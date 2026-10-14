@@ -31993,6 +31993,18 @@ _numeric_allowed = {}
 
 
 def _one_function(*args, **kwargs):
+    """One function's C, from the legacy emitter -- or, when `AIL_IR` is set and the function is
+    in the IR's current subset, from the IR (python/pkg-v12/ir/driver.py), which keeps the
+    legacy result's signature and context and falls back to it whole."""
+    result = _one_function_legacy(*args, **kwargs)
+    if os.environ.get('AIL_IR', '0').strip().lower() in ('', '0', 'off', 'no'):
+        return result
+    import sys as _sys
+    from ir import driver
+    return driver.apply(_sys.modules[__name__], args, kwargs, result)
+
+
+def _one_function_legacy(*args, **kwargs):
     fn = args[0]
     builders = True
     try:
