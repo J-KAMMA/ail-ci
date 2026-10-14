@@ -2,8 +2,8 @@
 prints them on stderr after a successful build. Never a failure, at most 3 lines, one per kind.
 
 Why: in the 2026-10-14 held-out task round AIL's route-search program was 40x C. The program used a heap of
-structs (5.5x the instructions of the same search over a heap of packed ints, measured with
-tools/icount) and a one-sided search where C/Rust searched from both ends (175x fewer
+structs (then 5.5x the instructions of the same search over a heap of packed ints, measured with
+tools/icount; a key of int/float fields is now sifted in C, so only computed keys are reported) and a one-sided search where C/Rust searched from both ends (175x fewer
 relaxations); the reference's own Dijkstra example scanned every edge for each popped node. The
 hints name the commonly O(n^2) shapes (list search / front shifts / re-scanning a list the loop
 changes / per-key scans / nested loops over one list) and the struct heap; a survey of every
@@ -53,12 +53,12 @@ fn main() {
     best[0] = 0;
     let h: list[Step] = [Step(0, 0)];
     while len(h) > 0 {
-        let s = heappop(h, key=lambda s: (s.dist, s.node));
+        let s = heappop(h, key=lambda s: (s.dist, -s.node));
         if s.dist > best[s.node] { continue; }
         for e in range(len(src)) {
             if src[e] == s.node and s.dist + w[e] < best[dst[e]] {
                 best[dst[e]] = s.dist + w[e];
-                heappush(h, Step(best[dst[e]], dst[e]), key=lambda s: (s.dist, s.node));
+                heappush(h, Step(best[dst[e]], dst[e]), key=lambda s: (s.dist, -s.node));
             }
         }
     }
@@ -179,9 +179,9 @@ class SlowPatternTests(unittest.TestCase):
             found = ail_slow_patterns.scan(text, source_map)
             if found:
                 warned[Path(name).name] = sorted((w['line'], w['rank']) for w in found)
-        # a route-search program 3/4: struct heaps (the 40x program); audit-2: venues x events scan.
-        self.assertEqual(warned, {'route_search-ail-3.ail': [(72, 5)], 'route_search-ail-4.ail': [(25, 5)],
-                                  'audit-ail-2.ail': [(254, 2)]})
+        # audit-2: venues x events scan. a route-search program 3/4 (the 40x program) key their struct
+        # heaps on int fields, which the compiler now sifts in C (4.6x fewer instructions).
+        self.assertEqual(warned, {'audit-ail-2.ail': [(254, 2)]})
         self.assertEqual(len(files), 60)
 
 

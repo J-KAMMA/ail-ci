@@ -53,6 +53,7 @@
   "test_ail_grid_return": 8.8,
   "test_ail_handle_lists": 185.9,
   "test_ail_heapq_bisect": 43.7,
+  "test_ail_hot_ops": 15.1,
   "test_ail_instruction_gap": 37.8,
   "test_ail_int_dict_set": 34.6,
   "test_ail_integer_codec": 22.2,
@@ -166,6 +167,7 @@
    "test_ail_builtin_api"
   ],
   [
+   "test_ail_hot_ops",
    "test_ail_memory_shapes"
   ],
   [

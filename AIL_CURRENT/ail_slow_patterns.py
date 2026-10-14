@@ -203,6 +203,18 @@ class _Scanner:
         self.types = _Types(tree)
         self.found = []
 
+    def field_key(self, call):
+        '''`key=lambda s: (s.f, s.g)` reading 1 to 4 int/float fields as they are: the compiler sifts
+        such a heap in C without a reference count per step (pyfunc `heapq_struct_key`).'''
+        key = next(k.value for k in call.keywords if k.arg == 'key')
+        if not isinstance(key, ast.Lambda) or len(key.args.args) != 1:
+            return False
+        name = key.args.args[0].arg
+        parts = key.body.elts if isinstance(key.body, ast.Tuple) else [key.body]
+        return 1 <= len(parts) <= 4 and all(
+            isinstance(part, ast.Attribute) and isinstance(part.value, ast.Name) and part.value.id == name
+            and self.types.fields.get(part.attr) in ('int', 'float') for part in parts)
+
     def add(self, rank, node, pattern, fix):
         self.found.append((rank, node.lineno, pattern, fix))
 
@@ -259,9 +271,11 @@ class _Scanner:
                          'group once before the loop (list[list[int]] or dict key -> indices)')
             elif isinstance(node, ast.Call):
                 func = node.func
-                if isinstance(func, ast.Name) and func.id == 'heappush' and any(k.arg == 'key' for k in node.keywords):
-                    self.add(5, node, 'a heap of structs allocates every entry',
-                             'push one int `(d << 20) | v` if it fits (5.5x fewer instructions on a route-search program)')
+                if (isinstance(func, ast.Name) and func.id == 'heappush'
+                        and any(k.arg == 'key' for k in node.keywords) and not self.field_key(node)):
+                    self.add(5, node, 'a heap of structs keyed by a computed value compares through references',
+                             'key on int/float fields as read (`key=lambda s: (s.d, s.id)`) or push one int '
+                             '`(d << 20) | v` if it fits')
                 elif isinstance(func, ast.Attribute) and self.is_list(func.value):
                     name = ast.unparse(func.value)
                     first = node.args[0] if node.args else None
