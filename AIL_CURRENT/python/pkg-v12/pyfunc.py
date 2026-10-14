@@ -9538,6 +9538,86 @@ def _olist_sort_name(info, spec):
     return 'ail_olist_sort_%s_%s' % (info.name, suffix)
 
 
+def _olist_heap_name(info, mode, fields):
+    """`ail_oheap_<mode>_<Class>_<fields>`: heappush's sift of the appended last element ('up'),
+    heappop ('pop', on a non-empty heap; returns the root, whose reference passes to the caller)
+    or heapify, over one class's pointer list ordered by the key tuple of `fields` (int or float).
+    `_class_c_decls` emits each one used, with `ail_oheap_lt_..` comparing exactly as the heapq
+    lowering's `_ail_lt` does: `a.f < b.f or (a.f == b.f and ...)`, so a NaN stops the comparison."""
+    if mode not in ('up', 'pop', 'heapify') or not 1 <= len(fields) <= 4 or not _managed_class(info):
+        raise Unsupported('internal: malformed struct heap operation')
+    for field in fields:
+        if info.field_types.get(field) not in NUM:
+            raise Unsupported('internal: struct heap key field %s is not an int or float' % field)
+    suffix = '_'.join(str(info.field_order.index(field)) for field in fields)
+    info.heap_specs[suffix] = list(fields)
+    return 'ail_oheap_%s_%s_%s' % (mode, info.name, suffix)
+
+
+def _olist_heap_decls(info):
+    out = []
+    for suffix, fields in info.heap_specs.items():
+        tests = []
+        for field in fields[:-1]:
+            tests.append('if (a->f_%s < b->f_%s) return 1; if (!(a->f_%s == b->f_%s)) return 0;'
+                         % (field, field, field, field))
+        tests.append('return a->f_%s < b->f_%s;' % (fields[-1], fields[-1]))
+        out.append('''static inline __attribute__((always_inline)) int ail_oheap_lt_%(c)s_%(s)s(const %(t)s *a, const %(t)s *b) {
+    %(tests)s
+}
+/* CPython heapq._siftup(heap, pos) and its closing _siftdown(heap, pos, ...): pointer moves only. */
+static void ail_oheap_down_%(c)s_%(s)s(void **p, int64_t end, int64_t pos) {
+    int64_t start = pos;
+    %(t)s *w = p[pos];
+    int64_t child = 2 * pos + 1;
+    while (child < end) {
+        int64_t right = child + 1;
+        if (right < end && !ail_oheap_lt_%(c)s_%(s)s(p[child], p[right])) child = right;
+        p[pos] = p[child];
+        pos = child;
+        child = 2 * pos + 1;
+    }
+    while (pos > start) {
+        int64_t up = (pos - 1) >> 1;
+        %(t)s *t = p[up];
+        if (!ail_oheap_lt_%(c)s_%(s)s(w, t)) break;
+        p[pos] = t;
+        pos = up;
+    }
+    p[pos] = w;
+}
+static void ail_oheap_up_%(c)s_%(s)s(ail_olist *v) {
+    void **p = v->p;
+    int64_t pos = ail_olist_len(v) - 1;
+    if (pos < 0) return;
+    %(t)s *w = p[pos];
+    while (pos > 0) {
+        int64_t up = (pos - 1) >> 1;
+        %(t)s *t = p[up];
+        if (!ail_oheap_lt_%(c)s_%(s)s(w, t)) break;
+        p[pos] = t;
+        pos = up;
+    }
+    p[pos] = w;
+}
+static void *ail_oheap_pop_%(c)s_%(s)s(ail_olist *v) {
+    int64_t n = ail_olist_len(v);
+    if (n <= 0) ail_raise_named(AIL_EXC_INDEX);
+    void *last = v->p[--v->n];
+    if (n == 1) return last;
+    void *root = v->p[0];
+    v->p[0] = last;
+    ail_oheap_down_%(c)s_%(s)s(v->p, v->n, 0);
+    return root;
+}
+static void ail_oheap_heapify_%(c)s_%(s)s(ail_olist *v) {
+    int64_t n = ail_olist_len(v);
+    for (int64_t i = n / 2 - 1; i >= 0; i--) ail_oheap_down_%(c)s_%(s)s(v->p, n, i);
+}
+''' % dict(c=info.name, s=suffix, t=info.struct_name(), tests='\n    '.join(tests)))
+    return ''.join(out)
+
+
 def _olist_sort_spec(key, info=None):
     if not isinstance(key, ast.Lambda):
         raise Unsupported('struct list sort requires key=lambda row: row.field')
@@ -14107,6 +14187,34 @@ def _map_upsert(node, ctx, ind):
                value_pre, inner, slot, value_c, _stmts(miss[1:], ctx, ind + 2), pad, pad))
 
 
+def _idict_get_fusion(node, ctx):
+    """`if k in d { x = d[k]; }` (no else) on a dict[int, int] and an int local x -> the statement
+    `x = d.get(k, x)`: one probe instead of `in` and the read probing twice. The key must make
+    no call (it is evaluated once instead of twice); when k is absent x keeps its value, as in the
+    source, and the read cannot raise because it only happens when k is present."""
+    test = node.test
+    if not (not node.orelse and len(node.body) == 1 and isinstance(test, ast.Compare)
+            and len(test.ops) == 1 and isinstance(test.ops[0], ast.In)
+            and isinstance(test.comparators[0], ast.Name)):
+        return None
+    d, key, s = test.comparators[0], test.left, node.body[0]
+    if not (isinstance(s, ast.Assign) and len(s.targets) == 1 and isinstance(s.targets[0], ast.Name)
+            and isinstance(s.value, ast.Subscript) and isinstance(s.value.value, ast.Name)
+            and s.value.value.id == d.id and ast.dump(s.value.slice) == ast.dump(key)):
+        return None
+    target = s.targets[0]
+    if (target.id == d.id or _calls(key)
+            or _map_kind(d, ctx) != IDICT or ctx.type_of(target.id) != INT
+            or any(isinstance(n, ast.Name) and n.id == target.id for n in ast.walk(key))):
+        return None
+    call = ast.Call(func=ast.Attribute(value=ast.Name(id=d.id, ctx=ast.Load()), attr='get', ctx=ast.Load()),
+                    args=[copy.deepcopy(key), ast.Name(id=target.id, ctx=ast.Load())], keywords=[])
+    fused = ast.Assign(targets=[ast.Name(id=target.id, ctx=ast.Store())], value=call)
+    for sub in ast.walk(fused):
+        ast.copy_location(sub, s)
+    return fused
+
+
 def _stab_add_plan(name, key_node, value, ctx):
     """`d[k] = d.get(k, C) + N` (either add order) -> (add, miss) for
     `ail_stab_add`, else None. Only the get-with-default form fuses:
@@ -15419,6 +15527,22 @@ def _method(node, ctx, *, as_stmt=False):
     if _is_olist_kind(t):
         if _is_hlist_kind(t) and m == 'sort':
             raise Unsupported('handle lists have no ordering')
+        heap = [kw.value.value for kw in node.keywords if kw.arg == '_ail_heap']
+        if heap and not _is_hlist_kind(t):
+            # heappush/heappop/heapify of a struct heap, from the heapq lowering (`heapq_call`)
+            if len(node.keywords) != 1 or a or m not in ('sort', 'pop'):
+                raise Unsupported('internal: malformed struct heap operation')
+            mode, *fields = heap[0].split()
+            function = _olist_heap_name(ctx.classes[t[1]], mode, fields)
+            receiver, _ = ctx.temp(t)
+            first = _obj_store(receiver, ctx.cname(name), t, ctx)
+            if mode == 'pop':
+                kind = _olist_element_kind(t)
+                return _obj_temp('(%s, (%s *)%s(%s))' % (first, _ref_ctype(kind, ctx), function, receiver),
+                                 kind, ctx)
+            if not as_stmt:
+                raise Unsupported('internal: a struct heap sift is a statement')
+            return '(%s, %s(%s))' % (first, function, receiver)
         if node.keywords and m != 'sort':
             raise Unsupported('reference list methods take positional arguments only')
         if m in ('append', 'clear', 'extend', 'reverse', 'sort') and not as_stmt:
@@ -18775,6 +18899,9 @@ def _stmt_inner(node, ctx, ind):
         fused = _map_upsert(node, ctx, ind)
         if fused is not None:
             return fused
+        fused = _idict_get_fusion(node, ctx)
+        if fused is not None:
+            return _stmt(fused, ctx, ind)
         c = _cond(node.test, ctx)
         pre = _flush(ctx, pad)
         out = '%s%sif (%s) {\n%s%s}\n' % (pre, pad, c, _stmts(node.body, ctx, ind + 1), pad)
@@ -27320,6 +27447,7 @@ class ClassInfo:
         self.init_param_c = []     # this class's constructor's C parameter declarations
         self.init_ctx = None       # the Ctx `_compile_init` used, kept for its .parts/.folds/.floor
         self.sort_specs = {}       # suffix -> key spec of every struct-list sort site that names this class
+        self.heap_specs = {}       # suffix -> key fields of every struct heap site (`_olist_heap_name`)
 
     def method_cname(self, m):
         return '%s__%s' % (self.name, m)
@@ -28261,6 +28389,7 @@ static inline __attribute__((always_inline)) void ail_olist_sort_%s_%s(ail_olist
 ''' % (info.name, suffix, info.struct_name(), ' '.join(body), info.name, suffix,
        ('for (int64_t i = 0; i < n; i++) { %s *a = v->p[i]; %s }' % (info.struct_name(), ' '.join(nan_loops))) if nan_loops else '',
        info.name, suffix))
+            out.append(_olist_heap_decls(info))
     for info in classes.values():
         sname = info.struct_name()
         owned_fields = [field for field in info.field_order if info.field_types[field] in (STR, BYTES)]
@@ -28793,6 +28922,7 @@ _HEAPQ_ARITY = {'heappush': (2, 2), 'heapify': (1, 1), 'heappop': (1, 1), 'heapp
                 'insort': (2, 4), 'insort_left': (2, 4), 'insort_right': (2, 4)}
 _HEAPQ_MUTATES = ('heappush', 'heapify', 'heappop', 'heappushpop', 'heapreplace',
                   'insort', 'insort_left', 'insort_right')
+_HEAPQ_STRUCT = ('heappush', 'heappop', 'heapify')    # struct heaps sifted in C (`_olist_heap_name`)
 
 
 _CHECKED_LIST_RETURNS = {'__ail_checked_flist__': 'float', '__ail_checked_slist__': 'str',
@@ -28837,9 +28967,20 @@ class _ListEvidence:
                 table[key] = value
             elif table[key] != value:
                 table[key] = False if (table[key] is False or value is False) else None
+        self.class_fields = {}    # class name -> field name -> annotation name ('int', 'float', ...)
         for node in tree.body:
             if isinstance(node, ast.ClassDef):
+                own = self.class_fields.setdefault(node.name, {})
                 for item in node.body:
+                    annotated = ([(arg.arg, arg.annotation) for arg in item.args.args[1:]]
+                                 if isinstance(item, ast.FunctionDef) and item.name == '__init__'
+                                 else [(item.target.id, item.annotation)]
+                                 if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)
+                                 else [])
+                    for field, annotation in annotated:
+                        kind = annotation.id if isinstance(annotation, ast.Name) else None
+                        if own.setdefault(field, kind) != kind:
+                            own[field] = None
                     if isinstance(item, ast.FunctionDef):
                         self.methods.add(item.name)
                         if item.name == '__init__':
@@ -29409,6 +29550,31 @@ class _ListLowering:
                         return True
         return False
 
+    def heapq_struct_key(self, receiver, key):
+        """The field names of `key=lambda e: (e.f, e.g, ...)` (1 to 4 plain reads of int or float
+        fields) when `receiver` is visibly a list of that struct; None otherwise."""
+        if not isinstance(key, ast.Lambda):
+            return None
+        params = key.args
+        if (len(params.args) != 1 or params.posonlyargs or params.kwonlyargs or params.vararg
+                or params.kwarg or params.defaults):
+            return None
+        cls = self.evidence.elem(receiver)
+        types = self.evidence.class_fields.get(cls)
+        if not types:
+            return None
+        name = params.args[0].arg
+        parts = key.body.elts if isinstance(key.body, ast.Tuple) else [key.body]
+        if not 1 <= len(parts) <= 4:
+            return None
+        fields = []
+        for part in parts:
+            if not (isinstance(part, ast.Attribute) and isinstance(part.value, ast.Name)
+                    and part.value.id == name and types.get(part.attr) in ('int', 'float')):
+                return None
+            fields.append(part.attr)
+        return fields
+
     def heapq_refuse(self, call, message):
         call._ail_refusal = message
         return None
@@ -29581,6 +29747,27 @@ class _ListLowering:
                                          '        if not _ail_lt($a, $b):\n            $c = $q\n')
         indent =lambda text, pad: ''.join(pad + line + '\n' for line in text.strip('\n').split('\n'))
         result = None
+        fields = self.heapq_struct_key(receiver, keywords.get('key')) if f in _HEAPQ_STRUCT else None
+        if fields is not None:
+            # A heap of structs keyed by int/float fields of the element: the sift runs in C over
+            # the list's pointer array (`.sort(_ail_heap=..)` / `.pop(_ail_heap=..)`, compiled by
+            # `_olist_heap_name`). Moving a pointer inside one list leaves every count as it was,
+            # so no comparison or move retains or releases; the comparisons are the ones below.
+            spec = ' '.join(fields)
+            if f == 'heappush':
+                text = '__X.append(__V)\n__X.sort(_ail_heap="up %s")\n' % spec
+            elif f == 'heapify':
+                text = '__X.sort(_ail_heap="heapify %s")\n' % spec
+            else:
+                text = ('if len(__X) == 0:\n    raise IndexError("index out of range")\n'
+                        '$r = __X.pop(_ail_heap="pop %s")\n' % spec)
+                result = 'r'
+            out, tag = self.heapq_build(text, call, less, **subs)
+            self.changed = True
+            if statement:
+                return out
+            prelude.extend(out)
+            return self.result(tag + (result or 'v'), call)
         if f == 'heappush':
             text = """
                 $v = __V

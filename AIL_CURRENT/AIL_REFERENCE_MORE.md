@@ -15,8 +15,8 @@ python3 ail_chatgpt.py api csv_stream              # signatures of a bundled mod
 Both `compile` (stderr) and `check` (`slow_patterns` in the JSON) name at most 3 commonly O(n²)
 loops as `file:line: slow: ...; fix`: `x in xs` / `.index` / `.count` / `.remove` on a list, `.pop(0)`
 / `.insert(0, x)`, `min`/`max`/`sort` of a list the loop keeps changing, a scan of all rows for the
-current key, nested loops over one list, a heap of structs. They never fail the build; fix them
-when n can be large. `s += t` on a str is linear (no hint).
+current key, nested loops over one list, a struct heap keyed by a computed value. They never
+fail the build; fix them when n can be large. `s += t` on a str is linear (no hint).
 
 ## Text I/O: main, arguments, stdin lines, print, files
 
@@ -319,9 +319,10 @@ hi]])`. Same results and heap layout as CPython, O(log n), the list changed in p
   parameter.
 - A heap of structs takes a sort key on every call: `heappush(h, n, key=lambda n: (n.dist, n.id))`,
   `heappop(h, key=lambda n: (n.dist, n.id))` (the same key each time; Python would use a tuple).
-  For `(priority, id)` pairs prefer a heap of ints: push `(d << 20) | v`, pop `p >> 20` and
-  `p & 1048575` (no allocation per entry: 5.5x fewer instructions than a struct heap in a
-  Dijkstra over 470k nodes). `bisect_left(xs, x, key=lambda n: n.t)` compares `x` with `key(xs[i])`.
+  A key of 1-4 int/float fields read as they are (`(n.dist, n.id)`) is sifted in C over the list's
+  pointers, no reference count per step; any other key (negated, computed, str) is slower, so there
+  prefer a heap of ints: push `(d << 20) | v`, pop `p >> 20` and `p & 1048575`.
+  `bisect_left(xs, x, key=lambda n: n.t)` compares `x` with `key(xs[i])`.
 - A call that pops inside a larger expression must come before any other read of that list in it;
   otherwise bind it first: `let x = heappop(h);`. A function you define with the same name wins.
 
