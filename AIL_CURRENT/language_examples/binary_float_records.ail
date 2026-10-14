@@ -1,0 +1,29 @@
+# Numeric binary64 arrays, at most 8192 values. NaN class only.
+fn decode_f64_records(data: bytes, reverse: int) -> list[float] {
+    if reverse != 0 and reverse != 1 { raise ValueError; }
+    if len(data) > 65536 or len(data) % 8 != 0 { raise ValueError; }
+    let values = native_binary64_unpack_records(data, reverse);
+    if len(values) != len(data) // 8 { raise OSError; }
+    return values;
+}
+
+fn encode_f64_records(values: list[float], reverse: int) -> bytes {
+    if reverse != 0 and reverse != 1 { raise ValueError; }
+    if len(values) > 8192 { raise ValueError; }
+    let result = native_binary64_pack_records(values, reverse);
+    if len(result) == 0 { raise OSError; }
+    if result[0] == 1 { raise ValueError; }
+    if result[0] != 0 or len(result) != len(values) * 8 + 1 { raise OSError; }
+    return result[1:];
+}
+
+# Independent read of a seekable file, not a snapshot across multiple calls.
+fn read_f64_records(path: str, first: int, count: int, reverse: int) -> list[float] {
+    if first < 0 or first > 1152921504606846975 { raise ValueError; }
+    if count < 0 or count > 8192 { raise ValueError; }
+    if reverse != 0 and reverse != 1 { raise ValueError; }
+    if count > 0 and first > 1152921504606846975 - (count - 1) { raise ValueError; }
+    let data = read_binary_range(path, first * 8, count * 8);
+    if len(data) != count * 8 { raise ValueError; }
+    return decode_f64_records(data, reverse);
+}

@@ -1,0 +1,73 @@
+use binary_cursor_file;
+
+fn binary_records_count(size: int) -> int {
+    if size < 0 or size % 13 != 0 { raise ValueError; }
+    let count = size // 13;
+    if count > 2147483648 { raise ValueError; }
+    return count;
+}
+
+fn main() -> int {
+    if len(sys.argv) != 2 {
+        print("usage: binary_cursor_records input-path", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let size = file_size(sys.argv[1]);
+        let count = binary_records_count(size);
+        write_stdout_bytes(binary_records_report_file(sys.argv[1], count, size));
+        return 0;
+    } except ValueError {
+        print("invalid binary record input", file=sys.stderr);
+        return 2;
+    } except OSError {
+        print("binary record file error", file=sys.stderr);
+        return 2;
+    }
+}
+
+fn binary_records_report(cursor: BinaryCursor, count: int) -> bytes {
+    let sum8 = 0;
+    let sum16le = 0;
+    let sum16be = 0;
+    let sum32le = 0;
+    let sum32be = 0;
+    for i in range(count) {
+        sum8 += cursor.read_u8();
+        sum16le += cursor.read_u16_le();
+        sum16be += cursor.read_u16_be();
+        sum32le += cursor.read_u32_le();
+        sum32be += cursor.read_u32_be();
+    }
+    if cursor.position != len(cursor.data) or cursor.remaining() != 0 { raise ValueError; }
+    let report = str(count) + " " + str(sum8) + " " + str(sum16le) + " " + str(sum16be) + " " + str(sum32le) + " " + str(sum32be) + " " + str(cursor.position) + "\n";
+    return report.encode();
+}
+
+# The same report, streaming the file through a cursor per chunk of whole records
+# (file_chunks reads at most 65536 bytes; 65533 = 5041 records of 13 bytes), so
+# memory stays flat whatever the input size.
+fn binary_records_report_file(path: str, count: int, size: int) -> bytes {
+    let sum8 = 0;
+    let sum16le = 0;
+    let sum16be = 0;
+    let sum32le = 0;
+    let sum32be = 0;
+    let records = 0;
+    let position = 0;
+    for chunk in file_chunks(path, 65533) {
+        let cursor = BinaryCursor(chunk, 0);
+        while cursor.remaining() > 0 {
+            sum8 += cursor.read_u8();
+            sum16le += cursor.read_u16_le();
+            sum16be += cursor.read_u16_be();
+            sum32le += cursor.read_u32_le();
+            sum32be += cursor.read_u32_be();
+            records += 1;
+        }
+        position += cursor.position;
+    }
+    if records != count or position != size { raise ValueError; }
+    let report = str(count) + " " + str(sum8) + " " + str(sum16le) + " " + str(sum16be) + " " + str(sum32le) + " " + str(sum32be) + " " + str(position) + "\n";
+    return report.encode();
+}

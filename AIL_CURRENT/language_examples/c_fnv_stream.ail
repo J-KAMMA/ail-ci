@@ -1,0 +1,11 @@
+fn main() -> int {
+    let data = read_bytes(sys.argv[1]);
+    let seed = int(sys.argv[2]);
+    reset_hash(seed);
+    update_hash(b"");
+    for start in range(0, len(data), 8192) {
+        update_hash(data[start:start + 8192]);
+    }
+    print(finish_hash());
+    return 0;
+}

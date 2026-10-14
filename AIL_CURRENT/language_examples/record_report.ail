@@ -1,0 +1,190 @@
+use csv_stream;
+use checked_integer;
+use json_text;
+use record_queries;
+
+struct ReportPaths { input:str; output:str; }
+struct ReportConfig { paths:ReportPaths; mode:str; }
+
+fn _report_validate_mode(mode:str)->void {
+    if mode!="all" and mode!="positive" and mode!="nonzero" { raise ValueError; }
+}
+
+fn _report_all(row:QueryRecord)->int { return 1; }
+fn _report_positive(row:QueryRecord)->int { return row.value>0; }
+fn _report_nonzero(row:QueryRecord)->int { return row.value!=0; }
+
+fn _report_predicate(mode:str)->Callable[[QueryRecord],int] {
+    _report_validate_mode(mode);
+    if mode=="positive" { return _report_positive; }
+    if mode=="nonzero" { return _report_nonzero; }
+    return _report_all;
+}
+
+fn report_read(path:str)->list[QueryRecord] {
+    let decoder=csv_decoder_new();
+    let parsed=csv_decode_feed(decoder,read_bytes(path).decode());
+    parsed.extend(csv_decode_finish(decoder));
+    let records:list[QueryRecord]=[];
+    for row in parsed {
+        let fields:list[str]=row.fields;
+        if len(fields)!=2 { raise ValueError; }
+        records.append(QueryRecord(fields[0],parse_int64_decimal(fields[1])));
+    }
+    return records;
+}
+
+fn report_select(rows:list[QueryRecord],mode:str)->list[QueryRecord] {
+    return query_select(rows,_report_predicate(mode));
+}
+
+fn report_total(rows:list[QueryRecord])->int {
+    let total:int=0;
+    for row in rows { total=checked_int64_add(total,row.value); }
+    return total;
+}
+
+fn report_render(rows:list[QueryRecord],total:int)->str {
+    let encoded:list[str]=[];
+    for row in rows {
+        encoded.append("{\"key\":"+json_quote(row.key)+",\"value\":"+str(row.value)+"}");
+    }
+    return "{\"rows\":["+",".join(encoded)+"],\"count\":"+str(len(rows))+",\"total\":"+str(total)+"}";
+}
+
+struct _ReportBytesRows { keys:list[bytes]; values:list[int]; }
+
+fn _report_bytes_validate_utf8(data:bytes)->void { let decoded=data.decode(); }
+
+fn _report_bytes_decimal(buffer:bytearray)->int {
+    let accumulator:int=0; let first:int=1; let negative:int=0;
+    let digits:int=0; let last_limit:int=7;
+    for c in buffer {
+        if first and (c==43 or c==45) {
+            if c==45 { negative=1; last_limit=8; }
+        } else {
+            let digit:int=c-48;
+            if digit<0 or digit>9 { raise ValueError; }
+            if accumulator < -922337203685477580 or (accumulator == -922337203685477580 and digit>last_limit) { raise ValueError; }
+            accumulator=accumulator*10-digit; digits=1;
+        }
+        first=0;
+    }
+    if not digits { raise ValueError; }
+    if negative { return accumulator; }
+    return -accumulator;
+}
+
+fn _report_bytes_store(rows:_ReportBytesRows,key:bytearray,value:int,mode:str)->void {
+    if mode=="all" or (mode=="positive" and value>0) or (mode=="nonzero" and value!=0) {
+        rows.keys.append(bytes(key)); rows.values.append(value);
+    }
+}
+
+fn _report_bytes_finish_row(rows:_ReportBytesRows,key:bytearray,value:bytearray,column:int,mode:str)->void {
+    if column!=1 { raise ValueError; }
+    let parsed=_report_bytes_decimal(value);
+    _report_bytes_store(rows,key,parsed,mode);
+    key.clear(); value.clear();
+}
+
+fn _report_bytes_parse(data:bytes,selection:str)->_ReportBytesRows {
+    let keys:list[bytes]=[]; let values:list[int]=[];
+    let rows=_ReportBytesRows(keys,values);
+    let key=bytearray(); let value=bytearray();
+    let mode:int=0; let column:int=0; let skip_lf:int=0; let row:int=0;
+    let start:int=0;
+    for i in range(len(data)) {
+        let c:int=data[i];
+        if skip_lf==1 and c==10 { skip_lf=0; continue; }
+        skip_lf=0;
+        if mode==2 {
+            if c==34 {
+                if start<i { if column==0 { key.extend(data[start:i]); } else { value.extend(data[start:i]); } }
+                mode=3;
+            }
+        } else {
+            if c==44 or c==13 or c==10 {
+                if mode==1 { if start<i { if column==0 { key.extend(data[start:i]); } else { value.extend(data[start:i]); } } }
+                if c==44 {
+                    if column!=0 { raise ValueError; }
+                    column=1;
+                } elif mode!=0 or column!=0 {
+                    if row==9223372036854775807 { raise ValueError; }
+                    _report_bytes_finish_row(rows,key,value,column,selection); row+=1; column=0;
+                }
+                mode=0;
+                if c==13 { skip_lf=1; }
+            } elif c==34 {
+                if mode==3 {
+                    start=i; mode=2;
+                } else {
+                    if mode!=0 { raise ValueError; }
+                    start=i+1; mode=2;
+                }
+            } else {
+                if mode==3 { raise ValueError; }
+                if mode==0 { start=i; mode=1; }
+            }
+        }
+    }
+    if mode==2 { raise ValueError; }
+    if mode==1 { if start<len(data) { if column==0 { key.extend(data[start:len(data)]); } else { value.extend(data[start:len(data)]); } } }
+    if mode!=0 or column!=0 {
+        if row==9223372036854775807 { raise ValueError; }
+        _report_bytes_finish_row(rows,key,value,column,selection);
+    }
+    return rows;
+}
+
+
+fn _report_bytes_quote(output:bytearray,key:bytes)->void {
+    let digits=b"0123456789abcdef";
+    let start:int=0; let position:int=0;
+    output.append(34);
+    for c in key {
+        if c<32 or c==34 or c==92 {
+            if start<position { output.extend(key[start:position]); }
+            if c==34 or c==92 { output.append(92); output.append(c); }
+            elif c==8 { output.extend(b"\\b"); }
+            elif c==12 { output.extend(b"\\f"); }
+            elif c==10 { output.extend(b"\\n"); }
+            elif c==13 { output.extend(b"\\r"); }
+            elif c==9 { output.extend(b"\\t"); }
+            elif c<32 {
+                output.extend(b"\\u00"); output.append(digits[c//16]); output.append(digits[c%16]);
+            }
+            start=position+1;
+        }
+        position+=1;
+    }
+    if start<position { output.extend(key[start:position]); }
+    output.append(34);
+}
+
+fn _report_bytes_emit_row(output:bytearray,key:bytes,value:int)->void {
+    output.extend(b"{\"key\":"); _report_bytes_quote(output,key);
+    output.extend(b",\"value\":"); output.extend(str(value).encode()); output.append(125);
+}
+
+fn _report_bytes_render(rows:_ReportBytesRows,total:int)->bytearray {
+    let output=bytearray(b"{\"rows\":[");
+    for i in range(len(rows.values)) {
+        if i!=0 { output.append(44); }
+        _report_bytes_emit_row(output,rows.keys[i],rows.values[i]);
+    }
+    output.extend(b"],\"count\":"); output.extend(str(len(rows.values)).encode());
+    output.extend(b",\"total\":"); output.extend(str(total).encode()); output.append(125);
+    return output;
+}
+
+fn report_run(config:ReportConfig)->void {
+    _report_validate_mode(config.mode);
+    if same_file(config.paths.input,config.paths.output) { raise OSError; }
+    let data=read_bytes(config.paths.input); _report_bytes_validate_utf8(data);
+    let rows=_report_bytes_parse(data,config.mode);
+    let total:int=0;
+    for i in range(len(rows.values)) { total=checked_int64_add(total,rows.values[i]); }
+    let rendered=_report_bytes_render(rows,total);
+    write_bytes(config.paths.output,rendered);
+}

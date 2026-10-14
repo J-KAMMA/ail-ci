@@ -1,0 +1,54 @@
+struct FileInfo { path: str; size: int; }
+
+fn inventory_empty() -> list[FileInfo] { let rows = []; return rows; }
+
+fn inventory_add(rows: list[FileInfo], path: str) -> int {
+    let data = read_bytes(path);
+    let size = len(data);
+    rows.append(FileInfo(path, size));
+    return size;
+}
+
+fn inventory_total(rows: list[FileInfo]) -> int {
+    let total = 0;
+    for item in rows { total += item.size; }
+    return total;
+}
+
+fn inventory_merge(rows: list[FileInfo], other: list[FileInfo]) -> int {
+    rows.extend(other);
+    return len(rows);
+}
+
+fn inventory_reverse(rows: list[FileInfo]) -> int {
+    rows.reverse();
+    return len(rows);
+}
+
+fn inventory_sort_size(rows: list[FileInfo], descending: int) -> int {
+    if descending { rows.sort(key=lambda item: item.size, reverse=True); }
+    else { rows.sort(key=lambda item: item.size); }
+    return len(rows);
+}
+
+fn inventory_sort_path(rows: list[FileInfo]) -> int {
+    rows.sort(key=lambda item: item.path);
+    return len(rows);
+}
+
+fn inventory_copy(rows: list[FileInfo]) -> list[FileInfo] {
+    let result = list(rows); return result;
+}
+
+fn inventory_ordered_size(rows: list[FileInfo], descending: int) -> list[FileInfo] {
+    if descending { let result = sorted(rows, key=lambda item: item.size, reverse=True); return result; }
+    let result = sorted(rows, key=lambda item: item.size); return result;
+}
+
+fn inventory_ordered_path(rows: list[FileInfo]) -> list[FileInfo] {
+    let result = sorted(rows, key=lambda item: item.path); return result;
+}
+
+fn inventory_slice(rows: list[FileInfo], start: int, stop: int, step: int) -> list[FileInfo] {
+    let result = rows[start:stop:step]; return result;
+}

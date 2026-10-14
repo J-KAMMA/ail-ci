@@ -1,0 +1,161 @@
+use tar_header;
+
+struct PaxEntry { header: bytes; attributes: bytes; data: bytes; }
+
+fn _pax_unicode_validate(text: str) -> void {
+    for c in text {
+        let code: int = ord(c);
+        if code >= 55296 and code <= 57343 { raise ValueError; }
+    }
+}
+
+fn _pax_key_validate(key: str) -> void {
+    if key == "" or "\0" in key or "=" in key { raise ValueError; }
+    _pax_unicode_validate(key);
+}
+
+fn pax_attributes_decode(data: bytes) -> dict[str, str] {
+    let result: dict[str, str] = {};
+    let position: int = 0;
+    while position < len(data) {
+        let space: int = data.find(b" ", position);
+        if space <= position { raise ValueError; }
+        let remaining: int = len(data) - position;
+        let quotient: int = remaining // 10;
+        let remainder: int = remaining % 10;
+        let length: int = 0;
+        let oversized: int = 0;
+        for i in range(position, space) {
+            let digit: int = data[i] - 48;
+            if digit < 0 or digit > 9 { raise ValueError; }
+            if not oversized {
+                if length > quotient or (length == quotient and digit > remainder) { oversized = 1; }
+                else { length = length * 10 + digit; }
+            }
+        }
+        let digits: int = space - position;
+        if oversized or length <= digits or length - digits < 4 { raise ValueError; }
+        let end: int = position + length;
+        if data[end - 1] != 10 { raise ValueError; }
+        let equal: int = data.find(b"=", space + 1, end - 1);
+        if equal <= space + 1 { raise ValueError; }
+        let key: str = data[space + 1:equal].decode("utf-8");
+        _pax_key_validate(key);
+        result[key] = data[equal + 1:end - 1].decode("utf-8");
+        position = end;
+    }
+    return result;
+}
+
+fn pax_attributes_encode(values: dict[str, str]) -> bytes {
+    let parts: list[bytes] = [];
+    let total: int = 0;
+    for key in values {
+        _pax_key_validate(key);
+        let key_bytes: bytes = key.encode("utf-8");
+        let value_bytes: bytes = values[key].encode("utf-8");
+        if len(key_bytes) > 9223372036854775807 - len(value_bytes) - 3 { raise ValueError; }
+        let body: int = len(key_bytes) + len(value_bytes) + 3;
+        let length: int = body;
+        while true {
+            let digits: int = len(str(length));
+            if body > 9223372036854775807 - digits { raise ValueError; }
+            let next_length: int = body + digits;
+            if next_length == length { break; }
+            length = next_length;
+        }
+        if length > 9223372036854775807 - total { raise ValueError; }
+        total += length;
+        parts.append(str(length).encode("utf-8"));
+        parts.append(b" ");
+        parts.append(key_bytes);
+        parts.append(b"=");
+        parts.append(value_bytes);
+        parts.append(b"\n");
+    }
+    return b"".join(parts);
+}
+
+fn pax_attributes_merge(left: dict[str, str], right: dict[str, str]) -> dict[str, str] {
+    let result: dict[str, str] = left.copy();
+    result.update(right);
+    return result;
+}
+
+fn _pax_decimal_validate(text: str) -> void {
+    if text == "" { raise ValueError; }
+    for c in text { if c < "0" or c > "9" { raise ValueError; } }
+}
+
+fn _pax_time_validate(text: str) -> void {
+    let first: int = 1;
+    let integer_seen: int = 0;
+    let fraction_seen: int = 0;
+    let dot: int = 0;
+    for c in text {
+        if first and c == "-" { first = 0; }
+        elif c == "." {
+            if not integer_seen or dot { raise ValueError; }
+            dot = 1;
+        } else {
+            if c < "0" or c > "9" { raise ValueError; }
+            if dot { fraction_seen = 1; }
+            else { integer_seen = 1; }
+        }
+        first = 0;
+    }
+    if not integer_seen or (dot and not fraction_seen) { raise ValueError; }
+}
+
+fn pax_attributes_validate(values: dict[str, str]) -> void {
+    for key in values {
+        _pax_key_validate(key);
+        let value: str = values[key];
+        _pax_unicode_validate(value);
+        if key.startswith("GNU.sparse.") or key.startswith("GNU.volume.") or key == "SCHILY.realsize" or key == "SUN.holesdata" {
+            raise ValueError;
+        }
+        if key == "SCHILY.filetype" and value == "sparse" { raise ValueError; }
+        if key == "size" { _pax_decimal_validate(value); }
+        elif key == "uid" or key == "gid" {
+            if value != "" { _pax_decimal_validate(value); }
+        } elif key == "mtime" or key == "atime" or key == "ctime" {
+            if value != "" { _pax_time_validate(value); }
+        } elif key == "hdrcharset" {
+            if value != "" and value != "ISO-IR 10646 2000 UTF-8" { raise ValueError; }
+        }
+    }
+}
+
+fn pax_header_base(header: bytes, attributes: dict[str, str]) -> TarEntry {
+    if len(header) != 512 { raise ValueError; }
+    if _tar_octal_decode(header[148:156], 2097151) != _tar_checksum(header) { raise ValueError; }
+    if header[257:263] != b"ustar\0" or header[263:265] != b"00" { raise ValueError; }
+    pax_attributes_validate(attributes);
+    let flag: int = header[156];
+    let base: bytes = header;
+    if flag == 120 or flag == 103 { base = base[:156] + b"0" + base[157:]; }
+    elif flag != 0 and (flag < 48 or flag > 55) { raise ValueError; }
+    if "path" in attributes { base = b"PaxEntry" + bytes(92) + base[100:345] + bytes(155) + base[500:]; }
+    if "linkpath" in attributes { base = base[:157] + bytes(100) + base[257:]; }
+    if "uname" in attributes { base = base[:265] + bytes(32) + base[297:]; }
+    if "gname" in attributes { base = base[:297] + bytes(32) + base[329:]; }
+    if "uid" in attributes { base = base[:108] + _tar_octal_encode(0, 8) + base[116:]; }
+    if "gid" in attributes { base = base[:116] + _tar_octal_encode(0, 8) + base[124:]; }
+    if "size" in attributes { base = base[:124] + _tar_octal_encode(0, 12) + base[136:]; }
+    if "mtime" in attributes { base = base[:136] + _tar_octal_encode(0, 12) + base[148:]; }
+    base = base[:148] + _tar_octal_encode(_tar_checksum(base), 7) + b" " + base[156:];
+    return tar_header_decode(base);
+}
+
+fn pax_extension_header(payload: bytes, global_flag: int) -> bytes {
+    if global_flag != 0 and global_flag != 1 { raise ValueError; }
+    let size: int = len(payload);
+    if size < 0 or size > 8589934591 { raise ValueError; }
+    let name: str = "PaxHeaders/entry";
+    let flag: bytes = b"x";
+    if global_flag { name = "GlobalHead/entry"; flag = b"g"; }
+    let header: bytes = tar_header_encode(TarEntry(name, 0, 420, 0, 0, size, 0, "", "", "", 0, 0, b""));
+    header = header[:156] + flag + header[157:];
+    return header[:148] + _tar_octal_encode(_tar_checksum(header), 7) + b" " + header[156:];
+}

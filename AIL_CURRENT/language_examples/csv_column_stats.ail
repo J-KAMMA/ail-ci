@@ -1,0 +1,14 @@
+use csv_integer_stream;
+
+# Preserve the str API while avoiding whole-document row materialization.
+fn csv_column_stats(data:str,column:int)->IntegerColumnStats {
+    if column<0 {raise ValueError;}
+    let content:bytes=data.encode("utf-8");
+    if _utf8_complete_length(content)!=len(content) {raise ValueError;}
+    let state:CsvIntegerState=CsvIntegerState(0,0,0,column,0,1,0,0,0);
+    let stats:IntegerColumnStats=IntegerColumnStats(0,0,0,0);
+    _csv_integer_feed(state,stats,content);
+    if state.mode==2 {raise ValueError;}
+    if state.mode!=0 or state.field!=0 {_csv_integer_finish_row(state,stats);}
+    return stats;
+}

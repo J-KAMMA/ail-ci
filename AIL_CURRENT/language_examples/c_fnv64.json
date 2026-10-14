@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "functions": {
+    "hash64": {
+      "symbol": "native_fnv64",
+      "params": [["data", "bytes"], ["seed", "uint64_bits"]],
+      "result": "uint64_bits"
+    }
+  }
+}

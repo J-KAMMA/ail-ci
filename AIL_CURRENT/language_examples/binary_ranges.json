@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "functions": {
+    "native_binary_range": {
+      "symbol": "native_binary_range",
+      "params": [["path", "str"], ["offset", "int"], ["count", "int"]],
+      "result": "bytes"
+    }
+  }
+}

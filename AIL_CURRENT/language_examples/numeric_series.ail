@@ -1,0 +1,23 @@
+struct IntegerSeries { values: list[int]; }
+struct FloatSeries { values: list[float]; }
+
+impl IntegerSeries {
+    fn values_copy(self) -> list[int] { return self.values; }
+    fn replace(self, values: list[int]) -> void { self.values = values; }
+}
+
+impl FloatSeries {
+    fn values_copy(self) -> list[float] { return self.values; }
+    fn replace(self, values: list[float]) -> void { self.values = values; }
+}
+
+fn integer_series_new(values: list[int]) -> IntegerSeries { return IntegerSeries(values); }
+fn float_series_new(values: list[float]) -> FloatSeries { return FloatSeries(values); }
+
+fn integer_series_render(series: IntegerSeries) -> str {
+    let values: list[int] = series.values;
+    let lines: list[str] = [];
+    for value in values { lines.append(str(value)); }
+    if len(lines) == 0 { return ""; }
+    return "\n".join(lines) + "\n";
+}

@@ -1,0 +1,124 @@
+use pax_attributes;
+
+fn _pax_archive_flag(header: bytes) -> int {
+    if len(header) != 512 { raise ValueError; }
+    let flag: int = header[156];
+    if flag == 0 { return 0; }
+    if flag >= 48 and flag <= 55 { return flag - 48; }
+    if flag == 120 or flag == 103 { return flag; }
+    raise ValueError;
+}
+
+fn _pax_archive_size(text: str, limit: int) -> int {
+    if len(text) == 0 { raise ValueError; }
+    let size: int = 0;
+    let quotient: int = limit // 10;
+    let remainder: int = limit % 10;
+    for c in text {
+        let digit: int = ord(c) - 48;
+        if digit < 0 or digit > 9 { raise ValueError; }
+        if size > quotient or (size == quotient and digit > remainder) { raise ValueError; }
+        size = size * 10 + digit;
+    }
+    return size;
+}
+
+fn _pax_archive_effective_size(base: TarEntry, attrs: dict[str, str], limit: int) -> int {
+    let size: int = base.size;
+    if "size" in attrs { size = _pax_archive_size(attrs["size"], limit); }
+    elif size > limit { raise ValueError; }
+    if base.typeflag != 0 and base.typeflag != 7 and size != 0 { raise ValueError; }
+    return size;
+}
+
+fn pax_entries_decode(data: bytes) -> list[PaxEntry] {
+    if len(data) < 1024 or len(data) % 512 != 0 { raise ValueError; }
+    let entries = [];
+    let globals: dict[str, str] = {};
+    let pending: dict[str, str] = {};
+    let has_pending: int = 0;
+    let offset: int = 0;
+    let zero: bytes = bytes(512);
+    while offset < len(data) {
+        if len(data) - offset < 512 { raise ValueError; }
+        let header: bytes = data[offset:offset + 512];
+        if header == zero {
+            if len(data) - offset < 1024 or has_pending { raise ValueError; }
+            if data[offset + 512:offset + 1024] != zero { raise ValueError; }
+            for i in range(offset + 1024, len(data)) { if data[i] != 0 { raise ValueError; } }
+            return entries;
+        }
+        let flag: int = _pax_archive_flag(header);
+        let attrs: dict[str, str] = {};
+        if flag != 120 and flag != 103 { attrs = pax_attributes_merge(globals, pending); }
+        let base: TarEntry = pax_header_base(header, attrs);
+        offset += 512;
+        let size: int = base.size;
+        if flag == 120 or flag == 103 {
+            if size > len(data) - offset { raise ValueError; }
+        } else { size = _pax_archive_effective_size(base, attrs, len(data) - offset); }
+        let padding: int = (512 - size % 512) % 512;
+        if padding > len(data) - offset - size { raise ValueError; }
+        let payload: bytes = data[offset:offset + size];
+        offset += size;
+        offset += padding;
+        if flag == 120 or flag == 103 {
+            let control: dict[str, str] = pax_attributes_decode(payload);
+            pax_attributes_validate(control);
+            if flag == 103 { globals = pax_attributes_merge(globals, control); }
+            else { pending = pax_attributes_merge(pending, control); has_pending = 1; }
+        } else {
+            pax_attributes_validate(attrs);
+            entries.append(PaxEntry(header, pax_attributes_encode(attrs), payload));
+            pending.clear();
+            has_pending = 0;
+        }
+    }
+    raise ValueError;
+}
+
+fn pax_entry_validate(entry: PaxEntry) -> void {
+    let flag: int = _pax_archive_flag(entry.header);
+    if flag == 120 or flag == 103 { raise ValueError; }
+    let attrs: dict[str, str] = pax_attributes_decode(entry.attributes);
+    pax_attributes_validate(attrs);
+    let base: TarEntry = pax_header_base(entry.header, attrs);
+    let size: int = _pax_archive_effective_size(base, attrs, len(entry.data));
+    if size != len(entry.data) { raise ValueError; }
+}
+
+fn pax_entry_attributes(entry: PaxEntry) -> dict[str, str] {
+    pax_entry_validate(entry);
+    return pax_attributes_decode(entry.attributes);
+}
+
+fn pax_entry_name(entry: PaxEntry) -> str {
+    pax_entry_validate(entry);
+    let attrs: dict[str, str] = pax_attributes_decode(entry.attributes);
+    if "path" in attrs { return attrs["path"]; }
+    let base: TarEntry = pax_header_base(entry.header, attrs);
+    return base.name;
+}
+
+fn pax_names(entries: list[PaxEntry]) -> list[str] {
+    for entry in entries { pax_entry_validate(entry); }
+    let names: list[str] = [];
+    for entry in entries { names.append(pax_entry_name(entry)); }
+    return names;
+}
+
+fn pax_member(entries: list[PaxEntry], name: str) -> bytes {
+    for entry in entries { pax_entry_validate(entry); }
+    let found: int = -1;
+    for i in range(len(entries)) {
+        if pax_entry_name(entries[i]) == name {
+            if found != -1 { raise ValueError; }
+            found = i;
+        }
+    }
+    if found == -1 { raise KeyError; }
+    let selected: PaxEntry = entries[found];
+    let flag: int = _pax_archive_flag(selected.header);
+    if flag != 0 and flag != 7 { raise ValueError; }
+    return selected.data[:];
+}

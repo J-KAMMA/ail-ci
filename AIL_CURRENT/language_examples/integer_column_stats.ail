@@ -1,0 +1,64 @@
+use checked_integer;
+
+struct IntegerColumnStats {
+    count: int;
+    total: int;
+    minimum: int;
+    maximum: int;
+}
+
+impl IntegerColumnStats {
+    fn add(self, value: int) -> void {
+        let next_total: int = checked_int64_add(self.total, value);
+        if self.count < 0 or self.count == 9223372036854775807 { raise ValueError; }
+        let next_minimum: int = value;
+        let next_maximum: int = value;
+        if self.count != 0 {
+            next_minimum = self.minimum;
+            next_maximum = self.maximum;
+            if value < next_minimum { next_minimum = value; }
+            if value > next_maximum { next_maximum = value; }
+        }
+        self.minimum = next_minimum;
+        self.maximum = next_maximum;
+        self.total = next_total;
+        self.count = self.count + 1;
+    }
+}
+
+fn integer_column_stats(data: str, column: int) -> IntegerColumnStats {
+    if column < 0 { raise ValueError; }
+    let stats: IntegerColumnStats = IntegerColumnStats(0, 0, 0, 0);
+    let lines = data.splitlines();
+    for line in lines {
+        let parts = line.split("\t");
+        if column >= len(parts) { raise ValueError; }
+        let value: int = parse_int64_decimal(parts[column]);
+        stats.add(value);
+    }
+    return stats;
+}
+
+fn integer_column_stats_bytes(data: bytes, column: int) -> IntegerColumnStats {
+    if column < 0 { raise ValueError; }
+    let stats: IntegerColumnStats = IntegerColumnStats(0, 0, 0, 0);
+    for line in data.utf8_lines() {
+        let selected: int = 0;
+        let start: int = 0;
+        while selected < column {
+            let separator: int = line.find(b"\t", start);
+            if separator < 0 { raise ValueError; }
+            start = separator + 1;
+            selected = selected + 1;
+        }
+        let end: int = line.find(b"\t", start);
+        if end < 0 { end = len(line); }
+        let value: int = parse_int64_decimal_bytes(line[start:end]);
+        stats.add(value);
+    }
+    return stats;
+}
+
+fn integer_column_stats_render(stats: IntegerColumnStats) -> str {
+    return str(stats.count) + "\t" + str(stats.total) + "\t" + str(stats.minimum) + "\t" + str(stats.maximum) + "\n";
+}

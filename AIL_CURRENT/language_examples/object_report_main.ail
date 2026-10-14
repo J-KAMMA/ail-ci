@@ -1,0 +1,5 @@
+# Link both object_report.o and block_text.o.
+fn main() -> int {
+    print(report(7));
+    return 0;
+}

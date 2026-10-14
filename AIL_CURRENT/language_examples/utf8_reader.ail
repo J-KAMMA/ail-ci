@@ -1,0 +1,44 @@
+use utf8_stream;
+
+# from_file shares the handle: closing the reader closes every file alias.
+# Invalid UTF-8 consumes the read bytes but preserves the decoder's prior state.
+# No cursor rollback or automatic recovery/reset is promised.
+struct Utf8Reader { file:binaryfile; decoder:Utf8Decoder; chunk_size:int; finished:int; }
+
+fn utf8_reader_from_file(file:binaryfile,chunk_size:int)->Utf8Reader {
+    if chunk_size<=0 { raise ValueError; }
+    if file.closed { raise ValueError; }
+    return Utf8Reader(file,utf8_decoder_new(),chunk_size,0);
+}
+
+fn utf8_reader_open(path:str,chunk_size:int)->Utf8Reader {
+    if chunk_size<=0 { raise ValueError; }
+    let file=open_binary(path,"r");
+    return utf8_reader_from_file(file,chunk_size);
+}
+
+fn utf8_reader_next(reader:Utf8Reader)->str {
+    let file:binaryfile=reader.file;
+    if file.closed { raise ValueError; }
+    if reader.finished { return ""; }
+    let chunk_size:int=reader.chunk_size;
+    if chunk_size<=0 { raise ValueError; }
+    while 1 {
+        let raw:bytes=file.read(chunk_size);
+        if len(raw)==0 {
+            let final:str=utf8_decode_finish(reader.decoder);
+            reader.finished=1;
+            return final;
+        }
+        let text:str=utf8_decode_feed(reader.decoder,raw);
+        if text!="" { return text; }
+    }
+    raise RuntimeError;
+}
+
+fn utf8_reader_close(reader:Utf8Reader)->void {
+    # Explicit close permits a pending suffix; it does not validate decoder EOF.
+    reader.file.close();
+    reader.finished=1;
+}
+

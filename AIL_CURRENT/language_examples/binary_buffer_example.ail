@@ -1,0 +1,17 @@
+use binary_buffer;
+
+struct Packet { data: bytearray; }
+
+fn main() -> int {
+    let packet = Packet(bytearray(bytes([0, 1, 127, 255])));
+    let shared = packet.data;
+    let saved = bytes(shared);
+    binary_buffer_xor(packet.data, 255);
+    print(bytes(shared).hex());
+    print(saved.hex());
+    let copied = shared.copy();
+    shared.clear();
+    print(bytes(copied).hex());
+    print(len(packet.data));
+    return 0;
+}

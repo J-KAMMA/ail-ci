@@ -1,0 +1,20 @@
+fn main() -> int {
+    if len(sys.argv) != 3 {
+        print("usage: integer_series <integer-lines-file> <minimum>", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let text = open(sys.argv[1]).read();
+        let values = [int(line) for line in text.splitlines()];
+        let changes = filtered_differences(values, int(sys.argv[2]));
+        print(len(changes));
+        for value in changes { print(value); }
+    } except OSError {
+        print("file error", file=sys.stderr);
+        return 3;
+    } except ValueError {
+        print("invalid integer", file=sys.stderr);
+        return 4;
+    }
+    return 0;
+}

@@ -1,0 +1,4 @@
+# Compile with --object block_text.o; label is supplied by that library.
+fn report(n: int) -> str {
+    return "[" + label(n) + "]";
+}

@@ -1,0 +1,48 @@
+use checked_integer;
+
+fn config_text(path: str) -> str {
+    try {
+        let reader = open_binary(path, "r");
+        try {
+            let data: bytes = b"";
+            while True {
+                let block: bytes = reader.read(8192);
+                if len(block) == 0 { break; }
+                data += block;
+            }
+            return data.decode();
+        } finally { reader.close(); }
+    } except OSError { raise OSError("file error"); }
+    except UnicodeDecodeError { raise UnicodeDecodeError("input must be UTF-8"); }
+}
+
+fn config_report(text: str) -> str {
+    let count: int = 0;
+    let total: int = 0;
+    let number: int = 0;
+    for raw in text.splitlines() {
+        number += 1;
+        let line: str = raw.strip();
+        if line == "" or line.startswith("#") { continue; }
+        let prefix: str = "line " + str(number) + ": ";
+        let parts: list[str] = line.split("=");
+        if len(parts) != 2 { raise ValueError(prefix + "expected key=integer"); }
+        let key: str = parts[0].strip();
+        let token: str = parts[1].strip();
+        if key == "" { raise ValueError(prefix + "empty key"); }
+        let value: int = 0;
+        try { value = parse_int64_decimal(token); }
+        except ValueError { raise ValueError(prefix + "invalid integer: " + token); }
+        try { total = checked_int64_add(total, value); }
+        except ValueError { raise ValueError(prefix + "total outside int64"); }
+        count += 1;
+    }
+    return "{\"count\":" + str(count) + ",\"total\":" + str(total) + "}";
+}
+
+fn validate_config(path: str) -> str {
+    try { return config_report(config_text(path)); }
+    except ValueError as e { raise e; }
+    except OSError { raise; }
+}
+

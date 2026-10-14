@@ -1,0 +1,17 @@
+use codepoint_checksum_core;
+
+fn main() -> int {
+    if len(sys.argv) != 2 {
+        print("usage: codepoint_checksum <utf8-file>", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let content = open(sys.argv[1]).read();
+        print(len(content));
+        print(checksum(content));
+    } except OSError {
+        print("read error", file=sys.stderr);
+        return 3;
+    }
+    return 0;
+}

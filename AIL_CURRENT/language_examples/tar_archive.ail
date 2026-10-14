@@ -1,0 +1,61 @@
+use tar_header;
+
+fn tar_entries_decode(data: bytes) -> list[TarEntry] {
+    if len(data) < 1024 or len(data) % 512 != 0 { raise ValueError; }
+    let entries = [];
+    let offset: int = 0;
+    let zero: bytes = bytes(512);
+    while offset < len(data) {
+        if len(data) - offset < 512 { raise ValueError; }
+        let header: bytes = data[offset:offset + 512];
+        if header == zero {
+            if len(data) - offset < 1024 { raise ValueError; }
+            if data[offset + 512:offset + 1024] != zero { raise ValueError; }
+            for i in range(offset + 1024, len(data)) { if data[i] != 0 { raise ValueError; } }
+            return entries;
+        }
+        let entry: TarEntry = tar_header_decode(header);
+        offset += 512;
+        if entry.size > len(data) - offset { raise ValueError; }
+        let padding: int = (512 - entry.size % 512) % 512;
+        if padding > len(data) - offset - entry.size { raise ValueError; }
+        entry.data = data[offset:offset + entry.size];
+        offset += entry.size;
+        offset += padding;
+        entries.append(entry);
+    }
+    raise ValueError;
+}
+
+fn _tar_entries_validate(entries: list[TarEntry]) -> void {
+    for entry in entries {
+        tar_header_encode(entry);
+        if entry.typeflag == 0 or entry.typeflag == 7 {
+            if len(entry.data) != entry.size { raise ValueError; }
+        } else {
+            if len(entry.data) != 0 { raise ValueError; }
+        }
+    }
+}
+
+fn tar_names(entries: list[TarEntry]) -> list[str] {
+    _tar_entries_validate(entries);
+    let names: list[str] = [];
+    for entry in entries { names.append(entry.name); }
+    return names;
+}
+
+fn tar_member(entries: list[TarEntry], name: str) -> bytes {
+    _tar_entries_validate(entries);
+    let found: int = -1;
+    for i in range(len(entries)) {
+        if entries[i].name == name {
+            if found != -1 { raise ValueError; }
+            found = i;
+        }
+    }
+    if found == -1 { raise KeyError; }
+    let selected: TarEntry = entries[found];
+    if selected.typeflag != 0 and selected.typeflag != 7 { raise ValueError; }
+    return selected.data[:];
+}

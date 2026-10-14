@@ -1,0 +1,5 @@
+# Link block_text.o using --object; this file does not import its source.
+fn main() -> int {
+    print(label(7));
+    return 0;
+}

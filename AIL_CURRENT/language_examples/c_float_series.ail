@@ -1,0 +1,10 @@
+fn main() -> int {
+    let text=read_bytes(sys.argv[1]).decode();
+    let words=text.split();
+    let values=[];
+    for word in words { values.append(float(word)); }
+    print(native_count_between(values,float(sys.argv[2]),float(sys.argv[3])));
+    print(native_total(values));
+    print(len(values));
+    return 0;
+}

@@ -1,0 +1,19 @@
+use wav_pcm16;
+use pcm16_audio;
+
+# PCM16 sample changes preserve every non-audio chunk byte.
+fn wav_audio_gain(data: bytes, numerator: int, denominator: int) -> bytes {
+    let info = wav_pcm16_parse(data);
+    let end: int = info.data_offset + info.data_size;
+    let samples: bytes = pcm16_gain(data[info.data_offset:end], numerator, denominator);
+    return b"".join([data[:info.data_offset], samples, data[end:]]);
+}
+
+fn wav_audio_trim(data: bytes, first: int, count: int) -> bytes {
+    let info = wav_pcm16_parse(data);
+    let end: int = info.data_offset + info.data_size;
+    let samples: bytes = pcm16_trim(data[info.data_offset:end], info.channels, first, count);
+    let size: int = len(data) - info.data_size + len(samples) - 8;
+    return b"".join([b"RIFF", pack_u32_le(size), data[8:info.data_offset - 4],
+                     pack_u32_le(len(samples)), samples, data[end:]]);
+}

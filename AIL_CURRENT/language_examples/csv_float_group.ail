@@ -1,0 +1,73 @@
+use csv_stream;
+use checked_float64;
+use json_text;
+
+struct CsvFloatGroups {
+    counts: dict[str, int];
+    totals: dict[str, float];
+    minimums: dict[str, float];
+    maximums: dict[str, float];
+}
+
+struct CsvFloatGroup { key: str; count: int; total: float; minimum: float; maximum: float; }
+
+fn csv_float_groups_new() -> CsvFloatGroups {
+    let counts: dict[str, int] = {};
+    let values: dict[str, float] = {};
+    return CsvFloatGroups(counts, values, values, values);
+}
+
+fn csv_float_groups_add(groups: CsvFloatGroups, rows: list[CsvRow], key_column: int, value_column: int) -> void {
+    if key_column < 0 or value_column < 0 { raise ValueError; }
+    let counts: dict[str, int] = groups.counts;
+    let totals: dict[str, float] = groups.totals;
+    let minimums: dict[str, float] = groups.minimums;
+    let maximums: dict[str, float] = groups.maximums;
+    for row in rows {
+        let fields: list[str] = row.fields;
+        if key_column >= len(fields) or value_column >= len(fields) { raise ValueError; }
+        let key: str = fields[key_column];
+        let value: float = parse_float64_decimal(fields[value_column]);
+        if key in counts {
+            let total: float = checked_float64_add(totals[key], value);
+            let count: int = counts[key];
+            if count == 9223372036854775807 { raise ValueError; }
+            totals[key] = total;
+            counts[key] = count + 1;
+            if value < minimums[key] { minimums[key] = value; }
+            if value > maximums[key] { maximums[key] = value; }
+        } else {
+            counts[key] = 1;
+            totals[key] = value;
+            minimums[key] = value;
+            maximums[key] = value;
+        }
+    }
+    groups.counts = counts;
+    groups.totals = totals;
+    groups.minimums = minimums;
+    groups.maximums = maximums;
+}
+
+fn csv_float_groups_snapshot(groups: CsvFloatGroups) -> list[CsvFloatGroup] {
+    let counts: dict[str, int] = groups.counts;
+    let totals: dict[str, float] = groups.totals;
+    let minimums: dict[str, float] = groups.minimums;
+    let maximums: dict[str, float] = groups.maximums;
+    let result: list[CsvFloatGroup] = [];
+    for key, count in counts.items() {
+        result.append(CsvFloatGroup(key, count, totals[key], minimums[key], maximums[key]));
+    }
+    return result;
+}
+
+fn csv_float_groups_render(groups: CsvFloatGroups) -> str {
+    let rows = csv_float_groups_snapshot(groups);
+    let parts: list[str] = [];
+    for row in rows {
+        parts.append("{\"key\":" + json_quote(row.key) + ",\"count\":" + str(row.count)
+            + ",\"total\":" + str(row.total) + ",\"minimum\":" + str(row.minimum)
+            + ",\"maximum\":" + str(row.maximum) + "}");
+    }
+    return "[" + ",".join(parts) + "]";
+}

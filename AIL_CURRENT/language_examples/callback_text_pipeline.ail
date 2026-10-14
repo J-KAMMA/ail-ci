@@ -1,0 +1,9 @@
+# Apply the callback once to each splitlines() item, preserving its order.
+# Normalize separators to LF; keep a final LF iff the input ended in LF.
+# Empty input produces empty output. Callback errors propagate to the caller.
+fn rewrite_lines(text: str, operation: Callable[[str], str]) -> str {
+    let lines: list[str] = [operation(line) for line in text.splitlines()];
+    let result = "\n".join(lines);
+    if text.endswith("\n") { result = result + "\n"; }
+    return result;
+}

@@ -1,0 +1,5 @@
+#ifndef EXAMPLE_CRC_CONSTANTS_H
+#define EXAMPLE_CRC_CONSTANTS_H
+#include <stdint.h>
+#define EXAMPLE_CRC_POLYNOMIAL UINT32_C(0xedb88320)
+#endif

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "functions": {
+    "file_identity_status": {
+      "symbol": "native_file_identity_status",
+      "params": [["source_path", "str"], ["destination_path", "str"]],
+      "result": "int"
+    }
+  }
+}

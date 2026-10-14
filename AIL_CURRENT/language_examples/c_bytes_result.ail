@@ -1,0 +1,7 @@
+fn main() -> int {
+    let input = read_bytes(sys.argv[1]);
+    let payload = native_tail(input, int(sys.argv[3]));
+    write_bytes(sys.argv[2], payload);
+    print(len(payload));
+    return 0;
+}

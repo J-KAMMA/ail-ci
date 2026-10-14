@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "functions": {
+    "native_count_above": {"symbol": "count_above", "params": [["values", "list"], ["threshold", "int"]], "result": "int"},
+    "native_lower_bound": {"symbol": "lower_bound", "params": [["values", "list"], ["key", "int"]], "result": "int"}
+  }
+}

@@ -1,0 +1,11 @@
+fn main() {
+    let count = 0;
+    let total = 0;
+    for line in sys.stdin {
+        total += int(line);
+        count += 1;
+    }
+    print(count);
+    print(total);
+    return 0;
+}

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "functions": {
+    "crc16": {
+      "symbol": "native_crc16",
+      "params": [["data", "bytes"], ["seed", "uint16"]],
+      "result": "uint16"
+    }
+  }
+}

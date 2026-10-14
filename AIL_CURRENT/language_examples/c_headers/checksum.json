@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "headers": ["crc32.h", "detail/crc_constants.h"],
+  "functions": {
+    "native_crc32": {
+      "symbol": "native_crc32",
+      "params": [["data", "bytes"]],
+      "result": "int"
+    }
+  }
+}

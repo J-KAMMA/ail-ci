@@ -1,0 +1,105 @@
+use checked_integer;
+use utf8_stream;
+use csv_stream;
+use csv_writer;
+
+fn _csv_rewrite_stream_units(fields: list[str], cap: int) -> int {
+    let units: int = len(fields);
+    if units > cap { raise ValueError; }
+    for field in fields {
+        units = checked_int64_add(units, len(field));
+        if units > cap { raise ValueError; }
+    }
+    return units;
+}
+
+fn _csv_rewrite_stream_validate(rows: list[CsvRow], decoder: CsvDecoder, cap: int) -> void {
+    for row in rows { _csv_rewrite_stream_units(row.fields, cap); }
+    let units: int = _csv_rewrite_stream_units(decoder.fields, cap);
+    units = checked_int64_add(units, len(decoder.field));
+    units = checked_int64_add(units, 1);
+    if units > cap { raise ValueError; }
+}
+
+# Reject excessive field construction before the parser allocates field prefixes.
+fn _csv_rewrite_stream_limit(text: str, decoder: CsvDecoder, cap: int) -> void {
+    if decoder.closed { raise ValueError; }
+    let units: int = _csv_rewrite_stream_units(decoder.fields, cap);
+    units = checked_int64_add(units, len(decoder.field));
+    units = checked_int64_add(units, 1);
+    if units > cap { raise ValueError; }
+    let mode: int = decoder.mode;
+    let skip_lf: int = decoder.skip_lf;
+    for ch in text {
+        if skip_lf == 1 and ch == "\n" { skip_lf = 0; continue; }
+        skip_lf = 0;
+        if mode == 2 {
+            if ch == "\"" { mode = 3; }
+            else {
+                if units >= cap { raise ValueError; }
+                units += 1;
+            }
+        } elif ch == "," {
+            if units >= cap { raise ValueError; }
+            units += 1; mode = 0;
+        } elif ch == "\r" or ch == "\n" {
+            units = 1; mode = 0;
+            if ch == "\r" { skip_lf = 1; }
+        } elif ch == "\"" {
+            if mode == 3 {
+                if units >= cap { raise ValueError; }
+                units += 1; mode = 2;
+            } else {
+                if mode != 0 { raise ValueError; }
+                mode = 2;
+            }
+        } else {
+            if mode == 3 { raise ValueError; }
+            if units >= cap { raise ValueError; }
+            units += 1;
+            if mode == 0 { mode = 1; }
+        }
+    }
+}
+
+# Each encoded record's temporary byte arena ends at this call boundary.
+fn _csv_rewrite_stream_write(writer: binaryfile, fields: list[str]) -> void {
+    writer.write(csv_encode_row(fields).encode("utf-8"));
+}
+
+# No read bytes, decoded text or completed rows escape this call.
+# EOF validates and emits its final row before returning -1.
+fn _csv_rewrite_stream_step(reader: binaryfile, writer: binaryfile, utf8: Utf8Decoder, decoder: CsvDecoder, size: int, cap: int) -> int {
+    let data: bytes = reader.read(size);
+    let rows: list[CsvRow] = [];
+    if len(data) == 0 {
+        utf8_decode_finish(utf8);
+        rows = csv_decode_finish(decoder);
+    } else {
+        let text: str = utf8_decode_feed(utf8, data);
+        _csv_rewrite_stream_limit(text, decoder, cap);
+        rows = csv_decode_feed(decoder, text);
+    }
+    # Validate every completed row and the pending row before any chunk output.
+    _csv_rewrite_stream_validate(rows, decoder, cap);
+    for row in rows { _csv_rewrite_stream_write(writer, row.fields); }
+    if len(data) == 0 { return -1; }
+    return len(rows);
+}
+
+# Caller supplies independent files and retains ownership of both handles.
+# Row units are Unicode codepoints in fields plus field count; blank records skip.
+# Late malformed input, cap errors or I/O failures can leave a written prefix.
+# This is a streaming partial-output profile, not an atomic rewrite.
+fn csv_rewrite_stream(reader: binaryfile, writer: binaryfile, chunk_size: int, max_row_units: int) -> int {
+    if chunk_size <= 0 or chunk_size > 1048576 or max_row_units <= 0 or max_row_units > 1048576 { raise ValueError; }
+    if reader.closed or writer.closed { raise ValueError; }
+    let utf8: Utf8Decoder = utf8_decoder_new();
+    let decoder: CsvDecoder = csv_decoder_new();
+    while True {
+        let count: int = _csv_rewrite_stream_step(reader, writer, utf8, decoder, chunk_size, max_row_units);
+        if count < 0 { break; }
+    }
+    # csv_stream checks its signed-int64 row increment before each completed row.
+    return decoder.row;
+}

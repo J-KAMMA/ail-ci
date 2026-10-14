@@ -1,0 +1,21 @@
+fn total(values: list[float]) -> float {
+    let result=0.0;
+    for value in values { result=result+value; }
+    return result;
+}
+
+fn count_between(values: list[float], low: float, high: float) -> int {
+    let count=0;
+    for value in values {
+        if value>=low and value<=high { count+=1; }
+    }
+    return count;
+}
+
+fn element(values: list[float], index: int) -> float {
+    return values[index];
+}
+
+fn composed_total(values: list[float]) -> float {
+    return total(values);
+}

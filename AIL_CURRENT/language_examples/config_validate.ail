@@ -1,0 +1,22 @@
+use config_core;
+
+fn main() -> int {
+    if len(sys.argv) != 2 {
+        print("usage: config_validate INPUT", file=sys.stderr);
+        return 2;
+    }
+    try {
+        print(validate_config(sys.argv[1]));
+        flush_stdout();
+        return 0;
+    } except UnicodeDecodeError as e {
+        print(e.kind + ": " + e.message, file=sys.stderr);
+        return 4;
+    } except ValueError as e {
+        print(e.kind + ": " + e.message, file=sys.stderr);
+        return 2;
+    } except OSError as e {
+        print(e.kind + ": " + e.message, file=sys.stderr);
+        return 3;
+    }
+}

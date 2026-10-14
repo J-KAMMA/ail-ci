@@ -1,0 +1,9 @@
+# IEEE binary64 records: order 0 = little endian, 1 = big endian.
+# Conversion preserves raw bits; decoded lists and encoded bytes are independent.
+fn unpack_float64(data: bytes, order: int) -> list[float] {
+    return float64_decode(data, order);
+}
+
+fn pack_float64(values: list[float], order: int) -> bytes {
+    return float64_encode(values, order);
+}

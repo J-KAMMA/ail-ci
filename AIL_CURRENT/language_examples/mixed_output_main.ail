@@ -1,0 +1,11 @@
+# Length-delimited bytes with text framing; raw payload is not translated.
+fn main()->int {
+    if len(sys.argv)!=2 { return 2; }
+    try {
+        let data=read_bytes(sys.argv[1]);
+        print("AIL bytes",len(data));
+        write_stdout_bytes(data);
+        print("END");
+        return 0;
+    } except OSError { return 3; }
+}

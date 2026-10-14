@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "functions": {
+    "byte_count": {
+      "symbol": "native_byte_count",
+      "params": [["text", "str"]],
+      "result": "int"
+    },
+    "weighted_checksum": {
+      "symbol": "native_checksum",
+      "params": [["text", "str"]],
+      "result": "int"
+    }
+  }
+}

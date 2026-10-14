@@ -1,0 +1,42 @@
+use checked_integer;
+
+fn _tcp_upload_chunk(source: binaryfile, connection: tcpsocket, buffer: bytearray) -> int {
+    let count = source.readinto(buffer);
+    if count != 0 { connection.send(buffer[:count]); }
+    return count;
+}
+
+fn _tcp_download_chunk(connection: tcpsocket, target: binaryfile, buffer: bytearray) -> int {
+    let count = connection.recv_into(buffer);
+    if count != 0 { target.write(buffer[:count]); }
+    return count;
+}
+
+# The peer consumes the request through EOF, then sends its response through EOF.
+# Late errors can leave an output prefix; operations have no built-in deadline.
+fn tcp_file_exchange(host: str, port: int, input_path: str, output_path: str, chunk_size: int) -> int {
+    if chunk_size <= 0 or chunk_size > 2147483647 { raise ValueError; }
+    if same_file(input_path, output_path) { raise OSError; }
+    let source = open_binary(input_path, "r");
+    try {
+        let connection = tcp_connect(host, port);
+        try {
+            let buffer = bytearray(chunk_size);
+            while True {
+                if _tcp_upload_chunk(source, connection, buffer) == 0 { break; }
+            }
+            connection.shutdown_write();
+            let target = open_binary(output_path, "w");
+            try {
+                let total: int = 0;
+                while True {
+                    let count = _tcp_download_chunk(connection, target, buffer);
+                    if count == 0 { break; }
+                    total = checked_int64_add(total, count);
+                }
+                target.flush();
+                return total;
+            } finally { target.close(); }
+        } finally { connection.close(); }
+    } finally { source.close(); }
+}

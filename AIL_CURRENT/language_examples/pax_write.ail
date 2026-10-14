@@ -1,0 +1,27 @@
+use pax_archive;
+
+fn pax_entries_encode(entries: list[PaxEntry]) -> bytes {
+    let parts: list[bytes] = [];
+    let total: int = 1024;
+    for entry in entries {
+        pax_entry_validate(entry);
+        let attributes: dict[str, str] = pax_entry_attributes(entry);
+        let segments: list[bytes] = [];
+        if len(attributes) != 0 {
+            let payload: bytes = pax_attributes_encode(attributes);
+            segments.append(pax_extension_header(payload, 0));
+            segments.append(payload);
+            segments.append(b"\x00" * ((512 - len(payload) % 512) % 512));
+        }
+        segments.append(entry.header);
+        segments.append(entry.data);
+        segments.append(b"\x00" * ((512 - len(entry.data) % 512) % 512));
+        for segment in segments {
+            if len(segment) > 9223372036854775807 - total { raise ValueError; }
+            total += len(segment);
+            parts.append(segment);
+        }
+    }
+    parts.append(b"\x00" * 1024);
+    return b"".join(parts);
+}

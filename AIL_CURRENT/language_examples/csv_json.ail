@@ -1,0 +1,14 @@
+# Link with csv_table and json_text; field values remain strings.
+fn csv_json(text: str) -> str {
+    let cells = csv_parse(text);
+    let result = "["; let row = -1;
+    for cell in cells {
+        if cell.row != row {
+            if row >= 0 { result += "],"; }
+            result += "["; row = cell.row;
+        } else { result += ","; }
+        result += json_quote(cell.text);
+    }
+    if row >= 0 { result += "]"; }
+    return result + "]";
+}

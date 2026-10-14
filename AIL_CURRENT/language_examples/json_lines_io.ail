@@ -1,0 +1,18 @@
+use json_lines;
+use utf8_stream;
+
+fn json_lines_read_file(path: str, size: int) -> JsonDocuments {
+    if size <= 0 { raise ValueError; }
+    let utf8 = utf8_decoder_new();
+    let lines = json_lines_decoder_new();
+    let batch = json_documents_new();
+    for chunk in file_chunks(path, size) {
+        let documents: list[JsonDocument] = json_lines_decode_feed(lines, utf8_decode_feed(utf8, chunk));
+        json_documents_append(batch, documents);
+    }
+    let tail: list[JsonDocument] = json_lines_decode_feed(lines, utf8_decode_finish(utf8));
+    json_documents_append(batch, tail);
+    let final: list[JsonDocument] = json_lines_decode_finish(lines);
+    json_documents_append(batch, final);
+    return batch;
+}

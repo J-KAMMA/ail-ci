@@ -1,0 +1,44 @@
+use record_queries;
+
+struct PolicyState { limit: int; visited: int; label: str; }
+struct RecordPolicy {
+    state: PolicyState;
+    accept: Callable[[PolicyState, QueryRecord], int];
+    render: Callable[[PolicyState, QueryRecord], str];
+}
+
+fn _policy_above(state: PolicyState, row: QueryRecord) -> int {
+    state.visited += 1;
+    return row.value >= state.limit;
+}
+
+fn _policy_below(state: PolicyState, row: QueryRecord) -> int {
+    state.visited += 1;
+    return row.value < state.limit;
+}
+
+fn _policy_render(state: PolicyState, row: QueryRecord) -> str {
+    return state.label + ":" + row.key + ":" + str(row.value);
+}
+
+fn record_policy_new(limit: int, label: str) -> RecordPolicy {
+    return RecordPolicy(PolicyState(limit, 0, label), _policy_above, _policy_render);
+}
+
+fn record_policy_mode(policy: RecordPolicy, mode: int) -> void {
+    if mode == 0 { policy.accept = _policy_above; }
+    elif mode == 1 { policy.accept = _policy_below; }
+    else { raise ValueError; }
+}
+
+fn record_policy_select(policy: RecordPolicy, rows: list[QueryRecord]) -> list[QueryRecord] {
+    let selected: list[QueryRecord] = [];
+    for row in rows {
+        if policy.accept(policy.state, row) { selected.append(row); }
+    }
+    return selected;
+}
+
+fn record_policy_describe(policy: RecordPolicy, row: QueryRecord) -> str {
+    return policy.render(policy.state, row);
+}

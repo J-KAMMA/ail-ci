@@ -1,0 +1,15 @@
+fn main() {
+    let count = 0;
+    let total = 0;
+    while true {
+        let line = sys.stdin.readline();
+        if line == "" {
+            break;
+        }
+        total += int(line);
+        count += 1;
+    }
+    print(count);
+    print(total);
+    return 0;
+}

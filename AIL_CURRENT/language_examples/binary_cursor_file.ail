@@ -1,0 +1,7 @@
+use binary_cursor;
+
+fn binary_cursor_file(path: str) -> BinaryCursor {
+    let cursor = BinaryCursor(b"", 0);
+    cursor.data = read_bytes(path);
+    return cursor;
+}

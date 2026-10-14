@@ -1,0 +1,3 @@
+fn binary_replace(data: bytes, old: bytes, replacement: bytes, count: int) -> bytes {
+    return data.replace(old, replacement, count);
+}

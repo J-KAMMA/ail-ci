@@ -1,0 +1,58 @@
+use binary_numbers;
+
+# Strict RIFF/WAVE PCM16, mono or stereo; metadata only, no audio copy.
+struct WavPcm16 {
+    channels: int;
+    sample_rate: int;
+    data_offset: int;
+    data_size: int;
+    frames: int;
+}
+
+fn wav_pcm16_parse(data: bytes) -> WavPcm16 {
+    let total: int = len(data);
+    if total < 12 { raise ValueError; }
+    if data[:4] != b"RIFF" or data[8:12] != b"WAVE" { raise ValueError; }
+    if unpack_u32_le(data[4:8]) != total - 8 { raise ValueError; }
+    let position: int = 12;
+    let seen_fmt: int = 0;
+    let seen_data: int = 0;
+    let channels: int = 0;
+    let sample_rate: int = 0;
+    let data_offset: int = 0;
+    let data_size: int = 0;
+    while position < total {
+        if total - position < 8 { raise ValueError; }
+        let kind: bytes = data[position:position + 4];
+        let size: int = unpack_u32_le(data[position + 4:position + 8]);
+        position = position + 8;
+        if size > total - position { raise ValueError; }
+        if kind == b"fmt " {
+            if seen_fmt != 0 or (size != 16 and size != 18) { raise ValueError; }
+            if unpack_u16_le(data[position:position + 2]) != 1 { raise ValueError; }
+            channels = unpack_u16_le(data[position + 2:position + 4]);
+            sample_rate = unpack_u32_le(data[position + 4:position + 8]);
+            let byte_rate: int = unpack_u32_le(data[position + 8:position + 12]);
+            let block_align: int = unpack_u16_le(data[position + 12:position + 14]);
+            let bits: int = unpack_u16_le(data[position + 14:position + 16]);
+            if (channels != 1 and channels != 2) or sample_rate == 0 or bits != 16 { raise ValueError; }
+            if block_align != channels * 2 or byte_rate != sample_rate * block_align { raise ValueError; }
+            # PCM ignores cbSize when the fmt chunk has the WAVEFORMATEX size.
+            seen_fmt = 1;
+        } elif kind == b"data" {
+            if seen_data != 0 { raise ValueError; }
+            data_offset = position;
+            data_size = size;
+            seen_data = 1;
+        }
+        position = position + size;
+        if size % 2 != 0 {
+            if total - position < 1 { raise ValueError; }
+            position = position + 1;
+        }
+    }
+    if seen_fmt == 0 or seen_data == 0 { raise ValueError; }
+    let frame_size: int = channels * 2;
+    if data_size % frame_size != 0 { raise ValueError; }
+    return WavPcm16(channels, sample_rate, data_offset, data_size, data_size // frame_size);
+}

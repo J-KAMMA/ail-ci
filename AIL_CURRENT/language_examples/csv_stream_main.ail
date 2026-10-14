@@ -1,0 +1,32 @@
+use csv_stream;
+use utf8_stream;
+use checked_integer;
+
+# Complete rows are emitted as they arrive; later input errors can leave rows on stdout.
+fn main() -> int {
+    if len(sys.argv) != 3 {
+        print("usage: csv_stream INPUT SIZE", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let size: int = parse_int64_decimal(sys.argv[2]);
+        if size <= 0 { raise ValueError; }
+        let utf8 = utf8_decoder_new();
+        let csv: CsvDecoder = csv_decoder_new();
+        for chunk in file_chunks(sys.argv[1], size) {
+            let rows = csv_decode_feed(csv, utf8_decode_feed(utf8, chunk));
+            for row in rows { write_stdout_bytes((csv_stream_row_json(row) + "\n").encode()); }
+        }
+        let tail = csv_decode_feed(csv, utf8_decode_finish(utf8));
+        for row in tail { write_stdout_bytes((csv_stream_row_json(row) + "\n").encode()); }
+        let final = csv_decode_finish(csv);
+        for row in final { write_stdout_bytes((csv_stream_row_json(row) + "\n").encode()); }
+        return 0;
+    } except ValueError {
+        print("invalid UTF-8, CSV, or chunk size", file=sys.stderr);
+        return 2;
+    } except OSError {
+        print("CSV stream input or output failed", file=sys.stderr);
+        return 2;
+    }
+}

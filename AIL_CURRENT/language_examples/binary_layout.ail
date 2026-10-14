@@ -1,0 +1,9 @@
+# Whole-buffer binary layout; byte counts use signed 64-bit integers.
+fn binary_pad(data: bytes, width: int) -> bytes {
+    if width < len(data) { raise ValueError; }
+    return bytes(data) + bytes(width - len(data));
+}
+
+fn binary_repeat(data: bytes, count: int) -> bytes {
+    return data * count;
+}

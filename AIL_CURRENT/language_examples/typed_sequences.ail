@@ -1,0 +1,34 @@
+use checked_integer;
+
+fn integer_column_values(data: str, column: int) -> list[int] {
+    if column < 0 { raise ValueError; }
+    let values: list[int] = [];
+    let lines: list[str] = data.splitlines();
+    for line in lines {
+        let parts: list[str] = line.split("\t");
+        if column >= len(parts) { raise ValueError; }
+        values.append(parse_int64_decimal(parts[column]));
+    }
+    return values;
+}
+
+fn integer_values_reverse(values: list[int]) -> list[int] {
+    return [values[i] for i in range(len(values) - 1, -1, -1)];
+}
+
+fn float_values_scale(values: list[float], scale: float) -> list[float] {
+    return [value * scale for value in values];
+}
+
+fn string_values_copy(values: list[str]) -> list[str] {
+    let result: list[str] = [];
+    for value in values { result.append(value); }
+    return result;
+}
+
+fn integer_values_render(values: list[int]) -> str {
+    let parts: list[str] = [];
+    for value in values { parts.append(str(value)); }
+    if len(parts) == 0 { return ""; }
+    return "\n".join(parts) + "\n";
+}

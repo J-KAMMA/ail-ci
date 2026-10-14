@@ -1,0 +1,45 @@
+use json_pointer;
+use json_string_map;
+use json_pointer_batch;
+use json_pointer_scan;
+use file_identity;
+
+struct JsonQueryResult { stage:int; error:int; }
+
+fn json_query_file(mode:str, input:str, output:str, pointers:list[str])->JsonQueryResult {
+    let stage=1;
+    try {
+        if mode!="batch" and mode!="extract" and mode!="string-map" {raise ValueError;}
+        if mode!="batch" and len(pointers)!=1 {raise ValueError;}
+        if input==output {raise ValueError;}
+        stage=2;
+        if file_paths_same(input,output) {raise ValueError;}
+        stage=3;
+        let data=read_bytes(input);
+        stage=4;
+        # Strict UTF-8 validation; the scan below reads the bytes.
+        let text=data.decode("utf-8");
+        stage=5;
+        let report:str="";
+        if mode=="string-map" {
+            let nodes=json_parse_document(text);
+            stage=6;
+            report=string_map_render(json_string_map_at(nodes,pointers[0]));
+        } else {
+            # One validating pass: a document error is stage 5, a pointer error stage 6.
+            let found=json_pointer_scan_bytes(data,pointers);
+            stage=6;
+            if found.error==1 {raise ValueError;}
+            if found.error==3 {raise KeyError;}
+            if mode=="batch" {report="["+",".join(found.values)+"]\n";}
+            else {report=found.values[0]+"\n";}
+        }
+        stage=7;
+        write_bytes(output,report.encode("utf-8"));
+        return JsonQueryResult(0,0);
+    } except UnicodeDecodeError {return JsonQueryResult(stage,2);}
+      except ValueError {return JsonQueryResult(stage,1);}
+      except KeyError {return JsonQueryResult(stage,3);}
+      except IndexError {return JsonQueryResult(stage,4);}
+      except OSError {return JsonQueryResult(stage,5);}
+}

@@ -1,0 +1,15 @@
+use json_text;
+
+# A sorted, nonrecursive snapshot; metadata is queried after enumerating names.
+fn directory_catalog(path: str) -> str {
+    let names: list[str] = list_dir(path);
+    let ordered = sorted(names);
+    let records: list[str] = [];
+    for name in ordered {
+        let entry_path = path + "/" + name;
+        records.append("{\"name\":" + json_quote(name)
+            + ",\"directory\":" + str(is_dir(entry_path))
+            + ",\"exists\":" + str(path_exists(entry_path)) + "}");
+    }
+    return "[" + ",".join(records) + "]";
+}

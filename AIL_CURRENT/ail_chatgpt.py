@@ -1,0 +1,980 @@
+"""Portable entry for the AIL source snapshot; no implicit model calls."""
+import ast
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import platform
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from ail_syntax import SyntaxErrorAIL, detect, translate
+import ail_sexpr
+
+ROOT = Path(__file__).resolve().parent
+
+
+def _literal_number(node):
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        node = node.operand
+    return isinstance(node, ast.Constant) and type(node.value) in (int, float)
+
+
+def _module_constant(node):
+    if not isinstance(node, ast.Assign) or len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
+        return False
+    value = node.value
+    return (isinstance(value, ast.Constant) and type(value.value) in (str, bytes)
+            or _literal_number(value) or isinstance(value, (ast.List, ast.Tuple))
+            and bool(value.elts) and all(map(_literal_number, value.elts)))
+
+
+def _check_int64_literals(tree):
+    nodes = [tree]
+    while nodes:
+        node = nodes.pop()
+        if (isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub))
+                and isinstance(node.operand, ast.Constant) and type(node.operand.value) is int):
+            value = -node.operand.value if isinstance(node.op, ast.USub) else node.operand.value
+        elif isinstance(node, ast.Constant) and type(node.value) is int:
+            value = node.value
+        else:
+            nodes.extend(ast.iter_child_nodes(node))
+            continue
+        if not -(1 << 63) <= value < 1 << 63:
+            error = ValueError(f'int64 literal out of range: {value}')
+            error.source_line = node.lineno
+            error.source_column = node.col_offset
+            raise error
+
+
+def _returns_on_every_path(statements):
+    def loop_exit(body):
+        pending = list(body)
+        while pending:
+            node = pending.pop()
+            if isinstance(node, (ast.Break, ast.Continue)):
+                return True
+            if isinstance(node, (ast.For, ast.While)):
+                pending.extend(node.orelse)
+            elif not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                pending.extend(ast.iter_child_nodes(node))
+        return False
+
+    return any(
+        isinstance(node, (ast.Return, ast.Raise))
+        or (isinstance(node, ast.If) and bool(node.orelse)
+            and _returns_on_every_path(node.body)
+            and _returns_on_every_path(node.orelse))
+        or (isinstance(node, ast.Try)
+            and (_returns_on_every_path(node.finalbody)
+                 or not loop_exit(node.finalbody)
+                 and all(_returns_on_every_path(handler.body) for handler in node.handlers)
+                 and (_returns_on_every_path(node.body)
+                      or bool(node.orelse) and _returns_on_every_path(node.orelse))))
+        for node in statements)
+
+
+ZIG_TARGETS = {'linux': 'x86_64-linux-gnu', 'linux-arm64': 'aarch64-linux-gnu',
+               'windows': 'x86_64-windows-gnu', 'macos': 'aarch64-macos', 'macos-x86_64': 'x86_64-macos'}
+
+
+def _zig_compiler(target):
+    """A one-file C compiler command that runs `zig cc -target <triple>`, for $PIPE_CC.
+
+    zig bundles the C libraries of every target, so one install builds Linux, Windows and macOS
+    executables from any host. The wrapper lives in a temporary directory for this process."""
+    import atexit, shutil, stat, tempfile
+    zig = os.environ.get('AIL_ZIG') or shutil.which('zig')
+    if not zig:
+        local = Path.home() / 'tools' / 'zig' / ('zig.exe' if os.name == 'nt' else 'zig')
+        zig = str(local) if local.is_file() else None
+    if not zig:
+        raise SystemExit('--target needs zig: set $AIL_ZIG, put zig on PATH, or unpack it to ~/tools/zig')
+    directory = Path(tempfile.mkdtemp(prefix='ail-zigcc-'))
+    atexit.register(shutil.rmtree, directory, True)
+    triple = ZIG_TARGETS[target]
+    if os.name == 'nt':
+        wrapper = directory / 'zigcc.cmd'
+        wrapper.write_text('@"%s" cc -target %s %%*\r\n' % (zig, triple), encoding='utf-8')
+    else:
+        wrapper = directory / 'zigcc'
+        wrapper.write_text('#!/bin/sh\nexec "%s" cc -target %s "$@"\n' % (zig, triple), encoding='utf-8')
+        wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
+    return str(wrapper)
+
+
+def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only=False,
+                  separate=False, module_paths=(), origins=None, source_map=None, declarations_only=False, source_bytes=None):
+    """Resolve source imports once and validate their shared declaration scope."""
+    search_paths = tuple(dict.fromkeys(Path(path).resolve() for path in module_paths))
+    if any(not path.is_dir() for path in search_paths):
+        raise ValueError('each --module-path must name an existing directory')
+    standard = ROOT / 'language_examples'
+    modules = []
+    names = set()
+    seen = set()
+    active = []
+    contracts = []
+    constants = set()
+    functions = []
+    unit_map = {}
+    unit_locations = {}
+
+    def load(path, *, entry=False):
+        path = path.resolve()
+        if path in active:
+            raise ValueError('AIL module cycle: ' + ' -> '.join(p.name for p in [*active, path]))
+        if path in seen:
+            return None
+        if path.suffix.lower() != '.ail' or not path.is_file():
+            raise ValueError(f'AIL module not found: {path}')
+        try:
+            if source_bytes is None:
+                text = path.read_text(encoding='utf-8')
+            else:
+                data=path.read_bytes();source_bytes[path]=data
+                text=data.decode('utf-8').replace('\r\n','\n').replace('\r','\n')
+            if source_syntax in ('auto', 'ail') and ail_sexpr.detect(text):
+                # The S-expression surface is converted to block syntax and then checked exactly
+                # like it; positions in diagnostics refer to that block text.
+                text = ail_sexpr.to_block(text)
+            syntax = ('ail' if detect(text) else 'python') if source_syntax == 'auto' else source_syntax
+            imports = []
+            declarations = {}
+            locations = {}
+            if syntax == 'ail':
+                text = translate(text, module=module_only or not entry, imports=imports, declarations=declarations, source_map=locations)
+            tree = ast.parse(text, filename=str(path))
+            if not declarations_only:
+                _check_int64_literals(tree)
+            if source_map is not None:
+                if syntax == 'python':
+                    for node in ast.walk(tree):
+                        if isinstance(node, ast.stmt):
+                            position = (node.lineno, len(text.splitlines()[node.lineno - 1].encode('utf8')[:node.col_offset].decode('utf8')) + 1)
+                            locations[node.lineno] = None if node.lineno in locations else position
+                    locations = {line: position for line, position in locations.items() if position is not None}
+                unit_locations[text] = {line: (str(path), *position) for line, position in locations.items()}
+            if origins is not None:
+                if syntax == 'python':
+                    for owner, fn in ((node.name if isinstance(node, ast.ClassDef) else None, member)
+                                      for node in tree.body for member in
+                                      (node.body if isinstance(node, ast.ClassDef) else [node])
+                                      if isinstance(member, ast.FunctionDef)):
+                        key = f'{owner}__{fn.name}' if owner else fn.name
+                        column = len(text.splitlines()[fn.lineno - 1].encode('utf8')[:fn.col_offset].decode('utf8')) + 1
+                        declarations[key] = None if key in declarations else (fn.lineno, column, f'{owner}.{fn.name}' if owner else fn.name)
+                for key, declaration in declarations.items():
+                    origins[key] = None if declaration is None or key in origins else (str(path), *declaration)
+        except (OSError, UnicodeError, SyntaxError, ValueError) as exc:
+            if hasattr(exc, 'source_line'):
+                position = locations.get(exc.source_line)
+                if syntax == 'python':
+                    prefix = text.splitlines()[exc.source_line - 1].encode('utf8')[:exc.source_column]
+                    position = (exc.source_line, len(prefix.decode('utf8')) + 1)
+                if position is not None:
+                    exc.source_position = (str(path), *position)
+            raise ValueError(f'AIL {"source" if entry else "module"} {path}: {exc}')
+        if syntax == 'ail' and any(isinstance(node, ast.Assign)
+                and not _module_constant(node) for node in tree.body):
+            raise ValueError('AIL const must be a literal number, string, bytes, or numeric list')
+        if syntax == 'ail' and not declarations_only:
+            if any(isinstance(node, ast.ClassDef) for node in tree.body):
+                contracts.append(path)
+            def contract_error(fn, owner, message):
+                error = ValueError(message)
+                error.source_function = f'{owner}__{fn.name}' if owner else fn.name
+                error.diagnostic_code = 'contract'
+                return error
+
+            for owner, fn in ((node.name if isinstance(node, ast.ClassDef) else None, member)
+                              for node in tree.body for member in
+                              (node.body if isinstance(node, ast.ClassDef) else [node])
+                              if isinstance(member, ast.FunctionDef)):
+                if isinstance(fn.returns, ast.Name) and fn.returns.id == '__ail_checked_void__':
+                    if any(isinstance(node, ast.Return) and node.value is not None for node in ast.walk(fn)):
+                        raise contract_error(fn, owner, f'AIL function {fn.name}: void function cannot return a value')
+                elif fn.returns is not None:
+                    if any(isinstance(node, ast.Return) and node.value is None
+                           for node in ast.walk(fn)) or not _returns_on_every_path(fn.body):
+                        raise contract_error(fn, owner, f'AIL function {fn.name}: annotated return needs a value '
+                                     'on every path')
+                if fn.returns is not None or any(arg.annotation is not None
+                                                  for arg in fn.args.args):
+                    contracts.append(path)
+        if (module_only or not entry) and ((not tree.body and not imports) or any(not (isinstance(node, ast.FunctionDef)
+                or syntax == 'ail' and isinstance(node, ast.ClassDef))
+                and not _module_constant(node) for node in tree.body)):
+            raise ValueError(f'AIL module needs functions, structs, or literal constants only: {path}')
+        if separate and not entry and any(
+                isinstance(node, ast.FunctionDef)
+                for fn in tree.body if isinstance(fn, ast.FunctionDef)
+                for node in ast.walk(fn) if node is not fn):
+            raise ValueError(f'AIL separate module cannot contain nested functions: {path}')
+        for node in tree.body:
+            name = (node.name if isinstance(node, (ast.FunctionDef, ast.ClassDef)) else
+                    node.targets[0].id if isinstance(node, ast.Assign)
+                    and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) else None)
+            if name is not None:
+                if name in names:
+                    raise ValueError(f'duplicate AIL name: {name}')
+                names.add(name)
+            if isinstance(node, ast.FunctionDef):
+                functions.append(node)
+            elif syntax == 'ail' and isinstance(node, ast.Assign) and _module_constant(node):
+                constants.add(node.targets[0].id)
+        active.append(path)
+        for name in imports:
+            directories = tuple(dict.fromkeys((path.parent, *search_paths, standard)))
+            candidate = next((directory / (name + '.ail') for directory in directories
+                              if (directory / (name + '.ail')).exists()
+                              or (directory / (name + '.ail')).is_symlink()), None)
+            if candidate is None:
+                raise ValueError('AIL module not found: %s; searched: %s' % (
+                    name, ', '.join(map(str, directories))))
+            load(candidate)
+        active.pop()
+        seen.add(path)
+        if not entry:
+            modules.append(text)
+            if separate:
+                unit_map.update({node.name: len(modules) for node in tree.body
+                                 if isinstance(node, ast.FunctionDef)})
+        return text
+
+    source_text = load(source, entry=True)
+    explicit = set()
+    for module_arg in extra_modules:
+        module = module_arg.resolve()
+        if module == source or module in explicit or module.suffix.lower() != '.ail' or not module.is_file():
+            raise ValueError('each --module must name a distinct existing .ail file')
+        explicit.add(module)
+        load(module)
+    for fn in functions:
+        shadowed = constants.intersection(arg.arg for arg in fn.args.args)
+        shadowed.update(node.id for node in ast.walk(fn)
+                        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del))
+                        and node.id in constants)
+        if shadowed:
+            raise ValueError(f'AIL const {min(shadowed)} cannot be rebound or shadowed in a function')
+    units = [*modules, source_text]
+    if source_map is not None:
+        offset = 0
+        for text in units:
+            source_map.update({offset + line: position for line, position in unit_locations[text].items()})
+            offset += text.count('\n') + 2
+    return '\n\n'.join(units), bool(contracts), unit_map
+
+
+def _doctor_build_check(report):
+    """Check a representative SDK build/run through the public CLI."""
+    if not report['python_supported']:
+        return {'status': 'failed', 'phase': 'configuration',
+                'message': 'AIL compilation requires Python 3.10 or newer'}
+    if not report['c_compiler_available']:
+        return {'status': 'failed', 'phase': 'configuration',
+                'message': 'C compiler is unavailable: ' + str(report['c_compiler_configured'])}
+    source = r'''fn main()->int {
+ let values:list[int]=[1,2,3]; if sum(values)!=6 { return 1; }
+ let buffer=bytearray(b"x"); let buffers:list[bytearray]=[buffer];
+ buffers[0].append(121); if bytes(buffer)!=b"xy" { return 2; }
+ let listener=tcp_listen("127.0.0.1",0,1);
+ try {
+  let peers:list[tcpsocket]=[listener]; let flags=tcp_poll(peers,[0],0);
+  if len(flags)!=1 or flags[0]!=0 { return 3; }
+ } finally { listener.close(); }
+ write_stdout_bytes(b"AIL environment\n"); return 0;
+}'''
+    phase = 'compile'
+    try:
+        with tempfile.TemporaryDirectory(prefix='ail-doctor-') as directory:
+            path = Path(directory)
+            input_path = path / 'environment.ail'
+            output_path = path / ('environment.exe' if os.name == 'nt' else 'environment')
+            input_path.write_text(source, encoding='utf-8')
+            result = subprocess.run(
+                [sys.executable, '-X', 'utf8', '-B', str(ROOT / 'ail_chatgpt.py'),
+                 'compile', str(input_path), '-o', str(output_path)],
+                capture_output=True, cwd=ROOT, env=dict(os.environ), timeout=120)
+            if result.returncode:
+                detail = (result.stderr or result.stdout)[:4096].decode('utf-8', errors='replace')
+                return {'status': 'failed', 'phase': phase,
+                        'message': f'compile exit {result.returncode}: {detail}'}
+            if not output_path.is_file():
+                return {'status': 'failed', 'phase': phase,
+                        'message': 'compile returned success without an executable'}
+            phase = 'run'
+            result = subprocess.run([str(output_path)], capture_output=True,
+                                    cwd=path, timeout=10)
+            if result.returncode:
+                detail = (result.stderr or result.stdout)[:4096].decode('utf-8', errors='replace')
+                return {'status': 'failed', 'phase': phase,
+                        'message': f'run exit {result.returncode}: {detail}'}
+            if result.stdout != b'AIL environment\n':
+                return {'status': 'failed', 'phase': phase,
+                        'message': 'stdout mismatch: expected AIL environment followed by LF; actual '
+                        + repr(result.stdout[:4096])}
+            if result.stderr:
+                return {'status': 'failed', 'phase': phase,
+                        'message': 'unexpected stderr: '
+                        + result.stderr[:4096].decode('utf-8', errors='replace')}
+    except subprocess.TimeoutExpired as error:
+        detail = (error.stderr or b'')[:4096]
+        if isinstance(detail, bytes):
+            detail = detail.decode('utf-8', errors='replace')
+        return {'status': 'failed', 'phase': phase,
+                'message': f'{phase} timed out after {error.timeout} seconds: {detail}'}
+    except OSError as error:
+        return {'status': 'failed', 'phase': phase, 'message': str(error)[:4096]}
+    return {'status': 'passed', 'phase': 'run',
+            'message': 'Representative SDK compile/runtime check passed'}
+
+
+def _source_interface(tree, symbols=(), types_used=False):
+    """Declared signatures only; absent annotations remain unknown, never inferred."""
+    def annotation(node):
+        if node is None:
+            return None
+        text = ast.unparse(node)
+        if text.startswith('__ail_checked_'):
+            text = text[len('__ail_checked_'):]
+            if text.endswith('__'):
+                text = text[:-2]
+        return 'list[float]' if text == 'flist' else text
+
+    def function(node):
+        positional = [*node.args.posonlyargs, *node.args.args]
+        defaults = [None] * (len(positional) - len(node.args.defaults)) + node.args.defaults
+        parameters = [dict(name=arg.arg, type=annotation(arg.annotation),
+                           kind='positional_only' if i < len(node.args.posonlyargs) else 'positional',
+                           default=ast.unparse(default) if default is not None else None)
+                      for i, (arg, default) in enumerate(zip(positional, defaults))]
+        for arg, kind, default in [
+                *((arg, 'keyword_only', default) for arg, default in
+                  zip(node.args.kwonlyargs, node.args.kw_defaults)),
+                *((arg, kind, None) for arg, kind in
+                  ((node.args.vararg, 'variadic'), (node.args.kwarg, 'variadic_keyword')) if arg)]:
+            parameters.append(dict(name=arg.arg, type=annotation(arg.annotation), kind=kind,
+                                   default=ast.unparse(default) if default is not None else None))
+        return dict(name=node.name, parameters=parameters, returns=annotation(node.returns))
+
+    structs = []
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            constructor = next((fn for fn in node.body if isinstance(fn, ast.FunctionDef)
+                                and fn.name == '__init__'), None)
+            parameters = {} if constructor is None else {arg.arg: arg.annotation for arg in constructor.args.args[1:]}
+            fields = {} if constructor is None else {
+                stmt.targets[0].attr: annotation(parameters.get(stmt.value.id)) if isinstance(stmt.value, ast.Name) else None
+                for stmt in constructor.body if isinstance(stmt, ast.Assign)}
+            structs.append(dict(name=node.name,
+                                constructor_parameters=[] if constructor is None else function(constructor)['parameters'][1:],
+                                fields=[dict(name=name, type=kind) for name, kind in fields.items()],
+                                methods=[function(fn) for fn in node.body
+                                         if isinstance(fn, ast.FunctionDef) and fn.name != '__init__']))
+    functions = [function(node) for node in tree.body if isinstance(node, ast.FunctionDef)]
+    if symbols:
+        missing = set(symbols) - {item['name'] for item in functions}
+        if missing:
+            raise ValueError('unknown interface function: ' + ', '.join(sorted(missing)))
+        functions = [item for item in functions if item['name'] in symbols]
+    result = dict(scope='loaded_sources', types='declared_annotations', functions=functions, structs=structs)
+    if types_used:
+        by_name = {item['name']: item for item in structs}
+        needed = set()
+        pending = [kind for item in functions for kind in
+                   [item['returns'], *(param['type'] for param in item['parameters'])]]
+        unknown = False
+        while pending:
+            kind = pending.pop()
+            if kind is None:
+                unknown = True
+                break
+            try:
+                nodes = list(ast.walk(ast.parse(kind, mode='eval')))
+                names = {node.id for node in nodes if isinstance(node, ast.Name)}
+                builtins = {'int','float','bool','str','bytes','bytearray','binaryfile','tcpsocket','exception','void','list','dict','tuple','Callable'}
+                if (names - builtins - set(by_name) or any(
+                        not isinstance(node, (ast.Expression, ast.Name, ast.Load, ast.Subscript, ast.Tuple, ast.List))
+                        and not (isinstance(node, ast.Constant) and node.value is None) for node in nodes)):
+                    unknown = True
+                    break
+            except SyntaxError:
+                unknown = True
+                break
+            for name in names.intersection(by_name).difference(needed):
+                needed.add(name)
+                item = by_name[name]
+                pending.extend(field['type'] for field in item['fields'])
+                pending.extend(param['type'] for param in item['constructor_parameters'])
+                for method in item['methods']:
+                    pending.append(method['returns'])
+                    pending.extend(param['type'] for index, param in enumerate(method['parameters'])
+                                   if index != 0 or param['name'] != 'self')
+        result['struct_selection'] = 'all_when_unknown' if unknown else 'reachable_declared_types'
+        if not unknown:
+            result['structs'] = [item for item in structs if item['name'] in needed]
+    return result
+
+def _check_repair_context(args, report, source, original, snapshots):
+    """Bind a repair body only to the bytes used by this source check."""
+    unavailable = lambda reason: dict(status='unavailable', reason=reason)
+    if report['status'] == 'passed':
+        return dict(status='not_needed')
+    if args.module or args.object:
+        return unavailable('explicit_module_or_object')
+    diagnostic = report['diagnostics'][0]
+    if diagnostic['code'] not in ('type', 'contract'):
+        return unavailable('unsupported_diagnostic')
+    if not diagnostic['function'] or not diagnostic['path']:
+        return unavailable('missing_function_location')
+    # Membership precedes any access to a diagnostic path.
+    target = next((path for path in snapshots if str(path) == diagnostic['path']), None)
+    if target is None:
+        return unavailable('source_not_loaded')
+    try:
+        data = snapshots[target]
+        syntax = ('ail' if detect(data.decode('utf8')) else 'python') if args.syntax == 'auto' else args.syntax
+        if syntax != 'ail':
+            return unavailable('python_source')
+        def unchanged():
+            return snapshots.get(source) == original and all(
+                path.read_bytes() == data for path, data in snapshots.items())
+        if not unchanged():
+            return unavailable('source_changed')
+        from ail_source_context import context
+        result = context(data, diagnostic['function'], include_body=True,
+                         source_path=target, module_paths=args.module_path, resolve_imports=True)
+        if not unchanged():
+            return unavailable('source_changed')
+        checked_hashes = {str(path): hashlib.sha256(data).hexdigest() for path, data in snapshots.items()}
+        if any(checked_hashes.get(path) != digest for path, digest in result['dependency_sha256'].items()):
+            return unavailable('source_dependencies_changed')
+        result['source_path'] = str(target)
+        return result
+    except (OSError, UnicodeError, SyntaxError, ValueError, RuntimeError, ImportError, KeyError) as error:
+        return unavailable('context_collection_failed: ' + str(error))
+
+def _source_check(args):
+    """Read-only strict type/code-generation check; no C build or runtime proof."""
+    report = dict(schema='ail.check/1', status='failed', stage='loader', diagnostics=[],
+                  link_verified=False, runtime_verified=False, source_sha256=None,
+                  checked_functions=None)
+    source = args.source
+    origins = {}
+    source_map = {}
+    stage = 'loader'
+    dependency = False
+    repair_context = getattr(args, 'repair_context', False)
+    snapshots = {} if repair_context or getattr(args, 'contracts', False) else None
+    original = None
+    try:
+        if getattr(args, 'api_module', None) is not None:
+            name = args.api_module
+            if not re.fullmatch(r'[A-Za-z_]\w*', name):
+                raise ValueError('invalid bundled API module name: ' + name)
+            try:
+                manifest = json.loads((ROOT / 'MANIFEST.json').read_text(encoding='utf8'))
+            except (json.JSONDecodeError, UnicodeError) as error:
+                raise ValueError('invalid bundled API manifest: ' + str(error)) from error
+            selected = manifest.get('sdk_files') if isinstance(manifest, dict) else None
+            if not isinstance(selected, list) or not all(isinstance(path, str) for path in selected):
+                raise ValueError('invalid bundled API manifest: sdk_files must be a list of paths')
+            if 'language_examples/' + name + '.ail' not in selected:
+                raise ValueError('unknown bundled API module: ' + name)
+        source = source.resolve()
+        original = source.read_bytes()
+        report['source_sha256'] = hashlib.sha256(original).hexdigest()
+        if getattr(args, 'contracts', False) and not args.interface:
+            raise ValueError('--contracts requires --interface')
+        if args.types_used and (not args.interface or not args.symbol):
+            raise ValueError('--types-used requires --interface and --symbol')
+        if args.symbol and not args.interface:
+            raise ValueError('--symbol requires --interface')
+        text, _, _ = _load_sources(source, args.module, args.syntax,
+                                  module_only=args.library, module_paths=args.module_path, origins=origins, source_map=source_map,
+                                  **({'source_bytes': snapshots} if snapshots is not None else {}))
+        report['checked_functions'] = sum(isinstance(node, ast.FunctionDef)
+                                          for node in ast.walk(ast.parse(text)))
+        compiler_path = str(ROOT / 'python/pkg-v12')
+        previous_path = sys.path[:]
+        previous_bytecode = sys.dont_write_bytecode
+        try:
+            sys.dont_write_bytecode = True
+            sys.path.insert(0, compiler_path)
+            from pyfunc import Unsupported, to_c
+            external = None
+            if args.object:
+                dependency = True
+                from module_object import load_objects
+                external = load_objects(args.object)
+                dependency = False
+            stage = 'type'
+            to_c(text, strict=True, info={'_want_units': True, '_checked_arrays': True},
+                 library=args.library, external=external)
+        finally:
+            sys.path[:] = previous_path
+            sys.dont_write_bytecode = previous_bytecode
+        if args.interface:
+            report['interface'] = _source_interface(ast.parse(text), args.symbol, args.types_used)
+            from ail_source_context import language_rules
+            report['language_rules'] = language_rules()
+            if getattr(args, 'contracts', False):
+                from ail_api_contracts import build_contracts
+                report['contracts'] = build_contracts(ast.parse(text), report['interface'], source_sha256=report['source_sha256'], snapshots=snapshots, imports_resolved=True)
+                if snapshots.get(source) != original or any(path.read_bytes() != data for path, data in snapshots.items()):
+                    raise ValueError('source or dependency changed while collecting API contracts')
+        report.update(status='passed', stage='type')
+        status = 0
+    except (OSError, UnicodeError, SyntaxError, ValueError, RuntimeError, ImportError, subprocess.SubprocessError) as error:
+        # Unsupported inherits the compiler's error type; inspect it without a fallback.
+        status = 2 if dependency or isinstance(error, (OSError, ImportError, subprocess.SubprocessError)) else 1
+        message = str(error)
+        configuration = ('each --module-path', 'each --module must', 'AIL module not found:', '--symbol requires --interface', '--contracts requires --interface', '--types-used requires --interface and --symbol', 'unknown interface function:', 'invalid bundled API module name:', 'unknown bundled API module:', 'invalid bundled API manifest:')
+        if any(marker in message for marker in configuration):
+            status = 2
+        code = 'dependency' if dependency or 'AIL module not found:' in message else (
+            'io' if isinstance(error, OSError) else 'configuration' if status == 2 else
+            'syntax' if stage == 'loader' else 'type')
+        path = None
+        line = column = None
+        if stage == 'loader':
+            if isinstance(error, OSError):
+                path = str(source)
+            current = error
+            while current is not None:
+                for prefix in ('AIL source ', 'AIL module '):
+                    if str(current).startswith(prefix) and ': ' in str(current):
+                        candidate = str(current)[len(prefix):].split(': ', 1)[0]
+                        if Path(candidate).is_file():
+                            path = candidate
+                if isinstance(current, SyntaxErrorAIL):
+                    line = getattr(current, 'lineno', None)
+                    column = getattr(current, 'offset', None)
+                elif isinstance(current, SyntaxError) and current.filename:
+                    candidate = Path(current.filename)
+                    if candidate.is_file():
+                        try:
+                            original = candidate.read_text(encoding='utf8')
+                            syntax = ('ail' if detect(original) else 'python') if args.syntax == 'auto' else args.syntax
+                        except (OSError, UnicodeError):
+                            syntax = None
+                        if syntax == 'python':
+                            path, line, column = str(candidate), current.lineno, current.offset
+                if getattr(current, 'source_position', None) is not None:
+                    path, line, column = current.source_position
+                current = current.__cause__ or current.__context__
+        function = getattr(error, 'source_function', None)
+        location_kind = 'source' if line is not None else None
+        origin = origins.get(function)
+        if origin is not None:
+            path, line, column, function = origin
+            location_kind = 'function_declaration'
+        position = source_map.get(getattr(error, 'source_line', None))
+        if position is not None:
+            path, line, column = position
+            location_kind = 'source_statement'
+        code = getattr(error, 'diagnostic_code', code)
+        report.update(stage=stage, diagnostics=[dict(code=code, message=message,
+                                                    path=path, line=line, column=column, function=function,
+                                                    location_kind=location_kind)])
+        if hasattr(error, 'type_details'):
+            details = dict(error.type_details)
+            callee_origin = origins.get(details.get('callee'))
+            if callee_origin is not None:
+                details['callee'] = callee_origin[3]
+            report['diagnostics'][0]['type_details'] = details
+        if hasattr(error, 'repair_hint'):
+            report['diagnostics'][0]['repair_hint'] = error.repair_hint
+    if repair_context:
+        report['repair_context'] = _check_repair_context(args, report, source, original, snapshots)
+    print(json.dumps(report, ensure_ascii=False))
+    return status
+
+def _locate_refusal(args, source, message):
+    """Prefix a compile refusal with path:line:col, found by the type check (which maps statements)."""
+    command = [sys.executable, '-B', str(Path(__file__).resolve()), 'check', str(source),
+               '--syntax', args.syntax]
+    for path in args.module_path:
+        command += ['-I', str(path)]
+    for path in args.module:
+        command += ['--module', str(path)]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=300)
+        diagnostic = json.loads(result.stdout)['diagnostics'][0]
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, IndexError, TypeError):
+        return message
+    text = diagnostic.get('message') or ''
+    if not text or text not in message:
+        return message
+    where = diagnostic.get('path') or str(source)
+    relative = os.path.relpath(where)
+    if not relative.startswith('..'):
+        where = relative
+    if diagnostic.get('line') is not None:
+        where += ':%d' % diagnostic['line']
+        if diagnostic.get('column') is not None:
+            where += ':%d' % diagnostic['column']
+    elif diagnostic.get('function'):
+        where += ' (in %s)' % diagnostic['function']
+    else:
+        return message
+    return '%s: %s' % (where, message)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest='command', required=True)
+    check_cmd = sub.add_parser('check', help='strict source/type check without a C build; exit 0 passed, 1 source error, 2 configuration/I/O/dependency')
+    check_cmd.add_argument('source', type=Path)
+    check_cmd.add_argument('--syntax', choices=('auto', 'ail', 'python'), default='auto')
+    check_cmd.add_argument('-I', '--module-path', action='append', type=Path, default=[])
+    check_cmd.add_argument('--module', action='append', type=Path, default=[])
+    check_cmd.add_argument('--object', action='append', type=Path, default=[], help='typed object metadata; may query compiler identity, never builds or links')
+    check_cmd.add_argument('--library', action='store_true')
+    check_cmd.add_argument('--repair-context', action='store_true', help='include SHA-bound failing AIL function body and declared import/API context')
+    check_cmd.add_argument('--interface', action='store_true', help='include checked source declarations without function bodies; absent types are null')
+    check_cmd.add_argument('--symbol', action='append', default=[], help='select top-level function declarations with --interface; repeatable; struct declarations retained')
+    api_cmd = sub.add_parser('api', help='check a bundled source module and return its typed API without compiling C')
+    api_cmd.add_argument('api_module', help='bundled module name, without path or .ail suffix')
+    builtin_cmd = sub.add_parser('api-builtin', help='query intrinsic signatures and declared ownership without building or running code')
+    builtin_cmd.add_argument('symbol', nargs='?', help='builtin name or typed receiver.method; omitted lists the available inventory')
+    api_cmd.add_argument('--object', action='append', type=Path, default=[], help='typed object metadata; may query compiler identity, never builds or links')
+    api_cmd.add_argument('--symbol', action='append', default=[], help='select top-level functions; structs retained')
+    check_cmd.add_argument('--types-used', action='store_true', help='retain structs reachable through selected declared types; unknown types retain all')
+    api_cmd.add_argument('--types-used', action='store_true', help='retain structs needed by selected declared types; requires --symbol')
+    check_cmd.add_argument('--contracts', action='store_true', help='include declared ownership and conservative static call contracts; requires --interface')
+    api_cmd.add_argument('--contracts', action='store_true', help='include declared ownership and conservative static call contracts')
+    context_cmd = sub.add_parser('context', help='read a local function declaration and call candidates without type checking')
+    context_cmd.add_argument('source', type=Path)
+    context_cmd.add_argument('--symbol', required=True)
+    context_cmd.add_argument('--include-body', action='store_true')
+    context_cmd.add_argument('--contracts', action='store_true', help='include syntax-derived ownership/call contracts without binding or runtime proof')
+    context_cmd.add_argument('--compact', action='store_true', help='encode context parameter rows in reversible compact JSON')
+    context_cmd.add_argument('--resolve-imports', action='store_true')
+    context_cmd.add_argument('-I', '--module-path', action='append', type=Path, default=[])
+    edit_cmd = sub.add_parser('edit', help='replace function bodies in a new source/type-checked candidate')
+    edit_cmd.add_argument('source', type=Path)
+    edit_cmd.add_argument('--symbol')
+    edit_cmd.add_argument('--base-sha256', required=True)
+    body_input = edit_cmd.add_mutually_exclusive_group(required=True)
+    body_input.add_argument('--body', type=Path)
+    body_input.add_argument('--body-text', help='replacement body directly; no temporary body file needed')
+    body_input.add_argument('--edits-text', help='JSON array of symbol/body strings, checked together')
+    edit_cmd.add_argument('--context', type=Path, help='bind the resolved source context and dependency hashes')
+    edit_cmd.add_argument('-o', '--output', required=True, type=Path)
+    edit_cmd.add_argument('--library', action='store_true')
+    edit_cmd.add_argument('-I', '--module-path', action='append', type=Path, default=[])
+    edit_cmd.add_argument('--module', action='append', type=Path, default=[])
+    edit_cmd.add_argument('--object', action='append', type=Path, default=[])
+    doctor_cmd = sub.add_parser('doctor')
+    doctor_cmd.add_argument('--check', action='store_true',
+                            help='compile and run a representative SDK program to check the C/OS runtime')
+    sub.add_parser('integrity')
+    sdk_cmd = sub.add_parser('export-sdk', help='copy the verified language compiler and standard sources to a new SDK directory')
+    sdk_cmd.add_argument('-o', '--output', type=Path, required=True)
+    http_cmd = sub.add_parser('compare-http', help='compare local read-only HTTP commands with exact output checks')
+    http_cmd.add_argument('manifest', type=Path)
+    http_cmd.add_argument('-o', '--output', required=True, type=Path)
+    snapshot_cmd = sub.add_parser('snapshot-http', help='copy declared HTTP inputs for relocated comparison')
+    snapshot_cmd.add_argument('manifest', type=Path)
+    snapshot_cmd.add_argument('-o', '--output', required=True, type=Path)
+    snapshot_cmd.add_argument('--compare', action='store_true',
+        help='compare the copied inputs and save result.json inside the new snapshot')
+    build_http_cmd = sub.add_parser('build-http', help='build a declared HTTP candidate beside a frozen reference')
+    build_http_cmd.add_argument('manifest', type=Path)
+    build_http_cmd.add_argument('--recipe', required=True, type=Path)
+    build_http_cmd.add_argument('-o', '--output', required=True, type=Path)
+    build_http_cmd.add_argument('--compare', action='store_true')
+    compile_cmd = sub.add_parser('compile', help='compile AIL source to a standalone executable')
+    compile_cmd.add_argument('source', type=Path)
+    compile_cmd.add_argument('-o', '--output', required=True, type=Path)
+    compile_cmd.add_argument('--module', action='append', type=Path, default=[],
+        help='additional .ail file containing functions and literal numeric constants')
+    compile_cmd.add_argument('--separate', action='store_true',
+        help='compile each typed source into a C object, then link the objects')
+    compile_cmd.add_argument('--object', action='append', type=Path, default=[],
+        help='link an existing typed .o and its adjacent .o.json without its source')
+    compile_cmd.add_argument('--syntax', choices=('auto', 'python', 'ail'), default='auto',
+        help='source syntax; auto detects fn/const/use/struct declarations, ail uses brace-delimited blocks')
+    compile_cmd.add_argument('--static', action='store_true',
+        help='link the C library statically (larger binary that runs on any Linux); default is dynamic')
+    compile_cmd.add_argument('--target', choices=sorted(ZIG_TARGETS),
+        help='cross-compile with zig cc for another OS/CPU (needs zig: $AIL_ZIG, PATH, or ~/tools/zig/zig)')
+    object_cmd = sub.add_parser('compile-module', help='compile typed functions, scalar structs and scalar constants to a reusable object')
+    object_cmd.add_argument('source', type=Path)
+    object_cmd.add_argument('-o', '--output', required=True, type=Path)
+    object_cmd.add_argument('--syntax', choices=('auto', 'python', 'ail'), default='auto')
+    object_cmd.add_argument('--object', action='append', type=Path, default=[],
+        help='typed dependency objects; entry linking requires their full object closure')
+    object_cmd.add_argument('--c-api-name', help='build a dependency dedicated to this C library name')
+    library_cmd = sub.add_parser('compile-library', help='build a C callable library with owned results and error returns')
+    library_cmd.add_argument('source', type=Path)
+    library_cmd.add_argument('--name', required=True)
+    library_cmd.add_argument('-o', '--output', required=True, type=Path)
+    library_cmd.add_argument('--syntax', choices=('auto', 'python', 'ail'), default='auto')
+    library_cmd.add_argument('--module', action='append', type=Path, default=[],
+        help='additional typed .ail source, combined with transitive use dependencies')
+    library_cmd.add_argument('--export', action='append',
+        help='public function name; repeat to select the C API (default: all functions)')
+    library_cmd.add_argument('--object', action='append', type=Path, default=[],
+        help='complete closure of objects built with --c-api-name matching --name')
+    for command in (compile_cmd, object_cmd, library_cmd):
+        command.add_argument('-I', '--module-path', action='append', type=Path, default=[],
+            help='use module search directory; local, then -I in order, then bundled standard modules')
+    c_cmd = sub.add_parser('compile-c', help='compile trusted C functions to a typed reusable object')
+    c_cmd.add_argument('source', type=Path)
+    c_cmd.add_argument('--interface', required=True, type=Path)
+    c_cmd.add_argument('-o', '--output', required=True, type=Path)
+    c_cmd.add_argument('--c-api-name', help='build a dependency dedicated to this C library name')
+    for command in (compile_cmd, object_cmd, library_cmd, c_cmd):
+        command.add_argument('--json', action='store_true', help='return structured build diagnostics without running the generated program')
+        command.add_argument('--debug-dir', type=Path, help='keep native diagnostic reports and generated sources in a new directory')
+    smoke = sub.add_parser('selftest'); smoke.add_argument('--out', required=True)
+    build = sub.add_parser('build'); build.add_argument('--project', required=True)
+    build.add_argument('--out', required=True); build.add_argument('--candidate-patch')
+    build.add_argument('--mode', choices=['original','balanced','speed','memory'], default='original')
+    args = parser.parse_args(argv)
+    if getattr(args, 'static', False):
+        os.environ['AIL_STATIC'] = '1'
+    if getattr(args, 'target', None):
+        os.environ['PIPE_CC'] = _zig_compiler(args.target)
+    if args.command in ('compile', 'compile-module', 'compile-library', 'compile-c'):
+        import ail_native_build as native_build
+        if native_build.enabled(args):
+            native_build.prepare(args, parser)
+    if args.command == 'edit':
+        if args.edits_text is None and args.symbol is None:
+            parser.error('--symbol is required for a single body edit')
+        if args.edits_text is not None and args.symbol is not None:
+            parser.error('--symbol cannot be combined with --edits-text')
+    if args.command == 'context':
+        from ail_source_context import context
+        try:
+            if args.source.suffix.lower()!='.ail':
+                raise ValueError('context source must use .ail suffix')
+            source=args.source.resolve(strict=True)
+            report=context(source.read_bytes(),args.symbol,args.include_body,
+                           source_path=source,module_paths=args.module_path,resolve_imports=args.resolve_imports,contracts=args.contracts)
+            report['source']=str(source)
+            if args.compact:
+                from ail_source_context import compact_context
+                report=compact_context(report)
+            print(json.dumps(report,ensure_ascii=False,**({'separators':(',', ':')} if args.compact else {})));return 0
+        except (OSError,UnicodeError,SyntaxError,ValueError) as error:
+            print(json.dumps(dict(schema='ail.context/1',status='failed',error=str(error)),ensure_ascii=False));return 2
+    if args.command == 'edit':
+        from ail_source_edit import run
+        status, report = run(args, _source_check)
+        print(json.dumps(report, ensure_ascii=False))
+        return status
+    if args.command == 'api':
+        args.source = ROOT / 'language_examples' / (args.api_module + '.ail')
+        args.module = args.module_path = []
+        args.syntax, args.library, args.interface = 'auto', True, True
+        return _source_check(args)
+    if args.command == 'check':
+        return _source_check(args)
+    if args.command == 'api-builtin':
+        from ail_builtin_api import query
+        try:
+            report = query(args.symbol, source_root=ROOT)
+        except (OSError, UnicodeError, SyntaxError, ValueError) as error:
+            print(json.dumps(dict(schema='ail.builtin_api/1', status='failed', error=str(error)), ensure_ascii=False))
+            return 2
+        print(json.dumps(report, ensure_ascii=False))
+        return 0
+    manifest_path = ROOT/'MANIFEST.json'
+    if ((ROOT/'SDK_README_JA.md').is_file() and manifest_path.is_file()
+            and json.loads(manifest_path.read_text(encoding='utf8')).get('kind') == 'ail_language_sdk'):
+        supported = ('doctor', 'integrity', 'compile', 'compile-module', 'compile-library', 'compile-c', 'export-sdk', 'check', 'api', 'api-builtin', 'edit', 'context')
+        if args.command not in supported:
+            parser.error('this language SDK supports: ' + ', '.join(supported))
+    if args.command == 'export-sdk':
+        from ail_sdk import export_sdk
+        try:
+            result = export_sdk(ROOT, args.output)
+        except (OSError, ValueError, RuntimeError) as error:
+            parser.error(str(error))
+        print(json.dumps({key: value for key, value in result.items() if key != 'sha256'}, ensure_ascii=False))
+        return 0
+    if args.command == 'doctor':
+        requested = os.environ.get('PIPE_CC') or next(filter(None, (shutil.which(name)
+            for name in ('cc', 'clang', 'gcc'))), None)
+        resolved = shutil.which(requested) if requested else None
+        report = {'python':sys.version, 'platform':platform.platform(),
+            'python_supported':sys.version_info >= (3,10),
+            'c_compiler':resolved, 'c_compiler_configured':requested,
+            'c_compiler_available':resolved is not None,
+            'source_root':str(ROOT), 'external_model_required_for_selftest':False}
+        if args.check:
+            report['build_check'] = _doctor_build_check(report)
+        print(json.dumps(report, indent=2))
+        return 2 if not report['python_supported'] or args.check and report['build_check']['status'] != 'passed' else 0
+    if args.command == 'integrity':
+        manifest = json.loads((ROOT/'MANIFEST.json').read_text(encoding='utf8'))
+        bad = [name for name,h in manifest['sha256'].items()
+               if not (ROOT/name).is_file() or hashlib.sha256((ROOT/name).read_bytes()).hexdigest()!=h]
+        print(json.dumps({'status':'verified' if not bad else 'failed','checked':len(manifest['sha256']),'mismatches':bad},indent=2))
+        return 1 if bad else 0
+    if args.command == 'compare-http':
+        from ail_http_compare import main as compare_http
+        return compare_http([str(args.manifest), '-o', str(args.output)])
+    if args.command == 'snapshot-http':
+        from ail_http_snapshot import main as snapshot_http
+        return snapshot_http([str(args.manifest), '-o', str(args.output)]
+                             + (['--compare'] if args.compare else []))
+    if args.command == 'build-http':
+        from ail_http_build import main as build_http
+        return build_http([str(args.manifest), '--recipe', str(args.recipe), '-o', str(args.output)]
+                          + (['--compare'] if args.compare else []))
+    if args.command in ('compile-module', 'compile-c'):
+        if sys.version_info < (3, 10):
+            parser.error('AIL compilation requires Python 3.10 or newer')
+        source, output = args.source.resolve(), Path(os.path.abspath(args.output))
+        metadata = Path(str(output) + '.json')
+        is_c = args.command == 'compile-c'
+        if source.suffix.lower() != ('.c' if is_c else '.ail') or not source.is_file():
+            parser.error('source must be an existing ' + ('.c' if is_c else '.ail') + ' file')
+        if is_c and (not args.interface.is_file() or args.interface.resolve() in (output, metadata)):
+            parser.error('interface must be an existing file distinct from outputs')
+        if output.exists() or metadata.exists() or output.is_symlink() or metadata.is_symlink():
+            parser.error('object output or metadata already exists')
+        if not output.parent.is_dir() or source in (output, metadata):
+            parser.error('object output requires an existing directory and must differ from source')
+        try:
+            text = source.read_text(encoding='utf8') if is_c else _load_sources(
+                source, source_syntax=args.syntax, module_only=True, module_paths=args.module_path, **native_build.loading(args))[0]
+        except (OSError, UnicodeError, SyntaxError, ValueError) as error:
+            parser.error(str(error))
+        with tempfile.TemporaryDirectory(prefix='ail-module-') as directory:
+            prepared, target = Path(directory) / ('module.c' if is_c else 'module.py'), Path(directory) / 'module.o'
+            prepared.write_text(text, encoding='utf8')
+            command = [sys.executable, '-B', str(ROOT/'python/pkg-v12/pyc.py'),
+                       '--file', str(source if is_c else prepared), str(target), '--strict']
+            command += ['--compile-c', str(args.interface.resolve())] if is_c else ['--compile-object']
+            if args.c_api_name is not None:
+                command += ['--c-api-name', args.c_api_name]
+            for object_path in ([] if is_c else args.object):
+                command += ['--object', str(object_path.resolve())]
+            result = native_build.invoke(args, command, directory,
+                                    capture_output=True, text=True, timeout=180)
+            if result.returncode:
+                return native_build.emit(args, {}, result.returncode, message=result.stderr or result.stdout)
+            created = metadata_created = False
+            try:
+                with output.open('xb') as destination:
+                    created = True
+                    destination.write(target.read_bytes())
+                with metadata.open('xb') as destination:
+                    metadata_created = True
+                    destination.write(Path(str(target) + '.json').read_bytes())
+            except Exception:
+                if metadata_created:
+                    metadata.unlink()
+                if created:
+                    output.unlink()
+                raise
+        return native_build.emit(args, {'output': str(output), 'metadata': str(metadata),
+                          'sha256': hashlib.sha256(output.read_bytes()).hexdigest()})
+    if args.command in ('compile', 'compile-library'):
+        library = args.command == 'compile-library'
+        objects = getattr(args, 'object', [])
+        separate = getattr(args, 'separate', False)
+        source = args.source.resolve()
+        output = Path(os.path.abspath(args.output))
+        if sys.version_info < (3, 10):
+            parser.error('AIL compilation requires Python 3.10 or newer')
+        if source.suffix.lower() != '.ail' or not source.is_file():
+            parser.error('source must be an existing .ail file')
+        try:
+            source_text, contracts, unit_map = _load_sources(
+                source, args.module, args.syntax, module_only=library, separate=separate,
+                module_paths=args.module_path, **native_build.loading(args))
+        except (OSError, UnicodeError, SyntaxError, ValueError) as error:
+            parser.error(str(error))
+        if library:
+            if output.exists() or output.is_symlink() or not output.parent.is_dir():
+                parser.error('library output requires a new directory in an existing parent')
+            with tempfile.TemporaryDirectory(prefix='ail-library-source-') as temporary:
+                prepared = Path(temporary) / 'library.py'
+                prepared.write_text(source_text, encoding='utf8')
+                result = native_build.invoke(args, [sys.executable, '-B', str(ROOT/'python/pkg-v12/c_api.py'),
+                                       str(prepared), '--name', args.name, '-o', str(output),
+                                       *(arg for name in args.export or [] for arg in ('--export', name)),
+                                       *(arg for obj in objects for arg in ('--object', str(obj.resolve())))],
+                                      temporary, timeout=240)
+                if not native_build.enabled(args):
+                    return result.returncode
+                if result.returncode:
+                    return native_build.emit(args, {}, result.returncode, message=result.stderr or result.stdout)
+                return native_build.emit(args, json.loads(result.stdout))
+        if output.exists() or output.is_symlink() or (sys.platform == 'win32' and
+                (Path(str(output) + '.exe').exists() or Path(str(output) + '.exe').is_symlink())):
+            parser.error('output already exists')
+        if source == output or source == Path(str(output) + '.exe'):
+            parser.error('output must differ from source')
+        if not output.parent.is_dir():
+            parser.error('output directory does not exist')
+        if separate and not unit_map:
+            parser.error('--separate needs a module with at least one function')
+        with tempfile.TemporaryDirectory(prefix='ailc-') as tmp:
+            target = Path(tmp) / 'program'
+            build_source = Path(tmp) / 'combined.ail'
+            build_source.write_text(source_text, encoding='utf-8')
+            command = [sys.executable, '-B', str(ROOT/'python/pkg-v12/pyc.py'),
+                       '--file', str(build_source), str(target), '--strict']
+            for object_path in objects:
+                command += ['--object', str(object_path.resolve())]
+            if separate:
+                unit_map_path = Path(tmp) / 'units.json'
+                unit_map_path.write_text(json.dumps(unit_map), encoding='utf-8')
+                command += ['--link-units', str(unit_map_path)]
+            result = native_build.invoke(args, command, tmp, capture_output=True, text=True,
+                timeout=660, env={**os.environ, 'AIL_NO_GENERAL': '1'} if contracts else None)
+            if result.returncode:
+                message = result.stderr or result.stdout
+                if result.returncode == 3 and not args.json and not objects and not separate:
+                    message = _locate_refusal(args, source, message)
+                return native_build.emit(args, {}, result.returncode, message=message)
+            built = target if target.is_file() else Path(str(target) + '.exe')
+            if not built.is_file():
+                return native_build.emit(args, {}, 2, 'artifact', 'AIL ERROR: compiler returned success without an executable')
+            if sys.platform == 'win32' and not output.suffix:
+                output = Path(str(output) + '.exe')
+            created = False
+            try:
+                with output.open('xb') as dst, built.open('rb') as src:
+                    created = True
+                    shutil.copyfileobj(src, dst)
+                shutil.copymode(built, output)
+            except Exception:
+                if created:
+                    output.unlink()
+                raise
+            return native_build.emit(args, {'output': str(output), 'bytes': output.stat().st_size,
+                'sha256': hashlib.sha256(output.read_bytes()).hexdigest()})
+    project = ROOT/'example' if args.command == 'selftest' else Path(args.project).resolve()
+    output = Path(args.out).resolve()
+    command = [sys.executable,'-B',str(ROOT/'workflow/vibe/vibe.py'),'build',
+        '--project',str(project),'--selector',str(ROOT/'workflow/selector'),
+        '--out',str(output),'--mode',getattr(args,'mode','original'),'--budget-seconds','600']
+    if getattr(args,'candidate_patch',None):
+        if args.mode == 'original':
+            parser.error('candidate-patch requires a measured mode')
+        command += ['--candidate-patch',str(Path(args.candidate_patch).resolve())]
+    subprocess.run(command,check=True,timeout=660)
+    config = json.loads((project/'project.json').read_text(encoding='utf8'))
+    checker = config.get('specification_checker')
+    if checker:
+        subprocess.run([sys.executable,'-B',str(ROOT/'workflow/vibe/vibe.py'),'verify',
+            str(output/'app/result.json'),'--checker',str(project/checker)],check=True,timeout=180)
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

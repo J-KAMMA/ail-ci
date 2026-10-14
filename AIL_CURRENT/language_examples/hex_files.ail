@@ -1,0 +1,10 @@
+# UTF-8 hexadecimal files; decoding accepts ASCII whitespace between byte pairs.
+fn hex_file_write(path: str, data: bytes) -> int {
+    let text = data.hex();
+    write_bytes(path, text.encode()); return len(data);
+}
+
+fn hex_file_read(path: str) -> bytes {
+    let text = read_bytes(path).decode();
+    return bytes.fromhex(text);
+}

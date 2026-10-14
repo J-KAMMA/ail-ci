@@ -1,0 +1,100 @@
+struct BinaryCursor {
+    data: bytes;
+    position: int;
+}
+
+impl BinaryCursor {
+    fn seek(self, position: int) -> void {
+        if position < 0 or position > len(self.data) { raise ValueError; }
+        self.position = position;
+    }
+
+    fn reset(self) -> void {
+        self.seek(0);
+    }
+
+    fn remaining(self) -> int {
+        if self.position < 0 or self.position > len(self.data) { raise ValueError; }
+        return len(self.data) - self.position;
+    }
+
+    fn take(self, count: int) -> bytes {
+        let available = self.remaining();
+        if count < 0 or count > available { raise ValueError; }
+        let selected = self.data[self.position:self.position + count];
+        self.position = self.position + count;
+        return selected;
+    }
+
+    fn peek(self, count: int) -> bytes {
+        let available = self.remaining();
+        if count < 0 or count > available { raise ValueError; }
+        return self.data[self.position:self.position + count];
+    }
+
+    fn skip(self, count: int) -> int {
+        let available = self.remaining();
+        if count < 0 or count > available { raise ValueError; }
+        self.position = self.position + count;
+        return self.position;
+    }
+
+    fn read_u8(self) -> int {
+        let available = self.remaining();
+        if available < 1 { raise ValueError; }
+        let start = self.position;
+        let value = self.data[start];
+        self.position = start + 1;
+        return value;
+    }
+
+    fn read_u16_le(self) -> int {
+        let available = self.remaining();
+        if available < 2 { raise ValueError; }
+        let start = self.position;
+        let value = self.data[start] + self.data[start + 1] * 256;
+        self.position = start + 2;
+        return value;
+    }
+
+    fn read_u16_be(self) -> int {
+        let available = self.remaining();
+        if available < 2 { raise ValueError; }
+        let start = self.position;
+        let value = self.data[start] * 256 + self.data[start + 1];
+        self.position = start + 2;
+        return value;
+    }
+
+    fn read_u32_le(self) -> int {
+        let available = self.remaining();
+        if available < 4 { raise ValueError; }
+        let start = self.position;
+        let value = self.data[start] + self.data[start + 1] * 256 + self.data[start + 2] * 65536 + self.data[start + 3] * 16777216;
+        self.position = start + 4;
+        return value;
+    }
+
+    fn read_u32_be(self) -> int {
+        let available = self.remaining();
+        if available < 4 { raise ValueError; }
+        let start = self.position;
+        let value = self.data[start] * 16777216 + self.data[start + 1] * 65536 + self.data[start + 2] * 256 + self.data[start + 3];
+        self.position = start + 4;
+        return value;
+    }
+}
+
+fn binary_cursor_slice(data: bytes, offset: int, count: int) -> bytes {
+    let cursor = BinaryCursor(data, 0);
+    cursor.skip(offset);
+    return cursor.take(count);
+}
+
+fn binary_cursor_rejoin(data: bytes, first: int, second: int) -> bytes {
+    if first < 0 or first > len(data) { raise ValueError; }
+    if second < 0 or second > len(data) - first { raise ValueError; }
+    let total: int = first + second;
+    if total == 0 { return b""; }
+    return data[:total];
+}

@@ -1,0 +1,50 @@
+# Integer byte encoding: unsigned 16/32 bits and signed 64 bits, exact lengths.
+# Public helpers accept width 2/4/8 and reverse 0 (little) or 1 (big).
+fn binary_encode_integer(value: int, width: int, reverse: int) -> bytes {
+    if width != 2 and width != 4 and width != 8 { raise ValueError; }
+    if reverse != 0 and reverse != 1 { raise ValueError; }
+    if width == 2 and (value < 0 or value > 65535) { raise ValueError; }
+    if width == 4 and (value < 0 or value > 4294967295) { raise ValueError; }
+    let factor = 1;
+    if reverse == 1 {
+        for i in range(width - 1) { factor = factor * 256; }
+    }
+    let values = [];
+    for i in range(width) {
+        values.append((value // factor) % 256);
+        if i + 1 < width {
+            if reverse == 0 { factor = factor * 256; }
+            else { factor = factor // 256; }
+        }
+    }
+    return bytes(values);
+}
+
+fn binary_decode_integer(data: bytes, width: int, reverse: int) -> int {
+    if width != 2 and width != 4 and width != 8 { raise ValueError; }
+    if reverse != 0 and reverse != 1 { raise ValueError; }
+    if len(data) != width { raise ValueError; }
+    let position = width - 1;
+    if reverse == 1 { position = 0; }
+    let value = data[position];
+    if width == 8 and value >= 128 { value = value - 256; }
+    for i in range(1, width) {
+        if reverse == 0 { position = width - 1 - i; }
+        else { position = i; }
+        value = value * 256 + data[position];
+    }
+    return value;
+}
+
+fn pack_u16_le(value: int) -> bytes { return binary_encode_integer(value, 2, 0); }
+fn pack_u16_be(value: int) -> bytes { return binary_encode_integer(value, 2, 1); }
+fn unpack_u16_le(data: bytes) -> int { return binary_decode_integer(data, 2, 0); }
+fn unpack_u16_be(data: bytes) -> int { return binary_decode_integer(data, 2, 1); }
+fn pack_u32_le(value: int) -> bytes { return binary_encode_integer(value, 4, 0); }
+fn pack_u32_be(value: int) -> bytes { return binary_encode_integer(value, 4, 1); }
+fn unpack_u32_le(data: bytes) -> int { return binary_decode_integer(data, 4, 0); }
+fn unpack_u32_be(data: bytes) -> int { return binary_decode_integer(data, 4, 1); }
+fn pack_i64_le(value: int) -> bytes { return binary_encode_integer(value, 8, 0); }
+fn pack_i64_be(value: int) -> bytes { return binary_encode_integer(value, 8, 1); }
+fn unpack_i64_le(data: bytes) -> int { return binary_decode_integer(data, 8, 0); }
+fn unpack_i64_be(data: bytes) -> int { return binary_decode_integer(data, 8, 1); }

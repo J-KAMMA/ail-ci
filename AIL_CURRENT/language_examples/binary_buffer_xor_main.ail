@@ -1,0 +1,23 @@
+use binary_buffer;
+
+fn main() -> int {
+    if len(sys.argv) != 4 {
+        print("usage: binary_buffer_xor INPUT OUTPUT KEY", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let key = int(sys.argv[3]);
+        if key < 0 or key > 255 { raise ValueError; }
+        if same_file(sys.argv[1], sys.argv[2]) { raise OSError; }
+        let buffer = bytearray(read_bytes(sys.argv[1]));
+        binary_buffer_xor(buffer, key);
+        write_bytes(sys.argv[2], bytes(buffer));
+        return 0;
+    } except OSError {
+        print("input or output access failed", file=sys.stderr);
+        return 3;
+    } except ValueError {
+        print("invalid byte key", file=sys.stderr);
+        return 4;
+    }
+}

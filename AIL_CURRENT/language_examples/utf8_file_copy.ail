@@ -1,0 +1,30 @@
+use utf8_reader;
+use checked_integer;
+
+# Release decoded text and encoded bytes at this call's boundary.
+fn _utf8_file_copy_chunk(source: Utf8Reader, target: binaryfile) -> int {
+    let text = utf8_reader_next(source);
+    if text == "" { return -1; }
+    target.write(text.encode("utf-8"));
+    return len(text);
+}
+
+# Strict UTF-8 identity copy with bounded chunks; late errors can leave a prefix.
+fn utf8_file_copy(input_path: str, output_path: str, chunk_size: int) -> int {
+    if chunk_size <= 0 { raise ValueError; }
+    if same_file(input_path, output_path) { raise OSError; }
+    let source = utf8_reader_open(input_path, chunk_size);
+    try {
+        let target = open_binary(output_path, "w");
+        try {
+            let characters: int = 0;
+            while True {
+                let count = _utf8_file_copy_chunk(source, target);
+                if count < 0 { break; }
+                characters = checked_int64_add(characters, count);
+            }
+            target.flush();
+            return characters;
+        } finally { target.close(); }
+    } finally { utf8_reader_close(source); }
+}

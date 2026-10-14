@@ -1,0 +1,14 @@
+fn main() -> int {
+    if len(sys.argv) < 2 { print("usage: inventory_ranked FILE...", file=sys.stderr); return 2; }
+    let rows = inventory_empty(); let i = 1;
+    try {
+        while i < len(sys.argv) { inventory_add(rows, sys.argv[i]); i += 1; }
+    } except OSError { print("cannot read input", file=sys.stderr); return 2; }
+    let ordered = inventory_ordered_size(rows, 1);
+    print("size_desc");
+    for rank, row in enumerate(ordered, start=1) { print(rank, row.path, row.size, sep="\t"); }
+    print("reverse_input");
+    for row in reversed(rows) { print(row.path, row.size, sep="\t"); }
+    print("total", inventory_total(rows), sep="\t");
+    return 0;
+}

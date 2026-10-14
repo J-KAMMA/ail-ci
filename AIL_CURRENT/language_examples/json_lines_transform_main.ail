@@ -1,0 +1,39 @@
+use checked_integer;
+use json_lines_io;
+use json_document_batch;
+
+fn json_lines_transform_file(path: str, size: int, mode: str, spec: str) -> JsonDocuments {
+    if size <= 0 { raise ValueError; }
+    if mode == "select" {
+        json_pointer_segments(spec);
+        let selected = json_lines_read_file(path, size);
+        return json_documents_select(selected, spec);
+    } elif mode == "project" {
+        let projection: JsonProjection = json_projection_parse(spec);
+        let projected = json_lines_read_file(path, size);
+        return json_documents_project(projected, projection);
+    } else { raise ValueError; }
+}
+
+fn main() -> int {
+    if len(sys.argv) != 5 {
+        print("usage: json_lines_transform INPUT SIZE MODE SPEC", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let size: int = parse_int64_decimal(sys.argv[2]);
+        let result = json_lines_transform_file(sys.argv[1], size, sys.argv[3], sys.argv[4]);
+        let rendered: str = json_documents_render_lines(result);
+        write_stdout_bytes(rendered.encode("utf-8"));
+        return 0;
+    } except ValueError {
+        print("invalid JSON Lines, UTF-8, size, mode, or specification", file=sys.stderr);
+        return 2;
+    } except KeyError {
+        print("JSON pointer target is missing", file=sys.stderr);
+        return 2;
+    } except OSError {
+        print("JSON Lines input or output failed", file=sys.stderr);
+        return 2;
+    }
+}

@@ -1,0 +1,68 @@
+# RFC 4648 standard alphabet with canonical, required padding.
+fn base64_encode(data: bytes) -> str {
+    let alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let output = [];
+    let value = 0;
+    let count = 0;
+    for byte in data {
+        value = value * 256 + byte;
+        count += 1;
+        if count == 3 {
+            output.append(alphabet[value // 262144]);
+            output.append(alphabet[(value // 4096) % 64]);
+            output.append(alphabet[(value // 64) % 64]);
+            output.append(alphabet[value % 64]);
+            value = 0; count = 0;
+        }
+    }
+    if count == 1 {
+        output.append(alphabet[value // 4]);
+        output.append(alphabet[(value % 4) * 16]);
+        output.append(61); output.append(61);
+    } elif count == 2 {
+        output.append(alphabet[value // 1024]);
+        output.append(alphabet[(value // 16) % 64]);
+        output.append(alphabet[(value % 16) * 4]);
+        output.append(61);
+    }
+    return bytes(output).decode("utf-8");
+}
+
+fn base64_decode(text: str) -> bytes {
+    let output = [];
+    let value = 0;
+    let count = 0;
+    # Padding states: none, awaiting the second '=', finished.
+    let padding = 0;
+    for c in text {
+        if padding == 2 { raise ValueError; }
+        if c == "=" {
+            if padding == 1 { padding = 2; }
+            elif count == 2 and value % 16 == 0 {
+                output.append(value // 16); padding = 1;
+            } elif count == 3 and value % 4 == 0 {
+                output.append(value // 1024);
+                output.append((value // 4) % 256); padding = 2;
+            } else { raise ValueError; }
+        } else {
+            if padding != 0 { raise ValueError; }
+            let code = ord(c);
+            let digit = -1;
+            if code >= 65 and code <= 90 { digit = code - 65; }
+            elif code >= 97 and code <= 122 { digit = code - 71; }
+            elif code >= 48 and code <= 57 { digit = code + 4; }
+            elif c == "+" { digit = 62; }
+            elif c == "/" { digit = 63; }
+            if digit < 0 { raise ValueError; }
+            value = value * 64 + digit; count += 1;
+            if count == 4 {
+                output.append(value // 65536);
+                output.append((value // 256) % 256);
+                output.append(value % 256);
+                value = 0; count = 0;
+            }
+        }
+    }
+    if count != 0 and padding != 2 { raise ValueError; }
+    return bytes(output);
+}

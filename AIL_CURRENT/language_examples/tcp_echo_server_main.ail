@@ -1,0 +1,34 @@
+use tcp_echo_server;
+use checked_integer;
+
+fn main() -> int {
+    if len(sys.argv) != 5 {
+        print("usage: tcp_echo_server HOST PORT CLIENT_COUNT CHUNK_SIZE", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let port = parse_int64_text(sys.argv[2]);
+        let clients = parse_int64_text(sys.argv[3]);
+        let chunk = parse_int64_text(sys.argv[4]);
+        if clients <= 0 or chunk <= 0 or chunk > 2147483647 { raise ValueError; }
+        let listener = tcp_listen(sys.argv[1], port, 16);
+        try {
+            print(listener.local_port());
+            flush_stdout();
+            let total: int = 0;
+            for i in range(clients) {
+                let connection = listener.accept();
+                try { total = checked_int64_add(total, tcp_echo_connection(connection, chunk)); }
+                finally { connection.close(); }
+            }
+            print(total);
+            return 0;
+        } finally { listener.close(); }
+    } except OSError {
+        print("TCP server access failed", file=sys.stderr);
+        return 3;
+    } except ValueError {
+        print("invalid TCP server argument", file=sys.stderr);
+        return 4;
+    }
+}

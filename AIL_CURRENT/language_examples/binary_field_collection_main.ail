@@ -1,0 +1,39 @@
+use binary_field_collection;
+use file_identity;
+
+fn main() -> int {
+    if len(sys.argv) != 5 {
+        print("usage: binary_field_collection reverse|sort input-path output-path separator-file", file=sys.stderr);
+        return 2;
+    }
+    if sys.argv[1] != "reverse" and sys.argv[1] != "sort" {
+        print("mode must be reverse or sort", file=sys.stderr);
+        return 2;
+    }
+    if sys.argv[2] == sys.argv[3] or sys.argv[4] == sys.argv[3] {
+        print("output must differ from input and separator paths", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let data = read_bytes(sys.argv[2]);
+        let separator = read_bytes(sys.argv[4]);
+        if len(separator) == 0 { raise ValueError; }
+        if file_paths_same(sys.argv[2], sys.argv[3]) or file_paths_same(sys.argv[4], sys.argv[3]) {
+            raise ValueError;
+        }
+        let fields = binary_field_collection(data, separator);
+        if sys.argv[1] == "reverse" { fields.reverse(); }
+        else { fields.sort(); }
+        write_bytes(sys.argv[3], fields.join());
+        return 0;
+    } except ValueError {
+        print("invalid binary field separator", file=sys.stderr);
+        return 2;
+    } except IndexError {
+        print("invalid binary field index", file=sys.stderr);
+        return 2;
+    } except OSError {
+        print("binary field file error", file=sys.stderr);
+        return 2;
+    }
+}

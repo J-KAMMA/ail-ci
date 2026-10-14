@@ -1,0 +1,4 @@
+# One Unicode code point per callback, in source order.
+fn map_characters(text: str, operation: Callable[[str], str]) -> str {
+    return "".join([operation(character) for character in text]);
+}

@@ -1,0 +1,12 @@
+# File operations reuse the separately maintained record codec.
+use binary_record;
+
+fn save_record(path: str, payload: bytes) -> int {
+    let record = pack_record(payload);
+    write_bytes(path, record);
+    return len(record);
+}
+
+fn load_record(path: str) -> bytes {
+    return unpack_record(read_bytes(path));
+}

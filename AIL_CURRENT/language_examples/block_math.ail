@@ -1,0 +1,9 @@
+const LIMIT = 6;
+
+fn sum_to(n: int) -> int {
+    let total = 0;
+    for i in range(n + 1) {
+        total += i;
+    }
+    return total;
+}

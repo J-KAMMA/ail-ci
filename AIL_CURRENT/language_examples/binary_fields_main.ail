@@ -1,0 +1,63 @@
+use binary_fields;
+
+fn binary_fields_integer_in_range(text: str) -> int {
+    let token = text.strip();
+    let negative = token.startswith("-");
+    if negative or token.startswith("+") { token = token[1:]; }
+    if not token.isdigit() { return 0; }
+    token = token.lstrip("0");
+    let limit = "9223372036854775807";
+    if negative { limit = "9223372036854775808"; }
+    return len(token) < 19 or len(token) == 19 and token <= limit;
+}
+
+fn main() -> int {
+    if len(sys.argv) < 4 or len(sys.argv) > 6 {
+        print("usage: binary_fields count input separator_hex [maxsplit]; binary_fields field input separator_hex index [maxsplit]; binary_fields rejoin input separator_hex joiner_hex [maxsplit]", file=sys.stderr);
+        return 2;
+    }
+    let mode = sys.argv[1];
+    if mode != "count" and mode != "field" and mode != "rejoin" {
+        print("unknown fields mode", file=sys.stderr);
+        return 2;
+    }
+    let required = 5;
+    if mode == "count" { required = 4; }
+    if len(sys.argv) != required and len(sys.argv) != required + 1 {
+        print("invalid fields arguments", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let separator = bytes.fromhex(sys.argv[3]);
+        if len(separator) == 0 { raise ValueError; }
+        let maxsplit = -1;
+        if len(sys.argv) == required + 1 {
+            if not binary_fields_integer_in_range(sys.argv[required]) { raise ValueError; }
+            maxsplit = int(sys.argv[required]);
+        }
+        let index = 0;
+        let joiner = b"";
+        if mode == "field" {
+            if not binary_fields_integer_in_range(sys.argv[4]) { raise ValueError; }
+            index = int(sys.argv[4]);
+        }
+        if mode == "rejoin" { joiner = bytes.fromhex(sys.argv[4]); }
+        let data = read_bytes(sys.argv[2]);
+        if mode == "count" {
+            let count = binary_fields_count(data, separator, maxsplit);
+            write_stdout_bytes((str(count) + "\n").encode());
+        }
+        if mode == "field" { write_stdout_bytes(binary_field(data, separator, maxsplit, index)); }
+        if mode == "rejoin" { write_stdout_bytes(binary_fields_rejoin(data, separator, joiner, maxsplit)); }
+        return 0;
+    } except ValueError {
+        print("invalid hexadecimal value, empty separator, or signed 64-bit integer", file=sys.stderr);
+        return 2;
+    } except IndexError {
+        print("field index out of range", file=sys.stderr);
+        return 2;
+    } except OSError {
+        print("binary input or output failed", file=sys.stderr);
+        return 2;
+    }
+}

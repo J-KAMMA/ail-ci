@@ -1,0 +1,13 @@
+use byte_search_core;
+
+fn count_zero_bytes(data: bytes) -> int {
+    let count = 0;
+    let position = 0;
+    while position < len(data) {
+        let found = find_byte(data, 0, position, len(data));
+        if found < 0 { break; }
+        count += 1;
+        position = found + 1;
+    }
+    return count;
+}

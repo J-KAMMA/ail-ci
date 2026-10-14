@@ -1,0 +1,7 @@
+fn reverse_values(values: list[float]) -> list[float] {
+    let stack = [];
+    for value in values { stack.append(value); }
+    let result = [];
+    while len(stack) > 0 { result.append(stack.pop()); }
+    return result;
+}

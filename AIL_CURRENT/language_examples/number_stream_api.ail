@@ -1,0 +1,3 @@
+fn number_pipe(first_line: int, chunk_size: int) -> void {
+    number_stdin(first_line, chunk_size);
+}

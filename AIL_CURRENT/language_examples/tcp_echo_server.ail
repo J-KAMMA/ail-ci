@@ -1,0 +1,21 @@
+use checked_integer;
+
+fn _tcp_echo_chunk(connection: tcpsocket, buffer: bytearray) -> int {
+    let count = connection.recv_into(buffer);
+    if count != 0 { connection.send(buffer[:count]); }
+    return count;
+}
+
+# A duplex byte stream: the peer must read replies while uploading large input.
+fn tcp_echo_connection(connection: tcpsocket, chunk_size: int) -> int {
+    if chunk_size <= 0 or chunk_size > 2147483647 { raise ValueError; }
+    let buffer = bytearray(chunk_size);
+    let total: int = 0;
+    while True {
+        let count = _tcp_echo_chunk(connection, buffer);
+        if count == 0 { break; }
+        total = checked_int64_add(total, count);
+    }
+    connection.shutdown_write();
+    return total;
+}

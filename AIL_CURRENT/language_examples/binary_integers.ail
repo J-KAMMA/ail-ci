@@ -1,0 +1,9 @@
+# Integer records: widths 1/2/4 are unsigned, width 8 is signed int64.
+# Order 0 = little endian, 1 = big endian. Results own independent storage.
+fn unpack_integers(data: bytes, width: int, order: int) -> list[int] {
+    return integer_decode(data, width, order);
+}
+
+fn pack_integers(values: list[int], width: int, order: int) -> bytes {
+    return integer_encode(values, width, order);
+}

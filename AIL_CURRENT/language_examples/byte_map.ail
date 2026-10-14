@@ -1,0 +1,59 @@
+use binary_numbers;
+
+fn byte_map_decode(data: bytes) -> dict[str, bytes] {
+    if len(data) < 8 or data[:4] != b"AILM" { raise ValueError; }
+    let count: int = unpack_u32_le(data[4:8]);
+    if count > (len(data) - 8) // 8 { raise ValueError; }
+    let result: dict[str, bytes] = {};
+    let position: int = 8;
+    for i in range(count) {
+        let remaining: int = len(data) - position;
+        if remaining < 8 { raise ValueError; }
+        let key_length: int = unpack_u32_le(data[position:position + 4]);
+        let value_length: int = unpack_u32_le(data[position + 4:position + 8]);
+        position += 8;
+        remaining -= 8;
+        if key_length > remaining or value_length > remaining - key_length { raise ValueError; }
+        let key: str = data[position:position + key_length].decode("utf-8");
+        if key in result { raise ValueError; }
+        position += key_length;
+        result[key] = data[position:position + value_length];
+        position += value_length;
+    }
+    if position != len(data) { raise ValueError; }
+    return result;
+}
+
+fn byte_map_encode(values: dict[str, bytes]) -> bytes {
+    let count: int = len(values);
+    if count > 4294967295 { raise ValueError; }
+    let parts: list[bytes] = [b"AILM", pack_u32_le(count)];
+    let total: int = 8;
+    for key in values {
+        let encoded: bytes = key.encode("utf-8");
+        let value: bytes = values[key];
+        let key_length: int = len(encoded);
+        let value_length: int = len(value);
+        if key_length > 4294967295 or value_length > 4294967295 { raise ValueError; }
+        let record_length: int = 8 + key_length + value_length;
+        if record_length > 9223372036854775807 - total { raise ValueError; }
+        total += record_length;
+        parts.append(pack_u32_le(key_length));
+        parts.append(pack_u32_le(value_length));
+        parts.append(encoded);
+        parts.append(value);
+    }
+    return b"".join(parts);
+}
+
+fn byte_map_copy(values: dict[str, bytes]) -> dict[str, bytes] { return values.copy(); }
+
+fn byte_map_merge(left: dict[str, bytes], right: dict[str, bytes]) -> dict[str, bytes] {
+    let result: dict[str, bytes] = left.copy();
+    result.update(right);
+    return result;
+}
+
+fn byte_map_keys(values: dict[str, bytes]) -> list[str] { return values.keys(); }
+
+fn byte_map_values(values: dict[str, bytes]) -> list[bytes] { return values.values(); }

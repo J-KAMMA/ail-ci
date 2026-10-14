@@ -1,0 +1,7 @@
+fn update(previous: int, data: bytes) -> int {
+    return crc32_update(previous, data);
+}
+
+fn file_crc(path: str) -> int {
+    return crc32_file(path);
+}

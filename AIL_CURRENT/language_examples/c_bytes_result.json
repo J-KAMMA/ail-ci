@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "functions": {
+    "native_tail": {
+      "symbol": "native_tail",
+      "params": [["data", "bytes"], ["skip", "int"]],
+      "result": "bytes"
+    }
+  }
+}

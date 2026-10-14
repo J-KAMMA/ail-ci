@@ -1,0 +1,14 @@
+use checked_integer;
+
+# Configuration values are read at each call; no process-wide cache.
+fn env_int(name: str, default: int) -> int {
+    return parse_int64_text(get_env(name, str(default)));
+}
+
+fn env_bool(name: str, default: int) -> int {
+    if default != 0 and default != 1 { raise ValueError; }
+    let value = get_env(name, str(default)).strip().lower();
+    if value == "1" or value == "true" { return 1; }
+    if value == "0" or value == "false" { return 0; }
+    raise ValueError;
+}

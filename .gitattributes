@@ -1,0 +1,2 @@
+# Preserve the exact bytes bound by the AIL source manifest on every OS.
+/AIL_CURRENT/** -text

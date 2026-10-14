@@ -1,0 +1,34 @@
+use json_kv;
+
+fn kv_read(path:str)->str {
+    let file:binaryfile=open_binary(path,"rb");
+    try {
+        let data=file.read(8388609);
+        if len(data)>8388608 {raise ValueError;}
+        return data.decode("utf-8");
+    } finally {file.close();}
+}
+
+fn kv_commit(path:str,data:str)->void {
+    let stage=path+".ail-stage";
+    make_dir(stage);
+    try {
+        write_bytes(stage+"/state.json",data.encode("utf-8"));
+        replace_path(stage+"/state.json",path);
+    } finally {
+        try {remove_file(stage+"/state.json");} except OSError {pass;}
+        remove_dir(stage);
+    }
+}
+
+fn kv_process(path:str,data:str)->str {
+    let values:dict[str,str]={};
+    if path_exists(path) {values=kv_object(kv_read(path));}
+    kv_validate(values);
+    let store=KvStore(values);
+    let report=kv_batch(store,data);
+    let snapshot=kv_snapshot(store);
+    if len(snapshot.encode())>8388608 {raise ValueError;}
+    kv_commit(path,snapshot);
+    return report;
+}

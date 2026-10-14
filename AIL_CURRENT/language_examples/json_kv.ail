@@ -1,0 +1,82 @@
+use json_document;
+use json_text;
+
+const KV_MAX_ITEMS=4096;
+const KV_MAX_LINE=1048576;
+const KV_MAX_REPORT=16777216;
+struct KvStore { values:dict[str,str]; }
+
+fn kv_object(text:str)->dict[str,str] {
+    let nodes=json_parse_document(text);
+    if nodes[0].kind!=5 {raise ValueError;}
+    let values:dict[str,str]={};
+    for i in range(1,len(nodes)) {
+        let node=nodes[i];
+        if node.parent!=0 or node.kind!=3 or node.key in values {raise ValueError;}
+        values[node.key]=node.text;
+    }
+    return values;
+}
+
+fn kv_validate(values:dict[str,str])->void {
+    if len(values)>KV_MAX_ITEMS {raise ValueError;}
+    for key,value in values.items() {
+        if len(key.encode())>1024 or len(value.encode())>65536 {raise ValueError;}
+    }
+}
+
+fn kv_snapshot(store:KvStore)->str {
+    let parts:list[str]=[];
+    for key in sorted(store.values.keys()) {
+        parts.append(json_quote(key)+":"+json_quote(store.values[key]));
+    }
+    return "{"+",".join(parts)+"}\n";
+}
+
+fn kv_apply(store:KvStore,line:str)->str {
+    let command=kv_object(line);
+    let op=command.get("op","");
+    if op=="count" {
+        if len(command)!=1 {raise ValueError;}
+        return "{\"ok\":true,\"count\":"+str(len(store.values))+"}";
+    }
+    if "key" not in command or len(command["key"].encode())>1024 {raise ValueError;}
+    let key=command["key"];
+    if op=="set" {
+        if len(command)!=3 or "value" not in command or len(command["value"].encode())>65536 {raise ValueError;}
+        if key not in store.values and len(store.values)>=KV_MAX_ITEMS {raise ValueError;}
+        store.values[key]=command["value"];
+        return "{\"ok\":true}";
+    }
+    if len(command)!=2 {raise ValueError;}
+    let found=key in store.values;
+    if op=="get" {
+        if found {return "{\"ok\":true,\"found\":true,\"value\":"+json_quote(store.values[key])+"}";}
+        return "{\"ok\":true,\"found\":false}";
+    }
+    if op=="delete" {
+        if found {store.values.pop(key);return "{\"ok\":true,\"found\":true}";}
+        return "{\"ok\":true,\"found\":false}";
+    }
+    raise ValueError;
+    return "";
+}
+
+fn kv_batch(store:KvStore,data:str)->str {
+    let frames:int=data.count("\n");
+    if len(data)>0 and not data.endswith("\n") {frames+=1;}
+    if frames>8192 {raise ValueError;}
+    let replies:list[str]=[];
+    let report_size:int=0;
+    let count:int=0;
+    for line in data.split("\n") {
+        if line=="" or line=="\r" {continue;}
+        if len(line.encode())>KV_MAX_LINE or count>=4096 {raise ValueError;}
+        let reply=kv_apply(store,line);
+        report_size+=len(reply.encode())+1;
+        if report_size>KV_MAX_REPORT {raise ValueError;}
+        replies.append(reply);count+=1;
+    }
+    if count==0 {return "";}
+    return "\n".join(replies)+"\n";
+}

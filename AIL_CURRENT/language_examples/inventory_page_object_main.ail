@@ -1,0 +1,17 @@
+fn main() -> int {
+    if len(sys.argv) < 5 {
+        print("usage: inventory_page START STOP STEP FILE...", file=sys.stderr); return 2;
+    }
+    let rows = inventory_empty(); let i = 4;
+    try {
+        let start = int(sys.argv[1]); let stop = int(sys.argv[2]); let step = int(sys.argv[3]);
+        while i < len(sys.argv) { inventory_add(rows, sys.argv[i]); i += 1; }
+        let selected = inventory_slice(rows, start, stop, step);
+    } except (OSError, ValueError) {
+        print("invalid selection or unreadable input", file=sys.stderr); return 2;
+    }
+    print("selected", len(selected), sep="\t");
+    for rank, row in enumerate(selected, start=1) { print(rank, row.path, row.size, sep="\t"); }
+    print("total", inventory_total(selected), sep="\t");
+    return 0;
+}

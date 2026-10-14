@@ -1,0 +1,18 @@
+struct ManifestFile { path: str; size: int; }
+
+fn manifest_empty() -> list[ManifestFile] { let rows = []; return rows; }
+
+fn manifest_add(rows: list[ManifestFile], path: str) -> int {
+    let size = file_size(path);
+    rows.append(ManifestFile(path, size)); return len(rows);
+}
+
+fn manifest_total(rows: list[ManifestFile]) -> int {
+    let total = 0;
+    for row in rows { total += row.size; }
+    return total;
+}
+
+fn manifest_by_path(rows: list[ManifestFile]) -> list[ManifestFile] {
+    let ordered = sorted(rows, key=lambda row: row.path); return ordered;
+}

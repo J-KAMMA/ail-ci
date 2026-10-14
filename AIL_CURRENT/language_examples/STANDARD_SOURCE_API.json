@@ -1,0 +1,2539 @@
+{
+  "schema": "ail.standard_source_api/1",
+  "scope": "Named initial-profile source modules; own non-underscore functions and own structs; private-name convention is not enforced access control",
+  "types": "declared_annotations; unknown annotations remain null",
+  "modules": [
+    {
+      "module": "text_search",
+      "source": "language_examples/text_search.ail",
+      "sha256": "5d22ade25ae3c96068a760494542923a43587c6a19f111a6fba203d1aaeb39ea",
+      "imports": [],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "text_find",
+            "parameters": [
+              {
+                "name": "text",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "needle",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "int"
+          }
+        ],
+        "structs": []
+      },
+      "source_comments": [],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 1,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "binary_search",
+      "source": "language_examples/binary_search.ail",
+      "sha256": "c5cbdbda90910c98a130060c0830d6ad0e70ce1a3464446e03993b18574d32ec",
+      "imports": [],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "binary_find",
+            "parameters": [
+              {
+                "name": "data",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "needle",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "start",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "end",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "int"
+          },
+          {
+            "name": "binary_rfind",
+            "parameters": [
+              {
+                "name": "data",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "needle",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "start",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "end",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "int"
+          },
+          {
+            "name": "binary_count",
+            "parameters": [
+              {
+                "name": "data",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "needle",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "start",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "end",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "int"
+          },
+          {
+            "name": "binary_startswith",
+            "parameters": [
+              {
+                "name": "data",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "prefix",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "start",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "end",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "int"
+          },
+          {
+            "name": "binary_endswith",
+            "parameters": [
+              {
+                "name": "data",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "suffix",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "start",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "end",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "int"
+          }
+        ],
+        "structs": []
+      },
+      "source_comments": [],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 5,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "utf8_stream",
+      "source": "language_examples/utf8_stream.ail",
+      "sha256": "e1625b222e5bc8d6275155be68d2e0f1b0be42e0450d582b5b08cb5faee5cad9",
+      "imports": [],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "utf8_decoder_new",
+            "parameters": [],
+            "returns": "Utf8Decoder"
+          },
+          {
+            "name": "utf8_decode_feed",
+            "parameters": [
+              {
+                "name": "decoder",
+                "type": "Utf8Decoder",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "data",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "str"
+          },
+          {
+            "name": "utf8_decode_finish",
+            "parameters": [
+              {
+                "name": "decoder",
+                "type": "Utf8Decoder",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "str"
+          }
+        ],
+        "structs": [
+          {
+            "name": "Utf8Decoder",
+            "constructor_parameters": [
+              {
+                "name": "pending",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "closed",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "fields": [
+              {
+                "name": "pending",
+                "type": "bytes"
+              },
+              {
+                "name": "closed",
+                "type": "int"
+              }
+            ],
+            "methods": []
+          }
+        ]
+      },
+      "source_comments": [],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 6,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "binary_numbers",
+      "source": "language_examples/binary_numbers.ail",
+      "sha256": "c50fa2995ffeaa7fac6d9c39f9cf4cb1e321c8424430f334dca99f470822ea84",
+      "imports": [],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "binary_encode_integer",
+            "parameters": [
+              {
+                "name": "value",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "width",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "reverse",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "bytes"
+          },
+          {
+            "name": "binary_decode_integer",
+            "parameters": [
+              {
+                "name": "data",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "width",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "reverse",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "int"
+          },
+          {
+            "name": "pack_u16_le",
+            "parameters": [
+              {
+                "name": "value",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "bytes"
+          },
+          {
+            "name": "pack_u16_be",
+            "parameters": [
+              {
+                "name": "value",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "bytes"
+          },
+          {
+            "name": "unpack_u16_le",
+            "parameters": [
+              {
+                "name": "data",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "int"
+          },
+          {
+            "name": "unpack_u16_be",
+            "parameters": [
+              {
+                "name": "data",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "int"
+          },
+          {
+            "name": "pack_u32_le",
+            "parameters": [
+              {
+                "name": "value",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "bytes"
+          },
+          {
+            "name": "pack_u32_be",
+            "parameters": [
+              {
+                "name": "value",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "bytes"
+          },
+          {
+            "name": "unpack_u32_le",
+            "parameters": [
+              {
+                "name": "data",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "int"
+          },
+          {
+            "name": "unpack_u32_be",
+            "parameters": [
+              {
+                "name": "data",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "int"
+          },
+          {
+            "name": "pack_i64_le",
+            "parameters": [
+              {
+                "name": "value",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "bytes"
+          },
+          {
+            "name": "pack_i64_be",
+            "parameters": [
+              {
+                "name": "value",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "bytes"
+          },
+          {
+            "name": "unpack_i64_le",
+            "parameters": [
+              {
+                "name": "data",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "int"
+          },
+          {
+            "name": "unpack_i64_be",
+            "parameters": [
+              {
+                "name": "data",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "int"
+          }
+        ],
+        "structs": []
+      },
+      "source_comments": [
+        "Integer byte encoding: unsigned 16/32 bits and signed 64 bits, exact lengths.",
+        "Public helpers accept width 2/4/8 and reverse 0 (little) or 1 (big)."
+      ],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 14,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "binary_float64",
+      "source": "language_examples/binary_float64.ail",
+      "sha256": "a7ac4e48a1896db30057e179da1989421c093aa868404d02f58e7b6220977ad4",
+      "imports": [],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "unpack_float64",
+            "parameters": [
+              {
+                "name": "data",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "order",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "list[float]"
+          },
+          {
+            "name": "pack_float64",
+            "parameters": [
+              {
+                "name": "values",
+                "type": "list[float]",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "order",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "bytes"
+          }
+        ],
+        "structs": []
+      },
+      "source_comments": [
+        "IEEE binary64 records: order 0 = little endian, 1 = big endian.",
+        "Conversion preserves raw bits; decoded lists and encoded bytes are independent."
+      ],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 2,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "base64_codec",
+      "source": "language_examples/base64_codec.ail",
+      "sha256": "ee2c6a863b9afd7bc0b296bc25fcc9f044c8998977ee722140cac700eeefe171",
+      "imports": [],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "base64_encode",
+            "parameters": [
+              {
+                "name": "data",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "str"
+          },
+          {
+            "name": "base64_decode",
+            "parameters": [
+              {
+                "name": "text",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "bytes"
+          }
+        ],
+        "structs": []
+      },
+      "source_comments": [
+        "RFC 4648 standard alphabet with canonical, required padding."
+      ],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 2,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "url_codec",
+      "source": "language_examples/url_codec.ail",
+      "sha256": "165be3913e5be5e5e610e7cf7757a36ae7beac8e4272008ab4184a63e63f28d7",
+      "imports": [],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "url_percent_encode",
+            "parameters": [
+              {
+                "name": "data",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "str"
+          },
+          {
+            "name": "url_percent_decode",
+            "parameters": [
+              {
+                "name": "text",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "bytes"
+          }
+        ],
+        "structs": []
+      },
+      "source_comments": [
+        "URI percent encoding preserves bytes; '+' is literal, not form whitespace."
+      ],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 2,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "csv_table",
+      "source": "language_examples/csv_table.ail",
+      "sha256": "4811c289909cfe3fed2a02d85b05ec9c141cf6665fdc9b1634bf90984de54613",
+      "imports": [],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "csv_parse",
+            "parameters": [
+              {
+                "name": "text",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "list[CsvCell]"
+          }
+        ],
+        "structs": [
+          {
+            "name": "CsvCell",
+            "constructor_parameters": [
+              {
+                "name": "row",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "column",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "text",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "fields": [
+              {
+                "name": "row",
+                "type": "int"
+              },
+              {
+                "name": "column",
+                "type": "int"
+              },
+              {
+                "name": "text",
+                "type": "str"
+              }
+            ],
+            "methods": []
+          }
+        ]
+      },
+      "source_comments": [
+        "Strict comma CSV over Unicode scalar text; blank records do not consume rows."
+      ],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 2,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "csv_stream",
+      "source": "language_examples/csv_stream.ail",
+      "sha256": "a175c2f7d47a19967f5bd89e45fe8806ddc523fe15568134e1c2dbb309d90598",
+      "imports": [
+        "json_text"
+      ],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "csv_decoder_new",
+            "parameters": [],
+            "returns": "CsvDecoder"
+          },
+          {
+            "name": "csv_decoder_new_crlf",
+            "parameters": [],
+            "returns": "CsvDecoder"
+          },
+          {
+            "name": "csv_decode_feed",
+            "parameters": [
+              {
+                "name": "decoder",
+                "type": "CsvDecoder",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "text",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "list[CsvRow]"
+          },
+          {
+            "name": "csv_decode_finish",
+            "parameters": [
+              {
+                "name": "decoder",
+                "type": "CsvDecoder",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "list[CsvRow]"
+          },
+          {
+            "name": "csv_stream_row_json",
+            "parameters": [
+              {
+                "name": "row",
+                "type": "CsvRow",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "str"
+          }
+        ],
+        "structs": [
+          {
+            "name": "CsvRow",
+            "constructor_parameters": [
+              {
+                "name": "number",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "fields",
+                "type": "list[str]",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "fields": [
+              {
+                "name": "number",
+                "type": "int"
+              },
+              {
+                "name": "fields",
+                "type": "list[str]"
+              }
+            ],
+            "methods": []
+          },
+          {
+            "name": "CsvDecoder",
+            "constructor_parameters": [
+              {
+                "name": "row",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "mode",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "field",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "fields",
+                "type": "list[str]",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "skip_lf",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "closed",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "strict",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "fields": [
+              {
+                "name": "row",
+                "type": "int"
+              },
+              {
+                "name": "mode",
+                "type": "int"
+              },
+              {
+                "name": "field",
+                "type": "str"
+              },
+              {
+                "name": "fields",
+                "type": "list[str]"
+              },
+              {
+                "name": "skip_lf",
+                "type": "int"
+              },
+              {
+                "name": "closed",
+                "type": "int"
+              },
+              {
+                "name": "strict",
+                "type": "int"
+              }
+            ],
+            "methods": []
+          }
+        ]
+      },
+      "source_comments": [],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 10,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "csv_group",
+      "source": "language_examples/csv_group.ail",
+      "sha256": "22d40e5d3ef1283514d57f2c363e51b0e547143f1a1baf2d4ce108a7ba51c7d9",
+      "imports": [
+        "csv_stream",
+        "checked_integer",
+        "json_text"
+      ],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "csv_groups_new",
+            "parameters": [],
+            "returns": "CsvGroups"
+          },
+          {
+            "name": "csv_groups_add",
+            "parameters": [
+              {
+                "name": "groups",
+                "type": "CsvGroups",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "rows",
+                "type": "list[CsvRow]",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "key_column",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "value_column",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "void"
+          },
+          {
+            "name": "csv_groups_snapshot",
+            "parameters": [
+              {
+                "name": "groups",
+                "type": "CsvGroups",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "list[CsvGroup]"
+          },
+          {
+            "name": "csv_groups_render",
+            "parameters": [
+              {
+                "name": "groups",
+                "type": "CsvGroups",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "str"
+          }
+        ],
+        "structs": [
+          {
+            "name": "CsvGroups",
+            "constructor_parameters": [
+              {
+                "name": "counts",
+                "type": "dict[str, int]",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "totals",
+                "type": "dict[str, int]",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "minimums",
+                "type": "dict[str, int]",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "maximums",
+                "type": "dict[str, int]",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "fields": [
+              {
+                "name": "counts",
+                "type": "dict[str, int]"
+              },
+              {
+                "name": "totals",
+                "type": "dict[str, int]"
+              },
+              {
+                "name": "minimums",
+                "type": "dict[str, int]"
+              },
+              {
+                "name": "maximums",
+                "type": "dict[str, int]"
+              }
+            ],
+            "methods": []
+          },
+          {
+            "name": "CsvGroup",
+            "constructor_parameters": [
+              {
+                "name": "key",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "count",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "total",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "minimum",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "maximum",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "fields": [
+              {
+                "name": "key",
+                "type": "str"
+              },
+              {
+                "name": "count",
+                "type": "int"
+              },
+              {
+                "name": "total",
+                "type": "int"
+              },
+              {
+                "name": "minimum",
+                "type": "int"
+              },
+              {
+                "name": "maximum",
+                "type": "int"
+              }
+            ],
+            "methods": []
+          }
+        ]
+      },
+      "source_comments": [],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 19,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "csv_writer",
+      "source": "language_examples/csv_writer.ail",
+      "sha256": "89c8d53ec9a5a9d14f5aa9954e77ecc024671777cd181a2fbcc058adc06619ad",
+      "imports": [],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "csv_encode_row",
+            "parameters": [
+              {
+                "name": "fields",
+                "type": "list[str]",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "str"
+          }
+        ],
+        "structs": []
+      },
+      "source_comments": [
+        "One Unicode CSV record with CRLF; zero fields are ambiguous and rejected.",
+        "A single empty field is quoted so it is distinct from an ignored blank record."
+      ],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 1,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "json_document",
+      "source": "language_examples/json_document.ail",
+      "sha256": "75a843bbe374ccd059be58e4f9465f32f3eff767e9f18d20d13773194ef47bbd",
+      "imports": [
+        "json_text"
+      ],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "json_scalar_kind",
+            "parameters": [
+              {
+                "name": "token",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "int"
+          },
+          {
+            "name": "json_parse_document",
+            "parameters": [
+              {
+                "name": "text",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "list[JsonValue]"
+          },
+          {
+            "name": "json_compact",
+            "parameters": [
+              {
+                "name": "text",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "str"
+          }
+        ],
+        "structs": [
+          {
+            "name": "JsonValue",
+            "constructor_parameters": [
+              {
+                "name": "kind",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "parent",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "key",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "text",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "fields": [
+              {
+                "name": "kind",
+                "type": "int"
+              },
+              {
+                "name": "parent",
+                "type": "int"
+              },
+              {
+                "name": "key",
+                "type": "str"
+              },
+              {
+                "name": "text",
+                "type": "str"
+              }
+            ],
+            "methods": []
+          },
+          {
+            "name": "JsonFrame",
+            "constructor_parameters": [
+              {
+                "name": "node",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "state",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "key",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "fields": [
+              {
+                "name": "node",
+                "type": "int"
+              },
+              {
+                "name": "state",
+                "type": "int"
+              },
+              {
+                "name": "key",
+                "type": "str"
+              }
+            ],
+            "methods": []
+          }
+        ]
+      },
+      "source_comments": [
+        "Full JSON documents over Unicode scalar text; preserve member order and lexemes."
+      ],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 12,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "json_tree",
+      "source": "language_examples/json_tree.ail",
+      "sha256": "a95ac93368faccfb6ff74db8ccd08e303ec5645a27f20a0a39443b57107d0791",
+      "imports": [
+        "json_document",
+        "json_text"
+      ],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "json_validate_nodes",
+            "parameters": [
+              {
+                "name": "nodes",
+                "type": "list[JsonValue]",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "int"
+          },
+          {
+            "name": "json_render_document",
+            "parameters": [
+              {
+                "name": "nodes",
+                "type": "list[JsonValue]",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "str"
+          },
+          {
+            "name": "json_subtree",
+            "parameters": [
+              {
+                "name": "nodes",
+                "type": "list[JsonValue]",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "index",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "list[JsonValue]"
+          }
+        ],
+        "structs": []
+      },
+      "source_comments": [],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 16,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "json_pointer",
+      "source": "language_examples/json_pointer.ail",
+      "sha256": "76036a9d1c3883535bfb21ac5a5547cf00de1454a9ab8821eca571d12740c2e3",
+      "imports": [
+        "json_tree"
+      ],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "json_pointer_segments",
+            "parameters": [
+              {
+                "name": "pointer",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "list[str]"
+          },
+          {
+            "name": "json_pointer_index",
+            "parameters": [
+              {
+                "name": "nodes",
+                "type": "list[JsonValue]",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "pointer",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "int"
+          },
+          {
+            "name": "json_pointer_extract",
+            "parameters": [
+              {
+                "name": "nodes",
+                "type": "list[JsonValue]",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "pointer",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "list[JsonValue]"
+          }
+        ],
+        "structs": []
+      },
+      "source_comments": [],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 21,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "directory_catalog",
+      "source": "language_examples/directory_catalog.ail",
+      "sha256": "ce54ace0050fd85bfadd4e6d1be99787ca3cd9df0f69fd90ec6fb1068272dae5",
+      "imports": [
+        "json_text"
+      ],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "directory_catalog",
+            "parameters": [
+              {
+                "name": "path",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "str"
+          }
+        ],
+        "structs": []
+      },
+      "source_comments": [
+        "A sorted, nonrecursive snapshot; metadata is queried after enumerating names."
+      ],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 4,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "environment_config",
+      "source": "language_examples/environment_config.ail",
+      "sha256": "e00d30619557d1d135543c4f154beeefd7521f6f30bf4be8898914785382936c",
+      "imports": [
+        "checked_integer"
+      ],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "env_int",
+            "parameters": [
+              {
+                "name": "name",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "default",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "int"
+          },
+          {
+            "name": "env_bool",
+            "parameters": [
+              {
+                "name": "name",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "default",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "int"
+          }
+        ],
+        "structs": []
+      },
+      "source_comments": [
+        "Configuration values are read at each call; no process-wide cache."
+      ],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 6,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "integer_column_stats",
+      "source": "language_examples/integer_column_stats.ail",
+      "sha256": "9a37ab4cb6459ab6157b6a241da9d597ca8f90b685698742c706e3d7f8c58b1f",
+      "imports": [
+        "checked_integer"
+      ],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "integer_column_stats",
+            "parameters": [
+              {
+                "name": "data",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "column",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "IntegerColumnStats"
+          },
+          {
+            "name": "integer_column_stats_bytes",
+            "parameters": [
+              {
+                "name": "data",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "column",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "IntegerColumnStats"
+          },
+          {
+            "name": "integer_column_stats_render",
+            "parameters": [
+              {
+                "name": "stats",
+                "type": "IntegerColumnStats",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "str"
+          }
+        ],
+        "structs": [
+          {
+            "name": "IntegerColumnStats",
+            "constructor_parameters": [
+              {
+                "name": "count",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "total",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "minimum",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "maximum",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "fields": [
+              {
+                "name": "count",
+                "type": "int"
+              },
+              {
+                "name": "total",
+                "type": "int"
+              },
+              {
+                "name": "minimum",
+                "type": "int"
+              },
+              {
+                "name": "maximum",
+                "type": "int"
+              }
+            ],
+            "methods": [
+              {
+                "name": "add",
+                "parameters": [
+                  {
+                    "name": "self",
+                    "type": null,
+                    "kind": "positional",
+                    "default": null
+                  },
+                  {
+                    "name": "value",
+                    "type": "int",
+                    "kind": "positional",
+                    "default": null
+                  }
+                ],
+                "returns": "void"
+              }
+            ]
+          }
+        ]
+      },
+      "source_comments": [],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 9,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "csv_column_stats",
+      "source": "language_examples/csv_column_stats.ail",
+      "sha256": "c6d4cf7701ac8b8d41477fd9c15f92eebc081d6dda3f18ff61ecdbe0d25a48a2",
+      "imports": [
+        "csv_integer_stream"
+      ],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "csv_column_stats",
+            "parameters": [
+              {
+                "name": "data",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "column",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "IntegerColumnStats"
+          }
+        ],
+        "structs": []
+      },
+      "source_comments": [
+        "Preserve the str API while avoiding whole-document row materialization."
+      ],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 23,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "csv_column_stats_stream",
+      "source": "language_examples/csv_column_stats_stream.ail",
+      "sha256": "646d4c3af64f9cd9a6de61c1bec497fa28e0a73d4b785973122785e049854897",
+      "imports": [
+        "csv_integer_stream",
+        "csv_stream",
+        "utf8_stream",
+        "integer_column_stats"
+      ],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "csv_column_stats_stream",
+            "parameters": [
+              {
+                "name": "reader",
+                "type": "binaryfile",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "column",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "size",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "IntegerColumnStats"
+          }
+        ],
+        "structs": []
+      },
+      "source_comments": [
+        "Completed rows and chunk temporaries do not escape this helper frame.",
+        "Caller retains the file. Memory depends on chunk and pending row, not row count.",
+        "No row-size restriction is added; very long fields remain supported.",
+        "The public contract is unchanged; the byte state avoids unused field/row objects."
+      ],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 34,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "tcp_json_lines",
+      "source": "language_examples/tcp_json_lines.ail",
+      "sha256": "eded8832ed5cc0b674ad9cc0f5f0110c99fdd014897620f9ae615a84f4040a4a",
+      "imports": [
+        "json_pointer",
+        "checked_integer"
+      ],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "tcp_json_lines",
+            "parameters": [
+              {
+                "name": "peer",
+                "type": "tcpsocket",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "timeout",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "max_line",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "int"
+          }
+        ],
+        "structs": []
+      },
+      "source_comments": [
+        "LF-delimited UTF-8 JSON; max_line excludes LF and is capped at 1 MiB.",
+        "Replies preserve number lexemes, member order and duplicate members.",
+        "The peer must consume replies while uploading. Readiness waits are per operation;",
+        "sockets must be nonblocking; timeout is not a total request deadline.",
+        "JSON escaping can expand output; each response is bounded by 6 * max_line + 1 bytes."
+      ],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 23,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "tcp_json_lines_poll",
+      "source": "language_examples/tcp_json_lines_poll.ail",
+      "sha256": "3a030fdf5b69d2b2c30a77f52a28ee646478efa2c6bf6b303dbd511d649128a2",
+      "imports": [
+        "json_pointer",
+        "checked_integer"
+      ],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "tcp_json_lines_poll",
+            "parameters": [
+              {
+                "name": "listener",
+                "type": "tcpsocket",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "clients",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "idle_ms",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "max_line",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "max_active",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "JsonPollResult"
+          },
+          {
+            "name": "tcp_json_lines_poll_timed",
+            "parameters": [
+              {
+                "name": "listener",
+                "type": "tcpsocket",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "clients",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "idle_ms",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "max_line",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "max_active",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "peer_ms",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "total_ms",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "JsonPollResult"
+          }
+        ],
+        "structs": [
+          {
+            "name": "JsonPollPeer",
+            "constructor_parameters": [
+              {
+                "name": "socket",
+                "type": "tcpsocket",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "line",
+                "type": "bytearray",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "chunk",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "cursor",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "output",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "offset",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "done",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "progress",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "fields": [
+              {
+                "name": "socket",
+                "type": "tcpsocket"
+              },
+              {
+                "name": "line",
+                "type": "bytearray"
+              },
+              {
+                "name": "chunk",
+                "type": "bytes"
+              },
+              {
+                "name": "cursor",
+                "type": "int"
+              },
+              {
+                "name": "output",
+                "type": "bytes"
+              },
+              {
+                "name": "offset",
+                "type": "int"
+              },
+              {
+                "name": "done",
+                "type": "int"
+              },
+              {
+                "name": "progress",
+                "type": "int"
+              }
+            ],
+            "methods": []
+          },
+          {
+            "name": "JsonPollResult",
+            "constructor_parameters": [
+              {
+                "name": "frames",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "status",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "fields": [
+              {
+                "name": "frames",
+                "type": "int"
+              },
+              {
+                "name": "status",
+                "type": "int"
+              }
+            ],
+            "methods": []
+          }
+        ]
+      },
+      "source_comments": [
+        "At most one reply and one 8192-byte received chunk are retained per peer.",
+        "Keep temporary receive/send byte arenas within one I/O operation.",
+        "LF-delimited UTF-8 JSON, preserving number lexemes, member order and duplicates.",
+        "max_line excludes LF; its fixed safety cap is 1 MiB. Replies <=6*max_line+1.",
+        "idle_ms is a batch-wide wait with no ready events, not a per-peer request deadline.",
+        "A stalled peer remains active until EOF/error or the batch's idle wait expires.",
+        "Caller owns listener; all accepted peers are closed here, including on failure.",
+        "peer_ms bounds time without actual received/sent bytes for each accepted peer.",
+        "total_ms bounds the whole batch, including continued traffic. Zero disables either.",
+        "Deadlines are checked between operations; this is not a real-time scheduling guarantee."
+      ],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 30,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "string_map",
+      "source": "language_examples/string_map.ail",
+      "sha256": "80e2bd975788dfb9b6fe783c0de5b65deb217ed6a56ddb2148e177befe2525cd",
+      "imports": [
+        "json_text"
+      ],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "string_map_from_config",
+            "parameters": [
+              {
+                "name": "data",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "dict[str, str]"
+          },
+          {
+            "name": "string_map_copy",
+            "parameters": [
+              {
+                "name": "values",
+                "type": "dict[str, str]",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "dict[str, str]"
+          },
+          {
+            "name": "string_map_merge",
+            "parameters": [
+              {
+                "name": "left",
+                "type": "dict[str, str]",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "right",
+                "type": "dict[str, str]",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "dict[str, str]"
+          },
+          {
+            "name": "string_map_keys",
+            "parameters": [
+              {
+                "name": "values",
+                "type": "dict[str, str]",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "list[str]"
+          },
+          {
+            "name": "string_map_values",
+            "parameters": [
+              {
+                "name": "values",
+                "type": "dict[str, str]",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "list[str]"
+          },
+          {
+            "name": "string_map_render",
+            "parameters": [
+              {
+                "name": "values",
+                "type": "dict[str, str]",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "str"
+          }
+        ],
+        "structs": []
+      },
+      "source_comments": [],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 9,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "checked_integer",
+      "source": "language_examples/checked_integer.ail",
+      "sha256": "13af69bb8fd55bdf665d38a7410a228f95679e28483842c900127a1aded78660",
+      "imports": [],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "parse_int64_decimal",
+            "parameters": [
+              {
+                "name": "text",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "int"
+          },
+          {
+            "name": "parse_int64_text",
+            "parameters": [
+              {
+                "name": "text",
+                "type": "str",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "int"
+          },
+          {
+            "name": "checked_int64_add",
+            "parameters": [
+              {
+                "name": "a",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "b",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "int"
+          },
+          {
+            "name": "parse_int64_decimal_bytes",
+            "parameters": [
+              {
+                "name": "text",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "int"
+          }
+        ],
+        "structs": []
+      },
+      "source_comments": [],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 4,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "cli_args",
+      "source": "language_examples/cli_args.ail",
+      "sha256": "56fad985a43f291bc3bab72cde469c1f49cf0991d4699f94b88480ef6631c972",
+      "imports": [],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "cli_parse",
+            "parameters": [
+              {
+                "name": "args",
+                "type": "list[str]",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "value_options",
+                "type": "list[str]",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "switch_options",
+                "type": "list[str]",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "CliArgs"
+          }
+        ],
+        "structs": [
+          {
+            "name": "CliArgs",
+            "constructor_parameters": [
+              {
+                "name": "options",
+                "type": "dict[str, str]",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "positional",
+                "type": "list[str]",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "fields": [
+              {
+                "name": "options",
+                "type": "dict[str, str]"
+              },
+              {
+                "name": "positional",
+                "type": "list[str]"
+              }
+            ],
+            "methods": []
+          }
+        ]
+      },
+      "source_comments": [],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 3,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "json_pointer_batch",
+      "source": "language_examples/json_pointer_batch.ail",
+      "sha256": "c89e2180b82f198d0b7f97cc1739f3709ea79575468a7c57e36508937201f131",
+      "imports": [
+        "json_pointer",
+        "json_tree"
+      ],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "json_pointer_batch",
+            "parameters": [
+              {
+                "name": "nodes",
+                "type": "list[JsonValue]",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "pointers",
+                "type": "list[str]",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "list[str]"
+          },
+          {
+            "name": "json_pointer_batch_render",
+            "parameters": [
+              {
+                "name": "nodes",
+                "type": "list[JsonValue]",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "pointers",
+                "type": "list[str]",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "str"
+          }
+        ],
+        "structs": []
+      },
+      "source_comments": [],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 23,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md",
+      "runtime_all_api_qualified": false
+    },
+    {
+      "module": "integer_row_stream",
+      "source": "language_examples/integer_row_stream.ail",
+      "sha256": "1e180c8fac332ac2e27a0d0d1e3203557a92b25012df7873c14557b4d5cc4518",
+      "imports": [],
+      "declared_api": {
+        "scope": "loaded_sources",
+        "types": "declared_annotations",
+        "functions": [
+          {
+            "name": "integer_row_report_stream",
+            "parameters": [
+              {
+                "name": "reader",
+                "type": "binaryfile",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "cols",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "size",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "returns": "bytes"
+          }
+        ],
+        "structs": [
+          {
+            "name": "IntegerRowStreamState",
+            "constructor_parameters": [
+              {
+                "name": "cols",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "column",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "total",
+                "type": "int",
+                "kind": "positional",
+                "default": null
+              },
+              {
+                "name": "carry",
+                "type": "bytes",
+                "kind": "positional",
+                "default": null
+              }
+            ],
+            "fields": [
+              {
+                "name": "cols",
+                "type": "int"
+              },
+              {
+                "name": "column",
+                "type": "int"
+              },
+              {
+                "name": "total",
+                "type": "int"
+              },
+              {
+                "name": "carry",
+                "type": "bytes"
+              }
+            ],
+            "methods": []
+          }
+        ]
+      },
+      "source_comments": [
+        "Little-endian signed int64 records, grouped into complete rows with checked prefixes.",
+        "Returns all ASCII decimal totals with LF, and produces no stdout before validation finishes.",
+        "Caller retains the open reader; read chunks 1..1MiB; partial record/row or overflow is ValueError.",
+        "Memory retains output plus a bounded chunk; the final bytes result is an immutable snapshot."
+      ],
+      "source_check": {
+        "status": "passed",
+        "checked_functions": 3,
+        "diagnostics": [],
+        "exit_code": 0
+      },
+      "contract_source": "python/pkg-v12/SEMANTICS.md section208",
+      "runtime_all_api_qualified": false
+    }
+  ],
+  "excludes": [
+    "builtins and methods without source declarations",
+    "C/object interfaces",
+    "entry programs and other examples",
+    "ownership/error contracts inferred from annotations",
+    "claim of all API runtime qualification"
+  ],
+  "source_check_all_passed": true,
+  "dependency_pins": {
+    "language_examples/text_search.ail": "5d22ade25ae3c96068a760494542923a43587c6a19f111a6fba203d1aaeb39ea",
+    "language_examples/binary_search.ail": "c5cbdbda90910c98a130060c0830d6ad0e70ce1a3464446e03993b18574d32ec",
+    "language_examples/utf8_stream.ail": "e1625b222e5bc8d6275155be68d2e0f1b0be42e0450d582b5b08cb5faee5cad9",
+    "language_examples/binary_numbers.ail": "c50fa2995ffeaa7fac6d9c39f9cf4cb1e321c8424430f334dca99f470822ea84",
+    "language_examples/binary_float64.ail": "a7ac4e48a1896db30057e179da1989421c093aa868404d02f58e7b6220977ad4",
+    "language_examples/base64_codec.ail": "ee2c6a863b9afd7bc0b296bc25fcc9f044c8998977ee722140cac700eeefe171",
+    "language_examples/url_codec.ail": "165be3913e5be5e5e610e7cf7757a36ae7beac8e4272008ab4184a63e63f28d7",
+    "language_examples/csv_table.ail": "4811c289909cfe3fed2a02d85b05ec9c141cf6665fdc9b1634bf90984de54613",
+    "language_examples/csv_stream.ail": "a175c2f7d47a19967f5bd89e45fe8806ddc523fe15568134e1c2dbb309d90598",
+    "language_examples/json_text.ail": "01c06114d903efeaefcb9b49d005bae19cfd4c5fe98fe0b5879099d7320e240b",
+    "language_examples/csv_group.ail": "22d40e5d3ef1283514d57f2c363e51b0e547143f1a1baf2d4ce108a7ba51c7d9",
+    "language_examples/checked_integer.ail": "13af69bb8fd55bdf665d38a7410a228f95679e28483842c900127a1aded78660",
+    "language_examples/csv_writer.ail": "89c8d53ec9a5a9d14f5aa9954e77ecc024671777cd181a2fbcc058adc06619ad",
+    "language_examples/json_document.ail": "75a843bbe374ccd059be58e4f9465f32f3eff767e9f18d20d13773194ef47bbd",
+    "language_examples/json_tree.ail": "a95ac93368faccfb6ff74db8ccd08e303ec5645a27f20a0a39443b57107d0791",
+    "language_examples/json_pointer.ail": "76036a9d1c3883535bfb21ac5a5547cf00de1454a9ab8821eca571d12740c2e3",
+    "language_examples/directory_catalog.ail": "ce54ace0050fd85bfadd4e6d1be99787ca3cd9df0f69fd90ec6fb1068272dae5",
+    "language_examples/environment_config.ail": "e00d30619557d1d135543c4f154beeefd7521f6f30bf4be8898914785382936c",
+    "language_examples/integer_column_stats.ail": "9a37ab4cb6459ab6157b6a241da9d597ca8f90b685698742c706e3d7f8c58b1f",
+    "language_examples/csv_column_stats.ail": "c6d4cf7701ac8b8d41477fd9c15f92eebc081d6dda3f18ff61ecdbe0d25a48a2",
+    "language_examples/csv_integer_stream.ail": "947db895093cbeca129211bc3da9d2d43f64e38a10b550dd3669193de69c036a",
+    "language_examples/csv_column_stats_stream.ail": "646d4c3af64f9cd9a6de61c1bec497fa28e0a73d4b785973122785e049854897",
+    "language_examples/tcp_json_lines.ail": "eded8832ed5cc0b674ad9cc0f5f0110c99fdd014897620f9ae615a84f4040a4a",
+    "language_examples/tcp_json_lines_poll.ail": "3a030fdf5b69d2b2c30a77f52a28ee646478efa2c6bf6b303dbd511d649128a2",
+    "language_examples/string_map.ail": "80e2bd975788dfb9b6fe783c0de5b65deb217ed6a56ddb2148e177befe2525cd",
+    "language_examples/cli_args.ail": "56fad985a43f291bc3bab72cde469c1f49cf0991d4699f94b88480ef6631c972",
+    "language_examples/json_pointer_batch.ail": "c89e2180b82f198d0b7f97cc1739f3709ea79575468a7c57e36508937201f131",
+    "language_examples/integer_row_stream.ail": "1e180c8fac332ac2e27a0d0d1e3203557a92b25012df7873c14557b4d5cc4518"
+  },
+  "qualification_scope": "Source/type checks at generation only; behavior/ownership/errors require SEMANTICS and runtime evidence"
+}

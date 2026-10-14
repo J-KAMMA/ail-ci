@@ -1,0 +1,39 @@
+use checked_integer;
+use json_text;
+
+fn integer_map_from_tsv(data: str) -> dict[str, int] {
+    let values: dict[str, int] = {};
+    let lines: list[str] = data.splitlines();
+    for line in lines {
+        let parts: list[str] = line.split("\t");
+        if len(parts) != 2 { raise ValueError; }
+        values[parts[0]] = parse_int64_decimal(parts[1]);
+    }
+    return values;
+}
+
+fn integer_map_copy(values: dict[str, int]) -> dict[str, int] {
+    return values.copy();
+}
+
+fn integer_map_merge(left: dict[str, int], right: dict[str, int]) -> dict[str, int] {
+    let result: dict[str, int] = left.copy();
+    result.update(right);
+    return result;
+}
+
+fn integer_map_keys(values: dict[str, int]) -> list[str] {
+    return values.keys();
+}
+
+fn integer_map_total(values: dict[str, int]) -> int {
+    let total: int = 0;
+    for key, value in values.items() { total = checked_int64_add(total, value); }
+    return total;
+}
+
+fn integer_map_render(values: dict[str, int]) -> str {
+    let parts: list[str] = [];
+    for key, value in values.items() { parts.append(json_quote(key) + ":" + str(value)); }
+    return "{" + ",".join(parts) + "}\n";
+}

@@ -1,0 +1,32 @@
+# A reusable value with text metadata and an arbitrary binary payload.
+struct Artifact { label: str; data: bytes; revision: int; }
+
+fn artifact(label: str, data: bytes, revision: int) -> Artifact {
+    if revision < 0 { raise ValueError; }
+    return Artifact(label, data, revision);
+}
+
+fn renamed(item: Artifact, label: str) -> Artifact {
+    return Artifact(label, item.data, item.revision);
+}
+
+fn with_data(item: Artifact, data: bytes) -> Artifact {
+    return Artifact(item.label, data, item.revision);
+}
+
+fn stored_size(item: Artifact) -> int { return len(item.data); }
+
+# Validate decimal text before arithmetic so an invalid revision is catchable.
+fn artifact_revision(text: str) -> int {
+    let clean = text.strip(); let value = 0;
+    if len(clean) == 0 { raise ValueError; }
+    for digit in clean {
+        if digit < "0" or digit > "9" { raise ValueError; }
+        let number = int(digit);
+        if value > 922337203685477580 or (value == 922337203685477580 and number > 7) {
+            raise ValueError;
+        }
+        value = value * 10 + number;
+    }
+    return value;
+}

@@ -1,0 +1,49 @@
+fn _checked_float64_finite(value: float) -> void {
+    if value != value or value > 1.7976931348623157e308 or value < -1.7976931348623157e308 {
+        raise ValueError;
+    }
+}
+
+fn parse_float64_decimal(text: str) -> float {
+    let state: int = 0;
+    for c in text {
+        let digit: int = ord(c) - 48;
+        if state == 0 and (c == "+" or c == "-") { state = 1; }
+        elif state <= 1 {
+            if digit >= 0 and digit <= 9 { state = 2; }
+            elif c == "." { state = 3; }
+            else { raise ValueError; }
+        } elif state == 2 {
+            if digit >= 0 and digit <= 9 { state = 2; }
+            elif c == "." { state = 4; }
+            elif c == "e" or c == "E" { state = 5; }
+            else { raise ValueError; }
+        } elif state == 3 {
+            if digit >= 0 and digit <= 9 { state = 4; }
+            else { raise ValueError; }
+        } elif state == 4 {
+            if digit >= 0 and digit <= 9 { state = 4; }
+            elif c == "e" or c == "E" { state = 5; }
+            else { raise ValueError; }
+        } elif state == 5 {
+            if c == "+" or c == "-" { state = 6; }
+            elif digit >= 0 and digit <= 9 { state = 7; }
+            else { raise ValueError; }
+        } else {
+            if digit >= 0 and digit <= 9 { state = 7; }
+            else { raise ValueError; }
+        }
+    }
+    if state != 2 and state != 4 and state != 7 { raise ValueError; }
+    let value: float = float(text);
+    _checked_float64_finite(value);
+    return value;
+}
+
+fn checked_float64_add(a: float, b: float) -> float {
+    _checked_float64_finite(a);
+    _checked_float64_finite(b);
+    let result: float = a + b;
+    _checked_float64_finite(result);
+    return result;
+}

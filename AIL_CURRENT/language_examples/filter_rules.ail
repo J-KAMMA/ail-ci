@@ -1,0 +1,5 @@
+const ERROR_PREFIX = "ERR:";
+
+fn is_error(line: str) {
+    return line.startswith(ERROR_PREFIX);
+}

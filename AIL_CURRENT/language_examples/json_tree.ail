@@ -1,0 +1,96 @@
+use json_document;
+use json_text;
+
+# A str never holds a surrogate (the language refuses one everywhere), so key and string
+# texts need no per-character scan here.
+
+fn json_validate_nodes(nodes: list[JsonValue]) -> int {
+    if len(nodes) == 0 { raise ValueError; }
+    let stack: list[int] = [];
+    for i in range(len(nodes)) {
+        let node: JsonValue = nodes[i];
+        if i == 0 {
+            if node.parent != -1 or node.key != "" { raise ValueError; }
+        } else {
+            if node.parent < 0 or node.parent >= i { raise ValueError; }
+            let parent: JsonValue = nodes[node.parent];
+            if parent.kind != 4 and parent.kind != 5 { raise ValueError; }
+            while len(stack) > 0 and stack[-1] != node.parent { stack.pop(); }
+            if len(stack) == 0 { raise ValueError; }
+            if parent.kind == 4 and node.key != "" { raise ValueError; }
+        }
+        if node.kind == 0 {
+            if node.text != "null" { raise ValueError; }
+        } elif node.kind == 1 {
+            if node.text != "true" and node.text != "false" { raise ValueError; }
+        } elif node.kind == 2 {
+            if json_scalar_kind(node.text) != 2 { raise ValueError; }
+        } elif node.kind == 3 {
+        } elif node.kind == 4 or node.kind == 5 {
+            if node.text != "" { raise ValueError; }
+            stack.append(i);
+        } else { raise ValueError; }
+    }
+    return 1;
+}
+
+fn json_render_document(nodes: list[JsonValue]) -> str {
+    json_validate_nodes(nodes);
+    return _json_render_valid(nodes);
+}
+
+# Render a tree already accepted by json_validate_nodes.
+fn _json_render_valid(nodes: list[JsonValue]) -> str {
+    let parts: list[str] = [];
+    let stack: list[int] = [];
+    let counts: list[int] = [];
+    for i in range(len(nodes)) {
+        let node: JsonValue = nodes[i];
+        while len(stack) > 0 and stack[-1] != node.parent {
+            let closed: int = stack.pop();
+            counts.pop();
+            if nodes[closed].kind == 4 { parts.append("]"); }
+            else { parts.append("}"); }
+        }
+        if i != 0 {
+            if counts[-1] != 0 { parts.append(","); }
+            counts[-1] = counts[-1] + 1;
+            if nodes[node.parent].kind == 5 { parts.append(json_quote(node.key) + ":"); }
+        }
+        if node.kind == 4 or node.kind == 5 {
+            if node.kind == 4 { parts.append("["); }
+            else { parts.append("{"); }
+            stack.append(i);
+            counts.append(0);
+        } elif node.kind == 3 { parts.append(json_quote(node.text)); }
+        else { parts.append(node.text); }
+    }
+    while len(stack) > 0 {
+        let closed: int = stack.pop();
+        counts.pop();
+        if nodes[closed].kind == 4 { parts.append("]"); }
+        else { parts.append("}"); }
+    }
+    return "".join(parts);
+}
+
+fn json_subtree(nodes: list[JsonValue], index: int) -> list[JsonValue] {
+    json_validate_nodes(nodes);
+    return _json_subtree_valid(nodes, index);
+}
+
+# The subtree at `index` of a validated tree; a subtree of a valid tree is itself valid.
+fn _json_subtree_valid(nodes: list[JsonValue], index: int) -> list[JsonValue] {
+    if index < 0 or index >= len(nodes) { raise IndexError; }
+    let result = [];
+    let root: JsonValue = nodes[index];
+    result.append(JsonValue(root.kind, -1, "", root.text));
+    let i: int = index + 1;
+    while i < len(nodes) {
+        let node: JsonValue = nodes[i];
+        if node.parent < index { break; }
+        result.append(JsonValue(node.kind, node.parent - index, node.key, node.text));
+        i += 1;
+    }
+    return result;
+}

@@ -1,0 +1,16 @@
+fn _copy_stdin_chunk(size: int) -> int {
+    let data = read_stdin_bytes(size);
+    write_stdout_bytes(data);
+    return len(data);
+}
+
+fn copy_stdin(size: int) -> int {
+    if size <= 0 { raise ValueError; }
+    let total = 0;
+    while true {
+        let count = _copy_stdin_chunk(size);
+        if count == 0 { break; }
+        total += count;
+    }
+    return total;
+}

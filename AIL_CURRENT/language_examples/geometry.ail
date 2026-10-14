@@ -1,0 +1,24 @@
+# Coordinates are bounded so both rectangle areas and their union fit int64.
+struct Rectangle { x0: int; y0: int; x1: int; y1: int; }
+
+fn coordinate(value: int) -> int {
+    if value < -1000000000 or value > 1000000000 { raise ValueError; }
+    return value;
+}
+
+fn make(x0: int, y0: int, x1: int, y1: int) -> Rectangle {
+    coordinate(x0); coordinate(y0); coordinate(x1); coordinate(y1);
+    if x0 > x1 or y0 > y1 { raise ValueError; }
+    return Rectangle(x0, y0, x1, y1);
+}
+
+fn area(rectangle: Rectangle) -> int {
+    return (rectangle.x1 - rectangle.x0) * (rectangle.y1 - rectangle.y0);
+}
+
+fn intersection(a: Rectangle, b: Rectangle) -> int {
+    let width = min(a.x1, b.x1) - max(a.x0, b.x0);
+    let height = min(a.y1, b.y1) - max(a.y0, b.y0);
+    if width <= 0 or height <= 0 { return 0; }
+    return width * height;
+}

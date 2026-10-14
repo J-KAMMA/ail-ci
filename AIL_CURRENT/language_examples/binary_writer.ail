@@ -1,0 +1,51 @@
+struct BinaryWriter {
+    data: bytes;
+}
+
+impl BinaryWriter {
+    fn write_u8(self, value: int) -> void {
+        if value < 0 or value > 255 { raise ValueError; }
+        self.data = self.data + bytes([value]);
+    }
+
+    fn write_u16_le(self, value: int) -> void {
+        if value < 0 or value > 65535 { raise ValueError; }
+        self.data = self.data + bytes([value % 256, value // 256]);
+    }
+
+    fn write_u16_be(self, value: int) -> void {
+        if value < 0 or value > 65535 { raise ValueError; }
+        self.data = self.data + bytes([value // 256, value % 256]);
+    }
+
+    fn write_u32_le(self, value: int) -> void {
+        if value < 0 or value > 4294967295 { raise ValueError; }
+        self.data = self.data + bytes([value % 256, (value // 256) % 256, (value // 65536) % 256, value // 16777216]);
+    }
+
+    fn write_u32_be(self, value: int) -> void {
+        if value < 0 or value > 4294967295 { raise ValueError; }
+        self.data = self.data + bytes([value // 16777216, (value // 65536) % 256, (value // 256) % 256, value % 256]);
+    }
+
+    fn append(self, data: bytes) -> void {
+        self.data = self.data + data;
+    }
+
+    fn finish(self) -> bytes {
+        return self.data;
+    }
+
+    fn clear(self) -> void {
+        self.data = b"";
+    }
+}
+
+fn binary_record_encode(kind: int, payload: bytes) -> bytes {
+    if kind < 0 or kind > 65535 or len(payload) > 4294967295 { raise ValueError; }
+    let writer = BinaryWriter(b"AILR");
+    writer.write_u16_be(kind);
+    writer.write_u32_le(len(payload));
+    writer.append(payload);
+    return writer.finish();
+}

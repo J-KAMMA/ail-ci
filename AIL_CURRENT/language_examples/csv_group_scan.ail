@@ -1,0 +1,115 @@
+use utf8_stream;
+use checked_integer;
+use json_text;
+
+# csv_table_group_file in one pass: the same UTF-8 and CSV state machine as csv_decode_feed,
+# but only the key and value fields of each row are kept (no CsvRow, no field list), and
+# each row is folded straight into a group slot. Every failure of the two-stage path is a
+# ValueError, so the order in which different failures are found cannot be observed; a file
+# error (OSError) can only come from reading a chunk, which both paths do in the same order.
+# Group state is kept in locals of the one function (a list passed to a helper is copied).
+fn csv_table_group_scan(path: str, key_column: int, value_column: int, size: int) -> str {
+    if size <= 0 or key_column < 0 or value_column < 0 { raise ValueError; }
+    let utf8 = utf8_decoder_new();
+    let slots: dict[str, int] = {};
+    let names: list[str] = [];
+    let counts: list[int] = [];
+    let totals: list[int] = [];
+    let minimums: list[int] = [];
+    let maximums: list[int] = [];
+    let mode: int = 0;
+    let skip_lf: int = 0;
+    let index: int = 0;
+    let want: int = 0;
+    if key_column == 0 or value_column == 0 { want = 1; }
+    let field: str = "";
+    let key: str = "";
+    let value: int = 0;
+    for chunk in file_chunks(path, size) {
+        let text: str = utf8_decode_feed(utf8, chunk);
+        for ch in text {
+            if skip_lf == 1 and ch == "\n" { skip_lf = 0; continue; }
+            skip_lf = 0;
+            if mode == 2 {
+                if ch == "\"" { mode = 3; }
+                elif want == 1 { field += ch; }
+            } else {
+                if ch == "," or ch == "\r" or ch == "\n" {
+                    if ch == "," or mode != 0 or index != 0 {
+                        if index == key_column { key = field; }
+                        if index == value_column { value = parse_int64_decimal(field); }
+                        if ch == "," {
+                            index += 1;
+                        } else {
+                            if key_column > index or value_column > index { raise ValueError; }
+                            let slot: int = slots.get(key, -1);
+                            if slot >= 0 {
+                                let count: int = counts[slot];
+                                if count == 9223372036854775807 { raise ValueError; }
+                                totals[slot] = checked_int64_add(totals[slot], value);
+                                counts[slot] = count + 1;
+                                if value < minimums[slot] { minimums[slot] = value; }
+                                if value > maximums[slot] { maximums[slot] = value; }
+                            } else {
+                                slots[key] = len(names);
+                                names.append(key);
+                                counts.append(1);
+                                totals.append(value);
+                                minimums.append(value);
+                                maximums.append(value);
+                            }
+                            index = 0;
+                        }
+                        want = 0;
+                        if index == key_column or index == value_column { want = 1; }
+                    }
+                    mode = 0;
+                    field = "";
+                    if ch == "\r" { skip_lf = 1; }
+                } elif ch == "\"" {
+                    if mode == 3 {
+                        if want == 1 { field += "\""; }
+                        mode = 2;
+                    } else {
+                        if mode != 0 { raise ValueError; }
+                        mode = 2;
+                    }
+                } else {
+                    if mode == 3 { raise ValueError; }
+                    if mode == 0 { mode = 1; }
+                    if want == 1 { field += ch; }
+                }
+            }
+        }
+    }
+    utf8_decode_finish(utf8);
+    if mode == 2 { raise ValueError; }
+    if mode != 0 or index != 0 {
+        if index == key_column { key = field; }
+        if index == value_column { value = parse_int64_decimal(field); }
+        if key_column > index or value_column > index { raise ValueError; }
+        let slot: int = slots.get(key, -1);
+        if slot >= 0 {
+            let count: int = counts[slot];
+            if count == 9223372036854775807 { raise ValueError; }
+            totals[slot] = checked_int64_add(totals[slot], value);
+            counts[slot] = count + 1;
+            if value < minimums[slot] { minimums[slot] = value; }
+            if value > maximums[slot] { maximums[slot] = value; }
+        } else {
+            slots[key] = len(names);
+            names.append(key);
+            counts.append(1);
+            totals.append(value);
+            minimums.append(value);
+            maximums.append(value);
+        }
+    }
+    let parts: list[str] = [];
+    for i in range(len(names)) {
+        parts.append("{\"key\":" + json_quote(names[i]) + ",\"count\":" + str(counts[i])
+            + ",\"total\":" + str(totals[i]) + ",\"minimum\":" + str(minimums[i])
+            + ",\"maximum\":" + str(maximums[i]) + "}");
+    }
+    return "[" + ",".join(parts) + "]";
+}

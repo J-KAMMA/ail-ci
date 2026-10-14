@@ -1,0 +1,27 @@
+use json_merge_patch;
+use file_identity;
+
+fn main() -> int {
+    if len(sys.argv) != 4 {
+        print("usage: json_merge INPUT PATCH OUTPUT", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let input: str = sys.argv[1];
+        let patch_path: str = sys.argv[2];
+        let output: str = sys.argv[3];
+        if output == input or output == patch_path { raise ValueError; }
+        if file_paths_same(input, output) or file_paths_same(patch_path, output) { raise ValueError; }
+        let target = json_parse_document(read_bytes(input).decode());
+        let patch = json_parse_document(read_bytes(patch_path).decode());
+        let report: str = json_render_document(json_merge_patch(target, patch)) + "\n";
+        write_bytes(output, report.encode());
+        return 0;
+    } except ValueError {
+        print("invalid JSON merge document, duplicate member, or output alias", file=sys.stderr);
+        return 2;
+    } except OSError {
+        print("JSON merge file error", file=sys.stderr);
+        return 2;
+    }
+}

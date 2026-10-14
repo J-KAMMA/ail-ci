@@ -1,0 +1,2 @@
+const ERROR_PREFIX = "ERR:";
+const REPORT_PREFIX = "matched=";

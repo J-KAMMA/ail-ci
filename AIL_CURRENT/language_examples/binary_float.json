@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "functions": {
+    "native_binary64_pack": {
+      "symbol": "native_binary64_pack",
+      "params": [["value", "float"], ["reverse", "int"]],
+      "result": "bytes"
+    },
+    "native_binary64_unpack": {
+      "symbol": "native_binary64_unpack",
+      "params": [["data", "bytes"], ["reverse", "int"]],
+      "result": "float"
+    }
+  }
+}

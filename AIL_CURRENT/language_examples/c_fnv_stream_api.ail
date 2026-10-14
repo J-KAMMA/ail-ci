@@ -1,0 +1,5 @@
+fn file_hash(path: str, seed: int) -> int {
+    return hash_file(path, seed);
+}
+
+fn stdin_hash(seed: int) -> int { return hash_stdin(seed); }

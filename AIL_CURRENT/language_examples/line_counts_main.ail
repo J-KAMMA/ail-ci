@@ -1,0 +1,30 @@
+# UTF-8 line counts in first appearance order, with hex-encoded UTF-8 keys.
+use named_counters;
+
+fn main() -> int {
+    if len(sys.argv) != 3 {
+        print("usage: line_counts <input-utf8> <output-tsv>", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let state = named_counters_new();
+        for line in read_bytes(sys.argv[1]).decode().splitlines() {
+            named_counters_add(state, line, 1);
+        }
+        let rows: list[str] = [];
+        for key, count in named_counters_snapshot(state).items() {
+            rows.append(key.encode().hex() + "\t" + str(count) + "\n");
+        }
+        write_bytes(sys.argv[2], "".join(rows).encode());
+        return 0;
+    } except OSError {
+        print("line counts file error", file=sys.stderr);
+        return 3;
+    } except UnicodeDecodeError {
+        print("input must be UTF-8", file=sys.stderr);
+        return 4;
+    } except ValueError {
+        print("invalid line counts input", file=sys.stderr);
+        return 4;
+    }
+}

@@ -1,0 +1,47 @@
+use json_query_file;
+use cli_args;
+
+fn json_query_usage()->void {
+    print("usage: json_query extract|string-map INPUT OUTPUT POINTER", file=sys.stderr);
+    print("       json_query batch INPUT OUTPUT [POINTER ...]", file=sys.stderr);
+    print("       json_query MODE --input INPUT --output OUTPUT [--pointer POINTER] [-- POINTER ...]", file=sys.stderr);
+}
+
+fn main()->int {
+    try {
+        let parsed=cli_parse(sys.argv[1:], ["input","output","pointer"], ["help"]);
+        if "help" in parsed.options {json_query_usage();return 0;}
+        if len(parsed.positional)==0 {raise ValueError;}
+        let mode=parsed.positional[0];
+        if mode!="extract" and mode!="string-map" and mode!="batch" {raise ValueError;}
+        let input:str="";let output:str="";let pointers:list[str]=[];
+        if len(parsed.options)>0 {
+            if "input" not in parsed.options or "output" not in parsed.options {raise ValueError;}
+            input=parsed.options["input"];output=parsed.options["output"];
+            if "pointer" in parsed.options {
+                if len(parsed.positional)!=1 {raise ValueError;}
+                pointers.append(parsed.options["pointer"]);
+            } else {pointers=parsed.positional[1:];}
+        } else {
+            if len(parsed.positional)<3 {raise ValueError;}
+            input=parsed.positional[1];output=parsed.positional[2];pointers=parsed.positional[3:];
+        }
+        let result=json_query_file(mode,input,output,pointers);
+        if result.error==0 {return 0;}
+        if result.error==2 {raise UnicodeDecodeError;}
+        if result.error==3 {raise KeyError;}
+        if result.error==4 {raise IndexError;}
+        if result.error==5 {raise OSError;}
+        raise ValueError;
+    } except UnicodeDecodeError {
+        print("invalid UTF-8 JSON input", file=sys.stderr);return 2;
+    } except ValueError {
+        print("invalid JSON query, options, document, pointer, or output alias", file=sys.stderr);return 2;
+    } except KeyError {
+        print("JSON pointer target is missing", file=sys.stderr);return 2;
+    } except IndexError {
+        print("JSON pointer index is outside the document", file=sys.stderr);return 2;
+    } except OSError {
+        print("JSON query file error", file=sys.stderr);return 2;
+    }
+}

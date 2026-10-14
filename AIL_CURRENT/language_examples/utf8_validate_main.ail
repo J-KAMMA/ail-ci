@@ -1,0 +1,18 @@
+# Validate the whole input without keeping or printing its decoded text.
+fn main() -> int {
+    if len(sys.argv) != 2 {
+        print("usage: utf8_validate <input>", file=sys.stderr);
+        return 2;
+    }
+    try {
+        read_bytes(sys.argv[1]).decode();
+        print("valid UTF-8");
+        return 0;
+    } except OSError {
+        print("input file error", file=sys.stderr);
+        return 3;
+    } except UnicodeDecodeError {
+        print("input is not UTF-8", file=sys.stderr);
+        return 4;
+    }
+}

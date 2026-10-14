@@ -1,0 +1,86 @@
+use json_tree;
+
+fn json_pointer_segments(pointer: str) -> list[str] {
+    let result: list[str] = [];
+    if pointer == "" { return result; }
+    if pointer[0] != "/" { raise ValueError; }
+    let escaped: int = 0;
+    for c in pointer {
+        if escaped {
+            if c != "0" and c != "1" { raise ValueError; }
+            escaped = 0;
+        } elif c == "~" { escaped = 1; }
+    }
+    if escaped { raise ValueError; }
+    for token in pointer[1:].split("/") {
+        result.append(token.replace("~1", "/").replace("~0", "~"));
+    }
+    return result;
+}
+
+fn json_pointer_index(nodes: list[JsonValue], pointer: str) -> int {
+    json_validate_nodes(nodes);
+    return _json_pointer_index_valid(nodes, pointer);
+}
+
+# One past the last descendant of `index` in a validated tree.
+fn _json_subtree_end(nodes: list[JsonValue], index: int) -> int {
+    let i: int = index + 1;
+    while i < len(nodes) and nodes[i].parent >= index { i += 1; }
+    return i;
+}
+
+fn _json_pointer_index_valid(nodes: list[JsonValue], pointer: str) -> int {
+    let segments: list[str] = json_pointer_segments(pointer);
+    let current: int = 0;
+    for token in segments {
+        if nodes[current].kind == 5 {
+            let found: int = -1;
+            for i in range(current + 1, _json_subtree_end(nodes, current)) {
+                if nodes[i].parent == current and nodes[i].key == token {
+                    if found != -1 { raise ValueError; }
+                    found = i;
+                }
+            }
+            if found == -1 { raise KeyError; }
+            current = found;
+        } elif nodes[current].kind == 4 {
+            if token == "-" { raise KeyError; }
+            let length: int = len(token);
+            if length == 0 { raise ValueError; }
+            let cap: int = len(nodes);
+            let quotient: int = cap // 10;
+            let remainder: int = cap % 10;
+            let offset: int = 0;
+            let oversized: int = 0;
+            let first: int = 1;
+            for c in token {
+                let digit: int = ord(c) - 48;
+                if digit < 0 or digit > 9 { raise ValueError; }
+                if first and digit == 0 and length != 1 { raise ValueError; }
+                first = 0;
+                if not oversized {
+                    if offset > quotient or (offset == quotient and digit > remainder) {
+                        oversized = 1;
+                    } else { offset = offset * 10 + digit; }
+                }
+            }
+            if oversized or offset >= cap { raise KeyError; }
+            let position: int = 0;
+            let selected: int = -1;
+            for i in range(current + 1, _json_subtree_end(nodes, current)) {
+                if nodes[i].parent == current {
+                    if position == offset { selected = i; break; }
+                    position += 1;
+                }
+            }
+            if selected == -1 { raise KeyError; }
+            current = selected;
+        } else { raise KeyError; }
+    }
+    return current;
+}
+
+fn json_pointer_extract(nodes: list[JsonValue], pointer: str) -> list[JsonValue] {
+    return json_subtree(nodes, json_pointer_index(nodes, pointer));
+}

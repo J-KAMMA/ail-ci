@@ -1,0 +1,17 @@
+# Axis-aligned boxes with shared point fields and explicit independent copies.
+struct Point2 { x: float; y: float; }
+struct Box2 { lower: Point2; upper: Point2; }
+
+fn box2_new(lower: Point2, upper: Point2) -> Box2 {
+    if not (lower.x <= upper.x and lower.y <= upper.y) { raise ValueError(); }
+    return Box2(lower, upper);
+}
+
+fn box2_contains(box: Box2, point: Point2) -> int {
+    return box.lower.x <= point.x and point.x <= box.upper.x
+        and box.lower.y <= point.y and point.y <= box.upper.y;
+}
+
+fn box2_copy(box: Box2) -> Box2 {
+    return Box2(Point2(box.lower.x, box.lower.y), Point2(box.upper.x, box.upper.y));
+}

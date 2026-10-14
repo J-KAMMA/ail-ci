@@ -1,0 +1,12 @@
+# Link object_filter_config.o and object_filter_rules.o.
+fn main() -> int {
+    let count = 0;
+    for line in sys.stdin {
+        if is_error(line) {
+            print(line, end="");
+            count += 1;
+        }
+    }
+    print(REPORT_PREFIX, count, sep="");
+    return 0;
+}

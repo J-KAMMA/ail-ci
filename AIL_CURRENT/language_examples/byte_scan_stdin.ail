@@ -1,0 +1,15 @@
+use byte_scan_counts;
+
+fn main() -> int {
+    if len(sys.argv) != 1 { return 2; }
+    let size = 0;
+    let zeros = 0;
+    while true {
+        let data = read_stdin_bytes(8192);
+        if len(data) == 0 { break; }
+        size += len(data);
+        zeros += count_zero_bytes(data);
+    }
+    write_stdout_bytes(("bytes=" + str(size) + "\nzeros=" + str(zeros) + "\n").encode());
+    return 0;
+}

@@ -1,0 +1,10 @@
+fn main() -> int {
+    if len(sys.argv) != 3 { return 2; }
+    try {
+        let negate = int(sys.argv[2]);
+        if negate != 0 and negate != 1 { return 2; }
+        print(contains_nul(read_bytes(sys.argv[1]), negate));
+        return 0;
+    } except ValueError { return 2; }
+      except OSError { return 3; }
+}

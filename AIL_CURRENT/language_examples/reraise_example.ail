@@ -1,0 +1,25 @@
+use record_queries;
+
+fn nonnegative(row: QueryRecord) -> int {
+    if row.value < 0 { raise ValueError(); }
+    return row.value;
+}
+
+fn checked_total(rows: list[QueryRecord]) -> int {
+    try { return query_total(rows, nonnegative); }
+    except ValueError {
+        print("invalid record");
+        raise;
+    }
+    return 0;
+}
+
+fn main() -> int {
+    let rows: list[QueryRecord] = [QueryRecord("ok", 3), QueryRecord("bad", -1)];
+    try { print(checked_total(rows)); }
+    except ValueError {
+        print("caller caught ValueError");
+        return 0;
+    }
+    return 9;
+}

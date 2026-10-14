@@ -1,0 +1,88 @@
+use json_pointer;
+
+fn _json_edit_end(nodes: list[JsonValue], index: int) -> int {
+    let end: int = index + 1;
+    while end < len(nodes) and nodes[end].parent >= index { end += 1; }
+    return end;
+}
+
+fn _json_edit_splice(nodes: list[JsonValue], start: int, end: int, value: list[JsonValue], parent: int, key: str) -> list[JsonValue] {
+    let result = [];
+    for i in range(start) {
+        let node: JsonValue = nodes[i];
+        result.append(JsonValue(node.kind, node.parent, node.key, node.text));
+    }
+    for i in range(len(value)) {
+        let node: JsonValue = value[i];
+        let new_parent: int = parent;
+        let new_key: str = key;
+        if i != 0 { new_parent = start + node.parent; new_key = node.key; }
+        result.append(JsonValue(node.kind, new_parent, new_key, node.text));
+    }
+    let shift: int = len(value) - (end - start);
+    for i in range(end, len(nodes)) {
+        let node: JsonValue = nodes[i];
+        let new_parent: int = node.parent;
+        if new_parent >= end { new_parent += shift; }
+        result.append(JsonValue(node.kind, new_parent, node.key, node.text));
+    }
+    return result;
+}
+
+fn json_replace_at(nodes: list[JsonValue], pointer: str, value: list[JsonValue]) -> list[JsonValue] {
+    json_validate_nodes(nodes);
+    json_validate_nodes(value);
+    let selected: int = json_pointer_index(nodes, pointer);
+    let node: JsonValue = nodes[selected];
+    return _json_edit_splice(nodes, selected, _json_edit_end(nodes, selected), value, node.parent, node.key);
+}
+
+fn json_remove_at(nodes: list[JsonValue], pointer: str) -> list[JsonValue] {
+    json_validate_nodes(nodes);
+    let selected: int = json_pointer_index(nodes, pointer);
+    if selected == 0 { raise ValueError; }
+    let empty = json_subtree(nodes, selected);
+    empty.clear();
+    return _json_edit_splice(nodes, selected, _json_edit_end(nodes, selected), empty, -1, "");
+}
+
+fn json_object_set_at(nodes: list[JsonValue], pointer: str, key: str, value: list[JsonValue]) -> list[JsonValue] {
+    json_validate_nodes(nodes);
+    json_validate_nodes(value);
+    for c in key {
+        let code: int = ord(c);
+        if code >= 55296 and code <= 57343 { raise ValueError; }
+    }
+    let selected: int = json_pointer_index(nodes, pointer);
+    if nodes[selected].kind != 5 { raise ValueError; }
+    let found: int = -1;
+    for i in range(len(nodes)) {
+        if nodes[i].parent == selected and nodes[i].key == key {
+            if found != -1 { raise ValueError; }
+            found = i;
+        }
+    }
+    if found != -1 {
+        return _json_edit_splice(nodes, found, _json_edit_end(nodes, found), value, selected, key);
+    }
+    let end: int = _json_edit_end(nodes, selected);
+    return _json_edit_splice(nodes, end, end, value, selected, key);
+}
+
+fn json_array_insert_at(nodes: list[JsonValue], pointer: str, index: int, value: list[JsonValue]) -> list[JsonValue] {
+    json_validate_nodes(nodes);
+    json_validate_nodes(value);
+    let selected: int = json_pointer_index(nodes, pointer);
+    if nodes[selected].kind != 4 { raise ValueError; }
+    if index < 0 { raise IndexError; }
+    let count: int = 0;
+    let insertion: int = _json_edit_end(nodes, selected);
+    for i in range(len(nodes)) {
+        if nodes[i].parent == selected {
+            if count == index { insertion = i; }
+            count += 1;
+        }
+    }
+    if index > count { raise IndexError; }
+    return _json_edit_splice(nodes, insertion, insertion, value, selected, "");
+}

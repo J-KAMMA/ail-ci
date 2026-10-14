@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "functions": {
+    "hash32": {
+      "symbol": "native_fnv1a",
+      "params": [["data", "bytes"], ["seed", "uint32"]],
+      "result": "uint32"
+    }
+  }
+}

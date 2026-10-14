@@ -1,0 +1,18 @@
+use csv_stream;
+
+fn csv_project_row(row: CsvRow, columns: list[int]) -> CsvRow {
+    let fields: list[str] = row.fields;
+    let selected: list[str] = [];
+    for column in columns {
+        if column < 0 or column >= len(fields) { raise ValueError; }
+        selected.append(fields[column]);
+    }
+    return CsvRow(row.number, selected);
+}
+
+fn csv_project_rows(rows: list[CsvRow], columns: list[int]) -> list[CsvRow] {
+    for column in columns { if column < 0 { raise ValueError; } }
+    let result = [];
+    for row in rows { result.append(csv_project_row(row, columns)); }
+    return result;
+}

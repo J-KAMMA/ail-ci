@@ -1,0 +1,10 @@
+fn main() -> int {
+    let text = read_bytes(sys.argv[1]).decode();
+    let words = text.split();
+    let values = [int(word) for word in words];
+    let ordered = sorted(values);
+    let chosen = native_between(ordered, int(sys.argv[2]), int(sys.argv[3]));
+    print(len(chosen));
+    for value in chosen { print(value); }
+    return 0;
+}

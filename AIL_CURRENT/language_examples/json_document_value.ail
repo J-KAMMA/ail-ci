@@ -1,0 +1,44 @@
+use json_tree;
+
+struct JsonDocument { nodes: list[JsonValue]; }
+struct JsonDocuments { documents: list[JsonDocument]; }
+
+fn json_document_new(text: str) -> JsonDocument {
+    return JsonDocument(json_parse_document(text));
+}
+
+fn json_document_copy(document: JsonDocument) -> JsonDocument {
+    let nodes: list[JsonValue] = document.nodes;
+    json_validate_nodes(nodes);
+    let copied: list[JsonValue] = [];
+    for node in nodes {
+        copied.append(JsonValue(node.kind, node.parent, node.key, node.text));
+    }
+    return JsonDocument(copied);
+}
+
+fn json_document_render(document: JsonDocument) -> str {
+    let nodes: list[JsonValue] = document.nodes;
+    return json_render_document(nodes);
+}
+
+fn json_documents_new() -> JsonDocuments {
+    let documents: list[JsonDocument] = [];
+    return JsonDocuments(documents);
+}
+
+fn json_documents_append(batch: JsonDocuments, documents: list[JsonDocument]) -> void {
+    let prepared: list[JsonDocument] = [];
+    for document in documents { prepared.append(json_document_copy(document)); }
+    let previous: list[JsonDocument] = batch.documents;
+    let combined: list[JsonDocument] = previous.copy();
+    combined.extend(prepared);
+    batch.documents = combined;
+}
+
+fn json_documents_render(batch: JsonDocuments) -> str {
+    let documents: list[JsonDocument] = batch.documents;
+    let parts: list[str] = [];
+    for document in documents { parts.append(json_document_render(document)); }
+    return "[" + ",".join(parts) + "]";
+}

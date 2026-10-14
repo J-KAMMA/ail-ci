@@ -1,0 +1,59 @@
+use json_edit;
+
+struct JsonMergeFrame { patch: int; cursor: int; pointer: str; }
+
+fn _json_merge_unique(nodes: list[JsonValue]) -> void {
+    let seen: dict[str, int] = {};
+    for i in range(1, len(nodes)) {
+        let node: JsonValue = nodes[i];
+        if nodes[node.parent].kind == 5 {
+            # The canonical decimal parent and first colon separate arbitrary keys.
+            let qualified: str = str(node.parent) + ":" + node.key;
+            if qualified in seen { raise ValueError; }
+            seen[qualified] = 1;
+        }
+    }
+}
+
+fn json_merge_patch(target: list[JsonValue], patch: list[JsonValue]) -> list[JsonValue] {
+    json_validate_nodes(target);
+    json_validate_nodes(patch);
+    _json_merge_unique(target);
+    _json_merge_unique(patch);
+    if patch[0].kind != 5 { return json_subtree(patch, 0); }
+    let result = [JsonValue(5, -1, "", "")];
+    if target[0].kind == 5 { result = json_subtree(target, 0); }
+    let empty = [JsonValue(5, -1, "", "")];
+    let stack = [JsonMergeFrame(0, 1, "")];
+    while len(stack) > 0 {
+        let frame: JsonMergeFrame = stack[-1];
+        while frame.cursor < len(patch) and patch[frame.cursor].parent != frame.patch {
+            if patch[frame.cursor].parent < frame.patch { frame.cursor = len(patch); break; }
+            frame.cursor += 1;
+        }
+        if frame.cursor == len(patch) { stack.pop(); }
+        else {
+            let index: int = frame.cursor;
+            let member: JsonValue = patch[index];
+            frame.cursor += 1;
+            stack[-1] = frame;
+            let parent: int = json_pointer_index(result, frame.pointer);
+            let found: int = -1;
+            for i in range(len(result)) {
+                if result[i].parent == parent and result[i].key == member.key { found = i; }
+            }
+            let pointer: str = frame.pointer + "/" + member.key.replace("~", "~0").replace("/", "~1");
+            if member.kind == 0 {
+                if found != -1 { result = json_remove_at(result, pointer); }
+            } elif member.kind == 5 {
+                if found == -1 or result[found].kind != 5 {
+                    result = json_object_set_at(result, frame.pointer, member.key, empty);
+                }
+                stack.append(JsonMergeFrame(index, index + 1, pointer));
+            } else {
+                result = json_object_set_at(result, frame.pointer, member.key, json_subtree(patch, index));
+            }
+        }
+    }
+    return result;
+}

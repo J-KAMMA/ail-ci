@@ -1,0 +1,8 @@
+fn main() -> int {
+    if len(sys.argv) != 1 { return 2; }
+    try {
+        copy_stdin(8192);
+        return 0;
+    } except ValueError { return 2; }
+    except OSError { return 3; }
+}

@@ -1,0 +1,156 @@
+use json_text;
+
+# Full JSON documents over Unicode scalar text; preserve member order and lexemes.
+struct JsonValue { kind: int; parent: int; key: str; text: str; }
+struct JsonFrame { node: int; state: int; key: str; }
+
+fn _json_space(c: str) -> int {
+    return c == " " or c == "\t" or c == "\r" or c == "\n";
+}
+
+fn _json_literal_kind(token: str) -> int {
+    if token == "null" { return 0; }
+    if token == "true" or token == "false" { return 1; }
+    # Number states: start, sign, zero, integer, dot, fraction, exponent, sign, digits.
+    let state = 0;
+    for c in token {
+        let digit = ord(c) >= 48 and ord(c) <= 57;
+        if state == 0 or state == 1 {
+            if c == "-" and state == 0 { state = 1; }
+            elif c == "0" { state = 2; }
+            elif digit { state = 3; }
+            else { raise ValueError; }
+        } elif state == 2 or state == 3 {
+            if digit and state == 3 { state = 3; }
+            elif c == "." { state = 4; }
+            elif c == "e" or c == "E" { state = 6; }
+            else { raise ValueError; }
+        } elif state == 4 or state == 7 {
+            if not digit { raise ValueError; }
+            if state == 4 { state = 5; } else { state = 8; }
+        } elif state == 5 {
+            if digit { state = 5; }
+            elif c == "e" or c == "E" { state = 6; }
+            else { raise ValueError; }
+        } elif state == 6 {
+            if c == "+" or c == "-" { state = 7; }
+            elif digit { state = 8; }
+            else { raise ValueError; }
+        } else {
+            if not digit { raise ValueError; }
+        }
+    }
+    if state != 2 and state != 3 and state != 5 and state != 8 { raise ValueError; }
+    return 2;
+}
+
+fn json_scalar_kind(token: str) -> int {
+    return _json_literal_kind(token);
+}
+
+# Add one value under the container in `state`; returns the container's next state.
+# Container states: root value; array first/next/comma; object first/next/colon/value/comma; done.
+fn _json_leaf(nodes: list[JsonValue], parent: int, state: int, key: str, kind: int, text: str) -> int {
+    let next = 0; let member = "";
+    if state == 0 { next = 9; }
+    elif state == 1 or state == 2 { next = 3; }
+    elif state == 7 { next = 8; member = key; }
+    else { raise ValueError; }
+    nodes.append(JsonValue(kind, parent, member, text));
+    return next;
+}
+
+# True when `piece` ends in an odd number of backslashes, i.e. a quote after it is escaped.
+fn _json_escaped_end(piece: str) -> int {
+    if not piece.endswith("\\") { return false; }
+    return (len(piece) - len(piece.rstrip("\\"))) % 2 == 1;
+}
+
+# Splitting at every double quote alternates structure (even pieces) and string bodies (odd pieces);
+# a body whose piece ends in an odd run of backslashes continues past the escaped quote. Only
+# structure is walked character by character, and only structural characters touch the frame stack.
+fn json_parse_document(text: str) -> list[JsonValue] {
+    let nodes = [];
+    let frames = [];
+    let parent = -1; let state = 0; let key = "";
+    let parts = text.split("\"");
+    let last = len(parts) - 1;
+    let at = 0;
+    while true {
+        let token = "";
+        for c in parts[at] {
+            if ord(c) >= 45 and c != ":" and c != "[" and c != "]" and c != "{" and c != "}" {
+                token += c; continue;
+            }
+            let space = c == " " or c == "\t" or c == "\r" or c == "\n";
+            let punctuation = c == "[" or c == "]" or c == "{" or c == "}" or c == "," or c == ":";
+            if not space and not punctuation { token += c; continue; }
+            if token != "" {
+                state = _json_leaf(nodes, parent, state, key, _json_literal_kind(token), token);
+                token = "";
+            }
+            if space { continue; }
+            if c == "[" or c == "{" {
+                let kind = 4; let inner = 1;
+                if c == "{" { kind = 5; inner = 4; }
+                let index = len(nodes);
+                state = _json_leaf(nodes, parent, state, key, kind, "");
+                frames.append(JsonFrame(parent, state, ""));
+                parent = index; state = inner; key = "";
+            } elif c == "]" or c == "}" {
+                if c == "]" {
+                    if state != 1 and state != 3 { raise ValueError; }
+                } else {
+                    if state != 4 and state != 8 { raise ValueError; }
+                }
+                let outer = frames.pop();
+                parent = outer.node; state = outer.state;
+            } elif c == "," {
+                if state == 3 { state = 2; }
+                elif state == 8 { state = 5; }
+                else { raise ValueError; }
+            } else {
+                if state != 6 { raise ValueError; }
+                state = 7;
+            }
+        }
+        if token != "" {
+            state = _json_leaf(nodes, parent, state, key, _json_literal_kind(token), token);
+        }
+        if at == last { break; }
+        # String body: parts[at + 1] up to the first quote that is not escaped.
+        at += 1;
+        let body = parts[at];
+        let escapes = false;
+        while _json_escaped_end(parts[at]) {
+            if at == last { raise ValueError; }
+            at += 1; body = body + "\"" + parts[at]; escapes = true;
+        }
+        if at == last { raise ValueError; }
+        at += 1;
+        let decoded = body;
+        if escapes or "\\" in body { decoded = json_unquote("\"" + body + "\""); }
+        else { for c in body { if ord(c) < 32 { raise ValueError; } } }
+        if state == 4 or state == 5 { key = decoded; state = 6; }
+        else { state = _json_leaf(nodes, parent, state, key, 3, decoded); }
+    }
+    if len(frames) != 0 or state != 9 { raise ValueError; }
+    return nodes;
+}
+
+fn json_compact(text: str) -> str {
+    let nodes = json_parse_document(text);
+    let result = ""; let quoted = false; let escaped = false;
+    for c in text {
+        if quoted {
+            result += c;
+            if escaped { escaped = false; }
+            elif c == "\\" { escaped = true; }
+            elif c == "\"" { quoted = false; }
+        } elif not _json_space(c) {
+            result += c;
+            if c == "\"" { quoted = true; }
+        }
+    }
+    return result;
+}

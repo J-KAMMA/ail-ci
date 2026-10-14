@@ -1,0 +1,24 @@
+use base64_codec;
+
+fn binary_fields_split(data: bytes, separator: bytes) -> list[bytes] {
+    return data.split(separator);
+}
+
+fn binary_fields_encode(parts: list[bytes]) -> list[bytes] {
+    let result: list[bytes] = [];
+    for part in parts { result.append(base64_encode(part).encode("utf-8")); }
+    return result;
+}
+
+fn binary_fields_decode(parts: list[bytes]) -> list[bytes] {
+    let result: list[bytes] = [];
+    for part in parts {
+        for byte in part { if byte > 127 { raise ValueError; } }
+        result.append(base64_decode(part.decode("utf-8")));
+    }
+    return result;
+}
+
+fn binary_fields_pack(parts: list[bytes], separator: bytes) -> bytes {
+    return separator.join(parts);
+}

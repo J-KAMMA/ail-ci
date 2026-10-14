@@ -1,0 +1,28 @@
+use json_projection;
+use json_document_value;
+use json_pointer;
+
+fn json_documents_select(batch: JsonDocuments, pointer: str) -> JsonDocuments {
+    let segments: list[str] = json_pointer_segments(pointer);
+    let documents: list[JsonDocument] = [];
+    for document in batch.documents {
+        documents.append(json_document_select(document, pointer));
+    }
+    return JsonDocuments(documents);
+}
+
+fn json_documents_project(batch: JsonDocuments, projection: JsonProjection) -> JsonDocuments {
+    let checked: JsonProjection = json_projection_new(projection.names, projection.pointers);
+    let documents: list[JsonDocument] = [];
+    for document in batch.documents {
+        documents.append(json_document_project(document, checked));
+    }
+    return JsonDocuments(documents);
+}
+
+fn json_documents_render_lines(batch: JsonDocuments) -> str {
+    let parts: list[str] = [];
+    for document in batch.documents { parts.append(json_document_render(document)); }
+    if len(parts) == 0 { return ""; }
+    return "\n".join(parts) + "\n";
+}

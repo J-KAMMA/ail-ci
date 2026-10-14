@@ -1,0 +1,4 @@
+# Compile with --object object_filter_config.o.
+fn is_error(line: str) -> int {
+    return line.startswith(ERROR_PREFIX);
+}

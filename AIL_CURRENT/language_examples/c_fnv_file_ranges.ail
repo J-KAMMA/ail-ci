@@ -1,0 +1,18 @@
+fn update_file_range(path: str, offset: int) -> int {
+    let data = read_bytes(path, offset, 8192);
+    update_hash(data);
+    return len(data);
+}
+
+fn main() -> int {
+    let path = sys.argv[1];
+    reset_hash(int(sys.argv[2]));
+    let offset = 0;
+    while true {
+        let count = update_file_range(path, offset);
+        if count == 0 { break; }
+        offset += count;
+    }
+    print(finish_hash());
+    return 0;
+}

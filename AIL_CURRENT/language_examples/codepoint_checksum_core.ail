@@ -1,0 +1,7 @@
+fn checksum(text: str) -> int {
+    let value = 0;
+    for c in text {
+        value = (value * 31 + ord(c)) % 1000000007;
+    }
+    return value;
+}

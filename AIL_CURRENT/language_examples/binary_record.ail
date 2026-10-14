@@ -1,0 +1,16 @@
+# A length-prefixed binary record: AIL1, uint32 little-endian length, raw payload.
+use binary_numbers;
+const RECORD_MAGIC = b"AIL1";
+
+fn pack_record(payload: bytes) -> bytes {
+    let n = len(payload);
+    if n > 4294967295 { raise ValueError; }
+    return RECORD_MAGIC + pack_u32_le(n) + payload;
+}
+
+fn unpack_record(record: bytes) -> bytes {
+    if len(record) < 8 or record[:4] != RECORD_MAGIC { raise ValueError; }
+    let n = unpack_u32_le(record[4:8]);
+    if len(record) - 8 != n { raise ValueError; }
+    return record[8:];
+}

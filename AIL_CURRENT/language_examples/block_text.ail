@@ -1,0 +1,3 @@
+fn label(n: int) -> str {
+    return "item:" + str(n);
+}

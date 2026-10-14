@@ -1,0 +1,10 @@
+fn emit_counts(content: str) -> int {
+    let counts = {};
+    for line in content.splitlines() {
+        counts[line] = counts.get(line, 0) + 1;
+    }
+    for line in counts {
+        print(line, counts[line], sep="\t");
+    }
+    return len(counts);
+}

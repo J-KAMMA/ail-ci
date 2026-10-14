@@ -1,0 +1,19 @@
+def above(values: list, minimum: int) -> list:
+    result = sorted([value for value in values if value >= minimum])
+    return result
+
+def differences(values: list) -> list:
+    return [values[i] - values[i - 1] for i in range(1, len(values))]
+
+
+def filtered_differences(values: list, minimum: int) -> list:
+    return differences(above(values, minimum))
+
+
+def filtered_change_total(values: list, minimum: int) -> int:
+    return sum(filtered_differences(values, minimum))
+
+def bounds(values: list) -> list:
+    if len(values) == 0:
+        return []
+    return [min(values), max(values)]

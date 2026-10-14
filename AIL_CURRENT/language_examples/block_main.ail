@@ -1,0 +1,4 @@
+fn main() {
+    print(sum_to(LIMIT));
+    return 0;
+}

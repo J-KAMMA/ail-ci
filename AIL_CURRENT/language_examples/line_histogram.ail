@@ -1,0 +1,15 @@
+use line_histogram_core;
+
+fn main() -> int {
+    if len(sys.argv) != 2 {
+        print("usage: line_histogram <utf8-file>", file=sys.stderr);
+        return 2;
+    }
+    try {
+        emit_counts(open(sys.argv[1]).read());
+    } except OSError {
+        print("read error", file=sys.stderr);
+        return 3;
+    }
+    return 0;
+}

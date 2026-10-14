@@ -1,0 +1,11 @@
+fn main() -> int {
+    let text=read_bytes(sys.argv[1]).decode();
+    let words=text.split();
+    let values=[];
+    for word in words { values.append(float(word)); }
+    let result=native_moving_average(values,int(sys.argv[2]));
+    let released=native_release_smoothing();
+    print(len(result));
+    for value in result { print(value); }
+    return released;
+}

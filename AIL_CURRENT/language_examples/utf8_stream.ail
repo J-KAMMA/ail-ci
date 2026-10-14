@@ -1,0 +1,57 @@
+struct Utf8Decoder { pending: bytes; closed: int; }
+
+fn _utf8_complete_length(data: bytes) -> int {
+    let position: int = 0;
+    while position < len(data) {
+        let lead: int = data[position];
+        if lead <= 127 { position += 1; }
+        else {
+            let width: int = 0;
+            if lead >= 194 and lead <= 223 { width = 2; }
+            elif lead >= 224 and lead <= 239 { width = 3; }
+            elif lead >= 240 and lead <= 244 { width = 4; }
+            else { raise ValueError; }
+            let remaining: int = len(data) - position;
+            let checked: int = width;
+            if remaining < checked { checked = remaining; }
+            for i in range(1, checked) {
+                let byte: int = data[position + i];
+                if byte < 128 or byte > 191 { raise ValueError; }
+                if i == 1 {
+                    if (lead == 224 and byte < 160) or (lead == 237 and byte > 159) or (lead == 240 and byte < 144) or (lead == 244 and byte > 143) {
+                        raise ValueError;
+                    }
+                }
+            }
+            if remaining < width { return position; }
+            position += width;
+        }
+    }
+    return position;
+}
+
+fn _utf8_decoder_check(decoder: Utf8Decoder) -> void {
+    if decoder.closed != 0 { raise ValueError; }
+    let pending: bytes = decoder.pending;
+    if len(pending) > 3 or _utf8_complete_length(pending) != 0 { raise ValueError; }
+}
+
+fn utf8_decoder_new() -> Utf8Decoder { return Utf8Decoder(b"", 0); }
+
+fn utf8_decode_feed(decoder: Utf8Decoder, data: bytes) -> str {
+    _utf8_decoder_check(decoder);
+    let combined: bytes = decoder.pending + data;
+    let complete: int = _utf8_complete_length(combined);
+    let text: str = combined[:complete].decode("utf-8");
+    let pending: bytes = combined[complete:];
+    decoder.pending = pending;
+    return text;
+}
+
+fn utf8_decode_finish(decoder: Utf8Decoder) -> str {
+    _utf8_decoder_check(decoder);
+    if decoder.pending != b"" { raise ValueError; }
+    decoder.pending = b"";
+    decoder.closed = 1;
+    return "";
+}

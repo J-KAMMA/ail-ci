@@ -1,0 +1,58 @@
+def _bytearray_method(node, ctx, *, as_stmt=False):
+    method, args = node.func.attr, node.args
+    arity = {'append': (1,), 'extend': (1,), 'clear': (0,), 'pop': (0, 1), 'reverse': (0,), 'copy': (0,)}
+    if method not in arity or node.keywords or len(args) not in arity[method]:
+        raise Unsupported('unsupported bytearray method or arguments')
+    if method in ('append', 'extend', 'clear', 'reverse') and not as_stmt:
+        raise Unsupported('bytearray.%s has no value; use a statement' % method)
+    ctx.parts.add('BYTEARRAY')
+    ctx.has_try = True
+    # A stable owned name survives a pure append argument without another retain.
+    if method == 'append' and isinstance(node.func.value, ast.Name):
+        excluded = ctx.optional | ctx.stdin_unbound | ctx.handles
+        arg = args[0]
+        constant = _int_const(arg)
+        pure = (isinstance(arg, ast.Name) and arg.id not in excluded
+                or constant is not None and -(1 << 63) <= constant < (1 << 63)
+                and isinstance(arg, (ast.Constant, ast.UnaryOp)))
+        if node.func.value.id not in excluded and pure:
+            source = _bytearray_value(node.func.value, ctx)
+            argument = _bytearray_int(arg, ctx)
+            return ('({ ail_bytearray *_receiver=%s; ail_bytearray_meta(_receiver); '
+                    'if(_receiver->refs==SIZE_MAX)ail_die("bytearray reference overflow"); '
+                    'int64_t _argument=%s; ail_bytearray_append(_receiver,_argument); })') % (source, argument)
+
+    receiver, _ = ctx.temp(BYTEARRAY)
+    steps = [_obj_store(receiver, _bytearray_value(node.func.value, ctx), BYTEARRAY, ctx) + ';']
+    argument = ''
+    if method in ('append', 'pop'):
+        steps.append('int64_t _argument = %s;' % (_bytearray_int(args[0], ctx) if args else '-1LL'))
+        argument = ', _argument'
+    elif method == 'extend':
+        kind = _etype(args[0], ctx)
+        item = args[0]
+        if (kind == BYTES and isinstance(item, ast.Subscript) and not isinstance(item.slice, ast.Slice)
+                and _etype(item.value, ctx) == BLIST):
+            ctx.parts.add('BLEXTEND')
+            source, _ = ctx.temp(BLIST)
+            value = _map_inline(lambda: _blist_value(item.value, ctx), ctx)
+            steps.append(_obj_store(source, value, BLIST, ctx) + ';')
+            _need_int(item.slice, ctx, 'a bytes list index')
+            index = _map_inline(lambda: _expr(item.slice, ctx), ctx)
+            steps.append('int64_t _index = %s;' % index)
+            return '({ %s ail_bytearray_extend_blist(&%s, %s, %s, _index); })' % (
+                ' '.join(steps), ctx.barena(), receiver, source)
+        if kind == BYTES:
+            value = _map_inline(lambda: _bytes_value(args[0], ctx), ctx)
+        else:
+            source = (_bytearray_value(args[0], ctx) if kind == BYTEARRAY
+                      else _obj_temp(_bytearray_from_ints(args[0], ctx), BYTEARRAY, ctx))
+            captured, _ = ctx.temp(BYTEARRAY)
+            steps.append(_obj_store(captured, source, BYTEARRAY, ctx) + ';')
+            value = 'ail_bytearray_span(%s)' % captured
+        steps.append('ail_bytes _argument = %s;' % value)
+        argument = ', _argument'
+    call = '({ %s ail_bytearray_%s(%s%s); })' % (' '.join(steps), method, receiver, argument)
+    return _obj_temp(call, BYTEARRAY, ctx) if method == 'copy' else call
+
+

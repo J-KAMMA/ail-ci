@@ -1,0 +1,11 @@
+# Shared, mutable byte storage. Explicit bytes() creates an immutable snapshot.
+fn binary_buffer_xor(buffer: bytearray, key: int) -> void {
+    if key < 0 or key > 255 { raise ValueError; }
+    for i in range(len(buffer)) { buffer[i] = buffer[i] ^ key; }
+}
+
+fn binary_buffer_xor_copy(data: bytes, key: int) -> bytes {
+    let buffer = bytearray(data);
+    binary_buffer_xor(buffer, key);
+    return bytes(buffer);
+}

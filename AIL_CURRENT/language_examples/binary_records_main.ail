@@ -1,0 +1,52 @@
+use binary_cursor;
+use file_identity;
+
+# Extract matching payloads after validating every record in the input.
+fn main() -> int {
+    if len(sys.argv) != 4 {
+        print("usage: binary_records input-path output-path kind", file=sys.stderr);
+        return 2;
+    }
+    if sys.argv[1] == sys.argv[2] {
+        print("input and output paths must differ", file=sys.stderr);
+        return 2;
+    }
+    try {
+        # ASCII decimal, with an optional sign; check before each multiplication.
+        let wanted = 0;
+        let position = 0;
+        let negative = False;
+        let digits = False;
+        for c in sys.argv[3] {
+            if position == 0 and (c == "+" or c == "-") { negative = c == "-"; }
+            else {
+                let digit = ord(c) - 48;
+                if digit < 0 or digit > 9 { raise ValueError; }
+                if wanted > 6553 or (wanted == 6553 and digit > 5) { raise ValueError; }
+                wanted = wanted * 10 + digit;
+                digits = True;
+            }
+            position += 1;
+        }
+        if not digits or (negative and wanted != 0) { raise ValueError; }
+        let data = read_bytes(sys.argv[1]);
+        if file_paths_same(sys.argv[1], sys.argv[2]) { raise ValueError; }
+        let cursor = BinaryCursor(data, 0);
+        if cursor.take(4) != b"AILR" { raise ValueError; }
+        let payloads = [b""];
+        while cursor.remaining() > 0 {
+            let kind = cursor.read_u16_be();
+            let length = cursor.read_u32_le();
+            if kind == wanted { payloads.append(cursor.take(length)); }
+            else { cursor.skip(length); }
+        }
+        write_bytes(sys.argv[2], b"".join(payloads));
+        return 0;
+    } except ValueError {
+        print("invalid kind or binary record input", file=sys.stderr);
+        return 2;
+    } except OSError {
+        print("binary record file error", file=sys.stderr);
+        return 2;
+    }
+}

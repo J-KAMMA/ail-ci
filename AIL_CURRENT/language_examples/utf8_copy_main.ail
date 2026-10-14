@@ -1,0 +1,19 @@
+use utf8_file_copy;
+
+fn main() -> int {
+    if len(sys.argv) != 4 {
+        print("usage: utf8_copy INPUT OUTPUT CHUNK_SIZE", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let chunk_size = int(sys.argv[3]);
+        print(utf8_file_copy(sys.argv[1], sys.argv[2], chunk_size));
+        return 0;
+    } except OSError {
+        print("text stream access failed", file=sys.stderr);
+        return 3;
+    } except ValueError {
+        print("invalid UTF-8, chunk size, or character count", file=sys.stderr);
+        return 4;
+    }
+}

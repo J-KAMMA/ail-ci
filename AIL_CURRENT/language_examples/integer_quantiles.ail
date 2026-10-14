@@ -1,0 +1,22 @@
+use config_core;
+
+fn input_integers(text:str)->list[int] {
+    let values:list[int]=[];
+    for token in text.split() { values.append(parse_int64_decimal(token)); }
+    return values;
+}
+
+fn quantile_report(paths:list[str])->str {
+    let values:list[int]=[];
+    for path in paths { values.extend(input_integers(config_text(path))); }
+    if len(values)==0 { return "{\"count\":0,\"min\":null,\"median\":null,\"max\":null}"; }
+    values.sort();
+    return "{\"count\":"+str(len(values))+",\"min\":"+str(values[0])
+        +",\"median\":"+str(values[(len(values)-1)//2])+",\"max\":"+str(values[-1])+"}";
+}
+
+fn main()->int {
+    if len(sys.argv)<2 { print("usage: integer_quantiles INPUT...",file=sys.stderr);return 2; }
+    try { write_stdout_bytes((quantile_report(sys.argv[1:])+"\n").encode());return 0; }
+    except (ValueError,OSError) as error { print(error.kind+": "+error.message,file=sys.stderr);return 2; }
+}

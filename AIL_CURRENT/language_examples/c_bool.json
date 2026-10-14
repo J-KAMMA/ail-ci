@@ -1,0 +1,1 @@
+{"version":1,"functions":{"contains_nul":{"symbol":"native_contains_nul","params":[["data","borrowed_bytes"],["negate","bool"]],"result":"bool"}}}

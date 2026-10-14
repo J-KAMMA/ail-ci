@@ -1,0 +1,6 @@
+use block_math;
+
+fn main() -> int {
+    print(sum_to(LIMIT));
+    return 0;
+}

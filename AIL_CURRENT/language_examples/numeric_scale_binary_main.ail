@@ -1,0 +1,37 @@
+use binary_float64;
+use typed_sequences;
+use checked_integer;
+
+# Input file -> binary64 array -> independent multiply -> binary stdout.
+# Finite factor; input/output record order is unchanged. NaN payload after
+# arithmetic is unspecified. No fast-math or reassociation is requested.
+# The size is validated first, then the file streams through in 64 KiB chunks
+# (file_chunks reads at most 65536 bytes, a multiple of 8), so memory stays
+# flat whatever the input size.
+fn main() -> int {
+    if len(sys.argv) != 4 {
+        print("usage: numeric_scale_binary input-path byteorder factor", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let order: int = parse_int64_text(sys.argv[2]);
+        let factor: float = float(sys.argv[3]);
+        if order < 0 or order > 1 or factor != factor or
+           factor > 1.7976931348623157e308 or factor < -1.7976931348623157e308 {
+            raise ValueError;
+        }
+        if file_size(sys.argv[1]) % 8 != 0 { raise ValueError; }
+        for chunk in file_chunks(sys.argv[1], 65536) {
+            let values: list[float] = unpack_float64(chunk, order);
+            let result: list[float] = float_values_scale(values, factor);
+            write_stdout_bytes(pack_float64(result, order));
+        }
+        return 0;
+    } except ValueError {
+        print("invalid binary64 records, order or finite factor", file=sys.stderr);
+        return 2;
+    } except OSError {
+        print("binary64 input/output error", file=sys.stderr);
+        return 3;
+    }
+}

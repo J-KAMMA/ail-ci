@@ -1,0 +1,40 @@
+use json_text;
+
+fn string_map_from_config(data: str) -> dict[str, str] {
+    let values: dict[str, str] = {};
+    let lines: list[str] = data.splitlines();
+    for line in lines {
+        let trimmed: str = line.strip();
+        if trimmed == "" or trimmed.startswith("#") { continue; }
+        let separator: int = line.find("=");
+        if separator < 0 { raise ValueError; }
+        let key: str = line[:separator].strip();
+        if key == "" { raise ValueError; }
+        values[key] = line[separator + 1:];
+    }
+    return values;
+}
+
+fn string_map_copy(values: dict[str, str]) -> dict[str, str] {
+    return values.copy();
+}
+
+fn string_map_merge(left: dict[str, str], right: dict[str, str]) -> dict[str, str] {
+    let result: dict[str, str] = left.copy();
+    result.update(right);
+    return result;
+}
+
+fn string_map_keys(values: dict[str, str]) -> list[str] {
+    return values.keys();
+}
+
+fn string_map_values(values: dict[str, str]) -> list[str] {
+    return values.values();
+}
+
+fn string_map_render(values: dict[str, str]) -> str {
+    let parts: list[str] = [];
+    for key, value in values.items() { parts.append(json_quote(key) + ":" + json_quote(value)); }
+    return "{" + ",".join(parts) + "}\n";
+}

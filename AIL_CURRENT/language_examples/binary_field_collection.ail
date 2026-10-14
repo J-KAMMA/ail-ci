@@ -1,0 +1,47 @@
+struct BinaryFieldCollection {
+    parts: list[bytes];
+    separator: bytes;
+}
+
+impl BinaryFieldCollection {
+    fn append(self, value: bytes) -> void {
+        self.parts.append(value);
+    }
+
+    fn extend(self, values: list[bytes]) -> void {
+        self.parts.extend(values);
+    }
+
+    fn pop(self, index: int) -> bytes {
+        return self.parts.pop(index);
+    }
+
+    fn clear(self) -> void {
+        self.parts.clear();
+    }
+
+    fn reverse(self) -> void {
+        self.parts.reverse();
+    }
+
+    fn sort(self) -> void {
+        self.parts.sort();
+    }
+
+    fn replace(self, values: list[bytes]) -> void {
+        self.parts = values;
+    }
+
+    fn snapshot(self) -> list[bytes] {
+        return self.parts.copy();
+    }
+
+    fn join(self) -> bytes {
+        return self.separator.join(self.parts);
+    }
+}
+
+fn binary_field_collection(data: bytes, separator: bytes) -> BinaryFieldCollection {
+    if len(separator) == 0 { raise ValueError; }
+    return BinaryFieldCollection(data.split(separator), separator);
+}

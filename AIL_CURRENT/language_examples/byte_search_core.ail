@@ -1,0 +1,5 @@
+fn find_byte(data: bytes, value: int, start: int, end: int) -> int {
+    let position = byte_search_native(data, value, start, end);
+    if position < -1 { raise ValueError(); }
+    return position;
+}

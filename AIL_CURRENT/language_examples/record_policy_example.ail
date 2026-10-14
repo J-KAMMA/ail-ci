@@ -1,0 +1,18 @@
+use record_policies;
+
+fn main() -> int {
+    let rows: list[QueryRecord] = [QueryRecord("one", 1), QueryRecord("two", 5), QueryRecord("three", 7)];
+    let policy = record_policy_new(5, "selected");
+    let saved = policy.accept;
+    let above = record_policy_select(policy, rows);
+    print(len(above));
+    for row in above { print(record_policy_describe(policy, row)); }
+    record_policy_mode(policy, 1);
+    let below = record_policy_select(policy, rows);
+    print(len(below));
+    print(record_policy_describe(policy, below[0]));
+    print(saved(policy.state, rows[1]));
+    print(policy.accept(policy.state, rows[1]));
+    print(policy.state.visited);
+    return 0;
+}

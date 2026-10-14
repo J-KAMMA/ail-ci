@@ -1,0 +1,39 @@
+fn reset_hash(seed: int) -> void { hash_reset(seed); }
+
+fn update_hash(data: bytes) -> void {
+    if len(data) == 0 { return; }
+    hash_update(data);
+}
+
+fn finish_hash() -> int { return hash_finish(); }
+
+fn _hash_file_chunk(path: str, offset: int) -> int {
+    let data = read_bytes(path, offset, 8192);
+    update_hash(data);
+    return len(data);
+}
+
+fn hash_file(path: str, seed: int) -> int {
+    reset_hash(seed);
+    let offset = 0;
+    while true {
+        let count = _hash_file_chunk(path, offset);
+        if count == 0 { break; }
+        offset += count;
+    }
+    return finish_hash();
+}
+
+fn _hash_stdin_chunk() -> int {
+    let data = read_stdin_bytes(8192);
+    update_hash(data);
+    return len(data);
+}
+
+fn hash_stdin(seed: int) -> int {
+    reset_hash(seed);
+    while true {
+        if _hash_stdin_chunk() == 0 { break; }
+    }
+    return finish_hash();
+}

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "functions": {
+    "native_moving_average": {
+      "symbol": "moving_average",
+      "params": [["values", "float_list"], ["window", "int"]],
+      "result": "float_list"
+    },
+    "native_release_smoothing": {
+      "symbol": "release_smoothing",
+      "params": [],
+      "result": "int"
+    }
+  }
+}

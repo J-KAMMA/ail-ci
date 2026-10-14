@@ -1,0 +1,11 @@
+fn binary_translate(data: bytes, table: bytes, delete: bytes) -> bytes {
+    return data.translate(table, delete);
+}
+
+fn binary_removeprefix(data: bytes, prefix: bytes) -> bytes {
+    return data.removeprefix(prefix);
+}
+
+fn binary_removesuffix(data: bytes, suffix: bytes) -> bytes {
+    return data.removesuffix(suffix);
+}

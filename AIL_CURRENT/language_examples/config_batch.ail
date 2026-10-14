@@ -1,0 +1,53 @@
+use config_core;
+use json_text;
+
+struct ConfigFailure { path:str; error:exception; }
+struct ConfigBatch { errors:list[exception]; paths:list[str]; reports:list[str]; }
+
+fn validate_many(paths:list[str])->ConfigBatch {
+    let errors:list[exception]=[];
+    let failed_paths:list[str]=[];
+    let reports:list[str]=[];
+    for path in paths {
+        try {
+            let report=validate_config(path);
+            reports.append("{\"path\":"+json_quote(path)+",\"summary\":"+report+"}");
+        } except (ValueError,OSError) as error {
+            errors.append(error);
+            failed_paths.append(path);
+        }
+    }
+    return ConfigBatch(errors,failed_paths,reports);
+}
+
+fn merge_config_batches(left:ConfigBatch,right:ConfigBatch)->ConfigBatch {
+    left.errors.extend(right.errors);
+    left.paths.extend(right.paths);
+    left.reports.extend(right.reports);
+    return left;
+}
+
+fn failure_json(failure:ConfigFailure)->str {
+    return "{\"path\":"+json_quote(failure.path)+",\"kind\":"+json_quote(failure.error.kind)
+        +",\"message\":"+json_quote(failure.error.message)+"}";
+}
+
+fn batch_json(batch:ConfigBatch)->str {
+    let errors:list[str]=[];
+    for i in range(len(batch.errors)) {
+        let failure=ConfigFailure(batch.paths[i],batch.errors[i]);
+        errors.append(failure_json(failure));
+    }
+    return "{\"reports\":["+",".join(batch.reports)+"],\"errors\":["+",".join(errors)+"]}";
+}
+
+fn main()->int {
+    if len(sys.argv)<2 {
+        print("usage: config_batch INPUT...",file=sys.stderr);
+        return 2;
+    }
+    let batch=validate_many(sys.argv[1:]);
+    write_stdout_bytes((batch_json(batch)+"\n").encode());
+    if len(batch.errors)>0 {return 2;}
+    return 0;
+}

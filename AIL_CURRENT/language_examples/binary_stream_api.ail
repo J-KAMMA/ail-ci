@@ -1,0 +1,2 @@
+fn emit(data: bytes) -> void { write_stdout_bytes(data); }
+fn copy(size: int) -> int { return copy_stdin(size); }

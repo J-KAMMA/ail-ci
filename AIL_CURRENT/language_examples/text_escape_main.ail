@@ -1,0 +1,32 @@
+use text_characters;
+
+fn escape_character(character: str) -> str {
+    if character == "\\" { return "\\\\"; }
+    if character == "\x00" { return "\\0"; }
+    if character == "\t" { return "\\t"; }
+    if character == "\r" { return "\\r"; }
+    if character == "\n" { return "\\n"; }
+    return character;
+}
+
+fn main() -> int {
+    if len(sys.argv) != 3 {
+        print("usage: text_escape <utf8-input> <utf8-output>", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let text = read_bytes(sys.argv[1]).decode();
+        let result = map_characters(text, escape_character);
+        write_bytes(sys.argv[2], result.encode());
+        return 0;
+    } except UnicodeDecodeError {
+        print("input must be UTF-8", file=sys.stderr);
+        return 4;
+    } except ValueError {
+        print("invalid character mapping", file=sys.stderr);
+        return 4;
+    } except OSError {
+        print("text escape file error", file=sys.stderr);
+        return 3;
+    }
+}

@@ -1,0 +1,43 @@
+use json_document_value;
+
+struct JsonLinesDecoder { pending: str; line: int; closed: int; }
+
+fn json_lines_decoder_new() -> JsonLinesDecoder { return JsonLinesDecoder("", 0, 0); }
+
+fn json_lines_decode_feed(decoder: JsonLinesDecoder, text: str) -> list[JsonDocument] {
+    if decoder.closed != 0 or decoder.line < 0 { raise ValueError; }
+    let combined: str = decoder.pending + text;
+    let lines: list[str] = combined.split("\n");
+    let documents: list[JsonDocument] = [];
+    let line: int = decoder.line;
+    for i in range(len(lines) - 1) {
+        if line == 9223372036854775807 { raise ValueError; }
+        line += 1;
+        let physical: str = lines[i];
+        if physical.strip(" \t\r") != "" {
+            documents.append(json_document_new(physical));
+        }
+    }
+    let pending: str = lines[len(lines) - 1];
+    decoder.pending = pending;
+    decoder.line = line;
+    return documents;
+}
+
+fn json_lines_decode_finish(decoder: JsonLinesDecoder) -> list[JsonDocument] {
+    if decoder.closed != 0 or decoder.line < 0 { raise ValueError; }
+    let documents: list[JsonDocument] = [];
+    let pending: str = decoder.pending;
+    let line: int = decoder.line;
+    if pending != "" {
+        if line == 9223372036854775807 { raise ValueError; }
+        line += 1;
+        if pending.strip(" \t\r") != "" {
+            documents.append(json_document_new(pending));
+        }
+    }
+    decoder.pending = "";
+    decoder.line = line;
+    decoder.closed = 1;
+    return documents;
+}

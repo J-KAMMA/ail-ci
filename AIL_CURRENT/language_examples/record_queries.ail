@@ -1,0 +1,16 @@
+# Selection owns a new list spine; selected records retain shared identity.
+struct QueryRecord { key: str; value: int; }
+
+fn query_select(rows: list[QueryRecord], predicate: Callable[[QueryRecord],int]) -> list[QueryRecord] {
+    let selected: list[QueryRecord] = [];
+    for row in rows {
+        if predicate(row) { selected.append(row); }
+    }
+    return selected;
+}
+
+fn query_total(rows: list[QueryRecord], measure: Callable[[QueryRecord],int]) -> int {
+    let total: int = 0;
+    for row in rows { total += measure(row); }
+    return total;
+}

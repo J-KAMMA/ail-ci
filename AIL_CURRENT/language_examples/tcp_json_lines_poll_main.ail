@@ -1,0 +1,34 @@
+use tcp_json_lines_poll;
+
+fn main() -> int {
+    if len(sys.argv) != 7 and len(sys.argv) != 9 {
+        print("usage: tcp_json_lines_poll HOST PORT CLIENT_COUNT IDLE_MS MAX_LINE MAX_ACTIVE [PEER_MS TOTAL_MS]", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let port = parse_int64_text(sys.argv[2]);
+        let clients = parse_int64_text(sys.argv[3]);
+        let idle = parse_int64_text(sys.argv[4]);
+        let max_line = parse_int64_text(sys.argv[5]);
+        let max_active = parse_int64_text(sys.argv[6]);
+        if clients <= 0 or idle <= 0 or idle > 2147483647 or max_line <= 0 or max_line > 1048576 or max_active <= 0 or max_active > 1024 { raise ValueError; }
+        let peer_ms: int = 0; let total_ms: int = 0;
+        if len(sys.argv) == 9 { peer_ms = parse_int64_text(sys.argv[7]); total_ms = parse_int64_text(sys.argv[8]); }
+        if peer_ms < 0 or peer_ms > 2147483647 or total_ms < 0 or total_ms > 2147483647 { raise ValueError; }
+        let listener = tcp_listen(sys.argv[1], port, 16);
+        try {
+            print(listener.local_port()); flush_stdout();
+            let result: JsonPollResult = tcp_json_lines_poll_timed(listener, clients, idle, max_line, max_active, peer_ms, total_ms);
+            if result.status == 0 { print(result.frames); }
+            elif result.status == 4 { print("invalid JSON frame or UTF-8", file=sys.stderr); }
+            else { print("TCP JSON service I/O or deadline failed", file=sys.stderr); }
+            return result.status;
+        } finally { listener.close(); }
+    } except OSError {
+        print("TCP JSON service I/O failed", file=sys.stderr); return 3;
+    } except UnicodeDecodeError {
+        print("invalid argument, JSON frame or UTF-8", file=sys.stderr); return 4;
+    } except ValueError {
+        print("invalid argument, JSON frame or UTF-8", file=sys.stderr); return 4;
+    }
+}

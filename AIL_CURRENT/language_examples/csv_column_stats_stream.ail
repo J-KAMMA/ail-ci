@@ -1,0 +1,39 @@
+use csv_integer_stream;
+use csv_stream;
+use utf8_stream;
+use integer_column_stats;
+
+# Completed rows and chunk temporaries do not escape this helper frame.
+fn _csv_stats_stream_step(reader:binaryfile,utf8:Utf8Decoder,decoder:CsvDecoder,stats:IntegerColumnStats,column:int,size:int)->int {
+    let data:bytes=reader.read(size);
+    let rows:list[CsvRow]=[];
+    if len(data)==0 {
+        utf8_decode_finish(utf8);
+        rows=csv_decode_finish(decoder);
+    } else {
+        rows=csv_decode_feed(decoder,utf8_decode_feed(utf8,data));
+    }
+    for row in rows {
+        if column>=len(row.fields) {raise ValueError;}
+        stats.add(parse_int64_decimal(row.fields[column]));
+    }
+    if len(data)==0 {return 0;}
+    return 1;
+}
+
+# Caller retains the file. Memory depends on chunk and pending row, not row count.
+# No row-size restriction is added; very long fields remain supported.
+fn _csv_column_stats_rows_stream(reader:binaryfile,column:int,size:int)->IntegerColumnStats {
+    if column<0 or size<=0 or size>1048576 or reader.closed {raise ValueError;}
+    let stats:IntegerColumnStats=IntegerColumnStats(0,0,0,0);
+    let utf8:Utf8Decoder=utf8_decoder_new();
+    let decoder:CsvDecoder=csv_decoder_new();
+    while True {
+        if _csv_stats_stream_step(reader,utf8,decoder,stats,column,size)==0 {break;}
+    }
+    return stats;
+}
+# The public contract is unchanged; the byte state avoids unused field/row objects.
+fn csv_column_stats_stream(reader:binaryfile,column:int,size:int)->IntegerColumnStats {
+    return _csv_column_stats_bytes_stream(reader,column,size);
+}

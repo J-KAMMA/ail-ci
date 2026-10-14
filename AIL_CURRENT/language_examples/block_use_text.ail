@@ -1,0 +1,7 @@
+use block_text;
+
+fn main() -> int {
+    let message = label(7);
+    print(message);
+    return 0;
+}

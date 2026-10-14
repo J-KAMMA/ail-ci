@@ -1,0 +1,10 @@
+# Build c_interop.c with c_binary.json, then link the resulting object.
+fn main() -> int {
+    if len(sys.argv) < 2 { return 2; }
+    try {
+        let data = read_bytes(sys.argv[1]);
+        print(binary_count(data));
+        print(binary_checksum(data));
+        return 0;
+    } except OSError { return 3; }
+}

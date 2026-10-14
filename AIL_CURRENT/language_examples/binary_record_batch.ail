@@ -1,0 +1,48 @@
+use binary_writer;
+use binary_cursor;
+
+fn binary_record_validate_single(data: bytes) -> void {
+    let cursor = BinaryCursor(data, 0);
+    if cursor.take(4) != b"AILR" { raise ValueError; }
+    cursor.read_u16_be();
+    let length = cursor.read_u32_le();
+    cursor.skip(length);
+    if cursor.remaining() != 0 { raise ValueError; }
+}
+
+struct BinaryRecordBatch {
+    records: list[bytes];
+}
+
+impl BinaryRecordBatch {
+    fn append(self, kind: int, payload: bytes) -> void {
+        self.records.append(binary_record_encode(kind, payload));
+    }
+
+    fn append_record(self, encoded: bytes) -> void {
+        binary_record_validate_single(encoded);
+        self.records.append(encoded);
+    }
+
+    fn extend_records(self, values: list[bytes]) -> void {
+        for encoded in values { binary_record_validate_single(encoded); }
+        self.records.extend(values);
+    }
+
+    fn clear(self) -> void {
+        self.records.clear();
+    }
+
+    fn snapshot(self) -> list[bytes] {
+        return self.records.copy();
+    }
+
+    fn finish(self) -> bytes {
+        let fragments: list[bytes] = [b"AILR"];
+        for encoded in self.records {
+            binary_record_validate_single(encoded);
+            fragments.append(encoded[4:]);
+        }
+        return b"".join(fragments);
+    }
+}

@@ -1,0 +1,18 @@
+use geometry;
+
+fn main() -> int {
+    if len(sys.argv) != 9 {
+        print("usage: rectangle x0 y0 x1 y1 x0 y0 x1 y1", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let a = make(int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]));
+        let b = make(int(sys.argv[5]), int(sys.argv[6]), int(sys.argv[7]), int(sys.argv[8]));
+        let area_a = area(a); let area_b = area(b); let overlap = intersection(a, b);
+        print(area_a); print(area_b); print(overlap); print(area_a + area_b - overlap);
+        return 0;
+    } except ValueError {
+        print("invalid rectangle coordinates", file=sys.stderr);
+        return 2;
+    }
+}

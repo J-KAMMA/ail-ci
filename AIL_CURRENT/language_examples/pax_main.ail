@@ -1,0 +1,51 @@
+use pax_archive;
+use pax_write;
+use file_identity;
+
+fn main() -> int {
+    if len(sys.argv) != 4 and len(sys.argv) != 5 {
+        print("usage: pax normalize INPUT OUTPUT | concat LEFT RIGHT OUTPUT | extract INPUT OUTPUT NAME", file=sys.stderr);
+        return 2;
+    }
+    let mode: str = sys.argv[1];
+    if mode != "normalize" and mode != "concat" and mode != "extract" {
+        print("unknown pax mode", file=sys.stderr);
+        return 2;
+    }
+    if (mode == "normalize" and len(sys.argv) != 4) or (mode != "normalize" and len(sys.argv) != 5) {
+        print("invalid pax argument count", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let output_path: str = sys.argv[3];
+        if mode == "concat" { output_path = sys.argv[4]; }
+        if sys.argv[2] == output_path { raise ValueError; }
+        if file_paths_same(sys.argv[2], output_path) { raise ValueError; }
+        if mode == "concat" {
+            if sys.argv[3] == output_path { raise ValueError; }
+            if file_paths_same(sys.argv[3], output_path) { raise ValueError; }
+        }
+        let entries = pax_entries_decode(read_bytes(sys.argv[2]));
+        let output: bytes = b"";
+        if mode == "concat" {
+            let right = pax_entries_decode(read_bytes(sys.argv[3]));
+            for entry in right { entries.append(entry); }
+            output = pax_entries_encode(entries);
+        } elif mode == "normalize" {
+            output = pax_entries_encode(entries);
+        } else {
+            output = pax_member(entries, sys.argv[4]);
+        }
+        write_bytes(output_path, output);
+        return 0;
+    } except ValueError {
+        print("invalid pax archive, member, or output path", file=sys.stderr);
+        return 2;
+    } except KeyError {
+        print("pax member not found", file=sys.stderr);
+        return 2;
+    } except OSError {
+        print("pax file error", file=sys.stderr);
+        return 2;
+    }
+}

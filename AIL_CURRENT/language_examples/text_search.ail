@@ -1,0 +1,1 @@
+fn text_find(text: str, needle: str) -> int { return text.find(needle); }

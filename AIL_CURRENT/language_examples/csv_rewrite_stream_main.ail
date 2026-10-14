@@ -1,0 +1,33 @@
+use csv_rewrite_stream;
+use file_identity;
+
+# Streaming profile: after validation/open, later errors may truncate output or
+# leave a prefix. Unlike csv_rewrite, this does not validate the whole input first.
+fn main() -> int {
+    if len(sys.argv) != 5 {
+        print("usage: csv_rewrite_stream INPUT OUTPUT CHUNK MAX_ROW_UNITS", file=sys.stderr); return 2;
+    }
+    try {
+        let input: str = sys.argv[1];
+        let output: str = sys.argv[2];
+        let size: int = parse_int64_text(sys.argv[3]);
+        let cap: int = parse_int64_text(sys.argv[4]);
+        if size <= 0 or size > 1048576 or cap <= 0 or cap > 1048576 { raise ValueError; }
+        if input == output or file_paths_same(input, output) { raise ValueError; }
+        let reader = open_binary(input, "rb");
+        try {
+            let writer = open_binary(output, "wb");
+            try {
+                csv_rewrite_stream(reader, writer, size, cap);
+                writer.flush();
+                return 0;
+            } finally { writer.close(); }
+        } finally { reader.close(); }
+    } except UnicodeDecodeError {
+        print("invalid UTF-8 CSV input", file=sys.stderr); return 4;
+    } except ValueError {
+        print("invalid CSV input, row limit, argument or output alias", file=sys.stderr); return 4;
+    } except OSError {
+        print("CSV rewrite file error", file=sys.stderr); return 3;
+    }
+}

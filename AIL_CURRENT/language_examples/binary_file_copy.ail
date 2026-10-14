@@ -1,0 +1,23 @@
+use checked_integer;
+
+# Bounded data buffers; the destination may contain a prefix after an I/O error.
+fn binary_stream_copy(input_path: str, output_path: str, chunk_size: int) -> int {
+    if chunk_size <= 0 { raise ValueError; }
+    if same_file(input_path, output_path) { raise OSError; }
+    let source = open_binary(input_path, "r");
+    try {
+        let target = open_binary(output_path, "w");
+        try {
+            let buffer = bytearray(chunk_size);
+            let total: int = 0;
+            while True {
+                let count = source.readinto(buffer);
+                if count == 0 { break; }
+                target.write(buffer[:count]);
+                total = checked_int64_add(total, count);
+            }
+            target.flush();
+            return total;
+        } finally { target.close(); }
+    } finally { source.close(); }
+}

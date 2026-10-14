@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "functions": {
+    "native_count_between": {
+      "symbol": "count_between",
+      "params": [["values", "float_list"], ["low", "float"], ["high", "float"]],
+      "result": "int"
+    },
+    "native_total": {
+      "symbol": "total",
+      "params": [["values", "float_list"]],
+      "result": "float"
+    }
+  }
+}

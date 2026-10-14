@@ -1,0 +1,10 @@
+# Independent calls reopen a regular seekable file; this is not a file snapshot.
+# The requested window is at most 65536 bytes; EOF returns a shorter byte string.
+fn read_binary_range(path: str, offset: int, count: int) -> bytes {
+    if offset < 0 or count < 0 or count > 65536 { raise ValueError; }
+    let result = native_binary_range(path, offset, count);
+    if len(result) == 0 { raise OSError; }
+    if result[0] == 1 { raise ValueError; }
+    if result[0] != 0 { raise OSError; }
+    return result[1:];
+}

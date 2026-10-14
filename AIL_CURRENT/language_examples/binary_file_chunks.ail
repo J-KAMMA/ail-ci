@@ -1,0 +1,40 @@
+use file_identity;
+
+fn file_chunk_totals(path: str, size: int) -> list[int] {
+    if size <= 0 { raise ValueError; }
+    let byte_count: int = 0;
+    let chunk_count: int = 0;
+    let nul_count: int = 0;
+    let lf_count: int = 0;
+    let cr_count: int = 0;
+    let maximum: int = 0;
+    for chunk in file_chunks(path, size) {
+        let length: int = len(chunk);
+        if byte_count > 9223372036854775807 - length { raise ValueError; }
+        byte_count += length;
+        chunk_count += 1;
+        nul_count += chunk.count(b"\x00");
+        lf_count += chunk.count(b"\n");
+        cr_count += chunk.count(b"\r");
+        if length > maximum { maximum = length; }
+    }
+    return [byte_count, chunk_count, nul_count, lf_count, cr_count, maximum];
+}
+
+# The iterator opens and reads before the first output write. Later I/O failures
+# may leave a partial destination; this operation does not promise atomic output.
+fn copy_file_chunks(source: str, destination: str, size: int) -> int {
+    if size <= 0 { raise ValueError; }
+    if source == destination or file_paths_same(source, destination) { raise ValueError; }
+    let total: int = 0;
+    let first: int = 1;
+    for chunk in file_chunks(source, size) {
+        let length: int = len(chunk);
+        if total > 9223372036854775807 - length { raise ValueError; }
+        total += length;
+        if first { write_bytes(destination, chunk); first = 0; }
+        else { append_bytes(destination, chunk); }
+    }
+    if first { write_bytes(destination, b""); }
+    return total;
+}

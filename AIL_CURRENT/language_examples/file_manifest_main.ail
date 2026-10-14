@@ -1,0 +1,14 @@
+fn main() -> int {
+    if len(sys.argv) < 2 {
+        print("usage: file_manifest FILE...", file=sys.stderr); return 2;
+    }
+    let rows = manifest_empty();
+    try {
+        for i in range(1, len(sys.argv)) { manifest_add(rows, sys.argv[i]); }
+    } except OSError {
+        print("cannot query regular file", file=sys.stderr); return 2;
+    }
+    for row in manifest_by_path(rows) { print(row.path, row.size, sep="\t"); }
+    print("total", manifest_total(rows), sep="\t");
+    return 0;
+}

@@ -1,0 +1,32 @@
+# Input: little-endian binary64 pairs (x, y). Output: one x*x+y*y per pair.
+use binary_float64;
+
+struct Point { x: float; y: float; }
+
+fn point_energies(points: list[Point]) -> list[float] {
+    return [point.x * point.x + point.y * point.y for point in points];
+}
+
+fn main() -> int {
+    if len(sys.argv) != 3 {
+        print("usage: points_energy <input-f64le-pairs> <output-f64le>", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let values = unpack_float64(read_bytes(sys.argv[1]), 0);
+        if len(values) % 2 != 0 { raise ValueError(); }
+        let points: list[Point] = [];
+        for index in range(0, len(values), 2) {
+            points.append(Point(values[index], values[index + 1]));
+        }
+        let energies = point_energies(points);
+        write_bytes(sys.argv[2], pack_float64(energies, 0));
+    } except OSError {
+        print("point data file error", file=sys.stderr);
+        return 3;
+    } except ValueError {
+        print("point data must contain complete binary64 pairs", file=sys.stderr);
+        return 4;
+    }
+    return 0;
+}

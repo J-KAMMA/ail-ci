@@ -1,0 +1,11 @@
+# Copies have separate list membership and share the mutable buffer element.
+fn main()->int {
+    let buffer=bytearray(b"AIL");
+    let values:list[bytearray]=[buffer];
+    let copied=values.copy();
+    values.clear();
+    copied[0].append(33);
+    write_stdout_bytes(bytes(buffer));
+    write_stdout_bytes(b"\n");
+    return 0;
+}

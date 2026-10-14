@@ -1,0 +1,80 @@
+# JSON string scalar codec; Unicode scalars are preserved, not ASCII escaped.
+fn json_quote(text: str) -> str {
+    let result = "\"";
+    let digits = "0123456789abcdef";
+    for c in text {
+        let value = ord(c);
+        if c == "\"" or c == "\\" { result += "\\" + c; }
+        elif c == "\b" { result += "\\b"; }
+        elif c == "\f" { result += "\\f"; }
+        elif c == "\n" { result += "\\n"; }
+        elif c == "\r" { result += "\\r"; }
+        elif c == "\t" { result += "\\t"; }
+        elif value < 32 {
+            let high = value // 16;
+            let low = value % 16;
+            result += "\\u00" + digits[high:high + 1] + digits[low:low + 1];
+        } else { result += c; }
+    }
+    return result + "\"";
+}
+
+fn _json_scalar(value: int) -> str {
+    if value < 0 or value > 1114111 or (value >= 55296 and value <= 57343) { raise ValueError; }
+    return chr(value);
+}
+
+fn json_unquote(text: str) -> str {
+    let result = "";
+    # States: opening, content, escape, hex, high slash, high u, low hex, closed.
+    let state = 0;
+    let value = 0;
+    let remaining = 0;
+    let high = 0;
+    for c in text {
+        if state == 0 {
+            if c != "\"" { raise ValueError; }
+            state = 1;
+        } elif state == 1 {
+            if ord(c) < 32 { raise ValueError; }
+            if c == "\"" { state = 7; }
+            elif c == "\\" { state = 2; }
+            else { result += c; }
+        } elif state == 2 {
+            state = 1;
+            if c == "\"" or c == "\\" or c == "/" { result += c; }
+            elif c == "b" { result += "\b"; }
+            elif c == "f" { result += "\f"; }
+            elif c == "n" { result += "\n"; }
+            elif c == "r" { result += "\r"; }
+            elif c == "t" { result += "\t"; }
+            elif c == "u" { state = 3; value = 0; remaining = 4; }
+            else { raise ValueError; }
+        } elif state == 3 or state == 6 {
+            let code = ord(c);
+            let digit = -1;
+            if code >= 48 and code <= 57 { digit = code - 48; }
+            elif code >= 65 and code <= 70 { digit = code - 55; }
+            elif code >= 97 and code <= 102 { digit = code - 87; }
+            if digit < 0 { raise ValueError; }
+            value = value * 16 + digit;
+            remaining -= 1;
+            if remaining == 0 {
+                if state == 6 {
+                    if value < 56320 or value > 57343 { raise ValueError; }
+                    result += _json_scalar(65536 + (high - 55296) * 1024 + value - 56320);
+                    state = 1;
+                } elif value >= 55296 and value <= 56319 { high = value; state = 4; }
+                else { result += _json_scalar(value); state = 1; }
+            }
+        } elif state == 4 {
+            if c != "\\" { raise ValueError; }
+            state = 5;
+        } elif state == 5 {
+            if c != "u" { raise ValueError; }
+            state = 6; value = 0; remaining = 4;
+        } else { raise ValueError; }
+    }
+    if state != 7 { raise ValueError; }
+    return result;
+}

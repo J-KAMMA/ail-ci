@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "functions": {
+    "binary_count": {"symbol": "native_byte_count", "params": [["data", "bytes"]], "result": "int"},
+    "binary_checksum": {"symbol": "native_checksum", "params": [["data", "bytes"]], "result": "int"}
+  }
+}

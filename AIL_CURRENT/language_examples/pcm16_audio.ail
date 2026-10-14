@@ -1,0 +1,20 @@
+# Raw little-endian signed 16-bit samples; gain truncates toward zero.
+fn pcm16_gain(data: bytes, numerator: int, denominator: int) -> bytes {
+    if numerator < -65536 or numerator > 65536 { raise ValueError; }
+    if denominator < 1 or denominator > 65536 { raise ValueError; }
+    if len(data) % 2 != 0 { raise ValueError; }
+    if numerator == denominator or len(data) == 0 { return data; }
+    return pcm16_scale_le(data, numerator, denominator);
+}
+
+fn pcm16_trim(data: bytes, channels: int, first: int, count: int) -> bytes {
+    if channels != 1 and channels != 2 { raise ValueError; }
+    let frame_size: int = channels * 2;
+    if len(data) % frame_size != 0 { raise ValueError; }
+    let frames: int = len(data) // frame_size;
+    if first < 0 or first > frames { raise ValueError; }
+    if count < 0 or count > frames - first { raise ValueError; }
+    let start: int = first * frame_size;
+    let end: int = (first + count) * frame_size;
+    return data[start:end];
+}

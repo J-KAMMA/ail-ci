@@ -1,0 +1,37 @@
+use binary_replace;
+
+fn binary_replace_count_in_range(text: str) -> int {
+    let token = text.strip();
+    let negative = token.startswith("-");
+    if negative or token.startswith("+") { token = token[1:]; }
+    if not token.isdigit() { return 0; }
+    token = token.lstrip("0");
+    let limit = "9223372036854775807";
+    if negative { limit = "9223372036854775808"; }
+    return len(token) < 19 or len(token) == 19 and token <= limit;
+}
+
+fn main() -> int {
+    if len(sys.argv) != 4 and len(sys.argv) != 5 {
+        print("usage: binary_replace input old_hex new_hex [count]", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let old = bytes.fromhex(sys.argv[2]);
+        let replacement = bytes.fromhex(sys.argv[3]);
+        let count = -1;
+        if len(sys.argv) == 5 {
+            if not binary_replace_count_in_range(sys.argv[4]) { raise ValueError; }
+            count = int(sys.argv[4]);
+        }
+        let data = read_bytes(sys.argv[1]);
+        write_stdout_bytes(binary_replace(data, old, replacement, count));
+        return 0;
+    } except ValueError {
+        print("invalid hexadecimal value or replacement count", file=sys.stderr);
+        return 2;
+    } except OSError {
+        print("binary input or output failed", file=sys.stderr);
+        return 2;
+    }
+}

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "functions": {
+    "native_value": {
+      "symbol": "native_value",
+      "params": [["text", "str"]],
+      "result": "str"
+    }
+  }
+}

@@ -1,0 +1,56 @@
+use json_kv_file;
+use checked_integer;
+
+# Loopback, serial clients. A client must half-close writes before reading replies.
+fn kv_receive(peer:tcpsocket,timeout:int)->str {
+    let pending=bytearray();
+    while True {
+        if peer.wait_readable(timeout)==0 {raise OSError;}
+        let chunk=peer.recv(8192);
+        if len(chunk)==0 {return bytes(pending).decode("utf-8");}
+        if len(chunk)>8388608-len(pending) {raise ValueError;}
+        pending.extend(chunk);
+    }
+    return "";
+}
+
+fn kv_send(peer:tcpsocket,data:bytes,timeout:int)->void {
+    let position:int=0;
+    while position<len(data) {
+        if peer.wait_writable(timeout)==0 {raise OSError;}
+        let sent=peer.send_some(data[position:]);
+        if sent<=0 {raise OSError;}
+        position+=sent;
+    }
+}
+
+fn main()->int {
+    if len(sys.argv)!=5 {
+        print("usage: json_kv_tcp PORT STATE.json CLIENT_COUNT WAIT_MS",file=sys.stderr);return 2;
+    }
+    try {
+        let port=parse_int64_text(sys.argv[1]);
+        let clients=parse_int64_text(sys.argv[3]);
+        let timeout=parse_int64_text(sys.argv[4]);
+        if clients<=0 or clients>4096 or timeout<=0 or timeout>2147483647 {raise ValueError;}
+        let listener=tcp_listen("127.0.0.1",port,16);
+        try {
+            listener.set_blocking(0);print(listener.local_port());flush_stdout();
+            let total:int=0;
+            for i in range(clients) {
+                if listener.wait_readable(timeout)==0 {raise OSError;}
+                let peer=listener.accept();
+                try {
+                    peer.set_blocking(0);
+                    let data=kv_receive(peer,timeout);
+                    let report=kv_process(sys.argv[2],data);
+                    kv_send(peer,report.encode("utf-8"),timeout);
+                    total+=report.count("\n");
+                } finally {peer.close();}
+            }
+            print(total);return 0;
+        } finally {listener.close();}
+    } except ValueError {print("invalid key-value TCP batch or state",file=sys.stderr);return 4;}
+    except KeyError {print("invalid key-value TCP request",file=sys.stderr);return 4;}
+    except OSError {print("key-value TCP file/socket/wait error",file=sys.stderr);return 3;}
+}

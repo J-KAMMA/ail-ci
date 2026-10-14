@@ -1,0 +1,16 @@
+fn main() -> int {
+    if len(sys.argv) != 4 or (sys.argv[1] != "encode" and sys.argv[1] != "decode") {
+        print("usage: hex_files encode|decode INPUT OUTPUT", file=sys.stderr); return 2;
+    }
+    try {
+        if sys.argv[1] == "encode" {
+            let size = hex_file_write(sys.argv[3], read_bytes(sys.argv[2]));
+        } else {
+            let data = hex_file_read(sys.argv[2]);
+            write_bytes(sys.argv[3], data);
+        }
+    } except (OSError, ValueError) {
+        print("invalid hexadecimal data or file operation failed", file=sys.stderr); return 2;
+    }
+    return 0;
+}

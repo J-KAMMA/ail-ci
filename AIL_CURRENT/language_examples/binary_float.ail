@@ -1,0 +1,16 @@
+# Numeric binary64 codec. NaN class is retained; NaN sign/payload is not promised.
+fn binary_encode_float(value: float, reverse: int) -> bytes {
+    if reverse != 0 and reverse != 1 { raise ValueError; }
+    return native_binary64_pack(value, reverse);
+}
+
+fn binary_decode_float(data: bytes, reverse: int) -> float {
+    if reverse != 0 and reverse != 1 { raise ValueError; }
+    if len(data) != 8 { raise ValueError; }
+    return native_binary64_unpack(data, reverse);
+}
+
+fn pack_f64_le(value: float) -> bytes { return binary_encode_float(value, 0); }
+fn pack_f64_be(value: float) -> bytes { return binary_encode_float(value, 1); }
+fn unpack_f64_le(data: bytes) -> float { return binary_decode_float(data, 0); }
+fn unpack_f64_be(data: bytes) -> float { return binary_decode_float(data, 1); }

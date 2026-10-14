@@ -1,0 +1,112 @@
+use json_text;
+
+struct CsvRow { number: int; fields: list[str]; }
+# `strict` 0: a lone \r ends a record (csv_decoder_new). `strict` 1: only \n or \r\n end a record and a
+# \r not followed by \n is data (csv_decoder_new_crlf); skip_lf 2 then marks a \r waiting for its \n.
+struct CsvDecoder { row: int; mode: int; field: str; fields: list[str]; skip_lf: int; closed: int; strict: int; }
+
+fn csv_decoder_new() -> CsvDecoder {
+    let fields: list[str] = [];
+    return CsvDecoder(0, 0, "", fields, 0, 0, 0);
+}
+
+# Like csv_decoder_new, but only \n and \r\n end a record; a \r that does not precede \n is an
+# ordinary character (after a closing quote it is an error, as any other character is).
+fn csv_decoder_new_crlf() -> CsvDecoder {
+    let fields: list[str] = [];
+    return CsvDecoder(0, 0, "", fields, 0, 0, 1);
+}
+
+fn csv_decode_feed(decoder: CsvDecoder, text: str) -> list[CsvRow] {
+    if decoder.closed { raise ValueError; }
+    let row: int = decoder.row;
+    let mode: int = decoder.mode;
+    let field: str = decoder.field;
+    let fields: list[str] = decoder.fields;
+    let skip_lf: int = decoder.skip_lf;
+    let strict: int = decoder.strict;
+    let result = [];
+    for ch in text {
+        if skip_lf == 2 {
+            skip_lf = 0;
+            if ch != "\n" {
+                if mode == 3 { raise ValueError; }
+                mode = 1;
+                field += "\r";
+            }
+        } else {
+            if skip_lf == 1 and ch == "\n" { skip_lf = 0; continue; }
+            skip_lf = 0;
+        }
+        if mode == 2 {
+            if ch == "\"" { mode = 3; }
+            else { field += ch; }
+        } else {
+            if strict == 1 and ch == "\r" { skip_lf = 2; continue; }
+            if ch == "," or ch == "\r" or ch == "\n" {
+                if ch == "," { fields.append(field); }
+                elif mode != 0 or len(fields) != 0 {
+                    if row == 9223372036854775807 { raise ValueError; }
+                    fields.append(field);
+                    result.append(CsvRow(row, fields));
+                    row += 1;
+                    fields.clear();
+                }
+                mode = 0;
+                field = "";
+                if ch == "\r" { skip_lf = 1; }
+            } elif ch == "\"" {
+                if mode == 3 { field += "\""; mode = 2; }
+                else {
+                    if mode != 0 { raise ValueError; }
+                    mode = 2;
+                }
+            } else {
+                if mode == 3 { raise ValueError; }
+                if mode == 0 { mode = 1; }
+                field += ch;
+            }
+        }
+    }
+    decoder.row = row;
+    decoder.mode = mode;
+    decoder.field = field;
+    decoder.fields = fields;
+    decoder.skip_lf = skip_lf;
+    return result;
+}
+
+fn csv_decode_finish(decoder: CsvDecoder) -> list[CsvRow] {
+    if decoder.closed or decoder.mode == 2 { raise ValueError; }
+    let row: int = decoder.row;
+    let fields: list[str] = decoder.fields;
+    let result = [];
+    let mode: int = decoder.mode;
+    let field: str = decoder.field;
+    if decoder.skip_lf == 2 {
+        if mode == 3 { raise ValueError; }
+        mode = 1;
+        field += "\r";
+    }
+    if mode != 0 or len(fields) != 0 {
+        if row == 9223372036854775807 { raise ValueError; }
+        fields.append(field);
+        result.append(CsvRow(row, fields));
+        row += 1;
+    }
+    fields.clear();
+    decoder.row = row;
+    decoder.mode = 0;
+    decoder.field = "";
+    decoder.fields = fields;
+    decoder.skip_lf = 0;
+    decoder.closed = 1;
+    return result;
+}
+
+fn csv_stream_row_json(row: CsvRow) -> str {
+    let fields: list[str] = row.fields;
+    let parts: list[str] = [];
+    for field in fields { parts.append(json_quote(field)); }
+    return "[" + ",".join(parts) + "]";
+}

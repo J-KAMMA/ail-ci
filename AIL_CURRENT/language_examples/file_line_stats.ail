@@ -1,0 +1,19 @@
+fn main() -> int {
+    let valid = 0;
+    let invalid = 0;
+    let total = 0;
+    for line in open(sys.argv[1]) {
+        try {
+            let value = int(line.strip());
+        } except ValueError {
+            invalid += 1;
+            continue;
+        }
+        total += value;
+        valid += 1;
+    }
+    print(valid);
+    print(invalid);
+    print(total);
+    return 0;
+}

@@ -1,0 +1,118 @@
+struct TarEntry {
+    name: str;
+    typeflag: int;
+    mode: int;
+    uid: int;
+    gid: int;
+    size: int;
+    mtime: int;
+    linkname: str;
+    uname: str;
+    gname: str;
+    devmajor: int;
+    devminor: int;
+    data: bytes;
+}
+
+fn _tar_octal_decode(field: bytes, limit: int) -> int {
+    if limit < 0 { raise ValueError; }
+    let text: str = field.decode("utf-8").strip(" \0");
+    let value: int = 0;
+    for c in text {
+        let digit: int = ord(c) - 48;
+        if digit < 0 or digit > 7 { raise ValueError; }
+        if value > limit // 8 or (value == limit // 8 and digit > limit % 8) { raise ValueError; }
+        value = value * 8 + digit;
+    }
+    return value;
+}
+
+fn _tar_octal_encode(value: int, width: int) -> bytes {
+    if width != 7 and width != 8 and width != 12 { raise ValueError; }
+    let limit: int = 262143;
+    if width == 8 { limit = 2097151; }
+    elif width == 12 { limit = 8589934591; }
+    if value < 0 or value > limit { raise ValueError; }
+    let factor: int = 1;
+    for i in range(width - 2) { factor *= 8; }
+    let output: list[int] = [];
+    for i in range(width - 1) {
+        output.append(48 + (value // factor) % 8);
+        factor //= 8;
+    }
+    output.append(0);
+    return bytes(output);
+}
+
+fn _tar_text_decode(field: bytes) -> str { return field.split(b"\0")[0].decode("utf-8"); }
+
+fn _tar_pad(field: bytes, width: int) -> bytes {
+    if width < 0 or len(field) > width { raise ValueError; }
+    return field + bytes(width - len(field));
+}
+
+fn _tar_text_encode(text: str, width: int) -> bytes {
+    if "\0" in text { raise ValueError; }
+    return _tar_pad(text.encode("utf-8"), width);
+}
+
+fn _tar_checksum(header: bytes) -> int {
+    if len(header) != 512 { raise ValueError; }
+    let checksum: int = 0;
+    for i in range(512) {
+        if i >= 148 and i < 156 { checksum += 32; }
+        else { checksum += header[i]; }
+    }
+    return checksum;
+}
+
+fn tar_header_decode(header: bytes) -> TarEntry {
+    if len(header) != 512 { raise ValueError; }
+    if _tar_octal_decode(header[148:156], 2097151) != _tar_checksum(header) { raise ValueError; }
+    if header[257:263] != b"ustar\0" or header[263:265] != b"00" { raise ValueError; }
+    let name: str = _tar_text_decode(header[:100]);
+    let prefix: str = _tar_text_decode(header[345:500]);
+    if prefix != "" { name = prefix + "/" + name; }
+    if name == "" { raise ValueError; }
+    let typeflag: int = 0;
+    if header[156] != 0 {
+        if header[156] < 48 or header[156] > 55 { raise ValueError; }
+        typeflag = header[156] - 48;
+    }
+    let size: int = _tar_octal_decode(header[124:136], 8589934591);
+    if typeflag != 0 and typeflag != 7 and size != 0 { raise ValueError; }
+    return TarEntry(name, typeflag,
+        _tar_octal_decode(header[100:108], 2097151),
+        _tar_octal_decode(header[108:116], 2097151),
+        _tar_octal_decode(header[116:124], 2097151), size,
+        _tar_octal_decode(header[136:148], 8589934591),
+        _tar_text_decode(header[157:257]), _tar_text_decode(header[265:297]),
+        _tar_text_decode(header[297:329]), _tar_octal_decode(header[329:337], 2097151),
+        _tar_octal_decode(header[337:345], 2097151), b"");
+}
+
+fn tar_header_encode(entry: TarEntry) -> bytes {
+    if entry.name == "" or "\0" in entry.name { raise ValueError; }
+    if entry.typeflag < 0 or entry.typeflag > 7 { raise ValueError; }
+    if entry.typeflag != 0 and entry.typeflag != 7 and entry.size != 0 { raise ValueError; }
+    let name: bytes = entry.name.encode("utf-8");
+    let prefix: bytes = b"";
+    if len(name) > 100 {
+        let split: int = name.rfind(b"/");
+        while split > 0 and (split > 155 or len(name) - split - 1 == 0 or len(name) - split - 1 > 100) {
+            split = name[:split].rfind(b"/");
+        }
+        if split <= 0 { raise ValueError; }
+        prefix = name[:split];
+        name = name[split + 1:];
+    }
+    let header: bytes = b"".join([
+        _tar_pad(name, 100), _tar_octal_encode(entry.mode, 8),
+        _tar_octal_encode(entry.uid, 8), _tar_octal_encode(entry.gid, 8),
+        _tar_octal_encode(entry.size, 12), _tar_octal_encode(entry.mtime, 12),
+        b"        ", bytes([48 + entry.typeflag]), _tar_text_encode(entry.linkname, 100),
+        b"ustar\0", b"00", _tar_text_encode(entry.uname, 32), _tar_text_encode(entry.gname, 32),
+        _tar_octal_encode(entry.devmajor, 8), _tar_octal_encode(entry.devminor, 8),
+        _tar_pad(prefix, 155), bytes(12)]);
+    return header[:148] + _tar_octal_encode(_tar_checksum(header), 7) + b" " + header[156:];
+}

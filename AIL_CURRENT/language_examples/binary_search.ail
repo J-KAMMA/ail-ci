@@ -1,0 +1,19 @@
+fn binary_find(data: bytes, needle: bytes, start: int, end: int) -> int {
+    return data.find(needle, start, end);
+}
+
+fn binary_rfind(data: bytes, needle: bytes, start: int, end: int) -> int {
+    return data.rfind(needle, start, end);
+}
+
+fn binary_count(data: bytes, needle: bytes, start: int, end: int) -> int {
+    return data.count(needle, start, end);
+}
+
+fn binary_startswith(data: bytes, prefix: bytes, start: int, end: int) -> int {
+    return data.startswith(prefix, start, end);
+}
+
+fn binary_endswith(data: bytes, suffix: bytes, start: int, end: int) -> int {
+    return data.endswith(suffix, start, end);
+}

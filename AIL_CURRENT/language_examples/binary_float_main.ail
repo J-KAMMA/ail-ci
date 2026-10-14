@@ -1,0 +1,18 @@
+# Convert little-endian numeric binary64 records into the requested byte order.
+fn main() -> int {
+    if len(sys.argv) != 4 { return 2; }
+    try {
+        let data = read_bytes(sys.argv[1]);
+        if len(data) % 8 != 0 { raise ValueError; }
+        let reverse = int(sys.argv[3]);
+        if reverse != 0 and reverse != 1 { raise ValueError; }
+        let output = [];
+        for pos in range(0, len(data), 8) {
+            let value = unpack_f64_le(data[pos:pos+8]);
+            let encoded = binary_encode_float(value, reverse);
+            for item in encoded { output.append(item); }
+        }
+        write_bytes(sys.argv[2], bytes(output));
+        return 0;
+    } except ValueError { return 2; }
+}

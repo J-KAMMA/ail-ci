@@ -1,0 +1,6 @@
+fn main() -> int {
+    let text = open(sys.argv[1]).read();
+    let value = native_value(text);
+    print(value);
+    return 0;
+}

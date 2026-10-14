@@ -1,0 +1,9 @@
+fn number_lines(content: str) -> str {
+    let result = "";
+    let number = 1;
+    for line in content.splitlines() {
+        result = result + str(number) + ": " + line + "\n";
+        number = number + 1;
+    }
+    return result;
+}

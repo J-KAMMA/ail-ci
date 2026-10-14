@@ -1,0 +1,7 @@
+fn main() -> int {
+    let data = read_bytes(sys.argv[1]);
+    let seed = int(sys.argv[2]);
+    try { print(hash32(data, seed)); }
+    except ValueError { print("seed must be in 0..4294967295"); return 2; }
+    return 0;
+}

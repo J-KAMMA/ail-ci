@@ -1,0 +1,24 @@
+use tar_header;
+
+fn tar_entries_encode(entries: list[TarEntry]) -> bytes {
+    let parts: list[bytes] = [];
+    let total: int = 1024;
+    for entry in entries {
+        let header: bytes = tar_header_encode(entry);
+        if entry.typeflag == 0 or entry.typeflag == 7 {
+            if len(entry.data) != entry.size { raise ValueError; }
+        } else {
+            if entry.size != 0 or len(entry.data) != 0 { raise ValueError; }
+        }
+        let padding: int = (512 - len(entry.data) % 512) % 512;
+        if total > 9223372036854775295 { raise ValueError; }
+        let available: int = 9223372036854775807 - total - 512;
+        if len(entry.data) > available or padding > available - len(entry.data) { raise ValueError; }
+        total = total + 512 + len(entry.data) + padding;
+        parts.append(header);
+        parts.append(entry.data);
+        parts.append(b"\x00" * padding);
+    }
+    parts.append(b"\x00" * 1024);
+    return b"".join(parts);
+}

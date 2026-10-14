@@ -1,0 +1,12 @@
+fn binary_fields_count(data: bytes, separator: bytes, maxsplit: int) -> int {
+    return len(data.split(separator, maxsplit));
+}
+
+fn binary_field(data: bytes, separator: bytes, maxsplit: int, index: int) -> bytes {
+    let parts = data.split(separator, maxsplit);
+    return parts[index];
+}
+
+fn binary_fields_rejoin(data: bytes, separator: bytes, joiner: bytes, maxsplit: int) -> bytes {
+    return joiner.join(data.split(separator, maxsplit));
+}

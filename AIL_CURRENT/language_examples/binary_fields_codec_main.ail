@@ -1,0 +1,42 @@
+use binary_fields_codec;
+use file_identity;
+
+fn main() -> int {
+    if len(sys.argv) != 5 {
+        print("usage: binary_fields encode|decode input-path output-path separator-file", file=sys.stderr);
+        return 2;
+    }
+    if sys.argv[1] != "encode" and sys.argv[1] != "decode" {
+        print("mode must be encode or decode", file=sys.stderr);
+        return 2;
+    }
+    if sys.argv[2] == sys.argv[3] or sys.argv[4] == sys.argv[3] {
+        print("output must differ from input and separator paths", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let data = read_bytes(sys.argv[2]);
+        let separator = read_bytes(sys.argv[4]);
+        if len(separator) == 0 { raise ValueError; }
+        if file_paths_same(sys.argv[2], sys.argv[3]) or file_paths_same(sys.argv[4], sys.argv[3]) {
+            raise ValueError;
+        }
+        let output = b"";
+        if sys.argv[1] == "encode" {
+            output = binary_fields_pack(binary_fields_encode(binary_fields_split(data, separator)), b"\n");
+        } else {
+            output = binary_fields_pack(binary_fields_decode(binary_fields_split(data, b"\n")), separator);
+        }
+        write_bytes(sys.argv[3], output);
+        return 0;
+    } except ValueError {
+        print("invalid separator or Base64 field", file=sys.stderr);
+        return 2;
+    } except IndexError {
+        print("invalid field index", file=sys.stderr);
+        return 2;
+    } except OSError {
+        print("binary field file error", file=sys.stderr);
+        return 2;
+    }
+}

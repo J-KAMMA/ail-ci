@@ -1,0 +1,13 @@
+# Read a complete little-endian span, then write LE/BE numeric records.
+fn main() -> int {
+    if len(sys.argv) != 6 { return 2; }
+    try {
+        let first = int(sys.argv[3]);
+        let count = int(sys.argv[4]);
+        let reverse = int(sys.argv[5]);
+        let values = read_f64_records(sys.argv[1], first, count, 0);
+        let output = encode_f64_records(values, reverse);
+        write_bytes(sys.argv[2], output);
+        return 0;
+    } except ValueError { return 2; } except OSError { return 3; }
+}

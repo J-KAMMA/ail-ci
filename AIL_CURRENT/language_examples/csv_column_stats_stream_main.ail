@@ -1,0 +1,23 @@
+use csv_column_stats_stream;
+use file_identity;
+
+fn main()->int {
+    if len(sys.argv)!=4 {
+        print("usage: csv_column_stats INPUT OUTPUT ZERO_BASED_COLUMN",file=sys.stderr);
+        return 2;
+    }
+    try {
+        let input:str=sys.argv[1];
+        let output:str=sys.argv[2];
+        let column:int=parse_int64_decimal(sys.argv[3]);
+        if column<0 or input==output or file_paths_same(input,output) {raise ValueError;}
+        let reader:binaryfile=open_binary(input,"rb");
+        let stats:IntegerColumnStats=IntegerColumnStats(0,0,0,0);
+        try {stats=csv_column_stats_stream(reader,column,8192);} finally {reader.close();}
+        write_bytes(output,integer_column_stats_render(stats).encode());
+        return 0;
+    } except (ValueError,IndexError,UnicodeDecodeError,OSError) {
+        print("invalid CSV, integer, column, path or file operation",file=sys.stderr);
+        return 2;
+    }
+}

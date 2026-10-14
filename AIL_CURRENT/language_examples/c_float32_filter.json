@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "functions": {
+    "filter_values": {"symbol": "native_filter", "params": [["values", "float32_list"], ["weights", "float32_list"]], "result": "float32_list"},
+    "release_values": {"symbol": "native_release", "params": [], "result": "void"},
+    "float_bits": {"symbol": "native_bits", "params": [["value", "float32"]], "result": "uint32"}
+  }
+}

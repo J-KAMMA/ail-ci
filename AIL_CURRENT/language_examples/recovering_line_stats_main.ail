@@ -1,0 +1,21 @@
+fn main() -> int {
+    let valid = 0;
+    let invalid = 0;
+    let total = 0;
+    while true {
+        let line = sys.stdin.readline();
+        if line == "" { break; }
+        try {
+            let value = parse(line);
+        } except ValueError {
+            invalid += 1;
+            continue;
+        }
+        total += value;
+        valid += 1;
+    }
+    print(valid);
+    print(invalid);
+    print(total);
+    return 0;
+}

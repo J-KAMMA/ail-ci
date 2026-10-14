@@ -1,0 +1,16 @@
+# Mutable named counts; snapshots are independent owned dictionaries.
+struct NamedCounters { values: dict[str,int]; }
+
+fn named_counters_new() -> NamedCounters {
+    return NamedCounters({});
+}
+
+fn named_counters_add(state: NamedCounters, key: str, amount: int) -> int {
+    state.values.setdefault(key, 0);
+    state.values[key] += amount;
+    return state.values[key];
+}
+
+fn named_counters_snapshot(state: NamedCounters) -> dict[str,int] {
+    return state.values;
+}

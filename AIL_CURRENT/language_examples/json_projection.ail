@@ -1,0 +1,61 @@
+use json_pointer;
+use json_document_value;
+
+struct JsonProjection { names: list[str]; pointers: list[str]; }
+
+fn json_projection_new(names: list[str], pointers: list[str]) -> JsonProjection {
+    if len(names) != len(pointers) { raise ValueError; }
+    let seen: dict[str, int] = {};
+    for i in range(len(names)) {
+        let name: str = names[i];
+        for c in name {
+            let code: int = ord(c);
+            if code >= 55296 and code <= 57343 { raise ValueError; }
+        }
+        if name in seen { raise ValueError; }
+        seen[name] = 1;
+        json_pointer_segments(pointers[i]);
+    }
+    return JsonProjection(names, pointers);
+}
+
+fn json_projection_parse(text: str) -> JsonProjection {
+    let nodes: list[JsonValue] = json_parse_document(text);
+    if nodes[0].kind != 5 { raise ValueError; }
+    let names: list[str] = [];
+    let pointers: list[str] = [];
+    for i in range(1, len(nodes)) {
+        let node: JsonValue = nodes[i];
+        if node.parent != 0 or node.kind != 3 { raise ValueError; }
+        names.append(node.key);
+        pointers.append(node.text);
+    }
+    return json_projection_new(names, pointers);
+}
+
+fn json_document_select(document: JsonDocument, pointer: str) -> JsonDocument {
+    let nodes: list[JsonValue] = document.nodes;
+    return JsonDocument(json_pointer_extract(nodes, pointer));
+}
+
+fn json_document_project(document: JsonDocument, projection: JsonProjection) -> JsonDocument {
+    let names: list[str] = projection.names;
+    let pointers: list[str] = projection.pointers;
+    json_projection_new(names, pointers);
+    let nodes: list[JsonValue] = document.nodes;
+    json_validate_nodes(nodes);
+    let result: list[JsonValue] = [JsonValue(5, -1, "", "")];
+    for i in range(len(names)) {
+        let selected: list[JsonValue] = json_pointer_extract(nodes, pointers[i]);
+        let offset: int = len(result);
+        if len(selected) > 9223372036854775807 - offset { raise ValueError; }
+        for j in range(len(selected)) {
+            let node: JsonValue = selected[j];
+            let parent: int = 0;
+            let key: str = names[i];
+            if j != 0 { parent = offset + node.parent; key = node.key; }
+            result.append(JsonValue(node.kind, parent, key, node.text));
+        }
+    }
+    return JsonDocument(result);
+}

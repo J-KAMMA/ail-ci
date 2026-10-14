@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "functions": {
+    "hash_reset": {"symbol": "native_reset", "params": [["seed", "uint32"]], "result": "void"},
+    "hash_update": {"symbol": "native_update", "params": [["data", "bytes"]], "result": "void"},
+    "hash_finish": {"symbol": "native_finish", "params": [], "result": "uint32"}
+  }
+}

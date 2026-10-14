@@ -1,0 +1,22 @@
+use named_counters;
+
+fn adjusted_copy(values: list[int], amount: int) -> list[int] {
+    let result = values.copy();
+    for i in range(len(result)) { result[i] += amount; }
+    return result;
+}
+
+fn main() -> int {
+    let values: list[int] = [1, 2, 1];
+    let adjusted = adjusted_copy(values, 10);
+    values[0] = 9;
+    let counts = named_counters_new();
+    for value in adjusted { named_counters_add(counts, str(value), 1); }
+    let saved = named_counters_snapshot(counts);
+    named_counters_add(counts, "11", 5);
+    print(values[0]);
+    print(adjusted[0]);
+    print(saved["11"]);
+    print(counts.values["11"]);
+    return 0;
+}

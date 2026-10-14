@@ -1,0 +1,77 @@
+# A bounded ring for numeric samples. Returned snapshots are independent.
+struct SampleRing { values: list[float]; next: int; limit: int; }
+
+fn sample_ring_new(limit: int) -> SampleRing {
+    if limit <= 0 { raise ValueError(); }
+    return SampleRing([], 0, limit);
+}
+
+fn sample_ring_check(ring: SampleRing) -> void {
+    if ring.limit <= 0 or len(ring.values) > ring.limit or ring.next < 0 or
+       (ring.next != 0 and (len(ring.values) != ring.limit or ring.next >= ring.limit)) {
+        raise ValueError();
+    }
+}
+
+fn sample_ring_push(ring: SampleRing, value: float) -> void {
+    sample_ring_check(ring);
+    if len(ring.values) < ring.limit {
+        ring.values.append(value);
+    } else {
+        ring.values[ring.next] = value;
+        ring.next = (ring.next + 1) % ring.limit;
+    }
+}
+
+fn sample_ring_snapshot(ring: SampleRing) -> list[float] {
+    sample_ring_check(ring);
+    let values = ring.values;
+    return [values[(ring.next + index) % len(values)] for index in range(len(values))];
+}
+
+# Append a numeric batch without invoking push for every element.
+fn sample_ring_extend(ring: SampleRing, values: list[float]) -> void {
+    sample_ring_check(ring);
+    let count = len(values);
+    if count == 0 { return; }
+    if count >= ring.limit {
+        ring.values = values[-ring.limit:];
+        ring.next = 0;
+        return;
+    }
+    let offset = 0;
+    if len(ring.values) < ring.limit {
+        let take = min(count, ring.limit - len(ring.values));
+        ring.values.extend(values[:take]);
+        offset = take;
+    }
+    let remaining = count - offset;
+    if remaining > 0 {
+        let first = min(remaining, ring.limit - ring.next);
+        ring.values[ring.next:ring.next + first] = values[offset:offset + first];
+        ring.next = (ring.next + first) % ring.limit;
+        let rest = remaining - first;
+        if rest > 0 {
+            ring.values[:rest] = values[offset + first:];
+            ring.next = rest;
+        }
+    }
+}
+
+# Decode complete little-endian binary64 records, return at most seven pending bytes.
+fn sample_ring_feed(ring: SampleRing, data: bytes) -> bytes {
+    sample_ring_check(ring);
+    let aligned = len(data) - len(data) % 8;
+    let values = float64_decode(data[:aligned], 0);
+    for value in values { sample_ring_push(ring, value); }
+    return data[aligned:];
+}
+
+# Explicit batch alternative; speed superiority has not been established.
+fn sample_ring_feed_batch(ring: SampleRing, data: bytes) -> bytes {
+    sample_ring_check(ring);
+    let aligned = len(data) - len(data) % 8;
+    let values = float64_decode(data[:aligned], 0);
+    sample_ring_extend(ring, values);
+    return data[aligned:];
+}

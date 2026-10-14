@@ -1,0 +1,14 @@
+fn main() -> int {
+    if len(sys.argv) == 3 {
+        let mode = sys.argv[1];
+        let path = sys.argv[2];
+        if mode == "normalize" { print(path_normalize(path)); return 0; }
+        if mode == "basename" { print(path_basename(path)); return 0; }
+        if mode == "dirname" { print(path_dirname(path)); return 0; }
+    }
+    if len(sys.argv) == 4 and sys.argv[1] == "join" {
+        print(path_join(sys.argv[2], sys.argv[3])); return 0;
+    }
+    print("usage: path_posix normalize|basename|dirname PATH, or join LEFT RIGHT", file=sys.stderr);
+    return 2;
+}

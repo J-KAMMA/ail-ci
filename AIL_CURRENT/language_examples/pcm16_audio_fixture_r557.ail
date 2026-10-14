@@ -1,0 +1,39 @@
+# Raw little-endian signed 16-bit samples; gain truncates toward zero.
+fn pcm16_gain(data: bytes, numerator: int, denominator: int) -> bytes {
+    if numerator < -65536 or numerator > 65536 { raise ValueError; }
+    if denominator < 1 or denominator > 65536 { raise ValueError; }
+    if len(data) % 2 != 0 { raise ValueError; }
+    if numerator == denominator or len(data) == 0 { return data; }
+    let blocks: list[bytes] = [];
+    for start in range(0, len(data), 8192) {
+        let end: int = len(data);
+        if len(data) - start > 8192 { end = start + 8192; }
+        let output: list[int] = [];
+        for offset in range(start, end, 2) {
+            let sample: int = data[offset] + data[offset + 1] * 256;
+            if sample >= 32768 { sample -= 65536; }
+            let product: int = sample * numerator;
+            let value: int = product // denominator;
+            if product < 0 { value = -((-product) // denominator); }
+            if value < -32768 { value = -32768; }
+            if value > 32767 { value = 32767; }
+            if value < 0 { value += 65536; }
+            output.append(value % 256);
+            output.append(value // 256);
+        }
+        blocks.append(bytes(output));
+    }
+    return b"".join(blocks);
+}
+
+fn pcm16_trim(data: bytes, channels: int, first: int, count: int) -> bytes {
+    if channels != 1 and channels != 2 { raise ValueError; }
+    let frame_size: int = channels * 2;
+    if len(data) % frame_size != 0 { raise ValueError; }
+    let frames: int = len(data) // frame_size;
+    if first < 0 or first > frames { raise ValueError; }
+    if count < 0 or count > frames - first { raise ValueError; }
+    let start: int = first * frame_size;
+    let end: int = (first + count) * frame_size;
+    return data[start:end];
+}

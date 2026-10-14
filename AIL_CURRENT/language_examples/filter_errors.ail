@@ -1,0 +1,13 @@
+use filter_rules;
+
+fn main() {
+    let count = 0;
+    for line in sys.stdin {
+        if is_error(line) {
+            print(line, end="");
+            count += 1;
+        }
+    }
+    print(count);
+    return 0;
+}

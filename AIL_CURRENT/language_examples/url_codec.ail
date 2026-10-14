@@ -1,0 +1,40 @@
+# URI percent encoding preserves bytes; '+' is literal, not form whitespace.
+fn url_percent_encode(data: bytes) -> str {
+    let output = [];
+    let digits = b"0123456789ABCDEF";
+    for value in data {
+        if (value >= 65 and value <= 90) or (value >= 97 and value <= 122) or (value >= 48 and value <= 57) or value == 45 or value == 46 or value == 95 or value == 126 {
+            output.append(value);
+        } else {
+            output.append(37);
+            output.append(digits[value // 16]);
+            output.append(digits[value % 16]);
+        }
+    }
+    return bytes(output).decode("utf-8");
+}
+
+fn url_percent_decode(text: str) -> bytes {
+    let output = [];
+    let remaining = 0;
+    let value = 0;
+    for c in text {
+        let code = ord(c);
+        if remaining == 0 {
+            if code > 127 { raise ValueError; }
+            if code == 37 { remaining = 2; value = 0; }
+            else { output.append(code); }
+        } else {
+            let digit = -1;
+            if code >= 48 and code <= 57 { digit = code - 48; }
+            elif code >= 65 and code <= 70 { digit = code - 55; }
+            elif code >= 97 and code <= 102 { digit = code - 87; }
+            if digit < 0 { raise ValueError; }
+            value = value * 16 + digit;
+            remaining -= 1;
+            if remaining == 0 { output.append(value); }
+        }
+    }
+    if remaining != 0 { raise ValueError; }
+    return bytes(output);
+}

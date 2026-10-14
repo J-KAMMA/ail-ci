@@ -1,0 +1,56 @@
+# AIL reference (core)
+
+AIL is statically typed Python with braces, compiled via C. Write Python, with these rules.
+Build in AIL_CURRENT/: `python3 ail_chatgpt.py compile p.ail -o p`.
+
+```ail
+# args: 3
+# exit: 1
+struct Acc { total: int; keys: list[str]; }
+impl Acc { fn add(self, k: str, v: int) -> void { self.keys.append(k); self.total += v; } }
+fn parse(acc: Acc, line: str) -> void {
+    let f = line.split("|");
+    if len(f) != 2 or not f[0].isupper() { raise ValueError(f"bad: {line.strip()}"); }
+    acc.add(f[0], int(f[1]));
+}
+fn main() {
+    let acc = Acc(0, []);
+    for line in sys.stdin { parse(acc, line); }
+    parse(acc, "B|5"); parse(acc, "A| 7");
+    let w = [3, 9, 3];
+    let idx = [i for i in range(3)];
+    idx.sort(key=lambda i: (-w[i], i));
+    for i in idx { print(f"{i:<2}{w[i]:>3}"); }
+    acc.keys.sort();
+    print(",".join(acc.keys), acc.total, int(sys.argv[1]), 3 > 2, b"xy"[1:].decode());
+    try { parse(acc, "b|1"); }
+    except ValueError as err { print(err.message, file=sys.stderr); return 1; }
+    return 0;
+}
+```
+
+- `;` ends every statement, never a `}`; `elif`; `#` comments; `and or not`. `except` names the
+  kinds (no bare `except`); an uncaught error exits 1.
+- Top level: only `use`, `const`, `struct`, `impl`, `fn`; no globals (pass a struct), nested
+  `fn`, `class`. A lambda is only a sort key and may read other lists (`idx.sort`): never
+  hand-write a sort.
+- `let x = 1;`, `let xs: list[str] = [];` fix the type. A name keeps one type in the whole
+  function, also across blocks: give another type a new name. Loop variables are per loop; name
+  `except` bindings freshly (`as err`). Annotate parameters and results (`-> void`).
+- `int` is 64-bit (overflow raises `OverflowError`). `bool` prints `True`/`False`, adds as 1/0; a
+  bool slot takes only bools (`n != 0`). No tuples: return a struct (`a, b = b, a` works). `None`
+  only for structs typed `Node | None`.
+- `list[T]`, `dict[int|str, T]`, `set[int|str]`, T int, float, str, bytes; lists also bool,
+  structs, rows (`[[0] * w for _ in range(h)]`). Structs and rows are shared references; `let ys =
+  xs;` copies a flat list. Flat list/dict/set parameters are read-only: change a struct field
+  `s.xs` or return a new list.
+- `print` takes int, float, str, bool; `+` never mixes str and number (`str(n)`). f-strings, `%`,
+  `.format`: `d f s`, width, precision, `<>^`.
+- Text: `for line in sys.stdin` (keeps `\n`), `input()`, `split()`, `int(s)`, a print per line.
+  Bytes for binary, non-UTF-8 (str input exits 1) or one huge line: `read_stdin_bytes(1 << 40)`;
+  `data[i]` is an int (`ord("a")`, not 97); `data[a:b]` an O(1) view, `int(data[a:b])`; to str
+  only by `.decode()`; `write_stdout_bytes(bytearray)`. To print nothing on error, collect output.
+- No `math`, `re`, `collections`, `zip`, big ints: `x ** 0.5`, loops. Built in: `heappush`,
+  `heappop(h)` (structs: same `key=lambda s: (s.d, s.id)` each call), `bisect_left`, `insort`.
+
+MORE (`sed -n A,Bp AIL_REFERENCE_MORE.md`): Commands 7-13, Text I/O 15-49, Bytes 51-83, Syntax 85-96, Local names 98-123, Numbers 125-139, Structs 141-174, Trees 176-218, Lists 220-230, Sort keys 232-239, Nested lists 241-258, Dicts 260-269, Sets 271-277, Strings 279-302, Heaps 304-317, Loops 319-326, Exceptions 328-335, Refused 337-378, Word count 380-412, Dijkstra 414-447, BFS 449-493, Modules 495-523, Speed 525-544, Parallel 546-581.

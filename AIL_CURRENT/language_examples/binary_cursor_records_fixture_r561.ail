@@ -1,0 +1,41 @@
+use binary_cursor_file;
+
+fn binary_records_count(size: int) -> int {
+    if size < 0 or size % 13 != 0 { raise ValueError; }
+    let count = size // 13;
+    if count > 2147483648 { raise ValueError; }
+    return count;
+}
+
+fn main() -> int {
+    if len(sys.argv) != 2 {
+        print("usage: binary_cursor_records input-path", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let cursor = binary_cursor_file(sys.argv[1]);
+        let count = binary_records_count(len(cursor.data));
+        let sum8 = 0;
+        let sum16le = 0;
+        let sum16be = 0;
+        let sum32le = 0;
+        let sum32be = 0;
+        for i in range(count) {
+            sum8 += cursor.read_u8();
+            sum16le += cursor.read_u16_le();
+            sum16be += cursor.read_u16_be();
+            sum32le += cursor.read_u32_le();
+            sum32be += cursor.read_u32_be();
+        }
+        if cursor.position != len(cursor.data) or cursor.remaining() != 0 { raise ValueError; }
+        let report = str(count) + " " + str(sum8) + " " + str(sum16le) + " " + str(sum16be) + " " + str(sum32le) + " " + str(sum32be) + " " + str(cursor.position) + "\n";
+        write_stdout_bytes(report.encode());
+        return 0;
+    } except ValueError {
+        print("invalid binary record input", file=sys.stderr);
+        return 2;
+    } except OSError {
+        print("binary record file error", file=sys.stderr);
+        return 2;
+    }
+}

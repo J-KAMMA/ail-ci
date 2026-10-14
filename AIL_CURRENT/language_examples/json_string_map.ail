@@ -1,0 +1,25 @@
+use json_pointer;
+use string_map;
+use json_document;
+
+fn json_string_map_at(nodes: list[JsonValue], pointer: str) -> dict[str, str] {
+    let selected: int = json_pointer_index(nodes, pointer);
+    if nodes[selected].kind != 5 { raise ValueError; }
+    let values: dict[str, str] = {};
+    let index: int = selected + 1;
+    while index < len(nodes) {
+        let node: JsonValue = nodes[index];
+        if node.parent < selected { break; }
+        if node.parent == selected {
+            if node.kind != 3 { raise ValueError; }
+            values[node.key] = node.text;
+        }
+        index += 1;
+    }
+    return values;
+}
+
+fn json_string_map_parse(text: str) -> dict[str, str] {
+    let nodes = json_parse_document(text);
+    return json_string_map_at(nodes, "");
+}

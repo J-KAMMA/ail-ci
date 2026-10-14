@@ -1,0 +1,17 @@
+use json_pointer;
+use json_tree;
+
+fn json_pointer_batch(nodes: list[JsonValue], pointers: list[str]) -> list[str] {
+    json_validate_nodes(nodes);
+    let result: list[str] = [];
+    for pointer in pointers {
+        let selected: list[JsonValue] = _json_subtree_valid(nodes, _json_pointer_index_valid(nodes, pointer));
+        result.append(_json_render_valid(selected));
+    }
+    return result;
+}
+
+fn json_pointer_batch_render(nodes: list[JsonValue], pointers: list[str]) -> str {
+    let values: list[str] = json_pointer_batch(nodes, pointers);
+    return "[" + ",".join(values) + "]";
+}

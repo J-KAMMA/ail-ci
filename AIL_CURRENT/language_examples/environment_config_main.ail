@@ -1,0 +1,26 @@
+use environment_config;
+use json_text;
+
+fn main() -> int {
+    if len(sys.argv) != 1 {
+        print("usage: environment_config", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let count = env_int("AIL_CONFIG_COUNT", 1);
+        let enabled = env_bool("AIL_CONFIG_ENABLED", 0);
+        let directory = current_dir();
+        print("{\"count\":" + str(count) + ",\"enabled\":" + str(enabled)
+            + ",\"directory\":" + json_quote(directory) + "}");
+        return 0;
+    } except OSError {
+        print("configuration access failed", file=sys.stderr);
+        return 3;
+    } except ValueError {
+        print("invalid configuration", file=sys.stderr);
+        return 4;
+    } except UnicodeDecodeError {
+        print("configuration is not valid Unicode", file=sys.stderr);
+        return 4;
+    }
+}

@@ -1,0 +1,181 @@
+use json_pointer;
+use checked_integer;
+
+struct JsonPollPeer {
+    socket: tcpsocket;
+    line: bytearray;
+    chunk: bytes;
+    cursor: int;
+    output: bytes;
+    offset: int;
+    done: int;
+    progress: int;
+}
+struct JsonPollResult { frames: int; status: int; }
+
+fn _json_poll_peer(socket: tcpsocket, progress: int) -> JsonPollPeer {
+    socket.set_blocking(0);
+    return JsonPollPeer(socket, bytearray(), b"", 0, b"", 0, 0, progress);
+}
+
+# At most one reply and one 8192-byte received chunk are retained per peer.
+fn _json_poll_frame(peer: JsonPollPeer, max_line: int) -> void {
+    while len(peer.output) == 0 and peer.cursor < len(peer.chunk) {
+        let octet: int = peer.chunk[peer.cursor];
+        peer.cursor += 1;
+        if octet == 10 {
+            let text: str = bytes(peer.line).decode("utf-8");
+            peer.output = (json_render_document(json_parse_document(text)) + "\n").encode("utf-8");
+            peer.offset = 0;
+            peer.line.clear();
+        } else {
+            if len(peer.line) >= max_line { raise ValueError; }
+            peer.line.append(octet);
+        }
+    }
+    if peer.cursor == len(peer.chunk) { peer.chunk = b""; peer.cursor = 0; }
+}
+
+# Keep temporary receive/send byte arenas within one I/O operation.
+fn _json_poll_read(peer: JsonPollPeer) -> int {
+    peer.chunk = peer.socket.recv(8192);
+    peer.cursor = 0;
+    if len(peer.chunk) == 0 {
+        if len(peer.line) != 0 { raise ValueError; }
+        return 0;
+    }
+    return 1;
+}
+
+fn _json_poll_write(peer: JsonPollPeer) -> int {
+    let end: int = peer.offset + 8192;
+    if end > len(peer.output) { end = len(peer.output); }
+    let sent: int = peer.socket.send_some(peer.output[peer.offset:end]);
+    if sent <= 0 { raise OSError; }
+    peer.offset += sent;
+    if peer.offset == len(peer.output) {
+        peer.output = b"";
+        peer.offset = 0;
+        return 1;
+    }
+    return 0;
+}
+
+# LF-delimited UTF-8 JSON, preserving number lexemes, member order and duplicates.
+# max_line excludes LF; its fixed safety cap is 1 MiB. Replies <=6*max_line+1.
+# idle_ms is a batch-wide wait with no ready events, not a per-peer request deadline.
+# A stalled peer remains active until EOF/error or the batch's idle wait expires.
+# Caller owns listener; all accepted peers are closed here, including on failure.
+fn tcp_json_lines_poll(listener: tcpsocket, clients: int, idle_ms: int, max_line: int, max_active: int) -> JsonPollResult {
+    return tcp_json_lines_poll_timed(listener, clients, idle_ms, max_line, max_active, 0, 0);
+}
+
+# peer_ms bounds time without actual received/sent bytes for each accepted peer.
+# total_ms bounds the whole batch, including continued traffic. Zero disables either.
+# Deadlines are checked between operations; this is not a real-time scheduling guarantee.
+fn tcp_json_lines_poll_timed(listener: tcpsocket, clients: int, idle_ms: int, max_line: int, max_active: int, peer_ms: int, total_ms: int) -> JsonPollResult {
+    if peer_ms < 0 or peer_ms > 2147483647 or total_ms < 0 or total_ms > 2147483647 { raise ValueError; }
+    if clients <= 0 or idle_ms <= 0 or idle_ms > 2147483647 or max_line <= 0 or max_line > 1048576 or max_active <= 0 or max_active > 1024 { raise ValueError; }
+    let started: int = 0;
+    if total_ms != 0 { started = monotonic_ms(); }
+    listener.set_blocking(0);
+    let states: list[JsonPollPeer] = [];
+    let accepted: int = 0;
+    let completed: int = 0;
+    let total: int = 0;
+    let status: int = 0;
+    try {
+        while completed < clients {
+            let now: int = 0;
+            if peer_ms != 0 or total_ms != 0 { now = monotonic_ms(); }
+            if total_ms != 0 and now - started >= total_ms { if status != 4 { status = 3; } break; }
+            let active: int = 0;
+            for state in states {
+                if not state.done and peer_ms != 0 and now - state.progress >= peer_ms {
+                    state.socket.close(); state.done = 1; completed += 1;
+                    if status != 4 { status = 3; }
+                }
+                if not state.done {
+                    try { _json_poll_frame(state, max_line); }
+                    except UnicodeDecodeError { state.socket.close(); state.done = 1; completed += 1; status = 4; }
+                    except ValueError { state.socket.close(); state.done = 1; completed += 1; status = 4; }
+                    if not state.done { active += 1; }
+                }
+            }
+            if completed == clients { break; }
+            let sockets: list[tcpsocket] = [listener];
+            let interests: list[int] = [0];
+            let slots: list[int] = [-1];
+            if accepted < clients and active < max_active { interests[0] = 1; }
+            for i in range(len(states)) {
+                let state: JsonPollPeer = states[i];
+                if not state.done {
+                    sockets.append(state.socket);
+                    slots.append(i);
+                    if len(state.output) != 0 { interests.append(2); }
+                    else { interests.append(1); }
+                }
+            }
+            let wait_ms: int = idle_ms;
+            if peer_ms != 0 or total_ms != 0 { now = monotonic_ms(); }
+            if total_ms != 0 {
+                let left: int = total_ms - (now - started);
+                if left <= 0 { if status != 4 { status = 3; } break; }
+                if left < wait_ms { wait_ms = left; }
+            }
+            if peer_ms != 0 {
+                for state in states {
+                    if not state.done {
+                        let left: int = peer_ms - (now - state.progress);
+                        if left <= 0 { wait_ms = 0; }
+                        elif left < wait_ms { wait_ms = left; }
+                    }
+                }
+            }
+            let ready: list[int] = tcp_poll(sockets, interests, wait_ms);
+            let events: int = 0;
+            for flag in ready { if flag != 0 { events += 1; } }
+            if events == 0 { if wait_ms < idle_ms { continue; } if status != 4 { status = 3; } break; }
+            if ready[0] == 1 or ready[0] == 3 {
+                let socket = listener.accept();
+                let reused: int = 0;
+                try {
+                    let progress: int = 0;
+                    if peer_ms != 0 { progress = monotonic_ms(); }
+                    let state: JsonPollPeer = _json_poll_peer(socket, progress);
+                    for i in range(len(states)) {
+                        if states[i].done and not reused { states[i] = state; reused = 1; }
+                    }
+                    if not reused { states.append(state); }
+                    accepted = checked_int64_add(accepted, 1);
+                } except OSError { socket.close(); raise OSError; }
+                  except ValueError { socket.close(); raise ValueError; }
+            }
+            for j in range(1, len(ready)) {
+                if ready[j] != 0 {
+                    let state: JsonPollPeer = states[slots[j]];
+                    try {
+                        if len(state.output) != 0 and (ready[j] == 2 or ready[j] == 3) {
+                            if _json_poll_write(state) { total = checked_int64_add(total, 1); }
+                            if peer_ms != 0 { state.progress = monotonic_ms(); }
+                        } elif len(state.output) == 0 and (ready[j] == 1 or ready[j] == 3) {
+                            if _json_poll_read(state) == 0 {
+                                state.socket.close(); state.done = 1; completed += 1;
+                            } elif peer_ms != 0 { state.progress = monotonic_ms(); }
+                        }
+                    } except OSError {
+                        state.socket.close(); state.done = 1; completed += 1;
+                        if status != 4 { status = 3; }
+                    } except UnicodeDecodeError {
+                        state.socket.close(); state.done = 1; completed += 1; status = 4;
+                    } except ValueError {
+                        state.socket.close(); state.done = 1; completed += 1; status = 4;
+                    }
+                }
+            }
+        }
+        return JsonPollResult(total, status);
+    } finally {
+        for state in states { state.socket.close(); }
+    }
+}

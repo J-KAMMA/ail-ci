@@ -1,0 +1,12 @@
+# One Unicode CSV record with CRLF; zero fields are ambiguous and rejected.
+# A single empty field is quoted so it is distinct from an ignored blank record.
+fn csv_encode_row(fields: list[str]) -> str {
+    if len(fields) == 0 { raise ValueError; }
+    let parts: list[str] = [];
+    for field in fields {
+        if "," in field or "\"" in field or "\r" in field or "\n" in field or (len(fields) == 1 and field == "") {
+            parts.append("\"" + field.replace("\"", "\"\"") + "\"");
+        } else { parts.append(field); }
+    }
+    return ",".join(parts) + "\r\n";
+}

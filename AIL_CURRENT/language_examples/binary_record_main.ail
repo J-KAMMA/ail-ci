@@ -1,0 +1,10 @@
+# Link the precompiled binary_record module.
+fn main() -> int {
+    if len(sys.argv) < 3 { return 2; }
+    try {
+        let record = pack_record(read_bytes(sys.argv[1]));
+        write_bytes(sys.argv[2], record);
+        print(len(unpack_record(record)));
+        return 0;
+    } except OSError { return 3; } except ValueError { return 4; }
+}

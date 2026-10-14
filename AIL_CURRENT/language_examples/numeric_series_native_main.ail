@@ -1,0 +1,50 @@
+use numeric_series;
+use typed_sequences;
+use checked_integer;
+
+fn integer_series_native_between(series: IntegerSeries, low: int, high: int) -> IntegerSeries {
+    let values: list[int] = series.values;
+    for i in range(1, len(values)) {
+        if values[i - 1] > values[i] { raise ValueError; }
+    }
+    let selected: list[int] = native_between(values, low, high);
+    return integer_series_new(selected);
+}
+
+fn float_series_native_average(series: FloatSeries, window: int) -> FloatSeries {
+    let values: list[float] = series.values;
+    if window <= 0 or window > len(values) { raise ValueError; }
+    let averages: list[float] = native_moving_average(values, window);
+    let result: FloatSeries = float_series_new(averages);
+    native_release_smoothing();
+    return result;
+}
+
+fn main() -> int {
+    if len(sys.argv) != 5 {
+        print("usage: numeric_series_native INPUT COLUMN LOW HIGH", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let column: int = parse_int64_decimal(sys.argv[2]);
+        let low: int = parse_int64_decimal(sys.argv[3]);
+        let high: int = parse_int64_decimal(sys.argv[4]);
+        if column < 0 { raise ValueError; }
+        let text: str = read_bytes(sys.argv[1]).decode("utf-8");
+        let values: list[int] = integer_column_values(text, column);
+        let series: IntegerSeries = integer_series_new(values);
+        let selected: IntegerSeries = integer_series_native_between(series, low, high);
+        let rendered: str = integer_series_render(selected);
+        write_stdout_bytes(rendered.encode("utf-8"));
+        return 0;
+    } except ValueError {
+        print("invalid integer column, range, or ascending data", file=sys.stderr);
+        return 2;
+    } except UnicodeDecodeError {
+        print("input must be UTF-8", file=sys.stderr);
+        return 2;
+    } except OSError {
+        print("numeric series input or output failed", file=sys.stderr);
+        return 2;
+    }
+}

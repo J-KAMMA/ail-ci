@@ -1,0 +1,21 @@
+fn main() -> int {
+    if len(sys.argv) != 4 {
+        print("usage: data_convert MODE INPUT OUTPUT", file=sys.stderr); return 2;
+    }
+    let mode = sys.argv[1];
+    if mode != "json-compact" and mode != "base64-encode" and mode != "base64-decode" and mode != "url-encode" and mode != "url-decode" {
+        print("unknown conversion mode", file=sys.stderr); return 2;
+    }
+    try {
+        let input = read_bytes(sys.argv[2]); let result = b"";
+        if mode == "json-compact" { result = json_compact(input.decode()).encode(); }
+        elif mode == "base64-encode" { result = base64_encode(input).encode(); }
+        elif mode == "base64-decode" { result = base64_decode(input.decode()); }
+        elif mode == "url-encode" { result = url_percent_encode(input).encode(); }
+        else { result = url_percent_decode(input.decode()); }
+        write_bytes(sys.argv[3], result);
+    } except (OSError, ValueError) {
+        print("invalid input or file operation failed", file=sys.stderr); return 2;
+    }
+    return 0;
+}

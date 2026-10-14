@@ -1,0 +1,5 @@
+fn scaled(values: list[float], factor: float) -> list[float] {
+    let result=[];
+    for value in values { result.append(value*factor); }
+    return result;
+}

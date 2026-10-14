@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "functions": {
+    "native_between": {
+      "symbol": "between",
+      "params": [["values", "list"], ["low", "int"], ["high", "int"]],
+      "result": "list"
+    }
+  }
+}

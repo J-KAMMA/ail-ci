@@ -1,0 +1,21 @@
+use tcp_file_exchange;
+use checked_integer;
+
+fn main() -> int {
+    if len(sys.argv) != 6 {
+        print("usage: tcp_file_exchange HOST PORT INPUT OUTPUT CHUNK_SIZE", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let port = parse_int64_text(sys.argv[2]);
+        let chunk = parse_int64_text(sys.argv[5]);
+        print(tcp_file_exchange(sys.argv[1], port, sys.argv[3], sys.argv[4], chunk));
+        return 0;
+    } except OSError {
+        print("TCP or file access failed", file=sys.stderr);
+        return 3;
+    } except ValueError {
+        print("invalid TCP or chunk argument", file=sys.stderr);
+        return 4;
+    }
+}

@@ -1,0 +1,12 @@
+fn main() {
+    let count = 0;
+    while true {
+        let line = sys.stdin.readline();
+        if line == "" {
+            break;
+        }
+        count += 1;
+    }
+    print(count);
+    return 0;
+}

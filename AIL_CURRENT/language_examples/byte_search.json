@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "functions": {
+    "byte_search_native": {
+      "symbol": "native_find_byte",
+      "params": [["data", "borrowed_bytes"], ["value", "int"], ["start", "int"], ["end", "int"]],
+      "result": "int"
+    }
+  }
+}

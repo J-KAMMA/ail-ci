@@ -1,0 +1,52 @@
+use binary_record_batch;
+use file_identity;
+
+fn binary_records_pack_kind(text: str) -> int {
+    let wanted = 0;
+    let position = 0;
+    let negative = False;
+    let digits = False;
+    for c in text {
+        if position == 0 and (c == "+" or c == "-") { negative = c == "-"; }
+        else {
+            let digit = ord(c) - 48;
+            if digit < 0 or digit > 9 { raise ValueError; }
+            if wanted > 6553 or (wanted == 6553 and digit > 5) { raise ValueError; }
+            wanted = wanted * 10 + digit;
+            digits = True;
+        }
+        position += 1;
+    }
+    if not digits or (negative and wanted != 0) { raise ValueError; }
+    return wanted;
+}
+
+fn main() -> int {
+    if len(sys.argv) < 4 or (len(sys.argv) - 2) % 2 != 0 {
+        print("usage: binary_records_pack output-path kind input-path [kind input-path...]", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let output = sys.argv[1];
+        let batch = BinaryRecordBatch([]);
+        for position in range(2, len(sys.argv), 2) {
+            let kind = binary_records_pack_kind(sys.argv[position]);
+            let input = sys.argv[position + 1];
+            if input == output { raise ValueError; }
+            if file_paths_same(input, output) { raise ValueError; }
+            let data = read_bytes(input);
+            batch.append(kind, data);
+        }
+        write_bytes(output, batch.finish());
+        return 0;
+    } except ValueError {
+        print("invalid kind, binary record payload, or output aliases an input", file=sys.stderr);
+        return 2;
+    } except IndexError {
+        print("invalid binary record arguments", file=sys.stderr);
+        return 2;
+    } except OSError {
+        print("binary record file error", file=sys.stderr);
+        return 2;
+    }
+}

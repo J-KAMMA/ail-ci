@@ -1,0 +1,3 @@
+fn append_record(path: str, payload: bytes) -> void {
+    append_bytes(path, (str(len(payload)) + ":").encode() + payload);
+}

@@ -1,0 +1,42 @@
+use tcp_json_lines;
+
+fn main() -> int {
+    if len(sys.argv) != 6 {
+        print("usage: tcp_json_lines HOST PORT CLIENT_COUNT WAIT_MS MAX_LINE", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let port = parse_int64_text(sys.argv[2]);
+        let clients = parse_int64_text(sys.argv[3]);
+        let timeout = parse_int64_text(sys.argv[4]);
+        let max_line = parse_int64_text(sys.argv[5]);
+        if clients <= 0 or timeout <= 0 or timeout > 2147483647 or max_line <= 0 or max_line > 1048576 { raise ValueError; }
+        let listener = tcp_listen(sys.argv[1], port, 16);
+        try {
+            listener.set_blocking(0);
+            print(listener.local_port());
+            flush_stdout();
+            let total: int = 0;
+            for i in range(clients) {
+                if listener.wait_readable(timeout) == 0 { raise OSError; }
+                let peer = listener.accept();
+                try {
+                    peer.set_blocking(0);
+                    total = checked_int64_add(total, tcp_json_lines(peer, timeout, max_line));
+                }
+                finally { peer.close(); }
+            }
+            print(total);
+            return 0;
+        } finally { listener.close(); }
+    } except OSError {
+        print("TCP JSON service I/O or readiness deadline failed", file=sys.stderr);
+        return 3;
+    } except UnicodeDecodeError {
+        print("invalid argument, JSON frame or UTF-8", file=sys.stderr);
+        return 4;
+    } except ValueError {
+        print("invalid argument, JSON frame or UTF-8", file=sys.stderr);
+        return 4;
+    }
+}

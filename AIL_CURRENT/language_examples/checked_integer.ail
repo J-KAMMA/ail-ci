@@ -1,0 +1,59 @@
+fn parse_int64_decimal(text: str) -> int {
+    let accumulator: int = 0;
+    let first: int = 1;
+    let negative: int = 0;
+    let digits: int = 0;
+    let last_limit: int = 7;
+    for c in text {
+        if first and (c == "+" or c == "-") {
+            if c == "-" { negative = 1; last_limit = 8; }
+        } else {
+            let digit: int = ord(c) - 48;
+            if digit < 0 or digit > 9 { raise ValueError; }
+            if accumulator < -922337203685477580 or (accumulator == -922337203685477580 and digit > last_limit) {
+                raise ValueError;
+            }
+            accumulator = accumulator * 10 - digit;
+            digits = 1;
+        }
+        first = 0;
+    }
+    if not digits { raise ValueError; }
+    if negative { return accumulator; }
+    return -accumulator;
+}
+
+fn parse_int64_text(text: str) -> int {
+    return parse_int64_decimal(text.strip("\t\n\v\f\r \u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"));
+}
+
+fn checked_int64_add(a: int, b: int) -> int {
+    if b > 0 and a > 9223372036854775807 - b { raise ValueError; }
+    if b < 0 and a < -9223372036854775808 - b { raise ValueError; }
+    return a + b;
+}
+
+fn parse_int64_decimal_bytes(text: bytes) -> int {
+    let accumulator: int = 0;
+    let first: int = 1;
+    let negative: int = 0;
+    let digits: int = 0;
+    let last_limit: int = 7;
+    for c in text {
+        if first and (c == 43 or c == 45) {
+            if c == 45 { negative = 1; last_limit = 8; }
+        } else {
+            let digit: int = c - 48;
+            if digit < 0 or digit > 9 { raise ValueError; }
+            if accumulator < -922337203685477580 or (accumulator == -922337203685477580 and digit > last_limit) {
+                raise ValueError;
+            }
+            accumulator = accumulator * 10 - digit;
+            digits = 1;
+        }
+        first = 0;
+    }
+    if not digits { raise ValueError; }
+    if negative { return accumulator; }
+    return -accumulator;
+}

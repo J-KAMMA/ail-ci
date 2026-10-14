@@ -1,0 +1,26 @@
+use json_lines_io;
+use checked_integer;
+
+fn json_lines_collect_file(path: str, size: int) -> JsonDocuments {
+    return json_lines_read_file(path, size);
+}
+
+fn main() -> int {
+    if len(sys.argv) != 3 {
+        print("usage: json_lines INPUT SIZE", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let size: int = parse_int64_decimal(sys.argv[2]);
+        let batch = json_lines_collect_file(sys.argv[1], size);
+        let rendered: str = json_documents_render(batch);
+        write_stdout_bytes((rendered + "\n").encode("utf-8"));
+        return 0;
+    } except ValueError {
+        print("invalid JSON Lines, UTF-8, or chunk size", file=sys.stderr);
+        return 2;
+    } except OSError {
+        print("JSON Lines input or output failed", file=sys.stderr);
+        return 2;
+    }
+}

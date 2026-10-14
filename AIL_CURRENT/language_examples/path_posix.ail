@@ -1,0 +1,39 @@
+# Pure lexical POSIX paths: slash is the only separator.
+fn path_basename(path: str) -> str {
+    let i = len(path);
+    while i > 0 and path[i - 1] != "/" { i -= 1; }
+    return path[i:];
+}
+
+fn path_dirname(path: str) -> str {
+    let i = len(path);
+    while i > 0 and path[i - 1] != "/" { i -= 1; }
+    let head = path[:i];
+    if head != "" and head.strip("/") != "" { return head.rstrip("/"); }
+    return head;
+}
+
+fn path_join(left: str, right: str) -> str {
+    if right.startswith("/") or left == "" { return right; }
+    if left.endswith("/") { return left + right; }
+    return left + "/" + right;
+}
+
+fn path_normalize(path: str) -> str {
+    if path == "" { return "."; }
+    let prefix = "";
+    if path.startswith("/") { prefix = "/"; }
+    if path.startswith("//") and not path.startswith("///") { prefix = "//"; }
+    let result = "";
+    for part in path.split("/") {
+        if part != "" and part != "." {
+            if part == ".." {
+                if result != "" and path_basename(result) != ".." { result = path_dirname(result); }
+                elif prefix == "" { result = path_join(result, part); }
+            } else { result = path_join(result, part); }
+        }
+    }
+    result = prefix + result;
+    if result == "" { return "."; }
+    return result;
+}

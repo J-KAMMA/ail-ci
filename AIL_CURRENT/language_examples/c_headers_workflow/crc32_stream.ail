@@ -1,0 +1,22 @@
+fn crc32_update(previous: int, data: bytes) -> int {
+    return native_crc32_update(previous, data);
+}
+
+fn _crc32_chunk(path: str, offset: int, previous: int) -> int {
+    let data = read_bytes(path, offset, 65536);
+    let next = crc32_update(previous, data);
+    if len(data) == 0 { return -1; }
+    return next;
+}
+
+fn crc32_file(path: str) -> int {
+    let state = 0;
+    let offset = 0;
+    while true {
+        let next = _crc32_chunk(path, offset, state);
+        if next == -1 { break; }
+        state = next;
+        offset += 65536;
+    }
+    return state;
+}

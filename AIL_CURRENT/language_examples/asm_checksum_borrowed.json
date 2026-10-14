@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "asm_sources": ["asm_checksum.S"],
+  "functions": {
+    "checksum_step": {
+      "symbol": "native_accumulate7",
+      "params": [["total", "int"], ["a", "int"], ["b", "int"], ["c", "int"], ["d", "int"], ["e", "int"], ["f", "int"]],
+      "result": "int"
+    },
+    "checksum_word": {
+      "symbol": "native_word",
+      "params": [["data", "borrowed_bytes"], ["index", "int"]],
+      "result": "int"
+    }
+  }
+}

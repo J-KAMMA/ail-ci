@@ -1,0 +1,9 @@
+import sys
+
+total = 0
+while True:
+    line = sys.stdin.readline()
+    if line == '':
+        break
+    total = total + int(line)
+print(total)

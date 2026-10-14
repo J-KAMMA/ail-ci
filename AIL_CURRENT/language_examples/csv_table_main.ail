@@ -1,0 +1,92 @@
+use utf8_stream;
+use csv_stream;
+use json_text;
+use checked_integer;
+use csv_group;
+use csv_group_scan;
+use csv_project;
+
+fn _csv_table_project_emit(rows: list[CsvRow], columns: list[int]) -> int {
+    let count: int = 0;
+    for row in rows {
+        let projected: CsvRow = csv_project_row(row, columns);
+        write_stdout_bytes((csv_stream_row_json(projected) + "\n").encode("utf-8"));
+        count += 1;
+    }
+    return count;
+}
+
+fn csv_table_project_file(path: str, columns: list[int], size: int) -> int {
+    if size <= 0 { raise ValueError; }
+    for column in columns { if column < 0 { raise ValueError; } }
+    let utf8 = utf8_decoder_new();
+    let csv = csv_decoder_new();
+    let count: int = 0;
+    for chunk in file_chunks(path, size) {
+        let rows = csv_decode_feed(csv, utf8_decode_feed(utf8, chunk));
+        count += _csv_table_project_emit(rows, columns);
+    }
+    let tail = csv_decode_feed(csv, utf8_decode_finish(utf8));
+    count += _csv_table_project_emit(tail, columns);
+    let final = csv_decode_finish(csv);
+    count += _csv_table_project_emit(final, columns);
+    return count;
+}
+
+fn csv_table_group_file(path: str, key_column: int, value_column: int, size: int) -> str {
+    if size <= 0 or key_column < 0 or value_column < 0 { raise ValueError; }
+    let utf8 = utf8_decoder_new();
+    let csv = csv_decoder_new();
+    let groups = csv_groups_new();
+    for chunk in file_chunks(path, size) {
+        let rows = csv_decode_feed(csv, utf8_decode_feed(utf8, chunk));
+        csv_groups_add(groups, rows, key_column, value_column);
+    }
+    let tail = csv_decode_feed(csv, utf8_decode_finish(utf8));
+    csv_groups_add(groups, tail, key_column, value_column);
+    let final = csv_decode_finish(csv);
+    csv_groups_add(groups, final, key_column, value_column);
+    return csv_groups_render(groups);
+}
+
+fn _csv_table_columns(text: str) -> list[int] {
+    let columns: list[int] = [];
+    if text == "" { return columns; }
+    for token in text.split(",") {
+        let column: int = parse_int64_decimal(token);
+        if column < 0 { raise ValueError; }
+        columns.append(column);
+    }
+    return columns;
+}
+
+fn main() -> int {
+    if len(sys.argv) != 5 and len(sys.argv) != 6 {
+        print("usage: csv_table project INPUT COLUMNS SIZE | group INPUT KEY_COLUMN VALUE_COLUMN SIZE", file=sys.stderr);
+        return 2;
+    }
+    try {
+        if sys.argv[1] == "project" and len(sys.argv) == 5 {
+            let columns: list[int] = _csv_table_columns(sys.argv[3]);
+            let project_size: int = parse_int64_decimal(sys.argv[4]);
+            csv_table_project_file(sys.argv[2], columns, project_size);
+            return 0;
+        } elif sys.argv[1] == "group" and len(sys.argv) == 6 {
+            let key_column: int = parse_int64_decimal(sys.argv[3]);
+            let value_column: int = parse_int64_decimal(sys.argv[4]);
+            let group_size: int = parse_int64_decimal(sys.argv[5]);
+            let rendered: str = csv_table_group_scan(sys.argv[2], key_column, value_column, group_size);
+            write_stdout_bytes((rendered + "\n").encode("utf-8"));
+            return 0;
+        } else {
+            print("invalid csv_table mode or argument count", file=sys.stderr);
+            return 2;
+        }
+    } except ValueError {
+        print("invalid CSV, UTF-8, column, integer, or chunk size", file=sys.stderr);
+        return 2;
+    } except OSError {
+        print("CSV table input or output failed", file=sys.stderr);
+        return 2;
+    }
+}

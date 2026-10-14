@@ -1,0 +1,46 @@
+use byte_map;
+use file_identity;
+
+fn main() -> int {
+    if len(sys.argv) != 4 and len(sys.argv) != 5 {
+        print("usage: byte_map normalize INPUT OUTPUT | merge LEFT RIGHT OUTPUT | extract INPUT OUTPUT KEY", file=sys.stderr);
+        return 2;
+    }
+    let mode: str = sys.argv[1];
+    if (mode == "normalize" and len(sys.argv) != 4) or ((mode == "merge" or mode == "extract") and len(sys.argv) != 5) {
+        print("invalid byte_map argument count", file=sys.stderr);
+        return 2;
+    }
+    if mode != "normalize" and mode != "merge" and mode != "extract" {
+        print("byte_map mode must be normalize, merge, or extract", file=sys.stderr);
+        return 2;
+    }
+    let output_path: str = sys.argv[3];
+    if mode == "merge" { output_path = sys.argv[4]; }
+    if sys.argv[2] == output_path or (mode == "merge" and sys.argv[3] == output_path) {
+        print("byte_map output must differ from all input paths", file=sys.stderr);
+        return 2;
+    }
+    try {
+        let left: dict[str, bytes] = byte_map_decode(read_bytes(sys.argv[2]));
+        if file_paths_same(sys.argv[2], output_path) { raise ValueError; }
+        let output: bytes = b"";
+        if mode == "merge" {
+            let right: dict[str, bytes] = byte_map_decode(read_bytes(sys.argv[3]));
+            if file_paths_same(sys.argv[3], output_path) { raise ValueError; }
+            output = byte_map_encode(byte_map_merge(left, right));
+        } elif mode == "normalize" { output = byte_map_encode(left); }
+        else { output = left[sys.argv[4]]; }
+        write_bytes(output_path, output);
+        return 0;
+    } except ValueError {
+        print("invalid byte_map archive, key, or output path", file=sys.stderr);
+        return 2;
+    } except KeyError {
+        print("byte_map key not found", file=sys.stderr);
+        return 2;
+    } except OSError {
+        print("byte_map file error", file=sys.stderr);
+        return 2;
+    }
+}

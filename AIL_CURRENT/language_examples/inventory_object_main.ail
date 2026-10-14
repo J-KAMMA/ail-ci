@@ -1,0 +1,16 @@
+fn main() -> int {
+    if len(sys.argv) < 2 {
+        print("usage: inventory FILE...", file=sys.stderr);
+        return 2;
+    }
+    let rows = inventory_empty();
+    try {
+        for i in range(1, len(sys.argv)) { inventory_add(rows, sys.argv[i]); }
+    } except OSError {
+        print("cannot read input file", file=sys.stderr);
+        return 2;
+    }
+    for item in rows { print(item.path, item.size, sep="\t"); }
+    print("total", inventory_total(rows), sep="\t");
+    return 0;
+}

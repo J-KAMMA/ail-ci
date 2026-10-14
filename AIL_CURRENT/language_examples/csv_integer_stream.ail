@@ -1,0 +1,115 @@
+use utf8_stream;
+use integer_column_stats;
+
+struct CsvIntegerState {
+    mode:int; skip_lf:int; field:int; column:int;
+    value:int; first:int; negative:int; digits:int; selected:int;
+}
+
+fn _csv_integer_content(state:CsvIntegerState,byte:int)->void {
+    if state.field!=state.column {return;}
+    if state.first and (byte==43 or byte==45) {
+        state.negative=byte==45;
+    } else {
+        let digit:int=byte-48;
+        let limit:int=7;
+        if state.negative {limit=8;}
+        if digit<0 or digit>9 or state.value < -922337203685477580 or (state.value==-922337203685477580 and digit>limit) {raise ValueError;}
+        state.value=state.value*10-digit;
+        state.digits=1;
+    }
+    state.first=0;
+}
+
+fn _csv_integer_finish_field(state:CsvIntegerState)->void {
+    if state.field==state.column {
+        if not state.digits {raise ValueError;}
+        if state.negative {state.selected=state.value;}
+        else {state.selected=-state.value;}
+    }
+    state.value=0;state.first=1;state.negative=0;state.digits=0;
+}
+
+fn _csv_integer_finish_row(state:CsvIntegerState,stats:IntegerColumnStats)->void {
+    if state.field<state.column {raise ValueError;}
+    _csv_integer_finish_field(state);
+    stats.add(state.selected);
+    state.field=0;state.mode=0;state.selected=0;
+}
+
+fn _csv_integer_feed(state:CsvIntegerState,stats:IntegerColumnStats,data:bytes)->void {
+    let position:int=0;
+    let comma_next:int=-2;let quote_next:int=-2;let cr_next:int=-2;let lf_next:int=-2;
+    while position<len(data) {
+        let byte:int=data[position];
+        position+=1;
+        if state.skip_lf and byte==10 {state.skip_lf=0;continue;}
+        state.skip_lf=0;
+        # Only unselected content is skipped; all syntax boundaries remain visible.
+        if state.field!=state.column and state.mode!=3 and byte!=34 and (state.mode==2 or (byte!=44 and byte!=13 and byte!=10)) {
+            let start:int=position-1;
+            let next:int=len(data);
+            if quote_next==-2 or (quote_next>=0 and quote_next<start) {quote_next=data.find(b"\"",start);}
+            if state.mode==2 {
+                if quote_next>=0 {next=quote_next;}
+            } else {
+                if comma_next==-2 or (comma_next>=0 and comma_next<start) {comma_next=data.find(b",",start);}
+                if cr_next==-2 or (cr_next>=0 and cr_next<start) {cr_next=data.find(b"\r",start);}
+                if lf_next==-2 or (lf_next>=0 and lf_next<start) {lf_next=data.find(b"\n",start);}
+                if comma_next>=0 and comma_next<next {next=comma_next;}
+                if quote_next>=0 and quote_next<next {next=quote_next;}
+                if cr_next>=0 and cr_next<next {next=cr_next;}
+                if lf_next>=0 and lf_next<next {next=lf_next;}
+            }
+            if next>start {
+                if state.mode!=2 {state.mode=1;}
+                position=next;
+                continue;
+            }
+        }
+        if state.mode==2 {
+            if byte==34 {state.mode=3;}
+            else {_csv_integer_content(state,byte);}
+        } elif byte==44 or byte==13 or byte==10 {
+            if byte==44 {
+                _csv_integer_finish_field(state);
+                if state.field==9223372036854775807 {raise ValueError;}
+                state.field+=1;state.mode=0;
+            } else {
+                if state.mode!=0 or state.field!=0 {_csv_integer_finish_row(state,stats);}
+                if byte==13 {state.skip_lf=1;}
+            }
+        } elif byte==34 {
+            if state.mode==3 {_csv_integer_content(state,byte);state.mode=2;}
+            else {if state.mode!=0 {raise ValueError;} state.mode=2;}
+        } else {
+            if state.mode==3 {raise ValueError;}
+            _csv_integer_content(state,byte);state.mode=1;
+        }
+    }
+}
+
+fn _csv_integer_step(reader:binaryfile,utf8:Utf8Decoder,state:CsvIntegerState,stats:IntegerColumnStats,size:int)->int {
+    let data:bytes=reader.read(size);
+    if len(data)==0 {
+        utf8_decode_finish(utf8);
+        if state.mode==2 {raise ValueError;}
+        if state.mode!=0 or state.field!=0 {_csv_integer_finish_row(state,stats);}
+        return 0;
+    }
+    _utf8_decoder_check(utf8);
+    let combined:bytes=utf8.pending+data;
+    let complete:int=_utf8_complete_length(combined);
+    _csv_integer_feed(state,stats,combined[:complete]);
+    utf8.pending=combined[complete:];
+    return 1;
+}
+
+fn _csv_column_stats_bytes_stream(reader:binaryfile,column:int,size:int)->IntegerColumnStats {
+    if column<0 or size<=0 or size>1048576 or reader.closed {raise ValueError;}
+    let utf8:Utf8Decoder=utf8_decoder_new();
+    let state:CsvIntegerState=CsvIntegerState(0,0,0,column,0,1,0,0,0);
+    let stats:IntegerColumnStats=IntegerColumnStats(0,0,0,0);
+    while True {if _csv_integer_step(reader,utf8,state,stats,size)==0 {break;}}
+    return stats;
+}

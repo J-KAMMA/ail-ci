@@ -1,0 +1,14 @@
+fn main() {
+    let n = int(input());
+    if n > 0 and n < 10 {
+        let total = 0;
+        while n > 0 {
+            total += n;
+            n -= 1;
+        }
+        print(total);
+    } else {
+        print(0);
+    }
+    return 0;
+}

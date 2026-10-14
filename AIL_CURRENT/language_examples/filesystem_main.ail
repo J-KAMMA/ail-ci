@@ -1,0 +1,22 @@
+# This demonstration owns only the new directory it successfully creates.
+fn main()->int {
+    if len(sys.argv)!=2 { return 2; }
+    let directory=sys.argv[1];
+    try {
+        make_dir(directory);
+        let staged=directory+"/staged.bin";
+        let final=directory+"/result.bin";
+        try {
+            write_bytes(staged,b"new\0\xff");
+            write_bytes(final,b"old");
+            replace_path(staged,final);
+            write_stdout_bytes(read_bytes(final));
+        } finally {
+            try { remove_file(staged); } except OSError { pass; }
+            try { remove_file(final); } except OSError { pass; }
+            remove_dir(directory);
+        }
+        return 0;
+    } except ValueError { return 3; }
+    except OSError { return 4; }
+}

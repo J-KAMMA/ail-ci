@@ -1,0 +1,59 @@
+# Little-endian signed int64 records, grouped into complete rows with checked prefixes.
+# Returns all ASCII decimal totals with LF, and produces no stdout before validation finishes.
+# Caller retains the open reader; read chunks 1..1MiB; partial record/row or overflow is ValueError.
+# Memory retains output plus a bounded chunk; the final bytes result is an immutable snapshot.
+struct IntegerRowStreamState { cols:int; column:int; total:int; carry:bytes; }
+fn _integer_row_stream_step(reader:binaryfile,state:IntegerRowStreamState,output:bytearray,size:int)->int {
+ let block:bytes=reader.read(size);
+ if len(block)==0 {return 0;}
+ let data:bytes=state.carry+block;
+ let usable:int=len(data)-len(data)%8;
+ let values:list[int]=integer_decode(data[:usable],8,0);
+ for value in values {
+  if value>0 and state.total>9223372036854775807-value {raise ValueError;}
+  if value<0 and state.total< -9223372036854775808-value {raise ValueError;}
+  state.total+=value;
+  state.column+=1;
+  if state.column==state.cols {
+   output.extend(str(state.total).encode()); output.append(10);
+   state.total=0;state.column=0;
+  }
+ }
+ state.carry=data[usable:];
+ return 1;
+}
+fn _integer_row_stream_step_owned(reader:binaryfile,state:IntegerRowStreamState,output:bytearray,size:int)->int {
+ let block:bytes=reader.read(size);
+ if len(block)==0 {return 0;}
+ let data:bytes=state.carry+block;
+ let usable:int=len(data)-len(data)%8;
+ let values:list[int]=integer_decode(data[:usable],8,0);
+ let total:int=state.total;
+ let column:int=state.column;
+ let cols:int=state.cols;
+ for value in values {
+  if value>0 and total>9223372036854775807-value {
+   state.total=total;state.column=column;raise ValueError;
+  }
+  if value<0 and total< -9223372036854775808-value {
+   state.total=total;state.column=column;raise ValueError;
+  }
+  total+=value;
+  column+=1;
+  if column==cols {
+   output.extend(str(total).encode()); output.append(10);
+   total=0;column=0;
+  }
+ }
+ state.total=total;state.column=column;
+ state.carry=data[usable:];
+ return 1;
+}
+fn integer_row_report_stream(reader:binaryfile,cols:int,size:int)->bytes {
+ if cols<=0 or size<=0 or size>1048576 or reader.closed {raise ValueError;}
+ let state=IntegerRowStreamState(cols,0,0,b"");
+ let output=bytearray(b"");
+ while _integer_row_stream_step_owned(reader,state,output,size)>0 {}
+ if len(state.carry)!=0 or state.column!=0 {raise ValueError;}
+ return bytes(output);
+}

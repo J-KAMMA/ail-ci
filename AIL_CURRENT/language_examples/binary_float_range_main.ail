@@ -1,0 +1,15 @@
+# Extract one numeric binary64 record without loading the entire input file.
+fn main() -> int {
+    if len(sys.argv) != 5 { return 2; }
+    try {
+        let index = int(sys.argv[3]);
+        let reverse = int(sys.argv[4]);
+        if index < 0 or index > 1152921504606846975 { raise ValueError; }
+        if reverse != 0 and reverse != 1 { raise ValueError; }
+        let record = read_binary_range(sys.argv[1], index * 8, 8);
+        let value = unpack_f64_le(record);
+        let output = binary_encode_float(value, reverse);
+        write_bytes(sys.argv[2], output);
+        return 0;
+    } except ValueError { return 2; } except OSError { return 3; }
+}

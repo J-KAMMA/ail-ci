@@ -1,0 +1,5 @@
+fn file_paths_same(source_path: str, destination_path: str) -> int {
+    let status = file_identity_status(source_path, destination_path);
+    if status != 0 and status != 1 { raise OSError; }
+    return status;
+}
