@@ -1,9 +1,12 @@
 """Translate the initial AIL block syntax to the existing checked compiler surface."""
 import ast
 import builtins
+import copy
 import io
 import importlib.util
 import keyword
+import math
+import operator
 from pathlib import Path
 import re
 import token
@@ -509,3 +512,913 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
                            if position is not None})
     return '\n'.join([*([] if module else ['import sys']), *(line for line, _ in lines),
                       *([] if module else ['sys.exit(main())']), ''])
+
+
+# ------------------------------------------------------------------------------------------------
+# Module constants: `MASK = (1 << 40) - 1` and `const MOD = 10 ** 9 + 7;` are literals the writer
+# spelled as arithmetic. Folded here, in place on the same line, for both syntaxes.
+
+class _NotConstant(Exception):
+    pass
+
+
+_FOLD_BINARY = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
+                ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod, ast.Div: operator.truediv,
+                ast.Pow: operator.pow, ast.LShift: operator.lshift, ast.RShift: operator.rshift,
+                ast.BitAnd: operator.and_, ast.BitOr: operator.or_, ast.BitXor: operator.xor}
+
+
+def _fold(node, known):
+    if isinstance(node, ast.Constant) and type(node.value) in (int, float, str, bytes):
+        return node.value
+    if isinstance(node, ast.Name) and node.id in known:
+        return known[node.id]
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
+        value = _fold(node.operand, known)
+        if type(value) not in (int, float) or isinstance(node.op, ast.Invert) and type(value) is not int:
+            raise _NotConstant
+        value = {ast.USub: operator.neg, ast.UAdd: operator.pos, ast.Invert: operator.invert}[type(node.op)](value)
+    elif isinstance(node, ast.BinOp) and type(node.op) in _FOLD_BINARY:
+        left, right = _fold(node.left, known), _fold(node.right, known)
+        numbers = type(left) in (int, float) and type(right) in (int, float)
+        if isinstance(node.op, ast.Pow):
+            if not numbers or type(right) is int and not 0 <= right <= 64:
+                raise _NotConstant
+        elif isinstance(node.op, (ast.LShift, ast.RShift)):
+            if type(left) is not int or type(right) is not int or not 0 <= right < 64:
+                raise _NotConstant
+        elif isinstance(node.op, ast.Mult) and not numbers:
+            if not ({type(left), type(right)} in ({str, int}, {bytes, int})
+                    and len(left if type(left) is not int else right) * (right if type(right) is int else left) <= 4096):
+                raise _NotConstant
+        elif isinstance(node.op, ast.Add) and not numbers:
+            if type(left) is not type(right) or type(left) not in (str, bytes):
+                raise _NotConstant
+        elif not numbers:
+            raise _NotConstant
+        value = _FOLD_BINARY[type(node.op)](left, right)
+    else:
+        raise _NotConstant
+    if (type(value) is int and not -(1 << 63) <= value < 1 << 63
+            or type(value) is float and not math.isfinite(value)
+            or type(value) not in (int, float, str, bytes)):
+        raise _NotConstant
+    return value
+
+
+def _is_literal(node):
+    return (isinstance(node, ast.Constant) or isinstance(node, ast.UnaryOp)
+            and isinstance(node.op, (ast.USub, ast.UAdd)) and isinstance(node.operand, ast.Constant))
+
+
+def _byte_offsets(data):
+    starts = [0]
+    starts.extend(index + 1 for index, byte in enumerate(data) if byte == 10)
+    return starts
+
+
+def fold_constants(text):
+    """Top-level `NAME = <constant arithmetic>` assigned once, rewritten to its literal value."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return text
+    stored = {}
+    for node in tree.body:
+        for target in (node.targets if isinstance(node, ast.Assign) else
+                       [node.target] if isinstance(node, (ast.AnnAssign, ast.AugAssign)) else []):
+            for name in ast.walk(target):
+                if isinstance(name, ast.Name):
+                    stored[name.id] = stored.get(name.id, 0) + 1
+    known = {}
+    edits = []
+    for node in tree.body:
+        if not (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name) and stored[node.targets[0].id] == 1):
+            continue
+        try:
+            value = _fold(node.value, known)
+        except (_NotConstant, ArithmeticError, ValueError, TypeError, RecursionError):
+            continue
+        known[node.targets[0].id] = value
+        if not _is_literal(node.value):
+            edits.append((node.value, repr(value)))
+    if not edits:
+        return text
+    data = text.encode('utf8')
+    starts = _byte_offsets(data)
+    for node, literal in reversed(edits):
+        start = starts[node.lineno - 1] + node.col_offset
+        end = starts[node.end_lineno - 1] + node.end_col_offset
+        padding = data[start:end].count(b'\n')
+        replacement = ('(' + literal + '\n' * padding + ')') if padding else literal
+        data = data[:start] + replacement.encode('utf8') + data[end:]
+    return data.decode('utf8')
+
+
+# ------------------------------------------------------------------------------------------------
+# Python syntax (`--syntax python`): the ordinary Python spellings of what the compiler already
+# builds under another name -- `-> str` as the same checked result type the block syntax's
+# `-> str` is, `import heapq` / `heapq.heappush` as the built-in heappush, `sys.stdin.buffer.read()`
+# as read_stdin_bytes, `@dataclass` as the `__init__` it stands for. Every rewrite replaces source
+# text in place and keeps each statement on the line it was written on, so a later refusal points
+# at the writer's own line. A construct this pass cannot map is left exactly as written (the
+# compiler's general path may still build it) and a note saying why is kept for the refusal.
+
+_HEAPQ = ('heappush', 'heappop', 'heapify', 'heappushpop', 'heapreplace')
+_BISECT = ('bisect_left', 'bisect_right', 'bisect', 'insort', 'insort_left', 'insort_right')
+_MATH_VALUES = {'pi': repr(math.pi), 'e': repr(math.e), 'tau': repr(math.tau),
+                'inf': "float('inf')", 'nan': "float('nan')"}
+_MATH_CALLS = ('sqrt', 'floor', 'ceil', 'isqrt', 'gcd', 'fabs')
+_MATH_BUILT = ('math.sqrt, math.floor, math.ceil, math.isqrt, math.gcd (two arguments), math.fabs '
+               'and the constants math.pi, math.e, math.tau, math.inf, math.nan')
+# Exact CPython results: sqrt keeps -0.0 and raises ValueError below zero, isqrt and gcd are
+# integer-only (no float rounding reaches the answer).
+_MATH_HELPERS = {
+    'sqrt': '''def _ail_math_sqrt(x: float) -> float:
+    if x < 0.0:
+        raise ValueError("math domain error")
+    if x == 0.0:
+        return x
+    return x ** 0.5
+''',
+    'isqrt': '''def _ail_math_isqrt(n: int) -> int:
+    if n < 0:
+        raise ValueError("isqrt() argument must be nonnegative")
+    if n < 2:
+        return n
+    x = int(float(n) ** 0.5)
+    while x > n // x:
+        x -= 1
+    while x + 1 <= n // (x + 1):
+        x += 1
+    return x
+''',
+    'gcd': '''def _ail_math_gcd(a: int, b: int) -> int:
+    x = abs(a)
+    y = abs(b)
+    while y != 0:
+        t = x % y
+        x = y
+        y = t
+    return x
+'''}
+_TYPING = {'List': 'list', 'Dict': 'dict', 'Set': 'set', 'Tuple': 'tuple', 'FrozenSet': 'frozenset'}
+_DROPPED = ('heapq', 'bisect', 'typing', 'dataclasses', '__future__')
+_STDOUT_STATEMENTS = ('sys.stdout.write', 'sys.stdout.buffer.write', 'sys.stdout.flush',
+                      'sys.stdout.buffer.flush', 'sys.setrecursionlimit')
+_ALIASABLE = ('sys.stdout.write', 'sys.stdout.buffer.write', 'sys.stdin.readline',
+              'sys.stdin.buffer.read')
+_RESULT_NAMES = ('int', 'float', 'str', 'bytes', 'bool', 'bytearray')
+_ATOMIC = (ast.Name, ast.Constant, ast.Call, ast.Attribute, ast.Subscript, ast.List, ast.Dict,
+           ast.Set, ast.ListComp, ast.SetComp, ast.DictComp, ast.JoinedStr)
+_FILE_HINT = ('with open(path) as f: is built for one file opened to read ("r" or "rb") and read '
+              'whole with f.read(), or in text mode line by line with `for line in f:`; '
+              'read_bytes(path) reads a binary file, write_text(path, text) / write_bytes(path, '
+              'data) write one')
+
+
+def _own_nodes(function):
+    """Nodes of `function` itself, not of the functions, lambdas or classes nested in it."""
+    pending = list(ast.iter_child_nodes(function))
+    while pending:
+        node = pending.pop()
+        yield node
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            pending.extend(ast.iter_child_nodes(node))
+
+
+class _SurfaceExpr(ast.NodeTransformer):
+    def __init__(self, surface):
+        self.surface = surface
+        self.changed = False
+
+    def replaced(self, new, old):
+        self.changed = True
+        return ast.fix_missing_locations(ast.copy_location(new, old))
+
+    def visit_Call(self, node):
+        surface = self.surface
+        path = surface.path(node.func)
+        node.args = [self.visit(arg) for arg in node.args]
+        for item in node.keywords:
+            item.value = self.visit(item.value)
+            if (item.arg == 'key' and isinstance(item.value, ast.Attribute) and item.value.attr == '__getitem__'
+                    and isinstance(item.value.value, (ast.Name, ast.Attribute))):
+                # `key=xs.__getitem__` is `key=lambda i: xs[i]`, the key form that is built.
+                item.value = ast.Lambda(
+                    args=ast.arguments(posonlyargs=[], args=[ast.arg(arg='_ail_key')], vararg=None,
+                                       kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[]),
+                    body=ast.Subscript(value=item.value.value, slice=ast.Name(id='_ail_key', ctx=ast.Load()),
+                                       ctx=ast.Load()))
+                self.changed = True
+        new = surface.call(node, path)
+        if new is not None:
+            return self.replaced(new, node)
+        if path is None:
+            node.func = self.visit(node.func)
+        return node
+
+    def visit_Attribute(self, node):
+        surface = self.surface
+        path = surface.path(node)
+        if path is not None:
+            new = surface.value(node, path)
+            return node if new is None else self.replaced(new, node)
+        if isinstance(node.value, ast.Name) and node.value.id in surface.files:
+            surface.note(node, f'{node.value.id}.{node.attr}: ' + _FILE_HINT)
+            return node
+        self.generic_visit(node)
+        return node
+
+    def visit_Name(self, node):
+        surface = self.surface
+        if not isinstance(node.ctx, ast.Load):
+            return node
+        if node.id in surface.files:
+            surface.note(node, f'the file object {node.id} is used as a value: ' + _FILE_HINT)
+        elif node.id in surface.names:
+            new = surface.value(node, surface.names[node.id])
+            if new is not None:
+                return self.replaced(new, node)
+        return node
+
+
+class _Surface:
+    def __init__(self, source):
+        self.data = source.encode('utf8')
+        self.starts = _byte_offsets(self.data)
+        self.tree = ast.parse(source)
+        self.edits = []
+        self.notes = []
+        self.helpers = []
+        self.imports = []
+        self.modules = {'sys': 'sys'}  # local module name -> module
+        self.names = {}                # local bare name -> dotted path it stands for
+        self.aliases = {}              # `write = sys.stdout.write` -> {'write': 'sys.stdout.write'}
+        self.alias_nodes = set()
+        self.typing = {}               # local name -> typing name
+        self.keep = set()              # dropped-by-default modules still needed as written
+        self.files = {}                # file object name -> (path expression, binary)
+        self.dataclasses = {}          # class name -> [(field, default text | None)]
+        self.consumed = set()
+        self.void = set()
+        self.classes = {node.name for node in self.tree.body if isinstance(node, ast.ClassDef)}
+        self.parents = {child: parent for parent in ast.walk(self.tree)
+                        for child in ast.iter_child_nodes(parent)}
+
+    # -- text ---------------------------------------------------------------------------------
+    def offset(self, line, column):
+        return self.starts[line - 1] + column
+
+    def replace(self, node, text, statement=False):
+        self.edits.append((self.offset(node.lineno, node.col_offset),
+                           self.offset(node.end_lineno, node.end_col_offset), text, statement))
+
+    def note(self, node, message):
+        entry = (node.lineno, message)
+        if entry not in self.notes:
+            self.notes.append(entry)
+
+    def header_colon(self, statement):
+        """Byte offset of the `:` that ends a def/with header."""
+        start = self.offset(statement.lineno, statement.col_offset)
+        end = self.offset(statement.body[0].lineno, statement.body[0].col_offset)
+        segment = self.data[start:end].decode('utf8')
+        lines = segment.splitlines(True)
+        depth = 0
+        try:
+            for part in tokenize.generate_tokens(io.StringIO(segment).readline):
+                if part.type != token.OP:
+                    continue
+                if part.string in '([{':
+                    depth += 1
+                elif part.string in ')]}':
+                    depth -= 1
+                elif part.string == ':' and depth == 0:
+                    row, column = part.start
+                    return (start + sum(len(line.encode('utf8')) for line in lines[:row - 1])
+                            + len(lines[row - 1][:column].encode('utf8')))
+        except (tokenize.TokenError, IndentationError):
+            pass
+        return None
+
+    def apply(self):
+        data = self.data
+        floor = len(data) + 1
+        for start, end, text, statement in sorted(self.edits, key=lambda edit: (edit[0], edit[1]), reverse=True):
+            if end > floor:
+                continue                       # nested inside a later edit's text: never expected
+            missing = data[start:end].count(b'\n') - text.count('\n')
+            if missing > 0:
+                text = text + '\n' * missing if statement else '(' + text + '\n' * missing + ')'
+            data = data[:start] + text.encode('utf8') + data[end:]
+            floor = start
+        text = data.decode('utf8')
+        if self.helpers:
+            text = text.rstrip('\n') + '\n\n\n' + '\n\n'.join(_MATH_HELPERS[name] for name in self.helpers)
+        return text
+
+    # -- names --------------------------------------------------------------------------------
+    def path(self, node):
+        parts = []
+        while isinstance(node, ast.Attribute):
+            parts.append(node.attr)
+            node = node.value
+        if not isinstance(node, ast.Name):
+            return None
+        root = self.names.get(node.id) or self.modules.get(node.id)
+        if root is None:
+            return None
+        return '.'.join([root, *reversed(parts)])
+
+    def collect(self):
+        stored = {}
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name in ('heapq', 'bisect', 'math', 'typing', 'dataclasses', 'sys'):
+                        self.modules[alias.asname or alias.name] = alias.name
+            elif isinstance(node, ast.ImportFrom) and not node.level:
+                for alias in node.names:
+                    local = alias.asname or alias.name
+                    if node.module in ('heapq', 'bisect', 'math', 'dataclasses'):
+                        self.names[local] = f'{node.module}.{alias.name}'
+                    elif node.module == 'typing':
+                        self.typing[local] = alias.name
+            names = ([node.id] if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load)
+                     else [node.arg] if isinstance(node, ast.arg)
+                     else [node.name] if isinstance(node, (ast.FunctionDef, ast.ClassDef)) else [])
+            for name in names:
+                stored[name] = stored.get(name, 0) + 1
+        for node in ast.walk(self.tree):
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name) and stored[node.targets[0].id] == 1):
+                path = self.path(node.value) if isinstance(node.value, ast.Attribute) else None
+                if path in _ALIASABLE:
+                    self.aliases[node.targets[0].id] = path
+                    self.names[node.targets[0].id] = path
+                    self.alias_nodes.add(node)
+
+    # -- expressions --------------------------------------------------------------------------
+    def rewritten(self, node):
+        rewriter = _SurfaceExpr(self)
+        new = rewriter.visit(copy.deepcopy(node))
+        return new, rewriter.changed
+
+    def expression(self, node):
+        if node is None:
+            return
+        new, changed = self.rewritten(node)
+        if changed:
+            text = ast.unparse(new)
+            self.replace(node, text if isinstance(new, _ATOMIC) else '(' + text + ')')
+
+    def value(self, node, path):
+        module, _, name = path.partition('.')
+        if module == 'math' and name in _MATH_VALUES:
+            return ast.parse(_MATH_VALUES[name], mode='eval').body
+        if module in ('heapq', 'bisect') and name in (_HEAPQ if module == 'heapq' else _BISECT):
+            return ast.Name(id=name, ctx=ast.Load()) if isinstance(node, ast.Attribute) else None
+        if module in ('heapq', 'bisect', 'math'):
+            if module != 'math':
+                self.keep.add(module)
+            self.note(node, f'{path} used as a value is not built; the built ones are '
+                      + (_MATH_BUILT if module == 'math' else ', '.join(
+                          f'{module}.{each}' for each in (_HEAPQ if module == 'heapq' else _BISECT)))
+                      + ', called directly')
+        elif path in _STDOUT_STATEMENTS or path.startswith('sys.stdin.buffer'):
+            self.note(node, f'{path} used as a value is not built: call it as a statement '
+                      '(sys.stdout.write(text) on its own line, sys.stdin.buffer.read())')
+        return None
+
+    def opened(self, call):
+        """`open(path[, mode][, encoding=...])` read whole: (path, binary, needs rewrite)."""
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == 'open'
+                and 1 <= len(call.args) <= 2 and not any(isinstance(arg, ast.Starred) for arg in call.args)):
+            return None
+        mode = call.args[1] if len(call.args) == 2 else None
+        rewrite = mode is not None
+        for item in call.keywords:
+            if item.arg == 'mode' and mode is None:
+                mode = item.value
+            elif not (item.arg == 'encoding' and isinstance(item.value, ast.Constant)
+                      and str(item.value.value).lower().replace('-', '').replace('_', '') == 'utf8'):
+                return None
+            rewrite = True
+        if mode is not None and not (isinstance(mode, ast.Constant) and isinstance(mode.value, str)):
+            return None
+        mode = 'r' if mode is None else mode.value
+        if ''.join(sorted(mode)) == 'br':
+            return call.args[0], True, True
+        if mode in ('r', 'rt', 'tr'):
+            return call.args[0], False, rewrite
+        return None
+
+    @staticmethod
+    def read_whole(path, binary):
+        path = copy.deepcopy(path)
+        if binary:
+            return ast.Call(func=ast.Name(id='read_bytes', ctx=ast.Load()), args=[path], keywords=[])
+        return ast.Call(func=ast.Attribute(value=ast.Call(func=ast.Name(id='open', ctx=ast.Load()),
+                                                          args=[path], keywords=[]),
+                                           attr='read', ctx=ast.Load()), args=[], keywords=[])
+
+    def call(self, node, path):
+        func = node.func
+        if path is not None:
+            module, _, name = path.partition('.')
+            if module in ('heapq', 'bisect') and name:
+                built = _HEAPQ if module == 'heapq' else _BISECT
+                if name not in built:
+                    self.keep.add(module)
+                    self.note(node, f'{module}.{name}() is not built in; the {module} functions here '
+                              f'are {", ".join(built)} (no import needed)'
+                              + ('; for the k smallest, sort a copy or pop k times from a heap'
+                                 if name in ('nsmallest', 'nlargest') else ''))
+                    return None
+                if isinstance(func, ast.Name) and func.id == name:
+                    return None
+                return ast.Call(func=ast.Name(id=name, ctx=ast.Load()), args=node.args, keywords=node.keywords)
+            if module == 'math' and name:
+                return self.math_call(node, name)
+            if path == 'sys.stdin.buffer.read' and not node.keywords and len(node.args) <= 1:
+                return ast.Call(func=ast.Name(id='read_stdin_bytes', ctx=ast.Load()),
+                                args=node.args or [ast.parse('1 << 40', mode='eval').body], keywords=[])
+            if path in _STDOUT_STATEMENTS:
+                self.note(node, f'{path}(...) is built as a statement on its own line; its result '
+                          'is not a value')
+                return None
+            if path.startswith('sys.stdin.buffer'):
+                self.note(node, f'{path}(): only sys.stdin.buffer.read() (all of stdin as bytes) is '
+                          'built; read text lines with sys.stdin.readline() or `for line in sys.stdin:`')
+                return None
+            if isinstance(func, ast.Name) and func.id in self.aliases:
+                return ast.Call(func=ast.parse(path, mode='eval').body, args=node.args, keywords=node.keywords)
+            return None
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id in self.files:
+            path_node, binary = self.files[func.value.id]
+            if func.attr == 'read' and not node.args and not node.keywords:
+                return self.read_whole(path_node, binary)
+            self.note(node, f'{func.value.id}.{func.attr}(): ' + _FILE_HINT)
+            return None
+        if isinstance(func, ast.Attribute) and func.attr == 'read' and not node.args and not node.keywords:
+            opened = self.opened(func.value)
+            if opened is not None and opened[2]:
+                return self.read_whole(opened[0], opened[1])
+            return None
+        if isinstance(func, ast.Name) and func.id in self.dataclasses:
+            return self.construct(node)
+        return None
+
+    def math_call(self, node, name):
+        args = node.args
+        if not node.keywords and not any(isinstance(arg, ast.Starred) for arg in args):
+            if name in ('sqrt', 'isqrt') and len(args) == 1 or name == 'gcd' and len(args) == 2:
+                if name not in self.helpers:
+                    self.helpers.append(name)
+                return ast.Call(func=ast.Name(id='_ail_math_' + name, ctx=ast.Load()), args=args, keywords=[])
+            if len(args) == 1 and name in ('floor', 'ceil', 'fabs'):
+                def call(function, argument):
+                    return ast.Call(func=ast.Name(id=function, ctx=ast.Load()), args=[argument], keywords=[])
+                if name == 'fabs':
+                    return call('abs', call('float', args[0]))
+                if name == 'floor':      # int(x // 1): floor of an int or a float, as an int
+                    return call('int', ast.BinOp(left=args[0], op=ast.FloorDiv(), right=ast.Constant(value=1)))
+                return ast.UnaryOp(op=ast.USub(), operand=call('int', ast.BinOp(
+                    left=ast.UnaryOp(op=ast.USub(), operand=args[0]), op=ast.FloorDiv(), right=ast.Constant(value=1))))
+        self.note(node, f'math.{name}() with these arguments is not built; the math names built here '
+                  f'are {_MATH_BUILT}')
+        return None
+
+    def construct(self, node):
+        """A dataclass constructor call with defaults or keywords, as the positional call the
+        generated `__init__` takes."""
+        fields = self.dataclasses[node.func.id]
+        if (any(isinstance(arg, ast.Starred) for arg in node.args) or len(node.args) > len(fields)
+                or any(item.arg is None for item in node.keywords)):
+            return None
+        given = {item.arg: item.value for item in node.keywords}
+        if not node.keywords and len(node.args) == len(fields):
+            return None
+        args = []
+        for index, (field, default) in enumerate(fields):
+            if index < len(node.args):
+                if field in given:
+                    return None
+                args.append(node.args[index])
+            elif field in given:
+                args.append(given.pop(field))
+            elif default is not None:
+                args.append(ast.parse(default, mode='eval').body)
+            else:
+                return None
+        if given:
+            return None
+        return ast.Call(func=node.func, args=args, keywords=[])
+
+    # -- annotations --------------------------------------------------------------------------
+    def normalized(self, node):
+        """`List[int]`, `Optional[Node]`, `"Node"` as `list[int]`, `Node | None`, `Node`."""
+        surface = self
+
+        def typing_name(node):
+            if isinstance(node, ast.Name):
+                return surface.typing.get(node.id)
+            if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                    and surface.modules.get(node.value.id) == 'typing'):
+                return node.attr
+            return None
+
+        class Normal(ast.NodeTransformer):
+            changed = False
+
+            def visit_Constant(self, node):
+                if isinstance(node.value, str):
+                    try:
+                        parsed = ast.parse(node.value.strip(), mode='eval').body
+                    except SyntaxError:
+                        return node
+                    self.changed = True
+                    return self.visit(parsed)
+                return node
+
+            def visit_Subscript(self, node):
+                name = typing_name(node.value)
+                node.slice = self.visit(node.slice)
+                if name in ('Optional', 'Union'):
+                    elements = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
+                    if name == 'Optional':
+                        elements = [*elements, ast.Constant(value=None)]
+                    self.changed = True
+                    result = elements[0]
+                    for element in elements[1:]:
+                        result = ast.BinOp(left=result, op=ast.BitOr(), right=element)
+                    return result
+                if name in _TYPING:
+                    self.changed = True
+                    node.value = ast.Name(id=_TYPING[name], ctx=ast.Load())
+                return node
+
+            def visit_Name(self, node):
+                name = typing_name(node)
+                if name in _TYPING:
+                    self.changed = True
+                    return ast.Name(id=_TYPING[name], ctx=ast.Load())
+                return node
+
+            visit_Attribute = visit_Name
+
+        normal = Normal()
+        new = normal.visit(copy.deepcopy(node))
+        return new, normal.changed
+
+    def annotation(self, node):
+        if node is not None:
+            new, changed = self.normalized(node)
+            if changed:
+                self.replace(node, ast.unparse(new))
+
+    def contract(self, node):
+        """The block syntax's checked result spelling for a Python return annotation, if it has one."""
+        if isinstance(node, ast.Constant) and node.value is None:
+            return '__ail_checked_void__'
+        if isinstance(node, ast.Name) and (node.id in _RESULT_NAMES or node.id in self.classes):
+            return f'__ail_checked_{node.id}__'
+        if (isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr) and isinstance(node.left, ast.Name)
+                and node.left.id in self.classes and isinstance(node.right, ast.Constant)
+                and node.right.value is None):
+            return f'__ail_checked_{node.left.id}__ | None'
+        if (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id == 'list'
+                and isinstance(node.slice, ast.Name)):
+            if node.slice.id == 'float':
+                return '__ail_checked_flist__'
+            if node.slice.id in ('int', 'str', 'bytes', 'bool') or node.slice.id in self.classes:
+                return f'__ail_checked_list[{node.slice.id}]'
+        return None
+
+    # -- statements ---------------------------------------------------------------------------
+    def block(self, body, function, owner):
+        for statement in body:
+            self.statement(statement, function, owner)
+
+    def statement(self, node, function, owner):
+        if node in self.consumed:
+            return
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            self.imports.append(node)
+        elif isinstance(node, ast.FunctionDef):
+            self.function(node, owner)
+        elif isinstance(node, ast.ClassDef):
+            self.klass(node)
+        elif node in self.alias_nodes:
+            self.replace(node, 'pass', True)
+        elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and self.output(node):
+            pass
+        elif isinstance(node, ast.With) and self.with_open(node, function, owner):
+            pass
+        elif isinstance(node, ast.Assign) and self.file_assign(node, function):
+            pass
+        elif isinstance(node, ast.AnnAssign):
+            self.ann_assign(node, function, owner)
+        elif (isinstance(node, ast.Return) and function in self.void
+              and isinstance(node.value, ast.Constant) and node.value.value is None):
+            self.replace(node, 'return', True)
+        elif isinstance(node, ast.For) and self.file_loop(node):
+            self.expression(node.target)
+            self.block(node.body, function, owner)
+            self.block(node.orelse, function, owner)
+        else:
+            self.generic(node, function, owner)
+
+    def generic(self, node, function, owner):
+        for _, value in ast.iter_fields(node):
+            for item in value if isinstance(value, list) else [value]:
+                if isinstance(item, ast.stmt):
+                    self.statement(item, function, owner)
+                elif isinstance(item, ast.expr):
+                    self.expression(item)
+                elif isinstance(item, ast.keyword):
+                    self.expression(item.value)
+                elif isinstance(item, ast.withitem):
+                    self.expression(item.context_expr)
+                    self.expression(item.optional_vars)
+                elif isinstance(item, ast.ExceptHandler):
+                    self.expression(item.type)
+                    self.block(item.body, function, owner)
+
+    def function(self, node, owner):
+        arguments = node.args
+        for argument in (*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs,
+                         arguments.vararg, arguments.kwarg):
+            if argument is not None:
+                self.annotation(argument.annotation)
+        for default in (*arguments.defaults, *arguments.kw_defaults):
+            self.expression(default)
+        for decorator in node.decorator_list:
+            self.expression(decorator)
+        own = list(_own_nodes(node))
+        values = any(isinstance(each, ast.Return) and each.value is not None
+                     and not (isinstance(each.value, ast.Constant) and each.value.value is None)
+                     for each in own)
+        if node.returns is None:
+            if (owner is not None and node.name != '__init__' and not values
+                    and not any(isinstance(each, (ast.Yield, ast.YieldFrom)) for each in own)):
+                colon = self.header_colon(node)
+                if colon is not None:
+                    self.edits.append((colon, colon, ' -> __ail_checked_void__', False))
+                    self.void.add(node)
+        else:
+            new, changed = self.normalized(node.returns)
+            result = None if node.name == '__init__' else self.contract(new)
+            if result is not None:
+                self.replace(node.returns, result)
+                if result == '__ail_checked_void__':
+                    self.void.add(node)
+            elif changed:
+                self.replace(node.returns, ast.unparse(new))
+        files = dict(self.files)
+        self.block(node.body, node, None)
+        self.files = files
+
+    def klass(self, node):
+        decorators = [each for each in node.decorator_list
+                      if self.path(each.func if isinstance(each, ast.Call) else each) == 'dataclasses.dataclass']
+        if decorators:
+            self.dataclass(node, decorators[0])
+        for base in node.bases:
+            self.expression(base)
+        self.block(node.body, None, node)
+
+    def dataclass(self, node, decorator):
+        options = {item.arg: item.value for item in decorator.keywords} if isinstance(decorator, ast.Call) else {}
+        for option, value in options.items():
+            enabled = not (isinstance(value, ast.Constant) and not value.value)
+            if option == 'init' and not enabled or option == 'order' and enabled:
+                self.note(node, f'@dataclass({option}={ast.unparse(value)}) is not built; @dataclass '
+                          'with annotated fields is, as the __init__ it generates')
+                return
+        if any(isinstance(each, ast.FunctionDef) and each.name == '__init__' for each in node.body):
+            return
+        fields = []
+        for statement in node.body:
+            if not (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)):
+                continue
+            annotation, _ = self.normalized(statement.annotation)
+            if 'ClassVar' in ast.unparse(annotation):
+                self.note(statement, 'a ClassVar in a @dataclass is not built')
+                return
+            default = None
+            value = statement.value
+            if (isinstance(value, ast.Call) and self.path(value.func) == 'dataclasses.field'):
+                options = {item.arg: item.value for item in value.keywords}
+                factory = options.pop('default_factory', None)
+                plain = options.pop('default', None)
+                if value.args or set(options) - {'repr', 'compare', 'hash'}:
+                    self.note(statement, 'field(...) in a @dataclass is built with default= or '
+                              'default_factory= only')
+                    return
+                if factory is not None:
+                    shown = {'list': '[]', 'dict': '{}', 'set': 'set()'}
+                    default = (shown.get(factory.id) if isinstance(factory, ast.Name) else None) or (
+                        ast.unparse(factory.body) if isinstance(factory, ast.Lambda) and not factory.args.args
+                        else ast.unparse(factory) + '()')
+                elif plain is not None:
+                    default = ast.unparse(self.rewritten(plain)[0])
+            elif value is not None:
+                default = ast.unparse(self.rewritten(value)[0])
+            fields.append((statement, statement.target.id, ast.unparse(annotation), default))
+        if not fields:
+            return
+        start = self.offset(decorator.lineno, decorator.col_offset)
+        at = start - 1
+        while at >= 0 and self.data[at:at + 1] in (b' ', b'\t'):
+            at -= 1
+        if at < 0 or self.data[at:at + 1] != b'@':
+            return
+        self.edits.append((at, self.offset(decorator.end_lineno, decorator.end_col_offset), '', False))
+        parameters = ', '.join(f'{name}: {annotation}' for _, name, annotation, _ in fields)
+        body = '; '.join(f'self.{name} = {name}' for _, name, _, _ in fields)
+        self.replace(fields[0][0], f'def __init__(self, {parameters}): {body}', True)
+        for statement, *_ in fields[1:]:
+            self.replace(statement, '', True)  # a class body here holds methods only, not `pass`
+        self.consumed.update(statement for statement, *_ in fields)
+        self.dataclasses[node.name] = [(name, default) for _, name, _, default in fields]
+
+    def ann_assign(self, node, function, owner):
+        if isinstance(node.target, ast.Attribute) and node.value is None:
+            self.replace(node, 'pass', True)
+            return
+        if function is None and owner is None and isinstance(node.target, ast.Name) and node.value is not None:
+            value, _ = self.rewritten(node.value)
+            self.replace(node, f'{node.target.id} = {ast.unparse(value)}', True)
+            return
+        self.annotation(node.annotation)
+        self.expression(node.value)
+
+    def output(self, node):
+        call = node.value
+        path = self.path(call.func)
+        if path in _STDOUT_STATEMENTS:
+            if path in ('sys.stdout.flush', 'sys.stdout.buffer.flush', 'sys.setrecursionlimit'):
+                self.replace(node, 'pass', True)
+                return True
+            if len(call.args) == 1 and not call.keywords and not isinstance(call.args[0], ast.Starred):
+                argument = ast.unparse(self.rewritten(call.args[0])[0])
+                self.replace(node, f"print({argument}, end='')" if path == 'sys.stdout.write'
+                             else f'write_stdout_bytes({argument})', True)
+                return True
+        func = call.func
+        if (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id in self.files
+                and func.attr == 'close' and not call.args and not call.keywords):
+            self.replace(node, 'pass', True)
+            return True
+        return False
+
+    def file_uses(self, name, body, binary, binding=None):
+        """Every use of the file object `name` in `body` (other than `binding`, the name it is
+        opened into) is one this pass maps."""
+        for statement in body:
+            for node in ast.walk(statement):
+                if not (isinstance(node, ast.Name) and node.id == name) or node is binding:
+                    continue
+                if not isinstance(node.ctx, ast.Load):
+                    return False
+                parent = self.parents.get(node)
+                grand = self.parents.get(parent)
+                if isinstance(parent, ast.Attribute) and isinstance(grand, ast.Call) and grand.func is parent \
+                        and not grand.args and not grand.keywords:
+                    if parent.attr == 'read':
+                        continue
+                    if parent.attr == 'close' and isinstance(self.parents.get(grand), ast.Expr):
+                        continue
+                    if (parent.attr == 'readlines' and not binary and isinstance(self.parents.get(grand), ast.For)
+                            and self.parents[grand].iter is grand):
+                        continue
+                if isinstance(parent, ast.For) and parent.iter is node and not binary:
+                    continue
+                return False
+        return True
+
+    def stable(self, path, body):
+        """The path expression names the same file everywhere in `body`."""
+        names = {node.id for node in ast.walk(path) if isinstance(node, ast.Name)}
+        if not all(isinstance(node, (ast.Name, ast.Constant, ast.Attribute, ast.Subscript, ast.Load,
+                                     ast.expr_context)) for node in ast.walk(path)):
+            return False
+        return not any(isinstance(node, ast.Name) and node.id in names and not isinstance(node.ctx, ast.Load)
+                       for statement in body for node in ast.walk(statement))
+
+    def with_open(self, node, function, owner):
+        if not any(isinstance(item.context_expr, ast.Call) and isinstance(item.context_expr.func, ast.Name)
+                   and item.context_expr.func.id == 'open' for item in node.items):
+            return False
+        item = node.items[0]
+        opened = self.opened(item.context_expr) if len(node.items) == 1 else None
+        target = item.optional_vars
+        if (opened is None or not isinstance(target, ast.Name) or not self.stable(opened[0], node.body)
+                or not self.file_uses(target.id, node.body, opened[1])):
+            self.note(node, _FILE_HINT)
+            return False
+        colon = self.header_colon(node)
+        if colon is None:
+            return False
+        self.edits.append((self.offset(node.lineno, node.col_offset), colon + 1, 'if True:', True))
+        saved = dict(self.files)
+        self.files[target.id] = (opened[0], opened[1])
+        self.block(node.body, function, owner)
+        self.files = saved
+        return True
+
+    def file_assign(self, node, function):
+        if not (function is not None and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)):
+            return False
+        opened = self.opened(node.value)
+        if opened is None:
+            return False
+        name = node.targets[0].id
+        stores = sum(1 for each in _own_nodes(function)
+                     if isinstance(each, ast.Name) and each.id == name and not isinstance(each.ctx, ast.Load))
+        if stores != 1 or not self.stable(opened[0], function.body) \
+                or not self.file_uses(name, function.body, opened[1], node.targets[0]):
+            self.note(node, _FILE_HINT)
+            return False
+        self.replace(node, 'pass', True)
+        self.files[name] = (opened[0], opened[1])
+        return True
+
+    def file_loop(self, node):
+        iterated = node.iter
+        if (isinstance(iterated, ast.Call) and isinstance(iterated.func, ast.Attribute)
+                and iterated.func.attr == 'readlines' and not iterated.args):
+            iterated = iterated.func.value
+        if not (isinstance(iterated, ast.Name) and iterated.id in self.files):
+            return False
+        path, binary = self.files[iterated.id]
+        if binary:
+            return False
+        self.replace(node.iter, f'open({ast.unparse(path)})')
+        return True
+
+    def finish_imports(self):
+        for node in self.imports:
+            if isinstance(node, ast.Import):
+                kept = [alias for alias in node.names if alias.name not in _DROPPED or alias.name in self.keep]
+                if len(kept) != len(node.names):
+                    self.replace(node, 'import ' + ', '.join(
+                        alias.name + (f' as {alias.asname}' if alias.asname else '') for alias in kept)
+                        if kept else 'pass', True)
+            elif not node.level and node.module in ('typing', 'dataclasses', '__future__'):
+                self.replace(node, 'pass', True)
+            elif not node.level and node.module in ('heapq', 'bisect', 'math'):
+                built = {'heapq': _HEAPQ, 'bisect': _BISECT, 'math': (*_MATH_CALLS, *_MATH_VALUES)}[node.module]
+                if node.module not in self.keep and all(alias.name in built for alias in node.names):
+                    self.replace(node, 'pass', True)
+                else:
+                    missing = [alias.name for alias in node.names if alias.name not in built]
+                    if missing:
+                        self.note(node, f'from {node.module} import {", ".join(missing)}: not built in; '
+                                  + (f'the math names built here are {_MATH_BUILT}' if node.module == 'math'
+                                     else f'the {node.module} functions here are {", ".join(built)} '
+                                     '(no import needed)'))
+
+    def run(self):
+        self.collect()
+        self.block(self.tree.body, None, None)
+        self.finish_imports()
+        return self.apply()
+
+
+def python_surface(source, notes=None):
+    """Map the Python spellings above onto the compiler's own; `notes` collects (line, why) for
+    the constructs left as written."""
+    try:
+        surface = _Surface(source)
+    except (SyntaxError, ValueError):
+        return source                          # the caller's own parse reports it
+    text = surface.run()
+    if notes is not None:
+        notes.extend(sorted(surface.notes))
+    return text
+
+
+def python_wording(message):
+    """A refusal written for the block syntax, respelled for a reader of the Python syntax: the
+    code it quotes loses `let` and the braces, a struct is a class."""
+    def snippet(match):
+        code = match.group(1)
+        if not re.search(r'\blet\s|\bstruct\s|\{\s|;', code):
+            return match.group(0)
+        code = re.sub(r'\bstruct\s+(\w+)\s*\{\s*(.*?)\s*\}',
+                      lambda found: '@dataclass class %s: %s' % (
+                          found[1], ', '.join(part.strip() for part in found[2].split(';') if part.strip())), code)
+        code = re.sub(r'\blet\s+', '', code)
+        code = re.sub(r'\s*\{\s+', ': ', code)
+        code = re.sub(r';?\s+\}', '', code)
+        code = re.sub(r'\s*;\s*$', '', code.strip())
+        return '`' + code + '`'
+    message = re.sub(r'`([^`\n]*)`', snippet, message)
+    message = re.sub(r'\ba let\b', 'an assignment', message)
+    message = re.sub(r'(?<!C )\bstructs\b', 'class instances', message)
+    message = re.sub(r'(?<!C )\bstruct\b', 'class', message)
+    return message

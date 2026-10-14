@@ -108,6 +108,7 @@ class ExceptionResourceTests(unittest.TestCase):
                        if 'ail__blk_cache_n' in generated else '')
         drain_cache += ('for(int j=0;j<ail__ba_cache_n;j++){count_free(ail__ba_cache[j]->p);count_free(ail__ba_cache[j]);}ail__ba_cache_n=0;' if 'ail__ba_cache_n' in generated else '')  # parked bytearrays (cruntime ail__ba_cache)
         drain_cache += ('for(int j=0;j<ail__svec_cache_n;j++)count_free(ail__svec_cache_p[j]);ail__svec_cache_n=0;' if 'ail__svec_cache_n' in generated else '')  # parked str-list vectors (cruntime ail__svec_cache)
+        drain_cache += ('ail__blist_caches_drain();' if 'ail__blist_caches_drain' in generated else '')  # parked list[bytes] headers and payload slabs (cruntime ail__blist_cache)
         host = r'''
 #undef malloc
 #undef calloc

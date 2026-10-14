@@ -35,6 +35,7 @@ class JsonPollResourceTests(unittest.TestCase):
                'ail__blk_cache_n=0;ail__blk_cache_bytes=0;' if 'ail__blk_cache_n' in generated else '')
         drain += ('for(int j=0;j<ail__ba_cache_n;j++){count_free(ail__ba_cache[j]->p);count_free(ail__ba_cache[j]);}ail__ba_cache_n=0;' if 'ail__ba_cache_n' in generated else '')  # parked bytearrays (cruntime ail__ba_cache)
         drain += ('for(int j=0;j<ail__svec_cache_n;j++)count_free(ail__svec_cache_p[j]);ail__svec_cache_n=0;' if 'ail__svec_cache_n' in generated else '')  # parked str-list vectors (cruntime ail__svec_cache)
+        drain += ('ail__blist_caches_drain();' if 'ail__blist_caches_drain' in generated else '')  # parked list[bytes] headers and payload slabs (cruntime ail__blist_cache)
         host=r'''int main(void){long long result=run();DRAIN
  fprintf(stderr,"{\"result\":%lld,\"live\":%zu,\"bytes\":%zu,\"peak\":%zu,\"frames\":%d}\n",result,live,live_bytes,peak_bytes,ail_cleanup_top!=NULL);
  return live||live_bytes||ail_cleanup_top?5:0;}'''.replace('DRAIN',drain)

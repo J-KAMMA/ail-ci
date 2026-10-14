@@ -244,11 +244,15 @@ class GuardedLoops(unittest.TestCase):
             for fn in ('flip', 'shifted', 'wrapped', 'stepped', 'skippy'):
                 body = function_body(program, fn)
                 self.assertIn('->p[', body, '%s: no unchecked copy emitted' % fn)
-                self.assertTrue('ail_list_get(' in body or 'ail_list_set(' in body, fn)
-            # ... and the loops that resize or step twice per iteration stay fully checked.
+                if fn != 'shifted':     # constant bounds over an 8-element list: rangecheck.py proves
+                    self.assertTrue('ail_list_get(' in body or 'ail_list_set(' in body, fn)  # every access
+            # ... and the loops that resize or step twice per iteration are not guarded (one loop,
+            # no `else` copy). `growing` reads xs[i] right after xs.append(...), where
+            # rangecheck.py knows len(xs) == i + 1, so that one read is unchecked without a guard.
             for fn in ('growing', 'twice'):
                 body = function_body(program, fn)
-                self.assertNotIn('->p[', body, '%s: must not be guarded' % fn)
+                self.assertNotIn('} else {', body, '%s: must not be guarded' % fn)
+            self.assertNotIn('->p[', function_body(program, 'twice'))
 
     def test_swap_loop_runs_without_bounds_checks(self):
         source = """

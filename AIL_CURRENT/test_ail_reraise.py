@@ -417,6 +417,7 @@ class ReraiseTests(unittest.TestCase):
         drain='for(int64_t i=0;i<ail__blk_cache_n;i++) count_free(ail__blk_cache[i].p); ail__blk_cache_n=0;' if 'ail__blk_cache_n' in generated else ''
         drain += ('for(int j=0;j<ail__ba_cache_n;j++){count_free(ail__ba_cache[j]->p);count_free(ail__ba_cache[j]);}ail__ba_cache_n=0;' if 'ail__ba_cache_n' in generated else '')  # parked bytearrays (cruntime ail__ba_cache)
         drain += ('for(int j=0;j<ail__svec_cache_n;j++)count_free(ail__svec_cache_p[j]);ail__svec_cache_n=0;' if 'ail__svec_cache_n' in generated else '')  # parked str-list vectors (cruntime ail__svec_cache)
+        drain += ('ail__blist_caches_drain();' if 'ail__blist_caches_drain' in generated else '')  # parked list[bytes] headers and payload slabs (cruntime ail__blist_cache)
         host=r'''int main(int argc,char **argv) { int64_t r=run(strtoll(argv[1],NULL,10)); DRAIN
  fprintf(stderr,"{\"result\":%lld,\"live\":%zu,\"bytes\":%zu,\"peak\":%zu,\"frames\":%d,\"handled\":%d}\n",(long long)r,live,live_bytes,peak_bytes,ail_cleanup_top!=NULL,ail_handled_code); return 0; }'''
         path=self.write('resources.c',ALLOCATOR+generated+host.replace('DRAIN',drain)); exe=self.root/('resources.exe' if os.name=='nt' else 'resources')

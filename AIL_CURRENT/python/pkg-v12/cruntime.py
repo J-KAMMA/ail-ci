@@ -532,6 +532,15 @@ static void ail_raise_value(ail_exception *value) {
     if (ail_exc_top >= 0) { ail_exc_unwind(); longjmp(ail_exc_stack[ail_exc_top], 1); }
     ail_exception_uncaught(value);
 }
+/* `raise E(...)` of a freshly built exception: the raise takes over its only reference, so the
+   raising function needs no temporary (and no unwind frame) to release it. */
+__attribute__((unused)) static void ail_raise_value_adopt(ail_exception *value) {
+    if (!value) ail_die("invalid exception payload");
+    ail_exception_store(&ail_exc_value, value, 1);
+    ail_exc_code = value->code;
+    if (ail_exc_top >= 0) { ail_exc_unwind(); longjmp(ail_exc_stack[ail_exc_top], 1); }
+    ail_exception_uncaught(value);
+}
 static void ail_raise_named(int code) {
     if (code < 1 || code > 8) code = AIL_EXC_RUNTIME;
     ail_exception_store(&ail_exc_value, ail_exception_new(code, NULL, 0, 1), 1);
@@ -6920,17 +6929,74 @@ static ail_bytes ail_bytes_join(ail_barena *A, ail_bytes sep, const ail_list *L,
 BLIST = r'''
 /* One shared list identity; each slot owns an independent immutable byte payload. */
 typedef struct { size_t refs; int64_t n, cap; ail_bytes *p; } ail_blist;
-static void ail_blist_meta(const ail_blist *B) {
-    if (!B || !B->refs || B->n < 0 || B->cap < B->n || (B->cap && !B->p) ||
+/* Inline: every list operation checks the header, and the call was 9% of an LLM-written line
+   validator splitting each line into a list[bytes]. */
+static inline void ail_blist_meta(const ail_blist *B) {
+    if (__builtin_expect(!B || !B->refs || B->n < 0 || B->cap < B->n || (B->cap && !B->p) ||
             (uintmax_t)B->cap > (uintmax_t)SIZE_MAX / sizeof *B->p ||
-            (uintmax_t)B->cap > (uintmax_t)PTRDIFF_MAX / sizeof *B->p)
+            (uintmax_t)B->cap > (uintmax_t)PTRDIFF_MAX / sizeof *B->p, 0))
         ail_die("invalid bytes list");
 }
 static void ail_blist_elements(const ail_blist *B) {
     ail_blist_meta(B);
     for (int64_t i = 0; i < B->n; ++i) ail_bsplit_span(B->p[i]);
 }
+/* Released payloads of at most 64 bytes wait in four size-class caches of at most 256 chunks each
+   for the next payload of that class: a list built per line (`fields.append(ln[s:i])`) paid a
+   malloc and a free per field, and glibc's thread cache holds only 7 chunks per size, so the rest
+   went through its bins (15% of an LLM-written validator after its element copies were gone).
+   Each chunk is its own malloc'd block of the class size and a full cache frees, so at most 64 KiB
+   is ever held back and a chunk can always go back to malloc (fixed slabs kept every class's peak
+   at once: 2x the RSS of a program building lists of 8-, 24-, 40- and 60-byte elements in turn).
+   A payload's class is its length's, so the release knows it. Under AddressSanitizer (GCC's or
+   Clang's) nothing is cached, so the sanitizer sees every allocation. */
+#define AIL_BPAY_SMALL 64
+#define AIL_BPAY_KEEP 256
+#if defined(__SANITIZE_ADDRESS__)
+#define AIL_BLIST_RECYCLE 0
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define AIL_BLIST_RECYCLE 0
+#endif
+#endif
+#ifndef AIL_BLIST_RECYCLE
+#define AIL_BLIST_RECYCLE 1
+#endif
+AIL_LINK_STATE(void *, ail__bpay_free[AIL_BPAY_SMALL / 16], );
+AIL_LINK_STATE(int, ail__bpay_kept[AIL_BPAY_SMALL / 16], );
+static inline unsigned char *ail__bpay_alloc(int64_t n) {
+    if (!AIL_BLIST_RECYCLE || n > AIL_BPAY_SMALL) return (unsigned char *)malloc((size_t)n);
+    int c = (int)((n - 1) >> 4);
+    void *p = ail__bpay_free[c];
+    if (p) { ail__bpay_free[c] = *(void **)p; ail__bpay_kept[c]--; return (unsigned char *)p; }
+    return (unsigned char *)malloc((size_t)(c + 1) << 4);
+}
+static inline void ail__bpay_release(const unsigned char *p, int64_t n) {
+    if (!p) return;
+    int c = (int)((n - 1) >> 4);
+    if (!AIL_BLIST_RECYCLE || n > AIL_BPAY_SMALL || ail__bpay_kept[c] >= AIL_BPAY_KEEP) { free((void *)p); return; }
+    *(void **)p = ail__bpay_free[c]; ail__bpay_free[c] = (void *)p; ail__bpay_kept[c]++;
+}
+/* Released list headers (with their slot arrays, up to 64 slots) are reused by the next new list:
+   `let fields: list[bytes] = []` per line allocated and freed both every time. Off under ASan too:
+   a header used after release would otherwise be silently shared instead of reported. */
+#define AIL_BLIST_CACHE 8
+AIL_LINK_STATE(ail_blist *, ail__blist_cache[AIL_BLIST_CACHE], );
+AIL_LINK_STATE(int, ail__blist_cache_n, = 0);
+__attribute__((unused)) static void ail__blist_caches_drain(void) {
+    for (int i = 0; i < ail__blist_cache_n; i++) { free(ail__blist_cache[i]->p); free(ail__blist_cache[i]); }
+    ail__blist_cache_n = 0;
+    for (int c = 0; c < AIL_BPAY_SMALL / 16; c++) {
+        while (ail__bpay_free[c]) { void *next = *(void **)ail__bpay_free[c]; free(ail__bpay_free[c]); ail__bpay_free[c] = next; }
+        ail__bpay_kept[c] = 0;
+    }
+}
 static ail_blist *ail_blist_new(void) {
+    if (AIL_BLIST_RECYCLE && ail__blist_cache_n) {
+        ail_blist *B = ail__blist_cache[--ail__blist_cache_n];
+        B->refs = 1;
+        return B;
+    }
     ail_blist *B = (ail_blist *)ail_alloc(sizeof *B);
     B->refs = 1;
     return B;
@@ -6943,7 +7009,7 @@ static ail_blist *ail_blist_retain(ail_blist *B) {
 }
 static void ail_blist_clear(ail_blist *B) {
     ail_blist_elements(B);
-    for (int64_t i = 0; i < B->n; ++i) free((void *)B->p[i].p);
+    for (int64_t i = 0; i < B->n; ++i) ail__bpay_release(B->p[i].p, B->p[i].n);
     B->n = 0;
 }
 static void ail_blist_release(ail_blist *B) {
@@ -6951,6 +7017,11 @@ static void ail_blist_release(ail_blist *B) {
     ail_blist_meta(B);
     if (B->refs > 1) { --B->refs; return; }
     ail_blist_clear(B);
+    if (AIL_BLIST_RECYCLE && ail__blist_cache_n < AIL_BLIST_CACHE && B->cap <= 64) {
+        B->refs = 0;                      /* a parked header fails ail_blist_meta until reused */
+        ail__blist_cache[ail__blist_cache_n++] = B;
+        return;
+    }
     free(B->p);
     free(B);
 }
@@ -6994,12 +7065,25 @@ static int ail_blist_reserve(ail_blist *B, int64_t needed) {
     B->p = p; B->cap = cap;
     return 1;
 }
+/* A slot's own copy, from the payload pool (released only by ail__bpay_release). */
 static ail_bytes ail_blist_payload(ail_bytes value) {
     ail_bsplit_span(value);
     if (!value.n) return (ail_bytes){NULL, 0};
-    unsigned char *p = (unsigned char *)malloc((size_t)value.n);
+    unsigned char *p = ail__bpay_alloc(value.n);
     if (p) memcpy(p, value.p, (size_t)value.n);
     return (ail_bytes){p, value.n};
+}
+static void ail_blist_payload_cleanup(void **resources) {
+    ail_bytes *value = (ail_bytes *)resources[0];
+    ail__bpay_release(value->p, value->n);
+}
+/* A slot as a VIEW of its payload, no copy: only where the compiler proved the consumer is done
+   with it before anything can replace, remove or free that slot (`_blist_element_view`). */
+static inline ail_bytes ail_blist_view(const ail_blist *B, int64_t i) {
+    ail_blist_meta(B);
+    if (i < 0) i += B->n;
+    if (i < 0 || i >= B->n) ail_raise_named(AIL_EXC_INDEX);
+    return B->p[i];
 }
 static int ail_blist_add(ail_blist *B, ail_bytes value) {
     ail_bsplit_span(value); ail_blist_meta(B);
@@ -7036,16 +7120,18 @@ static ail_bytes ail_blist_get(ail_barena *A, const ail_blist *B, int64_t index)
     ail_bsplit_meta(A->blk, A->n, A->cap, sizeof *A->blk);
     if (!B->p[index].n) return (ail_bytes){NULL, 0};
     ail_bsplit_growth(A->n, A->cap, sizeof *A->blk);
-    ail_bytes result = ail_blist_payload(B->p[index]);
-    if (!result.p) ail_die("out of memory");
-    return ail_blist_arena_put(A, (unsigned char *)result.p, result.n);
+    ail_bytes slot = B->p[index];
+    unsigned char *copy = (unsigned char *)malloc((size_t)slot.n);   /* the arena frees with free() */
+    if (!copy) ail_die("out of memory");
+    memcpy(copy, slot.p, (size_t)slot.n);
+    return ail_blist_arena_put(A, copy, slot.n);
 }
 static void ail_blist_set(ail_blist *B, int64_t index, ail_bytes value) {
     ail_bsplit_span(value);
     index = ail_blist_index(B, index);
     ail_bytes copy = ail_blist_payload(value);
     if (copy.n && !copy.p) ail_die("out of memory");
-    free((void *)B->p[index].p);
+    ail__bpay_release(B->p[index].p, B->p[index].n);
     B->p[index] = copy;
 }
 static void ail_blist_push(ail_blist *B, ail_bytes value) {
@@ -7058,12 +7144,12 @@ static void ail_blist_push_copy_first(ail_blist *B, ail_bytes value) {
     if (B->n == INT64_MAX || (uintmax_t)B->n >= limit) ail_die("bytes list too long");
     ail_bytes copy = ail_blist_payload(value);
     if (copy.n && !copy.p) ail_die("out of memory");
-    void *resources[] = {(void *)copy.p};
-    ail_cleanup_frame frame = {ail_cleanup_top, ail_bytes_replace_cleanup, resources};
+    void *resources[] = {(void *)&copy};
+    ail_cleanup_frame frame = {ail_cleanup_top, ail_blist_payload_cleanup, resources};
     ail_cleanup_top = &frame;
     if (!ail_blist_reserve(B, B->n + 1)) {
         ail_cleanup_top = frame.previous;
-        ail_bytes_replace_cleanup(resources);
+        ail_blist_payload_cleanup(resources);
         ail_die("out of memory");
     }
     B->p[B->n++] = copy;
@@ -7072,7 +7158,7 @@ static void ail_blist_push_copy_first(ail_blist *B, ail_bytes value) {
 static ail_bytes ail_blist_pop(ail_barena *A, ail_blist *B, int64_t index) {
     index = ail_blist_index(B, index);
     ail_bytes result = ail_blist_get(A, B, index);
-    free((void *)B->p[index].p);
+    ail__bpay_release(B->p[index].p, B->p[index].n);
     memmove(B->p + index, B->p + index + 1, (size_t)(B->n - index - 1) * sizeof *B->p);
     --B->n;
     return result;

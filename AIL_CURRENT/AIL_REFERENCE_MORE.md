@@ -12,6 +12,12 @@ python3 ail_chatgpt.py check prog.ail              # type check only, JSON diagn
 python3 ail_chatgpt.py api csv_stream              # signatures of a bundled module
 ```
 
+Both `compile` (stderr) and `check` (`slow_patterns` in the JSON) name at most 3 commonly O(n²)
+loops as `file:line: slow: ...; fix`: `x in xs` / `.index` / `.count` / `.remove` on a list, `.pop(0)`
+/ `.insert(0, x)`, `min`/`max`/`sort` of a list the loop keeps changing, a scan of all rows for the
+current key, nested loops over one list, a heap of structs. They never fail the build; fix them
+when n can be large. `s += t` on a str is linear (no hint).
+
 ## Text I/O: main, arguments, stdin lines, print, files
 
 ```ail
@@ -228,6 +234,8 @@ field access on None
 - `list(x)` copies any list, set, dict (its keys), `d.keys()`, `d.values()`, str (its characters)
   or range into a new list. On a list field, `x in st.xs` and `st.xs.count(x)` read it in place.
 - A flat list parameter is read-only (Structs). `print(xs)` is refused: `", ".join(xs)`.
+- `x in xs`, `index`, `count`, `remove`, `pop(0)`, `insert(0, x)` are O(n), as in Python: in a
+  loop use a set or `[False] * n`, a queue as list + head index (BFS), a heap (Heaps).
 
 ## Sort keys
 
@@ -311,8 +319,9 @@ hi]])`. Same results and heap layout as CPython, O(log n), the list changed in p
   parameter.
 - A heap of structs takes a sort key on every call: `heappush(h, n, key=lambda n: (n.dist, n.id))`,
   `heappop(h, key=lambda n: (n.dist, n.id))` (the same key each time; Python would use a tuple).
-  For `(priority, id)` pairs a heap of ints also works: push `d * 1000000 + v`, pop `p // 1000000`
-  and `p % 1000000`. `bisect_left(xs, x, key=lambda n: n.t)` compares `x` with `key(xs[i])`.
+  For `(priority, id)` pairs prefer a heap of ints: push `(d << 20) | v`, pop `p >> 20` and
+  `p & 1048575` (no allocation per entry: 5.5x fewer instructions than a struct heap in a
+  Dijkstra over 470k nodes). `bisect_left(xs, x, key=lambda n: n.t)` compares `x` with `key(xs[i])`.
 - A call that pops inside a larger expression must come before any other read of that list in it;
   otherwise bind it first: `let x = heappop(h);`. A function you define with the same name wins.
 
@@ -411,7 +420,7 @@ a	1	5
 b	2	5
 ```
 
-## Dijkstra: heap of structs, insort (example)
+## Dijkstra: int heap, adjacency, insort (example)
 
 ```ail
 struct Step { dist: int; node: int; }
@@ -420,31 +429,40 @@ fn main() {
     let src = [0, 0, 1, 2];
     let dst = [1, 2, 3, 3];
     let w = [4, 1, 1, 5];
+    let out: list[list[int]] = [[] for _ in range(n)];
+    for e in range(len(src)) { out[src[e]].append(e); }
     let best = [1 << 60] * n;
     best[0] = 0;
-    let h: list[Step] = [Step(0, 0)];
+    let h = [(0 << 20) | 0];
     while len(h) > 0 {
-        let s = heappop(h, key=lambda s: (s.dist, s.node));
-        if s.dist > best[s.node] { continue; }
-        for e in range(len(src)) {
-            if src[e] == s.node and s.dist + w[e] < best[dst[e]] {
-                best[dst[e]] = s.dist + w[e];
-                heappush(h, Step(best[dst[e]], dst[e]), key=lambda s: (s.dist, s.node));
+        let p = heappop(h);
+        let d = p >> 20;
+        let u = p & 1048575;
+        if d > best[u] { continue; }
+        for e in out[u] {
+            if d + w[e] < best[dst[e]] {
+                best[dst[e]] = d + w[e];
+                heappush(h, (best[dst[e]] << 20) | dst[e]);
             }
         }
     }
-    let packed: list[int] = [];
-    for v in range(n) { heappush(packed, best[v] * 1000000 + v); }
-    let p = heappop(packed);
+    let sh: list[Step] = [];
+    for v in range(n) { heappush(sh, Step(best[v], v), key=lambda s: (s.dist, s.node)); }
+    let s = heappop(sh, key=lambda s: (s.dist, s.node));
     let seen: list[int] = [];
     for x in [5, 1, 4] { insort(seen, x); }
-    print(best[3], p // 1000000, p % 1000000, seen[0], bisect_left(seen, 4));
+    print(best[3], s.dist, s.node, seen[0], bisect_left(seen, 4));
 }
 ```
 
 ```text
 5 0 0 1 1
 ```
+
+- Group edges by source once (`out`); never scan every edge for each popped node (O(V*E)).
+- Many S-to-T queries on one big graph: stop when T is popped, and search from both ends (a heap
+  per side, stop once the two tops add up to at least the best meeting found): on a route-search program
+  175x fewer relaxations than a one-sided search, which made AIL 40x slower than C there.
 
 ## BFS: graph, grid DP, buckets (example)
 

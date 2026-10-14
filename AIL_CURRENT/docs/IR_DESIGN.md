@@ -523,7 +523,7 @@ Testing has five parts.
 3. **Sanitizers.** ASan + UBSan + LeakSanitizer on the IR-mode build of everything in (1) and
    (2), including error exits. The leak check covers raise paths, as the hand-written prototype
    showed: its first version leaked the exception payload on `raise`.
-4. **Benchmarks.** `tools/icount` on the six LLM programs (`runs-2026-10-12b/*-ail-*`) and the
+4. **Benchmarks.** `tools/icount` on the six LLM programs (`private-runs/*-ail-*`) and the
    bench apps, plus peak RSS and binary size (the user's rule: judge on RSS and size too). An
    IR-mode count more than 1% above flag-off fails, unless the commit message names it.
 5. **Pins.** The flag-off pins stay frozen. The flag-on pins follow the rule in §1.
