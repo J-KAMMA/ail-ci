@@ -721,6 +721,9 @@ def export_sdk(source_root: Path, output: Path) -> dict:
             if not directory.is_dir():
                 raise ValueError(f'missing source directory: {directory}')
         selected.update(p for p in compiler.iterdir() if p.suffix in ('.py', '.h'))
+        # The IR is a package below the compiler directory (python/pkg-v12/ir/, ir/passes/).
+        if (compiler / 'ir').is_dir():
+            selected.update(p for p in (compiler / 'ir').rglob('*.py') if '__pycache__' not in p.parts)
         selected.update(p for p in examples.iterdir() if p.suffix in ('.ail', '.c', '.h', '.S', '.s', '.json'))
 
     # A selected C interface must include its full declared input closure.
