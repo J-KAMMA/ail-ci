@@ -291,6 +291,13 @@ class _Rewriter:
             source = source_expr.id
         else:
             source = '_ail_sk%d_src' % n
+            if (isinstance(source_expr, ast.Call) and isinstance(source_expr.func, ast.Name)
+                    and source_expr.func.id == 'range'):
+                # `sorted(range(n), key=...)`: a range is not a list (it has no .copy()); the
+                # comprehension makes the list[int] the rest of the rewrite indexes and copies.
+                element = '_ail_sk%d_r' % n
+                source_expr = ast.ListComp(elt=_name(element), generators=[ast.comprehension(
+                    target=_name(element, True), iter=source_expr, ifs=[], is_async=0)])
             pre.append(ast.Assign(targets=[_name(source, True)], value=source_expr))
         param, body = self.key_parts(key)
         columns = []

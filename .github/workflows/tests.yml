@@ -33,9 +33,10 @@ jobs:
       - name: Run shard
         env:
           SHARD: ${{ matrix.shard }}
-          SHARDS: '20'
         run: |
           gcc --version | head -1
-          modules=$(cd AIL_CURRENT && python3 -c 'import os, ail_check; i, n = int(os.environ["SHARD"]), int(os.environ["SHARDS"]); print(" ".join(sorted(ail_check.MODULES)[i::n]))')
+          # tools/ci_shards.json balances the modules by recorded run time; a module missing from it
+          # is still spread over the shards by name (python3 tools/ci_shards.py --update refreshes it).
+          modules=$(python3 tools/ci_shards.py --shard "$SHARD")
           echo "modules: $modules"
           python3 tools/par_check.py -j 4 $modules

@@ -46,6 +46,7 @@ import nested_lists
 import readonly_bytes_scalar
 import boolkind
 import shadowing
+import rangecheck
 from pipeline import PipelineError
 from pyfront import BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Unsupported, _use
 
@@ -622,24 +623,27 @@ def _exception_value(node, ctx):
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and _etype(node, ctx) == EXCEPTION:
         return _map_inline(lambda: _call(node, ctx), ctx)
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in EXC_NAMES:
-        _exc_parts(ctx, EXC_NAMES[node.func.id])
-        if node.keywords or len(node.args) > 1:
-            raise _exception_constructor_error(node.func.id, 'built-in exceptions accept zero arguments or one str message')
-        if node.args:
-            actual = _argument_kind(node.args[0], ctx, node.func.id, 'message', 0, STR)
-            if actual != STR:
-                error = _exception_constructor_error(node.func.id, 'an exception message must be str')
-                error.type_details = _argument_type_error(str(error), node.func.id, 'message', 0, STR, actual).type_details
-                raise error
-            message = _map_inline(lambda: _str_value(node.args[0], ctx), ctx)
-            slot, _ = ctx.temp(STR)
-            value = '(%s = %s, ail_exception_new(%d, %s.p, %s.n, %s.bytes))' % (slot, message, EXC_NAMES[node.func.id], slot, slot, slot)
-        else:
-            value = 'ail_exception_new(%d, NULL, 0, 0)' % EXC_NAMES[node.func.id]
-        return _obj_temp(value, EXCEPTION, ctx)
+        return _obj_temp(_exception_new(node, ctx), EXCEPTION, ctx)
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ctx.funcs and ctx.funcs[node.func.id][1] == EXCEPTION:
         return _call(node, ctx)
     raise Unsupported('an exception value requires a built-in exception or bound exception name')
+
+
+def _exception_new(node, ctx):
+    """`ValueError("msg")` as an `ail_exception_new(...)` call returning a NEW reference."""
+    _exc_parts(ctx, EXC_NAMES[node.func.id])
+    if node.keywords or len(node.args) > 1:
+        raise _exception_constructor_error(node.func.id, 'built-in exceptions accept zero arguments or one str message')
+    if not node.args:
+        return 'ail_exception_new(%d, NULL, 0, 0)' % EXC_NAMES[node.func.id]
+    actual = _argument_kind(node.args[0], ctx, node.func.id, 'message', 0, STR)
+    if actual != STR:
+        error = _exception_constructor_error(node.func.id, 'an exception message must be str')
+        error.type_details = _argument_type_error(str(error), node.func.id, 'message', 0, STR, actual).type_details
+        raise error
+    message = _map_inline(lambda: _str_value(node.args[0], ctx), ctx)
+    slot, _ = ctx.temp(STR)
+    return '(%s = %s, ail_exception_new(%d, %s.p, %s.n, %s.bytes))' % (slot, message, EXC_NAMES[node.func.id], slot, slot, slot)
 
 
 def _local_slist_pop(node, ctx):
@@ -1140,14 +1144,28 @@ def _scan_module_consts(tree):
             # supported" sends the reader looking for the spelling that works, and for `re` there
             # is not one: there is no regular-expression engine here, and no subset of one. Saying
             # that plainly is the whole value of the message.
-            if mod in ('re', 'regex'):
-                raise Unsupported("import of %r; there are no regular expressions here at all and "
-                                  "no way to spell one -- match by indexing and comparing the str "
-                                  "itself (s[i] == 'a', s[a:b] == 'foo')" % mod)
-            raise Unsupported("import of %r; importing another module is a separate, larger "
-                              "question this compiler does not answer -- only `import math` and "
-                              "`import sys` are accepted, so write what you need out by hand"
-                              % mod)
+            named = [a.name for a in node.names] if isinstance(node, ast.Import) else [mod]
+            regex = next((name for name in named if name in ('re', 'regex')), None)
+            builtin = next((name for name in named if name in ('heapq', 'bisect')), None)
+            if regex is not None:
+                error = Unsupported("import of %r; there are no regular expressions here at all and "
+                                    "no way to spell one -- match by indexing and comparing the str "
+                                    "itself (s[i] == 'a', s[a:b] == 'foo')" % regex)
+            elif builtin is not None:
+                # The Python front end (ail_syntax.python_surface) drops these imports when every
+                # use is a function that is built in; one that is not is what kept it here.
+                error = Unsupported("import of %r with a function that is not built in; heappush, "
+                                    "heappop, heapify, heappushpop, heapreplace, bisect_left, "
+                                    "bisect_right, bisect, insort, insort_left and insort_right are "
+                                    "built in (no import needed), nothing else from heapq or bisect is"
+                                    % builtin)
+            else:
+                error = Unsupported("import of %r; importing another module is a separate, larger "
+                                    "question this compiler does not answer -- only `import math` and "
+                                    "`import sys` are accepted, so write what you need out by hand"
+                                    % mod)
+            error.source_line = node.lineno    # the import itself, not a later use of the name
+            raise error
         if not isinstance(node, ast.Assign):
             continue
         if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
@@ -1359,10 +1377,14 @@ class Ctx:
         self.field_element_views = set()        # ids of `o.f[i]` (list[str] field) reads a
                                                 # consumer proved may be views -- see
                                                 # _slist_field_elements
+        self.blist_alias_views = set()          # bytes locals holding a view of a list[bytes]
+                                                # slot -- see _blist_alias_view
         self.borrowed_aliases = set()           # struct-list element locals held without a
                                                 # reference -- see _mark_borrowed_aliases
         self.freeable_objs = set()              # class-instance locals proved not to escape --
                                                  # see _mark_freeable_objects
+        self.range_marks = []                   # AST nodes behind `/*R<n>*/` check markers --
+                                                 # see `_range_resolve`
         self.modconsts = _MODCONSTS             # module-level constants (SEMANTICS section 29):
                                                  # name -> (INT|FLT|LIST|FLIST, value) -- the SAME
                                                  # dict `to_c` filled in once for every Ctx this
@@ -5935,7 +5957,7 @@ def _bytes_local_stable(name, ctx):
     local after its last use, but only when every mention is a call returning a number; a `.decode()`
     or a slice is never one, so a view keeps it alive.)"""
     try:
-        if ctx.type_of(name) != BYTES:
+        if ctx.type_of(name) != BYTES or name in ctx.blist_alias_views:
             return False
     except Unsupported:
         return False
@@ -6457,7 +6479,7 @@ def _str_value(node, ctx, *, owned_join_return=False):
         owner_kind, _ = _field_info(node.value, ctx)
         capture, owner = _owner_capture(node.value.value, owner_kind, ctx, _runs_no_code(node.slice))
         index = _map_inline(lambda: _expr(node.slice, ctx), ctx)
-        if id(node) in ctx.field_element_views:
+        if id(node) in ctx.field_element_views or _field_element_consumed(node, ctx):
             # The consumer proved nothing can change or replace the list before it is done with
             # the element (`_slist_field_elements`): the element's own text, not a copy kept in
             # this function's arena until it returns (4 million sort-key and argument copies made
@@ -7992,11 +8014,15 @@ def _blist_method(node, ctx, *, as_stmt=False):
     ctx.parts.update(('BLIST', 'BYTES'))
     saved, ctx.pre = ctx.pre, []
     try:
-        receiver, _ = ctx.temp(BLIST)
-        value = _blist_value(node.func.value, ctx)
-        steps = [*ctx.pre, _obj_store(receiver, value, BLIST, ctx) + ';']
-        ctx.pre = []
         method, args = node.func.attr, node.args
+        if method == 'append' and _blist_name_receiver(node.func.value, list(args), ctx):
+            # `xs.append(v)` on a local or parameter name: nothing in `v` can rebind the name.
+            receiver, steps = ctx.cname(node.func.value.id), []
+        else:
+            receiver, _ = ctx.temp(BLIST)
+            value = _blist_value(node.func.value, ctx)
+            steps = [*ctx.pre, _obj_store(receiver, value, BLIST, ctx) + ';']
+            ctx.pre = []
         if method in ('append', 'extend', 'clear', 'reverse', 'sort') and not as_stmt:
             raise Unsupported('bytes list %s is a statement, not a value' % method)
         if method == 'sort':
@@ -8039,6 +8065,208 @@ def _blist_method(node, ctx, *, as_stmt=False):
         return '({ %s %s; })' % (' '.join(steps), call)
     finally:
         ctx.pre = saved
+
+
+# ---- list[bytes] elements as views ----
+#
+# `ail_blist_get` copies the element into the function's bytes arena, kept until the function
+# returns: one malloc per read, and a line loop reading `fields[i]` keeps every line's copies (an
+# LLM-written ticket validator: 2.9M lines, 45% of its instructions and 440 MB of its 705 MB peak).
+# Each slot owns its payload, and only replacing, removing or freeing that slot frees it (append and
+# extend move the slot array, never a payload). So a read can hand out the payload itself when its
+# consumer is finished with the text before anything can do that, and keeps no part of it.
+
+_BLIST_VIEW_METHODS = frozenset(('decode', 'startswith', 'endswith', 'find', 'rfind', 'count', 'index',
+                                 'isdigit', 'isalpha', 'isalnum', 'isspace', 'isupper', 'islower'))
+_BLIST_FRESH_RESULTS = (INT, FLT, NORET, None)
+
+
+def _fn_parents(ctx):
+    """child -> parent over this function's AST, built once per function."""
+    cached = getattr(ctx, '_view_parents', None)
+    if cached is None or cached[0] is not ctx.fn_node:
+        parents = {}
+        for parent in ast.walk(ctx.fn_node):
+            for child in ast.iter_child_nodes(parent):
+                parents[child] = parent
+        cached = (ctx.fn_node, parents)
+        ctx._view_parents = cached
+    return cached[1]
+
+
+def _program_builtin(name, ctx):
+    return not (name in ctx.funcs or name in ctx.kind or name in ctx.types or name in ctx.classes
+                or name in ctx.modconsts)
+
+
+def _user_function_call(call, ctx):
+    func = call.func
+    return (isinstance(func, ast.Name) and func.id in ctx.funcs and func.id not in ctx.kind
+            and func.id not in ctx.types and func.id not in ctx.classes)
+
+
+def _blist_name_receiver(receiver, args, ctx):
+    """A list[bytes] local or parameter NAME whose list cannot be released while `args` run: only
+    rebinding the name releases it, and only a `:=` inside them could do that."""
+    return (isinstance(receiver, ast.Name) and not getattr(receiver, '_ail_synth', False)
+            and (receiver.id in ctx.locals or receiver.id in ctx.kind)
+            and not any(isinstance(n, ast.NamedExpr) for arg in args for n in ast.walk(arg)))
+
+
+def _fn_params(ctx):
+    fn = ctx.fn_node
+    return {arg.arg for arg in fn.args.posonlyargs + fn.args.args + fn.args.kwonlyargs}
+
+
+def _blist_private_local(name, ctx):
+    """A list[bytes] LOCAL no other code can reach: bound only to fresh lists (a literal or a
+    `.split()`), and otherwise only indexed, measured, appended to, extended, searched or iterated
+    here -- never passed, stored, returned or aliased. A call therefore cannot change its slots."""
+    fn = ctx.fn_node
+    if name in _fn_params(ctx):
+        return False
+    parents = _fn_parents(ctx)
+    for n in ast.walk(fn):
+        if isinstance(n, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n is not fn:
+            if any(isinstance(m, ast.Name) and m.id == name for m in ast.walk(n)):
+                return False
+        if isinstance(n, (ast.Global, ast.Nonlocal)):
+            return False
+        if not (isinstance(n, ast.Name) and n.id == name):
+            continue
+        p = parents.get(n)
+        if isinstance(n.ctx, ast.Store):
+            if (isinstance(p, ast.Assign) and len(p.targets) == 1 and p.targets[0] is n
+                    or isinstance(p, ast.AnnAssign) and p.target is n and p.value is not None):
+                v = p.value
+                try:
+                    # only bytes.split() builds a fresh list; a user method named split may not
+                    fresh = isinstance(v, ast.List) or _is_bytes_split_call(v, ctx)
+                except Unsupported:
+                    fresh = False
+                if fresh:
+                    continue
+            return False
+        if not isinstance(n.ctx, ast.Load):
+            return False
+        if (isinstance(p, ast.Subscript) and p.value is n and not isinstance(p.slice, ast.Slice)
+                and isinstance(p.ctx, ast.Load)):
+            continue
+        if (isinstance(p, ast.Call) and isinstance(p.func, ast.Name) and p.func.id == 'len'
+                and len(p.args) == 1 and p.args[0] is n and _program_builtin('len', ctx)):
+            continue
+        if (isinstance(p, ast.Attribute) and p.value is n and p.attr in ('append', 'extend', 'count', 'index')
+                and isinstance(parents.get(p), ast.Call) and parents[p].func is p):
+            continue
+        if isinstance(p, ast.For) and p.iter is n:
+            continue
+        return False
+    return True
+
+
+def _view_consumed(expr, ctx, private):
+    """Whether the parent of `expr` (a bytes value that is a view of a list[bytes] slot) is done with
+    it before anything else runs, and keeps nothing that points into it. `private`: the list is a
+    `_blist_private_local`, so a user call that cannot be handed the list cannot change it either."""
+    parents = _fn_parents(ctx)
+    p = parents.get(expr)
+    if p is None:
+        return False
+    if isinstance(p, ast.Compare):
+        operands = [p.left] + list(p.comparators)
+        return all(o is expr or _runs_no_code(o) for o in operands)
+    if isinstance(p, ast.Subscript) and p.value is expr:
+        return not isinstance(p.slice, ast.Slice) and _runs_no_code(p.slice) and isinstance(p.ctx, ast.Load)
+    if isinstance(p, ast.Attribute) and p.value is expr:
+        call = parents.get(p)
+        return (p.attr in _BLIST_VIEW_METHODS and isinstance(call, ast.Call) and call.func is p
+                and all(_runs_no_code(a) for a in call.args)
+                and all(_runs_no_code(k.value) for k in call.keywords))
+    if not isinstance(p, ast.Call) or not any(a is expr for a in p.args):
+        return False
+    others = [a for a in p.args if a is not expr] + [k.value for k in p.keywords]
+    if any(isinstance(a, ast.Starred) for a in p.args) or not all(_runs_no_code(o) for o in others):
+        return False
+    if isinstance(p.func, ast.Name) and p.func.id in ('int', 'len') and _program_builtin(p.func.id, ctx):
+        return len(p.args) == 1 and not p.keywords
+    if (isinstance(p.func, ast.Attribute) and p.func.attr == 'append' and len(p.args) == 1
+            and not p.keywords):
+        try:
+            return _etype(p.func.value, ctx) == BLIST and _runs_no_code(p.func.value)
+        except Unsupported:
+            return False
+    if _user_function_call(p, ctx):
+        # The callee reads its bytes parameter during the call; a value-only one can reach no
+        # list at all, any other cannot reach a private list, and neither returns a view of it.
+        if _value_only_signature(p.func.id, ctx):
+            return True
+        params, result = ctx.funcs.get(p.func.id, ((), 'unknown'))
+        return private and result in _BLIST_FRESH_RESULTS
+    return False
+
+
+def _blist_element_view(node, ctx):
+    """`L[i]` (L a list[bytes] local or parameter name, `i` running no code) may be read as a view
+    of L's slot: its consumer is done with it first (`_view_consumed`), or it initialises a local
+    alias every use of which is such a consumer (`_blist_alias_view`)."""
+    if not (isinstance(node.value, ast.Name) and _runs_no_code(node.slice)):
+        return False
+    name = node.value.id
+    private = _blist_private_local(name, ctx)
+    if _view_consumed(node, ctx, private):
+        return True
+    parents = _fn_parents(ctx)
+    assign = parents.get(node)
+    if (private and isinstance(assign, (ast.Assign, ast.AnnAssign)) and assign.value is node
+            and _blist_alias_view(assign, name, ctx)):
+        return True
+    return False
+
+
+def _blist_alias_view(assign, name, ctx):
+    """`t = L[i]` with L private: t may hold the slot's view when t is bound only here and every
+    read of t comes after this statement in the same block (so in the same iteration, before any
+    later rebinding of L can run) and is a `_view_consumed` use; L is never rebound in that span."""
+    target = assign.targets[0] if isinstance(assign, ast.Assign) else assign.target
+    if (isinstance(assign, ast.Assign) and len(assign.targets) != 1) or not isinstance(target, ast.Name):
+        return False
+    t = target.id
+    fn = ctx.fn_node
+    if t in _fn_params(ctx) or t == name:
+        return False
+    parents = _fn_parents(ctx)
+    holder = parents.get(assign)
+    block = None
+    for field in ('body', 'orelse', 'finalbody'):
+        seq = getattr(holder, field, None)
+        if isinstance(seq, list) and any(s is assign for s in seq):
+            block = seq
+    if block is None:
+        return False
+    k = next(i for i, s in enumerate(block) if s is assign)
+    region = {id(n) for s in block[k + 1:] for n in ast.walk(s)}
+    for n in ast.walk(fn):
+        if isinstance(n, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n is not fn:
+            if any(isinstance(m, ast.Name) and m.id == t for m in ast.walk(n)):
+                return False
+        if isinstance(n, ast.ExceptHandler) and n.name == t:
+            return False
+        if isinstance(n, ast.arg) and n.arg == t:
+            return False
+        if not isinstance(n, ast.Name):
+            continue
+        if n.id == name and id(n) in region and not isinstance(n.ctx, ast.Load):
+            return False
+        if n.id != t:
+            continue
+        if isinstance(n.ctx, ast.Store):
+            if n is not target:
+                return False
+            continue
+        if not isinstance(n.ctx, ast.Load) or id(n) not in region or not _view_consumed(n, ctx, True):
+            return False
+    ctx.blist_alias_views.add(t)
+    return True
 
 
 def _bytes_join_value(node, ctx):
@@ -8099,13 +8327,26 @@ def _bytes_value(node, ctx):
             and _etype(node.value, ctx) == BLIST):
         saved, ctx.pre = ctx.pre, []
         try:
-            source, _ = ctx.temp(BLIST)
-            value = _blist_value(node.value, ctx)
-            steps = [*ctx.pre, _obj_store(source, value, BLIST, ctx) + ';']
-            ctx.pre = []
+            direct = _blist_name_receiver(node.value, [node.slice], ctx)
+            if direct:
+                # A local or parameter name cannot be rebound by the index (no `:=`), so the list
+                # needs no reference held across the read.
+                source = ctx.cname(node.value.id)
+                steps = []
+            else:
+                source, _ = ctx.temp(BLIST)
+                value = _blist_value(node.value, ctx)
+                steps = [*ctx.pre, _obj_store(source, value, BLIST, ctx) + ';']
+                ctx.pre = []
             _need_int(node.slice, ctx, 'a bytes list index')
             index = _expr(node.slice, ctx)
             steps.extend(ctx.pre)
+            if direct and _blist_element_view(node, ctx):
+                ctx.shortcuts.append({'shortcut': 'blist_element_view',
+                                      'evidence': 'the consumer is done with the element before '
+                                                  'anything can remove or free it'})
+                view = 'ail_blist_view(%s, %s)' % (source, index)
+                return '({ %s %s; })' % (' '.join(steps), view) if steps else view
             return '({ %s ail_blist_get(&%s, %s, %s); })' % (' '.join(steps), ctx.barena(), source, index)
         finally:
             ctx.pre = saved
@@ -10317,6 +10558,109 @@ def _slist_field_elements(node, ctx):
     return found
 
 
+def _field_element_consumed(node, ctx):
+    """`o.f[i]` (a list[str] field element) whose consumer copies or finishes with the text before
+    anything else runs: a comparison of operands that run no code (`t.nm[i] == name`), `s += o.f[i]`
+    onto a local, or the initial value of a builder local (`ail_bl_set` copies). Each read otherwise
+    copied the element into the arena until the function returned (a linear search did so per
+    probe)."""
+    p = _fn_parents(ctx).get(node)
+    if isinstance(p, ast.Compare):
+        return all(o is node or _runs_no_code(o) for o in [p.left] + list(p.comparators))
+    builders = getattr(ctx, 'builders', None) or ()
+    if isinstance(p, ast.AugAssign) and p.value is node and isinstance(p.op, ast.Add):
+        return isinstance(p.target, ast.Name) and p.target.id in builders
+    if isinstance(p, ast.Assign) and len(p.targets) == 1 and p.value is node:
+        return isinstance(p.targets[0], ast.Name) and p.targets[0].id in builders
+    if isinstance(p, ast.AnnAssign) and p.value is node:
+        return isinstance(p.target, ast.Name) and p.target.id in builders
+    return False
+
+
+def _slist_local_field_view(name, arg, ctx):
+    """`xs.append(o.f[i])` may push a VIEW of the field element (its text stays in the field's own
+    storage) instead of a copy kept in this function's arena: `o` is a struct parameter never
+    rebound (the caller keeps the object alive), `xs` a local list[str] bound only to `[]`, and every
+    mention of `xs` comes before the first top-level statement that may change field `f` on any
+    object (`_scan_field_stores`' mutation summary covers what calls run) -- or is that statement
+    itself when it is exactly `p.g = xs`, whose store copies every string before it frees the old
+    list. Before that point `xs` is only appended to, measured, reversed, sorted or joined, so no
+    view outlives the field's text. An LLM-written tree editor rebuilt its node-name list this way
+    per operation: one malloc and one adoption per name, 37% of its instructions."""
+    if not (isinstance(arg, ast.Subscript) and not isinstance(arg.slice, ast.Slice)
+            and isinstance(arg.value, ast.Attribute) and isinstance(arg.value.value, ast.Name)
+            and _runs_no_code(arg.slice)):
+        return False
+    fn = getattr(ctx, 'fn_node', None)
+    if fn is None or _FIELD_STORES is None or not _borrowable_owner(arg.value.value, ctx):
+        return False
+    try:
+        if _field_kind(arg.value, ctx) != SLIST:
+            return False
+    except Unsupported:
+        return False
+    owner, field = arg.value.value.id, arg.value.attr
+    params = _fn_params(ctx)
+    if owner not in params or name in params:
+        return False
+    for n in ast.walk(fn):
+        if (isinstance(n, ast.Name) and n.id == owner and isinstance(n.ctx, (ast.Store, ast.Del))
+                or isinstance(n, (ast.Global, ast.Nonlocal, ast.NamedExpr))):
+            return False
+        if isinstance(n, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n is not fn:
+            if any(isinstance(m, ast.Name) and m.id in (name, owner) for m in ast.walk(n)):
+                return False
+    scan = _FIELD_STORES
+    body = fn.body
+    local_names = set(ctx.locals) | set(ctx.kind)
+    first = len(body)
+    for i, statement in enumerate(body):
+        stored, callees, unknown = _direct_field_effects(
+            None, scan['fns'], scan['methods'], scan['classes'], mutations=True, nodes=[statement],
+            local_names=local_names)
+        hit = unknown or field in stored
+        for callee in callees:
+            other = scan['mutations'].get(callee, _ALL_FIELDS)
+            hit = hit or other == _ALL_FIELDS or field in other
+        if hit:
+            first = i
+            break
+    parents = _fn_parents(ctx)
+    for i, statement in enumerate(body):
+        for n in ast.walk(statement):
+            if not (isinstance(n, ast.Name) and n.id == name):
+                continue
+            p = parents.get(n)
+            if i > first:
+                return False
+            if i == first:
+                if not (p is statement and isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                        and isinstance(statement.targets[0], ast.Attribute)
+                        and isinstance(statement.targets[0].value, ast.Name) and statement.value is n):
+                    return False
+                continue
+            if isinstance(n.ctx, ast.Store):
+                if ((isinstance(p, ast.Assign) and len(p.targets) == 1 and p.targets[0] is n
+                     or isinstance(p, ast.AnnAssign) and p.target is n)
+                        and isinstance(p.value, ast.List) and not p.value.elts):
+                    continue
+                return False
+            if not isinstance(n.ctx, ast.Load):
+                return False
+            call = parents.get(p)
+            if (isinstance(p, ast.Attribute) and p.value is n and p.attr in ('append', 'reverse', 'sort')
+                    and isinstance(call, ast.Call) and call.func is p and not call.keywords):
+                continue
+            if (isinstance(p, ast.Call) and isinstance(p.func, ast.Name) and p.func.id == 'len'
+                    and len(p.args) == 1 and p.args[0] is n and _program_builtin('len', ctx)):
+                continue
+            if (isinstance(p, ast.Call) and isinstance(p.func, ast.Attribute) and p.func.attr == 'join'
+                    and len(p.args) == 1 and p.args[0] is n):
+                continue
+            return False
+    return True
+
+
 def _map_int(node, ctx):
     if _etype(node, ctx) != INT:
         raise Unsupported('a dict of int values requires an int value or default')
@@ -11121,8 +11465,9 @@ def _expr(node, ctx):
             ctx.parts.add('BYTES')
             fast = _guard_marker_index(node.slice, recv_id, ctx) if isinstance(node.value, ast.Name) else None
             if fast is not None:
-                return 'AIL_GY(%s, %s, %s)' % (_bytes_value(node.value, ctx), i, fast)
-            return 'ail_bytes_get(%s, %s)' % (_bytes_value(node.value, ctx), i)
+                return 'AIL_GY(%s%s, %s, %s)' % (_range_mark(node, ctx), _bytes_value(node.value, ctx), i, fast)
+            mark = _range_mark(node, ctx) if isinstance(node.value, ast.Name) else ''
+            return 'ail_bytes_get(%s%s, %s)' % (mark, _bytes_value(node.value, ctx), i)
         if t == LIST:
             ctx.parts.add('LIST')
             if recv_id in ctx.nlist:
@@ -11147,8 +11492,9 @@ def _expr(node, ctx):
                                   % (recv_id, ctx.tstride[recv_id]))
             fast = _guard_marker_index(node.slice, recv_id, ctx) if isinstance(node.value, ast.Name) else None
             if fast is not None:
-                return 'AIL_GG(&%s, %s, %s)' % (ctx.cname(recv_id), i, fast)
-            return 'ail_list_get(&%s, %s)' % (ctx.cname(recv_id), i)
+                return 'AIL_GG(%s&%s, %s, %s)' % (_range_mark(node, ctx), ctx.cname(recv_id), i, fast)
+            mark = _range_mark(node, ctx) if isinstance(node.value, ast.Name) else ''
+            return 'ail_list_get(%s&%s, %s)' % (mark, ctx.cname(recv_id), i)
         if t == FLIST:
             ctx.parts.add('FLIST')
             if recv_id in ctx.tstride:
@@ -11158,7 +11504,8 @@ def _expr(node, ctx):
                 # FLIST, not LIST).
                 raise Unsupported('%r[...] is a %d-tuple, not a number; read a field of it'
                                   % (recv_id, ctx.tstride[recv_id]))
-            return 'ail_flist_get(&%s, %s)' % (ctx.cname(recv_id), i)
+            mark = _range_mark(node, ctx) if isinstance(node.value, ast.Name) else ''
+            return 'ail_flist_get(%s&%s, %s)' % (mark, ctx.cname(recv_id), i)
         if t == DICT:
             ctx.parts.add('TAB')
             if recv_id in ctx.ddict:
@@ -11295,6 +11642,9 @@ def _expr(node, ctx):
                     _use(need, 'ck_shlk')
                     return 'ck_shlk(%s, %d)' % (rec(node.left), _k)
             _use(need, h)
+            if h in ('ck_add', 'ck_sub', 'ck_mul'):
+                return _ordered_numeric_pair(node.left, node.right, ctx,
+                                             h + '(' + _range_mark(node, ctx) + '{}, {})')
             return _ordered_numeric_pair(node.left, node.right, ctx, h + '({}, {})')
         return _ordered_numeric_pair(node.left, node.right, ctx,
                                      '({} %s {})' % BINOP[type(node.op)])
@@ -11729,10 +12079,10 @@ def _attr_read(node, ctx):
                           % (sys_path, sys_path))
     math_path = _math_attr_path(node)
     if math_path is not None:
-        raise Unsupported('%s: `import math` is accepted so the import statement itself does not '
-                          'refuse, but no math function is wired in this compiler yet -- %s is '
-                          'refused, by name, the same as every other unimplemented attribute'
-                          % (math_path, math_path))
+        raise Unsupported('%s: not built; the Python syntax builds math.sqrt, math.floor, '
+                          'math.ceil, math.isqrt, math.gcd, math.fabs (called) and math.pi, '
+                          'math.e, math.tau, math.inf, math.nan -- %s is refused, by name, the '
+                          'same as every other unimplemented attribute' % (math_path, math_path))
     _, field_kind = _field_info(node, ctx)
     borrowed = _borrowed_element_receiver(node.value, ctx) if field_kind in NUM else None
     if borrowed is not None:
@@ -12737,6 +13087,12 @@ def _attr_assign_inner(target, value, ctx, ind):
     elif ft in MAPS:
         value_slot, _ = ctx.temp(ft)
         capture_value = '({ const ail_%s *_source = %s; ail_%s_replace(&%s, ail_%s_copy(_source)); })' % (ft, v, ft, value_slot, ft)
+    elif (ft == SLIST and isinstance(value, ast.Name) and value.id in ctx.locals
+          and ctx.type_of(value.id) == SLIST and isinstance(target.value, ast.Name)):
+        # `o.f = xs` with `xs` a local list[str] and `o` a name: reading `o` runs nothing, and
+        # ail_obj_field_slist copies every string before it frees the field's old list, so the
+        # snapshot taken first was a second full copy.
+        value_slot, capture_value = v, '(void)0'
     elif ft == SLIST:
         value_slot, expression = _slist_snapshot(v, ctx)
         capture_value = '(void)%s' % expression
@@ -14881,9 +15237,10 @@ def _method(node, ctx, *, as_stmt=False):
                           'are supported; every other sys attribute is refused' % sys_path)
     math_path = _math_attr_path(at)
     if math_path is not None:
-        raise Unsupported('%s(): `import math` is accepted so the import statement itself does '
-                          'not refuse, but no math function is wired in this compiler yet'
-                          % math_path)
+        raise Unsupported('%s(): not built; the Python syntax builds math.sqrt, math.floor, '
+                          'math.ceil, math.isqrt, math.gcd (two arguments), math.fabs and math.pi, '
+                          'math.e, math.tau, math.inf, math.nan (the block syntax writes a square '
+                          'root as x ** 0.5)' % math_path)
     if _is_open_call(at.value):
         # `open(...).<anything>` reaching generic dispatch. `open(path).read()` where a str
         # belongs was already built by `_str_value` (`_is_str_expr`/`_str_value` intercept it
@@ -15320,6 +15677,8 @@ def _method(node, ctx, *, as_stmt=False):
         # append branch above makes against its own promoted kind.
         if not _is_str_expr(a[0], ctx):
             raise Unsupported('%r holds str; appending a non-str value would mix types' % name)
+        if _slist_local_field_view(name, a[0], ctx):
+            ctx.field_element_views.add(id(a[0]))
         ctx.parts.add('SLIST')
         return 'ail_slist_push(&%s, %s)' % (c, _str_value(a[0], ctx))
     if m == 'sort' and t == SLIST and not a and not node.keywords:
@@ -18409,6 +18768,7 @@ def _stmt_inner(node, ctx, ind):
                               'grow a list with .append(), a set with .add(), and a dict with '
                               'd[k] = v' % _a(_at))
         fake = ast.BinOp(left=node.target, op=node.op, right=node.value)
+        fake._ail_range_src = node              # the range proof is recorded on the AugAssign
         v = _expr(fake, ctx)
         return _flush(ctx, pad) + '%s%s = %s;\n' % (pad, ctx.cname(node.target.id), v)
     if isinstance(node, ast.If):
@@ -18829,6 +19189,13 @@ def _raise_stmt(node, ctx, pad):
         return '%sail_raise_named(%d);\n' % (pad, EXC_NAMES[node.exc.id])
     if _etype(node.exc, ctx) != EXCEPTION:
         raise Unsupported('raise requires a built-in exception value')
+    if (isinstance(node.exc, ast.Call) and isinstance(node.exc.func, ast.Name)
+            and node.exc.func.id in EXC_NAMES and _dynamic_result(node.exc, ctx) != EXCEPTION):
+        # `raise ValueError("m")`: the new exception goes straight to the raise, which adopts it.
+        # Through a temporary, the temporary was a resource every return released and the unwind
+        # frame registered per call (19% of an LLM-written expression evaluator's instructions).
+        value = _exception_new(node.exc, ctx)
+        return _flush(ctx, pad) + '%sail_raise_value_adopt(%s);\n' % (pad, value)
     value = _exception_value(node.exc, ctx)
     return _flush(ctx, pad) + '%sail_raise_value(%s);\n' % (pad, value)
 
@@ -19738,7 +20105,7 @@ def _setitem(target, value, ctx, ind):
         k = _expr(target.slice, ctx)
         v = _expr(value, ctx)
         pre = _flush(ctx, pad)
-        return pre + '%sail_flist_set(&%s, %s, (double)(%s));\n' % (pad, c, k, v)
+        return pre + '%sail_flist_set(%s&%s, %s, (double)(%s));\n' % (pad, _range_mark(target, ctx), c, k, v)
     if _etype(value, ctx) == FLT:
         if t == 'array':
             raise Unsupported('%r is a list parameter, which is read-only; to change it in a '
@@ -19762,8 +20129,8 @@ def _setitem(target, value, ctx, ind):
         ctx.parts.add('LIST')
         fast = _guard_marker_index(target.slice, name, ctx)
         if fast is not None:
-            return pre + '%sAIL_GS(&%s, %s, %s, %s);\n' % (pad, c, k, fast, v)
-        return pre + '%sail_list_set(&%s, %s, %s);\n' % (pad, c, k, v)
+            return pre + '%sAIL_GS(%s&%s, %s, %s, %s);\n' % (pad, _range_mark(target, ctx), c, k, fast, v)
+        return pre + '%sail_list_set(%s&%s, %s, %s);\n' % (pad, _range_mark(target, ctx), c, k, v)
     if t == 'array':
         raise Unsupported('%r is a list parameter, which is read-only; to change it in a '
                           'helper, ' 'keep the list in a struct field and pass the struct (`s.xs[i] = v` and `s.xs.append(v)` work), or build and return a new list' % name)
@@ -20769,14 +21136,22 @@ def _body_no_str_alloc(body, ctx, params=()):
         # `float(x)`, `abs(x)`... of numbers, or a user function of this program whose parameters
         # and result are all int/float: it cannot leave a view of THIS arena anywhere (its own
         # strings live in its own arena), so a loop calling it allocates nothing here.
+        # A bytes local passed to a bytes parameter is a view and touches no str arena either
+        # (`if not isd(f[i])`, `if not valid(f)` per field: the per-iteration checkpoint and the
+        # arena it kept were the only str work of an LLM-written validator's helpers).
+        def bytes_name(x):
+            return isinstance(x, ast.Name) and ctx.kind.get(x.id, ctx.types.get(x.id)) == BYTES
         if not (isinstance(e.func, ast.Name) and not e.keywords and e.args
-                and all(intish(x) for x in e.args)):
+                and all(intish(x) or bytes_name(x) for x in e.args)):
             return False
         n = e.func.id
         if n in ctx.funcs:
             params, result = ctx.funcs[n]
             return (result in (INT, FLT) and len(params) == len(e.args)
-                    and all(kind in (INT, FLT) for _, kind in params))
+                    and all(kind in (INT, FLT) and intish(x) or kind == BYTES and bytes_name(x)
+                            for (_, kind), x in zip(params, e.args)))
+        if not all(intish(x) for x in e.args):
+            return False
         return (n in ('float', 'int', 'abs', 'min', 'max') and n not in shadowed
                 and n not in ctx.classes)
     def int_sequence(v):
@@ -20818,7 +21193,7 @@ def _body_no_str_alloc(body, ctx, params=()):
         if isinstance(e, ast.Call):
             return (isinstance(e.func, ast.Name) and e.func.id in ('ord', 'len')
                     and e.func.id not in shadowed and not e.keywords and len(e.args) == 1
-                    and isinstance(e.args[0], ast.Name))
+                    and isinstance(e.args[0], ast.Name)) or numeric_call(e)
         return False
     def stmts(seq):
         return all(stmt(s) for s in seq)
@@ -21443,6 +21818,112 @@ def _guard_rewrite(text, fast):
         args, i = _guard_args(text, found.end() - 1)
         args = [_guard_rewrite(a, fast) for a in args]
         out.append(_GUARD_MARKERS[found.group()[:-1]][1 if fast else 0].format(*args))
+
+
+# ---- range proofs: checks the value-range analysis (rangecheck.py) shows cannot fire ----
+#
+# Every `ck_add/ck_sub/ck_mul` and every plain-local `ail_list_get/set`, `ail_flist_get/set` and
+# `ail_bytes_get` is emitted with a `/*R<n>*/` comment as its first argument, <n> naming the AST node
+# in `ctx.range_marks`. Once the whole body is compiled (every local's kind settled),
+# `_range_resolve` runs the analysis on the function's AST and rewrites each marked call: the plain
+# operation where the node was proven (no overflow / index in [0, len)), the original call with the
+# comment removed everywhere else. A marker the resolver never sees is still the checked call (the
+# comment is valid C), and `_range_strip` removes any that remain from the final program text.
+_RANGE_MARK_RE = re.compile(r'\b(ck_add|ck_sub|ck_mul|ail_list_get|ail_flist_get|ail_bytes_get|ail_list_set|'
+                            r'ail_flist_set)\(/\*R(\d+)\*/')
+_RANGE_FAST = {
+    'ck_add': '(({0}) + ({1}))', 'ck_sub': '(({0}) - ({1}))', 'ck_mul': '(({0}) * ({1}))',
+    'ail_list_get': '(({0})->p[{1}])', 'ail_flist_get': '(({0})->p[{1}])',
+    'ail_bytes_get': '((int64_t)({0}).p[{1}])',
+    'ail_list_set': '(({0})->p[{1}] = ({2}))', 'ail_flist_set': '(({0})->p[{1}] = ({2}))',
+}
+_RANGE_STRIP_RE = re.compile(r'\((/\*R\d+\*/)')
+
+
+def _range_mark(node, ctx):
+    marks = getattr(ctx, 'range_marks', None)
+    if marks is None:
+        return ''
+    marks.append(getattr(node, '_ail_range_src', node))
+    return '/*R%d*/' % (len(marks) - 1)
+
+
+def _range_strip(text):
+    return _RANGE_STRIP_RE.sub('(', text) if '/*R' in text else text
+
+
+def _range_kind(name, ctx):
+    """The analysis' view of a name: 'int', a plainly stored 'list'/'flist', 'bytes', 'bytearray',
+    'str', or None for anything it must not reason about."""
+    if (name in ctx.optional or name in ctx.stdin_unbound or name in ctx.handles
+            or name in ctx.modconsts or name in (ctx.numeric_allowed_names or ())
+            or any(entry[0] == name for entry in getattr(ctx, 'numeric_tokens', {}).values())):
+        return None                     # nullable, special, or int-or-float at run time
+    try:
+        t = ctx.type_of(name)
+    except Unsupported:
+        return None
+    if t == INT:
+        return 'int'
+    if t == LIST:
+        return 'list' if _guard_plain_list(name, ctx) else None
+    if t == FLIST:
+        return None if (name in ctx.tstride or name in ctx.rowparam or name in ctx.nlist
+                        or name in ctx.rowof or name in ctx.modconsts) else 'flist'
+    if t == BYTES:
+        return None if (name in ctx.blist or name in ctx.rowof) else 'bytes'
+    if t == BYTEARRAY:
+        return 'bytearray'
+    if t == STR:
+        return 'str'
+    return None
+
+
+def _range_proofs(ctx):
+    proofs = getattr(ctx, '_range_proofs', None)
+    if proofs is None:
+        def const(name):
+            entry = ctx.modconsts.get(name)
+            if entry and entry[0] == INT and isinstance(entry[1], int) and not isinstance(entry[1], bool):
+                return entry[1]
+            return None
+        info = rangecheck.Info(lambda name: _range_kind(name, ctx), const,
+                               frozenset(ctx.funcs) | frozenset(ctx.classes))
+        proofs = rangecheck.analyze(ctx.fn_node, info)
+        ctx._range_proofs = proofs
+    return proofs
+
+
+_RANGE_PROBE = False
+
+
+def _range_resolve(text, ctx):
+    if not getattr(ctx, 'range_marks', None) or '/*R' not in text or _RANGE_PROBE:
+        return text
+    proofs = _range_proofs(ctx)
+    marks = ctx.range_marks
+    out, pos = [], 0
+    while True:
+        m = _RANGE_MARK_RE.search(text, pos)
+        if not m:
+            out.append(text[pos:])
+            return ''.join(out)
+        fn, n = m.group(1), int(m.group(2))
+        node = marks[n] if n < len(marks) else None
+        proven = node is not None and (proofs.ok_arith(node) if fn.startswith('ck_') else proofs.ok_index(node))
+        if proven:
+            try:
+                args, end = _guard_args(text, m.start() + len(fn))
+            except ValueError:
+                proven = False
+        if not proven or len(args) != _RANGE_FAST[fn].count('{'):
+            out.append(text[pos:m.start()] + fn + '(')
+            pos = m.end()
+            continue
+        args[0] = args[0][len('/*R%d*/' % n):]
+        args = [_range_resolve(a.strip(), ctx) for a in args]
+        out.append(text[pos:m.start()] + _RANGE_FAST[fn].format(*args))
+        pos = end
 
 
 def _guard_compile_body(node, ctx, ind, plan):
@@ -26873,6 +27354,25 @@ def _stripped_self(fn):
     return synth
 
 
+def _empty_container_literal(node):
+    return (isinstance(node, ast.List) and not node.elts or isinstance(node, ast.Dict) and not node.keys
+            or isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id in ('list', 'dict', 'set') and not node.args and not node.keywords)
+
+
+def _field_annotation_kind(annotation, classes):
+    """The container kind a field annotation in `__init__` names, or None."""
+    if (isinstance(annotation, ast.Subscript) and isinstance(annotation.value, ast.Name)
+            and annotation.value.id == 'list' and isinstance(annotation.slice, ast.Name)
+            and annotation.slice.id in (STR, FLT)):
+        return SLIST if annotation.slice.id == STR else FLIST
+    try:
+        kind = _annotation_kind(annotation, classes)
+    except Unsupported:
+        return None
+    return kind if (kind in (LIST, FLIST, SLIST, BLIST, *MAPS) or _is_olist_kind(kind)) else None
+
+
 def _compile_init(init_fn, info, classes):
     """Walk `__init__`'s body once, establishing `info.field_order`/`field_types` AS it goes (so
     `self.b = self.a + 1` on the line right after `self.a = ...` can read `self.a`'s type -- see
@@ -26895,6 +27395,14 @@ def _compile_init(init_fn, info, classes):
         if (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant)
                 and isinstance(stmt.value.value, str)):
             continue                                      # a docstring
+        declared = None
+        if (isinstance(stmt, ast.AnnAssign) and stmt.value is not None
+                and isinstance(stmt.target, ast.Attribute) and isinstance(stmt.target.value, ast.Name)
+                and stmt.target.value.id == 'self'):
+            # `self.items: list[str] = []` (Python syntax): the annotation is what types an empty
+            # container field; any other value keeps its own type, exactly as without it.
+            declared = _field_annotation_kind(stmt.annotation, classes)
+            stmt = ast.copy_location(ast.Assign(targets=[stmt.target], value=stmt.value), stmt)
         if not (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1
                 and isinstance(stmt.targets[0], ast.Attribute)
                 and isinstance(stmt.targets[0].value, ast.Name)
@@ -26905,6 +27413,8 @@ def _compile_init(init_fn, info, classes):
         field, value = stmt.targets[0].attr, stmt.value
         before = len(ctx.pre)
         ftype = _etype(value, ctx)
+        if declared is not None and _empty_container_literal(value):
+            ftype = declared
         if isinstance(value, ast.Name) and value.id in info.numeric_list_params:
             ftype = LIST
         if _container_literal(value, ctx) is not None and ftype not in (BLIST, LIST, FLIST, SLIST, *MAPS) and not _is_olist_kind(ftype):
@@ -29672,6 +30182,8 @@ def _explain_dict_of_containers(source, error):
                        'groups.append(G([])); } groups[idx[k]].items.append(w);` (or keep parallel '
                        'lists indexed through the int dict). Original refusal: %s')
                       % (text, name, error.args[0]),) + error.args[1:]
+        if site_line is not None:              # the container use this message names
+            error.source_line = site_line + source[:len(source) - len(source.lstrip())].count('\n')
         return
 
 
@@ -29696,6 +30208,15 @@ def to_c(source, name=None, strict=True, info=None, entry=None, sig=None, librar
     except Unsupported as error:
         shadowing.restore_error(error, shadow)
         raise
+    # range-proof markers left by code compiled outside a function body (struct constructors, ...)
+    # are plain comments in still-checked calls; drop them so that C is byte-for-byte as before
+    if isinstance(result, str):
+        result = _range_strip(result)
+    if info is not None and 'c_units' in info:
+        declarations, bodies = info['c_units']
+        info['c_units'] = (_range_strip(declarations), [(unit, _range_strip(body)) for unit, body in bodies])
+    if info is not None and 'c_source_regions' in info:
+        info['c_source_regions'] = [(unit, _range_strip(body)) for unit, body in info['c_source_regions']]
     if shadow and info is not None:
         if 'c_units' in info:
             declarations, bodies = info['c_units']
@@ -31294,7 +31815,12 @@ def _one_function(*args, **kwargs):
                 probe_kwargs = dict(kwargs, builders_enabled=builders)
                 if probe_kwargs.get('cleanup_symbols') is not None:
                     probe_kwargs['cleanup_symbols'] = set(probe_kwargs['cleanup_symbols'])
-                first = _one_function_numeric_impl(*probe_args, **probe_kwargs)
+                global _RANGE_PROBE
+                _RANGE_PROBE = True     # only the probe's ctx is used: skip the range analysis
+                try:
+                    first = _one_function_numeric_impl(*probe_args, **probe_kwargs)
+                finally:
+                    _RANGE_PROBE = False
                 break
             except _BuilderBail as bail:
                 if not builders:
@@ -31685,6 +32211,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
         ctx.builders, ctx.bl_views = (_builder_locals(fn, ctx) if builders_enabled
                                       else (set(), set()))
         body = _stmts(fn.body, ctx, 1)
+        body = _range_resolve(body, ctx)
         if ctx.builders:
             body = _bl_check(body, ctx)
             if any(name in text for text in ctx.borrowed_callback_helpers.values()
@@ -32161,6 +32688,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
         generated = _c_identifier_replace(generated, token, value)
     if ctx.par_regions:
         generated = _par_outline(generated, sig, decls, ctx, cname)
+    generated = _range_strip(generated)
     return sig, generated, ctx
 
 

@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from ail_syntax import SyntaxErrorAIL, detect, translate
+from ail_syntax import SyntaxErrorAIL, detect, fold_constants, python_surface, python_wording, translate
 import ail_sexpr
 
 ROOT = Path(__file__).resolve().parent
@@ -108,7 +108,8 @@ def _zig_compiler(target):
 
 
 def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only=False,
-                  separate=False, module_paths=(), origins=None, source_map=None, declarations_only=False, source_bytes=None):
+                  separate=False, module_paths=(), origins=None, source_map=None, declarations_only=False, source_bytes=None,
+                  notes=None):
     """Resolve source imports once and validate their shared declaration scope."""
     search_paths = tuple(dict.fromkeys(Path(path).resolve() for path in module_paths))
     if any(not path.is_dir() for path in search_paths):
@@ -148,6 +149,11 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             locations = {}
             if syntax == 'ail':
                 text = translate(text, module=module_only or not entry, imports=imports, declarations=declarations, source_map=locations)
+            else:
+                # Python spellings of built-ins and result contracts (ail_syntax.python_surface);
+                # every statement stays on its own line, so positions below are unchanged.
+                text = python_surface(text, None if notes is None else notes.setdefault(str(path), []))
+            text = fold_constants(text)
             tree = ast.parse(text, filename=str(path))
             if not declarations_only:
                 _check_int64_literals(tree)
@@ -178,6 +184,9 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                     position = (exc.source_line, len(prefix.decode('utf8')) + 1)
                 if position is not None:
                     exc.source_position = (str(path), *position)
+                if syntax == 'python' and position is not None:
+                    # `compile` prints only this message: name the line the check report has.
+                    raise ValueError(f'AIL {"source" if entry else "module"} {path}: line {position[0]}: {exc}') from exc
             raise ValueError(f'AIL {"source" if entry else "module"} {path}: {exc}')
         if syntax == 'ail' and any(isinstance(node, ast.Assign)
                 and not _module_constant(node) for node in tree.body):
@@ -459,6 +468,18 @@ def _check_repair_context(args, report, source, original, snapshots):
     except (OSError, UnicodeError, SyntaxError, ValueError, RuntimeError, ImportError, KeyError) as error:
         return unavailable('context_collection_failed: ' + str(error))
 
+def _slow_patterns(text, source_map):
+    """Advisory `file:line: slow: ...` lines (ail_slow_patterns); never raises, never fails a build."""
+    if os.environ.get('AIL_NO_SLOW_HINTS') or not source_map:
+        return []
+    try:
+        import ail_slow_patterns
+        found = ail_slow_patterns.scan(text, source_map, skip_prefixes=(str(ROOT / 'language_examples'),))
+        return [ail_slow_patterns.format_warning(item, Path.cwd()) for item in found]
+    except Exception:
+        return []
+
+
 def _source_check(args):
     """Read-only strict type/code-generation check; no C build or runtime proof."""
     report = dict(schema='ail.check/1', status='failed', stage='loader', diagnostics=[],
@@ -529,11 +550,16 @@ def _source_check(args):
                 if snapshots.get(source) != original or any(path.read_bytes() != data for path, data in snapshots.items()):
                     raise ValueError('source or dependency changed while collecting API contracts')
         report.update(status='passed', stage='type')
+        slow = _slow_patterns(text, source_map)
+        if slow:
+            report['slow_patterns'] = slow
         status = 0
     except (OSError, UnicodeError, SyntaxError, ValueError, RuntimeError, ImportError, subprocess.SubprocessError) as error:
         # Unsupported inherits the compiler's error type; inspect it without a fallback.
         status = 2 if dependency or isinstance(error, (OSError, ImportError, subprocess.SubprocessError)) else 1
         message = str(error)
+        if _python_source(args, original):
+            message = python_wording(message)
         configuration = ('each --module-path', 'each --module must', 'AIL module not found:', '--symbol requires --interface', '--contracts requires --interface', '--types-used requires --interface and --symbol', 'unknown interface function:', 'invalid bundled API module name:', 'unknown bundled API module:', 'invalid bundled API manifest:')
         if any(marker in message for marker in configuration):
             status = 2
@@ -594,6 +620,29 @@ def _source_check(args):
         report['repair_context'] = _check_repair_context(args, report, source, original, snapshots)
     print(json.dumps(report, ensure_ascii=False))
     return status
+
+def _python_source(args, data):
+    """Whether the entry source is written in the Python syntax (refusals are respelled for it)."""
+    if args.syntax != 'auto':
+        return args.syntax == 'python'
+    try:
+        text = data.decode('utf8') if isinstance(data, bytes) else data
+        return text is not None and not ail_sexpr.detect(text) and not detect(text)
+    except Exception:
+        return False
+
+
+def _python_notes(message, notes, source):
+    """A Python-syntax refusal followed by what the Python front end left as written."""
+    message = message.rstrip('\n')
+    shown = os.path.relpath(source)
+    shown = str(source) if shown.startswith('..') else shown
+    for path, entries in notes.items():
+        where = shown if Path(path) == source else path
+        for line, text in entries:
+            message += '\nnote: %s:%d: %s' % (where, line, text)
+    return message + '\n'
+
 
 def _locate_refusal(args, source, message):
     """Prefix a compile refusal with path:line:col, found by the type check (which maps statements)."""
@@ -891,10 +940,12 @@ def main(argv=None):
             parser.error('AIL compilation requires Python 3.10 or newer')
         if source.suffix.lower() != '.ail' or not source.is_file():
             parser.error('source must be an existing .ail file')
+        notes = {}
+        loading = native_build.loading(args) or {'source_map': {}}
         try:
             source_text, contracts, unit_map = _load_sources(
                 source, args.module, args.syntax, module_only=library, separate=separate,
-                module_paths=args.module_path, **native_build.loading(args))
+                module_paths=args.module_path, notes=notes, **loading)
         except (OSError, UnicodeError, SyntaxError, ValueError) as error:
             parser.error(str(error))
         if library:
@@ -938,8 +989,13 @@ def main(argv=None):
                 timeout=660, env={**os.environ, 'AIL_NO_GENERAL': '1'} if contracts else None)
             if result.returncode:
                 message = result.stderr or result.stdout
+                python = result.returncode == 3 and _python_source(args, source.read_bytes())
+                if python:
+                    message = python_wording(message)
                 if result.returncode == 3 and not args.json and not objects and not separate:
                     message = _locate_refusal(args, source, message)
+                if python and any(notes.values()):
+                    message = _python_notes(message, notes, source)
                 return native_build.emit(args, {}, result.returncode, message=message)
             built = target if target.is_file() else Path(str(target) + '.exe')
             if not built.is_file():
@@ -956,6 +1012,8 @@ def main(argv=None):
                 if created:
                     output.unlink()
                 raise
+            for line in [] if args.json else _slow_patterns(source_text, loading['source_map']):
+                print(line, file=sys.stderr)
             return native_build.emit(args, {'output': str(output), 'bytes': output.stat().st_size,
                 'sha256': hashlib.sha256(output.read_bytes()).hexdigest()})
     project = ROOT/'example' if args.command == 'selftest' else Path(args.project).resolve()
