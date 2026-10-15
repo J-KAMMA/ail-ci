@@ -448,7 +448,7 @@ class Analysis(object):
             if op == 'break':
                 loops[-1].breaks.append([self.get(env, v) for v in ins.operands])
                 return None
-            if op in ('return', 'unreachable'):
+            if op in ('return', 'unreachable', 'raise', 'reraise'):
                 return None
             self.evaluate(ins, env)
         return None

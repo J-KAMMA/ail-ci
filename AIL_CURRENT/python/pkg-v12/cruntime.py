@@ -23872,6 +23872,76 @@ def needs_libm(parts):
     return any(part in parts for part in ('FPOW', 'ROUND', 'FFLOORMOD'))
 
 
+# IR exceptions (stage S2, docs/design/IR_OWNERSHIP_DESIGN_v2.md section 11). Selected only by IR
+# functions that raise or contain a `try` (ctx.parts 'IREXC'), so no legacy program's C changes.
+IREXC = r'''
+/* IR exceptions (stage S2). A `raise` in an IR function sets `ail_pending` and returns; every IR
+   caller that can see a pending result checks the flag after the call and returns in turn, up to an
+   IR `try` (ail_ir_try below) or to a legacy caller, where the symbol with the legacy name re-raises
+   it the legacy way (ail_ir_rethrow: unwind frames, longjmp to the innermost handler). The payload
+   travels in the same two variables as a legacy longjmp (ail_exc_value, ail_exc_code). With no
+   handler open anywhere (ail_exc_top < 0) a raise ends the program on the spot, exactly as
+   ail_raise_named and ail_raise_value do, so the uncaught message and exit status are unchanged. */
+AIL_LINK_STATE(int, ail_pending, = 0);
+#define AIL_IR_EXC 1
+__attribute__((unused)) static void ail_ir_raise_value(ail_exception *value) {
+    if (ail_exc_top < 0) ail_exception_uncaught(value);
+    ail_exception_store(&ail_exc_value, value, 1);
+    ail_exc_code = value->code;
+    ail_pending = 1;
+}
+__attribute__((unused, noinline, cold)) static void ail_ir_raise_named(int code) {
+    /*IRPAR*/
+    if (ail_exc_top < 0) ail_raise_named(code);
+    ail_ir_raise_value(ail_exception_new(code, NULL, 0, 1));
+}
+__attribute__((unused, noinline, cold)) static void ail_ir_raise_new(int code, const uint8_t *p, int64_t n, _Bool ascii) {
+    ail_ir_raise_value(ail_exception_new(code, p, n, ascii));
+}
+__attribute__((unused)) static void ail_ir_reraise(void) {
+    if (ail_handled_value) ail_ir_raise_value(ail_exception_retain(ail_handled_value));
+    else ail_ir_raise_named(ail_handled_code ? ail_handled_code : AIL_EXC_RUNTIME);
+}
+__attribute__((unused, noreturn)) static void ail_ir_rethrow(void) {
+    ail_pending = 0;
+    ail_raise_current();
+    __builtin_unreachable();
+}
+/* The in-flight exception as an owned reference (the transport variables stay as they are, for
+   ail_handled_enter); ail_ir_raise_value(adopt) puts it back in flight afterwards. */
+__attribute__((unused)) static ail_exception *ail_ir_take(void) {
+    ail_exception *value = ail_exception_current();
+    if (!value) ail_die("invalid exception payload");
+    ail_pending = 0;
+    return ail_exception_retain(value);
+}
+/* A `try` body, run as a function so that a longjmp from anything it calls (a legacy function, a
+   runtime trap) lands here and not in a frame the C compiler has optimised: the same handler stack
+   the legacy `try` uses, so traps and legacy raises are caught exactly as before. Returns the body's
+   status: 0 it ran to its end, AIL_IR_EXC an exception is in flight (ail_pending set), other values
+   are the body's own early exits (return, break, continue). */
+__attribute__((unused, noinline)) static int ail_ir_try(int (*body)(void *), void *frame) {
+    if (ail_exc_top + 1 >= AIL_EXC_MAX_DEPTH) ail_die("try nesting too deep");
+    ail_exc_top++;
+    ail_exc_cleanup[ail_exc_top] = ail_cleanup_top;
+    ail_exc_depth[ail_exc_top] = ail_depth;
+    if (setjmp(ail_exc_stack[ail_exc_top]) == 0) {
+        int status = body(frame);
+        ail_exc_top--;
+        return status;
+    }
+    ail_depth = ail_exc_depth[ail_exc_top];
+    ail_exc_top--;
+    ail_pending = 1;
+    return AIL_IR_EXC;
+}
+'''
+
+ORDER.insert(ORDER.index('RECDEPTH') + 1, 'IREXC')
+SOURCE['IREXC'] = IREXC
+REQUIRES['IREXC'] = ['DIE', 'RECDEPTH']
+
+
 def emit(parts):
     """The pieces a program reached, in dependency order, once each."""
     want = set(parts)
@@ -23892,6 +23962,8 @@ def emit(parts):
 def _piece(p, want):
     text = (_overflow_exception(_assert_exception(SOURCE[p])) if p == 'DIE' and 'OVERFLOWEXC' in want
             else _assert_exception(SOURCE[p]) if p == 'DIE' and 'ASSERTEXC' in want else SOURCE[p])
+    if p == 'IREXC':
+        return text.replace('/*IRPAR*/', 'if (ail_par_cur) ail_par_trap(NULL, code);' if 'PAR' in want else '')
     return _parallel_die(text) if p == 'DIE' and 'PAR' in want else text
 
 

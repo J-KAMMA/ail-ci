@@ -26,6 +26,9 @@ STATS = []
 # call to one of them is no longer an unknown effect (whole-program summaries; a function the
 # legacy path compiled, or one compiled later, stays unknown).
 SUMMARIES = {}
+# C symbols of the functions already compiled through the IR that have an exception entry point
+# (`<sym>__ir`, S2): an IR caller compiled later calls that entry and checks `ail_pending`.
+PENDING = set()
 _PROGRAM = [None]        # the program SUMMARIES belong to: its signature table (`ctx.funcs`, one
                          # object per compiled program), held so its identity cannot be reused
 
@@ -35,12 +38,19 @@ def _summaries(ctx):
     if _PROGRAM[0] is not funcs:
         _PROGRAM[0] = funcs
         SUMMARIES.clear()
+        PENDING.clear()
     return SUMMARIES
 
 
 def facts_for(P, fn, ctx):
     """Whole-program facts the passes may use for `fn`."""
     return {'summaries': _summaries(ctx)}
+
+
+def checked_exceptions():
+    """AIL_IR_EXC=checked: exceptions leave IR functions as checked return values (design 2.8);
+    anything else (the default): as the legacy path raises them, by longjmp. See design doc 11."""
+    return os.environ.get('AIL_IR_EXC', 'longjmp').strip().lower() == 'checked'
 
 
 def mode():
@@ -95,7 +105,9 @@ def apply(P, args, kwargs, result):
         allow = os.environ.get('AIL_IR_FUNCS')
         if allow and fn.name not in allow.split(','):
             raise lower.NotS0('not in AIL_IR_FUNCS')
-        function, program = lower.lower(P, fn, ctx, sig, recursive, cname)
+        _summaries(ctx)
+        function, program = lower.lower(P, fn, ctx, sig, recursive, cname, PENDING,
+                                        not bound.get('local_methods', True))
         if not _only_cleanup_before(generated, sig):
             raise lower.NotS0('the legacy path emits helpers around this function')
         verify.check(function, program)
@@ -108,8 +120,10 @@ def apply(P, args, kwargs, result):
             if text.print_function(again) != printed:
                 raise I.IRError('print/parse/print round trip changed the text of %s' % fn.name)
             verify.check(again, program)
-        new_sig, body, needs = emit_c.emit_function(function)
-        if new_sig != sig:
+        new_sig, body, needs = emit_c.emit_function(function, PENDING, checked_exceptions())
+        # (a function with a try has its parameters `volatile` in the legacy signature, for the
+        # setjmp rule; a qualifier on a parameter does not change the type of the function)
+        if new_sig != sig and ''.join(new_sig.split()) != ''.join(re.sub(r'\bvolatile\b', '', sig).split()):
             raise I.IRError('IR signature %r differs from the legacy %r' % (new_sig, sig))
         if needs['need'] and ctx.need is None:
             raise lower.NotS0('checked helpers in a non-strict build')
@@ -128,4 +142,6 @@ def apply(P, args, kwargs, result):
     _record(fn.name, cname, 'ir', '', ctx, pass_stats)
     if function.effects is not None:
         _summaries(ctx)[cname] = function.effects
+    if needs['pending']:
+        PENDING.add(cname)
     return sig, body, ctx

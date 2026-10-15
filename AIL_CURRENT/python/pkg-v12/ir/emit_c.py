@@ -72,7 +72,7 @@ def _decl(ct, name):
     return ct + name if ct.endswith('*') else '%s %s' % (ct, name)
 
 
-def signature(fn):
+def signature(fn, sym=None, linkage=None):
     results = fn.results
     if len(results) > 1:
         raise I.IRError('S0 functions return at most one value')
@@ -87,36 +87,93 @@ def signature(fn):
         else:
             decls.append(_decl(ctype(p.type), 'v_' + n))
     params = ', '.join(decls)
-    prefix = LINKAGE_PREFIX.get(fn.attrs.get('linkage', 'extern'))
+    linkage = linkage or fn.attrs.get('linkage', 'extern')
+    prefix = LINKAGE_PREFIX.get(linkage)
     if prefix is None:
-        raise I.IRError('unknown linkage %r' % fn.attrs.get('linkage'))
-    return '%s%s %s(%s)' % (prefix, ret, fn.sym, params or 'void')
+        raise I.IRError('unknown linkage %r' % linkage)
+    return '%s%s %s(%s)' % (prefix, ret, sym or fn.sym, params or 'void')
+
+
+def _args_of(fn):
+    """The parameters as C arguments, to forward them to another function of the same signature."""
+    abi = fn.attrs.get('abi') or ['value'] * len(fn.params)
+    out = []
+    for n, a in zip(fn.param_names, abi):
+        out.append('v_%s, v_%s_len' % (n, n) if a == 'array' else 'v_%s' % n)
+    return ', '.join(out)
+
+
+def _zero(t):
+    return '0.0' if t == I.F64 else '0'
+
+
+def _c_literal(text):
+    """A UTF-8 string as one `"\\xHH"` literal per byte (what the legacy path writes: hex escapes
+    are maximal-munch in C, so every byte gets its own), and whether it is pure ASCII."""
+    data = text.encode('utf-8')
+    body = ''.join('"' + chr(92) + 'x%X"' % b for b in data) or '""'
+    return body, len(data), int(data.isascii())
+
+
+AIL_IR_EXC, AIL_IR_RET = 1, 2         # statuses of an outlined try body (cruntime.IREXC)
+
+
+class _Cx(object):
+    """One C function being written: the IR function itself ('top'), or the body of a `try`
+    ('body'), which is outlined (design section 11: the setjmp that catches a longjmp from a
+    legacy callee or a runtime trap lives in `ail_ir_try`, never in an IR function)."""
+
+    def __init__(self, kind, loops_start, scopes_start):
+        self.kind = kind
+        self.lines = []
+        self.loops_start = loops_start     # loops with a smaller index belong to an outer function
+        self.scopes_start = scopes_start
+        self.escapes = {}                  # (op, id(loop)) -> (status, op, loop)
+        self.returns = False               # whether a return leaves this body
 
 
 class Emitter(object):
-    def __init__(self, fn):
+    def __init__(self, fn, pending=(), checked=False):
         self.fn = fn
+        self.checked = checked                  # exceptions as checked returns, else the legacy longjmp
         self.names = {}
         self.defs = E.defs_of(fn)
-        self.lines = []
         self.count = 0
         self.parts = set()
         self.need = set()
         self.floor = set()
         self.labels = 0
         self.span_names = {}
+        self.pending = frozenset(pending)       # callees with an exception entry point `<sym>__ir`
+        ops = list(I.walk(fn.body))
+        # an exception can leave this function pending: it raises, or calls a function that can
+        # (a try can hand on an exception that nothing in it names, whatever raised it)
+        self.is_pending = checked and any(i.op in ('raise', 'reraise', 'try')
+                                          or (i.op == 'call' and i.attrs.get('callee') in self.pending)
+                                          for i in ops)
+        self.frame = any(i.op == 'try' for i in ops)
+        self.pre = 'fr->' if self.frame else ''
+        self.cx = _Cx('top', 0, 0)
+        self.lines = self.cx.lines
+        self.owner = {}                         # value -> the C function that defines it
+        self.scopes = []                        # cleanup actions of the enclosing handlers
+        self.aux = []                           # outlined try bodies and helpers, written first
+        self.tries = 0
+        self.next_status = 3
+        self.retained = [self.pre + 'v_' + n for n in fn.attrs.get('retain', ())]
         abi = fn.attrs.get('abi') or ['value'] * len(fn.params)
         for p, n, a in zip(fn.params, fn.param_names, abi):
-            self.names[p] = 'v_' + n
+            self.names[p] = self.pre + 'v_' + n
             if a == 'array':
-                self.span_names[p] = ('((int64_t *)v_%s)' % n, 'v_%s_len' % n)
+                self.span_names[p] = ('((int64_t *)%sv_%s)' % (self.pre, n), '%sv_%s_len' % (self.pre, n))
             elif a == 'flist':
-                self.span_names[p] = ('v_%s.p' % n, 'v_%s.n' % n)
+                self.span_names[p] = ('%sv_%s.p' % (self.pre, n), '%sv_%s.n' % (self.pre, n))
 
     # ------------------------------------------------------------------ naming
     def fresh(self, v):
         self.count += 1
         self.names[v] = 'ir%d' % self.count
+        self.owner[v] = self.cx
         return self.names[v]
 
     def const_of(self, v):
@@ -133,32 +190,155 @@ class Emitter(object):
                 return '1' if value else '0'
             return c_int(value)
         try:
-            return self.names[v]
+            name = self.names[v]
         except KeyError:
             raise I.IRError('value used before it was emitted: %r' % (v,))
+        if self.owner.get(v, self.cx) is not self.cx:
+            raise I.IRError('value %s is used in a try body but defined outside it' % name)
+        return name
 
     def line(self, depth, text):
-        self.lines.append('    ' * depth + text)
+        self.cx.lines.append('    ' * depth + text)
 
     def use(self, *helpers):
         self.need.update(helpers)
         self.need.add('ail_die')
 
     # ------------------------------------------------------------------ function
-    def emit(self):
+    def frame_struct(self):
+        """The frame of a function with a `try`: its parameters, its places and the value of an early
+        `return` from a try body, in memory, so the outlined bodies share them."""
         fn = self.fn
-        sig = signature(fn)
+        fields = []
+        abi = fn.attrs.get('abi') or ['value'] * len(fn.params)
+        for p, n, a in zip(fn.params, fn.param_names, abi):
+            if a == 'array':
+                fields.append('const int64_t *v_%s; int64_t v_%s_len;' % (n, n))
+            elif a == 'flist':
+                fields.append('ail_flist v_%s;' % n)
+            else:
+                fields.append('%s;' % _decl(ctype(p.type), 'v_' + n))
         params = set(fn.param_names)
         for ins in fn.body.instrs:
             if ins.op == 'local.alloc':
                 name = ins.attrs['name']
-                c = ('l_' if name in params else 'v_') + name
+                fields.append('%s;' % _decl(ctype(ins.result.type.pointee), ('l_' if name in params else 'v_') + name))
+        if fn.results:
+            fields.append('%s;' % _decl(ctype(fn.results[0]), 'ret'))
+        fields.append('char _unused;')
+        return 'struct %s__fr { %s };\n' % (fn.sym, ' '.join(fields))
+
+    def emit(self):
+        fn = self.fn
+        sig = signature(fn)
+        params = set(fn.param_names)
+        sym = fn.sym
+        ir_sig = signature(fn, sym + '__ir', 'static') if self.is_pending else sig
+        abi = fn.attrs.get('abi') or ['value'] * len(fn.params)
+        if self.frame:
+            self.aux.append(self.frame_struct())
+            self.line(1, 'struct %s__fr fr_ = {0};' % sym)
+            self.line(1, 'struct %s__fr *fr = &fr_;' % sym)
+            for n, a in zip(fn.param_names, abi):
+                if a == 'array':
+                    self.line(1, 'fr->v_%s = v_%s; fr->v_%s_len = v_%s_len;' % (n, n, n, n))
+                else:
+                    self.line(1, 'fr->v_%s = v_%s;' % (n, n))
+        for ins in fn.body.instrs:
+            if ins.op == 'local.alloc':
+                name = ins.attrs['name']
+                c = self.pre + ('l_' if name in params else 'v_') + name
                 self.names[ins.result] = c
-                self.line(1, '%s %s = 0;' % (ctype(ins.result.type.pointee), c))
+                if not self.frame:
+                    self.line(1, '%s %s = 0;' % (ctype(ins.result.type.pointee), c))
         if fn.attrs.get('recursive'):
             self.parts.add('RECDEPTH')
+        if self.retained:
+            # a bytearray parameter kept across calls (the legacy path retains it too): released at
+            # every exit, and by the cleanup frame when a longjmp unwinds over this function
+            self.parts.update(('DIE', 'BYTEARRAY'))
+            self.aux.append('static void ail_unwind_%s(void **p) { %s }\n' % (
+                sym, ' '.join('ail_bytearray_release(*(ail_bytearray **)p[%d]);' % k
+                              for k in range(len(self.retained)))))
+            for name in self.retained:
+                self.line(1, 'ail_bytearray_retain(%s);' % name)
+            self.line(1, 'void *v__cargs[] = {%s};' % ', '.join('(void *)(&%s)' % n for n in self.retained))
+            self.line(1, 'ail_cleanup_frame v__cf = {ail_cleanup_top, ail_unwind_%s, v__cargs};' % sym)
+            self.line(1, 'ail_cleanup_top = &v__cf;')
+        if self.is_pending or self.frame:
+            self.parts.add('IREXC')
         self.region(fn.body, 1, None)
-        return sig, '%s {\n%s\n}\n' % (sig, '\n'.join(self.lines))
+        text = '%s {\n%s\n}\n' % (ir_sig, '\n'.join(self.cx.lines))
+        out = ''.join(self.aux) + text
+        if self.is_pending:
+            call = '%s__ir(%s)' % (sym, _args_of(fn))
+            if fn.results:
+                body = ('    %s r = %s;\n    if (__builtin_expect(ail_pending, 0)) ail_ir_rethrow();\n'
+                        '    return r;\n' % (ctype(fn.results[0]), call))
+            else:
+                body = '    %s;\n    if (__builtin_expect(ail_pending, 0)) ail_ir_rethrow();\n' % call
+            out += '%s {\n%s}\n' % (sig, body)
+        return sig, out
+
+    # ------------------------------------------------------------------ exits
+    def leaves(self, depth, crossing):
+        """Run the cleanup of every enclosing handler scope of this C function that `crossing`
+        selects, innermost first."""
+        for sc in reversed(self.scopes[self.cx.scopes_start:]):
+            if crossing(sc):
+                self.line(depth, sc['leave'])
+
+    def epilogue(self, depth):
+        if self.retained:
+            self.line(depth, 'ail_cleanup_top = v__cf.previous;')
+            for name in self.retained:
+                self.line(depth, 'ail_bytearray_release(%s);' % name)
+
+    def exit_return(self, depth, value, in_frame=False):
+        self.leaves(depth, lambda sc: True)
+        if self.cx.kind == 'top':
+            self.epilogue(depth)
+            if in_frame:
+                value = 'fr->ret' if self.fn.results else None
+            self.line(depth, 'return %s;' % value if value is not None else 'return;')
+        else:
+            if value is not None and not in_frame:
+                self.line(depth, 'fr->ret = %s;' % value)
+            self.cx.returns = True
+            self.line(depth, 'return %d;' % AIL_IR_RET)
+
+    def exit_exc(self, depth):
+        """Leave the current construct with an exception pending (it has been set up already)."""
+        self.leaves(depth, lambda sc: True)
+        if not self.checked:
+            # the legacy way out: re-raise what is in flight (unwind frames, longjmp to the
+            # innermost handler: this function's own try shim, or a legacy one)
+            self.line(depth, 'ail_raise_current();')
+            self.line(depth, '__builtin_unreachable();')
+        elif self.cx.kind == 'top':
+            if self.fn.attrs.get('recursive'):
+                self.line(depth, 'ail_depth--;')
+            self.epilogue(depth)
+            self.line(depth, 'return %s;' % _zero(self.fn.results[0]) if self.fn.results else 'return;')
+        else:
+            self.line(depth, 'return %d;' % AIL_IR_EXC)
+
+    def escape(self, depth, op, loop):
+        """break/continue to a loop outside this try body: leave the body with a status that the
+        code after the try turns back into the break/continue."""
+        key = (op, id(loop))
+        if key not in self.cx.escapes:
+            self.cx.escapes[key] = (self.next_status, op, loop)
+            self.next_status += 1
+        self.leaves(depth, lambda sc: True)
+        self.line(depth, 'return %d;' % self.cx.escapes[key][0])
+
+    def pending_check(self, depth):
+        if os.environ.get('AIL_IR_NO_PENDING_CHECK'):
+            return
+        self.line(depth, 'if (__builtin_expect(ail_pending, 0)) {')
+        self.exit_exc(depth + 1)
+        self.line(depth, '}')
 
     def region(self, region, depth, owner):
         """`owner` is the instruction whose region this is (None for the function body)."""
@@ -330,10 +510,21 @@ class Emitter(object):
                     parts.append('%s, %s_len' % (text, text))
                 else:
                     parts.append(text)
-            text = '%s(%s)' % (ins.attrs['callee'], ', '.join(parts))
+            callee = ins.attrs['callee']
+            # a callee with an exception entry point is called through it and its result checked;
+            # any other (legacy, or an IR function that cannot raise) by its own name -- if that is
+            # the wrapper of an IR function compiled later, a raise comes back as a legacy raise
+            checked = callee in self.pending or (callee == self.fn.sym and self.is_pending)
+            if checked:
+                self.parts.add('IREXC')
+            text = '%s%s(%s)' % (callee, '__ir' if checked else '', ', '.join(parts))
             if ins.results:
-                return self.assign_new(depth, ins.result, text)
-            return self.line(depth, text + ';')
+                self.assign_new(depth, ins.result, text)
+            else:
+                self.line(depth, text + ';')
+            if checked:
+                self.pending_check(depth)
+            return
         if op == 'rt':
             callee = ins.attrs['callee']
             if callee == 'ail_depth_enter':
@@ -353,18 +544,25 @@ class Emitter(object):
             for r, v in zip(owner.results, o):
                 self.line(depth, '%s = %s;' % (self.names[r], v))
             return
-        if op == 'break':
+        if op in ('break', 'continue'):
             loop = self.loops[-1]
-            if loop.op == 'for.range':
-                # a for.range's results are its carried variables: a break stores its values there
-                args = loop.regions[0].args[1:]
-                self.parallel_assign(depth, [self.names[a] for a in args], o, [a.type for a in args])
+            index = len(self.loops) - 1
+            if index < self.cx.loops_start:
+                # the loop belongs to the function around this try body
+                carried = loop.regions[0].args[1:] if loop.op == 'for.range' else loop.regions[0].args
+                if o or (op == 'continue' and carried) or (op == 'break' and loop.results and loop.op != 'for.range'):
+                    raise I.IRError('%s with values out of a try body' % op)
+                return self.escape(depth, op, loop)
+            self.leaves(depth, lambda sc: sc['nloops'] > index)
+            if op == 'break':
+                if loop.op == 'for.range':
+                    # a for.range's results are its carried variables: a break stores its values there
+                    args = loop.regions[0].args[1:]
+                    self.parallel_assign(depth, [self.names[a] for a in args], o, [a.type for a in args])
+                    return self.line(depth, 'break;')
+                for r, v in zip(loop.results, o):
+                    self.line(depth, '%s = %s;' % (self.names[r], v))
                 return self.line(depth, 'break;')
-            for r, v in zip(loop.results, o):
-                self.line(depth, '%s = %s;' % (self.names[r], v))
-            return self.line(depth, 'break;')
-        if op == 'continue':
-            loop = self.loops[-1]
             args = loop.regions[0].args[1:] if loop.op == 'for.range' else loop.regions[0].args
             self.parallel_assign(depth, [self.names[a] for a in args], o, [a.type for a in args])
             keep = os.environ.get('AIL_IR_TRAILING_CONTINUE', 'loop,for.range')
@@ -373,10 +571,152 @@ class Emitter(object):
                                 # `continue;` changes GCC's block layout: +1 jump per iteration)
             return self.line(depth, 'continue;')
         if op == 'return':
-            return self.line(depth, 'return %s;' % o[0] if o else 'return;')
+            if not self.scopes and self.cx.kind == 'top' and not self.retained:
+                return self.line(depth, 'return %s;' % o[0] if o else 'return;')
+            return self.exit_return(depth, o[0] if o else None)
+        if op == 'raise':
+            return self.raise_op(ins, depth)
+        if op == 'reraise':
+            self.parts.add('IREXC')
+            if not self.checked:
+                self.line(depth, 'ail_reraise();')
+                return self.line(depth, '__builtin_unreachable();')
+            self.line(depth, 'ail_ir_reraise();')
+            return self.exit_exc(depth)
+        if op == 'try':
+            return self.emit_try(ins, depth)
         if op == 'unreachable':
             return self.line(depth, '__builtin_unreachable();')
         raise I.IRError('no C for op %s' % op)
+
+    # ------------------------------------------------------------------ exceptions (S2)
+    def raise_op(self, ins, depth):
+        code, form = ins.attrs['code'], ins.attrs['form']
+        self.parts.add('IREXC')
+        self.exception_parts([code])
+        if form == 'msg':
+            body, n, ascii_ = _c_literal(ins.attrs['msg'])
+            new = 'ail_exception_new(%d, (const uint8_t *)(%s), %d, %d)' % (code, body, n, ascii_)
+        else:
+            new = 'ail_exception_new(%d, NULL, 0, 0)' % code
+        if not self.checked:
+            # exactly what the legacy path writes: the raise takes over the new exception and
+            # longjmps (or ends the program when no handler is open)
+            if form == 'name':
+                self.line(depth, 'ail_raise_named(%d);' % code)
+            else:
+                self.line(depth, 'ail_raise_value_adopt(%s);' % new)
+            return self.line(depth, '__builtin_unreachable();')
+        if form == 'name':
+            self.line(depth, 'ail_ir_raise_named(%d);' % code)
+        elif form == 'new':
+            self.line(depth, 'ail_ir_raise_new(%d, NULL, 0, 0);' % code)
+        else:
+            body, n, ascii_ = _c_literal(ins.attrs['msg'])
+            self.line(depth, 'ail_ir_raise_new(%d, (const uint8_t *)(%s), %d, %d);' % (code, body, n, ascii_))
+        self.exit_exc(depth)
+
+    def exception_parts(self, codes):
+        # AssertionError (9) and OverflowError (10) exist in the DIE block only when asked for
+        if any(c >= 9 for c in codes):
+            self.parts.add('ASSERTEXC')
+        if 10 in codes:
+            self.parts.update(('ASSERTEXC', 'OVERFLOWEXC'))
+
+    def exit_to(self, depth, op, loop):
+        """Carry out a break/continue (of a loop outside the try body that returned it)."""
+        index = next(k for k, l in enumerate(self.loops) if l is loop)
+        if index < self.cx.loops_start:
+            return self.escape(depth, op, loop)
+        self.leaves(depth, lambda sc: sc['nloops'] > index)
+        self.line(depth, 'break;' if op == 'break' else 'continue;')
+
+    def dispatch_exits(self, depth, st, body):
+        """After a try body that did not run to its end nor raise: its early exits."""
+        if body.returns:
+            self.line(depth, 'if (%s == %d) {' % (st, AIL_IR_RET))
+            self.exit_return(depth + 1, None, in_frame=True)
+            self.line(depth, '}')
+        for code, op, loop in sorted(body.escapes.values(), key=lambda e: e[0]):
+            self.line(depth, 'if (%s == %d) {' % (st, code))
+            self.exit_to(depth + 1, op, loop)
+            self.line(depth, '}')
+
+    def emit_try(self, ins, depth):
+        """A `try` is a call of its outlined body under `ail_ir_try` (the one setjmp, in the
+        runtime), then ordinary C: the handlers (catch) or the finally body and the exit the body
+        asked for (finally). An exception that no handler takes leaves this function pending."""
+        self.parts.add('IREXC')
+        kind = ins.attrs['kind']
+        sym = self.fn.sym
+        self.tries += 1
+        n = self.tries
+        fname = '%s__try%d' % (sym, n)
+        parent = self.cx
+        body = _Cx('body', len(self.loops), len(self.scopes))
+        self.cx = body
+        try:
+            self.region(ins.regions[0], 1, ins)
+        finally:
+            self.cx = parent
+        self.aux.append('\n'.join(
+            ['static int %s(void *frv) {' % fname,
+             '    struct %s__fr *fr = (struct %s__fr *)frv;' % (sym, sym)]
+            + body.lines + ['    return 0;', '}', '']))
+        st = 'st%d' % n
+        self.line(depth, 'int %s = ail_ir_try(%s, fr);' % (st, fname))
+        if kind == 'catch':
+            self.exception_parts([c for cs in ins.attrs['codes'] for c in cs])
+            self.line(depth, 'if (%s == AIL_IR_EXC) {' % st)
+            self.line(depth + 1, 'int code%d = ail_exc_code;' % n)
+            for k, (codes, region) in enumerate(zip(ins.attrs['codes'], ins.regions[1:])):
+                wanted = []
+                for c in codes:
+                    wanted.append(c)
+                    if c == 1:
+                        wanted.append(8)           # a ValueError handler also takes UnicodeDecodeError
+                cond = ' || '.join('code%d == %d' % (n, c) for c in wanted)
+                self.line(depth + 1, '%s (%s) {' % ('if' if k == 0 else '} else if', cond))
+                hs = 'hs%d_%d' % (n, k)
+                if self.checked:
+                    self.line(depth + 2, 'ail_pending = 0;')
+                self.line(depth + 2, 'ail_handled_scope %s; ail_handled_enter(&%s, code%d);' % (hs, hs, n))
+                self.scopes.append({'leave': 'ail_handled_leave(&%s);' % hs, 'nloops': len(self.loops)})
+                try:
+                    self.region(region, depth + 2, ins)
+                finally:
+                    self.scopes.pop()
+                if region.instrs[-1].op == 'yield':
+                    self.line(depth + 2, 'ail_handled_leave(&%s);' % hs)
+            self.line(depth + 1, '} else {')
+            self.exit_exc(depth + 2)               # no handler names it: it stays pending
+            self.line(depth + 1, '}')
+            self.line(depth, '} else if (%s != 0) {' % st)
+            self.dispatch_exits(depth + 1, st, body)
+            self.line(depth, '}')
+            return
+        ex, hs = 'ex%d' % n, 'hs%d' % n
+        self.line(depth, 'ail_exception *%s = NULL; ail_handled_scope %s; %s.resources[0] = NULL;' % (ex, hs, hs))
+        self.line(depth, 'if (%s == AIL_IR_EXC) { %s = ail_ir_take(); ail_handled_enter(&%s, %s->code); }'
+                  % (st, ex, hs, ex))
+        self.scopes.append({'leave': 'ail_exception_release(%s);' % ex, 'nloops': len(self.loops)})
+        self.scopes.append({'leave': 'ail_handled_leave(&%s);' % hs, 'nloops': len(self.loops)})
+        try:
+            self.region(ins.regions[1], depth, ins)
+        finally:
+            self.scopes.pop()
+            self.scopes.pop()
+        self.line(depth, 'ail_handled_leave(&%s);' % hs)
+        self.line(depth, 'if (%s) {' % ex)
+        if self.checked:
+            self.line(depth + 1, 'ail_ir_raise_value(%s);' % ex)
+            self.exit_exc(depth + 1)
+        else:
+            self.line(depth + 1, 'ail_raise_value_adopt(%s);' % ex)
+            self.line(depth + 1, '__builtin_unreachable();')
+        self.line(depth, '} else if (%s != 0) {' % st)
+        self.dispatch_exits(depth + 1, st, body)
+        self.line(depth, '}')
 
     def list_op(self, ins, depth, o):
         """Numeric list fields reached through a struct borrow, with the legacy path's own
@@ -501,8 +841,11 @@ class Emitter(object):
                         yield x
 
 
-def emit_function(fn):
-    """(signature text, function definition text, runtime needs {'parts','need','floor'})."""
-    em = Emitter(fn)
+def emit_function(fn, pending=(), checked=False):
+    """(signature text, function definition text, runtime needs {'parts','need','floor',
+    'pending'}). `pending` lists the callees that have an exception entry point; the result's
+    `pending` says whether this function has one too (then its text defines `<sym>__ir` and, under
+    the function's own name, the wrapper legacy callers use)."""
+    em = Emitter(fn, pending, checked)
     sig, text = em.emit()
-    return sig, text, {'parts': em.parts, 'need': em.need, 'floor': em.floor}
+    return sig, text, {'parts': em.parts, 'need': em.need, 'floor': em.floor, 'pending': em.is_pending}
