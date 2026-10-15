@@ -13,6 +13,7 @@ The emitter reports the runtime pieces it used (`parts`, `need`, `floor`) so the
 merge them into the program's runtime selection.
 """
 import math
+import os
 
 from . import ir as I
 from . import effects as E
@@ -23,7 +24,22 @@ def ctype(t):
         return 'int64_t'
     if t == I.F64:
         return 'double'
-    raise I.IRError('no S0 C type for %s' % t)
+    if t == BYTES:
+        return 'ail_bytes'
+    if t.head == 'obj':
+        inner = t.args[0]
+        if inner.head == 'class':
+            return 'ail_obj_%s *' % inner.name
+        if inner.head == 'bytearray':
+            return 'ail_bytearray *'
+        if inner.head == 'list' and inner.args[0] == I.I64:
+            return 'ail_list *'
+        if inner.head == 'list' and inner.args[0] == I.F64:
+            return 'ail_flist *'
+    raise I.IRError('no C type for %s' % t)
+
+
+BYTES = I.T('bytes')
 
 
 def c_int(value):
@@ -52,12 +68,25 @@ _PLAIN = {'add': '+', 'sub': '-', 'mul': '*', 'and': '&', 'or': '|', 'xor': '^',
           'fadd': '+', 'fsub': '-', 'fmul': '*'}
 
 
+def _decl(ct, name):
+    return ct + name if ct.endswith('*') else '%s %s' % (ct, name)
+
+
 def signature(fn):
     results = fn.results
     if len(results) > 1:
         raise I.IRError('S0 functions return at most one value')
     ret = ctype(results[0]) if results else 'void'
-    params = ', '.join('%s v_%s' % (ctype(p.type), n) for p, n in zip(fn.params, fn.param_names))
+    abi = fn.attrs.get('abi') or ['value'] * len(fn.params)
+    decls = []
+    for p, n, a in zip(fn.params, fn.param_names, abi):
+        if a == 'array':
+            decls.append('const int64_t *v_%s, int64_t v_%s_len' % (n, n))
+        elif a == 'flist':
+            decls.append('ail_flist v_%s' % n)
+        else:
+            decls.append(_decl(ctype(p.type), 'v_' + n))
+    params = ', '.join(decls)
     prefix = LINKAGE_PREFIX.get(fn.attrs.get('linkage', 'extern'))
     if prefix is None:
         raise I.IRError('unknown linkage %r' % fn.attrs.get('linkage'))
@@ -75,8 +104,14 @@ class Emitter(object):
         self.need = set()
         self.floor = set()
         self.labels = 0
-        for p, n in zip(fn.params, fn.param_names):
+        self.span_names = {}
+        abi = fn.attrs.get('abi') or ['value'] * len(fn.params)
+        for p, n, a in zip(fn.params, fn.param_names, abi):
             self.names[p] = 'v_' + n
+            if a == 'array':
+                self.span_names[p] = ('((int64_t *)v_%s)' % n, 'v_%s_len' % n)
+            elif a == 'flist':
+                self.span_names[p] = ('v_%s.p' % n, 'v_%s.n' % n)
 
     # ------------------------------------------------------------------ naming
     def fresh(self, v):
@@ -131,7 +166,7 @@ class Emitter(object):
             self.instr(ins, depth, owner)
 
     def assign_new(self, depth, v, expr):
-        self.line(depth, '%s %s = %s;' % (ctype(v.type), self.fresh(v), expr))
+        self.line(depth, '%s = %s;' % (_decl(ctype(v.type), self.fresh(v)), expr))
 
     # ------------------------------------------------------------------ instructions
     def instr(self, ins, depth, owner):
@@ -144,6 +179,9 @@ class Emitter(object):
                 helper = _CK_HELPER[op]
                 self.use(helper)
                 return self.assign_new(depth, ins.result, '%s(%s, %s)' % (helper, o[0], o[1]))
+            if ins.attrs.get('mode') == 'wrap':
+                return self.assign_new(depth, ins.result, '((int64_t)((uint64_t)(%s) %s (uint64_t)(%s)))'
+                                       % (o[0], _PLAIN[op], o[1]))
             return self.assign_new(depth, ins.result, '((%s) %s (%s))' % (o[0], _PLAIN[op], o[1]))
         if op in ('and', 'or', 'xor', 'fadd', 'fsub', 'fmul'):
             return self.assign_new(depth, ins.result, '(%s %s %s)' % (o[0], _PLAIN[op], o[1]))
@@ -164,6 +202,10 @@ class Emitter(object):
                 if op == 'floordiv':
                     return self.assign_new(depth, ins.result, '((%s) >> %d)' % (o[0], d.bit_length() - 1))
                 return self.assign_new(depth, ins.result, '((%s) & %dLL)' % (o[0], d - 1))
+            if ins.attrs.get('mode') == 'nonneg':
+                # the range pass proved the dividend >= 0 and the divisor is a positive constant:
+                # C's truncating / and % equal Python's flooring ones there
+                return self.assign_new(depth, ins.result, '((%s) %s %s)' % (o[0], '/' if op == 'floordiv' else '%', o[1]))
             helper = 'pydiv' if op == 'floordiv' else 'pymod'
             self.floor.add(helper)
             return self.assign_new(depth, ins.result, '%s(%s, %s)' % (helper, o[0], o[1]))
@@ -209,8 +251,86 @@ class Emitter(object):
             return self.assign_new(depth, ins.result, o[0])
         if op == 'store':
             return self.line(depth, '%s = %s;' % (o[0], o[1]))
+        if op == 'bytes.len':
+            return self.assign_new(depth, ins.result, '(%s).n' % o[0])
+        if op == 'bytes.get':
+            self.parts.add('BYTES')
+            if ins.attrs.get('mode') == 'nck':
+                return self.assign_new(depth, ins.result, '((int64_t)(%s).p[%s])' % (o[0], o[1]))
+            return self.assign_new(depth, ins.result, 'ail_bytes_get(%s, %s)' % (o[0], o[1]))
+        if op == 'field.get':
+            return self.assign_new(depth, ins.result, '(%s)->f_%s' % (o[0], ins.attrs['name']))
+        if op == 'field.set':
+            return self.line(depth, '(%s)->f_%s = %s;' % (o[0], ins.attrs['name'], o[1]))
+        if op == 'field.list':
+            return self.assign_new(depth, ins.result, '(&(%s)->f_%s)' % (o[0], ins.attrs['name']))
+        if op == 'span.of' and ins.result.type == I.T('span', I.T('u8')):
+            name = self.fresh(ins.result)
+            self.parts.add('BYTEARRAY')
+            self.line(depth, 'ail_bytearray_meta(%s); unsigned char *%s_p = (%s)->p; int64_t %s_n = (%s)->n;'
+                      % (o[0], name, o[0], name, o[0]))
+            self.span_names[ins.result] = (name + '_p', name + '_n', o[0])
+            return
+        if op in ('ba.len', 'ba.get', 'ba.set', 'ba.push'):
+            self.parts.add('BYTEARRAY')
+            B = o[0]
+            if op == 'ba.len':
+                return self.assign_new(depth, ins.result, 'ail_bytearray_len(%s)' % B)
+            if op == 'ba.get':
+                if ins.attrs.get('mode') == 'nck':
+                    return self.assign_new(depth, ins.result, '((int64_t)(%s)->p[%s])' % (B, o[1]))
+                return self.assign_new(depth, ins.result, 'ail_bytearray_get(%s, %s)' % (B, o[1]))
+            if op == 'ba.set':
+                if ins.attrs.get('mode') == 'nck':
+                    return self.line(depth, '(%s)->p[%s] = (unsigned char)(%s);' % (B, o[1], o[2]))
+                return self.line(depth, 'ail_bytearray_set(%s, %s, %s);' % (B, o[1], o[2]))
+            return self.line(depth, 'ail_bytearray_append(%s, %s);' % (B, o[1]))
+        if op in ('span.get', 'span.set') and ins.operands[0].type == I.T('span', I.T('u8')):
+            sp, sn, B = self.span_names[ins.operands[0]]
+            if op == 'span.get':
+                if ins.attrs.get('mode') == 'nck':
+                    return self.assign_new(depth, ins.result, '((int64_t)%s[%s])' % (sp, o[1]))
+                return self.assign_new(depth, ins.result, '((uint64_t)(%s) < (uint64_t)%s ? (int64_t)%s[%s] : '
+                                       'ail__bytearray_get_slow(%s, %s))' % (o[1], sn, sp, o[1], B, o[1]))
+            if ins.attrs.get('mode') == 'nck':
+                return self.line(depth, '%s[%s] = (unsigned char)(%s);' % (sp, o[1], o[2]))
+            return self.line(depth, 'if ((uint64_t)(%s) < (uint64_t)%s && (uint64_t)(%s) <= 255) %s[%s] = '
+                                    '(unsigned char)(%s); else ail__bytearray_set_slow(%s, %s, %s);'
+                             % (o[1], sn, o[2], sp, o[1], o[2], B, o[1], o[2]))
+        if op == 'span.of':
+            elem = ins.result.type.args[0]
+            name = self.fresh(ins.result)
+            ct = 'double' if elem == I.F64 else 'int64_t'
+            self.parts.add('NUMVIEW')
+            self.line(depth, '%s *%s_p = (%s)->p; int64_t %s_n = %s_p ? (%s)->n : 0;'
+                      % (ct, name, o[0], name, name, o[0]))
+            self.span_names[ins.result] = (name + '_p', name + '_n')
+            return
+        if op == 'span.len':
+            return self.assign_new(depth, ins.result, self.span_names[ins.operands[0]][1])
+        if op in ('span.get', 'span.set'):
+            elem = ins.operands[0].type.args[0]
+            f = 'flist' if elem == I.F64 else 'list'
+            self.parts.add('NUMVIEW')
+            sp, sn = self.span_names[ins.operands[0]][:2]
+            if op == 'span.get':
+                if ins.attrs.get('mode') == 'nck':
+                    return self.assign_new(depth, ins.result, '%s[%s]' % (sp, o[1]))
+                return self.assign_new(depth, ins.result, 'ail_%s_view_get(%s, %s, %s)' % (f, sp, sn, o[1]))
+            if ins.attrs.get('mode') == 'nck':
+                return self.line(depth, '%s[%s] = %s;' % (sp, o[1], o[2]))
+            return self.line(depth, 'ail_%s_view_set(%s, %s, %s, %s);' % (f, sp, sn, o[1], o[2]))
+        if op in ('list.len', 'list.get', 'list.set', 'list.push', 'list.pop', 'list.clear'):
+            return self.list_op(ins, depth, o)
         if op == 'call':
-            text = '%s(%s)' % (ins.attrs['callee'], ', '.join(o))
+            abi = ins.attrs.get('abi') or ['value'] * len(o)
+            parts = []
+            for v, text, a in zip(ins.operands, o, abi):
+                if a == 'array':
+                    parts.append('%s, %s_len' % (text, text))
+                else:
+                    parts.append(text)
+            text = '%s(%s)' % (ins.attrs['callee'], ', '.join(parts))
             if ins.results:
                 return self.assign_new(depth, ins.result, text)
             return self.line(depth, text + ';')
@@ -235,20 +355,58 @@ class Emitter(object):
             return
         if op == 'break':
             loop = self.loops[-1]
+            if loop.op == 'for.range':
+                # a for.range's results are its carried variables: a break stores its values there
+                args = loop.regions[0].args[1:]
+                self.parallel_assign(depth, [self.names[a] for a in args], o, [a.type for a in args])
+                return self.line(depth, 'break;')
             for r, v in zip(loop.results, o):
                 self.line(depth, '%s = %s;' % (self.names[r], v))
-            label = self.exit_labels.get(loop)
-            return self.line(depth, 'goto %s;' % label if label else 'break;')
+            return self.line(depth, 'break;')
         if op == 'continue':
             loop = self.loops[-1]
             args = loop.regions[0].args[1:] if loop.op == 'for.range' else loop.regions[0].args
             self.parallel_assign(depth, [self.names[a] for a in args], o, [a.type for a in args])
+            keep = os.environ.get('AIL_IR_TRAILING_CONTINUE', 'loop,for.range')
+            if owner is loop and loop.regions[0].instrs[-1] is ins and loop.op not in keep.split(','):
+                return          # the end of the C loop body continues anyway (and a trailing
+                                # `continue;` changes GCC's block layout: +1 jump per iteration)
             return self.line(depth, 'continue;')
         if op == 'return':
             return self.line(depth, 'return %s;' % o[0] if o else 'return;')
         if op == 'unreachable':
             return self.line(depth, '__builtin_unreachable();')
         raise I.IRError('no C for op %s' % op)
+
+    def list_op(self, ins, depth, o):
+        """Numeric list fields reached through a struct borrow, with the legacy path's own
+        helpers (same checks, same messages): ail_list_span_* reads, ail_numfield_* writes."""
+        op = ins.op
+        elem = ins.operands[0].type.args[0].args[0]
+        f = 'flist' if elem == I.F64 else 'list'
+        self.parts.update(('NUMFIELD', 'NUMFIELDMUT', 'LIST'))
+        if elem == I.F64:
+            self.parts.add('FLIST')
+        L = o[0]
+        if op == 'list.len':
+            return self.assign_new(depth, ins.result, 'ail_%s_span_len((%s)->p, (%s)->n)' % (f, L, L))
+        if op == 'list.get':
+            if ins.attrs.get('mode') == 'nck':
+                return self.assign_new(depth, ins.result, '((%s)->p[%s])' % (L, o[1]))
+            return self.assign_new(depth, ins.result, 'ail_%s_span_get((%s)->p, (%s)->n, %s)' % (f, L, L, o[1]))
+        if op == 'list.set':
+            if ins.attrs.get('mode') == 'nck':
+                return self.line(depth, '(%s)->p[%s] = %s;' % (L, o[1], o[2]))
+            return self.line(depth, 'ail_numfield_%s_set(%s, %s, %s);' % (f, L, o[1], o[2]))
+        if op == 'list.push':
+            return self.line(depth, 'ail_numfield_%s_append(%s, %s);' % (f, L, o[1]))
+        if op == 'list.pop':
+            if ins.results:
+                return self.assign_new(depth, ins.result, 'ail_numfield_%s_pop(%s, -1LL)' % (f, L))
+            return self.line(depth, '(void)ail_numfield_%s_pop(%s, -1LL);' % (f, L))
+        if op == 'list.clear':
+            return self.line(depth, 'ail_numfield_%s_clear(%s);' % (f, L))
+        raise I.IRError('no C for %s' % op)
 
     loops = ()
     exit_labels = {}
@@ -293,7 +451,8 @@ class Emitter(object):
         self.line(depth, '}')
 
     def enter_loop(self, ins, depth):
-        self.declare_results(ins, depth)
+        if ins.op != 'for.range':
+            self.declare_results(ins, depth)
         self.loops = list(self.loops) + [ins]
 
     def leave_loop(self):
@@ -314,12 +473,6 @@ class Emitter(object):
         self.enter_loop(ins, depth)
         for a, v in zip(body.args[1:], o[3:]):
             self.line(depth, '%s %s = %s;' % (ctype(a.type), self.fresh(a), v))
-        label = None
-        if ins.results:
-            self.labels += 1
-            label = 'ir_exit%d' % self.labels
-            self.exit_labels = dict(self.exit_labels)
-            self.exit_labels[ins] = label
         index = self.fresh(body.args[0])
         if self.const_of(ins.operands[2]) == 1:
             self.line(depth, 'for (int64_t %s = %s; %s < %s; %s += 1) {' % (index, lo, index, hi, index))
@@ -332,11 +485,20 @@ class Emitter(object):
             self.line(depth + 1, 'int64_t %s = ail_range_value(%s, %s, %s);' % (index, lo, step, k))
         self.region(body, depth + 1, ins)
         self.line(depth, '}')
-        if label:
-            for r, a in zip(ins.results, body.args[1:]):
-                self.line(depth, '%s = %s;' % (self.names[r], self.names[a]))
-            self.line(depth, '%s: ;' % label)
+        for r, a in zip(ins.results, body.args[1:]):
+            self.names[r] = self.names[a]       # whether it ran out or broke, the carried variables
         self.leave_loop()
+
+    @staticmethod
+    def _own_exits(region):
+        """break/continue instructions of the loop whose body is `region` (not nested loops')."""
+        for i in region.instrs:
+            if i.op in ('break', 'continue'):
+                yield i
+            if i.op == 'if':
+                for r in i.regions:
+                    for x in Emitter._own_exits(r):
+                        yield x
 
 
 def emit_function(fn):

@@ -24,9 +24,13 @@ Locals are `local.alloc` places (S0 has no mem2reg; the C compiler promotes them
 the legacy path's locals). A parameter that is never assigned stays an SSA value.
 """
 import ast
+import os
 
 from . import ir as I
 from . import effects as E
+
+BYTES = I.T('bytes')
+BYTEARRAY = I.T('obj', I.T('bytearray'))
 
 
 class NotS0(Exception):
@@ -75,12 +79,27 @@ class Lowering(object):
         self.linkage = _linkage(sig)
 
     # ------------------------------------------------------------------ kinds and types
-    def kind_type(self, kind, what):
+    def kind_type(self, kind, what, views=False):
+        """The IR type of a legacy kind. : read-only views (bytes) are allowed -- for
+        parameters and call arguments, which the callee borrows."""
         P = self.P
         if kind == P.INT:
             return I.I64
         if kind == P.FLT:
             return I.F64
+        if views and kind == P.BYTES:
+            return BYTES
+        if views and kind == 'bytearray':
+            return I.T('obj', I.T('bytearray'))
+        if views and kind == 'array':
+            return I.T('span', I.I64)
+        if views and kind == P.FLIST:
+            return I.T('span', I.F64)
+        if views and isinstance(kind, tuple) and len(kind) == 2 and kind[0] == 'obj' \
+                and kind[1] in getattr(self.ctx, 'classes', {}):
+            if kind[1] in (getattr(P, '_NULLABLE', None) or ()):
+                raise NotS0('%s may be None (class %s is optional somewhere)' % (what, kind[1]))
+            return I.T('obj', I.class_type(kind[1]))
         raise NotS0('%s has kind %r' % (what, kind))
 
     def check_kind(self, node, value):
@@ -89,7 +108,10 @@ class Lowering(object):
             kind = self.P._etype(node, self.ctx)
         except Exception as error:
             raise NotS0('no legacy type for %s: %s' % (type(node).__name__, error))
-        want = I.F64 if kind == self.P.FLT else I.I64 if kind == self.P.INT else None
+        try:
+            want = self.kind_type(kind, 'expression', views=True)
+        except NotS0:
+            want = None
         have = I.I64 if value.type == I.I1 else value.type
         if want != have:
             raise NotS0('type disagreement at line %s: legacy %r, IR %s'
@@ -98,6 +120,8 @@ class Lowering(object):
     def proven(self, node):
         """Whether rangecheck.py proved `node`'s int + - * cannot overflow (as the legacy path
         asks it: on the node the check marker would carry)."""
+        if self.proofs is None and os.environ.get('AIL_IR_NO_RANGECHECK'):
+            self.proofs = False           # measure the SSA range pass alone
         if self.proofs is None:
             try:
                 self.proofs = self.P._range_proofs(self.ctx)
@@ -140,10 +164,25 @@ class Lowering(object):
             raise NotS0('builder locals')
         ret_kind = ctx.ret
         results = [] if ret_kind == P.NORET else [self.kind_type(ret_kind, 'the result')]
-        param_types = [self.kind_type(k, 'parameter %r' % n) for n, k in ctx.params]
+        param_types = [self.kind_type(k, 'parameter %r' % n, views=True) for n, k in ctx.params]
         param_names = [n for n, _ in ctx.params]
         if param_names != [p.arg for p in a.args]:
             raise NotS0('parameter list differs from the source')
+        if BYTEARRAY in param_types and any(
+                isinstance(c, ast.Call) and isinstance(c.func, ast.Name) and c.func.id in ctx.funcs
+                for c in ast.walk(fn)):
+            raise NotS0('a bytearray parameter in a function that calls user functions')
+        abi = []
+        for (n, k), t in zip(ctx.params, param_types):
+            if k == 'array':
+                for special in ('tstride', 'rowparam', 'gridparam', 'byterow', 'nlist', 'blist', 'trowsf'):
+                    if n in (getattr(ctx, special, None) or ()):
+                        raise NotS0('parameter %r is a %s array' % (n, special))
+                abi.append('array')
+            elif k == P.FLIST:
+                abi.append('flist')
+            else:
+                abi.append('value')
         for node in ast.walk(fn):
             if isinstance(node, (ast.NamedExpr, ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef,
                                  ast.ClassDef, ast.Global, ast.Nonlocal, ast.ListComp, ast.SetComp,
@@ -153,6 +192,8 @@ class Lowering(object):
                 raise NotS0('%s in the body' % type(node).__name__)
         params = [I.Value(t, hint=n) for n, t in zip(param_names, param_types)]
         attrs = {'sym': self.cname, 'linkage': self.linkage}
+        if any(x != 'value' for x in abi):
+            attrs['abi'] = abi
         if self.recursive:
             attrs['recursive'] = True
         f = I.Function(fn.name, params, param_names, results, I.Region(), attrs)
@@ -166,6 +207,8 @@ class Lowering(object):
         for name in sorted(assigned, key=lambda n: (n not in param_names, n)):
             if name in param_names:
                 t = value_type = params[param_names.index(name)].type
+                if not t.is_scalar:
+                    raise NotS0('parameter %r of type %s is reassigned' % (name, t))
             else:
                 kind = ctx.types.get(name)
                 t = value_type = self.kind_type(kind, 'local %r' % name)
@@ -191,6 +234,8 @@ class Lowering(object):
             elif isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign, ast.For)):
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
                 for t in targets:
+                    if isinstance(t, (ast.Attribute, ast.Subscript)) and not isinstance(node, ast.For):
+                        continue          # a field or element store (checked where it is lowered)
                     if not isinstance(t, ast.Name):
                         raise NotS0('assignment to %s' % type(t).__name__)
         modconsts = getattr(self.ctx, 'modconsts', {})
@@ -238,15 +283,22 @@ class Lowering(object):
 
     def stmt(self, s):
         if isinstance(s, ast.Assign):
-            if len(s.targets) != 1 or not isinstance(s.targets[0], ast.Name):
+            if len(s.targets) != 1:
                 raise NotS0('assignment shape')
-            self.store(s.targets[0].id, self.expr(s.value))
+            target = s.targets[0]
+            if isinstance(target, (ast.Attribute, ast.Subscript)):
+                return self.store_target(target, s.value)
+            if not isinstance(target, ast.Name):
+                raise NotS0('assignment shape')
+            self.store(target.id, self.expr(s.value))
         elif isinstance(s, ast.AnnAssign):
             if not isinstance(s.target, ast.Name):
                 raise NotS0('annotated assignment shape')
             if s.value is not None:
                 self.store(s.target.id, self.expr(s.value))
         elif isinstance(s, ast.AugAssign):
+            if isinstance(s.target, (ast.Attribute, ast.Subscript)):
+                return self.aug_target(s)
             if not isinstance(s.target, ast.Name):
                 raise NotS0('augmented assignment shape')
             fake = ast.BinOp(left=ast.Name(id=s.target.id, ctx=ast.Load()), op=s.op, right=s.value)
@@ -314,6 +366,9 @@ class Lowering(object):
         if s.orelse or getattr(s, 'par', None) is not None:
             raise NotS0('for ... else or a parallel for')
         it = s.iter
+        if isinstance(s.target, ast.Name) and isinstance(it, ast.Name) and it.id in self.params \
+                and self.params[it.id].type == BYTES:
+            return self.for_bytes(s, self.params[it.id])
         if not (isinstance(s.target, ast.Name) and isinstance(it, ast.Call)
                 and isinstance(it.func, ast.Name) and it.func.id == 'range' and not it.keywords
                 and 1 <= len(it.args) <= 3 and self.is_builtin('range')):
@@ -336,6 +391,24 @@ class Lowering(object):
         self.in_region(body, fill=fill)
         self.b.emit('for.range', [lo, hi, step], [], {'args': len(args)}, [body])
 
+    def for_bytes(self, s, base):
+        """`for c in d` over a bytes parameter (immutable: its length is fixed) is
+        `for k in range(len(d)): c = d[k]` with the read proven in range."""
+        if s.target.id in self.params or s.target.id not in self.places:
+            raise NotS0('for target %r' % s.target.id)
+        n = self.b.value('bytes.len', [base], I.I64)
+        lo, step = self.const(I.I64, 0), self.const(I.I64, 1)
+        index = I.Value(I.I64, hint='k')
+        body = I.Region([index])
+
+        def fill():
+            self.store(s.target.id, self.b.value('bytes.get', [base, index], I.I64, {'mode': 'nck'}))
+            self.stmts(s.body)
+            if not self.b.terminated():
+                self.b.emit('continue')
+        self.in_region(body, fill=fill)
+        self.b.emit('for.range', [lo, n, step], [], {'args': 1}, [body])
+
     # ------------------------------------------------------------------ expressions
     def is_builtin(self, name):
         ctx = self.ctx
@@ -345,6 +418,8 @@ class Lowering(object):
 
     def truthy(self, node):
         v = self.expr(node)
+        if not v.type.is_scalar:
+            raise NotS0('truth value of %s' % v.type)
         if v.type == I.I1:
             return v
         zero = self.const(v.type, 0.0 if v.type == I.F64 else 0)
@@ -396,7 +471,186 @@ class Lowering(object):
             if v is None:
                 raise NotS0('a void call used as a value')
             return v
+        if isinstance(node, ast.Subscript):
+            return self.subscript(node)
+        if isinstance(node, ast.Attribute):
+            obj, cls, kind = self.field_of(node)
+            if kind not in (self.P.INT, self.P.FLT):
+                raise NotS0('field %s.%s of kind %r used as a value' % (cls, node.attr, kind))
+            t = I.I64 if kind == self.P.INT else I.F64
+            return self.b.value('field.get', [obj], t, {'cls': cls, 'name': node.attr})
         raise NotS0('expression %s' % type(node).__name__)
+
+    # ------------------------------------------------------------------ objects and containers (S1)
+    def object_param(self, node):
+        """The IR value of `node` when it names a (non-optional) struct parameter, else None."""
+        if isinstance(node, ast.Name) and node.id in self.params:
+            v = self.params[node.id]
+            if v.type.head == 'obj' and v.type.args[0].head == 'class':
+                return v
+        return None
+
+    def field_of(self, node):
+        """(object value, class name, field kind) of `p.f` for a struct parameter `p`."""
+        obj = self.object_param(node.value)
+        if obj is None:
+            raise NotS0('attribute of %s' % type(node.value).__name__)
+        cls = obj.type.args[0].name
+        info = getattr(self.ctx, 'classes', {}).get(cls)
+        if info is None or node.attr not in info.field_types:
+            raise NotS0('unknown field %s.%s' % (cls, node.attr))
+        return obj, cls, info.field_types[node.attr]
+
+    def container(self, node):
+        """The IR value of a container operand: a bytes parameter, or a numeric list field of a
+        struct parameter (a borrow of the field's list)."""
+        if isinstance(node, ast.Name) and node.id in self.params and (
+                self.params[node.id].type in (BYTES, BYTEARRAY) or self.params[node.id].type.head == 'span'):
+            return self.params[node.id]
+        if isinstance(node, ast.Attribute):
+            obj, cls, kind = self.field_of(node)
+            if kind in (self.P.LIST, self.P.FLIST):
+                elem = I.I64 if kind == self.P.LIST else I.F64
+                return self.b.value('field.list', [obj], I.T('obj', I.T('list', elem)),
+                                    {'cls': cls, 'name': node.attr})
+            raise NotS0('field %s.%s of kind %r as a container' % (cls, node.attr, kind))
+        raise NotS0('container operand %s' % (ast.dump(node)[:60],))
+
+    def is_list(self, v):
+        return v.type.head == 'obj' and v.type.args[0].head == 'list'
+
+    def store_target(self, target, value_node):
+        """`p.f = v` (scalar field) or `c[i] = v` (numeric list element). Python evaluates the
+        right side first, then the target's parts."""
+        v = self.expr(value_node)
+        if isinstance(target, ast.Attribute):
+            obj, cls, kind = self.field_of(target)
+            if kind not in (self.P.INT, self.P.FLT):
+                raise NotS0('store to field %s.%s of kind %r' % (cls, target.attr, kind))
+            t = I.I64 if kind == self.P.INT else I.F64
+            self.b.emit('field.set', [obj, self.field_value(v, t)], [], {'cls': cls, 'name': target.attr})
+            return
+        if isinstance(target.slice, ast.Slice):
+            raise NotS0('slice assignment')
+        base = self.container(target.value)
+        if base.type == BYTEARRAY:
+            index = self.as_int(self.expr(target.slice))
+            self.b.emit('ba.set', [base, index, self.field_value(v, I.I64)], [], {'mode': 'ck'})
+            return
+        if not self.is_list(base):
+            raise NotS0('element store into %s' % base.type)
+        index = self.as_int(self.expr(target.slice))
+        elem = base.type.args[0].args[0]
+        self.b.emit('list.set', [base, index, self.field_value(v, elem)], [], {'mode': self.index_mode(target)})
+
+    def field_value(self, v, t):
+        if v.type == I.F64 and t != I.F64:
+            raise NotS0('a float stored into an int slot')
+        return self.coerce(v, t)
+
+    def aug_target(self, s):
+        """`p.f op= v` / `c[i] op= v`: the target's parts once, then read, operate, write."""
+        target = s.target
+        if isinstance(target, ast.Attribute):
+            obj, cls, kind = self.field_of(target)
+            if kind not in (self.P.INT, self.P.FLT):
+                raise NotS0('augmented store to field of kind %r' % (kind,))
+            t = I.I64 if kind == self.P.INT else I.F64
+            attrs = {'cls': cls, 'name': target.attr}
+            old = self.b.value('field.get', [obj], t, dict(attrs))
+            new = self.apply_binop(s, old, self.expr(s.value))
+            self.b.emit('field.set', [obj, self.field_value(new, t)], [], attrs)
+            return
+        if isinstance(target.slice, ast.Slice):
+            raise NotS0('slice augmented assignment')
+        base = self.container(target.value)
+        if not self.is_list(base):
+            raise NotS0('element store into %s' % base.type)
+        index = self.as_int(self.expr(target.slice))
+        elem = base.type.args[0].args[0]
+        mode = self.index_mode(target)
+        old = self.b.value('list.get', [base, index], elem, {'mode': mode})
+        new = self.apply_binop(s, old, self.expr(s.value))
+        self.b.emit('list.set', [base, index, self.field_value(new, elem)], [], {'mode': 'nck'})
+
+    def apply_binop(self, s, left, right):
+        """`left <op> right` for an augmented assignment, typed as the legacy path types the
+        equivalent BinOp (on the AugAssign node, as rangecheck.py keys its proofs)."""
+        fake = ast.BinOp(left=s.target, op=s.op, right=s.value)
+        ast.copy_location(fake, s)
+        fake._ail_range_src = s
+        v = self.binop_values(fake, left, right)
+        self.check_kind(fake, v)
+        return v
+
+    def index_mode(self, node):
+        """'nck' when rangecheck.py proved the subscript in range (the legacy path's own proof
+        on the same node), else 'ck'; the range pass may still prove it."""
+        if self.proofs is None:
+            self.proven(node)
+        if self.proofs and self.proofs.ok_index(getattr(node, '_ail_range_src', node)):
+            return 'nck'
+        return 'ck'
+
+    def subscript(self, node):
+        if isinstance(node.slice, ast.Slice):
+            raise NotS0('a slice')
+        base = self.container(node.value)
+        index = self.as_int(self.expr(node.slice))
+        if base.type == BYTES:
+            return self.b.value('bytes.get', [base, index], I.I64, {'mode': self.index_mode(node)})
+        if self.is_list(base):
+            return self.b.value('list.get', [base, index], base.type.args[0].args[0],
+                                {'mode': self.index_mode(node)})
+        if base.type == BYTEARRAY:
+            return self.b.value('ba.get', [base, index], I.I64, {'mode': self.index_mode(node)})
+        if base.type.head == 'span':
+            mode = self.index_mode(node)
+            if base.type == I.T('span', I.I64) and not getattr(self.ctx, 'checked_arrays', False):
+                mode = 'nck'      # the legacy path reads an unchecked array parameter directly
+            return self.b.value('span.get', [base, index], base.type.args[0], {'mode': mode})
+        raise NotS0('subscript of %s' % base.type)
+
+    def length(self, node):
+        base = self.container(node)
+        if base.type == BYTES:
+            return self.b.value('bytes.len', [base], I.I64)
+        if self.is_list(base):
+            return self.b.value('list.len', [base], I.I64)
+        if base.type.head == 'span':
+            return self.b.value('span.len', [base], I.I64)
+        if base.type == BYTEARRAY:
+            return self.b.value('ba.len', [base], I.I64)
+        raise NotS0('len() of %s' % base.type)
+
+    def method_call(self, node, statement):
+        """`c.append(v)`, `c.pop()`, `c.clear()` on a numeric list field."""
+        func = node.func
+        if node.keywords:
+            raise NotS0('keywords to a method')
+        if not isinstance(func.value, (ast.Attribute, ast.Name)):
+            raise NotS0('method call on %s' % type(func.value).__name__)
+        base = self.container(func.value)
+        if base.type == BYTEARRAY and func.attr == 'append' and len(node.args) == 1 and statement:
+            v = self.field_value(self.expr(node.args[0]), I.I64)
+            self.b.emit('ba.push', [base, v])
+            return None
+        if not self.is_list(base):
+            raise NotS0('method of %s' % base.type)
+        elem = base.type.args[0].args[0]
+        name = func.attr
+        if name == 'append' and len(node.args) == 1:
+            if not statement:
+                raise NotS0('append() used as a value')
+            v = self.field_value(self.expr(node.args[0]), elem)
+            self.b.emit('list.push', [base, v])
+            return None
+        if name == 'pop' and not node.args:
+            return self.b.value('list.pop', [base], elem)
+        if name == 'clear' and not node.args and statement:
+            self.b.emit('list.clear', [base])
+            return None
+        raise NotS0('list method %s()' % name)
 
     def unary(self, node):
         op = node.op
@@ -425,9 +679,10 @@ class Lowering(object):
         raise NotS0('unary %s' % type(op).__name__)
 
     def binop(self, node):
+        return self.binop_values(node, self.expr(node.left), self.expr(node.right))
+
+    def binop_values(self, node, left, right):
         op = node.op
-        left = self.expr(node.left)
-        right = self.expr(node.right)
         floating = I.F64 in (left.type, right.type)
         if isinstance(op, ast.Div):
             return self.b.value('fdiv', [self.coerce(left, I.F64), self.coerce(right, I.F64)], I.F64)
@@ -464,6 +719,8 @@ class Lowering(object):
                 ast.GtE: 'ge'}.get(type(op))
         if pred is None:
             raise NotS0('comparison %s' % type(op).__name__)
+        if not (a.type.is_scalar and b.type.is_scalar):
+            raise NotS0('comparison of %s and %s' % (a.type, b.type))
         if I.F64 in (a.type, b.type):
             a, b = self.coerce(a, I.F64), self.coerce(b, I.F64)
         elif I.I64 in (a.type, b.type):
@@ -511,6 +768,8 @@ class Lowering(object):
     # ------------------------------------------------------------------ calls
     def call(self, node, statement=False):
         P, ctx = self.P, self.ctx
+        if isinstance(node.func, ast.Attribute):
+            return self.method_call(node, statement)
         if not isinstance(node.func, ast.Name):
             raise NotS0('call of a non-name')
         f = node.func.id
@@ -540,6 +799,11 @@ class Lowering(object):
             a, b = self.coerce(a, t), self.coerce(b, t)
             c = self.b.value('cmp.lt' if f == 'min' else 'cmp.gt', [a, b], I.I1)
             return self.b.value('select', [c, a, b], t)
+        if f == 'len' and len(args) == 1:
+            return self.length(args[0])
+        if f in ('wrapping_add', 'wrapping_sub', 'wrapping_mul') and len(args) == 2:
+            a, b = self.as_int(self.expr(args[0])), self.as_int(self.expr(args[1]))
+            return self.b.value(f.split('_')[1], [a, b], I.I64, {'mode': 'wrap'})
         if f == 'float' and len(args) == 1:
             return self.coerce(self.expr(args[0]), I.F64)
         if f == 'int' and len(args) == 1:
@@ -567,7 +831,7 @@ class Lowering(object):
                 symbol, params = variant[0], variant[1]
         if len(arg_nodes) != len(params):
             raise NotS0('%s() arity' % f)
-        param_types = [self.kind_type(k, '%s() parameter %r' % (f, n)) for n, k in params]
+        param_types = [self.kind_type(k, '%s() parameter %r' % (f, n), views=True) for n, k in params]
         if ret == P.NORET:
             if not statement:
                 raise NotS0('void %s() used as a value' % f)
@@ -580,9 +844,19 @@ class Lowering(object):
         for i in order:
             values[i] = self.expr(arg_nodes[i])
         args = []
-        for v, t in zip(values, param_types):
+        arg_abi = []
+        own_abi = dict(zip(self.function.params, self.function.attrs.get('abi') or []))
+        for v, t, (pname, pkind) in zip(values, param_types, params):
             if v.type == I.F64 and t != I.F64:
                 raise NotS0('float argument to an int parameter of %s()' % f)
+            if t.head == 'span':
+                want = 'array' if pkind == 'array' else 'flist'
+                if v.type != t or own_abi.get(v) != want:
+                    raise NotS0('list argument to %s() is not a parameter passed through' % f)
+                arg_abi.append(want)
+                args.append(v)
+                continue
+            arg_abi.append('value')
             args.append(self.coerce(v, t))
         sig = I.fn_type(param_types, results)
         known = self.program.callee_type(symbol)
@@ -590,7 +864,10 @@ class Lowering(object):
             raise NotS0('two signatures for %s' % symbol)
         if symbol not in self.program.functions:
             self.program.externs[symbol] = sig
-        ins = self.b.emit('call', args, results, {'callee': symbol})
+        attrs = {'callee': symbol}
+        if any(x != 'value' for x in arg_abi):
+            attrs['abi'] = arg_abi
+        ins = self.b.emit('call', args, results, attrs)
         return ins.results[0] if results else None
 
 

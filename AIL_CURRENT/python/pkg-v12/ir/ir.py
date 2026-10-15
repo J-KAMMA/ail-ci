@@ -20,7 +20,9 @@ TEXT = ('str', 'strv', 'bytes', 'bytesv')
 LEAVES = SCALARS + TEXT + ('exc',)
 # head -> number of type arguments (None: any number)
 HEADS = dict({h: 0 for h in LEAVES}, tup=None, opt=1, obj=1, list=1, dict=2, set=1, bytearray=0,
-             cell=1, fn=2, closure=2, place=1)
+             cell=1, fn=2, closure=2, place=1, span=1)
+# span<T>: a snapshot of a list's data pointer and length, valid while nothing in between can resize
+# the list (made by LICM in front of a loop that cannot; design §3.6)
 # heads that may only appear directly under obj<..>
 OBJ_INNER = ('list', 'dict', 'set', 'bytearray', 'class')
 
@@ -265,8 +267,31 @@ _op('for.range', 3, None, regions=1)
 for _name in ('yield', 'break', 'continue', 'return'):
     _op(_name, 0, None, terminator=True)
 _op('unreachable', 0, 0, terminator=True)
+# S1: read-only bytes views, numeric lists (obj<list<i64|f64>> through a place or a borrow),
+# scalar struct fields. Index ops carry `mode` = 'ck' (bounds-checked, IndexError) or 'nck'
+# (proven in range).
+_op('bytes.len', 1, 1)
+_op('bytes.get', 2, 2)
+_op('list.len', 1, 1)
+_op('list.get', 2, 2)
+_op('list.set', 3, 3)
+_op('list.push', 2, 2)
+_op('list.pop', 1, 1)
+_op('list.clear', 1, 1)
+_op('field.get', 1, 1)
+_op('field.set', 2, 2)
+_op('field.list', 1, 1)
+_op('ba.len', 1, 1)
+_op('ba.get', 2, 2)
+_op('ba.set', 3, 3)
+_op('ba.push', 2, 2)
+_op('span.of', 1, 1)
+_op('span.len', 1, 1)
+_op('span.get', 2, 2)
+_op('span.set', 3, 3)
 
 LOOP_OPS = ('loop', 'for.range')
+INDEX_MODES = ('ck', 'nck')
 
 RESERVED = {}
 for _name in ('field', 'elem', 'slot', 'tupfield', 'env', 'global', 'borrow', 'take', 'copy', 'move',
@@ -275,7 +300,7 @@ for _name in ('field', 'elem', 'slot', 'tupfield', 'env', 'global', 'borrow', 't
     RESERVED[_name] = 'S1'
 for _name in ('try', 'raise', 'exc.new'):
     RESERVED[_name] = 'S2'
-for _name in ('list.new', 'list.lit', 'list.repeat', 'list.len', 'list.push', 'list.pop', 'list.insert',
+for _name in ('list.new', 'list.lit', 'list.repeat', 'list.insert',
               'list.extend', 'list.slice', 'list.sort', 'dict.new', 'set.new', 'dict.get', 'dict.contains',
               'dict.put', 'dict.del', 'dict.upsert', 'dict.items', 'dict.keys', 'dict.values', 'heap.push',
               'heap.pop', 'copy.list', 'copy.dict', 'copy.set', 'box.wrap', 'rc.inc', 'rc.dec', 'is'):

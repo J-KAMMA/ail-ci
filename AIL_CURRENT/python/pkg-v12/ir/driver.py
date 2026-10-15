@@ -19,9 +19,28 @@ import os
 import re
 
 from . import ir as I
-from . import emit_c, lower, text, verify
+from . import emit_c, lower, passes, text, verify
 
 STATS = []
+# Effect summaries of the functions already compiled through the IR in this build, by C symbol: a
+# call to one of them is no longer an unknown effect (whole-program summaries; a function the
+# legacy path compiled, or one compiled later, stays unknown).
+SUMMARIES = {}
+_PROGRAM = [None]        # the program SUMMARIES belong to: its signature table (`ctx.funcs`, one
+                         # object per compiled program), held so its identity cannot be reused
+
+
+def _summaries(ctx):
+    funcs = getattr(ctx, 'funcs', None)
+    if _PROGRAM[0] is not funcs:
+        _PROGRAM[0] = funcs
+        SUMMARIES.clear()
+    return SUMMARIES
+
+
+def facts_for(P, fn, ctx):
+    """Whole-program facts the passes may use for `fn`."""
+    return {'summaries': _summaries(ctx)}
 
 
 def mode():
@@ -29,8 +48,10 @@ def mode():
     return '' if value in ('', '0', 'off', 'no') else value
 
 
-def _record(fn_name, sym, path, reason, ctx):
+def _record(fn_name, sym, path, reason, ctx, stats=None):
     entry = {'fn': fn_name, 'sym': sym, 'path': path, 'reason': reason}
+    if stats:
+        entry['passes'] = stats
     STATS.append(entry)
     target = os.environ.get('AIL_IR_STATS')
     if target:
@@ -78,6 +99,9 @@ def apply(P, args, kwargs, result):
         if not _only_cleanup_before(generated, sig):
             raise lower.NotS0('the legacy path emits helpers around this function')
         verify.check(function, program)
+        checker = (lambda f: verify.check(f, program)) if current == 'verify' else None
+        pass_stats = passes.optimize(function, program, facts_for(P, fn, ctx), checker)
+        verify.check(function, program)
         if current == 'verify':
             printed = text.print_function(function)
             again = text.parse_function(printed)
@@ -101,5 +125,7 @@ def apply(P, args, kwargs, result):
     ctx.floor.update(needs['floor'])
     if ctx.need is not None:
         ctx.need.update(needs['need'])
-    _record(fn.name, cname, 'ir', '', ctx)
+    _record(fn.name, cname, 'ir', '', ctx, pass_stats)
+    if function.effects is not None:
+        _summaries(ctx)[cname] = function.effects
     return sig, body, ctx

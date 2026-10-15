@@ -18,6 +18,9 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+# The C-text assertions below describe the legacy emitter; with AIL_IR set, functions in the IR's
+# subset are emitted by the IR (same behaviour, different text), so only the behaviour is checked.
+LEGACY_C = os.environ.get('AIL_IR', '0').strip().lower() in ('', '0', 'off', 'no')
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -485,7 +488,7 @@ class RangeCheckTests(unittest.TestCase):
         self.assertTrue(sums and all(line.strip().startswith('v_s = ') for line in sums), sums)  # only s
         self.assertIn('ck_add(', kept)                                    # t = t + i is unbounded
         self.assertIn('ck_mul(', kept)                                    # n * n, n unknown
-        self.assertIn('ail_list_get', kept)                               # xs[n], len(xs) unknown
+        self.assertTrue('ail_list_get' in kept or 'ail_list_view_get' in kept)  # xs[n], len(xs) unknown
 
     def test_analysis_rules_directly(self):
         sys.path.insert(0, str(ROOT / 'python' / 'pkg-v12'))
