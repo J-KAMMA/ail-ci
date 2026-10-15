@@ -63,6 +63,7 @@ OVERFLOW = 'OverflowError'
 ZERODIV = 'ZeroDivisionError'
 VALUE = 'ValueError'
 RECURSION = 'RecursionError'
+INDEX = 'IndexError'
 DEPTH = 'Global(rt,ail_depth)'
 
 # Runtime entry points the S0 subset calls through `rt @name`: (param types, result types, effects).
@@ -115,6 +116,44 @@ def instr_effects(ins, fn, program, places=None, defs=None, summaries=None):
     if op in _CHECKED_RAISES:
         mode = ins.attrs.get('mode', 'ck')
         return Effects(raises=_CHECKED_RAISES[op]) if mode == 'ck' else NONE
+    if op in ('bytes.get', 'list.get', 'list.set'):
+        eff = Effects(raises=[INDEX]) if ins.attrs.get('mode', 'ck') == 'ck' else NONE
+        if op == 'list.set':
+            eff = eff | Effects(writes=['Elem(%s)' % _root(ins.operands[0], fn, defs)])
+        elif op == 'list.get':
+            eff = eff | Effects(reads=['Elem(%s)' % _root(ins.operands[0], fn, defs)])
+        return eff
+    if op in ('list.push', 'list.pop', 'list.clear', 'list.len'):
+        root = _root(ins.operands[0], fn, defs)
+        loc = 'Elem(%s)' % root
+        if op == 'list.len':
+            return Effects(reads=[loc])
+        # a resize also writes the list's spine (data pointer and length): what span hoisting and
+        # the range facts about len() depend on
+        return Effects(reads=[loc], writes=[loc, 'Spine(%s)' % root], raises=[INDEX] if op == 'list.pop' else [])
+    if op == 'field.list':
+        return NONE
+    if op in ('ba.len', 'ba.get', 'ba.set', 'ba.push'):
+        loc = 'Elem(%s)' % _root(ins.operands[0], fn, defs)
+        if op == 'ba.len':
+            return Effects(reads=[loc])
+        if op == 'ba.get':
+            return Effects(reads=[loc], raises=[INDEX] if ins.attrs.get('mode', 'ck') == 'ck' else [])
+        if op == 'ba.set':
+            return Effects(writes=[loc], raises=[INDEX, VALUE] if ins.attrs.get('mode', 'ck') == 'ck' else [])
+        return Effects(reads=[loc], writes=[loc, 'Spine(%s)' % _root(ins.operands[0], fn, defs)], raises=[VALUE])
+    if op in ('span.of', 'span.len'):
+        return NONE if op == 'span.len' else Effects(reads=['Elem(%s)' % _root(ins.operands[0], fn, defs)])
+    if op in ('span.get', 'span.set'):
+        d = (defs if defs is not None else defs_of(fn)).get(ins.operands[0])
+        loc = 'Elem(%s)' % (_root(d.operands[0], fn, defs) if d is not None and d.op == 'span.of' else 'Any')
+        eff = Effects(raises=[INDEX]) if ins.attrs.get('mode', 'ck') == 'ck' else NONE
+        if op == 'span.set' and ins.operands[0].type == I.T('span', I.T('u8')) and ins.attrs.get('mode', 'ck') == 'ck':
+            eff = eff | Effects(raises=[VALUE])
+        return eff | (Effects(writes=[loc]) if op == 'span.set' else Effects(reads=[loc]))
+    if op in ('field.get', 'field.set'):
+        loc = 'Field(%s,%s)' % (ins.attrs.get('cls', '?'), ins.attrs.get('name', '?'))
+        return Effects(reads=[loc]) if op == 'field.get' else Effects(writes=[loc])
     if op == 'call':
         sym = ins.attrs.get('callee')
         if summaries is not None and sym in summaries:
@@ -130,6 +169,19 @@ def instr_effects(ins, fn, program, places=None, defs=None, summaries=None):
         step = const_value(ins.operands[2], defs) if defs is not None else None
         return NONE if isinstance(step, int) and step != 0 else Effects(raises=[VALUE])
     return NONE
+
+
+def _root(v, fn, defs=None):
+    """The abstract location of a container value: `Field(C,f)` for a struct field's list,
+    `Param(fn,p)` for a parameter, else `Any`."""
+    for p, n in zip(fn.params, fn.param_names):
+        if p is v:
+            return 'Param(%s,%s)' % (fn.name, n)
+    d = (defs if defs is not None else defs_of(fn)).get(v)
+    if d is not None and d.op == 'field.list':
+        return 'Field(%s,%s)' % (d.attrs.get('cls', '?'), d.attrs.get('name', '?'))
+    return 'Any'
+
 
 
 def defs_of(fn):

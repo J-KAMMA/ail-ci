@@ -58,6 +58,7 @@
   "test_ail_int_dict_set": 34.6,
   "test_ail_integer_codec": 22.2,
   "test_ail_ir_s0": 42.9,
+  "test_ail_ir_s1": 22.5,
   "test_ail_lang_gaps": 285.1,
   "test_ail_libc_names": 9.9,
   "test_ail_list_expression_extend": 26.4,
@@ -169,6 +170,7 @@
   ],
   [
    "test_ail_hot_ops",
+   "test_ail_ir_s1",
    "test_ail_memory_shapes"
   ],
   [

@@ -22,6 +22,10 @@ from . import ir as I
 from . import effects as E
 
 S0_TYPES = frozenset([I.I1, I.I64, I.F64])
+# S1 adds read-only bytes views and numeric lists / struct objects reached through borrows
+S1_TYPES = S0_TYPES | frozenset([I.T('bytes'), I.T('obj', I.T('list', I.I64)),
+                                 I.T('obj', I.T('list', I.F64)), I.T('span', I.I64), I.T('span', I.F64),
+                                 I.T('span', I.T('u8')), I.T('obj', I.T('bytearray'))])
 
 
 class _Checker(object):
@@ -39,11 +43,14 @@ class _Checker(object):
         errs = I.type_errors(t)
         for e in errs:
             self.err(where, e)
-        if errs or self.stage != 'S0':
+        if errs:
             return
         base = t.pointee if t.is_place else t
-        if base not in S0_TYPES:
+        if self.stage == 'S0' and base not in S0_TYPES:
             self.err(where, 'type %s is not in the S0 subset (i1, i64, f64 and places of them)' % t)
+        elif self.stage == 'S1' and base not in S1_TYPES and not (
+                base.head == 'obj' and base.args[0].head == 'class'):
+            self.err(where, 'type %s is not in the S1 subset' % t)
 
     def define(self, v, where):
         if not isinstance(v, I.Value):
@@ -171,7 +178,11 @@ class _Checker(object):
     def op_int_binary(self, ins, scope, stack, where, top):
         if ins.op in ('and', 'or', 'xor'):
             return self._binary(ins, where, (I.I64, I.I1), None)
-        self._mode(ins, where, ('ck',) if ins.op in ('floordiv', 'floormod') else I.ARITH_MODES)
+        self._mode(ins, where, ('ck', 'nonneg') if ins.op in ('floordiv', 'floormod') else I.ARITH_MODES)
+        if ins.attrs.get('mode') == 'nonneg':
+            d = E.const_value(ins.operands[1], E.defs_of(self.fn))
+            self.want(where, isinstance(d, int) and not isinstance(d, bool) and d > 0,
+                      'mode nonneg needs a positive constant divisor')
         self._binary(ins, where, (I.I64,), I.I64)
 
     def op_float_binary(self, ins, scope, stack, where, top):
@@ -254,6 +265,133 @@ class _Checker(object):
         self.want(where, tuple(self.types(ins.operands)) == tuple(params), 'runtime argument mismatch')
         self.want(where, tuple(self.types(ins.results)) == tuple(results), 'runtime result mismatch')
 
+    def _index_mode(self, ins, where):
+        self.want(where, ins.attrs.get('mode') in I.INDEX_MODES,
+                  'index mode must be one of %s' % '/'.join(I.INDEX_MODES))
+
+    def op_bytes_len(self, ins, scope, stack, where, top):
+        self._unary(ins, where, I.T('bytes'), I.I64)
+
+    def op_bytes_get(self, ins, scope, stack, where, top):
+        self._index_mode(ins, where)
+        if self.nresults(ins, where, 1):
+            b, i = ins.operands
+            self.want(where, b.type == I.T('bytes') and i.type == I.I64, 'bytes.get takes (bytes, i64)')
+            self.want(where, ins.result.type == I.I64, 'bytes.get yields i64')
+
+    def _list_elem(self, v):
+        t = v.type
+        if t.head == 'obj' and t.args[0].head == 'list':
+            return t.args[0].args[0]
+        return None
+
+    def op_list_len(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 1):
+            self.want(where, self._list_elem(ins.operands[0]) is not None, 'list.len of a non-list')
+            self.want(where, ins.result.type == I.I64, 'list.len yields i64')
+
+    def op_list_get(self, ins, scope, stack, where, top):
+        self._index_mode(ins, where)
+        if self.nresults(ins, where, 1):
+            elem = self._list_elem(ins.operands[0])
+            self.want(where, elem is not None and ins.operands[1].type == I.I64, 'list.get takes (list, i64)')
+            self.want(where, ins.result.type == elem, 'list.get yields the element type')
+
+    def op_list_set(self, ins, scope, stack, where, top):
+        self._index_mode(ins, where)
+        self.nresults(ins, where, 0)
+        elem = self._list_elem(ins.operands[0])
+        self.want(where, elem is not None and ins.operands[1].type == I.I64
+                  and ins.operands[2].type == elem, 'list.set takes (list, i64, element)')
+
+    def op_list_push(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        elem = self._list_elem(ins.operands[0])
+        self.want(where, elem is not None and ins.operands[1].type == elem, 'list.push takes (list, element)')
+
+    def op_list_pop(self, ins, scope, stack, where, top):
+        elem = self._list_elem(ins.operands[0])
+        self.want(where, elem is not None, 'list.pop of a non-list')
+        if self.nresults(ins, where, 1):
+            self.want(where, ins.result.type == elem, 'list.pop yields the element type')
+
+    def op_list_clear(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        self.want(where, self._list_elem(ins.operands[0]) is not None, 'list.clear of a non-list')
+
+    def op_field_list(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 1):
+            o = ins.operands[0].type
+            self.want(where, o.head == 'obj' and o.args[0].head == 'class', 'field.list of a non-object')
+            self.want(where, self._list_elem(ins.result) is not None, 'field.list yields a list borrow')
+
+    def _span_elem(self, v):
+        """The element type a span op reads or writes (a byte reads as i64)."""
+        if v.type.head != 'span':
+            return None
+        return I.I64 if v.type.args[0] == I.T('u8') else v.type.args[0]
+
+    def _is_ba(self, v):
+        return v.type == I.T('obj', I.T('bytearray'))
+
+    def op_span_of(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 1):
+            src = ins.operands[0]
+            elem = I.T('u8') if self._is_ba(src) else self._list_elem(src)
+            self.want(where, elem is not None and ins.result.type == I.T('span', elem),
+                      'span.of takes a list or bytearray and yields span<element>')
+
+    def op_ba_len(self, ins, scope, stack, where, top):
+        self._unary(ins, where, I.T('obj', I.T('bytearray')), I.I64)
+
+    def op_ba_get(self, ins, scope, stack, where, top):
+        self._index_mode(ins, where)
+        if self.nresults(ins, where, 1):
+            self.want(where, self._is_ba(ins.operands[0]) and ins.operands[1].type == I.I64
+                      and ins.result.type == I.I64, 'ba.get takes (bytearray, i64) and yields i64')
+
+    def op_ba_set(self, ins, scope, stack, where, top):
+        self._index_mode(ins, where)
+        self.nresults(ins, where, 0)
+        self.want(where, self._is_ba(ins.operands[0]) and ins.operands[1].type == I.I64
+                  and ins.operands[2].type == I.I64, 'ba.set takes (bytearray, i64, i64)')
+
+    def op_ba_push(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        self.want(where, self._is_ba(ins.operands[0]) and ins.operands[1].type == I.I64,
+                  'ba.push takes (bytearray, i64)')
+
+    def op_span_len(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 1):
+            self.want(where, self._span_elem(ins.operands[0]) is not None and ins.result.type == I.I64,
+                      'span.len takes a span and yields i64')
+
+    def op_span_get(self, ins, scope, stack, where, top):
+        self._index_mode(ins, where)
+        if self.nresults(ins, where, 1):
+            elem = self._span_elem(ins.operands[0])
+            self.want(where, elem is not None and ins.operands[1].type == I.I64 and ins.result.type == elem,
+                      'span.get takes (span, i64) and yields the element')
+
+    def op_span_set(self, ins, scope, stack, where, top):
+        self._index_mode(ins, where)
+        self.nresults(ins, where, 0)
+        elem = self._span_elem(ins.operands[0])
+        self.want(where, elem is not None and ins.operands[1].type == I.I64 and ins.operands[2].type == elem,
+                  'span.set takes (span, i64, element)')
+
+    def op_field_get(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 1):
+            o = ins.operands[0].type
+            self.want(where, o.head == 'obj' and o.args[0].head == 'class', 'field.get of a non-object')
+            self.want(where, isinstance(ins.attrs.get('name'), str), 'field.get needs a name')
+
+    def op_field_set(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        o = ins.operands[0].type
+        self.want(where, o.head == 'obj' and o.args[0].head == 'class', 'field.set of a non-object')
+        self.want(where, isinstance(ins.attrs.get('name'), str), 'field.set needs a name')
+
     def op_if(self, ins, scope, stack, where, top):
         self.want(where, ins.operands[0].type == I.I1, 'if condition must be i1')
         for r in ins.regions:
@@ -326,19 +464,19 @@ for _pred in I.CMP_PREDICATES:
     setattr(_Checker, 'op_cmp_' + _pred, _Checker.op_cmp)
 
 
-def verify_function(fn, program=None, stage='S0'):
+def verify_function(fn, program=None, stage='S1'):
     """A list of error messages (empty when the function is well formed)."""
     return _Checker(fn, program, stage).run()
 
 
-def verify_program(program, stage='S0'):
+def verify_program(program, stage='S1'):
     errors = []
     for sym in sorted(program.functions):
         errors.extend(verify_function(program.functions[sym], program, stage))
     return errors
 
 
-def check(fn_or_program, program=None, stage='S0'):
+def check(fn_or_program, program=None, stage='S1'):
     """Raise IRError with every message if the function or program is malformed."""
     if isinstance(fn_or_program, I.Program):
         errors = verify_program(fn_or_program, stage)

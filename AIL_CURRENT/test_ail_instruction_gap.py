@@ -13,12 +13,16 @@ built the old way), so a faster path can never answer differently:
   * ShiftByLiteral `x << 2` is one range check, with the same overflow answer as ck_shl;
   * AppendOfCall   `out.append(f(c))` needs no retain/release of `out` around the call.
 """
+import os
 import re
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+# The C-text assertions below describe the legacy emitter; with AIL_IR set, functions in the IR's
+# subset are emitted by the IR (same behaviour, different text), so only the behaviour is checked.
+LEGACY_C = os.environ.get('AIL_IR', '0').strip().lower() in ('', '0', 'off', 'no')
 
 ROOT = Path(__file__).resolve().parent
 
@@ -363,12 +367,13 @@ fn main() {
             expected = [scan(b"hello, world", 0, 12), scan(b"hello, world", 3, 9), scan(b"hello, world", -4, 0),
                         hits, len(b"a\nb\n"), 6, "bytes index error", "bytes negative error", walked, 0, "walk error"]
             self.assertEqual(ran.stdout.split("\n")[:11], [str(x) for x in expected])
-            # an access before the loop's step needs `n <= len`, not `n <= len - 1`
-            self.assertIn('v_n <= ((int64_t)(v_ba)->n) - 0LL', function_body(program, 'walk'))
-            self.assertIn('(v_data).p[', function_body(program, 'scan'))
-            self.assertIn('->refs', function_body(program, 'rolling'))
-            self.assertIn('(v_data).p[', function_body(program, 'keep'))
-            self.assertNotIn('->refs &&', function_body(program, 'alias'))
+            if LEGACY_C:
+                # an access before the loop's step needs `n <= len`, not `n <= len - 1`
+                self.assertIn('v_n <= ((int64_t)(v_ba)->n) - 0LL', function_body(program, 'walk'))
+                self.assertIn('(v_data).p[', function_body(program, 'scan'))
+                self.assertIn('->refs', function_body(program, 'rolling'))
+                self.assertIn('(v_data).p[', function_body(program, 'keep'))
+                self.assertNotIn('->refs &&', function_body(program, 'alias'))
 
     def test_struct_field_lists_and_list_parameters(self):
         source = """
@@ -436,16 +441,17 @@ fn main() {
             self.assertEqual(ran.stdout.split('\n')[:6], [str(x) for x in expected])
             # span-cached field list reads in the guarded copy are raw `_spN[i]`; the checked copy
             # (the `else` branch) keeps the view's bounds check
-            addmul = function_body(program, 'addmul')
-            self.assertEqual(addmul.count('} else {'), 2)
-            for fast in re.findall(r'if \(v__t\d+ >= 0LL[^\n]*\n(.*?)\n        \} else \{', addmul, re.S):
-                self.assertRegex(fast, r'_sp\d\[ v_i\]')
-                self.assertNotIn('ail_list_view_', fast)
-                self.assertNotIn('ail_list_get', fast)
-            self.assertIn('ail_list_view_get(_sp1', addmul)
-            self.assertIn('->f_d.p[', function_body(program, 'prefix'))
-            self.assertNotIn('->f_d.p[', function_body(program, 'grow'))
-            self.assertNotIn('->f_d.p[', function_body(program, 'selfgrow'))
+            if LEGACY_C:
+                addmul = function_body(program, 'addmul')
+                self.assertEqual(addmul.count('} else {'), 2)
+                for fast in re.findall(r'if \(v__t\d+ >= 0LL[^\n]*\n(.*?)\n        \} else \{', addmul, re.S):
+                    self.assertRegex(fast, r'_sp\d\[ v_i\]')
+                    self.assertNotIn('ail_list_view_', fast)
+                    self.assertNotIn('ail_list_get', fast)
+                self.assertIn('ail_list_view_get(_sp1', addmul)
+                self.assertIn('->f_d.p[', function_body(program, 'prefix'))
+                self.assertNotIn('->f_d.p[', function_body(program, 'grow'))
+                self.assertNotIn('->f_d.p[', function_body(program, 'selfgrow'))
 
 
 POOL = """

@@ -147,13 +147,17 @@ class VerifierTests(unittest.TestCase):
         self.assertRejected(GOOD.replace('if %go {', 'if %mv {'), 'if condition must be i1')
 
     def test_reserved_op_names_its_stage(self):
-        self.assertRejected(GOOD.replace('  store %m, %n\n', '  store %m, %n\n  list.push %m, %n\n'),
+        self.assertRejected(GOOD.replace('  store %m, %n\n', '  store %m, %n\n  list.insert %m, %n\n'),
                             'belongs to stage S3')
 
     def test_type_outside_s0(self):
         self.assertRejected(GOOD.replace('%m = local.alloc {name = "m"} : place<i64>',
-                                         '%m = local.alloc {name = "m"} : place<obj<list<i64>>>'),
-                            'not in the S0 subset')
+                                         '%m = local.alloc {name = "m"} : place<obj<set<i64>>>'),
+                            'not in the S1 subset')
+        bad = GOOD.replace('%m = local.alloc {name = "m"} : place<i64>',
+                           '%m = local.alloc {name = "m"} : place<obj<list<i64>>>')
+        self.assertTrue(any('not in the S0 subset' in e
+                            for e in verify.verify_function(parse(bad), None, stage='S0')))
 
     def test_malformed_type(self):
         self.assertRejected(GOOD.replace('%m = local.alloc {name = "m"} : place<i64>',
