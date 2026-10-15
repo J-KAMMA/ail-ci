@@ -267,6 +267,13 @@ _op('for.range', 3, None, regions=1)
 for _name in ('yield', 'break', 'continue', 'return'):
     _op(_name, 0, None, terminator=True)
 _op('unreachable', 0, 0, terminator=True)
+# S2: exceptions. `raise` (attrs: code, name, optional msg; msg and none = `raise E`, msg = ""
+# is `raise E()`) and `reraise` (the exception being handled) end a region like `return`. `try`
+# (attrs: kind = "catch" | "finally") has a body region and then one region per handler (catch;
+# attrs codes lists the exception codes of each) or the finally region (finally); none has results.
+_op('raise', 0, 0, terminator=True)
+_op('reraise', 0, 0, terminator=True)
+_op('try', 0, 0, regions=-1)
 # S1: read-only bytes views, numeric lists (obj<list<i64|f64>> through a place or a borrow),
 # scalar struct fields. Index ops carry `mode` = 'ck' (bounds-checked, IndexError) or 'nck'
 # (proven in range).
@@ -298,7 +305,7 @@ for _name in ('field', 'elem', 'slot', 'tupfield', 'env', 'global', 'borrow', 't
               'drop', 'call.indirect', 'closure.make', 'tup.make', 'tup.get', 'opt.none', 'opt.some',
               'opt.is_some', 'opt.get', 'par.for'):
     RESERVED[_name] = 'S1'
-for _name in ('try', 'raise', 'exc.new'):
+for _name in ('exc.new',):
     RESERVED[_name] = 'S2'
 for _name in ('list.new', 'list.lit', 'list.repeat', 'list.insert',
               'list.extend', 'list.slice', 'list.sort', 'dict.new', 'set.new', 'dict.get', 'dict.contains',

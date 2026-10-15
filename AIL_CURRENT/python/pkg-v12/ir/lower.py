@@ -62,14 +62,24 @@ def _linkage(sig):
 
 
 class Lowering(object):
-    def __init__(self, P, fn, ctx, sig, recursive, cname):
+    def __init__(self, P, fn, ctx, sig, recursive, cname, pending=(), link_units=False):
         """`P` is the legacy compiler module (pyfunc), `ctx` its finished Ctx for this function,
-        `sig` the legacy C signature text (linkage and inlining decisions are kept as they are)."""
+        `sig` the legacy C signature text (linkage and inlining decisions are kept as they are).
+        `pending` lists the C symbols of already compiled IR functions that can return with an
+        exception pending (S2); `link_units` is set when the program is compiled as separate units
+        (an IR function with an exception entry point needs to share a unit with its callers)."""
         self.P = P
         self.fn = fn
         self.ctx = ctx
         self.recursive = recursive
         self.cname = cname
+        self.pending = frozenset(pending)
+        self.link_units = link_units
+        self.handler_depth = 0        # enclosing except handlers (a bare `raise` needs one)
+        self.loop_depth = 0           # enclosing loops
+        self.finally_loops = []       # loop_depth at the entry of each enclosing finally body
+        self.alloc_end = 0            # leading local.alloc instructions of the body
+        self.hidden = 0
         self.strict = ctx.need is not None
         self.b = _Builder()
         self.program = I.Program()
@@ -155,8 +165,8 @@ class Lowering(object):
         a = fn.args
         if a.posonlyargs or a.kwonlyargs or a.vararg or a.kwarg:
             raise NotS0('parameter shape')
-        if getattr(ctx, 'exc_frame', False) or getattr(ctx, 'par_regions', None):
-            raise NotS0('try frame or parallel region')
+        if getattr(ctx, 'par_regions', None):
+            raise NotS0('parallel region')
         if P._numeric_mixed_bindings(ctx) or getattr(ctx, 'numeric_assignments', None) \
                 or getattr(ctx, 'numeric_tokens', None):
             raise NotS0('int-or-float bindings')
@@ -168,10 +178,14 @@ class Lowering(object):
         param_names = [n for n, _ in ctx.params]
         if param_names != [p.arg for p in a.args]:
             raise NotS0('parameter list differs from the source')
+        # A bytearray parameter of a function that calls user functions is retained for the whole
+        # call, as the legacy path does (a callee may drop the caller's other reference to it), with
+        # a cleanup frame so that a longjmp over this function releases it.
+        retain = []
         if BYTEARRAY in param_types and any(
                 isinstance(c, ast.Call) and isinstance(c.func, ast.Name) and c.func.id in ctx.funcs
                 for c in ast.walk(fn)):
-            raise NotS0('a bytearray parameter in a function that calls user functions')
+            retain = [n for n, t in zip(param_names, param_types) if t == BYTEARRAY]
         abi = []
         for (n, k), t in zip(ctx.params, param_types):
             if k == 'array':
@@ -187,7 +201,7 @@ class Lowering(object):
             if isinstance(node, (ast.NamedExpr, ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef,
                                  ast.ClassDef, ast.Global, ast.Nonlocal, ast.ListComp, ast.SetComp,
                                  ast.DictComp, ast.GeneratorExp, ast.Await, ast.Yield, ast.YieldFrom,
-                                 ast.Try, ast.With, ast.Raise, ast.Assert, ast.Delete, ast.Starred)) \
+                                 ast.With, ast.Delete, ast.Starred, getattr(ast, 'TryStar', ast.With))) \
                     and node is not fn:
                 raise NotS0('%s in the body' % type(node).__name__)
         params = [I.Value(t, hint=n) for n, t in zip(param_names, param_types)]
@@ -196,6 +210,8 @@ class Lowering(object):
             attrs['abi'] = abi
         if self.recursive:
             attrs['recursive'] = True
+        if retain:
+            attrs['retain'] = retain
         f = I.Function(fn.name, params, param_names, results, I.Region(), attrs)
         self.program.add(f)
         self.function = f
@@ -218,11 +234,20 @@ class Lowering(object):
         for name, value in zip(param_names, params):
             if name in self.places:
                 self.b.emit('store', [self.places[name], value])
+        self.alloc_end = sum(1 for i in f.body.instrs if i.op == 'local.alloc')
         if self.recursive:
             self.b.emit('rt', [], [], {'callee': 'ail_depth_enter'})
         self.stmts(fn.body)
         if not self.b.terminated():
             self.fallthrough()
+        ops = [i for i in I.walk(f.body)]
+        if any(i.op == 'try' for i in ops):
+            f.attrs['frame'] = True
+        # a function that raises, or calls one that can return with an exception pending, has the
+        # exception entry point `<sym>__ir` and a wrapper under its own name (emit_c)
+        if any(i.op in ('raise', 'reraise', 'try') or (i.op == 'call' and i.attrs.get('callee') in self.pending)
+               for i in ops):
+            f.attrs['pending'] = True
         E.summarize_program(self.program)
         return f
 
@@ -335,11 +360,17 @@ class Lowering(object):
                 self.stmts(s.body)
                 if not self.b.terminated():
                     self.b.emit('continue')
-            self.in_region(body, fill=loop_body)
+            self.loop_depth += 1
+            try:
+                self.in_region(body, fill=loop_body)
+            finally:
+                self.loop_depth -= 1
             self.b.emit('loop', [], [], None, [body])
         elif isinstance(s, ast.For):
             self.for_range(s)
         elif isinstance(s, ast.Return):
+            if self.finally_loops:
+                raise NotS0('return inside a finally body')
             if s.value is None:
                 if self.function.results:
                     raise NotS0('bare return in a valued function')
@@ -352,15 +383,172 @@ class Lowering(object):
             self.leave()
             self.b.emit('return', [v])
         elif isinstance(s, ast.Break):
+            self.leaves_finally()
             self.b.emit('break')
         elif isinstance(s, ast.Continue):
+            self.leaves_finally()
             self.b.emit('continue')
+        elif isinstance(s, ast.Raise):
+            self.raise_stmt(s)
+        elif isinstance(s, ast.Assert):
+            self.assert_stmt(s)
+        elif isinstance(s, ast.Try):
+            self.try_stmt(s)
         else:
             raise NotS0('statement %s' % type(s).__name__)
 
     def _close_yield(self):
         if not self.b.terminated():
             self.b.emit('yield')
+
+    # ------------------------------------------------------------------ exceptions (S2)
+    def leaves_finally(self):
+        """break/continue may not leave a finally body (it would drop the exception or exit being
+        carried out); a loop inside the finally body is fine."""
+        if self.finally_loops and self.loop_depth <= self.finally_loops[-1]:
+            raise NotS0('break/continue out of a finally body')
+
+    def exception_code(self, name):
+        code = self.P.EXC_NAMES.get(name)
+        if code is None or not self.is_builtin(name):
+            raise NotS0('exception %r' % name)
+        return code
+
+    def raise_stmt(self, s):
+        """`raise`, `raise E`, `raise E()`, `raise E("literal")`."""
+        if self.link_units:
+            raise NotS0('a raise in separately linked units')
+        if s.cause is not None:
+            raise NotS0('raise ... from')
+        if s.exc is None:
+            if self.handler_depth == 0:
+                raise NotS0('a bare raise outside an except handler')
+            self.b.emit('reraise')
+            return
+        e = s.exc
+        if isinstance(e, ast.Name):
+            self.b.emit('raise', [], [], {'code': self.exception_code(e.id), 'name': e.id, 'form': 'name'})
+            return
+        if isinstance(e, ast.Call) and isinstance(e.func, ast.Name) and not e.keywords \
+                and e.func.id in self.P.EXC_NAMES:
+            code = self.exception_code(e.func.id)
+            if not e.args:
+                self.b.emit('raise', [], [], {'code': code, 'name': e.func.id, 'form': 'new'})
+                return
+            if len(e.args) == 1 and isinstance(e.args[0], ast.Constant) and isinstance(e.args[0].value, str):
+                try:
+                    e.args[0].value.encode('utf-8')
+                except UnicodeEncodeError:
+                    raise NotS0('a message that is not UTF-8')
+                self.b.emit('raise', [], [], {'code': code, 'name': e.func.id, 'form': 'msg',
+                                              'msg': e.args[0].value})
+                return
+            raise NotS0('an exception message that is not a str literal')
+        raise NotS0('raise of %s' % type(e).__name__)
+
+    def assert_stmt(self, s):
+        """`assert c` / `assert c, "literal"`: AssertionError (code 9) when c is false."""
+        if self.link_units:
+            raise NotS0('an assert in separately linked units')
+        code = self.exception_code('AssertionError')
+        attrs = {'code': code, 'name': 'AssertionError', 'form': 'name'}
+        if s.msg is not None:
+            if not (isinstance(s.msg, ast.Constant) and isinstance(s.msg.value, str)):
+                raise NotS0('an assert message that is not a str literal')
+            attrs.update(form='msg', msg=s.msg.value)
+        c = self.truthy(s.test)
+        ok, fail = I.Region(), I.Region()
+        self.in_region(ok, fill=lambda: self.b.emit('yield'))
+        self.in_region(fail, fill=lambda: self.b.emit('raise', [], [], attrs))
+        self.b.emit('if', [c], [], None, [ok, fail])
+
+    def new_place(self, name, t):
+        """A hidden local (a flag): a place allocated at the head of the function body."""
+        self.hidden += 1
+        pname = '__ir_%s%d' % (name, self.hidden)
+        if pname in self.ctx.locals:
+            raise NotS0('name clash with %s' % pname)
+        ins = I.Instr('local.alloc', [], [I.Value(I.place(t))], {'name': pname})
+        self.function.body.instrs.insert(self.alloc_end, ins)
+        self.alloc_end += 1
+        return ins.result
+
+    def try_stmt(self, s):
+        if self.link_units:
+            raise NotS0('a try in separately linked units')
+        if s.finalbody:
+            return self.try_finally(s)
+        return self.try_except(s.body, s.handlers, s.orelse)
+
+    def try_except(self, body, handlers, orelse):
+        """try / except [as nothing] / else. A named handler (`except E as e`) needs the exception
+        as a value (S4); the else body runs, outside the handlers' reach, after a body that did not
+        raise (a flag set at the end of the body, as the legacy path does)."""
+        P = self.P
+        codes = []
+        for h in handlers:
+            if h.name:
+                raise NotS0('a named exception handler')
+            types = h.type.elts if isinstance(h.type, ast.Tuple) else [h.type]
+            hc = []
+            for t in types:
+                if not isinstance(t, ast.Name):
+                    raise NotS0('except %s' % type(t).__name__)
+                hc.append(self.exception_code(t.id))
+            codes.append(hc)
+        if not handlers:
+            raise NotS0('a try with no handler')
+        flag = None
+        if orelse:
+            flag = self.new_place('else', I.I64)
+            self.b.emit('store', [flag, self.const(I.I64, 0)])
+        regions = []
+        body_region = I.Region()
+
+        def fill_body():
+            self.stmts(body)
+            if not self.b.terminated():
+                if flag is not None:
+                    self.b.emit('store', [flag, self.const(I.I64, 1)])
+                self.b.emit('yield')
+        self.in_region(body_region, fill=fill_body)
+        regions.append(body_region)
+        for h in handlers:
+            region = I.Region()
+            self.handler_depth += 1
+            try:
+                self.in_region(region, h.body, self._close_yield)
+            finally:
+                self.handler_depth -= 1
+            regions.append(region)
+        self.b.emit('try', [], [], {'kind': 'catch', 'codes': codes}, regions)
+        if flag is not None:
+            done = self.b.value('load', [flag], I.I64)
+            ran = self.b.value('cmp.ne', [done, self.const(I.I64, 0)], I.I1)
+            then, other = I.Region(), I.Region()
+            self.in_region(then, orelse, self._close_yield)
+            self.in_region(other, fill=lambda: self.b.emit('yield'))
+            self.b.emit('if', [ran], [], None, [then, other])
+
+    def try_finally(self, s):
+        """try [/ except / else] / finally: the finally body runs once, after the protected part
+        (its own region), whatever way that part was left; see emit_c for how the way is kept."""
+        body_region, fin_region = I.Region(), I.Region()
+
+        def fill_body():
+            if s.handlers:
+                self.try_except(s.body, s.handlers, s.orelse)
+            else:
+                self.stmts(s.body)
+            if not self.b.terminated():
+                self.b.emit('yield')
+        self.in_region(body_region, fill=fill_body)
+        self.finally_loops.append(self.loop_depth)
+        try:
+            self.in_region(fin_region, s.finalbody, self._close_yield)
+        finally:
+            self.finally_loops.pop()
+        self.b.emit('try', [], [], {'kind': 'finally'}, [body_region, fin_region])
 
     def for_range(self, s):
         if s.orelse or getattr(s, 'par', None) is not None:
@@ -388,7 +576,11 @@ class Lowering(object):
             self.stmts(s.body)
             if not self.b.terminated():
                 self.b.emit('continue')
-        self.in_region(body, fill=fill)
+        self.loop_depth += 1
+        try:
+            self.in_region(body, fill=fill)
+        finally:
+            self.loop_depth -= 1
         self.b.emit('for.range', [lo, hi, step], [], {'args': len(args)}, [body])
 
     def for_bytes(self, s, base):
@@ -406,7 +598,11 @@ class Lowering(object):
             self.stmts(s.body)
             if not self.b.terminated():
                 self.b.emit('continue')
-        self.in_region(body, fill=fill)
+        self.loop_depth += 1
+        try:
+            self.in_region(body, fill=fill)
+        finally:
+            self.loop_depth -= 1
         self.b.emit('for.range', [lo, n, step], [], {'args': 1}, [body])
 
     # ------------------------------------------------------------------ expressions
@@ -871,8 +1067,8 @@ class Lowering(object):
         return ins.results[0] if results else None
 
 
-def lower(P, fn, ctx, sig, recursive, cname):
+def lower(P, fn, ctx, sig, recursive, cname, pending=(), link_units=False):
     """(IR function, its one-function program) for the S0 subset; NotS0 otherwise."""
-    lowering = Lowering(P, fn, ctx, sig, recursive, cname)
+    lowering = Lowering(P, fn, ctx, sig, recursive, cname, pending, link_units)
     f = lowering.run()
     return f, lowering.program

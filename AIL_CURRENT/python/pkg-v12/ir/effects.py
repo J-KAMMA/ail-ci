@@ -165,6 +165,10 @@ def instr_effects(ins, fn, program, places=None, defs=None, summaries=None):
     if op == 'rt':
         entry = RUNTIME.get(ins.attrs.get('callee'))
         return entry[2] if entry else UNKNOWN
+    if op == 'raise':
+        return Effects(raises=[ins.attrs.get('name', 'Exception')])
+    if op == 'reraise':
+        return Effects(raises=['Exception'])
     if op == 'for.range':
         step = const_value(ins.operands[2], defs) if defs is not None else None
         return NONE if isinstance(step, int) and step != 0 else Effects(raises=[VALUE])

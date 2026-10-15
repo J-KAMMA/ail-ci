@@ -617,7 +617,7 @@ class SwitchTests(unittest.TestCase):
     def test_failure_falls_back_under_1_and_raises_under_verify(self):
         original = emit_c.emit_function
 
-        def broken(fn):
+        def broken(fn, *args):
             raise I.IRError('injected emitter failure')
         emit_c.emit_function = broken
         try:

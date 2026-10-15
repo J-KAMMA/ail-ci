@@ -122,7 +122,11 @@ class _Checker(object):
         if len(ins.operands) < nmin or (nmax is not None and len(ins.operands) > nmax):
             self.err(where, 'wrong number of operands (%d)' % len(ins.operands))
             return
-        if len(ins.regions) != nregions:
+        if nregions == -1:
+            if not ins.regions:
+                self.err(where, 'expected at least one region')
+                return
+        elif len(ins.regions) != nregions:
             self.err(where, 'expected %d region(s), found %d' % (nregions, len(ins.regions)))
             return
         for r in ins.results:
@@ -418,13 +422,16 @@ class _Checker(object):
         for kind, owner in reversed(stack):
             if kind in I.LOOP_OPS:
                 return owner
-            if kind != 'if':
+            if kind not in ('if', 'try', 'handler', 'finally'):
                 return None
         return None
 
     def op_yield(self, ins, scope, stack, where, top):
         kind, owner = stack[-1]
-        if not self.want(where, kind == 'if', 'yield outside an if region'):
+        if kind in ('try', 'handler', 'finally'):
+            self.want(where, not ins.operands, 'a try region yields no values')
+            return
+        if not self.want(where, kind == 'if', 'yield outside an if or try region'):
             return
         self.want(where, self.types(ins.operands) == self.types(owner.results),
                   'yield (%s) does not match the if results (%s)'
@@ -454,6 +461,42 @@ class _Checker(object):
 
     def op_unreachable(self, ins, scope, stack, where, top):
         pass
+
+    # ------------------------------------------------------------------ exceptions (S2)
+    def op_raise(self, ins, scope, stack, where, top):
+        code, name, form = ins.attrs.get('code'), ins.attrs.get('name'), ins.attrs.get('form')
+        self.want(where, isinstance(code, int) and not isinstance(code, bool) and 1 <= code <= 10,
+                  'raise needs an exception code 1..10')
+        self.want(where, isinstance(name, str) and name.isidentifier(), 'raise needs an exception name')
+        self.want(where, form in ('name', 'new', 'msg'),
+                  'raise form is name (raise E), new (raise E()) or msg (raise E("..."))')
+        self.want(where, (form == 'msg') == isinstance(ins.attrs.get('msg'), str),
+                  'raise msg is a string exactly for the msg form')
+
+    def op_reraise(self, ins, scope, stack, where, top):
+        self.want(where, any(kind == 'handler' for kind, _ in stack),
+                  'reraise outside an except handler')
+
+    def op_try(self, ins, scope, stack, where, top):
+        kind = ins.attrs.get('kind')
+        if not self.want(where, kind in ('catch', 'finally'), 'try kind must be catch or finally'):
+            return
+        self.nresults(ins, where, 0)
+        if kind == 'finally':
+            self.want(where, len(ins.regions) == 2, 'a finally try has a body and a finally region')
+        else:
+            codes = ins.attrs.get('codes')
+            ok = (isinstance(codes, list) and len(codes) == len(ins.regions) - 1 and len(codes) >= 1
+                  and all(isinstance(c, list) and c and all(isinstance(x, int) and not isinstance(x, bool)
+                                                            and 1 <= x <= 10 for x in c) for c in codes))
+            self.want(where, ok, 'a catch try lists the exception codes of every handler')
+            if ok:
+                flat = [x for c in codes for x in c]
+                self.want(where, len(flat) == len(set(flat)), 'an exception code is named by two handlers')
+        for k, r in enumerate(ins.regions):
+            self.want(where, not r.args, 'try regions take no block arguments')
+            role = 'try' if k == 0 else ('finally' if kind == 'finally' else 'handler')
+            self.region(r, scope, stack + [(role, ins)])
 
 
 for _name in I.INT_BINARY:

@@ -9,6 +9,7 @@ all) selects passes, for tests and for pricing each pass separately.
 import os
 
 from .. import effects as E
+from .. import ir as I
 from . import mem2reg, simplify, ranges, licm
 
 ALL = ('mem2reg', 'simplify', 'ranges', 'licm')
@@ -27,6 +28,11 @@ def optimize(fn, program, facts=None, check=None):
     facts = facts or {}
     on = enabled()
     stats = {}
+    if any(ins.op == 'try' for ins in I.walk(fn.body)):
+        # a function with a `try` keeps its places in a frame shared with the outlined bodies, and
+        # its exception edges are not in the SSA the passes reason about: it goes out as lowered
+        E.summarize_program(program)
+        return {'skipped': 'try'}
 
     def after():
         if check is not None:
