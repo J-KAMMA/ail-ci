@@ -1,0 +1,33 @@
+```ail
+struct Item {
+    name: str;
+    qty: int;
+    price: int;
+}
+
+impl Item {
+    fn value(self) -> int {
+        return self.qty * self.price;
+    }
+}
+
+fn main() -> int {
+    let items: list[Item] = [];
+    for line in sys.stdin {
+        let f = line.strip().split();
+        if len(f) >= 3 {
+            let item = Item(f[0], int(f[1]), int(f[2]));
+            items.append(item);
+        }
+    }
+    items.sort(key=lambda it: (-(it.qty * it.price), it.name));
+    let total = 0;
+    for item in items {
+        let v = item.value();
+        print(item.name, v);
+        total += v;
+    }
+    print("total", total);
+    return 0;
+}
+```

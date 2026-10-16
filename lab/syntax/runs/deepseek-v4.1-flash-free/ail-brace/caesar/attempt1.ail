@@ -1,0 +1,34 @@
+```
+const ABC = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const abc = "abcdefghijklmnopqrstuvwxyz";
+
+fn main() -> int {
+    let k = 0;
+    let first = true;
+    for line in sys.stdin {
+        if first {
+            k = int(line.strip());
+            first = false;
+        } else {
+            let s = line.replace("\n", "");
+            let res = "";
+            let i = 0;
+            while i < len(s) {
+                let ch = s[i];
+                let up = ABC.find(ch);
+                let lo = abc.find(ch);
+                if up >= 0 {
+                    res = res + ABC[(up + k) % 26];
+                } elif lo >= 0 {
+                    res = res + abc[(lo + k) % 26];
+                } else {
+                    res = res + ch;
+                }
+                i += 1;
+            }
+            print(res);
+        }
+    }
+    return 0;
+}
+```

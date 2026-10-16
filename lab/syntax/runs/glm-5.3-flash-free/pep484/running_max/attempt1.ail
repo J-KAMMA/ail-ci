@@ -1,0 +1,22 @@
+```python
+import sys
+
+def main() -> int:
+    for line in sys.stdin:
+        parts: list[str] = line.split()
+        if len(parts) > 0:
+            out: list[str] = []
+            best: int = 0
+            first: bool = True
+            v: int = 0
+            for tok in parts:
+                v = int(tok)
+                if first:
+                    best = v
+                    first = False
+                elif v > best:
+                    best = v
+                out.append(str(best))
+            print(" ".join(out))
+    return 0
+```

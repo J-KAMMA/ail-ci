@@ -1,0 +1,45 @@
+```ail
+fn sieve_prefix(limit: int) -> list[int] {
+    let is_comp: list[bool] = [];
+    let i = 0;
+    while i <= limit {
+        is_comp.append(false);
+        i += 1;
+    }
+    let p = 2;
+    while p * p <= limit {
+        if not is_comp[p] {
+            let j = p * p;
+            while j <= limit {
+                is_comp[j] = true;
+                j += p;
+            }
+        }
+        p += 1;
+    }
+    let prefix: list[int] = [];
+    let count = 0;
+    let k = 0;
+    while k <= limit {
+        if k >= 2 and not is_comp[k] {
+            count += 1;
+        }
+        prefix.append(count);
+        k += 1;
+    }
+    return prefix;
+}
+
+fn main() -> int {
+    let prefix = sieve_prefix(100000);
+    for line in sys.stdin {
+        try {
+            let n = int(line.strip());
+            print(prefix[n]);
+        } except ValueError as e {
+            print("bad", e.message);
+        }
+    }
+    return 0;
+}
+```

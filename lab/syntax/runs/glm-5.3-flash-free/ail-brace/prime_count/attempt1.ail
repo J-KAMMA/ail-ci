@@ -1,0 +1,39 @@
+```ail
+fn main() -> int {
+    let limit = 100000;
+    let sieve: list[int] = [];
+    for z in range(limit + 1) {
+        sieve.append(0);
+    }
+    sieve[0] = 1;
+    sieve[1] = 1;
+    for p in range(2, limit + 1) {
+        if sieve[p] == 0 {
+            for k in range(p * p, limit + 1) {
+                if k % p == 0 {
+                    sieve[k] = 1;
+                }
+            }
+        }
+    }
+    let counts: list[int] = [];
+    counts.append(0);
+    counts.append(0);
+    for t in range(2, limit + 1) {
+        counts.append(counts[t - 1] + (1 - sieve[t]));
+    }
+    for line in sys.stdin {
+        let s = line.strip();
+        if len(s) > 0 {
+            try {
+                let n = int(s);
+                print(counts[n]);
+            }
+            except ValueError as err {
+                print("bad", err.message);
+            }
+        }
+    }
+    return 0;
+}
+```

@@ -1,0 +1,21 @@
+```python
+import sys
+
+def main() -> int:
+    counts: dict[str, int] = {}
+    for line in sys.stdin:
+        parts: list[str] = line.split()
+        for w in parts:
+            word: str = w.lower()
+            if word in counts:
+                counts[word] += 1
+            else:
+                counts[word] = 1
+    words: list[str] = []
+    for k in counts:
+        words.append(k)
+    words.sort(key=lambda w: (-counts[w], w))
+    for w in words:
+        print(w, counts[w])
+    return 0
+```

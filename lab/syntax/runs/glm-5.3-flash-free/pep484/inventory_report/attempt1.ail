@@ -1,0 +1,37 @@
+```python
+import sys
+from dataclasses import dataclass
+
+@dataclass
+class Item:
+    name: str
+    quantity: int
+    unit_price: int
+
+    def value(self) -> int:
+        return self.quantity * self.unit_price
+
+def read_items() -> list[Item]:
+    items: list[Item] = []
+    for line in sys.stdin:
+        parts: list[str] = line.split()
+        if len(parts) != 3:
+            continue
+        try:
+            quantity: int = int(parts[1])
+            price: int = int(parts[2])
+        except ValueError as err:
+            continue
+        items.append(Item(parts[0], quantity, price))
+    return items
+
+def main() -> int:
+    items: list[Item] = read_items()
+    items.sort(key=lambda it: (-it.value(), it.name))
+    total: int = 0
+    for it in items:
+        print(it.name, it.value())
+        total += it.value()
+    print("total", total)
+    return 0
+```

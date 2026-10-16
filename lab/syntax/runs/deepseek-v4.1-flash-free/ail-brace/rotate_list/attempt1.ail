@@ -1,0 +1,39 @@
+```
+fn main() -> int {
+    let k = 0;
+    let nums: list[int] = [];
+    let seen = false;
+    for line in sys.stdin {
+        let t = line.strip();
+        if len(t) > 0 {
+            if not seen {
+                k = int(t);
+                seen = true;
+            } else {
+                let parts = t.split();
+                for p in parts {
+                    nums.append(int(p));
+                }
+            }
+        }
+    }
+    let n = len(nums);
+    if n == 0 {
+        return 0;
+    }
+    let e = k % n;
+    let out: list[str] = [];
+    let i = n - e;
+    while i < n {
+        out.append(str(nums[i]));
+        i += 1;
+    }
+    let j = 0;
+    while j < n - e {
+        out.append(str(nums[j]));
+        j += 1;
+    }
+    print(" ".join(out));
+    return 0;
+}
+```

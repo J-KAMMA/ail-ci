@@ -1,0 +1,21 @@
+```python
+import sys
+
+def main() -> int:
+    totals: dict[str, int] = {}
+    for line in sys.stdin:
+        line = line.strip()
+        if line == "":
+            continue
+        parts: list[str] = line.split()
+        name: str = parts[0]
+        amount: int = int(parts[1])
+        if name in totals:
+            totals[name] += amount
+        else:
+            totals[name] = amount
+    names: list[str] = sorted(totals)
+    for name in names:
+        print(name, totals[name])
+    return 0
+```

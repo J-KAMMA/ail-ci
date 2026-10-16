@@ -1,0 +1,33 @@
+```ail
+fn clean_alnum_lower(s: str, i: int) -> str {
+    if i == len(s) {
+        return "";
+    }
+    let ch = s[i];
+    if ch.isalnum() {
+        return ch.lower() + clean_alnum_lower(s, i + 1);
+    }
+    return clean_alnum_lower(s, i + 1);
+}
+fn pal(t: str, a: int, b: int) -> bool {
+    if a >= b {
+        return true;
+    }
+    if t[a] != t[b] {
+        return false;
+    }
+    return pal(t, a + 1, b - 1);
+}
+fn main() -> int {
+    for line in sys.stdin {
+        let s = line.strip();
+        let t = clean_alnum_lower(s, 0);
+        if pal(t, 0, len(t) - 1) {
+            print("yes");
+        } else {
+            print("no");
+        }
+    }
+    return 0;
+}
+```

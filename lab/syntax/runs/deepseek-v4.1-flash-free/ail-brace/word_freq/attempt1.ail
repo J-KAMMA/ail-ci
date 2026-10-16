@@ -1,0 +1,27 @@
+```
+struct Counter { freq: dict[str, int]; }
+
+fn add_line(c: Counter, line: str) -> void {
+    let parts = line.split();
+    for p in parts {
+        let w = p.lower();
+        c.freq[w] = c.freq.get(w, 0) + 1;
+    }
+}
+
+fn main() -> int {
+    let c = Counter({});
+    for line in sys.stdin {
+        add_line(c, line);
+    }
+    let keys: list[str] = [];
+    for w in c.freq {
+        keys.append(w);
+    }
+    keys.sort(key=lambda w: (-c.freq[w], w));
+    for w in keys {
+        print(w, c.freq[w]);
+    }
+    return 0;
+}
+```

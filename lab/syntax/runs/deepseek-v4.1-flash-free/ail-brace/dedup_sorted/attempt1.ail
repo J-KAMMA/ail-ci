@@ -1,0 +1,23 @@
+```
+fn main() -> int {
+    let xs: list[int] = [];
+    for line in sys.stdin {
+        let parts = line.split();
+        for p in parts {
+            try { xs.append(int(p)); }
+            except ValueError as e { let skipped = 0; }
+        }
+    }
+    xs.sort();
+    let first = true;
+    let prev = 0;
+    for x in xs {
+        if first or x != prev {
+            print(x);
+            prev = x;
+            first = false;
+        }
+    }
+    return 0;
+}
+```

@@ -1,0 +1,27 @@
+```python
+import sys
+
+def running_max(nums: list[int]) -> list[int]:
+    out: list[int] = []
+    best: int = nums[0]
+    for x in nums:
+        if x > best:
+            best = x
+        out.append(best)
+    return out
+
+def main() -> int:
+    for line in sys.stdin:
+        parts = line.split()
+        nums: list[int] = []
+        for p in parts:
+            nums.append(int(p))
+        if len(nums) == 0:
+            continue
+        res = running_max(nums)
+        strs: list[str] = []
+        for v in res:
+            strs.append(str(v))
+        print(" ".join(strs))
+    return 0
+```

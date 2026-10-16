@@ -1,0 +1,45 @@
+```python
+import sys
+
+LIMIT: int = 100000
+
+def build_counts(limit: int) -> list[int]:
+    sieve: list[bool] = []
+    i: int = 0
+    while i <= limit:
+        sieve.append(True)
+        i += 1
+    sieve[0] = False
+    if limit >= 1:
+        sieve[1] = False
+    p: int = 2
+    while p * p <= limit:
+        if sieve[p]:
+            m: int = p * p
+            while m <= limit:
+                sieve[m] = False
+                m += p
+        p += 1
+    counts: list[int] = []
+    total: int = 0
+    i = 0
+    while i <= limit:
+        if sieve[i]:
+            total += 1
+        counts.append(total)
+        i += 1
+    return counts
+
+def main() -> int:
+    counts: list[int] = build_counts(LIMIT)
+    for line in sys.stdin:
+        s: str = line.strip()
+        n: int = 0
+        try:
+            n = int(s)
+        except ValueError as err:
+            n = -1
+        if n >= 1 and n <= LIMIT:
+            print(counts[n])
+    return 0
+```

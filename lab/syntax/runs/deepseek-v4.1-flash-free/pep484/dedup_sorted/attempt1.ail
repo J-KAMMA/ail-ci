@@ -1,0 +1,19 @@
+```python
+import sys
+from dataclasses import dataclass
+
+def main() -> int:
+    xs: list[int] = []
+    for line in sys.stdin:
+        for tok in line.split():
+            xs.append(int(tok))
+    xs.sort()
+    prev: int = 0
+    first: bool = True
+    for v in xs:
+        if first or v != prev:
+            print(v)
+            prev = v
+            first = False
+    return 0
+```

@@ -1,0 +1,18 @@
+```ail
+fn main() -> int {
+    let totals: dict[str, int] = {};
+    for line in sys.stdin {
+        let parts = line.strip().split();
+        if len(parts) == 2 {
+            let name = parts[0];
+            let amt = int(parts[1]);
+            totals[name] = totals.get(name, 0) + amt;
+        }
+    }
+    let keys: list[str] = sorted(totals);
+    for k in keys {
+        print(k, totals[k]);
+    }
+    return 0;
+}
+```

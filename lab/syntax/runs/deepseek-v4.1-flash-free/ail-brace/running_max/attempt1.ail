@@ -1,0 +1,25 @@
+```ail
+fn main() -> int {
+    for line in sys.stdin {
+        let f = line.split();
+        if len(f) == 0 {
+            print("");
+        } else {
+            let nums: list[int] = [];
+            for p in f {
+                nums.append(int(p));
+            }
+            let out: list[str] = [];
+            let cur = nums[0];
+            for n in nums {
+                if n > cur {
+                    cur = n;
+                }
+                out.append(str(cur));
+            }
+            print(" ".join(out));
+        }
+    }
+    return 0;
+}
+```

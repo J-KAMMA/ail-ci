@@ -1,0 +1,18 @@
+```python
+import sys
+
+def main() -> int:
+    data: str = ""
+    for line in sys.stdin:
+        data = data + line
+    tokens: list[str] = data.split()
+    total: int = 0
+    for tok in tokens:
+        try:
+            v: int = int(tok)
+            total += v
+        except ValueError as e:
+            print("bad: " + tok)
+    print("sum=" + str(total))
+    return 0
+```
