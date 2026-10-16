@@ -23941,6 +23941,85 @@ ORDER.insert(ORDER.index('RECDEPTH') + 1, 'IREXC')
 SOURCE['IREXC'] = IREXC
 REQUIRES['IREXC'] = ['DIE', 'RECDEPTH']
 
+# IR owned numeric lists (stage S3a). Selected only by IR functions that own a list (ctx.parts
+# 'IRLIST' / 'IRFLIST'), so no legacy program's C changes. The element access of an owned list is the
+# legacy helper's own check and message ("list index out of range", ail_die), but always inlined with a
+# cold out-of-line failure, so the C compiler keeps the list's pointer and length in registers.
+IRLIST = r'''
+static __attribute__((noreturn, noinline, cold)) void ail_ir_list_fail(void) {
+    ail_die("list index out of range");
+    __builtin_unreachable();
+}
+static inline __attribute__((always_inline)) int64_t ail_ir_list_get(const ail_list *L, int64_t i) {
+    if (__builtin_expect((uint64_t)i >= (uint64_t)L->n, 0)) {
+        if (i < 0) i += L->n;
+        if (i < 0 || i >= L->n) ail_ir_list_fail();
+    }
+    return L->p[i];
+}
+static inline __attribute__((always_inline)) void ail_ir_list_set(ail_list *L, int64_t i, int64_t v) {
+    if (__builtin_expect((uint64_t)i >= (uint64_t)L->n, 0)) {
+        if (i < 0) i += L->n;
+        if (i < 0 || i >= L->n) ail_ir_list_fail();
+    }
+    L->p[i] = v;
+}
+static inline __attribute__((always_inline)) int64_t ail_ir_view_get(const int64_t *p, int64_t n, int64_t i) {
+    if (__builtin_expect((uint64_t)i >= (uint64_t)n, 0)) {
+        if (i < 0) i += n;
+        if (i < 0 || i >= n) ail_ir_list_fail();
+    }
+    return p[i];
+}
+static inline __attribute__((always_inline)) void ail_ir_view_set(int64_t *p, int64_t n, int64_t i, int64_t v) {
+    if (__builtin_expect((uint64_t)i >= (uint64_t)n, 0)) {
+        if (i < 0) i += n;
+        if (i < 0 || i >= n) ail_ir_list_fail();
+    }
+    p[i] = v;
+}
+'''
+IRFLIST = r'''
+static __attribute__((noreturn, noinline, cold)) void ail_ir_flist_fail(void) {
+    ail_die("list index out of range");
+    __builtin_unreachable();
+}
+static inline __attribute__((always_inline)) double ail_ir_flist_get(const ail_flist *L, int64_t i) {
+    if (__builtin_expect((uint64_t)i >= (uint64_t)L->n, 0)) {
+        if (i < 0) i += L->n;
+        if (i < 0 || i >= L->n) ail_ir_flist_fail();
+    }
+    return L->p[i];
+}
+static inline __attribute__((always_inline)) void ail_ir_flist_set(ail_flist *L, int64_t i, double v) {
+    if (__builtin_expect((uint64_t)i >= (uint64_t)L->n, 0)) {
+        if (i < 0) i += L->n;
+        if (i < 0 || i >= L->n) ail_ir_flist_fail();
+    }
+    L->p[i] = v;
+}
+static inline __attribute__((always_inline)) double ail_ir_fview_get(const double *p, int64_t n, int64_t i) {
+    if (__builtin_expect((uint64_t)i >= (uint64_t)n, 0)) {
+        if (i < 0) i += n;
+        if (i < 0 || i >= n) ail_ir_flist_fail();
+    }
+    return p[i];
+}
+static inline __attribute__((always_inline)) void ail_ir_fview_set(double *p, int64_t n, int64_t i, double v) {
+    if (__builtin_expect((uint64_t)i >= (uint64_t)n, 0)) {
+        if (i < 0) i += n;
+        if (i < 0 || i >= n) ail_ir_flist_fail();
+    }
+    p[i] = v;
+}
+'''
+ORDER.insert(ORDER.index('LIST') + 1, 'IRLIST')
+SOURCE['IRLIST'] = IRLIST
+REQUIRES['IRLIST'] = ['LIST', 'DIE']
+ORDER.insert(ORDER.index('FLIST') + 1, 'IRFLIST')
+SOURCE['IRFLIST'] = IRFLIST
+REQUIRES['IRFLIST'] = ['FLIST', 'DIE']
+
 
 def emit(parts):
     """The pieces a program reached, in dependency order, once each."""

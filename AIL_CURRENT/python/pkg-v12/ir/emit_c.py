@@ -86,6 +86,11 @@ def signature(fn, sym=None, linkage=None):
             decls.append('ail_flist v_%s' % n)
         else:
             decls.append(_decl(ctype(p.type), 'v_' + n))
+    if fn.attrs.get('ret_list'):
+        # a returned list crosses the C boundary as the legacy path hands it back (cruntime LISTRET):
+        # through a buffer the caller owns, the true length as the result
+        ret = 'int64_t'
+        decls.append('%s *_out, int64_t _cap' % ('double' if fn.attrs['ret_list'] == 'flist' else 'int64_t'))
     params = ', '.join(decls)
     linkage = linkage or fn.attrs.get('linkage', 'extern')
     prefix = LINKAGE_PREFIX.get(linkage)
@@ -100,7 +105,18 @@ def _args_of(fn):
     out = []
     for n, a in zip(fn.param_names, abi):
         out.append('v_%s, v_%s_len' % (n, n) if a == 'array' else 'v_%s' % n)
+    if fn.attrs.get('ret_list'):
+        out.append('_out, _cap')
     return ', '.join(out)
+
+
+def storage(t):
+    """The C type a place of this IR type holds: an owned list is the inline {p, n, cap} struct."""
+    if t == I.T('obj', I.T('list', I.I64)):
+        return 'ail_list'
+    if t == I.T('obj', I.T('list', I.F64)):
+        return 'ail_flist'
+    return ctype(t)
 
 
 def _zero(t):
@@ -132,9 +148,16 @@ class _Cx(object):
         self.returns = False               # whether a return leaves this body
 
 
+_LISTS = (I.T('obj', I.T('list', I.I64)), I.T('obj', I.T('list', I.F64)))
+_BA = I.T('obj', I.T('bytearray'))
+
+
 class Emitter(object):
-    def __init__(self, fn, pending=(), checked=False):
+    def __init__(self, fn, pending=(), checked=False, summaries=None, unwind_name=None):
         self.fn = fn
+        # the helper that frees what a longjmp unwinds over: the name the legacy path chose for its own
+        # (unique among the program's symbols), else one derived from the function's symbol
+        self.unwind_name = unwind_name
         self.checked = checked                  # exceptions as checked returns, else the legacy longjmp
         self.names = {}
         self.defs = E.defs_of(fn)
@@ -161,6 +184,21 @@ class Emitter(object):
         self.tries = 0
         self.next_status = 3
         self.retained = [self.pre + 'v_' + n for n in fn.attrs.get('retain', ())]
+        # the lists this function owns (S3a): one place each, freed at every exit; a cleanup frame
+        # links them so a longjmp over this function frees them too -- only when something in the
+        # function can raise (or call something that can); otherwise there is no edge to clean
+        self.owned = [(self.pre + 'v_' + i.attrs['name'],
+                       'bytearray' if i.result.type.pointee == _BA else
+                       'flist' if i.result.type.pointee == _LISTS[1] else 'list')
+                      for i in fn.body.instrs
+                      if i.op == 'local.alloc' and (i.result.type.pointee in _LISTS or i.result.type.pointee == _BA)]
+        if self.owned:
+            eff = E.body_effects(fn, None, summaries)
+            self.owned_can_raise = bool(eff.unknown or eff.raises)
+        else:
+            self.owned_can_raise = False
+        self.link = bool(self.retained) or self.owned_can_raise
+        self.span_own = set()                   # spans over an owned list (their failures are the legacy die)
         abi = fn.attrs.get('abi') or ['value'] * len(fn.params)
         for p, n, a in zip(fn.params, fn.param_names, abi):
             self.names[p] = self.pre + 'v_' + n
@@ -222,8 +260,8 @@ class Emitter(object):
         for ins in fn.body.instrs:
             if ins.op == 'local.alloc':
                 name = ins.attrs['name']
-                fields.append('%s;' % _decl(ctype(ins.result.type.pointee), ('l_' if name in params else 'v_') + name))
-        if fn.results:
+                fields.append('%s;' % _decl(storage(ins.result.type.pointee), ('l_' if name in params else 'v_') + name))
+        if fn.results and not fn.attrs.get('ret_list'):
             fields.append('%s;' % _decl(ctype(fn.results[0]), 'ret'))
         fields.append('char _unused;')
         return 'struct %s__fr { %s };\n' % (fn.sym, ' '.join(fields))
@@ -250,20 +288,39 @@ class Emitter(object):
                 c = self.pre + ('l_' if name in params else 'v_') + name
                 self.names[ins.result] = c
                 if not self.frame:
-                    self.line(1, '%s %s = 0;' % (ctype(ins.result.type.pointee), c))
+                    if ins.result.type.pointee in _LISTS:
+                        self.line(1, '%s %s = {0};' % (storage(ins.result.type.pointee), c))
+                    else:
+                        self.line(1, '%s %s = 0;' % (ctype(ins.result.type.pointee), c))
         if fn.attrs.get('recursive'):
             self.parts.add('RECDEPTH')
-        if self.retained:
-            # a bytearray parameter kept across calls (the legacy path retains it too): released at
-            # every exit, and by the cleanup frame when a longjmp unwinds over this function
-            self.parts.update(('DIE', 'BYTEARRAY'))
-            self.aux.append('static void ail_unwind_%s(void **p) { %s }\n' % (
-                sym, ' '.join('ail_bytearray_release(*(ail_bytearray **)p[%d]);' % k
-                              for k in range(len(self.retained)))))
+        if any(kind in ('list', 'flist') for _, kind in self.owned):
+            self.parts.update(('LIST', 'IRLIST'))
+            if any(kind == 'flist' for _, kind in self.owned):
+                self.parts.update(('FLIST', 'IRFLIST'))
+        if any(kind == 'bytearray' for _, kind in self.owned):
+            self.parts.add('BYTEARRAY')
+        if self.link:
+            # a bytearray parameter kept across calls (the legacy path retains it too) and the lists
+            # this function owns: released at every exit, and by the cleanup frame when a longjmp
+            # unwinds over this function
+            self.parts.add('DIE')
+            steps = []
+            for k, name in enumerate(self.retained):
+                self.parts.add('BYTEARRAY')
+                steps.append('ail_bytearray_release(*(ail_bytearray **)p[%d]);' % k)
+            for k, (name, kind) in enumerate(self.owned, len(self.retained)):
+                if kind == 'bytearray':
+                    steps.append('ail_bytearray_release(*(ail_bytearray **)p[%d]);' % k)
+                else:
+                    steps.append('ail_%s_free((ail_%s *)p[%d]);' % (kind, kind, k))
+            unwind = self.unwind_name or 'ail_unwind_ir_%s' % sym
+            self.aux.append('static void %s(void **p) { %s }\n' % (unwind, ' '.join(steps)))
             for name in self.retained:
                 self.line(1, 'ail_bytearray_retain(%s);' % name)
-            self.line(1, 'void *v__cargs[] = {%s};' % ', '.join('(void *)(&%s)' % n for n in self.retained))
-            self.line(1, 'ail_cleanup_frame v__cf = {ail_cleanup_top, ail_unwind_%s, v__cargs};' % sym)
+            cargs = ['(void *)(&%s)' % n for n in self.retained] + ['(void *)(&%s)' % n for n, _ in self.owned]
+            self.line(1, 'void *v__cargs[] = {%s};' % ', '.join(cargs))
+            self.line(1, 'ail_cleanup_frame v__cf = {ail_cleanup_top, %s, v__cargs};' % unwind)
             self.line(1, 'ail_cleanup_top = &v__cf;')
         if self.is_pending or self.frame:
             self.parts.add('IREXC')
@@ -274,7 +331,7 @@ class Emitter(object):
             call = '%s__ir(%s)' % (sym, _args_of(fn))
             if fn.results:
                 body = ('    %s r = %s;\n    if (__builtin_expect(ail_pending, 0)) ail_ir_rethrow();\n'
-                        '    return r;\n' % (ctype(fn.results[0]), call))
+                        '    return r;\n' % ('int64_t' if fn.attrs.get('ret_list') else ctype(fn.results[0]), call))
             else:
                 body = '    %s;\n    if (__builtin_expect(ail_pending, 0)) ail_ir_rethrow();\n' % call
             out += '%s {\n%s}\n' % (sig, body)
@@ -289,17 +346,32 @@ class Emitter(object):
                 self.line(depth, sc['leave'])
 
     def epilogue(self, depth):
-        if self.retained:
+        if self.link:
             self.line(depth, 'ail_cleanup_top = v__cf.previous;')
-            for name in self.retained:
+        for name in self.retained:
+            self.line(depth, 'ail_bytearray_release(%s);' % name)
+        for name, kind in self.owned:
+            if kind == 'bytearray':
                 self.line(depth, 'ail_bytearray_release(%s);' % name)
+            else:
+                self.line(depth, 'ail_%s_free(&%s);' % (kind, name))
 
     def exit_return(self, depth, value, in_frame=False):
         self.leaves(depth, lambda sc: True)
         if self.cx.kind == 'top':
-            self.epilogue(depth)
+            if self.fn.attrs.get('ret_list') and value is not None:
+                # the list leaves through the caller's buffer (LISTRET), then every owned list goes
+                self.parts.add('FLISTRET' if self.fn.attrs['ret_list'] == 'flist' else 'LISTRET')
+                self.line(depth, 'int64_t ir_ret = ail_%s_return(%s, _out, _cap);'
+                          % ('flist' if self.fn.attrs['ret_list'] == 'flist' else 'list', value))
+                value = 'ir_ret'
             if in_frame:
                 value = 'fr->ret' if self.fn.results else None
+            if value is not None and self.fn.results == [_BA]:
+                # the result is the caller's own reference: take it before the owners let go
+                self.parts.add('BYTEARRAY')
+                self.line(depth, 'ail_bytearray_retain(%s);' % value)
+            self.epilogue(depth)
             self.line(depth, 'return %s;' % value if value is not None else 'return;')
         else:
             if value is not None and not in_frame:
@@ -485,29 +557,83 @@ class Emitter(object):
             self.line(depth, '%s *%s_p = (%s)->p; int64_t %s_n = %s_p ? (%s)->n : 0;'
                       % (ct, name, o[0], name, name, o[0]))
             self.span_names[ins.result] = (name + '_p', name + '_n')
+            d = self.defs.get(ins.operands[0])
+            if d is not None and d.op == 'list.ref':
+                self.span_own.add(ins.result)
             return
         if op == 'span.len':
             return self.assign_new(depth, ins.result, self.span_names[ins.operands[0]][1])
         if op in ('span.get', 'span.set'):
             elem = ins.operands[0].type.args[0]
             f = 'flist' if elem == I.F64 else 'list'
-            self.parts.add('NUMVIEW')
             sp, sn = self.span_names[ins.operands[0]][:2]
+            if ins.operands[0] in self.span_own:
+                # a span over a list this function owns fails as the legacy owned list does
+                self.parts.update(('LIST', 'IRLIST') if f == 'list' else ('FLIST', 'IRFLIST'))
+                view = 'ail_ir_view' if f == 'list' else 'ail_ir_fview'
+            else:
+                self.parts.add('NUMVIEW')
+                view = 'ail_%s_view' % f
             if op == 'span.get':
                 if ins.attrs.get('mode') == 'nck':
                     return self.assign_new(depth, ins.result, '%s[%s]' % (sp, o[1]))
-                return self.assign_new(depth, ins.result, 'ail_%s_view_get(%s, %s, %s)' % (f, sp, sn, o[1]))
+                return self.assign_new(depth, ins.result, '%s_get(%s, %s, %s)' % (view, sp, sn, o[1]))
             if ins.attrs.get('mode') == 'nck':
                 return self.line(depth, '%s[%s] = %s;' % (sp, o[1], o[2]))
-            return self.line(depth, 'ail_%s_view_set(%s, %s, %s, %s);' % (f, sp, sn, o[1], o[2]))
+            return self.line(depth, '%s_set(%s, %s, %s, %s);' % (view, sp, sn, o[1], o[2]))
         if op in ('list.len', 'list.get', 'list.set', 'list.push', 'list.pop', 'list.clear'):
             return self.list_op(ins, depth, o)
-        if op == 'call':
+        if op == 'list.ref':
+            return self.assign_new(depth, ins.result, '&' + self.names[ins.operands[0]])
+        if op == 'field.ba':
+            return self.assign_new(depth, ins.result, '(%s)->f_%s' % (o[0], ins.attrs['name']))
+        if op == 'ba.extend_lit':
+            self.parts.add('BYTEARRAY')
+            data = ins.attrs['data']
+            lit = ''.join('"' + chr(92) + 'x%X"' % b for b in data) or '""'
+            return self.line(depth, 'ail_bytearray_extend(%s, (ail_bytes){(const unsigned char *)(%s), %d});'
+                             % (o[0], lit, len(data)))
+        if op == 'ba.call':
+            self.parts.add('BYTEARRAY')
+            checked = ins.attrs['callee'] in self.pending or (ins.attrs['callee'] == self.fn.sym and self.is_pending)
+            text = '%s%s(%s)' % (ins.attrs['callee'], '__ir' if checked else '', ', '.join(o[1:]))
+            if checked:
+                self.parts.add('IREXC')
+                self.count += 1
+                t = 'ir%d' % self.count
+                self.line(depth, 'ail_bytearray *%s = %s;' % (t, text))
+                self.pending_check(depth)
+                return self.line(depth, 'ail_bytearray_store(&%s, %s, 1);' % (o[0], t))
+            return self.line(depth, 'ail_bytearray_store(&%s, %s, 1);' % (o[0], text))
+        if op in ('ba.new', 'ba.drop', 'ba.clear', 'ba.write'):
+            self.parts.add('BYTEARRAY')
+            if op == 'ba.new':
+                return self.line(depth, 'ail_bytearray_store(&%s, ail_bytearray_new(%s), 1);' % (o[0], o[1]))
+            if op == 'ba.drop':
+                return self.line(depth, 'ail_bytearray_store(&%s, NULL, 1);' % o[0])
+            if op == 'ba.clear':
+                return self.line(depth, 'ail_bytearray_clear(%s);' % o[0])
+            self.parts.add('STDIO')
+            return self.line(depth, 'ail_stdout_write_bytes(ail_bytearray_span(%s));' % o[0])
+        if op in ('list.reset', 'list.repeat', 'list.lit', 'list.reserve', 'list.move'):
+            return self.list_replace(ins, depth, o)
+        if op in ('call', 'list.call'):
             abi = ins.attrs.get('abi') or ['value'] * len(o)
+            if op == 'list.call':
+                abi = [None] + list(abi)
             parts = []
             for v, text, a in zip(ins.operands, o, abi):
-                if a == 'array':
-                    parts.append('%s, %s_len' % (text, text))
+                if a is None:
+                    continue
+                if a in ('array', 'flist') and v in self.defs and self.defs[v].op in ('list.ref', 'field.list'):
+                    # an owned (or field) list handed to a read-only list parameter: the callee gets
+                    # the data pointer and length (an int list) or the {p, n, cap} struct (a float list)
+                    parts.append('(%s)->p, (%s)->n' % (text, text) if a == 'array' else '*(%s)' % text)
+                elif a == 'array':
+                    if v in self.span_names and v not in self.names:
+                        parts.append('%s, %s' % self.span_names[v][:2])
+                    else:
+                        parts.append('%s, %s_len' % (text, text))
                 else:
                     parts.append(text)
             callee = ins.attrs['callee']
@@ -517,6 +643,24 @@ class Emitter(object):
             checked = callee in self.pending or (callee == self.fn.sym and self.is_pending)
             if checked:
                 self.parts.add('IREXC')
+            if op == 'list.call':
+                # a list-returning callee hands its list back through a buffer (LISTRET); with none
+                # given, the whole list waits in the runtime's spill slot and is adopted right after
+                dst = ins.operands[0]
+                flist = dst.type == _LISTS[1]
+                parts.append('NULL, 0')
+                self.parts.update(('FLIST', 'FLISTRET', 'IRFLIST') if flist else ('LIST', 'LISTRET', 'IRLIST'))
+                self.count += 1
+                n = 'ir%d' % self.count
+                text = '%s%s(%s)' % (callee, '__ir' if checked else '', ', '.join(parts))
+                self.line(depth, 'int64_t %s = %s;' % (n, text))
+                if checked:
+                    self.parts.add('IREXC')
+                    self.pending_check(depth)
+                kind = 'flist' if flist else 'list'
+                self.line(depth, '{ ail_%s _r = ail_%s_adopt_return(%s); ail_%s_free(%s); *(%s) = _r; }'
+                          % (kind, kind, n, kind, o[0], o[0]))
+                return
             text = '%s%s(%s)' % (callee, '__ir' if checked else '', ', '.join(parts))
             if ins.results:
                 self.assign_new(depth, ins.result, text)
@@ -571,7 +715,7 @@ class Emitter(object):
                                 # `continue;` changes GCC's block layout: +1 jump per iteration)
             return self.line(depth, 'continue;')
         if op == 'return':
-            if not self.scopes and self.cx.kind == 'top' and not self.retained:
+            if not self.scopes and self.cx.kind == 'top' and not self.retained and not self.owned:
                 return self.line(depth, 'return %s;' % o[0] if o else 'return;')
             return self.exit_return(depth, o[0] if o else None)
         if op == 'raise':
@@ -724,6 +868,9 @@ class Emitter(object):
         op = ins.op
         elem = ins.operands[0].type.args[0].args[0]
         f = 'flist' if elem == I.F64 else 'list'
+        d = self.defs.get(ins.operands[0])
+        if d is not None and d.op == 'list.ref':
+            return self.owned_list_op(ins, depth, o, f)
         self.parts.update(('NUMFIELD', 'NUMFIELDMUT', 'LIST'))
         if elem == I.F64:
             self.parts.add('FLIST')
@@ -746,6 +893,63 @@ class Emitter(object):
             return self.line(depth, '(void)ail_numfield_%s_pop(%s, -1LL);' % (f, L))
         if op == 'list.clear':
             return self.line(depth, 'ail_numfield_%s_clear(%s);' % (f, L))
+        raise I.IRError('no C for %s' % op)
+
+    def owned_list_op(self, ins, depth, o, f):
+        """Element access, growth and shrinking of a list this function owns: the legacy helpers
+        (`ail_list_*`: same messages), with the checked get/set always inlined."""
+        op = ins.op
+        self.parts.update(('LIST', 'IRLIST') if f == 'list' else ('FLIST', 'IRFLIST'))
+        L = o[0]
+        ir = 'ail_ir_%s' % f
+        if op == 'list.len':
+            return self.assign_new(depth, ins.result, '((int64_t)(%s)->n)' % L)
+        if op == 'list.get':
+            if ins.attrs.get('mode') == 'nck':
+                return self.assign_new(depth, ins.result, '((%s)->p[%s])' % (L, o[1]))
+            return self.assign_new(depth, ins.result, '%s_get(%s, %s)' % (ir, L, o[1]))
+        if op == 'list.set':
+            if ins.attrs.get('mode') == 'nck':
+                return self.line(depth, '(%s)->p[%s] = %s;' % (L, o[1], o[2]))
+            return self.line(depth, '%s_set(%s, %s, %s);' % (ir, L, o[1], o[2]))
+        if op == 'list.push':
+            return self.line(depth, 'ail_%s_push(%s, %s);' % (f, L, o[1]))
+        if op == 'list.pop':
+            if ins.results:
+                return self.assign_new(depth, ins.result, 'ail_%s_pop(%s, -1LL)' % (f, L))
+            return self.line(depth, '(void)ail_%s_pop(%s, -1LL);' % (f, L))
+        if op == 'list.clear':
+            return self.line(depth, 'ail_%s_clear(%s);' % (f, L))
+        raise I.IRError('no C for %s' % op)
+
+    def list_replace(self, ins, depth, o):
+        """The operations that replace the content of an owned list (the old content is freed)."""
+        op = ins.op
+        f = 'flist' if ins.operands[0].type == _LISTS[1] else 'list'
+        self.parts.update(('LIST', 'IRLIST') if f == 'list' else ('FLIST', 'IRFLIST'))
+        L = o[0]
+        if op == 'list.reset':
+            return self.line(depth, 'ail_%s_free(%s);' % (f, L))
+        if op == 'list.reserve':
+            return self.line(depth, 'ail_%s_reserve(%s, %s);' % (f, L, o[1]))
+        if op == 'list.repeat':
+            self.count += 1
+            n, i = 'ir%d' % self.count, 'ir%d' % (self.count + 1)
+            self.count += 1
+            self.line(depth, '{ int64_t %s = %s; ail_%s_free(%s); if (%s > 0) { ail_%s_reserve(%s, %s); '
+                             'for (int64_t %s = 0; %s < %s; %s++) (%s)->p[%s] = %s; (%s)->n = %s; } }'
+                      % (n, o[2], f, L, n, f, L, n, i, i, n, i, L, i, o[1], L, n))
+            return
+        if op == 'list.lit':
+            self.line(depth, '{ ail_%s_free(%s);%s }' % (
+                f, L, ''.join(' ail_%s_push(%s, %s);' % (f, L, v) for v in o[1:])))
+            return
+        if op == 'list.move':
+            self.count += 1
+            t = 'ir%d' % self.count
+            self.line(depth, '{ ail_%s %s = *(%s); *(%s) = (ail_%s){0}; ail_%s_free(%s); *(%s) = %s; }'
+                      % (f, t, o[1], o[1], f, f, L, L, t))
+            return
         raise I.IRError('no C for %s' % op)
 
     loops = ()
@@ -841,11 +1045,11 @@ class Emitter(object):
                         yield x
 
 
-def emit_function(fn, pending=(), checked=False):
+def emit_function(fn, pending=(), checked=False, summaries=None, unwind_name=None):
     """(signature text, function definition text, runtime needs {'parts','need','floor',
     'pending'}). `pending` lists the callees that have an exception entry point; the result's
     `pending` says whether this function has one too (then its text defines `<sym>__ir` and, under
     the function's own name, the wrapper legacy callers use)."""
-    em = Emitter(fn, pending, checked)
+    em = Emitter(fn, pending, checked, summaries, unwind_name)
     sig, text = em.emit()
     return sig, text, {'parts': em.parts, 'need': em.need, 'floor': em.floor, 'pending': em.is_pending}

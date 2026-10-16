@@ -19,9 +19,12 @@
    code grows at most linearly with nesting depth.
 """
 from .. import ir as I
+from .. import effects as E
 from . import simplify
 
-RESIZING = ('list.push', 'list.pop', 'list.clear', 'ba.push')
+RESIZING = ('list.push', 'list.pop', 'list.clear', 'ba.push', 'ba.clear', 'ba.extend_lit')
+# S3a: operations that replace or grow the list they name (the first operand; both for a move)
+REPLACING = ('list.reset', 'list.repeat', 'list.lit', 'list.reserve', 'list.move', 'list.call')
 
 
 def _defs(fn):
@@ -85,8 +88,18 @@ class LICM(object):
         self.frozen = set()          # loops never to version (slow copies)
 
     # ------------------------------------------------------------------ helpers
-    def resizes(self, ins):
+    def resizes_root(self, ins, root, defs):
+        """Whether `ins` may resize or replace the owned list rooted at `root` (a list the function
+        owns: only an operation naming that very list can; a call has no way to name it)."""
         if ins.op in RESIZING:
+            return E._root(ins.operands[0], self.fn, defs) in (root, 'Any')
+        if ins.op in REPLACING:
+            refs = ins.operands[:2] if ins.op == 'list.move' else ins.operands[:1]
+            return any(E._root(r, self.fn, defs) in (root, 'Any') for r in refs)
+        return False
+
+    def resizes(self, ins):
+        if ins.op in RESIZING or ins.op in REPLACING:
             return True
         if ins.op == 'call':
             eff = self.summaries.get(ins.attrs.get('callee'))
@@ -144,24 +157,37 @@ class LICM(object):
         k = 0
         while k < len(region.instrs):
             ins = region.instrs[k]
-            if ins.op in I.LOOP_OPS and not any(self.resizes(i) for r in ins.regions for i in I.walk(r)):
+            if ins.op in I.LOOP_OPS:
                 new = self.make_spans(ins)
                 region.instrs[k:k] = new
-                k += len(new) + 1
-                continue
+                k += len(new)
+                ins = region.instrs[k]
             for r in ins.regions:
                 self.span_hoist(r)
             k += 1
 
     def make_spans(self, loop):
         inside = _inside(loop)
+        defs = _defs(self.fn)
+        body = [i for r in loop.regions for i in I.walk(r)]
+        any_resize = None
         lists = []
-        for r in loop.regions:
-            for ins in I.walk(r):
-                if ins.op in ('list.get', 'list.set', 'list.len', 'ba.get', 'ba.set', 'ba.len'):
-                    L = ins.operands[0]
-                    if L not in inside and L not in lists:
-                        lists.append(L)
+        for ins in body:
+            if ins.op in ('list.get', 'list.set', 'list.len', 'ba.get', 'ba.set', 'ba.len'):
+                L = ins.operands[0]
+                if L in inside or L in lists:
+                    continue
+                root = E._root(L, self.fn, defs)
+                if root.startswith('Own('):
+                    # an owned list: only an operation naming this very list can resize it
+                    if any(self.resizes_root(i, root, defs) for i in body):
+                        continue
+                else:
+                    if any_resize is None:
+                        any_resize = any(self.resizes(i) for i in body)
+                    if any_resize:
+                        continue
+                lists.append(L)
         if not lists:
             return []
         made = []

@@ -120,7 +120,9 @@ def apply(P, args, kwargs, result):
             if text.print_function(again) != printed:
                 raise I.IRError('print/parse/print round trip changed the text of %s' % fn.name)
             verify.check(again, program)
-        new_sig, body, needs = emit_c.emit_function(function, PENDING, checked_exceptions())
+        named = re.search(r'static void (ail_unwind_\w+)\(void \*\*p\) \{', generated)
+        new_sig, body, needs = emit_c.emit_function(function, PENDING, checked_exceptions(), _summaries(ctx),
+                                                    named.group(1) if named else None)
         # (a function with a try has its parameters `volatile` in the legacy signature, for the
         # setjmp rule; a qualifier on a parameter does not change the type of the function)
         if new_sig != sig and ''.join(new_sig.split()) != ''.join(re.sub(r'\bvolatile\b', '', sig).split()):

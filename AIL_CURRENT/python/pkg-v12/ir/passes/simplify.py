@@ -35,7 +35,7 @@ def may_raise_or_effect(ins, defs=None):
     if op in ('fdiv', 'ffloordiv', 'ffloormod') and defs is not None:
         d = _const(ins.operands[1], defs)
         return not (isinstance(d, float) and d != 0.0)
-    if op in ('bytes.len', 'field.list', 'span.len'):
+    if op in ('bytes.len', 'field.list', 'span.len', 'list.ref'):
         return False
     if op == 'bytes.get':
         return ins.attrs.get('mode') != 'nck'
@@ -49,7 +49,7 @@ def is_pure(ins, defs=None):
     return not ins.regions and not may_raise_or_effect(ins, defs)
 
 
-_READS = ('field.get', 'span.of')
+_READS = ('field.get', 'span.of', 'field.ba')
 
 
 def removable(ins, defs=None):

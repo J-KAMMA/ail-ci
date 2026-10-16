@@ -21,6 +21,9 @@ S0 does not have; they arrive with S3.
 from . import ir as I
 from . import effects as E
 
+_LIST_I64 = I.T('obj', I.T('list', I.I64))
+_LIST_F64 = I.T('obj', I.T('list', I.F64))
+_BA = I.T('obj', I.T('bytearray'))
 S0_TYPES = frozenset([I.I1, I.I64, I.F64])
 # S1 adds read-only bytes views and numeric lists / struct objects reached through borrows
 S1_TYPES = S0_TYPES | frozenset([I.T('bytes'), I.T('obj', I.T('list', I.I64)),
@@ -76,12 +79,89 @@ class _Checker(object):
         if fn.body.args:
             self.err('body', 'the function body takes no block arguments (parameters are separate)')
         self.region(fn.body, scope, [('func', None)], top=True)
+        if not self.errors:
+            self.check_spans()
+            self.check_ownership()
         if fn.effects is not None:
             actual = E.summarize(fn, self.program)
             if not fn.effects.covers(actual):
                 self.err('effects', 'declared summary %r does not cover the body %r'
                          % (fn.effects, actual))
         return self.errors
+
+    # ------------------------------------------------------------------ ownership of lists (S3a)
+    _RESIZERS = ('list.push', 'list.pop', 'list.clear', 'list.reset', 'list.repeat', 'list.lit',
+                 'list.reserve', 'list.move', 'list.call')
+
+    def _resizes(self, ins, root, defs):
+        """Whether `ins` may change the length or storage of the list rooted at `root` (an owned
+        local: only an operation naming that very list can; a call cannot, it has no way to name it)."""
+        if ins.op not in self._RESIZERS:
+            return False
+        refs = ins.operands[:2] if ins.op == 'list.move' else ins.operands[:1]
+        return any(E._root(r, self.fn, defs) in (root, 'Any') for r in refs)
+
+    def check_ownership(self):
+        """The invariants of S3a's single-owner lists: a list reference (borrow) lives only as the
+        operand of the instruction that uses it -- it is never stored, carried by a loop, yielded
+        by a region or selected -- so no second owner exists; the function lists its owned places."""
+        fn = self.fn
+        listy = (_LIST_I64, _LIST_F64)
+        places = []
+        for ins in I.walk(fn.body):
+            if ins.op == 'local.alloc' and ins.result.type.pointee in listy:
+                places.append(ins.attrs.get('name'))
+            if ins.op in ('store', 'load') and ins.operands[0].type.is_place \
+                    and ins.operands[0].type.pointee in listy:
+                self.err(ins.op, 'an owned list is changed by list.* operations, never loaded or stored')
+            if ins.op == 'local.alloc' and ins.result.type.pointee == _BA:
+                places.append(ins.attrs.get('name'))
+            if ins.op == 'store' and ins.operands[0].type.is_place and ins.operands[0].type.pointee == _BA:
+                self.err(ins.op, 'an owned bytearray is replaced by ba.new, never stored (the reference count)')
+            carried = []
+            if ins.op in ('yield', 'break', 'continue', 'select'):
+                carried = ins.operands
+            elif ins.op == 'loop':
+                carried = ins.operands
+            elif ins.op == 'for.range':
+                carried = ins.operands[3:]
+            if any(v.type in listy for v in carried) or (
+                    ins.op in ('if', 'loop', 'for.range') and any(r.type in listy for r in ins.results)):
+                self.err(ins.op, 'a list reference cannot be carried, yielded or selected (it would be a second owner)')
+        want = sorted(n for n in places if n)
+        have = sorted(fn.attrs.get('owned') or [])
+        if want != have:
+            self.err('attrs', 'owned places %s are not the function\'s list places %s' % (have, want))
+        if bool(fn.results and fn.results[0] in listy) != bool(fn.attrs.get('ret_list')):
+            self.err('attrs', 'ret_list must be set exactly when the function returns a list')
+
+    def check_spans(self):
+        """A span (data pointer and length, read once) over an owned list must not be used after an
+        operation that may resize or replace that list: between `span.of` and the last use of the
+        span, in program order and around any loop the two share, nothing resizes its list."""
+        fn = self.fn
+        defs = E.defs_of(fn)
+
+        def uses(region, v):
+            return any(v in i.operands for i in I.walk(region))
+
+        def visit(region):
+            for k, ins in enumerate(region.instrs):
+                if ins.op == 'span.of':
+                    root = E._root(ins.operands[0], fn, defs)
+                    if root.startswith('Own('):
+                        s = ins.result
+                        last = -1
+                        for j in range(k + 1, len(region.instrs)):
+                            if uses(I.Region([], [region.instrs[j]]), s):
+                                last = j
+                        for j in range(k + 1, last + 1):
+                            for sub in I.walk(I.Region([], [region.instrs[j]])):
+                                if self._resizes(sub, root, defs):
+                                    self.err(sub.op, 'resizes %s while a span over it is still in use' % root)
+                for r in ins.regions:
+                    visit(r)
+        visit(fn.body)
 
     def region(self, region, scope, stack, top=False):
         """`stack` lists the enclosing region owners innermost last: ('func'|'if'|op, instr)."""
@@ -256,8 +336,14 @@ class _Checker(object):
         if not self.want(where, sig is not None, 'call to unknown function %r' % (sym,)):
             return
         params, results = sig.args[0].args, sig.args[1].args
-        self.want(where, list(self.types(ins.operands)) == list(params),
-                  'arguments (%s) do not match %s' % (', '.join(map(str, self.types(ins.operands))), sig))
+        abi = ins.attrs.get('abi') or ['value'] * len(ins.operands)
+        ok = len(ins.operands) == len(params) == len(abi)
+        for a, p, how in zip(ins.operands, params, abi):
+            # an owned list lent to a read-only list parameter (a span in the callee's signature)
+            lent = how in ('array', 'flist') and p.head == 'span' and self._is_list_ref(a) \
+                and a.type.args[0].args[0] == p.args[0]
+            ok = ok and (a.type == p or lent)
+        self.want(where, ok, 'arguments (%s) do not match %s' % (', '.join(map(str, self.types(ins.operands))), sig))
         self.want(where, list(self.types(ins.results)) == list(results),
                   'results do not match %s' % sig)
 
@@ -322,6 +408,112 @@ class _Checker(object):
     def op_list_clear(self, ins, scope, stack, where, top):
         self.nresults(ins, where, 0)
         self.want(where, self._list_elem(ins.operands[0]) is not None, 'list.clear of a non-list')
+
+    # ------------------------------------------------------------------ owned lists (S3a)
+    def _is_list_ref(self, v):
+        return v.type in (_LIST_I64, _LIST_F64)
+
+    def op_list_ref(self, ins, scope, stack, where, top):
+        if not self.nresults(ins, where, 1):
+            return
+        p = ins.operands[0]
+        if self.want(where, p.type.is_place and p.type.pointee in (_LIST_I64, _LIST_F64),
+                     'list.ref takes the place of an owned list'):
+            self.want(where, ins.result.type == p.type.pointee, "list.ref yields a borrow of the place's list")
+            d = E.defs_of(self.fn).get(p)
+            self.want(where, d is not None and d.op == 'local.alloc', 'list.ref of something that is not a local place')
+
+    def op_list_reset(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        self.want(where, self._is_list_ref(ins.operands[0]), 'list.reset takes a list reference')
+
+    def op_list_repeat(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        r, v, n = ins.operands
+        self.want(where, self._is_list_ref(r) and v.type == r.type.args[0].args[0] and n.type == I.I64,
+                  'list.repeat takes (list, element, i64)')
+
+    def op_list_lit(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        r = ins.operands[0]
+        self.want(where, self._is_list_ref(r) and all(v.type == r.type.args[0].args[0] for v in ins.operands[1:]),
+                  'list.lit takes (list, elements of the element type...)')
+
+    def op_list_reserve(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        r, n = ins.operands
+        self.want(where, self._is_list_ref(r) and n.type == I.I64, 'list.reserve takes (list, i64)')
+
+    def op_list_move(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        d, s = ins.operands
+        self.want(where, self._is_list_ref(d) and d.type == s.type, 'list.move takes two lists of one type')
+        self.want(where, d is not s, 'list.move of a list into itself')
+
+    def op_list_call(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        sym = ins.attrs.get('callee')
+        sig = self.program.callee_type(sym) if self.program is not None else None
+        if not self.want(where, sig is not None, 'call to unknown function %r' % (sym,)):
+            return
+        params, results = sig.args[0].args, sig.args[1].args
+        dst, args = ins.operands[0], ins.operands[1:]
+        self.want(where, self._is_list_ref(dst) and list(results) == [dst.type],
+                  'list.call destination must be the list type %s the callee returns' % (list(results),))
+        abi = ins.attrs.get('abi') or ['value'] * len(args)
+        ok = len(args) == len(params) == len(abi)
+        for a, p, how in zip(args, params, abi):
+            if how in ('array', 'flist'):
+                ok = ok and p.head == 'span' and (a.type == p or (self._is_list_ref(a) and a.type.args[0].args[0] == p.args[0]))
+            else:
+                ok = ok and a.type == p
+        self.want(where, ok, 'arguments (%s) do not match %s' % (', '.join(str(a.type) for a in args), sig))
+
+    def op_ba_new(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        p, n = ins.operands
+        self.want(where, p.type.is_place and p.type.pointee == _BA and n.type == I.I64,
+                  'ba.new takes (place of a bytearray, i64)')
+
+    def op_ba_drop(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        p = ins.operands[0]
+        self.want(where, p.type.is_place and p.type.pointee == _BA, 'ba.drop takes the place of a bytearray')
+
+    def op_ba_call(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        sym = ins.attrs.get('callee')
+        sig = self.program.callee_type(sym) if self.program is not None else None
+        if not self.want(where, sig is not None, 'call to unknown function %r' % (sym,)):
+            return
+        params, results = sig.args[0].args, sig.args[1].args
+        place, args = ins.operands[0], ins.operands[1:]
+        self.want(where, place.type.is_place and place.type.pointee == _BA and list(results) == [_BA],
+                  'ba.call adopts a bytearray result into a bytearray place')
+        self.want(where, list(self.types(args)) == list(params), 'arguments do not match %s' % sig)
+
+    def op_ba_clear(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        self.want(where, self._is_ba(ins.operands[0]), 'ba.clear takes a bytearray')
+
+    def op_ba_extend_lit(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        self.want(where, self._is_ba(ins.operands[0]), 'ba.extend_lit takes a bytearray')
+        data = ins.attrs.get('data')
+        self.want(where, isinstance(data, list) and all(isinstance(x, int) and not isinstance(x, bool)
+                                                         and 0 <= x <= 255 for x in data),
+                  'ba.extend_lit needs data = [byte values]')
+
+    def op_field_ba(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 1):
+            o = ins.operands[0].type
+            self.want(where, o.head == 'obj' and o.args[0].head == 'class', 'field.ba of a non-object')
+            self.want(where, ins.result.type == _BA, 'field.ba yields a bytearray')
+            self.want(where, isinstance(ins.attrs.get('name'), str), 'field.ba needs a name')
+
+    def op_ba_write(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        self.want(where, self._is_ba(ins.operands[0]), 'ba.write takes a bytearray')
 
     def op_field_list(self, ins, scope, stack, where, top):
         if self.nresults(ins, where, 1):
