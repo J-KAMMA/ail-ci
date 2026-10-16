@@ -1,0 +1,12 @@
+import sys
+
+def main() -> int:
+    total: int = 0
+    for line in sys.stdin:
+        for tok in line.split():
+            try:
+                total += int(tok)
+            except ValueError:
+                print("bad: " + tok)
+    print("sum=" + str(total))
+    return 0

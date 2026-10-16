@@ -1,0 +1,18 @@
+{
+  "ail-brace": {
+    "title": "AIL current style (fn / let / braces, `-> T`)",
+    "status": "supported",
+    "prompt": "prompts/ail-brace.md"
+  },
+  "pep484": {
+    "title": "Python surface with PEP 484 annotations (def / indentation / dataclass)",
+    "status": "supported",
+    "prompt": "prompts/pep484.md"
+  },
+  "ts-like": {
+    "title": "TypeScript-like result annotation (`fn f(a: int): int`)",
+    "status": "mockup",
+    "prompt": "prompts/ts-like.md",
+    "note": "Rejected by the compiler today (checked: `invalid fn header`). Excluded from scoring."
+  }
+}

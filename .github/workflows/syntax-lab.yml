@@ -1,0 +1,49 @@
+name: syntax-lab
+
+# Scores the hand-generated submissions under lab/syntax/runs/ with the AIL compiler in this repo.
+# No secrets or API keys are used; the job has read-only repository access.
+on:
+  push:
+    paths:
+      - lab/syntax/**
+      - .github/workflows/syntax-lab.yml
+  pull_request:
+    paths:
+      - lab/syntax/**
+      - .github/workflows/syntax-lab.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: syntax-lab-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  score:
+    name: score submissions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: 3.12
+      - name: Score real submissions
+        run: |
+          gcc --version | head -1
+          python3 lab/syntax/score.py -j 4 --out syntax-scores.md > /dev/null
+          cat syntax-scores.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Pipeline self-check with the bundled samples
+        run: |
+          python3 lab/syntax/score.py -j 4 --include-samples --out syntax-samples.md > /dev/null
+          { echo; echo "---"; echo "Samples (pipeline check only, not results):"; echo; sed 1,2d syntax-samples.md; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: syntax-scores
+          path: |
+            syntax-scores.md
+            syntax-samples.md

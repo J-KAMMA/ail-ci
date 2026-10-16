@@ -1,0 +1,19 @@
+import sys
+
+def steps(n: int) -> int:
+    k: int = 0
+    x: int = n
+    while x != 1:
+        if x % 2 == 0:
+            x = x // 2
+        else:
+            x = 3 * x + 1
+        k += 1
+    return k
+
+def main() -> int:
+    for line in sys.stdin:
+        s = line.strip()
+        if len(s) > 0:
+            print(steps(int(s)))
+    return 0
