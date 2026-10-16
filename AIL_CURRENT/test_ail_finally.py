@@ -217,6 +217,36 @@ def run(n: int) -> int:
 '''
 
 
+GENERAL_PENDING = '''
+def h(s: str) -> str:
+    try:
+        s = s + "y"
+        raise RuntimeError(s)
+    finally:
+        try:
+            x = [1][3]
+        except IndexError:
+            print("inner")
+        print("fin", s)
+    return s
+
+def r(s: str) -> str:
+    try:
+        s = s + "q"
+        return s
+    finally:
+        print("r-fin", s)
+
+def main() -> None:
+    try:
+        print(h("ab"))
+    except RuntimeError as e:
+        print("caught", e)
+    print(r("z"))
+
+'''
+
+
 @unittest.skipUnless(os.environ.get('PIPE_CC') or shutil.which('cc') or shutil.which('gcc'),
                      'installed C compiler required')
 class FinallyTests(unittest.TestCase):
@@ -243,6 +273,23 @@ class FinallyTests(unittest.TestCase):
                 actual = subprocess.run([str(executable), str(n)], capture_output=True, timeout=30)
                 self.assertEqual((actual.returncode, actual.stderr), (0, b''))
                 self.assertEqual(actual.stdout.decode().replace('\r\n', '\n'), oracle.getvalue())
+
+    def test_general_path_pending_exception_survives_finally_body(self):
+        # The general path used to drop a pending exception (and the return it replaced) when the
+        # finally body ran any call, or caught an exception of its own; the caller saw None.
+        oracle = io.StringIO()
+        with contextlib.redirect_stdout(oracle):
+            exec(GENERAL_PENDING + 'main()\n', {})
+        source = self.write('pending.ail', GENERAL_PENDING + 'main()\n')
+        executable = self.root / 'pending'
+        built = self.command('compile', source, '--syntax', 'python', '-o', executable)
+        self.assertEqual(built.returncode, 0, built.stderr.decode(errors='replace'))
+        if not executable.is_file():
+            executable = Path(str(executable) + '.exe')
+        actual = subprocess.run([str(executable)], capture_output=True, timeout=30)
+        self.assertEqual((actual.returncode, actual.stderr), (0, b''))
+        self.assertEqual(actual.stdout.decode().replace('\r\n', '\n'), oracle.getvalue())
+        self.assertIn('caught aby', oracle.getvalue())
 
     def test_public_brace_finally(self):
         executable = self.ail_build('brace', BRACE_LIBRARY + BRACE_MAIN)

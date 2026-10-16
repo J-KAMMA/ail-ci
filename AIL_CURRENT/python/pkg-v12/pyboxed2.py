@@ -6021,6 +6021,14 @@ class Compiler:
             ctx.finally_stack.pop()
             ctx.lines.append('%s: ;' % fin_label)
             ctx.indent += 1
+            # A pending exception is the status in `st` and the record in `cx->exc` when control
+            # arrives here; the finally body's own calls overwrite `st` (AIL_OK) and an
+            # exception caught inside the body clears or replaces the record. Keep both for the
+            # COMPLETE_EXC exit (in frame slots, so the collector still sees them).
+            fin_st = '%s_st' % fin_label
+            sc, sm, sv = (ctx.slot_expr(ctx.new_slot()) for _ in range(3))
+            ctx.emit('ail_st %s = st; (void)%s;' % (fin_st, fin_st))
+            ctx.emit('%s = cx->exc.cls; %s = cx->exc.msg; %s = cx->exc.value;' % (sc, sm, sv))
             self.block(node.finalbody, ctx)
             ctx.emit('switch (comp) {')
             ctx.indent += 1
@@ -6030,7 +6038,9 @@ class Compiler:
             else:
                 ctx.emit('case AIL_COMPLETE_RETURN: *out = %s; AIL_FRAME_LEAVE(cx, f); return AIL_OK;'
                          % (ctx.retval_slot or 'ail_box_none()'))
-            ctx.emit('case AIL_COMPLETE_EXC: goto %s;' % ctx.cur_err_target())
+            ctx.emit('case AIL_COMPLETE_EXC: st = %s; cx->exc.cls = %s; cx->exc.msg = %s; '
+                     'cx->exc.value = %s; cx->exc_pending = 1; goto %s;'
+                     % (fin_st, sc, sm, sv, ctx.cur_err_target()))
             ctx.emit('default: break;')
             ctx.indent -= 1
             ctx.emit('}')

@@ -36,6 +36,9 @@ def optimize(fn, program, facts=None, check=None):
 
     def after():
         if check is not None:
+            # a pass may add reads (a span over a list that was only written): the declared summary
+            # follows the body between passes, exactly as it does at the end of this function
+            E.summarize_program(program)
             check(fn)
     if 'mem2reg' in on:
         stats['promoted'] = mem2reg.run(fn)

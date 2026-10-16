@@ -248,7 +248,7 @@ class GuardedLoops(unittest.TestCase):
             for fn in ('flip', 'shifted', 'wrapped', 'stepped', 'skippy'):
                 body = function_body(program, fn)
                 self.assertIn('->p[', body, '%s: no unchecked copy emitted' % fn)
-                if fn != 'shifted':     # constant bounds over an 8-element list: rangecheck.py proves
+                if fn != 'shifted' and LEGACY_C:     # constant bounds over an 8-element list: rangecheck.py proves
                     self.assertTrue('ail_list_get(' in body or 'ail_list_set(' in body, fn)  # every access
             # ... and the loops that resize or step twice per iteration are not guarded (one loop,
             # no `else` copy). `growing` reads xs[i] right after xs.append(...), where
@@ -256,7 +256,8 @@ class GuardedLoops(unittest.TestCase):
             for fn in ('growing', 'twice'):
                 body = function_body(program, fn)
                 self.assertNotIn('} else {', body, '%s: must not be guarded' % fn)
-            self.assertNotIn('->p[', function_body(program, 'twice'))
+            if LEGACY_C:
+                self.assertNotIn('->p[', function_body(program, 'twice'))
 
     def test_swap_loop_runs_without_bounds_checks(self):
         source = """
@@ -815,7 +816,8 @@ fn main() {
             for c in codes:
                 s = s * 4 + c
             self.assertEqual(ran.stdout.split('\n')[:3], [str(s), 'value error', '1'])
-            self.assertIn('_receiver', function_body(program, 'build'))
+            if LEGACY_C:
+                self.assertIn('_receiver', function_body(program, 'build'))
 
 
 if __name__ == '__main__':

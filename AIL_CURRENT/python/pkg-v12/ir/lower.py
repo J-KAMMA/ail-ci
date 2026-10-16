@@ -31,6 +31,15 @@ from . import effects as E
 
 BYTES = I.T('bytes')
 BYTEARRAY = I.T('obj', I.T('bytearray'))
+LIST_I64 = I.T('obj', I.T('list', I.I64))
+LIST_F64 = I.T('obj', I.T('list', I.F64))
+# list-valued methods the S3a lowering recognises as changing a list's length or contents
+_LIST_MUTATORS = ('append', 'pop', 'clear', 'extend', 'insert', 'remove', 'sort', 'reverse')
+
+
+def is_list(t):
+    """An owned-list type: obj<list<i64>> or obj<list<f64>>."""
+    return t in (LIST_I64, LIST_F64)
 
 
 class NotS0(Exception):
@@ -87,16 +96,28 @@ class Lowering(object):
         self.params = {}
         self.proofs = None
         self.linkage = _linkage(sig)
+        self.alias = {}               # owned list local -> (borrow of the field that now holds it, field name)
+        self.top_rest = {}            # id(top-level statement) -> the top-level statements after it
+        self.cur_stmt = None
+        self.scope_vars = {}          # comprehension variables in scope -> their SSA value
+        self.fieldba = set()          # values that are the bytearray a struct field held when read
 
     # ------------------------------------------------------------------ kinds and types
-    def kind_type(self, kind, what, views=False):
+    def kind_type(self, kind, what, views=False, owned=False, local=False):
         """The IR type of a legacy kind. : read-only views (bytes) are allowed -- for
-        parameters and call arguments, which the callee borrows."""
+        parameters and call arguments, which the callee borrows; `owned` admits the numeric lists
+        a function owns (locals and results, stage S3a)."""
         P = self.P
         if kind == P.INT:
             return I.I64
         if kind == P.FLT:
             return I.F64
+        if owned and kind == P.LIST:
+            return LIST_I64
+        if owned and kind == P.FLIST:
+            return LIST_F64
+        if owned and local and kind == 'bytearray':
+            return BYTEARRAY
         if views and kind == P.BYTES:
             return BYTES
         if views and kind == 'bytearray':
@@ -173,7 +194,10 @@ class Lowering(object):
         if getattr(ctx, 'builders', None):
             raise NotS0('builder locals')
         ret_kind = ctx.ret
-        results = [] if ret_kind == P.NORET else [self.kind_type(ret_kind, 'the result')]
+        if ret_kind == 'bytearray':
+            results = [BYTEARRAY]       # the owner's reference is handed to the caller (retained at the return)
+        else:
+            results = [] if ret_kind == P.NORET else [self.kind_type(ret_kind, 'the result', owned=True)]
         param_types = [self.kind_type(k, 'parameter %r' % n, views=True) for n, k in ctx.params]
         param_names = [n for n, _ in ctx.params]
         if param_names != [p.arg for p in a.args]:
@@ -199,7 +223,7 @@ class Lowering(object):
                 abi.append('value')
         for node in ast.walk(fn):
             if isinstance(node, (ast.NamedExpr, ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef,
-                                 ast.ClassDef, ast.Global, ast.Nonlocal, ast.ListComp, ast.SetComp,
+                                 ast.ClassDef, ast.Global, ast.Nonlocal, ast.SetComp,
                                  ast.DictComp, ast.GeneratorExp, ast.Await, ast.Yield, ast.YieldFrom,
                                  ast.With, ast.Delete, ast.Starred, getattr(ast, 'TryStar', ast.With))) \
                     and node is not fn:
@@ -227,7 +251,9 @@ class Lowering(object):
                     raise NotS0('parameter %r of type %s is reassigned' % (name, t))
             else:
                 kind = ctx.types.get(name)
-                t = value_type = self.kind_type(kind, 'local %r' % name)
+                if kind in (P.LIST, P.FLIST):
+                    self.check_list_local(name)
+                t = value_type = self.kind_type(kind, 'local %r' % name, owned=True, local=True)
             if name in getattr(ctx, 'optional', ()) or name in getattr(ctx, 'stdin_unbound', ()):
                 raise NotS0('local %r is optional or special' % name)
             self.places[name] = self.b.value('local.alloc', [], I.place(value_type), {'name': name})
@@ -237,12 +263,21 @@ class Lowering(object):
         self.alloc_end = sum(1 for i in f.body.instrs if i.op == 'local.alloc')
         if self.recursive:
             self.b.emit('rt', [], [], {'callee': 'ail_depth_enter'})
+        self.top_rest = dict((id(s), fn.body[k + 1:]) for k, s in enumerate(fn.body))
         self.stmts(fn.body)
         if not self.b.terminated():
             self.fallthrough()
         ops = [i for i in I.walk(f.body)]
         if any(i.op == 'try' for i in ops):
             f.attrs['frame'] = True
+            if results and (is_list(results[0]) or results[0] == BYTEARRAY):
+                raise NotS0('a function that returns a container and has a try')
+        owned = [i.attrs['name'] for i in f.body.instrs
+                 if i.op == 'local.alloc' and (is_list(i.result.type.pointee) or i.result.type.pointee == BYTEARRAY)]
+        if owned:
+            f.attrs['owned'] = owned
+        if results and is_list(results[0]):
+            f.attrs['ret_list'] = 'flist' if results[0] == LIST_F64 else 'list'
         # a function that raises, or calls one that can return with an exception pending, has the
         # exception entry point `<sym>__ir` and a wrapper under its own name (emit_c)
         if any(i.op in ('raise', 'reraise', 'try') or (i.op == 'call' and i.attrs.get('callee') in self.pending)
@@ -253,8 +288,14 @@ class Lowering(object):
 
     def assigned_names(self):
         out = set()
+        comp_targets = set()
         for node in ast.walk(self.fn):
-            if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            if isinstance(node, ast.ListComp):
+                for g in node.generators:
+                    comp_targets.update(id(n) for n in ast.walk(g.target))
+        for node in ast.walk(self.fn):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)) \
+                    and id(node) not in comp_targets:
                 out.add(node.id)
             elif isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign, ast.For)):
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
@@ -278,6 +319,8 @@ class Lowering(object):
         self.leave()
         if self.function.results:
             t = self.function.results[0]
+            if is_list(t) or t == BYTEARRAY:
+                raise NotS0('a function returning a container that can fall off its end')
             self.b.emit('return', [self.const(t, 0.0 if t == I.F64 else 0)])
         else:
             self.b.emit('return', [])
@@ -288,6 +331,318 @@ class Lowering(object):
             if self.b.terminated():
                 return            # dead code after return/break/continue
             self.stmt(s)
+            self.drop_after(s)
+
+    def drop_after(self, s):
+        """An owned list whose last mention is statement `s` is dropped when `s` completes (the
+        legacy path frees a numeric-list local at the same point, so a pipeline of whole-array
+        steps holds two arrays at a time, not all of them until the function returns)."""
+        names = (getattr(self.ctx, 'free_points', None) or {}).get(id(s), ())
+        for name in names:
+            place = self.places.get(name)
+            if place is None or not is_list(place.type.pointee) or name in self.ctx.kind \
+                    or self.b.terminated():
+                continue
+            self.b.emit('list.reset', [self.list_ref(place)])
+
+    def list_ref(self, place):
+        return self.b.value('list.ref', [place], place.type.pointee)
+
+    def check_list_local(self, name):
+        """The numeric-list locals the S3a lowering owns: flat lists of int or float, none of the
+        legacy path's special representations (handles, tuples, rows, bools, str)."""
+        ctx = self.ctx
+        for attr in ('nlist', 'blist', 'strlist', 'bool_lists', 'tstride', 'srowtypes', 'rowof', 'rowparam',
+                     'trowsf', 'handles', 'dhandles', 'hstride', 'borrowed_aliases'):
+            if name in (getattr(ctx, attr, None) or ()):
+                raise NotS0('list %r is a %s list' % (name, attr))
+        if name in ctx.kind:
+            raise NotS0('list %r is a special parameter' % name)
+
+    # ------------------------------------------------------------------ owned lists (S3a)
+    #
+    # Every list is owned by exactly one place (a local, a struct field, or a hidden temporary) and
+    # every other reference to it is a borrow that lives for one instruction (or, after LICM, a
+    # span over a loop that cannot resize it). No operation here makes a second name for a list:
+    # `ys = xs`, `ys = xs[:]`, `t.f = xs` with `xs` read afterwards and similar shapes are refused
+    # (the function stays on the legacy emitter, which copies), because under sharing semantics
+    # they would mean something else. The one store of a named list that is accepted is a move
+    # into a struct field where the program cannot tell a copy from the original (design section
+    # 12: Rule M, and Rule M' when the local is still read afterwards).
+    def is_list_name(self, name):
+        place = self.places.get(name)
+        return place is not None and is_list(place.type.pointee)
+
+    def guard_field_ba(self, base, *nodes):
+        """A bytearray read from a field is the reference the field held at that moment; a user
+        function called while the rest of the access is evaluated may rebind the field, so such
+        accesses are not lowered (the legacy path takes the same reference first and has the same
+        exposure; the IR does not extend it)."""
+        if base not in self.fieldba:
+            return
+        for node in nodes:
+            for n in ast.walk(node):
+                if isinstance(n, ast.Call) and not (isinstance(n.func, ast.Name) and n.func.id not in self.ctx.funcs
+                                                   and n.func.id not in getattr(self.ctx, 'classes', {})):
+                    raise NotS0('a bytearray field accessed while a function is called')
+
+    def is_ba_name(self, name):
+        place = self.places.get(name)
+        return place is not None and place.type.pointee == BYTEARRAY
+
+    def assign_ba(self, name, node):
+        """`b = bytearray()` / `b = bytearray(n)`: the place takes a fresh object (the old one is
+        released). Any other source would be a second name for an object or a conversion."""
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in self.ctx.funcs \
+                and node.func.id not in self.places and node.func.id not in self.params:
+            self.user_call(node.func.id, node, False, ba_dst=self.places[name])
+            return
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'bytearray'
+                and self.is_builtin('bytearray') and not node.keywords and len(node.args) <= 1):
+            raise NotS0('a bytearray built from %s (a second name for one, or a conversion: stage S3b)'
+                        % type(node).__name__)
+        n = self.as_int(self.expr(node.args[0])) if node.args else self.const(I.I64, 0)
+        self.b.emit('ba.new', [self.places[name], n])
+
+    def list_kind_of(self, t):
+        return self.P.FLIST if t == LIST_F64 else self.P.LIST
+
+    def same_kind(self, node, kind):
+        try:
+            got = self.P._etype(node, self.ctx)
+        except Exception as error:
+            raise NotS0('no legacy type for a list expression: %s' % error)
+        if got != kind:
+            raise NotS0('list kind disagreement at line %s: legacy %r, IR %r'
+                        % (getattr(node, 'lineno', '?'), got, kind))
+
+    def new_list_place(self, kind, tag):
+        return self.new_place(tag, LIST_F64 if kind == self.P.FLIST else LIST_I64)
+
+    def assign_list_name(self, name, node):
+        place = self.places[name]
+        self.assign_list(lambda: self.list_ref(place), node, self.list_kind_of(place.type.pointee))
+        self.alias.pop(name, None)
+
+    def assign_list(self, ref_fn, node, kind):
+        """Replace the content of the list `ref_fn()` names with the fresh list `node` builds."""
+        P = self.P
+        elem = I.F64 if kind == P.FLIST else I.I64
+        if isinstance(node, ast.List):
+            if any(isinstance(e, ast.Starred) for e in node.elts):
+                raise NotS0('a starred list display')
+            if not node.elts:
+                self.b.emit('list.reset', [ref_fn()])
+                return
+            vals = [self.field_value(self.expr(e), elem) for e in node.elts]
+            self.b.emit('list.lit', [ref_fn()] + vals)
+            return
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+            for lst, cnt, first in ((node.left, node.right, True), (node.right, node.left, False)):
+                if isinstance(lst, ast.List) and len(lst.elts) == 1 and not isinstance(lst.elts[0], ast.Starred):
+                    if first:
+                        v = self.field_value(self.expr(lst.elts[0]), elem)
+                        n = self.as_int(self.expr(cnt))
+                    else:
+                        n = self.as_int(self.expr(cnt))
+                        v = self.field_value(self.expr(lst.elts[0]), elem)
+                    self.b.emit('list.repeat', [ref_fn(), v, n])
+                    return
+            raise NotS0('a list product that is not [v] * n')
+        if isinstance(node, ast.ListComp):
+            tmp = self.comprehension(node, kind)
+            self.b.emit('list.move', [ref_fn(), self.list_ref(tmp)])
+            return
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in self.ctx.funcs \
+                and node.func.id not in self.places and node.func.id not in self.params:
+            self.user_call(node.func.id, node, False, list_dst=ref_fn, list_kind=kind)
+            return
+        raise NotS0('a list built from %s (a second name for a list, or a copy: stage S3b)'
+                    % type(node).__name__)
+
+    def mentions_outside(self, name, inner):
+        inside = set(id(n) for n in ast.walk(inner))
+        return any(isinstance(n, ast.Name) and n.id == name and id(n) not in inside for n in ast.walk(self.fn))
+
+    def comprehension(self, node, kind):
+        """`[elt for v in range(..) if c ...]`, built in a hidden list place that the caller moves
+        into its target (the old target stays readable while the new list is built)."""
+        P = self.P
+        elem = I.F64 if kind == P.FLIST else I.I64
+        if len(node.generators) != 1:
+            raise NotS0('a comprehension with several generators')
+        g = node.generators[0]
+        it = g.iter
+        if g.is_async or not isinstance(g.target, ast.Name) or not (
+                isinstance(it, ast.Call) and isinstance(it.func, ast.Name) and it.func.id == 'range'
+                and not it.keywords and 1 <= len(it.args) <= 3 and self.is_builtin('range')):
+            raise NotS0('a comprehension that is not over range()')
+        name = g.target.id
+        if name in self.places or name in self.params or name in self.scope_vars \
+                or self.mentions_outside(name, node):
+            raise NotS0('a comprehension variable that is also used outside it')
+        tmp = self.new_list_place(kind, 'comp')
+        self.b.emit('list.reset', [self.list_ref(tmp)])
+        args = [self.as_int(self.expr(a)) for a in it.args]
+        if len(args) == 1:
+            lo, hi, step = self.const(I.I64, 0), args[0], self.const(I.I64, 1)
+        elif len(args) == 2:
+            lo, hi, step = args[0], args[1], self.const(I.I64, 1)
+        else:
+            lo, hi, step = args
+        ref = self.list_ref(tmp)
+        if len(args) < 3 and not g.ifs:
+            # one allocation for a comprehension of known length (the legacy path reserves too)
+            self.b.emit('list.reserve', [ref, self.b.value('sub', [hi, lo], I.I64, {'mode': 'nsw'})])
+        index = I.Value(I.I64, hint=name)
+        body = I.Region([index])
+
+        def push():
+            v = self.field_value(self.expr(node.elt), elem)
+            self.b.emit('list.push', [ref, v])
+
+        def conds(k):
+            if k == len(g.ifs):
+                push()
+                return
+            c = self.truthy(g.ifs[k])
+            then, other = I.Region(), I.Region()
+            self.in_region(then, fill=lambda: (conds(k + 1), self.b.emit('yield')))
+            self.in_region(other, fill=lambda: self.b.emit('yield'))
+            self.b.emit('if', [c], [], None, [then, other])
+
+        def fill():
+            # the variable exists only here: it is an SSA value in scope, and (for the legacy
+            # type queries, which key on names) an int in the legacy context for the duration
+            self.scope_vars[name] = index
+            had = self.ctx.types.get(name)
+            self.ctx.types[name] = self.P.INT
+            try:
+                conds(0)
+            finally:
+                del self.scope_vars[name]
+                if had is None:
+                    del self.ctx.types[name]
+                else:
+                    self.ctx.types[name] = had
+            self.b.emit('continue')
+        self.loop_depth += 1
+        try:
+            self.in_region(body, fill=fill)
+        finally:
+            self.loop_depth -= 1
+        self.b.emit('for.range', [lo, hi, step], [], {'args': len(args)}, [body])
+        return tmp
+
+    def return_list(self, node):
+        t = self.function.results[0]
+        kind = self.list_kind_of(t)
+        if isinstance(node, ast.Name) and self.is_list_name(node.id) and self.places[node.id].type.pointee == t:
+            ref = self.container(node)
+        else:
+            tmp = self.new_list_place(kind, 'ret')
+            self.assign_list(lambda: self.list_ref(tmp), node, kind)
+            ref = self.list_ref(tmp)
+        self.leave()
+        self.b.emit('return', [ref])
+
+    def store_field_list(self, target, value_node):
+        """`t.f = <list>` for a numeric-list field of a struct parameter."""
+        obj, cls, fkind = self.field_of(target)
+        attrs = {'cls': cls, 'name': target.attr}
+
+        def ref_fn():
+            return self.b.value('field.list', [obj], LIST_F64 if fkind == self.P.FLIST else LIST_I64, dict(attrs))
+        if isinstance(value_node, ast.Name) and self.is_list_name(value_node.id):
+            self.move_into_field(target, value_node.id, fkind, ref_fn)
+            return
+        self.assign_list(ref_fn, value_node, fkind)
+
+    def move_into_field(self, target, name, fkind, ref_fn):
+        """`t.f = xs`: the field takes the storage of the owned local `xs` (Rule M). The legacy path
+        copies; the two cannot be told apart unless `xs` or the field is written afterwards, so
+        when `xs` is still read afterwards (Rule M') it becomes a borrow of the field for the rest
+        of the function, and the function is refused unless nothing below writes `xs` or `.f` or
+        calls code that might."""
+        place = self.places[name]
+        if self.list_kind_of(place.type.pointee) != fkind:
+            raise NotS0('a list stored in a field of the other element type')
+        rest = self.top_rest.get(id(self.cur_stmt))
+        if rest is None:
+            raise NotS0('a list moved into a field below the top level of the function')
+        if name in self.alias:
+            raise NotS0('a list that already is a borrow of a field')
+        used = any(isinstance(n, ast.Name) and n.id == name for st in rest for n in ast.walk(st))
+        if used and not self.rest_safe(rest, name, target.attr):
+            raise NotS0('a list stored in a field and then used while the field or the list may change')
+        self.b.emit('list.move', [ref_fn(), self.list_ref(place)])
+        if used:
+            self.alias[name] = (ref_fn, target.attr)
+
+    _PURE_BUILTINS = ('len', 'range', 'min', 'max', 'abs', 'int', 'float', 'ord', 'wrapping_add',
+                      'wrapping_sub', 'wrapping_mul')
+
+    def rest_safe(self, rest, name, field):
+        """Whether no statement of `rest` writes the list `name`, writes a list held in a field called
+        `field`, or calls anything that could (user functions, constructors, unknown methods)."""
+        def names_list(n):
+            return isinstance(n, ast.Name) and n.id == name
+
+        def field_list(n):
+            return isinstance(n, ast.Attribute) and n.attr == field
+
+        def writes(target):
+            while isinstance(target, ast.Subscript):
+                target = target.value
+            return names_list(target) or field_list(target)
+
+        for st in rest:
+            for n in ast.walk(st):
+                if isinstance(n, ast.Assign) and any(writes(t) for t in n.targets):
+                    return False
+                if isinstance(n, (ast.AugAssign, ast.AnnAssign)) and writes(n.target):
+                    return False
+                if isinstance(n, ast.For) and writes(n.target):
+                    return False
+                if isinstance(n, ast.Delete):
+                    return False
+                if isinstance(n, ast.Call):
+                    f = n.func
+                    if isinstance(f, ast.Name):
+                        if f.id not in self._PURE_BUILTINS or not self.is_builtin(f.id):
+                            return False
+                    elif isinstance(f, ast.Attribute) and f.attr in _LIST_MUTATORS:
+                        if names_list(f.value) or field_list(f.value):
+                            return False
+                        if not (isinstance(f.value, ast.Name) and self.is_list_name(f.value.id)
+                                or isinstance(f.value, ast.Attribute)):
+                            return False
+                    else:
+                        return False
+        return True
+
+    def body_mutates(self, body, name, field=None):
+        """Whether `body` rebinds or resizes the list `name` (or a list held in a field `field`)."""
+        for st in body:
+            for n in ast.walk(st):
+                if isinstance(n, (ast.Assign, ast.AugAssign, ast.AnnAssign, ast.For)):
+                    ts = n.targets if isinstance(n, ast.Assign) else [n.target]
+                    for t in ts:
+                        if isinstance(t, ast.Subscript):
+                            continue                  # an element store keeps the length
+                        if isinstance(t, ast.Name) and t.id == name:
+                            return True
+                        if field is not None and isinstance(t, ast.Attribute) and t.attr == field:
+                            return True
+                if isinstance(n, ast.Delete):
+                    return True
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in _LIST_MUTATORS:
+                    v = n.func.value
+                    if isinstance(v, ast.Name) and v.id == name:
+                        return True
+                    if field is not None and isinstance(v, ast.Attribute) and v.attr == field:
+                        return True
+        return False
 
     def in_region(self, region, body=None, fill=None):
         saved = self.b.region
@@ -304,9 +659,12 @@ class Lowering(object):
         place = self.places.get(name)
         if place is None:
             raise NotS0('store to %r' % name)
+        if place.type.pointee == BYTEARRAY:
+            raise NotS0('a bytearray %r rebound to something other than bytearray()' % name)
         self.b.emit('store', [place, self.coerce(v, place.type.pointee)])
 
     def stmt(self, s):
+        self.cur_stmt = s
         if isinstance(s, ast.Assign):
             if len(s.targets) != 1:
                 raise NotS0('assignment shape')
@@ -315,11 +673,19 @@ class Lowering(object):
                 return self.store_target(target, s.value)
             if not isinstance(target, ast.Name):
                 raise NotS0('assignment shape')
+            if self.is_list_name(target.id):
+                return self.assign_list_name(target.id, s.value)
+            if self.is_ba_name(target.id):
+                return self.assign_ba(target.id, s.value)
             self.store(target.id, self.expr(s.value))
         elif isinstance(s, ast.AnnAssign):
             if not isinstance(s.target, ast.Name):
                 raise NotS0('annotated assignment shape')
             if s.value is not None:
+                if self.is_list_name(s.target.id):
+                    return self.assign_list_name(s.target.id, s.value)
+                if self.is_ba_name(s.target.id):
+                    return self.assign_ba(s.target.id, s.value)
                 self.store(s.target.id, self.expr(s.value))
         elif isinstance(s, ast.AugAssign):
             if isinstance(s.target, (ast.Attribute, ast.Subscript)):
@@ -379,6 +745,15 @@ class Lowering(object):
                 return
             if not self.function.results:
                 raise NotS0('return with a value in a void function')
+            if is_list(self.function.results[0]):
+                return self.return_list(s.value)
+            if self.function.results[0] == BYTEARRAY:
+                if not (isinstance(s.value, ast.Name) and self.is_ba_name(s.value.id)):
+                    raise NotS0('a bytearray result that is not an owned local')
+                v = self.expr(s.value)
+                self.leave()
+                self.b.emit('return', [v])
+                return
             v = self.coerce(self.expr(s.value), self.function.results[0])
             self.leave()
             self.b.emit('return', [v])
@@ -557,6 +932,10 @@ class Lowering(object):
         if isinstance(s.target, ast.Name) and isinstance(it, ast.Name) and it.id in self.params \
                 and self.params[it.id].type == BYTES:
             return self.for_bytes(s, self.params[it.id])
+        if isinstance(s.target, ast.Name) and isinstance(it, ast.Name):
+            found = self.list_iterable(it, s)
+            if found is not None:
+                return self.for_list(s, *found)
         if not (isinstance(s.target, ast.Name) and isinstance(it, ast.Call)
                 and isinstance(it.func, ast.Name) and it.func.id == 'range' and not it.keywords
                 and 1 <= len(it.args) <= 3 and self.is_builtin('range')):
@@ -582,6 +961,48 @@ class Lowering(object):
         finally:
             self.loop_depth -= 1
         self.b.emit('for.range', [lo, hi, step], [], {'args': len(args)}, [body])
+
+    def list_iterable(self, it, s):
+        """(kind, container value) of a `for x in <name>` over a numeric list the loop cannot
+        resize: a read-only list parameter (a span), an owned local, or a local that became a borrow
+        of a field. None when `it` names something else."""
+        name = it.id
+        if name in self.params and self.params[name].type.head == 'span':
+            return 'span', self.params[name]
+        if name in self.alias or self.is_list_name(name):
+            field = self.alias[name][1] if name in self.alias else None
+            if self.body_mutates(s.body, name, field):
+                raise NotS0('a loop over a list that its body resizes or rebinds')
+            return 'ref', self.container(it)
+        return None
+
+    def for_list(self, s, how, base):
+        """`for x in xs` over a list that cannot change length during the loop is
+        `for k in range(len(xs)): x = xs[k]` with the read proven in range."""
+        if s.target.id in self.params or s.target.id not in self.places:
+            raise NotS0('for target %r' % s.target.id)
+        if how == 'ref':
+            n = self.b.value('list.len', [base], I.I64)
+            elem = base.type.args[0].args[0]
+        else:
+            n = self.b.value('span.len', [base], I.I64)
+            elem = base.type.args[0]
+        lo, step = self.const(I.I64, 0), self.const(I.I64, 1)
+        index = I.Value(I.I64, hint='k')
+        body = I.Region([index])
+
+        def fill():
+            op = 'list.get' if how == 'ref' else 'span.get'
+            self.store(s.target.id, self.b.value(op, [base, index], elem, {'mode': 'nck'}))
+            self.stmts(s.body)
+            if not self.b.terminated():
+                self.b.emit('continue')
+        self.loop_depth += 1
+        try:
+            self.in_region(body, fill=fill)
+        finally:
+            self.loop_depth -= 1
+        self.b.emit('for.range', [lo, n, step], [], {'args': 1}, [body])
 
     def for_bytes(self, s, base):
         """`for c in d` over a bytes parameter (immutable: its length is fixed) is
@@ -639,6 +1060,10 @@ class Lowering(object):
                 return self.const(I.F64, value)
             raise NotS0('constant %r' % (value,))
         if isinstance(node, ast.Name):
+            if node.id in self.scope_vars:
+                return self.scope_vars[node.id]
+            if node.id in self.alias or self.is_list_name(node.id):
+                raise NotS0('a list %r used as a value (a second name for it, or a copy: stage S3b)' % node.id)
             if node.id in self.places:
                 place = self.places[node.id]
                 return self.b.value('load', [place], place.type.pointee)
@@ -699,7 +1124,14 @@ class Lowering(object):
 
     def container(self, node):
         """The IR value of a container operand: a bytes parameter, or a numeric list field of a
-        struct parameter (a borrow of the field's list)."""
+        struct parameter (a borrow of the field's list), or an owned numeric-list local."""
+        if isinstance(node, ast.Name):
+            if node.id in self.alias:
+                return self.alias[node.id][0]()
+            if self.is_list_name(node.id):
+                return self.list_ref(self.places[node.id])
+            if self.is_ba_name(node.id):
+                return self.b.value('load', [self.places[node.id]], BYTEARRAY)
         if isinstance(node, ast.Name) and node.id in self.params and (
                 self.params[node.id].type in (BYTES, BYTEARRAY) or self.params[node.id].type.head == 'span'):
             return self.params[node.id]
@@ -709,6 +1141,10 @@ class Lowering(object):
                 elem = I.I64 if kind == self.P.LIST else I.F64
                 return self.b.value('field.list', [obj], I.T('obj', I.T('list', elem)),
                                     {'cls': cls, 'name': node.attr})
+            if kind == 'bytearray':
+                v = self.b.value('field.ba', [obj], BYTEARRAY, {'cls': cls, 'name': node.attr})
+                self.fieldba.add(v)
+                return v
             raise NotS0('field %s.%s of kind %r as a container' % (cls, node.attr, kind))
         raise NotS0('container operand %s' % (ast.dump(node)[:60],))
 
@@ -718,6 +1154,8 @@ class Lowering(object):
     def store_target(self, target, value_node):
         """`p.f = v` (scalar field) or `c[i] = v` (numeric list element). Python evaluates the
         right side first, then the target's parts."""
+        if isinstance(target, ast.Attribute) and self.field_of(target)[2] in (self.P.LIST, self.P.FLIST):
+            return self.store_field_list(target, value_node)
         v = self.expr(value_node)
         if isinstance(target, ast.Attribute):
             obj, cls, kind = self.field_of(target)
@@ -729,6 +1167,7 @@ class Lowering(object):
         if isinstance(target.slice, ast.Slice):
             raise NotS0('slice assignment')
         base = self.container(target.value)
+        self.guard_field_ba(base, target.slice)
         if base.type == BYTEARRAY:
             index = self.as_int(self.expr(target.slice))
             self.b.emit('ba.set', [base, index, self.field_value(v, I.I64)], [], {'mode': 'ck'})
@@ -792,6 +1231,7 @@ class Lowering(object):
         if isinstance(node.slice, ast.Slice):
             raise NotS0('a slice')
         base = self.container(node.value)
+        self.guard_field_ba(base, node.slice)
         index = self.as_int(self.expr(node.slice))
         if base.type == BYTES:
             return self.b.value('bytes.get', [base, index], I.I64, {'mode': self.index_mode(node)})
@@ -827,6 +1267,14 @@ class Lowering(object):
         if not isinstance(func.value, (ast.Attribute, ast.Name)):
             raise NotS0('method call on %s' % type(func.value).__name__)
         base = self.container(func.value)
+        self.guard_field_ba(base, *node.args)
+        if base.type == BYTEARRAY and func.attr == 'extend' and len(node.args) == 1 and statement \
+                and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, bytes):
+            self.b.emit('ba.extend_lit', [base], [], {'data': list(node.args[0].value)})
+            return None
+        if base.type == BYTEARRAY and func.attr == 'clear' and not node.args and statement:
+            self.b.emit('ba.clear', [base])
+            return None
         if base.type == BYTEARRAY and func.attr == 'append' and len(node.args) == 1 and statement:
             v = self.field_value(self.expr(node.args[0]), I.I64)
             self.b.emit('ba.push', [base, v])
@@ -1007,9 +1455,15 @@ class Lowering(object):
             if v.type == I.F64:
                 return self.b.value('fptosi', [v], I.I64, {'mode': 'ck'})
             return self.coerce(v, I.I64)
+        if f == 'write_stdout_bytes' and len(args) == 1 and statement:
+            v = self.expr(args[0])
+            if v.type != BYTEARRAY:
+                raise NotS0('write_stdout_bytes() of %s' % v.type)
+            self.b.emit('ba.write', [v])
+            return None
         raise NotS0('builtin %s()' % f)
 
-    def user_call(self, f, node, statement):
+    def user_call(self, f, node, statement, list_dst=None, list_kind=None, ba_dst=None):
         P, ctx = self.P, self.ctx
         try:
             arg_nodes = P._bind_call_args(f, node, ctx)
@@ -1032,13 +1486,37 @@ class Lowering(object):
             if not statement:
                 raise NotS0('void %s() used as a value' % f)
             results = []
+        elif ret == 'bytearray':
+            if ba_dst is None:
+                raise NotS0('the bytearray %s() returns is used as a value (stage S3b)' % f)
+            results = [BYTEARRAY]
         else:
-            results = [self.kind_type(ret, '%s() result' % f)]
+            results = [self.kind_type(ret, '%s() result' % f, owned=True)]
+        if ba_dst is not None and results != [BYTEARRAY]:
+            raise NotS0('%s() does not return a bytearray' % f)
+        if results and is_list(results[0]) and list_dst is None:
+            raise NotS0('the list %s() returns is used as a value (stage S3b)' % f)
+        if list_dst is not None and not (results and is_list(results[0])
+                                         and results[0] == (LIST_F64 if list_kind == P.FLIST else LIST_I64)):
+            raise NotS0("%s() does not return a list of the target's kind" % f)
         order = sorted(range(len(arg_nodes)), key=lambda i: (getattr(arg_nodes[i], 'lineno', 0),
                                                               getattr(arg_nodes[i], 'col_offset', 0)))
         values = [None] * len(arg_nodes)
         for i in order:
-            values[i] = self.expr(arg_nodes[i])
+            a = arg_nodes[i]
+            if isinstance(a, ast.Name) and (a.id in self.alias or self.is_list_name(a.id)):
+                # an owned list passed to a read-only list parameter: the callee gets a view of it
+                # for the duration of the call and cannot resize it (it has no way to name it)
+                if params[i][1] not in ('array', P.FLIST):
+                    raise NotS0('list argument to a parameter of kind %r' % (params[i][1],))
+                values[i] = self.container(a)
+            else:
+                values[i] = self.expr(a)
+        if any(is_list(v.type) for v in values):
+            for a in arg_nodes:
+                if any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                       and n.func.attr in _LIST_MUTATORS for n in ast.walk(a)):
+                    raise NotS0('a list passed in a call whose other arguments change a list')
         args = []
         arg_abi = []
         own_abi = dict(zip(self.function.params, self.function.attrs.get('abi') or []))
@@ -1047,11 +1525,17 @@ class Lowering(object):
                 raise NotS0('float argument to an int parameter of %s()' % f)
             if t.head == 'span':
                 want = 'array' if pkind == 'array' else 'flist'
+                if is_list(v.type) and v.type.args[0].args[0] == t.args[0]:
+                    arg_abi.append(want)
+                    args.append(v)
+                    continue
                 if v.type != t or own_abi.get(v) != want:
                     raise NotS0('list argument to %s() is not a parameter passed through' % f)
                 arg_abi.append(want)
                 args.append(v)
                 continue
+            if is_list(v.type):
+                raise NotS0('list argument to a non-list parameter of %s()' % f)
             arg_abi.append('value')
             args.append(self.coerce(v, t))
         sig = I.fn_type(param_types, results)
@@ -1063,6 +1547,16 @@ class Lowering(object):
         attrs = {'callee': symbol}
         if any(x != 'value' for x in arg_abi):
             attrs['abi'] = arg_abi
+        if ba_dst is not None:
+            if 'abi' in attrs:
+                raise NotS0('a bytearray result with list arguments')
+            self.b.emit('ba.call', [ba_dst] + args, [], attrs)
+            return None
+        if list_dst is not None:
+            # the destination is named after the arguments are evaluated; the call comes first, the
+            # old content of the destination is freed once the new list has been adopted
+            self.b.emit('list.call', [list_dst()] + args, [], attrs)
+            return None
         ins = self.b.emit('call', args, results, attrs)
         return ins.results[0] if results else None
 

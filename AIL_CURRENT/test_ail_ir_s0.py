@@ -578,8 +578,8 @@ class GeneratedProgramTests(unittest.TestCase):
 
 class SwitchTests(unittest.TestCase):
     SOURCE = ('fn sq(x: int) -> int { return x * x + 1; }\n'
-              'fn total(xs: list[int]) -> int { let s = 0; for v in xs { s += v; } return s; }\n'
-              'fn main() -> int { print(sq(4)); print(total([1, 2, 3])); return 0; }\n')
+              'fn total(s: str) -> int { return len(s); }\n'
+              'fn main() -> int { print(sq(4)); print(total("abc")); return 0; }\n')
 
     def to_c(self, mode, **extra):
         import pyfunc

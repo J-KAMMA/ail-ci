@@ -292,6 +292,26 @@ _op('ba.len', 1, 1)
 _op('ba.get', 2, 2)
 _op('ba.set', 3, 3)
 _op('ba.push', 2, 2)
+# S3a: owned numeric lists (`obj<list<i64|f64>>` stored in a local place, uniq layout: the inline
+# {p, n, cap} struct, no header, no count). `list.ref` yields a borrow of the owned place; the ops
+# below replace the content of the list a reference names (the old content is freed first), so
+# every list has exactly one owner place and every other reference is a transient borrow
+# (docs/design section 12).
+_op('list.ref', 1, 1)
+_op('list.reset', 1, 1)           # free the storage, leave an empty list (a drop, or `xs = []`)
+_op('list.repeat', 3, 3)          # (ref, value, count): `[v] * n`
+_op('list.lit', 1, None)          # (ref, elements...): `[a, b, c]`
+_op('list.reserve', 2, 2)         # (ref, extra): room for a comprehension of known length
+_op('list.move', 2, 2)            # (dst ref, src ref): dst takes src's storage, src is left empty
+_op('list.call', 1, None)         # (dst ref, args...): call a list-returning function, adopt its list
+# S3a: owned bytearrays (one reference-counted object per owner place; `load` of the place is a borrow)
+_op('ba.new', 2, 2)               # (place, length): the place now holds a fresh zero-filled bytearray
+_op('ba.drop', 1, 1)              # (place): release the owner's reference
+_op('ba.clear', 1, 1)             # (bytearray): `b.clear()`
+_op('ba.call', 1, None)           # (place, args...): the place adopts the bytearray a callee returns
+_op('ba.write', 1, 1)             # (bytearray): `write_stdout_bytes(b)`
+_op('ba.extend_lit', 1, 1)        # (bytearray) + attr data = list of byte values: `b.extend(b"...")`
+_op('field.ba', 1, 1)             # a struct field holding a bytearray: the reference, read now
 _op('span.of', 1, 1)
 _op('span.len', 1, 1)
 _op('span.get', 2, 2)
@@ -307,7 +327,7 @@ for _name in ('field', 'elem', 'slot', 'tupfield', 'env', 'global', 'borrow', 't
     RESERVED[_name] = 'S1'
 for _name in ('exc.new',):
     RESERVED[_name] = 'S2'
-for _name in ('list.new', 'list.lit', 'list.repeat', 'list.insert',
+for _name in ('list.new', 'list.insert',
               'list.extend', 'list.slice', 'list.sort', 'dict.new', 'set.new', 'dict.get', 'dict.contains',
               'dict.put', 'dict.del', 'dict.upsert', 'dict.items', 'dict.keys', 'dict.values', 'heap.push',
               'heap.pop', 'copy.list', 'copy.dict', 'copy.set', 'box.wrap', 'rc.inc', 'rc.dec', 'is'):
