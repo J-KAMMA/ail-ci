@@ -9,7 +9,7 @@ Only attempt1.ail counts (first try). Model directories whose name starts with "
 or whose meta.json has "sample": true, are samples and are skipped unless
 --include-samples is given.
 
-Verdict per submission: pass | compile-error | wrong-answer | runtime-error | timeout.
+Verdict per submission: pass | empty | compile-error | wrong-answer | runtime-error | timeout.
 
 Token approximation (no real tokenizer, so numbers are comparable across variants
 but are not billing tokens). Applied to the program text after stripping a Markdown
@@ -136,6 +136,14 @@ def judge(job):
             res["real_tokens"] = json.load(fh).get("tokens_out")
     except (OSError, ValueError):
         res["real_tokens"] = None
+    if not src.strip():
+        # the model returned nothing: not a compiler verdict (and not evidence about the syntax)
+        res.update(verdict="empty", detail="empty submission")
+        return res
+    if not src.strip():
+        # the model returned nothing: not a compiler verdict (and not evidence about the syntax)
+        res.update(verdict="empty", detail="empty submission")
+        return res
     with tempfile.TemporaryDirectory(prefix="ailsyn-") as tmp:
         sp = os.path.join(tmp, task + ".ail")
         exe = os.path.join(tmp, "prog")
@@ -243,11 +251,11 @@ def render(results, skipped, tasks, variants, include_samples):
                 tpp=f"{x['tpp']:.0f}" if x["tpp"] else "-", ppk=x["ppk"],
                 real=f"{x['real']:.0f}" if x["real"] is not None else "-"))
         out += ["", "## Per task", "",
-                "Legend: ok = pass, CE = compile error, WA = wrong answer, RE = runtime error, TO = timeout, . = not submitted.", ""]
+                "Legend: ok = pass, CE = compile error, WA = wrong answer, RE = runtime error, TO = timeout, EM = empty submission, . = not submitted.", ""]
         names = list(tasks)
         out.append("| model | variant | " + " | ".join(names) + " |")
         out.append("|---|---|" + "---|" * len(names))
-        code = {"pass": "ok", "compile-error": "CE", "wrong-answer": "WA", "runtime-error": "RE", "timeout": "TO"}
+        code = {"pass": "ok", "compile-error": "CE", "wrong-answer": "WA", "runtime-error": "RE", "timeout": "TO", "empty": "EM"}
         for x in rows:
             by = {r["task"]: code[r["verdict"]] for r in groups[(x["model"], x["variant"])]}
             out.append(f"| {x['model']} | {x['variant']} | " + " | ".join(by.get(t, ".") for t in names) + " |")
