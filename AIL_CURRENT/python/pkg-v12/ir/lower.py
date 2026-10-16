@@ -28,6 +28,7 @@ import os
 
 from . import ir as I
 from . import effects as E
+from . import ownership
 
 BYTES = I.T('bytes')
 BYTEARRAY = I.T('obj', I.T('bytearray'))
@@ -71,7 +72,7 @@ def _linkage(sig):
 
 
 class Lowering(object):
-    def __init__(self, P, fn, ctx, sig, recursive, cname, pending=(), link_units=False):
+    def __init__(self, P, fn, ctx, sig, recursive, cname, pending=(), link_units=False, summaries=None):
         """`P` is the legacy compiler module (pyfunc), `ctx` its finished Ctx for this function,
         `sig` the legacy C signature text (linkage and inlining decisions are kept as they are).
         `pending` lists the C symbols of already compiled IR functions that can return with an
@@ -84,6 +85,7 @@ class Lowering(object):
         self.cname = cname
         self.pending = frozenset(pending)
         self.link_units = link_units
+        self.summaries = summaries or {}
         self.handler_depth = 0        # enclosing except handlers (a bare `raise` needs one)
         self.loop_depth = 0           # enclosing loops
         self.finally_loops = []       # loop_depth at the entry of each enclosing finally body
@@ -96,8 +98,7 @@ class Lowering(object):
         self.params = {}
         self.proofs = None
         self.linkage = _linkage(sig)
-        self.alias = {}               # owned list local -> (borrow of the field that now holds it, field name)
-        self.top_rest = {}            # id(top-level statement) -> the top-level statements after it
+        self.iter_loops = []          # (for.range, list ref) of the `for x in xs` loops over a list
         self.cur_stmt = None
         self.scope_vars = {}          # comprehension variables in scope -> their SSA value
         self.fieldba = set()          # values that are the bytearray a struct field held when read
@@ -263,10 +264,15 @@ class Lowering(object):
         self.alloc_end = sum(1 for i in f.body.instrs if i.op == 'local.alloc')
         if self.recursive:
             self.b.emit('rt', [], [], {'callee': 'ail_depth_enter'})
-        self.top_rest = dict((id(s), fn.body[k + 1:]) for k, s in enumerate(fn.body))
         self.stmts(fn.body)
         if not self.b.terminated():
             self.fallthrough()
+        try:
+            resolved = ownership.resolve(f, self.program, self.summaries, self.iter_loops)
+        except ownership.NeedsBox as box:
+            raise NotS0('Rule X (needs a box, stage S3e): %s' % box)
+        f.sharing = dict(resolved.stats)
+        f.walias = list(resolved.walias)
         ops = [i for i in I.walk(f.body)]
         if any(i.op == 'try' for i in ops):
             f.attrs['frame'] = True
@@ -343,7 +349,7 @@ class Lowering(object):
             if place is None or not is_list(place.type.pointee) or name in self.ctx.kind \
                     or self.b.terminated():
                 continue
-            self.b.emit('list.reset', [self.list_ref(place)])
+            self.b.emit('list.reset', [self.list_ref(place)], [], {'drop': True})
 
     def list_ref(self, place):
         return self.b.value('list.ref', [place], place.type.pointee)
@@ -421,13 +427,68 @@ class Lowering(object):
 
     def assign_list_name(self, name, node):
         place = self.places[name]
-        self.assign_list(lambda: self.list_ref(place), node, self.list_kind_of(place.type.pointee))
-        self.alias.pop(name, None)
+        self.assign_list(lambda: self.list_ref(place), node, self.list_kind_of(place.type.pointee), dst=name)
 
-    def assign_list(self, ref_fn, node, kind):
-        """Replace the content of the list `ref_fn()` names with the fresh list `node` builds."""
+    def list_source(self, node, kind):
+        """(reference, name) when `node` names an existing list of element kind `kind`: an owned list
+        local or a struct field's list; None for any other expression."""
+        P = self.P
+        t = LIST_F64 if kind == P.FLIST else LIST_I64
+        if isinstance(node, ast.Name):
+            if node.id in self.params and self.params[node.id].type.head == 'span':
+                raise NotS0('a read-only list parameter %r is shared with its caller (stage S3e)' % node.id)
+            if self.is_list_name(node.id):
+                place = self.places[node.id]
+                if place.type.pointee != t:
+                    raise NotS0('a list assigned to a list of the other element type')
+                return self.list_ref(place), node.id
+            return None
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            obj, cls, fkind = self.field_of(node)
+            if fkind not in (P.LIST, P.FLIST):
+                return None
+            if fkind != kind:
+                raise NotS0('a list assigned to a list of the other element type')
+            return (self.b.value('field.list', [obj], t, {'cls': cls, 'name': node.attr}),
+                    '%s.%s' % (node.value.id, node.attr))
+        return None
+
+    def copy_source(self, node, kind):
+        """The list value an explicit copy `xs[:]`, `list(xs)` or `xs.copy()` reads, else None."""
+        P = self.P
+        inner = None
+        if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
+            sl = node.slice
+            if sl.lower is None and sl.upper is None and sl.step is None:
+                inner = node.value
+        elif isinstance(node, ast.Call) and not node.keywords:
+            if isinstance(node.func, ast.Name) and node.func.id == 'list' and len(node.args) == 1                     and self.is_builtin('list'):
+                inner = node.args[0]
+            elif isinstance(node.func, ast.Attribute) and node.func.attr == 'copy' and not node.args:
+                inner = node.func.value
+        if inner is None or not isinstance(inner, (ast.Name, ast.Attribute)):
+            return None
+        v = self.container(inner)
+        elem = I.F64 if kind == P.FLIST else I.I64
+        if not (v.type == (LIST_F64 if kind == P.FLIST else LIST_I64) or v.type == I.T('span', elem)):
+            raise NotS0('a copy of something that is not a list of the target kind')
+        return v
+
+    def assign_list(self, ref_fn, node, kind, dst='?'):
+        """Replace the content of the list `ref_fn()` names with the list `node` builds or names."""
         P = self.P
         elem = I.F64 if kind == P.FLIST else I.I64
+        src = self.list_source(node, kind)
+        if src is not None:
+            # Python's `dst = src`: one list, two names. The ownership analysis (ownership.py)
+            # decides move, rename or box
+            self.b.emit('list.share', [ref_fn(), src[0]], [], {'dst': dst, 'src': src[1],
+                                                               'line': getattr(node, 'lineno', 0)})
+            return
+        copy = self.copy_source(node, kind)
+        if copy is not None:
+            self.b.emit('list.copy', [ref_fn(), copy], [], {'dst': dst, 'line': getattr(node, 'lineno', 0)})
+            return
         if isinstance(node, ast.List):
             if any(isinstance(e, ast.Starred) for e in node.elts):
                 raise NotS0('a starred list display')
@@ -457,8 +518,7 @@ class Lowering(object):
                 and node.func.id not in self.places and node.func.id not in self.params:
             self.user_call(node.func.id, node, False, list_dst=ref_fn, list_kind=kind)
             return
-        raise NotS0('a list built from %s (a second name for a list, or a copy: stage S3b)'
-                    % type(node).__name__)
+        raise NotS0('a list built from %s' % type(node).__name__)
 
     def mentions_outside(self, name, inner):
         inside = set(id(n) for n in ast.walk(inner))
@@ -540,8 +600,10 @@ class Lowering(object):
         if isinstance(node, ast.Name) and self.is_list_name(node.id) and self.places[node.id].type.pointee == t:
             ref = self.container(node)
         else:
+            if isinstance(node, (ast.Name, ast.Attribute)):
+                raise NotS0('a list that something else names is returned (shared with its owner)')
             tmp = self.new_list_place(kind, 'ret')
-            self.assign_list(lambda: self.list_ref(tmp), node, kind)
+            self.assign_list(lambda: self.list_ref(tmp), node, kind, dst='<return>')
             ref = self.list_ref(tmp)
         self.leave()
         self.b.emit('return', [ref])
@@ -553,73 +615,7 @@ class Lowering(object):
 
         def ref_fn():
             return self.b.value('field.list', [obj], LIST_F64 if fkind == self.P.FLIST else LIST_I64, dict(attrs))
-        if isinstance(value_node, ast.Name) and self.is_list_name(value_node.id):
-            self.move_into_field(target, value_node.id, fkind, ref_fn)
-            return
-        self.assign_list(ref_fn, value_node, fkind)
-
-    def move_into_field(self, target, name, fkind, ref_fn):
-        """`t.f = xs`: the field takes the storage of the owned local `xs` (Rule M). The legacy path
-        copies; the two cannot be told apart unless `xs` or the field is written afterwards, so
-        when `xs` is still read afterwards (Rule M') it becomes a borrow of the field for the rest
-        of the function, and the function is refused unless nothing below writes `xs` or `.f` or
-        calls code that might."""
-        place = self.places[name]
-        if self.list_kind_of(place.type.pointee) != fkind:
-            raise NotS0('a list stored in a field of the other element type')
-        rest = self.top_rest.get(id(self.cur_stmt))
-        if rest is None:
-            raise NotS0('a list moved into a field below the top level of the function')
-        if name in self.alias:
-            raise NotS0('a list that already is a borrow of a field')
-        used = any(isinstance(n, ast.Name) and n.id == name for st in rest for n in ast.walk(st))
-        if used and not self.rest_safe(rest, name, target.attr):
-            raise NotS0('a list stored in a field and then used while the field or the list may change')
-        self.b.emit('list.move', [ref_fn(), self.list_ref(place)])
-        if used:
-            self.alias[name] = (ref_fn, target.attr)
-
-    _PURE_BUILTINS = ('len', 'range', 'min', 'max', 'abs', 'int', 'float', 'ord', 'wrapping_add',
-                      'wrapping_sub', 'wrapping_mul')
-
-    def rest_safe(self, rest, name, field):
-        """Whether no statement of `rest` writes the list `name`, writes a list held in a field called
-        `field`, or calls anything that could (user functions, constructors, unknown methods)."""
-        def names_list(n):
-            return isinstance(n, ast.Name) and n.id == name
-
-        def field_list(n):
-            return isinstance(n, ast.Attribute) and n.attr == field
-
-        def writes(target):
-            while isinstance(target, ast.Subscript):
-                target = target.value
-            return names_list(target) or field_list(target)
-
-        for st in rest:
-            for n in ast.walk(st):
-                if isinstance(n, ast.Assign) and any(writes(t) for t in n.targets):
-                    return False
-                if isinstance(n, (ast.AugAssign, ast.AnnAssign)) and writes(n.target):
-                    return False
-                if isinstance(n, ast.For) and writes(n.target):
-                    return False
-                if isinstance(n, ast.Delete):
-                    return False
-                if isinstance(n, ast.Call):
-                    f = n.func
-                    if isinstance(f, ast.Name):
-                        if f.id not in self._PURE_BUILTINS or not self.is_builtin(f.id):
-                            return False
-                    elif isinstance(f, ast.Attribute) and f.attr in _LIST_MUTATORS:
-                        if names_list(f.value) or field_list(f.value):
-                            return False
-                        if not (isinstance(f.value, ast.Name) and self.is_list_name(f.value.id)
-                                or isinstance(f.value, ast.Attribute)):
-                            return False
-                    else:
-                        return False
-        return True
+        self.assign_list(ref_fn, value_node, fkind, dst='%s.%s' % (getattr(target.value, 'id', '?'), target.attr))
 
     def body_mutates(self, body, name, field=None):
         """Whether `body` rebinds or resizes the list `name` (or a list held in a field `field`)."""
@@ -969,9 +965,8 @@ class Lowering(object):
         name = it.id
         if name in self.params and self.params[name].type.head == 'span':
             return 'span', self.params[name]
-        if name in self.alias or self.is_list_name(name):
-            field = self.alias[name][1] if name in self.alias else None
-            if self.body_mutates(s.body, name, field):
+        if self.is_list_name(name):
+            if self.body_mutates(s.body, name):
                 raise NotS0('a loop over a list that its body resizes or rebinds')
             return 'ref', self.container(it)
         return None
@@ -993,7 +988,7 @@ class Lowering(object):
 
         def fill():
             op = 'list.get' if how == 'ref' else 'span.get'
-            self.store(s.target.id, self.b.value(op, [base, index], elem, {'mode': 'nck'}))
+            self.store(s.target.id, self.b.value(op, [base, index], elem, {'mode': 'nck', 'iter': True}))
             self.stmts(s.body)
             if not self.b.terminated():
                 self.b.emit('continue')
@@ -1002,7 +997,9 @@ class Lowering(object):
             self.in_region(body, fill=fill)
         finally:
             self.loop_depth -= 1
-        self.b.emit('for.range', [lo, n, step], [], {'args': 1}, [body])
+        loop = self.b.emit('for.range', [lo, n, step], [], {'args': 1}, [body])
+        if how == 'ref':
+            self.iter_loops.append((loop, base))
 
     def for_bytes(self, s, base):
         """`for c in d` over a bytes parameter (immutable: its length is fixed) is
@@ -1062,8 +1059,8 @@ class Lowering(object):
         if isinstance(node, ast.Name):
             if node.id in self.scope_vars:
                 return self.scope_vars[node.id]
-            if node.id in self.alias or self.is_list_name(node.id):
-                raise NotS0('a list %r used as a value (a second name for it, or a copy: stage S3b)' % node.id)
+            if self.is_list_name(node.id):
+                raise NotS0('a list %r used as a value (only list assignments, calls and returns take one)' % node.id)
             if node.id in self.places:
                 place = self.places[node.id]
                 return self.b.value('load', [place], place.type.pointee)
@@ -1126,8 +1123,6 @@ class Lowering(object):
         """The IR value of a container operand: a bytes parameter, or a numeric list field of a
         struct parameter (a borrow of the field's list), or an owned numeric-list local."""
         if isinstance(node, ast.Name):
-            if node.id in self.alias:
-                return self.alias[node.id][0]()
             if self.is_list_name(node.id):
                 return self.list_ref(self.places[node.id])
             if self.is_ba_name(node.id):
@@ -1502,14 +1497,37 @@ class Lowering(object):
         order = sorted(range(len(arg_nodes)), key=lambda i: (getattr(arg_nodes[i], 'lineno', 0),
                                                               getattr(arg_nodes[i], 'col_offset', 0)))
         values = [None] * len(arg_nodes)
+        temps = []
         for i in order:
             a = arg_nodes[i]
-            if isinstance(a, ast.Name) and (a.id in self.alias or self.is_list_name(a.id)):
+            if isinstance(a, ast.Name) and self.is_list_name(a.id):
                 # an owned list passed to a read-only list parameter: the callee gets a view of it
                 # for the duration of the call and cannot resize it (it has no way to name it)
                 if params[i][1] not in ('array', P.FLIST):
                     raise NotS0('list argument to a parameter of kind %r' % (params[i][1],))
                 values[i] = self.container(a)
+            elif isinstance(a, ast.Attribute) and isinstance(a.value, ast.Name) and self.field_list_arg(a):
+                # a struct field's list lent to a read-only list parameter (S3b): fine while the callee
+                # can neither resize nor replace that field's list behind the view
+                if params[i][1] not in ('array', P.FLIST):
+                    raise NotS0('list argument to a parameter of kind %r' % (params[i][1],))
+                obj, cls, fkind = self.field_of(a)
+                summary = self.summaries.get(symbol)
+                tag = 'Field(%s,%s)' % (cls, a.attr)
+                if summary is None or summary.unknown                         or any(w in ('Spine(%s)' % tag, 'Rebind(%s)' % tag) for w in summary.writes):
+                    raise NotS0('the field list %s.%s is lent to %s(), which may resize or replace it'
+                                % (a.value.id, a.attr, f))
+                values[i] = self.container(a)
+            elif isinstance(a, ast.Call) and isinstance(a.func, ast.Name) and a.func.id in ctx.funcs                     and a.func.id not in self.places and a.func.id not in self.params                     and ctx.funcs[a.func.id][1] in (P.LIST, P.FLIST):
+                # the list a call returns, passed straight on: a temporary this call owns, lent to the
+                # callee and dropped once the call is over
+                if params[i][1] not in ('array', P.FLIST):
+                    raise NotS0('list argument to a parameter of kind %r' % (params[i][1],))
+                tkind = ctx.funcs[a.func.id][1]
+                tmp = self.new_list_place(tkind, 'arg')
+                self.user_call(a.func.id, a, False, list_dst=lambda tmp=tmp: self.list_ref(tmp), list_kind=tkind)
+                temps.append(tmp)
+                values[i] = self.list_ref(tmp)
             else:
                 values[i] = self.expr(a)
         if any(is_list(v.type) for v in values):
@@ -1551,18 +1569,33 @@ class Lowering(object):
             if 'abi' in attrs:
                 raise NotS0('a bytearray result with list arguments')
             self.b.emit('ba.call', [ba_dst] + args, [], attrs)
+            self.drop_temps(temps)
             return None
         if list_dst is not None:
             # the destination is named after the arguments are evaluated; the call comes first, the
             # old content of the destination is freed once the new list has been adopted
             self.b.emit('list.call', [list_dst()] + args, [], attrs)
+            self.drop_temps(temps)
             return None
         ins = self.b.emit('call', args, results, attrs)
+        self.drop_temps(temps)
         return ins.results[0] if results else None
 
+    def field_list_arg(self, node):
+        """Whether `node` is `p.f` for a struct parameter `p` whose field `f` is a numeric list."""
+        try:
+            obj, cls, kind = self.field_of(node)
+        except NotS0:
+            return False
+        return kind in (self.P.LIST, self.P.FLIST)
 
-def lower(P, fn, ctx, sig, recursive, cname, pending=(), link_units=False):
+    def drop_temps(self, temps):
+        for t in temps:
+            self.b.emit('list.reset', [self.list_ref(t)], [], {'drop': True})
+
+
+def lower(P, fn, ctx, sig, recursive, cname, pending=(), link_units=False, summaries=None):
     """(IR function, its one-function program) for the S0 subset; NotS0 otherwise."""
-    lowering = Lowering(P, fn, ctx, sig, recursive, cname, pending, link_units)
+    lowering = Lowering(P, fn, ctx, sig, recursive, cname, pending, link_units, summaries)
     f = lowering.run()
     return f, lowering.program

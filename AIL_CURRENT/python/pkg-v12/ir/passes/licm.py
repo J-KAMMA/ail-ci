@@ -24,7 +24,7 @@ from . import simplify
 
 RESIZING = ('list.push', 'list.pop', 'list.clear', 'ba.push', 'ba.clear', 'ba.extend_lit')
 # S3a: operations that replace or grow the list they name (the first operand; both for a move)
-REPLACING = ('list.reset', 'list.repeat', 'list.lit', 'list.reserve', 'list.move', 'list.call')
+REPLACING = ('list.reset', 'list.repeat', 'list.lit', 'list.reserve', 'list.move', 'list.call', 'list.copy')
 
 
 def _defs(fn):
@@ -94,7 +94,7 @@ class LICM(object):
         if ins.op in RESIZING:
             return E._root(ins.operands[0], self.fn, defs) in (root, 'Any')
         if ins.op in REPLACING:
-            refs = ins.operands[:2] if ins.op == 'list.move' else ins.operands[:1]
+            refs = ins.operands[:2] if ins.op in ('list.move', 'list.copy') else ins.operands[:1]
             return any(E._root(r, self.fn, defs) in (root, 'Any') for r in refs)
         return False
 

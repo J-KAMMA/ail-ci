@@ -12,11 +12,12 @@ python/pkg-v12/ir/).
   list-returning functions, iteration, hidden temporaries, moves into struct fields) take the IR path
   (AIL_IR=verify) and agree with CPython, the legacy build and both exception modes on stdout, status
   and the last line of stderr.
-* Sharing semantics (decided 2026-10-15): shapes that make a second name for a list (`ys = xs`, `ys =
-  xs[:]`, `t.f = xs` with `xs` written afterwards) are refused by the IR -- the function stays on the
-  legacy emitter, whose value semantics they were compiled with, so the IR never changes what a
-  program prints. The shapes where a copy and the original cannot be told apart (`t.f = xs` with `xs`
-  dead, or only read, afterwards) are taken, and agree with CPython.
+* Sharing semantics (decided 2026-10-15): S3a refused the shapes that make a second name for a list
+  (`ys = xs`, `ys = xs[:]`, `t.f = xs` with `xs` written afterwards) so the IR never changed what a program
+  prints; S3b (test_ail_ir_s3b) takes them with Python's meaning. What is pinned here: the shapes where a copy
+  and the original cannot be told apart (`t.f = xs` with `xs` dead, or only read, afterwards) agree with
+  CPython and the legacy build; the shapes where they can be told apart agree with CPython (the legacy
+  build copies); only what needs a box (Rule X) stays on the legacy emitter.
 * Drops: a list is freed at its last use (peak RSS equals the legacy build's on a pipeline of
   whole-array steps), at every return, and by the cleanup frame when an exception unwinds.
 * ASan + UBSan + LSan: the IR builds of the programs here, including the ones that raise out of
@@ -262,7 +263,7 @@ class ProgramTests(unittest.TestCase):
     maxDiff = None
 
     def check_program(self, name, source, must_be_ir, args_list=((),), cpython=True, stderr_with_cpython=True,
-                      must_stay_legacy=()):
+                      must_stay_legacy=(), legacy_equal=True):
         """Build in every mode; every run agrees across the modes (stdout, stderr, status) and, when
         `cpython`, with CPython (stdout, status, last line of stderr)."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -274,15 +275,18 @@ class ProgramTests(unittest.TestCase):
             for args in args_list:
                 runs = {tag: run(built.exe[tag], args) for tag in built.exe}
                 for tag in ('ir', 'ir-checked'):
-                    self.assertEqual(runs[tag], runs['legacy'], '%s %s args=%s' % (name, tag, args))
+                    if legacy_equal:
+                        self.assertEqual(runs[tag], runs['legacy'], '%s %s args=%s' % (name, tag, args))
+                    else:
+                        self.assertEqual(runs[tag], runs['ir'], '%s %s args=%s' % (name, tag, args))
                 if cpython:
                     expected = cpython_run(tmp, name, source, args)
-                    self.assertEqual(runs['legacy'][1], expected[1], '%s args=%s stdout' % (name, args))
-                    self.assertEqual(runs['legacy'][0], expected[0], '%s args=%s status' % (name, args))
+                    self.assertEqual(runs['ir'][1], expected[1], '%s args=%s stdout' % (name, args))
+                    self.assertEqual(runs['ir'][0], expected[0], '%s args=%s status' % (name, args))
                     if stderr_with_cpython:
-                        self.assertEqual(last_line(runs['legacy'][2]), last_line(expected[2]),
+                        self.assertEqual(last_line(runs['ir'][2]), last_line(expected[2]),
                                          '%s args=%s stderr' % (name, args))
-                results.append(runs['legacy'])
+                results.append(runs['ir'])
             return results, built
 
     # ------------------------------------------------------------------ creation, access, drops
@@ -309,33 +313,28 @@ class ProgramTests(unittest.TestCase):
             self.assertLessEqual(rss['ir'], rss['legacy'] * 1.05 + 256)
 
     # ------------------------------------------------------------------ sharing semantics
-    def test_shapes_that_make_a_second_name_for_a_list_stay_on_the_legacy_emitter(self):
-        # CPython shares: `ys = xs; ys[0] = 9` changes xs. The legacy emitter copies (value semantics),
-        # so this program prints a different number there -- the divergence the design (section 1.5)
-        # prices and S3b removes. The IR must not pick a side: these functions are refused, and the IR
-        # build prints exactly what the legacy build prints.
-        results, built = self.check_program('alias', ALIAS, ['clean'], cpython=False,
-                                            must_stay_legacy=['share', 'slice_copy', 'swap_in_place'])
-        for fn in ('share', 'slice_copy', 'swap_in_place'):
-            self.assertIn(fn, built.fallback['ir'])
-        self.assertRegex(built.fallback['ir']['share'], 'second name|copy')
+    def test_shapes_that_make_a_second_name_for_a_list_follow_python_since_s3b(self):
+        # CPython shares: `ys = xs; ys[0] = 9` changes xs. S3a refused these shapes (the legacy emitter
+        # copies); S3b takes them with Python's meaning (test_ail_ir_s3b has the full set) and refuses
+        # only what needs a box (`a = b` where `b` is rebuilt and read in the next round).
+        results, built = self.check_program('alias', ALIAS, ['clean', 'share', 'slice_copy'], cpython=False,
+                                            must_stay_legacy=['swap_in_place'], legacy_equal=False)
+        self.assertIn('Rule X', built.fallback['ir']['swap_in_place'])
         with tempfile.TemporaryDirectory() as tmp:
             cpython = cpython_run(tmp, 'alias', ALIAS)
-        self.assertNotEqual(cpython[1], results[0][1])        # the documented divergence (W-ALIAS), S3b
-        self.assertEqual(results[0][1].splitlines()[-1], 'clean 15')
+        lines, expected = results[0][1].splitlines(), cpython[1].splitlines()
+        self.assertEqual(lines[0], expected[0])               # share 9
+        self.assertEqual(lines[1], expected[1])               # slice 100 ...
+        self.assertEqual(lines[3], 'clean 15')
+        self.assertNotEqual(lines[2], expected[2])            # swap_in_place: Rule X, legacy value semantics
 
     def test_a_list_moved_into_a_struct_field_where_a_copy_cannot_be_told_apart(self):
         results, built = self.check_program('fieldmove', FIELDMOVE, ['dead_after', 'read_after', 'fresh_fields'])
         self.assertEqual(results[0][0], 0)
-        # ... and the ones where it can: CPython shares, the legacy build copies, the IR refuses
-        results, built = self.check_program('fieldshare', FIELDSHARE, [], cpython=False,
-                                            must_stay_legacy=['written_after', 'called_after', 'element_after',
-                                                              'alias_in_loop'])
-        for fn in ('written_after', 'called_after', 'element_after', 'alias_in_loop'):
-            self.assertRegex(built.fallback['ir'][fn], 'field|top level|moved')
-        with tempfile.TemporaryDirectory() as tmp:
-            cpython = cpython_run(tmp, 'fieldshare', FIELDSHARE)
-        self.assertNotEqual(cpython[1], results[0][1])            # the documented divergence (W-ALIAS)
+        # ... and the ones where it can: CPython shares; since S3b the IR does too (the legacy build copies)
+        results, built = self.check_program('fieldshare', FIELDSHARE, ['written_after', 'element_after', 'alias_in_loop'],
+                                            legacy_equal=False, must_stay_legacy=['called_after'])
+        self.assertIn('Rule X', built.fallback['ir']['called_after'])
 
     # ------------------------------------------------------------------ exceptions
     def test_exceptions_unwind_through_functions_that_own_lists(self):
@@ -463,7 +462,8 @@ class ProgramTests(unittest.TestCase):
                         self.assertNotIn('AddressSanitizer', stderr, (name, tag, k))
                         self.assertNotIn('LeakSanitizer', stderr.replace('LeakSanitizer is disabled', ''),
                                          (name, tag, k, stderr[-600:]))
-                        self.assertEqual((status, stdout), runs['legacy'][k][:2], (name, tag, k))
+                        if name != 'fieldshare':           # (sharing: the legacy build copies; S3b's tests cover it)
+                            self.assertEqual((status, stdout), runs['legacy'][k][:2], (name, tag, k))
 
 
 # --------------------------------------------------------------------------------------------

@@ -91,14 +91,14 @@ class _Checker(object):
 
     # ------------------------------------------------------------------ ownership of lists (S3a)
     _RESIZERS = ('list.push', 'list.pop', 'list.clear', 'list.reset', 'list.repeat', 'list.lit',
-                 'list.reserve', 'list.move', 'list.call')
+                 'list.reserve', 'list.move', 'list.call', 'list.copy')
 
     def _resizes(self, ins, root, defs):
         """Whether `ins` may change the length or storage of the list rooted at `root` (an owned
         local: only an operation naming that very list can; a call cannot, it has no way to name it)."""
         if ins.op not in self._RESIZERS:
             return False
-        refs = ins.operands[:2] if ins.op == 'list.move' else ins.operands[:1]
+        refs = ins.operands[:2] if ins.op in ('list.move', 'list.copy') else ins.operands[:1]
         return any(E._root(r, self.fn, defs) in (root, 'Any') for r in refs)
 
     def check_ownership(self):
@@ -449,6 +449,17 @@ class _Checker(object):
         d, s = ins.operands
         self.want(where, self._is_list_ref(d) and d.type == s.type, 'list.move takes two lists of one type')
         self.want(where, d is not s, 'list.move of a list into itself')
+
+    def op_list_share(self, ins, scope, stack, where, top):
+        self.err(where, 'list.share is resolved by the ownership analysis before verification')
+
+    def op_list_copy(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        d, s = ins.operands
+        elem = self._list_elem(d)
+        ok = self._is_list_ref(d) and elem is not None and (
+            s.type == d.type or s.type == I.T('span', elem))
+        self.want(where, ok, 'list.copy takes (list, list or span of the same element type)')
 
     def op_list_call(self, ins, scope, stack, where, top):
         self.nresults(ins, where, 0)
