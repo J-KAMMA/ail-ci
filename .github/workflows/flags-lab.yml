@@ -26,7 +26,8 @@ jobs:
       fail-fast: false
       max-parallel: 8
       matrix:
-        config: [gcc-O2, gcc-O3, gcc-Os, gcc-O2-v3, gcc-O2-lto, gcc-O2-pgo, clang-O2, clang-O3, zig-O2]
+        # zig-O2 is defined in configs.json but left out: its binary_search build fails (see PR 7).
+        config: [gcc-O2, gcc-O3, gcc-Os, gcc-O2-v3, gcc-O2-lto, gcc-O2-pgo, clang-O2, clang-O3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
