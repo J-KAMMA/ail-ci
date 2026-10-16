@@ -313,6 +313,7 @@ def take(x:int)->int:
 
 def main()->int:
     return take("wrong")
+main()
 ''')
         status, report = self.check(source, '--syntax', 'python')
         self.assertEqual(status, 1)
@@ -370,7 +371,7 @@ impl Item {
         self.assertEqual((diagnostic['line'], diagnostic['column'], diagnostic['location_kind']),
                          (1, text.index('return') + 1, 'source_statement'))
     def test_ambiguous_python_same_line_uses_declaration_fallback(self):
-        source = self.source('def main()->int:\n    x=1; return missing(x)\n')
+        source = self.source('def main()->int:\n    x=1; return missing(x)\nmain()\n')
         status, report = self.check(source, '--syntax', 'python')
         self.assertEqual(status, 1, report)
         diagnostic = report['diagnostics'][0]
@@ -409,7 +410,7 @@ impl Item {
         diagnostic = report['diagnostics'][0]
         self.assertEqual(status, 1, report)
         self.assertEqual((diagnostic['path'], diagnostic['line'], diagnostic['column']), (str(module), 2, 1))
-        text = 'def main()->int:\n    label="日本😀"; return -9223372036854775809\n'
+        text = 'def main()->int:\n    label="日本😀"; return -9223372036854775809\nmain()\n'
         source = self.source(text)
         status, report = self.check(source, '--syntax', 'python')
         diagnostic = report['diagnostics'][0]

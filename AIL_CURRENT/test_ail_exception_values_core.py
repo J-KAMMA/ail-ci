@@ -325,7 +325,7 @@ class ExceptionValueNameTests(unittest.TestCase):
             from pyfunc import to_c
             with self.assertRaisesRegex(SyntaxErrorAIL, 'reserved struct name: exception'):
                 translate('struct exception { value: int; } fn main()->int {return 0;}')
-            legacy = 'class exception:\n def __init__(self,value:int):\n  self.value=value\ndef read(e:exception)->int:\n return e.value\ndef main()->int:\n return read(exception(1))\n'
+            legacy = 'class exception:\n def __init__(self,value:int):\n  self.value=value\ndef read(e:exception)->int:\n return e.value\ndef main()->int:\n return read(exception(1))\nmain()\n'
             with self.assertRaisesRegex(Unsupported, 'reserved class name: exception'):
                 to_c(legacy, name='run', strict=True)
             with self.assertRaisesRegex(Unsupported, 'reserved builtin name: exception'):

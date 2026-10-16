@@ -96,6 +96,7 @@ def main() -> int:
   total += item
  print(total)
  return 0
+main()
 '''
 
 
@@ -153,10 +154,9 @@ class TypedLocalTests(unittest.TestCase):
                   'let value: list[list[bytes]] = [];', 'let value: list[int] = [1.0];',
                   'let value: list[str] = [1];', 'let value: list[float] = [1];']
         sources = [LIBRARY + 'fn main() -> int { ' + body + ' return 0; }' for body in bodies]
-        # AnnAssign target forms are checked through actual Python source entry compilation.
-        sources += ['class Box:\n def __init__(self):\n  self.value = 1\n'
-                    'def main() -> int:\n box = Box()\n box.value: int = 1\n return 0\n',
-                    'def main() -> int:\n values = [1]\n values[0]: int = 1\n return 0\n']
+        # (The Python-source AnnAssign target forms `box.value: int = 1` / `values[0]: int = 1` used to be
+        # listed here, but they only stayed refused while `main` was never called; with an explicit
+        # `main()` the general path builds them, as CPython runs them.)
         library = 'fn conflict(value: int) -> int { let value: float = 1.0; return 0; }'
         for index, source in enumerate([*sources, library]):
             with self.subTest(index=index):

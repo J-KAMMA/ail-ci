@@ -449,7 +449,7 @@ class IntDictSetTests(unittest.TestCase):
 
     def test_python_syntax_annotations(self):
         text = ("def main() -> int:\n    d: dict[int, int] = {}\n    s: set[str] = set()\n"
-                "    d[7] = 1\n    s.add(\"a\")\n    print(len(d), d[7], len(s))\n    return 0\n")
+                "    d[7] = 1\n    s.add(\"a\")\n    print(len(d), d[7], len(s))\n    return 0\nmain()\n")
         with tempfile.TemporaryDirectory() as directory:
             built, exe, _ = build(directory, text, syntax="python")
             self.assertEqual(built.returncode, 0, built.stdout + built.stderr)

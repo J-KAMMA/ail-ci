@@ -30421,12 +30421,28 @@ def _to_c_unshadowed(source, name=None, strict=True, info=None, entry=None, sig=
     retried with that binding region renamed (rebinding.py), when no read can tell the difference;
     otherwise the refusal says which loop or handler to rename."""
     snapshot = dict(info) if info is not None else None
-    renamed, tried = {}, set()
+    renamed, tried, copied, line_shifts = {}, set(), set(), []
     while True:
         try:
             return _to_c_sorted(source, name, strict, info, entry, sig, library, external)
         except Unsupported as error:
             message = error.args[0] if error.args and isinstance(error.args[0], str) else ''
+            param = rebinding.param_name(message)
+            if param is not None and param not in copied and len(copied) < 8:
+                # Python allows rebinding a parameter; for a scalar one that is a local copy
+                copied.add(param)
+                try:
+                    copy = rebinding.copy_param(source, param, renamed)
+                except SyntaxError:
+                    copy = None
+                if copy is not None:
+                    source, fresh_name, shifts = copy
+                    renamed[fresh_name] = param
+                    line_shifts.extend(shifts)
+                    if info is not None:
+                        info.clear()
+                        info.update(snapshot)
+                    continue
             local = rebinding.conflict_name(message)
             if local is not None and local not in renamed and local not in tried and len(tried) < 8:
                 tried.add(local)
@@ -30446,6 +30462,8 @@ def _to_c_unshadowed(source, name=None, strict=True, info=None, entry=None, sig=
                     error.source_line = line
             for new, old in renamed.items():
                 message = re.sub(r'\b%s\b' % re.escape(new), old, message)
+            if line_shifts and isinstance(getattr(error, 'source_line', None), int):
+                error.source_line -= sum(1 for at in line_shifts if at <= error.source_line)
             if message and error.args:
                 error.args = (message,) + error.args[1:]
             if (getattr(error, 'source_line', None) is None

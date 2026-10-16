@@ -244,6 +244,7 @@ def main() -> None:
         print("caught", e)
     print(r("z"))
 
+main()
 '''
 
 
@@ -259,7 +260,7 @@ class FinallyTests(unittest.TestCase):
     def test_whole_trace_matches_independent_cpython(self):
         reference = {}
         exec(TRACE, reference)
-        source = self.write('trace.ail', TRACE + '\ndef main() -> int:\n    return run(int(sys.argv[1]))\n')
+        source = self.write('trace.ail', TRACE + '\ndef main() -> int:\n    return run(int(sys.argv[1]))\nmain()\n')
         executable = self.root / 'trace'
         built = self.command('compile', source, '--syntax', 'python', '-o', executable)
         self.assertEqual(built.returncode, 0, built.stderr.decode(errors='replace'))

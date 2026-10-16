@@ -228,3 +228,99 @@ def blocked_refusal(message, name, blocked):
     return ('%s, and %s reads %r after this loop, where Python keeps its last value: rename this '
             'loop variable and its uses, e.g. `for %s in ...`' % (head, read, name, name + '2'),
             region.line)
+
+
+_PARAM_PATTERN = re.compile(r"\x27([A-Za-z_]\w*)\x27 is a parameter and cannot be reassigned")
+_SCALAR_ANNOTATIONS = ("int", "float", "bool")
+
+
+def param_name(message):
+    """The parameter a "cannot be reassigned" refusal is about, or None for any other refusal."""
+    match = _PARAM_PATTERN.search(message)
+    return match.group(1) if match else None
+
+
+def _binds_elsewhere(fn, name):
+    """True when something inside  other than a plain Name could bind or scope 
+    (nested scopes, global/nonlocal, handler names, imports, def/class names): those cases are
+    not copied, because renaming only the Name nodes would not be exact."""
+    for node in ast.walk(fn):
+        if node is fn:
+            continue
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if node.name == name:
+                return True
+            if any(isinstance(n, ast.Name) and n.id == name for n in ast.walk(node)):
+                return True
+        elif isinstance(node, ast.Lambda):
+            if any(isinstance(n, ast.Name) and n.id == name for n in ast.walk(node)):
+                return True
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            if name in node.names:
+                return True
+        elif isinstance(node, ast.ExceptHandler):
+            if node.name == name:
+                return True
+        elif isinstance(node, ast.alias):
+            if (node.asname or node.name.split(".")[0]) == name:
+                return True
+    return False
+
+
+def copy_param(source, name, taken=()):
+    """Python lets a function rebind its own parameter; the typed compiler gives a parameter one
+    fixed kind and refuses the store. For a scalar (int/float/bool annotated) parameter the
+    rebinding is exactly a local copy, so every use of the name in the body is renamed to a fresh
+    local that starts as the argument: (new source, fresh name, inserted line numbers), or None
+    when no function qualifies. The parameter keeps its own name, so keyword calls still bind.
+    The copy shares the first statement\x27s line when that statement is simple, so line numbers
+    stay put; otherwise it is a new line and the caller shifts line numbers back."""
+    text = source.strip()
+    tree = ast.parse(text)
+    lines = text.split("\n")
+    used = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)} | set(taken)
+    new = "%s__p" % name
+    while new in used:
+        new += "_"
+    edits, inserts = [], []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, ast.FunctionDef):
+            continue
+        args = fn.args.posonlyargs + fn.args.args + fn.args.kwonlyargs
+        arg = next((a for a in args if a.arg == name), None)
+        if arg is None or not (isinstance(arg.annotation, ast.Name)
+                               and arg.annotation.id in _SCALAR_ANNOTATIONS):
+            continue
+        if _binds_elsewhere(fn, name) or fn.args.vararg and fn.args.vararg.arg == name                 or fn.args.kwarg and fn.args.kwarg.arg == name:
+            continue
+        if not any(isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, (ast.Store, ast.Del))
+                   for n in ast.walk(fn)):
+            continue
+        body = fn.body
+        start = 1 if (isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant)
+                      and isinstance(body[0].value.value, str) and len(body) > 1) else 0
+        first = body[start]
+        for stmt in body:
+            for node in ast.walk(stmt):
+                if isinstance(node, ast.Name) and node.id == name:
+                    edits.append((node.lineno, node.col_offset, node.end_col_offset, new))
+        simple = not isinstance(first, (ast.If, ast.For, ast.While, ast.Try, ast.With,
+                                        ast.AsyncFor, ast.AsyncWith, ast.Match,
+                                        ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        indent = lines[first.lineno - 1][:first.col_offset]
+        # a simple one-line statement takes the copy before it on the same line; a multi-line
+        # or compound one gets a line of its own
+        if simple and first.lineno == first.end_lineno:
+            edits.append((first.lineno, first.col_offset, first.col_offset,
+                          "%s = %s; " % (new, name)))
+        else:
+            inserts.append((first.lineno, "%s%s = %s" % (indent, new, name)))
+    if not edits and not inserts:
+        return None
+    text = _rename_text(text, edits)
+    out = text.split("\n")
+    shifted = []
+    for line, stmt in sorted(inserts, reverse=True):
+        out.insert(line - 1, stmt)
+        shifted.append(line)
+    return "\n".join(out), new, sorted(shifted)

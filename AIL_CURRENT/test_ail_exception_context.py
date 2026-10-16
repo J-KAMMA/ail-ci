@@ -111,7 +111,7 @@ class ExceptionContextTests(unittest.TestCase):
                 root = Path(directory)
                 if statement.startswith('assert'):
                     source = root / 'main.ail'
-                    text = 'def main()->int:\n    try:\n        assert False,"bad"\n    except ValueError:\n        write_stdout_bytes(b"caught")\n        return 0\n    return 9\n'
+                    text = 'def main()->int:\n    try:\n        assert False,"bad"\n    except ValueError:\n        write_stdout_bytes(b"caught")\n        return 0\n    return 9\nmain()\n'
                 else:
                     source = root / 'main.ail'
                     text = ('fn main()->int {try {' + statement +

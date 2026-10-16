@@ -105,7 +105,7 @@ class CheckRepairContextTests(unittest.TestCase):
 
     def test_unavailable_cases_preserve_diagnostics_and_status(self):
         cases = [('fn main()->int {return 1 + * 2;}', (), 'unsupported_diagnostic'),
-                 ('def take(x:int)->int:\n    return x\ndef main()->int:\n    return take("wrong")\n', ('--syntax', 'python'), 'python_source'),
+                 ('def take(x:int)->int:\n    return x\ndef main()->int:\n    return take("wrong")\nmain()\n', ('--syntax', 'python'), 'python_source'),
                  ('fn main()->int {return 0;}', ('-I', self.root / 'absent'), 'unsupported_diagnostic'),
                  ('fn main()->int {return "wrong";}', ('--module', self.source('fn extra()->int {return 0;}', 'extra.ail')), 'explicit_module_or_object'),
                  ('fn main()->int {return 0;}', ('--object', self.root / 'missing.o'), 'explicit_module_or_object'),

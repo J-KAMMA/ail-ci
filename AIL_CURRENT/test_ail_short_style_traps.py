@@ -337,7 +337,11 @@ class ShortStyleTrapTests(unittest.TestCase):
 
     def test_dict_of_lists_is_refused_by_name_never_by_gcc(self):
         with tempfile.TemporaryDirectory() as directory:
-            for index, text in enumerate((GROUPS_AIL, GROUPS_PY_SYNTAX)):
+            # a Python-surface `main` that is never called is refused before any path sees it
+            built, exe, _ = build(directory, GROUPS_PY_SYNTAX, name="g1")
+            self.assertNotEqual(built.returncode, 0)
+            self.assertIn('main() is defined but never called', built.stdout + built.stderr)
+            for index, text in enumerate((GROUPS_AIL,)):
                 built, exe, _ = build(directory, text, name="g%d" % index)
                 output = built.stdout + built.stderr
                 self.assertNotEqual(built.returncode, 0)
