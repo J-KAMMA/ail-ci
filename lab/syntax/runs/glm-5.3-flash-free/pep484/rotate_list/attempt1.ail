@@ -1,0 +1,45 @@
+```python
+import sys
+from dataclasses import dataclass
+
+
+def read_lines() -> list[str]:
+    lines: list[str] = []
+    for line in sys.stdin:
+        s: str = line.strip()
+        if len(s) > 0:
+            lines.append(s)
+    return lines
+
+
+def parse_ints(s: str) -> list[int]:
+    xs: list[int] = []
+    for t in s.split():
+        xs.append(int(t))
+    return xs
+
+
+def main() -> int:
+    lines: list[str] = read_lines()
+    k: int = int(lines[0])
+    xs: list[int] = parse_ints(lines[1])
+    n: int = len(xs)
+    r: int = k % n
+    split: int = n - r
+    back: list[str] = []
+    front: list[str] = []
+    i: int = 0
+    for x in xs:
+        if i < split:
+            front.append(str(x))
+        else:
+            back.append(str(x))
+        i += 1
+    out: list[str] = []
+    for part in back:
+        out.append(part)
+    for part in front:
+        out.append(part)
+    print(" ".join(out))
+    return 0
+```

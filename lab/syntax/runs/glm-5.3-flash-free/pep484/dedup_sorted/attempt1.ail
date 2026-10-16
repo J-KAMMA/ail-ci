@@ -1,0 +1,22 @@
+```python
+import sys
+
+
+def main() -> int:
+    vals: dict[int, int] = {}
+    for line in sys.stdin:
+        parts: list[str] = line.split()
+        for tok in parts:
+            ok: bool = True
+            v: int = 0
+            try:
+                v = int(tok)
+            except ValueError as err:
+                ok = False
+            if ok:
+                vals[v] = 0
+    keys: list[int] = sorted(vals)
+    for k in keys:
+        print(k)
+    return 0
+```

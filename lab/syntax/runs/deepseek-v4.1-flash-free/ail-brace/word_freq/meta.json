@@ -1,0 +1,7 @@
+{
+  "model": "deepseek-v4.1-flash-free",
+  "variant": "ail-brace",
+  "task": "word_freq",
+  "date": "2026-10-17",
+  "tokens_out": null
+}

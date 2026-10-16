@@ -1,0 +1,31 @@
+```
+import sys
+from dataclasses import dataclass
+
+@dataclass
+class Item:
+    name: str
+    quantity: int
+    unit_price: int
+
+def main() -> int:
+    items: list[Item] = []
+    for line in sys.stdin:
+        f = line.split()
+        if len(f) < 3:
+            continue
+        try:
+            q = int(f[1])
+            p = int(f[2])
+        except ValueError as e:
+            continue
+        items.append(Item(f[0], q, p))
+    items.sort(key=lambda i: (-(i.quantity * i.unit_price), i.name))
+    total: int = 0
+    for it in items:
+        v = it.quantity * it.unit_price
+        total += v
+        print(it.name, v)
+    print("total", total)
+    return 0
+```

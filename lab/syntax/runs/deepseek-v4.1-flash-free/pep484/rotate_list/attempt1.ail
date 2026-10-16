@@ -1,0 +1,27 @@
+```
+import sys
+from dataclasses import dataclass
+
+def main() -> int:
+    lines: list[str] = []
+    for line in sys.stdin:
+        lines.append(line.strip())
+    k: int = int(lines[0])
+    parts: list[str] = lines[1].split()
+    xs: list[int] = []
+    for p in parts:
+        xs.append(int(p))
+    n: int = len(xs)
+    r: int = k % n
+    out: list[str] = []
+    i: int = n - r
+    while i < n:
+        out.append(str(xs[i]))
+        i += 1
+    i = 0
+    while i < n - r:
+        out.append(str(xs[i]))
+        i += 1
+    print(" ".join(out))
+    return 0
+```

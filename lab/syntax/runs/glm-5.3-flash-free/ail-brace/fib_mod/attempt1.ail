@@ -1,0 +1,22 @@
+```
+# Print F(n) mod m for each input line, reducing mod after every addition.
+fn main() -> int {
+    for line in sys.stdin {
+        let fs = line.split();
+        if len(fs) > 1 {
+            let n = int(fs[0]);
+            let m = int(fs[1]);
+            let a = 0;
+            let b = 1 % m;
+            let t = 0;
+            for i in range(n) {
+                t = (a + b) % m;
+                a = b;
+                b = t;
+            }
+            print(a);
+        }
+    }
+    return 0;
+}
+```

@@ -1,0 +1,36 @@
+```python
+import sys
+from dataclasses import dataclass
+
+
+def is_int_token(tok: str) -> bool:
+    s: str = tok
+    if len(s) > 0 and s[0] == "-":
+        s = s[1:]
+    return s.isdigit()
+
+
+def main() -> int:
+    total: int = 0
+    ok: bool = False
+    value: int = 0
+    tok: str = ""
+    parts: list[str] = []
+    for line in sys.stdin:
+        parts = line.split()
+        for tok in parts:
+            ok = False
+            value = 0
+            if is_int_token(tok):
+                try:
+                    value = int(tok)
+                    ok = True
+                except ValueError as err:
+                    ok = False
+            if ok:
+                total += value
+            else:
+                print("bad:", tok)
+    print(f"sum={total}")
+    return 0
+```

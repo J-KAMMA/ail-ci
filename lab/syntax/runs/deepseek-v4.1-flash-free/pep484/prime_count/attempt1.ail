@@ -1,0 +1,55 @@
+```python
+import sys
+from dataclasses import dataclass
+
+def max_int(xs: list[int]) -> int:
+    m: int = xs[0]
+    for x in xs:
+        if x > m:
+            m = x
+    return m
+
+def sieve_counts(limit: int) -> list[int]:
+    is_prime: list[bool] = []
+    i: int = 0
+    while i <= limit:
+        is_prime.append(True)
+        i += 1
+    is_prime[0] = False
+    is_prime[1] = False
+    p: int = 2
+    while p * p <= limit:
+        if is_prime[p]:
+            j: int = p * p
+            while j <= limit:
+                is_prime[j] = False
+                j += p
+        p += 1
+    counts: list[int] = []
+    c: int = 0
+    k: int = 0
+    while k <= limit:
+        if is_prime[k]:
+            c += 1
+        counts.append(c)
+        k += 1
+    return counts
+
+def main() -> int:
+    nums: list[int] = []
+    for line in sys.stdin:
+        f = line.split()
+        if len(f) == 0:
+            continue
+        try:
+            nums.append(int(f[0]))
+        except ValueError as err:
+            pass
+    if len(nums) == 0:
+        return 0
+    limit: int = max_int(nums)
+    counts: list[int] = sieve_counts(limit)
+    for n in nums:
+        print(counts[n])
+    return 0
+```

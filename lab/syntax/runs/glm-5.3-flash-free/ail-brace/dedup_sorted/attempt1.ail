@@ -1,0 +1,22 @@
+```ail
+fn main() -> int {
+    let xs: list[int] = [];
+    for line in sys.stdin {
+        let parts = line.split();
+        for p in parts {
+            xs.append(int(p));
+        }
+    }
+    xs.sort();
+    let out: list[int] = [];
+    for x in xs {
+        if len(out) == 0 or out[len(out) - 1] != x {
+            out.append(x);
+        }
+    }
+    for v in out {
+        print(v);
+    }
+    return 0;
+}
+```

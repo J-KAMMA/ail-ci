@@ -1,0 +1,37 @@
+```python
+import sys
+from dataclasses import dataclass
+
+@dataclass
+class Account:
+    balance: int
+
+def deposit(acc: Account, n: int) -> None:
+    acc.balance += n
+
+def withdraw(acc: Account, n: int) -> None:
+    if n > acc.balance:
+        raise ValueError("insufficient funds")
+    acc.balance -= n
+
+def main() -> int:
+    acc = Account(0)
+    for line in sys.stdin:
+        parts = line.split()
+        if len(parts) == 0:
+            print("error: unknown command")
+        else:
+            cmd = parts[0]
+            if cmd == "deposit":
+                deposit(acc, int(parts[1]))
+            elif cmd == "withdraw":
+                try:
+                    withdraw(acc, int(parts[1]))
+                except ValueError as e:
+                    print("error: insufficient funds")
+            elif cmd == "balance":
+                print("balance", acc.balance)
+            else:
+                print("error: unknown command")
+    return 0
+```

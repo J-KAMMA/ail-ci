@@ -1,0 +1,43 @@
+```ail
+# caesar: shift every ASCII letter forward by k, wrap around, keep case.
+const LOWER = "abcdefghijklmnopqrstuvwxyz";
+const UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+fn shift_char(ch: str, k: int) -> str {
+    let i = LOWER.find(ch);
+    if i >= 0 {
+        return LOWER[(i + k) % 26];
+    }
+    let j = UPPER.find(ch);
+    if j >= 0 {
+        return UPPER[(j + k) % 26];
+    }
+    return ch;
+}
+
+fn main() -> int {
+    let k = 0;
+    let have_k = false;
+    for line in sys.stdin {
+        if not have_k {
+            have_k = true;
+            try {
+                k = int(line.strip());
+                k = (k % 26 + 26) % 26;
+            }
+            except ValueError as err {
+                k = 0;
+            }
+        } else {
+            let out = "";
+            for ch in line {
+                if ch != "\n" and ch != "\r" {
+                    out = out + shift_char(ch, k);
+                }
+            }
+            print(out);
+        }
+    }
+    return 0;
+}
+```

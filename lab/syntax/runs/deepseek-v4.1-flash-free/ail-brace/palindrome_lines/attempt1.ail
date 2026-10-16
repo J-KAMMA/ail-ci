@@ -1,0 +1,36 @@
+```
+fn main() -> int {
+    let digits = "0123456789";
+    let lower = "abcdefghijklmnopqrstuvwxyz";
+    let upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    for line in sys.stdin {
+        let s = "";
+        let i = 0;
+        while i < len(line) {
+            let ch = line[i];
+            if digits.find(ch) >= 0 {
+                s += ch;
+            } elif lower.find(ch) >= 0 or upper.find(ch) >= 0 {
+                s += ch.lower();
+            }
+            i += 1;
+        }
+        let ok = true;
+        let n = len(s);
+        let j = 0;
+        while j < n / 2 {
+            if s[j] != s[n - 1 - j] {
+                ok = false;
+                break;
+            }
+            j += 1;
+        }
+        if ok {
+            print("yes");
+        } else {
+            print("no");
+        }
+    }
+    return 0;
+}
+```

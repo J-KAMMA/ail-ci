@@ -1,0 +1,7 @@
+{
+  "model": "glm-5.3-flash-free",
+  "variant": "pep484",
+  "task": "fib_mod",
+  "date": "2026-10-17",
+  "tokens_out": null
+}

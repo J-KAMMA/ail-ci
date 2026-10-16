@@ -1,0 +1,31 @@
+```
+fn is_int(tok: str) -> bool {
+    if len(tok) == 0 {
+        return false;
+    }
+    let body = tok;
+    if tok[0] == "-" {
+        body = tok[1:];
+    }
+    if len(body) == 0 {
+        return false;
+    }
+    return body.isdigit();
+}
+
+fn main() -> int {
+    let total = 0;
+    for line in sys.stdin {
+        let toks = line.split();
+        for t in toks {
+            if is_int(t) {
+                total += int(t);
+            } else {
+                print(f"bad: {t}");
+            }
+        }
+    }
+    print(f"sum={total}");
+    return 0;
+}
+```

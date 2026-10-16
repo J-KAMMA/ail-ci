@@ -1,0 +1,16 @@
+```python
+import sys
+
+def main() -> int:
+    counts: dict[str, int] = {}
+    for line in sys.stdin:
+        parts: list[str] = line.split()
+        for w in parts:
+            k = w.lower()
+            counts[k] = counts.get(k, 0) + 1
+    keys: list[str] = sorted(counts)
+    keys.sort(key=lambda k: (-counts[k], k))
+    for k in keys:
+        print(k, counts[k])
+    return 0
+```
