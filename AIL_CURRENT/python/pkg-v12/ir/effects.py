@@ -135,13 +135,18 @@ def instr_effects(ins, fn, program, places=None, defs=None, summaries=None):
         return Effects(reads=[loc], writes=[loc, 'Spine(%s)' % root], raises=[INDEX] if op == 'list.pop' else [])
     if op in ('field.list', 'list.ref'):
         return NONE
-    if op in ('list.reset', 'list.repeat', 'list.lit', 'list.reserve', 'list.move', 'list.call'):
+    if op in ('list.reset', 'list.repeat', 'list.lit', 'list.reserve', 'list.move', 'list.call',
+              'list.copy', 'list.share'):
         # these replace or grow the content of the list(s) they name (the destination first)
-        refs = ins.operands[:2] if op == 'list.move' else ins.operands[:1]
+        refs = ins.operands[:2] if op in ('list.move', 'list.copy', 'list.share') else ins.operands[:1]
         eff = NONE
-        for r in refs:
+        for k, r in enumerate(refs):
             root = _root(r, fn, defs)
             eff = eff | Effects(reads=['Elem(%s)' % root], writes=['Elem(%s)' % root, 'Spine(%s)' % root])
+            if k == 0 and op != 'list.reserve':
+                # the destination's list is replaced (rebound), not only resized: a borrow of the
+                # old list (S3b, ownership.py) must not outlive it
+                eff = eff | Effects(writes=['Rebind(%s)' % root])
         if op == 'list.call':
             sym = ins.attrs.get('callee')
             callee = program.functions.get(sym) if program is not None else None

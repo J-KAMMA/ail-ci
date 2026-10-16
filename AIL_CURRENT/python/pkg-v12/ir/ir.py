@@ -304,6 +304,14 @@ _op('list.lit', 1, None)          # (ref, elements...): `[a, b, c]`
 _op('list.reserve', 2, 2)         # (ref, extra): room for a comprehension of known length
 _op('list.move', 2, 2)            # (dst ref, src ref): dst takes src's storage, src is left empty
 _op('list.call', 1, None)         # (dst ref, args...): call a list-returning function, adopt its list
+# S3b: sharing (design section 13). `list.share` (dst, src) is the lowering's record of Python's `dst = src`
+# (a second holder of one list); the ownership analysis (ownership.py) replaces every one by a
+# `list.move`, by renaming the borrower's uses to the owner, or refuses the function (Rule X: a
+# box is needed, stage S3e). It never reaches the verifier. `list.copy` (dst, src) is an explicit
+# copy (`xs[:]`, `list(xs)`, `xs.copy()`): dst gets a new list with src's elements (src may be an
+# owned or field list, or a read-only list parameter); a copy of a dead source becomes a move (Rule 1).
+_op('list.share', 2, 2)
+_op('list.copy', 2, 2)
 # S3a: owned bytearrays (one reference-counted object per owner place; `load` of the place is a borrow)
 _op('ba.new', 2, 2)               # (place, length): the place now holds a fresh zero-filled bytearray
 _op('ba.drop', 1, 1)              # (place): release the owner's reference

@@ -72,7 +72,7 @@ def _decl(ct, name):
     return ct + name if ct.endswith('*') else '%s %s' % (ct, name)
 
 
-def signature(fn, sym=None, linkage=None):
+def signature(fn, sym=None, linkage=None, byval=False):
     results = fn.results
     if len(results) > 1:
         raise I.IRError('S0 functions return at most one value')
@@ -86,7 +86,10 @@ def signature(fn, sym=None, linkage=None):
             decls.append('ail_flist v_%s' % n)
         else:
             decls.append(_decl(ctype(p.type), 'v_' + n))
-    if fn.attrs.get('ret_list'):
+    if fn.attrs.get('ret_list') and byval:
+        # IR to IR (S3b): the list leaves as the {p, n, cap} struct itself, no copy through the spill slot
+        ret = 'ail_flist' if fn.attrs['ret_list'] == 'flist' else 'ail_list'
+    elif fn.attrs.get('ret_list'):
         # a returned list crosses the C boundary as the legacy path hands it back (cruntime LISTRET):
         # through a buffer the caller owns, the true length as the result
         ret = 'int64_t'
@@ -99,13 +102,13 @@ def signature(fn, sym=None, linkage=None):
     return '%s%s %s(%s)' % (prefix, ret, sym or fn.sym, params or 'void')
 
 
-def _args_of(fn):
+def _args_of(fn, want_out=True):
     """The parameters as C arguments, to forward them to another function of the same signature."""
     abi = fn.attrs.get('abi') or ['value'] * len(fn.params)
     out = []
     for n, a in zip(fn.param_names, abi):
         out.append('v_%s, v_%s_len' % (n, n) if a == 'array' else 'v_%s' % n)
-    if fn.attrs.get('ret_list'):
+    if fn.attrs.get('ret_list') and want_out:
         out.append('_out, _cap')
     return ', '.join(out)
 
@@ -153,8 +156,11 @@ _BA = I.T('obj', I.T('bytearray'))
 
 
 class Emitter(object):
-    def __init__(self, fn, pending=(), checked=False, summaries=None, unwind_name=None):
+    def __init__(self, fn, pending=(), checked=False, summaries=None, unwind_name=None, listval=None):
         self.fn = fn
+        # callees with a by-value list entry `<sym>__irl` (S3b); None: separately linked units, none
+        self.listval = frozenset(listval or ())
+        self.allow_byval = listval is not None
         # the helper that frees what a longjmp unwinds over: the name the legacy path chose for its own
         # (unique among the program's symbols), else one derived from the function's symbol
         self.unwind_name = unwind_name
@@ -175,6 +181,7 @@ class Emitter(object):
                                           or (i.op == 'call' and i.attrs.get('callee') in self.pending)
                                           for i in ops)
         self.frame = any(i.op == 'try' for i in ops)
+        self.byval = bool(fn.attrs.get('ret_list')) and not self.is_pending and not self.frame and self.allow_byval
         self.pre = 'fr->' if self.frame else ''
         self.cx = _Cx('top', 0, 0)
         self.lines = self.cx.lines
@@ -272,6 +279,8 @@ class Emitter(object):
         params = set(fn.param_names)
         sym = fn.sym
         ir_sig = signature(fn, sym + '__ir', 'static') if self.is_pending else sig
+        if self.byval:
+            ir_sig = signature(fn, sym + '__irl', 'static', byval=True)
         abi = fn.attrs.get('abi') or ['value'] * len(fn.params)
         if self.frame:
             self.aux.append(self.frame_struct())
@@ -327,6 +336,12 @@ class Emitter(object):
         self.region(fn.body, 1, None)
         text = '%s {\n%s\n}\n' % (ir_sig, '\n'.join(self.cx.lines))
         out = ''.join(self.aux) + text
+        if self.byval:
+            kind = 'flist' if fn.attrs['ret_list'] == 'flist' else 'list'
+            self.parts.update(('FLIST', 'FLISTRET') if kind == 'flist' else ('LIST', 'LISTRET'))
+            out += ('%s {\n    ail_%s r = %s__irl(%s);\n    int64_t n = ail_%s_return(&r, _out, _cap);\n'
+                    '    ail_%s_free(&r);\n    return n;\n}\n'
+                    % (sig, kind, sym, _args_of(fn, False), kind, kind))
         if self.is_pending:
             call = '%s__ir(%s)' % (sym, _args_of(fn))
             if fn.results:
@@ -359,7 +374,12 @@ class Emitter(object):
     def exit_return(self, depth, value, in_frame=False):
         self.leaves(depth, lambda sc: True)
         if self.cx.kind == 'top':
-            if self.fn.attrs.get('ret_list') and value is not None:
+            if self.byval and value is not None:
+                # the list leaves by value: the result takes the storage, the place is left empty
+                kind = 'flist' if self.fn.attrs['ret_list'] == 'flist' else 'list'
+                self.line(depth, 'ail_%s ir_ret = *(%s); *(%s) = (ail_%s){0};' % (kind, value, value, kind))
+                value = 'ir_ret'
+            elif self.fn.attrs.get('ret_list') and value is not None:
                 # the list leaves through the caller's buffer (LISTRET), then every owned list goes
                 self.parts.add('FLISTRET' if self.fn.attrs['ret_list'] == 'flist' else 'LISTRET')
                 self.line(depth, 'int64_t ir_ret = ail_%s_return(%s, _out, _cap);'
@@ -615,7 +635,7 @@ class Emitter(object):
                 return self.line(depth, 'ail_bytearray_clear(%s);' % o[0])
             self.parts.add('STDIO')
             return self.line(depth, 'ail_stdout_write_bytes(ail_bytearray_span(%s));' % o[0])
-        if op in ('list.reset', 'list.repeat', 'list.lit', 'list.reserve', 'list.move'):
+        if op in ('list.reset', 'list.repeat', 'list.lit', 'list.reserve', 'list.move', 'list.copy'):
             return self.list_replace(ins, depth, o)
         if op in ('call', 'list.call'):
             abi = ins.attrs.get('abi') or ['value'] * len(o)
@@ -648,6 +668,15 @@ class Emitter(object):
                 # given, the whole list waits in the runtime's spill slot and is adopted right after
                 dst = ins.operands[0]
                 flist = dst.type == _LISTS[1]
+                kind = 'flist' if flist else 'list'
+                if callee in self.listval or (callee == self.fn.sym and self.byval):
+                    # IR to IR: the callee hands its list back by value
+                    self.parts.update(('FLIST', 'IRFLIST') if flist else ('LIST', 'IRLIST'))
+                    self.count += 1
+                    n = 'ir%d' % self.count
+                    self.line(depth, 'ail_%s %s = %s__irl(%s);' % (kind, n, callee, ', '.join(parts)))
+                    self.line(depth, '{ ail_%s_free(%s); *(%s) = %s; }' % (kind, o[0], o[0], n))
+                    return
                 parts.append('NULL, 0')
                 self.parts.update(('FLIST', 'FLISTRET', 'IRFLIST') if flist else ('LIST', 'LISTRET', 'IRLIST'))
                 self.count += 1
@@ -944,6 +973,23 @@ class Emitter(object):
             self.line(depth, '{ ail_%s_free(%s);%s }' % (
                 f, L, ''.join(' ail_%s_push(%s, %s);' % (f, L, v) for v in o[1:])))
             return
+        if op == 'list.copy':
+            # the source is read in full before the destination's old content is freed, so a source
+            # that is (part of) the destination's own list is fine
+            src = ins.operands[1]
+            if src in self.span_names:
+                sp, sn = self.span_names[src][:2]
+            else:
+                sp, sn = '(%s)->p' % o[1], '(%s)->n' % o[1]
+            self.count += 1
+            t, n, i = 'ir%d' % self.count, 'ir%d' % (self.count + 1), 'ir%d' % (self.count + 2)
+            self.count += 2
+            ct = 'double' if f == 'flist' else 'int64_t'
+            self.line(depth, '{ ail_%s %s = {0}; const %s *%s_s = %s; int64_t %s = %s; ail_%s_reserve(&%s, %s); '
+                             'for (int64_t %s = 0; %s < %s; %s++) %s.p[%s] = %s_s[%s]; %s.n = %s; '
+                             'ail_%s_free(%s); *(%s) = %s; }'
+                      % (f, t, ct, t, sp, n, sn, f, t, n, i, i, n, i, t, i, t, i, t, n, f, o[0], o[0], t))
+            return
         if op == 'list.move':
             self.count += 1
             t = 'ir%d' % self.count
@@ -1045,11 +1091,12 @@ class Emitter(object):
                         yield x
 
 
-def emit_function(fn, pending=(), checked=False, summaries=None, unwind_name=None):
+def emit_function(fn, pending=(), checked=False, summaries=None, unwind_name=None, listval=None):
     """(signature text, function definition text, runtime needs {'parts','need','floor',
     'pending'}). `pending` lists the callees that have an exception entry point; the result's
     `pending` says whether this function has one too (then its text defines `<sym>__ir` and, under
     the function's own name, the wrapper legacy callers use)."""
-    em = Emitter(fn, pending, checked, summaries, unwind_name)
+    em = Emitter(fn, pending, checked, summaries, unwind_name, listval)
     sig, text = em.emit()
-    return sig, text, {'parts': em.parts, 'need': em.need, 'floor': em.floor, 'pending': em.is_pending}
+    return sig, text, {'parts': em.parts, 'need': em.need, 'floor': em.floor, 'pending': em.is_pending,
+                       'byval': em.byval}
