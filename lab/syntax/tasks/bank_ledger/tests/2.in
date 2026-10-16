@@ -1,0 +1,5 @@
+withdraw 5
+deposit 10
+withdraw 10
+withdraw 1
+balance

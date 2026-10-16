@@ -1,0 +1,8 @@
+{
+  "model": "_sample",
+  "variant": "ts-like",
+  "task": "collatz_steps",
+  "date": "2026-10-16",
+  "tokens_out": null,
+  "sample": true
+}

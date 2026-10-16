@@ -1,0 +1,20 @@
+fn main() -> int {
+    let lo: str = "abcdefghijklmnopqrstuvwxyz";
+    let up: str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    let first = true;
+    let k: int = 0;
+    for line in sys.stdin {
+        let s = line.rstrip("\n");
+        if first { k = int(s) % 26; first = false; continue; }
+        let out: str = "";
+        for ch in s {
+            let a = lo.find(ch);
+            let b = up.find(ch);
+            if a >= 0 and a + k < 26 { out += lo[a + k]; }
+            elif b >= 0 and b + k < 26 { out += up[b + k]; }
+            else { out += ch; }
+        }
+        print(out);
+    }
+    return 0;
+}

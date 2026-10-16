@@ -1,0 +1,8 @@
+{
+  "model": "_sample",
+  "variant": "pep484",
+  "task": "collatz_steps",
+  "date": "2026-10-16",
+  "tokens_out": null,
+  "sample": true
+}
