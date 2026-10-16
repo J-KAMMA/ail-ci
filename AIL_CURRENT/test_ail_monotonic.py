@@ -27,7 +27,7 @@ class MonotonicTests(unittest.TestCase):
         start,end,elapsed=map(int,result.stdout.split())
         self.assertGreaterEqual(start,0);self.assertEqual(end-start,elapsed)
         self.assertGreaterEqual(elapsed,50);self.assertLessEqual(elapsed,duration*1000+50)
-        python=self.ail_build('pythonclock','def main()->int:\n print(monotonic_ms())\n return 0\n')
+        python=self.ail_build('pythonclock','def main()->int:\n print(monotonic_ms())\n return 0\nmain()\n')
         self.assertEqual(subprocess.run([str(python)],capture_output=True,timeout=10).returncode,0)
 
     def test_reject_arguments_and_preserve_user_name(self):

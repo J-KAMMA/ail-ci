@@ -436,7 +436,7 @@ class ReraiseTests(unittest.TestCase):
                'def run(n:int)->int:\n raise ValueError() from None\n',
                'class Custom(Exception):\n pass\ndef run(n:int)->int:\n try:\n  raise ValueError()\n except Custom:\n  return 0\n return 0\n')
         for index,source in enumerate(cases):
-            path=self.write('bad'+str(index)+'.py',source+'\ndef main()->int:\n return run(0)\n'); out=self.root/('bad'+str(index))
+            path=self.write('bad'+str(index)+'.py',source+'\ndef main()->int:\n return run(0)\nmain()\n'); out=self.root/('bad'+str(index))
             result=self.command('compile',path,'--syntax','python','-o',out)
             self.assertNotEqual(result.returncode,0,source); self.assertNotIn(b'Traceback',result.stderr)
             self.assertFalse(out.exists()); self.assertFalse(out.with_suffix('.exe').exists())

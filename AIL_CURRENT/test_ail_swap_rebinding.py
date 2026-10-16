@@ -14,6 +14,7 @@ refusal points at the loop or handler and says what to rename. Refusals raised o
 still start with file:line, `str(bytes)` names `b.decode()` in a short message, and a refusal far
 from any sort no longer carries the "with key= columns" prefix.
 """
+import os
 import re
 import shutil
 import subprocess
@@ -345,6 +346,36 @@ class SwapTests(unittest.TestCase):
             self.assertIn('b.decode()', message)
             self.assertNotIn('with key= columns', message)
             self.assertRegex(message, r'p\.ail:7:\d+: ')
+
+    def typed_build(self, directory, text):
+        source, exe = Path(directory, 'q.ail'), Path(directory, 'q')
+        source.write_text(text)
+        env = dict(os.environ, AIL_NO_GENERAL='1')    # the typed path alone, not the fallback
+        built = subprocess.run([sys.executable, str(ROOT / 'ail_chatgpt.py'), 'compile', str(source),
+                                '-o', str(exe)], capture_output=True, text=True, timeout=300, env=env)
+        return built, exe
+
+    def test_scalar_parameter_rebinding_is_a_local_copy(self):
+        text = ('def steps(n: int) -> int:\n    s: int = 0\n    while n != 1:\n'
+                '        if n % 2 == 0:\n            n = n // 2\n        else:\n            n = 3 * n + 1\n'
+                '        s += 1\n    return s\n\n'
+                'def grow(n: int, rate: float = 1.5, up: bool = True) -> float:\n'
+                '    """doc"""\n    for i in range(3):\n        n += i\n    rate = rate * 2.0\n'
+                '    if up:\n        up = False\n    return n * rate + (1 if up else 0)\n\n'
+                'v = 7\nprint(steps(v), v, steps(27), grow(v), grow(2, up=False), grow(n=1, rate=0.5))\n')
+        with tempfile.TemporaryDirectory() as directory:
+            expected = python(directory, text)
+            built, exe = self.typed_build(directory, text)
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)
+            self.assertEqual(ran.stdout, expected)
+
+    def test_container_parameter_rebinding_stays_refused_on_the_typed_path(self):
+        text = 'def f(xs: list[int]) -> int:\n    xs = [1, 2]\n    return len(xs)\n\nprint(f([9]))\n'
+        with tempfile.TemporaryDirectory() as directory:
+            built, _ = self.typed_build(directory, text)
+            self.assertNotEqual(built.returncode, 0)
+            self.assertIn("'xs' is a", built.stdout + built.stderr)
 
 
 if __name__ == '__main__':

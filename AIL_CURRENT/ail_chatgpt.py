@@ -107,6 +107,22 @@ def _zig_compiler(target):
     return str(wrapper)
 
 
+def _check_main_called(tree):
+    """Python-surface programs: CPython runs nothing for a `main` that is defined and never
+    called, so this compiler (whose entry convention would call it) refuses instead of printing
+    what CPython would not. `main()`, `sys.exit(main())` and `raise SystemExit(main())` count as
+    calls; a call inside `main` itself (recursion) does not."""
+    mains = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'main']
+    if not mains:
+        return
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'main'
+                and not any(m.lineno <= node.lineno <= m.end_lineno for m in mains)):
+            return
+    raise ValueError('main() is defined but never called; add `main()` or '
+                     '`if __name__ == "__main__": main()` at the end (CPython would run nothing)')
+
+
 def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only=False,
                   separate=False, module_paths=(), origins=None, source_map=None, declarations_only=False, source_bytes=None,
                   notes=None):
@@ -155,6 +171,8 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 text = python_surface(text, None if notes is None else notes.setdefault(str(path), []))
             text = fold_constants(text)
             tree = ast.parse(text, filename=str(path))
+            if syntax == 'python' and entry and not module_only and not declarations_only:
+                _check_main_called(tree)
             if not declarations_only:
                 _check_int64_literals(tree)
             if source_map is not None:

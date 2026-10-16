@@ -374,6 +374,33 @@ class PythonSyntaxTests(unittest.TestCase):
                     self.assertNotIn(unwanted, built.stderr)
                 self.assertFalse(exe.exists())
 
+    def test_main_calls_run_once_like_cpython(self):
+        body = "import sys\n\ndef main() -> int:\n    t = 0\n    for line in sys.stdin:\n        t += int(line)\n    print(t)\n    return 0\n\n"
+        for name, tail in (("plain", "main()\n"),
+                           ("guard", 'if __name__ == "__main__":\n    main()\n'),
+                           ("exit", "sys.exit(main())\n")):
+            with self.subTest(name):
+                self.same_as_cpython(body + tail, "main_" + name, (), b"1\n2\n3\n")
+
+    def test_main_never_called_is_refused_not_run(self):
+        text = "def main() -> int:\n    print(7)\n    return 0\n"
+        with tempfile.TemporaryDirectory() as directory:
+            built, _, exe = compile_python(directory, text, "uncalled")
+            self.assertNotEqual(built.returncode, 0)
+            self.assertIn("main() is defined but never called", built.stdout + built.stderr)
+            self.assertFalse(exe.exists())
+        # CPython prints nothing for it, which is what the refusal says
+        self.assertEqual(subprocess.run([sys.executable, "-c", text], capture_output=True, text=True).stdout, "")
+
+    def test_block_syntax_main_is_still_called_for_you(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source, exe = Path(directory, "auto.ail"), Path(directory, "auto")
+            source.write_text("fn main() -> int { print(7); return 0; }\n", encoding="utf-8")
+            built = subprocess.run([sys.executable, "-B", str(ROOT / "ail_chatgpt.py"), "compile", str(source),
+                                    "-o", str(exe)], capture_output=True, text=True, timeout=600)
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            self.assertEqual(subprocess.run([str(exe)], capture_output=True, text=True).stdout, "7\n")
+
     def test_wording_respells_block_snippets(self):
         sys.path.insert(0, str(ROOT))
         from ail_syntax import python_wording

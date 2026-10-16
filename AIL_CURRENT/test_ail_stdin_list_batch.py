@@ -32,6 +32,7 @@ def main() -> int:
             out.append(f"x{k}")
     print(k, len(out), out[0] if out else "-", out[-1] if out else "-")
     return 0
+main()
 ''',
     "join_after": '''
 import sys
@@ -41,6 +42,7 @@ def main() -> int:
         out.append(line.strip() + "!")
     print("\\n".join(out))
     return 0
+main()
 ''',
     "for_print_after": '''
 import sys
@@ -51,6 +53,7 @@ def main() -> int:
     for x in out:
         print(x)
     return 0
+main()
 ''',
     "join_then_len": '''
 import sys
@@ -61,6 +64,7 @@ def main() -> int:
     print("\\n".join(out))
     print(len(out))
     return 0
+main()
 ''',
     "print_in_body": '''
 import sys
@@ -74,6 +78,7 @@ def main() -> int:
             print("tick", k)
     print("\\n".join(out))
     return 0
+main()
 ''',
     "sorted_after": '''
 import sys
@@ -84,6 +89,7 @@ def main() -> int:
     out.sort()
     print(len(out), out[0], out[-1], out[len(out) // 2])
     return 0
+main()
 ''',
     "dict_keys": '''
 import sys
@@ -98,6 +104,7 @@ def main() -> int:
         t = (t * 31 + len(k) + v) % 1000000007
     print(len(d), t, d.get("17", -1))
     return 0
+main()
 ''',
     "split_fields": '''
 import sys
@@ -113,6 +120,7 @@ def main() -> int:
         c = (c * 7 + len(n) + len(seen[n])) % 1000003
     print(len(names), len(seen), c, names[0], names[-1])
     return 0
+main()
 ''',
     "struct_fields": '''
 import sys
@@ -132,6 +140,7 @@ def main() -> int:
         s = (s * 13 + len(r.name) + r.n) % 1000003
     print(len(rs), s, rs[0].name, rs[-1].name, rs[len(rs) // 2].name)
     return 0
+main()
 ''',
     "str_field_accum": '''
 import sys
@@ -151,6 +160,7 @@ def main() -> int:
             a.longest = w
     print(a.n, a.last, a.longest)
     return 0
+main()
 ''',
     "str_locals": '''
 import sys
@@ -169,6 +179,7 @@ def main() -> int:
         prev = w
     print(k, first, prev, longest)
     return 0
+main()
 ''',
     "input_loop": '''
 def main() -> int:
@@ -181,6 +192,7 @@ def main() -> int:
         out.append(s + ".")
     print(len(out), out[0], out[-1], out[len(out) // 3])
     return 0
+main()
 ''',
     "readline_loop": '''
 import sys
@@ -193,6 +205,7 @@ def main() -> int:
         out.append(s.strip())
     print(len(out), out[0], out[-1], out[len(out) // 3])
     return 0
+main()
 ''',
     "file_lines": '''
 import sys
@@ -202,6 +215,7 @@ def main() -> int:
         out.append(line.strip())
     print(len(out), out[0], out[-1], out[len(out) // 3])
     return 0
+main()
 ''',
     "file_join": '''
 import sys
@@ -211,6 +225,7 @@ def main() -> int:
         out.append(line.strip())
     print("\\n".join(out))
     return 0
+main()
 ''',
     "two_lists": '''
 import sys
@@ -224,6 +239,7 @@ def main() -> int:
             b.append(w + w)
     print(len(a), len(b), a[-1], b[-1])
     return 0
+main()
 ''',
 }
 
@@ -308,7 +324,7 @@ class StdinListBatchTests(unittest.TestCase):
                     self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
                     self.assertEqual("_stdin_broots" in c_file.read_text(), name in BATCHED)
                     reference = Path(directory) / (name + "_ref.py")
-                    reference.write_text(text + "\nmain()\n")
+                    reference.write_text(text)
                     for n in (3, 8192, 8193, 16384, 20001):
                         data = lines(n)
                         args = []
