@@ -104,6 +104,7 @@
   "test_ail_span_cache": 15.1,
   "test_ail_stdin_list_batch": 60.7,
   "test_ail_stdin_read_until": 5.4,
+  "test_ail_stdlib_batch1": 10.0,
   "test_ail_stdout_mixed": 92.0,
   "test_ail_stdout_mixed_resources": 2.6,
   "test_ail_str_find_alias": 9.6,
@@ -181,6 +182,7 @@
   [
    "test_ail_ir_s0",
    "test_ail_ir_s3",
+   "test_ail_stdlib_batch1",
    "test_json_query_file"
   ],
   [

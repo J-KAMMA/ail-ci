@@ -53,4 +53,4 @@ fn main() {
 - No `math`, `re`, `collections`, `zip`, big ints: `x ** 0.5`, loops. Built in: `heappush`,
   `heappop(h)` (structs: same `key=lambda s: (s.d, s.id)` each call), `bisect_left`, `insort`.
 
-MORE (`sed -n A,Bp AIL_REFERENCE_MORE.md`): Commands 7-19, Text I/O 21-55, Bytes 57-89, Syntax 91-102, Local names 104-129, Numbers 131-145, Structs 147-180, Trees 182-224, Lists 226-238, Sort keys 240-247, Nested lists 249-266, Dicts 268-277, Sets 279-285, Strings 287-310, Heaps 312-327, Loops 329-336, Exceptions 338-345, Refused 347-388, Word count 390-422, Dijkstra 424-466, BFS 468-512, Modules 514-542, Speed 544-563, Parallel 565-600.
+MORE (`sed -n A,Bp AIL_REFERENCE_MORE.md`): Commands 7-19, Text I/O 21-55, Bytes 57-89, Syntax 91-102, Local names 104-129, Numbers 131-145, Structs 147-180, Trees 182-224, Lists 226-238, Sort keys 240-247, Nested lists 249-266, Dicts 268-277, Sets 279-285, Strings 287-312, Heaps 314-329, Loops 331-338, Exceptions 340-347, Refused 349-390, Word count 392-424, Dijkstra 426-468, BFS 470-514, Modules 516-544, Speed 546-565, Parallel 567-602.

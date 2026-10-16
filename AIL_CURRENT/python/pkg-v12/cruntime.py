@@ -23863,13 +23863,457 @@ def repr_runtime_for_host(source):
     table = ''.join(f'    {{{low}, {high}}},\n' for low, high in ranges)
     return before + marker + table + '};' + after
 
+LIBM_FUNCS = {'sin': 1, 'cos': 1, 'tan': 1, 'asin': 1, 'acos': 1, 'atan': 1, 'sinh': 1, 'cosh': 1, 'tanh': 1, 'asinh': 1, 'acosh': 1, 'atanh': 1, 'exp': 1, 'exp2': 1, 'expm1': 1, 'log': 1, 'log1p': 1, 'log2': 1, 'log10': 1, 'cbrt': 1, 'floor': 1, 'ceil': 1, 'trunc': 1, 'fabs': 1, 'atan2': 2, 'pow': 2, 'fmod': 2, 'copysign': 2, 'hypot': 2}
+LIBM = r'''
+#include <math.h>
+/* math-module functions: one noipa wrapper per libm function (parts LIBM_<name>), so the same glibc
+   routine CPython calls runs at run time even for a literal argument (gcc would otherwise fold
+   sin(2.0) itself, with MPFR, and glibc is not always correctly rounded). */
+#if defined(__GNUC__) && !defined(__clang__)
+#define AIL_NOIPA __attribute__((noipa))
+#else
+#define AIL_NOIPA __attribute__((noinline))
+#endif
+'''
+SOURCE['LIBM'] = LIBM
+REQUIRES['LIBM'] = []
+ORDER.insert(ORDER.index('FPOW') + 1, 'LIBM')
+for _name, _arity in LIBM_FUNCS.items():
+    SOURCE['LIBM_' + _name] = ('AIL_NOIPA __attribute__((unused)) static double ail_m_%s(double x%s) { return %s(x%s); }\n'
+                               % (_name, ', double y' if _arity == 2 else '', _name, ', y' if _arity == 2 else ''))
+    REQUIRES['LIBM_' + _name] = ['LIBM']
+    ORDER.insert(ORDER.index('LIBM') + 1, 'LIBM_' + _name)
+
+# math.hypot is not libm's hypot: CPython (3.10+) computes it with its own scaled, compensated
+# vector_norm, and the two differ in the last bit for about one pair in a thousand. This is the
+# two-argument case of that algorithm (frexp scale, error-free squares through fma, one differential
+# correction), checked bit for bit against CPython 3.12 on random pairs of every magnitude.
+SOURCE['LIBM_hypot'] = r'''
+AIL_NOIPA __attribute__((unused, optimize("fp-contract=off"))) static double ail_m_hypot_norm(double x, double y, double max) {
+    int max_e;
+    frexp(max, &max_e);
+    if (max_e < -1023) {
+        return 2.2250738585072014e-308 * ail_m_hypot_norm(x / 2.2250738585072014e-308, y / 2.2250738585072014e-308,
+                                                           max / 2.2250738585072014e-308);
+    }
+    double scale = ldexp(1.0, -max_e);
+    double csum = 1.0, frac1 = 0.0, frac2 = 0.0, v[2] = {x, y};
+    for (int i = 0; i < 2; i++) {
+        double t = v[i] * scale;
+        double hi = t * t, lo = fma(t, t, -hi);
+        double sum = csum + hi, sl = (csum - sum) + hi;
+        csum = sum; frac1 += lo; frac2 += sl;
+    }
+    double h = sqrt(csum - 1.0 + (frac1 + frac2));
+    double hi = -h * h, lo = fma(-h, h, -hi);
+    double sum = csum + hi, sl = (csum - sum) + hi;
+    csum = sum; frac1 += lo; frac2 += sl;
+    double corr = csum - 1.0 + (frac1 + frac2);
+    h += corr / (2.0 * h);
+    return h / scale;
+}
+AIL_NOIPA __attribute__((unused)) static double ail_m_hypot(double x, double y) {
+    x = fabs(x); y = fabs(y);
+    if (isinf(x) || isinf(y)) return INFINITY;
+    if (isnan(x) || isnan(y)) return NAN;
+    double max = x > y ? x : y;
+    if (max == 0.0) return max;
+    return ail_m_hypot_norm(x, y, max);
+}
+'''
+
+
+
+# The unprintable-code-point table the boxed runtime's repr() already carries (generated from
+# str.isprintable()), reused here by text so there is one table to regenerate.
+def _unprintable_table():
+    marker = 'static const uint32_t ail_repr_unprintable[][2] = {\n'
+    start = OBJ2.index(marker)
+    end = OBJ2.index('};', start) + 2
+    return OBJ2[start:end].replace('ail_repr_unprintable', 'ail_fmt_unprintable') + '\n'
+
+
+_UNPRINTABLE_TABLE = _unprintable_table()
+FMTGEN = (r'''
+/* The full format-spec mini-language for an int or a float field, [[fill]align][sign][#][0][width]
+   [grouping][.precision][type], parsed at compile time (pyfunc.py `_parse_braces_spec`) and
+   finished here. kind 0 formats `iv` (types d x X o b), kind 1 formats `dv` (types f F e E g G %
+   or none). `align`: 0 right (the numbers' default), 1 left, 2 center (odd pad on the right),
+   3 '=' (padding goes between the sign / 0x prefix and the digits). `sign`: 0 '-', 1 '+', 2 ' '.
+   `group`: 0, ',' or '_'. `prec` < 0 means none. glibc's printf is correctly rounded at the exact
+   binary value, which is what CPython's float formatting is, so f / e / g agree digit for digit;
+   a type-less float is the shortest repr (ail_fmt_float), or %g with ".0" kept when a precision is
+   given -- CPython's rule for `{x:.3}`. The caller never passes a combination CPython refuses. */
+static ail_str ail_fmt_gen(ail_sarena *A, int kind, int64_t iv, double dv, int fill, int align,
+                           int sign, int alt, int64_t width, int group, int64_t prec, int type) {
+    char sbuf[160];
+    char *body = sbuf;
+    size_t cap = sizeof sbuf;
+    char *heap = NULL;
+    int64_t blen = 0;
+    int neg = 0, plen = 0;
+    char prefix[2] = {0, 0};
+    if (kind == 0) {
+        uint64_t m = iv < 0 ? (uint64_t)0 - (uint64_t)iv : (uint64_t)iv;
+        neg = iv < 0;
+        int base = (type == 'x' || type == 'X') ? 16 : type == 'o' ? 8 : type == 'b' ? 2 : 10;
+        const char *dg = type == 'X' ? "0123456789ABCDEF" : "0123456789abcdef";
+        char tmp[72];
+        int nd = 0;
+        do { tmp[nd++] = dg[m % (uint64_t)base]; m /= (uint64_t)base; } while (m);
+        if (alt && base != 10) { prefix[0] = '0'; prefix[1] = (char)type; plen = 2; }
+        int every = base == 10 ? 3 : 4;
+        for (int i = nd - 1; i >= 0; i--) {
+            body[blen++] = tmp[i];
+            if (group && i > 0 && i % every == 0) body[blen++] = (char)group;
+        }
+    } else {
+        int upper = type == 'F' || type == 'E' || type == 'G';
+        if (dv != dv) {
+            memcpy(body, upper ? "NAN" : "nan", 3); blen = 3;
+            if (type == '%') body[blen++] = '%';
+        } else if (dv > 1.7976931348623157e308 || dv < -1.7976931348623157e308) {
+            neg = dv < 0;
+            memcpy(body, upper ? "INF" : "inf", 3); blen = 3;
+            if (type == '%') body[blen++] = '%';
+        } else {
+            neg = signbit(dv) != 0;
+            double a = fabs(dv);
+            if (type == '%') a *= 100.0;
+            char f[8];
+            int fi = 0;
+            f[fi++] = '%';
+            if (alt) f[fi++] = '#';
+            f[fi++] = '.'; f[fi++] = '*';
+            int conv = type == '%' ? 'f' : type ? type : 'g';
+            f[fi++] = (char)conv; f[fi] = 0;
+            int n;
+            if (type == 0 && prec < 0) {
+                ail_fmt_float(sbuf, sizeof sbuf, a);
+                n = (int)strlen(sbuf);
+            } else {
+                int p = (int)(prec < 0 ? 6 : prec);
+                n = snprintf(NULL, 0, f, p, a);
+                if (n < 0) ail_die("formatting a float failed");
+                if ((size_t)n + 4 > cap) { heap = (char *)malloc((size_t)n + 4); if (!heap) ail_die("out of memory"); body = heap; cap = (size_t)n + 4; }
+                snprintf(body, cap, f, p, a);
+            }
+            blen = n;
+            if (type == 0 && prec >= 0) {
+                int dot = 0;
+                for (int64_t i = 0; i < blen; i++) if (body[i] == '.' || body[i] == 'e') dot = 1;
+                if (!dot) { body[blen++] = '.'; body[blen++] = '0'; }
+            }
+            if (type == '%') body[blen++] = '%';
+            if (group) {
+                int64_t ip = 0;
+                while (ip < blen && body[ip] >= '0' && body[ip] <= '9') ip++;
+                int64_t seps = ip > 0 ? (ip - 1) / 3 : 0;
+                if (seps) {
+                    if ((size_t)(blen + seps + 4) > cap) {
+                        char *bigger = (char *)malloc((size_t)(blen + seps + 4));
+                        if (!bigger) ail_die("out of memory");
+                        memcpy(bigger, body, (size_t)blen);
+                        free(heap); heap = bigger; body = bigger; cap = (size_t)(blen + seps + 4);
+                    }
+                    memmove(body + ip + seps, body + ip, (size_t)(blen - ip));
+                    int64_t src = ip - 1, dst = ip + seps - 1;
+                    for (int64_t k = 0; src >= 0; k++, src--) {
+                        body[dst--] = body[src];
+                        if (src > 0 && (k + 1) % 3 == 0) body[dst--] = (char)group;
+                    }
+                    blen += seps;
+                }
+            }
+        }
+    }
+    char sg = neg ? '-' : sign == 1 ? '+' : sign == 2 ? ' ' : 0;
+    int64_t slen = sg ? 1 : 0;
+    int64_t total = slen + plen + blen;
+    int64_t padn = width - total;
+    int fw = ail_utf8_len((uint32_t)fill);
+    int64_t outn = total + (padn > 0 ? padn * fw : 0);
+    uint8_t *q = ail_sarena_alloc(A, outn);
+    int64_t o = 0, left = 0, right = 0, mid = 0;
+    if (padn > 0) {
+        if (align == 1) right = padn;
+        else if (align == 2) { left = padn / 2; right = padn - left; }
+        else if (align == 3) mid = padn;
+        else left = padn;
+    }
+    o = ail__fmt_fill(q, o, fill, left);
+    if (sg) q[o++] = (uint8_t)sg;
+    if (plen) { q[o++] = (uint8_t)prefix[0]; q[o++] = (uint8_t)prefix[1]; }
+    o = ail__fmt_fill(q, o, fill, mid);
+    memcpy(q + o, body, (size_t)blen); o += blen;
+    o = ail__fmt_fill(q, o, fill, right);
+    free(heap);
+    ail_str r; r.bytes = fill < 0x80; r.p = q; r.n = o; return r;
+}
+
+/* A str field with a fill character, alignment, width and precision (`{s:*^10}`, `{s:.3}`). */
+static ail_str ail_fmt_gen_str(ail_sarena *A, ail_str s, int fill, int align, int64_t width, int64_t prec) {
+    int64_t points = ail_str_len_points(s);
+    if (prec >= 0 && prec < points) { s.n = ail_str_unit_at(s, prec); points = prec; }
+    int64_t padn = width - points;
+    int fw = ail_utf8_len((uint32_t)fill);
+    int64_t left = 0, right = 0;
+    if (padn > 0) {
+        if (align == 0) left = padn;
+        else if (align == 2) { left = padn / 2; right = padn - left; }
+        else right = padn;
+    } else padn = 0;
+    uint8_t *q = ail_sarena_alloc(A, s.n + padn * fw);
+    int64_t k = ail__fmt_fill(q, 0, fill, left);
+    ail_str_put(q + k, s); k += s.n;
+    k = ail__fmt_fill(q, k, fill, right);
+    ail_str r; r.bytes = s.bytes && fill < 0x80; r.p = q; r.n = k; return r;
+}
+
+''')
+
+STRREPR = (r'''/* repr(str), exactly CPython's: a quote that is not in the text (' unless the text has ' and no "),
+   \\ \n \r \t, \xNN \uNNNN \UNNNNNNNN for what str.isprintable() says is not printable. */
+''' + _UNPRINTABLE_TABLE + r'''
+static int ail__repr_nonprintable(uint32_t c) {
+    if (c < 128) return c < 0x20 || c == 0x7f;
+    size_t lo = 0, hi = sizeof ail_fmt_unprintable / sizeof ail_fmt_unprintable[0];
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (c < ail_fmt_unprintable[mid][0]) hi = mid;
+        else if (c > ail_fmt_unprintable[mid][1]) lo = mid + 1;
+        else return 1;
+    }
+    return 0;
+}
+static int64_t ail__repr_str_run(ail_str s, uint8_t *out, int quote) {
+    static const char hex[] = "0123456789abcdef";
+    int64_t o = 0;
+    if (out) out[o] = (uint8_t)quote;
+    o++;
+    for (int64_t i = 0; i < s.n; i = ail_str_next_unit(s, i)) {
+        uint32_t c = ail_str_point(s, i);
+        if (c == (uint32_t)quote || c == '\\' || c == '\n' || c == '\r' || c == '\t') {
+            if (out) {
+                out[o] = '\\';
+                out[o + 1] = c == '\n' ? 'n' : c == '\r' ? 'r' : c == '\t' ? 't' : (uint8_t)c;
+            }
+            o += 2;
+        } else if (!ail__repr_nonprintable(c)) {
+            if (out) ail_utf8_put(out + o, c);
+            o += ail_utf8_len(c);
+        } else {
+            int digits = c <= 0xff ? 2 : c <= 0xffff ? 4 : 8;
+            if (out) {
+                out[o] = '\\';
+                out[o + 1] = digits == 2 ? 'x' : digits == 4 ? 'u' : 'U';
+                for (int k = 0; k < digits; k++) out[o + 2 + k] = (uint8_t)hex[(c >> ((digits - 1 - k) * 4)) & 15];
+            }
+            o += 2 + digits;
+        }
+    }
+    if (out) out[o] = (uint8_t)quote;
+    return o + 1;
+}
+static ail_str ail_fmt_repr_str(ail_sarena *A, ail_str s) {
+    int has_sq = 0, has_dq = 0;
+    for (int64_t i = 0; i < s.n; i++) { if (s.p[i] == '\'') has_sq = 1; else if (s.p[i] == '"') has_dq = 1; }
+    int quote = (has_sq && !has_dq) ? '"' : '\'';
+    int64_t n = ail__repr_str_run(s, NULL, quote);
+    uint8_t *q = ail_sarena_alloc(A, n);
+    ail__repr_str_run(s, q, quote);
+    ail_str r; r.bytes = 0; r.p = q; r.n = n;
+    r.bytes = 1;
+    for (int64_t i = 0; i < n; i++) if (q[i] >= 0x80) { r.bytes = 0; break; }
+    return r;
+}
+''')
+SOURCE['FMTGEN'] = FMTGEN
+REQUIRES['FMTGEN'] = ['FMT']
+ORDER.insert(ORDER.index('FMT') + 1, 'FMTGEN')
+SOURCE['STRREPR'] = STRREPR
+REQUIRES['STRREPR'] = ['STR']
+ORDER.insert(ORDER.index('STR') + 1, 'STRREPR')
+
+
+INTBASE = r'''
+/* `int(s, base)`, CPython's PyLong_FromString: base 2..36 or 0, optional surrounding whitespace and
+   sign, a 0x / 0o / 0b prefix when it matches the base (or picks it, for base 0), single underscores
+   between digits (also right after a prefix), no leading zeros in base 0 unless the number is all
+   zeros. The ValueError carries CPython's message, "invalid literal for int() with base B: " plus
+   the repr of the whole argument. A value outside int64 is the language's integer-overflow stop,
+   like every other int here. Non-ASCII digits and non-ASCII white space are not accepted (the
+   same limit `int(s)` has). */
+static void ail__int_base_fail(ail_str s, int64_t base) {
+    char head[64];
+    int hl = snprintf(head, sizeof head, "invalid literal for int() with base %lld: ", (long long)base);
+    int has_sq = 0, has_dq = 0;
+    for (int64_t i = 0; i < s.n; i++) { if (s.p[i] == '\'') has_sq = 1; else if (s.p[i] == '"') has_dq = 1; }
+    int quote = (has_sq && !has_dq) ? '"' : '\'';
+    int64_t rn = ail__repr_str_run(s, NULL, quote);
+    uint8_t *msg = (uint8_t *)malloc((size_t)hl + (size_t)rn);
+    if (!msg) ail_die("out of memory");
+    memcpy(msg, head, (size_t)hl);
+    ail__repr_str_run(s, msg + hl, quote);
+    ail_exception *value = ail_exception_new(AIL_EXC_VALUE, msg, hl + rn, 0);
+    free(msg);
+    ail_raise_value_adopt(value);
+}
+static int64_t ail_str_to_int_base(ail_str s, int64_t base) {
+    if (base != 0 && (base < 2 || base > 36)) {
+        static const char text[] = "int() base must be >= 2 and <= 36, or 0";
+        ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE, (const uint8_t *)text, (int64_t)sizeof text - 1, 1));
+    }
+    int64_t orig = base;
+    int64_t i = ail__trim_left(s, 0, s.n, ail__is_int_ws);
+    int64_t j = ail__trim_right(s, i, s.n, ail__is_int_ws);
+    int neg = 0;
+    if (i < j && (s.p[i] == '+' || s.p[i] == '-')) { neg = s.p[i] == '-'; i++; }
+    if (i >= j) ail__int_base_fail(s, orig);
+    int prefixed = 0;
+    if (s.p[i] == '0' && i + 1 < j) {
+        int c = s.p[i + 1] | 0x20;
+        int pb = c == 'x' ? 16 : c == 'o' ? 8 : c == 'b' ? 2 : 0;
+        if (pb && (base == 0 || base == pb)) { base = pb; i += 2; prefixed = 1; }
+    }
+    if (base == 0) {
+        base = 10;
+        if (s.p[i] == '0') {                      /* "0", "00", "0_0": only zeros, no leading zero before a digit */
+            int64_t k = i;
+            while (k < j) {
+                if (s.p[k] == '0') k++;
+                else if (s.p[k] == '_' && k + 1 < j && s.p[k + 1] == '0' && k > i) k++;
+                else ail__int_base_fail(s, orig);
+            }
+            return 0;
+        }
+    }
+    if (prefixed && i < j && s.p[i] == '_') i++;
+    uint64_t m = 0, limit = (uint64_t)INT64_MAX + (uint64_t)neg;
+    int digits = 0, last_us = 0;
+    for (; i < j; i++) {
+        int c = s.p[i], d;
+        if (c == '_') {
+            if (!digits || last_us) ail__int_base_fail(s, orig);
+            last_us = 1;
+            continue;
+        }
+        d = c >= '0' && c <= '9' ? c - '0' : (c | 0x20) >= 'a' && (c | 0x20) <= 'z' ? (c | 0x20) - 'a' + 10 : 99;
+        if (d >= base) ail__int_base_fail(s, orig);
+        if (m > (limit - (uint64_t)d) / (uint64_t)base) ail_die("integer overflow");
+        m = m * (uint64_t)base + (uint64_t)d;
+        digits++;
+        last_us = 0;
+    }
+    if (!digits || last_us) ail__int_base_fail(s, orig);
+    return m == (uint64_t)INT64_MAX + 1u ? INT64_MIN : neg ? -(int64_t)m : (int64_t)m;
+}
+'''
+
+POW3 = r'''
+/* `pow(base, exp, mod)` for ints, CPython's: the result has the sign of `mod` (Python's %), a
+   negative exponent means the modular inverse (ValueError "base is not invertible for the given
+   modulus" when gcd(base, mod) != 1), `mod` 0 is a ValueError. All arithmetic is exact in 128 bits,
+   so any int64 operands work, not only those whose products fit in 64 bits. */
+static void ail__pow3_fail(const char *text) {
+    ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE, (const uint8_t *)text, (int64_t)strlen(text), 1));
+}
+static int64_t ail_pow3(int64_t base, int64_t exp, int64_t mod) {
+    typedef unsigned __int128 u128;
+    typedef __int128 i128;
+    if (mod == 0) ail__pow3_fail("pow() 3rd argument cannot be 0");
+    uint64_t M = mod < 0 ? (uint64_t)0 - (uint64_t)mod : (uint64_t)mod;
+    i128 t = (i128)base % (i128)M;
+    if (t < 0) t += (i128)M;
+    u128 b = (u128)t;
+    uint64_t e;
+    if (exp < 0) {
+        /* extended Euclid: b * x == gcd (mod M) */
+        i128 r0 = (i128)M, r1 = (i128)b, x0 = 0, x1 = 1;
+        while (r1 != 0) {
+            i128 q = r0 / r1, tmp = r0 - q * r1;
+            r0 = r1; r1 = tmp;
+            tmp = x0 - q * x1; x0 = x1; x1 = tmp;
+        }
+        if (r0 != 1) ail__pow3_fail("base is not invertible for the given modulus");
+        if (x0 < 0) x0 += (i128)M;
+        b = (u128)x0 % M;
+        e = (uint64_t)0 - (uint64_t)exp;
+    } else e = (uint64_t)exp;
+    u128 r = (u128)1 % M;
+    while (e) {
+        if (e & 1) r = (r * b) % M;
+        e >>= 1;
+        if (e) b = (b * b) % M;
+    }
+    if (mod < 0 && r != 0) return (int64_t)((i128)r - (i128)M);
+    return (int64_t)r;
+}
+'''
+SOURCE['INTBASE'] = INTBASE
+REQUIRES['INTBASE'] = ['STR', 'STRREPR', 'DIE']
+ORDER.insert(ORDER.index('STRREPR') + 1, 'INTBASE')
+SOURCE['POW3'] = POW3
+REQUIRES['POW3'] = ['DIE']
+ORDER.insert(ORDER.index('DIE') + 1, 'POW3')
+
+
+SYSINFO = r'''
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <time.h>
+#include <unistd.h>
+#endif
+/* time.perf_counter_ns(): CLOCK_MONOTONIC (QueryPerformanceCounter on Windows), nanoseconds. */
+static int64_t ail_perf_counter_ns(void) {
+#ifdef _WIN32
+    LARGE_INTEGER f, t;
+    QueryPerformanceFrequency(&f); QueryPerformanceCounter(&t);
+    int64_t whole = t.QuadPart / f.QuadPart, rest = t.QuadPart % f.QuadPart;
+    return whole * 1000000000LL + rest * 1000000000LL / f.QuadPart;
+#else
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0 || now.tv_sec < 0) ail_raise_named(AIL_EXC_OS);
+    return (int64_t)now.tv_sec * 1000000000LL + (int64_t)now.tv_nsec;
+#endif
+}
+/* time.perf_counter(): the same clock in seconds, converted the way CPython converts it. */
+static double ail_perf_counter(void) {
+    int64_t t = ail_perf_counter_ns();
+    if (t % 1000000000LL == 0) return (double)(t / 1000000000LL);
+    return (double)t / 1e9;
+}
+/* os.cpu_count(): the number of online processors, as CPython reads it (sysconf on POSIX). */
+static int64_t ail_cpu_count(void) {
+#ifdef _WIN32
+    SYSTEM_INFO si; GetSystemInfo(&si);
+    return (int64_t)si.dwNumberOfProcessors;
+#else
+    long c = sysconf(_SC_NPROCESSORS_ONLN);
+    if (c < 1) ail_raise_named(AIL_EXC_OS);
+    return (int64_t)c;
+#endif
+}
+'''
+SOURCE['SYSINFO'] = SYSINFO
+REQUIRES['SYSINFO'] = ['MONOTONICHEAD', 'DIE', 'TYPES']
+ORDER.insert(ORDER.index('DIE') + 1, 'SYSINFO')
+
+
 def needs_libm(parts):
     """`pow` is in libm on Linux, so the link line depends on what the program reached. `round()`
     (AIL_TASK_p3idioms_20260916.md idiom 9, cruntime.py's ROUND block) needs it too: `nearbyint`/
     `fegetround`/`fesetround` are declared in libc's headers but DEFINED in libm, and a static
     link fails with 'undefined reference' for all three without `-lm` -- found building the first
     `round()` program, not guessed in advance."""
-    return any(part in parts for part in ('FPOW', 'ROUND', 'FFLOORMOD'))
+    return any(part in parts for part in ("FPOW", "ROUND", "FFLOORMOD")) or any(str(part).startswith("LIBM") for part in parts)
 
 
 # IR exceptions (stage S2, docs/design/IR_OWNERSHIP_DESIGN_v2.md section 11). Selected only by IR
