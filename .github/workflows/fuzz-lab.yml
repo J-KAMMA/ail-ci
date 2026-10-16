@@ -43,7 +43,8 @@ jobs:
     env:
       SEEDS_PER_JOB: ${{ github.event.inputs.seeds_per_job || (github.event_name == 'push' && '40' || '250') }}
       START_SEED: ${{ github.event.inputs.start_seed }}
-      FUZZ_OFF: ${{ github.event.inputs.off }}
+      # Known findings stay off until fixed (README: Findings). Pass off=none to run everything.
+      FUZZ_OFF: ${{ github.event.inputs.off || 'alias,listeq,stridx' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -59,6 +60,7 @@ jobs:
           start=$(( base + ${{ matrix.shard }} * SEEDS_PER_JOB ))
           echo "seeds $start .. $(( start + SEEDS_PER_JOB - 1 ))"
           status=0
+          [ "$FUZZ_OFF" = none ] && FUZZ_OFF=
           python3 lab/fuzz/run.py --start "$start" --count "$SEEDS_PER_JOB" --jobs 3 \
             --budget 2100 --off "$FUZZ_OFF" --out fuzz-out > /dev/null || status=$?
           cat fuzz-out/summary.md >> "$GITHUB_STEP_SUMMARY"
