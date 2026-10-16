@@ -1,0 +1,73 @@
+name: flags-lab
+
+# C backend flags study: AIL compiles to C and then calls a C compiler. Each matrix job rebuilds the public
+# bench apps and small programs with one compiler/flags config and records instructions (callgrind),
+# peak RSS and stripped size. A config whose output differs from the gcc -O2 build fails its job.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'lab/flags/**'
+      - '.github/workflows/flags-lab.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flags-lab-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  measure:
+    name: ${{ matrix.config }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        config: [gcc-O2, gcc-O3, gcc-Os, gcc-O2-v3, gcc-O2-lto, gcc-O2-pgo, clang-O2, clang-O3, zig-O2]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq valgrind
+          if [ "${{ matrix.config }}" = zig-O2 ]; then python3 -m pip install ziglang==0.13.0; fi
+          gcc --version | head -1; clang --version | head -1; valgrind --version
+      - name: Measure
+        run: python3 lab/flags/run_config.py --config "${{ matrix.config }}" --out "result-${{ matrix.config }}.json"
+      - name: Keep results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: result-${{ matrix.config }}
+          path: result-${{ matrix.config }}.json
+          if-no-files-found: ignore
+
+  report:
+    name: report
+    needs: measure
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: result-*
+          path: results
+      - name: Merge
+        run: |
+          python3 lab/flags/merge.py results > flags-report.md
+          cat flags-report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: flags-report
+          path: flags-report.md
