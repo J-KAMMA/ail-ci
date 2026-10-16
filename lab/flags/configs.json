@@ -1,0 +1,11 @@
+{
+  "gcc-O2":        {"cc": "gcc",   "opt": "-O2"},
+  "gcc-O3":        {"cc": "gcc",   "opt": "-O3"},
+  "gcc-Os":        {"cc": "gcc",   "opt": "-Os"},
+  "gcc-O2-v3":     {"cc": "gcc",   "opt": "-O2", "extra": "-march=x86-64-v3"},
+  "gcc-O2-lto":    {"cc": "gcc",   "opt": "-O2", "extra": "-flto"},
+  "gcc-O2-pgo":    {"cc": "gcc",   "opt": "-O2", "pgo": true},
+  "clang-O2":      {"cc": "clang", "opt": "-O2"},
+  "clang-O3":      {"cc": "clang", "opt": "-O3"},
+  "zig-O2":        {"cc": "python3 -m ziglang cc", "opt": "-O2"}
+}
