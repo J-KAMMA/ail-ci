@@ -1,0 +1,75 @@
+name: fuzz-lab
+
+# Differential fuzzing: random typed Python programs are run with CPython and with AIL (default path
+# and AIL_IR=1). A red run means a silent difference (DIFF) or a compiler/binary crash; named
+# compile-time refusals and the declared 64-bit overflow are counted, not failures.
+# No secrets or API keys are used; the jobs have read-only repository access.
+on:
+  schedule:
+    - cron: "37 3 * * *"
+  workflow_dispatch:
+    inputs:
+      seeds_per_job:
+        description: "Seeds per matrix job (4 jobs)"
+        default: "250"
+      off:
+        description: "Generator features to switch off (comma list: alias,listeq,stridx)"
+        default: ""
+      start_seed:
+        description: "First seed (empty = derived from today's date)"
+        default: ""
+  push:
+    paths:
+      - lab/fuzz/**
+      - .github/workflows/fuzz-lab.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-lab-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    name: fuzz shard ${{ matrix.shard }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: [0, 1, 2, 3]
+    env:
+      SEEDS_PER_JOB: ${{ github.event.inputs.seeds_per_job || (github.event_name == 'push' && '40' || '250') }}
+      START_SEED: ${{ github.event.inputs.start_seed }}
+      FUZZ_OFF: ${{ github.event.inputs.off }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: 3.12
+      - name: Fuzz
+        run: |
+          gcc --version | head -1
+          # a new seed block every day; blocks of 100000 seeds, one slice per shard
+          base="${START_SEED:-$(( ($(date -u +%s) / 86400) * 100000 ))}"
+          start=$(( base + ${{ matrix.shard }} * SEEDS_PER_JOB ))
+          echo "seeds $start .. $(( start + SEEDS_PER_JOB - 1 ))"
+          status=0
+          python3 lab/fuzz/run.py --start "$start" --count "$SEEDS_PER_JOB" --jobs 3 \
+            --budget 2100 --off "$FUZZ_OFF" --out fuzz-out > /dev/null || status=$?
+          cat fuzz-out/summary.md >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: fuzz-shard-${{ matrix.shard }}
+          path: |
+            fuzz-out/summary.md
+            fuzz-out/results.jsonl
+            fuzz-out/findings
+          if-no-files-found: ignore
+          retention-days: 30
