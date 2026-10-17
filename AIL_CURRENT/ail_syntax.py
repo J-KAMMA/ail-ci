@@ -629,9 +629,22 @@ _HEAPQ = ('heappush', 'heappop', 'heapify', 'heappushpop', 'heapreplace')
 _BISECT = ('bisect_left', 'bisect_right', 'bisect', 'insort', 'insort_left', 'insort_right')
 _MATH_VALUES = {'pi': repr(math.pi), 'e': repr(math.e), 'tau': repr(math.tau),
                 'inf': "float('inf')", 'nan': "float('nan')"}
-_MATH_CALLS = ('sqrt', 'floor', 'ceil', 'isqrt', 'gcd', 'fabs')
-_MATH_BUILT = ('math.sqrt, math.floor, math.ceil, math.isqrt, math.gcd (two arguments), math.fabs '
-               'and the constants math.pi, math.e, math.tau, math.inf, math.nan')
+# One-argument libm functions: name -> True when a finite argument can overflow (OverflowError, as
+# CPython's math_1 raises "math range error"); otherwise an infinite result of a finite argument is
+# a ValueError ("math domain error"), and a NaN result of a non-NaN argument always is.
+_MATH_ONE = {'sin': False, 'cos': False, 'tan': False, 'asin': False, 'acos': False, 'atan': False,
+             'sinh': True, 'cosh': True, 'tanh': False, 'asinh': False, 'acosh': False, 'atanh': False,
+             'exp': True, 'exp2': True, 'expm1': True, 'log': False, 'log1p': False, 'log2': False,
+             'log10': False, 'cbrt': False}
+_MATH_PLAIN_TWO = ('atan2', 'copysign', 'hypot')
+_MATH_PREDICATES = ('isnan', 'isinf', 'isfinite')
+_MATH_CALLS = ('sqrt', 'floor', 'ceil', 'isqrt', 'gcd', 'fabs', 'trunc', 'degrees', 'radians', 'factorial',
+               'pow', 'fmod', *_MATH_ONE, *_MATH_PLAIN_TWO, *_MATH_PREDICATES)
+_MATH_BUILT = ('math.sqrt, floor, ceil, trunc, isqrt, gcd (two arguments), fabs, factorial, pow, fmod, hypot, '
+               'copysign, atan2, degrees, radians, isnan, isinf, isfinite, sin, cos, tan, asin, acos, atan, '
+               'sinh, cosh, tanh, asinh, acosh, atanh, exp, exp2, expm1, log (one or two arguments), log1p, '
+               'log2, log10, cbrt and the constants math.pi, math.e, math.tau, math.inf, math.nan; '
+               'math.prod, fsum, comb, perm, lcm, dist, erf, gamma and the rest are not built')
 # Exact CPython results: sqrt keeps -0.0 and raises ValueError below zero, isqrt and gcd are
 # integer-only (no float rounding reaches the answer).
 _MATH_HELPERS = {
@@ -663,8 +676,129 @@ _MATH_HELPERS = {
         y = t
     return x
 '''}
+
+
+def _math_one_helper(name, overflow):
+    return (f'def _ail_math_{name}(x: float) -> float:\n'
+            f'    r = _ail_c_{name}(x)\n'
+            '    if r != r:\n'
+            '        if x == x:\n'
+            '            raise ValueError("math domain error")\n'
+            '        return r\n'
+            '    if r - r != 0.0 and x - x == 0.0:\n'
+            + ('        raise OverflowError("math range error")\n' if overflow
+               else '        raise ValueError("math domain error")\n')
+            + '    return r\n')
+
+
+for _name, _overflow in _MATH_ONE.items():
+    _MATH_HELPERS[_name] = _math_one_helper(_name, _overflow)
+for _name in _MATH_PLAIN_TWO:
+    _MATH_HELPERS[_name] = (f'def _ail_math_{_name}(x: float, y: float) -> float:\n'
+                            f'    return _ail_c_{_name}(x, y)\n')
+_MATH_HELPERS['fabs'] = 'def _ail_math_fabs(x: float) -> float:\n    return _ail_c_fabs(x)\n'
+_MATH_HELPERS['isnan'] = 'def _ail_math_isnan(x: float) -> bool:\n    return x != x\n'
+_MATH_HELPERS['isinf'] = 'def _ail_math_isinf(x: float) -> bool:\n    return x - x != 0.0 and x == x\n'
+_MATH_HELPERS['isfinite'] = 'def _ail_math_isfinite(x: float) -> bool:\n    return x - x == 0.0\n'
+_MATH_HELPERS['degrees'] = f'def _ail_math_degrees(x: float) -> float:\n    return x * {180.0 / math.pi!r}\n'
+_MATH_HELPERS['radians'] = f'def _ail_math_radians(x: float) -> float:\n    return x * {math.pi / 180.0!r}\n'
+_MATH_HELPERS['log2args'] = (
+    'def _ail_math_log2args(x: float, base: float) -> float:\n'
+    '    num = _ail_math_log(x)\n'
+    '    den = _ail_math_log(base)\n'
+    '    if den == 0.0:\n'
+    '        raise ZeroDivisionError("float division by zero")\n'
+    '    return num / den\n')
+_MATH_HELPERS['fmod'] = (
+    'def _ail_math_fmod(x: float, y: float) -> float:\n'
+    '    if y - y != 0.0 and y == y and x - x == 0.0:\n'
+    '        return x\n'
+    '    r = _ail_c_fmod(x, y)\n'
+    '    if r != r and x == x and y == y:\n'
+    '        raise ValueError("math domain error")\n'
+    '    return r\n')
+# CPython's math.pow keeps its own special-case table for non-finite operands (C99 Annex F) and
+# turns the finite cases' errno into ValueError / OverflowError.
+_MATH_HELPERS['pow'] = (
+    'def _ail_math_pow(x: float, y: float) -> float:\n'
+    '    if x - x != 0.0 or y - y != 0.0:\n'
+    '        if x != x:\n'
+    '            if y == 0.0:\n'
+    '                return 1.0\n'
+    '            return x\n'
+    '        if y != y:\n'
+    '            if x == 1.0:\n'
+    '                return 1.0\n'
+    '            return y\n'
+    '        if x - x != 0.0:\n'
+    '            odd = 0\n'
+    '            if y - y == 0.0:\n'
+    '                if _ail_c_fmod(_ail_c_fabs(y), 2.0) == 1.0:\n'
+    '                    odd = 1\n'
+    '            if y > 0.0:\n'
+    '                if odd == 1:\n'
+    '                    return x\n'
+    '                return _ail_c_fabs(x)\n'
+    '            if y == 0.0:\n'
+    '                return 1.0\n'
+    '            if odd == 1:\n'
+    '                return _ail_c_copysign(0.0, x)\n'
+    '            return 0.0\n'
+    '        if _ail_c_fabs(x) == 1.0:\n'
+    '            return 1.0\n'
+    '        if y > 0.0 and _ail_c_fabs(x) > 1.0:\n'
+    '            return y\n'
+    '        if y < 0.0 and _ail_c_fabs(x) < 1.0:\n'
+    '            return -y\n'
+    '        return 0.0\n'
+    '    r = _ail_c_pow(x, y)\n'
+    '    if r != r:\n'
+    '        raise ValueError("math domain error")\n'
+    '    if r - r != 0.0:\n'
+    '        if x == 0.0:\n'
+    '            raise ValueError("math domain error")\n'
+    '        raise OverflowError("math range error")\n'
+    '    return r\n')
+_MATH_HELPERS['factorial'] = (
+    'def _ail_math_factorial(n: int) -> int:\n'
+    '    if n < 0:\n'
+    '        raise ValueError("factorial() not defined for negative values")\n'
+    '    r = 1\n'
+    '    i = 2\n'
+    '    while i <= n:\n'
+    '        r = r * i\n'
+    '        i += 1\n'
+    '    return r\n')
+_MATH_DEPS = {'log2args': ('log',)}
+import string as _string_module
+
+_STRING_CONSTANTS = {name: getattr(_string_module, name) for name in (
+    'ascii_lowercase', 'ascii_uppercase', 'ascii_letters', 'digits', 'hexdigits', 'octdigits', 'punctuation',
+    'whitespace', 'printable')}
+_TIME_CLOCKS = {'perf_counter': '_ail_perf_counter', 'monotonic': '_ail_perf_counter',
+                'perf_counter_ns': '_ail_perf_counter_ns', 'monotonic_ns': '_ail_perf_counter_ns'}
+_OPERATOR_BINARY = {'add': ast.Add, 'sub': ast.Sub, 'mul': ast.Mult, 'truediv': ast.Div,
+                    'floordiv': ast.FloorDiv, 'mod': ast.Mod, 'pow': ast.Pow, 'and_': ast.BitAnd,
+                    'or_': ast.BitOr, 'xor': ast.BitXor, 'lshift': ast.LShift, 'rshift': ast.RShift}
+_OPERATOR_COMPARE = {'lt': ast.Lt, 'le': ast.LtE, 'gt': ast.Gt, 'ge': ast.GtE, 'eq': ast.Eq, 'ne': ast.NotEq}
+_OPERATOR_UNARY = {'neg': ast.USub, 'pos': ast.UAdd, 'invert': ast.Invert, 'inv': ast.Invert}
+_SMALL_MODULES = {
+    'time': tuple(_TIME_CLOCKS),
+    'string': tuple(_STRING_CONSTANTS),
+    'os': ('cpu_count',),
+    'operator': (*_OPERATOR_BINARY, *_OPERATOR_COMPARE, *_OPERATOR_UNARY, 'not_', 'abs', 'getitem', 'itemgetter'),
+}
+_SMALL_NOTE = {
+    'time': 'time.perf_counter() / monotonic() (and the _ns forms) are built; time.time() is wall-clock '
+            'time, which this language has no builtin for, and sleep() is not built',
+    'string': 'the string module is built as its constants: ascii_lowercase, ascii_uppercase, ascii_letters, '
+              'digits, hexdigits, octdigits, punctuation, whitespace, printable',
+    'os': 'os.cpu_count() is built; the rest of os (environ, path, ...) is not',
+    'operator': 'operator.add/sub/mul/truediv/floordiv/mod/pow/and_/or_/xor/lshift/rshift, the comparisons, '
+                'neg/pos/invert/not_/abs/getitem called directly, and itemgetter(k) as a key= are built',
+}
 _TYPING = {'List': 'list', 'Dict': 'dict', 'Set': 'set', 'Tuple': 'tuple', 'FrozenSet': 'frozenset'}
-_DROPPED = ('heapq', 'bisect', 'typing', 'dataclasses', '__future__')
+_DROPPED = ('heapq', 'bisect', 'typing', 'dataclasses', '__future__', 'time', 'string', 'os', 'operator')
 _STDOUT_STATEMENTS = ('sys.stdout.write', 'sys.stdout.buffer.write', 'sys.stdout.flush',
                       'sys.stdout.buffer.flush', 'sys.setrecursionlimit')
 _ALIASABLE = ('sys.stdout.write', 'sys.stdout.buffer.write', 'sys.stdin.readline',
@@ -837,12 +971,12 @@ class _Surface:
         for node in ast.walk(self.tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    if alias.name in ('heapq', 'bisect', 'math', 'typing', 'dataclasses', 'sys'):
+                    if alias.name in ('heapq', 'bisect', 'math', 'typing', 'dataclasses', 'sys', *_SMALL_MODULES):
                         self.modules[alias.asname or alias.name] = alias.name
             elif isinstance(node, ast.ImportFrom) and not node.level:
                 for alias in node.names:
                     local = alias.asname or alias.name
-                    if node.module in ('heapq', 'bisect', 'math', 'dataclasses'):
+                    if node.module in ('heapq', 'bisect', 'math', 'dataclasses', *_SMALL_MODULES):
                         self.names[local] = f'{node.module}.{alias.name}'
                     elif node.module == 'typing':
                         self.typing[local] = alias.name
@@ -887,6 +1021,13 @@ class _Surface:
                       + (_MATH_BUILT if module == 'math' else ', '.join(
                           f'{module}.{each}' for each in (_HEAPQ if module == 'heapq' else _BISECT)))
                       + ', called directly')
+        elif module in _SMALL_MODULES and name:
+            if module == 'string' and name in _STRING_CONSTANTS:
+                return ast.Constant(value=_STRING_CONSTANTS[name])
+            self.keep.add(module)
+            self.note(node, f'{path} used as a value is not built; ' + _SMALL_NOTE[module])
+        elif path == 'sys.maxsize':
+            return ast.Constant(value=2 ** 63 - 1)       # the 64-bit sys.maxsize; ints here are int64
         elif path in _STDOUT_STATEMENTS or path.startswith('sys.stdin.buffer'):
             self.note(node, f'{path} used as a value is not built: call it as a statement '
                       '(sys.stdout.write(text) on its own line, sys.stdin.buffer.read())')
@@ -942,9 +1083,22 @@ class _Surface:
                 return ast.Call(func=ast.Name(id=name, ctx=ast.Load()), args=node.args, keywords=node.keywords)
             if module == 'math' and name:
                 return self.math_call(node, name)
+            if module in _SMALL_MODULES and name:
+                return self.small_call(node, module, name)
             if path == 'sys.stdin.buffer.read' and not node.keywords and len(node.args) <= 1:
                 return ast.Call(func=ast.Name(id='read_stdin_bytes', ctx=ast.Load()),
                                 args=node.args or [ast.parse('1 << 40', mode='eval').body], keywords=[])
+            if path == 'sys.stderr.write' and len(node.args) == 1 and not node.keywords \
+                    and not isinstance(node.args[0], ast.Starred):
+                # a str only: `"" + x` is refused for an int, as CPython refuses to write one
+                text = node.args[0]
+                if not (isinstance(text, ast.JoinedStr) or isinstance(text, ast.Constant) and isinstance(text.value, str)):
+                    text = ast.BinOp(left=ast.Constant(value=''), op=ast.Add(), right=text)
+                return ast.Call(func=ast.Name(id='print', ctx=ast.Load()), args=[text], keywords=[
+                    ast.keyword(arg='end', value=ast.Constant(value='')),
+                    ast.keyword(arg='file', value=ast.parse('sys.stderr', mode='eval').body)])
+            if path == 'sys.stderr.flush' and not node.args and not node.keywords:
+                return ast.Constant(value=None)       # stderr is written as it is printed
             if path in _STDOUT_STATEMENTS:
                 self.note(node, f'{path}(...) is built as a statement on its own line; its result '
                           'is not a value')
@@ -971,18 +1125,63 @@ class _Surface:
             return self.construct(node)
         return None
 
+    def small_call(self, node, module, name):
+        """time / string / os / operator, mapped onto what is built (None keeps the call as written)."""
+        args = node.args
+        plain = not node.keywords and not any(isinstance(arg, ast.Starred) for arg in args)
+        if plain and module == 'time' and name in _TIME_CLOCKS and not args:
+            return ast.Call(func=ast.Name(id=_TIME_CLOCKS[name], ctx=ast.Load()), args=[], keywords=[])
+        if plain and module == 'os' and name == 'cpu_count' and not args:
+            return ast.Call(func=ast.Name(id='_ail_cpu_count', ctx=ast.Load()), args=[], keywords=[])
+        if plain and module == 'operator':
+            if name in _OPERATOR_BINARY and len(args) == 2:
+                return ast.BinOp(left=args[0], op=_OPERATOR_BINARY[name](), right=args[1])
+            if name in _OPERATOR_COMPARE and len(args) == 2:
+                return ast.Compare(left=args[0], ops=[_OPERATOR_COMPARE[name]()], comparators=[args[1]])
+            if name in _OPERATOR_UNARY and len(args) == 1:
+                return ast.UnaryOp(op=_OPERATOR_UNARY[name](), operand=args[0])
+            if name == 'not_' and len(args) == 1:
+                return ast.UnaryOp(op=ast.Not(), operand=args[0])
+            if name == 'abs' and len(args) == 1:
+                return ast.Call(func=ast.Name(id='abs', ctx=ast.Load()), args=args, keywords=[])
+            if name == 'getitem' and len(args) == 2:
+                return ast.Subscript(value=args[0], slice=args[1], ctx=ast.Load())
+            if name == 'itemgetter' and len(args) == 1:
+                return ast.Lambda(
+                    args=ast.arguments(posonlyargs=[], args=[ast.arg(arg='_ail_item')], vararg=None,
+                                       kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[]),
+                    body=ast.Subscript(value=ast.Name(id='_ail_item', ctx=ast.Load()), slice=args[0],
+                                       ctx=ast.Load()))
+        self.keep.add(module)
+        self.note(node, f'{module}.{name}() with these arguments is not built; ' + _SMALL_NOTE[module])
+        return None
+
     def math_call(self, node, name):
         args = node.args
         if not node.keywords and not any(isinstance(arg, ast.Starred) for arg in args):
+            helper = None
             if name in ('sqrt', 'isqrt') and len(args) == 1 or name == 'gcd' and len(args) == 2:
-                if name not in self.helpers:
-                    self.helpers.append(name)
-                return ast.Call(func=ast.Name(id='_ail_math_' + name, ctx=ast.Load()), args=args, keywords=[])
-            if len(args) == 1 and name in ('floor', 'ceil', 'fabs'):
+                helper = name
+            elif len(args) == 1 and (name in _MATH_ONE or name in _MATH_PREDICATES
+                                     or name in ('degrees', 'radians', 'factorial')):
+                helper = name
+            elif len(args) == 2 and (name in _MATH_PLAIN_TWO or name in ('pow', 'fmod')):
+                helper = name
+            elif name == 'log' and len(args) == 2:
+                helper = 'log2args'
+            elif name == 'fabs' and len(args) == 1:
+                helper = 'fabs'
+            if name == 'trunc' and len(args) == 1:
+                # int(x) truncates a float toward zero and returns an int argument as it is.
+                return ast.Call(func=ast.Name(id='int', ctx=ast.Load()), args=args, keywords=[])
+            if helper is not None:
+                for each in (*_MATH_DEPS.get(helper, ()), helper):
+                    if each not in self.helpers:
+                        self.helpers.append(each)
+                return ast.Call(func=ast.Name(id='_ail_math_' + helper, ctx=ast.Load()), args=args, keywords=[])
+            if len(args) == 1 and name in ('floor', 'ceil'):
                 def call(function, argument):
                     return ast.Call(func=ast.Name(id=function, ctx=ast.Load()), args=[argument], keywords=[])
-                if name == 'fabs':
-                    return call('abs', call('float', args[0]))
                 if name == 'floor':      # int(x // 1): floor of an int or a float, as an int
                     return call('int', ast.BinOp(left=args[0], op=ast.FloorDiv(), right=ast.Constant(value=1)))
                 return ast.UnaryOp(op=ast.USub(), operand=call('int', ast.BinOp(
@@ -1370,6 +1569,15 @@ class _Surface:
                         if kept else 'pass', True)
             elif not node.level and node.module in ('typing', 'dataclasses', '__future__'):
                 self.replace(node, 'pass', True)
+            elif not node.level and node.module in _SMALL_MODULES:
+                built = _SMALL_MODULES[node.module]
+                if node.module not in self.keep and all(alias.name in built for alias in node.names):
+                    self.replace(node, 'pass', True)
+                else:
+                    missing = [alias.name for alias in node.names if alias.name not in built]
+                    if missing:
+                        self.note(node, f'from {node.module} import {", ".join(missing)}: not built; '
+                                  + _SMALL_NOTE[node.module])
             elif not node.level and node.module in ('heapq', 'bisect', 'math'):
                 built = {'heapq': _HEAPQ, 'bisect': _BISECT, 'math': (*_MATH_CALLS, *_MATH_VALUES)}[node.module]
                 if node.module not in self.keep and all(alias.name in built for alias in node.names):

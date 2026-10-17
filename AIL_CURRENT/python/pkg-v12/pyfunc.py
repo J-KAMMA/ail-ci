@@ -36,6 +36,7 @@ import textwrap
 import callable_types
 
 import cruntime
+import iterlower
 import float64_fusion
 import sortkeys
 import parallel
@@ -655,6 +656,12 @@ def _local_slist_pop(node, ctx):
     except Unsupported:
         return False
 
+# names the Python syntax (ail_syntax.py) maps time.perf_counter(), time.perf_counter_ns() and
+# os.cpu_count() to: (result kind, C function), all in cruntime's SYSINFO part
+_AIL_SYSINFO = {'_ail_perf_counter': (FLT, 'ail_perf_counter'), '_ail_perf_counter_ns': (INT, 'ail_perf_counter_ns'),
+                '_ail_cpu_count': (INT, 'ail_cpu_count')}
+
+
 def _etype(node, ctx):
     if _NULLABLE and isinstance(node, ast.Constant) and node.value is None:
         return NULLK
@@ -873,6 +880,12 @@ def _etype(node, ctx):
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
         f, a = node.func.id, node.args
         if f == 'jsdiv':
+            return FLT
+        if f == 'pow' and len(a) == 3 and f not in ctx.funcs:
+            return INT
+        if f in _AIL_SYSINFO and f not in ctx.funcs:
+            return _AIL_SYSINFO[f][0]
+        if f.startswith('_ail_c_') and f[7:] in cruntime.LIBM_FUNCS and f not in ctx.funcs:
             return FLT
         if f == 'jsnegzero':
             return INT
@@ -6625,35 +6638,39 @@ def _fmt_default_conv(node, kind, ctx):
 
 
 def _parse_braces_spec(spec):
-    """Parse a `{}`-style format-spec MINI-LANGUAGE literal (the text after `:` in an f-string
-    field or a `.format()` field) at COMPILE time, into {'align', 'zero', 'width', 'precision',
-    'type'}. Only what THE_SUBSET (test_fstring.py's own docstring) declares is recognised --
-    `[[fill]align][0][width][.precision][type]` where `fill`, if given at all, must be a space or
-    a `0` (any other fill character -- `{x:*^10}` -- is refused BY NAME, quoting it). Anything
-    left over after that (thousands grouping `,`, a sign flag, `#`, ...) is refused by name too,
-    quoting the WHOLE spec, which is also how `{x:,}` ends up refused: `,` is not a digit, so it
-    never gets consumed by the width/precision loops and is still sitting in `s` when the type
-    character is taken off `s[0]` (','), which the caller's own type check then rejects -- one
-    mechanism catches both "a comma this parser never heard of" and "a comma as a bogus type
-    character" the same way, and either way the message names the input spec."""
+    """Parse a `{}`-style format-spec mini-language literal (the text after `:` in an f-string
+    field or a `.format()` field) at COMPILE time, into {'align', 'zero', 'fill', 'fill_given',
+    'sign', 'alt', 'group', 'width', 'precision', 'type'}: CPython's own grammar,
+    `[[fill]align][sign][#][0][width][grouping][.precision][type]`, read the way CPython reads it
+    (the `0` flag only means fill-with-zeros when no fill character was written). What the runtime
+    can build is decided by `_fmt_build` / `_fmt_general`, which refuse by name the combinations
+    CPython itself rejects or this compiler does not build (`z`, `n`, `c`, ...); anything left over
+    after the type character is refused here, quoting the whole spec."""
     orig = spec
     s = spec
     align = None
     fill = ' '
-    if len(s) >= 2 and s[1] in '<>^':
+    fill_given = False
+    if len(s) >= 2 and s[1] in '<>^=':
         fill = s[0]
-        if fill not in (' ', '0'):
-            raise Unsupported(
-                "a fill character %r in the format spec %r is out of the declared subset -- "
-                "only the align characters themselves (<, >, ^) with the default space fill, or "
-                "the sign-aware 0 flag, are built" % (fill, orig))
+        fill_given = True
         align = s[1]
         s = s[2:]
-    elif s[:1] in ('<', '>', '^'):
+    elif s[:1] in ('<', '>', '^', '='):
         align = s[0]
         s = s[1:]
+    sign = None
+    if s[:1] in ('+', '-', ' '):
+        sign = s[0]
+        s = s[1:]
+    if s[:1] == 'z':
+        raise Unsupported("the 'z' option in the format spec %r (coerce negative zero) is not built" % orig)
+    alt = False
+    if s[:1] == '#':
+        alt = True
+        s = s[1:]
     zero = False
-    if s[:1] == '0':
+    if not fill_given and s[:1] == '0':
         zero = True
         s = s[1:]
     width = None
@@ -6663,6 +6680,10 @@ def _parse_braces_spec(spec):
     if i:
         width = int(s[:i])
         s = s[i:]
+    group = None
+    if s[:1] in (',', '_'):
+        group = s[0]
+        s = s[1:]
     precision = None
     if s[:1] == '.':
         j = 1
@@ -6678,11 +6699,90 @@ def _parse_braces_spec(spec):
         s = s[1:]
     if s:
         raise Unsupported(
-            "the format spec %r is not built -- %r is outside the declared subset (only "
-            "[[fill]align][0][width][.precision][type] is parsed, fill limited to space or 0, "
-            "no thousands grouping, no sign flags, no nested spec)" % (orig, s))
-    return {'align': align, 'zero': zero, 'fill': fill, 'width': width,
-            'precision': precision, 'type': typ}
+            "the format spec %r is not built -- %r is not part of [[fill]align][sign][#][0][width]"
+            "[grouping][.precision][type] (a nested {field} in the spec is refused by name)" % (orig, s))
+    return {'align': align, 'zero': zero, 'fill': fill, 'fill_given': fill_given, 'sign': sign,
+            'alt': alt, 'group': group, 'width': width, 'precision': precision, 'type': typ}
+
+
+_FMT_INT_TYPES = 'dxXob'
+_FMT_FLOAT_TYPES = 'fFeEgG%'
+
+
+def _fmt_general_needed(spec, kind):
+    """Whether a field needs `ail_fmt_gen` rather than the three small padding formatters: any
+    sign, `#`, grouping, `=` alignment, a fill other than space (or the str's zero), a zero flag
+    next to an explicit alignment (CPython puts the zeros left of the sign then), an int type other
+    than d, a float without the explicit `f` (a type-less float is the repr, not `%f`)."""
+    t = spec['type']
+    if spec.get('sign') or spec.get('alt') or spec.get('group') or spec['align'] == '=':
+        return True
+    if kind == STR:
+        return spec.get('fill', ' ') != ' ' or t not in (None, 's')
+    if spec.get('fill_given') and spec.get('fill', ' ') not in (' ', '0'):
+        return True
+    if spec['zero'] and spec['align'] is not None:
+        return True
+    if kind == INT:
+        return t not in (None, 'd')
+    return t != 'f'
+
+
+def _fmt_general(val_node, kind, spec, orig_text, ctx, str_default_align, pre_c=None):
+    """The field built by the runtime's `ail_fmt_gen` / `ail_fmt_gen_str` (cruntime.py FMTGEN), for
+    every spec `_fmt_general_needed` says the small formatters cannot do. Refuses, by name, what
+    CPython rejects with a ValueError (so a refusal here is never a silent difference)."""
+    t = spec['type']
+    width = spec['width'] or 0
+    prec = spec['precision'] if spec['precision'] is not None else -1
+    fill, align_ch = spec.get('fill', ' '), spec['align']
+    ctx.parts.update(('STR', 'FMT', 'FMTGEN'))
+    if kind == STR:
+        if t not in (None, 's'):
+            raise Unsupported("an f-string/format field of type str with the format spec %r; only 's' "
+                              "(or no type) formats a str" % orig_text)
+        if spec.get('sign') or spec.get('alt') or spec.get('group') or align_ch == '=' or spec['zero']:
+            raise Unsupported("the format spec %r on a str: a sign, '#', grouping, '=' alignment or "
+                              "the '0' flag is not allowed for a str (CPython raises ValueError)" % orig_text)
+        align_ch = align_ch or str_default_align
+        sv = pre_c if pre_c is not None else _str_value(val_node, ctx)
+        return 'ail_fmt_gen_str(&%s, %s, %d, %d, %d, %d)' % (
+            ctx.sarena(), sv, ord(fill), {'>': 0, '<': 1, '^': 2}[align_ch], width, prec)
+    float_conv = kind == FLT or t in tuple(_FMT_FLOAT_TYPES)
+    if kind == INT and t is not None and t not in _FMT_INT_TYPES + _FMT_FLOAT_TYPES:
+        raise Unsupported("the format spec %r on an int: the type %r is not built (d x X o b and the float "
+                          "types e E f F g G %% are)" % (orig_text, t))
+    if kind == FLT and t is not None and t not in _FMT_FLOAT_TYPES:
+        raise Unsupported("the format spec %r on a float: the type %r is not built or not allowed "
+                          "(f F e E g G %% and no type are)" % (orig_text, t))
+    if not float_conv and prec >= 0:
+        raise Unsupported('precision .N in the format spec %r on an int; CPython raises ValueError '
+                          '("Precision not allowed in integer format specifier")' % orig_text)
+    if float_conv and t is None and prec == 0:
+        raise Unsupported("the format spec %r on a float with precision 0 and no type is not built (CPython "
+                          "switches to exponent form there; write 'f', 'e' or 'g')" % orig_text)
+    if spec.get('alt') and float_conv and t is None:
+        raise Unsupported("'#' in the format spec %r on a type-less float is not built" % orig_text)
+    if spec.get('group') and t in ('x', 'X', 'o', 'b') and spec.get('group') == ',':
+        raise Unsupported("',' in the format spec %r with the type %r; CPython raises ValueError "
+                          "(use '_')" % (orig_text, t))
+    if spec['zero']:
+        fill = '0'
+        if align_ch is None:
+            align_ch = '='
+    if spec.get('group') and fill == '0' and align_ch == '=':
+        raise Unsupported("grouping %r together with zero padding in the format spec %r is not built "
+                          "(CPython groups the padding zeros too)" % (spec.get('group'), orig_text))
+    code = {None: 0, '>': 0, '<': 1, '^': 2, '=': 3}[align_ch]
+    sign = {None: 0, '-': 0, '+': 1, ' ': 2}[spec.get('sign')]
+    v = _expr(val_node, ctx)
+    if float_conv:
+        iv, dv, k = '0', '(double)(%s)' % v, 1
+    else:
+        iv, dv, k = v, '0.0', 0
+    return 'ail_fmt_gen(&%s, %d, %s, %s, %d, %d, %d, %d, %d, %d, %d, %d)' % (
+        ctx.sarena(), k, iv, dv, ord(fill), code, sign, 1 if spec.get('alt') else 0, width,
+        ord(spec.get('group')) if spec.get('group') else 0, prec, ord(t) if t else 0)
 
 
 def _resolve_fmt_type(spec, kind, orig_text, ctx_desc):
@@ -6704,7 +6804,7 @@ def _resolve_fmt_type(spec, kind, orig_text, ctx_desc):
     return t
 
 
-def _fmt_build(val_node, kind, spec, orig_text, ctx, ctx_desc, str_default_align):
+def _fmt_build(val_node, kind, spec, orig_text, ctx, ctx_desc, str_default_align, pre_c=None):
     """The C expression for VAL_NODE (already known to be `kind` -- INT, FLT or STR) formatted
     with the parsed SPEC dict -- the one place shared by all three surface spellings (an
     f-string field, a `%`-conversion, a `.format()` field), each of which parses its own spec
@@ -6712,6 +6812,8 @@ def _fmt_build(val_node, kind, spec, orig_text, ctx, ctx_desc, str_default_align
     three spellings genuinely disagree with each other: f-string/`.format()` default a str field
     to LEFT alignment, `%`-formatting defaults every type (str included) to RIGHT -- both
     CPython's own rule, passed in by the three callers rather than guessed here."""
+    if _fmt_general_needed(spec, kind):
+        return _fmt_general(val_node, kind, spec, orig_text, ctx, str_default_align, pre_c)
     _resolve_fmt_type(spec, kind, orig_text, ctx_desc)
     width = spec['width'] or 0
     zero = 1 if spec['zero'] else 0
@@ -6742,7 +6844,7 @@ def _fmt_build(val_node, kind, spec, orig_text, ctx, ctx_desc, str_default_align
         return 'ail_fmt_spec_float(&%s, (double)(%s), %d, %d, %d, %d, %d)' % (
             ctx.sarena(), v, width, align, zero, prec, ord(fill))
     prec = spec['precision'] if spec['precision'] is not None else -1
-    sv = _str_value(val_node, ctx)
+    sv = pre_c if pre_c is not None else _str_value(val_node, ctx)
     if width <= 0 and prec < 0:
         return sv
     return 'ail_fmt_spec_str(&%s, %s, %d, %d, %d)' % (
@@ -6820,23 +6922,34 @@ def _concat_chain(parts_c, ctx):
     return '(' + ', '.join([*stages, call]) + ')'
 
 
+def _repr_conv(val, kind, ctx):
+    """The C str for `{val!r}`: repr() of a str (quotes, escapes), and for an int or float, which
+    repr and str spell the same, the default conversion."""
+    if kind == STR:
+        ctx.parts.update(('STR', 'STRREPR'))
+        return 'ail_fmt_repr_str(&%s, %s)' % (ctx.sarena(), _str_value(val, ctx))
+    return _fmt_default_conv(val, kind, ctx)
+
+
 def _fstring_field(fv, ctx):
     """One `ast.FormattedValue` inside an f-string (`{expr}` or `{expr:spec}`) -- conversion
     (`!r`/`!a`, refused by name) checked first, then the value's own kind, then the spec, if one
     is there at all."""
-    if fv.conversion not in (-1, 115):
-        bad = '!r' if fv.conversion == 114 else '!a' if fv.conversion == 97 else '!?'
+    if fv.conversion not in (-1, 114, 115):
         raise Unsupported(
-            "the %s conversion in an f-string field is out of the declared subset -- only the "
-            "default str() conversion is built (no !r/!a). Build the message with str(n)/+ "
-            "instead of a conversion flag" % bad)
+            "the !a conversion in an f-string field is not built (!r and !s are); "
+            "use ascii-safe text or build the message with str(n) and +")
     val = fv.value
     kind = _etype(val, ctx)
     if kind not in (INT, FLT, STR):
         raise Unsupported('an f-string field of type %s; only an int, float or str expression '
                           'is built inside {}' % kind)
+    pre = None
+    if fv.conversion == 114:
+        pre = _repr_conv(val, kind, ctx)
+        kind = STR
     if fv.format_spec is None:
-        return _fmt_default_conv(val, kind, ctx)
+        return pre if pre is not None else _fmt_default_conv(val, kind, ctx)
     fs = fv.format_spec
     if not isinstance(fs, ast.JoinedStr) or len(fs.values) > 1 \
             or (fs.values and not isinstance(fs.values[0], ast.Constant)):
@@ -6845,7 +6958,7 @@ def _fstring_field(fv, ctx):
     spec_text = fs.values[0].value if fs.values else ''
     spec = _parse_braces_spec(spec_text)
     return _fmt_build(val, kind, spec, spec_text, ctx, 'an f-string field with spec',
-                      str_default_align='<')
+                      str_default_align='<', pre_c=pre)
 
 
 def _fstring_print_parts(node, ctx):
@@ -7021,6 +7134,10 @@ def _build_strformat_value(node, ctx):
             raise Unsupported("the format string %r has an unmatched '{'" % template)
         field = template[i + 1:j]
         idxtext, sep, spectext = field.partition(':')
+        idxtext, bang, conv = idxtext.partition('!')
+        if bang and conv not in ('r', 's'):
+            raise Unsupported("the conversion !%s in the .format() field {%s}; only !r and !s are built"
+                              % (conv, field))
         if idxtext == '':
             if explicit is True:
                 raise Unsupported("the format string %r mixes automatic {} and explicit {0}/{1} "
@@ -7045,7 +7162,7 @@ def _build_strformat_value(node, ctx):
         if idx >= len(args):
             raise Unsupported('.format() field {%s} in %r has no matching positional argument '
                               '(%d given)' % (idxtext, template, len(args)))
-        pieces.append(('field', idx, spectext))
+        pieces.append(('field', idx, spectext, conv if bang else ''))
         i = j + 1
     if buf:
         pieces.append(('lit', ''.join(buf)))
@@ -7055,18 +7172,22 @@ def _build_strformat_value(node, ctx):
             parts_c.append(_str_literal(p[1]))
             ctx.parts.add('STR')
             continue
-        _, idx, spectext = p
+        _, idx, spectext, conv = p
         argnode = args[idx]
         kind = _etype(argnode, ctx)
         if kind not in (INT, FLT, STR):
             raise Unsupported('.format() field of type %s; only int, float or str is built'
                               % kind)
+        pre = None
+        if conv == 'r':
+            pre = _repr_conv(argnode, kind, ctx)
+            kind = STR
         if spectext:
             spec = _parse_braces_spec(spectext)
             parts_c.append(_fmt_build(argnode, kind, spec, spectext, ctx,
-                                      '.format() field with spec', str_default_align='<'))
+                                      '.format() field with spec', str_default_align='<', pre_c=pre))
         else:
-            parts_c.append(_fmt_default_conv(argnode, kind, ctx))
+            parts_c.append(pre if pre is not None else _fmt_default_conv(argnode, kind, ctx))
     return _concat_chain(parts_c, ctx)
 
 
@@ -14330,6 +14451,14 @@ def _call(node, ctx):
         raise Unsupported('flush_stdout() is a statement and has no value')
     if f in ('write_text', 'write_bytes', 'append_bytes') and f not in ctx.funcs:
         raise Unsupported(f + '(path, data) is a statement and has no value')
+    if f.startswith('_ail_c_') and f[7:] in cruntime.LIBM_FUNCS and f not in ctx.funcs:
+        # The Python syntax's math.* helpers (ail_syntax.py) reach libm only through these.
+        if node.keywords or len(a) != cruntime.LIBM_FUNCS[f[7:]]:
+            raise Unsupported('%s takes %d float arguments and no keywords' % (f, cruntime.LIBM_FUNCS[f[7:]]))
+        ctx.parts.update(('LIBM', 'LIBM_' + f[7:]))
+        if len(a) == 1:
+            return 'ail_m_%s((double)(%s))' % (f[7:], rec(a[0]))
+        return _ordered_numeric_pair(a[0], a[1], ctx, 'ail_m_%s((double)({}), (double)({}))' % f[7:])
     if f == 'jsdiv' and len(a) == 2:
         if node.keywords:
             raise Unsupported('jsdiv() does not accept keyword arguments')
@@ -14582,6 +14711,32 @@ def _call(node, ctx):
                     % ('double' if _etype(a[0], ctx) == FLT else 'int64_t',
                        p, inner, p, neg % p, p))
         return '((%s) < 0 ? %s : (%s))' % (inner, neg % inner, inner)
+    if f in _AIL_SYSINFO and f not in ctx.funcs:
+        # time.perf_counter() / perf_counter_ns() / os.cpu_count() as the Python syntax maps them
+        if a or node.keywords:
+            raise Unsupported('%s takes no arguments' % f)
+        ctx.parts.update(('DIE', 'SYSINFO'))
+        ctx.has_try = True
+        return '%s()' % _AIL_SYSINFO[f][1]
+    if f == 'pow' and f not in ctx.funcs and len(a) == 3 and not node.keywords:
+        if any(_etype(each, ctx) != INT for each in a):
+            raise Unsupported('pow(base, exp, mod) is built for ints only (CPython raises TypeError otherwise)')
+        ctx.parts.update(('DIE', 'POW3'))
+        ctx.has_try = True
+        return 'ail_pow3(%s)' % ', '.join(rec(each) for each in a)
+    if (f == 'int' and f not in ctx.funcs and not any(isinstance(each, ast.Starred) for each in a)
+            and (len(a) == 2 and not node.keywords
+                 or len(a) == 1 and len(node.keywords) == 1 and node.keywords[0].arg == 'base')):
+        base_node = a[1] if len(a) == 2 else node.keywords[0].value
+        if not _is_str_expr(a[0], ctx):
+            raise Unsupported("int(x, base) with a base needs a str as its first argument "
+                              "(CPython raises TypeError: int() can't convert non-string with explicit base)")
+        if _etype(base_node, ctx) != INT:
+            raise Unsupported('int(s, base): the base has to be an int')
+        v = _str_value(a[0], ctx)
+        ctx.parts.update(('STR', 'STRREPR', 'INTBASE', 'DIE'))
+        ctx.has_try = True
+        return 'ail_str_to_int_base(%s, %s)' % (v, rec(base_node))
     if f == 'int' and len(a) == 1:
         # AIL_TASK_stdio_20260915.md scope item 4: `int(<str>)` -- CPython's own rule (optional
         # whitespace, optional sign, decimal digits; anything else ValueError), via the new
@@ -30608,6 +30763,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         from module_object import _struct_source
         source = _struct_source(external['structs']) + source
     tree = ast.parse(source.strip())
+    iterlower.rewrite(tree)
     nested_lists.rewrite(tree, Unsupported, library, entry)
     _NULLABLE.clear()
     _NULLABLE.update(_strip_nullable(tree))

@@ -294,7 +294,9 @@ results, with Python's meaning:
   `hex(int)`. Missing: `partition`, `title`, `capitalize`, `zfill`, `ljust`, `translate`,
   `removeprefix`, `re`. `+` never mixes str and a number: `"n=" + str(n)`.
 - f-strings `{expr}`, `{n:5d}`, `{n:05d}`, `{x:.2f}`, `{x:8.3f}`, `{s:>6}` (`<`, `^`);
-  `"%d %5s %-5s %.9f" % (...)`; `"{} {:.2f}".format(...)`. No `x`, `e`, `g`, `+`, `,` specs.
+  `"%d %5s %-5s %.9f" % (...)`; `"{} {:.2f}".format(...)`. Specs follow CPython: `[[fill]align][sign][#][0]
+  [width][, or _][.precision][type]` with int types d x X o b (and e f g %), float types f F e E g G %
+  or none (the repr), `!r`; refused by name: n, c, z, a nested `{w}`, grouping with zero padding.
 
 ```ail
 fn main() {

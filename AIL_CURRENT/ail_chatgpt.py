@@ -653,6 +653,21 @@ def _python_source(args, data):
 def _python_notes(message, notes, source):
     """A Python-syntax refusal followed by what the Python front end left as written."""
     message = message.rstrip('\n')
+    if "'math' is read before it is assigned" in message:
+        # a math name the Python front end could not map was left as written; say so, not this
+        for entries in notes.values():
+            named = [text.split(';')[0] for _, text in entries if text.startswith('math.')]
+            if named:
+                message = message.replace("'math' is read before it is assigned", named[0] + " (see the note below)")
+                break
+    for entries in notes.values():
+        # `import time` followed by a time name the front end could not map: name that, not the import
+        named = [text.split(';')[0] for _, text in entries if re.match(r'(time|string|os|operator)\.', text)]
+        found = re.search(r"import of '(time|string|os|operator)'; [^\n]*?by hand", message)
+        if named and found and any(text.startswith(found.group(1) + '.') for _, text in entries):
+            message = message.replace(found.group(0), next(n for n in named if n.startswith(found.group(1) + '.'))
+                                      + ' (see the note below)')
+            break
     shown = os.path.relpath(source)
     shown = str(source) if shown.startswith('..') else shown
     for path, entries in notes.items():
