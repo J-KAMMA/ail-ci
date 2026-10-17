@@ -1,0 +1,6 @@
+{
+ "id": "t392",
+ "category": "simulation",
+ "description": "Shuffle the list range(n) with random.Random(seed).shuffle and print the result, then sort it using a hand-written bubble sort counting swaps.",
+ "input_format": "seed_params"
+}

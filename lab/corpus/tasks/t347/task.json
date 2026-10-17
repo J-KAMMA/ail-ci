@@ -1,0 +1,6 @@
+{
+ "id": "t347",
+ "category": "dp",
+ "description": "Run a sieve to count primes below n*1000, then list twin prime pairs found below 200.",
+ "input_format": "small_int"
+}

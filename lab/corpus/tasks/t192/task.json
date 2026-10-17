@@ -1,0 +1,6 @@
+{
+ "id": "t192",
+ "category": "parsing",
+ "description": "Print the number of lines per month using the date, and the first WARN line (or 'none').",
+ "input_format": "log_lines"
+}

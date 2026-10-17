@@ -1,0 +1,6 @@
+{
+ "id": "t408",
+ "category": "simulation",
+ "description": "Simulate a traffic light cycle: green 4, yellow 1, red 3 time units; print the state at each time step 0..n*3 as 'time: STATE'.",
+ "input_format": "small_int"
+}

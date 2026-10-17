@@ -1,0 +1,6 @@
+{
+ "id": "t391",
+ "category": "simulation",
+ "description": "Use random.Random(seed) from the standard library to produce n random integers in [1, 100] and print them, then the sum of random.Random(seed).sample(range(100), 5).",
+ "input_format": "seed_params"
+}

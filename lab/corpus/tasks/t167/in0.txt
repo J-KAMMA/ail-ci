@@ -1,0 +1,7 @@
+name,dept,salary,age
+grace,ops,47000,29
+carol,sales,90000,25
+bob,ops,64000,41
+mallory,sales,76000,39
+dave,ops,93000,58
+heidi,sales,172000,58

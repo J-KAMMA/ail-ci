@@ -1,0 +1,6 @@
+{
+ "id": "t334",
+ "category": "dp",
+ "description": "Print the length of the shortest subarray with sum at least t (all values are used as given), or 0 if none.",
+ "input_format": "nums_target"
+}

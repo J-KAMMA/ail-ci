@@ -1,0 +1,6 @@
+{
+ "id": "t191",
+ "category": "parsing",
+ "description": "Count log lines per hour of day (00-23), print only non-zero hours as 'HH: n', and the busiest hour.",
+ "input_format": "log_lines"
+}

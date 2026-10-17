@@ -1,0 +1,6 @@
+{
+ "id": "t059",
+ "category": "numbers",
+ "description": "Print the integer n written in balanced ternary using the symbols '-', '0', '+'.",
+ "input_format": "one_int"
+}

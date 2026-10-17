@@ -1,0 +1,6 @@
+{
+ "id": "t476",
+ "category": "errors_classes",
+ "description": "Use heapq with tuples (priority, counter, item) to implement a stable priority queue; push the words with priority = length; pop all; print.",
+ "input_format": "strings_n"
+}

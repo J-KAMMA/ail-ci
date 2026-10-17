@@ -1,0 +1,6 @@
+{
+ "id": "t081",
+ "category": "strings",
+ "description": "For each word in the text count how many are palindromes (case-insensitive); print the palindromes in order of appearance.",
+ "input_format": "text_uni"
+}

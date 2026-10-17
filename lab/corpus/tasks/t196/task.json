@@ -1,0 +1,6 @@
+{
+ "id": "t196",
+ "category": "parsing",
+ "description": "Mask every email with '***@' + domain and every phone with 'XXX-XXX-' + last four digits using re.sub; print the lines.",
+ "input_format": "emails_text"
+}

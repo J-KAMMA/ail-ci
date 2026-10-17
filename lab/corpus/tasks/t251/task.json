@@ -1,0 +1,6 @@
+{
+ "id": "t251",
+ "category": "grids",
+ "description": "Compute the matrix raised to the power e with plain integer arithmetic (matrix exponentiation) and print the result matrix; use big integers.",
+ "input_format": "matrix_pow"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t140",
+ "category": "collections",
+ "description": "Track an inventory: add increases stock, remove decreases stock but not below zero (print 'short by N' if too few), report prints every item with its quantity sorted by item name.",
+ "input_format": "inventory"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t223",
+ "category": "grids",
+ "description": "Count the connected components of open cells ('.', 'S', 'E' are open) with 4-connectivity, and the size of the largest.",
+ "input_format": "grid_se"
+}

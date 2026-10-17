@@ -1,0 +1,9 @@
+8
+zulu
+echo
+whiskey
+foxtrot
+foxtrot
+uniform
+lima
+romeo

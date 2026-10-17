@@ -1,0 +1,6 @@
+{
+ "id": "t232",
+ "category": "grids",
+ "description": "Transpose the grid, then rotate it 90 degrees clockwise; print both results.",
+ "input_format": "grid_life"
+}

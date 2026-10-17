@@ -1,0 +1,6 @@
+{
+ "id": "t229",
+ "category": "grids",
+ "description": "Simulate Conway's Game of Life on the grid (non-wrapping borders) for 5 generations; print the grid after each generation separated by a blank line.",
+ "input_format": "grid_life"
+}

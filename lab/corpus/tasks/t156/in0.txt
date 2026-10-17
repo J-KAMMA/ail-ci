@@ -1,0 +1,8 @@
+apple 4
+hotel 5
+golf 4
+cherry 3
+golf 1
+delta -5
+echo 4
+hotel -5

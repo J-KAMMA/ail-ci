@@ -1,0 +1,6 @@
+{
+ "id": "t151",
+ "category": "collections",
+ "description": "Print each number with its rank in the sorted distinct list (0-based coordinate compression), one line.",
+ "input_format": "nums_nocount"
+}

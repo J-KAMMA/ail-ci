@@ -1,0 +1,6 @@
+{
+ "id": "t434",
+ "category": "errors_classes",
+ "description": "Define a dataclass Employee(name, dept, salary, age) with order=True, field defaults and __post_init__ validation; read the CSV into Employee objects, print sorted by default dataclass ordering, the first 5.",
+ "input_format": "csv_table"
+}

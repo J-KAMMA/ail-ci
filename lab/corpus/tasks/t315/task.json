@@ -1,0 +1,6 @@
+{
+ "id": "t315",
+ "category": "dp",
+ "description": "Print the maximum sum of a subsequence with no two adjacent elements (house robber), taking the values as given (negative allowed).",
+ "input_format": "nums_nocount"
+}

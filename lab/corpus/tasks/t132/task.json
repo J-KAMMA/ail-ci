@@ -1,0 +1,6 @@
+{
+ "id": "t132",
+ "category": "collections",
+ "description": "Treat each stack command: push X, pop (print the popped value or 'empty'), peek (print the top or 'empty'), size (print the size). Print outputs in order.",
+ "input_format": "commands"
+}

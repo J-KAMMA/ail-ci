@@ -1,0 +1,6 @@
+{
+ "id": "t248",
+ "category": "grids",
+ "description": "Print the number of rows that are palindromes, and the matrix flipped horizontally and vertically.",
+ "input_format": "int_matrix"
+}

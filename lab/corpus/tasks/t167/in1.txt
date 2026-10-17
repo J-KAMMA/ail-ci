@@ -1,0 +1,13 @@
+name,dept,salary,age
+judy,ops,175000,31
+carol,hr,187000,45
+niaj,hr,82000,49
+ivan,sales,100000,31
+bob,hr,140000,21
+alice,ops,117000,48
+carol,ops,83000,64
+ivan,hr,197000,36
+heidi,sales,31000,44
+bob,eng,36000,63
+dave,hr,41000,60
+dave,ops,167000,33

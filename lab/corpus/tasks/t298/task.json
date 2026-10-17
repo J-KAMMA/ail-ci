@@ -1,0 +1,6 @@
+{
+ "id": "t298",
+ "category": "graphs",
+ "description": "Compute the minimum number of edges to every node from node 0 (BFS) and the total of the weights along the BFS tree edges.",
+ "input_format": "edges_dw"
+}

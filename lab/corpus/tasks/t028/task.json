@@ -1,0 +1,6 @@
+{
+ "id": "t028",
+ "category": "numbers",
+ "description": "Print the count of numbers that are perfect squares, and the largest such number or 'none'.",
+ "input_format": "pos_nums"
+}

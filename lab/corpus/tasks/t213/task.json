@@ -1,0 +1,6 @@
+{
+ "id": "t213",
+ "category": "parsing",
+ "description": "For each line print 'valid' or 'invalid' using a stack.",
+ "input_format": "balanced_ish"
+}

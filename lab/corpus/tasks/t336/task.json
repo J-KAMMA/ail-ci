@@ -1,0 +1,6 @@
+{
+ "id": "t336",
+ "category": "dp",
+ "description": "Count the number of subsets (by index) with sum equal to t, for the first up to 18 elements; print the count.",
+ "input_format": "nums_target"
+}

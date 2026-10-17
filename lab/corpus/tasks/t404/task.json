@@ -1,0 +1,6 @@
+{
+ "id": "t404",
+ "category": "simulation",
+ "description": "Simulate an elevator that starts at floor 1 and serves the requested floors given by the integers in order (nearest-first among remaining requests); print the order of service and the total distance travelled.",
+ "input_format": "nums_nocount"
+}

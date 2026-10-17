@@ -1,0 +1,1 @@
+[{"id": 0, "name": "mallory", "tags": ["apple", "golf"], "score": 81.75, "active": false}, {"id": 1, "name": "frank", "tags": ["delta", "echo"], "score": 60.36, "active": true}, {"id": 2, "name": "café", "tags": ["banana"], "score": 71.03, "active": false, "meta": {"level": 1, "note": null}}, {"id": 3, "name": "niaj", "tags": ["delta", "golf"], "score": 73.3, "active": false}]

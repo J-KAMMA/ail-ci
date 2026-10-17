@@ -1,0 +1,6 @@
+{
+ "id": "t416",
+ "category": "simulation",
+ "description": "Simulate a text editor with undo: treat each line as 'push X' = type X, 'pop' = undo the last, 'peek' = print the current last char typed or 'none', 'size' prints the number of kept entries; at the end print the concatenation of kept entries.",
+ "input_format": "commands"
+}

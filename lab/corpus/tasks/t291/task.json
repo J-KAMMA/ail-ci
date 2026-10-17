@@ -1,0 +1,6 @@
+{
+ "id": "t291",
+ "category": "graphs",
+ "description": "Print whether the directed graph has a cycle (and if so one cycle), using three-colour DFS.",
+ "input_format": "edges_d"
+}

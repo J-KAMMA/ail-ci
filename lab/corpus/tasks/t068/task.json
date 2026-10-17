@@ -1,0 +1,6 @@
+{
+ "id": "t068",
+ "category": "strings",
+ "description": "Strip punctuation (, . ! ;) from all words, lowercase them, and print the sorted list of unique words, one per line.",
+ "input_format": "text_lines"
+}

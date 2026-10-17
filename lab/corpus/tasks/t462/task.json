@@ -1,0 +1,6 @@
+{
+ "id": "t462",
+ "category": "errors_classes",
+ "description": "Raise an uncaught exception at the end if the sum of valid integers is negative (print the sum first); otherwise print 'fine'.",
+ "input_format": "opt_ints_lines"
+}

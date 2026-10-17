@@ -1,0 +1,1 @@
+[{"id": 0, "name": "heidi", "tags": ["apple", "cherry", "echo"], "score": 78.65, "active": false}, {"id": 1, "name": "judy", "tags": ["banana"], "score": 56.83, "active": true}, {"id": 2, "name": "\u00fcber", "tags": ["golf"], "score": 42.63, "active": false}]

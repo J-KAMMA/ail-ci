@@ -1,0 +1,6 @@
+{
+ "id": "t020",
+ "category": "numbers",
+ "description": "Compute the sum of digits of each non-negative number and print the number whose digit sum is largest (ties: the smaller number); ignore negatives.",
+ "input_format": "nums"
+}

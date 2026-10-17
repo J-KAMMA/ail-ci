@@ -1,0 +1,6 @@
+{
+ "id": "t088",
+ "category": "strings",
+ "description": "For each pair of words print 'anagram' or 'not anagram'.",
+ "input_format": "word_pairs"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t489",
+ "category": "errors_classes",
+ "description": "Use unicodedata: print the category, name (or 'unnamed') and NFC/NFD lengths of each distinct non-ASCII character in the text; sort by code point.",
+ "input_format": "text_uni"
+}

@@ -1,0 +1,5 @@
+name,dept,salary,age
+mallory,hr,47000,24
+grace,hr,91000,45
+heidi,eng,67000,54
+heidi,eng,169000,30

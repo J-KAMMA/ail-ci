@@ -1,0 +1,6 @@
+5
+mallory 20
+mallory 60
+carol 27
+mallory 5
+frank 21

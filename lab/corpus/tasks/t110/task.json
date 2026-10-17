@@ -1,0 +1,6 @@
+{
+ "id": "t110",
+ "category": "strings",
+ "description": "Read the line and print its chunks of size 7 (character-wise) separated by '|', plus the reversed string.",
+ "input_format": "words_line"
+}

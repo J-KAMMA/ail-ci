@@ -1,0 +1,6 @@
+{
+ "id": "t284",
+ "category": "graphs",
+ "description": "Find the connected components using union-find and print their sizes sorted, plus the component containing node 0 as a sorted list.",
+ "input_format": "edges_disc"
+}

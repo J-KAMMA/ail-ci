@@ -1,0 +1,6 @@
+{
+ "id": "t155",
+ "category": "collections",
+ "description": "Count the numbers with a dict, then print the numbers sorted by (count desc, value asc) as 'value count'.",
+ "input_format": "nums_nocount"
+}

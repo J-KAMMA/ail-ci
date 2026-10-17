@@ -1,0 +1,6 @@
+{
+ "id": "t332",
+ "category": "dp",
+ "description": "Print all pairs of indices (i<j) whose values sum to the target t (unsorted array), at most 20 pairs; use a dict.",
+ "input_format": "nums_target"
+}

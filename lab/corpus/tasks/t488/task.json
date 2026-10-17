@@ -1,0 +1,6 @@
+{
+ "id": "t488",
+ "category": "errors_classes",
+ "description": "Use time arithmetic: sum all HH:MM times as durations (not clock times) and print the total as 'H:MM' with hours possibly above 24.",
+ "input_format": "times"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t070",
+ "category": "strings",
+ "description": "Word-wrap the whole text (joined by single spaces) to lines of at most 20 characters, never breaking words; print the lines with line numbers.",
+ "input_format": "text_lines"
+}

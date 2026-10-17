@@ -1,0 +1,6 @@
+{
+ "id": "t075",
+ "category": "strings",
+ "description": "Print every line with its length in characters and its length in UTF-8 bytes as 'chars bytes text'.",
+ "input_format": "text_uni"
+}

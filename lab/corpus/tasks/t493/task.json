@@ -1,0 +1,6 @@
+{
+ "id": "t493",
+ "category": "errors_classes",
+ "description": "Use ljust/rjust/center on non-ASCII words with width 8 and fill '_' and also print the len of the results; check that padding counts characters.",
+ "input_format": "words_line_uni"
+}

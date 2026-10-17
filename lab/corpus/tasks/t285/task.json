@@ -1,0 +1,6 @@
+{
+ "id": "t285",
+ "category": "graphs",
+ "description": "Count the connected components using BFS and print them as sorted lists, ordered by their smallest node.",
+ "input_format": "edges_disc"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t431",
+ "category": "errors_classes",
+ "description": "Write a retry function that calls an operation which fails on specific values (the first two attempts fail for each number divisible by 3, implemented with a counter); print how many attempts each number needed.",
+ "input_format": "nums_nocount"
+}

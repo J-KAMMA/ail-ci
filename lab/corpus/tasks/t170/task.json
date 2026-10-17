@@ -1,0 +1,6 @@
+{
+ "id": "t170",
+ "category": "parsing",
+ "description": "Bucket employees by age decade (20s, 30s, ...) and print the count and mean salary (rounded to integer) of each bucket.",
+ "input_format": "csv_table"
+}

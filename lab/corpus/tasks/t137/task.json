@@ -1,0 +1,6 @@
+{
+ "id": "t137",
+ "category": "collections",
+ "description": "Implement an undo-able key-value store: after each 'set' or 'del' push a snapshot; 'count' prints the number of keys; 'get' prints the value or 'nil'; 'incr' acts as set; at the end print the final state sorted by key.",
+ "input_format": "kv_commands"
+}

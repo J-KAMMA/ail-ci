@@ -1,0 +1,6 @@
+{
+ "id": "t126",
+ "category": "collections",
+ "description": "Print each distinct name and the position (1-based line numbers) of its occurrences.",
+ "input_format": "name_scores"
+}

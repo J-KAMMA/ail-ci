@@ -1,0 +1,6 @@
+{
+ "id": "t482",
+ "category": "errors_classes",
+ "description": "Use the statistics module: mean, median, mode (if unique else 'multi'), pstdev and stdev (3 decimals; if n < 2 print 'n/a').",
+ "input_format": "nums"
+}

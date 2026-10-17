@@ -1,0 +1,6 @@
+{
+ "id": "t427",
+ "category": "errors_classes",
+ "description": "Process the lines with a generator pipeline: read -> filter ints -> square -> running sum; print the running sums using next() and a for loop; a StopIteration-safe version too.",
+ "input_format": "opt_ints_lines"
+}

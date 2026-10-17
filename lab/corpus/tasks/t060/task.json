@@ -1,0 +1,6 @@
+{
+ "id": "t060",
+ "category": "numbers",
+ "description": "For each of the big integers print its square, its number of digits, and its digit sum; then print the sum of all of them.",
+ "input_format": "big_ints"
+}

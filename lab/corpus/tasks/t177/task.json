@@ -1,0 +1,6 @@
+{
+ "id": "t177",
+ "category": "parsing",
+ "description": "Print the JSON re-serialised with sort_keys=True and indent=2 (ensure_ascii=False).",
+ "input_format": "json_records"
+}

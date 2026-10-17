@@ -1,0 +1,6 @@
+{
+ "id": "t200",
+ "category": "parsing",
+ "description": "Group the dates by ISO week number (isocalendar) and print week -> count sorted.",
+ "input_format": "dates"
+}

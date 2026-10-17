@@ -1,0 +1,6 @@
+{
+ "id": "t130",
+ "category": "collections",
+ "description": "Print the top 3 values (with names) using heapq.nlargest, and the bottom 3 using heapq.nsmallest.",
+ "input_format": "name_score_float"
+}

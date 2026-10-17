@@ -1,0 +1,6 @@
+name,dept,salary,age
+ivan,hr,74000,41
+frank,eng,91000,40
+bob,sales,140000,36
+ivan,eng,167000,23
+mallory,hr,36000,46

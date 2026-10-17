@@ -1,0 +1,6 @@
+{
+ "id": "t233",
+ "category": "grids",
+ "description": "Flood fill from the top-left cell: if it is '.', fill its connected '.' region with 'o' and print the grid, otherwise print the grid unchanged.",
+ "input_format": "grid_life"
+}

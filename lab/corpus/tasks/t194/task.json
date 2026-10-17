@@ -1,0 +1,6 @@
+{
+ "id": "t194",
+ "category": "parsing",
+ "description": "Find all email addresses with a regular expression; print them lowercased, unique and sorted, and the domains with counts.",
+ "input_format": "emails_text"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t443",
+ "category": "errors_classes",
+ "description": "Use itertools.groupby on the sorted words by first letter; print letter, count and the group's words joined with '/'.",
+ "input_format": "words_line"
+}

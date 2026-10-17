@@ -1,0 +1,6 @@
+{
+ "id": "t313",
+ "category": "dp",
+ "description": "Print the length of the longest increasing subsequence (strict) and one such subsequence, using the O(n log n) bisect method for the length.",
+ "input_format": "nums_nocount"
+}

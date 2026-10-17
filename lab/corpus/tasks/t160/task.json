@@ -1,0 +1,6 @@
+{
+ "id": "t160",
+ "category": "collections",
+ "description": "Convert the rows to namedtuples (fields a, b, word) and print the sum of a, the max of b and the word with the most occurrences.",
+ "input_format": "tuples_lines"
+}

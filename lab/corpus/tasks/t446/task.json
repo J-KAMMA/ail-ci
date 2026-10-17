@@ -1,0 +1,6 @@
+{
+ "id": "t446",
+ "category": "errors_classes",
+ "description": "Use enumerate with start=1, zip, map, filter, any, all and sum with generator expressions on the numbers; print one result per line, labelled.",
+ "input_format": "pos_nums"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t182",
+ "category": "parsing",
+ "description": "Print the top 2 records by score as JSON lines (one json.dumps per record, keys sorted).",
+ "input_format": "json_records"
+}

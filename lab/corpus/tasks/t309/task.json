@@ -1,0 +1,6 @@
+{
+ "id": "t309",
+ "category": "dp",
+ "description": "Count the number of distinct subsequences of the first string equal to the second string, modulo 1000000007.",
+ "input_format": "two_strings"
+}

@@ -1,0 +1,9 @@
+{
+ "model": "glm-5.3-flash-free",
+ "task": "t243",
+ "mode": "default",
+ "cpython_failed_all": false,
+ "input": -1,
+ "cls": "crash",
+ "reason": "compiler rc=1: TypeError: not all arguments converted during string formatting"
+}

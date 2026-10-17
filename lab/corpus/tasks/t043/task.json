@@ -1,0 +1,6 @@
+{
+ "id": "t043",
+ "category": "numbers",
+ "description": "Print the numbers from min(a,b) to max(a,b) that are divisible by 3 or 5 (at most 30 of them, space separated).",
+ "input_format": "two_ints"
+}

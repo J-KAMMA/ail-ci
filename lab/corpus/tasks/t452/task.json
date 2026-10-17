@@ -1,0 +1,6 @@
+{
+ "id": "t452",
+ "category": "errors_classes",
+ "description": "Implement a linked list class with append, reverse and a merge of two sorted lists; read the numbers, build two lists from the first and second halves (each sorted), merge, print.",
+ "input_format": "nums"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t057",
+ "category": "numbers",
+ "description": "Print the digital root of n, the reverse of n, and whether n is a palindrome.",
+ "input_format": "one_int"
+}

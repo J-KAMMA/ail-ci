@@ -1,0 +1,6 @@
+{
+ "id": "t120",
+ "category": "collections",
+ "description": "Per name print count, min, max and average (2 decimals) of the scores, in alphabetical order of names.",
+ "input_format": "name_scores"
+}

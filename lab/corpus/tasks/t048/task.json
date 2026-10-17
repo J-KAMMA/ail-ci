@@ -1,0 +1,6 @@
+{
+ "id": "t048",
+ "category": "numbers",
+ "description": "Print all primes up to 10*n using a sieve, 15 per line.",
+ "input_format": "small_int"
+}

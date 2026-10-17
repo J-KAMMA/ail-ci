@@ -1,0 +1,6 @@
+{
+ "id": "t296",
+ "category": "graphs",
+ "description": "Find the shortest cycle through node 0 (sum of weights) in the directed weighted graph, or 'none'.",
+ "input_format": "edges_dw"
+}

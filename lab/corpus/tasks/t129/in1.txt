@@ -1,0 +1,22 @@
+21
+alice 16.42
+mallory 91.97
+bob 29.96
+mallory 39.08
+grace 76.25
+alice 65.14
+dave 58.14
+grace 65.57
+heidi 79.81
+carol 22.00
+heidi 60.96
+heidi 80.13
+frank 14.26
+bob 56.73
+alice 75.48
+mallory 49.55
+carol 75.81
+erin 35.06
+ivan 74.59
+erin 22.91
+dave 63.08

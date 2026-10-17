@@ -1,0 +1,6 @@
+{
+ "id": "t086",
+ "category": "strings",
+ "description": "Print each string run-length encoded (e.g. 'aaab' -> 'a3b1').",
+ "input_format": "rle_input"
+}

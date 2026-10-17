@@ -1,0 +1,6 @@
+{
+ "id": "t299",
+ "category": "graphs",
+ "description": "Resolve task dependencies: print a valid execution order (alphabetical among ready tasks) and the earliest finish time of each task assuming unlimited parallelism, then the project length.",
+ "input_format": "tasks_deps"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t310",
+ "category": "dp",
+ "description": "Check whether the first string matches the second as a pattern where '?' is not present \u2014 instead, print whether the second is a subsequence of the first and the number of positions where the strings differ when aligned from the left.",
+ "input_format": "two_strings"
+}

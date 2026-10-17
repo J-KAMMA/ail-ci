@@ -1,0 +1,10 @@
+add gear 18
+remove gear 14
+add pin 6
+add nut 19
+report
+remove cog 6
+add nut 9
+report
+report
+report

@@ -1,0 +1,6 @@
+{
+ "id": "t224",
+ "category": "grids",
+ "description": "Print the grid with the cells reachable from S replaced by '+' (keeping S and E marks), then the count of reachable open cells.",
+ "input_format": "grid_se"
+}

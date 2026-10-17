@@ -1,0 +1,6 @@
+{
+ "id": "t080",
+ "category": "strings",
+ "description": "Print the longest word by number of characters (first one on ties) and its length, and the longest by UTF-8 byte length.",
+ "input_format": "text_uni"
+}

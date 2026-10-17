@@ -1,0 +1,6 @@
+{
+ "id": "t329",
+ "category": "dp",
+ "description": "Answer each query: the number of distinct values in the range, with a simple set per query.",
+ "input_format": "ints_and_queries"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t467",
+ "category": "errors_classes",
+ "description": "Use *args, **kwargs, keyword-only parameters, default mutable argument avoidance and unpacking in calls; process the numbers; print the stats via a function returning a dict printed with sorted keys.",
+ "input_format": "nums"
+}

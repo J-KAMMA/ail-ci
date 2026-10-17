@@ -1,0 +1,6 @@
+{
+ "id": "t202",
+ "category": "parsing",
+ "description": "Convert each time HH:MM to minutes since midnight, print the minutes sorted, and the largest gap between consecutive sorted times (circular, wrapping over midnight).",
+ "input_format": "times"
+}

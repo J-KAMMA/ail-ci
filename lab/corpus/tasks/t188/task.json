@@ -1,0 +1,6 @@
+{
+ "id": "t188",
+ "category": "parsing",
+ "description": "For every ERROR line print the time (HH:MM:SS) and the code; then print the count per level sorted by level.",
+ "input_format": "log_lines"
+}

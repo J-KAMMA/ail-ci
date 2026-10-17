@@ -1,0 +1,6 @@
+{
+ "id": "t220",
+ "category": "grids",
+ "description": "BFS from S to E moving in four directions on open cells; print the shortest path length or -1 if unreachable.",
+ "input_format": "grid_se"
+}

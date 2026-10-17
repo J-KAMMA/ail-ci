@@ -1,0 +1,6 @@
+{
+ "id": "t269",
+ "category": "graphs",
+ "description": "Detect whether the graph is bipartite and print the 2-colouring or 'not bipartite'.",
+ "input_format": "edges_plain"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t407",
+ "category": "simulation",
+ "description": "Simulate the Josephus problem with n people (n = the integer) and every k-th elimination where k=3; print the elimination order and the survivor.",
+ "input_format": "small_int"
+}

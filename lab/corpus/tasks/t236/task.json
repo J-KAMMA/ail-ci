@@ -1,0 +1,6 @@
+{
+ "id": "t236",
+ "category": "grids",
+ "description": "Find the minimum cost path from the top-left to the bottom-right moving right or down only (sum of digits); print the cost and one such path as a string of R/D.",
+ "input_format": "grid_digits"
+}

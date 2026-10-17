@@ -1,0 +1,6 @@
+{
+ "id": "t201",
+ "category": "parsing",
+ "description": "Print each date in the format 'Mon DD, YYYY' (using strftime) and the day of year.",
+ "input_format": "dates"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t389",
+ "category": "sorting",
+ "description": "Sort the times by minute-of-hour, then hour; print them back as HH:MM.",
+ "input_format": "times"
+}

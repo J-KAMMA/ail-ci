@@ -1,0 +1,20 @@
+push 28
+push 92
+pop
+push 37
+push 89
+peek
+size
+pop
+pop
+push 65
+peek
+peek
+push 59
+pop
+push 43
+peek
+pop
+push 27
+pop
+peek

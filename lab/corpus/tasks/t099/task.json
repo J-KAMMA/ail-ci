@@ -1,0 +1,6 @@
+{
+ "id": "t099",
+ "category": "strings",
+ "description": "Run a Vigenere-style shift: use the shift k and the position of each letter in the line (shift k+i for i-th letter, ASCII letters only); print the result lines.",
+ "input_format": "cipher_in"
+}

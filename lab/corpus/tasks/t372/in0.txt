@@ -1,0 +1,7 @@
+6
+victor
+mike
+echo
+cherry
+yankee
+uniform

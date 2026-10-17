@@ -1,0 +1,6 @@
+{
+ "id": "t390",
+ "category": "simulation",
+ "description": "Simulate a simple linear congruential generator x = (a*x + 11) % 2**31 with a=1103515245 starting from the seed; print the first n values mod 100.",
+ "input_format": "seed_params"
+}

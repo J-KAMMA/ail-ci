@@ -1,0 +1,6 @@
+{
+ "id": "t245",
+ "category": "grids",
+ "description": "Print the matrix with each row sorted ascending, and the columns' maxima.",
+ "input_format": "int_matrix"
+}

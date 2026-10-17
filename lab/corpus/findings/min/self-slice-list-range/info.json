@@ -1,0 +1,7 @@
+{
+ "note": "v = list(range(44)); v = v[:18] leaves an empty list: silent wrong result (t336)",
+ "from": "",
+ "cpython_rc": 0,
+ "default": "run rc=0, stdout DIFFERS",
+ "ir": "run rc=0, stdout DIFFERS"
+}

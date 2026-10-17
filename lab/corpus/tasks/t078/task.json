@@ -1,0 +1,6 @@
+{
+ "id": "t078",
+ "category": "strings",
+ "description": "Print the characters of the first non-empty line one per line as 'U+XXXX char' (uppercase hex, at least 4 digits).",
+ "input_format": "text_uni"
+}

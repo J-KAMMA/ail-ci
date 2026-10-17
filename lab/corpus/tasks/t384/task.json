@@ -1,0 +1,6 @@
+{
+ "id": "t384",
+ "category": "sorting",
+ "description": "Sort sentences (lines) by number of words descending then alphabetically (lowercase compare); print lines with word counts.",
+ "input_format": "text_lines"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t025",
+ "category": "numbers",
+ "description": "Print the prime factorisation of each number in the form 'n = p1^e1 * p2^e2' one per line.",
+ "input_format": "pos_nums"
+}

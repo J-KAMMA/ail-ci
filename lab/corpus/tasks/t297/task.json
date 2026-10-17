@@ -1,0 +1,6 @@
+{
+ "id": "t297",
+ "category": "graphs",
+ "description": "Compute the maximum weight path from node 0 using at most 4 edges (DP over edge count); print the weight or 'none'.",
+ "input_format": "edges_dw"
+}

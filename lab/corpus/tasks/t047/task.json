@@ -1,0 +1,6 @@
+{
+ "id": "t047",
+ "category": "numbers",
+ "description": "Print the Collatz sequence length (steps to reach 1) for each starting number 1..n, then the starting number with the longest sequence.",
+ "input_format": "small_int"
+}

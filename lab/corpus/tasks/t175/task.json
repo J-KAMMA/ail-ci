@@ -1,0 +1,6 @@
+{
+ "id": "t175",
+ "category": "parsing",
+ "description": "Parse amounts with float and then print the sum using round(x, 2) and using Decimal; print whether they match.",
+ "input_format": "money_lines"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t001",
+ "category": "numbers",
+ "description": "Print the second largest distinct value, or 'none' if there is no such value.",
+ "input_format": "nums"
+}

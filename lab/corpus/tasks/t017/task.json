@@ -1,0 +1,6 @@
+{
+ "id": "t017",
+ "category": "numbers",
+ "description": "Print the sum of the k largest values for k=1..min(5,n), one per line.",
+ "input_format": "nums"
+}

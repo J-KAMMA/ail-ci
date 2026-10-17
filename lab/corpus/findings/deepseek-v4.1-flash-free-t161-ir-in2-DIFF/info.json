@@ -1,0 +1,11 @@
+{
+ "model": "deepseek-v4.1-flash-free",
+ "task": "t161",
+ "mode": "ir",
+ "cpython_failed_all": false,
+ "input": 2,
+ "cls": "DIFF",
+ "reason": "line 1: cpython=\"Row(a=2, b=1, word='apple')\" ail='<Row object>'",
+ "cpython_rc": 0,
+ "ail_rc": 0
+}

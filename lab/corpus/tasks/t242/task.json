@@ -1,0 +1,6 @@
+{
+ "id": "t242",
+ "category": "grids",
+ "description": "For each cell determine whether it is a local maximum (strictly greater than all 4-neighbours); print the coordinates (row col) in row-major order and the count.",
+ "input_format": "grid_digits"
+}

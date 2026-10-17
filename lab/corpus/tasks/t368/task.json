@@ -1,0 +1,6 @@
+{
+ "id": "t368",
+ "category": "sorting",
+ "description": "Compute the z-score (population std, 3 decimals) of each student's score and print students with |z| > 1 sorted by name.",
+ "input_format": "student_records"
+}

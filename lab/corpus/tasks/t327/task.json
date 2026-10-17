@@ -1,0 +1,6 @@
+{
+ "id": "t327",
+ "category": "dp",
+ "description": "Answer each query with a prefix sum array and a sparse table for range minimum; print 'sum min' pairs.",
+ "input_format": "ints_and_queries"
+}

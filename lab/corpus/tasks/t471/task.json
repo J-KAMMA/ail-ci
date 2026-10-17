@@ -1,0 +1,6 @@
+{
+ "id": "t471",
+ "category": "errors_classes",
+ "description": "Use integer/float conversions: print int(x) truncation, round half-to-even results for x.5 cases, and the repr of 0.1+0.2 and the sum of 0.1 ten times; plus the input numbers divided by 3 using repr.",
+ "input_format": "nums"
+}

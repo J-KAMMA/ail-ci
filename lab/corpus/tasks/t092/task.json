@@ -1,0 +1,6 @@
+{
+ "id": "t092",
+ "category": "strings",
+ "description": "Print each word with its vowels replaced by '*' and the number of replaced characters.",
+ "input_format": "strings_n"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t049",
+ "category": "numbers",
+ "description": "Print the multiplication table of size n x n with columns right-aligned to width 4.",
+ "input_format": "small_int"
+}

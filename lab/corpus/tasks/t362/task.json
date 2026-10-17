@@ -1,0 +1,6 @@
+{
+ "id": "t362",
+ "category": "sorting",
+ "description": "Sort students by grade ascending, then score descending, then name; print 'name grade age score'.",
+ "input_format": "student_records"
+}

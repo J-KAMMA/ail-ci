@@ -1,0 +1,20 @@
+19
+mallory 87.13
+niaj 22.62
+heidi 83.10
+alice 18.36
+judy 21.74
+mallory 51.54
+heidi 78.96
+judy 50.44
+frank 9.74
+bob 30.34
+bob 53.64
+frank 64.82
+alice 36.54
+niaj 75.42
+heidi 5.45
+frank 27.69
+bob 12.10
+heidi 71.22
+carol 72.96

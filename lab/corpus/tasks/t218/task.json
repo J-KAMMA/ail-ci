@@ -1,0 +1,6 @@
+{
+ "id": "t218",
+ "category": "parsing",
+ "description": "Run the robot commands and print every distinct visited cell count, the farthest Euclidean distance reached with 3 decimals, and the final position.",
+ "input_format": "robot"
+}
