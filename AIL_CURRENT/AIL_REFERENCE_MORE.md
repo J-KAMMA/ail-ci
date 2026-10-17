@@ -443,6 +443,122 @@ be 2
 3 not 0 4
 ```
 
+## Tuples, lambdas (Python syntax)
+
+Tuples and lambdas are lowered before the rest runs (tuplib.py): a tuple type is a class `_AilT_<types>` with
+fields f0, f1, ..., a tuple expression its constructor, `t[k]` a field read, a dict or set that mentions a
+tuple a generated insertion-ordered hash table. Tuples are immutable, so sharing is CPython's behaviour. A
+program whose tuple uses the compiler already builds (literal swaps, sort-key tuples, `%` operands, lists of
+number tuples) is returned as written. Element types: int, float, bool, str, tuples, lists of those.
+
+- Functions: `return a, b`, `-> tuple[int, str]` (or `Tuple`), `q, r = f(x)`, nested `(a, b), c = ...`,
+  `divmod(a, b)`, `k, sep, v = s.partition(":")`, tuple parameters, class fields, `Optional[tuple[...]]`.
+- `t[k]` with a constant k (negative too), `len(t)`, `== != < <= > >=` (lexicographic, CPython's rules;
+  a nan field raises), `print(t)` / `str(t)` / f-strings give CPython's repr: `(1, 'a')`, `(1,)`, quotes and
+  escapes. `print(xs)` of a list is its repr too.
+- Loops: `for a, b in pairs`, `for i, (a, b) in enumerate(pairs)`, `for x, y in zip(xs, ys)`,
+  `for (r, c), v in d.items()`, comprehensions over or producing tuples (built as statements).
+- `list[tuple[...]]`: `append`, `sort()` (lexicographic), `sort(key=...)`, `sorted`, `min`, `max`, `in`,
+  `index`, `count`, `pop`, `insert`, slices, `reverse`. Sorting tuples of more than 4 scalar fields is done
+  by successive stable sorts in `list.sort()`.
+- `heapq`: `heappush(h, (d, v))`, `heappop`, `heapify`, `heappushpop`, `heapreplace` on lists of tuples.
+- `dict[tuple, V]`, `dict[str, tuple]`, `set[tuple]`, V int, float, str, bool, a tuple, or a list (a row is
+  read in place, `d[k].append(x)` changes it; `d[k] = xs` stores a copy): `d[k]`, `d[k] = v`, `d[k] += v`,
+  `get`, `setdefault`, `pop`, `del`, `in`, `len`, `update`, `copy`, `keys / values / items`, `popitem`;
+  sets `add discard remove pop clear update`, `| & - ^`, `<= < >= >`, `==`. Iteration is in insertion order
+  (a set too, unlike CPython: sort before printing). A float is not a key. A loop may not change the
+  dict or set it walks.
+- A module-level list of number tuples (`DIRS = [(0, 1), (1, 0)]`) is kept as columns; `for dr, dc in DIRS`
+  allocates nothing.
+- Lambdas: `f = lambda x: x * k` and then `f(3)`, `apply(f, xs)`; a lambda passed to a parameter typed
+  `Callable[[int], int]` (lifted to a top-level function; with captured locals the callee is cloned and
+  gets the captures as leading parameters); `map / filter` with a lambda (fused into loops and
+  comprehensions); `functools.reduce` with a lambda. A captured name must not be assigned after the lambda
+  is made (CPython reads it when the lambda is called); a lambda that is returned or stored in a list,
+  dict or field is refused by name.
+- Refused by name: tuple concatenation / repetition / slices, a variable index, `tuple(x)`, `tuple[int, ...]`,
+  iterating a tuple, float keys, `defaultdict` / `Counter` / `deque` of tuples, dict values that are sets or
+  dicts, `max(xs, key=...)` over tuples.
+
+```python
+import heapq
+
+
+def main() -> int:
+    q, r = divmod(17, 5)
+    pq = [(3, "c"), (1, "a")]
+    heapq.heapify(pq)
+    heapq.heappush(pq, (2, "b"))
+    seen = {(0, 0)}
+    seen.add((0, 1))
+    k = 10
+    scale = lambda x: x * k
+    print(q, r, heapq.heappop(pq), (1, "a") < (1, "b"), len(seen), scale(4))
+    return 0
+
+
+main()
+```
+
+```text
+3 2 (1, 'a') True 2 40
+```
+
+## Libraries
+
+`import random`, `import itertools`, `import functools`, `import json` (or `from m import name`). Each use is
+lowered before the rest of the compiler runs (stdlib3.py, itlib.py, funclib.py, jsonlib.py), so a program that
+imports none of them is unchanged. A use that is not built is refused by name (`module.name ...`), never
+passed on to the generic import refusal. Positions: a call that needs statements (sample, reduce, a
+comprehension over itertools, list(chain(...))) is built where it is the first thing a statement evaluates
+(`x = ...`, `return ...`, `print(...)` past names and constants, an `if` test, a `for` iterable); bind it to a
+variable first when it sits behind another call.
+
+- `random`: CPython 3.12's MT19937, bit for bit after `random.seed(<int>)`: `random()`, `randint`,
+  `randrange(stop | start, stop[, step])`, `uniform`, `gauss(mu, sigma)`, `choice(list)`, `shuffle(list)`,
+  `sample(list, k)` (same draws, same ValueError / IndexError). The state is one generator per program. A
+  program without `random.seed(<int>)` is refused (an unseeded run is not reproducible, like `time.time()`);
+  a seed that is a str / float / None, `random.Random(...)`, `choices`, `triangular`, `getrandbits`... are refused by
+  name. Ranges wider than 64 bits are a RuntimeError. Only the module-level functions share state, as in CPython.
+- `itertools`: `count`, `repeat` (a number or str), `chain`, `chain.from_iterable` (list of lists), `islice`
+  (None, 1 to 3 integers, CPython's ValueErrors), `accumulate` (default `+`, `func=` a two-parameter lambda,
+  a function name, `max`, `min`, `operator.mul`..., `initial=`), `pairwise`, `zip_longest(..., fillvalue=)`,
+  `groupby(list[, key])` (a pure key: lambda over len / abs / str / int / indexing or a name), `product`
+  (`repeat=` a literal), `permutations`, `combinations`, `combinations_with_replacement`. They are loops, so they appear in
+  `for` statements, comprehensions / generator expressions, and as the argument of `list`, `sum`, `min`, `max`,
+  `sorted`, `set`, `any`, `all`, `"".join` (`any` / `all` stop early). The items come out in CPython's order. Arguments are
+  lists / strs held in a variable the compiler knows to be one, slices, literals, comprehensions or `range(...)`
+  (anything else: `list(...)` it first). Lists are walked live (a list the body grows is walked on); the
+  pools of `product` / `permutations` / `combinations` are snapshots, as CPython's are. Tuples are not a
+  type: a tuple item is unpacked (`for a, b in product(x, y)`; `permutations(xs)` with a variable r needs the
+  item bound to one name), or bound to one name that is only indexed, iterated, summed or measured (it is a
+  list; `print(p)`, `p == q`, `d[p]` are refused). `zip(count(1), xs)` works too. Not built: `cycle`, `tee`,
+  `takewhile`, `dropwhile`, `filterfalse`, `starmap`, `compress`, `batched`, iterators held in variables, a
+  loop's `else:`, rebinding the walked list inside the loop.
+- `functools.reduce(f, iterable[, initial])` with a two-parameter lambda, a function name, `max` / `min`,
+  `operator.add` / `mul`..., `math.gcd` (these now also work as values: `key=operator.neg`). An empty iterable without
+  an initial value raises RuntimeError with CPython's text (there is no TypeError here).
+  `@lru_cache` / `@lru_cache(maxsize=N)` / `@cache` on a top-level pure function (int / str / bool parameters,
+  int / float / str / bool result; no print, input, files, sys, random, time, global): one memo dict per function,
+  shared by every call of the program (the dict travels as an extra parameter of the functions that can reach
+  it; `main` creates it). The size bound is ignored (the result of a pure function does not depend on eviction).
+  `cache_info()` / `cache_clear()` and passing the function as a value are refused.
+  `sorted(xs, key=cmp_to_key(f), reverse=)` and `xs.sort(key=cmp_to_key(f))` with a pure `f(a, b) -> int`: a
+  stable merge sort calling `f(a, b) < 0`, the same order as CPython for every consistent comparator.
+- `json.loads(s)` needs the type it produces, written down: `data: dict[str, int] = json.loads(s)`, a
+  function's return annotation, an annotated variable, or an annotated parameter of the function it is passed to.
+  Types: `int`, `float`, `str`, `bool`, `list[T]`, `list[list[T]]` (T int / float / str), `dict[str, T]` (T int / float /
+  str); `list[dict[...]]`, `dict[str, list[...]]`, `dict[str, bool]` are not types the compiler holds, so they are
+  refused. `json.load(sys.stdin)` is `json.loads(sys.stdin.read())`. The text is checked by a scanner with CPython's
+  messages, so every malformed document raises the same ValueError (`json.JSONDecodeError` in an `except` is
+  ValueError) with the same `line L column C (char P)`. A valid document that does not fit the declared type
+  (1 where float is declared, 1.5 for int, null, another container, an int beyond 64 bits, a lone surrogate)
+  is a RuntimeError naming what was found: CPython would hand back another type and a silent conversion would print
+  differently. `json.dumps(x, indent=, sort_keys=, separators=, ensure_ascii=, allow_nan=)` (literal options)
+  prints CPython's bytes for dict / list / str / int / float / bool / None literals (nested, mixed) and for variables of
+  the types above, whose type comes from an annotation or the first assignment; `json.dump(x, sys.stdout)` works.
+  `default=`, `cls=`, `skipkeys=` and a value of unknown type are refused by name.
+
 ## Heaps: heapq, bisect
 
 No import, on a list of int, float, str or structs: `heappush(h, x)`, `heappop(h)` (`IndexError`
@@ -482,8 +598,8 @@ needs a final `return`. Handler names: Local names.
 
 | Python | AIL |
 |---|---|
-| tuples, returning several values, `zip` | a struct; index loops (`a, b = b, a` works) |
-| `lambda`/closure as a value, nested `def` | a top-level `fn` passed as `Callable[[A], R]` |
+| tuples beyond the Tuples section, `zip` over non-lists | a struct; index loops |
+| a lambda that escapes, nested `def` | a top-level `fn` passed as `Callable[[A], R]` |
 | global variables | a struct holding the state, passed to each function |
 | `dict[str, Struct]`, `dict[str, list[T]]` | a `dict[str, int]` index into a `list[Struct]` (or a `list[list[T]]`) |
 | `None` for int, str, list | a sentinel (-1, ""), or raise. A struct may be `Node \| None` |

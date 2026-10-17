@@ -38,7 +38,7 @@ fn main() {
   function, also across blocks: give another type a new name. Loop variables are per loop; name
   `except` bindings freshly (`as err`). Annotate parameters and results (`-> void`).
 - `int` is 64-bit (overflow raises `OverflowError`). `bool` prints `True`/`False`, adds as 1/0; a
-  bool slot takes only bools (`n != 0`). No tuples: return a struct (`a, b = b, a` works). `None`
+  bool slot takes only bools (`n != 0`). `None`
   only for structs typed `Node | None`.
 - `list[T]`, `dict[int|str, T]`, `set[int|str]`, T int, float, str, bytes; lists also bool,
   structs, rows (`[[0] * w for _ in range(h)]`). Structs and rows are shared references; `let ys =
@@ -50,7 +50,7 @@ fn main() {
   Bytes for binary, non-UTF-8 (str input exits 1) or one huge line: `read_stdin_bytes(1 << 40)`;
   `data[i]` is an int (`ord("a")`, not 97); `data[a:b]` an O(1) view, `int(data[a:b])`; to str
   only by `.decode()`; `write_stdout_bytes(bytearray)`. To print nothing on error, collect output.
-- No big ints: `x ** 0.5`, loops. Python syntax: `re`, `collections` (Counter, defaultdict,
-  deque, OrderedDict): see MORE. Built in: `heappush`, `heappop(h)` (`key=`), `bisect_left`, `insort`.
+- No big ints: `x ** 0.5`, loops. Libs: `re`, `collections`, `random`,
+  `itertools`, `functools`, `json`; tuples/lambda: MORE. Built in: `heappush`, `heappop(h)` (`key=`), `bisect_left`, `insort`.
 
-MORE (`sed -n A,Bp AIL_REFERENCE_MORE.md`): Commands 7-19, Text I/O 21-55, Bytes 57-89, Syntax 91-102, Local names 104-129, Numbers 131-145, Structs 147-180, Trees 182-224, Lists 226-238, Sort keys 240-247, Nested lists 249-266, Dicts 268-277, Sets 279-285, Strings 287-312, Regular expressions 314-370, Collections 372-444, Heaps 446-461, Loops 463-470, Exceptions 472-479, Refused 481-522, Word count 524-556, Dijkstra 558-600, BFS 602-646, Modules 648-676, Speed 678-697, Parallel 699-734.
+MORE (`sed -n A,Bp AIL_REFERENCE_MORE.md`): Commands 7-19, Text I/O 21-55, Bytes 57-89, Syntax 91-102, Local names 104-129, Numbers 131-145, Structs 147-180, Trees 182-224, Lists 226-238, Sort keys 240-247, Nested lists 249-266, Dicts 268-277, Sets 279-285, Strings 287-312, Regular expressions 314-370, Collections 372-444, Tuples, lambdas (Python syntax) 446-505, Libraries 507-560, Heaps 562-577, Loops 579-586, Exceptions 588-595, Refused 597-638, Word count 640-672, Dijkstra 674-716, BFS 718-762, Modules 764-792, Speed 794-813, Parallel 815-850.

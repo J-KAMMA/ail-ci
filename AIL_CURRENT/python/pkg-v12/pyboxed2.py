@@ -5627,7 +5627,9 @@ class Compiler:
         t = node.target
         if isinstance(t, (ast.Name, ast.Attribute)):
             # a list's += and a set's |= change the object itself, which a second name sees
-            fn = {'ail_op_add': 'ail_op_iadd', 'ail_set_union': 'ail_set_ior'}.get(fn, fn)
+            fn = {'ail_op_add': 'ail_op_iadd', 'ail_set_union': 'ail_set_ior', 'ail_op_mul': 'ail_op_imul',
+                  'ail_meth_set_difference': 'ail_set_isub', 'ail_set_intersection': 'ail_set_iand',
+                  'ail_meth_set_symmetric_difference': 'ail_set_ixor'}.get(fn, fn)
         if isinstance(t, ast.Name):
             cur = ctx.tmp()
             if self._is_global_name(t.id, ctx):

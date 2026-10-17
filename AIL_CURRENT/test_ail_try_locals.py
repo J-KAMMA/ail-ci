@@ -226,7 +226,16 @@ class TryLocalsTests(unittest.TestCase):
                                  (expected[0], expected[1], b''))
 
     def main_declarations(self, source, name):
-        self.build(name, source, debug=True)
+        # (the declarations the legacy emitter writes are inspected here, whatever AIL_IR says)
+        saved = os.environ.get('AIL_IR')
+        os.environ['AIL_IR'] = '0'
+        try:
+            self.build(name, source, debug=True)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_IR', None)
+            else:
+                os.environ['AIL_IR'] = saved
         text = (self.root / (name + '-debug') / 'program.c').read_text(encoding='utf8')
         start = text.index('int64_t py_main(void) {')
         return text[start:text.index('\n}\n', start)]

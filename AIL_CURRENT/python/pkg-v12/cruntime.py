@@ -17052,6 +17052,42 @@ static inline ail_st ail_set_ior(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b
     }
     return ail_set_union(cx, out, a, b);
 }
+/* `xs *= n` repeats the list in place; `s -= t`, `s &= t`, `s ^= t` update the set itself, so a
+   second name for the same object sees them. Any other operand falls back to the plain operator. */
+static inline ail_st ail_op_imul(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    if (a.tag == AIL_T_LIST && ail__is_intlike(b.tag)) {
+        ail_vecobj *v = (ail_vecobj *)a.o; int64_t k = b.i, n = v->n;
+        if (k <= 0) { v->n = 0; }
+        else if (k > 1) {
+            if (n > 0 && k > (INT64_MAX / 16) / n) return ail_hit_limit(cx, "int_overflow", "list repeat too large");
+            ail_vec_reserve(cx, v, n * k);
+            for (int64_t r = 1; r < k; r++) for (int64_t j = 0; j < n; j++) v->p[v->n++] = v->p[j];
+        }
+        *out = a; return AIL_OK;
+    }
+    return ail_op_mul(cx, out, a, b);
+}
+static inline ail_st ail_set_isub(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    if (a.tag == AIL_T_SET && b.tag == AIL_T_SET) {
+        ail_st st = ail_set_difference_update(cx, a, b); if (st != AIL_OK) return st;
+        *out = a; return AIL_OK;
+    }
+    return ail_meth_set_difference(cx, out, a, b);
+}
+static inline ail_st ail_set_iand(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    if (a.tag == AIL_T_SET && b.tag == AIL_T_SET) {
+        ail_st st = ail_set_intersection_update(cx, a, b); if (st != AIL_OK) return st;
+        *out = a; return AIL_OK;
+    }
+    return ail_set_intersection(cx, out, a, b);
+}
+static inline ail_st ail_set_ixor(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    if (a.tag == AIL_T_SET && b.tag == AIL_T_SET) {
+        ail_st st = ail_set_symmetric_difference_update(cx, a, b); if (st != AIL_OK) return st;
+        *out = a; return AIL_OK;
+    }
+    return ail_meth_set_symmetric_difference(cx, out, a, b);
+}
 /* Operators |, &, -, ^ -- same functions, listed again under their operator spelling in
    NAMES_methods.json for discoverability by the emitter. */
 #define ail_meth_set_or(cx, out, a, b)  ail_set_union(cx, out, a, b)
@@ -24333,13 +24369,186 @@ REQUIRES['SYSINFO'] = ['MONOTONICHEAD', 'DIE', 'TYPES']
 ORDER.insert(ORDER.index('DIE') + 1, 'SYSINFO')
 
 
+RANDOM = r'''
+#include <math.h>
+/* random (module-level functions): CPython 3.12's MT19937 with its seeding (init_by_array of the
+   absolute value of the int seed, 32-bit words, least significant first), random() (53 bits from two
+   words), getrandbits, _randbelow by rejection, randrange / randint, uniform and gauss. The same
+   words come out as from CPython after random.seed(<int>), bit for bit. State lives in static
+   storage: one generator per program, as the module-level functions share one in CPython. */
+AIL_LINK_STATE(uint32_t, ail_rand_mt[624], );
+AIL_LINK_STATE(int, ail_rand_mti, = 625);
+AIL_LINK_STATE(int, ail_rand_seeded, = 0);
+AIL_LINK_STATE(int, ail_rand_have_gauss, = 0);
+AIL_LINK_STATE(double, ail_rand_gauss_next, = 0.0);
+static void ail_rand_fail(int code, const char *text) {
+    ail_raise_value_adopt(ail_exception_new(code, (const uint8_t *)text, (int64_t)strlen(text), 1));
+}
+static void ail_rand_init_genrand(uint32_t s) {
+    ail_rand_mt[0] = s;
+    for (int i = 1; i < 624; i++)
+        ail_rand_mt[i] = 1812433253U * (ail_rand_mt[i - 1] ^ (ail_rand_mt[i - 1] >> 30)) + (uint32_t)i;
+    ail_rand_mti = 624;
+}
+static void ail_rand_init_by_array(const uint32_t *key, int len) {
+    ail_rand_init_genrand(19650218U);
+    int i = 1, j = 0, k = 624 > len ? 624 : len;
+    for (; k; k--) {
+        ail_rand_mt[i] = (ail_rand_mt[i] ^ ((ail_rand_mt[i - 1] ^ (ail_rand_mt[i - 1] >> 30)) * 1664525U)) + key[j] + (uint32_t)j;
+        i++; j++;
+        if (i >= 624) { ail_rand_mt[0] = ail_rand_mt[623]; i = 1; }
+        if (j >= len) j = 0;
+    }
+    for (k = 623; k; k--) {
+        ail_rand_mt[i] = (ail_rand_mt[i] ^ ((ail_rand_mt[i - 1] ^ (ail_rand_mt[i - 1] >> 30)) * 1566083941U)) - (uint32_t)i;
+        i++;
+        if (i >= 624) { ail_rand_mt[0] = ail_rand_mt[623]; i = 1; }
+    }
+    ail_rand_mt[0] = 0x80000000U;
+}
+/* random.seed(a) for an int a: the key is |a| as 32-bit words, least significant first (one zero word
+   for 0); returns 0 so the front end can bind the call to a throwaway name. */
+static int64_t ail_rand_seed(int64_t a) {
+    uint64_t n = a < 0 ? (uint64_t)0 - (uint64_t)a : (uint64_t)a;
+    uint32_t key[2];
+    key[0] = (uint32_t)(n & 0xffffffffU); key[1] = (uint32_t)(n >> 32);
+    ail_rand_init_by_array(key, key[1] ? 2 : 1);
+    ail_rand_seeded = 1; ail_rand_have_gauss = 0;
+    return 0;
+}
+static uint32_t ail_rand_u32(void) {
+    static const uint32_t mag01[2] = {0x0U, 0x9908b0dfU};
+    uint32_t y;
+    if (ail_rand_mti >= 624) {
+        int kk;
+        if (!ail_rand_seeded)
+            ail_rand_fail(AIL_EXC_RUNTIME, "random used before random.seed(<int>) ran: an unseeded generator is not reproducible and is not built");
+        for (kk = 0; kk < 624 - 397; kk++) {
+            y = (ail_rand_mt[kk] & 0x80000000U) | (ail_rand_mt[kk + 1] & 0x7fffffffU);
+            ail_rand_mt[kk] = ail_rand_mt[kk + 397] ^ (y >> 1) ^ mag01[y & 1U];
+        }
+        for (; kk < 623; kk++) {
+            y = (ail_rand_mt[kk] & 0x80000000U) | (ail_rand_mt[kk + 1] & 0x7fffffffU);
+            ail_rand_mt[kk] = ail_rand_mt[kk + (397 - 624)] ^ (y >> 1) ^ mag01[y & 1U];
+        }
+        y = (ail_rand_mt[623] & 0x80000000U) | (ail_rand_mt[0] & 0x7fffffffU);
+        ail_rand_mt[623] = ail_rand_mt[396] ^ (y >> 1) ^ mag01[y & 1U];
+        ail_rand_mti = 0;
+    }
+    y = ail_rand_mt[ail_rand_mti++];
+    y ^= (y >> 11);
+    y ^= (y << 7) & 0x9d2c5680U;
+    y ^= (y << 15) & 0xefc60000U;
+    y ^= (y >> 18);
+    return y;
+}
+/* random.random(): [0, 1) with 53 random bits. */
+static double ail_rand_random(void) {
+    uint32_t a = ail_rand_u32() >> 5, b = ail_rand_u32() >> 6;
+    return (a * 67108864.0 + b) * (1.0 / 9007199254740992.0);
+}
+/* getrandbits(k), 1 <= k <= 64: the first word is the low 32 bits. */
+static uint64_t ail_rand_bits(int k) {
+    if (k <= 32) return (uint64_t)(ail_rand_u32() >> (32 - k));
+    uint64_t low = ail_rand_u32();
+    uint64_t high = ail_rand_u32() >> (64 - k);
+    return low | (high << 32);
+}
+/* _randbelow(n) for n > 0: getrandbits(n.bit_length()) until the draw is < n. */
+static uint64_t ail_rand_below(uint64_t n) {
+    int k = 64 - __builtin_clzll(n);
+    uint64_t r = ail_rand_bits(k);
+    while (r >= n) r = ail_rand_bits(k);
+    return r;
+}
+/* _randbelow(n) for the callers that pass an int64 (choice, shuffle, sample); n > 0. */
+static int64_t ail_rand_below_i(int64_t n) { return (int64_t)ail_rand_below((uint64_t)n); }
+/* random.choice(seq): the index, IndexError on an empty sequence (before anything is drawn). */
+static int64_t ail_rand_choice_index(int64_t n) {
+    if (n <= 0) ail_rand_fail(AIL_EXC_INDEX, "Cannot choose from an empty sequence");
+    return (int64_t)ail_rand_below((uint64_t)n);
+}
+static __int128 ail_rand_floordiv(__int128 a, __int128 b) {
+    __int128 q = a / b;
+    if ((a % b != 0) && ((a < 0) != (b < 0))) q -= 1;
+    return q;
+}
+/* random.randrange(...) / randint with the arguments filled in; `mode` 1: randrange(start) [only start is
+   read], 2: randrange(start, stop), 3: randrange(start, stop, step), 4: randint(start, stop). */
+static int64_t ail_rand_randrange(int64_t start, int64_t stop, int64_t step, int64_t mode) {
+    typedef __int128 i128;
+    char text[160];
+    if (mode == 1) {
+        if (start > 0) return (int64_t)ail_rand_below((uint64_t)start);
+        ail_rand_fail(AIL_EXC_VALUE, "empty range for randrange()");
+    }
+    i128 istart = start, istop = mode == 4 ? (i128)stop + 1 : (i128)stop;
+    i128 width = istop - istart, n;
+    if (mode != 3 || step == 1) {
+        if (width > 0) {
+            if (width > (i128)0xffffffffffffffffULL)
+                ail_rand_fail(AIL_EXC_RUNTIME, "a randrange wider than 64 bits is not built");
+            return (int64_t)((uint64_t)start + ail_rand_below((uint64_t)width));
+        }
+        snprintf(text, sizeof text, "empty range in randrange(%lld, %lld)", (long long)start, (long long)istop);
+        ail_rand_fail(AIL_EXC_VALUE, text);
+    }
+    if (step > 0) n = ail_rand_floordiv(width + step - 1, step);
+    else if (step < 0) n = ail_rand_floordiv(width + step + 1, step);
+    else { ail_rand_fail(AIL_EXC_VALUE, "zero step for randrange()"); n = 0; }
+    if (n <= 0) {
+        snprintf(text, sizeof text, "empty range in randrange(%lld, %lld, %lld)", (long long)start, (long long)stop, (long long)step);
+        ail_rand_fail(AIL_EXC_VALUE, text);
+    }
+    if (n > (i128)0xffffffffffffffffULL) ail_rand_fail(AIL_EXC_RUNTIME, "a randrange wider than 64 bits is not built");
+    i128 pick = (i128)ail_rand_below((uint64_t)n);
+    return (int64_t)(istart + (i128)step * pick);
+}
+/* random.uniform(a, b): a + (b - a) * random(); the product is rounded before the sum is. */
+static double ail_rand_uniform(double a, double b) {
+    volatile double scaled = (b - a) * ail_rand_random();
+    return a + scaled;
+}
+/* random.gauss(mu, sigma): CPython 3.12's pair method with the cached second value. */
+static double ail_rand_gauss(double mu, double sigma) {
+    double z;
+    if (ail_rand_have_gauss) {
+        z = ail_rand_gauss_next;
+        ail_rand_have_gauss = 0;
+    } else {
+        double x2pi = ail_rand_random() * (2.0 * 3.141592653589793);
+        double g2rad = sqrt(-2.0 * log(1.0 - ail_rand_random()));
+        z = cos(x2pi) * g2rad;
+        ail_rand_gauss_next = sin(x2pi) * g2rad;
+        ail_rand_have_gauss = 1;
+    }
+    volatile double scaled = z * sigma;
+    return mu + scaled;
+}
+/* sample()'s switch between the pool list and the selected set: 21 + 4 ** ceil(log(3k) / log(4)) for k > 5. */
+static int64_t ail_rand_setsize(int64_t k) {
+    int64_t size = 21;
+    if (k > 5) {
+        volatile double four = 4.0;
+        double v = ceil(log((double)k * 3.0) / log(four));
+        if (v > 31.0) return 0x7fffffffffffffffLL;
+        size += (int64_t)1 << (2 * (int)v);
+    }
+    return size;
+}
+'''
+SOURCE['RANDOM'] = RANDOM
+REQUIRES['RANDOM'] = ['DIE', 'TYPES']
+ORDER.insert(ORDER.index('DIE') + 1, 'RANDOM')
+
+
 def needs_libm(parts):
     """`pow` is in libm on Linux, so the link line depends on what the program reached. `round()`
     (AIL_TASK_p3idioms_20260916.md idiom 9, cruntime.py's ROUND block) needs it too: `nearbyint`/
     `fegetround`/`fesetround` are declared in libc's headers but DEFINED in libm, and a static
     link fails with 'undefined reference' for all three without `-lm` -- found building the first
     `round()` program, not guessed in advance."""
-    return any(part in parts for part in ("FPOW", "ROUND", "FFLOORMOD")) or any(str(part).startswith("LIBM") for part in parts)
+    return any(part in parts for part in ("FPOW", "ROUND", "FFLOORMOD", "RANDOM")) or any(str(part).startswith("LIBM") for part in parts)
 
 
 # IR exceptions (stage S2, docs/design/IR_OWNERSHIP_DESIGN_v2.md section 11). Selected only by IR
@@ -24489,6 +24698,19 @@ REQUIRES['IRLIST'] = ['LIST', 'DIE']
 ORDER.insert(ORDER.index('FLIST') + 1, 'IRFLIST')
 SOURCE['IRFLIST'] = IRFLIST
 REQUIRES['IRFLIST'] = ['FLIST', 'DIE']
+
+# IR text (stage S4a). Selected only by IR functions that walk a str by character: the character at a
+# known byte offset as a view (the legacy `for c in s` loop's own step, in one always-inlined helper).
+IRSTR = r'''
+static inline __attribute__((always_inline)) ail_str ail_ir_char_at(ail_str s, int64_t k) {
+    uint8_t b0 = s.p[k];
+    int64_t w = b0 < 0x80 ? 1 : ail__utf8_w(b0, s.n - k);
+    return (ail_str){s.p + k, w, b0 < 0x80};
+}
+'''
+ORDER.insert(ORDER.index('STR') + 1, 'IRSTR')
+SOURCE['IRSTR'] = IRSTR
+REQUIRES['IRSTR'] = ['STR']
 
 
 def emit(parts):

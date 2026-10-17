@@ -577,8 +577,9 @@ class GeneratedProgramTests(unittest.TestCase):
 
 
 class SwitchTests(unittest.TestCase):
+    # (`total` accumulates into a str local: a builder local, which the IR does not take before stage S4c)
     SOURCE = ('fn sq(x: int) -> int { return x * x + 1; }\n'
-              'fn total(s: str) -> int { return len(s); }\n'
+              'fn total(s: str) -> int { let t = ""; let i = 0; while i < 3 { t += s; i += 1; } return len(t); }\n'
               'fn main() -> int { print(sq(4)); print(total("abc")); return 0; }\n')
 
     def to_c(self, mode, **extra):

@@ -29,6 +29,9 @@ import os
 from . import ir as I
 from . import effects as E
 from . import ownership
+from . import flowtypes
+from .lower_text import TextLowering, NotS0
+from .emit_text import allocates_bytes
 
 BYTES = I.T('bytes')
 BYTEARRAY = I.T('obj', I.T('bytearray'))
@@ -41,10 +44,6 @@ _LIST_MUTATORS = ('append', 'pop', 'clear', 'extend', 'insert', 'remove', 'sort'
 def is_list(t):
     """An owned-list type: obj<list<i64>> or obj<list<f64>>."""
     return t in (LIST_I64, LIST_F64)
-
-
-class NotS0(Exception):
-    """The function is outside the S0 subset; the message says why."""
 
 
 class _Builder(object):
@@ -71,7 +70,7 @@ def _linkage(sig):
     return 'extern'
 
 
-class Lowering(object):
+class Lowering(TextLowering):
     def __init__(self, P, fn, ctx, sig, recursive, cname, pending=(), link_units=False, summaries=None):
         """`P` is the legacy compiler module (pyfunc), `ctx` its finished Ctx for this function,
         `sig` the legacy C signature text (linkage and inlining decisions are kept as they are).
@@ -102,6 +101,10 @@ class Lowering(object):
         self.cur_stmt = None
         self.scope_vars = {}          # comprehension variables in scope -> their SSA value
         self.fieldba = set()          # values that are the bytearray a struct field held when read
+        self.onecp = set()            # names that hold exactly one character (a str loop variable)
+        self.kind_places = {}         # tracked name -> {IR type: place} (flowtypes.py)
+        self.tracked = set()
+        self.flow = None
 
     # ------------------------------------------------------------------ kinds and types
     def kind_type(self, kind, what, views=False, owned=False, local=False):
@@ -119,7 +122,9 @@ class Lowering(object):
             return LIST_F64
         if owned and local and kind == 'bytearray':
             return BYTEARRAY
-        if views and kind == P.BYTES:
+        if kind == P.STR:
+            return I.STRV
+        if (views or owned) and kind == P.BYTES:
             return BYTES
         if views and kind == 'bytearray':
             return I.T('obj', I.T('bytearray'))
@@ -127,7 +132,7 @@ class Lowering(object):
             return I.T('span', I.I64)
         if views and kind == P.FLIST:
             return I.T('span', I.F64)
-        if views and isinstance(kind, tuple) and len(kind) == 2 and kind[0] == 'obj' \
+        if (views or (owned and local)) and isinstance(kind, tuple) and len(kind) == 2 and kind[0] == 'obj' \
                 and kind[1] in getattr(self.ctx, 'classes', {}):
             if kind[1] in (getattr(P, '_NULLABLE', None) or ()):
                 raise NotS0('%s may be None (class %s is optional somewhere)' % (what, kind[1]))
@@ -189,9 +194,19 @@ class Lowering(object):
             raise NotS0('parameter shape')
         if getattr(ctx, 'par_regions', None):
             raise NotS0('parallel region')
-        if P._numeric_mixed_bindings(ctx) or getattr(ctx, 'numeric_assignments', None) \
-                or getattr(ctx, 'numeric_tokens', None):
-            raise NotS0('int-or-float bindings')
+        self.tracked = set(P._numeric_mixed_bindings(ctx))
+        self.tracked |= {n for n, _, _ in (getattr(ctx, 'numeric_assignments', None) or {}).values()}
+        self.tracked |= {n for n, _, _ in (getattr(ctx, 'numeric_tokens', None) or {}).values()}
+        self.flow = None
+        self.saved_types = {n: ctx.types.get(n) for n in self.tracked}
+        if self.tracked:
+            # names that hold an int at one point and a float at another: the kind at every statement
+            # (flowtypes.py), one place per (name, kind)
+            try:
+                self.flow = flowtypes.Flow(P, fn, ctx, self.tracked)
+                self.flow_snap = self.flow.run()
+            except flowtypes.Ambiguous as error:
+                raise NotS0('int-or-float bindings: %s' % error)
         if getattr(ctx, 'builders', None):
             raise NotS0('builder locals')
         ret_kind = ctx.ret
@@ -246,9 +261,12 @@ class Lowering(object):
             if name not in assigned:
                 self.params[name] = value
         for name in sorted(assigned, key=lambda n: (n not in param_names, n)):
+            if name in self.tracked:
+                self.make_tracked_places(name, param_names, params)
+                continue
             if name in param_names:
                 t = value_type = params[param_names.index(name)].type
-                if not t.is_scalar:
+                if not t.is_scalar and t not in (I.STRV, BYTES):
                     raise NotS0('parameter %r of type %s is reassigned' % (name, t))
             else:
                 kind = ctx.types.get(name)
@@ -259,7 +277,9 @@ class Lowering(object):
                 raise NotS0('local %r is optional or special' % name)
             self.places[name] = self.b.value('local.alloc', [], I.place(value_type), {'name': name})
         for name, value in zip(param_names, params):
-            if name in self.places:
+            if name in self.kind_places:
+                self.store(name, value)
+            elif name in self.places:
                 self.b.emit('store', [self.places[name], value])
         self.alloc_end = sum(1 for i in f.body.instrs if i.op == 'local.alloc')
         if self.recursive:
@@ -271,6 +291,7 @@ class Lowering(object):
             resolved = ownership.resolve(f, self.program, self.summaries, self.iter_loops)
         except ownership.NeedsBox as box:
             raise NotS0('Rule X (needs a box, stage S3e): %s' % box)
+        self.check_bytes_loops(f.body, False)
         f.sharing = dict(resolved.stats)
         f.walias = list(resolved.walias)
         ops = [i for i in I.walk(f.body)]
@@ -291,6 +312,49 @@ class Lowering(object):
             f.attrs['pending'] = True
         E.summarize_program(self.program)
         return f
+
+    def check_bytes_loops(self, region, in_loop):
+        """A bytes block allocated by an iteration is held until the function returns (the bytes arena has
+        no per-iteration reset in the IR yet; the legacy path resets it only for a few shapes): such a
+        function stays on the legacy emitter (stage S4c: regions)."""
+        for ins in region.instrs:
+            if in_loop and allocates_bytes(ins):
+                raise NotS0('a bytes block allocated inside a loop (stage S4c: regions)')
+            for r in ins.regions:
+                self.check_bytes_loops(r, in_loop or ins.op in I.LOOP_OPS)
+
+    def make_tracked_places(self, name, param_names, params):
+        """Places of a name that holds both kinds: one per kind it ever holds (flowtypes.py)."""
+        P = self.P
+        kinds = self.flow.kinds_ever[name]
+        types = [t for t, k in ((I.I64, P.INT), (I.F64, P.FLT)) if k in kinds]
+        if name in param_names:
+            types = sorted(set(types) | {params[param_names.index(name)].type}, key=lambda t: t != I.I64)
+        if not types or any(t not in (I.I64, I.F64) for t in types):
+            raise NotS0('local %r of kind %r' % (name, kinds))
+        if name in getattr(self.ctx, 'optional', ()) or name in getattr(self.ctx, 'stdin_unbound', ()):
+            raise NotS0('local %r is optional or special' % name)
+        self.kind_places[name] = {}
+        for t in types:
+            pname = name if (t == types[0]) else name + '__f'
+            if pname != name and pname in self.ctx.locals:
+                raise NotS0('name clash with %s' % pname)
+            self.kind_places[name][t] = self.b.value('local.alloc', [], I.place(t), {'name': pname})
+        self.places[name] = self.kind_places[name][types[0]]
+
+    def apply_flow(self, s):
+        """The kinds the tracked names hold at the start of statement `s`."""
+        snap = self.flow_snap.get(id(s)) if self.flow is not None else None
+        if not snap:
+            return
+        P = self.P
+        for n, kinds in snap.items():
+            if len(kinds) == 1 and n in self.kind_places:
+                k = next(iter(kinds))
+                self.ctx.types[n] = k
+                place = self.kind_places[n].get(I.I64 if k == P.INT else I.F64)
+                if place is not None:
+                    self.places[n] = place
 
     def assigned_names(self):
         out = set()
@@ -325,8 +389,8 @@ class Lowering(object):
         self.leave()
         if self.function.results:
             t = self.function.results[0]
-            if is_list(t) or t == BYTEARRAY:
-                raise NotS0('a function returning a container that can fall off its end')
+            if is_list(t) or t == BYTEARRAY or t in (I.STRV, BYTES):
+                raise NotS0('a function returning a container or text that can fall off its end')
             self.b.emit('return', [self.const(t, 0.0 if t == I.F64 else 0)])
         else:
             self.b.emit('return', [])
@@ -538,8 +602,13 @@ class Lowering(object):
                 and not it.keywords and 1 <= len(it.args) <= 3 and self.is_builtin('range')):
             raise NotS0('a comprehension that is not over range()')
         name = g.target.id
-        if name in self.places or name in self.params or name in self.scope_vars \
-                or self.mentions_outside(name, node):
+        # (a comprehension has a scope of its own: an outer variable of the same name is another variable, as in
+        # Python 3 and in the legacy build -- as long as the legacy types agree: an int either way)
+        outer = self.places.get(name)
+        if name in self.params or name in self.scope_vars \
+                or (outer is not None and outer.type.pointee != I.I64) \
+                or (outer is None and self.mentions_outside(name, node)) \
+                or name in self.tracked:
             raise NotS0('a comprehension variable that is also used outside it')
         tmp = self.new_list_place(kind, 'comp')
         self.b.emit('list.reset', [self.list_ref(tmp)])
@@ -652,6 +721,13 @@ class Lowering(object):
             self.b.region = saved
 
     def store(self, name, v):
+        kp = self.kind_places.get(name)
+        if kp is not None:
+            t = I.I64 if v.type in (I.I64, I.I1) else v.type
+            if t not in kp:
+                raise NotS0('no place for %s of kind %s' % (name, t))
+            self.b.emit('store', [kp[t], self.coerce(v, t)])
+            return
         place = self.places.get(name)
         if place is None:
             raise NotS0('store to %r' % name)
@@ -661,6 +737,7 @@ class Lowering(object):
 
     def stmt(self, s):
         self.cur_stmt = s
+        self.apply_flow(s)
         if isinstance(s, ast.Assign):
             if len(s.targets) != 1:
                 raise NotS0('assignment shape')
@@ -673,6 +750,8 @@ class Lowering(object):
                 return self.assign_list_name(target.id, s.value)
             if self.is_ba_name(target.id):
                 return self.assign_ba(target.id, s.value)
+            if self.is_obj_name(target.id):
+                return self.assign_obj(target.id, s.value)
             self.store(target.id, self.expr(s.value))
         elif isinstance(s, ast.AnnAssign):
             if not isinstance(s.target, ast.Name):
@@ -682,6 +761,8 @@ class Lowering(object):
                     return self.assign_list_name(s.target.id, s.value)
                 if self.is_ba_name(s.target.id):
                     return self.assign_ba(s.target.id, s.value)
+                if self.is_obj_name(s.target.id):
+                    return self.assign_obj(s.target.id, s.value)
                 self.store(s.target.id, self.expr(s.value))
         elif isinstance(s, ast.AugAssign):
             if isinstance(s.target, (ast.Attribute, ast.Subscript)):
@@ -858,8 +939,8 @@ class Lowering(object):
         P = self.P
         codes = []
         for h in handlers:
-            if h.name:
-                raise NotS0('a named exception handler')
+            if h.name and any(isinstance(n, ast.Name) and n.id == h.name for st in h.body for n in ast.walk(st)):
+                raise NotS0('a named exception handler that reads the exception (stage S4e)')
             types = h.type.elts if isinstance(h.type, ast.Tuple) else [h.type]
             hc = []
             for t in types:
@@ -928,6 +1009,19 @@ class Lowering(object):
         if isinstance(s.target, ast.Name) and isinstance(it, ast.Name) and it.id in self.params \
                 and self.params[it.id].type == BYTES:
             return self.for_bytes(s, self.params[it.id])
+        if isinstance(s.target, ast.Name) and self.text_kind(it) == 'str':
+            return self.for_str(s)
+        if isinstance(s.target, ast.Name) and isinstance(it, (ast.List, ast.Tuple)) and it.elts \
+                and self.literal_kind(it.elts) is not None:
+            return self.for_literals(s)
+        if isinstance(s.target, ast.Name) and not isinstance(it, ast.Name) and self.text_kind(it) == 'bytes':
+            return self.for_bytes(s, self.bytes_arg(it))
+        if isinstance(s.target, ast.Name) and isinstance(it, (ast.Name, ast.Attribute)) \
+                and self.text_kind(it) is None and self.ba_expr(it):
+            return self.for_bytearray(s, it)
+        if isinstance(s.target, ast.Name) and isinstance(it, ast.Name) and it.id in self.places \
+                and self.places[it.id].type.pointee == BYTES:
+            return self.for_bytes(s, self.b.value('load', [self.places[it.id]], BYTES))
         if isinstance(s.target, ast.Name) and isinstance(it, ast.Name):
             found = self.list_iterable(it, s)
             if found is not None:
@@ -935,7 +1029,7 @@ class Lowering(object):
         if not (isinstance(s.target, ast.Name) and isinstance(it, ast.Call)
                 and isinstance(it.func, ast.Name) and it.func.id == 'range' and not it.keywords
                 and 1 <= len(it.args) <= 3 and self.is_builtin('range')):
-            raise NotS0('for over something other than range()')
+            raise NotS0('for over something other than range(): %s' % self.src(it))
         args = [self.as_int(self.expr(a)) for a in it.args]
         if len(args) == 1:
             lo, hi, step = self.const(I.I64, 0), args[0], self.const(I.I64, 1)
@@ -1001,6 +1095,37 @@ class Lowering(object):
         if how == 'ref':
             self.iter_loops.append((loop, base))
 
+    def ba_expr(self, node):
+        try:
+            return self.P._etype(node, self.ctx) == 'bytearray'
+        except Exception:
+            return False
+
+    def for_bytearray(self, s, it):
+        """`for b in ba`: the legacy loop reads the data pointer and length once, before the first iteration."""
+        if s.target.id in self.params or s.target.id not in self.places:
+            raise NotS0('for target %r' % s.target.id)
+        ba = self.container(it)
+        if ba.type != BYTEARRAY:
+            raise NotS0('for over %s' % ba.type)
+        sp = self.b.value('span.of', [ba], I.T('span', I.T('u8')))
+        n = self.b.value('span.len', [sp], I.I64)
+        lo, step = self.const(I.I64, 0), self.const(I.I64, 1)
+        index = I.Value(I.I64, hint='k')
+        body = I.Region([index])
+
+        def fill():
+            self.store(s.target.id, self.b.value('span.get', [sp, index], I.I64, {'mode': 'nck'}))
+            self.stmts(s.body)
+            if not self.b.terminated():
+                self.b.emit('continue')
+        self.loop_depth += 1
+        try:
+            self.in_region(body, fill=fill)
+        finally:
+            self.loop_depth -= 1
+        self.b.emit('for.range', [lo, n, step], [], {'args': 1}, [body])
+
     def for_bytes(self, s, base):
         """`for c in d` over a bytes parameter (immutable: its length is fixed) is
         `for k in range(len(d)): c = d[k]` with the read proven in range."""
@@ -1045,6 +1170,9 @@ class Lowering(object):
         return v
 
     def _expr(self, node):
+        tk = self.text_kind(node)
+        if tk is not None:
+            return self.text_expr(node, tk)
         if isinstance(node, ast.Constant):
             value = node.value
             if isinstance(value, bool):
@@ -1101,12 +1229,78 @@ class Lowering(object):
 
     # ------------------------------------------------------------------ objects and containers (S1)
     def object_param(self, node):
-        """The IR value of `node` when it names a (non-optional) struct parameter, else None."""
+        """The IR value of `node` when it names a (non-optional) struct parameter or a struct local, else None."""
         if isinstance(node, ast.Name) and node.id in self.params:
             v = self.params[node.id]
             if v.type.head == 'obj' and v.type.args[0].head == 'class':
                 return v
+        if isinstance(node, ast.Name) and self.is_obj_name(node.id):
+            return self.b.value('load', [self.places[node.id]], self.places[node.id].type.pointee)
         return None
+
+    def is_obj_name(self, name):
+        place = self.places.get(name)
+        t = place.type.pointee if place is not None else None
+        return t is not None and t.head == 'obj' and t.args[0].head == 'class'
+
+    def assign_obj(self, name, node):
+        """`p = Cls(args)` or `p = q` for a struct local: the legacy reference counts (a constructor result is
+        adopted, another name is retained)."""
+        place = self.places[name]
+        cls = place.type.pointee.args[0].name
+        if isinstance(node, ast.Name):
+            src = self.object_param(node)
+            if src is None or src.type != place.type.pointee:
+                raise NotS0('a struct assigned from %s' % type(node).__name__)
+            self.b.emit('obj.copyref', [place, src])
+            return
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == cls
+                and self.is_builtin(cls) is False and cls in getattr(self.ctx, 'classes', {})):
+            raise NotS0('a struct built from %s' % type(node).__name__)
+        self.construct(place, cls, node)
+
+    def construct(self, place, cls, node):
+        P, ctx = self.P, self.ctx
+        info = ctx.classes[cls]
+        if node.keywords or len(node.args) != len(info.init_params):
+            raise NotS0('constructor %s() arguments' % cls)
+        adopted = getattr(info, 'adopted_params', {}) or {}
+        numeric = getattr(info, 'numeric_list_params', set()) or set()
+        operands, abi = [], []
+        for arg, (pname, kind) in zip(node.args, info.init_params):
+            if kind in (P.LIST, P.FLIST, 'array') or pname in numeric:
+                lk = adopted.get(pname)
+                if lk not in (P.LIST, P.FLIST):
+                    raise NotS0('constructor %s(%s): a list the constructor copies' % (cls, pname))
+                if isinstance(arg, (ast.Name, ast.Attribute)):
+                    raise NotS0('constructor %s(%s): a named list (stage S3e)' % (cls, pname))
+                tmp = self.new_list_place(lk, 'ctor')
+                self.assign_list(lambda tmp=tmp: self.list_ref(tmp), arg, lk, dst='<ctor>')
+                operands.append(self.list_ref(tmp))
+                abi.append('list')
+            elif kind == P.INT:
+                if P._etype(arg, ctx) != P.INT:
+                    raise NotS0('constructor %s(%s): a float for an int' % (cls, pname))
+                operands.append(self.as_int(self.expr(arg)))
+                abi.append('value')
+            elif kind == P.FLT:
+                if P._etype(arg, ctx) not in (P.INT, P.FLT):
+                    raise NotS0('constructor %s(%s) argument' % (cls, pname))
+                operands.append(self.coerce(self.expr(arg), I.F64))
+                abi.append('value')
+            elif kind == P.BYTES:
+                if self.text_kind(arg) != 'bytes':
+                    raise NotS0('constructor %s(%s) argument' % (cls, pname))
+                operands.append(self.expr(arg))
+                abi.append('value')
+            elif kind == P.STR:
+                if self.text_kind(arg) != 'str':
+                    raise NotS0('constructor %s(%s) argument' % (cls, pname))
+                operands.append(self.expr(arg))
+                abi.append('value')
+            else:
+                raise NotS0('constructor %s(%s): a field of kind %r' % (cls, pname, kind))
+        self.b.emit('obj.init', [place] + operands, [], {'cls': cls, 'abi': abi})
 
     def field_of(self, node):
         """(object value, class name, field kind) of `p.f` for a struct parameter `p`."""
@@ -1127,6 +1321,8 @@ class Lowering(object):
                 return self.list_ref(self.places[node.id])
             if self.is_ba_name(node.id):
                 return self.b.value('load', [self.places[node.id]], BYTEARRAY)
+            if node.id in self.places and self.places[node.id].type.pointee == BYTES:
+                return self.b.value('load', [self.places[node.id]], BYTES)
         if isinstance(node, ast.Name) and node.id in self.params and (
                 self.params[node.id].type in (BYTES, BYTEARRAY) or self.params[node.id].type.head == 'span'):
             return self.params[node.id]
@@ -1140,6 +1336,8 @@ class Lowering(object):
                 v = self.b.value('field.ba', [obj], BYTEARRAY, {'cls': cls, 'name': node.attr})
                 self.fieldba.add(v)
                 return v
+            if kind == self.P.BYTES:
+                return self.b.value('field.get', [obj], BYTES, {'cls': cls, 'name': node.attr})
             raise NotS0('field %s.%s of kind %r as a container' % (cls, node.attr, kind))
         raise NotS0('container operand %s' % (ast.dump(node)[:60],))
 
@@ -1243,6 +1441,8 @@ class Lowering(object):
         raise NotS0('subscript of %s' % base.type)
 
     def length(self, node):
+        if self.text_kind(node) == 'bytes' and not isinstance(node, ast.Name):
+            return self.b.value('bytes.len', [self.expr(node)], I.I64)
         base = self.container(node)
         if base.type == BYTES:
             return self.b.value('bytes.len', [base], I.I64)
@@ -1257,6 +1457,16 @@ class Lowering(object):
     def method_call(self, node, statement):
         """`c.append(v)`, `c.pop()`, `c.clear()` on a numeric list field."""
         func = node.func
+        if self.P._is_sys_exit_call(node) and statement:
+            self.sys_exit_stmt(node)
+            return None
+        if func.attr in ('isdigit', 'isalpha', 'isalnum', 'isspace', 'isupper', 'islower', 'isdecimal',
+                         'isnumeric') and self.text_kind(func.value) == 'str' and not node.args \
+                and not node.keywords:
+            return self.rt('str_' + func.attr, [self.expr(func.value)])
+        if func.attr in ('startswith', 'endswith') and self.text_kind(func.value) == 'str' \
+                and len(node.args) == 1 and not node.keywords and self.text_kind(node.args[0]) == 'str':
+            return self.rt('str_' + func.attr, [self.expr(func.value), self.expr(node.args[0])])
         if node.keywords:
             raise NotS0('keywords to a method')
         if not isinstance(func.value, (ast.Attribute, ast.Name)):
@@ -1267,6 +1477,13 @@ class Lowering(object):
                 and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, bytes):
             self.b.emit('ba.extend_lit', [base], [], {'data': list(node.args[0].value)})
             return None
+        if func.attr in ('find', 'rfind') and self.text_kind(func.value) == 'bytes' and 1 <= len(node.args) <= 3 \
+                and not node.keywords:
+            return self.bytes_search(node)
+        if base.type == BYTEARRAY and func.attr == 'extend' and len(node.args) == 1 and statement \
+                and self.text_kind(node.args[0]) == 'bytes':
+            self.b.emit('ba.extend', [base, self.bytes_arg(node.args[0])])
+            return None
         if base.type == BYTEARRAY and func.attr == 'clear' and not node.args and statement:
             self.b.emit('ba.clear', [base])
             return None
@@ -1275,7 +1492,7 @@ class Lowering(object):
             self.b.emit('ba.push', [base, v])
             return None
         if not self.is_list(base):
-            raise NotS0('method of %s' % base.type)
+            raise NotS0('method of %s: %s' % (base.type, self.src(node)))
         elem = base.type.args[0].args[0]
         name = func.attr
         if name == 'append' and len(node.args) == 1:
@@ -1354,10 +1571,14 @@ class Lowering(object):
         raise NotS0('binary %s' % type(op).__name__)
 
     def cmp(self, op, a, b):
+        if isinstance(op, (ast.In, ast.NotIn)) and a.type == I.STRV and b.type == I.STRV:
+            return self.str_in(op, a, b)
         pred = {ast.Eq: 'eq', ast.NotEq: 'ne', ast.Lt: 'lt', ast.LtE: 'le', ast.Gt: 'gt',
                 ast.GtE: 'ge'}.get(type(op))
         if pred is None:
             raise NotS0('comparison %s' % type(op).__name__)
+        if a.type == I.STRV and b.type == I.STRV:
+            return self.str_compare(op, a, b)
         if not (a.type.is_scalar and b.type.is_scalar):
             raise NotS0('comparison of %s and %s' % (a.type, b.type))
         if I.F64 in (a.type, b.type):
@@ -1373,6 +1594,10 @@ class Lowering(object):
 
     def _chain(self, prev, ops, comparators):
         nxt = self.expr(comparators[0])
+        if self.tracked and {prev.type, nxt.type} == {I.I64, I.F64}:
+            # the legacy path compares an int and a float exactly when a tagged cell is involved; plain C
+            # (and this lowering) converts the int to a double
+            raise NotS0('an int compared with a float in a function with int-or-float names')
         result = self.cmp(ops[0], prev, nxt)
         if len(ops) == 1:
             return result
@@ -1399,7 +1624,10 @@ class Lowering(object):
         self.in_region(then, fill=lambda: values.__setitem__('then', self.expr(node.body)))
         self.in_region(other, fill=lambda: values.__setitem__('else', self.expr(node.orelse)))
         types = (values['then'].type, values['else'].type)
-        t = I.F64 if I.F64 in types else I.I64 if I.I64 in types else I.I1
+        if types[0] == types[1] and types[0] in (I.STRV, BYTES):
+            t = types[0]
+        else:
+            t = I.F64 if I.F64 in types else I.I64 if I.I64 in types else I.I1
         self.in_region(then, fill=lambda: self.b.emit('yield', [self.coerce(values['then'], t)]))
         self.in_region(other, fill=lambda: self.b.emit('yield', [self.coerce(values['else'], t)]))
         return self.b.value('if', [c], t, None, [then, other])
@@ -1417,6 +1645,9 @@ class Lowering(object):
         if not self.is_builtin(f):
             raise NotS0('call of %r' % f)
         args = node.args
+        if f == 'print' and statement:
+            self.print_stmt(node)
+            return None
         if node.keywords:
             raise NotS0('keywords to %s()' % f)
         if f == 'ord' and len(args) == 1 and isinstance(args[0], ast.Constant) \
@@ -1438,20 +1669,54 @@ class Lowering(object):
             a, b = self.coerce(a, t), self.coerce(b, t)
             c = self.b.value('cmp.lt' if f == 'min' else 'cmp.gt', [a, b], I.I1)
             return self.b.value('select', [c, a, b], t)
+        if f == 'print' and statement:
+            self.print_stmt(node)
+            return None
+        if f == 'len' and len(args) == 1 and self.text_kind(args[0]) == 'str':
+            return self.text_len(args[0])
+        if f == 'len' and len(args) == 1 and P._is_sys_argv(args[0]):
+            return self.rt('argv_len', [])
+        if f == 'len' and len(args) == 1 and self.text_kind(args[0]) == 'bytes' \
+                and not isinstance(args[0], ast.Name):
+            return self.b.value('bytes.len', [self.bytes_arg(args[0])], I.I64)
         if f == 'len' and len(args) == 1:
             return self.length(args[0])
         if f in ('wrapping_add', 'wrapping_sub', 'wrapping_mul') and len(args) == 2:
             a, b = self.as_int(self.expr(args[0])), self.as_int(self.expr(args[1]))
             return self.b.value(f.split('_')[1], [a, b], I.I64, {'mode': 'wrap'})
+        if f == 'ord' and len(args) == 1 and self.text_kind(args[0]) == 'str' \
+                and (isinstance(args[0], ast.Subscript)
+                     or (isinstance(args[0], ast.Name) and args[0].id in self.onecp)):
+            return self.rt('str_point', [self.expr(args[0])])
         if f == 'float' and len(args) == 1:
-            return self.coerce(self.expr(args[0]), I.F64)
+            v = self.expr(args[0])
+            if v.type == I.STRV:
+                return self.rt('str_to_float', [v])
+            return self.coerce(v, I.F64)
         if f == 'int' and len(args) == 1:
             v = self.expr(args[0])
+            if v.type == I.STRV:
+                return self.rt('str_to_int', [v])
+            if v.type == BYTES:
+                return self.rt('bytes_to_int', [v])
             if v.type == I.F64:
                 return self.b.value('fptosi', [v], I.I64, {'mode': 'ck'})
             return self.coerce(v, I.I64)
+        if f == 'write_stdout_bytes' and len(args) == 1 and statement and isinstance(args[0], ast.Call) \
+                and isinstance(args[0].func, ast.Name) and args[0].func.id in ctx.funcs \
+                and args[0].func.id not in self.places and args[0].func.id not in self.params \
+                and ctx.funcs[args[0].func.id][1] == 'bytearray':
+            # the bytearray a call returns, written and released at once
+            tmp = self.new_place('bat', BYTEARRAY)
+            self.user_call(args[0].func.id, args[0], False, ba_dst=tmp)
+            self.b.emit('ba.write', [self.b.value('load', [tmp], BYTEARRAY)])
+            self.b.emit('ba.drop', [tmp])
+            return None
         if f == 'write_stdout_bytes' and len(args) == 1 and statement:
-            v = self.expr(args[0])
+            v = self.bytes_arg(args[0]) if self.text_kind(args[0]) == 'bytes' else self.expr(args[0])
+            if v.type == BYTES:
+                self.rt('write_stdout_bytes', [v])
+                return None
             if v.type != BYTEARRAY:
                 raise NotS0('write_stdout_bytes() of %s' % v.type)
             self.b.emit('ba.write', [v])
@@ -1597,5 +1862,13 @@ class Lowering(object):
 def lower(P, fn, ctx, sig, recursive, cname, pending=(), link_units=False, summaries=None):
     """(IR function, its one-function program) for the S0 subset; NotS0 otherwise."""
     lowering = Lowering(P, fn, ctx, sig, recursive, cname, pending, link_units, summaries)
-    f = lowering.run()
+    try:
+        f = lowering.run()
+    finally:
+        # the kinds the flow analysis put in the legacy context are the IR's own business
+        for n, t in lowering.__dict__.get('saved_types', {}).items():
+            if t is None:
+                ctx.types.pop(n, None)
+            else:
+                ctx.types[n] = t
     return f, lowering.program

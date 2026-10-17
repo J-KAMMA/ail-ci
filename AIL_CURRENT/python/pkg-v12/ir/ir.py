@@ -94,6 +94,7 @@ def fn_type(params, results, closure=False):
 
 
 I1, I64, F64 = T('i1'), T('i64'), T('f64')
+STRV, BYTES = T('strv'), T('bytes')
 
 
 def place(t):
@@ -320,6 +321,19 @@ _op('ba.call', 1, None)           # (place, args...): the place adopts the bytea
 _op('ba.write', 1, 1)             # (bytearray): `write_stdout_bytes(b)`
 _op('ba.extend_lit', 1, 1)        # (bytearray) + attr data = list of byte values: `b.extend(b"...")`
 _op('field.ba', 1, 1)             # a struct field holding a bytearray: the reference, read now
+# S4a+: struct locals with the legacy reference counts (design section 14). `obj.init` (place, ctor args...) makes
+# the place hold a new object (attrs cls, abi: per argument 'value' or 'list', a list argument being a hidden list
+# whose storage the constructor takes); `obj.copyref` (place, object) makes it share another object (retain).
+# Places of objects are released at every exit, and by the cleanup frame.
+_op('obj.init', 1, None)
+_op('obj.copyref', 2, 2)
+_op('ba.extend', 2, 2)            # (bytearray, bytes): `b.extend(x)` with x a bytes view (S4a)
+# S4a: text. `str.lit` (attr value) is a static `ail_str`, `bytes.lit` (attr data) a static `ail_bytes`;
+# `print` (attrs kinds, stream, sep, end, parts) writes its operands as the legacy print does. Every other
+# text operation is an `rt` call from the table in rtc.py.
+_op('str.lit', 0, 0)
+_op('bytes.lit', 0, 0)
+_op('print', 0, None)
 _op('span.of', 1, 1)
 _op('span.len', 1, 1)
 _op('span.get', 2, 2)
@@ -340,8 +354,8 @@ for _name in ('list.new', 'list.insert',
               'dict.put', 'dict.del', 'dict.upsert', 'dict.items', 'dict.keys', 'dict.values', 'heap.push',
               'heap.pop', 'copy.list', 'copy.dict', 'copy.set', 'box.wrap', 'rc.inc', 'rc.dec', 'is'):
     RESERVED[_name] = 'S3'
-for _name in ('str.lit', 'str.len.bytes', 'str.len.cp', 'str.byte', 'str.cp_at', 'str.cat', 'str.append',
-              'str.slice', 'str.split', 'str.fmt', 'str.eq', 'str.lt', 'str.hash', 'print',
+for _name in ('str.len.bytes', 'str.len.cp', 'str.byte', 'str.cp_at', 'str.cat', 'str.append',
+              'str.slice', 'str.split', 'str.fmt', 'str.eq', 'str.lt', 'str.hash',
               'region.enter', 'region.exit'):
     RESERVED[_name] = 'S4'
 for _name in ('obj.new', 'reuse.token', 'obj.new.reuse'):
