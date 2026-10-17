@@ -449,7 +449,8 @@ static int ail_exc_kind_of(const char *w) {
         || !strcmp(w, "integer modulo by zero")) return AIL_EXC_ZERODIV;
     if (!strcmp(w, "list index out of range") || !strcmp(w, "pop index out of range")
         || !strcmp(w, "pop from empty list") || !strcmp(w, "grid row index out of range")
-        || !strcmp(w, "grid column index out of range") || !strcmp(w, "bytes index out of range"))
+        || !strcmp(w, "grid column index out of range") || !strcmp(w, "bytes index out of range")
+        || !strcmp(w, "string index out of range"))
         return AIL_EXC_INDEX;
     if (!strcmp(w, "key error")) return AIL_EXC_KEY;
     if (!strcmp(w, "dictionary changed size during iteration")) return AIL_EXC_RUNTIME;
@@ -14867,10 +14868,16 @@ static inline ail_st ail_obj_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_ob
         ail_obj content = (x.tag == AIL_T_STR) ? x : ail_obj_str(cx, x);
         ail_str cs = ail_view_to_str(content);
         if (f.has_prec && f.prec >= 0 && f.prec < cs.n) cs.n = f.prec;
-        char *buf = (char *)ail_xmalloc((size_t)(cs.n > 0 ? cs.n : 1));
-        for (int64_t i = 0; i < cs.n; i++) buf[i] = (char)ail_chr(cs, i);
-        *out = ail__pad(cx, buf, cs.n, f, 0);
-        free(buf);
+        /* code points, not bytes: a non-ASCII character must reach the result whole */
+        char align = f.align ? f.align : '<';
+        int64_t pad = f.width - cs.n; if (pad < 0) pad = 0;
+        int64_t lp = (align == '>' || align == '=') ? pad : (align == '^') ? pad / 2 : 0;
+        ail_strbuild bu = ail_str_buf(cx, cs.n + pad);
+        int64_t o = 0;
+        for (int64_t k = 0; k < lp; k++) bu.buf[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < cs.n; k++) bu.buf[o++] = ail_chr(cs, k);
+        for (int64_t k = 0; k < pad - lp; k++) bu.buf[o++] = (unsigned char)f.fill;
+        *out = ail_str_buf_done(bu, o);
         return AIL_OK;
     }
     return ail_hit_limit(cx, "format_spec", "format spec type not supported by this runtime's subset");
@@ -17025,6 +17032,25 @@ static inline ail_st ail_meth_set_update(ail_ctx *cx, ail_obj s, ail_obj other) 
         st = ail_set_add(cx, s, v); if (st != AIL_OK) return st;
     }
     return AIL_OK;
+}
+/* `xs += ys` and `s |= t` change the object in place (a second name for it sees the change);
+   any other operand falls back to the plain operator, which builds a new value. */
+static inline ail_st ail_op_iadd(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    if (a.tag == AIL_T_LIST && (b.tag == AIL_T_LIST || b.tag == AIL_T_TUPLE)) {
+        ail_vecobj *v = (ail_vecobj *)a.o, *ov = (ail_vecobj *)b.o;
+        int64_t n = ov->n;                       /* `xs += xs` doubles the list, once */
+        ail_vec_reserve(cx, v, v->n + n);
+        for (int64_t i = 0; i < n; i++) v->p[v->n++] = ov->p[i];
+        *out = a; return AIL_OK;
+    }
+    return ail_op_add(cx, out, a, b);
+}
+static inline ail_st ail_set_ior(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    if (a.tag == AIL_T_SET && b.tag == AIL_T_SET) {
+        ail_st st = ail_meth_set_update(cx, a, b); if (st != AIL_OK) return st;
+        *out = a; return AIL_OK;
+    }
+    return ail_set_union(cx, out, a, b);
 }
 /* Operators |, &, -, ^ -- same functions, listed again under their operator spelling in
    NAMES_methods.json for discoverability by the emitter. */

@@ -70,6 +70,28 @@ def _callable(annotation):
         raise SyntaxErrorAIL(str(exc)) from exc
 
 
+def _relib():
+    """python/pkg-v12/relib.py (the `re` module's compile-time half), loaded as _callable loads its codec."""
+    if not hasattr(_relib, 'module'):
+        spec = importlib.util.spec_from_file_location(
+            '_ail_relib', Path(__file__).parent / 'python' / 'pkg-v12' / 'relib.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _relib.module = module
+    return _relib.module
+
+
+def _collib():
+    """python/pkg-v12/collib.py (`collections`, lowered onto dict / list / classes before the surface pass)."""
+    if not hasattr(_collib, "module"):
+        spec = importlib.util.spec_from_file_location(
+            "_ail_collib", Path(__file__).parent / "python" / "pkg-v12" / "collib.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _collib.module = module
+    return _collib.module
+
+
 _OPTIONAL = re.compile(r'\bOptional\s*\[\s*([A-Za-z_]\w*)\s*\]')
 
 
@@ -798,7 +820,7 @@ _SMALL_NOTE = {
                 'neg/pos/invert/not_/abs/getitem called directly, and itemgetter(k) as a key= are built',
 }
 _TYPING = {'List': 'list', 'Dict': 'dict', 'Set': 'set', 'Tuple': 'tuple', 'FrozenSet': 'frozenset'}
-_DROPPED = ('heapq', 'bisect', 'typing', 'dataclasses', '__future__', 'time', 'string', 'os', 'operator')
+_DROPPED = ('heapq', 'bisect', 'typing', 'dataclasses', '__future__', 'time', 'string', 'os', 'operator', 're')
 _STDOUT_STATEMENTS = ('sys.stdout.write', 'sys.stdout.buffer.write', 'sys.stdout.flush',
                       'sys.stdout.buffer.flush', 'sys.setrecursionlimit')
 _ALIASABLE = ('sys.stdout.write', 'sys.stdout.buffer.write', 'sys.stdin.readline',
@@ -822,10 +844,91 @@ def _own_nodes(function):
             pending.extend(ast.iter_child_nodes(node))
 
 
+_RE_MODES = {'match': 0, 'fullmatch': 1, 'search': 2}
+# module function -> positional parameters after the pattern
+_RE_PARAMS = {'match': ('string', 'flags'), 'fullmatch': ('string', 'flags'), 'search': ('string', 'flags'),
+              'findall': ('string', 'flags'), 'finditer': ('string', 'flags'),
+              'split': ('string', 'maxsplit', 'flags'), 'sub': ('repl', 'string', 'count', 'flags')}
+_RE_BUILT = ('re.match / fullmatch / search / findall / finditer / split / sub / escape and re.compile(literal) '
+             'with a string-literal pattern (a literal, or a name bound once to one), flags I M S X A, '
+             'literals . classes \\d \\w \\s anchors ^ $ \\A \\Z \\b \\B * + ? {m,n} lazy variants | groups '
+             '(capturing, (?:), (?P<name>)); lookaround, backreferences, atomic / possessive forms and '
+             'conditionals are not built')
+_RE_MATCH_METHODS = ('group', 'start', 'end', 'groups', 'groupdict', 'span', 'expand')
+
+
 class _SurfaceExpr(ast.NodeTransformer):
-    def __init__(self, surface):
+    def __init__(self, surface, boolean=False):
         self.surface = surface
         self.changed = False
+        self.boolean = boolean
+        self.bool_calls = set()
+        self.bool_compares = {}
+
+    def mark_bool(self, node):
+        """Calls whose result is only tested (a match used as a condition): no Match object is built."""
+        if isinstance(node, ast.Call):
+            self.bool_calls.add(node)
+        elif isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            self.mark_bool(node.operand)
+        elif isinstance(node, ast.BoolOp):
+            for value in node.values:
+                self.mark_bool(value)
+        elif (isinstance(node, ast.Compare) and len(node.ops) == 1 and isinstance(node.ops[0], (ast.Is, ast.IsNot))
+              and isinstance(node.comparators[0], ast.Constant) and node.comparators[0].value is None
+              and isinstance(node.left, ast.Call)):
+            self.bool_compares[node] = isinstance(node.ops[0], ast.Is)
+            self.bool_calls.add(node.left)
+
+    def group_probe(self, node):
+        """`m.group(<int or str literal>)` on a plain name: the Call, else None."""
+        surface = self.surface
+        if (surface.re_on and 'group' not in surface.user_methods and isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute) and node.func.attr == 'group'
+                and isinstance(node.func.value, ast.Name) and len(node.args) == 1 and not node.keywords
+                and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, (int, str))
+                and not isinstance(node.args[0].value, bool)):
+            return node
+        return None
+
+    def start_of(self, group):
+        return ast.Call(func=ast.Attribute(value=copy.deepcopy(group.func.value), attr='start', ctx=ast.Load()),
+                        args=[copy.deepcopy(group.args[0])], keywords=[])
+
+    def visit_BoolOp(self, node):
+        """`m.group(k) or default`: the group when it took part, else the default (CPython's None is
+        falsy, and an empty group is falsy too, so `or` keeps its meaning on `m.start(k) < m.end(k)`)."""
+        if isinstance(node.op, ast.Or) and len(node.values) >= 2 and self.group_probe(node.values[0]):
+            first = node.values[0]
+            rest = node.values[1] if len(node.values) == 2 else ast.BoolOp(op=ast.Or(), values=node.values[1:])
+            nonempty = ast.Compare(left=self.start_of(first), ops=[ast.Lt()],
+                                   comparators=[ast.Call(func=ast.Attribute(value=copy.deepcopy(first.func.value),
+                                                                            attr='end', ctx=ast.Load()),
+                                                         args=[copy.deepcopy(first.args[0])], keywords=[])])
+            new = ast.IfExp(test=nonempty, body=first, orelse=rest)
+            self.changed = True
+            return self.visit(ast.fix_missing_locations(ast.copy_location(new, node)))
+        self.generic_visit(node)
+        return node
+
+    def visit_Compare(self, node):
+        if (len(node.ops) == 1 and isinstance(node.ops[0], (ast.Is, ast.IsNot)) and self.group_probe(node.left)
+                and isinstance(node.comparators[0], ast.Constant) and node.comparators[0].value is None):
+            new = ast.Compare(left=self.start_of(node.left), ops=[ast.Lt() if isinstance(node.ops[0], ast.Is)
+                                                                  else ast.GtE()],
+                              comparators=[ast.Constant(value=0)])
+            self.changed = True
+            return self.visit(ast.fix_missing_locations(ast.copy_location(new, node)))
+        if node in self.bool_compares:
+            call = self.visit(node.left)
+            if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == '_ail_re_test':
+                self.changed = True
+                return call if not self.bool_compares[node] else ast.copy_location(
+                    ast.UnaryOp(op=ast.Not(), operand=call), node)
+            node.left = call
+            return node
+        self.generic_visit(node)
+        return node
 
     def replaced(self, new, old):
         self.changed = True
@@ -834,6 +937,11 @@ class _SurfaceExpr(ast.NodeTransformer):
     def visit_Call(self, node):
         surface = self.surface
         path = surface.path(node.func)
+        if surface.re_on and node in self.bool_calls:
+            surface.testing.add(node)
+        if (surface.re_on and path is None and isinstance(node.func, ast.Attribute)
+                and not isinstance(node.func.value, ast.Name)):
+            node.func.value = self.visit(node.func.value)      # re.search(...).start(): the inner call too
         node.args = [self.visit(arg) for arg in node.args]
         for item in node.keywords:
             item.value = self.visit(item.value)
@@ -869,7 +977,17 @@ class _SurfaceExpr(ast.NodeTransformer):
         surface = self.surface
         if not isinstance(node.ctx, ast.Load):
             return node
-        if node.id in surface.files:
+        if node.id in surface.re_subst:
+            match, number = surface.re_subst[node.id]
+            self.changed = True
+            return ast.copy_location(ast.Call(func=ast.Attribute(value=ast.Name(id=match, ctx=ast.Load()),
+                                                                  attr='gs', ctx=ast.Load()),
+                                               args=[ast.Constant(value=number)], keywords=[]), node)
+        if node.id in surface.re_patterns:
+            surface.keep.add('re')
+            surface.note(node, f'the compiled pattern {node.id} is used as a value; only {node.id}.match / '
+                         'fullmatch / search / findall / finditer / split / sub (...) calls are built')
+        elif node.id in surface.files:
             surface.note(node, f'the file object {node.id} is used as a value: ' + _FILE_HINT)
         elif node.id in surface.names:
             new = surface.value(node, surface.names[node.id])
@@ -897,7 +1015,17 @@ class _Surface:
         self.dataclasses = {}          # class name -> [(field, default text | None)]
         self.consumed = set()
         self.void = set()
+        self.re_on = False             # `import re` seen
+        self.re_patterns = {}          # NAME -> (library index) for NAME = re.compile(literal)
+        self.re_nodes = set()          # those assignment statements
+        self.re_consts = {}            # NAME -> str for a name bound once to a string literal
+        self.re_lib = None
+        self.testing = set()           # re calls whose result is only tested
+        self.re_subst = {}             # findall-loop name -> (match variable, group number)
+        self.re_subst_now = None
         self.classes = {node.name for node in self.tree.body if isinstance(node, ast.ClassDef)}
+        self.user_methods = {item.name for node in ast.walk(self.tree) if isinstance(node, ast.ClassDef)
+                             for item in node.body if isinstance(item, ast.FunctionDef)}
         self.parents = {child: parent for parent in ast.walk(self.tree)
                         for child in ast.iter_child_nodes(parent)}
 
@@ -951,6 +1079,8 @@ class _Surface:
         text = data.decode('utf8')
         if self.helpers:
             text = text.rstrip('\n') + '\n\n\n' + '\n\n'.join(_MATH_HELPERS[name] for name in self.helpers)
+        if self.re_lib is not None and (self.re_lib.programs or self.re_lib.uses_escape):
+            text = text.rstrip('\n') + '\n\n' + python_surface(self.re_lib.text())
         return text
 
     # -- names --------------------------------------------------------------------------------
@@ -971,8 +1101,10 @@ class _Surface:
         for node in ast.walk(self.tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    if alias.name in ('heapq', 'bisect', 'math', 'typing', 'dataclasses', 'sys', *_SMALL_MODULES):
+                    if alias.name in ('heapq', 'bisect', 'math', 'typing', 'dataclasses', 'sys', 're', *_SMALL_MODULES):
                         self.modules[alias.asname or alias.name] = alias.name
+                        if alias.name == 're':
+                            self.re_on = True
             elif isinstance(node, ast.ImportFrom) and not node.level:
                 for alias in node.names:
                     local = alias.asname or alias.name
@@ -985,6 +1117,8 @@ class _Surface:
                      else [node.name] if isinstance(node, (ast.FunctionDef, ast.ClassDef)) else [])
             for name in names:
                 stored[name] = stored.get(name, 0) + 1
+        if self.re_on:
+            self.collect_re(stored)
         for node in ast.walk(self.tree):
             if (isinstance(node, ast.Assign) and len(node.targets) == 1
                     and isinstance(node.targets[0], ast.Name) and stored[node.targets[0].id] == 1):
@@ -995,15 +1129,25 @@ class _Surface:
                     self.alias_nodes.add(node)
 
     # -- expressions --------------------------------------------------------------------------
-    def rewritten(self, node):
+    def rewritten(self, node, boolean=False):
         rewriter = _SurfaceExpr(self)
-        new = rewriter.visit(copy.deepcopy(node))
+        node = copy.deepcopy(node)
+        if boolean and self.re_on:
+            rewriter.mark_bool(node)
+        if self.re_on:
+            for each in ast.walk(node):
+                if isinstance(each, (ast.If, ast.IfExp, ast.While, ast.Assert)):
+                    rewriter.mark_bool(each.test)
+                elif isinstance(each, ast.comprehension):
+                    for test in each.ifs:
+                        rewriter.mark_bool(test)
+        new = rewriter.visit(node)
         return new, rewriter.changed
 
-    def expression(self, node):
+    def expression(self, node, boolean=False):
         if node is None:
             return
-        new, changed = self.rewritten(node)
+        new, changed = self.rewritten(node, boolean)
         if changed:
             text = ast.unparse(new)
             self.replace(node, text if isinstance(new, _ATOMIC) else '(' + text + ')')
@@ -1065,8 +1209,224 @@ class _Surface:
                                                           args=[path], keywords=[]),
                                            attr='read', ctx=ast.Load()), args=[], keywords=[])
 
+    # -- re -----------------------------------------------------------------------------------
+    def collect_re(self, stored):
+        self.re_lib = _relib().Library()
+        for node in ast.walk(self.tree):
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+                    and stored[node.targets[0].id] == 1 and isinstance(node.value, ast.Constant)
+                    and isinstance(node.value.value, (str, bytes))):
+                self.re_consts[node.targets[0].id] = node.value.value
+        for node in ast.walk(self.tree):
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+                    and stored[node.targets[0].id] == 1 and isinstance(node.value, ast.Call)
+                    and self.path(node.value.func) == 're.compile'):
+                index = self.re_pattern(node.value, 'compile', node.value.args, node.value.keywords, ('flags',))
+                if index is not None:
+                    self.re_patterns[node.targets[0].id] = index
+                    self.re_nodes.add(node)
+
+    def re_str(self, node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, (str, bytes)):
+            return node.value
+        if isinstance(node, ast.Name) and node.id in self.re_consts:
+            return self.re_consts[node.id]
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            left, right = self.re_str(node.left), self.re_str(node.right)
+            if left is not None and right is not None and type(left) is type(right):
+                return left + right
+        return None
+
+    def re_flags(self, node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, int) and not isinstance(node.value, bool):
+            return node.value
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+            left, right = self.re_flags(node.left), self.re_flags(node.right)
+            return None if left is None or right is None else left | right
+        path = self.path(node) if isinstance(node, ast.Attribute) else None
+        if path and path.startswith('re.') and path[3:] in _relib().FLAG_NAMES:
+            return _relib().FLAG_NAMES[path[3:]]
+        return None
+
+    def re_args(self, node, params, args, keywords):
+        """{parameter: expression} of a call, or None (noted) when it has a shape not built."""
+        if any(isinstance(arg, ast.Starred) for arg in args) or any(item.arg is None for item in keywords):
+            return None
+        given = dict(zip(params, args))
+        if len(args) > len(params):
+            return None
+        for item in keywords:
+            if item.arg not in params or item.arg in given:
+                return None
+            given[item.arg] = item.value
+        return given
+
+    def re_refuse(self, node, name, why):
+        self.keep.add('re')
+        self.note(node, f're.{name}(): {why}; built here: {_RE_BUILT}')
+
+    def re_pattern(self, node, name, args, keywords, params):
+        """Library index of the pattern literal of a re call (args[0] is the pattern), or None (noted)."""
+        if not args:
+            self.re_refuse(node, name, 'the pattern is missing')
+            return None
+        text = self.re_str(args[0])
+        if text is None:
+            self.re_refuse(node, name, 'the pattern has to be a string literal (or a name bound once to one), '
+                           'not an expression: it is compiled when the program is built')
+            return None
+        given = self.re_args(node, params, args[1:], keywords)
+        if given is None:
+            self.re_refuse(node, name, 'these arguments are not built')
+            return None
+        flags = 0
+        if 'flags' in given:
+            flags = self.re_flags(given['flags'])
+            if flags is None:
+                self.re_refuse(node, name, 'flags has to be re.I / re.M / re.S / re.X / re.A combined with |')
+                return None
+        try:
+            return self.re_lib.pattern(text, flags, isinstance(text, bytes))
+        except _relib().ReRefused as exc:
+            self.re_refuse(node, name, f'the pattern {text!r} is not built: {exc}')
+            return None
+
+    def re_emit(self, node, name, index, given):
+        """The call that stands for re.<name> on library pattern `index` with the non-pattern arguments `given`."""
+        lib = self.re_lib
+        program = lib.programs[index]
+        table = ast.Name(id=lib.table_name(index), ctx=ast.Load())
+
+        def call(function, *args):
+            return ast.Call(func=ast.Name(id=function, ctx=ast.Load()), args=list(args), keywords=[])
+
+        if 'string' not in given:
+            self.re_refuse(node, name, 'the string argument is missing')
+            return None
+        subject = given['string']
+        sfx = 'B' if program.is_bytes else ''
+        if name in _RE_MODES:
+            if node in self.testing:
+                return call('_ail_re_test' + sfx, table, subject, ast.Constant(value=_RE_MODES[name]))
+            return call('_ail_re_do' + sfx, table, subject, ast.Constant(value=_RE_MODES[name]))
+        if name == 'findall':
+            if program.ngroups > 1:
+                self.re_refuse(node, name, 'a pattern with several groups returns tuples, which are not built '
+                               '(use finditer and m.group(i))')
+                return None
+            return call('_ail_re_findall' + sfx, table, subject)
+        if name == 'finditer':
+            return call('_ail_re_finditer' + sfx, table, subject)
+        if name == 'split':
+            if program.ngroups:
+                self.re_refuse(node, name, 'split with groups returns None for a group that did not match, which '
+                               'is not built; use a pattern without groups')
+                return None
+            return call('_ail_re_split' + sfx, table, subject, given.get('maxsplit', ast.Constant(value=0)))
+        if name == 'sub':
+            count = given.get('count', ast.Constant(value=0))
+            repl = given['repl']
+            text = self.re_str(repl)
+            if text is not None and isinstance(text, bytes) != program.is_bytes:
+                self.re_refuse(node, name, 'a bytes pattern needs a bytes replacement and a str pattern a str one')
+                return None
+            if text is not None and (b'\\' if program.is_bytes else '\\') in text:
+                try:
+                    function = lib.sub_function(index, text)
+                except _relib().ReRefused as exc:
+                    self.re_refuse(node, name, f'the replacement {text!r} is not built: {exc}')
+                    return None
+                return call(function, subject, count)
+            if text is None and not (isinstance(repl, (ast.Name, ast.Attribute, ast.Subscript, ast.JoinedStr,
+                                                       ast.BinOp, ast.Call))):
+                self.re_refuse(node, name, 'a function (or lambda) as the replacement is not built')
+                return None
+            if isinstance(repl, ast.Lambda):
+                self.re_refuse(node, name, 'a function (or lambda) as the replacement is not built')
+                return None
+            return call('_ail_re_sublit' + sfx, table, subject, repl, count)
+        return None
+
+    def re_call(self, node, name):
+        """re.<name>(pattern, ...) on the module."""
+        self.keep.add('re') if name not in _RE_PARAMS and name not in ('escape', 'compile') else None
+        if name == 'escape':
+            if len(node.args) == 1 and not node.keywords and not isinstance(node.args[0], ast.Starred):
+                self.re_lib.uses_escape = True
+                return ast.Call(func=ast.Name(id='_ail_re_escape', ctx=ast.Load()), args=node.args, keywords=[])
+            self.re_refuse(node, name, 're.escape takes one string')
+            return None
+        if name == 'compile':
+            self.re_refuse(node, name, 're.compile is built only as `NAME = re.compile(literal[, flags])` bound '
+                           'once; use NAME.match(...) and so on')
+            return None
+        if name not in _RE_PARAMS:
+            self.re_refuse(node, name, f're.{name} is not built')
+            return None
+        if not node.args and not any(item.arg == 'pattern' for item in node.keywords):
+            self.re_refuse(node, name, 'the pattern is missing')
+            return None
+        # the pattern is the first positional argument
+        params = ('pattern',) + _RE_PARAMS[name]
+        given = self.re_args(node, params, node.args, node.keywords)
+        if given is None or 'pattern' not in given:
+            self.re_refuse(node, name, 'these arguments are not built')
+            return None
+        pattern_node = given.pop('pattern')
+        shell = [pattern_node] + ([given['flags']] if 'flags' in given else [])
+        index = self.re_pattern(node, name, shell[:1], [ast.keyword(arg='flags', value=given['flags'])]
+                                if 'flags' in given else [], ('flags',))
+        if index is None:
+            return None
+        given.pop('flags', None)
+        return self.re_emit(node, name, index, given)
+
+    def re_method(self, node, receiver, name):
+        """NAME.<name>(...) on a compiled pattern."""
+        if name not in _RE_PARAMS:
+            self.re_refuse(node, name, f'the compiled pattern method {name} is not built')
+            return None
+        params = _RE_PARAMS[name]
+        params = tuple(p for p in params if p != 'flags')
+        given = self.re_args(node, params, node.args, node.keywords)
+        if given is None:
+            self.re_refuse(node, name, 'these arguments are not built (pos / endpos are not)')
+            return None
+        return self.re_emit(node, name, self.re_patterns[receiver], given)
+
+    def match_method(self, node):
+        """m.group() / m.group("name") / m.start() ... spelled with what the Match class has."""
+        func = node.func
+        name = func.attr
+        if node.keywords or any(isinstance(arg, ast.Starred) for arg in node.args):
+            return None
+        if name in ('group', 'start', 'end'):
+            if not node.args:
+                return ast.Call(func=func, args=[ast.Constant(value=0)], keywords=[])
+            if (len(node.args) == 1 and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)):
+                return ast.Call(func=ast.Attribute(value=func.value, attr=name + 'n', ctx=ast.Load()),
+                                args=node.args, keywords=[])
+            if name == 'group' and len(node.args) > 1:
+                self.keep.add('re')
+                self.note(node, 'm.group(a, b) returns a tuple, which is not built; call m.group(i) once per group')
+        elif name in ('groups', 'groupdict', 'span', 'expand', 'lastindex') and not node.args:
+            self.keep.add('re')
+            self.note(node, f'm.{name}() is not built (tuples and None groups); built are m.group(i) / '
+                      'm.group("name"), m.start(i), m.end(i), and `a, b = m.span()` / `a, b = m.groups()`')
+        return None
+
     def call(self, node, path):
         func = node.func
+        if self.re_on:
+            if path is not None and path.startswith('re.') and path.count('.') == 1:
+                return self.re_call(node, path[3:])
+            if (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
+                    and func.value.id in self.re_patterns):
+                return self.re_method(node, func.value.id, func.attr)
+            if (path is None and isinstance(func, ast.Attribute) and func.attr in _RE_MATCH_METHODS
+                    and func.attr not in self.user_methods):
+                return self.match_method(node)
         if path is not None:
             module, _, name = path.partition('.')
             if module in ('heapq', 'bisect') and name:
@@ -1124,6 +1484,72 @@ class _Surface:
         if isinstance(func, ast.Name) and func.id in self.dataclasses:
             return self.construct(node)
         return None
+
+    def re_findall_loop(self, node, function):
+        """`for a, b in re.findall(P, s):` (several groups): a loop over the matches, each name read as
+        that match's group (findall's tuple gives '' for a group that did not take part)."""
+        call = node.iter
+        if not (function is not None and isinstance(node.target, ast.Tuple) and isinstance(call, ast.Call)
+                and all(isinstance(each, ast.Name) for each in node.target.elts)):
+            return False
+        path = self.path(call.func)
+        if path == 're.findall':
+            given = self.re_args(call, ('pattern', 'string', 'flags'), call.args, call.keywords)
+            if given is None or 'pattern' not in given or 'string' not in given:
+                return False
+            flag_kw = [ast.keyword(arg='flags', value=given['flags'])] if 'flags' in given else []
+            index = self.re_pattern(call, 'findall', [given['pattern']], flag_kw, ('flags',))
+            subject = given['string']
+        elif (isinstance(call.func, ast.Attribute) and call.func.attr == 'findall'
+              and isinstance(call.func.value, ast.Name) and call.func.value.id in self.re_patterns):
+            given = self.re_args(call, ('string',), call.args, call.keywords)
+            if given is None or 'string' not in given:
+                return False
+            index = self.re_patterns[call.func.value.id]
+            subject = given['string']
+        else:
+            return False
+        if index is None:
+            return False
+        program = self.re_lib.programs[index]
+        names = [each.id for each in node.target.elts]
+        if program.ngroups != len(names) or len(names) < 2 or len(set(names)) != len(names):
+            return False
+        inside = {id(each) for each in ast.walk(node)}
+        for each in ast.walk(function):
+            if isinstance(each, ast.Name) and each.id in names:
+                if id(each) not in inside or (not isinstance(each.ctx, ast.Load) and each not in node.target.elts):
+                    self.re_refuse(node, 'findall', 'the loop names %s of a findall loop are used outside it or '
+                                   'assigned in it; loop over re.finditer and read m.group(i)' % ', '.join(names))
+                    return False
+        self.count_re = getattr(self, 'count_re', 0) + 1
+        match = '_ail_m%d' % self.count_re
+        sfx = 'B' if program.is_bytes else ''
+        subject_text = ast.unparse(self.rewritten(subject)[0])
+        self.replace(node.target, match)
+        self.replace(call, '_ail_re_finditer%s(%s, %s)' % (sfx, self.re_lib.table_name(index), subject_text))
+        self.re_subst_now = {name: (match, number) for number, name in enumerate(names, 1)}
+        return True
+
+    def re_unpack(self, node):
+        """`a, b = m.span()` / `a, b, c = m.groups()` as one assignment per element."""
+        value = node.value
+        if not (len(node.targets) == 1 and isinstance(node.targets[0], ast.Tuple) and isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Attribute) and isinstance(value.func.value, ast.Name)
+                and value.func.attr in ('span', 'groups') and not value.args and not value.keywords
+                and value.func.attr not in self.user_methods and value.func.value.id not in self.re_patterns
+                and all(isinstance(each, ast.Name) for each in node.targets[0].elts)):
+            return False
+        names = [each.id for each in node.targets[0].elts]
+        receiver = value.func.value.id
+        if value.func.attr == 'span':
+            if len(names) != 2:
+                return False
+            parts = [f'{names[0]} = {receiver}.start(0)', f'{names[1]} = {receiver}.end(0)']
+        else:
+            parts = [f'{each} = {receiver}.group({index})' for index, each in enumerate(names, 1)]
+        self.replace(node, '; '.join(parts), True)
+        return True
 
     def small_call(self, node, module, name):
         """time / string / os / operator, mapped onto what is built (None keeps the call as written)."""
@@ -1310,8 +1736,18 @@ class _Surface:
             self.function(node, owner)
         elif isinstance(node, ast.ClassDef):
             self.klass(node)
-        elif node in self.alias_nodes:
+        elif node in self.alias_nodes or node in self.re_nodes:
             self.replace(node, 'pass', True)
+        elif isinstance(node, ast.Assign) and self.re_on and self.re_unpack(node):
+            pass
+        elif isinstance(node, ast.For) and self.re_on and self.re_findall_loop(node, function):
+            names = self.re_subst_now
+            self.re_subst_now = None
+            saved = dict(self.re_subst)
+            self.re_subst.update(names)
+            self.block(node.body, function, owner)
+            self.re_subst = saved
+            self.block(node.orelse, function, owner)
         elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and self.output(node):
             pass
         elif isinstance(node, ast.With) and self.with_open(node, function, owner):
@@ -1336,7 +1772,7 @@ class _Surface:
                 if isinstance(item, ast.stmt):
                     self.statement(item, function, owner)
                 elif isinstance(item, ast.expr):
-                    self.expression(item)
+                    self.expression(item, _ == 'test' and isinstance(node, (ast.If, ast.While, ast.Assert)))
                 elif isinstance(item, ast.keyword):
                     self.expression(item.value)
                 elif isinstance(item, ast.withitem):
@@ -1600,6 +2036,8 @@ class _Surface:
 def python_surface(source, notes=None):
     """Map the Python spellings above onto the compiler's own; `notes` collects (line, why) for
     the constructs left as written."""
+    if "collections" in source:
+        source = _collib().rewrite(source, notes)
     try:
         surface = _Surface(source)
     except (SyntaxError, ValueError):

@@ -77,7 +77,7 @@ class NumericBindingTypeTests(unittest.TestCase):
  def test_nonmixed_full_c_is_unchanged(self):
   import hashlib
   sources=('fn main()->int {let x=7;print(x);x+=2;print(x);return 0;}','fn main()->int {let x=1.5;print(x);return 0;}')
-  pins=('07a941fc47102277cf2b3ddfaefaf13ebd46884406c352f1c0b2b5823e4b8968','ef8396c7b137b27b13f527a9e8e9239f91b89f545c60be3083bd25fcc2278664')
+  pins=('282afb76562157fff8753b9d0397221920821bf8d1b81762f455123d9b9977e8','804b26ab6f17823c1114e0d2a81e65e17e2394fd44aed3a82146e52db1ee102a')
   for source,pin in zip(sources,pins):self.assertEqual(hashlib.sha256(generated(source).encode()).hexdigest(),pin)
 @unittest.skipUnless(os.environ.get('PIPE_CC') or shutil.which('cc') or shutil.which('gcc'),'installed C compiler required')
 class NumericBindingNativeTests(unittest.TestCase):

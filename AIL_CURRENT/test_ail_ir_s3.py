@@ -214,6 +214,9 @@ def compile_program(directory, name, source, tag, env_extra, debug=False):
     path.write_text(source)
     env = dict(os.environ, AIL_IR_STATS=str(stats))
     env.pop('AIL_IR_EXC', None)
+    # these tests set the IR's sharing against the legacy emitter's value semantics: keep the legacy
+    # build of a def-syntax alias (otherwise refused by name, pkg-v12/aliasrefuse.py)
+    env['AIL_ALIAS_REFUSE'] = '0'
     env.update(env_extra)
     command = [sys.executable, '-B', str(ROOT / 'ail_chatgpt.py'), 'compile', str(path), '--syntax', 'python',
                '-o', str(exe)]
