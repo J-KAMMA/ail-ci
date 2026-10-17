@@ -40,8 +40,8 @@ jobs:
       max-parallel: 4
       matrix:
         shard: [0, 1, 2, 3]
-        # 3.12 is the reference AIL matches; the newest release shows what would change on an upgrade
-        cpython: ["3.12", "3.14"]
+        # 3.12 is the reference AIL matches; 3.x (the newest stable release) shows what an upgrade would change
+        cpython: ["3.12", "3.x"]
     env:
       SEEDS_PER_JOB: ${{ github.event.inputs.seeds_per_job || (github.event_name == 'push' && '40' || '250') }}
       START_SEED: ${{ github.event.inputs.start_seed }}
