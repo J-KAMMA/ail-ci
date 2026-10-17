@@ -10,9 +10,9 @@ import os
 
 from .. import effects as E
 from .. import ir as I
-from . import mem2reg, simplify, ranges, licm
+from . import mem2reg, simplify, ranges, licm, window
 
-ALL = ('mem2reg', 'simplify', 'ranges', 'licm')
+ALL = ('mem2reg', 'simplify', 'ranges', 'licm', 'window')
 
 
 def enabled():
@@ -70,6 +70,9 @@ def optimize(fn, program, facts=None, check=None):
             after()
     if 'simplify' in on:
         simplify.run(fn)
+        after()
+    if 'window' in on and 'mem2reg' in on:
+        stats['windows'] = window.run(fn)
         after()
     E.summarize_program(program)
     return stats

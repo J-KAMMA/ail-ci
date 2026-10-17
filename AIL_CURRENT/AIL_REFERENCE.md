@@ -1,56 +1,71 @@
 # AIL reference (core)
 
-AIL is statically typed Python with braces, compiled via C. Write Python, with these rules.
-Build in AIL_CURRENT/: `python3 ail_chatgpt.py compile p.ail -o p`; fix its `slow:` (O(n²)) hints.
+AIL compiles typed Python 3.12 to C. It prints what CPython would, or the compiler refuses a construct
+with `file:line:col` and what to write instead. This card is enough for most
+programs: write it all, compile, and open MORE only for a refusal or a feature missing here.
+In AIL_CURRENT/: `python3 ail_chatgpt.py compile p.ail -o p` (`check p.ail`: types only).
 
-```ail
-# args: 3
+```python
 # exit: 1
-struct Acc { total: int; keys: list[str]; }
-impl Acc { fn add(self, k: str, v: int) -> void { self.keys.append(k); self.total += v; } }
-fn parse(acc: Acc, line: str) -> void {
-    let f = line.split("|");
-    if len(f) != 2 or not f[0].isupper() { raise ValueError(f"bad: {line.strip()}"); }
-    acc.add(f[0], int(f[1]));
-}
-fn main() {
-    let acc = Acc(0, []);
-    for line in sys.stdin { parse(acc, line); }
-    parse(acc, "B|5"); parse(acc, "A| 7");
-    let w = [3, 9, 3];
-    let idx = [i for i in range(3)];
-    idx.sort(key=lambda i: (-w[i], i));
-    for i in idx { print(f"{i:<2}{w[i]:>3}"); }
-    acc.keys.sort();
-    print(",".join(acc.keys), acc.total, int(sys.argv[1]), 3 > 2, b"xy"[1:].decode());
-    try { parse(acc, "b|1"); }
-    except ValueError as err { print(err.message, file=sys.stderr); return 1; }
-    return 0;
-}
+import sys
+from dataclasses import dataclass
+
+@dataclass
+class Acc:
+    total: int
+    keys: list[str]
+
+def parse(acc: Acc, line: str) -> None:
+    f = line.split("|")
+    if len(f) != 2 or not f[0].isupper():
+        raise ValueError("bad")
+    acc.keys.append(f[0])
+    acc.total += int(f[1])
+
+def main() -> int:
+    acc = Acc(0, [])
+    for line in sys.stdin:
+        parse(acc, line)
+    parse(acc, "B|5")
+    w = [3, 9, 3]
+    idx = list(range(3))
+    idx.sort(key=lambda i: (-w[i], i))
+    seen: dict[int, int] = {}
+    for i in idx:
+        seen[w[i]] = seen.get(w[i], 0) + 1
+        print(f"{i:<2}{w[i]:>3}")
+    q, r = divmod(acc.total, 2)
+    print(",".join(acc.keys), q, r, len(seen), b"xy"[1:].decode())
+    try:
+        parse(acc, "b|1")
+    except ValueError:
+        print("error: bad record", file=sys.stderr)
+        return 1
+    return 0
+
+sys.exit(main())
 ```
 
-- `;` ends every statement, never a `}`; `elif`; `#` comments; `and or not`. `except` names the
-  kinds (no bare `except`); an uncaught error exits 1.
-- Top level: only `use`, `const`, `struct`, `impl`, `fn`; no globals (pass a struct), nested
-  `fn`, `class`. A lambda is only a sort key and may read other lists (`idx.sort`): never
-  hand-write a sort.
-- `let x = 1;`, `let xs: list[str] = [];` fix the type. A name keeps one type in the whole
-  function, also across blocks: give another type a new name. Loop variables are per loop; name
-  `except` bindings freshly (`as err`). Annotate parameters and results (`-> void`).
-- `int` is 64-bit (overflow raises `OverflowError`). `bool` prints `True`/`False`, adds as 1/0; a
-  bool slot takes only bools (`n != 0`). `None`
-  only for structs typed `Node | None`.
-- `list[T]`, `dict[int|str, T]`, `set[int|str]`, T int, float, str, bytes; lists also bool,
-  structs, rows (`[[0] * w for _ in range(h)]`). Structs and rows are shared references; `let ys =
-  xs;` copies a flat list. Flat list/dict/set parameters are read-only: change a struct field
-  `s.xs` or return a new list.
-- `print` takes int, float, str, bool; `+` never mixes str and number (`str(n)`). f-strings, `%`,
-  `.format`: `d f s`, width, precision, `<>^`.
-- Text: `for line in sys.stdin` (keeps `\n`), `input()`, `split()`, `int(s)`, a print per line.
-  Bytes for binary, non-UTF-8 (str input exits 1) or one huge line: `read_stdin_bytes(1 << 40)`;
-  `data[i]` is an int (`ord("a")`, not 97); `data[a:b]` an O(1) view, `int(data[a:b])`; to str
-  only by `.decode()`; `write_stdout_bytes(bytearray)`. To print nothing on error, collect output.
-- No big ints: `x ** 0.5`, loops. Libs: `re`, `collections`, `random`,
-  `itertools`, `functools`, `json`; tuples/lambda: MORE. Built in: `heappush`, `heappop(h)` (`key=`), `bisect_left`, `insort`.
+- Annotate parameters, results and empty containers (`xs: list[int] = []`). A name keeps one
+  type in its function: give a new type a new name.
+- Top level: imports, constants (`N = 10`), `@dataclass` classes (methods, no inheritance),
+  functions, `sys.exit(main())`. No globals you change, nested `def`, own exception classes.
+- `int` is 64-bit (`OverflowError`, no big ints). Types: int, float, str, bool, bytes, `list`,
+  `dict`, `set`, `tuple[int, str]` (`return a, b`; `a, b = f()`), dataclasses. `None` only for a
+  class (`nxt: Optional["Node"]`); else a sentinel (-1, "").
+- A list, dict or set parameter is read-only: change a dataclass field (`acc.keys.append`) or
+  return a new one.
+- `print` takes numbers, str, bool, tuples, never a list, dict or `*xs`: `" ".join([str(x) for x
+  in xs])`. A dict literal only as `d = {...}`.
+- Exceptions: built-in kinds by name (`except (ValueError, KeyError):`, no bare `except`); `e`
+  carries no text (`str(e)` is refused): print your own. Uncaught: exit 1.
+- Bind before use: `words = s.split()`, `x = heapq.heappop(h)` (not inside another call). Sort
+  with `xs.sort(key=lambda ...)`; `min`/`max` take no `key=`.
+- Text: `for line in sys.stdin` (keeps `\n`), `input()`, `sys.stdin.read()`, `int(s)`
+  (`ValueError`). Bytes: `sys.stdin.buffer.read()`, `data[i]` is an int, `data[a:b]` an O(1)
+  view, `.decode()`, `sys.stdout.buffer.write(bytearray)`.
+- Modules: `sys re math heapq bisect json`, `collections` (Counter, defaultdict, deque),
+  `itertools`, `functools`, `random` (after `random.seed(n)`).
+- Speed: fix `slow:` hints (`x in list`, `.pop(0)` in loops: use a set, a deque).
 
-MORE (`sed -n A,Bp AIL_REFERENCE_MORE.md`): Commands 7-19, Text I/O 21-55, Bytes 57-89, Syntax 91-102, Local names 104-129, Numbers 131-145, Structs 147-180, Trees 182-224, Lists 226-238, Sort keys 240-247, Nested lists 249-266, Dicts 268-277, Sets 279-285, Strings 287-312, Regular expressions 314-370, Collections 372-444, Tuples, lambdas (Python syntax) 446-505, Libraries 507-560, Heaps 562-577, Loops 579-586, Exceptions 588-595, Refused 597-638, Word count 640-672, Dijkstra 674-716, BFS 718-762, Modules 764-792, Speed 794-813, Parallel 815-850.
+MORE (`sed -n A,Bp AIL_REFERENCE_MORE.md`): Commands 8-20, Text I/O 22-56, Bytes 58-90, Syntax 92-103, Local names 105-130, Numbers 132-146, Structs 148-181, Trees 183-225, Lists 227-239, Sort keys 241-248, Nested lists 250-267, Dicts 269-278, Sets 280-286, Strings 288-313, Regular expressions 315-371, Collections 373-453, Tuples, lambdas (Python syntax) 455-514, Libraries 516-577, Heaps 579-594, Loops 596-603, Exceptions 605-612, Refused 614-655, Word count 657-689, Dijkstra 691-733, BFS 735-779, Modules 781-809, Speed 811-830, Parallel 832-867.

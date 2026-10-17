@@ -37,6 +37,11 @@ class NeedsBox(Exception):
     """Rule X: the site needs a box (S3e); the message names it."""
 
 
+class ValueDiffers(NeedsBox):
+    """Value-semantics mode only: sharing at this site would show through a write to one of the two
+    names (the legacy emitter, and so a brace-syntax file, copies there): the site becomes a copy."""
+
+
 def _regions(fn):
     yield fn.body
     for ins in I.walk(fn.body):
@@ -206,11 +211,12 @@ def _where(share):
 
 
 class Resolver(object):
-    def __init__(self, fn, program, summaries):
+    def __init__(self, fn, program, summaries, value=False):
         self.fn = fn
         self.program = program
         self.summaries = summaries
-        self.stats = dict(moves=0, field_moves=0, takes=0, renames=0, field_borrows=0, copies_moved=0, boxes=0)
+        self.value = value           # value semantics: a share that could be observed becomes a copy
+        self.stats = dict(copies_inserted=0, moves=0, field_moves=0, takes=0, renames=0, field_borrows=0, copies_moved=0, boxes=0)
         self.alias_of = {}           # a place that became a borrower -> the place it now names
         self.alias_roots = set()     # roots whose index proofs (legacy, by name) no longer hold
         self.walias = []
@@ -230,6 +236,8 @@ class Resolver(object):
             ins = pending[0]
             if ins.op == 'list.copy':
                 self.resolve_copy(flow, ins)
+            elif self.value:
+                self.resolve_value(flow, ins)
             else:
                 self.resolve_share(flow, ins)
         self.fix_drops()
@@ -249,6 +257,63 @@ class Resolver(object):
             self.stats['copies_moved'] += 1
             return
         ins.attrs['kept'] = True
+
+    # ------------------------------------------------------------------ value semantics (option A)
+    def resolve_value(self, flow, s):
+        """A brace-syntax file keeps value semantics until S6: `dst = src` means a copy. The cheap
+        shapes keep their meaning without one (same place, dead source: a move; a field taken out
+        and rebound), a rename or borrow stays only when no write through either name can be seen
+        through the other; everything else, and every site the sharing rules refuse (Rule X), is the
+        copy that value semantics implies. (Every check that raises does so before the IR is edited.)"""
+        try:
+            return self.resolve_share(flow, s)
+        except NeedsBox as box:
+            D, X = self.target(flow, s.operands[0]), self.target(flow, s.operands[1])
+            if D[0] == '?':
+                raise
+            if any(T[0] == 'F' and T[2] not in self.fn.params for T in (D, X)):
+                # the IR does not hoist the field lists of a struct local yet (the copy, and the loop
+                # reading them, cost more than the legacy emitter's in-place moves: grid_life-ail-3
+                # +5% instructions); the function stays on the legacy emitter, which has value semantics
+                raise NeedsBox('%s (a field list of a struct local is left to the legacy emitter)' % box)
+            differs = isinstance(box, ValueDiffers) or self.copy_differs(flow, s)
+            self.note(s, 'copy', differs)
+            s.op = 'list.copy'
+            s.attrs = {'dst': s.attrs.get('dst', '?'), 'line': s.attrs.get('line', 0)}
+            self.stats['copies_inserted'] += 1
+
+    def field_written(self, flow, n, key):
+        if n.op == 'list.reset' and n.attrs.get('drop'):
+            return False
+        eff = flow.call_effects(n)
+        tag = 'Field(%s,%s)' % key
+        return eff.unknown or any(w in ('Elem(%s)' % tag, 'Spine(%s)' % tag, 'Rebind(%s)' % tag)
+                                  for w in eff.writes)
+
+    def copy_differs(self, flow, s):
+        """W-ALIAS for a share turned into a copy: some name is written while the other can be read
+        afterwards (a rough, report-only test)."""
+        D = self.target(flow, s.operands[0])
+        X = self.target(flow, s.operands[1])
+        reach = flow.forward(flow.succ[s])
+        for n in reach:
+            if n is s:
+                continue
+            for a, b in ((D, X), (X, D)):
+                if a[0] == 'P' and a[1] in flow.writes[n] and (b[0] != 'P' or b[1] in flow.live_out[n]):
+                    return True
+                if a[0] == 'F' and self.field_written(flow, n, a[1]) and (b[0] != 'P' or b[1] in flow.live_out[n]):
+                    return True
+        return False
+
+    def field_write_seen(self, flow, reach, s, key, place):
+        """Value mode: a write to the field's list at some node while `place` is read afterwards."""
+        for n in reach:
+            if n is s:
+                continue
+            if self.field_written(flow, n, key) and (place in flow.live_out[n] or place in flow.uses[n]):
+                return True
+        return False
 
     # ------------------------------------------------------------------ list.share
     def target(self, flow, v):
@@ -421,6 +486,10 @@ class Resolver(object):
                     raise NeedsBox('%s: a list a struct field holds is also returned' % names)
             differs = any(Dp in flow.writes[n] for n in reach if n is not s) or any(
                 flow.rebinds_field(n, key) for n in reach if n is not s and Dp in flow.live_out[n])
+            if self.value and not differs:
+                differs = self.field_write_seen(flow, reach, s, key, Dp)
+        if self.value and differs:
+            raise ValueDiffers('%s: a write through one name can be seen through the other' % names)
         for d, inside in refs:
             if kind == 'P':
                 d.operands = [X[1]]
@@ -454,6 +523,10 @@ class Resolver(object):
             if any(c.op == 'return' for c in inside):
                 raise NeedsBox('%s: a list a struct field holds is also returned' % names)
         differs = any(Xp in flow.writes[n] for n in reach if n is not s)
+        if self.value and not differs:
+            differs = self.field_write_seen(flow, reach, s, key, Xp)
+        if self.value and differs:
+            raise ValueDiffers('%s: a write through one name can be seen through the other' % names)
         for d, inside in refs:
             d.op = 'field.list'
             d.operands = [base]
@@ -552,8 +625,9 @@ class Resolver(object):
                     ins.attrs['mode'] = 'ck'
 
 
-def resolve(fn, program, summaries=None, loops=()):
+def resolve(fn, program, summaries=None, loops=(), value=False):
     """Resolve every `list.share` and `list.copy` in `fn`; raises NeedsBox (Rule X). Returns the
-    Resolver (stats, W-ALIAS notes)."""
-    r = Resolver(fn, program, summaries)
+    Resolver (stats, W-ALIAS notes). `value`: value semantics (brace-syntax files, until S6): a share
+    whose two names could tell the difference becomes a copy instead of a rename or a refusal."""
+    r = Resolver(fn, program, summaries, value)
     return r.run(list(loops))

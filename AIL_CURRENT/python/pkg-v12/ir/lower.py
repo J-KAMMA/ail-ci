@@ -288,7 +288,8 @@ class Lowering(TextLowering):
         if not self.b.terminated():
             self.fallthrough()
         try:
-            resolved = ownership.resolve(f, self.program, self.summaries, self.iter_loops)
+            resolved = ownership.resolve(f, self.program, self.summaries, self.iter_loops,
+                                         value=os.environ.get('AIL_SURFACE') != 'python')
         except ownership.NeedsBox as box:
             raise NotS0('Rule X (needs a box, stage S3e): %s' % box)
         self.check_bytes_loops(f.body, False)

@@ -203,6 +203,16 @@ main()
 ''',
 }
 
+# With AIL_IR=1 the IR takes a def-syntax function whose only sharing is a list (design section 15):
+# it shares like CPython, so these compile and print what CPython prints. The other kinds (dict, set,
+# bytearray, `+=` on a list) are not in the IR yet: the legacy emitter refuses them by name.
+IR_SHARES = ("list", "list_store", "list_loop")
+
+
+def ir_on():
+    return os.environ.get("AIL_IR", "0").strip().lower() not in ("", "0", "off", "no")
+
+
 NONASCII_CASE = '''
 def h(a: int) -> str:
     v2: str = "-".join("caf\\u00e9 \\u00d1".lower().split(","))
@@ -212,13 +222,294 @@ def h(a: int) -> str:
 print(h(1))
 print("\\u00c9t\\u00e9".upper(), "\\u00c9t\\u00e9".lower())
 '''
-
 BRACE_ALIAS = '''fn main() {
     let xs = [1, 2];
     let ys = xs;
     ys.append(3);
     print(len(xs), len(ys));
 }
+'''
+
+# C2: every way a container gets a second reference. CPython shares; the typed path copies, so the
+# typed path refuses by name (the whole program is then rebuilt on the sharing general path).
+BAG = '''class Bag:
+    def __init__(self, xs: list[int]) -> None:
+        self.xs = xs
+
+'''
+SHARE = {
+    'append': 'def main() -> None:\n    g: list[list[int]] = []\n    xs = [1]\n    g.append(xs)\n'
+              '    xs.append(2)\n    print(len(g[0]))\n\n\nmain()\n',
+    'append_via_outer': 'def main() -> None:\n    g: list[list[int]] = []\n    xs = [1]\n    g.append(xs)\n'
+                        '    g[0].append(2)\n    print(len(xs))\n\n\nmain()\n',
+    'helper': 'def grow(g: list[list[int]], xs: list[int]) -> None:\n    g.append(xs)\n\n\n'
+              'def main() -> None:\n    g: list[list[int]] = []\n    xs = [1]\n    grow(g, xs)\n'
+              '    xs.append(2)\n    print(len(g[0]))\n\n\nmain()\n',
+    'insert': 'def main() -> None:\n    g: list[list[int]] = [[0]]\n    xs = [1]\n    g.insert(0, xs)\n'
+              '    xs.append(2)\n    print(len(g[0]))\n\n\nmain()\n',
+    'extend_display': 'def main() -> None:\n    g: list[list[int]] = []\n    xs = [1]\n    g.extend([xs])\n'
+                      '    xs.append(2)\n    print(len(g[0]))\n\n\nmain()\n',
+    'list_display': 'def main() -> None:\n    xs = [1]\n    g = [xs, [5]]\n    xs.append(2)\n'
+                    '    print(len(g[0]))\n\n\nmain()\n',
+    'element_store': 'def main() -> None:\n    xs = [1]\n    g: list[list[int]] = [[0]]\n    g[0] = xs\n'
+                     '    xs.append(2)\n    print(len(g[0]))\n\n\nmain()\n',
+    'comprehension': 'def main() -> None:\n    xs = [1]\n    g = [xs for _ in range(2)]\n    xs.append(2)\n'
+                     '    print(len(g[0]))\n\n\nmain()\n',
+    'tuple': 'def main() -> None:\n    xs = [1]\n    t = (xs, 3)\n    xs.append(2)\n    print(len(t[0]))\n\n\nmain()\n',
+    'constructor': BAG + 'def main() -> None:\n    ys = [1]\n    b = Bag(ys)\n    ys.append(8)\n'
+                   '    print(len(b.xs))\n\n\nmain()\n',
+    'constructor_field_write': BAG + 'def main() -> None:\n    ys = [1]\n    b = Bag(ys)\n    b.xs.append(8)\n'
+                               '    print(len(ys))\n\n\nmain()\n',
+    'field_read': BAG + 'def main() -> None:\n    b = Bag([1])\n    zs = b.xs\n    zs.append(9)\n'
+                  '    print(len(b.xs))\n\n\nmain()\n',
+    'field_read_other_way': BAG + 'def main() -> None:\n    b = Bag([1])\n    zs = b.xs\n    b.xs.append(9)\n'
+                            '    print(len(zs))\n\n\nmain()\n',
+    'return_parameter': 'def ident(x: list[int]) -> list[int]:\n    return x\n\n\ndef main() -> None:\n'
+                        '    xs = [1]\n    r = ident(xs)\n    r.append(2)\n    print(len(xs))\n\n\nmain()\n',
+    'return_field': BAG + 'def get(b: Bag) -> list[int]:\n    return b.xs\n\n\ndef main() -> None:\n'
+                    '    b = Bag([1])\n    r = get(b)\n    r.append(2)\n    print(len(b.xs))\n\n\nmain()\n',
+    'return_element': 'def first(g: list[list[int]]) -> list[int]:\n    return g[0]\n\n\ndef main() -> None:\n'
+                      '    g: list[list[int]] = [[1]]\n    r = first(g)\n    r.append(2)\n    print(len(g[0]))\n\n\nmain()\n',
+    'method_store': 'class Bag:\n    def __init__(self) -> None:\n        self.xs: list[int] = []\n\n'
+                    '    def put(self, ys: list[int]) -> None:\n        self.xs = ys\n\n\n'
+                    'def main() -> None:\n    b = Bag()\n    ys = [1]\n    b.put(ys)\n    ys.append(2)\n'
+                    '    print(len(b.xs))\n\n\nmain()\n',
+}
+
+# copies, fresh accumulators and read-only uses: the typed path keeps them
+SHARE_FINE = {
+    'copy_append': 'def main() -> None:\n    g: list[list[int]] = []\n    xs = [1]\n    g.append(xs.copy())\n'
+                   '    xs.append(2)\n    print(len(g[0]), len(xs))\n\n\nmain()\n',
+    'slice_append': 'def main() -> None:\n    g: list[list[int]] = []\n    xs = [1]\n    g.append(xs[:])\n'
+                    '    xs.append(2)\n    print(len(g[0]), len(xs))\n\n\nmain()\n',
+    'fresh_rows': 'def main() -> None:\n    g: list[list[int]] = []\n    for i in range(3):\n'
+                  '        row: list[int] = []\n        for j in range(i + 1):\n            row.append(j)\n'
+                  '        g.append(row)\n    print(len(g), len(g[2]))\n\n\nmain()\n',
+    'reset_row': 'def main() -> None:\n    g: list[list[int]] = []\n    row: list[int] = []\n'
+                 '    for i in range(6):\n        row.append(i)\n        if len(row) == 2:\n'
+                 '            g.append(row)\n            row = []\n    print(len(g), len(g[0]))\n\n\nmain()\n',
+    'append_no_write': 'def main() -> None:\n    g: list[list[int]] = []\n    xs = [1, 2]\n    g.append(xs)\n'
+                       '    print(len(g[0]), len(xs))\n\n\nmain()\n',
+    'rebind_after': 'def main() -> None:\n    g: list[list[int]] = []\n    xs = [1]\n    g.append(xs)\n'
+                    '    xs = [9]\n    xs.append(1)\n    print(len(g[0]), len(xs))\n\n\nmain()\n',
+    'scalar_append': 'def main() -> None:\n    vals = [3, 1, 2]\n    out: list[int] = []\n'
+                     '    for i in range(3):\n        out.append(vals[i])\n    vals.sort()\n'
+                     '    print(out[0], vals[0], len(out))\n\n\nmain()\n',
+    'ctor_read_only': BAG + 'def main() -> None:\n    ys = [1, 2]\n    b = Bag(ys)\n    print(len(b.xs), len(ys))\n\n\nmain()\n',
+    'ctor_copy': BAG + 'def main() -> None:\n    ys = [1]\n    b = Bag(ys.copy())\n    ys.append(8)\n'
+                 '    b.xs.append(7)\n    print(len(b.xs), len(ys))\n\n\nmain()\n',
+    'field_read_only': BAG + 'def main() -> None:\n    b = Bag([1])\n    zs = b.xs\n    print(len(zs), len(b.xs))\n\n\nmain()\n',
+}
+
+# C3: CPython evaluates a default once, so the list/dict is shared between calls (general path)
+MUTABLE_DEFAULTS = '''
+def add(x: int, acc: list[int] = []) -> int:
+    acc.append(x)
+    return len(acc)
+
+
+def tally(k: str, seen: dict[str, int] = {}) -> int:
+    seen[k] = seen.get(k, 0) + 1
+    return seen[k]
+
+
+class K:
+    def put(self, v: int, buf: list[int] = []) -> int:
+        buf.append(v)
+        return len(buf)
+
+
+def main() -> None:
+    print(add(1), add(2), add(3))
+    print(add(9, [7]), add(4))
+    print(tally("a"), tally("a"), tally("b"))
+    k = K()
+    j = K()
+    print(k.put(1), j.put(2), k.put(3))
+
+
+main()
+'''
+
+# C4: a dict or set that changes size while it is walked raises RuntimeError (general path: message too)
+CHANGED_SIZE_GENERAL = '''
+def main() -> None:
+    d: dict[int, int] = {1: 1, 2: 2}
+    try:
+        for k in d:
+            d[k + 10] = 0
+    except RuntimeError as e:
+        print("caught", e)
+    print(len(d))
+    e2: dict[int, int] = {1: 1, 2: 2, 3: 3}
+    for k in e2:
+        e2[k] = e2[k] + 1
+    print(sorted(e2.items()))
+    try:
+        for k in e2:
+            del e2[k]
+    except RuntimeError as err:
+        print("caught", err)
+    s: set[int] = {1, 2}
+    try:
+        for x in s:
+            s.add(x + 10)
+    except RuntimeError as err:
+        print("caught", err)
+    print(len(s))
+    f: dict[str, int] = {"a": 1}
+    try:
+        for key, val in f.items():
+            f[key + "x"] = val
+    except RuntimeError as err:
+        print("caught", err)
+    try:
+        for key in f.keys():
+            f["q" + key] = 0
+    except RuntimeError as err:
+        print("caught", err)
+    try:
+        for val in f.values():
+            f["z"] = 0
+    except RuntimeError as err:
+        print("caught", err)
+    print(len(f))
+    g: dict[int, int] = {1: 1, 2: 2}
+    for k in g:
+        g[k] = 0
+    print(g)
+    for k in d:
+        d[k + 1000] = 1
+    print("not reached")
+
+
+main()
+'''
+CHANGED_SIZE_TYPED = '''
+def main() -> None:
+    d: dict[int, int] = {1: 1, 2: 2}
+    try:
+        for k in d:
+            d[k + 10] = 0
+    except RuntimeError:
+        print("caught")
+    print(len(d))
+    e2: dict[int, int] = {1: 1, 2: 2, 3: 3}
+    for k in e2:
+        e2[k] = e2[k] + 1
+    print(len(e2))
+    try:
+        for k in e2:
+            del e2[k]
+    except RuntimeError:
+        print("caught")
+    s: set[int] = {1, 2}
+    try:
+        for x in s:
+            s.add(x + 10)
+    except RuntimeError:
+        print("caught")
+    print(len(s))
+    f: dict[str, int] = {"a": 1}
+    try:
+        for key, val in f.items():
+            f[key + "x"] = val
+    except RuntimeError:
+        print("caught")
+    try:
+        for key in f.keys():
+            f["q" + key] = 0
+    except RuntimeError:
+        print("caught")
+    try:
+        for val in f.values():
+            f["z"] = 0
+    except RuntimeError:
+        print("caught")
+    print(len(f))
+    g: dict[int, int] = {1: 1, 2: 2}
+    for k in g:
+        g[k] = 0
+    print(len(g))
+    for k in d:
+        d[k + 1000] = 1
+    print("not reached")
+
+
+main()
+'''
+
+# C12: the refusal names the real reason
+MINMAX_STR = 'def main() -> None:\n    print(min("ab", "b"))\n    print(max("ab", "b"))\n\n\nmain()\n'
+DICT_ALIAS_UNTYPED = ('def main() -> None:\n    d = {"a": 1}\n    e = d\n    e["b"] = 2\n'
+                      '    print(len(d))\n\n\nmain()\n')
+
+# C15: a str element must still be there when a later argument raises
+EXCEPT_LIST = '''import sys
+from dataclasses import dataclass
+
+
+@dataclass
+class Acc:
+    total: int
+    names: list[str]
+
+
+def add(acc: Acc, name: str, v: int) -> None:
+    acc.names.append(name)
+    acc.total += v
+
+
+def main() -> int:
+    acc = Acc(0, [])
+    for line in sys.stdin:
+        f = line.split()
+        try:
+            add(acc, f[0], int(f[1]))
+        except ValueError:
+            print("bad", f[0])
+    print(acc.total, len(acc.names))
+    return 0
+
+
+main()
+'''
+
+# C17 (reported, not reproduced): list(d.keys()) / list(d.values()) / list(d.items()) / sorted(d) lengths
+DICT_LISTS = '''
+def total(ks: list[str]) -> int:
+    return len(ks)
+
+
+def main() -> None:
+    names: dict[str, int] = {}
+    for w in ["delta", "alpha", "charlie"]:
+        names[w] = len(w)
+    keys = list(names.keys())
+    print(len(keys), keys[1])
+    keys.sort()
+    print(len(keys), keys[0], total(keys))
+    vals = list(names.values())
+    vals.append(9)
+    print(len(vals), sum(vals))
+    ks = list(names)
+    sk = sorted(names.keys())
+    sv = sorted(names.values())
+    print(len(ks), len(sk), sk[0], len(sv))
+    pairs = sorted(names.items())
+    print(len(pairs), pairs[0][0])
+    ik: dict[int, str] = {}
+    for i in range(4):
+        ik[i * 3] = "v" + str(i)
+    il = list(ik.keys())
+    print(len(il), il[3], len(list(ik)), len(sorted(ik.keys())))
+    iv = list(ik.values())
+    print(len(iv), iv[3])
+    ii = list(ik.items())
+    print(len(ii), ii[3][0], ii[3][1])
+
+
+main()
 '''
 
 
@@ -274,7 +565,12 @@ class FuzzFindings(unittest.TestCase):
         for name, text in ALIAS.items():
             with self.subTest(name):
                 with tempfile.TemporaryDirectory() as directory:
-                    built, _, _ = run_both(directory, text, name, {'AIL_NO_GENERAL': '1'})
+                    built, ran, expected = run_both(directory, text, name, {'AIL_NO_GENERAL': '1'})
+                    if ir_on() and name in IR_SHARES:
+                        # CPython's result: the IR owns the function and shares the list
+                        self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                        self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout))
+                        continue
                     self.assertEqual(built.returncode, 3, built.stdout + built.stderr)
                     message = built.stdout + built.stderr
                     self.assertIn('makes a second name for the same container', message)
@@ -323,12 +619,19 @@ class FuzzFindings(unittest.TestCase):
     def test_check_names_the_alias(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory, 'alias.ail')
-            source.write_text(ALIAS['list'], encoding='utf-8')
+            kind = 'dict' if ir_on() else 'list'     # with the IR on, the list alias is shared, not refused
+            source.write_text(ALIAS[kind], encoding='utf-8')
             checked = subprocess.run([sys.executable, '-B', str(ROOT / 'ail_chatgpt.py'), 'check', source.name,
                                       '--syntax', 'python'], cwd=directory, capture_output=True, text=True,
                                      timeout=120)
             self.assertIn('makes a second name for the same container', checked.stdout)
             self.assertIn('line 3', checked.stdout)
+            if ir_on():
+                source.write_text(ALIAS['list'], encoding='utf-8')
+                again = subprocess.run([sys.executable, '-B', str(ROOT / 'ail_chatgpt.py'), 'check', source.name,
+                                        '--syntax', 'python'], cwd=directory, capture_output=True, text=True,
+                                       timeout=120)
+                self.assertIn('"status": "passed"', again.stdout)
 
     def test_block_syntax_keeps_value_semantics(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -337,6 +640,81 @@ class FuzzFindings(unittest.TestCase):
             self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
             ran = subprocess.run([str(exe)], capture_output=True, timeout=60)
             self.assertEqual(ran.stdout, b'2 3\n')
+
+    # ---- C2: second references to a container (append / constructor / field read / return ...) ----
+    def test_second_references_are_cpython_identical_in_every_mode(self):
+        for name, text in SHARE.items():
+            with self.subTest(name):
+                self.same_as_cpython(text, 'share_' + name)
+                self.same_as_cpython(text, 'share_%s_ir' % name, {'AIL_IR': '1'})
+
+    def test_second_references_are_refused_by_name_on_the_typed_path(self):
+        for name, text in SHARE.items():
+            with self.subTest(name):
+                with tempfile.TemporaryDirectory() as directory:
+                    built, _, _ = run_both(directory, text, 'typed_' + name, {'AIL_NO_GENERAL': '1'})
+                    self.assertEqual(built.returncode, 3, built.stdout + built.stderr)
+                    self.assertIn('second reference to the same container', built.stdout + built.stderr)
+
+    def test_copies_fresh_accumulators_and_reads_stay_on_the_typed_path(self):
+        for name, text in SHARE_FINE.items():
+            with self.subTest(name):
+                self.same_as_cpython(text, 'fine_' + name, {'AIL_NO_GENERAL': '1'})
+
+    # ---- C3: a mutable default is evaluated once ----
+    def test_mutable_defaults_are_shared_between_calls(self):
+        self.same_as_cpython(MUTABLE_DEFAULTS, 'mutdefault')
+        self.same_as_cpython(MUTABLE_DEFAULTS, 'mutdefault_ir', {'AIL_IR': '1'})
+
+    # ---- C4: changing the size of a dict or set while walking it ----
+    def test_changing_size_during_iteration_raises_runtime_error(self):
+        for mode, env in (('general', None), ('general_ir', {'AIL_IR': '1'})):
+            with self.subTest(mode):
+                with tempfile.TemporaryDirectory() as directory:
+                    built, ran, expected = run_both(directory, CHANGED_SIZE_GENERAL, 'size_' + mode, env)
+                    self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                    self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout), ran.stderr)
+                    self.assertEqual(expected.returncode, 1)
+                    self.assertIn(b'RuntimeError: dictionary changed size during iteration', ran.stderr)
+        for mode, env in (('typed', {'AIL_NO_GENERAL': '1'}),
+                          ('typed_ir', {'AIL_NO_GENERAL': '1', 'AIL_IR': '1'})):
+            with self.subTest(mode):
+                with tempfile.TemporaryDirectory() as directory:
+                    built, ran, expected = run_both(directory, CHANGED_SIZE_TYPED, 'size_' + mode, env)
+                    self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                    self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout), ran.stderr)
+                    self.assertIn(b'RuntimeError: dictionary changed size during iteration', ran.stderr)
+
+    # ---- C12: the refusal names the real reason ----
+    def test_refusal_reasons_are_the_real_ones(self):
+        with tempfile.TemporaryDirectory() as directory:
+            built, _, _ = run_both(directory, MINMAX_STR, 'minmax', {'AIL_NO_GENERAL': '1'})
+            self.assertEqual(built.returncode, 3, built.stdout + built.stderr)
+            self.assertIn('min() over str values is not built', built.stdout + built.stderr)
+        with tempfile.TemporaryDirectory() as directory:
+            built, _, _ = run_both(directory, DICT_ALIAS_UNTYPED, 'dictalias', {'AIL_NO_GENERAL': '1'})
+            self.assertEqual(built.returncode, 3, built.stdout + built.stderr)
+            self.assertIn('makes a second name for the same container', built.stdout + built.stderr)
+        self.same_as_cpython(MINMAX_STR, 'minmax_general')
+        self.same_as_cpython(DICT_ALIAS_UNTYPED, 'dictalias_general')
+
+    def test_lists_made_from_dict_views_have_the_right_length(self):
+        for name, env in (('dl', {'AIL_NO_GENERAL': '1'}), ('dl_ir', {'AIL_NO_GENERAL': '1', 'AIL_IR': '1'}),
+                          ('dl_general', None)):
+            self.same_as_cpython(DICT_LISTS, name, env)
+
+    # ---- C15: an argument moved into a call must survive a later argument that raises ----
+    def test_str_element_survives_a_later_argument_raising(self):
+        data = b'a 1\nb x\nc 3\n'
+        for name, env in (('exc', None), ('exc_ir', {'AIL_IR': '1'})):
+            with self.subTest(name):
+                with tempfile.TemporaryDirectory() as directory:
+                    built, source, exe = compile_source(directory, EXCEPT_LIST, name, env=env)
+                    self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                    ran = subprocess.run([str(exe)], input=data, capture_output=True, timeout=60)
+                    expected = subprocess.run([sys.executable, str(source)], input=data, capture_output=True, timeout=60)
+                    self.assertEqual(expected.stdout, b'bad b\n4 2\n')
+                    self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout), ran.stderr)
 
 
 if __name__ == '__main__':

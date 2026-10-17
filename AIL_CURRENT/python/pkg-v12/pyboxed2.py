@@ -26,12 +26,13 @@ Anything this emitter does not implement raises `Unsupported` (imported from pyf
 exception the typed path and v1 both use) -- named, never a silent gap, never a bare gcc error.
 """
 import ast
+import copy
 import json
 import os
 import re
 import runpy
 
-from pyfront import Unsupported
+from pyfront import Unsupported, refuse_complex_pow
 import pyfunc
 try:
     import pymix
@@ -751,6 +752,42 @@ def _assign_target_names(t):
     return set()
 
 
+_HOISTED_DEFAULTS = (ast.List, ast.Dict, ast.Set, ast.ListComp, ast.DictComp, ast.SetComp,
+                     ast.GeneratorExp, ast.Call)
+
+
+def _hoist_defaults(tree):
+    """CPython evaluates a default argument ONCE, when the `def` runs, so `def f(x, acc=[])` shares
+    one list between calls. This emitter builds a default at each call site, which would hand every
+    call a fresh one. A default that builds something (a list/dict/set display or comprehension, or a
+    call) is therefore evaluated once into a module variable placed just before the `def` (before
+    the class, for a method) and read from there. The assignments are marked `_ail_hoisted` so the
+    'only defs and classes' entry-point convention does not count them as module statements."""
+    out, count = [], 0
+    for stmt in tree.body:
+        funcs = []
+        if isinstance(stmt, ast.FunctionDef):
+            funcs = [stmt]
+        elif isinstance(stmt, ast.ClassDef):
+            funcs = [m for m in stmt.body if isinstance(m, ast.FunctionDef)]
+        for f in funcs:
+            for defaults in (f.args.defaults, f.args.kw_defaults):
+                for i, d in enumerate(defaults):
+                    if d is None or not isinstance(d, _HOISTED_DEFAULTS):
+                        continue
+                    name = '_ail_default_%d' % count
+                    count += 1
+                    assign = ast.Assign(targets=[ast.Name(id=name, ctx=ast.Store())], value=d)
+                    ast.copy_location(assign, d)
+                    ast.copy_location(assign.targets[0], d)
+                    assign._ail_hoisted = True
+                    out.append(assign)
+                    defaults[i] = ast.copy_location(ast.Name(id=name, ctx=ast.Load()), d)
+        out.append(stmt)
+    tree.body = out
+    ast.fix_missing_locations(tree)
+
+
 def _scan_assigned_names(stmts):
     """Names assigned anywhere in `stmts` (a function or module body), stopping at nested
     FunctionDef/ClassDef (a different scope) and NOT descending into comprehension/generator/
@@ -940,6 +977,9 @@ class Compiler:
     # ------------------------------------------------------------------------------- entry point
     def compile(self, source):
         tree = ast.parse(source)
+        self.source_lines = source.splitlines()
+        mix_tree = copy.deepcopy(tree)          # the mixed-mode typed clones see the source as written
+        _hoist_defaults(tree)
         self.module_names = _scan_assigned_names(tree.body)
         for n in ast.walk(tree):
             if isinstance(n, ast.Global):
@@ -965,7 +1005,7 @@ class Compiler:
         # BRIEF_mixed_mode.md: after every top-level function is registered (`self.functions`,
         # needed to check a candidate for *args/**kwargs/keyword-only parameters) and before any
         # call site is compiled (`_emit_function` below is where `_call_user_function` runs).
-        self._setup_mix(source, tree)
+        self._setup_mix(source, mix_tree)
 
         for name in self.functions:
             info = self.functions[name]
@@ -985,6 +1025,7 @@ class Compiler:
 
         has_toplevel_exec = any(not isinstance(n, (ast.FunctionDef, ast.ClassDef, ast.Import,
                                                     ast.ImportFrom))
+                                and not getattr(n, '_ail_hoisted', False)
                                 for n in tree.body)
         fn_order = [n.name for n in tree.body if isinstance(n, ast.FunctionDef)]
         # A source with NO top-level executable statement at all (only def/class/import) is the
@@ -1017,6 +1058,9 @@ class Compiler:
 
         ng = self.next_global_slot
         parts = [PREAMBLE]
+        if getattr(self, 'needs_boxcase', False):
+            import cruntime
+            parts.append(cruntime.BOXCASE)
         if self.mix_typed:
             # mix_call.h relies on ail_obj/ail_ctx/ail_box_*/ail_float_val/ail_view_to_str/ail_str,
             # all already defined by PREAMBLE above -- inlined here (not #include'd: `out`'s own
@@ -1036,6 +1080,15 @@ class Compiler:
         parts.append('static ail_frame g_frame;\n')
         parts.append('\n/* ---- forward declarations ---- */\n')
         parts.extend(self.top_decls)
+        for cname in self.class_order:
+            nxt = self.classes[cname]['methods'].get('__next__')
+            if nxt and nxt['all_params'] == ['self']:
+                # the iterator protocol for a user class: StopIteration ends the loop
+                parts.append('static ail_st pit_%s(ail_ctx *cx, ail_obj *out, ail_obj self) {\n'
+                             '    ail_st st = %s(cx, out, self);\n'
+                             '    if (st == AIL_EXC && ail_exc_matches_b(cx, AIL_B_STOPITERATION)) '
+                             '{ ail_exc_clear(cx); return AIL_STOP; }\n'
+                             '    return st;\n}\n' % (cname, nxt['cname']))
         parts.append('\n/* ---- functions and methods ---- */\n')
         parts.extend(self.top_defs)
         parts.append('\n/* ---- module body ---- */\n')
@@ -1060,6 +1113,24 @@ class Compiler:
                 base_expr = 'ail_box_none()'
             setup.append('    g_slots_arr[%d] = ail_class_new(cx, %s, %s);\n' %
                          (self.global_slots['class:' + cname], c_str_literal(cname), base_expr))
+            nxt = cls['methods'].get('__next__')
+            if nxt and nxt['all_params'] == ['self']:
+                setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->iter_next = pit_%s;\n' %
+                             (self.global_slots['class:' + cname], cname))
+            for hook, field in (('__repr__', 'repr_fn'), ('__str__', 'str_fn')):
+                hm = cls['methods'].get(hook)
+                if hm and hm['all_params'] == ['self']:
+                    setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->%s = %s;\n' %
+                                 (self.global_slots['class:' + cname], field, hm['cname']))
+            itr = cls['methods'].get('__iter__')
+            if itr and itr['all_params'] == ['self']:
+                setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->iter_iter = %s;\n' %
+                             (self.global_slots['class:' + cname], itr['cname']))
+            if cls.get('dc'):
+                setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->dc = %d; '
+                             '((ail_classobj *)g_slots_arr[%d].o)->dc_hide = %dULL;\n' %
+                             (self.global_slots['class:' + cname], cls['dc'],
+                              self.global_slots['class:' + cname], cls['dc_hide']))
         if array_entry is not None:
             parts.append(self._array_entry_main(array_entry, tree, setup))
             return ''.join(parts)
@@ -1289,7 +1360,24 @@ class Compiler:
             else:
                 raise Unsupported('a class body statement other than def/assignment/pass/'
                                   'docstring in %s' % node.name)
-        self.classes[node.name] = {'base': base, 'methods': methods, 'class_attrs': class_attrs}
+        dc = 0
+        marker = getattr(self, 'source_lines', None)
+        hide = 0
+        if (marker and 2 <= node.lineno <= len(marker) + 1
+                and marker[node.lineno - 2].strip().startswith('# ail:dataclass')
+                and '__repr__' not in methods
+                and '__init__' in methods):
+            # ail_syntax.py replaced `@dataclass` by this marker comment (and wrote the __init__):
+            # print / repr / str / containers show ClassName(field=repr, ...) like CPython
+            init = [i for i in node.body if isinstance(i, ast.FunctionDef) and i.name == '__init__'][0]
+            dc = len(init.args.args)             # self + the fields = field count + 1
+            line = marker[node.lineno - 2].strip()
+            if ' hide=' in line:
+                hidden_names = set(line.split(' hide=', 1)[1].split(','))
+                for i, a in enumerate(init.args.args[1:]):
+                    if a.arg in hidden_names:
+                        hide |= 1 << i
+        self.classes[node.name] = {'base': base, 'methods': methods, 'class_attrs': class_attrs, 'dc': dc, 'dc_hide': hide}
         self.class_order.append(node.name)
 
     def _resolve_method(self, klass, mname):
@@ -1607,15 +1695,24 @@ class Compiler:
             t = ctx.tmp()
             ctx.emit('%s = ail_deque_data(%s);' % (t, v))
             return t
-        cname = self._inst_class(node, ctx)
-        info = self._resolve_method(cname, '__iter__') if cname else None
-        if info:
-            recv = self.expr(node, ctx)
+        if self._is_dict_view_call(node, ctx):
+            # CPython's `d.items()` / `.keys()` / `.values()` are live views: a loop over one raises
+            # RuntimeError when the dict changes size. The method call below returns a snapshot list,
+            # which would walk on quietly, so a loop over a dict walks the dict's own iterator.
+            recv = self.expr(node.func.value, ctx)
             t = ctx.tmp()
-            ctx.emit('st = %s(cx, &%s, %s);' % (info['cname'], t, recv))
-            ctx.check()
+            if node.func.attr == 'keys':
+                ctx.emit('%s = %s;' % (t, recv))
+            else:
+                ctx.emit('%s = ail_iter_dict_%s(cx, %s);' % (t, node.func.attr, recv))
             return t
         return self.expr(node, ctx)
+
+    def _is_dict_view_call(self, node, ctx):
+        """`d.items()` / `d.keys()` / `d.values()` on something proven to be a dict."""
+        return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and not node.args
+                and not node.keywords and node.func.attr in ('items', 'keys', 'values')
+                and self.infer_kind(node.func.value, ctx) == 'dict')
 
     @staticmethod
     def _is_sys_stdin(node):
@@ -1658,6 +1755,8 @@ class Compiler:
         it = ctx.tmp()
         val = ctx.tmp()
         k = self.infer_kind(iter_node, ctx)
+        if self._is_dict_view_call(iter_node, ctx):
+            k = None                    # an iterator object, not the snapshot list the call returns
         if k in ('list', 'tuple'):
             idx = ctx.new_cvar('i')
             ctx.emit('%s = %s;' % (it, src))
@@ -2132,6 +2231,8 @@ class Compiler:
         fn = self.BINOP_FN.get(type(node.op))
         if fn is None:
             raise Unsupported('the %s binary operator' % type(node.op).__name__)
+        if isinstance(node.op, ast.Pow):
+            refuse_complex_pow(node)
         l = self.expr(node.left, ctx)
         r = self.expr(node.right, ctx)
         t = ctx.tmp()
@@ -3183,7 +3284,7 @@ class Compiler:
 
     def _call_class(self, name, args, kwargs, ctx):
         cls = self.classes[name]
-        info = cls['methods'].get('__init__')
+        info = self._resolve_method(name, '__init__')
         t = ctx.tmp()
         ctx.emit('%s = ail_inst_new(cx, g_slots_arr[%d]);' %
                 (t, self.global_slots['class:' + name]))
@@ -4205,6 +4306,8 @@ class Compiler:
         start_node = args[1] if len(args) == 2 else kwargs.get('start')
         ctx.emit('%s = %s;' % (acc, self.expr(start_node, ctx) if start_node is not None else 'ail_box_int(0)'))
         it = ctx.tmp(); val = ctx.tmp()
+        sst = "sumst_" + "".join(ch for ch in acc if ch.isalnum())
+        ctx.emit('ail_sumst %s; ail_sum_begin(&%s, %s);' % (sst, sst, acc))
         ctx.emit('st = ail_iter(cx, &%s, %s);' % (it, src))
         ctx.check()
         ctx.emit('for (;;) {')
@@ -4212,10 +4315,11 @@ class Compiler:
         ctx.emit('st = ail_it_next(cx, &%s, %s);' % (val, it))
         ctx.emit('if (st == AIL_STOP) { st = AIL_OK; break; }')
         ctx.check()
-        ctx.emit('st = ail_op_add(cx, &%s, %s, %s);' % (acc, acc, val))
+        ctx.emit('st = ail_sum_step(cx, &%s, &%s, %s);' % (acc, sst, val))
         ctx.check()
         ctx.indent -= 1
         ctx.emit('}')
+        ctx.emit('ail_sum_end(cx, &%s, &%s);' % (acc, sst))
         return acc
 
     def _b_any(self, args, kwargs, ctx):
@@ -4463,6 +4567,10 @@ class Compiler:
                 return t
         m = getattr(self, '_m_' + f.attr, None)
         kind = self.infer_kind(recv, ctx)
+        if not cname and kind is None:
+            dyn = self._dynamic_user_method(recv_c, f, args, kwargs, ctx, m)
+            if dyn is not None:
+                return dyn
         if m is not None:
             if kwargs:
                 _kw = _METHOD_KWARGS.get(f.attr, ())
@@ -4498,6 +4606,55 @@ class Compiler:
             return t
         raise Unsupported('the method .%s() (on a %s)' % (f.attr, kind or 'value of unknown '
                                                           'static kind'))
+
+    def _dynamic_user_method(self, recv_c, f, args, kwargs, ctx, builtin):
+        """`x.meth(...)` where the receiver's class is not known statically but some user class
+        defines `meth`: test the run-time class (most derived first) and call that method; any
+        other receiver takes the built-in handler of the same name (a list's `.append`, a
+        Counter's `.total`, ...), as CPython would resolve it on the object itself."""
+        def depth(c):
+            n = 0
+            while self.classes[c]['base'] in self.classes:
+                c = self.classes[c]['base']
+                n += 1
+            return n
+        owners = [c for c in self.class_order if f.attr in self.classes[c]['methods']]
+        if not owners:
+            return None
+        owners.sort(key=depth, reverse=True)
+        t = ctx.tmp()
+        ctx.emit('if (%s.tag == AIL_T_INST) {' % recv_c)
+        ctx.indent += 1
+        first = True
+        for c in owners:
+            info = self.classes[c]['methods'][f.attr]
+            ctx.emit('%sif (ail_class_is_or_subclass(((ail_instobj *)%s.o)->cls, g_slots_arr[%d])) {' %
+                     ('' if first else 'else ', recv_c, self.global_slots['class:' + c]))
+            first = False
+            ctx.indent += 1
+            argcs = self._bind_args(f.attr, info, args, kwargs, ctx)
+            if not info.get('is_static'):
+                argcs = [recv_c] + argcs
+            ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t, ''.join(', ' + a for a in argcs)))
+            ctx.check()
+            ctx.indent -= 1
+            ctx.emit('}')
+        ctx.emit('else { st = ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, "object has no attribute \'%s\'"); goto %s; }'
+                 % (f.attr, ctx.cur_err_target()))
+        ctx.uses_st = True
+        ctx.indent -= 1
+        ctx.emit('} else {')
+        ctx.indent += 1
+        if builtin is not None:
+            res = builtin(recv_c, None, args, kwargs, ctx)
+            ctx.emit('%s = %s;' % (t, res))
+        else:
+            ctx.emit('st = ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, "object has no attribute \'%s\'"); goto %s;'
+                     % (f.attr, ctx.cur_err_target()))
+            ctx.uses_st = True
+        ctx.indent -= 1
+        ctx.emit('}')
+        return t
 
     def _call_module_function(self, recv, f, args, kwargs, ctx):
         mod = self.module_aliases.get(recv.id, recv.id)
@@ -5170,13 +5327,15 @@ class Compiler:
         return self._strip_family('ail_str_rstrip_view', 'rstrip', recv, args, ctx)
 
     def _m_lower(self, recv, kind, args, kwargs, ctx):
+        self.needs_boxcase = True          # appends the case tables (cruntime.BOXCASE) to this program
         t = ctx.tmp()
-        ctx.emit('%s = ail_str_lower(cx, %s);' % (t, recv))
+        ctx.emit('%s = ail_boxed_case(cx, %s, 0);' % (t, recv))
         return t
 
     def _m_upper(self, recv, kind, args, kwargs, ctx):
+        self.needs_boxcase = True
         t = ctx.tmp()
-        ctx.emit('%s = ail_str_upper(cx, %s);' % (t, recv))
+        ctx.emit('%s = ail_boxed_case(cx, %s, 1);' % (t, recv))
         return t
 
     def _m_replace(self, recv, kind, args, kwargs, ctx):

@@ -675,7 +675,8 @@ class TableTests(unittest.TestCase):
             for t in params + results:
                 self.assertEqual(I.type_errors(t), [], (name, t))
             for a in e['attrs']:
-                self.assertIn('{' + a + '}', e['c'], (name, a))
+                # (`win`, the window cell of S4c-1, is spelled {W} in the template)
+                self.assertIn('{' + ('W' if a == 'win' else a) + '}', e['c'], (name, a))
             if e['arena']:
                 self.assertTrue(e['effects'].allocs, name)
             if e['pure']:

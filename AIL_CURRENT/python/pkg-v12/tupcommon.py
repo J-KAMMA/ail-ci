@@ -11,7 +11,7 @@ if _here not in sys.path:
 import tuplegen as G  # noqa: E402
 from tuplegen import (INT, FLT, STR, BOOL, BYTES, Refused, Hole, R, deep, is_tuple, has_tuple,  # noqa: E402,F401
                       is_table_dict, is_table_set, is_table, known, code, tcode, tname, ann_text, table_name,
-                      leaves)
+                      leaves, fld)
 
 BUILT = ('tuples of int, float, bool, str and of tuples (not variable-length tuple[int, ...]) as return values, '
          'parameters, locals, list / set / dict elements, dict keys and values; unpacking (also nested and in for '

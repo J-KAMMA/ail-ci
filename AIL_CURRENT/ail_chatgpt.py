@@ -119,8 +119,26 @@ def _check_main_called(tree):
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'main'
                 and not any(m.lineno <= node.lineno <= m.end_lineno for m in mains)):
             return
-    raise ValueError('main() is defined but never called; add `main()` or '
-                     '`if __name__ == "__main__": main()` at the end (CPython would run nothing)')
+    error = ValueError('main() is defined but never called, so CPython would run nothing and this '
+                       'compiler refuses rather than run it.\n'
+                       '  write instead: add `main()` as the last line of the file '
+                       '(or `if __name__ == "__main__": main()`)')
+    error.source_line, error.source_column = mains[0].lineno, mains[0].col_offset
+    raise error
+
+
+def _refuse_load(error):
+    """Print a load-time refusal as `path:line:col: message` (no argparse usage dump) and exit 2.
+    The position comes from the failing check (`error.refusal`) when the loader found one."""
+    refusal = getattr(error, 'refusal', None)
+    if refusal is None:
+        message = str(error)
+    else:
+        path, line, column, text = refusal
+        where = os.path.relpath(path)
+        message = '%s:%d:%d: %s' % (path if where.startswith('..') else where, line, column, text)
+    print(message, file=sys.stderr)
+    raise SystemExit(2)
 
 
 def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only=False,
@@ -204,7 +222,16 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                     exc.source_position = (str(path), *position)
                 if syntax == 'python' and position is not None:
                     # `compile` prints only this message: name the line the check report has.
-                    raise ValueError(f'AIL {"source" if entry else "module"} {path}: line {position[0]}: {exc}') from exc
+                    located = ValueError(f'AIL {"source" if entry else "module"} {path}: line {position[0]}: {exc}')
+                    located.refusal = (str(path), position[0], position[1], str(exc))
+                    raise located from exc
+            elif ((isinstance(exc, SyntaxErrorAIL) or syntax == 'python' and type(exc) is SyntaxError)
+                  and getattr(exc, 'lineno', None)):
+                # a block-syntax or Python syntax error carries its own position
+                located = ValueError(f'AIL {"source" if entry else "module"} {path}: {exc}')
+                located.refusal = (str(path), exc.lineno, exc.offset or 1,
+                                   exc.msg if type(exc) is SyntaxError else str(exc))
+                raise located from exc
             raise ValueError(f'AIL {"source" if entry else "module"} {path}: {exc}')
         if syntax == 'ail' and any(isinstance(node, ast.Assign)
                 and not _module_constant(node) for node in tree.body):
@@ -243,8 +270,10 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 for node in ast.walk(fn) if node is not fn):
             raise ValueError(f'AIL separate module cannot contain nested functions: {path}')
         for node in tree.body:
+            # a Python-syntax script rebinds a module-level name freely (`values = ...` twice is
+            # ordinary Python); only AIL consts and definitions must be unique
             name = (node.name if isinstance(node, (ast.FunctionDef, ast.ClassDef)) else
-                    node.targets[0].id if isinstance(node, ast.Assign)
+                    node.targets[0].id if isinstance(node, ast.Assign) and syntax == 'ail'
                     and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) else None)
             if name is not None:
                 if name in names:
@@ -498,6 +527,56 @@ def _slow_patterns(text, source_map):
         return []
 
 
+_FALLBACK_NOTE = 'note: built on the general path'
+_LINE_MARKER = re.compile(r'^ail-source-line: (\d+)\r?\n?', re.M)
+
+
+def _split_line_marker(text):
+    """(text without the compiler's `ail-source-line: N` line, N or None)."""
+    found = _LINE_MARKER.search(text or '')
+    return (_LINE_MARKER.sub('', text), int(found.group(1))) if found else (text, None)
+
+
+def _marker_where(source_map, line):
+    """`path:line:col` of the combined-source line the compiler named, or None."""
+    position = source_map.get(line) if line is not None else None
+    if not position:
+        return None
+    where = os.path.relpath(position[0])
+    where = position[0] if where.startswith('..') else where
+    return '%s:%s:%s' % (where, position[1], position[2]) if len(position) > 2 and position[2] is not None else '%s:%s' % (where, position[1])
+
+
+def _fallback_notes(args, source, stderr, locate=True, source_map=None):
+    """The compile-time `note: file:line:col: built on the general path (several times slower)
+    because <typed refusal>` lines the compiler printed, positioned like a refusal. Advisory only:
+    stdout and the exit status are never affected; AIL_QUIET_FALLBACK=1 silences it."""
+    if os.environ.get('AIL_QUIET_FALLBACK') or not stderr or _FALLBACK_NOTE not in stderr:
+        return []
+    notes = []
+    stderr, marked = _split_line_marker(stderr)
+    try:
+        python = _python_source(args, source.read_bytes())
+        for line in stderr.splitlines():
+            if not line.startswith(_FALLBACK_NOTE):
+                continue
+            if python:
+                line = python_wording(line)
+            if locate:
+                reason = line.split(' because ', 1)[-1]
+                located = _locate_refusal(args, source, reason)
+                if located != reason and located.endswith(reason):
+                    where = located[:-len(reason)].rstrip(': ')
+                else:
+                    where = _marker_where(source_map or {}, marked)
+                if where:
+                    line = 'note: %s: built on the general path%s' % (where, line[len(_FALLBACK_NOTE):])
+            notes.append(line)
+    except Exception:
+        return notes
+    return notes
+
+
 def _source_check(args):
     """Read-only strict type/code-generation check; no C build or runtime proof."""
     report = dict(schema='ail.check/1', status='failed', stage='loader', diagnostics=[],
@@ -690,7 +769,7 @@ def _python_notes(message, notes, source):
     for entries in notes.values():
         # `import time` followed by a time name the front end could not map: name that, not the import
         named = [text.split(';')[0] for _, text in entries if re.match(r'(time|string|os|operator)\.', text)]
-        found = re.search(r"import of '(time|string|os|operator)'; [^\n]*?by hand", message)
+        found = re.search(r"import of '(time|string|os|operator)' is not available[^\n]*\n  write instead: [^\n]*", message)
         if named and found and any(text.startswith(found.group(1) + '.') for _, text in entries):
             message = message.replace(found.group(0), next(n for n in named if n.startswith(found.group(1) + '.'))
                                       + ' (see the note below)')
@@ -702,6 +781,97 @@ def _python_notes(message, notes, source):
         for line, text in entries:
             message += '\nnote: %s:%d: %s' % (where, line, text)
     return message + '\n'
+
+
+def _text_position(source, message, function=None):
+    """(line, column) of the construct a refusal names, found by reading the source text. This is
+    the fallback for refusals the type check cannot map to a statement (a signature, an
+    annotation): the position of the def, parameter or annotation the message quotes."""
+    try:
+        lines = Path(source).read_text(encoding='utf8').splitlines()
+    except (OSError, UnicodeError):
+        return None
+    head = message.split('\n', 1)[0]
+    head = re.sub(r'^not in the subset: ', '', head)
+
+    def find(pattern, only_defs=False):
+        compiled = re.compile(pattern)
+        for number, line in enumerate(lines, 1):
+            if line.lstrip().startswith(('#', '//')):
+                continue
+            if only_defs and not re.match(r'\s*(?:def|fn)\s', line):
+                continue
+            found = compiled.search(line)
+            if found:
+                return number, found.start() + 1
+        return None
+
+    def name_in(pattern):
+        found = re.search(pattern, head)
+        return re.escape(found.group(1)) if found else None
+
+    named_line = re.match(r'line (\d+): ', head)
+    if named_line and int(named_line[1]) <= len(lines):
+        at = int(named_line[1])
+        return at, len(lines[at - 1]) - len(lines[at - 1].lstrip()) + 1
+    nullable = name_in(r'^(\w+) \| None')
+    if nullable:
+        return find(r'\b%s\s*\|\s*None|Optional\s*\[\s*%s' % (nullable, nullable))
+    if 'must take plain positional arguments' in head:
+        return find(r'(?:def|fn)\s+\w+\s*\([^)]*(?:\*|,\s*/|/\s*[,)])', only_defs=True)
+    default_for = re.search(r"^(\w+)\(\): the default for '(\w+)'", head)
+    if default_for:
+        at = find(r'(?:def|fn)\s+%s\s*\([^)]*\b%s\b[^)]*=' % default_for.groups(), only_defs=True)
+        if at is not None:
+            line = lines[at[0] - 1]
+            named = re.search(r'\b%s\b\s*[:=]' % re.escape(default_for[2]), line[line.find('('):])
+            return (at[0], line.find('(') + named.start() + 1) if named else at
+        return find(r'(?:def|fn)\s+%s\b' % default_for[1], only_defs=True)
+    annotation = re.search(r'unsupported local annotation (.+?)\.?$', head)
+    if annotation:
+        squeezed = re.sub(r'\s+', '', annotation[1].rstrip('.'))
+        for number, line in enumerate(lines, 1):
+            at = re.sub(r'\s+', '', line).find(squeezed)
+            if at >= 0:
+                return number, max(1, len(line) - len(line.lstrip()) + 1)
+        return None
+    parameter = name_in(r"^'(\w+)' is annotated")
+    if parameter:
+        return find(r'\b%s\s*:' % parameter, only_defs=True)
+    if head.startswith('a function with no parameters'):
+        return find(r'(?:def|fn)\s+\w+\s*\(\s*\)', only_defs=True)
+    callee = re.search(r'^(\w+)\(\):', head)
+    if callee:
+        return find(r'(?:def|fn)\s+%s\b' % callee[1], only_defs=True)
+    if function:
+        return find(r'(?:def|fn)\s+%s\b' % re.escape(function.split('.')[-1]), only_defs=True)
+    return None
+
+
+def _construct_position(source, message):
+    """The position of a construct whose refusal names it, read off the source text. It overrides
+    the check's statement mapping, which can point at a later use (the call that reaches a class)."""
+    try:
+        lines = Path(source).read_text(encoding='utf8').splitlines()
+    except (OSError, UnicodeError):
+        return None
+    head = re.sub(r'^not in the subset: ', '', message.split('\n', 1)[0])
+    patterns = ((r"^inheritance \(class '(\w+)'", r'class\s+%s\b'),
+                (r"^class '(\w+)' has no __init__", r'class\s+%s\b'),
+                (r"^a decorator on class '(\w+)'", r'class\s+%s\b'),
+                (r"^a decorator on \w+\.(\w+)", r'def\s+%s\b'),
+                (r"^dunder method \w+\.(\w+)", r'def\s+%s\b'),
+                (r"^(nonlocal) in a nested function", r'\b%s\b'),
+                (r"^(global) in a nested function", r'\b%s\b'))
+    for refusal, wanted in patterns:
+        found = re.match(refusal, head)
+        if found:
+            compiled = re.compile(wanted % re.escape(found[1]))
+            for number, line in enumerate(lines, 1):
+                at = compiled.search(line)
+                if at and not line.lstrip().startswith(('#', '//')):
+                    return number, at.start() + 1
+    return None
 
 
 def _locate_refusal(args, source, message):
@@ -716,23 +886,29 @@ def _locate_refusal(args, source, message):
         result = subprocess.run(command, capture_output=True, text=True, timeout=300)
         diagnostic = json.loads(result.stdout)['diagnostics'][0]
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, IndexError, TypeError):
-        return message
-    text = diagnostic.get('message') or ''
-    if not text or text not in message:
-        return message
-    where = diagnostic.get('path') or str(source)
+        diagnostic = None
+    text = (diagnostic or {}).get('message') or ''
+    if diagnostic is not None and (not text or text not in message):
+        diagnostic = None
+    where = (diagnostic or {}).get('path') or str(source)
     relative = os.path.relpath(where)
     if not relative.startswith('..'):
         where = relative
-    if diagnostic.get('line') is not None:
+    named = _construct_position(source, message)
+    if named is not None:
+        return '%s:%d:%d: %s' % (where, named[0], named[1], message)
+    if diagnostic is not None and diagnostic.get('line') is not None:
         where += ':%d' % diagnostic['line']
         if diagnostic.get('column') is not None:
             where += ':%d' % diagnostic['column']
-    elif diagnostic.get('function'):
-        where += ' (in %s)' % diagnostic['function']
-    else:
+        return '%s: %s' % (where, message)
+    # the check could not map the refusal to a statement: read the position off the source text
+    position = _text_position(source, message, (diagnostic or {}).get('function'))
+    if position is None:
+        if diagnostic is not None and diagnostic.get('function'):
+            return '%s (in %s): %s' % (where, diagnostic['function'], message)
         return message
-    return '%s: %s' % (where, message)
+    return '%s:%d:%d: %s' % (where, position[0], position[1], message)
 
 
 def main(argv=None):
@@ -926,9 +1102,18 @@ def main(argv=None):
         return 2 if not report['python_supported'] or args.check and report['build_check']['status'] != 'passed' else 0
     if args.command == 'integrity':
         manifest = json.loads((ROOT/'MANIFEST.json').read_text(encoding='utf8'))
-        bad = [name for name,h in manifest['sha256'].items()
-               if not (ROOT/name).is_file() or hashlib.sha256((ROOT/name).read_bytes()).hexdigest()!=h]
-        print(json.dumps({'status':'verified' if not bad else 'failed','checked':len(manifest['sha256']),'mismatches':bad},indent=2))
+        pins = manifest['sha256']
+        is_sdk = manifest.get('kind') == 'ail_language_sdk'
+        # A source checkout's sha256 map also holds pins of files from earlier archive layouts that
+        # no longer exist; only the shipped sdk_files and the pins of files present are checked
+        # (the same set ail_check and tools/update_manifest.py --check verify).
+        names = list(pins) if is_sdk else [n for n in pins if (ROOT/n).is_file() or n in manifest.get('sdk_files', [])]
+        bad = [name for name in names
+               if not (ROOT/name).is_file() or hashlib.sha256((ROOT/name).read_bytes()).hexdigest()!=pins[name]]
+        report = {'status':'verified' if not bad else 'failed','checked':len(names),'mismatches':bad}
+        if not is_sdk:
+            report['historical_pins_skipped'] = len(pins) - len(names)
+        print(json.dumps(report,indent=2))
         return 1 if bad else 0
     if args.command == 'compare-http':
         from ail_http_compare import main as compare_http
@@ -1008,7 +1193,7 @@ def main(argv=None):
                 source, args.module, args.syntax, module_only=library, separate=separate,
                 module_paths=args.module_path, notes=notes, **loading)
         except (OSError, UnicodeError, SyntaxError, ValueError) as error:
-            parser.error(str(error))
+            _refuse_load(error)
         if library:
             if output.exists() or output.is_symlink() or not output.parent.is_dir():
                 parser.error('library output requires a new directory in an existing parent')
@@ -1047,14 +1232,17 @@ def main(argv=None):
                 unit_map_path.write_text(json.dumps(unit_map), encoding='utf-8')
                 command += ['--link-units', str(unit_map_path)]
             result = native_build.invoke(args, command, tmp, capture_output=True, text=True,
-                timeout=660, env=_surface_env(args, source, {**os.environ, 'AIL_NO_GENERAL': '1'} if contracts else None))
+                timeout=660, env=_surface_env(args, source, {**os.environ, 'AIL_REPORT_SOURCE_LINE': '1',
+                                                **({'AIL_NO_GENERAL': '1'} if contracts else {})}))
             if result.returncode:
-                message = result.stderr or result.stdout
+                message, marked = _split_line_marker(result.stderr or result.stdout)
                 python = result.returncode == 3 and _python_source(args, source.read_bytes())
                 if python:
                     message = python_wording(message)
                 if result.returncode == 3 and not args.json and not objects and not separate:
-                    message = _locate_refusal(args, source, message)
+                    located = _locate_refusal(args, source, message)
+                    where = _marker_where(loading['source_map'], marked) if located == message else None
+                    message = '%s: %s' % (where, message) if where else located
                 if python and any(notes.values()):
                     message = _python_notes(message, notes, source)
                 return native_build.emit(args, {}, result.returncode, message=message)
@@ -1075,6 +1263,10 @@ def main(argv=None):
                 raise
             for line in [] if args.json else _slow_patterns(source_text, loading['source_map']):
                 print(line, file=sys.stderr)
+            if not args.json:
+                for line in _fallback_notes(args, source, result.stderr, locate=not objects and not separate,
+                                             source_map=loading['source_map']):
+                    print(line, file=sys.stderr)
             return native_build.emit(args, {'output': str(output), 'bytes': output.stat().st_size,
                 'sha256': hashlib.sha256(output.read_bytes()).hexdigest()})
     project = ROOT/'example' if args.command == 'selftest' else Path(args.project).resolve()

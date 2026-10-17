@@ -837,6 +837,112 @@ def fill(template, **values):
     return template
 
 
+BOOL_TUPLE_FIELDS = r'''def f():
+    return False, 3
+
+def main():
+    t = (True, 1)
+    print(t, t[0])
+    print(str(t), f"{t} {t[0]}")
+    xs = [(True, 1), (False, 2)]
+    print(xs, xs[0][0], xs[1][0])
+    for a, b in xs:
+        print(a, b)
+    d = {1: (True, 5)}
+    print(d[1], d[1][0])
+    print(t == (True, 1), (True, 1) < (False, 2))
+    x = t[0]
+    print(x, not x, x and 1)
+    a, b = f()
+    print(a, b, f())
+    s = {(True, 1)}
+    print(len(s), (True, 1) in s)
+    print(sorted(xs), max(xs))
+
+main()
+'''
+
+BOOL_TUPLE_SHAPES = r'''def pick(n: int) -> tuple[bool, int]:
+    return n % 2 == 0, n
+
+
+def swap(t: tuple[bool, int]) -> tuple[int, bool]:
+    a, b = t
+    return b, a
+
+
+def main() -> int:
+    t = (True, 1)
+    nest = ((True, 1), False)
+    print(t, t[0], nest, nest[0][0], nest[1])
+    p, q = nest
+    print(p, q, p[0])
+    (a, b), c = nest
+    print(a, b, c)
+    print(f"{nest} {t[0]} {str(t)}")
+    d = {}
+    d[(True, 3)] = (False, 1)
+    d[(False, 3)] = (True, 2)
+    for k, v in d.items():
+        print(k, v, k[0], v[0])
+    for k in d:
+        print(k)
+    for v in d.values():
+        x, y = v
+        print(x, y)
+    print(d.get((True, 3)), (True, 3) in d)
+    s = set()
+    s.add((True, 1))
+    s.add((False, 1))
+    s.add((True, 1))
+    print(len(s), sorted(s))
+    for e in sorted(s):
+        print(e[0], e)
+    ys = [pick(i) for i in range(5)]
+    print(ys, max(ys), min(ys))
+    ys.sort(key=lambda z: (z[0], -z[1]))
+    print(ys)
+    for i, (ok, n) in enumerate(ys):
+        print(i, ok, n)
+    for ok, n in zip([True, False, True], [1, 2, 3]):
+        print(ok, n)
+    print(swap(pick(4)), swap(pick(3))[1])
+    r = pick(6)
+    print(r == (True, 6), r != pick(6), r < pick(7), r[0] and r[1] > 3)
+    if r[0]:
+        print("yes")
+    w = t[0]
+    z = not w
+    print(w, z, [w, z])
+    m = (1.5, True, "s")
+    print(m, m[1])
+    h = {(True, 1): 1, (False, 1): 2}
+    print(h[(True, 1)] + h[(False, 1)])
+    return 0
+
+main()
+'''
+
+
+class BoolInTupleTests(Compared):
+    """A bool kept in a tuple is read back as a bool (True / False, not 1 / 0) everywhere: locals, unpacking,
+    loop targets, dict values, nested tuples, comparisons.  The tuple field of a bool element is spelled fb<k>:
+    the compiler decides whether an unannotated local holds a bool from the field's name, and f<k> is an int in
+    other tuple classes."""
+
+    def test_bool_fields_read_back_as_bool(self):
+        self.compare("tup_bool_fields", BOOL_TUPLE_FIELDS)
+
+    def test_bool_in_every_tuple_shape(self):
+        self.compare("tup_bool_shapes", BOOL_TUPLE_SHAPES)
+
+    def test_bool_field_name_is_distinct(self):
+        out = tuplib.rewrite("def main() -> int:\n    a = (True, 1)\n    b = (2, 3)\n    print(a[0], b[0])\n"
+                             "    return 0\n\n\nmain()\n", [])
+        self.assertIn("fb0: bool", out)
+        self.assertIn("f0: int", out)
+
+
 class GeneratedOperationTests(Compared):
     """Random operation sequences (>= 5000 operations each) over dict / set / list / heap of tuples."""
     def test_dict_pair_int(self):
