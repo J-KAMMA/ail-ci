@@ -5625,6 +5625,9 @@ class Compiler:
         if fn is None:
             raise Unsupported('the augmented %s= operator' % type(node.op).__name__)
         t = node.target
+        if isinstance(t, (ast.Name, ast.Attribute)):
+            # a list's += and a set's |= change the object itself, which a second name sees
+            fn = {'ail_op_add': 'ail_op_iadd', 'ail_set_union': 'ail_set_ior'}.get(fn, fn)
         if isinstance(t, ast.Name):
             cur = ctx.tmp()
             if self._is_global_name(t.id, ctx):

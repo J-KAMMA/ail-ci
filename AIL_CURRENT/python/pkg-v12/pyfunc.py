@@ -1160,7 +1160,15 @@ def _scan_module_consts(tree):
             named = [a.name for a in node.names] if isinstance(node, ast.Import) else [mod]
             regex = next((name for name in named if name in ('re', 'regex')), None)
             builtin = next((name for name in named if name in ('heapq', 'bisect')), None)
-            if regex is not None:
+            if regex == 're':
+                # The Python front end (ail_syntax.python_surface) drops `import re` when every use
+                # is one it builds from a literal pattern; a use it could not build kept it here, and
+                # its `note:` lines say which.
+                error = Unsupported("import of 're' with a use that is not built: the re module is built "
+                                    "for string- or bytes-literal patterns only (match, fullmatch, search, "
+                                    "findall, finditer, split, sub, escape, and NAME = re.compile(literal)); "
+                                    "the notes below name the use")
+            elif regex is not None:
                 error = Unsupported("import of %r; there are no regular expressions here at all and "
                                     "no way to spell one -- match by indexing and comparing the str "
                                     "itself (s[i] == 'a', s[a:b] == 'foo')" % regex)
@@ -9045,6 +9053,36 @@ def _is_bytes_expr(node, ctx):
     return False
 
 
+def _list_compare_kinds(left, right, ctx):
+    """True when either side of `==`/`!=`/`<`.. is a list kind other than the bytes list (that one
+    has its own branch). Without this the C compiler was left to reject `ail_list == ail_list`."""
+    kinds = (LIST, FLIST, SLIST, OLIST, HLIST)
+    try:
+        return _etype(left, ctx) in kinds or _etype(right, ctx) in kinds
+    except Unsupported:
+        return False
+
+
+def _list_compare(left, op, right, ctx):
+    """`xs == ys` / `xs != ys` on two `list[int]`: same length and every element equal, as CPython.
+    Everything else that is a list is refused by name instead of reaching the C compiler."""
+    lk, rk = _etype(left, ctx), _etype(right, ctx)
+    if not isinstance(op, (ast.Eq, ast.NotEq)):
+        raise Unsupported('ordering comparison (< <= > >=) of lists; only == and != on two '
+                          '`list[int]` are built -- compare element by element in a loop')
+    if lk != LIST or rk != LIST:
+        raise Unsupported('== / != on a list of %s; only two `list[int]` can be compared as '
+                          'whole lists (CPython compares element by element) -- compare '
+                          'len() and the elements in a loop'
+                          % ('floats' if FLIST in (lk, rk) else 'str' if SLIST in (lk, rk)
+                             else 'records or nested lists' if {lk, rk} & {OLIST, HLIST}
+                             else 'another kind than int'))
+    ctx.parts.add('SEQEQ')
+    pa, na = _seq(left, ctx)
+    pb, nb = _seq(right, ctx)
+    return '(%sail_seq_eq(%s, %s, %s, %s))' % ('!' if isinstance(op, ast.NotEq) else '', pa, na, pb, nb)
+
+
 def _bytes_compare(left, op, right, ctx):
     ctx.parts.add('BYTES')
     a, b = _bytes_value(left, ctx), _bytes_value(right, ctx)
@@ -11951,7 +11989,9 @@ def _expr(node, ctx):
                     # does not).
                     raise Unsupported('comparing class instances; this compiler does not give '
                                       'classes an equality of their own')
-                if _is_str_expr(left, ctx) or _is_str_expr(right, ctx):
+                if _list_compare_kinds(left, right, ctx):
+                    parts.append(_list_compare(left, op, right, ctx))
+                elif _is_str_expr(left, ctx) or _is_str_expr(right, ctx):
                     parts.append(_str_compare(left, op, right, ctx))
                 elif _is_bytes_expr(left, ctx) or _is_bytes_expr(right, ctx):
                     parts.append(_bytes_compare(left, op, right, ctx))
@@ -23928,6 +23968,8 @@ def _for_inner_impl(node, ctx, ind):
     return pre + head + body + pad + '}\n'
 
 
+SEQEQ = ('static int64_t ail_seq_eq(const int64_t *p, int64_t n, const int64_t *q, int64_t m)'
+         ' { if (n != m) return 0; for (int64_t i = 0; i < n; i++) if (p[i] != q[i]) return 0; return 1; }\n')
 SEQHAS = ('static int64_t ail_seq_has(const int64_t *p, int64_t n, int64_t v)'
           ' { for (int64_t i = 0; i < n; i++) if (p[i] == v) return 1; return 0; }\n')
 
@@ -31181,7 +31223,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                     target_ctx is not None and param in target_ctx.rowparam | target_ctx.gridparam):
                 raise Unsupported('%s() requires rows or grids, not a returned integer list' % target)
     head = '#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n'
-    runtime_parts = (parts - {'SEQHAS', 'DIE'}
+    runtime_parts = (parts - {'SEQHAS', 'SEQEQ', 'DIE'}
                      | ({'DIE'} if parts or folds or strict or floor else set())
                      | ({'RECDEPTH'} if recursive else set()))
     fnkinds = {k for params, ret in sigs.values() for k in [ret, *(k for _, k in params)] if callable_types.valid(k)}
@@ -31227,6 +31269,8 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         head += '#define AIL_MAX_RECURSION_DEPTH %d\n' % AIL_MAX_RECURSION_DEPTH
     if 'SEQHAS' in parts:
         head += SEQHAS
+    if 'SEQEQ' in parts:
+        head += SEQEQ
     head += ''.join(FOLD_HELPERS[x] for x in ('sum', 'max', 'min') if x in folds)
     # pymod/pydiv floor arithmetic is the language's rule unconditionally (SEMANTICS section 1),
     # not a --strict-only cost, so it is emitted whenever the program uses `%` or `//` regardless
@@ -32172,10 +32216,21 @@ def _one_function(*args, **kwargs):
     legacy result's signature and context and falls back to it whole."""
     result = _one_function_legacy(*args, **kwargs)
     if os.environ.get('AIL_IR', '0').strip().lower() in ('', '0', 'off', 'no'):
-        return result
-    import sys as _sys
-    from ir import driver
-    return driver.apply(_sys.modules[__name__], args, kwargs, result)
+        final = result
+    else:
+        import sys as _sys
+        from ir import driver
+        final = driver.apply(_sys.modules[__name__], args, kwargs, result)
+    if final is result:
+        # still the legacy emitter's C (value semantics): refuse what CPython would share
+        import aliasrefuse
+        aliasrefuse.check(_sys_modules()[__name__], args[0], result[2])
+    return final
+
+
+def _sys_modules():
+    import sys
+    return sys.modules
 
 
 def _one_function_legacy(*args, **kwargs):
@@ -33071,8 +33126,19 @@ def _rewrite_returns(body, frees, ct='int64_t'):
     20260915.md, `_stmt`'s `ast.Return` handling -- becomes `{ <frees> return; }`: the same leak
     this rewrite already closes for every value-returning early exit, with no value to capture."""
     out, i = [], 0
-    for line in body.splitlines(keepends=True):
+    lines = body.splitlines(keepends=True)
+    k = 0
+    while k < len(lines):
+        line = lines[k]
+        k += 1
         s = line.strip()
+        if s.startswith('return ') and _c_open_depth(s) > 0:
+            # a `return` whose expression statement-expression spans several lines (a `.split()`
+            # set-up inside `x.find(sep.join(...))`): take the lines up to the balanced `;`
+            while k < len(lines) and _c_open_depth(s) > 0:
+                s += '\n' + lines[k].strip()
+                line += lines[k]
+                k += 1
         if s == 'return;':
             pad = line[:len(line) - len(line.lstrip())]
             out.append('%s{ %sreturn; }\n' % (pad, frees))
@@ -33084,6 +33150,26 @@ def _rewrite_returns(body, frees, ct='int64_t'):
         else:
             out.append(line)
     return ''.join(out)
+
+
+def _c_open_depth(text):
+    """How many ( { [ a C fragment leaves open, ignoring string and character literals."""
+    depth, quote, k = 0, None, 0
+    while k < len(text):
+        c = text[k]
+        if quote:
+            if c == chr(92):
+                k += 1
+            elif c == quote:
+                quote = None
+        elif c in '"' + chr(39):
+            quote = c
+        elif c in '({[':
+            depth += 1
+        elif c in ')}]':
+            depth -= 1
+        k += 1
+    return depth
 
 
 def compile_fn(source, strict=True, entry=None):

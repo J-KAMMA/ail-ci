@@ -553,8 +553,19 @@ def _source_check(args):
                 external = load_objects(args.object)
                 dependency = False
             stage = 'type'
-            to_c(text, strict=True, info={'_want_units': True, '_checked_arrays': True},
-                 library=args.library, external=external)
+            saved_surface = os.environ.get('AIL_SURFACE')
+            if _python_source(args, original):
+                os.environ['AIL_SURFACE'] = 'python'
+            else:
+                os.environ.pop('AIL_SURFACE', None)
+            try:
+                to_c(text, strict=True, info={'_want_units': True, '_checked_arrays': True},
+                     library=args.library, external=external)
+            finally:
+                if saved_surface is None:
+                    os.environ.pop('AIL_SURFACE', None)
+                else:
+                    os.environ['AIL_SURFACE'] = saved_surface
         finally:
             sys.path[:] = previous_path
             sys.dont_write_bytecode = previous_bytecode
@@ -639,9 +650,25 @@ def _source_check(args):
     print(json.dumps(report, ensure_ascii=False))
     return status
 
+def _surface_env(args, source, env=None):
+    """The environment for a compiler run: `AIL_SURFACE=python` for a def-syntax entry, which makes
+    the compiler refuse list/dict/set sharing it would otherwise copy (pkg-v12/aliasrefuse.py)."""
+    env = dict(os.environ if env is None else env)
+    try:
+        python = (Path(source).suffix.lower() == '.ail'
+                  and _python_source(args, Path(source).read_bytes()))
+    except OSError:
+        python = False
+    if python:
+        env['AIL_SURFACE'] = 'python'
+    else:
+        env.pop('AIL_SURFACE', None)
+    return env
+
+
 def _python_source(args, data):
     """Whether the entry source is written in the Python syntax (refusals are respelled for it)."""
-    if args.syntax != 'auto':
+    if getattr(args, 'syntax', 'auto') != 'auto':
         return args.syntax == 'python'
     try:
         text = data.decode('utf8') if isinstance(data, bytes) else data
@@ -944,7 +971,8 @@ def main(argv=None):
             for object_path in ([] if is_c else args.object):
                 command += ['--object', str(object_path.resolve())]
             result = native_build.invoke(args, command, directory,
-                                    capture_output=True, text=True, timeout=180)
+                                    capture_output=True, text=True, timeout=180,
+                                    env=_surface_env(args, source))
             if result.returncode:
                 return native_build.emit(args, {}, result.returncode, message=result.stderr or result.stdout)
             created = metadata_created = False
@@ -1019,7 +1047,7 @@ def main(argv=None):
                 unit_map_path.write_text(json.dumps(unit_map), encoding='utf-8')
                 command += ['--link-units', str(unit_map_path)]
             result = native_build.invoke(args, command, tmp, capture_output=True, text=True,
-                timeout=660, env={**os.environ, 'AIL_NO_GENERAL': '1'} if contracts else None)
+                timeout=660, env=_surface_env(args, source, {**os.environ, 'AIL_NO_GENERAL': '1'} if contracts else None))
             if result.returncode:
                 message = result.stderr or result.stdout
                 python = result.returncode == 3 and _python_source(args, source.read_bytes())

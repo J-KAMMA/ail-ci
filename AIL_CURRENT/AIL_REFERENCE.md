@@ -50,7 +50,7 @@ fn main() {
   Bytes for binary, non-UTF-8 (str input exits 1) or one huge line: `read_stdin_bytes(1 << 40)`;
   `data[i]` is an int (`ord("a")`, not 97); `data[a:b]` an O(1) view, `int(data[a:b])`; to str
   only by `.decode()`; `write_stdout_bytes(bytearray)`. To print nothing on error, collect output.
-- No `math`, `re`, `collections`, `zip`, big ints: `x ** 0.5`, loops. Built in: `heappush`,
+- No `collections`, big ints: `x ** 0.5`, loops. Python syntax: `import re` (literal patterns only), see MORE. Built in: `heappush`,
   `heappop(h)` (structs: same `key=lambda s: (s.d, s.id)` each call), `bisect_left`, `insort`.
 
-MORE (`sed -n A,Bp AIL_REFERENCE_MORE.md`): Commands 7-19, Text I/O 21-55, Bytes 57-89, Syntax 91-102, Local names 104-129, Numbers 131-145, Structs 147-180, Trees 182-224, Lists 226-238, Sort keys 240-247, Nested lists 249-266, Dicts 268-277, Sets 279-285, Strings 287-312, Heaps 314-329, Loops 331-338, Exceptions 340-347, Refused 349-390, Word count 392-424, Dijkstra 426-468, BFS 470-514, Modules 516-544, Speed 546-565, Parallel 567-602.
+MORE (`sed -n A,Bp AIL_REFERENCE_MORE.md`): Commands 7-19, Text I/O 21-55, Bytes 57-89, Syntax 91-102, Local names 104-129, Numbers 131-145, Structs 147-180, Trees 182-224, Lists 226-238, Sort keys 240-247, Nested lists 249-266, Dicts 268-277, Sets 279-285, Strings 287-312, Regular expressions 314-365, Heaps 367-382, Loops 384-391, Exceptions 393-400, Refused 402-443, Word count 445-477, Dijkstra 479-521, BFS 523-567, Modules 569-597, Speed 599-618, Parallel 620-655.
