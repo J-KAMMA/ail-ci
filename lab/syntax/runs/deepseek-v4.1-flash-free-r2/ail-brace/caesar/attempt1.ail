@@ -1,0 +1,39 @@
+```
+const LOWER = "abcdefghijklmnopqrstuvwxyz";
+const UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+fn shift_one(line: str, k: int) -> str {
+    let out = "";
+    let i = 0;
+    while i < len(line) {
+        let ch = line[i];
+        let li = LOWER.find(ch);
+        if li >= 0 {
+            out = out + LOWER[(li + k) % 26];
+        } else {
+            let ui = UPPER.find(ch);
+            if ui >= 0 {
+                out = out + UPPER[(ui + k) % 26];
+            } else {
+                out = out + ch;
+            }
+        }
+        i += 1;
+    }
+    return out;
+}
+
+fn main() -> int {
+    let k = 0;
+    let first = true;
+    for line in sys.stdin {
+        if first {
+            k = int(line.strip());
+            first = false;
+        } else {
+            print(shift_one(line.strip(), k));
+        }
+    }
+    return 0;
+}
+```

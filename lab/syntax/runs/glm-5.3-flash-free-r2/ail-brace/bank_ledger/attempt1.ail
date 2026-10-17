@@ -1,0 +1,51 @@
+```
+struct Acc { bal: int; }
+
+fn dep(acc: Acc, n: int) -> void {
+    acc.bal += n;
+}
+
+fn wd(acc: Acc, n: int) -> void {
+    if n > acc.bal {
+        raise ValueError("insufficient funds");
+    }
+    acc.bal -= n;
+}
+
+fn main() -> int {
+    let acc = Acc(0);
+    for line in sys.stdin {
+        let s = line.strip();
+        if len(s) == 0 {
+            print("error: unknown command");
+        } else {
+            let f = s.split();
+            let cmd = f[0];
+            if len(f) == 1 and cmd == "balance" {
+                print("balance", acc.bal);
+            } elif len(f) == 2 and cmd == "deposit" {
+                let da = f[1];
+                if da.isdigit() {
+                    dep(acc, int(da));
+                } else {
+                    print("error: unknown command");
+                }
+            } elif len(f) == 2 and cmd == "withdraw" {
+                let wa = f[1];
+                if wa.isdigit() {
+                    try {
+                        wd(acc, int(wa));
+                    } except ValueError as err {
+                        print("error: insufficient funds");
+                    }
+                } else {
+                    print("error: unknown command");
+                }
+            } else {
+                print("error: unknown command");
+            }
+        }
+    }
+    return 0;
+}
+```

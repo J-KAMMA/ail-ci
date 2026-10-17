@@ -1,0 +1,7 @@
+{
+  "model": "deepseek-v4.1-flash-free-r2",
+  "variant": "ail-brace",
+  "task": "inventory_report",
+  "date": "2026-10-17",
+  "tokens_out": null
+}

@@ -1,0 +1,19 @@
+```python
+import sys
+
+def main() -> int:
+    totals: dict[str, int] = {}
+    for line in sys.stdin:
+        f = line.split()
+        if not f:
+            continue
+        name = f[0]
+        amount = int(f[1])
+        totals[name] = totals.get(name, 0) + amount
+    for name in sorted(totals):
+        print(name, totals[name])
+    return 0
+
+if __name__ == "__main__":
+    main()
+```

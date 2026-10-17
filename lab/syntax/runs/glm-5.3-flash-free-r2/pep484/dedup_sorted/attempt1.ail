@@ -1,0 +1,23 @@
+```python
+import sys
+
+def read_values() -> list[int]:
+    seen: dict[int, bool] = {}
+    for line in sys.stdin:
+        parts: list[str] = line.split()
+        for p in parts:
+            try:
+                seen[int(p)] = True
+            except ValueError:
+                pass
+    return sorted(seen)
+
+def main() -> int:
+    vals: list[int] = read_values()
+    for v in vals:
+        print(v)
+    return 0
+
+if __name__ == "__main__":
+    main()
+```

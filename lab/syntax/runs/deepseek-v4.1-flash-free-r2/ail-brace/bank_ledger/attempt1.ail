@@ -1,0 +1,50 @@
+```
+struct Account {
+    balance: int;
+}
+
+fn run(acc: Account, line: str) -> void {
+    let f = line.split();
+    if len(f) == 0 {
+        print("error: unknown command");
+        return;
+    }
+    let name = f[0];
+    if name == "deposit" {
+        try {
+            let n = int(f[1]);
+            acc.balance += n;
+        }
+        except ValueError as err {
+            print("error: unknown command");
+        }
+    }
+    elif name == "withdraw" {
+        try {
+            let n = int(f[1]);
+            if n > acc.balance {
+                print("error: insufficient funds");
+            } else {
+                acc.balance -= n;
+            }
+        }
+        except ValueError as err {
+            print("error: unknown command");
+        }
+    }
+    elif name == "balance" {
+        print("balance", acc.balance);
+    }
+    else {
+        print("error: unknown command");
+    }
+}
+
+fn main() -> int {
+    let acc = Account(0);
+    for line in sys.stdin {
+        run(acc, line.strip());
+    }
+    return 0;
+}
+```

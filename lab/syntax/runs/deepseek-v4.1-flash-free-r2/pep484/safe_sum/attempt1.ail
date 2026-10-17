@@ -1,0 +1,32 @@
+```
+import sys
+
+DIGITS = "0123456789"
+
+def all_digits(s: str) -> bool:
+    if len(s) == 0:
+        return False
+    for ch in s:
+        if DIGITS.find(ch) < 0:
+            return False
+    return True
+
+def is_valid(tok: str) -> bool:
+    if len(tok) > 0 and tok[0] == "-":
+        return all_digits(tok[1:])
+    return all_digits(tok)
+
+def main() -> int:
+    total: int = 0
+    for line in sys.stdin:
+        for tok in line.split():
+            if is_valid(tok):
+                total += int(tok)
+            else:
+                print("bad: " + tok)
+    print("sum=" + str(total))
+    return 0
+
+if __name__ == "__main__":
+    main()
+```
