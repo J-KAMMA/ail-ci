@@ -1,0 +1,6 @@
+{
+ "id": "t266",
+ "category": "graphs",
+ "description": "Run recursive DFS from node 0 visiting neighbours in ascending order; print the preorder and postorder.",
+ "input_format": "edges_plain"
+}

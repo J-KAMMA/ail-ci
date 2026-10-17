@@ -1,0 +1,6 @@
+{
+ "id": "t300",
+ "category": "graphs",
+ "description": "Print the critical path (a longest path of dependent tasks by duration) as task names joined by '->' and its total duration.",
+ "input_format": "tasks_deps"
+}

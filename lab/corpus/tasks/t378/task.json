@@ -1,0 +1,6 @@
+{
+ "id": "t378",
+ "category": "sorting",
+ "description": "Sort the numbers by the last digit, then by value descending.",
+ "input_format": "pos_nums"
+}

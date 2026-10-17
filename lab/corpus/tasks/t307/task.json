@@ -1,0 +1,6 @@
+{
+ "id": "t307",
+ "category": "dp",
+ "description": "Compute the edit distance between the two strings (insert, delete, substitute) and print the number of each operation in one optimal alignment as 'ins del sub'.",
+ "input_format": "two_strings"
+}

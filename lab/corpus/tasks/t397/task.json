@@ -1,0 +1,6 @@
+{
+ "id": "t397",
+ "category": "simulation",
+ "description": "Play a deterministic card game: shuffle a 52-card deck with random.Random(seed).shuffle, deal 5 cards, and print the hand sorted by rank, and whether it contains a pair.",
+ "input_format": "seed_params"
+}

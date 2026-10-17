@@ -1,0 +1,6 @@
+{
+ "id": "t275",
+ "category": "graphs",
+ "description": "Print the adjacency list (sorted neighbours) and the adjacency matrix as 0/1 rows.",
+ "input_format": "edges_plain"
+}

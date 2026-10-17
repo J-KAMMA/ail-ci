@@ -1,0 +1,6 @@
+{
+ "id": "t124",
+ "category": "collections",
+ "description": "Rank the names by average score (descending, ties alphabetical) and print the dense rank, name and average with 1 decimal.",
+ "input_format": "name_scores"
+}

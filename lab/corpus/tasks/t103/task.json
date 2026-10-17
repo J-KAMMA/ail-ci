@@ -1,0 +1,6 @@
+{
+ "id": "t103",
+ "category": "strings",
+ "description": "Print the words joined with commas, the same with 'and' before the last one, and the words in a column right-aligned to the longest word.",
+ "input_format": "words_line"
+}

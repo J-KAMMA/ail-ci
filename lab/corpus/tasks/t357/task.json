@@ -1,0 +1,6 @@
+{
+ "id": "t357",
+ "category": "dp",
+ "description": "Compute the k-th smallest for k=1,2,n using quickselect and compare with sorting; print results.",
+ "input_format": "nums"
+}

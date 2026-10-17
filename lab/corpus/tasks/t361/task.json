@@ -1,0 +1,6 @@
+{
+ "id": "t361",
+ "category": "dp",
+ "description": "Implement a union-find with path compression over the words: unite words with the same first letter and print the number of groups and the sizes.",
+ "input_format": "strings_n"
+}

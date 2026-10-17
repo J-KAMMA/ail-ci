@@ -1,0 +1,6 @@
+{
+ "id": "t019",
+ "category": "numbers",
+ "description": "Print the values as a histogram: for each distinct value in ascending order print 'value: ' followed by that many '*' characters (counts of occurrences).",
+ "input_format": "nums"
+}

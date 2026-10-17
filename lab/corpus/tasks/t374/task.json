@@ -1,0 +1,6 @@
+{
+ "id": "t374",
+ "category": "sorting",
+ "description": "Print the sorted order of the words with natural ordering of embedded numbers: each word is suffixed by its 1-based index in the list ('word12'); sort these numerically on the index parts descending.",
+ "input_format": "strings_n"
+}

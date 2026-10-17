@@ -1,0 +1,6 @@
+{
+ "id": "t015",
+ "category": "numbers",
+ "description": "Print the number of inversions (pairs i<j with a[i] > a[j]).",
+ "input_format": "nums"
+}

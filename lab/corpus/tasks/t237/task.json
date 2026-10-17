@@ -1,0 +1,6 @@
+{
+ "id": "t237",
+ "category": "grids",
+ "description": "Find the minimum cost path with 4-directional movement (Dijkstra, cost of entering a cell is its digit, start cost excluded); print the cost.",
+ "input_format": "grid_digits"
+}

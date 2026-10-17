@@ -1,0 +1,6 @@
+{
+ "id": "t209",
+ "category": "parsing",
+ "description": "Evaluate each expression using a shunting-yard to RPN conversion and a stack, printing the RPN form and the result as a float with 4 decimals.",
+ "input_format": "expr_lines"
+}

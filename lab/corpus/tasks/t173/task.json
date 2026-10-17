@@ -1,0 +1,6 @@
+{
+ "id": "t173",
+ "category": "parsing",
+ "description": "Print the region with the highest total and the quarter with the highest total, and each region's share of the grand total as a percentage with 1 decimal.",
+ "input_format": "table_pivot"
+}

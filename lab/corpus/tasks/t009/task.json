@@ -1,0 +1,6 @@
+{
+ "id": "t009",
+ "category": "numbers",
+ "description": "Remove duplicates keeping first occurrences; print the result on one line.",
+ "input_format": "nums"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t421",
+ "category": "simulation",
+ "description": "Print the matrix chain multiplication minimum scalar multiplications for dimension list = the absolute values of the numbers (+1 each, so no zeros).",
+ "input_format": "pos_nums"
+}

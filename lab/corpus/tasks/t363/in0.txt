@@ -1,0 +1,7 @@
+6
+frank A 23 67
+ivan A 18 85
+carol C 19 85
+alice B 19 83
+dave A 22 94
+alice C 22 52

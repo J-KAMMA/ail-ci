@@ -1,0 +1,5 @@
+4
+bob 97
+alice 39
+ivan 72
+alice 40

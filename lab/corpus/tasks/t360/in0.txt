@@ -1,0 +1,7 @@
+6
+echo
+zulu
+sierra
+cherry
+india
+golf

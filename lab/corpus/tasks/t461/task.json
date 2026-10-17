@@ -1,0 +1,6 @@
+{
+ "id": "t461",
+ "category": "errors_classes",
+ "description": "Call sys.exit(2) after printing the count of valid lines when any line is invalid, else exit normally with status 0.",
+ "input_format": "opt_ints_lines"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t330",
+ "category": "dp",
+ "description": "Binary search for the target; print its first and last index (0-based) or -1 -1, and the count of occurrences, using the bisect module.",
+ "input_format": "sorted_nums_target"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t453",
+ "category": "errors_classes",
+ "description": "Implement a doubly-ended queue using two stacks and process alternate pushes to front/back and pops; print the final order and the sum.",
+ "input_format": "nums"
+}

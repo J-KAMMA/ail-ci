@@ -1,0 +1,6 @@
+{
+ "id": "t247",
+ "category": "grids",
+ "description": "Print the matrix elements in a zigzag diagonal order (anti-diagonals alternating directions) on one line.",
+ "input_format": "int_matrix"
+}

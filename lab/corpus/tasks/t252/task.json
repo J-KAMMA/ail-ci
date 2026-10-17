@@ -1,0 +1,6 @@
+{
+ "id": "t252",
+ "category": "grids",
+ "description": "Compute the transitive closure (Floyd-Warshall on the matrix entries > 0 as edges) and print it as a 0/1 matrix.",
+ "input_format": "square_matrix"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t464",
+ "category": "errors_classes",
+ "description": "Use the walrus operator, match statements (structural pattern matching) and f-string '=' specifiers to classify each number as 'neg', 'zero', 'small', 'large'; print them.",
+ "input_format": "nums"
+}

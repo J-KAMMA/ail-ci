@@ -1,0 +1,6 @@
+{
+ "id": "t207",
+ "category": "parsing",
+ "description": "Parse every non-empty line with ast.literal_eval; print repr of results or 'invalid' on failure.",
+ "input_format": "tokens_mixed"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t217",
+ "category": "parsing",
+ "description": "Parse a robot command string; track position and heading; print the final position, heading name and the Manhattan distance from the start.",
+ "input_format": "robot"
+}

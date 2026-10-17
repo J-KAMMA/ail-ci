@@ -1,0 +1,6 @@
+{
+ "id": "t402",
+ "category": "simulation",
+ "description": "Print the hand's total value in blackjack terms (aces 1 or 11, face cards 10) as the best total not exceeding 21 or the minimum total.",
+ "input_format": "cards"
+}

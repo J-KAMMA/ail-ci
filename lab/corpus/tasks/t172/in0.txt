@@ -1,0 +1,8 @@
+north,q2,959
+south,q1,89
+south,q4,528
+west,q3,607
+west,q4,434
+west,q4,348
+north,q4,322
+south,q3,587

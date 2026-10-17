@@ -1,0 +1,6 @@
+{
+ "id": "t053",
+ "category": "numbers",
+ "description": "Print n converted to base 2, 3, 5, 16 and 36 using a hand-written conversion (digits 0-9a-z), one per line.",
+ "input_format": "one_int"
+}

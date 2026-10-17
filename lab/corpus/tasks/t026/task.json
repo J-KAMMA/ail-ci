@@ -1,0 +1,6 @@
+{
+ "id": "t026",
+ "category": "numbers",
+ "description": "Print each number in binary (no prefix), octal and hexadecimal (uppercase) separated by tabs.",
+ "input_format": "pos_nums"
+}

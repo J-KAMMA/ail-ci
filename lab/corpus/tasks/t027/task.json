@@ -1,0 +1,6 @@
+{
+ "id": "t027",
+ "category": "numbers",
+ "description": "Print the number of set bits of each number, and the XOR of all the numbers.",
+ "input_format": "pos_nums"
+}

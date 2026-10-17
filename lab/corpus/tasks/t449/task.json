@@ -1,0 +1,6 @@
+{
+ "id": "t449",
+ "category": "errors_classes",
+ "description": "Use enum.IntEnum and enum.Enum members for grades; map student grades to them and print sorted by enum value, the member names and values.",
+ "input_format": "student_records"
+}

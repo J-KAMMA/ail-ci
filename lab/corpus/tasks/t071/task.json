@@ -1,0 +1,6 @@
+{
+ "id": "t071",
+ "category": "strings",
+ "description": "Print a character frequency table for letters only (case-insensitive), sorted by count descending then letter ascending, as 'x: n'.",
+ "input_format": "text_lines"
+}

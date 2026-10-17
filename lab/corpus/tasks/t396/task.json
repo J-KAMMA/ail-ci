@@ -1,0 +1,6 @@
+{
+ "id": "t396",
+ "category": "simulation",
+ "description": "Run a bank-queue simulation: customers arrive every 2 time units and each service takes randint(1,5) time units from random.Random(seed); one teller; print the average wait with 3 decimals for n customers.",
+ "input_format": "seed_params"
+}

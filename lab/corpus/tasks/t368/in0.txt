@@ -1,0 +1,6 @@
+5
+mallory C 25 91
+ivan B 15 59
+heidi A 25 56
+frank B 18 89
+carol A 23 59

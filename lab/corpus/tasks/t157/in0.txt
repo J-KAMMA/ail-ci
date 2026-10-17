@@ -1,0 +1,6 @@
+delta -3
+echo 2
+banana 1
+apple 5
+cherry 0
+banana 5

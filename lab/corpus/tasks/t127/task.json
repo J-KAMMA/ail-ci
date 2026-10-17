@@ -1,0 +1,6 @@
+{
+ "id": "t127",
+ "category": "collections",
+ "description": "Maintain a deque of the last 3 scores seen and print the average of the deque after each entry (2 decimals).",
+ "input_format": "name_scores"
+}

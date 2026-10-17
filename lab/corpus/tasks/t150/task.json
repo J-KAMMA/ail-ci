@@ -1,0 +1,6 @@
+{
+ "id": "t150",
+ "category": "collections",
+ "description": "Bucket the numbers by sign and parity into a dict with keys like 'neg-odd'; print keys sorted with their sorted values.",
+ "input_format": "nums_nocount"
+}

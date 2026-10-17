@@ -1,0 +1,6 @@
+{
+ "id": "t425",
+ "category": "errors_classes",
+ "description": "Write a function that returns the element at index = value in a list [10,20,30,40]; catch IndexError and TypeError; print the result or the exception class name.",
+ "input_format": "opt_ints_lines"
+}

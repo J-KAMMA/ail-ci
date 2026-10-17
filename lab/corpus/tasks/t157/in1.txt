@@ -1,0 +1,13 @@
+apple -2
+echo 1
+banana 2
+cherry -5
+foxtrot -5
+cherry 1
+foxtrot 1
+golf 5
+foxtrot -5
+foxtrot 3
+apple 5
+golf -2
+hotel 5

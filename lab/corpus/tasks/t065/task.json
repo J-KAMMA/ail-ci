@@ -1,0 +1,6 @@
+{
+ "id": "t065",
+ "category": "strings",
+ "description": "Print each line reversed (character-wise), then the number of lines and the number of empty lines.",
+ "input_format": "text_lines"
+}

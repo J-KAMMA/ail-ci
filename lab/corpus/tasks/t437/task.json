@@ -1,0 +1,6 @@
+{
+ "id": "t437",
+ "category": "errors_classes",
+ "description": "Implement an iterator class with __iter__ and __next__ that yields running averages of the numbers; print the first 10 with 2 decimals; then use a generator expression for the same.",
+ "input_format": "nums_nocount"
+}

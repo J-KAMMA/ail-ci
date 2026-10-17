@@ -1,0 +1,7 @@
+6
+carol A 22 71
+niaj A 15 77
+heidi A 21 94
+grace C 16 79
+bob A 19 58
+ivan A 15 64

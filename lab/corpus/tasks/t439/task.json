@@ -1,0 +1,6 @@
+{
+ "id": "t439",
+ "category": "errors_classes",
+ "description": "Implement a memoising decorator with functools.wraps and apply it to a recursive function counting paths in an n by n grid; print the result and cache hit counts.",
+ "input_format": "small_int"
+}

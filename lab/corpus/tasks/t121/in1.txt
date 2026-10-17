@@ -1,0 +1,13 @@
+12
+heidi 9
+grace 45
+niaj 4
+alice 61
+judy 77
+judy 95
+dave 82
+bob 86
+carol 7
+niaj 61
+dave 6
+mallory 47

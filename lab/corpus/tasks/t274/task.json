@@ -1,0 +1,6 @@
+{
+ "id": "t274",
+ "category": "graphs",
+ "description": "Compute the shortest path counts from node 0 to every node (number of distinct shortest paths).",
+ "input_format": "edges_plain"
+}

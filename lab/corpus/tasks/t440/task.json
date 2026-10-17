@@ -1,0 +1,6 @@
+{
+ "id": "t440",
+ "category": "errors_classes",
+ "description": "Use functools.lru_cache on a recursive partition function p(n,k) and print p(n,n) for n and cache_info() hits/misses.",
+ "input_format": "small_int"
+}

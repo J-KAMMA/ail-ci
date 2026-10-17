@@ -1,0 +1,6 @@
+{
+ "id": "t409",
+ "category": "simulation",
+ "description": "Simulate a vending machine with coins 1, 5, 10, 25 and print the greedy change for amounts 1..n*7 step 13, one per line as a dict repr.",
+ "input_format": "small_int"
+}

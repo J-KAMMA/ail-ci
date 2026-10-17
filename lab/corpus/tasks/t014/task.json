@@ -1,0 +1,6 @@
+{
+ "id": "t014",
+ "category": "numbers",
+ "description": "Print the running maximum after each element, space separated.",
+ "input_format": "nums"
+}

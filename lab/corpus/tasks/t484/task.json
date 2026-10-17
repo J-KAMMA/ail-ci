@@ -1,0 +1,6 @@
+{
+ "id": "t484",
+ "category": "errors_classes",
+ "description": "Use the string module constants and str.translate: remove punctuation from text and count ASCII letters/digits; print the result.",
+ "input_format": "text_lines"
+}

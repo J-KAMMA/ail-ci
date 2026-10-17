@@ -1,0 +1,6 @@
+{
+ "id": "t052",
+ "category": "numbers",
+ "description": "Print the digits of 2**(n*10) summed, and the number of digits.",
+ "input_format": "small_int"
+}

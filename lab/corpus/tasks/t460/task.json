@@ -1,0 +1,6 @@
+{
+ "id": "t460",
+ "category": "errors_classes",
+ "description": "Write errors to stderr via sys.stderr for invalid lines and normal results to stdout; print on stdout only the valid integers' sum; exit with status 0.",
+ "input_format": "opt_ints_lines"
+}

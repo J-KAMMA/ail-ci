@@ -1,0 +1,8 @@
+7
+carol B 25 81
+heidi A 20 93
+carol B 19 59
+grace B 16 96
+frank B 15 79
+carol A 15 63
+grace A 19 78

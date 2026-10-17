@@ -1,0 +1,6 @@
+{
+ "id": "t345",
+ "category": "dp",
+ "description": "Generate the Gray code sequence for k = min(n, 5) bits and print each code in binary.",
+ "input_format": "small_int"
+}

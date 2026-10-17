@@ -1,0 +1,6 @@
+{
+ "id": "t483",
+ "category": "errors_classes",
+ "description": "Use fractions.Fraction and the limit_denominator method to approximate each float with denominator <= 100; print 'num/den'.",
+ "input_format": "floats"
+}

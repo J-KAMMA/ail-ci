@@ -1,0 +1,6 @@
+{
+ "id": "t221",
+ "category": "grids",
+ "description": "BFS from S to E; print the path as a string of U/D/L/R moves (first found in order U, D, L, R) or 'no path'.",
+ "input_format": "grid_se"
+}

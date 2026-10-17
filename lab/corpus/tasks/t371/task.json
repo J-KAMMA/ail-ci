@@ -1,0 +1,6 @@
+{
+ "id": "t371",
+ "category": "sorting",
+ "description": "Print the words sorted by the number of vowels, then by the word; use sorted with a key lambda returning a tuple.",
+ "input_format": "strings_n"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t383",
+ "category": "sorting",
+ "description": "Print the lines sorted by code descending using the integer after 'code='; ties by original order; first 8 lines.",
+ "input_format": "log_lines"
+}

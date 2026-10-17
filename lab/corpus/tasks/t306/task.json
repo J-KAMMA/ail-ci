@@ -1,0 +1,6 @@
+{
+ "id": "t306",
+ "category": "dp",
+ "description": "Compute the length of the longest common subsequence of the two strings and print one such subsequence.",
+ "input_format": "two_strings"
+}

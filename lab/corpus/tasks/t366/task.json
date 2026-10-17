@@ -1,0 +1,6 @@
+{
+ "id": "t366",
+ "category": "sorting",
+ "description": "Print the ranking with competition ranking (1,2,2,4) of the students by score descending, with names alphabetical on ties.",
+ "input_format": "student_records"
+}

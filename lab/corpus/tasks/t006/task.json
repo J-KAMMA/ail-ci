@@ -1,0 +1,6 @@
+{
+ "id": "t006",
+ "category": "numbers",
+ "description": "Print the maximum subarray sum (Kadane), and the 0-based start and end indices of one such subarray (first one found).",
+ "input_format": "nums"
+}

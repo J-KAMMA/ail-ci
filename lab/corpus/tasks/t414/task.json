@@ -1,0 +1,6 @@
+{
+ "id": "t414",
+ "category": "simulation",
+ "description": "Simulate a stack-based virtual machine where each line of input is an instruction ('push X', 'pop', 'size', 'peek') using the commands format; print the final stack bottom to top.",
+ "input_format": "commands"
+}

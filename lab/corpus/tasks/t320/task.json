@@ -1,0 +1,6 @@
+{
+ "id": "t320",
+ "category": "dp",
+ "description": "Compute the minimum number of jumps to reach the end where each absolute value |a[i]| is the maximal jump length from i (position clamps nothing); print -1 if unreachable (zero value blocks).",
+ "input_format": "nums_nocount"
+}

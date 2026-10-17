@@ -1,0 +1,8 @@
+deposit acc1 475
+deposit acc3 444
+deposit acc3 336
+withdraw acc3 28
+balance acc2 424
+deposit acc3 182
+balance acc3 118
+withdraw acc2 221

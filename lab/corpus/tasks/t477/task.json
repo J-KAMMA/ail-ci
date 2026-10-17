@@ -1,0 +1,6 @@
+{
+ "id": "t477",
+ "category": "errors_classes",
+ "description": "Use bisect.insort to maintain a sorted list as numbers arrive; print the median after each arrival.",
+ "input_format": "nums_nocount"
+}

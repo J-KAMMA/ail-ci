@@ -1,0 +1,6 @@
+{
+ "id": "t143",
+ "category": "collections",
+ "description": "Print the elements of the first list that are not in the second (order preserved, duplicates preserved), the number of common distinct elements, and the Jaccard index with 4 decimals.",
+ "input_format": "two_lists"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t024",
+ "category": "numbers",
+ "description": "Print the numbers that are prime, in input order, space separated, or 'none'.",
+ "input_format": "pos_nums"
+}

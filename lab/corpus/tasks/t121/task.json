@@ -1,0 +1,6 @@
+{
+ "id": "t121",
+ "category": "collections",
+ "description": "Print the name with the best single score (first on ties) and the names that appear exactly once.",
+ "input_format": "name_scores"
+}

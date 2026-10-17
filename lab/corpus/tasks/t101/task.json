@@ -1,0 +1,6 @@
+{
+ "id": "t101",
+ "category": "strings",
+ "description": "Print the text with each word truncated to 4 characters and an ellipsis '...' appended when truncated.",
+ "input_format": "words_line"
+}

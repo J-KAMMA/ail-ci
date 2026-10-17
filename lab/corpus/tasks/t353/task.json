@@ -1,0 +1,6 @@
+{
+ "id": "t353",
+ "category": "dp",
+ "description": "Implement quicksort and merge sort by hand, verify both equal sorted(), and print the sorted list and 'ok'.",
+ "input_format": "nums"
+}

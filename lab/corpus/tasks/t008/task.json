@@ -1,0 +1,6 @@
+{
+ "id": "t008",
+ "category": "numbers",
+ "description": "Print how many pairs i<j have equal values.",
+ "input_format": "nums"
+}

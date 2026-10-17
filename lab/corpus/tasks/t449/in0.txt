@@ -1,0 +1,9 @@
+8
+alice C 19 65
+alice B 23 91
+mallory A 25 98
+alice C 22 60
+niaj C 24 52
+carol C 22 85
+niaj A 25 91
+bob A 25 98

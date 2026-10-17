@@ -1,0 +1,6 @@
+{
+ "id": "t457",
+ "category": "errors_classes",
+ "description": "Use string formatting widely: for each number print f-strings with width, fill, sign, hex, binary, percent, exponent and comma formats on one line.",
+ "input_format": "pos_nums"
+}

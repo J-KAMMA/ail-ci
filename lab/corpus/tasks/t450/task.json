@@ -1,0 +1,6 @@
+{
+ "id": "t450",
+ "category": "errors_classes",
+ "description": "Use typing.NamedTuple for a Record(name, grade, age, score); print the max score record using repr, and records as tuples via _asdict().",
+ "input_format": "student_records"
+}

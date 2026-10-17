@@ -1,0 +1,6 @@
+{
+ "id": "t148",
+ "category": "collections",
+ "description": "Group consecutive equal numbers using itertools.groupby and print each run as 'value x count'.",
+ "input_format": "nums_nocount"
+}

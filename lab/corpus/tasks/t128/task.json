@@ -1,0 +1,6 @@
+{
+ "id": "t128",
+ "category": "collections",
+ "description": "Sum values per name using floats; print totals rounded to 2 decimals sorted by name, and the grand total.",
+ "input_format": "name_score_float"
+}

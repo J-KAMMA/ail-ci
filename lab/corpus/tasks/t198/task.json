@@ -1,0 +1,6 @@
+{
+ "id": "t198",
+ "category": "parsing",
+ "description": "Validate every date: leap-year aware day checks via calendar; print 'weekday' name (using datetime.date) for each, and the count of weekend dates.",
+ "input_format": "dates"
+}

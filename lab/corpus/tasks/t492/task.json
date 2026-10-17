@@ -1,0 +1,6 @@
+{
+ "id": "t492",
+ "category": "errors_classes",
+ "description": "Use the str methods isalpha, isdigit, isupper, islower, istitle on each word and print the booleans as a string like 'TFFTF'.",
+ "input_format": "words_line_uni"
+}

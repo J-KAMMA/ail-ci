@@ -1,0 +1,6 @@
+{
+ "id": "t410",
+ "category": "simulation",
+ "description": "Run a cellular automaton (rule 30) with a width of 31 and a single centre cell for n generations; print the rows using '#' and '.'.",
+ "input_format": "small_int"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t265",
+ "category": "graphs",
+ "description": "Run BFS from node 0 and print the visiting order and the distance to every node.",
+ "input_format": "edges_plain"
+}

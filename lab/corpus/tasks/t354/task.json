@@ -1,0 +1,6 @@
+{
+ "id": "t354",
+ "category": "dp",
+ "description": "Implement heap sort by hand and a counting sort for the shifted values; print the sorted list and the number of swaps done by bubble sort.",
+ "input_format": "nums"
+}

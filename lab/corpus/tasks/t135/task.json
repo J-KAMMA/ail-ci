@@ -1,0 +1,6 @@
+{
+ "id": "t135",
+ "category": "collections",
+ "description": "Implement a key-value store: 'set K V' stores, 'get K' prints value or 'nil', 'del K' removes and prints 1 or 0, 'incr K V' adds V to the number at K (missing means 0) and prints the new value, 'count' prints the number of keys.",
+ "input_format": "kv_commands"
+}

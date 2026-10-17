@@ -1,0 +1,6 @@
+{
+ "id": "t290",
+ "category": "graphs",
+ "description": "Print the number of paths from node 0..n-1 sources to sinks: count paths from every source to every sink using DP modulo 1000000007; print the total.",
+ "input_format": "dag"
+}

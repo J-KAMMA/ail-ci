@@ -1,0 +1,6 @@
+{
+ "id": "t412",
+ "category": "simulation",
+ "description": "Run a rule-110 cellular automaton on a ring of 40 cells (single live cell at index 39) for n steps and print each generation.",
+ "input_format": "small_int"
+}

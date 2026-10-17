@@ -1,0 +1,6 @@
+{
+ "id": "t227",
+ "category": "grids",
+ "description": "Find the number of distinct shortest paths from S to E (4-directional moves, count paths using BFS DP); print 0 if unreachable.",
+ "input_format": "grid_se"
+}

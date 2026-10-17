@@ -1,0 +1,6 @@
+{
+ "id": "t326",
+ "category": "dp",
+ "description": "For each query range, print the sum, minimum and maximum of the array in that range.",
+ "input_format": "ints_and_queries"
+}

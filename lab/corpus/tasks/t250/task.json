@@ -1,0 +1,6 @@
+{
+ "id": "t250",
+ "category": "grids",
+ "description": "Print the trace, the determinant (integers via Laplace expansion for n<=6, otherwise 'skip') and whether the matrix is symmetric.",
+ "input_format": "square_matrix"
+}

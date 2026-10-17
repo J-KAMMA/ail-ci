@@ -1,0 +1,6 @@
+{
+ "id": "t355",
+ "category": "dp",
+ "description": "Implement selection sort and count comparisons and swaps; print the sorted list, comparisons and swaps.",
+ "input_format": "nums"
+}

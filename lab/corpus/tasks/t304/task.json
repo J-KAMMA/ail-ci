@@ -1,0 +1,6 @@
+{
+ "id": "t304",
+ "category": "dp",
+ "description": "Solve the unbounded knapsack and print the max value.",
+ "input_format": "knap"
+}

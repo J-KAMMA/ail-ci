@@ -1,0 +1,6 @@
+{
+ "id": "t494",
+ "category": "errors_classes",
+ "description": "Count words, characters, and bytes (like wc) for the input text; print three numbers on a line like the wc -l -w -c output with width 7.",
+ "input_format": "text_uni"
+}

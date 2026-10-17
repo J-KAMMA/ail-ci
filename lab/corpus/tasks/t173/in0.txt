@@ -1,0 +1,4 @@
+west,q1,839
+west,q1,180
+south,q3,484
+east,q4,465

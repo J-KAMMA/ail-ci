@@ -1,0 +1,6 @@
+{
+ "id": "t458",
+ "category": "errors_classes",
+ "description": "Use the % operator and str.format as well as f-strings to print the same data; for each (name, score) pair print three formatting styles.",
+ "input_format": "name_scores"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t279",
+ "category": "graphs",
+ "description": "Run Floyd-Warshall and print the matrix of shortest distances (use 'inf' for unreachable).",
+ "input_format": "edges_w"
+}

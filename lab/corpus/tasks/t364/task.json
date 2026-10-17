@@ -1,0 +1,6 @@
+{
+ "id": "t364",
+ "category": "sorting",
+ "description": "Print the students with a score at least equal to the 75th percentile (nearest-rank method), sorted by score descending then name.",
+ "input_format": "student_records"
+}

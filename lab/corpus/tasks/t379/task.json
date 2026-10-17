@@ -1,0 +1,6 @@
+{
+ "id": "t379",
+ "category": "sorting",
+ "description": "Print the numbers sorted by their string representation (lexicographic) and then largest-number-formation: arrange them to form the largest concatenated number; print that number.",
+ "input_format": "pos_nums"
+}

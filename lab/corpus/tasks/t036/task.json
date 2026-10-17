@@ -1,0 +1,6 @@
+{
+ "id": "t036",
+ "category": "numbers",
+ "description": "Print the numbers in scientific notation with 3 digits after the decimal point, one per line.",
+ "input_format": "floats"
+}

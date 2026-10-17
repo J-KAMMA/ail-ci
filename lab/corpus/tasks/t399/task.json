@@ -1,0 +1,6 @@
+{
+ "id": "t399",
+ "category": "simulation",
+ "description": "Evaluate each poker hand: print its category (high card, pair, two pair, three of a kind, straight, flush, full house, four of a kind, straight flush).",
+ "input_format": "lines_of_cards"
+}

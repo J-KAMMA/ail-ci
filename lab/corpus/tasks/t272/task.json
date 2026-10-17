@@ -1,0 +1,6 @@
+{
+ "id": "t272",
+ "category": "graphs",
+ "description": "Find all articulation points using DFS low-link and print them sorted.",
+ "input_format": "edges_plain"
+}

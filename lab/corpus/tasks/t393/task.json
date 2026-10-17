@@ -1,0 +1,6 @@
+{
+ "id": "t393",
+ "category": "simulation",
+ "description": "Simulate n coin flips with random.Random(seed).random() < 0.5 as heads; print the heads count, longest streak, and the proportion with 3 decimals.",
+ "input_format": "seed_params"
+}

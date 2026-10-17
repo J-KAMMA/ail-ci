@@ -1,0 +1,6 @@
+{
+ "id": "t276",
+ "category": "graphs",
+ "description": "Run Dijkstra from node 0 with heapq; print the distance to every node and the path to the farthest node.",
+ "input_format": "edges_w"
+}

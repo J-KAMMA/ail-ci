@@ -1,0 +1,6 @@
+{
+ "id": "t123",
+ "category": "collections",
+ "description": "Use defaultdict(list) to group scores per name; print each name with its scores sorted descending.",
+ "input_format": "name_scores"
+}

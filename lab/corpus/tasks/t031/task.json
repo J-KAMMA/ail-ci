@@ -1,0 +1,6 @@
+{
+ "id": "t031",
+ "category": "numbers",
+ "description": "Print the mean, population variance and population standard deviation, each rounded to 3 decimals.",
+ "input_format": "floats"
+}

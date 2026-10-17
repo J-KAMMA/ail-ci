@@ -1,0 +1,6 @@
+{
+ "id": "t105",
+ "category": "strings",
+ "description": "Print every word with its letters sorted, then a camelCase and a snake_case version of the whole sequence of words.",
+ "input_format": "words_line"
+}

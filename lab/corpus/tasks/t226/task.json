@@ -1,0 +1,6 @@
+{
+ "id": "t226",
+ "category": "grids",
+ "description": "Use 8-direction movement and BFS to print the shortest path length from S to E, or -1.",
+ "input_format": "grid_se"
+}

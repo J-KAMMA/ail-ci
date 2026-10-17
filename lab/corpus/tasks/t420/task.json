@@ -1,0 +1,6 @@
+{
+ "id": "t420",
+ "category": "simulation",
+ "description": "Compute compound interest: initial 1000, rate given by (first number mod 10 + 1)% per period, for periods equal to the count of numbers; print each period's balance as a rounded float with 2 decimals.",
+ "input_format": "nums_nocount"
+}

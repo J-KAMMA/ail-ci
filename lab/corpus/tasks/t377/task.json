@@ -1,0 +1,6 @@
+{
+ "id": "t377",
+ "category": "sorting",
+ "description": "Sort numbers by their digit sum then value; print each as 'value(digitsum)'.",
+ "input_format": "pos_nums"
+}

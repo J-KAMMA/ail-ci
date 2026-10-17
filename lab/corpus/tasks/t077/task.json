@@ -1,0 +1,6 @@
+{
+ "id": "t077",
+ "category": "strings",
+ "description": "Print each line upper-cased and lower-cased (Python's str.upper/lower), plus the casefolded version if different from lower.",
+ "input_format": "text_uni"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t316",
+ "category": "dp",
+ "description": "Print the maximum product subarray value.",
+ "input_format": "nums_nocount"
+}
