@@ -81,6 +81,17 @@ def _relib():
     return _relib.module
 
 
+def _collib():
+    """python/pkg-v12/collib.py (`collections`, lowered onto dict / list / classes before the surface pass)."""
+    if not hasattr(_collib, "module"):
+        spec = importlib.util.spec_from_file_location(
+            "_ail_collib", Path(__file__).parent / "python" / "pkg-v12" / "collib.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _collib.module = module
+    return _collib.module
+
+
 _OPTIONAL = re.compile(r'\bOptional\s*\[\s*([A-Za-z_]\w*)\s*\]')
 
 
@@ -2025,6 +2036,8 @@ class _Surface:
 def python_surface(source, notes=None):
     """Map the Python spellings above onto the compiler's own; `notes` collects (line, why) for
     the constructs left as written."""
+    if "collections" in source:
+        source = _collib().rewrite(source, notes)
     try:
         surface = _Surface(source)
     except (SyntaxError, ValueError):

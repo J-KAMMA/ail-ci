@@ -1168,6 +1168,14 @@ def _scan_module_consts(tree):
                                     "for string- or bytes-literal patterns only (match, fullmatch, search, "
                                     "findall, finditer, split, sub, escape, and NAME = re.compile(literal)); "
                                     "the notes below name the use")
+            elif 'collections' in named:
+                # collib.py (run by ail_syntax.python_surface) lowers every use it builds and drops the
+                # import; the use it could not build kept it here, and its `note:` lines say which.
+                error = Unsupported("import of 'collections' with a use that is not built: Counter, "
+                                    "defaultdict (int, float, str, list, lambda: <constant>), OrderedDict and "
+                                    "deque are built for str / int keys and int / float / str / bool elements; "
+                                    "namedtuple, ChainMap, defaultdict(set) and the rest are not -- the notes "
+                                    "below name the use")
             elif regex is not None:
                 error = Unsupported("import of %r; there are no regular expressions here at all and "
                                     "no way to spell one -- match by indexing and comparing the str "

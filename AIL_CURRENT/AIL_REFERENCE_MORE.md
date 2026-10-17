@@ -364,6 +364,80 @@ def main() -> int:
 main()
 ```
 
+## Collections: Counter, defaultdict, OrderedDict, deque (Python syntax)
+
+`from collections import Counter, defaultdict, deque, OrderedDict` (or `import collections`). Each is built
+into the ordinary dict / list / class the compiler already has, before the rest runs (collib.py), so a
+program that does not import collections is unchanged. Keys are `str` or `int`; values `int`, `float` or
+`str`; deque elements `int`, `float`, `str` or `bool`. The type comes from an annotation
+(`c: Counter[str] = Counter()`, `d: DefaultDict[int, List[int]]`, a parameter `q: Deque[int]`) or from the
+first uses (`Counter(words)`, `d[w].append(i)`, `q.append(x)`).
+
+- `Counter`: `Counter()`, `Counter(list | str | set | range | comprehension | another Counter or dict)`;
+  `c[k]` is 0 for a missing key and does not insert; `c[k] += n`, `c[k] = n`, `del c[k]` (silent when
+  missing), `c.get(k, d)`, `pop`, `keys / values / items`, `len`, `in`, `sum(c.values())`, `total()`,
+  `update(iterable | Counter)`, `elements()`, `+ - & |` (and `+=` ...) with CPython's rules (keep
+  positive counts), `print(c)` as `Counter({'a': 3, 'b': 2})`. `most_common([n])` (ties in insertion order,
+  as CPython) is built in `for word, n in c.most_common(10):`, in comprehensions of that form,
+  as `c.most_common(1)[0][0]` / `[i][1]`, in `len()`, `dict()` and `print()`; the loop body may not change `c`.
+- `defaultdict(int | float | str | lambda: <constant>)`: a `dict`. `d[k]` inserts the default, as CPython
+  (so `len(d)` and the order of the keys show it); `d.get(k, x)`, `in`, `pop`, `setdefault` do not;
+  `d[k] += v`, `dict(d)`, `d.copy()`, `for k in d`, `items()` work. `OrderedDict()` is an insertion-ordered
+  dict with `move_to_end(k)` and `popitem(last=True | False)` (a statement or `k, v = d.popitem(...)`).
+- `defaultdict(list)`: a class with the keys in order and the rows (`list[list[T]]`, T int, float or str):
+  `d[k].append / extend / pop / sort / insert`, `d[k] += [..]`, `d[k][i]`, `len(d[k])`, `for x in d[k]`,
+  `d[k] = [..]` (a fresh list), `d.get(k, [])` where the result is only read, `k in d`, `len(d)`,
+  `for k in d`, `d.keys() / values()`, `for k, v in d.items()`, `d.clear()`. Pass it to a function with a
+  parameter annotated `defaultdict[K, list[T]]` (or `Dict[K, List[T]]`); the callee may change it.
+  `defaultdict(set)` (elements int or str): `d[k].add / discard / remove / update(xs)`, `x in d[k]`,
+  `len`, `sorted / sum / min / max / any / all` of a row; looping over a row is refused (CPython's set order is
+  unspecified) -- write `for x in sorted(d[k])`.
+- `deque` (ring buffer, O(1) at both ends): `deque()`, `deque(iterable)`, `maxlen=n` (drops from the other
+  end), `append appendleft pop popleft extend extendleft rotate([n]) clear count index remove insert
+  reverse copy`, `len(q)`, `q[i]` / `q[i] = x` / `del q[i]` (negative too), `x in q`, `for x in q`, `while q:`,
+  `list(q)`, `sum / min / max / sorted(q)`, `print(q)`; `IndexError` / `ValueError` as CPython.
+- A collection passed to a function needs the same annotation on the parameter. A `Counter` or a defaultdict
+  of numbers is a dict there (read-only: return new values instead of changing it); `d[k]` on a defaultdict
+  parameter is refused because it would insert into the caller's dict.
+- Refused by name (`note:` lines): `namedtuple` (use a `@dataclass`), `ChainMap` and the rest of the module,
+  `defaultdict(bool | dict | Counter | lambda: <expression>)`, tuple / float keys or elements,
+  `==` / `<` on collections, `q.maxlen`, `d.default_factory`, deque slices, `OrderedDict(items)`, a collection
+  in a class field or at module level, `top = c.most_common(3)` as a value, `d[k] = xs` with an existing list,
+  `del d[k]` on `defaultdict(list)`, `Counter.subtract`, `print` of a defaultdict, a loop that adds to or
+  deletes from the collection it walks (CPython raises `RuntimeError`).
+
+```python
+from collections import Counter, defaultdict, deque
+
+
+def main() -> int:
+    words = "to be or not to be".split()
+    counts = Counter(words)
+    for word, n in counts.most_common(2):
+        print(word, n)
+    groups = defaultdict(list)
+    for i, w in enumerate(words):
+        groups[len(w)].append(i)
+    for k in sorted(groups):
+        print(k, len(groups[k]))
+    window = deque(maxlen=3)
+    for w in words:
+        window.append(w)
+    print(len(window), window[0], counts["zzz"], len(counts))
+    return 0
+
+
+main()
+```
+
+```text
+to 2
+be 2
+2 5
+3 1
+3 not 0 4
+```
+
 ## Heaps: heapq, bisect
 
 No import, on a list of int, float, str or structs: `heappush(h, x)`, `heappop(h)` (`IndexError`
@@ -415,7 +489,7 @@ needs a final `return`. Handler names: Local names.
 | `d.get(k)` (None when missing) | `d.get(k, -1)` with a sentinel, or `if k in d { ... d[k] ... }` |
 | `int(s)` on text that may overflow | `parse_int64_decimal(s)` from `checked_integer` (`ValueError`) |
 | `with open(p) as f`, `f.write` | `read_bytes`, `write_text`, `file_chunks` |
-| `re`, `math`, `collections`, big integers | hand-written loops; `x ** 0.5`; limbs in a `list[int]` |
+| `namedtuple`, big integers | a `@dataclass` class; limbs in a `list[int]` |
 
 ```ail-refused
 fn main() { let t = (1, 2); print(t[0]); }
