@@ -20,7 +20,7 @@ Each program below is ordinary Python: CPython runs it as the oracle, and the co
   `key=xs.__getitem__` sort; module constants may be constant arithmetic (`(1 << 40) - 1`, also
   `const` in the block syntax).
 * A refusal in the Python syntax quotes Python (no `let ...;`), and a construct the front end left
-  as written (heapq.nsmallest, math.log) is named, with its line, in a note.
+  as written (heapq.nsmallest, math.erf) is named, with its line, in a note.
 """
 import os
 import subprocess
@@ -307,16 +307,16 @@ fn main() {
 REFUSED = [
     ('def f(x: int) -> str:\n    return x + 1\n\n\ndef main():\n    print(f(2))\n\n\nmain()\n',
      'return annotation str disagrees', None),
-    ('def main():\n    xs = ["1", "2", "3"]\n    t = 0\n    for x in map(int, xs[0:3:2]):\n        t += x\n'
+    ('def main():\n    xs = ["1", "2", "3"]\n    t = 0\n    for x in (int(s) for s in xs):\n        t += x\n'
      '    print(t)\n\n\nmain()\n', 'prog.ail:4:5:', 'let '),
-    ('def main():\n    xs = ["1", "2", "3"]\n    t = 0\n    for x in map(int, xs[0:3:2]):\n        t += x\n'
+    ('def main():\n    xs = ["1", "2", "3"]\n    t = 0\n    for x in (int(s) for s in xs):\n        t += x\n'
      '    print(t)\n\n\nmain()\n', '(`for x in part: ...`)', '{'),
     ('import heapq\nimport math\n\n\ndef main():\n    h = [3, 1, 2]\n    heapq.heapify(h)\n'
-     '    print(heapq.nsmallest(2, h)[0], math.log(2.0))\n\n\nmain()\n',
+     '    print(heapq.nsmallest(2, h)[0], math.erf(2.0))\n\n\nmain()\n',
      'prog.ail:1:1: not in the subset: import of \'heapq\' with a function that is not built in', None),
     ('import heapq\nimport math\n\n\ndef main():\n    h = [3, 1, 2]\n    heapq.heapify(h)\n'
-     '    print(heapq.nsmallest(2, h)[0], math.log(2.0))\n\n\nmain()\n',
-     'note: prog.ail:8: math.log() with these arguments is not built', None),
+     '    print(heapq.nsmallest(2, h)[0], math.erf(2.0))\n\n\nmain()\n',
+     'note: prog.ail:8: math.erf() with these arguments is not built', None),
 ]
 
 

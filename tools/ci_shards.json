@@ -88,6 +88,7 @@
   "test_ail_pool_row_arguments": 71.7,
   "test_ail_python_syntax": 35.8,
   "test_ail_range_checks": 15.2,
+  "test_ail_re": 10.0,
   "test_ail_record_initializers": 4.4,
   "test_ail_reference_examples": 75.0,
   "test_ail_refusal_hints": 1.3,
@@ -104,6 +105,7 @@
   "test_ail_span_cache": 15.1,
   "test_ail_stdin_list_batch": 60.7,
   "test_ail_stdin_read_until": 5.4,
+  "test_ail_stdlib_batch1": 10.0,
   "test_ail_stdout_mixed": 92.0,
   "test_ail_stdout_mixed_resources": 2.6,
   "test_ail_str_find_alias": 9.6,
@@ -176,11 +178,13 @@
    "test_ail_ir_s1",
    "test_ail_ir_s2",
    "test_ail_ir_s3b",
-   "test_ail_memory_shapes"
+   "test_ail_memory_shapes",
+   "test_ail_stdlib_batch1"
   ],
   [
    "test_ail_ir_s0",
    "test_ail_ir_s3",
+   "test_ail_re",
    "test_json_query_file"
   ],
   [

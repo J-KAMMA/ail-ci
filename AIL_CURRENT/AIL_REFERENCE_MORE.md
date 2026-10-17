@@ -292,9 +292,11 @@ results, with Python's meaning:
   `lower/upper`, `isdigit/isalpha/isalnum/isspace/isupper/islower/isdecimal/isnumeric/istitle`,
   `encode()`; `in`, `+`, `*`, `<`, slices with steps, `ord`, `chr`, `str(int|float|bool)`,
   `hex(int)`. Missing: `partition`, `title`, `capitalize`, `zfill`, `ljust`, `translate`,
-  `removeprefix`, `re`. `+` never mixes str and a number: `"n=" + str(n)`.
+  `removeprefix`. `+` never mixes str and a number: `"n=" + str(n)`.
 - f-strings `{expr}`, `{n:5d}`, `{n:05d}`, `{x:.2f}`, `{x:8.3f}`, `{s:>6}` (`<`, `^`);
-  `"%d %5s %-5s %.9f" % (...)`; `"{} {:.2f}".format(...)`. No `x`, `e`, `g`, `+`, `,` specs.
+  `"%d %5s %-5s %.9f" % (...)`; `"{} {:.2f}".format(...)`. Specs follow CPython: `[[fill]align][sign][#][0]
+  [width][, or _][.precision][type]` with int types d x X o b (and e f g %), float types f F e E g G %
+  or none (the repr), `!r`; refused by name: n, c, z, a nested `{w}`, grouping with zero padding.
 
 ```ail
 fn main() {
@@ -307,6 +309,59 @@ fn main() {
 ```text
 007|   7|3.14|ab  |8     7|3.1 7!
 True 1 3.5 3 2 1024
+```
+
+## Regular expressions: re (Python syntax)
+
+`import re` with the pattern spelled as a literal: a str or bytes literal, or a name bound once to one
+(`WORD = r"[a-z]+"`), or `P = re.compile(literal[, flags])` bound once and used as `P.search(s)` and so
+on. The pattern is parsed when the program is built and matched by a linear-time engine written in the
+language itself (leftmost-first, CPython's priority), so groups and spans equal CPython's.
+
+- Functions and methods: `match fullmatch search findall finditer split sub escape`; `flags=` or the
+  last positional flags (`re.I re.M re.S re.X re.A`, joined with `|`), `count=`, `maxsplit=`.
+  `finditer` returns a list of matches, not an iterator (use it in a `for` or with `len`).
+- Pattern syntax: literals, `.`, classes (`[a-z]`, `[^...]`, ranges, `\d \w \s` and their
+  negations; Unicode-aware for str as in CPython, ASCII for bytes and `re.A`), `^ $ \A \Z \b \B`,
+  `* + ? {m} {m,} {,n} {m,n}` and the lazy forms, `|`, `(...)`, `(?:...)`, `(?P<name>...)`, `(?#...)`,
+  a leading `(?imsxa)`, `\n \t \xhh \uhhhh` escapes, lookahead `(?=..) (?!..)` and fixed-width lookbehind
+  `(?<=..) (?<!..)` (no groups inside).
+- Match: `m.group(i)`, `m.group("name")`, `m.group()`, `m.start(i)`, `m.end(i)`, `a, b = m.span()`,
+  `x, y = m.groups()`, `if m:`, `m is None`. A group that did not take part gives `start == -1`; reading it
+  with `m.group(i)` raises `ValueError` (there is no None str), so test `m.start(i) >= 0` first.
+  `findall` with one group returns that group ('' when it did not take part).
+- `sub(pattern, repl, s[, count])`: a literal `repl` may use `\1`, `\g<1>`, `\g<name>`, `\n`;
+  a non-literal `repl` must have no backslash; a function is not built. Empty matches follow CPython 3.7+.
+- Cost: matching is O(len(pattern) x len(text)); one call to `fullmatch` on a short str is about as fast
+  as CPython's, bulk `findall` over megabytes is a few times slower.
+- `for k, v in re.findall(P, s):` with several groups is a loop over the matches (the names may not be used
+  outside the loop); `m.group(k) or d` and `m.group(k) is None` read the group as CPython's None would.
+- Refused by name (the compiler prints a `note:` line): backreferences, groups inside lookaround,
+  atomic groups, possessive quantifiers, conditionals, scoped flags `(?i:...)`, a repeated group that
+  can match the empty string (`(a*)*`), `re.IGNORECASE` with a non-ASCII pattern character (a non-ASCII
+  subject with `re.I` raises `ValueError`), `findall` with several groups and `split` with groups
+  (tuples, None), `subn`, `m.groups()` / `m.groupdict()` / `m.span()` as values, a pattern that is not a
+  literal, `pos` / `endpos`.
+
+```python
+import re
+
+DATE = re.compile(r"(?P<y>[0-9]{4})-(?P<m>[0-9]{2})")
+
+
+def main() -> int:
+    if re.fullmatch(r"[0-9]+", "123"):
+        print("digits")
+    m = DATE.search("on 2026-10 ok")
+    if m:
+        print(m.group("y"), m.group(2), m.start(0))
+    print(re.sub(r"(\w+)@(\w+)", r"\2 at \1", "me@home"))
+    for word in re.findall(r"[a-z]+", "ab, cd"):
+        print(word)
+    return 0
+
+
+main()
 ```
 
 ## Heaps: heapq, bisect
