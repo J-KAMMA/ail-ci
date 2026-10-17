@@ -41,7 +41,7 @@ with a fixed seed so every category is covered even when the time budget ends ea
 
 ## Classes
 
-`same`, `refused` (compile-time refusal, exit 3, a named reason), `overflow` (declared 64-bit `int`),
+`same`, `refused` (compile-time refusal, exit 3, a named reason), `overflow` (declared 64-bit `int`), `limit` (character above U+FFFF, declared),
 `DIFF` (silent difference in stdout or exit code), `crash`, `timeout`, `skipped` (CPython timed out,
 printed too much, or printed different output under two hash seeds). A program is classed `refused` if its
 compile was refused; otherwise by the worst class over its three inputs. Only stdout and the exit code are
@@ -49,8 +49,8 @@ compared, not stderr text.
 
 ## State of this corpus
 
-499 tasks were defined. The free tier stopped serving requests (\"free tier can only be used from within
-OpenCode\") about 1.5 hours into generation, so only the first answers exist: see `RESULTS.md`, section
+499 tasks were defined. The free tier stopped serving requests ("free tier can only be used from within
+OpenCode") about 1.5 hours into generation, so only the first answers exist: see `RESULTS.md`, section
 Generation, for the counts. `python3 generate.py MODEL --redo-empty` asks the missing ones again once the
 service answers; `check.py` then only processes programs it has not seen. The AIL compiler used was a fixed
 snapshot of one build, so all results come from the same version; rerun `check.py` against a newer build
