@@ -203,8 +203,9 @@ typedef int64_t ail_len_t;
 #endif
 typedef struct { int64_t *p; ail_len_t n, cap; } ail_list;
 typedef struct {
-    /* HASH-mode storage: populated only when `mode == AIL_TAB_HASH` (a permanent state entered by
-       spilling once -- see ail_tab_arr_spill in TAB below -- and never left). */
+    /* HASH-mode storage: populated only when `mode == AIL_TAB_HASH` (entered by spilling -- see
+       ail_tab_arr_spill in TAB below -- and left only when the keys fill their span densely again,
+       ail_tab_hash_rearray). */
     int64_t *key; int64_t *val; unsigned char *used; int64_t fill, cap;
     /* insertion-order key list, valid in EITHER mode: exactly order[0 .. n) once ail_tab_order
        has closed the holes deletions leave (`otop` below). */
@@ -4533,7 +4534,7 @@ TAB = r'''
    keys will not fit a bounded array.
 
    THE BUDGET: AIL_TAB_ARR_MAX_SPAN caps how wide [lo, hi] may grow before a table gives up on the
-   array and spills, PERMANENTLY, to the hash table (ail_tab_arr_spill below) -- chosen as an
+   array and spills to the hash table (ail_tab_arr_spill below) -- chosen as an
    absolute span limit rather than a limit relative to how many keys are actually live, because the
    thing that must be bounded is the ALLOCATION, and an allocation is sized by the span regardless
    of how sparse it turns out to be. 1<<20 (1,048,576) slots is a 1 MiB occupancy array for a set,
@@ -4559,6 +4560,26 @@ TAB = r'''
 #define AIL_TAB_HASH  1
 #define AIL_TAB_BITS  2
 #define AIL_TAB_ARR_MAX_SPAN ((int64_t)1 << 20)
+/* THE DENSITY RULE: a widen whose padded span would exceed AIL_TAB_ARR_SPARSE_MIN slots AND
+   AIL_TAB_ARR_SPARSE_RATIO slots per live key spills to the hash table instead. The budget above
+   bounds one allocation but not the copying: a table cleared and refilled with a few keys spread
+   over a wide id range (a ranking program's per-document id-to-count table) re-widened towards that budget
+   on every refill -- 103,225 widens copying 9.9 GB, over half of that program's samples spent in
+   memmove -- for tables that never held more than a few hundred keys; a fresh table per document
+   paid the same widening once per table (40 keys over 300,000 ids: 25G cycles, 170x the hash).
+   A widen cannot tell such a table from one whose first keys merely arrive far apart and that
+   then fills its span densely (a permutation written in stride order), and spilling that one for
+   good made it 2.6-7.5x slower at twice the memory. So the spill is not permanent: when a spilled
+   table's live keys reach a power of two, ail_tab_hash_rearray measures their exact span and goes
+   back to the array once it is at most AIL_TAB_ARR_DENSE_RATIO slots per key. 8 measured better
+   than 4 on both counts for a 600,000-key permutation (1.2x the never-spilling cycles and 1.05x its
+   peak RSS, against 1.6x and 1.2x): the sooner the table leaves the hash, the less it pays for
+   it. The 32 against 8 keeps a table from flipping back and forth: each switch needs the span or
+   the key count to change fourfold first, and every switch is linear in n, so the switches are
+   amortised O(1) per insert. */
+#define AIL_TAB_ARR_SPARSE_MIN ((int64_t)1 << 12)
+#define AIL_TAB_ARR_SPARSE_RATIO 32
+#define AIL_TAB_ARR_DENSE_RATIO 8
 /* One bit per key instead of one byte, so the same 1 MiB allocation the ARRAY-mode budget above
    permits covers 8x the span. The cap is on the span the compiler ASKS for: a request wider than
    this is declined outright by ail_tab_bits_init, which leaves the table in ARRAY mode and lets
@@ -4762,9 +4783,9 @@ static void ail_tab_arr_widen(ail_tab *T, int64_t new_lo, int64_t new_hi) {
     T->arr_occ = occ; T->arr_val = val; T->lo = new_lo; T->hi = new_hi;
 }
 /* Migrates every live key (via `order`, so `order`/`n` themselves need no change at all) into the
-   hash table and switches modes, PERMANENTLY: array mode is never re-entered once a table spills.
-   There is no observable difference either way -- every operation behaves identically under both
-   representations -- so this is purely an internal, one-way cost decision, not a semantic one. */
+   hash table and switches modes; ail_tab_hash_rearray below is the only way back. There is no
+   observable difference either way -- every operation behaves identically under both
+   representations -- so this is purely an internal cost decision, not a semantic one. */
 static void ail_tab_arr_spill(ail_tab *T) {
     int64_t want = (T->n + 1) * 4 / 3 + 1, cap = 16;
     while (cap < want) cap *= 2;
@@ -4781,6 +4802,36 @@ static void ail_tab_arr_spill(ail_tab *T) {
     }
     free(T->arr_occ); free(T->arr_val); T->arr_occ = 0; T->arr_val = 0;
     T->mode = AIL_TAB_HASH;
+}
+/* The way back (see THE DENSITY RULE): a hash table whose live keys now fill their exact span
+   densely returns to the array. It reads the hash table's own slots, not `order`: walking `order`
+   would first compact the stale entries deletions left there, which for a set that is added to and
+   discarded from (an audit program's sold seats) built a temporary hash of every key at each power of
+   two -- +20% instructions and +84 MB peak RSS. `order`/`n` are untouched, and no operation can
+   observe which representation is live. Called only when `n` reaches a power of two, so its scan
+   of the capacity (under 4n slots) costs O(1) per insert amortised; a table from a bits plan with
+   `noorder` never comes here. */
+static __attribute__((noinline, cold)) void ail_tab_hash_rearray(ail_tab *T) {
+    int64_t lo = INT64_MAX, hi = INT64_MIN;
+    for (int64_t i = 0; i < T->cap; i++) {
+        if (T->used[i] != 1) continue;
+        if (T->key[i] < lo) lo = T->key[i];
+        if (T->key[i] > hi) hi = T->key[i];
+    }
+    double span = (double)hi - (double)lo + 1.0;
+    if (span > (double)AIL_TAB_ARR_DENSE_RATIO * (double)T->n || span > (double)AIL_TAB_ARR_MAX_SPAN)
+        return;
+    unsigned char *occ = (unsigned char *)ail_alloc((size_t)(hi - lo + 1));
+    int64_t *val = (int64_t *)ail_alloc((size_t)(hi - lo + 1) * sizeof *val);
+    for (int64_t i = 0; i < T->cap; i++) {
+        if (T->used[i] != 1) continue;
+        occ[T->key[i] - lo] = 1;
+        val[T->key[i] - lo] = T->val[i];
+    }
+    free(T->key); free(T->val); free(T->used);
+    T->key = T->val = 0; T->used = 0; T->cap = T->fill = 0;
+    T->arr_occ = occ; T->arr_val = val; T->lo = lo; T->hi = hi;
+    T->mode = AIL_TAB_ARRAY;
 }
 
 
@@ -4952,7 +5003,14 @@ static void ail_tab_put(ail_tab *T, int64_t k, int64_t v) {
     if (T->mode == AIL_TAB_HASH) {
         /* `noorder` is 0 for every table that did not come from a compile-time bits plan, so this
            is the same single call it always was for them. */
-        if (ail_tab_hput(T, k, v)) { if (T->noorder) T->n++; else ail_tab_order_append(T, k); }
+        if (ail_tab_hput(T, k, v)) {
+            if (T->noorder) T->n++;
+            else {
+                ail_tab_order_append(T, k);
+                if (!(T->n & (T->n - 1)) && T->n >= AIL_TAB_ARR_SPARSE_MIN / AIL_TAB_ARR_DENSE_RATIO)
+                    ail_tab_hash_rearray(T);
+            }
+        }
         return;
     }
     if (T->n == 0) {
@@ -4998,6 +5056,13 @@ static void ail_tab_put(ail_tab *T, int64_t k, int64_t v) {
             /* The padding alone would exceed the budget even though the key itself does not --
                fall back to the exact-fit span rather than spilling a table that still fits. */
             pad_lo = (int64_t)need_lo; pad_hi = (int64_t)need_hi;
+            padded_span = need_hi - need_lo + 1.0;
+        }
+        if (padded_span > (double)AIL_TAB_ARR_SPARSE_MIN
+            && padded_span > (double)AIL_TAB_ARR_SPARSE_RATIO * (double)(T->n + 1)) {
+            ail_tab_arr_spill(T);
+            if (ail_tab_hput(T, k, v)) ail_tab_order_append(T, k);
+            return;
         }
         ail_tab_arr_widen(T, pad_lo, pad_hi);
     }
@@ -25227,6 +25292,117 @@ SOURCE['IRSTR'] = IRSTR
 REQUIRES['IRSTR'] = ['STR']
 
 
+# IR input windows (stage S4c-1). Selected only by IR functions the window pass rewrote (a whole-input
+# read that is scanned once, forward): the legacy `read_stdin_bytes` / `read_bytes` result lives in a
+# malloc'ed block until the function returns; a window maps a regular file read-only instead and the
+# scan lets go of the pages behind it (`MADV_DONTNEED`: a private read-only file mapping reloads
+# from the page cache on a later touch, so a release is never wrong, only slow when guessed badly).
+# A pipe, a short input, an unmappable file, Windows: the legacy read, unchanged.
+IRWIN = r"""
+#ifndef _WIN32
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+typedef struct { unsigned char *map; size_t len; int64_t skew, rel, next, step, pg; } ail_win;
+static int64_t ail_win_env(const char *name, int64_t dflt) {
+    const char *e = getenv(name);
+    if (!e || !*e) return dflt;
+    char *end;
+    long long v = strtoll(e, &end, 10);
+    return (*end || v < 1) ? dflt : (int64_t)v;
+}
+static void ail_win_free(ail_win *W) {
+#ifndef _WIN32
+    if (W->map) munmap(W->map, W->len);
+#endif
+    W->map = 0; W->len = 0; W->next = INT64_MAX;
+}
+static void ail_win_drop(ail_win *W, int64_t upto) {
+#ifndef _WIN32
+    if (!W->map) { W->next = INT64_MAX; return; }
+    int64_t at = W->skew + upto;
+    if (at > (int64_t)W->len) at = (int64_t)W->len;
+    int64_t lim = at - at % W->pg;
+    if (lim > W->rel) { madvise(W->map + W->rel, (size_t)(lim - W->rel), MADV_DONTNEED); W->rel = lim; }
+    W->next = upto + W->step;
+#else
+    (void)upto; W->next = INT64_MAX;
+#endif
+}
+static inline void ail_win_release(ail_win *W, int64_t upto) {
+    if (__builtin_expect(upto >= W->next, 0)) ail_win_drop(W, upto);
+}
+/* [at, at + limit) of the regular file `fd` (limit < 0: to its end) as a read-only mapping; 0 when
+   the file is not mapped (not a regular file, shorter than AIL_IR_WINDOW_MIN = 1 MiB, mmap fails). */
+static int ail_win_map(ail_win *W, int fd, int64_t at, int64_t limit, ail_bytes *out) {
+#ifndef _WIN32
+    struct stat st;
+    if (W->map || fstat(fd, &st) || !S_ISREG(st.st_mode) || at < 0 || (int64_t)st.st_size <= at) return 0;
+    int64_t avail = (int64_t)st.st_size - at;
+    if (limit >= 0 && limit < avail) avail = limit;
+    if (avail < ail_win_env("AIL_IR_WINDOW_MIN", 1048576)) return 0;
+    long pg = sysconf(_SC_PAGESIZE);
+    if (pg <= 0) return 0;
+    int64_t skew = at % pg;
+    size_t len = (size_t)(skew + avail);
+    void *m = mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, (off_t)(at - skew));
+    if (m == MAP_FAILED) return 0;
+    W->map = (unsigned char *)m; W->len = len; W->skew = skew; W->rel = 0; W->pg = pg;
+    W->step = ail_win_env("AIL_IR_WINDOW_STEP", 1048576);
+    W->next = W->step;
+    *out = (ail_bytes){W->map + skew, avail};
+    return 1;
+#else
+    (void)W; (void)fd; (void)at; (void)limit; (void)out;
+    return 0;
+#endif
+}
+"""
+ORDER.insert(ORDER.index('STDINBYTES') + 1, 'IRWIN')
+SOURCE['IRWIN'] = IRWIN
+REQUIRES['IRWIN'] = ['BYTES', 'DIE']
+
+IRWINSTDIN = r"""
+/* `read_stdin_bytes(size)` that maps fd 0 when it is a regular file (a redirect), at its current offset;
+   the offset moves past what was mapped, as a read would have left it. */
+static ail_bytes ail_win_stdin(ail_win *W, ail_barena *A, int64_t size) {
+    if (size < 0) ail_raise_named(AIL_EXC_VALUE);
+    if (!size) return (ail_bytes){NULL, 0};
+    ail_stdin_begin_binary(size);
+#ifndef _WIN32
+    off_t at = lseek(0, 0, SEEK_CUR);
+    ail_bytes v;
+    if (at >= 0 && ail_win_map(W, 0, (int64_t)at, size, &v)) {
+        if (lseek(0, (off_t)((int64_t)at + v.n), SEEK_SET) >= 0) return v;
+        ail_win_free(W);
+    }
+#endif
+    return ail_stdin_read_bytes(A, size);
+}
+"""
+ORDER.insert(ORDER.index('IRWIN') + 1, 'IRWINSTDIN')
+SOURCE['IRWINSTDIN'] = IRWINSTDIN
+REQUIRES['IRWINSTDIN'] = ['IRWIN', 'STDINBYTES']
+
+IRWINFILE = r"""
+/* `read_bytes(path)` that maps the file; opening it (and so every error) is the legacy open. */
+static ail_bytes ail_win_file(ail_win *W, ail_barena *A, ail_str path) {
+#ifndef _WIN32
+    FILE *f = ail_file_open(path, 0);
+    ail_bytes v;
+    int mapped = ail_win_map(W, fileno(f), 0, -1, &v);
+    fclose(f);
+    if (mapped) return v;
+#endif
+    return ail_file_read_bytes(A, path);
+}
+"""
+ORDER.insert(ORDER.index('FILEBYTES') + 1, 'IRWINFILE')
+SOURCE['IRWINFILE'] = IRWINFILE
+REQUIRES['IRWINFILE'] = ['IRWIN', 'FILEBYTES']
+
+
 def emit(parts):
     """The pieces a program reached, in dependency order, once each."""
     want = set(parts)
@@ -25776,6 +25952,9 @@ REQUIRES['PAR'] = ['MONOTONICHEAD', 'TYPES', 'DIE']
 
 # json.loads fast path (jsonlib.py lowers a typed json.loads to calls of these; the text is in jsonrt.py).
 # One part per declared type, so a program carries only the scanners it reaches.
+import os as _os
+if _os.path.dirname(_os.path.abspath(__file__)) not in sys.path:  # loaded by file path (tests), not as a package member
+    sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
 import jsonrt as _jsonrt
 for _name, _text, _requires in (
         ("JFCORE", _jsonrt.FAST_CORE, ["TYPES", "DIE", "STR"]),

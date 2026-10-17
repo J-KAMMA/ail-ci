@@ -216,6 +216,8 @@ class Emitter(TextEmitter):
             self.owned.append((self.sar, 'sarena'))
         if self.needs_bar:
             self.owned.append((self.bar, 'barena'))
+        for k in self.wins:
+            self.owned.append((self.win_cell(k), 'win'))
         if self.owned:
             eff = E.body_effects(fn, None, summaries)
             self.owned_can_raise = bool(eff.unknown or eff.raises)

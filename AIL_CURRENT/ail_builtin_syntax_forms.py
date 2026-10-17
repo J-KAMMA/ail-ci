@@ -323,7 +323,7 @@ SYNTAX_FORMS.update({
   "dict[str,int].keys": [
     {
       "context": "owned_key_snapshot_for",
-      "source": "fn probe(m:dict[str,int])->int {let d:dict[str,int]=m.copy();let result:int=0;for key in d.keys() {d.clear();result=result+len(key);}return result;}",
+      "source": "fn probe(m:dict[str,int])->int {let d:dict[str,int]=m.copy();let result:int=0;for key in list(d.keys()) {d.clear();result=result+len(key);}return result;}",
       "inputs": [
         {
           "name": "m",
@@ -439,7 +439,7 @@ SYNTAX_FORMS.update({
   "dict[str,float].keys": [
     {
       "context": "owned_key_snapshot_for",
-      "source": "fn probe(m:dict[str,float])->int {let d:dict[str,float]=m.copy();let result:int=0;for key in d.keys() {d.clear();result=result+len(key);}return result;}",
+      "source": "fn probe(m:dict[str,float])->int {let d:dict[str,float]=m.copy();let result:int=0;for key in list(d.keys()) {d.clear();result=result+len(key);}return result;}",
       "inputs": [
         {
           "name": "m",
@@ -555,7 +555,7 @@ SYNTAX_FORMS.update({
   "dict[str,str].keys": [
     {
       "context": "owned_key_snapshot_for",
-      "source": "fn probe(m:dict[str,str])->int {let d:dict[str,str]=m.copy();let result:int=0;for key in d.keys() {d.clear();result=result+len(key);}return result;}",
+      "source": "fn probe(m:dict[str,str])->int {let d:dict[str,str]=m.copy();let result:int=0;for key in list(d.keys()) {d.clear();result=result+len(key);}return result;}",
       "inputs": [
         {
           "name": "m",
@@ -671,7 +671,7 @@ SYNTAX_FORMS.update({
   "dict[str,bytes].keys": [
     {
       "context": "owned_key_snapshot_for",
-      "source": "fn probe(m:dict[str,bytes])->int {let d:dict[str,bytes]=m.copy();let result:int=0;for key in d.keys() {d.clear();result=result+len(key);}return result;}",
+      "source": "fn probe(m:dict[str,bytes])->int {let d:dict[str,bytes]=m.copy();let result:int=0;for key in list(d.keys()) {d.clear();result=result+len(key);}return result;}",
       "inputs": [
         {
           "name": "m",

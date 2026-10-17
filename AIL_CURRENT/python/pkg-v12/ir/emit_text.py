@@ -48,6 +48,7 @@ class TextEmitter(object):
             i.op == 'call' and i.results and i.results[0].type == STRV for i in ops)
         self.needs_bar = any(allocates_bytes(i) for i in ops)
         self.cursors = sorted(set(i.attrs['cur'] for i in ops if i.op == 'rt' and 'cur' in i.attrs))
+        self.wins = sorted(set(i.attrs['win'] for i in ops if i.op == 'rt' and 'win' in i.attrs))
         self.str_places = [i for i in fn.body.instrs if i.op == 'local.alloc' and i.result.type.pointee == STRV]
         self.sar = self.pre + 'v__sarena'
         self.bar = self.pre + 'v__barena'
@@ -56,9 +57,14 @@ class TextEmitter(object):
     def cursor_cells(self, k):
         return {'cp': '%sv__cp%d' % (self.pre, k), 'cu': '%sv__cu%d' % (self.pre, k), 'cl': '%sv__cl%d' % (self.pre, k)}
 
+    def win_cell(self, k):
+        return '%sv__win%d' % (self.pre, k)
+
     def text_fields(self):
         """Frame-struct fields for the arenas and cursors (functions with a try)."""
         fields = []
+        for k in self.wins:
+            fields.append('ail_win v__win%d;' % k)
         if self.needs_sar:
             fields.append('ail_sarena v__sarena;')
         if self.needs_bar:
@@ -74,6 +80,8 @@ class TextEmitter(object):
             self.line(depth, 'ail_sarena v__sarena = {0};')
         if self.needs_bar:
             self.line(depth, 'ail_barena v__barena = {0};')
+        for k in self.wins:
+            self.line(depth, 'ail_win v__win%d = {0};' % k)
         for k in self.cursors:
             self.line(depth, 'int64_t v__cp%d = 0, v__cu%d = 0, v__cl%d = 0;' % (k, k, k))
 
@@ -99,6 +107,8 @@ class TextEmitter(object):
         spec = rtc.ENTRIES[callee]
         self.parts.update(spec['parts'])
         fields = {'A': '&' + self.sar, 'B': '&' + self.bar, 'va': ', '.join(o), 'n': len(o)}
+        if 'win' in ins.attrs:
+            fields['W'] = self.win_cell(ins.attrs['win'])
         if spec['cursor']:
             fields.update(self.cursor_cells(ins.attrs['cur']))
         for a in spec['attrs']:
