@@ -1035,21 +1035,23 @@ class Emitter(TextEmitter):
                 f, L, ''.join(' ail_%s_push(%s, %s);' % (f, L, v) for v in o[1:])))
             return
         if op == 'list.copy':
-            # the source is read in full before the destination's old content is freed, so a source
-            # that is (part of) the destination's own list is fine
+            # The destination keeps its buffer when it has room (a double buffer `ga = gb` copies once
+            # per round and must not allocate once per round); a source that is the destination's own
+            # buffer (`xs = xs[:]`) is already equal. Nothing else can overlap the destination: the
+            # only sources are a whole list or a read-only span of a list this function does not own.
             src = ins.operands[1]
             if src in self.span_names:
                 sp, sn = self.span_names[src][:2]
             else:
                 sp, sn = '(%s)->p' % o[1], '(%s)->n' % o[1]
             self.count += 1
-            t, n, i = 'ir%d' % self.count, 'ir%d' % (self.count + 1), 'ir%d' % (self.count + 2)
+            d, n, i = 'ir%d' % self.count, 'ir%d' % (self.count + 1), 'ir%d' % (self.count + 2)
             self.count += 2
             ct = 'double' if f == 'flist' else 'int64_t'
-            self.line(depth, '{ ail_%s %s = {0}; const %s *%s_s = %s; int64_t %s = %s; ail_%s_reserve(&%s, %s); '
-                             'for (int64_t %s = 0; %s < %s; %s++) %s.p[%s] = %s_s[%s]; %s.n = %s; '
-                             'ail_%s_free(%s); *(%s) = %s; }'
-                      % (f, t, ct, t, sp, n, sn, f, t, n, i, i, n, i, t, i, t, i, t, n, f, o[0], o[0], t))
+            self.line(depth, '{ ail_%s *%s = %s; const %s *%s_s = %s; int64_t %s = %s; if (%s_s != %s->p) { %s->n = 0; '
+                             'ail_%s_reserve(%s, %s); for (int64_t %s = 0; %s < %s; %s++) %s->p[%s] = %s_s[%s]; '
+                             '%s->n = %s; } }'
+                      % (f, d, o[0], ct, d, sp, n, sn, d, d, d, f, d, n, i, i, n, i, d, i, d, i, d, n))
             return
         if op == 'list.move':
             self.count += 1

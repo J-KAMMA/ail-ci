@@ -26,12 +26,13 @@ Anything this emitter does not implement raises `Unsupported` (imported from pyf
 exception the typed path and v1 both use) -- named, never a silent gap, never a bare gcc error.
 """
 import ast
+import copy
 import json
 import os
 import re
 import runpy
 
-from pyfront import Unsupported
+from pyfront import Unsupported, refuse_complex_pow
 import pyfunc
 try:
     import pymix
@@ -751,6 +752,42 @@ def _assign_target_names(t):
     return set()
 
 
+_HOISTED_DEFAULTS = (ast.List, ast.Dict, ast.Set, ast.ListComp, ast.DictComp, ast.SetComp,
+                     ast.GeneratorExp, ast.Call)
+
+
+def _hoist_defaults(tree):
+    """CPython evaluates a default argument ONCE, when the `def` runs, so `def f(x, acc=[])` shares
+    one list between calls. This emitter builds a default at each call site, which would hand every
+    call a fresh one. A default that builds something (a list/dict/set display or comprehension, or a
+    call) is therefore evaluated once into a module variable placed just before the `def` (before
+    the class, for a method) and read from there. The assignments are marked `_ail_hoisted` so the
+    'only defs and classes' entry-point convention does not count them as module statements."""
+    out, count = [], 0
+    for stmt in tree.body:
+        funcs = []
+        if isinstance(stmt, ast.FunctionDef):
+            funcs = [stmt]
+        elif isinstance(stmt, ast.ClassDef):
+            funcs = [m for m in stmt.body if isinstance(m, ast.FunctionDef)]
+        for f in funcs:
+            for defaults in (f.args.defaults, f.args.kw_defaults):
+                for i, d in enumerate(defaults):
+                    if d is None or not isinstance(d, _HOISTED_DEFAULTS):
+                        continue
+                    name = '_ail_default_%d' % count
+                    count += 1
+                    assign = ast.Assign(targets=[ast.Name(id=name, ctx=ast.Store())], value=d)
+                    ast.copy_location(assign, d)
+                    ast.copy_location(assign.targets[0], d)
+                    assign._ail_hoisted = True
+                    out.append(assign)
+                    defaults[i] = ast.copy_location(ast.Name(id=name, ctx=ast.Load()), d)
+        out.append(stmt)
+    tree.body = out
+    ast.fix_missing_locations(tree)
+
+
 def _scan_assigned_names(stmts):
     """Names assigned anywhere in `stmts` (a function or module body), stopping at nested
     FunctionDef/ClassDef (a different scope) and NOT descending into comprehension/generator/
@@ -940,6 +977,8 @@ class Compiler:
     # ------------------------------------------------------------------------------- entry point
     def compile(self, source):
         tree = ast.parse(source)
+        mix_tree = copy.deepcopy(tree)          # the mixed-mode typed clones see the source as written
+        _hoist_defaults(tree)
         self.module_names = _scan_assigned_names(tree.body)
         for n in ast.walk(tree):
             if isinstance(n, ast.Global):
@@ -965,7 +1004,7 @@ class Compiler:
         # BRIEF_mixed_mode.md: after every top-level function is registered (`self.functions`,
         # needed to check a candidate for *args/**kwargs/keyword-only parameters) and before any
         # call site is compiled (`_emit_function` below is where `_call_user_function` runs).
-        self._setup_mix(source, tree)
+        self._setup_mix(source, mix_tree)
 
         for name in self.functions:
             info = self.functions[name]
@@ -985,6 +1024,7 @@ class Compiler:
 
         has_toplevel_exec = any(not isinstance(n, (ast.FunctionDef, ast.ClassDef, ast.Import,
                                                     ast.ImportFrom))
+                                and not getattr(n, '_ail_hoisted', False)
                                 for n in tree.body)
         fn_order = [n.name for n in tree.body if isinstance(n, ast.FunctionDef)]
         # A source with NO top-level executable statement at all (only def/class/import) is the
@@ -1017,6 +1057,9 @@ class Compiler:
 
         ng = self.next_global_slot
         parts = [PREAMBLE]
+        if getattr(self, 'needs_boxcase', False):
+            import cruntime
+            parts.append(cruntime.BOXCASE)
         if self.mix_typed:
             # mix_call.h relies on ail_obj/ail_ctx/ail_box_*/ail_float_val/ail_view_to_str/ail_str,
             # all already defined by PREAMBLE above -- inlined here (not #include'd: `out`'s own
@@ -1607,6 +1650,17 @@ class Compiler:
             t = ctx.tmp()
             ctx.emit('%s = ail_deque_data(%s);' % (t, v))
             return t
+        if self._is_dict_view_call(node, ctx):
+            # CPython's `d.items()` / `.keys()` / `.values()` are live views: a loop over one raises
+            # RuntimeError when the dict changes size. The method call below returns a snapshot list,
+            # which would walk on quietly, so a loop over a dict walks the dict's own iterator.
+            recv = self.expr(node.func.value, ctx)
+            t = ctx.tmp()
+            if node.func.attr == 'keys':
+                ctx.emit('%s = %s;' % (t, recv))
+            else:
+                ctx.emit('%s = ail_iter_dict_%s(cx, %s);' % (t, node.func.attr, recv))
+            return t
         cname = self._inst_class(node, ctx)
         info = self._resolve_method(cname, '__iter__') if cname else None
         if info:
@@ -1616,6 +1670,12 @@ class Compiler:
             ctx.check()
             return t
         return self.expr(node, ctx)
+
+    def _is_dict_view_call(self, node, ctx):
+        """`d.items()` / `d.keys()` / `d.values()` on something proven to be a dict."""
+        return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and not node.args
+                and not node.keywords and node.func.attr in ('items', 'keys', 'values')
+                and self.infer_kind(node.func.value, ctx) == 'dict')
 
     @staticmethod
     def _is_sys_stdin(node):
@@ -1658,6 +1718,8 @@ class Compiler:
         it = ctx.tmp()
         val = ctx.tmp()
         k = self.infer_kind(iter_node, ctx)
+        if self._is_dict_view_call(iter_node, ctx):
+            k = None                    # an iterator object, not the snapshot list the call returns
         if k in ('list', 'tuple'):
             idx = ctx.new_cvar('i')
             ctx.emit('%s = %s;' % (it, src))
@@ -2132,6 +2194,8 @@ class Compiler:
         fn = self.BINOP_FN.get(type(node.op))
         if fn is None:
             raise Unsupported('the %s binary operator' % type(node.op).__name__)
+        if isinstance(node.op, ast.Pow):
+            refuse_complex_pow(node)
         l = self.expr(node.left, ctx)
         r = self.expr(node.right, ctx)
         t = ctx.tmp()
@@ -4205,6 +4269,8 @@ class Compiler:
         start_node = args[1] if len(args) == 2 else kwargs.get('start')
         ctx.emit('%s = %s;' % (acc, self.expr(start_node, ctx) if start_node is not None else 'ail_box_int(0)'))
         it = ctx.tmp(); val = ctx.tmp()
+        sst = "sumst_" + "".join(ch for ch in acc if ch.isalnum())
+        ctx.emit('ail_sumst %s; ail_sum_begin(&%s, %s);' % (sst, sst, acc))
         ctx.emit('st = ail_iter(cx, &%s, %s);' % (it, src))
         ctx.check()
         ctx.emit('for (;;) {')
@@ -4212,10 +4278,11 @@ class Compiler:
         ctx.emit('st = ail_it_next(cx, &%s, %s);' % (val, it))
         ctx.emit('if (st == AIL_STOP) { st = AIL_OK; break; }')
         ctx.check()
-        ctx.emit('st = ail_op_add(cx, &%s, %s, %s);' % (acc, acc, val))
+        ctx.emit('st = ail_sum_step(cx, &%s, &%s, %s);' % (acc, sst, val))
         ctx.check()
         ctx.indent -= 1
         ctx.emit('}')
+        ctx.emit('ail_sum_end(cx, &%s, &%s);' % (acc, sst))
         return acc
 
     def _b_any(self, args, kwargs, ctx):
@@ -5170,13 +5237,15 @@ class Compiler:
         return self._strip_family('ail_str_rstrip_view', 'rstrip', recv, args, ctx)
 
     def _m_lower(self, recv, kind, args, kwargs, ctx):
+        self.needs_boxcase = True          # appends the case tables (cruntime.BOXCASE) to this program
         t = ctx.tmp()
-        ctx.emit('%s = ail_str_lower(cx, %s);' % (t, recv))
+        ctx.emit('%s = ail_boxed_case(cx, %s, 0);' % (t, recv))
         return t
 
     def _m_upper(self, recv, kind, args, kwargs, ctx):
+        self.needs_boxcase = True
         t = ctx.tmp()
-        ctx.emit('%s = ail_str_upper(cx, %s);' % (t, recv))
+        ctx.emit('%s = ail_boxed_case(cx, %s, 1);' % (t, recv))
         return t
 
     def _m_replace(self, recv, kind, args, kwargs, ctx):

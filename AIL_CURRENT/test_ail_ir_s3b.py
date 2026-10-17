@@ -559,7 +559,7 @@ class SharingTests(unittest.TestCase):
         again = text.parse_function(text.print_function(f))
         self.assertEqual(text.print_function(again), text.print_function(f))
         _, c, needs = emit_c.emit_function(f)
-        self.assertIn('ail_list_reserve(&ir', c)
+        self.assertIn('ail_list_reserve(ir', c)
         self.assertIn('ail_list_free(&v_b)', c)
         bad = IR_COPY.replace('list.copy %rb, %ra2', 'list.copy %rb, %zero')
         with self.assertRaisesRegex(I.IRError, 'list.copy takes'):

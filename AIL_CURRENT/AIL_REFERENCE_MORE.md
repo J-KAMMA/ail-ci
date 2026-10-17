@@ -404,11 +404,19 @@ first uses (`Counter(words)`, `d[w].append(i)`, `q.append(x)`).
 - A collection passed to a function needs the same annotation on the parameter. A `Counter` or a defaultdict
   of numbers is a dict there (read-only: return new values instead of changing it); `d[k]` on a defaultdict
   parameter is refused because it would insert into the caller's dict.
+- Tuples inside collections (tuples of `int` / `float` / `bool` / `str`, see Tuples): `deque([(r, c)])` with
+  `r, c = q.popleft()`, `deque` of `(node, dist)`, `Counter` of coordinate tuples (`most_common`, `+`, `update`,
+  `Counter(zip(a, b))`), `defaultdict(int | float | str)` and `OrderedDict` with tuple keys,
+  `defaultdict(list)` / `defaultdict(set)` with tuple rows and/or keys (`adj[u].append((v, w))` then
+  `for v, w in adj[u]`). The collections pass runs first and writes its helpers with `tuple[...]`
+  annotations, which the tuple pass lowers to classes and tables, so the C runtime gets nothing new.
+  Printing is CPython's repr: `deque([(1, 2)])`, `Counter({(0, 1): 2})`, `defaultdict(<class 'int'>, {...})`,
+  `defaultdict(<class 'list'>, {...})`, `OrderedDict({...})` (also for str / int keys).
 - Refused by name (`note:` lines): `namedtuple` (use a `@dataclass`), `ChainMap` and the rest of the module,
-  `defaultdict(bool | dict | Counter | lambda: <expression>)`, tuple / float keys or elements,
-  `==` / `<` on collections, `q.maxlen`, `d.default_factory`, deque slices, `OrderedDict(items)`, a collection
+  `defaultdict(bool | dict | Counter | lambda: <expression>)`, float keys, nested tuples,
+  `print` of a `defaultdict(set)` or of `defaultdict(lambda: ...)`, `==` / `<` on collections, `q.maxlen`, `d.default_factory`, deque slices, `OrderedDict(items)`, a collection
   in a class field or at module level, `top = c.most_common(3)` as a value, `d[k] = xs` with an existing list,
-  `del d[k]` on `defaultdict(list)`, `Counter.subtract`, `print` of a defaultdict, a loop that adds to or
+  `del d[k]` on `defaultdict(list)`, `Counter.subtract`, a loop that adds to or
   deletes from the collection it walks (CPython raises `RuntimeError`).
 
 ```python
@@ -477,7 +485,7 @@ number tuples) is returned as written. Element types: int, float, bool, str, tup
   is made (CPython reads it when the lambda is called); a lambda that is returned or stored in a list,
   dict or field is refused by name.
 - Refused by name: tuple concatenation / repetition / slices, a variable index, `tuple(x)`, `tuple[int, ...]`,
-  iterating a tuple, float keys, `defaultdict` / `Counter` / `deque` of tuples, dict values that are sets or
+  iterating a tuple, float keys, dict values that are sets or
   dicts, `max(xs, key=...)` over tuples.
 
 ```python
@@ -558,6 +566,14 @@ variable first when it sits behind another call.
   prints CPython's bytes for dict / list / str / int / float / bool / None literals (nested, mixed) and for variables of
   the types above, whose type comes from an annotation or the first assignment; `json.dump(x, sys.stdout)` works.
   `default=`, `cls=`, `skipkeys=` and a value of unknown type are refused by name.
+  Speed: a plain document (strict syntax, every value of the declared type, ints within 64 bits) is parsed in one
+  pass by the C runtime straight into the declared list / dict, with no intermediate strings, and `json.dumps` of a
+  list, a nested list or a str-keyed dict is written by C appenders into one buffer; on the 12 MB benchmark documents
+  both are 2-6 times faster than CPython 3.12 with about half its peak memory. Whatever the fast path does not take
+  (a syntax error, a value of another type, NaN, an integer beyond 64 bits) runs the scanner and the typed parsers
+  described above, so errors and results are the same. `data: dict[str, int] = json.loads(s)` (or an assignment to an
+  annotated local) fills the local in place; a `return json.loads(s)` or a call argument goes through a loader
+  function and copies the result once more.
 
 ## Heaps: heapq, bisect
 

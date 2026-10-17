@@ -9414,3 +9414,30 @@ body may contain; `pyfunc._par_for` / `_par_outline` compile it; the runtime par
   loop called 100000 times costs the same as the plain loop; a 50-iteration one costs about 4 us a call.
   Programs without `parallel for` get no PAR code and no `-pthread`; the DIE block is edited only when
   PAR is present.
+
+## 238. CPython 3.12 rules for float sums, float powers, number text and case mapping
+
+Found while writing the language spec (docs/spec/DIFFERENCES.md C1, C5-C11, C13, C14); each is now CPython's
+answer, checked against CPython 3.12 by `test_ail_spec_fixes`.
+
+* `sum()` of floats is `builtin_sum_impl`: an exact-int start adds ints, the first non-int item is added plainly,
+  and the rest of a float run is Neumaier-compensated (`ail_fsum_add`, part FSUM; the general runtimes'
+  `ail_sum_step`). An int item inside the float run is added plainly; a non-number ends the run and drops the
+  compensation. `sum(xs[:k])` over a slice of a `list[float]` is refused by name on the typed path.
+* Float `**` is `float_pow` (`ail_fpow`, part FPOWCK; the C name `pow` is routed to it): a finite overflow is
+  `OverflowError`, `0.0 ** negative` is `ZeroDivisionError`. A negative base to a fractional exponent is a complex
+  number in Python: a literal pair is refused at compile time, anything else stops the program at run time
+  ("is a complex number in Python; AIL has no complex type"), never `nan`.
+* `int(s)`, `int(s, base)` and `float(s)` turn the text into ASCII first (other white space becomes a space, a
+  Unicode decimal digit its ASCII digit, any other non-ASCII character ends the text as invalid), then parse it
+  with CPython's grammar: single underscores between digits (also after a base prefix), ASCII white space
+  (not U+001C-U+001F) trimmed, `float` accepting only decimal floats, `inf`, `infinity` and `nan`. One parser
+  (`NUMPARSE`, tables from `tools/gen_digits.py`) serves the typed and both general runtimes. A too-long literal
+  that is also malformed is `ValueError`; a valid one outside int64 is the integer-overflow stop.
+* `int(nan)` is `ValueError`; `int(inf)` and a finite value outside int64 are `OverflowError`.
+* The general runtime's `str.lower()` / `str.upper()` use the full Unicode mapping and the final-sigma rule (part
+  BOXCASE, appended only to a program that calls them); its `isdigit()` and `splitlines()` know all of Unicode's
+  digits and line boundaries.
+* `import regex` names `re` as the module that is built.
+* `print(x)` / `str(x)` / `repr(x)` of a float is the shortest round-trip repr even just below a power of two, where the nearest decimal of the
+  shortest length may not read back (`ail__fmt_shorten`).

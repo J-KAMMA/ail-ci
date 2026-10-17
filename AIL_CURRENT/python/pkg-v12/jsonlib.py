@@ -65,9 +65,13 @@ def ann_to_type(node):
         name = node.id
         if name.startswith('__ail_checked_') and name.endswith('__'):
             name = name[len('__ail_checked_'):-2]
+            if name == 'flist':                        # a returned list[float]
+                return ('list', ('float',))
         return (name,) if name in SCALARS else None
     if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
         head = node.value.id
+        if head.startswith('__ail_checked_'):          # a returned list[T] is annotated __ail_checked_list[T]
+            head = head[len('__ail_checked_'):]
         if head in ('list', 'List'):
             inner = ann_to_type(node.slice)
             return ('list', inner) if inner else None
@@ -120,6 +124,9 @@ class Json:
         self.imports = imports
         self.tree = tree
         self.loads_types = {}          # mangled -> type
+        self.slow_types = {}           # mangled -> type: loaded in place, the scanner + parser only as the fallback
+        self.params = set()
+        self.temps = 0
         self.dumps_types = {}
         self.uses_dumps = False
         self.functions = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
@@ -158,7 +165,9 @@ class Json:
     # -- the types the program has written down ---------------------------------------------------------
     def collect_env(self, scope, module=False):
         env = {}
+        self.params = set()
         if isinstance(scope, ast.FunctionDef):
+            self.params = {arg.arg for arg in (*scope.args.args, *scope.args.kwonlyargs)}
             for arg in (*scope.args.args, *scope.args.kwonlyargs):
                 t = ann_to_type(arg.annotation) if arg.annotation is not None else None
                 if t:
@@ -328,17 +337,74 @@ class Json:
         return None
 
     # -- json.loads --------------------------------------------------------------------------------------
-    def loads_call(self, call, t):
-        """The call of the typed loader for `json.loads(s)` producing type t."""
+    def loads_check(self, call, t):
+        """Refuses what json.loads cannot produce; the mangled name of type t."""
         if not loads_ok(t):
             refuse(call, 'json.loads into %s is not built (built: int, float, str, bool, list[T] of those, '
                    'list[list[T]] of int / float / str, dict[str, T] of int / float / str)' % render(t))
         if len(call.args) != 1 or call.keywords or isinstance(call.args[0], ast.Starred):
             refuse(call, 'json.loads(s) takes the text only (object_hook=, parse_float=... are not built)')
-        key = mangle(t)
+        return mangle(t)
+
+    def loads_call(self, call, t):
+        """The call of the typed loader for `json.loads(s)` producing type t."""
+        key = self.loads_check(call, t)
         self.loads_types[key] = t
         new = _call(ast.Name(id='_ail_js_loads_' + key, ctx=ast.Load()), call.args[0])
         return ast.copy_location(_mark(new), call)
+
+    # -- the C fast path: the text parsed straight into the declared container ------------------------------
+    def fast_intrinsic(self, t):
+        """The _ail_jf_ call that fills a container local of type t from the text in place (1: done, 0: the
+        text is not plain -- run the scanner and the typed parsers), or None."""
+        if t[0] == 'list' and t[1][0] in ('int', 'float', 'str'):
+            return {'int': '_ail_jf_ints', 'float': '_ail_jf_floats', 'str': '_ail_jf_strs'}[t[1][0]]
+        if t[0] == 'dict' and t[1][0] == 'str' and t[2][0] in ('int', 'float', 'str'):
+            return {'int': '_ail_jf_dict_int', 'float': '_ail_jf_dict_float', 'str': '_ail_jf_dict_str'}[t[2][0]]
+        return None
+
+    def nest_intrinsic(self, t):
+        """The _ail_jf_ call that reads list[list[str]] into a flat list of the strings and the row ends."""
+        if t[0] == 'list' and t[1][0] == 'list' and t[1][1][0] == 'str':
+            return '_ail_jf_nest_strs'
+        return None
+
+    def row_intrinsic(self, t):
+        """The _ail_jf_ call that reads one row of list[list[int]] / list[list[float]] at a position."""
+        if t[0] == 'list' and t[1][0] == 'list' and t[1][1][0] in ('int', 'float'):
+            return {'int': '_ail_jf_row_ints', 'float': '_ail_jf_row_floats'}[t[1][1][0]]
+        return None
+
+    def fresh(self, stem):
+        self.temps += 1
+        return '_ail_%s%d' % (stem, self.temps)
+
+    def in_place(self, target, t, annotation, text, origin):
+        """Statements that load `text` (a name or a constant) into the local `target` of type t, or None:
+            target: T = []
+            if _ail_jf_ints(text, target) == 0:
+                target = <scanner and typed parser>"""
+        intrinsic = self.fast_intrinsic(t)
+        if intrinsic is None or target in self.params:
+            return None
+        key = mangle(t)
+        self.slow_types[key] = t
+        empty = ast.List(elts=[], ctx=ast.Load()) if t[0] == 'list' else ast.Dict(keys=[], values=[])
+        if annotation is not None:
+            init = ast.AnnAssign(target=_name(target, store=True), annotation=copy.deepcopy(annotation), value=empty,
+                                 simple=1)
+        else:
+            init = ast.Assign(targets=[_name(target, store=True)], value=empty)
+        test = ast.Compare(left=_call(_name(intrinsic), copy.deepcopy(text), _name(target)), ops=[ast.Eq()],
+                           comparators=[ast.Constant(value=0)])
+        slow = ast.Assign(targets=[_name(target, store=True)],
+                          value=_call(_name('_ail_js_slow_' + key), copy.deepcopy(text)))
+        statements = [init, ast.If(test=test, body=[slow], orelse=[])]
+        _mark(ast.Module(body=statements, type_ignores=[]))
+        for each in statements:
+            ast.copy_location(each, origin)
+        _locate(statements, origin)
+        return statements
 
     def as_loads(self, call):
         """json.loads(s) / json.load(stdin) as a (loads call node) or None."""
@@ -529,23 +595,26 @@ class Json:
 
     # -- helper text ---------------------------------------------------------------------------------------
     def add_helpers(self):
-        if not self.loads_types and not self.dumps_types and not self.uses_dumps:
+        if not self.loads_types and not self.slow_types and not self.dumps_types and not self.uses_dumps:
             return
         import jsonrt
         parts = []
-        if self.loads_types:
+        every = {**self.slow_types, **self.loads_types}
+        if every:
             parts.append(jsonrt.LOADS)
         if self.uses_dumps or self.dumps_types:
             parts.append(jsonrt.DUMPS)
         for key, t in self.loads_types.items():
             parts.append(self.loader_text(key, t))
-        needed = set(self.loads_types.values())
-        for t in self.loads_types.values():
+        for key, t in self.slow_types.items():
+            parts.append(self.slow_text(key, t))
+        needed = set(every.values())
+        for t in every.values():
             for sub in self.loader_deps(t):
                 needed.add(sub)
-        for sub in sorted(needed - set(self.loads_types.values()), key=mangle):
+        for sub in sorted(needed - set(every.values()), key=mangle):
             parts.append(self.parser_text(sub))
-        for t in self.loads_types.values():
+        for t in every.values():
             parts.append(self.parser_text(t))
         dump_needed = {}
         for key, t in self.dumps_types.items():
@@ -586,12 +655,69 @@ class Json:
             return [t[1]]
         return []
 
-    def loader_text(self, key, t):
+    def slow_text(self, key, t):
+        """The scanner and the typed parser: CPython's errors, and every document the fast path declines."""
         return textwrap.dedent('''
-            def _ail_js_loads_%s(s: str) -> %s:
+            def _ail_js_slow_%s(s: str) -> %s:
                 p = _ail_js_check(s)
                 return %s(p)
         ''' % (key, render(t), self.parser_name(t)))
+
+    def loader_text(self, key, t):
+        """json.loads(s) as a function: the C fast path first, then the scanner and the typed parser."""
+        intrinsic = self.fast_intrinsic(t)
+        if intrinsic is not None:
+            attempt = textwrap.dedent('''
+                    out: %s = %s
+                    if %s(s, out) == 1:
+                        return out
+            ''' % (render(t), '[]' if t[0] == 'list' else '{}', intrinsic))
+        elif self.row_intrinsic(t) is not None:
+            inner = t[1][1]
+            attempt = textwrap.dedent('''
+                    out: %s = []
+                    pos = _ail_jf_rows_open(s)
+                    more = 0
+                    if pos >= 0:
+                        more = 1
+                    while more == 1:
+                        row: list[%s] = []
+                        st = %s(s, pos, row)
+                        if st < 0:
+                            pos = -1
+                            more = 0
+                        else:
+                            out.append(row)
+                            pos = st >> 1
+                            more = st & 1
+                    if pos != -1:
+                        return out
+            ''' % (render(t), inner[0], self.row_intrinsic(t)))
+        elif self.nest_intrinsic(t) is not None:
+            inner = t[1][1]
+            attempt = textwrap.dedent('''
+                    flat: list[%s] = []
+                    offs: list[int] = []
+                    if %s(s, flat, offs) == 1:
+                        out: %s = []
+                        j = 0
+                        k = 0
+                        n = len(offs)
+                        while k < n:
+                            end = offs[k]
+                            row: list[%s] = []
+                            while j < end:
+                                row.append(flat[j])
+                                j += 1
+                            out.append(row)
+                            k += 1
+                        return out
+            ''' % (inner[0], self.nest_intrinsic(t), render(t), inner[0]))
+        else:
+            return self.slow_text(key, t).replace('_ail_js_slow_', '_ail_js_loads_', 1)
+        head = 'def _ail_js_loads_%s(s: str) -> %s:' % (key, render(t))
+        tail = '    p = _ail_js_check(s)\n    return %s(p)\n' % self.parser_name(t)
+        return '\n' + head + '\n' + textwrap.indent(attempt.strip('\n'), '    ') + '\n' + tail
 
     def parser_name(self, t):
         if t[0] in SCALARS:
@@ -662,7 +788,70 @@ class Json:
             return 'out += _ail_jd_str(%s, o)' % var
         return 'out += _ail_jd_%s(%s, o, lvl + 1)' % (mangle(t), var)
 
+    OPTS = 'o.pad, o.pretty, o.isep, o.ksep, o.asc, o.srt, o.nan'
+
+    def leaf_lines(self, leaf, var, lvl):
+        """Statements (as lines) appending the JSON of the flat list in `var` (leaf type `leaf`) to the buffer."""
+        name = {'int': '_ail_jdc_ints', 'bool': '_ail_jdc_bools', 'float': '_ail_jdc_floats', 'str': '_ail_jdc_strs'}[leaf]
+        if leaf == 'float':
+            return ['st = %s(%s, %s, %s)' % (name, var, self.OPTS, lvl), 'if st != 0:', '    _ail_jd_bad(st)']
+        return ['%s(%s, %s, %s)' % (name, var, self.OPTS, lvl)]
+
     def dumper_text(self, t):
+        """The helper for json.dumps of a container: the C appenders of cruntime JDCORE write the text into one
+        buffer (jsonrt.py); a str-keyed dict or a flat list is one call, a nested list a loop over its rows."""
+        key = mangle(t)
+        flat = t[0] == 'list' and t[1][0] in ('int', 'float', 'str', 'bool')
+        nested = t[0] == 'list' and t[1][0] == 'list'
+        sdict = t[0] == 'dict' and t[1][0] == 'str'
+        if not (flat or nested or sdict):
+            return self.dumper_text_ast(t)
+        if flat:
+            body = self.leaf_lines(t[1][0], 'xs', 'lvl')
+            head = 'def _ail_jd_%s(xs: %s, o: _AilJo, lvl: int) -> str:' % (key, render(t))
+        elif sdict:
+            leaf = t[2][0]
+            name = {'int': '_ail_jdc_dict_int', 'float': '_ail_jdc_dict_float', 'str': '_ail_jdc_dict_str'}[leaf]
+            if leaf == 'float':
+                body = ['st = %s(d, %s, lvl)' % (name, self.OPTS), 'if st != 0:', '    _ail_jd_bad(st)']
+            else:
+                body = ['%s(d, %s, lvl)' % (name, self.OPTS)]
+            head = 'def _ail_jd_%s(d: %s, o: _AilJo, lvl: int) -> str:' % (key, render(t))
+        else:
+            leaf = t[1][1][0]
+            row = self.leaf_lines(leaf, 'v', 'lvl + 1')
+            lines = [
+                'n = len(xs)',
+                'if n == 0:',
+                '    return "[]"',
+                '_ail_jdc_begin()',
+                '_ail_jdc_lit("[")',
+                'nl = ""',
+                'sep = o.isep',
+                'if o.pretty != 0:',
+                '    nl = "\\n" + _ail_jd_pad(o.pad, lvl + 1)',
+                '    _ail_jdc_lit(nl)',
+                '    sep = o.isep + nl',
+                'i = 0',
+                'while i < n:',
+                '    if i > 0:',
+                '        _ail_jdc_lit(sep)',
+                '    v = xs[i]',
+            ] + ['    ' + line for line in row] + [
+                '    i += 1',
+                'if o.pretty != 0:',
+                '    _ail_jdc_lit("\\n" + _ail_jd_pad(o.pad, lvl))',
+                '_ail_jdc_lit("]")',
+            ]
+            body = lines
+            head = 'def _ail_jd_%s(xs: %s, o: _AilJo, lvl: int) -> str:' % (key, render(t))
+        if not nested:
+            body = ['_ail_jdc_begin()'] + body
+        body = body + ['return _ail_jdc_result()']
+        return '\n' + head + '\n' + ''.join('    ' + line + '\n' for line in body)
+
+    def dumper_text_ast(self, t):
+        """The helper written in the typed subset itself (the dict[int, T] case)."""
         key = mangle(t)
         if t[0] == 'list':
             inner = t[1]
@@ -751,9 +940,39 @@ class Resolver(ast.NodeTransformer):
                 return js.loads_call(loads, t)
         return None
 
+    def load_in_place(self, node, target, t, annotation):
+        """`target: T = json.loads(text)` / `target = json.loads(text)` inside a function, as statements that
+        fill the local container directly (no copy of the result): the list of statements, or None."""
+        js = self.js
+        value = node.value
+        if not (self.fn_stack and isinstance(value, ast.Call) and t is not None and js.fast_intrinsic(t) is not None
+                and target not in js.params):
+            return None
+        loads = js.as_loads(value)
+        if loads is None:
+            return None
+        loads.args = [self.visit(a) for a in loads.args]
+        js.loads_check(loads, t)
+        if len(loads.args) != 1:
+            return None
+        text = loads.args[0]
+        statements = []
+        if not isinstance(text, (ast.Name, ast.Constant)):
+            temp = js.fresh('jt')
+            statements.append(ast.copy_location(_mark(ast.AnnAssign(target=_name(temp, store=True), annotation=_name('str'),
+                                                                    value=text, simple=1)), node))
+            text = _name(temp)
+        statements.extend(js.in_place(target, t, annotation, text, node))
+        return statements
+
     def visit_AnnAssign(self, node):
         if node.value is not None:
-            replacement = self.typed_loads(node.value, ann_to_type(node.annotation), node)
+            t = ann_to_type(node.annotation)
+            if isinstance(node.target, ast.Name):
+                statements = self.load_in_place(node, node.target.id, t, node.annotation)
+                if statements is not None:
+                    return statements
+            replacement = self.typed_loads(node.value, t, node)
             if replacement is not None:
                 node.value = replacement
                 return node
@@ -762,6 +981,9 @@ class Resolver(ast.NodeTransformer):
     def visit_Assign(self, node):
         if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             t = self.js.env.get(node.targets[0].id)
+            statements = self.load_in_place(node, node.targets[0].id, t, None)
+            if statements is not None:
+                return statements
             replacement = self.typed_loads(node.value, t, node)
             if replacement is not None:
                 node.value = replacement

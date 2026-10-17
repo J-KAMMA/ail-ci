@@ -210,7 +210,7 @@ class Exprs:
         """The scalar leaves of a tuple-typed pure expression, as (node, type)."""
         out = []
         for i, e in enumerate(deep(t)[1]):
-            sub_ = attr(fresh_copy(node), 'f%d' % i)
+            sub_ = attr(fresh_copy(node), fld(e, i))
             if is_tuple(e):
                 out.extend(self.leaf_nodes(sub_, e))
             else:
@@ -367,7 +367,7 @@ class Exprs:
                 self.refuse(node, 'tuple index out of range')
             if not isinstance(node.value, ast.Subscript) and not self.quiet:
                 self.force()
-            return attr(vn, 'f%d' % (k % n)), vt[1][k % n]
+            return attr(vn, fld(vt[1][k % n], k % n)), vt[1][k % n]
         if is_table_dict(vt):
             self.force()
             kn, kt = self.exv(sl, vt[1])
@@ -801,8 +801,8 @@ class Exprs:
             self.refuse(pat, 'unpacking %d names from a tuple of %d' % (len(pat.elts), len(t[1])))
         out = []
         for i, e in enumerate(pat.elts):
-            access = attr(fresh_copy(src), 'f%d' % i)
             te = deep(t[1][i])
+            access = attr(fresh_copy(src), fld(te, i))
             if isinstance(e, ast.Starred):
                 self.refuse(pat, 'a starred name in an unpacking target')
             if isinstance(e, (ast.Tuple, ast.List)):
