@@ -12,6 +12,14 @@ program that does not import re is untouched).
   ones CPython's backtracker reports) in O(len(pattern) * len(text)).  Subjects are code-point lists,
   so non-ASCII text works; \\d \\w \\s use str.isdecimal / isalnum / isspace for code points >= 128,
   which is CPython's own definition for str patterns.
+* Fast path: for an ASCII str (or any bytes) subject and a pattern without lookaround, `build_dfa` makes
+  a byte-class DFA at build time (state = priority-ordered thread list + what the previous character
+  was, so \\b ^ $ are decided when the next character is known; the MATCH cut gives leftmost-first ends;
+  a second table answers fullmatch).  It finds the span of the first match from each start the first
+  character allows; the Pike VM (bytes flavour) then runs anchored on that span, with its end forced,
+  only when groups are wanted.  Everything it cannot answer identically goes to the Pike VM: non-ASCII
+  text, a `$` before a final newline, an empty match followed by a search that may not be empty, and
+  starts that fail after a long scan (work budget 4n + 2048 bytes, so the whole call stays linear).
 """
 import re as _re
 
@@ -23,6 +31,9 @@ I, M, S, X, A, U = 2, 8, 16, 64, 256, 32
 FLAG_NAMES = {'I': I, 'IGNORECASE': I, 'M': M, 'MULTILINE': M, 'S': S, 'DOTALL': S, 'X': X, 'VERBOSE': X,
               'A': A, 'ASCII': A, 'U': U, 'UNICODE': U}
 _PROG_LIMIT = 30000
+_DFA_MAX_STATES = 256
+_DFA_MAX_CELLS = 4096
+_DFA_MAX_QUICK = 1600
 _MAXGROUPS = 99
 _ASCII_LETTERS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
@@ -621,11 +632,237 @@ class Program:
                     nonascii = True
         return empty, nonascii, table
 
+    # -- DFA (compile-time subset construction) -------------------------------------------------
+    def _byte_hit(self, pc, c):
+        """Whether the consuming instruction at pc takes the character / byte value c."""
+        op = self.ops[pc]
+        if op == CHAR:
+            return c == self.xs[pc]
+        if op == ANY:
+            return c != 10
+        if op == ANYNL:
+            return True
+        _neg, tab, flat = self.classes[self.xs[pc]]
+        if c < 128:
+            return bool(tab[c])
+        hit = False
+        for i in range(0, len(flat), 2):
+            lo = flat[i]
+            if lo >= 0:
+                hit = hit or lo <= c <= flat[i + 1]
+            elif lo == -1:
+                hit = hit or chr(c).isdecimal()
+            elif lo == -2:
+                hit = hit or not chr(c).isdecimal()
+            elif lo == -3:
+                hit = hit or chr(c).isalnum()
+            elif lo == -4:
+                hit = hit or not chr(c).isalnum()
+            elif lo == -5:
+                hit = hit or chr(c).isspace()
+            else:
+                hit = hit or not chr(c).isspace()
+        return hit != (op == NCLASS)
+
+    def build_dfa(self):
+        """Tables of a DFA over byte classes that answers "where does the leftmost-first match from here
+        end" (and, for fullmatch, "does any thread end at the end of the text") for subjects whose
+        characters are single bytes (ASCII str, or bytes).  The state is the priority-ordered list of
+        parked threads plus what is known about the previous character (start / newline / word), so \\b,
+        \\B, ^, $ and \\A \\Z are decided when the next character is known.  None when the pattern has
+        a lookaround or the automaton is larger than the limits."""
+        ops, xs, ys = self.ops, self.xs, self.ys
+        if LOOK in ops:
+            return None
+        alpha = 256 if self.is_bytes else 128
+        kinds = {xs[pc] for pc in range(len(ops)) if ops[pc] == ASSERT}
+        need_word = bool(kinds & {A_WB, A_NWB})
+        need_nl = bool(kinds & {A_MBOL, A_MEOL})
+        need_none = bool(kinds & {A_BOL, A_MBOL, A_BOS, A_WB, A_NWB})
+
+        def isw(c):
+            return 48 <= c <= 57 or 65 <= c <= 90 or c == 95 or 97 <= c <= 122
+
+        # consuming instructions, and the characters a match can start with (assertions read as true)
+        consumers = []
+        nullable = False
+        seen = set()
+        stack = [0]
+        while stack:
+            pc = stack.pop()
+            if pc in seen:
+                continue
+            seen.add(pc)
+            op = ops[pc]
+            if op == JMP:
+                stack.append(xs[pc])
+            elif op == SPLIT:
+                stack += [xs[pc], ys[pc]]
+            elif op in (SAVE, ASSERT, LOOK):
+                stack.append(pc + 1)
+            elif op == MATCH:
+                nullable = True
+            else:
+                consumers.append(pc)
+        def distinct(pcs):
+            first = {}
+            for pc in pcs:
+                first.setdefault((ops[pc], xs[pc] if ops[pc] in (CHAR, CLASS, NCLASS) else 0), pc)
+            return list(first.values())
+
+        starters = set(c for c in range(alpha) if any(self._byte_hit(pc, c) for pc in distinct(consumers)))
+        splitters = distinct(pc for pc in range(len(ops)) if ops[pc] in (CHAR, ANY, ANYNL, CLASS, NCLASS))
+        # byte classes: equal behaviour for every instruction, for word-ness and for newline
+        sigs = {}
+        cls = []
+        reps = []
+        for c in range(alpha):
+            sig = (tuple(self._byte_hit(pc, c) for pc in splitters), nullable or c in starters,
+                   need_word and isw(c), need_nl and c == 10)
+            if sig not in sigs:
+                sigs[sig] = len(sigs)
+                reps.append(c)
+            cls.append(sigs[sig])
+        # renumber: bytes that cannot start a match first, so that "class >= k" means "may start"
+        cand_of = {v: k[1] for k, v in sigs.items()}
+        order = sorted(range(len(reps)), key=lambda k: (cand_of[k], k))
+        renum = {old: new for new, old in enumerate(order)}
+        cls = [renum[k] for k in cls]
+        reps = [reps[old] for old in order]
+        ncls = len(reps)
+        firstk = 0 if nullable else sum(1 for r in reps if r not in starters)
+        width = ncls + 1
+
+        def keyfn(prev):
+            return (need_none and prev is None, need_nl and prev == 10,
+                    need_word and prev is not None and isw(prev))
+
+        def holds(kind, key, c):
+            none, nl, word = key
+            if kind in (A_BOL, A_BOS):
+                return none
+            if kind == A_MBOL:
+                return none or nl
+            if kind in (A_EOL, A_EOS):
+                return c is None
+            if kind == A_MEOL:
+                return c is None or c == 10
+            if none and c is None:
+                return False                # the engine answers False for \b and \B on an empty subject
+            after = c is not None and isw(c)
+            return (word != after) if kind == A_WB else (word == after)
+
+        def visit(roots, flags, out):
+            seen = set()
+            stack = list(reversed(roots))
+            while stack:
+                pc = stack.pop()
+                if pc in seen:
+                    continue
+                seen.add(pc)
+                op = ops[pc]
+                if op == JMP:
+                    stack.append(xs[pc])
+                elif op == SPLIT:
+                    stack.append(ys[pc])
+                    stack.append(xs[pc])
+                elif op == SAVE:
+                    stack.append(pc + 1)
+                elif op == ASSERT:
+                    if flags is None:
+                        out.append(pc)
+                    elif flags(xs[pc]):
+                        stack.append(pc + 1)
+                else:
+                    out.append(pc)
+            return out
+
+        cut = [False]
+
+        def build(membership):
+            ids = {}
+            states = [None]                      # id 0 is the dead state
+            rows = [[0] * width]
+
+            def state_of(listing, key):
+                if not listing:
+                    return 0
+                k = (tuple(listing), key)
+                if k not in ids:
+                    ids[k] = len(states)
+                    states.append(k)
+                    rows.append(None)
+                return ids[k]
+
+            start = visit([0], None, [])
+            init = [state_of(start, keyfn(r)) for r in reps] + [state_of(start, keyfn(None))]
+            done = 1
+            while done < len(states):
+                if len(states) > _DFA_MAX_STATES:
+                    return None
+                listing, key = states[done]
+                row = []
+                for c in reps + [None]:
+                    resolved = visit(listing, lambda kind: holds(kind, key, c), [])
+                    matched = False
+                    nxt = []
+                    for pc in resolved:
+                        if ops[pc] == MATCH:
+                            matched = True
+                            if not membership:
+                                if pc != resolved[-1]:
+                                    cut[0] = True
+                                break
+                            continue
+                        if c is not None and self._byte_hit(pc, c):
+                            nxt.append(pc + 1)
+                    target = 0 if c is None else state_of(visit(nxt, None, []), keyfn(c))
+                    row.append(((target * width) << 1) | (1 if matched else 0))
+                rows[done] = row
+                done += 1
+            if len(rows) * width > _DFA_MAX_CELLS:
+                return None
+            flat = [v for row in rows for v in row]
+            return flat, [i * width for i in init]
+
+        priority = build(False)
+        if priority is None:
+            return None
+        member = build(True) if cut[0] else priority
+        if member is None:
+            return None
+        # a start can be rejected from the previous and the next class alone when the start state
+        # depends on the previous character (\\b, ^ with MULTILINE ...): quick[prev * ncls + next]
+        quick = None
+        table, init = priority
+        if firstk > 0 and len(set(init)) > 1 and (ncls + 1) * ncls <= _DFA_MAX_QUICK:
+            quick = []
+            for prev in range(ncls + 1):
+                for c in range(ncls):
+                    cell = table[init[prev] + c]
+                    quick.append(0 if (cell >> 1) == 0 and (cell & 1) == 0 else 1)
+        return {'ncls': ncls, 'width': width, 'firstk': firstk, 'cls': cls, 'priority': priority,
+                'member': member, 'eol': A_EOL in kinds, 'quick': quick}
+
+    def literal_prefix(self):
+        """The ASCII characters every match starts with (consecutive CHAR instructions at the start of the
+        program, groups opened on the way allowed); '' when there is none or the pattern is a bytes one."""
+        if self.is_bytes:
+            return ''
+        pc = 0
+        while self.ops[pc] == SAVE:
+            pc += 1
+        chars = []
+        while self.ops[pc] == CHAR and self.xs[pc] < 128:
+            chars.append(chr(self.xs[pc]))
+            pc += 1
+        return ''.join(chars)
+
     # -- packing ------------------------------------------------------------------------------
     def pack(self, pid):
         n = len(self.ops)
         ncap = 2 * (self.ngroups + 1)
-        header = 16
+        header = 17
         offop = header
         offx = offop + n
         offy = offx + n
@@ -649,8 +886,34 @@ class Program:
         for _neg, table, _flat in self.classes:
             out += list(table)
         out += starts + items
+        out[16] = 1 if self.literal_prefix() else 0
         out[13] = len(out)
         out += first
+        dfa = self.build_dfa()
+        if dfa is not None:
+            d = len(out)
+            out[14] = d
+            out[15] = 1 if dfa['eol'] else 0
+            out += [0] * 10
+            out[d], out[d + 1], out[d + 2] = dfa['ncls'], dfa['width'], dfa['firstk']
+            out[d + 3] = len(out)
+            out += dfa['cls']
+            table, init = dfa['priority']
+            out[d + 4] = len(out)
+            out += table
+            out[d + 6] = len(out)
+            out += init
+            if dfa['member'] is dfa['priority']:
+                out[d + 5], out[d + 7] = out[d + 4], out[d + 6]
+            else:
+                table, init = dfa['member']
+                out[d + 5] = len(out)
+                out += table
+                out[d + 7] = len(out)
+                out += init
+            if dfa['quick'] is not None:
+                out[d + 8] = len(out)
+                out += dfa['quick']
         return out
 
 
@@ -744,6 +1007,11 @@ class _ail_re_Vm:
         self.work = work
         self.res = res
         self.stack = stack
+
+
+class _ail_re_Wk:
+    def __init__(self, v: list[int]):
+        self.v = v
 
 
 class _ail_re_Match:
@@ -1058,10 +1326,153 @@ def _ail_re_run(vm: _ail_re_Vm, p: list[int], cps: list[int], n: int, start: int
     return matched != 0
 
 
+def _ail_re_dok(p: list[int], sb: bytes, n: int) -> bool:
+    if p[14] == 0:
+        return False
+    if p[15] == 0 or n == 0:
+        return True
+    return sb[n - 1] != 10
+
+
+def _ail_re_dp(p: list[int], sb: bytes, n: int, s: int, wk: _ail_re_Wk) -> int:
+    d = p[14]
+    ncls = p[d]
+    co = p[d + 3]
+    tb = p[d + 4]
+    ib = p[d + 6]
+    st = p[ib + ncls]
+    if s > 0:
+        st = p[ib + p[co + sb[s - 1]]]
+    last = -1
+    pos = s
+    while pos < n:
+        v = p[tb + st + p[co + sb[pos]]]
+        if (v & 1) == 1:
+            last = pos
+        st = v >> 1
+        if st == 0:
+            wk.v[3] = pos + 1 - s
+            return last
+        pos += 1
+    if (p[tb + st + ncls] & 1) == 1:
+        last = n
+    wk.v[3] = pos - s
+    return last
+
+
+def _ail_re_dm(p: list[int], sb: bytes, n: int) -> bool:
+    d = p[14]
+    ncls = p[d]
+    co = p[d + 3]
+    tb = p[d + 5]
+    st = p[p[d + 7] + ncls]
+    pos = 0
+    while pos < n:
+        st = p[tb + st + p[co + sb[pos]]] >> 1
+        if st == 0:
+            return False
+        pos += 1
+    return (p[tb + st + ncls] & 1) == 1
+
+
+def _ail_re_ds(p: list[int], sb: bytes, n: int, pos: int, wk: _ail_re_Wk) -> int:
+    d = p[14]
+    co = p[d + 3]
+    k = p[d + 2]
+    qo = p[d + 8]
+    ncls = p[d]
+    s = pos
+    while s <= n:
+        if k > 0:
+            if qo > 0:
+                if s == 0 and n > 0:
+                    if p[qo + ncls * ncls + p[co + sb[0]]] == 0:
+                        s = 1
+                while s > 0 and s < n and p[qo + p[co + sb[s - 1]] * ncls + p[co + sb[s]]] == 0:
+                    s += 1
+            else:
+                while s < n and p[co + sb[s]] < k:
+                    s += 1
+            if s >= n:
+                return -1
+        e = _ail_re_dp(p, sb, n, s, wk)
+        if e >= 0:
+            wk.v[1] = e
+            wk.v[2] = wk.v[2] - (wk.v[3] - (e - s))
+            return s
+        wk.v[2] = wk.v[2] - wk.v[3]
+        if wk.v[2] < 0:
+            wk.v[0] = s + 1
+            return -2
+        s += 1
+    return -1
+
+
+def _ail_re_span(p: list[int], sb: bytes, n: int, mode: int, wk: _ail_re_Wk) -> int:
+    if mode == 1:
+        if _ail_re_dm(p, sb, n):
+            wk.v[1] = n
+            return 0
+        return -1
+    if mode == 0:
+        e = _ail_re_dp(p, sb, n, 0, wk)
+        if e < 0:
+            return -1
+        wk.v[1] = e
+        return 0
+    return _ail_re_ds(p, sb, n, 0, wk)
+
+
+def _ail_re_find(vm: _ail_re_Vm, p: list[int], sb: bytes, cps: list[int], asc: int, n: int, pos: int,
+                 mustadv: int, wk: _ail_re_Wk, needg: int) -> int:
+    start = pos
+    if wk.v[2] >= 0 and (mustadv == 0 or p[11] == 0):
+        s0 = _ail_re_ds(p, sb, n, start, wk)
+        if s0 == -1:
+            return -1
+        if s0 >= 0:
+            if needg != 0 and p[4] > 0:
+                _ail_re_runY(vm, p, sb, n, s0, 0, 0, 0, wk.v[1])
+            return s0
+        wk.v[2] = -1
+        start = wk.v[0]
+    ok = False
+    if asc == 1:
+        ok = _ail_re_execY(vm, p, sb, n, start, 2, mustadv)
+    if asc == 0:  #L
+        ok = _ail_re_exec(vm, p, cps, n, start, 2, mustadv)  #L
+    if not ok:
+        return -1
+    wk.v[1] = vm.res[1]
+    return vm.res[0]
+
+
 def _ail_re_do(p: list[int], s: str, mode: int) -> _ail_re_Match | None:
-    cps = _ail_re_cps(p, s)
+    @PREP@
+    if mode == 2 and p[16] != 0:  #P
+        if _ail_re_pre(p[2], s, 0) < 0:  #P
+            return None  #P
+    if asc == 1 and _ail_re_dok(p, sb, n):
+        wk = _ail_re_Wk([0, 0, 4 * n + 2048, 0])
+        r = _ail_re_span(p, sb, n, mode, wk)
+        if r == -1:
+            return None
+        if r >= 0:
+            if p[0] == 2:
+                return _ail_re_Match(s[r:wk.v[1]], [r, wk.v[1]], p[2])
+            vm = _ail_re_new(p)
+            _ail_re_runY(vm, p, sb, n, r, 0, 0, 0, wk.v[1])
+            g = [0] * p[0]
+            for k in range(p[0]):
+                g[k] = vm.res[k]
+            return _ail_re_Match(s[g[0]:g[1]], g, p[2])
     vm = _ail_re_new(p)
-    if _ail_re_exec(vm, p, cps, len(cps), 0, mode, 0):
+    ok = False
+    if asc == 1:
+        ok = _ail_re_execY(vm, p, sb, n, 0, mode, 0)
+    if asc == 0:  #L
+        ok = _ail_re_exec(vm, p, cps, n, 0, mode, 0)  #L
+    if ok:
         g = [0] * p[0]
         for k in range(p[0]):
             g[k] = vm.res[k]
@@ -1070,31 +1481,55 @@ def _ail_re_do(p: list[int], s: str, mode: int) -> _ail_re_Match | None:
 
 
 def _ail_re_test(p: list[int], s: str, mode: int) -> bool:
-    cps = _ail_re_cps(p, s)
+    @PREP@
+    if mode == 2 and p[16] != 0:  #P
+        if _ail_re_pre(p[2], s, 0) < 0:  #P
+            return False  #P
+    if asc == 1 and _ail_re_dok(p, sb, n):
+        wk = _ail_re_Wk([0, 0, 4 * n + 2048, 0])
+        r = _ail_re_span(p, sb, n, mode, wk)
+        if r >= 0:
+            return True
+        if r == -1:
+            return False
     vm = _ail_re_new(p)
-    return _ail_re_exec(vm, p, cps, len(cps), 0, mode, 0)
+    ok = False
+    if asc == 1:
+        ok = _ail_re_execY(vm, p, sb, n, 0, mode, 0)
+    if asc == 0:  #L
+        ok = _ail_re_exec(vm, p, cps, n, 0, mode, 0)  #L
+    return ok
 
 
 def _ail_re_findall(p: list[int], s: str) -> list[str]:
-    cps = _ail_re_cps(p, s)
+    @PREP@
+    @TEXT@
+    @WK@
     vm = _ail_re_new(p)
-    n = len(cps)
     out: list[str] = []
     pos = 0
     mustadv = 0
     while pos <= n:
-        if not _ail_re_exec(vm, p, cps, n, pos, 2, mustadv):
+        if p[16] != 0 and asc == 1:  #P
+            pos = _ail_re_pre(p[2], t2 if dec == 1 else t, pos)  #P
+            if pos < 0:  #P
+                break  #P
+        a = _ail_re_find(vm, p, sb, cps, asc, n, pos, mustadv, wk, 1)
+        if a < 0:
             break
-        a = vm.res[0]
-        b = vm.res[1]
+        nm += 1
+        if nm == 64 and dec == 0 and asc == 1 and n >= 4096 and pos < 1536:  #S
+            t2 = sb.decode()  #S
+            dec = 1  #S
+        b = wk.v[1]
         if p[4] == 0:
-            out.append(s[a:b])
+            out.append(t[a:b])
         else:
             ga = vm.res[2]
             if ga < 0:
                 out.append("")
             else:
-                out.append(s[ga:vm.res[3]])
+                out.append(t[ga:vm.res[3]])
         pos = b
         mustadv = 0
         if b == a:
@@ -1102,53 +1537,46 @@ def _ail_re_findall(p: list[int], s: str) -> list[str]:
     return out
 
 
-def _ail_re_findallg(p: list[int], s: str, g: int) -> list[str]:
-    cps = _ail_re_cps(p, s)
-    vm = _ail_re_new(p)
-    n = len(cps)
-    out: list[str] = []
-    pos = 0
-    mustadv = 0
-    while pos <= n:
-        if not _ail_re_exec(vm, p, cps, n, pos, 2, mustadv):
-            break
-        ga = vm.res[2 * g]
-        if ga < 0:
-            out.append("")
-        else:
-            out.append(s[ga:vm.res[2 * g + 1]])
-        pos = vm.res[1]
-        mustadv = 0
-        if vm.res[1] == vm.res[0]:
-            mustadv = 1
-    return out
-
-
 def _ail_re_finditer(p: list[int], s: str) -> list[_ail_re_Match]:
-    cps = _ail_re_cps(p, s)
+    @PREP@
+    @TEXT@
+    @WK@
     vm = _ail_re_new(p)
-    n = len(cps)
     out: list[_ail_re_Match] = []
     pos = 0
     mustadv = 0
     while pos <= n:
-        if not _ail_re_exec(vm, p, cps, n, pos, 2, mustadv):
+        if p[16] != 0 and asc == 1:  #P
+            pos = _ail_re_pre(p[2], t2 if dec == 1 else t, pos)  #P
+            if pos < 0:  #P
+                break  #P
+        a = _ail_re_find(vm, p, sb, cps, asc, n, pos, mustadv, wk, 1)
+        if a < 0:
             break
-        g = [0] * p[0]
-        for k in range(p[0]):
-            g[k] = vm.res[k]
-        out.append(_ail_re_Match(s[g[0]:g[1]], g, p[2]))
-        pos = vm.res[1]
+        nm += 1
+        if nm == 64 and dec == 0 and asc == 1 and n >= 4096 and pos < 1536:  #S
+            t2 = sb.decode()  #S
+            dec = 1  #S
+        b = wk.v[1]
+        if p[0] == 2:
+            out.append(_ail_re_Match(t[a:b], [a, b], p[2]))
+        else:
+            g = [0] * p[0]
+            for k in range(p[0]):
+                g[k] = vm.res[k]
+            out.append(_ail_re_Match(t[g[0]:g[1]], g, p[2]))
+        pos = b
         mustadv = 0
-        if vm.res[1] == vm.res[0]:
+        if b == a:
             mustadv = 1
     return out
 
 
 def _ail_re_split(p: list[int], s: str, maxsplit: int) -> list[str]:
-    cps = _ail_re_cps(p, s)
+    @PREP@
+    @TEXT@
+    @WK@
     vm = _ail_re_new(p)
-    n = len(cps)
     out: list[str] = []
     pos = 0
     last = 0
@@ -1157,18 +1585,26 @@ def _ail_re_split(p: list[int], s: str, maxsplit: int) -> list[str]:
     while pos <= n:
         if maxsplit > 0 and cnt >= maxsplit:
             break
-        if not _ail_re_exec(vm, p, cps, n, pos, 2, mustadv):
+        if p[16] != 0 and asc == 1:  #P
+            pos = _ail_re_pre(p[2], t2 if dec == 1 else t, pos)  #P
+            if pos < 0:  #P
+                break  #P
+        a = _ail_re_find(vm, p, sb, cps, asc, n, pos, mustadv, wk, 0)
+        if a < 0:
             break
-        a = vm.res[0]
-        b = vm.res[1]
-        out.append(s[last:a])
+        nm += 1
+        if nm == 64 and dec == 0 and asc == 1 and n >= 4096 and pos < 1536:  #S
+            t2 = sb.decode()  #S
+            dec = 1  #S
+        b = wk.v[1]
+        out.append(t[last:a])
         cnt += 1
         last = b
         pos = b
         mustadv = 0
         if b == a:
             mustadv = 1
-    out.append(s[last:])
+    out.append(t[last:])
     return out
 
 
@@ -1179,9 +1615,10 @@ def _ail_re_plain(repl: str) -> bool:
 def _ail_re_sublit(p: list[int], s: str, repl: str, count: int) -> str:
     if not _ail_re_plain(repl):
         raise ValueError("re.sub: a replacement with a backslash has to be a string literal")
-    cps = _ail_re_cps(p, s)
+    @PREP@
+    @TEXT@
+    @WK@
     vm = _ail_re_new(p)
-    n = len(cps)
     out: list[str] = []
     pos = 0
     last = 0
@@ -1190,11 +1627,19 @@ def _ail_re_sublit(p: list[int], s: str, repl: str, count: int) -> str:
     while pos <= n:
         if count > 0 and cnt >= count:
             break
-        if not _ail_re_exec(vm, p, cps, n, pos, 2, mustadv):
+        if p[16] != 0 and asc == 1:  #P
+            pos = _ail_re_pre(p[2], t2 if dec == 1 else t, pos)  #P
+            if pos < 0:  #P
+                break  #P
+        a = _ail_re_find(vm, p, sb, cps, asc, n, pos, mustadv, wk, 0)
+        if a < 0:
             break
-        a = vm.res[0]
-        b = vm.res[1]
-        out.append(s[last:a])
+        nm += 1
+        if nm == 64 and dec == 0 and asc == 1 and n >= 4096 and pos < 1536:  #S
+            t2 = sb.decode()  #S
+            dec = 1  #S
+        b = wk.v[1]
+        out.append(t[last:a])
         out.append(repl)
         cnt += 1
         last = b
@@ -1202,7 +1647,7 @@ def _ail_re_sublit(p: list[int], s: str, repl: str, count: int) -> str:
         mustadv = 0
         if b == a:
             mustadv = 1
-    out.append(s[last:])
+    out.append(t[last:])
     return "".join(out)
 
 
@@ -1215,11 +1660,36 @@ def _ail_re_escape(s: str) -> str:
     return "".join(out)
 '''
 
+_PREP_STR = """    sb = s.encode()
+    n = len(s)
+    cps: list[int] = []
+    asc = 1
+    if len(sb) != n:
+        asc = 0
+        cps = _ail_re_cps(@P@, s)
+"""
+_PREP_BYTES = """    sb = s
+    n = len(s)
+    cps: list[int] = []
+    asc = 1
+"""
+# The pieces are cut from t, assigned once at the top of the function (so the compiler gives its slices a
+# cursor: cutting from a str without the "pure ASCII" mark is otherwise O(n) per piece). A str built by
+# repetition or concatenation may have lost that mark and a cursor slice costs ~360 instructions against ~60;
+# when the first 64 matches come within 1536 characters (dense matches) an ASCII text of 4096+ characters
+# is decoded once from its bytes (which sets the mark) and the rest of the pieces are cut from that copy t2.
+# A sparse scan does not pay for the copy, which is mostly page faults.
+_TEXT_STR = ("    t = s\n    t2 = \"\"\n    dec = 0\n    nm = 0\n"
+             "    if @P@[16] != 0 and asc == 1 and n >= 4096:  #P\n        t2 = sb.decode()  #P\n        dec = 1  #P\n")
+_TEXT_BYTES = "    t = s\n    nm = 0\n"
+_WK = """    wk = _ail_re_Wk([0, 0, 4 * n + 2048, 0])
+    if asc == 0 or not _ail_re_dok(@P@, sb, n):
+        wk.v[2] = -1
+"""
+
 _SUB_TEMPLATE = """
 def _ail_re_sub%(k)d(s: str, count: int) -> str:
-    cps = _ail_re_cps(%(table)s, s)
-    vm = _ail_re_new(%(table)s)
-    n = len(cps)
+%(prep)s%(text)s%(wk)s    vm = _ail_re_new(%(table)s)
     out: list[str] = []
     pos = 0
     last = 0
@@ -1228,11 +1698,19 @@ def _ail_re_sub%(k)d(s: str, count: int) -> str:
     while pos <= n:
         if count > 0 and cnt >= count:
             break
-        if not _ail_re_exec(vm, %(table)s, cps, n, pos, 2, mustadv):
+        if %(table)s[16] != 0 and asc == 1:  #P
+            pos = _ail_re_pre(%(pid)d, t2 if dec == 1 else t, pos)  #P
+            if pos < 0:  #P
+                break  #P
+        a = _ail_re_find(vm, %(table)s, sb, cps, asc, n, pos, mustadv, wk, %(needg)d)
+        if a < 0:
             break
-        a = vm.res[0]
-        b = vm.res[1]
-        out.append(s[last:a])
+        nm += 1
+        if nm == 64 and dec == 0 and asc == 1 and n >= 4096 and pos < 1536:  #S
+            t2 = sb.decode()  #S
+            dec = 1  #S
+        b = wk.v[1]
+        out.append(t[last:a])
 %(parts)s
         cnt += 1
         last = b
@@ -1240,32 +1718,81 @@ def _ail_re_sub%(k)d(s: str, count: int) -> str:
         mustadv = 0
         if b == a:
             mustadv = 1
-    out.append(s[last:])
+    out.append(t[last:])
     return "".join(out)
 """
 
-_CORE_NAMES = ('_ail_re_Vm', '_ail_re_new', '_ail_re_isw', '_ail_re_assert', '_ail_re_nonascii', '_ail_re_look',
-               '_ail_re_add', '_ail_re_exec', '_ail_re_run')
+_SHARED_NAMES = ('_ail_re_Vm', '_ail_re_Wk', '_ail_re_new', '_ail_re_isw', '_ail_re_nonascii', '_ail_re_dok', '_ail_re_dp',
+                 '_ail_re_dm', '_ail_re_ds', '_ail_re_span', '_ail_re_find')
+_FLAVOR_NAMES = ('_ail_re_assert', '_ail_re_look', '_ail_re_add', '_ail_re_exec', '_ail_re_run')
 
 
 def _blocks():
-    """(core text, api text): the engine split at its top-level definitions."""
-    core, api = [], []
+    """(shared core text, flavor text, api text): the engine split at its top-level definitions."""
+    shared, flavor, api = [], [], []
     for block in _ENGINE.split('\n\n\n'):
         block = block.strip('\n')
         if not block:
             continue
         name = block.split('(')[0].split(':')[0].split()[1]
-        (core if name in _CORE_NAMES else api).append(block)
-    return '\n\n\n'.join(core), '\n\n\n'.join(api)
+        (shared if name in _SHARED_NAMES else flavor if name in _FLAVOR_NAMES else api).append(block)
+    return '\n\n\n'.join(shared), '\n\n\n'.join(flavor), '\n\n\n'.join(api)
+
+
+def _y_flavor(flavor):
+    """The Pike VM for a subject that is a bytes object (an ASCII str encoded, or a bytes subject)."""
+    import re as regex
+    text = regex.sub(r'\b_ail_re_(assert|look|add|exec|run)\b', r'_ail_re_\1Y', flavor)
+    return text.replace('cps: list[int]', 'cps: bytes')
+
+
+def _drop_marked(text, marker, keep):
+    """Lines ending in `  #L` (the str-with-non-ASCII branch) or `  #P` (the literal-prefix skip) are kept with
+    the marker removed, or dropped."""
+    lines = []
+    for line in text.split('\n'):
+        if line.endswith(marker):
+            if keep:
+                lines.append(line[:-len(marker)])
+        else:
+            lines.append(line)
+    return '\n'.join(lines)
+
+
+def _drop_l(text, keep):
+    return _drop_marked(text, '  #L', keep)
+
+
+def _dual_cut(text):
+    """Every statement that cuts a piece `t[a:b]` runs on t2 instead once the decoded copy exists (a statement, not
+    a conditional expression: the compiler gives a slice a cursor only as a plain statement)."""
+    import re as regex
+    cut = regex.compile(r'(?<![\w.])t\[((?:[^\[\]]|\[[^\[\]]*\])*)\]')
+    lines = []
+    for line in text.split('\n'):
+        if cut.search(line) and not line.lstrip().startswith(('if ', 'elif ', 'while ', 'def ', 'return ', 'for ')):
+            indent = line[:len(line) - len(line.lstrip())]
+            lines += [indent + 'if dec == 0:', '    ' + line, indent + 'else:', '    ' + cut.sub(r't2[\1]', line)]
+        else:
+            lines.append(line)
+    return '\n'.join(lines)
+
+
+def _str_api(api):
+    return (api.replace('    @PREP@\n', _PREP_STR.replace('@P@', 'p')).replace('    @TEXT@\n', _TEXT_STR.replace('@P@', 'p'))
+            .replace('    @WK@\n', _WK.replace('@P@', 'p')))
 
 
 def _bytes_api(api):
     """The str wrappers respelled for bytes subjects: B-suffixed names, bytes types, bytes literals."""
     import re as regex
     sep = '\n' * 3
-    api = sep.join(b for b in api.split(sep) if not b.startswith('def _ail_re_escape'))
-    api = regex.sub(r'\b(_ail_re_(?:Match|do|test|findall|findallg|finditer|split|plain|sublit|cps))\b', r'\1B', api)
+    api = sep.join(b for b in api.split(sep)
+                   if not b.startswith('def _ail_re_escape') and not b.startswith('def _ail_re_cps'))
+    api = (api.replace('    @PREP@\n', _PREP_BYTES).replace('    @TEXT@\n', _TEXT_BYTES)
+           .replace('    @WK@\n', _WK.replace('@P@', 'p')))
+    api = _drop_marked(_drop_marked(_drop_l(api, False), '  #P', False), '  #S', False)
+    api = regex.sub(r'\b(_ail_re_(?:Match|do|test|findall|finditer|split|plain|sublit))\b', r'\1B', api)
     api = api.replace('s: str', 's: bytes').replace('repl: str', 'repl: bytes').replace('list[str]', 'list[bytes]')
     api = api.replace('def groupn(self, name: str) -> str', 'def groupn(self, name: str) -> bytes')
     api = api.replace('count: int) -> str:', 'count: int) -> bytes:')
@@ -1274,10 +1801,6 @@ def _bytes_api(api):
     api = api.replace('            return ""\n        return self.s', '            return b""\n        return self.s')
     api = api.replace('out.append("")', 'out.append(b"")').replace('"".join(out)', 'b"".join(out)')
     api = api.replace('"\\\\" not in repl', 'b"\\\\" not in repl')
-    # no IGNORECASE refusal: a byte is ASCII-folded as it is
-    a = api.index('def _ail_re_cpsB(')
-    b = api.index('\n\n\n', a)
-    api = api[:a] + 'def _ail_re_cpsB(p: list[int], s: bytes) -> list[int]:\n    return [c for c in s]' + api[b:]
     api = api.replace('raise ValueError("re.sub: a replacement with a backslash has to be a string literal")',
                       'raise ValueError("re.sub: a replacement with a backslash has to be a bytes literal")')
     return api
@@ -1311,22 +1834,34 @@ class Library:
             program = self.programs[index]
             parts = parse_template(repl, program)
             lines = []
+            needg = 0
+            table = self.table_name(index)
             for kind, value in parts:
                 if kind == 'lit':
                     lines.append('        out.append(%r)' % value)
+                elif value == 0:
+                    lines.append('        out.append(t[a:b])')
                 else:
+                    needg = 1
                     lines.append('        ga = vm.res[%d]' % (2 * value))
                     lines.append('        if ga < 0:')
                     lines.append('            out.append(%s)' % ('b""' if program.is_bytes else '""'))
                     lines.append('        else:')
-                    lines.append('            out.append(s[ga:vm.res[%d]])' % (2 * value + 1))
+                    lines.append('            out.append(t[ga:vm.res[%d]])' % (2 * value + 1))
             k = len(self.sub_keys)
             name = '_ail_re_sub%d' % k
             self.sub_keys[key] = name
-            text = _SUB_TEMPLATE % {'k': k, 'table': self.table_name(index), 'parts': '\n'.join(lines) or '        pass'}
+            prep = (_PREP_BYTES if program.is_bytes else _PREP_STR).replace('@P@', table)
+            text = _SUB_TEMPLATE % {'k': k, 'table': table, 'pid': index, 'parts': '\n'.join(lines) or '        pass',
+                                    'prep': prep, 'wk': _WK.replace('@P@', table), 'needg': needg,
+                                    'text': _TEXT_BYTES if program.is_bytes else _TEXT_STR.replace('@P@', table)}
+            text = _drop_marked(_drop_marked(text, '  #P', bool(program.literal_prefix())), '  #S',
+                                not program.is_bytes)
+            if not program.is_bytes:
+                text = _dual_cut(text)
             if program.is_bytes:
                 text = (text.replace('s: str', 's: bytes').replace('list[str]', 'list[bytes]').replace('count: int) -> str:', 'count: int) -> bytes:')
-                        .replace('"".join(out)', 'b"".join(out)').replace('_ail_re_cps(', '_ail_re_cpsB('))
+                        .replace('"".join(out)', 'b"".join(out)'))
             self.subs.append(text)
         return self.sub_keys[key]
 
@@ -1336,11 +1871,22 @@ class Library:
             for name, group in program.names.items():
                 named.append('        if self.pid == %d and name == %r:\n            return %d' % (index, name, group))
         named.append('        if self.pid < 0:\n            return 0')
-        core, api = _blocks()
+        shared, flavor, api = _blocks()
         api = api.replace('@NAMED@', '\n'.join(named))
-        parts = [core]
-        if self.uses_escape or any(not p.is_bytes for p in self.programs):
-            parts.append(api)
+        have_l = self.uses_escape or any(not p.is_bytes for p in self.programs)
+        prefixes = [(index, program.literal_prefix()) for index, program in enumerate(self.programs)
+                    if program.literal_prefix()]
+        parts = [_drop_l(shared, have_l), _y_flavor(flavor)]
+        if have_l:
+            if prefixes:
+                lines = ['def _ail_re_pre(pid: int, t: str, s: int) -> int:']
+                for index, prefix in prefixes:
+                    lines += ['    if pid == %d:' % index, '        return t.find(%r, s)' % prefix]
+                lines.append('    return s')
+                parts.append('\n'.join(lines))
+            parts.append(flavor)
+            parts.append(_dual_cut(_drop_marked(_drop_marked(_drop_l(_str_api(api), True), '  #P', bool(prefixes)),
+                                                '  #S', True)))
         if any(p.is_bytes for p in self.programs):
             parts.append(_bytes_api(api))
         tables = []
