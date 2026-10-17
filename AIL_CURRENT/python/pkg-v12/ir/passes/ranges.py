@@ -232,6 +232,13 @@ class Analysis(object):
                 lo = max(lo, fa.lb[b])
             if b in fa.ub:
                 hi = min(hi, fa.ub[b])
+            fb = self.get(env, b)
+            for w, c in fa.lb.items():     # a >= w + c and b <= w + d  =>  a - b >= c - d
+                if w in fb.ub and w is not a and w is not b:
+                    lo = max(lo, c - fb.ub[w])
+            for w, c in fa.ub.items():     # a <= w + c and b >= w + d  =>  a - b <= c - d
+                if w in fb.lb and w is not a and w is not b:
+                    hi = min(hi, c - fb.lb[w])
         else:
             ps = (alo * blo, alo * bhi, ahi * blo, ahi * bhi)
             lo, hi = min(ps), max(ps)
@@ -371,6 +378,15 @@ class Analysis(object):
                     self.decision[ins] = 'ck'
             elif isinstance(k, int) and not isinstance(k, bool) and k < 0 and op == 'floormod':
                 env[r] = Fact(k + 1, 0)
+            else:
+                blo, bhi = self.bounds(env, o[1])
+                if blo >= 1 and alo >= 0:
+                    # a non-negative dividend and a divisor known to be >= 1: C's / and % are Python's, and
+                    # there is no ZeroDivisionError
+                    env[r] = Fact(0, ahi) if op == 'floordiv' else Fact(0, min(ahi, bhi - 1))
+                    self.decision[ins] = 'nonneg'
+                elif ins in self.decision:
+                    self.decision[ins] = 'ck'
             return
         if op == 'and':
             alo, ahi = self.bounds(env, o[0])

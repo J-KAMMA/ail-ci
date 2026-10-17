@@ -17,6 +17,8 @@ import os
 
 from . import ir as I
 from . import effects as E
+from . import rtc
+from .emit_text import TextEmitter, allocates_str, allocates_bytes
 
 
 def ctype(t):
@@ -26,6 +28,8 @@ def ctype(t):
         return 'double'
     if t == BYTES:
         return 'ail_bytes'
+    if t == I.STRV:
+        return 'ail_str'
     if t.head == 'obj':
         inner = t.args[0]
         if inner.head == 'class':
@@ -123,6 +127,10 @@ def storage(t):
 
 
 def _zero(t):
+    if t == I.STRV:
+        return '(ail_str){0}'
+    if t == I.BYTES:
+        return '(ail_bytes){0}'
     return '0.0' if t == I.F64 else '0'
 
 
@@ -155,7 +163,7 @@ _LISTS = (I.T('obj', I.T('list', I.I64)), I.T('obj', I.T('list', I.F64)))
 _BA = I.T('obj', I.T('bytearray'))
 
 
-class Emitter(object):
+class Emitter(TextEmitter):
     def __init__(self, fn, pending=(), checked=False, summaries=None, unwind_name=None, listval=None):
         self.fn = fn
         # callees with a by-value list entry `<sym>__irl` (S3b); None: separately linked units, none
@@ -183,6 +191,7 @@ class Emitter(object):
         self.frame = any(i.op == 'try' for i in ops)
         self.byval = bool(fn.attrs.get('ret_list')) and not self.is_pending and not self.frame and self.allow_byval
         self.pre = 'fr->' if self.frame else ''
+        self.text_init(fn)
         self.cx = _Cx('top', 0, 0)
         self.lines = self.cx.lines
         self.owner = {}                         # value -> the C function that defines it
@@ -199,6 +208,14 @@ class Emitter(object):
                        'flist' if i.result.type.pointee == _LISTS[1] else 'list')
                       for i in fn.body.instrs
                       if i.op == 'local.alloc' and (i.result.type.pointee in _LISTS or i.result.type.pointee == _BA)]
+        for i in fn.body.instrs:
+            if i.op == 'local.alloc' and i.result.type.pointee.head == 'obj' \
+                    and i.result.type.pointee.args[0].head == 'class':
+                self.owned.append((self.pre + 'v_' + i.attrs['name'], 'obj'))
+        if self.needs_sar:
+            self.owned.append((self.sar, 'sarena'))
+        if self.needs_bar:
+            self.owned.append((self.bar, 'barena'))
         if self.owned:
             eff = E.body_effects(fn, None, summaries)
             self.owned_can_raise = bool(eff.unknown or eff.raises)
@@ -268,6 +285,7 @@ class Emitter(object):
             if ins.op == 'local.alloc':
                 name = ins.attrs['name']
                 fields.append('%s;' % _decl(storage(ins.result.type.pointee), ('l_' if name in params else 'v_') + name))
+        fields.extend(self.text_fields())
         if fn.results and not fn.attrs.get('ret_list'):
             fields.append('%s;' % _decl(ctype(fn.results[0]), 'ret'))
         fields.append('char _unused;')
@@ -297,10 +315,12 @@ class Emitter(object):
                 c = self.pre + ('l_' if name in params else 'v_') + name
                 self.names[ins.result] = c
                 if not self.frame:
-                    if ins.result.type.pointee in _LISTS:
+                    if ins.result.type.pointee in _LISTS or ins.result.type.pointee in (I.STRV, I.BYTES):
                         self.line(1, '%s %s = {0};' % (storage(ins.result.type.pointee), c))
                     else:
                         self.line(1, '%s %s = 0;' % (ctype(ins.result.type.pointee), c))
+        self.text_decls(1)
+        self.text_parts()
         if fn.attrs.get('recursive'):
             self.parts.add('RECDEPTH')
         if any(kind in ('list', 'flist') for _, kind in self.owned):
@@ -321,6 +341,8 @@ class Emitter(object):
             for k, (name, kind) in enumerate(self.owned, len(self.retained)):
                 if kind == 'bytearray':
                     steps.append('ail_bytearray_release(*(ail_bytearray **)p[%d]);' % k)
+                elif kind == 'obj':
+                    steps.append('ail_obj_release(*(void **)p[%d]);' % k)
                 else:
                     steps.append('ail_%s_free((ail_%s *)p[%d]);' % (kind, kind, k))
             unwind = self.unwind_name or 'ail_unwind_ir_%s' % sym
@@ -368,6 +390,8 @@ class Emitter(object):
         for name, kind in self.owned:
             if kind == 'bytearray':
                 self.line(depth, 'ail_bytearray_release(%s);' % name)
+            elif kind == 'obj':
+                self.line(depth, 'ail_obj_release(%s);' % name)
             else:
                 self.line(depth, 'ail_%s_free(&%s);' % (kind, name))
 
@@ -387,6 +411,15 @@ class Emitter(object):
                 value = 'ir_ret'
             if in_frame:
                 value = 'fr->ret' if self.fn.results else None
+            if value is not None and self.fn.results == [I.STRV]:
+                self.parts.update(('STR', 'STRRET'))
+                self.line(depth, 'ail_str ir_ret = ail_str_return_owned(%s);' % value)
+                value = 'ir_ret'
+            if value is not None and self.fn.results == [I.BYTES]:
+                # (the caller adopts the block into its bytes arena: the result must be a heap copy)
+                self.parts.update(('BYTES', 'BYTESRET'))
+                self.line(depth, 'ail_bytes ir_ret = ail_bytes_return_owned(%s);' % value)
+                value = 'ir_ret'
             if value is not None and self.fn.results == [_BA]:
                 # the result is the caller's own reference: take it before the owners let go
                 self.parts.add('BYTEARRAY')
@@ -613,6 +646,14 @@ class Emitter(object):
             lit = ''.join('"' + chr(92) + 'x%X"' % b for b in data) or '""'
             return self.line(depth, 'ail_bytearray_extend(%s, (ail_bytes){(const unsigned char *)(%s), %d});'
                              % (o[0], lit, len(data)))
+        if op == 'obj.init':
+            cls = ins.attrs['cls']
+            return self.line(depth, 'ail_obj_store_%s(&%s, ail_new_%s(%s), 1);' % (cls, o[0], cls, ', '.join(o[1:])))
+        if op == 'obj.copyref':
+            return self.line(depth, 'ail_obj_store_%s(&%s, %s, 0);' % (ins.operands[1].type.args[0].name, o[0], o[1]))
+        if op == 'ba.extend':
+            self.parts.add('BYTEARRAY')
+            return self.line(depth, 'ail_bytearray_extend(%s, %s);' % (o[0], o[1]))
         if op == 'ba.call':
             self.parts.add('BYTEARRAY')
             checked = ins.attrs['callee'] in self.pending or (ins.attrs['callee'] == self.fn.sym and self.is_pending)
@@ -691,12 +732,21 @@ class Emitter(object):
                           % (kind, kind, n, kind, o[0], o[0]))
                 return
             text = '%s%s(%s)' % (callee, '__ir' if checked else '', ', '.join(parts))
+            adopt = None
+            if ins.results and ins.result.type == I.STRV:
+                adopt = 'ail_str_adopt(&%s, %%s)' % self.sar
+                self.parts.update(('STR', 'STRRET'))
+            elif ins.results and ins.result.type == I.BYTES:
+                adopt = 'ail_bytes_adopt(&%s, %%s)' % self.bar
+                self.parts.update(('BYTES', 'BYTESRET'))
             if ins.results:
-                self.assign_new(depth, ins.result, text)
+                self.assign_new(depth, ins.result, text if adopt is None or checked else adopt % text)
             else:
                 self.line(depth, text + ';')
             if checked:
                 self.pending_check(depth)
+                if adopt is not None:
+                    self.line(depth, '%s = %s;' % (self.names[ins.result], adopt % self.names[ins.result]))
             return
         if op == 'rt':
             callee = ins.attrs['callee']
@@ -706,7 +756,13 @@ class Emitter(object):
                                         'ail_die("recursion depth exceeded");')
             if callee == 'ail_depth_leave':
                 return self.line(depth, 'ail_depth--;')
-            raise I.IRError('no C for runtime entry %r' % callee)
+            return self.emit_rt(ins, depth, o)
+        if op == 'str.lit':
+            return self.emit_str_lit(ins, depth)
+        if op == 'bytes.lit':
+            return self.emit_bytes_lit(ins, depth)
+        if op == 'print':
+            return self.emit_print(ins, depth, o)
         if op == 'if':
             return self.emit_if(ins, depth, o[0])
         if op == 'loop':
@@ -738,13 +794,18 @@ class Emitter(object):
                 return self.line(depth, 'break;')
             args = loop.regions[0].args[1:] if loop.op == 'for.range' else loop.regions[0].args
             self.parallel_assign(depth, [self.names[a] for a in args], o, [a.type for a in args])
-            keep = os.environ.get('AIL_IR_TRAILING_CONTINUE', 'loop,for.range')
+            # (S4a, measured over the 40 programs: omitting the trailing `continue;` everywhere is -8.140% instructions
+            # against -8.128% for keeping it, and it is the only setting with no program above +1% -- the
+            # while-loops of fannkuch_redux and relaxation-4 gain a jump per iteration with it. S1 had kept it
+            # for both loop ops; AIL_IR_TRAILING_CONTINUE=loop,for.range restores that.)
+            keep = os.environ.get('AIL_IR_TRAILING_CONTINUE', '')
             if owner is loop and loop.regions[0].instrs[-1] is ins and loop.op not in keep.split(','):
                 return          # the end of the C loop body continues anyway (and a trailing
                                 # `continue;` changes GCC's block layout: +1 jump per iteration)
             return self.line(depth, 'continue;')
         if op == 'return':
-            if not self.scopes and self.cx.kind == 'top' and not self.retained and not self.owned:
+            if not self.scopes and self.cx.kind == 'top' and not self.retained and not self.owned \
+                    and self.fn.results not in ([I.STRV], [I.BYTES]):
                 return self.line(depth, 'return %s;' % o[0] if o else 'return;')
             return self.exit_return(depth, o[0] if o else None)
         if op == 'raise':
@@ -1017,7 +1078,8 @@ class Emitter(object):
 
     def declare_results(self, ins, depth):
         for r in ins.results:
-            self.line(depth, '%s %s = 0;' % (ctype(r.type), self.fresh(r)))
+            self.line(depth, '%s %s = %s;' % (ctype(r.type), self.fresh(r),
+                                              '{0}' if r.type in (I.STRV, I.BYTES) else '0'))
 
     @staticmethod
     def only_yield(region):
@@ -1052,9 +1114,14 @@ class Emitter(object):
         self.enter_loop(ins, depth)
         for a, v in zip(ins.regions[0].args, inits):
             self.line(depth, '%s %s = %s;' % (ctype(a.type), self.fresh(a), v))
+        tag = self.open_loop_roots(ins, depth)
         self.line(depth, 'for (;;) {')
+        if tag:
+            self.reset_roots(tag, depth + 1)
         self.region(ins.regions[0], depth + 1, ins)
         self.line(depth, '}')
+        if tag:
+            self.line(depth, '}')
         self.leave_loop()
 
     def emit_for(self, ins, depth, o):
@@ -1064,6 +1131,7 @@ class Emitter(object):
         for a, v in zip(body.args[1:], o[3:]):
             self.line(depth, '%s %s = %s;' % (ctype(a.type), self.fresh(a), v))
         index = self.fresh(body.args[0])
+        tag = self.open_loop_roots(ins, depth)
         if self.const_of(ins.operands[2]) == 1:
             self.line(depth, 'for (int64_t %s = %s; %s < %s; %s += 1) {' % (index, lo, index, hi, index))
         else:
@@ -1073,8 +1141,12 @@ class Emitter(object):
             self.line(depth, 'int64_t %s = ail_range_count(%s, %s, %s);' % (count, lo, hi, step))
             self.line(depth, 'for (int64_t %s = 0; %s < %s; %s++) {' % (k, k, count, k))
             self.line(depth + 1, 'int64_t %s = ail_range_value(%s, %s, %s);' % (index, lo, step, k))
+        if tag:
+            self.reset_roots(tag, depth + 1)
         self.region(body, depth + 1, ins)
         self.line(depth, '}')
+        if tag:
+            self.line(depth, '}')
         for r, a in zip(ins.results, body.args[1:]):
             self.names[r] = self.names[a]       # whether it ran out or broke, the carried variables
         self.leave_loop()

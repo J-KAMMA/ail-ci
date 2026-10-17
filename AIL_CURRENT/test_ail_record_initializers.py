@@ -27,7 +27,13 @@ fn main()->int {
 }
 '''
 
-def generated(source):return candidate.to_c(translate(source),name='run',strict=True)
+def generated(source):
+ # (the C the legacy emitter writes: pinned and inspected here whatever AIL_IR says)
+ saved=os.environ.get('AIL_IR');os.environ['AIL_IR']='0'
+ try:return candidate.to_c(translate(source),name='run',strict=True)
+ finally:
+  if saved is None:os.environ.pop('AIL_IR',None)
+  else:os.environ['AIL_IR']=saved
 
 class RecordInitializerTypeTests(unittest.TestCase):
  def test_three_record_kinds_empty_and_nonempty(self):

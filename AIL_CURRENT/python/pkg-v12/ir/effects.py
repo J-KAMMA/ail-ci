@@ -110,6 +110,8 @@ def instr_effects(ins, fn, program, places=None, defs=None, summaries=None):
         loc = 'Local(%s,%s)' % (fn.name, names.get(ins.operands[0], '?'))
         return Effects(reads=[loc]) if op == 'load' else Effects(writes=[loc])
     if op in _ALWAYS_RAISES:
+        if ins.attrs.get('mode') == 'nonneg':
+            return NONE            # the range pass proved the divisor >= 1 and the dividend >= 0
         divisor = const_value(ins.operands[1], defs if defs is not None else defs_of(fn))
         if isinstance(divisor, (int, float)) and not isinstance(divisor, bool) and divisor != 0:
             # a non-zero constant divisor: no ZeroDivisionError; INT64_MIN // -1 is the one overflow
@@ -179,6 +181,21 @@ def instr_effects(ins, fn, program, places=None, defs=None, summaries=None):
     if op == 'ba.extend_lit':
         root = _root(ins.operands[0], fn, defs)
         return Effects(reads=['Elem(%s)' % root], writes=['Elem(%s)' % root, 'Spine(%s)' % root], raises=[VALUE])
+    if op == 'obj.init':
+        names = places if places is not None else place_names(fn)
+        eff = Effects(writes=['Local(%s,%s)' % (fn.name, names.get(ins.operands[0], '?'))])
+        for v, a in zip(ins.operands[1:], ins.attrs.get('abi') or []):
+            if a == 'list':
+                root = _root(v, fn, defs)
+                eff = eff | Effects(reads=['Elem(%s)' % root], writes=['Elem(%s)' % root, 'Spine(%s)' % root,
+                                                                       'Rebind(%s)' % root])
+        return eff | Effects(allocs=['Heap'])
+    if op == 'obj.copyref':
+        names = places if places is not None else place_names(fn)
+        return Effects(writes=['Local(%s,%s)' % (fn.name, names.get(ins.operands[0], '?'))])
+    if op == 'ba.extend':
+        root = _root(ins.operands[0], fn, defs)
+        return Effects(reads=['Elem(%s)' % root], writes=['Elem(%s)' % root, 'Spine(%s)' % root], raises=[VALUE])
     if op == 'ba.write':
         return Effects(reads=['Elem(%s)' % _root(ins.operands[0], fn, defs)], io=True)
     if op in ('ba.len', 'ba.get', 'ba.set', 'ba.push'):
@@ -213,6 +230,10 @@ def instr_effects(ins, fn, program, places=None, defs=None, summaries=None):
     if op == 'rt':
         entry = RUNTIME.get(ins.attrs.get('callee'))
         return entry[2] if entry else UNKNOWN
+    if op == 'print':
+        return Effects(io=True, writes=['Global(rt,stdout)'])
+    if op in ('str.lit', 'bytes.lit'):
+        return NONE
     if op == 'raise':
         return Effects(raises=[ins.attrs.get('name', 'Exception')])
     if op == 'reraise':
@@ -273,3 +294,7 @@ def summarize_program(program):
     for sym, fn in program.functions.items():
         fn.effects = summaries[sym]
     return summaries
+
+
+# the text stage's runtime calls (rtc.py); imported last because it builds on the names above
+from . import rtc      # noqa: E402,F401  (registers its entries in RUNTIME)

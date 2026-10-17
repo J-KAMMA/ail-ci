@@ -16,9 +16,10 @@ Every step preserves what the program prints and how it fails: an op that may ra
 removed, folded into a different failure, or moved.
 """
 from .. import ir as I
+from .. import rtc
 
 _MASK = (1 << 64) - 1
-_PURE = {'const', 'and', 'or', 'xor', 'inv', 'fneg', 'zext', 'sitofp', 'select', 'fadd', 'fsub', 'fmul',
+_PURE = {'const', 'str.lit', 'bytes.lit', 'and', 'or', 'xor', 'inv', 'fneg', 'zext', 'sitofp', 'select', 'fadd', 'fsub', 'fmul',
          'cmp.eq', 'cmp.ne', 'cmp.lt', 'cmp.le', 'cmp.gt', 'cmp.ge'}
 _MODE_PURE = {'add', 'sub', 'mul', 'neg', 'shl', 'shr'}     # pure unless mode == 'ck'
 
@@ -29,6 +30,8 @@ def may_raise_or_effect(ins, defs=None):
         return False
     if op in _MODE_PURE:
         return ins.attrs.get('mode') == 'ck'
+    if op in ('floordiv', 'floormod') and ins.attrs.get('mode') == 'nonneg':
+        return False
     if op in ('floordiv', 'floormod') and defs is not None:
         d = _const(ins.operands[1], defs)
         return not (isinstance(d, int) and not isinstance(d, bool) and d not in (0, -1))
@@ -41,6 +44,8 @@ def may_raise_or_effect(ins, defs=None):
         return ins.attrs.get('mode') != 'nck'
     if op == 'fpow':
         return False
+    if op == 'rt':
+        return not rtc.is_pure(ins.attrs.get('callee'))
     return True
 
 
@@ -206,7 +211,7 @@ class Simplifier(object):
                     ins.op, ins.operands, ins.attrs = 'const', [], {'value': value}
                     self.changed = True
             if is_pure(ins, defs) and ins.op != 'const' and len(ins.results) == 1:
-                key = (ins.op, tuple(id(v) for v in ins.operands), tuple(sorted(ins.attrs.items())),
+                key = (ins.op, tuple(id(v) for v in ins.operands), repr(sorted(ins.attrs.items())),
                        ins.result.type)
                 if key in avail:
                     self.replace[ins.result] = avail[key]
@@ -240,9 +245,146 @@ class Simplifier(object):
         walk(self.fn.body)
         return count
 
-    def dce(self, defs):
-        count = self.uses()
+    def dce_live(self, defs):
+        """Liveness of values through control flow: a value is live when an instruction that has to stay (an
+        effect, a raise, a store, a condition, a bound, a return) uses it, or when it is a result or carried
+        value that feeds a live value. The carried values and `if` results that are not live are removed.
+        (The local rule below only sees a carried value that carries itself; this one also removes a chain
+        that runs through nested loops, which the C compiler would otherwise keep in registers.)"""
+        fn = self.fn
+        live = set()
+        work = []
+        loops = []                 # enclosing loops while walking
+        uses_of = {}               # value -> [(kind, ...)] edges: value becomes live => operands become live
+        edges = {}                 # value -> values that become live when it does
+
+        def link(v, *deps):
+            edges.setdefault(v, []).extend(d for d in deps if d is not None)
+
+        def mark(v):
+            if v not in live:
+                live.add(v)
+                work.append(v)
+
+        def walk(region, loops):
+            for ins in region.instrs:
+                op = ins.op
+                inner = loops
+                if op == 'if':
+                    mark(ins.operands[0])
+                    for j, r in enumerate(ins.results):
+                        for arm in ins.regions:
+                            y = arm.instrs[-1]
+                            if y.op == 'yield' and j < len(y.operands):
+                                link(r, y.operands[j])
+                elif op in I.LOOP_OPS:
+                    body = ins.regions[0]
+                    if op == 'for.range':
+                        for v in ins.operands[:3]:
+                            mark(v)
+                        for k, r in enumerate(ins.results):
+                            link(r, body.args[1 + k])
+                        for k in range(len(body.args) - 1):
+                            link(body.args[1 + k], ins.operands[3 + k])
+                    else:
+                        for k, a in enumerate(body.args):
+                            link(a, ins.operands[k])
+                    inner = loops + [ins]
+                elif op in ('break', 'continue'):
+                    loop = loops[-1] if loops else None
+                    if loop is not None:
+                        body = loop.regions[0]
+                        if op == 'continue':
+                            args = body.args[1:] if loop.op == 'for.range' else body.args
+                            for k, a in enumerate(args):
+                                if k < len(ins.operands):
+                                    link(a, ins.operands[k])
+                        elif loop.op == 'for.range':
+                            for k, r in enumerate(loop.results):
+                                if k < len(ins.operands):
+                                    link(r, ins.operands[k])
+                        else:
+                            for j, r in enumerate(loop.results):
+                                if j < len(ins.operands):
+                                    link(r, ins.operands[j])
+                elif op == 'yield':
+                    pass
+                elif ins.regions:
+                    for v in ins.operands:
+                        mark(v)
+                elif removable(ins, defs):
+                    for r in ins.results:
+                        link(r, *ins.operands)
+                else:
+                    for v in ins.operands:
+                        mark(v)
+                for r in ins.regions:
+                    walk(r, inner)
+        walk(fn.body, [])
+        while work:
+            v = work.pop()
+            for d in edges.get(v, ()):
+                mark(d)
         changed = False
+        for ins in list(I.walk(fn.body)):
+            if ins.op == 'if':
+                keep = [j for j, r in enumerate(ins.results) if r in live]
+                if len(keep) != len(ins.results):
+                    for arm in ins.regions:
+                        y = arm.instrs[-1]
+                        if y.op == 'yield':
+                            y.operands = [y.operands[j] for j in keep]
+                    ins.results = [ins.results[j] for j in keep]
+                    changed = True
+            elif ins.op in I.LOOP_OPS:
+                body = ins.regions[0]
+                exits = self.loop_exits(ins)
+                if ins.op == 'for.range':
+                    keepk = [k for k in range(len(body.args) - 1)
+                             if body.args[1 + k] in live or ins.results[k] in live]
+                    if len(keepk) != len(body.args) - 1:
+                        body.args = [body.args[0]] + [body.args[1 + k] for k in keepk]
+                        ins.operands = ins.operands[:3] + [ins.operands[3 + k] for k in keepk]
+                        for e in exits:
+                            e.operands = [e.operands[k] for k in keepk]
+                        ins.results = [ins.results[k] for k in keepk]
+                        changed = True
+                else:
+                    keepk = [k for k, a in enumerate(body.args) if a in live]
+                    if len(keepk) != len(body.args):
+                        body.args = [body.args[k] for k in keepk]
+                        ins.operands = [ins.operands[k] for k in keepk]
+                        for e in exits:
+                            if e.op == 'continue':
+                                e.operands = [e.operands[k] for k in keepk]
+                        changed = True
+                    keepj = [j for j, r in enumerate(ins.results) if r in live]
+                    if len(keepj) != len(ins.results):
+                        for e in exits:
+                            if e.op == 'break':
+                                e.operands = [e.operands[j] for j in keepj]
+                        ins.results = [ins.results[j] for j in keepj]
+                        changed = True
+
+        # instructions nothing live uses (they may still name a carried value that was just removed)
+        def prune(region):
+            nonlocal changed
+            out = []
+            for ins in region.instrs:
+                for r in ins.regions:
+                    prune(r)
+                if ins.results and not ins.regions and removable(ins, defs) \
+                        and all(r not in live for r in ins.results):
+                    changed = True
+                    continue
+                out.append(ins)
+            region.instrs = out
+        prune(fn.body)
+        return changed
+
+    def dce(self, defs):
+        changed = self.dce_live(defs)
+        count = self.uses()
         # carried values and results
         for ins in list(I.walk(self.fn.body)):
             if ins.op == 'if':

@@ -64,6 +64,7 @@
   "test_ail_ir_s2": 10.0,
   "test_ail_ir_s3": 10.0,
   "test_ail_ir_s3b": 10.0,
+  "test_ail_ir_s4a": 10.0,
   "test_ail_lang_gaps": 285.1,
   "test_ail_libc_names": 9.9,
   "test_ail_list_expression_extend": 26.4,
@@ -187,6 +188,7 @@
   [
    "test_ail_ir_s0",
    "test_ail_ir_s3",
+   "test_ail_ir_s4a",
    "test_ail_re",
    "test_ail_stdlib_batch1",
    "test_json_query_file"

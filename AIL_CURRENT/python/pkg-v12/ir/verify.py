@@ -28,7 +28,7 @@ S0_TYPES = frozenset([I.I1, I.I64, I.F64])
 # S1 adds read-only bytes views and numeric lists / struct objects reached through borrows
 S1_TYPES = S0_TYPES | frozenset([I.T('bytes'), I.T('obj', I.T('list', I.I64)),
                                  I.T('obj', I.T('list', I.F64)), I.T('span', I.I64), I.T('span', I.F64),
-                                 I.T('span', I.T('u8')), I.T('obj', I.T('bytearray'))])
+                                 I.T('span', I.T('u8')), I.T('obj', I.T('bytearray')), I.STRV])
 
 
 class _Checker(object):
@@ -264,9 +264,10 @@ class _Checker(object):
             return self._binary(ins, where, (I.I64, I.I1), None)
         self._mode(ins, where, ('ck', 'nonneg') if ins.op in ('floordiv', 'floormod') else I.ARITH_MODES)
         if ins.attrs.get('mode') == 'nonneg':
+            # (a constant divisor is checked here; a variable one was proven positive by the range pass)
             d = E.const_value(ins.operands[1], E.defs_of(self.fn))
-            self.want(where, isinstance(d, int) and not isinstance(d, bool) and d > 0,
-                      'mode nonneg needs a positive constant divisor')
+            self.want(where, d is None or (isinstance(d, int) and not isinstance(d, bool) and d > 0),
+                      'mode nonneg needs a positive divisor')
         self._binary(ins, where, (I.I64,), I.I64)
 
     def op_float_binary(self, ins, scope, stack, where, top):
@@ -352,7 +353,16 @@ class _Checker(object):
         if not self.want(where, entry is not None, 'unknown runtime entry %r' % ins.attrs.get('callee')):
             return
         params, results, _ = entry
-        self.want(where, tuple(self.types(ins.operands)) == tuple(params), 'runtime argument mismatch')
+        spec = E.rtc.ENTRIES.get(ins.attrs.get('callee'))
+        if spec is not None and spec['variadic']:
+            # one repeated parameter type (str_catn): at least one operand
+            self.want(where, len(ins.operands) >= 1 and all(t == params[0] for t in self.types(ins.operands)),
+                      'runtime argument mismatch')
+        else:
+            self.want(where, tuple(self.types(ins.operands)) == tuple(params), 'runtime argument mismatch')
+        if spec is not None:
+            for a in spec['attrs']:
+                self.want(where, a in ins.attrs, 'runtime entry %s needs attribute %s' % (ins.attrs['callee'], a))
         self.want(where, tuple(self.types(ins.results)) == tuple(results), 'runtime result mismatch')
 
     def _index_mode(self, ins, where):
@@ -515,6 +525,36 @@ class _Checker(object):
                                                          and 0 <= x <= 255 for x in data),
                   'ba.extend_lit needs data = [byte values]')
 
+    def _is_obj(self, t):
+        return t.head == 'obj' and t.args[0].head == 'class'
+
+    def op_obj_init(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        p = ins.operands[0]
+        if not self.want(where, p.type.is_place and self._is_obj(p.type.pointee), 'obj.init takes the place of an object'):
+            return
+        info = (self.program.object_classes.get(p.type.pointee.args[0].name)
+                if self.program is not None and hasattr(self.program, 'object_classes') else None)
+        abi = ins.attrs.get('abi')
+        self.want(where, isinstance(abi, list) and len(abi) == len(ins.operands) - 1
+                  and all(a in ('value', 'list') for a in abi), 'obj.init needs abi = [value|list, ...]')
+        self.want(where, ins.attrs.get('cls') == p.type.pointee.args[0].name, 'obj.init names the place\'s class')
+        if isinstance(abi, list) and len(abi) == len(ins.operands) - 1:
+            for v, a in zip(ins.operands[1:], abi):
+                self.want(where, self._is_list_ref(v) if a == 'list' else v.type.is_scalar or v.type in (I.BYTES, I.STRV),
+                          'obj.init argument of type %s as %s' % (v.type, a))
+
+    def op_obj_copyref(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        p, o = ins.operands
+        self.want(where, p.type.is_place and p.type.pointee == o.type and self._is_obj(o.type),
+                  'obj.copyref takes (place of an object, object of that class)')
+
+    def op_ba_extend(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        self.want(where, self._is_ba(ins.operands[0]) and ins.operands[1].type == I.BYTES,
+                  'ba.extend takes (bytearray, bytes)')
+
     def op_field_ba(self, ins, scope, stack, where, top):
         if self.nresults(ins, where, 1):
             o = ins.operands[0].type
@@ -586,6 +626,40 @@ class _Checker(object):
         elem = self._span_elem(ins.operands[0])
         self.want(where, elem is not None and ins.operands[1].type == I.I64 and ins.operands[2].type == elem,
                   'span.set takes (span, i64, element)')
+
+    # ------------------------------------------------------------------ text (S4a)
+    def op_str_lit(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 1):
+            self.want(where, ins.result.type == I.STRV and isinstance(ins.attrs.get('value'), str),
+                      'str.lit yields a strv and carries its text')
+
+    def op_bytes_lit(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 1):
+            data = ins.attrs.get('data')
+            self.want(where, ins.result.type == I.BYTES and isinstance(data, list)
+                      and all(isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= 255 for x in data),
+                      'bytes.lit yields bytes and carries its byte values')
+
+    _PRINT_KINDS = {'int': I.I64, 'flt': I.F64, 'str': I.STRV, 'bool': I.I64}
+
+    def op_print(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        kinds = ins.attrs.get('kinds')
+        if not self.want(where, isinstance(kinds, list) and all(k in self._PRINT_KINDS for k in kinds),
+                         'print needs kinds = [int|flt|str|bool, ...]'):
+            return
+        stream = ins.attrs.get('stream', 'stdout')
+        self.want(where, stream in ('stdout', 'stderr'), 'print stream is stdout or stderr')
+        extra = int(bool(ins.attrs.get('sep'))) + int(bool(ins.attrs.get('end')))
+        if self.want(where, len(ins.operands) == len(kinds) + extra, 'print takes its values, then sep, then end'):
+            for v, k in zip(ins.operands, kinds):
+                self.want(where, v.type == self._PRINT_KINDS[k] or (k in ('int', 'bool') and v.type == I.I1),
+                          'print %s argument has type %s' % (k, v.type))
+            for v in ins.operands[len(kinds):]:
+                self.want(where, v.type == I.STRV, 'print sep and end are strings')
+        if ins.attrs.get('parts'):
+            self.want(where, len(kinds) >= 1 and all(k == 'str' for k in kinds) and extra == 0
+                      and stream == 'stdout', 'print parts: strings only, to stdout, no sep or end')
 
     def op_field_get(self, ins, scope, stack, where, top):
         if self.nresults(ins, where, 1):

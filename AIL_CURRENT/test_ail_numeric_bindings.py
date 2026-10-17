@@ -54,7 +54,13 @@ def float64_decode(data,order):return [struct.unpack("<d" if order==0 else ">d",
 BRANCH_JOIN='''fn probe(flag:int)->float {let item=0;if flag {item=1.5;}else {item=7;}return item+0;} fn compare(flag:int)->int {let item=0;if flag {item=1.5;}else {item=7;}if item==1 {return 1;}return 0;} fn main()->int {print(probe(1));print(int(probe(0)));print(compare(1));return 0;}'''
 COMPARE_BOUNDARY='''fn main()->int {let floats:list[float]=[1.5];for item in floats {}item=9223372036854775807;let f=9223372036854775808.0;if item<f {print("less");}if item==f {print("bad");}if f>item {print("greater");}item=-9223372036854775808;if item== -9223372036854775808.0 {print("equal");}return 0;}'''
 VECTORS=(BRANCH_JOIN,COMPARE_BOUNDARY,MIXED_ITERATOR_WHOLE,FLOW,SHADOW_RANGE,POST_ASSIGN,AFTER_NESTED,UNDER_NAME,LITERAL_MARKER,MIN_MOD,CAST_BOUNDS)
-def generated(source):return candidate.to_c(translate(source),name='run',strict=True)
+def generated(source):
+ # (the C the legacy emitter writes: pinned and inspected here whatever AIL_IR says)
+ saved=os.environ.get('AIL_IR');os.environ['AIL_IR']='0'
+ try:return candidate.to_c(translate(source),name='run',strict=True)
+ finally:
+  if saved is None:os.environ.pop('AIL_IR',None)
+  else:os.environ['AIL_IR']=saved
 class NumericBindingTypeTests(unittest.TestCase):
  def test_original_mixed_iterator_integer_storage(self):
   c=generated(MIXED_ITERATOR_WHOLE)

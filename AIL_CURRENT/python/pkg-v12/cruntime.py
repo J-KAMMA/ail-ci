@@ -24490,6 +24490,19 @@ ORDER.insert(ORDER.index('FLIST') + 1, 'IRFLIST')
 SOURCE['IRFLIST'] = IRFLIST
 REQUIRES['IRFLIST'] = ['FLIST', 'DIE']
 
+# IR text (stage S4a). Selected only by IR functions that walk a str by character: the character at a
+# known byte offset as a view (the legacy `for c in s` loop's own step, in one always-inlined helper).
+IRSTR = r'''
+static inline __attribute__((always_inline)) ail_str ail_ir_char_at(ail_str s, int64_t k) {
+    uint8_t b0 = s.p[k];
+    int64_t w = b0 < 0x80 ? 1 : ail__utf8_w(b0, s.n - k);
+    return (ail_str){s.p + k, w, b0 < 0x80};
+}
+'''
+ORDER.insert(ORDER.index('STR') + 1, 'IRSTR')
+SOURCE['IRSTR'] = IRSTR
+REQUIRES['IRSTR'] = ['STR']
+
 
 def emit(parts):
     """The pieces a program reached, in dependency order, once each."""

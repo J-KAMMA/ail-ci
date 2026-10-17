@@ -272,12 +272,35 @@ class LICM(object):
         for pred, a, b in atoms(body.instrs[test].operands[0]):
             if pred in ('gt', 'ge'):
                 pred, a, b = {'gt': 'lt', 'ge': 'le'}[pred], b, a
-            if pred not in ('lt', 'le') or a not in body.args or b in inside:
+            if pred not in ('lt', 'le') or a not in body.args:
                 continue
             k = body.args.index(a)
-            if all(self.non_decreasing(e.operands[k], a, defs) for e in own):
-                return a, loop.operands[k], b, pred == 'lt', test
+            if not all(self.non_decreasing(e.operands[k], a, defs) for e in own):
+                continue
+            if b not in inside:
+                return a, loop.operands[k], b, pred == 'lt', test, None
+            # two pointers closing in on each other (`while a < b: ...; a += 1; b -= 1`): b is carried and
+            # never increases, so a < b <= b0 (its value before the loop) in every iteration
+            if b in body.args:
+                kb = body.args.index(b)
+                if all(self.non_increasing(e.operands[kb], b, defs) for e in own):
+                    return a, loop.operands[k], loop.operands[kb], pred == 'lt', test, b
         return None
+
+    @staticmethod
+    def non_increasing(v, a, defs):
+        if v is a:
+            return True
+        d = defs.get(v)
+        if d is None or d.op not in ('add', 'sub'):
+            return False
+        x, y = d.operands
+        if d.op == 'sub':
+            c = _const(y, defs) if x is a else None
+            return c is not None and c >= 0
+        other = y if x is a else x if y is a else None
+        c = _const(other, defs) if other is not None else None
+        return c is not None and c <= 0
 
     @staticmethod
     def non_decreasing(v, a, defs):
@@ -306,7 +329,7 @@ class LICM(object):
 
     def version(self, loop):
         defs = _defs(self.fn)
-        idx = lo = hi = None
+        idx = lo = hi = dec = None
         strict = True
         scope = loop.regions[0].instrs
         inside = _inside(loop)
@@ -317,9 +340,10 @@ class LICM(object):
         else:
             found = self.induction(loop, defs, inside)
             if found is not None:
-                idx, lo, hi, strict, test = found
+                idx, lo, hi, strict, test, dec = found
                 scope = loop.regions[0].instrs[test + 1:]
         ranges = {}           # container -> [cmin, cmax]
+        down = {}             # container -> [cmin, cmax] of the accesses at the closing pointer `dec + c`
         absolute = {}         # container -> largest index known from the range pass (index >= 0)
         facts = getattr(self.fn, 'index_facts', {})
         accesses = []
@@ -329,6 +353,15 @@ class LICM(object):
                 if base in inside:
                     continue
                 c = self.index_offset(index, idx, defs) if idx is not None else None
+                if c is None and dec is not None:
+                    c2 = self.index_offset(index, dec, defs)
+                    if c2 is not None:
+                        lohi = down.setdefault(base, [c2, c2])
+                        lohi[0], lohi[1] = min(lohi[0], c2), max(lohi[1], c2)
+                        if ins.attrs.get('mode') == 'ck' and not (
+                                ins.op == 'span.set' and base.type == I.T('span', I.T('u8'))):
+                            accesses.append(ins)
+                        continue
                 if c is None:
                     span = facts.get(ins)
                     if (ins.attrs.get('mode') == 'ck' and span is not None and span[0] >= 0
@@ -348,7 +381,7 @@ class LICM(object):
         # guard does): in the fast copy their bounds then imply the loop's own tests
         ranges = dict((b, r) for b, r in ranges.items()
                       if any(a.operands[0] is b for a in accesses) or len(ranges) <= 4)
-        if not ranges and not absolute:
+        if not ranges and not absolute and not down:
             return None
         pre = []
 
@@ -361,11 +394,27 @@ class LICM(object):
         for base, top in absolute.items():
             n = emit('span.len' if base.type.head == 'span' else 'bytes.len', [base], I.I64)
             conds.append(emit('cmp.lt', [emit('const', [], I.I64, {'value': top}), n], I.I1))
+        # one lower bound on `lo` and, per container, one upper bound on `hi`: every access gives a
+        # threshold, and the strictest of them implies the others
+        lower = None
+        upper = {}
         for base, (cmin, cmax) in ranges.items():
+            need = -cmin
+            lower = need if lower is None else max(lower, need)
+            k = cmax if strict else cmax + 1              # hi <= len - k
+            upper[base] = max(upper.get(base, k), k)
+        for base, (cmin, cmax) in down.items():
+            # b <= b0 and b > a >= a0 in every iteration: b + c is in range when b0 + cmax < len and
+            # a0 + (1 if a < b else 0) + cmin >= 0
+            need = -cmin - (1 if strict else 0)
+            lower = need if lower is None else max(lower, need)
+            upper[base] = max(upper.get(base, cmax + 1), cmax + 1)
+        if lower is not None:
+            conds.append(emit('cmp.ge', [lo, emit('const', [], I.I64, {'value': lower})], I.I1))
+        for base, k in upper.items():
             n = emit('span.len' if base.type.head == 'span' else 'bytes.len', [base], I.I64)
-            conds.append(emit('cmp.ge', [lo, emit('const', [], I.I64, {'value': -cmin})], I.I1))
-            limit = emit('sub', [n, emit('const', [], I.I64, {'value': cmax})], I.I64, {'mode': 'nsw'})
-            conds.append(emit('cmp.le' if strict else 'cmp.lt', [hi, limit], I.I1))
+            limit = emit('sub', [n, emit('const', [], I.I64, {'value': k})], I.I64, {'mode': 'nsw'})
+            conds.append(emit('cmp.le', [hi, limit], I.I1))
         guard = conds[-1]
         for c in reversed(conds[:-1]):
             # c and guard, as the lowering builds `and` (the range pass reads this shape)
