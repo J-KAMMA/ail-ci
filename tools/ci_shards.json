@@ -109,6 +109,7 @@
   "test_ail_stdin_list_batch": 60.7,
   "test_ail_stdin_read_until": 5.4,
   "test_ail_stdlib_batch1": 10.0,
+  "test_ail_stdlib_batch3": 10.0,
   "test_ail_stdout_mixed": 92.0,
   "test_ail_stdout_mixed_resources": 2.6,
   "test_ail_str_find_alias": 9.6,
@@ -126,6 +127,7 @@
   "test_ail_text_lines": 9.5,
   "test_ail_text_views": 17.3,
   "test_ail_try_locals": 49.4,
+  "test_ail_tuples": 10.0,
   "test_ail_type_details": 1.4,
   "test_ail_typed_locals": 50.6,
   "test_c_api_bridge": 17.2,
@@ -183,7 +185,8 @@
    "test_ail_ir_s1",
    "test_ail_ir_s2",
    "test_ail_ir_s3b",
-   "test_ail_memory_shapes"
+   "test_ail_memory_shapes",
+   "test_ail_stdlib_batch3"
   ],
   [
    "test_ail_ir_s0",
@@ -191,6 +194,7 @@
    "test_ail_ir_s4a",
    "test_ail_re",
    "test_ail_stdlib_batch1",
+   "test_ail_tuples",
    "test_json_query_file"
   ],
   [

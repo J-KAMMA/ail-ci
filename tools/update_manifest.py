@@ -3,7 +3,7 @@
 Run after editing pinned files:  python3 tools/update_manifest.py [--check]
 --check exits 1 (and changes nothing) when any pin is stale; CI and quick_test use it.
 """
-import hashlib, json, subprocess, sys
+import hashlib, json, re, subprocess, sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -24,7 +24,12 @@ def main():
             stale[name] = digest
     # A file named in sdk_files must have a pin: ail_check fails with "hash mismatch" otherwise
     # (a MANIFEST merge once dropped the pins of a new module while keeping its sdk_files entry).
-    unpinned = sorted(n for n in manifest.get("sdk_files", []) if n in names and n not in manifest["sha256"])
+    # Compiler sources and the test modules ail_check runs must be pinned too (a merge resolution
+    # once dropped the pins of four new ir/ modules that were in neither list).
+    registered = set(re.findall(r"'(test_[a-z0-9_]+)'", (SRC / "ail_check.py").read_text(encoding="utf-8")))
+    must = set(manifest.get("sdk_files", []))
+    must |= {n for n in names if n.endswith(".py") and (n.startswith("python/pkg-v12/") or n[:-3] in registered)}
+    unpinned = sorted(n for n in must if n in names and n not in manifest["sha256"])
     for name in unpinned:
         digest = hashlib.sha256((SRC / name).read_bytes()).hexdigest()
         print(("unpinned " if check else "pinned ") + name)

@@ -5,6 +5,9 @@
 3. A def-syntax file that binds a second name to a list/dict/set/bytearray and writes through one name
    while reading the other is refused by name where only the copying emitter could take it (CPython
    shares the object); block-syntax files keep their value semantics.
+4. (round 2) alias shapes the fuzzer built (try/else, augmented ops, list == beside a lambda sort key)
+   are CPython-identical or refused by name, never a silent difference or a C error; `.lower()` /
+   `.upper()` on a non-ASCII str literal is folded at compile time instead of trapping at run time.
 """
 import os
 import subprocess
@@ -147,6 +150,69 @@ def h1(text: str, other: str) -> int:
 print(h0("a,b"), h0("a-b,b"), h1("a,b", "zxz"))
 '''
 
+# round 2: shapes from the fuzz run (try/else alias with `+=`; list == beside a lambda sort key)
+ROUND2 = {
+    'try_else_alias': '''
+def main() -> int:
+    v1: list[int] = [5, 3, 1]
+    try:
+        print(len(v1))
+    except KeyError:
+        v6: int = 2
+    else:
+        al7: list[int] = v1
+        al7 += [7]
+        print(len(v1), len(al7), sum(v1) - sum(al7))
+    finally:
+        print(238)
+    return 0
+
+
+main()
+''',
+    'alias_eq_sortkey': '''
+def main() -> int:
+    v7: list[int] = [1, 2, 3]
+    v9: list[int] = [3, 1, 2]
+    v9.sort(key=lambda q: (-q, q))
+    al21: list[int] = v7
+    al21.append(8)
+    print(len(v7), len(al21), sum(v7) - sum(al21))
+    print(v7 == al21)
+    print(v9)
+    return 0
+
+
+main()
+''',
+    'aug_ops_alias': '''
+def main() -> int:
+    xs: list[int] = [1, 2, 3]
+    ys: list[int] = xs
+    ys *= 2
+    s: set[int] = {1, 2, 3}
+    t: set[int] = s
+    t -= {1}
+    t &= {2, 5}
+    t ^= {9}
+    print(len(xs), len(ys), sorted(s), sorted(t))
+    return 0
+
+
+main()
+''',
+}
+
+NONASCII_CASE = '''
+def h(a: int) -> str:
+    v2: str = "-".join("caf\\u00e9 \\u00d1".lower().split(","))
+    return v2 + "stra\\u00dfe".upper()
+
+
+print(h(1))
+print("\\u00c9t\\u00e9".upper(), "\\u00c9t\\u00e9".lower())
+'''
+
 BRACE_ALIAS = '''fn main() {
     let xs = [1, 2];
     let ys = xs;
@@ -234,6 +300,25 @@ class FuzzFindings(unittest.TestCase):
     def test_return_with_a_multi_line_setup_is_one_statement(self):
         self.same_as_cpython(RETURN_SETUP, 'retsetup')
         self.same_as_cpython(RETURN_SETUP, 'retsetup_ir', {'AIL_IR': '1'})
+
+    def same_or_named_refusal(self, text, name, env=None):
+        with tempfile.TemporaryDirectory() as directory:
+            built, ran, expected = run_both(directory, text, name, env)
+            self.assertIn(built.returncode, (0, 3), built.stdout + built.stderr)
+            if built.returncode == 3:
+                self.assertIn('not in the subset', built.stdout + built.stderr)
+            else:
+                self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout), ran.stderr)
+
+    def test_round2_alias_shapes_never_differ_silently(self):
+        for name, text in ROUND2.items():
+            with self.subTest(name):
+                self.same_or_named_refusal(text, name)
+                self.same_or_named_refusal(text, name + '_ir', {'AIL_IR': '1'})
+
+    def test_case_mapping_of_non_ascii_literals_is_folded(self):
+        self.same_as_cpython(NONASCII_CASE, 'nonascii_case')
+        self.same_as_cpython(NONASCII_CASE, 'nonascii_case_ir', {'AIL_IR': '1'})
 
     def test_check_names_the_alias(self):
         with tempfile.TemporaryDirectory() as directory:

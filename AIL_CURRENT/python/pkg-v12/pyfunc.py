@@ -37,6 +37,7 @@ import callable_types
 
 import cruntime
 import iterlower
+import stdlib3
 import float64_fusion
 import sortkeys
 import parallel
@@ -662,6 +663,15 @@ _AIL_SYSINFO = {'_ail_perf_counter': (FLT, 'ail_perf_counter'), '_ail_perf_count
                 '_ail_cpu_count': (INT, 'ail_cpu_count')}
 
 
+# names stdlib3.py (random) lowers to: (result kind, C function, argument kinds); all in cruntime RANDOM
+_AIL_RAND = {'_ail_rand_seed': (INT, 'ail_rand_seed', (INT,)), '_ail_rand_random': (FLT, 'ail_rand_random', ()),
+             '_ail_rand_uniform': (FLT, 'ail_rand_uniform', (FLT, FLT)), '_ail_rand_gauss': (FLT, 'ail_rand_gauss', (FLT, FLT)),
+             '_ail_rand_range': (INT, 'ail_rand_randrange', (INT, INT, INT, INT)),
+             '_ail_rand_below_i': (INT, 'ail_rand_below_i', (INT,)),
+             '_ail_rand_choice_index': (INT, 'ail_rand_choice_index', (INT,)),
+             '_ail_rand_setsize': (INT, 'ail_rand_setsize', (INT,))}
+
+
 def _etype(node, ctx):
     if _NULLABLE and isinstance(node, ast.Constant) and node.value is None:
         return NULLK
@@ -885,6 +895,8 @@ def _etype(node, ctx):
             return INT
         if f in _AIL_SYSINFO and f not in ctx.funcs:
             return _AIL_SYSINFO[f][0]
+        if f in _AIL_RAND and f not in ctx.funcs:
+            return _AIL_RAND[f][0]
         if f.startswith('_ail_c_') and f[7:] in cruntime.LIBM_FUNCS and f not in ctx.funcs:
             return FLT
         if f == 'jsnegzero':
@@ -14759,6 +14771,24 @@ def _call(node, ctx):
                     % ('double' if _etype(a[0], ctx) == FLT else 'int64_t',
                        p, inner, p, neg % p, p))
         return '((%s) < 0 ? %s : (%s))' % (inner, neg % inner, inner)
+    if f in _AIL_RAND and f not in ctx.funcs:
+        # random.* as stdlib3.py lowers it: the C generator in cruntime RANDOM
+        kind, cfunc, argkinds = _AIL_RAND[f]
+        if node.keywords or len(a) != len(argkinds):
+            raise Unsupported('%s takes %d arguments' % (f, len(argkinds)))
+        for each, want in zip(a, argkinds):
+            have = _etype(each, ctx)
+            if want == INT and have != INT:
+                raise Unsupported('%s needs int arguments here (random takes ints; a float or str is a TypeError in CPython)'
+                                  % f.replace('_ail_rand_', 'random.'))
+            if want == FLT and have not in (INT, FLT):
+                raise Unsupported('%s needs number arguments here' % f.replace('_ail_rand_', 'random.'))
+        ctx.parts.update(('DIE', 'RANDOM'))
+        ctx.has_try = True
+        if len(a) == 2 and argkinds[0] == FLT:
+            return _ordered_numeric_pair(a[0], a[1], ctx, '%s((double)({}), (double)({}))' % cfunc)
+        return '%s(%s)' % (cfunc, ', '.join(rec(each) if w == INT else '(double)(%s)' % rec(each)
+                                            for each, w in zip(a, argkinds)))
     if f in _AIL_SYSINFO and f not in ctx.funcs:
         # time.perf_counter() / perf_counter_ns() / os.cpu_count() as the Python syntax maps them
         if a or node.keywords:
@@ -28820,6 +28850,20 @@ class _BareTupleRewriter(ast.NodeTransformer):
         return node
 
 
+class _FoldCaseLiterals(ast.NodeTransformer):
+    """`'café'.lower()` / `.upper()` on a str literal with a non-ASCII character: the runtime's
+    case mapping is ASCII-only (it traps by name on such a character), but a literal is known at
+    compile time, so CPython's own answer is folded in instead of reaching that trap."""
+    def visit_Call(self, node):
+        self.generic_visit(node)
+        f = node.func
+        if (isinstance(f, ast.Attribute) and f.attr in ('lower', 'upper') and not node.args
+                and not node.keywords and isinstance(f.value, ast.Constant)
+                and isinstance(f.value.value, str) and not f.value.value.isascii()):
+            return ast.copy_location(ast.Constant(value=getattr(f.value.value, f.attr)()), node)
+        return node
+
+
 def _rewrite_bare_tuple_params(fn):
     """Applies the rewrite the module note above describes to `fn` IN PLACE, if it has any
     parameter this is safe for; a no-op otherwise. Called once, from `to_c`, before any other
@@ -30813,6 +30857,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         from module_object import _struct_source
         source = _struct_source(external['structs']) + source
     tree = ast.parse(source.strip())
+    stdlib3.rewrite(tree, Unsupported)
     iterlower.rewrite(tree)
     nested_lists.rewrite(tree, Unsupported, library, entry)
     _NULLABLE.clear()
@@ -30906,6 +30951,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     # before any other pass below inspects `fn` -- see the module note above `_bare_tuple_arity`.
     for _fn in fns:
         _rewrite_bare_tuple_params(_fn)
+        _FoldCaseLiterals().visit(_fn)
     if entry is not None:
         by_name = {f.name: f for f in fns}
         if entry not in by_name:

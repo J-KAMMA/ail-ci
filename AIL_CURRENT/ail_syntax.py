@@ -81,6 +81,17 @@ def _relib():
     return _relib.module
 
 
+def _tuplib():
+    """python/pkg-v12/tuplib.py (tuples, lowered onto classes before the surface pass)."""
+    if not hasattr(_tuplib, "module"):
+        spec = importlib.util.spec_from_file_location(
+            "_ail_tuplib", Path(__file__).parent / "python" / "pkg-v12" / "tuplib.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _tuplib.module = module
+    return _tuplib.module
+
+
 def _collib():
     """python/pkg-v12/collib.py (`collections`, lowered onto dict / list / classes before the surface pass)."""
     if not hasattr(_collib, "module"):
@@ -1152,10 +1163,42 @@ class _Surface:
             text = ast.unparse(new)
             self.replace(node, text if isinstance(new, _ATOMIC) else '(' + text + ')')
 
+    def function_value(self, module, name):
+        """`operator.mul` / `math.gcd` used as a value (reduce, accumulate, a sort key...): the lambda of the
+        same arithmetic, which the iterator lowering and sorted(key=) inline. None when it is not one of those."""
+        def lam(params, body):
+            return ast.Lambda(args=ast.arguments(posonlyargs=[], args=[ast.arg(arg=p) for p in params],
+                                                 vararg=None, kwonlyargs=[], kw_defaults=[], kwarg=None,
+                                                 defaults=[]), body=body)
+        a, b = ast.Name(id='_ail_a', ctx=ast.Load()), ast.Name(id='_ail_b', ctx=ast.Load())
+        if module == 'operator':
+            if name in _OPERATOR_BINARY:
+                return lam(['_ail_a', '_ail_b'], ast.BinOp(left=a, op=_OPERATOR_BINARY[name](), right=b))
+            if name in _OPERATOR_COMPARE:
+                return lam(['_ail_a', '_ail_b'], ast.Compare(left=a, ops=[_OPERATOR_COMPARE[name]()], comparators=[b]))
+            if name in _OPERATOR_UNARY:
+                return lam(['_ail_a'], ast.UnaryOp(op=_OPERATOR_UNARY[name](), operand=a))
+            if name == 'abs':
+                return lam(['_ail_a'], ast.Call(func=ast.Name(id='abs', ctx=ast.Load()), args=[a], keywords=[]))
+            return None
+        if name in _MATH_CALLS:
+            two = name in ('gcd', 'pow', 'fmod', *_MATH_PLAIN_TWO)
+            call = ast.Call(func=ast.Name(id=name, ctx=ast.Load()), args=[a, b] if two else [a], keywords=[])
+            call.lineno = call.end_lineno = 1
+            call.col_offset = call.end_col_offset = 0
+            mapped = self.math_call(call, name)
+            if mapped is not None:
+                return lam(['_ail_a', '_ail_b'] if two else ['_ail_a'], mapped)
+        return None
+
     def value(self, node, path):
         module, _, name = path.partition('.')
         if module == 'math' and name in _MATH_VALUES:
             return ast.parse(_MATH_VALUES[name], mode='eval').body
+        if module in ('operator', 'math') and name:
+            lowered = self.function_value(module, name)
+            if lowered is not None:
+                return lowered
         if module in ('heapq', 'bisect') and name in (_HEAPQ if module == 'heapq' else _BISECT):
             return ast.Name(id=name, ctx=ast.Load()) if isinstance(node, ast.Attribute) else None
         if module in ('heapq', 'bisect', 'math'):
@@ -2038,6 +2081,7 @@ def python_surface(source, notes=None):
     the constructs left as written."""
     if "collections" in source:
         source = _collib().rewrite(source, notes)
+    source = _tuplib().rewrite(source, notes)
     try:
         surface = _Surface(source)
     except (SyntaxError, ValueError):
