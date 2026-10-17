@@ -43,8 +43,8 @@ jobs:
     env:
       SEEDS_PER_JOB: ${{ github.event.inputs.seeds_per_job || (github.event_name == 'push' && '40' || '250') }}
       START_SEED: ${{ github.event.inputs.start_seed }}
-      # Known findings stay off until fixed (README: Findings). Pass off=none to run everything.
-      FUZZ_OFF: ${{ github.event.inputs.off || 'alias,listeq,stridx' }}
+      # All generator features on; pass off=alias,listeq,stridx to silence known findings.
+      FUZZ_OFF: ${{ github.event.inputs.off }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:

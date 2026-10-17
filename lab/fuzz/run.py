@@ -64,7 +64,7 @@ def classify(cpy, ail):
         return 'crash', 'binary died with status %d' % a_rc
     if a_rc == c_rc and a_out == c_out:
         return 'same', ''
-    if (a_rc == 1 and (b"OverflowError" in a_err or b"overflow" in a_err.lower()) and c_out.startswith(a_out)):
+    if (((a_rc == 1) or (a_rc == 3 and b"limit: int_overflow" in a_err)) and (b"OverflowError" in a_err or b"overflow" in a_err.lower()) and c_out.startswith(a_out)):
         return 'overflow', 'AIL OverflowError, CPython rc=%s' % c_rc
     if a_rc != c_rc:
         return 'DIFF', 'exit code cpython=%s ail=%s; %s' % (c_rc, a_rc, first_diff(text(c_out), text(a_out)))
