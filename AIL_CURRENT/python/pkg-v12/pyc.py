@@ -435,7 +435,17 @@ def to_c(source, strict=True, name='run', info=None, external=None):
                         for arg in call.args + [kw.value for kw in call.keywords])):
             # Typed bools erase their object identity to int; print must retain it.
             # Nonliteral arguments use the existing object-semantics fallback.
-            raise Unsupported('nonliteral print requires general object semantics')
+            # Name the argument that needs it and point at its line (this refusal had neither).
+            literal = next((arg for arg in call.args if isinstance(arg, (ast.Dict, ast.Set))), None)
+            if isinstance(literal, ast.Dict):
+                refusal = Unsupported('a dict literal; build a dict with {} and d[k] = v instead')
+            elif isinstance(literal, ast.Set):
+                refusal = Unsupported('a set literal; build a set with set() and .add() in a loop instead')
+            else:
+                refusal = Unsupported('a script that is only print(<expression>) needs general object '
+                                      'semantics; write it inside def main() and call main()')
+            refusal.source_line = getattr(literal or call, 'lineno', None)
+            raise refusal
     if is_function(source):
         rewritten = _rewrite_script(source, force=False)
         return func_to_c(rewritten if rewritten is not None else source,
@@ -471,7 +481,9 @@ def _main_for(info):
         # `run(void)` -- caught only at the C compiler, not by name, and only because the mismatch
         # happens to be an arity gcc itself checks.
         raise Unsupported('a function with no parameters and no print()/assert has no way to '
-                          'show its return value; add a print() (or take a parameter)')
+                          'show its return value.\n'
+                          '  write instead: print the result inside the function (`print(total)`), '
+                          'or give it a parameter')
     if kinds[0] != 'array':
         raise Unsupported('the first parameter must be the sequence read from the file')
     extra = kinds[1:]
@@ -530,8 +542,15 @@ def _general_failure(typed, use_typed, failure):
     arguments to function pf_main" for a dict of lists) or its own generic refusal -- says
     nothing the author can act on."""
     if use_typed:
-        typed.args = ((typed.args[0] + ' (the general path could not build this program either)',)
-                      + typed.args[1:]) if typed.args and isinstance(typed.args[0], str) else typed.args
+        # the note goes after the first line, so a `write instead:` line stays last; the general
+        # path's own reason follows it, so a refusal that comes from it (a subclass without
+        # __init__, a method it cannot call) is named too
+        reason = str(failure).strip().splitlines()[0][:240] if str(failure).strip() else ''
+        suffix = ' (the general path could not build this program either)' + (
+            '; general path: ' + reason if reason else '')
+        if typed.args and isinstance(typed.args[0], str):
+            head, newline, rest = typed.args[0].partition('\n')
+            typed.args = (head.rstrip('.') + suffix + newline + rest,) + typed.args[1:]
         return typed
     return failure
 
@@ -560,7 +579,30 @@ _BOUNDARY_REFUSAL_MARKERS = (
 )
 
 
+# Why the last build() fell back from the typed path to the (several times slower) general path,
+# or None when it did not. main() prints it as a compile-time note on stderr.
+last_fallback_reason = None
+last_fallback_line = None
+
+
+def _source_line_marker(line):
+    """`ail-source-line: N` on its own stderr line, for ail_chatgpt.py to turn into file:line:col.
+    Printed only when it asks for it (AIL_REPORT_SOURCE_LINE=1); it removes the line from the text."""
+    if line is None or not os.environ.get('AIL_REPORT_SOURCE_LINE'):
+        return None
+    return 'ail-source-line: %d' % line
+
+
+def fallback_note(reason, location=None):
+    """The one-line stderr notice for a program the typed path refused but the general path built.
+    `reason` is the typed refusal text (it carries its own "write instead" hint when it has one)."""
+    return 'note: %sbuilt on the general path (several times slower) because %s' % (
+        location + ': ' if location else '', ' '.join(str(reason).split()))
+
+
 def build(source, out, strict=True, report=None, force_general=False):
+    global last_fallback_reason, last_fallback_line
+    last_fallback_reason = last_fallback_line = None
     if not strict:
         # UPGRADE, do not refuse. The unchecked mode emits plain C `+ - *` with no overflow guard,
         # which SEMANTICS section 8 says this language does not do, and whose C is UNDEFINED rather
@@ -582,7 +624,10 @@ def build(source, out, strict=True, report=None, force_general=False):
     # either path sees it, so the general path's name-keyed dispatch honours it too (shadowing.py).
     source, shadow = shadowing.rename(source, Unsupported)
     try:
-        return _build_unshadowed(source, out, strict, report, force_general)
+        result = _build_unshadowed(source, out, strict, report, force_general)
+        if last_fallback_reason is not None and shadow:
+            last_fallback_reason = shadowing.restore_text(last_fallback_reason, shadow)
+        return result
     except (Unsupported, PipelineError) as error:
         shadowing.restore_error(error, shadow)
         raise
@@ -711,6 +756,10 @@ def _build_unshadowed(source, out, strict, report, force_general):
             report['boxed'] = boxed_report['boxed']
             report['typed_inline'] = boxed_report.get('typed_inline', [])
             report['guard_checks'] = boxed_report.get('guard_checks', {})
+        if not force_general:
+            global last_fallback_reason, last_fallback_line
+            last_fallback_reason = str(_typed_e)
+            last_fallback_line = getattr(_typed_e, 'source_line', None)
         return _finalize_output(out)
     # AIL_TASK_callconv_20260915.md: a NORET entry point (`info['ret']`) has no int64 return value
     # at all -- `_main_for`'s own `printf(AIL_FMT "\n", AIL_CALL)` would hand a `void` expression to
@@ -850,11 +899,17 @@ def main(argv=None):
     except Unsupported as e:
         native_diagnostics.failure(e)
         print('not in the subset: %s' % e, file=sys.stderr)
+        if _source_line_marker(getattr(e, 'source_line', None)):
+            print(_source_line_marker(e.source_line), file=sys.stderr)
         return 3
     except PipelineError as e:
         native_diagnostics.failure(e)
         print(e, file=sys.stderr)
         return 4
+    if last_fallback_reason is not None and not os.environ.get('AIL_QUIET_FALLBACK'):
+        print(fallback_note(last_fallback_reason), file=sys.stderr)
+        if _source_line_marker(last_fallback_line):
+            print(_source_line_marker(last_fallback_line), file=sys.stderr)
     print('%s  %d bytes' % (p, p.stat().st_size))
     return 0
 

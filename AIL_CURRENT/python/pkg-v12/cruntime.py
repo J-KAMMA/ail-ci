@@ -13526,7 +13526,13 @@ typedef struct { ail_gcobj hdr; ail_mapentry *entries; int64_t n, cap; int64_t *
 typedef struct { int64_t name_id; ail_obj val; } ail_attr;
 typedef struct { ail_gcobj hdr; ail_obj cls; ail_attr *attrs; int64_t n, cap; } ail_instobj;
 
-typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or NONE */; int builtin_id; } ail_classobj;
+typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or NONE */; int builtin_id;
+                 int dc; /* @dataclass: field count + 1 (0 = not a dataclass); repr/str print the first dc-1 attributes */
+                 unsigned long long dc_hide; /* bit i set: field i is left out of the repr (field(repr=False)) */
+                 ail_st (*iter_iter)(ail_ctx *, ail_obj *, ail_obj); /* user __iter__ (self only), or 0 */
+                 ail_st (*iter_next)(ail_ctx *, ail_obj *, ail_obj); /* user __next__ wrapped: StopIteration -> AIL_STOP, or 0 */
+                 ail_st (*repr_fn)(ail_ctx *, ail_obj *, ail_obj); /* user __repr__ (self only), or 0 */
+                 ail_st (*str_fn)(ail_ctx *, ail_obj *, ail_obj); /* user __str__ (self only), or 0 */ } ail_classobj;
 
 typedef struct { ail_gcobj hdr; int64_t start, stop, step; } ail_rangeobj;
 
@@ -13549,7 +13555,7 @@ typedef struct { ail_gcobj hdr; ail_obj func, self; } ail_boundobj;
 enum {
     AIL_IT_LIST = 1, AIL_IT_TUPLE, AIL_IT_STR, AIL_IT_DICT_KEYS, AIL_IT_DICT_VALUES,
     AIL_IT_DICT_ITEMS, AIL_IT_SET, AIL_IT_RANGE, AIL_IT_ENUMERATE, AIL_IT_ZIP,
-    AIL_IT_REVERSED, AIL_IT_MAP, AIL_IT_FILTER, AIL_IT_STREAM
+    AIL_IT_REVERSED, AIL_IT_MAP, AIL_IT_FILTER, AIL_IT_STREAM, AIL_IT_USER
 };
 typedef struct { ail_gcobj hdr; int kind; ail_obj target; ail_obj extra; int64_t idx, idx2; ail_st (*read_next)(ail_ctx *, ail_obj *); } ail_iterobj;
 
@@ -14525,8 +14531,19 @@ static inline ail_st ail_op_len(ail_ctx *cx, ail_obj *out, ail_obj x) {
         default: { char buf[64]; snprintf(buf, sizeof buf, "object of type '%s' has no len()", ail_type_name(x.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
     }
 }
+static inline ail_st ail_next(ail_ctx *cx, ail_obj *out, ail_obj iterobj);
 static inline ail_st ail_op_contains(ail_ctx *cx, int *out, ail_obj c, ail_obj item) {
     switch (c.tag) {
+        case AIL_T_ITER: {
+            /* `x in it` walks the iterator (consuming it up to and including the match), like CPython */
+            *out = 0;
+            for (;;) {
+                ail_obj e; ail_st st = ail_next(cx, &e, c);
+                if (st == AIL_STOP) return AIL_OK;
+                if (st != AIL_OK) return st;
+                if (ail_member_eq(e, item)) { *out = 1; return AIL_OK; }
+            }
+        }
         case AIL_T_STR:
             if (item.tag != AIL_T_STR) return ail_raise_c(cx, AIL_B_TYPEERROR, "'in <string>' requires string as left operand");
             *out = ail_str_find(ail_view_to_str(c), ail_view_to_str(item)) >= 0; return AIL_OK;
@@ -14600,8 +14617,31 @@ static inline ail_st ail_next(ail_ctx *cx, ail_obj *out, ail_obj iterobj); /* fo
                                                                         filter/enumerate/
                                                                         zip/reversed call
                                                                         it recursively */
+static inline ail_st ail_iter(ail_ctx *cx, ail_obj *out, ail_obj obj);
+static inline ail_obj ail__iter_wrap(ail_ctx *cx, int kind, ail_obj target, ail_obj extra, int64_t idx);
+/* an instance of a user class: __iter__ is called once; when it hands back the instance itself, the
+   instance is its own iterator and each step calls its __next__ (StopIteration ends the loop) */
+static inline ail_st ail__iter_inst(ail_ctx *cx, ail_obj *out, ail_obj obj) {
+    ail_st (*fi)(ail_ctx *, ail_obj *, ail_obj) = 0, (*fn)(ail_ctx *, ail_obj *, ail_obj) = 0;
+    for (ail_obj k = ((ail_instobj *)obj.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+        ail_classobj *kc = (ail_classobj *)k.o;
+        if (!fi) fi = kc->iter_iter;
+        if (!fn) fn = kc->iter_next;
+    }
+    if (fi) {
+        ail_obj r; ail_st st = fi(cx, &r, obj); if (st != AIL_OK) return st;
+        if (!(r.tag == AIL_T_INST && r.o == obj.o)) return ail_iter(cx, out, r);
+    }
+    if (!fn) {
+        char buf[96]; snprintf(buf, sizeof buf, "'%s' object is not iterable", ail_type_name(obj.tag));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
+    *out = ail__iter_wrap(cx, AIL_IT_USER, obj, ail_box_none(), 0);
+    return AIL_OK;
+}
 static inline ail_st ail_iter(ail_ctx *cx, ail_obj *out, ail_obj obj) {
     if (obj.tag == AIL_T_ITER) { *out = obj; return AIL_OK; }
+    if (obj.tag == AIL_T_INST) return ail__iter_inst(cx, out, obj);
     ail_iterobj *it = (ail_iterobj *)ail_gc_alloc(cx, AIL_K_ITER, sizeof(ail_iterobj));
     it->target = obj; it->extra = ail_box_none(); it->idx = 0; it->idx2 = 0;
     switch (obj.tag) {
@@ -14650,6 +14690,13 @@ static inline ail_st ail_next(ail_ctx *cx, ail_obj *out, ail_obj iterobj) {
     ail_iterobj *it = (ail_iterobj *)iterobj.o;
     switch (it->kind) {
         case AIL_IT_STREAM: return it->read_next(cx, out);
+        case AIL_IT_USER: {
+            for (ail_obj k = ((ail_instobj *)it->target.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+                ail_classobj *kc = (ail_classobj *)k.o;
+                if (kc->iter_next) return kc->iter_next(cx, out, it->target);
+            }
+            return AIL_STOP;
+        }
         case AIL_IT_LIST: case AIL_IT_TUPLE: {
             ail_vecobj *v = (ail_vecobj *)it->target.o;
             if (it->idx >= v->n) return AIL_STOP;
@@ -14774,6 +14821,32 @@ static inline void ail_obj_write_repr(ail_ctx *cx, ail_obj x, FILE *f) {
         }
         case AIL_T_INST: {
             ail_instobj *ii = (ail_instobj *)x.o; ail_classobj *c = (ail_classobj *)ii->cls.o;
+            {   /* a user __repr__ (found through the base classes) decides how the instance shows, also inside containers */
+                for (ail_obj k = ii->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+                    ail_classobj *kc = (ail_classobj *)k.o;
+                    if (kc->repr_fn) {
+                        ail_obj r; ail_st st = kc->repr_fn(cx, &r, x);
+                        if (st != AIL_OK) ail_die("an exception was raised inside __repr__ while showing a value");
+                        if (r.tag != AIL_T_STR) ail_die("__repr__ returned a non-string");
+                        ail_str_write(ail_view_to_str(r), f);
+                        return;
+                    }
+                }
+            }
+            if (c->dc) {
+                /* a @dataclass: ClassName(field=repr, ...) -- the generated __init__ assigns the fields first, in order */
+                ail_str_write(ail_view_to_str(c->name), f); fputc('(', f);
+                int first = 1;
+                for (int64_t i = 0; i < c->dc - 1 && i < ii->n; i++) {
+                    if (i < 64 && ((c->dc_hide >> i) & 1ULL)) continue;
+                    if (!first) fputs(", ", f);
+                    first = 0;
+                    fputs(cx->intern_tab[ii->attrs[i].name_id], f); fputc('=', f);
+                    ail_obj_write_repr(cx, ii->attrs[i].val, f);
+                }
+                fputc(')', f);
+                break;
+            }
             fputs("<", f); ail_str_write(ail_view_to_str(c->name), f); fputs(" object>", f);
             break;
         }
@@ -14811,6 +14884,19 @@ static inline void ail_obj_write_str(ail_ctx *cx, ail_obj x, FILE *f) {
     if (x.tag == AIL_T_EXC) {
         ail_instobj *ii = (ail_instobj *)x.o;
         for (int64_t i = 0; i < ii->n; i++) if (ii->attrs[i].name_id == AIL_ATTR_MESSAGE) { ail_str_write(ail_view_to_str(ii->attrs[i].val), f); return; }
+    }
+    if (x.tag == AIL_T_INST) {
+        for (ail_obj k = ((ail_instobj *)x.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+            ail_classobj *kc = (ail_classobj *)k.o;
+            if (kc->str_fn) {
+                ail_obj r; ail_st st = kc->str_fn(cx, &r, x);
+                if (st != AIL_OK) ail_die("an exception was raised inside __str__ while showing a value");
+                if (r.tag != AIL_T_STR) ail_die("__str__ returned a non-string");
+                ail_str_write(ail_view_to_str(r), f);
+                return;
+            }
+            if (kc->repr_fn) break;
+        }
     }
     ail_obj_write_repr(cx, x, f);
 }
@@ -15101,6 +15187,8 @@ static inline ail_obj ail_class_new(ail_ctx *cx, const char *name, ail_obj base)
     c->name = ail_str_from_cstr(cx, name);
     c->base = base;
     c->builtin_id = -1;
+    c->dc = 0; c->dc_hide = 0;
+    c->iter_iter = 0; c->iter_next = 0; c->repr_fn = 0; c->str_fn = 0;
     ail_obj r; r.tag = AIL_T_CLASS; r.o = (ail_gcobj *)c; return r;
 }
 static inline ail_obj ail_inst_new(ail_ctx *cx, ail_obj cls) {
@@ -18336,6 +18424,14 @@ static inline ail_st ail_it_combinations_wr(ail_ctx *cx, ail_obj *out, ail_obj i
 
 /* ---- the dispatcher itself ----------------------------------------------------------- */
 static inline ail_st ail_it_next(ail_ctx *cx, ail_obj *out, ail_obj itobj) {
+    if (itobj.tag == AIL_T_INST) {
+        for (ail_obj k = ((ail_instobj *)itobj.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+            ail_classobj *kc = (ail_classobj *)k.o;
+            if (kc->iter_next) return kc->iter_next(cx, out, itobj);
+        }
+        char buf[96]; snprintf(buf, sizeof buf, "'%s' object is not an iterator", ail_type_name(itobj.tag));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
     ail_iterobj *it = (ail_iterobj *)itobj.o;
     if (it->kind < 1000) return ail_next(cx, out, itobj);
     switch (it->kind) {

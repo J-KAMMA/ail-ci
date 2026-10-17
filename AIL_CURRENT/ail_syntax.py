@@ -34,25 +34,34 @@ def _let_refusal(statement, line):
     found = re.fullmatch(r'let\s+([A-Za-z_]\w*)\s*:\s*([^=]+?)\s*=(?!=)\s*(.+)', statement)
     if not found:
         if re.fullmatch(r'let\s+[A-Za-z_]\w*(?:\s*:\s*[^=]+)?', statement):
-            return f'invalid let statement at line {line}: a let needs an initializer (`let x = ...;`)'
-        return f'invalid let statement at line {line}'
+            return ('a `let` needs an initial value.\n'
+                    '  write instead: `let x = 0;` (or `let x: int = 0;`)')
+        return ('this `let` is not of the form `let name = value;`.\n'
+                '  write instead: `let total: int = 0;` (one name, an optional type, then `= value`)')
     name, annotation = found[1], re.sub(r'\s+', '', found[2])
-    head = f'invalid let statement at line {line}: `let {name}: {annotation}`'
+    head = f'`let {name}: {annotation}`'
     if re.match(r'list\[(?:list|set|dict|tuple\[[^]]*(?:str|list))', annotation):
-        return (f'{head} -- a list of lists holds rows of int, float, str or a struct '
-                f'(`let {name}: list[list[int]] = [[] for _ in range(n)];`); a list of sets, dicts, '
-                f'bytes or deeper lists is not a supported type: use a list of structs')
+        return (f'{head}: a list of lists holds rows of int, float, str or a struct; lists of '
+                f'sets, dicts, bytes or deeper lists are not supported.\n'
+                f'  write instead: `let {name}: list[list[int]] = [[] for _ in range(n)];`, '
+                f'or a list of structs')
     key = re.match(r'(dict|set)\[([A-Za-z_]\w*)', annotation)
     if key and key[2] not in ('str', 'int'):
-        rewrite = ('key it by str with `.decode()` (`let d: dict[str, int] = {}; d[k.decode()] = v;`)'
-                   if key[2] == 'bytes' else 'key it by str or int')
-        return f'{head} -- {key[1]} keys must be str or int, not {key[2]}; {rewrite}'
+        rewrite = ('key it by str with `.decode()`: `let d: dict[str, int] = {}; d[k.decode()] = v;`'
+                   if key[2] == 'bytes' else f'key it by str or int: `let {name}: {key[1]}[str, int] = {{}};`')
+        return f'{head}: {key[1]} keys must be str or int, not {key[2]}.\n  write instead: {rewrite}'
     if key and annotation.startswith('dict['):
-        return (f'{head} -- dict values must be int, float, str or bytes; keep the values in '
-                f'their own list and map each key to its index (`dict[str, int]`)')
-    return (f'{head} -- unsupported annotation; a let may be annotated with a plain type '
-            f'(int, float, str, bytes, a struct, T | None), list[T], list[tuple[...]], '
-            f'dict[str|int, int|float|str|bytes], set[int|str] or Callable[...], or left unannotated')
+        if annotation.endswith(',bool]'):
+            return (f'{head}: a dict value must be int, float, str or bytes, not bool.\n'
+                    f'  write instead: `let {name}: dict[{key[2]}, int] = {{}};` storing 1 or 0 '
+                    f'(`{name}[k] = 1`, test with `k in {name}`)')
+        return (f'{head}: a dict value must be int, float, str or bytes.\n'
+                f'  write instead: keep the values in their own list and map each key to its '
+                f'index (`let {name}: dict[{key[2]}, int] = {{}};`)')
+    return (f'{head}: this type is not supported in a `let`.\n'
+            f'  write instead: int, float, str, bytes, a struct, T | None, list[T], '
+            f'list[tuple[...]], dict[str|int, int|float|str|bytes], set[int|str], or no type at all '
+            f'(`let {name} = ...;`)')
 
 def _callable(annotation):
     # The block frontend is also loaded before the compiler adds pkg-v12 to sys.path.
@@ -207,6 +216,7 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
     # requires/ensures of the function being translated: {'depth', 'name', 'void', 'ensures', 'started'}
     contract = None
     pending_contract = None
+    current_start = None
 
     def declare(name):
         if keyword.iskeyword(name) or name in declared:
@@ -235,6 +245,7 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
                 pending.append(part)
                 continue
             start = pending[0].start if pending else part.start
+            current_start = start
             statement = _render(pending)
             pending.clear()
             if statement.startswith(('fn ', 'let ')) or (blocks and blocks[-1].startswith('struct ')):
@@ -296,7 +307,9 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
                         raise SyntaxErrorAIL('fn must be at the top level')
                     match = re.fullmatch(r'fn\s+([A-Za-z_]\w*)\s*\((.*)\)(?:\s*->\s*(.+))?', statement)
                     if not match:
-                        raise SyntaxErrorAIL(f'invalid fn header at line {part.start[0]}')
+                        raise SyntaxErrorAIL('this `fn` header is not of the form `fn name(a: int, b: str) -> int {`.\n'
+                                             '  write instead: `fn add(a: int, b: int) -> int { return a + b; }` '
+                                             '(the result type follows `->`, never `:`)')
                     name, params, result = match.groups()
                     nullable_result = False
                     if result and re.fullmatch(r'[A-Za-z_]\w*\s*\|\s*None', result):
@@ -352,9 +365,11 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
                             raise SyntaxErrorAIL('main must be in the entry source')
                         main_count += 1
                         if params.strip():
-                            raise SyntaxErrorAIL('main takes no parameters')
+                            raise SyntaxErrorAIL('`fn main` takes no parameters.\n'
+                                                 '  write instead: `fn main() -> int { ... }`; read input from sys.stdin or sys.argv')
                         if result and result != 'int':
-                            raise SyntaxErrorAIL('main return type must be int')
+                            raise SyntaxErrorAIL('`fn main` must return int (or have no result type).\n'
+                                                 '  write instead: `fn main() -> int { ...; return 0; }`')
                         # `fn main() { ... }` is main returning int: Python's sys.exit(None)
                         # exits 0, which the implicit `return 0` added at its close keeps.
                         result = 'int'
@@ -377,7 +392,9 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
                             start[0], start[1] + 1, f'{owner}.{name}' if is_method else name)
                 else:
                     if not blocks:
-                        raise SyntaxErrorAIL('only fn and const are allowed at the top level')
+                        raise SyntaxErrorAIL('a statement outside any function; only `fn`, `struct`, `const` and `use` '
+                                             'can be at the top level.\n'
+                                             '  write instead: move it into `fn main() -> int { ... }`')
                     if blocks[-1].startswith('impl '):
                         raise SyntaxErrorAIL('impl supports only fn methods')
                     if statement in ('else', 'try', 'finally'):
@@ -392,7 +409,9 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
                     elif re.match(r'^(if|elif|while|for)\s+.+$', statement):
                         header = statement
                     else:
-                        raise SyntaxErrorAIL(f'unsupported block header: {statement}')
+                        raise SyntaxErrorAIL(f'unsupported block header: `{statement}`.\n'
+                                             f'  write instead: a block opens with `if`, `elif`, `else`, `while`, `for`, '
+                                             f'`try`, `except`, `fn` or `struct`, e.g. `if x > 0 {{ ... }}`')
                 if contract is not None and len(blocks) == contract['depth']:
                     contract['started'] = True
                 lines.append(('    ' * len(blocks) + header + ':', start))
@@ -414,7 +433,10 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
                         continue
                     match = re.fullmatch(r'const\s+([A-Za-z_]\w*)\s*=\s*(.+)', statement)
                     if not match:
-                        raise SyntaxErrorAIL('only fn, const, and use are allowed at the top level')
+                        raise SyntaxErrorAIL('a statement outside any function; only `fn`, `struct`, `const` and `use` '
+                                         'can be at the top level.\n'
+                                         '  write instead: `const NAME = 10;` for a constant, or move the '
+                                         'statement into `fn main() -> int { ... }`')
                     if match[1] == 'sys':
                         raise SyntaxErrorAIL('sys is reserved by the AIL entry point')
                     declare(match[1])
@@ -450,11 +472,15 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
                     try:
                         parsed = ast.parse(statement).body
                     except SyntaxError as exc:
-                        raise SyntaxErrorAIL(f'invalid statement at line {part.start[0]}: {exc.msg}') from exc
+                        raise SyntaxErrorAIL(f'`{statement.strip()}` is not valid here ({exc.msg}).\n'
+                                             f'  write instead: one plain statement ending in `;`, such as `x += 1;` '
+                                             f'(there is no `x++`; use `and`/`or`/`not`, not `&&`/`||`/`!`)') from exc
                     if (len(parsed) != 1 or not isinstance(parsed[0],
                             (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.Delete, ast.Return, ast.Raise, ast.Break,
                              ast.Continue, ast.Pass, ast.Expr, ast.Assert))):
-                        raise SyntaxErrorAIL(f'unsupported statement at line {part.start[0]}')
+                        raise SyntaxErrorAIL(f'`{statement.strip()}` is not a statement form this language has.\n'
+                                             f'  write instead: an assignment, `return`, a call, `break`/`continue`, '
+                                             f'or open a block with `if`/`while`/`for`/`try` and braces')
                     if isinstance(parsed[0], ast.AnnAssign):
                         declaration = parsed[0]
                         annotation = declaration.annotation
@@ -482,7 +508,9 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
                                              or annotation.value.id == 'set'
                                              and isinstance(annotation.slice, ast.Name)
                                              and annotation.slice.id in ('int', 'str')))):
-                            raise SyntaxErrorAIL(f'unsupported local annotation at line {part.start[0]}')
+                            raise SyntaxErrorAIL(f'`{statement.strip()}`: this annotation is not supported on a local.\n'
+                                             f'  write instead: int, float, str, bytes, a struct, T | None, list[T], '
+                                             f'dict[str|int, int|float|str|bytes], set[int|str], or no annotation')
                 if contract is not None and len(blocks) == contract['depth']:
                     contract['started'] = True
                 if (contract is not None and contract['ensures'] and blocks
@@ -524,6 +552,12 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
                         raise SyntaxErrorAIL('impl needs at least one method')
                     method_blocks[owner].append(lines[impl_start:])
                     del lines[impl_start:]
+    except SyntaxErrorAIL as exc:
+        # every block-syntax refusal reports file:line:col; the ones raised without a position
+        # get that of the statement being read
+        if exc.lineno is None and current_start is not None:
+            exc.lineno, exc.offset = current_start[0], current_start[1] + 1
+        raise
     except tokenize.TokenError as exc:
         position = exc.args[1] if len(exc.args) > 1 else None
         known = (isinstance(position, tuple) and len(position) == 2
@@ -536,7 +570,9 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
                              lineno=source.count('\n') + 1,
                              offset=len(source.rsplit('\n', 1)[-1]) + 1)
     if not module and main_count != 1:
-        raise SyntaxErrorAIL('entry source needs exactly one fn main()')
+        raise SyntaxErrorAIL('the entry file needs exactly one `fn main()`, and this one has %d.\n'
+                             '  write instead: `fn main() -> int { ...; return 0; }` (once, at the top level)' % main_count,
+                             lineno=1, offset=1)
     for name, end in sorted(structs.items(), key=lambda item: item[1], reverse=True):
         lines[end:end] = [line for body in method_blocks[name] for line in body]
     if source_map is not None:
@@ -839,10 +875,11 @@ _ALIASABLE = ('sys.stdout.write', 'sys.stdout.buffer.write', 'sys.stdin.readline
 _RESULT_NAMES = ('int', 'float', 'str', 'bytes', 'bool', 'bytearray')
 _ATOMIC = (ast.Name, ast.Constant, ast.Call, ast.Attribute, ast.Subscript, ast.List, ast.Dict,
            ast.Set, ast.ListComp, ast.SetComp, ast.DictComp, ast.JoinedStr)
-_FILE_HINT = ('with open(path) as f: is built for one file opened to read ("r" or "rb") and read '
-              'whole with f.read(), or in text mode line by line with `for line in f:`; '
-              'read_bytes(path) reads a binary file, write_text(path, text) / write_bytes(path, '
-              'data) write one')
+_FILE_HINT = ('this use of a file is not built: only reading it whole (`f.read()`) or line by line '
+              '(`for line in f:`) is.\n'
+              '  write instead: `with open(path) as f:` with `text = f.read()` or `for line in f:` to '
+              'read, `read_bytes(path)` for a binary file, `write_text(path, text)` / '
+              '`write_bytes(path, data)` to write one')
 
 
 def _own_nodes(function):
@@ -1024,6 +1061,7 @@ class _Surface:
         self.keep = set()              # dropped-by-default modules still needed as written
         self.files = {}                # file object name -> (path expression, binary)
         self.dataclasses = {}          # class name -> [(field, default text | None)]
+        self.dc_annotations = {}       # class name -> [(field, annotation text, hidden from repr)]
         self.consumed = set()
         self.void = set()
         self.re_on = False             # `import re` seen
@@ -1870,6 +1908,7 @@ class _Surface:
 
     def dataclass(self, node, decorator):
         options = {item.arg: item.value for item in decorator.keywords} if isinstance(decorator, ast.Call) else {}
+        repr_off = isinstance(options.get('repr'), ast.Constant) and not options['repr'].value
         for option, value in options.items():
             enabled = not (isinstance(value, ast.Constant) and not value.value)
             if option == 'init' and not enabled or option == 'order' and enabled:
@@ -1879,6 +1918,7 @@ class _Surface:
         if any(isinstance(each, ast.FunctionDef) and each.name == '__init__' for each in node.body):
             return
         fields = []
+        hidden = set()
         for statement in node.body:
             if not (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)):
                 continue
@@ -1890,6 +1930,8 @@ class _Surface:
             value = statement.value
             if (isinstance(value, ast.Call) and self.path(value.func) == 'dataclasses.field'):
                 options = {item.arg: item.value for item in value.keywords}
+                if isinstance(options.get('repr'), ast.Constant) and not options['repr'].value:
+                    hidden.add(statement.target.id)
                 factory = options.pop('default_factory', None)
                 plain = options.pop('default', None)
                 if value.args or set(options) - {'repr', 'compare', 'hash'}:
@@ -1914,14 +1956,40 @@ class _Surface:
             at -= 1
         if at < 0 or self.data[at:at + 1] != b'@':
             return
-        self.edits.append((at, self.offset(decorator.end_lineno, decorator.end_col_offset), '', False))
-        parameters = ', '.join(f'{name}: {annotation}' for _, name, annotation, _ in fields)
-        body = '; '.join(f'self.{name} = {name}' for _, name, _, _ in fields)
+        # a marker comment instead of nothing: the general (boxed) path prints the instance as
+        # ClassName(field=..., ...) for it; the typed path never sees a comment
+        self.edits.append((at, self.offset(decorator.end_lineno, decorator.end_col_offset),
+                           '' if repr_off else '# ail:dataclass', False))
+        # a dataclass that extends another one: its fields come after the base's (a field of the same
+        # name keeps the base's position)
+        merged = []                    # (name, annotation, default, hidden)
+        for base in node.bases:
+            if isinstance(base, ast.Name) and base.id in self.dc_annotations:
+                inherited = dict((name, default) for name, default in self.dataclasses[base.id])
+                merged = [(name, annotation, inherited.get(name), shown)
+                          for name, annotation, shown in self.dc_annotations[base.id]]
+        for _, name, annotation, default in fields:
+            entry = (name, annotation, default, name in hidden)
+            for index, old in enumerate(merged):
+                if old[0] == name:
+                    merged[index] = entry
+                    break
+            else:
+                merged.append(entry)
+        parameters = ', '.join(f'{name}: {annotation}' for name, annotation, _, _ in merged)
+        body = '; '.join(f'self.{name} = {name}' for name, _, _, _ in merged)
         self.replace(fields[0][0], f'def __init__(self, {parameters}): {body}', True)
         for statement, *_ in fields[1:]:
             self.replace(statement, '', True)  # a class body here holds methods only, not `pass`
         self.consumed.update(statement for statement, *_ in fields)
-        self.dataclasses[node.name] = [(name, default) for _, name, _, default in fields]
+        self.dataclasses[node.name] = [(name, default) for name, _, default, _ in merged]
+        self.dc_annotations[node.name] = [(name, annotation, shown) for name, annotation, _, shown in merged]
+        if not repr_off and any(shown for *_, shown in merged):
+            # which fields repr leaves out, for the general path's marker lookup
+            skipped = ','.join(name for name, _, _, shown in merged if shown)
+            for index, (start, end, text, flag) in enumerate(self.edits):
+                if text == '# ail:dataclass':
+                    self.edits[index] = (start, end, '# ail:dataclass hide=' + skipped, flag)
 
     def ann_assign(self, node, function, owner):
         if isinstance(node.target, ast.Attribute) and node.value is None:

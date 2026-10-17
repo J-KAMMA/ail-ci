@@ -564,6 +564,10 @@ class Exprs:
             if isinstance(op, (ast.In, ast.NotIn)) and isinstance(comp, (ast.Tuple, ast.List, ast.Set)) \
                     and is_tuple(lt):
                 right, rt = self.ex(ast.List(elts=comp.elts, ctx=ast.Load()), ('list', lt), None)
+            elif isinstance(op, (ast.In, ast.NotIn)) and isinstance(comp, ast.Tuple) and comp.elts:
+                # `op in ("size", "peek")` -- a tuple literal as the container is a list of its
+                # elements for a membership test (the tuple type class has no `in`)
+                right, rt = self.exv(ast.List(elts=comp.elts, ctx=ast.Load()))
             else:
                 right, rt = self.exv(comp, lt if isinstance(op, (ast.Eq, ast.NotEq)) else None)
             parts.append((op, operands[-1], (right, rt)))
@@ -591,6 +595,15 @@ class Exprs:
                 if code(at) != code(bt_[1]):
                     self.refuse(node, 'membership of a tuple in a list of tuples of another shape')
                 res = call(self.gen.list_helper('in', bt_[1]), b, a)
+            elif is_tuple(bt_) and not is_tuple(at) and bt_[1]:
+                # `x in t` with t a tuple value: the fields as a list (CPython compares x with
+                # each in order)
+                if not pure(b):
+                    self.refuse(node, 'membership in a tuple expression; bind the tuple to a name '
+                                'first')
+                res = ast.Compare(left=a, ops=[ast.In()], comparators=[ast.List(
+                    elts=[attr(fresh_copy(b), 'f%d' % i) for i in range(len(bt_[1]))],
+                    ctx=ast.Load())])
             else:
                 return ast.Compare(left=a, ops=[op], comparators=[b])
             return ast.UnaryOp(op=ast.Not(), operand=res) if neg else res

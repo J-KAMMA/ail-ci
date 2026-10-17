@@ -1247,10 +1247,11 @@ def _scan_module_consts(tree):
                                     "built in (no import needed), nothing else from heapq or bisect is"
                                     % builtin)
             else:
-                error = Unsupported("import of %r; importing another module is a separate, larger "
-                                    "question this compiler does not answer -- only `import math` and "
-                                    "`import sys` are accepted, so write what you need out by hand"
-                                    % mod)
+                error = Unsupported("import of %r is not available: this compiler builds only the "
+                                    "modules it models (math, sys, collections, itertools, functools, "
+                                    "heapq, bisect, re, json).\n"
+                                    "  write instead: drop the import and write what you need by hand "
+                                    "with plain lists, dicts and loops" % mod)
             error.source_line = node.lineno    # the import itself, not a later use of the name
             raise error
         if not isinstance(node, ast.Assign):
@@ -1583,7 +1584,8 @@ class Ctx:
     def declare(self, name, t=INT):
         declared = getattr(self, 'local_annotations', {}).get(name)
         if declared is not None and declared != t:
-            raise Unsupported('%r is declared %s; assigning %s is unsupported' % (name, declared, t))
+            raise Unsupported('%r is declared %s; assigning %s is unsupported.\n'
+                              '  write instead: %s' % (name, declared, t, _assign_fix(declared, t)))
         if name in self.kind:
             if self.kind[name] == t and _managed_obj(t, self):
                 return self.cname(name)
@@ -3084,7 +3086,7 @@ def _tuple_elements(tup, name, k, ctx, bytepos=frozenset(), is_float=False, capt
                               'field of every row a float (write float(...) at each one) if that '
                               'is what you mean')
         if et not in (INT, None):
-            raise Unsupported('a tuple field must be an int, not %s' % et)
+            raise Unsupported('a tuple field must be an int, not %s' % (et,))
         record(_expr(e, ctx))
     return out
 
@@ -3391,6 +3393,37 @@ def _return_type_error(message, function, expected, actual, fn=None):
     error.type_details = dict(operation='return', expected=_diagnostic_type(expected),
                               actual=_diagnostic_type(actual))
     return error
+
+def _assign_fix(declared, actual):
+    """The `write instead:` text for assigning one type to a name declared as another (messages only)."""
+    if declared == INT and actual == FLT:
+        return ('`int(x)` to truncate (`y: int = int(x / 2)`), `x // 2` for floor division of ints, '
+                'or declare the name `float`')
+    if declared == FLT and actual == INT:
+        return 'declare the name `float` (it is `y: float = ...`), or write `float(x)`'
+    if declared == STR and actual == INT:
+        return 'convert with `str(n)`, or declare the name `int`'
+    if declared == INT and actual == STR:
+        return 'convert with `int(s)`, or declare the name `str`'
+    return 'make the value match the declared type, or convert it (`int(x)`, `float(x)`, `str(x)`)'
+
+
+def _mismatch_fix(existing, given):
+    """The `write instead:` text for a declared-versus-supplied parameter type clash (messages only)."""
+    declared, supplied = _describe_kind(existing), _describe_kind(given)
+    if declared == INT and supplied == FLT:
+        return ('pass `int(x)` at the call (truncates toward zero), use `//` where the float came from '
+                '`/`, or annotate the parameter `float`')
+    if declared == STR and supplied in (INT, BYTES):
+        return ('indexing or iterating bytes gives an int, not a str: annotate the parameter `int` '
+                '(`def shift(b: int, k: int)`), or decode first (`text = data.decode()`)')
+    if declared == INT and supplied in (STR, BYTES):
+        return 'convert at the call: `int(s)` parses a str, `ord(c)` gives the code of one character'
+    if declared == FLT and supplied == STR:
+        return 'convert at the call with `float(s)`, or annotate the parameter `str`'
+    return ('make the annotation match what the callers pass, or convert at the call '
+            '(`int(x)`, `float(x)`, `str(x)`)')
+
 
 def _argument_type_error(message, callee, parameter, index, expected, actual):
     error = Unsupported(message)
@@ -4060,8 +4093,9 @@ def _param_kinds(fn, classes=(), sig_override=None, function_results=None, *, al
             if existing is not None and existing != given:
                 error = _argument_type_error(
                     '%r is annotated %s in the source, but the caller also supplies %s; refusing '
-                    'rather than silently choosing one'
-                    % (pname, _describe_kind(existing), _describe_kind(given)), fn.name, pname,
+                    'rather than silently choosing one.\n  write instead: %s'
+                    % (pname, _describe_kind(existing), _describe_kind(given),
+                       _mismatch_fix(existing, given)), fn.name, pname,
                     [arg.arg for arg in fn.args.args].index(pname), existing, given)
                 error.type_details.update(operation='parameter', inference_scope='signature_override')
                 error.source_function = fn.name
@@ -4079,8 +4113,9 @@ def _param_kinds(fn, classes=(), sig_override=None, function_results=None, *, al
             if existing is not None and existing != given:
                 error = _argument_type_error(
                     '%r is annotated %s in the source, but the caller also supplies %s; refusing '
-                    'rather than silently choosing one'
-                    % (pname, _describe_kind(existing), _describe_kind(given)), fn.name, pname,
+                    'rather than silently choosing one.\n  write instead: %s'
+                    % (pname, _describe_kind(existing), _describe_kind(given),
+                       _mismatch_fix(existing, given)), fn.name, pname,
                     [arg.arg for arg in fn.args.args].index(pname), existing, given)
                 error.type_details.update(operation='parameter', inference_scope='signature_override')
                 error.source_function = fn.name
@@ -4126,13 +4161,12 @@ def _param_kinds(fn, classes=(), sig_override=None, function_results=None, *, al
             # and bytes never mix. Every other contradiction (used as a scalar, assigned into,
             # iterated) is refused BY NAME where it is compiled, exactly as for a bytes parameter.
             if kind == BYTES:
-                raise Unsupported('%r is annotated str but the body uses it like bytes; str and '
-                                  'bytes are separate types here and never mix '
-                                  "(SEMANTICS.md section 31). Only two things in a body say "
-                                  "'bytes' about a parameter -- comparing it against a b'...' "
-                                  'literal, and calling .find() on it (which a str does not have '
-                                  'at all) -- so remove that one, or drop the str annotation'
-                                  % n)
+                raise Unsupported('%r is annotated str but the body uses it like bytes (compared '
+                                  "with a b'...' literal, or passed to .find() on a module-level "
+                                  'const); str and bytes never mix.\n'
+                                  "  write instead: compare with a str literal ('a', not b'a'), "
+                                  'and copy a const table into a local first '
+                                  '(`let alpha: str = TABLE;` then `alpha.find(%s)`)' % (n, n))
             out.append((n, STR))
         elif ann == LIST:
             if kind == BYTES:
@@ -4172,7 +4206,10 @@ def _param_kinds(fn, classes=(), sig_override=None, function_results=None, *, al
                                   % (n, 'bytes' if kind == BYTES else 'a sequence'))
             out.append((n, FLT))
         else:
-            raise Unsupported('%r is annotated %s, which this compiler has no rule for' % (n, ann[1]))
+            raise Unsupported('%r is annotated %s, which this compiler has no rule for.\n'
+                              '  write instead: int, float, str, bytes, bool, list[int], list[float], '
+                              'list[str], dict[str, int], set[int], or a class name (no generics '
+                              'such as list[T], no Optional/Union)' % (n, ann[1]))
     return out
 
 
@@ -4343,8 +4380,10 @@ def _seq(node, ctx):
         # works. Every other kind reaching here (a plain int, a handle) has no such route, and
         # offering one would be a recommendation that does not compile.
         raise Unsupported('%r is %s; only an array, a list, a list of floats, a set, a dict, '
-                          'bytes and a list of str are walked as flat sequences here'
-                          % (node.id, _a(ctx.type_of(node.id))))
+                          'bytes and a list of str are walked as flat sequences here.\n'
+                          '  write instead: loop over the rows, then the row '
+                          '(`for row in %s: for x in row: ...`), or index `%s[i][j]`'
+                          % (node.id, _a(ctx.type_of(node.id)), node.id, node.id))
     field_kind = _numeric_field_kind(node, ctx) if isinstance(node, ast.Attribute) else None
     if field_kind in (LIST, FLIST):
         # `sum(obj.xs)`, `max(g[i])` (a nested-list row is a list field of a row struct; a float
@@ -7031,7 +7070,9 @@ def _fstring_field(fv, ctx):
     if not isinstance(fs, ast.JoinedStr) or len(fs.values) > 1 \
             or (fs.values and not isinstance(fs.values[0], ast.Constant)):
         raise Unsupported('a nested format spec ({x:{w}}); the spec has to be a literal, not '
-                          'itself containing a {field} -- refused by name')
+                          'itself containing a {field}.\n'
+                          '  write instead: a literal spec (`f"{x:8.2f}"`), or format first '
+                          'and pad by hand')
     spec_text = fs.values[0].value if fs.values else ''
     spec = _parse_braces_spec(spec_text)
     return _fmt_build(val, kind, spec, spec_text, ctx, 'an f-string field with spec',
@@ -7289,8 +7330,9 @@ def _str_refusal(node, ctx):
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
         lk, rk = _kindword(node.left, ctx), _kindword(node.right, ctx)
         return ('concatenating %s with %s; `+` joins two strs and nothing else. str and bytes are '
-                'separate types here and never mix -- CPython raises TypeError for exactly this '
-                '(SEMANTICS.md section 31)' % (lk, rk))
+                'separate types here and never mix -- CPython raises TypeError for exactly this.\n'
+                '  write instead: convert one side first, `data.decode()` (bytes to str) or '
+                '`s.encode()` (str to bytes)' % (lk, rk))
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
         return _str_call_refusal(node)
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
@@ -7302,10 +7344,8 @@ def _str_refusal(node, ctx):
 
 
 STR_METHOD_REFUSALS = {
-    'upper': 'ASCII-only case mapping is not what Python does and this compiler will not guess: '
-             "'\u00df'.upper() is 'SS' (one character becomes two) and '\u0130'.lower() is two "
-             "code points, so case mapping is not a per-character function at all and needs the "
-             'full Unicode case table',
+    'upper': "case mapping beyond lower()/upper() is not built (Unicode case rules are not "
+             "per-character: '\u00df'.upper() is 'SS')",
     'encode': 'only str.encode() and bytes.decode() with literal UTF-8 and strict errors are supported',
     'format': 'str formatting is refused by name -- the format spec is a language of its own and '
               'reproducing CPython exactly is not built',
@@ -7324,10 +7364,7 @@ STR_METHOD_REFUSALS = {
     'listy': "it takes or returns a list of str; only .split()/.rsplit()/.splitlines() (str -> "
              "list) and, for a list of str this compiler already has, .join() (list -> str) are "
              "built",
-    'edit': 'it returns a MODIFIED str (padded, replaced, case-folded, ...); this compiler builds '
-            'only the read-only str operations SEMANTICS.md section 31 and AIL_TASK_strops_'
-            '20260915.md name -- indexing, slicing, +, len(), comparison, str(int)/int(str), '
-            'strip()/lstrip()/rstrip(), count(), split()/splitlines()',
+    'edit': 'it returns a modified str, and only the read-only str operations are built',
     'find': 'this shape of searching inside a str is not built (find/rfind/index/rindex/count '
             'take a str and optional integer start and end; startswith/endswith take one str and '
             'optional integer start and end, not a tuple of prefixes)',
@@ -7389,7 +7426,32 @@ def _join_refusal(node):
                 'when the slice is the whole list')
     return ('.join() on a str takes one list[str]: a named list of str or an inline '
             '.split()/.splitlines() result; a slice, generator, comprehension or list of non-str '
-            'is not built -- build a list[str] with .append() and join that')
+            'is not built.\n'
+            '  write instead: `parts: list[str] = []`, `parts.append(str(x))` in a loop, then '
+            '`", ".join(parts)`')
+
+
+_STR_METHOD_FIX = {
+    'replace': 'a loop that builds the result, `out = out + (new if c == old else c)` for each `c in s`',
+    'zfill': '`while len(s) < w: s = "0" + s`',
+    'rjust': '`while len(s) < w: s = " " + s`',
+    'ljust': '`while len(s) < w: s = s + " "`',
+    'center': 'pad both sides with a loop, `while len(s) < w: s = " " + s + " "`',
+    'partition': '`i = s.find(sep)` then `s[:i]` and `s[i + len(sep):]`',
+    'rpartition': '`i = s.rfind(sep)` then `s[:i]` and `s[i + len(sep):]`',
+    'removeprefix': '`s[len(p):] if s.startswith(p) else s`',
+    'removesuffix': '`s[:len(s) - len(p)] if s.endswith(p) else s`',
+    'expandtabs': 'a loop that replaces each tab by spaces',
+    'title': 'uppercase the first character of each word in a loop with `.upper()`',
+    'capitalize': '`s[0].upper() + s[1:].lower()` (after checking `len(s) > 0`)',
+    'casefold': '`s.lower()`',
+    'swapcase': 'a loop that picks `.upper()` or `.lower()` per character',
+    'format': 'an f-string, `f"{x:.2f}"`, or concatenate with `str(x)`',
+    'encode': '`s.encode()` (UTF-8 only, no arguments but "utf-8")',
+    'decode': '`b.decode()` (UTF-8 only)',
+    'isidentifier': 'a loop comparing each character, `c.isalpha() or c == "_"`',
+    'isprintable': 'a loop comparing each character with `" "` and `"~"`',
+}
 
 
 def _str_method_refusal(m, node=None):
@@ -7400,13 +7462,14 @@ def _str_method_refusal(m, node=None):
                 'positionally or as sep=/maxsplit= keywords' % m)
     g = _STR_METHOD_GROUP.get(m)
     if g is None:
-        return ('.%s() on a str is not built; the str methods this compiler does build are '
-                'strip()/lstrip()/rstrip(), find()/rfind()/index()/rindex()/count()/startswith()/'
-                'endswith(), split()/rsplit()/splitlines(), lower()/upper() and the is*() predicates '
-                "(and .join() on a list of str a split() produced) -- every other one is refused "
-                'by name rather than guessed at, because its CPython answer cannot be reproduced '
-                'exactly (SEMANTICS.md section 31)' % m)
-    return '.%s() on a str: %s' % (m, STR_METHOD_REFUSALS[g])
+        return ('.%s() on a str is not built.\n'
+                '  write instead: a str method that is built -- strip/lstrip/rstrip, '
+                'find/rfind/index/rindex/count, startswith/endswith, split/rsplit/splitlines, '
+                'lower/upper, join, the is*() predicates -- or a loop over the characters' % m)
+    return '.%s() on a str: %s.\n  write instead: %s' % (
+        m, STR_METHOD_REFUSALS[g].rstrip('.'),
+        _STR_METHOD_FIX.get(m, 'only the str methods that are built (strip, find, split, join, lower, '
+                               'upper, startswith, endswith, count, is*()), or a loop over the characters'))
 
 
 def _str_call_refusal(node):
@@ -7526,8 +7589,10 @@ def _str_compare(left, op, right, ctx):
     if not (_is_str_expr(left, ctx) and _is_str_expr(right, ctx)):
         other = right if _is_str_expr(left, ctx) else left
         raise Unsupported('comparing a str with %s; str and bytes are separate types here and a '
-                          'str is never a number -- this is refused by name rather than answered '
-                          '(SEMANTICS.md section 31)' % _kindword(other, ctx))
+                          'str is never a number -- this is refused by name rather than answered.\n'
+                          '  write instead: compare like with like: a byte from bytes/sys.stdin.buffer '
+                          'is an int (`b == 97`, or `b == ord("a")`), a character of a str is a '
+                          'str (`c == "a"`); convert with `chr(b)` or `ord(c)`' % _kindword(other, ctx))
     ctx.parts.add('STR')
     if isinstance(op, (ast.Eq, ast.NotEq)):
         # `s == s.lower()`, `cmd.upper() == "QUIT"`: compare against the case-mapped text without
@@ -9654,7 +9719,11 @@ def _olist_get_value(node, ctx, owned=False, borrow=False):
     list_kind = _etype(node.value, ctx)
     kind = _olist_element_kind(list_kind)
     if isinstance(node.slice, ast.Slice) or _etype(node.slice, ctx) != INT:
-        raise Unsupported('a reference list item requires an integer index')
+        raise Unsupported('a reference list item requires an integer index; the index here is not an '
+                          'int (inside a key= lambda the parameter is the element itself, not its '
+                          'position).\n'
+                          '  write instead: key=lambda it: (-it.value, it.name) for a sort, or '
+                          '`xs[i]` with an int `i`')
     index, _ = ctx.temp(INT)
     if _olist_stable_name(node.value, ctx):
         receiver = _field_receiver(node.value, ctx)
@@ -10433,48 +10502,63 @@ def _receiver_temp(node, ctx):
 # whose route is genuinely unknown gets a sentence that says what is wrong and stops, rather than
 # a guess (SEMANTICS.md section 5).
 _EXPR_SHAPE_REFUSALS = {
-    'List': 'a list literal used where a single value is needed; a list literal is built only as '
-            'the whole right-hand side of an assignment (xs = [1, 2, 3], or xs = [0] * n with '
-            'an int or float element) -- build any other shape with .append() in a loop',
-    'Tuple': 'a tuple used where a single value is needed; a tuple is held only as an element of '
-             'a list of records or returned whole -- read one field of it (r[0]) or unpack it '
-             'into names (a, b = r)',
-    'Set': 'a set literal; build a set with set() and .add() in a loop instead',
-    'Dict': 'a dict literal; build a dict with {} and d[k] = v instead',
-    'Lambda': "a lambda used as a value; the only lambda built here is sorted()'s key= -- write "
-              'an ordinary def and call it by name instead',
-    'SetComp': 'a set comprehension; build the set with set() and .add() in a loop instead',
-    'DictComp': 'a dict comprehension; build the dict with {} and d[k] = v in a loop instead',
-    'GeneratorExp': 'a generator expression used as a value; a generator has no value of its own '
-                    'here -- consume it in place (sum(...), any(...), all(...)) or write the loop',
-    'Starred': 'unpacking with *; not built -- copy the elements across with .append() in a loop',
-    'NamedExpr': 'the walrus operator (:=); assign on a line of its own first, then use the name',
-    'Await': 'await; this language has no coroutines and no event loop',
-    'Yield': 'yield; this language has no generators -- build a list and return it instead',
-    'YieldFrom': 'yield from; this language has no generators -- build a list and return it '
-                 'instead',
+    'List': 'a list literal used where a single value is needed.\n'
+            '  write instead: put it on a line of its own (`xs = [1, 2, 3]`, or `xs = [0] * n`), then '
+            'use `xs`; build any other shape with `.append()` in a loop',
+    'Tuple': 'a tuple used where a single value is needed.\n'
+             '  write instead: unpack it into names (`a, b = r`) or read one field (`r[0]`)',
+    'Set': 'a set literal here.\n'
+           '  write instead: `s = set()` and then `s.add(x)` in a loop',
+    'Dict': 'a dict literal here.\n'
+            '  write instead: `d = {}` and then `d[k] = v`',
+    'Lambda': "a lambda used as a value; the only lambda built here is the key= of sorted()/sort().\n"
+              '  write instead: an ordinary `def key_of(x: int) -> int: return -x`, called by name',
+    'SetComp': 'a set comprehension.\n'
+               '  write instead: `s = set()` and then `s.add(x)` in a loop',
+    'DictComp': 'a dict comprehension.\n'
+                '  write instead: `d = {}` and then `d[k] = v` in a loop',
+    'GeneratorExp': 'a generator expression used as a value.\n'
+                    '  write instead: consume it in place (`sum(x * x for x in xs)`, `any(...)`, `all(...)`), '
+                    'or fill a list with a loop',
+    'Starred': 'unpacking with `*`.\n'
+               '  write instead: copy the elements with `for x in xs: out.append(x)`',
+    'NamedExpr': 'the walrus operator (`:=`).\n'
+                 '  write instead: assign on a line of its own, `n = len(xs)`, then `if n > 2:`',
+    'Await': 'await: this language has no coroutines or event loop.\n'
+             '  write instead: an ordinary `def` called directly',
+    'Yield': 'yield: this language has no generators.\n'
+             '  write instead: build a list with `out.append(x)` and `return out`',
+    'YieldFrom': 'yield from: this language has no generators.\n'
+                 '  write instead: build a list with `out.append(x)` and `return out`',
     'FString': '',
 }
 _STMT_SHAPE_REFUSALS = {
-    'With': 'a `with` statement; there are no context managers here, and no file capability that '
-            'would need one (SEMANTICS.md section 5)',
-    'Global': '`global`; module scope is a fixed set of one-time constants (SEMANTICS.md section '
-              '29), never a mutable global -- pass the value in as a parameter and return the new '
-              'one',
-    'Nonlocal': '`nonlocal`; a captured local cannot be rebound -- pass the value in as a '
-                'parameter and return the new one',
-    'Delete': '`del`; there is no delete here for a name, an attribute or a key -- remove '
-              'from a list with .pop(i), and from a set with .remove(x) or .discard(x)',
-    'Import': '`import` inside a function; move it to the top of the file, where only '
-              '`import math` and `import sys` are accepted',
-    'ImportFrom': '`from ... import ...`; move it to the top of the file, where only '
-                  '`import math` and `import sys` are accepted',
-    'Match': 'a `match` statement; write it as an if/elif chain instead',
-    'ClassDef': 'a class defined inside a function; define it at the top level of the file '
-                'instead (SEMANTICS.md section 25)',
-    'AsyncFunctionDef': 'an async def; this language has no coroutines and no event loop',
-    'AsyncFor': 'an async for; this language has no coroutines and no event loop',
-    'AsyncWith': 'an async with; this language has no coroutines and no event loop',
+    'With': 'a `with` statement other than `with open(path) as f:`; there are no context managers.\n'
+            '  write instead: `with open(path) as f: text = f.read()` to read, or '
+            '`write_text(path, text)` to write a file',
+    'Global': '`global`: module scope is a set of one-time constants, never a mutable global.\n'
+              '  write instead: pass the value in as a parameter and return the new one '
+              '(`count = inc(count)`)',
+    'Nonlocal': '`nonlocal`: a captured local cannot be rebound.\n'
+                '  write instead: pass the value in as a parameter and return the new one '
+                '(`total = add(total, n)`)',
+    'Delete': '`del`: there is no delete for a name, an attribute or a key.\n'
+              '  write instead: `xs.pop(i)` to remove from a list, `d.pop(k)` from a dict, '
+              '`s.discard(x)` from a set',
+    'Import': '`import` inside a function.\n'
+              '  write instead: move it to the top of the file, above every `def`',
+    'ImportFrom': '`from ... import ...` inside a function.\n'
+                  '  write instead: move it to the top of the file, above every `def`',
+    'Match': 'a `match` statement.\n'
+             '  write instead: an `if` / `elif` / `else` chain (`if x == 1: ... elif x == 2: ... else: ...`)',
+    'ClassDef': 'a class defined inside a function.\n'
+                '  write instead: define it at the top level of the file, above the function',
+    'AsyncFunctionDef': 'async def: this language has no coroutines or event loop.\n'
+                        '  write instead: an ordinary `def`',
+    'AsyncFor': 'async for: this language has no coroutines or event loop.\n'
+                '  write instead: an ordinary `for`',
+    'AsyncWith': 'async with: this language has no coroutines or event loop.\n'
+                 '  write instead: an ordinary `with open(path) as f:`',
     'Raise': '',
     'Try': '',
 }
@@ -11121,8 +11205,8 @@ def _map_method(node, ctx, *, as_stmt=False):
 
 
 _ONE_ARG_GET = ('d.get(k) with one argument gives None for a missing key, and AIL has no None for '
-                'an int, float, str or bytes value; give the default: `d.get(k, -1)` (or "", '
-                '0.0), or test `k in d` first')
+                'an int, float, str or bytes value.\n'
+                '  write instead: give the default, `d.get(k, -1)` (or "" / 0.0), or test `k in d` first')
 
 
 def _map_need(node, ctx):
@@ -11465,12 +11549,11 @@ def _expr(node, ctx):
             # int64, so the way to key one by text is to compute an int64 FROM the text, which is
             # what the Benchmarks Game's own C k-nucleotide entry does (two bits per base, so an
             # 18-mer is 4**18 - 1 and fits).
-            raise Unsupported('%r is a str used where a number is needed; a str is not an int64 -- '
-                              'compare it, index it, slice it, concatenate it with +, measure it '
-                              'with len(), or return it (SEMANTICS.md section 31). To use text as '
-                              'a dict key, a list element or a set member, PACK it into an int64 '
-                              'yourself -- fold the characters into a number (code = code * B + '
-                              'digit) and use that' % node.id)
+            raise Unsupported('%r is a str used where a number is needed; a str is not an int64 '
+                              '(a list, set or dict of numbers cannot hold it).\n'
+                              '  write instead: a dict keyed by the str (`d: dict[str, int] = {}`, '
+                              '`d[%s] = 1`), a `list[str]`, or fold the characters into a number '
+                              '(`code = code * 31 + ord(c)`)' % (node.id, node.id))
         if t in ('array', BYTES):
             raise Unsupported('%r used as a value; index it, iterate it or measure it' % node.id)
         if t == SLIST:
@@ -11510,10 +11593,10 @@ def _expr(node, ctx):
             # of its own type and a container holds int64 only -- which is what a reader who wrote
             # `xs = ["a", "b"]` actually needs to be told.
             raise Unsupported('a str constant %r used where a number is needed; a str is a value of '
-                              'its own type (SEMANTICS.md section 31) and never an int64 -- in '
-                              'particular a list, set or dict holds int64, so a str can never be an '
-                              'element of one; PACK the text into an int64 (fold the characters '
-                              'into a number) and hold that instead' % (node.value,))
+                              'its own type and never an int64, so a list of numbers cannot hold it.\n'
+                              '  write instead: a `list[str]` (`names: list[str] = []`, '
+                              '`names.append(%r)`), a dict keyed by the str, or a number code '
+                              'for the text' % (node.value, node.value))
         if node.value is None and _NULLABLE:
             return '((void *)0)'
         if node.value is None:
@@ -11844,7 +11927,7 @@ def _expr(node, ctx):
                               'compiler does not pass a str/list-of-str value to another '
                               'compiled function -- use it directly (print it, compare it, '
                               'int() it) where it is read' % recv_id)
-        raise Unsupported('subscripting a %s' % t)
+        raise Unsupported('subscripting a %s' % (t,))
     if isinstance(node, ast.UnaryOp):
         if not isinstance(node.op, ast.Not) and _is_ref_kind(_etype(node.operand, ctx)):
             raise Unsupported('a unary numeric operation on a struct is unsupported')
@@ -12293,10 +12376,11 @@ def _contains(item, holder, ctx, negate):
         receiver = _map_inline(lambda: _str_value(holder, ctx), ctx)
         return '({ ail_str _item = %s; ail_str _holder = %s; int _found = ail_text_find_points(_holder, _item) >= 0; %s; })' % (needle, receiver, '!_found' if negate else '_found')
     if _is_str_expr(holder, ctx) or _is_str_expr(item, ctx):
-        raise Unsupported('`in` with a str; a str is never an element of a list, set or dict, so '
-                          'there is nothing here for `in` to mean unless BOTH sides are str '
-                          '(substring search, which IS built) -- refused by name rather than '
-                          'guessed (SEMANTICS.md section 31)')
+        raise Unsupported('`in` with a str; a str is never an element of a list, set or dict of '
+                          'numbers, so `in` only works when BOTH sides are str (substring search).\n'
+                          '  write instead: `"a" in text` for substrings; for membership in a '
+                          'collection of str use a `set[str]` or `dict[str, int]`; to test a '
+                          'byte value, compare ints (`b == 97`)')
     if isinstance(holder, ast.Name) and ctx.type_of(holder.id) == BYTES:
         # `find` returns an index, and 0 is a valid one -- the common `!= 0` wrapping used below
         # would read "found at the start" as "absent", so this builds the boolean itself.
@@ -14278,8 +14362,11 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
                     raise _argument_type_error('passing %s where %s() wants %s' % (at, fname, kind), fname, pname, index, kind, at)
                 if kind == INT and at == FLT:
                     raise _argument_type_error('passing a float to %s(), whose %r is an int64; this '
-                                               'language has no implicit truncation, so say int(...) if '
-                                               'that is what you mean' % (fname, pname), fname, pname, index, kind, at)
+                                               'language has no implicit truncation.\n'
+                                               '  write instead: `//` where the float came from `/` '
+                                               '(`%s(n // 2)`), otherwise `%s(int(x))` (truncates toward '
+                                               'zero), or annotate %r `float`'
+                                               % (fname, pname, fname, fname, pname), fname, pname, index, kind, at)
             out.append(_expr(arg, ctx))
         if len(ctx.pre) != pre_count:
             raise Unsupported('arguments to %s() require statement temporaries; bind them '
@@ -14615,7 +14702,10 @@ def _call(node, ctx):
         # own name, exactly as before, UNLESS `f` is one of `ctx.funcs`, in which case
         # `_bind_call_args` (reached from the `f in ctx.funcs` dispatch further down) resolves it
         # -- or refuses IT by name, parameter by parameter, rather than this one blanket message.
-        raise Unsupported('%s() with keyword arguments' % f)
+        raise Unsupported('%s() with keyword arguments is not built.\n'
+                          '  write instead: pass the arguments positionally%s'
+                          % (f, '; for a default, test `if xs:` before calling %s(xs)' % f
+                             if f in ('max', 'min') else ''))
     if builtin_len and len(a) == 1 and _is_sys_argv(a[0]):
         # argc, counted the way CPython counts it -- program name included -- so
         # `len(sys.argv) > 1` means the same thing on both sides.
@@ -14987,8 +15077,10 @@ def _call(node, ctx):
             return 'ail_str_to_float(%s)' % v
         return '((double)(%s))' % rec(a[0])
     if f == STR and STR not in ctx.funcs and STR not in ctx.classes:
-        raise Unsupported('str() used where a number is needed; str(<int>) builds a str VALUE '
-                          '(SEMANTICS.md section 31), and a str is not an int64')
+        raise Unsupported('str() used where a number is needed; str(<int>) builds a str VALUE, '
+                          'and a str is not an int64.\n'
+                          '  write instead: keep the number (`n`), or print/concatenate the text '
+                          '(`print("n=" + str(n))`)')
     if _is_chr_call(node, ctx):
         _str_value(node, ctx)
         raise Unsupported('chr() produces str, not a number')
@@ -15250,8 +15342,12 @@ def _call(node, ctx):
                           'list(...) is built as a statement or a plain argument: bind it first '
                           '(`let ys = list(xs);`); inside a comprehension or a conditional arm write '
                           '`[x for x in xs]`')
-    raise Unsupported('call to %s(); this compiler builds only the builtins SEMANTICS.md names, '
-                      'and refuses the rest by name rather than guessing at one' % f)
+    raise Unsupported('call to %s(); this compiler builds only the builtins it names, and '
+                      'refuses the rest by name rather than guessing at one.\n'
+                      '  write instead: %s'
+                      % (f, '`sys.exit(0)` (after `import sys`)' if f in ('exit', 'quit') else
+                         'define `%s` yourself with a `def` and call that, or use the builtin '
+                         'that does the job (len, sum, min, max, sorted, abs, range, int, float, str)' % f))
 
 
 FOLD_INIT = {'sum': ('0', '%s += %s;'), 'any': ('0', 'if (%s) { %s = 1; break; }'),
@@ -16002,7 +16098,9 @@ def _method(node, ctx, *, as_stmt=False):
         # silently (d.get(k, default=v) compiled as d.get(k) was the case found); .sort's own
         # shape consumes key=/reverse= through _sort_keywords and stays reachable.
         raise Unsupported('.%s() with keyword arguments (methods here take positional '
-                          'arguments only)' % m)
+                          'arguments only).\n'
+                          '  write instead: pass them positionally (`d.get(k, 0)`, not '
+                          '`d.get(k, default=0)`)' % m)
     c = ctx.cname(name)
     if m == 'append' and t == LIST and name in ctx.nlist and len(a) == 1:
         # `rows.append(r)` -- `rows` is a list of lists, so the value being appended must itself be
@@ -16176,7 +16274,7 @@ def _method(node, ctx, *, as_stmt=False):
         # numeric sink in this compiler.
         et = _etype(a[0], ctx)
         if et not in NUM:
-            raise Unsupported('a list of floats holds numbers; appending a %s would not fit' % et)
+            raise Unsupported('a list of floats holds numbers; appending a %s would not fit' % (et,))
         ctx.parts.add('FLIST')
         return 'ail_flist_push(&%s, (double)(%s))' % (c, _expr(a[0], ctx))
     if m == 'append' and t == SLIST and len(a) == 1:
@@ -16368,14 +16466,17 @@ def _method(node, ctx, *, as_stmt=False):
         return ('({ int64_t %s = %s; if (!ail_tab_has(&%s, %s)) ail_die("key error");'
                 ' ail_tab_del(&%s, %s); 0; })' % (tmp, k, c, tmp, c, tmp))
     if t == 'array':
-        raise Unsupported('%s.%s(): %r is a list parameter, which is read-only; to change it in a '
-                          'helper, ' 'keep the list in a struct field and pass the struct (`s.xs[i] = v` and `s.xs.append(v)` work), or build and return a new list' % (name, m, name))
+        raise Unsupported('%s.%s(): %r is a list parameter, which is read-only here.\n'
+                          '  write instead: build and return a new list (`out = %s.copy()`, change '
+                          '`out`, `return out`), or keep the list in a struct field and pass the '
+                          'struct (`s.xs[i] = v` and `s.xs.append(v)` work)' % (name, m, name, name))
     if m in _LIST_OP_NAMES and (t in (LIST, FLIST, SLIST, BLIST, 'array') or _is_olist_kind(t)):
         raise Unsupported('%s.%s(): list.%s is built when the list is known to be a list (annotate it as '
                           'list[...]) and the call is evaluated unconditionally -- not in the right operand '
                           'of and/or, an if-else arm or a comprehension; bind its result to a name first'
                           % (name, m, m))
-    raise Unsupported('%s.%s(): %s has no method %r here (or not with these arguments); %s'
+    raise Unsupported('%s.%s(): %s has no method %r here (or not with these arguments).\n'
+                      '  write instead: use a method that is built, or a loop (%s)'
                       % (name, m, _a(t), m, _METHOD_MENUS.get(t if t in _METHOD_MENUS else 'list' if t in (LIST, FLIST, SLIST, BLIST) else None,
                                                              'this compiler builds only the methods SEMANTICS.md '
                                                              'names for each kind, and refuses the rest by name')))
@@ -18799,10 +18900,24 @@ def _stmt_inner(node, ctx, ind):
                 if v0.slice.upper is not None:
                     hi = _expr(v0.slice.upper, ctx)
                 pre = _flush(ctx, pad)
+                if src_c == c:
+                    # `xs = xs[a:b]` -- the source is the destination: build the slice in a private
+                    # list first (clearing the destination would empty the source), then swap it in
+                    return (pre + '%s{ ail_list _sw = {0};\n' % pad
+                            + '%sail_list_slice_into(&_sw, &%s, %s, %s, %d);\n'
+                            % (pad, src_c, lo, hi, stv)
+                            + '%sail_list_free(&%s); %s = _sw; }\n' % (pad, c, c))
                 clear = '%sail_list_clear(&%s);\n' % (pad, c) if rebound else ''
                 return (pre + clear
                         + '%sail_list_slice_into(&%s, &%s, %s, %s, %d);\n'
                         % (pad, c, src_c, lo, hi, stv))
+            if (isinstance(v0.value, ast.Name)
+                    and (v0.value.id in ctx.strlist or v0.value.id in ctx.srowtypes
+                         or ctx.type_of(v0.value.id) in (STR, SLIST, SROW))):
+                # `rest = data[1:]` over a list of str: this branch copies int64 elements into an
+                # int list, which would build a list of int from str elements
+                raise Unsupported('a slice of a list of str bound to a name; the general path '
+                                  'builds it')
             c = ctx.declare(t.id, LIST)
             ctx.parts.add('LIST')
             lo, n2, elem, pre = _iter_plan(v0, ctx)
@@ -19996,11 +20111,17 @@ def _print_stmt(node, ctx, pad):
             # every run, so there is nothing faithful to print; name the fields to print instead.
             fields = list(ctx.classes[t[1]].field_types)[:4]
             base = a0.id if isinstance(a0, ast.Name) else 'v'
-            raise Unsupported('print() given a %s object, which has no printable form; print its fields '
-                               'instead, e.g. print(%s)' % (t[1], ', '.join(base + '.' + f for f in fields) or 'len(...)'))
+            raise Unsupported('print() given a %s object, which has no printable form.\n'
+                               '  write instead: print its fields, e.g. print(%s)'
+                               % (t[1], ', '.join(base + '.' + f for f in fields) or 'len(...)'))
+        elif t == EXCEPTION:
+            raise Unsupported('print() given an exception, which has no printable form here.\n'
+                               '  write instead: print a fixed text, `except ValueError: print("bad input")`')
         else:
-            raise Unsupported('print() given a %s, not a number or a str; print one element or '
-                               'one measurement of it instead (print(xs[0]), print(len(xs)))' % (t,))
+            raise Unsupported('print() given a %s, not a number or a str.\n'
+                               '  write instead: print an element or a measurement (`print(xs[0])`, '
+                               '`print(len(xs))`), or one line per element (`for x in xs: print(x)`)'
+                               % (_diagnostic_type(t) or t,))
     sepc = endc = None
     for kw in node.keywords:
         if kw.arg == 'sep':
@@ -20113,7 +20234,7 @@ def _assert_stmt(node, ctx, pad):
     if t in NUM:
         message = ast.copy_location(ast.Call(func=ast.Name(id='str', ctx=ast.Load()), args=[node.msg], keywords=[]), node.msg)
     elif t != STR:
-        raise Unsupported('assert given a %s message, not a number or str' % t)
+        raise Unsupported('assert given a %s message, not a number or str' % (t,))
     call = ast.copy_location(ast.Call(func=ast.Name(id='AssertionError', ctx=ast.Load()), args=[message], keywords=[]), node.msg)
     value = _exception_value(call, ctx)
     inner = _flush(ctx, pad + '    ')
@@ -22452,7 +22573,9 @@ def _guard_compile_body(node, ctx, ind, plan):
 
 def _while(node, ctx, ind):
     if node.orelse:
-        raise Unsupported('while-else is unsupported')
+        raise Unsupported('while-else is unsupported.\n'
+                          '  write instead: a flag set before the loop, `done = True` when the loop '
+                          'ends normally, and `if done:` after it')
     matched = _match_stdin_while_int_loop(node, ctx)
     if matched is not None:
         return _emit_stdin_while_int_loop(node, matched, ctx, ind)
@@ -24044,7 +24167,10 @@ def _for_inner_impl(node, ctx, ind):
             return head + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n'
 
     if not isinstance(node.target, ast.Name):
-        raise Unsupported('a tuple target over a sequence')
+        raise Unsupported('a tuple target over a sequence (`for i, x in ...` is built for '
+                          'enumerate(xs), zip(a, b) and d.items() only).\n'
+                          '  write instead: `for i in range(len(xs)):` and read `xs[i]`; for '
+                          'enumerate(xs, 1) use `for i in range(len(xs)):` and print `i + 1`')
     if isinstance(it, ast.Name) and it.id in ctx.skeys:
         # `for k in s:` (a str-keyed SET) or `for k in d:` (a str-keyed DICT -- Python iterates
         # its keys, the bare-name counterpart of `.keys()` above) -- mechanisms 4/5. `.order`
@@ -24370,7 +24496,10 @@ def _seed_local_annotations(fn, ctx):
                 raise Unsupported('conflicting local record annotation for %r' % node.target.id)
             kind = FLIST if all(field == FLT for field in ctx.local_records[node.target.id]) else LIST
         if kind not in (*NUM, EXCEPTION, STR, BYTES, BLIST, BYTEARRAY, BINARYFILE, TCPSOCKET, LIST, FLIST, SLIST, *MAPS) and not callable_types.valid(kind) and not (_is_olist_kind(kind) or _is_obj_kind(kind) and _managed_obj(kind, ctx)):
-            raise Unsupported('unsupported local annotation %s' % ast.unparse(node.annotation))
+            raise Unsupported('unsupported local annotation %s.\n'
+                              '  write instead: a plain int, float, str, bytes, list[int], list[str], '
+                              'dict[str, int], set[int] or a class name; keep other values in '
+                              'parallel lists' % ast.unparse(node.annotation))
         name = node.target.id
         if name in declared and declared[name] != kind or name in ctx.kind and ctx.kind[name] != kind:
             raise Unsupported('conflicting local annotation for %r' % name)
@@ -24466,7 +24595,8 @@ def _check_local_assignment(name, value, ctx):
     if actual == NULLK and _is_obj_kind(kind):
         actual = kind                        # `x = None` for a struct-typed name
     if actual != kind:
-        raise Unsupported('%r is declared %s; assigning %s is unsupported' % (name, kind, actual))
+        raise Unsupported('%r is declared %s; assigning %s is unsupported.\n'
+                          '  write instead: %s' % (name, kind, actual, _assign_fix(kind, actual)))
 
 
 def _parallel_value_settled_later(value, ctx, container_names):
@@ -25986,7 +26116,7 @@ def _return_kind(value, ctx):
         for e in value.elts:
             et = _etype(e, ctx)
             if et not in NUM:
-                raise Unsupported('a tuple element must be int or float, not %s' % et)
+                raise Unsupported('a tuple element must be int or float, not %s' % (et,))
             types.append(et)
         return (TUP, tuple(types))
     return _etype(value, ctx)
@@ -28337,10 +28467,17 @@ def _scan_classes(classdefs):
         classes[c.name] = ClassInfo(c.name)
     for c in classdefs:
         if c.bases or c.keywords:
+            if any(isinstance(b, ast.Name) and b.id.endswith(('Error', 'Exception')) for b in c.bases):
+                raise _refusal_at(c,
+                    'inheritance (class %r names a base class); a user-defined exception class is '
+                    'not built here.\n'
+                    '  write instead: raise a built-in exception (`raise ValueError("negative")`) '
+                    'and catch it by that name (`except ValueError:`)' % c.name)
             raise _refusal_at(c,
-                'inheritance (class %r names a base class); a class here lowers to a fixed-offset '
-                'C struct with no vtable, so there is no dynamic dispatch a base class could mean '
-                '-- SEMANTICS.md section 25' % c.name)
+                'inheritance (class %r names a base class); a class here is a fixed-offset '
+                'C struct with no vtable.\n'
+                '  write instead: a standalone class that holds the base as a field '
+                '(`self.base = Base(...)`) or repeats its fields; no base class' % c.name)
         if c.decorator_list:
             raise _refusal_at(c, 'a decorator on class %r' % c.name)
         info = classes[c.name]
@@ -28358,7 +28495,10 @@ def _scan_classes(classdefs):
                 raise _refusal_at(stmt,
                     'a decorator on %s.%s (classmethod, staticmethod, property, or any other '
                     'method decorator); every method here is a plain instance method with a '
-                    'fixed C signature' % (c.name, stmt.name))
+                    'fixed C signature.\n'
+                    '  write instead: a plain method (`def %s(self, x: int) -> int`), or a top-level '
+                    '`def %s(x: int) -> int` called as `%s(3)`' % (c.name, stmt.name, stmt.name,
+                                                                    stmt.name, stmt.name))
             if stmt.name == '__init__':
                 init_fn = stmt
                 continue
@@ -28370,7 +28510,9 @@ def _scan_classes(classdefs):
         if init_fn is None:
             raise _refusal_at(c,
                 'class %r has no __init__; its shape (which fields it has, and their types) '
-                'cannot be determined at compile time without one' % c.name)
+                'cannot be determined at compile time without one.\n'
+                '  write instead: `def __init__(self, x: int) -> None: self.x = x`, or a '
+                '`@dataclass` with annotated fields' % c.name)
         _check_plain_args(init_fn, c.name, '__init__')
         for mname, mfn in info.methods.items():
             _check_plain_args(mfn, c.name, mname)
@@ -29287,7 +29429,9 @@ def _lift_in_function(outer, counter, nested_captures):
             if isinstance(n, ast.Nonlocal):
                 raise Unsupported(
                     'nonlocal in a nested function (%r) is not available: a captured local cannot '
-                    'be rebound' % inner.name)
+                    'be rebound.\n'
+                    '  write instead: pass the value in and return the new one '
+                    '(`total = add(total, n)`), or make the helper a top-level def' % inner.name)
             if isinstance(n, ast.Global):
                 raise Unsupported('global in a nested function (%r) is not available' % inner.name)
 
@@ -31201,8 +31345,10 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     classes = _scan_classes(classdefs) if classdefs else {}
     for _n in sorted(_NULLABLE):
         if _n not in classes:
-            refusal = Unsupported('%s | None: only a struct type can be None; use a sentinel (-1, "") '
-                                  'or raise for other types' % _n)
+            refusal = Unsupported('%s | None: only a struct type can be None.\n'
+                                  '  write instead: return a sentinel (`-1` or `""`) and compare with it, '
+                                  'or raise an exception when there is no value; `Node | None` is fine '
+                                  'for a class' % _n)
             refusal.source_line = _NULLABLE_LINES.get(_n)
             raise refusal
         classes[_n].init_ctx.parts.add('DIE')
@@ -32665,10 +32811,11 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     """
     a = fn.args
     if a.posonlyargs or a.kwonlyargs or a.vararg or a.kwarg or (a.defaults and is_method):
-        raise _refusal_at(fn, 'the function must take plain positional arguments; list every '
-                              'parameter by name -- *args, **kwargs, positional-only and '
-                              'keyword-only parameters are all refused, and a method may not take '
-                              'a default either')
+        raise _refusal_at(fn, 'the function must take plain positional arguments: *args, **kwargs, '
+                          'positional-only and keyword-only parameters are refused, and a method '
+                          'may not take a default.\n'
+                          '  write instead: list every parameter by name '
+                          '(`def f(a: int, b: int)`); pass a list for a variable number of values')
     # AIL_TASK_callconv_20260915.md scope item 1: a default is accepted only when it is a
     # compile-time constant of a kind this language already has (int, float or bool -- `_expr`'s
     # own Constant handling already maps a bool to a plain 0/1 int64) -- anything else (a call, a
@@ -32682,8 +32829,9 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
                                    and isinstance(_dflt.op, (ast.USub, ast.UAdd))) else _dflt
         if not (isinstance(_dnode, ast.Constant) and isinstance(_dnode.value, (int, float, bool))):
             raise Unsupported('%s(): the default for %r must be a compile-time int, float or '
-                              'bool constant; drop the default and pass the value at every call '
-                              'site instead' % (fn.name, _pname))
+                              'bool constant (a list, dict, str or None default is refused).\n'
+                              '  write instead: drop the default and pass the value at every call '
+                              'site (`%s(x, [])`)' % (fn.name, _pname, fn.name))
         if isinstance(_dnode.value, float) and not isinstance(_dnode.value, bool) \
                 and _pk_settled.get(_pname) == INT:
             raise Unsupported('%s(): the default for %r is a float but the parameter is int; '

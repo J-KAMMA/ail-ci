@@ -2,7 +2,8 @@
 
 Look-up sections behind AIL_REFERENCE.md, whose last line gives each section's line range here:
 read only the slice you need (`sed -n A,Bp AIL_REFERENCE_MORE.md`). A refusal names the construct,
-the rewrite and `file:line:col`.
+the rewrite and `file:line:col`. Most examples use the brace surface (`fn`, `let`, `;`, braces);
+write them in Python as usual (`struct` is a `@dataclass`, `impl` its methods; brace `let ys = xs;` copies).
 
 ## Commands
 

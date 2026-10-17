@@ -799,17 +799,16 @@ def _refuse(P, hit):
         dst, src = a, b
         raise P.Unsupported(
             'line %d: `%s = %s` makes a second name for the same container, and one of the two is '
-            'written while the other is read afterwards. CPython shares the object there (a write '
-            'through one name shows in the other); this compiler would copy and print something '
-            'else, so it refuses rather than differ. If a copy was meant, write `%s = %s.copy()` '
-            '(or list(%s) / dict(%s) / set(%s) / bytearray(%s)); if sharing was meant, '
-            'keep a single name or pass the container to a function'
-            % (line, dst, src, dst, src, src, src, src, src))
+            'written while the other is read afterwards. CPython shares the object there; this '
+            'compiler would copy and print something else, so it refuses rather than differ.\n'
+            '  write instead: `%s = %s.copy()` for a copy (or list(%s) / dict(%s) / set(%s)); to '
+            'share, keep a single name or pass the container to a function'
+            % (line, dst, src, dst, src, src, src, src))
     raise P.Unsupported(
         'line %d: `%s` makes a second reference to the same container (`%s` and `%s` are one '
         'list/dict/set, or one holds the other), and one of the two is written while the other is '
-        'read afterwards. CPython shares the object there (a write through one shows in the other); '
-        'this compiler would copy and print something else, so it refuses rather than differ. If a '
-        'copy was meant, store `%s.copy()` (or list(%s) / dict(%s) / set(%s) / bytearray(%s)) '
-        'instead; if sharing was meant, keep a single name or pass the container to a function'
-        % (line, text, a, b, a, a, a, a, a))
+        'read afterwards. CPython shares the object there; this compiler would copy and print '
+        'something else, so it refuses rather than differ.\n'
+        '  write instead: store `%s.copy()` (or list(%s) / dict(%s) / set(%s)) for a copy; to share, '
+        'keep a single name or pass the container to a function'
+        % (line, text, a, b, a, a, a, a))
