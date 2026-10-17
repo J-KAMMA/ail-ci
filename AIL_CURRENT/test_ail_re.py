@@ -457,13 +457,89 @@ def fuzz_program(seed, count, subjects, bytes_mode=False):
     parts += ["    print(total)", "    return 0", "", "", "main()", ""]
     return "\n".join(parts), len(cases), len(subs)
 
+FAST_PATTERNS = [
+    (r"[0-9]+", 0), (r"\b[a-z]{5}\b", 0), (r"(?:fox|dog) \d+", 0), (r"\s+", 0), (r"[a-z]+[0-9]*", 0),
+    (r"a|ab", 0), (r"(a|ab)(c|bcd)(d*)", 0), (r"x*", 0), (r"^\w+", 0), (r"\w+$", 0), (r"^\w", re.M),
+    (r"\w$", re.M), (r"\bfoo\b|\bbar\B", 0), (r"ab+c", re.I), (r"a.*?c", 0), (r"a.*c", re.S),
+    (r"(\d+)-(\d+)?", 0), (r"\B", 0), (r"\b", 0), (r"$", 0), (r"^", 0), (r"^", re.M), (r"$", re.M),
+    (r"[^a]+", 0), (r"\A\w|\w\Z", 0), (r"\d*", 0), (r"(?:ab|a)+?c?", 0), (r"[a-z]+\d", 0),
+    (r"\n", 0), (r"\.\s*$", 0), (r"x{2,3}", 0), (r"(?P<w>[a-z]+) (?P=w)?" if False else r"(?P<w>[a-z]+) ", 0),
+    (r"\xe9+", 0), (r"[\xe9a]\w", re.A), (r"fox\s+\w+", 0), (r"ab", 0), (r"a(bc)d", 0), (r"x\d", 0), (r"\n\n", 0),
+    (r"foo", re.I), (r"o", 0), (r"\xe91", 0), (r"(?:ab)+c", 0), (r"zzz", 0), (r"b+a", 0),
+]
+
+FAST_SUBJECTS = [
+    "", "a", "ab", "foo bar foo", "the quick brown fox 12 dog 345x", "ab abc abcd abcdd", "x\n", "\n", "a\nb\n",
+    "  lead and trail  ", "12-34 5-", "xx xxx xxxx", "a.\n", "bar barn foobar foo", "AbC aBc", "\n\nab\n\n",
+    "caf\u00e9 \u00e91 \u0663x", "a" * 40 + "1" + "b" * 40, "word " * 30,
+]
+
+
+def fast_program(bytes_mode):
+    parts = ["import re", ""]
+    cases = 0
+    subjects = [s.encode("latin-1", "replace") if bytes_mode else s for s in FAST_SUBJECTS]
+    for pattern, flags in FAST_PATTERNS:
+        if bytes_mode:
+            if not pattern.isascii():
+                continue
+            flags &= ~re.A
+        compiled = usable(pattern, flags, bytes_mode)
+        if compiled is None:
+            continue
+        chosen = subjects
+        if flags & re.I and not bytes_mode:
+            chosen = [s for s in subjects if s.isascii()]
+        parts.append(case_function(cases, pattern, flags, compiled, bytes_mode, chosen))
+        cases += 1
+    parts += ["def main() -> int:", "    total = 0"]
+    parts += ["    total += case_%d()" % i for i in range(cases)]
+    parts += ["    print(total)", "    return 0", "", "", "main()", ""]
+    return "\n".join(parts), cases
+
+
+def long_text_program():
+    """Quadratic-looking scans (a failed start rescans its whole run) must switch to the linear engine."""
+    return "\n".join([
+        "import re", "", "",
+        "def main() -> int:",
+        "    s = 'a' * 3000 + '1 ' + 'b' * 3000 + ' c' * 500",
+        "    print(len(re.findall(r'[a-z]+\\d', s)), len(re.findall(r'[a-z]+ ', s)))",
+        "    print(re.search(r'[a-z]+\\d', s).start(0))",
+        "    t = 'ab' * 4000 + 'c'",
+        "    print(len(re.findall(r'(?:ab)*c', t)), len(re.split(r'b+a', t)), len(re.sub(r'a+\\w?', '-', t)))",
+        "    u = 'x1 yz ' * 4000",
+        "    print(len(re.findall(r'[a-z]\\d', u)), len(re.split(r'\\s+', u)), len(re.sub(r'1 y', '-', u)), len(re.sub(r'(x)(1)', r'\\2\\1', u)))",
+        "    k = 0",
+        "    for m in re.finditer(r'(\\d) (y)', u):",
+        "        k += m.start(2)",
+        "    print(k, re.search(r'z x1', u).start(0), re.search(r'q', u) is None, re.fullmatch(r'(?:x1 yz )*', u) is not None)",
+        "    w = 'caf\u00e9 x1 ' * 3000",
+        "    print(len(re.findall(r'x\\d', w)), len(re.split(r'\\s+', w)), len(re.sub(r'x1', '-', w)))",
+        "    return 0", "", "", "main()", ""])
+
+
+def big_text_program():
+    """Megabyte texts built by repetition (no ASCII mark; one non-ASCII): every scan has to stay linear -- a
+    slice or find that counts code points from the start of the text per match takes minutes here."""
+    return "\n".join([
+        "import re", "", "",
+        "def main() -> int:",
+        "    w = 'the quick brown fox 12 caf\\u00e9 ' * 60000",
+        "    print(len(re.findall(r'fox \\d+', w)), len(re.findall(r'[0-9]+', w)), len(re.split(r'\\s+', w)), "
+        "len(re.sub(r'fox', 'cat', w)))",
+        "    a = 'ab cd 12 ' * 150000",
+        "    print(len(re.findall(r'\\d+', a)), len(re.split(r'\\s+', a)), len(re.sub(r'cd', 'x', a)), "
+        "len(re.findall(r'\\bab\\b', a)), len(re.findall(r'ab c', a)))",
+        "    return 0", "", "", "main()", ""])
+
 
 class ReTests(unittest.TestCase):
-    def same_as_cpython(self, text, name, stdin=b"", minimum_lines=1):
+    def same_as_cpython(self, text, name, stdin=b"", minimum_lines=1, run_timeout=600):
         with tempfile.TemporaryDirectory() as directory:
             built, source, exe = compile_python(directory, text, name)
             self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
-            ran = subprocess.run([str(exe)], input=stdin, capture_output=True, timeout=600)
+            ran = subprocess.run([str(exe)], input=stdin, capture_output=True, timeout=run_timeout)
             expected = subprocess.run([sys.executable, str(source)], input=stdin, capture_output=True, timeout=600)
             self.assertEqual(expected.returncode, 0, expected.stderr)
             self.assertGreaterEqual(expected.stdout.count(b"\n"), minimum_lines)
@@ -515,6 +591,31 @@ class ReTests(unittest.TestCase):
             sys.path.insert(0, str(ROOT))
             import ail_syntax
             self.assertNotIn("_ail_re_", ail_syntax.python_surface(text))
+
+    def test_dfa_fast_paths_match_cpython(self):
+        text, cases = fast_program(False)
+        self.assertGreaterEqual(cases, 30)
+        self.same_as_cpython(text, "re_fast", minimum_lines=cases * 10)
+
+    def test_dfa_fast_paths_match_cpython_bytes(self):
+        text, cases = fast_program(True)
+        self.assertGreaterEqual(cases, 28)
+        self.same_as_cpython(text, "re_fast_bytes", minimum_lines=cases * 10)
+
+    def test_failed_starts_fall_back_to_the_linear_engine(self):
+        self.same_as_cpython(long_text_program(), "re_long", minimum_lines=3)
+
+    def test_dfa_tables_exist_for_the_common_shapes(self):
+        for pattern in (r"[0-9]+", r"\s+", r"\b[a-z]{5}\b", r"(?:fox|dog) \d+", r"[a-z]+[0-9]*", r"a|ab"):
+            program = relib.Program(pattern, 0)
+            self.assertIsNotNone(program.build_dfa(), pattern)
+        self.assertIsNone(relib.Program(r"a(?=b)", 0).build_dfa())          # lookaround: the Pike VM
+        self.assertIsNone(relib.Program(r"(a|b)*a(a|b){9}", 0).build_dfa())  # too many states
+
+
+    def test_megabyte_texts_stay_linear(self):
+        self.same_as_cpython(big_text_program(), "re_big", minimum_lines=2, run_timeout=120)
+
 
     def test_generated_str_patterns_match_cpython(self):
         total = 0

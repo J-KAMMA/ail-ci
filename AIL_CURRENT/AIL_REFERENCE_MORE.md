@@ -332,8 +332,13 @@ language itself (leftmost-first, CPython's priority), so groups and spans equal 
   `findall` with one group returns that group ('' when it did not take part).
 - `sub(pattern, repl, s[, count])`: a literal `repl` may use `\1`, `\g<1>`, `\g<name>`, `\n`;
   a non-literal `repl` must have no backslash; a function is not built. Empty matches follow CPython 3.7+.
-- Cost: matching is O(len(pattern) x len(text)); one call to `fullmatch` on a short str is about as fast
-  as CPython's, bulk `findall` over megabytes is a few times slower.
+- Cost: matching is O(len(pattern) x len(text)). On an ASCII str or a bytes subject (and a pattern without
+  lookaround) a DFA built with the program finds the spans, so scans over megabytes (`findall`, `finditer`,
+  `sub`, `split`, `search`) and short `fullmatch` calls run at or below CPython's time, with 2 to 5 times
+  fewer CPU cycles; groups are then read by the Pike VM on the matched span only. A non-ASCII str, a
+  lookaround, or a `$` before a final newline uses the slower Pike VM (a few times slower than CPython on
+  megabytes). The result lists of `findall`/`split` cost about 650 instructions per element in the
+  runtime's list-of-str return, whatever the engine.
 - `for k, v in re.findall(P, s):` with several groups is a loop over the matches (the names may not be used
   outside the loop); `m.group(k) or d` and `m.group(k) is None` read the group as CPython's None would.
 - Refused by name (the compiler prints a `note:` line): backreferences, groups inside lookaround,
