@@ -1,0 +1,36 @@
+```python
+import sys
+
+def rotate(xs: list[int], k: int) -> list[int]:
+    n: int = len(xs)
+    r: int = k % n
+    res: list[int] = []
+    for i in range(n - r, n):
+        res.append(xs[i])
+    for i in range(0, n - r):
+        res.append(xs[i])
+    return res
+
+def main() -> int:
+    k: int = 0
+    nums: list[int] = []
+    first: bool = True
+    for line in sys.stdin:
+        if first:
+            k = int(line.strip())
+            first = False
+        else:
+            s: str = line.strip()
+            if len(s) > 0:
+                for t in s.split():
+                    nums.append(int(t))
+    out: list[int] = rotate(nums, k)
+    parts: list[str] = []
+    for v in out:
+        parts.append(str(v))
+    print(" ".join(parts))
+    return 0
+
+if __name__ == "__main__":
+    main()
+```

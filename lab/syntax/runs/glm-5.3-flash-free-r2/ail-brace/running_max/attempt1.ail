@@ -1,0 +1,26 @@
+```
+fn main() -> int {
+    for line in sys.stdin {
+        let f = line.split();
+        if len(f) == 0 {
+            print("");
+        } else {
+            let maxs: list[str] = [];
+            let cur = 0;
+            let first = true;
+            for tok in f {
+                let v = int(tok);
+                if first {
+                    cur = v;
+                    first = false;
+                } elif v > cur {
+                    cur = v;
+                }
+                maxs.append(str(cur));
+            }
+            print(" ".join(maxs));
+        }
+    }
+    return 0;
+}
+```

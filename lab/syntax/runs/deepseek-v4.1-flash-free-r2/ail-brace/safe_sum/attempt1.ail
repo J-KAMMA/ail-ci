@@ -1,0 +1,29 @@
+```
+fn main() -> int {
+    let data = "";
+    for line in sys.stdin {
+        data += line;
+    }
+    let tokens = data.split();
+    let total = 0;
+    for t in tokens {
+        let neg = false;
+        let body = t;
+        if len(t) > 0 and t[0] == "-" {
+            neg = true;
+            body = t[1:];
+        }
+        if len(body) > 0 and body.isdigit() {
+            if neg {
+                total -= int(body);
+            } else {
+                total += int(body);
+            }
+        } else {
+            print("bad:", t);
+        }
+    }
+    print(f"sum={total}");
+    return 0;
+}
+```

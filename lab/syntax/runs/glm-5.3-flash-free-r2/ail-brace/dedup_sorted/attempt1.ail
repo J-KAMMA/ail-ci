@@ -1,0 +1,31 @@
+```ail
+fn main() -> int {
+    let xs: list[int] = [];
+    for line in sys.stdin {
+        let parts = line.split();
+        for tok in parts {
+            try {
+                let num = int(tok);
+                xs.append(num);
+            }
+            except ValueError as err {
+                let skip = 0;
+            }
+        }
+    }
+    xs.sort();
+    let donefirst = false;
+    let prev = 0;
+    for v in xs {
+        if not donefirst {
+            print(v);
+            donefirst = true;
+        }
+        elif v != prev {
+            print(v);
+        }
+        prev = v;
+    }
+    return 0;
+}
+```

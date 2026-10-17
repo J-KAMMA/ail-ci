@@ -1,0 +1,28 @@
+```ail
+fn main() -> int {
+    let lines: list[str] = [];
+    for line in sys.stdin {
+        lines.append(line.strip());
+    }
+    let k = int(lines[0]);
+    let parts = lines[1].split();
+    let d: dict[int, str] = {};
+    let idx = 0;
+    for p in parts {
+        d[idx] = p;
+        idx += 1;
+    }
+    let n = idx;
+    let r = k % n;
+    let out: dict[int, str] = {};
+    for i, v in d.items() {
+        out[(i + r) % n] = v;
+    }
+    let res: list[str] = [];
+    for key in sorted(out) {
+        res.append(out[key]);
+    }
+    print(" ".join(res));
+    return 0;
+}
+```
