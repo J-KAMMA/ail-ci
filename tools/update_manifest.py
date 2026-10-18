@@ -42,10 +42,17 @@ def main():
             manifest["sha256"][name] = digest
             if name in manifest["files"]:
                 manifest["files"][name] = digest
-    if (stale or unpinned) and not check:
+    # A union merge can list a file twice in sdk_files, which export_sdk refuses.
+    listed = manifest.get("sdk_files", [])
+    doubled = sorted({n for n in listed if listed.count(n) > 1})
+    for name in doubled:
+        print(("duplicate sdk_files " if check else "deduplicated sdk_files ") + name)
+    if doubled and not check:
+        manifest["sdk_files"] = list(dict.fromkeys(listed))
+    if (stale or unpinned or doubled) and not check:
         path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + ("\n" if raw.endswith(b"\n") else ""),
                         encoding="utf-8")
-    return 1 if check and (stale or unpinned) else 0
+    return 1 if check and (stale or unpinned or doubled) else 0
 
 if __name__ == "__main__":
     raise SystemExit(main())

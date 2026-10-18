@@ -73,7 +73,7 @@ BUILT = ('Counter(iterable or mapping) / update(iterable or mapping) / most_comm
          'index, remove, insert, reverse, copy, len, indexing, in, iteration, maxlen=); OrderedDict with '
          'move_to_end(k) and popitem(); str or int keys, int, float or str values (list[int|float|str] rows for '
          'defaultdict(list)); tuples of int, float, bool or str as Counter / defaultdict / OrderedDict keys, '
-         'deque elements and defaultdict(list|set) rows. Not built: namedtuple, ChainMap, UserDict, '
+         'deque elements and defaultdict(list|set) rows. Not built: UserDict, namedtuple(rename=), '
          'defaultdict(bool|<container>), tuples of tuples or containers, deque slicing, == on collections, '
          'collections in class fields or module globals')
 

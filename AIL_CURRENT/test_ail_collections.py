@@ -23,7 +23,7 @@ Built (python/pkg-v12/collib.py lowers them before the surface pass; see AIL_REF
   (`deque([(1, 2)])`, `Counter({(0, 1): 2})`, `defaultdict(<class 'int'>, {...})`, `OrderedDict({...})`).
   The pass runs before the tuple lowering (tuplib.py): the helpers are written with `tuple[...]` annotations,
   which the tuple pass then turns into classes and tables.
-Refused by name: namedtuple, defaultdict(bool | dict | Counter | lambda: <expression>), float keys, nested
+Refused by name: namedtuple(rename=), defaultdict(bool | dict | Counter | lambda: <expression>), float keys, nested
 tuples, == on collections, q.maxlen, d.default_factory, deque slices, OrderedDict(items), a collection in a
 class field or at module level, most_common as a list of pairs, d[k] = <existing list>, a loop that changes the
 collection it walks, Counter.subtract, del d[k] on defaultdict(list) / (set), print of a defaultdict(set) or of
@@ -792,7 +792,7 @@ REFUSALS = {}
 REFUSALS['namedtuple'] = (r'''from collections import namedtuple
 
 
-P = namedtuple("P", "x y")
+P = namedtuple("P", "x y", rename=True)
 
 def main() -> int:
     p = P(1, 2)
@@ -963,14 +963,6 @@ def main() -> int:
 
 main()
 ''', 'subtract')
-REFUSALS['chainmap'] = (r'''from collections import ChainMap
-
-
-def main() -> int:
-    return 0
-
-main()
-''', 'ChainMap')
 REFUSALS['ddl_del'] = (r'''from collections import Counter, defaultdict, deque, OrderedDict
 
 

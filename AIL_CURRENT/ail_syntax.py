@@ -135,6 +135,17 @@ def _threadlib():
     return _threadlib.module
 
 
+def _stdlib5():
+    """python/pkg-v12/stdlib5.py (library batch 5: fractions, enum, namedtuple, random.Random, ... lowered first)."""
+    if not hasattr(_stdlib5, "module"):
+        here = str(Path(__file__).parent / "python" / "pkg-v12")
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import stdlib5
+        _stdlib5.module = stdlib5
+    return _stdlib5.module
+
+
 def _stdlib4():
     """python/pkg-v12/stdlib4.py (library batch 4: csv, datetime, ... lowered before the other source passes)."""
     if not hasattr(_stdlib4, "module"):
@@ -779,13 +790,16 @@ _MATH_ONE = {'sin': False, 'cos': False, 'tan': False, 'asin': False, 'acos': Fa
              'log10': False, 'cbrt': False}
 _MATH_PLAIN_TWO = ('atan2', 'copysign', 'hypot')
 _MATH_PREDICATES = ('isnan', 'isinf', 'isfinite')
+_MATH_INT_TWO = ('comb', 'perm', 'lcm')
+_MATH_LIST_ONE = ('fsum', 'prod')
 _MATH_CALLS = ('sqrt', 'floor', 'ceil', 'isqrt', 'gcd', 'fabs', 'trunc', 'degrees', 'radians', 'factorial',
-               'pow', 'fmod', *_MATH_ONE, *_MATH_PLAIN_TWO, *_MATH_PREDICATES)
-_MATH_BUILT = ('math.sqrt, floor, ceil, trunc, isqrt, gcd (two arguments), fabs, factorial, pow, fmod, hypot, '
+               'pow', 'fmod', *_MATH_INT_TWO, *_MATH_LIST_ONE, *_MATH_ONE, *_MATH_PLAIN_TWO, *_MATH_PREDICATES)
+_MATH_BUILT = ('math.sqrt, floor, ceil, trunc, isqrt, gcd and lcm (two arguments), comb, perm (two arguments), '
+               'fabs, factorial, pow, fmod, hypot, '
                'copysign, atan2, degrees, radians, isnan, isinf, isfinite, sin, cos, tan, asin, acos, atan, '
                'sinh, cosh, tanh, asinh, acosh, atanh, exp, exp2, expm1, log (one or two arguments), log1p, '
                'log2, log10, cbrt and the constants math.pi, math.e, math.tau, math.inf, math.nan; '
-               'math.prod, fsum, comb, perm, lcm, dist, erf, gamma and the rest are not built')
+               'fsum (a list of floats), prod (a list of ints), modf; dist, erf, gamma and the rest are not built')
 # Exact CPython results: sqrt keeps -0.0 and raises ValueError below zero, isqrt and gcd are
 # integer-only (no float rounding reaches the answer).
 _MATH_HELPERS = {
@@ -910,7 +924,194 @@ _MATH_HELPERS['factorial'] = (
     '        r = r * i\n'
     '        i += 1\n'
     '    return r\n')
-_MATH_DEPS = {'log2args': ('log',)}
+# comb / perm / lcm of two ints, CPython's results and error messages; the running product is divided by the
+# gcd first so an intermediate only overflows int64 when the answer is near it
+_MATH_HELPERS['comb'] = (
+    'def _ail_math_comb(n: int, k: int) -> int:\n'
+    '    if n < 0:\n'
+    '        raise ValueError("n must be a non-negative integer")\n'
+    '    if k < 0:\n'
+    '        raise ValueError("k must be a non-negative integer")\n'
+    '    if k > n:\n'
+    '        return 0\n'
+    '    if k > n - k:\n'
+    '        k = n - k\n'
+    '    r = 1\n'
+    '    i = 1\n'
+    '    while i <= k:\n'
+    '        top = n - k + i\n'
+    '        g = _ail_math_gcd(top, i)\n'
+    '        r = r // (i // g) * (top // g)\n'
+    '        i += 1\n'
+    '    return r\n')
+_MATH_HELPERS['perm'] = (
+    'def _ail_math_perm(n: int, k: int) -> int:\n'
+    '    if n < 0:\n'
+    '        raise ValueError("n must be a non-negative integer")\n'
+    '    if k < 0:\n'
+    '        raise ValueError("k must be a non-negative integer")\n'
+    '    if k > n:\n'
+    '        return 0\n'
+    '    r = 1\n'
+    '    i = 0\n'
+    '    while i < k:\n'
+    '        r = r * (n - i)\n'
+    '        i += 1\n'
+    '    return r\n')
+_MATH_HELPERS['lcm'] = (
+    'def _ail_math_lcm(a: int, b: int) -> int:\n'
+    '    if a == 0 or b == 0:\n'
+    '        return 0\n'
+    '    return abs(a // _ail_math_gcd(a, b) * b)\n')
+
+# math.fsum (CPython's Shewchuk partials and its final rounding step; a non-finite input is summed plainly),
+# math.prod of ints, and textwrap.wrap / fill / dedent for the default options. Text with a hyphen or a tab is a
+# loud RuntimeError: CPython may break a line after a hyphen and expands tabs, neither of which is built.
+_MATH_HELPERS['fsum'] = (
+    'def _ail_math_fsum(xs: list[float]) -> float:\n'
+    '    plain = 0.0\n'
+    '    finite = True\n'
+    '    for v in xs:\n'
+    '        plain += v\n'
+    '        if v - v != 0.0:\n'
+    '            finite = False\n'
+    '    if not finite:\n'
+    '        return plain\n'
+    '    partials = [0.0] * (len(xs) + 1)\n'
+    '    m = 0\n'
+    '    for v in xs:\n'
+    '        x = v\n'
+    '        i = 0\n'
+    '        j = 0\n'
+    '        while j < m:\n'
+    '            y = partials[j]\n'
+    '            if abs(x) < abs(y):\n'
+    '                t = x\n'
+    '                x = y\n'
+    '                y = t\n'
+    '            hi = x + y\n'
+    '            lo = y - (hi - x)\n'
+    '            if lo != 0.0:\n'
+    '                partials[i] = lo\n'
+    '                i += 1\n'
+    '            x = hi\n'
+    '            j += 1\n'
+    '        if x != 0.0:\n'
+    '            partials[i] = x\n'
+    '            i += 1\n'
+    '        m = i\n'
+    '    n = m\n'
+    '    hi = 0.0\n'
+    '    if n > 0:\n'
+    '        n -= 1\n'
+    '        hi = partials[n]\n'
+    '        lo = 0.0\n'
+    '        while n > 0:\n'
+    '            x = hi\n'
+    '            n -= 1\n'
+    '            y = partials[n]\n'
+    '            hi = x + y\n'
+    '            yr = hi - x\n'
+    '            lo = y - yr\n'
+    '            if lo != 0.0:\n'
+    '                break\n'
+    '        if n > 0 and ((lo < 0.0 and partials[n - 1] < 0.0) or (lo > 0.0 and partials[n - 1] > 0.0)):\n'
+    '            y = lo * 2.0\n'
+    '            x = hi + y\n'
+    '            yr = x - hi\n'
+    '            if y == yr:\n'
+    '                hi = x\n'
+    '    return hi\n')
+_MATH_HELPERS['prod'] = (
+    'def _ail_math_prod(xs: list[int]) -> int:\n'
+    '    r = 1\n'
+    '    for v in xs:\n'
+    '        r = r * v\n'
+    '    return r\n')
+_MATH_HELPERS['tw_wrap'] = (
+    'def _ail_tw_wrap(text: str, width: int) -> list[str]:\n'
+    '    if width <= 0:\n'
+    '        raise ValueError("invalid width " + str(width) + " (must be > 0)")\n'
+    '    if "-" in text or "\\t" in text:\n'
+    '        raise RuntimeError("textwrap: text with a hyphen or a tab is not built")\n'
+    '    chunks: list[str] = []\n'
+    '    cur = ""\n'
+    '    cur_space = False\n'
+    '    for ch in text:\n'
+    '        sp = ch == " " or ch == "\\n" or ch == "\\r" or ch == "\\x0b" or ch == "\\x0c"\n'
+    '        if cur != "" and sp != cur_space:\n'
+    '            chunks.append(cur)\n'
+    '            cur = ""\n'
+    '        cur_space = sp\n'
+    '        if sp:\n'
+    '            cur += " "\n'
+    '        else:\n'
+    '            cur += ch\n'
+    '    if cur != "":\n'
+    '        chunks.append(cur)\n'
+    '    lines: list[str] = []\n'
+    '    line_chunks: list[str] = []\n'
+    '    pos = 0\n'
+    '    n = len(chunks)\n'
+    '    while pos < n:\n'
+    '        while len(line_chunks) > 0:\n'
+    '            line_chunks.pop()\n'
+    '        if len(lines) > 0 and chunks[pos].strip() == "":\n'
+    '            pos += 1\n'
+    '        cur_len = 0\n'
+    '        while pos < n:\n'
+    '            size = len(chunks[pos])\n'
+    '            if cur_len + size <= width:\n'
+    '                line_chunks.append(chunks[pos])\n'
+    '                cur_len += size\n'
+    '                pos += 1\n'
+    '            else:\n'
+    '                break\n'
+    '        if pos < n and len(chunks[pos]) > width:\n'
+    '            space_left = width - cur_len\n'
+    '            line_chunks.append(chunks[pos][:space_left])\n'
+    '            chunks[pos] = chunks[pos][space_left:]\n'
+    '        if len(line_chunks) > 0 and line_chunks[len(line_chunks) - 1].strip() == "":\n'
+    '            line_chunks.pop()\n'
+    '        if len(line_chunks) > 0:\n'
+    '            lines.append("".join(line_chunks))\n'
+    '    return lines\n')
+_MATH_HELPERS['tw_fill'] = (
+    'def _ail_tw_fill(text: str, width: int) -> str:\n'
+    '    parts = _ail_tw_wrap(text, width)\n'
+    '    return "\\n".join(parts)\n')
+_MATH_HELPERS['tw_dedent'] = (
+    'def _ail_tw_dedent(text: str) -> str:\n'
+    '    lines = text.split("\\n")\n'
+    '    margin = ""\n'
+    '    first = True\n'
+    '    for line in lines:\n'
+    '        if line.strip(" \\t") == "":\n'
+    '            continue\n'
+    '        k = 0\n'
+    '        while k < len(line) and (line[k] == " " or line[k] == "\\t"):\n'
+    '            k += 1\n'
+    '        indent = line[:k]\n'
+    '        if first:\n'
+    '            margin = indent\n'
+    '            first = False\n'
+    '        elif line.startswith(margin):\n'
+    '            pass\n'
+    '        elif margin.startswith(indent):\n'
+    '            margin = indent\n'
+    '        else:\n'
+    '            j = 0\n'
+    '            while j < len(margin) and j < len(indent) and margin[j] == indent[j]:\n'
+    '                j += 1\n'
+    '            margin = margin[:j]\n'
+    '    out: list[str] = []\n'
+    '    for line in lines:\n'
+    '        if line.strip(" \\t") == "":\n'
+    '            out.append("")\n'
+    '        else:\n'
+    '            out.append(line[len(margin):])\n'
+    '    return "\\n".join(out)\n')
+_MATH_DEPS = {'log2args': ('log',), 'comb': ('gcd',), 'lcm': ('gcd',), 'tw_fill': ('tw_wrap',)}
 import string as _string_module
 
 _STRING_CONSTANTS = {name: getattr(_string_module, name) for name in (
@@ -927,12 +1128,15 @@ _OPERATOR_BINARY = {'add': ast.Add, 'sub': ast.Sub, 'mul': ast.Mult, 'truediv': 
 _OPERATOR_COMPARE = {'lt': ast.Lt, 'le': ast.LtE, 'gt': ast.Gt, 'ge': ast.GtE, 'eq': ast.Eq, 'ne': ast.NotEq}
 _OPERATOR_UNARY = {'neg': ast.USub, 'pos': ast.UAdd, 'invert': ast.Invert, 'inv': ast.Invert}
 _SMALL_MODULES = {
+    'textwrap': ('wrap', 'fill', 'dedent'),
     'time': (*_TIME_CLOCKS, *_TIME_LOWERED),
     'string': tuple(_STRING_CONSTANTS),
     'os': ('cpu_count',),
     'operator': (*_OPERATOR_BINARY, *_OPERATOR_COMPARE, *_OPERATOR_UNARY, 'not_', 'abs', 'getitem', 'itemgetter'),
 }
 _SMALL_NOTE = {
+    'textwrap': 'textwrap.wrap(text[, width]), fill(text[, width]) and dedent(text) are built; the other options '
+                'and functions are not, and text with a hyphen or a tab is a RuntimeError',
     'time': 'time.perf_counter() / monotonic() / time() (and the _ns forms), sleep(), localtime(), gmtime(), '
             'strftime() and mktime() are built (the wall clock is an input: AIL_CLOCK=<seconds> pins it); '
             'asctime, ctime, struct_time, tzset and the zone constants are not',
@@ -943,7 +1147,7 @@ _SMALL_NOTE = {
                 'neg/pos/invert/not_/abs/getitem called directly, and itemgetter(k) as a key= are built',
 }
 _TYPING = {'List': 'list', 'Dict': 'dict', 'Set': 'set', 'Tuple': 'tuple', 'FrozenSet': 'frozenset'}
-_DROPPED = ('heapq', 'bisect', 'typing', 'dataclasses', '__future__', 'time', 'string', 'os', 'operator', 're')
+_DROPPED = ('heapq', 'bisect', 'textwrap', 'typing', 'dataclasses', '__future__', 'time', 'string', 'os', 'operator', 're')
 _STDOUT_STATEMENTS = ('sys.stdout.write', 'sys.stdout.buffer.write', 'sys.stdout.flush',
                       'sys.stdout.buffer.flush', 'sys.setrecursionlimit')
 _ALIASABLE = ('sys.stdout.write', 'sys.stdout.buffer.write', 'sys.stdin.readline',
@@ -1714,6 +1918,24 @@ class _Surface:
         plain = not node.keywords and not any(isinstance(arg, ast.Starred) for arg in args)
         if plain and module == 'time' and name in _TIME_CLOCKS and not args:
             return ast.Call(func=ast.Name(id=_TIME_CLOCKS[name], ctx=ast.Load()), args=[], keywords=[])
+        if module == 'textwrap' and name in ('wrap', 'fill', 'dedent') and not any(
+                isinstance(arg, ast.Starred) for arg in args):
+            if name == 'dedent' and len(args) == 1 and not node.keywords:
+                self.helpers.append('tw_dedent') if 'tw_dedent' not in self.helpers else None
+                return ast.Call(func=ast.Name(id='_ail_tw_dedent', ctx=ast.Load()), args=args, keywords=[])
+            width = None
+            if name != 'dedent' and 1 <= len(args) + len(node.keywords) <= 2 and len(args) >= 1:
+                if len(args) == 2 and not node.keywords:
+                    width = args[1]
+                elif len(args) == 1 and not node.keywords:
+                    width = ast.Constant(value=70)
+                elif len(args) == 1 and len(node.keywords) == 1 and node.keywords[0].arg == 'width':
+                    width = node.keywords[0].value
+            if width is not None:
+                for each in (('tw_wrap', 'tw_fill') if name == 'fill' else ('tw_wrap',)):
+                    if each not in self.helpers:
+                        self.helpers.append(each)
+                return ast.Call(func=ast.Name(id='_ail_tw_' + name, ctx=ast.Load()), args=[args[0], width], keywords=[])
         if plain and module == 'os' and name == 'cpu_count' and not args:
             return ast.Call(func=ast.Name(id='_ail_cpu_count', ctx=ast.Load()), args=[], keywords=[])
         if plain and module == 'operator':
@@ -1748,7 +1970,9 @@ class _Surface:
             elif len(args) == 1 and (name in _MATH_ONE or name in _MATH_PREDICATES
                                      or name in ('degrees', 'radians', 'factorial')):
                 helper = name
-            elif len(args) == 2 and (name in _MATH_PLAIN_TWO or name in ('pow', 'fmod')):
+            elif len(args) == 2 and (name in _MATH_PLAIN_TWO or name in ('pow', 'fmod') or name in _MATH_INT_TWO):
+                helper = name
+            elif len(args) == 1 and name in _MATH_LIST_ONE:
                 helper = name
             elif name == 'log' and len(args) == 2:
                 helper = 'log2args'
@@ -1995,6 +2219,7 @@ class _Surface:
             return
         fields = []
         hidden = set()
+        uncompared = set()
         for statement in node.body:
             if not (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)):
                 continue
@@ -2008,6 +2233,9 @@ class _Surface:
                 options = {item.arg: item.value for item in value.keywords}
                 if isinstance(options.get('repr'), ast.Constant) and not options['repr'].value:
                     hidden.add(statement.target.id)
+                if 'compare' in options and not (isinstance(options['compare'], ast.Constant)
+                                                 and options['compare'].value):
+                    uncompared.add(statement.target.id)
                 factory = options.pop('default_factory', None)
                 plain = options.pop('default', None)
                 if value.args or set(options) - {'repr', 'compare', 'hash'}:
@@ -2034,8 +2262,13 @@ class _Surface:
             return
         # a marker comment instead of nothing: the general (boxed) path prints the instance as
         # ClassName(field=..., ...) for it; the typed path never sees a comment
+        # (the typed path builds the __eq__ a dataclass generates from it too: ` noeq` for eq=False and
+        # ` nocmp=` for fields declared compare=False, both written before ` hide=`)
+        eq_off = isinstance(options.get('eq'), ast.Constant) and not options['eq'].value
+        marker = '# ail:dataclass' + (' noeq' if eq_off else '') + (
+            ' nocmp=' + ','.join(sorted(uncompared)) if uncompared else '')
         self.edits.append((at, self.offset(decorator.end_lineno, decorator.end_col_offset),
-                           '' if repr_off else '# ail:dataclass', False))
+                           '' if repr_off else marker, False))
         # a dataclass that extends another one: its fields come after the base's (a field of the same
         # name keeps the base's position)
         merged = []                    # (name, annotation, default, hidden)
@@ -2064,8 +2297,8 @@ class _Surface:
             # which fields repr leaves out, for the general path's marker lookup
             skipped = ','.join(name for name, _, _, shown in merged if shown)
             for index, (start, end, text, flag) in enumerate(self.edits):
-                if text == '# ail:dataclass':
-                    self.edits[index] = (start, end, '# ail:dataclass hide=' + skipped, flag)
+                if text == marker and start == at:
+                    self.edits[index] = (start, end, marker + ' hide=' + skipped, flag)
 
     def ann_assign(self, node, function, owner):
         if isinstance(node.target, ast.Attribute) and node.value is None:
@@ -2085,8 +2318,44 @@ class _Surface:
                 or (isinstance(n, ast.ImportFrom) and not n.level and n.module == 'subprocess') for n in self.tree.body)
         return self._starts_processes
 
+    def star_print(self, node):
+        """`print(*xs)` / `print(label, *xs, sep=S, end=E)` as a loop over `xs` (constant sep / end): the typed
+        path walks any list, str or iterable of a type it knows, and the general path runs the loop too. The
+        separator goes in front of every item but the first, so an empty `xs` prints just the leading values."""
+        call = node.value
+        if not (isinstance(call.func, ast.Name) and call.func.id == 'print' and 'print' not in self.names
+                and call.args and isinstance(call.args[-1], ast.Starred)
+                and not any(isinstance(a, ast.Starred) for a in call.args[:-1])):
+            return False
+        options = {}
+        for keyword in call.keywords:
+            if keyword.arg not in ('sep', 'end') or keyword.arg in options or not (
+                    isinstance(keyword.value, ast.Constant) and isinstance(keyword.value.value, str)):
+                return False
+            options[keyword.arg] = keyword.value.value
+        column = node.col_offset
+        before = self.data[self.starts[node.lineno - 1]:self.offset(node.lineno, column)]
+        if before.strip():
+            return False                      # not alone on its line (`if c: print(*xs)`)
+        sep, end = options.get('sep', ' '), options.get('end', '\n')
+        self.star_prints = getattr(self, 'star_prints', 0) + 1
+        flag, item = f'_ail_ps{self.star_prints}', f'_ail_px{self.star_prints}'
+        lead = [ast.unparse(self.rewritten(a)[0]) for a in call.args[:-1]]
+        source = ast.unparse(self.rewritten(call.args[-1].value)[0])
+        pad = ' ' * column
+        lines = []
+        if lead:
+            lines.append(f'print({", ".join(lead)}, sep={sep!r}, end="")')
+        lines.append(f'{flag} = {sep!r}' if lead else f'{flag} = ""')
+        lines += [f'for {item} in {source}:', f'    print({flag}, {item}, sep="", end="")', f'    {flag} = {sep!r}',
+                  f'print("", end={end!r})']
+        self.replace(node, ('\n' + pad).join(lines), True)
+        return True
+
     def output(self, node):
         call = node.value
+        if self.star_print(node):
+            return True
         path = self.path(call.func)
         if path in _STDOUT_STATEMENTS:
             if path in ('sys.stdout.flush', 'sys.stdout.buffer.flush', 'sys.setrecursionlimit'):
@@ -2229,6 +2498,17 @@ class _Surface:
         return self.apply()
 
 
+def _sqllower():
+    """python/pkg-v12/sqllower.py (sqlite3 lowered onto the C primitives, before the tuple and Optional passes)."""
+    if not hasattr(_sqllower, "module"):
+        here = str(Path(__file__).parent / "python" / "pkg-v12")
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import sqllower
+        _sqllower.module = sqllower
+    return _sqllower.module
+
+
 def _modtables():
     """python/pkg-v12/modtables.py (module-level tables with tuples in them, lowered before the tuple pass)."""
     if not hasattr(_modtables, "module"):
@@ -2243,8 +2523,13 @@ def _modtables():
 def python_surface(source, notes=None, library=False):
     """Map the Python spellings above onto the compiler's own; `notes` collects (line, why) for
     the constructs left as written."""
+    if "sqlite3" in source:
+        source = _sqllower().rewrite_text(source, notes)
     if any(name in source for name in ("threading", "queue", "concurrent")):
         source = _threadlib().rewrite_text(source, notes)
+    if any(name in source for name in ("fractions", "enum", "namedtuple", "NamedTuple", "ChainMap", "keyword", "calendar",
+                                       "abc", "array", "Random", "string", "io", "statistics")):
+        source = _stdlib5().rewrite_text(source, notes)
     if any(name in source for name in ("csv", "datetime", "decimal", "fractions", "time", "zoneinfo")):
         source = _stdlib4().rewrite_text(source, notes)
     if "collections" in source:

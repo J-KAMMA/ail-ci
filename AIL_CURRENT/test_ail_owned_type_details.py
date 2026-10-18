@@ -91,12 +91,24 @@ class OwnedTypeDetailsTests(unittest.TestCase):
         self.assertEqual(report['diagnostics'][0]['function'],'invoke')
 
     def test_builtin_exception_argument_and_nested_errors_keep_inner_details(self):
-        details=dict(operation='argument',callee='ValueError',parameter='message',parameter_index=0,expected='str',actual='int')
-        for body in ('raise ValueError(1);', 'let errors:list[exception]=[];errors.append(ValueError(1));',
-                     'let errors:list[exception]=[];errors[0]=ValueError(1);'):
+        # exc-str: an exception argument may be a str, int, float, bool or None, as in CPython;
+        # a bytes argument is still refused, with the same inner details.
+        details=dict(operation='argument',callee='ValueError',parameter='argument',parameter_index=0,expected='str',actual='bytes')
+        message='an exception argument must be a str, int, float, bool or None'
+        for body in ('raise ValueError(b"x");', 'let errors:list[exception]=[];errors.append(ValueError(b"x"));',
+                     'let errors:list[exception]=[];errors[0]=ValueError(b"x");'):
             with self.subTest(body=body):
-                self.mismatch('fn main()->int {'+body+'return 0;}',details,'an exception message must be str')
-        self.mismatch('struct Box {value:exception;} fn main()->int {let box=Box(ValueError());box.value=ValueError(1);return 0;}',details,'an exception message must be str')
+                self.mismatch('fn main()->int {'+body+'return 0;}',details,message)
+        self.mismatch('struct Box {value:exception;} fn main()->int {let box=Box(ValueError());box.value=ValueError(b"x");return 0;}',details,message)
+
+    def test_non_str_exception_arguments_are_accepted_like_cpython(self):
+        for body in ('raise ValueError(1);', 'let errors:list[exception]=[];errors.append(ValueError(1));',
+                     'let errors:list[exception]=[];errors[0]=ValueError(1.5);'):
+            with self.subTest(body=body):
+                status,report=self.check(self.source('fn main()->int {'+body+'return 0;}'))
+                self.assertEqual(status,0,report)
+        status,report=self.check(self.source('struct Box {value:exception;} fn main()->int {let box=Box(ValueError());box.value=ValueError(1);return 0;}'))
+        self.assertEqual(status,0,report)
 
     def test_unsupported_operation_unknown_owner_and_first_error_are_not_reclassified(self):
         cases=('fn main()->int {let errors:list[exception]=[];errors[:]=7;return 0;}',

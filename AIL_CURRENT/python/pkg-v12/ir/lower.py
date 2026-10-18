@@ -1387,6 +1387,8 @@ class Lowering(TextLowering):
         code = self.P.EXC_NAMES.get(name)
         if code is None or not self.is_builtin(name):
             raise NotS0('exception %r' % name)
+        if code >= 28:
+            raise NotS0('the exception class %r (Exception and the user classes are caught by the legacy path)' % name)
         return code
 
     def raise_stmt(self, s):
@@ -1411,6 +1413,8 @@ class Lowering(TextLowering):
                 self.b.emit('raise', [], [], {'code': code, 'name': e.func.id, 'form': 'new'})
                 return
             if len(e.args) == 1 and isinstance(e.args[0], ast.Constant) and isinstance(e.args[0].value, str):
+                if not e.args[0].value and self.P.exctext.ACTIVE:
+                    raise NotS0('an empty message in a program that reads exception text (ValueError("") has one argument)')
                 try:
                     e.args[0].value.encode('utf-8')
                 except UnicodeEncodeError:
@@ -1430,6 +1434,8 @@ class Lowering(TextLowering):
         if s.msg is not None:
             if not (isinstance(s.msg, ast.Constant) and isinstance(s.msg.value, str)):
                 raise NotS0('an assert message that is not a str literal')
+            if not s.msg.value and self.P.exctext.ACTIVE:
+                raise NotS0('an empty assert message in a program that reads exception text')
             attrs.update(form='msg', msg=s.msg.value)
         c = self.truthy(s.test)
         ok, fail = I.Region(), I.Region()

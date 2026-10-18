@@ -16,7 +16,7 @@ must allocate belongs to the host language, and that is most code.
 The measured claims and the conditions they were measured under are in README.md. This module
 depends on nothing but the standard library and a C compiler.
 """
-import ctypes, hashlib, os, pathlib, shutil, subprocess, tempfile
+import ctypes, hashlib, os, pathlib, shutil, subprocess, sys, tempfile
 
 MAPS = {'squares': 'x*x', 'double': '2*x', 'inc': 'x+1', 'dec': 'x-1',
         'negate': '-x', 'abs': 'x<0?-x:x', 'half': 'x/2', 'cube': 'x*x*x'}
@@ -61,6 +61,12 @@ def ffi_link_args():
     return shlex.split(os.environ.get('AIL_FFI_LINK', ''))
 
 
+def sqlite_link_args():
+    """The link arguments of a program that uses sqlite3 (G11): the system libsqlite3, then what a static libsqlite3.a needs
+    after it (the shared library records its own dependencies)."""
+    return ['-lsqlite3', '-lm'] + (['-ldl', '-pthread'] if sys.platform.startswith('linux') else [])
+
+
 def link_flags():
     """Dynamic linking is the default on Linux and macOS: a typed program is then about 30 KB
     instead of about 800 KB with a static glibc (decided 2026-10-11). AIL_STATIC=1 (set by
@@ -74,7 +80,26 @@ def link_flags():
     if windows:
         # UTF-8 console (decision Q8): a separate unit, so the generated C is the same everywhere.
         flags += ['-D_Exit=ail_wincon_exit', str(pathlib.Path(__file__).resolve().with_name('ail_wincon.c'))]
+    flags += _curl_flags(flags)          # G12: include paths of libcurl, only for a program that uses urllib.request
     return flags
+
+
+def _curl_flags(flags):
+    try:
+        import urllower
+    except ImportError:
+        return []
+    return urllower.cflags()
+
+
+def extra_libs(flags=None):
+    """Libraries that come after the objects on the link line: libcurl for a program that uses urllib.request
+    (G12), nothing for every other program."""
+    try:
+        import urllower
+    except ImportError:
+        return []
+    return urllower.libs(static='-static' in (flags if flags is not None else link_flags()))
 
 def cache_dir():
     d = os.environ.get('PIPE_CACHE')

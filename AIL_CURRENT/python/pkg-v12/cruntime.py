@@ -13964,7 +13964,8 @@ typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or
                  ail_st (*iter_iter)(ail_ctx *, ail_obj *, ail_obj); /* user __iter__ (self only), or 0 */
                  ail_st (*iter_next)(ail_ctx *, ail_obj *, ail_obj); /* user __next__ wrapped: StopIteration -> AIL_STOP, or 0 */
                  ail_st (*repr_fn)(ail_ctx *, ail_obj *, ail_obj); /* user __repr__ (self only), or 0 */
-                 ail_st (*str_fn)(ail_ctx *, ail_obj *, ail_obj); /* user __str__ (self only), or 0 */ } ail_classobj;
+                 ail_st (*str_fn)(ail_ctx *, ail_obj *, ail_obj); /* user __str__ (self only), or 0 */
+                 ail_st (*lt_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj); /* user __lt__ (self, other), or 0 */ } ail_classobj;
 
 typedef struct { ail_gcobj hdr; int64_t start, stop, step; } ail_rangeobj;
 
@@ -14390,6 +14391,16 @@ static inline ail_st ail_obj_cmp(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b
     }
     if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag))
         return ail_hit_limit(cx, "sorting or min()/max() of sets: < on sets is the subset test, a partial order whose result depends on the sort algorithm; sort a key such as sorted(x) or len(x) instead", "");
+    if (a.tag == AIL_T_INST) {   /* a user __lt__ (found through the base classes) orders instances, as CPython does */
+        for (ail_obj k = ((ail_instobj *)a.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+            ail_classobj *kc = (ail_classobj *)k.o;
+            if (!kc->lt_fn) continue;
+            ail_obj r; ail_st st = kc->lt_fn(cx, &r, a, b); if (st != AIL_OK) return st;
+            if (ail_obj_truthy(r)) { *out = -1; return AIL_OK; }
+            if (b.tag == AIL_T_INST) { st = kc->lt_fn(cx, &r, b, a); if (st != AIL_OK) return st; if (ail_obj_truthy(r)) { *out = 1; return AIL_OK; } }
+            *out = 0; return AIL_OK;
+        }
+    }
     char buf[128];
     snprintf(buf, sizeof buf, "'<' not supported between instances of '%s' and '%s'", ail_type_name(a.tag), ail_type_name(b.tag));
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
@@ -15864,7 +15875,7 @@ static inline ail_obj ail_class_new(ail_ctx *cx, const char *name, ail_obj base)
     c->base = base;
     c->builtin_id = -1;
     c->dc = 0; c->dc_hide = 0;
-    c->iter_iter = 0; c->iter_next = 0; c->repr_fn = 0; c->str_fn = 0;
+    c->iter_iter = 0; c->iter_next = 0; c->repr_fn = 0; c->str_fn = 0; c->lt_fn = 0;
     ail_obj r; r.tag = AIL_T_CLASS; r.o = (ail_gcobj *)c; return r;
 }
 static inline ail_obj ail_inst_new(ail_ctx *cx, ail_obj cls) {
@@ -26427,18 +26438,47 @@ ORDER.insert(ORDER.index('STR') + 1, 'OSEXC')
 SOURCE['OSEXC'] = OSEXC
 REQUIRES['OSEXC'] = ['STR', 'DIE', 'FILEEXC']
 
+# S4e: exception values that read like CPython's (str(e), repr(e), e.args, type(e).__name__; exctext.py). Spliced into
+# the DIE block and the OSEXC part only for a program that reads the text of an exception.
+import os as _os, sys as _sys
+if _os.path.dirname(_os.path.abspath(__file__)) not in _sys.path:   # loaded by path (tests): find exctext.py beside it
+    _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import exctext as _exctext
+ORDER.insert(max(ORDER.index(_p) for _p in ('STRREPR', 'STRRET', 'OSEXC')) + 1, 'EXCFLOAT')
+SOURCE['EXCFLOAT'] = _exctext.CFLOAT
+REQUIRES['EXCFLOAT'] = ['FREPR', 'EXCSTR']
+ORDER.insert(ORDER.index('EXCFLOAT') + 1, 'EXCSTR')
+SOURCE['EXCSTR'] = _exctext.CPART
+REQUIRES['EXCSTR'] = ['STR', 'STRRET', 'STRREPR', 'DIE', 'OSEXC']
+ORDER.insert(ORDER.index('EXCSTR') + 1, 'FDIVF')
+SOURCE['FDIVF'] = _exctext.CFDIVF
+REQUIRES['FDIVF'] = ['DIE', 'EXCSTR']
+
 
 def _piece(p, want):
     text = (_overflow_exception(_assert_exception(SOURCE[p])) if p == 'DIE' and 'OVERFLOWEXC' in want
             else _assert_exception(SOURCE[p]) if p == 'DIE' and 'ASSERTEXC' in want else SOURCE[p])
     if p == 'DIE' and 'OSEXC' in want:
         text = _os_exception(text)
+        if 'EXCSTR' in want:
+            text = _exctext.apply(text, _exctext.DIE_EDITS, 'the DIE block')
+            text = text.replace('!strcmp(w, "integer overflow")', '!strcmp(w, "integer overflow") || !strcmp(w, "cannot convert float infinity to integer")')
+    if p == 'OSEXC' and 'EXCSTR' in want:
+        text = _exctext.apply(text, _exctext.OSEXC_EDITS, 'the OSEXC part')
     if p == 'DIE' and 'FILEEXC' in want:
         text = _filert.file_exception(text, 'FILECORE' in want)
         if 'PROCEXC' in want:
             text = _filert.proc_exception(text)
+        if 'SQLEXC' in want:
+            text = _filert.sql_exception(text)         # G11: sqlite3 exception codes 19..27
+        if 'HTTPEXC' in want:
+            text = _filert.http_exception(text)        # G12: URLError / HTTPError, codes 30, 31 (after the others)
     elif p in _filert.LEGACY_EDITS and 'FILEEXC' in want:
         text = _filert.legacy_errno(p, text)
+    if p == 'DIE' and 'EXCCLASSES' in want:
+        text = _exctext.classes_table(text)          # S4e: Exception (28) and the user exception classes (29..)
+    if 'EXCSTR' in want and p != 'DIE':
+        text = _exctext.part_edit(p, text)
     if p == 'IREXC':
         return text.replace('/*IRPAR*/', 'if (ail_par_cur) ail_par_trap(NULL, code);' if 'PAR' in want else '')
     return _parallel_die(text) if p == 'DIE' and 'PAR' in want else text
@@ -27005,6 +27045,8 @@ import filert as _filert
 _filert.register(ORDER, SOURCE, REQUIRES)
 REQUIRES['FILEEXC'] = ['ASSERTEXC', 'OVERFLOWEXC']
 REQUIRES['PROCEXC'] = ['FILEEXC']          # G8: CalledProcessError / TimeoutExpired codes (filert.proc_exception)
+REQUIRES['HTTPEXC'] = ['PROCEXC']          # G12: URLError / HTTPError codes (filert.http_exception)
+REQUIRES['SQLEXC'] = ['FILEEXC']           # G11: sqlite3 exception codes (filert.sql_exception)
 
 # G9 the wall clock: time.time / time_ns / sleep, the OS time zone (clockrt.py)
 import clockrt as _clockrt

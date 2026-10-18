@@ -259,6 +259,15 @@ def _ail_unprintable(o: int) -> bool:
 DIVMOD_I = '''def _ail_divmod_i(a: int, b: int) -> _AilT_i_i:
     return _AilT_i_i(a // b, a % b)
 '''
+MODF = '''def _ail_modf(x: float) -> _AilT_f_f:
+    t = _ail_c_trunc(x)
+    if x - x != 0.0 and x == x:
+        return _AilT_f_f(_ail_c_copysign(0.0, x), x)
+    f = x - t
+    if f == 0.0:
+        f = _ail_c_copysign(0.0, x)
+    return _AilT_f_f(f, t)
+'''
 DIVMOD_F = '''def _ail_divmod_f(a: float, b: float) -> _AilT_f_f:
     return _AilT_f_f(a // b, a % b)
 '''
@@ -313,6 +322,10 @@ class Gen:
             return self.add('_ail_divmod_f', DIVMOD_F)
         self.tcls(('tuple', (INT, INT)))
         return self.add('_ail_divmod_i', DIVMOD_I)
+
+    def modf(self):
+        self.tcls(('tuple', (FLT, FLT)))
+        return self.add('_ail_modf', MODF)
 
     def partition(self, right=False):
         self.tcls(('tuple', (STR, STR, STR)))

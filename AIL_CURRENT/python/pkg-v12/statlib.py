@@ -14,8 +14,9 @@ the answer is whole and a float when it is not, so a call is built only where th
 Anywhere else the call is refused by name, with fmean() (always a float) and sum(xs) / len(xs) as the
 spellings to use. stdev / pstdev are always floats, mode is an element, median_low / median_high are
 elements, multimode is a list, fmean is a float: those are built anywhere.
-Lists of floats: fmean (the exactly rounded sum over n) is built; the others need CPython's exact fractions
-over floats and are refused.
+Lists of floats: fmean (the exactly rounded sum over n), median, median_low, median_high, mode and multimode are
+built (they need no exact sums); mean, variance, pvariance, stdev and pstdev need CPython's exact fractions over
+floats (integers beyond 64 bits) and are refused.
 """
 import ast
 import copy
@@ -242,8 +243,11 @@ class Stat:
         if elem == 'float':
             if name == 'fmean':
                 return self.call('fsum_floats_mean', data)
+            if name in ('median', 'median_low', 'median_high', 'mode', 'multimode'):
+                return self.call(name + '_f', data)
             refuse(call, 'statistics.%s of floats needs CPython\'s exact fractions over floats, which is not '
-                   'built; fmean() (the exactly rounded sum over n) is, and so is sum(xs) / len(xs)' % name)
+                   'built; fmean() (the exactly rounded sum over n) is, and so is sum(xs) / len(xs); '
+                   'median, median_low, median_high, mode and multimode of floats are built' % name)
         if elem == 'str':
             if name == 'mode':
                 return self.call('mode_str', data)

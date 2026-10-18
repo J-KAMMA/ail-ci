@@ -30,7 +30,7 @@ from tupcalls import Calls  # noqa: E402
 from tupstmt import Stmts  # noqa: E402
 from tuplam import Lams  # noqa: E402
 
-CANDIDATE_NAMES = {'tuple', 'Tuple', 'divmod', 'zip', 'partition', 'rpartition', 'heappush', 'heappop'}
+CANDIDATE_NAMES = {'tuple', 'Tuple', 'modf', 'divmod', 'zip', 'partition', 'rpartition', 'heappush', 'heappop'}
 
 
 def candidate(tree):

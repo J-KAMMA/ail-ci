@@ -130,6 +130,16 @@ def apply(P, args, kwargs, result):
     try:
         if bound.get('is_method'):
             raise lower.NotS0('a method')
+        hier = getattr(P, '_HIER', None)
+        if hier:
+            # docs/design/TYPED_INHERITANCE.md section 6: dispatch and subtype conversions are the
+            # legacy emitter's; a function that touches a class of a hierarchy stays there
+            kinds = (list(ctx.types.values()) + [k for _, k in getattr(ctx, 'params', ())]
+                     + [getattr(ctx, 'ret', None)])
+            touched = sorted({k[1] for k in kinds if isinstance(k, tuple) and len(k) == 2
+                              and isinstance(k[1], str) and k[1] in hier})
+            if touched or getattr(fn, '_ail_dispatcher', False):
+                raise lower.NotS0('class %s is in an inheritance hierarchy' % (touched or [fn.name])[0])
         allow = os.environ.get('AIL_IR_FUNCS')
         if allow and fn.name not in allow.split(','):
             raise lower.NotS0('not in AIL_IR_FUNCS')

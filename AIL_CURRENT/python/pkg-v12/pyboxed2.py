@@ -26,6 +26,7 @@ Anything this emitter does not implement raises `Unsupported` (imported from pyf
 exception the typed path and v1 both use) -- named, never a silent gap, never a bare gcc error.
 """
 import ast
+import builtins
 import copy
 import json
 import os
@@ -340,6 +341,19 @@ def _sibling_headers():
         if os.path.exists(path):
             lines.append('#include "%s"' % path.replace(os.sep, '/'))
     return '\n'.join(lines)
+
+
+# `type(x).__name__` / `x.__class__.__name__` (added to the program only when it uses one)
+TYPE_NAME_C = '''
+static inline ail_st ail_type_name_of(ail_ctx *cx, ail_obj *out, ail_obj x) {
+    if (x.tag == AIL_T_INST) {
+        ail_obj c = ((ail_instobj *)x.o)->cls;
+        if (c.tag == AIL_T_CLASS) { *out = ((ail_classobj *)c.o)->name; return AIL_OK; }
+    }
+    *out = ail_str_from_cstr(cx, ail_type_name(x.tag));
+    return AIL_OK;
+}
+'''
 
 
 def _runtime_text():
@@ -889,6 +903,19 @@ def _free_reads(node, bound):
     return free
 
 
+_BUILTIN_NAMES = frozenset(dir(builtins))
+# names ail_syntax.py lowers as if they were builtins (the import line is dropped): name -> its module
+_IMPLICIT_LIB = {**{n: 'heapq' for n in ('heappush', 'heappop', 'heapify', 'heappushpop', 'heapreplace')},
+                 **{n: 'bisect' for n in ('bisect_left', 'bisect_right', 'insort', 'insort_left',
+                                          'insort_right')}}
+
+
+def _lambda_free_reads(body, bound, ctx):
+    """The names a lambda body reads that it does not own: a local of the enclosing function would be a
+    closure (refused). A builtin the function does not shadow (`len`, `set`, `sorted`, `min` ...) is not."""
+    return {n for n in _free_reads(body, bound) if n not in _BUILTIN_NAMES or n in ctx.slot_of}
+
+
 def _nonlocal_names(stmts):
     out = set()
     for n in ast.walk(ast.Module(body=stmts, type_ignores=[])):
@@ -967,6 +994,15 @@ class Ctx:
         return '\n'.join(self.lines)
 
 
+class _PreC(ast.AST):
+    """An already-compiled C expression standing in for an argument node (see _precompute_args)."""
+    _fields = ('c',)
+
+    def __init__(self, c):
+        super().__init__()
+        self.c = c
+
+
 class Compiler:
     def __init__(self, allow_mix=True):
         self.allow_mix = allow_mix
@@ -984,6 +1020,7 @@ class Compiler:
         self.global_slots = {}     # 'class:Name' or 'g:pyname' -> g_slots index
         self.next_global_slot = 0
         self.lambda_n = 0
+        self.lambda_caps = {}      # key-lambda C name -> the enclosing locals it reads (passed as closure cells)
         self.nested_n = 0
         self.names_builtins = _load_names('NAMES_builtins.json')
         self.names_methods = _load_names('NAMES_methods.json')
@@ -1002,6 +1039,12 @@ class Compiler:
     # ------------------------------------------------------------------------------- entry point
     def compile(self, source):
         tree = ast.parse(source)
+        for fn in tree.body:
+            # math.sqrt is the correctly rounded C sqrt; the helper's `x ** 0.5` is pow(), which can differ in the last bit
+            if isinstance(fn, ast.FunctionDef) and fn.name == '_ail_math_sqrt':
+                for stmt in ast.walk(fn):
+                    if isinstance(stmt, ast.Return) and isinstance(stmt.value, ast.BinOp) and isinstance(stmt.value.op, ast.Pow):
+                        stmt.value = ast.Call(func=ast.Name(id='_ail_c_sqrt', ctx=ast.Load()), args=[stmt.value.left], keywords=[])
         self.source_lines = source.splitlines()
         self.uses_fileio = False
         self.uses_proc = False
@@ -1030,11 +1073,26 @@ class Compiler:
             elif isinstance(n, ast.Import):
                 self._check_import(n)
 
+        # The Python-syntax front end treats heappush / bisect_left ... as builtins (no import needed) and
+        # drops the `import heapq` / `from heapq import ...` line; this path still resolves them through the
+        # module they came from.
+        own = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.ClassDef))}
+        for n in ast.walk(tree):
+            if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in _IMPLICIT_LIB
+                    and n.func.id not in self.from_imports and n.func.id not in own
+                    and n.func.id not in self.module_names):
+                self.from_imports[n.func.id] = (_IMPLICIT_LIB[n.func.id], n.func.id)
+
         for n in tree.body:
             if isinstance(n, ast.FunctionDef):
                 self._register_function(n)
             elif isinstance(n, ast.ClassDef):
                 self._register_class(n)
+
+        import dunderrt
+        # operator methods, identity ==, hashing, str() through the class chain and AttributeError on a non-instance
+        # are dispatched by the run time in every program that has a class (C30-C32: they were silent or fatal)
+        self.dunder_ops = bool(self.classes)
 
         # BRIEF_mixed_mode.md: after every top-level function is registered (`self.functions`,
         # needed to check a candidate for *args/**kwargs/keyword-only parameters) and before any
@@ -1109,6 +1167,8 @@ class Compiler:
         if getattr(self, 'needs_boxcase', False):
             import cruntime
             parts.append(cruntime.BOXCASE)
+        if getattr(self, 'needs_type_name', False):
+            parts.append(TYPE_NAME_C)
         if self.mix_typed:
             # mix_call.h relies on ail_obj/ail_ctx/ail_box_*/ail_float_val/ail_view_to_str/ail_str,
             # all already defined by PREAMBLE above -- inlined here (not #include'd: `out`'s own
@@ -1170,15 +1230,24 @@ class Compiler:
                 if hm and hm['all_params'] == ['self']:
                     setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->%s = %s;\n' %
                                  (self.global_slots['class:' + cname], field, hm['cname']))
+            ltm = cls['methods'].get('__lt__')
+            if ltm and len(ltm['all_params']) == 2:
+                setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->lt_fn = %s;\n' %
+                             (self.global_slots['class:' + cname], ltm['cname']))
             itr = cls['methods'].get('__iter__')
             if itr and itr['all_params'] == ['self']:
                 setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->iter_iter = %s;\n' %
                              (self.global_slots['class:' + cname], itr['cname']))
+            if self.dunder_ops:
+                setup.extend(dunderrt.install('g_slots_arr[%d]' % self.global_slots['class:' + cname],
+                                              cls['methods'], lambda info: info['all_params']))
             if cls.get('dc'):
                 setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->dc = %d; '
                              '((ail_classobj *)g_slots_arr[%d].o)->dc_hide = %dULL;\n' %
                              (self.global_slots['class:' + cname], cls['dc'],
                               self.global_slots['class:' + cname], cls['dc_hide']))
+        if self.dunder_ops:
+            setup.append('    ail__gcx = cx;\n')
         if self.threads:
             setup.append('    ail_th_body_fn = %s; ail_th_atexit_fn = %s;\n'
                          % (self.functions['_ail_thread_body']['cname'], self.functions['_ail_th_atexit']['cname']))
@@ -1444,6 +1513,76 @@ class Compiler:
                 return info['methods'][mname]
             k = info['base']
         return None
+
+    def _virtual_plan(self, cname, lookup):
+        """Run-time dispatch plan for a call whose receiver is statically an instance of `cname`
+        (which may really hold an instance of any subclass): `lookup(klass)` resolves the wanted
+        method on a class by its MRO.  Returns (static_info, overrides) -- `overrides` lists
+        (subclass, info) deepest first, one entry per subclass that resolves to a DIFFERENT method than its
+        own base does.  An empty list means no subclass overrides anything: the call stays static."""
+        base = lookup(cname)
+        out = []
+        for d in self._descendants(cname):
+            info = lookup(d)
+            parent = self.classes[d]['base']
+            if info is not None and info is not (lookup(parent) if parent in self.classes else None):
+                out.append((d, info))
+        return base, out
+
+    def _emit_virtual(self, plan, recv_c, mkargs, ctx, what):
+        """Emit the dispatch for _virtual_plan: test the receiver's run-time class, most derived
+        first (CPython's MRO lookup on type(self), for single inheritance), else the method the
+        static class resolves to.  `mkargs(info)` gives the C argument list for one candidate."""
+        base, overrides = plan
+        t = ctx.tmp()
+        cls = ctx.new_cvar('vc')
+        ctx.emit('{')
+        ctx.indent += 1
+        ctx.emit('ail_obj %s = ((ail_instobj *)%s.o)->cls;' % (cls, recv_c))
+        first = True
+        for d, info in overrides:
+            ctx.emit('%sif (ail_class_is_or_subclass(%s, g_slots_arr[%d])) {' %
+                     ('' if first else 'else ', cls, self.global_slots['class:' + d]))
+            first = False
+            ctx.indent += 1
+            ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t, ''.join(', ' + a for a in mkargs(info))))
+            ctx.check()
+            ctx.indent -= 1
+            ctx.emit('}')
+        ctx.emit('else {')
+        ctx.indent += 1
+        if base is not None:
+            ctx.emit('st = %s(cx, &%s%s);' % (base['cname'], t, ''.join(', ' + a for a in mkargs(base))))
+            ctx.check()
+        else:
+            ctx.uses_st = True
+            ctx.emit('st = ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, "object has no attribute \'%s\'"); goto %s;'
+                     % (what, ctx.cur_err_target()))
+        ctx.indent -= 1
+        ctx.emit('}')
+        ctx.indent -= 1
+        ctx.emit('}')
+        return t
+
+    def _dunder_plan(self, cname, mname):
+        """The dispatch plan for a special method on an instance of `cname`, or None while no
+        subclass overrides it (the call then stays static).  A subclass-only definition of a
+        special method the static class lacks is refused by name."""
+        if not cname:
+            return None
+        plan = self._virtual_plan(cname, lambda c: self._resolve_method(c, mname))
+        if not plan[1]:
+            return None
+        if plan[0] is None:
+            raise Unsupported('%s defined only on a subclass of %s (the call on a %s receiver '
+                              'cannot be bound statically)' % (mname, cname, cname))
+        return plan
+
+    def _precompute_args(self, args, kwargs, ctx):
+        """Evaluate call-site arguments once (positional, then keyword values, as _bind_args does)
+        so that several candidate callees can be bound without repeating them."""
+        return ([_PreC(self.expr(a, ctx)) for a in args],
+                {k: _PreC(self.expr(v, ctx)) for k, v in kwargs.items()})
 
     # ------------------------------------------------------------------------------ emit a def
     def _emit_function(self, info):
@@ -1723,8 +1862,34 @@ class Compiler:
                 cname = recv_kind.split(':', 1)[1]
                 for kls, kv in self.classes[cname].get('class_attrs', []):
                     if kls == node.attr:
+                        # a subclass may rebind the attribute to a value of another kind
+                        if any(node.attr == a for d in self._descendants(cname)
+                               for a, _ in self.classes[d].get('class_attrs', [])):
+                            return None
                         return self.infer_kind(kv, ctx)
         return None
+
+    def _descendants(self, cname):
+        """The classes below the given class (strict), deepest first."""
+        out = []
+        for c in self.class_order:
+            k = self.classes[c]['base']
+            seen = 0
+            while k is not None and k in self.classes and seen < 64:
+                if k == cname:
+                    out.append(c)
+                    break
+                k = self.classes[k]['base']
+                seen += 1
+        def depth(c):
+            n = 0
+            k = self.classes[c]['base']
+            while k is not None and k in self.classes and n < 64:
+                n += 1
+                k = self.classes[k]['base']
+            return n
+        out.sort(key=depth, reverse=True)
+        return out
 
     def _inst_class(self, node, ctx):
         k = self.infer_kind(node, ctx)
@@ -2193,6 +2358,9 @@ class Compiler:
             raise Unsupported('the %s statement form' % type(node).__name__)
         method(node, ctx)
 
+    def expr__PreC(self, node, ctx):
+        return node.c
+
     def expr(self, node, ctx):
         method = getattr(self, 'expr_' + type(node).__name__, None)
         if method is None:
@@ -2289,6 +2457,17 @@ class Compiler:
             r = self.expr(node.right, ctx)
             t = ctx.tmp()
             ctx.emit('st = %s(cx, &%s, %s, %s);' % (setfn, t, l, r))
+            ctx.check()
+            return t
+        if (isinstance(node.op, ast.BitOr) and self.infer_kind(node.left, ctx) == 'dict'
+                and self.infer_kind(node.right, ctx) == 'dict'):
+            # `d1 | d2` (3.9): a copy of d1 updated with d2
+            l = self.expr(node.left, ctx)
+            r = self.expr(node.right, ctx)
+            t = ctx.tmp()
+            ctx.emit('st = ail_meth_dict_copy(cx, &%s, %s);' % (t, l))
+            ctx.check()
+            ctx.emit('st = ail_meth_dict_update(cx, %s, %s);' % (t, r))
             ctx.check()
             return t
         if isinstance(node.op, ast.Add):
@@ -2417,6 +2596,11 @@ class Compiler:
             ctx.check()
             return t
         if isinstance(node.op, ast.UAdd):
+            if self.dunder_ops:
+                t = ctx.tmp()
+                ctx.emit('st = ail_dun_pos(cx, &%s, %s);' % (t, v))
+                ctx.check()
+                return t
             return v
         if isinstance(node.op, ast.Not):
             t = ctx.tmp()
@@ -2500,9 +2684,13 @@ class Compiler:
         if isinstance(op, (ast.In, ast.NotIn)):
             cname = self._inst_class(bn, ctx) if bn is not None else None
             info = self._resolve_method(cname, '__contains__') if cname else None
+            plan = self._dunder_plan(cname, '__contains__')
             civar = ctx.new_cvar('ci')
             ctx.emit('int %s = 0;' % civar)
-            if info:
+            if plan:
+                bt = self._emit_virtual(plan, b, lambda i: [b, a], ctx, '__contains__')
+                ctx.emit('%s = ail_obj_truthy(%s);' % (civar, bt))
+            elif info:
                 bt = ctx.tmp()
                 ctx.emit('st = %s(cx, &%s, %s, %s);' % (info['cname'], bt, b, a))
                 ctx.check()
@@ -2516,6 +2704,10 @@ class Compiler:
         cname = self._inst_class(an, ctx) if an is not None else None
         dunder = {ast.Eq: '__eq__', ast.Lt: '__lt__'}.get(type(op))
         info = self._resolve_method(cname, dunder) if (cname and dunder) else None
+        plan = self._dunder_plan(cname, dunder) if (cname and dunder) else None
+        if plan:
+            t = self._emit_virtual(plan, a, lambda i: [a, b], ctx, dunder)
+            return t
         if info:
             ctx.emit('st = %s(cx, &%s, %s, %s);' % (info['cname'], t, a, b))
             ctx.check()
@@ -2703,6 +2895,9 @@ class Compiler:
             return t
         cname = self._inst_class(node.value, ctx)
         info = self._resolve_method(cname, '__getitem__') if cname else None
+        plan = self._dunder_plan(cname, '__getitem__')
+        if plan:
+            return self._emit_virtual(plan, c, lambda i: [c, key], ctx, '__getitem__')
         t = ctx.tmp()
         if info:
             ctx.emit('st = %s(cx, &%s, %s, %s);' % (info['cname'], t, c, key))
@@ -2712,9 +2907,39 @@ class Compiler:
         return t
 
     def expr_Attribute(self, node, ctx):
+        if node.attr == '__name__':
+            # `type(x).__name__` and `x.__class__.__name__`: the name of the run-time class
+            inner = None
+            if (isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
+                    and node.value.func.id == 'type' and len(node.value.args) == 1 and not node.value.keywords
+                    and 'type' not in self.functions and 'type' not in self.classes):
+                inner = node.value.args[0]
+            elif isinstance(node.value, ast.Attribute) and node.value.attr == '__class__':
+                inner = node.value.value
+            if inner is not None:
+                v = self.expr(inner, ctx)
+                t = ctx.tmp()
+                self.needs_type_name = True
+                ctx.emit('st = ail_type_name_of(cx, &%s, %s);' % (t, v))
+                ctx.check()
+                return t
         if isinstance(node.value, ast.Name) and (node.value.id in self.module_aliases or
                                                   node.value.id == 'sys'):
             return self._module_attr_value(node.value.id, node.attr, ctx)
+        if (isinstance(node.value, ast.Name) and node.value.id in self.classes
+                and node.value.id not in ctx.slot_of and node.value.id not in self.module_names):
+            # `C.K` where K is a constant class attribute of C or of a base of C: the class name as a
+            # value does not reach its attributes (`AttributeError: 'instance' object has no attribute`),
+            # so read the literal the lookup through the bases finds, as CPython does
+            k = node.value.id
+            while k is not None and k in self.classes:
+                hits = [v for a, v in self.classes[k].get('class_attrs', []) if a == node.attr]
+                if hits:
+                    if isinstance(hits[-1], ast.Constant) or (isinstance(hits[-1], ast.UnaryOp)
+                                                              and isinstance(hits[-1].operand, ast.Constant)):
+                        return self.expr(hits[-1], ctx)
+                    break
+                k = self.classes[k]['base']
         obj = self.expr(node.value, ctx)
         self.attr_names.add(node.attr)
         t = ctx.tmp()
@@ -2919,10 +3144,17 @@ class Compiler:
         ctx.emit('%s = ail_str_view((ail_gcobj *)&%s, 0, %d);' % (t, lv, len(s)))
         return t
 
+    def _str_lookup(self, c):
+        return self._resolve_method(c, '__str__') or self._resolve_method(c, '__repr__')
+
     def _to_str_slot(self, val, cname, ctx):
-        info = self._resolve_method(cname, '__str__') if cname else None
-        if info is None and cname:
-            info = self._resolve_method(cname, '__repr__')
+        info = self._str_lookup(cname) if cname else None
+        if cname:
+            plan = self._virtual_plan(cname, self._str_lookup)
+            if plan[1]:
+                if plan[0] is None:
+                    raise Unsupported('__str__/__repr__ defined only on a subclass of %s' % cname)
+                return self._emit_virtual(plan, val, lambda i: [val], ctx, '__str__')
         if info:
             t = ctx.tmp()
             ctx.emit('st = %s(cx, &%s, %s);' % (info['cname'], t, val))
@@ -2965,6 +3197,13 @@ class Compiler:
                 if not info.get('vararg') and not info.get('kwarg') and not info.get('kwonly') \
                         and not info['defaults']:
                     return self._call_user_function_fixed_star(info, star_val, ctx)
+        if (len(node.args) == 1 and isinstance(node.args[0], ast.Starred) and not node.keywords
+                and isinstance(f, ast.Name) and f.id in self.classes and f.id not in self.functions):
+            init = self._resolve_method(f.id, '__init__')
+            if init and not init.get('vararg') and not init.get('kwarg') and not init.get('kwonly') \
+                    and not init['defaults']:
+                # `Cls(*xs)` with a fixed-arity __init__: as for a function, N is known from the definition
+                return self._call_class_fixed_star(f.id, init, node.args[0].value, ctx)
         if any(isinstance(a, ast.Starred) for a in node.args):
             raise Unsupported('a starred (*args) call argument (only print(*xs), zip(*rows), '
                               'and a call to a def f(*args) or a fixed-arity def with no '
@@ -2986,7 +3225,12 @@ class Compiler:
         this refuses, not a false positive on real list/tuple values)."""
         kind = self.infer_kind(star_val, ctx)
         if kind not in ('list', 'tuple'):
-            raise Unsupported('%s(*x) where x is not statically known to be a list/tuple' % what)
+            # kind inference is syntactic (a list returned by a function, a name bound to one, a generator):
+            # walk the value once into a fresh list, which is what `*x` does in CPython
+            lst = ctx.tmp()
+            ctx.emit('%s = ail_list_new(cx);' % lst)
+            self._extend_from_iter(lst, self._resolve_iter_src(star_val, ctx), ctx)
+            return lst
         return self.expr(star_val, ctx)
 
     def _call_print_star(self, star_val, kwargs, ctx):
@@ -3039,6 +3283,26 @@ class Compiler:
         ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], out, ''.join(', ' + a for a in argcs)))
         ctx.check()
         return out
+
+    def _call_class_fixed_star(self, cname, init, star_val, ctx):
+        n = len(init['params']) - 1
+        lst = ctx.tmp()
+        ctx.emit('%s = ail_list_new(cx);' % lst)
+        self._extend_from_iter(lst, self._resolve_iter_src(star_val, ctx), ctx)
+        lenobj = ctx.tmp()
+        ctx.emit('st = ail_op_len(cx, &%s, %s);' % (lenobj, lst))
+        ctx.check()
+        ctx.emit('if ((%s).i != %d) { st = ail_raise_c(cx, AIL_B_TYPEERROR, "%s() takes %d '
+                 'positional arguments but a different number were given"); goto %s; }' %
+                 (lenobj, n, cname, n, ctx.cur_err_target()))
+        ctx.uses_st = True
+        argcs = []
+        for i in range(n):
+            it = ctx.tmp()
+            ctx.emit('st = ail_op_getitem(cx, &%s, %s, ail_box_int(%d));' % (it, lst, i))
+            ctx.check()
+            argcs.append(_PreC(it))
+        return self._call_class(cname, argcs, {}, ctx)
 
     def _call_zip_star(self, star_val, ctx):
         """`zip(*rows)` -- no N-ary zip primitive in the core (API.md's ail_iter_zip is the
@@ -3354,10 +3618,18 @@ class Compiler:
         t = ctx.tmp()
         ctx.emit('%s = ail_inst_new(cx, g_slots_arr[%d]);' %
                 (t, self.global_slots['class:' + name]))
-        for aname, aval in cls.get('class_attrs', []):
-            self.attr_names.add(aname)
-            v = self.expr(aval, ctx)
-            ctx.emit('ail_inst_setattr(cx, %s, g_attr_%s, %s);' % (t, aname, v))
+        # class attributes are copied onto the instance, base class first so a subclass value wins
+        # (a class attribute the subclass does not redefine is read through the base, as CPython does)
+        chain = []
+        k = name
+        while k is not None and k in self.classes and k not in chain:
+            chain.append(k)
+            k = self.classes[k]['base']
+        for kls in reversed(chain):
+            for aname, aval in self.classes[kls].get('class_attrs', []):
+                self.attr_names.add(aname)
+                v = self.expr(aval, ctx)
+                ctx.emit('ail_inst_setattr(cx, %s, g_attr_%s, %s);' % (t, aname, v))
         if info:
             argcs = self._bind_args(name, info, args, kwargs, ctx)
             dummy = ctx.tmp()
@@ -3371,6 +3643,8 @@ class Compiler:
     def _call_fileprim(self, name, args, kwargs, ctx):
         """The stage-G7 file / os primitives (filelib.PRIMS) -> ailo_* (filert.py)."""
         ret, kinds = filelib.PRIMS[name]
+        if filelib.is_sql_prim(name):
+            raise Unsupported('sqlite3 is built in typed code only (the general path has no bytes values and no C handles)')
         if 'bytes' in kinds or ret == 'bytes':
             if filelib.is_proc_prim(name):
                 raise Unsupported('subprocess bytes: the general path has no bytes values, so they are built in typed code '
@@ -3428,7 +3702,43 @@ class Compiler:
         ctx.check()
         return t
 
+    def _call_typed_intrinsic(self, name, args, kwargs, ctx):
+        """The helpers ail_syntax.py and the tuple pass write for the typed path reach libm through `_ail_c_<fn>`
+        and integer hashing through `wrapping_<op>`; this path builds them from the same C operations."""
+        if kwargs:
+            raise Unsupported('%s() takes no keyword arguments' % name)
+        if name in pyfunc.WRAPPING_OPS:
+            if len(args) != 2:
+                raise Unsupported('%s(a, b) takes two int arguments' % name)
+            a, b = self.expr(args[0], ctx), self.expr(args[1], ctx)
+            t = ctx.tmp()
+            ctx.emit('%s = ail_box_int((int64_t)((uint64_t)(%s).i %s (uint64_t)(%s).i));'
+                     % (t, a, pyfunc.WRAPPING_OPS[name], b))
+            return t
+        import cruntime
+        fn = name[len('_ail_c_'):]
+        arity = 1 if fn == 'sqrt' else cruntime.LIBM_FUNCS[fn]
+        if len(args) != arity:
+            raise Unsupported('%s takes %d float arguments' % (name, arity))
+        vals = [self.expr(a, ctx) for a in args]
+        t = ctx.tmp()
+        ctx.emit('%s = ail_box_float(cx, %s(%s));' % (t, fn, ', '.join(
+            '((%s).tag == AIL_T_FLOAT ? ail_float_val(%s) : (double)(%s).i)' % (v, v, v) for v in vals)))
+        return t
+
+    def _is_typed_intrinsic(self, name):
+        if name in self.functions or name in self.classes:
+            return False
+        if name in pyfunc.WRAPPING_OPS:
+            return True
+        if name.startswith('_ail_c_'):
+            import cruntime
+            return name[len('_ail_c_'):] in cruntime.LIBM_FUNCS or name == '_ail_c_sqrt'
+        return False
+
     def _call_name(self, name, args, kwargs, ctx):
+        if self._is_typed_intrinsic(name):
+            return self._call_typed_intrinsic(name, args, kwargs, ctx)
         if self.threads and name.startswith('_ail_th_') and name not in self.functions:
             return self._call_thread_prim(name, args, kwargs, ctx)
         if name in self._CLOCK_PRIMS and name not in self.functions and name not in self.classes:
@@ -3585,8 +3895,8 @@ class Compiler:
             if leaves is None:
                 v = self.expr(a, ctx)
                 cname = self._inst_class(a, ctx)
-                if cname and (self._resolve_method(cname, '__str__') or
-                             self._resolve_method(cname, '__repr__')):
+                if cname and (self._str_lookup(cname) or
+                              self._virtual_plan(cname, self._str_lookup)[1]):
                     v = self._to_str_slot(v, cname, ctx)
                 vs.append(v)
                 flags.append('1' if i else '0')
@@ -3629,8 +3939,12 @@ class Compiler:
         kind = self.infer_kind(args[0], ctx)
         v = self.expr(args[0], ctx)
         info = self._resolve_method(cname, '__len__') if cname else None
+        plan = self._dunder_plan(cname, '__len__')
         t = ctx.tmp()
-        if info:
+        if plan:
+            lt = self._emit_virtual(plan, v, lambda i: [v], ctx, '__len__')
+            ctx.emit('%s = %s;' % (t, lt))
+        elif info:
             lt = ctx.tmp()
             ctx.emit('st = %s(cx, &%s, %s);' % (info['cname'], lt, v))
             ctx.check()
@@ -3732,7 +4046,10 @@ class Compiler:
         v = self.expr(args[0], ctx)
         cname = self._inst_class(args[0], ctx)
         info = self._resolve_method(cname, '__repr__') if cname else None
+        plan = self._dunder_plan(cname, '__repr__')
         t = ctx.tmp()
+        if plan:
+            return self._emit_virtual(plan, v, lambda i: [v], ctx, '__repr__')
         if info:
             ctx.emit('st = %s(cx, &%s, %s);' % (info['cname'], t, v))
             ctx.check()
@@ -3843,6 +4160,15 @@ class Compiler:
         ctx.indent -= 1
         ctx.emit('}')
 
+    def _b_hash(self, args, kwargs, ctx):
+        if len(args) != 1 or kwargs:
+            raise Unsupported('hash() with other than one argument')
+        v = self.expr(args[0], ctx)
+        t = ctx.tmp()
+        ctx.emit('st = ail_bi_hash(cx, &%s, %s);' % (t, v))
+        ctx.check()
+        return t
+
     def _b_isinstance(self, args, kwargs, ctx):
         if len(args) != 2 or kwargs:
             raise Unsupported('isinstance() with other than 2 arguments')
@@ -3952,9 +4278,9 @@ class Compiler:
             if la.vararg or la.kwonlyargs or la.kwarg or la.defaults or len(la.args) != arity:
                 raise Unsupported('a lambda with other than exactly %d plain parameters' % arity)
             lnames = [p.arg for p in la.args]
-            free = _free_reads([ast.Expr(value=node.body)],
-                               set(lnames) | set(self.module_names) | set(self.classes) |
-                               set(self.functions) | {'True', 'False', 'None'})
+            free = _lambda_free_reads([ast.Expr(value=node.body)],
+                                      set(lnames) | set(self.module_names) | set(self.classes) |
+                                      set(self.functions) | {'True', 'False', 'None'}, ctx)
             if free:
                 raise Unsupported('a lambda closing over a local variable (%s)' %
                                   ', '.join(sorted(free)))
@@ -4013,6 +4339,48 @@ class Compiler:
         keyfn = self._func_pointer_lib(key_node, ctx, 1) if key_node is not None else 'NULL'
         t = ctx.tmp()
         ctx.emit('st = ail_it_groupby(cx, &%s, %s, %s);' % (t, src, keyfn))
+        ctx.check()
+        return t
+
+    def _lib_combinations(self, args, kwargs, ctx):
+        if kwargs and set(kwargs) != {'r'} or len(args) + len(kwargs) != 2:
+            raise Unsupported('combinations() with other than (iterable, r)')
+        r_node = args[1] if len(args) > 1 else kwargs['r']
+        src = self._resolve_iter_src(args[0], ctx)
+        r = self.expr(r_node, ctx)
+        t = ctx.tmp()
+        ctx.emit('st = ail_it_combinations(cx, &%s, %s, (%s).i);' % (t, src, r))
+        ctx.check()
+        return t
+
+    def _lib_permutations(self, args, kwargs, ctx):
+        if (kwargs and set(kwargs) != {'r'}) or not 1 <= len(args) + len(kwargs) <= 2 or not args:
+            raise Unsupported('permutations() with other than (iterable[, r])')
+        r_node = args[1] if len(args) > 1 else kwargs.get('r')
+        src = self._resolve_iter_src(args[0], ctx)
+        r = '0' if r_node is None else '(%s).i' % self.expr(r_node, ctx)
+        t = ctx.tmp()
+        ctx.emit('st = ail_it_permutations(cx, &%s, %s, %d, %s);' % (t, src, 0 if r_node is None else 1, r))
+        ctx.check()
+        return t
+
+    def _lib_zip_longest(self, args, kwargs, ctx):
+        if (kwargs and set(kwargs) != {'fillvalue'}) or len(args) != 2:
+            raise Unsupported('zip_longest() with other than two iterables and an optional fillvalue=')
+        a, b = (self._resolve_iter_src(x, ctx) for x in args)
+        fill = self.expr(kwargs['fillvalue'], ctx) if kwargs else 'ail_box_none()'
+        t = ctx.tmp()
+        ctx.emit('st = ail_it_zip_longest(cx, &%s, %s, %s, %s);' % (t, a, b, fill))
+        ctx.check()
+        return t
+
+    def _lib_combinations_with_replacement(self, args, kwargs, ctx):
+        if kwargs and set(kwargs) != {'r'} or len(args) + len(kwargs) != 2:
+            raise Unsupported('combinations_with_replacement() with other than (iterable, r)')
+        r_node = args[1] if len(args) > 1 else kwargs['r']
+        src = self._resolve_iter_src(args[0], ctx)
+        t = ctx.tmp()
+        ctx.emit('st = ail_it_combinations_wr(cx, &%s, %s, (%s).i);' % (t, src, self.expr(r_node, ctx)))
         ctx.check()
         return t
 
@@ -4162,6 +4530,8 @@ class Compiler:
     def _lib_insort(self, args, kwargs, ctx):
         return self._bisect_call('ail_bisect_insort_right', args, kwargs, ctx, False)
 
+    _lib_insort_right = _lib_insort
+
     def _lib_deque(self, args, kwargs, ctx):
         if len(args) > 2:
             raise Unsupported('deque() with more than (iterable, maxlen)')
@@ -4257,19 +4627,32 @@ class Compiler:
             if a.vararg or a.kwonlyargs or a.kwarg or a.defaults or len(a.args) not in (0, 1):
                 raise Unsupported('a lambda with other than exactly 0 or 1 plain parameters')
             pname = a.args[0].arg if a.args else '_x'
-            free = _free_reads(a.body if False else [ast.Expr(value=node.body)],
-                               {pname} | set(self.module_names) | set(self.classes) |
-                               set(self.functions) | {'True', 'False', 'None'})
-            if free:
+            free = _lambda_free_reads([ast.Expr(value=node.body)],
+                                      {pname} | set(self.module_names) | set(self.classes) |
+                                      set(self.functions) | {'True', 'False', 'None'}, ctx)
+            # A local of the enclosing function that the lambda only reads is captured BY VALUE when the
+            # key function object is built (`_wrap_cfunc` / `_minmax` hand the values over as the
+            # closure cells); the lambda runs inside the call it is an argument of, so the value cannot
+            # have changed. Any other free name is refused as before.
+            captured = sorted(n for n in free if n in ctx.slot_of and n not in ctx.ptr_names
+                              and n not in ctx.global_decls)
+            rest = free - set(captured)
+            if rest:
                 raise Unsupported('a lambda closing over a local variable (%s)' %
-                                  ', '.join(sorted(free)))
+                                  ', '.join(sorted(rest)))
             self.lambda_n += 1
             cname = 'plam_%d' % self.lambda_n
             lctx = Ctx(cname)
             lctx.declare_local(pname)
+            for nm in captured:
+                lctx.declare_local(nm)
             v = self.expr(node.body, lctx)
-            body = ('    f.slots[0] = x;\n' + lctx.body_text() +
-                   '\n    *out = %s;\n' % v)
+            body = ('    f.slots[0] = x;\n' +
+                    ''.join('    f.slots[%d] = ((ail_obj *)closure)[%d];\n' % (lctx.slot_of[nm], i)
+                            for i, nm in enumerate(captured)) +
+                    lctx.body_text() + '\n    *out = %s;\n' % v)
+            if captured:
+                self.lambda_caps[cname] = captured
             self.top_decls.append('static ail_st %s(ail_ctx *cx, ail_obj *out, ail_obj arg, '
                                   'void *closure);\n' % cname)
             self.top_defs.append(
@@ -4328,6 +4711,19 @@ class Compiler:
         real `ail_obj` FUNC value -- what ail_list_sort's key_fn_or_none / ail_iter_map /
         ail_iter_filter all actually take (API.md section 10/11), as opposed to a raw pointer."""
         t = ctx.tmp()
+        caps = self.lambda_caps.get(cname)
+        if caps:
+            # the captured locals travel as the function object's cells (marked by the collector, freed
+            # with the object): the key function receives them as its `closure`
+            ctx.emit('{ ail_funcobj *_fo = (ail_funcobj *)ail_gc_alloc(cx, AIL_K_FUNC, sizeof(ail_funcobj)); '
+                     '_fo->fn = %s; _fo->cells = NULL; _fo->n_cells = 0; _fo->name = "%s"; '
+                     '_fo->cells = (ail_obj *)ail_xmalloc(%d * sizeof(ail_obj)); '
+                     '%s _fo->n_cells = %d; '
+                     '%s.tag = AIL_T_FUNC; %s.o = (ail_gcobj *)_fo; }' % (
+                         cname, cname, len(caps),
+                         ' '.join('_fo->cells[%d] = %s;' % (i, self.name_ref(nm, ctx)) for i, nm in enumerate(caps)),
+                         len(caps), t, t))
+            return t
         ctx.emit('{ ail_funcobj *_fo = (ail_funcobj *)ail_gc_alloc(cx, AIL_K_FUNC, sizeof(ail_funcobj)); '
                  '_fo->fn = %s; _fo->cells = NULL; _fo->n_cells = 0; _fo->name = "%s"; '
                  '%s.tag = AIL_T_FUNC; %s.o = (ail_gcobj *)_fo; }' % (cname, cname, t, t))
@@ -4414,11 +4810,17 @@ class Compiler:
             kv = self.expr(keyfn, ctx) if isinstance(keyfn, ast.Name) and False else None
             # key= here is a function value (usually a lambda/def) applied per element.
             fname = self._func_pointer_of(keyfn, ctx)
+            closure = 'NULL'
+            if fname in self.lambda_caps:      # a lambda reading locals of this function: their values
+                closure = ctx.new_cvar('cap')
+                caps = self.lambda_caps[fname]
+                ctx.emit('ail_obj %s[%d] = { %s };' % (closure, len(caps),
+                                                        ', '.join(self.name_ref(nm, ctx) for nm in caps)))
             kbest = ctx.tmp(); kcur = ctx.tmp()
-            ctx.emit('if (!%s) { %s = %s; st = %s(cx, &%s, %s, NULL); ' % (have, best, val, fname, kbest, val) +
+            ctx.emit('if (!%s) { %s = %s; st = %s(cx, &%s, %s, %s); ' % (have, best, val, fname, kbest, val, closure) +
                      'if (st != AIL_OK) goto %s; %s = 1; }' % (ctx.cur_err_target(), have))
-            ctx.emit('else { st = %s(cx, &%s, %s, NULL); if (st != AIL_OK) goto %s;' %
-                     (fname, kcur, val, ctx.cur_err_target()))
+            ctx.emit('else { st = %s(cx, &%s, %s, %s); if (st != AIL_OK) goto %s;' %
+                     (fname, kcur, val, closure, ctx.cur_err_target()))
             cmpv = ctx.tmp()
             ctx.emit('  st = %s(cx, &%s, %s, %s); if (st != AIL_OK) goto %s;' %
                      (cmp_op, cmpv, kcur, kbest, ctx.cur_err_target()))
@@ -4577,6 +4979,11 @@ class Compiler:
             raise Unsupported('abs() with other than exactly one argument')
         v = self.expr(args[0], ctx)
         t = ctx.tmp()
+        if self.dunder_ops:
+            # an instance may define __abs__ (dunderrt.py patches ail_bi_abs to ask the class)
+            ctx.emit('st = ail_bi_abs(cx, &%s, %s);' % (t, v))
+            ctx.check()
+            return t
         ctx.emit('if ((%s).tag == AIL_T_FLOAT) { %s = ail_box_float(cx, fabs(ail_float_val(%s))); }'
                  % (v, t, v))
         ctx.emit('else { st = ((%s).i < 0) ? ail_op_neg(cx, &%s, %s) : (( %s = %s), AIL_OK); '
@@ -4601,6 +5008,24 @@ class Compiler:
         ctx.emit('st = ail_bi_ord(cx, &%s, %s);' % (t, v))
         ctx.check()
         return t
+
+    def _base_str_builtin(self, name, args, kwargs, ctx):
+        if len(args) != 1 or kwargs:
+            raise Unsupported('%s() with other than exactly one argument' % name)
+        v = self.expr(args[0], ctx)
+        t = ctx.tmp()
+        ctx.emit('st = ail_bi_%s(cx, &%s, %s);' % (name, t, v))
+        ctx.check()
+        return t
+
+    def _b_hex(self, args, kwargs, ctx):
+        return self._base_str_builtin('hex', args, kwargs, ctx)
+
+    def _b_oct(self, args, kwargs, ctx):
+        return self._base_str_builtin('oct', args, kwargs, ctx)
+
+    def _b_bin(self, args, kwargs, ctx):
+        return self._base_str_builtin('bin', args, kwargs, ctx)
 
     def _b_divmod(self, args, kwargs, ctx):
         if len(args) != 2 or kwargs:
@@ -4699,9 +5124,29 @@ class Compiler:
             return t
         if isinstance(recv, ast.Name) and recv.id == 'dict' and f.attr == 'fromkeys':
             return self._dict_fromkeys(args, kwargs, ctx)
+        if (isinstance(recv, ast.Name) and recv.id in self.classes and recv.id not in ctx.slot_of
+                and recv.id not in self.module_names and args and not isinstance(args[0], ast.Starred)):
+            # `Base.m(self, x)`: the method as Base resolves it, called on the object passed first
+            info = self._resolve_method(recv.id, f.attr)
+            if info is not None and info.get('is_method') and not info.get('is_static'):
+                first = self.expr(args[0], ctx)
+                argcs = [first] + self._bind_args(f.attr, info, args[1:], kwargs, ctx)
+                t = ctx.tmp()
+                ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t, ''.join(', ' + a for a in argcs)))
+                ctx.check()
+                return t
         recv_c = self.expr(recv, ctx)
         cname = self._inst_class(recv, ctx)
         if cname:
+            plan = self._virtual_plan(cname, lambda c: self._resolve_method(c, f.attr))
+            if plan[1]:
+                # a subclass overrides this method: dispatch on the run-time class (C27)
+                pargs, pkw = self._precompute_args(args, kwargs, ctx)
+
+                def mkargs(info, recv_c=recv_c, pargs=pargs, pkw=pkw):
+                    a = self._bind_args(f.attr, info, pargs, pkw, ctx)
+                    return a if info.get('is_static') else [recv_c] + a
+                return self._emit_virtual(plan, recv_c, mkargs, ctx, f.attr)
             info = self._resolve_method(cname, f.attr)
             if info:
                 argcs = self._bind_args(f.attr, info, args, kwargs, ctx)
@@ -5429,12 +5874,12 @@ class Compiler:
             ctx.emit('%s = %s(%s);' % (t, fallback_fn, recv))
             return t
         key = 'str.' + name
-        if key not in self.names_methods:
-            raise Unsupported('.%s(chars) with an explicit character set (not yet published in '
-                              'NAMES_methods.json)' % name)
+        fn = self.names_methods[key][0] if key in self.names_methods else 'ail_meth_str_' + name
+        if len(args) != 1 or (isinstance(args[0], ast.Constant) and args[0].value is None):
+            raise Unsupported('.%s(chars) with other than one character-set argument' % name)
         chars = self.expr(args[0], ctx)
         t = ctx.tmp()
-        ctx.emit('%s = %s(%s, 0, %s);' % (t, self.names_methods[key][0], recv, chars))
+        ctx.emit('%s = %s(%s, 0, %s);' % (t, fn, recv, chars))
         return t
 
     def _m_strip(self, recv, kind, args, kwargs, ctx):
@@ -5623,6 +6068,12 @@ class Compiler:
     def _str_predicate(self, name, recv, ctx):
         key = 'str.' + name
         if key not in self.names_methods:
+            # the method tables are not shipped with this tree; str.isspace has a runtime function of its
+            # own (isupper / islower / isalnum stop on a non-ASCII character there, so they stay refused)
+            if name == 'isspace':
+                t = ctx.tmp()
+                ctx.emit('%s = ail_box_bool(ail_meth_str_isspace(%s));' % (t, recv))
+                return t
             raise Unsupported('the method .%s() (not yet published in NAMES_methods.json)' % name)
         fn = self.names_methods[key][0]
         t = ctx.tmp()
@@ -6392,6 +6843,9 @@ def build(source, report, allow_mix=True):
     refused something and the source is whole-program shaped)."""
     compiler = Compiler(allow_mix=allow_mix)
     body = compiler.compile(source)
+    if compiler.dunder_ops:
+        import dunderrt
+        body = dunderrt.patch(body)
     report['boxed'] = list(compiler.boxed_names)
     if compiler.threads:
         # G12: the prelude's own functions are not the program's; the link needs the thread library

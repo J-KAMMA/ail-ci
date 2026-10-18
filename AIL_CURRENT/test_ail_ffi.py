@@ -592,8 +592,6 @@ class FFITests(unittest.TestCase):
              "e.errno is built only on a name bound by `except OSError as e`"),
             ("RuntimeError strerror", "    try:\n        tiny_fail(-4)\n    except RuntimeError as e:\n        print(e.strerror)\n",
              "e.strerror is built only on a name bound by `except OSError as e`"),
-            ("str of a ValueError", "    try:\n        tiny_find(-1)\n    except ValueError as e:\n        print(str(e))\n",
-             "str(e) is built only on a name bound by `except OSError as e`"),
             ("mixed tuple", "    try:\n        tiny_find(-1)\n    except (OSError, ValueError) as e:\n        print(e.errno)\n",
              "e.errno is built only on a name bound by `except OSError as e`"))
         for label, body, message in cases:

@@ -32,7 +32,7 @@ class ExceptionContextTests(unittest.TestCase):
             return status, report
 
     def test_argument_and_keyword_errors_offer_same_exception_forms(self):
-        for name, arguments in [('ValueError', '1'), ('KeyError', '1'),
+        for name, arguments in [('ValueError', '[1]'), ('KeyError', '[1]'),
                                 ('OSError', 'message="bad"'), ('RuntimeError', '*[1]')]:
             with self.subTest(name=name, arguments=arguments):
                 source = f'fn fail()->int {{raise {name}({arguments});return 0;}}'.encode()
@@ -53,7 +53,7 @@ class ExceptionContextTests(unittest.TestCase):
                     self.assertEqual(self.check(candidate)[0], 0)
 
     def test_nested_raise_location_preserves_unicode_crlf_columns(self):
-        text = 'fn fail()->int {\r\n let label="日本"; if true {raise ValueError(1);}\r\n return 0;\r\n}'
+        text = 'fn fail()->int {\r\n let label="日本"; if true {raise ValueError([1]);}\r\n return 0;\r\n}'
         _, report = self.check(text.encode())
         diagnostic = report['diagnostics'][0]
         self.assertEqual((diagnostic['line'], diagnostic['column'], diagnostic['function']),

@@ -8,6 +8,7 @@
   "test_ail_argument_type_details": 2.2,
   "test_ail_argv_slices": 6.2,
   "test_ail_batch_edit": 1.2,
+  "test_ail_boolfield": 81.8,
   "test_ail_borrowed_elements": 18.9,
   "test_ail_borrowed_owner": 29.6,
   "test_ail_build_cache": 49.4,
@@ -40,10 +41,12 @@
   "test_ail_dict_delete": 23.5,
   "test_ail_dict_upsert": 10.7,
   "test_ail_doctor": 5.1,
+  "test_ail_dunders": 75.9,
   "test_ail_edit_check_report": 1.0,
   "test_ail_edit_dependencies": 1.6,
   "test_ail_element_views": 71.5,
   "test_ail_empty_blocks": 2.7,
+  "test_ail_exc_str": 178.0,
   "test_ail_exception_aggregate_objects": 20.5,
   "test_ail_exception_context": 8.9,
   "test_ail_exception_values_app": 55.6,
@@ -68,6 +71,7 @@
   "test_ail_handle_lists": 185.9,
   "test_ail_heapq_bisect": 43.7,
   "test_ail_hot_ops": 15.1,
+  "test_ail_http": 377.7,
   "test_ail_instruction_gap": 37.8,
   "test_ail_int_dict_set": 34.6,
   "test_ail_int_sort": 38.8,
@@ -141,8 +145,10 @@
   "test_ail_source_edit": 1.4,
   "test_ail_span_cache": 15.1,
   "test_ail_spec_fixes": 10.0,
+  "test_ail_sqlite": 175.7,
   "test_ail_stdin_list_batch": 60.7,
   "test_ail_stdin_read_until": 5.4,
+  "test_ail_stdlib5": 247.2,
   "test_ail_stdlib_batch1": 10.0,
   "test_ail_stdlib_batch3": 10.0,
   "test_ail_stdlib_batch4": 49.4,
@@ -169,7 +175,9 @@
   "test_ail_try_locals": 49.4,
   "test_ail_tuples": 10.0,
   "test_ail_type_details": 1.4,
+  "test_ail_typed_inherit": 138.8,
   "test_ail_typed_locals": 50.6,
+  "test_ail_virtual_dispatch": 41.8,
   "test_ail_zlib": 49.4,
   "test_c_api_bridge": 17.2,
   "test_csv_column_stats_cli": 9.4,
@@ -202,9 +210,11 @@
    "test_ail_nested_lists"
   ],
   [
-   "test_ail_handle_lists"
+   "test_ail_handle_lists",
+   "test_ail_stdlib5"
   ],
   [
+   "test_ail_http",
    "test_ail_parallel_for"
   ],
   [
@@ -212,10 +222,12 @@
    "test_ail_threads"
   ],
   [
+   "test_ail_exc_str",
    "test_ail_sets_general",
    "test_ail_stdout_mixed"
   ],
   [
+   "test_ail_boolfield",
    "test_ail_build_cache",
    "test_ail_clock",
    "test_ail_csv_rewrite_stream",
@@ -231,6 +243,7 @@
    "test_ail_files",
    "test_ail_rep5_idioms",
    "test_ail_try_hoist",
+   "test_ail_typed_inherit",
    "test_ail_zlib"
   ],
   [
@@ -250,7 +263,8 @@
    "test_ail_memory_shapes",
    "test_ail_quirks",
    "test_ail_spec_fixes",
-   "test_ail_stdlib_batch3"
+   "test_ail_stdlib_batch3",
+   "test_ail_virtual_dispatch"
   ],
   [
    "test_ail_corpus_findings2",
@@ -371,6 +385,7 @@
    "test_ail_pathlib",
    "test_ail_sort_keys",
    "test_ail_source_edit",
+   "test_ail_sqlite",
    "test_ail_stdout_mixed_resources",
    "test_ail_str_predicates",
    "test_ail_tcp_poll",
@@ -383,6 +398,7 @@
    "test_ail_argv_slices",
    "test_ail_check_repair_context",
    "test_ail_dict_delete",
+   "test_ail_dunders",
    "test_ail_field_pop",
    "test_ail_numeric_binding_boundaries",
    "test_ail_string_field_mutation",

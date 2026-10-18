@@ -362,7 +362,9 @@ class Lowerer:
     NONNULL_BUILTINS = frozenset(('len', 'int', 'float', 'str', 'bool', 'abs', 'min', 'max', 'sum', 'round', 'ord',
                                   'chr', 'repr', 'sorted', 'list', 'range', 'divmod', 'pow', 'hex', 'bin', 'oct',
                                   'tuple', 'set', 'dict', 'format', 'any', 'all', 'input', 'enumerate', 'zip',
-                                  'reversed', 'isinstance', 'hash'))
+                                  'reversed', 'isinstance', 'hash',
+                                  # G11: the sqlite3 column readers never return None (a NULL is tested first)
+                                  '_ail_sq_ci', '_ail_sq_cf', '_ail_sq_cs', '_ail_sq_cb'))
 
     def scan_function(self, node):
         self.assigns = {}
@@ -949,7 +951,11 @@ class Lowerer:
         return ast.IfExp(test=cond, body=body, orelse=orelse)
 
     def ex_Compare(self, e, facts, test):
-        if any(self.optish(x) for x in [e.left] + e.comparators):
+        operands = [e.left] + e.comparators
+        # the literal None counts as Optional-ish, but a comparison whose only Optional-ish operand is that literal
+        # ( with a class instance) is not an Optional comparison: leave it to the typed path (G11)
+        if any(self.optish(x) for x in operands) and (
+                any(self.optish(x) and not _is_none(x) for x in operands) or all(_is_none(x) for x in operands)):
             if len(e.ops) != 1:
                 raise Refused(e, 'a chained comparison of an Optional value is not built')
             op, left, right = e.ops[0], e.left, e.comparators[0]
