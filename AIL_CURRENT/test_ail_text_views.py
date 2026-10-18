@@ -298,10 +298,10 @@ class TextViewsTests(unittest.TestCase):
             self.assertNotRegex(main, r"_value = ail_str_adopt\([^;]*ail_slist_get\(&v_f")
             self.assertRegex(main, r"_value = ail_str_adopt\(&v__sarena, ail_str_return_owned\([^;]*f_name\)+;[^}]*bump\(")
             # field elements: views for the lookup key, show()'s argument and the sort key columns
-            views = re.findall(r"; ail_slist_get\(&\(v_st\)->f_keys, _index\); \}\)", main)
+            views = re.findall(r"; ail_pslist_get\(&\(v_st\)->f_keys, _index\); \}\)", main)
             self.assertGreaterEqual(len(views), 6, views)
             # ... but clobber() stores into keys, so its argument is still a copy
-            self.assertRegex(main, r"ail_str_return_owned\(ail_slist_get\(&\(v_st\)->f_keys, _index\)\)\); \}\), clobber\(")
+            self.assertRegex(main, r"ail_str_return_owned\(ail_pslist_get\(&\(v_st\)->f_keys, _index\)\)\); \}\), clobber\(")
             for name in ("pick", "fields", "store"):
                 self.assertNotIn("ail_smap_get(", body_of(program, name))
             self.assertIn("ail_smap_get_view(", body_of(program, "pick"))

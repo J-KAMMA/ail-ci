@@ -301,6 +301,9 @@ class TextLowering(object):
                 and not isinstance(node.slice, ast.Slice):
             # an element of a list of str (S3c-1): the list's own checked read
             return self.subscript(node)
+        if isinstance(node.value, ast.Attribute) and not isinstance(node.slice, ast.Slice) \
+                and self.plist_field(node.value) is not None:
+            return self.plist_elem(node)
         if not self.is_str(node.value):
             raise self.NotS0('subscript of a non-str text value')
         base = self.expr(node.value)
@@ -317,6 +320,49 @@ class TextLowering(object):
         if cur is not None:
             return self.rt('str_index_cur', [base, i], {'cur': cur})
         return self.rt('str_index', [base, i])
+
+    def plist_elem(self, node):
+        """`o.f[i]` for a list[str] field: the field's checked read, a view of the field's own text. The view is kept only
+        when its consumer is done with it before anything can change the field (the legacy front end's own test,
+        `_field_element_consumed`: a comparison of operands that run no code); otherwise it is copied into the str
+        arena, as the legacy front end copies it."""
+        obj, cls, name = self.plist_field(node.value)
+        p = self.b.value('field.plist', [obj], I.PLIST, {'cls': cls, 'name': name})
+        index = self.as_int(self.expr(node.slice))
+        view = self.b.value('plist.get', [p, index], I.STRV, {'mode': 'ck'})
+        try:
+            keep = bool(self.P._field_element_consumed(node, self.ctx)) or self.plist_elem_consumed(node)
+        except Exception:
+            keep = False
+        return view if keep else self.rt('str_own', [view])
+
+    def plist_elem_consumed(self, node):
+        """The two other consumers the legacy front end lets read a field element in place: every part of a `+` chain
+        (one `ail_str_catn` copies them all, and no part runs code that could change the field: `_chain_borrow_safe`),
+        and the elements of a sort-key column comprehension whose whole site runs no user code (sortkeys.py marks it)."""
+        P = self.P
+        parents = P._fn_parents(self.ctx)
+        top = node
+        while isinstance(parents.get(top), ast.BinOp) and isinstance(parents[top].op, ast.Add) and self.is_str(parents[top]):
+            top = parents[top]
+        if top is not node:
+            leaves = []
+
+            def flat(n):
+                if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Add) and self.is_str(n):
+                    flat(n.left)
+                    flat(n.right)
+                else:
+                    leaves.append(n)
+            flat(top)
+            return bool(P._chain_borrow_safe(leaves))
+        comp = parents.get(node)
+        while comp is not None and not isinstance(comp, (ast.ListComp, ast.stmt)):
+            comp = parents.get(comp)
+        columns = getattr(comp, '_ail_sort_columns', None) if isinstance(comp, ast.ListComp) else None
+        if columns is None or len(comp.generators) != 1 or comp.generators[0].ifs or not P._chain_borrow_safe(columns):
+            return False
+        return any(n is node for n in P._slist_field_elements(comp.elt, self.ctx))
 
     # --- calls that build or read str
     def str_call(self, node):

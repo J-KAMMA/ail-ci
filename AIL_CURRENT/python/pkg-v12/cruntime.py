@@ -3919,8 +3919,147 @@ static void ail_obj_field_flist_move(ail_flist *slot, ail_flist *value) {
 }
 '''
 
+PSLIST = r"""
+/* A list[str] struct field is a packed string list (`ail_pslist`), not an `ail_slist`: the elements
+   of a field are written once (appended, or stored whole from a local) and read many times, and an
+   `ail_str` per element (24 bytes) plus a copy of the strings per whole-field store dominated the
+   programs that keep a name column in a struct. Dense mode: all the text back to back in `t`, and
+   `e[0] = 0, e[i + 1] = end of element i` in a prefix-sum array (8 bytes an element, grown by
+   doubling, no repacking when it grows: an append is a copy of its text and one store). A change
+   that needs per-element ranges (an element store, a delete, a slice, a reverse or a sort) turns the
+   field into the wide mode first: the legacy `ail_sfield` block (spine of `ail_str`, text behind it,
+   slack and counted garbage) held in `w`, with exactly the legacy code and costs; only a whole-field
+   store (`o.f = xs`) makes a field dense again. `n` is the element count in both modes.
+   An element read is a view into the field's storage: valid until the field is next changed. */
+typedef struct {
+    uint8_t *t;
+    int64_t *e;
+    int64_t n, cap, tn, tcap;
+    int noasc;
+    int wide;
+    ail_slist w;
+} ail_pslist;
+static inline ail_str ail_pslist_at(const ail_pslist *L, int64_t i) {
+    if (__builtin_expect(L->wide, 0)) return L->w.p[i];
+    int64_t a = L->e[i];
+    return (ail_str){L->t + a, L->e[i + 1] - a, !L->noasc};
+}
+static __attribute__((noreturn, noinline, cold)) void ail_pslist_index_fail(void) {
+    ail_die("list index out of range");
+    __builtin_unreachable();
+}
+static inline __attribute__((always_inline)) ail_str ail_pslist_get(const ail_pslist *L, int64_t i) {
+    if (__builtin_expect((uint64_t)i >= (uint64_t)L->n, 0)) {      /* the in-range case is one compare */
+        if (i < 0) i += L->n;
+        if (i < 0 || i >= L->n) ail_pslist_index_fail();
+    }
+    return ail_pslist_at(L, i);
+}
+static void ail_pslist_free(ail_pslist *L) {
+    free(L->t); free(L->e);
+    ail_slist_free(&L->w);
+    *L = (ail_pslist){0};
+}
+static void ail_pslist_check(const ail_pslist *L) {
+    if (!L || L->n < 0 || (L->wide ? L->w.n != L->n || L->w.cap < L->w.n || (L->w.cap && !L->w.p)
+                           : L->cap < L->n || L->tcap < L->tn || L->tn < 0 || (L->cap && !L->e) || (L->tcap && !L->t)))
+        ail_die("invalid string field layout");
+}
+/* Append to a dense field. A value that views the field's own text stays valid across the growth. */
+static void ail_pslist_push(ail_pslist *L, ail_str v) {
+    ail__need_elems(v.n, AIL_STR_LIMIT);
+    if (v.n && !v.p) ail_die("invalid string text");
+    if (L->n == L->cap) {
+        if (L->cap > (INT64_MAX - 2) / 2) ail_die("string field too long");
+        int64_t c = L->cap ? L->cap * 2 : 8;
+        ail__need_elems(c + 1, AIL_ELEM_LIMIT(int64_t));
+        int64_t *q = (int64_t *)realloc(L->e, (size_t)(c + 1) * sizeof *q);
+        if (!q) ail_die("out of memory");
+        if (!L->e) q[0] = 0;
+        L->e = q; L->cap = c;
+    }
+    if (v.n > L->tcap - L->tn) {
+        if (v.n > INT64_MAX - L->tn) ail_die("allocation too large");
+        int64_t need = L->tn + v.n, c = L->tcap ? L->tcap : 64;
+        while (c < need) { if (c > INT64_MAX / 2) { c = need; break; } c *= 2; }
+        ail__need_elems(c, AIL_STR_LIMIT);
+        int64_t inside = (v.n && (uintptr_t)v.p >= (uintptr_t)L->t && (uintptr_t)v.p - (uintptr_t)L->t < (uintptr_t)L->tcap)
+                           ? (int64_t)((uintptr_t)v.p - (uintptr_t)L->t) : -1;
+        uint8_t *q = (uint8_t *)realloc(L->t, (size_t)c);
+        if (!q) ail_die("out of memory");
+        if (inside >= 0) v.p = q + inside;
+        L->t = q; L->tcap = c;
+    }
+    if (v.n) memcpy(L->t + L->tn, v.p, (size_t)v.n);
+    L->tn += v.n;
+    L->e[L->n + 1] = L->tn;
+    if (!v.bytes) L->noasc = 1;
+    L->n++;
+}
+/* `o.f = xs` and a constructor argument: the field becomes a dense copy of `xs`, built before the
+   old field is freed, since `xs` may view the old field's text. */
+static void ail_pslist_assign(ail_pslist *slot, ail_slist value) {
+    ail__need_elems(value.n, AIL_ELEM_LIMIT(ail_str));
+    if (value.cap < value.n || (value.n && !value.p)) ail_die("invalid string list");
+    ail_pslist r = {0};
+    if (value.n) {
+        int64_t total = 0;
+        int noasc = 0;
+        for (int64_t i = 0; i < value.n; i++) {
+            ail_str s = value.p[i];
+            ail__need_elems(s.n, AIL_STR_LIMIT);
+            if (s.n && !s.p) ail_die("invalid string list text");
+            if (s.n > INT64_MAX - total) ail_die("allocation too large");
+            total += s.n;
+            noasc |= !s.bytes;
+        }
+        ail__need_elems(value.n + 1, AIL_ELEM_LIMIT(int64_t));
+        ail__need_elems(total, AIL_STR_LIMIT);
+        r.e = (int64_t *)ail_alloc_raw((size_t)(value.n + 1) * sizeof *r.e);
+        r.t = (uint8_t *)ail_alloc_raw((size_t)(total > 0 ? total : 1));
+        r.n = r.cap = value.n; r.tn = total; r.tcap = total > 0 ? total : 1; r.noasc = noasc;
+        int64_t o = 0;
+        r.e[0] = 0;
+        for (int64_t i = 0; i < value.n; i++) {
+            ail_str s = value.p[i];
+            if (s.n) memcpy(r.t + o, s.p, (size_t)s.n);
+            o += s.n;
+            r.e[i + 1] = o;
+        }
+    }
+    ail_pslist_free(slot);
+    *slot = r;
+}
+/* An independent copy of a field (a whole-field read): one arena block holds every text and one
+   vector holds the views, as ail_slist_snapshot does. */
+static ail_slist ail_pslist_snapshot(ail_sarena *A, ail_pslist L) {
+    if (!A) ail_die("invalid string arena");
+    ail_pslist_check(&L);
+    if (L.wide) return ail_slist_snapshot(A, L.w);
+    ail__need_elems(L.n, AIL_ELEM_LIMIT(ail_str));
+    if (!L.n) return (ail_slist){0};
+    uint8_t *text = (uint8_t *)ail_alloc((size_t)(L.tn > 0 ? L.tn : 1));
+    ail_sarena_pushn(A, text, L.tn > 0 ? L.tn : 1);
+    if (L.tn) memcpy(text, L.t, (size_t)L.tn);
+    ail_str *q = (ail_str *)ail_alloc((size_t)L.n * sizeof *q);
+    for (int64_t i = 0; i < L.n; i++) q[i] = (ail_str){text + L.e[i], L.e[i + 1] - L.e[i], !L.noasc};
+    return (ail_slist){q, L.n, L.n};
+}
+static int64_t ail_pslist_has(const ail_pslist *L, ail_str v) {
+    for (int64_t i = 0; i < L->n; i++) if (ail_str_eq(ail_pslist_at(L, i), v)) return 1;
+    return 0;
+}
+/* a whole-field read goes through the same name as a local list's: the macro does not expand inside itself */
+#define ail_slist_snapshot(A, L) _Generic((L), ail_pslist: ail_pslist_snapshot, default: ail_slist_snapshot)(A, L)
+static int64_t ail_pslist_count(const ail_pslist *L, ail_str v) {
+    int64_t c = 0;
+    for (int64_t i = 0; i < L->n; i++) c += ail_str_eq(ail_pslist_at(L, i), v) != 0;
+    return c;
+}
+"""
+
 SFIELDMUT = r'''
-static void ail_sfield_validate(const ail_slist *s) {
+static void ail_wfield_validate(const ail_slist *s) {
     if (!s || s->n < 0 || s->cap < s->n || (s->cap && !s->p))
         ail_die("invalid string field layout");
     ail__need_elems(s->cap, AIL_ELEM_LIMIT(ail_str));
@@ -3932,7 +4071,7 @@ static void ail_sfield_validate(const ail_slist *s) {
    marked by cap > n (then cap >= n + 2): its last spine slot p[cap - 1] is not an element but the
    free text {next free byte, bytes left}, and p[cap - 2] counts the garbage {NULL, dead text bytes}.
    A store copies only the new text into the free text and repoints its slot; the replaced or
-   removed text stays behind as counted garbage. ail_sfield_repack copies the live strings into a
+   removed text stays behind as counted garbage. ail_wfield_repack copies the live strings into a
    fresh block when the free text or the spine runs out, or when garbage outgrows both the live
    text and the spine, so every repack is paid for by the mutations since the previous one: a
    single-element mutation costs amortised O(new text) plus the spine shifting Python does too, and
@@ -3940,7 +4079,7 @@ static void ail_sfield_validate(const ail_slist *s) {
    the element out, and a slice source is an independent snapshot, so no view is held across a
    mutation except the value being stored, which stays valid because the old block is freed only
    after the value is copied in. */
-static ail_str *ail_sfield_repack(ail_slist *s, int64_t slots, int64_t bytes, int64_t skip, int64_t cap) {
+static ail_str *ail_wfield_repack(ail_slist *s, int64_t slots, int64_t bytes, int64_t skip, int64_t cap) {
     int64_t live = 0;
     for (int64_t i = 0; i < s->n; i++) {
         if (i == skip) continue;
@@ -3979,29 +4118,29 @@ static ail_str *ail_sfield_repack(ail_slist *s, int64_t slots, int64_t bytes, in
 /* Room for `slots` elements (slots >= n) and `bytes` more text; element `skip` (or -1) is about
    to be replaced and is not carried over. Returns the old block, which the caller frees only after
    copying its value in, since that value may view it; NULL when nothing moved. */
-static ail_str *ail_sfield_room(ail_slist *s, int64_t slots, int64_t bytes, int64_t skip) {
+static ail_str *ail_wfield_room(ail_slist *s, int64_t slots, int64_t bytes, int64_t skip) {
     if (s->cap > s->n && s->cap - 2 >= slots && s->p[s->cap - 1].n >= bytes) return NULL;
     if (slots > (INT64_MAX - 2) / 2) ail_die("string field too long");
     /* Growing doubles the spine; a same-length store keeps the spine it has, plus the two slots. */
     int64_t cap = slots <= s->cap - 2 ? s->cap : slots > s->n ? 2 * slots + 2 : slots + 2;
     if (slots > s->n && cap < 10) cap = 10;
-    return ail_sfield_repack(s, slots, bytes, skip, cap);
+    return ail_wfield_repack(s, slots, bytes, skip, cap);
 }
-/* Copy one value into the free text that ail_sfield_room reserved. */
-static ail_str ail_sfield_put(ail_slist *s, ail_str value) {
+/* Copy one value into the free text that ail_wfield_room reserved. */
+static ail_str ail_wfield_put(ail_slist *s, ail_str value) {
     ail_str room = s->p[s->cap - 1];
     uint8_t *text = (uint8_t *)room.p;
     if (value.n) memcpy(text, value.p, (size_t)value.n);
     s->p[s->cap - 1] = (ail_str){text + value.n, room.n - value.n, 0};
     return (ail_str){text, value.n, value.bytes};
 }
-static int64_t ail_sfield_index(const ail_slist *s, int64_t i) {
-    ail_sfield_validate(s);
+static int64_t ail_wfield_index(const ail_slist *s, int64_t i) {
+    ail_wfield_validate(s);
     if (i < 0) i += s->n;
     if (i < 0 || i >= s->n) ail_raise_named(AIL_EXC_INDEX);
     return i;
 }
-static int64_t ail_sfield_text(const ail_str *values, int64_t count) {
+static int64_t ail_wfield_text(const ail_str *values, int64_t count) {
     int64_t total = 0;
     for (int64_t j = 0; j < count; j++) {
         ail__need_elems(values[j].n, AIL_STR_LIMIT);
@@ -4013,24 +4152,24 @@ static int64_t ail_sfield_text(const ail_str *values, int64_t count) {
 }
 /* After a mutation of a slack block left `dead` more bytes of garbage: count them, and repack once
    garbage exceeds the live text and the element count, or once the spine is mostly unused. */
-static void ail_sfield_settle(ail_slist *s, int64_t dead) {
+static void ail_wfield_settle(ail_slist *s, int64_t dead) {
     ail_str *meta = &s->p[s->cap - 2];
     if (dead > INT64_MAX - meta->n) ail_die("allocation too large");
     meta->n += dead;
     int64_t used = (int64_t)(s->p[s->cap - 1].p - (const uint8_t *)(s->p + s->cap));
     int64_t garbage = meta->n;
     if ((garbage > used - garbage && garbage > s->n + 64) || (s->cap > 64 && s->n < (s->cap - 2) / 4))
-        free(ail_sfield_repack(s, s->n, 0, -1, s->n + 2));
+        free(ail_wfield_repack(s, s->n, 0, -1, s->n + 2));
 }
 /* Elements were removed in place from an exact block: give it the room and garbage slots by
    repacking (the removed text is not carried over). */
-static void ail_sfield_removed(ail_slist *s, int64_t old_n, int64_t dead) {
-    if (s->cap == old_n) free(ail_sfield_repack(s, s->n, 0, -1, s->n + 2));
-    else ail_sfield_settle(s, dead);
+static void ail_wfield_removed(ail_slist *s, int64_t old_n, int64_t dead) {
+    if (s->cap == old_n) free(ail_wfield_repack(s, s->n, 0, -1, s->n + 2));
+    else ail_wfield_settle(s, dead);
 }
-static void ail_sfield_set_slice(ail_slist *s, const ail_slist *source,
+static void ail_wfield_set_slice(ail_slist *s, const ail_slist *source,
         int64_t lo, int haslo, int64_t hi, int hashi, int64_t step) {
-    ail_sfield_validate(s); ail_sfield_validate(source);
+    ail_wfield_validate(s); ail_wfield_validate(source);
     int64_t start; uint64_t stride;
     int64_t count = ail_numfield_slice_plan(s->n, lo, haslo, hi, hashi, step, &start, &stride);
     if (step != 1 && source->n != count) ail_raise_named(AIL_EXC_VALUE);
@@ -4045,19 +4184,19 @@ static void ail_sfield_set_slice(ail_slist *s, const ail_slist *source,
         memcpy(spine, source->p, (size_t)k * sizeof *spine);
         values = spine;
     }
-    ail_str *old = ail_sfield_room(s, new_n > old_n ? new_n : old_n, ail_sfield_text(values, k), -1);
+    ail_str *old = ail_wfield_room(s, new_n > old_n ? new_n : old_n, ail_wfield_text(values, k), -1);
     int64_t dead = 0;
     if (step == 1) {
-        dead = ail_sfield_text(s->p + start, count);
+        dead = ail_wfield_text(s->p + start, count);
         int64_t tail = old_n - start - count;
         if (tail && k != count)
             memmove(s->p + start + k, s->p + start + count, (size_t)tail * sizeof(ail_str));
-        for (int64_t j = 0; j < k; ++j) s->p[start + j] = ail_sfield_put(s, values[j]);
+        for (int64_t j = 0; j < k; ++j) s->p[start + j] = ail_wfield_put(s, values[j]);
     } else {
         int64_t index = start;
         for (int64_t j = 0; j < count; ++j) {
             dead += s->p[index].n;
-            s->p[index] = ail_sfield_put(s, values[j]);
+            s->p[index] = ail_wfield_put(s, values[j]);
             if (j + 1 < count) index = step < 0
                 ? (int64_t)((uint64_t)index - stride) : (int64_t)((uint64_t)index + stride);
         }
@@ -4065,11 +4204,11 @@ static void ail_sfield_set_slice(ail_slist *s, const ail_slist *source,
     s->n = new_n;
     if (old) free(old);
     free(spine);
-    ail_sfield_settle(s, dead);
+    ail_wfield_settle(s, dead);
 }
-static void ail_sfield_delete_slice(ail_slist *s, int64_t lo, int haslo,
+static void ail_wfield_delete_slice(ail_slist *s, int64_t lo, int haslo,
         int64_t hi, int hashi, int64_t step) {
-    ail_sfield_validate(s);
+    ail_wfield_validate(s);
     int64_t start; uint64_t stride;
     int64_t count = ail_numfield_slice_plan(s->n, lo, haslo, hi, hashi, step, &start, &stride);
     if (!count) return;
@@ -4082,55 +4221,150 @@ static void ail_sfield_delete_slice(ail_slist *s, int64_t lo, int haslo,
         } else s->p[write++] = s->p[read];
     }
     s->n = write;
-    ail_sfield_removed(s, old_n, dead);
+    ail_wfield_removed(s, old_n, dead);
 }
-static void ail_sfield_append(ail_slist *s, ail_str value) {
-    ail_sfield_validate(s);
+static void ail_wfield_append(ail_slist *s, ail_str value) {
+    ail_wfield_validate(s);
     ail__need_elems(value.n, AIL_STR_LIMIT);
     if (value.n && !value.p) ail_die("invalid string text");
-    ail_str *old = ail_sfield_room(s, s->n + 1, value.n, -1);
-    s->p[s->n] = ail_sfield_put(s, value);
+    ail_str *old = ail_wfield_room(s, s->n + 1, value.n, -1);
+    s->p[s->n] = ail_wfield_put(s, value);
     s->n++;
     if (old) free(old);
 }
-static void ail_sfield_extend(ail_slist *s, const ail_slist *source) {
-    ail_sfield_validate(s);
-    ail_sfield_set_slice(s, source, s->n, 1, s->n, 1, 1);
+static void ail_wfield_extend(ail_slist *s, const ail_slist *source) {
+    ail_wfield_validate(s);
+    ail_wfield_set_slice(s, source, s->n, 1, s->n, 1, 1);
 }
-static void ail_sfield_set(ail_slist *s, int64_t i, ail_str value) {
-    i = ail_sfield_index(s, i);
+static void ail_wfield_set(ail_slist *s, int64_t i, ail_str value) {
+    i = ail_wfield_index(s, i);
     ail__need_elems(value.n, AIL_STR_LIMIT);
     if (value.n && !value.p) ail_die("invalid string text");
     int64_t dead = s->p[i].n;
-    ail_str *old = ail_sfield_room(s, s->n, value.n, i);
-    s->p[i] = ail_sfield_put(s, value);
+    ail_str *old = ail_wfield_room(s, s->n, value.n, i);
+    s->p[i] = ail_wfield_put(s, value);
     if (old) free(old);
-    else ail_sfield_settle(s, dead);
+    else ail_wfield_settle(s, dead);
 }
-static void ail_sfield_delete(ail_slist *s, int64_t i) {
-    i = ail_sfield_index(s, i);
+static void ail_wfield_delete(ail_slist *s, int64_t i) {
+    i = ail_wfield_index(s, i);
     int64_t old_n = s->n, dead = s->p[i].n;
     if (i + 1 < old_n) memmove(s->p + i, s->p + i + 1, (size_t)(old_n - i - 1) * sizeof(ail_str));
     s->n = old_n - 1;
-    ail_sfield_removed(s, old_n, dead);
+    ail_wfield_removed(s, old_n, dead);
 }
-static ail_str ail_sfield_pop(ail_slist *s, int64_t i) {
-    i = ail_sfield_index(s, i);
+static ail_str ail_wfield_pop(ail_slist *s, int64_t i) {
+    i = ail_wfield_index(s, i);
     ail_str value = ail_str_return_owned(s->p[i]);
-    ail_sfield_delete(s, i);
+    ail_wfield_delete(s, i);
     return value;
 }
-static void ail_sfield_clear(ail_slist *s) {
-    ail_sfield_validate(s); ail_slist_free(s);
+static void ail_wfield_clear(ail_slist *s) {
+    ail_wfield_validate(s); ail_slist_free(s);
 }
-static void ail_sfield_reverse(ail_slist *s) {
-    ail_sfield_validate(s);
+static void ail_wfield_reverse(ail_slist *s) {
+    ail_wfield_validate(s);
     for (int64_t i = 0, j = s->n - 1; i < j; ++i, --j) {
         ail_str value = s->p[i]; s->p[i] = s->p[j]; s->p[j] = value;
     }
 }
-static void ail_sfield_sort(ail_slist *s) {
-    ail_sfield_validate(s); ail_slist_sort(s);
+static void ail_wfield_sort(ail_slist *s) {
+    ail_wfield_validate(s); ail_slist_sort(s);
+}
+/* The wide mode of a packed string field: the legacy ail_sfield block. Everything the dense mode
+   cannot do in place goes through here, with the legacy functions (ail_wfield_*) unchanged. */
+static void ail_pslist_widen(ail_pslist *L) {
+    ail_pslist_check(L);
+    if (L->wide) return;
+    ail_slist w = {0};
+    if (L->n) {
+        ail__need_elems(L->n, AIL_ELEM_LIMIT(ail_str));
+        size_t head = (size_t)L->n * sizeof(ail_str);
+        if ((size_t)L->tn > SIZE_MAX - head) ail_die("allocation too large");
+        ail_str *q = (ail_str *)ail_alloc(head + (size_t)L->tn);
+        uint8_t *text = (uint8_t *)q + head;
+        if (L->tn) memcpy(text, L->t, (size_t)L->tn);
+        for (int64_t i = 0; i < L->n; i++) q[i] = (ail_str){text + L->e[i], L->e[i + 1] - L->e[i], !L->noasc};
+        w = (ail_slist){q, L->n, L->n};
+    }
+    free(L->t); free(L->e);
+    *L = (ail_pslist){0};
+    L->wide = 1; L->w = w; L->n = w.n;
+}
+static void ail_sfield_append(ail_pslist *L, ail_str value) {
+    if (!L->wide) {
+        if (__builtin_expect(L->n < 0 || L->cap < L->n || L->tcap < L->tn, 0)) ail_pslist_check(L);
+        ail_pslist_push(L, value);
+        return;
+    }
+    ail_wfield_append(&L->w, value);
+    L->n = L->w.n;
+}
+static void ail_sfield_extend(ail_pslist *L, const ail_slist *source) {
+    if (L->wide) { ail_wfield_extend(&L->w, source); L->n = L->w.n; return; }
+    ail_pslist_check(L);
+    ail_wfield_validate(source);
+    for (int64_t j = 0; j < source->n; j++) ail_pslist_push(L, source->p[j]);
+}
+static void ail_sfield_set(ail_pslist *L, int64_t i, ail_str value) {
+    ail_pslist_widen(L);
+    ail_wfield_set(&L->w, i, value);
+    L->n = L->w.n;
+}
+static void ail_sfield_set_slice(ail_pslist *L, const ail_slist *source,
+        int64_t lo, int haslo, int64_t hi, int hashi, int64_t step) {
+    ail_pslist_widen(L);
+    ail_wfield_set_slice(&L->w, source, lo, haslo, hi, hashi, step);
+    L->n = L->w.n;
+}
+static void ail_sfield_delete_slice(ail_pslist *L, int64_t lo, int haslo,
+        int64_t hi, int hashi, int64_t step) {
+    ail_pslist_widen(L);
+    ail_wfield_delete_slice(&L->w, lo, haslo, hi, hashi, step);
+    L->n = L->w.n;
+}
+/* The last element of a dense field is removed in place (a stack of strings stays dense). */
+static void ail_sfield_delete(ail_pslist *L, int64_t i) {
+    if (!L->wide) {
+        ail_pslist_check(L);
+        int64_t j = i < 0 ? i + L->n : i;
+        if (j >= 0 && j == L->n - 1) { L->n--; L->tn = L->e[L->n]; return; }
+    }
+    ail_pslist_widen(L);
+    ail_wfield_delete(&L->w, i);
+    L->n = L->w.n;
+}
+static ail_str ail_sfield_pop(ail_pslist *L, int64_t i) {
+    if (!L->wide) {
+        ail_pslist_check(L);
+        int64_t j = i < 0 ? i + L->n : i;
+        if (j >= 0 && j == L->n - 1) {
+            ail_str value = ail_str_return_owned(ail_pslist_at(L, j));
+            L->n--; L->tn = L->e[L->n];
+            return value;
+        }
+    }
+    ail_pslist_widen(L);
+    ail_str value = ail_wfield_pop(&L->w, i);
+    L->n = L->w.n;
+    return value;
+}
+static void ail_sfield_clear(ail_pslist *L) {
+    ail_pslist_check(L);
+    ail_pslist_free(L);
+}
+static void ail_sfield_reverse(ail_pslist *L) {
+    ail_pslist_widen(L);
+    ail_wfield_reverse(&L->w);
+}
+static void ail_sfield_sort(ail_pslist *L) {
+    ail_pslist_widen(L);
+    ail_wfield_sort(&L->w);
+}
+/* A read-only list[str] parameter lent a field: the field's own spine, the field turning wide. */
+static ail_slist ail_pslist_borrow(ail_pslist *L) {
+    ail_pslist_widen(L);
+    return L->w;
 }
 '''
 NUMVIEW = r'''
@@ -4281,11 +4515,18 @@ static void PREFIX##extend(LISTTYPE *s, const LISTTYPE *source) { \
     if (n) memcpy(s->p + s->n, p, (size_t)n * sizeof(SCALAR)); \
     s->n += n; free(copy); \
 } \
-static SCALAR PREFIX##pop(LISTTYPE *s, int64_t i) { \
+static SCALAR PREFIX##pop_slow(LISTTYPE *s, int64_t i) { \
     i = PREFIX##index(s, i); \
     SCALAR value; memcpy(&value, s->p + i, sizeof value); \
     if (i < s->n - 1) memmove(s->p + i, s->p + i + 1, (size_t)(s->n - i - 1) * sizeof(SCALAR)); \
     --s->n; return value; \
+} \
+/* `xs.pop()` and `xs.pop(-1)` (a stack kept in a struct field: 60% of an LLM-written interpreter's time went to the \
+   out-of-line call, the negative-index slow path and the layout check behind it for every pop): the last element of a \
+   live list is one compare and a decrement; anything else, and every damaged layout, takes the full path. */ \
+static inline __attribute__((always_inline)) SCALAR PREFIX##pop(LISTTYPE *s, int64_t i) { \
+    if (__builtin_expect(s && s->n > 0 && (i == -1 || i == s->n - 1), 1)) return s->p[--s->n]; \
+    return PREFIX##pop_slow(s, i); \
 } \
 static void PREFIX##clear(LISTTYPE *s) { PREFIX##validate(s); s->n = 0; } \
 static void PREFIX##reverse(LISTTYPE *s) { \
@@ -4457,9 +4698,69 @@ static int ail_cmp(const void *a, const void *b) {
     int64_t x = *(const int64_t *)a, y = *(const int64_t *)b;
     return (x > y) - (x < y);
 }
+/* `xs.sort()` / `sorted(xs)` of an int list: an in-place introsort with the comparison inlined. qsort called a function
+   through a pointer for every comparison and moved elements through its merge buffer: 31% of the instructions of an
+   LLM-written scheduler that sorts a million ints. Equal ints are indistinguishable, so the lack of stability shows
+   nowhere (floats are not done this way: 0.0 and -0.0 compare equal and print differently). Median of three, Hoare
+   partition (it stops on equal keys, so many duplicates split evenly), insertion sort below 17 elements, heapsort once
+   the depth limit is reached: O(n log n) in the worst case, no allocation, the recursion on the smaller side only. */
+#define AIL_DEFINE_SORT(NAME, T) \
+static void NAME##_insertion(T *a, int64_t n) { \
+    for (int64_t i = 1; i < n; i++) { \
+        T x = a[i]; int64_t j = i - 1; \
+        while (j >= 0 && a[j] > x) { a[j + 1] = a[j]; j--; } \
+        a[j + 1] = x; \
+    } \
+} \
+static void NAME##_sift(T *a, int64_t i, int64_t n) { \
+    T x = a[i]; \
+    for (;;) { \
+        int64_t c = 2 * i + 1; \
+        if (c >= n) break; \
+        if (c + 1 < n && a[c + 1] > a[c]) c++; \
+        if (!(a[c] > x)) break; \
+        a[i] = a[c]; i = c; \
+    } \
+    a[i] = x; \
+} \
+static void NAME##_heap(T *a, int64_t n) { \
+    for (int64_t i = n / 2 - 1; i >= 0; i--) NAME##_sift(a, i, n); \
+    for (int64_t e = n - 1; e > 0; e--) { T t = a[0]; a[0] = a[e]; a[e] = t; NAME##_sift(a, 0, e); } \
+} \
+static void NAME##_intro(T *a, int64_t n, int depth) { \
+    while (n > 16) { \
+        if (depth-- == 0) { NAME##_heap(a, n); return; } \
+        int64_t m = (n - 1) / 2; \
+        { T x = a[0], y = a[m], z = a[n - 1], t; \
+          if (y < x) { t = x; x = y; y = t; } \
+          if (z < y) { y = z; if (y < x) y = x; } \
+          /* y is now the median of the three: put it at m */ \
+          if (a[0] == y) { T t2 = a[m]; a[m] = a[0]; a[0] = t2; } \
+          else if (a[n - 1] == y) { T t2 = a[m]; a[m] = a[n - 1]; a[n - 1] = t2; } } \
+        T pivot = a[m]; \
+        int64_t i = -1, j = n; \
+        for (;;) { \
+            do i++; while (a[i] < pivot); \
+            do j--; while (a[j] > pivot); \
+            if (i >= j) break; \
+            T t = a[i]; a[i] = a[j]; a[j] = t; \
+        } \
+        int64_t left = j + 1, right = n - left; \
+        if (left < right) { NAME##_intro(a, left, depth); a += left; n = right; } \
+        else { NAME##_intro(a + left, right, depth); n = left; } \
+    } \
+    NAME##_insertion(a, n); \
+} \
+static void NAME(T *a, int64_t n) { \
+    if (n < 2) return; \
+    int depth = 0; \
+    for (int64_t k = n; k > 1; k >>= 1) depth += 2; \
+    NAME##_intro(a, n, depth); \
+}
+AIL_DEFINE_SORT(ail__sort_i64, int64_t)
 static void ail_list_sort(ail_list *L) {
-    /* An empty list may hold p == NULL, and qsort(NULL, 0, ...) is undefined behaviour. */
-    if (L->n > 1) qsort(L->p, (size_t)L->n, sizeof *L->p, ail_cmp);
+    /* An empty list may hold p == NULL: there is nothing to sort below two elements. */
+    if (L->n > 1) ail__sort_i64(L->p, L->n);
 }
 '''
 
@@ -21344,9 +21645,12 @@ REQUIRES['NUMVIEW'] = ['NUMFIELD', 'DIE']
 ORDER.insert(ORDER.index('NUMFIELD') + 1, 'NUMFIELDMUT')
 SOURCE['NUMFIELDMUT'] = NUMFIELDMUT
 REQUIRES['NUMFIELDMUT'] = ['NUMFIELD', 'DIE']
-ORDER.insert(max(ORDER.index(name) for name in ('SLIST', 'STRRET', 'NUMFIELDMUT')) + 1, 'SFIELDMUT')
+ORDER.insert(ORDER.index('SLIST') + 1, 'PSLIST')
+SOURCE['PSLIST'] = PSLIST
+REQUIRES['PSLIST'] = ['SLIST']
+ORDER.insert(max(ORDER.index(name) for name in ('PSLIST', 'STRRET', 'NUMFIELDMUT')) + 1, 'SFIELDMUT')
 SOURCE['SFIELDMUT'] = SFIELDMUT
-REQUIRES['SFIELDMUT'] = ['SLIST', 'STRRET', 'NUMFIELDMUT']
+REQUIRES['SFIELDMUT'] = ['SLIST', 'PSLIST', 'STRRET', 'NUMFIELDMUT']
 
 ORDER.insert(ORDER.index('STAB') + 1, 'SDICT')
 SOURCE['SDICT'] = SDICT
@@ -22902,20 +23206,32 @@ static ail_bytes ail_bytearray_span(const ail_bytearray *B) {
 static ail_bytearray *ail_bytearray_copy(const ail_bytearray *B) {
     return ail_bytearray_from_bytes(ail_bytearray_span(B));
 }
-static ail_bytearray *ail_bytearray_retain(ail_bytearray *B) {
+/* A struct method that reads a bytearray field takes a reference to it for the call and gives it back (`self.arena` in
+   ranking-2's table, a tree parser's name store): the retain, the release that does not free and the store helper were
+   a third of the instructions of both (the full metadata check ran in each). A live object takes one compare and an
+   increment inline in the retain, the store helper is inline, and the release is one function whose first test is the
+   release that does not free; a dead object, a counter at its limit and the last release take the full path. (Inlining
+   the release as well saved 8% more of the tree parser's instructions and cost it 6 KB of text: 64 KB against 60 KB.) */
+static __attribute__((noinline, cold)) ail_bytearray *ail_bytearray_retain_slow(ail_bytearray *B) {
     ail_bytearray_meta(B);
     if (B->refs == SIZE_MAX) ail_die("bytearray reference overflow");
     ++B->refs;
     return B;
 }
-static void ail_bytearray_release(ail_bytearray *B) {
+static inline __attribute__((always_inline)) ail_bytearray *ail_bytearray_retain(ail_bytearray *B) {
+    if (__builtin_expect(B != NULL, 1)) { size_t r = B->refs; if (__builtin_expect(r - 1 < SIZE_MAX - 1, 1)) { B->refs = r + 1; return B; } }
+    if (!B) __builtin_unreachable();
+    return ail_bytearray_retain_slow(B);
+}
+static __attribute__((noinline)) void ail_bytearray_release(ail_bytearray *B) {
     if (!B) return;
+    if (__builtin_expect(B->refs > 1, 1)) { --B->refs; return; }
     ail_bytearray_meta(B);
     if (--B->refs) return;
     if (B->cap <= 4096 && ail__ba_cache_n < AIL_BA_CACHE_MAX) { ail__ba_cache[ail__ba_cache_n++] = B; return; }
     free(B->p); free(B);
 }
-static void ail_bytearray_store(ail_bytearray * volatile *slot, ail_bytearray *value, int adopt) {
+static inline void ail_bytearray_store(ail_bytearray * volatile *slot, ail_bytearray *value, int adopt) {
     if (!slot || (adopt != 0 && adopt != 1)) ail_die("invalid bytearray store");
     if (value) {
         if (adopt) ail_bytearray_meta(value);

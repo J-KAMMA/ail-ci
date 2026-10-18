@@ -44,6 +44,8 @@ def ctype(t):
             return 'ail_idict *'
         if inner.head == 'list' and inner.args[0] == I.STRV:
             return 'ail_slist *'
+        if inner.head == 'plist':
+            return 'ail_pslist *'
         if I.rec_elem(t) is not None:
             return 'ail_rl_%s *' % I.rec_sig(t)
     raise I.IRError('no C type for %s' % t)
@@ -606,6 +608,17 @@ class Emitter(TextEmitter):
             return self.line(depth, '(%s)->f_%s = %s;' % (o[0], ins.attrs['name'], o[1]))
         if op == 'field.list':
             return self.assign_new(depth, ins.result, '(&(%s)->f_%s)' % (o[0], ins.attrs['name']))
+        if op == 'field.plist':
+            self.parts.update(('SLIST', 'PSLIST'))
+            return self.assign_new(depth, ins.result, '(&(%s)->f_%s)' % (o[0], ins.attrs['name']))
+        if op == 'plist.len':
+            return self.assign_new(depth, ins.result, '((int64_t)(%s)->n)' % o[0])
+        if op == 'plist.get':
+            if ins.attrs.get('mode') == 'nck':
+                return self.assign_new(depth, ins.result, 'ail_pslist_at(%s, %s)' % (o[0], o[1]))
+            return self.assign_new(depth, ins.result, 'ail_pslist_get(%s, %s)' % (o[0], o[1]))
+        if op == 'plist.has':
+            return self.assign_new(depth, ins.result, '(ail_pslist_has(%s, %s) != 0)' % (o[0], o[1]))
         if op == 'span.of' and ins.result.type == I.T('span', I.T('u8')):
             name = self.fresh(ins.result)
             self.parts.add('BYTEARRAY')

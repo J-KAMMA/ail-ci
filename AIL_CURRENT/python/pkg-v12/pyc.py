@@ -29,6 +29,11 @@ from pipeline import PipelineError, compiler, ffi_link_args, link_flags
 # stalls (n-body: 3.75 s with it, 2.46 s without, same instruction count within 3%; clang, which
 # does not pack them, ran the same C 2.2x faster). Loop vectorization is unaffected.
 CFLAGS_TUNE = ['-fno-tree-slp-vectorize']
+# Extra flags for the C compiler, for development: AIL_EXTRA_CFLAGS='-Werror=incompatible-pointer-types' turns the one
+# warning GCC 13 gives for a call of a runtime helper on the wrong struct type into an error (a packed list[str] field passed
+# to an ail_slist_* function compiled and misbehaved before the tests of that stage were run this way).
+import os as _os_flags
+CFLAGS_TUNE += _os_flags.environ.get('AIL_EXTRA_CFLAGS', '').split()
 import native_diagnostics
 import buildcache
 import shadowing

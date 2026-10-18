@@ -664,8 +664,8 @@ class LangGapTests(unittest.TestCase):
     def test_sets_dicts_and_list_fields_match_cpython(self):
         program = self.check(SETS_AIL, SETS_PY, "sets")
         body = body_of(program, "field_hits")
-        for call in ("ail_list_count(&(v_b)->f_xs", "ail_slist_count(&(v_b)->f_ws",
-                     "ail_list_has(&(v_b)->f_xs", "ail_slist_has(&(v_b)->f_ws"):
+        for call in ("ail_list_count(&(v_b)->f_xs", "ail_pslist_count(&(v_b)->f_ws",
+                     "ail_list_has(&(v_b)->f_xs", "ail_pslist_has(&(v_b)->f_ws"):
             self.assertIn(call, body)
         for copy in ("snapshot", "_copy", "ail_list_push", "ail_slist_push"):
             self.assertNotIn(copy, body)
