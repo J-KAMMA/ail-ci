@@ -169,6 +169,7 @@ EXC_IDS = {
 TYPE_TAG = {
     'int': 'AIL_T_INT', 'float': 'AIL_T_FLOAT', 'str': 'AIL_T_STR', 'bool': 'AIL_T_BOOL',
     'list': 'AIL_T_LIST', 'dict': 'AIL_T_DICT', 'set': 'AIL_T_SET', 'tuple': 'AIL_T_TUPLE',
+    'frozenset': 'AIL_T_FROZENSET',
 }
 
 # Methods whose _m_ handlers actually consume keyword arguments. Everything else
@@ -1660,7 +1661,8 @@ class Compiler:
                 return 'deque'
             return {'str': 'str', 'int': 'int', 'float': 'float', 'bool': 'bool',
                    'list': 'list', 'sorted': 'list', 'dict': 'dict',
-                   'set': 'set', 'tuple': 'tuple', 'range': 'range'}.get(node.func.id)
+                   'set': 'set', 'frozenset': 'frozenset', 'tuple': 'tuple',
+                   'range': 'range'}.get(node.func.id)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
             # A handful of methods PROVABLY return a fixed kind regardless of their receiver's
             # own kind -- propagating through these (safely; never guessed) recovers real
@@ -2591,24 +2593,21 @@ class Compiler:
         ctx.emit('%s = ail_tuple_new(cx, %s, %d);' % (t, arr, len(vs)))
         return t
 
+    def _set_iter_src(self, node, ctx):
+        """The iterable handed to a set constructor/method. `d.keys()` is a dict_keys view in CPython, which
+        set code walks one key at a time (an exact dict gets the pre-sized path), so it is the keys list here."""
+        if self._is_dict_view_call(node, ctx):
+            return self.expr(node, ctx)
+        return self._resolve_iter_src(node, ctx)
+
     def expr_Set(self, node, ctx):
         t = ctx.tmp()
         ctx.emit('%s = ail_set_new(cx);' % t)
         for e in node.elts:
             if isinstance(e, ast.Starred):
                 src = self.expr(e.value, ctx)
-                it = ctx.tmp(); val = ctx.tmp()
-                ctx.emit('st = ail_iter(cx, &%s, %s);' % (it, src))
+                ctx.emit('st = ail_set_update_any(cx, %s, %s);' % (t, src))
                 ctx.check()
-                ctx.emit('for (;;) {')
-                ctx.indent += 1
-                ctx.emit('st = ail_it_next(cx, &%s, %s);' % (val, it))
-                ctx.emit('if (st == AIL_STOP) { st = AIL_OK; break; }')
-                ctx.check()
-                ctx.emit('st = ail_set_add(cx, %s, %s);' % (t, val))
-                ctx.check()
-                ctx.indent -= 1
-                ctx.emit('}')
                 continue
             v = self.expr(e, ctx)
             ctx.emit('st = ail_set_add(cx, %s, %s);' % (t, v))
@@ -3711,21 +3710,22 @@ class Compiler:
         if kwargs or len(args) > 1:
             raise Unsupported('set() with other than 0 or 1 positional argument')
         t = ctx.tmp()
-        ctx.emit('%s = ail_set_new(cx);' % t)
-        if args:
-            src = self._resolve_iter_src(args[0], ctx)
-            it = ctx.tmp(); val = ctx.tmp()
-            ctx.emit('st = ail_iter(cx, &%s, %s);' % (it, src))
-            ctx.check()
-            ctx.emit('for (;;) {')
-            ctx.indent += 1
-            ctx.emit('st = ail_it_next(cx, &%s, %s);' % (val, it))
-            ctx.emit('if (st == AIL_STOP) { st = AIL_OK; break; }')
-            ctx.check()
-            ctx.emit('st = ail_set_add(cx, %s, %s);' % (t, val))
-            ctx.check()
-            ctx.indent -= 1
-            ctx.emit('}')
+        if not args:
+            ctx.emit('%s = ail_set_new(cx);' % t)
+            return t
+        ctx.emit('st = ail_bi_set_from_iter(cx, &%s, 1, %s);' % (t, self._set_iter_src(args[0], ctx)))
+        ctx.check()
+        return t
+
+    def _b_frozenset(self, args, kwargs, ctx):
+        if kwargs or len(args) > 1:
+            raise Unsupported('frozenset() with other than 0 or 1 positional argument')
+        t = ctx.tmp()
+        if not args:
+            ctx.emit('%s = ail_frozenset_new(cx);' % t)
+            return t
+        ctx.emit('st = ail_bi_frozenset_from_iter(cx, &%s, 1, %s);' % (t, self._set_iter_src(args[0], ctx)))
+        ctx.check()
         return t
 
     def _b_dict(self, args, kwargs, ctx):
@@ -3768,9 +3768,11 @@ class Compiler:
         # same scope as the other unambiguous-name methods).
         return self._dict_fromkeys(args, kwargs, ctx)
 
-    def _extend_from_iter(self, listexpr, src, ctx):
+    def _extend_from_iter(self, listexpr, src, ctx, ordered=True):
         it = ctx.tmp(); val = ctx.tmp()
-        ctx.emit('st = ail_iter(cx, &%s, %s);' % (it, src))
+        # ordered=False: the order the elements arrive in cannot show (sorted() with no key), so a set whose
+        # CPython order cannot be reproduced (str ...) may still be read
+        ctx.emit('st = %s(cx, &%s, %s);' % ('ail_iter', it, src))
         ctx.check()
         ctx.emit('for (;;) {')
         ctx.indent += 1
@@ -4277,7 +4279,7 @@ class Compiler:
         src = self._resolve_iter_src(args[0], ctx)
         t = ctx.tmp()
         ctx.emit('%s = ail_list_new(cx);' % t)
-        self._extend_from_iter(t, src, ctx)
+        self._extend_from_iter(t, src, ctx, ordered=('key' in kwargs))
         keyfn = self._wrap_cfunc(ctx, self._func_pointer_of(kwargs['key'], ctx)) \
             if 'key' in kwargs else 'ail_box_none()'
         if 'reverse' in kwargs:
@@ -4340,7 +4342,8 @@ class Compiler:
         it = ctx.tmp(); val = ctx.tmp(); best = ctx.tmp()
         have = ctx.new_cvar('have')
         ctx.emit('int %s = 0;' % have)
-        ctx.emit('st = ail_iter(cx, &%s, %s);' % (it, src))
+        # with no key= the answer does not depend on the order the elements arrive in
+        ctx.emit('st = %s(cx, &%s, %s);' % ('ail_iter', it, src))
         ctx.check()
         ctx.emit('for (;;) {')
         ctx.indent += 1
@@ -4775,7 +4778,13 @@ class Compiler:
                     (recv, src, ctx.cur_err_target()))
             ctx.uses_st = True
             return 'ail_box_none()'
-        self._extend_from_iter(recv, src, ctx)
+        # `xs.extend(xs)` adds the items xs had at the start, once; walking xs while appending to
+        # it would never end (fuzz seed 2074400450 ran out of memory). Walk a copy instead.
+        same = ctx.tmp()
+        ctx.emit('%s = %s;' % (same, src))
+        ctx.emit('if (%s.tag == AIL_T_LIST && %s.tag == AIL_T_LIST && %s.o == %s.o) %s = ail_meth_list_copy(cx, %s);'
+                 % (same, recv, same, recv, same, same))
+        self._extend_from_iter(recv, same, ctx)
         return 'ail_box_none()'
 
     def _m_insert(self, recv, kind, args, kwargs, ctx):
@@ -4826,7 +4835,9 @@ class Compiler:
             raise Unsupported(typeerror_msg + ' (no candidate kind accepts this call\'s '
                               'argument shape)')
         for i, (k, lines) in enumerate(applicable):
-            ctx.emit('%s (%s.tag == %s) {' % ('if' if i == 0 else 'else if', recv, TYPE_TAG[k]))
+            cond = ('(%s.tag == AIL_T_SET || %s.tag == AIL_T_FROZENSET)' % (recv, recv)
+                    if k == 'set' else '%s.tag == %s' % (recv, TYPE_TAG[k]))
+            ctx.emit('%s (%s) {' % ('if' if i == 0 else 'else if', cond))
             ctx.indent += 1
             ctx.lines.extend(lines)
             ctx.indent -= 1
@@ -4998,9 +5009,8 @@ class Compiler:
             c.emit('%s = ail_meth_list_copy(cx, %s);' % (t, recv))
 
         def do_set(c):
-            # union(s, s) is exactly a copy: fresh map, same members.
-            c.emit('st = ail_set_union(cx, &%s, %s, %s); if (st != AIL_OK) goto %s;' %
-                  (t, recv, recv, c.cur_err_target()))
+            c.emit('st = ail_meth_set_copy(cx, &%s, %s); if (st != AIL_OK) goto %s;' %
+                  (t, recv, c.cur_err_target()))
             c.uses_st = True
 
         self._tag_branch(ctx, recv, kind, {'dict': do_dict, 'list': do_list, 'set': do_set},
@@ -5015,7 +5025,8 @@ class Compiler:
             c.emit('ail_meth_list_clear(%s);' % recv)
 
         def do_set(c):
-            c.emit('ail_map_clear((ail_mapobj *)(%s).o);' % recv)
+            c.emit('st = ail_meth_set_clear(cx, %s); if (st != AIL_OK) goto %s;' % (recv, c.cur_err_target()))
+            c.uses_st = True
 
         self._tag_branch(ctx, recv, kind, {'dict': do_dict, 'list': do_list, 'set': do_set},
                          "object has no attribute 'clear'")
@@ -5116,7 +5127,10 @@ class Compiler:
                 raise Unsupported('.update() on a set with keyword arguments')
             for a in args:
                 c.emit('st = ail_meth_set_update(cx, %s, %s); if (st != AIL_OK) goto %s;' %
-                       (recv, self._resolve_iter_src(a, ctx), c.cur_err_target()))
+                       (recv, self._set_iter_src(a, ctx), c.cur_err_target()))
+                c.uses_st = True
+            if not args:
+                c.emit('st = ail_setm_need_mut(cx, %s, "update"); if (st != AIL_OK) goto %s;' % (recv, c.cur_err_target()))
                 c.uses_st = True
 
         if kind == 'counter':
@@ -5126,139 +5140,86 @@ class Compiler:
                          "object has no attribute 'update'")
         return 'ail_box_none()'
 
-    def _m_union(self, recv, kind, args, kwargs, ctx):
-        t = ctx.tmp()
-        ctx.emit('%s = ail_set_new(cx);' % t)
-        self._set_add_from_iter(t, recv, ctx)
-        for a in args:
-            self._set_add_from_iter(t, self._resolve_iter_src(a, ctx), ctx)
-        return t
+    _SETISH = ('set', 'frozenset', None)
 
-    def _set_add_from_iter(self, setexpr, srcexpr, ctx):
-        it = ctx.tmp(); val = ctx.tmp()
-        ctx.emit('st = ail_iter(cx, &%s, %s);' % (it, srcexpr))
+    def _m_union(self, recv, kind, args, kwargs, ctx):
+        if kind not in self._SETISH:
+            raise Unsupported('.union() (on a %s)' % kind)
+        t = ctx.tmp()
+        if not args:
+            ctx.emit('st = ail_meth_set_copy_new(cx, &%s, %s);' % (t, recv))
+            ctx.check()
+            return t
+        ctx.emit('st = ail_meth_set_union1(cx, &%s, %s, %s);' % (t, recv, self._set_iter_src(args[0], ctx)))
         ctx.check()
-        ctx.emit('for (;;) {')
-        ctx.indent += 1
-        ctx.emit('st = ail_it_next(cx, &%s, %s);' % (val, it))
-        ctx.emit('if (st == AIL_STOP) { st = AIL_OK; break; }')
-        ctx.check()
-        ctx.emit('st = ail_set_add(cx, %s, %s);' % (setexpr, val))
-        ctx.check()
-        ctx.indent -= 1
-        ctx.emit('}')
+        for a in args[1:]:
+            ctx.emit('st = ail_meth_set_extend(cx, %s, %s, %s);' % (t, recv, self._set_iter_src(a, ctx)))
+            ctx.check()
+        return t
 
     def _m_intersection(self, recv, kind, args, kwargs, ctx):
+        if kind not in self._SETISH:
+            raise Unsupported('.intersection() (on a %s)' % kind)
         if not args:
             t = ctx.tmp()
-            ctx.emit('%s = ail_set_new(cx);' % t)
-            self._set_add_from_iter(t, recv, ctx)
-            return t
-        t = None
-        for i, a in enumerate(args):
-            tmp = ctx.tmp()
-            ctx.emit('%s = ail_set_new(cx);' % tmp)
-            self._set_add_from_iter(tmp, self._resolve_iter_src(a, ctx), ctx)
-            nt = ctx.tmp()
-            ctx.emit('st = ail_set_intersection(cx, &%s, %s, %s);' %
-                     (nt, recv if i == 0 else t, tmp))
+            ctx.emit('st = ail_meth_set_copy_new(cx, &%s, %s);' % (t, recv))
             ctx.check()
-            t = nt
-        return t
-
-    def _m_intersection_old(self, recv, kind, args, kwargs, ctx):
-        other = self.expr(args[0], ctx)
-        t = ctx.tmp()
-        ctx.emit('st = ail_set_intersection(cx, &%s, %s, %s);' % (t, recv, other))
-        ctx.check()
-        return t
-
-    def _set_arg(self, arg, ctx):
-        """Materialise a set-op's `other` operand into a real SET unless it is
-        statically proven one already -- the published ail_meth_set_* helpers
-        membership-test `b` via ail_set_contains on a mapobj backing, so a
-        non-set iterable there is a wild cast; CPython accepts ANY iterable."""
-        if self.infer_kind(arg, ctx) == 'set':
-            return self.expr(arg, ctx)
-        s = ctx.tmp()
-        ctx.emit('%s = ail_set_new(cx);' % s)
-        self._set_add_from_iter(s, self._resolve_iter_src(arg, ctx), ctx)
-        return s
-
-    def _m_difference(self, recv, kind, args, kwargs, ctx):
-        if kind not in ('set', None):
-            raise Unsupported('.difference() (on a %s)' % kind)
-        if not args:
-            # CPython set.difference() with no argument returns an independent
-            # COPY of the receiver, not the receiver itself.
-            t = ctx.tmp()
-            ctx.emit('%s = ail_set_new(cx);' % t)
-            self._set_add_from_iter(t, recv, ctx)
             return t
         cur = recv
         for a in args:
-            b = self._set_arg(a, ctx)
             t = ctx.tmp()
-            ctx.emit('st = ail_meth_set_difference(cx, &%s, %s, %s);' % (t, cur, b))
+            ctx.emit('st = ail_meth_set_intersection1(cx, &%s, %s, %s);' % (t, cur, self._set_iter_src(a, ctx)))
             ctx.check()
             cur = t
         return cur
 
-    def _m_symmetric_difference(self, recv, kind, args, kwargs, ctx):
-        if kind not in ('set', None):
-            raise Unsupported('.symmetric_difference() (on a %s)' % kind)
-        b = self._set_arg(args[0], ctx)
+    def _m_difference(self, recv, kind, args, kwargs, ctx):
+        if kind not in self._SETISH:
+            raise Unsupported('.difference() (on a %s)' % kind)
         t = ctx.tmp()
-        ctx.emit('st = ail_meth_set_symmetric_difference(cx, &%s, %s, %s);'
-                 % (t, recv, b))
+        if not args:
+            ctx.emit('st = ail_meth_set_copy_new(cx, &%s, %s);' % (t, recv))
+            ctx.check()
+            return t
+        ctx.emit('st = ail_meth_set_difference1(cx, &%s, %s, %s);' % (t, recv, self._set_iter_src(args[0], ctx)))
+        ctx.check()
+        for a in args[1:]:
+            ctx.emit('st = ail_meth_set_difference_more(cx, %s, %s);' % (t, self._set_iter_src(a, ctx)))
+            ctx.check()
+        return t
+
+    def _m_symmetric_difference(self, recv, kind, args, kwargs, ctx):
+        if kind not in self._SETISH:
+            raise Unsupported('.symmetric_difference() (on a %s)' % kind)
+        if len(args) != 1:
+            raise Unsupported('.symmetric_difference() takes exactly one argument (%d given)' % len(args))
+        t = ctx.tmp()
+        ctx.emit('st = ail_meth_set_symmetric_difference1(cx, &%s, %s, %s);'
+                 % (t, recv, self._set_iter_src(args[0], ctx)))
         ctx.check()
         return t
 
     def _set_pred(self, fn, name, recv, kind, args, ctx):
-        if kind not in ('set', None):
+        if kind not in self._SETISH:
             raise Unsupported('.%s() (on a %s)' % (name, kind))
-        b = self._set_arg(args[0], ctx)
+        if len(args) != 1:
+            raise Unsupported('.%s() takes exactly one argument (%d given)' % (name, len(args)))
         iv = ctx.new_cvar('isp')
         ctx.emit('int %s;' % iv)
-        ctx.emit('st = %s(cx, &%s, %s, %s);' % (fn, iv, recv, b))
+        ctx.emit('st = %s(cx, &%s, %s, %s);' % (fn, iv, recv, self._set_iter_src(args[0], ctx)))
         ctx.check()
         t = ctx.tmp()
         ctx.emit('%s = ail_box_bool(%s);' % (t, iv))
         return t
 
     def _m_issubset(self, recv, kind, args, kwargs, ctx):
-        return self._set_pred('ail_meth_set_issubset', 'issubset',
-                              recv, kind, args, ctx)
+        return self._set_pred('ail_meth_set_issubset', 'issubset', recv, kind, args, ctx)
 
     def _m_issuperset(self, recv, kind, args, kwargs, ctx):
-        return self._set_pred('ail_meth_set_issuperset', 'issuperset',
-                              recv, kind, args, ctx)
+        return self._set_pred('ail_meth_set_issuperset', 'issuperset', recv, kind, args, ctx)
 
     def _m_isdisjoint(self, recv, kind, args, kwargs, ctx):
-        # No published runtime helper: materialise `other` to a set, then scan
-        # the receiver's elements with ail_set_contains (early break on hit).
-        if kind not in ('set', None):
-            raise Unsupported('.isdisjoint() (on a %s)' % kind)
-        b = self._set_arg(args[0], ctx)
-        it = ctx.tmp(); val = ctx.tmp()
-        iv = ctx.new_cvar('disj'); has = ctx.new_cvar('has')
-        ctx.emit('int %s = 1;' % iv)
-        ctx.emit('st = ail_iter(cx, &%s, %s);' % (it, recv))
-        ctx.check()
-        ctx.emit('for (;;) {')
-        ctx.indent += 1
-        ctx.emit('st = ail_it_next(cx, &%s, %s);' % (val, it))
-        ctx.emit('if (st == AIL_STOP) { st = AIL_OK; break; }')
-        ctx.check()
-        ctx.emit('int %s;' % has)
-        ctx.emit('st = ail_set_contains(cx, &%s, %s, %s);' % (has, b, val))
-        ctx.check()
-        ctx.emit('if (%s) { %s = 0; break; }' % (has, iv))
-        ctx.indent -= 1
-        ctx.emit('}')
-        t = ctx.tmp()
-        ctx.emit('%s = ail_box_bool(%s);' % (t, iv))
-        return t
+        return self._set_pred('ail_meth_set_isdisjoint', 'isdisjoint', recv, kind, args, ctx)
 
     def _m_popitem(self, recv, kind, args, kwargs, ctx):
         if kind not in ('dict', 'counter', None) and \
@@ -5270,29 +5231,31 @@ class Compiler:
         return t
 
     def _set_update_op(self, fn, recv, kind, args, ctx):
-        # In-place op on the receiver's own map; each `other` is materialised to a
-        # real set first (CPython accepts any iterable; _set_arg does that). Zero
-        # args is CPython's legal no-op.
-        if kind not in ('set', None):
-            raise Unsupported('.%s() (on a %s)' % (fn[len('ail_set_'):], kind))
+        # In-place method of a set with any iterable argument (zero arguments is CPython's legal no-op,
+        # still refused on a frozenset)
+        if kind not in self._SETISH:
+            raise Unsupported('.%s() (on a %s)' % (fn[len('ail_meth_set_'):], kind))
+        if not args:
+            ctx.emit('st = ail_setm_need_mut(cx, %s, "%s"); if (st != AIL_OK) goto %s;' %
+                     (recv, fn[len('ail_meth_set_'):], ctx.cur_err_target()))
+            ctx.uses_st = True
         for a in args:
-            b = self._set_arg(a, ctx)
             ctx.emit('st = %s(cx, %s, %s); if (st != AIL_OK) goto %s;' %
-                     (fn, recv, b, ctx.cur_err_target()))
+                     (fn, recv, self._set_iter_src(a, ctx), ctx.cur_err_target()))
             ctx.uses_st = True
         return 'ail_box_none()'
 
     def _m_intersection_update(self, recv, kind, args, kwargs, ctx):
-        return self._set_update_op('ail_set_intersection_update', recv, kind, args, ctx)
+        return self._set_update_op('ail_meth_set_intersection_update', recv, kind, args, ctx)
 
     def _m_difference_update(self, recv, kind, args, kwargs, ctx):
-        return self._set_update_op('ail_set_difference_update', recv, kind, args, ctx)
+        return self._set_update_op('ail_meth_set_difference_update', recv, kind, args, ctx)
 
     def _m_symmetric_difference_update(self, recv, kind, args, kwargs, ctx):
         if len(args) != 1:
             raise Unsupported('.symmetric_difference_update() takes exactly one '
                               'argument (%d given)' % len(args))
-        return self._set_update_op('ail_set_symmetric_difference_update', recv, kind, args, ctx)
+        return self._set_update_op('ail_meth_set_symmetric_difference_update', recv, kind, args, ctx)
 
     def _str_method_1(self, fn, recv, args, ctx, extra=''):
         t = ctx.tmp()
@@ -5868,6 +5831,11 @@ class Compiler:
         if fn is None:
             raise Unsupported('the augmented %s= operator' % type(node.op).__name__)
         t = node.target
+        _tk = self.get_kind(t.id, ctx) if isinstance(t, ast.Name) else None
+        if _tk not in ('int', 'float', 'str', 'list', 'tuple', 'bool'):
+            # `s |= t`, `s &= t`, `s ^= t`, `s -= t` on a set whose kind is not known statically
+            fn = {'ail_op_bitor': 'ail_op_ibitor', 'ail_op_bitand': 'ail_op_ibitand',
+                  'ail_op_bitxor': 'ail_op_ibitxor', 'ail_op_sub': 'ail_op_isub'}.get(fn, fn)
         if isinstance(t, (ast.Name, ast.Attribute)):
             # a list's += and a set's |= change the object itself, which a second name sees
             fn = {'ail_op_add': 'ail_op_iadd', 'ail_set_union': 'ail_set_ior', 'ail_op_mul': 'ail_op_imul',
@@ -6215,6 +6183,15 @@ class Compiler:
 
         ctx.lines.append('%s: ;' % catch)
         ctx.indent += 1
+        # AIL_LIMIT (int64 overflow and the other implementation limits) is a stop, not a Python
+        # exception: no handler and no `finally` body may run on the way out. CPython has no such
+        # stop at all, so any output a `finally` printed here would be a line CPython never
+        # printed (fuzz seed 2074400336).
+        if has_finally:
+            outer_target = ctx.try_stack[-2]['catch'] if len(ctx.try_stack) > 1 else 'L_leave'
+        else:
+            outer_target = ctx.cur_err_target()
+        ctx.emit('if (st == AIL_LIMIT) goto %s;' % outer_target)
         first = True
         for h in node.handlers:
             conds = []
@@ -6263,6 +6240,7 @@ class Compiler:
             ctx.try_stack.pop()  # the handler-body trampoline pushed above
             ctx.lines.append('%s: ;' % trampoline)
             ctx.indent += 1
+            ctx.emit('if (st == AIL_LIMIT) goto %s;' % ctx.cur_err_target())
             ctx.emit('comp = AIL_COMPLETE_EXC;')
             ctx.emit('goto %s;' % fin_label)
             ctx.indent -= 1

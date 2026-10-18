@@ -397,6 +397,10 @@ _op('span.of', 1, 1)
 _op('span.len', 1, 1)
 _op('span.get', 2, 2)
 _op('span.set', 3, 3)
+# Speculative selects (passes/specsel.py, design section 22): `spec.get (list or span, index, guard)` reads an
+# int or float element when the index is in range; out of range it fails as the checked read does when
+# `guard` (i1) holds, and otherwise yields 0 without touching memory.
+_op('spec.get', 3, 3)
 
 LOOP_OPS = ('loop', 'for.range')
 INDEX_MODES = ('ck', 'nck')

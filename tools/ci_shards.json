@@ -83,6 +83,7 @@
   "test_ail_ir_s3d1": 10.0,
   "test_ail_ir_s4a": 10.0,
   "test_ail_ir_s4c1": 10.0,
+  "test_ail_ir_specsel": 8.3,
   "test_ail_json_fast": 10.0,
   "test_ail_lang_gaps": 285.1,
   "test_ail_libc_names": 9.9,
@@ -126,6 +127,7 @@
   "test_ail_scan_spec_modes": 40.0,
   "test_ail_sdk": 793.6,
   "test_ail_sdk_environment": 21.9,
+  "test_ail_sets_general": 145.1,
   "test_ail_short_style_traps": 30.7,
   "test_ail_slow_patterns": 22.7,
   "test_ail_sort_keys": 69.7,
@@ -203,6 +205,7 @@
    "test_ail_exception_values_core"
   ],
   [
+   "test_ail_sets_general",
    "test_ail_stdout_mixed"
   ],
   [
@@ -316,6 +319,7 @@
    "test_ail_edit_check_report",
    "test_ail_edit_dependencies",
    "test_ail_field_index_inplace",
+   "test_ail_ir_specsel",
    "test_ail_list_expression_extend",
    "test_ail_numeric_bindings",
    "test_ail_numeric_profiles",
