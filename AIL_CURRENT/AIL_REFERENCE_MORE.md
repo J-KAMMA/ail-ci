@@ -629,6 +629,15 @@ variable first when it sits behind another call.
   key or set member, `<` on paths, `p.iterdir()` kept in a variable. The typed path does not build a comprehension over a
   `list[Path]` that produces strs: write the loop (the default build falls back to the slower general path). Differences:
   DIFFERENCES A31-A35.
+- Threads (`threading`, `queue`, `concurrent.futures`): one interpreter lock as in CPython, so threads overlap waiting
+  (`sleep`, `join`, `Queue.get`, locks), not computing. `threading.Thread(target=worker, args=(a, b))` where `worker` is a
+  module-level `def` or `obj.method` (not a lambda or a nested def), `start join is_alive name daemon`, subclasses with
+  `run()`; `Lock RLock Condition Semaphore BoundedSemaphore Event` with `with`; `queue.Queue(maxsize)` `LifoQueue`
+  `SimpleQueue` with `task_done/join`, `queue.Empty/Full`; `ThreadPoolExecutor` `submit map shutdown as_completed`,
+  `Future.result()` raising the worker's exception. Built on the general path only (the program falls back to it, several
+  times slower than typed code). Print results after `join()`, sorted, or from one consumer: thread order is not
+  deterministic in CPython either. Refused with the line to write instead: `threading.local Timer Barrier`,
+  `PriorityQueue`, `ProcessPoolExecutor`, `wait_for`, `add_done_callback`. Differences: DIFFERENCES A36-A38.
 
 ## Heaps: heapq, bisect
 

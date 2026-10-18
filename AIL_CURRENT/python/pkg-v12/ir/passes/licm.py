@@ -141,6 +141,17 @@ class LICM(object):
                 out.add(top.operands[0])
         return set()
 
+    def global_unchanged_in(self, loop, name, defs):
+        """Whether nothing in `loop` can store the module variable `name`: no `global.store` of it and
+        no call whose summary may write it (a call without a summary may write anything)."""
+        loc = 'Global(m,%s)' % name
+        for r in loop.regions:
+            for i in I.walk(r):
+                eff = E.instr_effects(i, self.fn, None, None, defs, self.summaries)
+                if eff.unknown or loc in eff.writes:
+                    return False
+        return True
+
     def hoist_pure(self, loop):
         inside = _inside(loop)
         defs = _defs(self.fn)
@@ -169,7 +180,8 @@ class LICM(object):
         def visit(region):
             keep = []
             for ins in region.instrs:
-                if (not ins.regions and ins.op != 'const' and (simplify.is_pure(ins, defs) or invariant_load(ins))
+                if (not ins.regions and ins.op != 'const' and (simplify.is_pure(ins, defs) or invariant_load(ins) or (
+                        ins.op == 'global.load' and self.global_unchanged_in(loop, ins.attrs['name'], defs)))
                         and all(v not in inside for v in ins.operands)):
                     moved.append(ins)
                     for r in ins.results:

@@ -852,7 +852,7 @@ def main():
     print(d[1], d[1][0])
     print(t == (True, 1), (True, 1) < (False, 2))
     x = t[0]
-    print(x, not x, x and 1)
+    print(x, not x, x and True)
     a, b = f()
     print(a, b, f())
     s = {(True, 1)}

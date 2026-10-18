@@ -40,8 +40,8 @@ declaring file; None is the C library), `header` (checked against the real proto
 without one the declaration is trusted and `ail check --ffi` says so), `symbol` (the C name when it differs
 from the stub name), `pkg_config` (link flags from pkg-config, compile side only), `check` (one of
 "negative", "nonzero", "null", "minus1": a result that means failure), `errno` (read errno right after the
-call and put it in the message: `[Errno 2] No such file or directory`), `exc` (OSError by default with
-errno, else RuntimeError; one of the built-in kinds AIL can raise: OSError ValueError RuntimeError KeyError
+call and raise OSError(errno, strerror): `str(e)` is `[Errno 2] No such file or directory`, `e.errno` is 2),
+`exc` (OSError by default with errno, else RuntimeError; one of the built-in kinds AIL can raise: OSError ValueError RuntimeError KeyError
 IndexError OverflowError EOFError), `sources` (a list of .c files beside the declaring file: the compiled
 program links them into its adapter object, CPython builds them into a shared library on first use).
 
@@ -50,8 +50,10 @@ What the compiled program does differently (the declared differences):
     same bits in the compiled program (AIL ints are 64 bit); CPython gives the positive value.
   * a bytearray argument is copied in and out around the call in the compiled program; two names for one
     bytearray in one call see C's writes only after it returns.
-  * `OSError` carries the message `[Errno N] text`; the compiled program has no `.errno` attribute and no
-    FileNotFoundError subclass selection.
+  * `e.errno`, `e.strerror` and `str(e)` of an OSError are built in the compiled program only on a name bound by
+    `except OSError as e` (or one of the five errno classes AIL has); any other class is refused by name.
+    An OSError that did not come from an errno (a bare `OSError("x")`) has no errno there: reading it raises
+    RuntimeError, where CPython gives None.
 """
 import ctypes
 import ctypes.util

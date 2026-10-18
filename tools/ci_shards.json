@@ -62,6 +62,7 @@
   "test_ail_for_bytes_expr": 4.2,
   "test_ail_frontend_speed": 6.0,
   "test_ail_fuzz_findings": 10.0,
+  "test_ail_globals": 66.5,
   "test_ail_grid_calls": 32.3,
   "test_ail_grid_return": 8.8,
   "test_ail_handle_lists": 185.9,
@@ -112,6 +113,7 @@
   "test_ail_owned_join_take": 22.9,
   "test_ail_owned_type_details": 1.9,
   "test_ail_owned_type_repair": 13.3,
+  "test_ail_packaging": 28.8,
   "test_ail_parallel_for": 171.0,
   "test_ail_pathlib": 10.1,
   "test_ail_platforms": 49.4,
@@ -162,6 +164,7 @@
   "test_ail_tcp_poll_resources": 6.2,
   "test_ail_text_lines": 9.5,
   "test_ail_text_views": 17.3,
+  "test_ail_threads": 202.4,
   "test_ail_try_hoist": 48.8,
   "test_ail_try_locals": 49.4,
   "test_ail_tuples": 10.0,
@@ -205,7 +208,8 @@
    "test_ail_parallel_for"
   ],
   [
-   "test_ail_exception_values_core"
+   "test_ail_exception_values_core",
+   "test_ail_threads"
   ],
   [
    "test_ail_sets_general",
@@ -250,6 +254,7 @@
   ],
   [
    "test_ail_corpus_findings2",
+   "test_ail_globals",
    "test_ail_int_sort",
    "test_ail_ir_s0",
    "test_ail_ir_s3",
@@ -331,6 +336,7 @@
    "test_ail_numeric_profiles_native",
    "test_ail_overflow_error",
    "test_ail_owned_join_take",
+   "test_ail_packaging",
    "test_ail_pool_row_arguments",
    "test_ail_range_checks",
    "test_ail_slow_patterns",

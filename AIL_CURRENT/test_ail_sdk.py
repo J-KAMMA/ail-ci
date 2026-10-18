@@ -897,6 +897,9 @@ fn main()->int {let g=[[1,2,3]];write_stdout_bytes(str(reduce(g[choose()])).enco
         manifest = json.loads((sdk / 'MANIFEST.json').read_text(encoding='utf8'))
         self.assertEqual(manifest['kind'], 'ail_language_sdk')
         self.assertTrue((sdk / 'SDK_README_JA.md').is_file())
+        for name in ('LICENSE-APACHE', 'LICENSE-MIT'):
+            self.assertEqual((sdk / name).read_bytes(), (support.ROOT.parent / name).read_bytes())
+            self.assertIn(name, manifest['sdk_files'])
         self.assertIn('ail_chatgpt.py', manifest['sha256'])
         self.assertTrue(any(name.endswith('.ail') for name in manifest['sha256']))
         self.assertFalse(any(part in ('workflow', 'weights', 'timinghistory')

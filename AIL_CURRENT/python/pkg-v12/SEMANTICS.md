@@ -2706,6 +2706,58 @@ corpus predates this section), so this section moves none of them from REFUSED t
 would actually write for this compiler, comparing how many compile and agree with CPython on
 `pkg-v5` versus `pkg-modconst` (see the report alongside this package, not repeated here since it
 is not a fixed number this document can state once and leave true).
+### 29a. Module variables: `global` on the typed path and in the IR (G3)
+
+A module-level name that some function rebinds under `global` is a **module variable**, not a
+constant. Section 29 refused this ("a mutable global has no story"); the multi-module merge
+(`ail_modules.py`, G2) made every `m.x = v` / `m.x += 1` a `global x` line, and those programs ran
+on the general path. Now:
+
+- **What is a variable.** A name bound once at module level to an int, float, str or `True` / `False`
+  literal (`count = 0`, `rate = 0.5`, `done = False`, `mode = "idle"`) that a function both declares `global` and
+  rebinds (`_written_globals`). A `global` line that only reads leaves the name a constant. The
+  pre-pass `_rewrite_script` keeps a `True` / `False` assignment at module scope when the name is
+  one of these. A str variable is assigned only text that lives for the whole run (a str literal, or
+  another module-level str: a computed str would sit in the arena of the function that built it), and the IR
+  leaves a function that touches one on the legacy emitter. A list, set or dict that is rebound, a name with no module-level literal, and
+  any module variable in a library or a separately compiled module are refused by name (the general
+  path runs the program).
+- **One C static.** `static int64_t v_count = 0LL;` / `static double v_rate = (0.5);` after the
+  constants; a function names `v_count` directly, so there is no copy-in, copy-out and no pointer.
+  A variable is initialised once, before any function runs (the module body of a typed program is
+  its literal assignments), and holds the kind of its first value: `x = 1.5` then `x = 3` is refused
+  (Python would turn it into an int), and so is a number assigned a bool or a bool assigned a number
+  (`boolkind.py` knows the module bools: they print as `True` / `False`).
+- **How the compiler sees it.** `_MODCONSTS` is a `_ModTable`: as a dict it holds the constants (so
+  every place that folds a value is untouched), `.vars` holds the variables, `in` and `[]` answer for
+  both (so every "is this a module name, not a local" test treats a variable like a constant), and
+  `.names()` is both. A function that says `global x` has `ctx.gdecl`; `Ctx.declare` returns `v_x`
+  for it (after the kind check) and never makes it a local; `_settle_module_vars` removes the name
+  from `ctx.types` / `ctx.locals` once `_promote_floats` has typed the function's locals. Reads
+  resolve through `Ctx.type_of` to the variable's kind. `rangecheck.py` aborts a function with a
+  `global` line, and `_range_kind` / the guard analysis never treat a variable as invariant.
+- **Vetted before compiling** (`_check_module_variables`): a variable is written only by `x = e` or
+  `x op= e` in a function that says `global x`, never as a loop variable, a tuple target, a `with` /
+  `except` name or by `del`, and never by a same-named local of another function (Python's separate
+  local; the compiler does not track it); a lambda or comprehension that names a variable its
+  function rebinds is refused. C leaves some orders open (an index against the value stored at it,
+  the operands of a conditional), a callee can change a variable, so **a statement that reads a
+  variable and also calls something that may write it is refused** ("call it on its own line
+  first"); the arguments of `print` are each staged in order, so `print(fib(15), calls)` is fine.
+  Two calls in one statement already run in the written order (the compiler stages them), whatever
+  they change. "May write" follows the call graph (calls by name, methods by method name, a
+  function value held in a variable may write every variable).
+- **The IR.** `global.load {name}` and `global.store v {name}` (ir.py), typed i64 or f64. Their
+  effects are `reads` / `writes` of `Global(m,name)` (`effects.py`), so a function summary lists the
+  variables it reads and writes, a call's effect includes its callee's, and the existing passes see
+  them: neither op is pure, so nothing merges or removes them; LICM hoists a `global.load` in front of a
+  loop only when nothing in the loop can store the variable (no `global.store` of it, no call whose
+  summary may write it or that has no summary). `lower.py` lowers a read of a
+  variable to a load, an assignment (and `x op= e`) to a store, and the `global` line to nothing;
+  `emit_c.py` prints `v_name`. Under `AIL_IR=0` the legacy emitter compiles the same programs.
+- **Tests**: `test_ail_globals.py` (CPython-compared, typed, `AIL_IR=0/1`, a multi-module program,
+  the named refusals with the general-path fallback, the IR ops).
+
 ### 29.2 Module-level set and dict tables (`modtables.py`, 2026-10-18)
 
 `STOP = {"a", "the"}`, `STOP: set[str] = {...}`, `TABLE = {"x": 1}`, `NAMES = {1: "one"}`,

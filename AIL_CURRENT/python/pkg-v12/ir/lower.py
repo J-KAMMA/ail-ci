@@ -255,11 +255,14 @@ class Lowering(TextLowering):
                 abi.append('value')
         for node in ast.walk(fn):
             if isinstance(node, (ast.NamedExpr, ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef,
-                                 ast.ClassDef, ast.Global, ast.Nonlocal, ast.SetComp,
+                                 ast.ClassDef, ast.Nonlocal, ast.SetComp,
                                  ast.DictComp, ast.GeneratorExp, ast.Await, ast.Yield, ast.YieldFrom,
                                  ast.With, ast.Delete, ast.Starred, getattr(ast, 'TryStar', ast.With))) \
                     and node is not fn:
                 raise NotS0('%s in the body' % type(node).__name__)
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Global) and not all(n in ctx.modconsts for n in node.names):
+                raise NotS0('global of a name that is not a module variable')
         params = [I.Value(t, hint=n) for n, t in zip(param_names, param_types)]
         attrs = {'sym': self.cname, 'linkage': self.linkage}
         if any(x != 'value' for x in abi):
@@ -430,10 +433,11 @@ class Lowering(TextLowering):
                     if not isinstance(t, ast.Name):
                         raise NotS0('assignment to %s' % type(t).__name__)
         modconsts = getattr(self.ctx, 'modconsts', {})
+        gdecl = getattr(self.ctx, 'gdecl', ())
         for name in out:
-            if name in modconsts:
+            if name in modconsts and name not in gdecl:
                 raise NotS0('module constant %r rebound' % name)
-        return out
+        return out - set(gdecl)           # a module variable is a global, not a local place
 
     def leave(self):
         if self.recursive:
@@ -1194,7 +1198,17 @@ class Lowering(TextLowering):
         finally:
             self.b.region = saved
 
+    def global_type(self, name):
+        """The IR type of a module variable (an int or a float, as the legacy path typed it)."""
+        kind = self.ctx.modconsts.vars[name][0]
+        if kind not in (self.P.INT, self.P.FLT):
+            raise NotS0('the module variable %r is a %s' % (name, kind))
+        return I.I64 if kind == self.P.INT else I.F64
+
     def store(self, name, v):
+        if name in getattr(self.ctx, 'gdecl', ()):
+            self.b.emit('global.store', [self.coerce(v, self.global_type(name))], [], {'name': name})
+            return
         kp = self.kind_places.get(name)
         if kp is not None:
             t = I.I64 if v.type in (I.I64, I.I1) else v.type
@@ -1288,7 +1302,7 @@ class Lowering(TextLowering):
                 self.call(s.value, statement=True)
             else:
                 self.expr(s.value)
-        elif isinstance(s, ast.Pass):
+        elif isinstance(s, (ast.Pass, ast.Global)):
             pass
         elif isinstance(s, ast.If) and self.if_add(s):
             pass
@@ -1681,6 +1695,8 @@ class Lowering(TextLowering):
                 and name not in getattr(ctx, 'modconsts', {}))
 
     def truthy(self, node):
+        if isinstance(node, ast.BoolOp):
+            return self.boolop(node)            # a test, not a value: the plain bool
         v = self.expr(node)
         if not v.type.is_scalar:
             raise NotS0('truth value of %s' % v.type)
@@ -1720,6 +1736,8 @@ class Lowering(TextLowering):
                 return self.b.value('load', [place], place.type.pointee)
             if node.id in self.params:
                 return self.params[node.id]
+            if node.id in getattr(getattr(self.ctx, 'modconsts', None), 'vars', ()):
+                return self.b.value('global.load', [], self.global_type(node.id), {'name': node.id})
             entry = getattr(self.ctx, 'modconsts', {}).get(node.id)
             if entry is not None and entry[0] in (self.P.INT, self.P.FLT):
                 value = entry[1]
@@ -1733,6 +1751,9 @@ class Lowering(TextLowering):
         if isinstance(node, ast.BinOp):
             return self.binop(node)
         if isinstance(node, ast.BoolOp):
+            if os.environ.get('AIL_SURFACE') == 'python' and not all(self.P._is_bool_expr(v, self.ctx)
+                                                                    for v in node.values):
+                raise NotS0('and/or used as a value on the Python surface (the operand that decided it)')
             return self.boolop(node)
         if isinstance(node, ast.Compare):
             return self.compare(node)

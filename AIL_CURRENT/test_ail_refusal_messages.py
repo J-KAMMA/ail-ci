@@ -47,10 +47,14 @@ CASES = [
      'class M:\n    @staticmethod\n    def sq(x: int) -> int:\n        return x * x\n\n\n'
      'def main() -> None:\n    print(M.sq(3))\n\n\nmain()\n',
      '3:', ['a decorator on M.sq', 'a top-level `def sq(x: int) -> int`']),
-    ('global_statement', 'python',
-     'count = 0\n\n\ndef inc() -> None:\n    global count\n    count += 1\n\n\n'
+    ('global_loop_variable', 'python',
+     'count = 0\n\n\ndef inc() -> None:\n    global count\n    for count in range(3):\n        pass\n\n\n'
      'def main() -> None:\n    inc()\n    print(count)\n\n\nmain()\n',
-     '5:', ['`global`', 'pass the value in as a parameter']),
+     '6:', ['module variable', 'compute the value into a local']),
+    ('global_list', 'python',
+     'items = [1]\n\n\ndef reset() -> None:\n    global items\n    items = [2]\n\n\n'
+     'def main() -> None:\n    reset()\n    print(items[0])\n\n\nmain()\n',
+     '', ['`global`', 'pass the value in as a parameter']),
     ('nonlocal_statement', 'python',
      'def main() -> None:\n    total = 0\n\n    def add(n: int) -> None:\n        nonlocal total\n'
      '        total += n\n\n    add(3)\n    print(total)\n\n\nmain()\n',

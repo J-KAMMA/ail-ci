@@ -166,6 +166,36 @@ def _check_main_called(tree):
     raise error
 
 
+# third-party modules whose refusal elsewhere names the standard-library replacement (regex -> re)
+_IMPORT_HINTS = {'regex'}
+
+
+def _check_importable(tree):
+    """A top-level `import X` / `from X import ...` whose X is neither in the standard library nor on the search
+    path (a third-party package, a typo): CPython stops with ModuleNotFoundError at that line, and a program that
+    never uses the name would otherwise be built and run. (Local modules were merged away before this; an import
+    inside `try:`, a function or `if` is not looked at, so `try: import numpy ... except ImportError` keeps its
+    meaning. `_ail_*` names are the compiler's own markers, such as the one the threads rewrite adds.)"""
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+            names = [node.module]
+        else:
+            continue
+        for name in names:
+            root = name.split('.')[0]
+            if root in sys.stdlib_module_names or root in ail_modules.MODELLED or root == 'ail_ffi' or root.startswith('_ail_') or root in _IMPORT_HINTS:
+                continue
+            error = ValueError(
+                "import of %r is not available: it is not part of the standard library and no module of that name "
+                "is on the search path, so CPython stops here with ModuleNotFoundError.\n"
+                "  write instead: drop the import and write what you need by hand with plain lists, dicts and "
+                "loops" % name)
+            error.source_line, error.source_column = node.lineno, node.col_offset
+            raise error
+
+
 def _ffi_session(args):
     """The G4 session that lowers `@extern` stubs (ail_ffi_lower.py), closed when the process ends."""
     import atexit
@@ -259,6 +289,8 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             tree = ast.parse(text, filename=str(path))
             if syntax == 'python' and entry and not module_only and not declarations_only:
                 _check_main_called(tree)
+                if local_imports:
+                    _check_importable(tree)
             if not declarations_only:
                 _check_int64_literals(tree)
             if merged is not None and merged.positions:

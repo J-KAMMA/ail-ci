@@ -346,6 +346,18 @@ class _Checker(object):
             self.want(where, v.type == p.type.pointee, 'store of %s into place<%s>'
                       % (v.type, p.type.pointee))
 
+    def op_global_load(self, ins, scope, stack, where, top):
+        self.want(where, isinstance(ins.attrs.get('name'), str) and ins.attrs['name'].isidentifier(),
+                  'global.load needs a variable name')
+        if self.nresults(ins, where, 1):
+            self.want(where, ins.result.type in (I.I64, I.F64), 'a module variable is an i64 or an f64')
+
+    def op_global_store(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        self.want(where, isinstance(ins.attrs.get('name'), str) and ins.attrs['name'].isidentifier(),
+                  'global.store needs a variable name')
+        self.want(where, ins.operands[0].type in (I.I64, I.F64), 'a module variable is an i64 or an f64')
+
     def op_call(self, ins, scope, stack, where, top):
         sym = ins.attrs.get('callee')
         sig = self.program.callee_type(sym) if self.program is not None else None

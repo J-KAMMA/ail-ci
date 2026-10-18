@@ -262,6 +262,9 @@ def instr_effects(ins, fn, program, places=None, defs=None, summaries=None):
         else:
             root = _root(ins.operands[0], fn, defs)
         return Effects(reads=['Elem(%s)' % root], raises=[INDEX])
+    if op in ('global.load', 'global.store'):
+        loc = 'Global(m,%s)' % ins.attrs.get('name', '?')
+        return Effects(reads=[loc]) if op == 'global.load' else Effects(writes=[loc])
     if op in ('field.get', 'field.set'):
         loc = 'Field(%s,%s)' % (ins.attrs.get('cls', '?'), ins.attrs.get('name', '?'))
         return Effects(reads=[loc]) if op == 'field.get' else Effects(writes=[loc])

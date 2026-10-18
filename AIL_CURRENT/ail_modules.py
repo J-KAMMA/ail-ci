@@ -842,7 +842,44 @@ def _import_node(mod, name):
     return mod.tree
 
 
+def _rebound_by_submodule(program, mods):
+    """`pkg/__init__.py` binds a name (`a = 5`, `def a`, `from .x import a`) that is also the name of a submodule the
+    program imports: CPython's import of `pkg.a` stores the module over that attribute, wherever it happens, so what
+    `pkg.a` means depends on the order of the imports."""
+    for mod in mods:
+        if mod.kind == 'module':
+            continue
+        for name in sorted(set(mod.kinds) | set(mod.std) | set(mod.alias)):
+            child = program.mods.get(mod.name + '.' + name)
+            if child is None:
+                continue
+            entry = mod.alias.get(name)
+            if entry is not None and entry[0] == 'mod' and entry[1] is child:
+                continue                # `from . import a` binds the module itself
+            program.refuse(mod, _binding_node(mod, name),
+                           "%s binds the name %r and %s is also a submodule that the program imports: CPython's "
+                           "import of %s stores the module over that attribute, so what %s.%s means depends on the "
+                           "order of the imports.\n"
+                           "  write instead: give the %s variable or function another name"
+                           % (mod.path.name, name, child.name, child.name, mod.name, name, mod.name))
+
+
+def _binding_node(mod, name):
+    for node in mod.tree.body:
+        if getattr(node, 'name', None) == name:
+            return node
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(isinstance(t, ast.Name) and t.id == name for t in targets):
+                return node
+        if isinstance(node, (ast.Import, ast.ImportFrom)) and any(
+                (a.asname or a.name.split('.')[0]) == name for a in node.names):
+            return node
+    return mod.tree
+
+
 def _assign_names(program, mods):
+    _rebound_by_submodule(program, mods)
     ids = set(BUILTINS)
     for mod in mods:
         for node in ast.walk(mod.tree):
@@ -952,6 +989,14 @@ class Rewriter(ast.NodeTransformer):
                                 "package gets the attribute for a submodule only once that submodule has been "
                                 "imported, so this raises AttributeError here.\n"
                                 "  write instead: `import %s` (or `from %s import %s`) before this line"
+                                % (base.name, attr, sub.name, base.name, attr))
+        if not self.dry and self.running and not sub.done:
+            # a function runs whenever it is called: if that is before the import, CPython raises AttributeError
+            # (a program may catch it), and the merged program has no such global yet
+            self.program.refuse(self.mod, node, "%s.%s is read inside a function that is defined before the import "
+                                "that binds it: CPython raises AttributeError if the function runs first, and this "
+                                "compiler cannot tell when it runs.\n"
+                                "  write instead: `import %s` (or `from %s import %s`) above this function"
                                 % (base.name, attr, sub.name, base.name, attr))
         return sub
 

@@ -280,6 +280,11 @@ _op('select', 3, 3)
 _op('local.alloc', 0, 0)
 _op('load', 1, 1)
 _op('store', 2, 2)
+# Module variables (a function's `global x` on the typed path): `global.load {name}` reads and
+# `global.store {name} v` writes the program's one variable `name`, of type i64 or f64. The location is
+# `Global(m,name)` in the effect records, so a call, a loop or a pass sees every read and write.
+_op('global.load', 0, 0)
+_op('global.store', 1, 1)
 _op('call', 0, None)
 _op('rt', 0, None)
 _op('if', 1, 1, regions=2)

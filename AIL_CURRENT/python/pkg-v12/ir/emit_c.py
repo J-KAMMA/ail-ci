@@ -597,6 +597,10 @@ class Emitter(TextEmitter):
             return self.assign_new(depth, ins.result, o[0])
         if op == 'store':
             return self.line(depth, '%s = %s;' % (o[0], o[1]))
+        if op == 'global.load':
+            return self.assign_new(depth, ins.result, 'v_%s' % ins.attrs['name'])
+        if op == 'global.store':
+            return self.line(depth, 'v_%s = %s;' % (ins.attrs['name'], o[0]))
         if op == 'bytes.len':
             return self.assign_new(depth, ins.result, '(%s).n' % o[0])
         if op == 'bytes.get':

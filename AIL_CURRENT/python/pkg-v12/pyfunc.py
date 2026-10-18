@@ -39,6 +39,7 @@ import cruntime
 import filelib
 import pathlower
 import proclib
+import threadlib
 import iterlower
 import tryhoist
 import stdlib3
@@ -624,9 +625,24 @@ def _is_exception_expr(node, ctx):
         return False
 
 
+# the OSError family the typed path has: OSError and the five errno classes
+_OS_FAMILY = (6, 11, 12, 13, 14, 15)
+
+
 def _exception_field(node, ctx):
-    return (isinstance(node, ast.Attribute) and node.attr in ('kind', 'message')
+    return (isinstance(node, ast.Attribute) and node.attr in ('kind', 'message', 'errno', 'strerror')
             and _etype(node.value, ctx) == EXCEPTION)
+
+
+def _require_os_exception(node, ctx, what):
+    """`e.errno`, `e.strerror` and `str(e)` exist only for a name bound by `except OSError as e` (or one of its
+    subclasses): CPython has no `.errno` on other classes, and the typed exception keeps a message only, so
+    the other classes' `str(e)` would be wrong for runtime-raised errors."""
+    stack = ctx.exception_oserr.get(node.id) if isinstance(node, ast.Name) else None
+    if not stack or not stack[-1]:
+        raise Unsupported('%s is built only on a name bound by `except OSError as e` (or FileNotFoundError, '
+                          'PermissionError, IsADirectoryError, FileExistsError, NotADirectoryError); '
+                          'other exception classes have no such value here' % what)
 
 
 def _exception_constructor_error(name, message):
@@ -661,8 +677,21 @@ def _exception_value(node, ctx):
 def _exception_new(node, ctx):
     """`ValueError("msg")` as an `ail_exception_new(...)` call returning a NEW reference."""
     _exc_parts(ctx, EXC_NAMES[node.func.id])
+    if len(node.args) == 2 and not node.keywords and node.func.id == 'OSError':
+        # CPython's OSError(errno, strerror): `.errno`, `.strerror`, `str(e)` == "[Errno N] text", and the
+        # errno picks the subclass (ENOENT -> FileNotFoundError ...) like CPython's constructor
+        _exc_parts(ctx, 11)
+        ctx.parts.add('OSEXC')
+        number = _argument_kind(node.args[0], ctx, 'OSError', 'errno', 0, INT)
+        text = _argument_kind(node.args[1], ctx, 'OSError', 'strerror', 1, STR)
+        if number != INT or text != STR:
+            raise _exception_constructor_error('OSError', 'OSError(errno, strerror) takes an int and a str')
+        code = _map_inline(lambda: _expr(node.args[0], ctx), ctx)
+        message = _map_inline(lambda: _str_value(node.args[1], ctx), ctx)
+        return 'ail_exception_new_os(%s, %s)' % (code, message)
     if node.keywords or len(node.args) > 1:
-        raise _exception_constructor_error(node.func.id, 'built-in exceptions accept zero arguments or one str message')
+        raise _exception_constructor_error(node.func.id, 'built-in exceptions accept zero arguments or one str message'
+                                           + ('; OSError also takes (errno, strerror)' if node.func.id == 'OSError' else ''))
     if not node.args:
         return 'ail_exception_new(%d, NULL, 0, 0)' % EXC_NAMES[node.func.id]
     actual = _argument_kind(node.args[0], ctx, node.func.id, 'message', 0, STR)
@@ -752,7 +781,9 @@ def _etype(node, ctx):
     if _local_slist_pop(node, ctx) or _string_field_call(node, ctx) and node.func.attr == 'pop':
         return STR
     if _exception_field(node, ctx):
-        return STR
+        if node.attr in ('errno', 'strerror'):
+            _require_os_exception(node.value, ctx, 'e.' + node.attr)
+        return INT if node.attr == 'errno' else STR
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in EXC_NAMES:
         return EXCEPTION
     if _is_monotonic_call(node, ctx):
@@ -1134,7 +1165,36 @@ FOLD_HELPERS = {
 # `to_c` call, before any `Ctx` is built, is exactly as safe as passing it explicitly would be, and
 # never observed from outside a `to_c` call in flight (this compiler is not reentrant: nothing
 # calls `to_c` from inside a `to_c` call already running).
-_MODCONSTS = {}
+class _ModTable(dict):
+    """The module-level names of one compile. As a dict it holds the CONSTANTS (`name -> (kind,
+    value)`, section 29): iteration, `.items()`, `.get()` and `len` see only those, so every place
+    that folds a constant's value is unchanged. `.vars` holds the module-level scalars a function
+    rebinds with `global` (`name -> (kind, initial value)`): one mutable C static each, never folded.
+    `in` and `[]` answer for both, so every place that asks "is this name a module-level name, not
+    a local?" (about forty of them) treats a variable like a constant; only the places that write or
+    declare a variable look at `.vars` themselves."""
+
+    def __init__(self, *args):
+        dict.__init__(self, *args)
+        self.vars = {}
+        self.bools = set()          # the variables that start as True / False (stored as 0 / 1)
+
+    def __contains__(self, name):
+        return dict.__contains__(self, name) or name in self.vars
+
+    def __getitem__(self, name):
+        if dict.__contains__(self, name):
+            return dict.__getitem__(self, name)
+        return self.vars[name]
+
+    def __bool__(self):
+        return bool(len(self) or self.vars)
+
+    def names(self):
+        return frozenset(dict.keys(self)) | frozenset(self.vars)
+
+
+_MODCONSTS = _ModTable()
 # Struct names written `X | None` (or `Optional[X]`) anywhere in this source. A value of such a
 # struct type may be a null pointer: `None`. Reset by every `_to_c_once`.
 _NULLABLE = set()
@@ -1257,7 +1317,8 @@ def _scan_module_consts(tree):
     ever extracts `ast.FunctionDef`/`ast.ClassDef` from `tree.body`, so nothing here changes what
     ran before for a source that has no top-level constant, only what happens for one that does.
     """
-    consts = {}
+    consts = _ModTable()
+    bool_vars = _module_bool_vars(tree)
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
             continue
@@ -1306,6 +1367,11 @@ def _scan_module_consts(tree):
                                     "deque are built for str / int / tuple keys and int / float / str / tuple "
                                     "elements; namedtuple, ChainMap and the rest are not -- the notes "
                                     "below name the use")
+            elif any(name.split('.')[0] in ('threading', 'queue', 'concurrent') for name in named):
+                # threadlib.py (the first source pass) lowers every use it builds and replaces the
+                # import; the use it could not build kept it here, and its `note:` lines say which.
+                error = Unsupported("import of %r with a use that is not built (built, on the general path: %s) "
+                                    "-- the notes below name the use" % (mod, threadlib.BUILT))
             elif regex is not None:
                 error = Unsupported("import of %r; the third-party regex module is not built. The standard "
                                     "`re` module is, for string- or bytes-literal patterns (match, fullmatch, "
@@ -1338,6 +1404,10 @@ def _scan_module_consts(tree):
                               "treats module scope as a fixed set of one-time constants, not a "
                               "mutable global -- guessing which assignment a reader meant is "
                               "exactly the failure SEMANTICS section 5 refuses" % name)
+        if name in bool_vars:
+            consts[name] = (INT, int(node.value.value))
+            consts.bools.add(name)
+            continue
         scalar = _module_const_scalar(node.value)
         if scalar is not None:
             consts[name] = scalar
@@ -1364,7 +1434,264 @@ def _scan_module_consts(tree):
         raise Unsupported("%r is a module-level name assigned to a %s, not a literal; only an "
                           "int/float/str/bytes literal, or a numeric list or tuple, is accepted as "
                           "a module constant" % (name, type(node.value).__name__))
+    for name in sorted(_written_globals(tree)):
+        entry = dict.get(consts, name)
+        if entry is None:
+            raise Unsupported("%r is written under `global` but has no module-level literal value; "
+                              "a module variable needs one int/float literal assignment at the top "
+                              "of the module" % name)
+        if entry[0] not in (INT, FLT, STR):
+            raise Unsupported("%r is a module-level %s that a function rebinds with `global`; only an "
+                              "int, float, bool or str module variable is built\n"
+                              "  write instead: pass the value in as a parameter and return the new "
+                              "one (`count = inc(count)`)" % (name, _a(entry[0])))
+        del consts[name]
+        consts.vars[name] = entry
     return consts
+
+
+def _module_bool_vars(tree):
+    """The module-level names bound once to True / False that a function rebinds under `global`."""
+    out = set()
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+                and isinstance(node.value, ast.Constant) and type(node.value.value) is bool):
+            out.add(node.targets[0].id)
+    return (out & _written_globals(tree)) if out else out
+
+
+def _global_scopes(tree):
+    """[(function node, names it declares `global`)] for every function of the module (methods and
+    nested functions included): the names a `global` statement directly in that function binds."""
+    out = []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        names, stack = set(), list(fn.body)
+        while stack:
+            n = stack.pop()
+            if isinstance(n, ast.Global):
+                names.update(n.names)
+            if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                stack.extend(ast.iter_child_nodes(n))
+        if names:
+            out.append((fn, names))
+    return out
+
+
+def _written_globals(tree):
+    """The names some function both declares `global` and rebinds: those are module variables.
+    (A `global` line that only reads leaves the name a constant.)"""
+    written = set()
+    for fn, names in _global_scopes(tree):
+        for n in ast.walk(fn):
+            if isinstance(n, ast.Name) and n.id in names and isinstance(n.ctx, (ast.Store, ast.Del)):
+                written.add(n.id)
+            elif isinstance(n, ast.alias) and (n.asname or n.name.split('.')[0]) in names:
+                written.add(n.asname or n.name.split('.')[0])
+            elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n is not fn \
+                    and n.name in names:
+                written.add(n.name)
+    return written
+
+
+def _check_module_variables(tree, variables):
+    """Vet the program's module variables (the names a function rebinds under `global`) before any
+    function is compiled. A variable is one C static, so two things must hold that a local never
+    needs: (1) every write is a plain `x = e` / `x op= e` in a function that says `global x` (a
+    `for` target, a tuple target, a `with`/`except` name or a same-named local would be a different
+    variable in Python, and the compiler does not track that); (2) the order Python evaluates a
+    statement in does not matter to the result. C leaves the order of some operands open (an index
+    and the value stored at it, call arguments), and a callee can change a variable, so a statement
+    that reads or writes a variable and also calls something that may write it is refused, and so
+    are two calls in one statement of which one writes what the other touches. Both are refused by
+    name; the general path runs such a program."""
+    names = set(variables)
+    fns = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]
+    top = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+    str_names = {n for n, (kind, _value) in variables.items() if kind == STR}
+    str_consts = {n.targets[0].id for n in tree.body
+                  if isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name)
+                  and isinstance(n.value, ast.Constant) and type(n.value.value) is str}
+
+    def immortal(value):
+        if isinstance(value, ast.Constant):
+            return type(value.value) is str
+        if isinstance(value, ast.Name):
+            return value.id in str_names or value.id in str_consts
+        if isinstance(value, ast.IfExp):
+            return immortal(value.body) and immortal(value.orelse)
+        return False
+    methods, classes = {}, set()
+    for cls in (n for n in tree.body if isinstance(n, ast.ClassDef)):
+        classes.add(cls.name)
+        for m in cls.body:
+            if isinstance(m, ast.FunctionDef):
+                methods.setdefault(m.name, []).append(m)
+
+    def refusal(node, text):
+        error = Unsupported(text)
+        error.source_line = getattr(node, 'lineno', None)
+        return error
+
+    # per function: (variables it reads, variables it writes, functions it calls, locals,
+    # whether it calls a function value held in a variable)
+    info = {}
+    for fn in fns:
+        params = {a.arg for a in fn.args.posonlyargs + fn.args.args + fn.args.kwonlyargs}
+        params.update(a.arg for a in (fn.args.vararg, fn.args.kwarg) if a is not None)
+        gnames = {n for g in ast.walk(fn) if isinstance(g, ast.Global) for n in g.names} & names
+        direct = set()
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                direct.add(id(node.targets[0]))
+            elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+                direct.add(id(node.target))
+        reads, writes, local = set(), set(), set(params)
+        for node in ast.walk(fn):
+            if not isinstance(node, ast.Name):
+                continue
+            if isinstance(node.ctx, (ast.Store, ast.Del)):
+                if node.id not in names:
+                    local.add(node.id)
+                elif node.id not in params:
+                    if node.id not in gnames:
+                        raise refusal(node, '%r is a module variable that a function rebinds with `global`; '
+                                      'this function assigns a name %r of its own, which Python treats as '
+                                      'a separate local and this compiler does not follow.\n'
+                                      '  write instead: use another name for the local, or say `global %s`'
+                                      % (node.id, node.id, node.id))
+                    if id(node) not in direct or isinstance(node.ctx, ast.Del):
+                        raise refusal(node, '%r is a module variable; only `%s = value` and `%s += value` '
+                                      '(any operator) may rebind it, not a loop variable, a tuple target, '
+                                      'a `with` / `except` name or `del`.\n'
+                                      '  write instead: compute the value into a local and assign '
+                                      '`%s = local` on its own line' % ((node.id,) * 4))
+                    writes.add(node.id)
+            elif node.id in names and node.id not in params:
+                reads.add(node.id)
+        # a str variable only ever holds text that lives for the whole run: a literal, or another
+        # str constant or variable (a computed str would live in the function's arena, and the
+        # arena is freed when the function returns)
+        stringy = {n for n in names if variables[n][0] == STR}
+        for node in ast.walk(fn):
+            if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name) and node.target.id in stringy:
+                raise refusal(node, '%r is a str module variable; `%s %s= ...` builds a new str, which would '
+                              'not outlive this call.\n'
+                              '  write instead: assign a str literal (`%s = "idle"`), or keep the text in a '
+                              'local and pass it along' % (node.target.id, node.target.id,
+                                                         ast.unparse(node.op), node.target.id))
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+                    and node.targets[0].id in stringy and not immortal(node.value)):
+                raise refusal(node, '%r is a str module variable; it can be assigned a str literal or another '
+                              'module-level str, not `%s` (a computed str would not outlive this call).\n'
+                              '  write instead: assign a str literal (`%s = "idle"`), or keep the text in a '
+                              'local and pass it along' % (node.targets[0].id, ast.unparse(node.value),
+                                                         node.targets[0].id))
+        if gnames:
+            for node in ast.walk(fn):
+                if isinstance(node, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)) \
+                        and any(isinstance(n, ast.Name) and n.id in gnames for n in ast.walk(node)):
+                    raise refusal(node, 'a lambda or comprehension that names a module variable this function '
+                                  'rebinds; the compiler does not follow the scope.\n'
+                                  '  write instead: read the variable into a local first')
+        calls, every = set(), False
+        for node in ast.walk(fn):
+            if not isinstance(node, ast.Call):
+                continue
+            f = node.func
+            if isinstance(f, ast.Name):
+                if f.id in top:
+                    calls.add(id(top[f.id]))
+                elif f.id in classes:
+                    calls.update(id(m) for m in methods.get('__init__', ()))
+                elif f.id in local:
+                    every = True            # a function value held in a variable: could be any function
+            elif isinstance(f, ast.Attribute):
+                calls.update(id(m) for m in methods.get(f.attr, ()))
+            else:
+                every = True
+        info[fn] = (reads, writes, calls, local, every)
+    # what a call to each function may read / write, callees included
+    total = {id(fn): [set(info[fn][0]), set(info[fn][1])] for fn in fns}
+    changed = True
+    while changed:
+        changed = False
+        for fn in fns:
+            r, w = total[id(fn)]
+            before = (len(r), len(w))
+            for other in (fns if info[fn][4] else ()):
+                r |= total[id(other)][0]
+                w |= total[id(other)][1]
+            for key in info[fn][2]:
+                r |= total[key][0]
+                w |= total[key][1]
+            if (len(r), len(w)) != before:
+                changed = True
+
+    def effect(call, fn):
+        f = call.func
+        reach = []
+        if isinstance(f, ast.Name):
+            if f.id in top:
+                reach = [top[f.id]]
+            elif f.id in classes:
+                reach = methods.get('__init__', [])
+            elif f.id in info[fn][3]:
+                return set(names), set(names)       # a function value in a variable
+        elif isinstance(f, ast.Attribute):
+            reach = methods.get(f.attr, [])
+        elif not isinstance(f, ast.Name):
+            return set(names), set(names)
+        r, w = set(), set()
+        for c in reach:
+            r |= total[id(c)][0]
+            w |= total[id(c)][1]
+        return r, w
+
+    def units(stmt):
+        """The parts of a statement whose evaluation order C may reorder among themselves. The
+        arguments of a `print` are each staged into their own temporary, in order, so each is a unit."""
+        if isinstance(stmt, (ast.If, ast.While)):
+            return [[stmt.test]]
+        if isinstance(stmt, ast.For):
+            return [[stmt.iter, stmt.target]]
+        if isinstance(stmt, ast.With):
+            return [[item.context_expr for item in stmt.items]]
+        if isinstance(stmt, (ast.Try, ast.FunctionDef, ast.ClassDef, ast.Global, ast.Nonlocal, ast.Pass,
+                             ast.Break, ast.Continue, ast.Import, ast.ImportFrom)):
+            return []
+        if (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call) and isinstance(stmt.value.func, ast.Name)
+                and stmt.value.func.id == 'print' and 'print' not in top and 'print' not in classes):
+            return [[a] for a in stmt.value.args] + [[k.value] for k in stmt.value.keywords]
+        return [[stmt]]
+
+    for fn in fns:
+        for stmt in ast.walk(fn):
+            if not isinstance(stmt, ast.stmt):
+                continue
+            for unit in units(stmt):
+                direct_r, calls = set(), []
+                for e in unit:
+                    for n in ast.walk(e):
+                        if isinstance(n, ast.Name) and n.id in names and not isinstance(n.ctx, ast.Store):
+                            direct_r.add(n.id)
+                        elif isinstance(n, ast.Call):
+                            calls.append(n)
+                if isinstance(stmt, ast.AugAssign) and isinstance(stmt.target, ast.Name) and stmt.target.id in names:
+                    direct_r.add(stmt.target.id)
+                for c in calls:
+                    r, w = effect(c, fn)
+                    clash = w & direct_r
+                    if clash:
+                        raise refusal(stmt, 'a statement reads the module variable %s and also calls %s, which '
+                                      'may change it; Python orders these exactly and C leaves the order open.\n'
+                                      '  write instead: call it on its own line first (`t = %s(...)`) and '
+                                      'use `t` in the expression' % (sorted(clash)[0], ast.unparse(c.func),
+                                                                     ast.unparse(c.func)))
+    # Two calls in one statement run in the order written (the compiler stages them left to right),
+    # and a call that only reads a variable sees it as the statement found it: a store happens last.
+    return None
 
 
 def _emit_module_consts(modconsts):
@@ -1381,6 +1708,16 @@ def _emit_module_consts(modconsts):
     forgot the check would fail to BUILD rather than silently write past what this array owns.
     """
     out = []
+    for name, (kind, value) in sorted(getattr(modconsts, 'vars', {}).items()):
+        # a module variable: one mutable static, initialised once to its module-level literal
+        # (the module body runs before any function, so the initial value is all a function sees
+        # first); every function that reads or `global`-rebinds it names `v_<name>` directly
+        if kind == INT:
+            out.append('static int64_t v_%s = %s;\n' % (name, _c_int_literal(value)))
+        elif kind == FLT:
+            out.append('static double v_%s = (%r);\n' % (name, value))
+        elif kind == STR:
+            out.append('static ail_str v_%s = %s;\n' % (name, _str_literal(value)))
     for name, (kind, value) in sorted(modconsts.items()):
         c = 'v_' + name
         if kind == INT:
@@ -1440,6 +1777,7 @@ class Ctx:
         self.active_try_depths = []
         self.handled_scopes = []
         self.exception_bindings = {}
+        self.exception_oserr = {}               # bound exception name -> stack: does the handler name only OS-family classes
         self.exception_handler_names = set()
         self.check_exception_scope = False
         self.finally_stack = []
@@ -1556,6 +1894,7 @@ class Ctx:
                                                  # see _mark_freeable_objects
         self.range_marks = []                   # AST nodes behind `/*R<n>*/` check markers --
                                                  # see `_range_resolve`
+        self.gdecl = frozenset()                # module variables this function rebinds (`global`)
         self.modconsts = _MODCONSTS             # module-level constants (SEMANTICS section 29):
                                                  # name -> (INT|FLT|LIST|FLIST, value) -- the SAME
                                                  # dict `to_c` filled in once for every Ctx this
@@ -1665,6 +2004,17 @@ class Ctx:
         return 'v_' + name
 
     def declare(self, name, t=INT):
+        if name in self.gdecl:
+            # a module variable this function rebinds with `global`: the C static `v_<name>`, not a
+            # local. Python keeps whatever type the last assignment gave it; the static has one, so
+            # an assignment of another kind (an int into a float variable) cannot be built.
+            kind = self.modconsts.vars[name][0]
+            if t != kind:
+                raise Unsupported('%r is a module variable holding %s; `global` assigns it %s here, and a '
+                                  'module variable keeps the kind of its first value.\n'
+                                  '  write instead: give the variable a value of the kind you assign '
+                                  '(`total = 0.0` for a float)' % (name, _a(kind), _a(t)))
+            return 'v_' + name
         declared = getattr(self, 'local_annotations', {}).get(name)
         if declared is not None and declared != t:
             raise Unsupported('%r is declared %s; assigning %s is unsupported.\n'
@@ -6272,7 +6622,7 @@ def _is_str_expr(node, ctx):
     if _local_slist_pop(node, ctx) or _string_field_call(node, ctx) and node.func.attr == 'pop':
         return True
     if _exception_field(node, ctx):
-        return True
+        return node.attr != 'errno'
     """Whether `node` denotes a str VALUE. Deliberately narrow, and deliberately NOT symmetrical
     with `_is_bytes_expr`: there is no container, row, field or parameter-inference shape here,
     because a str is never an element of a list/set/dict and is never inferred from body evidence.
@@ -6438,9 +6788,12 @@ def _str_value(node, ctx, *, owned_join_return=False):
         return _method(node, ctx)
     if _string_field_call(node, ctx) and node.func.attr == 'pop':
         return _string_field_method(node, ctx)
-    if _exception_field(node, ctx):
+    if _exception_field(node, ctx) and node.attr != 'errno':
         ctx.parts.update(('STR', 'STRRET'))
         ctx.needs_sarena = True
+        if node.attr == 'strerror':
+            _require_os_exception(node.value, ctx, 'e.strerror')
+            ctx.parts.add('OSEXC')
         value = _exception_value(node.value, ctx)
         return 'ail_exception_string_copy(ail_exception_%s(%s), &%s)' % (node.attr, value, ctx.sarena())
     if _is_dirpath_call(node, ctx, ('get_env', 'current_dir')):
@@ -6582,6 +6935,11 @@ def _str_value(node, ctx, *, owned_join_return=False):
                               'to get the text, decode it: `b.decode()`')
         if at == STR:
             raise Unsupported('str() of a str: the value already is a str; drop the str() call')
+        if at == EXCEPTION:
+            _require_os_exception(arg, ctx, 'str(e)')
+            ctx.parts.update(('STR', 'STRRET'))
+            ctx.needs_sarena = True
+            return 'ail_exception_string_copy(ail_exception_message(%s), &%s)' % (_exception_value(arg, ctx), ctx.sarena())
         if at != INT:
             raise Unsupported('str() of %s is not built; only str(<int>) and str(<float>) are. '
                               'For a list, join its elements: `",".join([str(v) for v in xs])`'
@@ -7660,6 +8018,8 @@ def _str_cursor(node, ctx):
     statement of the body (so not again by a loop, branch or handler). None otherwise."""
     if not isinstance(node, ast.Name) or getattr(ctx, 'fn_node', None) is None:
         return None
+    if node.id in ctx.modconsts.vars and node.id not in ctx.kind:
+        return None             # a module variable: a call can change it under the cursor
     fn = ctx.fn_node
     cache = getattr(ctx, 'str_cursors', None)
     if cache is None or cache[0] is not fn:
@@ -10697,7 +11057,7 @@ _STMT_SHAPE_REFUSALS = {
     'With': 'a `with` statement other than `with open(path) as f:`; there are no context managers.\n'
             '  write instead: `with open(path) as f: text = f.read()` to read, or '
             '`write_text(path, text)` to write a file',
-    'Global': '`global`: module scope is a set of one-time constants, never a mutable global.\n'
+    'Global': '`global`: only a module-level int or float variable can be rebound this way; this name is not one.\n'
               '  write instead: pass the value in as a parameter and return the new one '
               '(`count = inc(count)`)',
     'Nonlocal': '`nonlocal`: a captured local cannot be rebound.\n'
@@ -12217,6 +12577,9 @@ def _expr(node, ctx):
         return _ordered_numeric_pair(node.left, node.right, ctx,
                                      '({} %s {})' % BINOP[type(node.op)])
     if isinstance(node, ast.BoolOp):
+        if (os.environ.get('AIL_SURFACE') == 'python' and not getattr(node, '_ail_cond', False)
+                and not all(_is_bool_expr(v, ctx) for v in node.values)):
+            return _boolop_value(node, ctx)
         return '(%s)' % (' %s ' % BOOLOP[type(node.op)]).join(
             '(%s) != 0' % _truthy(v, ctx) for v in node.values)
     if isinstance(node, ast.Compare):
@@ -12631,6 +12994,10 @@ def _contains(item, holder, ctx, negate):
 
 def _attr_read(node, ctx):
     if _exception_field(node, ctx):
+        if node.attr == 'errno':
+            _require_os_exception(node.value, ctx, 'e.errno')
+            ctx.parts.update(('STR', 'OSEXC'))
+            return 'ail_exception_errno(%s)' % _exception_value(node.value, ctx)
         return _str_value(node, ctx)
     """`p.x` as a VALUE -- SEMANTICS.md section 25. `node.value` must be a plain name already
     known to hold a class instance; anything else (an expression, a container element, a name
@@ -16786,7 +17153,39 @@ _METHOD_MENUS = {
 }
 
 
+def _mark_truth_context(node):
+    """A `and` / `or` whose value is only tested (an `if` test, an operand of another test) is a
+    condition, not a value: it keeps the plain 0/1 code."""
+    if isinstance(node, ast.BoolOp):
+        node._ail_cond = True
+        for value in node.values:
+            _mark_truth_context(value)
+    elif isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        _mark_truth_context(node.operand)
+
+
+def _boolop_value(node, ctx):
+    """`a or b` / `a and b` used as a VALUE on the Python surface: CPython gives the operand that
+    decided the result (`0 or 5` is 5), not a bool. Built for int operands, which `?:` chains
+    express exactly; a float, a bool mixed with numbers or anything else has no single C type and
+    is refused by name (the general path runs it)."""
+    kinds = [_etype(v, ctx) for v in node.values]
+    if any(k != INT for k in kinds) or any(_is_bool_expr(v, ctx) for v in node.values):
+        raise Unsupported('`%s` used as a value needs int operands: Python gives the operand that decided '
+                          'the result (`0 or 5` is 5; a float or bool operand changes the type).\n'
+                          '  write instead: a conditional (`b if a else c`), or test the operands '
+                          'in an `if`' % ('or' if isinstance(node.op, ast.Or) else 'and'))
+    values = [_expr(v, ctx) for v in node.values]
+    is_or = isinstance(node.op, ast.Or)
+    text = values[-1]
+    for value in reversed(values[:-1]):
+        temp = ctx.temp(INT)[0]
+        text = '((%s = %s) %s 0 ? %s : (%s))' % (temp, value, '!=' if is_or else '==', temp, text)
+    return '(%s)' % text
+
+
 def _truthy(node, ctx):
+    _mark_truth_context(node)
     if _numeric_expression_needed(node,ctx) and _etype(node,ctx) in NUM:
         value=_numeric_value_expression(node,ctx)
         return ('({ _ail_nb_value _nb_value=%s; _nb_value.floating ? _nb_value.f!=0.0 : _nb_value.i!=0; })').replace('_ail_nb_value',_numeric_value_type(ctx))%value
@@ -19667,7 +20066,7 @@ def _stmt_inner(node, ctx, ind):
             return _setitem(node.target, fake, ctx, ind)
         if not isinstance(node.target, ast.Name):
             raise Unsupported('augmented assignment to %s' % type(node.target).__name__)
-        if node.target.id in ctx.modconsts:
+        if node.target.id in ctx.modconsts and node.target.id not in ctx.gdecl:
             # SEMANTICS section 29: `n += 1` rebinds a constant exactly like `n = n + 1`
             # (which `ctx.declare` already refuses); without this door it emitted
             # `v_n = v_n + 1` and failed the C BUILD on `const` instead of refusing by name.
@@ -19849,6 +20248,8 @@ def _stmt_inner(node, ctx, ind):
         return pop + '%s%s;\n' % (pad, 'break' if isinstance(node, ast.Break) else 'continue')
     if isinstance(node, ast.Pass):
         return '%s;\n' % pad
+    if isinstance(node, ast.Global) and all(name in ctx.modconsts for name in node.names):
+        return ''                   # the names are module variables or constants: `_check_module_variables` vetted them
     if isinstance(node, ast.Expr):
         if isinstance(node.value, ast.Constant):
             return ''                                   # a docstring
@@ -20245,6 +20646,7 @@ def _try_stmt(node, ctx, ind):
         if h.name:
             bound, _ = ctx.temp(EXCEPTION)
             ctx.exception_bindings.setdefault(h.name, []).append(bound)
+            ctx.exception_oserr.setdefault(h.name, []).append(all(c in _OS_FAMILY for c in hc))
             out += '%s%s;\n' % (pad2, _obj_store(bound, 'ail_handled_value', EXCEPTION, ctx))
         try:
             out += _stmts(h.body, ctx, ind + 2)
@@ -20252,8 +20654,10 @@ def _try_stmt(node, ctx, ind):
             ctx.handled_scopes.pop()
             if h.name:
                 ctx.exception_bindings[h.name].pop()
+                ctx.exception_oserr[h.name].pop()
                 if not ctx.exception_bindings[h.name]:
                     del ctx.exception_bindings[h.name]
+                    del ctx.exception_oserr[h.name]
         out += '%sail_handled_leave(&%s);\n' % (pad2, scope)
         out += '%s}\n' % pad1
     # No handler here named this code: give it to the next OUTER handler (ail_exc_top was already
@@ -22486,7 +22890,7 @@ def _guard_scan(body, ctx, ivs, held, stepped=()):
         kind = kind_of(name)
         if kind in NUM or (kind is None and name in stored):
             return name not in ctx.optional and name not in ctx.stdin_unbound and name not in ctx.handles
-        return name in ctx.modconsts and ctx.modconsts[name][0] in NUM
+        return dict.__contains__(ctx.modconsts, name) and ctx.modconsts[name][0] in NUM    # a variable is not invariant
 
     def element(node):
         if isinstance(node.slice, ast.Slice):
@@ -23557,7 +23961,7 @@ def _for_str(node, ctx, ind):
 def _readonly_numeric_loop(body, ctx):
     """Only private integer updates: no operation can mutate the captured buffer."""
     excluded = ctx.optional | ctx.stdin_unbound | ctx.handles
-    shadowed = set(ctx.funcs) | set(ctx.classes) | set(ctx.kind) | set(ctx.types) | set(ctx.modconsts)
+    shadowed = set(ctx.funcs) | set(ctx.classes) | set(ctx.kind) | set(ctx.types) | ctx.modconsts.names()
     def integer(node):
         return (isinstance(node, ast.Name) and node.id not in excluded
                 and ctx.kind.get(node.id, ctx.types.get(node.id)) == INT)
@@ -24959,6 +25363,21 @@ def _parallel_value_settled_later(value, ctx, container_names):
         elif isinstance(n, ast.IfExp):
             stack += [n.body, n.orelse]
     return False
+
+
+def _settle_module_vars(fn, ctx):
+    """After `_promote_floats` has typed every name the function assigns: a module variable the
+    function rebinds under `global` is not a local, so it leaves `ctx.types` and `ctx.locals`
+    (reads of it then resolve to the variable's own kind, `Ctx.type_of`), and `ctx.gdecl` names it
+    for `Ctx.declare`."""
+    if not ctx.modconsts.vars:
+        return
+    ctx.gdecl = frozenset(name for g in ast.walk(fn) if isinstance(g, ast.Global)
+                          for name in g.names if name in ctx.modconsts.vars)
+    for name in ctx.gdecl:
+        ctx.types.pop(name, None)
+        while name in ctx.locals:
+            ctx.locals.remove(name)
 
 
 def _promote_floats(fn, ctx):
@@ -27647,6 +28066,7 @@ def _caller_ctx(f, sigs, arity_seed=None, classes=None, owned_str_fns=None, owne
         if _local_record_annotations(f):
             ctx.trowsf = _propagate_row_float(f, ctx.trowsf, set(ctx.tstride))
         _promote_floats(f, ctx)
+        _settle_module_vars(f, ctx)
         _bind_container_types(f, ctx)
         _bind_object_types(f, ctx)
     except Unsupported:
@@ -28101,6 +28521,7 @@ def _settle_return_kinds_pass(fns, sigs, grid_fns, classes, arity_seeds,
             ctx.trowsf |= (set(ctx.tstride) & _prelim_flist_sig)
             ctx.flist |= _prelim_flist_sig
             _promote_floats(f, ctx)
+            _settle_module_vars(f, ctx)
             _bind_container_types(f, ctx)
             _bind_object_types(f, ctx)
             ctx.trowsf = _propagate_row_float(
@@ -28143,6 +28564,7 @@ def _clone_return_kind(f, params, sigs, generic_ret, grid_fns, classes=None,
     try:
         ctx.blist, ctx.bkeys = _mark_bytes_containers(f, {n for n, k in params if k == BYTES})
         _promote_floats(f, ctx)
+        _settle_module_vars(f, ctx)
         _bind_container_types(f, ctx)
         _bind_object_types(f, ctx)
         ctx.numeric_return_kinds = _numeric_loop_return_evidence(f, ctx)
@@ -31723,6 +32145,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         from module_object import _struct_source
         source = _struct_source(external['structs']) + source
     tree = ast.parse(source.strip())
+    threadlib.refuse_typed(tree, Unsupported)        # G12: threads are built on the general path only
     modtables.rewrite(tree, Unsupported, library, entry)
     stdlib4.rewrite(tree, Unsupported)
     stdlib3.rewrite(tree, Unsupported)
@@ -31737,7 +32160,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     _NULLABLE.update(_strip_nullable(tree))
     global _BOOLS
     _BOOLS = boolkind.EMPTY
-    _BOOLS = boolkind.scan(tree, Unsupported)
+    _BOOLS = boolkind.scan(tree, Unsupported, _module_bool_vars(tree))
     _name_repeated_list_returns(tree)
     _FROZEN_LINKS.clear()
     if _NULLABLE:
@@ -31778,6 +32201,12 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     # -- and reset on every call so a `Ctx` built later in THIS compile never sees a stale table
     # left over from a previous, unrelated `to_c()` call (see `_MODCONSTS`'s own docstring).
     _MODCONSTS = _scan_module_consts(tree)
+    if _MODCONSTS.vars:
+        boolkind.check_numeric_vars(_BOOLS, _MODCONSTS.vars, _MODCONSTS.bools, Unsupported)
+    if _MODCONSTS.vars and (library or any(external.values())):
+        raise Unsupported('%s: a module variable rebound with `global` is built only into a whole '
+                          'program, not a library or a separately compiled module'
+                          % ', '.join(sorted(_MODCONSTS.vars)))
     global _BORROWED_PARAMS
     _BORROWED_PARAMS = _scan_borrowed_params(tree, library, {name, entry})
     # Nested functions (pkg-closure): lifted to ordinary top-level siblings, spliced into
@@ -31785,6 +32214,8 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     # inspects `tree.body` -- see the module note above `_lift_nested_functions`. A program with no
     # nested `def` anywhere gets `nested_captures == {}` and this is a no-op.
     nested_captures = _lift_nested_functions(tree)
+    if _MODCONSTS.vars:
+        _check_module_variables(tree, _MODCONSTS.vars)
     parallel.prepare(tree, Unsupported)
     _hoist_augassign_indexes(tree)
     _lower_set_method_spellings(tree)
@@ -32006,7 +32437,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     # unconditionally (see its own docstring), so `ail_list`/`ail_flist` must already be defined by
     # the time that declaration is emitted, not only when some function's own `ctx.parts` happens
     # to ask for one.
-    for _mck, _ in _MODCONSTS.values():
+    for _mck, _ in list(_MODCONSTS.values()) + list(_MODCONSTS.vars.values()):
         if _mck == SLIST:
             parts.update(('SLIST', 'STR'))
         if _mck in (LIST, FLIST, STR, BYTES):
@@ -32040,7 +32471,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     non_escaping_helpers = _readonly_scalar_helpers(
         fns, sigs, clones, classes, external_non_escaping, numeric_containers=True) | external_non_escaping
     float64_pipelines = ({} if info is not None and info.get('_disable_float64_fusion') else
-                        float64_fusion.summaries(fns, sigs, set(classes) | set(_MODCONSTS) | set(external_exports)))
+                        float64_fusion.summaries(fns, sigs, set(classes) | _MODCONSTS.names() | set(external_exports)))
     if info is not None and info.get('_disable_float64_consumption'):
         float64_pipelines['_disable_consumption'] = True
     if not float64_pipelines.get('maps'):
@@ -32050,7 +32481,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                           if fname not in method_names}
     readonly_bytes_consumers = (set() if info is not None and info.get('_disable_readonly_bytes_arg') else
                                 readonly_bytes_scalar.summaries(fns, sigs, clones, classes, EXC_NAMES,
-                                                               blocked=set(_MODCONSTS) | set(external_exports)))
+                                                               blocked=_MODCONSTS.names() | set(external_exports)))
     for f in fns:
         cname = csym[f.name]
         # `base_ctx` is THIS function's OWN fully-typed, UNSPECIALISED ctx (`_caller_ctx`) -- the
@@ -32780,7 +33211,7 @@ def _borrow_leaf_self(fn, ctx, is_method, recursive, scalar=False):
         return False
     cls = ctx.classes[ctx.params[0][1][1]]
     fields = cls.field_types
-    shadowed = set(ctx.funcs) | set(ctx.classes) | set(ctx.modconsts) | set(ctx.kind) | set(ctx.types)
+    shadowed = set(ctx.funcs) | set(ctx.classes) | ctx.modconsts.names() | set(ctx.kind) | set(ctx.types)
 
     def field(node, kind, context=ast.Load):
         return (isinstance(node, ast.Attribute) and isinstance(node.ctx, context)
@@ -32957,7 +33388,7 @@ def _builder_locals(fn, ctx):
                 and id(n) not in allowed_targets:
             bad.add(n.id)
     params = {name for name, _ in ctx.params} | set(ctx.kind)
-    excluded = (params | bad | set(ctx.modconsts) | set(ctx.optional) | set(ctx.stdin_unbound)
+    excluded = (params | bad | ctx.modconsts.names() | set(ctx.optional) | set(ctx.stdin_unbound)
                 | set(ctx.onecp) | set(ctx.len1_names) | set(ctx.funcs) | set(ctx.classes)
                 | set(ctx.single_bind or ()))
     builders = set()
@@ -33302,6 +33733,9 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     # always has, and `signature()` gives this function a `void` C return type from `ctx.ret`.
 
     ctx = Ctx(sigs[fn.name][0], set() if strict else None)
+    if ctx.modconsts.vars:
+        ctx.gdecl = frozenset(name for g in ast.walk(fn) if isinstance(g, ast.Global)
+                              for name in g.names if name in ctx.modconsts.vars)
     ctx.bool_names = _BOOLS.locals.get(fn.name, frozenset())
     ctx.bool_lists = _BOOLS.lists.get(fn.name, frozenset())
     float_params = {name for name, kind in ctx.params if kind == FLIST}
@@ -33520,6 +33954,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
         if n not in ctx.kind:
             ctx.types[n] = BLIST
     _promote_floats(fn, ctx)
+    _settle_module_vars(fn, ctx)
     ctx.stdin_unbound = _stdin_only_bindings(fn, ctx)
     # Decided once, before a line of the body is compiled, exactly like every other container kind
     # here (`_mark_nested`, `_mark_tuple_lists`, above) -- so `out = []` compiles to the right
