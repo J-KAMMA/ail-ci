@@ -20,11 +20,11 @@ TEXT = ('str', 'strv', 'bytes', 'bytesv')
 LEAVES = SCALARS + TEXT + ('exc',)
 # head -> number of type arguments (None: any number)
 HEADS = dict({h: 0 for h in LEAVES}, tup=None, opt=1, obj=1, list=1, dict=2, set=1, bytearray=0,
-             cell=1, fn=2, closure=2, place=1, span=1)
+             cell=1, fn=2, closure=2, place=1, span=1, plist=1)
 # span<T>: a snapshot of a list's data pointer and length, valid while nothing in between can resize
 # the list (made by LICM in front of a loop that cannot; design §3.6)
 # heads that may only appear directly under obj<..>
-OBJ_INNER = ('list', 'dict', 'set', 'bytearray', 'class')
+OBJ_INNER = ('list', 'dict', 'set', 'bytearray', 'class', 'plist')
 
 
 class Type(object):
@@ -98,6 +98,9 @@ STRV, BYTES = T('strv'), T('bytes')
 
 
 DICT_II = Type('obj', (Type('dict', (I64, I64)),))
+# a list[str] struct field, borrowed (the legacy `ail_pslist`, section 21): read-only, its elements are views of the
+# field's own storage, valid until the field is next changed
+PLIST = Type('obj', (Type('plist', (STRV,)),))
 
 
 def rec_elem(t):
@@ -382,6 +385,14 @@ _op('dict.get', 3, 3)
 _op('dict.put', 3, 3)
 _op('dict.len', 1, 1)
 _op('dict.reset', 1, 1)
+# F1: a list[str] struct field (`obj<plist<strv>>`, the legacy packed `ail_pslist`; design section 21), read through a
+# borrow: `field.plist (obj) {cls, name}`, `plist.len (p) -> i64`, `plist.get (p, i) {mode} -> strv` (a view of the field's
+# own text), `plist.has (p, s) -> i1`. The lowering turns a view into a copy in the str arena unless its consumer is
+# done with it before anything can change the field.
+_op('field.plist', 1, 1)
+_op('plist.len', 1, 1)
+_op('plist.get', 2, 2)
+_op('plist.has', 2, 2)
 _op('span.of', 1, 1)
 _op('span.len', 1, 1)
 _op('span.get', 2, 2)

@@ -242,7 +242,7 @@ class FieldViewTests(unittest.TestCase):
         for name in ("top", "below"):
             self.assertNotIn("snapshot", body_of(self.program, name), name)
         self.assertNotIn("snapshot", body_of(self.program, "name_at"))
-        self.assertIn("ail_slist_get(&(v_r)->f_names", body_of(self.program, "name_at"))
+        self.assertIn("ail_pslist_get(&(v_r)->f_names", body_of(self.program, "name_at"))
 
 
 if __name__ == "__main__":

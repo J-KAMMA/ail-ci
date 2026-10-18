@@ -135,8 +135,13 @@ def instr_effects(ins, fn, program, places=None, defs=None, summaries=None):
         # a resize also writes the list's spine (data pointer and length): what span hoisting and
         # the range facts about len() depend on
         return Effects(reads=[loc], writes=[loc, 'Spine(%s)' % root], raises=[INDEX] if op == 'list.pop' else [])
-    if op in ('field.list', 'list.ref'):
+    if op in ('field.list', 'list.ref', 'field.plist'):
         return NONE
+    if op in ('plist.len', 'plist.get', 'plist.has'):
+        eff = Effects(reads=['Elem(%s)' % _root(ins.operands[0], fn, defs)])
+        if op == 'plist.get' and ins.attrs.get('mode', 'ck') == 'ck':
+            eff = eff | Effects(raises=[INDEX])
+        return eff
     if op == 'list.sortperm':
         perm = _root(ins.operands[0], fn, defs)
         eff = Effects(reads=['Elem(%s)' % perm], writes=['Elem(%s)' % perm, 'Spine(%s)' % perm, 'Rebind(%s)' % perm],
@@ -284,7 +289,7 @@ def _root(v, fn, defs=None):
             return 'Param(%s,%s)' % (fn.name, n)
     defs = defs if defs is not None else defs_of(fn)
     d = defs.get(v)
-    if d is not None and d.op == 'field.list':
+    if d is not None and d.op in ('field.list', 'field.plist'):
         return 'Field(%s,%s)' % (d.attrs.get('cls', '?'), d.attrs.get('name', '?'))
     if d is not None and d.op == 'field.ba':
         return 'Field(%s,%s)' % (d.attrs.get('cls', '?'), d.attrs.get('name', '?'))
