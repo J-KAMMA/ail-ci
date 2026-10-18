@@ -41,6 +41,7 @@ sys.path[:0] = [str(ROOT / 'python' / 'pkg-v12'), str(ROOT)]
 from ir import ir as I                       # noqa: E402
 from ir import effects as E                  # noqa: E402
 from ir import emit_c, text, verify          # noqa: E402
+from ail_testenv import ASAN_DETECT_LEAKS, DARWIN, LEAK_CHECK_REASON
 
 HAVE_CC = bool(shutil.which('gcc') or shutil.which('cc'))
 
@@ -389,6 +390,7 @@ class ProgramTests(unittest.TestCase):
         self.assertIn('ail_cleanup_frame', body)         # the checked adds in the steps can raise
 
     @unittest.skipUnless(shutil.which('gcc'), 'no gcc')
+    @unittest.skipIf(DARWIN, LEAK_CHECK_REASON)
     def test_the_cleanup_frame_is_what_frees_the_lists_when_an_exception_unwinds(self):
         # control for the leak check: the same IR C with the unwind helpers emptied leaks (LSan reports it),
         # so the clean runs of the sanitizer test above are the frames' doing
@@ -402,7 +404,7 @@ class ProgramTests(unittest.TestCase):
             self.assertNotEqual(mutated, c)
             path = Path(tmp, 'mutated.c')
             path.write_text(mutated)
-            env_run = dict(os.environ, ASAN_OPTIONS='detect_leaks=1:abort_on_error=0')
+            env_run = dict(os.environ, ASAN_OPTIONS=ASAN_DETECT_LEAKS + ':abort_on_error=0')
             reports = {}
             for tag, text_ in (('intact', c), ('emptied', mutated)):
                 path.write_text(text_)
@@ -441,7 +443,7 @@ class ProgramTests(unittest.TestCase):
                                      str(Path(tmp, '%s.%s.d' % (name, tag), 'program.c')), '-lm', '-o', str(san)],
                                     capture_output=True, text=True)
                 self.assertEqual(cc.returncode, 0, cc.stderr[-2000:])
-                env_run = dict(os.environ, ASAN_OPTIONS='detect_leaks=1:abort_on_error=0',
+                env_run = dict(os.environ, ASAN_OPTIONS=ASAN_DETECT_LEAKS + ':abort_on_error=0',
                                UBSAN_OPTIONS='print_stacktrace=1:halt_on_error=1')
                 runs = []
                 for args in args_list:

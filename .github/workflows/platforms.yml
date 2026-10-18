@@ -1,0 +1,105 @@
+name: platforms
+
+# The compiler on the operating systems other than the Linux x86-64 of tests.yml: Windows (native
+# MinGW-w64 UCRT gcc), macOS arm64 (Apple clang) and Linux arm64 (gcc). Each job runs a share of the
+# representative set of test modules listed in lab/platforms/config.json; what a platform skips, and
+# why, is in the same file and is printed in each job's summary. A manual run can pass `all` to run
+# every module of ail_check.MODULES instead (long: use it for a rare full check).
+on:
+  workflow_dispatch:
+    inputs:
+      all:
+        description: 'Run every test module, not only the representative set'
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - 'AIL_CURRENT/**'
+      - 'lab/platforms/**'
+      - '.github/workflows/platforms.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platforms-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  platform:
+    name: ${{ matrix.platform }} shard ${{ matrix.shard }}/${{ matrix.shards }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ inputs.all && 350 || 75 }}
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        include:
+          - {platform: windows, runner: windows-latest, shard: 0, shards: 4, jobs: 4}
+          - {platform: windows, runner: windows-latest, shard: 1, shards: 4, jobs: 4}
+          - {platform: windows, runner: windows-latest, shard: 2, shards: 4, jobs: 4}
+          - {platform: windows, runner: windows-latest, shard: 3, shards: 4, jobs: 4}
+          - {platform: macos, runner: macos-14, shard: 0, shards: 2, jobs: 3}
+          - {platform: macos, runner: macos-14, shard: 1, shards: 2, jobs: 3}
+          - {platform: linux-arm64, runner: ubuntu-24.04-arm, shard: 0, shards: 2, jobs: 4}
+          - {platform: linux-arm64, runner: ubuntu-24.04-arm, shard: 1, shards: 2, jobs: 4}
+    steps:
+      # The manifest pins hash the files byte for byte: keep LF on Windows.
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: MinGW-w64 UCRT gcc (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          # MSYS2 is preinstalled on the runner image; this only adds the UCRT64 gcc package.
+          C:\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm --needed mingw-w64-ucrt-x86_64-gcc"
+          "C:\msys64\ucrt64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Show the toolchain
+        shell: bash
+        run: |
+          python --version
+          gcc --version | head -1
+          gcc -dumpmachine
+          if [ "${{ matrix.platform }}" = macos ]; then echo "PIPE_CC=$(command -v cc)" >> "$GITHUB_ENV"; fi
+      - name: Run shard
+        shell: bash
+        env:
+          PYTHONUTF8: '1'
+        run: |
+          flag=""
+          if [ "${{ inputs.all }}" = true ]; then flag="--all"; fi
+          python lab/platforms/run.py --platform "${{ matrix.platform }}" $flag \
+            --shard "${{ matrix.shard }}" --shards "${{ matrix.shards }}" -j "${{ matrix.jobs }}" --timeout 2700
+
+  console-probe:
+    # Windows console encoding: the same program writes UTF-8 to a pipe and, through the console code
+    # page switch in ail_wincon.c, to a console. GitHub runners have no console, so this job proves
+    # the redirected path (UTF-8 bytes, LF -> CRLF like CPython's sys.stdout) and the Unicode build.
+    name: windows utf-8 output
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: MinGW-w64 UCRT gcc
+        shell: pwsh
+        run: |
+          C:\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm --needed mingw-w64-ucrt-x86_64-gcc"
+          "C:\msys64\ucrt64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Hello in four scripts
+        shell: bash
+        env:
+          PYTHONUTF8: '1'
+        run: python lab/platforms/console_probe.py

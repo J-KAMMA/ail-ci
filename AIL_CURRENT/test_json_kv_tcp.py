@@ -22,14 +22,23 @@ class JsonKvTcpTests(unittest.TestCase):
         if result.returncode:raise RuntimeError(result.stderr.decode(errors='replace'))
         cls.exe=exe if exe.is_file() else exe.with_suffix('.exe')
 
-    def exchange(self,port,data,chunk=8192):
-        with socket.create_connection(('127.0.0.1',port),timeout=5) as peer:
-            peer.settimeout(15)
-            for offset in range(0,len(data),chunk):peer.sendall(data[offset:offset+chunk])
-            peer.shutdown(socket.SHUT_WR)
-            output=bytearray()
-            while piece:=peer.recv(8192):output.extend(piece)
-            return bytes(output)
+    def exchange(self,port,data,chunk=8192,server=None):
+        # `server`: when the client sees a reset, say how the server ended (a macOS-only failure is
+        # otherwise a bare ConnectionResetError; the DIAG line is what the next CI run reads)
+        received=bytearray()
+        try:
+            with socket.create_connection(('127.0.0.1',port),timeout=5) as peer:
+                peer.settimeout(15)
+                for offset in range(0,len(data),chunk):peer.sendall(data[offset:offset+chunk])
+                peer.shutdown(socket.SHUT_WR)
+                while piece:=peer.recv(8192):received.extend(piece)
+                return bytes(received)
+        except ConnectionError as error:
+            if server is None:raise
+            try:out,err=server.process.communicate(timeout=10)
+            except subprocess.TimeoutExpired:server.process.kill();out,err=server.process.communicate();err=b'(had to kill the server) '+err
+            raise AssertionError(f'DIAG json_kv_tcp {sys.platform}: client {error!r} after receiving {len(received)} bytes, sent {len(data)} bytes in chunks of {chunk}; '
+                                 f'server returncode={server.process.returncode} stdout={out[:200]!r} stderr={err[:2000]!r}') from error
 
     def test_fragmented_utf8_persistence_and_multiple_connections(self):
         db=self.root/'state 日本😀.json';current=None;total=0
@@ -52,9 +61,9 @@ class JsonKvTcpTests(unittest.TestCase):
         for index,data in enumerate((b'{"op":"set","key":"x","value":"y"}\ninvalid',b'\xff',b'{"op":"count","op":"count"}',b'\n'*8193)):
             db=self.root/f'bad{index}.json';db.write_bytes(b'{"kept":"original"}')
             with RunningServer(self.exe,(0,db,1,1000)) as server:
-                self.assertEqual(self.exchange(server.port,data),b'')
+                self.assertEqual(self.exchange(server.port,data,server=server),b'')
                 out,err=server.process.communicate(timeout=5)
-                self.assertEqual((server.process.returncode,out),(4,b''));self.assertTrue(err)
+                self.assertEqual((server.process.returncode,out),(4,b''),f'DIAG json_kv_tcp {sys.platform}: case {index} data[:40]={data[:40]!r} server stderr={err[:2000]!r}');self.assertTrue(err)
             self.assertEqual(db.read_bytes(),b'{"kept":"original"}');self.assertFalse(Path(str(db)+'.ail-stage').exists())
         db=self.root/'timeout.json';db.write_bytes(b'{}')
         with RunningServer(self.exe,(0,db,1,100)) as server:
@@ -68,7 +77,7 @@ class JsonKvTcpTests(unittest.TestCase):
         commands=[{'op':'set','key':'k','value':value}]+[{'op':'get','key':'k'}]*20
         data=('\n'.join(json.dumps(row,ensure_ascii=False) for row in commands)).encode();expected,snapshot=reference(None,data)
         with RunningServer(self.exe,(0,db,1,3000)) as server:
-            self.assertEqual(self.exchange(server.port,data,7),expected);self.assertEqual(server.finish(),(f'21{os.linesep}'.encode(),b''))
+            self.assertEqual(self.exchange(server.port,data,7,server),expected);self.assertEqual(server.finish(),(f'21{os.linesep}'.encode(),b''))
         self.assertEqual(db.read_bytes(),snapshot)
         for args in (('0',db,'0','1'),('0',db,'4097','1'),('0',db,'1','0'),('0',db,'1','2147483648'),('-1',db,'1','1'),('65536',db,'1','1')):
             result=subprocess.run([self.exe,*map(str,args)],capture_output=True,timeout=5)

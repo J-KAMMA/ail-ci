@@ -530,6 +530,79 @@ def run_both(directory, text, name, env=None):
         return built, None, expected
     return built, subprocess.run([str(exe)], capture_output=True, timeout=60), expected
 
+# (round 3) an int64 overflow is a stop (`AIL limit: int_overflow`, exit 3), not an exception: no `except`
+# and no `finally` block may run on the way out. The general path used to run the `finally` bodies first,
+# printing lines CPython never prints (fuzz seed 2074400336). `v += [9]` after `a = v` forces that path.
+LIMIT_IN_TRY = '''
+def main() -> int:
+    v: list[int] = [1, 2]
+    a: list[int] = v
+    v += [9]
+    print(len(a))
+    try:
+        try:
+            try:
+                x: int = 9223372036854775807 - len(v) * -1
+                print(x)
+            except:
+                print(1)
+            finally:
+                print(2)
+        except ZeroDivisionError:
+            print(3)
+        else:
+            print(70)
+        finally:
+            print(4)
+    finally:
+        print(5)
+    return 1
+
+
+main()
+'''
+
+LIMIT_IN_HANDLER = '''
+def main() -> int:
+    v: list[int] = [1, 2]
+    a: list[int] = v
+    v += [9]
+    print(len(a))
+    try:
+        try:
+            print(1 // (len(a) - 3))
+        except ZeroDivisionError:
+            x: int = 9223372036854775807 - len(v) * -1
+            print(x)
+        finally:
+            print(2)
+    finally:
+        print(5)
+    return 1
+
+
+main()
+'''
+
+# `xs.extend(xs)` on the general path walked xs while appending to it and never ended (out of memory;
+# fuzz seed 2074400450). It adds the items xs had when the call began, once.
+SELF_EXTEND = '''
+def main() -> int:
+    v: list[int] = [-3, 0, 3, 6]
+    a: list[int] = v
+    v.extend(v)
+    print(len(v), len(a), sum(a))
+    v.extend(a)
+    print(len(v), sum(v))
+    w: list[int] = list(v)
+    w.extend(v)
+    print(len(w), sum(w))
+    return 1
+
+
+main()
+'''
+
 
 class FuzzFindings(unittest.TestCase):
     def same_as_cpython(self, text, name, env=None):
@@ -714,6 +787,27 @@ class FuzzFindings(unittest.TestCase):
                     ran = subprocess.run([str(exe)], input=data, capture_output=True, timeout=60)
                     expected = subprocess.run([sys.executable, str(source)], input=data, capture_output=True, timeout=60)
                     self.assertEqual(expected.stdout, b'bad b\n4 2\n')
+                    self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout), ran.stderr)
+
+    # ---- C16: a limit stop does not run except/finally blocks ----
+    def test_int_overflow_stop_runs_no_finally_block(self):
+        for text, label in ((LIMIT_IN_TRY, 'try'), (LIMIT_IN_HANDLER, 'handler')):
+            for mode, env in (('default', None), ('ir', {'AIL_IR': '1'})):
+                with self.subTest(label + '_' + mode):
+                    with tempfile.TemporaryDirectory() as directory:
+                        built, ran, _ = run_both(directory, text, 'limit_' + label + '_' + mode, env)
+                        self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                        self.assertEqual(ran.returncode, 3, ran.stderr)
+                        self.assertEqual(ran.stdout.replace(b'\r\n', b'\n'), b'3\n')   # Windows text-mode stdout writes CRLF
+                        self.assertIn(b'AIL limit: int_overflow', ran.stderr)
+
+    def test_list_extend_with_itself_adds_the_items_once(self):
+        for name, env in (('selfext', None), ('selfext_ir', {'AIL_IR': '1'})):
+            with self.subTest(name):
+                with tempfile.TemporaryDirectory() as directory:
+                    built, ran, expected = run_both(directory, SELF_EXTEND, name, env)
+                    self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                    self.assertEqual(expected.stdout.replace(b'\r\n', b'\n'), b'8 8 12\n16 24\n32 48\n')
                     self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout), ran.stderr)
 
 

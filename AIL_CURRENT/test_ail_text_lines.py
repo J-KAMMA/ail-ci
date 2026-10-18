@@ -25,6 +25,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from ail_testenv import gnu_time
 
 ROOT = Path(__file__).resolve().parent
 
@@ -225,10 +226,11 @@ def body_of(program, name):
 
 
 def peak_rss_kb(argv):
-    """Peak RSS of one run, from GNU time when present (None otherwise)."""
-    if not Path("/usr/bin/time").exists():
+    """Peak RSS of one run, from GNU time when present (None otherwise: macOS time has other flags)."""
+    timer = gnu_time()
+    if timer is None:
         return None
-    ran = subprocess.run(["/usr/bin/time", "-f", "%M", *argv], capture_output=True, text=True, timeout=120)
+    ran = subprocess.run([timer, "-f", "%M", *argv], capture_output=True, text=True, timeout=120)
     return int(ran.stderr.strip().splitlines()[-1])
 
 

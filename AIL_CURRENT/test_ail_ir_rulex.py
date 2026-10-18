@@ -17,6 +17,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from ail_testenv import ASAN_DETECT_LEAKS
 
 ROOT = Path(__file__).resolve().parent
 
@@ -178,7 +179,8 @@ fn main() {
 }
 ''', None)
 
-# a swap of two fields of a struct local through a temporary: the function stays on the legacy emitter
+# a swap of two fields of a struct local through a temporary: three moves (each field is rebound before
+# anything reads it), no copy (design section 23)
 BRACE['field_swap'] = ('''
 struct Gr { cur: list[int]; nxt: list[int]; }
 fn main() {
@@ -189,7 +191,7 @@ fn main() {
         print(len(gr.cur), gr.cur[0], len(gr.nxt), gr.nxt[0]);
     }
 }
-''', 'legacy')
+''', 0)
 
 # a local bound to a field list of a struct local and written: legacy emitter, the local is a copy
 BRACE['field_to_local_write'] = ('''
@@ -333,7 +335,7 @@ class BraceValueSemantics(unittest.TestCase):
         # (double buffer), and frees nothing twice or not at all
         if not have_cc():
             self.skipTest('no gcc')
-        env_run = dict(os.environ, ASAN_OPTIONS='detect_leaks=1:abort_on_error=0',
+        env_run = dict(os.environ, ASAN_OPTIONS=ASAN_DETECT_LEAKS + ':abort_on_error=0',
                        UBSAN_OPTIONS='print_stacktrace=1:halt_on_error=1')
         for name in ('double_buffer', 'alias_mutate_read', 'alias_in_loop', 'swap_keep', 'field_store',
                      'field_to_field'):

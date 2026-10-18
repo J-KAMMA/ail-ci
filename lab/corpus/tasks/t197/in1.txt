@@ -1,7 +1,7 @@
-echo tango india judy.grace@delta.co.uk cherry
-lima erin.grace@banana.org golf
-romeo zulu judy.niaj@golf.co.uk hotel
-kilo dave.erin@uniform.org 839-534-7142 oscar romeo india echo november
-dave.ivan@delta.co.uk juliet romeo november hotel juliet cherry
-sierra uniform dave.frank@juliet.co.uk november hotel
+echo tango india judy.grace@delta.example.net cherry
+lima erin.grace@banana.example.org golf
+romeo zulu judy.niaj@golf.example.net hotel
+kilo dave.erin@uniform.example.org 839-534-7142 oscar romeo india echo november
+dave.ivan@delta.example.net juliet romeo november hotel juliet cherry
+sierra uniform dave.frank@juliet.example.net november hotel
 655-641-4139 romeo uniform golf quebec cherry

@@ -458,7 +458,7 @@ class ArgumentBorrowTests(unittest.TestCase):
         body = body_of(self.program, "field_total")
         self.assertIn("(const ail_idict *)&(v_s)->f_d", body)
         self.assertIn("xsat((v_s)->f_xs.p, (v_s)->f_xs.n,", body)
-        self.assertIn("wslen((v_s)->f_ws,", body)
+        self.assertIn("wslen(ail_pslist_borrow(&(v_s)->f_ws),", body)
         self.assertIn("fsat((v_s)->f_fs,", body)
 
     def test_local_arguments_are_borrowed(self):

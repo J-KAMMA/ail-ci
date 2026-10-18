@@ -676,3 +676,4 @@ def _ail_ntabspath(p: str) -> str:
         q = _ail_ntjoin_end(_ail_ntjoin_step(_ail_ntjoin_init(_ail_os_getcwd()), p))
     return _ail_ntnormpath(q)
 ''', ('nt_join', 'nt_norm'))
+

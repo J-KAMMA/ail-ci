@@ -498,10 +498,10 @@ class ElementViewTests(unittest.TestCase):
     def test_str_field_element_views_match_cpython(self):
         with tempfile.TemporaryDirectory() as directory:
             _, program = run_pair(self, directory, STR_SOURCE, STR_PYTHON)
-            copy = "ail_str_return_owned(ail_slist_get(&(v_t)->f_nm"
+            copy = "ail_str_return_owned(ail_pslist_get(&(v_t)->f_nm"
             for name in ("rebuild", "find", "path"):
                 self.assertNotIn(copy, body_of(program, name), name)
-            self.assertIn("ail_bl_append(&v_out, ({ (void)0; int64_t _index = v_i; ail_slist_get(&(v_t)->f_nm, _index); }))",
+            self.assertIn("ail_bl_append(&v_out, ({ (void)0; int64_t _index = v_i; ail_pslist_get(&(v_t)->f_nm, _index); }))",
                           body_of(program, "joined"))
             for name in ("held_after_store", "held_after_call", "store_then_read"):
                 self.assertIn(copy, body_of(program, name), name)

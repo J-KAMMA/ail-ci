@@ -29,7 +29,17 @@ from pipeline import PipelineError, compiler, ffi_link_args, link_flags
 # stalls (n-body: 3.75 s with it, 2.46 s without, same instruction count within 3%; clang, which
 # does not pack them, ran the same C 2.2x faster). Loop vectorization is unaffected.
 CFLAGS_TUNE = ['-fno-tree-slp-vectorize']
+# No fused multiply-add: CPython rounds every float operation, and a compiler that contracts `a * b + c`
+# by default (Apple clang and GCC on arm64, where FMA is baseline) would round once instead. x86-64
+# without -march has no FMA, so the generated code there does not change.
+CFLAGS_TUNE += ['-ffp-contract=off']
+# Extra flags for the C compiler, for development: AIL_EXTRA_CFLAGS='-Werror=incompatible-pointer-types' turns the one
+# warning GCC 13 gives for a call of a runtime helper on the wrong struct type into an error (a packed list[str] field passed
+# to an ail_slist_* function compiled and misbehaved before the tests of that stage were run this way).
+import os as _os_flags
+CFLAGS_TUNE += _os_flags.environ.get('AIL_EXTRA_CFLAGS', '').split()
 import native_diagnostics
+import buildcache
 import shadowing
 from pyfront import Unsupported, to_pipeline_c
 from pyfunc import to_c as func_to_c
@@ -199,6 +209,14 @@ def _is_single_expression(source):
     value = tree.body[0].value
     return not (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
                 and value.func.id == 'print')
+
+
+def _cc(command, phase, **kwargs):
+    """Run a C compiler step through the build cache (a no-op unless `--cache` activated it and no
+    native-build report is being recorded)."""
+    if native_diagnostics.enabled():
+        return native_diagnostics.run(command, phase=phase, **kwargs)
+    return buildcache.run_cc(command, lambda c: native_diagnostics.run(c, phase=phase, **kwargs))
 
 
 def _finalize_output(out):
@@ -759,7 +777,7 @@ def _build_unshadowed(source, out, strict, report, force_general):
             # expressions inside a single statement); the CRT longjmp
             # walks it via RtlUnwindEx and faulted intermittently.
             # Prologue-level unwind info stays and is sufficient.
-            r = native_diagnostics.run([compiler(), '-O2', *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c), '-lm'],
+            r = _cc([compiler(), '-O2', *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c), '-lm'],
                                capture_output=True, text=True, phase='compile_link')
             if r.returncode:
                 # The exact phrase 'the C compiler rejected this' (identical to the typed path's
@@ -791,7 +809,7 @@ def _build_unshadowed(source, out, strict, report, force_general):
                 to = out.parent / ('%s_mix%d.o' % (out.name, i))
                 tc.write_text(csrc, encoding='utf-8')
                 native_diagnostics.generated(tc, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
-                r = native_diagnostics.run([compiler(), '-O2', *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', '-c', '-o', str(to), str(tc)],
+                r = _cc([compiler(), '-O2', *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', '-c', '-o', str(to), str(tc)],
                                    capture_output=True, text=True, phase='compile')
                 if r.returncode:
                     raise _general_failure(_typed_e, typed_main, PipelineError('the C compiler rejected this (general path, typed clone of %r):\n%s' %
@@ -800,12 +818,12 @@ def _build_unshadowed(source, out, strict, report, force_general):
             c.write_text(boxed_c, encoding='utf-8')
             native_diagnostics.generated(c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
             obj_boxed = out.parent / ('%s_boxed.o' % out.name)
-            r = native_diagnostics.run([compiler(), '-O2', *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', '-c', '-o', str(obj_boxed), str(c)],
+            r = _cc([compiler(), '-O2', *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', '-c', '-o', str(obj_boxed), str(c)],
                                capture_output=True, text=True, phase='compile')
             if r.returncode:
                 raise _general_failure(_typed_e, typed_main, PipelineError('the C compiler rejected this (general path):\n%s' %
                                     r.stderr[-800:]))
-            r = native_diagnostics.run([compiler(), '-O2', *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(obj_boxed)]
+            r = _cc([compiler(), '-O2', *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(obj_boxed)]
                                + objs + ['-lm'], capture_output=True, text=True, phase='link')
             if r.returncode:
                 raise _general_failure(_typed_e, typed_main, PipelineError('the C compiler rejected this (general path, link step):\n%s' %
@@ -828,7 +846,7 @@ def _build_unshadowed(source, out, strict, report, force_general):
     main = _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info)
     c.write_text(body + main, encoding='utf-8')
     native_diagnostics.generated(c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
-    r = native_diagnostics.run([compiler(), '-O2', *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c)]
+    r = _cc([compiler(), '-O2', *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c)]
                        + (['-lm'] if info.get('libm') else [])
                        + (['-pthread'] if info.get('pthread') else [])
                        + (['-lws2_32'] if os.name == 'nt' and {'TCPSOCKET', 'TCPHEAD'}.intersection(info.get('runtime_parts', [])) else []),
@@ -906,9 +924,12 @@ def main(argv=None):
     ap.add_argument('--compile-c', help=argparse.SUPPRESS)
     ap.add_argument('--c-api-name', help=argparse.SUPPRESS)
     ap.add_argument('--object', action='append', default=[], help=argparse.SUPPRESS)
+    ap.add_argument('--cache', action='store_true', help=argparse.SUPPRESS)
     ap.add_argument('--native-report', help=argparse.SUPPRESS)
     ap.add_argument('--native-debug-dir', help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
+    if a.cache:
+        buildcache.activate()
     if a.native_report:
         native_diagnostics.configure(a.native_report, a.native_debug_dir)
     if a.c_api_name is not None and not (a.compile_object or a.compile_c):

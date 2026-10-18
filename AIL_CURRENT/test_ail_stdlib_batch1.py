@@ -337,7 +337,10 @@ def main() -> int:
     print(operator.getitem(xs, 1))
     t1 = time.perf_counter()
     n1 = time.perf_counter_ns()
-    print(t1 >= t0, n1 >= n0, t1 - t0 < 5.0, time.monotonic() >= t1)
+    m0 = time.monotonic()
+    m1 = time.monotonic()
+    # (monotonic against perf_counter is not comparable: on Windows CPython reads two different clocks)
+    print(t1 >= t0, n1 >= n0, t1 - t0 < 5.0, m1 >= m0)
     return 0
 
 main()

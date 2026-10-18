@@ -3919,8 +3919,147 @@ static void ail_obj_field_flist_move(ail_flist *slot, ail_flist *value) {
 }
 '''
 
+PSLIST = r"""
+/* A list[str] struct field is a packed string list (`ail_pslist`), not an `ail_slist`: the elements
+   of a field are written once (appended, or stored whole from a local) and read many times, and an
+   `ail_str` per element (24 bytes) plus a copy of the strings per whole-field store dominated the
+   programs that keep a name column in a struct. Dense mode: all the text back to back in `t`, and
+   `e[0] = 0, e[i + 1] = end of element i` in a prefix-sum array (8 bytes an element, grown by
+   doubling, no repacking when it grows: an append is a copy of its text and one store). A change
+   that needs per-element ranges (an element store, a delete, a slice, a reverse or a sort) turns the
+   field into the wide mode first: the legacy `ail_sfield` block (spine of `ail_str`, text behind it,
+   slack and counted garbage) held in `w`, with exactly the legacy code and costs; only a whole-field
+   store (`o.f = xs`) makes a field dense again. `n` is the element count in both modes.
+   An element read is a view into the field's storage: valid until the field is next changed. */
+typedef struct {
+    uint8_t *t;
+    int64_t *e;
+    int64_t n, cap, tn, tcap;
+    int noasc;
+    int wide;
+    ail_slist w;
+} ail_pslist;
+static inline ail_str ail_pslist_at(const ail_pslist *L, int64_t i) {
+    if (__builtin_expect(L->wide, 0)) return L->w.p[i];
+    int64_t a = L->e[i];
+    return (ail_str){L->t + a, L->e[i + 1] - a, !L->noasc};
+}
+static __attribute__((noreturn, noinline, cold)) void ail_pslist_index_fail(void) {
+    ail_die("list index out of range");
+    __builtin_unreachable();
+}
+static inline __attribute__((always_inline)) ail_str ail_pslist_get(const ail_pslist *L, int64_t i) {
+    if (__builtin_expect((uint64_t)i >= (uint64_t)L->n, 0)) {      /* the in-range case is one compare */
+        if (i < 0) i += L->n;
+        if (i < 0 || i >= L->n) ail_pslist_index_fail();
+    }
+    return ail_pslist_at(L, i);
+}
+static void ail_pslist_free(ail_pslist *L) {
+    free(L->t); free(L->e);
+    ail_slist_free(&L->w);
+    *L = (ail_pslist){0};
+}
+static void ail_pslist_check(const ail_pslist *L) {
+    if (!L || L->n < 0 || (L->wide ? L->w.n != L->n || L->w.cap < L->w.n || (L->w.cap && !L->w.p)
+                           : L->cap < L->n || L->tcap < L->tn || L->tn < 0 || (L->cap && !L->e) || (L->tcap && !L->t)))
+        ail_die("invalid string field layout");
+}
+/* Append to a dense field. A value that views the field's own text stays valid across the growth. */
+static void ail_pslist_push(ail_pslist *L, ail_str v) {
+    ail__need_elems(v.n, AIL_STR_LIMIT);
+    if (v.n && !v.p) ail_die("invalid string text");
+    if (L->n == L->cap) {
+        if (L->cap > (INT64_MAX - 2) / 2) ail_die("string field too long");
+        int64_t c = L->cap ? L->cap * 2 : 8;
+        ail__need_elems(c + 1, AIL_ELEM_LIMIT(int64_t));
+        int64_t *q = (int64_t *)realloc(L->e, (size_t)(c + 1) * sizeof *q);
+        if (!q) ail_die("out of memory");
+        if (!L->e) q[0] = 0;
+        L->e = q; L->cap = c;
+    }
+    if (v.n > L->tcap - L->tn) {
+        if (v.n > INT64_MAX - L->tn) ail_die("allocation too large");
+        int64_t need = L->tn + v.n, c = L->tcap ? L->tcap : 64;
+        while (c < need) { if (c > INT64_MAX / 2) { c = need; break; } c *= 2; }
+        ail__need_elems(c, AIL_STR_LIMIT);
+        int64_t inside = (v.n && (uintptr_t)v.p >= (uintptr_t)L->t && (uintptr_t)v.p - (uintptr_t)L->t < (uintptr_t)L->tcap)
+                           ? (int64_t)((uintptr_t)v.p - (uintptr_t)L->t) : -1;
+        uint8_t *q = (uint8_t *)realloc(L->t, (size_t)c);
+        if (!q) ail_die("out of memory");
+        if (inside >= 0) v.p = q + inside;
+        L->t = q; L->tcap = c;
+    }
+    if (v.n) memcpy(L->t + L->tn, v.p, (size_t)v.n);
+    L->tn += v.n;
+    L->e[L->n + 1] = L->tn;
+    if (!v.bytes) L->noasc = 1;
+    L->n++;
+}
+/* `o.f = xs` and a constructor argument: the field becomes a dense copy of `xs`, built before the
+   old field is freed, since `xs` may view the old field's text. */
+static void ail_pslist_assign(ail_pslist *slot, ail_slist value) {
+    ail__need_elems(value.n, AIL_ELEM_LIMIT(ail_str));
+    if (value.cap < value.n || (value.n && !value.p)) ail_die("invalid string list");
+    ail_pslist r = {0};
+    if (value.n) {
+        int64_t total = 0;
+        int noasc = 0;
+        for (int64_t i = 0; i < value.n; i++) {
+            ail_str s = value.p[i];
+            ail__need_elems(s.n, AIL_STR_LIMIT);
+            if (s.n && !s.p) ail_die("invalid string list text");
+            if (s.n > INT64_MAX - total) ail_die("allocation too large");
+            total += s.n;
+            noasc |= !s.bytes;
+        }
+        ail__need_elems(value.n + 1, AIL_ELEM_LIMIT(int64_t));
+        ail__need_elems(total, AIL_STR_LIMIT);
+        r.e = (int64_t *)ail_alloc_raw((size_t)(value.n + 1) * sizeof *r.e);
+        r.t = (uint8_t *)ail_alloc_raw((size_t)(total > 0 ? total : 1));
+        r.n = r.cap = value.n; r.tn = total; r.tcap = total > 0 ? total : 1; r.noasc = noasc;
+        int64_t o = 0;
+        r.e[0] = 0;
+        for (int64_t i = 0; i < value.n; i++) {
+            ail_str s = value.p[i];
+            if (s.n) memcpy(r.t + o, s.p, (size_t)s.n);
+            o += s.n;
+            r.e[i + 1] = o;
+        }
+    }
+    ail_pslist_free(slot);
+    *slot = r;
+}
+/* An independent copy of a field (a whole-field read): one arena block holds every text and one
+   vector holds the views, as ail_slist_snapshot does. */
+static ail_slist ail_pslist_snapshot(ail_sarena *A, ail_pslist L) {
+    if (!A) ail_die("invalid string arena");
+    ail_pslist_check(&L);
+    if (L.wide) return ail_slist_snapshot(A, L.w);
+    ail__need_elems(L.n, AIL_ELEM_LIMIT(ail_str));
+    if (!L.n) return (ail_slist){0};
+    uint8_t *text = (uint8_t *)ail_alloc((size_t)(L.tn > 0 ? L.tn : 1));
+    ail_sarena_pushn(A, text, L.tn > 0 ? L.tn : 1);
+    if (L.tn) memcpy(text, L.t, (size_t)L.tn);
+    ail_str *q = (ail_str *)ail_alloc((size_t)L.n * sizeof *q);
+    for (int64_t i = 0; i < L.n; i++) q[i] = (ail_str){text + L.e[i], L.e[i + 1] - L.e[i], !L.noasc};
+    return (ail_slist){q, L.n, L.n};
+}
+static int64_t ail_pslist_has(const ail_pslist *L, ail_str v) {
+    for (int64_t i = 0; i < L->n; i++) if (ail_str_eq(ail_pslist_at(L, i), v)) return 1;
+    return 0;
+}
+/* a whole-field read goes through the same name as a local list's: the macro does not expand inside itself */
+#define ail_slist_snapshot(A, L) _Generic((L), ail_pslist: ail_pslist_snapshot, default: ail_slist_snapshot)(A, L)
+static int64_t ail_pslist_count(const ail_pslist *L, ail_str v) {
+    int64_t c = 0;
+    for (int64_t i = 0; i < L->n; i++) c += ail_str_eq(ail_pslist_at(L, i), v) != 0;
+    return c;
+}
+"""
+
 SFIELDMUT = r'''
-static void ail_sfield_validate(const ail_slist *s) {
+static void ail_wfield_validate(const ail_slist *s) {
     if (!s || s->n < 0 || s->cap < s->n || (s->cap && !s->p))
         ail_die("invalid string field layout");
     ail__need_elems(s->cap, AIL_ELEM_LIMIT(ail_str));
@@ -3932,7 +4071,7 @@ static void ail_sfield_validate(const ail_slist *s) {
    marked by cap > n (then cap >= n + 2): its last spine slot p[cap - 1] is not an element but the
    free text {next free byte, bytes left}, and p[cap - 2] counts the garbage {NULL, dead text bytes}.
    A store copies only the new text into the free text and repoints its slot; the replaced or
-   removed text stays behind as counted garbage. ail_sfield_repack copies the live strings into a
+   removed text stays behind as counted garbage. ail_wfield_repack copies the live strings into a
    fresh block when the free text or the spine runs out, or when garbage outgrows both the live
    text and the spine, so every repack is paid for by the mutations since the previous one: a
    single-element mutation costs amortised O(new text) plus the spine shifting Python does too, and
@@ -3940,7 +4079,7 @@ static void ail_sfield_validate(const ail_slist *s) {
    the element out, and a slice source is an independent snapshot, so no view is held across a
    mutation except the value being stored, which stays valid because the old block is freed only
    after the value is copied in. */
-static ail_str *ail_sfield_repack(ail_slist *s, int64_t slots, int64_t bytes, int64_t skip, int64_t cap) {
+static ail_str *ail_wfield_repack(ail_slist *s, int64_t slots, int64_t bytes, int64_t skip, int64_t cap) {
     int64_t live = 0;
     for (int64_t i = 0; i < s->n; i++) {
         if (i == skip) continue;
@@ -3979,29 +4118,29 @@ static ail_str *ail_sfield_repack(ail_slist *s, int64_t slots, int64_t bytes, in
 /* Room for `slots` elements (slots >= n) and `bytes` more text; element `skip` (or -1) is about
    to be replaced and is not carried over. Returns the old block, which the caller frees only after
    copying its value in, since that value may view it; NULL when nothing moved. */
-static ail_str *ail_sfield_room(ail_slist *s, int64_t slots, int64_t bytes, int64_t skip) {
+static ail_str *ail_wfield_room(ail_slist *s, int64_t slots, int64_t bytes, int64_t skip) {
     if (s->cap > s->n && s->cap - 2 >= slots && s->p[s->cap - 1].n >= bytes) return NULL;
     if (slots > (INT64_MAX - 2) / 2) ail_die("string field too long");
     /* Growing doubles the spine; a same-length store keeps the spine it has, plus the two slots. */
     int64_t cap = slots <= s->cap - 2 ? s->cap : slots > s->n ? 2 * slots + 2 : slots + 2;
     if (slots > s->n && cap < 10) cap = 10;
-    return ail_sfield_repack(s, slots, bytes, skip, cap);
+    return ail_wfield_repack(s, slots, bytes, skip, cap);
 }
-/* Copy one value into the free text that ail_sfield_room reserved. */
-static ail_str ail_sfield_put(ail_slist *s, ail_str value) {
+/* Copy one value into the free text that ail_wfield_room reserved. */
+static ail_str ail_wfield_put(ail_slist *s, ail_str value) {
     ail_str room = s->p[s->cap - 1];
     uint8_t *text = (uint8_t *)room.p;
     if (value.n) memcpy(text, value.p, (size_t)value.n);
     s->p[s->cap - 1] = (ail_str){text + value.n, room.n - value.n, 0};
     return (ail_str){text, value.n, value.bytes};
 }
-static int64_t ail_sfield_index(const ail_slist *s, int64_t i) {
-    ail_sfield_validate(s);
+static int64_t ail_wfield_index(const ail_slist *s, int64_t i) {
+    ail_wfield_validate(s);
     if (i < 0) i += s->n;
     if (i < 0 || i >= s->n) ail_raise_named(AIL_EXC_INDEX);
     return i;
 }
-static int64_t ail_sfield_text(const ail_str *values, int64_t count) {
+static int64_t ail_wfield_text(const ail_str *values, int64_t count) {
     int64_t total = 0;
     for (int64_t j = 0; j < count; j++) {
         ail__need_elems(values[j].n, AIL_STR_LIMIT);
@@ -4013,24 +4152,24 @@ static int64_t ail_sfield_text(const ail_str *values, int64_t count) {
 }
 /* After a mutation of a slack block left `dead` more bytes of garbage: count them, and repack once
    garbage exceeds the live text and the element count, or once the spine is mostly unused. */
-static void ail_sfield_settle(ail_slist *s, int64_t dead) {
+static void ail_wfield_settle(ail_slist *s, int64_t dead) {
     ail_str *meta = &s->p[s->cap - 2];
     if (dead > INT64_MAX - meta->n) ail_die("allocation too large");
     meta->n += dead;
     int64_t used = (int64_t)(s->p[s->cap - 1].p - (const uint8_t *)(s->p + s->cap));
     int64_t garbage = meta->n;
     if ((garbage > used - garbage && garbage > s->n + 64) || (s->cap > 64 && s->n < (s->cap - 2) / 4))
-        free(ail_sfield_repack(s, s->n, 0, -1, s->n + 2));
+        free(ail_wfield_repack(s, s->n, 0, -1, s->n + 2));
 }
 /* Elements were removed in place from an exact block: give it the room and garbage slots by
    repacking (the removed text is not carried over). */
-static void ail_sfield_removed(ail_slist *s, int64_t old_n, int64_t dead) {
-    if (s->cap == old_n) free(ail_sfield_repack(s, s->n, 0, -1, s->n + 2));
-    else ail_sfield_settle(s, dead);
+static void ail_wfield_removed(ail_slist *s, int64_t old_n, int64_t dead) {
+    if (s->cap == old_n) free(ail_wfield_repack(s, s->n, 0, -1, s->n + 2));
+    else ail_wfield_settle(s, dead);
 }
-static void ail_sfield_set_slice(ail_slist *s, const ail_slist *source,
+static void ail_wfield_set_slice(ail_slist *s, const ail_slist *source,
         int64_t lo, int haslo, int64_t hi, int hashi, int64_t step) {
-    ail_sfield_validate(s); ail_sfield_validate(source);
+    ail_wfield_validate(s); ail_wfield_validate(source);
     int64_t start; uint64_t stride;
     int64_t count = ail_numfield_slice_plan(s->n, lo, haslo, hi, hashi, step, &start, &stride);
     if (step != 1 && source->n != count) ail_raise_named(AIL_EXC_VALUE);
@@ -4045,19 +4184,19 @@ static void ail_sfield_set_slice(ail_slist *s, const ail_slist *source,
         memcpy(spine, source->p, (size_t)k * sizeof *spine);
         values = spine;
     }
-    ail_str *old = ail_sfield_room(s, new_n > old_n ? new_n : old_n, ail_sfield_text(values, k), -1);
+    ail_str *old = ail_wfield_room(s, new_n > old_n ? new_n : old_n, ail_wfield_text(values, k), -1);
     int64_t dead = 0;
     if (step == 1) {
-        dead = ail_sfield_text(s->p + start, count);
+        dead = ail_wfield_text(s->p + start, count);
         int64_t tail = old_n - start - count;
         if (tail && k != count)
             memmove(s->p + start + k, s->p + start + count, (size_t)tail * sizeof(ail_str));
-        for (int64_t j = 0; j < k; ++j) s->p[start + j] = ail_sfield_put(s, values[j]);
+        for (int64_t j = 0; j < k; ++j) s->p[start + j] = ail_wfield_put(s, values[j]);
     } else {
         int64_t index = start;
         for (int64_t j = 0; j < count; ++j) {
             dead += s->p[index].n;
-            s->p[index] = ail_sfield_put(s, values[j]);
+            s->p[index] = ail_wfield_put(s, values[j]);
             if (j + 1 < count) index = step < 0
                 ? (int64_t)((uint64_t)index - stride) : (int64_t)((uint64_t)index + stride);
         }
@@ -4065,11 +4204,11 @@ static void ail_sfield_set_slice(ail_slist *s, const ail_slist *source,
     s->n = new_n;
     if (old) free(old);
     free(spine);
-    ail_sfield_settle(s, dead);
+    ail_wfield_settle(s, dead);
 }
-static void ail_sfield_delete_slice(ail_slist *s, int64_t lo, int haslo,
+static void ail_wfield_delete_slice(ail_slist *s, int64_t lo, int haslo,
         int64_t hi, int hashi, int64_t step) {
-    ail_sfield_validate(s);
+    ail_wfield_validate(s);
     int64_t start; uint64_t stride;
     int64_t count = ail_numfield_slice_plan(s->n, lo, haslo, hi, hashi, step, &start, &stride);
     if (!count) return;
@@ -4082,55 +4221,150 @@ static void ail_sfield_delete_slice(ail_slist *s, int64_t lo, int haslo,
         } else s->p[write++] = s->p[read];
     }
     s->n = write;
-    ail_sfield_removed(s, old_n, dead);
+    ail_wfield_removed(s, old_n, dead);
 }
-static void ail_sfield_append(ail_slist *s, ail_str value) {
-    ail_sfield_validate(s);
+static void ail_wfield_append(ail_slist *s, ail_str value) {
+    ail_wfield_validate(s);
     ail__need_elems(value.n, AIL_STR_LIMIT);
     if (value.n && !value.p) ail_die("invalid string text");
-    ail_str *old = ail_sfield_room(s, s->n + 1, value.n, -1);
-    s->p[s->n] = ail_sfield_put(s, value);
+    ail_str *old = ail_wfield_room(s, s->n + 1, value.n, -1);
+    s->p[s->n] = ail_wfield_put(s, value);
     s->n++;
     if (old) free(old);
 }
-static void ail_sfield_extend(ail_slist *s, const ail_slist *source) {
-    ail_sfield_validate(s);
-    ail_sfield_set_slice(s, source, s->n, 1, s->n, 1, 1);
+static void ail_wfield_extend(ail_slist *s, const ail_slist *source) {
+    ail_wfield_validate(s);
+    ail_wfield_set_slice(s, source, s->n, 1, s->n, 1, 1);
 }
-static void ail_sfield_set(ail_slist *s, int64_t i, ail_str value) {
-    i = ail_sfield_index(s, i);
+static void ail_wfield_set(ail_slist *s, int64_t i, ail_str value) {
+    i = ail_wfield_index(s, i);
     ail__need_elems(value.n, AIL_STR_LIMIT);
     if (value.n && !value.p) ail_die("invalid string text");
     int64_t dead = s->p[i].n;
-    ail_str *old = ail_sfield_room(s, s->n, value.n, i);
-    s->p[i] = ail_sfield_put(s, value);
+    ail_str *old = ail_wfield_room(s, s->n, value.n, i);
+    s->p[i] = ail_wfield_put(s, value);
     if (old) free(old);
-    else ail_sfield_settle(s, dead);
+    else ail_wfield_settle(s, dead);
 }
-static void ail_sfield_delete(ail_slist *s, int64_t i) {
-    i = ail_sfield_index(s, i);
+static void ail_wfield_delete(ail_slist *s, int64_t i) {
+    i = ail_wfield_index(s, i);
     int64_t old_n = s->n, dead = s->p[i].n;
     if (i + 1 < old_n) memmove(s->p + i, s->p + i + 1, (size_t)(old_n - i - 1) * sizeof(ail_str));
     s->n = old_n - 1;
-    ail_sfield_removed(s, old_n, dead);
+    ail_wfield_removed(s, old_n, dead);
 }
-static ail_str ail_sfield_pop(ail_slist *s, int64_t i) {
-    i = ail_sfield_index(s, i);
+static ail_str ail_wfield_pop(ail_slist *s, int64_t i) {
+    i = ail_wfield_index(s, i);
     ail_str value = ail_str_return_owned(s->p[i]);
-    ail_sfield_delete(s, i);
+    ail_wfield_delete(s, i);
     return value;
 }
-static void ail_sfield_clear(ail_slist *s) {
-    ail_sfield_validate(s); ail_slist_free(s);
+static void ail_wfield_clear(ail_slist *s) {
+    ail_wfield_validate(s); ail_slist_free(s);
 }
-static void ail_sfield_reverse(ail_slist *s) {
-    ail_sfield_validate(s);
+static void ail_wfield_reverse(ail_slist *s) {
+    ail_wfield_validate(s);
     for (int64_t i = 0, j = s->n - 1; i < j; ++i, --j) {
         ail_str value = s->p[i]; s->p[i] = s->p[j]; s->p[j] = value;
     }
 }
-static void ail_sfield_sort(ail_slist *s) {
-    ail_sfield_validate(s); ail_slist_sort(s);
+static void ail_wfield_sort(ail_slist *s) {
+    ail_wfield_validate(s); ail_slist_sort(s);
+}
+/* The wide mode of a packed string field: the legacy ail_sfield block. Everything the dense mode
+   cannot do in place goes through here, with the legacy functions (ail_wfield_*) unchanged. */
+static void ail_pslist_widen(ail_pslist *L) {
+    ail_pslist_check(L);
+    if (L->wide) return;
+    ail_slist w = {0};
+    if (L->n) {
+        ail__need_elems(L->n, AIL_ELEM_LIMIT(ail_str));
+        size_t head = (size_t)L->n * sizeof(ail_str);
+        if ((size_t)L->tn > SIZE_MAX - head) ail_die("allocation too large");
+        ail_str *q = (ail_str *)ail_alloc(head + (size_t)L->tn);
+        uint8_t *text = (uint8_t *)q + head;
+        if (L->tn) memcpy(text, L->t, (size_t)L->tn);
+        for (int64_t i = 0; i < L->n; i++) q[i] = (ail_str){text + L->e[i], L->e[i + 1] - L->e[i], !L->noasc};
+        w = (ail_slist){q, L->n, L->n};
+    }
+    free(L->t); free(L->e);
+    *L = (ail_pslist){0};
+    L->wide = 1; L->w = w; L->n = w.n;
+}
+static void ail_sfield_append(ail_pslist *L, ail_str value) {
+    if (!L->wide) {
+        if (__builtin_expect(L->n < 0 || L->cap < L->n || L->tcap < L->tn, 0)) ail_pslist_check(L);
+        ail_pslist_push(L, value);
+        return;
+    }
+    ail_wfield_append(&L->w, value);
+    L->n = L->w.n;
+}
+static void ail_sfield_extend(ail_pslist *L, const ail_slist *source) {
+    if (L->wide) { ail_wfield_extend(&L->w, source); L->n = L->w.n; return; }
+    ail_pslist_check(L);
+    ail_wfield_validate(source);
+    for (int64_t j = 0; j < source->n; j++) ail_pslist_push(L, source->p[j]);
+}
+static void ail_sfield_set(ail_pslist *L, int64_t i, ail_str value) {
+    ail_pslist_widen(L);
+    ail_wfield_set(&L->w, i, value);
+    L->n = L->w.n;
+}
+static void ail_sfield_set_slice(ail_pslist *L, const ail_slist *source,
+        int64_t lo, int haslo, int64_t hi, int hashi, int64_t step) {
+    ail_pslist_widen(L);
+    ail_wfield_set_slice(&L->w, source, lo, haslo, hi, hashi, step);
+    L->n = L->w.n;
+}
+static void ail_sfield_delete_slice(ail_pslist *L, int64_t lo, int haslo,
+        int64_t hi, int hashi, int64_t step) {
+    ail_pslist_widen(L);
+    ail_wfield_delete_slice(&L->w, lo, haslo, hi, hashi, step);
+    L->n = L->w.n;
+}
+/* The last element of a dense field is removed in place (a stack of strings stays dense). */
+static void ail_sfield_delete(ail_pslist *L, int64_t i) {
+    if (!L->wide) {
+        ail_pslist_check(L);
+        int64_t j = i < 0 ? i + L->n : i;
+        if (j >= 0 && j == L->n - 1) { L->n--; L->tn = L->e[L->n]; return; }
+    }
+    ail_pslist_widen(L);
+    ail_wfield_delete(&L->w, i);
+    L->n = L->w.n;
+}
+static ail_str ail_sfield_pop(ail_pslist *L, int64_t i) {
+    if (!L->wide) {
+        ail_pslist_check(L);
+        int64_t j = i < 0 ? i + L->n : i;
+        if (j >= 0 && j == L->n - 1) {
+            ail_str value = ail_str_return_owned(ail_pslist_at(L, j));
+            L->n--; L->tn = L->e[L->n];
+            return value;
+        }
+    }
+    ail_pslist_widen(L);
+    ail_str value = ail_wfield_pop(&L->w, i);
+    L->n = L->w.n;
+    return value;
+}
+static void ail_sfield_clear(ail_pslist *L) {
+    ail_pslist_check(L);
+    ail_pslist_free(L);
+}
+static void ail_sfield_reverse(ail_pslist *L) {
+    ail_pslist_widen(L);
+    ail_wfield_reverse(&L->w);
+}
+static void ail_sfield_sort(ail_pslist *L) {
+    ail_pslist_widen(L);
+    ail_wfield_sort(&L->w);
+}
+/* A read-only list[str] parameter lent a field: the field's own spine, the field turning wide. */
+static ail_slist ail_pslist_borrow(ail_pslist *L) {
+    ail_pslist_widen(L);
+    return L->w;
 }
 '''
 NUMVIEW = r'''
@@ -4281,11 +4515,18 @@ static void PREFIX##extend(LISTTYPE *s, const LISTTYPE *source) { \
     if (n) memcpy(s->p + s->n, p, (size_t)n * sizeof(SCALAR)); \
     s->n += n; free(copy); \
 } \
-static SCALAR PREFIX##pop(LISTTYPE *s, int64_t i) { \
+static SCALAR PREFIX##pop_slow(LISTTYPE *s, int64_t i) { \
     i = PREFIX##index(s, i); \
     SCALAR value; memcpy(&value, s->p + i, sizeof value); \
     if (i < s->n - 1) memmove(s->p + i, s->p + i + 1, (size_t)(s->n - i - 1) * sizeof(SCALAR)); \
     --s->n; return value; \
+} \
+/* `xs.pop()` and `xs.pop(-1)` (a stack kept in a struct field: 60% of an LLM-written interpreter's time went to the \
+   out-of-line call, the negative-index slow path and the layout check behind it for every pop): the last element of a \
+   live list is one compare and a decrement; anything else, and every damaged layout, takes the full path. */ \
+static inline __attribute__((always_inline)) SCALAR PREFIX##pop(LISTTYPE *s, int64_t i) { \
+    if (__builtin_expect(s && s->n > 0 && (i == -1 || i == s->n - 1), 1)) return s->p[--s->n]; \
+    return PREFIX##pop_slow(s, i); \
 } \
 static void PREFIX##clear(LISTTYPE *s) { PREFIX##validate(s); s->n = 0; } \
 static void PREFIX##reverse(LISTTYPE *s) { \
@@ -4457,9 +4698,69 @@ static int ail_cmp(const void *a, const void *b) {
     int64_t x = *(const int64_t *)a, y = *(const int64_t *)b;
     return (x > y) - (x < y);
 }
+/* `xs.sort()` / `sorted(xs)` of an int list: an in-place introsort with the comparison inlined. qsort called a function
+   through a pointer for every comparison and moved elements through its merge buffer: 31% of the instructions of an
+   LLM-written scheduler that sorts a million ints. Equal ints are indistinguishable, so the lack of stability shows
+   nowhere (floats are not done this way: 0.0 and -0.0 compare equal and print differently). Median of three, Hoare
+   partition (it stops on equal keys, so many duplicates split evenly), insertion sort below 17 elements, heapsort once
+   the depth limit is reached: O(n log n) in the worst case, no allocation, the recursion on the smaller side only. */
+#define AIL_DEFINE_SORT(NAME, T) \
+static void NAME##_insertion(T *a, int64_t n) { \
+    for (int64_t i = 1; i < n; i++) { \
+        T x = a[i]; int64_t j = i - 1; \
+        while (j >= 0 && a[j] > x) { a[j + 1] = a[j]; j--; } \
+        a[j + 1] = x; \
+    } \
+} \
+static void NAME##_sift(T *a, int64_t i, int64_t n) { \
+    T x = a[i]; \
+    for (;;) { \
+        int64_t c = 2 * i + 1; \
+        if (c >= n) break; \
+        if (c + 1 < n && a[c + 1] > a[c]) c++; \
+        if (!(a[c] > x)) break; \
+        a[i] = a[c]; i = c; \
+    } \
+    a[i] = x; \
+} \
+static void NAME##_heap(T *a, int64_t n) { \
+    for (int64_t i = n / 2 - 1; i >= 0; i--) NAME##_sift(a, i, n); \
+    for (int64_t e = n - 1; e > 0; e--) { T t = a[0]; a[0] = a[e]; a[e] = t; NAME##_sift(a, 0, e); } \
+} \
+static void NAME##_intro(T *a, int64_t n, int depth) { \
+    while (n > 16) { \
+        if (depth-- == 0) { NAME##_heap(a, n); return; } \
+        int64_t m = (n - 1) / 2; \
+        { T x = a[0], y = a[m], z = a[n - 1], t; \
+          if (y < x) { t = x; x = y; y = t; } \
+          if (z < y) { y = z; if (y < x) y = x; } \
+          /* y is now the median of the three: put it at m */ \
+          if (a[0] == y) { T t2 = a[m]; a[m] = a[0]; a[0] = t2; } \
+          else if (a[n - 1] == y) { T t2 = a[m]; a[m] = a[n - 1]; a[n - 1] = t2; } } \
+        T pivot = a[m]; \
+        int64_t i = -1, j = n; \
+        for (;;) { \
+            do i++; while (a[i] < pivot); \
+            do j--; while (a[j] > pivot); \
+            if (i >= j) break; \
+            T t = a[i]; a[i] = a[j]; a[j] = t; \
+        } \
+        int64_t left = j + 1, right = n - left; \
+        if (left < right) { NAME##_intro(a, left, depth); a += left; n = right; } \
+        else { NAME##_intro(a + left, right, depth); n = left; } \
+    } \
+    NAME##_insertion(a, n); \
+} \
+static void NAME(T *a, int64_t n) { \
+    if (n < 2) return; \
+    int depth = 0; \
+    for (int64_t k = n; k > 1; k >>= 1) depth += 2; \
+    NAME##_intro(a, n, depth); \
+}
+AIL_DEFINE_SORT(ail__sort_i64, int64_t)
 static void ail_list_sort(ail_list *L) {
-    /* An empty list may hold p == NULL, and qsort(NULL, 0, ...) is undefined behaviour. */
-    if (L->n > 1) qsort(L->p, (size_t)L->n, sizeof *L->p, ail_cmp);
+    /* An empty list may hold p == NULL: there is nothing to sort below two elements. */
+    if (L->n > 1) ail__sort_i64(L->p, L->n);
 }
 '''
 
@@ -10534,7 +10835,7 @@ enum {
     AIL_T_UNBOUND = 0, AIL_T_NONE, AIL_T_BOOL, AIL_T_INT, AIL_T_FLOAT,
     AIL_T_STR, AIL_T_LIST, AIL_T_TUPLE, AIL_T_DICT, AIL_T_SET,
     AIL_T_FUNC, AIL_T_BOUND, AIL_T_ITER, AIL_T_CLASS, AIL_T_INST, AIL_T_EXC,
-    AIL_T_RANGE, AIL_T_CELL
+    AIL_T_RANGE, AIL_T_CELL, AIL_T_FROZENSET
 };
 
 /* ===================================================================================
@@ -13640,6 +13941,19 @@ static inline void ail_fmt_float(char *out, size_t cap, double v) {
 typedef struct { ail_obj key, val; int64_t hash; } ail_mapentry;
 typedef struct { ail_gcobj hdr; ail_mapentry *entries; int64_t n, cap; int64_t *index; int64_t index_cap;
                  int8_t dd_factory; /* defaultdict marker: 0 plain dict, 1 int, 2 list, 3 set, 4 str (2026-09-16) */ } ail_mapobj;
+/* set / frozenset: insertion-ordered like the typed path's sets (DIFFERENCES.md A2). An entry whose key tag is UNBOUND is a
+   hole left by a removal; `n` counts entries used including holes, `used` the live ones. */
+typedef struct { ail_obj key; int64_t hash; } ail_setentry;
+typedef struct { ail_gcobj hdr; ail_setentry *ent; int64_t n, cap, used; int64_t *index; int64_t index_cap; } ail_setobj;
+#define AIL_SETOBJ(x) ((ail_setobj *)(x).o)
+#define AIL_IS_ANYSET(t) ((t) == AIL_T_SET || (t) == AIL_T_FROZENSET)
+static inline int ail_setx_eq(ail_obj a, ail_obj b);
+static inline int ail_setx_cmp(ail_obj a, ail_obj b, int op /* 0 lt, 1 le, 2 gt, 3 ge */);
+static inline int64_t ail_frozenset_hash(const ail_setobj *so);
+static inline ail_st ail_set_union(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b);
+static inline ail_st ail_set_intersection(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b);
+static inline ail_st ail_meth_set_difference(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b);
+static inline ail_st ail_meth_set_symmetric_difference(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b);
 
 typedef struct { int64_t name_id; ail_obj val; } ail_attr;
 typedef struct { ail_gcobj hdr; ail_obj cls; ail_attr *attrs; int64_t n, cap; } ail_instobj;
@@ -13687,7 +14001,7 @@ static inline void ail_gc_mark_value(ail_obj v) {
     ail_gcobj *o;
     switch (v.tag) {
         case AIL_T_STR: o = v.sv.backing; break;
-        case AIL_T_FLOAT: case AIL_T_LIST: case AIL_T_TUPLE: case AIL_T_DICT: case AIL_T_SET:
+        case AIL_T_FLOAT: case AIL_T_LIST: case AIL_T_TUPLE: case AIL_T_DICT: case AIL_T_SET: case AIL_T_FROZENSET:
         case AIL_T_FUNC: case AIL_T_BOUND: case AIL_T_ITER: case AIL_T_CLASS:
         case AIL_T_INST: case AIL_T_EXC: case AIL_T_RANGE: case AIL_T_CELL:
             o = v.o; break;
@@ -13702,9 +14016,14 @@ static inline void ail_gc_mark_value(ail_obj v) {
             for (int64_t i = 0; i < vv->n; i++) ail_gc_mark_value(vv->p[i]);
             break;
         }
-        case AIL_K_DICT: case AIL_K_SET: {
+        case AIL_K_DICT: {
             ail_mapobj *m = (ail_mapobj *)o;
             for (int64_t i = 0; i < m->n; i++) { ail_gc_mark_value(m->entries[i].key); ail_gc_mark_value(m->entries[i].val); }
+            break;
+        }
+        case AIL_K_SET: {
+            ail_setobj *so = (ail_setobj *)o;
+            if (so->ent) for (int64_t i = 0; i < so->n; i++) if (so->ent[i].key.tag != AIL_T_UNBOUND) ail_gc_mark_value(so->ent[i].key);
             break;
         }
         case AIL_K_INST: {
@@ -13732,7 +14051,8 @@ static inline void ail_gc_mark_value(ail_obj v) {
 static inline void ail__free_payload(ail_gcobj *o) {
     switch (o->kind) {
         case AIL_K_LIST: case AIL_K_TUPLE: free(((ail_vecobj *)o)->p); break;
-        case AIL_K_DICT: case AIL_K_SET: free(((ail_mapobj *)o)->entries); free(((ail_mapobj *)o)->index); break;
+        case AIL_K_DICT: free(((ail_mapobj *)o)->entries); free(((ail_mapobj *)o)->index); break;
+        case AIL_K_SET: free(((ail_setobj *)o)->ent); free(((ail_setobj *)o)->index); break;
         case AIL_K_INST: free(((ail_instobj *)o)->attrs); break;
         case AIL_K_FUNC: free(((ail_funcobj *)o)->cells); break;
         default: break;
@@ -13782,6 +14102,7 @@ static inline const char *ail_type_name(uint8_t t) {
         case AIL_T_TUPLE: return "tuple";
         case AIL_T_DICT: return "dict";
         case AIL_T_SET: return "set";
+        case AIL_T_FROZENSET: return "frozenset";
         case AIL_T_FUNC: return "function";
         case AIL_T_BOUND: return "method";
         case AIL_T_ITER: return "iterator";
@@ -13943,7 +14264,8 @@ static inline int ail_obj_truthy(ail_obj x) {
         case AIL_T_FLOAT: return ail_float_val(x) != 0.0;
         case AIL_T_STR: return x.sv.len != 0;
         case AIL_T_LIST: case AIL_T_TUPLE: return ((ail_vecobj *)x.o)->n != 0;
-        case AIL_T_DICT: case AIL_T_SET: return ((ail_mapobj *)x.o)->n != 0;
+        case AIL_T_DICT: return ((ail_mapobj *)x.o)->n != 0;
+        case AIL_T_SET: case AIL_T_FROZENSET: return AIL_SETOBJ(x)->used != 0;
         default: return 1;
     }
 }
@@ -13970,17 +14292,37 @@ static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {
         if (b.tag == AIL_T_FLOAT) return ail__cmp_int_float(a.i, ail_float_val(b)) == 0;
         return a.i == b.i;
     }
+    if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) return ail_setx_eq(a, b);
     if (a.tag != b.tag) return 0;
     switch (a.tag) {
         case AIL_T_NONE: return 1;
         case AIL_T_STR: return ail_str_eq(ail_view_to_str(a), ail_view_to_str(b));
+        case AIL_T_DICT: {
+            ail_mapobj *x = (ail_mapobj *)a.o, *y = (ail_mapobj *)b.o;
+            if (x == y) return 1;
+            if (x->n != y->n) return 0;
+            int64_t ymask = y->index_cap - 1;
+            for (int64_t i = 0; i < x->n; i++) {
+                int64_t h = x->entries[i].hash, slot = (int64_t)((uint64_t)h & (uint64_t)ymask);
+                for (;;) {
+                    int64_t e = y->index[slot];
+                    if (e == -1) return 0;
+                    if (y->entries[e].hash == h && (ail_identical(y->entries[e].key, x->entries[i].key) || ail_obj_eq_raw(y->entries[e].key, x->entries[i].key))) {
+                        if (!(ail_identical(y->entries[e].val, x->entries[i].val) || ail_obj_eq_raw(y->entries[e].val, x->entries[i].val))) return 0;
+                        break;
+                    }
+                    slot = (slot + 1) & ymask;
+                }
+            }
+            return 1;
+        }
         case AIL_T_LIST: case AIL_T_TUPLE: {
             ail_vecobj *va = (ail_vecobj *)a.o, *vb = (ail_vecobj *)b.o;
             if (va->n != vb->n) return 0;
             for (int64_t i = 0; i < va->n; i++) if (!ail_obj_eq_raw(va->p[i], vb->p[i])) return 0;
             return 1;
         }
-        default: return 0; /* dict/set/instance/exception ==: out of scope, matches v1 */
+        default: return 0; /* instance/exception ==: out of scope, matches v1 */
     }
 }
 /* `x in c` / dict & set lookup: identity-then-equality, exactly like CPython, so a NaN
@@ -13989,6 +14331,7 @@ static inline int ail_member_eq(ail_obj a, ail_obj b) { return ail_identical(a, 
 
 static inline ail_st ail_obj_hash(ail_ctx *cx, int64_t *out, ail_obj x) {
     switch (x.tag) {
+        case AIL_T_FROZENSET: *out = ail_frozenset_hash(AIL_SETOBJ(x)); return AIL_OK;
         case AIL_T_NONE: *out = 0xA1EC1; return AIL_OK;
         case AIL_T_BOOL: case AIL_T_INT: {
             uint64_t h = (uint64_t)x.i; h ^= h >> 33; h *= 0xff51afd7ed558ccdULL; h ^= h >> 33;
@@ -14045,16 +14388,18 @@ static inline ail_st ail_obj_cmp(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b
         }
         *out = va->n == vb->n ? 0 : (va->n < vb->n ? -1 : 1); return AIL_OK;
     }
+    if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag))
+        return ail_hit_limit(cx, "sorting or min()/max() of sets: < on sets is the subset test, a partial order whose result depends on the sort algorithm; sort a key such as sorted(x) or len(x) instead", "");
     char buf[128];
     snprintf(buf, sizeof buf, "'<' not supported between instances of '%s' and '%s'", ail_type_name(a.tag), ail_type_name(b.tag));
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
 }
 static inline ail_st ail_op_eq(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { (void)cx; *out = ail_box_bool(ail_obj_eq_raw(a, b)); return AIL_OK; }
 static inline ail_st ail_op_ne(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { (void)cx; *out = ail_box_bool(!ail_obj_eq_raw(a, b)); return AIL_OK; }
-static inline ail_st ail_op_lt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0); return AIL_OK; }
-static inline ail_st ail_op_le(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c <= 0); return AIL_OK; }
-static inline ail_st ail_op_gt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0); return AIL_OK; }
-static inline ail_st ail_op_ge(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c >= 0); return AIL_OK; }
+static inline ail_st ail_op_lt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 0)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0); return AIL_OK; }
+static inline ail_st ail_op_le(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 1)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c <= 0); return AIL_OK; }
+static inline ail_st ail_op_gt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 2)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0); return AIL_OK; }
+static inline ail_st ail_op_ge(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 3)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c >= 0); return AIL_OK; }
 
 /* ===================================================================================
    Arithmetic. int64 overflow -> AIL_LIMIT (uncatchable), per the owner decision -- the
@@ -14121,6 +14466,7 @@ static inline void ail_sum_end(ail_ctx *cx, ail_obj *acc, ail_sumst *s) {
     }
 }
 static inline ail_st ail_op_sub(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) return ail_meth_set_difference(cx, out, a, b);
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t r;
         if (__builtin_sub_overflow(a.i, b.i, &r)) return ail_hit_limit(cx, "int_overflow", "integer overflow in -");
@@ -14222,6 +14568,8 @@ static inline ail_st ail__bit_type_error(ail_ctx *cx, const char *op, ail_obj a,
 }
 /* & | ^ : bool op bool stays bool (CPython), any int involvement gives int. */
 static inline ail_st ail__bit_logic(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, char op) {
+    if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag))
+        return op == '&' ? ail_set_intersection(cx, out, a, b) : op == '|' ? ail_set_union(cx, out, a, b) : ail_meth_set_symmetric_difference(cx, out, a, b);
     if (!ail__is_intlike(a.tag) || !ail__is_intlike(b.tag)) return ail__bit_type_error(cx, op == '&' ? "&" : op == '|' ? "|" : "^", a, b);
     int64_t r = op == '&' ? (a.i & b.i) : op == '|' ? (a.i | b.i) : (a.i ^ b.i);
     *out = (a.tag == AIL_T_BOOL && b.tag == AIL_T_BOOL) ? ail_box_bool(r != 0) : ail_box_int(r);
@@ -14349,8 +14697,9 @@ static inline void ail_list_reverse(ail_obj lst) {
 }
 static inline void ail_list_extend(ail_ctx *cx, ail_obj lst, ail_obj other) {
     ail_vecobj *v = (ail_vecobj *)lst.o, *ov = (ail_vecobj *)other.o;
-    ail_vec_reserve(cx, v, v->n + ov->n);
-    for (int64_t i = 0; i < ov->n; i++) v->p[v->n++] = ov->p[i];
+    int64_t count = ov->n;   /* fixed first: `xs.extend(xs)` must add len(xs) items, once */
+    ail_vec_reserve(cx, v, v->n + count);
+    for (int64_t i = 0; i < count; i++) v->p[v->n++] = ov->p[i];
 }
 static inline ail_st ail_list_setitem(ail_ctx *cx, ail_obj lst, int64_t i, ail_obj x) {
     ail_vecobj *v = (ail_vecobj *)lst.o;
@@ -14494,7 +14843,7 @@ static inline ail_obj ail_dict_new(ail_ctx *cx) { ail_obj r; r.tag = AIL_T_DICT;
 static inline ail_obj ail_dict_new_default(ail_ctx *cx, int factory) {
     ail_obj r = ail_dict_new(cx); ((ail_mapobj *)r.o)->dd_factory = (int8_t)factory; return r;
 }
-static inline ail_obj ail_set_new(ail_ctx *cx) { ail_obj r; r.tag = AIL_T_SET; r.o = (ail_gcobj *)ail_map_new(cx); return r; }
+static inline ail_obj ail_set_new(ail_ctx *cx);
 static inline ail_st ail_dict_getitem(ail_ctx *cx, ail_obj *out, ail_obj d, ail_obj key) {
     ail_obj *v; ail_st st = ail_map_get(cx, &v, (ail_mapobj *)d.o, key); if (st != AIL_OK) return st;
     if (!v) {
@@ -14552,79 +14901,275 @@ static inline ail_obj ail_dict_items(ail_ctx *cx, ail_obj d) {
     }
     ail_obj r; r.tag = AIL_T_LIST; r.o = (ail_gcobj *)v; return r;
 }
-static inline ail_st ail_set_add(ail_ctx *cx, ail_obj s, ail_obj x) { return ail_map_set(cx, (ail_mapobj *)s.o, x, ail_box_none()); }
-static inline ail_st ail_set_discard(ail_ctx *cx, int *found, ail_obj s, ail_obj x) { return ail_map_del(cx, found, (ail_mapobj *)s.o, x); }
-static inline ail_st ail_set_contains(ail_ctx *cx, int *out, ail_obj s, ail_obj x) {
-    ail_obj *v; ail_st st = ail_map_get(cx, &v, (ail_mapobj *)s.o, x); if (st != AIL_OK) return st; *out = v != NULL; return AIL_OK;
+/* ===================================================================================
+   set / frozenset core. A set keeps its elements in insertion order, as the typed path does (DIFFERENCES.md A2):
+   a dense entries array (a removed slot becomes a hole that iteration skips; re-adding a removed key puts it at the
+   end) and an open-addressed index over it. `ail_setx_*` work on an ail_setobj and never look at the tag; the public
+   `ail_set_*` / `ail_meth_set_*` wrappers check it (a frozenset has no add/pop/...). The order of a result follows
+   the typed path's ail_*set_combine: `a | b` is a's elements then b's new ones, `a & b` and `a - b` keep a's order,
+   `a ^ b` is a's elements not in b then b's elements not in a; a result has the type of the left operand.
+   =================================================================================== */
+static inline int ail_setx_live(const ail_setentry *e) { return e->key.tag != AIL_T_UNBOUND; }
+static inline void ail_setx_account(ail_ctx *cx, ail_setobj *s, int64_t delta) {
+    if (delta >= 0) { s->hdr.size += (uint32_t)delta; cx->gc_bytes += (size_t)delta; }
+    else {
+        size_t d = (size_t)(-delta);
+        s->hdr.size -= (uint32_t)d; cx->gc_bytes = cx->gc_bytes >= d ? cx->gc_bytes - d : 0;
+    }
 }
-static inline int64_t ail_set_len(ail_obj s) { return ((ail_mapobj *)s.o)->n; }
+static inline int64_t ail_setx_bytes(int64_t cap) { return cap * (int64_t)sizeof(ail_setentry) + 2 * cap * (int64_t)sizeof(int64_t); }
+static inline void ail_setx_alloc(ail_setobj *so, int64_t cap) {
+    so->ent = (ail_setentry *)ail_xcalloc((size_t)cap * sizeof(ail_setentry));
+    so->index_cap = 2 * cap;
+    so->index = (int64_t *)ail_xmalloc((size_t)so->index_cap * sizeof(int64_t));
+    for (int64_t i = 0; i < so->index_cap; i++) so->index[i] = -1;
+    so->cap = cap; so->n = 0; so->used = 0;
+}
+static inline ail_obj ail_setx_new(ail_ctx *cx, int frozen) {
+    ail_setobj *s = (ail_setobj *)ail_gc_alloc(cx, AIL_K_SET, sizeof(ail_setobj));
+    ail_setx_alloc(s, 8);
+    ail_setx_account(cx, s, ail_setx_bytes(8));
+    ail_obj r; memset(&r, 0, sizeof r); r.tag = frozen ? AIL_T_FROZENSET : AIL_T_SET; r.o = (ail_gcobj *)s; return r;
+}
+static inline ail_obj ail_set_new(ail_ctx *cx) { return ail_setx_new(cx, 0); }
+static inline ail_obj ail_frozenset_new(ail_ctx *cx) { return ail_setx_new(cx, 1); }
+
+/* rebuild into `newcap` slots, dropping holes (order kept) */
+static inline void ail_setx_rebuild(ail_ctx *cx, ail_setobj *so, int64_t newcap) {
+    ail_setentry *old = so->ent; int64_t oldn = so->n, oldcap = so->cap;
+    free(so->index);
+    ail_setx_alloc(so, newcap);
+    int64_t mask = so->index_cap - 1;
+    for (int64_t i = 0; i < oldn; i++) {
+        if (!ail_setx_live(&old[i])) continue;
+        int64_t k = so->n++;
+        so->ent[k] = old[i];
+        int64_t slot = (int64_t)((uint64_t)old[i].hash & (uint64_t)mask);
+        while (so->index[slot] != -1) slot = (slot + 1) & mask;
+        so->index[slot] = k;
+    }
+    so->used = so->n;
+    free(old);
+    ail_setx_account(cx, so, ail_setx_bytes(newcap) - ail_setx_bytes(oldcap));
+}
+static inline int64_t ail_setx_find(const ail_setobj *so, ail_obj key, int64_t hash) {
+    int64_t mask = so->index_cap - 1, slot = (int64_t)((uint64_t)hash & (uint64_t)mask);
+    for (;;) {
+        int64_t e = so->index[slot];
+        if (e == -1) return -1;
+        if (so->ent[e].hash == hash && ail_setx_live(&so->ent[e]) && ail_member_eq(so->ent[e].key, key)) return e;
+        slot = (slot + 1) & mask;
+    }
+}
+static inline int ail_setx_contains_entry(const ail_setobj *so, ail_obj key, int64_t hash) {
+    return ail_setx_find(so, key, hash) >= 0;
+}
+static inline void ail_setx_add_entry(ail_ctx *cx, ail_setobj *so, ail_obj key, int64_t hash) {
+    if (ail_setx_find(so, key, hash) >= 0) return;
+    if (so->n == so->cap) ail_setx_rebuild(cx, so, so->used * 2 > so->cap ? so->cap * 2 : so->cap);
+    int64_t k = so->n++;
+    so->ent[k].key = key; so->ent[k].hash = hash;
+    so->used++;
+    int64_t mask = so->index_cap - 1, slot = (int64_t)((uint64_t)hash & (uint64_t)mask);
+    while (so->index[slot] != -1) slot = (slot + 1) & mask;
+    so->index[slot] = k;
+}
+/* 1 when the key was there */
+static inline int ail_setx_discard_entry(ail_setobj *so, ail_obj key, int64_t hash) {
+    int64_t e = ail_setx_find(so, key, hash);
+    if (e < 0) return 0;
+    memset(&so->ent[e].key, 0, sizeof so->ent[e].key);
+    so->used--;
+    return 1;
+}
+static inline int ail_setx_next(const ail_setobj *so, int64_t *pos, ail_setentry **entry) {
+    int64_t i = *pos;
+    if (i < 0) return 0;
+    while (i < so->n && !ail_setx_live(&so->ent[i])) i++;
+    if (i >= so->n) { *pos = i; return 0; }
+    *entry = &so->ent[i];
+    *pos = i + 1;
+    return 1;
+}
+static inline void ail_setx_clear(ail_ctx *cx, ail_setobj *so) {
+    int64_t oldcap = so->cap;
+    free(so->ent); free(so->index);
+    ail_setx_alloc(so, 8);
+    ail_setx_account(cx, so, ail_setx_bytes(8) - ail_setx_bytes(oldcap));
+}
+static inline void ail_setx_swap_bodies(ail_setobj *a, ail_setobj *b) {
+    ail_setobj t = *a;
+    a->ent = b->ent; a->n = b->n; a->cap = b->cap; a->used = b->used; a->index = b->index; a->index_cap = b->index_cap;
+    b->ent = t.ent; b->n = t.n; b->cap = t.cap; b->used = t.used; b->index = t.index; b->index_cap = t.index_cap;
+    uint32_t sz = a->hdr.size; a->hdr.size = b->hdr.size; b->hdr.size = sz;
+}
+static inline ail_st ail_setx_add_key(ail_ctx *cx, ail_setobj *so, ail_obj key) {
+    int64_t h; ail_st st = ail_obj_hash(cx, &h, key); if (st != AIL_OK) return st;
+    ail_setx_add_entry(cx, so, key, h);
+    return AIL_OK;
+}
+/* a set used as a key to look up (`{1} in {frozenset({1})}`, s.discard({1})) is treated as the frozenset of its elements */
+static inline ail_st ail_setx_key_for_lookup(ail_ctx *cx, ail_obj *key) {
+    if (key->tag == AIL_T_SET) {
+        ail_setobj *src = AIL_SETOBJ(*key);
+        ail_obj fs = ail_frozenset_new(cx); ail_setobj *dst = AIL_SETOBJ(fs);
+        int64_t pos = 0; ail_setentry *e;
+        while (ail_setx_next(src, &pos, &e)) ail_setx_add_entry(cx, dst, e->key, e->hash);
+        *key = fs;
+    }
+    return AIL_OK;
+}
+static inline ail_st ail_setx_contains_key(ail_ctx *cx, int *out, ail_setobj *so, ail_obj key) {
+    ail_st st = ail_setx_key_for_lookup(cx, &key); if (st != AIL_OK) return st;
+    int64_t h; st = ail_obj_hash(cx, &h, key); if (st != AIL_OK) return st;
+    *out = ail_setx_contains_entry(so, key, h);
+    return AIL_OK;
+}
+static inline ail_st ail_setx_discard_key(ail_ctx *cx, int *found, ail_setobj *so, ail_obj key) {
+    ail_st st = ail_setx_key_for_lookup(cx, &key); if (st != AIL_OK) return st;
+    int64_t h; st = ail_obj_hash(cx, &h, key); if (st != AIL_OK) return st;
+    *found = ail_setx_discard_entry(so, key, h);
+    return AIL_OK;
+}
+static inline ail_obj ail_setx_newlike(ail_ctx *cx, ail_obj like) { return ail_setx_new(cx, like.tag == AIL_T_FROZENSET); }
+/* add every element of `other` (a set/frozenset), in its order */
+static inline void ail_setx_merge(ail_ctx *cx, ail_setobj *so, const ail_setobj *other) {
+    if (other == so) return;
+    int64_t pos = 0; ail_setentry *e;
+    while (ail_setx_next(other, &pos, &e)) ail_setx_add_entry(cx, so, e->key, e->hash);
+}
+static inline ail_obj ail_setx_copy_as(ail_ctx *cx, int frozen, const ail_setobj *src) {
+    ail_obj r = ail_setx_new(cx, frozen);
+    ail_setx_merge(cx, AIL_SETOBJ(r), src);
+    return r;
+}
+/* a's elements that are (keep 1) / are not (keep 0) in b, in a's order */
+static inline void ail_setx_filter(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_obj bo, int keep) {
+    ail_obj r = ail_setx_newlike(cx, ao);
+    ail_setobj *a = AIL_SETOBJ(ao), *b = AIL_SETOBJ(bo);
+    int64_t pos = 0; ail_setentry *e;
+    while (ail_setx_next(a, &pos, &e))
+        if (ail_setx_contains_entry(b, e->key, e->hash) == keep) ail_setx_add_entry(cx, AIL_SETOBJ(r), e->key, e->hash);
+    *out = r;
+}
+static inline void ail_setx_intersection(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_obj bo) { ail_setx_filter(cx, out, ao, bo, 1); }
+static inline void ail_setx_difference(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_obj bo) { ail_setx_filter(cx, out, ao, bo, 0); }
+static inline void ail_setx_symmetric_difference(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_obj bo) {
+    ail_obj r; ail_setx_filter(cx, &r, ao, bo, 0);
+    ail_setobj *a = AIL_SETOBJ(ao), *b = AIL_SETOBJ(bo);
+    int64_t pos = 0; ail_setentry *e;
+    while (ail_setx_next(b, &pos, &e))
+        if (!ail_setx_contains_entry(a, e->key, e->hash)) ail_setx_add_entry(cx, AIL_SETOBJ(r), e->key, e->hash);
+    *out = r;
+}
+static inline void ail_setx_difference_update_set(ail_ctx *cx, ail_setobj *so, ail_obj otheri) {
+    ail_setobj *other = AIL_SETOBJ(otheri);
+    if (other == so) { ail_setx_clear(cx, so); return; }
+    int64_t pos = 0; ail_setentry *e;
+    while (ail_setx_next(other, &pos, &e)) ail_setx_discard_entry(so, e->key, e->hash);
+}
+static inline void ail_setx_symmetric_difference_update_set(ail_ctx *cx, ail_setobj *so, ail_obj soo, ail_obj otheri) {
+    ail_obj tmp; ail_setx_symmetric_difference(cx, &tmp, soo, otheri);
+    ail_setx_swap_bodies(so, AIL_SETOBJ(tmp));
+}
+static inline int ail_setx_issubset_set(const ail_setobj *a, const ail_setobj *b) {
+    if (a->used > b->used) return 0;
+    int64_t pos = 0; ail_setentry *entry;
+    while (ail_setx_next(a, &pos, &entry)) if (!ail_setx_contains_entry(b, entry->key, entry->hash)) return 0;
+    return 1;
+}
+static inline int ail_setx_eq(ail_obj a, ail_obj b) {
+    if (!AIL_IS_ANYSET(a.tag) || !AIL_IS_ANYSET(b.tag)) return 0;
+    const ail_setobj *x = AIL_SETOBJ(a), *y = AIL_SETOBJ(b);
+    if (x->used != y->used) return 0;
+    return ail_setx_issubset_set(x, y);
+}
+/* an order-free hash of the elements, so equal frozensets hash alike */
+static inline int64_t ail_frozenset_hash(const ail_setobj *so) {
+    uint64_t hash = 0;
+    for (int64_t i = 0; i < so->n; i++) {
+        if (!ail_setx_live(&so->ent[i])) continue;
+        uint64_t h = (uint64_t)so->ent[i].hash;
+        hash ^= ((h ^ 89869747ULL) ^ (h << 16)) * 3644798167ULL;
+    }
+    hash ^= ((uint64_t)so->used + 1) * 1927868237ULL;
+    hash ^= (hash >> 11) ^ (hash >> 25);
+    hash = hash * 69069U + 907133923ULL;
+    return (int64_t)hash;
+}
+static inline int ail_setx_cmp(ail_obj a, ail_obj b, int op /* 0 lt, 1 le, 2 gt, 3 ge */) {
+    const ail_setobj *x = AIL_SETOBJ(a), *y = AIL_SETOBJ(b);
+    switch (op) {
+        case 0: return x->used < y->used && ail_setx_issubset_set(x, y);
+        case 1: return x->used <= y->used && ail_setx_issubset_set(x, y);
+        case 2: return x->used > y->used && ail_setx_issubset_set(y, x);
+        default: return x->used >= y->used && ail_setx_issubset_set(y, x);
+    }
+}
+static inline ail_st ail_setx_attr_error(ail_ctx *cx, ail_obj s, const char *name) {
+    char buf[128]; snprintf(buf, sizeof buf, "'%s' object has no attribute '%s'", ail_type_name(s.tag), name);
+    return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, buf);
+}
+
+/* ---- the entry points generated code and the library call ---- */
+static inline int64_t ail_set_len(ail_obj s) { return AIL_SETOBJ(s)->used; }
+static inline ail_st ail_set_add(ail_ctx *cx, ail_obj s, ail_obj x) {
+    if (s.tag != AIL_T_SET) return ail_setx_attr_error(cx, s, "add");
+    return ail_setx_add_key(cx, AIL_SETOBJ(s), x);
+}
+static inline ail_st ail_set_discard(ail_ctx *cx, int *found, ail_obj s, ail_obj x) {
+    if (s.tag != AIL_T_SET) return ail_setx_attr_error(cx, s, "discard");
+    return ail_setx_discard_key(cx, found, AIL_SETOBJ(s), x);
+}
+static inline ail_st ail_set_contains(ail_ctx *cx, int *out, ail_obj s, ail_obj x) {
+    return ail_setx_contains_key(cx, out, AIL_SETOBJ(s), x);
+}
+static inline void ail_set_clear(ail_ctx *cx, ail_obj s) { ail_setx_clear(cx, AIL_SETOBJ(s)); }
+static inline ail_st ail_setx_binop_type_error(ail_ctx *cx, const char *op, ail_obj a, ail_obj b) {
+    char buf[112]; snprintf(buf, sizeof buf, "unsupported operand type(s) for %s: '%s' and '%s'", op, ail_type_name(a.tag), ail_type_name(b.tag));
+    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+}
+/* a | b: both operands must be sets/frozensets; the result has the left operand's type */
 static inline ail_st ail_set_union(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
-    ail_obj r = ail_set_new(cx); ail_mapobj *ma = (ail_mapobj *)a.o, *mb = (ail_mapobj *)b.o;
-    for (int64_t i = 0; i < ma->n; i++) { ail_st st = ail_set_add(cx, r, ma->entries[i].key); if (st != AIL_OK) return st; }
-    for (int64_t i = 0; i < mb->n; i++) { ail_st st = ail_set_add(cx, r, mb->entries[i].key); if (st != AIL_OK) return st; }
+    if (!AIL_IS_ANYSET(a.tag) || !AIL_IS_ANYSET(b.tag)) return ail_setx_binop_type_error(cx, "|", a, b);
+    ail_obj r = ail_setx_copy_as(cx, a.tag == AIL_T_FROZENSET, AIL_SETOBJ(a));
+    ail_setx_merge(cx, AIL_SETOBJ(r), AIL_SETOBJ(b));
     *out = r; return AIL_OK;
 }
 static inline ail_st ail_set_intersection(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
-    ail_obj r = ail_set_new(cx); ail_mapobj *ma = (ail_mapobj *)a.o;
-    for (int64_t i = 0; i < ma->n; i++) {
-        int in_b; ail_st st = ail_set_contains(cx, &in_b, b, ma->entries[i].key); if (st != AIL_OK) return st;
-        if (in_b) { st = ail_set_add(cx, r, ma->entries[i].key); if (st != AIL_OK) return st; }
-    }
-    *out = r; return AIL_OK;
+    if (!AIL_IS_ANYSET(a.tag) || !AIL_IS_ANYSET(b.tag)) return ail_setx_binop_type_error(cx, "&", a, b);
+    ail_setx_intersection(cx, out, a, b); return AIL_OK;
+}
+static inline ail_st ail_meth_set_difference(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    if (!AIL_IS_ANYSET(a.tag) || !AIL_IS_ANYSET(b.tag)) return ail_setx_binop_type_error(cx, "-", a, b);
+    ail_setx_difference(cx, out, a, b); return AIL_OK;
+}
+static inline ail_st ail_meth_set_symmetric_difference(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    if (!AIL_IS_ANYSET(a.tag) || !AIL_IS_ANYSET(b.tag)) return ail_setx_binop_type_error(cx, "^", a, b);
+    ail_setx_symmetric_difference(cx, out, a, b); return AIL_OK;
 }
 static inline void ail_map_clear(ail_mapobj *m) {
     m->n = 0;
     for (int64_t i = 0; i < m->index_cap; i++) m->index[i] = -1;
 }
-/* In-place update ops (the named-method forms of -=, &=, ^=). `b` is always a real
-   SET -- the emitter materialises any other iterable first, same rule as the binary
-   ops. Mutating `a`'s own map is required: `s2 = s; s.difference_update(b)` must be
-   visible through s2 (object identity), not just through s. */
+/* In-place update ops of two sets (`b` is a real set/frozenset; the iterable forms are in the method section).
+   `a` itself changes, so a second name sees it. */
 static inline ail_st ail_set_intersection_update(ail_ctx *cx, ail_obj a, ail_obj b) {
-    ail_mapobj *ma = (ail_mapobj *)a.o;
-    for (int64_t i = 0; i < ma->n; i++) {
-        int in_b; ail_st st = ail_set_contains(cx, &in_b, b, ma->entries[i].key);
-        if (st != AIL_OK) return st;
-        if (!in_b) {
-            int f; st = ail_map_del(cx, &f, ma, ma->entries[i].key);
-            if (st != AIL_OK) return st;
-            i--;
-        }
-    }
+    ail_obj tmp; ail_setx_intersection(cx, &tmp, a, b);
+    ail_setx_swap_bodies(AIL_SETOBJ(a), AIL_SETOBJ(tmp));
     return AIL_OK;
 }
 static inline ail_st ail_set_difference_update(ail_ctx *cx, ail_obj a, ail_obj b) {
-    ail_mapobj *ma = (ail_mapobj *)a.o;
-    for (int64_t i = 0; i < ma->n; i++) {
-        int in_b; ail_st st = ail_set_contains(cx, &in_b, b, ma->entries[i].key);
-        if (st != AIL_OK) return st;
-        if (in_b) {
-            int f; st = ail_map_del(cx, &f, ma, ma->entries[i].key);
-            if (st != AIL_OK) return st;
-            i--;
-        }
-    }
-    return AIL_OK;
+    ail_setx_difference_update_set(cx, AIL_SETOBJ(a), b); return AIL_OK;
 }
 static inline ail_st ail_set_symmetric_difference_update(ail_ctx *cx, ail_obj a, ail_obj b) {
-    if (a.o == b.o) { ail_map_clear((ail_mapobj *)a.o); return AIL_OK; }
-    ail_mapobj *mb = (ail_mapobj *)b.o;
-    for (int64_t i = 0; i < mb->n; i++) {
-        ail_obj k = mb->entries[i].key;
-        int in_a; ail_st st = ail_set_contains(cx, &in_a, a, k);
-        if (st != AIL_OK) return st;
-        if (in_a) { int f; st = ail_map_del(cx, &f, (ail_mapobj *)a.o, k); }
-        else { st = ail_set_add(cx, a, k); }
-        if (st != AIL_OK) return st;
-    }
-    return AIL_OK;
+    ail_setx_symmetric_difference_update_set(cx, AIL_SETOBJ(a), a, b); return AIL_OK;
 }
+/* sorted(s) as a list, for the runtime's own use */
 static inline ail_st ail_set_sorted_list(ail_ctx *cx, ail_obj *out, ail_obj s) {
-    ail_mapobj *m = (ail_mapobj *)s.o; ail_vecobj *v = ail_vec_new(cx); ail_vec_reserve(cx, v, m->n);
-    for (int64_t i = 0; i < m->n; i++) v->p[v->n++] = m->entries[i].key;
-    /* plain insertion sort: sets in this test corpus are small, and this avoids a second
-       sort engine -- ail_list_sort itself works fine here too, kept separate only because
-       this helper has no "list" wrapper object to hand ail_list_sort until the end. */
+    ail_setobj *m = AIL_SETOBJ(s); ail_vecobj *v = ail_vec_new(cx); ail_vec_reserve(cx, v, m->used);
+    int64_t pos = 0; ail_setentry *entry;
+    while (ail_setx_next(m, &pos, &entry)) v->p[v->n++] = entry->key;
     for (int64_t i = 1; i < v->n; i++) {
         ail_obj key = v->p[i]; int64_t j = i - 1;
         for (;;) {
@@ -14638,6 +15183,7 @@ static inline ail_st ail_set_sorted_list(ail_ctx *cx, ail_obj *out, ail_obj s) {
     ail_obj r; r.tag = AIL_T_LIST; r.o = (ail_gcobj *)v; *out = r; return AIL_OK;
 }
 
+
 /* ===================================================================================
    Object-level dispatch: len/contains/getitem/setitem/delitem/getslice.
    =================================================================================== */
@@ -14645,7 +15191,8 @@ static inline ail_st ail_op_len(ail_ctx *cx, ail_obj *out, ail_obj x) {
     switch (x.tag) {
         case AIL_T_STR: *out = ail_box_int(x.sv.len); return AIL_OK;
         case AIL_T_LIST: case AIL_T_TUPLE: *out = ail_box_int(((ail_vecobj *)x.o)->n); return AIL_OK;
-        case AIL_T_DICT: case AIL_T_SET: *out = ail_box_int(((ail_mapobj *)x.o)->n); return AIL_OK;
+        case AIL_T_DICT: *out = ail_box_int(((ail_mapobj *)x.o)->n); return AIL_OK;
+        case AIL_T_SET: case AIL_T_FROZENSET: *out = ail_box_int(AIL_SETOBJ(x)->used); return AIL_OK;
         default: { char buf[64]; snprintf(buf, sizeof buf, "object of type '%s' has no len()", ail_type_name(x.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
     }
 }
@@ -14670,7 +15217,8 @@ static inline ail_st ail_op_contains(ail_ctx *cx, int *out, ail_obj c, ail_obj i
             for (int64_t i = 0; i < v->n; i++) if (ail_member_eq(v->p[i], item)) { *out = 1; return AIL_OK; }
             *out = 0; return AIL_OK;
         }
-        case AIL_T_DICT: case AIL_T_SET: return ail_set_contains(cx, out, c, item);
+        case AIL_T_DICT: { ail_obj *v; ail_st st = ail_map_get(cx, &v, (ail_mapobj *)c.o, item); if (st != AIL_OK) return st; *out = v != NULL; return AIL_OK; }
+        case AIL_T_SET: case AIL_T_FROZENSET: return ail_set_contains(cx, out, c, item);
         default: { char buf[64]; snprintf(buf, sizeof buf, "argument of type '%s' is not iterable", ail_type_name(c.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
     }
 }
@@ -14767,7 +15315,7 @@ static inline ail_st ail_iter(ail_ctx *cx, ail_obj *out, ail_obj obj) {
         case AIL_T_TUPLE: it->kind = AIL_IT_TUPLE; break;
         case AIL_T_STR: it->kind = AIL_IT_STR; break;
         case AIL_T_DICT: it->kind = AIL_IT_DICT_KEYS; it->idx2 = ((ail_mapobj *)obj.o)->n; break;
-        case AIL_T_SET: it->kind = AIL_IT_SET; it->idx2 = ((ail_mapobj *)obj.o)->n; break;
+        case AIL_T_SET: case AIL_T_FROZENSET: it->kind = AIL_IT_SET; it->idx2 = AIL_SETOBJ(obj)->used; break;
         case AIL_T_RANGE: it->kind = AIL_IT_RANGE; it->idx = ((ail_rangeobj *)obj.o)->start; break;
         default: { char buf[64]; snprintf(buf, sizeof buf, "'%s' object is not iterable", ail_type_name(obj.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
     }
@@ -14833,7 +15381,16 @@ static inline ail_st ail_next(ail_ctx *cx, ail_obj *out, ail_obj iterobj) {
             ail_obj pr[2]; pr[0] = m->entries[it->idx].key; pr[1] = m->entries[it->idx].val; it->idx++;
             *out = ail_tuple_new(cx, pr, 2); return AIL_OK;
         }
-        case AIL_IT_SET: { ail_mapobj *m = (ail_mapobj *)it->target.o; if (m->n != it->idx2) return ail_raise_c(cx, AIL_B_RUNTIMEERROR, "Set changed size during iteration"); if (it->idx >= m->n) return AIL_STOP; *out = m->entries[it->idx++].key; return AIL_OK; }
+        case AIL_IT_SET: {
+            /* setiter_iternext: a walk over the table slots; the size is compared at every step, and an
+               exhausted iterator stays exhausted */
+            ail_setobj *so = AIL_SETOBJ(it->target);
+            if (it->idx < 0) return AIL_STOP;
+            if (so->used != it->idx2) { it->idx2 = -1; return ail_raise_c(cx, AIL_B_RUNTIMEERROR, "Set changed size during iteration"); }
+            int64_t pos = it->idx; ail_setentry *entry;
+            if (!ail_setx_next(so, &pos, &entry)) { it->idx = -1; return AIL_STOP; }
+            it->idx = pos; *out = entry->key; return AIL_OK;
+        }
         case AIL_IT_RANGE: {
             ail_rangeobj *r = (ail_rangeobj *)it->target.o;
             if ((r->step > 0 && it->idx >= r->stop) || (r->step < 0 && it->idx <= r->stop)) return AIL_STOP;
@@ -14924,12 +15481,13 @@ static inline void ail_obj_write_repr(ail_ctx *cx, ail_obj x, FILE *f) {
             fputc('}', f);
             break;
         }
-        case AIL_T_SET: {
-            ail_mapobj *m = (ail_mapobj *)x.o;
-            if (m->n == 0) { fputs("set()", f); break; }
-            fputc('{', f);
-            for (int64_t i = 0; i < m->n; i++) { if (i) fputs(", ", f); ail_obj_write_repr(cx, m->entries[i].key, f); }
-            fputc('}', f);
+        case AIL_T_SET: case AIL_T_FROZENSET: {
+            ail_setobj *so = AIL_SETOBJ(x); int fz = x.tag == AIL_T_FROZENSET;
+            if (so->used == 0) { fputs(fz ? "frozenset()" : "set()", f); break; }
+            fputs(fz ? "frozenset({" : "{", f);
+            int64_t pos = 0; ail_setentry *entry; int first = 1;
+            while (ail_setx_next(so, &pos, &entry)) { if (!first) fputs(", ", f); first = 0; ail_obj_write_repr(cx, entry->key, f); }
+            fputs(fz ? "})" : "}", f);
             break;
         }
         case AIL_T_RANGE: {
@@ -16344,24 +16902,6 @@ static inline ail_st ail_bi_dict_fromkeys(ail_ctx *cx, ail_obj *out, ail_obj ite
     AIL_FRAME_LEAVE(cx, fr);
     return AIL_OK;
 }
-static inline ail_st ail_bi_set_from_iter(ail_ctx *cx, ail_obj *out, int has_arg, ail_obj arg) {
-    AIL_FRAME_ENTER(cx, fr, 2); /* 0=s 1=it */
-    fr.slots[0] = ail_set_new(cx);
-    if (!has_arg) { *out = fr.slots[0]; AIL_FRAME_LEAVE(cx, fr); return AIL_OK; }
-    ail_st st = ail_iter(cx, &fr.slots[1], arg);
-    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
-    for (;;) {
-        ail_obj x; st = ail_next(cx, &x, fr.slots[1]);
-        if (st == AIL_STOP) break;
-        if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
-        st = ail_set_add(cx, fr.slots[0], x);
-        if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
-    }
-    *out = fr.slots[0];
-    AIL_FRAME_LEAVE(cx, fr);
-    return AIL_OK;
-}
-
 /* B028/B029: chr()/ord(). The folded runtime stores 16-bit code points.
    Refuse values it cannot represent instead of truncating them. */
 static inline ail_st ail_bi_chr(ail_ctx *cx, ail_obj *out, ail_obj x) {
@@ -17373,76 +17913,231 @@ static inline ail_st ail_meth_dict_check_unchanged(ail_ctx *cx, ail_obj rte_cls,
 }
 
 /* ===================================================================================
-   M045-M052 -- set methods + operators. add/discard/union/intersection are exact
-   re-exports of the core. remove/pop/difference/symmetric_difference/issubset/
-   issuperset/update have no core primitive.
+   set / frozenset methods and operators on any iterable argument. the order of a result is the typed path's (a's elements first). The result of a method on a frozenset is a frozenset.
    =================================================================================== */
 #define ail_meth_set_add           ail_set_add
-#define ail_meth_set_discard(cx, s, x) ({ int ail__found; ail_set_discard((cx), &ail__found, (s), (x)); })
-#define ail_meth_set_union         ail_set_union
-#define ail_meth_set_intersection  ail_set_intersection
-
+static inline ail_st ail_meth_set_discard(ail_ctx *cx, ail_obj s, ail_obj x) {
+    int found; return ail_set_discard(cx, &found, s, x);
+}
+static inline ail_st ail_setm_need(ail_ctx *cx, ail_obj s, const char *name) {
+    return AIL_IS_ANYSET(s.tag) ? AIL_OK : ail_setx_attr_error(cx, s, name);
+}
+static inline ail_st ail_setm_need_mut(ail_ctx *cx, ail_obj s, const char *name) {
+    return s.tag == AIL_T_SET ? AIL_OK : ail_setx_attr_error(cx, s, name);
+}
+/* add every element of `other`: a set in its order, a dict by its keys, anything else through the iterator protocol */
+static inline ail_st ail_setx_update_any(ail_ctx *cx, ail_setobj *so, ail_obj other) {
+    if (AIL_IS_ANYSET(other.tag)) { ail_setx_merge(cx, so, AIL_SETOBJ(other)); return AIL_OK; }
+    AIL_FRAME_ENTER(cx, fr, 1);
+    ail_st st = ail_iter(cx, &fr.slots[0], other);
+    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    for (;;) {
+        ail_obj x; st = ail_it_next(cx, &x, fr.slots[0]);
+        if (st == AIL_STOP) { st = AIL_OK; break; }
+        if (st != AIL_OK) break;
+        st = ail_setx_add_key(cx, so, x); if (st != AIL_OK) break;
+    }
+    AIL_FRAME_LEAVE(cx, fr);
+    return st;
+}
+/* set(x) / frozenset(x) */
+static inline ail_st ail_bi_setx_from_iter(ail_ctx *cx, ail_obj *out, int frozen, int has_arg, ail_obj arg) {
+    ail_obj r = ail_setx_new(cx, frozen);
+    if (!has_arg) { *out = r; return AIL_OK; }
+    AIL_FRAME_ENTER(cx, fr, 1);
+    fr.slots[0] = r;
+    ail_st st = ail_setx_update_any(cx, AIL_SETOBJ(r), arg);
+    AIL_FRAME_LEAVE(cx, fr);
+    if (st != AIL_OK) return st;
+    *out = r; return AIL_OK;
+}
+static inline ail_st ail_bi_set_from_iter(ail_ctx *cx, ail_obj *out, int has_arg, ail_obj arg) {
+    return ail_bi_setx_from_iter(cx, out, 0, has_arg, arg);
+}
+static inline ail_st ail_bi_frozenset_from_iter(ail_ctx *cx, ail_obj *out, int has_arg, ail_obj arg) {
+    if (has_arg && arg.tag == AIL_T_FROZENSET) { *out = arg; return AIL_OK; }
+    return ail_bi_setx_from_iter(cx, out, 1, has_arg, arg);
+}
+/* a starred part of a display, and the `update` method */
+static inline ail_st ail_set_update_any(ail_ctx *cx, ail_obj s, ail_obj other) {
+    return ail_setx_update_any(cx, AIL_SETOBJ(s), other);
+}
+static inline ail_st ail_meth_set_update(ail_ctx *cx, ail_obj s, ail_obj other) {
+    ail_st st = ail_setm_need_mut(cx, s, "update"); if (st != AIL_OK) return st;
+    return ail_setx_update_any(cx, AIL_SETOBJ(s), other);
+}
 static inline ail_st ail_meth_set_remove(ail_ctx *cx, ail_obj s, ail_obj x) {
-    int found; ail_st st = ail_set_discard(cx, &found, s, x); if (st != AIL_OK) return st;
-    /* ail_obj_repr (NOT ail_str_repr) -- a set element can be any hashable type, not just
-       STR; ail_str_repr assumes its argument is already a STR view and reads .sv.backing/
-       off/len straight out of the union, which is a real type-confusion bug for a non-STR
-       argument (caught here by the sanitizer sweep: a misaligned-pointer UB report on an
-       int element, since int 99's bit pattern gets read back as a "backing" pointer). The
-       core's OWN ail_dict_getitem/ail_dict_pop/ail_dict_del have this exact same latent
-       bug (they call ail_str_repr(cx, key) unconditionally for a KeyError message, and a
-       dict key need not be STR either) -- reported under "core changes needed" since
-       ail_obj2.h cannot be edited here. */
+    ail_st st = ail_setm_need_mut(cx, s, "remove"); if (st != AIL_OK) return st;
+    int found; st = ail_setx_discard_key(cx, &found, AIL_SETOBJ(s), x); if (st != AIL_OK) return st;
     if (!found) { ail_obj msg = ail_obj_repr(cx, x); return ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], msg); }
     return AIL_OK;
 }
 static inline ail_st ail_meth_set_pop(ail_ctx *cx, ail_obj *out, ail_obj s) {
-    ail_mapobj *m = (ail_mapobj *)s.o;
-    if (m->n == 0) {
+    ail_st st = ail_setm_need_mut(cx, s, "pop"); if (st != AIL_OK) return st;
+    ail_setobj *so = AIL_SETOBJ(s);
+    if (so->used == 0) {
         ail_obj msg = ail_str_repr(cx, ail_str_from_cstr(cx, "pop from an empty set"));
         return ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], msg);
     }
-    ail_obj key = m->entries[0].key;
-    int found; ail_st st = ail_map_del(cx, &found, m, key); if (st != AIL_OK) return st;
+    int64_t k = so->n - 1;                    /* the newest element, as the typed path pops it */
+    while (!ail_setx_live(&so->ent[k])) k--;
+    ail_obj key = so->ent[k].key;
+    memset(&so->ent[k].key, 0, sizeof so->ent[k].key);
+    so->used--;
     *out = key; return AIL_OK;
 }
-static inline ail_st ail_meth_set_difference(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
-    ail_obj r = ail_set_new(cx); ail_mapobj *ma = (ail_mapobj *)a.o;
-    for (int64_t i = 0; i < ma->n; i++) {
-        int in_b; ail_st st = ail_set_contains(cx, &in_b, b, ma->entries[i].key); if (st != AIL_OK) return st;
-        if (!in_b) { st = ail_set_add(cx, r, ma->entries[i].key); if (st != AIL_OK) return st; }
-    }
+static inline ail_st ail_meth_set_clear(ail_ctx *cx, ail_obj s) {
+    ail_st st = ail_setm_need_mut(cx, s, "clear"); if (st != AIL_OK) return st;
+    ail_setx_clear(cx, AIL_SETOBJ(s)); return AIL_OK;
+}
+/* .copy(): a frozenset returns itself (frozenset_copy), a set a new set (merged) */
+static inline ail_st ail_meth_set_copy(ail_ctx *cx, ail_obj *out, ail_obj s) {
+    ail_st st = ail_setm_need(cx, s, "copy"); if (st != AIL_OK) return st;
+    if (s.tag == AIL_T_FROZENSET) { *out = s; return AIL_OK; }
+    *out = ail_setx_copy_as(cx, 0, AIL_SETOBJ(s)); return AIL_OK;
+}
+/* the first step of union()/difference()/intersection() with no argument: a new set of the same type */
+static inline ail_st ail_meth_set_copy_new(ail_ctx *cx, ail_obj *out, ail_obj s) {
+    ail_st st = ail_setm_need(cx, s, "copy"); if (st != AIL_OK) return st;
+    *out = ail_setx_copy_as(cx, s.tag == AIL_T_FROZENSET, AIL_SETOBJ(s)); return AIL_OK;
+}
+/* union(*others): copy, then update with each */
+static inline ail_st ail_meth_set_union1(ail_ctx *cx, ail_obj *out, ail_obj s, ail_obj other) {
+    ail_st st = ail_setm_need(cx, s, "union"); if (st != AIL_OK) return st;
+    ail_obj r = ail_setx_copy_as(cx, s.tag == AIL_T_FROZENSET, AIL_SETOBJ(s));
+    AIL_FRAME_ENTER(cx, fr, 1); fr.slots[0] = r;
+    st = ail_setx_update_any(cx, AIL_SETOBJ(r), other);
+    AIL_FRAME_LEAVE(cx, fr);
+    if (st != AIL_OK) return st;
     *out = r; return AIL_OK;
 }
-static inline ail_st ail_meth_set_symmetric_difference(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
-    ail_obj r = ail_set_new(cx); ail_mapobj *ma = (ail_mapobj *)a.o, *mb = (ail_mapobj *)b.o;
-    for (int64_t i = 0; i < ma->n; i++) {
-        int in_b; ail_st st = ail_set_contains(cx, &in_b, b, ma->entries[i].key); if (st != AIL_OK) return st;
-        if (!in_b) { st = ail_set_add(cx, r, ma->entries[i].key); if (st != AIL_OK) return st; }
+static inline ail_st ail_meth_set_extend(ail_ctx *cx, ail_obj acc, ail_obj orig, ail_obj other) {   /* the later arguments of union() */
+    (void)orig;
+    return ail_setx_update_any(cx, AIL_SETOBJ(acc), other);
+}
+/* set_intersection(so, other) for any `other`; the result has the type of `s` */
+static inline ail_st ail_meth_set_intersection1(ail_ctx *cx, ail_obj *out, ail_obj s, ail_obj other) {
+    ail_st st = ail_setm_need(cx, s, "intersection"); if (st != AIL_OK) return st;
+    if (AIL_IS_ANYSET(other.tag)) { ail_setx_intersection(cx, out, s, other); return AIL_OK; }
+    ail_obj tmp = ail_set_new(cx);
+    AIL_FRAME_ENTER(cx, fr, 1); fr.slots[0] = tmp;
+    st = ail_setx_update_any(cx, AIL_SETOBJ(tmp), other);
+    AIL_FRAME_LEAVE(cx, fr);
+    if (st != AIL_OK) return st;
+    ail_setx_intersection(cx, out, s, tmp); return AIL_OK;
+}
+/* difference_update_internal(so, other) for any `other` */
+static inline ail_st ail_setx_difference_update_any(ail_ctx *cx, ail_setobj *so, ail_obj other) {
+    if (AIL_IS_ANYSET(other.tag)) { ail_setx_difference_update_set(cx, so, other); return AIL_OK; }
+    AIL_FRAME_ENTER(cx, fr, 1);
+    ail_st st = ail_iter(cx, &fr.slots[0], other);
+    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    for (;;) {
+        ail_obj x; st = ail_it_next(cx, &x, fr.slots[0]);
+        if (st == AIL_STOP) { st = AIL_OK; break; }
+        if (st != AIL_OK) break;
+        int found; st = ail_setx_discard_key(cx, &found, so, x); if (st != AIL_OK) break;
     }
-    for (int64_t i = 0; i < mb->n; i++) {
-        int in_a; ail_st st = ail_set_contains(cx, &in_a, a, mb->entries[i].key); if (st != AIL_OK) return st;
-        if (!in_a) { st = ail_set_add(cx, r, mb->entries[i].key); if (st != AIL_OK) return st; }
-    }
+    AIL_FRAME_LEAVE(cx, fr);
+    return st;
+}
+/* set_difference(so, other) for any `other` */
+static inline ail_st ail_meth_set_difference1(ail_ctx *cx, ail_obj *out, ail_obj s, ail_obj other) {
+    ail_st st = ail_setm_need(cx, s, "difference"); if (st != AIL_OK) return st;
+    if (AIL_IS_ANYSET(other.tag)) { ail_setx_difference(cx, out, s, other); return AIL_OK; }
+    ail_setobj *so = AIL_SETOBJ(s);
+    ail_obj r = ail_setx_copy_as(cx, s.tag == AIL_T_FROZENSET, so);
+    AIL_FRAME_ENTER(cx, fr, 1); fr.slots[0] = r;
+    st = ail_setx_difference_update_any(cx, AIL_SETOBJ(r), other);
+    AIL_FRAME_LEAVE(cx, fr);
+    if (st != AIL_OK) return st;
     *out = r; return AIL_OK;
+}
+static inline ail_st ail_meth_set_difference_more(ail_ctx *cx, ail_obj acc, ail_obj other) {   /* later arguments */
+    return ail_setx_difference_update_any(cx, AIL_SETOBJ(acc), other);
+}
+static inline ail_st ail_meth_set_symmetric_difference1(ail_ctx *cx, ail_obj *out, ail_obj s, ail_obj other) {
+    ail_st st = ail_setm_need(cx, s, "symmetric_difference"); if (st != AIL_OK) return st;
+    if (AIL_IS_ANYSET(other.tag)) return ail_meth_set_symmetric_difference(cx, out, s, other);
+    ail_obj tmp = ail_set_new(cx);
+    AIL_FRAME_ENTER(cx, fr, 1); fr.slots[0] = tmp;
+    st = ail_setx_update_any(cx, AIL_SETOBJ(tmp), other);
+    AIL_FRAME_LEAVE(cx, fr);
+    if (st != AIL_OK) return st;
+    ail_setx_symmetric_difference(cx, out, s, tmp); return AIL_OK;
 }
 static inline ail_st ail_meth_set_issubset(ail_ctx *cx, int *out, ail_obj a, ail_obj b) {
-    ail_mapobj *ma = (ail_mapobj *)a.o;
-    for (int64_t i = 0; i < ma->n; i++) {
-        int in_b; ail_st st = ail_set_contains(cx, &in_b, b, ma->entries[i].key); if (st != AIL_OK) return st;
-        if (!in_b) { *out = 0; return AIL_OK; }
-    }
-    *out = 1; return AIL_OK;
+    ail_st st = ail_setm_need(cx, a, "issubset"); if (st != AIL_OK) return st;
+    if (AIL_IS_ANYSET(b.tag)) { *out = ail_setx_issubset_set(AIL_SETOBJ(a), AIL_SETOBJ(b)); return AIL_OK; }
+    ail_obj tmp = ail_set_new(cx);
+    AIL_FRAME_ENTER(cx, fr, 1); fr.slots[0] = tmp;
+    st = ail_setx_update_any(cx, AIL_SETOBJ(tmp), b);
+    AIL_FRAME_LEAVE(cx, fr);
+    if (st != AIL_OK) return st;
+    *out = ail_setx_issubset_set(AIL_SETOBJ(a), AIL_SETOBJ(tmp)); return AIL_OK;
 }
-static inline ail_st ail_meth_set_issuperset(ail_ctx *cx, int *out, ail_obj a, ail_obj b) { return ail_meth_set_issubset(cx, out, b, a); }
-static inline ail_st ail_meth_set_update(ail_ctx *cx, ail_obj s, ail_obj other) {
-    ail_obj it; ail_st st = ail_iter(cx, &it, other); if (st != AIL_OK) return st;
+static inline ail_st ail_meth_set_issuperset(ail_ctx *cx, int *out, ail_obj a, ail_obj b) {
+    ail_st st = ail_setm_need(cx, a, "issuperset"); if (st != AIL_OK) return st;
+    if (AIL_IS_ANYSET(b.tag)) { *out = ail_setx_issubset_set(AIL_SETOBJ(b), AIL_SETOBJ(a)); return AIL_OK; }
+    AIL_FRAME_ENTER(cx, fr, 1);
+    st = ail_iter(cx, &fr.slots[0], b);
+    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    *out = 1;
     for (;;) {
-        ail_obj v; st = ail_it_next(cx, &v, it);
-        if (st == AIL_STOP) break;
-        if (st != AIL_OK) return st;
-        st = ail_set_add(cx, s, v); if (st != AIL_OK) return st;
+        ail_obj x; st = ail_it_next(cx, &x, fr.slots[0]);
+        if (st == AIL_STOP) { st = AIL_OK; break; }
+        if (st != AIL_OK) break;
+        int has; st = ail_setx_contains_key(cx, &has, AIL_SETOBJ(a), x); if (st != AIL_OK) break;
+        if (!has) { *out = 0; break; }
     }
+    AIL_FRAME_LEAVE(cx, fr);
+    return st;
+}
+static inline ail_st ail_meth_set_isdisjoint(ail_ctx *cx, int *out, ail_obj a, ail_obj b) {
+    ail_st st = ail_setm_need(cx, a, "isdisjoint"); if (st != AIL_OK) return st;
+    *out = 1;
+    if (AIL_IS_ANYSET(b.tag)) {
+        ail_setobj *so = AIL_SETOBJ(a), *other = AIL_SETOBJ(b);
+        if (other->used > so->used) { ail_setobj *t = so; so = other; other = t; }
+        int64_t pos = 0; ail_setentry *entry;
+        while (ail_setx_next(other, &pos, &entry))
+            if (ail_setx_contains_entry(so, entry->key, entry->hash)) { *out = 0; break; }
+        return AIL_OK;
+    }
+    AIL_FRAME_ENTER(cx, fr, 1);
+    st = ail_iter(cx, &fr.slots[0], b);
+    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    for (;;) {
+        ail_obj x; st = ail_it_next(cx, &x, fr.slots[0]);
+        if (st == AIL_STOP) { st = AIL_OK; break; }
+        if (st != AIL_OK) break;
+        int has; st = ail_setx_contains_key(cx, &has, AIL_SETOBJ(a), x); if (st != AIL_OK) break;
+        if (has) { *out = 0; break; }
+    }
+    AIL_FRAME_LEAVE(cx, fr);
+    return st;
+}
+/* in-place methods with any iterable argument */
+static inline ail_st ail_meth_set_intersection_update(ail_ctx *cx, ail_obj a, ail_obj other) {
+    ail_st st = ail_setm_need_mut(cx, a, "intersection_update"); if (st != AIL_OK) return st;
+    ail_obj tmp; st = ail_meth_set_intersection1(cx, &tmp, a, other); if (st != AIL_OK) return st;
+    ail_setx_swap_bodies(AIL_SETOBJ(a), AIL_SETOBJ(tmp));
+    return AIL_OK;
+}
+static inline ail_st ail_meth_set_difference_update(ail_ctx *cx, ail_obj a, ail_obj other) {
+    ail_st st = ail_setm_need_mut(cx, a, "difference_update"); if (st != AIL_OK) return st;
+    return ail_setx_difference_update_any(cx, AIL_SETOBJ(a), other);
+}
+static inline ail_st ail_meth_set_symmetric_difference_update(ail_ctx *cx, ail_obj a, ail_obj other) {
+    ail_st st = ail_setm_need_mut(cx, a, "symmetric_difference_update"); if (st != AIL_OK) return st;
+    ail_setobj *so = AIL_SETOBJ(a);
+    if (AIL_IS_ANYSET(other.tag)) { ail_setx_symmetric_difference_update_set(cx, so, a, other); return AIL_OK; }
+    ail_obj tmp = ail_set_new(cx);
+    AIL_FRAME_ENTER(cx, fr, 1); fr.slots[0] = tmp;
+    st = ail_setx_update_any(cx, AIL_SETOBJ(tmp), other);
+    AIL_FRAME_LEAVE(cx, fr);
+    if (st != AIL_OK) return st;
+    ail_setx_symmetric_difference_update_set(cx, so, a, tmp);
     return AIL_OK;
 }
 /* `xs += ys` and `s |= t` change the object in place (a second name for it sees the change);
@@ -17456,13 +18151,6 @@ static inline ail_st ail_op_iadd(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b
         *out = a; return AIL_OK;
     }
     return ail_op_add(cx, out, a, b);
-}
-static inline ail_st ail_set_ior(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
-    if (a.tag == AIL_T_SET && b.tag == AIL_T_SET) {
-        ail_st st = ail_meth_set_update(cx, a, b); if (st != AIL_OK) return st;
-        *out = a; return AIL_OK;
-    }
-    return ail_set_union(cx, out, a, b);
 }
 /* `xs *= n` repeats the list in place; `s -= t`, `s &= t`, `s ^= t` update the set itself, so a
    second name for the same object sees them. Any other operand falls back to the plain operator. */
@@ -17479,33 +18167,50 @@ static inline ail_st ail_op_imul(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b
     }
     return ail_op_mul(cx, out, a, b);
 }
+/* operators: `s |= t` ... change a set in place; a frozenset gets a new value (the name is rebound) */
+static inline ail_st ail_set_ior(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    if (!AIL_IS_ANYSET(a.tag) || !AIL_IS_ANYSET(b.tag)) return ail_setx_binop_type_error(cx, "|=", a, b);
+    if (a.tag == AIL_T_SET) { ail_setx_merge(cx, AIL_SETOBJ(a), AIL_SETOBJ(b)); *out = a; return AIL_OK; }
+    return ail_set_union(cx, out, a, b);
+}
 static inline ail_st ail_set_isub(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
-    if (a.tag == AIL_T_SET && b.tag == AIL_T_SET) {
-        ail_st st = ail_set_difference_update(cx, a, b); if (st != AIL_OK) return st;
-        *out = a; return AIL_OK;
-    }
+    if (!AIL_IS_ANYSET(a.tag) || !AIL_IS_ANYSET(b.tag)) return ail_setx_binop_type_error(cx, "-=", a, b);
+    if (a.tag == AIL_T_SET) { ail_setx_difference_update_set(cx, AIL_SETOBJ(a), b); *out = a; return AIL_OK; }
     return ail_meth_set_difference(cx, out, a, b);
 }
 static inline ail_st ail_set_iand(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
-    if (a.tag == AIL_T_SET && b.tag == AIL_T_SET) {
-        ail_st st = ail_set_intersection_update(cx, a, b); if (st != AIL_OK) return st;
-        *out = a; return AIL_OK;
-    }
+    if (!AIL_IS_ANYSET(a.tag) || !AIL_IS_ANYSET(b.tag)) return ail_setx_binop_type_error(cx, "&=", a, b);
+    if (a.tag == AIL_T_SET) { ail_st st = ail_set_intersection_update(cx, a, b); if (st != AIL_OK) return st; *out = a; return AIL_OK; }
     return ail_set_intersection(cx, out, a, b);
 }
 static inline ail_st ail_set_ixor(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
-    if (a.tag == AIL_T_SET && b.tag == AIL_T_SET) {
-        ail_st st = ail_set_symmetric_difference_update(cx, a, b); if (st != AIL_OK) return st;
-        *out = a; return AIL_OK;
-    }
+    if (!AIL_IS_ANYSET(a.tag) || !AIL_IS_ANYSET(b.tag)) return ail_setx_binop_type_error(cx, "^=", a, b);
+    if (a.tag == AIL_T_SET) { ail_setx_symmetric_difference_update_set(cx, AIL_SETOBJ(a), a, b); *out = a; return AIL_OK; }
     return ail_meth_set_symmetric_difference(cx, out, a, b);
 }
-/* Operators |, &, -, ^ -- same functions, listed again under their operator spelling in
-   NAMES_methods.json for discoverability by the emitter. */
+/* the generic augmented operators for a target whose kind is not known statically */
+static inline ail_st ail_op_ibitor(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    if (AIL_IS_ANYSET(a.tag)) return ail_set_ior(cx, out, a, b);
+    return ail_op_bitor(cx, out, a, b);
+}
+static inline ail_st ail_op_ibitand(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    if (AIL_IS_ANYSET(a.tag)) return ail_set_iand(cx, out, a, b);
+    return ail_op_bitand(cx, out, a, b);
+}
+static inline ail_st ail_op_ibitxor(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    if (AIL_IS_ANYSET(a.tag)) return ail_set_ixor(cx, out, a, b);
+    return ail_op_bitxor(cx, out, a, b);
+}
+static inline ail_st ail_op_isub(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    if (AIL_IS_ANYSET(a.tag)) return ail_set_isub(cx, out, a, b);
+    return ail_op_sub(cx, out, a, b);
+}
 #define ail_meth_set_or(cx, out, a, b)  ail_set_union(cx, out, a, b)
 #define ail_meth_set_and(cx, out, a, b) ail_set_intersection(cx, out, a, b)
 #define ail_meth_set_xor ail_meth_set_symmetric_difference
 #define ail_meth_set_sub ail_meth_set_difference
+#define ail_meth_set_union         ail_set_union
+#define ail_meth_set_intersection  ail_set_intersection
 
 /* ===================================================================================
    M053/M054 -- tuple.index/count. count is an exact re-export (ail_vec_count is already
@@ -18832,9 +19537,10 @@ static inline ail_st ail_copy_shallow(ail_ctx *cx, ail_obj *out, ail_obj x) {
             *out = r; return AIL_OK;
         }
         case AIL_T_SET: {
-            ail_mapobj *m = (ail_mapobj *)x.o;
+            ail_setobj *m = AIL_SETOBJ(x);
             ail_obj r = ail_set_new(cx);
-            for (int64_t i = 0; i < m->n; i++) { ail_st st = ail_set_add(cx, r, m->entries[i].key); if (st != AIL_OK) return st; }
+            int64_t pos = 0; ail_setentry *e;
+            while (ail_setx_next(m, &pos, &e)) { ail_st st = ail_setx_add_key(cx, AIL_SETOBJ(r), e->key); if (st != AIL_OK) return st; }
             *out = r; return AIL_OK;
         }
         case AIL_T_INST: {
@@ -18871,9 +19577,10 @@ static inline ail_st ail_copy_deep(ail_ctx *cx, ail_obj *out, ail_obj x) {
             *out = r; return AIL_OK;
         }
         case AIL_T_SET: {
-            ail_mapobj *m = (ail_mapobj *)x.o;
+            ail_setobj *m = AIL_SETOBJ(x);
             ail_obj r = ail_set_new(cx);
-            for (int64_t i = 0; i < m->n; i++) { ail_obj ck; ail_st st = ail_copy_deep(cx, &ck, m->entries[i].key); if (st != AIL_OK) return st; st = ail_set_add(cx, r, ck); if (st != AIL_OK) return st; }
+            int64_t pos = 0; ail_setentry *e;
+            while (ail_setx_next(m, &pos, &e)) { ail_obj ck; ail_st st = ail_copy_deep(cx, &ck, e->key); if (st != AIL_OK) return st; st = ail_setx_add_key(cx, AIL_SETOBJ(r), ck); if (st != AIL_OK) return st; }
             *out = r; return AIL_OK;
         }
         case AIL_T_INST: {
@@ -21344,9 +22051,12 @@ REQUIRES['NUMVIEW'] = ['NUMFIELD', 'DIE']
 ORDER.insert(ORDER.index('NUMFIELD') + 1, 'NUMFIELDMUT')
 SOURCE['NUMFIELDMUT'] = NUMFIELDMUT
 REQUIRES['NUMFIELDMUT'] = ['NUMFIELD', 'DIE']
-ORDER.insert(max(ORDER.index(name) for name in ('SLIST', 'STRRET', 'NUMFIELDMUT')) + 1, 'SFIELDMUT')
+ORDER.insert(ORDER.index('SLIST') + 1, 'PSLIST')
+SOURCE['PSLIST'] = PSLIST
+REQUIRES['PSLIST'] = ['SLIST']
+ORDER.insert(max(ORDER.index(name) for name in ('PSLIST', 'STRRET', 'NUMFIELDMUT')) + 1, 'SFIELDMUT')
 SOURCE['SFIELDMUT'] = SFIELDMUT
-REQUIRES['SFIELDMUT'] = ['SLIST', 'STRRET', 'NUMFIELDMUT']
+REQUIRES['SFIELDMUT'] = ['SLIST', 'PSLIST', 'STRRET', 'NUMFIELDMUT']
 
 ORDER.insert(ORDER.index('STAB') + 1, 'SDICT')
 SOURCE['SDICT'] = SDICT
@@ -22902,20 +23612,35 @@ static ail_bytes ail_bytearray_span(const ail_bytearray *B) {
 static ail_bytearray *ail_bytearray_copy(const ail_bytearray *B) {
     return ail_bytearray_from_bytes(ail_bytearray_span(B));
 }
-static ail_bytearray *ail_bytearray_retain(ail_bytearray *B) {
+/* A struct method that reads a bytearray field takes a reference to it for the call and gives it back (`self.arena` in
+   ranking-2's table, a tree parser's name store): the retain, the release that does not free and the store helper were
+   a third of the instructions of both (the full metadata check ran in each). A live object takes one compare and an
+   increment inline in the retain, the store helper is inline, and the release is one function whose first test is the
+   release that does not free; a dead object, a counter at its limit and the last release take the full path. (Inlining
+   the release as well saved 8% more of the tree parser's instructions and cost it 6 KB of text: 64 KB against 60 KB.) */
+static __attribute__((noinline, cold)) ail_bytearray *ail_bytearray_retain_slow(ail_bytearray *B) {
     ail_bytearray_meta(B);
     if (B->refs == SIZE_MAX) ail_die("bytearray reference overflow");
     ++B->refs;
     return B;
 }
-static void ail_bytearray_release(ail_bytearray *B) {
+static inline __attribute__((always_inline)) ail_bytearray *ail_bytearray_retain(ail_bytearray *B) {
+    if (__builtin_expect(B != NULL, 1)) { size_t r = B->refs; if (__builtin_expect(r - 1 < SIZE_MAX - 1, 1)) { B->refs = r + 1; return B; } }
+    if (!B) __builtin_unreachable();
+    return ail_bytearray_retain_slow(B);
+}
+static inline __attribute__((always_inline)) void ail_bytearray_live(const ail_bytearray *B) {
+    if (!B->refs) __builtin_unreachable();
+}
+static __attribute__((noinline)) void ail_bytearray_release(ail_bytearray *B) {
     if (!B) return;
+    if (__builtin_expect(B->refs > 1, 1)) { --B->refs; return; }
     ail_bytearray_meta(B);
     if (--B->refs) return;
     if (B->cap <= 4096 && ail__ba_cache_n < AIL_BA_CACHE_MAX) { ail__ba_cache[ail__ba_cache_n++] = B; return; }
     free(B->p); free(B);
 }
-static void ail_bytearray_store(ail_bytearray * volatile *slot, ail_bytearray *value, int adopt) {
+static inline void ail_bytearray_store(ail_bytearray * volatile *slot, ail_bytearray *value, int adopt) {
     if (!slot || (adopt != 0 && adopt != 1)) ail_die("invalid bytearray store");
     if (value) {
         if (adopt) ail_bytearray_meta(value);
@@ -22999,7 +23724,9 @@ static void ail_bytearray_extend(ail_bytearray *B, ail_bytes value) {
     if (!value.n) return;
     int64_t offset = -1;
     uintptr_t base = (uintptr_t)B->p, source = (uintptr_t)value.p;
-    if (B->p && source >= base && source - base <= (uintmax_t)B->cap) {
+    /* `< cap`, not `<= cap`: a separate allocation can start exactly where B's block ends (the
+       macOS allocator packs small blocks, so a received chunk often does) and is not an alias. */
+    if (B->p && source >= base && source - base < (uintmax_t)B->cap) {
         uintmax_t delta = source - base;
         if (delta > (uintmax_t)B->n || (uintmax_t)value.n > (uintmax_t)B->n - delta)
             ail_die("invalid bytearray alias");
@@ -23175,7 +23902,7 @@ static void ail_bytearray_extend_blist(ail_barena *A, ail_bytearray *B, const ai
     int overlaps_header = value.n && (source >= header
         ? source - header < sizeof *B : (uintmax_t)value.n > header - source);
     int overlaps_payload = value.n && B->p && (source >= base
-        ? source - base <= (uintmax_t)B->cap : (uintmax_t)value.n > base - source);
+        ? source - base < (uintmax_t)B->cap : (uintmax_t)value.n > base - source);
     if (overlaps_header || overlaps_payload) value = ail_blist_get(A, items, index);
     ail_bytearray_extend(B, value);
 }
@@ -25270,8 +25997,11 @@ static double ail_rand_gauss(double mu, double sigma) {
     } else {
         double x2pi = ail_rand_random() * (2.0 * 3.141592653589793);
         double g2rad = sqrt(-2.0 * log(1.0 - ail_rand_random()));
-        z = cos(x2pi) * g2rad;
-        ail_rand_gauss_next = sin(x2pi) * g2rad;
+        /* cos and sin of one argument: clang on Darwin merges the pair into __sincos_stret, whose cos can
+           differ from libm's cos by an ulp (CPython calls cos alone). Two volatile reads keep them apart. */
+        volatile double x_cos = x2pi, x_sin = x2pi;
+        z = cos(x_cos) * g2rad;
+        ail_rand_gauss_next = sin(x_sin) * g2rad;
         ail_rand_have_gauss = 1;
     }
     volatile double scaled = z * sigma;
@@ -25648,6 +26378,8 @@ def _piece(p, want):
         text = _filert.file_exception(text, 'FILECORE' in want)
         if 'PROCEXC' in want:
             text = _filert.proc_exception(text)
+    elif p in _filert.LEGACY_EDITS and 'FILEEXC' in want:
+        text = _filert.legacy_errno(p, text)
     if p == 'IREXC':
         return text.replace('/*IRPAR*/', 'if (ail_par_cur) ail_par_trap(NULL, code);' if 'PAR' in want else '')
     return _parallel_die(text) if p == 'DIE' and 'PAR' in want else text

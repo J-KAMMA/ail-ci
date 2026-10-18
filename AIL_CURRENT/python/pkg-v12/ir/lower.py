@@ -39,6 +39,7 @@ BYTEARRAY = I.T('obj', I.T('bytearray'))
 LIST_I64 = I.T('obj', I.T('list', I.I64))
 LIST_F64 = I.T('obj', I.T('list', I.F64))
 LIST_STR = I.T('obj', I.T('list', I.STRV))
+PLIST = I.PLIST
 # list-valued methods the S3a lowering recognises as changing a list's length or contents
 _LIST_MUTATORS = ('append', 'pop', 'clear', 'extend', 'insert', 'remove', 'sort', 'reverse')
 
@@ -516,7 +517,15 @@ class Lowering(TextLowering):
 
     def assign_ba(self, name, node):
         """`b = bytearray()` / `b = bytearray(n)`: the place takes a fresh object (the old one is
-        released). Any other source would be a second name for an object or a conversion."""
+        released). `b = a` for a bytearray local or parameter `a`: the place takes a second reference to
+        a's object (`ba.copyref`; one object with two names, which is what Python and the legacy path
+        mean). Any other source would be a conversion or a reference read from a field."""
+        if isinstance(node, ast.Name) and node.id != name and (
+                self.is_ba_name(node.id) or (node.id in self.params and self.params[node.id].type == BYTEARRAY)):
+            self.b.emit('ba.copyref', [self.places[name], self.container(node)])
+            return
+        if isinstance(node, ast.Name) and node.id == name and self.is_ba_name(name):
+            return              # `b = b`
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in self.ctx.funcs \
                 and node.func.id not in self.places and node.func.id not in self.params:
             self.user_call(node.func.id, node, False, ba_dst=self.places[name])
@@ -1854,6 +1863,8 @@ class Lowering(TextLowering):
                 elem = I.I64 if kind == self.P.LIST else I.F64
                 return self.b.value('field.list', [obj], I.T('obj', I.T('list', elem)),
                                     {'cls': cls, 'name': node.attr})
+            if kind == self.P.SLIST:
+                return self.b.value('field.plist', [obj], PLIST, {'cls': cls, 'name': node.attr})
             if kind == 'bytearray':
                 v = self.b.value('field.ba', [obj], BYTEARRAY, {'cls': cls, 'name': node.attr})
                 self.fieldba.add(v)
@@ -1991,6 +2002,8 @@ class Lowering(TextLowering):
             return self.b.value('bytes.len', [base], I.I64)
         if self.is_list(base):
             return self.b.value('list.len', [base], I.I64)
+        if base.type == PLIST:
+            return self.b.value('plist.len', [base], I.I64)
         if base.type.head == 'span':
             return self.b.value('span.len', [base], I.I64)
         if base.type == BYTEARRAY:
@@ -2152,7 +2165,27 @@ class Lowering(TextLowering):
         if len(node.ops) == 1 and isinstance(node.ops[0], (ast.In, ast.NotIn)) \
                 and isinstance(node.comparators[0], ast.Name) and self.is_slist_name(node.comparators[0].id):
             return self.slist_in(node)
+        if len(node.ops) == 1 and isinstance(node.ops[0], (ast.In, ast.NotIn)) \
+                and self.plist_field(node.comparators[0]) is not None:
+            return self.plist_in(node)
         return self._chain(self.expr(node.left), node.ops, node.comparators)
+
+    def plist_field(self, node):
+        """(object, class, name) when `node` is `p.f` for a struct parameter or local `p` and a list[str] field `f`."""
+        if not (isinstance(node, ast.Attribute) and self.object_param(node.value) is not None):
+            return None
+        obj, cls, kind = self.field_of(node)
+        return (obj, cls, node.attr) if kind == self.P.SLIST else None
+
+    def plist_in(self, node):
+        """`x in o.f` / `x not in o.f` for a list[str] field: a scan by value (`ail_pslist_has`)."""
+        if self.text_kind(node.left) != 'str':
+            raise NotS0('membership of something that is not a str in a list of str')
+        item = self.expr(node.left)
+        found = self.b.value('plist.has', [self.container(node.comparators[0]), item], I.I1)
+        if isinstance(node.ops[0], ast.NotIn):
+            return self.b.value('cmp.eq', [found, self.const(I.I1, False)], I.I1)
+        return found
 
     def slist_in(self, node):
         """`x in xs` / `x not in xs` for a list of str: a scan by value (`ail_slist_has`)."""

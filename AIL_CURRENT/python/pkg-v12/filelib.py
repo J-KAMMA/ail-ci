@@ -61,10 +61,26 @@ PRIMS = {
     '_ail_os_unsetenv': ('int', ('str',)),
 }
 PRIMS.update(proclib.PROCS)        # stage G8: the process primitives (ailproc_core.h), a part of their own
+# stage G10: three small primitives for pathlib (ailpath_core.h), also a part of their own
+PATHS = {
+    '_ail_pp_staterr': ('int', ('str',)),          # errno of stat(path): 0 works, -1 a path CPython refuses with ValueError
+    '_ail_pp_readlink': ('str', ('str',)),
+    '_ail_pp_repr': ('str', ('str',)),             # repr() of a str
+}
+PRIMS.update(PATHS)
 
 
 def is_proc_prim(prim):
     return prim.startswith('_ail_sp_')
+
+
+def is_path_prim(prim):
+    return prim.startswith('_ail_pp_')
+
+
+def prim_kind(prim):
+    """'file' (ailfile_core.h), 'proc' (ailproc_core.h) or 'path' (ailpath_core.h)."""
+    return 'proc' if is_proc_prim(prim) else 'path' if is_path_prim(prim) else 'file'
 
 
 def c_name(prim):
@@ -107,11 +123,15 @@ def rewrite_tree(tree, Unsupported, general=False):
     Returns whether the program uses the file layer; a program that does not is left untouched."""
     global ACTIVE
     ACTIVE = bool(os.environ.get('AIL_G7_FORCE'))
+    import pathlower
+    path_need = pathlower.rewrite_tree(tree, Unsupported, general)     # G10: pathlib.Path -> prelude functions + open()
     used_proc = proclib.rewrite_tree(tree, Unsupported, general)      # G8: subprocess -> primitives + prelude
     import filelower
     lowerer = filelower._Lowerer(tree, Unsupported, general)
     lowerer.scan()
-    if not lowerer.wants():
+    if path_need is not None:
+        lowerer.need.update(path_need)
+    if not lowerer.wants() and path_need is None:
         ACTIVE = ACTIVE or used_proc           # subprocess raises the OS-family classes too
         return used_proc
     lowerer.run()

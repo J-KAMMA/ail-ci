@@ -22,6 +22,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from ail_testenv import ASAN_DETECT_LEAKS
 
 ROOT = Path(__file__).resolve().parent
 
@@ -417,7 +418,7 @@ class NestedListTests(unittest.TestCase):
             for args in runs:
                 with self.subTest(program=name, args=args):
                     ran = subprocess.run([str(exe), *map(str, args)], capture_output=True, text=True, timeout=120,
-                                         env=dict(os.environ, ASAN_OPTIONS='detect_leaks=1'))
+                                         env=dict(os.environ, ASAN_OPTIONS=ASAN_DETECT_LEAKS))
                     self.assertEqual(ran.returncode, 0, ran.stderr[-3000:])
                     self.assertEqual(ran.stderr, '')
 
