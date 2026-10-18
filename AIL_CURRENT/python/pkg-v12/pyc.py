@@ -34,6 +34,7 @@ import shadowing
 from pyfront import Unsupported, to_pipeline_c
 from pyfunc import to_c as func_to_c
 from pyfunc import _module_const_scalar, module_table_refusal
+import modtables
 from pyfunc import NORET
 try:
     # BRIEF_mixed_mode.md's own capability probe (test_mixed.py): "pymix.py present in the
@@ -422,14 +423,37 @@ def _rewrite_script(source, force):
         other.append(n)
 
     # A module-level set / dict / list of strings that a function reads cannot become a local of the
-    # synthesised body (the reader would then say "read before it is assigned"): name it instead.
+    # synthesised body (the reader would then say "read before it is assigned"). A literal set or dict
+    # stays at module scope as a table (modtables.py lowers it); the rest is named.
+    annotated = {}
     for n in other:
-        if (isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name)
-                and isinstance(n.value, (ast.Set, ast.Dict, ast.List, ast.Tuple))
-                and (getattr(n.value, 'elts', None) or getattr(n.value, 'keys', None))
-                and assign_counts[n.targets[0].id] == 1
-                and any(_reads_global(fn, n.targets[0].id) for fn in _all_functions(kept))):
-            refusal = module_table_refusal(n.targets[0].id, n.value)
+        if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name):
+            annotated[n.target.id] = annotated.get(n.target.id, 0) + 1
+    for n in list(other):
+        target = (n.targets[0] if isinstance(n, ast.Assign) and len(n.targets) == 1
+                  else n.target if isinstance(n, ast.AnnAssign) and n.value is not None else None)
+        if (isinstance(target, ast.Name)
+                and ((isinstance(n.value, (ast.Set, ast.Dict, ast.List, ast.Tuple))
+                      and (getattr(n.value, "elts", None) or getattr(n.value, "keys", None)))
+                     or (modtables.display(n.value) is not None and not isinstance(n.value, (ast.Set, ast.Dict))))
+                and assign_counts.get(target.id, 0) + annotated.get(target.id, 0) == 1
+                and any(_reads_global(fn, target.id) for fn in _all_functions(kept))):
+            if modtables.table_assign(n, False) is not None:
+                other.remove(n)
+                kept.append(n)
+                continue
+            refusal = module_table_refusal(target.id, modtables.display(n.value) or n.value)
+            refusal.source_line = n.lineno
+            raise refusal
+        if (isinstance(target, ast.Name) and modtables.display(n.value) is not None
+                and modtables.table_assign(n, False) is not None
+                and assign_counts.get(target.id, 0) + annotated.get(target.id, 0) > 1
+                and any(_reads_global(fn, target.id) for fn in _all_functions(kept))):
+            refusal = Unsupported("%r is a module-level %s that the program changes at module level; a function "
+                                  "cannot read a table that is not fixed.\n"
+                                  "  write instead: build the table once as a literal and do not change it, or "
+                                  "build it in main() and pass it to the functions that read it"
+                                  % (target.id, 'dict' if isinstance(n.value, ast.Dict) else 'set'))
             refusal.source_line = n.lineno
             raise refusal
 

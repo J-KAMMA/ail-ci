@@ -84,6 +84,7 @@
   "test_ail_local_count_repeat": 2.1,
   "test_ail_loss_paths": 10.0,
   "test_ail_memory_shapes": 82.2,
+  "test_ail_modconst": 49.4,
   "test_ail_modules": 10.0,
   "test_ail_monotonic": 14.9,
   "test_ail_native_diagnostics": 0.4,
@@ -101,6 +102,7 @@
   "test_ail_owned_type_details": 1.9,
   "test_ail_owned_type_repair": 13.3,
   "test_ail_parallel_for": 171.0,
+  "test_ail_platforms": 49.4,
   "test_ail_pool_iter_capture": 20.1,
   "test_ail_pool_row_arguments": 71.7,
   "test_ail_python_syntax": 35.8,
@@ -138,6 +140,7 @@
   "test_ail_string_field_mutation": 15.2,
   "test_ail_string_repeat_fusion": 18.3,
   "test_ail_struct_list_inplace": 5.4,
+  "test_ail_subprocess": 49.4,
   "test_ail_swap_rebinding": 51.0,
   "test_ail_tcp_json_deadlines": 59.9,
   "test_ail_tcp_json_lines_poll_resources": 17.1,
@@ -194,7 +197,10 @@
    "test_ail_stdout_mixed"
   ],
   [
-   "test_ail_csv_rewrite_stream"
+   "test_ail_csv_rewrite_stream",
+   "test_ail_modconst",
+   "test_ail_platforms",
+   "test_ail_subprocess"
   ],
   [
    "test_ail_builtin_api",

@@ -991,6 +991,7 @@ class Compiler:
         tree = ast.parse(source)
         self.source_lines = source.splitlines()
         self.uses_fileio = False
+        self.uses_proc = False
         filelib.rewrite_tree(tree, Unsupported, general=True)      # G7: open / with / os -> primitives + prelude
         mix_tree = copy.deepcopy(tree)          # the mixed-mode typed clones see the source as written
         _hoist_defaults(tree)
@@ -1075,6 +1076,8 @@ class Compiler:
         if self.uses_fileio:
             import filert
             parts.append(filert.general_text())
+            if self.uses_proc:
+                parts.append(filert.general_proc_text())
         if getattr(self, 'needs_boxcase', False):
             import cruntime
             parts.append(cruntime.BOXCASE)
@@ -3325,12 +3328,17 @@ class Compiler:
         """The stage-G7 file / os primitives (filelib.PRIMS) -> ailo_* (filert.py)."""
         ret, kinds = filelib.PRIMS[name]
         if 'bytes' in kinds or ret == 'bytes':
+            if filelib.is_proc_prim(name):
+                raise Unsupported('subprocess bytes: the general path has no bytes values, so they are built in typed code '
+                                  'only.\n  write instead: text=True (str output and input)')
             raise Unsupported('a binary file: the general path has no bytes values, so binary files are built in '
                               'typed code only.\n  write instead: keep the code that opens it in a function whose '
                               'parameters are annotated, or read the file as text')
         if kwargs or len(args) != len(kinds):
             raise Unsupported('%s takes %d positional arguments' % (name, len(kinds)))
         self.uses_fileio = True
+        if filelib.is_proc_prim(name):
+            self.uses_proc = True
         argcs = [self.expr(a, ctx) for a in args]
         t = ctx.tmp()
         ctx.emit('st = ailo_%s(cx, &%s%s);' % (filelib.c_name(name), t, ''.join(', ' + a for a in argcs)))
@@ -3516,6 +3524,14 @@ class Compiler:
                      % (fl, len(flags), ', '.join(flags)))
             ctx.emit('st = ail2_do_print_parts(cx, %s, %s, %d, %s, %s);'
                      % (arr, fl, len(vs), sep, end))
+        ctx.check()
+        return 'ail_box_none()'
+
+    def _b_flush_stdout(self, args, kwargs, ctx):
+        """flush_stdout(): what `sys.stdout.flush()` becomes in a program that starts processes (ail_syntax)."""
+        if args or kwargs:
+            raise Unsupported('flush_stdout takes no arguments')
+        ctx.emit('st = ail_out_flush(cx);')
         ctx.check()
         return 'ail_box_none()'
 

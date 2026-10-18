@@ -19,6 +19,8 @@ import filelib
 
 with open(os.path.join(HERE, 'ailfile_core.h'), 'r', encoding='utf-8') as _f:
     CORE = _f.read()
+with open(os.path.join(HERE, 'ailproc_core.h'), 'r', encoding='utf-8') as _f:      # stage G8
+    PROCCORE = _f.read()
 
 # ---------------------------------------------------------------------------------------------
 # Typed runtime: exception codes 11..16 (FileNotFoundError, PermissionError, IsADirectoryError,
@@ -49,6 +51,27 @@ FLUSH_EDITS = (
     ('static void ail_exception_uncaught(ail_exception *value) {\n    fflush(stdout);\n',
      'static void ail_exception_uncaught(ail_exception *value) {\n    ailf_flush_all();\n    fflush(stdout);\n'),
 )
+
+
+# Stage G8: CalledProcessError (17) and TimeoutExpired (18) extend the same table; spliced in after the
+# file edits, and only into a program that names them.
+PROC_EXC_EDITS = (
+    ('AIL_EXC_UNSUP = 16 };', 'AIL_EXC_UNSUP = 16, AIL_EXC_CPE = 17, AIL_EXC_TIMEDOUT = 18 };'),
+    ('"FileExistsError", "NotADirectoryError", "UnsupportedOperation"};',
+     '"FileExistsError", "NotADirectoryError", "UnsupportedOperation", "CalledProcessError", "TimeoutExpired"};'),
+    ('return code >= 1 && code <= 16 ? names[code]', 'return code >= 1 && code <= 18 ? names[code]'),
+    ('if (code < 1 || code > 16 || n < 0', 'if (code < 1 || code > 18 || n < 0'),
+    ('if (code < 1 || code > 16) code = AIL_EXC_RUNTIME;', 'if (code < 1 || code > 18) code = AIL_EXC_RUNTIME;'),
+)
+
+
+def proc_exception(text):
+    """The DIE block (already carrying the file edits) with the two subprocess exception codes."""
+    for old, new in PROC_EXC_EDITS:
+        if text.count(old) != 1:
+            raise AssertionError('DIE block changed; update filert.PROC_EXC_EDITS: ' + old)
+        text = text.replace(old, new)
+    return text
 
 
 def file_exception(text, with_flush):
@@ -186,15 +209,55 @@ static int64_t ailt_os_unsetenv(ail_str k) { AILT_CHECK(ailf_unsetenv(k.p, k.n))
 # which primitives of the table take an arena first, by result kind
 ARENA_FIRST = {'str': 'ail_sarena', 'bytes': 'ail_barena'}
 
+TYPED_PROC = r'''
+/* ---- G8 typed adapters: the process primitives of proclib.PROCS over ailproc_core.h ---- */
+static int64_t ailt_sp_begin(void) { ailp_begin(); return 0; }
+static int64_t ailt_sp_arg(ail_str s) { AILT_CHECK(ailp_add_arg(s.p, s.n)); return 0; }
+static int64_t ailt_sp_cwd(ail_str s) { AILT_CHECK(ailp_set_cwd(s.p, s.n)); return 0; }
+static int64_t ailt_sp_envbegin(void) { ailp_env_begin(); return 0; }
+static int64_t ailt_sp_env(ail_str k, ail_str v) { AILT_CHECK(ailp_env_add(k.p, k.n, v.p, v.n)); return 0; }
+static int64_t ailt_sp_inputt(ail_str s, int64_t enc, int64_t errh) { AILT_CHECK(ailp_input_text(s.p, s.n, enc, errh)); return 0; }
+static int64_t ailt_sp_inputb(ail_bytes d) { AILT_CHECK(ailp_input_bytes(d.p, d.n)); return 0; }
+static int64_t ailt_sp_run(int64_t flags, int64_t us) { int64_t r = ailp_run(flags, us); if (r < 0) ailt_fraise(); return r; }
+static int64_t ailt_sp_rc(int64_t h) { return ailp_rc(h); }
+static int64_t ailt_sp_timedout(int64_t h) { return ailp_timedout(h); }
+static ail_str ailt_sp_outt(ail_sarena *A, int64_t h, int64_t which, int64_t enc, int64_t errh) {
+    ailf_buf b; AILT_CHECK(ailp_out_text(h, which, enc, errh, &b)); return ailt_adopt_str(A, &b);
+}
+static ail_bytes ailt_sp_outb(ail_barena *A, int64_t h, int64_t which) {
+    ailf_buf b; AILT_CHECK(ailp_out_bytes(h, which, &b)); return ailt_adopt_bytes(A, &b);
+}
+static int64_t ailt_sp_free(int64_t h) { return ailp_free(h); }
+static int64_t ailt_sp_errfrom(int64_t h, ail_str t) { return ailp_err_from(h, t.p, t.n); }
+static int64_t ailt_sp_errbegin(int64_t kind, int64_t rc, ail_str t) { return ailp_err_begin(kind, rc, t.p, t.n); }
+static int64_t ailt_sp_errarg(ail_str s) { AILT_CHECK(ailp_err_arg(s.p, s.n)); return 0; }
+static int64_t ailt_sp_errout_t(ail_str s) { AILT_CHECK(ailp_err_out(s.p, s.n)); return 0; }
+static int64_t ailt_sp_errout_b(ail_bytes d) { AILT_CHECK(ailp_err_out(d.p, d.n)); return 0; }
+static int64_t ailt_sp_errerr_t(ail_str s) { AILT_CHECK(ailp_err_err(s.p, s.n)); return 0; }
+static int64_t ailt_sp_errerr_b(ail_bytes d) { AILT_CHECK(ailp_err_err(d.p, d.n)); return 0; }
+static int64_t ailt_sp_errrc(void) { return ailp_get_rc(); }
+static ail_str ailt_sp_errcmd(ail_sarena *A) { ailf_buf b; AILT_CHECK(ailp_get_cmd(&b)); return ailt_adopt_str(A, &b); }
+static ail_str ailt_sp_erro_t(ail_sarena *A) { ailf_buf b; AILT_CHECK(ailp_get_buf(&b, &ailp_last.out)); return ailt_adopt_str(A, &b); }
+static ail_bytes ailt_sp_erro_b(ail_barena *A) { ailf_buf b; AILT_CHECK(ailp_get_buf(&b, &ailp_last.out)); return ailt_adopt_bytes(A, &b); }
+static ail_str ailt_sp_erre_t(ail_sarena *A) { ailf_buf b; AILT_CHECK(ailp_get_buf(&b, &ailp_last.err)); return ailt_adopt_str(A, &b); }
+static ail_bytes ailt_sp_erre_b(ail_barena *A) { ailf_buf b; AILT_CHECK(ailp_get_buf(&b, &ailp_last.err)); return ailt_adopt_bytes(A, &b); }
+static ail_str ailt_sp_errtimeout(ail_sarena *A) { ailf_buf b; AILT_CHECK(ailp_get_timeout(&b)); return ailt_adopt_str(A, &b); }
+static ail_str ailt_sp_errmsg(ail_sarena *A) { ailf_buf b; AILT_CHECK(ailp_err_msg(&b)); return ailt_adopt_str(A, &b); }
+static ail_str ailt_sp_repr(ail_sarena *A, ail_str s) { ailf_buf b; AILT_CHECK(ailp_repr(s.p, s.n, &b)); return ailt_adopt_str(A, &b); }
+static ail_str ailt_sp_reprb(ail_sarena *A, ail_bytes d) { ailf_buf b; AILT_CHECK(ailp_repr_bytes(d.p, d.n, &b)); return ailt_adopt_str(A, &b); }
+'''
+
 for _name in filelib.PRIMS:
-    assert ('ailt_' + filelib.c_name(_name) + '(') in TYPED, _name
+    assert ('ailt_' + filelib.c_name(_name) + '(') in (TYPED_PROC if filelib.is_proc_prim(_name) else TYPED), _name
 
 
 def register(ORDER, SOURCE, REQUIRES):
     """Add the file parts to cruntime's tables (called once at the end of cruntime.py)."""
     for name, text, requires in (
             ('FILECORE', CORE, ['MONOTONICHEAD', 'TYPES', 'DIE']),
-            ('FILEIO', TYPED, ['FILECORE', 'FILEEXC', 'STR', 'BYTES', 'DIE'])):
+            ('FILEIO', TYPED, ['FILECORE', 'FILEEXC', 'STR', 'BYTES', 'DIE']),
+            ('PROCCORE', PROCCORE, ['FILECORE']),
+            ('PROCIO', TYPED_PROC, ['PROCCORE', 'FILEIO', 'PROCEXC'])):
         ORDER.append(name)
         SOURCE[name] = text
         REQUIRES[name] = requires
@@ -269,6 +332,7 @@ static ail_st ailo_int_arg(ail_ctx *cx, ail_obj v, int64_t *out) {
 #   buf    the expression fills `b` and is negative on error; the result is its text
 #   plain  the expression is the result
 GENERAL_SPEC = {
+    # (the process primitives of stage G8 are in GENERAL_SPEC_PROC)
     'f_open': ('val', 'ailf_open({s0}, {s1}, {i2}, {s3}, (int){i4}, {s5}, (int){i6}, {s7}, (int){i8})'),
     'f_close': ('status', 'ailf_close({i0})'),
     'f_flush': ('status', 'ailf_flush({i0})'),
@@ -299,13 +363,42 @@ GENERAL_SPEC = {
 }
 
 
-def general_wrappers():
+GENERAL_SPEC_PROC = {
+    'sp_begin': ('status', 'ailp_begin()'),
+    'sp_arg': ('status', 'ailp_add_arg({s0})'),
+    'sp_cwd': ('status', 'ailp_set_cwd({s0})'),
+    'sp_envbegin': ('status', 'ailp_env_begin()'),
+    'sp_env': ('status', 'ailp_env_add({s0}, {s1})'),
+    'sp_inputt': ('status', 'ailp_input_text({s0}, {i1}, {i2})'),
+    'sp_run': ('val', 'ailp_run({i0}, {i1})'),
+    'sp_rc': ('plain', 'ailp_rc({i0})'),
+    'sp_timedout': ('plain', 'ailp_timedout({i0})'),
+    'sp_outt': ('buf', 'ailp_out_text({i0}, {i1}, {i2}, {i3}, &b)'),
+    'sp_free': ('plain', 'ailp_free({i0})'),
+    'sp_errfrom': ('plain', 'ailp_err_from({i0}, {s1})'),
+    'sp_errbegin': ('plain', 'ailp_err_begin({i0}, {i1}, {s2})'),
+    'sp_errarg': ('status', 'ailp_err_arg({s0})'),
+    'sp_errout_t': ('status', 'ailp_err_out({s0})'),
+    'sp_errerr_t': ('status', 'ailp_err_err({s0})'),
+    'sp_errrc': ('plain', 'ailp_get_rc()'),
+    'sp_errcmd': ('buf', 'ailp_get_cmd(&b)'),
+    'sp_erro_t': ('buf', 'ailp_get_buf(&b, &ailp_last.out)'),
+    'sp_erre_t': ('buf', 'ailp_get_buf(&b, &ailp_last.err)'),
+    'sp_errtimeout': ('buf', 'ailp_get_timeout(&b)'),
+    'sp_errmsg': ('buf', 'ailp_err_msg(&b)'),
+    'sp_repr': ('buf', 'ailp_repr({s0}, &b)'),
+}
+
+
+def general_wrappers(proc=False):
     out = []
     for prim, (ret, kinds) in filelib.PRIMS.items():
         cname = filelib.c_name(prim)
+        if filelib.is_proc_prim(prim) != proc:
+            continue
         if 'bytes' in kinds or ret == 'bytes':
             continue
-        form, expr = GENERAL_SPEC[cname]
+        form, expr = (GENERAL_SPEC_PROC if proc else GENERAL_SPEC)[cname]
         params = ''.join(', ail_obj a%d' % i for i in range(len(kinds)))
         lines = ['static ail_st ailo_%s(ail_ctx *cx, ail_obj *out%s) {' % (cname, params), '    ail_st st = AIL_OK;',
                  '    ailf_buf b = {0};']
@@ -352,8 +445,14 @@ def general_wrappers():
 
 
 GENERAL = GENERAL_HEAD + general_wrappers()
+GENERAL_PROC = general_wrappers(True)
 
 
 def general_text():
     """The C the general runtime needs once a program reaches a file primitive."""
     return '\n/* ---- G7: shared file core ---- */\n' + CORE + GENERAL
+
+
+def general_proc_text():
+    """The C the general runtime needs once a program reaches a process primitive (after general_text())."""
+    return '\n/* ---- G8: process core ---- */\n' + PROCCORE + GENERAL_PROC

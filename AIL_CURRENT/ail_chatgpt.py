@@ -186,10 +186,10 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
         syntax = 'python' if path.suffix.lower() == '.py' else source_syntax
         try:
             if source_bytes is None:
-                text = path.read_text(encoding='utf-8')
+                text = path.read_text(encoding='utf-8-sig')
             else:
                 data=path.read_bytes();source_bytes[path]=data
-                text=data.decode('utf-8').replace('\r\n','\n').replace('\r','\n')
+                text=data.decode('utf-8-sig').replace('\r\n','\n').replace('\r','\n')
             if source_syntax in ('auto', 'ail') and ail_sexpr.detect(text):
                 # The S-expression surface is converted to block syntax and then checked exactly
                 # like it; positions in diagnostics refer to that block text.
@@ -217,7 +217,8 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             else:
                 # Python spellings of built-ins and result contracts (ail_syntax.python_surface);
                 # every statement stays on its own line, so positions below are unchanged.
-                text = python_surface(text, None if notes is None else notes.setdefault(str(path), []))
+                text = python_surface(text, None if notes is None else notes.setdefault(str(path), []),
+                                     library=module_only)
             text = fold_constants(text)
             tree = ast.parse(text, filename=str(path))
             if syntax == 'python' and entry and not module_only and not declarations_only:
@@ -1111,6 +1112,8 @@ def main(argv=None):
         os.environ['AIL_STATIC'] = '1'
     if getattr(args, 'target', None):
         os.environ['PIPE_CC'] = _zig_compiler(args.target)
+        if args.target == 'windows':
+            os.environ['AIL_TARGET_OS'] = 'windows'
         os.environ['AIL_TARGET'] = args.target      # os.path takes the flavour of the target (filelib.target_windows)
     if args.command in ('compile', 'compile-module', 'compile-library', 'compile-c'):
         import ail_native_build as native_build

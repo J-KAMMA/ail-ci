@@ -48,7 +48,7 @@ sys.exit(main())
 
 - Annotate parameters, results and empty containers (`xs: list[int] = []`). A name keeps one
   type in its function: give a new type a new name.
-- Top level: imports, number/str constants (`N = 10`; tables: build in `main`, pass in),
+- Top level: imports, constants, read-only tables (`N = 10`, `STOP = {"a"}`, `T = {"k": 1}`),
   `@dataclass` classes (methods, no inheritance), functions, `sys.exit(main())`. No globals you
   change, nested `def`, own exception classes.
 - `int` is 64-bit (`OverflowError`, no big ints). Types: int, float, str, bool, bytes, `list`,
@@ -69,4 +69,4 @@ sys.exit(main())
   `itertools`, `functools`, `random` (after `random.seed(n)`).
 - Speed: fix `slow:` hints (`x in list`, `.pop(0)`: set, deque).
 
-MORE (`sed -n A,Bp AIL_REFERENCE_MORE.md`): Commands 8-20, Text I/O 22-56, Bytes 58-121, Syntax 123-134, Local names 136-161, Numbers 163-177, Structs 179-212, Trees 214-256, Lists 258-270, Sort keys 272-279, Nested lists 281-298, Dicts 300-309, Sets 311-317, Strings 319-344, Regular expressions 346-402, Collections 404-484, Tuples, lambdas (Python syntax) 486-545, Libraries 547-608, Heaps 610-625, Loops 627-634, Exceptions 636-643, Refused 645-686, Word count 688-720, Dijkstra 722-764, BFS 766-810, Modules 812-840, Speed 842-861, Parallel 863-909.
+MORE (`sed -n A,Bp AIL_REFERENCE_MORE.md`): Commands 8-20, Text I/O 22-56, Bytes 58-121, Syntax 123-134, Local names 136-161, Numbers 163-177, Structs 179-212, Trees 214-256, Lists 258-270, Sort keys 272-279, Nested lists 281-298, Dicts 300-309, Sets 311-329, Strings 331-356, Regular expressions 358-414, Collections 416-496, Tuples, lambdas (Python syntax) 498-557, Libraries 559-620, Heaps 622-637, Loops 639-646, Exceptions 648-655, Refused 657-698, Word count 700-732, Dijkstra 734-776, BFS 778-822, Modules 824-852, Speed 854-873, Parallel 875-921.

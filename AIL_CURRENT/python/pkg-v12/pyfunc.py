@@ -37,6 +37,7 @@ import callable_types
 
 import cruntime
 import filelib
+import proclib
 import iterlower
 import tryhoist
 import stdlib3
@@ -48,6 +49,7 @@ import rebinding
 import string_repeat_fusion
 import borrowed_callback
 import nested_lists
+import modtables
 import readonly_bytes_scalar
 import boolkind
 import shadowing
@@ -154,7 +156,7 @@ EXC_NAMES = {'ValueError': 1, 'ZeroDivisionError': 2, 'IndexError': 3, 'KeyError
              'EOFError': 5, 'OSError': 6, 'FileNotFoundError': 11, 'RuntimeError': 7,
              'UnicodeDecodeError': 8, 'AssertionError': 9, 'OverflowError': 10,
              'PermissionError': 12, 'IsADirectoryError': 13, 'FileExistsError': 14,
-             'NotADirectoryError': 15}
+             'NotADirectoryError': 15, 'CalledProcessError': 17, 'TimeoutExpired': 18}      # 17, 18: G8 subprocess
 
 
 def _handler_codes(code):
@@ -176,6 +178,8 @@ def _exc_parts(ctx, code):
         ctx.parts.add('ASSERTEXC')
     elif code == 10:
         ctx.parts.update(('ASSERTEXC', 'OVERFLOWEXC'))
+    elif code >= 17:
+        ctx.parts.update(('ASSERTEXC', 'OVERFLOWEXC', 'FILEEXC', 'PROCEXC'))
     elif code >= 11:
         ctx.parts.update(('ASSERTEXC', 'OVERFLOWEXC', 'FILEEXC'))
 # wrapping_add/sub/mul(a, b): int64 arithmetic modulo 2**64 (two's complement), never an
@@ -1210,12 +1214,21 @@ def module_table_refusal(name, value):
         what = 'list of non-numbers'
         declared = 'list[bytes]' if any(isinstance(e, ast.Constant) and isinstance(e.value, bytes)
                                          for e in getattr(value, 'elts', ())) else 'list[str]'
+    if what in ('set', 'dict'):
+        return Unsupported("%r is a module-level %s that a function cannot read: a module-level table must be "
+                           "a non-empty literal whose %s are all ints, all strs or all bytes (or tuples of "
+                           "ints / strs)%s -- no empty one, no computed one, no bool, and no name bound "
+                           "twice or changed at module level.\n"
+                           "  write instead: build it in main() (`%s: %s = {...}`) and pass it to the functions that "
+                           "read it as a parameter, or build it inside the one function that reads it"
+                           % (name, what, 'keys' if what == 'dict' else 'elements',
+                              ' and whose values are all one kind' if what == 'dict' else '',
+                              name.lower(), declared))
     return Unsupported("%r is a module-level %s; only an int/float/str/bytes literal, or a "
                        "numeric list or tuple, is accepted as a module constant.\n"
                        "  write instead: build it in main() (`%s: %s = %s`) and pass it to the functions that "
                        "read it as a parameter, or build it inside the one function that reads it"
-                       % (name, what, name.lower(), declared,
-                          '{...}' if declared.startswith(('set', 'dict')) else '[...]'))
+                       % (name, what, name.lower(), declared, '[...]'))
 
 
 def _scan_module_consts(tree):
@@ -6357,7 +6370,7 @@ def _fileprim_value(node, ctx):
     ret, kinds = filelib.PRIMS[name]
     if node.keywords or len(node.args) != len(kinds) or any(isinstance(a, ast.Starred) for a in node.args):
         raise Unsupported('%s takes %d positional arguments' % (name, len(kinds)))
-    ctx.parts.add('FILEIO')
+    ctx.parts.add('PROCIO' if filelib.is_proc_prim(name) else 'FILEIO')
     ctx.has_try = True
     stages, names = [], []
     for arg, kind in zip(node.args, kinds):
@@ -20146,7 +20159,7 @@ def _try_stmt(node, ctx, ind):
         for e in types:
             if e.id not in EXC_NAMES:
                 raise Unsupported('except %s; the exceptions this language has are %s'
-                                  % (e.id, ', '.join(sorted(EXC_NAMES))))
+                                  % (e.id, ', '.join(sorted(n for n in EXC_NAMES if proclib.ACTIVE or n not in ('CalledProcessError', 'TimeoutExpired')))))
             code = EXC_NAMES[e.id]
             _exc_parts(ctx, code)
             if code in seen:
@@ -31581,6 +31594,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         from module_object import _struct_source
         source = _struct_source(external['structs']) + source
     tree = ast.parse(source.strip())
+    modtables.rewrite(tree, Unsupported, library, entry)
     stdlib4.rewrite(tree, Unsupported)
     stdlib3.rewrite(tree, Unsupported)
     iterlower.rewrite(tree)

@@ -8,6 +8,7 @@ machine; this is what to run while iterating. ail_check.py stays the reference (
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -18,16 +19,21 @@ ROOT = Path(__file__).resolve().parents[1] / 'AIL_CURRENT'
 TIMES = Path.home() / '.cache' / 'ail_par_check.json'
 
 
-def run_module(name, env):
+def run_module(name, env, timeout=None):
     start = time.monotonic()
-    proc = subprocess.run([sys.executable, '-X', 'utf8', '-B', '-m', 'unittest', '-q', name],
-                          cwd=ROOT, env=env, capture_output=True, text=True)
+    try:
+        proc = subprocess.run([sys.executable, '-X', 'utf8', '-B', '-m', 'unittest', '-q', name],
+                              cwd=ROOT, env=env, capture_output=True, text=True, encoding='utf8',
+                              errors='replace', timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return name, 124, time.monotonic() - start, 'timed out after %ss' % timeout
     return name, proc.returncode, time.monotonic() - start, proc.stdout + proc.stderr
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-j', type=int, default=8)
+    parser.add_argument('--timeout', type=float, default=None, help='seconds per module (default: none)')
     parser.add_argument('modules', nargs='*')
     args = parser.parse_args()
     sys.path.insert(0, str(ROOT))
@@ -41,12 +47,11 @@ def main():
         times = {}
     modules.sort(key=lambda m: -times.get(m, 60.0))
     env = dict(os.environ, PYTHONUTF8='1')
-    env.setdefault('PIPE_CC', subprocess.run(['sh', '-c', 'command -v gcc'], capture_output=True,
-                                             text=True).stdout.strip())
+    env.setdefault('PIPE_CC', shutil.which('gcc') or '')
     start = time.monotonic()
     failed = []
     with ThreadPoolExecutor(args.j) as pool:
-        futures = [pool.submit(run_module, m, env) for m in modules]
+        futures = [pool.submit(run_module, m, env, args.timeout) for m in modules]
         for done, future in enumerate(as_completed(futures), 1):
             name, code, seconds, output = future.result()
             times[name] = round(seconds, 1)

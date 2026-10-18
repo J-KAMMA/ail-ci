@@ -2063,12 +2063,21 @@ class _Surface:
         self.annotation(node.annotation)
         self.expression(node.value)
 
+    def starts_processes(self):
+        if not hasattr(self, '_starts_processes'):
+            self._starts_processes = any(
+                (isinstance(n, ast.Import) and any(a.name == 'subprocess' for a in n.names))
+                or (isinstance(n, ast.ImportFrom) and not n.level and n.module == 'subprocess') for n in self.tree.body)
+        return self._starts_processes
+
     def output(self, node):
         call = node.value
         path = self.path(call.func)
         if path in _STDOUT_STATEMENTS:
             if path in ('sys.stdout.flush', 'sys.stdout.buffer.flush', 'sys.setrecursionlimit'):
-                self.replace(node, 'pass', True)
+                # a program that starts processes needs the flush: the child's output is ordered against ours by it (stage G8)
+                real = path != 'sys.setrecursionlimit' and not call.args and not call.keywords and self.starts_processes()
+                self.replace(node, 'flush_stdout()' if real else 'pass', True)
                 return True
             if len(call.args) == 1 and not call.keywords and not isinstance(call.args[0], ast.Starred):
                 argument = ast.unparse(self.rewritten(call.args[0])[0])
@@ -2205,7 +2214,18 @@ class _Surface:
         return self.apply()
 
 
-def python_surface(source, notes=None):
+def _modtables():
+    """python/pkg-v12/modtables.py (module-level tables with tuples in them, lowered before the tuple pass)."""
+    if not hasattr(_modtables, "module"):
+        here = str(Path(__file__).parent / "python" / "pkg-v12")
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import modtables
+        _modtables.module = modtables
+    return _modtables.module
+
+
+def python_surface(source, notes=None, library=False):
     """Map the Python spellings above onto the compiler's own; `notes` collects (line, why) for
     the constructs left as written."""
     if any(name in source for name in ("csv", "datetime", "decimal", "fractions")):
@@ -2214,6 +2234,8 @@ def python_surface(source, notes=None):
         source = _collib().rewrite(source, notes)
     if "None" in source or "Optional" in source:
         source = _optlib().rewrite(source, notes)
+    if "(" in source and ("{" in source or "set" in source):
+        source = _modtables().rewrite_text(source, library, notes)
     source = _tuplib().rewrite(source, notes)
     try:
         surface = _Surface(source)

@@ -721,6 +721,9 @@ def export_sdk(source_root: Path, output: Path) -> dict:
             if not directory.is_dir():
                 raise ValueError(f'missing source directory: {directory}')
         selected.update(p for p in compiler.iterdir() if p.suffix in ('.py', '.h'))
+        # pinned C sources linked into programs (e.g. ail_wincon.c for the Windows console)
+        selected.update(p for p in compiler.iterdir()
+                        if p.suffix == '.c' and 'python/pkg-v12/' + p.name in pins)
         # The IR is a package below the compiler directory (python/pkg-v12/ir/, ir/passes/).
         if (compiler / 'ir').is_dir():
             selected.update(p for p in (compiler / 'ir').rglob('*.py') if '__pycache__' not in p.parts)

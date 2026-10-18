@@ -162,7 +162,7 @@ sys.exit(main())
     "module_level_set": ("""
 import sys
 
-STOP = {"an", "and"}
+STOP = {"an", "and", 1}
 
 def f(t: str) -> int:
     return 1 if t in STOP else 0

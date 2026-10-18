@@ -24784,6 +24784,7 @@ def _unprintable_table():
 
 _UNPRINTABLE_TABLE = _unprintable_table()
 FMTGEN = (r'''
+#include <math.h>   /* fabs, signbit: a C99 compiler (clang, gcc 14+) rejects the implicit declarations */
 /* The full format-spec mini-language for an int or a float field, [[fill]align][sign][#][0][width]
    [grouping][.precision][type], parsed at compile time (pyfunc.py `_parse_braces_spec`) and
    finished here. kind 0 formats `iv` (types d x X o b), kind 1 formats `dv` (types f F e E g G %
@@ -25645,6 +25646,8 @@ def _piece(p, want):
             else _assert_exception(SOURCE[p]) if p == 'DIE' and 'ASSERTEXC' in want else SOURCE[p])
     if p == 'DIE' and 'FILEEXC' in want:
         text = _filert.file_exception(text, 'FILECORE' in want)
+        if 'PROCEXC' in want:
+            text = _filert.proc_exception(text)
     if p == 'IREXC':
         return text.replace('/*IRPAR*/', 'if (ail_par_cur) ail_par_trap(NULL, code);' if 'PAR' in want else '')
     return _parallel_die(text) if p == 'DIE' and 'PAR' in want else text
@@ -26210,3 +26213,4 @@ for _name, _text, _requires in (
 import filert as _filert
 _filert.register(ORDER, SOURCE, REQUIRES)
 REQUIRES['FILEEXC'] = ['ASSERTEXC', 'OVERFLOWEXC']
+REQUIRES['PROCEXC'] = ['FILEEXC']          # G8: CalledProcessError / TimeoutExpired codes (filert.proc_exception)

@@ -67,9 +67,14 @@ def link_flags():
     `ail_chatgpt.py compile --static`) links statically, for a binary that runs on any Linux
     without the same C library. Windows keeps static linking, so a MinGW build needs no runtime
     DLLs beside it."""
-    if os.name == 'nt' or os.environ.get('AIL_STATIC') == '1':
-        return ['-static']
-    return []
+    flags = []
+    windows = os.name == 'nt' or os.environ.get('AIL_TARGET_OS') == 'windows'   # --target windows
+    if windows or os.environ.get('AIL_STATIC') == '1':
+        flags.append('-static')
+    if windows:
+        # UTF-8 console (decision Q8): a separate unit, so the generated C is the same everywhere.
+        flags += ['-D_Exit=ail_wincon_exit', str(pathlib.Path(__file__).resolve().with_name('ail_wincon.c'))]
+    return flags
 
 def cache_dir():
     d = os.environ.get('PIPE_CACHE')

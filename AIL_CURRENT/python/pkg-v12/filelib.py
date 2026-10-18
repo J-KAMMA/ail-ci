@@ -21,6 +21,8 @@ import copy
 import os
 import re
 
+import proclib
+
 # ---------------------------------------------------------------------------------------------
 # The primitives. name -> (result kind, argument kinds), kinds in {'int', 'str', 'bytes'}.
 # A primitive that has nothing to return returns int 0 (the prelude ignores it).
@@ -58,6 +60,11 @@ PRIMS = {
     '_ail_os_setenv': ('int', ('str', 'str')),
     '_ail_os_unsetenv': ('int', ('str',)),
 }
+PRIMS.update(proclib.PROCS)        # stage G8: the process primitives (ailproc_core.h), a part of their own
+
+
+def is_proc_prim(prim):
+    return prim.startswith('_ail_sp_')
 
 
 def c_name(prim):
@@ -100,11 +107,13 @@ def rewrite_tree(tree, Unsupported, general=False):
     Returns whether the program uses the file layer; a program that does not is left untouched."""
     global ACTIVE
     ACTIVE = bool(os.environ.get('AIL_G7_FORCE'))
+    used_proc = proclib.rewrite_tree(tree, Unsupported, general)      # G8: subprocess -> primitives + prelude
     import filelower
     lowerer = filelower._Lowerer(tree, Unsupported, general)
     lowerer.scan()
     if not lowerer.wants():
-        return False
+        ACTIVE = ACTIVE or used_proc           # subprocess raises the OS-family classes too
+        return used_proc
     lowerer.run()
     ACTIVE = True
     if os.environ.get('AIL_G7_DUMP'):

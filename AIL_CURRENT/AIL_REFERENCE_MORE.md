@@ -91,7 +91,7 @@ fn main() {
 - Python syntax: a bytes-keyed dict or set (`ids: dict[bytes, int] = {}`, `stop = {b"an"}`) and a list
   of bytes are locals, not parameters or fields; a bytes sort key is `terms[i].hex()`;
   `ba[a:b].decode()` works on a bytearray; a tuple cannot hold a bytearray (pass it in, return the
-  number). A module-level set or dict is refused: build it in `main` and pass it in.
+  number). A module-level set or dict literal is a read-only table (next section).
 
 ```python
 import sys
@@ -315,6 +315,18 @@ results, with Python's meaning:
 (also `union intersection difference symmetric_difference`, `*_update`), `== != <= < >= >`
 (`issubset`, `issuperset`), `isdisjoint`. Insertion ordered; `s.pop()` removes the newest element
 (`KeyError` when empty). A set parameter is read-only.
+
+Module-level tables (Python syntax): `STOP = {"a", "the"}`, `STOP: set[str] = {...}`, `TABLE = {"x": 1}`,
+`NAMES = {1: "one"}`, `PAIRS = {(0, 1), (2, 3)}`, `STOP = {b"a"}`: a non-empty literal, every element of one
+kind (int, str, bytes, or a tuple of ints / strs; a dict: one key kind, one value kind, int / float / str /
+bytes / tuple), bound once and not changed. Any function reads it in place: `w in STOP`, `TABLE[k]`,
+`TABLE.get(k, 0)`, `for k, v in TABLE.items()`, `len`, `sorted`, `min`, `max`, `sum`, `any`, `all`. It is built
+once in the entry function and passed down (a bytes table is rebuilt by each function that reads it).
+Refused by name: `STOP.add(x)`, `T[k] = v`, `global STOP`, `xs = STOP`, `return STOP`, `f(STOP)`, `[STOP]`
+(CPython would share the one object; write `set(STOP)` for a copy), and a set of ints walked by `for` /
+`list(...)` (CPython walks it in hash order, this compiler in insertion order; write `sorted(PRIMES)`). A
+computed, empty, mixed-kind, bool or float table is refused too: build it in `main` and pass it in. A library
+module (`compile-library`) takes no table.
 
 ## Strings: methods, formatting
 
@@ -648,7 +660,7 @@ needs a final `return`. Handler names: Local names.
 |---|---|
 | tuples beyond the Tuples section, `zip` over non-lists | a struct; index loops |
 | a lambda that escapes, nested `def` | a top-level `fn` passed as `Callable[[A], R]` |
-| global variables | a struct holding the state, passed to each function |
+| global variables you change | a struct holding the state, passed to each function (a literal read-only table is fine) |
 | `dict[str, Struct]`, `dict[str, list[T]]` | a `dict[str, int]` index into a `list[Struct]` (or a `list[list[T]]`) |
 | `None` for int, str, list | a sentinel (-1, ""), or raise. A struct may be `Node \| None` |
 | `xs[i] = v` or `xs.append(v)` on a list parameter | a struct field `s.xs`, or return a new list |

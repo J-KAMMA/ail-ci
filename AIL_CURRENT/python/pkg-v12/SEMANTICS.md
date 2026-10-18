@@ -2706,6 +2706,42 @@ corpus predates this section), so this section moves none of them from REFUSED t
 would actually write for this compiler, comparing how many compile and agree with CPython on
 `pkg-v5` versus `pkg-modconst` (see the report alongside this package, not repeated here since it
 is not a fixed number this document can state once and leave true).
+### 29.2 Module-level set and dict tables (`modtables.py`, 2026-10-18)
+
+`STOP = {"a", "the"}`, `STOP: set[str] = {...}`, `TABLE = {"x": 1}`, `NAMES = {1: "one"}`,
+`PAIRS = {(0, 1), (2, 3)}`, `STOP = {b"a"}`: a non-empty literal whose elements (a dict: keys) are all
+ints, all strs, all bytes, or tuples of ints / strs of one shape, and whose dict values are all one
+kind (int, float, str, bytes, tuple), bound exactly once, before any other module-level code, and
+changed nowhere. Read from any function, in place: `in`, `d[k]`, `d.get`, `items / keys / values`,
+`for`, `len`, `sorted`, `min`, `max`, `sum`, `any`, `all`, `|` `&` `-` `^`, `join`, a truth test.
+
+**Lowering.** One AST pass (`modtables.rewrite`, run first in `_to_c_once`) removes the statement and
+gives every reader the table the way a parameter gives it -- the typed path already borrows set and dict
+parameters (`const ail_sset *`), so no new codegen path exists. A function that reads a table, or calls
+one that does, takes it as a hidden FIRST parameter named after the table (annotated from the literal,
+`STOP: set[str]`); each call site passes it. The entry function -- and every function that cannot take
+an extra parameter (a method, a function used as a value or decorated, one the module's own statements
+call, any function in a library) -- builds the table as an annotated local at the top of its body
+instead (`STOP: set[str] = {...}`): once for the entry, once per call elsewhere. A table with bytes in it
+is always built that way, in each reader (the typed path has no bytes-keyed parameters). Duplicate
+entries are folded as CPython folds them (a set keeps the first, a dict the first position and the last
+value). A table with tuples is lowered the same way by the front end (`modtables.rewrite_text`, before
+the tuple pass in `python_surface`, which turns `set[tuple[int, int]]` into its own table class); that
+rewrite returns unparsed text, like the tuple pass itself. A program with no such table is returned
+untouched (the generated C is byte-identical).
+
+**Refused by name** (CPython shares the one object, or its order differs): `STOP.add(x)` and every
+mutating method, `T[k] = v`, `del T[k]`, `T |= ...`, `global T`, a nested `def` reading it, any use of
+the whole table as a value (`xs = STOP`, `return STOP`, `f(STOP)`, `[STOP]`, `{k: STOP}`; `set(STOP)`
+is the copy), a name bound in a function that still calls a function reading the table, a table
+changed at module level, and a set of ints (or of tuples of ints) walked where the order shows
+(`for x in PRIMES`, `list(PRIMES)`, `[x for x in PRIMES]`): CPython walks it in hash order, this
+compiler in insertion order; `sorted(PRIMES)` is the spelling. A set of str or bytes may be walked
+(CPython's order for those changes from run to run, so no program can depend on it). An empty,
+computed, mixed-kind, bool or float-element table keeps the old refusal (`module_table_refusal`).
+The general (boxed) path has no bytes literal at all, so a bytes table that the typed path refuses
+is refused there by name too. `test_ail_modconst.py` compares all of this with CPython 3.12.
+
 ## 30. Exceptions: `try`/`except`/`raise` (`pkg-exc`, 2026-09-14)
 
 Ten ordinary language features were probed against this line; five work, five do not, and
