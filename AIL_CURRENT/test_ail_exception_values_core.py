@@ -250,8 +250,7 @@ def run(n:int)->int:
         reference=oracle_source(native).replace('.message','.args[0]')
         ExceptionResourceTests().check_resources(reference,sizes=(1,2,101,1001),native_source=native)
     def test_bad_message_fields_binding_scope_and_custom_types_refused(self):
-        cases = ('raise ValueError(1);', 'raise ValueError(message="bad");',
-                 'raise ValueError("a", "b");',
+        cases = ('raise ValueError(message="bad");',      # (several arguments and non-str ones are built: test_ail_exc_str)
                  'try {raise ValueError();} except ValueError as e { print(e.kind); } print(e.message);',
                  'try {raise ValueError();} except ValueError as e { e.message = "bad"; }',
                  'raise UnknownError();', 'raise ValueError() from KeyError();')

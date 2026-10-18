@@ -44,6 +44,18 @@ class Calls:
         node.args, node.keywords = args, kws
         return node, t
 
+    def no_tuple_items(self, node, ts, what):
+        """A builtin that iterates its argument was given a tuple: the tuple is a class here, which the
+        generic runtime cannot iterate (`sum(c)`, `list(c)`, `any(c)`, `set(c)` ... ended in a TypeError)."""
+        if what in ('str.format', 'str.join') or what in self.ITERATING:
+            for t in ts:
+                if is_tuple(deep(t)):
+                    self.refuse(node, '%s() of a tuple (iterating a tuple is not built); unpack it or name '
+                                'the items' % what.replace('str.', ''))
+
+    ITERATING = {'sum', 'any', 'all', 'list', 'set', 'frozenset', 'dict', 'reversed', 'enumerate', 'zip',
+                 'map', 'filter', 'next', 'iter', 'sorted', 'min', 'max', 'tuple', 'str.join'}
+
     def ex_Call(self, node, want=None, ctx=None):
         f = node.func
         if isinstance(f, ast.Name):
@@ -72,6 +84,8 @@ class Calls:
         if not isinstance(node.func, ast.Name):
             node.func = self.exv(node.func)[0]
         args, ts, kws = self.args_ex(node)
+        if isinstance(node.func, ast.Name):
+            self.no_tuple_items(node, ts, node.func.id)
         return self.done(node, args, kws, None)
 
     # ------------------------------------------------------------------------------------------
@@ -217,6 +231,7 @@ class Calls:
 
     def b_any(self, node, want, ctx):
         args, ts, kws = self.args_ex(node)
+        self.no_tuple_items(node, ts, 'any')
         return self.done(node, args, kws, BOOL)
 
     b_all = b_any
@@ -231,6 +246,7 @@ class Calls:
 
     def b_sum(self, node, want, ctx):
         args, ts, kws = self.args_ex(node)
+        self.no_tuple_items(node, ts[:1], 'sum')
         et = elem_of(ts[0]) if ts else None
         if len(args) > 1:
             et = deep(ts[1])
@@ -242,14 +258,17 @@ class Calls:
 
     def b_reversed(self, node, want, ctx):
         args, ts, kws = self.args_ex(node)
+        self.no_tuple_items(node, ts, 'reversed')
         return self.done(node, args, kws, ('iter', elem_of(ts[0]) if ts else None))
 
     def b_enumerate(self, node, want, ctx):
         args, ts, kws = self.args_ex(node)
+        self.no_tuple_items(node, ts, 'enumerate')
         return self.done(node, args, kws, ('iter', None))
 
     def b_zip(self, node, want, ctx):
         args, ts, kws = self.args_ex(node)
+        self.no_tuple_items(node, ts, 'zip')
         if any(has_tuple(elem_of(t)) for t in ts):
             self.refuse(node, 'zip over tuples outside a for loop or comprehension; loop with an index')
         return self.done(node, args, kws, ('iter', None))
@@ -274,6 +293,7 @@ class Calls:
             return self.done(node, [], [], ('list', we if we is not None else Hole()))
         n, t = self.exv(node.args[0])
         t = deep(t)
+        self.no_tuple_items(node, [t], 'list')
         if is_table(t):
             self.force()
             return call(self.table(t).fn('keys'), n), ('list', t[1])
@@ -290,6 +310,7 @@ class Calls:
             return self.done(node, [], [], t)
         n, t = self.exv(node.args[0])
         t = deep(t)
+        self.no_tuple_items(node, [t], 'set')
         et = elem_of(t)
         st = ('set', et if et is not None else we)
         if is_table_set(st):
@@ -314,6 +335,7 @@ class Calls:
         if len(node.args) == 1 and not node.keywords:
             n, t = self.exv(node.args[0])
             t = deep(t)
+            self.no_tuple_items(node, [t], 'dict')
             if is_table_dict(t):
                 self.force()
                 return call(self.table(t).fn('copy'), n), t
@@ -387,6 +409,9 @@ class Calls:
         if len(node.args) == 1 and not any(kw.arg == 'key' for kw in node.keywords):
             n, t = self.exv(node.args[0])
             t = deep(t)
+            if is_tuple(t):
+                self.refuse(node, '%s() of a tuple (iterating a tuple is not built); name the items: %s(a, b)'
+                            % (op, op))
             et = elem_of(t)
             if is_table(t):
                 self.force()
@@ -445,6 +470,13 @@ class Calls:
             return self.done(node, [k, src], kws, ('list', et))
         if mod == 'functools' and fn == 'reduce':
             return self.b_reduce(node, want, None)
+        if mod == 'math' and fn == 'modf' and len(node.args) == 1 and not node.keywords:
+            args, ts, kws = self.args_ex(node)
+            t = deep(ts[0])
+            if t not in NUMERIC:
+                self.refuse(node, 'math.modf of a value whose type is not known to be int or float')
+            self.force()
+            return call(self.gen.modf(), self.coerce(args[0], t, FLT)[0]), ('tuple', (FLT, FLT))
         if mod == 'math':
             args, ts, kws = self.args_ex(node)
             if fn in MATH_FLOAT:
@@ -524,6 +556,7 @@ class Calls:
         args, ts, kws = self.args_ex(node)
         if m == 'format' and any(is_tuple(t) or has_tuple(t) for t in ts):
             self.refuse(node, 'str.format with a tuple argument; use an f-string or unpack the tuple')
+        self.no_tuple_items(node, ts, 'str.' + m)
         if m in STR_RET_STR:
             t = STR
         elif m in STR_RET_INT:

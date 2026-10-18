@@ -4,6 +4,7 @@ Each AIL program is compared with the same program run by CPython (None access t
 AttributeError, here RuntimeError "field access on None"; the Python twins catch it and print the
 AIL spelling).
 """
+import os
 import subprocess
 import sys
 import tempfile
@@ -304,6 +305,40 @@ def _python(code):
     return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60).stdout
 
 
+MIXED_PY = """
+class Node:
+    def __init__(self, a: int):
+        self.a = a
+
+
+def find(k: int) -> Node | None:
+    if k > 0:
+        return Node(k)
+    return None
+
+
+def name(k: int) -> str | None:
+    if k > 0:
+        return "x"
+    return None
+
+
+def main():
+    row = find(1)
+    if row is not None:
+        print(row.a)
+    s = name(1)
+    print(s)
+    r2 = find(0)
+    print(r2 is None, r2 is not None, name(0) is None)
+    t: Node | None = find(2)
+    print(t is None)
+
+
+main()
+"""
+
+
 class OptionalStructTests(unittest.TestCase):
     def check(self, source, python, name):
         ran = _build_and_run(source, name)
@@ -321,6 +356,19 @@ class OptionalStructTests(unittest.TestCase):
 
     def test_list_children_and_mutual_recursion(self):
         self.check(NESTED_AIL, NESTED_PY, "nested")
+
+    def test_a_class_optional_and_a_scalar_optional_in_one_program(self):
+        # `node is None` where node is a class instance was read as a comparison of a scalar Optional (G11)
+        with tempfile.TemporaryDirectory() as directory:
+            src, exe = Path(directory, "mixed.py"), Path(directory, "mixed")
+            src.write_text(MIXED_PY)
+            env = dict(os.environ, AIL_NO_GENERAL="1")
+            built = subprocess.run([sys.executable, "-B", str(ROOT / "ail_chatgpt.py"), "compile", str(src), "-o", str(exe)],
+                                   capture_output=True, text=True, timeout=600, env=env)
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)
+            self.assertEqual(ran.returncode, 0, ran.stderr)
+            self.assertEqual(ran.stdout, _python(MIXED_PY))
 
     def test_uncaught_none_access_exits_one(self):
         ran = _build_and_run("""

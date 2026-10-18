@@ -280,7 +280,7 @@ class Excfix(Base):
     def test_errno_of_other_classes_is_refused_on_the_typed_path(self):
         body = ("def main():\n    try:\n        raise ValueError('x')\n    except ValueError as e:\n"
                 "        print(%s)\n\nmain()\n")
-        for expr in ("e.errno", "e.strerror", "str(e)"):
+        for expr in ("e.errno", "e.strerror"):         # str(e) is built for every class (test_ail_exc_str)
             with self.subTest(expr):
                 self.refused(body % expr, "is built only on a name bound by `except OSError as e`")
 

@@ -892,10 +892,19 @@ class Csv:
                 if isinstance(func, ast.Name) and func.id in ('list', 'sorted', 'tuple', 'len') and node.args:
                     info = lower.reader_of(node.args[0], state)
                     if info is not None and func.id in ('list',):
-                        if info.kind != 'reader':
-                            lower.refuse(node, 'list(%s): a list of dict rows is not built; loop over the '
-                                         'DictReader' % info.name)
                         self.guard(node, 'list(%s)' % info.name)
+                        if info.kind != 'reader':
+                            # a list of dict rows: the typed path does not hold one (the program is built on the
+                            # general path); each row is the dict a `for row in reader` loop would build
+                            rest = lower.take_rest(info, pre)
+                            lower.helper('dict')
+                            drows, cellsname = lower.fresh('drows'), lower.fresh('c')
+                            pre.append(_mark(ast.Assign(targets=[_name(drows, True)], value=ast.ListComp(
+                                elt=_call(_name('_ail_csv_dict'), _name(info.hdr), _name(cellsname)),
+                                generators=[ast.comprehension(target=_name(cellsname, True), iter=_name(rest), ifs=[
+                                    ast.Compare(left=_call(_name('len'), _name(cellsname)), ops=[ast.NotEq()],
+                                                comparators=[ast.Constant(value=0)])], is_async=0)]))))
+                            return _name(drows)
                         return _name(lower.take_rest(info, pre))
                 ctor = lower.ctor_kind(node)
                 if ctor in ('reader', 'DictReader'):
@@ -1062,12 +1071,23 @@ class Csv:
         return Tests().visit(node)
 
     # -- writers ----------------------------------------------------------------------------------------------------
+    def stringio_names(self):
+        """Names the program binds to an io.StringIO (stdlib5 has turned the call into `_AilStringIO(...)`)."""
+        if not hasattr(self, '_stringio'):
+            self._stringio = {t.id for n in ast.walk(self.tree) if isinstance(n, ast.Assign)
+                              and isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Name)
+                              and n.value.func.id == '_AilStringIO' for t in n.targets if isinstance(t, ast.Name)}
+        return self._stringio
+
     def make_writer(self, name, call, kind, s, state):
-        if not call.args or not (isinstance(call.args[0], ast.Attribute) and call.args[0].attr in ('stdout', 'stderr')
-                                 and isinstance(call.args[0].value, ast.Name) and call.args[0].value.id == 'sys'):
-            self.refuse(call, 'csv.%s(...): only sys.stdout / sys.stderr are built as the target (collect the '
-                        'text and write it, or print the joined fields)' % kind)
-        stream = call.args[0].attr
+        if call.args and isinstance(call.args[0], ast.Name) and call.args[0].id in self.stringio_names():
+            stream = call.args[0].id            # a StringIO object: the rows are written with its write()
+        elif not call.args or not (isinstance(call.args[0], ast.Attribute) and call.args[0].attr in ('stdout', 'stderr')
+                                   and isinstance(call.args[0].value, ast.Name) and call.args[0].value.id == 'sys'):
+            self.refuse(call, 'csv.%s(...): only sys.stdout / sys.stderr / an io.StringIO are built as the target '
+                        '(collect the text and write it, or print the joined fields)' % kind)
+        else:
+            stream = call.args[0].attr
         positional = ['dialect'] if kind == 'writer' else ['fieldnames', 'restval', 'extrasaction', 'dialect']
         extra = ('fieldnames', 'restval', 'extrasaction') if kind == 'DictWriter' else ()
         d, extras = self.dialect(call, positional, extra=extra)
@@ -1116,6 +1136,11 @@ class Csv:
                      ast.Constant(value=d.quotechar or ''), ast.Constant(value=d.escapechar or ''),
                      ast.Constant(value=d.lineterminator), ast.Constant(value=d.quoting),
                      ast.Constant(value=d.doublequote))
+        if w.stream not in ('stdout', 'stderr'):
+            write = ast.Expr(value=ast.Call(func=ast.Attribute(value=_name(w.stream), attr='write', ctx=ast.Load()),
+                                            args=[call], keywords=[]))
+            _mark(write)
+            return write
         # what the surface pass makes of sys.stdout.write(text) / sys.stderr.write(text)
         keywords = [ast.keyword(arg='end', value=ast.Constant(value=''))]
         if w.stream == 'stderr':

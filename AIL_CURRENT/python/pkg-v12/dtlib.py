@@ -191,6 +191,7 @@ class Dt:
         self.functions = {}
         self.defined = set()         # names the program defines itself (functions, methods, classes, fields)
         self.aware = False           # the program names a time zone
+        self.tuple_order = False     # a tuple holds a datetime: comparing tuples compares the class (needs __lt__)
         self.cls = None
         self.count = 0
 
@@ -267,6 +268,10 @@ class Dt:
             if name in ('dict', 'Dict') and isinstance(inner, ast.Tuple) and len(inner.elts) == 2:
                 t = self.ann_type(inner.elts[1])
                 return dct(t) if t is not None else None
+            if name in ('tuple', 'Tuple') and isinstance(inner, ast.Tuple) and inner.elts \
+                    and not any(isinstance(e, ast.Constant) and e.value is Ellipsis for e in inner.elts):
+                parts = tuple(self.ann_type(e) for e in inner.elts)
+                return ('tuple', parts) if any(is_dt(p) for p in parts) else None
         return None
 
     def rename_annotation(self, node):
@@ -378,6 +383,9 @@ class Dt:
                 return inner if isinstance(node.slice, ast.Slice) else inner[1]
             if inner is not None and inner[0] == 'dict' and not isinstance(node.slice, ast.Slice):
                 return inner[1]
+            if inner is not None and inner[0] == 'tuple' and isinstance(node.slice, ast.Constant) \
+                    and type(node.slice.value) is int and -len(inner[1]) <= node.slice.value < len(inner[1]):
+                return inner[1][node.slice.value]
             return None
         if isinstance(node, ast.IfExp):
             return join(self.expr_type(node.body, scope), self.expr_type(node.orelse, scope))
@@ -397,6 +405,10 @@ class Dt:
             self.bind_generators(node.generators, inner)
             t = self.expr_type(node.elt, inner)
             return lst(t) if t is not None else None
+        if isinstance(node, ast.Tuple) and node.elts and isinstance(node.ctx, ast.Load) \
+                and not any(isinstance(e, ast.Starred) for e in node.elts):
+            parts = tuple(self.expr_type(e, scope) for e in node.elts)
+            return ('tuple', parts) if any(is_dt(p) for p in parts) else None
         if isinstance(node, ast.List) and node.elts:
             t = self.expr_type(node.elts[0], scope)
             for each in node.elts[1:]:
@@ -405,6 +417,13 @@ class Dt:
         if isinstance(node, ast.NamedExpr):
             return self.expr_type(node.value, scope)
         return None
+
+    @staticmethod
+    def as_list_comp(node):
+        """A generator expression handed to sorted / min / max / list is the bracketed comprehension."""
+        if isinstance(node, ast.GeneratorExp):
+            return ast.copy_location(ast.ListComp(elt=node.elt, generators=node.generators), node)
+        return node
 
     def binop_type(self, node, scope):
         left, right = self.expr_type(node.left, scope), self.expr_type(node.right, scope)
@@ -455,7 +474,7 @@ class Dt:
             if func.id in ('max', 'min', 'abs') and node.args:
                 if func.id == 'abs':
                     return self.expr_type(node.args[0], scope)
-                first = self.expr_type(node.args[0], scope)
+                first = self.expr_type(self.as_list_comp(node.args[0]), scope)
                 if len(node.args) == 1 and first is not None and first[0] == 'list':
                     return first[1]
                 if len(node.args) > 1:
@@ -465,7 +484,7 @@ class Dt:
                     return t
                 return None
             if func.id in ('sorted', 'reversed', 'list') and node.args:
-                t = self.expr_type(node.args[0], scope)
+                t = self.expr_type(self.as_list_comp(node.args[0]), scope)
                 return t if t is not None and t[0] == 'list' else None
         if isinstance(func, ast.Attribute):
             recv = self.expr_type(func.value, scope)
@@ -549,6 +568,13 @@ class Dt:
                 break
 
     def assign_name(self, target, t, scope, forced=False):
+        if isinstance(target, (ast.Tuple, ast.List)):
+            changed = False
+            if t is not None and t[0] == 'tuple' and len(t[1]) == len(target.elts):
+                for each, part in zip(target.elts, t[1]):
+                    if part is not None:
+                        changed |= self.assign_name(each, part, scope)
+            return changed
         if not isinstance(target, ast.Name):
             return False
         old = scope.names.get(target.id, 'unset')
@@ -700,6 +726,13 @@ class Dt:
                 setattr(node, field, self.expr(value, scope))
             elif isinstance(value, list):
                 setattr(node, field, [self.expr(e, scope) if isinstance(e, ast.expr) else e for e in value])
+        return node
+
+    def x_Tuple(self, node, scope):
+        if isinstance(node.ctx, ast.Load) and any(is_dt(self.expr_type(e, scope)) for e in node.elts):
+            self.tuple_order = True
+        for i, e in enumerate(node.elts):
+            node.elts[i] = self.expr(e, scope)
         return node
 
     def x_Lambda(self, node, scope):
@@ -1026,6 +1059,12 @@ class Dt:
             return ast.copy_location(self.clock_call(node, path, scope), node)
         if path is not None and path not in CLASS_CONSTANTS:
             refuse(node, 'datetime.%s is not built' % path)
+        if (isinstance(func, ast.Name) and func.id in ('sorted', 'min', 'max', 'list') and func.id not in self.defined
+                and len(node.args) >= 1 and isinstance(node.args[0], ast.GeneratorExp)):
+            # `sorted(date.fromisoformat(s) for s in xs)`: the same list as the bracketed comprehension, so the
+            # element type is seen and the sort is keyed (a generator was sorted by `<` on the class: TypeError)
+            gen = node.args[0]
+            node.args[0] = ast.copy_location(ast.ListComp(elt=gen.elt, generators=gen.generators), gen)
         # types are read from the call as written, then the arguments are rewritten
         types = [self.expr_type(a, scope) for a in node.args]
         kw_types = {k.arg: self.expr_type(k.value, scope) for k in node.keywords}
@@ -1241,6 +1280,9 @@ class Dt:
             node.body = [n for n in node.body if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant))]
             init = [n for n in node.body if isinstance(n, ast.FunctionDef) and n.name == "__init__"][0]
             init.args.defaults = []
+            if self.tuple_order and not self.aware:
+                # (datetime, x) tuples are compared by the runtime's ordering op, which asks the class
+                node.body.append(ast.parse('def __lt__(self, other):\n    return self.k < other.k\n').body[0])
             if not self.aware:
                 init.args.args = init.args.args[:-3]
                 init.body = [s for s in init.body if not (isinstance(s, ast.Assign) and isinstance(s.targets[0], ast.Attribute)
@@ -1265,6 +1307,11 @@ class Dt:
             need.add(name)
             stack.extend(uses.get(name, ()))
         mapping = {name: rt_name(name) for name in top}
+        for each in ast.walk(self.tree):    # an annotation `tuple[datetime, str]` (already renamed to _AilDT)
+            if isinstance(each, ast.Subscript) and isinstance(each.value, ast.Name) \
+                    and each.value.id in ('tuple', 'Tuple') \
+                    and any(isinstance(n, ast.Name) and n.id == '_AilDT' for n in ast.walk(each.slice)):
+                self.tuple_order = True
 
         class Rename(ast.NodeTransformer):
             def visit_Name(self, node):

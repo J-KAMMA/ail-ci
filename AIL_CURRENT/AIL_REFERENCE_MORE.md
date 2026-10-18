@@ -456,7 +456,7 @@ first uses (`Counter(words)`, `d[w].append(i)`, `q.append(x)`).
   annotations, which the tuple pass lowers to classes and tables, so the C runtime gets nothing new.
   Printing is CPython's repr: `deque([(1, 2)])`, `Counter({(0, 1): 2})`, `defaultdict(<class 'int'>, {...})`,
   `defaultdict(<class 'list'>, {...})`, `OrderedDict({...})` (also for str / int keys).
-- Refused by name (`note:` lines): `namedtuple` (use a `@dataclass`), `ChainMap` and the rest of the module,
+- Refused by name (`note:` lines): `namedtuple(rename=)` (namedtuple, ChainMap: batch 5) and the rest of the module,
   `defaultdict(bool | dict | Counter | lambda: <expression>)`, float keys, nested tuples,
   `print` of a `defaultdict(set)` or of `defaultdict(lambda: ...)`, `==` / `<` on collections, `q.maxlen`, `d.default_factory`, deque slices, `OrderedDict(items)`, a collection
   in a class field or at module level, `top = c.most_common(3)` as a value, `d[k] = xs` with an existing list,
@@ -570,8 +570,8 @@ variable first when it sits behind another call.
   `randrange(stop | start, stop[, step])`, `uniform`, `gauss(mu, sigma)`, `choice(list)`, `shuffle(list)`,
   `sample(list, k)` (same draws, same ValueError / IndexError). The state is one generator per program. A
   program without `random.seed(<int>)` is refused (an unseeded run is not reproducible);
-  a seed that is a str / float / None, `random.Random(...)`, `choices`, `triangular`, `getrandbits`... are refused by
-  name. Ranges wider than 64 bits are a RuntimeError. Only the module-level functions share state, as in CPython.
+  a seed that is a str / float / None, `choices`, `triangular`, `getrandbits`... are refused by name (`random.Random(seed)`:
+  batch 5). Ranges wider than 64 bits are a RuntimeError. Only the module-level functions share state, as in CPython.
 - `itertools`: `count`, `repeat` (a number or str), `chain`, `chain.from_iterable` (list of lists), `islice`
   (None, 1 to 3 integers, CPython's ValueErrors), `accumulate` (default `+`, `func=` a two-parameter lambda,
   a function name, `max`, `min`, `operator.mul`..., `initial=`), `pairwise`, `zip_longest(..., fillvalue=)`,
@@ -629,6 +629,17 @@ variable first when it sits behind another call.
   key or set member, `<` on paths, `p.iterdir()` kept in a variable. The typed path does not build a comprehension over a
   `list[Path]` that produces strs: write the loop (the default build falls back to the slower general path). Differences:
   DIFFERENCES A31-A35.
+- `urllib` (`import urllib.request`, `urllib.error`, `urllib.parse`; `http://` and `https://` over libcurl, which is linked only into
+  a program that uses `urllib.request`; typed path only): `urlopen(url, data=, timeout=)`, `urlopen(request)`, `Request(url, data=,
+  headers={...}, method=)` and `add_header get_method has_header get_header(k, d) full_url`; the response `r.read() r.read(n) r.status
+  r.reason r.url r.getcode() r.geturl() r.headers.get(name, "") name in r.headers r.getheader(name, "") r.close()` and `with
+  urlopen(url) as r:`; `except urllib.error.HTTPError as e:` (`e.code e.reason e.url e.read() e.headers.get(n, "") print(e)`) and
+  `except urllib.error.URLError as e:` (`e.reason`), both caught by `except OSError`; `urllib.parse.urlencode(d) quote(s, safe=)
+  quote_plus unquote unquote_plus urljoin`. It does what CPython 3.12 does: `Python-urllib/3.12`, POST when `data` is given, redirects
+  followed (10 at most), a status outside 200-299 is an `HTTPError`, certificates checked (`SSL_CERT_FILE`). Print a body as
+  `r.read().decode()`. Refused with the line to write instead: openers and handlers, `ftp:` / `file:` URLs, `headers.get(name)` with
+  no default (there is no `None` str), `r.info()`, iterating a response, the `urlparse` family, passing a response to a function.
+  Differences: DIFFERENCES A46-A50.
 - Threads (`threading`, `queue`, `concurrent.futures`): one interpreter lock as in CPython, so threads overlap waiting
   (`sleep`, `join`, `Queue.get`, locks), not computing. `threading.Thread(target=worker, args=(a, b))` where `worker` is a
   module-level `def` or `obj.method` (not a lambda or a nested def), `start join is_alive name daemon`, subclasses with
@@ -638,6 +649,17 @@ variable first when it sits behind another call.
   times slower than typed code). Print results after `join()`, sorted, or from one consumer: thread order is not
   deterministic in CPython either. Refused with the line to write instead: `threading.local Timer Barrier`,
   `PriorityQueue`, `ProcessPoolExecutor`, `wait_for`, `add_done_callback`. Differences: DIFFERENCES A36-A38.
+- `sqlite3` (the system libsqlite3; only a program that imports it links it): `conn = sqlite3.connect(path or ":memory:")`,
+  `conn.execute(sql, params)` / `executemany(sql, rows)` / `executescript` / `cursor()` / `commit()` / `rollback()` / `close()`,
+  `with conn:`, `cur.fetchone()` / `fetchall()` / `for row in cur`, `rowcount`, `lastrowid`, `conn.in_transaction`,
+  `except sqlite3.IntegrityError` (and the other classes), 3.12's implicit BEGIN before insert / update / delete / replace.
+  `?` / `:name` parameters (tuple, list or dict display, or a name beside a literal SQL text) of int, float, str, bytes, bool, None.
+  Rows are plain tuples whose shape YOU declare in an annotation CPython ignores: `rows: list[tuple[int, str]] = cur.fetchall()`,
+  `row: tuple[int, str] | None = cur.fetchone()`, `n = cast(tuple[int], cur.fetchone())[0]`, `pk: int` and `name: Optional[str]` on
+  lines of their own before `for pk, name in cur.execute(...)`. A nullable (`Optional[T]`) or `bytes` column makes the row a
+  generated class (index with a constant, unpack, `is None`, print). A value of another type than declared is a `RuntimeError`.
+  `print(e)` / `str(e)` of an error is CPython's text. Refused with the line to write instead: `row_factory`,
+  adapters, `create_function`, `fetchmany`, `description`, `connect(timeout=...)`. Differences: DIFFERENCES A41-A44.
 
 ## Heaps: heapq, bisect
 
@@ -669,8 +691,16 @@ comprehensions, `global`, `isinstance`.
 
 `ValueError`, `KeyError`, `IndexError`, `ZeroDivisionError`, `OverflowError`, `OSError`
 (= `FileNotFoundError`), `EOFError`, `RuntimeError`, `AssertionError`, `UnicodeDecodeError`.
-Name the kinds: `except (ValueError, KeyError) as e` (no bare `except`, no `except Exception`, no
-user classes); `e.kind`, `e.message` are strs. `raise ValueError("m");`, `raise;`,
+Name the kinds: `except (ValueError, KeyError) as e` (no bare `except`); `except Exception` takes every kind. On the
+Python surface `print(e)`, `str(e)`, `repr(e)`, `f"{e}"`, `"%s" % e`, `e.args`, `e.args[i]`, `len(e.args)`,
+`type(e).__name__`, `isinstance(e, K)` read like CPython's (`ValueError('x')`, `('x',)`, `[Errno 2] No such file or
+directory: 'f'`; a KeyError prints its key's repr); `raise K(a, b)` takes up to 8 str, int, float, bool or None
+arguments. Own classes: `class E(Base)` where Base is `Exception`, `ValueError`, `RuntimeError`, `IndexError`,
+`ZeroDivisionError`, `EOFError`, `AssertionError`, `OverflowError` or such a class; the body is `pass`, an `__init__`
+with one `super().__init__(..)` and `self.x = <expression of the parameters>` (annotate the parameters or let the
+calls show their kinds), constants in the body (`status = 404`) and a `__str__` returning an expression of `self.x`;
+read `e.x` under `except E as e`.
+On the brace surface: `e.kind`, `e.message` are strs. `raise ValueError("m");`, `raise;`,
 `assert c, "m";`. Uncaught: message on stderr, exit 1. A function whose body only raises still
 needs a final `return`. Handler names: Local names.
 
@@ -690,7 +720,7 @@ needs a final `return`. Handler names: Local names.
 | `d.get(k)` (None when missing) | `d.get(k, -1)` with a sentinel, or `if k in d { ... d[k] ... }` |
 | `int(s)` on text that may overflow | `parse_int64_decimal(s)` from `checked_integer` (`ValueError`) |
 | `with open(p) as f`, `f.write` | `read_bytes`, `write_text`, `file_chunks` |
-| `namedtuple`, big integers | a `@dataclass` class; limbs in a `list[int]` |
+| big integers (`Fraction` has 64-bit parts) | limbs in a `list[int]`; a `@dataclass` class |
 
 ```ail-refused
 fn main() { let t = (1, 2); print(t[0]); }
@@ -937,6 +967,42 @@ Lowered in the front end like batches 1 to 3 (stdlib4.py, csvlib.py, dtlib.py, s
 '`). A parse error is raised when the reader reaches it, so earlier rows are processed first. `csv.Error` is `ValueError`. Declared difference: `DictReader` rows with too few or too many fields raise `RuntimeError`.
 - `datetime`: `date`, `datetime` (naive), `time`, `timedelta` with arithmetic, comparison, `replace`, `isoformat`, `strftime`, `strptime`, `fromisoformat`, `fromordinal`, `weekday`, `isocalendar` parts. `now() utcnow() today() date.today() fromtimestamp() utcfromtimestamp() timestamp()` read the wall clock and the OS time zone (`time`, below). Fixed-offset time zones are built: `timezone.utc`, `UTC`, `timezone(timedelta(...)[, name])`, `tzinfo=` / `replace(tzinfo=)`, `astimezone([tz])`, `utcoffset()`, `tzname()`, `now(tz)`, `fromtimestamp(t, tz)`, `fromisoformat` with `Z` or an offset, `%z %Z`; test `d.tzinfo is None`. Refused by name: `zoneinfo`, `tzinfo` subclasses, `dst()`, `timezone.min/max`, an aware `time`. Limit: `timedelta` beyond about 53 million days raises `OverflowError`.
 - `time`: `perf_counter() monotonic() time() time_ns() sleep(x) localtime([t]) gmtime([t]) strftime(fmt[, t]) mktime(t)`. The wall clock is a program input: `AIL_CLOCK=<seconds>[.<fraction>]` pins it for tests (every read returns that value, `sleep(x)` advances it without sleeping); local time is the OS time zone (`TZ` is respected). `localtime` and `gmtime` give an object with `tm_year tm_mon tm_mday tm_hour tm_min tm_sec tm_wday tm_yday tm_isdst tm_zone tm_gmtoff` only. Refused by name: `asctime ctime tzset altzone daylight timezone tzname struct_time(...)` and `strftime` of a tuple.
-- `statistics` on `list[int]`: `mean median median_low median_high mode multimode variance pvariance stdev pstdev`; `fmean` also on floats. `StatisticsError` is `ValueError`. Mixed int/float results only where printed or used as floats.
+- `statistics` on `list[int]`: `mean median median_low median_high mode multimode variance pvariance stdev pstdev`; `fmean`, `median`, `median_low`, `median_high`, `mode`, `multimode` also on `list[float]`. `StatisticsError` is `ValueError`. Mixed int/float results only where printed or used as floats.
 - Small forms: `int.bit_length()`, `int.bit_count()`, `max/min(..., default=)`, `max(d, key=d.get)` (and over a generator), `x in (constants)`, `itertools.product(x, repeat=n)` with a runtime `n`, unpacking a `tuple | None` after a None test.
-- Refused by name with a "write instead" hint: `decimal`, `fractions`, `textwrap`, `unicodedata`, `enum`, `string.Template`.
+- Refused by name with a "write instead" hint: `decimal`, `unicodedata`, `string.Template`.
+
+### Library batch 5 (fractions, enum, namedtuple, random.Random, keyword, calendar, abc, array, io.StringIO)
+
+Lowered in the front end (stdlib5.py, enumlib.py, ntlib.py, randlib.py, smalllib5.py; the classes are Python source in `prelude_*.py`); a program that
+imports none of them is unchanged. They are classes with operator methods, so a program using them is built on the general path (several times
+slower than typed code), where operator methods dispatch on the run-time class (dunderrt.py). `int` is still 64 bits: a numerator beyond it is an `OverflowError`.
+
+- `fractions.Fraction`: `Fraction(a, b)`, `Fraction("3/4")`, `Fraction("0.125")`, `Fraction(0.75)`, `Fraction(other)`; `+ - * / // % **` with ints, Fractions and
+  floats (a float gives a float), `== < <= > >=`, `abs round(x[, n]) int float math.floor math.ceil`, `limit_denominator`, `numerator`, `denominator`,
+  `is_integer`, `as_integer_ratio`, `Fraction.from_float`, `sum / min / max / sorted`, dict keys and set members. `str`/`repr` as CPython (`3/4`, `Fraction(3, 4)`).
+  Not built: `Fraction.from_decimal`, `format` specs, `divmod`, `decimal` (refused by name).
+- `enum`: `Enum`, `IntEnum`, `StrEnum`, `auto()`, `@unique`. Members print as `Color.RED`, repr `<Color.RED: 1>`; `Color(1)` (ValueError `1 is not a valid Color`),
+  `Color["RED"]` (KeyError), `for c in Color`, `list(Color)`, `len(Color)`, `Color.__members__`, aliases, `.name`, `.value`, methods, members as dict keys and set
+  members, `==` / `is`. An `IntEnum` member compares, adds and indexes like its value (`int(m)`, `m + 1`, `lst[m]`). Refused by name: `Flag`/`IntFlag`, the
+  functional API, mixed-in bases (`class C(str, Enum)`), `__init__`/`__new__` in an enum, class methods. `isinstance(m, int)` is False.
+- `collections.namedtuple("P", "x y", defaults=[..])`, `class P(NamedTuple)` (annotations, defaults, methods) and `class P(namedtuple(..))`: fields, indexing, unpacking,
+  iteration, `==` with tuples, ordering, hashing, `repr` `P(x=1, y=2)`, `_asdict()`, `_replace(x=..)`, `P._make(xs)`, `P._fields`, `count`, `index`. Refused:
+  `rename=`, `module=`, `__new__`, `_field_defaults`. Slices `p[1:]` and `isinstance(p, tuple)` are not built. `collections.ChainMap(*maps)`: lookups, `get`, `in`,
+  `len`, iteration, `keys values items`, writes to the first map, `new_child`, `.parents`, `.maps`, `update`, `pop`, `setdefault`, `copy`. An `OrderedDict` kept in a class
+  field or at module level (not built by the typed collections pass above) is a class with `move_to_end`, `popitem(last=)`, `pop`, `get`, `setdefault`, `update`, `copy`, `repr`.
+- `random.Random(seed)`: its own MT19937 state, bit for bit with CPython 3.12 for an int seed: `random randint randrange choice shuffle sample uniform gauss
+  getrandbits choices expovariate triangular seed`, with the same exceptions. Any number of generators, in fields or passed to functions. In a program that also calls
+  `random.randint(..)` the module functions run on a hidden generator, seeded by `random.seed(<int>)`. Refused: no seed, a str/float/None seed, `SystemRandom`,
+  `getstate`, `randbytes`, other distributions; `getrandbits(k)` beyond 62 bits is a RuntimeError.
+- `keyword`: `iskeyword`, `issoftkeyword`, `kwlist`, `softkwlist`. `calendar`: `isleap leapdays weekday monthrange monthcalendar`, `month_name month_abbr day_name day_abbr`,
+  `MONDAY`..`SUNDAY`, `month(y, m[, w, l])`, `prmonth(y, m)` (`weekday` and `monthrange` give `calendar.Day` members, which print as ints and as `calendar.TUESDAY` in a tuple;
+  `monthrange(y, m)[1]` is a plain int and stays on the typed path). Refused: `calendar.calendar`, the Calendar classes, `setfirstweekday`.
+- `abc`: `ABC`, `ABCMeta`, `abstractmethod` are dropped (an abstract class can be instantiated). `array.array(tc, it)` for `b B h H i I l L q Q d`: `append extend insert pop
+  remove index count reverse tolist byteswap`, indexing, `len`, iteration, range-checked values, `repr`; refused: `f`, `u`, `tobytes`, `frombytes`, `tofile`.
+- `io.StringIO(text)`: `write writelines getvalue read readline readlines seek tell truncate close`, iteration, `print(.., file=buf)`. `csv.reader(io.StringIO(text))` and
+  `csv.DictReader(io.StringIO(text))` read the text; `csv.writer(buf)` / `csv.DictWriter(buf, ..)` write into a StringIO; `list(csv.DictReader(..))` gives
+  `list[dict[str, str]]` (general path); `json.load(io.StringIO(text))` is `json.loads(text)`.
+  `io.BytesIO` and the rest of `io` are refused by name.
+- Also: user classes may define `__add__ __sub__ __mul__ __truediv__ __floordiv__ __mod__ __pow__` (and the `__r..__` forms), `__neg__ __pos__ __abs__ __bool__ __int__ __float__
+  __round__ __floor__ __ceil__ __trunc__ __index__ __hash__ __eq__ __len__ __getitem__ __setitem__ __delitem__ __contains__`; instances hash and compare by identity unless the
+  class says otherwise. `d1 | d2` on dicts, `type(x).__name__`, `x.__class__.__name__`, `Cls(*xs)` for a class with a fixed `__init__`.

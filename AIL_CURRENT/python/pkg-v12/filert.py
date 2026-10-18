@@ -23,6 +23,12 @@ with open(os.path.join(HERE, 'ailproc_core.h'), 'r', encoding='utf-8') as _f:   
     PROCCORE = _f.read()
 with open(os.path.join(HERE, 'ailpath_core.h'), 'r', encoding='utf-8') as _f:      # stage G10
     PATHCORE = _f.read()
+with open(os.path.join(HERE, 'ailurl_core.h'), 'r', encoding='utf-8') as _f:       # stage G12
+    URLCORE = _f.read()
+with open(os.path.join(HERE, 'ailhttp_core.h'), 'r', encoding='utf-8') as _f:      # stage G12
+    HTTPCORE = _f.read()
+with open(os.path.join(HERE, 'ailsql_core.h'), 'r', encoding='utf-8') as _f:       # stage G11
+    SQLCORE = _f.read()
 
 # ---------------------------------------------------------------------------------------------
 # Typed runtime: exception codes 11..16 (FileNotFoundError, PermissionError, IsADirectoryError,
@@ -65,6 +71,61 @@ PROC_EXC_EDITS = (
     ('if (code < 1 || code > 16 || n < 0', 'if (code < 1 || code > 18 || n < 0'),
     ('if (code < 1 || code > 16) code = AIL_EXC_RUNTIME;', 'if (code < 1 || code > 18) code = AIL_EXC_RUNTIME;'),
 )
+
+
+# Stage G12: URLError (30) and HTTPError (31). Codes 19..27 are sqlite3's, 28 is Exception and the user classes
+# (userexc.py) start at 29, so a program that uses urllib reserves 29 (spare), 30 and 31 and its classes start at 32.
+# Spliced in last, after the file, process and sqlite3 edits, whatever of them the table carries: the names array
+# is read, padded with empty names up to code 29 and given the two names; the three limits move to 31.
+HTTP_CODES = (30, 31)
+HTTP_NAMES = ('URLError', 'HTTPError')
+
+
+def http_exception(text):
+    """The DIE block (already carrying the file, process and sqlite3 edits) with URLError and HTTPError."""
+    import re
+    text = text.replace('AIL_EXC_TIMEDOUT = 18 };', 'AIL_EXC_TIMEDOUT = 18, AIL_EXC_URLERR = 30, AIL_EXC_HTTPERR = 31 };')
+    pattern = re.compile(r'(static const char \*ail_exception_name\(int code\) \{\n\s*static const char \*names\[\] =\s*\{)(.*?)(\};)', re.S)
+    found = pattern.search(text)
+    if not found:
+        raise AssertionError('DIE block changed; update filert.http_exception (names)')
+    names = re.findall(r'"([^"]*)"', found.group(2))
+    names += [''] * (30 - len(names)) + list(HTTP_NAMES)
+    text = text[:found.start()] + found.group(1) + ', '.join('"%s"' % n for n in names) + found.group(3) + text[found.end():]
+    for old, new in ((r'return code >= 1 && code <= \d+ \? names\[code\]', 'return code >= 1 && code <= 31 ? names[code]'),
+                     (r'code > \d+ \|\| n < 0', 'code > 31 || n < 0'),
+                     (r'if \(code < 1 \|\| code > \d+\) code = AIL_EXC_RUNTIME;', 'if (code < 1 || code > 31) code = AIL_EXC_RUNTIME;')):
+        text, count = re.subn(old, new, text)
+        if count != 1:
+            raise AssertionError('DIE block changed; update filert.http_exception: ' + old)
+    return text
+
+
+# Stage G11: the sqlite3 exception classes, codes 19..27 (pyfunc.EXC_NAMES), on top of whatever the table
+# already holds (the file edits, and the subprocess ones when the program has them).
+SQL_EXC_NAMES = ('sqlite3.Error', 'sqlite3.DatabaseError', 'sqlite3.OperationalError', 'sqlite3.IntegrityError',
+                 'sqlite3.ProgrammingError', 'sqlite3.InterfaceError', 'sqlite3.DataError', 'sqlite3.InternalError',
+                 'sqlite3.NotSupportedError')
+
+
+def sql_exception(text):
+    """The DIE block (already carrying the file edits, and the subprocess ones if present) with codes 19..27."""
+    if 'AIL_EXC_TIMEDOUT = 18 };' in text:
+        last, tail, pad = 18, '"CalledProcessError", "TimeoutExpired"};', ''
+    else:
+        last, tail, pad = 16, '"UnsupportedOperation"};', ', "RuntimeError", "RuntimeError"'
+    names = ', '.join('"%s"' % n for n in SQL_EXC_NAMES)
+    edits = (
+        ('return code >= 1 && code <= %d ? names[code]' % last, 'return code >= 1 && code <= 27 ? names[code]'),
+        ('if (code < 1 || code > %d || n < 0' % last, 'if (code < 1 || code > 27 || n < 0'),
+        ('if (code < 1 || code > %d) code = AIL_EXC_RUNTIME;' % last, 'if (code < 1 || code > 27) code = AIL_EXC_RUNTIME;'),
+        (tail, tail[:-2] + pad + ',\n         ' + names + '};'),
+    )
+    for old, new in edits:
+        if text.count(old) != 1:
+            raise AssertionError('DIE block changed; update filert.sql_exception: ' + old)
+        text = text.replace(old, new)
+    return text
 
 
 def proc_exception(text):
@@ -317,8 +378,89 @@ static ail_str ailt_pp_readlink(ail_sarena *A, ail_str p) { ailf_buf b; AILT_CHE
 static ail_str ailt_pp_repr(ail_sarena *A, ail_str s) { ailf_buf b; AILT_CHECK(ailf_repr_buf(s.p, s.n, &b)); return ailt_adopt_str(A, &b); }
 '''
 
-_TYPED_BY_KIND = {'file': TYPED, 'proc': TYPED_PROC, 'path': TYPED_PATH}
+TYPED_URL = r'''
+/* ---- G12 typed adapters: the urllib.parse primitives of urllower.URL_PRIMS over ailurl_core.h ---- */
+static ail_str ailt_ur_unquote(ail_sarena *A, ail_str s, int64_t plus) { ailf_buf b; AILT_CHECK(ailu_unquote(s.p, s.n, plus, &b)); return ailt_adopt_str(A, &b); }
+static ail_str ailt_ur_repr(ail_sarena *A, ail_str s) { ailf_buf b; AILT_CHECK(ailu_repr(s.p, s.n, &b)); return ailt_adopt_str(A, &b); }
+'''
+
+TYPED_HTTP = r'''
+/* ---- G12 typed adapters: the HTTP primitives of urllower.HTTP_PRIMS over ailhttp_core.h (libcurl) ---- */
+static int64_t ailt_ht_begin(ail_str m, ail_str u, int64_t us) { AILT_CHECK(ailh_begin(m.p, m.n, u.p, u.n, us)); return 0; }
+static int64_t ailt_ht_hdr(ail_str n, ail_str v) { AILT_CHECK(ailh_hdr_add(n.p, n.n, v.p, v.n)); return 0; }
+static int64_t ailt_ht_body(ail_bytes d) { AILT_CHECK(ailh_set_body(d.p, d.n)); return 0; }
+static int64_t ailt_ht_perform(void) { int64_t h = ailh_perform(); if (h < 0) ailt_fraise(); return h; }
+static int64_t ailt_ht_failed(int64_t h) { return ailh_failed(h); }
+static ail_str ailt_ht_errtext(ail_sarena *A, int64_t h) { ailf_buf b; AILT_CHECK(ailh_errtext(h, &b)); return ailt_adopt_str(A, &b); }
+static int64_t ailt_ht_status(int64_t h) { return ailh_status(h); }
+static ail_str ailt_ht_reason(ail_sarena *A, int64_t h) { ailf_buf b; AILT_CHECK(ailh_reason(h, &b)); return ailt_adopt_str(A, &b); }
+static int64_t ailt_ht_nhdr(int64_t h) { return ailh_nhdr(h); }
+static ail_str ailt_ht_hname(ail_sarena *A, int64_t h, int64_t i) { ailf_buf b; AILT_CHECK(ailh_hname(h, i, &b)); return ailt_adopt_str(A, &b); }
+static ail_str ailt_ht_hval(ail_sarena *A, int64_t h, int64_t i) { ailf_buf b; AILT_CHECK(ailh_hval(h, i, &b)); return ailt_adopt_str(A, &b); }
+static int64_t ailt_ht_hfind(int64_t h, ail_str name) { return ailh_hfind(h, name.p, name.n); }
+static ail_bytes ailt_ht_read(ail_barena *A, int64_t h, int64_t amt) { ailf_buf b; AILT_CHECK(ailh_read(h, amt, &b)); return ailt_adopt_bytes(A, &b); }
+static int64_t ailt_ht_close(int64_t h) { return ailh_close(h); }
+static int64_t ailt_ht_free(int64_t h) { return ailh_free(h); }
+static int64_t ailt_ht_eset(int64_t h, int64_t kind, int64_t code, ail_str u, ail_str r, ail_str m) {
+    AILT_CHECK(ailh_eset(h, kind, code, u.p, u.n, r.p, r.n, m.p, m.n)); return 0;
+}
+static int64_t ailt_ht_ecode(void) { return ailh_ecode(); }
+static int64_t ailt_ht_eh(void) { return ailh_eh(); }
+static ail_str ailt_ht_eurl(ail_sarena *A) { ailf_buf b; AILT_CHECK(ailh_eurl(&b)); return ailt_adopt_str(A, &b); }
+static ail_str ailt_ht_ereason(ail_sarena *A) { ailf_buf b; AILT_CHECK(ailh_ereason(&b)); return ailt_adopt_str(A, &b); }
+static ail_str ailt_ht_emsg(ail_sarena *A) { ailf_buf b; AILT_CHECK(ailh_emsg(&b)); return ailt_adopt_str(A, &b); }
+'''
+
+
+TYPED_SQL = r'''
+/* ---- G11 typed adapters: the sqlite3 primitives of sqllower.SQLP over ailsql_core.h ---- */
+static void ailt_sraise(void) {
+    ail_raise_value_adopt(ail_exception_new(ails_e.code, (const uint8_t *)ails_e.msg, (int64_t)strlen(ails_e.msg),
+                                            (_Bool)ailt_ascii(ails_e.msg)));
+}
+#define AILT_SCHECK(call) do { if ((call) < 0) ailt_sraise(); } while (0)
+static int64_t ailt_sq_open(ail_str p, int64_t iso) { int64_t h = ails_connect(p.p, p.n, iso); if (h < 0) ailt_sraise(); return h; }
+static int64_t ailt_sq_close(int64_t h) { AILT_SCHECK(ails_close(h)); return 0; }
+static int64_t ailt_sq_commit(int64_t h) { AILT_SCHECK(ails_commit(h)); return 0; }
+static int64_t ailt_sq_rollback(int64_t h) { AILT_SCHECK(ails_rollback(h)); return 0; }
+static int64_t ailt_sq_cursor(int64_t h) { int64_t r = ails_cursor(h); if (r < 0) ailt_sraise(); return r; }
+static int64_t ailt_sq_prep(int64_t h, ail_str s) { int64_t r = ails_prep(h, s.p, s.n); if (r < 0) ailt_sraise(); return r; }
+static int64_t ailt_sq_named(int64_t h) { AILT_SCHECK(ails_set_named(h)); return h; }
+static int64_t ailt_sq_name(int64_t h, ail_str k) { AILT_SCHECK(ails_bind_name(h, k.p, k.n)); return h; }
+static int64_t ailt_sq_bi(int64_t h, int64_t v) { AILT_SCHECK(ails_bind_int(h, v)); return h; }
+static int64_t ailt_sq_bf(int64_t h, double v) { AILT_SCHECK(ails_bind_float(h, v)); return h; }
+static int64_t ailt_sq_bs(int64_t h, ail_str s) { AILT_SCHECK(ails_bind_text(h, s.p, s.n)); return h; }
+static int64_t ailt_sq_bb(int64_t h, ail_bytes d) { AILT_SCHECK(ails_bind_blob(h, d.p, d.n)); return h; }
+static int64_t ailt_sq_bn(int64_t h) { AILT_SCHECK(ails_bind_null(h)); return h; }
+static int64_t ailt_sq_exec(int64_t h) { AILT_SCHECK(ails_exec(h)); return h; }
+static int64_t ailt_sq_mbegin(int64_t h) { AILT_SCHECK(ails_mbegin(h)); return h; }
+static int64_t ailt_sq_mrow(int64_t h) { AILT_SCHECK(ails_mrow(h)); return h; }
+static int64_t ailt_sq_mstep(int64_t h) { AILT_SCHECK(ails_mstep(h)); return h; }
+static int64_t ailt_sq_mend(int64_t h) { AILT_SCHECK(ails_mend(h)); return h; }
+static int64_t ailt_sq_script(int64_t h, ail_str s) { int64_t r = ails_script(h, s.p, s.n); if (r < 0) ailt_sraise(); return r; }
+static int64_t ailt_sq_next(int64_t h) { int r = ails_next(h); if (r < 0) ailt_sraise(); return r; }
+static int64_t ailt_sq_cols(int64_t h, int64_t n) { AILT_SCHECK(ails_cols(h, n)); return 0; }
+static int64_t ailt_sq_isnull(int64_t h, int64_t i) { int r = ails_isnull(h, i); if (r < 0) ailt_sraise(); return r; }
+static int64_t ailt_sq_ci(int64_t h, int64_t i) { int err; int64_t v = ails_col_int(h, i, &err); if (err) ailt_sraise(); return v; }
+static double ailt_sq_cf(int64_t h, int64_t i) { int err; double v = ails_col_float(h, i, &err); if (err) ailt_sraise(); return v; }
+static ail_str ailt_sq_cs(ail_sarena *A, int64_t h, int64_t i) { ailf_buf b; AILT_SCHECK(ails_col_text(h, i, &b)); return ailt_adopt_str(A, &b); }
+static ail_bytes ailt_sq_cb(ail_barena *A, int64_t h, int64_t i) { ailf_buf b; AILT_SCHECK(ails_col_blob(h, i, &b)); return ailt_adopt_bytes(A, &b); }
+static int64_t ailt_sq_rowcount(int64_t h) { int64_t v; AILT_SCHECK(ails_rowcount(h, &v)); return v; }
+static int64_t ailt_sq_lastrowid(int64_t h) { int64_t v; AILT_SCHECK(ails_lastrowid(h, &v)); return v; }
+static int64_t ailt_sq_haslast(int64_t h) { int64_t v; AILT_SCHECK(ails_haslast(h, &v)); return v; }
+static ail_str ailt_sq_lastshow(ail_sarena *A, int64_t h) { ailf_buf b; AILT_SCHECK(ails_lastshow(h, &b)); return ailt_adopt_str(A, &b); }
+static int64_t ailt_sq_intx(int64_t h) { int64_t v = ails_in_transaction(h); if (v < 0) ailt_sraise(); return v; }
+static int64_t ailt_sq_total(int64_t h) { int64_t v = ails_total_changes(h); if (v < 0) ailt_sraise(); return v; }
+static int64_t ailt_sq_free(int64_t h) { ails_cur_free(h); return 0; }
+static int64_t ailt_sq_drop(int64_t h) { ails_cur_drop(h); return 0; }
+static int64_t ailt_sq_blen(int64_t h, int64_t n) { AILT_SCHECK(ails_blen(h, n)); return h; }
+static ail_str ailt_sq_reprb(ail_sarena *A, ail_bytes d) { ailf_buf b; AILT_SCHECK(ails_repr_bytes(d.p, d.n, &b)); return ailt_adopt_str(A, &b); }
+'''
+
+_TYPED_BY_KIND = {'file': TYPED, 'proc': TYPED_PROC, 'path': TYPED_PATH, 'sql': TYPED_SQL, 'http': TYPED_HTTP, 'url': TYPED_URL}
 for _name in filelib.PRIMS:
+    if _name == '_ail_sq_bind':       # resolved to _ail_sq_bi / bf / bs / bb by pyfunc._fileprim_value
+        continue
     assert ('ailt_' + filelib.c_name(_name) + '(') in _TYPED_BY_KIND[filelib.prim_kind(_name)], _name
 
 
@@ -330,7 +472,13 @@ def register(ORDER, SOURCE, REQUIRES):
             ('PROCCORE', PROCCORE, ['FILECORE']),
             ('PROCIO', TYPED_PROC, ['PROCCORE', 'FILEIO', 'PROCEXC']),
             ('PATHCORE', PATHCORE, ['FILECORE']),
-            ('PATHIO', TYPED_PATH, ['PATHCORE', 'FILEIO'])):
+            ('PATHIO', TYPED_PATH, ['PATHCORE', 'FILEIO']),
+            ('URLCORE', URLCORE, ['FILECORE']),
+            ('URLIO', TYPED_URL, ['URLCORE', 'FILEIO']),
+            ('HTTPCORE', HTTPCORE, ['FILECORE']),
+            ('HTTPIO', TYPED_HTTP, ['HTTPCORE', 'FILEIO', 'HTTPEXC']),
+            ('SQLCORE', SQLCORE, ['FILECORE']),
+            ('SQLIO', TYPED_SQL, ['SQLCORE', 'FILEIO', 'SQLEXC'])):
         ORDER.append(name)
         SOURCE[name] = text
         REQUIRES[name] = requires

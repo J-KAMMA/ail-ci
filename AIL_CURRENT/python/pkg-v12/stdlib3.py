@@ -131,8 +131,13 @@ class Imports:
 
 
 def binds(tree, name):
-    """Whether the program binds `name` itself (a variable, parameter, function or class)."""
+    """Whether the program binds `name` itself (a variable, parameter, function or class). A method is not a
+    binding of its name in the module's scope (`def random(self)` in a class does not hide `import random`)."""
+    methods = {id(n) for c in ast.walk(tree) if isinstance(c, ast.ClassDef) for n in c.body
+               if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
     for each in ast.walk(tree):
+        if id(each) in methods:
+            continue
         if isinstance(each, ast.Name) and each.id == name and not isinstance(each.ctx, ast.Load):
             return True
         if isinstance(each, ast.arg) and each.arg == name:

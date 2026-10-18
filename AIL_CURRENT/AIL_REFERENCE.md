@@ -50,7 +50,7 @@ sys.exit(main())
   type in its function: give a new type a new name.
 - Top level: imports, constants, read-only tables (`N = 10`, `STOP = {"a"}`, `T = {"k": 1}`),
   `@dataclass` classes (methods, no inheritance), functions, `sys.exit(main())`. No globals you
-  change, nested `def`, own exception classes.
+  change, nested `def`, own exception classes (MORE).
 - `int` is 64-bit (`OverflowError`, no big ints). Types: int, float, str, bool, bytes, `list`,
   `dict`, `set`, `tuple[int, str]` (`return a, b`; `a, b = f()`), dataclasses. `None` only for a
   class (`nxt: Optional["Node"]`); else a sentinel (-1, "").
@@ -58,8 +58,8 @@ sys.exit(main())
   return a new one.
 - `print` takes numbers, str, bool, tuples, never a list, dict or `*xs`: `" ".join([str(x) for x
   in xs])`. A dict literal only as `d: dict[str, int] = {...}`.
-- Exceptions: built-in kinds by name (`except (ValueError, KeyError):`, no bare `except`); `e`
-  has no text (`str(e)` is refused): print your own.
+- Exceptions: kinds by name (`except (ValueError, KeyError) as e:`, no bare `except`);
+  `print(e)`, `str(e)`, `e.args` read like CPython's.
 - Bind before use: `words = s.split()`, `x = heapq.heappop(h)` (not inside another call). Sort
   with `xs.sort(key=lambda ...)`; `min`/`max` take no `key=`.
 - Text: `for line in sys.stdin` (keeps `\n`), `input()`, `sys.stdin.read()`, `int(s)`
@@ -69,4 +69,4 @@ sys.exit(main())
   `itertools`, `functools`, `random` (after `random.seed(n)`).
 - Speed: fix `slow:` hints (`x in list`, `.pop(0)`: set, deque).
 
-MORE (`sed -n A,Bp AIL_REFERENCE_MORE.md`): Commands 8-20, Text I/O 22-56, Bytes 58-121, Syntax 123-134, Local names 136-161, Numbers 163-177, Structs 179-212, Trees 214-256, Lists 258-270, Sort keys 272-279, Nested lists 281-298, Dicts 300-309, Sets 311-329, Strings 331-356, Regular expressions 358-414, Collections 416-496, Tuples, lambdas (Python syntax) 498-557, Libraries 559-640, Heaps 642-657, Loops 659-666, Exceptions 668-675, Refused 677-718, Word count 720-752, Dijkstra 754-796, BFS 798-842, Modules 844-872, Speed 874-893, Parallel 895-942.
+MORE (`sed -n A,Bp AIL_REFERENCE_MORE.md`): Commands 8-20, Text I/O 22-56, Bytes 58-121, Syntax 123-134, Local names 136-161, Numbers 163-177, Structs 179-212, Trees 214-256, Lists 258-270, Sort keys 272-279, Nested lists 281-298, Dicts 300-309, Sets 311-329, Strings 331-356, Regular expressions 358-414, Collections 416-496, Tuples, lambdas (Python syntax) 498-557, Libraries 559-662, Heaps 664-679, Loops 681-688, Exceptions 690-705, Refused 707-748, Word count 750-782, Dijkstra 784-826, BFS 828-872, Modules 874-902, Speed 904-923, Parallel 925-1008.

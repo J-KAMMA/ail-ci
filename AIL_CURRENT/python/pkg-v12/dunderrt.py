@@ -1,0 +1,356 @@
+# -*- coding: utf-8 -*-
+"""dunderrt.py -- run-time dispatch of operator special methods on the general path (library batch 5).
+
+The general-path runtime (cruntime.OBJ2) knows the special methods the emitter binds statically
+(`__eq__`, `__lt__`, `__len__`, `__getitem__`, `__contains__` on a receiver whose class the emitter
+can tell, plus the per-class hooks `__repr__`, `__str__`, `__lt__`, `__iter__`, `__next__`). A program
+whose classes define arithmetic or hashing special methods (`__add__`, `__neg__`, `__hash__`, `__bool__`,
+`__float__`, ... ; the Fraction, Enum and namedtuple preludes do) needs the other receivers too: `a + b`
+where nothing proves the class of `a`, `sum(xs)` starting from 0, `1 + x`, a dict keyed by instances.
+
+`patch(c_text)` rewrites the generated C of such a program only: every operand-kind miss in the runtime
+(`unsupported operand type(s)`, `unhashable type`, `object of type ... has no len()`, ...) asks the class
+chain of an instance operand first, through per-class tables filled by the program's setup code
+(`classobj.d1[]`, `classobj.d2[]`). It is on in every general-path program that has a class (a program
+with no class gets the runtime text it always had); the cost is a class-table lookup on the paths that were errors, plus about 2% on
+the comparison of instances.
+
+Differences from CPython (declared): there is no `NotImplemented` (a method that cannot handle its operand
+raises TypeError itself), the reflected method of a subclass is not tried first, and an exception raised
+inside an `__eq__` called from a container lookup (`x in list`, a dict probe) is dropped (the comparison
+counts as unequal). Instances without `__eq__` / `__hash__` compare and hash by identity.
+"""
+
+# special method -> table index; D1 = (self), D2 = (self, other)
+D1 = {'__neg__': 'NEG', '__pos__': 'POS', '__abs__': 'ABS', '__hash__': 'HASH', '__bool__': 'BOOL',
+      '__int__': 'INT', '__float__': 'FLOAT', '__floor__': 'FLOOR', '__ceil__': 'CEIL', '__trunc__': 'TRUNC',
+      '__len__': 'LEN', '__index__': 'INDEX'}
+D2 = {'__add__': 'ADD', '__radd__': 'RADD', '__sub__': 'SUB', '__rsub__': 'RSUB', '__mul__': 'MUL',
+      '__rmul__': 'RMUL', '__truediv__': 'TRUEDIV', '__rtruediv__': 'RTRUEDIV', '__floordiv__': 'FLOORDIV',
+      '__rfloordiv__': 'RFLOORDIV', '__mod__': 'MOD', '__rmod__': 'RMOD', '__pow__': 'POW', '__rpow__': 'RPOW',
+      '__eq__': 'EQ', '__gt__': 'GT', '__round__': 'ROUND', '__getitem__': 'GETITEM', '__contains__': 'CONTAINS',
+      '__delitem__': 'DELITEM'}
+D3 = {'__setitem__': 'SETITEM'}
+# an operator method that is a hook here; a program defining one of these turns the patch on
+HOOKED = frozenset(D1) | frozenset(D2) | frozenset(D3)
+# of those, the ones the emitter already binds for a receiver whose class it can tell (a program defining only
+# these keeps the runtime text it has always had)
+ALREADY_BOUND = frozenset(('__eq__', '__len__', '__getitem__', '__contains__'))
+
+ENUMS = '''
+enum { AIL_D1_NEG, AIL_D1_POS, AIL_D1_ABS, AIL_D1_HASH, AIL_D1_BOOL, AIL_D1_INT, AIL_D1_FLOAT, AIL_D1_FLOOR,
+       AIL_D1_CEIL, AIL_D1_TRUNC, AIL_D1_LEN, AIL_D1_INDEX, AIL_ND1 };
+enum { AIL_D2_ADD, AIL_D2_RADD, AIL_D2_SUB, AIL_D2_RSUB, AIL_D2_MUL, AIL_D2_RMUL, AIL_D2_TRUEDIV, AIL_D2_RTRUEDIV,
+       AIL_D2_FLOORDIV, AIL_D2_RFLOORDIV, AIL_D2_MOD, AIL_D2_RMOD, AIL_D2_POW, AIL_D2_RPOW, AIL_D2_EQ, AIL_D2_GT,
+       AIL_D2_ROUND, AIL_D2_GETITEM, AIL_D2_CONTAINS, AIL_D2_DELITEM, AIL_ND2 };
+enum { AIL_D3_SETITEM, AIL_ND3 };
+typedef ail_st (*ail_d3_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj, ail_obj);
+typedef ail_st (*ail_d1_fn)(ail_ctx *, ail_obj *, ail_obj);
+typedef ail_st (*ail_d2_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj);
+'''
+
+FUNCS = '''
+/* ---- operator special methods on instances (dunderrt.py) ---- */
+static ail_ctx *ail__gcx;
+static inline ail_st ail_iter(ail_ctx *cx, ail_obj *out, ail_obj obj);
+static inline ail_st ail_next(ail_ctx *cx, ail_obj *out, ail_obj iterobj);
+static inline ail_d1_fn ail_dun1(ail_obj x, int i) {
+    if (x.tag != AIL_T_INST) return 0;
+    for (ail_obj k = ((ail_instobj *)x.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base)
+        if (((ail_classobj *)k.o)->d1[i]) return ((ail_classobj *)k.o)->d1[i];
+    return 0;
+}
+static inline ail_d3_fn ail_dun3(ail_obj x, int i) {
+    if (x.tag != AIL_T_INST) return 0;
+    for (ail_obj k = ((ail_instobj *)x.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base)
+        if (((ail_classobj *)k.o)->d3[i]) return ((ail_classobj *)k.o)->d3[i];
+    return 0;
+}
+static inline ail_d2_fn ail_dun2(ail_obj x, int i) {
+    if (x.tag != AIL_T_INST) return 0;
+    for (ail_obj k = ((ail_instobj *)x.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base)
+        if (((ail_classobj *)k.o)->d2[i]) return ((ail_classobj *)k.o)->d2[i];
+    return 0;
+}
+static void ail__dun_tname(char *buf, size_t n, ail_obj x) {
+    if (x.tag == AIL_T_INST) {
+        ail_obj c = ((ail_instobj *)x.o)->cls;
+        if (c.tag == AIL_T_CLASS) {
+            ail_str s = ail_view_to_str(((ail_classobj *)c.o)->name);
+            size_t k = 0;
+            for (int64_t i = 0; i < s.n && k + 1 < n; i++) { uint32_t ch = (uint32_t)ail_chr(s, i); buf[k++] = ch < 128 ? (char)ch : '?'; }
+            buf[k] = 0; return;
+        }
+    }
+    snprintf(buf, n, "%s", ail_type_name(x.tag));
+}
+__attribute__((noinline, cold)) static ail_st ail_dun_noattr(ail_ctx *cx, ail_obj inst, const char *name_for_msg) {
+    char b2[200], tn[80]; ail__dun_tname(tn, sizeof tn, inst);
+    snprintf(b2, sizeof b2, "'%s' object has no attribute '%s'", tn, name_for_msg);
+    return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, b2);
+}
+__attribute__((noinline)) static ail_st ail_dun_binop(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, int fwd, int rev, const char *op) {
+    ail_d2_fn f = ail_dun2(a, fwd);
+    if (f) return f(cx, out, a, b);
+    f = ail_dun2(b, rev);
+    if (f) return f(cx, out, b, a);
+    char buf[240], na[80], nb[80];
+    ail__dun_tname(na, sizeof na, a); ail__dun_tname(nb, sizeof nb, b);
+    snprintf(buf, sizeof buf, "unsupported operand type(s) for %s: '%s' and '%s'", op, na, nb);
+    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+}
+static inline int ail_obj_truthy(ail_obj x);
+static inline int ail_member_eq(ail_obj a, ail_obj b);
+static inline ail_st ail_dun_pos(ail_ctx *cx, ail_obj *out, ail_obj x) {
+    if (x.tag == AIL_T_INST) { ail_d1_fn f = ail_dun1(x, AIL_D1_POS); if (f) return f(cx, out, x); }
+    else if (x.tag == AIL_T_INT || x.tag == AIL_T_FLOAT) { *out = x; return AIL_OK; }
+    else if (x.tag == AIL_T_BOOL) { *out = ail_box_int(x.i); return AIL_OK; }
+    char buf[140], tn[80]; ail__dun_tname(tn, sizeof tn, x);
+    snprintf(buf, sizeof buf, "bad operand type for unary +: '%s'", tn);
+    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+}
+static inline ail_st ail_dun_contains(ail_ctx *cx, int *out, ail_obj c, ail_obj item) {
+    ail_d2_fn f = ail_dun2(c, AIL_D2_CONTAINS);
+    if (f) { ail_obj r; ail_st st = f(cx, &r, c, item); if (st != AIL_OK) return st; *out = ail_obj_truthy(r); return AIL_OK; }
+    AIL_FRAME_ENTER(cx, fr, 2);
+    ail_st st = ail_iter(cx, &fr.slots[0], c);
+    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    for (;;) {
+        ail_obj e; st = ail_next(cx, &e, fr.slots[0]);
+        if (st == AIL_STOP) { *out = 0; AIL_FRAME_LEAVE(cx, fr); return AIL_OK; }
+        if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+        fr.slots[1] = e;
+        if (ail_member_eq(e, item)) { *out = 1; AIL_FRAME_LEAVE(cx, fr); return AIL_OK; }
+    }
+}
+__attribute__((noinline)) static int ail_dun_truthy(ail_obj x);
+static inline int ail_truthy_u(ail_obj x) { return __builtin_expect(x.tag == AIL_T_INST, 0) ? ail_dun_truthy(x) : ail_obj_truthy(x); }
+__attribute__((noinline)) static int ail_dun_truthy(ail_obj x) {
+    ail_d1_fn f = ail_dun1(x, AIL_D1_BOOL);
+    ail_obj r;
+    if (!f) f = ail_dun1(x, AIL_D1_LEN);
+    if (!f || !ail__gcx) return 1;
+    if (f(ail__gcx, &r, x) != AIL_OK) return 1;
+    return ail_obj_truthy(r);
+}
+__attribute__((noinline)) static int ail_dun_cmp_gt(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b, ail_st *stp) {
+    ail_d2_fn gf = ail_dun2(a, AIL_D2_GT);
+    ail_obj r;
+    if (!gf) return 0;
+    *stp = gf(cx, &r, a, b);
+    if (*stp != AIL_OK) return 1;
+    if (ail_obj_truthy(r)) { *out = 1; *stp = AIL_OK; return 1; }
+    return 0;
+}
+__attribute__((noinline)) static int ail_dun_cmp_rev(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b, ail_st *stp) {
+    (void)a;
+    for (ail_obj k = ((ail_instobj *)b.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+        ail_classobj *kc = (ail_classobj *)k.o;
+        ail_obj r;
+        if (!kc->lt_fn) continue;
+        *stp = kc->lt_fn(cx, &r, b, a); if (*stp != AIL_OK) return 1;
+        if (ail_obj_truthy(r)) { *out = 1; return *stp = AIL_OK, 1; }
+        ail_d2_fn gf = ail_dun2(b, AIL_D2_GT);
+        if (gf) { *stp = gf(cx, &r, b, a); if (*stp != AIL_OK) return 1; if (ail_obj_truthy(r)) { *out = -1; return *stp = AIL_OK, 1; } }
+        *out = 0; *stp = AIL_OK; return 1;
+    }
+    return 0;
+}
+__attribute__((noinline)) static int ail_dun_eq_raw(ail_obj a, ail_obj b) {
+    ail_d2_fn f = ail_dun2(a, AIL_D2_EQ);
+    ail_obj r;
+    if (f && ail__gcx) { if (f(ail__gcx, &r, a, b) != AIL_OK) return 0; return ail_obj_truthy(r); }
+    f = ail_dun2(b, AIL_D2_EQ);
+    if (f && ail__gcx) { if (f(ail__gcx, &r, b, a) != AIL_OK) return 0; return ail_obj_truthy(r); }
+    return a.tag == b.tag && a.o == b.o;
+}
+'''
+
+HASH_CASE = '''        case AIL_T_INST: return ail_dun_hash(cx, out, x);
+'''
+
+HASH_FUNC = '''static inline ail_st ail_obj_hash(ail_ctx *cx, int64_t *out, ail_obj x);
+__attribute__((noinline)) static ail_st ail_dun_hash(ail_ctx *cx, int64_t *out, ail_obj x) {
+    ail_d1_fn hf = ail_dun1(x, AIL_D1_HASH);
+    if (hf) {
+        ail_obj hr; ail_st hst = hf(cx, &hr, x); if (hst != AIL_OK) return hst;
+        if (!(hr.tag == AIL_T_INST && hr.o == x.o)) return ail_obj_hash(cx, out, hr);
+    } else if (ail_dun2(x, AIL_D2_EQ) || ((ail_classobj *)((ail_instobj *)x.o)->cls.o)->dc) {
+        char hb[120], hn[80]; ail__dun_tname(hn, sizeof hn, x);
+        snprintf(hb, sizeof hb, "unhashable type: '%s'", hn);
+        return ail_raise_c(cx, AIL_B_TYPEERROR, hb);
+    }
+    uint64_t hv = (uint64_t)(uintptr_t)x.o; hv ^= hv >> 33; hv *= 0xff51afd7ed558ccdULL; hv ^= hv >> 33;
+    *out = (int64_t)hv; return AIL_OK;
+}
+'''
+
+
+def _binop_guard(fwd, rev, op):
+    return ('if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) return ail_dun_binop(cx, out, a, b, '
+            'AIL_D2_%s, AIL_D2_%s, "%s");\n    ' % (fwd, rev, op))
+
+
+def _edits():
+    """(old, new) text replacements, each applied to exactly one place of the runtime."""
+    e = []
+    # tables in the class object
+    e.append(('typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or NONE */; int builtin_id;',
+              ENUMS + 'typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or NONE */; int builtin_id;'))
+    e.append(('ail_st (*lt_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj); /* user __lt__ (self, other), or 0 */ } ail_classobj;',
+              'ail_st (*lt_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj); /* user __lt__ (self, other), or 0 */\n'
+              '                 ail_st (*d1[AIL_ND1])(ail_ctx *, ail_obj *, ail_obj); /* operator methods (self), dunderrt.py */\n'
+              '                 ail_st (*d2[AIL_ND2])(ail_ctx *, ail_obj *, ail_obj, ail_obj); /* operator methods (self, other) */\n'
+              '                 ail_st (*d3[AIL_ND3])(ail_ctx *, ail_obj *, ail_obj, ail_obj, ail_obj); /* (self, key, value) */ } ail_classobj;'))
+    e.append(('c->iter_iter = 0; c->iter_next = 0; c->repr_fn = 0; c->str_fn = 0; c->lt_fn = 0;',
+              'c->iter_iter = 0; c->iter_next = 0; c->repr_fn = 0; c->str_fn = 0; c->lt_fn = 0;\n'
+              '    memset(c->d1, 0, sizeof c->d1); memset(c->d2, 0, sizeof c->d2); memset(c->d3, 0, sizeof c->d3);'))
+    # truthiness and equality
+    # ail_obj_truthy itself is left alone (the runtime's own tests stay as small as they were); bool() and `not` ask the class here,
+    # and the conditions of the program's own code are rewritten in patch()
+    e.append(('static inline ail_obj ail_to_bool(ail_obj x) { return ail_box_bool(ail_obj_truthy(x)); }',
+              'static inline ail_obj ail_to_bool(ail_obj x) { return ail_box_bool(ail_truthy_u(x)); }'))
+    e.append(('static inline ail_obj ail_op_not(ail_obj a) { return ail_box_bool(!ail_obj_truthy(a)); }',
+              'static inline ail_obj ail_op_not(ail_obj a) { return ail_box_bool(!ail_truthy_u(a)); }'))
+    e.append(('static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {\n',
+              'static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {\n'
+              '    if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) return ail_dun_eq_raw(a, b);\n'))
+    # hashing
+    e.append(('        default: {\n            char buf[64]; snprintf(buf, sizeof buf, "unhashable type: \'%s\'", ail_type_name(x.tag));\n'
+              '            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n        }\n    }\n}\nstatic inline ail_st ail_obj_cmp(',
+              HASH_CASE + '        default: {\n            char buf[64]; snprintf(buf, sizeof buf, "unhashable type: \'%s\'", ail_type_name(x.tag));\n'
+              '            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n        }\n    }\n}\nstatic inline ail_st ail_obj_cmp('))
+    # ordering: a on the left with no < answer (its > may answer), or the instance on the right (out of line, so that the
+    # comparison of two instances, the hot case of a sort, keeps its size)
+    e.append(('            if (b.tag == AIL_T_INST) { st = kc->lt_fn(cx, &r, b, a); if (st != AIL_OK) return st; if (ail_obj_truthy(r)) { *out = 1; return AIL_OK; } }\n'
+              '            *out = 0; return AIL_OK;\n        }\n    }\n',
+              '            if (b.tag == AIL_T_INST) { st = kc->lt_fn(cx, &r, b, a); if (st != AIL_OK) return st; if (ail_obj_truthy(r)) { *out = 1; return AIL_OK; } }\n'
+              '            else { ail_st gst; if (ail_dun_cmp_gt(cx, out, a, b, &gst)) return gst; }\n'
+              '            *out = 0; return AIL_OK;\n        }\n    }\n'
+              '    if (b.tag == AIL_T_INST && a.tag != AIL_T_INST) { ail_st rst; if (ail_dun_cmp_rev(cx, out, a, b, &rst)) return rst; }\n'))
+    # an attribute of a value that is not an instance is an AttributeError (the unpatched runtime reads the int as a pointer)
+    e.append(('    ail_instobj *o = (ail_instobj *)inst.o;\n    for (int64_t i = 0; i < o->n; i++) if (o->attrs[i].name_id == name_id) { *out = o->attrs[i].val; return AIL_OK; }\n',
+              '    if (__builtin_expect(inst.tag != AIL_T_INST && inst.tag != AIL_T_EXC, 0)) return ail_dun_noattr(cx, inst, name_for_msg);\n'
+              '    ail_instobj *o = (ail_instobj *)inst.o;\n    for (int64_t i = 0; i < o->n; i++) if (o->attrs[i].name_id == name_id) { *out = o->attrs[i].val; return AIL_OK; }\n'))
+    # str() of an instance: the first class of the chain that defines __str__ wins, whether or not a class below it defines
+    # __repr__ (object.__str__ only falls back to repr when no class defines __str__)
+    e.append(('            if (kc->repr_fn) break;\n        }\n    }\n    ail_obj_write_repr(cx, x, f);',
+              '        }\n    }\n    ail_obj_write_repr(cx, x, f);'))
+    # arithmetic
+    e.append(('    char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for +: \'%s\' and \'%s\'"',
+              '    ' + _binop_guard('ADD', 'RADD', '+') + 'char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for +: \'%s\' and \'%s\'"'))
+    e.append(('    char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for -: \'%s\' and \'%s\'"',
+              '    ' + _binop_guard('SUB', 'RSUB', '-') + 'char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for -: \'%s\' and \'%s\'"'))
+    e.append(('    char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for *: \'%s\' and \'%s\'"',
+              '    ' + _binop_guard('MUL', 'RMUL', '*') + 'char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for *: \'%s\' and \'%s\'"'))
+    for sym, fwd, rev in (('//', 'FLOORDIV', 'RFLOORDIV'), ('%', 'MOD', 'RMOD'), ('/', 'TRUEDIV', 'RTRUEDIV'),
+                          ('**', 'POW', 'RPOW')):
+        e.append(('    return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %s");' % sym,
+                  '    ' + _binop_guard(fwd, rev, sym) + 'return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %s");' % sym))
+    # the add in front of the dispatch helpers: they must be visible before ail_op_add
+    e.append(('/* sum(): CPython 3.12 builtin_sum_impl.', '/* sum(): CPython 3.12 builtin_sum_impl.'))
+    # unary and builtin conversions
+    e.append(('    char buf[64]; snprintf(buf, sizeof buf, "bad operand type for unary -: \'%s\'", ail_type_name(a.tag));',
+              '    if (a.tag == AIL_T_INST) { ail_d1_fn f = ail_dun1(a, AIL_D1_NEG); if (f) return f(cx, out, a); }\n'
+              '    char buf[64]; snprintf(buf, sizeof buf, "bad operand type for unary -: \'%s\'", ail_type_name(a.tag));'))
+    e.append(('    char buf[64]; snprintf(buf, sizeof buf, "bad operand type for abs(): \'%s\'", ail_type_name(x.tag));',
+              '    if (x.tag == AIL_T_INST) { ail_d1_fn f = ail_dun1(x, AIL_D1_ABS); if (f) return f(cx, out, x); }\n'
+              '    char buf[64]; snprintf(buf, sizeof buf, "bad operand type for abs(): \'%s\'", ail_type_name(x.tag));'))
+    e.append(('            case AIL_T_STR: base = 10; break;\n            default: {\n                char buf[128]; snprintf(buf, sizeof buf, "int() argument must be',
+              '            case AIL_T_STR: base = 10; break;\n'
+              '            case AIL_T_INST: {\n'
+              '                ail_d1_fn f = ail_dun1(x, AIL_D1_INT); if (!f) f = ail_dun1(x, AIL_D1_INDEX); if (!f) f = ail_dun1(x, AIL_D1_TRUNC);\n'
+              '                if (f) return f(cx, out, x);\n'
+              '            }\n            /* fall through */\n'
+              '            default: {\n                char buf[128]; snprintf(buf, sizeof buf, "int() argument must be'))
+    e.append(('        case AIL_T_STR: break;\n        default: {\n            char buf[96]; snprintf(buf, sizeof buf, "float() argument must be',
+              '        case AIL_T_STR: break;\n'
+              '        case AIL_T_INST: {\n'
+              '            ail_d1_fn f = ail_dun1(x, AIL_D1_FLOAT); if (!f) f = ail_dun1(x, AIL_D1_INDEX);\n'
+              '            if (f) { ail_obj r; ail_st st = f(cx, &r, x); if (st != AIL_OK) return st; if (r.tag == AIL_T_INT) r = ail_box_float(cx, (double)r.i); *out = r; return AIL_OK; }\n'
+              '        }\n        /* fall through */\n'
+              '        default: {\n            char buf[96]; snprintf(buf, sizeof buf, "float() argument must be'))
+    e.append(("        default: { char buf[80]; snprintf(buf, sizeof buf, \"int() argument must be a string or a number, not '%s'\", ail_type_name(x.tag));",
+              "        case AIL_T_INST: {\n"
+              "            ail_d1_fn f = ail_dun1(x, AIL_D1_INT); if (!f) f = ail_dun1(x, AIL_D1_INDEX); if (!f) f = ail_dun1(x, AIL_D1_TRUNC);\n"
+              "            if (f) return f(cx, out, x);\n"
+              "        }\n"
+              "        /* fall through */\n"
+              "        default: { char buf[80]; snprintf(buf, sizeof buf, \"int() argument must be a string or a number, not '%s'\", ail_type_name(x.tag));"))
+    e.append(("        default: { char buf[80]; snprintf(buf, sizeof buf, \"float() argument must be a string or a number, not '%s'\", ail_type_name(x.tag));",
+              "        case AIL_T_INST: {\n"
+              "            ail_d1_fn f = ail_dun1(x, AIL_D1_FLOAT); if (!f) f = ail_dun1(x, AIL_D1_INDEX);\n"
+              "            if (f) { ail_obj r; ail_st st = f(cx, &r, x); if (st != AIL_OK) return st; if (r.tag == AIL_T_INT) r = ail_box_float(cx, (double)r.i); *out = r; return AIL_OK; }\n"
+              "        }\n"
+              "        /* fall through */\n"
+              "        default: { char buf[80]; snprintf(buf, sizeof buf, \"float() argument must be a string or a number, not '%s'\", ail_type_name(x.tag));"))
+    e.append(('static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, int64_t n) {\n',
+              'static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, int64_t n) {\n'
+              '    if (x.tag == AIL_T_INST) { ail_d2_fn f = ail_dun2(x, AIL_D2_ROUND); if (f) return f(cx, out, x, has_n ? ail_box_int(n) : ail_box_none()); }\n'))
+    for fn, key in (('floor', 'FLOOR'), ('ceil', 'CEIL'), ('trunc', 'TRUNC')):
+        e.append(('static inline ail_st ail_math_%s(ail_ctx *cx, ail_obj *out, ail_obj x) {\n' % fn,
+                  'static inline ail_st ail_math_%s(ail_ctx *cx, ail_obj *out, ail_obj x) {\n'
+                  '    if (x.tag == AIL_T_INST) { ail_d1_fn f = ail_dun1(x, AIL_D1_%s); if (f) return f(cx, out, x); }\n' % (fn, key)))
+    # container protocol on an instance the emitter could not resolve
+    e.append(('        default: { char buf[64]; snprintf(buf, sizeof buf, "object of type \'%s\' has no len()"',
+              '        case AIL_T_INST: { ail_d1_fn f = ail_dun1(x, AIL_D1_LEN); if (f) return f(cx, out, x); }\n        /* fall through */\n'
+              '        default: { char buf[64]; snprintf(buf, sizeof buf, "object of type \'%s\' has no len()"'))
+    e.append(('        default: { char buf[64]; snprintf(buf, sizeof buf, "argument of type \'%s\' is not iterable"',
+              '        case AIL_T_INST: return ail_dun_contains(cx, out, c, item);\n'
+              '        default: { char buf[64]; snprintf(buf, sizeof buf, "argument of type \'%s\' is not iterable"'))
+    e.append(('static inline ail_st ail_op_getitem(ail_ctx *cx, ail_obj *out, ail_obj c, ail_obj key) {\n',
+              'static inline ail_st ail_op_getitem(ail_ctx *cx, ail_obj *out, ail_obj c, ail_obj key) {\n'
+              '    if (key.tag == AIL_T_INST && (c.tag == AIL_T_LIST || c.tag == AIL_T_TUPLE || c.tag == AIL_T_STR)) {   /* __index__ */\n'
+              '        ail_d1_fn xf = ail_dun1(key, AIL_D1_INDEX);\n'
+              '        if (xf) { ail_obj ik; ail_st xst = xf(cx, &ik, key); if (xst != AIL_OK) return xst; key = ik; }\n'
+              '    }\n'))
+    e.append(('    char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object does not support item assignment", ail_type_name(c.tag));',
+              '    if (c.tag == AIL_T_INST) { ail_d3_fn f = ail_dun3(c, AIL_D3_SETITEM); if (f) { ail_obj r; return f(cx, &r, c, key, val); } }\n'
+              '    char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object does not support item assignment", ail_type_name(c.tag));'))
+    e.append(('    char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object doesn\'t support item deletion", ail_type_name(c.tag));',
+              '    if (c.tag == AIL_T_INST) { ail_d2_fn f = ail_dun2(c, AIL_D2_DELITEM); if (f) { ail_obj r; return f(cx, &r, c, key); } }\n'
+              '    char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object doesn\'t support item deletion", ail_type_name(c.tag));'))
+    e.append(('        default: { char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable"',
+              '        case AIL_T_INST: { ail_d2_fn f = ail_dun2(c, AIL_D2_GETITEM); if (f) return f(cx, out, c, key); }\n        /* fall through */\n'
+              '        default: { char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable"'))
+    return e
+
+
+def patch(text):
+    """The generated C with the operator-method dispatch added to the general-path runtime."""
+    for old, new in _edits():
+        if old == new:
+            continue
+        count = text.count(old)
+        if count != 1:
+            raise RuntimeError('dunderrt: %d places match %r' % (count, old[:70]))
+        text = text.replace(old, new)
+    # the helpers go in front of the first user: ail_obj_eq_raw's (needs ail_obj_truthy declared above it)
+    anchor = 'static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {\n'
+    if text.count(anchor) != 1:
+        raise RuntimeError('dunderrt: no unique anchor for the helpers')
+    text = text.replace(anchor, FUNCS + HASH_FUNC + anchor, 1)
+    # the conditions of the program's own code (if / while / and / or / ?:) ask the class of an instance
+    mark = '/* ---- interned attribute-name ids ---- */'
+    k = text.find(mark)
+    if k < 0:
+        raise RuntimeError('dunderrt: no start of the program text')
+    return text[:k] + text[k:].replace('ail_obj_truthy(', 'ail_truthy_u(')
+
+
+def install(cls_global, cls_methods, all_params_of):
+    """C statements for the program's setup code: the tables of one class."""
+    lines = []
+    for name, key in D1.items():
+        info = cls_methods.get(name)
+        if info and len(all_params_of(info)) == 1:
+            lines.append('    ((ail_classobj *)%s.o)->d1[AIL_D1_%s] = %s;\n' % (cls_global, key, info['cname']))
+    for name, key in D2.items():
+        info = cls_methods.get(name)
+        if info and len(all_params_of(info)) == 2:
+            lines.append('    ((ail_classobj *)%s.o)->d2[AIL_D2_%s] = %s;\n' % (cls_global, key, info['cname']))
+    for name, key in D3.items():
+        info = cls_methods.get(name)
+        if info and len(all_params_of(info)) == 3:
+            lines.append('    ((ail_classobj *)%s.o)->d3[AIL_D3_%s] = %s;\n' % (cls_global, key, info['cname']))
+    return lines

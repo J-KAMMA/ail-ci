@@ -253,6 +253,96 @@ def multimode_str(xs: list[str]) -> list[str]:
     return out
 
 
+# -- floats (library batch 5): the functions of the module that need no exact fractions
+def sorted_floats(xs: list[float]) -> list[float]:
+    out: list[float] = []
+    for x in xs:
+        out.append(x)
+    out.sort()
+    return out
+
+
+def median_f(xs: list[float]) -> float:
+    n = len(xs)
+    if n == 0:
+        raise ValueError("no median for empty data")
+    d = sorted_floats(xs)
+    if n % 2 == 1:
+        return d[n // 2]
+    i = n // 2
+    return (d[i - 1] + d[i]) / 2
+
+
+def median_low_f(xs: list[float]) -> float:
+    n = len(xs)
+    if n == 0:
+        raise ValueError("no median for empty data")
+    d = sorted_floats(xs)
+    if n % 2 == 1:
+        return d[n // 2]
+    return d[n // 2 - 1]
+
+
+def median_high_f(xs: list[float]) -> float:
+    n = len(xs)
+    if n == 0:
+        raise ValueError("no median for empty data")
+    d = sorted_floats(xs)
+    return d[n // 2]
+
+
+def runs_f(xs: list[float], want_first: bool) -> list[int]:
+    """For each position: how many times its value occurs (want_first False), or 1 when it is the first
+    occurrence of its value and 0 otherwise (want_first True). Values are told apart by their repr (the
+    shortest text of a double; 0.0 and -0.0 are one value, as for == ; every nan is one value, unlike CPython)."""
+    counts: dict[str, int] = {}
+    for x in xs:
+        k = str(x + 0.0)
+        if k in counts:
+            counts[k] += 1
+        else:
+            counts[k] = 1
+    out: list[int] = []
+    seen: dict[str, int] = {}
+    for y in xs:
+        k2 = str(y + 0.0)
+        if want_first:
+            if k2 in seen:
+                out.append(0)
+            else:
+                seen[k2] = 1
+                out.append(1)
+        else:
+            out.append(counts[k2])
+    return out
+
+
+def mode_f(xs: list[float]) -> float:
+    n = len(xs)
+    if n == 0:
+        raise ValueError("no mode for empty data")
+    counts = runs_f(xs, False)
+    best = 0
+    for i in range(n):
+        if counts[i] > counts[best]:
+            best = i
+    return xs[best]
+
+
+def multimode_f(xs: list[float]) -> list[float]:
+    counts = runs_f(xs, False)
+    first = runs_f(xs, True)
+    top = 0
+    for c in counts:
+        if c > top:
+            top = c
+    out: list[float] = []
+    for i in range(len(xs)):
+        if first[i] == 1 and counts[i] == top:
+            out.append(xs[i])
+    return out
+
+
 # -- variance: needs core
 def ss_numerator(xs: list[int]) -> int:
     """n * sum(x*x) - sum(x)**2 : the sum of squared deviations is this over n."""

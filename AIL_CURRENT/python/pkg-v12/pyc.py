@@ -21,7 +21,7 @@ input; Windows reads the same raw file into an owned buffer before calling the g
 """
 import argparse, ast, json, os, pathlib, subprocess, sys
 
-from pipeline import PipelineError, compiler, ffi_link_args, link_flags
+from pipeline import PipelineError, compiler, ffi_link_args, link_flags, sqlite_link_args, extra_libs
 
 # Extra optimizer flags for the generated C. SLP vectorization is off: on a struct of doubles it packs
 # neighbouring fields (vx,vy / vz,m) into 16-byte vectors whose loads straddle the preceding scalar or
@@ -530,8 +530,15 @@ def to_c(source, strict=True, name='run', info=None, external=None):
             raise refusal
     if is_function(source):
         rewritten = _rewrite_script(source, force=False)
-        return func_to_c(rewritten if rewritten is not None else source,
-                         name=name, strict=strict, info=info, external=external)
+        if rewritten is None:
+            return func_to_c(source, name=name, strict=strict, info=info, external=external)
+        # the rewritten text has lost its comments: keep the @dataclass markers for dunders.py
+        import dunders
+        dunders.HINT.update(dunders._dataclass_markers(source))
+        try:
+            return func_to_c(rewritten, name=name, strict=strict, info=info, external=external)
+        finally:
+            dunders.HINT.clear()
     if _is_single_expression(source):
         if info is not None:
             info.setdefault('kinds', ['array'])
@@ -854,9 +861,12 @@ def _build_unshadowed(source, out, strict, report, force_general):
     c.write_text(body + main, encoding='utf-8')
     native_diagnostics.generated(c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
     r = _cc([compiler(), '-O2', *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c)]
+                       + (['-fno-strict-aliasing'] if info.get('inherit') else [])   # TYPED_INHERITANCE.md section 2
                        + (['-lm'] if info.get('libm') else [])
                        + (['-pthread'] if info.get('pthread') else [])
-                       + (['-lws2_32'] if os.name == 'nt' and {'TCPSOCKET', 'TCPHEAD'}.intersection(info.get('runtime_parts', [])) else []),
+                       + (sqlite_link_args() if info.get('sqlite') else [])
+                       + (['-lws2_32'] if os.name == 'nt' and {'TCPSOCKET', 'TCPHEAD'}.intersection(info.get('runtime_parts', [])) else [])
+                       + extra_libs(),
                        capture_output=True, text=True, phase='compile_link')
     if r.returncode:
         raise PipelineError('the C compiler rejected this:\n%s' % r.stderr[-800:])
@@ -897,6 +907,7 @@ def build_link_units(source, out, unit_map, external=None):
                           + (references + main if unit == 0 else ''), encoding='utf-8')
         native_diagnostics.generated(c_path, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
         result = native_diagnostics.run([compiler(), '-O2', *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables',
+                                 *(['-fno-strict-aliasing'] if info.get('inherit') else []),
                                  '-c', '-o', str(o_path), str(c_path)],
                                 capture_output=True, text=True, phase='compile')
         if result.returncode:
@@ -907,8 +918,10 @@ def build_link_units(source, out, unit_map, external=None):
                              *(external['objects'] if external is not None else [])]
                             + (['-lm'] if info.get('libm') else []) + (ffi_link_args() if external is not None else [])
                             + (['-pthread'] if info.get('pthread') else [])
+                            + (sqlite_link_args() if info.get('sqlite') else [])
                             + (['-lws2_32'] if os.name == 'nt' and {'TCPSOCKET', 'TCPHEAD'}.intersection(
-                                info.get('runtime_parts', []) + (external or {}).get('runtime_parts', [])) else []),
+                                info.get('runtime_parts', []) + (external or {}).get('runtime_parts', [])) else [])
+                            + extra_libs(),
                             capture_output=True, text=True, phase='link')
     if result.returncode:
         raise PipelineError('the C linker rejected AIL units:\n%s' % result.stderr[-800:])

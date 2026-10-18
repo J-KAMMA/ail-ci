@@ -37,8 +37,12 @@ import callable_types
 
 import cruntime
 import filelib
+import exctext
+import userexc
+import sqllower
 import pathlower
 import proclib
+import urllower
 import threadlib
 import iterlower
 import tryhoist
@@ -54,6 +58,8 @@ import nested_lists
 import modtables
 import readonly_bytes_scalar
 import boolkind
+import dunders
+import typedinherit
 import shadowing
 import rangecheck
 from pipeline import PipelineError
@@ -158,17 +164,52 @@ EXC_NAMES = {'ValueError': 1, 'ZeroDivisionError': 2, 'IndexError': 3, 'KeyError
              'EOFError': 5, 'OSError': 6, 'FileNotFoundError': 11, 'RuntimeError': 7,
              'UnicodeDecodeError': 8, 'AssertionError': 9, 'OverflowError': 10,
              'PermissionError': 12, 'IsADirectoryError': 13, 'FileExistsError': 14,
-             'NotADirectoryError': 15, 'CalledProcessError': 17, 'TimeoutExpired': 18}      # 17, 18: G8 subprocess
+             'NotADirectoryError': 15, 'CalledProcessError': 17, 'TimeoutExpired': 18,      # 17, 18: G8 subprocess
+             # 19..27: G11 sqlite3 (sqllower.py spells the classes sqlite3_<Name>); Error is the base class
+             'sqlite3_Error': 19, 'sqlite3_DatabaseError': 20, 'sqlite3_OperationalError': 21,
+             'sqlite3_IntegrityError': 22, 'sqlite3_ProgrammingError': 23, 'sqlite3_InterfaceError': 24,
+             'sqlite3_DataError': 25, 'sqlite3_InternalError': 26, 'sqlite3_NotSupportedError': 27,
+             'Exception': 28,
+             'URLError': 30, 'HTTPError': 31}      # 30, 31: G12 urllib (HTTPError is a URLError is an OSError)              # 28: the root class (S4e); user exception classes (userexc.py) follow from 29
+_BUILTIN_EXC_NAMES = dict(EXC_NAMES)
+
+
+def _exc_codes_of(name, exact=False):
+    """The codes `isinstance(e, name)` is true for (a tuple), or with `exact` the one code of `type(e) is name`."""
+    code = EXC_NAMES.get(name)
+    if (code is None or name in ('CalledProcessError', 'TimeoutExpired') and not proclib.ACTIVE
+            or name.startswith('sqlite3_') and not sqllower.ACTIVE):
+        return None
+    return code if exact else _handler_codes(code)
 
 
 def _handler_codes(code):
-    """Every exception code a handler for `code` catches."""
+    """Every exception code a handler for `code` catches, user classes derived from it included."""
+    if code == EXC_NAMES['Exception']:
+        return tuple(range(1, userexc.last_code() + 1))
+    base = _builtin_handler_codes(code)
+    if userexc.USER:
+        extra = set()
+        for c in base:
+            extra |= userexc.derived(c)
+        base += tuple(sorted(extra - set(base)))
+    return base
+
+
+def _builtin_handler_codes(code):
     if code == EXC_NAMES['ValueError']:
         return (code, EXC_NAMES['UnicodeDecodeError']) + ((16,) if filelib.ACTIVE else ())
     if code == EXC_NAMES['OSError']:
         # C23: `except OSError` takes every subclass; a subclass handler takes only its own code (the
         # whole-file builtins raise the class of their errno once the OS-family codes exist).
-        return (code, 11, 12, 13, 14, 15, 16) if filelib.ACTIVE else (code, 11, 12, 13, 14, 15)
+        base = (code, 11, 12, 13, 14, 15, 16) if filelib.ACTIVE else (code, 11, 12, 13, 14, 15)
+        return base + (30, 31) if urllower.ACTIVE else base        # G12: URLError and HTTPError are OSErrors
+    if code == EXC_NAMES['URLError']:
+        return (code, EXC_NAMES['HTTPError'])
+    if code == EXC_NAMES['sqlite3_Error']:
+        return tuple(range(19, 28))                      # G11: the base class of every sqlite3 error
+    if code == EXC_NAMES['sqlite3_DatabaseError']:
+        return (20, 21, 22, 23, 25, 26, 27)              # all but InterfaceError, which is an Error only
     return (code,)
 # OverflowError (10) joined 2026-10-12: int64 arithmetic that leaves the range ("integer overflow")
 # is catchable once a program names OverflowError. Like AssertionError, the DIE block only grows
@@ -176,10 +217,16 @@ def _handler_codes(code):
 
 
 def _exc_parts(ctx, code):
-    if code == 9:
+    if code >= 28:
+        ctx.parts.update(('ASSERTEXC', 'OVERFLOWEXC', 'EXCCLASSES'))
+    elif code == 9:
         ctx.parts.add('ASSERTEXC')
     elif code == 10:
         ctx.parts.update(('ASSERTEXC', 'OVERFLOWEXC'))
+    elif code >= 30:
+        ctx.parts.update(('ASSERTEXC', 'OVERFLOWEXC', 'FILEEXC', 'PROCEXC', 'HTTPEXC'))
+    elif code >= 19:
+        ctx.parts.update(('ASSERTEXC', 'OVERFLOWEXC', 'FILEEXC', 'SQLEXC'))
     elif code >= 17:
         ctx.parts.update(('ASSERTEXC', 'OVERFLOWEXC', 'FILEEXC', 'PROCEXC'))
     elif code >= 11:
@@ -282,8 +329,79 @@ def _is_obj_kind(t):
     return isinstance(t, tuple) and len(t) == 2 and t[0] == OBJ
 
 
+def _obj_subtype(actual, wanted):
+    """Whether a struct of kind `actual` may stand where `wanted` is declared because its class derives
+    from `wanted`'s (single inheritance; equal kinds are not asked here)."""
+    if not _HIER or not (_is_obj_kind(actual) and _is_obj_kind(wanted)):
+        return False
+    name = actual[1]
+    while name is not None:
+        if name == wanted[1]:
+            return True
+        name = _HIER.get(name)
+    return False
+
+
+def _class_chain(name):
+    """`name` and its ancestors, nearest first."""
+    chain = []
+    while name is not None:
+        chain.append(name)
+        name = _HIER.get(name)
+    return chain
+
+
+def _obj_assignable(name, actual, declared):
+    """A struct of a subclass into a local declared as its base; or, into the local that
+    `typedinherit.narrow_isinstance` binds inside `if isinstance(x, C):`, the x it tested (a downcast
+    the test has proven)."""
+    # (Two unrelated classes meet there only in a branch the test makes dead: `isinstance` of a class
+    # the value cannot be compiles to 0.)
+    return (_obj_subtype(actual, declared)
+            or name.startswith('_ail_narrow') and _is_obj_kind(actual) and _is_obj_kind(declared)
+            and actual[1] in _HIER and declared[1] in _HIER)
+
+
+def _fits(actual, wanted):
+    """`actual == wanted`, or a struct of a subclass where its base is declared."""
+    return actual == wanted or _obj_subtype(actual, wanted)
+
+
+def _obj_join(a, b):
+    """The nearest common ancestor kind of two struct kinds, or None (also for non-struct kinds)."""
+    if a == b:
+        return a
+    if not _HIER or not (_is_obj_kind(a) and _is_obj_kind(b)):
+        return None
+    up = _class_chain(b[1])
+    for name in _class_chain(a[1]):
+        if name in up:
+            return (OBJ, name)
+    return None
+
+
+def _obj_join_all(kinds):
+    """The nearest common base of several struct kinds, or None."""
+    joined = None
+    for k in sorted(kinds, key=str):
+        joined = k if joined is None else _obj_join(joined, k)
+        if joined is None:
+            return None
+    return joined
+
+
+def _ref_join(a, b):
+    """`_obj_join` for two struct kinds, or for two struct-list kinds (a list of their common base); else None."""
+    if _is_obj_kind(a) and _is_obj_kind(b):
+        return _obj_join(a, b)
+    if _is_olist_kind(a) and _is_olist_kind(b) and not _is_hlist_kind(a) and not _is_hlist_kind(b):
+        joined = _obj_join((OBJ, a[1]), (OBJ, b[1]))
+        return (OLIST, joined[1]) if joined else None
+    return None
+
+
 def _managed_class(info):
-    return bool(info.field_types) and all(t in (*NUM, EXCEPTION, STR, BYTES, BLIST, BYTEARRAY, BINARYFILE, TCPSOCKET, LIST, FLIST, SLIST, *MAPS) or _is_olist_kind(t) or _is_obj_kind(t) or callable_types.valid(t) for t in info.field_types.values())
+    return (bool(info.field_types) or info.name in _HIER) and all(t in (*NUM, EXCEPTION, STR, BYTES, BLIST, BYTEARRAY, BINARYFILE, TCPSOCKET, LIST, FLIST, SLIST, *MAPS) or _is_olist_kind(t) or _is_obj_kind(t) or callable_types.valid(t) for t in info.field_types.values())
 
 
 def _managed_obj(t, ctx):
@@ -627,10 +745,12 @@ def _is_exception_expr(node, ctx):
 
 # the OSError family the typed path has: OSError and the five errno classes
 _OS_FAMILY = (6, 11, 12, 13, 14, 15)
+_OS_NAMES = ('OSError', 'FileNotFoundError', 'PermissionError', 'IsADirectoryError', 'FileExistsError', 'NotADirectoryError')
+_EXC_MAX_ARGS = 8
 
 
 def _exception_field(node, ctx):
-    return (isinstance(node, ast.Attribute) and node.attr in ('kind', 'message', 'errno', 'strerror')
+    return (isinstance(node, ast.Attribute) and node.attr in ('kind', 'message', 'errno', 'strerror', *exctext.VIRTUAL_FIELDS)
             and _etype(node.value, ctx) == EXCEPTION)
 
 
@@ -643,6 +763,43 @@ def _require_os_exception(node, ctx, what):
         raise Unsupported('%s is built only on a name bound by `except OSError as e` (or FileNotFoundError, '
                           'PermissionError, IsADirectoryError, FileExistsError, NotADirectoryError); '
                           'other exception classes have no such value here' % what)
+
+
+def _unpack_check(ctx, pad, count, k):
+    """The run-time length check of `a, b = <sequence of unknown length>`: ValueError, with CPython's wording when the
+    program reads exception text."""
+    if exctext.ACTIVE:
+        _exc_text_parts(ctx)
+        return '%sif (%s.n != %d) ail_raise_unpack(%s.n, %d);\n' % (pad, count, k, count, k)
+    return '%sif (%s.n != %d) ail_raise_named(AIL_EXC_VALUE);\n' % (pad, count, k)
+
+
+def _key_die(ctx, kind, key):
+    """`ail_die("key error")` for a missing key, saying which key when the program reads exception text."""
+    if not exctext.ACTIVE:
+        return 'ail_die("key error")'
+    _exc_text_parts(ctx)
+    if kind == INT:
+        return 'ail_key_error_i(%s)' % key
+    if kind == STR:
+        return '({ ail_str _kd = %s; ail_key_error_s(_kd.p, _kd.n); })' % key
+    return '({ ail_bytes _kd = %s; ail_key_error_b(_kd.p, _kd.n); })' % key
+
+
+def _exc_text_parts(ctx):
+    ctx.parts.update(('STR', 'STRRET', 'DIE', 'EXCSTR'))
+    ctx.needs_sarena = True
+
+
+def _exception_text_field(node, ctx):
+    """`e.__ail_text__` and friends (exctext.py): str(e), repr(e), type(e).__name__ ... of a bound exception."""
+    _exc_text_parts(ctx)
+    value = _exception_value(node.value, ctx)
+    if node.attr in (exctext.TYPE, exctext.QUAL):
+        return 'ail_exc_%s(%s)' % ('typename' if node.attr == exctext.TYPE else 'qualname', value)
+    helper = {exctext.TEXT: 'ail_exc_text', exctext.REPR: 'ail_exc_repr', exctext.ARGSREPR: 'ail_exc_argsrepr',
+              exctext.FILENAME: 'ail_exc_filename'}[node.attr]
+    return '%s(%s, &%s)' % (helper, value, ctx.sarena())
 
 
 def _exception_constructor_error(name, message):
@@ -669,39 +826,138 @@ def _exception_value(node, ctx):
         return _map_inline(lambda: _call(node, ctx), ctx)
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in EXC_NAMES:
         return _obj_temp(_exception_new(node, ctx), EXCEPTION, ctx)
+    if _is_exc_new_call(node, ctx):
+        return _obj_temp(_exception_new_user(node, ctx), EXCEPTION, ctx)
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ctx.funcs and ctx.funcs[node.func.id][1] == EXCEPTION:
         return _call(node, ctx)
     raise Unsupported('an exception value requires a built-in exception or bound exception name')
 
 
+def _exception_arg_kinds(node, ctx, args=None, name=None):
+    """The kinds of the arguments of a built-in exception constructor: str, int, bool, float or None."""
+    kinds = []
+    name = name or node.func.id
+    for arg in (node.args if args is None else args):
+        if isinstance(arg, ast.Constant) and arg.value is None:
+            kinds.append('none')
+            continue
+        if isinstance(arg, ast.Starred):
+            raise _exception_constructor_error(name, 'an exception argument cannot be starred')
+        kind = _argument_kind(arg, ctx, name, 'argument', len(kinds), STR)
+        if kind == INT:
+            kinds.append('bool' if _is_bool_expr(arg, ctx) else INT)
+        elif kind in (STR, FLT):
+            kinds.append(kind)
+        else:
+            error = _exception_constructor_error(name, 'an exception argument must be a str, int, float, bool or None')
+            error.type_details = _argument_type_error(str(error), name, 'argument', len(kinds), STR, kind).type_details
+            raise error
+    return kinds
+
+
 def _exception_new(node, ctx):
     """`ValueError("msg")` as an `ail_exception_new(...)` call returning a NEW reference."""
     _exc_parts(ctx, EXC_NAMES[node.func.id])
-    if len(node.args) == 2 and not node.keywords and node.func.id == 'OSError':
-        # CPython's OSError(errno, strerror): `.errno`, `.strerror`, `str(e)` == "[Errno N] text", and the
-        # errno picks the subclass (ENOENT -> FileNotFoundError ...) like CPython's constructor
+    name = node.func.id
+    if name in _OS_NAMES and 2 <= len(node.args) <= 5 and not node.keywords:
+        # CPython's OSError(errno, strerror[, filename]): `.errno`, `.strerror`, `str(e)` == "[Errno N] text[: 'name']",
+        # and the errno picks the subclass (ENOENT -> FileNotFoundError ...) for OSError itself, like CPython's constructor
         _exc_parts(ctx, 11)
+        _exc_text_parts(ctx)
         ctx.parts.add('OSEXC')
-        number = _argument_kind(node.args[0], ctx, 'OSError', 'errno', 0, INT)
-        text = _argument_kind(node.args[1], ctx, 'OSError', 'strerror', 1, STR)
-        if number != INT or text != STR:
-            raise _exception_constructor_error('OSError', 'OSError(errno, strerror) takes an int and a str')
-        code = _map_inline(lambda: _expr(node.args[0], ctx), ctx)
-        message = _map_inline(lambda: _str_value(node.args[1], ctx), ctx)
-        return 'ail_exception_new_os(%s, %s)' % (code, message)
-    if node.keywords or len(node.args) > 1:
-        raise _exception_constructor_error(node.func.id, 'built-in exceptions accept zero arguments or one str message'
-                                           + ('; OSError also takes (errno, strerror)' if node.func.id == 'OSError' else ''))
+        kinds = _exception_arg_kinds(node, ctx)
+        if len(kinds) <= 3 and kinds[0] == INT and all(k == STR for k in kinds[1:]):
+            code = _map_inline(lambda: _expr(node.args[0], ctx), ctx)
+            message = _map_inline(lambda: _str_value(node.args[1], ctx), ctx)
+            if len(node.args) == 3:
+                fname = _map_inline(lambda: _str_value(node.args[2], ctx), ctx)
+                return 'ail_exception_new_oserr(%d, %s, %s, 1, %s)' % (EXC_NAMES[name], code, message, fname)
+            if exctext.ACTIVE or name != 'OSError':
+                return 'ail_exception_new_oserr(%d, %s, %s, 0, (ail_str){0})' % (EXC_NAMES[name], code, message)
+            return 'ail_exception_new_os(%s, %s)' % (code, message)
+        if FLT in kinds:
+            ctx.parts.add('EXCFLOAT')
+        return 'ail_exception_new_oserr_args(%d, %d, %s)' % (EXC_NAMES[name], len(kinds), _exception_arg_array(node, kinds, ctx))
+    if node.keywords or len(node.args) > _EXC_MAX_ARGS:
+        raise _exception_constructor_error(name, 'built-in exceptions accept up to %d positional arguments (str, int, float, bool or None)' % _EXC_MAX_ARGS)
     if not node.args:
-        return 'ail_exception_new(%d, NULL, 0, 0)' % EXC_NAMES[node.func.id]
-    actual = _argument_kind(node.args[0], ctx, node.func.id, 'message', 0, STR)
-    if actual != STR:
-        error = _exception_constructor_error(node.func.id, 'an exception message must be str')
-        error.type_details = _argument_type_error(str(error), node.func.id, 'message', 0, STR, actual).type_details
-        raise error
-    message = _map_inline(lambda: _str_value(node.args[0], ctx), ctx)
-    slot, _ = ctx.temp(STR)
-    return '(%s = %s, ail_exception_new(%d, %s.p, %s.n, %s.bytes))' % (slot, message, EXC_NAMES[node.func.id], slot, slot, slot)
+        return 'ail_exception_new(%d, NULL, 0, 0)' % EXC_NAMES[name]
+    if len(node.args) == 1 and not exctext.ACTIVE:
+        actual = _argument_kind(node.args[0], ctx, name, 'message', 0, STR)
+        if actual == STR:
+            message = _map_inline(lambda: _str_value(node.args[0], ctx), ctx)
+            slot, _ = ctx.temp(STR)
+            return '(%s = %s, ail_exception_new(%d, %s.p, %s.n, %s.bytes))' % (slot, message, EXC_NAMES[name], slot, slot, slot)
+    kinds = _exception_arg_kinds(node, ctx)
+    _exc_text_parts(ctx)
+    ctx.parts.add('OSEXC')
+    if FLT in kinds:
+        ctx.parts.add('EXCFLOAT')
+    array, stages = _exception_arg_array(node, kinds, ctx, split=True)
+    return '(%sail_exception_new_args(%d, %d, %s))' % (''.join(stage + ', ' for stage in stages), EXC_NAMES[name], len(kinds), array)
+
+
+def _exception_arg_array(node, kinds, ctx, split=False, args=None):
+    """`(ail_exarg[]){...}` for the arguments of a constructor, each held in a temporary first (left to right)."""
+    stages, cells = [], []
+    for arg, kind in zip(node.args if args is None else args, kinds):
+        if kind == 'none':
+            cells.append('ail_exarg_none()')
+        elif kind == STR:
+            slot, _ = ctx.temp(STR)
+            stages.append('%s = %s' % (slot, _map_inline(lambda arg=arg: _str_value(arg, ctx), ctx)))
+            cells.append('ail_exarg_s(%s)' % slot)
+        else:
+            slot, _ = ctx.temp(FLT if kind == FLT else INT)
+            stages.append('%s = %s' % (slot, _map_inline(lambda arg=arg: _expr(arg, ctx), ctx)))
+            cells.append('ail_exarg_%s(%s)' % ({INT: 'i', FLT: 'f', 'bool': 'b'}[kind], slot))
+    array = '(ail_exarg[]){%s}' % ', '.join(cells)
+    if split:
+        return array, stages
+    return '(' + ''.join(stage + ', ' for stage in stages) + array + ')' if stages else array
+
+
+def _exception_new_user(node, ctx):
+    """`_ail_exc_new(code, (args...), 'attr', value, ...)`: the exception of a user class, with its attributes."""
+    a = node.args
+    if (len(a) < 2 or len(a) % 2 or node.keywords or not isinstance(a[0], ast.Constant) or not isinstance(a[1], ast.Tuple)
+            or not all(isinstance(n, ast.Constant) and isinstance(n.value, str) for n in a[2::2])):
+        raise Unsupported('_ail_exc_new takes a code, a tuple of arguments and attribute name / value pairs')
+    code, args = a[0].value, a[1].elts
+    name = next(n for n, c in EXC_NAMES.items() if c == code)
+    _exc_parts(ctx, code)
+    _exc_text_parts(ctx)
+    ctx.parts.add('OSEXC')
+    kinds = _exception_arg_kinds(node, ctx, args=args, name=name)
+    if FLT in kinds:
+        ctx.parts.add('EXCFLOAT')
+    array, stages = _exception_arg_array(node, kinds, ctx, split=True, args=args)
+    sets = []
+    for attr, value in zip(a[2::2], a[3::2]):
+        if attr.value == '__str__':
+            if _etype(value, ctx) != STR:
+                raise Unsupported('__str__ of %s must return a str' % name)
+            slot, _ = ctx.temp(STR)
+            stages.append('%s = %s' % (slot, _map_inline(lambda value=value: _str_value(value, ctx), ctx)))
+            sets.append('ail_exception_set_text(_x, %s);' % slot)
+            continue
+        index, want = userexc.ATTRS[attr.value]
+        have = _etype(value, ctx)
+        if want == 's' and have != STR or want in 'ibf' and have not in (INT, FLT) or want == 'i' and have == FLT:
+            raise Unsupported('the attribute %r of %s is read as %s but is assigned a %s' % (attr.value, name, {'s': 'str', 'i': 'int', 'f': 'float', 'b': 'bool'}[want], have))
+        if want == 's':
+            slot, _ = ctx.temp(STR)
+            stages.append('%s = %s' % (slot, _map_inline(lambda value=value: _str_value(value, ctx), ctx)))
+            sets.append('ail_exception_set_attr(_x, %d, ail_exarg_s(%s));' % (index, slot))
+        else:
+            slot, _ = ctx.temp(FLT if want == 'f' else INT)
+            stages.append('%s = %s' % (slot, _map_inline(lambda value=value: _expr(value, ctx), ctx)))
+            sets.append('ail_exception_set_attr(_x, %d, ail_exarg_%s(%s));' % (index, want, slot))
+    ctx.tmp += 1
+    var = '_x%d' % ctx.tmp
+    body = ''.join(stage + '; ' for stage in stages)
+    sets = ' '.join(text.replace('_x,', var + ',') for text in sets)
+    return '({ %sail_exception *%s = ail_exception_new_args(%d, %d, %s); %s %s; })' % (body, var, code, len(kinds), array, sets, var)
 
 
 def _local_slist_pop(node, ctx):
@@ -768,6 +1024,74 @@ _AIL_JD_OPT_KINDS = "sisiiii"
 _AIL_JD_STATUS = ("_ail_jdc_floats", "_ail_jdc_dict_float")
 
 
+_EXC_INTRINSICS = exctext.INTRINSICS
+
+
+def _is_exc_new_call(node, ctx):
+    """`_ail_exc_new(code, (args...), 'attr', value, ...)` -- a user exception class's constructor (userexc.py)."""
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == '_ail_exc_new'
+            and '_ail_exc_new' not in ctx.funcs)
+
+
+def _is_exc_attr_call(node, ctx, kind=None):
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in exctext.ATTR_INTRINSICS
+            and node.func.id not in ctx.funcs and (kind is None or node.func.id.endswith(kind)))
+
+
+def _exc_attr_value(node, ctx):
+    """`_ail_exc_attr_s/i/f(e, index)`: an attribute of a user exception."""
+    if node.keywords or len(node.args) != 2 or not isinstance(node.args[1], ast.Constant):
+        raise Unsupported('%s takes an exception and an attribute index' % node.func.id)
+    value = _exc_intrinsic_arg(node, ctx)
+    _exc_text_parts(ctx)
+    ctx.has_try = True
+    kind = node.func.id[-1]
+    if kind == 's':
+        return 'ail_exc_attr_s(%s, %d, &%s)' % (value, node.args[1].value, ctx.sarena())
+    return 'ail_exc_attr_%s(%s, %d)' % (kind, value, node.args[1].value)
+
+
+def _is_exc_arg_call(node, ctx):
+    """`_ail_exc_arg(e, i)` -- e.args[i] as a str (exctext.py)."""
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == '_ail_exc_arg'
+            and '_ail_exc_arg' not in ctx.funcs and not node.keywords and len(node.args) == 2)
+
+
+def _exc_intrinsic_arg(node, ctx):
+    exc = node.args[0]
+    if _etype(exc, ctx) != EXCEPTION:
+        raise Unsupported('%s needs an exception value' % node.func.id)
+    return _exception_value(exc, ctx)
+
+
+def _exc_intrinsic_value(node, ctx):
+    """The C value of `_ail_exc_nargs(e)`, `_ail_exc_isa(e, codes...)` and `_ail_exc_is(e, code)`."""
+    f = node.func.id
+    if node.keywords:
+        raise Unsupported('%s takes no keyword arguments' % f)
+    value = _exc_intrinsic_arg(node, ctx)
+    _exc_text_parts(ctx)
+    if f == '_ail_exc_nargs':
+        if len(node.args) != 1:
+            raise Unsupported('_ail_exc_nargs takes one exception')
+        return 'ail_exc_nargs(%s)' % value
+    codes = [a.value for a in node.args[1:] if isinstance(a, ast.Constant) and type(a.value) is int]
+    if len(codes) != len(node.args) - 1 or not codes:
+        raise Unsupported('%s takes exception codes' % f)
+    return '(%s)' % ' || '.join('%s->code == %d' % (value, c) for c in codes)
+
+
+def _exc_arg_value(node, ctx):
+    """`_ail_exc_arg(e, i)`: the i-th argument of the exception as a str, in the arena."""
+    value = _exc_intrinsic_arg(node, ctx)
+    if _etype(node.args[1], ctx) != INT:
+        raise Unsupported('e.args[...] takes an int index')
+    _exc_text_parts(ctx)
+    ctx.has_try = True
+    index = _map_inline(lambda: _expr(node.args[1], ctx), ctx)
+    return 'ail_exc_argstr(%s, %s, &%s)' % (value, index, ctx.sarena())
+
+
 def _is_jd_result_call(node, ctx):
     return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == '_ail_jdc_result'
             and not node.args and not node.keywords and '_ail_jdc_result' not in ctx.funcs)
@@ -776,6 +1100,8 @@ def _is_jd_result_call(node, ctx):
 def _etype(node, ctx):
     if _NULLABLE and isinstance(node, ast.Constant) and node.value is None:
         return NULLK
+    if dunders.is_exc_code(node):
+        return INT
     if isinstance(node, ast.BinOp) and type(node.op) in SET_OPS and _map_kind(node, ctx) in SETS:
         return _map_kind(node, ctx)
     if _local_slist_pop(node, ctx) or _string_field_call(node, ctx) and node.func.attr == 'pop':
@@ -785,6 +1111,8 @@ def _etype(node, ctx):
             _require_os_exception(node.value, ctx, 'e.' + node.attr)
         return INT if node.attr == 'errno' else STR
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in EXC_NAMES:
+        return EXCEPTION
+    if _is_exc_new_call(node, ctx):
         return EXCEPTION
     if _is_monotonic_call(node, ctx):
         _monotonic_arguments(node)
@@ -995,8 +1323,14 @@ def _etype(node, ctx):
         f, a = node.func.id, node.args
         if f == 'jsdiv':
             return FLT
+        if f == '__ail_class_id' and _HIER or f == 'isinstance' and _is_class_isinstance(node, ctx):
+            return INT
         if f == 'pow' and len(a) == 3 and f not in ctx.funcs:
             return INT
+        if f in _EXC_INTRINSICS and f not in ctx.funcs:
+            return STR if f == '_ail_exc_arg' else INT
+        if f in exctext.ATTR_INTRINSICS and f not in ctx.funcs:
+            return {'s': STR, 'i': INT, 'f': FLT}[f[-1]]
         if f in _AIL_SYSINFO and f not in ctx.funcs:
             return _AIL_SYSINFO[f][0]
         if f in _AIL_RAND and f not in ctx.funcs:
@@ -1004,7 +1338,7 @@ def _etype(node, ctx):
         if f in _AIL_CLOCK and f not in ctx.funcs:
             return _AIL_CLOCK[f][0]
         if f in filelib.PRIMS and f not in ctx.funcs and f not in ctx.classes:
-            return {'int': INT, 'str': STR, 'bytes': BYTES}[filelib.PRIMS[f][0]]
+            return {'int': INT, 'float': FLT, 'str': STR, 'bytes': BYTES}[filelib.PRIMS[f][0]]
         if f in _AIL_JF and f not in ctx.funcs:
             return INT
         if f in _AIL_JD and f not in ctx.funcs:
@@ -1205,6 +1539,13 @@ _BOOLS = boolkind.EMPTY
 # Reading such a field through a held struct yields a pointer that lives as long as the struct,
 # so it needs no retain temp. Computed only for programs that use `X | None`.
 _FROZEN_LINKS = set()
+# Single inheritance (docs/design/TYPED_INHERITANCE.md), reset by every `_scan_classes`. `_HIER` maps
+# every class of an inheritance hierarchy to its base (None for a root); it is empty for a program
+# without inheritance, and every inheritance rule below is skipped then. `_VTARGET` maps
+# (static class, method) to the compiled function a call through that class reaches: the one
+# method all its subclasses share, or a dispatcher on the run-time class (`<Class>__<m>__vt`).
+_HIER = {}
+_VTARGET = {}
 
 # Borrowed struct parameters, {function name: {parameter names}}, reset per `to_c` like _MODCONSTS.
 # A top-level function that is only ever CALLED (never used as a value, never a library export)
@@ -1365,8 +1706,8 @@ def _scan_module_consts(tree):
                 error = Unsupported("import of 'collections' with a use that is not built: Counter, "
                                     "defaultdict (int, float, str, list, lambda: <constant>), OrderedDict and "
                                     "deque are built for str / int / tuple keys and int / float / str / tuple "
-                                    "elements; namedtuple, ChainMap and the rest are not -- the notes "
-                                    "below name the use")
+                                    "elements; the rest of the module is not (namedtuple and ChainMap are "
+                                    "built by the library pass) -- the notes below name the use")
             elif any(name.split('.')[0] in ('threading', 'queue', 'concurrent') for name in named):
                 # threadlib.py (the first source pass) lowers every use it builds and replaces the
                 # import; the use it could not build kept it here, and its `note:` lines say which.
@@ -2016,7 +2357,7 @@ class Ctx:
                                   '(`total = 0.0` for a float)' % (name, _a(kind), _a(t)))
             return 'v_' + name
         declared = getattr(self, 'local_annotations', {}).get(name)
-        if declared is not None and declared != t:
+        if declared is not None and declared != t and not _obj_assignable(name, t, declared):
             raise Unsupported('%r is declared %s; assigning %s is unsupported.\n'
                               '  write instead: %s' % (name, declared, t, _assign_fix(declared, t)))
         if name in self.kind:
@@ -2036,7 +2377,7 @@ class Ctx:
         if old is None:
             self.locals.append(name)
             self.types[name] = t
-        elif old != t:
+        elif old != t and not _obj_assignable(name, t, old):
             # A local that holds an int on one line and a float on another is a float, which is what
             # Python does; `smoothed = xs[0]` then `smoothed = 0.3 * v + 0.7 * smoothed` is the
             # ordinary shape. Mixing a number with a container is still an error.
@@ -5727,58 +6068,64 @@ def _is_str_isdigit_call(node, ctx):
             and 1 <= len(node.args) <= 3 and _is_str_expr(node.args[0], ctx))
 
 
+class _TypedBoolEnv:
+    """What `boolkind.boolish` asks of its environment, answered from the compiler's real types: the
+    struct a field belongs to, the function or method a call reaches (boolkind.py)."""
+
+    def __init__(self, ctx):
+        self.ctx = ctx
+
+    def _field(self, node, table):
+        kind = _etype(node.value, self.ctx)
+        return _is_obj_kind(kind) and (kind[1], node.attr) in table
+
+    def attr_bool(self, node):
+        return self._field(node, _BOOLS.fields)
+
+    def attr_list(self, node):
+        return self._field(node, _BOOLS.list_fields)
+
+    def attr_dict(self, node):
+        return self._field(node, _BOOLS.dict_fields)
+
+    def call_info(self, node):
+        ctx, f = self.ctx, node.func
+        if isinstance(f, ast.Name):
+            if f.id in ctx.funcs or f.id in ctx.classes:
+                return (f.id in _BOOLS.fns, f.id in _BOOLS.list_fns, f.id in _BOOLS.dict_fns)
+            return None
+        if isinstance(f, ast.Attribute):
+            mangled = _class_method_name(node, ctx)
+            if mangled is not None:
+                return (mangled in _BOOLS.fns, mangled in _BOOLS.list_fns, mangled in _BOOLS.dict_fns)
+        return None
+
+    def predicate_call(self, node):
+        ctx, f = self.ctx, node.func
+        if not isinstance(f, ast.Attribute):
+            return False
+        if _is_str_isdigit_call(node, ctx):
+            return True
+        if f.attr in boolkind.STR_PREDICATES and _is_bytes_expr(f.value, ctx):
+            return True
+        if f.attr in boolkind.SET_PREDICATES:
+            return _set_kind_of(f.value, ctx) is not None
+        return False
+
+
 def _is_bool_expr(node, ctx):
     """True when `node` is a Python bool: what `print`, `str()`, a spec-less f-string field and
     `%s` show as `True`/`False` (boolkind.py). A bool is still an int64 0/1 everywhere else, so
     this is consulted only where an int would become TEXT. Comparisons, `not`, `and`/`or` of
-    bools, True/False, bool()/any()/all(), the str/bytes/set predicates, functions and methods
-    declared `-> bool`, bool fields, and locals boolkind.py proved hold only bools."""
-    if isinstance(node, ast.Constant):
-        return isinstance(node.value, bool)
-    if isinstance(node, ast.Compare):
-        return True
-    if isinstance(node, ast.UnaryOp):
-        return isinstance(node.op, ast.Not)
-    if isinstance(node, ast.BoolOp):
-        return all(_is_bool_expr(v, ctx) for v in node.values)
-    if isinstance(node, ast.IfExp):
-        return _is_bool_expr(node.body, ctx) and _is_bool_expr(node.orelse, ctx)
-    if isinstance(node, ast.Name):
-        return node.id in getattr(ctx, 'bool_names', ())
+    bools, `&` `|` `^` of bools, True/False, bool()/any()/all(), `max`/`min` of bools, the
+    str/bytes/set predicates, functions and methods declared or inferred `-> bool`, bool fields
+    (declared, or every store a bool), elements of bool lists and dicts, and locals boolkind.py
+    proved hold only bools. The judgement is boolkind.boolish's, with real types for fields and calls."""
     try:
-        if isinstance(node, ast.Attribute):
-            kind = _etype(node.value, ctx)
-            return _is_obj_kind(kind) and (kind[1], node.attr) in _BOOLS.fields
-        if isinstance(node, ast.Subscript):
-            if isinstance(node.slice, ast.Slice):
-                return False
-            holder = node.value
-            if isinstance(holder, ast.Name):
-                return holder.id in getattr(ctx, 'bool_lists', ())
-            if isinstance(holder, ast.Attribute):
-                kind = _etype(holder.value, ctx)
-                return _is_obj_kind(kind) and (kind[1], holder.attr) in _BOOLS.list_fields
-            return False
-        if isinstance(node, ast.Call):
-            f = node.func
-            if isinstance(f, ast.Name):
-                if f.id in ctx.funcs or f.id in ctx.classes:
-                    return f.id in _BOOLS.fns
-                return f.id in boolkind.BOOL_BUILTINS
-            if not isinstance(f, ast.Attribute):
-                return False
-            mangled = _class_method_name(node, ctx)
-            if mangled is not None:
-                return mangled in _BOOLS.fns
-            if _is_str_isdigit_call(node, ctx):
-                return True
-            if f.attr in boolkind.STR_PREDICATES and _is_bytes_expr(f.value, ctx):
-                return True
-            if f.attr in boolkind.SET_PREDICATES:
-                return _set_kind_of(f.value, ctx) is not None
+        return boolkind.boolish(node, _TypedBoolEnv(ctx), getattr(ctx, 'bool_names', ()),
+                                getattr(ctx, 'bool_lists', ()))
     except Unsupported:
         return False
-    return False
 
 
 def _bool_str_value(node, ctx):
@@ -6634,7 +6981,8 @@ def _is_str_expr(node, ctx):
     AIL_TASK_strops_20260915.md, `.strip()`/`.lstrip()`/`.rstrip()` (Part A) and indexing a list of
     str (Part B; `.split()`/`.splitlines()` themselves build a LIST, never a str, so they are NOT
     here -- see `_is_slist_call`)."""
-    if _is_smap_value(node, ctx) or _is_jd_result_call(node, ctx) or _is_fileprim_call(node, ctx, 'str'):
+    if (_is_smap_value(node, ctx) or _is_jd_result_call(node, ctx) or _is_fileprim_call(node, ctx, 'str')
+            or _is_exc_arg_call(node, ctx) or _is_exc_attr_call(node, ctx, 's')):
         return True
     if _is_int_hex_call(node, ctx) or _is_chr_call(node, ctx) or _is_hex_call(node, ctx) or _is_owned_str_call(node, ctx) or _is_strlit(node) or _is_str_call(node, ctx) or _is_sys_stdin_call(node) \
             or _is_input_call(node) or _is_str_strip_call(node, ctx) \
@@ -6731,7 +7079,24 @@ def _fileprim_value(node, ctx):
     ret, kinds = filelib.PRIMS[name]
     if node.keywords or len(node.args) != len(kinds) or any(isinstance(a, ast.Starred) for a in node.args):
         raise Unsupported('%s takes %d positional arguments' % (name, len(kinds)))
-    ctx.parts.add({'proc': 'PROCIO', 'path': 'PATHIO', 'file': 'FILEIO'}[filelib.prim_kind(name)])
+    if name == '_ail_sq_bind':
+        # G11: bind a value of whatever static type it has; sqllower cannot know the type of an expression
+        value = node.args[1]
+        if _is_str_expr(value, ctx):
+            specific = '_ail_sq_bs'
+        elif _is_bytes_expr(value, ctx):
+            specific = '_ail_sq_bb'
+        elif _etype(value, ctx) == FLT:
+            specific = '_ail_sq_bf'
+        elif _etype(value, ctx) == INT:
+            specific = '_ail_sq_bi'
+        else:
+            raise Unsupported('a sqlite3 parameter must be an int, float, str, bytes, bool or None')
+        node = ast.copy_location(ast.Call(func=ast.copy_location(ast.Name(id=specific, ctx=ast.Load()), node.func),
+                                          args=node.args, keywords=[]), node)
+        name = specific
+        ret, kinds = filelib.PRIMS[name]
+    ctx.parts.add({'proc': 'PROCIO', 'path': 'PATHIO', 'file': 'FILEIO', 'sql': 'SQLIO', 'http': 'HTTPIO', 'url': 'URLIO'}[filelib.prim_kind(name)])
     ctx.has_try = True
     stages, names = [], []
     for arg, kind in zip(node.args, kinds):
@@ -6739,6 +7104,11 @@ def _fileprim_value(node, ctx):
             _need_int(arg, ctx, name + ' argument')
             value = _map_inline(lambda a=arg: _expr(a, ctx), ctx)
             slot, _ = ctx.temp(INT)
+        elif kind == 'float':
+            if _etype(arg, ctx) not in NUM:
+                raise Unsupported('%s needs a float argument' % name)
+            value = _map_inline(lambda a=arg: _expr(a, ctx), ctx)
+            slot, _ = ctx.temp(FLT)
         elif kind == 'str':
             if not _is_str_expr(arg, ctx):
                 raise Unsupported('%s needs a str argument' % name)
@@ -6788,6 +7158,8 @@ def _str_value(node, ctx, *, owned_join_return=False):
         return _method(node, ctx)
     if _string_field_call(node, ctx) and node.func.attr == 'pop':
         return _string_field_method(node, ctx)
+    if _exception_field(node, ctx) and node.attr in exctext.VIRTUAL_FIELDS:
+        return _exception_text_field(node, ctx)
     if _exception_field(node, ctx) and node.attr != 'errno':
         ctx.parts.update(('STR', 'STRRET'))
         ctx.needs_sarena = True
@@ -6874,6 +7246,10 @@ def _str_value(node, ctx, *, owned_join_return=False):
             ctx.has_try = True
             return 'ail_bytes_decode_utf8_view(%s)' % _bytes_value(node.func.value, ctx)
         return 'ail_bytes_decode_utf8(&%s, %s)' % (ctx.sarena(), _bytes_value(node.func.value, ctx))
+    if _is_exc_arg_call(node, ctx):
+        return _exc_arg_value(node, ctx)
+    if _is_exc_attr_call(node, ctx, 's'):
+        return _exc_attr_value(node, ctx)
     if _is_jd_result_call(node, ctx):
         ctx.parts.update(('STR', 'STRRET', 'DIE', 'JDCORE'))
         return 'ail_str_adopt(&%s, ail_jd_take_owned())' % ctx.sarena()
@@ -6936,10 +7312,8 @@ def _str_value(node, ctx, *, owned_join_return=False):
         if at == STR:
             raise Unsupported('str() of a str: the value already is a str; drop the str() call')
         if at == EXCEPTION:
-            _require_os_exception(arg, ctx, 'str(e)')
-            ctx.parts.update(('STR', 'STRRET'))
-            ctx.needs_sarena = True
-            return 'ail_exception_string_copy(ail_exception_message(%s), &%s)' % (_exception_value(arg, ctx), ctx.sarena())
+            _exc_text_parts(ctx)
+            return 'ail_exc_text(%s, &%s)' % (_exception_value(arg, ctx), ctx.sarena())
         if at != INT:
             raise Unsupported('str() of %s is not built; only str(<int>) and str(<float>) are. '
                               'For a list, join its elements: `",".join([str(v) for v in xs])`'
@@ -7564,6 +7938,15 @@ def _fstring_field(fv, ctx):
             "use ascii-safe text or build the message with str(n) and +")
     val = fv.value
     kind = _etype(val, ctx)
+    if kind == EXCEPTION and fv.format_spec is None and fv.conversion in (-1, 114, 115):
+        _exc_text_parts(ctx)
+        return 'ail_exc_%s(%s, &%s)' % ('repr' if fv.conversion == 114 else 'text', _exception_value(val, ctx), ctx.sarena())
+    if kind == BYTES and fv.format_spec is None and fv.conversion in (-1, 114, 115):
+        # str(b) and repr(b) of bytes are both CPython's repr, b'...'
+        ctx.parts.update(('BYTES', 'EXCSTR'))
+        ctx.needs_sarena = True
+        cell, _ = ctx.temp(BYTES)
+        return '(%s = %s, ail__bytes_repr(&%s, %s.p, %s.n))' % (cell, _bytes_value(val, ctx), ctx.sarena(), cell, cell)
     if kind not in (INT, FLT, STR):
         raise Unsupported('an f-string field of type %s; only an int, float or str expression '
                           'is built inside {}' % kind)
@@ -8245,6 +8628,11 @@ def _class_method_name(node, ctx):
         except Unsupported:
             return None
         if _is_obj_kind(kind) and kind[1] in ctx.classes:
+            if kind[1] in _HIER:
+                target = _VTARGET.get((kind[1], node.func.attr))
+                if isinstance(target, Unsupported):
+                    raise target
+                return target
             cls = ctx.classes[kind[1]]
             if node.func.attr in cls.methods:
                 return cls.method_cname(node.func.attr)
@@ -10219,7 +10607,7 @@ def _olist_value(node, kind, ctx):
     fresh, _ = ctx.temp(kind)
     steps = [_obj_store(fresh, _olist_helper(kind, 'new') + '()', kind, ctx, adopt=True) + ';']
     for element in node.elts:
-        if _etype(element, ctx) != _olist_element_kind(kind):
+        if not _fits(_etype(element, ctx), _olist_element_kind(kind)):
             raise Unsupported('a reference list accepts only %s elements' % kind[1])
         value = _map_inline(lambda: _expr(element, ctx), ctx)
         steps.append('%s(%s, %s);' % (_olist_helper(kind, 'push'), fresh, value))
@@ -11787,11 +12175,15 @@ def _numeric_value_type(ctx):
 def _numeric_to_int(value, ctx):
     ctx.parts.add('DIE')
     ctx.has_try = True
+    if exctext.ACTIVE:
+        _exc_text_parts(ctx)
     return ('({ double _ail_number_input = %s; '
             'if (!(_ail_number_input >= -9223372036854775808.0 && _ail_number_input < 9223372036854775808.0)) { '
             # CPython: nan is a ValueError, an infinity an OverflowError, and so is a finite value
             # that does not fit int64 here (A1: int is 64-bit, the result would not fit)
-            'if (_ail_number_input != _ail_number_input) ail_raise_named(AIL_EXC_VALUE); '
+            + ('if (_ail_number_input != _ail_number_input) ail_raise_msg(AIL_EXC_VALUE, "cannot convert float NaN to integer"); '
+               'if (__builtin_isinf(_ail_number_input)) ail_die("cannot convert float infinity to integer"); ' if exctext.ACTIVE
+               else 'if (_ail_number_input != _ail_number_input) ail_raise_named(AIL_EXC_VALUE); ') +
             'ail_die("integer overflow"); } (int64_t)_ail_number_input; })') % value
 def _numeric_expression_needed(node, ctx):
     if isinstance(node, ast.BinOp) and not (_etype(node.left, ctx) in NUM and _etype(node.right, ctx) in NUM):
@@ -11881,6 +12273,8 @@ def _numeric_compare(node,ctx):
 }'''.replace('_ail_nb_value',_numeric_value_type(ctx)) % (right,check))
     return '({ '+' '.join(steps)+' _nb_ok; })'
 def _expr(node, ctx):
+    if dunders.is_exc_code(node):
+        return '((int64_t)ail_handled_code)'   # the code of the exception being handled (dunders.py)
     if isinstance(node,ast.Compare) and all(type(op) in CMPOP for op in node.ops) and _numeric_expression_needed(node,ctx) and all(_etype(value,ctx) in NUM for value in (node.left,*node.comparators)):
         return _numeric_compare(node,ctx)
     if (isinstance(node,ast.BinOp) and isinstance(node.op,(ast.Add,ast.Sub,ast.Mult,ast.Div,ast.FloorDiv,ast.Mod)) or isinstance(node,ast.UnaryOp) and isinstance(node.op,(ast.USub,ast.UAdd))) and _numeric_expression_needed(node,ctx):
@@ -12488,6 +12882,10 @@ def _expr(node, ctx):
         # Python's `/` is always true division. C's `/` between integers is not, which is the one
         # difference that silently turns a mean into the floor of a mean.
         ctx.parts.add('DIE')
+        if exctext.ACTIVE and FLT in (_etype(node.left, ctx), _etype(node.right, ctx)):
+            ctx.parts.add('FDIVF')           # CPython words a float division by zero differently from int / int
+            return _ordered_numeric_pair(node.left, node.right, ctx,
+                                         'ail_fdiv_f((double)({}), (double)({}))')
         ctx.parts.add('FDIV')
         return _ordered_numeric_pair(node.left, node.right, ctx,
                                      'ail_fdiv((double)({}), (double)({}))')
@@ -13057,6 +13455,13 @@ def _field_info(node, ctx):
     if not isinstance(node.value, ast.Name) and not _managed_class(cls):
         raise Unsupported('expression field receivers require a nonempty scalar struct')
     if node.attr not in cls.field_types:
+        below = sorted(n for n in _hier_subtree(ctx.classes, kind[1]) if node.attr in ctx.classes[n].field_types
+                       ) if kind[1] in _HIER else []
+        if below:
+            raise Unsupported('%r has no field %r; only its subclass %s has it (CPython raises AttributeError for '
+                              'the others).\n'
+                              '  write instead: read it inside `if isinstance(x, %s):`'
+                              % (kind[1], node.attr, below[0], below[0]))
         raise Unsupported('%r has no field %r; %s has %s'
                           % (kind[1], node.attr, kind[1], ', '.join(sorted(cls.field_types)) or '(none)'))
     return kind, cls.field_types[node.attr]
@@ -13952,7 +14357,7 @@ def _attr_assign_inner(target, value, ctx, ind):
             raise Unsupported('%s.%s requires exactly matching Callable signature' % (t[1], target.attr))
         v = _map_inline(lambda: _fn_value(value, ctx), ctx)
     elif _is_obj_kind(ft):
-        if _etype(value, ctx) not in (ft, NULLK):
+        if _etype(value, ctx) not in (ft, NULLK) and not _obj_subtype(_etype(value, ctx), ft):
             raise Unsupported('%s.%s requires a %s instance' % (t[1], target.attr, ft[1]))
         v = _expr(value, ctx)
     elif ft in (LIST, FLIST):
@@ -14533,7 +14938,8 @@ def _mixed_rows_argument(name, fields, ctx):
     return expression, [packed + '.p', packed + '.n', blob + '.p', blob + '.n']
 
 
-def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dynamic=None, owned_result=False, grid_result=False):
+def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dynamic=None, owned_result=False, grid_result=False,
+                    proven_self=False):
     """The C for calling another compiled function (or method, under its mangled name) by name,
     with `arg_nodes` the Python AST nodes at the call site, ALREADY resolved to one node per
     PARAMETER, in parameter order -- `_call`'s plain `f(...)` dispatch gets this from
@@ -14875,7 +15281,8 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
                 raise
         elif _is_ref_kind(kind):
             actual = _argument_kind(arg, ctx, fname, pname, index, kind)
-            if actual != kind and not (actual == NULLK and _is_obj_kind(kind)):
+            if (actual != kind and not (actual == NULLK and _is_obj_kind(kind)) and not _obj_subtype(actual, kind)
+                    and not (index == 0 and (proven_self or getattr(getattr(ctx, 'fn_node', None), '_ail_dispatcher', False)))):
                 raise _argument_type_error('passing %s where %s() wants %s' % (actual, fname, kind), fname, pname, index, kind, actual)
             out.append(_expr(arg, ctx))
         else:
@@ -15156,6 +15563,49 @@ def _stab_add_plan(name, key_node, value, ctx):
     return None
 
 
+def _is_class_isinstance(node, ctx):
+    """`isinstance(x, C)` / `isinstance(x, (C1, C2))` with classes of this program, in a program with
+    inheritance (TYPED_INHERITANCE.md section 1)."""
+    if not (_HIER and isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'isinstance' and len(node.args) == 2 and not node.keywords
+            and all(node.func.id not in table for table in (ctx.funcs, ctx.classes, ctx.kind, ctx.types))):
+        return False
+    spec = node.args[1]
+    names = spec.elts if isinstance(spec, ast.Tuple) else [spec]
+    return bool(names) and all(isinstance(n, ast.Name) and n.id in ctx.classes for n in names)
+
+
+def _isinstance_value(node, ctx):
+    """An int64 0/1: whether the run-time class of `x` is one of the classes or below one. A class the
+    static class already is (or is below) needs no test; one it cannot be is 0."""
+    value, spec = node.args
+    kind = _etype(value, ctx)
+    if not _is_obj_kind(kind):
+        raise Unsupported('isinstance(%s, ...) of %s; isinstance is built for a class instance against classes '
+                          'of this program' % (ast.unparse(value), _a(kind)))
+    if not isinstance(value, (ast.Name, ast.Attribute)):
+        raise Unsupported('isinstance(%s, ...): bind the value to a name first' % ast.unparse(value))
+    targets = [n.id for n in (spec.elts if isinstance(spec, ast.Tuple) else [spec])]
+    static = kind[1]
+    tests = []
+    for t in targets:
+        if t in _class_chain(static) or t == static:
+            tests = None                 # always an instance (unless None)
+            break
+        if t in _HIER and static in _class_chain(t):
+            lo, hi = ctx.classes[t].cid, ctx.classes[t].cid_hi
+            tests.append('(uint64_t)(((ail_obj_header *)_ail_io)->drop - %dU) <= %dU' % (lo, hi - lo)
+                         if hi > lo else '((ail_obj_header *)_ail_io)->drop == %d' % lo)
+    pointer = _null_test_pointer(value, ctx)
+    nullable = static in _NULLABLE
+    if tests is None:
+        return '(int64_t)((%s) != 0)' % pointer if nullable else '((void)(%s), (int64_t)1)' % pointer
+    if not tests:
+        return '((void)(%s), (int64_t)0)' % pointer
+    return '({ void *_ail_io = (void *)(%s); (int64_t)(%s(%s)); })' % (
+        pointer, '_ail_io && ' if nullable else '', ' || '.join(tests))
+
+
 def _call(node, ctx):
     if _is_monotonic_call(node, ctx):
         _monotonic_arguments(node)
@@ -15166,6 +15616,8 @@ def _call(node, ctx):
         raise Unsupported('%s has no value; use a statement' % node.func.id)
     if _is_tcp_poll_call(node, ctx):
         return _tcp_poll_value(node, ctx)[0]
+    if _is_class_isinstance(node, ctx):
+        return _isinstance_value(node, ctx)
     if isinstance(node.func, ast.Name) and node.func.id not in ctx.funcs and node.func.id not in ctx.classes and node.func.id not in ctx.kind and node.func.id not in ctx.types and any(callable_types.valid(_fn_kind(arg, ctx)) for arg in node.args):
         raise Unsupported('builtins and codecs do not accept function values')
     if callable_types.valid(_fn_kind(node.func, ctx)) and not (isinstance(node.func, ast.Name) and node.func.id in ctx.funcs and node.func.id not in ctx.kind and node.func.id not in ctx.types):
@@ -15271,6 +15723,9 @@ def _call(node, ctx):
             raise Unsupported('jsnegzero() does not accept keyword arguments')
         ctx.parts.add('JSDIV')
         return 'ail_js_negzero((double)(%s))' % rec(a[0])
+    if f == '__ail_class_id' and _HIER and len(a) == 1:
+        # the run-time class of a struct of a hierarchy: its header's drop number (TYPED_INHERITANCE.md)
+        return '(int64_t)((ail_obj_header *)(%s))->drop' % _expr(a[0], ctx)
     if f == 'jscharat' and len(a) == 2:
         if node.keywords:
             raise Unsupported('jscharat() does not accept keyword arguments')
@@ -15503,7 +15958,7 @@ def _call(node, ctx):
                     % ('double' if _etype(a[0], ctx) == FLT else 'int64_t',
                        p, inner, p, neg % p, p))
         return '((%s) < 0 ? %s : (%s))' % (inner, neg % inner, inner)
-    if _is_fileprim_call(node, ctx, 'int'):
+    if _is_fileprim_call(node, ctx, 'int') or _is_fileprim_call(node, ctx, 'float'):
         return _fileprim_value(node, ctx)
     if f in _AIL_CLOCK and f not in ctx.funcs:
         # the wall clock and the OS time zone (clockrt.py): ints only, evaluated left to right
@@ -15616,6 +16071,10 @@ def _call(node, ctx):
             targets.append('&' + ctx.sarena())
         ctx.parts.update(('DIE',) + parts)
         return '%s(%s)' % (cfunc, ', '.join([text] + targets))
+    if f in ('_ail_exc_nargs', '_ail_exc_isa', '_ail_exc_is') and f not in ctx.funcs:
+        return _exc_intrinsic_value(node, ctx)
+    if f in ('_ail_exc_attr_i', '_ail_exc_attr_f') and f not in ctx.funcs:
+        return _exc_attr_value(node, ctx)
     if f in _AIL_SYSINFO and f not in ctx.funcs:
         # time.perf_counter() / perf_counter_ns() / os.cpu_count() as the Python syntax maps them
         if a or node.keywords:
@@ -15802,7 +16261,7 @@ def _call(node, ctx):
                     raise Unsupported('passing a %s where %s() wants a sequence' % (t, f))
             else:
                 actual = _argument_kind(arg, ctx, f, pname, argument_index, kind)
-                if (_is_obj_kind(kind) and actual != kind and actual != NULLK
+                if (_is_obj_kind(kind) and actual != kind and actual != NULLK and not _obj_subtype(actual, kind)
                         or not _is_obj_kind(kind) and (actual not in NUM or kind == INT and actual != INT)):
                     raise _argument_type_error('constructor %s() needs %s, got %s' % (f, kind, actual), f, pname, argument_index, kind, actual)
                 value = rec(arg)
@@ -16440,9 +16899,11 @@ def _method(node, ctx, *, as_stmt=False):
         return _bytes_value(node, ctx)
     mangled = _class_method_name(node, ctx)
     if mangled is not None:
+        # `proven_self`: `_VTARGET` may name the method of the only subclass the program constructs
+        # (TYPED_INHERITANCE.md section 3); the receiver is then that subclass, whatever its static class
         return _call_user_func(mangled,
                                _bind_method_args(mangled, at.attr, at.value, node, ctx), ctx,
-                               as_stmt=as_stmt)
+                               as_stmt=as_stmt, proven_self=bool(_HIER))
     if _is_bytes_join_call(node, ctx):
         return _bytes_join_value(node, ctx)
     if _is_bytes_split_call(node, ctx):
@@ -16696,7 +17157,7 @@ def _method(node, ctx, *, as_stmt=False):
                                              args=[node.func.value], keywords=[]), t, ctx)
         if m == 'append' and len(a) == 1:
             element_kind = _olist_element_kind(t)
-            if _element_kind(a[0], ctx, t, 'append') != element_kind:
+            if not _fits(_element_kind(a[0], ctx, t, 'append'), element_kind):
                 raise _element_type_error('a reference list accepts only %s elements' % t[1], t, 'append', _known_argument_kind(a[0], ctx))
             argument, _ = ctx.temp(element_kind)
             value = _map_inline(lambda: _expr(a[0], ctx), ctx)
@@ -17103,7 +17564,7 @@ def _method(node, ctx, *, as_stmt=False):
         ctx.tmp += 1
         tmp = '_bk%d' % ctx.tmp
         return ('({ ail_bytes %s = %s; if (!ail_btab_has(&%s, %s)) ail_die("key error");'
-                ' ail_btab_del(&%s, %s); 0; })' % (tmp, k, c, tmp, c, tmp))
+                ' ail_btab_del(&%s, %s); 0; })' % (tmp, k, c, tmp, c, tmp)).replace('ail_die("key error")', _key_die(ctx, BYTES, tmp))
     if m in ('remove', 'discard') and t == SET and name in ctx.skeys and len(a) == 1:
         if not _is_str_expr(a[0], ctx):
             raise Unsupported('%r holds str; %s needs a str value' % (name, m))
@@ -17114,7 +17575,7 @@ def _method(node, ctx, *, as_stmt=False):
         ctx.tmp += 1
         tmp = '_sk%d' % ctx.tmp
         return ('({ ail_str %s = %s; if (!ail_stab_has(&%s, %s)) ail_die("key error");'
-                ' ail_stab_del(&%s, %s); 0; })' % (tmp, k, c, tmp, c, tmp))
+                ' ail_stab_del(&%s, %s); 0; })' % (tmp, k, c, tmp, c, tmp)).replace('ail_die("key error")', _key_die(ctx, STR, tmp))
     if m in ('remove', 'discard') and t == SET and len(a) == 1:
         # Python's `remove` raises on a missing key and `discard` does not. The table's delete is
         # silent, so `remove` gets the check in front of it rather than quietly differing.
@@ -17124,7 +17585,7 @@ def _method(node, ctx, *, as_stmt=False):
             return 'ail_tab_del(&%s, %s)' % (c, k)
         tmp, _ = ctx.temp(INT)
         return ('({ int64_t %s = %s; if (!ail_tab_has(&%s, %s)) ail_die("key error");'
-                ' ail_tab_del(&%s, %s); 0; })' % (tmp, k, c, tmp, c, tmp))
+                ' ail_tab_del(&%s, %s); 0; })' % (tmp, k, c, tmp, c, tmp)).replace('ail_die("key error")', _key_die(ctx, INT, tmp))
     if t == 'array':
         raise Unsupported('%s.%s(): %r is a list parameter, which is read-only here.\n'
                           '  write instead: build and return a new list (`out = %s.copy()`, change '
@@ -17212,6 +17673,10 @@ def _truthy(node, ctx):
     without opening any new door into arithmetic: a str used in `+`, `-`, comparison-with-int, or
     any other numeric position never reaches `_truthy` at all and stays refused exactly as before.
     """
+    if dunders.TRUTH and _is_obj_kind(_etype(node, ctx)) and _etype(node, ctx)[1] in dunders.TRUTH:
+        # dunders.py turns every truth test it can type into __bool__ / __len__; this one it could not
+        raise Unsupported('the truth value of a %s instance, whose class defines __bool__ or __len__, here; '
+                          'call the method (`x.__bool__()`, `len(x) != 0`)' % _etype(node, ctx)[1])
     if _NULLABLE and _is_obj_kind(_etype(node, ctx)):
         # `if node:` / `while cur:` -- a struct value is true unless it is None.
         return '(%s != NULL)' % _null_test_pointer(node, ctx)
@@ -18851,7 +19316,7 @@ def _stmt_inner(node, ctx, ind):
                 ctx.has_try = True
                 k = len(t.elts)
                 pre = _flush(ctx, pad)
-                check = '%sif (%s.n != %d) ail_raise_named(AIL_EXC_VALUE);\n' % (pad, c, k)
+                check = _unpack_check(ctx, pad, c, k)
                 names = [ctx.declare(e.id, FLT if conv == 'float' else INT) for e in t.elts]
                 out = ''.join('%s%s = %s(ail_slist_get(&%s, %d));\n' % (pad, nm, convfn, c, i)
                               for i, nm in enumerate(names))
@@ -18867,7 +19332,7 @@ def _stmt_inner(node, ctx, ind):
                 ctx.has_try = True
                 k = len(t.elts)
                 pre = _flush(ctx, pad)
-                check = '%sif (%s.n != %d) ail_raise_named(AIL_EXC_VALUE);\n' % (pad, c, k)
+                check = _unpack_check(ctx, pad, c, k)
                 names = [ctx.declare(e.id, STR) for e in t.elts]
                 out = ''.join('%s%s = ail_slist_get(&%s, %d);\n' % (pad, nm, c, i)
                               for i, nm in enumerate(names))
@@ -18884,7 +19349,7 @@ def _stmt_inner(node, ctx, ind):
                 ctx.has_try = True
                 k = len(t.elts)
                 pre = _flush(ctx, pad)
-                check = '%sif (%s.n != %d) ail_raise_named(AIL_EXC_VALUE);\n' % (pad, c, k)
+                check = _unpack_check(ctx, pad, c, k)
                 names = [ctx.declare(e.id, STR) for e in t.elts]
                 out = ''.join('%s%s = ail_slist_get(&%s, %d);\n' % (pad, nm, c, i)
                               for i, nm in enumerate(names))
@@ -18908,7 +19373,7 @@ def _stmt_inner(node, ctx, ind):
                 ctx.has_try = True
                 k = len(t.elts)
                 pre = _flush(ctx, pad)
-                check = '%sif (%s.n != %d) ail_raise_named(AIL_EXC_VALUE);\n' % (pad, c, k)
+                check = _unpack_check(ctx, pad, c, k)
                 names = [ctx.declare(e.id, FLT if fl else INT) for e in t.elts]
                 getfn = 'ail_flist_get' if fl else 'ail_list_get'
                 out = ''.join('%s%s = %s(&%s, %d);\n' % (pad, nm, getfn, c, i)
@@ -19152,7 +19617,7 @@ def _stmt_inner(node, ctx, ind):
             fresh, _ = ctx.temp(known)
             out = '%s%s;\n' % (pad, _obj_store(fresh, _olist_helper(known, 'new') + '()', known, ctx, adopt=True))
             for element in node.value.elts:
-                if _etype(element, ctx) != _olist_element_kind(known):
+                if not _fits(_etype(element, ctx), _olist_element_kind(known)):
                     raise Unsupported('a struct list accepts only %s elements' % known[1])
                 value = _expr(element, ctx)
                 out += _flush(ctx, pad) + '%s%s(%s, %s);\n' % (pad, _olist_helper(known, 'push'), fresh, value)
@@ -20283,7 +20748,7 @@ def _stmt_inner(node, ctx, ind):
                 ctx.parts.add('TAB')
                 ctx.has_try = True
                 out = (pre + '%sif (!ail_tab_has(&%s, %s)) ail_die("key error");\n'
-                       % (pad, ctx.tdict_col(name, 0), k))
+                       % (pad, ctx.tdict_col(name, 0), k)).replace('ail_die("key error")', _key_die(ctx, INT, k))
                 for j in range(ctx.tdict[name]):
                     out += '%sail_tab_del(&%s, %s);\n' % (pad, ctx.tdict_col(name, j), k)
                 return out
@@ -20490,7 +20955,7 @@ def _stmt_inner(node, ctx, ind):
                     k = _bytes_value(key, ctx)
                     pre = _flush(ctx, pad)
                     return (pre + '%sif (!ail_btab_has(&%s, %s)) ail_die("key error");\n'
-                            '%sail_btab_del(&%s, %s);\n' % (pad, c, k, pad, c, k))
+                            '%sail_btab_del(&%s, %s);\n' % (pad, c, k, pad, c, k)).replace('ail_die("key error")', _key_die(ctx, BYTES, k))
                 if name in ctx.skeys:
                     if not _is_str_expr(key, ctx):
                         raise Unsupported('%r is keyed by str; del needs a str key' % name)
@@ -20498,12 +20963,12 @@ def _stmt_inner(node, ctx, ind):
                     k = _str_value(key, ctx)
                     pre = _flush(ctx, pad)
                     return (pre + '%sif (!ail_stab_has(&%s, %s)) ail_die("key error");\n'
-                            '%sail_stab_del(&%s, %s);\n' % (pad, c, k, pad, c, k))
+                            '%sail_stab_del(&%s, %s);\n' % (pad, c, k, pad, c, k)).replace('ail_die("key error")', _key_die(ctx, STR, k))
                 ctx.parts.add('TAB')
                 k = _expr(key, ctx)
                 pre = _flush(ctx, pad)
                 out = (pre + '%sif (!ail_tab_has(&%s, %s)) ail_die("key error");\n'
-                       % (pad, c, k))
+                       % (pad, c, k)).replace('ail_die("key error")', _key_die(ctx, INT, k))
                 for j in range(ctx.tdict.get(name, 1)):
                     out += '%sail_tab_del(&%s, %s);\n' % (pad, ctx.tdict_col(name, j), k)
                 return out
@@ -20513,6 +20978,10 @@ def _stmt_inner(node, ctx, ind):
                 pre = _flush(ctx, pad)
                 ctx.parts.add('LIST')
                 ctx.has_try = True
+                if exctext.ACTIVE:
+                    _exc_text_parts(ctx)
+                    return pre + ('%s{ int64_t _dk = %s; if (_dk >= %s.n || _dk < -%s.n) ail_die("list assignment index out of range"); '
+                                  '(void)ail_list_pop(&%s, _dk); }\n' % (pad, k, c, c, c))
                 return pre + '%s(void)ail_list_pop(&%s, %s);\n' % (pad, c, k)
         raise Unsupported(_shape_refusal(node, _STMT_SHAPE_REFUSALS, 'statement'))
     if isinstance(node, ast.Assert):
@@ -20533,6 +21002,10 @@ def _raise_stmt(node, ctx, pad):
         return '%sail_reraise();\n' % pad
     if isinstance(node.exc, ast.Name) and node.exc.id in EXC_NAMES:
         _exc_parts(ctx, EXC_NAMES[node.exc.id])
+        if EXC_NAMES[node.exc.id] in (2, 3, 5):
+            # the runtime's own division / index / EOF traps carry CPython's text when a program reads it; a program's
+            # `raise IndexError` has no arguments
+            return '%sail_raise_value_adopt(ail_exception_new(%d, NULL, 0, 0));\n' % (pad, EXC_NAMES[node.exc.id])
         return '%sail_raise_named(%d);\n' % (pad, EXC_NAMES[node.exc.id])
     if _etype(node.exc, ctx) != EXCEPTION:
         raise Unsupported('raise requires a built-in exception value')
@@ -20595,7 +21068,9 @@ def _try_stmt(node, ctx, ind):
         for e in types:
             if e.id not in EXC_NAMES:
                 raise Unsupported('except %s; the exceptions this language has are %s'
-                                  % (e.id, ', '.join(sorted(n for n in EXC_NAMES if proclib.ACTIVE or n not in ('CalledProcessError', 'TimeoutExpired')))))
+                                  % (e.id, ', '.join(sorted(n for n in EXC_NAMES if (proclib.ACTIVE or n not in ('CalledProcessError', 'TimeoutExpired'))
+                                                       and (sqllower.ACTIVE or not n.startswith('sqlite3_'))
+                                                       and (urllower.ACTIVE or n not in ('URLError', 'HTTPError'))))))
             code = EXC_NAMES[e.id]
             _exc_parts(ctx, code)
             if code in seen:
@@ -20638,6 +21113,8 @@ def _try_stmt(node, ctx, ind):
         first = False
         cond = ' || '.join('ail_exc_code == %d' % caught for code in hc
                            for caught in _handler_codes(code))
+        if EXC_NAMES['Exception'] in hc:
+            cond = '1'                                     # `except Exception` takes everything that can be caught
         out += '%s%s (%s) {\n' % (pad1, kw, cond)
         ctx.finally_serial += 1
         scope = _handled_name(ctx, '_ail_handled%d' % ctx.finally_serial)
@@ -20836,8 +21313,8 @@ def _print_stmt(node, ctx, pad):
                                '  write instead: print its fields, e.g. print(%s)'
                                % (t[1], ', '.join(base + '.' + f for f in fields) or 'len(...)'))
         elif t == EXCEPTION:
-            raise Unsupported('print() given an exception, which has no printable form here.\n'
-                               '  write instead: print a fixed text, `except ValueError: print("bad input")`')
+            _exc_text_parts(ctx)
+            writers.append(('str', stage(STR, 'ail_exc_text(%s, &%s)' % (_exception_value(a0, ctx), ctx.sarena()))))
         else:
             raise Unsupported('print() given a %s, not a number or a str.\n'
                                '  write instead: print an element or a measurement (`print(xs[0])`, '
@@ -21209,7 +21686,7 @@ def _setitem(target, value, ctx, ind):
         kind = _etype(target.value, ctx)
         if isinstance(target.slice, ast.Slice):
             raise Unsupported('assigning a struct list slice is unsupported')
-        if _element_kind(value, ctx, kind, 'store') != _olist_element_kind(kind):
+        if not _fits(_element_kind(value, ctx, kind, 'store'), _olist_element_kind(kind)):
             raise _element_type_error('a struct list accepts only %s elements' % kind[1], kind, 'store', _known_argument_kind(value, ctx))
         if _etype(target.slice, ctx) != INT:
             raise Unsupported('a struct list index must be an integer')
@@ -25288,7 +25765,7 @@ def _check_local_assignment(name, value, ctx):
     if kind in (LIST, FLIST) and isinstance(source, ast.Name) and source.id in ctx.tstride:
         raise Unsupported('a scalar list annotation cannot hold records')
     if _is_olist_kind(kind) and isinstance(value, ast.List):
-        if any(_etype(element, ctx) != _olist_element_kind(kind) for element in value.elts):
+        if any(not _fits(_etype(element, ctx), _olist_element_kind(kind)) for element in value.elts):
             raise Unsupported('a struct list accepts only %s elements' % kind[1])
         actual = kind
     elif kind in MAPS and isinstance(value, ast.Dict):
@@ -25318,7 +25795,7 @@ def _check_local_assignment(name, value, ctx):
         actual = BLIST if kind == BLIST and isinstance(value, ast.List) and not value.elts else _etype(value, ctx)
     if actual == NULLK and _is_obj_kind(kind):
         actual = kind                        # `x = None` for a struct-typed name
-    if actual != kind:
+    if actual != kind and not _obj_assignable(name, actual, kind):
         raise Unsupported('%r is declared %s; assigning %s is unsupported.\n'
                           '  write instead: %s' % (name, kind, actual, _assign_fix(kind, actual)))
 
@@ -26354,6 +26831,10 @@ def _bind_object_types(fn, ctx):
         if _is_olist_kind(kind) and not _is_hlist_kind(kind) and not _managed_class(ctx.classes[kind[1]]):
             raise Unsupported('a struct list requires a nonempty scalar struct')
         old = ctx.types.get(name)
+        if _is_ref_kind(old) and old != kind and _HIER and _ref_join(old, kind) is not None:
+            kind = _ref_join(old, kind)        # a base class holds both (TYPED_INHERITANCE.md section 4)
+            if kind == old:
+                return False
         if _is_ref_kind(old) and old != kind:
             error = Unsupported('incompatible struct types assigned to %s' % name)
             if action in ('append', 'extend') and _list_element_kind(old) is not None:
@@ -26402,6 +26883,8 @@ def _bind_object_types(fn, ctx):
                         kinds = {known(element) for element in value.elts}
                         objects = {kind for kind in kinds if _is_obj_kind(kind)}
                         if objects:
+                            if len(objects) > 1 and kinds == objects and _obj_join_all(objects) is not None:
+                                objects = kinds = {_obj_join_all(objects)}     # their common base
                             if len(objects) != 1 or kinds != objects:
                                 raise Unsupported('a struct list must hold one struct type')
                             kind = (OLIST, next(iter(objects))[1])
@@ -26833,7 +27316,7 @@ def _return_kind(value, ctx):
     if _range_list_comp(value, ctx) is not None:
         return LIST
     if isinstance(value, ast.List) and _is_olist_kind(ctx.ret):
-        if any(_etype(element, ctx) != (OBJ, ctx.ret[1]) for element in value.elts):
+        if any(not _fits(_etype(element, ctx), (OBJ, ctx.ret[1])) for element in value.elts):
             raise Unsupported('a struct list return accepts only %s elements' % ctx.ret[1])
         return ctx.ret
     if isinstance(value, ast.List) and ctx.ret == SLIST:
@@ -27117,6 +27600,8 @@ def _reconcile_return_kinds(kinds, fname):
     if obj_kinds and kinds - obj_kinds:
         raise Unsupported(
             '%s returns a class instance on one path and something else on another' % fname)
+    if len(obj_kinds) > 1 and _HIER and _obj_join_all(obj_kinds) is not None:
+        return _obj_join_all(obj_kinds)    # the nearest common base class (TYPED_INHERITANCE.md section 4)
     if len(obj_kinds) > 1:
         raise Unsupported(
             '%s: return paths disagree on which class instance (%s)'
@@ -28853,6 +29338,9 @@ def _signatures(fns, entry_sig=None, classes=None, external=None):
                     raise Unsupported('%s() has unknown return type %s' % (f.name, name))
                 expected = (OBJ, name)
             actual = sigs[f.name][1]
+            if actual != expected and _obj_subtype(actual, expected):
+                sigs[f.name] = (sigs[f.name][0], expected)      # `-> Base` returning a subclass instance
+                actual = expected
             if actual != expected:
                 raise _return_type_error('%s() return annotation %s disagrees with inferred %s'
                                          % (f.name, expected, actual), f.name, expected, actual, f)
@@ -28880,6 +29368,10 @@ class ClassInfo:
         self.init_ctx = None       # the Ctx `_compile_init` used, kept for its .parts/.folds/.floor
         self.sort_specs = {}       # suffix -> key spec of every struct-list sort site that names this class
         self.heap_specs = {}       # suffix -> key fields of every struct heap site (`_olist_heap_name`)
+        self.base = None           # the base class's name (single inheritance), or None
+        self.init_expanded = None  # __init__ with the base's construction inlined (classes of a hierarchy)
+        self.cid = None            # class id = drop number (classes of a hierarchy); subclasses: cid..cid_hi
+        self.cid_hi = None
 
     def method_cname(self, m):
         return '%s__%s' % (self.name, m)
@@ -28959,10 +29451,14 @@ def _compile_init(init_fn, info, classes):
     ctx.classes = dict(classes)
     ctx.classes[info.name] = info
     ctx.funcs = {}
+    ctx.bool_names = _BOOLS.locals.get(info.name + '.__init__', frozenset())
+    ctx.bool_lists = _BOOLS.lists.get(info.name + '.__init__', frozenset())
     for stmt in init_fn.body:
         if (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant)
                 and isinstance(stmt.value.value, str)):
             continue                                      # a docstring
+        if isinstance(stmt, ast.Pass) and info.name in _HIER:
+            continue                                      # `def __init__(self): pass` in a base class
         declared = None
         if (isinstance(stmt, ast.AnnAssign) and stmt.value is not None
                 and isinstance(stmt.target, ast.Attribute) and isinstance(stmt.target.value, ast.Name)
@@ -29033,7 +29529,7 @@ def _compile_init(init_fn, info, classes):
         if ftype in (LIST, FLIST):
             ctx.parts.add('NUMFIELD')            # ail_obj_field_list_move / _flist_move
         info.init_stmts.append((field, cexpr))
-    if not info.field_order:
+    if not info.field_order and info.name not in _HIER:
         raise Unsupported('class %r has an __init__ that establishes no fields' % info.name)
     for p, kind in info.init_params:
         if p in info.adopted_params:
@@ -29312,6 +29808,284 @@ def _strip_nullable(tree):
     return names
 
 
+def _resolve_method(classes, name, method):
+    """The class whose `method` an instance of class `name` runs (its own, else the nearest base's), or None."""
+    for k in _class_chain(name):
+        if method in classes[k].methods:
+            return k
+    return None
+
+
+def _inherit_class(c, info, init_fn, classes):
+    """A class of a hierarchy: its base's fields first (prefix layout), its __init__ with the base's
+    construction inlined, `super()` calls in its methods bound to the base's methods. Its base was
+    scanned before it (a base is defined above its subclasses)."""
+    base = info.base
+    chain = _class_chain(base) if base else []
+    base_info = classes[base] if base else None
+    expanded = typedinherit.expand_init(c, init_fn, base, base_info.init_expanded if base_info else None,
+                                        list(base_info.field_order) if base_info else [], chain, Unsupported)
+    info.init_expanded = expanded
+    if base_info is not None:
+        info.field_order = list(base_info.field_order)
+        info.field_types = dict(base_info.field_types)
+
+    def resolve(start, method):
+        owner = _resolve_method(classes, start, method)
+        return classes[owner].method_cname(method) if owner else None
+    for mname in list(info.methods):
+        info.methods[mname] = typedinherit.rewrite_super_calls(info.methods[mname], c.name, chain, resolve,
+                                                               Unsupported)
+    _compile_init(expanded, info, classes)
+    if base_info is not None:
+        for field in base_info.field_order:
+            if info.field_types[field] != base_info.field_types[field]:
+                raise _refusal_at(c, '%s.__init__ sets %s.%s to %s, and %s.%s is %s; an inherited field '
+                                     'keeps its type' % (c.name, c.name, field, _a(info.field_types[field]),
+                                                         base, field, _a(base_info.field_types[field])))
+    if not _managed_class(info):
+        raise _refusal_at(c, 'class %r is part of an inheritance hierarchy and has a field of a kind that is not '
+                             'reference counted (%s)' % (c.name, ', '.join(sorted(map(str, info.field_types.values())))))
+
+
+def _finish_hierarchy(classes):
+    """Order the classes in preorder (a base right before its subclasses) and number them."""
+    names = list(classes)
+    children = {n: [m for m in names if _HIER.get(m) == n] for n in names}
+    order = []
+
+    def visit(n):
+        order.append(n)
+        for m in children[n]:
+            visit(m)
+    for n in names:
+        if _HIER.get(n) is None:
+            visit(n)
+    infos = [classes[n] for n in order]
+    classes.clear()
+    for info in infos:
+        classes[info.name] = info
+    next_id = 2
+    for info in infos:
+        if _managed_class(info):
+            info.cid = next_id
+            next_id += 1
+    for info in reversed(infos):
+        if info.name in _HIER:
+            info.cid_hi = max([info.cid] + [classes[m].cid_hi for m in children[info.name]])
+
+
+def _hier_subtree(classes, name):
+    """`name` and every class below it, in preorder."""
+    info = classes[name]
+    return [i.name for i in classes.values()
+            if i.cid is not None and info.cid <= i.cid <= info.cid_hi]
+
+
+def _has_value_return(fn):
+    return any(isinstance(n, ast.Return) and n.value is not None for n in ast.walk(fn))
+
+
+def _hierarchy_functions(tree, fns, classes, method_fns):
+    """The method functions of a program with inheritance: stub methods dropped, `if isinstance(x, C):`
+    narrowed (typedinherit.narrow_isinstance), one dispatcher per (class, method) whose call can reach
+    two methods, and `_VTARGET` filled in. Section 3 of docs/design/TYPED_INHERITANCE.md."""
+    stubs = {classes[k].method_cname(m) for k in _HIER for m, fn in classes[k].methods.items()
+             if typedinherit.is_stub(fn)}
+    method_fns = [f for f in method_fns if f.name not in stubs]
+    by_name = {f.name: f for f in method_fns}
+    hier = set(_HIER)
+    for f in list(fns) + method_fns:
+        typedinherit.narrow_isinstance(f, hier)
+    constructed = {n.func.id for n in ast.walk(tree)
+                   if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in classes}
+    called = {n.func.attr for n in ast.walk(tree)
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
+    dispatchers = []
+    for sname in _HIER:
+        subtree = _hier_subtree(classes, sname)
+        for m in sorted(called):
+            own = _resolve_method(classes, sname, m)
+            reach = [k for k in subtree if k in constructed]
+            owners = {k: _resolve_method(classes, k, m) for k in reach}
+            if not reach:
+                if own is not None:
+                    target = classes[own].method_cname(m)
+                    _VTARGET[(sname, m)] = (target if target not in stubs else
+                                            Unsupported('%s.%s is a stub (no body); no class the program '
+                                                        'constructs defines %s' % (own, m, m)))
+                continue
+            if own is None and any(o is None for o in owners.values()):
+                if any(o is not None for o in owners.values()):
+                    lacking = sorted(k for k, o in owners.items() if o is None)
+                    _VTARGET[(sname, m)] = Unsupported(
+                        '.%s() through a %s: %s has no method %s (CPython raises AttributeError).\n'
+                        '  write instead: call it inside `if isinstance(x, C):` with C a class that has '
+                        '%s, or define %s on %s' % (m, sname, lacking[0], m, m, m, sname))
+                continue
+            stubbed = sorted(k for k, o in owners.items() if classes[o].method_cname(m) in stubs)
+            if stubbed:
+                _VTARGET[(sname, m)] = Unsupported(
+                    '.%s() through a %s can reach %s.%s, a stub (no body), for a %s the program constructs '
+                    '(CPython would return None or raise NotImplementedError).\n'
+                    '  write instead: define %s on %s' % (m, sname, owners[stubbed[0]], m, stubbed[0],
+                                                          m, stubbed[0]))
+                continue
+            impls = sorted({o for o in owners.values()}, key=lambda o: classes[o].cid)
+            if len(impls) == 1:
+                _VTARGET[(sname, m)] = classes[impls[0]].method_cname(m)
+                continue
+            fn = _dispatcher(sname, m, impls, owners, classes, by_name)
+            if isinstance(fn, Unsupported):
+                _VTARGET[(sname, m)] = fn
+                continue
+            _VTARGET[(sname, m)] = fn.name
+            dispatchers.append(fn)
+    if _BOOLS is not boolkind.EMPTY:
+        for fn in dispatchers:
+            lflags = {impl in _BOOLS.list_fns for impl in fn._ail_impls}
+            if lflags == {True}:
+                _BOOLS.list_fns.add(fn.name)
+                if {impl in _BOOLS.dict_fns for impl in fn._ail_impls} == {True}:
+                    _BOOLS.dict_fns.add(fn.name)
+            flags = {impl in _BOOLS.fns for impl in fn._ail_impls}
+            if flags == {True}:
+                _BOOLS.fns.add(fn.name)
+            elif len(flags) > 1:
+                _VTARGET[fn._ail_key] = Unsupported(
+                    '%s.%s returns a bool in some subclasses and an int in others; CPython prints them '
+                    'differently (True / 1).\n'
+                    '  write instead: return the same kind in every override' % fn._ail_key)
+    return method_fns + dispatchers
+
+
+def _dispatcher(sname, m, impls, owners, classes, by_name):
+    """`def S__m__vt(self: S, a, b): k = class id; if k == ..: return O1__m(self, a, b) ...` -- a call
+    on the run-time class, compiled like any other function. Its parameters are the methods' own."""
+    fns = [by_name[classes[o].method_cname(m)] for o in impls]
+    own = _resolve_method(classes, sname, m)
+    rep = by_name[classes[own].method_cname(m)] if own is not None else fns[0]
+    def shown(f):
+        return f.name.replace('__', '.')
+    for f in fns:
+        if f is rep:
+            continue
+        if len(f.args.args) != len(rep.args.args):
+            return Unsupported('%s takes %d parameters and %s, which it overrides or shares a base with, takes %d; '
+                               'an override takes the parameters of the method it overrides'
+                               % (shown(f), len(f.args.args) - 1, shown(rep), len(rep.args.args) - 1))
+        if _has_value_return(f) != _has_value_return(rep):
+            return Unsupported('%s returns %s and %s returns %s; an override returns what the method it '
+                               'overrides returns' % (shown(f), 'a value' if _has_value_return(f) else 'nothing',
+                                                       shown(rep), 'a value' if _has_value_return(rep) else 'nothing'))
+        pairs = [(a.annotation, b.annotation, 'parameter %r' % a.arg) for a, b in zip(f.args.args[1:], rep.args.args[1:])]
+        pairs.append((f.returns, rep.returns, 'result'))
+        for x, y, what in pairs:
+            if x is not None and y is not None and ast.dump(x) != ast.dump(y):
+                return Unsupported('%s declares its %s %s and %s declares it %s; an override keeps the types of '
+                                   'the method it overrides (one call cannot have two result or parameter types)'
+                                   % (shown(f), what, ast.unparse(x).replace('__ail_checked_', '').strip('_'),
+                                      shown(rep), ast.unparse(y).replace('__ail_checked_', '').strip('_')))
+    params = [copy.deepcopy(a) for a in rep.args.args[1:]]
+    self_arg = ast.arg(arg='self', annotation=ast.Name(id=sname, ctx=ast.Load()))
+    names = [a.arg for a in params]
+
+    def call(target):
+        return ast.Call(func=ast.Name(id=target, ctx=ast.Load()),
+                        args=[ast.Name(id='self', ctx=ast.Load())] + [ast.Name(id=n, ctx=ast.Load()) for n in names],
+                        keywords=[])
+    noret = not _has_value_return(rep)
+
+    def leave(target):
+        if noret:
+            return [ast.Expr(value=call(target)), ast.Return(value=None)]
+        return [ast.Return(value=call(target))]
+    # the method most classes reach is the fall-through; the others are tested
+    count = {o: sum(1 for k in owners if owners[k] == o) for o in impls}
+    fallback = max(impls, key=lambda o: (count[o], -classes[o].cid))
+    body = [ast.Assign(targets=[ast.Name(id='_ail_cls', ctx=ast.Store())],
+                       value=ast.Call(func=ast.Name(id='__ail_class_id', ctx=ast.Load()),
+                                      args=[ast.Name(id='self', ctx=ast.Load())], keywords=[]))]
+    for o in impls:
+        if o == fallback:
+            continue
+        ids = sorted(classes[k].cid for k in owners if owners[k] == o)
+        tests = [ast.Compare(left=ast.Name(id='_ail_cls', ctx=ast.Load()), ops=[ast.Eq()],
+                             comparators=[ast.Constant(value=i)]) for i in ids]
+        test = tests[0] if len(tests) == 1 else ast.BoolOp(op=ast.Or(), values=tests)
+        body.append(ast.If(test=test, body=leave(classes[o].method_cname(m)), orelse=[]))
+    body.extend(leave(classes[fallback].method_cname(m)))
+    returns = copy.deepcopy(rep.returns)
+    fn = ast.FunctionDef(name='%s__%s__vt' % (sname, m),
+                         args=ast.arguments(posonlyargs=[], args=[self_arg] + params, vararg=None, kwonlyargs=[],
+                                            kw_defaults=[], kwarg=None, defaults=[]),
+                         body=body, decorator_list=[], returns=returns)
+    ast.copy_location(fn, rep)
+    for node in ast.walk(fn):
+        if not hasattr(node, 'lineno') and isinstance(node, (ast.stmt, ast.expr)):
+            ast.copy_location(node, rep)
+    ast.fix_missing_locations(fn)
+    fn._ail_dispatcher = True
+    fn._ail_impls = [classes[o].method_cname(m) for o in impls]
+    fn._ail_key = (sname, m)
+    fn._ail_cases = [(sorted(classes[k].cid for k in owners if owners[k] == o), classes[o].method_cname(m))
+                     for o in impls if o != fallback]
+    fn._ail_fallback = classes[fallback].method_cname(m)
+    return fn
+
+
+def _c_param_names(params):
+    """The parameter names of a C parameter list (`T *v_a, int64_t (*v_f)(int64_t), double v_b`)."""
+    if params.strip() in ('', 'void'):
+        return []
+    parts, depth, cur = [], 0, ''
+    for ch in params:
+        if ch == ',' and depth == 0:
+            parts.append(cur)
+            cur = ''
+            continue
+        depth += ch == '('
+        depth -= ch == ')'
+        cur += ch
+    parts.append(cur)
+    names = []
+    for part in parts:
+        pointer = re.search(r'\(\s*\*\s*([A-Za-z_]\w*)\s*\)', part)
+        names.append(pointer.group(1) if pointer else re.findall(r'[A-Za-z_]\w*', part)[-1])
+    return names
+
+
+def _dispatcher_c(text, fn, csym):
+    """The C of a dispatcher (`_dispatcher`): a switch on the receiver's class id that hands every
+    parameter on to the method of that class -- no retain, no cleanup frame (each method keeps its
+    own). The emitter's own compile of the AST body only settled the signature."""
+    sym = csym[fn.name]
+    lines = text.split('\n')
+    for i, line in enumerate(lines):
+        if not line.startswith((' ', '\t')) and line.endswith(') {') and (' ' + sym + '(') in ' ' + line:
+            break
+    else:
+        return text
+    header = line[:-2]
+    at = header.index(sym + '(')
+    names = _c_param_names(header[at + len(sym) + 1:-1])
+    void = header[:at].split()[-1:] == ['void']
+    args = ', '.join(names)
+
+    def leave(target):
+        call = '%s(%s)' % (csym.get(target, target), args)
+        return '%s; return;' % call if void else 'return %s;' % call
+    body = ['    switch (((ail_obj_header *)%s)->drop) {' % names[0]]
+    for ids, target in fn._ail_cases:
+        body.append('    %s %s' % (' '.join('case %d:' % i for i in ids), leave(target)))
+    body.append('    default: %s' % leave(fn._ail_fallback))
+    body.append('    }')
+    if fn._ail_key[0] in _NULLABLE:
+        body.insert(0, '    if (!%s) ail_none_fault();' % names[0])
+    keep = [l for l in lines[:i] if not l.startswith('static void ail_unwind_%s(' % sym)]
+    return '\n'.join(keep + [line] + body + ['}', ''])
+
+
 def _scan_classes(classdefs):
     """Every `class` in the source, validated and reduced to its fixed shape -- SEMANTICS.md
     section 25. Each out-of-scope construct is refused by its own name, at this one pre-pass,
@@ -29325,31 +30099,31 @@ def _scan_classes(classdefs):
         if c.name in classes:
             raise _refusal_at(c, 'class %r defined more than once' % c.name)
         classes[c.name] = ClassInfo(c.name)
+    bases, seen = {}, set()
     for c in classdefs:
-        if c.bases or c.keywords:
-            if any(isinstance(b, ast.Name) and b.id.endswith(('Error', 'Exception')) for b in c.bases):
-                raise _refusal_at(c,
-                    'inheritance (class %r names a base class); a user-defined exception class is '
-                    'not built here.\n'
-                    '  write instead: raise a built-in exception (`raise ValueError("negative")`) '
-                    'and catch it by that name (`except ValueError:`)' % c.name)
-            raise _refusal_at(c,
-                'inheritance (class %r names a base class); a class here is a fixed-offset '
-                'C struct with no vtable.\n'
-                '  write instead: a standalone class that holds the base as a field '
-                '(`self.base = Base(...)`) or repeats its fields; no base class' % c.name)
+        bases[c.name] = (typedinherit.class_base(c, seen, Unsupported) if c.bases or c.keywords else None)
+        seen.add(c.name)
+    _HIER.clear()
+    _VTARGET.clear()
+    parents = {b for b in bases.values() if b is not None}
+    _HIER.update((n, b) for n, b in bases.items() if b is not None or n in parents)
+    for c in classdefs:
         if c.decorator_list:
             raise _refusal_at(c, 'a decorator on class %r' % c.name)
         info = classes[c.name]
+        info.base = bases[c.name]
         init_fn = None
         for stmt in c.body:
             if (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant)
                     and isinstance(stmt.value.value, str)):
                 continue                                  # a docstring
+            if isinstance(stmt, ast.Pass) or (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant)
+                                              and stmt.value.value is Ellipsis):
+                continue                                  # `class Chore(Task): pass`
             if not isinstance(stmt, ast.FunctionDef):
                 raise _refusal_at(stmt,
                     'a class body statement other than a method (%s, in class %r); a class here '
-                    'is __init__ and plain methods only, no class-level attributes'
+                    'is __init__, plain methods and literal class attributes (`K = 3`) only'
                     % (type(stmt).__name__, c.name))
             if stmt.decorator_list:
                 raise _refusal_at(stmt,
@@ -29362,21 +30136,27 @@ def _scan_classes(classdefs):
             if stmt.name == '__init__':
                 init_fn = stmt
                 continue
-            if stmt.name.startswith('__') and stmt.name.endswith('__'):
+            if stmt.name.startswith('__') and stmt.name.endswith('__') and not dunders.accepted(c.name, stmt.name):
                 raise _refusal_at(stmt,
                     'dunder method %s.%s; only __init__ is supported here, no other dunder '
                     '(__eq__, __repr__, __len__, __add__, ...)' % (c.name, stmt.name))
             info.methods[stmt.name] = stmt
-        if init_fn is None:
+        if init_fn is None and c.name not in _HIER:
             raise _refusal_at(c,
                 'class %r has no __init__; its shape (which fields it has, and their types) '
                 'cannot be determined at compile time without one.\n'
                 '  write instead: `def __init__(self, x: int) -> None: self.x = x`, or a '
                 '`@dataclass` with annotated fields' % c.name)
-        _check_plain_args(init_fn, c.name, '__init__')
+        if init_fn is not None:
+            _check_plain_args(init_fn, c.name, '__init__')
         for mname, mfn in info.methods.items():
             _check_plain_args(mfn, c.name, mname)
-        _compile_init(init_fn, info, classes)
+        if c.name in _HIER:
+            _inherit_class(c, info, init_fn, classes)
+        else:
+            _compile_init(init_fn, info, classes)
+    if _HIER:
+        _finish_hierarchy(classes)
     visiting, done = set(), set()
     for root in classes:
         stack = [(root, False)]
@@ -29498,6 +30278,11 @@ def _class_c_decls(classes):
     for info in classes.values():
         if _managed_class(info):
             drop_ids[info.name] = len(drop_ids) + 2
+            assert info.cid is None or info.cid == drop_ids[info.name], (info.name, info.cid)
+    if _HIER:
+        # TYPED_INHERITANCE.md section 2: a subclass pointer is passed where its base is declared (the
+        # compiler's subtype check allowed it); the structs share their prefix, asserted below.
+        out.append('#pragma GCC diagnostic ignored "-Wincompatible-pointer-types"\n#include <stddef.h>\n')
     if _NULLABLE:
         out.append('''static __attribute__((noinline, cold)) void ail_none_fault(void) {
     ail_raise_value(ail_exception_new(AIL_EXC_RUNTIME, (const uint8_t *)"field access on None", 20, 1));
@@ -29844,6 +30629,10 @@ static void ail__field_str_append_slow(ail_str *slot, ail_str value) {
             for fn in info.field_order)
         header = '    ail_obj_header _ail_header;\n' if _managed_class(info) else ''
         out.append('struct %s {\n%s%s};\n' % (info.struct_name(), header, fields))
+        if info.base is not None:
+            base_struct = classes[info.base].struct_name()
+            out.extend('_Static_assert(offsetof(%s, f_%s) == offsetof(%s, f_%s), "a subclass begins with its base");\n'
+                       % (info.struct_name(), fn, base_struct, fn) for fn in classes[info.base].field_order)
         for fn in info.field_order:
             if info.field_types[fn] == STR:
                 out.append('#include <stddef.h>\n_Static_assert(offsetof(%s, f_%s_inl) == offsetof(%s, f_%s) + sizeof(ail_str), '
@@ -31503,7 +32292,7 @@ class _ListLowering:
             lines += ['$e = $n']
         lines += ['$r = -1', '$k = $s', 'while $k < $e:', '    if __X[$k] == $v:', '        $r = $k',
                   '        break', '    $k += 1', 'if $r < 0:',
-                  '    raise ValueError("list.index(x): x not in list")']
+                  '    raise ValueError(f"{$v!r} is not in list")']
         subs = {'X': receiver, 'V': args[0]}
         if len(args) >= 2:
             subs['S'] = args[1]
@@ -32145,25 +32934,41 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         from module_object import _struct_source
         source = _struct_source(external['structs']) + source
     tree = ast.parse(source.strip())
+    # special methods, class attributes, static/class methods and properties become plain methods,
+    # functions and module variables first; a program without them is left untouched (dunders.py)
+    dunders.rewrite(tree, source, Unsupported)
     threadlib.refuse_typed(tree, Unsupported)        # G12: threads are built on the general path only
     modtables.rewrite(tree, Unsupported, library, entry)
     stdlib4.rewrite(tree, Unsupported)
     stdlib3.rewrite(tree, Unsupported)
     iterlower.rewrite(tree)
     filelib.rewrite_tree(tree, Unsupported)
+    EXC_NAMES.clear()
+    EXC_NAMES.update(_BUILTIN_EXC_NAMES)
+    if userexc.collect(tree, {k: v for k, v in _BUILTIN_EXC_NAMES.items() if urllower.ACTIVE or k not in ('URLError', 'HTTPError')}):          # S4e: user exception classes become codes and constructor functions
+        for _name, _cls in userexc.USER.items():
+            EXC_NAMES[_name] = _cls.code
+    exctext.rewrite(tree, _exc_codes_of)
+    if userexc.USER:
+        exctext.ACTIVE = True                  # S4e: str(e), repr(e), e.args, type(e).__name__ of a bound exception
     if os.environ.get("AIL_NO_TRYHOIST", "0") in ("", "0"):
         tryhoist.rewrite(tree)
     nested_lists.rewrite(tree, Unsupported, library, entry)
     _unannotate_bytes_key_locals(tree)
+    typedinherit.lower_class_names(tree)                       # `type(x).__name__`: TYPED_INHERITANCE.md
+    typedinherit.lower_class_attributes(tree, Unsupported)     # `K = 3` in a class body: TYPED_INHERITANCE.md
     _NULLABLE.clear()
     _NULLABLE_LINES.clear()
+    _HIER.clear()
+    _VTARGET.clear()
     _NULLABLE.update(_strip_nullable(tree))
     global _BOOLS
     _BOOLS = boolkind.EMPTY
     _BOOLS = boolkind.scan(tree, Unsupported, _module_bool_vars(tree))
     _name_repeated_list_returns(tree)
     _FROZEN_LINKS.clear()
-    if _NULLABLE:
+    # also for a program with a class that names a base (TYPED_INHERITANCE.md): a tree of base-typed links
+    if _NULLABLE or any(isinstance(_c, ast.ClassDef) and _c.bases for _c in tree.body):
         _written = set()
         for _cd in tree.body:
             for _fd in ast.walk(_cd):
@@ -32224,6 +33029,13 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     _FIELD_STORES = _scan_field_stores(tree, library)
     classdefs = [n for n in tree.body if isinstance(n, ast.ClassDef)]
     classes = _scan_classes(classdefs) if classdefs else {}
+    if _HIER and _BOOLS is not boolkind.EMPTY:
+        # an inherited bool field prints as a bool through the subclass too
+        for _cls in _HIER:
+            for _above in _class_chain(_cls)[1:]:
+                _BOOLS.fields.update((_cls, f) for c, f in list(_BOOLS.fields) if c == _above)
+                _BOOLS.list_fields.update((_cls, f) for c, f in list(_BOOLS.list_fields) if c == _above)
+                _BOOLS.dict_fields.update((_cls, f) for c, f in list(_BOOLS.dict_fields) if c == _above)
     for _n in sorted(_NULLABLE):
         if _n not in classes:
             refusal = Unsupported('%s | None: only a struct type can be None here (a scalar Optional is built as a '
@@ -32297,6 +33109,8 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                     mfn2.returns.id = '__ail_checked_%s__' % mfn2.returns.id
                 ast.fix_missing_locations(mfn2)
                 method_fns.append(mfn2)
+        if _HIER:
+            method_fns = _hierarchy_functions(tree, fns, classes, method_fns)
         # Prepended, not appended: the entry point is whichever function is LAST in `fns`
         # (`csym` below keys off `f is fns[-1]`), and that has to stay the last ORIGINAL
         # top-level `def`, methods or no methods -- so they go in front of it, never after.
@@ -32312,6 +33126,9 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     for _cname, _cinfo in classes.items():
         for _mname in _cinfo.methods:
             method_targets.setdefault(_mname, set()).add(_cinfo.method_cname(_mname))
+    for (_cname, _mname), _target in _VTARGET.items():
+        if isinstance(_target, str):
+            method_targets.setdefault(_mname, set()).add(_target)
 
     def _calls_with_methods(fn):
         found = set(_calls_of(fn))
@@ -32330,6 +33147,20 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     recursive = {f.name for f in fns if f.name in reach[f.name]}
 
     sigs, arity_seeds, clones = _signatures(fns, entry_sig=sig, classes=classes, external=external_exports)
+    for _f in fns:
+        if getattr(_f, '_ail_dispatcher', False):
+            # the methods one call can reach agree on their parameter and result kinds
+            _want = ([k for _, k in sigs[_f.name][0][1:]], sigs[_f.name][1])
+            for _impl in _f._ail_impls:
+                _got = ([k for _, k in sigs[_impl][0][1:]], sigs[_impl][1])
+                if _got != _want or clones.get(_impl):
+                    raise Unsupported('%s and %s are reached by one call `.%s()` on a %s, and their parameter or '
+                                      'result types differ (%s against %s); an override keeps the types of the '
+                                      'method it overrides.\n'
+                                      '  write instead: annotate the parameters and the result of both alike'
+                                      % (_impl.replace('__', '.'), _f._ail_impls[0].replace('__', '.'), _f._ail_key[1],
+                                         _f._ail_key[0], _got, ([k for _, k in sigs[_f._ail_impls[0]][0][1:]],
+                                                                sigs[_f._ail_impls[0]][1])))
     if (any(callable_types.valid(kind) for params, result in sigs.values() for kind in [result, *(k for _, k in params)])
             or any(isinstance(value, ast.Name) and value.id in sigs
                    for f in fns for node in ast.walk(f)
@@ -32515,6 +33346,8 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                                   checked_arrays=bool(info is not None and info.get('_checked_arrays')))
         ctxs[f.name] = ctx
         symbol_contexts[cname] = ctx
+        if getattr(f, '_ail_dispatcher', False) and not clones.get(f.name):
+            b = _dispatcher_c(b, f, csym)
         heads.append(h)
         bodies.append(b)
         body_names.append(f.name)
@@ -32667,6 +33500,10 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         info['ret'] = sigs[fns[-1].name][1]
         info['libm'] = cruntime.needs_libm(parts) or external.get('libm', False)
         info['pthread'] = 'PAR' in runtime_parts
+        if {'SQLIO', 'SQLCORE'} & runtime_parts:
+            info['sqlite'] = True          # G11: the sqlite3 module links the system libsqlite3
+        if _HIER:
+            info['inherit'] = True         # one object read through two struct types: -fno-strict-aliasing
         info['kinds'] = [k for _, k in sigs[fns[-1].name][0]]
         # Which parameters are grids, so a caller knows to hand over a width as well. `entry_ctx`
         # is the context of the function `info` describes; without it the caller would have to
@@ -33236,7 +34073,8 @@ def _borrow_leaf_self(fn, ctx, is_method, recursive, scalar=False):
                     and isinstance(node.func.value, ast.Name) and node.func.value.id == 'self'
                     and node.func.attr in cls.methods
                     and isinstance(cls.methods[node.func.attr], ast.FunctionDef)
-                    and ctx.funcs.get(cls.method_cname(node.func.attr)) == (ctx.params, INT)):
+                    and ctx.funcs.get(cls.method_cname(node.func.attr)) == (ctx.params, INT)
+                    and (not _HIER or _VTARGET.get((cls.name, node.func.attr)) == cls.method_cname(node.func.attr))):
                 # Calls are restricted to the already proven, read-only leaf subset.
                 return _borrow_leaf_self(cls.methods[node.func.attr], ctx, True, False)
             return False
@@ -34594,7 +35432,7 @@ def compile_fn(source, strict=True, entry=None):
         raise Unsupported('compile_fn does not marshal Python tcpsocket references; use the typed object ABI')
     if callable_types.valid(info.get('ret')) or any(callable_types.valid(k) for k in info.get('kinds', ())):
         raise Unsupported('compile_fn does not marshal Python callable values; use the typed object ABI')
-    extra = (('-lm',) if info.get('libm') else ()) + (('-pthread',) if info.get('pthread') else ()) + (('-lws2_32',) if os.name == 'nt' and {'TCPSOCKET', 'TCPHEAD'} & set(info.get('runtime_parts', ())) else ())
+    extra = (('-fno-strict-aliasing',) if info.get('inherit') else ()) + (('-lm',) if info.get('libm') else ()) + (('-pthread',) if info.get('pthread') else ()) + (tuple(__import__('pipeline').sqlite_link_args()) if info.get('sqlite') else ()) + (('-lws2_32',) if os.name == 'nt' and {'TCPSOCKET', 'TCPHEAD'} & set(info.get('runtime_parts', ())) else ())
     so = shared_object(c, prefix='g', extra=extra)
     lib = ctypes.CDLL(str(so))
     f = lib.run

@@ -22,6 +22,8 @@ import os
 import re
 
 import proclib
+import urllower
+import sqllower
 
 # ---------------------------------------------------------------------------------------------
 # The primitives. name -> (result kind, argument kinds), kinds in {'int', 'str', 'bytes'}.
@@ -68,6 +70,12 @@ PATHS = {
     '_ail_pp_repr': ('str', ('str',)),             # repr() of a str
 }
 PRIMS.update(PATHS)
+PRIMS.update(urllower.PRIMS)       # stage G12: urllib over libcurl (ailhttp_core.h) and urllib.parse (ailurl_core.h), parts of their own
+PRIMS.update(sqllower.SQLP)        # stage G11: the sqlite3 primitives (ailsql_core.h), a part of their own
+
+
+def is_sql_prim(prim):
+    return prim.startswith('_ail_sq_')
 
 
 def is_proc_prim(prim):
@@ -78,9 +86,18 @@ def is_path_prim(prim):
     return prim.startswith('_ail_pp_')
 
 
+def is_http_prim(prim):
+    return prim.startswith('_ail_ht_')
+
+
+def is_url_prim(prim):
+    return prim.startswith('_ail_ur_')
+
+
 def prim_kind(prim):
-    """'file' (ailfile_core.h), 'proc' (ailproc_core.h) or 'path' (ailpath_core.h)."""
-    return 'proc' if is_proc_prim(prim) else 'path' if is_path_prim(prim) else 'file'
+    """'file' (ailfile_core.h), 'proc' (ailproc_core.h), 'path' (ailpath_core.h) 'sql' (ailsql_core.h), 'http' (ailhttp_core.h) or 'url' (ailurl_core.h)."""
+    return 'sql' if is_sql_prim(prim) else 'proc' if is_proc_prim(prim) else 'path' if is_path_prim(prim) \
+        else 'http' if is_http_prim(prim) else 'url' if is_url_prim(prim) else 'file'
 
 
 def c_name(prim):
@@ -126,14 +143,15 @@ def rewrite_tree(tree, Unsupported, general=False):
     import pathlower
     path_need = pathlower.rewrite_tree(tree, Unsupported, general)     # G10: pathlib.Path -> prelude functions + open()
     used_proc = proclib.rewrite_tree(tree, Unsupported, general)      # G8: subprocess -> primitives + prelude
+    used_url = urllower.rewrite_tree(tree, Unsupported, general)      # G12: urllib -> primitives + prelude
     import filelower
     lowerer = filelower._Lowerer(tree, Unsupported, general)
     lowerer.scan()
     if path_need is not None:
         lowerer.need.update(path_need)
     if not lowerer.wants() and path_need is None:
-        ACTIVE = ACTIVE or used_proc           # subprocess raises the OS-family classes too
-        return used_proc
+        ACTIVE = ACTIVE or used_proc or used_url           # subprocess and urllib raise OS-family classes too
+        return used_proc or used_url
     lowerer.run()
     ACTIVE = True
     if os.environ.get('AIL_G7_DUMP'):

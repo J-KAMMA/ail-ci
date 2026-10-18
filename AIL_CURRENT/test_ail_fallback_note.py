@@ -60,10 +60,13 @@ def main():
 main()
 '''
 
+# the general path now builds a key lambda that reads a local (`ys`), so the refusal is kept alive by something
+# it still cannot build: str.encode()
 PRINT_SORTED = '''def main():
     ys = [3, 1, 4, 1, 5]
     idx = sorted(range(len(ys)), key=lambda i: ys[i])
     print(idx)
+    print(len(str(idx).encode()))
 
 main()
 '''

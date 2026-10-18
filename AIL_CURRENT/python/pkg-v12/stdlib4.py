@@ -32,9 +32,7 @@ UNBUILT = {
                 'offset: datetime.timezone(datetime.timedelta(hours=9), "JST"), or datetime.timezone.utc',
     'decimal': 'decimal: Decimal needs decimal arithmetic with a context precision and rounding modes, which is not '
                'built, so keep money as integers scaled by 100 (cents) and print them with divmod, or use a float with '
-               'round() / f"{x:.2f}"',
-    'fractions': 'fractions: Fraction needs unbounded integers, which are not built, so keep the numerator and the '
-                 'denominator in two ints and reduce them with math.gcd',
+               'round() / f"{x:.2f}", or fractions.Fraction for exact rational arithmetic',
 }
 
 

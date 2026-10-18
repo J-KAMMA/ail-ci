@@ -43,10 +43,12 @@ CASES = [
     ('dict_get_one_argument', 'python',
      'def main() -> None:\n    d = {"a": 1}\n    v = d.get("b")\n    print(v)\n\n\nmain()\n',
      '3:', ['d.get(k) with one argument', '`d.get(k, -1)`']),
-    ('staticmethod', 'python',
-     'class M:\n    @staticmethod\n    def sq(x: int) -> int:\n        return x * x\n\n\n'
-     'def main() -> None:\n    print(M.sq(3))\n\n\nmain()\n',
-     '3:', ['a decorator on M.sq', 'a top-level `def sq(x: int) -> int`']),
+    # (@staticmethod is built since the dunders pass; a property setter is still refused)
+    ('property_setter', 'python',
+     'class M:\n    def __init__(self) -> None:\n        self._x = 0\n\n    @property\n    def x(self) -> int:\n'
+     '        return self._x\n\n    @x.setter\n    def x(self, v: int) -> None:\n        self._x = v\n\n\n'
+     'def main() -> None:\n    m = M()\n    m.x = 4\n    print(m.x)\n\n\nmain()\n',
+     '6:', ['a decorator on M.x', 'a top-level `def x(x: int) -> int`']),
     ('global_loop_variable', 'python',
      'count = 0\n\n\ndef inc() -> None:\n    global count\n    for count in range(3):\n        pass\n\n\n'
      'def main() -> None:\n    inc()\n    print(count)\n\n\nmain()\n',
@@ -125,9 +127,10 @@ CASES = [
      '1:', ['is not valid here', 'there is no `x++`']),
     ('inheritance', 'python',
      'class A:\n    def __init__(self) -> None:\n        self.x = 1\n\n\n'
-     'class B(A):\n    def __init__(self) -> None:\n        self.x = 2\n\n\n'
+     'class C:\n    def __init__(self) -> None:\n        self.y = 1\n\n\n'
+     'class B(A, C):\n    def __init__(self) -> None:\n        self.x = 2\n\n\n'
      'def main() -> None:\n    print(B().x)\n\n\nmain()\n',
-     '6:', ["class 'B' names a base class", 'no base class']),
+     '11:', ['multiple inheritance', 'one base class, and hold the other as a field']),
     ('class_without_init', 'python',
      'class A:\n    def f(self) -> int:\n        return 1\n\n\ndef main() -> None:\n    print(A().f())\n\n\nmain()\n',
      '1:', ["class 'A' has no __init__", '`@dataclass` with annotated fields']),
