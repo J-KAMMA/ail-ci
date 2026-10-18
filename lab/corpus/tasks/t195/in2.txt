@@ -1,23 +1,23 @@
 golf lima kilo juliet
-dave.niaj@cherry.co.uk foxtrot whiskey romeo xray uniform foxtrot
+dave.niaj@cherry.example.net foxtrot whiskey romeo xray uniform foxtrot
 romeo quebec november 384-302-5728 november hotel kilo
-whiskey 482-900-5937 delta carol.carol@apple.com tango
-frank.erin@kilo.co.uk whiskey 878-855-6767 papa
-heidi.niaj@hotel.com echo romeo india hotel
+whiskey 482-900-5937 delta carol.carol@apple.example.com tango
+frank.erin@kilo.example.net whiskey 878-855-6767 papa
+heidi.niaj@hotel.example.com echo romeo india hotel
 golf lima cherry hotel golf
-dave.carol@foxtrot.co.uk delta oscar victor oscar whiskey
-zulu lima frank.frank@golf.org golf romeo delta
-mike hotel bob.carol@uniform.co.uk kilo echo uniform oscar
-frank.heidi@romeo.com tango quebec zulu
-yankee banana alice.grace@uniform.org echo
-ivan.judy@quebec.com golf hotel
-erin.dave@juliet.com yankee kilo apple
-india 696-128-3956 grace.ivan@whiskey.co.uk victor banana
-ivan.carol@papa.org apple india hotel
-heidi.erin@kilo.org tango papa sierra
-mallory.carol@november.org india papa hotel
-grace.dave@papa.com 706-744-3727 romeo echo yankee juliet november foxtrot
+dave.carol@foxtrot.example.net delta oscar victor oscar whiskey
+zulu lima frank.frank@golf.example.org golf romeo delta
+mike hotel bob.carol@uniform.example.net kilo echo uniform oscar
+frank.heidi@romeo.example.com tango quebec zulu
+yankee banana alice.grace@uniform.example.org echo
+ivan.judy@quebec.example.com golf hotel
+erin.dave@juliet.example.com yankee kilo apple
+india 696-128-3956 grace.ivan@whiskey.example.net victor banana
+ivan.carol@papa.example.org apple india hotel
+heidi.erin@kilo.example.org tango papa sierra
+mallory.carol@november.example.org india papa hotel
+grace.dave@papa.example.com 706-744-3727 romeo echo yankee juliet november foxtrot
 victor yankee oscar
-judy.grace@zulu.com mike oscar xray uniform echo
-uniform oscar bob.niaj@echo.com tango sierra
-528-768-9343 whiskey xray delta alice.ivan@quebec.co.uk cherry
+judy.grace@zulu.example.com mike oscar xray uniform echo
+uniform oscar bob.niaj@echo.example.com tango sierra
+528-768-9343 whiskey xray delta alice.ivan@quebec.example.net cherry

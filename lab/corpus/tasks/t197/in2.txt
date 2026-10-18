@@ -1,22 +1,22 @@
-bob.ivan@lima.com banana apple 958-632-2570 apple foxtrot
-sierra apple golf erin.grace@banana.com 686-196-5458 papa november
+bob.ivan@lima.example.com banana apple 958-632-2570 apple foxtrot
+sierra apple golf erin.grace@banana.example.com 686-196-5458 papa november
 romeo whiskey
 juliet november zulu cherry xray
-papa judy.frank@whiskey.co.uk lima zulu
-kilo juliet ivan.judy@echo.org papa apple foxtrot oscar
-xray dave.bob@foxtrot.co.uk apple
+papa judy.frank@whiskey.example.net lima zulu
+kilo juliet ivan.judy@echo.example.org papa apple foxtrot oscar
+xray dave.bob@foxtrot.example.net apple
 596-378-1885 cherry kilo yankee tango banana cherry
-575-994-4433 banana oscar juliet erin.niaj@foxtrot.org kilo tango apple
-sierra golf lima delta carol.heidi@papa.org echo
+575-994-4433 banana oscar juliet erin.niaj@foxtrot.example.org kilo tango apple
+sierra golf lima delta carol.heidi@papa.example.org echo
 424-760-2412 sierra yankee
-mallory.carol@foxtrot.org golf juliet banana 209-929-9594 quebec
-mike golf oscar 355-154-3824 niaj.carol@cherry.org xray
-banana golf banana hotel bob.ivan@sierra.co.uk foxtrot 889-913-4149 whiskey
-foxtrot mallory.alice@november.org foxtrot oscar romeo cherry lima
+mallory.carol@foxtrot.example.org golf juliet banana 209-929-9594 quebec
+mike golf oscar 355-154-3824 niaj.carol@cherry.example.org xray
+banana golf banana hotel bob.ivan@sierra.example.net foxtrot 889-913-4149 whiskey
+foxtrot mallory.alice@november.example.org foxtrot oscar romeo cherry lima
 delta banana india echo 402-841-2974 echo
-victor heidi.frank@sierra.com yankee november echo quebec lima
-juliet alice.bob@uniform.org oscar 708-569-8641 india hotel lima india
-juliet yankee tango juliet banana niaj.bob@echo.co.uk delta
-249-595-8667 xray judy.dave@tango.org november kilo
-grace.dave@tango.org golf 284-518-3761 india kilo
-delta frank.niaj@echo.co.uk hotel foxtrot
+victor heidi.frank@sierra.example.com yankee november echo quebec lima
+juliet alice.bob@uniform.example.org oscar 708-569-8641 india hotel lima india
+juliet yankee tango juliet banana niaj.bob@echo.example.net delta
+249-595-8667 xray judy.dave@tango.example.org november kilo
+grace.dave@tango.example.org golf 284-518-3761 india kilo
+delta frank.niaj@echo.example.net hotel foxtrot

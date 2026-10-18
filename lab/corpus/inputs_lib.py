@@ -309,7 +309,7 @@ def emails_text(rng, k):
     for _ in range(n_of(rng, k) // 2 + 1):
         parts = [rng.choice(WORDS) for _ in range(rng.randint(2, 6))]
         if rng.random() < 0.7:
-            parts.insert(rng.randrange(len(parts)), f"{rng.choice(NAMES)}.{rng.choice(NAMES)}@{rng.choice(WORDS)}.{rng.choice(['com', 'org', 'co.uk'])}")
+            parts.insert(rng.randrange(len(parts)), f"{rng.choice(NAMES)}.{rng.choice(NAMES)}@{rng.choice(WORDS)}.example.{rng.choice(['com', 'org', 'net'])}")
         if rng.random() < 0.4:
             parts.insert(rng.randrange(len(parts)), f"{rng.randint(100, 999)}-{rng.randint(100, 999)}-{rng.randint(1000, 9999)}")
         out.append(" ".join(parts))
