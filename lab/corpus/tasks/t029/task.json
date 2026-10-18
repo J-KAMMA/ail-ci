@@ -1,0 +1,6 @@
+{
+ "id": "t029",
+ "category": "numbers",
+ "description": "Print numbers grouped by their remainder modulo 7: one line per remainder that occurs ('r: a b c').",
+ "input_format": "pos_nums"
+}

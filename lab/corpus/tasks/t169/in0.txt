@@ -1,0 +1,5 @@
+name,dept,salary,age
+heidi,eng,128000,29
+erin,hr,134000,61
+niaj,ops,149000,43
+erin,sales,154000,59

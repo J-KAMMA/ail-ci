@@ -1,0 +1,6 @@
+{
+ "id": "t113",
+ "category": "strings",
+ "description": "Print whether each word is a valid identifier (str.isidentifier), a keyword (keyword.iskeyword), or neither.",
+ "input_format": "words_line"
+}

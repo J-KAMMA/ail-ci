@@ -1,0 +1,6 @@
+{
+ "id": "t319",
+ "category": "dp",
+ "description": "Use bisect to count how many numbers are less than each of the numbers in a sorted copy; print counts as one line, plus the insertion point of 0.",
+ "input_format": "nums_nocount"
+}

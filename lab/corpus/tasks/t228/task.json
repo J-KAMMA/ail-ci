@@ -1,0 +1,6 @@
+{
+ "id": "t228",
+ "category": "grids",
+ "description": "Count the connected groups of '#' cells using 8-connectivity and print the size of each group sorted descending.",
+ "input_format": "grid_life"
+}

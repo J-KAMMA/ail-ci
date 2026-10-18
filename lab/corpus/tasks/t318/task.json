@@ -1,0 +1,6 @@
+{
+ "id": "t318",
+ "category": "dp",
+ "description": "Print the number of ways to split the sequence into contiguous non-empty parts whose sums are all non-negative, modulo 1000000007.",
+ "input_format": "nums_nocount"
+}

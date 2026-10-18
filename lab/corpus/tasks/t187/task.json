@@ -1,0 +1,6 @@
+{
+ "id": "t187",
+ "category": "parsing",
+ "description": "Print the JSON with all strings upper-cased and all integers incremented by one (booleans untouched), as compact JSON.",
+ "input_format": "json_nested"
+}

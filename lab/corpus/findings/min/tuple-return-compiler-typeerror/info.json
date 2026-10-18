@@ -1,0 +1,7 @@
+{
+ "note": "compiler Python TypeError: tuple element error message formatted with a tuple (t243)",
+ "from": "",
+ "cpython_rc": 0,
+ "default": "compile rc=1",
+ "ir": "compile rc=1"
+}

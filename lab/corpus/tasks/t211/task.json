@@ -1,0 +1,6 @@
+{
+ "id": "t211",
+ "category": "parsing",
+ "description": "Print for each line the postfix evaluation of tokens treating them as RPN (digits push, operators pop two); print the result or 'error' for malformed sequences.",
+ "input_format": "tokens_ops"
+}

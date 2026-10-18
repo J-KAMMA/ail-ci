@@ -1,0 +1,6 @@
+{
+ "id": "t139",
+ "category": "collections",
+ "description": "Track accounts; failed withdrawals raise a custom InsufficientFunds exception that is caught and printed as 'error: <acc> needs <missing> more'; balance prints 'acc=balance'. Print final balances too.",
+ "input_format": "bank_txns"
+}

@@ -17,10 +17,17 @@ Built (python/pkg-v12/collib.py lowers them before the surface pass; see AIL_REF
 * deque: append, appendleft, pop, popleft, extend, extendleft, rotate, clear, count, index, remove, insert,
   reverse, copy, len, indexing (negative too), item assignment, del, in, iteration, truthiness, maxlen=,
   IndexError / ValueError as CPython; print(q).
-Refused by name: namedtuple, defaultdict(bool | dict | Counter | lambda: <expression>), tuple / float keys or
-elements, == on collections, q.maxlen, d.default_factory, deque slices, OrderedDict(items), a collection in a
+* Tuples of int / float / bool / str (not nested) as Counter / defaultdict / OrderedDict keys, deque elements
+  and defaultdict(list | set) rows: `deque([(r, c)])` + popleft, `r, c = q.popleft()`, `adj[u].append((v, w))` +
+  `for v, w in adj[u]`, Counter of coordinate tuples, `defaultdict(int)` with tuple keys; printing as CPython
+  (`deque([(1, 2)])`, `Counter({(0, 1): 2})`, `defaultdict(<class 'int'>, {...})`, `OrderedDict({...})`).
+  The pass runs before the tuple lowering (tuplib.py): the helpers are written with `tuple[...]` annotations,
+  which the tuple pass then turns into classes and tables.
+Refused by name: namedtuple, defaultdict(bool | dict | Counter | lambda: <expression>), float keys, nested
+tuples, == on collections, q.maxlen, d.default_factory, deque slices, OrderedDict(items), a collection in a
 class field or at module level, most_common as a list of pairs, d[k] = <existing list>, a loop that changes the
-collection it walks, Counter.subtract, del d[k] on defaultdict(list) / (set), print of a defaultdict, ...
+collection it walks, Counter.subtract, del d[k] on defaultdict(list) / (set), print of a defaultdict(set) or of
+a defaultdict(lambda: ...), ...
 
 Generated tests: random operation sequences (>= 5000 operations per program, an LCG inside the program picks
 the operation, the key and the value) for every type, the final state and periodic checkpoints compared.
@@ -818,16 +825,6 @@ def main() -> int:
 
 main()
 ''', 'defaultdict(set)')
-REFUSALS['dd_set_tuple'] = (r'''from collections import Counter, defaultdict, deque, OrderedDict
-
-
-def main() -> int:
-    d = defaultdict(set)
-    d["a"].add((1, 2))
-    return 0
-
-main()
-''', 'tuple')
 REFUSALS['dd_bool'] = (r'''from collections import Counter, defaultdict, deque, OrderedDict
 
 
@@ -857,27 +854,6 @@ def main() -> int:
 
 main()
 ''', 'lambda')
-REFUSALS['ctr_tuple_keys'] = (r'''from collections import Counter, defaultdict, deque, OrderedDict
-
-
-def main() -> int:
-    c = Counter([(1, 2), (1, 2)])
-    print(len(c))
-    return 0
-
-main()
-''', 'tuple')
-REFUSALS['deque_tuples'] = (r'''from collections import Counter, defaultdict, deque, OrderedDict
-
-
-def main() -> int:
-    q = deque([(0, 0)])
-    while q:
-        r, c = q.popleft()
-    return 0
-
-main()
-''', 'tuple')
 REFUSALS['ctr_eq'] = (r'''from collections import Counter, defaultdict, deque, OrderedDict
 
 
@@ -1006,17 +982,6 @@ def main() -> int:
 
 main()
 ''', 'del d[k]')
-REFUSALS['print_dd'] = (r'''from collections import Counter, defaultdict, deque, OrderedDict
-
-
-def main() -> int:
-    d = defaultdict(int)
-    d[1] += 1
-    print(d)
-    return 0
-
-main()
-''', 'print()')
 REFUSALS['ddl_get_mutate'] = (r'''from collections import Counter, defaultdict, deque, OrderedDict
 
 
@@ -1106,6 +1071,466 @@ def main() -> int:
 main()
 ''', 'shares')
 
+# ---- tuples in collections: typical programs ------------------------------------------
+TUPLE_SNIPPETS = {}
+TUPLE_SNIPPETS['grid_bfs'] = r'''from collections import deque
+
+DIRS = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+
+
+def make(h: int, w: int, seed: int) -> list[str]:
+    grid = []
+    s = seed
+    for i in range(h):
+        row = ""
+        for j in range(w):
+            s = (s * 1103515245 + 12345) % 2147483648
+            if (s // 7) % 4 == 0 and (i, j) != (0, 0):
+                row += "#"
+            else:
+                row += "."
+        grid.append(row)
+    return grid
+
+
+def bfs(grid: list[str], h: int, w: int) -> int:
+    start = (0, 0)
+    q = deque([start])
+    visited = {start}
+    dist = [[-1] * w for _ in range(h)]
+    dist[0][0] = 0
+    far = 0
+    reached = 0
+    while q:
+        r, c = q.popleft()
+        reached += 1
+        for dr, dc in DIRS:
+            nr, nc = r + dr, c + dc
+            if 0 <= nr < h and 0 <= nc < w and grid[nr][nc] != "#" and (nr, nc) not in visited:
+                visited.add((nr, nc))
+                dist[nr][nc] = dist[r][c] + 1
+                if dist[nr][nc] > far:
+                    far = dist[nr][nc]
+                q.append((nr, nc))
+    print(reached, len(visited), far)
+    return far
+
+
+def main() -> int:
+    for seed in range(1, 6):
+        g = make(30, 40, seed)
+        print(seed, bfs(g, 30, 40))
+    q = deque([(1, 2), (3, 4)])
+    q.appendleft((0, 0))
+    print(q, len(q), q[1], (3, 4) in q)
+    return 0
+
+
+main()
+'''
+TUPLE_SNIPPETS['dijkstra'] = r'''import heapq
+from collections import defaultdict
+
+
+def dijkstra(adj: defaultdict[int, list[tuple[int, int]]], n: int, src: int) -> list[int]:
+    INF = 10 ** 9
+    dist = [INF] * n
+    dist[src] = 0
+    pq = [(0, src)]
+    while pq:
+        d, u = heapq.heappop(pq)
+        if d > dist[u]:
+            continue
+        if u in adj:
+            for v, w in adj[u]:
+                nd = d + w
+                if nd < dist[v]:
+                    dist[v] = nd
+                    heapq.heappush(pq, (nd, v))
+    return dist
+
+
+def main() -> int:
+    n = 400
+    adj = defaultdict(list)
+    s = 99
+    for i in range(3000):
+        s = (s * 1103515245 + 12345) % 2147483648
+        u = s % n
+        s = (s * 1103515245 + 12345) % 2147483648
+        v = s % n
+        s = (s * 1103515245 + 12345) % 2147483648
+        w = 1 + s % 50
+        adj[u].append((v, w))
+        adj[v].append((u, w))
+    dist = dijkstra(adj, n, 0)
+    reach = 0
+    total = 0
+    for x in dist:
+        if x < 10 ** 9:
+            reach += 1
+            total += x
+    print(reach, total, dist[1], dist[n - 1])
+    print(len(adj), len(adj[5]), adj[5][0])
+    return 0
+
+
+main()
+'''
+TUPLE_SNIPPETS['coord_counter'] = r'''from collections import Counter
+
+
+def cells(n: int) -> Counter[tuple[int, int]]:
+    c: Counter[tuple[int, int]] = Counter()
+    s = 7
+    for i in range(n):
+        s = (s * 1103515245 + 12345) % 2147483648
+        x = s % 100
+        s = (s * 1103515245 + 12345) % 2147483648
+        y = s % 100
+        c[(x // 25, y // 25)] += 1
+    return c
+
+
+def main() -> int:
+    c = cells(500)
+    print(len(c), c.total())
+    for pos, n in c.most_common(3):
+        print(pos, n)
+    print(c.most_common(2))
+    print(c[(0, 0)], c[(9, 9)], (1, 1) in c)
+    d = Counter([(0, 0), (1, 1), (1, 1)])
+    print(d)
+    e = c + d
+    print(e.most_common(1))
+    c.update([(0, 0), (0, 0)])
+    print(c[(0, 0)])
+    words = Counter(zip([1, 2, 1, 2, 3], "ababc"))
+    print(words)
+    return 0
+
+
+main()
+'''
+TUPLE_SNIPPETS['tuple_keys_int'] = r'''from collections import defaultdict
+
+
+def main() -> int:
+    hits = defaultdict(int)
+    s = 5
+    for i in range(800):
+        s = (s * 1103515245 + 12345) % 2147483648
+        hits[(s % 7, (s // 7) % 5)] += 1
+    print(len(hits), hits[(0, 0)], hits[(8, 8)], len(hits))
+    best = (0, 0)
+    top = 0
+    for k in hits:
+        if hits[k] > top:
+            best = k
+            top = hits[k]
+    print(best, top)
+    n = 0
+    for k, v in sorted(hits.items()):
+        if n < 5:
+            print(k, v)
+        n += 1
+    seen = defaultdict(float)
+    seen[("a", 1)] += 0.5
+    seen[("b", 2)] += 1.5
+    seen[("a", 1)] += 2.0
+    for k2 in seen:
+        print(k2, seen[k2])
+    return 0
+
+
+main()
+'''
+TUPLE_SNIPPETS['bfs_node_dist'] = r'''from collections import defaultdict, deque
+
+
+def main() -> int:
+    n = 300
+    g = defaultdict(list)
+    s = 3
+    for i in range(700):
+        s = (s * 1103515245 + 12345) % 2147483648
+        u = s % n
+        s = (s * 1103515245 + 12345) % 2147483648
+        v = s % n
+        g[u].append(v)
+        g[v].append(u)
+    q = deque([(0, 0)])
+    seen = {0}
+    far = (0, 0)
+    order = []
+    while q:
+        node, d = q.popleft()
+        order.append(node)
+        if d >= far[1]:
+            far = (node, d)
+        for nxt in g[node]:
+            if nxt not in seen:
+                seen.add(nxt)
+                q.append((nxt, d + 1))
+    print(len(order), far, order[0], order[7])
+    levels = defaultdict(list)
+    kids = defaultdict(list)
+    links = [(0, 1), (0, 2), (1, 3), (2, 3), (2, 4), (4, 5)]
+    for p, ch in links:
+        kids[p].append(ch)
+    q2 = deque([(0, 0)])
+    done = {0}
+    while q2:
+        name, depth = q2.popleft()
+        levels[depth].append((name, len(kids[name])))
+        for child in kids[name]:
+            if child not in done:
+                done.add(child)
+                q2.append((child, depth + 1))
+    for depth in levels:
+        print(depth, levels[depth])
+    return 0
+
+
+main()
+'''
+TUPLE_SNIPPETS['reprs'] = r'''from collections import Counter, defaultdict, deque, OrderedDict
+
+
+def main() -> int:
+    q = deque([(1, 2), (3, 4)], maxlen=3)
+    print(q)
+    q.append((5, 6))
+    q.append((7, 8))
+    print(q)
+    q3 = deque([("a", 1)])
+    q4 = deque([(1.5, 2)])
+    print(q3, q4)
+    c = Counter([(0, 1), (0, 1), (2, 3)])
+    print(c)
+    e: Counter[tuple[int, int]] = Counter()
+    print(e)
+    print(c.most_common())
+    dd = defaultdict(int)
+    dd[(1, 2)] += 3
+    dd[(4, 2)] = 5
+    print(dd)
+    dl = defaultdict(list)
+    dl[(1, 2)].append((3, 4))
+    dl[(1, 2)].append((5, 6))
+    dl[(0, 0)].append((7, 8))
+    print(dl)
+    od = OrderedDict()
+    od[(1, 2)] = 3
+    od[(4, 5)] = 6
+    od.move_to_end((1, 2))
+    print(od)
+    ds = defaultdict(str)
+    ds[(1, 1)] += "ab"
+    print(ds)
+    df = defaultdict(float)
+    df[3] += 1.5
+    print(df)
+    return 0
+
+
+main()
+'''
+TUPLE_SNIPPETS['sets_and_orders'] = r'''from collections import defaultdict, OrderedDict, deque
+
+
+def main() -> int:
+    groups = defaultdict(set)
+    named = defaultdict(set)
+    for i in range(40):
+        groups[i % 3].add((i % 5, i % 2))
+        named[(i % 2, "k")].add((i % 4, "v" + str(i % 3)))
+    for k in groups:
+        print(k, len(groups[k]), sorted(groups[k]))
+    for k2 in named:
+        print(k2, len(named[k2]), sorted(named[k2]))
+    print((0, 0) in groups[0], (9, 9) in groups[0])
+    lru = OrderedDict()
+    miss = 0
+    for i in range(80):
+        key = ((i * 7) % 6, (i * 3) % 4)
+        if key in lru:
+            lru.move_to_end(key)
+        else:
+            miss += 1
+            lru[key] = i
+            if len(lru) > 5:
+                ek, ev = lru.popitem(last=False)
+                print("evict", ek, ev)
+    print(miss, list(lru.items()))
+    w = deque(maxlen=3)
+    for i in range(10):
+        w.append((i, i * i))
+    print(list(w), sum(a * b for a, b in w))
+    return 0
+
+
+main()
+'''
+
+TUPLE_SNIPPETS['bool_in_tuple'] = r'''from collections import Counter, defaultdict, deque, OrderedDict
+
+
+def main() -> int:
+    q = deque([(1, True)])
+    q.append((2, False))
+    q.appendleft((0, True))
+    print(q, len(q))
+    while q:
+        n, f = q.popleft()
+        print(n, f, not f)
+    c = Counter()
+    c[(True, 1)] += 2
+    c[(False, 1)] += 1
+    c[(True, 1)] += 1
+    print(c)
+    for k, v in c.most_common():
+        print(k, v, k[0])
+    d = defaultdict(int)
+    d[(1, True)] += 3
+    d[(2, False)] += 1
+    print(d, d[(1, True)])
+    r = defaultdict(list)
+    r[1].append((True, 5))
+    r[1].append((False, 6))
+    for ok, w in r[1]:
+        print(ok, w)
+    od = OrderedDict()
+    od[(False, 2)] = 7
+    od[(True, 2)] = 8
+    print(od)
+    seen = set()
+    seen.add((True, True))
+    print((True, True) in seen, (True, False) in seen)
+    flags = deque()
+    flags.append((True, 1.5))
+    f0, g0 = flags[0]
+    print(f0, g0, flags)
+    return 0
+
+main()
+'''
+
+TUPLE_SNIPPETS['str_rows_ascii_flag'] = r'''from collections import deque
+
+DIRS = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+
+
+def rows(n: int, wide: bool) -> list[str]:
+    s = 99
+    grid = []
+    for r in range(n):
+        row = []
+        for c in range(n):
+            s = (s * 1103515245 + 12345) % 2147483648
+            if wide and s % 17 == 0:
+                row.append("é")
+            elif wide and s % 29 == 0:
+                row.append("ツ")
+            else:
+                row.append("#" if s % 100 < 26 and r + c > 0 else ".")
+        grid.append("".join(row))
+    return grid
+
+
+def bfs(grid: list[str], n: int) -> tuple[int, int, int]:
+    q = deque()
+    q.append((0, 0))
+    seen = set()
+    seen.add((0, 0))
+    far = 0
+    odd = 0
+    while q:
+        r, c = q.popleft()
+        far = max(far, r + c)
+        if grid[r][c] != ".":
+            odd += 1
+        for dr, dc in DIRS:
+            nr, nc = r + dr, c + dc
+            if nr < 0 or nc < 0 or nr >= n or nc >= n:
+                continue
+            if grid[nr][nc] == "#" or (nr, nc) in seen:
+                continue
+            seen.add((nr, nc))
+            q.append((nr, nc))
+    return len(seen), far, odd
+
+
+def take(names: list[str]) -> list[str]:
+    out = []
+    for x in names:
+        out.append(x)
+    return out
+
+
+def main() -> int:
+    g = rows(60, False)
+    a, b, c = bfs(g, 60)
+    print(a, b, c, len(g[3]), g[3][5], g[59][-1], g[7][2:9])
+    g = rows(60, True)
+    a, b, c = bfs(g, 60)
+    print(a, b, c, len(g[3]), g[3][5], g[59][-1], g[7][2:9])
+    mixed = take(["abc", "déf", "", "ツx", "plain"])
+    for w in mixed:
+        print(len(w))
+    print(len(mixed), mixed[1][1], mixed[3][0], mixed[4][2], mixed[1][-1])
+    popped = mixed.pop(1)
+    print(popped, len(popped), popped[1], mixed)
+    names: dict[str, int] = {}
+    names["k1"] = 1
+    names["ké"] = 2
+    names["k3"] = 3
+    keys = list(names.keys())
+    print(keys[1], len(keys[1]), keys[1][1])
+    lone: set[str] = set()
+    lone.add("ツツ")
+    only = lone.pop()
+    print(only, len(only), only[1])
+    return 0
+
+
+main()
+'''
+
+TUPLE_REFUSALS = {}
+TUPLE_REFUSALS['nested_tuple'] = (r'''from collections import Counter
+
+
+def main() -> int:
+    c = Counter([((1, 2), 3), ((1, 2), 3)])
+    print(len(c))
+    return 0
+
+main()
+''', 'tuple')
+TUPLE_REFUSALS['set_row_print'] = (r'''from collections import defaultdict
+
+
+def main() -> int:
+    d = defaultdict(set)
+    d[1].add((1, 2))
+    print(d)
+    return 0
+
+main()
+''', 'defaultdict(set)')
+TUPLE_REFUSALS['lambda_factory_print'] = (r'''from collections import defaultdict
+
+
+def main() -> int:
+    d = defaultdict(lambda: 5)
+    d[(1, 2)] += 1
+    print(d)
+    return 0
+
+main()
+''', 'print() of this defaultdict')
+
 
 # ---- generators ------------------------------------------------------------------
 HEAD = '''from collections import Counter, defaultdict, deque, OrderedDict
@@ -1162,15 +1587,24 @@ def weighted(rng, table, count):
     return out
 
 
+ELEMS = {"int": ("a", "(%s)", "[1, 2, 3, 4]"),
+         "str": ('"v" + str(a)', "len(%s)", '["a", "b", "c"]'),
+         "tup": ("(a, b)", "(%s[0] * 3 + %s[1])", "[(1, 2), (3, 4)]"),
+         "tups": ('(a, "v" + str(b + 3))', "(%s[0] * 3 + len(%s[1]))", '[(1, "a"), (2, "b")]')}
+
+
+def hexpr(h, name):
+    return h.replace("%s", name)
+
+
 def deque_program(rng, elem="int", steps=6000):
     maxlen = rng.choice([None, None, 0, 1, 3, 8, 25])
     keys = rng.choice([5, 12, 40])
     mk = "q = deque(maxlen=%s)" % maxlen if maxlen is not None else "q = deque()"
     if rng.random() < 0.3:
-        init = "[1, 2, 3, 4]" if elem == "int" else '["a", "b", "c"]'
+        init = ELEMS[elem][2]
         mk = "q = deque(%s%s)" % (init, ", maxlen=%d" % maxlen if maxlen is not None else "")
-    x = "a" if elem == "int" else '"v" + str(a)'
-    h = "(%s)" if elem == "int" else "len(%s)"
+    x, h = ELEMS[elem][0], ELEMS[elem][1]
     table = [
         ("q.append(X)", 4), ("q.appendleft(X)", 4), ("q.extend([X, X])", 1), ("q.extendleft([X, X])", 1),
         ("q.rotate(b)", 2), ("q.rotate()", 1),
@@ -1192,15 +1626,20 @@ def deque_program(rng, elem="int", steps=6000):
         ("if not q:\n    acc += 7", 1),
         ("if len(q) == 0:\n    acc += 3\nelse:\n    acc += len(q)", 1),
     ]
-    ops = [subst(b, X=x).replace("H(y)", h % "y") for b in weighted(rng, table, 26)]
-    final = ["for z in q:", "    print(z)", "print(len(q))"]
+    ops = [subst(b, X=x).replace("H(y)", hexpr(h, "y")) for b in weighted(rng, table, 26)]
+    final = ["for z in q:", "    print(z)", "print(len(q))", "print(q)"]
     return subst(build(rng, [mk], ops, final, steps), KEYS=str(keys), STATE="len(q)")
+
+
+KEYS_OF = {"str": ('"w" + str(a)', '"w" + str(b + 3)', "len(w)"),
+           "int": ("a - 3", "b", "w"),
+           "tup": ("(a - 3, a % 3)", "(b, b % 2)", "w[0] * 3 + w[1]"),
+           "tups": ('(a - 3, "w" + str(a % 4))', '(b, "w" + str(b + 3))', "w[0] + len(w[1])")}
 
 
 def counter_program(rng, keytype="str", steps=6000):
     keys = rng.choice([4, 9, 30])
-    k = '"w" + str(a)' if keytype == "str" else "a - 3"
-    kb = '"w" + str(b + 3)' if keytype == "str" else "b"
+    k, kb, wexpr = KEYS_OF[keytype]
     table = [
         ("c[K] += b", 4), ("c[K] += 1", 5), ("c[K] = b + 2", 1), ("acc += c[K]", 3),
         ("acc += c.get(K, 100)", 1), ("if K in c:\n    acc += 1", 1),
@@ -1219,7 +1658,7 @@ def counter_program(rng, keytype="str", steps=6000):
         ("if s % 31 == 0:\n    d = Counter()", 1),
         ("acc += c.total()", 1),
     ]
-    ops = [subst(b, K=k, KB=kb, WEXPR=("len(w)" if keytype == "str" else "w")) for b in weighted(rng, table, 28)]
+    ops = [subst(b, K=k, KB=kb, WEXPR=wexpr) for b in weighted(rng, table, 28)]
     init = ["c = Counter()", "d = Counter()"]
     final = ["for w, n in c.items():", "    print(w, n)", "print(c.most_common(3))", "print(c)"]
     return subst(build(rng, init, ops, final, steps), KEYS=str(keys), STATE="len(c)")
@@ -1227,8 +1666,7 @@ def counter_program(rng, keytype="str", steps=6000):
 
 def dd_program(rng, kind="int", keytype="str", steps=6000):
     keys = rng.choice([4, 9, 30])
-    k = '"w" + str(a)' if keytype == "str" else "a - 3"
-    kb = '"w" + str(b + 3)' if keytype == "str" else "b"
+    k, kb, _ = KEYS_OF[keytype]
     if kind == "int":
         mk, v, zero = "defaultdict(int)", "b", "0"
     elif kind == "float":
@@ -1266,14 +1704,20 @@ def dd_program(rng, kind="int", keytype="str", steps=6000):
         ops = [o.replace("(acc * 3 + y)", "(acc * 3 + int(y * 2.0))").replace("(acc * 5 + y)", "(acc * 5 + int(y * 2.0))") for o in ops]
     init = ["d = %s" % mk]
     final = ["for k2 in d:", "    print(k2, d[k2])", "print(len(d))"]
+    if kind != "lambda":
+        final.append("print(d)")
     return subst(build(rng, init, ops, final, steps), KEYS=str(keys), STATE="len(d)")
+
+
+DKEYS = {"int": "a", "str": '"k" + str(a)', "tup": "(a, a % 2)", "tups": '(a % 5, "k" + str(a % 3))'}
+DELEMS = {"int": ("b", "(Y)"), "str": ('"e" + str(b + 3)', "len(Y)"), "tup": ("(b, b % 3)", "(Y[0] * 3 + Y[1])"),
+          "tups": ('(b, "e" + str(b + 3))', "(Y[0] * 3 + len(Y[1]))")}
 
 
 def ddl_program(rng, keytype="int", elem="int", steps=6000):
     keys = rng.choice([4, 9, 30])
-    k = "a" if keytype == "int" else '"k" + str(a)'
-    x = "b" if elem == "int" else '"e" + str(b + 3)'
-    h = "(Y)" if elem == "int" else "len(Y)"
+    k = DKEYS[keytype]
+    x, h = DELEMS[elem]
     table = [
         ("d[K].append(X)", 6),
         ("d[K].extend([X, X])", 1),
@@ -1294,11 +1738,12 @@ def ddl_program(rng, keytype="int", elem="int", steps=6000):
     ]
     ops = [subst(b, K=k, X=x).replace("H0", h.replace("Y", "y")) for b in weighted(rng, table, 22)]
     init = ["d = defaultdict(list)"]
-    final = ["for k2 in d:", "    print(k2, len(d[k2]))", "    for y in d[k2]:", "        print(y)", "print(len(d))"]
+    final = ["for k2 in d:", "    print(k2, len(d[k2]))", "    for y in d[k2]:", "        print(y)", "print(len(d))",
+             "print(d)"]
     return subst(build(rng, init, ops, final, steps), KEYS=str(keys), STATE="len(d)")
 
 
-def od_program(rng, steps=6000):
+def od_program(rng, keytype="str", steps=6000):
     keys = rng.choice([4, 9, 30])
     table = [
         ("od[K] = b", 5), ("od[K] += b" if False else "if K in od:\n    od[K] += b", 2),
@@ -1309,22 +1754,27 @@ def od_program(rng, steps=6000):
         ("if K in od:\n    del od[K]", 2), ("y = od.pop(K, 5)\nacc += y", 1),
         ("acc += od.get(K, 9)", 2), ("if K in od:\n    acc += od[K]", 2),
         ("for k2 in od:\n    acc = (acc * 3 + od[k2]) % 1000003", 2),
-        ("for k2, v2 in od.items():\n    acc = (acc * 7 + v2 + len(k2)) % 1000003", 2),
+        ("for k2, v2 in od.items():\n    acc = (acc * 7 + v2 + LK2) % 1000003", 2),
         ("acc += len(od)", 1),
         ("try:\n    od.popitem()\nexcept KeyError:\n    errs += 1", 1),
     ]
-    ops = [subst(b, K='"w" + str(a)') for b in weighted(rng, table, 20)]
+    k, _, _ = KEYS_OF[keytype]
+    lk2 = "len(k2)" if keytype == "str" else "k2[0]"
+    ops = [subst(b, K=k, LK2=lk2) for b in weighted(rng, table, 20)]
     init = ["od = OrderedDict()"]
-    final = ["for k2 in od:", "    print(k2, od[k2])"]
+    final = ["for k2 in od:", "    print(k2, od[k2])", "print(od)"]
     return subst(build(rng, init, ops, final, steps), KEYS=str(keys), STATE="len(od)")
+
+
+DSELEMS = {"int": ("b", "b + 1", "y"), "str": ('"e" + str(b + 3)', '"e" + str(b + 5)', "len(y)"),
+           "tup": ("(b, b % 3)", "(b + 1, 0)", "y[0] * 3 + y[1]"),
+           "tups": ('(b, "e" + str(b + 3))', '(b + 1, "e" + str(b + 5))', "y[0] * 3 + len(y[1])")}
 
 
 def dss_program(rng, keytype="int", elem="int", steps=6000):
     keys = rng.choice([4, 9, 30])
-    k = "a" if keytype == "int" else '"k" + str(a)'
-    x = "b" if elem == "int" else '"e" + str(b + 3)'
-    xb = "b + 1" if elem == "int" else '"e" + str(b + 5)'
-    h = "y" if elem == "int" else "len(y)"
+    k = DKEYS[keytype]
+    x, xb, h = DSELEMS[elem]
     table = [
         ("d[K].add(X)", 6), ("d[K].update([X, XB, X])", 1), ("d[K].discard(X)", 2),
         ("if X in d[K]:\n    d[K].remove(X)", 2),
@@ -1354,6 +1804,15 @@ FUZZ = [("counter", ("str",), 31), ("counter", ("int",), 32), ("dd", ("int", "st
         ("ddl", ("int", "int"), 38), ("ddl", ("str", "str"), 39), ("ddl", ("str", "int"), 40),
         ("dss", ("int", "int"), 41), ("dss", ("str", "str"), 42), ("od", (), 43), ("deque", ("int",), 44),
         ("deque", ("str",), 45), ("deque", ("int",), 46), ("counter", ("str",), 47), ("ddl", ("int", "str"), 48)]
+# the same operation sequences with tuples as keys / elements
+TUPLE_FUZZ = [("deque", ("tup",), 61), ("deque", ("tups",), 62), ("deque", ("tup",), 63),
+              ("counter", ("tup",), 64), ("counter", ("tups",), 65), ("counter", ("tup",), 66),
+              ("dd", ("int", "tup"), 67), ("dd", ("float", "tups"), 68), ("dd", ("str", "tup"), 69),
+              ("dd", ("lambda", "tup"), 70), ("dd", ("int", "tups"), 71),
+              ("ddl", ("tup", "int"), 72), ("ddl", ("int", "tup"), 73), ("ddl", ("tups", "tups"), 74),
+              ("ddl", ("tup", "str"), 75), ("ddl", ("str", "tup"), 76),
+              ("dss", ("tup", "int"), 77), ("dss", ("int", "tup"), 78), ("dss", ("tups", "tups"), 79),
+              ("dss", ("str", "tup"), 80), ("od", ("tup",), 81), ("od", ("tups",), 82)]
 
 
 class CollectionsTests(unittest.TestCase):
@@ -1412,6 +1871,33 @@ class CollectionsTests(unittest.TestCase):
             with self.subTest("%s %s %d" % (kind, " ".join(args), seed)):
                 out = self.same_as_cpython(text, "coll_fuzz_%d" % index, minimum_lines=8)
                 self.assertIn(b" ", out)
+
+    def test_tuple_programs_match_cpython(self):
+        for name, text in TUPLE_SNIPPETS.items():
+            with self.subTest(name):
+                self.same_as_cpython(text, "coll_tup_" + name, minimum_lines=2)
+
+    def test_tuple_refusals_are_named(self):
+        for name, (text, wanted) in TUPLE_REFUSALS.items():
+            with self.subTest(name):
+                self.refused(text, wanted)
+
+    def test_generated_tuple_operation_sequences_match_cpython(self):
+        """>= 5000 random operations per program over tuple keys / elements: the same final state as CPython."""
+        for index, (kind, args, seed) in enumerate(TUPLE_FUZZ):
+            text = PROGRAMS[kind](random.Random(seed), *args)
+            self.assertGreaterEqual(int(re.search(r"range\((\d+)\)", text).group(1)), 5000)
+            with self.subTest("%s %s %d" % (kind, " ".join(args), seed)):
+                out = self.same_as_cpython(text, "coll_tupfuzz_%d" % index, minimum_lines=8)
+                self.assertIn(b" ", out)
+
+    def test_programs_without_tuples_are_unchanged_by_the_tuple_support(self):
+        import ail_syntax
+        text = ("from collections import deque, Counter\n\n\ndef main() -> int:\n    q = deque([1])\n"
+                "    q.append(2)\n    c = Counter('abca')\n    print(q.popleft(), c['a'])\n    return 0\n\n\nmain()\n")
+        out = ail_syntax.python_surface(text)
+        self.assertNotIn("tup", out)
+        self.assertNotIn("_AilT_", out)
 
     def test_programs_without_collections_are_untouched(self):
         import ail_syntax

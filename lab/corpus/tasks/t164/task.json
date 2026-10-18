@@ -1,0 +1,6 @@
+{
+ "id": "t164",
+ "category": "parsing",
+ "description": "Parse the CSV; print the average salary per department (integer division) sorted by department.",
+ "input_format": "csv_table"
+}

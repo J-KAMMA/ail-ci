@@ -1,0 +1,6 @@
+{
+ "id": "t118",
+ "category": "strings",
+ "description": "Print the interleaving (alternating characters) of the two words, and all characters they share sorted without duplicates.",
+ "input_format": "two_words_line"
+}

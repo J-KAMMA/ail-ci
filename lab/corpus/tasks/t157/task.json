@@ -1,0 +1,6 @@
+{
+ "id": "t157",
+ "category": "collections",
+ "description": "Build a dict mapping word -> list of numbers, drop the entries whose numbers sum to zero, and print the rest sorted.",
+ "input_format": "pairs_str_int"
+}

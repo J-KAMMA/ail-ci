@@ -2706,6 +2706,42 @@ corpus predates this section), so this section moves none of them from REFUSED t
 would actually write for this compiler, comparing how many compile and agree with CPython on
 `pkg-v5` versus `pkg-modconst` (see the report alongside this package, not repeated here since it
 is not a fixed number this document can state once and leave true).
+### 29.2 Module-level set and dict tables (`modtables.py`, 2026-10-18)
+
+`STOP = {"a", "the"}`, `STOP: set[str] = {...}`, `TABLE = {"x": 1}`, `NAMES = {1: "one"}`,
+`PAIRS = {(0, 1), (2, 3)}`, `STOP = {b"a"}`: a non-empty literal whose elements (a dict: keys) are all
+ints, all strs, all bytes, or tuples of ints / strs of one shape, and whose dict values are all one
+kind (int, float, str, bytes, tuple), bound exactly once, before any other module-level code, and
+changed nowhere. Read from any function, in place: `in`, `d[k]`, `d.get`, `items / keys / values`,
+`for`, `len`, `sorted`, `min`, `max`, `sum`, `any`, `all`, `|` `&` `-` `^`, `join`, a truth test.
+
+**Lowering.** One AST pass (`modtables.rewrite`, run first in `_to_c_once`) removes the statement and
+gives every reader the table the way a parameter gives it -- the typed path already borrows set and dict
+parameters (`const ail_sset *`), so no new codegen path exists. A function that reads a table, or calls
+one that does, takes it as a hidden FIRST parameter named after the table (annotated from the literal,
+`STOP: set[str]`); each call site passes it. The entry function -- and every function that cannot take
+an extra parameter (a method, a function used as a value or decorated, one the module's own statements
+call, any function in a library) -- builds the table as an annotated local at the top of its body
+instead (`STOP: set[str] = {...}`): once for the entry, once per call elsewhere. A table with bytes in it
+is always built that way, in each reader (the typed path has no bytes-keyed parameters). Duplicate
+entries are folded as CPython folds them (a set keeps the first, a dict the first position and the last
+value). A table with tuples is lowered the same way by the front end (`modtables.rewrite_text`, before
+the tuple pass in `python_surface`, which turns `set[tuple[int, int]]` into its own table class); that
+rewrite returns unparsed text, like the tuple pass itself. A program with no such table is returned
+untouched (the generated C is byte-identical).
+
+**Refused by name** (CPython shares the one object, or its order differs): `STOP.add(x)` and every
+mutating method, `T[k] = v`, `del T[k]`, `T |= ...`, `global T`, a nested `def` reading it, any use of
+the whole table as a value (`xs = STOP`, `return STOP`, `f(STOP)`, `[STOP]`, `{k: STOP}`; `set(STOP)`
+is the copy), a name bound in a function that still calls a function reading the table, a table
+changed at module level, and a set of ints (or of tuples of ints) walked where the order shows
+(`for x in PRIMES`, `list(PRIMES)`, `[x for x in PRIMES]`): CPython walks it in hash order, this
+compiler in insertion order; `sorted(PRIMES)` is the spelling. A set of str or bytes may be walked
+(CPython's order for those changes from run to run, so no program can depend on it). An empty,
+computed, mixed-kind, bool or float-element table keeps the old refusal (`module_table_refusal`).
+The general (boxed) path has no bytes literal at all, so a bytes table that the typed path refuses
+is refused there by name too. `test_ail_modconst.py` compares all of this with CPython 3.12.
+
 ## 30. Exceptions: `try`/`except`/`raise` (`pkg-exc`, 2026-09-14)
 
 Ten ordinary language features were probed against this line; five work, five do not, and
@@ -9414,3 +9450,59 @@ body may contain; `pyfunc._par_for` / `_par_outline` compile it; the runtime par
   loop called 100000 times costs the same as the plain loop; a 50-iteration one costs about 4 us a call.
   Programs without `parallel for` get no PAR code and no `-pthread`; the DIE block is edited only when
   PAR is present.
+
+## 238. CPython 3.12 rules for float sums, float powers, number text and case mapping
+
+Found while writing the language spec (docs/spec/DIFFERENCES.md C1, C5-C11, C13, C14); each is now CPython's
+answer, checked against CPython 3.12 by `test_ail_spec_fixes`.
+
+* `sum()` of floats is `builtin_sum_impl`: an exact-int start adds ints, the first non-int item is added plainly,
+  and the rest of a float run is Neumaier-compensated (`ail_fsum_add`, part FSUM; the general runtimes'
+  `ail_sum_step`). An int item inside the float run is added plainly; a non-number ends the run and drops the
+  compensation. `sum(xs[:k])` over a slice of a `list[float]` is refused by name on the typed path.
+* Float `**` is `float_pow` (`ail_fpow`, part FPOWCK; the C name `pow` is routed to it): a finite overflow is
+  `OverflowError`, `0.0 ** negative` is `ZeroDivisionError`. A negative base to a fractional exponent is a complex
+  number in Python: a literal pair is refused at compile time, anything else stops the program at run time
+  ("is a complex number in Python; AIL has no complex type"), never `nan`.
+* `int(s)`, `int(s, base)` and `float(s)` turn the text into ASCII first (other white space becomes a space, a
+  Unicode decimal digit its ASCII digit, any other non-ASCII character ends the text as invalid), then parse it
+  with CPython's grammar: single underscores between digits (also after a base prefix), ASCII white space
+  (not U+001C-U+001F) trimmed, `float` accepting only decimal floats, `inf`, `infinity` and `nan`. One parser
+  (`NUMPARSE`, tables from `tools/gen_digits.py`) serves the typed and both general runtimes. A too-long literal
+  that is also malformed is `ValueError`; a valid one outside int64 is the integer-overflow stop.
+* `int(nan)` is `ValueError`; `int(inf)` and a finite value outside int64 are `OverflowError`.
+* The general runtime's `str.lower()` / `str.upper()` use the full Unicode mapping and the final-sigma rule (part
+  BOXCASE, appended only to a program that calls them); its `isdigit()` and `splitlines()` know all of Unicode's
+  digits and line boundaries.
+* `import regex` names `re` as the module that is built.
+* `print(x)` / `str(x)` / `repr(x)` of a float is the shortest round-trip repr even just below a power of two, where the nearest decimal of the
+  shortest length may not read back (`ail__fmt_shorten`).
+
+## 239. Comprehension scopes, folds over instances, module lists of str, scalar Optional
+
+Found by the library agents; each is checked against CPython 3.12 by `test_ail_quirks`.
+
+* A comprehension variable is local to the comprehension (compscope.py, run by `shadowing.rename_all` before any
+  pass): where its name is also used in the enclosing function, or a nested comprehension binds it again, it gets a
+  fresh name (`total__c1`), so `total = 5; xs = [total for total in range(3)]` leaves `total` 5 and
+  `[[x for x in row] for row in rows]` reads each name where Python resolves it. A program with no such clash is
+  returned unchanged.
+* `sum` / `min` / `max` / `any` / `all` over a generator expression whose source is a list of class instances
+  (`sum(r.v for r in rows)`) walk the list as an ordinary `for r in rows` does (retaining each instance).
+* `NAMES = ["a", "b"]` (or a tuple) at module level is a read-only list of str on the typed path; binding or returning
+  the whole list (`xs = NAMES`) is refused (it would copy where CPython shares), `list(NAMES)` is the copy.
+* A typed clone that prints is no longer mixed into a boxed program: its stdout was a second buffer, so its lines
+  came out before everything the boxed code had printed (seen with `AIL_IR=1`).
+* Scalar Optional (optlib.py, run by `ail_syntax.python_surface` before the tuple pass): `int | None`,
+  `float | None`, `bool | None`, `str | None` (and `Optional[...]`) as a parameter, a return type or an annotated local
+  of a plain function is a present flag and a value (`x__p`, `x__v`; a result is the pair `tuple[bool, T]`).
+  `is None`, `is not None`, `== None`, `!= None`, `==` / `!=` against a value or another Optional, truthiness,
+  `print` / `str` / `repr` / f-string (`None` while absent), passing, returning, defaults and assignment follow
+  CPython. Every other use of the value needs the compiler to know it is present (after `if x is None: return`, inside
+  `if x is not None:`, right of `x is not None and`, after an assignment or an `assert`); where it does not, CPython
+  would raise or store the None, so the program is refused by name ("x may be None here"). Refused by name too: an
+  Optional field, method, nested function, list / dict element or keyword-only parameter; an Optional-returning
+  call inside `and` / `or` / `x if c else y` / a comprehension / a `while` test or beside a call that is not a
+  plain builtin; a value wrapped as present that cannot be shown not to be None (`d.get(k)`, an unannotated
+  parameter); a `None` stored in a list / tuple / dict / set or passed to a method (it could reach an Optional
+  parameter as a plain value). A refusal leaves the source as written, so the general path still builds it.

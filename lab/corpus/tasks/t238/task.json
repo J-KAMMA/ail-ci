@@ -1,0 +1,6 @@
+{
+ "id": "t238",
+ "category": "grids",
+ "description": "Find the maximum sum path from top-left to bottom-right moving right or down, and the number of different maximum sum paths.",
+ "input_format": "grid_digits"
+}

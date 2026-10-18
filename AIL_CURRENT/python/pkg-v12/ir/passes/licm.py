@@ -22,9 +22,10 @@ from .. import ir as I
 from .. import effects as E
 from . import simplify
 
-RESIZING = ('list.push', 'list.pop', 'list.clear', 'ba.push', 'ba.clear', 'ba.extend_lit')
+RESIZING = ('list.push', 'list.pop', 'list.clear', 'rec.push', 'rec.pop', 'ba.push', 'ba.clear', 'ba.extend_lit')
 # S3a: operations that replace or grow the list they name (the first operand; both for a move)
-REPLACING = ('list.reset', 'list.repeat', 'list.lit', 'list.reserve', 'list.move', 'list.call', 'list.copy')
+REPLACING = ('list.reset', 'list.repeat', 'list.lit', 'list.reserve', 'list.move', 'list.call', 'list.copy',
+             'list.rt', 'list.sortperm')
 
 
 def _defs(fn):
@@ -177,6 +178,8 @@ class LICM(object):
                 L = ins.operands[0]
                 if L in inside or L in lists:
                     continue
+                if L.type.args[0].head == 'list' and L.type.args[0].args[0] not in (I.I64, I.F64):
+                    continue                 # a list of str has no span (S3c-1)
                 root = E._root(L, self.fn, defs)
                 if root.startswith('Own('):
                     # an owned list: only an operation naming this very list can resize it

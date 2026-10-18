@@ -1,0 +1,6 @@
+{
+ "id": "t448",
+ "category": "errors_classes",
+ "description": "Implement a state machine using an Enum (IDLE, RUNNING, DONE, ERROR) that transitions on each numeric token (even = advance, odd = error, zero = reset); print state names after each token.",
+ "input_format": "opt_ints_lines"
+}

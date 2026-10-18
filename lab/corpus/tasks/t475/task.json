@@ -1,0 +1,6 @@
+{
+ "id": "t475",
+ "category": "errors_classes",
+ "description": "Use int.from_bytes and to_bytes on the numbers (abs, big-endian, minimal length) and print the byte lists; also struct.pack('>I') for those under 2**32.",
+ "input_format": "big_ints"
+}

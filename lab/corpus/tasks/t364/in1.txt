@@ -1,0 +1,13 @@
+12
+bob B 15 73
+carol B 16 80
+erin A 23 82
+frank A 20 94
+ivan A 19 79
+carol A 23 85
+grace B 25 71
+niaj C 17 76
+erin C 25 92
+alice C 16 81
+erin B 15 100
+judy A 15 50

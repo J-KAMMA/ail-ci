@@ -1,0 +1,6 @@
+{
+ "id": "t072",
+ "category": "strings",
+ "description": "Print lines that contain the word 'a' or 'e' as whole words, with their 1-based numbers, as '3: text'.",
+ "input_format": "text_lines"
+}

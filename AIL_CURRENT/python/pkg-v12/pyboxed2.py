@@ -26,12 +26,14 @@ Anything this emitter does not implement raises `Unsupported` (imported from pyf
 exception the typed path and v1 both use) -- named, never a silent gap, never a bare gcc error.
 """
 import ast
+import copy
 import json
 import os
 import re
 import runpy
 
-from pyfront import Unsupported
+from pyfront import Unsupported, refuse_complex_pow
+import filelib
 import pyfunc
 try:
     import pymix
@@ -258,6 +260,17 @@ def _load_names(fname):
 _SIMPLE_SIG_RE = re.compile(
     r'^\s*ail_st\s+\w+\s*\(\s*ail_ctx\s*\*\s*cx\s*,\s*ail_obj\s*\*\s*out\s*'
     r'(,\s*ail_obj\s+\w+\s*)*\)')
+
+
+def _unpublished(key):
+    """The refusal for a module attribute that has no NAMES_library entry. A dynamic import names no
+    module at build time, so it carries a rewrite."""
+    text = '%s (not yet published in NAMES_library.json)' % key
+    if key.split('.')[0] == 'importlib':
+        text += ('\n  write instead: import the module at the top of the file (`import name` or '
+                 '`from package import name`); a program is built whole, so a module name cannot be '
+                 'chosen at run time')
+    return Unsupported(text)
 
 
 def _simple_sig(sig):
@@ -751,6 +764,42 @@ def _assign_target_names(t):
     return set()
 
 
+_HOISTED_DEFAULTS = (ast.List, ast.Dict, ast.Set, ast.ListComp, ast.DictComp, ast.SetComp,
+                     ast.GeneratorExp, ast.Call)
+
+
+def _hoist_defaults(tree):
+    """CPython evaluates a default argument ONCE, when the `def` runs, so `def f(x, acc=[])` shares
+    one list between calls. This emitter builds a default at each call site, which would hand every
+    call a fresh one. A default that builds something (a list/dict/set display or comprehension, or a
+    call) is therefore evaluated once into a module variable placed just before the `def` (before
+    the class, for a method) and read from there. The assignments are marked `_ail_hoisted` so the
+    'only defs and classes' entry-point convention does not count them as module statements."""
+    out, count = [], 0
+    for stmt in tree.body:
+        funcs = []
+        if isinstance(stmt, ast.FunctionDef):
+            funcs = [stmt]
+        elif isinstance(stmt, ast.ClassDef):
+            funcs = [m for m in stmt.body if isinstance(m, ast.FunctionDef)]
+        for f in funcs:
+            for defaults in (f.args.defaults, f.args.kw_defaults):
+                for i, d in enumerate(defaults):
+                    if d is None or not isinstance(d, _HOISTED_DEFAULTS):
+                        continue
+                    name = '_ail_default_%d' % count
+                    count += 1
+                    assign = ast.Assign(targets=[ast.Name(id=name, ctx=ast.Store())], value=d)
+                    ast.copy_location(assign, d)
+                    ast.copy_location(assign.targets[0], d)
+                    assign._ail_hoisted = True
+                    out.append(assign)
+                    defaults[i] = ast.copy_location(ast.Name(id=name, ctx=ast.Load()), d)
+        out.append(stmt)
+    tree.body = out
+    ast.fix_missing_locations(tree)
+
+
 def _scan_assigned_names(stmts):
     """Names assigned anywhere in `stmts` (a function or module body), stopping at nested
     FunctionDef/ClassDef (a different scope) and NOT descending into comprehension/generator/
@@ -940,6 +989,13 @@ class Compiler:
     # ------------------------------------------------------------------------------- entry point
     def compile(self, source):
         tree = ast.parse(source)
+        self.source_lines = source.splitlines()
+        self.uses_fileio = False
+        self.uses_proc = False
+        self.uses_clock = False
+        filelib.rewrite_tree(tree, Unsupported, general=True)      # G7: open / with / os -> primitives + prelude
+        mix_tree = copy.deepcopy(tree)          # the mixed-mode typed clones see the source as written
+        _hoist_defaults(tree)
         self.module_names = _scan_assigned_names(tree.body)
         for n in ast.walk(tree):
             if isinstance(n, ast.Global):
@@ -965,7 +1021,7 @@ class Compiler:
         # BRIEF_mixed_mode.md: after every top-level function is registered (`self.functions`,
         # needed to check a candidate for *args/**kwargs/keyword-only parameters) and before any
         # call site is compiled (`_emit_function` below is where `_call_user_function` runs).
-        self._setup_mix(source, tree)
+        self._setup_mix(source, mix_tree)
 
         for name in self.functions:
             info = self.functions[name]
@@ -985,6 +1041,7 @@ class Compiler:
 
         has_toplevel_exec = any(not isinstance(n, (ast.FunctionDef, ast.ClassDef, ast.Import,
                                                     ast.ImportFrom))
+                                and not getattr(n, '_ail_hoisted', False)
                                 for n in tree.body)
         fn_order = [n.name for n in tree.body if isinstance(n, ast.FunctionDef)]
         # A source with NO top-level executable statement at all (only def/class/import) is the
@@ -1017,6 +1074,17 @@ class Compiler:
 
         ng = self.next_global_slot
         parts = [PREAMBLE]
+        if self.uses_fileio:
+            import filert
+            parts.append(filert.general_text())
+            if self.uses_proc:
+                parts.append(filert.general_proc_text())
+        if self.uses_clock:
+            import clockrt
+            parts.append(clockrt.general_text())
+        if getattr(self, 'needs_boxcase', False):
+            import cruntime
+            parts.append(cruntime.BOXCASE)
         if self.mix_typed:
             # mix_call.h relies on ail_obj/ail_ctx/ail_box_*/ail_float_val/ail_view_to_str/ail_str,
             # all already defined by PREAMBLE above -- inlined here (not #include'd: `out`'s own
@@ -1036,6 +1104,15 @@ class Compiler:
         parts.append('static ail_frame g_frame;\n')
         parts.append('\n/* ---- forward declarations ---- */\n')
         parts.extend(self.top_decls)
+        for cname in self.class_order:
+            nxt = self.classes[cname]['methods'].get('__next__')
+            if nxt and nxt['all_params'] == ['self']:
+                # the iterator protocol for a user class: StopIteration ends the loop
+                parts.append('static ail_st pit_%s(ail_ctx *cx, ail_obj *out, ail_obj self) {\n'
+                             '    ail_st st = %s(cx, out, self);\n'
+                             '    if (st == AIL_EXC && ail_exc_matches_b(cx, AIL_B_STOPITERATION)) '
+                             '{ ail_exc_clear(cx); return AIL_STOP; }\n'
+                             '    return st;\n}\n' % (cname, nxt['cname']))
         parts.append('\n/* ---- functions and methods ---- */\n')
         parts.extend(self.top_defs)
         parts.append('\n/* ---- module body ---- */\n')
@@ -1060,6 +1137,24 @@ class Compiler:
                 base_expr = 'ail_box_none()'
             setup.append('    g_slots_arr[%d] = ail_class_new(cx, %s, %s);\n' %
                          (self.global_slots['class:' + cname], c_str_literal(cname), base_expr))
+            nxt = cls['methods'].get('__next__')
+            if nxt and nxt['all_params'] == ['self']:
+                setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->iter_next = pit_%s;\n' %
+                             (self.global_slots['class:' + cname], cname))
+            for hook, field in (('__repr__', 'repr_fn'), ('__str__', 'str_fn')):
+                hm = cls['methods'].get(hook)
+                if hm and hm['all_params'] == ['self']:
+                    setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->%s = %s;\n' %
+                                 (self.global_slots['class:' + cname], field, hm['cname']))
+            itr = cls['methods'].get('__iter__')
+            if itr and itr['all_params'] == ['self']:
+                setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->iter_iter = %s;\n' %
+                             (self.global_slots['class:' + cname], itr['cname']))
+            if cls.get('dc'):
+                setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->dc = %d; '
+                             '((ail_classobj *)g_slots_arr[%d].o)->dc_hide = %dULL;\n' %
+                             (self.global_slots['class:' + cname], cls['dc'],
+                              self.global_slots['class:' + cname], cls['dc_hide']))
         if array_entry is not None:
             parts.append(self._array_entry_main(array_entry, tree, setup))
             return ''.join(parts)
@@ -1289,7 +1384,24 @@ class Compiler:
             else:
                 raise Unsupported('a class body statement other than def/assignment/pass/'
                                   'docstring in %s' % node.name)
-        self.classes[node.name] = {'base': base, 'methods': methods, 'class_attrs': class_attrs}
+        dc = 0
+        marker = getattr(self, 'source_lines', None)
+        hide = 0
+        if (marker and 2 <= node.lineno <= len(marker) + 1
+                and marker[node.lineno - 2].strip().startswith('# ail:dataclass')
+                and '__repr__' not in methods
+                and '__init__' in methods):
+            # ail_syntax.py replaced `@dataclass` by this marker comment (and wrote the __init__):
+            # print / repr / str / containers show ClassName(field=repr, ...) like CPython
+            init = [i for i in node.body if isinstance(i, ast.FunctionDef) and i.name == '__init__'][0]
+            dc = len(init.args.args)             # self + the fields = field count + 1
+            line = marker[node.lineno - 2].strip()
+            if ' hide=' in line:
+                hidden_names = set(line.split(' hide=', 1)[1].split(','))
+                for i, a in enumerate(init.args.args[1:]):
+                    if a.arg in hidden_names:
+                        hide |= 1 << i
+        self.classes[node.name] = {'base': base, 'methods': methods, 'class_attrs': class_attrs, 'dc': dc, 'dc_hide': hide}
         self.class_order.append(node.name)
 
     def _resolve_method(self, klass, mname):
@@ -1607,15 +1719,24 @@ class Compiler:
             t = ctx.tmp()
             ctx.emit('%s = ail_deque_data(%s);' % (t, v))
             return t
-        cname = self._inst_class(node, ctx)
-        info = self._resolve_method(cname, '__iter__') if cname else None
-        if info:
-            recv = self.expr(node, ctx)
+        if self._is_dict_view_call(node, ctx):
+            # CPython's `d.items()` / `.keys()` / `.values()` are live views: a loop over one raises
+            # RuntimeError when the dict changes size. The method call below returns a snapshot list,
+            # which would walk on quietly, so a loop over a dict walks the dict's own iterator.
+            recv = self.expr(node.func.value, ctx)
             t = ctx.tmp()
-            ctx.emit('st = %s(cx, &%s, %s);' % (info['cname'], t, recv))
-            ctx.check()
+            if node.func.attr == 'keys':
+                ctx.emit('%s = %s;' % (t, recv))
+            else:
+                ctx.emit('%s = ail_iter_dict_%s(cx, %s);' % (t, node.func.attr, recv))
             return t
         return self.expr(node, ctx)
+
+    def _is_dict_view_call(self, node, ctx):
+        """`d.items()` / `d.keys()` / `d.values()` on something proven to be a dict."""
+        return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and not node.args
+                and not node.keywords and node.func.attr in ('items', 'keys', 'values')
+                and self.infer_kind(node.func.value, ctx) == 'dict')
 
     @staticmethod
     def _is_sys_stdin(node):
@@ -1658,6 +1779,8 @@ class Compiler:
         it = ctx.tmp()
         val = ctx.tmp()
         k = self.infer_kind(iter_node, ctx)
+        if self._is_dict_view_call(iter_node, ctx):
+            k = None                    # an iterator object, not the snapshot list the call returns
         if k in ('list', 'tuple'):
             idx = ctx.new_cvar('i')
             ctx.emit('%s = %s;' % (it, src))
@@ -2132,6 +2255,8 @@ class Compiler:
         fn = self.BINOP_FN.get(type(node.op))
         if fn is None:
             raise Unsupported('the %s binary operator' % type(node.op).__name__)
+        if isinstance(node.op, ast.Pow):
+            refuse_complex_pow(node)
         l = self.expr(node.left, ctx)
         r = self.expr(node.right, ctx)
         t = ctx.tmp()
@@ -3065,10 +3190,12 @@ class Compiler:
             # definition) -- never touches any other function's inlining in the same unit.
             csrc = re.sub(r'__attribute__\(\(always_inline\)\) static inline\r?\n'
                           r'(?=\S[^\n]*\b' + re.escape(mangled) + r'\s*\()', '', csrc)
-            if ret == pymix.STR and info2.get('io'):
-                # The str-return calling convention below calls the typed clone TWICE (a
-                # length-then-fill probe -- see `_call_mix_guarded`); a function that can itself
-                # print()/assert a message would say it twice. Left boxed rather than risk it.
+            if info2.get('io'):
+                # A clone that prints writes through the typed unit's own stdio while the boxed
+                # program buffers its output separately, so the two interleave out of order; and
+                # the str-return convention calls the clone TWICE (length-then-fill probe, see
+                # `_call_mix_guarded`), which would say a message twice. A function that can
+                # print()/assert stays boxed.
                 continue
             sig_text = _mix_extract_signature(csrc, mangled)
             if sig_text is None or not _mix_validate_signature(sig_text, mangled, params, ret):
@@ -3183,7 +3310,7 @@ class Compiler:
 
     def _call_class(self, name, args, kwargs, ctx):
         cls = self.classes[name]
-        info = cls['methods'].get('__init__')
+        info = self._resolve_method(name, '__init__')
         t = ctx.tmp()
         ctx.emit('%s = ail_inst_new(cx, g_slots_arr[%d]);' %
                 (t, self.global_slots['class:' + name]))
@@ -3201,13 +3328,60 @@ class Compiler:
             raise Unsupported('%s() called with arguments but has no __init__' % name)
         return t
 
+    def _call_fileprim(self, name, args, kwargs, ctx):
+        """The stage-G7 file / os primitives (filelib.PRIMS) -> ailo_* (filert.py)."""
+        ret, kinds = filelib.PRIMS[name]
+        if 'bytes' in kinds or ret == 'bytes':
+            if filelib.is_proc_prim(name):
+                raise Unsupported('subprocess bytes: the general path has no bytes values, so they are built in typed code '
+                                  'only.\n  write instead: text=True (str output and input)')
+            raise Unsupported('a binary file: the general path has no bytes values, so binary files are built in '
+                              'typed code only.\n  write instead: keep the code that opens it in a function whose '
+                              'parameters are annotated, or read the file as text')
+        if kwargs or len(args) != len(kinds):
+            raise Unsupported('%s takes %d positional arguments' % (name, len(kinds)))
+        self.uses_fileio = True
+        if filelib.is_proc_prim(name):
+            self.uses_proc = True
+        argcs = [self.expr(a, ctx) for a in args]
+        t = ctx.tmp()
+        ctx.emit('st = ailo_%s(cx, &%s%s);' % (filelib.c_name(name), t, ''.join(', ' + a for a in argcs)))
+        ctx.check()
+        return t
+
+    # G9: the wall clock and the OS time zone (clockrt.py): name -> (C call, argument count)
+    _CLOCK_PRIMS = {'_ail_time': ('ailc_gtime(cx, &{t})', 0), '_ail_time_ns': ('ailc_gtime_ns(cx, &{t})', 0),
+                    '_ail_sleep_ns': ('ailc_gsleep_ns(cx, &{t}, {a0})', 1),
+                    '_ail_local_offset': ('ailc_glocal(cx, &{t}, {a0}, 0)', 1),
+                    '_ail_local_isdst': ('ailc_glocal(cx, &{t}, {a0}, 1)', 1),
+                    '_ail_tz_name': ('ailc_glocal(cx, &{t}, {a0}, 2)', 1),
+                    '_ail_mktime': ('ailc_gmktime(cx, &{t}, {arr})', 7)}
+
+    def _call_clock(self, name, args, kwargs, ctx):
+        cfn, count = self._CLOCK_PRIMS[name]
+        if kwargs or len(args) != count:
+            raise Unsupported('%s takes %d positional arguments' % (name, count))
+        self.uses_clock = True
+        argcs = [self.expr(a, ctx) for a in args]
+        t = ctx.tmp()
+        fields = {'t': t, 'arr': '(ail_obj[]){%s}' % ', '.join(argcs) if argcs else 'NULL'}
+        for i, each in enumerate(argcs):
+            fields['a%d' % i] = each
+        ctx.emit('st = %s;' % cfn.format(**fields))
+        ctx.check()
+        return t
+
     def _call_name(self, name, args, kwargs, ctx):
+        if name in self._CLOCK_PRIMS and name not in self.functions and name not in self.classes:
+            return self._call_clock(name, args, kwargs, ctx)
         if name in self.classes:
             return self._call_class(name, args, kwargs, ctx)
         if name in ctx.nested_funcs:
             return self._call_nested_function(name, args, kwargs, ctx)
         if name in self.functions:
             return self._call_user_function(name, args, kwargs, ctx)
+        if name in filelib.PRIMS:
+            return self._call_fileprim(name, args, kwargs, ctx)
         m = getattr(self, '_b_' + name, None)
         if m is not None:
             allowed = _BUILTIN_KWARGS.get(name, frozenset())
@@ -3254,7 +3428,10 @@ class Compiler:
                 ctx.emit('st = %s(cx, &%s%s);' % (cfn, t, ''.join(', ' + a for a in argcs)))
                 ctx.check()
                 return t
-            raise Unsupported('%s (not yet published in NAMES_library.json)' % key)
+            raise _unpublished(key)
+        if name == '__import__':
+            raise Unsupported("call to __import__(); a program is built whole, so a module name cannot be "
+                              "chosen at run time\n  write instead: import the module at the top of the file")
         raise Unsupported("the name '%s' is not a known function/class/builtin" % name)
 
     # ---- a small, honest core of builtins implemented directly against the FIXED v2 API
@@ -3375,6 +3552,14 @@ class Compiler:
                      % (fl, len(flags), ', '.join(flags)))
             ctx.emit('st = ail2_do_print_parts(cx, %s, %s, %d, %s, %s);'
                      % (arr, fl, len(vs), sep, end))
+        ctx.check()
+        return 'ail_box_none()'
+
+    def _b_flush_stdout(self, args, kwargs, ctx):
+        """flush_stdout(): what `sys.stdout.flush()` becomes in a program that starts processes (ail_syntax)."""
+        if args or kwargs:
+            raise Unsupported('flush_stdout takes no arguments')
+        ctx.emit('st = ail_out_flush(cx);')
         ctx.check()
         return 'ail_box_none()'
 
@@ -4205,6 +4390,8 @@ class Compiler:
         start_node = args[1] if len(args) == 2 else kwargs.get('start')
         ctx.emit('%s = %s;' % (acc, self.expr(start_node, ctx) if start_node is not None else 'ail_box_int(0)'))
         it = ctx.tmp(); val = ctx.tmp()
+        sst = "sumst_" + "".join(ch for ch in acc if ch.isalnum())
+        ctx.emit('ail_sumst %s; ail_sum_begin(&%s, %s);' % (sst, sst, acc))
         ctx.emit('st = ail_iter(cx, &%s, %s);' % (it, src))
         ctx.check()
         ctx.emit('for (;;) {')
@@ -4212,10 +4399,11 @@ class Compiler:
         ctx.emit('st = ail_it_next(cx, &%s, %s);' % (val, it))
         ctx.emit('if (st == AIL_STOP) { st = AIL_OK; break; }')
         ctx.check()
-        ctx.emit('st = ail_op_add(cx, &%s, %s, %s);' % (acc, acc, val))
+        ctx.emit('st = ail_sum_step(cx, &%s, &%s, %s);' % (acc, sst, val))
         ctx.check()
         ctx.indent -= 1
         ctx.emit('}')
+        ctx.emit('ail_sum_end(cx, &%s, &%s);' % (acc, sst))
         return acc
 
     def _b_any(self, args, kwargs, ctx):
@@ -4463,6 +4651,10 @@ class Compiler:
                 return t
         m = getattr(self, '_m_' + f.attr, None)
         kind = self.infer_kind(recv, ctx)
+        if not cname and kind is None:
+            dyn = self._dynamic_user_method(recv_c, f, args, kwargs, ctx, m)
+            if dyn is not None:
+                return dyn
         if m is not None:
             if kwargs:
                 _kw = _METHOD_KWARGS.get(f.attr, ())
@@ -4499,6 +4691,55 @@ class Compiler:
         raise Unsupported('the method .%s() (on a %s)' % (f.attr, kind or 'value of unknown '
                                                           'static kind'))
 
+    def _dynamic_user_method(self, recv_c, f, args, kwargs, ctx, builtin):
+        """`x.meth(...)` where the receiver's class is not known statically but some user class
+        defines `meth`: test the run-time class (most derived first) and call that method; any
+        other receiver takes the built-in handler of the same name (a list's `.append`, a
+        Counter's `.total`, ...), as CPython would resolve it on the object itself."""
+        def depth(c):
+            n = 0
+            while self.classes[c]['base'] in self.classes:
+                c = self.classes[c]['base']
+                n += 1
+            return n
+        owners = [c for c in self.class_order if f.attr in self.classes[c]['methods']]
+        if not owners:
+            return None
+        owners.sort(key=depth, reverse=True)
+        t = ctx.tmp()
+        ctx.emit('if (%s.tag == AIL_T_INST) {' % recv_c)
+        ctx.indent += 1
+        first = True
+        for c in owners:
+            info = self.classes[c]['methods'][f.attr]
+            ctx.emit('%sif (ail_class_is_or_subclass(((ail_instobj *)%s.o)->cls, g_slots_arr[%d])) {' %
+                     ('' if first else 'else ', recv_c, self.global_slots['class:' + c]))
+            first = False
+            ctx.indent += 1
+            argcs = self._bind_args(f.attr, info, args, kwargs, ctx)
+            if not info.get('is_static'):
+                argcs = [recv_c] + argcs
+            ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t, ''.join(', ' + a for a in argcs)))
+            ctx.check()
+            ctx.indent -= 1
+            ctx.emit('}')
+        ctx.emit('else { st = ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, "object has no attribute \'%s\'"); goto %s; }'
+                 % (f.attr, ctx.cur_err_target()))
+        ctx.uses_st = True
+        ctx.indent -= 1
+        ctx.emit('} else {')
+        ctx.indent += 1
+        if builtin is not None:
+            res = builtin(recv_c, None, args, kwargs, ctx)
+            ctx.emit('%s = %s;' % (t, res))
+        else:
+            ctx.emit('st = ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, "object has no attribute \'%s\'"); goto %s;'
+                     % (f.attr, ctx.cur_err_target()))
+            ctx.uses_st = True
+        ctx.indent -= 1
+        ctx.emit('}')
+        return t
+
     def _call_module_function(self, recv, f, args, kwargs, ctx):
         mod = self.module_aliases.get(recv.id, recv.id)
         # `import collections; collections.deque(...)` -- the SAME richer constructors
@@ -4510,7 +4751,7 @@ class Compiler:
             return m2(args, kwargs, ctx)
         key = '%s.%s' % (mod, f.attr)
         if key not in self.names_library:
-            raise Unsupported('%s (not yet published in NAMES_library.json)' % key)
+            raise _unpublished(key)
         cfn, sig = self.names_library[key]
         if not _simple_sig(sig):
             raise Unsupported('%s() (published in NAMES_library.json with a signature this '
@@ -5170,13 +5411,15 @@ class Compiler:
         return self._strip_family('ail_str_rstrip_view', 'rstrip', recv, args, ctx)
 
     def _m_lower(self, recv, kind, args, kwargs, ctx):
+        self.needs_boxcase = True          # appends the case tables (cruntime.BOXCASE) to this program
         t = ctx.tmp()
-        ctx.emit('%s = ail_str_lower(cx, %s);' % (t, recv))
+        ctx.emit('%s = ail_boxed_case(cx, %s, 0);' % (t, recv))
         return t
 
     def _m_upper(self, recv, kind, args, kwargs, ctx):
+        self.needs_boxcase = True
         t = ctx.tmp()
-        ctx.emit('%s = ail_str_upper(cx, %s);' % (t, recv))
+        ctx.emit('%s = ail_boxed_case(cx, %s, 1);' % (t, recv))
         return t
 
     def _m_replace(self, recv, kind, args, kwargs, ctx):
@@ -6040,6 +6283,8 @@ class Compiler:
             if ctx.finally_stack:
                 outer = ctx.finally_stack[-1]['label']
                 ctx.emit('case AIL_COMPLETE_RETURN: goto %s;' % outer)
+            elif ctx.fname == '<module>':
+                ctx.emit('case AIL_COMPLETE_RETURN: break;')      # module code has no `return`
             else:
                 ctx.emit('case AIL_COMPLETE_RETURN: *out = %s; AIL_FRAME_LEAVE(cx, f); return AIL_OK;'
                          % (ctx.retval_slot or 'ail_box_none()'))

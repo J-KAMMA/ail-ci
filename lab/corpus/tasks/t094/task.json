@@ -1,0 +1,6 @@
+{
+ "id": "t094",
+ "category": "strings",
+ "description": "Print each word reversed, and whether it equals its reverse; then print the concatenation of all words separated by '-'.",
+ "input_format": "strings_n_uni"
+}

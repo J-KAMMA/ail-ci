@@ -1,0 +1,6 @@
+{
+ "id": "t472",
+ "category": "errors_classes",
+ "description": "Use math functions: print sqrt, log2 (for positive), sin and cos in radians (3 decimals) for each of the first 8 absolute numbers plus 1; and math.hypot, math.gcd and math.isqrt.",
+ "input_format": "nums"
+}

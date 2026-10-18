@@ -1,0 +1,6 @@
+{
+ "id": "t152",
+ "category": "collections",
+ "description": "Print the top-3 distinct maximum values using a set and sorted, and the numbers that appear more than once.",
+ "input_format": "nums_nocount"
+}

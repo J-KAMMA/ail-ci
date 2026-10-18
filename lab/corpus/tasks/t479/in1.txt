@@ -1,0 +1,15 @@
+foxtrot 3
+banana 4
+foxtrot -2
+apple 5
+delta 5
+delta 5
+banana 2
+banana -1
+cherry -2
+golf 0
+apple 2
+delta 3
+hotel -3
+delta -3
+banana 1

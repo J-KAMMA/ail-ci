@@ -1,0 +1,22 @@
+```
+fn main() -> int {
+    for line in sys.stdin {
+        let parts = line.split();
+        if len(parts) > 0 {
+            let out: list[str] = [];
+            let cur = 0;
+            let first = true;
+            for p in parts {
+                let v = int(p);
+                if first or v > cur {
+                    cur = v;
+                    first = false;
+                }
+                out.append(str(cur));
+            }
+            print(" ".join(out));
+        }
+    }
+    return 0;
+}
+```

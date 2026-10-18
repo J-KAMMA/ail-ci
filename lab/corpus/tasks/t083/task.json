@@ -1,0 +1,6 @@
+{
+ "id": "t083",
+ "category": "strings",
+ "description": "Check that each line is pure ASCII; print 'ascii' or 'non-ascii' for each, then the encoded bytes (as list of ints) of the first non-ASCII line in UTF-8.",
+ "input_format": "text_uni"
+}

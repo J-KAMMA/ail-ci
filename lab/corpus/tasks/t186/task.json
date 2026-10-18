@@ -1,0 +1,6 @@
+{
+ "id": "t186",
+ "category": "parsing",
+ "description": "Round-trip the JSON: parse, dump with sort_keys and compact separators, parse again and print whether equal, followed by the dump.",
+ "input_format": "json_nested"
+}

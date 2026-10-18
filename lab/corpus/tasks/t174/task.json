@@ -1,0 +1,6 @@
+{
+ "id": "t174",
+ "category": "parsing",
+ "description": "Parse the money lines into decimal.Decimal values; print item subtotal, tax, fee and total exactly (two decimals) using Decimal arithmetic.",
+ "input_format": "money_lines"
+}

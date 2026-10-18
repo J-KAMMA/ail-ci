@@ -1,0 +1,6 @@
+{
+ "id": "t195",
+ "category": "parsing",
+ "description": "Extract phone numbers of the form NNN-NNN-NNNN with re.findall and print them with the line number where they occur.",
+ "input_format": "emails_text"
+}

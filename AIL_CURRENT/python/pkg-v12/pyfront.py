@@ -122,6 +122,31 @@ class Unsupported(PipelineError):
     """Outside the subset. The message names the construct, so the boundary stays measurable."""
 
 
+def _number_constant(node):
+    """The value of an int/float literal, with any unary signs (`-4.0`, `+(-2)`), else None."""
+    sign = 1
+    while isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        if isinstance(node.op, ast.USub):
+            sign = -sign
+        node = node.operand
+    if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+        return sign * node.value
+    return None
+
+
+def refuse_complex_pow(node):
+    """`(-4.0) ** 0.5`: a negative base to a fractional power is a complex number in Python, and this
+    language has no complex type. Constant operands are refused here, at compile time; any other
+    operands stop the program at run time with the same words (never a quiet nan)."""
+    base, exponent = _number_constant(node.left), _number_constant(node.right)
+    if (base is not None and exponent is not None and base < 0 and isinstance(exponent, float)
+            and exponent == exponent and abs(exponent) != float('inf') and exponent != int(exponent)):
+        refusal = Unsupported('a negative number raised to a fractional power is a complex number in Python, '
+                              'and AIL has no complex type; take the absolute value first or use an integer exponent')
+        refusal.source_line = getattr(node, 'lineno', None)
+        raise refusal
+
+
 def _use(need, *names):
     need.update(names)
     need.add('ail_die')

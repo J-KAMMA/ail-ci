@@ -1,0 +1,13 @@
+12
+mallory C 15 75
+carol C 20 84
+carol C 16 99
+niaj B 21 69
+erin B 19 86
+carol B 18 92
+heidi B 23 64
+bob A 21 93
+heidi C 24 99
+carol C 18 95
+carol A 20 65
+judy B 17 62

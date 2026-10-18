@@ -1,0 +1,6 @@
+{
+ "id": "t119",
+ "category": "collections",
+ "description": "Sum scores per name; print names ordered by total score descending then name ascending as 'name total'.",
+ "input_format": "name_scores"
+}

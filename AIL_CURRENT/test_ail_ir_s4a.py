@@ -30,6 +30,7 @@ from ir import ir as I                       # noqa: E402
 from ir import rtc, text, verify             # noqa: E402
 import test_ail_ir_s3 as S3                  # noqa: E402
 from test_ail_ir_s3 import (Built, cpython_run, compile_program, last_line, HAVE_CC)   # noqa: E402
+from ail_testenv import ASAN_DETECT_LEAKS
 
 
 def run_with(exe, args=(), stdin=b'', env=None):
@@ -675,7 +676,8 @@ class TableTests(unittest.TestCase):
             for t in params + results:
                 self.assertEqual(I.type_errors(t), [], (name, t))
             for a in e['attrs']:
-                self.assertIn('{' + a + '}', e['c'], (name, a))
+                # (`win`, the window cell of S4c-1, is spelled {W} in the template)
+                self.assertIn('{' + ('W' if a == 'win' else a) + '}', e['c'], (name, a))
             if e['arena']:
                 self.assertTrue(e['effects'].allocs, name)
             if e['pure']:
@@ -878,7 +880,7 @@ class ProgramTests(unittest.TestCase):
                                      str(Path(tmp, '%s.%s.d' % (name, tag), 'program.c')), '-lm', '-o', str(san)],
                                     capture_output=True, text=True)
                 self.assertEqual(cc.returncode, 0, cc.stderr[-2000:])
-                env_run = {'ASAN_OPTIONS': 'detect_leaks=1:abort_on_error=0',
+                env_run = {'ASAN_OPTIONS': ASAN_DETECT_LEAKS + ':abort_on_error=0',
                            'UBSAN_OPTIONS': 'print_stacktrace=1:halt_on_error=1'}
                 out[tag] = [run_with(san, args, stdin, env_run) for args in args_list]
         return out

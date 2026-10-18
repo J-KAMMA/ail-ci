@@ -6,6 +6,7 @@ import subprocess
 import unittest
 import test_ail_c_objects as support
 from test_ail_map_fields import build
+from ail_testenv import glibc_cookie_streams
 
 SOURCE=r'''fn main()->int {
  let payload=read_bytes(sys.argv[1]);print("header");
@@ -67,7 +68,7 @@ class MixedStdoutTests(unittest.TestCase):
         result=subprocess.run([str(exe)],capture_output=True,timeout=15)
         self.assertEqual((result.returncode,result.stdout,result.stderr),(0,b'AB\n\0\xfflast\r\n',b''))
 
-    @unittest.skipIf(os.name=='nt','glibc stdout callback')
+    @unittest.skipUnless(glibc_cookie_streams(),'glibc stdout callback: fopencookie exists only in glibc (macOS has funopen, MinGW neither)')
     def test_flush_callback_cannot_corrupt_live_input_and_borrowed_echo(self):
         native=r'''
 #define _GNU_SOURCE
@@ -91,7 +92,7 @@ int64_t install_callback(void){cookie_io_functions_t io={0};io.write=callback;FI
             result=subprocess.run([str(exe)],input=b'xy',capture_output=True,timeout=15)
             self.assertEqual((result.returncode,result.stdout,result.stderr),(0,expected,b''))
 
-    @unittest.skipIf(os.name=='nt','glibc mutable-buffer callback')
+    @unittest.skipUnless(glibc_cookie_streams(),'glibc mutable-buffer callback: fopencookie exists only in glibc (macOS has funopen, MinGW neither)')
     def test_dirty_flush_snapshots_mutable_payload_before_callback_reallocation(self):
         import sys
         sys.path.insert(0,str(support.ROOT/'python/pkg-v12'))

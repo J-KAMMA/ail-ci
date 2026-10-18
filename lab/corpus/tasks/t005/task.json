@@ -1,0 +1,6 @@
+{
+ "id": "t005",
+ "category": "numbers",
+ "description": "Print the length of the longest strictly increasing contiguous run.",
+ "input_format": "nums"
+}

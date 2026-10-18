@@ -1,0 +1,6 @@
+{
+ "id": "t257",
+ "category": "grids",
+ "description": "Print the convex hull of the points (Andrew's monotone chain) in counter-clockwise order starting from the lowest-leftmost point, one 'x y' per line.",
+ "input_format": "points"
+}

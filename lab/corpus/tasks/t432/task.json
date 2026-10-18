@@ -1,0 +1,6 @@
+{
+ "id": "t432",
+ "category": "errors_classes",
+ "description": "Implement a Matrix class with __add__, __mul__, __eq__, __repr__ and __getitem__ (dimensions from the input), then print A+A, A*A (when square), and A==A.",
+ "input_format": "square_matrix"
+}

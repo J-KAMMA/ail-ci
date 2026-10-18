@@ -1,0 +1,6 @@
+{
+ "id": "t328",
+ "category": "dp",
+ "description": "Build a Fenwick tree (binary indexed tree) over the array and answer each query as the range sum; then add 1 to every even index and answer the queries again.",
+ "input_format": "ints_and_queries"
+}

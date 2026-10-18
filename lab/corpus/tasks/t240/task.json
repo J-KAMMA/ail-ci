@@ -1,0 +1,6 @@
+{
+ "id": "t240",
+ "category": "grids",
+ "description": "Find the 2x2 sub-block with the maximum sum (first on ties by row then column) and print its top-left corner and the sum.",
+ "input_format": "grid_digits"
+}

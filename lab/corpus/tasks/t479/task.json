@@ -1,0 +1,6 @@
+{
+ "id": "t479",
+ "category": "errors_classes",
+ "description": "Use collections.ChainMap and a dict merge operator (|) to combine default settings with overrides from the lines 'word number'; print the combined dict sorted by key.",
+ "input_format": "pairs_str_int"
+}

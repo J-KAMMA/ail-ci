@@ -1,0 +1,6 @@
+{
+ "id": "t405",
+ "category": "simulation",
+ "description": "Simulate a ball bouncing: each integer is a height; drop from each height h with 0.5 rebound ratio until below 1; print the total distance travelled per drop with 2 decimals (heights taken as absolute values).",
+ "input_format": "nums_nocount"
+}

@@ -1,0 +1,7 @@
+{
+  "model": "glm-5.3-flash-free-r2",
+  "variant": "pep484",
+  "task": "rotate_list",
+  "date": "2026-10-17",
+  "tokens_out": null
+}

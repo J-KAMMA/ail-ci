@@ -1,0 +1,6 @@
+{
+ "id": "t172",
+ "category": "parsing",
+ "description": "Compute a pivot table of the amounts: rows regions, columns q1..q4 with 0 for missing, plus row and column totals; print aligned with width 7.",
+ "input_format": "table_pivot"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t169",
+ "category": "parsing",
+ "description": "Using csv.DictReader build a list of dicts; print the highest-paid person overall and the department with the highest average age (2 decimals).",
+ "input_format": "csv_table"
+}

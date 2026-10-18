@@ -1,0 +1,6 @@
+{
+ "id": "t146",
+ "category": "collections",
+ "description": "Merge the two lists into one sorted list using heapq.merge after sorting both, and print the merged list and its length.",
+ "input_format": "two_lists"
+}

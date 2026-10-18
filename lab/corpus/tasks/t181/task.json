@@ -1,0 +1,6 @@
+{
+ "id": "t181",
+ "category": "parsing",
+ "description": "Output a JSON list of {id, name_upper, n_tags} for each record, using json.dumps with default settings.",
+ "input_format": "json_records"
+}

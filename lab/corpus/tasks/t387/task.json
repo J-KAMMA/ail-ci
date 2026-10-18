@@ -1,0 +1,6 @@
+{
+ "id": "t387",
+ "category": "sorting",
+ "description": "Do a stable multi-key sort in two passes (first by word, then by a descending) and print the result; verify equal to a single-pass tuple key.",
+ "input_format": "tuples_lines"
+}

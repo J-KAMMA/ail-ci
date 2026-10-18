@@ -1,0 +1,6 @@
+{
+ "id": "t401",
+ "category": "simulation",
+ "description": "Compare the hands pairwise in order (hand 1 vs hand 2, hand 3 vs hand 4,...) using category then tie-breaking ranks; print the winner index or 'tie'.",
+ "input_format": "lines_of_cards"
+}

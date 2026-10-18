@@ -1,0 +1,6 @@
+{
+ "id": "t322",
+ "category": "dp",
+ "description": "Merge overlapping closed intervals and print the merged result as 'a b' lines, then the total covered length.",
+ "input_format": "intervals"
+}

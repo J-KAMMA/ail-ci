@@ -1,0 +1,6 @@
+{
+ "id": "t171",
+ "category": "parsing",
+ "description": "Print for every department the salary range as 'dept: min-max' and the median salary (average of two middles as float when even).",
+ "input_format": "csv_table"
+}

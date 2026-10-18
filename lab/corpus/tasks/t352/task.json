@@ -1,0 +1,6 @@
+{
+ "id": "t352",
+ "category": "dp",
+ "description": "Print the median of medians by splitting into chunks of 5 (print the medians list and its median), then the exact median.",
+ "input_format": "nums_nocount"
+}

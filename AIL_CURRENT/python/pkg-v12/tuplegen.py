@@ -169,12 +169,18 @@ def sub(text, **kw):
     return text
 
 
+def fld(e, i):
+    """Field name of element i.  A bool element has its own spelling (fb0): the compiler judges a field by name
+    before typing and calls it a bool only when every class defining that name declares it bool."""
+    return 'fb%d' % i if deep(e) == BOOL else 'f%d' % i
+
+
 def leaves(t, path='n'):
     """[(accessor text, type)] of the scalar leaves of a tuple type, depth first."""
     out = []
     for i, e in enumerate(deep(t)[1]):
         e = deep(e)
-        p = '%s.f%d' % (path, i)
+        p = '%s.%s' % (path, fld(e, i))
         if is_tuple(e):
             out.extend(leaves(e, p))
         else:
@@ -319,8 +325,8 @@ class Gen:
         if name in self.out:
             return name
         elts = t[1]
-        params = ', '.join('f%d: %s' % (i, ann_text(e)) for i, e in enumerate(elts))
-        body = '\n'.join('        self.f%d = f%d' % (i, i) for i in range(len(elts)))
+        params = ', '.join('%s: %s' % (fld(e, i), ann_text(e)) for i, e in enumerate(elts))
+        body = '\n'.join('        self.%s = %s' % (fld(e, i), fld(e, i)) for i, e in enumerate(elts))
         self.out[name] = 'class %s:\n    def __init__(self, %s):\n%s\n' % (name, params, body)
         for e in elts:
             if is_tuple(e):
@@ -350,7 +356,7 @@ class Gen:
         self.out[name] = None
         cls = self.tcls(t)
         elts = t[1]
-        parts = ' + ", " + '.join(self.repr_expr(e, 't.f%d' % i) for i, e in enumerate(elts))
+        parts = ' + ", " + '.join(self.repr_expr(e, 't.' + fld(e, i)) for i, e in enumerate(elts))
         tail = ' + ",)"' if len(elts) == 1 else ' + ")"'
         self.out[name] = 'def %s(t: %s) -> str:\n    return "(" + %s%s\n' % (name, cls, parts, tail)
         return name
@@ -388,7 +394,7 @@ class Gen:
         lines = ['def %s(a: %s, b: %s) -> int:' % (name, cls, cls)]
         for i, e in enumerate(t[1]):
             e = deep(e)
-            x, y = 'a.f%d' % i, 'b.f%d' % i
+            x, y = 'a.' + fld(e, i), 'b.' + fld(e, i)
             if is_tuple(e):
                 lines += ['    c%d = %s(%s, %s)' % (i, self.tcmp(e), x, y), '    if c%d != 0:' % i,
                           '        return c%d' % i]
@@ -416,7 +422,7 @@ class Gen:
         lines = ['def %s(a: %s, b: %s) -> bool:' % (name, cls, cls)]
         for i, e in enumerate(t[1]):
             e = deep(e)
-            x, y = 'a.f%d' % i, 'b.f%d' % i
+            x, y = 'a.' + fld(e, i), 'b.' + fld(e, i)
             if is_tuple(e):
                 lines += ['    if not %s(%s, %s):' % (self.teq(e), x, y), '        return False']
                 continue
@@ -440,7 +446,7 @@ class Gen:
         self.hfin()
         lines = ['def %s(k: %s) -> int:' % (name, cls), '    h = 17']
         for i, e in enumerate(t[1]):
-            lines.append('    h = wrapping_add(wrapping_mul(h, 1000003), %s)' % self.hash_leaf(e, 'k.f%d' % i))
+            lines.append('    h = wrapping_add(wrapping_mul(h, 1000003), %s)' % self.hash_leaf(e, 'k.' + fld(e, i)))
         lines.append('    return _ail_hfin(h)')
         self.out[name] = '\n'.join(lines) + '\n'
         return name
@@ -893,9 +899,9 @@ class Table:
         return self.sub('''def @p@dfromlist(xs: list[@PAIR@]) -> @T@:
     d = @p@new()
     for x in xs:
-        @p@set(d, x.f0, x.f1)
+        @p@set(d, x.@F0@, x.@F1@)
     return d
-''', PAIR=pair)
+''', PAIR=pair, F0=fld(self.k, 0), F1=fld(self.v, 1))
 
     # -- sets -------------------------------------------------------------------------------------------
     def op_add(self, name):

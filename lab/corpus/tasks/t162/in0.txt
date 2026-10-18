@@ -1,0 +1,7 @@
+fri 16
+wed 18
+tue 32
+mon -8
+wed 6
+mon -3
+tue 25

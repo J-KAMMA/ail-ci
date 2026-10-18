@@ -1,0 +1,6 @@
+{
+ "id": "t153",
+ "category": "collections",
+ "description": "Maintain a sliding window of size 4 with a deque and print the max of each full window.",
+ "input_format": "nums_nocount"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t176",
+ "category": "parsing",
+ "description": "Parse each JSON record; print the names of active records sorted, and the average score of all records (2 decimals).",
+ "input_format": "json_records"
+}

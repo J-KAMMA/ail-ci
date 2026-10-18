@@ -1,0 +1,6 @@
+{
+ "id": "t216",
+ "category": "parsing",
+ "description": "Count the occurrences of each bracket kind over all lines and print them as a dict with sorted keys using repr.",
+ "input_format": "parens"
+}

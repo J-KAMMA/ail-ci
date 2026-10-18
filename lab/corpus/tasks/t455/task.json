@@ -1,0 +1,6 @@
+{
+ "id": "t455",
+ "category": "errors_classes",
+ "description": "Implement a simple tokenizer class with a regex, state, and peek/next methods for the expression lines; print token types and values.",
+ "input_format": "expr_lines"
+}

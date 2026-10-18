@@ -1,0 +1,6 @@
+{
+ "id": "t138",
+ "category": "collections",
+ "description": "Track a bank: deposit adds, withdraw subtracts only if enough funds (otherwise print 'insufficient'), balance prints the balance. Print the final balances sorted by account.",
+ "input_format": "bank_txns"
+}

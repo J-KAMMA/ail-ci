@@ -1,0 +1,25 @@
+24
+dave 41
+ivan 55
+frank 48
+dave 52
+judy 12
+heidi 51
+ivan 39
+mallory 2
+grace 55
+grace 8
+grace 71
+bob 63
+heidi 21
+judy 39
+mallory 62
+bob 79
+bob 12
+frank 76
+judy 45
+judy 87
+alice 0
+niaj 3
+grace 19
+ivan 41

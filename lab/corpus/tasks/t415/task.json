@@ -1,0 +1,6 @@
+{
+ "id": "t415",
+ "category": "simulation",
+ "description": "Run a tiny interpreter: ints are lines pushing; here use the stack commands but 'pop' prints the popped value; at the end print 'sum of remaining' and 'max of remaining'.",
+ "input_format": "commands"
+}

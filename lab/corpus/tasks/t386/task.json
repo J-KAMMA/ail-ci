@@ -1,0 +1,6 @@
+{
+ "id": "t386",
+ "category": "sorting",
+ "description": "Print the numbers of the 2-element tuple list sorted using key=lambda t: (t[1], -t[0]) where the tuples are read from CSV lines 'a,b,word' (word ignored).",
+ "input_format": "tuples_lines"
+}

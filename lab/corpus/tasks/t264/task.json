@@ -1,0 +1,6 @@
+{
+ "id": "t264",
+ "category": "grids",
+ "description": "For each triangle side triple print its type (equilateral, isosceles, scalene, invalid) and the area by Heron's formula with 3 decimals when valid.",
+ "input_format": "tri_sides"
+}

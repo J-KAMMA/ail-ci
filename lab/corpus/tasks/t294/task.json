@@ -1,0 +1,6 @@
+{
+ "id": "t294",
+ "category": "graphs",
+ "description": "Compute the in-degree and out-degree of each node and print nodes where in != out.",
+ "input_format": "edges_d"
+}

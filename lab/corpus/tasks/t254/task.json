@@ -1,0 +1,6 @@
+{
+ "id": "t254",
+ "category": "grids",
+ "description": "Print the sum of the main diagonal and anti-diagonal without double-counting the centre, and the maximum row sum.",
+ "input_format": "square_matrix"
+}

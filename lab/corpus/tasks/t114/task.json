@@ -1,0 +1,6 @@
+{
+ "id": "t114",
+ "category": "strings",
+ "description": "Print each distinct pair of words (w1, w2) with w1<w2 that differ in exactly one position and have the same length (at most 20 pairs, sorted).",
+ "input_format": "words_line"
+}

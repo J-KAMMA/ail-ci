@@ -8,6 +8,8 @@ import unittest
 import zlib
 
 import test_ail_c_objects as support
+from ail_testenv import objcopy_available
+OBJCOPY_REASON='symbol localization needs an ELF/COFF objcopy; Apple toolchains have none'
 
 sys.path.insert(0,str(support.ROOT/'python/pkg-v12'))
 import c_api_bridge as bridge
@@ -59,6 +61,7 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(bridge.state_prefix('AIL_LINK_STATE(int, x[2], = 0);\nAIL_LINK_STATE(int, x[2], = 0);','demo'),
                          '#define x demo_ail_state_x\n')
 
+    @unittest.skipUnless(objcopy_available(),OBJCOPY_REASON)
     def test_native_multiple_units_resource_cleanup_and_reentrant_guard(self):
         source=self.write('packet.c',r'''
 #include <string.h>
@@ -148,6 +151,7 @@ int main(void) {
         print(json.dumps(dict(profile='linked allocation and FILE counters; not RSS or speed',
             platform=sys.platform,repetitions=30,reentrant_status=10,**metrics)))
 
+    @unittest.skipUnless(objcopy_available(),OBJCOPY_REASON)
     def test_crc_example_public_cli_closure(self):
         examples=support.ROOT/'language_examples/c_headers_workflow'
         native,stream=self.root/'native.o',self.root/'stream.o'

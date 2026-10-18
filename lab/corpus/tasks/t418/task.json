@@ -1,0 +1,6 @@
+{
+ "id": "t418",
+ "category": "simulation",
+ "description": "Compute exact rational sum of 1/x for the positive numbers (abs values, skip zeros) with Fraction and print it as 'num/den' and the float approximation with 10 decimals.",
+ "input_format": "nums_nocount"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t280",
+ "category": "graphs",
+ "description": "Print the second shortest distance (strictly greater than the shortest) from node 0 to the last node, or -1 if none.",
+ "input_format": "edges_w"
+}

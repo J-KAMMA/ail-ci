@@ -21,7 +21,7 @@ same exception the typed path uses) -- never a silent gap, never a bare gcc erro
 import ast
 import re
 
-from pyfront import Unsupported
+from pyfront import Unsupported, refuse_complex_pow
 
 # ---------------------------------------------------------------------------------------------
 # Exception-type-name -> the runtime's AIL_ERR_* id. Only the runtime's own built-in exception
@@ -291,7 +291,7 @@ static ail_obj ail_builtin_round(ail_obj x, int has_n, int64_t n) {
         if (r >= 9223372036854775808.0 || r < -9223372036854775808.0) ail_raise_c(AIL_ERR_OVERFLOW, "integer overflow");
         return ail_box_int((int64_t)r);
     }
-    double scale = pow(10.0, (double)n);
+    double scale = (pow)(10.0, (double)n);
     return ail_box_float(nearbyint(v * scale) / scale);
 }
 
@@ -363,7 +363,26 @@ static ail_obj ail_builtin_zip2(ail_obj a, ail_obj b) {
 static ail_obj ail_builtin_sum(ail_obj src, ail_obj start) {
     ail_obj acc = start;
     int64_t n = ail_iter_len(src);
-    for (int64_t i = 0; i < n; i++) acc = ail_obj_add(acc, ail_iter_at(src, i));
+    int mode = acc.tag == AIL_INT ? 0 : acc.tag == AIL_FLOAT ? 1 : 2;   /* 3.12 sum(): int, float, generic */
+    double f = mode == 1 ? acc.f : 0.0, c = 0.0;
+    for (int64_t i = 0; i < n; i++) {
+        ail_obj v = ail_iter_at(src, i);
+        if (mode == 1) {
+            if (v.tag == AIL_FLOAT) {
+                double t = f + v.f;
+                if (fabs(f) >= fabs(v.f)) c += (f - t) + v.f; else c += (v.f - t) + f;
+                f = t;
+                continue;
+            }
+            if (v.tag == AIL_INT || v.tag == AIL_BOOL) { f += (double)v.i; continue; }
+            acc = ail_box_float(f); mode = 2;
+        }
+        acc = ail_obj_add(acc, v);
+        if (mode == 0 && acc.tag != AIL_INT) {
+            if (acc.tag == AIL_FLOAT) { mode = 1; f = acc.f; c = 0.0; } else mode = 2;
+        }
+    }
+    if (mode == 1) { if (c != 0.0 && isfinite(c)) f += c; acc = ail_box_float(f); }
     return acc;
 }
 static ail_obj ail_builtin_any(ail_obj src) {
@@ -1310,6 +1329,8 @@ class Compiler:
         fn = self.BINOP_FN.get(type(node.op))
         if fn is None:
             raise Unsupported('the %s binary operator' % type(node.op).__name__)
+        if isinstance(node.op, ast.Pow):
+            refuse_complex_pow(node)
         l = self.expr(node.left, ctx)
         r = self.expr(node.right, ctx)
         return self._emit_tmp(ctx, '%s(%s, %s)' % (fn, l, r))

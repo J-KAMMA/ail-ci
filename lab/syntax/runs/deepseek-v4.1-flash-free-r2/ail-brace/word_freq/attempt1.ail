@@ -1,0 +1,24 @@
+```
+fn main() -> int {
+    let counts: dict[str, int] = {};
+    let text = "";
+    for line in sys.stdin {
+        text += line;
+    }
+    let words = text.split();
+    for w in words {
+        let lw = w.lower();
+        if lw in counts {
+            counts[lw] = counts[lw] + 1;
+        } else {
+            counts[lw] = 1;
+        }
+    }
+    let keys = sorted(counts);
+    keys.sort(key=lambda x: (-counts[x], x));
+    for k in keys {
+        print(k, counts[k]);
+    }
+    return 0;
+}
+```

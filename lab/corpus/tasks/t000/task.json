@@ -1,0 +1,6 @@
+{
+ "id": "t000",
+ "category": "numbers",
+ "description": "Print the sum, minimum, maximum and the mean (rounded to 2 decimals) of the numbers, one per line.",
+ "input_format": "nums"
+}

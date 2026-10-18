@@ -1,0 +1,6 @@
+{
+ "id": "t486",
+ "category": "errors_classes",
+ "description": "Use datetime/timedelta: for each time HH:MM add 90 minutes and print the new time (wrap at midnight) and day offset +0/+1.",
+ "input_format": "times"
+}

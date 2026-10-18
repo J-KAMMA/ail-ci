@@ -1,0 +1,6 @@
+{
+ "id": "t350",
+ "category": "dp",
+ "description": "Compute the longest Collatz chain for starting numbers below n*100 with memoization via a dict, printing the winner and the chain length.",
+ "input_format": "small_int"
+}

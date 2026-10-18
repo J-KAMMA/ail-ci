@@ -1,0 +1,6 @@
+{
+ "id": "t234",
+ "category": "grids",
+ "description": "For each cell print the count of neighbouring '#' cells (8 directions) as a digit grid.",
+ "input_format": "grid_life"
+}

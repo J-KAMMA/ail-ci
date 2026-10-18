@@ -1,0 +1,6 @@
+{
+ "id": "t498",
+ "category": "errors_classes",
+ "description": "Print the base-2 logarithm table: for the numbers print the position of the highest set bit via bit_length, and the representation of -n in two's complement with 16 bits for small n.",
+ "input_format": "nums"
+}

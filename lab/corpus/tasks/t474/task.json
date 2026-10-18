@@ -1,0 +1,6 @@
+{
+ "id": "t474",
+ "category": "errors_classes",
+ "description": "Use the bytes and bytearray types: encode each line in UTF-8, print the bytes repr, the hex string, the length, and decode back to check equality.",
+ "input_format": "text_uni"
+}

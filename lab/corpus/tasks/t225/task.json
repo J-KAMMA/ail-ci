@@ -1,0 +1,6 @@
+{
+ "id": "t225",
+ "category": "grids",
+ "description": "Compute for every open cell the distance from S (BFS) and print the grid with distances modulo 10 as digits ('#' for walls, '.' for unreachable).",
+ "input_format": "grid_se"
+}

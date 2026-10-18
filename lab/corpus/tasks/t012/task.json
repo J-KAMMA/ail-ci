@@ -1,0 +1,6 @@
+{
+ "id": "t012",
+ "category": "numbers",
+ "description": "Print the product of all numbers modulo 1000003, and the product of the non-zero ones modulo 1000003.",
+ "input_format": "nums"
+}

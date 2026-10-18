@@ -1,0 +1,6 @@
+{
+ "id": "t162",
+ "category": "collections",
+ "description": "Print the temperature statistics per day: min, max, mean (1 decimal) in the order mon..fri for days that appear.",
+ "input_format": "temps"
+}

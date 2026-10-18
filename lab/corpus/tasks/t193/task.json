@@ -1,0 +1,6 @@
+{
+ "id": "t193",
+ "category": "parsing",
+ "description": "Sort the lines by their timestamp and print the first five plus the average code value per level (rounded to 1 decimal).",
+ "input_format": "log_lines"
+}

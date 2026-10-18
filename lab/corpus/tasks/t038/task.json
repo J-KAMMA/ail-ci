@@ -1,0 +1,6 @@
+{
+ "id": "t038",
+ "category": "numbers",
+ "description": "Print the integer part and fractional part (use math.modf) of each number with 3 decimals.",
+ "input_format": "floats"
+}

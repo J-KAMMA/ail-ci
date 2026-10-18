@@ -1,0 +1,7 @@
+{
+ "note": "coords = data[1:] with data = sys.stdin.read().split(): C compiler error ail_list_push (t256, t258)",
+ "from": "",
+ "cpython_rc": 0,
+ "default": "compile rc=4",
+ "ir": "compile rc=4"
+}

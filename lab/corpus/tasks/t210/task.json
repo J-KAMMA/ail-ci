@@ -1,0 +1,6 @@
+{
+ "id": "t210",
+ "category": "parsing",
+ "description": "Tokenise each expression with a regular expression and print the tokens list (repr) and the count of operators.",
+ "input_format": "expr_lines"
+}

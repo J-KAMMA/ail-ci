@@ -104,7 +104,7 @@ static int one(int selected) {
  ail_list out={count_malloc(sizeof(int64_t)),1,1};out.p[0]=99;
  volatile int caught=0;
  ail_exc_cleanup[++ail_exc_top]=ail_cleanup_top;
- if(!setjmp(ail_exc_stack[ail_exc_top])){
+ if(!AIL_SETJMP(ail_exc_stack[ail_exc_top])){
   if(selected==10){
    ail_hlist_tcpsocket forged={1,INT64_C(2147483648),INT64_C(2147483648),(ail_tcpsocket **)16};
    ail_tcp_poll(&out,&forged,(int64_t *)16,INT64_C(2147483648),0);

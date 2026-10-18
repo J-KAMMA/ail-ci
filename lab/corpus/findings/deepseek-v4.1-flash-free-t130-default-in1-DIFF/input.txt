@@ -1,0 +1,23 @@
+22
+alice 13.38
+ivan 31.22
+ivan 35.49
+alice 47.52
+erin 13.55
+carol 36.53
+carol 6.38
+mallory 79.32
+bob 89.97
+judy 83.35
+ivan 30.53
+dave 96.71
+frank 86.37
+ivan 56.40
+grace 31.13
+grace 5.23
+bob 91.85
+grace 23.44
+ivan 41.09
+grace 35.02
+ivan 89.38
+ivan 49.05

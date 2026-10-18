@@ -1,0 +1,6 @@
+{
+ "id": "t030",
+ "category": "numbers",
+ "description": "Print the two numbers with the smallest absolute difference and that difference.",
+ "input_format": "pos_nums"
+}

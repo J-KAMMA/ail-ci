@@ -1,0 +1,6 @@
+{
+ "id": "t097",
+ "category": "strings",
+ "description": "Print each word padded to width 10 using centre alignment with '*' and its first and last character.",
+ "input_format": "strings_n_uni"
+}

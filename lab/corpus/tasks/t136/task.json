@@ -1,0 +1,6 @@
+{
+ "id": "t136",
+ "category": "collections",
+ "description": "Implement an LRU cache of capacity 2 using OrderedDict: 'set K V' inserts or updates, 'get K' prints value or -1 and marks it recently used, 'del K' removes (print nothing), 'incr K V' behaves like set with value V, 'count' prints the current size.",
+ "input_format": "kv_commands"
+}

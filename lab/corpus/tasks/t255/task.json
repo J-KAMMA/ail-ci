@@ -1,0 +1,6 @@
+{
+ "id": "t255",
+ "category": "grids",
+ "description": "Print the number of 'saddle points' (minimum in its row and maximum in its column) with their coordinates.",
+ "input_format": "square_matrix"
+}

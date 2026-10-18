@@ -1,0 +1,6 @@
+{
+ "id": "t273",
+ "category": "graphs",
+ "description": "Print the number of triangles in the graph.",
+ "input_format": "edges_plain"
+}

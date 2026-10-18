@@ -1,0 +1,6 @@
+{
+ "id": "t131",
+ "category": "collections",
+ "description": "Round each value to the nearest integer with Python's round() and print the integer sum and the sum of the original values formatted with 2 decimals.",
+ "input_format": "name_score_float"
+}

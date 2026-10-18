@@ -1,0 +1,7 @@
+{
+ "note": "heapq.nlargest(key=lambda kv: kv[1]) over list(dict.items()) built from stdin strings: TypeError at run time (t130)",
+ "from": "",
+ "cpython_rc": 0,
+ "default": "run rc=1, stdout DIFFERS",
+ "ir": "run rc=1, stdout DIFFERS"
+}

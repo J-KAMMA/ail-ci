@@ -1,0 +1,6 @@
+{
+ "id": "t084",
+ "category": "strings",
+ "description": "Print whether each of the strings is a palindrome ignoring case: 'yes' or 'no', then the count of palindromes.",
+ "input_format": "palin_strings"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t016",
+ "category": "numbers",
+ "description": "Print the index (0-based) of the first element that is larger than all previous elements and equal to the global maximum, plus the number of times the global maximum appears.",
+ "input_format": "nums"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t465",
+ "category": "errors_classes",
+ "description": "Use pattern matching (match/case) on the parsed command tuples (e.g., ('push', n), ('pop',)) of the stack commands and print the results.",
+ "input_format": "commands"
+}

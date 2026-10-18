@@ -1,0 +1,6 @@
+{
+ "id": "t295",
+ "category": "graphs",
+ "description": "Run Dijkstra from node 0; print 'node: dist' for reachable nodes and 'node: unreachable' otherwise.",
+ "input_format": "edges_dw"
+}

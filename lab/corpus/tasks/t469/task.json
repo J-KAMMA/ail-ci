@@ -1,0 +1,6 @@
+{
+ "id": "t469",
+ "category": "errors_classes",
+ "description": "Use list comprehension, dict comprehension, set comprehension and nested comprehensions to build outputs from the numbers; print each result labelled.",
+ "input_format": "nums"
+}

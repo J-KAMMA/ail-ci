@@ -1,0 +1,6 @@
+{
+ "id": "t286",
+ "category": "graphs",
+ "description": "Print for each component whether it is a tree (m = n-1) or has cycles.",
+ "input_format": "edges_disc"
+}

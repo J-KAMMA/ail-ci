@@ -1,0 +1,156 @@
+add nut 11
+remove pin 7
+add bolt 9
+report
+add bolt 16
+remove cog 3
+report
+remove pin 18
+remove nut 9
+remove gear 17
+remove bolt 13
+add bolt 6
+add cog 4
+add cog 15
+add cog 7
+remove pin 8
+add bolt 7
+report
+add cog 4
+remove pin 6
+add bolt 11
+add cog 15
+report
+remove nut 16
+report
+report
+remove gear 12
+add cog 19
+add bolt 20
+report
+add nut 2
+report
+remove gear 3
+add cog 8
+report
+add cog 9
+remove cog 3
+add nut 10
+add gear 10
+remove cog 14
+report
+add nut 3
+report
+add bolt 12
+remove bolt 16
+remove bolt 9
+remove pin 4
+report
+add cog 15
+report
+add nut 15
+add pin 14
+remove pin 12
+add cog 18
+add pin 13
+remove bolt 18
+remove bolt 16
+add pin 10
+add pin 6
+add cog 4
+report
+report
+report
+add pin 14
+report
+add gear 9
+report
+remove bolt 10
+add bolt 1
+add bolt 10
+remove bolt 10
+add bolt 17
+remove gear 9
+remove nut 4
+report
+add cog 2
+remove pin 14
+report
+add gear 1
+remove bolt 17
+add bolt 2
+report
+report
+add cog 19
+remove bolt 16
+add nut 3
+add gear 3
+add cog 16
+report
+add bolt 16
+remove nut 1
+remove bolt 8
+add gear 2
+add cog 14
+remove bolt 7
+add gear 12
+remove gear 6
+add gear 20
+remove gear 12
+report
+report
+report
+add gear 10
+add pin 14
+remove cog 1
+remove nut 17
+remove gear 9
+add nut 11
+report
+report
+add nut 10
+remove cog 18
+add pin 10
+add pin 5
+add bolt 4
+add bolt 11
+remove gear 17
+add bolt 9
+add gear 10
+remove gear 14
+remove pin 6
+remove pin 18
+add pin 3
+remove pin 19
+remove nut 18
+remove cog 8
+add bolt 11
+remove gear 5
+add nut 4
+remove nut 14
+add gear 8
+report
+add nut 9
+report
+remove bolt 4
+add bolt 3
+add gear 15
+add pin 17
+add gear 9
+report
+add gear 8
+report
+report
+report
+remove gear 2
+report
+report
+add gear 5
+add cog 15
+add nut 9
+add cog 10
+report
+report
+report
+add gear 4
+add nut 13

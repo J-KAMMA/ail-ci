@@ -1,0 +1,13 @@
+12
+carol 88
+judy 30
+carol 37
+carol 90
+niaj 78
+mallory 81
+niaj 31
+frank 37
+dave 78
+frank 99
+alice 13
+grace 76

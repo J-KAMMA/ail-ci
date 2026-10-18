@@ -1,0 +1,6 @@
+{
+ "id": "t433",
+ "category": "errors_classes",
+ "description": "Define a Vector2D class with operator overloading (+, -, * scalar, abs, ==, iteration) and process the points: print the sum, the vector with the largest norm, and the dot products of consecutive points.",
+ "input_format": "points"
+}

@@ -1,0 +1,17 @@
+16
+carol 80
+niaj 7
+grace 96
+alice 97
+erin 52
+alice 70
+judy 49
+grace 74
+erin 65
+judy 66
+mallory 11
+mallory 23
+heidi 37
+dave 99
+grace 43
+bob 27

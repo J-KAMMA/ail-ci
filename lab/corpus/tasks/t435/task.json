@@ -1,0 +1,6 @@
+{
+ "id": "t435",
+ "category": "errors_classes",
+ "description": "Define a class hierarchy Shape -> Rect, Circle, Triangle using abstract methods; build shapes from the triangle side lines (as triangles) and print the area and perimeter with 3 decimals via polymorphism.",
+ "input_format": "tri_sides"
+}

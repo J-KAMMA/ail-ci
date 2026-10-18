@@ -1,0 +1,6 @@
+{
+ "id": "t142",
+ "category": "collections",
+ "description": "Compute the set operations of the two lists: union, intersection, symmetric difference, and elements only in the first, each sorted on its own line.",
+ "input_format": "two_lists"
+}

@@ -122,6 +122,14 @@ class CheckTests(unittest.TestCase):
         self.assertIn('Total: 1 tests', output)
         self.assertIn(case.id(), output)
 
+    def test_integrity_in_source_tree_ignores_historical_pins(self):
+        here = Path(__file__).resolve().parent
+        result = subprocess.run([os.sys.executable, '-B', str(here / 'ail_chatgpt.py'), 'integrity'],
+                                capture_output=True, text=True, timeout=60)
+        report = json.loads(result.stdout)
+        self.assertEqual((result.returncode, report['status'], report['mismatches']), (0, 'verified', []))
+        self.assertGreater(report['checked'], 0)
+
 
 if __name__ == '__main__':
     unittest.main()

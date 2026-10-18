@@ -1,7 +1,7 @@
 """Every example in AIL_REFERENCE.md (the core) and AIL_REFERENCE_MORE.md compiles and behaves
 as the documents say.
 
-- A ```ail block containing `fn main` is compiled with `ail_chatgpt.py compile` and run in a
+- A ```ail block containing `fn main`, or a ```python block containing `def main`, is compiled with `ail_chatgpt.py compile` and run in a
   fresh directory. It must exit 0 unless its first lines declare `# exit: N`; `# args: a b`
   passes command-line arguments. A ```text block directly after it is the exact stdout.
 - A ```ail-refused block holds one or more programs separated by blank lines; each must FAIL to
@@ -69,6 +69,10 @@ def more_index(text=None):
     return INDEX_PREFIX + ', '.join(parts) + '.'
 
 
+def runnable(lang, body):
+    return (lang == 'ail' and 'fn main' in body) or (lang == 'python' and 'def main' in body)
+
+
 def header(body, key):
     for row in body.splitlines()[:3]:
         if row.startswith('# %s:' % key):
@@ -89,7 +93,7 @@ class ReferenceExamples(unittest.TestCase):
     def test_core_size_and_pointer(self):
         core = CORE.read_text(encoding='utf-8')
         self.assertLessEqual(len(core), CORE_MAX_CHARS, 'move detail to %s' % MORE.name)
-        self.assertTrue(any(lang == 'ail' and 'fn main' in body for lang, body, _, _ in doc_blocks(CORE)))
+        self.assertTrue(any(runnable(lang, body) for lang, body, _, _ in doc_blocks(CORE)))
         last = core.rstrip('\n').rsplit('\n', 1)[1]
         self.assertEqual(last, more_index(), 'stale MORE index: run python3 tools/ref_index.py')
 
@@ -99,9 +103,9 @@ class ReferenceExamples(unittest.TestCase):
         self.assertTrue(all(',' not in n for n in names), names)
 
     def test_runnable_examples(self):
-        runnable = [b for b in blocks() if b[0] == 'ail' and 'fn main' in b[1]]
-        self.assertGreaterEqual(len(runnable), 4)
-        for lang, body, line, expected in runnable:
+        examples = [b for b in blocks() if runnable(b[0], b[1])]
+        self.assertGreaterEqual(len(examples), 4)
+        for lang, body, line, expected in examples:
             with self.subTest(line=line), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 proc, exe = self.compile(body, root, 'example')

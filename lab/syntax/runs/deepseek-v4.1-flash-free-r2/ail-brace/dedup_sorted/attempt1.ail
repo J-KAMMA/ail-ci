@@ -1,0 +1,16 @@
+```
+fn main() -> int {
+    let seen: dict[int, bool] = {};
+    for line in sys.stdin {
+        let f = line.split();
+        for tok in f {
+            seen[int(tok)] = true;
+        }
+    }
+    let keys = sorted(seen);
+    for k in keys {
+        print(k);
+    }
+    return 0;
+}
+```

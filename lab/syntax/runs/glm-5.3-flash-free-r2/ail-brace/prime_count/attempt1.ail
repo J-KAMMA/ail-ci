@@ -1,0 +1,43 @@
+```
+fn main() -> int {
+    let is_p: list[bool] = [];
+    for i in range(100001) {
+        is_p.append(true);
+    }
+    is_p[0] = false;
+    is_p[1] = false;
+    for i in range(320) {
+        if i >= 2 and is_p[i] {
+            for k in range(100001) {
+                let j = i * i + k * i;
+                if j <= 100000 {
+                    is_p[j] = false;
+                }
+            }
+        }
+    }
+    let counts: list[int] = [];
+    let cnt = 0;
+    for i in range(100001) {
+        if is_p[i] {
+            cnt += 1;
+        }
+        counts.append(cnt);
+    }
+    for line in sys.stdin {
+        let s = line.strip();
+        if len(s) > 0 {
+            try {
+                let n = int(s);
+                if n >= 0 and n <= 100000 {
+                    print(counts[n]);
+                }
+            }
+            except ValueError as err {
+                let bad = err.message;
+            }
+        }
+    }
+    return 0;
+}
+```

@@ -1,0 +1,6 @@
+{
+ "id": "t406",
+ "category": "simulation",
+ "description": "Simulate a parking lot with the integers as car IDs; the same ID arriving a second time means the car leaves; print the lot occupancy (sorted IDs) after each event.",
+ "input_format": "nums_nocount"
+}

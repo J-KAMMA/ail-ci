@@ -364,6 +364,8 @@ class Stmts:
     def unpack(self, tgt, v, vt, st):
         """`a, b = v` for a tuple-typed v."""
         vt = deep(vt)
+        if isinstance(vt, tuple) and vt[0] == 'opt' and is_tuple(deep(vt[1])):
+            vt = deep(vt[1])           # a tuple | None that the program has tested: CPython raises TypeError on None
         if not is_tuple(vt):
             if vt is None:
                 self.bind_pattern(tgt, None)

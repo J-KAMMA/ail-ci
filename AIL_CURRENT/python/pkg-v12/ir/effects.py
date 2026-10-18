@@ -137,8 +137,38 @@ def instr_effects(ins, fn, program, places=None, defs=None, summaries=None):
         return Effects(reads=[loc], writes=[loc, 'Spine(%s)' % root], raises=[INDEX] if op == 'list.pop' else [])
     if op in ('field.list', 'list.ref'):
         return NONE
+    if op == 'list.sortperm':
+        perm = _root(ins.operands[0], fn, defs)
+        eff = Effects(reads=['Elem(%s)' % perm], writes=['Elem(%s)' % perm, 'Spine(%s)' % perm, 'Rebind(%s)' % perm],
+                      raises=[VALUE, rtc.DIE])
+        for c in ins.operands[1:]:
+            eff = eff | Effects(reads=['Elem(%s)' % _root(c, fn, defs)])
+        return eff
+    if op == 'list.permute':
+        loc = 'Elem(%s)' % _root(ins.operands[0], fn, defs)
+        return Effects(reads=[loc, 'Elem(%s)' % _root(ins.operands[1], fn, defs)], writes=[loc], raises=[rtc.DIE])
+    if op in ('rec.push', 'rec.up', 'rec.pop'):
+        root = _root(ins.operands[0], fn, defs)
+        loc = 'Elem(%s)' % root
+        if op == 'rec.up':
+            return Effects(reads=[loc], writes=[loc])
+        return Effects(reads=[loc], writes=[loc, 'Spine(%s)' % root],
+                       raises=[INDEX] if op == 'rec.pop' else [rtc.DIE])
+    if op in ('dict.has', 'dict.need', 'dict.get', 'dict.put', 'dict.len', 'dict.reset'):
+        names = places if places is not None else place_names(fn)
+        loc = 'Local(%s,%s)' % (fn.name, names.get(ins.operands[0], '?'))
+        if op in ('dict.put', 'dict.reset'):
+            return Effects(reads=[loc], writes=[loc], raises=[rtc.DIE])
+        return Effects(reads=[loc], raises=[rtc.DIE] if op == 'dict.need' else [])
+    if op == 'list.has':
+        return Effects(reads=['Elem(%s)' % _root(ins.operands[0], fn, defs)])
+    if op == 'list.sort':
+        loc = 'Elem(%s)' % _root(ins.operands[0], fn, defs)
+        return Effects(reads=[loc], writes=[loc], raises=[VALUE] if ins.operands[0].type.args[0].args[0] == I.F64 else [])
+    if op == 'list.join':
+        return Effects(reads=['Elem(%s)' % _root(ins.operands[1], fn, defs)], allocs=[rtc.ARENA], raises=[rtc.DIE])
     if op in ('list.reset', 'list.repeat', 'list.lit', 'list.reserve', 'list.move', 'list.call',
-              'list.copy', 'list.share'):
+              'list.copy', 'list.share', 'list.rt'):
         # these replace or grow the content of the list(s) they name (the destination first)
         refs = ins.operands[:2] if op in ('list.move', 'list.copy', 'list.share') else ins.operands[:1]
         eff = NONE
@@ -149,6 +179,8 @@ def instr_effects(ins, fn, program, places=None, defs=None, summaries=None):
                 # the destination's list is replaced (rebound), not only resized: a borrow of the
                 # old list (S3b, ownership.py) must not outlive it
                 eff = eff | Effects(writes=['Rebind(%s)' % root])
+        if op == 'list.rt':
+            eff = eff | rtc.LIST_ENTRIES[ins.attrs['callee']]['effects']
         if op == 'list.call':
             sym = ins.attrs.get('callee')
             callee = program.functions.get(sym) if program is not None else None

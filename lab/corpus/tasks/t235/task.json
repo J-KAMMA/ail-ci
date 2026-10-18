@@ -1,0 +1,6 @@
+{
+ "id": "t235",
+ "category": "grids",
+ "description": "Print the perimeter of all '#' cells (edges adjacent to '.' or outside) and the number of '#' cells.",
+ "input_format": "grid_life"
+}

@@ -1,0 +1,41 @@
+```ail
+fn clean(line: str) -> str {
+    let out = "";
+    let n = len(line);
+    let i = 0;
+    while i < n {
+        let c = line[i].lower();
+        if c.isalnum() {
+            out = out + c;
+        }
+        i += 1;
+    }
+    return out;
+}
+
+fn is_pal(s: str) -> bool {
+    let a = 0;
+    let b = len(s) - 1;
+    let ok = true;
+    while a < b and ok {
+        if s[a] != s[b] {
+            ok = false;
+        }
+        a += 1;
+        b -= 1;
+    }
+    return ok;
+}
+
+fn main() -> int {
+    for line in sys.stdin {
+        let s = clean(line.strip());
+        if is_pal(s) {
+            print("yes");
+        } else {
+            print("no");
+        }
+    }
+    return 0;
+}
+```

@@ -431,6 +431,18 @@ class Calls:
     def call_module(self, node, mod, fn, want):
         if mod == 'heapq' and fn in HEAP_FUNCS:
             return self.heap_call(node, fn)
+        if mod == 'heapq' and fn in ('nlargest', 'nsmallest') and len(node.args) == 2:
+            # `heapq.nlargest(k, d.items(), key=lambda kv: kv[1])` -- the element is a tuple
+            # class instance here, so the key lambda must be lowered over it like sorted()'s
+            k, _ = self.exv(node.args[0])
+            src, st, _ = self.iter_source(node.args[1])
+            src, st = self.realize(src, st)
+            st = deep(st)
+            et = elem_of(st)
+            if is_tuple(st):
+                self.refuse(node, 'heapq.%s() of a tuple' % fn)
+            kws = self.key_kw(node, node.keywords, et)
+            return self.done(node, [k, src], kws, ('list', et))
         if mod == 'functools' and fn == 'reduce':
             return self.b_reduce(node, want, None)
         if mod == 'math':

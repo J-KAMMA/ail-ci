@@ -1,0 +1,8 @@
+7
+heidi C 25 76
+carol C 18 64
+bob A 15 51
+bob B 20 97
+bob B 24 50
+frank A 22 68
+niaj B 25 92

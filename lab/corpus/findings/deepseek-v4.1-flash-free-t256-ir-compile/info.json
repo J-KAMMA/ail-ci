@@ -1,0 +1,9 @@
+{
+ "model": "deepseek-v4.1-flash-free",
+ "task": "t256",
+ "mode": "ir",
+ "cpython_failed_all": false,
+ "input": -1,
+ "cls": "crash",
+ "reason": "compiler rc=4: 3787:79: error: incompatible type for argument 2 of \u2018ail_list_push\u2019"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t365",
+ "category": "sorting",
+ "description": "Use sorted() with a key function that returns a tuple, and operator.itemgetter, to sort by age then name; print the first 5.",
+ "input_format": "student_records"
+}

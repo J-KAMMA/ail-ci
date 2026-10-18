@@ -1,0 +1,47 @@
+Traceback (most recent call last):
+  File "/home/user/scratch/corpus_ail/AIL_CURRENT/python/pkg-v12/pyc.py", line 863, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/user/scratch/corpus_ail/AIL_CURRENT/python/pkg-v12/pyc.py", line 849, in main
+    p = build(src, a.out, strict=a.strict, force_general=a.general_only)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/scratch/corpus_ail/AIL_CURRENT/python/pkg-v12/pyc.py", line 585, in build
+    return _build_unshadowed(source, out, strict, report, force_general)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/scratch/corpus_ail/AIL_CURRENT/python/pkg-v12/pyc.py", line 603, in _build_unshadowed
+    body = to_c(source, strict=strict, info=info)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/scratch/corpus_ail/AIL_CURRENT/python/pkg-v12/pyc.py", line 441, in to_c
+    return func_to_c(rewritten if rewritten is not None else source,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/scratch/corpus_ail/AIL_CURRENT/python/pkg-v12/pyfunc.py", line 34155, in wrapper
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/user/scratch/corpus_ail/AIL_CURRENT/python/pkg-v12/pyfunc.py", line 30920, in to_c
+    result = _to_c_unshadowed(source, name, strict, info, entry, sig, library, external)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/scratch/corpus_ail/AIL_CURRENT/python/pkg-v12/pyfunc.py", line 30953, in _to_c_unshadowed
+    return _to_c_sorted(source, name, strict, info, entry, sig, library, external)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/scratch/corpus_ail/AIL_CURRENT/python/pkg-v12/pyfunc.py", line 31048, in _to_c_sorted
+    return _to_c_once(source, name, strict, info, entry, sig, library, external)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/scratch/corpus_ail/AIL_CURRENT/python/pkg-v12/pyfunc.py", line 34244, in wrapper
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/user/scratch/corpus_ail/AIL_CURRENT/python/pkg-v12/pyfunc.py", line 31303, in _to_c_once
+    sigs, arity_seeds, clones = _signatures(fns, entry_sig=sig, classes=classes, external=external_exports)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/scratch/corpus_ail/AIL_CURRENT/python/pkg-v12/pyfunc.py", line 34240, in wrapper
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/user/scratch/corpus_ail/AIL_CURRENT/python/pkg-v12/pyfunc.py", line 27832, in _signatures
+    r_changed = _settle_return_kinds_pass(fns, sigs, grid_fns, classes, arity_seeds,
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/scratch/corpus_ail/AIL_CURRENT/python/pkg-v12/pyfunc.py", line 27572, in _settle_return_kinds_pass
+    kinds = {_return_kind(v, ctx) for v in returns}
+             ^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/scratch/corpus_ail/AIL_CURRENT/python/pkg-v12/pyfunc.py", line 25989, in _return_kind
+    raise Unsupported('a tuple element must be int or float, not %s' % et)
+                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~
+TypeError: not all arguments converted during string formatting

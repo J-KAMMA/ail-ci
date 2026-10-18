@@ -1,0 +1,6 @@
+{
+ "id": "t466",
+ "category": "errors_classes",
+ "description": "Use nested functions and closures with nonlocal to build counters; call them for each token and print the counts; also use a lambda in a loop with default-argument binding to demonstrate late binding.",
+ "input_format": "words_line"
+}

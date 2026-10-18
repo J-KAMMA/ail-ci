@@ -1,0 +1,6 @@
+{
+ "id": "t158",
+ "category": "collections",
+ "description": "Parse the rows 'a,b,word' into tuples (int, int, str); print them sorted by (b descending, a ascending, word), and the unique tuples count.",
+ "input_format": "tuples_lines"
+}

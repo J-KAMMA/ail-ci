@@ -1,0 +1,31 @@
+```
+fn main() -> int {
+    for line in sys.stdin {
+        let t = "";
+        let i = 0;
+        while i < len(line) {
+            let c = line[i];
+            if c.isalnum() {
+                t += c.lower();
+            }
+            i += 1;
+        }
+        let lo = 0;
+        let hi = len(t) - 1;
+        let ok = true;
+        while lo < hi and ok {
+            if t[lo] != t[hi] {
+                ok = false;
+            }
+            lo += 1;
+            hi -= 1;
+        }
+        if ok {
+            print("yes");
+        } else {
+            print("no");
+        }
+    }
+    return 0;
+}
+```

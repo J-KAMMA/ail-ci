@@ -1,0 +1,6 @@
+{
+ "id": "t167",
+ "category": "parsing",
+ "description": "Sort the rows by (dept, -salary, name) and print them back as CSV including the header.",
+ "input_format": "csv_table"
+}

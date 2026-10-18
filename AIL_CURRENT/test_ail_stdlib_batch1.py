@@ -337,7 +337,10 @@ def main() -> int:
     print(operator.getitem(xs, 1))
     t1 = time.perf_counter()
     n1 = time.perf_counter_ns()
-    print(t1 >= t0, n1 >= n0, t1 - t0 < 5.0, time.monotonic() >= t1)
+    m0 = time.monotonic()
+    m1 = time.monotonic()
+    # (monotonic against perf_counter is not comparable: on Windows CPython reads two different clocks)
+    print(t1 >= t0, n1 >= n0, t1 - t0 < 5.0, m1 >= m0)
     return 0
 
 main()
@@ -500,8 +503,10 @@ class Batch1Tests(unittest.TestCase):
         # an iterable that is not known to be a sequence is not indexed (a dict's keys are not 0..n-1)
         self.refused("def main():\n    d = {1: 2, 3: 4}\n    e = {5: 6, 7: 8}\n"
                      "    for a, b in zip(d, e):\n        print(a, b)\n\n\nmain()\n", "tuple target")
-        self.refused("def main():\n    d = {1: 2, 3: 4}\n    k = max(d, key=d.get)\n    print(k)\n\n\nmain()\n",
-                     "keyword arguments")
+        # (max(d, key=...) over a dict held in a variable is built since library batch 4; another dict's
+        # .get is not a key function it knows)
+        self.refused("def main():\n    d = {1: 2, 3: 4}\n    e = {5: 6}\n    k = max(d, key=e.get)\n    print(k)\n\n\nmain()\n",
+                     "gives None for a missing key")
 
     def test_sys_maxsize_and_stderr(self):
         self.same_as_cpython(SYS_BITS, "sys_bits", stderr=True)
@@ -513,10 +518,11 @@ class Batch1Tests(unittest.TestCase):
         self.same_as_cpython(WRITE_OPEN, "write_open", args=("@out.txt",))
 
     def test_unbuilt_clock_and_file_shapes_are_named(self):
-        self.refused("import time\n\n\ndef main():\n    print(time.time() > 0.0)\n\n\nmain()\n",
-                     "time.time() with these arguments is not built")
-        self.refused("def main():\n    with open('x', 'w') as f:\n        print('a', file=f)\n\n\nmain()\n",
-                     "context managers")
+        # (time.time() and sleep are built since stage G9: test_ail_clock.py)
+        self.refused("import time\n\n\ndef main():\n    print(time.asctime())\n\n\nmain()\n",
+                     "time.asctime() with these arguments is not built")
+        self.refused("def main():\n    m = 'w'\n    with open('x', m) as f:\n        f.write('a')\n    print(1)\n\n\nmain()\n",
+                     "mode that is not a string literal")
 
 
 if __name__ == "__main__":

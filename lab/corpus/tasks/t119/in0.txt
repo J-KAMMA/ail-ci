@@ -1,0 +1,9 @@
+8
+alice 48
+carol 14
+carol 7
+alice 55
+ivan 96
+dave 22
+bob 65
+mallory 45

@@ -1,0 +1,6 @@
+{
+ "id": "t064",
+ "category": "strings",
+ "description": "Count the words (split on whitespace) and print the 5 most frequent words with counts, ties broken alphabetically.",
+ "input_format": "text_lines"
+}

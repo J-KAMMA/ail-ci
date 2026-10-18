@@ -1,0 +1,6 @@
+{
+ "id": "t444",
+ "category": "errors_classes",
+ "description": "Use itertools.takewhile and dropwhile with the predicate x < 50 on the numbers; print both lists; also use itertools.pairwise to print consecutive differences.",
+ "input_format": "pos_nums"
+}

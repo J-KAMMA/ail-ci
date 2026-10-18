@@ -1,0 +1,15 @@
+14
+frank 94
+mallory 65
+ivan 54
+judy 46
+ivan 77
+judy 52
+judy 39
+frank 82
+erin 26
+carol 43
+dave 81
+dave 17
+alice 7
+judy 49

@@ -1,0 +1,6 @@
+{
+ "id": "t134",
+ "category": "collections",
+ "description": "Treat the commands as a priority queue (heapq): push inserts, pop removes the smallest, peek shows the smallest; print results of pop/peek/size.",
+ "input_format": "commands"
+}

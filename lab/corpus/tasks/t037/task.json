@@ -1,0 +1,6 @@
+{
+ "id": "t037",
+ "category": "numbers",
+ "description": "Normalise the numbers to the range [0,1] (min-max); print each with 4 decimals; if all equal print zeros.",
+ "input_format": "floats"
+}
