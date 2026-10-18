@@ -28,6 +28,8 @@ import stdlib3
 TEXT_MODULES = ('csv', 'datetime')
 # modules that are named and refused, with what to write instead (module -> text; the text starts with the module)
 UNBUILT = {
+    'zoneinfo': 'zoneinfo: a named time zone needs the tz database (and its rules), which is not built, so use a fixed '
+                'offset: datetime.timezone(datetime.timedelta(hours=9), "JST"), or datetime.timezone.utc',
     'decimal': 'decimal: Decimal needs decimal arithmetic with a context precision and rounding modes, which is not '
                'built, so keep money as integers scaled by 100 (cents) and print them with divmod, or use a float with '
                'round() / f"{x:.2f}"',
@@ -133,7 +135,7 @@ def leftovers(tree, imports):
 def rewrite_text(source, notes=None):
     """The program text with the batch-4 modules lowered; the source as written (and `notes` filled) when a
     use is not built."""
-    if not any(name in source for name in TEXT_MODULES + tuple(UNBUILT)):
+    if not any(name in source for name in TEXT_MODULES + tuple(UNBUILT) + ('time',)):
         return source
     try:
         tree = ast.parse(source)
@@ -150,10 +152,16 @@ def rewrite_text(source, notes=None):
                     notes.append((node.lineno, UNBUILT[name]))
                 return source
     imports = Imports(tree, TEXT_MODULES)
-    if not imports:
+    import timelib
+    time_on = "time" in source and timelib.uses_any(tree, bool(imports))
+    if not imports and not time_on:
         return source
     helpers = []
+    time_used = set()
     try:
+        if time_on:
+            import dtlib
+            timelib.run(tree, time_used, dtlib.rt_name)
         for alias in list(imports.aliases) + list(imports.names):
             if stdlib3.binds(tree, alias):
                 refuse(tree.body[0] if tree.body else tree, '%s is also bound by the program itself; rename it '
@@ -164,7 +172,10 @@ def rewrite_text(source, notes=None):
             csvlib.Csv(imports, tree, helpers).run()
         if 'datetime' in modules:
             import dtlib
-            dtlib.rewrite(imports, tree, helpers)
+            dtlib.rewrite(imports, tree, helpers, time_used)
+        elif time_used:
+            import dtlib
+            dtlib.attach_only(tree, helpers, time_used)
         leftovers(tree, imports)
         # the helper functions go in after the imports, before the program's own definitions
         added = []

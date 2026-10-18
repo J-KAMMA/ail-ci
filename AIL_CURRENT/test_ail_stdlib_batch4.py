@@ -773,13 +773,14 @@ main()
 
     def test_datetime_refusals_are_named(self):
         head = "from datetime import date, datetime, timedelta\n\n\ndef main():\n"
-        self.refused(head + "    print(datetime.now())\n\n\nmain()\n", "datetime.datetime.now reads the clock")
-        self.refused(head + "    print(date.today())\n\n\nmain()\n", "reads the clock")
+        # (now(), today() and timestamp() are built since stage G9: test_ail_clock.py)
+        self.refused(head + "    print(datetime.fromordinal(5))\n\n\nmain()\n", "datetime.fromordinal is not built")
         self.refused(head + "    print(timedelta(hours=1.5))\n\n\nmain()\n", "float")
-        self.refused(head + "    d = datetime(2020, 1, 1)\n    print(d.timestamp())\n\n\nmain()\n", ".timestamp()")
-        self.refused("from datetime import timezone, datetime\n\n\ndef main():\n    print(datetime(2020, 1, 1, tzinfo=timezone.utc))\n\n\nmain()\n",
-                     "timezone")
-        self.refused("import datetime\n\n\ndef main():\n    print(datetime.timezone.utc)\n\n\nmain()\n", "timezone-aware")
+        self.refused(head + "    d = datetime(2020, 1, 1)\n    print(d.isocalendar())\n\n\nmain()\n", ".isocalendar()")
+        # (fixed-offset time zones are built since stage G9: test_ail_clock.py)
+        self.refused("import datetime\n\n\ndef main():\n    print(datetime.timezone.min)\n\n\nmain()\n", "microsecond offset")
+        self.refused("from datetime import date, time, datetime, timezone\n\n\ndef main():\n"
+                     "    print(datetime.combine(date(2020, 1, 1), time(1), tzinfo=timezone.utc))\n\n\nmain()\n", "datetime.combine(..., tzinfo)")
         self.refused(head + "    print(isinstance(1, date))\n\n\nmain()\n", "used as a value is not built")
 
     # -- statistics ---------------------------------------------------------------------------------------------------

@@ -992,6 +992,7 @@ class Compiler:
         self.source_lines = source.splitlines()
         self.uses_fileio = False
         self.uses_proc = False
+        self.uses_clock = False
         filelib.rewrite_tree(tree, Unsupported, general=True)      # G7: open / with / os -> primitives + prelude
         mix_tree = copy.deepcopy(tree)          # the mixed-mode typed clones see the source as written
         _hoist_defaults(tree)
@@ -1078,6 +1079,9 @@ class Compiler:
             parts.append(filert.general_text())
             if self.uses_proc:
                 parts.append(filert.general_proc_text())
+        if self.uses_clock:
+            import clockrt
+            parts.append(clockrt.general_text())
         if getattr(self, 'needs_boxcase', False):
             import cruntime
             parts.append(cruntime.BOXCASE)
@@ -3345,7 +3349,31 @@ class Compiler:
         ctx.check()
         return t
 
+    # G9: the wall clock and the OS time zone (clockrt.py): name -> (C call, argument count)
+    _CLOCK_PRIMS = {'_ail_time': ('ailc_gtime(cx, &{t})', 0), '_ail_time_ns': ('ailc_gtime_ns(cx, &{t})', 0),
+                    '_ail_sleep_ns': ('ailc_gsleep_ns(cx, &{t}, {a0})', 1),
+                    '_ail_local_offset': ('ailc_glocal(cx, &{t}, {a0}, 0)', 1),
+                    '_ail_local_isdst': ('ailc_glocal(cx, &{t}, {a0}, 1)', 1),
+                    '_ail_tz_name': ('ailc_glocal(cx, &{t}, {a0}, 2)', 1),
+                    '_ail_mktime': ('ailc_gmktime(cx, &{t}, {arr})', 7)}
+
+    def _call_clock(self, name, args, kwargs, ctx):
+        cfn, count = self._CLOCK_PRIMS[name]
+        if kwargs or len(args) != count:
+            raise Unsupported('%s takes %d positional arguments' % (name, count))
+        self.uses_clock = True
+        argcs = [self.expr(a, ctx) for a in args]
+        t = ctx.tmp()
+        fields = {'t': t, 'arr': '(ail_obj[]){%s}' % ', '.join(argcs) if argcs else 'NULL'}
+        for i, each in enumerate(argcs):
+            fields['a%d' % i] = each
+        ctx.emit('st = %s;' % cfn.format(**fields))
+        ctx.check()
+        return t
+
     def _call_name(self, name, args, kwargs, ctx):
+        if name in self._CLOCK_PRIMS and name not in self.functions and name not in self.classes:
+            return self._call_clock(name, args, kwargs, ctx)
         if name in self.classes:
             return self._call_class(name, args, kwargs, ctx)
         if name in ctx.nested_funcs:

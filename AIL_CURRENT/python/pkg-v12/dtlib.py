@@ -18,9 +18,15 @@ program (only the ones used, dtrt.py is their source, run as plain Python by the
   `x += td`; sorted / min / max / sort of a list of them (by key).
   An operator whose operand types the pass cannot tell is left as written (the compiler then refuses the
   class arithmetic by name); annotate the variable to build it.
-* refused by name: now() / today() / utcnow() / fromtimestamp / timestamp() (the clock and the time zone
-  are not reproducible), timezone / tzinfo / aware values, isocalendar(), a timedelta with float
-  arguments, hashing values in sets / dicts.
+* the wall clock (stage G9): now() / today() / utcnow() / fromtimestamp / utcfromtimestamp / date.today() /
+  timestamp(), read from the clock and the OS time zone (dtrt.py `# -- clock`; AIL_CLOCK pins the clock).
+* fixed-offset time zones (stage G9, dtrt.py `# -- aware`): a program that names `timezone`, `tzinfo=`,
+  `astimezone`, `utcoffset`, `tzname` or `.tzinfo` is "aware". Then AilDT keeps three more fields (aware, off,
+  tzn), the naive functions are replaced by their `_aw` variants (AWARE_ALT), and a comparison of datetimes is a
+  call that refuses naive against aware (CPython's TypeError, as a RuntimeError with its text).
+* refused by name: isocalendar(), a timedelta with float arguments, hashing values in sets / dicts, and, for
+  time zones: timezone.min / max, tzinfo subclasses, dst(), an aware time, fold, `.tzinfo` used as a value (test
+  it with `is None`), zoneinfo (stdlib4.UNBUILT).
 
 Limits (documented, loud): a timedelta beyond about 53 million days is an OverflowError naming it; the
 exceptions CPython raises that this language does not have (TypeError, AttributeError) are RuntimeError
@@ -45,16 +51,30 @@ CLASS_METHODS = {
 }
 CLASS_CONSTANTS = {'date.min': 'date_min', 'date.max': 'date_max', 'datetime.min': 'datetime_min',
                    'datetime.max': 'datetime_max'}
-CLOCK = ('date.today', 'datetime.now', 'datetime.today', 'datetime.utcnow', 'datetime.fromtimestamp',
-         'datetime.utcfromtimestamp', 'date.fromtimestamp', 'time.fromisoformat', 'datetime.fromordinal')
+# stage G9: the clock is an input (AIL_CLOCK pins it); name -> (dtrt function, positional parameters)
+CLOCK_BUILT = {'date.today': ('date_today', ()), 'datetime.now': ('now_local', ('tz',)),
+               'datetime.today': ('dt_today', ()), 'datetime.utcnow': ('now_utc', ()),
+               'datetime.fromtimestamp': ('dt_from_ts', ('timestamp', 'tz')),
+               'datetime.utcfromtimestamp': ('dt_from_ts', ('timestamp',)),
+               'date.fromtimestamp': ('date_from_ts', ('timestamp',))}
+CLOCK = ('time.fromisoformat', 'datetime.fromordinal')
 # methods that are the same function whatever the receiver (only when the program defines none of that name)
 METHODS = {'weekday': 'weekday', 'isoweekday': 'isoweekday', 'toordinal': 'toordinal', 'total_seconds': 'total_seconds',
            'strftime': 'fmt', 'date': 'date_of', 'time': 'time_of'}
-UNBUILT_METHODS = {'timestamp': 'is the clock / time zone dependent (a naive value is read as local time)',
-                   'isocalendar': 'returns a named tuple: use isoweekday() and strftime("%G %V")',
-                   'astimezone': 'makes aware values', 'utcoffset': 'is for aware values', 'tzname': 'is for aware values',
-                   'dst': 'is for aware values', 'timetuple': 'returns a struct_time', 'utctimetuple': 'is for aware values',
-                   'ctime': 'is locale dependent: use strftime("%c")', 'fromutc': 'is for aware values'}
+UNBUILT_METHODS = {'isocalendar': 'returns a named tuple: use isoweekday() and strftime("%G %V")',
+                   'dst': 'is for time zones with daylight saving, which are not built (fixed offsets are)',
+                   'timetuple': 'returns a struct_time', 'utctimetuple': 'returns a struct_time',
+                   'ctime': 'is locale dependent: use strftime("%c")', 'fromutc': 'is for custom time zones',
+                   'timetz': 'is not built'}
+# stage G9: time zones. A program that names one (timezone, tzinfo=, astimezone, ...) is "aware": these dtrt functions
+# stand in for the naive ones, and AilDT keeps three more fields (see dtrt.py)
+TZ_PATHS = ('timezone', 'tzinfo', 'UTC')
+TZ_METHODS = ('astimezone', 'utcoffset', 'tzname', 'tzinfo', 'dst')
+AWARE_ALT = {'add': 'add_aw', 'sub': 'sub_aw', 'iso': 'iso_aw', 'text': 'text_aw', 'rep': 'rep_aw', 'fmt': 'fmt_aw',
+             'replace': 'replace_aw', 'pick_max': 'pick_max_aw', 'pick_min': 'pick_min_aw', 'max_list': 'max_list_aw',
+             'min_list': 'min_list_aw', 'timestamp': 'timestamp_aw', 'from_iso_datetime': 'from_iso_datetime_aw'}
+COMPARE_FUNCTIONS = {ast.Lt: 'cmp_lt', ast.LtE: 'cmp_le', ast.Gt: 'cmp_gt', ast.GtE: 'cmp_ge', ast.Eq: 'cmp_eq',
+                     ast.NotEq: 'cmp_ne'}
 RUNTIME = None
 
 
@@ -160,16 +180,17 @@ class Scope:
 
 
 class Dt:
-    def __init__(self, imports, tree, out):
+    def __init__(self, imports, tree, out, used=None):
         self.imports = imports
         self.tree = tree
         self.out = out
-        self.used = set()            # runtime names used
+        self.used = set(used or ())  # runtime names used (timelib.py adds the ones the time module needs)
         self.fields = {}             # class name -> {attr: type}
         self.field_by_name = {}      # attr -> type when every class that has it agrees
         self.returns = {}            # function name -> return type
         self.functions = {}
         self.defined = set()         # names the program defines itself (functions, methods, classes, fields)
+        self.aware = False           # the program names a time zone
         self.cls = None
         self.count = 0
 
@@ -191,7 +212,24 @@ class Dt:
         return _name(rt_name(name))
 
     def call(self, name, *args):
+        if self.aware and name in AWARE_ALT:
+            name = AWARE_ALT[name]
         return _call(self.use(name), *args)
+
+    def detect_aware(self):
+        for node in ast.walk(self.tree):
+            if isinstance(node, (ast.Name, ast.Attribute)):
+                path = self.path(node)
+                if path is not None and (path in TZ_PATHS or path.startswith('timezone.')):
+                    return True
+            if isinstance(node, ast.Attribute) and node.attr in TZ_METHODS and node.attr not in self.defined:
+                return True
+            if isinstance(node, ast.keyword) and node.arg == 'tzinfo':
+                return True
+        return False
+
+    def is_tz_ref(self, node):
+        return isinstance(node, (ast.Name, ast.Attribute)) and self.path(node) in ('timezone', 'tzinfo')
 
     # -- annotations ---------------------------------------------------------------------------------------
     def ann_type(self, node):
@@ -205,6 +243,8 @@ class Dt:
         cls = self.class_ref(node)
         if cls is not None:
             return dt(cls)
+        if self.is_tz_ref(node):
+            return ('tz',)
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
             left, right = self.ann_type(node.left), self.ann_type(node.right)
             none_l = isinstance(node.left, ast.Constant) and node.left.value is None
@@ -244,6 +284,9 @@ class Dt:
         if self.class_ref(node) is not None:
             self.used.add('AilDT')
             return ast.copy_location(_name('_AilDT'), node)
+        if self.is_tz_ref(node):
+            self.used.add('AilTZ')
+            return ast.copy_location(_name('_AilTZ'), node)
         if isinstance(node, ast.Subscript):
             node.value = self.rename_annotation(node.value)
             if isinstance(node.slice, ast.Tuple):
@@ -260,7 +303,7 @@ class Dt:
         return node
 
     def mentions(self, node):
-        return any(self.class_ref(each) is not None for each in ast.walk(node)
+        return any(self.class_ref(each) is not None or self.is_tz_ref(each) for each in ast.walk(node)
                    if isinstance(each, (ast.Name, ast.Attribute)))
 
     # -- the program's own definitions -------------------------------------------------------------------------
@@ -304,6 +347,8 @@ class Dt:
     # -- expression types ----------------------------------------------------------------------------------------
     def expr_type(self, node, scope):
         if isinstance(node, ast.Name):
+            if self.path(node) == 'UTC':
+                return ('tz',)
             return scope.get(node.id)
         if isinstance(node, ast.Constant):
             return None
@@ -311,6 +356,8 @@ class Dt:
             return self.call_type(node, scope)
         if isinstance(node, ast.Attribute):
             path = self.path(node)
+            if path in ('timezone.utc', 'UTC'):
+                return ('tz',)
             if path in CLASS_CONSTANTS:
                 return dt(path.split('.')[0])
             if path in ('MINYEAR', 'MAXYEAR'):
@@ -397,6 +444,10 @@ class Dt:
             return dt(path)
         if path in CLASS_METHODS:
             return dt('date' if path in ('date.fromisoformat', 'date.fromordinal', 'date.fromisocalendar') else 'datetime')
+        if path in CLOCK_BUILT:
+            return dt('date' if path in ('date.today', 'date.fromtimestamp') else 'datetime')
+        if path == 'timezone':
+            return ('tz',)
         func = node.func
         if isinstance(func, ast.Name):
             if func.id in self.returns and func.id in self.functions:
@@ -418,6 +469,10 @@ class Dt:
                 return t if t is not None and t[0] == 'list' else None
         if isinstance(func, ast.Attribute):
             recv = self.expr_type(func.value, scope)
+            if func.attr == 'astimezone' and func.attr not in self.defined:
+                return dt('datetime')
+            if func.attr == 'utcoffset' and func.attr not in self.defined:
+                return dt('timedelta')
             if func.attr == 'date' and not node.args and func.attr not in self.defined:
                 return dt('date')
             if func.attr == 'time' and not node.args and func.attr not in self.defined:
@@ -525,6 +580,7 @@ class Dt:
 
     # -- the walk --------------------------------------------------------------------------------------------------------
     def run(self):
+        self.aware = self.detect_aware()
         self.reject()
         self.collect()
         # the types the annotations say, before their names are replaced
@@ -558,12 +614,14 @@ class Dt:
             if path is None:
                 continue
             if path in CLOCK:
-                refuse(node, 'datetime.%s reads the clock or the time zone, which a deterministic program cannot '
-                       'repeat; read the date from the input (date.fromisoformat(line))' % path)
-            if path in ('timezone', 'tzinfo', 'UTC', 'timezone.utc', 'timezone.min', 'timezone.max') \
-                    or path.startswith('timezone.'):
-                refuse(node, 'datetime.%s: timezone-aware values are not built (naive date / datetime / '
-                       'time / timedelta are)' % path)
+                refuse(node, 'datetime.%s is not built' % path)
+            if path in ('timezone.min', 'timezone.max'):
+                refuse(node, 'datetime.%s has a microsecond offset, which is not built' % path)
+            if path.startswith('timezone.') and path not in ('timezone.utc', 'timezone.min', 'timezone.max'):
+                refuse(node, 'datetime.%s is not built' % path)
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.ClassDef) and any(self.is_tz_ref(b) for b in node.bases):
+                refuse(node, 'a tzinfo subclass is not built: datetime.timezone(timedelta(...)) is a fixed offset')
 
     # -- statements ------------------------------------------------------------------------------------------------------
     def stmt(self, node, scope):
@@ -734,12 +792,26 @@ class Dt:
 
     def x_Compare(self, node, scope):
         operands = [node.left, *node.comparators]
+        if self.aware and len(node.ops) == 1 and isinstance(node.ops[0], (ast.Is, ast.IsNot)) \
+                and isinstance(operands[0], ast.Attribute) and operands[0].attr == 'tzinfo' \
+                and isinstance(operands[1], ast.Constant) and operands[1].value is None:
+            naive = self.call('is_naive', self.expr(operands[0].value, scope))
+            return ast.copy_location(naive if isinstance(node.ops[0], ast.Is) else ast.UnaryOp(op=ast.Not(), operand=naive), node)
         types = [self.expr_type(o, scope) for o in operands]
+        if self.aware and len(node.ops) == 1 and isinstance(node.ops[0], (ast.Eq, ast.NotEq)) \
+                and all(t == ('tz',) for t in types):
+            same = self.call('tz_eq', *[self.expr(o, scope) for o in operands])
+            return ast.copy_location(same if isinstance(node.ops[0], ast.Eq) else ast.UnaryOp(op=ast.Not(), operand=same), node)
         new = [self.expr(o, scope) for o in operands]
         order = (ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Eq, ast.NotEq)
         if any(is_dt(t) for t in types) and all(isinstance(op, order) for op in node.ops) \
                 and not any(isinstance(o, ast.Constant) and o.value is None for o in operands):
-            new = [ast.Attribute(value=o, attr='k', ctx=ast.Load()) for o in new]
+            if self.aware and len(node.ops) == 1:
+                return ast.copy_location(self.call(COMPARE_FUNCTIONS[type(node.ops[0])], new[0], new[1]), node)
+            if self.aware:
+                new = [self.call('ukey', o) for o in new]
+            else:
+                new = [ast.Attribute(value=o, attr='k', ctx=ast.Load()) for o in new]
         node.left, node.comparators = new[0], new[1:]
         return node
 
@@ -766,6 +838,10 @@ class Dt:
                         part = ast.FormattedValue(value=self.call('text', inner), conversion=-1, format_spec=None)
                     values.append(part)
                     continue
+                if t == ('tz',) and part.format_spec is None:
+                    values.append(ast.FormattedValue(value=self.call('tz_rep' if part.conversion == 114 else 'tz_name', inner),
+                                                     conversion=-1, format_spec=None))
+                    continue
                 part.value = inner
                 if part.format_spec is not None:
                     part.format_spec = self.expr(part.format_spec, scope)
@@ -780,6 +856,8 @@ class Dt:
         for each in items:
             if is_dt(self.expr_type(each, scope)):
                 out.append(self.call('text', self.expr(each, scope)))
+            elif self.expr_type(each, scope) == ('tz',):
+                out.append(self.call('tz_name', self.expr(each, scope)))
             else:
                 out.append(self.expr(each, scope))
         if isinstance(node, ast.Tuple):
@@ -791,6 +869,11 @@ class Dt:
         path = self.path(node)
         if path in CLASS_CONSTANTS:
             return ast.copy_location(self.call(CLASS_CONSTANTS[path]), node)
+        if path in ('timezone.utc', 'UTC'):
+            return ast.copy_location(self.call('tz_utc'), node)
+        if node.attr == 'tzinfo' and 'tzinfo' not in self.defined and self.aware:
+            refuse(node, '.tzinfo used as a value is not built: test it with `d.tzinfo is None`, or read '
+                   'd.utcoffset() / d.tzname()')
         if path in CLASSES:
             refuse(node, 'datetime.%s used as a value is not built (call it: %s(...), or annotate with it)'
                    % (path, path))
@@ -799,6 +882,11 @@ class Dt:
 
     def x_Name(self, node, scope):
         path = self.path(node)
+        if path == 'UTC':
+            return ast.copy_location(self.call('tz_utc'), node)
+        if path in ('timezone', 'tzinfo'):
+            refuse(node, 'datetime.%s used as a value is not built (call timezone(timedelta(...)), or annotate '
+                   'with it)' % path)
         if path in CLASSES:
             refuse(node, 'datetime.%s used as a value is not built (call it: %s(...), or annotate with it)'
                    % (path, path))
@@ -841,9 +929,13 @@ class Dt:
             'time': ['hour', 'minute', 'second', 'microsecond', 'tzinfo'],
             'timedelta': ['days', 'seconds', 'microseconds', 'milliseconds', 'minutes', 'hours', 'weeks'],
         }[cls], cls)
-        if 'tzinfo' in got and not (isinstance(got['tzinfo'], ast.Constant) and got['tzinfo'].value is None):
-            refuse(node, '%s(..., tzinfo=...): timezone-aware values are not built' % cls)
-        got.pop('tzinfo', None)
+        tzinfo = got.pop('tzinfo', None)
+        if tzinfo is not None and isinstance(tzinfo, ast.Constant) and tzinfo.value is None:
+            tzinfo = None
+        if tzinfo is not None and cls != 'datetime':
+            refuse(node, '%s(..., tzinfo=...): an aware time is not built (an aware datetime is)' % cls)
+        if tzinfo is not None:
+            tzinfo = self.expr(tzinfo, scope)
         for key in list(got):
             got[key] = self.expr(got[key], scope)
         if cls == 'date':
@@ -855,9 +947,10 @@ class Dt:
             for name in ('year', 'month', 'day'):
                 if name not in got:
                     refuse(node, 'datetime() needs year, month and day')
-            return self.call('mk_datetime', *self.int_args(
+            made = self.call('mk_datetime', *self.int_args(
                 got, ['year', 'month', 'day', 'hour', 'minute', 'second', 'microsecond'],
                 {'hour': 0, 'minute': 0, 'second': 0, 'microsecond': 0}, cls, node))
+            return self.call('aw_attach', made, tzinfo) if tzinfo is not None else made
         if cls == 'time':
             return self.call('mk_time', *self.int_args(
                 got, ['hour', 'minute', 'second', 'microsecond'],
@@ -883,6 +976,37 @@ class Dt:
         got = self.value_arguments(node, ['date_string'] if 'iso' in path else ['ordinal'], path)
         return self.call(name, self.expr(next(iter(got.values())), scope))
 
+    def tz_constructor(self, node, scope):
+        got = self.value_arguments(node, ['offset', 'name'], 'timezone')
+        if 'offset' not in got:
+            refuse(node, 'timezone() needs the offset (a timedelta)')
+        named = 'name' in got
+        return self.call('tz_make', self.expr(got['offset'], scope),
+                         self.expr(got['name'], scope) if named else ast.Constant(value=''),
+                         ast.Constant(value=1 if named else 0))
+
+    def clock_call(self, node, path, scope):
+        """datetime.now() and friends: the wall clock and the OS time zone (naive values only)."""
+        name, params = CLOCK_BUILT[path]
+        got = self.value_arguments(node, list(params), path)
+        tz = got.pop('tz', None)
+        if tz is not None and isinstance(tz, ast.Constant) and tz.value is None:
+            tz = None
+        if tz is not None:
+            tz = self.expr(tz, scope)
+        if path.endswith('timestamp'):
+            if 'timestamp' not in got:
+                refuse(node, '%s needs the timestamp' % path)
+            value = self.expr(got['timestamp'], scope)
+            if tz is not None:
+                return self.call('fromts_tz', value, tz)
+            if path == 'date.fromtimestamp':
+                return self.call(name, value)
+            return self.call(name, value, ast.Constant(value=(path == 'datetime.utcfromtimestamp')))
+        if tz is not None:
+            return self.call('now_tz', tz)
+        return self.call(name)
+
     def x_Call(self, node, scope):
         func = node.func
         path = self.path(func)
@@ -890,10 +1014,16 @@ class Dt:
             if path is not None or isinstance(func, ast.Attribute) and (func.attr in METHODS or func.attr in
                                                                          ('isoformat', 'replace', 'strftime')):
                 refuse(node, 'datetime calls with * or ** arguments are not built')
+        if path == 'timezone':
+            return ast.copy_location(self.tz_constructor(node, scope), node)
+        if path == 'tzinfo':
+            refuse(node, 'datetime.tzinfo() is not built: datetime.timezone(timedelta(...)) is a fixed offset')
         if path in CLASSES:
             return ast.copy_location(self.constructor(node, path, scope), node)
         if path in CLASS_METHODS:
             return ast.copy_location(self.class_method(node, path, scope), node)
+        if path in CLOCK_BUILT:
+            return ast.copy_location(self.clock_call(node, path, scope), node)
         if path is not None and path not in CLASS_CONSTANTS:
             refuse(node, 'datetime.%s is not built' % path)
         # types are read from the call as written, then the arguments are rewritten
@@ -910,9 +1040,12 @@ class Dt:
 
     def key_lambda(self):
         """lambda _x: _x.k"""
+        body = ast.Attribute(value=_name('_dt_x'), attr='k', ctx=ast.Load())
+        if self.aware:
+            body = self.call('ukey', _name('_dt_x'))
         return ast.Lambda(args=ast.arguments(posonlyargs=[], args=[ast.arg(arg='_dt_x')], kwonlyargs=[],
                                              kw_defaults=[], defaults=[]),
-                          body=ast.Attribute(value=_name('_dt_x'), attr='k', ctx=ast.Load()))
+                          body=body)
 
     def typed_key(self, keyword, element):
         """The key= keyword with its lambda's parameter known to be `element`."""
@@ -937,10 +1070,12 @@ class Dt:
             new = []
             for a, t in zip(args, types):
                 value = self.expr(a, scope)
-                new.append(self.text_of(value, t) if is_dt(t) else value)
+                new.append(self.text_of(value, t) if is_dt(t) else (self.call('tz_name', value) if t == ('tz',) else value))
             node.args = new
             node.keywords = [ast.keyword(arg=k.arg, value=self.expr(k.value, scope)) for k in node.keywords]
             return node
+        if name in ('str', 'repr') and len(args) == 1 and types[0] == ('tz',) and not node.keywords:
+            return ast.copy_location(self.call('tz_name' if name == 'str' else 'tz_rep', self.expr(args[0], scope)), node)
         if name in ('str', 'repr') and len(args) == 1 and is_dt(types[0]) and not node.keywords:
             value = self.expr(args[0], scope)
             if name == 'str':
@@ -1003,11 +1138,22 @@ class Dt:
         recv = self.expr(func.value, scope)
         args, keywords = node.args, node.keywords
         user = attr in self.defined
-        if attr in UNBUILT_METHODS and not user and (is_dt(recv_t) or attr in ('timestamp', 'isocalendar', 'astimezone')):
+        if self.aware and not user and not keywords:
+            if attr == 'astimezone' and len(args) <= 1:
+                if args:
+                    return ast.copy_location(self.call('astimezone_to', recv, self.expr(args[0], scope)), node)
+                return ast.copy_location(self.call('astimezone_local', recv), node)
+            if attr == 'utcoffset' and len(args) <= 1:
+                return ast.copy_location(self.call('tz_utcoffset' if args else 'utcoffset_aw', recv), node)
+            if attr == 'tzname' and len(args) <= 1:
+                return ast.copy_location(self.call('tz_name' if args else 'tzname_aw', recv), node)
+        if attr in UNBUILT_METHODS and not user and (is_dt(recv_t) or attr in ('isocalendar', 'dst')):
             refuse(node, '.%s() %s' % (attr, UNBUILT_METHODS[attr]))
         if not user:
             if attr in ('weekday', 'isoweekday', 'toordinal', 'total_seconds') and not args and not keywords:
                 return ast.copy_location(self.call(METHODS[attr], recv), node)
+            if attr == 'timestamp' and not args and not keywords and (is_dt(recv_t) or recv_t is None):
+                return ast.copy_location(self.call('timestamp', recv), node)
             if attr in ('date', 'time') and not args and not keywords and (is_dt(recv_t) or recv_t is None):
                 if is_dt(recv_t) and recv_t[1] not in ('datetime', 'any'):
                     refuse(node, '.%s() is a datetime method' % attr)
@@ -1041,15 +1187,25 @@ class Dt:
                 names = ['year', 'month', 'day', 'hour', 'minute', 'second', 'microsecond']
                 if keywords and all(k.arg in names + ['tzinfo', 'fold'] for k in keywords) and not args or \
                         (is_dt(recv_t) and not any(isinstance(a, ast.Constant) and isinstance(a.value, str) for a in args)):
-                    if any(k.arg in ('tzinfo', 'fold') for k in keywords):
-                        refuse(node, 'replace(tzinfo= / fold=): timezone-aware values are not built')
+                    if any(k.arg == 'fold' for k in keywords):
+                        refuse(node, 'replace(fold=): fold is not built')
+                    tzkw = [k for k in keywords if k.arg == 'tzinfo']
+                    if tzkw and not self.aware:
+                        refuse(node, 'replace(tzinfo=): not built here')
                     slots = [ast.Constant(value=-1)] * 7
                     slots = list(slots)
                     for index, value in enumerate(args):
                         slots[index] = self.expr(value, scope)
                     for k in keywords:
-                        slots[names.index(k.arg)] = self.expr(k.value, scope)
-                    return ast.copy_location(self.call('replace', recv, *slots), node)
+                        if k.arg != 'tzinfo':
+                            slots[names.index(k.arg)] = self.expr(k.value, scope)
+                    made = self.call('replace', recv, *slots)
+                    if tzkw:
+                        value = tzkw[0].value
+                        if isinstance(value, ast.Constant) and value.value is None:
+                            return ast.copy_location(self.call('aw_strip', made), node)
+                        return ast.copy_location(self.call('aw_attach', made, self.expr(value, scope)), node)
+                    return ast.copy_location(made, node)
             if attr == 'sort' and recv_t is not None and recv_t[0] == 'list' and is_dt(recv_t[1]):
                 node.func = ast.Attribute(value=recv, attr='sort', ctx=ast.Load())
                 node.args = []
@@ -1077,6 +1233,26 @@ class Dt:
         return isinstance(node, ast.Call) and (self.path(node.func) in CLASSES or self.path(node.func) in CLASS_METHODS)
 
     # -- the helper source -----------------------------------------------------------------------------------------------
+    def fit_aware(self, node):
+        """AilDT with or without its three time zone fields (a program that names no zone gets exactly the class and
+        the C it had before stage G9); where zones are built, a call that gives the twelve naive fields gets the
+        zone defaults."""
+        if isinstance(node, ast.ClassDef) and node.name == "AilDT":
+            node.body = [n for n in node.body if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant))]
+            init = [n for n in node.body if isinstance(n, ast.FunctionDef) and n.name == "__init__"][0]
+            init.args.defaults = []
+            if not self.aware:
+                init.args.args = init.args.args[:-3]
+                init.body = [s for s in init.body if not (isinstance(s, ast.Assign) and isinstance(s.targets[0], ast.Attribute)
+                                                          and s.targets[0].attr in ("aware", "off", "tzn"))]
+            return node
+        if self.aware:
+            for each in ast.walk(node):
+                if isinstance(each, ast.Call) and isinstance(each.func, ast.Name) and each.func.id == "AilDT" \
+                        and len(each.args) == 12:
+                    each.args += [ast.Constant(value=0), ast.Constant(value=0), ast.Constant(value="")]
+        return node
+
     def attach(self):
         if not self.used:
             return
@@ -1108,10 +1284,15 @@ class Dt:
         nodes = []
         for name, node in top.items():
             if name in need:
-                copy_node = copy.deepcopy(node)
+                copy_node = self.fit_aware(copy.deepcopy(node))
                 nodes.append(Rename().visit(copy_node))
         self.out.append('\n\n\n'.join(ast.unparse(n) for n in nodes))
 
 
-def rewrite(imports, tree, out):
-    Dt(imports, tree, out).run()
+def rewrite(imports, tree, out, used=None):
+    Dt(imports, tree, out, used).run()
+
+
+def attach_only(tree, out, used):
+    """The runtime functions `used` names, for a program that imports time but not datetime."""
+    Dt(None, tree, out, used).attach()

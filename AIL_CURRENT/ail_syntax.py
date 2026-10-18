@@ -906,21 +906,25 @@ _STRING_CONSTANTS = {name: getattr(_string_module, name) for name in (
     'ascii_lowercase', 'ascii_uppercase', 'ascii_letters', 'digits', 'hexdigits', 'octdigits', 'punctuation',
     'whitespace', 'printable')}
 _TIME_CLOCKS = {'perf_counter': '_ail_perf_counter', 'monotonic': '_ail_perf_counter',
-                'perf_counter_ns': '_ail_perf_counter_ns', 'monotonic_ns': '_ail_perf_counter_ns'}
+                'perf_counter_ns': '_ail_perf_counter_ns', 'monotonic_ns': '_ail_perf_counter_ns',
+                'time': '_ail_time', 'time_ns': '_ail_time_ns'}
+# time.sleep / localtime / gmtime / strftime / mktime are lowered by dtlib.py (stdlib4.rewrite_text) before this pass
+_TIME_LOWERED = ('sleep', 'localtime', 'gmtime', 'strftime', 'mktime')
 _OPERATOR_BINARY = {'add': ast.Add, 'sub': ast.Sub, 'mul': ast.Mult, 'truediv': ast.Div,
                     'floordiv': ast.FloorDiv, 'mod': ast.Mod, 'pow': ast.Pow, 'and_': ast.BitAnd,
                     'or_': ast.BitOr, 'xor': ast.BitXor, 'lshift': ast.LShift, 'rshift': ast.RShift}
 _OPERATOR_COMPARE = {'lt': ast.Lt, 'le': ast.LtE, 'gt': ast.Gt, 'ge': ast.GtE, 'eq': ast.Eq, 'ne': ast.NotEq}
 _OPERATOR_UNARY = {'neg': ast.USub, 'pos': ast.UAdd, 'invert': ast.Invert, 'inv': ast.Invert}
 _SMALL_MODULES = {
-    'time': tuple(_TIME_CLOCKS),
+    'time': (*_TIME_CLOCKS, *_TIME_LOWERED),
     'string': tuple(_STRING_CONSTANTS),
     'os': ('cpu_count',),
     'operator': (*_OPERATOR_BINARY, *_OPERATOR_COMPARE, *_OPERATOR_UNARY, 'not_', 'abs', 'getitem', 'itemgetter'),
 }
 _SMALL_NOTE = {
-    'time': 'time.perf_counter() / monotonic() (and the _ns forms) are built; time.time() is wall-clock '
-            'time, which this language has no builtin for, and sleep() is not built',
+    'time': 'time.perf_counter() / monotonic() / time() (and the _ns forms), sleep(), localtime(), gmtime(), '
+            'strftime() and mktime() are built (the wall clock is an input: AIL_CLOCK=<seconds> pins it); '
+            'asctime, ctime, struct_time, tzset and the zone constants are not',
     'string': 'the string module is built as its constants: ascii_lowercase, ascii_uppercase, ascii_letters, '
               'digits, hexdigits, octdigits, punctuation, whitespace, printable',
     'os': 'os.cpu_count() is built; the rest of os (environ, path, ...) is not',
@@ -2228,7 +2232,7 @@ def _modtables():
 def python_surface(source, notes=None, library=False):
     """Map the Python spellings above onto the compiler's own; `notes` collects (line, why) for
     the constructs left as written."""
-    if any(name in source for name in ("csv", "datetime", "decimal", "fractions")):
+    if any(name in source for name in ("csv", "datetime", "decimal", "fractions", "time", "zoneinfo")):
         source = _stdlib4().rewrite_text(source, notes)
     if "collections" in source:
         source = _collib().rewrite(source, notes)

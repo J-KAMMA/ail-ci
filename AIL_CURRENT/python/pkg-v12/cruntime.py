@@ -26214,3 +26214,7 @@ import filert as _filert
 _filert.register(ORDER, SOURCE, REQUIRES)
 REQUIRES['FILEEXC'] = ['ASSERTEXC', 'OVERFLOWEXC']
 REQUIRES['PROCEXC'] = ['FILEEXC']          # G8: CalledProcessError / TimeoutExpired codes (filert.proc_exception)
+
+# G9 the wall clock: time.time / time_ns / sleep, the OS time zone (clockrt.py)
+import clockrt as _clockrt
+_clockrt.register(ORDER, SOURCE, REQUIRES)

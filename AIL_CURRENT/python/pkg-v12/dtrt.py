@@ -26,8 +26,12 @@ TD_LIMIT = 4611686018427387904 // 2
 
 
 class AilDT:
+    """The last three fields exist only when the program names a time zone (dtlib.Dt.attach drops them
+    otherwise): aware is 0 for a naive value, 1 for an aware one and 2 for one whose zone has a name."""
+
     def __init__(self, kind: int, k: int, year: int, month: int, day: int, hour: int, minute: int, second: int,
-                 microsecond: int, days: int, seconds: int, microseconds: int) -> None:
+                 microsecond: int, days: int, seconds: int, microseconds: int, aware: int = 0, off: int = 0,
+                 tzn: str = "") -> None:
         self.kind = kind
         self.k = k
         self.year = year
@@ -40,6 +44,9 @@ class AilDT:
         self.days = days
         self.seconds = seconds
         self.microseconds = microseconds
+        self.aware = aware
+        self.off = off
+        self.tzn = tzn
 
 
 def isleap(y: int) -> bool:
@@ -1344,3 +1351,683 @@ def strptime(data: str, fmt0: str) -> AilDT:
     if leap_fix:
         year = 1900
     return mk_datetime(year, month, day, hour, st.minute, st.second, st.frac)
+
+
+# -- clock: needs core, strftime
+# The wall clock and the OS time zone (stage G9). `_ail_time_ns`, `_ail_time`, `_ail_sleep_ns`,
+# `_ail_local_offset`, `_ail_local_isdst`, `_ail_tz_name` and `_ail_mktime` are the compiler's own
+# primitives (clockrt.py); the tests give this file stand-ins when CPython runs it.
+EPOCH_ORD = 719163
+EPOCH_K = 719163 * US_DAY
+TIME_T_LIMIT = 9.2233720368547758e18
+TM_UNSET = -4611686018427387904
+
+
+class AilTM:
+    """time.struct_time: the nine fields and tm_zone, tm_gmtoff."""
+
+    def __init__(self, tm_year: int, tm_mon: int, tm_mday: int, tm_hour: int, tm_min: int, tm_sec: int,
+                 tm_wday: int, tm_yday: int, tm_isdst: int, tm_zone: str, tm_gmtoff: int) -> None:
+        self.tm_year = tm_year
+        self.tm_mon = tm_mon
+        self.tm_mday = tm_mday
+        self.tm_hour = tm_hour
+        self.tm_min = tm_min
+        self.tm_sec = tm_sec
+        self.tm_wday = tm_wday
+        self.tm_yday = tm_yday
+        self.tm_isdst = tm_isdst
+        self.tm_zone = tm_zone
+        self.tm_gmtoff = tm_gmtoff
+
+
+def local_off(secs: int) -> int:
+    off = _ail_local_offset(secs)
+    if off > 100000 or off < -100000:
+        raise OSError("[Errno 75] Value too large for defined data type")
+    return off
+
+
+def local_secs(u: int) -> int:
+    """CPython's local(u): the local reading at the Unix time `u`, counted in seconds from the epoch as if it were
+    UTC; a reading outside years 1..9999 is the ValueError CPython raises."""
+    r = u + local_off(u)
+    n = r // 86400 + EPOCH_ORD
+    if n < 1 or n > MAX_ORDINAL:
+        year_error_n(n)
+    return r
+
+
+def tz_text(v: int) -> str:
+    s = ""
+    for i in range(7):
+        c = (v >> (8 * i)) & 255
+        if c == 0:
+            break
+        s += chr(c)
+    return s
+
+
+def year_error_n(n: int) -> None:
+    """The error CPython gives for a time on the proleptic ordinal day `n` outside years 1..9999: the C library
+    fails (EOVERFLOW) once the year does not fit a C int."""
+    y = ord_year(n)
+    if y - 1900 > 2147483647 or y - 1900 < -2147483648:
+        raise OSError("[Errno 75] Value too large for defined data type")
+    raise ValueError("year " + str(y) + " is out of range")
+
+
+def year_error(k: int) -> None:
+    year_error_n(k // US_DAY)
+
+
+def wall_from_unix(secs: int, us: int, off: int) -> AilDT:
+    """The naive datetime that the Unix time `secs` + `us` microseconds shows on a clock `off` seconds east."""
+    k = EPOCH_K + (secs + off) * 1000000 + us
+    if not in_range(k):
+        year_error(k)
+    return from_k(1, k)
+
+
+def float_secs(t: float) -> float:
+    if t != t:
+        raise ValueError("Invalid value NaN (not a number)")
+    if t - t != 0.0:
+        raise OverflowError("timestamp out of range for platform time_t")
+    return t
+
+
+def ts_us(t: float) -> int:
+    """A float timestamp as whole seconds * 1000000 + microseconds, microseconds rounded half to even (the
+    rounding datetime.fromtimestamp does)."""
+    float_secs(t)
+    if t >= 1e12 or t <= -1e12:
+        if t >= TIME_T_LIMIT or t <= -TIME_T_LIMIT:
+            raise OverflowError("timestamp out of range for platform time_t")
+        year_error_n(int(t) // 86400 + EPOCH_ORD)
+    ip = float(int(t))
+    r = round((t - ip) * 1000000.0)
+    if r >= 1000000:
+        r -= 1000000
+        ip += 1.0
+    elif r < 0:
+        r += 1000000
+        ip -= 1.0
+    return int(ip) * 1000000 + r
+
+
+def floor_secs(t: float) -> int:
+    """floor(t) as a time_t (what time.localtime(t), time.gmtime(t) and date.fromtimestamp(t) use)."""
+    float_secs(t)
+    f = t // 1.0
+    if f >= TIME_T_LIMIT or f < -TIME_T_LIMIT:
+        raise OverflowError("timestamp out of range for platform time_t")
+    return int(f)
+
+
+def now_secs() -> int:
+    return _ail_time_ns() // 1000000000
+
+
+def dt_from_us(total: int, utc: bool) -> AilDT:
+    secs = total // 1000000
+    us = total - secs * 1000000
+    if utc:
+        return wall_from_unix(secs, us, 0)
+    off = local_off(secs)
+    a = wall_from_unix(secs, us, off)
+    # CPython probes a day back for a fold (and so fails for a time within a day of year 1 or 9999)
+    probe = local_secs(secs - 86400)
+    transition = secs + off - probe - 86400
+    if transition < 0:
+        if local_secs(secs + transition) == secs + off:
+            # fold = 1 is kept in the `seconds` slot, which a datetime does not otherwise use
+            return AilDT(1, a.k, a.year, a.month, a.day, a.hour, a.minute, a.second, a.microsecond, 0, 1, 0)
+    return a
+
+
+def now_local() -> AilDT:
+    """datetime.now(): the clock floored to microseconds, shown on the local clock."""
+    return dt_from_us(_ail_time_ns() // 1000, False)
+
+
+def now_utc() -> AilDT:
+    """datetime.utcnow()"""
+    return dt_from_us(_ail_time_ns() // 1000, True)
+
+
+def dt_from_ts(t: float, utc: bool) -> AilDT:
+    """datetime.fromtimestamp(t) (utc False) and datetime.utcfromtimestamp(t)."""
+    return dt_from_us(ts_us(t), utc)
+
+
+def dt_today() -> AilDT:
+    """datetime.today(): fromtimestamp(time.time())"""
+    return dt_from_ts(_ail_time(), False)
+
+
+def date_from_ts(t: float) -> AilDT:
+    """date.fromtimestamp(t): the local date of floor(t)."""
+    secs = floor_secs(t)
+    n = (secs + local_off(secs)) // 86400 + EPOCH_ORD
+    if n < 1 or n > MAX_ORDINAL:
+        year_error_n(n)
+    return from_k(0, n * US_DAY)
+
+
+def date_today() -> AilDT:
+    return date_from_ts(_ail_time())
+
+
+def local_to_utc(t: int, fold: int) -> int:
+    """The Unix time whose local reading is `t` (a reading counted in seconds from the epoch as if it were UTC),
+    CPython's local_to_seconds."""
+    a = local_secs(t) - t
+    u1 = t - a
+    t1 = local_secs(u1)
+    b = 0
+    if t1 == t:
+        u2 = u1 - 86400
+        if fold != 0:
+            u2 = u1 + 86400
+        b = local_secs(u2) - u2
+        if a == b:
+            return u1
+    else:
+        b = t1 - u1
+    u2 = t - b
+    t2 = local_secs(u2)
+    if t2 == t:
+        return u2
+    if t1 == t:
+        return u1
+    if fold != 0:
+        if u1 < u2:
+            return u1
+        return u2
+    if u1 > u2:
+        return u1
+    return u2
+
+
+def timestamp(a: AilDT) -> float:
+    """datetime.timestamp() of a naive datetime: it is read as local time."""
+    if a.kind != 1:
+        raise RuntimeError("AttributeError: '" + kind_name(a.kind) + "' object has no attribute 'timestamp'")
+    wall = (a.k - EPOCH_K) // 1000000
+    return float(local_to_utc(wall, a.seconds)) + a.microsecond / 1e6
+
+
+def sleep_for(x: float) -> int:
+    """time.sleep(x)"""
+    float_secs(x)
+    ns = x * 1e9
+    if ns >= TIME_T_LIMIT or ns <= -TIME_T_LIMIT:
+        raise OverflowError("timestamp out of range for platform time_t")
+    n = int(ns)
+    if float(n) < ns:
+        n += 1
+    elif float(n) > ns:
+        n -= 1
+    if n < 0:
+        raise ValueError("sleep length must be non-negative")
+    return _ail_sleep_ns(n)
+
+
+def tm_build(secs: int, off: int, isdst: int, zone: str) -> AilTM:
+    t = secs + off
+    n = t // 86400 + EPOCH_ORD
+    sod = t - (n - EPOCH_ORD) * 86400
+    y = ord_year(n)
+    if y - 1900 > 2147483647 or y - 1900 < -2147483648:
+        year_error_n(n)
+    m = ord_month(n)
+    d = n - ymd2ord(y, m, 1) + 1
+    return AilTM(y, m, d, sod // 3600, (sod // 60) % 60, sod % 60, (n + 6) % 7, n - ymd2ord(y, 1, 1) + 1, isdst, zone, off)
+
+
+def tm_gm(t: float) -> AilTM:
+    """time.gmtime(t)"""
+    return tm_build(floor_secs(t), 0, 0, "GMT")
+
+
+def tm_gm_now() -> AilTM:
+    return tm_build(now_secs(), 0, 0, "GMT")
+
+
+def tm_at(secs: int) -> AilTM:
+    off = local_off(secs)
+    return tm_build(secs, off, _ail_local_isdst(secs), tz_text(_ail_tz_name(secs)))
+
+
+def tm_local(t: float) -> AilTM:
+    """time.localtime(t)"""
+    return tm_at(floor_secs(t))
+
+
+def tm_local_now() -> AilTM:
+    return tm_at(now_secs())
+
+
+def mktime_fields(y: int, mo: int, d: int, hh: int, mm: int, ss: int, isdst: int) -> float:
+    """time.mktime((y, mo, d, hh, mm, ss, wday, yday, isdst))"""
+    r = _ail_mktime(y, mo, d, hh, mm, ss, isdst)
+    if r < -4611686018427387904:
+        raise OverflowError("mktime argument out of range")
+    return float(r)
+
+
+def tm_mktime(t: AilTM) -> float:
+    return mktime_fields(t.tm_year, t.tm_mon, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, t.tm_isdst)
+
+
+def gmt_off_text(off: int) -> str:
+    sign = "+"
+    if off < 0:
+        sign = "-"
+        off = -off
+    return sign + p2(off // 3600) + p2((off // 60) % 60)
+
+
+def tm_strftime(f: str, t: AilTM) -> str:
+    """time.strftime(f, t): %z and %Z come from the struct, the rest is the datetime directives."""
+    g = ""
+    i = 0
+    n = len(f)
+    while i < n:
+        c = f[i]
+        if c == "%" and i + 1 < n:
+            d = f[i + 1]
+            if d == "z":
+                g += gmt_off_text(t.tm_gmtoff)
+            elif d == "Z":
+                g += t.tm_zone
+            else:
+                g += c + d
+            i += 2
+        else:
+            g += c
+            i += 1
+    if t.tm_year < 1 or t.tm_year > 9999:
+        raise RuntimeError("time.strftime: years outside 1..9999 are not built")
+    return fmt(mk_datetime(t.tm_year, t.tm_mon, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, 0), g)
+
+
+# -- aware: needs core, text, clock
+# Fixed-offset time zones and aware datetimes (stage G9). A program that names a time zone gets these in place of
+# the naive functions (dtlib.AWARE_ALT); the key `k` of an aware value stays the key of its wall clock fields, so
+# weekday(), strftime() and the fields work as they do for a naive value, and `ukey` is the key of the instant.
+class AilTZ:
+    """datetime.timezone: `off` seconds east of UTC; `named` is 1 when a name was given (then `name` is the name)."""
+
+    def __init__(self, off: int, name: str, named: int) -> None:
+        self.off = off
+        self.name = name
+        self.named = named
+
+
+def tz_utc() -> AilTZ:
+    return AilTZ(0, "UTC", 0)
+
+
+def tz_offset_text(off: int, colon: bool) -> str:
+    """+HH:MM, or +HH:MM:SS when there are seconds (without the colons for %z)."""
+    sign = "+"
+    if off < 0:
+        sign = "-"
+        off = -off
+    c = ""
+    if colon:
+        c = ":"
+    out = sign + p2(off // 3600) + c + p2((off // 60) % 60)
+    if off % 60 != 0:
+        out += c + p2(off % 60)
+    return out
+
+
+def tz_make(td: AilDT, name: str, named: int) -> AilTZ:
+    if td.kind != 2:
+        raise RuntimeError("TypeError: timezone() argument 1 must be datetime.timedelta, not " + kind_name(td.kind))
+    if td.k % 1000000 != 0:
+        raise RuntimeError("a timezone offset with microseconds is not built")
+    s = td.k // 1000000
+    if s <= -86400 or s >= 86400:
+        raise ValueError("offset must be a timedelta strictly between -timedelta(hours=24) and timedelta(hours=24), not " + td_repr(td) + ".")
+    if named == 0 and s == 0:
+        return tz_utc()
+    return AilTZ(s, name, named)
+
+
+def tz_name(z: AilTZ) -> str:
+    if z.named != 0:
+        return z.name
+    if z.off == 0:
+        return "UTC"
+    return "UTC" + tz_offset_text(z.off, True)
+
+
+def tz_repr(off: int, name: str, named: int) -> str:
+    if named == 0 and off == 0:
+        return "datetime.timezone.utc"
+    out = "datetime.timezone(" + td_repr(from_k(2, off * 1000000))
+    if named != 0:
+        out += ", " + repr(name)
+    return out + ")"
+
+
+def tz_rep(z: AilTZ) -> str:
+    return tz_repr(z.off, z.name, z.named)
+
+
+def tz_utcoffset(z: AilTZ) -> AilDT:
+    return from_k(2, z.off * 1000000)
+
+
+def tz_eq(a: AilTZ, b: AilTZ) -> bool:
+    return a.off == b.off
+
+
+def aw_set(a: AilDT, off: int, name: str, named: int) -> AilDT:
+    """`a` (a fresh value) marked aware with that offset and name."""
+    a.aware = 1 + named
+    a.off = off
+    a.tzn = name
+    return a
+
+
+def aw_tz(a: AilDT) -> AilTZ:
+    return AilTZ(a.off, a.tzn, a.aware - 1)
+
+
+def aw_attach(a: AilDT, z: AilTZ) -> AilDT:
+    """a.replace(tzinfo=z): the wall clock fields stay."""
+    if a.kind != 1:
+        raise RuntimeError("TypeError: tzinfo is only built for a datetime")
+    return aw_set(from_k(1, a.k), z.off, z.name, z.named)
+
+
+def aw_strip(a: AilDT) -> AilDT:
+    """a.replace(tzinfo=None)"""
+    if a.kind != 1:
+        raise RuntimeError("TypeError: tzinfo is only built for a datetime")
+    return from_k(1, a.k)
+
+
+def aw_copy(a: AilDT, src: AilDT) -> AilDT:
+    """`a` (fresh) with the zone of `src`."""
+    if a.kind == 1 and src.aware != 0:
+        a.aware = src.aware
+        a.off = src.off
+        a.tzn = src.tzn
+    return a
+
+
+def is_naive(a: AilDT) -> bool:
+    return a.aware == 0
+
+
+def ukey(a: AilDT) -> int:
+    return a.k - a.off * 1000000
+
+
+def is_mixed(a: AilDT, b: AilDT) -> bool:
+    return (a.aware == 0 and b.aware != 0) or (a.aware != 0 and b.aware == 0)
+
+
+def mixed_error(what: str) -> None:
+    raise RuntimeError("TypeError: can't " + what + " offset-naive and offset-aware datetimes")
+
+
+def cmp_lt(a: AilDT, b: AilDT) -> bool:
+    if is_mixed(a, b):
+        mixed_error("compare")
+    return ukey(a) < ukey(b)
+
+
+def cmp_le(a: AilDT, b: AilDT) -> bool:
+    if is_mixed(a, b):
+        mixed_error("compare")
+    return ukey(a) <= ukey(b)
+
+
+def cmp_gt(a: AilDT, b: AilDT) -> bool:
+    if is_mixed(a, b):
+        mixed_error("compare")
+    return ukey(a) > ukey(b)
+
+
+def cmp_ge(a: AilDT, b: AilDT) -> bool:
+    if is_mixed(a, b):
+        mixed_error("compare")
+    return ukey(a) >= ukey(b)
+
+
+def cmp_eq(a: AilDT, b: AilDT) -> bool:
+    if is_mixed(a, b):
+        return False
+    return ukey(a) == ukey(b)
+
+
+def cmp_ne(a: AilDT, b: AilDT) -> bool:
+    return not cmp_eq(a, b)
+
+
+def add_aw(a: AilDT, b: AilDT) -> AilDT:
+    r = add(a, b)
+    if a.kind == 1:
+        return aw_copy(r, a)
+    return aw_copy(r, b)
+
+
+def sub_aw(a: AilDT, b: AilDT) -> AilDT:
+    if a.kind == 1 and b.kind == 1:
+        if is_mixed(a, b):
+            mixed_error("subtract")
+        return from_k(2, ukey(a) - ukey(b))
+    r = sub(a, b)
+    if a.kind == 1:
+        return aw_copy(r, a)
+    return r
+
+
+def pick_max_aw(a: AilDT, b: AilDT) -> AilDT:
+    if ukey(b) > ukey(a):
+        return b
+    return a
+
+
+def pick_min_aw(a: AilDT, b: AilDT) -> AilDT:
+    if ukey(b) < ukey(a):
+        return b
+    return a
+
+
+def max_list_aw(xs: list[AilDT]) -> AilDT:
+    if len(xs) == 0:
+        raise ValueError("max() iterable argument is empty")
+    best = xs[0]
+    for i in range(1, len(xs)):
+        if ukey(xs[i]) > ukey(best):
+            best = xs[i]
+    return best
+
+
+def min_list_aw(xs: list[AilDT]) -> AilDT:
+    if len(xs) == 0:
+        raise ValueError("min() iterable argument is empty")
+    best = xs[0]
+    for i in range(1, len(xs)):
+        if ukey(xs[i]) < ukey(best):
+            best = xs[i]
+    return best
+
+
+def replace_aw(a: AilDT, year: int, month: int, day: int, hour: int, minute: int, second: int, microsecond: int) -> AilDT:
+    return aw_copy(replace(a, year, month, day, hour, minute, second, microsecond), a)
+
+
+def iso_aw(a: AilDT, sep: str, timespec: str) -> str:
+    out = iso(a, sep, timespec)
+    if a.kind == 1 and a.aware != 0:
+        out += tz_offset_text(a.off, True)
+    return out
+
+
+def text_aw(a: AilDT) -> str:
+    if a.kind == 2:
+        return td_str(a)
+    return iso_aw(a, " ", "auto")
+
+
+def rep_aw(a: AilDT) -> str:
+    r = rep(a)
+    if a.kind == 1 and a.aware != 0:
+        return r[0:len(r) - 1] + ", tzinfo=" + tz_repr(a.off, a.tzn, a.aware - 1) + ")"
+    return r
+
+
+def fmt_aw(a: AilDT, f: str) -> str:
+    """strftime with %z and %Z (empty for a naive value)."""
+    if a.kind != 1:
+        return fmt(a, f)
+    g = ""
+    i = 0
+    n = len(f)
+    while i < n:
+        c = f[i]
+        if c == "%" and i + 1 < n:
+            d = f[i + 1]
+            if d == "z":
+                if a.aware != 0:
+                    g += tz_offset_text(a.off, False)
+            elif d == "Z":
+                if a.aware != 0:
+                    g += tz_name(aw_tz(a))
+            else:
+                g += c + d
+            i += 2
+        else:
+            g += c
+            i += 1
+    return fmt(a, g)
+
+
+def utcoffset_aw(a: AilDT) -> AilDT:
+    if a.kind != 1 or a.aware == 0:
+        raise RuntimeError("utcoffset() of a naive value is None, which is not built: test d.tzinfo is None first")
+    return from_k(2, a.off * 1000000)
+
+
+def tzname_aw(a: AilDT) -> str:
+    if a.kind != 1 or a.aware == 0:
+        raise RuntimeError("tzname() of a naive value is None, which is not built: test d.tzinfo is None first")
+    return tz_name(aw_tz(a))
+
+
+def wall_aware(secs: int, us: int, z: AilTZ) -> AilDT:
+    """The aware datetime for the Unix time `secs` + `us` microseconds on the zone `z`."""
+    return aw_set(wall_from_unix(secs, us, z.off), z.off, z.name, z.named)
+
+
+def now_tz(z: AilTZ) -> AilDT:
+    """datetime.now(tz)"""
+    total = _ail_time_ns() // 1000
+    secs = total // 1000000
+    return wall_aware(secs, total - secs * 1000000, z)
+
+
+def fromts_tz(t: float, z: AilTZ) -> AilDT:
+    """datetime.fromtimestamp(t, tz)"""
+    total = ts_us(t)
+    secs = total // 1000000
+    return wall_aware(secs, total - secs * 1000000, z)
+
+
+def local_zone_at(secs: int) -> AilTZ:
+    """The OS time zone at the Unix time `secs` as a fixed-offset zone named by its abbreviation."""
+    return AilTZ(local_off(secs), tz_text(_ail_tz_name(secs)), 1)
+
+
+def astimezone_to(a: AilDT, z: AilTZ) -> AilDT:
+    """a.astimezone(z)"""
+    if a.kind != 1:
+        raise RuntimeError("AttributeError: only a datetime has astimezone")
+    u = ukey(a)
+    if a.aware == 0:
+        u = (local_to_utc((a.k - EPOCH_K) // 1000000, a.seconds)) * 1000000 + a.microsecond + EPOCH_K
+    k = u + z.off * 1000000
+    if not in_range(k):
+        raise OverflowError("date value out of range")
+    return aw_set(from_k(1, k), z.off, z.name, z.named)
+
+
+def astimezone_local(a: AilDT) -> AilDT:
+    """a.astimezone(): the OS time zone, as a fixed offset named by its abbreviation."""
+    if a.kind != 1:
+        raise RuntimeError("AttributeError: only a datetime has astimezone")
+    u = ukey(a)
+    if a.aware == 0:
+        u = (local_to_utc((a.k - EPOCH_K) // 1000000, a.seconds)) * 1000000 + a.microsecond + EPOCH_K
+    secs = (u - EPOCH_K) // 1000000
+    return astimezone_to(aw_set(from_k(1, u), 0, "UTC", 0), local_zone_at(secs))
+
+
+def timestamp_aw(a: AilDT) -> float:
+    if a.kind != 1:
+        raise RuntimeError("AttributeError: '" + kind_name(a.kind) + "' object has no attribute 'timestamp'")
+    if a.aware == 0:
+        return timestamp(a)
+    return total_seconds(from_k(2, ukey(a) - EPOCH_K))
+
+
+def from_iso_datetime_aw(s: str) -> AilDT:
+    """datetime.fromisoformat with a UTC offset or Z: aware; without one: naive."""
+    n = len(s)
+    if n < 7:
+        bad_iso(s)
+    sep = iso_separator(s)
+    if sep < 0:
+        bad_iso(s)
+    packed = parse_iso_date(s, 0, sep)
+    if packed < 0:
+        bad_iso(s)
+    tod = 0
+    tzpos = -1
+    secs = 0
+    if n > sep:
+        start = sep + 1
+        tz = start
+        while tz < n and s[tz] != "Z" and s[tz] != "+" and s[tz] != "-":
+            tz += 1
+        has_tz = tz < n
+        tod = parse_hh_mm_ss_ff(s, start, tz, has_tz)
+        if tod < 0:
+            bad_iso(s)
+        if has_tz:
+            tzpos = tz
+            if s[tz] == "Z":
+                if tz + 1 < n:
+                    bad_iso(s)
+            else:
+                off = parse_hh_mm_ss_ff(s, tz + 1, n, False)
+                if off < 0:
+                    bad_iso(s)
+                if off % 1000000 != 0:
+                    raise RuntimeError("a UTC offset with microseconds is not built")
+                secs = (off // 10000000000) * 3600 + ((off // 100000000) % 100) * 60 + (off // 1000000) % 100
+                if s[tz] == "-":
+                    secs = -secs
+                if secs <= -86400 or secs >= 86400:
+                    raise ValueError("offset must be a timedelta strictly between -timedelta(hours=24) and timedelta(hours=24), not " + td_repr(from_k(2, secs * 1000000)) + ".")
+    o = packed_ordinal(packed)
+    hh = tod // 10000000000
+    mm = (tod // 100000000) % 100
+    ss = (tod // 1000000) % 100
+    us = tod % 1000000
+    check_hmsu(hh, mm, ss, us)
+    base = from_k(1, o * US_DAY + ((hh * 60 + mm) * 60 + ss) * 1000000 + us)
+    if tzpos < 0:
+        return base
+    if secs == 0:
+        return aw_set(base, 0, "UTC", 0)
+    return aw_set(base, secs, "", 0)

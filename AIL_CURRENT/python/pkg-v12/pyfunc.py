@@ -685,6 +685,14 @@ def _local_slist_pop(node, ctx):
 
 # names the Python syntax (ail_syntax.py) maps time.perf_counter(), time.perf_counter_ns() and
 # os.cpu_count() to: (result kind, C function), all in cruntime's SYSINFO part
+# names dtrt.py / ail_syntax.py lower time.time(), time.time_ns() and the wall-clock helpers to:
+# (result kind, C function, argument kinds), all in cruntime's CLOCK part (clockrt.py)
+_AIL_CLOCK = {'_ail_time': (FLT, 'ail_time', ()), '_ail_time_ns': (INT, 'ail_time_ns', ()),
+              '_ail_sleep_ns': (INT, 'ail_sleep_ns', (INT,)), '_ail_local_offset': (INT, 'ail_local_offset', (INT,)),
+              '_ail_local_isdst': (INT, 'ail_local_isdst', (INT,)), '_ail_tz_name': (INT, 'ail_tz_name', (INT,)),
+              '_ail_mktime': (INT, 'ail_mktime', (INT,) * 7)}
+
+
 _AIL_SYSINFO = {'_ail_perf_counter': (FLT, 'ail_perf_counter'), '_ail_perf_counter_ns': (INT, 'ail_perf_counter_ns'),
                 '_ail_cpu_count': (INT, 'ail_cpu_count')}
 
@@ -961,6 +969,8 @@ def _etype(node, ctx):
             return _AIL_SYSINFO[f][0]
         if f in _AIL_RAND and f not in ctx.funcs:
             return _AIL_RAND[f][0]
+        if f in _AIL_CLOCK and f not in ctx.funcs:
+            return _AIL_CLOCK[f][0]
         if f in filelib.PRIMS and f not in ctx.funcs and f not in ctx.classes:
             return {'int': INT, 'str': STR, 'bytes': BYTES}[filelib.PRIMS[f][0]]
         if f in _AIL_JF and f not in ctx.funcs:
@@ -15124,6 +15134,17 @@ def _call(node, ctx):
         return '((%s) < 0 ? %s : (%s))' % (inner, neg % inner, inner)
     if _is_fileprim_call(node, ctx, 'int'):
         return _fileprim_value(node, ctx)
+    if f in _AIL_CLOCK and f not in ctx.funcs:
+        # the wall clock and the OS time zone (clockrt.py): ints only, evaluated left to right
+        kind, cfunc, argkinds = _AIL_CLOCK[f]
+        if node.keywords or len(a) != len(argkinds):
+            raise Unsupported('%s takes %d arguments' % (f, len(argkinds)))
+        for each in a:
+            if _etype(each, ctx) != INT:
+                raise Unsupported('%s needs int arguments' % f)
+        ctx.parts.update(('DIE', 'CLOCK'))
+        ctx.has_try = True
+        return '%s(%s)' % (cfunc, ', '.join(rec(each) for each in a))
     if f in _AIL_RAND and f not in ctx.funcs:
         # random.* as stdlib3.py lowers it: the C generator in cruntime RANDOM
         kind, cfunc, argkinds = _AIL_RAND[f]

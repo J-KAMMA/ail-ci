@@ -515,8 +515,9 @@ class Batch1Tests(unittest.TestCase):
         self.same_as_cpython(WRITE_OPEN, "write_open", args=("@out.txt",))
 
     def test_unbuilt_clock_and_file_shapes_are_named(self):
-        self.refused("import time\n\n\ndef main():\n    print(time.time() > 0.0)\n\n\nmain()\n",
-                     "time.time() with these arguments is not built")
+        # (time.time() and sleep are built since stage G9: test_ail_clock.py)
+        self.refused("import time\n\n\ndef main():\n    print(time.asctime())\n\n\nmain()\n",
+                     "time.asctime() with these arguments is not built")
         self.refused("def main():\n    m = 'w'\n    with open('x', m) as f:\n        f.write('a')\n    print(1)\n\n\nmain()\n",
                      "mode that is not a string literal")
 
