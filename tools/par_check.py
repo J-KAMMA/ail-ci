@@ -47,6 +47,7 @@ def main():
         times = {}
     modules.sort(key=lambda m: -times.get(m, 60.0))
     env = dict(os.environ, PYTHONUTF8='1')
+    env.setdefault('AIL_NO_CACHE', '1')     # a warm build cache from another run must not change what tests see
     env.setdefault('PIPE_CC', shutil.which('gcc') or '')
     start = time.monotonic()
     failed = []

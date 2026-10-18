@@ -22,6 +22,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from ail_testenv import ASAN_DETECT_LEAKS
 
 ROOT = Path(__file__).resolve().parent
 
@@ -291,7 +292,7 @@ def sanitized(directory, c_file):
     if made.returncode:
         return None
     return subprocess.run([str(exe)], capture_output=True, text=True, timeout=120,
-                          env={'ASAN_OPTIONS': 'detect_leaks=1',
+                          env={'ASAN_OPTIONS': ASAN_DETECT_LEAKS,
                                'UBSAN_OPTIONS': 'halt_on_error=1:print_stacktrace=1'})
 
 

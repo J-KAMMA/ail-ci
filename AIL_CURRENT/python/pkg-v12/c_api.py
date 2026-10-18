@@ -274,7 +274,11 @@ def build(source, output, name, public=None, objects=()):
             query = subprocess.run([compiler(), '-print-prog-name=objcopy'], capture_output=True,
                                    timeout=20, check=True)
             tool = query.stdout.decode().strip()
-            tool = Path(shutil.which(tool) or tool).resolve(strict=True)
+            try:
+                tool = Path(shutil.which(tool) or tool).resolve(strict=True)
+            except FileNotFoundError:
+                raise Unsupported('a C library build needs an ELF/COFF objcopy to localize symbols and none was '
+                                  'found (%s is not installed; the Apple toolchain has no objcopy)' % tool) from None
             tool_hash = digest(tool)
             public_symbols = re.findall(r'^#define ' + re.escape(name) + r'_\w+ (\w+_abi_[0-9a-f]{24})$',
                                         header, re.MULTILINE)

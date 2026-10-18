@@ -116,7 +116,11 @@ def archive_tools(environment):
         if query.returncode:
             raise PipelineError('cannot identify archive '+name+' tool')
         value = query.stdout.decode().strip()
-        path = Path(shutil.which(value) or value).resolve(strict=True)
+        try:
+            path = Path(shutil.which(value) or value).resolve(strict=True)
+        except FileNotFoundError:
+            raise PipelineError('cannot find the archive %s tool (%s): binding C archives needs an ELF/COFF '
+                                'binutils %s; the Apple toolchain has none' % (name, value, name)) from None
         tools[name] = dict(path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest())
     return tools
 

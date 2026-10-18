@@ -22,6 +22,7 @@ from ir import ir as I                       # noqa: E402
 from ir import effects as E                  # noqa: E402
 from ir import emit_c, text, verify          # noqa: E402
 from test_ail_ir_s3 import Built, compile_program, HAVE_CC     # noqa: E402
+from ail_testenv import ASAN_DETECT_LEAKS
 
 DICT = '''func @tally(%k: i64) -> (i64) attrs {linkage = "extern", names = ["k"], owned = ["d"], sym = "tally"} {
   %d = local.alloc {name = "d"} : place<obj<dict<i64, i64>>>
@@ -194,7 +195,7 @@ class ProgramTests(unittest.TestCase):
                 self.assertEqual(cc.returncode, 0, cc.stderr[-2000:])
                 for args in ((), (7,)):
                     r = subprocess.run([str(san), *map(str, args)], capture_output=True, timeout=300,
-                                       env=dict(os.environ, ASAN_OPTIONS='detect_leaks=1:abort_on_error=0',
+                                       env=dict(os.environ, ASAN_OPTIONS=ASAN_DETECT_LEAKS + ':abort_on_error=0',
                                                 UBSAN_OPTIONS='print_stacktrace=1:halt_on_error=1'))
                     results[(tag, args)] = (r.returncode, r.stdout, r.stderr.decode(errors='replace'))
             for args in ((), (7,)):

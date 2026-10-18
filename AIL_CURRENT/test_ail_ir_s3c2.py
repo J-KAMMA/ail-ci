@@ -28,6 +28,7 @@ from ir import ir as I                       # noqa: E402
 from ir import effects as E                  # noqa: E402
 from ir import emit_c, text, verify          # noqa: E402
 from test_ail_ir_s3 import Built, compile_program, run, last_line, HAVE_CC     # noqa: E402
+from ail_testenv import ASAN_DETECT_LEAKS
 
 SORT = '''func @order(%n: i64) -> (i64) attrs {linkage = "extern", names = ["n"], owned = ["p", "k", "xs"], sym = "order"} {
   %p = local.alloc {name = "p"} : place<obj<list<i64>>>
@@ -233,7 +234,7 @@ class ProgramTests(unittest.TestCase):
                                     capture_output=True, text=True)
                 self.assertEqual(cc.returncode, 0, cc.stderr[-2000:])
                 r = subprocess.run([str(san)], capture_output=True, timeout=300,
-                                   env=dict(os.environ, ASAN_OPTIONS='detect_leaks=1:abort_on_error=0',
+                                   env=dict(os.environ, ASAN_OPTIONS=ASAN_DETECT_LEAKS + ':abort_on_error=0',
                                             UBSAN_OPTIONS='print_stacktrace=1:halt_on_error=1'))
                 err = r.stderr.decode(errors='replace')
                 self.assertEqual(r.returncode, 0, err[-800:])

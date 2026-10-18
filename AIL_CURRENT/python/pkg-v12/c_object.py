@@ -10,6 +10,7 @@ import tempfile
 import cruntime
 from module_object import ABI_VERSION, FLAGS, canonical, contract_symbol, digest, identity, _valid_name
 from pipeline import PipelineError, compiler
+import buildcache
 import native_diagnostics
 from pyfront import Unsupported
 
@@ -374,10 +375,15 @@ def compile_c(source_path, interface_path, output, *, c_api_namespace=None):
                        if is_assembly else ['-std=c11', '-Werror=strict-prototypes', '-Werror=old-style-definition'])
             if unit != c_path:
                 native_diagnostics.generated(unit)
-            result = native_diagnostics.run([compiler(), *FLAGS, *options, '-MD', '-MF', str(depfile), '-MT', 'unit',
-                                 '-I', 'inputs', '-c', unit.relative_to(directory).as_posix(), '-o',
-                                 obj.relative_to(directory).as_posix() if is_assembly else str(obj)], cwd=directory,
-                                capture_output=True, timeout=120, env=environment, phase='compile')
+            unit_command = [compiler(), *FLAGS, *options, '-MD', '-MF', str(depfile), '-MT', 'unit',
+                            '-I', 'inputs', '-c', unit.relative_to(directory).as_posix(), '-o',
+                            obj.relative_to(directory).as_posix() if is_assembly else str(obj)]
+            def run_unit(command):
+                return native_diagnostics.run(command, cwd=directory, capture_output=True, timeout=120,
+                                              env=environment, phase='compile')
+            # The build cache keys on the adapter, the declared inputs and the system headers read.
+            result = (run_unit(unit_command) if is_assembly or native_diagnostics.enabled()
+                      else buildcache.run_cc(unit_command, run_unit, cwd=directory))
             if result.returncode:
                 raise PipelineError('C adapter compile failed: ' + result.stderr.decode(errors='replace')[-2000:])
             # Each translation unit can include only declared headers and system headers.

@@ -13,6 +13,15 @@ import unittest
 ROOT = Path(__file__).resolve().parent
 
 
+def raw_reader_source():
+    """c_interop.ail reading with newline='': text-mode open() translates CRLF and CR to LF
+    (universal newlines, as in CPython), but these tests checksum the file bytes unchanged."""
+    source = (ROOT / 'language_examples' / 'c_interop.ail').read_text(encoding='utf8')
+    patched = source.replace('open(sys.argv[1])', "open(sys.argv[1], newline='')")
+    assert patched != source
+    return patched
+
+
 def signature(symbol, params, result='int'):
     return dict(symbol=symbol, params=params, result=result)
 
@@ -75,7 +84,7 @@ class CObjectTests(unittest.TestCase):
         shutil.move(str(obj), destination)
         shutil.move(str(obj) + '.json', str(destination) + '.json')
         before = self.snapshot(destination)
-        executable = self.ail_build('reader', (example / 'c_interop.ail').read_text(encoding='utf8'), destination)
+        executable = self.ail_build('reader', raw_reader_source(), destination)
         inputs = ['', 'abc', '日本語\x00😀\r\n𐀀\U0010ffff',
                   ''.join(map(chr, (0, 0x7f, 0x80, 0x7ff, 0x800, 0xd7ff, 0xe000,
                                      0xffff, 0x10000, 0x10ffff))),
@@ -277,7 +286,7 @@ int64_t native_pair(const unsigned char *a, size_t an,
         executable = self.ail_build('ascii_storage', code, obj)
         self.check_run(executable, '\n'.join(expected) + '\n0\n0\n')
 
-        reader = self.ail_build('ascii_reader', (example / 'c_interop.ail').read_text(encoding='utf8'), obj)
+        reader = self.ail_build('ascii_reader', raw_reader_source(), obj)
         path = self.root / 'ascii_input'
         # Pure ASCII takes bytes=1; cover every octet and allocation boundaries.
         for data in (bytes(range(128)), *(b'a' * n for n in (65535, 65536, 65537)),

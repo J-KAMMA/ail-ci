@@ -9,6 +9,7 @@
   "test_ail_argv_slices": 6.2,
   "test_ail_batch_edit": 1.2,
   "test_ail_borrowed_owner": 29.6,
+  "test_ail_build_cache": 49.4,
   "test_ail_build_reports": 11.2,
   "test_ail_builder_locals": 77.8,
   "test_ail_builtin_api": 82.7,
@@ -198,6 +199,7 @@
    "test_ail_stdout_mixed"
   ],
   [
+   "test_ail_build_cache",
    "test_ail_clock",
    "test_ail_csv_rewrite_stream",
    "test_ail_modconst",
