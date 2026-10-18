@@ -43,7 +43,7 @@ import buildcache
 import shadowing
 from pyfront import Unsupported, to_pipeline_c
 from pyfunc import to_c as func_to_c
-from pyfunc import _module_const_scalar, module_table_refusal
+from pyfunc import _module_const_scalar, module_table_refusal, _written_globals
 import modtables
 from pyfunc import NORET
 try:
@@ -252,7 +252,7 @@ def _is_docstring_stmt(node):
     return isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
 
 
-def _is_module_const_assign(node):
+def _is_module_const_assign(node, written=frozenset()):
     """Mirrors `pyfunc._scan_module_consts`'s own acceptance test exactly -- a single-target
     `Name` assignment whose value is an int/float/str literal, or a non-empty numeric list/tuple
     -- so `_rewrite_script` below leaves at module scope PRECISELY the assignments
@@ -264,6 +264,9 @@ def _is_module_const_assign(node):
         return False
     if _module_const_scalar(node.value) is not None:
         return True
+    if (isinstance(node.value, ast.Constant) and type(node.value.value) is bool
+            and node.targets[0].id in written):
+        return True              # `flag = False` that a function rebinds with `global`: a module variable
     if isinstance(node.value, (ast.List, ast.Tuple)) and node.value.elts:
         kinds = [(_module_const_scalar(e) or (None,))[0] for e in node.value.elts]
         return all(k in ('int', 'float') for k in kinds) or all(k == 'str' for k in kinds)
@@ -426,6 +429,7 @@ def _rewrite_script(source, force):
 
     fn_names = {n.name for n in expanded if isinstance(n, ast.FunctionDef)}
     assign_counts = _count_assign_targets(expanded)
+    written = _written_globals(ast.Module(body=expanded, type_ignores=[]))
 
     kept, other = [], []
     for n in expanded:
@@ -434,7 +438,7 @@ def _rewrite_script(source, force):
             continue
         if _is_docstring_stmt(n) or isinstance(n, ast.Pass):
             continue
-        if (isinstance(n, ast.Assign) and _is_module_const_assign(n)
+        if (isinstance(n, ast.Assign) and _is_module_const_assign(n, written)
                 and assign_counts[n.targets[0].id] == 1):
             kept.append(n)
             continue
@@ -503,6 +507,8 @@ def to_c(source, strict=True, name='run', info=None, external=None):
     runs -- SEMANTICS section 33), or a script with no `def` at all (section 33 again, via
     `_rewrite_script(force=True)`)."""
     tree = ast.parse(source.strip())
+    import threadlib
+    threadlib.refuse_typed(tree, Unsupported)        # G12: threads are built on the general path only
     if len(tree.body) == 1 and isinstance(tree.body[0], ast.Expr):
         call = tree.body[0].value
         if (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
@@ -777,7 +783,8 @@ def _build_unshadowed(source, out, strict, report, force_general):
             # expressions inside a single statement); the CRT longjmp
             # walks it via RtlUnwindEx and faulted intermittently.
             # Prologue-level unwind info stays and is sufficient.
-            r = _cc([compiler(), '-O2', *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c), '-lm'],
+            r = _cc([compiler(), '-O2', *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c), '-lm']
+                    + (['-pthread'] if boxed_report.get('threads') else []),     # G12: threads (threadrt.py)
                                capture_output=True, text=True, phase='compile_link')
             if r.returncode:
                 # The exact phrase 'the C compiler rejected this' (identical to the typed path's

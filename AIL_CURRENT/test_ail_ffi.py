@@ -57,6 +57,7 @@ int tiny_next(void *h);
 void tiny_free(void *h);
 void *tiny_find(int k);
 int tiny_fail(int k);
+int tiny_seterr(int e);
 """
 
 TINY_C = r"""
@@ -92,6 +93,7 @@ int tiny_next(void *h) { return (*(int *)h)++; }
 void tiny_free(void *h) { free(h); }
 void *tiny_find(int k) { static int cell = 5; return k >= 0 ? (void *)&cell : NULL; }
 int tiny_fail(int k) { errno = 0; return k > 0 ? 0 : -k; }
+int tiny_seterr(int e) { errno = e; return -1; }
 """
 
 # stubs shared by the programs (the library sits in the program's directory)
@@ -268,6 +270,71 @@ def main():
     except RuntimeError as e:
         print("fail", {MSG})
     print(tiny_fail(1))
+
+main()
+"""
+
+# G4 exceptions: an OSError from an errno failure has `.errno` and `.strerror`, `str(e)` is "[Errno N] text", and the
+# errno picks the subclass, exactly as CPython's shim (`raise OSError(err, os.strerror(err))`) does
+ERRNO_STUBS = STUBS + r"""
+@extern(lib="./libtiny.so", header="tiny.h", check="negative", errno=True)
+def tiny_seterr(e: c_int) -> c_int: ...
+@extern(lib="./libtiny.so", header="tiny.h", symbol="tiny_fail", check="nonzero", errno=True)
+def tiny_fail_errno(k: c_int) -> c_int: ...
+"""
+
+ERRNO_ATTRS = ERRNO_STUBS + r"""
+def probe(n: int) -> None:
+    try:
+        tiny_seterr(n)
+    except OSError as e:
+        print(n, e.errno, e.strerror, str(e))
+
+
+def which(n: int) -> None:
+    try:
+        try:
+            tiny_seterr(n)
+        except FileNotFoundError as e:
+            print("FileNotFoundError", e.errno)
+        except PermissionError as e:
+            print("PermissionError", e.errno, str(e))
+        except IsADirectoryError as e:
+            print("IsADirectoryError", e.errno)
+        except FileExistsError as e:
+            print("FileExistsError", e.errno)
+        except NotADirectoryError as e:
+            print("NotADirectoryError", e.errno)
+    except OSError as e:
+        print("OSError", e.errno, e.strerror)
+
+
+def main():
+    for n in {ERRNOS}:
+        probe(n)
+    for n in {ERRNOS}:
+        which(n)
+    q = bytearray(4)
+    r = bytearray(4)
+    try:
+        tiny_divmod(1, 0, q, r)
+    except OSError as e:
+        print("divmod", e.errno, e.strerror, str(e))
+    try:
+        tiny_open("/no/such/directory/file")
+    except (FileNotFoundError, PermissionError) as e:
+        print("tuple", e.errno, str(e))
+    try:
+        tiny_fail_errno(-4)
+    except OSError as e:
+        print("errno zero", e.errno, e.strerror, str(e))
+    text = ""
+    try:
+        tiny_seterr(2)
+    except OSError as e:
+        text = e.strerror + "|" + str(e)
+    print(text)
+    print(tiny_open("tiny.h"))
 
 main()
 """
@@ -497,6 +564,47 @@ class FFITests(unittest.TestCase):
             "True\n"
             "fail tiny_fail failed with 4\n"
             "0\n"))
+
+    def test_oserror_has_errno_strerror_and_the_cpython_text(self):
+        import errno as errno_module
+        names = ("EPERM", "ENOENT", "EACCES", "EEXIST", "ENOTDIR", "EISDIR", "EDOM", "ENOMEM", "ERANGE", "EBUSY")
+        numbers = [getattr(errno_module, name) for name in names]
+        text = ERRNO_ATTRS.replace("{ERRNOS}", repr(numbers))
+        cpy, ail = self.both("errno_attrs", text)
+        self.assertEqual(cpy, ail)
+        lines = ail.splitlines()
+        first = numbers[0]
+        self.assertEqual(lines[0], "%d %d %s [Errno %d] %s" % (first, first, os.strerror(first), first, os.strerror(first)))
+        self.assertIn("FileNotFoundError %d" % errno_module.ENOENT, lines)
+        self.assertIn("IsADirectoryError %d" % errno_module.EISDIR, lines)
+        self.assertIn("OSError %d %s" % (errno_module.EDOM, os.strerror(errno_module.EDOM)), lines)
+        self.assertIn("errno zero 0 %s [Errno 0] %s" % (os.strerror(0), os.strerror(0)), lines)
+
+    def test_oserror_attributes_under_the_ir(self):
+        import errno as errno_module
+        text = ERRNO_ATTRS.replace("{ERRNOS}", repr([errno_module.ENOENT, errno_module.EDOM]))
+        cpy, ail = self.both("errno_attrs_ir", text, ir="1")
+        self.assertEqual(cpy, ail)
+
+    def test_errno_of_another_exception_class_is_refused_by_name(self):
+        cases = (
+            ("ValueError", "    try:\n        tiny_find(-1)\n    except ValueError as e:\n        print(e.errno)\n",
+             "e.errno is built only on a name bound by `except OSError as e`"),
+            ("RuntimeError strerror", "    try:\n        tiny_fail(-4)\n    except RuntimeError as e:\n        print(e.strerror)\n",
+             "e.strerror is built only on a name bound by `except OSError as e`"),
+            ("str of a ValueError", "    try:\n        tiny_find(-1)\n    except ValueError as e:\n        print(str(e))\n",
+             "str(e) is built only on a name bound by `except OSError as e`"),
+            ("mixed tuple", "    try:\n        tiny_find(-1)\n    except (OSError, ValueError) as e:\n        print(e.errno)\n",
+             "e.errno is built only on a name bound by `except OSError as e`"))
+        for label, body, message in cases:
+            with self.subTest(label):
+                self.write("errno_refuse.py", STUBS + "\ndef main():\n" + body + "\nmain()\n")
+                built, _ = compile_cli(self.dir, "errno_refuse.py", name="errno_refuse.out")
+                self.assertNotEqual(built.returncode, 0)
+                self.assertIn(message, built.stderr)
+        # CPython agrees that there is nothing to read: ValueError has no .errno
+        self.write("errno_cpy.py", STUBS + "\ndef main():\n    try:\n        tiny_find(-1)\n    except ValueError as e:\n        print(e.errno)\n\nmain()\n")
+        self.assertNotEqual(run_cpython(self.dir, "errno_cpy.py").returncode, 0)
 
     def test_handles(self):
         self.same("handles", HANDLES, "True 10 11 12\n100 13 True\n")

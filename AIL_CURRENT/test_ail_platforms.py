@@ -9,6 +9,66 @@ import test_ail_c_objects as support
 
 PKG = support.ROOT / 'python' / 'pkg-v12'
 TEXT = 'こんにちは héllo 😀 Привет'
+
+# Line ends written by the program: stdout and stderr (CPython's sys.stdout writes os.linesep on Windows), and text
+# files with every newline= setting (default, "", "\n", "\r", "\r\n"), append, print(file=) and binary. The bytes
+# are compared with what CPython itself produces on the same platform, so the expectation is CRLF on Windows and
+# LF elsewhere without this file knowing which.
+LINE_ENDS = """import sys
+
+
+def hexb(b: bytes) -> None:
+    for x in b:
+        print(x, end=" ")
+    print()
+
+
+def main() -> int:
+    print("plain line")
+    print("two", "words", end="!\\n")
+    print("cr\\rlf\\ncrlf\\r\\nend", end="")
+    print()
+    print("tail", file=sys.stderr)
+    print("tail two\\nthree", file=sys.stderr)
+    p = "w.txt"
+    with open(p, "w") as f:
+        f.write("a\\nb\\r\\nc\\n")
+    with open(p, "rb") as f:
+        hexb(f.read())
+    with open(p, "w", newline="") as f:
+        f.write("a\\nb\\r\\nc\\n")
+    with open(p, "rb") as f:
+        hexb(f.read())
+    with open(p, "w", newline="\\n") as f:
+        f.write("a\\nb\\r\\nc\\n")
+    with open(p, "rb") as f:
+        hexb(f.read())
+    with open(p, "w", newline="\\r") as f:
+        f.write("a\\nb\\r\\nc\\n")
+    with open(p, "rb") as f:
+        hexb(f.read())
+    with open(p, "w", newline="\\r\\n") as f:
+        print("x", file=f)
+        print("y", "z", file=f)
+    with open(p, "rb") as f:
+        hexb(f.read())
+    with open(p, "a") as f:
+        f.write("tail\\n")
+    with open(p, "rb") as f:
+        hexb(f.read())
+    with open(p, "wb") as f:
+        f.write(b"raw\\nbytes\\r\\n")
+    with open(p, "rb") as f:
+        hexb(f.read())
+    with open(p) as f:
+        print(f.read(), end="")
+    with open("last.txt", "w") as f:
+        f.write("one\\ntwo\\n")
+    return 0
+
+
+main()
+"""
 CONSOLE_FLAGS = ['-D_Exit=ail_wincon_exit', str(PKG / 'ail_wincon.c')]
 
 
@@ -42,6 +102,31 @@ class PlatformTests(unittest.TestCase):
         for name, prefix in (('plain', b''), ('bom', b'\xef\xbb\xbf')):
             ran = self.build_and_run(name, prefix)
             self.assertEqual((ran.returncode, ran.stdout, ran.stderr), (0, want, b''), name)
+
+    def test_text_output_and_files_have_the_line_ends_cpython_writes_here(self):
+        source = self.root / 'lineends.py'
+        source.write_text(LINE_ENDS, encoding='utf8')
+        for name in ('cpy', 'ail'):
+            (self.root / name).mkdir()
+        env = dict(os.environ, PYTHONUTF8='1')
+        env.pop('PYTHONPATH', None)
+        want = subprocess.run([sys.executable, '-B', str(source)], cwd=self.root / 'cpy', capture_output=True,
+                              timeout=60, env=env)
+        self.assertEqual(want.returncode, 0, want.stderr.decode(errors='replace'))
+        output = self.root / 'lineends_exe'
+        built = self.command('compile', source, '-o', output)
+        self.assertEqual(built.returncode, 0, built.stderr.decode(errors='replace'))
+        exe = output if output.is_file() else Path(str(output) + '.exe')
+        got = subprocess.run([str(exe)], cwd=self.root / 'ail', capture_output=True, timeout=60)
+        self.assertEqual(got.returncode, 0, got.stderr.decode(errors='replace'))
+        self.assertEqual(got.stdout, want.stdout)
+        self.assertEqual(got.stderr, want.stderr)
+        for name in ('w.txt', 'last.txt'):
+            self.assertEqual((self.root / 'ail' / name).read_bytes(), (self.root / 'cpy' / name).read_bytes(), name)
+        # what the comparison means on each platform, so that two equal wrong answers cannot pass
+        newline = b'\r\n' if sys.platform == 'win32' else b'\n'
+        self.assertTrue(got.stdout.startswith(b'plain line' + newline + b'two words!' + newline))
+        self.assertEqual((self.root / 'ail' / 'last.txt').read_bytes(), b'one' + newline + b'two' + newline)
 
     def test_link_flags_per_target(self):
         self.assertEqual(link_flags_with(), ['-static', *CONSOLE_FLAGS] if os.name == 'nt' else [])

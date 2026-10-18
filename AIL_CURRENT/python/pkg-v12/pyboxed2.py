@@ -365,8 +365,9 @@ def _runtime_text():
     return cruntime.repr_runtime_for_host(cruntime.SOURCE['OBJ2']) + '\n'
 
 
-PREAMBLE = ('/* ============================ pyboxed2.py generated preamble (v2) ============ */\n'
-           + _runtime_text()) + r'''
+_PREAMBLE_HEAD = ('/* ============================ pyboxed2.py generated preamble (v2) ============ */\n'
+                  + _runtime_text())
+_PREAMBLE_TAIL = r'''
 #include <unistd.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -749,6 +750,14 @@ static inline void ail2_sys_exit(ail_ctx *cx, int has_arg, ail_obj arg) {
 }
 /* ============================================================================================= */
 '''
+PREAMBLE = _PREAMBLE_HEAD + _PREAMBLE_TAIL
+
+
+def _thread_preamble():
+    """G12: the preamble of a program that uses threads (threadrt.py). The GC also marks every thread's
+    saved state, the lock and the thread primitives follow the runtime, and sys.exit() knows threads."""
+    import threadrt
+    return threadrt.patch_head(_PREAMBLE_HEAD) + threadrt.patch_tail(_PREAMBLE_TAIL)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -961,6 +970,7 @@ class Ctx:
 class Compiler:
     def __init__(self, allow_mix=True):
         self.allow_mix = allow_mix
+        self.threads = False       # G12: the program uses threads (threadlib.inject)
         self.classes = {}          # name -> {id_slot, base, methods: {name: info}}
         self.class_order = []
         self.functions = {}        # top-level name -> info
@@ -997,6 +1007,10 @@ class Compiler:
         self.uses_proc = False
         self.uses_path = False
         self.uses_clock = False
+        import threadlib
+        self.threads = threadlib.inject(tree)                       # G12: the thread prelude (threadlib.py)
+        if self.threads:
+            self.allow_mix = False      # typed clones would run on the typed runtime, which has no lock
         filelib.rewrite_tree(tree, Unsupported, general=True)      # G7: open / with / os -> primitives + prelude
         mix_tree = copy.deepcopy(tree)          # the mixed-mode typed clones see the source as written
         _hoist_defaults(tree)
@@ -1077,7 +1091,7 @@ class Compiler:
             self.boxed_names = [n for n in self.boxed_names if n != '<module>']
 
         ng = self.next_global_slot
-        parts = [PREAMBLE]
+        parts = [_thread_preamble() if self.threads else PREAMBLE]
         if self.uses_fileio:
             import filert
             parts.append(filert.general_text())
@@ -1087,7 +1101,11 @@ class Compiler:
                 parts.append(filert.general_path_text())
         if self.uses_clock:
             import clockrt
-            parts.append(clockrt.general_text())
+            if self.threads:
+                import threadrt
+                parts.append(threadrt.patch_clock(clockrt.general_text()))
+            else:
+                parts.append(clockrt.general_text())
         if getattr(self, 'needs_boxcase', False):
             import cruntime
             parts.append(cruntime.BOXCASE)
@@ -1161,6 +1179,9 @@ class Compiler:
                              '((ail_classobj *)g_slots_arr[%d].o)->dc_hide = %dULL;\n' %
                              (self.global_slots['class:' + cname], cls['dc'],
                               self.global_slots['class:' + cname], cls['dc_hide']))
+        if self.threads:
+            setup.append('    ail_th_body_fn = %s; ail_th_atexit_fn = %s;\n'
+                         % (self.functions['_ail_thread_body']['cname'], self.functions['_ail_th_atexit']['cname']))
         if array_entry is not None:
             parts.append(self._array_entry_main(array_entry, tree, setup))
             return ''.join(parts)
@@ -1175,6 +1196,9 @@ class Compiler:
         parts.append('L_leave:\n')
         parts.append('    { int rc = ail_main_finish(cx, st); ail_ctx_destroy(cx); return rc; }\n')
         parts.append('}\n')
+        if self.threads:
+            import threadrt
+            return threadrt.patch_main(''.join(parts))
         return ''.join(parts)
 
     def _array_entry_main(self, info, tree, setup_lines):
@@ -1751,13 +1775,21 @@ class Compiler:
                and isinstance(node.value, ast.Name) and node.value.id == 'sys')
 
 
+    def _gil_check(self, ctx):
+        """G12: a loop back-edge is where the interpreter lock changes hands (threadrt.py). Not inside the
+        functions the library passes add (`_ail_*`, methods of `_Ail*`): a sequence of primitives that share
+        the C layer's state (a command being built, the last error) must not be split by another thread."""
+        if self.threads and not ctx.fname.lower().startswith(('pf__ail', 'pm__ail')):
+            ctx.emit('AIL_GIL_CHECK(cx);')
+
     def _open_iter_loop(self, iter_node, ctx):
         """Emit the iterable evaluation + `for (;;) {` head of an iteration loop.
         Returns the tmp holding each element. Uses an indexed loop for
         containers whose kind is proven (no 112B iterator object and no
         per-element call); everything else takes the generic
         ail_iter/ail_it_next path unchanged."""
-        plan = self._slice_iter_plan(iter_node, ctx)
+        # G12: with threads another thread may change the list between iterations; iterate the slice
+        plan = None if self.threads else self._slice_iter_plan(iter_node, ctx)
         if plan is not None:
             seq_t, lo_c, hi_c = plan
             it = ctx.tmp()
@@ -1778,6 +1810,7 @@ class Compiler:
                      % (hi, hi, nv, hi, hi, hi, nv, hi, nv))
             ctx.emit('for (;;) {')
             ctx.indent += 1
+            self._gil_check(ctx)
             ctx.emit('{ ail_vecobj *_v = (ail_vecobj *)%s.o;'
                      ' if (%s >= %s) break; %s = _v->p[%s++]; }'
                      % (it, idx, hi, val, idx))
@@ -1794,6 +1827,7 @@ class Compiler:
             ctx.emit('int64_t %s = 0;' % idx)
             ctx.emit('for (;;) {')
             ctx.indent += 1
+            self._gil_check(ctx)
             ctx.emit('{ ail_vecobj *_v = (ail_vecobj *)%s.o;'
                      ' if (%s >= _v->n) break; %s = _v->p[%s++]; }'
                      % (it, idx, val, idx))
@@ -1804,6 +1838,7 @@ class Compiler:
             ctx.emit('int64_t %s = 0;' % idx)
             ctx.emit('for (;;) {')
             ctx.indent += 1
+            self._gil_check(ctx)
             ctx.emit('{ ail_obj _s = %s;'
                      ' if (%s >= _s.sv.len) break;'
                      ' %s = ail_str_view(_s.sv.backing, _s.sv.off + %s, 1); %s++; }'
@@ -1813,6 +1848,7 @@ class Compiler:
         ctx.check()
         ctx.emit('for (;;) {')
         ctx.indent += 1
+        self._gil_check(ctx)
         ctx.emit('st = ail_it_next(cx, &%s, %s);' % (val, it))
         ctx.emit('if (st == AIL_STOP) { st = AIL_OK; break; }')
         ctx.check()
@@ -3377,7 +3413,24 @@ class Compiler:
         ctx.check()
         return t
 
+    def _call_thread_prim(self, name, args, kwargs, ctx):
+        """G12: a primitive of thread_prelude.py (threadlib.PRIMS), C in threadrt.py."""
+        import threadlib
+        cfn, count = threadlib.PRIMS[name]
+        if kwargs or len(args) != count:
+            raise Unsupported('%s takes %d positional arguments' % (name, count))
+        argcs = [self.expr(a, ctx) for a in args]
+        t = ctx.tmp()
+        fields = {'t': t}
+        for i, each in enumerate(argcs):
+            fields['a%d' % i] = each
+        ctx.emit('st = %s;' % cfn.format(**fields))
+        ctx.check()
+        return t
+
     def _call_name(self, name, args, kwargs, ctx):
+        if self.threads and name.startswith('_ail_th_') and name not in self.functions:
+            return self._call_thread_prim(name, args, kwargs, ctx)
         if name in self._CLOCK_PRIMS and name not in self.functions and name not in self.classes:
             return self._call_clock(name, args, kwargs, ctx)
         if name in self.classes:
@@ -4739,8 +4792,21 @@ class Compiler:
         ctx.indent -= 1
         ctx.emit('} else {')
         ctx.indent += 1
+        mark = len(ctx.lines)
+        try:
+            res = None if builtin is None else builtin(recv_c, None, args, kwargs, ctx)
+        except IndexError:
+            # the built-in method of that name takes more arguments than this call passes (`q.get()`
+            # of a user class beside dict.get): on any other receiver CPython raises TypeError
+            del ctx.lines[mark:]
+            ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "%s() takes more arguments"); goto %s;'
+                     % (f.attr, ctx.cur_err_target()))
+            ctx.uses_st = True
+            builtin = res = None
+            ctx.indent -= 1
+            ctx.emit('}')
+            return t
         if builtin is not None:
-            res = builtin(recv_c, None, args, kwargs, ctx)
             ctx.emit('%s = %s;' % (t, res))
         else:
             ctx.emit('st = ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, "object has no attribute \'%s\'"); goto %s;'
@@ -5957,6 +6023,7 @@ class Compiler:
                                'finally_depth': len(ctx.finally_stack)})
         ctx.emit('while (1) {')
         ctx.indent += 1
+        self._gil_check(ctx)
         cond = self.expr(node.test, ctx)
         ctx.emit('if (!ail_obj_truthy(%s)) break;' % cond)
         self.block(node.body, ctx)
@@ -6326,6 +6393,13 @@ def build(source, report, allow_mix=True):
     compiler = Compiler(allow_mix=allow_mix)
     body = compiler.compile(source)
     report['boxed'] = list(compiler.boxed_names)
+    if compiler.threads:
+        # G12: the prelude's own functions are not the program's; the link needs the thread library
+        import threadlib
+        for name in threadlib.prelude_def_names():
+            if name in report['boxed']:
+                report['boxed'].remove(name)
+        report['threads'] = True
     # BRIEF_mixed_mode.md: which functions this compile wired a typed clone + runtime guard for
     # (`pyc.py`'s build() links `mix_units` in alongside this boxed unit; see its own docstring),
     # how many call sites each one's guard covers, and the typed units themselves.

@@ -1270,5 +1270,159 @@ class PackageRefusals(ModulesBase):
                      "class body")
 
 
+
+PKG = {"pkg/__init__.py": "", "pkg/a.py": "X = 1\n\n\ndef f():\n    return \"fa\"\n", "pkg/b.py": "Y = 2\n"}
+
+
+class ImportOrder(ModulesBase):
+    """Import orders for which CPython raises AttributeError / ModuleNotFoundError or binds a different object.
+
+    Each program is run by CPython first: the claim "CPython does something else here" is checked, not assumed.
+    Then the compiler must refuse it by name (no program is built), or - for the orders that work - print what
+    CPython prints."""
+
+    def cpython(self, files, entry="main.py"):
+        write(self.dir, files)
+        env = dict(os.environ)
+        env.pop("PYTHONPATH", None)
+        return subprocess.run([sys.executable, "-B", entry], cwd=self.dir, capture_output=True, text=True,
+                              timeout=60, env=env)
+
+    def refusal_with_oracle(self, files, expected_out, expected_err, *needles):
+        ran = self.cpython(files)
+        self.assertEqual(ran.stdout, expected_out)
+        if expected_err:
+            self.assertNotEqual(ran.returncode, 0)
+            self.assertIn(expected_err, ran.stderr)
+        else:
+            self.assertEqual(ran.returncode, 0, ran.stderr)
+        return self.refused(files, *needles)
+
+    def test_a_function_that_reads_a_submodule_defined_before_its_import(self):
+        # CPython: the call before `import pkg.a` raises AttributeError (caught here), the one after prints 1
+        main = ("import pkg\n\n\ndef get():\n    return pkg.a.X\n\n\ntry:\n    print(get())\nexcept AttributeError:\n"
+                "    print(\"AttributeError\")\nimport pkg.a\nprint(get())\n")
+        self.refusal_with_oracle({**PKG, "main.py": main}, "AttributeError\n1\n", "",
+                                 "pkg.a is read inside a function that is defined before the import that binds it")
+        # the order in the other direction is the same program as far as the compiler can tell
+        main = "import pkg\n\n\ndef get():\n    return pkg.a.X\n\n\nimport pkg.a\nprint(get())\n"
+        self.assertEqual(self.cpython({**PKG, "main.py": main}).stdout, "1\n")
+        self.refused({**PKG, "main.py": main}, "defined before the import that binds it")
+
+    def test_a_package_module_function_that_reads_a_sibling_imported_later(self):
+        files = {**PKG, "pkg/a.py": "import pkg\n\n\ndef z():\n    return pkg.b.Y\n",
+                 "main.py": ("import pkg.a\ntry:\n    print(pkg.a.z())\nexcept AttributeError:\n    print(\"AttributeError\")\n"
+                             "import pkg.b\nprint(pkg.a.z())\n")}
+        self.refusal_with_oracle(files, "AttributeError\n2\n", "", "pkg.b is read inside a function that is defined before")
+
+    def test_functions_defined_after_the_import_still_work(self):
+        main = ("import pkg\nimport pkg.a\n\n\ndef get():\n    return pkg.a.X\n\n\nprint(get())\n"
+                "print(pkg.a.f())\n")
+        self.assertEqual(self.same_as_cpython({**PKG, "main.py": main}), "1\nfa\n")
+        # a package that imports its own submodules makes the attribute available to everyone
+        files = {**PKG, "pkg/__init__.py": "from . import a\n",
+                 "main.py": "import pkg\n\n\ndef get():\n    return pkg.a.X\n\n\nprint(get())\n"}
+        self.assertEqual(self.same_as_cpython(files), "1\n")
+        # a sibling that imports its sibling first
+        files = {**PKG, "pkg/a.py": "import pkg.b\nimport pkg\n\n\ndef z():\n    return pkg.b.Y\n",
+                 "main.py": "import pkg.a\nprint(pkg.a.z(), pkg.b.Y)\n"}
+        self.assertEqual(self.same_as_cpython(files), "2 2\n")
+
+    def test_module_level_reads_before_the_import_are_refused(self):
+        for label, main, out, err, needle in (
+                ("attribute of a package that imports nothing", "import pkg\nprint(pkg.a.X)\n", "", "AttributeError",
+                 "package 'pkg' has no attribute 'a'"),
+                ("caught and then imported", "import pkg\ntry:\n    print(pkg.a.X)\nexcept AttributeError:\n"
+                 "    print(\"AttributeError\")\nimport pkg.a\nprint(pkg.a.X)\n", "AttributeError\n1\n", "",
+                 "read before the import that binds it has run"),
+                ("a sibling nobody imports", "import pkg.a\nprint(pkg.b.Y)\n", "", "AttributeError",
+                 "package 'pkg' has no attribute 'b'"),
+                ("a conditional import that does not run",
+                 "import pkg\nif len(\"abc\") == 4:\n    import pkg.a\nprint(pkg.a.X)\n", "", "AttributeError",
+                 "below the top level"),
+                ("an alias bound before the import", "import pkg as p\nprint(p.a.X)\nimport pkg.a\n", "", "AttributeError",
+                 "read before the import that binds it has run"),
+                ("a class body", "import pkg\n\n\nclass C:\n    v = pkg.a.X\n\n\nimport pkg.a\nprint(1)\n", "",
+                 "AttributeError", "read before the import that binds it has run")):
+            with self.subTest(label):
+                self.refusal_with_oracle({**PKG, "main.py": main}, out, err, needle)
+
+    def test_a_namespace_package_has_no_submodule_attribute_either(self):
+        files = {"nsp/a.py": "X = 1\n", "nsp/b.py": "Y = 2\n",
+                 "main.py": "import nsp.a\nprint(nsp.a.X)\nprint(nsp.b.Y)\n"}
+        self.refusal_with_oracle(files, "1\n", "AttributeError", "package 'nsp' has no attribute 'b'")
+
+    def test_a_deeper_package_needs_the_import_of_every_level(self):
+        files = {**PKG, "pkg/__init__.py": "from . import sub\n", "pkg/sub/__init__.py": "", "pkg/sub/c.py": "Z = 3\n",
+                 "pkg/sub/d.py": "W = 4\n",
+                 "main.py": "import pkg\nimport pkg.sub.c\nprint(pkg.sub.c.Z)\nprint(pkg.sub.d.W)\n"}
+        self.refusal_with_oracle(files, "3\n", "AttributeError", "package 'pkg.sub' has no attribute 'd'")
+
+    def test_a_package_name_that_the_submodule_import_would_rebind(self):
+        # CPython: `import pkg.a` stores the module over the attribute `a` the package defined
+        for label, init in (("a variable", "a = 5\n"), ("a function", "def a():\n    return \"func\"\n"),
+                            ("a class", "class a:\n    pass\n"), ("an imported name", "from .b import Y as a\n")):
+            with self.subTest(label):
+                files = {**PKG, "pkg/__init__.py": init, "main.py": "import pkg\nimport pkg.a\nprint(pkg.a.X)\n"}
+                ran = self.cpython(files)
+                self.assertEqual((ran.returncode, ran.stdout), (0, "1\n"))
+                self.refused(files, "is also a submodule that the program imports", "order of the imports")
+        files = {**PKG, "pkg/__init__.py": "a = 5\n", "main.py": "import pkg\nprint(pkg.a)\nimport pkg.a\nprint(pkg.a.X)\n"}
+        self.assertEqual(self.cpython(files).stdout, "5\n1\n")
+        self.refused(files, "pkg.a")
+        files = {**PKG, "pkg/__init__.py": "a = 5\n", "main.py": "from pkg.a import f\nimport pkg\nprint(pkg.a.X, f())\n"}
+        self.assertEqual(self.cpython(files).stdout, "1 fa\n")
+        self.refused(files, "is also a submodule that the program imports")
+
+    def test_the_name_alone_is_fine_when_the_submodule_is_never_imported(self):
+        files = {**PKG, "pkg/__init__.py": "a = 5\n", "main.py": "import pkg\nprint(pkg.a)\n"}
+        self.assertEqual(self.same_as_cpython(files), "5\n")
+        files = {**PKG, "pkg/__init__.py": "a = 5\n", "main.py": "from pkg import a\nprint(a)\n"}
+        self.assertEqual(self.same_as_cpython(files), "5\n")
+        # `from . import a` binds the module itself: not a clash
+        files = {**PKG, "pkg/__init__.py": "from . import a\n", "main.py": "import pkg\nimport pkg.a\nprint(pkg.a.X)\n"}
+        self.assertEqual(self.same_as_cpython(files), "1\n")
+
+    def test_orders_that_work_in_cpython_print_the_same(self):
+        cases = {
+            "dotted imports then both attributes": ("import pkg.b\nimport pkg.a\nprint(pkg.a.X, pkg.b.Y)\n", PKG),
+            "a sibling imported by a sibling": ("import pkg.a\nprint(pkg.b.Y)\n",
+                                                {**PKG, "pkg/a.py": "import pkg.b\nX = 1\n"}),
+            "a relative sibling import": ("import pkg.a\nprint(pkg.b.Y)\n",
+                                          {**PKG, "pkg/a.py": "from . import b\nX = 1\n"}),
+            "an import cycle between siblings": ("import pkg.a\nprint(pkg.a.X, pkg.b.Y)\n",
+                                                 {**PKG, "pkg/a.py": "from . import b\nX = 1\n",
+                                                  "pkg/b.py": "from . import a\nY = 2\n"}),
+            "from-import of two submodules": ("from pkg import a, b\nprint(a.X, b.Y)\n", PKG),
+            "the package binds the submodule": ("import pkg\nprint(pkg.a.X)\n", {**PKG, "pkg/__init__.py": "import pkg.a\n"}),
+            "the alias is bound before and used after": ("import pkg as p\nimport pkg.a\nprint(p.a.X)\n", PKG),
+        }
+        for label, (main, files) in cases.items():
+            with self.subTest(label):
+                self.same_as_cpython({**files, "main.py": main})
+
+    def test_an_import_of_a_module_that_does_not_exist_is_refused_even_when_unused(self):
+        # CPython stops at the import with ModuleNotFoundError; a program that never used the name used to be built
+        for label, main, needle in (("unused", "import nothere\nprint(1)\n", "import of 'nothere' is not available"),
+                                    ("from", "from nothere import x\nprint(1)\n", "import of 'nothere' is not available"),
+                                    ("dotted", "import nothere.sub as s\nprint(1)\n", "import of 'nothere.sub' is not available"),
+                                    ("third party alias", "import numpy as np\nprint(1)\n", "import of 'numpy' is not available")):
+            with self.subTest(label):
+                ran = self.cpython({"main.py": main})
+                self.assertNotEqual(ran.returncode, 0)
+                self.assertIn("ModuleNotFoundError", ran.stderr)
+                self.assertEqual(ran.stdout, "")
+                stderr = self.refused({"main.py": main}, needle, "ModuleNotFoundError")
+                self.assertIn("main.py:1:1", stderr)
+
+    def test_standard_library_and_local_imports_are_not_mistaken_for_missing_ones(self):
+        files = {"helper.py": "V = 7\n", "main.py": "import os\nimport sys\nimport helper\nimport collections.abc\nprint(helper.V)\n"}
+        write(self.dir, files)
+        built, exe = compile_program(self.dir, "main.py", "1")
+        self.assertEqual(built.returncode, 0, built.stderr)
+        ran = subprocess.run([str(exe)], capture_output=True, timeout=60)
+        self.assertEqual(ran.stdout, b"7\n")
+
+
 if __name__ == "__main__":
     unittest.main()

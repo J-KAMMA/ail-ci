@@ -37,6 +37,8 @@ class BoolInfo:
         self.list_fields = set()    # (struct, field) declared list[bool]
         self.locals = {}            # compiled function name -> names holding a bool
         self.lists = {}             # compiled function name -> names holding a list of bools
+        self.env = None             # what `boolish` judges by (set by `scan`)
+        self.units = ()             # [(compiled name, def)] of every function `scan` looked at
 
 
 EMPTY = BoolInfo()      # a program defining its own `bool` struct: nothing is a bool
@@ -181,8 +183,202 @@ def _bound_names(target):
     return {n.id for n in ast.walk(target) if isinstance(n, ast.Name)}
 
 
-def scan(tree, error):
-    """Record and rewrite every bool annotation in `tree`; return a BoolInfo (see module note)."""
+def _facts(f):
+    """What a function assigns: values by name, `for` iterables, names a number can reach
+    (`poisoned`), container stores (`breaks`), and where each poisoning happens."""
+    values, loops, poisoned, breaks = {}, {}, set(), {}
+    poison_at = {}
+    for node in _own_nodes(f):
+        if isinstance(node, ast.AugAssign):
+            target = node.target.value if isinstance(node.target, ast.Subscript) else node.target
+            if isinstance(target, ast.Name):
+                poison_at.setdefault(target.id, node)
+        elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension, ast.Assign)):
+            for t in (node.targets if isinstance(node, ast.Assign) else [node.target]):
+                if isinstance(t, (ast.Tuple, ast.List)) or not isinstance(node, ast.Assign):
+                    for name in _bound_names(t):
+                        poison_at.setdefault(name, node.target if isinstance(node, ast.comprehension) else node)
+    for node in _own_nodes(f):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
+            for t in (node.targets if isinstance(node, ast.Assign) else [node.target]):
+                if isinstance(t, ast.Name):
+                    values.setdefault(t.id, []).append(node.value)
+                elif isinstance(t, (ast.Tuple, ast.List)):
+                    if (isinstance(node.value, (ast.Tuple, ast.List))
+                            and len(node.value.elts) == len(t.elts)):
+                        for sub, val in zip(t.elts, node.value.elts):
+                            if isinstance(sub, ast.Name):
+                                values.setdefault(sub.id, []).append(val)
+                            else:
+                                poisoned |= _bound_names(sub)
+                    else:
+                        poisoned |= _bound_names(t)
+                elif isinstance(t, ast.Subscript) and isinstance(t.value, ast.Name):
+                    breaks.setdefault(t.value.id, []).append(node.value)
+        elif isinstance(node, ast.AugAssign):
+            if isinstance(node.target, ast.Name):
+                poisoned.add(node.target.id)
+                breaks.setdefault(node.target.id, []).append(None)
+            elif isinstance(node.target, ast.Subscript) and isinstance(node.target.value, ast.Name):
+                breaks.setdefault(node.target.value.id, []).append(None)
+        elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+            if isinstance(node.target, ast.Name):
+                loops.setdefault(node.target.id, []).append(node.iter)
+            else:
+                poisoned |= _bound_names(node.target)
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if item.optional_vars is not None:
+                    poisoned |= _bound_names(item.optional_vars)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            poisoned.add(node.name)
+        elif isinstance(node, ast.NamedExpr):
+            poisoned.add(node.target.id)
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+              and isinstance(node.func.value, ast.Name)):
+            if node.func.attr in ('append', 'insert') and node.args:
+                breaks.setdefault(node.func.value.id, []).append(node.args[-1])
+            elif node.func.attr == 'extend':
+                breaks.setdefault(node.func.value.id, []).append(
+                    ('list', node.args[0] if node.args else None))
+    return values, loops, poisoned, breaks, poison_at
+
+
+def _solve(env, names, lists, fixed_names, fixed_lists, values, loops, breaks):
+    """Shrink the candidate bool names and lists to a fixed point (in place)."""
+    changed = True
+    while changed:
+        changed = False
+        for n in sorted(names - fixed_names):
+            if not (all(boolish(v, env, names, lists) for v in values.get(n, ()))
+                    and all(bool_list_value(it, env, names, lists) for it in loops.get(n, ()))):
+                names.discard(n)
+                changed = True
+        for n in sorted(lists - fixed_lists):
+            ok = n not in names and all(bool_list_value(v, env, names, lists)
+                                        for v in values.get(n, ()))
+            for brk in breaks.get(n, ()):
+                if brk is None or (isinstance(brk, tuple) and (
+                        brk[1] is None or not bool_list_value(brk[1], env, names, lists))) or (
+                        not isinstance(brk, tuple) and not boolish(brk, env, names, lists)):
+                    ok = False
+            if not ok:
+                lists.discard(n)
+                changed = True
+
+
+def _infer_unannotated(info, tree, units, classes, methods, functions, declared, slots, module_bools=frozenset()):
+    """Unannotated parameters and results that are bools. A top-level function's parameter is a bool
+    when every call passes a bool for it (a comparison, `not`, True / False, a bool name or call) and
+    the function only stores bools into it; its result is a bool when every `return` is one. Found by
+    shrinking from "all of them" to a fixed point, since a bool parameter makes more returns bools.
+    A parameter that some calls pass a bool and others a number cannot be told apart by kind and is
+    refused by name (Python keeps each value's own type; an int64 cannot)."""
+    top = {f.name: f for f in functions}
+    sites = {name: [] for name in top}
+    as_value = set()
+    keyed = list(units) + [(None, node, None) for node in tree.body
+                           if not isinstance(node, (ast.FunctionDef, ast.ClassDef))]
+    for key, f, owner in keyed:
+        walk = list(ast.walk(f))
+        called = {id(n.func) for n in walk if isinstance(n, ast.Call)}
+        for n in walk:
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in top:
+                sites[n.func.id].append((key, n))
+            elif isinstance(n, ast.Name) and n.id in top and isinstance(n.ctx, ast.Load) and id(n) not in called:
+                as_value.add(n.id)
+    base_fns = set(info.fns)
+    cand_params, cand_results = {}, set()
+    for name, f in top.items():
+        a = f.args
+        simple = not (a.vararg or a.kwarg or a.kwonlyargs or a.posonlyargs)
+        if simple and name not in as_value and sites[name] and not any(
+                isinstance(n, (ast.Yield, ast.YieldFrom)) for n in _own_nodes(f)):
+            ps = {p.arg for p in a.args if p.annotation is None}
+            if ps:
+                cand_params[name] = ps
+        returns = [n for n in _own_nodes(f) if isinstance(n, ast.Return)]
+        if (f.returns is None and name not in base_fns and returns and all(r.value is not None for r in returns)
+                and isinstance(f.body[-1], (ast.Return, ast.Raise))):
+            cand_results.add(name)
+    if not cand_params and not cand_results:
+        return
+    facts = {key: _facts(f) for key, f, owner in units}
+    unit_of = {key: (f, owner) for key, f, owner in units}
+    first = dict(cand_params)
+    mixed = {}
+    for _ in range(12):
+        info.fns = base_fns | cand_results
+        env = _Env(info, classes, methods, functions)
+        names_of, lists_of = {}, {}
+        for key, f, owner in units:
+            fixed_names, fixed_lists, annotated = declared[key]
+            fixed_names = set(fixed_names) | cand_params.get(key, set())
+            fixed_names |= set(module_bools) - {x.arg for x in (*f.args.posonlyargs, *f.args.args, *f.args.kwonlyargs)}
+            values, loops, poisoned, breaks, _at = facts[key]
+            params = {x.arg for x in (*f.args.posonlyargs, *f.args.args, *f.args.kwonlyargs)}
+            free = (set(values) | set(loops)) - params - poisoned
+            names = set(fixed_names) | (free - fixed_lists)
+            lists = set(fixed_lists) | ((set(values) - params - poisoned) - fixed_names)
+            _solve(env, names, lists, fixed_names, fixed_lists, values, loops, breaks)
+            names_of[key], lists_of[key] = names, lists
+        new_results = {k for k in cand_results if all(
+            boolish(r.value, env, names_of[k], lists_of[k])
+            for r in _own_nodes(unit_of[k][0]) if isinstance(r, ast.Return))}
+        new_params = {}
+        for fname, ps in cand_params.items():
+            f = top[fname]
+            args = f.args.args
+            ndef = len(f.args.defaults)
+            keep = set()
+            for pi, p in enumerate(args):
+                if p.arg not in ps:
+                    continue
+                verdicts = []
+                for caller, call in sites[fname]:
+                    names_c = names_of.get(caller, set())
+                    lists_c = lists_of.get(caller, set())
+                    if any(isinstance(x, ast.Starred) for x in call.args) or any(k.arg is None for k in call.keywords):
+                        verdicts.append(None)
+                        continue
+                    if pi < len(call.args):
+                        arg = call.args[pi]
+                    else:
+                        arg = next((k.value for k in call.keywords if k.arg == p.arg), None)
+                        if arg is None and pi >= len(args) - ndef:
+                            arg = f.args.defaults[pi - (len(args) - ndef)]
+                    verdicts.append(None if arg is None else boolish(arg, env, names_c, lists_c))
+                values, loops, poisoned, breaks, _at = facts[fname]
+                stores_ok = p.arg not in poisoned and all(
+                    boolish(v, env, names_of[fname], lists_of[fname]) for v in values.get(p.arg, ()))
+                if verdicts and all(v is True for v in verdicts) and stores_ok:
+                    keep.add(p.arg)
+                elif any(v is True for v in verdicts) and any(v is False for v in verdicts):
+                    mixed[(fname, p.arg)] = f
+            new_params[fname] = keep
+        if new_results == cand_results and new_params == cand_params:
+            break
+        cand_results, cand_params = new_results, new_params
+    for (fname, pname), f in mixed.items():
+        if pname not in cand_params.get(fname, ()):
+            at = next(p for p in f.args.args if p.arg == pname)
+            _fail(info.error, 'parameter `%s` of %s() gets a bool from some calls and a number from others; '
+                  'Python keeps each value\'s own type and a number would print as 1 / 0.\n'
+                  '  write instead: pass the same kind everywhere (`int(flag)` or a comparison)' % (pname, fname), at)
+    info.fns = base_fns | cand_results
+    for fname, ps in cand_params.items():
+        key = fname
+        for index, p in enumerate(top[fname].args.args):
+            if p.arg in ps:
+                declared[key][0].add(p.arg)
+                slots[key].append((index, p.arg, False))
+
+
+def scan(tree, error, module_bools=frozenset()):
+    """Record and rewrite every bool annotation in `tree`; return a BoolInfo (see module note).
+    `module_bools` are the module variables that start as True / False and that functions rebind
+    with `global`: each is a bool in every function that does not take a parameter of that name,
+    and every store into one must be a bool."""
     classes = {n.name: n for n in tree.body if isinstance(n, ast.ClassDef)}
     if 'bool' in classes:
         return EMPTY
@@ -226,87 +422,21 @@ def scan(tree, error):
                     (names if kind == 'bool' else lists).add(node.target.id)
                     annotated.add(node.target.id)
         declared[key] = (names, lists, annotated)
+    info.error = error
+    _infer_unannotated(info, tree, units, classes, methods, functions, declared, slots, module_bools)
     env = _Env(info, classes, methods, functions)
+    info.env = env
+    info.units = [(key, f) for key, f, owner in units]
     for key, f, owner in units:
         fixed_names, fixed_lists, annotated = declared[key]
         params = {a.arg for a in (*f.args.posonlyargs, *f.args.args, *f.args.kwonlyargs)}
-        values, loops, poisoned, breaks = {}, {}, set(), {}
-        poison_at = {}
-        for node in _own_nodes(f):
-            if isinstance(node, ast.AugAssign):
-                target = node.target.value if isinstance(node.target, ast.Subscript) else node.target
-                if isinstance(target, ast.Name):
-                    poison_at.setdefault(target.id, node)
-            elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension, ast.Assign)):
-                for t in (node.targets if isinstance(node, ast.Assign) else [node.target]):
-                    if isinstance(t, (ast.Tuple, ast.List)) or not isinstance(node, ast.Assign):
-                        for name in _bound_names(t):
-                            poison_at.setdefault(name, node.target if isinstance(node, ast.comprehension) else node)
-        for node in _own_nodes(f):
-            if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
-                for t in (node.targets if isinstance(node, ast.Assign) else [node.target]):
-                    if isinstance(t, ast.Name):
-                        values.setdefault(t.id, []).append(node.value)
-                    elif isinstance(t, (ast.Tuple, ast.List)):
-                        if (isinstance(node.value, (ast.Tuple, ast.List))
-                                and len(node.value.elts) == len(t.elts)):
-                            for sub, val in zip(t.elts, node.value.elts):
-                                if isinstance(sub, ast.Name):
-                                    values.setdefault(sub.id, []).append(val)
-                                else:
-                                    poisoned |= _bound_names(sub)
-                        else:
-                            poisoned |= _bound_names(t)
-                    elif isinstance(t, ast.Subscript) and isinstance(t.value, ast.Name):
-                        breaks.setdefault(t.value.id, []).append(node.value)
-            elif isinstance(node, ast.AugAssign):
-                if isinstance(node.target, ast.Name):
-                    poisoned.add(node.target.id)
-                    breaks.setdefault(node.target.id, []).append(None)
-                elif isinstance(node.target, ast.Subscript) and isinstance(node.target.value, ast.Name):
-                    breaks.setdefault(node.target.value.id, []).append(None)
-            elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
-                if isinstance(node.target, ast.Name):
-                    loops.setdefault(node.target.id, []).append(node.iter)
-                else:
-                    poisoned |= _bound_names(node.target)
-            elif isinstance(node, (ast.With, ast.AsyncWith)):
-                for item in node.items:
-                    if item.optional_vars is not None:
-                        poisoned |= _bound_names(item.optional_vars)
-            elif isinstance(node, ast.ExceptHandler) and node.name:
-                poisoned.add(node.name)
-            elif isinstance(node, ast.NamedExpr):
-                poisoned.add(node.target.id)
-            elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                  and isinstance(node.func.value, ast.Name)):
-                if node.func.attr in ('append', 'insert') and node.args:
-                    breaks.setdefault(node.func.value.id, []).append(node.args[-1])
-                elif node.func.attr == 'extend':
-                    breaks.setdefault(node.func.value.id, []).append(
-                        ('list', node.args[0] if node.args else None))
+        gbools = set(module_bools) - params
+        fixed_names = set(fixed_names) | gbools
+        values, loops, poisoned, breaks, poison_at = _facts(f)
         free = (set(values) | set(loops)) - params - poisoned
         names = set(fixed_names) | (free - fixed_lists)
         lists = set(fixed_lists) | ((set(values) - params - poisoned) - fixed_names)
-        changed = True
-        while changed:
-            changed = False
-            for n in sorted(names - fixed_names):
-                if not (all(boolish(v, env, names, lists) for v in values.get(n, ()))
-                        and all(bool_list_value(it, env, names, lists) for it in loops.get(n, ()))):
-                    names.discard(n)
-                    changed = True
-            for n in sorted(lists - fixed_lists):
-                ok = n not in names and all(bool_list_value(v, env, names, lists)
-                                            for v in values.get(n, ()))
-                for brk in breaks.get(n, ()):
-                    if brk is None or (isinstance(brk, tuple) and (
-                            brk[1] is None or not bool_list_value(brk[1], env, names, lists))) or (
-                            not isinstance(brk, tuple) and not boolish(brk, env, names, lists)):
-                        ok = False
-                if not ok:
-                    lists.discard(n)
-                    changed = True
+        _solve(env, names, lists, fixed_names, fixed_lists, values, loops, breaks)
         info.locals[key] = frozenset(names)
         info.lists[key] = frozenset(lists)
         # A declared bool slot takes only bools.
@@ -318,6 +448,10 @@ def scan(tree, error):
             for v in values.get(n, ()):
                 if not boolish(v, env, names, lists):
                     _refuse(error, 'parameter `%s`' % n, v, _hint(v))
+        for n in sorted(gbools):
+            for v in values.get(n, ()):
+                if not boolish(v, env, names, lists):
+                    _refuse(error, 'the module variable `%s`' % n, v, _hint(v))
         for n in sorted(fixed_names & poisoned):
             _fail(error, '`%s` is declared bool; `+=` or a loop/unpacking target stores a number '
                   'into it -- assign a bool (True/False, a comparison, `not`)' % n, poison_at.get(n, f))
@@ -348,6 +482,26 @@ def scan(tree, error):
         for node in _own_nodes(f):
             _check_stores(node, env, names, lists, info, classes, methods, slots, error)
     return info
+
+
+def check_numeric_vars(info, variables, bools, error):
+    """A module variable that starts as a number must not be assigned a bool: Python would then
+    print it as True / False, and the variable is one int64 that prints as a number."""
+    if info.env is None:
+        if bools:
+            _fail(error, 'a bool module variable needs the compiler\'s own bool; this program defines a '
+                  'struct named bool', ast.Pass())
+        return
+    for key, f in info.units:
+        names, lists = set(info.locals[key]) | set(bools), set(info.lists[key])
+        for node in _own_nodes(f):
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                name = node.targets[0].id
+                if name in variables and name not in bools and boolish(node.value, info.env, names, lists):
+                    _fail(error, 'the module variable `%s` starts as a number and is assigned a bool (`%s`); '
+                          'Python would then print it as True / False.\n'
+                          '  write instead: start it as False / True, or store a number '
+                          '(`int(%s)`)' % (name, _show(node.value), _show(node.value)), node)
 
 
 def _fail(error, message, node):

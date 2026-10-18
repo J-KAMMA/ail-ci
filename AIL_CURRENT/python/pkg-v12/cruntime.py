@@ -26371,9 +26371,68 @@ def emit(parts):
             + ''.join(_piece(p, want) for p in ORDER if p in want))
 
 
+# OSError(errno, strerror) on the typed path (FFI errno failures): the exception keeps its errno and the offset of
+# the strerror text inside the message, spliced into the struct only when the program reads them (the pinned C of
+# every other program stays as it was).
+def _os_exception(text):
+    old = "    _Bool bytes;\n} ail_exception;\n"
+    if text.count(old) != 1:
+        raise AssertionError('DIE block changed; update cruntime._os_exception')
+    return text.replace(old, "    _Bool bytes;\n    int64_t err, se_off;\n    _Bool has_err;\n} ail_exception;\n")
+
+
+OSEXC = r'''
+/* OSError(errno, strerror): the class CPython's constructor picks for the errno (ENOENT FileNotFoundError, EACCES and
+   EPERM PermissionError, EISDIR, EEXIST, ENOTDIR; every other errno is a plain OSError), `str(e)` is
+   "[Errno N] text", `.errno` is N and `.strerror` is the text. */
+#include <errno.h>
+static int64_t ail_exception_no_errno(void) {
+    static const char m[] = "this OSError carries no errno in a compiled program";
+    ail_raise_value_adopt(ail_exception_new(AIL_EXC_RUNTIME, (const uint8_t *)m, (int64_t)sizeof m - 1, 1));
+    return 0;
+}
+static ail_exception *ail_exception_new_os(int64_t err, ail_str text) {
+    int code = AIL_EXC_OS;
+    switch (err) {
+    case ENOENT: code = AIL_EXC_FNF; break;
+    case EACCES: case EPERM: code = AIL_EXC_PERM; break;
+    case EISDIR: code = AIL_EXC_ISDIR; break;
+    case EEXIST: code = AIL_EXC_EXIST; break;
+    case ENOTDIR: code = AIL_EXC_NOTDIR; break;
+    default: break;
+    }
+    char head[48];
+    int h = snprintf(head, sizeof head, "[Errno %lld] ", (long long)err);
+    uint8_t *buf = malloc((size_t)h + (size_t)(text.n > 0 ? text.n : 1));
+    if (!buf) ail_die("out of memory");
+    memcpy(buf, head, (size_t)h);
+    if (text.n > 0) ail_str_put(buf + h, text);
+    ail_exception *value = ail_exception_new(code, buf, (int64_t)h + text.n, text.bytes);
+    free(buf);
+    value->err = err;
+    value->se_off = h;
+    value->has_err = 1;
+    return value;
+}
+static int64_t ail_exception_errno(ail_exception *value) {
+    return value->has_err ? value->err : ail_exception_no_errno();
+}
+static ail_str ail_exception_strerror(ail_exception *value) {
+    if (!value->has_err) ail_exception_no_errno();
+    return (ail_str){value->p + value->se_off, value->n - value->se_off, value->bytes};
+}
+'''
+
+ORDER.insert(ORDER.index('STR') + 1, 'OSEXC')
+SOURCE['OSEXC'] = OSEXC
+REQUIRES['OSEXC'] = ['STR', 'DIE', 'FILEEXC']
+
+
 def _piece(p, want):
     text = (_overflow_exception(_assert_exception(SOURCE[p])) if p == 'DIE' and 'OVERFLOWEXC' in want
             else _assert_exception(SOURCE[p]) if p == 'DIE' and 'ASSERTEXC' in want else SOURCE[p])
+    if p == 'DIE' and 'OSEXC' in want:
+        text = _os_exception(text)
     if p == 'DIE' and 'FILEEXC' in want:
         text = _filert.file_exception(text, 'FILECORE' in want)
         if 'PROCEXC' in want:

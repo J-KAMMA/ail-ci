@@ -124,6 +124,17 @@ def _collib():
     return _collib.module
 
 
+def _threadlib():
+    """python/pkg-v12/threadlib.py (stage G12: threading, queue, concurrent.futures; the first source pass)."""
+    if not hasattr(_threadlib, "module"):
+        here = str(Path(__file__).parent / "python" / "pkg-v12")
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import threadlib
+        _threadlib.module = threadlib
+    return _threadlib.module
+
+
 def _stdlib4():
     """python/pkg-v12/stdlib4.py (library batch 4: csv, datetime, ... lowered before the other source passes)."""
     if not hasattr(_stdlib4, "module"):
@@ -2232,6 +2243,8 @@ def _modtables():
 def python_surface(source, notes=None, library=False):
     """Map the Python spellings above onto the compiler's own; `notes` collects (line, why) for
     the constructs left as written."""
+    if any(name in source for name in ("threading", "queue", "concurrent")):
+        source = _threadlib().rewrite_text(source, notes)
     if any(name in source for name in ("csv", "datetime", "decimal", "fractions", "time", "zoneinfo")):
         source = _stdlib4().rewrite_text(source, notes)
     if "collections" in source:

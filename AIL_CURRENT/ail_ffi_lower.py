@@ -422,7 +422,12 @@ class Session:
             out.append('    if ffi_rc %s:' % CHECKS[d.check])
             if d.errno:
                 out.append('        ffi_e = ffi_%s__errno()' % d.tag)
-                out.append('        raise %s("[Errno %%d] %%s" %% (ffi_e, ffi_%s__strerror(ffi_e)))' % (d.exc, d.tag))
+                if d.exc == 'OSError':
+                    # CPython's shim raises OSError(err, os.strerror(err)): `.errno`, `.strerror`, the
+                    # errno-picked subclass and str(e) == "[Errno N] text"
+                    out.append('        raise OSError(ffi_e, ffi_%s__strerror(ffi_e))' % d.tag)
+                else:
+                    out.append('        raise %s("[Errno %%d] %%s" %% (ffi_e, ffi_%s__strerror(ffi_e)))' % (d.exc, d.tag))
             else:
                 out.append('        raise %s("%s failed with %%d" %% ffi_rc)' % (d.exc, d.name))
         out.append('    return ffi_rc != 0' if d.result == 'c_bool' else '    return ffi_rc')

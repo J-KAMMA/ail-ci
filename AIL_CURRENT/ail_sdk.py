@@ -673,6 +673,29 @@ def _declared_inputs(root, interface, value):
             yield _local_file(root, interface.parent / name)
 
 
+# Licence texts live once, at the repository root (beside AIL_CURRENT). An export carries them by copy;
+# re-exporting an SDK finds them at its own root.
+LICENSE_FILES = ('LICENSE-APACHE', 'LICENSE-MIT')
+
+
+def _license_payloads(root, payloads):
+    """Add LICENSE_FILES to payloads (unless already selected); return the names copied from outside root."""
+    outside = set()
+    for name in LICENSE_FILES:
+        if name in payloads:
+            continue
+        for base in (root, root.parent):
+            candidate = base / name
+            if candidate.is_file():
+                payloads[name] = _local_file(base.resolve(strict=True), candidate).read_bytes()
+                if base is not root:
+                    outside.add(name)
+                break
+        else:
+            raise ValueError(f'missing license file: {name}')
+    return outside
+
+
 def export_sdk(source_root: Path, output: Path) -> dict:
     """Write a new SDK directory, preserving partial output on copy failure."""
     source_root, output = Path(source_root).absolute(), Path(output).absolute()
@@ -781,6 +804,7 @@ def export_sdk(source_root: Path, output: Path) -> dict:
                 raise ValueError('stale standard API module declaration')
     if _sha(manifest_path.read_bytes()) != manifest_hash:
         raise ValueError('source manifest changed during preflight')
+    outside = _license_payloads(root, payloads)
     payloads['SDK_README_JA.md'] = README.encode('utf-8')
     hashes = {name: _sha(data) for name, data in payloads.items()}
     result = {'kind': 'ail_language_sdk', 'version': 1, 'abi': 11,
@@ -798,7 +822,7 @@ def export_sdk(source_root: Path, output: Path) -> dict:
             if _sha(target.read_bytes()) != hashes[name]:
                 raise ValueError(f'copied SHA-256 mismatch: {name}')
         for name in payloads:
-            if name != 'SDK_README_JA.md' and _sha(_local_file(root, root / name).read_bytes()) != hashes[name]:
+            if name != 'SDK_README_JA.md' and name not in outside and _sha(_local_file(root, root / name).read_bytes()) != hashes[name]:
                 raise ValueError(f'source changed during copy: {name}')
         if _sha(manifest_path.read_bytes()) != manifest_hash:
             raise ValueError('source manifest changed during copy')

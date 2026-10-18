@@ -218,6 +218,40 @@ def hierarchy_program(classes):
     return "\n".join(out) + "\n"
 
 
+# OSError(errno, strerror) built by the program (G4 raises it for an FFI errno failure): .errno, .strerror, str(e)
+# and the errno-picked subclass, on a name bound by `except OSError as e`
+USER_OSERROR = r"""
+def show(n: int, text: str) -> None:
+    try:
+        raise OSError(n, text)
+    except FileNotFoundError as e:
+        print("FileNotFoundError", e.errno, e.strerror, str(e))
+    except PermissionError as e:
+        print("PermissionError", e.errno, e.strerror, str(e))
+    except IsADirectoryError as e:
+        print("IsADirectoryError", e.errno, str(e))
+    except FileExistsError as e:
+        print("FileExistsError", e.errno, str(e))
+    except NotADirectoryError as e:
+        print("NotADirectoryError", e.errno, str(e))
+    except OSError as e:
+        print("OSError", e.errno, e.strerror, str(e))
+
+
+def main():
+    for n in (1, 2, 13, 17, 20, 21, 33, 0, -1, 99999):
+        show(n, "text " + str(n))
+    show(2, "")
+    show(2, "café 日本")
+    try:
+        raise OSError(2, "again")
+    except OSError as e:
+        print(e.errno, e.strerror)
+        print(str(e) + "!")
+
+main()
+"""
+
 TYPED_CLASSES = CLASSES[:5] + ("OSError",)      # the exception names the typed path has
 HIERARCHY_TYPED = hierarchy_program(TYPED_CLASSES)
 HIERARCHY = hierarchy_program(CLASSES)
@@ -235,6 +269,20 @@ class Excfix(Base):
 
     def test_c23_hierarchy_general(self):
         self.compare("hier_g", HIERARCHY, mode="gonly", irs=("1",))
+
+    def test_oserror_with_errno_typed(self):
+        self.compare("userr", USER_OSERROR, mode="typed", irs=("0", "1"))
+
+    def test_oserror_with_errno_general_is_refused_by_name(self):
+        # the general path has no errno on its exceptions yet; it says so rather than print another text
+        self.refused(USER_OSERROR, "raising OSError with more than one argument", mode="gonly")
+
+    def test_errno_of_other_classes_is_refused_on_the_typed_path(self):
+        body = ("def main():\n    try:\n        raise ValueError('x')\n    except ValueError as e:\n"
+                "        print(%s)\n\nmain()\n")
+        for expr in ("e.errno", "e.strerror", "str(e)"):
+            with self.subTest(expr):
+                self.refused(body % expr, "is built only on a name bound by `except OSError as e`")
 
 
 if __name__ == "__main__":
