@@ -1,9 +1,9 @@
 echo lima
-banana golf mallory.carol@victor.com india
-victor heidi.mallory@echo.org foxtrot kilo
+banana golf mallory.carol@victor.example.com india
+victor heidi.mallory@echo.example.org foxtrot kilo
 golf tango papa papa zulu
-india oscar november 750-594-4542 carol.frank@uniform.com uniform
-bob.niaj@xray.com xray hotel echo november lima
+india oscar november 750-594-4542 carol.frank@uniform.example.com uniform
+bob.niaj@xray.example.com xray hotel echo november lima
 papa 571-589-1929 zulu
 november india
-tango uniform echo bob.bob@delta.org romeo
+tango uniform echo bob.bob@delta.example.org romeo

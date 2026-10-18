@@ -31,6 +31,7 @@ sys.path[:0] = [str(ROOT / 'python' / 'pkg-v12'), str(ROOT)]
 from ir import ir as I                       # noqa: E402
 from ir import rtc, text, verify             # noqa: E402
 from test_ail_ir_s3 import Built, compile_program, HAVE_CC     # noqa: E402
+from ail_testenv import ASAN_DETECT_LEAKS
 
 FORCE = {'AIL_IR_WINDOW_MIN': '1', 'AIL_IR_WINDOW_STEP': '4096'}
 
@@ -591,7 +592,7 @@ class ProgramTests(_Base):
                                          str(Path(tmp, '%s.%s.d' % (name, tag), 'program.c')), '-lm', '-o', str(san)],
                                         capture_output=True, text=True)
                     self.assertEqual(cc.returncode, 0, cc.stderr[-2000:])
-                    env_run = dict(FORCE, ASAN_OPTIONS='detect_leaks=1:abort_on_error=0',
+                    env_run = dict(FORCE, ASAN_OPTIONS=ASAN_DETECT_LEAKS + ':abort_on_error=0',
                                    UBSAN_OPTIONS='print_stacktrace=1:halt_on_error=1')
                     with open(Path(tmp, 'stdin.bin'), 'wb') as f:
                         f.write(data)

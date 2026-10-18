@@ -17,6 +17,42 @@ import ail_sexpr
 import ail_modules
 
 ROOT = Path(__file__).resolve().parent
+_BUILDCACHE = []
+
+
+def _relpath(path):
+    """os.path.relpath that survives the platforms where there is no plain relative form:
+    a path on another drive (Windows: temp on C:, cwd on D:) answers the '..' spelling every caller
+    already treats as "show it absolute", and a spelling that differs only by aliases (Windows
+    8.3 short names such as RUNNER~1, macOS /var -> /private/var) is compared by real path."""
+    try:
+        relative = os.path.relpath(path)
+    except ValueError:
+        relative = None
+    if relative is None or relative.startswith(os.pardir):
+        try:
+            relative = os.path.relpath(os.path.realpath(path), os.path.realpath(os.curdir))
+        except ValueError:
+            return os.pardir + os.sep + str(path)
+    return relative
+
+
+def _build_cache(args=None):
+    """The build cache module (python/pkg-v12/buildcache.py), or None when it is switched off
+    (AIL_NO_CACHE, --no-cache) or cannot be loaded. Loaded by path so pkg-v12 stays off sys.path."""
+    if not _BUILDCACHE:
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location('buildcache', ROOT / 'python/pkg-v12/buildcache.py')
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            _BUILDCACHE.append(module)
+        except (OSError, ImportError, SyntaxError):
+            _BUILDCACHE.append(None)
+    module = _BUILDCACHE[0]
+    return None if module is None or module.disabled() else module
+
+
 _MERGED_ENTRIES = {}         # entry file -> ail_modules.Merged, for entries whose text merges several modules
 
 
@@ -147,7 +183,7 @@ def _refuse_load(error):
         message = str(error)
     else:
         path, line, column, text = refusal
-        where = os.path.relpath(path)
+        where = _relpath(path)
         message = '%s:%d:%d: %s' % (path if where.startswith('..') else where, line, column, text)
     print(message, file=sys.stderr)
     raise SystemExit(2)
@@ -383,6 +419,37 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
     return '\n\n'.join(units), bool(contracts), unit_map
 
 
+def _hand_over_toolchain(cache, environment):
+    """Tell the compiler subprocess which toolchain the parent already identified (saves a probe)."""
+    if cache is not None:
+        compiler = cache.resolve_compiler()
+        identity = cache.toolchain(compiler) if compiler else None
+        if identity:
+            environment['AIL_CACHE_TOOLCHAIN'] = identity + ':' + compiler
+    return environment
+
+
+def _compile_c_key(cache, args, source, text):
+    """Cache key of a `compile-c` object: the C source, the interface, every declared header,
+    source, assembly file and archive (read the way compile_c reads them), the C API name. None
+    when anything is unreadable or outside the source directory; the real build then reports it."""
+    try:
+        interface = args.interface.resolve(strict=True).read_bytes()
+        declared = json.loads(interface)
+        root = source.parent
+        parts = []
+        for field in ('headers', 'sources', 'asm_sources', 'archives'):
+            for name in declared.get(field, []):
+                path = (root / name).resolve(strict=True)
+                if not path.is_relative_to(root) or path == source:
+                    return None
+                parts += [field, name, path.read_bytes()]
+    except (OSError, ValueError, AttributeError, TypeError, RuntimeError):
+        return None
+    return cache.frontend_key(ROOT / 'python/pkg-v12', 'compile-c', text.encode('utf8'), interface,
+                              args.c_api_name or '', *parts)
+
+
 def _doctor_build_check(report):
     """Check a representative SDK build/run through the public CLI."""
     if not report['python_supported']:
@@ -412,7 +479,7 @@ def _doctor_build_check(report):
             result = subprocess.run(
                 [sys.executable, '-X', 'utf8', '-B', str(ROOT / 'ail_chatgpt.py'),
                  'compile', str(input_path), '-o', str(output_path)],
-                capture_output=True, cwd=ROOT, env=dict(os.environ), timeout=120)
+                capture_output=True, cwd=ROOT, env={**os.environ, 'AIL_NO_CACHE': '1'}, timeout=120)
             if result.returncode:
                 detail = (result.stderr or result.stdout)[:4096].decode('utf-8', errors='replace')
                 return {'status': 'failed', 'phase': phase,
@@ -599,7 +666,7 @@ def _marker_where(source_map, line):
     position = source_map.get(line) if line is not None else None
     if not position:
         return None
-    where = os.path.relpath(position[0])
+    where = _relpath(position[0])
     where = position[0] if where.startswith('..') else where
     return '%s:%s:%s' % (where, position[1], position[2]) if len(position) > 2 and position[2] is not None else '%s:%s' % (where, position[1])
 
@@ -854,7 +921,7 @@ def _python_notes(message, notes, source):
             if named:
                 message = message.replace(found.group(0), named[0] + ' (see the note below)')
                 break
-    shown = os.path.relpath(source)
+    shown = _relpath(source)
     shown = str(source) if shown.startswith('..') else shown
     for path, entries in notes.items():
         where = shown if Path(path) == source else path
@@ -971,7 +1038,7 @@ def _locate_refusal(args, source, message):
     if diagnostic is not None and (not text or text not in message):
         diagnostic = None
     where = (diagnostic or {}).get('path') or str(source)
-    relative = os.path.relpath(where)
+    relative = _relpath(where)
     if not relative.startswith('..'):
         where = relative
     merged = str(Path(source).resolve()) in _MERGED_ENTRIES      # the entry text alone does not hold the code
@@ -1103,12 +1170,22 @@ def main(argv=None):
     for command in (compile_cmd, object_cmd, library_cmd, c_cmd):
         command.add_argument('--json', action='store_true', help='return structured build diagnostics without running the generated program')
         command.add_argument('--debug-dir', type=Path, help='keep native diagnostic reports and generated sources in a new directory')
+    for command in (compile_cmd, object_cmd, library_cmd, c_cmd):
+        command.add_argument('--no-cache', action='store_true', help='do not read or write the build cache (same as AIL_NO_CACHE=1)')
+    cache_cmd = sub.add_parser('cache', help='build cache in $AIL_CACHE (default ~/.cache/ail): stats, path or clear')
+    cache_cmd.add_argument('action', choices=('stats', 'path', 'clear'))
     smoke = sub.add_parser('selftest'); smoke.add_argument('--out', required=True)
     build = sub.add_parser('build'); build.add_argument('--project', required=True)
     build.add_argument('--out', required=True); build.add_argument('--candidate-patch')
     build.add_argument('--mode', choices=['original','balanced','speed','memory'], default='original')
     args = parser.parse_args(argv)
+    if getattr(args, 'no_cache', False):
+        os.environ['AIL_NO_CACHE'] = '1'
     if getattr(args, 'static', False):
+        if sys.platform == 'darwin' and not getattr(args, 'target', None):
+            parser.error('--static is not supported on macOS: Apple ships no static C library, so the '
+                         'linker fails on crt0.o (build a static Linux binary with --target linux, or '
+                         'drop --static)')
         os.environ['AIL_STATIC'] = '1'
     if getattr(args, 'target', None):
         os.environ['PIPE_CC'] = _zig_compiler(args.target)
@@ -1163,9 +1240,24 @@ def main(argv=None):
     manifest_path = ROOT/'MANIFEST.json'
     if ((ROOT/'SDK_README_JA.md').is_file() and manifest_path.is_file()
             and json.loads(manifest_path.read_text(encoding='utf8')).get('kind') == 'ail_language_sdk'):
-        supported = ('doctor', 'integrity', 'compile', 'compile-module', 'compile-library', 'compile-c', 'export-sdk', 'check', 'api', 'api-builtin', 'edit', 'context')
+        supported = ('doctor', 'integrity', 'cache', 'compile', 'compile-module', 'compile-library', 'compile-c', 'export-sdk', 'check', 'api', 'api-builtin', 'edit', 'context')
         if args.command not in supported:
             parser.error('this language SDK supports: ' + ', '.join(supported))
+    if args.command == 'cache':
+        module = _BUILDCACHE[0] if _BUILDCACHE else None
+        if module is None:
+            _build_cache()
+            module = _BUILDCACHE[0]
+        if module is None:
+            print('AIL ERROR: build cache module unavailable', file=sys.stderr)
+            return 2
+        if args.action == 'path':
+            print(module.root())
+        elif args.action == 'stats':
+            print(json.dumps(module.stats(), indent=2))
+        else:
+            print(json.dumps({'removed': module.clear(), 'path': str(module.root())}))
+        return 0
     if args.command == 'export-sdk':
         from ail_sdk import export_sdk
         try:
@@ -1240,11 +1332,29 @@ def main(argv=None):
             command += ['--compile-c', str(args.interface.resolve())] if is_c else ['--compile-object']
             if args.c_api_name is not None:
                 command += ['--c-api-name', args.c_api_name]
+            if is_c and _build_cache(args) is not None and not native_build.enabled(args):
+                command.append('--cache')
             for object_path in ([] if is_c else args.object):
                 command += ['--object', str(object_path.resolve())]
-            result = native_build.invoke(args, command, directory,
-                                    capture_output=True, text=True, timeout=180,
-                                    env=_surface_env(args, source))
+            cache = _build_cache(args) if is_c and not native_build.enabled(args) else None
+            key = _compile_c_key(cache, args, source, text) if cache is not None else None
+            payload = cache.get('fe', key) if key else None
+            result = None
+            if payload is not None:
+                try:
+                    meta, blob = cache.unpack(payload)
+                    target.write_bytes(blob)
+                    Path(str(target) + '.json').write_text(meta['metadata'], encoding='utf8')
+                    result = subprocess.CompletedProcess(command, 0, '', '')
+                except (OSError, ValueError, KeyError):
+                    result = None
+            if result is None:
+                result = native_build.invoke(args, command, directory,
+                                        capture_output=True, text=True, timeout=180,
+                                        env=_hand_over_toolchain(cache, _surface_env(args, source)))
+                if key and result.returncode == 0 and target.is_file() and Path(str(target) + '.json').is_file():
+                    cache.put('fe', key, cache.pack({'metadata': Path(str(target) + '.json').read_text(encoding='utf8')},
+                                                    target.read_bytes()))
             if result.returncode:
                 return native_build.emit(args, {}, result.returncode, message=result.stderr or result.stdout)
             created = metadata_created = False
@@ -1326,9 +1436,38 @@ def main(argv=None):
                 unit_map_path = Path(tmp) / 'units.json'
                 unit_map_path.write_text(json.dumps(unit_map), encoding='utf-8')
                 command += ['--link-units', str(unit_map_path)]
-            result = native_build.invoke(args, command, tmp, capture_output=True, text=True,
-                timeout=660, env=_surface_env(args, source, {**os.environ, 'AIL_REPORT_SOURCE_LINE': '1',
-                                                **({'AIL_NO_GENERAL': '1'} if contracts else {}), **ffi_env}))
+            environment = _surface_env(args, source, {**os.environ, 'AIL_REPORT_SOURCE_LINE': '1',
+                                                **({'AIL_NO_GENERAL': '1'} if contracts else {}), **ffi_env})
+            cache = None if separate or getattr(args, 'target', None) else _build_cache(args)
+            frontend = None
+            if cache is not None and not native_build.enabled(args):
+                # A finished build is a function of the merged source, the objects it links, the
+                # compiler sources, the toolchain and the environment; nothing else is read.
+                frontend = cache.frontend_key(
+                    ROOT / 'python/pkg-v12', 'compile', source_text,
+                    *[part for object_path in [*objects, *ffi_objects] for part in (
+                        hashlib.sha256(object_path.read_bytes()).hexdigest(),
+                        hashlib.sha256(Path(str(object_path) + '.json').read_bytes()).hexdigest()
+                        if Path(str(object_path) + '.json').is_file() else '-')],
+                    environment.get('AIL_SURFACE', ''), environment.get('AIL_NO_GENERAL', ''),
+                    *[hashlib.sha256(Path(a).read_bytes()).hexdigest() for a in shlex.split(ffi_env.get('AIL_FFI_LINK', '')) if Path(a).is_file()])
+            _hand_over_toolchain(cache, environment)
+            result = None
+            payload = cache.get('fe', frontend) if frontend else None
+            if payload is not None:
+                try:
+                    meta, blob = cache.unpack(payload)
+                    cache.write_output(target, blob, True)
+                    result = subprocess.CompletedProcess(command, 0, '', meta['stderr'])
+                except (OSError, ValueError, KeyError):
+                    result = None
+            if result is None:
+                if cache is not None and not native_build.enabled(args):
+                    command.append('--cache')
+                result = native_build.invoke(args, command, tmp, capture_output=True, text=True,
+                    timeout=660, env=environment)
+                if frontend and result.returncode == 0 and target.is_file():
+                    cache.put('fe', frontend, cache.pack({'stderr': result.stderr or ''}, target.read_bytes()))
             if result.returncode:
                 message, marked = _split_line_marker(result.stderr or result.stdout)
                 python = result.returncode == 3 and _python_source(args, source.read_bytes())

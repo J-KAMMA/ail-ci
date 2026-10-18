@@ -30,6 +30,7 @@ from ir import ir as I                       # noqa: E402
 from ir import effects as E                  # noqa: E402
 from ir import emit_c, rtc, text, verify     # noqa: E402
 from test_ail_ir_s3 import Built, compile_program, run, last_line, HAVE_CC     # noqa: E402
+from ail_testenv import ASAN_DETECT_LEAKS
 
 LIST_STR = 'obj<list<strv>>'
 
@@ -493,7 +494,7 @@ class ProgramTests(unittest.TestCase):
                                          str(Path(tmp, '%s.%s.d' % (name, tag), 'program.c')), '-lm', '-o', str(san)],
                                         capture_output=True, text=True)
                     self.assertEqual(cc.returncode, 0, cc.stderr[-2000:])
-                    env_run = dict(os.environ, ASAN_OPTIONS='detect_leaks=1:abort_on_error=0',
+                    env_run = dict(os.environ, ASAN_OPTIONS=ASAN_DETECT_LEAKS + ':abort_on_error=0',
                                    UBSAN_OPTIONS='print_stacktrace=1:halt_on_error=1')
                     for args in args_list:
                         r = subprocess.run([str(san), *map(str, args)], capture_output=True, env=env_run, timeout=300)

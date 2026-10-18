@@ -1,35 +1,35 @@
 india juliet banana uniform sierra 953-694-7240 tango
-890-979-8128 mike mallory.dave@mike.com kilo sierra
+890-979-8128 mike mallory.dave@mike.example.com kilo sierra
 banana romeo mike india victor foxtrot
-papa niaj.frank@hotel.co.uk 122-875-3495 golf
-oscar xray ivan.mallory@cherry.org delta romeo papa delta
-quebec 695-123-7214 india foxtrot judy.erin@sierra.com cherry delta victor
-victor 553-849-5054 golf india alice.judy@apple.com foxtrot
-mike foxtrot 786-418-3928 romeo sierra grace.frank@echo.co.uk november
-lima echo frank.bob@foxtrot.com uniform golf 104-125-1632 whiskey
-lima golf juliet india xray ivan.dave@juliet.org romeo
-tango alice.alice@victor.org yankee 797-994-3491 echo
+papa niaj.frank@hotel.example.net 122-875-3495 golf
+oscar xray ivan.mallory@cherry.example.org delta romeo papa delta
+quebec 695-123-7214 india foxtrot judy.erin@sierra.example.com cherry delta victor
+victor 553-849-5054 golf india alice.judy@apple.example.com foxtrot
+mike foxtrot 786-418-3928 romeo sierra grace.frank@echo.example.net november
+lima echo frank.bob@foxtrot.example.com uniform golf 104-125-1632 whiskey
+lima golf juliet india xray ivan.dave@juliet.example.org romeo
+tango alice.alice@victor.example.org yankee 797-994-3491 echo
 515-436-3972 india echo quebec
-oscar bob.grace@yankee.org cherry
-delta 646-291-7994 november hotel carol.bob@kilo.org whiskey papa
+oscar bob.grace@yankee.example.org cherry
+delta 646-291-7994 november hotel carol.bob@kilo.example.org whiskey papa
 juliet lima echo
 yankee foxtrot golf apple 613-770-1949 yankee tango
 delta mike
 kilo 586-175-3046 yankee
-lima heidi.niaj@sierra.com papa victor banana whiskey
-mike mike niaj.erin@xray.org banana echo
+lima heidi.niaj@sierra.example.com papa victor banana whiskey
+mike mike niaj.erin@xray.example.org banana echo
 november hotel xray uniform
-victor 329-433-7904 alice.ivan@delta.co.uk sierra
-frank.grace@echo.org whiskey uniform
-lima 856-866-3447 tango kilo niaj.mallory@banana.org hotel
+victor 329-433-7904 alice.ivan@delta.example.net sierra
+frank.grace@echo.example.org whiskey uniform
+lima 856-866-3447 tango kilo niaj.mallory@banana.example.org hotel
 732-243-5006 echo juliet zulu whiskey
 kilo apple victor banana sierra
-oscar judy.alice@whiskey.org delta banana
-772-168-8467 judy.carol@lima.org uniform victor quebec kilo
-alice.erin@foxtrot.org banana yankee
+oscar judy.alice@whiskey.example.org delta banana
+772-168-8467 judy.carol@lima.example.org uniform victor quebec kilo
+alice.erin@foxtrot.example.org banana yankee
 hotel 974-580-7280 banana
-papa quebec ivan.erin@cherry.co.uk 981-936-4423 romeo
-yankee mike mallory.mallory@quebec.co.uk 508-632-3075 quebec foxtrot
-banana xray judy.judy@foxtrot.org papa whiskey
-bob.judy@juliet.org papa 541-288-9263 apple foxtrot delta
+papa quebec ivan.erin@cherry.example.net 981-936-4423 romeo
+yankee mike mallory.mallory@quebec.example.net 508-632-3075 quebec foxtrot
+banana xray judy.judy@foxtrot.example.org papa whiskey
+bob.judy@juliet.example.org papa 541-288-9263 apple foxtrot delta
 368-655-9321 kilo sierra whiskey quebec zulu romeo

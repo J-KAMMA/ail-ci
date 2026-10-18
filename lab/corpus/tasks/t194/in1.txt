@@ -1,8 +1,8 @@
-delta romeo papa mallory.grace@cherry.org echo golf
-golf heidi.dave@oscar.com papa sierra
-banana erin.carol@lima.co.uk golf zulu apple
+delta romeo papa mallory.grace@cherry.example.org echo golf
+golf heidi.dave@oscar.example.com papa sierra
+banana erin.carol@lima.example.net golf zulu apple
 606-525-7283 quebec hotel
-xray uniform quebec hotel mike grace.heidi@quebec.org apple
-foxtrot banana ivan.erin@victor.org oscar tango foxtrot tango
-frank.judy@delta.co.uk zulu november xray papa
-115-383-2090 echo romeo kilo bob.heidi@victor.co.uk juliet lima
+xray uniform quebec hotel mike grace.heidi@quebec.example.org apple
+foxtrot banana ivan.erin@victor.example.org oscar tango foxtrot tango
+frank.judy@delta.example.net zulu november xray papa
+115-383-2090 echo romeo kilo bob.heidi@victor.example.net juliet lima

@@ -26,6 +26,15 @@ class LinkModeTests(unittest.TestCase):
     def test_default_dynamic_and_static_option(self):
         with tempfile.TemporaryDirectory() as tmp:
             work = Path(tmp)
+            if sys.platform == 'darwin':
+                # Apple ships no static C library: the option is refused by name, the default build runs
+                refused = subprocess.run([sys.executable, '-B', str(ROOT / 'ail_chatgpt.py'), 'compile', '--static',
+                                          str(work / 'x.ail'), '-o', str(work / 'x')], capture_output=True, text=True)
+                self.assertEqual(refused.returncode, 2)
+                self.assertIn('--static is not supported on macOS', refused.stderr)
+                run = subprocess.run([str(self.build(work))], capture_output=True, text=True, timeout=30)
+                self.assertEqual((run.returncode, run.stdout), (0, 'hello\n'))
+                return
             dynamic, static = self.build(work), self.build(work, '--static')
             for binary in (dynamic, static):
                 run = subprocess.run([str(binary)], capture_output=True, text=True, timeout=30)

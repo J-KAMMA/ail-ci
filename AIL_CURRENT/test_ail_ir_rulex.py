@@ -17,6 +17,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from ail_testenv import ASAN_DETECT_LEAKS
 
 ROOT = Path(__file__).resolve().parent
 
@@ -333,7 +334,7 @@ class BraceValueSemantics(unittest.TestCase):
         # (double buffer), and frees nothing twice or not at all
         if not have_cc():
             self.skipTest('no gcc')
-        env_run = dict(os.environ, ASAN_OPTIONS='detect_leaks=1:abort_on_error=0',
+        env_run = dict(os.environ, ASAN_OPTIONS=ASAN_DETECT_LEAKS + ':abort_on_error=0',
                        UBSAN_OPTIONS='print_stacktrace=1:halt_on_error=1')
         for name in ('double_buffer', 'alias_mutate_read', 'alias_in_loop', 'swap_keep', 'field_store',
                      'field_to_field'):
