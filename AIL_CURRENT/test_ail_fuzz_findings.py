@@ -798,7 +798,7 @@ class FuzzFindings(unittest.TestCase):
                         built, ran, _ = run_both(directory, text, 'limit_' + label + '_' + mode, env)
                         self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
                         self.assertEqual(ran.returncode, 3, ran.stderr)
-                        self.assertEqual(ran.stdout, b'3\n')
+                        self.assertEqual(ran.stdout.replace(b'\r\n', b'\n'), b'3\n')   # Windows text-mode stdout writes CRLF
                         self.assertIn(b'AIL limit: int_overflow', ran.stderr)
 
     def test_list_extend_with_itself_adds_the_items_once(self):
@@ -807,7 +807,7 @@ class FuzzFindings(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as directory:
                     built, ran, expected = run_both(directory, SELF_EXTEND, name, env)
                     self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
-                    self.assertEqual(expected.stdout, b'8 8 12\n16 24\n32 48\n')
+                    self.assertEqual(expected.stdout.replace(b'\r\n', b'\n'), b'8 8 12\n16 24\n32 48\n')
                     self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout), ran.stderr)
 
 

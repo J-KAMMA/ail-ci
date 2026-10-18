@@ -29,6 +29,10 @@ from pipeline import PipelineError, compiler, ffi_link_args, link_flags
 # stalls (n-body: 3.75 s with it, 2.46 s without, same instruction count within 3%; clang, which
 # does not pack them, ran the same C 2.2x faster). Loop vectorization is unaffected.
 CFLAGS_TUNE = ['-fno-tree-slp-vectorize']
+# No fused multiply-add: CPython rounds every float operation, and a compiler that contracts `a * b + c`
+# by default (Apple clang and GCC on arm64, where FMA is baseline) would round once instead. x86-64
+# without -march has no FMA, so the generated code there does not change.
+CFLAGS_TUNE += ['-ffp-contract=off']
 # Extra flags for the C compiler, for development: AIL_EXTRA_CFLAGS='-Werror=incompatible-pointer-types' turns the one
 # warning GCC 13 gives for a call of a runtime helper on the wrong struct type into an error (a packed list[str] field passed
 # to an ail_slist_* function compiled and misbehaved before the tests of that stage were run this way).

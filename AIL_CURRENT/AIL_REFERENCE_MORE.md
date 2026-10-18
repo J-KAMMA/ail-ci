@@ -618,6 +618,17 @@ variable first when it sits behind another call.
   described above, so errors and results are the same. `data: dict[str, int] = json.loads(s)` (or an assignment to an
   annotated local) fills the local in place; a `return json.loads(s)` or a call argument goes through a loader
   function and copies the result once more.
+- `pathlib` (`from pathlib import Path`, POSIX paths): `Path(a, b)`, `Path.cwd()`, `p / "x"`, `p /= "x"`, `str(p)`, `print(p)`,
+  `f"{p}"`, `repr(p)`, `p == q`, `p.name stem suffix suffixes parent root anchor`, `p.parts` (iterate it, index it with one number,
+  `len` or `list(p.parts)`), `joinpath with_name with_stem with_suffix resolve absolute is_absolute as_posix`, `exists is_file
+  is_dir`, `mkdir(parents=, exist_ok=)`, `unlink(missing_ok=)`, `rmdir`, `rename`, `replace`, `read_text write_text read_bytes
+  write_bytes open` (UTF-8), `iterdir() glob(pat) rglob(pat)` in a `for` loop or inside `list()` / `sorted()`; `sorted(paths)`
+  orders as CPython. A path is known from the program text, so annotate: `def f(p: Path) -> Path:`, `xs: list[Path] = []`, a
+  dataclass field `root: Path`; a path passed to an unannotated parameter or returned without `-> Path` is refused. Also
+  refused, with the line to write instead: `stat touch chmod relative_to parents is_symlink`, `Pure*` classes, a path as a dict
+  key or set member, `<` on paths, `p.iterdir()` kept in a variable. The typed path does not build a comprehension over a
+  `list[Path]` that produces strs: write the loop (the default build falls back to the slower general path). Differences:
+  DIFFERENCES A31-A35.
 
 ## Heaps: heapq, bisect
 

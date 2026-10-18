@@ -241,7 +241,7 @@ def _build_sources(sources, lib, filename):
     target = os.path.join(directory, digest.hexdigest()[:24] + '.so')
     if not os.path.exists(target):
         compiler = os.environ.get('PIPE_CC') or os.environ.get('CC') or shutil.which('cc') or shutil.which('gcc') or 'cc'
-        command = [compiler, '-O2', '-shared', '-fPIC', '-I', base, '-o', target + '.tmp.%d' % os.getpid(), *paths]
+        command = [compiler, '-O2', '-ffp-contract=off', '-shared', '-fPIC', '-I', base, '-o', target + '.tmp.%d' % os.getpid(), *paths]
         if lib and not (os.sep in lib or lib.endswith('.so')):
             command.append('-l' + lib)
         done = subprocess.run(command, capture_output=True, text=True)

@@ -245,7 +245,7 @@ def shared_object(src, prefix='p', extra=()):
         with tempfile.TemporaryDirectory() as tmp:
             c = pathlib.Path(tmp) / 'a.c'
             c.write_text(src, encoding='utf-8')
-            r = subprocess.run([compiler(), '-O2', '-shared', '-fPIC', '-o', str(so), str(c)]
+            r = subprocess.run([compiler(), '-O2', '-ffp-contract=off', '-shared', '-fPIC', '-o', str(so), str(c)]
                                + list(extra), capture_output=True, text=True)
             if r.returncode:
                 raise PipelineError('the C compiler rejected this:\n%s\n%s' % (r.stderr[-600:], src))

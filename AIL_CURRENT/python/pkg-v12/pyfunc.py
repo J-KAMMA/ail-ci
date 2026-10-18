@@ -37,6 +37,7 @@ import callable_types
 
 import cruntime
 import filelib
+import pathlower
 import proclib
 import iterlower
 import tryhoist
@@ -166,6 +167,8 @@ def _handler_codes(code):
     if code == EXC_NAMES['OSError'] and filelib.ACTIVE:
         return (code, 11, 12, 13, 14, 15, 16)
     if code == EXC_NAMES['FileNotFoundError']:
+        if pathlower.ACTIVE:
+            return (code,)        # G10: every file error of a pathlib program has its own code (no legacy whole-file read)
         return (code, EXC_NAMES['OSError'])
     return (code,)
 # OverflowError (10) joined 2026-10-12: int64 arithmetic that leaves the range ("integer overflow")
@@ -6380,7 +6383,7 @@ def _fileprim_value(node, ctx):
     ret, kinds = filelib.PRIMS[name]
     if node.keywords or len(node.args) != len(kinds) or any(isinstance(a, ast.Starred) for a in node.args):
         raise Unsupported('%s takes %d positional arguments' % (name, len(kinds)))
-    ctx.parts.add('PROCIO' if filelib.is_proc_prim(name) else 'FILEIO')
+    ctx.parts.add({'proc': 'PROCIO', 'path': 'PATHIO', 'file': 'FILEIO'}[filelib.prim_kind(name)])
     ctx.has_try = True
     stages, names = [], []
     for arg, kind in zip(node.args, kinds):
@@ -33944,6 +33947,11 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
         ctx.parts.add('DIE')
     decls += ''.join('    %s(%s);\n' % (_ref_helper(ctx.type_of(v), 'retain'),
                                       ctx.cname(v)) for v in object_params)
+    # After every entry retain: the function owns a reference to each bytearray parameter, so none is dead here. Said once
+    # after the last retain's store (which could alias an earlier array), the loops that index a retained array fold
+    # their per-iteration test of the reference count into the entry.
+    decls += ''.join('    ail_bytearray_live(%s);\n' % ctx.cname(v) for v in object_params
+                     if ctx.type_of(v) == BYTEARRAY)
     decls += cleanup_entry
 
     # The records guard runs before anything else in the body: the arity is fixed by the

@@ -993,6 +993,7 @@ class Compiler:
         self.source_lines = source.splitlines()
         self.uses_fileio = False
         self.uses_proc = False
+        self.uses_path = False
         self.uses_clock = False
         filelib.rewrite_tree(tree, Unsupported, general=True)      # G7: open / with / os -> primitives + prelude
         mix_tree = copy.deepcopy(tree)          # the mixed-mode typed clones see the source as written
@@ -1080,6 +1081,8 @@ class Compiler:
             parts.append(filert.general_text())
             if self.uses_proc:
                 parts.append(filert.general_proc_text())
+            if self.uses_path:
+                parts.append(filert.general_path_text())
         if self.uses_clock:
             import clockrt
             parts.append(clockrt.general_text())
@@ -3342,6 +3345,8 @@ class Compiler:
         self.uses_fileio = True
         if filelib.is_proc_prim(name):
             self.uses_proc = True
+        if filelib.is_path_prim(name):
+            self.uses_path = True
         argcs = [self.expr(a, ctx) for a in args]
         t = ctx.tmp()
         ctx.emit('st = ailo_%s(cx, &%s%s);' % (filelib.c_name(name), t, ''.join(', ' + a for a in argcs)))
