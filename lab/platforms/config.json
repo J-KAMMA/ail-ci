@@ -201,17 +201,10 @@
     }
    }
   },
-  "test_ail_python_syntax": {
-   "tests": {
-    "test_io_spellings": {
-     "windows": "CPython text-mode open() translates CRLF/LF; AIL file I/O is still byte-exact on Windows (the CRLF read/write fix is stage G7)"
-    }
-   }
-  },
   "test_ail_stdlib_batch1": {
    "tests": {
     "test_with_open_write_modes": {
-     "windows": "CPython text-mode open() translates CRLF/LF; AIL file I/O is still byte-exact on Windows (the CRLF read/write fix is stage G7)"
+     "windows": "CPython text-mode open(..., 'w') writes CRLF; AIL text writes on Windows are still LF (still differs after G7 files/os)"
     }
    }
   },
