@@ -743,6 +743,10 @@ main()
                 style = rng.choice(styles)
                 text = dt.strftime(style)
                 for candidate in (text, mutate(text)):
+                    # ISO week dates in year 0 ("0000W33"): CPython 3.12 patch releases disagree on the
+                    # message (3.12.3 "month must be in 1..12", later "Invalid isoformat string")
+                    if candidate[:4] == "0000" and "W" in candidate[4:6]:
+                        continue
                     checks.append(("fromisoformat", err(lambda: view(R.from_iso_date(candidate))), err(lambda: pyview(D.date.fromisoformat(candidate)))))
                     tail = rng.choice(["T12:30:45", " 12:30", "x123045", "T12:30:45.5", "T1", ""])
                     full = mutate(text + tail) if rng.random() < 0.5 else text + tail
