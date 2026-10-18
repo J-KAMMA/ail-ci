@@ -179,7 +179,8 @@ fn main() {
 }
 ''', None)
 
-# a swap of two fields of a struct local through a temporary: the function stays on the legacy emitter
+# a swap of two fields of a struct local through a temporary: three moves (each field is rebound before
+# anything reads it), no copy (design section 23)
 BRACE['field_swap'] = ('''
 struct Gr { cur: list[int]; nxt: list[int]; }
 fn main() {
@@ -190,7 +191,7 @@ fn main() {
         print(len(gr.cur), gr.cur[0], len(gr.nxt), gr.nxt[0]);
     }
 }
-''', 'legacy')
+''', 0)
 
 # a local bound to a field list of a struct local and written: legacy emitter, the local is a copy
 BRACE['field_to_local_write'] = ('''

@@ -1208,6 +1208,8 @@ class RefusalTests(Base):
 
     def test_windows_target(self):
         zig = os.environ.get("AIL_ZIG") or shutil.which("zig") or str(Path.home() / "tools" / "zig" / "zig")
+        if not os.path.isfile(zig):
+            self.skipTest("--target needs zig, which is not installed here")
         text = "from pathlib import Path\n\nprint(Path('a') / 'b')\n"
         env_target = dict(os.environ, AIL_TARGET="windows", AIL_NO_GENERAL="1")
         with tempfile.TemporaryDirectory(prefix="ail-pathlib-") as tmp:

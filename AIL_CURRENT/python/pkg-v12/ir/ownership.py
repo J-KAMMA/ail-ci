@@ -59,6 +59,15 @@ def _delete(fn, ins):
     return False
 
 
+def _insert_before(fn, at, ins):
+    for r in _regions(fn):
+        for k, i in enumerate(r.instrs):
+            if i is at:
+                r.instrs.insert(k, ins)
+                return
+    raise I.IRError('instruction to insert before is not in %s' % fn.name)
+
+
 class Flow(object):
     """The CFG, the per-instruction events on list places, and liveness."""
 
@@ -393,7 +402,8 @@ class Resolver(object):
         """Whether the field `key` of `base`, whose list a take at `s` moves out, is rebound (by a
         destination operation on that very object) on every path before anything reads it, with
         nothing in between that can raise and no exit (the field is empty meanwhile)."""
-        if base not in self.fn.params:
+        holder = self.object_place(flow, base)
+        if holder is None:
             return False
         seen = set()
         stack = list(flow.succ[s])
@@ -403,7 +413,7 @@ class Resolver(object):
                 continue
             seen.add(n)
             if n.op in DST_OPS and n.operands and flow.field_of(n.operands[0]) == key \
-                    and flow.defs[n.operands[0]].operands[0] is base:
+                    and self.object_place(flow, flow.defs[n.operands[0]].operands[0]) is holder:
                 # the rebinding itself: it must not read the emptied field (`s.f = s.f[:]`), and a call
                 # that raises would leave the field empty
                 if any(flow.field_of(v) == key for v in n.operands[1:]):
@@ -413,10 +423,26 @@ class Resolver(object):
                 continue
             if n.op == 'try' or self.reads_field(flow, n, key) or self.may_raise(flow, n):
                 return False
+            if holder is not base and n.op in ('store', 'obj.copyref', 'obj.init') and n.operands[0] is holder:
+                return False        # the struct local names another object before the field is rebound
             if n.op in ('return', 'raise', 'reraise', 'unreachable') or not flow.succ[n]:
                 return False
             stack.extend(flow.succ[n])
         return True
+
+    def object_place(self, flow, base):
+        """What identifies the object whose field a take empties: a struct parameter (its value), or
+        the place of the struct local `base` was loaded from (`taken` refuses a store to that place
+        before the rebinding, so every load of it on the way names the same object). None otherwise."""
+        if base in self.fn.params:
+            return base
+        d = flow.defs.get(base)
+        if d is not None and d.op == 'load' and d.operands:
+            a = flow.defs.get(d.operands[0])
+            t = d.operands[0].type.pointee
+            if a is not None and a.op == 'local.alloc' and t.head == 'obj' and t.args[0].head == 'class':
+                return d.operands[0]
+        return None
 
     # -- the set of uses of `place` reached through the share
     def reached_uses(self, flow, s, place, names):
@@ -479,8 +505,17 @@ class Resolver(object):
             differs = self.observable(flow, s, reach, Dp, Xp)
         else:
             key, base = X[1], X[2]
-            if base not in self.fn.params:
-                raise NeedsBox('%s: the object holding the list is not a parameter' % names)
+            holder = self.object_place(flow, base)
+            if holder is None:
+                raise NeedsBox('%s: the object holding the list is not a parameter or a struct local' % names)
+            if holder is not base:
+                # a struct local: it must keep naming the same object (and so keep it alive) while
+                # the second name is in use
+                for n in reach:
+                    if n is not s and n.op in ('store', 'obj.copyref', 'obj.init') and n.operands[0] is holder \
+                            and (Dp in flow.live_in[n] or Dp in flow.live_out[n]):
+                        raise NeedsBox('%s: the struct local is reassigned while the second name is still used'
+                                       % names)
             self.check_field_borrow(flow, s, Dp, reach, key, names)
             for d, inside in refs:
                 if any(c.op == 'return' for c in inside):
@@ -495,8 +530,15 @@ class Resolver(object):
             if kind == 'P':
                 d.operands = [X[1]]
             else:
+                obj = X[2]
+                if obj not in self.fn.params:
+                    # the object of a struct local is loaded again where the borrow is taken (the load
+                    # at the share may sit in a region that does not enclose the uses)
+                    load = I.Instr('load', [flow.defs[obj].operands[0]], [I.Value(obj.type)])
+                    _insert_before(self.fn, d, load)
+                    obj = load.result
                 d.op = 'field.list'
-                d.operands = [X[2]]
+                d.operands = [obj]
                 d.attrs = {'cls': X[1][0], 'name': X[1][1]}
         _delete(self.fn, s)
         self.alias_of[Dp] = X[1] if kind == 'P' else None

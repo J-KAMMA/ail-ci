@@ -41,7 +41,7 @@ _WRAPPABLE = {'add', 'sub', 'mul', 'neg'}
 _ELEMENT = ('list.get', 'span.get', 'spec.get')
 _READS = _ELEMENT + ('ba.get', 'bytes.get', 'field.get')
 _NUM = (I.I64, I.F64)
-_INITS = ('store', 'obj.init', 'obj.copyref', 'ba.new', 'ba.call')
+_INITS = ('store', 'obj.init', 'obj.copyref', 'ba.new', 'ba.call', 'ba.copyref')
 
 
 class _Abort(Exception):

@@ -728,6 +728,9 @@ class Emitter(TextEmitter):
                 self.pending_check(depth)
                 return self.line(depth, 'ail_bytearray_store(&%s, %s, 1);' % (o[0], t))
             return self.line(depth, 'ail_bytearray_store(&%s, %s, 1);' % (o[0], text))
+        if op == 'ba.copyref':
+            self.parts.add('BYTEARRAY')
+            return self.line(depth, 'ail_bytearray_store(&%s, %s, 0);' % (o[0], o[1]))
         if op in ('ba.new', 'ba.drop', 'ba.clear', 'ba.write'):
             self.parts.add('BYTEARRAY')
             if op == 'ba.new':
