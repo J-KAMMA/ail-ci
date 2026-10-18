@@ -88,6 +88,37 @@ fn main() {
   `write_stdout_bytes(bytes|bytearray)` and `print` mix in order.
 - Use bytes for binary formats, non-UTF-8 input and one huge line of tokens. `bytes.split()`
   builds a list of every token: avoid it on large input.
+- Python syntax: a bytes-keyed dict or set (`ids: dict[bytes, int] = {}`, `stop = {b"an"}`) and a list
+  of bytes are locals, not parameters or fields; a bytes sort key is `terms[i].hex()`;
+  `ba[a:b].decode()` works on a bytearray; a tuple cannot hold a bytearray (pass it in, return the
+  number). A module-level set or dict is refused: build it in `main` and pass it in.
+
+```python
+import sys
+
+def main() -> int:
+    ids: dict[bytes, int] = {}
+    stop = {b"an", b"the"}
+    terms = []
+    for w in b"the cat an ox cat".split():
+        t = bytes(w)
+        if t in stop:
+            continue
+        if t not in ids:
+            ids[t] = len(terms)
+            terms.append(t)
+    order = list(range(len(terms)))
+    order.sort(key=lambda i: terms[i].hex())
+    ba = bytearray(b"xyz")
+    print(len(terms), order[0], ids[b"ox"], ba[1:3].decode())
+    return 0
+
+sys.exit(main())
+```
+
+```text
+2 0 1 yz
+```
 
 ## Syntax: top level, functions, statements, let, const
 

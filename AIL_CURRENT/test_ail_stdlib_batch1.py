@@ -517,8 +517,8 @@ class Batch1Tests(unittest.TestCase):
     def test_unbuilt_clock_and_file_shapes_are_named(self):
         self.refused("import time\n\n\ndef main():\n    print(time.time() > 0.0)\n\n\nmain()\n",
                      "time.time() with these arguments is not built")
-        self.refused("def main():\n    with open('x', 'w') as f:\n        print('a', file=f)\n\n\nmain()\n",
-                     "context managers")
+        self.refused("def main():\n    m = 'w'\n    with open('x', m) as f:\n        f.write('a')\n    print(1)\n\n\nmain()\n",
+                     "mode that is not a string literal")
 
 
 if __name__ == "__main__":

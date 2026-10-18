@@ -33,7 +33,7 @@ import native_diagnostics
 import shadowing
 from pyfront import Unsupported, to_pipeline_c
 from pyfunc import to_c as func_to_c
-from pyfunc import _module_const_scalar
+from pyfunc import _module_const_scalar, module_table_refusal
 from pyfunc import NORET
 try:
     # BRIEF_mixed_mode.md's own capability probe (test_mixed.py): "pymix.py present in the
@@ -316,6 +316,28 @@ def _count_assign_targets(nodes):
     return counts
 
 
+def _all_functions(nodes):
+    for top in nodes:
+        for n in ast.walk(top):
+            if isinstance(n, ast.FunctionDef):
+                yield n
+
+
+def _reads_global(fn, name):
+    """`fn` reads `name` without binding it (no parameter, no assignment in it): a module-level read."""
+    args = fn.args
+    bound = {a.arg for a in args.posonlyargs + args.args + args.kwonlyargs}
+    bound.update(a.arg for a in (args.vararg, args.kwarg) if a is not None)
+    loads = False
+    for n in ast.walk(fn):
+        if isinstance(n, ast.Name) and n.id == name:
+            if isinstance(n.ctx, ast.Load):
+                loads = True
+            else:
+                bound.add(name)
+    return loads and name not in bound
+
+
 def _entry_name(taken):
     if 'main' not in taken:
         return 'main'
@@ -398,6 +420,18 @@ def _rewrite_script(source, force):
             kept.append(n)
             continue
         other.append(n)
+
+    # A module-level set / dict / list of strings that a function reads cannot become a local of the
+    # synthesised body (the reader would then say "read before it is assigned"): name it instead.
+    for n in other:
+        if (isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name)
+                and isinstance(n.value, (ast.Set, ast.Dict, ast.List, ast.Tuple))
+                and (getattr(n.value, 'elts', None) or getattr(n.value, 'keys', None))
+                and assign_counts[n.targets[0].id] == 1
+                and any(_reads_global(fn, n.targets[0].id) for fn in _all_functions(kept))):
+            refusal = module_table_refusal(n.targets[0].id, n.value)
+            refusal.source_line = n.lineno
+            raise refusal
 
     if not other and not force:
         return None

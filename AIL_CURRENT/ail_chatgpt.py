@@ -1085,6 +1085,7 @@ def main(argv=None):
         os.environ['AIL_STATIC'] = '1'
     if getattr(args, 'target', None):
         os.environ['PIPE_CC'] = _zig_compiler(args.target)
+        os.environ['AIL_TARGET'] = args.target      # os.path takes the flavour of the target (filelib.target_windows)
     if args.command in ('compile', 'compile-module', 'compile-library', 'compile-c'):
         import ail_native_build as native_build
         if native_build.enabled(args):

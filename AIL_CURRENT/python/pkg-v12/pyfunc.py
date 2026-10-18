@@ -36,6 +36,7 @@ import textwrap
 import callable_types
 
 import cruntime
+import filelib
 import iterlower
 import tryhoist
 import stdlib3
@@ -145,9 +146,26 @@ AIL_MAX_RECURSION_DEPTH = 50000
 # (both ARE OSError subclasses -- which is why `FileNotFoundError` maps to the SAME code here:
 # `except OSError:` catching what `except FileNotFoundError:` names is CPython's own subclass
 # rule, and the finer subclasses are not separately distinguished).
+# G7: the OS-family classes got codes of their own (FileNotFoundError 11 ... NotADirectoryError 15;
+# 16 is io.UnsupportedOperation, raised by the file layer, caught as OSError or ValueError). A
+# handler for FileNotFoundError also takes code 6 so the older whole-file intrinsics, which raise
+# the plain OSError code, are still caught by it; `except OSError` takes them all.
 EXC_NAMES = {'ValueError': 1, 'ZeroDivisionError': 2, 'IndexError': 3, 'KeyError': 4,
-             'EOFError': 5, 'OSError': 6, 'FileNotFoundError': 6, 'RuntimeError': 7,
-             'UnicodeDecodeError': 8, 'AssertionError': 9, 'OverflowError': 10}
+             'EOFError': 5, 'OSError': 6, 'FileNotFoundError': 11, 'RuntimeError': 7,
+             'UnicodeDecodeError': 8, 'AssertionError': 9, 'OverflowError': 10,
+             'PermissionError': 12, 'IsADirectoryError': 13, 'FileExistsError': 14,
+             'NotADirectoryError': 15}
+
+
+def _handler_codes(code):
+    """Every exception code a handler for `code` catches."""
+    if code == EXC_NAMES['ValueError']:
+        return (code, EXC_NAMES['UnicodeDecodeError']) + ((16,) if filelib.ACTIVE else ())
+    if code == EXC_NAMES['OSError'] and filelib.ACTIVE:
+        return (code, 11, 12, 13, 14, 15, 16)
+    if code == EXC_NAMES['FileNotFoundError']:
+        return (code, EXC_NAMES['OSError'])
+    return (code,)
 # OverflowError (10) joined 2026-10-12: int64 arithmetic that leaves the range ("integer overflow")
 # is catchable once a program names OverflowError. Like AssertionError, the DIE block only grows
 # the extra code when the name is used, so every other program's C is unchanged.
@@ -158,6 +176,8 @@ def _exc_parts(ctx, code):
         ctx.parts.add('ASSERTEXC')
     elif code == 10:
         ctx.parts.update(('ASSERTEXC', 'OVERFLOWEXC'))
+    elif code >= 11:
+        ctx.parts.update(('ASSERTEXC', 'OVERFLOWEXC', 'FILEEXC'))
 # wrapping_add/sub/mul(a, b): int64 arithmetic modulo 2**64 (two's complement), never an
 # overflow -- for hashes, PRNGs and checksums that C, Rust and Go write with unsigned wraparound.
 WRAPPING_OPS = {'wrapping_add': '+', 'wrapping_sub': '-', 'wrapping_mul': '*'}
@@ -754,7 +774,8 @@ def _etype(node, ctx):
         return BYTEARRAY
     if isinstance(node, ast.Subscript) and _etype(node.value, ctx) == BYTEARRAY:
         return BYTEARRAY if isinstance(node.slice, ast.Slice) else INT
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and _is_bytearray_expr(node.func.value, ctx):
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr != 'decode'
+            and _is_bytearray_expr(node.func.value, ctx)):
         return BYTEARRAY if node.func.attr == 'copy' else INT
     if isinstance(node, (ast.List, ast.Tuple, ast.Set, ast.Dict)) and any(callable_types.valid(_fn_kind(child, ctx)) for child in ast.iter_child_nodes(node)):
         raise Unsupported('function values cannot be stored in containers')
@@ -936,6 +957,8 @@ def _etype(node, ctx):
             return _AIL_SYSINFO[f][0]
         if f in _AIL_RAND and f not in ctx.funcs:
             return _AIL_RAND[f][0]
+        if f in filelib.PRIMS and f not in ctx.funcs and f not in ctx.classes:
+            return {'int': INT, 'str': STR, 'bytes': BYTES}[filelib.PRIMS[f][0]]
         if f in _AIL_JF and f not in ctx.funcs:
             return INT
         if f in _AIL_JD and f not in ctx.funcs:
@@ -1176,6 +1199,25 @@ def _c_int_literal(value):
     return '(-9223372036854775807LL - 1LL)' if value == -(1 << 63) else '%dLL' % value
 
 
+def module_table_refusal(name, value):
+    """The refusal for a module-level set, dict or list that is not a number table (STOP words, KEYWORDS):
+    functions cannot read it, so it is built in main() and passed in (rep5 a ranking program)."""
+    if isinstance(value, ast.Set):
+        what, declared = 'set', 'set[str]'
+    elif isinstance(value, ast.Dict):
+        what, declared = 'dict', 'dict[str, int]'
+    else:
+        what = 'list of non-numbers'
+        declared = 'list[bytes]' if any(isinstance(e, ast.Constant) and isinstance(e.value, bytes)
+                                         for e in getattr(value, 'elts', ())) else 'list[str]'
+    return Unsupported("%r is a module-level %s; only an int/float/str/bytes literal, or a "
+                       "numeric list or tuple, is accepted as a module constant.\n"
+                       "  write instead: build it in main() (`%s: %s = %s`) and pass it to the functions that "
+                       "read it as a parameter, or build it inside the one function that reads it"
+                       % (name, what, name.lower(), declared,
+                          '{...}' if declared.startswith(('set', 'dict')) else '[...]'))
+
+
 def _scan_module_consts(tree):
     """Module-level constant bindings, section 29's whole feature: a name bound EXACTLY ONCE at
     module scope to an int/float/str literal, or a literal numeric list/tuple, read by any function
@@ -1288,13 +1330,13 @@ def _scan_module_consts(tree):
                 consts[name] = (SLIST, [v for _, v in vals])
                 continue
             if any(v is None or v[0] not in (INT, FLT) for v in vals):
-                raise Unsupported("%r is a module-level list/tuple with an element that is not "
-                                  "an int/float literal; only a literal list or tuple of those is "
-                                  "accepted as a module constant" % name)
+                raise module_table_refusal(name, node.value)
             is_float = any(k == FLT for k, _ in vals)
             values = [float(v) for _, v in vals] if is_float else [v for _, v in vals]
             consts[name] = (FLIST if is_float else LIST, values)
             continue
+        if isinstance(node.value, (ast.Set, ast.Dict)):
+            raise module_table_refusal(name, node.value)
         raise Unsupported("%r is a module-level name assigned to a %s, not a literal; only an "
                           "int/float/str/bytes literal, or a numeric list or tuple, is accepted as "
                           "a module constant" % (name, type(node.value).__name__))
@@ -2867,10 +2909,18 @@ def _mark_tuple_lists(fn, seed=None, params=None, exclude=()):
                     rowof[n.target.id] = n.iter.id
                     changed = True
                 elif prev != n.iter.id:
-                    raise Unsupported(
-                        '%r is the loop variable of both %r and %r; this compiler binds a row '
-                        'variable once per function, not once per loop, so one of the two has to '
-                        'be renamed' % (n.target.id, prev, n.iter.id))
+                    # Only a list of RECORDS (one with an arity) has row variables; a loop over a
+                    # plain list of numbers binds an ordinary int, so `for i in vi:` and later
+                    # `for i in ei:` over two index lists is fine (rep5 an audit program, 3 builds).
+                    # The record owner wins over a plain list; two record owners still conflict.
+                    if prev in arity and n.iter.id in arity:
+                        raise Unsupported(
+                            '%r is the loop variable of both %r and %r; this compiler binds a row '
+                            'variable once per function, not once per loop, so one of the two has to '
+                            'be renamed' % (n.target.id, prev, n.iter.id))
+                    if prev not in arity and n.iter.id in arity:
+                        rowof[n.target.id] = n.iter.id
+                        changed = True
             # `last = ps[i]` and `b = a` carry row-ness
             if (isinstance(n, ast.Assign) and len(n.targets) == 1
                     and isinstance(n.targets[0], ast.Name)
@@ -4223,10 +4273,14 @@ def _param_kinds(fn, classes=(), sig_override=None, function_results=None, *, al
                                   % (n, 'bytes' if kind == BYTES else 'a sequence'))
             out.append((n, FLT))
         else:
+            hint = ''
+            if re.match(r'(set|dict)\[bytes\b', str(ann[1])):
+                hint = ('; a bytes-keyed set or dict is a local (`%s = {}` / `set()`), not a parameter: '
+                        'build it in the function that uses it' % n)
             raise Unsupported('%r is annotated %s, which this compiler has no rule for.\n'
                               '  write instead: int, float, str, bytes, bool, list[int], list[float], '
-                              'list[str], dict[str, int], set[int], or a class name (no generics '
-                              'such as list[T], no Optional/Union)' % (n, ann[1]))
+                              'list[str], dict[str, int], set[int], set[str], or a class name (no generics '
+                              'such as list[T], no Optional/Union)%s' % (n, ann[1], hint))
     return out
 
 
@@ -6086,6 +6140,14 @@ def _is_fromhex_call(node, ctx):
 
 
 def _is_utf8_codec_call(node, ctx, method):
+    if (method == "decode" and isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "decode" and isinstance(node.func.value, (ast.Subscript, ast.Name))
+            and not _is_bytes_expr(node.func.value, ctx) and _is_bytearray_expr(node.func.value, ctx)):
+        # `ba.decode()` / `ba[a:b].decode()` on a bytearray is `bytes(ba[a:b]).decode()` (rep5 a tree-folding program)
+        recv = node.func.value
+        node.func.value = ast.fix_missing_locations(ast.copy_location(
+            ast.Call(func=ast.copy_location(ast.Name(id='bytes', ctx=ast.Load()), recv),
+                     args=[recv], keywords=[]), recv))
     return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
             and node.func.attr == method
             and (_is_str_expr(node.func.value, ctx) if method == 'encode'
@@ -6198,7 +6260,7 @@ def _is_str_expr(node, ctx):
     AIL_TASK_strops_20260915.md, `.strip()`/`.lstrip()`/`.rstrip()` (Part A) and indexing a list of
     str (Part B; `.split()`/`.splitlines()` themselves build a LIST, never a str, so they are NOT
     here -- see `_is_slist_call`)."""
-    if _is_smap_value(node, ctx) or _is_jd_result_call(node, ctx):
+    if _is_smap_value(node, ctx) or _is_jd_result_call(node, ctx) or _is_fileprim_call(node, ctx, 'str'):
         return True
     if _is_int_hex_call(node, ctx) or _is_chr_call(node, ctx) or _is_hex_call(node, ctx) or _is_owned_str_call(node, ctx) or _is_strlit(node) or _is_str_call(node, ctx) or _is_sys_stdin_call(node) \
             or _is_input_call(node) or _is_str_strip_call(node, ctx) \
@@ -6279,6 +6341,50 @@ def _str_literal(s):
     return '(ail_str){(const uint8_t *)(%s), %d, %d}' % (body, len(data), int(data.isascii()))
 
 
+def _is_fileprim_call(node, ctx, ret=None):
+    """A call of one of the stage-G7 primitives (filelib.PRIMS), optionally of one result kind."""
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in filelib.PRIMS):
+        return False
+    if node.func.id in ctx.funcs or node.func.id in ctx.classes:
+        return False
+    return ret is None or filelib.PRIMS[node.func.id][0] == ret
+
+
+def _fileprim_value(node, ctx):
+    """`_ail_f_*` / `_ail_os_*` -> `ailt_*` (filert.py): arguments evaluated left to right into
+    temporaries, the str / bytes arena first for a primitive that returns text or bytes."""
+    name = node.func.id
+    ret, kinds = filelib.PRIMS[name]
+    if node.keywords or len(node.args) != len(kinds) or any(isinstance(a, ast.Starred) for a in node.args):
+        raise Unsupported('%s takes %d positional arguments' % (name, len(kinds)))
+    ctx.parts.add('FILEIO')
+    ctx.has_try = True
+    stages, names = [], []
+    for arg, kind in zip(node.args, kinds):
+        if kind == 'int':
+            _need_int(arg, ctx, name + ' argument')
+            value = _map_inline(lambda a=arg: _expr(a, ctx), ctx)
+            slot, _ = ctx.temp(INT)
+        elif kind == 'str':
+            if not _is_str_expr(arg, ctx):
+                raise Unsupported('%s needs a str argument' % name)
+            value = _map_inline(lambda a=arg: _str_value(a, ctx), ctx)
+            slot, _ = ctx.temp(STR)
+        else:
+            if not _is_bytes_expr(arg, ctx):
+                raise Unsupported('%s needs a bytes argument' % name)
+            value = _map_inline(lambda a=arg: _bytes_value(a, ctx), ctx)
+            slot, _ = ctx.temp(BYTES)
+        stages.append('%s = %s' % (slot, value))
+        names.append(slot)
+    if ret == 'str':
+        names.insert(0, '&' + ctx.sarena())
+    elif ret == 'bytes':
+        names.insert(0, '&' + ctx.barena())
+    call = 'ailt_%s(%s)' % (filelib.c_name(name), ', '.join(names))
+    return '(' + ', '.join(stages + [call]) + ')'
+
+
 def _osconfig_str_value(node, ctx):
     expected = 2 if node.func.id == 'get_env' else 0
     if node.keywords or len(node.args) != expected or any(_etype(arg, ctx) != STR for arg in node.args):
@@ -6315,6 +6421,8 @@ def _str_value(node, ctx, *, owned_join_return=False):
         return 'ail_exception_string_copy(ail_exception_%s(%s), &%s)' % (node.attr, value, ctx.sarena())
     if _is_dirpath_call(node, ctx, ('get_env', 'current_dir')):
         return _osconfig_str_value(node, ctx)
+    if _is_fileprim_call(node, ctx, 'str'):
+        return _fileprim_value(node, ctx)
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult) and _is_str_expr(node, ctx):
         kinds = [STR if _is_str_expr(arg, ctx) else _etype(arg, ctx)
                  for arg in (node.left, node.right)]
@@ -8598,6 +8706,8 @@ def _bytes_join_value(node, ctx):
 
 
 def _bytes_value(node, ctx):
+    if _is_fileprim_call(node, ctx, 'bytes'):
+        return _fileprim_value(node, ctx)
     if _is_tcpsocket_recv(node, ctx):
         return _tcpsocket_method(node, ctx)
     if _is_binaryfile_read(node, ctx):
@@ -9138,6 +9248,8 @@ def _is_bytes_expr(node, ctx):
     """Whether `node` denotes a bytes VALUE (not a byte read out of one) -- used to route a
     comparison to `ail_bytes_cmp`/`ail_bytes_eq` instead of plain integer comparison, and to
     recognise a bytes-producing right-hand side wherever one may appear."""
+    if _is_fileprim_call(node, ctx, 'bytes'):
+        return True
     if (_is_pcm16_scale_call(node, ctx) or _is_float64_codec_call(node, ctx, 'encode')
             or _is_integer_codec_call(node, ctx, 'encode')):
         return True
@@ -10798,6 +10910,10 @@ def _map_pointer(node, ctx, kind=None):
         if kind in SETS and isinstance(node, ast.Name) and _etype(node, ctx) == SET:
             raise Unsupported('%r is an unannotated set; declare it `let %s: %s = set();` to pass it '
                               'as a %s' % (node.id, node.id, _diagnostic_type(kind), _diagnostic_type(kind)))
+        if isinstance(node, ast.Name) and kind is not None and ctx.types.get(node.id) == 'dict':
+            raise Unsupported('%r is an unannotated dict literal, a lookup table that cannot be passed or '
+                              'stored in a field.\n  write instead: annotate it `%s: %s = {...}`'
+                              % (node.id, node.id, _diagnostic_type(kind)))
         raise Unsupported('a typed dict of the matching kind is required')
     kind = actual
     ctx.parts.add(kind.upper())
@@ -11952,6 +12068,11 @@ def _expr(node, ctx):
                               'compiler does not pass a str/list-of-str value to another '
                               'compiled function -- use it directly (print it, compare it, '
                               'int() it) where it is read' % recv_id)
+        if t == BLIST:
+            raise Unsupported('%r[...] is a bytes element, not a number.\n  write instead: as a sort '
+                              'key use %s[i].hex() (hex text orders exactly like the bytes); '
+                              'otherwise compare it with ==, or read its bytes %s[i][j]'
+                              % (recv_id, recv_id, recv_id))
         raise Unsupported('subscripting a %s' % (t,))
     if isinstance(node, ast.UnaryOp):
         if not isinstance(node.op, ast.Not) and _is_ref_kind(_etype(node.operand, ctx)):
@@ -14988,6 +15109,8 @@ def _call(node, ctx):
                     % ('double' if _etype(a[0], ctx) == FLT else 'int64_t',
                        p, inner, p, neg % p, p))
         return '((%s) < 0 ? %s : (%s))' % (inner, neg % inner, inner)
+    if _is_fileprim_call(node, ctx, 'int'):
+        return _fileprim_value(node, ctx)
     if f in _AIL_RAND and f not in ctx.funcs:
         # random.* as stdlib3.py lowers it: the C generator in cruntime RANDOM
         kind, cfunc, argkinds = _AIL_RAND[f]
@@ -16098,7 +16221,11 @@ def _method(node, ctx, *, as_stmt=False):
     if declared in (LIST, FLIST, SLIST) and not record and m == 'append' and len(a) == 1:
         expected = {LIST: INT, FLIST: FLT, SLIST: STR}[declared]
         if _element_kind(a[0], ctx, declared, 'append') != expected:
-            raise _element_type_error('a declared %s list accepts only %s elements' % (declared, expected), declared, 'append', _known_argument_kind(a[0], ctx))
+            actual = _known_argument_kind(a[0], ctx)
+            raise _element_type_error('a declared %s accepts only %s elements%s' % (
+                {LIST: 'list[int]', FLIST: 'list[float]', SLIST: 'list[str]'}[declared], expected,
+                ', not %s' % actual if isinstance(actual, str) and actual.isidentifier() else ''),
+                declared, 'append', actual)
     if m == 'reverse' and t in (LIST, FLIST, SLIST) and not a and not node.keywords:
         if name in ctx.nlist or name in ctx.tstride or name in ctx.blist:
             raise Unsupported('scalar list reverse requires scalar elements')
@@ -19616,6 +19743,11 @@ def _stmt_inner(node, ctx, ind):
             return _return_srowtup(node.value, ctx, ctx.ret[1], pad)
         if _is_multi_ret(ctx.ret):
             return _return_multi(node.value, ctx, ctx.ret[1], pad)
+        if isinstance(node.value, ast.Tuple) and any(_is_bytearray_expr(e, ctx) for e in node.value.elts):
+            raise Unsupported('a tuple cannot hold a bytearray, so `return code, out` with a bytearray '
+                              'is refused.\n  write instead: pass the bytearray in as a parameter '
+                              '(a bytearray parameter is writable) and return only the number, or '
+                              'return it as bytes(out)')
         rt = _rtype(node.value, ctx)
         if rt is not None and not _is_olist_kind(ctx.ret):
             raise Unsupported('returning a %s, but this function returns a number: no return '
@@ -20056,8 +20188,7 @@ def _try_stmt(node, ctx, ind):
         kw = 'if' if first else 'else if'
         first = False
         cond = ' || '.join('ail_exc_code == %d' % caught for code in hc
-                           for caught in ((code, EXC_NAMES['UnicodeDecodeError'])
-                                          if code == EXC_NAMES['ValueError'] else (code,)))
+                           for caught in _handler_codes(code))
         out += '%s%s (%s) {\n' % (pad1, kw, cond)
         ctx.finally_serial += 1
         scope = _handled_name(ctx, '_ail_handled%d' % ctx.finally_serial)
@@ -28546,6 +28677,32 @@ def _name_repeated_list_returns(tree):
     ast.fix_missing_locations(tree)
 
 
+def _unannotate_bytes_key_locals(tree):
+    """`ids: dict[bytes, int] = {}` / `seen: set[bytes] = set()` as a local is `ids = {}` /
+    `seen = set()`: a bytes-keyed dict or set is recognised from its bytes keys (`_mark_bkeys`), and
+    the annotation has no kind of its own (rep5 a ranking program: refused as an unsupported annotation)."""
+    def bytes_keyed(ann):
+        if not (isinstance(ann, ast.Subscript) and isinstance(ann.value, ast.Name)
+                and ann.value.id in ('dict', 'set')):
+            return False
+        first = ann.slice.elts[0] if isinstance(ann.slice, ast.Tuple) and ann.slice.elts else ann.slice
+        return isinstance(first, ast.Name) and first.id == 'bytes'
+
+    for fn in ast.walk(tree):
+        if not isinstance(fn, ast.FunctionDef):
+            continue
+        for node in ast.walk(fn):
+            for field in ('body', 'orelse', 'finalbody'):
+                stmts = getattr(node, field, None)
+                if not isinstance(stmts, list):
+                    continue
+                for i, st in enumerate(stmts):
+                    if (isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Name)
+                            and st.value is not None and bytes_keyed(st.annotation)):
+                        stmts[i] = ast.copy_location(
+                            ast.Assign(targets=[st.target], value=st.value, type_comment=None), st)
+
+
 def _strip_nullable(tree):
     """`Node | None`, `None | Node` and `Optional[Node]` annotations (parameters, results, locals)
     are replaced by the plain `Node`, and every such struct name is returned. A struct value is
@@ -31420,9 +31577,11 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     stdlib4.rewrite(tree, Unsupported)
     stdlib3.rewrite(tree, Unsupported)
     iterlower.rewrite(tree)
+    filelib.rewrite_tree(tree, Unsupported)
     if os.environ.get("AIL_NO_TRYHOIST", "0") in ("", "0"):
         tryhoist.rewrite(tree)
     nested_lists.rewrite(tree, Unsupported, library, entry)
+    _unannotate_bytes_key_locals(tree)
     _NULLABLE.clear()
     _NULLABLE_LINES.clear()
     _NULLABLE.update(_strip_nullable(tree))

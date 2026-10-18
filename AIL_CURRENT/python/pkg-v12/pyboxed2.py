@@ -33,6 +33,7 @@ import re
 import runpy
 
 from pyfront import Unsupported, refuse_complex_pow
+import filelib
 import pyfunc
 try:
     import pymix
@@ -989,6 +990,8 @@ class Compiler:
     def compile(self, source):
         tree = ast.parse(source)
         self.source_lines = source.splitlines()
+        self.uses_fileio = False
+        filelib.rewrite_tree(tree, Unsupported, general=True)      # G7: open / with / os -> primitives + prelude
         mix_tree = copy.deepcopy(tree)          # the mixed-mode typed clones see the source as written
         _hoist_defaults(tree)
         self.module_names = _scan_assigned_names(tree.body)
@@ -1069,6 +1072,9 @@ class Compiler:
 
         ng = self.next_global_slot
         parts = [PREAMBLE]
+        if self.uses_fileio:
+            import filert
+            parts.append(filert.general_text())
         if getattr(self, 'needs_boxcase', False):
             import cruntime
             parts.append(cruntime.BOXCASE)
@@ -3315,6 +3321,22 @@ class Compiler:
             raise Unsupported('%s() called with arguments but has no __init__' % name)
         return t
 
+    def _call_fileprim(self, name, args, kwargs, ctx):
+        """The stage-G7 file / os primitives (filelib.PRIMS) -> ailo_* (filert.py)."""
+        ret, kinds = filelib.PRIMS[name]
+        if 'bytes' in kinds or ret == 'bytes':
+            raise Unsupported('a binary file: the general path has no bytes values, so binary files are built in '
+                              'typed code only.\n  write instead: keep the code that opens it in a function whose '
+                              'parameters are annotated, or read the file as text')
+        if kwargs or len(args) != len(kinds):
+            raise Unsupported('%s takes %d positional arguments' % (name, len(kinds)))
+        self.uses_fileio = True
+        argcs = [self.expr(a, ctx) for a in args]
+        t = ctx.tmp()
+        ctx.emit('st = ailo_%s(cx, &%s%s);' % (filelib.c_name(name), t, ''.join(', ' + a for a in argcs)))
+        ctx.check()
+        return t
+
     def _call_name(self, name, args, kwargs, ctx):
         if name in self.classes:
             return self._call_class(name, args, kwargs, ctx)
@@ -3322,6 +3344,8 @@ class Compiler:
             return self._call_nested_function(name, args, kwargs, ctx)
         if name in self.functions:
             return self._call_user_function(name, args, kwargs, ctx)
+        if name in filelib.PRIMS:
+            return self._call_fileprim(name, args, kwargs, ctx)
         m = getattr(self, '_b_' + name, None)
         if m is not None:
             allowed = _BUILTIN_KWARGS.get(name, frozenset())
@@ -6215,6 +6239,8 @@ class Compiler:
             if ctx.finally_stack:
                 outer = ctx.finally_stack[-1]['label']
                 ctx.emit('case AIL_COMPLETE_RETURN: goto %s;' % outer)
+            elif ctx.fname == '<module>':
+                ctx.emit('case AIL_COMPLETE_RETURN: break;')      # module code has no `return`
             else:
                 ctx.emit('case AIL_COMPLETE_RETURN: *out = %s; AIL_FRAME_LEAVE(cx, f); return AIL_OK;'
                          % (ctx.retval_slot or 'ail_box_none()'))

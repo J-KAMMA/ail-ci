@@ -2327,6 +2327,17 @@ static ail_str ail_file_read(ail_sarena *A, ail_str path) {
     }
     if (ferror(f)) { fclose(f); free(buf); ail_raise_named(AIL_EXC_OS); }
     fclose(f);
+    if (n && memchr(buf, '\r', (size_t)n)) {
+        /* Text mode reads with universal newlines: "\r\n" and a lone "\r" both come back as "\n"
+           (CPython does this on every OS, DIFFERENCES.md C18). */
+        int64_t o = 0;
+        for (int64_t i = 0; i < n; i++) {
+            unsigned char c = buf[i];
+            if (c == '\r') { buf[o++] = '\n'; if (i + 1 < n && buf[i + 1] == '\n') i++; }
+            else buf[o++] = c;
+        }
+        n = o;
+    }
     int64_t ascii_end = 0;
     while (ascii_end < n && buf[ascii_end] < 0x80) ascii_end++;
     if (ascii_end == n) {
@@ -25632,6 +25643,8 @@ def emit(parts):
 def _piece(p, want):
     text = (_overflow_exception(_assert_exception(SOURCE[p])) if p == 'DIE' and 'OVERFLOWEXC' in want
             else _assert_exception(SOURCE[p]) if p == 'DIE' and 'ASSERTEXC' in want else SOURCE[p])
+    if p == 'DIE' and 'FILEEXC' in want:
+        text = _filert.file_exception(text, 'FILECORE' in want)
     if p == 'IREXC':
         return text.replace('/*IRPAR*/', 'if (ail_par_cur) ail_par_trap(NULL, code);' if 'PAR' in want else '')
     return _parallel_die(text) if p == 'DIE' and 'PAR' in want else text
@@ -26190,3 +26203,10 @@ for _name, _text, _requires in (
     ORDER.append(_name)
     SOURCE[_name] = _text
     REQUIRES[_name] = _requires
+
+
+# G7 files and os: the shared C core, the typed adapters and the OS-family exception codes
+# (filert.py; the C text is in ailfile_core.h). A program carries them only when it reaches them.
+import filert as _filert
+_filert.register(ORDER, SOURCE, REQUIRES)
+REQUIRES['FILEEXC'] = ['ASSERTEXC', 'OVERFLOWEXC']
