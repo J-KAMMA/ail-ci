@@ -134,6 +134,11 @@ def apply(P, args, kwargs, result):
         if allow and fn.name not in allow.split(','):
             raise lower.NotS0('not in AIL_IR_FUNCS')
         _summaries(ctx)
+        if os.environ.get("AIL_IR_AST") == fn.name:
+            import ast, sys
+            with open(os.environ.get("AIL_IR_AST_FILE", "/dev/stderr"), "a") as out:
+                print(ast.unparse(fn), file=out)
+                print("---- types:", dict(ctx.types), file=out)
         function, program = lower.lower(P, fn, ctx, sig, recursive, cname, PENDING,
                                         not bound.get('local_methods', True), _summaries(ctx))
         if not _only_cleanup_before(generated, sig):

@@ -38,7 +38,7 @@ class ArgumentTypeDetailsTests(unittest.TestCase):
                       'int', 'str', 'passing str where take() wants int')
         # Keywords reach the existing call guard without positional inference overriding it.
         self.mismatch('fn take(value:int)->int {return value;} fn main()->int {return take(value=1.5);}',
-                      'int', 'float', "passing a float to take(), whose 'value' is an int64; this language has no implicit truncation, so say int(...) if that is what you mean")
+                      'int', 'float', "passing a float to take(), whose 'value' is an int64; this language has no implicit truncation.\n  write instead: `//` where the float came from `/` (`take(n // 2)`), otherwise `take(int(x))` (truncates toward zero), or annotate 'value' `float`")
         self.mismatch('fn take(value:int)->int {return value;} fn main()->int {let parts:list[bytes]=[b"x"];return take(value=parts);}',
                       'int', 'list[bytes]', 'bytes-list parameter across a function boundary is unsupported; pass joined bytes or an int')
 
@@ -49,7 +49,7 @@ class ArgumentTypeDetailsTests(unittest.TestCase):
         self.assertEqual((diagnostic['line'], diagnostic['column']), (2, 17))
         # Both arguments fail; the first expression in source order remains the diagnostic.
         self.mismatch(prefix + 'take(right=1.5,left="wrong");}', 'int', 'float',
-                      "passing a float to take(), whose 'right' is an int64; this language has no implicit truncation, so say int(...) if that is what you mean",
+                      "passing a float to take(), whose 'right' is an int64; this language has no implicit truncation.\n  write instead: `//` where the float came from `/` (`take(n // 2)`), otherwise `take(int(x))` (truncates toward zero), or annotate 'right' `float`",
                       parameter='right', index=1)
 
     def test_callable_and_typed_map_argument_types_are_public(self):
@@ -172,7 +172,7 @@ class ArgumentTypeDetailsTests(unittest.TestCase):
         self.assertEqual((diagnostic['path'], diagnostic['function'], diagnostic['line'], diagnostic['column']),
                          (str(module), 'take', 2, 1))
         self.assertEqual(diagnostic['location_kind'], 'function_declaration')
-        self.assertEqual(diagnostic['message'], "'value' is annotated int in the source, but the caller also supplies float; refusing rather than silently choosing one")
+        self.assertEqual(diagnostic['message'], "'value' is annotated int in the source, but the caller also supplies float; refusing rather than silently choosing one.\n  write instead: pass `int(x)` at the call (truncates toward zero), use `//` where the float came from `/`, or annotate the parameter `float`")
 
     def test_multiple_call_evidence_keeps_parameter_and_argument_scopes(self):
         source = self.source('fn take(value:int)->int {return value;}\n'

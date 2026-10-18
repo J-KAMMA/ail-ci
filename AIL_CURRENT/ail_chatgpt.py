@@ -7,14 +7,17 @@ import os
 from pathlib import Path
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
 from ail_syntax import SyntaxErrorAIL, detect, fold_constants, python_surface, python_wording, translate
 import ail_sexpr
+import ail_modules
 
 ROOT = Path(__file__).resolve().parent
+_MERGED_ENTRIES = {}         # entry file -> ail_modules.Merged, for entries whose text merges several modules
 
 
 def _literal_number(node):
@@ -119,14 +122,44 @@ def _check_main_called(tree):
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'main'
                 and not any(m.lineno <= node.lineno <= m.end_lineno for m in mains)):
             return
-    raise ValueError('main() is defined but never called; add `main()` or '
-                     '`if __name__ == "__main__": main()` at the end (CPython would run nothing)')
+    error = ValueError('main() is defined but never called, so CPython would run nothing and this '
+                       'compiler refuses rather than run it.\n'
+                       '  write instead: add `main()` as the last line of the file '
+                       '(or `if __name__ == "__main__": main()`)')
+    error.source_line, error.source_column = mains[0].lineno, mains[0].col_offset
+    raise error
+
+
+def _ffi_session(args):
+    """The G4 session that lowers `@extern` stubs (ail_ffi_lower.py), closed when the process ends."""
+    import atexit
+    import ail_ffi_lower
+    session = ail_ffi_lower.Session(forbid=getattr(args, 'no_ffi', False))
+    atexit.register(session.close)
+    return session
+
+
+def _refuse_load(error):
+    """Print a load-time refusal as `path:line:col: message` (no argparse usage dump) and exit 2.
+    The position comes from the failing check (`error.refusal`) when the loader found one."""
+    refusal = getattr(error, 'refusal', None)
+    if refusal is None:
+        message = str(error)
+    else:
+        path, line, column, text = refusal
+        where = os.path.relpath(path)
+        message = '%s:%d:%d: %s' % (path if where.startswith('..') else where, line, column, text)
+    print(message, file=sys.stderr)
+    raise SystemExit(2)
 
 
 def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only=False,
                   separate=False, module_paths=(), origins=None, source_map=None, declarations_only=False, source_bytes=None,
-                  notes=None):
-    """Resolve source imports once and validate their shared declaration scope."""
+                  notes=None, local_imports=False, ffi=None):
+    """Resolve source imports once and validate their shared declaration scope.
+
+    `local_imports` lets a Python-syntax entry import sibling modules (ail_modules, stage G1): their
+    bodies are merged into the entry's text before everything below sees it."""
     search_paths = tuple(dict.fromkeys(Path(path).resolve() for path in module_paths))
     if any(not path.is_dir() for path in search_paths):
         raise ValueError('each --module-path must name an existing directory')
@@ -147,19 +180,35 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             raise ValueError('AIL module cycle: ' + ' -> '.join(p.name for p in [*active, path]))
         if path in seen:
             return None
-        if path.suffix.lower() != '.ail' or not path.is_file():
+        if path.suffix.lower() not in (('.ail', '.py') if entry else ('.ail',)) or not path.is_file():
             raise ValueError(f'AIL module not found: {path}')
+        # set before decoding: the error handler below reads it when the bytes are not UTF-8
+        syntax = 'python' if path.suffix.lower() == '.py' else source_syntax
         try:
             if source_bytes is None:
-                text = path.read_text(encoding='utf-8')
+                text = path.read_text(encoding='utf-8-sig')
             else:
                 data=path.read_bytes();source_bytes[path]=data
-                text=data.decode('utf-8').replace('\r\n','\n').replace('\r','\n')
+                text=data.decode('utf-8-sig').replace('\r\n','\n').replace('\r','\n')
             if source_syntax in ('auto', 'ail') and ail_sexpr.detect(text):
                 # The S-expression surface is converted to block syntax and then checked exactly
                 # like it; positions in diagnostics refer to that block text.
                 text = ail_sexpr.to_block(text)
             syntax = ('ail' if detect(text) else 'python') if source_syntax == 'auto' else source_syntax
+            if path.suffix.lower() == '.py':
+                syntax = 'python'
+            merged = None
+            if ffi is not None and syntax == 'python':
+                # G4: `@extern` stubs become ordinary functions over a generated C object (ail_ffi_lower.py);
+                # a file that does not mention ail_ffi is returned untouched
+                text = ffi.lower(path, text)
+            if local_imports and entry and syntax == 'python' and not module_only:
+                merged = ail_modules.merge_program(path, text, **({} if ffi is None else {'read': ffi.read}))
+                if merged is not None:
+                    _MERGED_ENTRIES[str(path)] = merged
+                    text = merged.text
+                    for line in merged.notes:
+                        print(line, file=sys.stderr)
             imports = []
             declarations = {}
             locations = {}
@@ -168,23 +217,28 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             else:
                 # Python spellings of built-ins and result contracts (ail_syntax.python_surface);
                 # every statement stays on its own line, so positions below are unchanged.
-                text = python_surface(text, None if notes is None else notes.setdefault(str(path), []))
+                text = python_surface(text, None if notes is None else notes.setdefault(str(path), []),
+                                     library=module_only)
             text = fold_constants(text)
             tree = ast.parse(text, filename=str(path))
             if syntax == 'python' and entry and not module_only and not declarations_only:
                 _check_main_called(tree)
             if not declarations_only:
                 _check_int64_literals(tree)
+            if merged is not None and merged.positions:
+                locations = dict(merged.positions)
             if source_map is not None:
-                if syntax == 'python':
+                if syntax == 'python' and merged is None:
                     for node in ast.walk(tree):
                         if isinstance(node, ast.stmt):
                             position = (node.lineno, len(text.splitlines()[node.lineno - 1].encode('utf8')[:node.col_offset].decode('utf8')) + 1)
                             locations[node.lineno] = None if node.lineno in locations else position
                     locations = {line: position for line, position in locations.items() if position is not None}
-                unit_locations[text] = {line: (str(path), *position) for line, position in locations.items()}
+                unit_locations[text] = ({line: position for line, position in locations.items()}
+                                        if merged is not None and merged.positions else
+                                        {line: (str(path), *position) for line, position in locations.items()})
             if origins is not None:
-                if syntax == 'python':
+                if syntax == 'python' and merged is None:
                     for owner, fn in ((node.name if isinstance(node, ast.ClassDef) else None, member)
                                       for node in tree.body for member in
                                       (node.body if isinstance(node, ast.ClassDef) else [node])
@@ -192,9 +246,30 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                         key = f'{owner}__{fn.name}' if owner else fn.name
                         column = len(text.splitlines()[fn.lineno - 1].encode('utf8')[:fn.col_offset].decode('utf8')) + 1
                         declarations[key] = None if key in declarations else (fn.lineno, column, f'{owner}.{fn.name}' if owner else fn.name)
+                if merged is not None:
+                    for owner, fn in ((node.name if isinstance(node, ast.ClassDef) else None, member)
+                                      for node in tree.body for member in
+                                      (node.body if isinstance(node, ast.ClassDef) else [node])
+                                      if isinstance(member, ast.FunctionDef)):
+                        key = f'{owner}__{fn.name}' if owner else fn.name
+                        where = merged.positions.get(fn.lineno)
+                        shown = merged.names.get(fn.name, fn.name)
+                        declarations[key] = None if key in declarations or where is None else (
+                            where[0], where[1], where[2], f'{owner}.{shown}' if owner else shown)
                 for key, declaration in declarations.items():
-                    origins[key] = None if declaration is None or key in origins else (str(path), *declaration)
+                    if merged is not None:
+                        origins[key] = None if declaration is None or key in origins else declaration
+                    else:
+                        origins[key] = None if declaration is None or key in origins else (str(path), *declaration)
+        except ail_modules.ModuleRefusal:
+            raise
         except (OSError, UnicodeError, SyntaxError, ValueError) as exc:
+            if hasattr(exc, 'source_line') and merged is not None and exc.source_line in (merged.positions or {}):
+                where = merged.positions[exc.source_line]
+                exc.source_position = where
+                located = ValueError(f'AIL source {where[0]}: line {where[1]}: {exc}')
+                located.refusal = (where[0], where[1], where[2], str(exc))
+                raise located from exc
             if hasattr(exc, 'source_line'):
                 position = locations.get(exc.source_line)
                 if syntax == 'python':
@@ -204,7 +279,16 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                     exc.source_position = (str(path), *position)
                 if syntax == 'python' and position is not None:
                     # `compile` prints only this message: name the line the check report has.
-                    raise ValueError(f'AIL {"source" if entry else "module"} {path}: line {position[0]}: {exc}') from exc
+                    located = ValueError(f'AIL {"source" if entry else "module"} {path}: line {position[0]}: {exc}')
+                    located.refusal = (str(path), position[0], position[1], str(exc))
+                    raise located from exc
+            elif ((isinstance(exc, SyntaxErrorAIL) or syntax == 'python' and type(exc) is SyntaxError)
+                  and getattr(exc, 'lineno', None)):
+                # a block-syntax or Python syntax error carries its own position
+                located = ValueError(f'AIL {"source" if entry else "module"} {path}: {exc}')
+                located.refusal = (str(path), exc.lineno, exc.offset or 1,
+                                   exc.msg if type(exc) is SyntaxError else str(exc))
+                raise located from exc
             raise ValueError(f'AIL {"source" if entry else "module"} {path}: {exc}')
         if syntax == 'ail' and any(isinstance(node, ast.Assign)
                 and not _module_constant(node) for node in tree.body):
@@ -243,8 +327,10 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 for node in ast.walk(fn) if node is not fn):
             raise ValueError(f'AIL separate module cannot contain nested functions: {path}')
         for node in tree.body:
+            # a Python-syntax script rebinds a module-level name freely (`values = ...` twice is
+            # ordinary Python); only AIL consts and definitions must be unique
             name = (node.name if isinstance(node, (ast.FunctionDef, ast.ClassDef)) else
-                    node.targets[0].id if isinstance(node, ast.Assign)
+                    node.targets[0].id if isinstance(node, ast.Assign) and syntax == 'ail'
                     and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) else None)
             if name is not None:
                 if name in names:
@@ -498,6 +584,58 @@ def _slow_patterns(text, source_map):
         return []
 
 
+_FALLBACK_NOTE = 'note: built on the general path'
+_LINE_MARKER = re.compile(r'^ail-source-line: (\d+)\r?\n?', re.M)
+
+
+def _split_line_marker(text):
+    """(text without the compiler's `ail-source-line: N` line, N or None)."""
+    found = _LINE_MARKER.search(text or '')
+    return (_LINE_MARKER.sub('', text), int(found.group(1))) if found else (text, None)
+
+
+def _marker_where(source_map, line):
+    """`path:line:col` of the combined-source line the compiler named, or None."""
+    position = source_map.get(line) if line is not None else None
+    if not position:
+        return None
+    where = os.path.relpath(position[0])
+    where = position[0] if where.startswith('..') else where
+    return '%s:%s:%s' % (where, position[1], position[2]) if len(position) > 2 and position[2] is not None else '%s:%s' % (where, position[1])
+
+
+def _fallback_notes(args, source, stderr, locate=True, source_map=None):
+    """The compile-time `note: file:line:col: built on the general path (several times slower)
+    because <typed refusal>` lines the compiler printed, positioned like a refusal. Advisory only:
+    stdout and the exit status are never affected; AIL_QUIET_FALLBACK=1 silences it."""
+    if os.environ.get('AIL_QUIET_FALLBACK') or not stderr or _FALLBACK_NOTE not in stderr:
+        return []
+    notes = []
+    stderr, marked = _split_line_marker(stderr)
+    try:
+        python = _python_source(args, source.read_bytes())
+        for line in stderr.splitlines():
+            if not line.startswith(_FALLBACK_NOTE):
+                continue
+            if python:
+                line = python_wording(line)
+            if str(source) in _MERGED_ENTRIES:
+                line = ail_modules.unmangle(line, _MERGED_ENTRIES[str(source)].names)
+            if locate:
+                reason = line.split(' because ', 1)[-1]
+                located = _locate_refusal(args, source, reason)
+                if located != reason and located.endswith(reason):
+                    where = located[:-len(reason)].rstrip(': ')
+                else:
+                    where = _marker_where(source_map or {}, marked)
+                if where:
+                    line = 'note: %s: built on the general path%s' % (where, line[len(_FALLBACK_NOTE):])
+            notes.append(line)
+    except Exception:
+        return notes
+    return notes
+
+
 def _source_check(args):
     """Read-only strict type/code-generation check; no C build or runtime proof."""
     report = dict(schema='ail.check/1', status='failed', stage='loader', diagnostics=[],
@@ -534,9 +672,19 @@ def _source_check(args):
             raise ValueError('--types-used requires --interface and --symbol')
         if args.symbol and not args.interface:
             raise ValueError('--symbol requires --interface')
+        ffi = _ffi_session(args)
         text, _, _ = _load_sources(source, args.module, args.syntax,
                                   module_only=args.library, module_paths=args.module_path, origins=origins, source_map=source_map,
+                                  local_imports=True, ffi=ffi,
                                   **({'source_bytes': snapshots} if snapshots is not None else {}))
+        check_objects = list(args.object)
+        if getattr(args, 'ffi', False):
+            report['ffi'] = ffi.listing()
+        if ffi.decls:
+            dependency = True
+            check_objects.append(ffi.build(ROOT / 'ail_chatgpt.py'))
+            os.environ['AIL_FFI_SYMBOLS'] = ' '.join(ffi.symbols())
+            dependency = False
         report['checked_functions'] = sum(isinstance(node, ast.FunctionDef)
                                           for node in ast.walk(ast.parse(text)))
         compiler_path = str(ROOT / 'python/pkg-v12')
@@ -547,10 +695,10 @@ def _source_check(args):
             sys.path.insert(0, compiler_path)
             from pyfunc import Unsupported, to_c
             external = None
-            if args.object:
+            if check_objects:
                 dependency = True
                 from module_object import load_objects
-                external = load_objects(args.object)
+                external = load_objects(check_objects)
                 dependency = False
             stage = 'type'
             saved_surface = os.environ.get('AIL_SURFACE')
@@ -586,7 +734,9 @@ def _source_check(args):
     except (OSError, UnicodeError, SyntaxError, ValueError, RuntimeError, ImportError, subprocess.SubprocessError) as error:
         # Unsupported inherits the compiler's error type; inspect it without a fallback.
         status = 2 if dependency or isinstance(error, (OSError, ImportError, subprocess.SubprocessError)) else 1
-        message = str(error)
+        message = error.refusal[3] if isinstance(error, ail_modules.ModuleRefusal) else str(error)
+        if str(source) in _MERGED_ENTRIES:
+            message = ail_modules.unmangle(message, _MERGED_ENTRIES[str(source)].names)
         if _python_source(args, original):
             message = python_wording(message)
         configuration = ('each --module-path', 'each --module must', 'AIL module not found:', '--symbol requires --interface', '--contracts requires --interface', '--types-used requires --interface and --symbol', 'unknown interface function:', 'invalid bundled API module name:', 'unknown bundled API module:', 'invalid bundled API manifest:')
@@ -655,8 +805,8 @@ def _surface_env(args, source, env=None):
     the compiler refuse list/dict/set sharing it would otherwise copy (pkg-v12/aliasrefuse.py)."""
     env = dict(os.environ if env is None else env)
     try:
-        python = (Path(source).suffix.lower() == '.ail'
-                  and _python_source(args, Path(source).read_bytes()))
+        python = (Path(source).suffix.lower() in ('.ail', '.py')
+                  and (Path(source).suffix.lower() == '.py' or _python_source(args, Path(source).read_bytes())))
     except OSError:
         python = False
     if python:
@@ -690,11 +840,20 @@ def _python_notes(message, notes, source):
     for entries in notes.values():
         # `import time` followed by a time name the front end could not map: name that, not the import
         named = [text.split(';')[0] for _, text in entries if re.match(r'(time|string|os|operator)\.', text)]
-        found = re.search(r"import of '(time|string|os|operator)'; [^\n]*?by hand", message)
+        found = re.search(r"import of '(time|string|os|operator)' is not available[^\n]*\n  write instead: [^\n]*", message)
         if named and found and any(text.startswith(found.group(1) + '.') for _, text in entries):
             message = message.replace(found.group(0), next(n for n in named if n.startswith(found.group(1) + '.'))
                                       + ' (see the note below)')
             break
+    # library batch 4 (csv, datetime, ...): the import is refused because a use was not built; say which
+    found = re.search(r"import of '(csv|datetime|decimal|fractions|unicodedata|statistics|textwrap|enum|string)'; [^\n]*?by hand",
+                      message)
+    if found:
+        for entries in notes.values():
+            named = [text.split(';')[0] for _, text in entries if found.group(1) in text.split(':')[0]]
+            if named:
+                message = message.replace(found.group(0), named[0] + ' (see the note below)')
+                break
     shown = os.path.relpath(source)
     shown = str(source) if shown.startswith('..') else shown
     for path, entries in notes.items():
@@ -702,6 +861,97 @@ def _python_notes(message, notes, source):
         for line, text in entries:
             message += '\nnote: %s:%d: %s' % (where, line, text)
     return message + '\n'
+
+
+def _text_position(source, message, function=None):
+    """(line, column) of the construct a refusal names, found by reading the source text. This is
+    the fallback for refusals the type check cannot map to a statement (a signature, an
+    annotation): the position of the def, parameter or annotation the message quotes."""
+    try:
+        lines = Path(source).read_text(encoding='utf8').splitlines()
+    except (OSError, UnicodeError):
+        return None
+    head = message.split('\n', 1)[0]
+    head = re.sub(r'^not in the subset: ', '', head)
+
+    def find(pattern, only_defs=False):
+        compiled = re.compile(pattern)
+        for number, line in enumerate(lines, 1):
+            if line.lstrip().startswith(('#', '//')):
+                continue
+            if only_defs and not re.match(r'\s*(?:def|fn)\s', line):
+                continue
+            found = compiled.search(line)
+            if found:
+                return number, found.start() + 1
+        return None
+
+    def name_in(pattern):
+        found = re.search(pattern, head)
+        return re.escape(found.group(1)) if found else None
+
+    named_line = re.match(r'line (\d+): ', head)
+    if named_line and int(named_line[1]) <= len(lines):
+        at = int(named_line[1])
+        return at, len(lines[at - 1]) - len(lines[at - 1].lstrip()) + 1
+    nullable = name_in(r'^(\w+) \| None')
+    if nullable:
+        return find(r'\b%s\s*\|\s*None|Optional\s*\[\s*%s' % (nullable, nullable))
+    if 'must take plain positional arguments' in head:
+        return find(r'(?:def|fn)\s+\w+\s*\([^)]*(?:\*|,\s*/|/\s*[,)])', only_defs=True)
+    default_for = re.search(r"^(\w+)\(\): the default for '(\w+)'", head)
+    if default_for:
+        at = find(r'(?:def|fn)\s+%s\s*\([^)]*\b%s\b[^)]*=' % default_for.groups(), only_defs=True)
+        if at is not None:
+            line = lines[at[0] - 1]
+            named = re.search(r'\b%s\b\s*[:=]' % re.escape(default_for[2]), line[line.find('('):])
+            return (at[0], line.find('(') + named.start() + 1) if named else at
+        return find(r'(?:def|fn)\s+%s\b' % default_for[1], only_defs=True)
+    annotation = re.search(r'unsupported local annotation (.+?)\.?$', head)
+    if annotation:
+        squeezed = re.sub(r'\s+', '', annotation[1].rstrip('.'))
+        for number, line in enumerate(lines, 1):
+            at = re.sub(r'\s+', '', line).find(squeezed)
+            if at >= 0:
+                return number, max(1, len(line) - len(line.lstrip()) + 1)
+        return None
+    parameter = name_in(r"^'(\w+)' is annotated")
+    if parameter:
+        return find(r'\b%s\s*:' % parameter, only_defs=True)
+    if head.startswith('a function with no parameters'):
+        return find(r'(?:def|fn)\s+\w+\s*\(\s*\)', only_defs=True)
+    callee = re.search(r'^(\w+)\(\):', head)
+    if callee:
+        return find(r'(?:def|fn)\s+%s\b' % callee[1], only_defs=True)
+    if function:
+        return find(r'(?:def|fn)\s+%s\b' % re.escape(function.split('.')[-1]), only_defs=True)
+    return None
+
+
+def _construct_position(source, message):
+    """The position of a construct whose refusal names it, read off the source text. It overrides
+    the check's statement mapping, which can point at a later use (the call that reaches a class)."""
+    try:
+        lines = Path(source).read_text(encoding='utf8').splitlines()
+    except (OSError, UnicodeError):
+        return None
+    head = re.sub(r'^not in the subset: ', '', message.split('\n', 1)[0])
+    patterns = ((r"^inheritance \(class '(\w+)'", r'class\s+%s\b'),
+                (r"^class '(\w+)' has no __init__", r'class\s+%s\b'),
+                (r"^a decorator on class '(\w+)'", r'class\s+%s\b'),
+                (r"^a decorator on \w+\.(\w+)", r'def\s+%s\b'),
+                (r"^dunder method \w+\.(\w+)", r'def\s+%s\b'),
+                (r"^(nonlocal) in a nested function", r'\b%s\b'),
+                (r"^(global) in a nested function", r'\b%s\b'))
+    for refusal, wanted in patterns:
+        found = re.match(refusal, head)
+        if found:
+            compiled = re.compile(wanted % re.escape(found[1]))
+            for number, line in enumerate(lines, 1):
+                at = compiled.search(line)
+                if at and not line.lstrip().startswith(('#', '//')):
+                    return number, at.start() + 1
+    return None
 
 
 def _locate_refusal(args, source, message):
@@ -716,23 +966,30 @@ def _locate_refusal(args, source, message):
         result = subprocess.run(command, capture_output=True, text=True, timeout=300)
         diagnostic = json.loads(result.stdout)['diagnostics'][0]
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, IndexError, TypeError):
-        return message
-    text = diagnostic.get('message') or ''
-    if not text or text not in message:
-        return message
-    where = diagnostic.get('path') or str(source)
+        diagnostic = None
+    text = (diagnostic or {}).get('message') or ''
+    if diagnostic is not None and (not text or text not in message):
+        diagnostic = None
+    where = (diagnostic or {}).get('path') or str(source)
     relative = os.path.relpath(where)
     if not relative.startswith('..'):
         where = relative
-    if diagnostic.get('line') is not None:
+    merged = str(Path(source).resolve()) in _MERGED_ENTRIES      # the entry text alone does not hold the code
+    named = None if merged else _construct_position(source, message)
+    if named is not None:
+        return '%s:%d:%d: %s' % (where, named[0], named[1], message)
+    if diagnostic is not None and diagnostic.get('line') is not None:
         where += ':%d' % diagnostic['line']
         if diagnostic.get('column') is not None:
             where += ':%d' % diagnostic['column']
-    elif diagnostic.get('function'):
-        where += ' (in %s)' % diagnostic['function']
-    else:
+        return '%s: %s' % (where, message)
+    # the check could not map the refusal to a statement: read the position off the source text
+    position = None if merged else _text_position(source, message, (diagnostic or {}).get('function'))
+    if position is None:
+        if diagnostic is not None and diagnostic.get('function'):
+            return '%s (in %s): %s' % (where, diagnostic['function'], message)
         return message
-    return '%s: %s' % (where, message)
+    return '%s:%d:%d: %s' % (where, position[0], position[1], message)
 
 
 def main(argv=None):
@@ -745,6 +1002,8 @@ def main(argv=None):
     check_cmd.add_argument('--module', action='append', type=Path, default=[])
     check_cmd.add_argument('--object', action='append', type=Path, default=[], help='typed object metadata; may query compiler identity, never builds or links')
     check_cmd.add_argument('--library', action='store_true')
+    check_cmd.add_argument('--ffi', action='store_true', help='list the C FFI declarations (@extern stubs) of the program')
+    check_cmd.add_argument('--no-ffi', action='store_true', help='refuse a program that declares C FFI functions')
     check_cmd.add_argument('--repair-context', action='store_true', help='include SHA-bound failing AIL function body and declared import/API context')
     check_cmd.add_argument('--interface', action='store_true', help='include checked source declarations without function bodies; absent types are null')
     check_cmd.add_argument('--symbol', action='append', default=[], help='select top-level function declarations with --interface; repeatable; struct declarations retained')
@@ -804,6 +1063,7 @@ def main(argv=None):
     compile_cmd.add_argument('-o', '--output', required=True, type=Path)
     compile_cmd.add_argument('--module', action='append', type=Path, default=[],
         help='additional .ail file containing functions and literal numeric constants')
+    compile_cmd.add_argument('--no-ffi', action='store_true', help='refuse a program that declares C FFI functions (@extern)')
     compile_cmd.add_argument('--separate', action='store_true',
         help='compile each typed source into a C object, then link the objects')
     compile_cmd.add_argument('--object', action='append', type=Path, default=[],
@@ -852,6 +1112,9 @@ def main(argv=None):
         os.environ['AIL_STATIC'] = '1'
     if getattr(args, 'target', None):
         os.environ['PIPE_CC'] = _zig_compiler(args.target)
+        if args.target == 'windows':
+            os.environ['AIL_TARGET_OS'] = 'windows'
+        os.environ['AIL_TARGET'] = args.target      # os.path takes the flavour of the target (filelib.target_windows)
     if args.command in ('compile', 'compile-module', 'compile-library', 'compile-c'):
         import ail_native_build as native_build
         if native_build.enabled(args):
@@ -926,9 +1189,18 @@ def main(argv=None):
         return 2 if not report['python_supported'] or args.check and report['build_check']['status'] != 'passed' else 0
     if args.command == 'integrity':
         manifest = json.loads((ROOT/'MANIFEST.json').read_text(encoding='utf8'))
-        bad = [name for name,h in manifest['sha256'].items()
-               if not (ROOT/name).is_file() or hashlib.sha256((ROOT/name).read_bytes()).hexdigest()!=h]
-        print(json.dumps({'status':'verified' if not bad else 'failed','checked':len(manifest['sha256']),'mismatches':bad},indent=2))
+        pins = manifest['sha256']
+        is_sdk = manifest.get('kind') == 'ail_language_sdk'
+        # A source checkout's sha256 map also holds pins of files from earlier archive layouts that
+        # no longer exist; only the shipped sdk_files and the pins of files present are checked
+        # (the same set ail_check and tools/update_manifest.py --check verify).
+        names = list(pins) if is_sdk else [n for n in pins if (ROOT/n).is_file() or n in manifest.get('sdk_files', [])]
+        bad = [name for name in names
+               if not (ROOT/name).is_file() or hashlib.sha256((ROOT/name).read_bytes()).hexdigest()!=pins[name]]
+        report = {'status':'verified' if not bad else 'failed','checked':len(names),'mismatches':bad}
+        if not is_sdk:
+            report['historical_pins_skipped'] = len(pins) - len(names)
+        print(json.dumps(report,indent=2))
         return 1 if bad else 0
     if args.command == 'compare-http':
         from ail_http_compare import main as compare_http
@@ -999,16 +1271,24 @@ def main(argv=None):
         output = Path(os.path.abspath(args.output))
         if sys.version_info < (3, 10):
             parser.error('AIL compilation requires Python 3.10 or newer')
-        if source.suffix.lower() != '.ail' or not source.is_file():
-            parser.error('source must be an existing .ail file')
+        if source.suffix.lower() not in ('.ail', '.py') or not source.is_file():
+            parser.error('source must be an existing .ail or .py file')
         notes = {}
         loading = native_build.loading(args) or {'source_map': {}}
+        ffi = None if library else _ffi_session(args)
         try:
             source_text, contracts, unit_map = _load_sources(
                 source, args.module, args.syntax, module_only=library, separate=separate,
-                module_paths=args.module_path, notes=notes, **loading)
+                module_paths=args.module_path, notes=notes, local_imports=not library, ffi=ffi, **loading)
         except (OSError, UnicodeError, SyntaxError, ValueError) as error:
-            parser.error(str(error))
+            _refuse_load(error)
+        ffi_objects, ffi_env = [], {}
+        if ffi is not None and ffi.decls:
+            try:
+                ffi_objects = [ffi.build(ROOT / 'ail_chatgpt.py')]
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                return native_build.emit(args, {}, 2, 'ffi', str(error))
+            ffi_env = {'AIL_FFI_LINK': shlex.join(ffi.link_args), 'AIL_FFI_SYMBOLS': ' '.join(ffi.symbols())}
         if library:
             if output.exists() or output.is_symlink() or not output.parent.is_dir():
                 parser.error('library output requires a new directory in an existing parent')
@@ -1040,21 +1320,26 @@ def main(argv=None):
             build_source.write_text(source_text, encoding='utf-8')
             command = [sys.executable, '-B', str(ROOT/'python/pkg-v12/pyc.py'),
                        '--file', str(build_source), str(target), '--strict']
-            for object_path in objects:
+            for object_path in [*objects, *ffi_objects]:
                 command += ['--object', str(object_path.resolve())]
             if separate:
                 unit_map_path = Path(tmp) / 'units.json'
                 unit_map_path.write_text(json.dumps(unit_map), encoding='utf-8')
                 command += ['--link-units', str(unit_map_path)]
             result = native_build.invoke(args, command, tmp, capture_output=True, text=True,
-                timeout=660, env=_surface_env(args, source, {**os.environ, 'AIL_NO_GENERAL': '1'} if contracts else None))
+                timeout=660, env=_surface_env(args, source, {**os.environ, 'AIL_REPORT_SOURCE_LINE': '1',
+                                                **({'AIL_NO_GENERAL': '1'} if contracts else {}), **ffi_env}))
             if result.returncode:
-                message = result.stderr or result.stdout
+                message, marked = _split_line_marker(result.stderr or result.stdout)
                 python = result.returncode == 3 and _python_source(args, source.read_bytes())
                 if python:
                     message = python_wording(message)
+                if str(source) in _MERGED_ENTRIES:
+                    message = ail_modules.unmangle(message, _MERGED_ENTRIES[str(source)].names)
                 if result.returncode == 3 and not args.json and not objects and not separate:
-                    message = _locate_refusal(args, source, message)
+                    located = _locate_refusal(args, source, message)
+                    where = _marker_where(loading['source_map'], marked) if located == message else None
+                    message = '%s: %s' % (where, message) if where else located
                 if python and any(notes.values()):
                     message = _python_notes(message, notes, source)
                 return native_build.emit(args, {}, result.returncode, message=message)
@@ -1075,6 +1360,10 @@ def main(argv=None):
                 raise
             for line in [] if args.json else _slow_patterns(source_text, loading['source_map']):
                 print(line, file=sys.stderr)
+            if not args.json:
+                for line in _fallback_notes(args, source, result.stderr, locate=not objects and not separate,
+                                             source_map=loading['source_map']):
+                    print(line, file=sys.stderr)
             return native_build.emit(args, {'output': str(output), 'bytes': output.stat().st_size,
                 'sha256': hashlib.sha256(output.read_bytes()).hexdigest()})
     project = ROOT/'example' if args.command == 'selftest' else Path(args.project).resolve()

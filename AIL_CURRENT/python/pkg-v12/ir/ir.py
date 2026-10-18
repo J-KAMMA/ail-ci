@@ -97,6 +97,23 @@ I1, I64, F64 = T('i1'), T('i64'), T('f64')
 STRV, BYTES = T('strv'), T('bytes')
 
 
+DICT_II = Type('obj', (Type('dict', (I64, I64)),))
+
+
+def rec_elem(t):
+    """The record type (a tup of scalars) of an obj<list<tup<..>>>, else None."""
+    if t.head == 'obj' and t.args[0].head == 'list':
+        e = t.args[0].args[0]
+        if e.head == 'tup' and e.args and all(a in (I64, F64) for a in e.args):
+            return e
+    return None
+
+
+def rec_sig(t):
+    """'IIF' for obj<list<tup<i64, i64, f64>>>."""
+    return ''.join('I' if a == I64 else 'F' for a in rec_elem(t).args)
+
+
 def place(t):
     return Type('place', (t,))
 
@@ -334,6 +351,37 @@ _op('ba.extend', 2, 2)            # (bytearray, bytes): `b.extend(x)` with x a b
 _op('str.lit', 0, 0)
 _op('bytes.lit', 0, 0)
 _op('print', 0, None)
+# S3c-1: owned lists of str (`obj<list<strv>>`, the legacy `ail_slist`: a spine of views over the function's
+# text arena; design section 17). `list.rt` (dst ref, args...; attr callee) adopts the list a runtime call
+# builds (`s.split()`); `list.has` (list, str) is `x in xs`; `list.sort` (list) sorts in place; `list.join`
+# (sep, list) is `sep.join(xs)`, a str in the function's arena.
+_op('list.rt', 1, None)
+_op('list.has', 2, 2)
+_op('list.sort', 1, 1)
+_op('list.join', 2, 2)
+# S3c-2: keyed sorts, as the legacy front end lowers them (sortkeys.py): `list.sortperm (perm, cols...) {rev}` fills the
+# int list `perm` with the stable ordering permutation of the key columns (lists of int, float or str, all as long as
+# the sorted list); `list.permute (xs, perm)` reorders `xs` in place: new xs[i] is old xs[perm[i]].
+_op('list.sortperm', 2, None)
+_op('list.permute', 2, 2)
+# S3c-3: lists of scalar records (`obj<list<tup<i64|f64, ...>>>`: the legacy list of a struct whose fields are all int
+# or float, held inline, one record after the other, instead of as counted objects). The legacy front end lowers
+# heapq on such a list to `append` + a sift (`_ail_heap='up d b n'`) and `pop(_ail_heap='pop d b n')`; here
+# `rec.push (list, fields...)`, `rec.up (list) {key}` (sift the last record up: CPython's heapq._siftdown) and
+# `rec.pop (list) {key} -> fields...` (heappop: CPython's _siftup then _siftdown). `key` is the list of field
+# indices of the ordering.
+_op('rec.push', 2, None)
+_op('rec.up', 1, 1)
+_op('rec.pop', 1, 1)
+# S3d-1: an owned dictionary of int to int (`obj<dict<i64,i64>>`, the legacy `ail_idict`, held in a local place;
+# every op takes the place itself). `dict.has (d, k) -> i1`, `dict.need (d, k) -> i64` (KeyError when missing),
+# `dict.get (d, k, default) -> i64`, `dict.put (d, k, v)`, `dict.len (d) -> i64`, `dict.reset (d)` (`d = {}`).
+_op('dict.has', 2, 2)
+_op('dict.need', 2, 2)
+_op('dict.get', 3, 3)
+_op('dict.put', 3, 3)
+_op('dict.len', 1, 1)
+_op('dict.reset', 1, 1)
 _op('span.of', 1, 1)
 _op('span.len', 1, 1)
 _op('span.get', 2, 2)
@@ -350,8 +398,8 @@ for _name in ('field', 'elem', 'slot', 'tupfield', 'env', 'global', 'borrow', 't
 for _name in ('exc.new',):
     RESERVED[_name] = 'S2'
 for _name in ('list.new', 'list.insert',
-              'list.extend', 'list.slice', 'list.sort', 'dict.new', 'set.new', 'dict.get', 'dict.contains',
-              'dict.put', 'dict.del', 'dict.upsert', 'dict.items', 'dict.keys', 'dict.values', 'heap.push',
+              'list.extend', 'list.slice', 'dict.new', 'set.new', 'dict.contains',
+              'dict.del', 'dict.upsert', 'dict.items', 'dict.keys', 'dict.values', 'heap.push',
               'heap.pop', 'copy.list', 'copy.dict', 'copy.set', 'box.wrap', 'rc.inc', 'rc.dec', 'is'):
     RESERVED[_name] = 'S3'
 for _name in ('str.len.bytes', 'str.len.cp', 'str.byte', 'str.cp_at', 'str.cat', 'str.append',

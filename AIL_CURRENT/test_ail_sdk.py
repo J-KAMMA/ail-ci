@@ -808,6 +808,31 @@ fn main()->int {let g=[[1,2,3]];write_stdout_bytes(str(reduce(g[choose()])).enco
             with redirect_stdout(output):ail_chatgpt.main(['doctor'])
         self.assertEqual(json.loads(output.getvalue())['c_compiler'], '/compiler/clang')
 
+    def test_sdk_files_cover_every_compiler_module_import(self):
+        # The exported compiler must carry every python/pkg-v12 module that a shipped .py file imports
+        # (jsonrt.py once imported unconditionally by cruntime.py was missing from a copied subset).
+        import ast
+        manifest = json.loads((support.ROOT / 'MANIFEST.json').read_text(encoding='utf8'))
+        shipped = set(manifest['sdk_files'])
+        package = support.ROOT / 'python/pkg-v12'
+        modules = {path.stem for path in package.glob('*.py')}
+        missing = set()
+        for name in sorted(shipped):
+            if not name.endswith('.py'):
+                continue
+            tree = ast.parse((support.ROOT / name).read_text(encoding='utf8'))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    imported = [alias.name.split('.')[0] for alias in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                    imported = [node.module.split('.')[0]]
+                else:
+                    continue
+                for module in imported:
+                    if module in modules and 'python/pkg-v12/' + module + '.py' not in shipped:
+                        missing.add((name, module))
+        self.assertEqual(sorted(missing), [])
+
     def test_declared_distribution_excludes_unadopted_files_and_checks_closure(self):
         exporter = importlib.import_module('ail_sdk').export_sdk
         sdk = self.exported()

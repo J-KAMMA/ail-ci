@@ -8,6 +8,7 @@ calls them, not what they say.
 """
 from . import ir as I
 from . import rtc
+from . import ownership
 
 STRV, BYTES = I.STRV, I.BYTES
 
@@ -25,6 +26,8 @@ def c_bytes_literal(data):
 
 def allocates_str(ins):
     """Whether `ins` puts a block into the function's str arena."""
+    if ins.op == 'list.join':
+        return True
     if ins.op == 'rt':
         spec = rtc.ENTRIES.get(ins.attrs.get('callee'))
         return bool(spec and spec['arena'] == 's')
@@ -48,6 +51,7 @@ class TextEmitter(object):
             i.op == 'call' and i.results and i.results[0].type == STRV for i in ops)
         self.needs_bar = any(allocates_bytes(i) for i in ops)
         self.cursors = sorted(set(i.attrs['cur'] for i in ops if i.op == 'rt' and 'cur' in i.attrs))
+        self.wins = sorted(set(i.attrs['win'] for i in ops if i.op == 'rt' and 'win' in i.attrs))
         self.str_places = [i for i in fn.body.instrs if i.op == 'local.alloc' and i.result.type.pointee == STRV]
         self.sar = self.pre + 'v__sarena'
         self.bar = self.pre + 'v__barena'
@@ -56,9 +60,14 @@ class TextEmitter(object):
     def cursor_cells(self, k):
         return {'cp': '%sv__cp%d' % (self.pre, k), 'cu': '%sv__cu%d' % (self.pre, k), 'cl': '%sv__cl%d' % (self.pre, k)}
 
+    def win_cell(self, k):
+        return '%sv__win%d' % (self.pre, k)
+
     def text_fields(self):
         """Frame-struct fields for the arenas and cursors (functions with a try)."""
         fields = []
+        for k in self.wins:
+            fields.append('ail_win v__win%d;' % k)
         if self.needs_sar:
             fields.append('ail_sarena v__sarena;')
         if self.needs_bar:
@@ -74,6 +83,8 @@ class TextEmitter(object):
             self.line(depth, 'ail_sarena v__sarena = {0};')
         if self.needs_bar:
             self.line(depth, 'ail_barena v__barena = {0};')
+        for k in self.wins:
+            self.line(depth, 'ail_win v__win%d = {0};' % k)
         for k in self.cursors:
             self.line(depth, 'int64_t v__cp%d = 0, v__cu%d = 0, v__cl%d = 0;' % (k, k, k))
 
@@ -99,6 +110,8 @@ class TextEmitter(object):
         spec = rtc.ENTRIES[callee]
         self.parts.update(spec['parts'])
         fields = {'A': '&' + self.sar, 'B': '&' + self.bar, 'va': ', '.join(o), 'n': len(o)}
+        if 'win' in ins.attrs:
+            fields['W'] = self.win_cell(ins.attrs['win'])
         if spec['cursor']:
             fields.update(self.cursor_cells(ins.attrs['cur']))
         for a in spec['attrs']:
@@ -156,9 +169,31 @@ class TextEmitter(object):
     def loop_allocates(self, loop):
         return self.needs_sar and any(allocates_str(i) for r in loop.regions for i in I.walk(r))
 
+    def slist_blocks_reset(self, loop):
+        """Whether resetting the str arena at the top of each iteration of `loop` could leave a list of str
+        pointing at freed text (S3c-1). The elements of a list are views over arena blocks and, unlike a str
+        place, cannot be re-pointed by `ail_sarena_keep_roots`. A list written in the loop (replaced, grown,
+        sorted) and live at the loop header (read on some path before the loop writes it again, in a later
+        iteration or after the loop) may hold views of blocks that the reset releases; a list only read in
+        the loop holds what existed before the loop's mark, and a list rebuilt before it is read in every
+        iteration is not live at the header. Liveness is the ownership analysis's (places of lists)."""
+        places = [i.result for i in self.fn.body.instrs
+                  if i.op == 'local.alloc' and i.result.type.pointee == I.T('obj', I.T('list', STRV))]
+        if not places:
+            return False
+        if getattr(self, '_slist_flow', None) is None:
+            self._slist_flow = ownership.Flow(self.fn, None, None)
+        flow = self._slist_flow
+        live = flow.live_in.get(loop, set())
+        touched = set()
+        for r in loop.regions:
+            for ins in I.walk(r):
+                touched |= flow.kills.get(ins, set()) | flow.writes.get(ins, set())
+        return any(p in live and p in touched for p in places)
+
     def open_loop_roots(self, loop, depth):
         """Before a loop whose iterations allocate text: the mark and the root list (every str place)."""
-        if not self.loop_allocates(loop):
+        if not self.loop_allocates(loop) or self.slist_blocks_reset(loop):
             return None
         self.roots_loops += 1
         k = self.roots_loops

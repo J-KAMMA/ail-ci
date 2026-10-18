@@ -125,6 +125,26 @@ _entry('read_bytes', (S,), (B,), 'ail_file_read_bytes({B}, {0})',
        Effects(allocs=[BARENA], raises=[OSERR, DIE], io=True), parts=('FILEBYTES',), arena='b')
 _entry('exit', (N,), (), 'exit((int)({0}))', Effects(io=True))
 
+# --- input windows (S4c-1, passes/window.py): the same reads, mapped where the input is a regular file, and the
+# release of the pages behind a forward scan. `win` names the function's window cell.
+WIN = 'Global(rt,win)'
+_entry('read_stdin_win', (N,), (B,), 'ail_win_stdin(&{W}, {B}, {0})',
+       Effects(reads=[STDIN], writes=[STDIN, STDOUT], allocs=[BARENA], raises=[VALUE, OSERR], io=True),
+       parts=('IRWINSTDIN',), arena='b', attrs=('win',))
+_entry('read_bytes_win', (S,), (B,), 'ail_win_file(&{W}, {B}, {0})',
+       Effects(allocs=[BARENA], raises=[OSERR, DIE], io=True), parts=('IRWINFILE',), arena='b', attrs=('win',))
+_entry('win_release', (N,), (), 'ail_win_release(&{W}, {0})', Effects(writes=[WIN]), parts=('IRWIN',), attrs=('win',))
+
+
+# --- lists of str (S3c-1, design section 17): runtime calls that build a list. They are not `rt` calls: the list
+# they return lives in a place, so the lowering emits `list.rt (destination, args...)`.
+LIST_ENTRIES = {}
+LIST_ENTRIES['str_split_ws'] = dict(params=(S,), c='ail_str_split_ws({0})', effects=Effects(raises=[DIE]),
+                                    parts=frozenset(('STR', 'SLIST')))
+LIST_ENTRIES['str_split_sep'] = dict(params=(S, S), c='ail_str_split_sep({0}, {1})',
+                                     effects=Effects(raises=[VALUE, DIE]), parts=frozenset(('STR', 'SLIST')))
+LIST_ENTRIES['str_splitlines'] = dict(params=(S,), c='ail_str_splitlines({0})', effects=Effects(raises=[DIE]),
+                                      parts=frozenset(('STR', 'SLIST')))
 
 from . import effects as _effects      # noqa: E402
 

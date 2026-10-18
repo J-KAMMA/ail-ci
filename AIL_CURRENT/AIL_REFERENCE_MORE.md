@@ -2,7 +2,8 @@
 
 Look-up sections behind AIL_REFERENCE.md, whose last line gives each section's line range here:
 read only the slice you need (`sed -n A,Bp AIL_REFERENCE_MORE.md`). A refusal names the construct,
-the rewrite and `file:line:col`.
+the rewrite and `file:line:col`. Most examples use the brace surface (`fn`, `let`, `;`, braces);
+write them in Python as usual (`struct` is a `@dataclass`, `impl` its methods; brace `let ys = xs;` copies).
 
 ## Commands
 
@@ -87,6 +88,37 @@ fn main() {
   `write_stdout_bytes(bytes|bytearray)` and `print` mix in order.
 - Use bytes for binary formats, non-UTF-8 input and one huge line of tokens. `bytes.split()`
   builds a list of every token: avoid it on large input.
+- Python syntax: a bytes-keyed dict or set (`ids: dict[bytes, int] = {}`, `stop = {b"an"}`) and a list
+  of bytes are locals, not parameters or fields; a bytes sort key is `terms[i].hex()`;
+  `ba[a:b].decode()` works on a bytearray; a tuple cannot hold a bytearray (pass it in, return the
+  number). A module-level set or dict literal is a read-only table (next section).
+
+```python
+import sys
+
+def main() -> int:
+    ids: dict[bytes, int] = {}
+    stop = {b"an", b"the"}
+    terms = []
+    for w in b"the cat an ox cat".split():
+        t = bytes(w)
+        if t in stop:
+            continue
+        if t not in ids:
+            ids[t] = len(terms)
+            terms.append(t)
+    order = list(range(len(terms)))
+    order.sort(key=lambda i: terms[i].hex())
+    ba = bytearray(b"xyz")
+    print(len(terms), order[0], ids[b"ox"], ba[1:3].decode())
+    return 0
+
+sys.exit(main())
+```
+
+```text
+2 0 1 yz
+```
 
 ## Syntax: top level, functions, statements, let, const
 
@@ -284,6 +316,18 @@ results, with Python's meaning:
 (`issubset`, `issuperset`), `isdisjoint`. Insertion ordered; `s.pop()` removes the newest element
 (`KeyError` when empty). A set parameter is read-only.
 
+Module-level tables (Python syntax): `STOP = {"a", "the"}`, `STOP: set[str] = {...}`, `TABLE = {"x": 1}`,
+`NAMES = {1: "one"}`, `PAIRS = {(0, 1), (2, 3)}`, `STOP = {b"a"}`: a non-empty literal, every element of one
+kind (int, str, bytes, or a tuple of ints / strs; a dict: one key kind, one value kind, int / float / str /
+bytes / tuple), bound once and not changed. Any function reads it in place: `w in STOP`, `TABLE[k]`,
+`TABLE.get(k, 0)`, `for k, v in TABLE.items()`, `len`, `sorted`, `min`, `max`, `sum`, `any`, `all`. It is built
+once in the entry function and passed down (a bytes table is rebuilt by each function that reads it).
+Refused by name: `STOP.add(x)`, `T[k] = v`, `global STOP`, `xs = STOP`, `return STOP`, `f(STOP)`, `[STOP]`
+(CPython would share the one object; write `set(STOP)` for a copy), and a set of ints walked by `for` /
+`list(...)` (CPython walks it in hash order, this compiler in insertion order; write `sorted(PRIMES)`). A
+computed, empty, mixed-kind, bool or float table is refused too: build it in `main` and pass it in. A library
+module (`compile-library`) takes no table.
+
 ## Strings: methods, formatting
 
 - `str` is UTF-8; `len`, index, slice, `for c in s` count code points; `s[i]` is a str.
@@ -404,11 +448,19 @@ first uses (`Counter(words)`, `d[w].append(i)`, `q.append(x)`).
 - A collection passed to a function needs the same annotation on the parameter. A `Counter` or a defaultdict
   of numbers is a dict there (read-only: return new values instead of changing it); `d[k]` on a defaultdict
   parameter is refused because it would insert into the caller's dict.
+- Tuples inside collections (tuples of `int` / `float` / `bool` / `str`, see Tuples): `deque([(r, c)])` with
+  `r, c = q.popleft()`, `deque` of `(node, dist)`, `Counter` of coordinate tuples (`most_common`, `+`, `update`,
+  `Counter(zip(a, b))`), `defaultdict(int | float | str)` and `OrderedDict` with tuple keys,
+  `defaultdict(list)` / `defaultdict(set)` with tuple rows and/or keys (`adj[u].append((v, w))` then
+  `for v, w in adj[u]`). The collections pass runs first and writes its helpers with `tuple[...]`
+  annotations, which the tuple pass lowers to classes and tables, so the C runtime gets nothing new.
+  Printing is CPython's repr: `deque([(1, 2)])`, `Counter({(0, 1): 2})`, `defaultdict(<class 'int'>, {...})`,
+  `defaultdict(<class 'list'>, {...})`, `OrderedDict({...})` (also for str / int keys).
 - Refused by name (`note:` lines): `namedtuple` (use a `@dataclass`), `ChainMap` and the rest of the module,
-  `defaultdict(bool | dict | Counter | lambda: <expression>)`, tuple / float keys or elements,
-  `==` / `<` on collections, `q.maxlen`, `d.default_factory`, deque slices, `OrderedDict(items)`, a collection
+  `defaultdict(bool | dict | Counter | lambda: <expression>)`, float keys, nested tuples,
+  `print` of a `defaultdict(set)` or of `defaultdict(lambda: ...)`, `==` / `<` on collections, `q.maxlen`, `d.default_factory`, deque slices, `OrderedDict(items)`, a collection
   in a class field or at module level, `top = c.most_common(3)` as a value, `d[k] = xs` with an existing list,
-  `del d[k]` on `defaultdict(list)`, `Counter.subtract`, `print` of a defaultdict, a loop that adds to or
+  `del d[k]` on `defaultdict(list)`, `Counter.subtract`, a loop that adds to or
   deletes from the collection it walks (CPython raises `RuntimeError`).
 
 ```python
@@ -477,7 +529,7 @@ number tuples) is returned as written. Element types: int, float, bool, str, tup
   is made (CPython reads it when the lambda is called); a lambda that is returned or stored in a list,
   dict or field is refused by name.
 - Refused by name: tuple concatenation / repetition / slices, a variable index, `tuple(x)`, `tuple[int, ...]`,
-  iterating a tuple, float keys, `defaultdict` / `Counter` / `deque` of tuples, dict values that are sets or
+  iterating a tuple, float keys, dict values that are sets or
   dicts, `max(xs, key=...)` over tuples.
 
 ```python
@@ -517,7 +569,7 @@ variable first when it sits behind another call.
 - `random`: CPython 3.12's MT19937, bit for bit after `random.seed(<int>)`: `random()`, `randint`,
   `randrange(stop | start, stop[, step])`, `uniform`, `gauss(mu, sigma)`, `choice(list)`, `shuffle(list)`,
   `sample(list, k)` (same draws, same ValueError / IndexError). The state is one generator per program. A
-  program without `random.seed(<int>)` is refused (an unseeded run is not reproducible, like `time.time()`);
+  program without `random.seed(<int>)` is refused (an unseeded run is not reproducible);
   a seed that is a str / float / None, `random.Random(...)`, `choices`, `triangular`, `getrandbits`... are refused by
   name. Ranges wider than 64 bits are a RuntimeError. Only the module-level functions share state, as in CPython.
 - `itertools`: `count`, `repeat` (a number or str), `chain`, `chain.from_iterable` (list of lists), `islice`
@@ -558,6 +610,14 @@ variable first when it sits behind another call.
   prints CPython's bytes for dict / list / str / int / float / bool / None literals (nested, mixed) and for variables of
   the types above, whose type comes from an annotation or the first assignment; `json.dump(x, sys.stdout)` works.
   `default=`, `cls=`, `skipkeys=` and a value of unknown type are refused by name.
+  Speed: a plain document (strict syntax, every value of the declared type, ints within 64 bits) is parsed in one
+  pass by the C runtime straight into the declared list / dict, with no intermediate strings, and `json.dumps` of a
+  list, a nested list or a str-keyed dict is written by C appenders into one buffer; on the 12 MB benchmark documents
+  both are 2-6 times faster than CPython 3.12 with about half its peak memory. Whatever the fast path does not take
+  (a syntax error, a value of another type, NaN, an integer beyond 64 bits) runs the scanner and the typed parsers
+  described above, so errors and results are the same. `data: dict[str, int] = json.loads(s)` (or an assignment to an
+  annotated local) fills the local in place; a `return json.loads(s)` or a call argument goes through a loader
+  function and copies the result once more.
 
 ## Heaps: heapq, bisect
 
@@ -600,7 +660,7 @@ needs a final `return`. Handler names: Local names.
 |---|---|
 | tuples beyond the Tuples section, `zip` over non-lists | a struct; index loops |
 | a lambda that escapes, nested `def` | a top-level `fn` passed as `Callable[[A], R]` |
-| global variables | a struct holding the state, passed to each function |
+| global variables you change | a struct holding the state, passed to each function (a literal read-only table is fine) |
 | `dict[str, Struct]`, `dict[str, list[T]]` | a `dict[str, int]` index into a `list[Struct]` (or a `list[list[T]]`) |
 | `None` for int, str, list | a sentinel (-1, ""), or raise. A struct may be `Node \| None` |
 | `xs[i] = v` or `xs.append(v)` on a list parameter | a struct field `s.xs`, or return a new list |
@@ -848,3 +908,15 @@ fn main() {
 ```text
 7.485470860550343 0.6933972430599376 1385.7944861198737
 ```
+
+### Library batch 4 (csv, datetime, statistics, small forms)
+
+Lowered in the front end like batches 1 to 3 (stdlib4.py, csvlib.py, dtlib.py, statlib.py, smalllib.py); a program that does not use them is unchanged.
+
+- `csv`: `reader`, `DictReader`, `writer`, `DictWriter` on `sys.stdin`, a file opened for reading, or a list of lines, with `delimiter quotechar doublequote escapechar skipinitialspace quoting lineterminator strict`. CPython's state machine (QUOTE_MINIMAL default, `lineterminator '
+'`). A parse error is raised when the reader reaches it, so earlier rows are processed first. `csv.Error` is `ValueError`. Declared difference: `DictReader` rows with too few or too many fields raise `RuntimeError`.
+- `datetime`: `date`, `datetime` (naive), `time`, `timedelta` with arithmetic, comparison, `replace`, `isoformat`, `strftime`, `strptime`, `fromisoformat`, `fromordinal`, `weekday`, `isocalendar` parts. `now() utcnow() today() date.today() fromtimestamp() utcfromtimestamp() timestamp()` read the wall clock and the OS time zone (`time`, below). Fixed-offset time zones are built: `timezone.utc`, `UTC`, `timezone(timedelta(...)[, name])`, `tzinfo=` / `replace(tzinfo=)`, `astimezone([tz])`, `utcoffset()`, `tzname()`, `now(tz)`, `fromtimestamp(t, tz)`, `fromisoformat` with `Z` or an offset, `%z %Z`; test `d.tzinfo is None`. Refused by name: `zoneinfo`, `tzinfo` subclasses, `dst()`, `timezone.min/max`, an aware `time`. Limit: `timedelta` beyond about 53 million days raises `OverflowError`.
+- `time`: `perf_counter() monotonic() time() time_ns() sleep(x) localtime([t]) gmtime([t]) strftime(fmt[, t]) mktime(t)`. The wall clock is a program input: `AIL_CLOCK=<seconds>[.<fraction>]` pins it for tests (every read returns that value, `sleep(x)` advances it without sleeping); local time is the OS time zone (`TZ` is respected). `localtime` and `gmtime` give an object with `tm_year tm_mon tm_mday tm_hour tm_min tm_sec tm_wday tm_yday tm_isdst tm_zone tm_gmtoff` only. Refused by name: `asctime ctime tzset altzone daylight timezone tzname struct_time(...)` and `strftime` of a tuple.
+- `statistics` on `list[int]`: `mean median median_low median_high mode multimode variance pvariance stdev pstdev`; `fmean` also on floats. `StatisticsError` is `ValueError`. Mixed int/float results only where printed or used as floats.
+- Small forms: `int.bit_length()`, `int.bit_count()`, `max/min(..., default=)`, `max(d, key=d.get)` (and over a generator), `x in (constants)`, `itertools.product(x, repeat=n)` with a runtime `n`, unpacking a `tuple | None` after a None test.
+- Refused by name with a "write instead" hint: `decimal`, `fractions`, `textwrap`, `unicodedata`, `enum`, `string.Template`.

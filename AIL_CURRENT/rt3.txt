@@ -1,0 +1,2 @@
+== test_ail_argument_type_details rc=0 4s OK
+DONE

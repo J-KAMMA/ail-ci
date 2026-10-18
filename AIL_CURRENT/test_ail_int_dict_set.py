@@ -420,6 +420,94 @@ REFUSED = [
 ]
 
 
+# Few keys over a wide id range, cleared and refilled each round (a ranking program's per-document
+# id-to-count table): such tables spill from the dense array to the hash table on a sparse widen,
+# and must still give CPython's results -- insertion order, re-adds after del, clear, and a table
+# that spilled early and then fills densely. `wide` (a permutation written in stride order) spills
+# on its second key and returns to the array once its keys fill the span.
+SPARSE = """
+fn main() {
+    let x = 12345;
+    let cur: dict[int, int] = {};
+    let seen: set[int] = set();
+    let acc = 0;
+    for doc in range(300) {
+        for t in range(1 + doc % 23) {
+            x = (x * 1103515245 + 12345) % 2147483648;
+            let id = x % 200000;
+            if doc % 5 == 0 { id = id * 9973; }
+            cur[id] = cur.get(id, 0) + 1;
+            seen.add(id % 70001 * 31);
+        }
+        if doc % 7 == 0 and len(cur) > 2 {
+            let ks = cur.keys();
+            del cur[ks[1]];
+            cur[ks[1]] = 5;
+        }
+        for k, v in cur.items() { acc = (acc * 131 + k * 3 + v) % 1000000007; }
+        cur.clear();
+    }
+    print(acc, len(seen));
+    let sx = 0;
+    for v in seen { sx = (sx * 7 + v) % 1000000007; }
+    print(sx);
+    let grow: dict[int, int] = {5: 1, 900000: 2};
+    for i in range(20000) { grow[i * 37 % 50000] = i; }
+    let g = 0;
+    for k, v in grow.items() { g = (g * 31 + k + v) % 1000000007; }
+    print(len(grow), g, grow.get(900000, -1), grow.get(-3, -1));
+    let wide: dict[int, int] = {};
+    for i in range(30000) { wide[(i * 7919) % 30000 - 15000] = i; }
+    let w = 0;
+    for k, v in wide.items() { w = (w * 31 + k + v) % 1000000007; }
+    print(len(wide), w);
+}
+"""
+
+SPARSE_PYTHON = """
+def main():
+    x = 12345
+    cur = {}
+    seen = {}
+    acc = 0
+    for doc in range(300):
+        for t in range(1 + doc % 23):
+            x = (x * 1103515245 + 12345) % 2147483648
+            id = x % 200000
+            if doc % 5 == 0:
+                id = id * 9973
+            cur[id] = cur.get(id, 0) + 1
+            seen.setdefault(id % 70001 * 31, None)
+        if doc % 7 == 0 and len(cur) > 2:
+            ks = list(cur.keys())
+            del cur[ks[1]]
+            cur[ks[1]] = 5
+        for k, v in cur.items():
+            acc = (acc * 131 + k * 3 + v) % 1000000007
+        cur.clear()
+    print(acc, len(seen))
+    sx = 0
+    for v in seen:
+        sx = (sx * 7 + v) % 1000000007
+    print(sx)
+    grow = {5: 1, 900000: 2}
+    for i in range(20000):
+        grow[i * 37 % 50000] = i
+    g = 0
+    for k, v in grow.items():
+        g = (g * 31 + k + v) % 1000000007
+    print(len(grow), g, grow.get(900000, -1), grow.get(-3, -1))
+    wide = {}
+    for i in range(30000):
+        wide[(i * 7919) % 30000 - 15000] = i
+    w = 0
+    for k, v in wide.items():
+        w = (w * 31 + k + v) % 1000000007
+    print(len(wide), w)
+main()
+"""
+
+
 class IntDictSetTests(unittest.TestCase):
     def test_every_operation_matches_cpython(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -438,6 +526,16 @@ class IntDictSetTests(unittest.TestCase):
                 self.assertIn(table, body, name)
                 for slow in ("ail_str_from_int", "ail_stab", "ail_sdict"):
                     self.assertNotIn(slow, body, name)
+
+    def test_sparse_refills_match_cpython(self):
+        with tempfile.TemporaryDirectory() as directory:
+            built, exe, _ = build(directory, SPARSE)
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)
+            expected = subprocess.run([sys.executable, "-c", SPARSE_PYTHON], capture_output=True, text=True, timeout=60)
+            self.assertEqual(expected.returncode, 0, expected.stderr)
+            self.assertEqual(ran.returncode, 0, ran.stderr)
+            self.assertEqual(ran.stdout, expected.stdout)
 
     def test_literals_results_and_fields(self):
         with tempfile.TemporaryDirectory() as directory:

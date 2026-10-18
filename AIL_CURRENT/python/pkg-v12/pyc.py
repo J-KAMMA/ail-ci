@@ -21,7 +21,7 @@ input; Windows reads the same raw file into an owned buffer before calling the g
 """
 import argparse, ast, json, os, pathlib, subprocess, sys
 
-from pipeline import PipelineError, compiler, link_flags
+from pipeline import PipelineError, compiler, ffi_link_args, link_flags
 
 # Extra optimizer flags for the generated C. SLP vectorization is off: on a struct of doubles it packs
 # neighbouring fields (vx,vy / vz,m) into 16-byte vectors whose loads straddle the preceding scalar or
@@ -33,7 +33,8 @@ import native_diagnostics
 import shadowing
 from pyfront import Unsupported, to_pipeline_c
 from pyfunc import to_c as func_to_c
-from pyfunc import _module_const_scalar
+from pyfunc import _module_const_scalar, module_table_refusal
+import modtables
 from pyfunc import NORET
 try:
     # BRIEF_mixed_mode.md's own capability probe (test_mixed.py): "pymix.py present in the
@@ -246,8 +247,8 @@ def _is_module_const_assign(node):
     if _module_const_scalar(node.value) is not None:
         return True
     if isinstance(node.value, (ast.List, ast.Tuple)) and node.value.elts:
-        return all((kind := _module_const_scalar(e)) is not None and kind[0] in ('int', 'float')
-                   for e in node.value.elts)
+        kinds = [(_module_const_scalar(e) or (None,))[0] for e in node.value.elts]
+        return all(k in ('int', 'float') for k in kinds) or all(k == 'str' for k in kinds)
     return False
 
 
@@ -314,6 +315,28 @@ def _count_assign_targets(nodes):
                 if name is not None:
                     counts[name] = counts.get(name, 0) + 1
     return counts
+
+
+def _all_functions(nodes):
+    for top in nodes:
+        for n in ast.walk(top):
+            if isinstance(n, ast.FunctionDef):
+                yield n
+
+
+def _reads_global(fn, name):
+    """`fn` reads `name` without binding it (no parameter, no assignment in it): a module-level read."""
+    args = fn.args
+    bound = {a.arg for a in args.posonlyargs + args.args + args.kwonlyargs}
+    bound.update(a.arg for a in (args.vararg, args.kwarg) if a is not None)
+    loads = False
+    for n in ast.walk(fn):
+        if isinstance(n, ast.Name) and n.id == name:
+            if isinstance(n.ctx, ast.Load):
+                loads = True
+            else:
+                bound.add(name)
+    return loads and name not in bound
 
 
 def _entry_name(taken):
@@ -399,6 +422,41 @@ def _rewrite_script(source, force):
             continue
         other.append(n)
 
+    # A module-level set / dict / list of strings that a function reads cannot become a local of the
+    # synthesised body (the reader would then say "read before it is assigned"). A literal set or dict
+    # stays at module scope as a table (modtables.py lowers it); the rest is named.
+    annotated = {}
+    for n in other:
+        if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name):
+            annotated[n.target.id] = annotated.get(n.target.id, 0) + 1
+    for n in list(other):
+        target = (n.targets[0] if isinstance(n, ast.Assign) and len(n.targets) == 1
+                  else n.target if isinstance(n, ast.AnnAssign) and n.value is not None else None)
+        if (isinstance(target, ast.Name)
+                and ((isinstance(n.value, (ast.Set, ast.Dict, ast.List, ast.Tuple))
+                      and (getattr(n.value, "elts", None) or getattr(n.value, "keys", None)))
+                     or (modtables.display(n.value) is not None and not isinstance(n.value, (ast.Set, ast.Dict))))
+                and assign_counts.get(target.id, 0) + annotated.get(target.id, 0) == 1
+                and any(_reads_global(fn, target.id) for fn in _all_functions(kept))):
+            if modtables.table_assign(n, False) is not None:
+                other.remove(n)
+                kept.append(n)
+                continue
+            refusal = module_table_refusal(target.id, modtables.display(n.value) or n.value)
+            refusal.source_line = n.lineno
+            raise refusal
+        if (isinstance(target, ast.Name) and modtables.display(n.value) is not None
+                and modtables.table_assign(n, False) is not None
+                and assign_counts.get(target.id, 0) + annotated.get(target.id, 0) > 1
+                and any(_reads_global(fn, target.id) for fn in _all_functions(kept))):
+            refusal = Unsupported("%r is a module-level %s that the program changes at module level; a function "
+                                  "cannot read a table that is not fixed.\n"
+                                  "  write instead: build the table once as a literal and do not change it, or "
+                                  "build it in main() and pass it to the functions that read it"
+                                  % (target.id, 'dict' if isinstance(n.value, ast.Dict) else 'set'))
+            refusal.source_line = n.lineno
+            raise refusal
+
     if not other and not force:
         return None
     # A top-level `class` needed no special refusal here, tested rather than assumed (CLAUDE.md's
@@ -435,7 +493,17 @@ def to_c(source, strict=True, name='run', info=None, external=None):
                         for arg in call.args + [kw.value for kw in call.keywords])):
             # Typed bools erase their object identity to int; print must retain it.
             # Nonliteral arguments use the existing object-semantics fallback.
-            raise Unsupported('nonliteral print requires general object semantics')
+            # Name the argument that needs it and point at its line (this refusal had neither).
+            literal = next((arg for arg in call.args if isinstance(arg, (ast.Dict, ast.Set))), None)
+            if isinstance(literal, ast.Dict):
+                refusal = Unsupported('a dict literal; build a dict with {} and d[k] = v instead')
+            elif isinstance(literal, ast.Set):
+                refusal = Unsupported('a set literal; build a set with set() and .add() in a loop instead')
+            else:
+                refusal = Unsupported('a script that is only print(<expression>) needs general object '
+                                      'semantics; write it inside def main() and call main()')
+            refusal.source_line = getattr(literal or call, 'lineno', None)
+            raise refusal
     if is_function(source):
         rewritten = _rewrite_script(source, force=False)
         return func_to_c(rewritten if rewritten is not None else source,
@@ -471,7 +539,9 @@ def _main_for(info):
         # `run(void)` -- caught only at the C compiler, not by name, and only because the mismatch
         # happens to be an arity gcc itself checks.
         raise Unsupported('a function with no parameters and no print()/assert has no way to '
-                          'show its return value; add a print() (or take a parameter)')
+                          'show its return value.\n'
+                          '  write instead: print the result inside the function (`print(total)`), '
+                          'or give it a parameter')
     if kinds[0] != 'array':
         raise Unsupported('the first parameter must be the sequence read from the file')
     extra = kinds[1:]
@@ -530,8 +600,15 @@ def _general_failure(typed, use_typed, failure):
     arguments to function pf_main" for a dict of lists) or its own generic refusal -- says
     nothing the author can act on."""
     if use_typed:
-        typed.args = ((typed.args[0] + ' (the general path could not build this program either)',)
-                      + typed.args[1:]) if typed.args and isinstance(typed.args[0], str) else typed.args
+        # the note goes after the first line, so a `write instead:` line stays last; the general
+        # path's own reason follows it, so a refusal that comes from it (a subclass without
+        # __init__, a method it cannot call) is named too
+        reason = str(failure).strip().splitlines()[0][:240] if str(failure).strip() else ''
+        suffix = ' (the general path could not build this program either)' + (
+            '; general path: ' + reason if reason else '')
+        if typed.args and isinstance(typed.args[0], str):
+            head, newline, rest = typed.args[0].partition('\n')
+            typed.args = (head.rstrip('.') + suffix + newline + rest,) + typed.args[1:]
         return typed
     return failure
 
@@ -560,7 +637,30 @@ _BOUNDARY_REFUSAL_MARKERS = (
 )
 
 
+# Why the last build() fell back from the typed path to the (several times slower) general path,
+# or None when it did not. main() prints it as a compile-time note on stderr.
+last_fallback_reason = None
+last_fallback_line = None
+
+
+def _source_line_marker(line):
+    """`ail-source-line: N` on its own stderr line, for ail_chatgpt.py to turn into file:line:col.
+    Printed only when it asks for it (AIL_REPORT_SOURCE_LINE=1); it removes the line from the text."""
+    if line is None or not os.environ.get('AIL_REPORT_SOURCE_LINE'):
+        return None
+    return 'ail-source-line: %d' % line
+
+
+def fallback_note(reason, location=None):
+    """The one-line stderr notice for a program the typed path refused but the general path built.
+    `reason` is the typed refusal text (it carries its own "write instead" hint when it has one)."""
+    return 'note: %sbuilt on the general path (several times slower) because %s' % (
+        location + ': ' if location else '', ' '.join(str(reason).split()))
+
+
 def build(source, out, strict=True, report=None, force_general=False):
+    global last_fallback_reason, last_fallback_line
+    last_fallback_reason = last_fallback_line = None
     if not strict:
         # UPGRADE, do not refuse. The unchecked mode emits plain C `+ - *` with no overflow guard,
         # which SEMANTICS section 8 says this language does not do, and whose C is UNDEFINED rather
@@ -580,9 +680,12 @@ def build(source, out, strict=True, report=None, force_general=False):
         strict = True
     # A module-level definition shadowing a built-in (`def abs`, `def heappush`) is renamed before
     # either path sees it, so the general path's name-keyed dispatch honours it too (shadowing.py).
-    source, shadow = shadowing.rename(source, Unsupported)
+    source, shadow = shadowing.rename_all(source, Unsupported)
     try:
-        return _build_unshadowed(source, out, strict, report, force_general)
+        result = _build_unshadowed(source, out, strict, report, force_general)
+        if last_fallback_reason is not None and shadow:
+            last_fallback_reason = shadowing.restore_text(last_fallback_reason, shadow)
+        return result
     except (Unsupported, PipelineError) as error:
         shadowing.restore_error(error, shadow)
         raise
@@ -711,6 +814,10 @@ def _build_unshadowed(source, out, strict, report, force_general):
             report['boxed'] = boxed_report['boxed']
             report['typed_inline'] = boxed_report.get('typed_inline', [])
             report['guard_checks'] = boxed_report.get('guard_checks', {})
+        if not force_general:
+            global last_fallback_reason, last_fallback_line
+            last_fallback_reason = str(_typed_e)
+            last_fallback_line = getattr(_typed_e, 'source_line', None)
         return _finalize_output(out)
     # AIL_TASK_callconv_20260915.md: a NORET entry point (`info['ret']`) has no int64 return value
     # at all -- `_main_for`'s own `printf(AIL_FMT "\n", AIL_CALL)` would hand a `void` expression to
@@ -773,7 +880,7 @@ def build_link_units(source, out, unit_map, external=None):
         objects.append(str(o_path))
     result = native_diagnostics.run([compiler(), *link_flags(), '-o', str(out), *objects,
                              *(external['objects'] if external is not None else [])]
-                            + (['-lm'] if info.get('libm') else [])
+                            + (['-lm'] if info.get('libm') else []) + (ffi_link_args() if external is not None else [])
                             + (['-pthread'] if info.get('pthread') else [])
                             + (['-lws2_32'] if os.name == 'nt' and {'TCPSOCKET', 'TCPHEAD'}.intersection(
                                 info.get('runtime_parts', []) + (external or {}).get('runtime_parts', [])) else []),
@@ -850,11 +957,17 @@ def main(argv=None):
     except Unsupported as e:
         native_diagnostics.failure(e)
         print('not in the subset: %s' % e, file=sys.stderr)
+        if _source_line_marker(getattr(e, 'source_line', None)):
+            print(_source_line_marker(e.source_line), file=sys.stderr)
         return 3
     except PipelineError as e:
         native_diagnostics.failure(e)
         print(e, file=sys.stderr)
         return 4
+    if last_fallback_reason is not None and not os.environ.get('AIL_QUIET_FALLBACK'):
+        print(fallback_note(last_fallback_reason), file=sys.stderr)
+        if _source_line_marker(last_fallback_line):
+            print(_source_line_marker(last_fallback_line), file=sys.stderr)
     print('%s  %d bytes' % (p, p.stat().st_size))
     return 0
 

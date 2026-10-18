@@ -33,8 +33,8 @@ class NumericBindingReviewNativeTests(unittest.TestCase):
   import math
   values=[-0.0,1.5,-1.5,-float(2**63),math.nextafter(float(2**63),-math.inf),float(2**63),math.nextafter(-float(2**63),-math.inf),math.nan,math.inf,-math.inf]
   expressions=[str(x) if math.isfinite(x) else 'float("'+str(x)+'")' for x in values]
-  source='fn show(value:float)->void {try {print(int(value));}except ValueError {print("range");}return;} fn main()->int {'+''.join('show('+x+');' for x in expressions)+'return 0;}'
-  expected=''.join((str(int(x)) if math.isfinite(x) and -2**63<=x<2**63 else 'range')+'\n' for x in values).encode()
+  source='fn show(value:float)->void {try {print(int(value));}except ValueError {print("value");}except OverflowError {print("overflow");}return;} fn main()->int {'+''.join('show('+x+');' for x in expressions)+'return 0;}'
+  expected=''.join(('value' if math.isnan(x) else str(int(x)) if math.isfinite(x) and -2**63<=x<2**63 else 'overflow')+'\n' for x in values).encode()
   with tempfile.TemporaryDirectory(prefix='ail-float-int-review-') as directory:
    code=Path(directory)/'case.c';code.write_text(HEADERS+generated(source)+'\nint main(void){return (int)run();}\n',encoding='utf8')
    binary=Path(directory)/('case.exe' if os.name=='nt' else 'case')

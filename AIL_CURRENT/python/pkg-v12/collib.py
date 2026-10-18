@@ -23,15 +23,59 @@ ZERO = {'int': '0', 'float': '0.0', 'str': '""', 'bool': 'False'}
 KEYS = ('int', 'str')
 ELEMS = ('int', 'float', 'str', 'bool')
 ROWS = ('int', 'float', 'str')
+
+
+def is_tup(t):
+    """A tuple type: ('tup', (element types...)), the elements scalars."""
+    return isinstance(t, tuple) and t[0] == 'tup'
+
+
+def okel(t):
+    return t in SCALARS or is_tup(t)
+
+
+def tn(t):
+    """The type as a piece of an identifier (helper and class names)."""
+    if is_tup(t):
+        return 'tup%d_%s' % (len(t[1]), '_'.join(tn(e) for e in t[1]))
+    return str(t)
+
+
+def ann(t):
+    """The type as an annotation."""
+    if is_tup(t):
+        return 'tuple[%s]' % ', '.join(ann(e) for e in t[1])
+    return str(t)
+
+
+def zero(t):
+    """A value of the type, as source text (the unused slots of a ring buffer)."""
+    if is_tup(t):
+        return '(%s%s)' % (', '.join(zero(e) for e in t[1]), ',' if len(t[1]) == 1 else '')
+    return ZERO[t]
+
+
+def rsuf(t):
+    return '!r' if t == 'str' else ''
+
+
+def subs(**types):
+    """Template substitutions for K / T / V: @K the identifier piece, @KA the annotation."""
+    out = {}
+    for key, t in types.items():
+        out[key] = tn(t)
+        out[key + 'A'] = ann(t)
+    return out
 NAMES = ('defaultdict', 'Counter', 'deque', 'OrderedDict')
 BUILT = ('Counter(iterable or mapping) / update(iterable or mapping) / most_common / elements / total / + - & | / '
          'print; defaultdict(int|float|str|list|lambda: <constant>) with str or int keys; deque with int, float, '
          'str or bool elements (append, appendleft, pop, popleft, extend, extendleft, rotate, clear, count, '
          'index, remove, insert, reverse, copy, len, indexing, in, iteration, maxlen=); OrderedDict with '
          'move_to_end(k) and popitem(); str or int keys, int, float or str values (list[int|float|str] rows for '
-         'defaultdict(list)). Not built: namedtuple, ChainMap, UserDict, defaultdict(set|bool|<container>), '
-         'tuple keys or elements, deque slicing, == on collections, collections in class fields or module '
-         'globals')
+         'defaultdict(list)); tuples of int, float, bool or str as Counter / defaultdict / OrderedDict keys, '
+         'deque elements and defaultdict(list|set) rows. Not built: namedtuple, ChainMap, UserDict, '
+         'defaultdict(bool|<container>), tuples of tuples or containers, deque slicing, == on collections, '
+         'collections in class fields or module globals')
 
 
 KIND_NAMES = {'ctr': 'Counter', 'dds': 'defaultdict', 'ddl': 'defaultdict(list)', 'od': 'OrderedDict',
@@ -40,7 +84,7 @@ KIND_NAMES = {'ctr': 'Counter', 'dds': 'defaultdict', 'ddl': 'defaultdict(list)'
 
 def tname(t):
     if isinstance(t, tuple):
-        return {'tuple': 'a tuple', 'list': 'a list', 'set': 'a set', 'dict': 'a dict', 'obj': 'an object'}.get(
+        return {'tuple': 'a tuple', 'tup': 'a tuple', 'list': 'a list', 'set': 'a set', 'dict': 'a dict', 'obj': 'an object'}.get(
             t[0], t[0])
     return str(t)
 
@@ -55,8 +99,9 @@ class Refused(Exception):
 
 class C:
     """A collections object: kind ctr | dds (defaultdict of scalars) | ddl (defaultdict(list)) | od | dq."""
-    def __init__(self, kind, K=None, V=None, default=None, sets=False):
+    def __init__(self, kind, K=None, V=None, default=None, sets=False, fname=None):
         self.kind, self.K, self.V, self.default, self.sets = kind, K, V, default, sets
+        self.fname = fname          # the factory a defaultdict was made with when it is a class name (int, list ...)
 
     def sig(self):
         return (self.kind, self.K, self.V, self.sets)
@@ -71,10 +116,10 @@ class C:
 
 
 # --------------------------------------------------------------------------------------------------
-# the typed helpers appended to a program (Python subset; @K key type, @T element type, @V value type,
+# the typed helpers appended to a program (Python subset; @KA key type, @TA element type, @VA value type,
 # @Z zero of T, @ZK zero of K)
-T_CTR_NEW = '''def _ail_ctr_new_@K(xs: list[@K]) -> dict[@K, int]:
-    c: dict[@K, int] = {}
+T_CTR_NEW = '''def _ail_ctr_new_@K(xs: list[@KA]) -> dict[@KA, int]:
+    c: dict[@KA, int] = {}
     for x in xs:
         c[x] = c.get(x, 0) + 1
     return c
@@ -85,12 +130,12 @@ T_CTR_CHARS = '''def _ail_ctr_chars(s: str) -> dict[str, int]:
         c[x] = c.get(x, 0) + 1
     return c
 '''
-T_CTR_MC = '''def _ail_ctr_mc_@K(c: dict[@K, int], n: int) -> list[@K]:
+T_CTR_MC = '''def _ail_ctr_mc_@K(c: dict[@KA, int], n: int) -> list[@KA]:
     ks = list(c)
     vs = list(c.values())
     order = [i for i in range(len(ks))]
     order.sort(key=lambda i: -vs[i])
-    out: list[@K] = []
+    out: list[@KA] = []
     m = len(ks)
     if n < m:
         m = n
@@ -98,16 +143,16 @@ T_CTR_MC = '''def _ail_ctr_mc_@K(c: dict[@K, int], n: int) -> list[@K]:
         out.append(ks[order[j]])
     return out
 '''
-T_CTR_ELEMS = '''def _ail_ctr_elems_@K(c: dict[@K, int]) -> list[@K]:
-    out: list[@K] = []
+T_CTR_ELEMS = '''def _ail_ctr_elems_@K(c: dict[@KA, int]) -> list[@KA]:
+    out: list[@KA] = []
     for k in c:
         for i in range(c[k]):
             out.append(k)
     return out
 '''
 T_CTR_ARITH = {
-    '+': '''def _ail_ctr_add_@K(a: dict[@K, int], b: dict[@K, int]) -> dict[@K, int]:
-    r: dict[@K, int] = {}
+    '+': '''def _ail_ctr_add_@K(a: dict[@KA, int], b: dict[@KA, int]) -> dict[@KA, int]:
+    r: dict[@KA, int] = {}
     for k in a:
         n = a[k] + b.get(k, 0)
         if n > 0:
@@ -117,8 +162,8 @@ T_CTR_ARITH = {
             r[k] = b[k]
     return r
 ''',
-    '-': '''def _ail_ctr_sub_@K(a: dict[@K, int], b: dict[@K, int]) -> dict[@K, int]:
-    r: dict[@K, int] = {}
+    '-': '''def _ail_ctr_sub_@K(a: dict[@KA, int], b: dict[@KA, int]) -> dict[@KA, int]:
+    r: dict[@KA, int] = {}
     for k in a:
         n = a[k] - b.get(k, 0)
         if n > 0:
@@ -128,8 +173,8 @@ T_CTR_ARITH = {
             r[k] = 0 - b[k]
     return r
 ''',
-    '&': '''def _ail_ctr_and_@K(a: dict[@K, int], b: dict[@K, int]) -> dict[@K, int]:
-    r: dict[@K, int] = {}
+    '&': '''def _ail_ctr_and_@K(a: dict[@KA, int], b: dict[@KA, int]) -> dict[@KA, int]:
+    r: dict[@KA, int] = {}
     for k in a:
         o = b.get(k, 0)
         n = a[k]
@@ -139,8 +184,8 @@ T_CTR_ARITH = {
             r[k] = n
     return r
 ''',
-    '|': '''def _ail_ctr_or_@K(a: dict[@K, int], b: dict[@K, int]) -> dict[@K, int]:
-    r: dict[@K, int] = {}
+    '|': '''def _ail_ctr_or_@K(a: dict[@KA, int], b: dict[@KA, int]) -> dict[@KA, int]:
+    r: dict[@KA, int] = {}
     for k in a:
         o = b.get(k, 0)
         n = a[k]
@@ -153,7 +198,7 @@ T_CTR_ARITH = {
             r[k] = b[k]
     return r
 '''}
-T_CTR_EQ = '''def _ail_ctr_eq_@K(a: dict[@K, int], b: dict[@K, int]) -> bool:
+T_CTR_EQ = '''def _ail_ctr_eq_@K(a: dict[@KA, int], b: dict[@KA, int]) -> bool:
     for k in a:
         if a[k] != b.get(k, 0):
             return False
@@ -162,7 +207,7 @@ T_CTR_EQ = '''def _ail_ctr_eq_@K(a: dict[@K, int], b: dict[@K, int]) -> bool:
             return False
     return True
 '''
-T_CTR_REPR = '''def _ail_ctr_repr_@K(c: dict[@K, int]) -> str:
+T_CTR_REPR = '''def _ail_ctr_repr_@K(c: dict[@KA, int]) -> str:
     if len(c) == 0:
         return "Counter()"
     ks = _ail_ctr_mc_@K(c, len(c))
@@ -171,12 +216,12 @@ T_CTR_REPR = '''def _ail_ctr_repr_@K(c: dict[@K, int]) -> str:
         parts.append(f"{k@R}: {c[k]}")
     return "Counter({" + ", ".join(parts) + "})"
 '''
-T_OD_FIRST = '''def _ail_od_first_@K_@V(d: dict[@K, @V]) -> @K:
+T_OD_FIRST = '''def _ail_od_first_@K_@V(d: dict[@KA, @VA]) -> @KA:
     for k in d:
         return k
     raise KeyError("dictionary is empty")
 '''
-T_OD_LAST = '''def _ail_od_last_@K_@V(d: dict[@K, @V]) -> @K:
+T_OD_LAST = '''def _ail_od_last_@K_@V(d: dict[@KA, @VA]) -> @KA:
     r = @ZK
     found = False
     for k in d:
@@ -188,15 +233,15 @@ T_OD_LAST = '''def _ail_od_last_@K_@V(d: dict[@K, @V]) -> @K:
 '''
 
 T_DQ = '''class _AilDeque_@T:
-    def __init__(self, buf: list[@T], head: int, n: int, maxlen: int):
+    def __init__(self, buf: list[@TA], head: int, n: int, maxlen: int):
         self.buf = buf
         self.head = head
         self.n = n
         self.maxlen = maxlen
 
 
-def _ail_dq_alloc_@T(n: int) -> list[@T]:
-    return @ALLOC
+def _ail_dq_alloc_@T(n: int) -> list[@TA]:
+    @ALLOC
 
 
 def _ail_dq_new_@T(maxlen: int) -> _AilDeque_@T:
@@ -214,7 +259,7 @@ def _ail_dq_grow_@T(q: _AilDeque_@T) -> None:
     q.head = 0
 
 
-def _ail_dq_append_@T(q: _AilDeque_@T, x: @T) -> None:
+def _ail_dq_append_@T(q: _AilDeque_@T, x: @TA) -> None:
     if q.maxlen >= 0:
         if q.maxlen == 0:
             return
@@ -227,7 +272,7 @@ def _ail_dq_append_@T(q: _AilDeque_@T, x: @T) -> None:
     q.n += 1
 
 
-def _ail_dq_appendleft_@T(q: _AilDeque_@T, x: @T) -> None:
+def _ail_dq_appendleft_@T(q: _AilDeque_@T, x: @TA) -> None:
     if q.maxlen >= 0:
         if q.maxlen == 0:
             return
@@ -240,14 +285,14 @@ def _ail_dq_appendleft_@T(q: _AilDeque_@T, x: @T) -> None:
     q.n += 1
 
 
-def _ail_dq_pop_@T(q: _AilDeque_@T) -> @T:
+def _ail_dq_pop_@T(q: _AilDeque_@T) -> @TA:
     if q.n == 0:
         raise IndexError("pop from an empty deque")
     q.n -= 1
     return q.buf[(q.head + q.n) & (len(q.buf) - 1)]
 
 
-def _ail_dq_popleft_@T(q: _AilDeque_@T) -> @T:
+def _ail_dq_popleft_@T(q: _AilDeque_@T) -> @TA:
     if q.n == 0:
         raise IndexError("pop from an empty deque")
     x = q.buf[q.head]
@@ -256,7 +301,7 @@ def _ail_dq_popleft_@T(q: _AilDeque_@T) -> @T:
     return x
 
 
-def _ail_dq_get_@T(q: _AilDeque_@T, i: int) -> @T:
+def _ail_dq_get_@T(q: _AilDeque_@T, i: int) -> @TA:
     j = i
     if j < 0:
         j += q.n
@@ -265,7 +310,7 @@ def _ail_dq_get_@T(q: _AilDeque_@T, i: int) -> @T:
     return q.buf[(q.head + j) & (len(q.buf) - 1)]
 
 
-def _ail_dq_set_@T(q: _AilDeque_@T, i: int, x: @T) -> None:
+def _ail_dq_set_@T(q: _AilDeque_@T, i: int, x: @TA) -> None:
     j = i
     if j < 0:
         j += q.n
@@ -274,7 +319,7 @@ def _ail_dq_set_@T(q: _AilDeque_@T, i: int, x: @T) -> None:
     q.buf[(q.head + j) & (len(q.buf) - 1)] = x
 
 
-def _ail_dq_list_@T(q: _AilDeque_@T) -> list[@T]:
+def _ail_dq_list_@T(q: _AilDeque_@T) -> list[@TA]:
     out = _ail_dq_alloc_@T(q.n)
     j = q.head
     mask = len(q.buf) - 1
@@ -284,26 +329,26 @@ def _ail_dq_list_@T(q: _AilDeque_@T) -> list[@T]:
     return out
 
 
-def _ail_dq_fill_@T(q: _AilDeque_@T, xs: list[@T]) -> None:
+def _ail_dq_fill_@T(q: _AilDeque_@T, xs: list[@TA]) -> None:
     q.n = 0
     q.head = 0
     for x in xs:
         _ail_dq_append_@T(q, x)
 
 
-def _ail_dq_from_@T(xs: list[@T], maxlen: int) -> _AilDeque_@T:
+def _ail_dq_from_@T(xs: list[@TA], maxlen: int) -> _AilDeque_@T:
     q = _ail_dq_new_@T(maxlen)
     for x in xs:
         _ail_dq_append_@T(q, x)
     return q
 
 
-def _ail_dq_extend_@T(q: _AilDeque_@T, xs: list[@T]) -> None:
+def _ail_dq_extend_@T(q: _AilDeque_@T, xs: list[@TA]) -> None:
     for x in xs:
         _ail_dq_append_@T(q, x)
 
 
-def _ail_dq_extendleft_@T(q: _AilDeque_@T, xs: list[@T]) -> None:
+def _ail_dq_extendleft_@T(q: _AilDeque_@T, xs: list[@TA]) -> None:
     for x in xs:
         _ail_dq_appendleft_@T(q, x)
 
@@ -327,7 +372,7 @@ def _ail_dq_rotate_@T(q: _AilDeque_@T, k: int) -> None:
             _ail_dq_append_@T(q, _ail_dq_popleft_@T(q))
 
 
-def _ail_dq_in_@T(q: _AilDeque_@T, x: @T) -> bool:
+def _ail_dq_in_@T(q: _AilDeque_@T, x: @TA) -> bool:
     j = q.head
     mask = len(q.buf) - 1
     for i in range(q.n):
@@ -337,7 +382,7 @@ def _ail_dq_in_@T(q: _AilDeque_@T, x: @T) -> bool:
     return False
 
 
-def _ail_dq_count_@T(q: _AilDeque_@T, x: @T) -> int:
+def _ail_dq_count_@T(q: _AilDeque_@T, x: @TA) -> int:
     c = 0
     j = q.head
     mask = len(q.buf) - 1
@@ -348,7 +393,7 @@ def _ail_dq_count_@T(q: _AilDeque_@T, x: @T) -> int:
     return c
 
 
-def _ail_dq_index_@T(q: _AilDeque_@T, x: @T) -> int:
+def _ail_dq_index_@T(q: _AilDeque_@T, x: @TA) -> int:
     j = q.head
     mask = len(q.buf) - 1
     for i in range(q.n):
@@ -358,7 +403,7 @@ def _ail_dq_index_@T(q: _AilDeque_@T, x: @T) -> int:
     raise ValueError(f"{x@R} is not in deque")
 
 
-def _ail_dq_remove_@T(q: _AilDeque_@T, x: @T) -> None:
+def _ail_dq_remove_@T(q: _AilDeque_@T, x: @TA) -> None:
     xs = _ail_dq_list_@T(q)
     for i in range(len(xs)):
         if xs[i] == x:
@@ -368,7 +413,7 @@ def _ail_dq_remove_@T(q: _AilDeque_@T, x: @T) -> None:
     raise ValueError("deque.remove(x): x not in deque")
 
 
-def _ail_dq_insert_@T(q: _AilDeque_@T, i: int, x: @T) -> None:
+def _ail_dq_insert_@T(q: _AilDeque_@T, i: int, x: @TA) -> None:
     if q.maxlen >= 0 and q.n >= q.maxlen:
         raise IndexError("deque already at its maximum size")
     xs = _ail_dq_list_@T(q)
@@ -409,7 +454,7 @@ def _ail_dq_repr_@T(q: _AilDeque_@T) -> str:
 '''
 
 T_DDL = '''class _AilDDL_@K_@T:
-    def __init__(self, idx: dict[@K, int], keys: list[@K], vals: list[list[@T]]):
+    def __init__(self, idx: dict[@KA, int], keys: list[@KA], vals: list[list[@TA]]):
         self.idx = idx
         self.keys = keys
         self.vals = vals
@@ -419,7 +464,7 @@ def _ail_ddl_new_@K_@T() -> _AilDDL_@K_@T:
     return _AilDDL_@K_@T({}, [], [])
 
 
-def _ail_ddl_slot_@K_@T(d: _AilDDL_@K_@T, k: @K) -> int:
+def _ail_ddl_slot_@K_@T(d: _AilDDL_@K_@T, k: @KA) -> int:
     s = d.idx.get(k, -1)
     if s < 0:
         s = len(d.keys)
@@ -429,7 +474,7 @@ def _ail_ddl_slot_@K_@T(d: _AilDDL_@K_@T, k: @K) -> int:
     return s
 
 
-def _ail_ddl_get_@K_@T(d: _AilDDL_@K_@T, k: @K, default: list[@T]) -> list[@T]:
+def _ail_ddl_get_@K_@T(d: _AilDDL_@K_@T, k: @KA, default: list[@TA]) -> list[@TA]:
     s = d.idx.get(k, -1)
     if s < 0:
         return default
@@ -444,7 +489,7 @@ def _ail_ddl_clear_@K_@T(d: _AilDDL_@K_@T) -> None:
 
 # defaultdict(set): the rows are lists in insertion order, membership is a set of "slot:element" strings
 T_DSS = '''class _AilDSS_@K_@T:
-    def __init__(self, idx: dict[@K, int], keys: list[@K], vals: list[list[@T]], members: set[str]):
+    def __init__(self, idx: dict[@KA, int], keys: list[@KA], vals: list[list[@TA]], members: set[str]):
         self.idx = idx
         self.keys = keys
         self.vals = vals
@@ -455,7 +500,7 @@ def _ail_dss_new_@K_@T() -> _AilDSS_@K_@T:
     return _AilDSS_@K_@T({}, [], [], set())
 
 
-def _ail_dss_slot_@K_@T(d: _AilDSS_@K_@T, k: @K) -> int:
+def _ail_dss_slot_@K_@T(d: _AilDSS_@K_@T, k: @KA) -> int:
     s = d.idx.get(k, -1)
     if s < 0:
         s = len(d.keys)
@@ -465,7 +510,7 @@ def _ail_dss_slot_@K_@T(d: _AilDSS_@K_@T, k: @K) -> int:
     return s
 
 
-def _ail_dss_add_@K_@T(d: _AilDSS_@K_@T, k: @K, x: @T) -> None:
+def _ail_dss_add_@K_@T(d: _AilDSS_@K_@T, k: @KA, x: @TA) -> None:
     s = _ail_dss_slot_@K_@T(d, k)
     m = str(s) + ":" + @XS
     if m not in d.members:
@@ -473,12 +518,12 @@ def _ail_dss_add_@K_@T(d: _AilDSS_@K_@T, k: @K, x: @T) -> None:
         d.vals[s].append(x)
 
 
-def _ail_dss_has_@K_@T(d: _AilDSS_@K_@T, k: @K, x: @T) -> bool:
+def _ail_dss_has_@K_@T(d: _AilDSS_@K_@T, k: @KA, x: @TA) -> bool:
     s = _ail_dss_slot_@K_@T(d, k)
     return (str(s) + ":" + @XS) in d.members
 
 
-def _ail_dss_discard_@K_@T(d: _AilDSS_@K_@T, k: @K, x: @T) -> None:
+def _ail_dss_discard_@K_@T(d: _AilDSS_@K_@T, k: @KA, x: @TA) -> None:
     s = _ail_dss_slot_@K_@T(d, k)
     m = str(s) + ":" + @XS
     if m in d.members:
@@ -486,7 +531,7 @@ def _ail_dss_discard_@K_@T(d: _AilDSS_@K_@T, k: @K, x: @T) -> None:
         d.vals[s].remove(x)
 
 
-def _ail_dss_remove_@K_@T(d: _AilDSS_@K_@T, k: @K, x: @T) -> None:
+def _ail_dss_remove_@K_@T(d: _AilDSS_@K_@T, k: @KA, x: @TA) -> None:
     s = _ail_dss_slot_@K_@T(d, k)
     m = str(s) + ":" + @XS
     if m not in d.members:
@@ -495,7 +540,7 @@ def _ail_dss_remove_@K_@T(d: _AilDSS_@K_@T, k: @K, x: @T) -> None:
     d.vals[s].remove(x)
 
 
-def _ail_dss_update_@K_@T(d: _AilDSS_@K_@T, k: @K, xs: list[@T]) -> None:
+def _ail_dss_update_@K_@T(d: _AilDSS_@K_@T, k: @KA, xs: list[@TA]) -> None:
     for x in xs:
         _ail_dss_add_@K_@T(d, k, x)
 
@@ -528,7 +573,7 @@ def fill(template, **names):
 
 
 def _reprsuffix(t):
-    return '!r' if t == 'str' else ''
+    return rsuf(t)
 
 
 # --------------------------------------------------------------------------------------------------
@@ -591,6 +636,7 @@ class Rewriter:
         self.sigs = {}            # function name -> ([param annotation nodes], return node)
         self.ddl_sigs = set()     # (K, T) of the defaultdict(list)s, for params written as Dict[K, List[T]]
         self.fresh = 0
+        self.consts = {}          # module-level name -> type, for the constants made of tuples
 
     # -- notes / edits ------------------------------------------------------------------------
     def note(self, node, message):
@@ -719,6 +765,8 @@ class Rewriter:
             if isinstance(args[1], tuple) and args[1][0] == 'set':
                 return C('ddl', args[0], args[1][1], sets=True)
             return C('dds', args[0], args[1], ZERO.get(args[1]) if isinstance(args[1], str) else None)
+        if base in ('tuple', 'Tuple') and args and all(a in SCALARS for a in args):
+            return ('tup', tuple(args))
         if base in ('list', 'List') and len(args) == 1:
             return ('list', args[0])
         if base in ('set', 'Set') and len(args) == 1:
@@ -742,28 +790,29 @@ class Rewriter:
     def type_text(self, c):
         """The annotation text a collection variable gets after the rewrite."""
         if c.kind in ('ctr', 'dds', 'od'):
-            return 'dict[%s, %s]' % (c.K, c.V)
+            return 'dict[%s, %s]' % (ann(c.K), ann(c.V))
         if c.kind == 'dq':
-            return '_AilDeque_%s' % c.V
-        return '_Ail%s_%s_%s' % ('DSS' if c.sets else 'DDL', c.K, c.V)
+            return '_AilDeque_%s' % tn(c.V)
+        return '_Ail%s_%s_%s' % ('DSS' if c.sets else 'DDL', tn(c.K), tn(c.V))
 
     def check_c(self, node, c):
         """Refuse the element types that are not built."""
         if c.kind == 'dq':
-            if c.V not in ELEMS:
-                self.refuse(node, 'deque elements must be int, float, str or bool (found %s); tuples and '
-                            'containers as deque elements are not built -- encode a pair as one int '
-                            '(r * width + c) or keep two deques' % tname(c.V))
+            if c.V not in ELEMS and not is_tup(c.V):
+                self.refuse(node, 'deque elements must be int, float, str, bool or a tuple of those (found %s); '
+                            'containers as deque elements are not built -- keep the parts in separate deques'
+                            % tname(c.V))
             return
-        if c.K not in KEYS:
-            self.refuse(node, '%s keys must be str or int (found %s); a tuple or float key is not built -- '
-                        'use an int or a str built from the parts' % (
+        if c.K not in KEYS and not is_tup(c.K):
+            self.refuse(node, '%s keys must be str, int or a tuple of int / float / str / bool (found %s); a '
+                        'float key is not built -- use an int or a str built from the parts' % (
                             {'ctr': 'Counter', 'dds': 'defaultdict', 'ddl': 'defaultdict', 'od': 'OrderedDict'}[c.kind],
                             tname(c.K)))
-        if c.kind == 'ddl' and c.sets and c.V not in KEYS:
-            self.refuse(node, 'defaultdict(set) elements must be int or str (found %s)' % tname(c.V))
-        if c.kind == 'ddl' and not c.sets and c.V not in ROWS:
-            self.refuse(node, 'defaultdict(list) rows must be list[int], list[float] or list[str] (found %s)' % tname(c.V))
+        if c.kind == 'ddl' and c.sets and c.V not in KEYS and not is_tup(c.V):
+            self.refuse(node, 'defaultdict(set) elements must be int, str or a tuple (found %s)' % tname(c.V))
+        if c.kind == 'ddl' and not c.sets and c.V not in ROWS and not is_tup(c.V):
+            self.refuse(node, 'defaultdict(list) rows must be list[int], list[float], list[str] or a list of '
+                        'tuples (found %s)' % tname(c.V))
         if c.kind in ('dds', 'od') and c.V not in ('int', 'float', 'str'):
             self.refuse(node, '%s values must be int, float or str (found %s); defaultdict(bool), nested '
                         'containers and other value types are not built' % (
@@ -776,7 +825,7 @@ class Rewriter:
         if t == 'str':
             return 'str'
         if isinstance(t, tuple):
-            if t[0] in ('list', 'set'):
+            if t[0] in ('list', 'set', 'iter'):
                 return t[1]
             if t[0] == 'range':
                 return 'int'
@@ -835,20 +884,25 @@ class Rewriter:
         if t is ast.List:
             for x in e.elts:
                 tx = self.infer(x, env)
-                if tx in SCALARS or (isinstance(tx, tuple) and tx[0] in ('list', 'tuple')):
+                if tx in SCALARS or (isinstance(tx, tuple) and tx[0] in ('list', 'tuple', 'tup')):
                     return ('list', tx)
             return None
         if t is ast.Tuple:
+            ts = [self.infer(x, env) for x in e.elts]
+            if ts and all(x in SCALARS for x in ts):
+                return ('tup', tuple(ts))
+            if ts and is_tup(ts[0]) and all(x == ts[0] for x in ts):
+                return ('list', ts[0])           # ((1, 0), (0, 1)): walked as a sequence of pairs
             return ('tuple',)
         if t is ast.Set:
             tx = self.infer(e.elts[0], env) if e.elts else None
-            return ('set', tx) if tx in SCALARS else None
+            return ('set', tx) if okel(tx) else None
         if t in (ast.ListComp, ast.SetComp, ast.GeneratorExp):
             inner = dict(env)
             for g in e.generators:
                 self.bind(g.target, g.iter, inner)
             tx = self.infer(e.elt, inner)
-            if tx in SCALARS:
+            if okel(tx):
                 return ('set' if t is ast.SetComp else 'list', tx)
             return None
         if t is ast.Subscript:
@@ -866,6 +920,12 @@ class Rewriter:
                     return base if isinstance(e.slice, ast.Slice) else base[1]
                 if base[0] == 'dict':
                     return base[2]
+                if base[0] == 'tup':
+                    k = e.slice
+                    if isinstance(k, ast.UnaryOp) and isinstance(k.op, ast.USub) and isinstance(k.operand, ast.Constant):
+                        k = ast.Constant(value=-k.operand.value)
+                    if isinstance(k, ast.Constant) and type(k.value) is int and -len(base[1]) <= k.value < len(base[1]):
+                        return base[1][k.value]
             return None
         if t is ast.Attribute:
             base = self.infer(e.value, env)
@@ -904,10 +964,20 @@ class Rewriter:
                 return self.infer(args[0], env)
             if n in ('sorted', 'list', 'reversed') and args:
                 el = self.elem_of(self.infer(args[0], env))
-                return ('list', el) if el in SCALARS else None
+                return ('list', el) if okel(el) else None
             if n == 'set' and args:
                 el = self.elem_of(self.infer(args[0], env))
-                return ('set', el) if el in SCALARS else None
+                return ('set', el) if okel(el) else None
+            if n == 'zip' and len(args) >= 2 and not e.keywords:
+                els = [self.elem_of(self.infer(a, env)) for a in args]
+                if all(x in SCALARS for x in els):
+                    return ('iter', ('tup', tuple(els)))
+                return None
+            if n == 'enumerate' and len(args) == 1:
+                el = self.elem_of(self.infer(args[0], env))
+                if el in SCALARS:
+                    return ('iter', ('tup', ('int', el)))
+                return None
             if n == 'range':
                 return ('range',)
             if n in self.sigs:
@@ -1000,8 +1070,17 @@ class Rewriter:
                         pair = (base[1], base[2])
                 elif isinstance(f, ast.Name) and f.id == 'enumerate' and iterable.args:
                     pair = ('int', self.elem_of(self.infer(iterable.args[0], env)))
+            if pair is None:
+                el = self.elem_of(itype)
+                if is_tup(el) and len(el[1]) == 2:
+                    pair = el[1]
             for name, t in zip((a, b), pair or (None, None)):
                 if t is not None:
+                    env.setdefault(name.id, t)
+        elif isinstance(target, ast.Tuple) and all(isinstance(x, ast.Name) for x in target.elts):
+            el = self.elem_of(itype)
+            if is_tup(el) and len(el[1]) == len(target.elts):
+                for name, t in zip(target.elts, el[1]):
                     env.setdefault(name.id, t)
 
     # -- collections constructors -------------------------------------------------------------
@@ -1072,7 +1151,7 @@ class Rewriter:
             if len(args) > 1:
                 self.refuse(call, 'defaultdict(factory, mapping) is not built; build it empty and assign')
             k, v, default, sets = self.factory(call, args[0] if args else None)
-            return C(k, None, v, default, sets)
+            return C(k, None, v, default, sets, args[0].id if isinstance(args[0], ast.Name) else None)
         if kind == 'deque':
             c = C('dq')
             if len(args) > 2:
@@ -1100,8 +1179,11 @@ class Rewriter:
         return self.emit(DQ_BLOCKS, '_AilDeque_@T', **self.dq_subs(t))
 
     def dq_subs(self, t):
-        alloc = '["" for i in range(n)]' if t == 'str' else '[%s] * n' % ZERO[t]
-        return dict(T=t, Z=ZERO[t], R=_reprsuffix(t), ALLOC=alloc)
+        if is_tup(t):
+            alloc = 'z: %s = %s\n    return [z for i in range(n)]' % (ann(t), zero(t))
+        else:
+            alloc = 'return ' + ('["" for i in range(n)]' if t == 'str' else '[%s] * n' % zero(t))
+        return dict(Z=zero(t), R=rsuf(t), ALLOC=alloc, **subs(T=t))
 
     def dq(self, c, op):
         return self.emit(DQ_BLOCKS, '_ail_dq_%s_@T' % op, **self.dq_subs(c.V))
@@ -1109,13 +1191,13 @@ class Rewriter:
     def ddl(self, c, op):
         self.ddl_sigs.add((c.K, c.V, c.sets))
         if c.sets:
-            return self.emit(DSS_BLOCKS, '_ail_dss_%s_@K_@T' % op, K=c.K, T=c.V,
-                             XS='str(x)' if c.V == 'int' else 'x', R=_reprsuffix(c.V))
-        return self.emit(DDL_BLOCKS, '_ail_ddl_%s_@K_@T' % op, K=c.K, T=c.V)
+            return self.emit(DSS_BLOCKS, '_ail_dss_%s_@K_@T' % op, XS='str(x)' if c.V == 'int' or is_tup(c.V) else 'x',
+                             R=rsuf(c.V), **subs(K=c.K, T=c.V))
+        return self.emit(DDL_BLOCKS, '_ail_ddl_%s_@K_@T' % op, **subs(K=c.K, T=c.V))
 
     def ctr(self, k, op, text):
-        name = '_ail_ctr_%s_%s' % (op, k)
-        self.helper(name, fill(text, K=k, R=_reprsuffix(k)))
+        name = '_ail_ctr_%s_%s' % (op, tn(k))
+        self.helper(name, fill(text, R=rsuf(k), **subs(K=k)))
         return name
 
     def ctr_mc(self, c):
@@ -1132,6 +1214,17 @@ class Rewriter:
         for node in self.tree.body:
             if isinstance(node, ast.FunctionDef):
                 self.sigs[node.name] = ([a.annotation for a in node.args.args], node.returns)
+        for node in self.tree.body:
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                t = self.infer(node.value, {})
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                t = self.ann_type(node.annotation)
+            else:
+                continue
+            name = node.targets[0].id if isinstance(node, ast.Assign) else node.target.id
+            inner = t[1] if isinstance(t, tuple) and t[0] in ('list', 'set') else t
+            if is_tup(inner):
+                self.consts[name] = t
         # analysis to a fixpoint (a Dict[K, List[T]] parameter is a defaultdict(list) once one is built)
         for _ in range(3):
             before = set(self.ddl_sigs)
@@ -1228,6 +1321,7 @@ class Scope:
         self.first = {}           # name -> the first binding statement (gets the annotation)
         self.subst = {}
         self.boolnames = set()
+        self.walking = {}         # a defaultdict walked by the enclosing loop -> the loop's key names
 
     # -- analysis -----------------------------------------------------------------------------
     def own(self):
@@ -1255,6 +1349,11 @@ class Scope:
                 self.env[a.arg] = copy.copy(t) if isinstance(t, C) else t
             self.params.add(a.arg)
         stmts = self.own()
+        # module-level constants that are tuples (DIRS = [(0, 1), (1, 0)]), unless the function rebinds the name
+        bound = {n.id for n in ast.walk(self.fn) if isinstance(n, ast.Name) and not isinstance(n.ctx, ast.Load)}
+        for name, t in r.consts.items():
+            if name not in bound and name not in self.params:
+                self.env[name] = t
         # two sweeps: types of names in order, then the collections' missing parts from their uses
         for sweep in range(3):
             for st in stmts:
@@ -1297,6 +1396,17 @@ class Scope:
                     self.first.setdefault(name, st)
             if t is not None and name not in env:
                 env[name] = t
+        elif isinstance(st, ast.Assign) and len(st.targets) == 1 and isinstance(st.targets[0], ast.Tuple):
+            # a, b = q.popleft() / a, b = x + 1, y: the types of the unpacked names
+            tg, value = st.targets[0], st.value
+            if isinstance(value, ast.Tuple) and len(value.elts) == len(tg.elts):
+                types = [r.infer(x, env) for x in value.elts]
+            else:
+                t = r.infer(value, env)
+                types = list(t[1]) if is_tup(t) and len(t[1]) == len(tg.elts) else []
+            for x, t in zip(tg.elts, types):
+                if isinstance(x, ast.Name) and t is not None and not isinstance(t, C):
+                    env.setdefault(x.id, t)
         elif isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Name):
             name = st.target.id
             t = r.ann_type(st.annotation)
@@ -1342,6 +1452,8 @@ class Scope:
             self.r.note(self.fn, 'a name is bound to a %s and to a %s in %s(); give them different names' % (
                 old.kind, new.kind, self.fn.name))
             return
+        if old.fname is None:
+            old.fname = new.fname
         for field in ('K', 'V', 'default'):
             a, b = getattr(old, field), getattr(new, field)
             if a is None and b is not None:
@@ -1351,7 +1463,7 @@ class Scope:
                     'element' if field == 'V' else 'key', a, b, self.fn.name))
 
     def hint(self, c, field, t, node):
-        if t in SCALARS or t == ('tuple',) or (field == 'K' and t is not None and not isinstance(t, C)):
+        if t in SCALARS or is_tup(t) or t == ('tuple',) or (field == 'K' and t is not None and not isinstance(t, C)):
             cur = getattr(c, field)
             if cur is None:
                 setattr(c, field, t)
@@ -1870,11 +1982,11 @@ class Scope:
     def od_helper(self, c, last):
         r = self.r
         if last:
-            name = '_ail_od_last_%s_%s' % (c.K, c.V)
-            r.helper(name, fill(T_OD_LAST, K=c.K, V=c.V, ZK=ZERO[c.K]))
+            name = '_ail_od_last_%s_%s' % (tn(c.K), tn(c.V))
+            r.helper(name, fill(T_OD_LAST, ZK=zero(c.K), **subs(K=c.K, V=c.V)))
         else:
-            name = '_ail_od_first_%s_%s' % (c.K, c.V)
-            r.helper(name, fill(T_OD_FIRST, K=c.K, V=c.V))
+            name = '_ail_od_first_%s_%s' % (tn(c.K), tn(c.V))
+            r.helper(name, fill(T_OD_FIRST, **subs(K=c.K, V=c.V)))
         return name
 
     def popitem_last(self, st, call):
@@ -1924,8 +2036,18 @@ class Scope:
                 r.refuse(st, 'Counter.update(mapping) needs the mapping in a name')
             text = 'for %s in %s: %s[%s] = %s.get(%s, 0) + %s[%s]' % (tmp, arg.id, name, tmp, name, tmp, arg.id, tmp)
         else:
-            it = self.iter_expr(arg)
-            text = 'for %s in %s: %s[%s] = %s.get(%s, 0) + 1' % (tmp, ast.unparse(it), name, tmp, name, tmp)
+            if is_tup(c.K) and isinstance(arg, ast.List) and not arg.elts:
+                text = 'pass'
+            elif is_tup(c.K) and not isinstance(arg, ast.Name):
+                # the pairs go to a typed list first: a loop straight over a list display of tuples is not typed
+                lst = r.new_name('l')
+                self.pre = []
+                it = _X(self).as_list(arg, t)
+                head = '%s = %s' % (lst, ast.unparse(it)) + chr(10) + ' ' * st.col_offset
+                text = head + 'for %s in %s: %s[%s] = %s.get(%s, 0) + 1' % (tmp, lst, name, tmp, name, tmp)
+            else:
+                it = self.iter_expr(arg)
+                text = 'for %s in %s: %s[%s] = %s.get(%s, 0) + 1' % (tmp, ast.unparse(it), name, tmp, name, tmp)
         self.put_stmt(st, text)
 
     def iter_expr(self, node):
@@ -2088,7 +2210,11 @@ class Scope:
             self.r.edits.append((s0, e0, text, False))
         saved = dict(self.subst)
         self.subst.update(subst)
+        walked = dict(self.walking)
+        if src is not None and src[0].kind == 'dds' and src[2] != 'most_common':
+            self.walking[src[1].id] = {v for v in keyvars if not any(_stores(b, v) for b in st.body)}
         self.block(st.body)
+        self.walking = walked
         self.subst = saved
         self.block(st.orelse)
 
@@ -2239,6 +2365,13 @@ class _X(ast.NodeTransformer):
         if c is not None:
             return self.visit_argument(a)
         new = self.visit(copy.deepcopy(a))
+        if isinstance(a, ast.Call) and isinstance(a.func, ast.Name) and a.func.id in ('zip', 'enumerate') \
+                and not a.keywords:
+            # Counter(zip(xs, ys)): the pairs are built by a comprehension, which is where tuples are lowered
+            names = [self.r.new_name('z') for _ in (a.args if a.func.id == 'zip' else (0, 1))]
+            tgt = ast.Tuple(elts=[ast.Name(id=n, ctx=ast.Store()) for n in names], ctx=ast.Store())
+            elt = ast.Tuple(elts=[mk(n) for n in names], ctx=ast.Load())
+            return ast.ListComp(elt=elt, generators=[ast.comprehension(target=tgt, iter=new, ifs=[], is_async=0)])
         if isinstance(a, ast.GeneratorExp):
             return ast.ListComp(elt=new.elt, generators=new.generators)
         if isinstance(a, (ast.List, ast.ListComp)) or (isinstance(t, tuple) and t[0] == 'list'):
@@ -2295,6 +2428,9 @@ class _X(ast.NodeTransformer):
                 if recv.id in self.s.params:
                     self.refuse(node, 'd[k] on a defaultdict parameter would insert the missing key into the '
                                 'caller\'s dict, and a dict parameter is read-only here; use d.get(k, default)')
+                if is_tup(c.K) and isinstance(node.slice, ast.Name) and node.slice.id in self.s.walking.get(recv.id, ()):
+                    # d[k] with k the key being walked: it exists, and a setdefault call would read as a change
+                    return call(attr(recv, 'get'), k, ast.parse(c.default, mode='eval').body)
                 return call(attr(recv, 'setdefault'), k, ast.parse(c.default, mode='eval').body)
             node.slice = k
             return node
@@ -2318,8 +2454,8 @@ class _X(ast.NodeTransformer):
             a = r.infer(node.left, self.env)
             b = r.infer(node.comparators[0], self.env)
             if isinstance(a, C) and isinstance(b, C) and a.kind == 'ctr' == b.kind and a.K == b.K:
-                helper = '_ail_ctr_eq_%s' % a.K
-                r.helper(helper, fill(T_CTR_EQ, K=a.K))
+                helper = '_ail_ctr_eq_%s' % tn(a.K)
+                r.helper(helper, fill(T_CTR_EQ, **subs(K=a.K)))
                 res = call(helper, self.visit_dictlike(node.left), self.visit_dictlike(node.comparators[0]))
                 return ast.UnaryOp(op=ast.Not(), operand=res) if isinstance(node.ops[0], ast.NotEq) else res
         if any(isinstance(op, (ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE)) for op in node.ops):
@@ -2357,8 +2493,8 @@ class _X(ast.NodeTransformer):
             if a.K != b.K:
                 self.refuse(node, 'Counters with different key types')
             name = {'+': 'add', '-': 'sub', '&': 'and', '|': 'or'}[op]
-            helper = '_ail_ctr_%s_%s' % (name, a.K)
-            r.helper(helper, fill(T_CTR_ARITH[op], K=a.K))
+            helper = '_ail_ctr_%s_%s' % (name, tn(a.K))
+            r.helper(helper, fill(T_CTR_ARITH[op], **subs(K=a.K)))
             return call(helper, self.visit_dictlike(node.left), self.visit_dictlike(node.right))
         self.generic_visit(node)
         return node
@@ -2460,11 +2596,11 @@ class _X(ast.NodeTransformer):
                 if c.kind in ('ctr', 'dds', 'od'):
                     # key=c.get : the keys come from c, so the lookup never misses
                     k = r.new_name('k')
-                    zero = ast.parse(c.default if c.kind == 'dds' else ZERO[c.V], mode='eval').body
+                    zero_ = ast.parse(c.default if c.kind == 'dds' else ZERO[c.V], mode='eval').body
                     kw.value = ast.Lambda(
                         args=ast.arguments(posonlyargs=[], args=[ast.arg(arg=k)], vararg=None, kwonlyargs=[],
                                            kw_defaults=[], kwarg=None, defaults=[]),
-                        body=call(attr(v.value, 'get'), mk(k), zero))
+                        body=call(attr(v.value, 'get'), mk(k), zero_))
         if r.kind_of(f) is not None:
             c = r.ctor_c(node, self.env)
             if c is None or not c.complete():
@@ -2499,9 +2635,9 @@ class _X(ast.NodeTransformer):
             if fname == 'len':
                 return call('len', call(r.ctr_mc(c), nm, n))
             if fname == 'print':
-                r.helper('_ail_ctr_mcrepr_%s' % c.K, fill(T_CTR_MCREPR, K=c.K, R=_reprsuffix(c.K)))
+                r.helper('_ail_ctr_mcrepr_%s' % tn(c.K), fill(T_CTR_MCREPR, R=rsuf(c.K), **subs(K=c.K)))
                 r.ctr(c.K, 'mc', T_CTR_MC)
-                return call('print', call('_ail_ctr_mcrepr_%s' % c.K, nm, n))
+                return call('print', call('_ail_ctr_mcrepr_%s' % tn(c.K), nm, n))
             if fname == 'dict':
                 k = r.new_name('k')
                 gen = ast.comprehension(target=ast.Name(id=k, ctx=ast.Store()),
@@ -2518,6 +2654,12 @@ class _X(ast.NodeTransformer):
                     continue
                 self.refuse(node, '%s(d[k]) of a defaultdict(set) row is not built; %s' % (fname, self.SET_ROW_NOTE))
             c = self.coll(a)
+            if c is None and fname == 'print' and not isinstance(a, ast.Name):
+                t = r.infer(a, self.env)
+                if isinstance(t, C) and t.kind == 'ctr':
+                    # print(c + d): the Counter a helper built, printed as a Counter
+                    new_args.append(call(self.ctr_repr_name(t), self.visit(a)))
+                    continue
             if c is None or id(a) in self.okbare:
                 new_args.append(self.visit(a))
                 continue
@@ -2557,13 +2699,10 @@ class _X(ast.NodeTransformer):
             return (self.truth(c, a),)
         if fname == 'print':
             if c.kind == 'ctr':
-                r.helper('_ail_ctr_repr_%s' % c.K, fill(T_CTR_REPR, K=c.K, R=_reprsuffix(c.K)))
-                r.ctr(c.K, 'mc', T_CTR_MC)
-                return call('_ail_ctr_repr_%s' % c.K, a)
+                return call(self.ctr_repr_name(c), a)
             if c.kind == 'dq':
                 return call(r.dq(c, 'repr'), a)
-            self.refuse(node, 'print() of a %s is not built; print its items' % (
-                {'dds': 'defaultdict', 'ddl': 'defaultdict', 'od': 'OrderedDict'}[c.kind]))
+            return self.dict_repr(node, c, a)
         if fname == 'dict' and len(node.args) == 1 and not node.keywords:
             if c.kind in ('ctr', 'dds', 'od'):
                 return (call(attr(a, 'copy')),)
@@ -2582,6 +2721,37 @@ class _X(ast.NodeTransformer):
         self.refuse(node, 'a %s passed to %s() is not built' % (
             {'ctr': 'Counter', 'dds': 'defaultdict', 'ddl': 'defaultdict(list)', 'od': 'OrderedDict',
              'dq': 'deque'}[c.kind], fname))
+
+    def ctr_repr_name(self, c):
+        r = self.r
+        r.helper('_ail_ctr_repr_%s' % tn(c.K), fill(T_CTR_REPR, R=rsuf(c.K), **subs(K=c.K)))
+        r.ctr(c.K, 'mc', T_CTR_MC)
+        return '_ail_ctr_repr_%s' % tn(c.K)
+
+    def dict_repr(self, node, c, a):
+        """print(d) of a defaultdict / OrderedDict as CPython's repr."""
+        r = self.r
+        if c.kind == 'ddl' and c.sets:
+            self.refuse(node, 'print() of a defaultdict(set) is not built: CPython prints its sets in an order the '
+                        'language does not fix; print sorted(d[k])')
+        if c.kind == 'ddl':
+            if c.fname != 'list':
+                self.refuse(node, 'print() of this defaultdict(list) is not built (CPython prints the factory, '
+                            'a function with an address, unless it is `list` written out)')
+            r.ddl(c, 'new')
+            name = '_ail_ddlr_%s_%s' % (tn(c.K), tn(c.V))
+            r.helper(name, fill(T_DDL_REPR, R=rsuf(c.V), RK=rsuf(c.K), **subs(K=c.K, T=c.V)))
+            return call(name, a)
+        name = '_ail_dr_%s_%s' % (tn(c.K), tn(c.V))
+        r.helper(name, fill(T_DICT_REPR, R=rsuf(c.K), RV=rsuf(c.V), **subs(K=c.K, V=c.V)))
+        if c.kind == 'od':
+            text = '"OrderedDict()" if len(%s) == 0 else "OrderedDict(" + %s(%s) + ")"' % (a.id, name, a.id)
+        else:
+            if c.fname not in ('int', 'float', 'str'):
+                self.refuse(node, 'print() of this defaultdict is not built (CPython prints the factory: it is '
+                            'known only for defaultdict(int|float|str) written out in this function)')
+            text = '"defaultdict(<class \'%s\'>, " + %s(%s) + ")"' % (c.fname, name, a.id)
+        return ast.parse(text, mode='eval').body
 
     # defaultdict(set) rows ---------------------------------------------------------------------
     def set_row(self, node):
@@ -2710,7 +2880,24 @@ class _X(ast.NodeTransformer):
                         'in, or an index; write `if k in d:` and use d[k] to change the row')
 
 
-T_CTR_MCREPR = '''def _ail_ctr_mcrepr_@K(c: dict[@K, int], n: int) -> str:
+# dict printing: {k: v, ...} as CPython's repr (@R the key's repr suffix, @RV the value's)
+T_DICT_REPR = '''def _ail_dr_@K_@V(d: dict[@KA, @VA]) -> str:
+    parts: list[str] = []
+    for k in d:
+        parts.append(f"{k@R}: {d[k]@RV}")
+    return "{" + ", ".join(parts) + "}"
+'''
+T_DDL_REPR = '''def _ail_ddlr_@K_@T(d: _AilDDL_@K_@T) -> str:
+    parts: list[str] = []
+    for i in range(len(d.keys)):
+        row: list[str] = []
+        for x in d.vals[i]:
+            row.append(f"{x@R}")
+        parts.append(f"{d.keys[i]@RK}: [" + ", ".join(row) + "]")
+    return "defaultdict(<class 'list'>, {" + ", ".join(parts) + "})"
+'''
+
+T_CTR_MCREPR = '''def _ail_ctr_mcrepr_@K(c: dict[@KA, int], n: int) -> str:
     ks = _ail_ctr_mc_@K(c, n)
     parts: list[str] = []
     for k in ks:
