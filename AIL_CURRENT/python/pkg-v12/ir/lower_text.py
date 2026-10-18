@@ -297,6 +297,10 @@ class TextLowering(object):
         if P._is_sys_argv_index(node):
             i = self.as_int(self.expr(node.slice))
             return self.rt('argv_get', [i])
+        if isinstance(node.value, ast.Name) and self.is_slist_name(node.value.id) \
+                and not isinstance(node.slice, ast.Slice):
+            # an element of a list of str (S3c-1): the list's own checked read
+            return self.subscript(node)
         if not self.is_str(node.value):
             raise self.NotS0('subscript of a non-str text value')
         base = self.expr(node.value)
@@ -356,6 +360,10 @@ class TextLowering(object):
             return self.rt('str_%s' % attr, [recv])
         if attr == 'decode' and self.text_kind(f.value) == 'bytes' and not node.args and not node.keywords:
             return self.decode_value(f.value)
+        if attr == 'join' and self.is_str(f.value) and len(node.args) == 1 and not node.keywords \
+                and isinstance(node.args[0], ast.Name) and self.is_slist_name(node.args[0].id):
+            sep = self.expr(f.value)
+            return self.b.value('list.join', [sep, self.container(node.args[0])], STRV)
         raise self.NotS0('str method %s()' % attr)
 
     def bytes_arg(self, node):

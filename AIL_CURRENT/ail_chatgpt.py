@@ -13,8 +13,10 @@ import sys
 import tempfile
 from ail_syntax import SyntaxErrorAIL, detect, fold_constants, python_surface, python_wording, translate
 import ail_sexpr
+import ail_modules
 
 ROOT = Path(__file__).resolve().parent
+_MERGED_ENTRIES = {}         # entry file -> ail_modules.Merged, for entries whose text merges several modules
 
 
 def _literal_number(node):
@@ -143,8 +145,11 @@ def _refuse_load(error):
 
 def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only=False,
                   separate=False, module_paths=(), origins=None, source_map=None, declarations_only=False, source_bytes=None,
-                  notes=None):
-    """Resolve source imports once and validate their shared declaration scope."""
+                  notes=None, local_imports=False):
+    """Resolve source imports once and validate their shared declaration scope.
+
+    `local_imports` lets a Python-syntax entry import sibling modules (ail_modules, stage G1): their
+    bodies are merged into the entry's text before everything below sees it."""
     search_paths = tuple(dict.fromkeys(Path(path).resolve() for path in module_paths))
     if any(not path.is_dir() for path in search_paths):
         raise ValueError('each --module-path must name an existing directory')
@@ -165,8 +170,10 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             raise ValueError('AIL module cycle: ' + ' -> '.join(p.name for p in [*active, path]))
         if path in seen:
             return None
-        if path.suffix.lower() != '.ail' or not path.is_file():
+        if path.suffix.lower() not in (('.ail', '.py') if entry else ('.ail',)) or not path.is_file():
             raise ValueError(f'AIL module not found: {path}')
+        # set before decoding: the error handler below reads it when the bytes are not UTF-8
+        syntax = 'python' if path.suffix.lower() == '.py' else source_syntax
         try:
             if source_bytes is None:
                 text = path.read_text(encoding='utf-8')
@@ -178,6 +185,16 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 # like it; positions in diagnostics refer to that block text.
                 text = ail_sexpr.to_block(text)
             syntax = ('ail' if detect(text) else 'python') if source_syntax == 'auto' else source_syntax
+            if path.suffix.lower() == '.py':
+                syntax = 'python'
+            merged = None
+            if local_imports and entry and syntax == 'python' and not module_only:
+                merged = ail_modules.merge_program(path, text)
+                if merged is not None:
+                    _MERGED_ENTRIES[str(path)] = merged
+                    text = merged.text
+                    for line in merged.notes:
+                        print(line, file=sys.stderr)
             imports = []
             declarations = {}
             locations = {}
@@ -193,16 +210,20 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 _check_main_called(tree)
             if not declarations_only:
                 _check_int64_literals(tree)
+            if merged is not None and merged.positions:
+                locations = dict(merged.positions)
             if source_map is not None:
-                if syntax == 'python':
+                if syntax == 'python' and merged is None:
                     for node in ast.walk(tree):
                         if isinstance(node, ast.stmt):
                             position = (node.lineno, len(text.splitlines()[node.lineno - 1].encode('utf8')[:node.col_offset].decode('utf8')) + 1)
                             locations[node.lineno] = None if node.lineno in locations else position
                     locations = {line: position for line, position in locations.items() if position is not None}
-                unit_locations[text] = {line: (str(path), *position) for line, position in locations.items()}
+                unit_locations[text] = ({line: position for line, position in locations.items()}
+                                        if merged is not None and merged.positions else
+                                        {line: (str(path), *position) for line, position in locations.items()})
             if origins is not None:
-                if syntax == 'python':
+                if syntax == 'python' and merged is None:
                     for owner, fn in ((node.name if isinstance(node, ast.ClassDef) else None, member)
                                       for node in tree.body for member in
                                       (node.body if isinstance(node, ast.ClassDef) else [node])
@@ -210,9 +231,30 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                         key = f'{owner}__{fn.name}' if owner else fn.name
                         column = len(text.splitlines()[fn.lineno - 1].encode('utf8')[:fn.col_offset].decode('utf8')) + 1
                         declarations[key] = None if key in declarations else (fn.lineno, column, f'{owner}.{fn.name}' if owner else fn.name)
+                if merged is not None:
+                    for owner, fn in ((node.name if isinstance(node, ast.ClassDef) else None, member)
+                                      for node in tree.body for member in
+                                      (node.body if isinstance(node, ast.ClassDef) else [node])
+                                      if isinstance(member, ast.FunctionDef)):
+                        key = f'{owner}__{fn.name}' if owner else fn.name
+                        where = merged.positions.get(fn.lineno)
+                        shown = merged.names.get(fn.name, fn.name)
+                        declarations[key] = None if key in declarations or where is None else (
+                            where[0], where[1], where[2], f'{owner}.{shown}' if owner else shown)
                 for key, declaration in declarations.items():
-                    origins[key] = None if declaration is None or key in origins else (str(path), *declaration)
+                    if merged is not None:
+                        origins[key] = None if declaration is None or key in origins else declaration
+                    else:
+                        origins[key] = None if declaration is None or key in origins else (str(path), *declaration)
+        except ail_modules.ModuleRefusal:
+            raise
         except (OSError, UnicodeError, SyntaxError, ValueError) as exc:
+            if hasattr(exc, 'source_line') and merged is not None and exc.source_line in (merged.positions or {}):
+                where = merged.positions[exc.source_line]
+                exc.source_position = where
+                located = ValueError(f'AIL source {where[0]}: line {where[1]}: {exc}')
+                located.refusal = (where[0], where[1], where[2], str(exc))
+                raise located from exc
             if hasattr(exc, 'source_line'):
                 position = locations.get(exc.source_line)
                 if syntax == 'python':
@@ -562,6 +604,8 @@ def _fallback_notes(args, source, stderr, locate=True, source_map=None):
                 continue
             if python:
                 line = python_wording(line)
+            if str(source) in _MERGED_ENTRIES:
+                line = ail_modules.unmangle(line, _MERGED_ENTRIES[str(source)].names)
             if locate:
                 reason = line.split(' because ', 1)[-1]
                 located = _locate_refusal(args, source, reason)
@@ -615,6 +659,7 @@ def _source_check(args):
             raise ValueError('--symbol requires --interface')
         text, _, _ = _load_sources(source, args.module, args.syntax,
                                   module_only=args.library, module_paths=args.module_path, origins=origins, source_map=source_map,
+                                  local_imports=True,
                                   **({'source_bytes': snapshots} if snapshots is not None else {}))
         report['checked_functions'] = sum(isinstance(node, ast.FunctionDef)
                                           for node in ast.walk(ast.parse(text)))
@@ -665,7 +710,9 @@ def _source_check(args):
     except (OSError, UnicodeError, SyntaxError, ValueError, RuntimeError, ImportError, subprocess.SubprocessError) as error:
         # Unsupported inherits the compiler's error type; inspect it without a fallback.
         status = 2 if dependency or isinstance(error, (OSError, ImportError, subprocess.SubprocessError)) else 1
-        message = str(error)
+        message = error.refusal[3] if isinstance(error, ail_modules.ModuleRefusal) else str(error)
+        if str(source) in _MERGED_ENTRIES:
+            message = ail_modules.unmangle(message, _MERGED_ENTRIES[str(source)].names)
         if _python_source(args, original):
             message = python_wording(message)
         configuration = ('each --module-path', 'each --module must', 'AIL module not found:', '--symbol requires --interface', '--contracts requires --interface', '--types-used requires --interface and --symbol', 'unknown interface function:', 'invalid bundled API module name:', 'unknown bundled API module:', 'invalid bundled API manifest:')
@@ -734,8 +781,8 @@ def _surface_env(args, source, env=None):
     the compiler refuse list/dict/set sharing it would otherwise copy (pkg-v12/aliasrefuse.py)."""
     env = dict(os.environ if env is None else env)
     try:
-        python = (Path(source).suffix.lower() == '.ail'
-                  and _python_source(args, Path(source).read_bytes()))
+        python = (Path(source).suffix.lower() in ('.ail', '.py')
+                  and (Path(source).suffix.lower() == '.py' or _python_source(args, Path(source).read_bytes())))
     except OSError:
         python = False
     if python:
@@ -894,7 +941,8 @@ def _locate_refusal(args, source, message):
     relative = os.path.relpath(where)
     if not relative.startswith('..'):
         where = relative
-    named = _construct_position(source, message)
+    merged = str(Path(source).resolve()) in _MERGED_ENTRIES      # the entry text alone does not hold the code
+    named = None if merged else _construct_position(source, message)
     if named is not None:
         return '%s:%d:%d: %s' % (where, named[0], named[1], message)
     if diagnostic is not None and diagnostic.get('line') is not None:
@@ -903,7 +951,7 @@ def _locate_refusal(args, source, message):
             where += ':%d' % diagnostic['column']
         return '%s: %s' % (where, message)
     # the check could not map the refusal to a statement: read the position off the source text
-    position = _text_position(source, message, (diagnostic or {}).get('function'))
+    position = None if merged else _text_position(source, message, (diagnostic or {}).get('function'))
     if position is None:
         if diagnostic is not None and diagnostic.get('function'):
             return '%s (in %s): %s' % (where, diagnostic['function'], message)
@@ -1184,14 +1232,14 @@ def main(argv=None):
         output = Path(os.path.abspath(args.output))
         if sys.version_info < (3, 10):
             parser.error('AIL compilation requires Python 3.10 or newer')
-        if source.suffix.lower() != '.ail' or not source.is_file():
-            parser.error('source must be an existing .ail file')
+        if source.suffix.lower() not in ('.ail', '.py') or not source.is_file():
+            parser.error('source must be an existing .ail or .py file')
         notes = {}
         loading = native_build.loading(args) or {'source_map': {}}
         try:
             source_text, contracts, unit_map = _load_sources(
                 source, args.module, args.syntax, module_only=library, separate=separate,
-                module_paths=args.module_path, notes=notes, **loading)
+                module_paths=args.module_path, notes=notes, local_imports=not library, **loading)
         except (OSError, UnicodeError, SyntaxError, ValueError) as error:
             _refuse_load(error)
         if library:
@@ -1239,6 +1287,8 @@ def main(argv=None):
                 python = result.returncode == 3 and _python_source(args, source.read_bytes())
                 if python:
                     message = python_wording(message)
+                if str(source) in _MERGED_ENTRIES:
+                    message = ail_modules.unmangle(message, _MERGED_ENTRIES[str(source)].names)
                 if result.returncode == 3 and not args.json and not objects and not separate:
                     located = _locate_refusal(args, source, message)
                     where = _marker_where(loading['source_map'], marked) if located == message else None

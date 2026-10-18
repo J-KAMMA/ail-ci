@@ -136,6 +136,16 @@ _entry('read_bytes_win', (S,), (B,), 'ail_win_file(&{W}, {B}, {0})',
 _entry('win_release', (N,), (), 'ail_win_release(&{W}, {0})', Effects(writes=[WIN]), parts=('IRWIN',), attrs=('win',))
 
 
+# --- lists of str (S3c-1, design section 17): runtime calls that build a list. They are not `rt` calls: the list
+# they return lives in a place, so the lowering emits `list.rt (destination, args...)`.
+LIST_ENTRIES = {}
+LIST_ENTRIES['str_split_ws'] = dict(params=(S,), c='ail_str_split_ws({0})', effects=Effects(raises=[DIE]),
+                                    parts=frozenset(('STR', 'SLIST')))
+LIST_ENTRIES['str_split_sep'] = dict(params=(S, S), c='ail_str_split_sep({0}, {1})',
+                                     effects=Effects(raises=[VALUE, DIE]), parts=frozenset(('STR', 'SLIST')))
+LIST_ENTRIES['str_splitlines'] = dict(params=(S,), c='ail_str_splitlines({0})', effects=Effects(raises=[DIE]),
+                                      parts=frozenset(('STR', 'SLIST')))
+
 from . import effects as _effects      # noqa: E402
 
 for _name, _e in ENTRIES.items():

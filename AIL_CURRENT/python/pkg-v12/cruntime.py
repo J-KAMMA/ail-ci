@@ -202,11 +202,12 @@ typedef __typeof__(_Generic((int64_t)0, long: (long long)0, default: (long)0)) a
 typedef int64_t ail_len_t;
 #endif
 typedef struct { int64_t *p; ail_len_t n, cap; } ail_list;
+typedef struct { int64_t key, val; } ail_hent;
 typedef struct {
     /* HASH-mode storage: populated only when `mode == AIL_TAB_HASH` (entered by spilling -- see
        ail_tab_arr_spill in TAB below -- and left only when the keys fill their span densely again,
        ail_tab_hash_rearray). */
-    int64_t *key; int64_t *val; unsigned char *used; int64_t fill, cap;
+    ail_hent *ent; unsigned char *used; int64_t fill, cap;
     /* insertion-order key list, valid in EITHER mode: exactly order[0 .. n) once ail_tab_order
        has closed the holes deletions leave (`otop` below). */
     int64_t *order; int64_t n, order_cap;
@@ -3755,7 +3756,7 @@ static __attribute__((noreturn, noinline, cold)) void ail_list_span_fail(const i
     __builtin_unreachable();
 }
 static inline __attribute__((always_inline)) int64_t ail_list_span_get(const int64_t *data, int64_t count, int64_t index) {
-    if (__builtin_expect(!((uint64_t)index < (uint64_t)count && data != NULL), 0)) {
+    if (__builtin_expect(!((uint64_t)index < (uint64_t)count), 0)) {   /* count > 0 implies data (ail_*list_span_len) */
         int64_t fixed = index < 0 ? index + count : index;
         if (!((uint64_t)fixed < (uint64_t)count && data != NULL)) ail_list_span_fail(data, count, index);
         return data[fixed];
@@ -3776,7 +3777,7 @@ static __attribute__((noreturn, noinline, cold)) void ail_flist_span_fail(const 
     __builtin_unreachable();
 }
 static inline __attribute__((always_inline)) double ail_flist_span_get(const double *data, int64_t count, int64_t index) {
-    if (__builtin_expect(!((uint64_t)index < (uint64_t)count && data != NULL), 0)) {
+    if (__builtin_expect(!((uint64_t)index < (uint64_t)count), 0)) {   /* count > 0 implies data (ail_*list_span_len) */
         int64_t fixed = index < 0 ? index + count : index;
         if (!((uint64_t)fixed < (uint64_t)count && data != NULL)) ail_flist_span_fail(data, count, index);
         return data[fixed];
@@ -4590,22 +4591,22 @@ TAB = r'''
    `order`/`n` are never touched here -- every caller below does that itself, exactly once, only
    for a key that was genuinely new (ail_tab_hput/ail_tab_hdel report that back rather than assume
    it), the same division of labour the pre-array-mode version already had. */
-static int64_t ail_hash(int64_t k) {
+static inline __attribute__((always_inline)) int64_t ail_hash(int64_t k) {
     uint64_t x = (uint64_t)k * 0x9E3779B97F4A7C15ull;
     return (int64_t)(x ^ (x >> 31));
 }
 /* used[i]: 0 empty, 1 live, 2 a tombstone. Linear probing cannot stop at a deleted slot, so a
    deletion leaves a tombstone the probe walks past; only `used == 1` counts as present. */
-static int64_t ail_tab_hslot(const ail_tab *T, int64_t k) {
+static inline __attribute__((always_inline)) int64_t ail_tab_hslot(const ail_tab *T, int64_t k) {
     int64_t m = T->cap - 1, i = ail_hash(k) & m;
-    while (T->used[i] && !(T->used[i] == 1 && T->key[i] == k)) i = (i + 1) & m;
+    while (T->used[i] && !(T->used[i] == 1 && T->ent[i].key == k)) i = (i + 1) & m;
     return i;
 }
 static int64_t ail_tab_hfree_slot(const ail_tab *T, int64_t k) {
     int64_t m = T->cap - 1, i = ail_hash(k) & m, first = -1;
     while (T->used[i]) {
         if (T->used[i] == 2 && first < 0) first = i;
-        if (T->used[i] == 1 && T->key[i] == k) return i;
+        if (T->used[i] == 1 && T->ent[i].key == k) return i;
         i = (i + 1) & m;
     }
     return first >= 0 ? first : i;
@@ -4616,28 +4617,26 @@ static int64_t ail_tab_hfree_slot(const ail_tab *T, int64_t k) {
    those are unaffected by which keys happen to still be live in the hash's own storage. */
 static void ail_tab_hgrow(ail_tab *T) {
     int64_t old_cap = T->cap;
-    int64_t *old_key = T->key, *old_val = T->val;
+    ail_hent *old_ent = T->ent;
     unsigned char *old_used = T->used;
     T->cap = (T->fill + 1) * 4 > T->cap * 3 ? T->cap * 2 : T->cap;
-    T->key = (int64_t *)ail_alloc((size_t)T->cap * sizeof *T->key);
-    T->val = (int64_t *)ail_alloc((size_t)T->cap * sizeof *T->val);
+    T->ent = (ail_hent *)ail_alloc((size_t)T->cap * sizeof *T->ent);
     T->used = (unsigned char *)ail_alloc((size_t)T->cap);
     T->fill = 0;
     for (int64_t i = 0; i < old_cap; i++) {
         if (old_used[i] != 1) continue;
-        int64_t slot = ail_tab_hfree_slot(T, old_key[i]);
-        T->used[slot] = 1; T->key[slot] = old_key[i]; T->val[slot] = old_val[i];
+        int64_t slot = ail_tab_hfree_slot(T, old_ent[i].key);
+        T->used[slot] = 1; T->ent[slot].key = old_ent[i].key; T->ent[slot].val = old_ent[i].val;
         T->fill++;
     }
-    free(old_key); free(old_val); free(old_used);
+    free(old_ent); free(old_used);
 }
 /* Returns 1 if `k` was not already present (a genuinely new key: the caller appends it to `order`
    and bumps `n`), 0 if this only updated an existing key's value. */
 static int ail_tab_hput(ail_tab *T, int64_t k, int64_t v) {
     if (!T->cap) {
         T->cap = 16; T->fill = 0;
-        T->key = (int64_t *)ail_alloc((size_t)T->cap * sizeof *T->key);
-        T->val = (int64_t *)ail_alloc((size_t)T->cap * sizeof *T->val);
+        T->ent = (ail_hent *)ail_alloc((size_t)T->cap * sizeof *T->ent);
         T->used = (unsigned char *)ail_alloc((size_t)T->cap);
     }
     /* the check counts tombstones: they occupy slots a probe must walk past, and a table full of
@@ -4647,25 +4646,25 @@ static int ail_tab_hput(ail_tab *T, int64_t k, int64_t v) {
     int is_new = T->used[i] != 1;
     if (is_new) {
         if (!T->used[i]) T->fill++;               /* an empty slot; a tombstone was already counted */
-        T->used[i] = 1; T->key[i] = k;
+        T->used[i] = 1; T->ent[i].key = k;
     }
-    T->val[i] = v;
+    T->ent[i].val = v;
     return is_new;
 }
-static int64_t ail_tab_hhas(const ail_tab *T, int64_t k) {
+static inline __attribute__((always_inline)) int64_t ail_tab_hhas(const ail_tab *T, int64_t k) {
     if (!T->cap) return 0;
     return T->used[ail_tab_hslot(T, k)] == 1 ? 1 : 0;
 }
-static int64_t ail_tab_hget(const ail_tab *T, int64_t k, int64_t dflt) {
+static inline __attribute__((always_inline)) int64_t ail_tab_hget(const ail_tab *T, int64_t k, int64_t dflt) {
     if (!T->cap) return dflt;
     int64_t i = ail_tab_hslot(T, k);
-    return T->used[i] == 1 ? T->val[i] : dflt;
+    return T->used[i] == 1 ? T->ent[i].val : dflt;
 }
-static int64_t ail_tab_hneed(const ail_tab *T, int64_t k) {
+static inline __attribute__((always_inline)) int64_t ail_tab_hneed(const ail_tab *T, int64_t k) {
     if (!T->cap) ail_die("key error");
     int64_t i = ail_tab_hslot(T, k);
     if (T->used[i] != 1) ail_die("key error");
-    return T->val[i];
+    return T->ent[i].val;
 }
 /* Returns 1 if `k` was present (the caller compacts `order` and decrements `n`), 0 if this was a
    no-op (Python's `discard` of an absent value; `remove` checks presence itself, beforehand). */
@@ -4702,9 +4701,9 @@ static void ail_tab_hclear(ail_tab *T) {
    LATEST occurrence if it is present now, since every insertion of an absent key appends it; an
    earlier occurrence of the same key is one a deletion left behind. When nothing was appended
    since the first deletion (`otop == hfirst`), no key can occur twice and presence alone decides. */
-static int64_t ail_tab_has(const ail_tab *T, int64_t k);
+static int64_t ail_tab_has_slow(const ail_tab *T, int64_t k);
 static int ail_tab_hput(ail_tab *T, int64_t k, int64_t v);
-static int64_t ail_tab_hhas(const ail_tab *T, int64_t k);
+static inline int64_t ail_tab_hhas(const ail_tab *T, int64_t k);
 /* Keeps the `live` entries; `live` is `n`, or `n - 1` while a deletion is under way. */
 static void ail__tab_compact(ail_tab *T, int64_t live) {
     int64_t top = T->otop, w = top;
@@ -4712,14 +4711,14 @@ static void ail__tab_compact(ail_tab *T, int64_t live) {
     int dup = top > T->hfirst;
     for (int64_t j = top; j-- > 0;) {
         int64_t k = T->order[j];
-        if (!ail_tab_has(T, k)) continue;
+        if (!ail_tab_has_slow(T, k)) continue;
         if (dup) {
             if (ail_tab_hhas(&seen, k)) continue;
             (void)ail_tab_hput(&seen, k, 0);
         }
         T->order[--w] = k;             /* w > j until now: never overwrites an unread entry */
     }
-    free(seen.key); free(seen.val); free(seen.used);
+    free(seen.ent); free(seen.used);
     if (top - w != live) ail_die("invalid table order");
     if (w) memmove(T->order, T->order + w, (size_t)live * sizeof *T->order);
     T->otop = live; T->holes = 0;
@@ -4790,14 +4789,13 @@ static void ail_tab_arr_spill(ail_tab *T) {
     int64_t want = (T->n + 1) * 4 / 3 + 1, cap = 16;
     while (cap < want) cap *= 2;
     T->cap = cap; T->fill = 0;
-    T->key = (int64_t *)ail_alloc((size_t)T->cap * sizeof *T->key);
-    T->val = (int64_t *)ail_alloc((size_t)T->cap * sizeof *T->val);
+    T->ent = (ail_hent *)ail_alloc((size_t)T->cap * sizeof *T->ent);
     T->used = (unsigned char *)ail_alloc((size_t)T->cap);
     (void)ail_tab_order(T);
     for (int64_t i = 0; i < T->n; i++) {
         int64_t k = T->order[i], v = T->arr_val[k - T->lo];
         int64_t slot = ail_tab_hfree_slot(T, k);
-        T->used[slot] = 1; T->key[slot] = k; T->val[slot] = v;
+        T->used[slot] = 1; T->ent[slot].key = k; T->ent[slot].val = v;
         T->fill++;
     }
     free(T->arr_occ); free(T->arr_val); T->arr_occ = 0; T->arr_val = 0;
@@ -4815,8 +4813,8 @@ static __attribute__((noinline, cold)) void ail_tab_hash_rearray(ail_tab *T) {
     int64_t lo = INT64_MAX, hi = INT64_MIN;
     for (int64_t i = 0; i < T->cap; i++) {
         if (T->used[i] != 1) continue;
-        if (T->key[i] < lo) lo = T->key[i];
-        if (T->key[i] > hi) hi = T->key[i];
+        if (T->ent[i].key < lo) lo = T->ent[i].key;
+        if (T->ent[i].key > hi) hi = T->ent[i].key;
     }
     double span = (double)hi - (double)lo + 1.0;
     if (span > (double)AIL_TAB_ARR_DENSE_RATIO * (double)T->n || span > (double)AIL_TAB_ARR_MAX_SPAN)
@@ -4825,11 +4823,11 @@ static __attribute__((noinline, cold)) void ail_tab_hash_rearray(ail_tab *T) {
     int64_t *val = (int64_t *)ail_alloc((size_t)(hi - lo + 1) * sizeof *val);
     for (int64_t i = 0; i < T->cap; i++) {
         if (T->used[i] != 1) continue;
-        occ[T->key[i] - lo] = 1;
-        val[T->key[i] - lo] = T->val[i];
+        occ[T->ent[i].key - lo] = 1;
+        val[T->ent[i].key - lo] = T->ent[i].val;
     }
-    free(T->key); free(T->val); free(T->used);
-    T->key = T->val = 0; T->used = 0; T->cap = T->fill = 0;
+    free(T->ent); free(T->used);
+    T->ent = 0; T->used = 0; T->cap = T->fill = 0;
     T->arr_occ = occ; T->arr_val = val; T->lo = lo; T->hi = hi;
     T->mode = AIL_TAB_ARRAY;
 }
@@ -4959,21 +4957,20 @@ static void ail_tab_bits_spill(ail_tab *T) {
     int64_t want = (T->n + 1) * 4 / 3 + 1, cap = 16, span = T->hi - T->lo + 1;
     while (cap < want) cap *= 2;
     T->cap = cap; T->fill = 0;
-    T->key = (int64_t *)ail_alloc((size_t)T->cap * sizeof *T->key);
-    T->val = (int64_t *)ail_alloc((size_t)T->cap * sizeof *T->val);
+    T->ent = (ail_hent *)ail_alloc((size_t)T->cap * sizeof *T->ent);
     T->used = (unsigned char *)ail_alloc((size_t)T->cap);
     if (T->noorder) {
         for (int64_t i = T->bwlo * 64, end = (T->bwhi + 1) * 64 < span ? (T->bwhi + 1) * 64 : span;
              i < end; i++) {
             if (!((T->bits[i >> 6] >> (i & 63)) & 1u)) continue;
             int64_t k = T->lo + i, slot = ail_tab_hfree_slot(T, k);
-            T->used[slot] = 1; T->key[slot] = k; T->val[slot] = 0; T->fill++;
+            T->used[slot] = 1; T->ent[slot].key = k; T->ent[slot].val = 0; T->fill++;
         }
     } else {
         (void)ail_tab_order(T);
         for (int64_t i = 0; i < T->n; i++) {
             int64_t k = T->order[i], slot = ail_tab_hfree_slot(T, k);
-            T->used[slot] = 1; T->key[slot] = k; T->val[slot] = 0; T->fill++;
+            T->used[slot] = 1; T->ent[slot].key = k; T->ent[slot].val = 0; T->fill++;
         }
     }
     free(T->bits); T->bits = 0;
@@ -4998,7 +4995,7 @@ static void ail_tab_bits_put(ail_tab *T, int64_t k) {
     else { if (T->otop == T->order_cap) ail_tab_order_grow(T); T->order[T->otop++] = k; T->n++; }
 }
 
-static void ail_tab_put(ail_tab *T, int64_t k, int64_t v) {
+static __attribute__((noinline)) void ail_tab_put_slow(ail_tab *T, int64_t k, int64_t v) {
     if (T->mode == AIL_TAB_BITS) { ail_tab_bits_put(T, k); return; }
     if (T->mode == AIL_TAB_HASH) {
         /* `noorder` is 0 for every table that did not come from a compile-time bits plan, so this
@@ -5072,7 +5069,21 @@ static void ail_tab_put(ail_tab *T, int64_t k, int64_t v) {
     if (!T->arr_occ[idx]) { T->arr_occ[idx] = 1; ail_tab_order_append(T, k); }
     T->arr_val[idx] = v;
 }
-static int64_t ail_tab_has(const ail_tab *T, int64_t k) {
+/* Overwriting the value of a key a HASH table already holds -- a counter, a `last seen` position -- is
+   one hash and one probe with no order or epoch bookkeeping, so it is inlined at the call site;
+   anything else (a new key, the other representations, a growth) is the out-of-line function. */
+static inline __attribute__((always_inline)) int ail_tab_put_hit(ail_tab *T, int64_t k, int64_t v) {
+    if (T->mode != AIL_TAB_HASH || !T->cap) return 0;
+    int64_t i = ail_tab_hslot(T, k);
+    if (T->used[i] != 1) return 0;
+    T->ent[i].val = v;
+    return 1;
+}
+static inline __attribute__((always_inline)) void ail_tab_put(ail_tab *T, int64_t k, int64_t v) {
+    if (ail_tab_put_hit(T, k, v)) return;
+    ail_tab_put_slow(T, k, v);
+}
+static __attribute__((noinline)) int64_t ail_tab_has_slow(const ail_tab *T, int64_t k) {
     if (T->mode == AIL_TAB_BITS) {
         if (k < T->lo || k > T->hi) return 0;
         int64_t i = k - T->lo;
@@ -5082,23 +5093,38 @@ static int64_t ail_tab_has(const ail_tab *T, int64_t k) {
     if (T->n == 0 || k < T->lo || k > T->hi) return 0;
     return T->arr_occ[k - T->lo];
 }
-static int64_t ail_tab_get(const ail_tab *T, int64_t k, int64_t dflt) {
+/* Lookups inline only the HASH-mode probe (an LLM-written match finder spends most of its time in it); the
+   ARRAY and BITS representations stay one call, as before - inlining all three cost 6 KB of text in a
+   program with one int dict. */
+static inline __attribute__((always_inline)) int64_t ail_tab_has(const ail_tab *T, int64_t k) {
+    if (T->mode == AIL_TAB_HASH) return ail_tab_hhas(T, k);
+    return ail_tab_has_slow(T, k);
+}
+static __attribute__((noinline)) int64_t ail_tab_get_slow(const ail_tab *T, int64_t k, int64_t dflt) {
     /* BITS mode is only ever chosen for a SET, whose every value is 0 (see ail_tab_put's
        call sites in pyfunc.py) -- so a present key's value is 0 and an absent one is `dflt`,
        which is what both representations beside it already answer for a set. */
-    if (T->mode == AIL_TAB_BITS) return ail_tab_has(T, k) ? 0 : dflt;
+    if (T->mode == AIL_TAB_BITS) return ail_tab_has_slow(T, k) ? 0 : dflt;
     if (T->mode == AIL_TAB_HASH) return ail_tab_hget(T, k, dflt);
     if (T->n == 0 || k < T->lo || k > T->hi || !T->arr_occ[k - T->lo]) return dflt;
     return T->arr_val[k - T->lo];
 }
-static int64_t ail_tab_need(const ail_tab *T, int64_t k) {
+static inline __attribute__((always_inline)) int64_t ail_tab_get(const ail_tab *T, int64_t k, int64_t dflt) {
+    if (T->mode == AIL_TAB_HASH) return ail_tab_hget(T, k, dflt);
+    return ail_tab_get_slow(T, k, dflt);
+}
+static __attribute__((noinline)) int64_t ail_tab_need_slow(const ail_tab *T, int64_t k) {
     if (T->mode == AIL_TAB_BITS) {
-        if (!ail_tab_has(T, k)) ail_die("key error");
+        if (!ail_tab_has_slow(T, k)) ail_die("key error");
         return 0;
     }
     if (T->mode == AIL_TAB_HASH) return ail_tab_hneed(T, k);
     if (T->n == 0 || k < T->lo || k > T->hi || !T->arr_occ[k - T->lo]) ail_die("key error");
     return T->arr_val[k - T->lo];
+}
+static inline __attribute__((always_inline)) int64_t ail_tab_need(const ail_tab *T, int64_t k) {
+    if (T->mode == AIL_TAB_HASH) return ail_tab_hneed(T, k);
+    return ail_tab_need_slow(T, k);
 }
 static void ail_tab_del(ail_tab *T, int64_t k) {
     if (T->mode == AIL_TAB_BITS) {
@@ -5157,23 +5183,23 @@ static void ail_tab_copy(ail_tab *dst, const ail_tab *src) {
     if (src->noorder) {
         if (src->mode == AIL_TAB_BITS) {
             for (int64_t i = 0, sp = src->hi - src->lo + 1; i < sp; i++)
-                if ((src->bits[i >> 6] >> (i & 63)) & 1u) ail_tab_put(dst, src->lo + i, 0);
+                if ((src->bits[i >> 6] >> (i & 63)) & 1u) ail_tab_put_slow(dst, src->lo + i, 0);
         } else {
             for (int64_t i = 0; i < src->cap; i++)
-                if (src->used[i] == 1) ail_tab_put(dst, src->key[i], src->val[i]);
+                if (src->used[i] == 1) ail_tab_put_slow(dst, src->ent[i].key, src->ent[i].val);
         }
         return;
     }
     const int64_t *order = ail_tab_order(src);
     for (int64_t i = 0; i < src->n; i++) {
         int64_t k = order[i];
-        ail_tab_put(dst, k, ail_tab_get(src, k, 0));
+        ail_tab_put_slow(dst, k, ail_tab_get_slow(src, k, 0));
     }
 }
 static void ail_tab_free(ail_tab *T) {
-    free(T->key); free(T->val); free(T->used); free(T->order);
+    free(T->ent); free(T->used); free(T->order);
     free(T->arr_occ); free(T->arr_val); free(T->bits);
-    T->key = T->val = T->order = 0; T->used = 0; T->arr_occ = 0; T->arr_val = 0; T->bits = 0;
+    T->ent = 0; T->order = 0; T->used = 0; T->arr_occ = 0; T->arr_val = 0; T->bits = 0;
     T->n = T->fill = T->cap = T->order_cap = T->lo = T->hi = T->noorder = 0;
     T->bwlo = T->bwhi = 0; T->otop = T->holes = T->hfirst = 0;
     T->mode = AIL_TAB_ARRAY;
@@ -21257,7 +21283,7 @@ REQUIRES['BMAP'] = ['STAB', 'BYTES', 'SLIST', 'BLIST', 'DIE']
 # AIL dict and set.
 IDICT = r'''
 typedef struct { ail_tab table; uint64_t epoch; } ail_idict;
-static void ail_idict_check(const ail_idict *T) {
+static inline __attribute__((always_inline)) void ail_idict_check(const ail_idict *T) {
     if (!T || T->table.n < 0) ail_die("invalid int dictionary");
 }
 static uint64_t ail_idict_next_epoch(const ail_idict *T) {
@@ -21297,21 +21323,27 @@ static ail_idict ail_idict_take(ail_idict *temporary) {
 static int64_t ail_idict_len(const ail_idict *T) {
     ail_idict_check(T); return T->table.n;
 }
-static int64_t ail_idict_has(const ail_idict *T, int64_t key) {
+static inline __attribute__((always_inline)) int64_t ail_idict_has(const ail_idict *T, int64_t key) {
     ail_idict_check(T); return ail_tab_has(&T->table, key);
 }
-static int64_t ail_idict_get(const ail_idict *T, int64_t key, int64_t fallback) {
+static inline __attribute__((always_inline)) int64_t ail_idict_get(const ail_idict *T, int64_t key, int64_t fallback) {
     ail_idict_check(T); return ail_tab_get(&T->table, key, fallback);
 }
-static int64_t ail_idict_need(const ail_idict *T, int64_t key) {
+static inline __attribute__((always_inline)) int64_t ail_idict_need(const ail_idict *T, int64_t key) {
     ail_idict_check(T); return ail_tab_need(&T->table, key);
 }
 /* One probe: the table counts a new key, and only a new key moves the epoch. */
-static void ail_idict_put(ail_idict *T, int64_t key, int64_t value) {
+static __attribute__((noinline)) void ail_idict_put_slow(ail_idict *T, int64_t key, int64_t value) {
     ail_idict_check(T);
     int64_t n = T->table.n;
-    ail_tab_put(&T->table, key, value);
+    ail_tab_put_slow(&T->table, key, value);
     if (T->table.n != n) T->epoch = ail_idict_next_epoch(T);
+}
+/* An existing key keeps the count and so the epoch: only the value changes (see ail_tab_put_hit). */
+static inline __attribute__((always_inline)) void ail_idict_put(ail_idict *T, int64_t key, int64_t value) {
+    ail_idict_check(T);
+    if (ail_tab_put_hit(&T->table, key, value)) return;
+    ail_idict_put_slow(T, key, value);
 }
 static void ail_idict_clear(ail_idict *T) {
     ail_idict_check(T);
@@ -21507,7 +21539,7 @@ static void ail_@M_put(ail_@M *T, int64_t key, @V value) {
         slot = T->values_n++;
     }
     T->values[slot] = owned;
-    ail_tab_put(&T->table, key, slot);
+    ail_tab_put_slow(&T->table, key, slot);
     T->epoch = ail_@M_next_epoch(T);
 }
 static void ail_@M_del(ail_@M *T, int64_t key) {
@@ -21682,11 +21714,11 @@ static ail_iset ail_iset_combine(const ail_iset *a, const ail_iset *b, int keep,
     ail_iset result = {0};
     const int64_t *order = ail_tab_order(&a->table);
     for (int64_t j = 0; j < a->table.n; j++)
-        if (keep < 0 || ail_tab_has(&b->table, order[j]) == keep) ail_tab_put(&result.table, order[j], 0);
+        if (keep < 0 || ail_tab_has(&b->table, order[j]) == keep) ail_tab_put_slow(&result.table, order[j], 0);
     if (b_too) {
         order = ail_tab_order(&b->table);
         for (int64_t j = 0; j < b->table.n; j++)
-            if (keep < 0 || !ail_tab_has(&a->table, order[j])) ail_tab_put(&result.table, order[j], 0);
+            if (keep < 0 || !ail_tab_has(&a->table, order[j])) ail_tab_put_slow(&result.table, order[j], 0);
     }
     return result;
 }

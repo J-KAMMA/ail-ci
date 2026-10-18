@@ -7971,6 +7971,14 @@ def _bytearray_pure_int(node, ctx):
         if isinstance(n, ast.UnaryOp):
             return isinstance(n.op, (ast.USub, ast.Invert)) and pure(n.operand)
         if isinstance(n, ast.BinOp):
+            if isinstance(n.op, (ast.FloorDiv, ast.Mod)):
+                # by a positive literal: no zero or -1 divisor, so the division only computes
+                # (`out.append(n % 256)`, `out.append(dist // 256)` - the bytes of a length field)
+                c = _int_const(n.right)
+                return c is not None and 0 < c < (1 << 63) and pure(n.left)
+            if isinstance(n.op, ast.RShift):
+                c = _int_const(n.right)
+                return c is not None and 0 <= c < 64 and pure(n.left)
             return (isinstance(n.op, (ast.Add, ast.Sub, ast.Mult, ast.BitAnd, ast.BitOr, ast.BitXor))
                     and pure(n.left) and pure(n.right))
         if isinstance(n, ast.Subscript) and isinstance(n.value, ast.Name) and not isinstance(n.slice, ast.Slice):
@@ -14539,6 +14547,52 @@ def _idict_get_fusion(node, ctx):
     return fused
 
 
+def _if_add_test(test):
+    """The tests worth turning into a conditional add: one comparison (or its `not`) that reads a
+    container element - data-dependent, so the branch it would feed mispredicts. A test made of
+    `and`/`or` stays a branch (the short-circuit is one anyway) and so does a comparison of locals
+    (predictable in a counting loop: k_nucleotide's `if i >= m - 1 and key == target` ran 3% slower)."""
+    if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+        test = test.operand
+    if not (isinstance(test, ast.Compare) and len(test.ops) == 1):
+        return False
+    nodes = list(ast.walk(test))
+    return (any(isinstance(n, ast.Subscript) for n in nodes)
+            and not any(isinstance(n, (ast.BoolOp, ast.Call, ast.NamedExpr, ast.Lambda, ast.IfExp)) for n in nodes))
+
+
+def _if_add_fusion(node, ctx):
+    """`if <test> { x += K; }` (no else, x an int local, K a nonzero int constant) -> the statement
+    `x += K if <test> else 0`: the same test evaluated once, the same checked add (adding 0 never
+    overflows), but a conditional move instead of a branch. A test on loaded data is the
+    unpredictable branch of a neighbour count (a grid-life program: eight of them per cell, 30% of its cycles
+    in mispredicts); a well-predicted test costs one extra register move."""
+    if node.orelse or len(node.body) != 1:
+        return None
+    s = node.body[0]
+    if not (isinstance(s, ast.AugAssign) and isinstance(s.op, (ast.Add, ast.Sub))
+            and isinstance(s.target, ast.Name)
+            and isinstance(s.value, ast.Constant) and type(s.value.value) is int
+            and 0 < abs(s.value.value) < (1 << 62)):
+        return None
+    name = s.target.id
+    try:
+        if (name in ctx.modconsts or name in ctx.optional or name in ctx.stdin_unbound or name in ctx.handles
+                or name in (ctx.numeric_allowed_names or ()) or ctx.type_of(name) != INT
+                or not _if_add_test(node.test)):
+            return None
+    except Unsupported:
+        return None
+    value = ast.IfExp(test=node.test, body=s.value, orelse=ast.Constant(value=0))
+    fused = ast.AugAssign(target=s.target, op=s.op, value=value)
+    ast.copy_location(fused, s)
+    for sub in ast.walk(fused):
+        if not hasattr(sub, 'lineno'):
+            ast.copy_location(sub, s)
+    fused._ail_range_src = getattr(s, '_ail_range_src', s)
+    return fused
+
+
 def _stab_add_plan(name, key_node, value, ctx):
     """`d[k] = d.get(k, C) + N` (either add order) -> (add, miss) for
     `ail_stab_add`, else None. Only the get-with-default form fuses:
@@ -19393,7 +19447,7 @@ def _stmt_inner(node, ctx, ind):
                               'grow a list with .append(), a set with .add(), and a dict with '
                               'd[k] = v' % _a(_at))
         fake = ast.BinOp(left=node.target, op=node.op, right=node.value)
-        fake._ail_range_src = node              # the range proof is recorded on the AugAssign
+        fake._ail_range_src = getattr(node, '_ail_range_src', node)   # the range proof is recorded on the AugAssign
         v = _expr(fake, ctx)
         return _flush(ctx, pad) + '%s%s = %s;\n' % (pad, ctx.cname(node.target.id), v)
     if isinstance(node, ast.If):
@@ -19401,6 +19455,9 @@ def _stmt_inner(node, ctx, ind):
         if fused is not None:
             return fused
         fused = _idict_get_fusion(node, ctx)
+        if fused is not None:
+            return _stmt(fused, ctx, ind)
+        fused = _if_add_fusion(node, ctx)
         if fused is not None:
             return _stmt(fused, ctx, ind)
         c = _cond(node.test, ctx)

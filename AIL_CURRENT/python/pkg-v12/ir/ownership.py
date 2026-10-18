@@ -28,8 +28,9 @@ from . import ir as I
 from . import effects as E
 
 _LISTS = (I.T('obj', I.T('list', I.I64)), I.T('obj', I.T('list', I.F64)))
-DST_OPS = ('list.reset', 'list.lit', 'list.repeat', 'list.move', 'list.call', 'list.copy', 'list.share')
-WRITE_OPS = ('list.set', 'list.push', 'list.pop', 'list.clear', 'list.reserve')
+DST_OPS = ('list.reset', 'list.lit', 'list.repeat', 'list.move', 'list.call', 'list.copy', 'list.share', 'list.rt', 'list.sortperm')
+WRITE_OPS = ('list.set', 'list.push', 'list.pop', 'list.clear', 'list.reserve', 'list.sort', 'list.permute',
+             'rec.push', 'rec.up', 'rec.pop')
 CALLS = ('call', 'list.call', 'ba.call')
 
 
