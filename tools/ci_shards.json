@@ -45,6 +45,7 @@
   "test_ail_exception_values_app": 55.6,
   "test_ail_exception_values_core": 132.2,
   "test_ail_fallback_note": 10.0,
+  "test_ail_ffi": 49.4,
   "test_ail_field_index_inplace": 2.7,
   "test_ail_field_store_cost": 18.2,
   "test_ail_field_str_append": 13.8,
@@ -149,6 +150,7 @@
   "test_ail_tuples": 10.0,
   "test_ail_type_details": 1.4,
   "test_ail_typed_locals": 50.6,
+  "test_ail_zlib": 49.4,
   "test_c_api_bridge": 17.2,
   "test_csv_column_stats_cli": 9.4,
   "test_csv_column_stats_stream": 28.1,
@@ -196,9 +198,11 @@
   ],
   [
    "test_ail_builtin_api",
+   "test_ail_ffi",
    "test_ail_files",
    "test_ail_rep5_idioms",
-   "test_ail_try_hoist"
+   "test_ail_try_hoist",
+   "test_ail_zlib"
   ],
   [
    "test_ail_collections",

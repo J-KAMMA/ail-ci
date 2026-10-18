@@ -712,7 +712,7 @@ def export_sdk(source_root: Path, output: Path) -> dict:
         selected = {root / name for name in required}
         # Newer legacy snapshots pin these CLI modules without sdk_files.
         # Older snapshots that predate the commands need neither module.
-        selected.update(root / name for name in ('ail_source_edit.py', 'ail_source_context.py', 'ail_api_contracts.py', 'ail_native_build.py', 'ail_builtin_api.py', 'ail_builtin_syntax_forms.py', 'ail_sexpr.py', 'ail_slow_patterns.py', 'ail_modules.py')
+        selected.update(root / name for name in ('ail_source_edit.py', 'ail_source_context.py', 'ail_api_contracts.py', 'ail_native_build.py', 'ail_builtin_api.py', 'ail_builtin_syntax_forms.py', 'ail_sexpr.py', 'ail_slow_patterns.py', 'ail_modules.py', 'ail_ffi.py', 'ail_ffi_lower.py')
                         if name in pins)
         compiler = root / 'python' / 'pkg-v12'
         examples = root / 'language_examples'
@@ -725,6 +725,10 @@ def export_sdk(source_root: Path, output: Path) -> dict:
         if (compiler / 'ir').is_dir():
             selected.update(p for p in (compiler / 'ir').rglob('*.py') if '__pycache__' not in p.parts)
         selected.update(p for p in examples.iterdir() if p.suffix in ('.ail', '.c', '.h', '.S', '.s', '.json'))
+        # bundled standard modules written in AIL over the C FFI (G5a): stdlib/zlib.py and its C glue
+        if (root / 'stdlib').is_dir() and any(name.startswith('stdlib/') for name in pins):
+            _no_links(root / 'stdlib')
+            selected.update(p for p in (root / 'stdlib').iterdir() if p.suffix in ('.py', '.c', '.h'))
 
     # A selected C interface must include its full declared input closure.
     for path in tuple(selected):

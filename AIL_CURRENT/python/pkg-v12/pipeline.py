@@ -55,6 +55,12 @@ def compiler():
     raise PipelineError('no C compiler found on PATH; set $PIPE_CC')
 
 
+def ffi_link_args():
+    """Extra link arguments for C libraries named by @extern stubs (G4); empty unless AIL_FFI_LINK is set."""
+    import shlex
+    return shlex.split(os.environ.get('AIL_FFI_LINK', ''))
+
+
 def link_flags():
     """Dynamic linking is the default on Linux and macOS: a typed program is then about 30 KB
     instead of about 800 KB with a static glibc (decided 2026-10-11). AIL_STATIC=1 (set by

@@ -21,7 +21,7 @@ input; Windows reads the same raw file into an owned buffer before calling the g
 """
 import argparse, ast, json, os, pathlib, subprocess, sys
 
-from pipeline import PipelineError, compiler, link_flags
+from pipeline import PipelineError, compiler, ffi_link_args, link_flags
 
 # Extra optimizer flags for the generated C. SLP vectorization is off: on a struct of doubles it packs
 # neighbouring fields (vx,vy / vz,m) into 16-byte vectors whose loads straddle the preceding scalar or
@@ -856,7 +856,7 @@ def build_link_units(source, out, unit_map, external=None):
         objects.append(str(o_path))
     result = native_diagnostics.run([compiler(), *link_flags(), '-o', str(out), *objects,
                              *(external['objects'] if external is not None else [])]
-                            + (['-lm'] if info.get('libm') else [])
+                            + (['-lm'] if info.get('libm') else []) + (ffi_link_args() if external is not None else [])
                             + (['-pthread'] if info.get('pthread') else [])
                             + (['-lws2_32'] if os.name == 'nt' and {'TCPSOCKET', 'TCPHEAD'}.intersection(
                                 info.get('runtime_parts', []) + (external or {}).get('runtime_parts', [])) else []),

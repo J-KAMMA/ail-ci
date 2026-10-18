@@ -45,6 +45,12 @@ BUILTINS = frozenset(dir(builtins))
 MODULE_DUNDERS = frozenset(('__file__', '__package__', '__path__', '__spec__', '__loader__', '__cached__',
                             '__builtins__'))
 NEVER = 10 ** 9
+# G5a: standard modules the compiler ships as AIL source over the C FFI (stdlib/*.py). They are searched
+# after the entry directory and AIL_PATH, so a program's own `zlib.py` still wins.
+BUNDLED_DIR = Path(__file__).resolve().parent / 'stdlib'
+# module attributes of a bundled module that name an exception kind the typed path can raise; CPython's
+# zlib.error is a class of its own, the compiler spells it RuntimeError (as csv.Error is ValueError)
+BUNDLED_NAMES = {('zlib', 'error'): 'RuntimeError'}
 
 
 class ModuleRefusal(ValueError):
@@ -222,6 +228,8 @@ class Program:
                 root = Path(part).resolve()
                 if root not in self.roots:
                     self.roots.append(root)
+        if BUNDLED_DIR.is_dir() and BUNDLED_DIR not in self.roots:
+            self.roots.append(BUNDLED_DIR)
         self.mods = {}                  # dotted module name -> Mod
         self.notes = []
         self.entry = None
@@ -323,7 +331,8 @@ class Program:
             self.refuse(importer, node, "import of %r would load the entry file a second time as a module "
                         "(CPython runs its body twice).\n  write instead: move the shared code into its own "
                         "module and import that" % fullname)
-        if '.' not in fullname and fullname in STDLIB and kind != 'namespace':
+        if '.' not in fullname and fullname in STDLIB and kind != 'namespace' and (
+                path is None or path.resolve().parent != BUNDLED_DIR):
             self.notes.append('note: %s shadows the standard library module %s, as it does in CPython'
                               % (path.name if path.name != '__init__.py' else path.parent.name + '/__init__.py',
                                  fullname))
@@ -1004,6 +1013,8 @@ class Rewriter(ast.NodeTransformer):
             if stored:
                 self.program.ext.setdefault((target, attr), (self.mod, node))
             return node
+        if not stored and (target.name, attr) in BUNDLED_NAMES and target.path.resolve().parent == BUNDLED_DIR:
+            return ast.copy_location(ast.Name(BUNDLED_NAMES[(target.name, attr)], ast.Load()), node)
         if isinstance(node.ctx, ast.Del):
             self.program.refuse(self.mod, node, "`del %s.%s` removes a module attribute; the compiler fixes every "
                                 "module's names at build time.\n  write instead: assign a placeholder value "

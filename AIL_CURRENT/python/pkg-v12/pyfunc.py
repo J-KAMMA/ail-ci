@@ -27435,6 +27435,13 @@ wmemmove wmempcpy wmemset wprintf write writev wscanf xor xor_eq y0 y0f y0f128 y
 y0f64x y0l y1 y1f y1f128 y1f32 y1f32x y1f64 y1f64x y1l yn ynf ynf128 ynf32 ynf32x ynf64 ynf64x ynl
 """.split())
 
+def _ffi_csyms():
+    """C symbols an @extern adapter object references (AIL_FFI_SYMBOLS, space separated, set by the
+    driver, G4): a user function of the same name would be linked in their place."""
+    value = os.environ.get('AIL_FFI_SYMBOLS')
+    return value.split() if value else ()
+
+
 def _mangle_csym(nm):
     """The C symbol a Python function name `nm` is actually emitted under, once it is checked
     against `_RESERVED_CSYMS` and the runtime's own `ail_` namespace -- see the call site in
@@ -27443,7 +27450,7 @@ def _mangle_csym(nm):
     `py_`) or with the runtime (`ail_...` never becomes `py_ail_...` under any OTHER rule here);
     every non-colliding name passes through unchanged, so a program with no such name is emitted
     byte-for-byte as before."""
-    if (nm in _C_KEYWORDS or nm in _RESERVED_CSYMS or nm in _LIBC_CSYMS
+    if (nm in _C_KEYWORDS or nm in _RESERVED_CSYMS or nm in _LIBC_CSYMS or nm in _ffi_csyms()
             or nm.startswith(('ail_', 'ail2_', 'ck_', '__', '_ail', '_AIL'))
             or nm[:1] == '_' and nm[1:2].isupper()):
         return 'py_' + nm

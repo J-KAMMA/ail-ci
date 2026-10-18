@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -129,6 +130,15 @@ def _check_main_called(tree):
     raise error
 
 
+def _ffi_session(args):
+    """The G4 session that lowers `@extern` stubs (ail_ffi_lower.py), closed when the process ends."""
+    import atexit
+    import ail_ffi_lower
+    session = ail_ffi_lower.Session(forbid=getattr(args, 'no_ffi', False))
+    atexit.register(session.close)
+    return session
+
+
 def _refuse_load(error):
     """Print a load-time refusal as `path:line:col: message` (no argparse usage dump) and exit 2.
     The position comes from the failing check (`error.refusal`) when the loader found one."""
@@ -145,7 +155,7 @@ def _refuse_load(error):
 
 def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only=False,
                   separate=False, module_paths=(), origins=None, source_map=None, declarations_only=False, source_bytes=None,
-                  notes=None, local_imports=False):
+                  notes=None, local_imports=False, ffi=None):
     """Resolve source imports once and validate their shared declaration scope.
 
     `local_imports` lets a Python-syntax entry import sibling modules (ail_modules, stage G1): their
@@ -188,8 +198,12 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             if path.suffix.lower() == '.py':
                 syntax = 'python'
             merged = None
+            if ffi is not None and syntax == 'python':
+                # G4: `@extern` stubs become ordinary functions over a generated C object (ail_ffi_lower.py);
+                # a file that does not mention ail_ffi is returned untouched
+                text = ffi.lower(path, text)
             if local_imports and entry and syntax == 'python' and not module_only:
-                merged = ail_modules.merge_program(path, text)
+                merged = ail_modules.merge_program(path, text, **({} if ffi is None else {'read': ffi.read}))
                 if merged is not None:
                     _MERGED_ENTRIES[str(path)] = merged
                     text = merged.text
@@ -657,10 +671,19 @@ def _source_check(args):
             raise ValueError('--types-used requires --interface and --symbol')
         if args.symbol and not args.interface:
             raise ValueError('--symbol requires --interface')
+        ffi = _ffi_session(args)
         text, _, _ = _load_sources(source, args.module, args.syntax,
                                   module_only=args.library, module_paths=args.module_path, origins=origins, source_map=source_map,
-                                  local_imports=True,
+                                  local_imports=True, ffi=ffi,
                                   **({'source_bytes': snapshots} if snapshots is not None else {}))
+        check_objects = list(args.object)
+        if getattr(args, 'ffi', False):
+            report['ffi'] = ffi.listing()
+        if ffi.decls:
+            dependency = True
+            check_objects.append(ffi.build(ROOT / 'ail_chatgpt.py'))
+            os.environ['AIL_FFI_SYMBOLS'] = ' '.join(ffi.symbols())
+            dependency = False
         report['checked_functions'] = sum(isinstance(node, ast.FunctionDef)
                                           for node in ast.walk(ast.parse(text)))
         compiler_path = str(ROOT / 'python/pkg-v12')
@@ -671,10 +694,10 @@ def _source_check(args):
             sys.path.insert(0, compiler_path)
             from pyfunc import Unsupported, to_c
             external = None
-            if args.object:
+            if check_objects:
                 dependency = True
                 from module_object import load_objects
-                external = load_objects(args.object)
+                external = load_objects(check_objects)
                 dependency = False
             stage = 'type'
             saved_surface = os.environ.get('AIL_SURFACE')
@@ -978,6 +1001,8 @@ def main(argv=None):
     check_cmd.add_argument('--module', action='append', type=Path, default=[])
     check_cmd.add_argument('--object', action='append', type=Path, default=[], help='typed object metadata; may query compiler identity, never builds or links')
     check_cmd.add_argument('--library', action='store_true')
+    check_cmd.add_argument('--ffi', action='store_true', help='list the C FFI declarations (@extern stubs) of the program')
+    check_cmd.add_argument('--no-ffi', action='store_true', help='refuse a program that declares C FFI functions')
     check_cmd.add_argument('--repair-context', action='store_true', help='include SHA-bound failing AIL function body and declared import/API context')
     check_cmd.add_argument('--interface', action='store_true', help='include checked source declarations without function bodies; absent types are null')
     check_cmd.add_argument('--symbol', action='append', default=[], help='select top-level function declarations with --interface; repeatable; struct declarations retained')
@@ -1037,6 +1062,7 @@ def main(argv=None):
     compile_cmd.add_argument('-o', '--output', required=True, type=Path)
     compile_cmd.add_argument('--module', action='append', type=Path, default=[],
         help='additional .ail file containing functions and literal numeric constants')
+    compile_cmd.add_argument('--no-ffi', action='store_true', help='refuse a program that declares C FFI functions (@extern)')
     compile_cmd.add_argument('--separate', action='store_true',
         help='compile each typed source into a C object, then link the objects')
     compile_cmd.add_argument('--object', action='append', type=Path, default=[],
@@ -1246,12 +1272,20 @@ def main(argv=None):
             parser.error('source must be an existing .ail or .py file')
         notes = {}
         loading = native_build.loading(args) or {'source_map': {}}
+        ffi = None if library else _ffi_session(args)
         try:
             source_text, contracts, unit_map = _load_sources(
                 source, args.module, args.syntax, module_only=library, separate=separate,
-                module_paths=args.module_path, notes=notes, local_imports=not library, **loading)
+                module_paths=args.module_path, notes=notes, local_imports=not library, ffi=ffi, **loading)
         except (OSError, UnicodeError, SyntaxError, ValueError) as error:
             _refuse_load(error)
+        ffi_objects, ffi_env = [], {}
+        if ffi is not None and ffi.decls:
+            try:
+                ffi_objects = [ffi.build(ROOT / 'ail_chatgpt.py')]
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                return native_build.emit(args, {}, 2, 'ffi', str(error))
+            ffi_env = {'AIL_FFI_LINK': shlex.join(ffi.link_args), 'AIL_FFI_SYMBOLS': ' '.join(ffi.symbols())}
         if library:
             if output.exists() or output.is_symlink() or not output.parent.is_dir():
                 parser.error('library output requires a new directory in an existing parent')
@@ -1283,7 +1317,7 @@ def main(argv=None):
             build_source.write_text(source_text, encoding='utf-8')
             command = [sys.executable, '-B', str(ROOT/'python/pkg-v12/pyc.py'),
                        '--file', str(build_source), str(target), '--strict']
-            for object_path in objects:
+            for object_path in [*objects, *ffi_objects]:
                 command += ['--object', str(object_path.resolve())]
             if separate:
                 unit_map_path = Path(tmp) / 'units.json'
@@ -1291,7 +1325,7 @@ def main(argv=None):
                 command += ['--link-units', str(unit_map_path)]
             result = native_build.invoke(args, command, tmp, capture_output=True, text=True,
                 timeout=660, env=_surface_env(args, source, {**os.environ, 'AIL_REPORT_SOURCE_LINE': '1',
-                                                **({'AIL_NO_GENERAL': '1'} if contracts else {})}))
+                                                **({'AIL_NO_GENERAL': '1'} if contracts else {}), **ffi_env}))
             if result.returncode:
                 message, marked = _split_line_marker(result.stderr or result.stdout)
                 python = result.returncode == 3 and _python_source(args, source.read_bytes())
