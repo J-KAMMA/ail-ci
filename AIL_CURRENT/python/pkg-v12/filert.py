@@ -36,7 +36,7 @@ FILE_EXC_CODES = {name: 11 + i for i, name in enumerate(FILE_EXC_NAMES)}
 EXC_EDITS = (
     ('AIL_EXC_OVERFLOW = 10 };',
      'AIL_EXC_OVERFLOW = 10, AIL_EXC_FNF = 11, AIL_EXC_PERM = 12, AIL_EXC_ISDIR = 13, AIL_EXC_EXIST = 14,\n'
-     '       AIL_EXC_NOTDIR = 15, AIL_EXC_UNSUP = 16 };'),
+     '       AIL_EXC_NOTDIR = 15, AIL_EXC_UNSUP = 16 };\n#define AIL_FILE_EXC_CODES 1'),
     ('"AssertionError", "OverflowError"};',
      '"AssertionError", "OverflowError", "FileNotFoundError", "PermissionError", "IsADirectoryError",\n'
      '         "FileExistsError", "NotADirectoryError", "UnsupportedOperation"};'),
@@ -72,6 +72,67 @@ def proc_exception(text):
     for old, new in PROC_EXC_EDITS:
         if text.count(old) != 1:
             raise AssertionError('DIE block changed; update filert.PROC_EXC_EDITS: ' + old)
+        text = text.replace(old, new)
+    return text
+
+
+# C23: the older whole-file builtins (open(path).read(), read_bytes, file_size, list_dir, the binary file
+# handle) used to raise the plain OSError for every failure, which `except FileNotFoundError` had to take
+# so that a missing file was still caught.  With the OS-family codes present they now raise the class of
+# their errno, exactly like the file layer (ailt_fraise); spliced into those parts only with FILEEXC.
+_FAIL_HELPER = """/* C23: the exception class of an errno, as the file layer's ailt_fraise picks it. */
+static void ail_file_fail(int err) {
+    switch (err) {
+    case ENOENT: ail_raise_named(AIL_EXC_FNF);
+    case EACCES: case EPERM: ail_raise_named(AIL_EXC_PERM);
+    case EISDIR: ail_raise_named(AIL_EXC_ISDIR);
+    case EEXIST: ail_raise_named(AIL_EXC_EXIST);
+    case ENOTDIR: ail_raise_named(AIL_EXC_NOTDIR);
+    default: break;
+    }
+    ail_raise_named(AIL_EXC_OS);
+}
+"""
+LEGACY_EDITS = {
+    'STR': (
+        ('/* mode: 0 read, 1 replace, 2 append; binary on every platform. */\n',
+         _FAIL_HELPER + '/* mode: 0 read, 1 replace, 2 append; binary on every platform. */\n', 1),
+        ('    free(name);\n    if (!f) ail_raise_named(AIL_EXC_OS);\n',
+         '    int open_errno = errno;\n    free(name);\n    if (!f) ail_file_fail(open_errno);\n', 1),
+        ('if (ferror(it->file)) ail_raise_named(AIL_EXC_OS);', 'if (ferror(it->file)) ail_file_fail(errno);', 1),
+        ('if (next == EOF && ferror(it->file)) ail_raise_named(AIL_EXC_OS);',
+         'if (next == EOF && ferror(it->file)) ail_file_fail(errno);', 1),
+        ('if (ferror(f)) { fclose(f); free(buf); ail_raise_named(AIL_EXC_OS); }',
+         'if (ferror(f)) { int read_errno = errno; fclose(f); free(buf); ail_file_fail(read_errno); }', 1),
+    ),
+    'FILESIZE': (
+        ('    int ok = stat(name, &info) == 0;\n    free(name);\n    if (!ok || !S_ISREG(info.st_mode)) ail_raise_named(AIL_EXC_OS);\n',
+         '    int ok = stat(name, &info) == 0;\n    int stat_errno = ok ? 0 : errno;\n    free(name);\n'
+         '    if (!ok) ail_file_fail(stat_errno);\n'
+         '    if (!S_ISREG(info.st_mode)) ail_file_fail(S_ISDIR(info.st_mode) ? EISDIR : 0);\n', 1),
+    ),
+    'BINARYFILE': (
+        ('    free(name);\n    if (!F->fp) { free(F); ail_raise_named(AIL_EXC_OS); }\n',
+         '    int open_errno = errno;\n    free(name);\n    if (!F->fp) { free(F); ail_file_fail(open_errno); }\n', 1),
+        ('    int valid = _fstat64(_fileno(F->fp), &info) == 0 && (info.st_mode & _S_IFMT) != _S_IFDIR;\n',
+         '    int is_dir = 0;\n'
+         '    int valid = _fstat64(_fileno(F->fp), &info) == 0 && !(is_dir = (info.st_mode & _S_IFMT) == _S_IFDIR);\n', 1),
+        ('    int valid = fstat(fileno(F->fp), &info) == 0 && !S_ISDIR(info.st_mode);\n',
+         '    int is_dir = 0;\n    int valid = fstat(fileno(F->fp), &info) == 0 && !(is_dir = S_ISDIR(info.st_mode));\n', 1),
+        ('    if (!valid) { fclose(F->fp); free(F); ail_raise_named(AIL_EXC_OS); }\n',
+         '    if (!valid) { fclose(F->fp); free(F); ail_file_fail(is_dir ? EISDIR : 0); }\n', 1),
+    ),
+    'DIRPATH': (
+        ('    if (!ail_is_dir(path)) ail_raise_named(AIL_EXC_OS);\n',
+         '    if (!ail_is_dir(path)) ail_file_fail(ail_path_exists(path) ? ENOTDIR : ENOENT);\n', 1),
+    ),
+}
+
+
+def legacy_errno(part, text):
+    for old, new, count in LEGACY_EDITS.get(part, ()):
+        if text.count(old) != count:
+            raise AssertionError('%s block changed; update filert.LEGACY_EDITS: %s' % (part, old))
         text = text.replace(old, new)
     return text
 

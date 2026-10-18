@@ -130,15 +130,46 @@ class LICM(object):
                 k += len(moved)
             k += 1
 
+    def initialised_before(self, loop):
+        """Object places given an object by a top-level instruction of the body that precedes the
+        top-level statement holding `loop` (so they hold one wherever the loop starts)."""
+        out = set()
+        for top in self.fn.body.instrs:
+            if top is loop or any(i is loop for r in top.regions for i in I.walk(r)):
+                return out
+            if top.op in ('obj.init', 'obj.copyref') or (top.op == 'store' and top.operands[0].type.pointee.head == 'obj'):
+                out.add(top.operands[0])
+        return set()
+
     def hoist_pure(self, loop):
         inside = _inside(loop)
         defs = _defs(self.fn)
         moved = []
+        # The place of a struct local (the object pointer) changes only through an instruction naming it
+        # (`store`, `obj.init`, `obj.copyref`): a call cannot reach a local place. Its `load` is
+        # invariant in a loop that names the place in nothing but loads, so the field lists read
+        # through it get spans as those of a struct parameter do. Only a place that already holds an
+        # object where the loop starts (initialised at the top level of the body, before the
+        # statement holding the loop) is read early: a span over the field of no object would fault
+        # in front of a loop that runs no iteration.
+        named = set()
+        for r in loop.regions:
+            for i in I.walk(r):
+                if i.op != 'load':
+                    named.update(v for v in i.operands if v.type.is_place)
+        ready = self.initialised_before(loop)
+
+        def invariant_load(ins):
+            if ins.op != 'load':
+                return False
+            p = ins.operands[0]
+            t = p.type.pointee
+            return p in ready and p not in named and t.head == 'obj' and t.args[0].head == 'class'
 
         def visit(region):
             keep = []
             for ins in region.instrs:
-                if (not ins.regions and ins.op != 'const' and simplify.is_pure(ins, defs)
+                if (not ins.regions and ins.op != 'const' and (simplify.is_pure(ins, defs) or invariant_load(ins))
                         and all(v not in inside for v in ins.operands)):
                     moved.append(ins)
                     for r in ins.results:

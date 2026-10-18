@@ -616,6 +616,12 @@ class _Checker(object):
         p = ins.operands[0]
         self.want(where, p.type.is_place and p.type.pointee == _BA, 'ba.drop takes the place of a bytearray')
 
+    def op_ba_copyref(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        p, b = ins.operands
+        self.want(where, p.type.is_place and p.type.pointee == _BA and b.type == _BA,
+                  'ba.copyref takes (place of a bytearray, bytearray)')
+
     def op_ba_call(self, ins, scope, stack, where, top):
         self.nresults(ins, where, 0)
         sym = ins.attrs.get('callee')

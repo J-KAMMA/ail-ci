@@ -164,12 +164,10 @@ def _handler_codes(code):
     """Every exception code a handler for `code` catches."""
     if code == EXC_NAMES['ValueError']:
         return (code, EXC_NAMES['UnicodeDecodeError']) + ((16,) if filelib.ACTIVE else ())
-    if code == EXC_NAMES['OSError'] and filelib.ACTIVE:
-        return (code, 11, 12, 13, 14, 15, 16)
-    if code == EXC_NAMES['FileNotFoundError']:
-        if pathlower.ACTIVE:
-            return (code,)        # G10: every file error of a pathlib program has its own code (no legacy whole-file read)
-        return (code, EXC_NAMES['OSError'])
+    if code == EXC_NAMES['OSError']:
+        # C23: `except OSError` takes every subclass; a subclass handler takes only its own code (the
+        # whole-file builtins raise the class of their errno once the OS-family codes exist).
+        return (code, 11, 12, 13, 14, 15, 16) if filelib.ACTIVE else (code, 11, 12, 13, 14, 15)
     return (code,)
 # OverflowError (10) joined 2026-10-12: int64 arithmetic that leaves the range ("integer overflow")
 # is catchable once a program names OverflowError. Like AssertionError, the DIE block only grows

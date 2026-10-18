@@ -906,6 +906,8 @@ class Ctx:
         self.loop_stack = []       # dicts: has_else, broke_slot, try_depth (finally_stack length)
         self.try_stack = []        # dicts: catch label, for the currently-open try bodies
         self.finally_stack = []    # dicts: label, for currently-open try/finally regions
+        self.reraise_stack = []    # C22: frame-slot triples (cls, msg, value) of the exception a
+                                   # bare `raise` re-raises (enclosing handler / finally body)
         self.label_n = 0
         self.cvar_n = 0
         self.uses_st = False
@@ -6083,6 +6085,20 @@ class Compiler:
         if node.cause is not None:
             raise Unsupported('raise ... from ...')
         if node.exc is None:
+            if ctx.reraise_stack:
+                # C22: the handler cleared the pending exception at entry; re-raise the copy it
+                # kept in frame slots (same class, message and value).
+                ent = ctx.reraise_stack[-1]
+                sc, sm, sv = ent['slots']
+                rest = ('st = AIL_EXC; cx->exc.cls = %s; cx->exc.msg = %s; cx->exc.value = %s; '
+                        'cx->exc_pending = 1; goto %s;' % (sc, sm, sv, ctx.cur_err_target()))
+                if ent.get('cond'):
+                    ctx.emit('if (%s) { %s }' % (ent['cond'], rest))
+                    ctx.emit('st = AIL_EXC; goto %s;' % ctx.cur_err_target())
+                else:
+                    ctx.emit(rest)
+                ctx.uses_st = True
+                return
             ctx.emit('st = AIL_EXC; goto %s;' % ctx.cur_err_target())
             ctx.uses_st = True
             return
@@ -6220,10 +6236,18 @@ class Compiler:
                 if h.type is not None and not isinstance(h.type, ast.Tuple):
                     self.set_kind(h.name, 'instance:' + h.type.id if h.type.id in self.classes
                                  else None, ctx)
+            keeps = any(isinstance(n, ast.Raise) and n.exc is None
+                        for b in h.body for n in ast.walk(b))
+            if keeps:
+                hs = tuple(ctx.slot_expr(ctx.new_slot()) for _ in range(3))
+                ctx.emit('%s = cx->exc.cls; %s = cx->exc.msg; %s = cx->exc.value;' % hs)
+                ctx.reraise_stack.append({'slots': hs})
             ctx.emit('ail_exc_clear(cx);')
             ctx.emit('st = AIL_OK;')
             ctx.uses_st = True
             self.block(h.body, ctx)
+            if keeps:
+                ctx.reraise_stack.pop()
             if has_finally:
                 ctx.emit('comp = AIL_COMPLETE_NORMAL;')
             ctx.indent -= 1
@@ -6260,7 +6284,14 @@ class Compiler:
             sc, sm, sv = (ctx.slot_expr(ctx.new_slot()) for _ in range(3))
             ctx.emit('ail_st %s = st; (void)%s;' % (fin_st, fin_st))
             ctx.emit('%s = cx->exc.cls; %s = cx->exc.msg; %s = cx->exc.value;' % (sc, sm, sv))
+            fkeeps = any(isinstance(n, ast.Raise) and n.exc is None
+                         for b in node.finalbody for n in ast.walk(b))
+            if fkeeps:
+                ctx.reraise_stack.append({'slots': (sc, sm, sv),
+                                          'cond': 'comp == AIL_COMPLETE_EXC'})
             self.block(node.finalbody, ctx)
+            if fkeeps:
+                ctx.reraise_stack.pop()
             ctx.emit('switch (comp) {')
             ctx.indent += 1
             if ctx.finally_stack:

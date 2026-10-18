@@ -26378,6 +26378,8 @@ def _piece(p, want):
         text = _filert.file_exception(text, 'FILECORE' in want)
         if 'PROCEXC' in want:
             text = _filert.proc_exception(text)
+    elif p in _filert.LEGACY_EDITS and 'FILEEXC' in want:
+        text = _filert.legacy_errno(p, text)
     if p == 'IREXC':
         return text.replace('/*IRPAR*/', 'if (ail_par_cur) ail_par_trap(NULL, code);' if 'PAR' in want else '')
     return _parallel_die(text) if p == 'DIE' and 'PAR' in want else text
