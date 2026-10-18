@@ -1,0 +1,50 @@
+```python
+import sys
+from dataclasses import dataclass
+
+@dataclass
+class Account:
+    balance: int
+
+def process(acc: Account, line: str) -> None:
+    parts = line.split()
+    if len(parts) == 0:
+        return
+    cmd = parts[0]
+    if cmd == "deposit":
+        if len(parts) != 2:
+            print("error: unknown command")
+            return
+        try:
+            n = int(parts[1])
+        except ValueError:
+            print("error: unknown command")
+            return
+        acc.balance += n
+    elif cmd == "withdraw":
+        if len(parts) != 2:
+            print("error: unknown command")
+            return
+        try:
+            n = int(parts[1])
+        except ValueError:
+            print("error: unknown command")
+            return
+        if n > acc.balance:
+            print("error: insufficient funds")
+        else:
+            acc.balance -= n
+    elif cmd == "balance":
+        print("balance", acc.balance)
+    else:
+        print("error: unknown command")
+
+def main() -> int:
+    acc = Account(0)
+    for line in sys.stdin:
+        process(acc, line)
+    return 0
+
+if __name__ == "__main__":
+    main()
+```

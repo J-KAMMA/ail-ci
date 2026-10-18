@@ -1,0 +1,43 @@
+```python
+import sys
+
+LOWER = "abcdefghijklmnopqrstuvwxyz"
+UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+def shift_line(line: str, k: int) -> str:
+    out: str = ""
+    i: int = 0
+    n: int = len(line)
+    while i < n:
+        ch: str = line[i]
+        pos: int = LOWER.find(ch)
+        if pos >= 0:
+            out += LOWER[(pos + k) % 26]
+        else:
+            upos: int = UPPER.find(ch)
+            if upos >= 0:
+                out += UPPER[(upos + k) % 26]
+            else:
+                out += ch
+        i += 1
+    return out
+
+def main() -> int:
+    first: bool = True
+    k: int = 0
+    for line in sys.stdin:
+        if first:
+            k = int(line.strip())
+            first = False
+        else:
+            text: str = line
+            if len(text) > 0 and text[-1] == "\n":
+                text = text[:-1]
+            if len(text) > 0 and text[-1] == "\r":
+                text = text[:-1]
+            print(shift_line(text, k))
+    return 0
+
+if __name__ == "__main__":
+    main()
+```

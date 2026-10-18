@@ -1,0 +1,27 @@
+```
+fn fib_mod(n: int, m: int) -> int {
+    let a = 0;
+    let b = 1;
+    let i = 0;
+    while i < n {
+        let t = (a + b) % m;
+        a = b;
+        b = t;
+        i += 1;
+    }
+    return a % m;
+}
+
+fn main() -> int {
+    for line in sys.stdin {
+        let s = line.strip();
+        if len(s) > 0 {
+            let f = s.split();
+            let n = int(f[0]);
+            let m = int(f[1]);
+            print(fib_mod(n, m));
+        }
+    }
+    return 0;
+}
+```

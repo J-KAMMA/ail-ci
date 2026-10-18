@@ -1,0 +1,40 @@
+```
+fn main() -> int {
+    let limit = 100000;
+    let sieve: list[int] = [];
+    let i = 0;
+    while i <= limit {
+        sieve.append(1);
+        i += 1;
+    }
+    sieve[0] = 0;
+    sieve[1] = 0;
+    let p = 2;
+    while p * p <= limit {
+        if sieve[p] == 1 {
+            let q = p * p;
+            while q <= limit {
+                sieve[q] = 0;
+                q += p;
+            }
+        }
+        p += 1;
+    }
+    let count: list[int] = [];
+    let c = 0;
+    let j = 0;
+    while j <= limit {
+        c += sieve[j];
+        count.append(c);
+        j += 1;
+    }
+    for line in sys.stdin {
+        let s = line.strip();
+        if len(s) > 0 {
+            let n = int(s);
+            print(count[n]);
+        }
+    }
+    return 0;
+}
+```

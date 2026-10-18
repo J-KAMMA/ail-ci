@@ -1,0 +1,35 @@
+```ail
+# word_freq: lower-case every word, print counts by count desc, word asc
+fn main() -> int {
+    let counts: dict[str, int] = {};
+    for line in sys.stdin {
+        let parts = line.split();
+        for part in parts {
+            let low = part.lower();
+            counts[low] = counts.get(low, 0) + 1;
+        }
+    }
+    let words: list[str] = [];
+    for w0 in counts {
+        words.append(w0);
+    }
+    words.sort();
+    let rank: dict[str, int] = {};
+    let n1 = 0;
+    for w1 in words {
+        rank[w1] = n1;
+        n1 += 1;
+    }
+    let idx: list[int] = [];
+    let n2 = 0;
+    for w2 in words {
+        idx.append(n2);
+        n2 += 1;
+    }
+    idx.sort(key=lambda t: (-counts[words[t]], rank[words[t]]));
+    for pos in idx {
+        print(words[pos], counts[words[pos]]);
+    }
+    return 0;
+}
+```

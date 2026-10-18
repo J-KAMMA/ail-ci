@@ -1,0 +1,19 @@
+```python
+import sys
+
+def main() -> int:
+    nums: list[int] = []
+    for line in sys.stdin:
+        for tok in line.split():
+            nums.append(int(tok))
+    nums.sort()
+    seen: set[int] = set()
+    for x in nums:
+        if x not in seen:
+            seen.add(x)
+            print(x)
+    return 0
+
+if __name__ == "__main__":
+    main()
+```
