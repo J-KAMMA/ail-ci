@@ -156,6 +156,9 @@ class BytearrayRefTests(unittest.TestCase):
         self.assertIn('ail_bytearray_retain_slow(ail_bytearray *B)', c)
         self.assertIn('static __attribute__((noinline)) void ail_bytearray_release(ail_bytearray *B)', c)
         self.assertIn('static inline void ail_bytearray_store(', c)
+        # the entry of a function that retains a bytearray parameter says the arrays are live once, after the retains
+        # (regex_redux-2 count_alt: without it the second array's retain store hides the first array's refs test in the loop)
+        self.assertRegex(c, r'ail_bytearray_retain\(v_b\);\s+ail_bytearray_live\(v_b\);')
 
     def test_sanitizers_report_nothing(self):
         for tag in ('legacy', 'ir'):

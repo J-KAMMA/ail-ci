@@ -21,6 +21,8 @@ with open(os.path.join(HERE, 'ailfile_core.h'), 'r', encoding='utf-8') as _f:
     CORE = _f.read()
 with open(os.path.join(HERE, 'ailproc_core.h'), 'r', encoding='utf-8') as _f:      # stage G8
     PROCCORE = _f.read()
+with open(os.path.join(HERE, 'ailpath_core.h'), 'r', encoding='utf-8') as _f:      # stage G10
+    PATHCORE = _f.read()
 
 # ---------------------------------------------------------------------------------------------
 # Typed runtime: exception codes 11..16 (FileNotFoundError, PermissionError, IsADirectoryError,
@@ -34,7 +36,7 @@ FILE_EXC_CODES = {name: 11 + i for i, name in enumerate(FILE_EXC_NAMES)}
 EXC_EDITS = (
     ('AIL_EXC_OVERFLOW = 10 };',
      'AIL_EXC_OVERFLOW = 10, AIL_EXC_FNF = 11, AIL_EXC_PERM = 12, AIL_EXC_ISDIR = 13, AIL_EXC_EXIST = 14,\n'
-     '       AIL_EXC_NOTDIR = 15, AIL_EXC_UNSUP = 16 };'),
+     '       AIL_EXC_NOTDIR = 15, AIL_EXC_UNSUP = 16 };\n#define AIL_FILE_EXC_CODES 1'),
     ('"AssertionError", "OverflowError"};',
      '"AssertionError", "OverflowError", "FileNotFoundError", "PermissionError", "IsADirectoryError",\n'
      '         "FileExistsError", "NotADirectoryError", "UnsupportedOperation"};'),
@@ -70,6 +72,67 @@ def proc_exception(text):
     for old, new in PROC_EXC_EDITS:
         if text.count(old) != 1:
             raise AssertionError('DIE block changed; update filert.PROC_EXC_EDITS: ' + old)
+        text = text.replace(old, new)
+    return text
+
+
+# C23: the older whole-file builtins (open(path).read(), read_bytes, file_size, list_dir, the binary file
+# handle) used to raise the plain OSError for every failure, which `except FileNotFoundError` had to take
+# so that a missing file was still caught.  With the OS-family codes present they now raise the class of
+# their errno, exactly like the file layer (ailt_fraise); spliced into those parts only with FILEEXC.
+_FAIL_HELPER = """/* C23: the exception class of an errno, as the file layer's ailt_fraise picks it. */
+static void ail_file_fail(int err) {
+    switch (err) {
+    case ENOENT: ail_raise_named(AIL_EXC_FNF);
+    case EACCES: case EPERM: ail_raise_named(AIL_EXC_PERM);
+    case EISDIR: ail_raise_named(AIL_EXC_ISDIR);
+    case EEXIST: ail_raise_named(AIL_EXC_EXIST);
+    case ENOTDIR: ail_raise_named(AIL_EXC_NOTDIR);
+    default: break;
+    }
+    ail_raise_named(AIL_EXC_OS);
+}
+"""
+LEGACY_EDITS = {
+    'STR': (
+        ('/* mode: 0 read, 1 replace, 2 append; binary on every platform. */\n',
+         _FAIL_HELPER + '/* mode: 0 read, 1 replace, 2 append; binary on every platform. */\n', 1),
+        ('    free(name);\n    if (!f) ail_raise_named(AIL_EXC_OS);\n',
+         '    int open_errno = errno;\n    free(name);\n    if (!f) ail_file_fail(open_errno);\n', 1),
+        ('if (ferror(it->file)) ail_raise_named(AIL_EXC_OS);', 'if (ferror(it->file)) ail_file_fail(errno);', 1),
+        ('if (next == EOF && ferror(it->file)) ail_raise_named(AIL_EXC_OS);',
+         'if (next == EOF && ferror(it->file)) ail_file_fail(errno);', 1),
+        ('if (ferror(f)) { fclose(f); free(buf); ail_raise_named(AIL_EXC_OS); }',
+         'if (ferror(f)) { int read_errno = errno; fclose(f); free(buf); ail_file_fail(read_errno); }', 1),
+    ),
+    'FILESIZE': (
+        ('    int ok = stat(name, &info) == 0;\n    free(name);\n    if (!ok || !S_ISREG(info.st_mode)) ail_raise_named(AIL_EXC_OS);\n',
+         '    int ok = stat(name, &info) == 0;\n    int stat_errno = ok ? 0 : errno;\n    free(name);\n'
+         '    if (!ok) ail_file_fail(stat_errno);\n'
+         '    if (!S_ISREG(info.st_mode)) ail_file_fail(S_ISDIR(info.st_mode) ? EISDIR : 0);\n', 1),
+    ),
+    'BINARYFILE': (
+        ('    free(name);\n    if (!F->fp) { free(F); ail_raise_named(AIL_EXC_OS); }\n',
+         '    int open_errno = errno;\n    free(name);\n    if (!F->fp) { free(F); ail_file_fail(open_errno); }\n', 1),
+        ('    int valid = _fstat64(_fileno(F->fp), &info) == 0 && (info.st_mode & _S_IFMT) != _S_IFDIR;\n',
+         '    int is_dir = 0;\n'
+         '    int valid = _fstat64(_fileno(F->fp), &info) == 0 && !(is_dir = (info.st_mode & _S_IFMT) == _S_IFDIR);\n', 1),
+        ('    int valid = fstat(fileno(F->fp), &info) == 0 && !S_ISDIR(info.st_mode);\n',
+         '    int is_dir = 0;\n    int valid = fstat(fileno(F->fp), &info) == 0 && !(is_dir = S_ISDIR(info.st_mode));\n', 1),
+        ('    if (!valid) { fclose(F->fp); free(F); ail_raise_named(AIL_EXC_OS); }\n',
+         '    if (!valid) { fclose(F->fp); free(F); ail_file_fail(is_dir ? EISDIR : 0); }\n', 1),
+    ),
+    'DIRPATH': (
+        ('    if (!ail_is_dir(path)) ail_raise_named(AIL_EXC_OS);\n',
+         '    if (!ail_is_dir(path)) ail_file_fail(ail_path_exists(path) ? ENOTDIR : ENOENT);\n', 1),
+    ),
+}
+
+
+def legacy_errno(part, text):
+    for old, new, count in LEGACY_EDITS.get(part, ()):
+        if text.count(old) != count:
+            raise AssertionError('%s block changed; update filert.LEGACY_EDITS: %s' % (part, old))
         text = text.replace(old, new)
     return text
 
@@ -247,8 +310,16 @@ static ail_str ailt_sp_repr(ail_sarena *A, ail_str s) { ailf_buf b; AILT_CHECK(a
 static ail_str ailt_sp_reprb(ail_sarena *A, ail_bytes d) { ailf_buf b; AILT_CHECK(ailp_repr_bytes(d.p, d.n, &b)); return ailt_adopt_str(A, &b); }
 '''
 
+TYPED_PATH = r'''
+/* ---- G10 typed adapters: the pathlib primitives of filelib.PATHS over ailpath_core.h ---- */
+static int64_t ailt_pp_staterr(ail_str p) { return ailf_stat_errno(p.p, p.n); }
+static ail_str ailt_pp_readlink(ail_sarena *A, ail_str p) { ailf_buf b; AILT_CHECK(ailf_readlink(p.p, p.n, &b)); return ailt_adopt_str(A, &b); }
+static ail_str ailt_pp_repr(ail_sarena *A, ail_str s) { ailf_buf b; AILT_CHECK(ailf_repr_buf(s.p, s.n, &b)); return ailt_adopt_str(A, &b); }
+'''
+
+_TYPED_BY_KIND = {'file': TYPED, 'proc': TYPED_PROC, 'path': TYPED_PATH}
 for _name in filelib.PRIMS:
-    assert ('ailt_' + filelib.c_name(_name) + '(') in (TYPED_PROC if filelib.is_proc_prim(_name) else TYPED), _name
+    assert ('ailt_' + filelib.c_name(_name) + '(') in _TYPED_BY_KIND[filelib.prim_kind(_name)], _name
 
 
 def register(ORDER, SOURCE, REQUIRES):
@@ -257,7 +328,9 @@ def register(ORDER, SOURCE, REQUIRES):
             ('FILECORE', CORE, ['MONOTONICHEAD', 'TYPES', 'DIE']),
             ('FILEIO', TYPED, ['FILECORE', 'FILEEXC', 'STR', 'BYTES', 'DIE']),
             ('PROCCORE', PROCCORE, ['FILECORE']),
-            ('PROCIO', TYPED_PROC, ['PROCCORE', 'FILEIO', 'PROCEXC'])):
+            ('PROCIO', TYPED_PROC, ['PROCCORE', 'FILEIO', 'PROCEXC']),
+            ('PATHCORE', PATHCORE, ['FILECORE']),
+            ('PATHIO', TYPED_PATH, ['PATHCORE', 'FILEIO'])):
         ORDER.append(name)
         SOURCE[name] = text
         REQUIRES[name] = requires
@@ -390,15 +463,22 @@ GENERAL_SPEC_PROC = {
 }
 
 
-def general_wrappers(proc=False):
+GENERAL_SPEC_PATH = {
+    'pp_staterr': ('plain', 'ailf_stat_errno({s0})'),
+    'pp_readlink': ('buf', 'ailf_readlink({s0}, &b)'),
+    'pp_repr': ('buf', 'ailf_repr_buf({s0}, &b)'),
+}
+
+
+def general_wrappers(which='file'):
     out = []
     for prim, (ret, kinds) in filelib.PRIMS.items():
         cname = filelib.c_name(prim)
-        if filelib.is_proc_prim(prim) != proc:
+        if filelib.prim_kind(prim) != which:
             continue
         if 'bytes' in kinds or ret == 'bytes':
             continue
-        form, expr = (GENERAL_SPEC_PROC if proc else GENERAL_SPEC)[cname]
+        form, expr = {'file': GENERAL_SPEC, 'proc': GENERAL_SPEC_PROC, 'path': GENERAL_SPEC_PATH}[which][cname]
         params = ''.join(', ail_obj a%d' % i for i in range(len(kinds)))
         lines = ['static ail_st ailo_%s(ail_ctx *cx, ail_obj *out%s) {' % (cname, params), '    ail_st st = AIL_OK;',
                  '    ailf_buf b = {0};']
@@ -445,7 +525,8 @@ def general_wrappers(proc=False):
 
 
 GENERAL = GENERAL_HEAD + general_wrappers()
-GENERAL_PROC = general_wrappers(True)
+GENERAL_PROC = general_wrappers('proc')
+GENERAL_PATH = general_wrappers('path')
 
 
 def general_text():
@@ -456,3 +537,8 @@ def general_text():
 def general_proc_text():
     """The C the general runtime needs once a program reaches a process primitive (after general_text())."""
     return '\n/* ---- G8: process core ---- */\n' + PROCCORE + GENERAL_PROC
+
+
+def general_path_text():
+    """The C the general runtime needs once a program reaches a pathlib primitive (after general_text())."""
+    return '\n/* ---- G10: pathlib core ---- */\n' + PATHCORE + GENERAL_PATH

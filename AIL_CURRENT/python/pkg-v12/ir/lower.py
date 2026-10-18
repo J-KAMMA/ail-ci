@@ -517,7 +517,15 @@ class Lowering(TextLowering):
 
     def assign_ba(self, name, node):
         """`b = bytearray()` / `b = bytearray(n)`: the place takes a fresh object (the old one is
-        released). Any other source would be a second name for an object or a conversion."""
+        released). `b = a` for a bytearray local or parameter `a`: the place takes a second reference to
+        a's object (`ba.copyref`; one object with two names, which is what Python and the legacy path
+        mean). Any other source would be a conversion or a reference read from a field."""
+        if isinstance(node, ast.Name) and node.id != name and (
+                self.is_ba_name(node.id) or (node.id in self.params and self.params[node.id].type == BYTEARRAY)):
+            self.b.emit('ba.copyref', [self.places[name], self.container(node)])
+            return
+        if isinstance(node, ast.Name) and node.id == name and self.is_ba_name(name):
+            return              # `b = b`
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in self.ctx.funcs \
                 and node.func.id not in self.places and node.func.id not in self.params:
             self.user_call(node.func.id, node, False, ba_dst=self.places[name])

@@ -336,6 +336,8 @@ _op('list.copy', 2, 2)
 # S3a: owned bytearrays (one reference-counted object per owner place; `load` of the place is a borrow)
 _op('ba.new', 2, 2)               # (place, length): the place now holds a fresh zero-filled bytearray
 _op('ba.drop', 1, 1)              # (place): release the owner's reference
+_op('ba.copyref', 2, 2)           # (place, bytearray): `b = a`, the place shares another bytearray (retain it,
+                                  # release the old one): one object, two names, as in Python and the legacy path
 _op('ba.clear', 1, 1)             # (bytearray): `b.clear()`
 _op('ba.call', 1, None)           # (place, args...): the place adopts the bytearray a callee returns
 _op('ba.write', 1, 1)             # (bytearray): `write_stdout_bytes(b)`

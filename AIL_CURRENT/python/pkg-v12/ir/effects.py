@@ -207,7 +207,9 @@ def instr_effects(ins, fn, program, places=None, defs=None, summaries=None):
         else:
             base = UNKNOWN
         return base | Effects(writes=['Local(%s,%s)' % (fn.name, names.get(ins.operands[0], '?'))])
-    if op in ('ba.new', 'ba.drop'):
+    if op in ('ba.new', 'ba.drop', 'ba.copyref'):
+        # (the contents of every loaded bytearray are `Elem(Any)`, so a second name for one needs no
+        # alias class of its own: a write through either name conflicts with a read through the other)
         names = places if places is not None else place_names(fn)
         return Effects(writes=['Local(%s,%s)' % (fn.name, names.get(ins.operands[0], '?'))])
     if op == 'ba.clear':

@@ -23629,6 +23629,9 @@ static inline __attribute__((always_inline)) ail_bytearray *ail_bytearray_retain
     if (!B) __builtin_unreachable();
     return ail_bytearray_retain_slow(B);
 }
+static inline __attribute__((always_inline)) void ail_bytearray_live(const ail_bytearray *B) {
+    if (!B->refs) __builtin_unreachable();
+}
 static __attribute__((noinline)) void ail_bytearray_release(ail_bytearray *B) {
     if (!B) return;
     if (__builtin_expect(B->refs > 1, 1)) { --B->refs; return; }
@@ -23721,7 +23724,9 @@ static void ail_bytearray_extend(ail_bytearray *B, ail_bytes value) {
     if (!value.n) return;
     int64_t offset = -1;
     uintptr_t base = (uintptr_t)B->p, source = (uintptr_t)value.p;
-    if (B->p && source >= base && source - base <= (uintmax_t)B->cap) {
+    /* `< cap`, not `<= cap`: a separate allocation can start exactly where B's block ends (the
+       macOS allocator packs small blocks, so a received chunk often does) and is not an alias. */
+    if (B->p && source >= base && source - base < (uintmax_t)B->cap) {
         uintmax_t delta = source - base;
         if (delta > (uintmax_t)B->n || (uintmax_t)value.n > (uintmax_t)B->n - delta)
             ail_die("invalid bytearray alias");
@@ -23897,7 +23902,7 @@ static void ail_bytearray_extend_blist(ail_barena *A, ail_bytearray *B, const ai
     int overlaps_header = value.n && (source >= header
         ? source - header < sizeof *B : (uintmax_t)value.n > header - source);
     int overlaps_payload = value.n && B->p && (source >= base
-        ? source - base <= (uintmax_t)B->cap : (uintmax_t)value.n > base - source);
+        ? source - base < (uintmax_t)B->cap : (uintmax_t)value.n > base - source);
     if (overlaps_header || overlaps_payload) value = ail_blist_get(A, items, index);
     ail_bytearray_extend(B, value);
 }
@@ -25992,8 +25997,11 @@ static double ail_rand_gauss(double mu, double sigma) {
     } else {
         double x2pi = ail_rand_random() * (2.0 * 3.141592653589793);
         double g2rad = sqrt(-2.0 * log(1.0 - ail_rand_random()));
-        z = cos(x2pi) * g2rad;
-        ail_rand_gauss_next = sin(x2pi) * g2rad;
+        /* cos and sin of one argument: clang on Darwin merges the pair into __sincos_stret, whose cos can
+           differ from libm's cos by an ulp (CPython calls cos alone). Two volatile reads keep them apart. */
+        volatile double x_cos = x2pi, x_sin = x2pi;
+        z = cos(x_cos) * g2rad;
+        ail_rand_gauss_next = sin(x_sin) * g2rad;
         ail_rand_have_gauss = 1;
     }
     volatile double scaled = z * sigma;
@@ -26370,6 +26378,8 @@ def _piece(p, want):
         text = _filert.file_exception(text, 'FILECORE' in want)
         if 'PROCEXC' in want:
             text = _filert.proc_exception(text)
+    elif p in _filert.LEGACY_EDITS and 'FILEEXC' in want:
+        text = _filert.legacy_errno(p, text)
     if p == 'IREXC':
         return text.replace('/*IRPAR*/', 'if (ail_par_cur) ail_par_trap(NULL, code);' if 'PAR' in want else '')
     return _parallel_die(text) if p == 'DIE' and 'PAR' in want else text
