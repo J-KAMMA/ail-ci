@@ -63,7 +63,7 @@ class _Checker(object):
         base = t.pointee if t.is_place else t
         if self.stage == 'S0' and base not in S0_TYPES:
             self.err(where, 'type %s is not in the S0 subset (i1, i64, f64 and places of them)' % t)
-        elif self.stage == 'S1' and base not in S1_TYPES and I.rec_elem(base) is None and base != I.DICT_II and not (
+        elif self.stage == 'S1' and base not in S1_TYPES and I.rec_elem(base) is None and base != I.DICT_II and base != I.PLIST and not (
                 base.head == 'obj' and base.args[0].head == 'class'):
             self.err(where, 'type %s is not in the S1 subset' % t)
 
@@ -681,6 +681,28 @@ class _Checker(object):
         self.nresults(ins, where, 0)
         self.want(where, self._is_ba(ins.operands[0]), 'ba.write takes a bytearray')
 
+    def op_field_plist(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 1):
+            o = ins.operands[0].type
+            self.want(where, o.head == 'obj' and o.args[0].head == 'class', 'field.plist of a non-object')
+            self.want(where, ins.result.type == I.PLIST, 'field.plist yields a borrow of a list of str')
+            self.want(where, isinstance(ins.attrs.get('name'), str), 'field.plist needs a name')
+
+    def op_plist_len(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 1):
+            self.want(where, ins.operands[0].type == I.PLIST and ins.result.type == I.I64, 'plist.len takes a plist and yields i64')
+
+    def op_plist_get(self, ins, scope, stack, where, top):
+        self._index_mode(ins, where)
+        if self.nresults(ins, where, 1):
+            self.want(where, ins.operands[0].type == I.PLIST and ins.operands[1].type == I.I64
+                      and ins.result.type == I.STRV, 'plist.get takes (plist, i64) and yields a str')
+
+    def op_plist_has(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 1):
+            self.want(where, ins.operands[0].type == I.PLIST and ins.operands[1].type == I.STRV
+                      and ins.result.type == I.I1, 'plist.has takes (plist, str) and yields i1')
+
     def op_field_list(self, ins, scope, stack, where, top):
         if self.nresults(ins, where, 1):
             o = ins.operands[0].type
@@ -734,6 +756,14 @@ class _Checker(object):
             elem = self._span_elem(ins.operands[0])
             self.want(where, elem is not None and ins.operands[1].type == I.I64 and ins.result.type == elem,
                       'span.get takes (span, i64) and yields the element')
+
+    def op_spec_get(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 1):
+            c, i, g = ins.operands
+            elem = self._list_elem(c) if c.type.head == 'obj' else self._span_elem(c)
+            self.want(where, elem in (I.I64, I.F64) and c.type != I.T('span', I.T('u8')) and i.type == I.I64
+                      and g.type == I.I1 and ins.result.type == elem,
+                      'spec.get takes (int or float list or span, i64, i1) and yields the element')
 
     def op_span_set(self, ins, scope, stack, where, top):
         self._index_mode(ins, where)

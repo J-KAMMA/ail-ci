@@ -6762,11 +6762,11 @@ def _str_value(node, ctx, *, owned_join_return=False):
             # this function's arena until it returns (4 million sort-key and argument copies made
             # an LLM-written ranking program hold 160 MB).
             ctx.parts.update(('STR', 'SLIST'))
-            return ('({ %s; int64_t _index = %s; ail_slist_get(&%s->f_%s, _index); })'
+            return ('({ %s; int64_t _index = %s; ail_pslist_get(&%s->f_%s, _index); })'
                     % (capture, index, owner, node.value.attr))
         ctx.parts.update(('STR', 'STRRET', 'SLIST'))
         return ('({ %s; int64_t _index = %s; ail_str_adopt(&%s, ail_str_return_owned('
-                'ail_slist_get(&%s->f_%s, _index))); })'
+                'ail_pslist_get(&%s->f_%s, _index))); })'
                 % (capture, index, ctx.sarena(), owner, node.value.attr))
     if _is_slist_call_index(node, ctx):
         if not _is_slist_call(node.value, ctx):
@@ -12401,7 +12401,7 @@ def _field_list_contains(item, holder, ctx, negate):
     owner_kind, _ = _field_info(holder, ctx)
     capture, owner = _owner_capture(holder.value, owner_kind, ctx)
     ctx.parts.add(kind.upper())
-    has = 'ail_slist_has' if kind == SLIST else 'ail_list_has'
+    has = 'ail_pslist_has' if kind == SLIST else 'ail_list_has'
     return '({ %s _item = %s; %s; (%s(&%s->f_%s, _item) %s 0); })' % (
         ctype, value, capture, has, owner, holder.attr, '==' if negate else '!=')
 
@@ -12418,7 +12418,7 @@ def _field_list_count(node, ctx):
     ctype, value = _field_list_item(node.args[0], kind, ctx, 'count()')
     ctx.parts.add(kind.upper() + 'COUNT')
     return '({ %s; %s _item = %s; ail_%s_count(&%s->f_%s, _item); })' % (
-        capture, ctype, value, kind, owner, field.attr)
+        capture, ctype, value, 'pslist' if kind == SLIST else kind, owner, field.attr)
 
 
 def _contains(item, holder, ctx, negate):
@@ -12513,7 +12513,7 @@ def _contains(item, holder, ctx, negate):
         owner_kind, _ = _field_info(holder, ctx)
         needle = _map_inline(lambda: _str_value(item, ctx), ctx)
         capture, owner = _owner_capture(holder.value, owner_kind, ctx, True)
-        r = '({ ail_str _item = %s; %s; ail_slist_has(&%s->f_%s, _item); })' % (needle, capture, owner, holder.attr)
+        r = '({ ail_str _item = %s; %s; ail_pslist_has(&%s->f_%s, _item); })' % (needle, capture, owner, holder.attr)
         return '(%s == 0)' % r if negate else '(%s != 0)' % r
     if (isinstance(holder, ast.Name) and holder.id in ctx.skeys and _is_str_expr(item, ctx)):
         # `k in d` / `k in seen` where `d`/`seen` is keyed by str (STAB, mechanisms 4/5) -- content
@@ -14482,7 +14482,10 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
                 if isinstance(arg, ast.Name):
                     groups[index] = [ctx.cname(arg.id)]
                 else:
-                    groups[index] = ['%s->f_%s' % (_owner_capture(arg.value, _etype(arg.value, ctx), ctx)[1], arg.attr)]
+                    # a field is a packed string list: a lent field turns it into the wide (spine) mode
+                    ctx.parts.add('SFIELDMUT')
+                    ctx.has_try = True
+                    groups[index] = ['ail_pslist_borrow(&%s->f_%s)' % (_owner_capture(arg.value, _etype(arg.value, ctx), ctx)[1], arg.attr)]
                 if len(ctx.pre) != pre_count:
                     raise Unsupported('arguments to %s() require statement temporaries; bind them '
                                       'before the call to preserve evaluation order' % fname)
@@ -15201,7 +15204,7 @@ def _call(node, ctx):
                 # a row of a nested list: the list field of its row object
                 if _field_kind(each, ctx) != {'L': LIST, 'F': FLIST, 'S': SLIST}[k]:
                     raise Unsupported('%s takes a list field of its kind' % f)
-                args.append(_attr_read(each, ctx))
+                args.append(_slist_snapshot(_attr_read(each, ctx), ctx)[1] if k == 'S' else _attr_read(each, ctx))
             elif not isinstance(each, ast.Name):
                 raise Unsupported('%s takes a container variable' % f)
             elif k == 'L':
@@ -18711,6 +18714,16 @@ def _stmt_inner(node, ctx, ind):
             destination = ctx.declare(t.id, SLIST)
             return _flush(ctx, pad) + ('%s(void)%s;\n%sail_slist_free(&%s); %s = %s; %s = (ail_slist){0};\n'
                                       % (pad, expression, pad, destination, destination, temporary, temporary))
+        if (isinstance(node.value, ast.ListComp) and node.value.generators
+                and not _is_sys_stdin_bare(node.value.generators[0].iter)
+                and _listcomp_kind(node.value, ctx) == SLIST):
+            # `names = [f(x) for x in xs]`: the comprehension is built into a private temp that nothing else names, so
+            # the temp itself moves into the local (it used to be copied into one temp, and again into a second one,
+            # before the move: two spines of views for every str column of a keyed sort)
+            temporary = _listcomp_into_temp(node.value, ctx)
+            destination = ctx.declare(t.id, SLIST)
+            return _flush(ctx, pad) + ('%sail_slist_free(&%s); %s = %s; %s = (ail_slist){0};\n'
+                                      % (pad, destination, destination, temporary, temporary))
         if (_is_slist_expr(node.value, ctx) and not _is_slist_call(node.value, ctx)
                 and (known == SLIST or not isinstance(node.value, ast.Name))):
             source = _slist_arg_c(node.value, ctx)
@@ -23847,9 +23860,12 @@ def _for_inner_impl(node, ctx, ind):
                        '(ail_die("integer overflow"), 0) : ++%s) : 0)' % (index, _olist_helper(kind, 'len'), receiver, counter, counter))
             bind_number = '%s    %s = %s;\n' % (pad, number, counter)
         head = '%sfor (%s = %s; %s; %s) {\n' % (pad, index, initial, condition, update)
-        bind = _obj_store(target, '(%s *)%s(%s, %s)' % (
-            _ref_ctype(_olist_element_kind(kind), ctx), _olist_helper(kind, 'get'), receiver, index),
-            _olist_element_kind(kind), ctx)
+        element_c = '(%s *)%s(%s, %s)' % (_ref_ctype(_olist_element_kind(kind), ctx), _olist_helper(kind, 'get'),
+                                           receiver, index)
+        if element.id in ctx.borrowed_aliases and wrapper is None:
+            bind = '%s = %s' % (target, element_c)      # the list outlives the loop (_mark_borrowed_aliases)
+        else:
+            bind = _obj_store(target, element_c, _olist_element_kind(kind), ctx)
         return prefix + head + bind_number + '%s    %s;\n' % (pad, bind) + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n'
     # Any `for` re-binds its target: a name that held <=1 code point from an earlier
     # `for c in s` must not keep that mark through a different loop. The str branch
@@ -26015,28 +26031,102 @@ def _bind_object_types(fn, ctx):
 
 _ALIAS_SAFE_CALLS = frozenset((
     'len', 'abs', 'min', 'max', 'int', 'float', 'ord', 'chr', 'str', 'range', 'round', 'bool', 'sum',
-    'print', 'sqrt', 'floor', 'ceil', 'sin', 'cos', 'exp', 'log', 'pow', 'hex', 'bin'))
+    'print', 'sqrt', 'floor', 'ceil', 'sin', 'cos', 'exp', 'log', 'pow', 'hex', 'bin',
+    'read_bytes', 'read_stdin_bytes', 'write_stdout_bytes', 'bytes', 'bytearray', 'set', 'dict', 'list', 'tuple',
+    'sorted', 'enumerate', 'zip', 'any', 'all', '_ail_sort_perm', '_ail_sort_apply'))
 _ALIAS_SAFE_METHODS = frozenset((
     'append', 'extend', 'insert', 'reverse', 'join', 'split', 'strip', 'lower', 'upper',
     'startswith', 'endswith', 'find', 'get', 'count', 'index', 'replace'))
+# Methods that take an element out of a container (and so can drop the last reference to a struct): a call of one is
+# safe only on a receiver that cannot hold structs.
+_ALIAS_RELEASING_METHODS = frozenset(('pop', 'clear', 'remove', 'popitem', 'popleft', 'discard_all', '__delitem__'))
+
+
+def _borrow_plain_kind(kind):
+    """A kind that holds no struct object: a value that cannot reach, keep or release one."""
+    return not (_is_obj_kind(kind) or _is_olist_kind(kind) or callable_types.valid(kind) or kind is None)
+
+
+def _borrow_receiver_plain(node, ctx):
+    """Whether the receiver of a container method or the base of an element store provably holds no struct object
+    (an int/float/str/bytes list, a dict, a set, a str, ...): the kinds are read off the annotations, the parameters and the
+    class fields; anything else is taken to be a list of structs."""
+    if isinstance(node, ast.Name):
+        n = node.id
+        if n in ctx.kind:
+            return _borrow_plain_kind(ctx.kind[n])
+        if n in ctx.local_annotations:
+            return _borrow_plain_kind(ctx.local_annotations[n])
+        return bool(n in ctx.strlist or n in ctx.flist or n in ctx.skeys or n in ctx.bkeys or n in ctx.nlist
+                    or n in ctx.ndict)
+    if isinstance(node, ast.Attribute):
+        return _borrow_plain_kind(_field_kind(node, ctx))
+    return False
+
+
+def _borrow_user_methods(ctx):
+    names = set()
+    for info in ctx.classes.values():
+        names.update(info.methods)
+    return names
+
+
+def _borrow_call_safe(node, ctx, methods):
+    """Whether this call cannot drop the last reference to a struct held by the calling function's lists."""
+    func = node.func
+    if isinstance(func, ast.Name):
+        name = func.id
+        if name in ctx.funcs:
+            params, result = ctx.funcs[name]
+            # a function that is given no struct, no list of structs and no callable and returns none cannot reach one
+            # of this function's lists (there is no mutable global state)
+            return all(_borrow_plain_kind(k) for _, k in params) and (result is None or result == NORET
+                                                                      or _borrow_plain_kind(result))
+        if name in ctx.classes:
+            return True
+        if name in ctx.kind or name in ctx.types or name in ctx.locals:
+            return False                      # a callable held in a variable
+        return name in _ALIAS_SAFE_CALLS
+    if isinstance(func, ast.Attribute):
+        if isinstance(func.value, ast.Name) and func.value.id in ('math', 'sys'):
+            return True
+        if func.attr in methods:
+            return False                      # a user method runs code that may do anything
+        if func.attr in _ALIAS_RELEASING_METHODS:
+            return _borrow_receiver_plain(func.value, ctx)
+        return True
+    return False
+
+
+def _borrow_lambda_ok(node, parents):
+    """A `key=` lambda of a sort/min/max call whose body calls nothing but pure builtins."""
+    p = parents.get(node)
+    call = parents.get(p) if isinstance(p, ast.keyword) else None
+    if not (isinstance(p, ast.keyword) and p.arg == 'key' and isinstance(call, ast.Call)):
+        return False
+    f = call.func
+    if not (isinstance(f, ast.Attribute) and f.attr == 'sort' or isinstance(f, ast.Name) and f.id in ('sorted', 'min', 'max')):
+        return False
+    return all(isinstance(n.func, ast.Name) and n.func.id in _ALIAS_SAFE_CALLS
+               for n in ast.walk(node.body) if isinstance(n, ast.Call))
 
 
 def _mark_borrowed_aliases(fn, ctx):
     """Struct-list element locals that can be held WITHOUT a reference.
 
-    `let p = xs[i]` normally retains the element and releases the previous one in the slot, and
-    releases it again at exit: a retain, a release and a slot update per iteration. That is
-    needed only because something could drop the element while `p` still points at it. This
-    proves nothing can, for names `p` such that
+    `let p = xs[i]` (and `for p in xs`) normally retains the element and releases the previous one in the slot, and
+    releases it again at exit: a retain, a release and a slot update per iteration. That is needed only because
+    something could drop the element while `p` still points at it. This proves nothing can, for names `p` such that
 
-      * every binding of `p` is `p = xs[i]` / `p = a.xs[i]` on a plain name or a field of one,
-        and every other mention of `p` is the owner of a field access (`p.x`, `p.x = v`): `p`
-        is never passed, returned, stored, compared or aliased, so it cannot outlive a reference;
-      * the whole function runs no code that could release an element of any list: no call
-        except a few builtins, constructors and non-removing list methods, no lambda, no nested
-        def, no `del`, no store into any subscript (`xs[i] = v` releases the old element), and
-        the list the element came from is never rebound (one binding at most) and, for a field
-        list, no field of that name is ever assigned.
+      * every binding of `p` is `p = xs[i]` / `p = a.xs[i]` / `for p in xs` / `for p in a.xs` on a plain name or a field
+        of one, and every other mention of `p` is the owner of a field access (`p.x`, `p.x = v`): `p` is never
+        passed, returned, stored, compared or aliased, so it cannot outlive a reference;
+      * the whole function runs no code that could release an element of any list: no call of a function that is given
+        a struct (or a list of structs or a callable), of a user method or of a method that takes elements out
+        (`pop`, `clear`, `remove`) on a receiver that might hold structs; no `del`; no nested def; no lambda except
+        the `key=` of a sort; no store into a subscript whose base might be a list of structs (`xs[i] = v` releases the
+        old element); the list the element came from is never rebound (one binding at most, and the owner of a field
+        list as well), and, for a field list, no field of that name is ever assigned.
 
     Then the list, held by its owner for the whole call, holds every element for the whole call.
     """
@@ -26044,7 +26134,10 @@ def _mark_borrowed_aliases(fn, ctx):
     for node in ast.walk(fn):
         for child in ast.iter_child_nodes(node):
             parents[child] = node
-        if isinstance(node, (ast.Lambda, ast.Delete, ast.Global, ast.Nonlocal)):
+    for node in ast.walk(fn):
+        if isinstance(node, (ast.Delete, ast.Global, ast.Nonlocal)):
+            return set()
+        if isinstance(node, ast.Lambda) and not _borrow_lambda_ok(node, parents):
             return set()
         if node is not fn and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             return set()
@@ -26055,31 +26148,36 @@ def _mark_borrowed_aliases(fn, ctx):
             base = node.value.value
             if isinstance(base, ast.Name) or (isinstance(base, ast.Attribute) and isinstance(base.value, ast.Name)):
                 candidates.setdefault(node.targets[0].id, []).append(base)
+        elif (isinstance(node, ast.For) and isinstance(node.target, ast.Name)
+                and (isinstance(node.iter, ast.Name)
+                     or isinstance(node.iter, ast.Attribute) and isinstance(node.iter.value, ast.Name))):
+            candidates.setdefault(node.target.id, []).append(node.iter)
     if not candidates:
         return set()
+    methods = _borrow_user_methods(ctx)
     stores = {}
     for node in ast.walk(fn):
         if isinstance(node, ast.Call):
-            func = node.func
-            if isinstance(func, ast.Name):
-                if func.id in ctx.funcs or func.id not in ctx.classes and func.id not in _ALIAS_SAFE_CALLS:
-                    return set()
-            elif isinstance(func, ast.Attribute):
-                if not (func.attr in _ALIAS_SAFE_METHODS
-                        or isinstance(func.value, ast.Name) and func.value.id == 'math'):
-                    return set()
-            else:
+            if not _borrow_call_safe(node, ctx, methods):
                 return set()
         elif isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
             for target in (node.targets if isinstance(node, ast.Assign) else [node.target]):
                 for sub_target in ast.walk(target):
                     if isinstance(sub_target, ast.Subscript) and isinstance(sub_target.ctx, ast.Store):
-                        return set()
+                        if not _borrow_receiver_plain(sub_target.value, ctx):
+                            return set()
                     if isinstance(sub_target, ast.Name) and isinstance(sub_target.ctx, ast.Store):
                         stores[sub_target.id] = stores.get(sub_target.id, 0) + 1
                     if isinstance(sub_target, ast.Attribute) and isinstance(sub_target.ctx, ast.Store):
                         stores[('.', sub_target.attr)] = stores.get(('.', sub_target.attr), 0) + 1
-        elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+        elif isinstance(node, ast.For):
+            for sub_target in ast.walk(node.target):
+                if isinstance(sub_target, ast.Name):
+                    # a `for p in xs` binding counts once, like an `p = xs[i]` one; any other loop target is a rebinding
+                    ok = (sub_target is node.target and sub_target.id in candidates
+                          and any(b is node.iter for b in candidates[sub_target.id]))
+                    stores[sub_target.id] = stores.get(sub_target.id, 0) + (1 if ok else 2)
+        elif isinstance(node, (ast.AsyncFor, ast.comprehension)):
             for sub_target in ast.walk(node.target):
                 if isinstance(sub_target, ast.Name):
                     stores[sub_target.id] = stores.get(sub_target.id, 0) + 2
@@ -26097,7 +26195,8 @@ def _mark_borrowed_aliases(fn, ctx):
                 if stores.get(base.id, 0) > 1 or base.id in candidates:
                     del candidates[name]
                     break
-            elif stores.get(('.', base.attr), 0):
+            elif stores.get(('.', base.attr), 0) or stores.get(base.value.id, 0) > 1 or base.value.id in candidates:
+                # the field is assigned somewhere, or the object that owns it is rebound (and so may be freed)
                 del candidates[name]
                 break
     names = set(candidates)
@@ -26108,6 +26207,8 @@ def _mark_borrowed_aliases(fn, ctx):
                 continue
             if (isinstance(parent, ast.Assign) and len(parent.targets) == 1 and parent.targets[0] is node
                     and isinstance(node.ctx, ast.Store)):
+                continue
+            if isinstance(parent, ast.For) and parent.target is node:
                 continue
             names.discard(node.id)
     return names
@@ -28881,9 +28982,10 @@ def _scan_classes(classdefs):
     return classes
 
 
-_RELEASE_RECURSIVE = """static void ail_obj_release(void *value) {
+_RELEASE_RECURSIVE = """static __attribute__((noinline)) void ail_obj_release(void *value) {
     if (value) {
         ail_obj_header *h = value;
+        if (__builtin_expect(h->refs > 1, 1)) { h->refs--; return; }
         if (!h->refs) abort();
         if (!--h->refs) { if (h->drop) ail_obj_drops[h->drop](value); ail_obj_dealloc(value); }
     }
@@ -29031,17 +29133,24 @@ static inline void ail_obj_dealloc(void *value) {
     if (cls) { *(void **)value = ail_pool_head[cls]; ail_pool_head[cls] = value; }
     else free(value);
 }
-static void *ail_obj_retain(void *value) {
+/* The count is touched by every binding of a struct element to a name and every field store: the retain is one compare
+   and an increment inline (r <= 1 is a count of 0 or a wrapped UINT32_MAX), the per-class store helper is inline, and the
+   release is one function whose first test is the release that does not free. (A ticket validator's `let e = s.evs[i]`
+   spent a quarter of its instructions in the out-of-line retain, release and store. The release stays a call: inlined at the
+   hundred epilogue and unwinder sites it added 9% to the text of route_search-3 for 1% of its instructions.) */
+static inline __attribute__((always_inline)) void *ail_obj_retain(void *value) {
     if (value) {
         ail_obj_header *h = value;
-        if (!h->refs || h->refs == UINT32_MAX) abort();
-        h->refs++;
+        uint32_t r = h->refs + 1;
+        if (__builtin_expect(r <= 1, 0)) abort();
+        h->refs = r;
     }
     return value;
 }
-static void ail_obj_release(void *value) {
+static __attribute__((noinline)) void ail_obj_release(void *value) {
     if (value) {
         ail_obj_header *h = value;
+        if (__builtin_expect(h->refs > 1, 1)) { h->refs--; return; }
         if (!h->refs) abort();
         if (!--h->refs) { if (h->drop) ail_obj_drops[h->drop](value); ail_obj_dealloc(value); }
     }
@@ -29275,10 +29384,8 @@ static void ail__field_str_append_slow(ail_str *slot, ail_str value) {
 }
 ''')
     if any(SLIST in info.field_types.values() for info in classes.values()):
-        out.append('''static void ail_obj_field_slist(ail_slist *slot, ail_slist value) {
-    ail_slist copy = ail_slist_return_owned(value);
-    ail_slist_free(slot);
-    *slot = copy;
+        out.append('''static void ail_obj_field_slist(ail_pslist *slot, ail_slist value) {
+    ail_pslist_assign(slot, value);
 }
 ''')
     for kind in MAPS:
@@ -29304,7 +29411,7 @@ static void ail__field_str_append_slow(ail_str *slot, ail_str value) {
                                 else 'ail_bytearray *' if info.field_types[fn] == BYTEARRAY
                                 else 'ail_binaryfile *' if info.field_types[fn] == BINARYFILE
                                 else 'ail_tcpsocket *' if info.field_types[fn] == TCPSOCKET
-                                else 'ail_slist' if info.field_types[fn] == SLIST
+                                else 'ail_pslist' if info.field_types[fn] == SLIST
                                 else 'ail_%s' % info.field_types[fn] if info.field_types[fn] in (LIST, FLIST)
                                 else _ref_ctype(info.field_types[fn], info.init_ctx) + ' *' if _is_olist_kind(info.field_types[fn])
                                 else '%s *' % classes[info.field_types[fn][1]].struct_name() if _is_obj_kind(info.field_types[fn])
@@ -29371,7 +29478,7 @@ static inline __attribute__((always_inline)) void ail_olist_sort_%s_%s(ail_olist
                                     for field in info.field_order if info.field_types[field] == TCPSOCKET)
                           + ''.join('    %s(v_self->f_%s);\n' % (_ref_helper(info.field_types[field], 'release'), field)
                                     for field in info.field_order if _is_hlist_kind(info.field_types[field]))
-                          + ''.join('    ail_slist_free(&v_self->f_%s);\n' % field
+                          + ''.join('    ail_pslist_free(&v_self->f_%s);\n' % field
                                     for field in info.field_order if info.field_types[field] == SLIST)
                           + ''.join('    ail_%s_free(&v_self->f_%s);\n' % (info.field_types[field], field)
                                     for field in info.field_order if info.field_types[field] in (LIST, FLIST, *MAPS))
@@ -29404,7 +29511,7 @@ static inline __attribute__((always_inline)) void ail_olist_sort_%s_%s(ail_olist
                                                        if _is_obj_kind(info.field_types[field]) else cexpr))
             body.append('    return v_self;')
             out.append('%s {\n%s\n}\n' % (sig, '\n'.join(body)))
-            out.append('''static %s *ail_obj_store_%s(%s * volatile *slot, %s *value, int adopt) {
+            out.append('''static inline %s *ail_obj_store_%s(%s * volatile *slot, %s *value, int adopt) {
     if (!adopt) ail_obj_retain(value);
     ail_obj_release(*slot);
     *slot = value;
@@ -29469,7 +29576,7 @@ static inline __attribute__((always_inline)) void ail_olist_sort_%s_%s(ail_olist
         body.append('    return v_self;')
         out.append('%s {\n%s\n}\n' % (sig, '\n'.join(body)))
         if _managed_class(info):
-            out.append('''static %s *ail_obj_store_%s(%s * volatile *slot, %s *value, int adopt) {
+            out.append('''static inline %s *ail_obj_store_%s(%s * volatile *slot, %s *value, int adopt) {
     if (!adopt) ail_obj_retain(value);
     ail_obj_release(*slot);
     *slot = value;
@@ -32057,6 +32164,8 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     runtime_parts = (parts - {'SEQHAS', 'SEQEQ', 'DIE'}
                      | ({'DIE'} if parts or folds or strict or floor else set())
                      | ({'RECDEPTH'} if recursive else set()))
+    if any(SLIST in info.field_types.values() for info in classes.values()):
+        runtime_parts.update(('SLIST', 'PSLIST'))
     fnkinds = {k for params, ret in sigs.values() for k in [ret, *(k for _, k in params)] if callable_types.valid(k)}
     fnkinds.update(k for context in ctxs.values() for k in context.types.values() if callable_types.valid(k))
     fnkinds.update(kind for info in classes.values()

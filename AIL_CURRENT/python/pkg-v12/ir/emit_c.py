@@ -44,6 +44,8 @@ def ctype(t):
             return 'ail_idict *'
         if inner.head == 'list' and inner.args[0] == I.STRV:
             return 'ail_slist *'
+        if inner.head == 'plist':
+            return 'ail_pslist *'
         if I.rec_elem(t) is not None:
             return 'ail_rl_%s *' % I.rec_sig(t)
     raise I.IRError('no C type for %s' % t)
@@ -579,6 +581,8 @@ class Emitter(TextEmitter):
         if op.startswith('cmp.'):
             return self.assign_new(depth, ins.result, '(%s %s %s)' % (o[0], _CMP[op[4:]], o[1]))
         if op == 'select':
+            if ins.attrs.get('spec') and ins.result.type == I.I64:
+                return self.assign_new(depth, ins.result, self.mask_select(ins, o))
             return self.assign_new(depth, ins.result, '(%s ? %s : %s)' % tuple(o))
         if op == 'zext':
             return self.assign_new(depth, ins.result, o[0])
@@ -606,6 +610,17 @@ class Emitter(TextEmitter):
             return self.line(depth, '(%s)->f_%s = %s;' % (o[0], ins.attrs['name'], o[1]))
         if op == 'field.list':
             return self.assign_new(depth, ins.result, '(&(%s)->f_%s)' % (o[0], ins.attrs['name']))
+        if op == 'field.plist':
+            self.parts.update(('SLIST', 'PSLIST'))
+            return self.assign_new(depth, ins.result, '(&(%s)->f_%s)' % (o[0], ins.attrs['name']))
+        if op == 'plist.len':
+            return self.assign_new(depth, ins.result, '((int64_t)(%s)->n)' % o[0])
+        if op == 'plist.get':
+            if ins.attrs.get('mode') == 'nck':
+                return self.assign_new(depth, ins.result, 'ail_pslist_at(%s, %s)' % (o[0], o[1]))
+            return self.assign_new(depth, ins.result, 'ail_pslist_get(%s, %s)' % (o[0], o[1]))
+        if op == 'plist.has':
+            return self.assign_new(depth, ins.result, '(ail_pslist_has(%s, %s) != 0)' % (o[0], o[1]))
         if op == 'span.of' and ins.result.type == I.T('span', I.T('u8')):
             name = self.fresh(ins.result)
             self.parts.add('BYTEARRAY')
@@ -673,6 +688,8 @@ class Emitter(TextEmitter):
             return self.line(depth, '%s_set(%s, %s, %s, %s);' % (view, sp, sn, o[1], o[2]))
         if op in ('list.len', 'list.get', 'list.set', 'list.push', 'list.pop', 'list.clear'):
             return self.list_op(ins, depth, o)
+        if op == 'spec.get':
+            return self.spec_get(ins, depth, o)
         if op in ('list.rt', 'list.has', 'list.sort', 'list.join'):
             return self.slist_op(ins, depth, o)
         if op in ('rec.push', 'rec.up', 'rec.pop'):
@@ -996,6 +1013,61 @@ class Emitter(TextEmitter):
         self.line(depth, '} else if (%s != 0) {' % st)
         self.dispatch_exits(depth + 1, st, body)
         self.line(depth, '}')
+
+    def mask_select(self, ins, o):
+        """A select made by passes/specsel.py, as mask arithmetic: GCC turns a chain of `c ? a : b` on the
+        same conditions back into branches (tail duplication), which is the misprediction the pass removed
+        (grid_life-ail-2: +20% cycles with ternaries, measured). The arithmetic is on uint64_t: no overflow."""
+        c, a, b = o
+        ka, kb = self.const_of(ins.operands[1]), self.const_of(ins.operands[2])
+        m = '(0 - (uint64_t)(%s))' % c
+        if isinstance(ka, int) and isinstance(kb, int):
+            if (ka, kb) == (1, 0):
+                return '((int64_t)(%s))' % c
+            if (ka, kb) == (0, 1):
+                return '((int64_t)!(%s))' % c
+            if ka - kb in (1, -1):
+                return '((int64_t)((uint64_t)%s %s (uint64_t)(%s)))' % (b, '+' if ka > kb else '-', c)
+            diff = (ka - kb) & ((1 << 64) - 1)
+            return '((int64_t)((uint64_t)%s + (%sULL & %s)))' % (b, diff, m)
+        if kb == 0:
+            return '((int64_t)((uint64_t)(%s) & %s))' % (a, m)
+        if ka == 0:
+            return '((int64_t)((uint64_t)(%s) & ((uint64_t)(%s) - 1)))' % (b, c)
+        return '((int64_t)((uint64_t)(%s) ^ (((uint64_t)(%s) ^ (uint64_t)(%s)) & %s)))' % (b, a, b, m)
+
+    def spec_get(self, ins, depth, o):
+        """`spec.get` (passes/specsel.py): the element when the index is in range; otherwise, when the guard
+        holds, the checked read the original `list.get`/`span.get` was (same helper, same failure), else 0."""
+        c = ins.operands[0]
+        if c.type.head == 'span':
+            elem = c.type.args[0]
+            f = 'flist' if elem == I.F64 else 'list'
+            sp, sn = self.span_names[c][:2]
+            if c in self.span_own:
+                self.parts.update(('LIST', 'IRLIST') if f == 'list' else ('FLIST', 'IRFLIST'))
+                view = 'ail_ir_view' if f == 'list' else 'ail_ir_fview'
+            else:
+                self.parts.add('NUMVIEW')
+                view = 'ail_%s_view' % f
+            p, n, slow = sp, sn, '%s_get(%s, %s, %s)' % (view, sp, sn, o[1])
+        else:
+            elem = c.type.args[0].args[0]
+            f = 'flist' if elem == I.F64 else 'list'
+            L = o[0]
+            d = self.defs.get(c)
+            if d is not None and d.op == 'list.ref':
+                self.parts.update(('LIST', 'IRLIST') if f == 'list' else ('FLIST', 'IRFLIST'))
+                slow = 'ail_ir_%s_get(%s, %s)' % (f, L, o[1])
+            else:
+                self.parts.update(('NUMFIELD', 'NUMFIELDMUT', 'LIST'))
+                if elem == I.F64:
+                    self.parts.add('FLIST')
+                slow = 'ail_%s_span_get((%s)->p, (%s)->n, %s)' % (f, L, L, o[1])
+            p, n = '(%s)->p' % L, '(%s)->n' % L
+        zero = '0.0' if elem == I.F64 else '0LL'
+        return self.assign_new(depth, ins.result, '(__builtin_expect((uint64_t)(%s) < (uint64_t)(%s), 1) ? (%s)[%s] : '
+                                                  '(%s) ? %s : %s)' % (o[1], n, p, o[1], o[2], slow, zero))
 
     def list_op(self, ins, depth, o):
         """Numeric list fields reached through a struct borrow, with the legacy path's own

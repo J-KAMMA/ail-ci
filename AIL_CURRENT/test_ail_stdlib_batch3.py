@@ -215,6 +215,23 @@ def iter_input(count=6000):
     return ("\n".join(lines) + "\n").encode()
 
 
+def first_difference(name, stdin, ran, expected):
+    """DIAG text for a mismatch: the first differing output line, both versions, and the input line
+    (plus the last seed line before it) that produced it. A full 100 KB tuple diff says where a
+    platform-only failure is not; this does (macOS arm64 once differed by 7 in one integer)."""
+    got, want = ran.stdout.split(b"\n"), expected.stdout.split(b"\n")
+    k = next((i for i in range(min(len(got), len(want))) if got[i] != want[i]), min(len(got), len(want)))
+    lines = stdin.split(b"\n") if stdin else []
+    # random_fuzz prints one line per input line except the seed lines ("0 <seed> 0 0")
+    produced = [i for i, line in enumerate(lines) if line and not line.startswith(b"0 ")] if name == "random_fuzz" else list(range(len(lines)))
+    source = produced[k] if k < len(produced) else None
+    seed = next((lines[i] for i in range(source or 0, -1, -1) if lines[i].startswith(b"0 ")), None) if name == "random_fuzz" else None
+    return ("DIAG %s on %s: returncode %s, output %d vs %d lines; first difference at output line %d: AIL %r, CPython %r; "
+            "input line %r; last seed line %r; stderr %r" % (name, sys.platform, ran.returncode, len(got), len(want), k,
+            got[k] if k < len(got) else None, want[k] if k < len(want) else None,
+            lines[source] if source is not None else None, seed, ran.stderr[:300]))
+
+
 class Batch3Tests(unittest.TestCase):
     def same_as_cpython(self, text, name, stdin=b"", oracle_text=None):
         with tempfile.TemporaryDirectory() as directory:
@@ -225,7 +242,8 @@ class Batch3Tests(unittest.TestCase):
             ran = subprocess.run([str(exe)], input=stdin, capture_output=True, timeout=300)
             expected = subprocess.run([sys.executable, str(oracle)], input=stdin, capture_output=True, timeout=300)
             self.assertEqual(expected.returncode, 0, expected.stderr)
-            self.assertEqual((ran.returncode, ran.stdout), (0, expected.stdout), ran.stderr[:500])
+            if (ran.returncode, ran.stdout) != (0, expected.stdout):
+                self.fail(first_difference(name, stdin, ran, expected))
             return expected.stdout
 
     def refused(self, text, wanted, name="prog"):

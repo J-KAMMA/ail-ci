@@ -9506,3 +9506,23 @@ Found by the library agents; each is checked against CPython 3.12 by `test_ail_q
   plain builtin; a value wrapped as present that cannot be shown not to be None (`d.get(k)`, an unannotated
   parameter); a `None` stored in a list / tuple / dict / set or passed to a method (it could reach an Optional
   parameter as a plain value). A refusal leaves the source as written, so the general path still builds it.
+
+## 240. Sets and frozensets on the general path: insertion order, operators by run-time kind
+
+The general (boxed) runtime keeps a `set` / `frozenset` in insertion order, as the typed path does (DIFFERENCES.md A2):
+`ail_setobj` is a dense entries array (a removed element leaves a hole that iteration skips, and re-adding it puts it at
+the end) with an open-addressed index. Iteration, `repr`, `list()`, `pop()` (the newest element) and the results of
+operators and methods follow the typed path's `ail_*set_combine`: `a | b` is a's elements then b's new ones, `a & b` and
+`a - b` keep a's order, `a ^ b` is a's elements not in b then b's elements not in a, and the in-place forms and the named
+methods (`union`, `intersection_update`, ...) give the same order as the operator. A result has the type of the left
+operand; a method argument may be any iterable (a list or dict contributes its elements in its own order).
+`a == b`, `<=`, `<`, `>=`, `>` are the subset tests, between a set and a frozenset too.
+
+`frozenset` is its own tag (`AIL_T_FROZENSET`) on the same object: hashable (an order-free hash of the elements, so it is
+a dict key and a set element), `frozenset()` / `frozenset(it)`, repr `frozenset({...})` / `frozenset()`, `AttributeError`
+for `add` / `discard` / `pop` / `update` / ... . `|`, `&`, `-`, `^`, `|=` ... dispatch on the run-time kind, so they work on
+parameters whose type is not known when the program is built. `x in S` and `S.discard(x)` with a `set` x use its
+frozenset, as CPython does. `==` on dicts compares keys and values (it always answered `False` before).
+
+`test_ail_sets_general.py` builds programs on the typed path, the default build (`AIL_IR=0`/`1`) and the general path and
+requires identical output, and compares the order-free results with CPython 3.12.

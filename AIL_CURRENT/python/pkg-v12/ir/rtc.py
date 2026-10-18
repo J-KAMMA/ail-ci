@@ -72,6 +72,9 @@ _entry('str_endswith', (S, S), (T1,), '(ail_str_endswith({0}, {1}) != 0)', _PURE
 
 # --- building text (the result lives in the function's str arena)
 _entry('str_cat', (S, S), (S,), 'ail_str_cat({A}, {0}, {1})', _ALLOC, parts=('STR',), arena='s')
+# a copy of a view into the function's arena (an element read out of a struct's list[str] field that outlives the read)
+_entry('str_own', (S,), (S,), 'ail_str_adopt({A}, ail_str_return_owned({0}))', Effects(allocs=[ARENA], raises=[DIE]),
+       parts=('STR', 'STRRET'), arena='s')
 _entry('str_catn', (S,), (S,), 'ail_str_catn({A}, (ail_str[]){{{va}}}, {n})', _ALLOC, parts=('STR',), arena='s',
        variadic=True)
 _entry('str_repeat', (S, N), (S,), 'ail_str_repeat({A}, {0}, {1})', Effects(allocs=[ARENA], raises=[DIE]),
