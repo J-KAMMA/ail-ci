@@ -1,0 +1,9 @@
+8
+niaj 46.70
+alice 92.02
+erin 15.11
+frank 98.04
+bob 28.55
+bob 38.20
+dave 52.31
+frank 25.75

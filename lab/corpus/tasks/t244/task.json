@@ -1,0 +1,6 @@
+{
+ "id": "t244",
+ "category": "grids",
+ "description": "Print the matrix transposed, and the matrix multiplied by its transpose (only if both dimensions allow; it always does) as rows of integers.",
+ "input_format": "int_matrix"
+}

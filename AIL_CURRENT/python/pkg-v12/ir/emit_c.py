@@ -17,6 +17,8 @@ import os
 
 from . import ir as I
 from . import effects as E
+from . import rtc
+from .emit_text import TextEmitter, allocates_str, allocates_bytes
 
 
 def ctype(t):
@@ -26,6 +28,8 @@ def ctype(t):
         return 'double'
     if t == BYTES:
         return 'ail_bytes'
+    if t == I.STRV:
+        return 'ail_str'
     if t.head == 'obj':
         inner = t.args[0]
         if inner.head == 'class':
@@ -36,6 +40,12 @@ def ctype(t):
             return 'ail_list *'
         if inner.head == 'list' and inner.args[0] == I.F64:
             return 'ail_flist *'
+        if inner.head == 'dict':
+            return 'ail_idict *'
+        if inner.head == 'list' and inner.args[0] == I.STRV:
+            return 'ail_slist *'
+        if I.rec_elem(t) is not None:
+            return 'ail_rl_%s *' % I.rec_sig(t)
     raise I.IRError('no C type for %s' % t)
 
 
@@ -72,7 +82,7 @@ def _decl(ct, name):
     return ct + name if ct.endswith('*') else '%s %s' % (ct, name)
 
 
-def signature(fn, sym=None, linkage=None):
+def signature(fn, sym=None, linkage=None, byval=False):
     results = fn.results
     if len(results) > 1:
         raise I.IRError('S0 functions return at most one value')
@@ -86,7 +96,10 @@ def signature(fn, sym=None, linkage=None):
             decls.append('ail_flist v_%s' % n)
         else:
             decls.append(_decl(ctype(p.type), 'v_' + n))
-    if fn.attrs.get('ret_list'):
+    if fn.attrs.get('ret_list') and byval:
+        # IR to IR (S3b): the list leaves as the {p, n, cap} struct itself, no copy through the spill slot
+        ret = 'ail_flist' if fn.attrs['ret_list'] == 'flist' else 'ail_list'
+    elif fn.attrs.get('ret_list'):
         # a returned list crosses the C boundary as the legacy path hands it back (cruntime LISTRET):
         # through a buffer the caller owns, the true length as the result
         ret = 'int64_t'
@@ -99,15 +112,18 @@ def signature(fn, sym=None, linkage=None):
     return '%s%s %s(%s)' % (prefix, ret, sym or fn.sym, params or 'void')
 
 
-def _args_of(fn):
+def _args_of(fn, want_out=True):
     """The parameters as C arguments, to forward them to another function of the same signature."""
     abi = fn.attrs.get('abi') or ['value'] * len(fn.params)
     out = []
     for n, a in zip(fn.param_names, abi):
         out.append('v_%s, v_%s_len' % (n, n) if a == 'array' else 'v_%s' % n)
-    if fn.attrs.get('ret_list'):
+    if fn.attrs.get('ret_list') and want_out:
         out.append('_out, _cap')
     return ', '.join(out)
+
+
+_SLIST = I.T('obj', I.T('list', I.STRV))
 
 
 def storage(t):
@@ -116,10 +132,20 @@ def storage(t):
         return 'ail_list'
     if t == I.T('obj', I.T('list', I.F64)):
         return 'ail_flist'
+    if t == _SLIST:
+        return 'ail_slist'
+    if t == I.DICT_II:
+        return 'ail_idict'
+    if I.rec_elem(t) is not None:
+        return 'ail_rl_%s' % I.rec_sig(t)
     return ctype(t)
 
 
 def _zero(t):
+    if t == I.STRV:
+        return '(ail_str){0}'
+    if t == I.BYTES:
+        return '(ail_bytes){0}'
     return '0.0' if t == I.F64 else '0'
 
 
@@ -149,12 +175,25 @@ class _Cx(object):
 
 
 _LISTS = (I.T('obj', I.T('list', I.I64)), I.T('obj', I.T('list', I.F64)))
+_OWNED_LISTS = _LISTS + (_SLIST,)
+
+
+class _OwnedLists(object):
+    def __contains__(self, t):
+        return t in _OWNED_LISTS_T or I.rec_elem(t) is not None or t == I.DICT_II
+
+
+_OWNED_LISTS_T = _OWNED_LISTS
+_OWNED_LISTS = _OwnedLists()
 _BA = I.T('obj', I.T('bytearray'))
 
 
-class Emitter(object):
-    def __init__(self, fn, pending=(), checked=False, summaries=None, unwind_name=None):
+class Emitter(TextEmitter):
+    def __init__(self, fn, pending=(), checked=False, summaries=None, unwind_name=None, listval=None):
         self.fn = fn
+        # callees with a by-value list entry `<sym>__irl` (S3b); None: separately linked units, none
+        self.listval = frozenset(listval or ())
+        self.allow_byval = listval is not None
         # the helper that frees what a longjmp unwinds over: the name the legacy path chose for its own
         # (unique among the program's symbols), else one derived from the function's symbol
         self.unwind_name = unwind_name
@@ -175,12 +214,18 @@ class Emitter(object):
                                           or (i.op == 'call' and i.attrs.get('callee') in self.pending)
                                           for i in ops)
         self.frame = any(i.op == 'try' for i in ops)
+        self.byval = bool(fn.attrs.get('ret_list')) and not self.is_pending and not self.frame and self.allow_byval
         self.pre = 'fr->' if self.frame else ''
+        self.text_init(fn)
         self.cx = _Cx('top', 0, 0)
         self.lines = self.cx.lines
         self.owner = {}                         # value -> the C function that defines it
         self.scopes = []                        # cleanup actions of the enclosing handlers
         self.aux = []                           # outlined try bodies and helpers, written first
+        self.rec_done = set()
+        for i in fn.body.instrs:
+            if i.op == 'local.alloc' and I.rec_elem(i.result.type.pointee) is not None:
+                self.rec_types(i.result.type.pointee)
         self.tries = 0
         self.next_status = 3
         self.retained = [self.pre + 'v_' + n for n in fn.attrs.get('retain', ())]
@@ -189,9 +234,23 @@ class Emitter(object):
         # function can raise (or call something that can); otherwise there is no edge to clean
         self.owned = [(self.pre + 'v_' + i.attrs['name'],
                        'bytearray' if i.result.type.pointee == _BA else
-                       'flist' if i.result.type.pointee == _LISTS[1] else 'list')
+                       'flist' if i.result.type.pointee == _LISTS[1] else
+                       'idict' if i.result.type.pointee == I.DICT_II else
+                       'slist' if i.result.type.pointee == _SLIST else
+                       'rl_' + I.rec_sig(i.result.type.pointee) if I.rec_elem(i.result.type.pointee) is not None
+                       else 'list')
                       for i in fn.body.instrs
-                      if i.op == 'local.alloc' and (i.result.type.pointee in _LISTS or i.result.type.pointee == _BA)]
+                      if i.op == 'local.alloc' and (i.result.type.pointee in _OWNED_LISTS or i.result.type.pointee == _BA)]
+        for i in fn.body.instrs:
+            if i.op == 'local.alloc' and i.result.type.pointee.head == 'obj' \
+                    and i.result.type.pointee.args[0].head == 'class':
+                self.owned.append((self.pre + 'v_' + i.attrs['name'], 'obj'))
+        if self.needs_sar:
+            self.owned.append((self.sar, 'sarena'))
+        if self.needs_bar:
+            self.owned.append((self.bar, 'barena'))
+        for k in self.wins:
+            self.owned.append((self.win_cell(k), 'win'))
         if self.owned:
             eff = E.body_effects(fn, None, summaries)
             self.owned_can_raise = bool(eff.unknown or eff.raises)
@@ -261,6 +320,7 @@ class Emitter(object):
             if ins.op == 'local.alloc':
                 name = ins.attrs['name']
                 fields.append('%s;' % _decl(storage(ins.result.type.pointee), ('l_' if name in params else 'v_') + name))
+        fields.extend(self.text_fields())
         if fn.results and not fn.attrs.get('ret_list'):
             fields.append('%s;' % _decl(ctype(fn.results[0]), 'ret'))
         fields.append('char _unused;')
@@ -272,6 +332,8 @@ class Emitter(object):
         params = set(fn.param_names)
         sym = fn.sym
         ir_sig = signature(fn, sym + '__ir', 'static') if self.is_pending else sig
+        if self.byval:
+            ir_sig = signature(fn, sym + '__irl', 'static', byval=True)
         abi = fn.attrs.get('abi') or ['value'] * len(fn.params)
         if self.frame:
             self.aux.append(self.frame_struct())
@@ -288,12 +350,16 @@ class Emitter(object):
                 c = self.pre + ('l_' if name in params else 'v_') + name
                 self.names[ins.result] = c
                 if not self.frame:
-                    if ins.result.type.pointee in _LISTS:
+                    if ins.result.type.pointee in _OWNED_LISTS or ins.result.type.pointee in (I.STRV, I.BYTES):
                         self.line(1, '%s %s = {0};' % (storage(ins.result.type.pointee), c))
                     else:
                         self.line(1, '%s %s = 0;' % (ctype(ins.result.type.pointee), c))
+        self.text_decls(1)
+        self.text_parts()
         if fn.attrs.get('recursive'):
             self.parts.add('RECDEPTH')
+        if any(kind == 'slist' for _, kind in self.owned):
+            self.parts.update(('STR', 'SLIST'))
         if any(kind in ('list', 'flist') for _, kind in self.owned):
             self.parts.update(('LIST', 'IRLIST'))
             if any(kind == 'flist' for _, kind in self.owned):
@@ -312,6 +378,8 @@ class Emitter(object):
             for k, (name, kind) in enumerate(self.owned, len(self.retained)):
                 if kind == 'bytearray':
                     steps.append('ail_bytearray_release(*(ail_bytearray **)p[%d]);' % k)
+                elif kind == 'obj':
+                    steps.append('ail_obj_release(*(void **)p[%d]);' % k)
                 else:
                     steps.append('ail_%s_free((ail_%s *)p[%d]);' % (kind, kind, k))
             unwind = self.unwind_name or 'ail_unwind_ir_%s' % sym
@@ -327,6 +395,12 @@ class Emitter(object):
         self.region(fn.body, 1, None)
         text = '%s {\n%s\n}\n' % (ir_sig, '\n'.join(self.cx.lines))
         out = ''.join(self.aux) + text
+        if self.byval:
+            kind = 'flist' if fn.attrs['ret_list'] == 'flist' else 'list'
+            self.parts.update(('FLIST', 'FLISTRET') if kind == 'flist' else ('LIST', 'LISTRET'))
+            out += ('%s {\n    ail_%s r = %s__irl(%s);\n    int64_t n = ail_%s_return(&r, _out, _cap);\n'
+                    '    ail_%s_free(&r);\n    return n;\n}\n'
+                    % (sig, kind, sym, _args_of(fn, False), kind, kind))
         if self.is_pending:
             call = '%s__ir(%s)' % (sym, _args_of(fn))
             if fn.results:
@@ -353,13 +427,20 @@ class Emitter(object):
         for name, kind in self.owned:
             if kind == 'bytearray':
                 self.line(depth, 'ail_bytearray_release(%s);' % name)
+            elif kind == 'obj':
+                self.line(depth, 'ail_obj_release(%s);' % name)
             else:
                 self.line(depth, 'ail_%s_free(&%s);' % (kind, name))
 
     def exit_return(self, depth, value, in_frame=False):
         self.leaves(depth, lambda sc: True)
         if self.cx.kind == 'top':
-            if self.fn.attrs.get('ret_list') and value is not None:
+            if self.byval and value is not None:
+                # the list leaves by value: the result takes the storage, the place is left empty
+                kind = 'flist' if self.fn.attrs['ret_list'] == 'flist' else 'list'
+                self.line(depth, 'ail_%s ir_ret = *(%s); *(%s) = (ail_%s){0};' % (kind, value, value, kind))
+                value = 'ir_ret'
+            elif self.fn.attrs.get('ret_list') and value is not None:
                 # the list leaves through the caller's buffer (LISTRET), then every owned list goes
                 self.parts.add('FLISTRET' if self.fn.attrs['ret_list'] == 'flist' else 'LISTRET')
                 self.line(depth, 'int64_t ir_ret = ail_%s_return(%s, _out, _cap);'
@@ -367,6 +448,15 @@ class Emitter(object):
                 value = 'ir_ret'
             if in_frame:
                 value = 'fr->ret' if self.fn.results else None
+            if value is not None and self.fn.results == [I.STRV]:
+                self.parts.update(('STR', 'STRRET'))
+                self.line(depth, 'ail_str ir_ret = ail_str_return_owned(%s);' % value)
+                value = 'ir_ret'
+            if value is not None and self.fn.results == [I.BYTES]:
+                # (the caller adopts the block into its bytes arena: the result must be a heap copy)
+                self.parts.update(('BYTES', 'BYTESRET'))
+                self.line(depth, 'ail_bytes ir_ret = ail_bytes_return_owned(%s);' % value)
+                value = 'ir_ret'
             if value is not None and self.fn.results == [_BA]:
                 # the result is the caller's own reference: take it before the owners let go
                 self.parts.add('BYTEARRAY')
@@ -583,6 +673,14 @@ class Emitter(object):
             return self.line(depth, '%s_set(%s, %s, %s, %s);' % (view, sp, sn, o[1], o[2]))
         if op in ('list.len', 'list.get', 'list.set', 'list.push', 'list.pop', 'list.clear'):
             return self.list_op(ins, depth, o)
+        if op in ('list.rt', 'list.has', 'list.sort', 'list.join'):
+            return self.slist_op(ins, depth, o)
+        if op in ('rec.push', 'rec.up', 'rec.pop'):
+            return self.rec_op(ins, depth, o)
+        if op.startswith('dict.'):
+            return self.dict_op(ins, depth, o)
+        if op in ('list.sortperm', 'list.permute'):
+            return self.keysort_op(ins, depth, o)
         if op == 'list.ref':
             return self.assign_new(depth, ins.result, '&' + self.names[ins.operands[0]])
         if op == 'field.ba':
@@ -593,6 +691,14 @@ class Emitter(object):
             lit = ''.join('"' + chr(92) + 'x%X"' % b for b in data) or '""'
             return self.line(depth, 'ail_bytearray_extend(%s, (ail_bytes){(const unsigned char *)(%s), %d});'
                              % (o[0], lit, len(data)))
+        if op == 'obj.init':
+            cls = ins.attrs['cls']
+            return self.line(depth, 'ail_obj_store_%s(&%s, ail_new_%s(%s), 1);' % (cls, o[0], cls, ', '.join(o[1:])))
+        if op == 'obj.copyref':
+            return self.line(depth, 'ail_obj_store_%s(&%s, %s, 0);' % (ins.operands[1].type.args[0].name, o[0], o[1]))
+        if op == 'ba.extend':
+            self.parts.add('BYTEARRAY')
+            return self.line(depth, 'ail_bytearray_extend(%s, %s);' % (o[0], o[1]))
         if op == 'ba.call':
             self.parts.add('BYTEARRAY')
             checked = ins.attrs['callee'] in self.pending or (ins.attrs['callee'] == self.fn.sym and self.is_pending)
@@ -615,7 +721,7 @@ class Emitter(object):
                 return self.line(depth, 'ail_bytearray_clear(%s);' % o[0])
             self.parts.add('STDIO')
             return self.line(depth, 'ail_stdout_write_bytes(ail_bytearray_span(%s));' % o[0])
-        if op in ('list.reset', 'list.repeat', 'list.lit', 'list.reserve', 'list.move'):
+        if op in ('list.reset', 'list.repeat', 'list.lit', 'list.reserve', 'list.move', 'list.copy'):
             return self.list_replace(ins, depth, o)
         if op in ('call', 'list.call'):
             abi = ins.attrs.get('abi') or ['value'] * len(o)
@@ -648,6 +754,15 @@ class Emitter(object):
                 # given, the whole list waits in the runtime's spill slot and is adopted right after
                 dst = ins.operands[0]
                 flist = dst.type == _LISTS[1]
+                kind = 'flist' if flist else 'list'
+                if callee in self.listval or (callee == self.fn.sym and self.byval):
+                    # IR to IR: the callee hands its list back by value
+                    self.parts.update(('FLIST', 'IRFLIST') if flist else ('LIST', 'IRLIST'))
+                    self.count += 1
+                    n = 'ir%d' % self.count
+                    self.line(depth, 'ail_%s %s = %s__irl(%s);' % (kind, n, callee, ', '.join(parts)))
+                    self.line(depth, '{ ail_%s_free(%s); *(%s) = %s; }' % (kind, o[0], o[0], n))
+                    return
                 parts.append('NULL, 0')
                 self.parts.update(('FLIST', 'FLISTRET', 'IRFLIST') if flist else ('LIST', 'LISTRET', 'IRLIST'))
                 self.count += 1
@@ -662,12 +777,21 @@ class Emitter(object):
                           % (kind, kind, n, kind, o[0], o[0]))
                 return
             text = '%s%s(%s)' % (callee, '__ir' if checked else '', ', '.join(parts))
+            adopt = None
+            if ins.results and ins.result.type == I.STRV:
+                adopt = 'ail_str_adopt(&%s, %%s)' % self.sar
+                self.parts.update(('STR', 'STRRET'))
+            elif ins.results and ins.result.type == I.BYTES:
+                adopt = 'ail_bytes_adopt(&%s, %%s)' % self.bar
+                self.parts.update(('BYTES', 'BYTESRET'))
             if ins.results:
-                self.assign_new(depth, ins.result, text)
+                self.assign_new(depth, ins.result, text if adopt is None or checked else adopt % text)
             else:
                 self.line(depth, text + ';')
             if checked:
                 self.pending_check(depth)
+                if adopt is not None:
+                    self.line(depth, '%s = %s;' % (self.names[ins.result], adopt % self.names[ins.result]))
             return
         if op == 'rt':
             callee = ins.attrs['callee']
@@ -677,7 +801,13 @@ class Emitter(object):
                                         'ail_die("recursion depth exceeded");')
             if callee == 'ail_depth_leave':
                 return self.line(depth, 'ail_depth--;')
-            raise I.IRError('no C for runtime entry %r' % callee)
+            return self.emit_rt(ins, depth, o)
+        if op == 'str.lit':
+            return self.emit_str_lit(ins, depth)
+        if op == 'bytes.lit':
+            return self.emit_bytes_lit(ins, depth)
+        if op == 'print':
+            return self.emit_print(ins, depth, o)
         if op == 'if':
             return self.emit_if(ins, depth, o[0])
         if op == 'loop':
@@ -709,13 +839,18 @@ class Emitter(object):
                 return self.line(depth, 'break;')
             args = loop.regions[0].args[1:] if loop.op == 'for.range' else loop.regions[0].args
             self.parallel_assign(depth, [self.names[a] for a in args], o, [a.type for a in args])
-            keep = os.environ.get('AIL_IR_TRAILING_CONTINUE', 'loop,for.range')
+            # (S4a, measured over the 40 programs: omitting the trailing `continue;` everywhere is -8.140% instructions
+            # against -8.128% for keeping it, and it is the only setting with no program above +1% -- the
+            # while-loops of fannkuch_redux and relaxation-4 gain a jump per iteration with it. S1 had kept it
+            # for both loop ops; AIL_IR_TRAILING_CONTINUE=loop,for.range restores that.)
+            keep = os.environ.get('AIL_IR_TRAILING_CONTINUE', '')
             if owner is loop and loop.regions[0].instrs[-1] is ins and loop.op not in keep.split(','):
                 return          # the end of the C loop body continues anyway (and a trailing
                                 # `continue;` changes GCC's block layout: +1 jump per iteration)
             return self.line(depth, 'continue;')
         if op == 'return':
-            if not self.scopes and self.cx.kind == 'top' and not self.retained and not self.owned:
+            if not self.scopes and self.cx.kind == 'top' and not self.retained and not self.owned \
+                    and self.fn.results not in ([I.STRV], [I.BYTES]):
                 return self.line(depth, 'return %s;' % o[0] if o else 'return;')
             return self.exit_return(depth, o[0] if o else None)
         if op == 'raise':
@@ -867,10 +1002,12 @@ class Emitter(object):
         helpers (same checks, same messages): ail_list_span_* reads, ail_numfield_* writes."""
         op = ins.op
         elem = ins.operands[0].type.args[0].args[0]
-        f = 'flist' if elem == I.F64 else 'list'
+        f = 'flist' if elem == I.F64 else 'slist' if elem == I.STRV else 'rlist' if elem.head == 'tup' else 'list'
         d = self.defs.get(ins.operands[0])
         if d is not None and d.op == 'list.ref':
             return self.owned_list_op(ins, depth, o, f)
+        if f == 'slist':
+            raise I.IRError('a list of str that is not an owned place')
         self.parts.update(('NUMFIELD', 'NUMFIELDMUT', 'LIST'))
         if elem == I.F64:
             self.parts.add('FLIST')
@@ -899,6 +1036,15 @@ class Emitter(object):
         """Element access, growth and shrinking of a list this function owns: the legacy helpers
         (`ail_list_*`: same messages), with the checked get/set always inlined."""
         op = ins.op
+        if f == 'slist':
+            return self.owned_slist_op(ins, depth, o)
+        if f == 'rlist':
+            L = o[0]
+            if op == 'list.len':
+                return self.assign_new(depth, ins.result, '((int64_t)(%s)->n)' % L)
+            if op == 'list.clear':
+                return self.line(depth, '(%s)->n = 0;' % L)
+            raise I.IRError('no C for %s on a list of records' % op)
         self.parts.update(('LIST', 'IRLIST') if f == 'list' else ('FLIST', 'IRFLIST'))
         L = o[0]
         ir = 'ail_ir_%s' % f
@@ -922,9 +1068,208 @@ class Emitter(object):
             return self.line(depth, 'ail_%s_clear(%s);' % (f, L))
         raise I.IRError('no C for %s' % op)
 
+    def owned_slist_op(self, ins, depth, o):
+        """Element access, growth and shrinking of a list of str this function owns (S3c-1): the legacy
+        `ail_slist_*` helpers, so the messages are the legacy's."""
+        op = ins.op
+        self.parts.update(('STR', 'SLIST'))
+        L = o[0]
+        if op == 'list.len':
+            return self.assign_new(depth, ins.result, '((int64_t)(%s)->n)' % L)
+        if op == 'list.get':
+            if ins.attrs.get('mode') == 'nck':
+                return self.assign_new(depth, ins.result, '((%s)->p[%s])' % (L, o[1]))
+            self.parts.add('DIE')
+            return self.assign_new(depth, ins.result, 'ail_slist_get(%s, %s)' % (L, o[1]))
+        if op == 'list.push':
+            self.parts.add('DIE')
+            return self.line(depth, 'ail_slist_push(%s, %s);' % (L, o[1]))
+        if op == 'list.clear':
+            return self.line(depth, 'ail_slist_clear(%s);' % L)
+        raise I.IRError('no C for %s on a list of str' % op)
+
+    def dict_op(self, ins, depth, o):
+        """The legacy `ail_idict_*` helpers (S3d-1): the place is the dictionary."""
+        op = ins.op
+        self.parts.update(('IDICT', 'DIE'))
+        D = '&' + o[0].lstrip('&') if False else '&' + o[0]
+        if op == 'dict.has':
+            return self.assign_new(depth, ins.result, '(ail_idict_has(%s, %s) != 0)' % (D, o[1]))
+        if op == 'dict.need':
+            return self.assign_new(depth, ins.result, 'ail_idict_need(%s, %s)' % (D, o[1]))
+        if op == 'dict.get':
+            return self.assign_new(depth, ins.result, 'ail_idict_get(%s, %s, %s)' % (D, o[1], o[2]))
+        if op == 'dict.len':
+            return self.assign_new(depth, ins.result, 'ail_idict_len(%s)' % D)
+        if op == 'dict.put':
+            return self.line(depth, 'ail_idict_put(%s, %s, %s);' % (D, o[1], o[2]))
+        return self.line(depth, '{ ail_idict_free(%s); ail_idict_init(%s); }' % (D, D))
+
+    def rec_types(self, t):
+        """The C record and list types of a list of scalar records, and its free/push helpers (S3c-3), written once
+        per signature in the file (a guard macro: several IR functions may need the same one)."""
+        sig = I.rec_sig(t)
+        if ('t', sig) in self.rec_done:
+            return
+        self.rec_done.add(('t', sig))
+        self.parts.add('DIE')
+        fields = ' '.join('%s f%d;' % ('int64_t' if c == 'I' else 'double', k) for k, c in enumerate(sig))
+        self.aux.append(
+            '#ifndef AIL_RL_%(s)s\n#define AIL_RL_%(s)s\n'
+            'typedef struct { %(f)s } ail_rec_%(s)s;\n'
+            'typedef struct { ail_rec_%(s)s *p; int64_t n, cap; } ail_rl_%(s)s;\n'
+            '__attribute__((unused)) static void ail_rl_%(s)s_free(ail_rl_%(s)s *L) { free(L->p); L->p = 0; '
+            'L->n = L->cap = 0; }\n'
+            '__attribute__((unused)) static void ail_rl_%(s)s_push(ail_rl_%(s)s *L, ail_rec_%(s)s v) {\n'
+            '    if (L->n == L->cap) {\n'
+            '        if (L->cap > INT64_MAX / 2 / (int64_t)sizeof(ail_rec_%(s)s)) ail_die("allocation too large");\n'
+            '        int64_t c = L->cap ? L->cap * 2 : 8;\n'
+            '        ail_rec_%(s)s *q = (ail_rec_%(s)s *)realloc(L->p, (size_t)c * sizeof *q);\n'
+            '        if (!q) ail_die("out of memory");\n'
+            '        L->p = q; L->cap = c;\n'
+            '    }\n'
+            '    L->p[L->n++] = v;\n'
+            '}\n#endif\n' % dict(s=sig, f=fields))
+
+    def rec_heap_helpers(self, sig, key):
+        """CPython's heapq on inline records (the moves of the legacy ail_oheap_*, on records instead of pointers):
+        the order is `a.f[k0] < b.f[k0] or (equal and ...)`, so a NaN stops the comparison exactly as there."""
+        name = '%s_%s' % (sig, '_'.join(map(str, key)))
+        if ('h', name) in self.rec_done:
+            return name
+        self.rec_done.add(('h', name))
+        tests = []
+        for k in key[:-1]:
+            tests.append('if (a->f%d < b->f%d) return 1; if (!(a->f%d == b->f%d)) return 0;' % (k, k, k, k))
+        tests.append('return a->f%d < b->f%d;' % (key[-1], key[-1]))
+        self.aux.append(
+            '#ifndef AIL_RH_%(n)s\n#define AIL_RH_%(n)s\n'
+            'static inline __attribute__((always_inline)) int ail_rh_lt_%(n)s(const ail_rec_%(s)s *a, '
+            'const ail_rec_%(s)s *b) {\n    %(t)s\n}\n'
+            '__attribute__((unused)) static void ail_rh_down_%(n)s(ail_rec_%(s)s *p, int64_t end, int64_t pos) {\n'
+            '    int64_t start = pos;\n    ail_rec_%(s)s w = p[pos];\n    int64_t child = 2 * pos + 1;\n'
+            '    while (child < end) {\n        int64_t right = child + 1;\n'
+            '        if (right < end && !ail_rh_lt_%(n)s(&p[child], &p[right])) child = right;\n'
+            '        p[pos] = p[child];\n        pos = child;\n        child = 2 * pos + 1;\n    }\n'
+            '    while (pos > start) {\n        int64_t up = (pos - 1) >> 1;\n'
+            '        if (!ail_rh_lt_%(n)s(&w, &p[up])) break;\n        p[pos] = p[up];\n        pos = up;\n    }\n'
+            '    p[pos] = w;\n}\n'
+            '__attribute__((unused)) static void ail_rh_up_%(n)s(ail_rl_%(s)s *v) {\n'
+            '    ail_rec_%(s)s *p = v->p;\n    int64_t pos = v->n - 1;\n    if (pos < 0) return;\n'
+            '    ail_rec_%(s)s w = p[pos];\n'
+            '    while (pos > 0) {\n        int64_t up = (pos - 1) >> 1;\n'
+            '        if (!ail_rh_lt_%(n)s(&w, &p[up])) break;\n        p[pos] = p[up];\n        pos = up;\n    }\n'
+            '    p[pos] = w;\n}\n'
+            '__attribute__((unused)) static ail_rec_%(s)s ail_rh_pop_%(n)s(ail_rl_%(s)s *v) {\n'
+            '    int64_t n = v->n;\n    if (n <= 0) ail_raise_named(AIL_EXC_INDEX);\n'
+            '    ail_rec_%(s)s last = v->p[--v->n];\n    if (n == 1) return last;\n'
+            '    ail_rec_%(s)s root = v->p[0];\n    v->p[0] = last;\n    ail_rh_down_%(n)s(v->p, v->n, 0);\n'
+            '    return root;\n}\n#endif\n' % dict(n=name, s=sig, t=' '.join(tests)))
+        return name
+
+    def rec_op(self, ins, depth, o):
+        """`rec.push`, `rec.up`, `rec.pop`: records stored inline, the legacy heapq moves."""
+        op = ins.op
+        t = ins.operands[0].type
+        sig = I.rec_sig(t)
+        self.rec_types(t)
+        self.parts.add('DIE')
+        L = o[0]
+        if op == 'rec.push':
+            lit = ', '.join(o[1:])
+            return self.line(depth, 'ail_rl_%s_push(%s, (ail_rec_%s){%s});' % (sig, L, sig, lit))
+        name = self.rec_heap_helpers(sig, ins.attrs['key'])
+        if op == 'rec.up':
+            return self.line(depth, 'ail_rh_up_%s(%s);' % (name, L))
+        self.count += 1
+        r = 'ir%d' % self.count
+        self.line(depth, 'ail_rec_%s %s = ail_rh_pop_%s(%s);' % (sig, r, name, L))
+        for k, res in enumerate(ins.results):
+            self.assign_new(depth, res, '%s.f%d' % (r, k))
+
+    def keysort_op(self, ins, depth, o):
+        """The legacy KEYSORT runtime (cruntime.py): `ail_keysort_perm` over key columns and `ail_perm_apply`."""
+        op = ins.op
+        self.parts.update(('LIST', 'KEYSORT', 'DIE'))
+        if op == 'list.permute':
+            t = ins.operands[0].type
+            elem = t.args[0].args[0]
+            if elem == I.F64:
+                self.parts.add('FLIST')
+            elif elem == I.STRV:
+                self.parts.update(('STR', 'SLIST'))
+            ct = 'double' if elem == I.F64 else 'ail_str' if elem == I.STRV else 'int64_t'
+            return self.line(depth, 'ail_perm_apply((%s)->p, sizeof(%s), (%s)->n, (%s)->p, (%s)->n);'
+                             % (o[0], ct, o[0], o[1], o[1]))
+        cols = []
+        for v, text_ in zip(ins.operands[1:], o[1:]):
+            elem = v.type.args[0].args[0]
+            if elem == I.F64:
+                self.parts.add('FLIST')
+            elif elem == I.STRV:
+                self.parts.update(('STR', 'SLIST', 'KEYSORTSTR'))
+            kind = 1 if elem == I.F64 else 2 if elem == I.STRV else 0
+            cols.append('{%d, (const void *)(%s)->p, (%s)->n}' % (kind, text_, text_))
+        return self.line(depth, '{ ail_keycol _kc[%d] = {%s}; ail_keysort_perm(%s, _kc, %d, %d); }'
+                         % (len(cols), ', '.join(cols), o[0], len(cols), ins.attrs['rev']))
+
+    def slist_copy(self, depth, dst, src):
+        """`ys = list(xs)` for a list of str: a new spine over the same views (S3c-2)."""
+        self.parts.add('DIE')
+        self.count += 1
+        i = 'ir%d' % self.count
+        self.line(depth, '{ ail_slist _src = *(%s); ail_slist _new = {0}; '
+                         'for (int64_t %s = 0; %s < _src.n; %s++) ail_slist_push(&_new, _src.p[%s]); '
+                         'ail_slist_free(%s); *(%s) = _new; }' % (src, i, i, i, i, dst, dst))
+
+    def slist_op(self, ins, depth, o):
+        """`list.rt`, `list.has`, `list.sort`, `list.join` (lists of str, S3c-1)."""
+        op = ins.op
+        self.parts.update(('STR', 'SLIST', 'DIE'))
+        if op == 'list.rt':
+            entry = rtc.LIST_ENTRIES[ins.attrs['callee']]
+            self.parts.update(entry['parts'])
+            self.count += 1
+            r = 'ir%d' % self.count
+            return self.line(depth, '{ ail_slist %s = %s; ail_slist_free(%s); *(%s) = %s; }'
+                             % (r, entry['c'].format(*o[1:]), o[0], o[0], r))
+        if op == 'list.has':
+            return self.assign_new(depth, ins.result, '(ail_slist_has(%s, %s) != 0)' % (o[0], o[1]))
+        if op == 'list.sort':
+            elem = ins.operands[0].type.args[0].args[0]
+            if elem == I.I64:
+                self.parts.add('LIST')
+                return self.line(depth, 'ail_list_sort(%s);' % o[0])
+            if elem == I.F64:
+                self.parts.update(('FLIST', 'FLISTSORT'))
+                return self.line(depth, 'ail_flist_sort(%s);' % o[0])
+            return self.line(depth, 'ail_slist_sort(%s);' % o[0])
+        return self.assign_new(depth, ins.result, 'ail_str_join(&%s, %s, *(%s))' % (self.sar, o[0], o[1]))
+
     def list_replace(self, ins, depth, o):
         """The operations that replace the content of an owned list (the old content is freed)."""
         op = ins.op
+        if I.rec_elem(ins.operands[0].type) is not None:
+            if op != 'list.reset':
+                raise I.IRError('no C for %s on a list of records' % op)
+            return self.line(depth, 'ail_rl_%s_free(%s);' % (I.rec_sig(ins.operands[0].type), o[0]))
+        if ins.operands[0].type == _SLIST:
+            self.parts.update(('STR', 'SLIST'))
+            L = o[0]
+            if op == 'list.reset':
+                return self.line(depth, 'ail_slist_free(%s);' % L)
+            if op == 'list.lit':
+                self.parts.add('DIE')
+                return self.line(depth, '{ ail_slist_free(%s);%s }' % (
+                    L, ''.join(' ail_slist_push(%s, %s);' % (L, v) for v in o[1:])))
+            if op == 'list.copy':
+                return self.slist_copy(depth, L, o[1])
+            if op == 'list.move':
+                self.count += 1
+                t = 'ir%d' % self.count
+                return self.line(depth, '{ ail_slist %s = *(%s); *(%s) = (ail_slist){0}; ail_slist_free(%s); *(%s) = %s; }'
+                                 % (t, o[1], o[1], L, L, t))
+            raise I.IRError('no C for %s on a list of str' % op)
         f = 'flist' if ins.operands[0].type == _LISTS[1] else 'list'
         self.parts.update(('LIST', 'IRLIST') if f == 'list' else ('FLIST', 'IRFLIST'))
         L = o[0]
@@ -943,6 +1288,25 @@ class Emitter(object):
         if op == 'list.lit':
             self.line(depth, '{ ail_%s_free(%s);%s }' % (
                 f, L, ''.join(' ail_%s_push(%s, %s);' % (f, L, v) for v in o[1:])))
+            return
+        if op == 'list.copy':
+            # The destination keeps its buffer when it has room (a double buffer `ga = gb` copies once
+            # per round and must not allocate once per round); a source that is the destination's own
+            # buffer (`xs = xs[:]`) is already equal. Nothing else can overlap the destination: the
+            # only sources are a whole list or a read-only span of a list this function does not own.
+            src = ins.operands[1]
+            if src in self.span_names:
+                sp, sn = self.span_names[src][:2]
+            else:
+                sp, sn = '(%s)->p' % o[1], '(%s)->n' % o[1]
+            self.count += 1
+            d, n, i = 'ir%d' % self.count, 'ir%d' % (self.count + 1), 'ir%d' % (self.count + 2)
+            self.count += 2
+            ct = 'double' if f == 'flist' else 'int64_t'
+            self.line(depth, '{ ail_%s *%s = %s; const %s *%s_s = %s; int64_t %s = %s; if (%s_s != %s->p) { %s->n = 0; '
+                             'ail_%s_reserve(%s, %s); for (int64_t %s = 0; %s < %s; %s++) %s->p[%s] = %s_s[%s]; '
+                             '%s->n = %s; } }'
+                      % (f, d, o[0], ct, d, sp, n, sn, d, d, d, f, d, n, i, i, n, i, d, i, d, i, d, n))
             return
         if op == 'list.move':
             self.count += 1
@@ -971,7 +1335,8 @@ class Emitter(object):
 
     def declare_results(self, ins, depth):
         for r in ins.results:
-            self.line(depth, '%s %s = 0;' % (ctype(r.type), self.fresh(r)))
+            self.line(depth, '%s %s = %s;' % (ctype(r.type), self.fresh(r),
+                                              '{0}' if r.type in (I.STRV, I.BYTES) else '0'))
 
     @staticmethod
     def only_yield(region):
@@ -1006,9 +1371,14 @@ class Emitter(object):
         self.enter_loop(ins, depth)
         for a, v in zip(ins.regions[0].args, inits):
             self.line(depth, '%s %s = %s;' % (ctype(a.type), self.fresh(a), v))
+        tag = self.open_loop_roots(ins, depth)
         self.line(depth, 'for (;;) {')
+        if tag:
+            self.reset_roots(tag, depth + 1)
         self.region(ins.regions[0], depth + 1, ins)
         self.line(depth, '}')
+        if tag:
+            self.line(depth, '}')
         self.leave_loop()
 
     def emit_for(self, ins, depth, o):
@@ -1018,6 +1388,7 @@ class Emitter(object):
         for a, v in zip(body.args[1:], o[3:]):
             self.line(depth, '%s %s = %s;' % (ctype(a.type), self.fresh(a), v))
         index = self.fresh(body.args[0])
+        tag = self.open_loop_roots(ins, depth)
         if self.const_of(ins.operands[2]) == 1:
             self.line(depth, 'for (int64_t %s = %s; %s < %s; %s += 1) {' % (index, lo, index, hi, index))
         else:
@@ -1027,8 +1398,12 @@ class Emitter(object):
             self.line(depth, 'int64_t %s = ail_range_count(%s, %s, %s);' % (count, lo, hi, step))
             self.line(depth, 'for (int64_t %s = 0; %s < %s; %s++) {' % (k, k, count, k))
             self.line(depth + 1, 'int64_t %s = ail_range_value(%s, %s, %s);' % (index, lo, step, k))
+        if tag:
+            self.reset_roots(tag, depth + 1)
         self.region(body, depth + 1, ins)
         self.line(depth, '}')
+        if tag:
+            self.line(depth, '}')
         for r, a in zip(ins.results, body.args[1:]):
             self.names[r] = self.names[a]       # whether it ran out or broke, the carried variables
         self.leave_loop()
@@ -1045,11 +1420,12 @@ class Emitter(object):
                         yield x
 
 
-def emit_function(fn, pending=(), checked=False, summaries=None, unwind_name=None):
+def emit_function(fn, pending=(), checked=False, summaries=None, unwind_name=None, listval=None):
     """(signature text, function definition text, runtime needs {'parts','need','floor',
     'pending'}). `pending` lists the callees that have an exception entry point; the result's
     `pending` says whether this function has one too (then its text defines `<sym>__ir` and, under
     the function's own name, the wrapper legacy callers use)."""
-    em = Emitter(fn, pending, checked, summaries, unwind_name)
+    em = Emitter(fn, pending, checked, summaries, unwind_name, listval)
     sig, text = em.emit()
-    return sig, text, {'parts': em.parts, 'need': em.need, 'floor': em.floor, 'pending': em.is_pending}
+    return sig, text, {'parts': em.parts, 'need': em.need, 'floor': em.floor, 'pending': em.is_pending,
+                       'byval': em.byval}

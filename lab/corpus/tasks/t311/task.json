@@ -1,0 +1,6 @@
+{
+ "id": "t311",
+ "category": "dp",
+ "description": "Print the minimum number of coins needed to make the amount (or -1) and one optimal multiset of coins.",
+ "input_format": "coins"
+}

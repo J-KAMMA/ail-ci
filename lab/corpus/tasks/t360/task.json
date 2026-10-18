@@ -1,0 +1,6 @@
+{
+ "id": "t360",
+ "category": "dp",
+ "description": "Build a trie from the lowercase words, then print the number of nodes, and all words sharing the prefix equal to the first two letters of the first word, sorted.",
+ "input_format": "strings_n"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t215",
+ "category": "parsing",
+ "description": "For each line print the length of the longest valid parentheses substring considering only '(' and ')' characters (ignore other characters).",
+ "input_format": "parens"
+}

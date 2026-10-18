@@ -1,0 +1,6 @@
+{
+ "id": "t189",
+ "category": "parsing",
+ "description": "Using the re module, extract date, level and code with named groups and print the codes grouped by level; use sorted order.",
+ "input_format": "log_lines"
+}

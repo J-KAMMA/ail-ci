@@ -1,0 +1,6 @@
+{
+ "id": "t442",
+ "category": "errors_classes",
+ "description": "Use itertools: print combinations of 2 of the first 6 numbers, permutations of the first 3, the product of [0,1] repeated 3, accumulate (running sum) and chain of two lists.",
+ "input_format": "pos_nums"
+}

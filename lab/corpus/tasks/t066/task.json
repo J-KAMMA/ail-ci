@@ -1,0 +1,6 @@
+{
+ "id": "t066",
+ "category": "strings",
+ "description": "Print each line title-cased with str.title(), and then the same line with swapcase().",
+ "input_format": "text_lines"
+}

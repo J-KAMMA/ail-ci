@@ -1,0 +1,6 @@
+{
+ "id": "t358",
+ "category": "dp",
+ "description": "Implement a binary search tree with insertion; print the inorder traversal, the height, and the preorder traversal.",
+ "input_format": "nums"
+}

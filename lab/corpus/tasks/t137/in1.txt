@@ -1,0 +1,24 @@
+incr d 8
+set e 2
+count
+count
+get d
+set c 1
+set c 9
+count
+incr c 6
+count
+count
+count
+set a 1
+incr e 6
+set b 8
+set a 7
+set b 1
+set b 8
+set b 9
+set a 6
+get b
+del a
+set c 3
+count

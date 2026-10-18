@@ -10,9 +10,9 @@ import os
 
 from .. import effects as E
 from .. import ir as I
-from . import mem2reg, simplify, ranges, licm
+from . import mem2reg, simplify, ranges, licm, window
 
-ALL = ('mem2reg', 'simplify', 'ranges', 'licm')
+ALL = ('mem2reg', 'simplify', 'ranges', 'licm', 'window')
 
 
 def enabled():
@@ -39,11 +39,22 @@ def optimize(fn, program, facts=None, check=None):
             # a pass may add reads (a span over a list that was only written): the declared summary
             # follows the body between passes, exactly as it does at the end of this function
             E.summarize_program(program)
-            check(fn)
+            try:
+                check(fn)
+            except I.IRError:
+                dump = os.environ.get('AIL_IR_DUMP')
+                if dump:
+                    from .. import text
+                    open(dump, 'a').write('--- the IR the checker rejected\n' + text.print_function(fn))
+                raise
     if 'mem2reg' in on:
         stats['promoted'] = mem2reg.run(fn)
         after()
     if 'simplify' in on:
+        dump = os.environ.get('AIL_IR_DUMP')
+        if dump:
+            from .. import text
+            open(dump, 'a').write('--- before the first simplify\n' + text.print_function(fn))
         simplify.run(fn)
         after()
     if 'ranges' in on:
@@ -59,6 +70,9 @@ def optimize(fn, program, facts=None, check=None):
             after()
     if 'simplify' in on:
         simplify.run(fn)
+        after()
+    if 'window' in on and 'mem2reg' in on:
+        stats['windows'] = window.run(fn)
         after()
     E.summarize_program(program)
     return stats

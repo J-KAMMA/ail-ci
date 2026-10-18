@@ -1,0 +1,6 @@
+{
+ "id": "t438",
+ "category": "errors_classes",
+ "description": "Implement a generator fibonacci() and itertools.islice; print the first n Fibonacci numbers, and the first one over 10**6, using a for loop with break.",
+ "input_format": "small_int"
+}

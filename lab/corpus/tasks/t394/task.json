@@ -1,0 +1,6 @@
+{
+ "id": "t394",
+ "category": "simulation",
+ "description": "Simulate a 1-D random walk of n steps with random.Random(seed).choice([-1, 1]); print the final position, max, and min positions.",
+ "input_format": "seed_params"
+}

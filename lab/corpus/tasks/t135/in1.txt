@@ -1,0 +1,42 @@
+incr a 1
+incr c 4
+set d 7
+incr a 5
+set d 2
+del c
+get c
+del c
+del b
+count
+set c 2
+del e
+incr e 9
+set a 3
+del d
+count
+set c 6
+incr b 5
+set e 9
+del d
+count
+incr e 3
+set d 3
+incr a 3
+set c 7
+get e
+set e 5
+get a
+get d
+set b 3
+count
+set b 3
+set e 3
+set b 6
+set d 8
+del b
+get e
+del e
+count
+set d 7
+set e 5
+incr b 4

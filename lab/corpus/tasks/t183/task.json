@@ -1,0 +1,6 @@
+{
+ "id": "t183",
+ "category": "parsing",
+ "description": "Compute the depth of the nested JSON, the number of leaves, and print the sorted distinct leaf types by name (e.g. int, str).",
+ "input_format": "json_nested"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t050",
+ "category": "numbers",
+ "description": "Print n in Roman numerals for n, 2n, 3n (skip values above 3999), one per line.",
+ "input_format": "small_int"
+}

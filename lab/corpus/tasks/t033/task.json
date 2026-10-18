@@ -1,0 +1,6 @@
+{
+ "id": "t033",
+ "category": "numbers",
+ "description": "Print each number rounded to the nearest integer using Python's round(), then floored and ceiled, as 'r f c' lines.",
+ "input_format": "floats"
+}

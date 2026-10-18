@@ -1,0 +1,6 @@
+{
+ "id": "t035",
+ "category": "numbers",
+ "description": "Print the numbers sorted by absolute value (stable), formatted with 3 decimals, one line.",
+ "input_format": "floats"
+}

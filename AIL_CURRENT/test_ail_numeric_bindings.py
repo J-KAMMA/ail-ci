@@ -37,7 +37,7 @@ fn main()->int {
  print(convert(0));print(convert(4610560118520545280));print(convert(-9223372036854775808));
  print(convert(-4332462841530417152));print(convert(4890909195324358655));
  let bad:list[int]=[9221120237041090560,9218868437227405312,-4503599627370496,4890909195324358656,-4332462841530417151];
- for bits in bad {try {convert(bits);}except ValueError {print("ValueError");}}
+ for bits in bad {try {convert(bits);}except ValueError {print("ValueError");}except OverflowError {print("OverflowError");}}
  return 0;
 }
 '''
@@ -46,7 +46,8 @@ def write_stdout_bytes(data):
  sys.stdout.flush();sys.stdout.buffer.write(data);sys.stdout.buffer.flush()
 _original_int=builtins.int
 def int(value):
- if isinstance(value,float) and (not math.isfinite(value) or not -2**63<=value<2**63):raise ValueError("int64 conversion")
+ if isinstance(value,float) and math.isnan(value):raise ValueError("cannot convert float NaN to integer")
+ if isinstance(value,float) and (not math.isfinite(value) or not -2**63<=value<2**63):raise OverflowError("int64 conversion")
  return _original_int(value)
 def integer_encode(values,width,order):return b"".join(_original_int(x).to_bytes(width,"little" if order==0 else "big",signed=True) for x in values)
 def float64_decode(data,order):return [struct.unpack("<d" if order==0 else ">d",data[i:i+8])[0] for i in builtins.range(0,len(data),8)]
@@ -54,7 +55,13 @@ def float64_decode(data,order):return [struct.unpack("<d" if order==0 else ">d",
 BRANCH_JOIN='''fn probe(flag:int)->float {let item=0;if flag {item=1.5;}else {item=7;}return item+0;} fn compare(flag:int)->int {let item=0;if flag {item=1.5;}else {item=7;}if item==1 {return 1;}return 0;} fn main()->int {print(probe(1));print(int(probe(0)));print(compare(1));return 0;}'''
 COMPARE_BOUNDARY='''fn main()->int {let floats:list[float]=[1.5];for item in floats {}item=9223372036854775807;let f=9223372036854775808.0;if item<f {print("less");}if item==f {print("bad");}if f>item {print("greater");}item=-9223372036854775808;if item== -9223372036854775808.0 {print("equal");}return 0;}'''
 VECTORS=(BRANCH_JOIN,COMPARE_BOUNDARY,MIXED_ITERATOR_WHOLE,FLOW,SHADOW_RANGE,POST_ASSIGN,AFTER_NESTED,UNDER_NAME,LITERAL_MARKER,MIN_MOD,CAST_BOUNDS)
-def generated(source):return candidate.to_c(translate(source),name='run',strict=True)
+def generated(source):
+ # (the C the legacy emitter writes: pinned and inspected here whatever AIL_IR says)
+ saved=os.environ.get('AIL_IR');os.environ['AIL_IR']='0'
+ try:return candidate.to_c(translate(source),name='run',strict=True)
+ finally:
+  if saved is None:os.environ.pop('AIL_IR',None)
+  else:os.environ['AIL_IR']=saved
 class NumericBindingTypeTests(unittest.TestCase):
  def test_original_mixed_iterator_integer_storage(self):
   c=generated(MIXED_ITERATOR_WHOLE)
@@ -77,7 +84,7 @@ class NumericBindingTypeTests(unittest.TestCase):
  def test_nonmixed_full_c_is_unchanged(self):
   import hashlib
   sources=('fn main()->int {let x=7;print(x);x+=2;print(x);return 0;}','fn main()->int {let x=1.5;print(x);return 0;}')
-  pins=('07a941fc47102277cf2b3ddfaefaf13ebd46884406c352f1c0b2b5823e4b8968','ef8396c7b137b27b13f527a9e8e9239f91b89f545c60be3083bd25fcc2278664')
+  pins=('e1da99c7d257968b119a1eb0b067183c048ffcba7f59eae58eaa566de7a7dea9','1b22e521b4ceb683abfc302ea558d2fa3c612c1269677f3f97fa2cd1a3620182')
   for source,pin in zip(sources,pins):self.assertEqual(hashlib.sha256(generated(source).encode()).hexdigest(),pin)
 @unittest.skipUnless(os.environ.get('PIPE_CC') or shutil.which('cc') or shutil.which('gcc'),'installed C compiler required')
 class NumericBindingNativeTests(unittest.TestCase):

@@ -1,0 +1,6 @@
+{
+ "id": "t481",
+ "category": "errors_classes",
+ "description": "Use a deque with rotate and maxlen=5 to process the numbers; print the deque after each element and the sum of the final deque.",
+ "input_format": "nums_nocount"
+}

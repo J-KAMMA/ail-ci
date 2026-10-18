@@ -1,0 +1,7 @@
+{
+ "note": "print/repr of a dataclass prints <Row object> instead of Row(a=1, word=x) (t161)",
+ "from": "",
+ "cpython_rc": 0,
+ "default": "run rc=0, stdout DIFFERS",
+ "ir": "run rc=0, stdout DIFFERS"
+}

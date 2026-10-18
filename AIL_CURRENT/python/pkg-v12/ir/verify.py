@@ -20,15 +20,27 @@ S0 does not have; they arrive with S3.
 """
 from . import ir as I
 from . import effects as E
+from . import rtc
 
 _LIST_I64 = I.T('obj', I.T('list', I.I64))
 _LIST_F64 = I.T('obj', I.T('list', I.F64))
+_LIST_STR = I.T('obj', I.T('list', I.STRV))
 _BA = I.T('obj', I.T('bytearray'))
+
+
+class _Listy(object):
+    """The owned-list types: lists of int, float, str, and lists of scalar records."""
+    def __contains__(self, t):
+        return t in (_LIST_I64, _LIST_F64, _LIST_STR) or I.rec_elem(t) is not None
+
+
+_LISTY = _Listy()
 S0_TYPES = frozenset([I.I1, I.I64, I.F64])
 # S1 adds read-only bytes views and numeric lists / struct objects reached through borrows
 S1_TYPES = S0_TYPES | frozenset([I.T('bytes'), I.T('obj', I.T('list', I.I64)),
                                  I.T('obj', I.T('list', I.F64)), I.T('span', I.I64), I.T('span', I.F64),
-                                 I.T('span', I.T('u8')), I.T('obj', I.T('bytearray'))])
+                                 I.T('span', I.T('u8')), I.T('obj', I.T('bytearray')), I.STRV,
+                                 I.T('obj', I.T('list', I.STRV))])
 
 
 class _Checker(object):
@@ -51,7 +63,7 @@ class _Checker(object):
         base = t.pointee if t.is_place else t
         if self.stage == 'S0' and base not in S0_TYPES:
             self.err(where, 'type %s is not in the S0 subset (i1, i64, f64 and places of them)' % t)
-        elif self.stage == 'S1' and base not in S1_TYPES and not (
+        elif self.stage == 'S1' and base not in S1_TYPES and I.rec_elem(base) is None and base != I.DICT_II and not (
                 base.head == 'obj' and base.args[0].head == 'class'):
             self.err(where, 'type %s is not in the S1 subset' % t)
 
@@ -91,14 +103,15 @@ class _Checker(object):
 
     # ------------------------------------------------------------------ ownership of lists (S3a)
     _RESIZERS = ('list.push', 'list.pop', 'list.clear', 'list.reset', 'list.repeat', 'list.lit',
-                 'list.reserve', 'list.move', 'list.call')
+                 'list.reserve', 'list.move', 'list.call', 'list.copy', 'list.rt', 'list.sortperm',
+                 'rec.push', 'rec.pop')
 
     def _resizes(self, ins, root, defs):
         """Whether `ins` may change the length or storage of the list rooted at `root` (an owned
         local: only an operation naming that very list can; a call cannot, it has no way to name it)."""
         if ins.op not in self._RESIZERS:
             return False
-        refs = ins.operands[:2] if ins.op == 'list.move' else ins.operands[:1]
+        refs = ins.operands[:2] if ins.op in ('list.move', 'list.copy') else ins.operands[:1]
         return any(E._root(r, self.fn, defs) in (root, 'Any') for r in refs)
 
     def check_ownership(self):
@@ -106,7 +119,7 @@ class _Checker(object):
         operand of the instruction that uses it -- it is never stored, carried by a loop, yielded
         by a region or selected -- so no second owner exists; the function lists its owned places."""
         fn = self.fn
-        listy = (_LIST_I64, _LIST_F64)
+        listy = _LISTY
         places = []
         for ins in I.walk(fn.body):
             if ins.op == 'local.alloc' and ins.result.type.pointee in listy:
@@ -114,8 +127,10 @@ class _Checker(object):
             if ins.op in ('store', 'load') and ins.operands[0].type.is_place \
                     and ins.operands[0].type.pointee in listy:
                 self.err(ins.op, 'an owned list is changed by list.* operations, never loaded or stored')
-            if ins.op == 'local.alloc' and ins.result.type.pointee == _BA:
+            if ins.op == 'local.alloc' and ins.result.type.pointee in (_BA, I.DICT_II):
                 places.append(ins.attrs.get('name'))
+            if ins.op in ('store', 'load') and ins.operands[0].type.is_place and ins.operands[0].type.pointee == I.DICT_II:
+                self.err(ins.op, 'an owned dictionary is changed by dict.* operations, never loaded or stored')
             if ins.op == 'store' and ins.operands[0].type.is_place and ins.operands[0].type.pointee == _BA:
                 self.err(ins.op, 'an owned bytearray is replaced by ba.new, never stored (the reference count)')
             carried = []
@@ -264,9 +279,10 @@ class _Checker(object):
             return self._binary(ins, where, (I.I64, I.I1), None)
         self._mode(ins, where, ('ck', 'nonneg') if ins.op in ('floordiv', 'floormod') else I.ARITH_MODES)
         if ins.attrs.get('mode') == 'nonneg':
+            # (a constant divisor is checked here; a variable one was proven positive by the range pass)
             d = E.const_value(ins.operands[1], E.defs_of(self.fn))
-            self.want(where, isinstance(d, int) and not isinstance(d, bool) and d > 0,
-                      'mode nonneg needs a positive constant divisor')
+            self.want(where, d is None or (isinstance(d, int) and not isinstance(d, bool) and d > 0),
+                      'mode nonneg needs a positive divisor')
         self._binary(ins, where, (I.I64,), I.I64)
 
     def op_float_binary(self, ins, scope, stack, where, top):
@@ -352,7 +368,16 @@ class _Checker(object):
         if not self.want(where, entry is not None, 'unknown runtime entry %r' % ins.attrs.get('callee')):
             return
         params, results, _ = entry
-        self.want(where, tuple(self.types(ins.operands)) == tuple(params), 'runtime argument mismatch')
+        spec = E.rtc.ENTRIES.get(ins.attrs.get('callee'))
+        if spec is not None and spec['variadic']:
+            # one repeated parameter type (str_catn): at least one operand
+            self.want(where, len(ins.operands) >= 1 and all(t == params[0] for t in self.types(ins.operands)),
+                      'runtime argument mismatch')
+        else:
+            self.want(where, tuple(self.types(ins.operands)) == tuple(params), 'runtime argument mismatch')
+        if spec is not None:
+            for a in spec['attrs']:
+                self.want(where, a in ins.attrs, 'runtime entry %s needs attribute %s' % (ins.attrs['callee'], a))
         self.want(where, tuple(self.types(ins.results)) == tuple(results), 'runtime result mismatch')
 
     def _index_mode(self, ins, where):
@@ -411,13 +436,13 @@ class _Checker(object):
 
     # ------------------------------------------------------------------ owned lists (S3a)
     def _is_list_ref(self, v):
-        return v.type in (_LIST_I64, _LIST_F64)
+        return v.type in _LISTY
 
     def op_list_ref(self, ins, scope, stack, where, top):
         if not self.nresults(ins, where, 1):
             return
         p = ins.operands[0]
-        if self.want(where, p.type.is_place and p.type.pointee in (_LIST_I64, _LIST_F64),
+        if self.want(where, p.type.is_place and p.type.pointee in _LISTY,
                      'list.ref takes the place of an owned list'):
             self.want(where, ins.result.type == p.type.pointee, "list.ref yields a borrow of the place's list")
             d = E.defs_of(self.fn).get(p)
@@ -449,6 +474,117 @@ class _Checker(object):
         d, s = ins.operands
         self.want(where, self._is_list_ref(d) and d.type == s.type, 'list.move takes two lists of one type')
         self.want(where, d is not s, 'list.move of a list into itself')
+
+    # ------------------------------------------------------------------ owned lists of str (S3c-1)
+    def op_list_rt(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        callee = ins.attrs.get('callee')
+        entry = rtc.LIST_ENTRIES.get(callee)
+        if not self.want(where, entry is not None, 'list.rt of an unknown runtime call %r' % (callee,)):
+            return
+        dst, args = ins.operands[0], ins.operands[1:]
+        self.want(where, dst.type == _LIST_STR, 'list.rt fills a list of str')
+        self.want(where, list(self.types(args)) == list(entry['params']),
+                  'list.rt %s takes (%s)' % (callee, ', '.join(map(str, entry['params']))))
+
+    def op_list_sortperm(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        perm, cols = ins.operands[0], ins.operands[1:]
+        self.want(where, perm.type == _LIST_I64, 'list.sortperm fills a list of int')
+        self.want(where, all(c.type in (_LIST_I64, _LIST_F64, _LIST_STR) for c in cols),
+                  'list.sortperm takes key columns that are lists of int, float or str')
+        self.want(where, ins.attrs.get('rev') in (0, 1), 'list.sortperm needs rev = 0 or 1')
+
+    def op_list_permute(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        xs, perm = ins.operands
+        self.want(where, xs.type in (_LIST_I64, _LIST_F64, _LIST_STR) and perm.type == _LIST_I64,
+                  'list.permute takes (list of int, float or str; list of int)')
+        self.want(where, xs is not perm, 'list.permute of a list by itself')
+
+    def op_rec_push(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        r = ins.operands[0]
+        e = I.rec_elem(r.type)
+        self.want(where, e is not None and list(self.types(ins.operands[1:])) == list(e.args),
+                  'rec.push takes (list of records, one value per field)')
+
+    def _rec_key(self, ins, where, e):
+        key = ins.attrs.get('key')
+        self.want(where, isinstance(key, list) and key and all(isinstance(k, int) and not isinstance(k, bool)
+                                                                and 0 <= k < len(e.args) for k in key),
+                  'a record heap needs key = field indices')
+
+    def op_rec_up(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        e = I.rec_elem(ins.operands[0].type)
+        if self.want(where, e is not None, 'rec.up takes a list of records'):
+            self._rec_key(ins, where, e)
+
+    def op_rec_pop(self, ins, scope, stack, where, top):
+        e = I.rec_elem(ins.operands[0].type)
+        if self.want(where, e is not None, 'rec.pop takes a list of records'):
+            self._rec_key(ins, where, e)
+            self.want(where, list(self.types(ins.results)) == list(e.args), 'rec.pop yields one value per field')
+
+    def _dict_place(self, ins, where):
+        p = ins.operands[0]
+        ok = p.type.is_place and p.type.pointee == I.DICT_II
+        self.want(where, ok, '%s takes the place of an int dictionary' % ins.op)
+        return ok
+
+    def op_dict_has(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 1) and self._dict_place(ins, where):
+            self.want(where, ins.operands[1].type == I.I64 and ins.result.type == I.I1, 'dict.has takes (place, i64) and yields i1')
+
+    def op_dict_need(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 1) and self._dict_place(ins, where):
+            self.want(where, ins.operands[1].type == I.I64 and ins.result.type == I.I64, 'dict.need takes (place, i64) and yields i64')
+
+    def op_dict_get(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 1) and self._dict_place(ins, where):
+            self.want(where, ins.operands[1].type == I.I64 and ins.operands[2].type == I.I64
+                      and ins.result.type == I.I64, 'dict.get takes (place, i64, i64) and yields i64')
+
+    def op_dict_put(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 0) and self._dict_place(ins, where):
+            self.want(where, ins.operands[1].type == I.I64 and ins.operands[2].type == I.I64, 'dict.put takes (place, i64, i64)')
+
+    def op_dict_len(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 1) and self._dict_place(ins, where):
+            self.want(where, ins.result.type == I.I64, 'dict.len yields i64')
+
+    def op_dict_reset(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 0):
+            self._dict_place(ins, where)
+
+    def op_list_has(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 1):
+            L, v = ins.operands
+            self.want(where, L.type == _LIST_STR and v.type == I.STRV and ins.result.type == I.I1,
+                      'list.has takes (list of str, str) and yields i1')
+
+    def op_list_sort(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        self.want(where, ins.operands[0].type in (_LIST_STR, _LIST_I64, _LIST_F64),
+                  'list.sort takes a list of str, int or float')
+
+    def op_list_join(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 1):
+            sep, L = ins.operands
+            self.want(where, sep.type == I.STRV and L.type == _LIST_STR and ins.result.type == I.STRV,
+                      'list.join takes (str, list of str) and yields str')
+
+    def op_list_share(self, ins, scope, stack, where, top):
+        self.err(where, 'list.share is resolved by the ownership analysis before verification')
+
+    def op_list_copy(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        d, s = ins.operands
+        elem = self._list_elem(d)
+        ok = self._is_list_ref(d) and elem is not None and (
+            s.type == d.type or s.type == I.T('span', elem))
+        self.want(where, ok, 'list.copy takes (list, list or span of the same element type)')
 
     def op_list_call(self, ins, scope, stack, where, top):
         self.nresults(ins, where, 0)
@@ -503,6 +639,36 @@ class _Checker(object):
         self.want(where, isinstance(data, list) and all(isinstance(x, int) and not isinstance(x, bool)
                                                          and 0 <= x <= 255 for x in data),
                   'ba.extend_lit needs data = [byte values]')
+
+    def _is_obj(self, t):
+        return t.head == 'obj' and t.args[0].head == 'class'
+
+    def op_obj_init(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        p = ins.operands[0]
+        if not self.want(where, p.type.is_place and self._is_obj(p.type.pointee), 'obj.init takes the place of an object'):
+            return
+        info = (self.program.object_classes.get(p.type.pointee.args[0].name)
+                if self.program is not None and hasattr(self.program, 'object_classes') else None)
+        abi = ins.attrs.get('abi')
+        self.want(where, isinstance(abi, list) and len(abi) == len(ins.operands) - 1
+                  and all(a in ('value', 'list') for a in abi), 'obj.init needs abi = [value|list, ...]')
+        self.want(where, ins.attrs.get('cls') == p.type.pointee.args[0].name, 'obj.init names the place\'s class')
+        if isinstance(abi, list) and len(abi) == len(ins.operands) - 1:
+            for v, a in zip(ins.operands[1:], abi):
+                self.want(where, self._is_list_ref(v) if a == 'list' else v.type.is_scalar or v.type in (I.BYTES, I.STRV),
+                          'obj.init argument of type %s as %s' % (v.type, a))
+
+    def op_obj_copyref(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        p, o = ins.operands
+        self.want(where, p.type.is_place and p.type.pointee == o.type and self._is_obj(o.type),
+                  'obj.copyref takes (place of an object, object of that class)')
+
+    def op_ba_extend(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        self.want(where, self._is_ba(ins.operands[0]) and ins.operands[1].type == I.BYTES,
+                  'ba.extend takes (bytearray, bytes)')
 
     def op_field_ba(self, ins, scope, stack, where, top):
         if self.nresults(ins, where, 1):
@@ -575,6 +741,40 @@ class _Checker(object):
         elem = self._span_elem(ins.operands[0])
         self.want(where, elem is not None and ins.operands[1].type == I.I64 and ins.operands[2].type == elem,
                   'span.set takes (span, i64, element)')
+
+    # ------------------------------------------------------------------ text (S4a)
+    def op_str_lit(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 1):
+            self.want(where, ins.result.type == I.STRV and isinstance(ins.attrs.get('value'), str),
+                      'str.lit yields a strv and carries its text')
+
+    def op_bytes_lit(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 1):
+            data = ins.attrs.get('data')
+            self.want(where, ins.result.type == I.BYTES and isinstance(data, list)
+                      and all(isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= 255 for x in data),
+                      'bytes.lit yields bytes and carries its byte values')
+
+    _PRINT_KINDS = {'int': I.I64, 'flt': I.F64, 'str': I.STRV, 'bool': I.I64}
+
+    def op_print(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        kinds = ins.attrs.get('kinds')
+        if not self.want(where, isinstance(kinds, list) and all(k in self._PRINT_KINDS for k in kinds),
+                         'print needs kinds = [int|flt|str|bool, ...]'):
+            return
+        stream = ins.attrs.get('stream', 'stdout')
+        self.want(where, stream in ('stdout', 'stderr'), 'print stream is stdout or stderr')
+        extra = int(bool(ins.attrs.get('sep'))) + int(bool(ins.attrs.get('end')))
+        if self.want(where, len(ins.operands) == len(kinds) + extra, 'print takes its values, then sep, then end'):
+            for v, k in zip(ins.operands, kinds):
+                self.want(where, v.type == self._PRINT_KINDS[k] or (k in ('int', 'bool') and v.type == I.I1),
+                          'print %s argument has type %s' % (k, v.type))
+            for v in ins.operands[len(kinds):]:
+                self.want(where, v.type == I.STRV, 'print sep and end are strings')
+        if ins.attrs.get('parts'):
+            self.want(where, len(kinds) >= 1 and all(k == 'str' for k in kinds) and extra == 0
+                      and stream == 'stdout', 'print parts: strings only, to stdout, no sep or end')
 
     def op_field_get(self, ins, scope, stack, where, top):
         if self.nresults(ins, where, 1):

@@ -1,0 +1,6 @@
+{
+ "id": "t116",
+ "category": "strings",
+ "description": "Print the one-line text with its words wrapped using textwrap.fill at width 30, and then with textwrap.shorten at width 40.",
+ "input_format": "words_line"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t117",
+ "category": "strings",
+ "description": "Check whether the two words are rotations of each other, whether one is a subsequence of the other, and print their common letters sorted.",
+ "input_format": "two_words_line"
+}

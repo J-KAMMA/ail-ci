@@ -1,0 +1,6 @@
+{
+ "id": "t323",
+ "category": "dp",
+ "description": "Select the maximum number of non-overlapping intervals (greedy by end time) and print the count and the chosen intervals.",
+ "input_format": "intervals"
+}

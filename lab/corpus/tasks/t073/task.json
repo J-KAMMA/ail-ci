@@ -1,0 +1,6 @@
+{
+ "id": "t073",
+ "category": "strings",
+ "description": "Left-justify, right-justify and centre each line in a width of 40 using '.' as the fill character, one block per line of input.",
+ "input_format": "text_lines"
+}

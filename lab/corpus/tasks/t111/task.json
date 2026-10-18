@@ -1,0 +1,6 @@
+{
+ "id": "t111",
+ "category": "strings",
+ "description": "Find the longest substring without repeating characters in the whole line (spaces included); print it and its length.",
+ "input_format": "words_line"
+}

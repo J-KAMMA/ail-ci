@@ -1,0 +1,52 @@
+```python
+import sys
+
+
+def parse_ints(s: str) -> list[int]:
+    res: list[int] = []
+    for tok in s.split():
+        res.append(int(tok))
+    return res
+
+
+def rotate_right(xs: list[int], k: int) -> list[int]:
+    res: list[int] = []
+    n: int = len(xs)
+    if n == 0:
+        return res
+    m: int = k % n
+    tail: list[int] = []
+    head: list[int] = []
+    i: int = 0
+    for v in xs:
+        if i < n - m:
+            head.append(v)
+        else:
+            tail.append(v)
+        i += 1
+    for v in tail:
+        res.append(v)
+    for v in head:
+        res.append(v)
+    return res
+
+
+def main() -> int:
+    lines: list[str] = []
+    for line in sys.stdin:
+        s: str = line.strip()
+        if len(s) > 0:
+            lines.append(s)
+    k: int = int(lines[0])
+    nums: list[int] = parse_ints(lines[1])
+    res: list[int] = rotate_right(nums, k)
+    out: list[str] = []
+    for v in res:
+        out.append(str(v))
+    print(" ".join(out))
+    return 0
+
+
+if __name__ == "__main__":
+    main()
+```

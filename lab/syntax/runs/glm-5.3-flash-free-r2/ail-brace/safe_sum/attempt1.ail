@@ -1,0 +1,34 @@
+```ail
+fn is_int(s: str) -> bool {
+    let res: bool = false;
+    if s.isdigit() {
+        res = true;
+    } elif len(s) > 1 and s[0] == "-" {
+        res = s[1:].isdigit();
+    }
+    return res;
+}
+
+fn main() -> int {
+    let total = 0;
+    for line in sys.stdin {
+        let toks: list[str] = line.split();
+        for t in toks {
+            let ok: bool = is_int(t);
+            if ok {
+                try {
+                    total += int(t);
+                }
+                except ValueError as err {
+                    ok = false;
+                }
+            }
+            if not ok {
+                print(f"bad: {t}");
+            }
+        }
+    }
+    print(f"sum={total}");
+    return 0;
+}
+```

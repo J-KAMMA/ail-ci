@@ -1,0 +1,6 @@
+{
+ "id": "t258",
+ "category": "grids",
+ "description": "Print the closest pair of points (brute force) with its squared distance, ties by first found in sorted order of the points; if fewer than two points print 'none'.",
+ "input_format": "points"
+}

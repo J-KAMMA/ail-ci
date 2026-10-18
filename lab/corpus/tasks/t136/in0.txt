@@ -1,0 +1,16 @@
+set e 5
+count
+get a
+incr e 7
+set e 6
+set d 9
+set b 6
+get d
+incr d 5
+del d
+incr c 7
+del c
+get e
+get d
+del c
+count

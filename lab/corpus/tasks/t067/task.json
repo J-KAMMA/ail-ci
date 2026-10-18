@@ -1,0 +1,6 @@
+{
+ "id": "t067",
+ "category": "strings",
+ "description": "Capitalise the first letter of each sentence (after '.', '!' or at the start), leaving the rest untouched; print the result.",
+ "input_format": "text_lines"
+}

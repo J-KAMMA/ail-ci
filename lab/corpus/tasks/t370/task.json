@@ -1,0 +1,6 @@
+{
+ "id": "t370",
+ "category": "sorting",
+ "description": "Print the words sorted by length descending, then reverse alphabetical.",
+ "input_format": "strings_n"
+}

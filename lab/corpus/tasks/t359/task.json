@@ -1,0 +1,6 @@
+{
+ "id": "t359",
+ "category": "dp",
+ "description": "Implement a min-heap by hand with sift-up/sift-down and print the elements popped in order, then compare with heapq.",
+ "input_format": "nums"
+}

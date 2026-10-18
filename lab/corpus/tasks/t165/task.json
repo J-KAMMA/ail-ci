@@ -1,0 +1,6 @@
+{
+ "id": "t165",
+ "category": "parsing",
+ "description": "Using the csv module, print the oldest employee per department (ties: first listed) as 'dept: name (age)'.",
+ "input_format": "csv_table"
+}

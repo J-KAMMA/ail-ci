@@ -1,0 +1,6 @@
+{
+ "id": "t163",
+ "category": "collections",
+ "description": "Print the days sorted by mean temperature descending, and the longest streak of consecutive input lines with a temperature above the overall mean.",
+ "input_format": "temps"
+}

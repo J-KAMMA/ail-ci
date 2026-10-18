@@ -1,0 +1,6 @@
+{
+ "id": "t145",
+ "category": "collections",
+ "description": "Use itertools.zip_longest with fill value 0 to add the two lists elementwise and print the result.",
+ "input_format": "two_lists"
+}

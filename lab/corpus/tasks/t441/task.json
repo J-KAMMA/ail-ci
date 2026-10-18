@@ -1,0 +1,6 @@
+{
+ "id": "t441",
+ "category": "errors_classes",
+ "description": "Use functools.reduce with a lambda to compute the product, the gcd and the string concatenation of the numbers; print all three.",
+ "input_format": "pos_nums"
+}

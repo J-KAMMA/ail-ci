@@ -1,0 +1,6 @@
+{
+ "id": "t283",
+ "category": "graphs",
+ "description": "Print the eccentricity of each node (max shortest distance with weights) and the graph's radius and centre nodes.",
+ "input_format": "edges_w"
+}

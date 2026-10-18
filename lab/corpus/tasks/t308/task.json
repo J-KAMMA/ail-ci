@@ -1,0 +1,6 @@
+{
+ "id": "t308",
+ "category": "dp",
+ "description": "Compute the longest common substring of the two strings (first found in the first string) and its length.",
+ "input_format": "two_strings"
+}

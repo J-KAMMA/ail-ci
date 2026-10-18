@@ -1,0 +1,6 @@
+{
+ "id": "t022",
+ "category": "numbers",
+ "description": "Compute the product of every number except the one at index i, for each i, without using division by zero; print as one line (use Python big integers).",
+ "input_format": "pos_nums"
+}

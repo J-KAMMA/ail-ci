@@ -1,0 +1,6 @@
+{
+ "id": "t325",
+ "category": "dp",
+ "description": "Compute the minimum number of rooms needed using a min-heap of end times, and print the total idle time between intervals when merged.",
+ "input_format": "intervals"
+}

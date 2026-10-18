@@ -1,0 +1,6 @@
+{
+ "id": "t106",
+ "category": "strings",
+ "description": "Print the number of distinct letters across all words, the letters that never appear (a-z) and the most frequent letter (alphabetically smallest on ties).",
+ "input_format": "words_line"
+}

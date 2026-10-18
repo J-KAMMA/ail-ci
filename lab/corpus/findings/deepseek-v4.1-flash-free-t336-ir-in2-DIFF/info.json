@@ -1,0 +1,11 @@
+{
+ "model": "deepseek-v4.1-flash-free",
+ "task": "t336",
+ "mode": "ir",
+ "cpython_failed_all": false,
+ "input": 2,
+ "cls": "DIFF",
+ "reason": "line 1: cpython='187' ail='1'",
+ "cpython_rc": 0,
+ "ail_rc": 0
+}

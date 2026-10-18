@@ -1,0 +1,6 @@
+{
+ "id": "t267",
+ "category": "graphs",
+ "description": "Compute the diameter (longest shortest path) of the tree/graph using BFS from every node, and print it with the pair of endpoints (smallest pair on ties).",
+ "input_format": "edges_plain"
+}

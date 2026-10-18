@@ -1,0 +1,6 @@
+{
+ "id": "t259",
+ "category": "grids",
+ "description": "Print the centroid with 3 decimals, the point farthest from the centroid, and the area of the bounding box.",
+ "input_format": "points"
+}

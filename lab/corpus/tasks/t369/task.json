@@ -1,0 +1,6 @@
+{
+ "id": "t369",
+ "category": "sorting",
+ "description": "Count the students per (grade, age) combination, print combinations sorted, and the combination with the most students.",
+ "input_format": "student_records"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t497",
+ "category": "errors_classes",
+ "description": "Take the word with the most characters per UTF-8 byte (lowest bytes/chars ratio first) and print it with its ratio to 3 decimals; print the ASCII ratio for the whole text.",
+ "input_format": "words_line_uni"
+}

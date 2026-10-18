@@ -1,0 +1,7 @@
+{
+ "note": "x in <iterator from iter()> inside all() builds, then fails at run time (t117, t310)",
+ "from": "",
+ "cpython_rc": 0,
+ "default": "run rc=1, stdout DIFFERS",
+ "ir": "run rc=1, stdout DIFFERS"
+}

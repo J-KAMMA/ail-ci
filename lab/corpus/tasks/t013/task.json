@@ -1,0 +1,6 @@
+{
+ "id": "t013",
+ "category": "numbers",
+ "description": "Partition into negative, zero and positive numbers; print each group on its own line (sorted ascending, '-' if empty).",
+ "input_format": "nums"
+}

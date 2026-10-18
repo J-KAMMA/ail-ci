@@ -1,0 +1,6 @@
+{
+ "id": "t069",
+ "category": "strings",
+ "description": "For each line print its length, the length of its longest word, and the longest word itself ('-' for empty lines).",
+ "input_format": "text_lines"
+}

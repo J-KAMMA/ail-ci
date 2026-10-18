@@ -1,0 +1,6 @@
+{
+ "id": "t112",
+ "category": "strings",
+ "description": "Print the line after removing consecutive duplicate characters, and the length before and after.",
+ "input_format": "words_line"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t428",
+ "category": "errors_classes",
+ "description": "Use dict.get, setdefault and KeyError handling: build counts of tokens; look up the keys '5', '0', '-3', '2' and print each result or 'missing' via try/except KeyError.",
+ "input_format": "opt_ints_lines"
+}

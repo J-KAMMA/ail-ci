@@ -1,0 +1,23 @@
+```python
+import sys
+
+def main() -> int:
+    for line in sys.stdin:
+        parts = line.split()
+        if len(parts) == 0:
+            continue
+        nums: list[int] = []
+        for p in parts:
+            nums.append(int(p))
+        out: list[str] = []
+        best: int = nums[0]
+        for x in nums:
+            if x > best:
+                best = x
+            out.append(str(best))
+        print(" ".join(out))
+    return 0
+
+if __name__ == "__main__":
+    main()
+```

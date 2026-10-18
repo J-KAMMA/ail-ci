@@ -1,0 +1,6 @@
+{
+ "id": "t063",
+ "category": "numbers",
+ "description": "Print the numbers in comma-grouped format ('{:,}') and in hex with 0x prefix, one per line.",
+ "input_format": "big_ints"
+}

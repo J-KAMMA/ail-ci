@@ -1,0 +1,6 @@
+{
+ "id": "t056",
+ "category": "numbers",
+ "description": "Print n spelled in English words (e.g. 'one hundred twenty-three') for values up to 5000.",
+ "input_format": "one_int"
+}

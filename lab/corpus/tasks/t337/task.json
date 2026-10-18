@@ -1,0 +1,6 @@
+{
+ "id": "t337",
+ "category": "dp",
+ "description": "Solve the N-Queens puzzle for n = the integer given; print the number of solutions and the first solution (as column indices of each row) in lexicographic order.",
+ "input_format": "small_int"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t281",
+ "category": "graphs",
+ "description": "Run Bellman-Ford from node 0 and print the distances.",
+ "input_format": "edges_w"
+}

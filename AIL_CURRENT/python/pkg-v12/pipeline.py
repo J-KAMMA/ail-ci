@@ -55,15 +55,26 @@ def compiler():
     raise PipelineError('no C compiler found on PATH; set $PIPE_CC')
 
 
+def ffi_link_args():
+    """Extra link arguments for C libraries named by @extern stubs (G4); empty unless AIL_FFI_LINK is set."""
+    import shlex
+    return shlex.split(os.environ.get('AIL_FFI_LINK', ''))
+
+
 def link_flags():
     """Dynamic linking is the default on Linux and macOS: a typed program is then about 30 KB
     instead of about 800 KB with a static glibc (decided 2026-10-11). AIL_STATIC=1 (set by
     `ail_chatgpt.py compile --static`) links statically, for a binary that runs on any Linux
     without the same C library. Windows keeps static linking, so a MinGW build needs no runtime
     DLLs beside it."""
-    if os.name == 'nt' or os.environ.get('AIL_STATIC') == '1':
-        return ['-static']
-    return []
+    flags = []
+    windows = os.name == 'nt' or os.environ.get('AIL_TARGET_OS') == 'windows'   # --target windows
+    if windows or os.environ.get('AIL_STATIC') == '1':
+        flags.append('-static')
+    if windows:
+        # UTF-8 console (decision Q8): a separate unit, so the generated C is the same everywhere.
+        flags += ['-D_Exit=ail_wincon_exit', str(pathlib.Path(__file__).resolve().with_name('ail_wincon.c'))]
+    return flags
 
 def cache_dir():
     d = os.environ.get('PIPE_CACHE')

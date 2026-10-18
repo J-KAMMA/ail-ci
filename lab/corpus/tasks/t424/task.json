@@ -1,0 +1,6 @@
+{
+ "id": "t424",
+ "category": "errors_classes",
+ "description": "Compute 100 divided by each line's integer value; catch ZeroDivisionError and ValueError separately, print 'zero', 'bad' or the quotient with 2 decimals.",
+ "input_format": "opt_ints_lines"
+}

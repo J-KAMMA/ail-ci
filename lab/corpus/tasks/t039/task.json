@@ -1,0 +1,6 @@
+{
+ "id": "t039",
+ "category": "numbers",
+ "description": "Print the sum of two integers a and b, their difference, product, floor division, modulo and a**b only when b<=20 (else 'big').",
+ "input_format": "two_ints"
+}

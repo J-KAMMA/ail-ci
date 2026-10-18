@@ -1,0 +1,6 @@
+{
+ "id": "t122",
+ "category": "collections",
+ "description": "Use collections.Counter to count names; print the 3 most common via most_common(3), and the total of the rest.",
+ "input_format": "name_scores"
+}

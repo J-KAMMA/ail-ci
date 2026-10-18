@@ -1,0 +1,7 @@
+{
+ "note": "str in a tuple of str literals builds, then fails at run time with TypeError (t414)",
+ "from": "",
+ "cpython_rc": 0,
+ "default": "run rc=1, stdout DIFFERS",
+ "ir": "run rc=1, stdout DIFFERS"
+}

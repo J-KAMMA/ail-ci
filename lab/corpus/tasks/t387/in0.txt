@@ -1,0 +1,7 @@
+9,0,echo
+4,1,delta
+3,0,echo
+0,3,echo
+1,6,banana
+7,0,apple
+9,2,echo

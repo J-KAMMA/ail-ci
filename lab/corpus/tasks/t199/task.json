@@ -1,0 +1,6 @@
+{
+ "id": "t199",
+ "category": "parsing",
+ "description": "Print the dates sorted ascending, the day count between the first and last, and the date 100 days after the earliest one.",
+ "input_format": "dates"
+}

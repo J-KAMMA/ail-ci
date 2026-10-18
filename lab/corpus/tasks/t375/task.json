@@ -1,0 +1,6 @@
+{
+ "id": "t375",
+ "category": "sorting",
+ "description": "Print list.sort() with reverse=True on stable key length, to demonstrate that equal-length words keep input order; print the result.",
+ "input_format": "strings_n"
+}

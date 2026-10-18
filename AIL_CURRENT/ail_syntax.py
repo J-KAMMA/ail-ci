@@ -9,6 +9,7 @@ import math
 import operator
 from pathlib import Path
 import re
+import sys
 import token
 import tokenize
 
@@ -34,25 +35,34 @@ def _let_refusal(statement, line):
     found = re.fullmatch(r'let\s+([A-Za-z_]\w*)\s*:\s*([^=]+?)\s*=(?!=)\s*(.+)', statement)
     if not found:
         if re.fullmatch(r'let\s+[A-Za-z_]\w*(?:\s*:\s*[^=]+)?', statement):
-            return f'invalid let statement at line {line}: a let needs an initializer (`let x = ...;`)'
-        return f'invalid let statement at line {line}'
+            return ('a `let` needs an initial value.\n'
+                    '  write instead: `let x = 0;` (or `let x: int = 0;`)')
+        return ('this `let` is not of the form `let name = value;`.\n'
+                '  write instead: `let total: int = 0;` (one name, an optional type, then `= value`)')
     name, annotation = found[1], re.sub(r'\s+', '', found[2])
-    head = f'invalid let statement at line {line}: `let {name}: {annotation}`'
+    head = f'`let {name}: {annotation}`'
     if re.match(r'list\[(?:list|set|dict|tuple\[[^]]*(?:str|list))', annotation):
-        return (f'{head} -- a list of lists holds rows of int, float, str or a struct '
-                f'(`let {name}: list[list[int]] = [[] for _ in range(n)];`); a list of sets, dicts, '
-                f'bytes or deeper lists is not a supported type: use a list of structs')
+        return (f'{head}: a list of lists holds rows of int, float, str or a struct; lists of '
+                f'sets, dicts, bytes or deeper lists are not supported.\n'
+                f'  write instead: `let {name}: list[list[int]] = [[] for _ in range(n)];`, '
+                f'or a list of structs')
     key = re.match(r'(dict|set)\[([A-Za-z_]\w*)', annotation)
     if key and key[2] not in ('str', 'int'):
-        rewrite = ('key it by str with `.decode()` (`let d: dict[str, int] = {}; d[k.decode()] = v;`)'
-                   if key[2] == 'bytes' else 'key it by str or int')
-        return f'{head} -- {key[1]} keys must be str or int, not {key[2]}; {rewrite}'
+        rewrite = ('key it by str with `.decode()`: `let d: dict[str, int] = {}; d[k.decode()] = v;`'
+                   if key[2] == 'bytes' else f'key it by str or int: `let {name}: {key[1]}[str, int] = {{}};`')
+        return f'{head}: {key[1]} keys must be str or int, not {key[2]}.\n  write instead: {rewrite}'
     if key and annotation.startswith('dict['):
-        return (f'{head} -- dict values must be int, float, str or bytes; keep the values in '
-                f'their own list and map each key to its index (`dict[str, int]`)')
-    return (f'{head} -- unsupported annotation; a let may be annotated with a plain type '
-            f'(int, float, str, bytes, a struct, T | None), list[T], list[tuple[...]], '
-            f'dict[str|int, int|float|str|bytes], set[int|str] or Callable[...], or left unannotated')
+        if annotation.endswith(',bool]'):
+            return (f'{head}: a dict value must be int, float, str or bytes, not bool.\n'
+                    f'  write instead: `let {name}: dict[{key[2]}, int] = {{}};` storing 1 or 0 '
+                    f'(`{name}[k] = 1`, test with `k in {name}`)')
+        return (f'{head}: a dict value must be int, float, str or bytes.\n'
+                f'  write instead: keep the values in their own list and map each key to its '
+                f'index (`let {name}: dict[{key[2]}, int] = {{}};`)')
+    return (f'{head}: this type is not supported in a `let`.\n'
+            f'  write instead: int, float, str, bytes, a struct, T | None, list[T], '
+            f'list[tuple[...]], dict[str|int, int|float|str|bytes], set[int|str], or no type at all '
+            f'(`let {name} = ...;`)')
 
 def _callable(annotation):
     # The block frontend is also loaded before the compiler adds pkg-v12 to sys.path.
@@ -70,7 +80,62 @@ def _callable(annotation):
         raise SyntaxErrorAIL(str(exc)) from exc
 
 
-_OPTIONAL = re.compile(r'\bOptional\s*\[\s*([A-Za-z_]\w*)\s*\]')
+def _relib():
+    """python/pkg-v12/relib.py (the `re` module's compile-time half), loaded as _callable loads its codec."""
+    if not hasattr(_relib, 'module'):
+        spec = importlib.util.spec_from_file_location(
+            '_ail_relib', Path(__file__).parent / 'python' / 'pkg-v12' / 'relib.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _relib.module = module
+    return _relib.module
+
+
+def _optlib():
+    """python/pkg-v12/optlib.py (scalar `int | None` / `Optional[str]`, lowered onto a flag and a value)."""
+    if not hasattr(_optlib, "module"):
+        spec = importlib.util.spec_from_file_location(
+            "_ail_optlib", Path(__file__).parent / "python" / "pkg-v12" / "optlib.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _optlib.module = module
+    return _optlib.module
+
+
+def _tuplib():
+    """python/pkg-v12/tuplib.py (tuples, lowered onto classes before the surface pass)."""
+    if not hasattr(_tuplib, "module"):
+        spec = importlib.util.spec_from_file_location(
+            "_ail_tuplib", Path(__file__).parent / "python" / "pkg-v12" / "tuplib.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _tuplib.module = module
+    return _tuplib.module
+
+
+def _collib():
+    """python/pkg-v12/collib.py (`collections`, lowered onto dict / list / classes before the surface pass)."""
+    if not hasattr(_collib, "module"):
+        spec = importlib.util.spec_from_file_location(
+            "_ail_collib", Path(__file__).parent / "python" / "pkg-v12" / "collib.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _collib.module = module
+    return _collib.module
+
+
+def _stdlib4():
+    """python/pkg-v12/stdlib4.py (library batch 4: csv, datetime, ... lowered before the other source passes)."""
+    if not hasattr(_stdlib4, "module"):
+        here = str(Path(__file__).parent / "python" / "pkg-v12")
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import stdlib4
+        _stdlib4.module = stdlib4
+    return _stdlib4.module
+
+
+_OPTIONAL =re.compile(r'\bOptional\s*\[\s*([A-Za-z_]\w*)\s*\]')
 
 
 def detect(source):
@@ -174,6 +239,7 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
     # requires/ensures of the function being translated: {'depth', 'name', 'void', 'ensures', 'started'}
     contract = None
     pending_contract = None
+    current_start = None
 
     def declare(name):
         if keyword.iskeyword(name) or name in declared:
@@ -202,6 +268,7 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
                 pending.append(part)
                 continue
             start = pending[0].start if pending else part.start
+            current_start = start
             statement = _render(pending)
             pending.clear()
             if statement.startswith(('fn ', 'let ')) or (blocks and blocks[-1].startswith('struct ')):
@@ -263,7 +330,9 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
                         raise SyntaxErrorAIL('fn must be at the top level')
                     match = re.fullmatch(r'fn\s+([A-Za-z_]\w*)\s*\((.*)\)(?:\s*->\s*(.+))?', statement)
                     if not match:
-                        raise SyntaxErrorAIL(f'invalid fn header at line {part.start[0]}')
+                        raise SyntaxErrorAIL('this `fn` header is not of the form `fn name(a: int, b: str) -> int {`.\n'
+                                             '  write instead: `fn add(a: int, b: int) -> int { return a + b; }` '
+                                             '(the result type follows `->`, never `:`)')
                     name, params, result = match.groups()
                     nullable_result = False
                     if result and re.fullmatch(r'[A-Za-z_]\w*\s*\|\s*None', result):
@@ -319,9 +388,11 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
                             raise SyntaxErrorAIL('main must be in the entry source')
                         main_count += 1
                         if params.strip():
-                            raise SyntaxErrorAIL('main takes no parameters')
+                            raise SyntaxErrorAIL('`fn main` takes no parameters.\n'
+                                                 '  write instead: `fn main() -> int { ... }`; read input from sys.stdin or sys.argv')
                         if result and result != 'int':
-                            raise SyntaxErrorAIL('main return type must be int')
+                            raise SyntaxErrorAIL('`fn main` must return int (or have no result type).\n'
+                                                 '  write instead: `fn main() -> int { ...; return 0; }`')
                         # `fn main() { ... }` is main returning int: Python's sys.exit(None)
                         # exits 0, which the implicit `return 0` added at its close keeps.
                         result = 'int'
@@ -344,7 +415,9 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
                             start[0], start[1] + 1, f'{owner}.{name}' if is_method else name)
                 else:
                     if not blocks:
-                        raise SyntaxErrorAIL('only fn and const are allowed at the top level')
+                        raise SyntaxErrorAIL('a statement outside any function; only `fn`, `struct`, `const` and `use` '
+                                             'can be at the top level.\n'
+                                             '  write instead: move it into `fn main() -> int { ... }`')
                     if blocks[-1].startswith('impl '):
                         raise SyntaxErrorAIL('impl supports only fn methods')
                     if statement in ('else', 'try', 'finally'):
@@ -359,7 +432,9 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
                     elif re.match(r'^(if|elif|while|for)\s+.+$', statement):
                         header = statement
                     else:
-                        raise SyntaxErrorAIL(f'unsupported block header: {statement}')
+                        raise SyntaxErrorAIL(f'unsupported block header: `{statement}`.\n'
+                                             f'  write instead: a block opens with `if`, `elif`, `else`, `while`, `for`, '
+                                             f'`try`, `except`, `fn` or `struct`, e.g. `if x > 0 {{ ... }}`')
                 if contract is not None and len(blocks) == contract['depth']:
                     contract['started'] = True
                 lines.append(('    ' * len(blocks) + header + ':', start))
@@ -381,7 +456,10 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
                         continue
                     match = re.fullmatch(r'const\s+([A-Za-z_]\w*)\s*=\s*(.+)', statement)
                     if not match:
-                        raise SyntaxErrorAIL('only fn, const, and use are allowed at the top level')
+                        raise SyntaxErrorAIL('a statement outside any function; only `fn`, `struct`, `const` and `use` '
+                                         'can be at the top level.\n'
+                                         '  write instead: `const NAME = 10;` for a constant, or move the '
+                                         'statement into `fn main() -> int { ... }`')
                     if match[1] == 'sys':
                         raise SyntaxErrorAIL('sys is reserved by the AIL entry point')
                     declare(match[1])
@@ -417,11 +495,15 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
                     try:
                         parsed = ast.parse(statement).body
                     except SyntaxError as exc:
-                        raise SyntaxErrorAIL(f'invalid statement at line {part.start[0]}: {exc.msg}') from exc
+                        raise SyntaxErrorAIL(f'`{statement.strip()}` is not valid here ({exc.msg}).\n'
+                                             f'  write instead: one plain statement ending in `;`, such as `x += 1;` '
+                                             f'(there is no `x++`; use `and`/`or`/`not`, not `&&`/`||`/`!`)') from exc
                     if (len(parsed) != 1 or not isinstance(parsed[0],
                             (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.Delete, ast.Return, ast.Raise, ast.Break,
                              ast.Continue, ast.Pass, ast.Expr, ast.Assert))):
-                        raise SyntaxErrorAIL(f'unsupported statement at line {part.start[0]}')
+                        raise SyntaxErrorAIL(f'`{statement.strip()}` is not a statement form this language has.\n'
+                                             f'  write instead: an assignment, `return`, a call, `break`/`continue`, '
+                                             f'or open a block with `if`/`while`/`for`/`try` and braces')
                     if isinstance(parsed[0], ast.AnnAssign):
                         declaration = parsed[0]
                         annotation = declaration.annotation
@@ -449,7 +531,9 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
                                              or annotation.value.id == 'set'
                                              and isinstance(annotation.slice, ast.Name)
                                              and annotation.slice.id in ('int', 'str')))):
-                            raise SyntaxErrorAIL(f'unsupported local annotation at line {part.start[0]}')
+                            raise SyntaxErrorAIL(f'`{statement.strip()}`: this annotation is not supported on a local.\n'
+                                             f'  write instead: int, float, str, bytes, a struct, T | None, list[T], '
+                                             f'dict[str|int, int|float|str|bytes], set[int|str], or no annotation')
                 if contract is not None and len(blocks) == contract['depth']:
                     contract['started'] = True
                 if (contract is not None and contract['ensures'] and blocks
@@ -491,6 +575,12 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
                         raise SyntaxErrorAIL('impl needs at least one method')
                     method_blocks[owner].append(lines[impl_start:])
                     del lines[impl_start:]
+    except SyntaxErrorAIL as exc:
+        # every block-syntax refusal reports file:line:col; the ones raised without a position
+        # get that of the statement being read
+        if exc.lineno is None and current_start is not None:
+            exc.lineno, exc.offset = current_start[0], current_start[1] + 1
+        raise
     except tokenize.TokenError as exc:
         position = exc.args[1] if len(exc.args) > 1 else None
         known = (isinstance(position, tuple) and len(position) == 2
@@ -503,7 +593,9 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
                              lineno=source.count('\n') + 1,
                              offset=len(source.rsplit('\n', 1)[-1]) + 1)
     if not module and main_count != 1:
-        raise SyntaxErrorAIL('entry source needs exactly one fn main()')
+        raise SyntaxErrorAIL('the entry file needs exactly one `fn main()`, and this one has %d.\n'
+                             '  write instead: `fn main() -> int { ...; return 0; }` (once, at the top level)' % main_count,
+                             lineno=1, offset=1)
     for name, end in sorted(structs.items(), key=lambda item: item[1], reverse=True):
         lines[end:end] = [line for body in method_blocks[name] for line in body]
     if source_map is not None:
@@ -577,19 +669,57 @@ def _byte_offsets(data):
     return starts
 
 
+def _module_scope_bindings(tree):
+    """How many times each name is bound at module scope, in any statement outside function and class
+    bodies (a store in an `if`/`for`/`while`/`with`/`try` counts), and twice for a name that a function
+    declares `global` (it can change whenever that function runs)."""
+    count = {}
+
+    def bind(name, times=1):
+        count[name] = count.get(name, 0) + times
+
+    def walk(node):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bind(node.name)
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Global):
+                    for name in sub.names:
+                        bind(name, 2)
+            return
+        if isinstance(node, ast.Lambda):
+            return
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            for sub in ast.walk(node):          # only a walrus target leaks out of a comprehension
+                if isinstance(sub, ast.NamedExpr) and isinstance(sub.target, ast.Name):
+                    bind(sub.target.id)
+            return
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bind(node.id)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                bind((alias.asname or alias.name).split('.')[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bind(node.name)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            bind(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            bind(node.rest)
+        for child in ast.iter_child_nodes(node):
+            walk(child)
+    for node in tree.body:
+        walk(node)
+    return count
+
+
 def fold_constants(text):
-    """Top-level `NAME = <constant arithmetic>` assigned once, rewritten to its literal value."""
+    """Top-level `NAME = <constant arithmetic>` bound once in module scope, rewritten to its literal
+    value. A name that a nested block, a loop or a `global` function rebinds is not folded: its value
+    at the line that reads it is not the first one."""
     try:
         tree = ast.parse(text)
     except SyntaxError:
         return text
-    stored = {}
-    for node in tree.body:
-        for target in (node.targets if isinstance(node, ast.Assign) else
-                       [node.target] if isinstance(node, (ast.AnnAssign, ast.AugAssign)) else []):
-            for name in ast.walk(target):
-                if isinstance(name, ast.Name):
-                    stored[name.id] = stored.get(name.id, 0) + 1
+    stored = _module_scope_bindings(tree)
     known = {}
     edits = []
     for node in tree.body:
@@ -629,9 +759,22 @@ _HEAPQ = ('heappush', 'heappop', 'heapify', 'heappushpop', 'heapreplace')
 _BISECT = ('bisect_left', 'bisect_right', 'bisect', 'insort', 'insort_left', 'insort_right')
 _MATH_VALUES = {'pi': repr(math.pi), 'e': repr(math.e), 'tau': repr(math.tau),
                 'inf': "float('inf')", 'nan': "float('nan')"}
-_MATH_CALLS = ('sqrt', 'floor', 'ceil', 'isqrt', 'gcd', 'fabs')
-_MATH_BUILT = ('math.sqrt, math.floor, math.ceil, math.isqrt, math.gcd (two arguments), math.fabs '
-               'and the constants math.pi, math.e, math.tau, math.inf, math.nan')
+# One-argument libm functions: name -> True when a finite argument can overflow (OverflowError, as
+# CPython's math_1 raises "math range error"); otherwise an infinite result of a finite argument is
+# a ValueError ("math domain error"), and a NaN result of a non-NaN argument always is.
+_MATH_ONE = {'sin': False, 'cos': False, 'tan': False, 'asin': False, 'acos': False, 'atan': False,
+             'sinh': True, 'cosh': True, 'tanh': False, 'asinh': False, 'acosh': False, 'atanh': False,
+             'exp': True, 'exp2': True, 'expm1': True, 'log': False, 'log1p': False, 'log2': False,
+             'log10': False, 'cbrt': False}
+_MATH_PLAIN_TWO = ('atan2', 'copysign', 'hypot')
+_MATH_PREDICATES = ('isnan', 'isinf', 'isfinite')
+_MATH_CALLS = ('sqrt', 'floor', 'ceil', 'isqrt', 'gcd', 'fabs', 'trunc', 'degrees', 'radians', 'factorial',
+               'pow', 'fmod', *_MATH_ONE, *_MATH_PLAIN_TWO, *_MATH_PREDICATES)
+_MATH_BUILT = ('math.sqrt, floor, ceil, trunc, isqrt, gcd (two arguments), fabs, factorial, pow, fmod, hypot, '
+               'copysign, atan2, degrees, radians, isnan, isinf, isfinite, sin, cos, tan, asin, acos, atan, '
+               'sinh, cosh, tanh, asinh, acosh, atanh, exp, exp2, expm1, log (one or two arguments), log1p, '
+               'log2, log10, cbrt and the constants math.pi, math.e, math.tau, math.inf, math.nan; '
+               'math.prod, fsum, comb, perm, lcm, dist, erf, gamma and the rest are not built')
 # Exact CPython results: sqrt keeps -0.0 and raises ValueError below zero, isqrt and gcd are
 # integer-only (no float rounding reaches the answer).
 _MATH_HELPERS = {
@@ -663,8 +806,133 @@ _MATH_HELPERS = {
         y = t
     return x
 '''}
+
+
+def _math_one_helper(name, overflow):
+    return (f'def _ail_math_{name}(x: float) -> float:\n'
+            f'    r = _ail_c_{name}(x)\n'
+            '    if r != r:\n'
+            '        if x == x:\n'
+            '            raise ValueError("math domain error")\n'
+            '        return r\n'
+            '    if r - r != 0.0 and x - x == 0.0:\n'
+            + ('        raise OverflowError("math range error")\n' if overflow
+               else '        raise ValueError("math domain error")\n')
+            + '    return r\n')
+
+
+for _name, _overflow in _MATH_ONE.items():
+    _MATH_HELPERS[_name] = _math_one_helper(_name, _overflow)
+for _name in _MATH_PLAIN_TWO:
+    _MATH_HELPERS[_name] = (f'def _ail_math_{_name}(x: float, y: float) -> float:\n'
+                            f'    return _ail_c_{_name}(x, y)\n')
+_MATH_HELPERS['fabs'] = 'def _ail_math_fabs(x: float) -> float:\n    return _ail_c_fabs(x)\n'
+_MATH_HELPERS['isnan'] = 'def _ail_math_isnan(x: float) -> bool:\n    return x != x\n'
+_MATH_HELPERS['isinf'] = 'def _ail_math_isinf(x: float) -> bool:\n    return x - x != 0.0 and x == x\n'
+_MATH_HELPERS['isfinite'] = 'def _ail_math_isfinite(x: float) -> bool:\n    return x - x == 0.0\n'
+_MATH_HELPERS['degrees'] = f'def _ail_math_degrees(x: float) -> float:\n    return x * {180.0 / math.pi!r}\n'
+_MATH_HELPERS['radians'] = f'def _ail_math_radians(x: float) -> float:\n    return x * {math.pi / 180.0!r}\n'
+_MATH_HELPERS['log2args'] = (
+    'def _ail_math_log2args(x: float, base: float) -> float:\n'
+    '    num = _ail_math_log(x)\n'
+    '    den = _ail_math_log(base)\n'
+    '    if den == 0.0:\n'
+    '        raise ZeroDivisionError("float division by zero")\n'
+    '    return num / den\n')
+_MATH_HELPERS['fmod'] = (
+    'def _ail_math_fmod(x: float, y: float) -> float:\n'
+    '    if y - y != 0.0 and y == y and x - x == 0.0:\n'
+    '        return x\n'
+    '    r = _ail_c_fmod(x, y)\n'
+    '    if r != r and x == x and y == y:\n'
+    '        raise ValueError("math domain error")\n'
+    '    return r\n')
+# CPython's math.pow keeps its own special-case table for non-finite operands (C99 Annex F) and
+# turns the finite cases' errno into ValueError / OverflowError.
+_MATH_HELPERS['pow'] = (
+    'def _ail_math_pow(x: float, y: float) -> float:\n'
+    '    if x - x != 0.0 or y - y != 0.0:\n'
+    '        if x != x:\n'
+    '            if y == 0.0:\n'
+    '                return 1.0\n'
+    '            return x\n'
+    '        if y != y:\n'
+    '            if x == 1.0:\n'
+    '                return 1.0\n'
+    '            return y\n'
+    '        if x - x != 0.0:\n'
+    '            odd = 0\n'
+    '            if y - y == 0.0:\n'
+    '                if _ail_c_fmod(_ail_c_fabs(y), 2.0) == 1.0:\n'
+    '                    odd = 1\n'
+    '            if y > 0.0:\n'
+    '                if odd == 1:\n'
+    '                    return x\n'
+    '                return _ail_c_fabs(x)\n'
+    '            if y == 0.0:\n'
+    '                return 1.0\n'
+    '            if odd == 1:\n'
+    '                return _ail_c_copysign(0.0, x)\n'
+    '            return 0.0\n'
+    '        if _ail_c_fabs(x) == 1.0:\n'
+    '            return 1.0\n'
+    '        if y > 0.0 and _ail_c_fabs(x) > 1.0:\n'
+    '            return y\n'
+    '        if y < 0.0 and _ail_c_fabs(x) < 1.0:\n'
+    '            return -y\n'
+    '        return 0.0\n'
+    '    r = _ail_c_pow(x, y)\n'
+    '    if r != r:\n'
+    '        raise ValueError("math domain error")\n'
+    '    if r - r != 0.0:\n'
+    '        if x == 0.0:\n'
+    '            raise ValueError("math domain error")\n'
+    '        raise OverflowError("math range error")\n'
+    '    return r\n')
+_MATH_HELPERS['factorial'] = (
+    'def _ail_math_factorial(n: int) -> int:\n'
+    '    if n < 0:\n'
+    '        raise ValueError("factorial() not defined for negative values")\n'
+    '    r = 1\n'
+    '    i = 2\n'
+    '    while i <= n:\n'
+    '        r = r * i\n'
+    '        i += 1\n'
+    '    return r\n')
+_MATH_DEPS = {'log2args': ('log',)}
+import string as _string_module
+
+_STRING_CONSTANTS = {name: getattr(_string_module, name) for name in (
+    'ascii_lowercase', 'ascii_uppercase', 'ascii_letters', 'digits', 'hexdigits', 'octdigits', 'punctuation',
+    'whitespace', 'printable')}
+_TIME_CLOCKS = {'perf_counter': '_ail_perf_counter', 'monotonic': '_ail_perf_counter',
+                'perf_counter_ns': '_ail_perf_counter_ns', 'monotonic_ns': '_ail_perf_counter_ns',
+                'time': '_ail_time', 'time_ns': '_ail_time_ns'}
+# time.sleep / localtime / gmtime / strftime / mktime are lowered by dtlib.py (stdlib4.rewrite_text) before this pass
+_TIME_LOWERED = ('sleep', 'localtime', 'gmtime', 'strftime', 'mktime')
+_OPERATOR_BINARY = {'add': ast.Add, 'sub': ast.Sub, 'mul': ast.Mult, 'truediv': ast.Div,
+                    'floordiv': ast.FloorDiv, 'mod': ast.Mod, 'pow': ast.Pow, 'and_': ast.BitAnd,
+                    'or_': ast.BitOr, 'xor': ast.BitXor, 'lshift': ast.LShift, 'rshift': ast.RShift}
+_OPERATOR_COMPARE = {'lt': ast.Lt, 'le': ast.LtE, 'gt': ast.Gt, 'ge': ast.GtE, 'eq': ast.Eq, 'ne': ast.NotEq}
+_OPERATOR_UNARY = {'neg': ast.USub, 'pos': ast.UAdd, 'invert': ast.Invert, 'inv': ast.Invert}
+_SMALL_MODULES = {
+    'time': (*_TIME_CLOCKS, *_TIME_LOWERED),
+    'string': tuple(_STRING_CONSTANTS),
+    'os': ('cpu_count',),
+    'operator': (*_OPERATOR_BINARY, *_OPERATOR_COMPARE, *_OPERATOR_UNARY, 'not_', 'abs', 'getitem', 'itemgetter'),
+}
+_SMALL_NOTE = {
+    'time': 'time.perf_counter() / monotonic() / time() (and the _ns forms), sleep(), localtime(), gmtime(), '
+            'strftime() and mktime() are built (the wall clock is an input: AIL_CLOCK=<seconds> pins it); '
+            'asctime, ctime, struct_time, tzset and the zone constants are not',
+    'string': 'the string module is built as its constants: ascii_lowercase, ascii_uppercase, ascii_letters, '
+              'digits, hexdigits, octdigits, punctuation, whitespace, printable',
+    'os': 'os.cpu_count() is built; the rest of os (environ, path, ...) is not',
+    'operator': 'operator.add/sub/mul/truediv/floordiv/mod/pow/and_/or_/xor/lshift/rshift, the comparisons, '
+                'neg/pos/invert/not_/abs/getitem called directly, and itemgetter(k) as a key= are built',
+}
 _TYPING = {'List': 'list', 'Dict': 'dict', 'Set': 'set', 'Tuple': 'tuple', 'FrozenSet': 'frozenset'}
-_DROPPED = ('heapq', 'bisect', 'typing', 'dataclasses', '__future__')
+_DROPPED = ('heapq', 'bisect', 'typing', 'dataclasses', '__future__', 'time', 'string', 'os', 'operator', 're')
 _STDOUT_STATEMENTS = ('sys.stdout.write', 'sys.stdout.buffer.write', 'sys.stdout.flush',
                       'sys.stdout.buffer.flush', 'sys.setrecursionlimit')
 _ALIASABLE = ('sys.stdout.write', 'sys.stdout.buffer.write', 'sys.stdin.readline',
@@ -672,10 +940,11 @@ _ALIASABLE = ('sys.stdout.write', 'sys.stdout.buffer.write', 'sys.stdin.readline
 _RESULT_NAMES = ('int', 'float', 'str', 'bytes', 'bool', 'bytearray')
 _ATOMIC = (ast.Name, ast.Constant, ast.Call, ast.Attribute, ast.Subscript, ast.List, ast.Dict,
            ast.Set, ast.ListComp, ast.SetComp, ast.DictComp, ast.JoinedStr)
-_FILE_HINT = ('with open(path) as f: is built for one file opened to read ("r" or "rb") and read '
-              'whole with f.read(), or in text mode line by line with `for line in f:`; '
-              'read_bytes(path) reads a binary file, write_text(path, text) / write_bytes(path, '
-              'data) write one')
+_FILE_HINT = ('this use of a file is not built: only reading it whole (`f.read()`) or line by line '
+              '(`for line in f:`) is.\n'
+              '  write instead: `with open(path) as f:` with `text = f.read()` or `for line in f:` to '
+              'read, `read_bytes(path)` for a binary file, `write_text(path, text)` / '
+              '`write_bytes(path, data)` to write one')
 
 
 def _own_nodes(function):
@@ -688,10 +957,91 @@ def _own_nodes(function):
             pending.extend(ast.iter_child_nodes(node))
 
 
+_RE_MODES = {'match': 0, 'fullmatch': 1, 'search': 2}
+# module function -> positional parameters after the pattern
+_RE_PARAMS = {'match': ('string', 'flags'), 'fullmatch': ('string', 'flags'), 'search': ('string', 'flags'),
+              'findall': ('string', 'flags'), 'finditer': ('string', 'flags'),
+              'split': ('string', 'maxsplit', 'flags'), 'sub': ('repl', 'string', 'count', 'flags')}
+_RE_BUILT = ('re.match / fullmatch / search / findall / finditer / split / sub / escape and re.compile(literal) '
+             'with a string-literal pattern (a literal, or a name bound once to one), flags I M S X A, '
+             'literals . classes \\d \\w \\s anchors ^ $ \\A \\Z \\b \\B * + ? {m,n} lazy variants | groups '
+             '(capturing, (?:), (?P<name>)); lookaround, backreferences, atomic / possessive forms and '
+             'conditionals are not built')
+_RE_MATCH_METHODS = ('group', 'start', 'end', 'groups', 'groupdict', 'span', 'expand')
+
+
 class _SurfaceExpr(ast.NodeTransformer):
-    def __init__(self, surface):
+    def __init__(self, surface, boolean=False):
         self.surface = surface
         self.changed = False
+        self.boolean = boolean
+        self.bool_calls = set()
+        self.bool_compares = {}
+
+    def mark_bool(self, node):
+        """Calls whose result is only tested (a match used as a condition): no Match object is built."""
+        if isinstance(node, ast.Call):
+            self.bool_calls.add(node)
+        elif isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            self.mark_bool(node.operand)
+        elif isinstance(node, ast.BoolOp):
+            for value in node.values:
+                self.mark_bool(value)
+        elif (isinstance(node, ast.Compare) and len(node.ops) == 1 and isinstance(node.ops[0], (ast.Is, ast.IsNot))
+              and isinstance(node.comparators[0], ast.Constant) and node.comparators[0].value is None
+              and isinstance(node.left, ast.Call)):
+            self.bool_compares[node] = isinstance(node.ops[0], ast.Is)
+            self.bool_calls.add(node.left)
+
+    def group_probe(self, node):
+        """`m.group(<int or str literal>)` on a plain name: the Call, else None."""
+        surface = self.surface
+        if (surface.re_on and 'group' not in surface.user_methods and isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute) and node.func.attr == 'group'
+                and isinstance(node.func.value, ast.Name) and len(node.args) == 1 and not node.keywords
+                and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, (int, str))
+                and not isinstance(node.args[0].value, bool)):
+            return node
+        return None
+
+    def start_of(self, group):
+        return ast.Call(func=ast.Attribute(value=copy.deepcopy(group.func.value), attr='start', ctx=ast.Load()),
+                        args=[copy.deepcopy(group.args[0])], keywords=[])
+
+    def visit_BoolOp(self, node):
+        """`m.group(k) or default`: the group when it took part, else the default (CPython's None is
+        falsy, and an empty group is falsy too, so `or` keeps its meaning on `m.start(k) < m.end(k)`)."""
+        if isinstance(node.op, ast.Or) and len(node.values) >= 2 and self.group_probe(node.values[0]):
+            first = node.values[0]
+            rest = node.values[1] if len(node.values) == 2 else ast.BoolOp(op=ast.Or(), values=node.values[1:])
+            nonempty = ast.Compare(left=self.start_of(first), ops=[ast.Lt()],
+                                   comparators=[ast.Call(func=ast.Attribute(value=copy.deepcopy(first.func.value),
+                                                                            attr='end', ctx=ast.Load()),
+                                                         args=[copy.deepcopy(first.args[0])], keywords=[])])
+            new = ast.IfExp(test=nonempty, body=first, orelse=rest)
+            self.changed = True
+            return self.visit(ast.fix_missing_locations(ast.copy_location(new, node)))
+        self.generic_visit(node)
+        return node
+
+    def visit_Compare(self, node):
+        if (len(node.ops) == 1 and isinstance(node.ops[0], (ast.Is, ast.IsNot)) and self.group_probe(node.left)
+                and isinstance(node.comparators[0], ast.Constant) and node.comparators[0].value is None):
+            new = ast.Compare(left=self.start_of(node.left), ops=[ast.Lt() if isinstance(node.ops[0], ast.Is)
+                                                                  else ast.GtE()],
+                              comparators=[ast.Constant(value=0)])
+            self.changed = True
+            return self.visit(ast.fix_missing_locations(ast.copy_location(new, node)))
+        if node in self.bool_compares:
+            call = self.visit(node.left)
+            if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == '_ail_re_test':
+                self.changed = True
+                return call if not self.bool_compares[node] else ast.copy_location(
+                    ast.UnaryOp(op=ast.Not(), operand=call), node)
+            node.left = call
+            return node
+        self.generic_visit(node)
+        return node
 
     def replaced(self, new, old):
         self.changed = True
@@ -700,6 +1050,11 @@ class _SurfaceExpr(ast.NodeTransformer):
     def visit_Call(self, node):
         surface = self.surface
         path = surface.path(node.func)
+        if surface.re_on and node in self.bool_calls:
+            surface.testing.add(node)
+        if (surface.re_on and path is None and isinstance(node.func, ast.Attribute)
+                and not isinstance(node.func.value, ast.Name)):
+            node.func.value = self.visit(node.func.value)      # re.search(...).start(): the inner call too
         node.args = [self.visit(arg) for arg in node.args]
         for item in node.keywords:
             item.value = self.visit(item.value)
@@ -735,7 +1090,17 @@ class _SurfaceExpr(ast.NodeTransformer):
         surface = self.surface
         if not isinstance(node.ctx, ast.Load):
             return node
-        if node.id in surface.files:
+        if node.id in surface.re_subst:
+            match, number = surface.re_subst[node.id]
+            self.changed = True
+            return ast.copy_location(ast.Call(func=ast.Attribute(value=ast.Name(id=match, ctx=ast.Load()),
+                                                                  attr='gs', ctx=ast.Load()),
+                                               args=[ast.Constant(value=number)], keywords=[]), node)
+        if node.id in surface.re_patterns:
+            surface.keep.add('re')
+            surface.note(node, f'the compiled pattern {node.id} is used as a value; only {node.id}.match / '
+                         'fullmatch / search / findall / finditer / split / sub (...) calls are built')
+        elif node.id in surface.files:
             surface.note(node, f'the file object {node.id} is used as a value: ' + _FILE_HINT)
         elif node.id in surface.names:
             new = surface.value(node, surface.names[node.id])
@@ -761,9 +1126,20 @@ class _Surface:
         self.keep = set()              # dropped-by-default modules still needed as written
         self.files = {}                # file object name -> (path expression, binary)
         self.dataclasses = {}          # class name -> [(field, default text | None)]
+        self.dc_annotations = {}       # class name -> [(field, annotation text, hidden from repr)]
         self.consumed = set()
         self.void = set()
+        self.re_on = False             # `import re` seen
+        self.re_patterns = {}          # NAME -> (library index) for NAME = re.compile(literal)
+        self.re_nodes = set()          # those assignment statements
+        self.re_consts = {}            # NAME -> str for a name bound once to a string literal
+        self.re_lib = None
+        self.testing = set()           # re calls whose result is only tested
+        self.re_subst = {}             # findall-loop name -> (match variable, group number)
+        self.re_subst_now = None
         self.classes = {node.name for node in self.tree.body if isinstance(node, ast.ClassDef)}
+        self.user_methods = {item.name for node in ast.walk(self.tree) if isinstance(node, ast.ClassDef)
+                             for item in node.body if isinstance(item, ast.FunctionDef)}
         self.parents = {child: parent for parent in ast.walk(self.tree)
                         for child in ast.iter_child_nodes(parent)}
 
@@ -817,6 +1193,8 @@ class _Surface:
         text = data.decode('utf8')
         if self.helpers:
             text = text.rstrip('\n') + '\n\n\n' + '\n\n'.join(_MATH_HELPERS[name] for name in self.helpers)
+        if self.re_lib is not None and (self.re_lib.programs or self.re_lib.uses_escape):
+            text = text.rstrip('\n') + '\n\n' + python_surface(self.re_lib.text())
         return text
 
     # -- names --------------------------------------------------------------------------------
@@ -837,12 +1215,14 @@ class _Surface:
         for node in ast.walk(self.tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    if alias.name in ('heapq', 'bisect', 'math', 'typing', 'dataclasses', 'sys'):
+                    if alias.name in ('heapq', 'bisect', 'math', 'typing', 'dataclasses', 'sys', 're', *_SMALL_MODULES):
                         self.modules[alias.asname or alias.name] = alias.name
+                        if alias.name == 're':
+                            self.re_on = True
             elif isinstance(node, ast.ImportFrom) and not node.level:
                 for alias in node.names:
                     local = alias.asname or alias.name
-                    if node.module in ('heapq', 'bisect', 'math', 'dataclasses'):
+                    if node.module in ('heapq', 'bisect', 'math', 'dataclasses', *_SMALL_MODULES):
                         self.names[local] = f'{node.module}.{alias.name}'
                     elif node.module == 'typing':
                         self.typing[local] = alias.name
@@ -851,6 +1231,8 @@ class _Surface:
                      else [node.name] if isinstance(node, (ast.FunctionDef, ast.ClassDef)) else [])
             for name in names:
                 stored[name] = stored.get(name, 0) + 1
+        if self.re_on:
+            self.collect_re(stored)
         for node in ast.walk(self.tree):
             if (isinstance(node, ast.Assign) and len(node.targets) == 1
                     and isinstance(node.targets[0], ast.Name) and stored[node.targets[0].id] == 1):
@@ -861,23 +1243,65 @@ class _Surface:
                     self.alias_nodes.add(node)
 
     # -- expressions --------------------------------------------------------------------------
-    def rewritten(self, node):
+    def rewritten(self, node, boolean=False):
         rewriter = _SurfaceExpr(self)
-        new = rewriter.visit(copy.deepcopy(node))
+        node = copy.deepcopy(node)
+        if boolean and self.re_on:
+            rewriter.mark_bool(node)
+        if self.re_on:
+            for each in ast.walk(node):
+                if isinstance(each, (ast.If, ast.IfExp, ast.While, ast.Assert)):
+                    rewriter.mark_bool(each.test)
+                elif isinstance(each, ast.comprehension):
+                    for test in each.ifs:
+                        rewriter.mark_bool(test)
+        new = rewriter.visit(node)
         return new, rewriter.changed
 
-    def expression(self, node):
+    def expression(self, node, boolean=False):
         if node is None:
             return
-        new, changed = self.rewritten(node)
+        new, changed = self.rewritten(node, boolean)
         if changed:
             text = ast.unparse(new)
             self.replace(node, text if isinstance(new, _ATOMIC) else '(' + text + ')')
+
+    def function_value(self, module, name):
+        """`operator.mul` / `math.gcd` used as a value (reduce, accumulate, a sort key...): the lambda of the
+        same arithmetic, which the iterator lowering and sorted(key=) inline. None when it is not one of those."""
+        def lam(params, body):
+            return ast.Lambda(args=ast.arguments(posonlyargs=[], args=[ast.arg(arg=p) for p in params],
+                                                 vararg=None, kwonlyargs=[], kw_defaults=[], kwarg=None,
+                                                 defaults=[]), body=body)
+        a, b = ast.Name(id='_ail_a', ctx=ast.Load()), ast.Name(id='_ail_b', ctx=ast.Load())
+        if module == 'operator':
+            if name in _OPERATOR_BINARY:
+                return lam(['_ail_a', '_ail_b'], ast.BinOp(left=a, op=_OPERATOR_BINARY[name](), right=b))
+            if name in _OPERATOR_COMPARE:
+                return lam(['_ail_a', '_ail_b'], ast.Compare(left=a, ops=[_OPERATOR_COMPARE[name]()], comparators=[b]))
+            if name in _OPERATOR_UNARY:
+                return lam(['_ail_a'], ast.UnaryOp(op=_OPERATOR_UNARY[name](), operand=a))
+            if name == 'abs':
+                return lam(['_ail_a'], ast.Call(func=ast.Name(id='abs', ctx=ast.Load()), args=[a], keywords=[]))
+            return None
+        if name in _MATH_CALLS:
+            two = name in ('gcd', 'pow', 'fmod', *_MATH_PLAIN_TWO)
+            call = ast.Call(func=ast.Name(id=name, ctx=ast.Load()), args=[a, b] if two else [a], keywords=[])
+            call.lineno = call.end_lineno = 1
+            call.col_offset = call.end_col_offset = 0
+            mapped = self.math_call(call, name)
+            if mapped is not None:
+                return lam(['_ail_a', '_ail_b'] if two else ['_ail_a'], mapped)
+        return None
 
     def value(self, node, path):
         module, _, name = path.partition('.')
         if module == 'math' and name in _MATH_VALUES:
             return ast.parse(_MATH_VALUES[name], mode='eval').body
+        if module in ('operator', 'math') and name:
+            lowered = self.function_value(module, name)
+            if lowered is not None:
+                return lowered
         if module in ('heapq', 'bisect') and name in (_HEAPQ if module == 'heapq' else _BISECT):
             return ast.Name(id=name, ctx=ast.Load()) if isinstance(node, ast.Attribute) else None
         if module in ('heapq', 'bisect', 'math'):
@@ -887,6 +1311,13 @@ class _Surface:
                       + (_MATH_BUILT if module == 'math' else ', '.join(
                           f'{module}.{each}' for each in (_HEAPQ if module == 'heapq' else _BISECT)))
                       + ', called directly')
+        elif module in _SMALL_MODULES and name:
+            if module == 'string' and name in _STRING_CONSTANTS:
+                return ast.Constant(value=_STRING_CONSTANTS[name])
+            self.keep.add(module)
+            self.note(node, f'{path} used as a value is not built; ' + _SMALL_NOTE[module])
+        elif path == 'sys.maxsize':
+            return ast.Constant(value=2 ** 63 - 1)       # the 64-bit sys.maxsize; ints here are int64
         elif path in _STDOUT_STATEMENTS or path.startswith('sys.stdin.buffer'):
             self.note(node, f'{path} used as a value is not built: call it as a statement '
                       '(sys.stdout.write(text) on its own line, sys.stdin.buffer.read())')
@@ -924,8 +1355,224 @@ class _Surface:
                                                           args=[path], keywords=[]),
                                            attr='read', ctx=ast.Load()), args=[], keywords=[])
 
+    # -- re -----------------------------------------------------------------------------------
+    def collect_re(self, stored):
+        self.re_lib = _relib().Library()
+        for node in ast.walk(self.tree):
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+                    and stored[node.targets[0].id] == 1 and isinstance(node.value, ast.Constant)
+                    and isinstance(node.value.value, (str, bytes))):
+                self.re_consts[node.targets[0].id] = node.value.value
+        for node in ast.walk(self.tree):
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+                    and stored[node.targets[0].id] == 1 and isinstance(node.value, ast.Call)
+                    and self.path(node.value.func) == 're.compile'):
+                index = self.re_pattern(node.value, 'compile', node.value.args, node.value.keywords, ('flags',))
+                if index is not None:
+                    self.re_patterns[node.targets[0].id] = index
+                    self.re_nodes.add(node)
+
+    def re_str(self, node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, (str, bytes)):
+            return node.value
+        if isinstance(node, ast.Name) and node.id in self.re_consts:
+            return self.re_consts[node.id]
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            left, right = self.re_str(node.left), self.re_str(node.right)
+            if left is not None and right is not None and type(left) is type(right):
+                return left + right
+        return None
+
+    def re_flags(self, node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, int) and not isinstance(node.value, bool):
+            return node.value
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+            left, right = self.re_flags(node.left), self.re_flags(node.right)
+            return None if left is None or right is None else left | right
+        path = self.path(node) if isinstance(node, ast.Attribute) else None
+        if path and path.startswith('re.') and path[3:] in _relib().FLAG_NAMES:
+            return _relib().FLAG_NAMES[path[3:]]
+        return None
+
+    def re_args(self, node, params, args, keywords):
+        """{parameter: expression} of a call, or None (noted) when it has a shape not built."""
+        if any(isinstance(arg, ast.Starred) for arg in args) or any(item.arg is None for item in keywords):
+            return None
+        given = dict(zip(params, args))
+        if len(args) > len(params):
+            return None
+        for item in keywords:
+            if item.arg not in params or item.arg in given:
+                return None
+            given[item.arg] = item.value
+        return given
+
+    def re_refuse(self, node, name, why):
+        self.keep.add('re')
+        self.note(node, f're.{name}(): {why}; built here: {_RE_BUILT}')
+
+    def re_pattern(self, node, name, args, keywords, params):
+        """Library index of the pattern literal of a re call (args[0] is the pattern), or None (noted)."""
+        if not args:
+            self.re_refuse(node, name, 'the pattern is missing')
+            return None
+        text = self.re_str(args[0])
+        if text is None:
+            self.re_refuse(node, name, 'the pattern has to be a string literal (or a name bound once to one), '
+                           'not an expression: it is compiled when the program is built')
+            return None
+        given = self.re_args(node, params, args[1:], keywords)
+        if given is None:
+            self.re_refuse(node, name, 'these arguments are not built')
+            return None
+        flags = 0
+        if 'flags' in given:
+            flags = self.re_flags(given['flags'])
+            if flags is None:
+                self.re_refuse(node, name, 'flags has to be re.I / re.M / re.S / re.X / re.A combined with |')
+                return None
+        try:
+            return self.re_lib.pattern(text, flags, isinstance(text, bytes))
+        except _relib().ReRefused as exc:
+            self.re_refuse(node, name, f'the pattern {text!r} is not built: {exc}')
+            return None
+
+    def re_emit(self, node, name, index, given):
+        """The call that stands for re.<name> on library pattern `index` with the non-pattern arguments `given`."""
+        lib = self.re_lib
+        program = lib.programs[index]
+        table = ast.Name(id=lib.table_name(index), ctx=ast.Load())
+
+        def call(function, *args):
+            return ast.Call(func=ast.Name(id=function, ctx=ast.Load()), args=list(args), keywords=[])
+
+        if 'string' not in given:
+            self.re_refuse(node, name, 'the string argument is missing')
+            return None
+        subject = given['string']
+        sfx = 'B' if program.is_bytes else ''
+        if name in _RE_MODES:
+            if node in self.testing:
+                return call('_ail_re_test' + sfx, table, subject, ast.Constant(value=_RE_MODES[name]))
+            return call('_ail_re_do' + sfx, table, subject, ast.Constant(value=_RE_MODES[name]))
+        if name == 'findall':
+            if program.ngroups > 1:
+                self.re_refuse(node, name, 'a pattern with several groups returns tuples, which are not built '
+                               '(use finditer and m.group(i))')
+                return None
+            return call('_ail_re_findall' + sfx, table, subject)
+        if name == 'finditer':
+            return call('_ail_re_finditer' + sfx, table, subject)
+        if name == 'split':
+            if program.ngroups:
+                self.re_refuse(node, name, 'split with groups returns None for a group that did not match, which '
+                               'is not built; use a pattern without groups')
+                return None
+            return call('_ail_re_split' + sfx, table, subject, given.get('maxsplit', ast.Constant(value=0)))
+        if name == 'sub':
+            count = given.get('count', ast.Constant(value=0))
+            repl = given['repl']
+            text = self.re_str(repl)
+            if text is not None and isinstance(text, bytes) != program.is_bytes:
+                self.re_refuse(node, name, 'a bytes pattern needs a bytes replacement and a str pattern a str one')
+                return None
+            if text is not None and (b'\\' if program.is_bytes else '\\') in text:
+                try:
+                    function = lib.sub_function(index, text)
+                except _relib().ReRefused as exc:
+                    self.re_refuse(node, name, f'the replacement {text!r} is not built: {exc}')
+                    return None
+                return call(function, subject, count)
+            if text is None and not (isinstance(repl, (ast.Name, ast.Attribute, ast.Subscript, ast.JoinedStr,
+                                                       ast.BinOp, ast.Call))):
+                self.re_refuse(node, name, 'a function (or lambda) as the replacement is not built')
+                return None
+            if isinstance(repl, ast.Lambda):
+                self.re_refuse(node, name, 'a function (or lambda) as the replacement is not built')
+                return None
+            return call('_ail_re_sublit' + sfx, table, subject, repl, count)
+        return None
+
+    def re_call(self, node, name):
+        """re.<name>(pattern, ...) on the module."""
+        self.keep.add('re') if name not in _RE_PARAMS and name not in ('escape', 'compile') else None
+        if name == 'escape':
+            if len(node.args) == 1 and not node.keywords and not isinstance(node.args[0], ast.Starred):
+                self.re_lib.uses_escape = True
+                return ast.Call(func=ast.Name(id='_ail_re_escape', ctx=ast.Load()), args=node.args, keywords=[])
+            self.re_refuse(node, name, 're.escape takes one string')
+            return None
+        if name == 'compile':
+            self.re_refuse(node, name, 're.compile is built only as `NAME = re.compile(literal[, flags])` bound '
+                           'once; use NAME.match(...) and so on')
+            return None
+        if name not in _RE_PARAMS:
+            self.re_refuse(node, name, f're.{name} is not built')
+            return None
+        if not node.args and not any(item.arg == 'pattern' for item in node.keywords):
+            self.re_refuse(node, name, 'the pattern is missing')
+            return None
+        # the pattern is the first positional argument
+        params = ('pattern',) + _RE_PARAMS[name]
+        given = self.re_args(node, params, node.args, node.keywords)
+        if given is None or 'pattern' not in given:
+            self.re_refuse(node, name, 'these arguments are not built')
+            return None
+        pattern_node = given.pop('pattern')
+        shell = [pattern_node] + ([given['flags']] if 'flags' in given else [])
+        index = self.re_pattern(node, name, shell[:1], [ast.keyword(arg='flags', value=given['flags'])]
+                                if 'flags' in given else [], ('flags',))
+        if index is None:
+            return None
+        given.pop('flags', None)
+        return self.re_emit(node, name, index, given)
+
+    def re_method(self, node, receiver, name):
+        """NAME.<name>(...) on a compiled pattern."""
+        if name not in _RE_PARAMS:
+            self.re_refuse(node, name, f'the compiled pattern method {name} is not built')
+            return None
+        params = _RE_PARAMS[name]
+        params = tuple(p for p in params if p != 'flags')
+        given = self.re_args(node, params, node.args, node.keywords)
+        if given is None:
+            self.re_refuse(node, name, 'these arguments are not built (pos / endpos are not)')
+            return None
+        return self.re_emit(node, name, self.re_patterns[receiver], given)
+
+    def match_method(self, node):
+        """m.group() / m.group("name") / m.start() ... spelled with what the Match class has."""
+        func = node.func
+        name = func.attr
+        if node.keywords or any(isinstance(arg, ast.Starred) for arg in node.args):
+            return None
+        if name in ('group', 'start', 'end'):
+            if not node.args:
+                return ast.Call(func=func, args=[ast.Constant(value=0)], keywords=[])
+            if (len(node.args) == 1 and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)):
+                return ast.Call(func=ast.Attribute(value=func.value, attr=name + 'n', ctx=ast.Load()),
+                                args=node.args, keywords=[])
+            if name == 'group' and len(node.args) > 1:
+                self.keep.add('re')
+                self.note(node, 'm.group(a, b) returns a tuple, which is not built; call m.group(i) once per group')
+        elif name in ('groups', 'groupdict', 'span', 'expand', 'lastindex') and not node.args:
+            self.keep.add('re')
+            self.note(node, f'm.{name}() is not built (tuples and None groups); built are m.group(i) / '
+                      'm.group("name"), m.start(i), m.end(i), and `a, b = m.span()` / `a, b = m.groups()`')
+        return None
+
     def call(self, node, path):
         func = node.func
+        if self.re_on:
+            if path is not None and path.startswith('re.') and path.count('.') == 1:
+                return self.re_call(node, path[3:])
+            if (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
+                    and func.value.id in self.re_patterns):
+                return self.re_method(node, func.value.id, func.attr)
+            if (path is None and isinstance(func, ast.Attribute) and func.attr in _RE_MATCH_METHODS
+                    and func.attr not in self.user_methods):
+                return self.match_method(node)
         if path is not None:
             module, _, name = path.partition('.')
             if module in ('heapq', 'bisect') and name:
@@ -942,9 +1589,22 @@ class _Surface:
                 return ast.Call(func=ast.Name(id=name, ctx=ast.Load()), args=node.args, keywords=node.keywords)
             if module == 'math' and name:
                 return self.math_call(node, name)
+            if module in _SMALL_MODULES and name:
+                return self.small_call(node, module, name)
             if path == 'sys.stdin.buffer.read' and not node.keywords and len(node.args) <= 1:
                 return ast.Call(func=ast.Name(id='read_stdin_bytes', ctx=ast.Load()),
                                 args=node.args or [ast.parse('1 << 40', mode='eval').body], keywords=[])
+            if path == 'sys.stderr.write' and len(node.args) == 1 and not node.keywords \
+                    and not isinstance(node.args[0], ast.Starred):
+                # a str only: `"" + x` is refused for an int, as CPython refuses to write one
+                text = node.args[0]
+                if not (isinstance(text, ast.JoinedStr) or isinstance(text, ast.Constant) and isinstance(text.value, str)):
+                    text = ast.BinOp(left=ast.Constant(value=''), op=ast.Add(), right=text)
+                return ast.Call(func=ast.Name(id='print', ctx=ast.Load()), args=[text], keywords=[
+                    ast.keyword(arg='end', value=ast.Constant(value='')),
+                    ast.keyword(arg='file', value=ast.parse('sys.stderr', mode='eval').body)])
+            if path == 'sys.stderr.flush' and not node.args and not node.keywords:
+                return ast.Constant(value=None)       # stderr is written as it is printed
             if path in _STDOUT_STATEMENTS:
                 self.note(node, f'{path}(...) is built as a statement on its own line; its result '
                           'is not a value')
@@ -971,18 +1631,129 @@ class _Surface:
             return self.construct(node)
         return None
 
+    def re_findall_loop(self, node, function):
+        """`for a, b in re.findall(P, s):` (several groups): a loop over the matches, each name read as
+        that match's group (findall's tuple gives '' for a group that did not take part)."""
+        call = node.iter
+        if not (function is not None and isinstance(node.target, ast.Tuple) and isinstance(call, ast.Call)
+                and all(isinstance(each, ast.Name) for each in node.target.elts)):
+            return False
+        path = self.path(call.func)
+        if path == 're.findall':
+            given = self.re_args(call, ('pattern', 'string', 'flags'), call.args, call.keywords)
+            if given is None or 'pattern' not in given or 'string' not in given:
+                return False
+            flag_kw = [ast.keyword(arg='flags', value=given['flags'])] if 'flags' in given else []
+            index = self.re_pattern(call, 'findall', [given['pattern']], flag_kw, ('flags',))
+            subject = given['string']
+        elif (isinstance(call.func, ast.Attribute) and call.func.attr == 'findall'
+              and isinstance(call.func.value, ast.Name) and call.func.value.id in self.re_patterns):
+            given = self.re_args(call, ('string',), call.args, call.keywords)
+            if given is None or 'string' not in given:
+                return False
+            index = self.re_patterns[call.func.value.id]
+            subject = given['string']
+        else:
+            return False
+        if index is None:
+            return False
+        program = self.re_lib.programs[index]
+        names = [each.id for each in node.target.elts]
+        if program.ngroups != len(names) or len(names) < 2 or len(set(names)) != len(names):
+            return False
+        inside = {id(each) for each in ast.walk(node)}
+        for each in ast.walk(function):
+            if isinstance(each, ast.Name) and each.id in names:
+                if id(each) not in inside or (not isinstance(each.ctx, ast.Load) and each not in node.target.elts):
+                    self.re_refuse(node, 'findall', 'the loop names %s of a findall loop are used outside it or '
+                                   'assigned in it; loop over re.finditer and read m.group(i)' % ', '.join(names))
+                    return False
+        self.count_re = getattr(self, 'count_re', 0) + 1
+        match = '_ail_m%d' % self.count_re
+        sfx = 'B' if program.is_bytes else ''
+        subject_text = ast.unparse(self.rewritten(subject)[0])
+        self.replace(node.target, match)
+        self.replace(call, '_ail_re_finditer%s(%s, %s)' % (sfx, self.re_lib.table_name(index), subject_text))
+        self.re_subst_now = {name: (match, number) for number, name in enumerate(names, 1)}
+        return True
+
+    def re_unpack(self, node):
+        """`a, b = m.span()` / `a, b, c = m.groups()` as one assignment per element."""
+        value = node.value
+        if not (len(node.targets) == 1 and isinstance(node.targets[0], ast.Tuple) and isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Attribute) and isinstance(value.func.value, ast.Name)
+                and value.func.attr in ('span', 'groups') and not value.args and not value.keywords
+                and value.func.attr not in self.user_methods and value.func.value.id not in self.re_patterns
+                and all(isinstance(each, ast.Name) for each in node.targets[0].elts)):
+            return False
+        names = [each.id for each in node.targets[0].elts]
+        receiver = value.func.value.id
+        if value.func.attr == 'span':
+            if len(names) != 2:
+                return False
+            parts = [f'{names[0]} = {receiver}.start(0)', f'{names[1]} = {receiver}.end(0)']
+        else:
+            parts = [f'{each} = {receiver}.group({index})' for index, each in enumerate(names, 1)]
+        self.replace(node, '; '.join(parts), True)
+        return True
+
+    def small_call(self, node, module, name):
+        """time / string / os / operator, mapped onto what is built (None keeps the call as written)."""
+        args = node.args
+        plain = not node.keywords and not any(isinstance(arg, ast.Starred) for arg in args)
+        if plain and module == 'time' and name in _TIME_CLOCKS and not args:
+            return ast.Call(func=ast.Name(id=_TIME_CLOCKS[name], ctx=ast.Load()), args=[], keywords=[])
+        if plain and module == 'os' and name == 'cpu_count' and not args:
+            return ast.Call(func=ast.Name(id='_ail_cpu_count', ctx=ast.Load()), args=[], keywords=[])
+        if plain and module == 'operator':
+            if name in _OPERATOR_BINARY and len(args) == 2:
+                return ast.BinOp(left=args[0], op=_OPERATOR_BINARY[name](), right=args[1])
+            if name in _OPERATOR_COMPARE and len(args) == 2:
+                return ast.Compare(left=args[0], ops=[_OPERATOR_COMPARE[name]()], comparators=[args[1]])
+            if name in _OPERATOR_UNARY and len(args) == 1:
+                return ast.UnaryOp(op=_OPERATOR_UNARY[name](), operand=args[0])
+            if name == 'not_' and len(args) == 1:
+                return ast.UnaryOp(op=ast.Not(), operand=args[0])
+            if name == 'abs' and len(args) == 1:
+                return ast.Call(func=ast.Name(id='abs', ctx=ast.Load()), args=args, keywords=[])
+            if name == 'getitem' and len(args) == 2:
+                return ast.Subscript(value=args[0], slice=args[1], ctx=ast.Load())
+            if name == 'itemgetter' and len(args) == 1:
+                return ast.Lambda(
+                    args=ast.arguments(posonlyargs=[], args=[ast.arg(arg='_ail_item')], vararg=None,
+                                       kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[]),
+                    body=ast.Subscript(value=ast.Name(id='_ail_item', ctx=ast.Load()), slice=args[0],
+                                       ctx=ast.Load()))
+        self.keep.add(module)
+        self.note(node, f'{module}.{name}() with these arguments is not built; ' + _SMALL_NOTE[module])
+        return None
+
     def math_call(self, node, name):
         args = node.args
         if not node.keywords and not any(isinstance(arg, ast.Starred) for arg in args):
+            helper = None
             if name in ('sqrt', 'isqrt') and len(args) == 1 or name == 'gcd' and len(args) == 2:
-                if name not in self.helpers:
-                    self.helpers.append(name)
-                return ast.Call(func=ast.Name(id='_ail_math_' + name, ctx=ast.Load()), args=args, keywords=[])
-            if len(args) == 1 and name in ('floor', 'ceil', 'fabs'):
+                helper = name
+            elif len(args) == 1 and (name in _MATH_ONE or name in _MATH_PREDICATES
+                                     or name in ('degrees', 'radians', 'factorial')):
+                helper = name
+            elif len(args) == 2 and (name in _MATH_PLAIN_TWO or name in ('pow', 'fmod')):
+                helper = name
+            elif name == 'log' and len(args) == 2:
+                helper = 'log2args'
+            elif name == 'fabs' and len(args) == 1:
+                helper = 'fabs'
+            if name == 'trunc' and len(args) == 1:
+                # int(x) truncates a float toward zero and returns an int argument as it is.
+                return ast.Call(func=ast.Name(id='int', ctx=ast.Load()), args=args, keywords=[])
+            if helper is not None:
+                for each in (*_MATH_DEPS.get(helper, ()), helper):
+                    if each not in self.helpers:
+                        self.helpers.append(each)
+                return ast.Call(func=ast.Name(id='_ail_math_' + helper, ctx=ast.Load()), args=args, keywords=[])
+            if len(args) == 1 and name in ('floor', 'ceil'):
                 def call(function, argument):
                     return ast.Call(func=ast.Name(id=function, ctx=ast.Load()), args=[argument], keywords=[])
-                if name == 'fabs':
-                    return call('abs', call('float', args[0]))
                 if name == 'floor':      # int(x // 1): floor of an int or a float, as an int
                     return call('int', ast.BinOp(left=args[0], op=ast.FloorDiv(), right=ast.Constant(value=1)))
                 return ast.UnaryOp(op=ast.USub(), operand=call('int', ast.BinOp(
@@ -1111,8 +1882,18 @@ class _Surface:
             self.function(node, owner)
         elif isinstance(node, ast.ClassDef):
             self.klass(node)
-        elif node in self.alias_nodes:
+        elif node in self.alias_nodes or node in self.re_nodes:
             self.replace(node, 'pass', True)
+        elif isinstance(node, ast.Assign) and self.re_on and self.re_unpack(node):
+            pass
+        elif isinstance(node, ast.For) and self.re_on and self.re_findall_loop(node, function):
+            names = self.re_subst_now
+            self.re_subst_now = None
+            saved = dict(self.re_subst)
+            self.re_subst.update(names)
+            self.block(node.body, function, owner)
+            self.re_subst = saved
+            self.block(node.orelse, function, owner)
         elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and self.output(node):
             pass
         elif isinstance(node, ast.With) and self.with_open(node, function, owner):
@@ -1137,7 +1918,7 @@ class _Surface:
                 if isinstance(item, ast.stmt):
                     self.statement(item, function, owner)
                 elif isinstance(item, ast.expr):
-                    self.expression(item)
+                    self.expression(item, _ == 'test' and isinstance(node, (ast.If, ast.While, ast.Assert)))
                 elif isinstance(item, ast.keyword):
                     self.expression(item.value)
                 elif isinstance(item, ast.withitem):
@@ -1192,6 +1973,7 @@ class _Surface:
 
     def dataclass(self, node, decorator):
         options = {item.arg: item.value for item in decorator.keywords} if isinstance(decorator, ast.Call) else {}
+        repr_off = isinstance(options.get('repr'), ast.Constant) and not options['repr'].value
         for option, value in options.items():
             enabled = not (isinstance(value, ast.Constant) and not value.value)
             if option == 'init' and not enabled or option == 'order' and enabled:
@@ -1201,6 +1983,7 @@ class _Surface:
         if any(isinstance(each, ast.FunctionDef) and each.name == '__init__' for each in node.body):
             return
         fields = []
+        hidden = set()
         for statement in node.body:
             if not (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)):
                 continue
@@ -1212,6 +1995,8 @@ class _Surface:
             value = statement.value
             if (isinstance(value, ast.Call) and self.path(value.func) == 'dataclasses.field'):
                 options = {item.arg: item.value for item in value.keywords}
+                if isinstance(options.get('repr'), ast.Constant) and not options['repr'].value:
+                    hidden.add(statement.target.id)
                 factory = options.pop('default_factory', None)
                 plain = options.pop('default', None)
                 if value.args or set(options) - {'repr', 'compare', 'hash'}:
@@ -1236,14 +2021,40 @@ class _Surface:
             at -= 1
         if at < 0 or self.data[at:at + 1] != b'@':
             return
-        self.edits.append((at, self.offset(decorator.end_lineno, decorator.end_col_offset), '', False))
-        parameters = ', '.join(f'{name}: {annotation}' for _, name, annotation, _ in fields)
-        body = '; '.join(f'self.{name} = {name}' for _, name, _, _ in fields)
+        # a marker comment instead of nothing: the general (boxed) path prints the instance as
+        # ClassName(field=..., ...) for it; the typed path never sees a comment
+        self.edits.append((at, self.offset(decorator.end_lineno, decorator.end_col_offset),
+                           '' if repr_off else '# ail:dataclass', False))
+        # a dataclass that extends another one: its fields come after the base's (a field of the same
+        # name keeps the base's position)
+        merged = []                    # (name, annotation, default, hidden)
+        for base in node.bases:
+            if isinstance(base, ast.Name) and base.id in self.dc_annotations:
+                inherited = dict((name, default) for name, default in self.dataclasses[base.id])
+                merged = [(name, annotation, inherited.get(name), shown)
+                          for name, annotation, shown in self.dc_annotations[base.id]]
+        for _, name, annotation, default in fields:
+            entry = (name, annotation, default, name in hidden)
+            for index, old in enumerate(merged):
+                if old[0] == name:
+                    merged[index] = entry
+                    break
+            else:
+                merged.append(entry)
+        parameters = ', '.join(f'{name}: {annotation}' for name, annotation, _, _ in merged)
+        body = '; '.join(f'self.{name} = {name}' for name, _, _, _ in merged)
         self.replace(fields[0][0], f'def __init__(self, {parameters}): {body}', True)
         for statement, *_ in fields[1:]:
             self.replace(statement, '', True)  # a class body here holds methods only, not `pass`
         self.consumed.update(statement for statement, *_ in fields)
-        self.dataclasses[node.name] = [(name, default) for _, name, _, default in fields]
+        self.dataclasses[node.name] = [(name, default) for name, _, default, _ in merged]
+        self.dc_annotations[node.name] = [(name, annotation, shown) for name, annotation, _, shown in merged]
+        if not repr_off and any(shown for *_, shown in merged):
+            # which fields repr leaves out, for the general path's marker lookup
+            skipped = ','.join(name for name, _, _, shown in merged if shown)
+            for index, (start, end, text, flag) in enumerate(self.edits):
+                if text == '# ail:dataclass':
+                    self.edits[index] = (start, end, '# ail:dataclass hide=' + skipped, flag)
 
     def ann_assign(self, node, function, owner):
         if isinstance(node.target, ast.Attribute) and node.value is None:
@@ -1256,12 +2067,21 @@ class _Surface:
         self.annotation(node.annotation)
         self.expression(node.value)
 
+    def starts_processes(self):
+        if not hasattr(self, '_starts_processes'):
+            self._starts_processes = any(
+                (isinstance(n, ast.Import) and any(a.name == 'subprocess' for a in n.names))
+                or (isinstance(n, ast.ImportFrom) and not n.level and n.module == 'subprocess') for n in self.tree.body)
+        return self._starts_processes
+
     def output(self, node):
         call = node.value
         path = self.path(call.func)
         if path in _STDOUT_STATEMENTS:
             if path in ('sys.stdout.flush', 'sys.stdout.buffer.flush', 'sys.setrecursionlimit'):
-                self.replace(node, 'pass', True)
+                # a program that starts processes needs the flush: the child's output is ordered against ours by it (stage G8)
+                real = path != 'sys.setrecursionlimit' and not call.args and not call.keywords and self.starts_processes()
+                self.replace(node, 'flush_stdout()' if real else 'pass', True)
                 return True
             if len(call.args) == 1 and not call.keywords and not isinstance(call.args[0], ast.Starred):
                 argument = ast.unparse(self.rewritten(call.args[0])[0])
@@ -1370,6 +2190,15 @@ class _Surface:
                         if kept else 'pass', True)
             elif not node.level and node.module in ('typing', 'dataclasses', '__future__'):
                 self.replace(node, 'pass', True)
+            elif not node.level and node.module in _SMALL_MODULES:
+                built = _SMALL_MODULES[node.module]
+                if node.module not in self.keep and all(alias.name in built for alias in node.names):
+                    self.replace(node, 'pass', True)
+                else:
+                    missing = [alias.name for alias in node.names if alias.name not in built]
+                    if missing:
+                        self.note(node, f'from {node.module} import {", ".join(missing)}: not built; '
+                                  + _SMALL_NOTE[node.module])
             elif not node.level and node.module in ('heapq', 'bisect', 'math'):
                 built = {'heapq': _HEAPQ, 'bisect': _BISECT, 'math': (*_MATH_CALLS, *_MATH_VALUES)}[node.module]
                 if node.module not in self.keep and all(alias.name in built for alias in node.names):
@@ -1389,9 +2218,29 @@ class _Surface:
         return self.apply()
 
 
-def python_surface(source, notes=None):
+def _modtables():
+    """python/pkg-v12/modtables.py (module-level tables with tuples in them, lowered before the tuple pass)."""
+    if not hasattr(_modtables, "module"):
+        here = str(Path(__file__).parent / "python" / "pkg-v12")
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import modtables
+        _modtables.module = modtables
+    return _modtables.module
+
+
+def python_surface(source, notes=None, library=False):
     """Map the Python spellings above onto the compiler's own; `notes` collects (line, why) for
     the constructs left as written."""
+    if any(name in source for name in ("csv", "datetime", "decimal", "fractions", "time", "zoneinfo")):
+        source = _stdlib4().rewrite_text(source, notes)
+    if "collections" in source:
+        source = _collib().rewrite(source, notes)
+    if "None" in source or "Optional" in source:
+        source = _optlib().rewrite(source, notes)
+    if "(" in source and ("{" in source or "set" in source):
+        source = _modtables().rewrite_text(source, library, notes)
+    source = _tuplib().rewrite(source, notes)
     try:
         surface = _Surface(source)
     except (SyntaxError, ValueError):

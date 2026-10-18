@@ -1,0 +1,6 @@
+{
+ "id": "t256",
+ "category": "grids",
+ "description": "Print the points sorted by (x, y), the bounding box, and the number of distinct points.",
+ "input_format": "points"
+}

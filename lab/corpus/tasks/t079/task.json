@@ -1,0 +1,6 @@
+{
+ "id": "t079",
+ "category": "strings",
+ "description": "Reverse the order of words in each line (keeping spaces single) and print them; then print the total number of distinct characters in the whole text.",
+ "input_format": "text_uni"
+}

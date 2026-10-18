@@ -1,0 +1,6 @@
+{
+ "id": "t261",
+ "category": "grids",
+ "description": "Compute the polygon area (shoelace formula) of the points in input order, as a float with 1 decimal, and the perimeter with 3 decimals.",
+ "input_format": "points"
+}

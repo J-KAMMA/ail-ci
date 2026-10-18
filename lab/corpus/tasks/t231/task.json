@@ -1,0 +1,6 @@
+{
+ "id": "t231",
+ "category": "grids",
+ "description": "Find the largest rectangle consisting only of '#' cells and print its area.",
+ "input_format": "grid_life"
+}

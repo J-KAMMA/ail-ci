@@ -1,0 +1,54 @@
+```python
+import sys
+
+def sieve(limit: int) -> list[bool]:
+    is_prime: list[bool] = []
+    i: int = 0
+    while i <= limit:
+        is_prime.append(True)
+        i += 1
+    if limit >= 0:
+        is_prime[0] = False
+    if limit >= 1:
+        is_prime[1] = False
+    p: int = 2
+    while p * p <= limit:
+        if is_prime[p]:
+            m: int = p * p
+            while m <= limit:
+                is_prime[m] = False
+                m += p
+        p += 1
+    return is_prime
+
+def main() -> int:
+    ns: list[int] = []
+    for line in sys.stdin:
+        s: str = line.strip()
+        if s == "":
+            continue
+        ns.append(int(s))
+    if len(ns) == 0:
+        return 0
+    limit: int = 0
+    for n in ns:
+        if n > limit:
+            limit = n
+    is_prime: list[bool] = sieve(limit)
+    prefix: list[int] = []
+    cnt: int = 0
+    i: int = 0
+    while i <= limit:
+        if is_prime[i]:
+            cnt += 1
+        prefix.append(cnt)
+        i += 1
+    out: list[str] = []
+    for n in ns:
+        out.append(str(prefix[n]))
+    print("\n".join(out))
+    return 0
+
+if __name__ == "__main__":
+    main()
+```

@@ -1,0 +1,6 @@
+{
+ "id": "t253",
+ "category": "grids",
+ "description": "Rotate the matrix by 90 degrees three times and print the final result; also print whether the matrix is a Latin square.",
+ "input_format": "square_matrix"
+}

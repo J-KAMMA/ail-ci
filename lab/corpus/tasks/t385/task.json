@@ -1,0 +1,6 @@
+{
+ "id": "t385",
+ "category": "sorting",
+ "description": "Sort the rows of the matrix by the sum of their entries (ties by lexicographic order), print rows; also sort the columns by the min entry.",
+ "input_format": "int_matrix"
+}

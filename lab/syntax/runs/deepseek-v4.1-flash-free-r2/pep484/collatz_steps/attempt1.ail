@@ -1,0 +1,26 @@
+```python
+import sys
+
+def collatz_steps(n: int) -> int:
+    steps: int = 0
+    cur: int = n
+    while cur != 1:
+        if cur % 2 == 0:
+            cur = cur // 2
+        else:
+            cur = 3 * cur + 1
+        steps += 1
+    return steps
+
+def main() -> int:
+    for line in sys.stdin:
+        s: str = line.strip()
+        if s == "":
+            continue
+        n: int = int(s)
+        print(collatz_steps(n))
+    return 0
+
+if __name__ == "__main__":
+    main()
+```

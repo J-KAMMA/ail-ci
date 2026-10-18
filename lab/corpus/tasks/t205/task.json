@@ -1,0 +1,6 @@
+{
+ "id": "t205",
+ "category": "parsing",
+ "description": "For each token print the result of str.strip().isdigit(), isnumeric() and isdecimal() as three booleans separated by spaces, and print repr of the token.",
+ "input_format": "tokens_mixed"
+}

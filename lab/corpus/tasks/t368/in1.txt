@@ -1,0 +1,14 @@
+13
+dave B 23 96
+carol C 21 50
+grace C 23 66
+carol A 21 93
+frank C 22 82
+erin A 23 52
+alice B 16 74
+frank B 21 51
+carol A 22 83
+carol C 24 90
+carol C 20 76
+bob A 17 71
+niaj A 19 94

@@ -1,0 +1,6 @@
+{
+ "id": "t321",
+ "category": "dp",
+ "description": "Count the number of increasing triples i<j<k with a[i]<a[j]<a[k].",
+ "input_format": "nums_nocount"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t147",
+ "category": "collections",
+ "description": "Count the frequencies of the numbers in both lists with Counter; print the sum of both Counters (as sorted 'k:v' pairs) and the difference of the first minus the second.",
+ "input_format": "two_lists"
+}

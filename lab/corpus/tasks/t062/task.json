@@ -1,0 +1,6 @@
+{
+ "id": "t062",
+ "category": "numbers",
+ "description": "Print the product of all numbers and the product mod 998244353.",
+ "input_format": "big_ints"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t161",
+ "category": "collections",
+ "description": "Convert the rows to a list of dataclass instances and print them sorted by word then a, using the repr of the dataclass.",
+ "input_format": "tuples_lines"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t004",
+ "category": "numbers",
+ "description": "Print the mode (smallest value among the most frequent) and its count.",
+ "input_format": "nums"
+}

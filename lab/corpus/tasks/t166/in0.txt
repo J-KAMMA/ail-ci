@@ -1,0 +1,8 @@
+name,dept,salary,age
+mallory,hr,124000,64
+carol,sales,144000,37
+niaj,ops,31000,63
+erin,hr,177000,46
+alice,ops,175000,24
+heidi,eng,50000,26
+alice,hr,182000,54

@@ -1,0 +1,26 @@
+report
+remove cog 10
+report
+remove nut 3
+add nut 12
+add nut 12
+report
+add pin 7
+remove nut 3
+add nut 14
+remove pin 13
+report
+add pin 8
+add pin 3
+report
+report
+remove gear 11
+remove nut 5
+remove nut 15
+remove cog 9
+remove gear 15
+add pin 19
+report
+report
+report
+add bolt 11

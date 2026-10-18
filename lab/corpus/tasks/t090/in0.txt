@@ -1,0 +1,8 @@
+7
+echo
+romeo
+lima
+mike
+juliet
+november
+sierra

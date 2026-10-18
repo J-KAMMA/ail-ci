@@ -1,0 +1,6 @@
+{
+ "id": "t282",
+ "category": "graphs",
+ "description": "Print the shortest path (as node list) from 0 to n-1 with minimal weight, ties broken by fewer edges then lexicographically smaller list.",
+ "input_format": "edges_w"
+}

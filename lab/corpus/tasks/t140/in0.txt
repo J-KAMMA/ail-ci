@@ -1,0 +1,10 @@
+add nut 4
+add cog 15
+add gear 13
+remove bolt 13
+report
+add nut 14
+add pin 19
+add nut 13
+remove pin 13
+add bolt 5

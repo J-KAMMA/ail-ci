@@ -1,0 +1,6 @@
+{
+ "id": "t338",
+ "category": "dp",
+ "description": "Generate all permutations of the integers 1..min(n,6) in lexicographic order and print the count and the last permutation; also print the number of derangements of that size.",
+ "input_format": "small_int"
+}

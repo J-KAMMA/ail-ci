@@ -1,0 +1,9 @@
+name,dept,salary,age
+carol,ops,35000,43
+grace,hr,182000,21
+erin,eng,117000,63
+heidi,ops,198000,25
+bob,ops,121000,60
+bob,eng,103000,56
+judy,ops,84000,55
+niaj,eng,94000,46

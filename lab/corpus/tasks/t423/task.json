@@ -1,0 +1,6 @@
+{
+ "id": "t423",
+ "category": "errors_classes",
+ "description": "For each line try to convert to int; collect ValueError messages and print the message text of the first failing line (use str(exception)), then the total of successfully parsed numbers.",
+ "input_format": "opt_ints_lines"
+}

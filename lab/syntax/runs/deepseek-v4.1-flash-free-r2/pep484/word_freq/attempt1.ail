@@ -1,0 +1,20 @@
+```
+import sys
+
+def main() -> int:
+    counts: dict[str, int] = {}
+    for line in sys.stdin:
+        for w in line.split():
+            k: str = w.lower()
+            counts[k] = counts.get(k, 0) + 1
+    words: list[str] = []
+    for k in counts:
+        words.append(k)
+    words.sort(key=lambda w: (-counts[w], w))
+    for w in words:
+        print(w, counts[w])
+    return 0
+
+if __name__ == "__main__":
+    main()
+```

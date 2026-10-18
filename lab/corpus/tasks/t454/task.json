@@ -1,0 +1,6 @@
+{
+ "id": "t454",
+ "category": "errors_classes",
+ "description": "Implement a binary heap-based priority queue class with a task list: push (priority, name) tuples built from the strings with priority = length; pop all; print them in order.",
+ "input_format": "strings_n"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t003",
+ "category": "numbers",
+ "description": "Print the median (as a float with one decimal when n is even; otherwise the integer).",
+ "input_format": "nums"
+}

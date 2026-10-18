@@ -1,0 +1,6 @@
+{
+ "id": "t262",
+ "category": "grids",
+ "description": "Count the number of right triangles that can be formed from the points (use all triples when n<=25; otherwise only the first 25 points).",
+ "input_format": "points"
+}

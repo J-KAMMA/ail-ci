@@ -1,0 +1,31 @@
+```python
+import sys
+from dataclasses import dataclass
+
+@dataclass
+class Item:
+    name: str
+    quantity: int
+    price: int
+
+def value(it: Item) -> int:
+    return it.quantity * it.price
+
+def main() -> int:
+    items: list[Item] = []
+    for line in sys.stdin:
+        f = line.split()
+        if len(f) == 3:
+            items.append(Item(f[0], int(f[1]), int(f[2])))
+    items.sort(key=lambda it: (-value(it), it.name))
+    total: int = 0
+    for it in items:
+        v: int = value(it)
+        total += v
+        print(it.name, v)
+    print("total", total)
+    return 0
+
+if __name__ == "__main__":
+    main()
+```

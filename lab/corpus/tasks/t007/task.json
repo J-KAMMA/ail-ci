@@ -1,0 +1,6 @@
+{
+ "id": "t007",
+ "category": "numbers",
+ "description": "Print the prefix sums as one space-separated line, then the total of the even-valued numbers.",
+ "input_format": "nums"
+}

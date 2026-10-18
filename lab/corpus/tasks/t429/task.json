@@ -1,0 +1,6 @@
+{
+ "id": "t429",
+ "category": "errors_classes",
+ "description": "Use a context manager class with __enter__/__exit__ to wrap each line's processing: print 'enter', the result and 'exit', and swallow ValueErrors printing 'swallowed'.",
+ "input_format": "opt_ints_lines"
+}

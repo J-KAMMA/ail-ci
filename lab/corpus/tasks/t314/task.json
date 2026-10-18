@@ -1,0 +1,6 @@
+{
+ "id": "t314",
+ "category": "dp",
+ "description": "Print the length of the longest non-decreasing subsequence and the length of the longest bitonic subsequence.",
+ "input_format": "nums_nocount"
+}

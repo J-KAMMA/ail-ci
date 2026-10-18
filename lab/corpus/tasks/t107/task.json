@@ -1,0 +1,6 @@
+{
+ "id": "t107",
+ "category": "strings",
+ "description": "Print the words in a sliding window: for window size 3, each triple joined by '+', one per line; fewer than 3 words prints 'short'.",
+ "input_format": "words_line"
+}

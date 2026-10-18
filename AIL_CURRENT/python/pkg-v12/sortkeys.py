@@ -181,13 +181,15 @@ class _SubstituteItem(ast.NodeTransformer):
                     and node.slice.value in (0, 1)):
                 return copy.deepcopy(self.replacement[node.slice.value])
             raise self.Unsupported('a sort key over d.items() reads kv[0] (the key) and kv[1] '
-                                   '(the value) only')
+                                   '(the value) only.\n'
+                                   '  write instead: key=lambda kv: kv[1], or key=lambda kv: (-kv[1], kv[0])')
         return self.generic_visit(node)
 
     def visit_Name(self, node):
         if node.id == self.param:
             raise self.Unsupported('a sort key over d.items() reads kv[0] (the key) and kv[1] '
-                                   '(the value) only; the pair itself is not a value here')
+                                   '(the value) only; the pair itself is not a value here.\n'
+                                   '  write instead: key=lambda kv: kv[1], or key=lambda kv: (-kv[1], kv[0])')
         return node
 
 
@@ -199,6 +201,7 @@ class _Rewriter:
         self.structs = False
         self.struct_names = set()
         self.dicts = set()
+        self.range_sources = set()
 
     # -- site pieces ---------------------------------------------------------------------------
     def options(self, call, what):
@@ -215,7 +218,8 @@ class _Rewriter:
                     raise self.Unsupported("%s: reverse= must be a literal True or False" % what)
                 reverse = kw.value.value
             else:
-                raise self.Unsupported('%s with a %r keyword; only key= and reverse= are accepted'
+                raise self.Unsupported('%s with a %r keyword; only key= and reverse= are accepted.\n'
+                                       '  write instead: sorted(xs, key=lambda x: x, reverse=True)'
                                        % (what, kw.arg))
         return key, reverse
 
@@ -225,7 +229,8 @@ class _Rewriter:
             a = key.args
             if (len(a.posonlyargs) + len(a.args) != 1 or a.vararg or a.kwarg or a.kwonlyargs
                     or a.defaults or a.kw_defaults):
-                raise self.Unsupported('a sort key lambda takes exactly one argument')
+                raise self.Unsupported('a sort key lambda takes exactly one argument.\n'
+                                       '  write instead: key=lambda x: (x.score, x.name)')
             return (a.posonlyargs + a.args)[0].arg, key.body
         param = '_ail_key_arg'
         if isinstance(key, ast.Name):
@@ -234,7 +239,8 @@ class _Rewriter:
                 and key.value.id == 'str'):
             return param, ast.Call(func=ast.Attribute(value=_name(param), attr=key.attr,
                                                       ctx=ast.Load()), args=[], keywords=[])
-        raise self.Unsupported('key= must be a lambda or a function name')
+        raise self.Unsupported('key= must be a lambda or a function name.\n'
+                               '  write instead: key=lambda x: x[1], or key=len')
 
     def components(self, body):
         if isinstance(body, ast.Tuple):
@@ -296,6 +302,7 @@ class _Rewriter:
                 # `sorted(range(n), key=...)`: a range is not a list (it has no .copy()); the
                 # comprehension makes the list[int] the rest of the rewrite indexes and copies.
                 element = '_ail_sk%d_r' % n
+                self.range_sources.add(source)
                 source_expr = ast.ListComp(elt=_name(element), generators=[ast.comprehension(
                     target=_name(element, True), iter=source_expr, ifs=[], is_async=0)])
             pre.append(ast.Assign(targets=[_name(source, True)], value=source_expr))
@@ -332,7 +339,9 @@ class _Rewriter:
         """A new list holding the elements of `source`. A comprehension types a list of int, float
         or str reliably wherever it came from; a list of structs can only be copied (and a plain
         copy of a list built by a comprehension is mistyped as int by the compiler)."""
-        if self.structs or self.stage >= 3:
+        # A list made from a range is a list of int whose comprehension copy types correctly at every
+        # stage; `.copy()` of it is the mistyped case (an index sort then read "'ys' is an int").
+        if self.structs or self.stage >= 3 and source not in self.range_sources:
             return _method(source, 'copy')
         element = '_ail_sk%d_g' % self.next_id()
         return ast.ListComp(elt=_name(element), generators=[ast.comprehension(

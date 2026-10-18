@@ -1,0 +1,6 @@
+{
+ "id": "t341",
+ "category": "dp",
+ "description": "Count the number of binary strings of length n without two consecutive ones and print the count modulo 1000000007 plus the first few strings of length min(n,4).",
+ "input_format": "small_int"
+}

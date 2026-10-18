@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import tempfile
 
-from pipeline import PipelineError, compiler, link_flags
+from pipeline import PipelineError, compiler, ffi_link_args, link_flags
 import native_diagnostics
 from pyfront import Unsupported
 import callable_types
@@ -819,7 +819,7 @@ def link_objects(source, output, paths, *, unit_map=None):
             native_diagnostics.generated(c_path, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
             result = native_diagnostics.run([compiler(), *FLAGS, *link_flags(), str(c_path),
                                      *staged_objects, '-o', str(output)]
-                                    + (['-lm'] if info.get('libm') else [])
+                                    + (['-lm'] if info.get('libm') else []) + ffi_link_args()
                                     + (['-lws2_32'] if platform.system() == 'Windows'
                                        and {'TCPSOCKET', 'TCPHEAD'}.intersection(
                                            info.get('runtime_parts', []) + metadata['runtime_parts']) else []),

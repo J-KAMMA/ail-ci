@@ -1,0 +1,6 @@
+{
+ "id": "t051",
+ "category": "numbers",
+ "description": "Print the number of ways to write n as a sum of positive integers (partitions), and the number of ways using distinct parts.",
+ "input_format": "small_int"
+}

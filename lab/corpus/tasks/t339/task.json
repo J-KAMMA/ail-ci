@@ -1,0 +1,6 @@
+{
+ "id": "t339",
+ "category": "dp",
+ "description": "Print all subsets of {1..min(n,5)} ordered by (size, lexicographic) one per line, using itertools.combinations.",
+ "input_format": "small_int"
+}

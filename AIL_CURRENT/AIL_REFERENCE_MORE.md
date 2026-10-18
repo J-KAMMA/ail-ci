@@ -2,7 +2,8 @@
 
 Look-up sections behind AIL_REFERENCE.md, whose last line gives each section's line range here:
 read only the slice you need (`sed -n A,Bp AIL_REFERENCE_MORE.md`). A refusal names the construct,
-the rewrite and `file:line:col`.
+the rewrite and `file:line:col`. Most examples use the brace surface (`fn`, `let`, `;`, braces);
+write them in Python as usual (`struct` is a `@dataclass`, `impl` its methods; brace `let ys = xs;` copies).
 
 ## Commands
 
@@ -87,6 +88,37 @@ fn main() {
   `write_stdout_bytes(bytes|bytearray)` and `print` mix in order.
 - Use bytes for binary formats, non-UTF-8 input and one huge line of tokens. `bytes.split()`
   builds a list of every token: avoid it on large input.
+- Python syntax: a bytes-keyed dict or set (`ids: dict[bytes, int] = {}`, `stop = {b"an"}`) and a list
+  of bytes are locals, not parameters or fields; a bytes sort key is `terms[i].hex()`;
+  `ba[a:b].decode()` works on a bytearray; a tuple cannot hold a bytearray (pass it in, return the
+  number). A module-level set or dict literal is a read-only table (next section).
+
+```python
+import sys
+
+def main() -> int:
+    ids: dict[bytes, int] = {}
+    stop = {b"an", b"the"}
+    terms = []
+    for w in b"the cat an ox cat".split():
+        t = bytes(w)
+        if t in stop:
+            continue
+        if t not in ids:
+            ids[t] = len(terms)
+            terms.append(t)
+    order = list(range(len(terms)))
+    order.sort(key=lambda i: terms[i].hex())
+    ba = bytearray(b"xyz")
+    print(len(terms), order[0], ids[b"ox"], ba[1:3].decode())
+    return 0
+
+sys.exit(main())
+```
+
+```text
+2 0 1 yz
+```
 
 ## Syntax: top level, functions, statements, let, const
 
@@ -284,6 +316,18 @@ results, with Python's meaning:
 (`issubset`, `issuperset`), `isdisjoint`. Insertion ordered; `s.pop()` removes the newest element
 (`KeyError` when empty). A set parameter is read-only.
 
+Module-level tables (Python syntax): `STOP = {"a", "the"}`, `STOP: set[str] = {...}`, `TABLE = {"x": 1}`,
+`NAMES = {1: "one"}`, `PAIRS = {(0, 1), (2, 3)}`, `STOP = {b"a"}`: a non-empty literal, every element of one
+kind (int, str, bytes, or a tuple of ints / strs; a dict: one key kind, one value kind, int / float / str /
+bytes / tuple), bound once and not changed. Any function reads it in place: `w in STOP`, `TABLE[k]`,
+`TABLE.get(k, 0)`, `for k, v in TABLE.items()`, `len`, `sorted`, `min`, `max`, `sum`, `any`, `all`. It is built
+once in the entry function and passed down (a bytes table is rebuilt by each function that reads it).
+Refused by name: `STOP.add(x)`, `T[k] = v`, `global STOP`, `xs = STOP`, `return STOP`, `f(STOP)`, `[STOP]`
+(CPython would share the one object; write `set(STOP)` for a copy), and a set of ints walked by `for` /
+`list(...)` (CPython walks it in hash order, this compiler in insertion order; write `sorted(PRIMES)`). A
+computed, empty, mixed-kind, bool or float table is refused too: build it in `main` and pass it in. A library
+module (`compile-library`) takes no table.
+
 ## Strings: methods, formatting
 
 - `str` is UTF-8; `len`, index, slice, `for c in s` count code points; `s[i]` is a str.
@@ -292,9 +336,11 @@ results, with Python's meaning:
   `lower/upper`, `isdigit/isalpha/isalnum/isspace/isupper/islower/isdecimal/isnumeric/istitle`,
   `encode()`; `in`, `+`, `*`, `<`, slices with steps, `ord`, `chr`, `str(int|float|bool)`,
   `hex(int)`. Missing: `partition`, `title`, `capitalize`, `zfill`, `ljust`, `translate`,
-  `removeprefix`, `re`. `+` never mixes str and a number: `"n=" + str(n)`.
+  `removeprefix`. `+` never mixes str and a number: `"n=" + str(n)`.
 - f-strings `{expr}`, `{n:5d}`, `{n:05d}`, `{x:.2f}`, `{x:8.3f}`, `{s:>6}` (`<`, `^`);
-  `"%d %5s %-5s %.9f" % (...)`; `"{} {:.2f}".format(...)`. No `x`, `e`, `g`, `+`, `,` specs.
+  `"%d %5s %-5s %.9f" % (...)`; `"{} {:.2f}".format(...)`. Specs follow CPython: `[[fill]align][sign][#][0]
+  [width][, or _][.precision][type]` with int types d x X o b (and e f g %), float types f F e E g G %
+  or none (the repr), `!r`; refused by name: n, c, z, a nested `{w}`, grouping with zero padding.
 
 ```ail
 fn main() {
@@ -308,6 +354,270 @@ fn main() {
 007|   7|3.14|ab  |8     7|3.1 7!
 True 1 3.5 3 2 1024
 ```
+
+## Regular expressions: re (Python syntax)
+
+`import re` with the pattern spelled as a literal: a str or bytes literal, or a name bound once to one
+(`WORD = r"[a-z]+"`), or `P = re.compile(literal[, flags])` bound once and used as `P.search(s)` and so
+on. The pattern is parsed when the program is built and matched by a linear-time engine written in the
+language itself (leftmost-first, CPython's priority), so groups and spans equal CPython's.
+
+- Functions and methods: `match fullmatch search findall finditer split sub escape`; `flags=` or the
+  last positional flags (`re.I re.M re.S re.X re.A`, joined with `|`), `count=`, `maxsplit=`.
+  `finditer` returns a list of matches, not an iterator (use it in a `for` or with `len`).
+- Pattern syntax: literals, `.`, classes (`[a-z]`, `[^...]`, ranges, `\d \w \s` and their
+  negations; Unicode-aware for str as in CPython, ASCII for bytes and `re.A`), `^ $ \A \Z \b \B`,
+  `* + ? {m} {m,} {,n} {m,n}` and the lazy forms, `|`, `(...)`, `(?:...)`, `(?P<name>...)`, `(?#...)`,
+  a leading `(?imsxa)`, `\n \t \xhh \uhhhh` escapes, lookahead `(?=..) (?!..)` and fixed-width lookbehind
+  `(?<=..) (?<!..)` (no groups inside).
+- Match: `m.group(i)`, `m.group("name")`, `m.group()`, `m.start(i)`, `m.end(i)`, `a, b = m.span()`,
+  `x, y = m.groups()`, `if m:`, `m is None`. A group that did not take part gives `start == -1`; reading it
+  with `m.group(i)` raises `ValueError` (there is no None str), so test `m.start(i) >= 0` first.
+  `findall` with one group returns that group ('' when it did not take part).
+- `sub(pattern, repl, s[, count])`: a literal `repl` may use `\1`, `\g<1>`, `\g<name>`, `\n`;
+  a non-literal `repl` must have no backslash; a function is not built. Empty matches follow CPython 3.7+.
+- Cost: matching is O(len(pattern) x len(text)). On an ASCII str or a bytes subject (and a pattern without
+  lookaround) a DFA built with the program finds the spans, so scans over megabytes (`findall`, `finditer`,
+  `sub`, `split`, `search`) and short `fullmatch` calls run at or below CPython's time, with 2 to 5 times
+  fewer CPU cycles; groups are then read by the Pike VM on the matched span only. A non-ASCII str, a
+  lookaround, or a `$` before a final newline uses the slower Pike VM (a few times slower than CPython on
+  megabytes). The result lists of `findall`/`split` cost about 650 instructions per element in the
+  runtime's list-of-str return, whatever the engine.
+- `for k, v in re.findall(P, s):` with several groups is a loop over the matches (the names may not be used
+  outside the loop); `m.group(k) or d` and `m.group(k) is None` read the group as CPython's None would.
+- Refused by name (the compiler prints a `note:` line): backreferences, groups inside lookaround,
+  atomic groups, possessive quantifiers, conditionals, scoped flags `(?i:...)`, a repeated group that
+  can match the empty string (`(a*)*`), `re.IGNORECASE` with a non-ASCII pattern character (a non-ASCII
+  subject with `re.I` raises `ValueError`), `findall` with several groups and `split` with groups
+  (tuples, None), `subn`, `m.groups()` / `m.groupdict()` / `m.span()` as values, a pattern that is not a
+  literal, `pos` / `endpos`.
+
+```python
+import re
+
+DATE = re.compile(r"(?P<y>[0-9]{4})-(?P<m>[0-9]{2})")
+
+
+def main() -> int:
+    if re.fullmatch(r"[0-9]+", "123"):
+        print("digits")
+    m = DATE.search("on 2026-10 ok")
+    if m:
+        print(m.group("y"), m.group(2), m.start(0))
+    print(re.sub(r"(\w+)@(\w+)", r"\2 at \1", "me@home"))
+    for word in re.findall(r"[a-z]+", "ab, cd"):
+        print(word)
+    return 0
+
+
+main()
+```
+
+## Collections: Counter, defaultdict, OrderedDict, deque (Python syntax)
+
+`from collections import Counter, defaultdict, deque, OrderedDict` (or `import collections`). Each is built
+into the ordinary dict / list / class the compiler already has, before the rest runs (collib.py), so a
+program that does not import collections is unchanged. Keys are `str` or `int`; values `int`, `float` or
+`str`; deque elements `int`, `float`, `str` or `bool`. The type comes from an annotation
+(`c: Counter[str] = Counter()`, `d: DefaultDict[int, List[int]]`, a parameter `q: Deque[int]`) or from the
+first uses (`Counter(words)`, `d[w].append(i)`, `q.append(x)`).
+
+- `Counter`: `Counter()`, `Counter(list | str | set | range | comprehension | another Counter or dict)`;
+  `c[k]` is 0 for a missing key and does not insert; `c[k] += n`, `c[k] = n`, `del c[k]` (silent when
+  missing), `c.get(k, d)`, `pop`, `keys / values / items`, `len`, `in`, `sum(c.values())`, `total()`,
+  `update(iterable | Counter)`, `elements()`, `+ - & |` (and `+=` ...) with CPython's rules (keep
+  positive counts), `print(c)` as `Counter({'a': 3, 'b': 2})`. `most_common([n])` (ties in insertion order,
+  as CPython) is built in `for word, n in c.most_common(10):`, in comprehensions of that form,
+  as `c.most_common(1)[0][0]` / `[i][1]`, in `len()`, `dict()` and `print()`; the loop body may not change `c`.
+- `defaultdict(int | float | str | lambda: <constant>)`: a `dict`. `d[k]` inserts the default, as CPython
+  (so `len(d)` and the order of the keys show it); `d.get(k, x)`, `in`, `pop`, `setdefault` do not;
+  `d[k] += v`, `dict(d)`, `d.copy()`, `for k in d`, `items()` work. `OrderedDict()` is an insertion-ordered
+  dict with `move_to_end(k)` and `popitem(last=True | False)` (a statement or `k, v = d.popitem(...)`).
+- `defaultdict(list)`: a class with the keys in order and the rows (`list[list[T]]`, T int, float or str):
+  `d[k].append / extend / pop / sort / insert`, `d[k] += [..]`, `d[k][i]`, `len(d[k])`, `for x in d[k]`,
+  `d[k] = [..]` (a fresh list), `d.get(k, [])` where the result is only read, `k in d`, `len(d)`,
+  `for k in d`, `d.keys() / values()`, `for k, v in d.items()`, `d.clear()`. Pass it to a function with a
+  parameter annotated `defaultdict[K, list[T]]` (or `Dict[K, List[T]]`); the callee may change it.
+  `defaultdict(set)` (elements int or str): `d[k].add / discard / remove / update(xs)`, `x in d[k]`,
+  `len`, `sorted / sum / min / max / any / all` of a row; looping over a row is refused (CPython's set order is
+  unspecified) -- write `for x in sorted(d[k])`.
+- `deque` (ring buffer, O(1) at both ends): `deque()`, `deque(iterable)`, `maxlen=n` (drops from the other
+  end), `append appendleft pop popleft extend extendleft rotate([n]) clear count index remove insert
+  reverse copy`, `len(q)`, `q[i]` / `q[i] = x` / `del q[i]` (negative too), `x in q`, `for x in q`, `while q:`,
+  `list(q)`, `sum / min / max / sorted(q)`, `print(q)`; `IndexError` / `ValueError` as CPython.
+- A collection passed to a function needs the same annotation on the parameter. A `Counter` or a defaultdict
+  of numbers is a dict there (read-only: return new values instead of changing it); `d[k]` on a defaultdict
+  parameter is refused because it would insert into the caller's dict.
+- Tuples inside collections (tuples of `int` / `float` / `bool` / `str`, see Tuples): `deque([(r, c)])` with
+  `r, c = q.popleft()`, `deque` of `(node, dist)`, `Counter` of coordinate tuples (`most_common`, `+`, `update`,
+  `Counter(zip(a, b))`), `defaultdict(int | float | str)` and `OrderedDict` with tuple keys,
+  `defaultdict(list)` / `defaultdict(set)` with tuple rows and/or keys (`adj[u].append((v, w))` then
+  `for v, w in adj[u]`). The collections pass runs first and writes its helpers with `tuple[...]`
+  annotations, which the tuple pass lowers to classes and tables, so the C runtime gets nothing new.
+  Printing is CPython's repr: `deque([(1, 2)])`, `Counter({(0, 1): 2})`, `defaultdict(<class 'int'>, {...})`,
+  `defaultdict(<class 'list'>, {...})`, `OrderedDict({...})` (also for str / int keys).
+- Refused by name (`note:` lines): `namedtuple` (use a `@dataclass`), `ChainMap` and the rest of the module,
+  `defaultdict(bool | dict | Counter | lambda: <expression>)`, float keys, nested tuples,
+  `print` of a `defaultdict(set)` or of `defaultdict(lambda: ...)`, `==` / `<` on collections, `q.maxlen`, `d.default_factory`, deque slices, `OrderedDict(items)`, a collection
+  in a class field or at module level, `top = c.most_common(3)` as a value, `d[k] = xs` with an existing list,
+  `del d[k]` on `defaultdict(list)`, `Counter.subtract`, a loop that adds to or
+  deletes from the collection it walks (CPython raises `RuntimeError`).
+
+```python
+from collections import Counter, defaultdict, deque
+
+
+def main() -> int:
+    words = "to be or not to be".split()
+    counts = Counter(words)
+    for word, n in counts.most_common(2):
+        print(word, n)
+    groups = defaultdict(list)
+    for i, w in enumerate(words):
+        groups[len(w)].append(i)
+    for k in sorted(groups):
+        print(k, len(groups[k]))
+    window = deque(maxlen=3)
+    for w in words:
+        window.append(w)
+    print(len(window), window[0], counts["zzz"], len(counts))
+    return 0
+
+
+main()
+```
+
+```text
+to 2
+be 2
+2 5
+3 1
+3 not 0 4
+```
+
+## Tuples, lambdas (Python syntax)
+
+Tuples and lambdas are lowered before the rest runs (tuplib.py): a tuple type is a class `_AilT_<types>` with
+fields f0, f1, ..., a tuple expression its constructor, `t[k]` a field read, a dict or set that mentions a
+tuple a generated insertion-ordered hash table. Tuples are immutable, so sharing is CPython's behaviour. A
+program whose tuple uses the compiler already builds (literal swaps, sort-key tuples, `%` operands, lists of
+number tuples) is returned as written. Element types: int, float, bool, str, tuples, lists of those.
+
+- Functions: `return a, b`, `-> tuple[int, str]` (or `Tuple`), `q, r = f(x)`, nested `(a, b), c = ...`,
+  `divmod(a, b)`, `k, sep, v = s.partition(":")`, tuple parameters, class fields, `Optional[tuple[...]]`.
+- `t[k]` with a constant k (negative too), `len(t)`, `== != < <= > >=` (lexicographic, CPython's rules;
+  a nan field raises), `print(t)` / `str(t)` / f-strings give CPython's repr: `(1, 'a')`, `(1,)`, quotes and
+  escapes. `print(xs)` of a list is its repr too.
+- Loops: `for a, b in pairs`, `for i, (a, b) in enumerate(pairs)`, `for x, y in zip(xs, ys)`,
+  `for (r, c), v in d.items()`, comprehensions over or producing tuples (built as statements).
+- `list[tuple[...]]`: `append`, `sort()` (lexicographic), `sort(key=...)`, `sorted`, `min`, `max`, `in`,
+  `index`, `count`, `pop`, `insert`, slices, `reverse`. Sorting tuples of more than 4 scalar fields is done
+  by successive stable sorts in `list.sort()`.
+- `heapq`: `heappush(h, (d, v))`, `heappop`, `heapify`, `heappushpop`, `heapreplace` on lists of tuples.
+- `dict[tuple, V]`, `dict[str, tuple]`, `set[tuple]`, V int, float, str, bool, a tuple, or a list (a row is
+  read in place, `d[k].append(x)` changes it; `d[k] = xs` stores a copy): `d[k]`, `d[k] = v`, `d[k] += v`,
+  `get`, `setdefault`, `pop`, `del`, `in`, `len`, `update`, `copy`, `keys / values / items`, `popitem`;
+  sets `add discard remove pop clear update`, `| & - ^`, `<= < >= >`, `==`. Iteration is in insertion order
+  (a set too, unlike CPython: sort before printing). A float is not a key. A loop may not change the
+  dict or set it walks.
+- A module-level list of number tuples (`DIRS = [(0, 1), (1, 0)]`) is kept as columns; `for dr, dc in DIRS`
+  allocates nothing.
+- Lambdas: `f = lambda x: x * k` and then `f(3)`, `apply(f, xs)`; a lambda passed to a parameter typed
+  `Callable[[int], int]` (lifted to a top-level function; with captured locals the callee is cloned and
+  gets the captures as leading parameters); `map / filter` with a lambda (fused into loops and
+  comprehensions); `functools.reduce` with a lambda. A captured name must not be assigned after the lambda
+  is made (CPython reads it when the lambda is called); a lambda that is returned or stored in a list,
+  dict or field is refused by name.
+- Refused by name: tuple concatenation / repetition / slices, a variable index, `tuple(x)`, `tuple[int, ...]`,
+  iterating a tuple, float keys, dict values that are sets or
+  dicts, `max(xs, key=...)` over tuples.
+
+```python
+import heapq
+
+
+def main() -> int:
+    q, r = divmod(17, 5)
+    pq = [(3, "c"), (1, "a")]
+    heapq.heapify(pq)
+    heapq.heappush(pq, (2, "b"))
+    seen = {(0, 0)}
+    seen.add((0, 1))
+    k = 10
+    scale = lambda x: x * k
+    print(q, r, heapq.heappop(pq), (1, "a") < (1, "b"), len(seen), scale(4))
+    return 0
+
+
+main()
+```
+
+```text
+3 2 (1, 'a') True 2 40
+```
+
+## Libraries
+
+`import random`, `import itertools`, `import functools`, `import json` (or `from m import name`). Each use is
+lowered before the rest of the compiler runs (stdlib3.py, itlib.py, funclib.py, jsonlib.py), so a program that
+imports none of them is unchanged. A use that is not built is refused by name (`module.name ...`), never
+passed on to the generic import refusal. Positions: a call that needs statements (sample, reduce, a
+comprehension over itertools, list(chain(...))) is built where it is the first thing a statement evaluates
+(`x = ...`, `return ...`, `print(...)` past names and constants, an `if` test, a `for` iterable); bind it to a
+variable first when it sits behind another call.
+
+- `random`: CPython 3.12's MT19937, bit for bit after `random.seed(<int>)`: `random()`, `randint`,
+  `randrange(stop | start, stop[, step])`, `uniform`, `gauss(mu, sigma)`, `choice(list)`, `shuffle(list)`,
+  `sample(list, k)` (same draws, same ValueError / IndexError). The state is one generator per program. A
+  program without `random.seed(<int>)` is refused (an unseeded run is not reproducible);
+  a seed that is a str / float / None, `random.Random(...)`, `choices`, `triangular`, `getrandbits`... are refused by
+  name. Ranges wider than 64 bits are a RuntimeError. Only the module-level functions share state, as in CPython.
+- `itertools`: `count`, `repeat` (a number or str), `chain`, `chain.from_iterable` (list of lists), `islice`
+  (None, 1 to 3 integers, CPython's ValueErrors), `accumulate` (default `+`, `func=` a two-parameter lambda,
+  a function name, `max`, `min`, `operator.mul`..., `initial=`), `pairwise`, `zip_longest(..., fillvalue=)`,
+  `groupby(list[, key])` (a pure key: lambda over len / abs / str / int / indexing or a name), `product`
+  (`repeat=` a literal), `permutations`, `combinations`, `combinations_with_replacement`. They are loops, so they appear in
+  `for` statements, comprehensions / generator expressions, and as the argument of `list`, `sum`, `min`, `max`,
+  `sorted`, `set`, `any`, `all`, `"".join` (`any` / `all` stop early). The items come out in CPython's order. Arguments are
+  lists / strs held in a variable the compiler knows to be one, slices, literals, comprehensions or `range(...)`
+  (anything else: `list(...)` it first). Lists are walked live (a list the body grows is walked on); the
+  pools of `product` / `permutations` / `combinations` are snapshots, as CPython's are. Tuples are not a
+  type: a tuple item is unpacked (`for a, b in product(x, y)`; `permutations(xs)` with a variable r needs the
+  item bound to one name), or bound to one name that is only indexed, iterated, summed or measured (it is a
+  list; `print(p)`, `p == q`, `d[p]` are refused). `zip(count(1), xs)` works too. Not built: `cycle`, `tee`,
+  `takewhile`, `dropwhile`, `filterfalse`, `starmap`, `compress`, `batched`, iterators held in variables, a
+  loop's `else:`, rebinding the walked list inside the loop.
+- `functools.reduce(f, iterable[, initial])` with a two-parameter lambda, a function name, `max` / `min`,
+  `operator.add` / `mul`..., `math.gcd` (these now also work as values: `key=operator.neg`). An empty iterable without
+  an initial value raises RuntimeError with CPython's text (there is no TypeError here).
+  `@lru_cache` / `@lru_cache(maxsize=N)` / `@cache` on a top-level pure function (int / str / bool parameters,
+  int / float / str / bool result; no print, input, files, sys, random, time, global): one memo dict per function,
+  shared by every call of the program (the dict travels as an extra parameter of the functions that can reach
+  it; `main` creates it). The size bound is ignored (the result of a pure function does not depend on eviction).
+  `cache_info()` / `cache_clear()` and passing the function as a value are refused.
+  `sorted(xs, key=cmp_to_key(f), reverse=)` and `xs.sort(key=cmp_to_key(f))` with a pure `f(a, b) -> int`: a
+  stable merge sort calling `f(a, b) < 0`, the same order as CPython for every consistent comparator.
+- `json.loads(s)` needs the type it produces, written down: `data: dict[str, int] = json.loads(s)`, a
+  function's return annotation, an annotated variable, or an annotated parameter of the function it is passed to.
+  Types: `int`, `float`, `str`, `bool`, `list[T]`, `list[list[T]]` (T int / float / str), `dict[str, T]` (T int / float /
+  str); `list[dict[...]]`, `dict[str, list[...]]`, `dict[str, bool]` are not types the compiler holds, so they are
+  refused. `json.load(sys.stdin)` is `json.loads(sys.stdin.read())`. The text is checked by a scanner with CPython's
+  messages, so every malformed document raises the same ValueError (`json.JSONDecodeError` in an `except` is
+  ValueError) with the same `line L column C (char P)`. A valid document that does not fit the declared type
+  (1 where float is declared, 1.5 for int, null, another container, an int beyond 64 bits, a lone surrogate)
+  is a RuntimeError naming what was found: CPython would hand back another type and a silent conversion would print
+  differently. `json.dumps(x, indent=, sort_keys=, separators=, ensure_ascii=, allow_nan=)` (literal options)
+  prints CPython's bytes for dict / list / str / int / float / bool / None literals (nested, mixed) and for variables of
+  the types above, whose type comes from an annotation or the first assignment; `json.dump(x, sys.stdout)` works.
+  `default=`, `cls=`, `skipkeys=` and a value of unknown type are refused by name.
+  Speed: a plain document (strict syntax, every value of the declared type, ints within 64 bits) is parsed in one
+  pass by the C runtime straight into the declared list / dict, with no intermediate strings, and `json.dumps` of a
+  list, a nested list or a str-keyed dict is written by C appenders into one buffer; on the 12 MB benchmark documents
+  both are 2-6 times faster than CPython 3.12 with about half its peak memory. Whatever the fast path does not take
+  (a syntax error, a value of another type, NaN, an integer beyond 64 bits) runs the scanner and the typed parsers
+  described above, so errors and results are the same. `data: dict[str, int] = json.loads(s)` (or an assignment to an
+  annotated local) fills the local in place; a `return json.loads(s)` or a call argument goes through a loader
+  function and copies the result once more.
 
 ## Heaps: heapq, bisect
 
@@ -348,9 +658,9 @@ needs a final `return`. Handler names: Local names.
 
 | Python | AIL |
 |---|---|
-| tuples, returning several values, `zip` | a struct; index loops (`a, b = b, a` works) |
-| `lambda`/closure as a value, nested `def` | a top-level `fn` passed as `Callable[[A], R]` |
-| global variables | a struct holding the state, passed to each function |
+| tuples beyond the Tuples section, `zip` over non-lists | a struct; index loops |
+| a lambda that escapes, nested `def` | a top-level `fn` passed as `Callable[[A], R]` |
+| global variables you change | a struct holding the state, passed to each function (a literal read-only table is fine) |
 | `dict[str, Struct]`, `dict[str, list[T]]` | a `dict[str, int]` index into a `list[Struct]` (or a `list[list[T]]`) |
 | `None` for int, str, list | a sentinel (-1, ""), or raise. A struct may be `Node \| None` |
 | `xs[i] = v` or `xs.append(v)` on a list parameter | a struct field `s.xs`, or return a new list |
@@ -360,7 +670,7 @@ needs a final `return`. Handler names: Local names.
 | `d.get(k)` (None when missing) | `d.get(k, -1)` with a sentinel, or `if k in d { ... d[k] ... }` |
 | `int(s)` on text that may overflow | `parse_int64_decimal(s)` from `checked_integer` (`ValueError`) |
 | `with open(p) as f`, `f.write` | `read_bytes`, `write_text`, `file_chunks` |
-| `re`, `math`, `collections`, big integers | hand-written loops; `x ** 0.5`; limbs in a `list[int]` |
+| `namedtuple`, big integers | a `@dataclass` class; limbs in a `list[int]` |
 
 ```ail-refused
 fn main() { let t = (1, 2); print(t[0]); }
@@ -598,3 +908,15 @@ fn main() {
 ```text
 7.485470860550343 0.6933972430599376 1385.7944861198737
 ```
+
+### Library batch 4 (csv, datetime, statistics, small forms)
+
+Lowered in the front end like batches 1 to 3 (stdlib4.py, csvlib.py, dtlib.py, statlib.py, smalllib.py); a program that does not use them is unchanged.
+
+- `csv`: `reader`, `DictReader`, `writer`, `DictWriter` on `sys.stdin`, a file opened for reading, or a list of lines, with `delimiter quotechar doublequote escapechar skipinitialspace quoting lineterminator strict`. CPython's state machine (QUOTE_MINIMAL default, `lineterminator '
+'`). A parse error is raised when the reader reaches it, so earlier rows are processed first. `csv.Error` is `ValueError`. Declared difference: `DictReader` rows with too few or too many fields raise `RuntimeError`.
+- `datetime`: `date`, `datetime` (naive), `time`, `timedelta` with arithmetic, comparison, `replace`, `isoformat`, `strftime`, `strptime`, `fromisoformat`, `fromordinal`, `weekday`, `isocalendar` parts. `now() utcnow() today() date.today() fromtimestamp() utcfromtimestamp() timestamp()` read the wall clock and the OS time zone (`time`, below). Fixed-offset time zones are built: `timezone.utc`, `UTC`, `timezone(timedelta(...)[, name])`, `tzinfo=` / `replace(tzinfo=)`, `astimezone([tz])`, `utcoffset()`, `tzname()`, `now(tz)`, `fromtimestamp(t, tz)`, `fromisoformat` with `Z` or an offset, `%z %Z`; test `d.tzinfo is None`. Refused by name: `zoneinfo`, `tzinfo` subclasses, `dst()`, `timezone.min/max`, an aware `time`. Limit: `timedelta` beyond about 53 million days raises `OverflowError`.
+- `time`: `perf_counter() monotonic() time() time_ns() sleep(x) localtime([t]) gmtime([t]) strftime(fmt[, t]) mktime(t)`. The wall clock is a program input: `AIL_CLOCK=<seconds>[.<fraction>]` pins it for tests (every read returns that value, `sleep(x)` advances it without sleeping); local time is the OS time zone (`TZ` is respected). `localtime` and `gmtime` give an object with `tm_year tm_mon tm_mday tm_hour tm_min tm_sec tm_wday tm_yday tm_isdst tm_zone tm_gmtoff` only. Refused by name: `asctime ctime tzset altzone daylight timezone tzname struct_time(...)` and `strftime` of a tuple.
+- `statistics` on `list[int]`: `mean median median_low median_high mode multimode variance pvariance stdev pstdev`; `fmean` also on floats. `StatisticsError` is `ValueError`. Mixed int/float results only where printed or used as floats.
+- Small forms: `int.bit_length()`, `int.bit_count()`, `max/min(..., default=)`, `max(d, key=d.get)` (and over a generator), `x in (constants)`, `itertools.product(x, repeat=n)` with a runtime `n`, unpacking a `tuple | None` after a None test.
+- Refused by name with a "write instead" hint: `decimal`, `fractions`, `textwrap`, `unicodedata`, `enum`, `string.Template`.

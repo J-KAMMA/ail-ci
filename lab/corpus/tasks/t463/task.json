@@ -1,0 +1,6 @@
+{
+ "id": "t463",
+ "category": "errors_classes",
+ "description": "Use assert statements to check invariants on the input (the sorted list is non-decreasing) and print 'asserts ok'; additionally print the result of an assert False caught as AssertionError with its message.",
+ "input_format": "nums"
+}

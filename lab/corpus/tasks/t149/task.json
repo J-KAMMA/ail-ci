@@ -1,0 +1,6 @@
+{
+ "id": "t149",
+ "category": "collections",
+ "description": "Find the longest run of equal consecutive numbers and the starting index; also print the number of runs.",
+ "input_format": "nums_nocount"
+}

@@ -110,6 +110,8 @@ def instr_effects(ins, fn, program, places=None, defs=None, summaries=None):
         loc = 'Local(%s,%s)' % (fn.name, names.get(ins.operands[0], '?'))
         return Effects(reads=[loc]) if op == 'load' else Effects(writes=[loc])
     if op in _ALWAYS_RAISES:
+        if ins.attrs.get('mode') == 'nonneg':
+            return NONE            # the range pass proved the divisor >= 1 and the dividend >= 0
         divisor = const_value(ins.operands[1], defs if defs is not None else defs_of(fn))
         if isinstance(divisor, (int, float)) and not isinstance(divisor, bool) and divisor != 0:
             # a non-zero constant divisor: no ZeroDivisionError; INT64_MIN // -1 is the one overflow
@@ -135,13 +137,50 @@ def instr_effects(ins, fn, program, places=None, defs=None, summaries=None):
         return Effects(reads=[loc], writes=[loc, 'Spine(%s)' % root], raises=[INDEX] if op == 'list.pop' else [])
     if op in ('field.list', 'list.ref'):
         return NONE
-    if op in ('list.reset', 'list.repeat', 'list.lit', 'list.reserve', 'list.move', 'list.call'):
+    if op == 'list.sortperm':
+        perm = _root(ins.operands[0], fn, defs)
+        eff = Effects(reads=['Elem(%s)' % perm], writes=['Elem(%s)' % perm, 'Spine(%s)' % perm, 'Rebind(%s)' % perm],
+                      raises=[VALUE, rtc.DIE])
+        for c in ins.operands[1:]:
+            eff = eff | Effects(reads=['Elem(%s)' % _root(c, fn, defs)])
+        return eff
+    if op == 'list.permute':
+        loc = 'Elem(%s)' % _root(ins.operands[0], fn, defs)
+        return Effects(reads=[loc, 'Elem(%s)' % _root(ins.operands[1], fn, defs)], writes=[loc], raises=[rtc.DIE])
+    if op in ('rec.push', 'rec.up', 'rec.pop'):
+        root = _root(ins.operands[0], fn, defs)
+        loc = 'Elem(%s)' % root
+        if op == 'rec.up':
+            return Effects(reads=[loc], writes=[loc])
+        return Effects(reads=[loc], writes=[loc, 'Spine(%s)' % root],
+                       raises=[INDEX] if op == 'rec.pop' else [rtc.DIE])
+    if op in ('dict.has', 'dict.need', 'dict.get', 'dict.put', 'dict.len', 'dict.reset'):
+        names = places if places is not None else place_names(fn)
+        loc = 'Local(%s,%s)' % (fn.name, names.get(ins.operands[0], '?'))
+        if op in ('dict.put', 'dict.reset'):
+            return Effects(reads=[loc], writes=[loc], raises=[rtc.DIE])
+        return Effects(reads=[loc], raises=[rtc.DIE] if op == 'dict.need' else [])
+    if op == 'list.has':
+        return Effects(reads=['Elem(%s)' % _root(ins.operands[0], fn, defs)])
+    if op == 'list.sort':
+        loc = 'Elem(%s)' % _root(ins.operands[0], fn, defs)
+        return Effects(reads=[loc], writes=[loc], raises=[VALUE] if ins.operands[0].type.args[0].args[0] == I.F64 else [])
+    if op == 'list.join':
+        return Effects(reads=['Elem(%s)' % _root(ins.operands[1], fn, defs)], allocs=[rtc.ARENA], raises=[rtc.DIE])
+    if op in ('list.reset', 'list.repeat', 'list.lit', 'list.reserve', 'list.move', 'list.call',
+              'list.copy', 'list.share', 'list.rt'):
         # these replace or grow the content of the list(s) they name (the destination first)
-        refs = ins.operands[:2] if op == 'list.move' else ins.operands[:1]
+        refs = ins.operands[:2] if op in ('list.move', 'list.copy', 'list.share') else ins.operands[:1]
         eff = NONE
-        for r in refs:
+        for k, r in enumerate(refs):
             root = _root(r, fn, defs)
             eff = eff | Effects(reads=['Elem(%s)' % root], writes=['Elem(%s)' % root, 'Spine(%s)' % root])
+            if k == 0 and op != 'list.reserve':
+                # the destination's list is replaced (rebound), not only resized: a borrow of the
+                # old list (S3b, ownership.py) must not outlive it
+                eff = eff | Effects(writes=['Rebind(%s)' % root])
+        if op == 'list.rt':
+            eff = eff | rtc.LIST_ENTRIES[ins.attrs['callee']]['effects']
         if op == 'list.call':
             sym = ins.attrs.get('callee')
             callee = program.functions.get(sym) if program is not None else None
@@ -172,6 +211,21 @@ def instr_effects(ins, fn, program, places=None, defs=None, summaries=None):
     if op == 'field.ba':
         return Effects(reads=['Field(%s,%s)' % (ins.attrs.get('cls', '?'), ins.attrs.get('name', '?'))])
     if op == 'ba.extend_lit':
+        root = _root(ins.operands[0], fn, defs)
+        return Effects(reads=['Elem(%s)' % root], writes=['Elem(%s)' % root, 'Spine(%s)' % root], raises=[VALUE])
+    if op == 'obj.init':
+        names = places if places is not None else place_names(fn)
+        eff = Effects(writes=['Local(%s,%s)' % (fn.name, names.get(ins.operands[0], '?'))])
+        for v, a in zip(ins.operands[1:], ins.attrs.get('abi') or []):
+            if a == 'list':
+                root = _root(v, fn, defs)
+                eff = eff | Effects(reads=['Elem(%s)' % root], writes=['Elem(%s)' % root, 'Spine(%s)' % root,
+                                                                       'Rebind(%s)' % root])
+        return eff | Effects(allocs=['Heap'])
+    if op == 'obj.copyref':
+        names = places if places is not None else place_names(fn)
+        return Effects(writes=['Local(%s,%s)' % (fn.name, names.get(ins.operands[0], '?'))])
+    if op == 'ba.extend':
         root = _root(ins.operands[0], fn, defs)
         return Effects(reads=['Elem(%s)' % root], writes=['Elem(%s)' % root, 'Spine(%s)' % root], raises=[VALUE])
     if op == 'ba.write':
@@ -208,6 +262,10 @@ def instr_effects(ins, fn, program, places=None, defs=None, summaries=None):
     if op == 'rt':
         entry = RUNTIME.get(ins.attrs.get('callee'))
         return entry[2] if entry else UNKNOWN
+    if op == 'print':
+        return Effects(io=True, writes=['Global(rt,stdout)'])
+    if op in ('str.lit', 'bytes.lit'):
+        return NONE
     if op == 'raise':
         return Effects(raises=[ins.attrs.get('name', 'Exception')])
     if op == 'reraise':
@@ -268,3 +326,7 @@ def summarize_program(program):
     for sym, fn in program.functions.items():
         fn.effects = summaries[sym]
     return summaries
+
+
+# the text stage's runtime calls (rtc.py); imported last because it builds on the names above
+from . import rtc      # noqa: E402,F401  (registers its entries in RUNTIME)

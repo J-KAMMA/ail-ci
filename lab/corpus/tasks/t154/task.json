@@ -1,0 +1,6 @@
+{
+ "id": "t154",
+ "category": "collections",
+ "description": "Print the pair (min, max) of each prefix and the number of times the maximum changed.",
+ "input_format": "nums_nocount"
+}

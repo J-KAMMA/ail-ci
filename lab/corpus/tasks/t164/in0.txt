@@ -1,0 +1,5 @@
+name,dept,salary,age
+niaj,ops,162000,45
+erin,hr,140000,45
+dave,ops,170000,39
+carol,sales,196000,61

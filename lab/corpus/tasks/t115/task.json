@@ -1,0 +1,6 @@
+{
+ "id": "t115",
+ "category": "strings",
+ "description": "Zip-compare the first half of the word list against the second half, printing 'a<b', 'a=b' or 'a>b' for each pair.",
+ "input_format": "words_line"
+}

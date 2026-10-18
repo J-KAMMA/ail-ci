@@ -1,0 +1,6 @@
+{
+ "id": "t091",
+ "category": "strings",
+ "description": "Print the words sorted by length then alphabetically, and the longest common prefix of all words.",
+ "input_format": "strings_n"
+}

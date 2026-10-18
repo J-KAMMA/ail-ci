@@ -1,0 +1,6 @@
+{
+ "id": "t349",
+ "category": "dp",
+ "description": "Print the n-th Fibonacci number modulo 10**9+7 using fast doubling, and the Pisano period for modulo min(n,50)+1.",
+ "input_format": "small_int"
+}

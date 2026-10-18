@@ -1,0 +1,6 @@
+{
+ "id": "t426",
+ "category": "errors_classes",
+ "description": "Use a custom exception hierarchy (BaseAppError, ParseError, RangeError) for validating lines: ints must be 1..5; print which error was raised; use finally to count processed lines.",
+ "input_format": "opt_ints_lines"
+}

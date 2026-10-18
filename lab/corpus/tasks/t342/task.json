@@ -1,0 +1,6 @@
+{
+ "id": "t342",
+ "category": "dp",
+ "description": "Print Catalan numbers C(0)..C(n) using both the DP recurrence and the closed form with math.comb; verify they agree and print 'ok'.",
+ "input_format": "small_int"
+}

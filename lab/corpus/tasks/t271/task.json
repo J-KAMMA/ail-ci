@@ -1,0 +1,6 @@
+{
+ "id": "t271",
+ "category": "graphs",
+ "description": "Find all bridges (edges whose removal disconnects the graph) in sorted order using DFS low-link.",
+ "input_format": "edges_plain"
+}

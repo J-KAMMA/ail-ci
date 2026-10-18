@@ -1,0 +1,6 @@
+{
+ "id": "t100",
+ "category": "strings",
+ "description": "Count words per line, and print the line number with the most words (first on ties) and the average words per line with 2 decimals.",
+ "input_format": "text_lines"
+}

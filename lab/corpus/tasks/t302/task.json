@@ -1,0 +1,6 @@
+{
+ "id": "t302",
+ "category": "graphs",
+ "description": "Simulate shortest-job-first scheduling (non-preemptive, all arrive at time 0); print the order, the waiting time of each process and the average waiting time with 2 decimals.",
+ "input_format": "schedule_queue"
+}

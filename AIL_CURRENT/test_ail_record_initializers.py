@@ -9,7 +9,7 @@ from pyfront import Unsupported
 from test_ail_callable_values import oracle_source
 from test_ail_text_find_search import HEADERS
 
-SCALAR_BASELINE_SHA256={'fn main()->int {let xs:list[int]=[1,2];xs.reverse();print(xs[0]);return 0;}': '7ebf3010204f3d86a27aa54de8e448e8944811acfb5948dad3f853697b9e28b4', 'fn main()->int {let xs:list[float]=[1.5,2.5];xs.reverse();print(xs[0]);return 0;}': '30306b2c2a776bb57fcbbe94369ebe2fc23170bb1a5d0163705b26b6ebbfb8a1', 'struct Box {ints:list[int];floats:list[float];} fn main()->int {let b=Box([1],[1.5]);b.ints=[2];b.floats=[2.5];print(b.ints[0]);return 0;}': '4921d3757e950c07c0ce172380e27fd54b6ca5f4d58556cccb6bebdcb0a6530d'}
+SCALAR_BASELINE_SHA256={'fn main()->int {let xs:list[int]=[1,2];xs.reverse();print(xs[0]);return 0;}': '674b0550be0354ec222bcdc44ad1d7366c4e3c87d5e127f07a318928850c39d6', 'fn main()->int {let xs:list[float]=[1.5,2.5];xs.reverse();print(xs[0]);return 0;}': 'cb76ee66072d09aa575ba5d6247c6d389c6c2bd8c2e24ac330f835ad2b19323d', 'struct Box {ints:list[int];floats:list[float];} fn main()->int {let b=Box([1],[1.5]);b.ints=[2];b.floats=[2.5];print(b.ints[0]);return 0;}': '9c542728a1900e5d6f5b706d1f05cf1ef4c24b932b7693c85431708be7e11734'}
 
 WHOLE=r'''
 struct Source {count:int;ratio:float;data:bytes;}
@@ -27,7 +27,13 @@ fn main()->int {
 }
 '''
 
-def generated(source):return candidate.to_c(translate(source),name='run',strict=True)
+def generated(source):
+ # (the C the legacy emitter writes: pinned and inspected here whatever AIL_IR says)
+ saved=os.environ.get('AIL_IR');os.environ['AIL_IR']='0'
+ try:return candidate.to_c(translate(source),name='run',strict=True)
+ finally:
+  if saved is None:os.environ.pop('AIL_IR',None)
+  else:os.environ['AIL_IR']=saved
 
 class RecordInitializerTypeTests(unittest.TestCase):
  def test_three_record_kinds_empty_and_nonempty(self):

@@ -1,0 +1,6 @@
+{
+ "id": "t380",
+ "category": "sorting",
+ "description": "Sort points by distance from the origin (squared distance integer), ties by x then y; print the first 10.",
+ "input_format": "points"
+}

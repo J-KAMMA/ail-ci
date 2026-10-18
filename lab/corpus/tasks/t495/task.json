@@ -1,0 +1,6 @@
+{
+ "id": "t495",
+ "category": "errors_classes",
+ "description": "Print the word counts of the text where words are lowercased with casefold and non-alphabetic edge characters stripped (str.strip with string.punctuation); sort by count desc then word; first 8 lines.",
+ "input_format": "text_uni"
+}

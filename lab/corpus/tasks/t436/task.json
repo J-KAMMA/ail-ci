@@ -1,0 +1,6 @@
+{
+ "id": "t436",
+ "category": "errors_classes",
+ "description": "Define a Stack class with a generic type annotation using typing.Generic; process the commands; print results; use __len__ and __iter__ and __bool__.",
+ "input_format": "commands"
+}

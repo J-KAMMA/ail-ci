@@ -1,0 +1,6 @@
+{
+ "id": "t411",
+ "category": "simulation",
+ "description": "Run Langton's ant on a 15x15 torus for n*20 steps, starting in the centre facing up; print the final grid and the number of black cells.",
+ "input_format": "small_int"
+}

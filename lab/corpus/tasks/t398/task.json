@@ -1,0 +1,6 @@
+{
+ "id": "t398",
+ "category": "simulation",
+ "description": "Implement Monte-Carlo estimation of pi using random.Random(seed) with n*100 samples; print the estimate with 4 decimals.",
+ "input_format": "seed_params"
+}

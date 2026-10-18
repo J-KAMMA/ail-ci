@@ -1,0 +1,18 @@
+17
+heidi 40
+alice 75
+heidi 35
+niaj 53
+heidi 59
+dave 82
+grace 38
+dave 78
+frank 3
+bob 35
+ivan 88
+heidi 37
+grace 18
+frank 3
+frank 14
+niaj 62
+mallory 3

@@ -1,0 +1,10 @@
+push 25
+peek
+size
+push 86
+push 55
+push 62
+push 37
+push 68
+push 23
+size

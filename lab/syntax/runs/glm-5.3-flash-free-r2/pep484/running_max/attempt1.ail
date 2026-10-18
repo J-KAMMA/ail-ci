@@ -1,0 +1,27 @@
+```python
+import sys
+
+def main() -> int:
+    for line in sys.stdin:
+        xs: list[int] = []
+        for tok in line.split():
+            try:
+                xs.append(int(tok))
+            except ValueError:
+                pass
+        out: list[str] = []
+        best: int = 0
+        first: bool = True
+        for i in range(len(xs)):
+            if first:
+                best = xs[i]
+                first = False
+            elif xs[i] > best:
+                best = xs[i]
+            out.append(str(best))
+        print(" ".join(out))
+    return 0
+
+if __name__ == "__main__":
+    main()
+```

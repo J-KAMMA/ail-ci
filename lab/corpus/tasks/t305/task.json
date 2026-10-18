@@ -1,0 +1,6 @@
+{
+ "id": "t305",
+ "category": "dp",
+ "description": "Print the number of subsets of the items whose total weight is at most the capacity, modulo 1000000007 (items may be considered distinct by index).",
+ "input_format": "knap"
+}

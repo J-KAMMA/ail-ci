@@ -1,0 +1,6 @@
+{
+ "id": "t260",
+ "category": "grids",
+ "description": "Print the points grouped by quadrant (I, II, III, IV, axis) with the counts.",
+ "input_format": "points"
+}

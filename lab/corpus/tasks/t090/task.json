@@ -1,0 +1,6 @@
+{
+ "id": "t090",
+ "category": "strings",
+ "description": "Group the words by their sorted letters (anagram classes); print groups with more than one member, sorted, one group per line.",
+ "input_format": "strings_n"
+}

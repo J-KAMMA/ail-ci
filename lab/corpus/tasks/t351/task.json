@@ -1,0 +1,6 @@
+{
+ "id": "t351",
+ "category": "dp",
+ "description": "Solve the stock profit problem: use the integers (with random sign) as daily prices (absolute values), print the maximum profit with one transaction and with unlimited transactions.",
+ "input_format": "nums_nocount"
+}

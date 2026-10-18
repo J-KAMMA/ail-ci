@@ -1,0 +1,6 @@
+{
+ "id": "t331",
+ "category": "dp",
+ "description": "Print the lower bound and upper bound positions of the target (hand-written binary search), and the closest value to the target.",
+ "input_format": "sorted_nums_target"
+}

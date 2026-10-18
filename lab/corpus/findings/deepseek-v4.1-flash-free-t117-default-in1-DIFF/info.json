@@ -1,0 +1,11 @@
+{
+ "model": "deepseek-v4.1-flash-free",
+ "task": "t117",
+ "mode": "default",
+ "cpython_failed_all": false,
+ "input": 1,
+ "cls": "DIFF",
+ "reason": "exit code cpython=0 ail=1; line 1: cpython='No' ail='<end>'",
+ "cpython_rc": 0,
+ "ail_rc": 1
+}
