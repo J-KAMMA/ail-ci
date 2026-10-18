@@ -261,6 +261,17 @@ _SIMPLE_SIG_RE = re.compile(
     r'(,\s*ail_obj\s+\w+\s*)*\)')
 
 
+def _unpublished(key):
+    """The refusal for a module attribute that has no NAMES_library entry. A dynamic import names no
+    module at build time, so it carries a rewrite."""
+    text = '%s (not yet published in NAMES_library.json)' % key
+    if key.split('.')[0] == 'importlib':
+        text += ('\n  write instead: import the module at the top of the file (`import name` or '
+                 '`from package import name`); a program is built whole, so a module name cannot be '
+                 'chosen at run time')
+    return Unsupported(text)
+
+
 def _simple_sig(sig):
     """True iff `sig` is exactly `ail_st NAME(ail_ctx *cx, ail_obj *out, ail_obj p1, ail_obj
     p2, ...)` -- the ONLY shape this emitter's blind positional-passthrough generic dispatch
@@ -3166,10 +3177,12 @@ class Compiler:
             # definition) -- never touches any other function's inlining in the same unit.
             csrc = re.sub(r'__attribute__\(\(always_inline\)\) static inline\r?\n'
                           r'(?=\S[^\n]*\b' + re.escape(mangled) + r'\s*\()', '', csrc)
-            if ret == pymix.STR and info2.get('io'):
-                # The str-return calling convention below calls the typed clone TWICE (a
-                # length-then-fill probe -- see `_call_mix_guarded`); a function that can itself
-                # print()/assert a message would say it twice. Left boxed rather than risk it.
+            if info2.get('io'):
+                # A clone that prints writes through the typed unit's own stdio while the boxed
+                # program buffers its output separately, so the two interleave out of order; and
+                # the str-return convention calls the clone TWICE (length-then-fill probe, see
+                # `_call_mix_guarded`), which would say a message twice. A function that can
+                # print()/assert stays boxed.
                 continue
             sig_text = _mix_extract_signature(csrc, mangled)
             if sig_text is None or not _mix_validate_signature(sig_text, mangled, params, ret):
@@ -3355,7 +3368,10 @@ class Compiler:
                 ctx.emit('st = %s(cx, &%s%s);' % (cfn, t, ''.join(', ' + a for a in argcs)))
                 ctx.check()
                 return t
-            raise Unsupported('%s (not yet published in NAMES_library.json)' % key)
+            raise _unpublished(key)
+        if name == '__import__':
+            raise Unsupported("call to __import__(); a program is built whole, so a module name cannot be "
+                              "chosen at run time\n  write instead: import the module at the top of the file")
         raise Unsupported("the name '%s' is not a known function/class/builtin" % name)
 
     # ---- a small, honest core of builtins implemented directly against the FIXED v2 API
@@ -4667,7 +4683,7 @@ class Compiler:
             return m2(args, kwargs, ctx)
         key = '%s.%s' % (mod, f.attr)
         if key not in self.names_library:
-            raise Unsupported('%s (not yet published in NAMES_library.json)' % key)
+            raise _unpublished(key)
         cfn, sig = self.names_library[key]
         if not _simple_sig(sig):
             raise Unsupported('%s() (published in NAMES_library.json with a signature this '

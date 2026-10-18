@@ -9,6 +9,7 @@ import math
 import operator
 from pathlib import Path
 import re
+import sys
 import token
 import tokenize
 
@@ -90,6 +91,17 @@ def _relib():
     return _relib.module
 
 
+def _optlib():
+    """python/pkg-v12/optlib.py (scalar `int | None` / `Optional[str]`, lowered onto a flag and a value)."""
+    if not hasattr(_optlib, "module"):
+        spec = importlib.util.spec_from_file_location(
+            "_ail_optlib", Path(__file__).parent / "python" / "pkg-v12" / "optlib.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _optlib.module = module
+    return _optlib.module
+
+
 def _tuplib():
     """python/pkg-v12/tuplib.py (tuples, lowered onto classes before the surface pass)."""
     if not hasattr(_tuplib, "module"):
@@ -112,7 +124,18 @@ def _collib():
     return _collib.module
 
 
-_OPTIONAL = re.compile(r'\bOptional\s*\[\s*([A-Za-z_]\w*)\s*\]')
+def _stdlib4():
+    """python/pkg-v12/stdlib4.py (library batch 4: csv, datetime, ... lowered before the other source passes)."""
+    if not hasattr(_stdlib4, "module"):
+        here = str(Path(__file__).parent / "python" / "pkg-v12")
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import stdlib4
+        _stdlib4.module = stdlib4
+    return _stdlib4.module
+
+
+_OPTIONAL =re.compile(r'\bOptional\s*\[\s*([A-Za-z_]\w*)\s*\]')
 
 
 def detect(source):
@@ -646,19 +669,57 @@ def _byte_offsets(data):
     return starts
 
 
+def _module_scope_bindings(tree):
+    """How many times each name is bound at module scope, in any statement outside function and class
+    bodies (a store in an `if`/`for`/`while`/`with`/`try` counts), and twice for a name that a function
+    declares `global` (it can change whenever that function runs)."""
+    count = {}
+
+    def bind(name, times=1):
+        count[name] = count.get(name, 0) + times
+
+    def walk(node):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bind(node.name)
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Global):
+                    for name in sub.names:
+                        bind(name, 2)
+            return
+        if isinstance(node, ast.Lambda):
+            return
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            for sub in ast.walk(node):          # only a walrus target leaks out of a comprehension
+                if isinstance(sub, ast.NamedExpr) and isinstance(sub.target, ast.Name):
+                    bind(sub.target.id)
+            return
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bind(node.id)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                bind((alias.asname or alias.name).split('.')[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bind(node.name)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            bind(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            bind(node.rest)
+        for child in ast.iter_child_nodes(node):
+            walk(child)
+    for node in tree.body:
+        walk(node)
+    return count
+
+
 def fold_constants(text):
-    """Top-level `NAME = <constant arithmetic>` assigned once, rewritten to its literal value."""
+    """Top-level `NAME = <constant arithmetic>` bound once in module scope, rewritten to its literal
+    value. A name that a nested block, a loop or a `global` function rebinds is not folded: its value
+    at the line that reads it is not the first one."""
     try:
         tree = ast.parse(text)
     except SyntaxError:
         return text
-    stored = {}
-    for node in tree.body:
-        for target in (node.targets if isinstance(node, ast.Assign) else
-                       [node.target] if isinstance(node, (ast.AnnAssign, ast.AugAssign)) else []):
-            for name in ast.walk(target):
-                if isinstance(name, ast.Name):
-                    stored[name.id] = stored.get(name.id, 0) + 1
+    stored = _module_scope_bindings(tree)
     known = {}
     edits = []
     for node in tree.body:
@@ -2147,8 +2208,12 @@ class _Surface:
 def python_surface(source, notes=None):
     """Map the Python spellings above onto the compiler's own; `notes` collects (line, why) for
     the constructs left as written."""
+    if any(name in source for name in ("csv", "datetime", "decimal", "fractions")):
+        source = _stdlib4().rewrite_text(source, notes)
     if "collections" in source:
         source = _collib().rewrite(source, notes)
+    if "None" in source or "Optional" in source:
+        source = _optlib().rewrite(source, notes)
     source = _tuplib().rewrite(source, notes)
     try:
         surface = _Surface(source)

@@ -865,3 +865,14 @@ fn main() {
 ```text
 7.485470860550343 0.6933972430599376 1385.7944861198737
 ```
+
+### Library batch 4 (csv, datetime, statistics, small forms)
+
+Lowered in the front end like batches 1 to 3 (stdlib4.py, csvlib.py, dtlib.py, statlib.py, smalllib.py); a program that does not use them is unchanged.
+
+- `csv`: `reader`, `DictReader`, `writer`, `DictWriter` on `sys.stdin`, a file opened for reading, or a list of lines, with `delimiter quotechar doublequote escapechar skipinitialspace quoting lineterminator strict`. CPython's state machine (QUOTE_MINIMAL default, `lineterminator '
+'`). A parse error is raised when the reader reaches it, so earlier rows are processed first. `csv.Error` is `ValueError`. Declared difference: `DictReader` rows with too few or too many fields raise `RuntimeError`.
+- `datetime`: `date`, `datetime` (naive), `time`, `timedelta` with arithmetic, comparison, `replace`, `isoformat`, `strftime`, `strptime`, `fromisoformat`, `fromordinal`, `weekday`, `isocalendar` parts. Refused by name: `now() today() utcnow() timestamp() fromtimestamp()` and time zones. Limit: `timedelta` beyond about 53 million days raises `OverflowError`.
+- `statistics` on `list[int]`: `mean median median_low median_high mode multimode variance pvariance stdev pstdev`; `fmean` also on floats. `StatisticsError` is `ValueError`. Mixed int/float results only where printed or used as floats.
+- Small forms: `int.bit_length()`, `int.bit_count()`, `max/min(..., default=)`, `max(d, key=d.get)` (and over a generator), `x in (constants)`, `itertools.product(x, repeat=n)` with a runtime `n`, unpacking a `tuple | None` after a None test.
+- Refused by name with a "write instead" hint: `decimal`, `fractions`, `textwrap`, `unicodedata`, `enum`, `string.Template`.

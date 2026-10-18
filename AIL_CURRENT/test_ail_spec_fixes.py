@@ -398,8 +398,8 @@ main()
             self.assertNotIn('no regular expressions', message)
 
     def test_optional_refusal_names_the_line(self):
-        text = ('from typing import Optional\n\n\ndef f(x: int) -> Optional[int]:\n    if x > 0:\n        return x\n'
-                '    return None\n\n\ndef main() -> None:\n    print(f(3))\n\n\nmain()\n')
+        text = ('from typing import Optional\n\n\ndef f(d: dict[int, int], x: int) -> Optional[int]:\n'
+                '    return d.get(x)\n\n\ndef main() -> None:\n    print(f({3: 3}, 3))\n\n\nmain()\n')
         with tempfile.TemporaryDirectory() as directory:
             built, _ = build(directory, text, 'opt', 'typed')
             self.assertEqual(built.returncode, 3, built.stdout + built.stderr)

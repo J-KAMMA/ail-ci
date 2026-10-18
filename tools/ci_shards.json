@@ -102,6 +102,7 @@
   "test_ail_pool_iter_capture": 20.1,
   "test_ail_pool_row_arguments": 71.7,
   "test_ail_python_syntax": 35.8,
+  "test_ail_quirks": 49.4,
   "test_ail_range_checks": 15.2,
   "test_ail_re": 10.0,
   "test_ail_record_initializers": 4.4,
@@ -124,6 +125,7 @@
   "test_ail_stdin_read_until": 5.4,
   "test_ail_stdlib_batch1": 10.0,
   "test_ail_stdlib_batch3": 10.0,
+  "test_ail_stdlib_batch4": 49.4,
   "test_ail_stdout_mixed": 92.0,
   "test_ail_stdout_mixed_resources": 2.6,
   "test_ail_str_find_alias": 9.6,
@@ -140,6 +142,7 @@
   "test_ail_tcp_poll_resources": 6.2,
   "test_ail_text_lines": 9.5,
   "test_ail_text_views": 17.3,
+  "test_ail_try_hoist": 48.8,
   "test_ail_try_locals": 49.4,
   "test_ail_tuples": 10.0,
   "test_ail_type_details": 1.4,
@@ -190,7 +193,8 @@
    "test_ail_csv_rewrite_stream"
   ],
   [
-   "test_ail_builtin_api"
+   "test_ail_builtin_api",
+   "test_ail_try_hoist"
   ],
   [
    "test_ail_collections",
@@ -206,6 +210,7 @@
    "test_ail_ir_s3c3",
    "test_ail_loss_paths",
    "test_ail_memory_shapes",
+   "test_ail_quirks",
    "test_ail_spec_fixes",
    "test_ail_stdlib_batch3"
   ],
@@ -222,6 +227,7 @@
    "test_ail_re",
    "test_ail_refusal_messages",
    "test_ail_stdlib_batch1",
+   "test_ail_stdlib_batch4",
    "test_ail_tuples",
    "test_json_query_file"
   ],

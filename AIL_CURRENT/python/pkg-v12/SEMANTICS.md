@@ -9441,3 +9441,32 @@ answer, checked against CPython 3.12 by `test_ail_spec_fixes`.
 * `import regex` names `re` as the module that is built.
 * `print(x)` / `str(x)` / `repr(x)` of a float is the shortest round-trip repr even just below a power of two, where the nearest decimal of the
   shortest length may not read back (`ail__fmt_shorten`).
+
+## 239. Comprehension scopes, folds over instances, module lists of str, scalar Optional
+
+Found by the library agents; each is checked against CPython 3.12 by `test_ail_quirks`.
+
+* A comprehension variable is local to the comprehension (compscope.py, run by `shadowing.rename_all` before any
+  pass): where its name is also used in the enclosing function, or a nested comprehension binds it again, it gets a
+  fresh name (`total__c1`), so `total = 5; xs = [total for total in range(3)]` leaves `total` 5 and
+  `[[x for x in row] for row in rows]` reads each name where Python resolves it. A program with no such clash is
+  returned unchanged.
+* `sum` / `min` / `max` / `any` / `all` over a generator expression whose source is a list of class instances
+  (`sum(r.v for r in rows)`) walk the list as an ordinary `for r in rows` does (retaining each instance).
+* `NAMES = ["a", "b"]` (or a tuple) at module level is a read-only list of str on the typed path; binding or returning
+  the whole list (`xs = NAMES`) is refused (it would copy where CPython shares), `list(NAMES)` is the copy.
+* A typed clone that prints is no longer mixed into a boxed program: its stdout was a second buffer, so its lines
+  came out before everything the boxed code had printed (seen with `AIL_IR=1`).
+* Scalar Optional (optlib.py, run by `ail_syntax.python_surface` before the tuple pass): `int | None`,
+  `float | None`, `bool | None`, `str | None` (and `Optional[...]`) as a parameter, a return type or an annotated local
+  of a plain function is a present flag and a value (`x__p`, `x__v`; a result is the pair `tuple[bool, T]`).
+  `is None`, `is not None`, `== None`, `!= None`, `==` / `!=` against a value or another Optional, truthiness,
+  `print` / `str` / `repr` / f-string (`None` while absent), passing, returning, defaults and assignment follow
+  CPython. Every other use of the value needs the compiler to know it is present (after `if x is None: return`, inside
+  `if x is not None:`, right of `x is not None and`, after an assignment or an `assert`); where it does not, CPython
+  would raise or store the None, so the program is refused by name ("x may be None here"). Refused by name too: an
+  Optional field, method, nested function, list / dict element or keyword-only parameter; an Optional-returning
+  call inside `and` / `or` / `x if c else y` / a comprehension / a `while` test or beside a call that is not a
+  plain builtin; a value wrapped as present that cannot be shown not to be None (`d.get(k)`, an unannotated
+  parameter); a `None` stored in a list / tuple / dict / set or passed to a method (it could reach an Optional
+  parameter as a plain value). A refusal leaves the source as written, so the general path still builds it.

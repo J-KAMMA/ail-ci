@@ -37,7 +37,9 @@ import callable_types
 
 import cruntime
 import iterlower
+import tryhoist
 import stdlib3
+import stdlib4
 import float64_fusion
 import sortkeys
 import parallel
@@ -968,12 +970,18 @@ def _etype(node, ctx):
                     source = g.iter
                     while isinstance(source, ast.Subscript) and isinstance(source.slice, ast.Slice):
                         source = source.value
-                    if isinstance(source, ast.List) or _is_str_expr(source, ctx):
-                        element = STR if _iter_elem_is_str(source, ctx) else FLT if _is_flist_name(source, ctx) else INT
+                    source_kind = _etype(g.iter, ctx) if isinstance(source, (ast.Name, ast.Attribute, ast.Call)) else None
+                    struct_source = source_kind is not None and _is_olist_kind(source_kind) and not _is_hlist_kind(source_kind)
+                    if (isinstance(source, ast.List) or _is_str_expr(source, ctx) or struct_source
+                            or (isinstance(source, ast.Name) and _iter_elem_is_str(source, ctx))):
+                        element = ((OBJ, source_kind[1]) if struct_source
+                                   else STR if _iter_elem_is_str(source, ctx) else FLT if _is_flist_name(source, ctx) else INT)
                         types, kinds = dict(ctx.types), dict(ctx.kind)
                         try:
                             ctx.kind.pop(g.target.id, None)
                             ctx.types[g.target.id] = element
+                            if struct_source:
+                                ctx.kind[g.target.id] = element
                             return _etype(a[0].elt, ctx)
                         finally:
                             ctx.types.clear(); ctx.types.update(types)
@@ -1275,6 +1283,10 @@ def _scan_module_consts(tree):
                                   "tuple of int/float literals is accepted as a module constant"
                                   % name)
             vals = [_module_const_scalar(e) for e in elts]
+            if all(v is not None and v[0] == STR for v in vals):
+                # NAMES = ["a", "b"]: a list of str literals, read-only like the numeric lists
+                consts[name] = (SLIST, [v for _, v in vals])
+                continue
             if any(v is None or v[0] not in (INT, FLT) for v in vals):
                 raise Unsupported("%r is a module-level list/tuple with an element that is not "
                                   "an int/float literal; only a literal list or tuple of those is "
@@ -1317,6 +1329,11 @@ def _emit_module_consts(modconsts):
             out.append('static const int64_t %s_data[] = {%s};\n'
                        % (c, ', '.join(map(_c_int_literal, value))))
             out.append('static const ail_list %s = {(int64_t *)%s_data, %dLL, %dLL};\n'
+                       % (c, c, len(value), len(value)))
+        elif kind == SLIST:
+            out.append('static const ail_str %s_data[] = {%s};\n'
+                       % (c, ', '.join(_str_literal(v)[len('(ail_str)'):] for v in value)))
+            out.append('static const ail_slist %s = {(ail_str *)%s_data, %dLL, %dLL};\n'
                        % (c, c, len(value), len(value)))
         elif kind == FLIST:
             out.append('static const double %s_data[] = {%s};\n'
@@ -15408,7 +15425,7 @@ FOLD_INIT = {'sum': ('0', '%s += %s;'), 'any': ('0', 'if (%s) { %s = 1; break; }
              'all': ('1', 'if (!(%s)) { %s = 0; break; }')}
 
 
-def _finish_fold(f, ctx, ct, acc, seen, tag, head, body, value, eager=None):
+def _finish_fold(f, ctx, ct, acc, seen, tag, head, body, value, eager=None, after=()):
     """Build eager comprehensions before folding; generators fold each item lazily."""
     acc_out = acc
     if eager is not None:
@@ -15447,6 +15464,7 @@ def _finish_fold(f, ctx, ct, acc, seen, tag, head, body, value, eager=None):
     if f in ('max', 'min'):
         ctx.parts.add('DIE')
         body.append('if (!%s) ail_die("%s() of an empty sequence");' % (seen, f))
+    body.extend(after)
     return '({ %s %s %s; })' % (head, ' '.join(body), acc_out)
 
 
@@ -15525,6 +15543,59 @@ def _inline_fold(f, arg, ctx):
     return _inline_fold_inner(f, arg, ctx)
 
 
+def _struct_fold(f, var, elt_node, conds, src, ctx, eager):
+    """`sum(r.v for r in rows)`, `max(r.w for r in rows if r.v > 0)` over a list of struct
+    instances: the source is retained once, its length is observed per step and each bound
+    instance is retained while the body runs, exactly as an ordinary `for r in rows` does."""
+    kind = _etype(src, ctx)
+    cls = (OBJ, kind[1])
+    receiver, _ = ctx.temp(kind)
+    bound, _ = ctx.temp(cls)
+    value = _olist_value(src, kind, ctx)
+    pres, ctx.pre = ctx.pre, []
+    pres.append(_obj_store(receiver, value, kind, ctx) + ';')
+    ctx.tmp += 1
+    tag = ctx.tmp
+    acc, idx, seen = '_a%d' % tag, '_i%d' % tag, '_s%d' % tag
+    old_type, old_kind = ctx.types.get(var), ctx.kind.get(var)
+    old_cnames = getattr(ctx, 'comprehension_cnames', {})
+    old_onecp, old_len1 = set(ctx.onecp), set(ctx.len1_names)
+    ctx.comprehension_cnames = {**old_cnames, var: bound}
+    ctx.types[var] = cls
+    ctx.kind[var] = cls
+    ctx.onecp.discard(var)
+    ctx.len1_names.discard(var)
+    body = []
+    try:
+        element = _etype(elt_node, ctx)
+        if f not in ('any', 'all') and element not in NUM:
+            raise Unsupported('%s() over a list of instances needs int or float values (got %s)'
+                              % (f, _a(element)))
+        ct = 'double' if f not in ('any', 'all') and element == FLT else 'int64_t'
+        head = ' '.join(pres + ['%s %s = %s;' % (ct, acc, FOLD_INIT[f][0] if f in FOLD_INIT else '0')])
+        if f in ('min', 'max'):
+            head += ' int64_t %s = 0;' % seen
+        body.append('for (int64_t %s = 0; %s < ail_olist_len(%s); %s++) {' % (idx, idx, receiver, idx))
+        body.append(_obj_store(bound, '(%s *)ail_olist_get(%s, %s)' % (
+            _ref_ctype(_olist_element_kind(kind), ctx), receiver, idx), cls, ctx) + ';')
+        for c in conds:
+            cc = _cond(c, ctx)
+            body.extend(ctx.pre); ctx.pre = []
+            body.append('if (!(%s)) continue;' % cc)
+        val = _cond(elt_node, ctx) if f in ('any', 'all') else _expr(elt_node, ctx)
+    finally:
+        ctx.comprehension_cnames = old_cnames
+        ctx.onecp, ctx.len1_names = old_onecp, old_len1
+        ctx.types.pop(var, None); ctx.kind.pop(var, None)
+        if old_type is not None:
+            ctx.types[var] = old_type
+        if old_kind is not None:
+            ctx.kind[var] = old_kind
+    body.extend(ctx.pre); ctx.pre = []
+    after = [_obj_store(bound, 'NULL', cls, ctx) + ';', _obj_store(receiver, 'NULL', kind, ctx) + ';']
+    return _finish_fold(f, ctx, ct, acc, seen, tag, head, body, val, eager, after)
+
+
 def _inline_fold_inner(f, arg, ctx):
     """`sum(...)`, `max(...)` and friends over anything, including a generator expression.
 
@@ -15573,6 +15644,9 @@ def _inline_fold_inner(f, arg, ctx):
 
     if pair is not None:
         return _inline_pair_fold(f, pair, elt_node, conds, src, ctx, eager)
+
+    if var and _is_olist_kind(_etype(src, ctx)) and not _is_hlist_kind(_etype(src, ctx)):
+        return _struct_fold(f, var, elt_node, conds, src, ctx, eager)
 
     # `src` is the container actually being walked in BOTH forms -- the bare `sum(xs)` and the
     # generator `sum(v for v in xs)` (there `src` is `g.iter`, the same `xs`) -- so this one check
@@ -18031,6 +18105,13 @@ def _numeric_assign(node,ctx,ind):
 
 
 def _stmt_inner(node, ctx, ind):
+    if (isinstance(node, (ast.Assign, ast.AnnAssign, ast.Return)) and isinstance(node.value, ast.Name)
+            and node.value.id in ctx.modconsts and ctx.modconsts[node.value.id][0] == SLIST
+            and node.value.id not in ctx.types and node.value.id not in ctx.kind):
+        raise Unsupported('%r is a module-level list of str; binding or returning the whole list would '
+                          'make a copy where CPython shares the one object.\n'
+                          '  write instead: `list(%s)` for a copy, or index / loop over %s directly'
+                          % (node.value.id, node.value.id, node.value.id))
     if getattr(ctx, 'builders', None):
         lowered = _bl_stmt(node, ctx, ind)
         if lowered is not None:
@@ -19955,7 +20036,7 @@ def _try_stmt(node, ctx, ind):
     out += '%sail_exc_cleanup[ail_exc_top] = ail_cleanup_top;\n' % pad
     ctx.parts.add('RECDEPTH')
     out += '%sail_exc_depth[ail_exc_top] = ail_depth;\n' % pad
-    out += '%sif (setjmp(ail_exc_stack[ail_exc_top]) == 0) {\n' % pad
+    out += '%sif (AIL_SETJMP(ail_exc_stack[ail_exc_top]) == 0) {\n' % pad
     region = _try_region_open(ctx, node)
     out += '%s/*@AILTRY%d*/\n' % (pad1, region)
     ctx.active_try_depths.append(ctx.loopdepth)
@@ -20025,7 +20106,7 @@ def _try_finally_stmt(node, ctx, ind):
     out += ('%sif (ail_exc_top + 1 >= AIL_EXC_MAX_DEPTH) ail_die("try nesting too deep");\n'
             '%sail_exc_top++;\n%sail_exc_cleanup[ail_exc_top] = ail_cleanup_top;\n'
             '%sail_exc_depth[ail_exc_top] = ail_depth;\n'
-            '%sif (setjmp(ail_exc_stack[ail_exc_top]) == 0) {\n' % (pad, pad, pad, pad, pad))
+            '%sif (AIL_SETJMP(ail_exc_stack[ail_exc_top]) == 0) {\n' % (pad, pad, pad, pad, pad))
     ctx.parts.add('RECDEPTH')
     region = _try_region_open(ctx, node)
     out += '%s/*@AILTRY%d*/\n' % (p, region)
@@ -31108,7 +31189,7 @@ def to_c(source, name=None, strict=True, info=None, entry=None, sig=None, librar
     the compiler can capture a call that belongs to the user. Refusals and the per-function unit
     names in `info` are reported under the user's own spelling."""
     linked = [key for section in ('exports', 'constants') for key in (external or {}).get(section, {})]
-    source, shadow = shadowing.rename(source, Unsupported, linked)
+    source, shadow = shadowing.rename_all(source, Unsupported, linked)
     if shadow:
         fresh = {old: new for new, old in shadow.items()}
         entry = fresh.get(entry, entry)
@@ -31336,8 +31417,11 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         from module_object import _struct_source
         source = _struct_source(external['structs']) + source
     tree = ast.parse(source.strip())
+    stdlib4.rewrite(tree, Unsupported)
     stdlib3.rewrite(tree, Unsupported)
     iterlower.rewrite(tree)
+    if os.environ.get("AIL_NO_TRYHOIST", "0") in ("", "0"):
+        tryhoist.rewrite(tree)
     nested_lists.rewrite(tree, Unsupported, library, entry)
     _NULLABLE.clear()
     _NULLABLE_LINES.clear()
@@ -31402,7 +31486,9 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     classes = _scan_classes(classdefs) if classdefs else {}
     for _n in sorted(_NULLABLE):
         if _n not in classes:
-            refusal = Unsupported('%s | None: only a struct type can be None.\n'
+            refusal = Unsupported('%s | None: only a struct type can be None here (a scalar Optional is built as a '
+                                  'parameter, a return type or a local of a plain function; a note below names the use '
+                                  'that is not).\n'
                                   '  write instead: return a sentinel (`-1` or `""`) and compare with it, '
                                   'or raise an exception when there is no value; `Node | None` is fine '
                                   'for a class' % _n)
@@ -31612,6 +31698,8 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     # the time that declaration is emitted, not only when some function's own `ctx.parts` happens
     # to ask for one.
     for _mck, _ in _MODCONSTS.values():
+        if _mck == SLIST:
+            parts.update(('SLIST', 'STR'))
         if _mck in (LIST, FLIST, STR, BYTES):
             # `_mck` is the lowercase kind marker ('list'/'flist'); `cruntime.emit` keys its
             # pieces by the UPPERCASE fragment name ('LIST'/'FLIST') -- a lowercase entry here

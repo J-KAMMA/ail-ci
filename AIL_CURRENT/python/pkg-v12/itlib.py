@@ -528,10 +528,16 @@ class PoolStream(Src):
         out = self.pool.setup(st)
         n, r = self.pool.size, self.r
         out.append(assign(r, _name(n) if self.r_expr is None else self.r_expr))
-        out += code('''
-            if @R < 0:
-                raise ValueError("r must be non-negative")
-        ''', R=r)
+        if self.kind == 'product':
+            out += code('''
+                if @R < 0:
+                    raise ValueError("repeat argument cannot be negative")
+            ''', R=r)
+        else:
+            out += code('''
+                if @R < 0:
+                    raise ValueError("r must be non-negative")
+            ''', R=r)
         if self.tuple_arity is not None:
             if self.r_expr is None:
                 out += code('''
@@ -604,6 +610,20 @@ class PoolStream(Src):
                 while @J < @R:
                     @IX[@J] = @IX[@J - 1] + 1
                     @J += 1
+            '''
+        elif self.kind == 'product':
+            first_ok = '''
+                if @N == 0 and @R > 0:
+                    EXH
+            '''
+            advance = '''
+                @I = @R - 1
+                while @I >= 0 and @IX[@I] == @N - 1:
+                    @IX[@I] = 0
+                    @I -= 1
+                if @I < 0:
+                    EXH
+                @IX[@I] += 1
             '''
         else:
             first_ok = '''
@@ -785,8 +805,12 @@ class Streams:
                 refuse(call, 'itertools.product(a, b, ..., repeat=n) takes positional iterables')
             if keys:
                 repeat = int_value(keys[0].value)
+                if repeat is None and len(call.args) == 1:
+                    # one iterable and a repeat computed at run time: the indices are a list, like permutations
+                    return PoolStream(self, call, 'product', call.args[0], keys[0].value)
                 if repeat is None or repeat < 0:
-                    refuse(call, 'itertools.product: repeat= has to be a non-negative integer literal')
+                    refuse(call, 'itertools.product: with several iterables repeat= has to be a non-negative '
+                           'integer literal (with one iterable it can be any int)')
             return Product(self, call, call.args, repeat)
         got = self.lib.args_of(call, ['iterable', 'r'], what='itertools.' + name)
         if 'iterable' not in got:

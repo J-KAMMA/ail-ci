@@ -167,6 +167,53 @@ class _Lower:
                 bad.add(node.name)
         return good - bad
 
+    def known_dicts(self, fn):
+        """Names of `fn` whose every binding is a dict (a dict annotation, a dict display / comprehension,
+        dict())."""
+        good, bad = set(), set()
+
+        def ann_dict(ann):
+            head = ann.value if isinstance(ann, ast.Subscript) else ann
+            return isinstance(head, ast.Name) and head.id in ('dict', 'Dict')
+
+        def dict_value(value):
+            return (isinstance(value, (ast.Dict, ast.DictComp))
+                    or isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id == 'dict')
+        for arg in (*fn.args.args, *fn.args.kwonlyargs):
+            (good if arg.annotation is not None and ann_dict(arg.annotation) else bad).add(arg.arg)
+        if fn.args.vararg:
+            bad.add(fn.args.vararg.arg)
+        if fn.args.kwarg:
+            bad.add(fn.args.kwarg.arg)
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        (good if dict_value(node.value) else bad).add(target.id)
+                    elif isinstance(target, (ast.Tuple, ast.List)):
+                        bad.update(n.id for n in ast.walk(target) if isinstance(n, ast.Name))
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                (good if ann_dict(node.annotation) else bad).add(node.target.id)
+            elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+                bad.add(node.target.id)
+            elif isinstance(node, (ast.For, ast.comprehension)):
+                bad.update(n.id for n in ast.walk(node.target) if isinstance(n, ast.Name))
+            elif isinstance(node, ast.NamedExpr):
+                bad.add(node.target.id)
+            elif isinstance(node, (ast.With, ast.AsyncWith)):
+                for item in node.items:
+                    if item.optional_vars is not None:
+                        bad.update(n.id for n in ast.walk(item.optional_vars) if isinstance(n, ast.Name))
+            elif isinstance(node, ast.ExceptHandler) and node.name:
+                bad.add(node.name)
+            elif isinstance(node, (ast.Global, ast.Nonlocal)):
+                bad.update(node.names)
+            elif isinstance(node, ast.Delete):
+                bad.update(n.id for n in ast.walk(node) if isinstance(n, ast.Name) and not isinstance(n.ctx, ast.Load))
+            elif isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node is not fn:
+                bad.add(node.name)
+        return good - bad
+
     # -- function reference applied to an element ---------------------------------------------------
     def apply(self, func, arg):
         """`func(arg)` for a lambda (inlined), a builtin type method spelled `str.strip`, or any callable
@@ -269,8 +316,7 @@ class _Lower:
                 assign = ast.Assign(targets=[_name(temp, True)], value=comp)
                 e.args = [_name(temp)]
                 return e, [assign]
-        if (isinstance(e, ast.Call) and isinstance(e.func, ast.Name) and e.func.id in ('max', 'min')
-                and len(e.args) == 1 and len(e.keywords) == 1 and e.keywords[0].arg == 'key'):
+        if self.minmax_options(e) is not None:
             lowered = self.keyed(e)
             if lowered is not None:
                 return lowered[1], lowered[0]
@@ -313,18 +359,56 @@ class _Lower:
             pre = []
         return e, pre
 
+    def minmax_options(self, call):
+        """(key, default) of `max|min(X, key=K, default=D)` (either keyword may be absent, one is present),
+        or None when the call is any other shape."""
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id in ('max', 'min')
+                and len(call.args) == 1 and not isinstance(call.args[0], ast.Starred) and call.keywords):
+            return None
+        options = {}
+        for keyword in call.keywords:
+            if keyword.arg not in ('key', 'default') or keyword.arg in options:
+                return None
+            options[keyword.arg] = keyword.value
+        key = options.get('key')
+        if isinstance(key, ast.Constant) and key.value is None:
+            key = None
+        return key, options.get('default')
+
     def keyed(self, call):
-        """`max(X, key=K)` / `min(...)` as (statements, element expression): one pass that keeps the first
-        best element, K applied once per element in order, ValueError when X is empty -- CPython's own
-        algorithm, hoisted ahead of the statement that needs the value."""
-        source, key = call.args[0], call.keywords[0].value
+        """`max(X, key=K, default=D)` / `min(...)` as (statements, element expression): one pass that keeps
+        the first best element, K applied once per element in order, ValueError when X is empty and there
+        is no default (D is evaluated first, as the call evaluates its arguments, and is the result for an
+        empty X) -- CPython's own algorithm, hoisted ahead of the statement that needs the value. X is a
+        list held in a variable, a dict held in a variable (its keys), a comprehension or generator
+        expression, or range(n) / range(a, b)."""
+        source = call.args[0]
+        key, default = self.minmax_options(call)
+        if (isinstance(key, ast.Attribute) and key.attr == 'get' and isinstance(key.value, ast.Name)
+                and isinstance(source, ast.Name) and key.value.id == source.id
+                and key.value.id in getattr(self, 'dicts', ())):
+            key = ast.parse('lambda _k: %s[_k]' % key.value.id, mode='eval').body      # max(d, key=d.get)
         is_max = call.func.id == 'max'
         index, best_index, best_key, count = (self.fresh(n) for n in ('i', 'bi', 'bk', 'n'))
         pre = []
+        holder = None
         if isinstance(source, ast.Name) and source.id in self.sequences:
+            holder = source.id
+        elif isinstance(source, ast.Name) and source.id in getattr(self, 'dicts', ()):
+            holder = self.fresh('keys')
+            each_key = self.fresh('kk')
+            pre.append(ast.Assign(targets=[_name(holder, True)], value=ast.List(elts=[], ctx=ast.Load())))
+            pre.append(ast.For(target=_name(each_key, True), iter=_name(source.id), body=[ast.Expr(value=_call(
+                ast.Attribute(value=_name(holder), attr='append', ctx=ast.Load()), _name(each_key)))],
+                orelse=[]))
+        elif isinstance(source, (ast.ListComp, ast.GeneratorExp)):
+            holder = self.fresh('seq')
+            pre.append(ast.Assign(targets=[_name(holder, True)], value=self.expr(ast.copy_location(
+                ast.ListComp(elt=source.elt, generators=source.generators), source))))
+        if holder is not None:
             def element(position):
-                return ast.Subscript(value=_name(source.id), slice=position, ctx=ast.Load())
-            pre.append(ast.Assign(targets=[_name(count, True)], value=_call(_name('len'), _name(source.id))))
+                return ast.Subscript(value=_name(holder), slice=position, ctx=ast.Load())
+            pre.append(ast.Assign(targets=[_name(count, True)], value=_call(_name('len'), _name(holder))))
         elif (isinstance(source, ast.Call) and isinstance(source.func, ast.Name) and source.func.id == 'range'
               and not source.keywords and 1 <= len(source.args) <= 2):
             if len(source.args) == 1:
@@ -340,21 +424,22 @@ class _Lower:
                     return ast.BinOp(left=_name(start), op=ast.Add(), right=position)
         else:
             return None
-        first = self.apply(key, element(ast.Constant(value=0)))
-        each = self.apply(key, element(_name(index)))
+        if key is None:
+            first, each = element(ast.Constant(value=0)), element(_name(index))
+        else:
+            first = self.apply(key, element(ast.Constant(value=0)))
+            each = self.apply(key, element(_name(index)))
         if first is None or each is None:
             return None
         word = 'max' if is_max else 'min'
-        pre.append(ast.If(test=ast.Compare(left=_name(count), ops=[ast.LtE()], comparators=[ast.Constant(value=0)]),
-                          body=[ast.Raise(exc=_call(_name('ValueError'), ast.Constant(
-                              value='%s() iterable argument is empty' % word)), cause=None)], orelse=[]))
+        loop = []
         step = fresh_key = self.fresh('k')
-        pre.append(ast.Assign(targets=[_name(best_index, True)], value=ast.Constant(value=0)))
-        pre.append(ast.Assign(targets=[_name(best_key, True)], value=self.expr(first)))
-        pre.append(ast.Assign(targets=[_name(index, True)], value=ast.Constant(value=1)))
+        loop.append(ast.Assign(targets=[_name(best_index, True)], value=ast.Constant(value=0)))
+        loop.append(ast.Assign(targets=[_name(best_key, True)], value=self.expr(first)))
+        loop.append(ast.Assign(targets=[_name(index, True)], value=ast.Constant(value=1)))
         better = ast.Compare(left=_name(fresh_key), ops=[ast.Gt() if is_max else ast.Lt()],
                              comparators=[_name(best_key)])
-        pre.append(ast.While(
+        loop.append(ast.While(
             test=ast.Compare(left=_name(index), ops=[ast.Lt()], comparators=[_name(count)]),
             body=[ast.Assign(targets=[_name(fresh_key, True)], value=self.expr(each)),
                   ast.If(test=better, body=[ast.Assign(targets=[_name(best_key, True)], value=_name(fresh_key)),
@@ -362,7 +447,21 @@ class _Lower:
                          orelse=[]),
                   ast.AugAssign(target=_name(index, True), op=ast.Add(), value=ast.Constant(value=1))],
             orelse=[]))
-        return pre, element(_name(best_index))
+        if default is None:
+            pre.append(ast.If(test=ast.Compare(left=_name(count), ops=[ast.LtE()],
+                                               comparators=[ast.Constant(value=0)]),
+                              body=[ast.Raise(exc=_call(_name('ValueError'), ast.Constant(
+                                  value='%s() iterable argument is empty' % word)), cause=None)], orelse=[]))
+            pre.extend(loop)
+            return pre, element(_name(best_index))
+        # a default: it is evaluated before the iterable is walked, and is the result for an empty one
+        fallback, result = self.fresh('dflt'), self.fresh('res')
+        pre.insert(0, ast.Assign(targets=[_name(fallback, True)], value=self.expr(default)))
+        loop.append(ast.Assign(targets=[_name(result, True)], value=element(_name(best_index))))
+        pre.append(ast.If(test=ast.Compare(left=_name(count), ops=[ast.Gt()], comparators=[ast.Constant(value=0)]),
+                          body=loop,
+                          orelse=[ast.Assign(targets=[_name(result, True)], value=_name(fallback))]))
+        return pre, _name(result)
 
     # -- statements -------------------------------------------------------------------------------
     def block(self, stmts):
@@ -373,10 +472,11 @@ class _Lower:
 
     def stmt(self, node):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            saved = getattr(self, 'sequences', set())
+            saved, saved_dicts = getattr(self, 'sequences', set()), getattr(self, 'dicts', set())
             self.sequences = self.known_sequences(node)
+            self.dicts = self.known_dicts(node)
             node.body = self.block(node.body)
-            self.sequences = saved
+            self.sequences, self.dicts = saved, saved_dicts
             return [node]
         if isinstance(node, ast.ClassDef):
             node.body = self.block(node.body)
@@ -419,9 +519,7 @@ class _Lower:
                 _locate(pre, node)
                 return self.block(pre) + self.stmt(node)
         value = getattr(node, 'value', None)
-        if (isinstance(node, (ast.Assign, ast.AnnAssign, ast.Return)) and isinstance(value, ast.Call)
-                and isinstance(value.func, ast.Name) and value.func.id in ('max', 'min') and len(value.args) == 1
-                and len(value.keywords) == 1 and value.keywords[0].arg == 'key'):
+        if (isinstance(node, (ast.Assign, ast.AnnAssign, ast.Return)) and self.minmax_options(value) is not None):
             lowered = self.keyed(value)
             if lowered is not None:
                 pre, result = lowered

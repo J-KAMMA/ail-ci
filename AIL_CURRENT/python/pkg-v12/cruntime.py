@@ -339,8 +339,89 @@ typedef struct ail_cleanup_frame {
 } ail_cleanup_frame;
 AIL_LINK_STATE(ail_cleanup_frame *, ail_cleanup_top, = NULL);
 AIL_LINK_STATE(ail_cleanup_frame *, ail_exc_cleanup[AIL_EXC_MAX_DEPTH], );
-AIL_LINK_STATE(jmp_buf, ail_exc_stack[AIL_EXC_MAX_DEPTH], );
+/* The handler stack's jump buffers. On x86-64 Linux with GCC or clang a `try` uses a two-function pair
+   of its own instead of the C library's setjmp/longjmp: ail_sj_set saves the six callee-saved registers,
+   the stack pointer after return, the return address and the shadow-stack pointer (nine words, no
+   signal mask, no pointer mangling), ail_sj_jump restores them and resumes after the call. It is
+   declared returns_twice, so the compiler treats it exactly as it treats setjmp (locals that change
+   between the two returns are indeterminate, which the generated code already allows for) -- only the
+   work behind the call is smaller. The pair is plain assembly local to each translation unit, so
+   separately compiled modules each carry their own copy and share only the buffer stack. Every other
+   target (macOS, Windows, other CPUs) keeps the C library pair; -DAIL_NO_FAST_SJLJ selects it anywhere. */
+#if defined(__x86_64__) && defined(__linux__) && defined(__GNUC__) && !defined(AIL_NO_FAST_SJLJ)
+#define AIL_FAST_SJLJ 1
+typedef long ail_jmp_buf[9];
+__asm__(
+    ".text\n"
+    ".p2align 4\n"
+    ".type ail_sj_set,@function\n"
+    ".local ail_sj_set\n"
+    "ail_sj_set:\n"
+    "movq %rbx,(%rdi)\n"
+    "movq %rbp,8(%rdi)\n"
+    "movq %r12,16(%rdi)\n"
+    "movq %r13,24(%rdi)\n"
+    "movq %r14,32(%rdi)\n"
+    "movq %r15,40(%rdi)\n"
+    "leaq 8(%rsp),%rdx\n"
+    "movq %rdx,48(%rdi)\n"
+    "movq (%rsp),%rdx\n"
+    "movq %rdx,56(%rdi)\n"
+    "xorl %eax,%eax\n"
+    ".byte 0xf3,0x48,0x0f,0x1e,0xc8\n"          /* rdsspq %rax: a no-op unless a shadow stack is on */
+    "movq %rax,64(%rdi)\n"
+    "xorl %eax,%eax\n"
+    "ret\n"
+    ".size ail_sj_set,.-ail_sj_set\n"
+    ".p2align 4\n"
+    ".type ail_sj_jump,@function\n"
+    ".local ail_sj_jump\n"
+    "ail_sj_jump:\n"
+    "movq (%rdi),%rbx\n"
+    "movq 8(%rdi),%rbp\n"
+    "movq 16(%rdi),%r12\n"
+    "movq 24(%rdi),%r13\n"
+    "movq 32(%rdi),%r14\n"
+    "movq 40(%rdi),%r15\n"
+    "xorl %eax,%eax\n"
+    ".byte 0xf3,0x48,0x0f,0x1e,0xc8\n"          /* rdsspq %rax */
+    "testq %rax,%rax\n"
+    "je 3f\n"
+    "movq 64(%rdi),%rdx\n"
+    "subq %rax,%rdx\n"
+    "jbe 3f\n"
+    "shrq $3,%rdx\n"
+    "1:\n"
+    "cmpq $255,%rdx\n"
+    "jbe 2f\n"
+    "movl $255,%ecx\n"
+    ".byte 0xf3,0x48,0x0f,0xae,0xe9\n"          /* incsspq %rcx */
+    "subq $255,%rdx\n"
+    "jmp 1b\n"
+    "2:\n"
+    ".byte 0xf3,0x48,0x0f,0xae,0xea\n"          /* incsspq %rdx */
+    "3:\n"
+    "movq 48(%rdi),%rsp\n"
+    "movl $1,%eax\n"
+    "jmp *56(%rdi)\n"
+    ".size ail_sj_jump,.-ail_sj_jump\n");
+extern int ail_sj_set(void *) __attribute__((returns_twice));
+extern void ail_sj_jump(void *) __attribute__((noreturn));
+#define AIL_SETJMP(buf) ail_sj_set(buf)
+#else
+typedef jmp_buf ail_jmp_buf;
+#define AIL_SETJMP(buf) setjmp(buf)
+#endif
+AIL_LINK_STATE(ail_jmp_buf, ail_exc_stack[AIL_EXC_MAX_DEPTH], );
 AIL_LINK_STATE(int, ail_exc_top, = -1);
+static __attribute__((noinline, noreturn, cold)) void ail_exc_throw(void) {
+#ifdef AIL_FAST_SJLJ
+    ail_sj_jump(ail_exc_stack[ail_exc_top]);
+#else
+    longjmp(ail_exc_stack[ail_exc_top], 1);
+    __builtin_unreachable();
+#endif
+}
 AIL_LINK_STATE(int, ail_exc_code, = 0); /* set just before a longjmp; read once control lands */
 AIL_LINK_STATE(int, ail_handled_code, = 0); /* active handled exception, separate from transport */
 /* Payloads survive cleanup of the source string arena. */
@@ -472,7 +553,7 @@ static void ail_die(const char *w) {
        failure path a trap already was -- never on the path that succeeds. */
     if (ail_exc_top >= 0) {
         int k = ail_exc_kind_of(w);
-        if (k) { ail_exception_store(&ail_exc_value, NULL, 1); ail_exc_code = k; ail_exc_unwind(); longjmp(ail_exc_stack[ail_exc_top], 1); }
+        if (k) { ail_exception_store(&ail_exc_value, NULL, 1); ail_exc_code = k; ail_exc_unwind(); ail_exc_throw(); }
     }
     /* `fflush(stdout)` here is F3's correctness fix, not a new feature (DESIGN_FOUNDATION_20260914.md
        section 5): `_Exit` never flushes stdio buffers, and stdout is fully buffered whenever it is
@@ -537,7 +618,7 @@ static void ail_raise_value(ail_exception *value) {
     /* Retain before unwind: a local or the handled scope may own the source. */
     ail_exception_store(&ail_exc_value, value, 0);
     ail_exc_code = value->code;
-    if (ail_exc_top >= 0) { ail_exc_unwind(); longjmp(ail_exc_stack[ail_exc_top], 1); }
+    if (ail_exc_top >= 0) { ail_exc_unwind(); ail_exc_throw(); }
     ail_exception_uncaught(value);
 }
 /* `raise E(...)` of a freshly built exception: the raise takes over its only reference, so the
@@ -546,14 +627,14 @@ __attribute__((unused)) static void ail_raise_value_adopt(ail_exception *value) 
     if (!value) ail_die("invalid exception payload");
     ail_exception_store(&ail_exc_value, value, 1);
     ail_exc_code = value->code;
-    if (ail_exc_top >= 0) { ail_exc_unwind(); longjmp(ail_exc_stack[ail_exc_top], 1); }
+    if (ail_exc_top >= 0) { ail_exc_unwind(); ail_exc_throw(); }
     ail_exception_uncaught(value);
 }
 static void ail_raise_named(int code) {
     if (code < 1 || code > 8) code = AIL_EXC_RUNTIME;
     ail_exception_store(&ail_exc_value, ail_exception_new(code, NULL, 0, 1), 1);
     ail_exc_code = code;
-    if (ail_exc_top >= 0) { ail_exc_unwind(); longjmp(ail_exc_stack[ail_exc_top], 1); }
+    if (ail_exc_top >= 0) { ail_exc_unwind(); ail_exc_throw(); }
     ail_exception_uncaught(ail_exc_value);
 }
 static ail_exception *ail_exception_current(void) {
@@ -21779,7 +21860,7 @@ static void ail_set_pop_empty(void) {
     ail_exception_store(&ail_exc_value, ail_exception_new(AIL_EXC_KEY, (const uint8_t *)message,
                                                           (int64_t)strlen(message), 1), 1);
     ail_exc_code = AIL_EXC_KEY;
-    if (ail_exc_top >= 0) { ail_exc_unwind(); longjmp(ail_exc_stack[ail_exc_top], 1); }
+    if (ail_exc_top >= 0) { ail_exc_unwind(); ail_exc_throw(); }
     ail_exception_uncaught(ail_exc_value);
 }
 static int64_t ail_tabset_compare(const ail_tab *a, const ail_tab *b, int op) {
@@ -21913,7 +21994,7 @@ static int64_t ail_slice_indices(int64_t n, int64_t lo, int64_t hi, int64_t st,
         ail_exception_store(&ail_exc_value, ail_exception_new(AIL_EXC_VALUE, (const uint8_t *)message,
                                                               (int64_t)strlen(message), 1), 1);
         ail_exc_code = AIL_EXC_VALUE;
-        if (ail_exc_top >= 0) { ail_exc_unwind(); longjmp(ail_exc_stack[ail_exc_top], 1); }
+        if (ail_exc_top >= 0) { ail_exc_unwind(); ail_exc_throw(); }
         ail_exception_uncaught(ail_exc_value);
     }
     if (st > 0) {
@@ -25311,7 +25392,7 @@ __attribute__((unused, noinline)) static int ail_ir_try(int (*body)(void *), voi
     ail_exc_top++;
     ail_exc_cleanup[ail_exc_top] = ail_cleanup_top;
     ail_exc_depth[ail_exc_top] = ail_depth;
-    if (setjmp(ail_exc_stack[ail_exc_top]) == 0) {
+    if (AIL_SETJMP(ail_exc_stack[ail_exc_top]) == 0) {
         int status = body(frame);
         ail_exc_top--;
         return status;

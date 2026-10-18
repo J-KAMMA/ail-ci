@@ -821,6 +821,15 @@ def _python_notes(message, notes, source):
             message = message.replace(found.group(0), next(n for n in named if n.startswith(found.group(1) + '.'))
                                       + ' (see the note below)')
             break
+    # library batch 4 (csv, datetime, ...): the import is refused because a use was not built; say which
+    found = re.search(r"import of '(csv|datetime|decimal|fractions|unicodedata|statistics|textwrap|enum|string)'; [^\n]*?by hand",
+                      message)
+    if found:
+        for entries in notes.values():
+            named = [text.split(';')[0] for _, text in entries if found.group(1) in text.split(':')[0]]
+            if named:
+                message = message.replace(found.group(0), named[0] + ' (see the note below)')
+                break
     shown = os.path.relpath(source)
     shown = str(source) if shown.startswith('..') else shown
     for path, entries in notes.items():

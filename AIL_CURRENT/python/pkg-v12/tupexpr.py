@@ -564,6 +564,11 @@ class Exprs:
             if isinstance(op, (ast.In, ast.NotIn)) and isinstance(comp, (ast.Tuple, ast.List, ast.Set)) \
                     and is_tuple(lt):
                 right, rt = self.ex(ast.List(elts=comp.elts, ctx=ast.Load()), ('list', lt), None)
+            elif isinstance(op, (ast.In, ast.NotIn)) and isinstance(comp, (ast.Tuple, ast.List, ast.Set)) \
+                    and comp.elts and all(isinstance(e, ast.Constant) and isinstance(e.value, (str, int, float))
+                                          for e in comp.elts):
+                # `x in ("a", "b")`: a display of constants stays a display (not a tuple value)
+                right, rt = comp, None
             elif isinstance(op, (ast.In, ast.NotIn)) and isinstance(comp, ast.Tuple) and comp.elts:
                 # `op in ("size", "peek")` -- a tuple literal as the container is a list of its
                 # elements for a membership test (the tuple type class has no `in`)

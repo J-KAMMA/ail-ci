@@ -37,8 +37,8 @@ CASES = [
      'fn main() { let seen: dict[int,bool] = {}; print(len(seen)); }\n',
      '1:', ['`let seen: dict[int,bool]`', 'not bool', 'let seen: dict[int, int] = {};']),
     ('optional_int', 'python',
-     'def find(xs: list[int], k: int) -> int | None:\n    return None\n\n\n'
-     'def main() -> None:\n    print(find([1], 1))\n\n\nmain()\n',
+     'def find(d: dict[int, int], k: int) -> int | None:\n    return d.get(k)\n\n\n'
+     'def main() -> None:\n    print(find({1: 2}, 1))\n\n\nmain()\n',
      '1:', ['int | None: only a class type can be None', 'return a sentinel']),
     ('dict_get_one_argument', 'python',
      'def main() -> None:\n    d = {"a": 1}\n    v = d.get("b")\n    print(v)\n\n\nmain()\n',

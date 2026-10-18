@@ -22,13 +22,11 @@ CLI = ROOT / 'ail_chatgpt.py'
 
 OPTIONAL = '''from typing import Optional
 
-def f(x: int) -> Optional[int]:
-    if x > 0:
-        return x
-    return None
+def f(d: dict[int, int], x: int) -> Optional[int]:
+    return d.get(x)
 
 def main():
-    r = f(3)
+    r = f({3: 3}, 3)
     print(r)
 
 main()

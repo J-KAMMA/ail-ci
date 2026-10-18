@@ -500,8 +500,10 @@ class Batch1Tests(unittest.TestCase):
         # an iterable that is not known to be a sequence is not indexed (a dict's keys are not 0..n-1)
         self.refused("def main():\n    d = {1: 2, 3: 4}\n    e = {5: 6, 7: 8}\n"
                      "    for a, b in zip(d, e):\n        print(a, b)\n\n\nmain()\n", "tuple target")
-        self.refused("def main():\n    d = {1: 2, 3: 4}\n    k = max(d, key=d.get)\n    print(k)\n\n\nmain()\n",
-                     "keyword arguments")
+        # (max(d, key=...) over a dict held in a variable is built since library batch 4; another dict's
+        # .get is not a key function it knows)
+        self.refused("def main():\n    d = {1: 2, 3: 4}\n    e = {5: 6}\n    k = max(d, key=e.get)\n    print(k)\n\n\nmain()\n",
+                     "gives None for a missing key")
 
     def test_sys_maxsize_and_stderr(self):
         self.same_as_cpython(SYS_BITS, "sys_bits", stderr=True)

@@ -314,6 +314,25 @@ def rename(source, Unsupported, extra_names=()):
     return renamed, {new: old for old, new in fresh.items()}
 
 
+def rename_all(source, Unsupported, extra_names=()):
+    """Comprehension variables that could clash with the enclosing scope get fresh names
+    (compscope.py), then shadowing definitions are renamed (below); one {fresh: old} map covers both."""
+    try:
+        import compscope
+    except ImportError:         # loaded by file path (a test), not as part of the package directory
+        import importlib.util
+        import os
+        spec = importlib.util.spec_from_file_location(
+            'compscope', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'compscope.py'))
+        compscope = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(compscope)
+    source, scoped = compscope.rename(source)
+    source, mapping = rename(source, Unsupported, extra_names)
+    if scoped:
+        mapping = dict(scoped, **mapping)
+    return source, mapping
+
+
 def restore_text(text, mapping):
     """`text` with every fresh identifier from `rename` spelled as the user wrote it."""
     if not mapping or not isinstance(text, str):

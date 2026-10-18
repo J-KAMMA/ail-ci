@@ -246,8 +246,8 @@ def _is_module_const_assign(node):
     if _module_const_scalar(node.value) is not None:
         return True
     if isinstance(node.value, (ast.List, ast.Tuple)) and node.value.elts:
-        return all((kind := _module_const_scalar(e)) is not None and kind[0] in ('int', 'float')
-                   for e in node.value.elts)
+        kinds = [(_module_const_scalar(e) or (None,))[0] for e in node.value.elts]
+        return all(k in ('int', 'float') for k in kinds) or all(k == 'str' for k in kinds)
     return False
 
 
@@ -622,7 +622,7 @@ def build(source, out, strict=True, report=None, force_general=False):
         strict = True
     # A module-level definition shadowing a built-in (`def abs`, `def heappush`) is renamed before
     # either path sees it, so the general path's name-keyed dispatch honours it too (shadowing.py).
-    source, shadow = shadowing.rename(source, Unsupported)
+    source, shadow = shadowing.rename_all(source, Unsupported)
     try:
         result = _build_unshadowed(source, out, strict, report, force_general)
         if last_fallback_reason is not None and shadow:
