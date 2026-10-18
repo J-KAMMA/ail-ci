@@ -21,6 +21,8 @@ with open(os.path.join(HERE, 'ailfile_core.h'), 'r', encoding='utf-8') as _f:
     CORE = _f.read()
 with open(os.path.join(HERE, 'ailproc_core.h'), 'r', encoding='utf-8') as _f:      # stage G8
     PROCCORE = _f.read()
+with open(os.path.join(HERE, 'ailpath_core.h'), 'r', encoding='utf-8') as _f:      # stage G10
+    PATHCORE = _f.read()
 
 # ---------------------------------------------------------------------------------------------
 # Typed runtime: exception codes 11..16 (FileNotFoundError, PermissionError, IsADirectoryError,
@@ -247,8 +249,16 @@ static ail_str ailt_sp_repr(ail_sarena *A, ail_str s) { ailf_buf b; AILT_CHECK(a
 static ail_str ailt_sp_reprb(ail_sarena *A, ail_bytes d) { ailf_buf b; AILT_CHECK(ailp_repr_bytes(d.p, d.n, &b)); return ailt_adopt_str(A, &b); }
 '''
 
+TYPED_PATH = r'''
+/* ---- G10 typed adapters: the pathlib primitives of filelib.PATHS over ailpath_core.h ---- */
+static int64_t ailt_pp_staterr(ail_str p) { return ailf_stat_errno(p.p, p.n); }
+static ail_str ailt_pp_readlink(ail_sarena *A, ail_str p) { ailf_buf b; AILT_CHECK(ailf_readlink(p.p, p.n, &b)); return ailt_adopt_str(A, &b); }
+static ail_str ailt_pp_repr(ail_sarena *A, ail_str s) { ailf_buf b; AILT_CHECK(ailf_repr_buf(s.p, s.n, &b)); return ailt_adopt_str(A, &b); }
+'''
+
+_TYPED_BY_KIND = {'file': TYPED, 'proc': TYPED_PROC, 'path': TYPED_PATH}
 for _name in filelib.PRIMS:
-    assert ('ailt_' + filelib.c_name(_name) + '(') in (TYPED_PROC if filelib.is_proc_prim(_name) else TYPED), _name
+    assert ('ailt_' + filelib.c_name(_name) + '(') in _TYPED_BY_KIND[filelib.prim_kind(_name)], _name
 
 
 def register(ORDER, SOURCE, REQUIRES):
@@ -257,7 +267,9 @@ def register(ORDER, SOURCE, REQUIRES):
             ('FILECORE', CORE, ['MONOTONICHEAD', 'TYPES', 'DIE']),
             ('FILEIO', TYPED, ['FILECORE', 'FILEEXC', 'STR', 'BYTES', 'DIE']),
             ('PROCCORE', PROCCORE, ['FILECORE']),
-            ('PROCIO', TYPED_PROC, ['PROCCORE', 'FILEIO', 'PROCEXC'])):
+            ('PROCIO', TYPED_PROC, ['PROCCORE', 'FILEIO', 'PROCEXC']),
+            ('PATHCORE', PATHCORE, ['FILECORE']),
+            ('PATHIO', TYPED_PATH, ['PATHCORE', 'FILEIO'])):
         ORDER.append(name)
         SOURCE[name] = text
         REQUIRES[name] = requires
@@ -390,15 +402,22 @@ GENERAL_SPEC_PROC = {
 }
 
 
-def general_wrappers(proc=False):
+GENERAL_SPEC_PATH = {
+    'pp_staterr': ('plain', 'ailf_stat_errno({s0})'),
+    'pp_readlink': ('buf', 'ailf_readlink({s0}, &b)'),
+    'pp_repr': ('buf', 'ailf_repr_buf({s0}, &b)'),
+}
+
+
+def general_wrappers(which='file'):
     out = []
     for prim, (ret, kinds) in filelib.PRIMS.items():
         cname = filelib.c_name(prim)
-        if filelib.is_proc_prim(prim) != proc:
+        if filelib.prim_kind(prim) != which:
             continue
         if 'bytes' in kinds or ret == 'bytes':
             continue
-        form, expr = (GENERAL_SPEC_PROC if proc else GENERAL_SPEC)[cname]
+        form, expr = {'file': GENERAL_SPEC, 'proc': GENERAL_SPEC_PROC, 'path': GENERAL_SPEC_PATH}[which][cname]
         params = ''.join(', ail_obj a%d' % i for i in range(len(kinds)))
         lines = ['static ail_st ailo_%s(ail_ctx *cx, ail_obj *out%s) {' % (cname, params), '    ail_st st = AIL_OK;',
                  '    ailf_buf b = {0};']
@@ -445,7 +464,8 @@ def general_wrappers(proc=False):
 
 
 GENERAL = GENERAL_HEAD + general_wrappers()
-GENERAL_PROC = general_wrappers(True)
+GENERAL_PROC = general_wrappers('proc')
+GENERAL_PATH = general_wrappers('path')
 
 
 def general_text():
@@ -456,3 +476,8 @@ def general_text():
 def general_proc_text():
     """The C the general runtime needs once a program reaches a process primitive (after general_text())."""
     return '\n/* ---- G8: process core ---- */\n' + PROCCORE + GENERAL_PROC
+
+
+def general_path_text():
+    """The C the general runtime needs once a program reaches a pathlib primitive (after general_text())."""
+    return '\n/* ---- G10: pathlib core ---- */\n' + PATHCORE + GENERAL_PATH
