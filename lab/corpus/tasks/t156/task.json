@@ -1,0 +1,6 @@
+{
+ "id": "t156",
+ "category": "collections",
+ "description": "Sort the lines 'word number' by number descending, then word ascending, and print them; then print the words with their total numbers via a dict comprehension sorted by key.",
+ "input_format": "pairs_str_int"
+}

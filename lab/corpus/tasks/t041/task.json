@@ -1,0 +1,6 @@
+{
+ "id": "t041",
+ "category": "numbers",
+ "description": "Print a divided by b as a float with 6 decimals, then divmod(a,b), then pow(a, b, 1000007).",
+ "input_format": "two_ints"
+}

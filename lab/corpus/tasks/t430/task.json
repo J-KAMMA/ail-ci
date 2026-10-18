@@ -1,0 +1,6 @@
+{
+ "id": "t430",
+ "category": "errors_classes",
+ "description": "Raise and catch exceptions chained with 'raise ... from ...' when parsing; print the repr of the exception's __cause__ for the first bad line, or 'all ok'.",
+ "input_format": "opt_ints_lines"
+}

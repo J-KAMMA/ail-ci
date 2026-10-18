@@ -1,0 +1,6 @@
+{
+ "id": "t278",
+ "category": "graphs",
+ "description": "Compute the MST with Prim's algorithm and print the total weight; print the number of different MST edge sets cannot be computed so just print the total.",
+ "input_format": "edges_w"
+}

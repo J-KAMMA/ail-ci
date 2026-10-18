@@ -1,0 +1,6 @@
+{
+ "id": "t108",
+ "category": "strings",
+ "description": "Print the word frequencies of the line as 'word=count' sorted by count desc then word asc, then bigram counts (adjacent word pairs) for the top 3.",
+ "input_format": "words_line"
+}

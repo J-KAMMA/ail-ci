@@ -1,0 +1,6 @@
+{
+ "id": "t197",
+ "category": "parsing",
+ "description": "Use re.split to split every line on commas, spaces, or periods and print the number of resulting non-empty tokens per line.",
+ "input_format": "emails_text"
+}

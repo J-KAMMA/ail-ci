@@ -1,0 +1,6 @@
+{
+ "id": "t270",
+ "category": "graphs",
+ "description": "Detect whether the graph has a cycle and print one cycle as a list of nodes, or 'acyclic'.",
+ "input_format": "edges_plain"
+}

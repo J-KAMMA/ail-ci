@@ -1,0 +1,6 @@
+{
+ "id": "t104",
+ "category": "strings",
+ "description": "Print each word that is an anagram of an earlier word, with the index of its first partner.",
+ "input_format": "words_line"
+}

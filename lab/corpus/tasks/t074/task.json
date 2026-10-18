@@ -1,0 +1,6 @@
+{
+ "id": "t074",
+ "category": "strings",
+ "description": "Print the number of vowels and consonants (ASCII letters only) in the whole text, plus the number of non-ASCII characters.",
+ "input_format": "text_uni"
+}

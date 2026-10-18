@@ -1,0 +1,6 @@
+{
+ "id": "t093",
+ "category": "strings",
+ "description": "Print the words that contain all five vowels at least once, or 'none'; and the word with the most distinct letters (first on ties).",
+ "input_format": "strings_n"
+}

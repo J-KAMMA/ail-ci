@@ -1,0 +1,6 @@
+{
+ "id": "t445",
+ "category": "errors_classes",
+ "description": "Use itertools.product to enumerate all strings over 'ab' of length 3, and itertools.cycle with islice to print the first 7 words of the input cycled twice.",
+ "input_format": "words_line"
+}

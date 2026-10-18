@@ -1,0 +1,120 @@
+incr e 8
+get e
+set d 5
+count
+set d 5
+incr a 1
+incr e 6
+incr a 6
+del a
+incr c 8
+get c
+set b 6
+incr a 8
+set b 2
+count
+incr c 8
+set e 1
+del a
+set c 3
+count
+set b 6
+set d 8
+get a
+count
+incr a 6
+set c 8
+get a
+get a
+incr d 1
+incr d 6
+get c
+incr a 9
+del d
+del a
+count
+set a 1
+count
+incr c 8
+del d
+del d
+set d 8
+incr e 6
+incr b 6
+count
+set a 7
+set d 6
+del b
+del b
+set b 9
+del d
+get d
+count
+get d
+del d
+incr d 6
+count
+set e 6
+incr a 4
+incr b 2
+set a 7
+count
+set b 8
+get a
+count
+count
+set b 1
+set c 7
+get c
+del b
+count
+del e
+incr e 2
+incr e 1
+set d 9
+count
+set e 9
+set b 5
+set b 7
+set a 7
+set e 1
+set b 9
+set e 9
+incr e 4
+del d
+count
+incr b 8
+set a 7
+set b 4
+count
+del e
+del e
+get e
+set d 8
+count
+set b 7
+del c
+incr e 9
+set d 1
+get a
+incr d 3
+del a
+get a
+count
+set c 4
+set d 1
+del b
+set b 6
+set d 9
+count
+set d 2
+set c 7
+del c
+del a
+get d
+del b
+count
+set d 2
+set b 8
+set e 4
+get e

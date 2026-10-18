@@ -1,0 +1,6 @@
+{
+ "id": "t034",
+ "category": "numbers",
+ "description": "Print the largest and smallest numbers formatted with a width of 10, 2 decimals, and thousands separator (format spec ',.2f').",
+ "input_format": "floats"
+}

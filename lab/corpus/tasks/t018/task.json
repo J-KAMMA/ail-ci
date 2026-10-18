@@ -1,0 +1,6 @@
+{
+ "id": "t018",
+ "category": "numbers",
+ "description": "Print all pairs of values (a, b) with a<b whose sum is zero, as 'a b' lines in sorted order; print 'none' if there are none.",
+ "input_format": "nums"
+}

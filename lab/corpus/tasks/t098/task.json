@@ -1,0 +1,6 @@
+{
+ "id": "t098",
+ "category": "strings",
+ "description": "Apply a Caesar cipher with the shift k to all ASCII letters of the text (preserve case; leave other characters unchanged); print the result, then decrypt it and print 'ok' if equal.",
+ "input_format": "cipher_in"
+}

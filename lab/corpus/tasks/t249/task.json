@@ -1,0 +1,6 @@
+{
+ "id": "t249",
+ "category": "grids",
+ "description": "Compute the determinant using Fraction-based Gaussian elimination and print it as a fraction in lowest terms (e.g. 7 or 7/2). If not square print 'not square'.",
+ "input_format": "int_matrix"
+}

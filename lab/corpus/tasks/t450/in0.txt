@@ -1,0 +1,6 @@
+5
+bob C 19 89
+dave C 23 81
+bob B 16 85
+carol C 16 91
+judy C 16 53

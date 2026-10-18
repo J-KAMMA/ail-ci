@@ -1,0 +1,6 @@
+5
+judy 89.20
+frank 55.87
+ivan 98.14
+bob 67.11
+ivan 0.37

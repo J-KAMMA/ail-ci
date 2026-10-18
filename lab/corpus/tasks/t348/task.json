@@ -1,0 +1,6 @@
+{
+ "id": "t348",
+ "category": "dp",
+ "description": "Print the digits of the continued fraction expansion for sqrt(n) (first 8 terms; if n is a perfect square print the integer), integer arithmetic only.",
+ "input_format": "small_int"
+}

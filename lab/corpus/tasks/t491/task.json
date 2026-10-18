@@ -1,0 +1,6 @@
+{
+ "id": "t491",
+ "category": "errors_classes",
+ "description": "Use string slicing and indexing on non-ASCII text: print the first 3 characters, last 3 characters, every second character, and s[::-1] for the first non-empty line.",
+ "input_format": "text_uni"
+}

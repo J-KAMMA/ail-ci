@@ -1,0 +1,7 @@
+6
+bob 53
+heidi 9
+ivan 58
+mallory 69
+frank 90
+judy 43

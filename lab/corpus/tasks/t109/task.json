@@ -1,0 +1,6 @@
+{
+ "id": "t109",
+ "category": "strings",
+ "description": "Print each word with its Pig Latin form (move the leading consonant cluster to the end and add 'ay'; words starting with a vowel get 'way').",
+ "input_format": "words_line"
+}

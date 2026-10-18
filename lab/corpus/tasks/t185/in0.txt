@@ -1,0 +1,1 @@
+[{"foxtrot": 0.192, "banana": "sierra"}]

@@ -1,0 +1,6 @@
+{
+ "id": "t293",
+ "category": "graphs",
+ "description": "Print the set of nodes reachable from node 0 (sorted) and those that can reach node 0 (sorted).",
+ "input_format": "edges_d"
+}

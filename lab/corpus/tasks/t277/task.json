@@ -1,0 +1,6 @@
+{
+ "id": "t277",
+ "category": "graphs",
+ "description": "Compute a minimum spanning tree with Kruskal using union-find; print its total weight and edges sorted.",
+ "input_format": "edges_w"
+}

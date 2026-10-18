@@ -1,0 +1,6 @@
+{
+ "id": "t419",
+ "category": "simulation",
+ "description": "Use decimal.Decimal with precision 28 to compute the sum and product of the given numbers' inverses (1/x for non-zero absolute values), printing with 10 decimals via quantize.",
+ "input_format": "nums_nocount"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t473",
+ "category": "errors_classes",
+ "description": "Use string methods split/partition/rpartition/join/replace/find/rfind/count/startswith/endswith/zfill/translate with str.maketrans on each line and print the results.",
+ "input_format": "text_lines"
+}

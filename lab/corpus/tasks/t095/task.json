@@ -1,0 +1,6 @@
+{
+ "id": "t095",
+ "category": "strings",
+ "description": "Sort the words with Python's default string ordering and with key=str.casefold; print both orders.",
+ "input_format": "strings_n_uni"
+}

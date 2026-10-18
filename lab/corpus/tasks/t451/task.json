@@ -1,0 +1,6 @@
+{
+ "id": "t451",
+ "category": "errors_classes",
+ "description": "Use a class with __slots__ and a classmethod/staticmethod factory to build objects from lines of students; print their str() and sorted by property computed score bucket.",
+ "input_format": "student_records"
+}

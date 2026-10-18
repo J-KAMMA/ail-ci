@@ -1,0 +1,6 @@
+{
+ "id": "t485",
+ "category": "errors_classes",
+ "description": "Use textwrap and str.splitlines(keepends=True) and print repr of each; also print the number of lines per splitlines vs split('\\n').",
+ "input_format": "text_lines"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t168",
+ "category": "parsing",
+ "description": "Print the number of distinct names, and the names whose rows appear in at least two different departments.",
+ "input_format": "csv_table"
+}

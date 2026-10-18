@@ -1,0 +1,6 @@
+{
+ "id": "t400",
+ "category": "simulation",
+ "description": "For each hand print the ranks sorted by (count desc, rank value desc) and whether all five cards share a suit.",
+ "input_format": "lines_of_cards"
+}

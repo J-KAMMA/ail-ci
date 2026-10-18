@@ -1,0 +1,6 @@
+{
+ "id": "t076",
+ "category": "strings",
+ "description": "Sort all distinct words (case-sensitive, by Unicode code point) and print them, one per line, with the code point of their first character in hex.",
+ "input_format": "text_uni"
+}

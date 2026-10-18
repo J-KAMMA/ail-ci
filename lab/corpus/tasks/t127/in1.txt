@@ -1,0 +1,11 @@
+10
+bob 98
+frank 23
+dave 97
+niaj 88
+grace 64
+erin 44
+alice 93
+dave 33
+mallory 34
+judy 66

@@ -1,0 +1,11 @@
+the C compiler rejected this:
+program.c: In function ‘run’:
+/tmp/ailc-2vsu901a/program.c:3070:79: error: incompatible type for argument 2 of ‘ail_list_push’
+ 3070 |     for (int64_t _i = _sl2; _i < _sh2; _i++) ail_list_push(&v_coords, v_data.p[_i]);
+      |                                                                       ~~~~~~~~^~~~
+      |                                                                               |
+      |                                                                               ail_str
+/tmp/ailc-2vsu901a/program.c:2958:86: note: expected ‘int64_t’ {aka ‘long int’} but argument is of type ‘ail_str’
+ 2958 | static inline __attribute__((always_inline)) void ail_list_push(ail_list *L, int64_t v) {
+      |                                                                              ~~~~~~~~^
+

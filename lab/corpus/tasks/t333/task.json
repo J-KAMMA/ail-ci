@@ -1,0 +1,6 @@
+{
+ "id": "t333",
+ "category": "dp",
+ "description": "Print the number of subarrays with sum equal to t, using prefix sums and a dict.",
+ "input_format": "nums_target"
+}

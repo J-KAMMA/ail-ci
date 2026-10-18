@@ -1,0 +1,6 @@
+{
+ "id": "t346",
+ "category": "dp",
+ "description": "Print the number of lattice paths from (0,0) to (n,n) moving right or up, plus the number avoiding the diagonal (staying weakly below it), using big ints.",
+ "input_format": "small_int"
+}

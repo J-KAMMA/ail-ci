@@ -1,0 +1,6 @@
+{
+ "id": "t214",
+ "category": "parsing",
+ "description": "For each line print the minimum number of bracket insertions needed to make a string balanced, using only the bracket types present; treat each bracket type independently with counters.",
+ "input_format": "parens"
+}

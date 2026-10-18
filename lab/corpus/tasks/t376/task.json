@@ -1,0 +1,6 @@
+{
+ "id": "t376",
+ "category": "sorting",
+ "description": "Sort numbers by the number of 1 bits in binary (ties by value) and print them.",
+ "input_format": "pos_nums"
+}

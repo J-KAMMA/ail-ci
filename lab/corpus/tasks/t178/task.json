@@ -1,0 +1,6 @@
+{
+ "id": "t178",
+ "category": "parsing",
+ "description": "Print the JSON re-serialised compactly (separators ',' and ':') with ensure_ascii=True.",
+ "input_format": "json_records"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t141",
+ "category": "collections",
+ "description": "Track inventory and print the item with the highest stock after every report command, and the total quantity added overall.",
+ "input_format": "inventory"
+}

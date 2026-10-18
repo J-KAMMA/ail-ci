@@ -1,0 +1,6 @@
+{
+ "id": "t044",
+ "category": "numbers",
+ "description": "Print n! (full big integer), the number of digits of n!, and the number of trailing zeros.",
+ "input_format": "small_int"
+}

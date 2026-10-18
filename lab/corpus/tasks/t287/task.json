@@ -1,0 +1,6 @@
+{
+ "id": "t287",
+ "category": "graphs",
+ "description": "Topologically sort the DAG using Kahn's algorithm with a min-heap for smallest-first ordering; print the order.",
+ "input_format": "dag"
+}

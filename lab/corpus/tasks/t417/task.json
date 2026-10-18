@@ -1,0 +1,6 @@
+{
+ "id": "t417",
+ "category": "simulation",
+ "description": "Implement a simple Fraction-based calculator: for each pair of consecutive numbers a, b (from the list) print their quotient as a fraction in lowest terms using fractions.Fraction; skip zeros as divisors with 'div0'.",
+ "input_format": "nums_nocount"
+}

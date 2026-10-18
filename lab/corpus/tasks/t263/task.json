@@ -1,0 +1,6 @@
+{
+ "id": "t263",
+ "category": "grids",
+ "description": "Count lattice points pairs (i<j) lying on a common horizontal, vertical or 45-degree diagonal line, and print the counts for each kind.",
+ "input_format": "points"
+}

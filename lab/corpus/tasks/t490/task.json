@@ -1,0 +1,6 @@
+{
+ "id": "t490",
+ "category": "errors_classes",
+ "description": "Use sorted(set(...)) over characters and print the characters whose code point is above 127 with their codes in decimal, the total count and the max.",
+ "input_format": "text_uni"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t023",
+ "category": "numbers",
+ "description": "Print the greatest common divisor and least common multiple of all the numbers.",
+ "input_format": "pos_nums"
+}

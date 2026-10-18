@@ -1,0 +1,6 @@
+{
+ "id": "t085",
+ "category": "strings",
+ "description": "Print the longest palindromic substring of each string (first on ties).",
+ "input_format": "palin_strings"
+}

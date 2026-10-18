@@ -1,0 +1,6 @@
+{
+ "id": "t206",
+ "category": "parsing",
+ "description": "Sum all lines that parse as ints after strip; count the lines that fail; print both.",
+ "input_format": "tokens_mixed"
+}

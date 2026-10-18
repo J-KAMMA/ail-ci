@@ -1,0 +1,6 @@
+{
+ "id": "t335",
+ "category": "dp",
+ "description": "Find three distinct indices i<j<k with a[i]+a[j]+a[k] == t; print the lexicographically smallest triple or 'none'.",
+ "input_format": "nums_target"
+}

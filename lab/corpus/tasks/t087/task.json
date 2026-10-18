@@ -1,0 +1,6 @@
+{
+ "id": "t087",
+ "category": "strings",
+ "description": "Print each string compressed as 'a3b' style (count omitted when 1), and check that decoding returns the original; print 'ok' for each.",
+ "input_format": "rle_input"
+}

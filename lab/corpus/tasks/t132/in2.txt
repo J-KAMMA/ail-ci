@@ -1,0 +1,98 @@
+push 12
+peek
+push 20
+size
+peek
+push 40
+peek
+size
+push 85
+push 93
+push 96
+push 39
+peek
+peek
+size
+size
+peek
+push 10
+peek
+size
+size
+push 56
+push 85
+push 56
+push 76
+peek
+peek
+size
+size
+pop
+peek
+push 56
+size
+size
+peek
+peek
+peek
+pop
+size
+push 53
+peek
+push 54
+peek
+size
+push 56
+push 1
+size
+pop
+peek
+peek
+push 55
+size
+push 50
+peek
+pop
+peek
+peek
+peek
+pop
+pop
+push 1
+peek
+pop
+peek
+peek
+peek
+push 83
+pop
+pop
+size
+peek
+push 42
+size
+push 38
+push 16
+push 6
+pop
+pop
+pop
+push 91
+push 91
+peek
+size
+push 51
+size
+size
+pop
+push 73
+push 78
+push 26
+push 19
+push 70
+size
+pop
+push 47
+push 44
+size
+push 21

@@ -1,0 +1,6 @@
+{
+ "id": "t324",
+ "category": "dp",
+ "description": "Print the maximum number of overlapping intervals at any time (sweep line) and the earliest time that happens.",
+ "input_format": "intervals"
+}

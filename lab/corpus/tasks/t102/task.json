@@ -1,0 +1,6 @@
+{
+ "id": "t102",
+ "category": "strings",
+ "description": "Print the number of distinct words, the first word that appears twice, and the words that appear exactly once in order.",
+ "input_format": "words_line"
+}

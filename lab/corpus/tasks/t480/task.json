@@ -1,0 +1,6 @@
+{
+ "id": "t480",
+ "category": "errors_classes",
+ "description": "Use collections.OrderedDict and move_to_end to implement a most-recently-used list of the words; print the order after each word and the final list.",
+ "input_format": "words_line"
+}

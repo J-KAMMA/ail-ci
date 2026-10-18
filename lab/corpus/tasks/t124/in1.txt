@@ -1,0 +1,15 @@
+14
+ivan 72
+carol 7
+heidi 89
+ivan 32
+heidi 20
+heidi 82
+bob 47
+frank 37
+carol 68
+dave 38
+frank 95
+heidi 86
+bob 73
+niaj 53

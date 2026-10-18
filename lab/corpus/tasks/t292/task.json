@@ -1,0 +1,6 @@
+{
+ "id": "t292",
+ "category": "graphs",
+ "description": "Compute strongly connected components with Tarjan's or Kosaraju's algorithm; print components sorted by smallest node, each as a sorted list.",
+ "input_format": "edges_d"
+}

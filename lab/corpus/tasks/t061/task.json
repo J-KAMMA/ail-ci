@@ -1,0 +1,6 @@
+{
+ "id": "t061",
+ "category": "numbers",
+ "description": "Print the integer cube root (floor) of each number using integer arithmetic only (binary search).",
+ "input_format": "big_ints"
+}

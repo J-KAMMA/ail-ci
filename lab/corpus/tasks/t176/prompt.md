@@ -1,0 +1,13 @@
+Write a complete Python 3.12 program that solves the task below.
+
+Task: Parse each JSON record; print the names of active records sorted, and the average score of all records (2 decimals).
+
+Input (read from standard input): One line containing a JSON array of objects with keys id, name, tags (list of strings), score (float), active (bool), and sometimes meta (an object with level int and note string or null). Strings may contain escaped characters or non-ASCII text.
+
+Output: write the result to standard output exactly as described. Print nothing else.
+
+Requirements: standard library only; ordinary readable Python with type hints where natural; define main() and end with
+if __name__ == "__main__":
+    main()
+
+Reply with the program in a single ```python code block and nothing else.

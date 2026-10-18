@@ -1,0 +1,6 @@
+{
+ "id": "t381",
+ "category": "sorting",
+ "description": "Sort points by angle around the origin (atan2) with ties by distance; exclude the origin; print the first 10.",
+ "input_format": "points"
+}

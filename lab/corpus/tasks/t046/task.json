@@ -1,0 +1,6 @@
+{
+ "id": "t046",
+ "category": "numbers",
+ "description": "Print the n-th row of Pascal's triangle and the sum of its squares.",
+ "input_format": "small_int"
+}

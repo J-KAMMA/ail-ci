@@ -1,0 +1,6 @@
+{
+ "id": "t289",
+ "category": "graphs",
+ "description": "Topologically sort using DFS (visit nodes in ascending order) and print the reverse postorder.",
+ "input_format": "dag"
+}

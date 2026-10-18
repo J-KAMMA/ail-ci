@@ -1,0 +1,6 @@
+{
+ "id": "t021",
+ "category": "numbers",
+ "description": "Print the list in 'wave' order: sorted ascending, then alternately take from the smallest and the largest end.",
+ "input_format": "nums"
+}

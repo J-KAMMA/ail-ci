@@ -1,0 +1,4 @@
+
+zulu; whiskey mike
+echo
+Hotel,

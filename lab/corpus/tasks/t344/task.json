@@ -1,0 +1,6 @@
+{
+ "id": "t344",
+ "category": "dp",
+ "description": "Print the n-th ugly number (factors 2, 3, 5) for n up to 60 using a heap or three pointers, and the first 15 ugly numbers.",
+ "input_format": "small_int"
+}

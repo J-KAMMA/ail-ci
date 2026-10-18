@@ -1,0 +1,6 @@
+{
+ "id": "t166",
+ "category": "parsing",
+ "description": "Print the total salary and the number of employees per department as an aligned table with the headers 'dept', 'count', 'total'.",
+ "input_format": "csv_table"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t268",
+ "category": "graphs",
+ "description": "Print the degree of every node and the nodes with the max degree.",
+ "input_format": "edges_plain"
+}

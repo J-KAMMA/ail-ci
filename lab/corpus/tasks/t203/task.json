@@ -1,0 +1,6 @@
+{
+ "id": "t203",
+ "category": "parsing",
+ "description": "Print each time in 12-hour notation like '3:05 PM', and count the AM times and PM times.",
+ "input_format": "times"
+}

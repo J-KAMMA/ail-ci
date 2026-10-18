@@ -1,0 +1,8 @@
+name,dept,salary,age
+frank,ops,169000,22
+grace,hr,183000,51
+erin,sales,98000,45
+ivan,hr,83000,54
+mallory,sales,66000,30
+judy,ops,196000,62
+alice,eng,99000,55

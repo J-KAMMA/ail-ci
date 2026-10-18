@@ -1,0 +1,6 @@
+{
+ "id": "t241",
+ "category": "grids",
+ "description": "Print the spiral order traversal of the grid on one line.",
+ "input_format": "grid_digits"
+}

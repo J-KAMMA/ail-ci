@@ -1,0 +1,6 @@
+{
+ "id": "t002",
+ "category": "numbers",
+ "description": "Print the numbers sorted ascending, then sorted descending, each on its own line, space separated.",
+ "input_format": "nums"
+}

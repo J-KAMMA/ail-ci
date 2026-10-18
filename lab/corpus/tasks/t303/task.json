@@ -1,0 +1,6 @@
+{
+ "id": "t303",
+ "category": "dp",
+ "description": "Solve 0/1 knapsack: print the maximum total value and the chosen item indices (0-based, ascending).",
+ "input_format": "knap"
+}

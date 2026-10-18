@@ -1,0 +1,6 @@
+5
+ivan 10.55
+mallory 85.64
+dave 39.64
+alice 50.00
+dave 22.17

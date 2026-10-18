@@ -1,0 +1,1 @@
+{"banana": [{"delta": 0}, {"delta": 2, "apple": null}, [0.106]]}

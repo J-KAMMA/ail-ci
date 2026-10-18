@@ -1,0 +1,19 @@
+18
+alice 55
+alice 69
+heidi 40
+judy 55
+mallory 66
+carol 44
+alice 72
+dave 27
+judy 98
+carol 35
+frank 63
+bob 34
+mallory 11
+erin 63
+bob 60
+frank 9
+carol 33
+judy 37

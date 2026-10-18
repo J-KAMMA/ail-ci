@@ -1,0 +1,6 @@
+{
+ "id": "t317",
+ "category": "dp",
+ "description": "Partition into two subsets with minimum absolute difference of sums for non-negative numbers only (use absolute values of the inputs); print the difference.",
+ "input_format": "nums_nocount"
+}

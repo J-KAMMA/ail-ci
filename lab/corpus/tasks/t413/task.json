@@ -1,0 +1,6 @@
+{
+ "id": "t413",
+ "category": "simulation",
+ "description": "Print n rows of a Pascal triangle mod 2 (Sierpinski) centred, using '*' and spaces.",
+ "input_format": "small_int"
+}

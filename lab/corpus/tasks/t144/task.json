@@ -1,0 +1,6 @@
+{
+ "id": "t144",
+ "category": "collections",
+ "description": "Zip the two lists (stop at the shorter), print pairwise sums and products, and the dot product.",
+ "input_format": "two_lists"
+}

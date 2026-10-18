@@ -1,0 +1,6 @@
+{
+ "id": "t340",
+ "category": "dp",
+ "description": "Generate all balanced parentheses strings with min(n,6) pairs, sorted, and print the count and the first three.",
+ "input_format": "small_int"
+}

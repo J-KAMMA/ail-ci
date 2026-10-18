@@ -1,0 +1,6 @@
+5
+alice 44
+frank 70
+heidi 80
+bob 41
+ivan 10

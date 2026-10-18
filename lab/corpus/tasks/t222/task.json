@@ -1,0 +1,6 @@
+{
+ "id": "t222",
+ "category": "grids",
+ "description": "DFS (iterative) from S; print how many cells are reachable (including S) and whether E is reachable.",
+ "input_format": "grid_se"
+}

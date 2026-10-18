@@ -1,0 +1,6 @@
+{
+ "id": "t089",
+ "category": "strings",
+ "description": "For each pair print the length of the longest common prefix and the edit (Levenshtein) distance.",
+ "input_format": "word_pairs"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t447",
+ "category": "errors_classes",
+ "description": "Implement a simple event system: observers registered in a dict of lists; for each number emit an event ('even' or 'odd') and print the handler outputs in registration order.",
+ "input_format": "pos_nums"
+}

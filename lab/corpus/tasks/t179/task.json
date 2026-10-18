@@ -1,0 +1,6 @@
+{
+ "id": "t179",
+ "category": "parsing",
+ "description": "Collect all tags across records into a Counter and print the counts as a JSON object with sorted keys.",
+ "input_format": "json_records"
+}

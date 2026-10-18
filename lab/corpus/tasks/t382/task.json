@@ -1,0 +1,6 @@
+{
+ "id": "t382",
+ "category": "sorting",
+ "description": "Sort the lines of a log by level severity (ERROR > WARN > INFO > DEBUG), then by timestamp; print the first 8 lines.",
+ "input_format": "log_lines"
+}

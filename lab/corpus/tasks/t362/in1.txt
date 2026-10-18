@@ -1,0 +1,16 @@
+15
+heidi B 22 60
+frank B 23 54
+alice B 25 94
+judy C 24 79
+bob C 17 72
+bob C 16 84
+heidi B 22 73
+niaj B 21 51
+frank B 16 83
+mallory A 17 54
+erin C 15 54
+judy C 22 85
+grace A 25 80
+dave A 25 71
+heidi A 25 95

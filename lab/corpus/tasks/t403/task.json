@@ -1,0 +1,6 @@
+{
+ "id": "t403",
+ "category": "simulation",
+ "description": "Simulate the cards: sort the five cards by rank ascending and print them, then print the longest run of consecutive ranks.",
+ "input_format": "cards"
+}

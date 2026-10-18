@@ -1,0 +1,7 @@
+delta 1
+cherry -1
+delta 2
+golf 0
+banana -3
+delta 5
+foxtrot -2

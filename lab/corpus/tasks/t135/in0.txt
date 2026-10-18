@@ -1,0 +1,10 @@
+set a 6
+set c 5
+set a 7
+count
+get c
+get d
+del b
+get b
+get a
+incr d 9

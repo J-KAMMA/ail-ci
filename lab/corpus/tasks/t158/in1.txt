@@ -1,0 +1,15 @@
+0,4,apple
+9,7,apple
+3,1,banana
+7,3,echo
+3,6,apple
+0,9,echo
+4,2,cherry
+6,9,delta
+1,2,banana
+1,4,apple
+4,0,apple
+5,7,banana
+7,8,delta
+8,4,echo
+5,9,echo

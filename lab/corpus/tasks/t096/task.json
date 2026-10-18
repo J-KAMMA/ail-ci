@@ -1,0 +1,6 @@
+{
+ "id": "t096",
+ "category": "strings",
+ "description": "For each word print len(), len of its UTF-8 encoding, and whether str.isalpha() and str.isascii() hold.",
+ "input_format": "strings_n_uni"
+}

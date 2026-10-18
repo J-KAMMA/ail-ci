@@ -1,0 +1,6 @@
+{
+ "id": "t184",
+ "category": "parsing",
+ "description": "Flatten the JSON into 'path = value' lines where the path uses dots for keys and [i] for indices; values printed with json.dumps.",
+ "input_format": "json_nested"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t372",
+ "category": "sorting",
+ "description": "Print the words sorted case-insensitively, stable, by their last letter.",
+ "input_format": "strings_n"
+}

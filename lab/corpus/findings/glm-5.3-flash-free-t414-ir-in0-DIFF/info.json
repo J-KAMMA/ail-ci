@@ -1,0 +1,11 @@
+{
+ "model": "glm-5.3-flash-free",
+ "task": "t414",
+ "mode": "ir",
+ "cpython_failed_all": false,
+ "input": 0,
+ "cls": "DIFF",
+ "reason": "exit code cpython=0 ail=1; line 1: cpython='54' ail='<end>'",
+ "cpython_rc": 0,
+ "ail_rc": 1
+}

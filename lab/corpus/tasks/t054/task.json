@@ -1,0 +1,6 @@
+{
+ "id": "t054",
+ "category": "numbers",
+ "description": "Print the divisors of n in ascending order, the count of divisors, and their sum.",
+ "input_format": "one_int"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t055",
+ "category": "numbers",
+ "description": "Print whether n is prime, the next prime after n, and the previous prime before n (or 'none').",
+ "input_format": "one_int"
+}

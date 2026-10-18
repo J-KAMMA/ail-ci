@@ -1,0 +1,6 @@
+5
+dave A 23 82
+dave B 16 98
+niaj C 19 85
+carol B 22 76
+frank C 17 89

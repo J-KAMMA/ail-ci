@@ -1,0 +1,6 @@
+{
+ "id": "t219",
+ "category": "parsing",
+ "description": "Run the robot and print the path as a list of tuples (repr) for the first 10 visited positions, then print whether it returns to the origin.",
+ "input_format": "robot"
+}

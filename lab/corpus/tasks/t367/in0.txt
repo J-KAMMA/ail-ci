@@ -1,0 +1,6 @@
+5
+bob B 24 95
+mallory C 24 85
+grace B 17 79
+grace C 16 77
+alice B 16 98

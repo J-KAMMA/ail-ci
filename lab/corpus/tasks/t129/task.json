@@ -1,0 +1,6 @@
+{
+ "id": "t129",
+ "category": "collections",
+ "description": "Print the name with the highest average value, and the median value overall.",
+ "input_format": "name_score_float"
+}

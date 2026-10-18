@@ -1,0 +1,6 @@
+{
+ "id": "t487",
+ "category": "errors_classes",
+ "description": "Use calendar and datetime: for each date print whether it is in a leap year, days in the month, and the date of the last day of that month.",
+ "input_format": "dates"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t422",
+ "category": "simulation",
+ "description": "Print the maximum number of coins collected: given the numbers as balloons, solve the burst balloons problem (maximum coins) for the first 12 numbers.",
+ "input_format": "pos_nums"
+}

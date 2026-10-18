@@ -1,0 +1,6 @@
+{
+ "id": "t373",
+ "category": "sorting",
+ "description": "Sort by key=lambda w: (-len(set(w)), w) and print with index numbers; also print the min and max by the same key.",
+ "input_format": "strings_n"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t159",
+ "category": "collections",
+ "description": "Use a set of tuples (a,b) to count distinct pairs, then print the pairs with a==b, and the most common word per a value.",
+ "input_format": "tuples_lines"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t204",
+ "category": "parsing",
+ "description": "Parse the lines as integers where possible; print 'int N', 'float X', or 'bad TOKEN' (repr of the token) for each line using try/except; the integers must be parsed with int(), floats with float().",
+ "input_format": "tokens_mixed"
+}

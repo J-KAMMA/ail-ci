@@ -1,0 +1,6 @@
+{
+ "id": "t496",
+ "category": "errors_classes",
+ "description": "Detect and print the longest line (in characters) with its 1-based number, and the shortest non-empty line; ties first.",
+ "input_format": "text_uni"
+}

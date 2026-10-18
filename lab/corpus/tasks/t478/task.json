@@ -1,0 +1,6 @@
+{
+ "id": "t478",
+ "category": "errors_classes",
+ "description": "Use array-like data with the 'array' module of type 'i' to store the numbers, then print the typecode, itemsize, the byteswapped first element, and the sum.",
+ "input_format": "nums_nocount"
+}

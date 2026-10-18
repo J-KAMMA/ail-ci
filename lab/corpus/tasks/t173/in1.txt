@@ -1,0 +1,16 @@
+west,q3,623
+north,q3,491
+south,q4,530
+east,q4,160
+east,q4,690
+south,q2,109
+west,q3,951
+south,q3,938
+south,q3,538
+south,q2,26
+east,q3,679
+west,q2,448
+east,q2,47
+south,q4,140
+south,q3,719
+west,q2,511

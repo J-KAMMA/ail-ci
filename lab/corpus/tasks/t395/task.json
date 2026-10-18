@@ -1,0 +1,6 @@
+{
+ "id": "t395",
+ "category": "simulation",
+ "description": "Roll two dice n times with random.Random(seed).randint(1,6); print the frequency of each sum 2..12 as a histogram of '#'.",
+ "input_format": "seed_params"
+}

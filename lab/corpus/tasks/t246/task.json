@@ -1,0 +1,6 @@
+{
+ "id": "t246",
+ "category": "grids",
+ "description": "Print the rows sorted lexicographically as lists, the row with the largest sum (first on ties), and the number of zero entries.",
+ "input_format": "int_matrix"
+}

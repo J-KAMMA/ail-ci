@@ -1,0 +1,6 @@
+{
+ "id": "t058",
+ "category": "numbers",
+ "description": "Print the Euler totient of n and the number of integers in 1..n coprime to n whose digit sum is even.",
+ "input_format": "one_int"
+}

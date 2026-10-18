@@ -1,0 +1,6 @@
+{
+ "id": "t045",
+ "category": "numbers",
+ "description": "Print the first n Fibonacci numbers on one line, then fib(n*3) as a big integer.",
+ "input_format": "small_int"
+}

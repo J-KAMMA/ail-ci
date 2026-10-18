@@ -1,0 +1,6 @@
+{
+ "id": "t180",
+ "category": "parsing",
+ "description": "Print records with a 'meta' key flattened as 'id: level=<level> note=<note or ->', one per line, sorted by id.",
+ "input_format": "json_records"
+}

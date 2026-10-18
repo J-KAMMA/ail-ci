@@ -1,0 +1,6 @@
+{
+ "id": "t343",
+ "category": "dp",
+ "description": "Print the Tower of Hanoi move count and the first 10 moves for min(n,10) discs ('A->C' style).",
+ "input_format": "small_int"
+}

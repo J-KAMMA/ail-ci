@@ -1,0 +1,16 @@
+incr b 5
+set c 8
+count
+count
+incr d 3
+get b
+del c
+get c
+incr a 1
+incr b 9
+count
+incr d 4
+count
+get c
+incr e 8
+count

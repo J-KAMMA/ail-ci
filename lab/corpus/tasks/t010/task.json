@@ -1,0 +1,6 @@
+{
+ "id": "t010",
+ "category": "numbers",
+ "description": "Print the numbers with every negative value replaced by its absolute value, then the count of values that changed.",
+ "input_format": "nums"
+}

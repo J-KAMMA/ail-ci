@@ -1,0 +1,50 @@
+report
+remove bolt 15
+add pin 2
+report
+report
+add bolt 16
+remove gear 19
+report
+add pin 20
+report
+add nut 1
+add bolt 15
+add nut 13
+add cog 9
+add nut 9
+remove gear 1
+add nut 11
+remove pin 8
+add pin 12
+remove nut 6
+add gear 11
+report
+remove cog 7
+add bolt 3
+remove bolt 20
+add cog 19
+add pin 10
+report
+report
+report
+add pin 16
+report
+add nut 5
+add bolt 1
+report
+add nut 2
+add gear 5
+add nut 6
+add bolt 11
+add pin 14
+remove cog 19
+remove nut 5
+add pin 8
+report
+report
+add bolt 5
+add pin 2
+remove nut 12
+add bolt 6
+remove pin 7

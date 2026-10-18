@@ -1,0 +1,6 @@
+{
+ "id": "t388",
+ "category": "sorting",
+ "description": "Sort the dates by weekday (Mon=0) then by day of month, print the first 8 with the weekday abbreviation.",
+ "input_format": "dates"
+}

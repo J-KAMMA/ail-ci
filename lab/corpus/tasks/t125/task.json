@@ -1,0 +1,6 @@
+{
+ "id": "t125",
+ "category": "collections",
+ "description": "Print a histogram of scores bucketed in tens (0-9, 10-19, ..., 100) using '#' marks, only buckets with content.",
+ "input_format": "name_scores"
+}

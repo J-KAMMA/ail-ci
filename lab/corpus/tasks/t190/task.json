@@ -1,0 +1,6 @@
+{
+ "id": "t190",
+ "category": "parsing",
+ "description": "Parse timestamps with datetime.strptime; print the earliest and latest entries and the difference in whole days between them.",
+ "input_format": "log_lines"
+}

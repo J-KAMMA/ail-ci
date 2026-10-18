@@ -1,0 +1,6 @@
+{
+ "id": "t212",
+ "category": "parsing",
+ "description": "For each line report the maximum depth of the nested brackets or 'unbalanced', and the position of the first mismatch (0-based).",
+ "input_format": "balanced_ish"
+}

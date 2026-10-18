@@ -1,0 +1,6 @@
+{
+ "id": "t243",
+ "category": "grids",
+ "description": "Compute a 2D prefix sum array and answer: the sum of the whole grid, of the top-left quadrant (rows//2, cols//2), and of the bottom-right quadrant.",
+ "input_format": "grid_digits"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t230",
+ "category": "grids",
+ "description": "Simulate Game of Life with wrap-around (torus) for 4 generations and print the final grid plus the live-cell count.",
+ "input_format": "grid_life"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t301",
+ "category": "graphs",
+ "description": "Simulate round-robin scheduling with the given quantum; print the completion time of every process in the input order and the average turnaround time with 2 decimals.",
+ "input_format": "schedule_queue"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "t208",
+ "category": "parsing",
+ "description": "Evaluate each arithmetic expression with your own recursive descent parser (supporting + - * / and parentheses, true division); print the value with repr, or 'error' for division by zero.",
+ "input_format": "expr_lines"
+}

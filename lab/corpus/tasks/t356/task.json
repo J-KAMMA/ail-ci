@@ -1,0 +1,6 @@
+{
+ "id": "t356",
+ "category": "dp",
+ "description": "Implement insertion sort, count shifts, and print the number of shifts; also print the sorted list with positions of original indices (stable argsort).",
+ "input_format": "nums"
+}

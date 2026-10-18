@@ -1,0 +1,6 @@
+{
+ "id": "t456",
+ "category": "errors_classes",
+ "description": "Implement a Counter-like class via dict subclass with __missing__; count words; print the top 3 with ties alphabetical; make sure printing the subclass instance works via dict repr sorted.",
+ "input_format": "words_line"
+}

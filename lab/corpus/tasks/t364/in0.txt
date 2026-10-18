@@ -1,0 +1,6 @@
+5
+niaj B 24 99
+dave B 22 86
+judy B 16 99
+alice C 23 79
+heidi C 17 90
