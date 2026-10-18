@@ -757,6 +757,14 @@ class _Checker(object):
             self.want(where, elem is not None and ins.operands[1].type == I.I64 and ins.result.type == elem,
                       'span.get takes (span, i64) and yields the element')
 
+    def op_spec_get(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 1):
+            c, i, g = ins.operands
+            elem = self._list_elem(c) if c.type.head == 'obj' else self._span_elem(c)
+            self.want(where, elem in (I.I64, I.F64) and c.type != I.T('span', I.T('u8')) and i.type == I.I64
+                      and g.type == I.I1 and ins.result.type == elem,
+                      'spec.get takes (int or float list or span, i64, i1) and yields the element')
+
     def op_span_set(self, ins, scope, stack, where, top):
         self._index_mode(ins, where)
         self.nresults(ins, where, 0)

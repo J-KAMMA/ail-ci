@@ -253,6 +253,13 @@ def instr_effects(ins, fn, program, places=None, defs=None, summaries=None):
         if op == 'span.set' and ins.operands[0].type == I.T('span', I.T('u8')) and ins.attrs.get('mode', 'ck') == 'ck':
             eff = eff | Effects(raises=[VALUE])
         return eff | (Effects(writes=[loc]) if op == 'span.set' else Effects(reads=[loc]))
+    if op == 'spec.get':
+        d = (defs if defs is not None else defs_of(fn)).get(ins.operands[0])
+        if ins.operands[0].type.head == 'span':
+            root = _root(d.operands[0], fn, defs) if d is not None and d.op == 'span.of' else 'Any'
+        else:
+            root = _root(ins.operands[0], fn, defs)
+        return Effects(reads=['Elem(%s)' % root], raises=[INDEX])
     if op in ('field.get', 'field.set'):
         loc = 'Field(%s,%s)' % (ins.attrs.get('cls', '?'), ins.attrs.get('name', '?'))
         return Effects(reads=[loc]) if op == 'field.get' else Effects(writes=[loc])
