@@ -1,0 +1,48 @@
+name: census-lab
+# Which path builds each program of lab/census/programs: typed, general, or refused by both.
+on:
+  workflow_dispatch:
+  push:
+    branches: [lab-census]
+    paths: ["lab/census/**", ".github/workflows/census-lab.yml"]
+permissions:
+  contents: read
+jobs:
+  census:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Census
+        run: |
+          cp lab/census/fallback_census.py tools/fallback_census.py
+          ls lab/census/programs/*/*.py | sort | awk "NR % 10 == ${{ matrix.shard }}" > files.txt
+          python3 tools/fallback_census.py --jobs 4 -o census-${{ matrix.shard }}.jsonl $(cat files.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: census-${{ matrix.shard }}
+          path: census-${{ matrix.shard }}.jsonl
+  summary:
+    needs: census
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: census-*
+          merge-multiple: true
+      - name: Summary
+        run: |
+          cp lab/census/fallback_census.py tools/fallback_census.py
+          for set in gdev dev; do
+            cat census-*.jsonl | grep "\"path\": \"lab/census/programs/$set/" > $set.jsonl || true
+            echo "## $set" >> "$GITHUB_STEP_SUMMARY"
+            python3 tools/fallback_census.py --summary $set.jsonl | head -3 | sed "s/^/    /" >> "$GITHUB_STEP_SUMMARY"
+          done
+          cat "$GITHUB_STEP_SUMMARY"
