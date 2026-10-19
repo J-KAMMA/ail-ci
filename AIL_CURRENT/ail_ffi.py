@@ -35,7 +35,13 @@ Annotations (the stub's whole contract; a missing parameter or return annotation
     results    any of the above except bytes/bytearray; `c_char_p` is copied and decoded (NULL gives "");
                `None` is void; a missing return annotation is refused
 
-`@extern(...)` options: `lib` (library name for -l, or a path to a shared library relative to the
+`link("m", "z")` at module level names libraries for every stub of the file that has no `lib=`.
+`ptr(c_void_p)` is `void **`, the out-parameter that returns a handle (sqlite3_open). A struct passed by pointer
+is a bytearray (`c_mut_void_p`) / bytes (`c_const_void_p`) laid out by hand with the C offsets; give a stub whose
+C prototype names a struct `trust=True` (the exact-prototype check cannot spell the struct).
+
+`@extern(...)` options: `trust` (True: the header is included but its prototype is not compared with the stub;
+for a C prototype that names a struct), `lib` (library name for -l, or a path to a shared library relative to the
 declaring file; None is the C library), `header` (checked against the real prototype at compile time;
 without one the declaration is trusted and `ail check --ffi` says so), `symbol` (the C name when it differs
 from the stub name), `pkg_config` (link flags from pkg-config, compile side only), `check` (one of
@@ -60,7 +66,7 @@ import ctypes.util
 import os
 import sys
 
-__all__ = ['extern', 'length', 'ptr', 'cptr', 'declarations', 'c_int', 'c_uint', 'c_short', 'c_ushort', 'c_long', 'c_ulong',
+__all__ = ['extern', 'link', 'length', 'ptr', 'cptr', 'declarations', 'c_int', 'c_uint', 'c_short', 'c_ushort', 'c_long', 'c_ulong',
            'c_longlong', 'c_ulonglong', 'c_size_t', 'c_ssize_t', 'c_int8', 'c_int16', 'c_int32', 'c_int64',
            'c_uint8', 'c_uint16', 'c_uint32', 'c_uint64', 'c_byte', 'c_ubyte', 'c_bool', 'c_double', 'c_float',
            'c_char_p', 'c_mut_char_p', 'c_void_p', 'c_const_void_p', 'c_mut_void_p']
@@ -131,8 +137,8 @@ class ptr:
     const = False
 
     def __init__(self, ctype):
-        if not isinstance(ctype, CType) or ctype.kind not in ('int', 'float', 'bool'):
-            raise TypeError('%s(integer, float or bool C type)' % type(self).__name__)
+        if not isinstance(ctype, CType) or ctype.kind not in ('int', 'float', 'bool', 'handle'):
+            raise TypeError('%s(integer, float, bool or c_void_p C type)' % type(self).__name__)
         self.ctype = ctype
 
     @property
@@ -160,6 +166,33 @@ class length:
 
 
 _DECLARED = []
+_LINKED = {}                            # declaring file -> [library name or path, ...] from link()
+
+
+def link(*libs, pkg_config=None):
+    """Module-level declaration: the libraries this file's `@extern` stubs (those without `lib=`) resolve their
+    symbols in, in order after the C library. `link("m", "z")` is `-lm -lz` when compiled and the same two
+    libraries loaded by name here. A name is a library name; a path (`./libfoo.so`, relative to this file) is
+    that file. `pkg_config=` (compile side) takes the link flags from pkg-config for these names."""
+    if not libs or not all(isinstance(lib, str) and lib for lib in libs):
+        raise TypeError('link("name", ...) takes library names or paths')
+    filename = sys._getframe(1).f_code.co_filename
+    _LINKED.setdefault(filename, []).extend(libs)
+
+
+class _Chain:
+    """Symbol lookup over the C library and then each linked library."""
+
+    def __init__(self, libraries):
+        self.libraries = libraries
+
+    def __getattr__(self, name):
+        for library in self.libraries:
+            try:
+                return getattr(library, name)
+            except AttributeError:
+                continue
+        raise AttributeError('symbol %r not found in the C library or any link() library' % name)
 
 
 def declarations():
@@ -183,6 +216,9 @@ def _classify(annotation):
 
 def _load(lib, filename):
     if lib is None:
+        linked = _LINKED.get(filename)
+        if linked:
+            return _Chain([ctypes.CDLL(None, use_errno=True)] + [_load(name, filename) for name in linked])
         return ctypes.CDLL(None, use_errno=True)
     if '/' in lib or os.sep in lib or lib.endswith(('.so', '.dylib', '.dll')) or '.so.' in lib:
         base = os.path.dirname(os.path.abspath(filename)) if filename else os.getcwd()
@@ -253,7 +289,7 @@ def _build_sources(sources, lib, filename):
     return ctypes.CDLL(target, use_errno=True)
 
 
-def extern(lib=None, header=None, *, symbol=None, check=None, errno=False, exc=None, pkg_config=None, sources=None):
+def extern(lib=None, header=None, *, symbol=None, check=None, errno=False, exc=None, pkg_config=None, sources=None, trust=False):
     if check is not None and check not in CHECKS:
         raise ValueError('check must be one of %s' % ', '.join(sorted(CHECKS)))
     if exc is not None and exc not in EXCEPTIONS.values():

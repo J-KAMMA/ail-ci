@@ -98,9 +98,9 @@ class Lower(Stmts, Calls, Lams, Exprs):
         for node in tree.body:
             if isinstance(node, ast.Import):
                 for a in node.names:
-                    if a.name in ('heapq', 'math', 'sys', 'functools'):
+                    if a.name in ('heapq', 'math', 'sys', 'functools', 'bisect'):
                         self.modalias[a.asname or a.name] = a.name
-            elif isinstance(node, ast.ImportFrom) and node.module in ('heapq', 'math', 'functools'):
+            elif isinstance(node, ast.ImportFrom) and node.module in ('heapq', 'math', 'functools', 'bisect'):
                 for a in node.names:
                     self.fromnames[a.asname or a.name] = (node.module, a.name)
         for node in tree.body:
@@ -123,7 +123,7 @@ class Lower(Stmts, Calls, Lams, Exprs):
                 t = ('cls', owner)
             else:
                 try:
-                    t = self.ann(a.annotation)
+                    t = self.sig_ann(a.annotation)
                 except Refused as exc:
                     self.errors.append(exc.args[0])
                     t = None
@@ -136,7 +136,7 @@ class Lower(Stmts, Calls, Lams, Exprs):
                 t = None
             sig.params.append((a.arg, t, dflt is not None))
         try:
-            sig.ret = self.ann(fn.returns) if fn.returns is not None else None
+            sig.ret = self.sig_ann(fn.returns) if fn.returns is not None else None
         except Refused as exc:
             self.errors.append(exc.args[0])
         key = (owner or '') + '.' + fn.name
@@ -197,7 +197,7 @@ class Lower(Stmts, Calls, Lams, Exprs):
         for a, p in zip(plain, sig.params):
             if a.annotation is not None:
                 try:
-                    a.annotation, t = self.map_ann(a.annotation)
+                    a.annotation, t = self.sig_map_ann(a.annotation)
                 except Refused as exc:
                     self.errors.append(exc.args[0])
                     continue
@@ -211,7 +211,7 @@ class Lower(Stmts, Calls, Lams, Exprs):
             self.errors.append(exc.args[0])
         if fn.returns is not None:
             try:
-                fn.returns, rt = self.map_ann(fn.returns)
+                fn.returns, rt = self.sig_map_ann(fn.returns)
                 if is_tuple(rt) or is_table(rt) or (isinstance(rt, tuple) and rt[0] == 'opt' and has_tuple(rt)):
                     self.force()
             except Refused as exc:
@@ -292,6 +292,13 @@ class Lower(Stmts, Calls, Lams, Exprs):
             if not ok:
                 self.errors.append((node.lineno, 'a module-level tuple constant must be numbers only, one type per '
                                     'position (DIRS = [(0, 1), (1, 0)]); build other tuples inside a function'))
+                return [node]
+            if isinstance(v, ast.List) and not rowconst_in_place(self.tree, nm):
+                # kept as columns, the list is rebuilt wherever it is used as a value: a function that
+                # changes it, or a name bound to it, would change a copy (DIFFERENCES C68)
+                self.errors.append((node.lineno, 'the module-level list %s is passed, bound or returned as a value; '
+                                    'a list of number tuples is built here only when it is read in place (for, '
+                                    '%s[i], len(%s)); build it in main() and pass it down' % (nm, nm, nm)))
                 return [node]
             t = ('tuple', tuple(types))
             self.force()
