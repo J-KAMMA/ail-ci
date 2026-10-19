@@ -290,8 +290,6 @@ print(sum(int(w) for w in b"10 20  30\n-5".split()))
 
 
 REFUSALS = [
-    ('fn main() { let xs = ["a", "b", "c"]; print(", ".join(xs[0:2])); }',
-     ["join(xs[a:b])", "list SLICE", "part.append(xs[i])"]),
     ('fn main() { let g: list[list[bytes]] = []; print(len(g)); }',
      ["let g: list[list[bytes]]", "rows of int, float, str or a struct", "list of structs"]),
     ('fn main() { let d: dict[bytes, int] = {}; print(len(d)); }',

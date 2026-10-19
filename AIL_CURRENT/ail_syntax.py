@@ -2242,6 +2242,9 @@ class _Surface:
     def dataclass(self, node, decorator):
         options = {item.arg: item.value for item in decorator.keywords} if isinstance(decorator, ast.Call) else {}
         repr_off = isinstance(options.get('repr'), ast.Constant) and not options['repr'].value
+        eq_off = isinstance(options.get('eq'), ast.Constant) and not options['eq'].value   # (`options` is reused below)
+        frozen = any(isinstance(options.get(k), ast.Constant) and options[k].value is True
+                     for k in ('frozen', 'unsafe_hash'))
         for option, value in options.items():
             enabled = not (isinstance(value, ast.Constant) and not value.value)
             if option == 'init' and not enabled or option == 'order' and enabled:
@@ -2297,11 +2300,10 @@ class _Surface:
         # ClassName(field=..., ...) for it; the typed path never sees a comment
         # (the typed path builds the __eq__ a dataclass generates from it too: ` noeq` for eq=False and
         # ` nocmp=` for fields declared compare=False, both written before ` hide=`)
-        eq_off = isinstance(options.get('eq'), ast.Constant) and not options['eq'].value
-        marker = '# ail:dataclass' + (' noeq' if eq_off else '') + (
+        # ` norepr` for repr=False (the marker is written all the same: the general path's generated __eq__ reads it)
+        marker = '# ail:dataclass' + (' noeq' if eq_off else '') + (' frozen' if frozen else '') + (' norepr' if repr_off else '') + (
             ' nocmp=' + ','.join(sorted(uncompared)) if uncompared else '')
-        self.edits.append((at, self.offset(decorator.end_lineno, decorator.end_col_offset),
-                           '' if repr_off else marker, False))
+        self.edits.append((at, self.offset(decorator.end_lineno, decorator.end_col_offset), marker, False))
         # a dataclass that extends another one: its fields come after the base's (a field of the same
         # name keeps the base's position)
         merged = []                    # (name, annotation, default, hidden)
@@ -2410,7 +2412,36 @@ class _Surface:
 
     def file_uses(self, name, body, binary, binding=None):
         """Every use of the file object `name` in `body` (other than `binding`, the name it is
-        opened into) is one this pass maps."""
+        opened into) is one this pass maps, and the file is consumed (read, or walked line by line) at
+        most once: each mapped use reads the whole file again, where CPython's second read of the same
+        file object finds it at its end (`f.read(), f.read()` is the text and '')."""
+        consuming = []
+        statements = set(map(id, body))
+
+        def repeated(node):
+            # inside a loop (or a comprehension) of the body: the use runs more than once
+            child, up = node, self.parents.get(node)
+            while up is not None and id(child) not in statements:
+                if isinstance(up, (ast.For, ast.While, ast.AsyncFor)) and child is not getattr(up, 'iter', None):
+                    return True
+                if isinstance(up, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp, ast.Lambda,
+                                   ast.FunctionDef)):
+                    return True
+                child, up = up, self.parents.get(up)
+            return False
+        for statement in body:
+            for node in ast.walk(statement):
+                if not (isinstance(node, ast.Name) and node.id == name) or node is binding:
+                    continue
+                parent = self.parents.get(node)
+                grand = self.parents.get(parent)
+                if isinstance(parent, ast.Attribute) and isinstance(grand, ast.Call) and grand.func is parent \
+                        and not grand.args and not grand.keywords and parent.attr in ('read', 'readlines'):
+                    consuming.append(grand)
+                elif isinstance(parent, ast.For) and parent.iter is node:
+                    consuming.append(node)
+        if len(consuming) > 1 or any(repeated(each) for each in consuming):
+            return False
         for statement in body:
             for node in ast.walk(statement):
                 if not (isinstance(node, ast.Name) and node.id == name) or node is binding:
