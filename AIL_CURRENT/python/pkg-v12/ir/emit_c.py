@@ -589,9 +589,19 @@ class Emitter(TextEmitter):
         if op == 'sitofp':
             return self.assign_new(depth, ins.result, '((double)(%s))' % o[0])
         if op == 'fptosi':
+            # as the legacy `_numeric_to_int`: nan is a ValueError; an infinity, and a finite value
+            # that does not fit int64, an OverflowError (the "integer overflow" die)
             self.parts.add('DIE')
-            self.line(depth, 'if (!(%s >= -9223372036854775808.0 && %s < 9223372036854775808.0)) '
-                             'ail_raise_named(AIL_EXC_VALUE);' % (o[0], o[0]))
+            self.exception_parts([10])
+            import exctext
+            if exctext.ACTIVE:
+                self.parts.update(('STR', 'STRRET', 'DIE', 'EXCSTR'))
+                inner = ('if (%(x)s != %(x)s) ail_raise_msg(AIL_EXC_VALUE, "cannot convert float NaN to integer"); '
+                         'if (__builtin_isinf(%(x)s)) ail_die("cannot convert float infinity to integer"); ')
+            else:
+                inner = 'if (%(x)s != %(x)s) ail_raise_named(AIL_EXC_VALUE); '
+            self.line(depth, ('if (!(%(x)s >= -9223372036854775808.0 && %(x)s < 9223372036854775808.0)) { '
+                              + inner + 'ail_die("integer overflow"); }') % {'x': o[0]})
             return self.assign_new(depth, ins.result, '(int64_t)%s' % o[0])
         if op == 'load':
             return self.assign_new(depth, ins.result, o[0])
@@ -655,6 +665,11 @@ class Emitter(TextEmitter):
                                        'ail__bytearray_get_slow(%s, %s))' % (o[1], sn, sp, o[1], B, o[1]))
             if ins.attrs.get('mode') == 'nck':
                 return self.line(depth, '%s[%s] = (unsigned char)(%s);' % (sp, o[1], o[2]))
+            if ins.attrs.get('mode') == 'vck':
+                # the index is proven in range; the value keeps its check (the slow path raises it)
+                return self.line(depth, 'if ((uint64_t)(%s) <= 255) %s[%s] = (unsigned char)(%s); '
+                                        'else ail__bytearray_set_slow(%s, %s, %s);'
+                                 % (o[2], sp, o[1], o[2], B, o[1], o[2]))
             return self.line(depth, 'if ((uint64_t)(%s) < (uint64_t)%s && (uint64_t)(%s) <= 255) %s[%s] = '
                                     '(unsigned char)(%s); else ail__bytearray_set_slow(%s, %s, %s);'
                              % (o[1], sn, o[2], sp, o[1], o[2], B, o[1], o[2]))

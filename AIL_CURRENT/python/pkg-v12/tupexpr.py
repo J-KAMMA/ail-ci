@@ -163,13 +163,23 @@ class Exprs:
                         'a length instead')
         return n
 
-    def coerce(self, n, t, want):
-        """An int where a float is expected becomes a float (the compiler's slots do not widen inside classes)."""
+    def coerce(self, n, t, want, math=False):
+        """An int where a float is expected: CPython keeps the int (annotations convert nothing), so converting
+        it here would make a later print or str() show 3.0 where CPython shows 3, and the lowered source is what
+        the general path compiles too.  Refused by name (the source is left as written, so the typed path refuses
+        it and the default build takes the general path, which keeps the int).  `math=True` is a call into a
+        math function, which converts its argument whatever the int's later use (silent6, C39 as found on the
+        tuple pass)."""
         w, d = deep(want), deep(t)
         if w == FLT and d in (INT, BOOL):
-            if isinstance(n, ast.Constant) and type(n.value) is int:
-                return const(float(n.value)), FLT
-            return call('float', n), FLT
+            if math:
+                if isinstance(n, ast.Constant) and type(n.value) is int:
+                    return const(float(n.value)), FLT
+                return call('float', n), FLT
+            self.refuse(n, 'an int where a float is expected (%s); CPython keeps the int (annotations convert '
+                        'nothing), so a later print or str() of it shows 3 where this build would show 3.0. '
+                        'Write instead: a float (`%s`) if the value is meant to be a float.'
+                        % (ast.unparse(n), ast.unparse(n) + '.0' if isinstance(n, ast.Constant) else 'float(%s)' % ast.unparse(n)))
         return n, t
 
     def ex_Constant(self, node, want=None, ctx=None):
