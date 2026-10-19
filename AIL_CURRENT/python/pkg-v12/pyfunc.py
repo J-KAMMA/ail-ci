@@ -45,6 +45,7 @@ import proclib
 import urllower
 import threadlib
 import iterlower
+import typedforms
 import tryhoist
 import stdlib3
 import stdlib4
@@ -1242,6 +1243,8 @@ def _etype(node, ctx):
             return FLT
         if isinstance(node.slice, ast.Slice) and _is_bytes_expr(node.value, ctx):
             return BYTES
+        if _is_slist_slice(node, ctx):
+            return SLIST
         if (isinstance(node.value, ast.Name) and node.value.id in ctx.rowof
                 and ctx.rowof[node.value.id] in ctx.trowsf):
             # `p[j]` where `p` is a row variable over a FLOAT-uniform tuple list -- reads a
@@ -5180,6 +5183,15 @@ def _seq(node, ctx):
         temporary, value = _numeric_field_value(node, field_kind, ctx)
         ctx.pre.append('(void)%s;' % value)
         return '%s.p' % temporary, '%s.n' % temporary
+    repeat = _list_repeat_parts(node)
+    if repeat is not None:
+        # `for x in [0] * n` / `[1] + [0] * n`: CPython builds the repeated list first, and so does
+        # this, into a temp the walk reads (int elements only)
+        kinds = {_etype(element, ctx) for element in repeat[0]}
+        if kinds == {INT} and not any(_is_handle_producing(e, ctx) for e in repeat[0]):
+            temporary, value = _list_repeat_value(node, LIST, ctx)
+            ctx.pre.append('(void)%s;' % value)
+            return '%s.p' % temporary, '%s.n' % temporary
     raise Unsupported(_bind_first(node))
 
 
@@ -6037,6 +6049,60 @@ def _is_str_lower_call(node, ctx):
             and _is_str_expr(node.func.value, ctx))
 
 
+def _is_str_casefold_call(node, ctx):
+    """`s.casefold()`, no arguments: CPython's full case folding (the CASEFOLD table, generated
+    from CPython 3.12 by tools/gen_casemap.py)."""
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == 'casefold' and not node.args and not node.keywords
+            and _is_str_expr(node.func.value, ctx))
+
+
+def _is_str_pad_call(node, ctx):
+    """`s.ljust(w)` / `s.rjust(w)` / `s.center(w)`, optionally with a one-character str literal fill
+    (`s.ljust(w, ".")`): positional arguments only. A fill that is not a one-character literal is
+    left to the general path (CPython raises TypeError for a fill of any other length)."""
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr in ('ljust', 'rjust', 'center') and not node.keywords
+            and 1 <= len(node.args) <= 2 and not any(isinstance(a, ast.Starred) for a in node.args)):
+        return False
+    if len(node.args) == 2 and _pad_fill(node.args[1], ctx) is None:
+        return False
+    return _is_str_expr(node.func.value, ctx)
+
+
+def _pad_fill(node, ctx):
+    """The fill character of a pad call: a one-character str literal, or a module constant bound to
+    one (`FILL = "_"`); None otherwise."""
+    if _is_strlit(node):
+        return node.value if len(node.value) == 1 else None
+    if (isinstance(node, ast.Name) and node.id not in ctx.types and node.id not in ctx.kind
+            and dict.__contains__(getattr(ctx, 'modconsts', {}), node.id)):
+        entry = ctx.modconsts[node.id]
+        if (isinstance(entry, tuple) and len(entry) == 2 and entry[0] == STR
+                and isinstance(entry[1], str) and len(entry[1]) == 1):
+            return entry[1]
+    return None
+
+
+def _str_pad_value(node, ctx):
+    """CPython's pad (unicodeobject.c `pad`): no change when the width is not wider than the text;
+    center puts the odd extra column on the left exactly when the margin and the width are both
+    odd (`left = marg / 2 + (marg & width & 1)`). The receiver is evaluated before the width."""
+    if _etype(node.args[0], ctx) != INT or _is_handle_producing(node.args[0], ctx):
+        raise Unsupported('str.%s() needs an int width' % node.func.attr)
+    fill = _pad_fill(node.args[1], ctx) if len(node.args) == 2 else ' '
+    data = fill.encode('utf-8')
+    literal = '"%s"' % ''.join('\\x%02x' % b for b in data)
+    recv, _ = ctx.temp(STR)
+    width, _ = ctx.temp(INT)
+    ctx.pre.append('%s = %s;' % (recv, _map_inline(lambda: _str_value(node.func.value, ctx), ctx)))
+    ctx.pre.append('%s = %s;' % (width, _map_inline(lambda: _expr(node.args[0], ctx), ctx)))
+    ctx.parts.update(('STR', 'STRPAD'))
+    return 'ail_str_pad(&%s, %s, %s, (const uint8_t *)%s, %d, %d)' % (
+        ctx.sarena(), recv, width, literal, len(data),
+        {'ljust': 0, 'rjust': 1, 'center': 2}[node.func.attr])
+
+
 def _is_str_upper_call(node, ctx):
     """`s.upper()`, no arguments -- AIL_TASK_p3idioms_20260916.md idiom 7, the mirror image of
     `_is_str_lower_call` just above: ASCII-only case mapping (`ail_str_upper`, cruntime.py's STR
@@ -6366,11 +6432,20 @@ def _is_slist_expr(node, ctx):
                 and not all(_is_empty_list_lit(value) for value in branches))
     if (isinstance(node, ast.ListComp) and node.generators
             and not _is_sys_stdin_bare(node.generators[0].iter)):
-        return _listcomp_kind(node, ctx) == SLIST
+        try:
+            return _listcomp_kind(node, ctx) == SLIST
+        except Unsupported as unknown:
+            # a pre-pass asks before the comprehension's source has a kind (`" ".join([f(w) for w
+            # in words])` ahead of `words = line.split()` being typed): not known to be one yet
+            if 'is read before it is assigned' in str(unknown):
+                return False
+            raise
     if isinstance(node, ast.Attribute) and _field_kind(node, ctx) == SLIST:
         return True
     if (isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice)
             and isinstance(node.value, ast.Attribute) and _field_kind(node.value, ctx) == SLIST):
+        return True
+    if _is_slist_slice(node, ctx):
         return True
     if (_is_map_snapshot(node, ctx, 'keys') and _map_kind(node.func.value, ctx) not in INT_KEYED
             or _is_map_snapshot(node, ctx, 'values') and _mvk(_map_kind(node.func.value, ctx)) == STR):
@@ -6401,11 +6476,120 @@ def _is_slist_expr(node, ctx):
     return False
 
 
+def _is_slist_slice(node, ctx):
+    """`xs[a:b]` / `xs[a:b:c]` where `xs` is a bound list-of-str local or an inline `.split()` /
+    `.splitlines()` call: a new list of str (CPython copies the selected references)."""
+    if not (isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice)):
+        return False
+    source = node.value
+    if isinstance(source, ast.Name):
+        try:
+            return ctx.type_of(source.id) == SLIST
+        except Unsupported:
+            return False
+    return _is_slist_call(source, ctx) or _is_slist_slice(source, ctx)
+
+
+def _slist_slice_c(node, ctx):
+    """The spine of `xs[a:b:c]` over a list of str, built into a fresh temp: the views the slice
+    selects, with CPython's own slice.indices clamping for either sign of a literal step. A bound
+    name is read after the bounds (reading a name has no effect of its own, and a bound that
+    mutates the list, `xs[:xs.pop()]`, must see the list after the mutation, as CPython does); an
+    inline `.split()` is evaluated first, before the bounds, in CPython's order."""
+    step = _literal_slice_step(node.slice.step)
+    ctx.parts.add('SLIST')
+    if isinstance(node.value, ast.Name):
+        source = None
+    elif _is_slist_slice(node.value, ctx):
+        source = _slist_slice_c(node.value, ctx)
+    else:
+        source = _slist_call_temp(node.value, ctx)
+    bounds = []
+    for bound in (node.slice.lower, node.slice.upper):
+        if bound is None:
+            bounds.append(None)
+            continue
+        if _etype(bound, ctx) != INT or _is_handle_producing(bound, ctx):
+            raise Unsupported('a slice bound of a list of str must be an int')
+        temp, _ = ctx.temp(INT)
+        ctx.pre.append('%s = %s;' % (temp, _map_inline(lambda: _expr(bound, ctx), ctx)))
+        bounds.append(temp)
+    if source is None:
+        source = ctx.cname(node.value.id)
+    result, _ = ctx.temp(SLIST)
+    if step > 0:
+        lo = bounds[0] or '0'
+        hi = bounds[1] or '_n'
+        clamp = ('if (_lo < 0) { _lo += _n; if (_lo < 0) _lo = 0; } else if (_lo > _n) _lo = _n; '
+                 'if (_hi < 0) { _hi += _n; if (_hi < 0) _hi = 0; } else if (_hi > _n) _hi = _n; '
+                 'for (int64_t _i = _lo; _i < _hi; _i += %d) ' % step)
+    else:
+        lo = bounds[0] or '_n - 1'
+        hi = bounds[1] or '-_n - 1'
+        clamp = ('if (_lo < 0) { _lo += _n; if (_lo < -1) _lo = -1; } else if (_lo > _n - 1) _lo = _n - 1; '
+                 'if (_hi < 0) { _hi += _n; if (_hi < -1) _hi = -1; } else if (_hi > _n - 1) _hi = _n - 1; '
+                 'for (int64_t _i = _lo; _i > _hi; _i -= %d) ' % -step)
+    ctx.pre.append('{ const ail_slist *_src = &%s; int64_t _n = _src->n; int64_t _lo = %s; '
+                   'int64_t _hi = %s; ail_slist_clear(&%s); %sail_slist_push(&%s, _src->p[_i]); }'
+                   % (source, lo, hi, result, clamp, result))
+    return result
+
+
+def _literal_slice_step(step):
+    """The step of a slice this file copies (1 when absent); a step that is not an int literal, or
+    is 0 (CPython raises ValueError), is refused by name."""
+    if step is None:
+        return 1
+    value = _slice_step_literal(step)
+    if value == 0:
+        if isinstance(step, ast.Constant) and isinstance(step.value, int) and not isinstance(step.value, bool):
+            raise Unsupported('a slice step of 0; CPython raises ValueError -- the general path '
+                              'reports it catchably')
+        raise Unsupported('a slice step that is not an int literal; write the step as a number '
+                          '(xs[::2], xs[::-1])')
+    return value
+
+
+def _stepped_slice_temp(node, ctx):
+    """`xs[a:b:c]` iterated (a `for`, a comprehension, sum(), ...) with a literal step: CPython
+    copies the slice first, so this copies it too, into a fresh temp, and the walk reads the copy.
+    For a list of str or a plain list of int bound to a name; None for anything else (the caller
+    refuses it as before)."""
+    if _is_slist_slice(node, ctx):
+        return _slist_slice_c(node, ctx)
+    source = node.value
+    if not (isinstance(source, ast.Name) and ctx.type_of(source.id) == LIST
+            and all(source.id not in group for group in (
+                ctx.tstride, ctx.rowof, ctx.nlist, ctx.blist, ctx.strlist, ctx.srowtypes,
+                ctx.handles, ctx.rowparam))):
+        return None
+    step = _literal_slice_step(node.slice.step)
+    bounds = []
+    for bound in (node.slice.lower, node.slice.upper):
+        if bound is None:
+            bounds.append(None)
+            continue
+        _need_int(bound, ctx, 'a slice bound')
+        temp, _ = ctx.temp(INT)
+        ctx.pre.append('%s = %s;' % (temp, _map_inline(lambda: _expr(bound, ctx), ctx)))
+        bounds.append(temp)
+    ctx.parts.add('LIST')
+    src = ctx.cname(source.id)
+    result, _ = ctx.temp(LIST)
+    lo = bounds[0] or ('0' if step > 0 else '%s.n - 1' % src)
+    hi = bounds[1] or ('%s.n' % src if step > 0 else '0 - %s.n - 1' % src)
+    ctx.pre.append('ail_list_clear(&%s); ail_list_slice_into(&%s, &%s, %s, %s, %d);'
+                   % (result, result, src, lo, hi, step))
+    return result
+
+
 def _slist_arg_c(node, ctx):
     """The C `ail_slist` VALUE a node already proven `_is_slist_expr` denotes -- either an
     existing local's own struct, or an inline call built into a temp (`_slist_call_temp`)."""
     if isinstance(node, ast.Name):
         return ctx.cname(node.id)
+    if _is_slist_slice(node, ctx):
+        return _slist_slice_c(node, ctx)
     if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
             and node.func.id == 'sorted' and node.func.id not in ctx.funcs
             and node.func.id not in ctx.classes and _is_slist_expr(node, ctx)):
@@ -6758,7 +6942,9 @@ def _is_join_call_slist_arg_ok(node, ctx, slist_names):
             and node.func.attr == 'join' and not node.keywords and len(node.args) == 1
             and _is_str_expr(node.func.value, ctx)
             and (_is_slist_call(node.args[0], ctx)
-                 or (isinstance(node.args[0], ast.Name) and node.args[0].id in slist_names)))
+                 or (isinstance(node.args[0], ast.Name) and node.args[0].id in slist_names)
+                 # a str's join returns a str whatever the comprehension holds (or raises)
+                 or isinstance(node.args[0], ast.ListComp)))
 
 
 def _is_named_slist_index(node, slist_names):
@@ -6989,6 +7175,7 @@ def _is_str_expr(node, ctx):
     if _is_int_hex_call(node, ctx) or _is_chr_call(node, ctx) or _is_hex_call(node, ctx) or _is_owned_str_call(node, ctx) or _is_strlit(node) or _is_str_call(node, ctx) or _is_sys_stdin_call(node) \
             or _is_input_call(node) or _is_str_strip_call(node, ctx) \
             or _is_str_lower_call(node, ctx) or _is_str_upper_call(node, ctx) \
+            or _is_str_pad_call(node, ctx) or _is_str_casefold_call(node, ctx) \
             or _is_str_join_call(node, ctx) or _is_str_replace_call(node, ctx) \
             or _is_open_read_call(node) \
             or _is_sys_argv_index(node) or _is_utf8_codec_call(node, ctx, 'decode'):
@@ -7431,6 +7618,12 @@ def _str_value(node, ctx, *, owned_join_return=False):
         recv = _str_value(node.func.value, ctx)
         ctx.parts.update(('STR', 'CASEMAP'))
         return 'ail_str_upper(&%s, %s)' % (ctx.sarena(), recv)
+    if _is_str_pad_call(node, ctx):
+        return _str_pad_value(node, ctx)
+    if _is_str_casefold_call(node, ctx):
+        recv = _str_value(node.func.value, ctx)
+        ctx.parts.update(('STR', 'CASEMAP', 'CASEFOLD'))
+        return 'ail_str_casefold(&%s, %s)' % (ctx.sarena(), recv)
     if _is_str_join_call(node, ctx):
         streamed = _owned_callback_join(node, ctx)
         if streamed is not None:
@@ -7444,7 +7637,8 @@ def _str_value(node, ctx, *, owned_join_return=False):
                 value = _str_value(node.func.value, ctx)
                 steps = [*ctx.pre, '%s = %s;' % (separator, value)]
                 ctx.pre = []
-                if isinstance(node.args[0], ast.Name) or _is_slist_call(node.args[0], ctx):
+                if (isinstance(node.args[0], ast.Name) or _is_slist_call(node.args[0], ctx)
+                        or _is_slist_slice(node.args[0], ctx)):
                     source = _slist_arg_c(node.args[0], ctx)
                 else:
                     source = _expr(node.args[0], ctx)
@@ -7461,7 +7655,8 @@ def _str_value(node, ctx, *, owned_join_return=False):
                 value = _str_value(node.func.value, ctx)
                 steps = [*ctx.pre, '%s = %s;' % (separator, value)]
                 ctx.pre = []
-                source = _expr(node.args[0], ctx)
+                source = (_slist_arg_c(node.args[0], ctx) if _is_slist_slice(node.args[0], ctx)
+                          else _expr(node.args[0], ctx))
                 steps.extend(ctx.pre)
                 ctx.parts.update(('STR', 'SLIST'))
                 return '({ %s ail_str_join(&%s, %s, %s); })' % (
@@ -10511,6 +10706,12 @@ def _iter_plan(node, ctx):
             pre.extend(ctx.pre); ctx.pre = []
             pre.append('(void)%s;' % expression)
             return '0', '%s.n' % c, '%s.p[@]' % c, pre
+    if (isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice)
+            and node.slice.step is not None):
+        stepped = _stepped_slice_temp(node, ctx)
+        if stepped is not None:
+            pre.extend(ctx.pre); ctx.pre = []
+            return '0', '%s.n' % stepped, '%s.p[@]' % stepped, pre
     if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
         # `sorted(xs)[1:-1]` -- the bounds move and nothing is copied, which is what iterating a
         # slice costs here and is not what it costs in Python
@@ -16105,10 +16306,17 @@ def _call(node, ctx):
             p, q = '_mx%d' % ctx.tmp, '_my%d' % ctx.tmp
             ta = 'double' if _etype(a[0], ctx) == FLT else 'int64_t'
             tb = 'double' if _etype(a[1], ctx) == FLT else 'int64_t'
+            if FLT in (_etype(a[0], ctx), _etype(a[1], ctx)):
+                # CPython keeps the first argument unless the second is smaller (larger): NaN stays first (silent6)
+                return ('({ %s %s = %s; %s %s = %s; (%s %s %s ? %s : %s); })'
+                        % (ta, p, rec(a[0]), tb, q, rec(a[1]), q,
+                           '<' if f == 'min' else '>', p, q, p))
             return ('({ %s %s = %s; %s %s = %s; (%s %s %s ? %s : %s); })'
                     % (ta, p, rec(a[0]), tb, q, rec(a[1]), p,
                        '<' if f == 'min' else '>', q, p, q))
         x, y = rec(a[0]), rec(a[1])
+        if FLT in (_etype(a[0], ctx), _etype(a[1], ctx)):
+            return '((%s) %s (%s) ? (%s) : (%s))' % (y, '<' if f == 'min' else '>', x, y, x)
         return '((%s) %s (%s) ? (%s) : (%s))' % (x, '<' if f == 'min' else '>', y, x, y)
     if f == 'abs' and len(a) == 1:
         inner = rec(a[0])
@@ -16893,8 +17101,11 @@ def _pair_plan(src, ctx):
     own docstring for the identical bug this mirrors, and `_inline_pair_fold` for the fix).
     """
     if isinstance(src, ast.Call) and isinstance(src.func, ast.Name) and src.func.id == 'enumerate':
-        if len(src.args) != 1:
-            raise Unsupported('enumerate() with %d arguments' % len(src.args))
+        if len(src.args) != 1 or src.keywords:
+            # `enumerate(xs, start=1)` inside a comprehension or a fold: refused by name (the
+            # index counted from 0 here, whatever the start said)
+            raise Unsupported('enumerate() with a start inside a comprehension or a fold; write '
+                              'the loop out, or add the start to the index')
         lo, n, elem, pre = _iter_plan(src.args[0], ctx)
         # `enumerate`'s index counts from zero -- always, regardless of where the underlying
         # sequence itself starts. For most shapes (an array, a list, a range with no start) `lo` is
@@ -17991,6 +18202,9 @@ def _owned_callback_join(node, ctx):
     params, result = callable_types.unpack(kind)
     if result != STR or len(params) != 1 or params[0] not in (INT, FLT, STR):
         return None
+    if (call.func.id not in ctx.kind and call.func.id not in ctx.types
+            and call.func.id in ctx.funcs and call.func.id not in getattr(ctx, 'owned_str_fns', ())):
+        return None     # no owned-return entry to stream through: built the ordinary way below
     # Predicates with allocations, container aliases or nested scopes retain the normal path.
     if any(isinstance(n, (ast.Call, ast.Subscript, ast.Attribute, ast.NamedExpr,
                           ast.ListComp, ast.GeneratorExp, ast.Lambda))
@@ -19042,9 +19256,39 @@ def _bytes_local_releasable(name, ctx):
     return stores == 1
 
 
+_DEBUG_LINE_MAPS = {}
+
+
+def _debug_site(node, ind):
+    """`ail build --debug` (AIL_DEBUG=1 and AIL_LINE_MAP=<json {combined line: [path, line]}>): the C lines that
+    point gdb at the source line of a statement (`#line`) and record it for the uncaught-exception report
+    (AIL_DBG_SITE). Empty, and no file is read, in every other build."""
+    if os.environ.get('AIL_DEBUG') != '1':
+        return ''
+    path = os.environ.get('AIL_LINE_MAP')
+    if not path:
+        return ''
+    table = _DEBUG_LINE_MAPS.get(path)
+    if table is None:
+        try:
+            with open(path, encoding='utf-8') as handle:
+                table = {int(key): tuple(value) for key, value in json.load(handle).items()}
+        except (OSError, ValueError):
+            table = {}
+        _DEBUG_LINE_MAPS[path] = table
+    where = table.get(getattr(node, 'lineno', None))
+    if not where:
+        return ''
+    name = str(where[0]).replace(chr(92), '/').replace('"', chr(92) + '"')
+    return '#line %d "%s"\n%sAIL_DBG_SITE("%s:%d");\n' % (where[1], name, '    ' * ind, name, where[1])
+
+
 def _stmts(body, ctx, ind):
     emitted, index = [], 0
     while index < len(body):
+        site = _debug_site(body[index], ind)
+        if site:
+            emitted.append(site)
         proof = (float64_fusion.candidate(body, index, ctx.fn_node, ctx.float64_pipelines)
                  if getattr(ctx, 'float64_pipelines', None) else None)
         fused = _emit_float64_pipeline(proof, ctx, ind) if proof else None
@@ -24739,6 +24983,60 @@ def _for_inner(node, ctx, ind):
     finally:
         if previous == FLT and kind == INT:
             ctx.types[name] = FLT
+def _enumerate_start(call):
+    """The start of `enumerate(xs, s)` / `enumerate(xs, start=s)`, None for `enumerate(xs)`; any
+    other argument shape is refused by name (the index must never silently count from 0)."""
+    if len(call.args) == 1 and not call.keywords:
+        return None
+    if len(call.args) == 2 and not call.keywords and not isinstance(call.args[1], ast.Starred):
+        return call.args[1]
+    if (len(call.args) == 1 and len(call.keywords) == 1 and call.keywords[0].arg == 'start'):
+        return call.keywords[0].value
+    raise Unsupported('enumerate() takes an iterable and an optional start')
+
+
+def _for_enumerate_start(node, it, ctx, ind):
+    """`for i, v in enumerate(xs, start)`: the start is evaluated once, after the iterable (CPython's
+    order), and `i` is start + the position; the walk itself keeps its own counter, so a body that
+    rebinds `i` changes nothing about the next step."""
+    pad = '    ' * ind
+    if not (isinstance(node.target, ast.Tuple) and len(node.target.elts) == 2
+            and all(isinstance(e, ast.Name) for e in node.target.elts)):
+        raise Unsupported('enumerate() without an (i, v) target')
+    source, start = it.args[0], _enumerate_start(it)
+    if _is_slist_expr(source, ctx):
+        kind = STR
+    elif isinstance(source, ast.Name) and ctx.type_of(source.id) in (LIST, 'array') and not any(
+            source.id in group for group in (ctx.tstride, ctx.rowof, ctx.nlist, ctx.blist, ctx.strlist,
+                                             ctx.srowtypes, ctx.handles, ctx.rowparam)):
+        kind = INT
+    elif isinstance(source, ast.Name) and _is_flist_name(source, ctx) and source.id not in ctx.tstride:
+        kind = FLT
+    else:
+        raise Unsupported('enumerate() with a start over something other than a named list of int, '
+                          'float or str')
+    if _etype(start, ctx) != INT or _is_handle_producing(start, ctx):
+        raise Unsupported('enumerate() needs an int start')
+    iname, vname = (e.id for e in node.target.elts)
+    if kind == STR:
+        base = _slist_arg_c(source, ctx)
+        ctx.parts.add('SLIST')
+        count, element = '%s.n' % base, '%s.p[%%s]' % base
+    else:
+        p, n = _seq(source, ctx)
+        count, element = n, '%s[%%s]' % p
+    first, _ = ctx.temp(INT)
+    ctx.pre.append('%s = %s;' % (first, _map_inline(lambda: _expr(start, ctx), ctx)))
+    counter, _ = ctx.temp(INT)
+    i = ctx.declare(iname)
+    v = ctx.declare(vname, kind)
+    pre = _flush(ctx, pad)
+    _use(ctx.need, 'ck_add')
+    head = ('%sfor (%s = 0; %s < %s; %s++) {\n%s    %s = ck_add(%s, %s);\n%s    %s = %s;\n'
+            % (pad, counter, counter, count, counter, pad, i, first, counter, pad, v, element % counter))
+    return pre + head + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n'
+
+
 def _for_inner_impl(node, ctx, ind):
     pad = '    ' * ind
     if node.orelse:
@@ -25315,7 +25613,15 @@ def _for_inner_impl(node, ctx, ind):
     if (isinstance(it, ast.Subscript) and isinstance(it.slice, ast.Slice)
             and isinstance(it.value, ast.Name) and ctx.type_of(it.value.id) == SLIST):
         if it.slice.step is not None:
-            raise Unsupported('a slice with a step; only a contiguous slice is built -- copy the elements you want with .append() in a loop, stepping the index yourself')
+            # `for w in words[::-1]`: CPython walks a copy of the slice, and so does this
+            if not isinstance(node.target, ast.Name):
+                raise Unsupported('a tuple target over a slice of a list of str')
+            copied = _slist_slice_c(it, ctx)
+            pre = _flush(ctx, pad)
+            v = ctx.declare(node.target.id, STR)
+            head = '%sfor (%s = 0; %s < %s.n; %s++) {\n%s    %s = %s.p[%s];\n' % (
+                pad, idx, idx, copied, idx, pad, v, copied, idx)
+            return pre + head + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n'
         for b in (it.slice.lower, it.slice.upper):
             if b is not None:
                 _need_int(b, ctx, 'a slice bound')
@@ -25405,6 +25711,8 @@ def _for_inner_impl(node, ctx, ind):
                                pad, head, _guard_rewrite(body, False), pad, pad))
                 return pre + snap + head + _guard_rewrite(body, False) + pad + '}\n'
             return pre + snap + reserve + head + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n'
+        if it.func.id == 'enumerate' and _enumerate_start(it) is not None:
+            return _for_enumerate_start(node, it, ctx, ind)
         if it.func.id == 'enumerate' and len(it.args) == 1:
             if not (isinstance(node.target, ast.Tuple) and len(node.target.elts) == 2
                     and all(isinstance(e, ast.Name) for e in node.target.elts)):
@@ -26172,6 +26480,15 @@ def _promote_floats(fn, ctx):
                         and n.value.func.id not in ctx.funcs and n.value.func.id not in ctx.classes
                         and len(n.value.args) == 1 and isinstance(n.value.args[0], ast.Name)
                         and (n.value.args[0].id in slist_names or ctx.types.get(n.value.args[0].id) == SLIST)):
+                    slist_names.add(name)
+                    changed = True
+                if (name not in slist_names and isinstance(n.value, ast.Subscript)
+                        and isinstance(n.value.slice, ast.Slice)
+                        and (isinstance(n.value.value, ast.Name)
+                             and (n.value.value.id in slist_names
+                                  or ctx.types.get(n.value.value.id) == SLIST)
+                             or _is_slist_call(n.value.value, ctx))):
+                    # `rest = words[1:]`: a slice of a list of str is a list of str
                     slist_names.add(name)
                     changed = True
                 if (name not in slist_names and isinstance(n.value, ast.Call)
@@ -29642,6 +29959,28 @@ def _field_annotation_kind(annotation, classes):
     return kind if (kind in (LIST, FLIST, SLIST, BLIST, *MAPS) or _is_olist_kind(kind)) else None
 
 
+def _range_list_as_comprehension(value, ctx):
+    """`list(range(...))` as the field value of a constructor: the comprehension of the same
+    elements (`[i for i in range(...)]`), which a field already takes. Anything else is returned
+    as it is."""
+    if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id == 'list'
+            and len(value.args) == 1 and not value.keywords
+            and isinstance(value.args[0], ast.Call) and isinstance(value.args[0].func, ast.Name)
+            and value.args[0].func.id == 'range' and not value.args[0].keywords
+            and 1 <= len(value.args[0].args) <= 3
+            and not any(isinstance(a, ast.Starred) for a in value.args[0].args)
+            and 'list' not in ctx.funcs and 'range' not in ctx.funcs
+            and 'list' not in ctx.classes and 'range' not in ctx.classes):
+        return value
+    name = '_ail_range_item'
+    comp = ast.ListComp(elt=ast.Name(id=name, ctx=ast.Load()),
+                        generators=[ast.comprehension(target=ast.Name(id=name, ctx=ast.Store()),
+                                                      iter=value.args[0], ifs=[], is_async=0)])
+    ast.copy_location(comp, value)
+    ast.fix_missing_locations(comp)
+    return comp
+
+
 def _compile_init(init_fn, info, classes):
     """Walk `__init__`'s body once, establishing `info.field_order`/`field_types` AS it goes (so
     `self.b = self.a + 1` on the line right after `self.a = ...` can read `self.a`'s type -- see
@@ -29685,7 +30024,16 @@ def _compile_init(init_fn, info, classes):
                 'establish the fixed shape; found a %s' % (info.name, type(stmt).__name__))
         field, value = stmt.targets[0].attr, stmt.value
         before = len(ctx.pre)
+        value = _range_list_as_comprehension(value, ctx)
         ftype = _etype(value, ctx)
+        repeat = _list_repeat_parts(value)
+        if repeat is not None and ftype not in (LIST, FLIST, SLIST):
+            # `self.size = [1] * n`: a list of the repeated elements (ints only, or floats only)
+            kinds = {_etype(element, ctx) for element in repeat[0]}
+            if kinds == {INT}:
+                ftype = LIST
+            elif kinds == {FLT}:
+                ftype = FLIST
         if declared is not None and _empty_container_literal(value):
             ftype = declared
         if isinstance(value, ast.Name) and value.id in info.numeric_list_params:
@@ -32694,6 +33042,18 @@ def _lower_set_method_spellings(tree):
     Lower().visit(tree)
 
 
+def _is_self_field_store(stmt):
+    """`self.<name> = <expr>` (or annotated), a docstring, or `pass`."""
+    if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str):
+        return True
+    if isinstance(stmt, ast.Pass):
+        return True
+    targets = (stmt.targets if isinstance(stmt, ast.Assign)
+               else [stmt.target] if isinstance(stmt, ast.AnnAssign) and stmt.value is not None else None)
+    return (targets is not None and len(targets) == 1 and isinstance(targets[0], ast.Attribute)
+            and isinstance(targets[0].value, ast.Name) and targets[0].value.id == 'self')
+
+
 def _lower_list_operations(tree):
     """Rewrite the list operations described above in every function of `tree`, in place."""
     wanted = False
@@ -32717,10 +33077,19 @@ def _lower_list_operations(tree):
     if not wanted:
         return
     lowering = _ListLowering(tree)
+    inits = {id(item) for node in ast.walk(tree) if isinstance(node, ast.ClassDef)
+             for item in node.body if isinstance(item, ast.FunctionDef) and item.name == '__init__'}
     for fn in [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]:
         lowering.evidence.scan_function(fn)
         lowering.current_fn = fn
+        original = copy.deepcopy(fn.body) if id(fn) in inits else None
         fn.body = lowering.body(fn.body)
+        if (id(fn) in inits and all(_is_self_field_store(st) for st in original)
+                and not all(_is_self_field_store(st) for st in fn.body)):
+            # a constructor of plain field stores keeps them: the constructor builds each field
+            # value itself (`self.parent = list(range(n))`), and a lowered prelude statement
+            # would be refused there as a statement that is not a field store
+            fn.body = original
     if lowering.changed:
         ast.fix_missing_locations(tree)
 
@@ -33245,6 +33614,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     stdlib4.rewrite(tree, Unsupported)
     stdlib3.rewrite(tree, Unsupported)
     iterlower.rewrite(tree)
+    typedforms.rewrite(tree)
     filelib.rewrite_tree(tree, Unsupported)
     EXC_NAMES.clear()
     EXC_NAMES.update(_BUILTIN_EXC_NAMES)

@@ -1163,6 +1163,10 @@ def main(argv=None):
     compile_cmd.add_argument('--module', action='append', type=Path, default=[],
         help='additional .ail file containing functions and literal numeric constants')
     compile_cmd.add_argument('--no-ffi', action='store_true', help='refuse a program that declares C FFI functions (@extern)')
+    compile_cmd.add_argument('--debug', action='store_true',
+                             help='build for gdb: -g -O0, #line directives back to the .py/.ail source, and an uncaught exception names the last statement run (stderr is then not CPython-compatible)')
+    compile_cmd.add_argument('--link', action='append', default=[], metavar='LIB',
+                             help='link this library as well (-lLIB; a word starting with - is passed as written); repeatable')
     compile_cmd.add_argument('--separate', action='store_true',
         help='compile each typed source into a C object, then link the objects')
     compile_cmd.add_argument('--object', action='append', type=Path, default=[],
@@ -1468,8 +1472,18 @@ def main(argv=None):
                 unit_map_path = Path(tmp) / 'units.json'
                 unit_map_path.write_text(json.dumps(unit_map), encoding='utf-8')
                 command += ['--link-units', str(unit_map_path)]
+            debug = bool(getattr(args, 'debug', False))
+            link = [word if word.startswith('-') else '-l' + word for word in getattr(args, 'link', [])]
+            if link:
+                ffi_env['AIL_FFI_LINK'] = shlex.join([*shlex.split(ffi_env.get('AIL_FFI_LINK', '')), *link])
+            debug_env = {}
+            if debug:
+                line_map = Path(tmp) / 'lines.json'
+                line_map.write_text(json.dumps({str(key): [value[0], value[1]]
+                                                for key, value in loading['source_map'].items()}), encoding='utf-8')
+                debug_env = {'AIL_DEBUG': '1', 'AIL_LINE_MAP': str(line_map)}
             environment = _surface_env(args, source, {**os.environ, 'AIL_REPORT_SOURCE_LINE': '1',
-                                                **({'AIL_NO_GENERAL': '1'} if contracts else {}), **ffi_env})
+                                                **({'AIL_NO_GENERAL': '1'} if contracts else {}), **ffi_env, **debug_env})
             cache = None if separate or getattr(args, 'target', None) else _build_cache(args)
             frontend = None
             if cache is not None and not native_build.enabled(args):
@@ -1482,7 +1496,9 @@ def main(argv=None):
                         hashlib.sha256(Path(str(object_path) + '.json').read_bytes()).hexdigest()
                         if Path(str(object_path) + '.json').is_file() else '-')],
                     environment.get('AIL_SURFACE', ''), environment.get('AIL_NO_GENERAL', ''),
-                    *[hashlib.sha256(Path(a).read_bytes()).hexdigest() for a in shlex.split(ffi_env.get('AIL_FFI_LINK', '')) if Path(a).is_file()])
+                    *[hashlib.sha256(Path(a).read_bytes()).hexdigest() for a in shlex.split(ffi_env.get('AIL_FFI_LINK', '')) if Path(a).is_file()],
+                    *(['link', ffi_env['AIL_FFI_LINK']] if link else []),
+                    *(['debug', hashlib.sha256(line_map.read_bytes()).hexdigest()] if debug else []))
             _hand_over_toolchain(cache, environment)
             result = None
             payload = cache.get('fe', frontend) if frontend else None
