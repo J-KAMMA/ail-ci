@@ -1091,6 +1091,35 @@ def _locate_refusal(args, source, message):
     return '%s:%d:%d: %s' % (where, position[0], position[1], message)
 
 
+def _compile_freestanding(args, parser, native_build):
+    """`compile --freestanding`: one module to C or an object with no runtime and no libc (python/pkg-v12/freestanding.py)."""
+    if args.module or args.object or args.separate or args.static or args.target or args.module_path:
+        parser.error('--freestanding builds one module alone; drop --module, --object, --separate, --static, --target and -I')
+    source = args.source.resolve()
+    output = Path(os.path.abspath(args.output))
+    if source.suffix.lower() != '.py' or not source.is_file():
+        parser.error('--freestanding takes an existing Python-syntax .py module')
+    if output.suffix not in ('.c', '.o'):
+        parser.error('--freestanding output must end in .c (C source) or .o (object)')
+    header = output.with_suffix('.h')
+    for path in (output, header):
+        if path.exists() or path.is_symlink():
+            parser.error('output already exists: %s' % path)
+    if source in (output, header) or not output.parent.is_dir():
+        parser.error('output must differ from source, in an existing directory')
+    sys.path.insert(0, str(ROOT / 'python/pkg-v12'))
+    import freestanding
+    try:
+        report = freestanding.build(source, output)
+    except freestanding.Refusal as error:
+        return native_build.emit(args, {}, 3, 'type', error.text(_relpath(source)))
+    except SyntaxError as error:
+        return native_build.emit(args, {}, 3, 'syntax', 'AIL freestanding: %s:%s: %s' % (_relpath(source), error.lineno, error.msg))
+    except (RuntimeError, OSError, subprocess.SubprocessError) as error:
+        return native_build.emit(args, {}, 2, 'backend', 'AIL freestanding: %s' % error)
+    return native_build.emit(args, report)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -1173,6 +1202,9 @@ def main(argv=None):
         help='link the C library statically (larger binary that runs on any Linux); default is dynamic')
     compile_cmd.add_argument('--target', choices=sorted(ZIG_TARGETS),
         help='cross-compile with zig cc for another OS/CPU (needs zig: $AIL_ZIG, PATH, or ~/tools/zig/zig)')
+    compile_cmd.add_argument('--freestanding', action='store_true',
+        help='compile one Python-syntax module to C (-o x.c) or an object (-o x.o) that needs no runtime and no libc, '
+             'plus a header x.h; see docs/design/FREESTANDING.md')
     object_cmd = sub.add_parser('compile-module', help='compile typed functions, scalar structs and scalar constants to a reusable object')
     object_cmd.add_argument('source', type=Path)
     object_cmd.add_argument('-o', '--output', required=True, type=Path)
@@ -1405,6 +1437,8 @@ def main(argv=None):
                 raise
         return native_build.emit(args, {'output': str(output), 'metadata': str(metadata),
                           'sha256': hashlib.sha256(output.read_bytes()).hexdigest()})
+    if args.command == 'compile' and args.freestanding:
+        return _compile_freestanding(args, parser, native_build)
     if args.command in ('compile', 'compile-library'):
         library = args.command == 'compile-library'
         objects = getattr(args, 'object', [])
