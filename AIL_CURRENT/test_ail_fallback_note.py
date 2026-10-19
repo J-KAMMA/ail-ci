@@ -152,10 +152,13 @@ class FallbackNote(unittest.TestCase):
         self.assertEqual(ran.stdout, expected_index_sort())
 
     def test_refusal_after_index_sort_names_the_real_cause(self):
-        result, _ = self.compile(PRINT_SORTED)
-        self.assertEqual(result.returncode, 3)
+        # the general path builds it since branch safetynet (str.encode); the note still names the typed path's reason
+        result, exe = self.compile(PRINT_SORTED)
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('print() given a list', result.stderr)
         self.assertNotIn('is an int', result.stderr)
+        ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)
+        self.assertEqual(ran.stdout, '[1, 3, 0, 2, 4]\n15\n')
 
 
 if __name__ == '__main__':

@@ -1,7 +1,8 @@
 """The per-function switch between the IR path and the legacy emitter (design §4.1).
 
-    AIL_IR unset or 0   legacy emitter only (the IR is never imported; C is byte-identical)
-    AIL_IR=1            every function in the S0 subset is lowered, verified and emitted from the
+    AIL_IR=0 (off/no)   legacy emitter only (the IR is never imported; C is byte-identical to the
+                        pre-IR-default build); the opt-out
+    AIL_IR unset or 1   (the default since 2026-10-19) every function in the S0 subset is lowered, verified and emitted from the
                         IR; anything else, and any IR failure, falls back to the legacy emitter
     AIL_IR=verify       as 1, plus a print/parse/print round trip of every IR function, and an IR
                         failure (verifier error, emitter error, signature mismatch) raises instead
@@ -58,8 +59,10 @@ def checked_exceptions():
 
 
 def mode():
-    value = os.environ.get('AIL_IR', '0').strip().lower()
-    return '' if value in ('', '0', 'off', 'no') else value
+    value = os.environ.get('AIL_IR', '1').strip().lower()
+    if value == '':
+        value = '1'                  # unset or empty: the default, the IR
+    return '' if value in ('0', 'off', 'no', 'false') else value
 
 
 def _record(fn_name, sym, path, reason, ctx, stats=None, extra=None):
