@@ -19,10 +19,18 @@ ROOT = Path(__file__).resolve().parents[1] / 'AIL_CURRENT'
 TIMES = Path.home() / '.cache' / 'ail_par_check.json'
 
 
+def label(name):
+    """Short name for logs and the timing cache: a piece (ids joined by '+') is its first id and a count."""
+    ids = name.split('+')
+    return ids[0] if len(ids) == 1 else '%s+%d' % (ids[0], len(ids) - 1)
+
+
 def run_module(name, env, timeout=None):
+    """`name` is a test module, or several test ids joined by '+' (a piece of a module that
+    tools/ci_shards.py splits): one `python -m unittest` process runs them all."""
     start = time.monotonic()
     try:
-        proc = subprocess.run([sys.executable, '-X', 'utf8', '-B', '-m', 'unittest', '-q', name],
+        proc = subprocess.run([sys.executable, '-X', 'utf8', '-B', '-m', 'unittest', '-q', *name.split('+')],
                               cwd=ROOT, env=env, capture_output=True, text=True, encoding='utf8',
                               errors='replace', timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -45,7 +53,7 @@ def main():
         times = json.loads(TIMES.read_text())
     except (OSError, ValueError):
         times = {}
-    modules.sort(key=lambda m: -times.get(m, 60.0))
+    modules.sort(key=lambda m: -times.get(label(m), 60.0))
     env = dict(os.environ, PYTHONUTF8='1')
     env.setdefault('AIL_NO_CACHE', '1')     # a warm build cache from another run must not change what tests see
     env.setdefault('PIPE_CC', shutil.which('gcc') or '')
@@ -57,6 +65,7 @@ def main():
         futures = [pool.submit(run_module, m, env, args.timeout) for m in modules]
         for done, future in enumerate(as_completed(futures), 1):
             name, code, seconds, output = future.result()
+            name = label(name)
             times[name] = round(seconds, 1)
             if code:
                 failed.append(name)
