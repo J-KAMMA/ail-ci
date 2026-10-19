@@ -419,7 +419,8 @@ def main() -> None:
 main()
 ''', 'bytes_tables')
 
-    def test_bytes_table_is_refused_by_name_on_the_general_path(self):
+    def test_bytes_table_on_the_general_path(self):
+        # (refused by name until the general path gained bytes; now it must match CPython)
         text = '''
 STOP = {b"a", b"the"}
 
@@ -427,15 +428,16 @@ def f(w: bytes) -> int:
     return 1 if w in STOP else 0
 
 def main() -> None:
-    print(f(b"a"))
+    print(f(b"a"), f(b"x"))
 
 main()
 '''
         with tempfile.TemporaryDirectory() as directory:
             built, exe = build(directory, text, 'bytes_general', 'general')
-            self.assertNotEqual(built.returncode, 0)
-            self.assertIn('bytes literal', built.stdout + built.stderr)
-            self.assertFalse(exe.exists())
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)
+            want = cpython(directory, text, 'bytes_general', '')
+            self.assertEqual((ran.returncode, ran.stdout), (want.returncode, want.stdout))
 
     # ------------------------------------------------------------------ M6 tuples
 
