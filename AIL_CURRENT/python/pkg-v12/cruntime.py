@@ -9854,9 +9854,9 @@ static inline int64_t ail_obj_cmp(ail_obj a, ail_obj b) {
 static inline ail_obj ail_obj_eq(ail_obj a, ail_obj b) { return ail_box_bool(ail_obj_eq_raw(a, b)); }
 static inline ail_obj ail_obj_ne(ail_obj a, ail_obj b) { return ail_box_bool(!ail_obj_eq_raw(a, b)); }
 static inline ail_obj ail_obj_lt(ail_obj a, ail_obj b) { return ail_box_bool(ail_obj_cmp(a, b) < 0); }
-static inline ail_obj ail_obj_le(ail_obj a, ail_obj b) { return ail_box_bool(ail_obj_cmp(a, b) <= 0); }
+static inline ail_obj ail_obj_le(ail_obj a, ail_obj b) { int64_t c = ail_obj_cmp(a, b); return ail_box_bool(c < 0 || (c == 0 && !((a.tag == AIL_FLOAT && a.f != a.f) || (b.tag == AIL_FLOAT && b.f != b.f)))); }
 static inline ail_obj ail_obj_gt(ail_obj a, ail_obj b) { return ail_box_bool(ail_obj_cmp(a, b) > 0); }
-static inline ail_obj ail_obj_ge(ail_obj a, ail_obj b) { return ail_box_bool(ail_obj_cmp(a, b) >= 0); }
+static inline ail_obj ail_obj_ge(ail_obj a, ail_obj b) { int64_t c = ail_obj_cmp(a, b); return ail_box_bool(c > 0 || (c == 0 && !((a.tag == AIL_FLOAT && a.f != a.f) || (b.tag == AIL_FLOAT && b.f != b.f)))); }
 
 /* ===================================================================================
    dict / set -- open-addressed index over a dense, insertion-ordered entries array (see
@@ -14320,7 +14320,8 @@ static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {
         case AIL_T_LIST: case AIL_T_TUPLE: {
             ail_vecobj *va = (ail_vecobj *)a.o, *vb = (ail_vecobj *)b.o;
             if (va->n != vb->n) return 0;
-            for (int64_t i = 0; i < va->n; i++) if (!ail_obj_eq_raw(va->p[i], vb->p[i])) return 0;
+            /* identity first, as CPython's list / tuple comparison does (a NaN that is the same object is equal to itself) */
+            for (int64_t i = 0; i < va->n; i++) if (!(ail_identical(va->p[i], vb->p[i]) || ail_obj_eq_raw(va->p[i], vb->p[i]))) return 0;
             return 1;
         }
         default: return 0; /* instance/exception ==: out of scope, matches v1 */
@@ -14407,10 +14408,14 @@ static inline ail_st ail_obj_cmp(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b
 }
 static inline ail_st ail_op_eq(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { (void)cx; *out = ail_box_bool(ail_obj_eq_raw(a, b)); return AIL_OK; }
 static inline ail_st ail_op_ne(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { (void)cx; *out = ail_box_bool(!ail_obj_eq_raw(a, b)); return AIL_OK; }
+/* ail_obj_cmp answers 0 (neither smaller nor larger) for a NaN operand; `<=` and `>=` must not read that as equal (silent6) */
+static inline int ail__nan_operand(ail_obj a, ail_obj b) {
+    return (a.tag == AIL_T_FLOAT && ail_float_val(a) != ail_float_val(a)) || (b.tag == AIL_T_FLOAT && ail_float_val(b) != ail_float_val(b));
+}
 static inline ail_st ail_op_lt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 0)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0); return AIL_OK; }
-static inline ail_st ail_op_le(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 1)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c <= 0); return AIL_OK; }
+static inline ail_st ail_op_le(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 1)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK; }
 static inline ail_st ail_op_gt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 2)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0); return AIL_OK; }
-static inline ail_st ail_op_ge(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 3)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c >= 0); return AIL_OK; }
+static inline ail_st ail_op_ge(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 3)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK; }
 
 /* ===================================================================================
    Arithmetic. int64 overflow -> AIL_LIMIT (uncatchable), per the owner decision -- the
@@ -20838,6 +20843,116 @@ static int64_t ail_str_eq_casemap(ail_sarena *A, ail_str x, ail_str y, int upper
 }
 '''
 # END GENERATED CASEMAP
+# BEGIN GENERATED CASEFOLD
+CASEFOLD = r'''/* str.casefold(), generated by tools/gen_casemap.py from CPython 3.12.3 (Unicode 15.0.0) -- do not
+   edit by hand. 297 code points fold differently from their lower() mapping; every other one folds
+   as CASEMAP lowers it, with no Final_Sigma rule. Output is at most three times the input. */
+static const uint32_t ail__fold_cp[297] = {
+    0xB5, 0xDF, 0x149, 0x17F, 0x1F0, 0x345, 0x390, 0x3B0, 0x3C2, 0x3D0, 0x3D1, 0x3D5,
+    0x3D6, 0x3F0, 0x3F1, 0x3F5, 0x587, 0x13A0, 0x13A1, 0x13A2, 0x13A3, 0x13A4, 0x13A5, 0x13A6,
+    0x13A7, 0x13A8, 0x13A9, 0x13AA, 0x13AB, 0x13AC, 0x13AD, 0x13AE, 0x13AF, 0x13B0, 0x13B1, 0x13B2,
+    0x13B3, 0x13B4, 0x13B5, 0x13B6, 0x13B7, 0x13B8, 0x13B9, 0x13BA, 0x13BB, 0x13BC, 0x13BD, 0x13BE,
+    0x13BF, 0x13C0, 0x13C1, 0x13C2, 0x13C3, 0x13C4, 0x13C5, 0x13C6, 0x13C7, 0x13C8, 0x13C9, 0x13CA,
+    0x13CB, 0x13CC, 0x13CD, 0x13CE, 0x13CF, 0x13D0, 0x13D1, 0x13D2, 0x13D3, 0x13D4, 0x13D5, 0x13D6,
+    0x13D7, 0x13D8, 0x13D9, 0x13DA, 0x13DB, 0x13DC, 0x13DD, 0x13DE, 0x13DF, 0x13E0, 0x13E1, 0x13E2,
+    0x13E3, 0x13E4, 0x13E5, 0x13E6, 0x13E7, 0x13E8, 0x13E9, 0x13EA, 0x13EB, 0x13EC, 0x13ED, 0x13EE,
+    0x13EF, 0x13F0, 0x13F1, 0x13F2, 0x13F3, 0x13F4, 0x13F5, 0x13F8, 0x13F9, 0x13FA, 0x13FB, 0x13FC,
+    0x13FD, 0x1C80, 0x1C81, 0x1C82, 0x1C83, 0x1C84, 0x1C85, 0x1C86, 0x1C87, 0x1C88, 0x1E96, 0x1E97,
+    0x1E98, 0x1E99, 0x1E9A, 0x1E9B, 0x1E9E, 0x1F50, 0x1F52, 0x1F54, 0x1F56, 0x1F80, 0x1F81, 0x1F82,
+    0x1F83, 0x1F84, 0x1F85, 0x1F86, 0x1F87, 0x1F88, 0x1F89, 0x1F8A, 0x1F8B, 0x1F8C, 0x1F8D, 0x1F8E,
+    0x1F8F, 0x1F90, 0x1F91, 0x1F92, 0x1F93, 0x1F94, 0x1F95, 0x1F96, 0x1F97, 0x1F98, 0x1F99, 0x1F9A,
+    0x1F9B, 0x1F9C, 0x1F9D, 0x1F9E, 0x1F9F, 0x1FA0, 0x1FA1, 0x1FA2, 0x1FA3, 0x1FA4, 0x1FA5, 0x1FA6,
+    0x1FA7, 0x1FA8, 0x1FA9, 0x1FAA, 0x1FAB, 0x1FAC, 0x1FAD, 0x1FAE, 0x1FAF, 0x1FB2, 0x1FB3, 0x1FB4,
+    0x1FB6, 0x1FB7, 0x1FBC, 0x1FBE, 0x1FC2, 0x1FC3, 0x1FC4, 0x1FC6, 0x1FC7, 0x1FCC, 0x1FD2, 0x1FD3,
+    0x1FD6, 0x1FD7, 0x1FE2, 0x1FE3, 0x1FE4, 0x1FE6, 0x1FE7, 0x1FF2, 0x1FF3, 0x1FF4, 0x1FF6, 0x1FF7,
+    0x1FFC, 0xAB70, 0xAB71, 0xAB72, 0xAB73, 0xAB74, 0xAB75, 0xAB76, 0xAB77, 0xAB78, 0xAB79, 0xAB7A,
+    0xAB7B, 0xAB7C, 0xAB7D, 0xAB7E, 0xAB7F, 0xAB80, 0xAB81, 0xAB82, 0xAB83, 0xAB84, 0xAB85, 0xAB86,
+    0xAB87, 0xAB88, 0xAB89, 0xAB8A, 0xAB8B, 0xAB8C, 0xAB8D, 0xAB8E, 0xAB8F, 0xAB90, 0xAB91, 0xAB92,
+    0xAB93, 0xAB94, 0xAB95, 0xAB96, 0xAB97, 0xAB98, 0xAB99, 0xAB9A, 0xAB9B, 0xAB9C, 0xAB9D, 0xAB9E,
+    0xAB9F, 0xABA0, 0xABA1, 0xABA2, 0xABA3, 0xABA4, 0xABA5, 0xABA6, 0xABA7, 0xABA8, 0xABA9, 0xABAA,
+    0xABAB, 0xABAC, 0xABAD, 0xABAE, 0xABAF, 0xABB0, 0xABB1, 0xABB2, 0xABB3, 0xABB4, 0xABB5, 0xABB6,
+    0xABB7, 0xABB8, 0xABB9, 0xABBA, 0xABBB, 0xABBC, 0xABBD, 0xABBE, 0xABBF, 0xFB00, 0xFB01, 0xFB02,
+    0xFB03, 0xFB04, 0xFB05, 0xFB06, 0xFB13, 0xFB14, 0xFB15, 0xFB16, 0xFB17,
+};
+static const uint32_t ail__fold_at[297] = {  /* pool offset << 3 | length */
+    2, 18, 35, 57, 67, 90, 110, 158, 202, 218, 234, 250, 266, 282, 298, 314,
+    332, 363, 387, 411, 435, 459, 483, 507, 531, 555, 579, 603, 627, 651, 675, 699,
+    723, 747, 771, 795, 819, 843, 867, 891, 915, 939, 963, 987, 1011, 1035, 1059, 1083,
+    1107, 1131, 1155, 1179, 1203, 1227, 1251, 1275, 1299, 1323, 1347, 1371, 1395, 1419, 1443, 1467,
+    1491, 1515, 1539, 1563, 1587, 1611, 1635, 1659, 1683, 1707, 1731, 1755, 1779, 1803, 1827, 1851,
+    1875, 1899, 1923, 1947, 1971, 1995, 2019, 2043, 2067, 2091, 2115, 2139, 2163, 2187, 2211, 2235,
+    2259, 2283, 2307, 2331, 2355, 2379, 2403, 2427, 2451, 2475, 2499, 2523, 2547, 2570, 2586, 2602,
+    2618, 2634, 2650, 2666, 2682, 2699, 2723, 2747, 2771, 2795, 2819, 2843, 2866, 2884, 2918, 2966,
+    3014, 3061, 3101, 3141, 3181, 3221, 3261, 3301, 3341, 3381, 3421, 3461, 3501, 3541, 3581, 3621,
+    3661, 3701, 3741, 3781, 3821, 3861, 3901, 3941, 3981, 4021, 4061, 4101, 4141, 4181, 4221, 4261,
+    4301, 4341, 4381, 4421, 4461, 4501, 4541, 4581, 4621, 4661, 4701, 4741, 4781, 4821, 4861, 4901,
+    4941, 4981, 5020, 5052, 5084, 5118, 5164, 5194, 5213, 5252, 5284, 5316, 5350, 5396, 5430, 5478,
+    5524, 5558, 5606, 5654, 5700, 5732, 5766, 5813, 5852, 5884, 5916, 5950, 5996, 6027, 6051, 6075,
+    6099, 6123, 6147, 6171, 6195, 6219, 6243, 6267, 6291, 6315, 6339, 6363, 6387, 6411, 6435, 6459,
+    6483, 6507, 6531, 6555, 6579, 6603, 6627, 6651, 6675, 6699, 6723, 6747, 6771, 6795, 6819, 6843,
+    6867, 6891, 6915, 6939, 6963, 6987, 7011, 7035, 7059, 7083, 7107, 7131, 7155, 7179, 7203, 7227,
+    7251, 7275, 7299, 7323, 7347, 7371, 7395, 7419, 7443, 7467, 7491, 7515, 7539, 7563, 7587, 7611,
+    7635, 7659, 7683, 7707, 7731, 7755, 7779, 7803, 7827, 7851, 7875, 7899, 7923, 7946, 7962, 7978,
+    7995, 8019, 8042, 8058, 8076, 8108, 8140, 8172, 8204,
+};
+static const uint8_t ail__fold_pool[1030] =
+    "\xCE\xBC\x73\x73\xCA\xBC\x6E\x73\x6A\xCC\x8C\xCE\xB9\xCE\xB9\xCC\x88\xCC\x81\xCF\x85\xCC\x88\xCC\x81\xCF\x83\xCE\xB2\xCE\xB8\xCF\x86\xCF\x80\xCE\xBA\xCF\x81\xCE"
+    "\xB5\xD5\xA5\xD6\x82\xE1\x8E\xA0\xE1\x8E\xA1\xE1\x8E\xA2\xE1\x8E\xA3\xE1\x8E\xA4\xE1\x8E\xA5\xE1\x8E\xA6\xE1\x8E\xA7\xE1\x8E\xA8\xE1\x8E\xA9\xE1\x8E\xAA\xE1\x8E"
+    "\xAB\xE1\x8E\xAC\xE1\x8E\xAD\xE1\x8E\xAE\xE1\x8E\xAF\xE1\x8E\xB0\xE1\x8E\xB1\xE1\x8E\xB2\xE1\x8E\xB3\xE1\x8E\xB4\xE1\x8E\xB5\xE1\x8E\xB6\xE1\x8E\xB7\xE1\x8E\xB8"
+    "\xE1\x8E\xB9\xE1\x8E\xBA\xE1\x8E\xBB\xE1\x8E\xBC\xE1\x8E\xBD\xE1\x8E\xBE\xE1\x8E\xBF\xE1\x8F\x80\xE1\x8F\x81\xE1\x8F\x82\xE1\x8F\x83\xE1\x8F\x84\xE1\x8F\x85\xE1"
+    "\x8F\x86\xE1\x8F\x87\xE1\x8F\x88\xE1\x8F\x89\xE1\x8F\x8A\xE1\x8F\x8B\xE1\x8F\x8C\xE1\x8F\x8D\xE1\x8F\x8E\xE1\x8F\x8F\xE1\x8F\x90\xE1\x8F\x91\xE1\x8F\x92\xE1\x8F"
+    "\x93\xE1\x8F\x94\xE1\x8F\x95\xE1\x8F\x96\xE1\x8F\x97\xE1\x8F\x98\xE1\x8F\x99\xE1\x8F\x9A\xE1\x8F\x9B\xE1\x8F\x9C\xE1\x8F\x9D\xE1\x8F\x9E\xE1\x8F\x9F\xE1\x8F\xA0"
+    "\xE1\x8F\xA1\xE1\x8F\xA2\xE1\x8F\xA3\xE1\x8F\xA4\xE1\x8F\xA5\xE1\x8F\xA6\xE1\x8F\xA7\xE1\x8F\xA8\xE1\x8F\xA9\xE1\x8F\xAA\xE1\x8F\xAB\xE1\x8F\xAC\xE1\x8F\xAD\xE1"
+    "\x8F\xAE\xE1\x8F\xAF\xE1\x8F\xB0\xE1\x8F\xB1\xE1\x8F\xB2\xE1\x8F\xB3\xE1\x8F\xB4\xE1\x8F\xB5\xE1\x8F\xB0\xE1\x8F\xB1\xE1\x8F\xB2\xE1\x8F\xB3\xE1\x8F\xB4\xE1\x8F"
+    "\xB5\xD0\xB2\xD0\xB4\xD0\xBE\xD1\x81\xD1\x82\xD1\x82\xD1\x8A\xD1\xA3\xEA\x99\x8B\x68\xCC\xB1\x74\xCC\x88\x77\xCC\x8A\x79\xCC\x8A\x61\xCA\xBE\xE1\xB9\xA1\x73\x73"
+    "\xCF\x85\xCC\x93\xCF\x85\xCC\x93\xCC\x80\xCF\x85\xCC\x93\xCC\x81\xCF\x85\xCC\x93\xCD\x82\xE1\xBC\x80\xCE\xB9\xE1\xBC\x81\xCE\xB9\xE1\xBC\x82\xCE\xB9\xE1\xBC\x83"
+    "\xCE\xB9\xE1\xBC\x84\xCE\xB9\xE1\xBC\x85\xCE\xB9\xE1\xBC\x86\xCE\xB9\xE1\xBC\x87\xCE\xB9\xE1\xBC\x80\xCE\xB9\xE1\xBC\x81\xCE\xB9\xE1\xBC\x82\xCE\xB9\xE1\xBC\x83"
+    "\xCE\xB9\xE1\xBC\x84\xCE\xB9\xE1\xBC\x85\xCE\xB9\xE1\xBC\x86\xCE\xB9\xE1\xBC\x87\xCE\xB9\xE1\xBC\xA0\xCE\xB9\xE1\xBC\xA1\xCE\xB9\xE1\xBC\xA2\xCE\xB9\xE1\xBC\xA3"
+    "\xCE\xB9\xE1\xBC\xA4\xCE\xB9\xE1\xBC\xA5\xCE\xB9\xE1\xBC\xA6\xCE\xB9\xE1\xBC\xA7\xCE\xB9\xE1\xBC\xA0\xCE\xB9\xE1\xBC\xA1\xCE\xB9\xE1\xBC\xA2\xCE\xB9\xE1\xBC\xA3"
+    "\xCE\xB9\xE1\xBC\xA4\xCE\xB9\xE1\xBC\xA5\xCE\xB9\xE1\xBC\xA6\xCE\xB9\xE1\xBC\xA7\xCE\xB9\xE1\xBD\xA0\xCE\xB9\xE1\xBD\xA1\xCE\xB9\xE1\xBD\xA2\xCE\xB9\xE1\xBD\xA3"
+    "\xCE\xB9\xE1\xBD\xA4\xCE\xB9\xE1\xBD\xA5\xCE\xB9\xE1\xBD\xA6\xCE\xB9\xE1\xBD\xA7\xCE\xB9\xE1\xBD\xA0\xCE\xB9\xE1\xBD\xA1\xCE\xB9\xE1\xBD\xA2\xCE\xB9\xE1\xBD\xA3"
+    "\xCE\xB9\xE1\xBD\xA4\xCE\xB9\xE1\xBD\xA5\xCE\xB9\xE1\xBD\xA6\xCE\xB9\xE1\xBD\xA7\xCE\xB9\xE1\xBD\xB0\xCE\xB9\xCE\xB1\xCE\xB9\xCE\xAC\xCE\xB9\xCE\xB1\xCD\x82\xCE"
+    "\xB1\xCD\x82\xCE\xB9\xCE\xB1\xCE\xB9\xCE\xB9\xE1\xBD\xB4\xCE\xB9\xCE\xB7\xCE\xB9\xCE\xAE\xCE\xB9\xCE\xB7\xCD\x82\xCE\xB7\xCD\x82\xCE\xB9\xCE\xB7\xCE\xB9\xCE\xB9"
+    "\xCC\x88\xCC\x80\xCE\xB9\xCC\x88\xCC\x81\xCE\xB9\xCD\x82\xCE\xB9\xCC\x88\xCD\x82\xCF\x85\xCC\x88\xCC\x80\xCF\x85\xCC\x88\xCC\x81\xCF\x81\xCC\x93\xCF\x85\xCD\x82"
+    "\xCF\x85\xCC\x88\xCD\x82\xE1\xBD\xBC\xCE\xB9\xCF\x89\xCE\xB9\xCF\x8E\xCE\xB9\xCF\x89\xCD\x82\xCF\x89\xCD\x82\xCE\xB9\xCF\x89\xCE\xB9\xE1\x8E\xA0\xE1\x8E\xA1\xE1"
+    "\x8E\xA2\xE1\x8E\xA3\xE1\x8E\xA4\xE1\x8E\xA5\xE1\x8E\xA6\xE1\x8E\xA7\xE1\x8E\xA8\xE1\x8E\xA9\xE1\x8E\xAA\xE1\x8E\xAB\xE1\x8E\xAC\xE1\x8E\xAD\xE1\x8E\xAE\xE1\x8E"
+    "\xAF\xE1\x8E\xB0\xE1\x8E\xB1\xE1\x8E\xB2\xE1\x8E\xB3\xE1\x8E\xB4\xE1\x8E\xB5\xE1\x8E\xB6\xE1\x8E\xB7\xE1\x8E\xB8\xE1\x8E\xB9\xE1\x8E\xBA\xE1\x8E\xBB\xE1\x8E\xBC"
+    "\xE1\x8E\xBD\xE1\x8E\xBE\xE1\x8E\xBF\xE1\x8F\x80\xE1\x8F\x81\xE1\x8F\x82\xE1\x8F\x83\xE1\x8F\x84\xE1\x8F\x85\xE1\x8F\x86\xE1\x8F\x87\xE1\x8F\x88\xE1\x8F\x89\xE1"
+    "\x8F\x8A\xE1\x8F\x8B\xE1\x8F\x8C\xE1\x8F\x8D\xE1\x8F\x8E\xE1\x8F\x8F\xE1\x8F\x90\xE1\x8F\x91\xE1\x8F\x92\xE1\x8F\x93\xE1\x8F\x94\xE1\x8F\x95\xE1\x8F\x96\xE1\x8F"
+    "\x97\xE1\x8F\x98\xE1\x8F\x99\xE1\x8F\x9A\xE1\x8F\x9B\xE1\x8F\x9C\xE1\x8F\x9D\xE1\x8F\x9E\xE1\x8F\x9F\xE1\x8F\xA0\xE1\x8F\xA1\xE1\x8F\xA2\xE1\x8F\xA3\xE1\x8F\xA4"
+    "\xE1\x8F\xA5\xE1\x8F\xA6\xE1\x8F\xA7\xE1\x8F\xA8\xE1\x8F\xA9\xE1\x8F\xAA\xE1\x8F\xAB\xE1\x8F\xAC\xE1\x8F\xAD\xE1\x8F\xAE\xE1\x8F\xAF\x66\x66\x66\x69\x66\x6C\x66"
+    "\x66\x69\x66\x66\x6C\x73\x74\x73\x74\xD5\xB4\xD5\xB6\xD5\xB4\xD5\xA5\xD5\xB4\xD5\xAB\xD5\xBE\xD5\xB6\xD5\xB4\xD5\xAD";
+static ail_str ail_str_casefold(ail_sarena *A, ail_str s) {
+    int ascii = 1;
+    for (int64_t i = 0; i < s.n; i++) if (s.p[i] & 0x80) { ascii = 0; break; }
+    if (ascii) return ail__case_map(A, s, 0);
+    if (s.n > (INT64_MAX - 1) / 3) ail_die("string too long");
+    uint8_t *q = (uint8_t *)ail_alloc((size_t)(3 * s.n + 1));
+    int64_t o = 0;
+    const int64_t nfold = (int64_t)(sizeof ail__fold_cp / sizeof ail__fold_cp[0]);
+    const int64_t nlower = (int64_t)(sizeof ail__lower_cp / sizeof ail__lower_cp[0]);
+    for (int64_t i = 0; i < s.n; ) {
+        int64_t next = ail_str_next_unit(s, i);
+        uint32_t c = s.p[i] < 0x80 ? s.p[i] : ail_str_point(s, i);
+        int64_t k;
+        if (c < 0x80) {
+            q[o++] = (uint8_t)(c >= 65 && c <= 90 ? c + 32 : c);
+        } else if ((k = ail__case_find(ail__fold_cp, nfold, c)) >= 0) {
+            uint32_t len = ail__fold_at[k] & 7, off = ail__fold_at[k] >> 3;
+            memcpy(q + o, ail__fold_pool + off, len); o += len;
+        } else if ((k = ail__case_find(ail__lower_cp, nlower, c)) >= 0) {
+            uint32_t len = ail__lower_at[k] & 7, off = ail__lower_at[k] >> 3;
+            memcpy(q + o, ail__lower_pool + off, len); o += len;
+        } else {
+            memcpy(q + o, s.p + i, (size_t)(next - i)); o += next - i;
+        }
+        i = next;
+    }
+    ail_sarena_pushn(A, q, -(3 * s.n + 1));
+    ail_str r; r.bytes = 0; r.p = q; r.n = o; return r;
+}
+'''
+# END GENERATED CASEFOLD
 
 # str.lower() / str.upper() for the general (boxed) runtime: the same CPython tables the typed runtime uses
 # (CASEMAP above), over its UTF-16 strings. Appended to a boxed program only when it calls .lower() or
@@ -22044,6 +22159,9 @@ REQUIRES['TABGUARD'] = ['TYPES', 'DIE']
 ORDER.insert(ORDER.index('STR') + 1, 'CASEMAP')
 SOURCE['CASEMAP'] = CASEMAP
 REQUIRES['CASEMAP'] = ['STR']
+ORDER.insert(ORDER.index('CASEMAP') + 1, 'CASEFOLD')
+SOURCE['CASEFOLD'] = CASEFOLD
+REQUIRES['CASEFOLD'] = ['CASEMAP']
 ORDER.insert(ORDER.index('STR') + 1, 'STRWIN')
 SOURCE['STRWIN'] = STRWIN
 REQUIRES['STRWIN'] = ['STR']
@@ -25090,6 +25208,31 @@ static ail_str ail_str_from_cp(ail_sarena *A, int64_t value) {
 ORDER.insert(ORDER.index('STR') + 1, 'CHRSTR')
 SOURCE['CHRSTR'] = CHRSTR
 REQUIRES['CHRSTR'] = ['STR']
+
+STRPAD = r'''
+/* s.ljust(w, f) / s.rjust(w, f) / s.center(w, f) (mode 0 / 1 / 2), CPython's own `pad`: the width
+   counts code points, a width not wider than the text leaves it as it is, and center gives the odd
+   extra column to the left exactly when the margin and the width are both odd. `fill` is the UTF-8
+   of one character, `fn` bytes long. */
+static ail_str ail_str_pad(ail_sarena *A, ail_str s, int64_t width, const uint8_t *fill, int64_t fn, int mode) {
+    int64_t len = ail_str_len_points(s);
+    if (width <= len) return s;
+    int64_t marg = width - len;
+    int64_t left = mode == 0 ? 0 : mode == 1 ? marg : marg / 2 + (marg & width & 1);
+    int64_t right = marg - left;
+    if (marg > (INT64_MAX - s.n - 1) / fn) ail_die("string too long");
+    int64_t n = s.n + marg * fn, o = 0;
+    uint8_t *q = ail_sarena_alloc(A, n);
+    for (int64_t i = 0; i < left; i++) { memcpy(q + o, fill, (size_t)fn); o += fn; }
+    if (s.n) memcpy(q + o, s.p, (size_t)s.n);
+    o += s.n;
+    for (int64_t i = 0; i < right; i++) { memcpy(q + o, fill, (size_t)fn); o += fn; }
+    return (ail_str){q, n, s.bytes && fn == 1};
+}
+'''
+ORDER.insert(ORDER.index('STR') + 1, 'STRPAD')
+SOURCE['STRPAD'] = STRPAD
+REQUIRES['STRPAD'] = ['STR']
 
 HEXCODEC = r'''
 static ail_str ail_bytes_hex(ail_sarena *A, ail_bytes data) {

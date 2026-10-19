@@ -19,6 +19,25 @@ loops as `file:line: slow: ...; fix`: `x in xs` / `.index` / `.count` / `.remove
 current key, nested loops over one list, a struct heap keyed by a computed value. They never
 fail the build; fix them when n can be large. `s += t` on a str is linear (no hint).
 
+### Strict mode: the typed path or a refusal
+
+A program the typed path cannot take is built on the general path, about 20x slower, and `compile`
+prints one `note: ... built on the general path (about 20x slower) because ...; run with --strict to see
+why` line (`AIL_QUIET_FALLBACK=1` silences it). Strict mode never falls back:
+
+```text
+python3 ail_chatgpt.py compile prog.py --strict -o prog          # also AIL_STRICT=1, ail build --strict, ail run --strict
+python3 ail_chatgpt.py compile prog.py --strict --json -o prog   # blockers as ail.strict/1 JSON on stdout
+```
+
+A typed program builds exactly as without the flag (same C, same executable). Otherwise exit status 3 and
+every blocker the compiler can find in one pass, not only the first: `file:line:col`, the code, the
+construct, why it is not typed and a `write instead:` rewrite, the one that keeps the most code off the
+typed path first (`blocks N lines (f, main)`: the function and every caller). Fix them all, run again.
+The JSON has `schema`, `status`, `blocker_count`, `incomplete` (null, or why the list may be short) and
+`blockers[]` with `rank path line column function statement construct why write_instead blocks_lines
+blocks_functions message`. `AIL_NO_GENERAL=1` alone still stops at the first refusal.
+
 ## Text I/O: main, arguments, stdin lines, print, files
 
 ```ail
