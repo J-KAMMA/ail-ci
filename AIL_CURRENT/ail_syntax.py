@@ -1195,6 +1195,25 @@ _FILE_HINT = ('this use of a file is not built: only reading it whole (`f.read()
               '`write_bytes(path, data)` to write one')
 
 
+def _annotation_only_names(tree, names):
+    """Whether every mention of each of `names` (the ABCs of a `from collections.abc import ...`)
+    is inside an annotation, where the import has nothing to do."""
+    inside = set()
+    for node in ast.walk(tree):
+        annotations = []
+        if isinstance(node, ast.arg):
+            annotations.append(node.annotation)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            annotations.append(node.returns)
+        elif isinstance(node, ast.AnnAssign):
+            annotations.append(node.annotation)
+        for annotation in annotations:
+            if annotation is not None:
+                inside.update(id(n) for n in ast.walk(annotation))
+    wanted = set(names)
+    return not any(isinstance(n, ast.Name) and n.id in wanted and id(n) not in inside for n in ast.walk(tree))
+
+
 def _own_nodes(function):
     """Nodes of `function` itself, not of the functions, lambdas or classes nested in it."""
     pending = list(ast.iter_child_nodes(function))
@@ -2242,6 +2261,9 @@ class _Surface:
     def dataclass(self, node, decorator):
         options = {item.arg: item.value for item in decorator.keywords} if isinstance(decorator, ast.Call) else {}
         repr_off = isinstance(options.get('repr'), ast.Constant) and not options['repr'].value
+        eq_off = isinstance(options.get('eq'), ast.Constant) and not options['eq'].value   # (`options` is reused below)
+        frozen = any(isinstance(options.get(k), ast.Constant) and options[k].value is True
+                     for k in ('frozen', 'unsafe_hash'))
         for option, value in options.items():
             enabled = not (isinstance(value, ast.Constant) and not value.value)
             if option == 'init' and not enabled or option == 'order' and enabled:
@@ -2297,11 +2319,10 @@ class _Surface:
         # ClassName(field=..., ...) for it; the typed path never sees a comment
         # (the typed path builds the __eq__ a dataclass generates from it too: ` noeq` for eq=False and
         # ` nocmp=` for fields declared compare=False, both written before ` hide=`)
-        eq_off = isinstance(options.get('eq'), ast.Constant) and not options['eq'].value
-        marker = '# ail:dataclass' + (' noeq' if eq_off else '') + (
+        # ` norepr` for repr=False (the marker is written all the same: the general path's generated __eq__ reads it)
+        marker = '# ail:dataclass' + (' noeq' if eq_off else '') + (' frozen' if frozen else '') + (' norepr' if repr_off else '') + (
             ' nocmp=' + ','.join(sorted(uncompared)) if uncompared else '')
-        self.edits.append((at, self.offset(decorator.end_lineno, decorator.end_col_offset),
-                           '' if repr_off else marker, False))
+        self.edits.append((at, self.offset(decorator.end_lineno, decorator.end_col_offset), marker, False))
         # a dataclass that extends another one: its fields come after the base's (a field of the same
         # name keeps the base's position)
         merged = []                    # (name, annotation, default, hidden)
@@ -2410,7 +2431,36 @@ class _Surface:
 
     def file_uses(self, name, body, binary, binding=None):
         """Every use of the file object `name` in `body` (other than `binding`, the name it is
-        opened into) is one this pass maps."""
+        opened into) is one this pass maps, and the file is consumed (read, or walked line by line) at
+        most once: each mapped use reads the whole file again, where CPython's second read of the same
+        file object finds it at its end (`f.read(), f.read()` is the text and '')."""
+        consuming = []
+        statements = set(map(id, body))
+
+        def repeated(node):
+            # inside a loop (or a comprehension) of the body: the use runs more than once
+            child, up = node, self.parents.get(node)
+            while up is not None and id(child) not in statements:
+                if isinstance(up, (ast.For, ast.While, ast.AsyncFor)) and child is not getattr(up, 'iter', None):
+                    return True
+                if isinstance(up, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp, ast.Lambda,
+                                   ast.FunctionDef)):
+                    return True
+                child, up = up, self.parents.get(up)
+            return False
+        for statement in body:
+            for node in ast.walk(statement):
+                if not (isinstance(node, ast.Name) and node.id == name) or node is binding:
+                    continue
+                parent = self.parents.get(node)
+                grand = self.parents.get(parent)
+                if isinstance(parent, ast.Attribute) and isinstance(grand, ast.Call) and grand.func is parent \
+                        and not grand.args and not grand.keywords and parent.attr in ('read', 'readlines'):
+                    consuming.append(grand)
+                elif isinstance(parent, ast.For) and parent.iter is node:
+                    consuming.append(node)
+        if len(consuming) > 1 or any(repeated(each) for each in consuming):
+            return False
         for statement in body:
             for node in ast.walk(statement):
                 if not (isinstance(node, ast.Name) and node.id == name) or node is binding:
@@ -2503,6 +2553,9 @@ class _Surface:
                         if kept else 'pass', True)
             elif not node.level and node.module in ('typing', 'dataclasses', '__future__'):
                 self.replace(node, 'pass', True)
+            elif (not node.level and node.module == 'collections.abc'
+                  and _annotation_only_names(self.tree, [alias.asname or alias.name for alias in node.names])):
+                self.replace(node, 'pass', True)
             elif not node.level and node.module in _SMALL_MODULES:
                 built = _SMALL_MODULES[node.module]
                 if node.module not in self.keep and all(alias.name in built for alias in node.names):
@@ -2553,9 +2606,139 @@ def _modtables():
     return _modtables.module
 
 
+_ALIAS_TYPE_NAMES = frozenset((
+    'int', 'float', 'str', 'bool', 'bytes', 'None', 'list', 'dict', 'set', 'tuple', 'frozenset', 'bytearray',
+    'List', 'Dict', 'Set', 'Tuple', 'FrozenSet', 'Optional', 'Union', 'Sequence', 'Iterable', 'Collection',
+    'Mapping', 'Final'))
+
+
+def _inline_type_aliases(source):
+    """`Grid = list[list[int]]`, `Point: TypeAlias = tuple[int, int]`, `type Row = list[str]`: a
+    module-level name bound once to a type, and named nowhere but in annotations (its own and other
+    aliases' included), is written out in those annotations and its statement becomes `pass` -- the
+    annotation then says what it means to every pass that reads annotations. Lines and columns of
+    everything else are kept. A program without such an alias is returned unchanged."""
+    if '=' not in source and 'type ' not in source:
+        return source
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return source
+    classes = {n.name for n in tree.body if isinstance(n, ast.ClassDef)}
+    candidates = {}
+    for node in tree.body:
+        name = value = None
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            name, value = node.targets[0].id, node.value
+        elif (isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None
+              and (isinstance(node.annotation, ast.Name) and node.annotation.id == 'TypeAlias'
+                   or isinstance(node.annotation, ast.Attribute) and node.annotation.attr == 'TypeAlias')):
+            name, value = node.target.id, node.value
+        elif hasattr(ast, 'TypeAlias') and isinstance(node, ast.TypeAlias) and not node.type_params:
+            name, value = node.name.id, node.value
+        if name is not None and name not in classes:
+            candidates.setdefault(name, []).append((node, value))
+    candidates = {k: v[0] for k, v in candidates.items() if len(v) == 1}
+    if not candidates:
+        return source
+
+    def is_type(e, names):
+        if isinstance(e, ast.Name):
+            return e.id in _ALIAS_TYPE_NAMES or e.id in classes or e.id in names
+        if isinstance(e, ast.Constant):
+            return e.value is None
+        if isinstance(e, ast.Attribute):
+            return isinstance(e.value, ast.Name) and e.value.id in ('typing', 't') and e.attr in _ALIAS_TYPE_NAMES
+        if isinstance(e, ast.Subscript):
+            inner = e.slice.elts if isinstance(e.slice, ast.Tuple) else [e.slice]
+            return is_type(e.value, names) and all(
+                is_type(x, names) or isinstance(x, ast.Constant) and x.value is Ellipsis for x in inner)
+        if isinstance(e, ast.BinOp) and isinstance(e.op, ast.BitOr):
+            return is_type(e.left, names) and is_type(e.right, names)
+        return False
+
+    aliases = dict(candidates)
+    changed = True
+    while changed:                    # an alias may name another alias
+        changed = False
+        for name in list(aliases):
+            node, value = aliases[name]
+            if not is_type(value, set(aliases)):
+                del aliases[name]
+                changed = True
+    if not aliases:
+        return source
+    # every mention must sit in an annotation or in an alias's own value
+    allowed = set()
+    for node in ast.walk(tree):
+        spots = []
+        if isinstance(node, ast.arg):
+            spots.append(node.annotation)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            spots.append(node.returns)
+        elif isinstance(node, ast.AnnAssign):
+            spots.append(node.annotation)
+        for spot in spots:
+            if spot is not None:
+                allowed.update(id(x) for x in ast.walk(spot))
+    for node, value in aliases.values():
+        allowed.update(id(x) for x in ast.walk(value))
+        allowed.update(id(x) for x in ast.walk(node))
+    for x in ast.walk(tree):
+        if isinstance(x, ast.Name) and x.id in aliases and id(x) not in allowed:
+            return source             # used as a value somewhere: leave every alias as written
+    lines = source.splitlines(True)
+    starts = [0]
+    for line in lines:
+        starts.append(starts[-1] + len(line))
+
+    def offset(lineno, col):
+        return starts[lineno - 1] + len(lines[lineno - 1].encode('utf8')[:col].decode('utf8', 'replace'))
+
+    def text_of(name, depth=0):
+        _, value = aliases[name]
+        out = ast.get_source_segment(source, value)
+        if out is None or depth > 20:
+            return None
+        inner = sorted(((x.lineno, x.col_offset, x.end_lineno, x.end_col_offset, x.id) for x in ast.walk(value)
+                        if isinstance(x, ast.Name) and x.id in aliases), reverse=True)
+        base_line, base_col = value.lineno, value.col_offset
+        for line, col, end_line, end_col, ref in inner:
+            sub = text_of(ref, depth + 1)
+            if sub is None:
+                return None
+            if line != base_line or end_line != base_line:
+                return None           # a multi-line alias value with an inner alias: left alone
+            out = out[:col - base_col] + sub + out[end_col - base_col:]
+        if isinstance(value, ast.BinOp):
+            out = '(' + out + ')'
+        return ' '.join(out.split())
+
+    edits = []
+    texts = {}
+    for name in aliases:
+        texts[name] = text_of(name)
+        if texts[name] is None:
+            return source
+    alias_nodes = {id(node) for node, _ in aliases.values()}
+    in_alias = {id(y) for node, _ in aliases.values() for y in ast.walk(node)}
+    for node in tree.body:
+        if id(node) in alias_nodes:
+            start = offset(node.lineno, node.col_offset)
+            end = offset(node.end_lineno, node.end_col_offset)
+            edits.append((start, end, 'pass' + '\n' * source[start:end].count('\n')))
+    for x in ast.walk(tree):
+        if isinstance(x, ast.Name) and x.id in aliases and id(x) in allowed and id(x) not in in_alias:
+            edits.append((offset(x.lineno, x.col_offset), offset(x.end_lineno, x.end_col_offset), texts[x.id]))
+    for start, end, text in sorted(edits, reverse=True):
+        source = source[:start] + text + source[end:]
+    return source
+
+
 def python_surface(source, notes=None, library=False):
     """Map the Python spellings above onto the compiler's own; `notes` collects (line, why) for
     the constructs left as written."""
+    source = _inline_type_aliases(source)
     if "raise" in source and " from " in source:
         source = _raisefrom().rewrite(source, notes)
     if "match" in source:
@@ -2564,6 +2747,10 @@ def python_surface(source, notes=None, library=False):
         source = _nestfn().rewrite(source, notes)
     if "sqlite3" in source:
         source = _sqllower().rewrite_text(source, notes)
+    if any(name in source for name in ("concurrent", "multiprocessing", "threading")):
+        _threadlib()                             # puts python/pkg-v12 on sys.path
+        import typedpar                          # typed parallelism without the lock (TYPED_PARALLEL.md)
+        source = typedpar.rewrite_text(source, notes)
     if any(name in source for name in ("threading", "queue", "concurrent")):
         source = _threadlib().rewrite_text(source, notes)
     if any(name in source for name in ("fractions", "enum", "namedtuple", "NamedTuple", "ChainMap", "keyword", "calendar",
@@ -2575,7 +2762,7 @@ def python_surface(source, notes=None, library=False):
         source = _collib().rewrite(source, notes)
     if "None" in source or "Optional" in source:
         source = _optlib().rewrite(source, notes)
-    if "(" in source and ("{" in source or "set" in source):
+    if "(" in source:
         source = _modtables().rewrite_text(source, library, notes)
     source = _tuplib().rewrite(source, notes)
     try:
