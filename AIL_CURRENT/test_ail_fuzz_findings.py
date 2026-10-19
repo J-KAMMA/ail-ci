@@ -207,10 +207,11 @@ main()
 # it shares like CPython, so these compile and print what CPython prints. The other kinds (dict, set,
 # bytearray, `+=` on a list) are not in the IR yet: the legacy emitter refuses them by name.
 IR_SHARES = ("list", "list_store", "list_loop")
+IR_SHARES_TYPED = ("field_read", "field_read_other_way")
 
 
 def ir_on():
-    return os.environ.get("AIL_IR", "0").strip().lower() not in ("", "0", "off", "no")
+    return os.environ.get("AIL_IR", "1").strip().lower() not in ("0", "off", "no", "false")   # the IR is the default
 
 
 NONASCII_CASE = '''
@@ -725,7 +726,12 @@ class FuzzFindings(unittest.TestCase):
         for name, text in SHARE.items():
             with self.subTest(name):
                 with tempfile.TemporaryDirectory() as directory:
-                    built, _, _ = run_both(directory, text, 'typed_' + name, {'AIL_NO_GENERAL': '1'})
+                    built, ran, expected = run_both(directory, text, 'typed_' + name, {'AIL_NO_GENERAL': '1'})
+                    if ir_on() and name in IR_SHARES_TYPED:
+                        # the IR owns the function and shares the container: CPython's result
+                        self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                        self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout))
+                        continue
                     self.assertEqual(built.returncode, 3, built.stdout + built.stderr)
                     self.assertIn('second reference to the same container', built.stdout + built.stderr)
 
