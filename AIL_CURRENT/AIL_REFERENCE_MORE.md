@@ -18,6 +18,26 @@ loops as `file:line: slow: ...; fix`: `x in xs` / `.index` / `.count` / `.remove
 / `.insert(0, x)`, `min`/`max`/`sort` of a list the loop keeps changing, a scan of all rows for the
 current key, nested loops over one list, a struct heap keyed by a computed value. They never
 fail the build; fix them when n can be large. `s += t` on a str is linear (no hint).
+Projects (`ail new`, `ail.toml`), `ail lsp` and `ail build --debug`: see Tooling at the end.
+
+### Strict mode: the typed path or a refusal
+
+A program the typed path cannot take is built on the general path, about 20x slower, and `compile`
+prints one `note: ... built on the general path (about 20x slower) because ...; run with --strict to see
+why` line (`AIL_QUIET_FALLBACK=1` silences it). Strict mode never falls back:
+
+```text
+python3 ail_chatgpt.py compile prog.py --strict -o prog          # also AIL_STRICT=1, ail build --strict, ail run --strict
+python3 ail_chatgpt.py compile prog.py --strict --json -o prog   # blockers as ail.strict/1 JSON on stdout
+```
+
+A typed program builds exactly as without the flag (same C, same executable). Otherwise exit status 3 and
+every blocker the compiler can find in one pass, not only the first: `file:line:col`, the code, the
+construct, why it is not typed and a `write instead:` rewrite, the one that keeps the most code off the
+typed path first (`blocks N lines (f, main)`: the function and every caller). Fix them all, run again.
+The JSON has `schema`, `status`, `blocker_count`, `incomplete` (null, or why the list may be short) and
+`blockers[]` with `rank path line column function statement construct why write_instead blocks_lines
+blocks_functions message`. `AIL_NO_GENERAL=1` alone still stops at the first refusal.
 
 ## Text I/O: main, arguments, stdin lines, print, files
 
@@ -1006,3 +1026,60 @@ slower than typed code), where operator methods dispatch on the run-time class (
 - Also: user classes may define `__add__ __sub__ __mul__ __truediv__ __floordiv__ __mod__ __pow__` (and the `__r..__` forms), `__neg__ __pos__ __abs__ __bool__ __int__ __float__
   __round__ __floor__ __ceil__ __trunc__ __index__ __hash__ __eq__ __len__ __getitem__ __setitem__ __delitem__ __contains__`; instances hash and compare by identity unless the
   class says otherwise. `d1 | d2` on dicts, `type(x).__name__`, `x.__class__.__name__`, `Cls(*xs)` for a class with a fixed `__init__`.
+
+### Tooling: projects, language server, debugging (last section of this file)
+
+`ail` (packaging/ail_lang/cli.py) is the command; `python -m ail_lang` is the same. With `AIL_SDK_DIR=<AIL_CURRENT>` it runs from a source checkout.
+
+- **Project.** `ail new NAME` creates `NAME/ail.toml`, `NAME/src/main.py` and `NAME/.gitignore`. `ail build`, `ail run` and `ail check` with no source
+  file use the project found from the current directory upwards: `ail.toml` (top-level keys) or `[tool.ail]` in pyproject.toml, `ail.toml` first.
+  Keys: `name` (default: the directory name), `entry` (required, .py or .ail), `link` (plain library names, passed as `--link LIB`, i.e. `-lLIB`),
+  `strict` (default false), `module_path` (directories, passed as `-I`). Unknown keys, wrong types, a missing entry, and a bad name or link are refused
+  by name. `ail build` writes `build/NAME` (`build/NAME-debug` with `--debug`), replacing the previous one; `-o` overrides. There is no package registry.
+- **strict.** `strict = true` adds `--strict` to the build: a program the typed path refuses is not built on the slow general path; every blocker is listed with its `write instead:` (exit 3, ail.strict/1 with `--json`). The language server shows those as errors. `link` and `compile --link LIB` are `link("LIB")` of the source (cratebridge), one code path (`Session.extra_libs`).
+- **Language server.** `ail lsp` (stdio, JSON-RPC 2.0, standard library only). Capabilities: open/close sync, `didSave`, hover. On didOpen and didSave it
+  runs `ail check` (schema `ail.check/1`) on the file on disk (a file that does not exist yet is checked from the buffer text). Severity: a source that
+  does not load or parse, or that the build refuses, is an Error; a typed-path blocker that the general path builds is a Warning `runs on the slow general
+  path because <reason>`; `slow_patterns` are Information. The Warning/Error split costs one build of the program (needs a C compiler; remembered per source
+  hash; without a compiler the Warning says it cannot tell). Messages keep the `write instead:` text; hover on a diagnostic shows it as **write instead:**.
+  The blocker list is `compile --strict --json` (no C compiler needed); the Warning/Error split is the one build. A problem in an imported module is published on that module's file. Classification lives in `lsp.Diagnoser.classify`; when `ail check --strict`
+  reports blockers and refusals itself, that is the only place to change.
+- **Debugging.** `ail build --debug` (`compile --debug`, environment `AIL_DEBUG=1`) compiles with `-g -O0`, writes `#line N "file"` before every statement
+  of the typed path (the combined-source line is mapped back through the loader's source map, so imported modules point at their own files), and
+  records `file:line` of the statement being run. An uncaught exception or runtime trap prints its usual message, then `  raised near file:line`; a normal build's
+  stderr is unchanged (DIFFERENCES A4). The line is the last statement that began to run, so for an exception raised after a call returns within one
+  statement it can name the callee's last statement. The general path, `--separate` and linked objects have no line mapping (a note says so). The build cache
+  keeps debug and normal builds apart. `-O0` uses more stack per call than `-O2`, so very deep recursion fails sooner.
+### Native libraries: C and Rust (`ail_ffi`, `link`, `ail_cbuf`)
+
+```python
+from ail_ffi import *
+from ail_cbuf import get_i32, get_i64, put_i64      # copy ail_cbuf.py beside the program
+
+link("m", "z")                                       # -lm -lz; the CPython shim loads the same libraries
+
+@extern(header="math.h", symbol="frexp")
+def c_frexp(x: c_double, e: ptr(c_int)) -> c_double: ...            # out-parameter: a bytearray(4)
+@extern(header="zlib.h", symbol="compress")
+def z_compress(dest: bytearray, dest_len: ptr(c_ulong), src: bytes, n: length("src", c_ulong)) -> c_int: ...
+@extern(header="zlib.h", symbol="uncompress", check="nonzero", exc=ValueError)   # error code -> exception
+def z_uncompress(dest: bytearray, dest_len: ptr(c_ulong), src: bytes, n: length("src", c_ulong)) -> c_int: ...
+@extern(header="sqlite3.h", trust=True)              # the prototype names `sqlite3 **`: not compared
+def sqlite3_open(path: c_char_p, db: ptr(c_void_p)) -> c_int: ...    # void ** out-parameter: read with get_i64
+
+e = bytearray(4)
+m = c_frexp(48.0, e)
+print(m, get_i32(e, 0))                              # 0.75 6
+```
+
+- `link("name", ...)` once per file; `pkg_config="x"` for pkg-config flags; a path links that file. Stubs without `lib=` search the C
+  library, then the linked libraries.
+- Out-parameters and structs are byte buffers: `ptr(T)` (writable) / `cptr(T)` (read only) over a `bytearray` / `bytes`, element types are
+  ints, `c_float`, `c_double`, `c_bool`, `c_void_p`; `c_mut_void_p` / `c_const_void_p` for a struct; fields are read and written at the C
+  offsets with `get_i32 get_u32 get_i64 get_f64 put_i32 put_i64 put_f64 ...`.
+- `trust=True` for a prototype that names a struct (`struct tm *`, `sqlite3 *`): the header is included, its prototype is not compared.
+- Callbacks (AIL functions called from C) are not supported.
+- Rust: export `#[no_mangle] pub extern "C"` functions from a `cdylib` / `staticlib` crate (`panic = "abort"`), generate a header with
+  cbindgen, and `python3 AIL_CURRENT/ail_bindgen.py crate.h --lib ./libcrate.so --check fn=nonzero:ValueError` writes the stubs.
+  Recipe: `docs/design/NATIVE_LIBRARIES.md`.
+
