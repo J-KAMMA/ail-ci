@@ -468,11 +468,9 @@ class GeneralPathTests(Base):
                   'def main() -> None:\n    print("before")\n    print(P(1) == None)\n\nmain()\n')
         self.same(source)
 
-    def test_slice_through_getitem_is_refused_by_name(self):
-        built, _ = self.build(GETITEM, '0')
-        self.assertEqual(built.returncode, 3, built.stderr)
-        self.assertIn('slice', built.stderr)
-        self.assertNotIn('Traceback', built.stderr)
+    def test_slice_through_getitem(self):
+        # refused by name until branch safetynet; the slice object now reaches __getitem__ (safetyrt.SLICE)
+        self.same(GETITEM)
         self.same(GETITEM.replace('    print(v[1:2])\n', ''))
 
     def test_slice_of_an_unresolved_receiver_raises_by_name(self):

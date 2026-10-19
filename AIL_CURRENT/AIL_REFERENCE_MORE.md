@@ -19,6 +19,25 @@ loops as `file:line: slow: ...; fix`: `x in xs` / `.index` / `.count` / `.remove
 current key, nested loops over one list, a struct heap keyed by a computed value. They never
 fail the build; fix them when n can be large. `s += t` on a str is linear (no hint).
 
+### Strict mode: the typed path or a refusal
+
+A program the typed path cannot take is built on the general path, about 20x slower, and `compile`
+prints one `note: ... built on the general path (about 20x slower) because ...; run with --strict to see
+why` line (`AIL_QUIET_FALLBACK=1` silences it). Strict mode never falls back:
+
+```text
+python3 ail_chatgpt.py compile prog.py --strict -o prog          # also AIL_STRICT=1, ail build --strict, ail run --strict
+python3 ail_chatgpt.py compile prog.py --strict --json -o prog   # blockers as ail.strict/1 JSON on stdout
+```
+
+A typed program builds exactly as without the flag (same C, same executable). Otherwise exit status 3 and
+every blocker the compiler can find in one pass, not only the first: `file:line:col`, the code, the
+construct, why it is not typed and a `write instead:` rewrite, the one that keeps the most code off the
+typed path first (`blocks N lines (f, main)`: the function and every caller). Fix them all, run again.
+The JSON has `schema`, `status`, `blocker_count`, `incomplete` (null, or why the list may be short) and
+`blockers[]` with `rank path line column function statement construct why write_instead blocks_lines
+blocks_functions message`. `AIL_NO_GENERAL=1` alone still stops at the first refusal.
+
 ## Text I/O: main, arguments, stdin lines, print, files
 
 ```ail
@@ -355,7 +374,7 @@ fn main() {
 True 1 3.5 3 2 1024
 ```
 
-## Regular expressions: re (Python syntax)
+## Regex: re (Python syntax)
 
 `import re` with the pattern spelled as a literal: a str or bytes literal, or a name bound once to one
 (`WORD = r"[a-z]+"`), or `P = re.compile(literal[, flags])` bound once and used as `P.search(s)` and so
@@ -1006,3 +1025,71 @@ slower than typed code), where operator methods dispatch on the run-time class (
 - Also: user classes may define `__add__ __sub__ __mul__ __truediv__ __floordiv__ __mod__ __pow__` (and the `__r..__` forms), `__neg__ __pos__ __abs__ __bool__ __int__ __float__
   __round__ __floor__ __ceil__ __trunc__ __index__ __hash__ __eq__ __len__ __getitem__ __setitem__ __delitem__ __contains__`; instances hash and compare by identity unless the
   class says otherwise. `d1 | d2` on dicts, `type(x).__name__`, `x.__class__.__name__`, `Cls(*xs)` for a class with a fixed `__init__`.
+
+### Native libraries: C and Rust (`ail_ffi`, `link`, `ail_cbuf`)
+
+```python
+from ail_ffi import *
+from ail_cbuf import get_i32, get_i64, put_i64      # copy ail_cbuf.py beside the program
+
+link("m", "z")                                       # -lm -lz; the CPython shim loads the same libraries
+
+@extern(header="math.h", symbol="frexp")
+def c_frexp(x: c_double, e: ptr(c_int)) -> c_double: ...            # out-parameter: a bytearray(4)
+@extern(header="zlib.h", symbol="compress")
+def z_compress(dest: bytearray, dest_len: ptr(c_ulong), src: bytes, n: length("src", c_ulong)) -> c_int: ...
+@extern(header="zlib.h", symbol="uncompress", check="nonzero", exc=ValueError)   # error code -> exception
+def z_uncompress(dest: bytearray, dest_len: ptr(c_ulong), src: bytes, n: length("src", c_ulong)) -> c_int: ...
+@extern(header="sqlite3.h", trust=True)              # the prototype names `sqlite3 **`: not compared
+def sqlite3_open(path: c_char_p, db: ptr(c_void_p)) -> c_int: ...    # void ** out-parameter: read with get_i64
+
+e = bytearray(4)
+m = c_frexp(48.0, e)
+print(m, get_i32(e, 0))                              # 0.75 6
+```
+
+- `link("name", ...)` once per file; `pkg_config="x"` for pkg-config flags; a path links that file. Stubs without `lib=` search the C
+  library, then the linked libraries.
+- Out-parameters and structs are byte buffers: `ptr(T)` (writable) / `cptr(T)` (read only) over a `bytearray` / `bytes`, element types are
+  ints, `c_float`, `c_double`, `c_bool`, `c_void_p`; `c_mut_void_p` / `c_const_void_p` for a struct; fields are read and written at the C
+  offsets with `get_i32 get_u32 get_i64 get_f64 put_i32 put_i64 put_f64 ...`.
+- `trust=True` for a prototype that names a struct (`struct tm *`, `sqlite3 *`): the header is included, its prototype is not compared.
+- Callbacks (AIL functions called from C) are not supported.
+- Rust: export `#[no_mangle] pub extern "C"` functions from a `cdylib` / `staticlib` crate (`panic = "abort"`), generate a header with
+  cbindgen, and `python3 AIL_CURRENT/ail_bindgen.py crate.h --lib ./libcrate.so --check fn=nonzero:ValueError` writes the stubs.
+  Recipe: `docs/design/NATIVE_LIBRARIES.md`.
+
+
+## Export
+
+`@export` marks the top-level typed functions of a Python-syntax file as the C API of a library. The same
+file runs on CPython (`from ail_ffi import export` is a checking no-op there) and builds with
+
+    ail build --lib NAME prog.py [-o DIR]        # or: ail_chatgpt.py compile --lib NAME prog.py -o DIR
+
+into `DIR/libNAME.so` (`.dylib` on macOS), `DIR/libNAME.a` and `DIR/NAME.h` (DIR must exist, default `.`; an
+existing file is never overwritten; Linux and macOS). Only the `@export` functions are public; every other
+function, class and literal constant of the file is private and may use any typed AIL. `@dataclass` classes
+and the `ail_ffi` / `dataclasses` imports are consumed by the build; `if __name__ == "__main__":` blocks
+are dropped.
+
+| annotation | C parameter | C result (out-parameter) |
+|---|---|---|
+| `int` / `float` / `bool` | `int64_t` / `double` / `bool` | `int64_t *` / `double *` / `bool *` |
+| `str` | `const char *` (UTF-8, NUL terminated) | `char **`, malloc'd, NUL terminated |
+| `bytes` | `const uint8_t *p, size_t p_len` | `uint8_t **, size_t *`, malloc'd |
+| `list[int]` / `list[float]` | `const int64_t *` / `const double *` + `size_t` count | `T **, size_t *`, malloc'd |
+| dataclass of `int`/`float`/`bool` | `const NAME_Type *` (C struct, same field order) | not allowed |
+| `None` | | none |
+
+Every function returns `int`: 0 on success, otherwise `NAME_ERR_VALUE` 1, `_ZERO_DIVISION` 2, `_INDEX` 3,
+`_KEY` 4, `_EOF` 5, `_OS` 6, `_RUNTIME` 7, `_INTERNAL` 8 (allocation failure, invalid result), `_ARGUMENT` 9
+(NULL where a pointer is required, a NUL in a str result). Results are written only on success.
+`const char *NAME_last_error(void)` returns `"ValueError: text"` for the calling thread's last call (empty after
+a success; valid until that thread's next call). An exception that escapes an exported function never ends the
+process. `NAME_free(void *)` releases every str, bytes and list result (once; NULL is fine; an empty bytes or
+list result may be NULL). No init or teardown function exists because no state survives a call. Calls from any
+number of threads are allowed: one internal mutex serializes them (no calls from signal handlers; link the
+static library with `-lm -lpthread`). Differences from CPython: `int` is 64 bit, `str` results containing a
+NUL are refused, and a dataclass cannot be returned. A file without `@export` and the existing
+`compile-library` (view structs, `NAME_error`) are unchanged.
