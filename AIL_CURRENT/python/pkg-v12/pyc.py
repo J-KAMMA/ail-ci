@@ -685,8 +685,8 @@ def _source_line_marker(line):
 def fallback_note(reason, location=None):
     """The one-line stderr notice for a program the typed path refused but the general path built.
     `reason` is the typed refusal text (it carries its own "write instead" hint when it has one)."""
-    return 'note: %sbuilt on the general path (several times slower) because %s' % (
-        location + ': ' if location else '', ' '.join(str(reason).split()))
+    return 'note: %sbuilt on the general path (about 20x slower) because %s; run with --strict to see why' % (
+        location + ': ' if location else '', ' '.join(str(reason).split()).rstrip(';'))
 
 
 def build(source, out, strict=True, report=None, force_general=False):
@@ -757,8 +757,11 @@ def _build_unshadowed(source, out, strict, report, force_general):
         # either, so trying it would only trade the typed path's specific, correct reason for a
         # generic "not a defined function" one. Judged on the message text because the typed path
         # raises one exception class for both kinds of refusal (coordinator review, 2026-09-16).
-        if any(m in str(_typed_e) for m in _BOUNDARY_REFUSAL_MARKERS) or not _is_whole_program(source):
+        if not _is_whole_program(source):
             raise
+        # a DECLARED-BOUNDARY refusal of the typed path (sys.argv, sys.stdout, a file ...) is final only when
+        # the general path cannot build the program either; it is then reported as the typed path wrote it
+        boundary = any(m in str(_typed_e) for m in _BOUNDARY_REFUSAL_MARKERS)
         # AIL_GENERAL=v2: use pyboxed2 (the v2-runtime emitter, status-code error edges, no
         # setjmp/longjmp) instead of pyboxed (v1, setjmp-based, against the v1 runtime). v1 stays
         # the DEFAULT until v2 is complete -- this is purely an environment-selected swap, never
@@ -776,6 +779,8 @@ def _build_unshadowed(source, out, strict, report, force_general):
             boxed_c = (_boxed_impl.build(source, boxed_report, allow_mix=False) if force_general
                        else _boxed_impl.build(source, boxed_report))
         except Unsupported as boxed_refusal:
+            if boundary:
+                raise _typed_e
             raise _general_failure(_typed_e, typed_main, boxed_refusal)
         mix_units = boxed_report.get('mix_units') or []
         if not mix_units:

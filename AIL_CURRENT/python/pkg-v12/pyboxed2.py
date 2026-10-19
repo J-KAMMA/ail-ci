@@ -67,6 +67,35 @@ _MIX_LIST_KINDS_OK = (pymix.LIST_INT, pymix.LIST_FLOAT) if pymix else ()
 _MIX_CALL_H_PATH = os.path.join(HERE, 'mix_call.h')
 _mix_call_h_cache = None
 
+# A typed clone is its own translation unit with its own trap paths (ail_die, ail_exception_uncaught): each
+# ends in `fflush(stdout)` and `_Exit(1)`, but the boxed program's print() text sits in cx->out_buf, which that
+# unit cannot see, so a program that printed and then trapped inside a clone lost everything it had printed
+#. Both paths call the boxed unit's ail_mix_drain_out() (defined beside mix_call.h).
+_MIX_DRAIN_EXTERN = 'extern void ail_mix_drain_out(void);\n'
+_MIX_DRAIN_SITES = (
+    ('    fflush(stdout); fputs(w, stderr); fputc(10, stderr); _Exit(1);\n',
+     '    ail_mix_drain_out(); fflush(stdout); fputs(w, stderr); fputc(10, stderr); _Exit(1);\n'),
+    ('static void ail_exception_uncaught(ail_exception *value) {\n    fflush(stdout);\n',
+     'static void ail_exception_uncaught(ail_exception *value) {\n    ail_mix_drain_out();\n    fflush(stdout);\n'),
+)
+_MIX_DRAIN_DEF = (
+    'void ail_mix_drain_out(void) {   /* called by a clone\'s trap path before _Exit */\n'
+    '    if (ail_die_out_buf && *ail_die_out_buf && ail_die_out_len && *ail_die_out_len) {\n'
+    '        fwrite(*ail_die_out_buf, 1, *ail_die_out_len, stdout); *ail_die_out_len = 0;\n'
+    '    }\n}\n')
+
+
+def _mix_drain_before_exit(csrc):
+    """The clone's C with both trap paths draining the boxed stdout buffer, or None when a path is not there."""
+    for old, new in _MIX_DRAIN_SITES:
+        if csrc.count(old) != 1:
+            return None
+        csrc = csrc.replace(old, new)
+    marker = '#include <string.h>\n'
+    if marker not in csrc:
+        return None
+    return csrc.replace(marker, marker + _MIX_DRAIN_EXTERN, 1)
+
 
 def _mix_call_h_text():
     global _mix_call_h_cache
@@ -183,7 +212,7 @@ TYPE_TAG = {
 # startswith, ljust/rjust/center, strip family, get/pop/setdefault, partition, join,
 # most_common, ...) are absent here -> any keyword is refused by name below.
 _BUILTIN_KWARGS = {
-    'print': {'sep', 'end'},
+    'print': {'sep', 'end', 'file', 'flush'},
     'min': {'key', 'default'}, 'max': {'key', 'default'},
     'sorted': {'key', 'reverse'},
     'enumerate': {'start'},
@@ -228,7 +257,7 @@ _METHOD_MAXARGS = {
     'split': 2, 'rsplit': 2, 'splitlines': 1, 'lower': 0, 'upper': 0,
     'isdigit': 0, 'isalpha': 0, 'title': 0, 'capitalize': 0, 'swapcase': 0,
     'isupper': 0, 'islower': 0, 'isalnum': 0, 'isspace': 0, 'isnumeric': 0,
-    'isdecimal': 0, 'isascii': 0, 'isidentifier': 0, 'fromkeys': 2, 'rfind': 3, 'symmetric_difference_update': 1, 'keys': 0, 'values': 0, 'items': 0, 'clear': 0,
+    'isdecimal': 0, 'isascii': 0, 'isidentifier': 0, 'istitle': 0, 'fromkeys': 2, 'rfind': 3, 'symmetric_difference_update': 1, 'keys': 0, 'values': 0, 'items': 0, 'clear': 0,
     'copy': 0, 'reverse': 0, 'total': 0, 'elements': 0, 'get': 2,
     'setdefault': 2, 'most_common': 1, 'sort': 0, 'pop': 2,
     'startswith': 3, 'endswith': 3, 'find': 3, 'index': 3, 'count': 3,
@@ -269,6 +298,11 @@ def _unpublished(key):
     """The refusal for a module attribute that has no NAMES_library entry. A dynamic import names no
     module at build time, so it carries a rewrite."""
     text = '%s (not yet published in NAMES_library.json)' % key
+    if key.split('.')[0] == 'decimal':
+        text = ('%s is not built: decimal needs exact base-10 arithmetic on integers wider than 64 bits and the '
+                'context (precision, rounding) machinery, which the general path does not have'
+                '\n  write instead: integer cents (an int scaled by 100) with divmod, or fractions.Fraction for exact '
+                'rational arithmetic' % key)
     if key.split('.')[0] == 'importlib':
         text += ('\n  write instead: import the module at the top of the file (`import name` or '
                  '`from package import name`); a program is built whole, so a module name cannot be '
@@ -345,9 +379,40 @@ def _sibling_headers():
 
 
 # `type(x).__name__` / `x.__class__.__name__` (added to the program only when it uses one)
+# s.ljust / rjust / center with a fill that is not one BMP literal character (mode 0 / 1 / 2): CPython's
+# TypeError for a fill that is not exactly one character, the width and the margin counted in code
+# points, and center's odd column on the left exactly when the margin and the width are both odd.
+PADFILL_C = r"""
+static ail_st ail_meth_str_pad_fill(ail_ctx *cx, ail_obj *out, ail_obj sobj, int64_t width, ail_obj fobj, int mode) {
+    if (fobj.tag != AIL_T_STR) {
+        char buf[96];
+        snprintf(buf, sizeof buf, "The fill character must be a unicode character, not %s", ail_type_name(fobj.tag));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
+    ail_str f = ail_view_to_str(fobj);
+    int pair = f.n == 2 && f.p[0] >= 0xD800 && f.p[0] <= 0xDBFF && f.p[1] >= 0xDC00 && f.p[1] <= 0xDFFF;
+    if (!(f.n == 1 || pair))
+        return ail_raise_c(cx, AIL_B_TYPEERROR, "The fill character must be exactly one character long");
+    ail_str s = ail_view_to_str(sobj);
+    int64_t len = 0;
+    for (int64_t i = 0; i < s.n; i++) if (!(s.p[i] >= 0xDC00 && s.p[i] <= 0xDFFF)) len++;
+    if (width <= len) { *out = sobj; return AIL_OK; }
+    int64_t marg = width - len;
+    int64_t left = mode == 0 ? 0 : mode == 1 ? marg : marg / 2 + (marg & width & 1);
+    int64_t right = marg - left;
+    int64_t n = s.n + marg * f.n, o = 0;
+    ail_strbuild bu = ail_str_buf(cx, n);
+    for (int64_t i = 0; i < left; i++) for (int64_t j = 0; j < f.n; j++) bu.buf[o++] = f.p[j];
+    for (int64_t i = 0; i < s.n; i++) bu.buf[o++] = ail_chr(s, i);
+    for (int64_t i = 0; i < right; i++) for (int64_t j = 0; j < f.n; j++) bu.buf[o++] = f.p[j];
+    *out = ail_str_buf_done(bu, n);
+    return AIL_OK;
+}
+"""
+
 TYPE_NAME_C = '''
 static inline ail_st ail_type_name_of(ail_ctx *cx, ail_obj *out, ail_obj x) {
-    if (x.tag == AIL_T_INST) {
+    if (x.tag == AIL_T_INST || x.tag == AIL_T_EXC) {
         ail_obj c = ((ail_instobj *)x.o)->cls;
         if (c.tag == AIL_T_CLASS) { *out = ((ail_classobj *)c.o)->name; return AIL_OK; }
     }
@@ -999,6 +1064,245 @@ class Ctx:
         return '\n'.join(self.lines)
 
 
+# the names a type expression is built from (builtin types and the typing module)
+_TYPE_BASES = frozenset((
+    'int', 'float', 'str', 'bool', 'bytes', 'bytearray', 'complex', 'object', 'type', 'list', 'dict', 'tuple', 'set',
+    'frozenset', 'List', 'Dict', 'Tuple', 'Set', 'FrozenSet', 'Optional', 'Union', 'Callable', 'Sequence', 'Iterable',
+    'Iterator', 'Mapping', 'MutableMapping', 'MutableSequence', 'Collection', 'Container', 'Any', 'Literal', 'Final',
+    'ClassVar', 'Deque', 'DefaultDict', 'Counter', 'OrderedDict', 'Generator', 'Type', 'Annotated', 'AbstractSet',
+    'Hashable', 'Sized', 'Reversible', 'NoReturn', 'Never', 'Self', 'LiteralString', 'TypeAlias', 'Awaitable'))
+
+
+def _is_type_expr(e, top=True):
+    """True for an expression that only spells a type: `list[list[int]]`, `Optional[int]`, `int | None`,
+    `Tuple[str, ...]`, `TypeVar("T")`. Inside the brackets any name may appear (a class of the program)."""
+    if isinstance(e, ast.Name):
+        return e.id in _TYPE_BASES or not top
+    if isinstance(e, ast.Attribute) and isinstance(e.value, ast.Name) and e.value.id in ('typing', 'collections', 't'):
+        return True
+    if isinstance(e, ast.Subscript):
+        inner = e.slice.elts if isinstance(e.slice, ast.Tuple) else [e.slice]
+        return _is_type_expr(e.value, top) and all(_is_type_expr(x, False) for x in inner)
+    if isinstance(e, ast.BinOp) and isinstance(e.op, ast.BitOr):
+        return _is_type_expr(e.left, False) and _is_type_expr(e.right, False)
+    if isinstance(e, ast.Constant):
+        return (e.value is None or e.value is Ellipsis or isinstance(e.value, str)) and (not top or e.value is None)
+    if isinstance(e, ast.List):
+        return not top and all(_is_type_expr(x, False) for x in e.elts)
+    if isinstance(e, ast.Call) and isinstance(e.func, ast.Name) and e.func.id in ('TypeVar', 'ParamSpec', 'TypeVarTuple') \
+            and top:
+        return True
+    return False
+
+
+def _own_yields(fn):
+    """The yield / yield from nodes of a def itself (not of a def, lambda or class inside it)."""
+    out = []
+    stack = list(fn.body)
+    while stack:
+        n = stack.pop()
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            continue
+        if isinstance(n, (ast.Yield, ast.YieldFrom)):
+            out.append(n)
+        stack.extend(ast.iter_child_nodes(n))
+    return out
+
+
+class _YieldFromLoop(ast.NodeTransformer):
+    """`yield from it` as a statement: `for v in it: yield v` (its value, the sub-generator's return value, is not
+    read there)."""
+    def __init__(self):
+        self.n = 0
+
+    def visit_FunctionDef(self, node):
+        return node
+
+    visit_AsyncFunctionDef = visit_ClassDef = visit_Lambda = visit_FunctionDef
+
+    def visit_Expr(self, node):
+        if isinstance(node.value, ast.YieldFrom):
+            self.n += 1
+            name = '_ail_yf_%d' % self.n
+            loop = ast.For(target=ast.Name(id=name, ctx=ast.Store()), iter=node.value.value,
+                           body=[ast.Expr(value=ast.Yield(value=ast.Name(id=name, ctx=ast.Load())))], orelse=[])
+            return ast.copy_location(loop, node)
+        return node
+
+
+_MATCH_GETITEM = '''
+def __getitem__(self, k):
+    if isinstance(k, int):
+        return self.group(k)
+    return self.groupn(k)
+'''
+
+
+def _unwiden(tree):
+    """`float(+n)` is how the tuple pass writes an int it stores where its types say float (tupexpr.coerce); CPython
+    keeps the int there, and so does this path: the call goes, n stays. Only in a program the tuple pass rewrote
+    (it has _AilT_ record classes or the tuple pass's helpers)."""
+    if not any(isinstance(n, ast.ClassDef) and n.name.startswith('_AilT_') for n in tree.body) and \
+            not any(isinstance(n, ast.FunctionDef) and n.name.startswith('_ail_') for n in tree.body):
+        return
+
+    class Back(ast.NodeTransformer):
+        def visit_Call(self, node):
+            self.generic_visit(node)
+            if (isinstance(node.func, ast.Name) and node.func.id == 'float' and len(node.args) == 1
+                    and not node.keywords and isinstance(node.args[0], ast.UnaryOp)
+                    and isinstance(node.args[0].op, ast.UAdd)):
+                return node.args[0].operand
+            return node
+    tree.body = [Back().visit(st) for st in tree.body]
+
+
+_HEAP_FUNCS = frozenset(('heappush', 'heappop', 'heapify', 'heappushpop', 'heapreplace'))
+
+
+def _untuple_records(tree):
+    """The front end's tuple pass writes a tuple as a record class `_AilT_...` with fields f0, f1, ... (what the typed
+    path builds); a program the general path takes gets its tuples back (unpacking, comparison, printing and hashing
+    are a tuple's), unless a class of its own also has attributes named f0, f1, ... (branch safetynet)."""
+    records = {}
+    for st in tree.body:
+        if isinstance(st, ast.ClassDef) and st.name.startswith('_AilT_') and not st.bases and len(st.body) == 1 \
+                and isinstance(st.body[0], ast.FunctionDef) and st.body[0].name == '__init__':
+            init = st.body[0]
+            params = [a.arg for a in init.args.args[1:]]
+            ok = len(init.body) == len(params) and all(
+                isinstance(b, ast.Assign) and len(b.targets) == 1 and isinstance(b.targets[0], ast.Attribute)
+                and b.targets[0].attr in ('f%d' % i, 'fb%d' % i) and isinstance(b.value, ast.Name)
+                and b.value.id == params[i]
+                for i, b in enumerate(init.body))
+            if ok:
+                records[st.name] = len(params)
+    if not records:
+        return
+    width = max(records.values())
+    fields = {'f%d' % i for i in range(width)} | {'fb%d' % i for i in range(width)}
+    others = [st for st in tree.body if not (isinstance(st, ast.ClassDef) and st.name in records)]
+    for n in ast.walk(ast.Module(body=others, type_ignores=[])):
+        if isinstance(n, ast.ClassDef):
+            for m in ast.walk(n):
+                if isinstance(m, ast.Attribute) and m.attr in fields:
+                    return
+        if isinstance(n, ast.Attribute) and n.attr in fields and not isinstance(n.ctx, ast.Load):
+            return
+
+    class Back(ast.NodeTransformer):
+        def visit_Call(self, node):
+            self.generic_visit(node)
+            if isinstance(node.func, ast.Name) and node.func.id in records and not node.keywords:
+                return ast.copy_location(ast.Tuple(elts=node.args, ctx=ast.Load()), node)
+            # the tuple pass orders heap entries with key=lambda _k: (_k.f0, _k.f1, ...): a tuple's own order
+            if (isinstance(node.func, ast.Name) and node.func.id in _HEAP_FUNCS
+                    or isinstance(node.func, ast.Attribute) and node.func.attr in _HEAP_FUNCS):
+                node.keywords = [k for k in node.keywords if not (
+                    k.arg == 'key' and isinstance(k.value, ast.Lambda) and len(k.value.args.args) == 1
+                    and k.value.args.args[0].arg == '_k')]
+            if (isinstance(node.func, ast.Name) and node.func.id == 'isinstance' and len(node.args) == 2
+                    and isinstance(node.args[1], ast.Name) and node.args[1].id in records):
+                node.args[1] = ast.Name(id='tuple', ctx=ast.Load())
+            return node
+
+        def visit_Attribute(self, node):
+            self.generic_visit(node)
+            if node.attr in fields and isinstance(node.ctx, ast.Load):
+                return ast.copy_location(ast.Subscript(value=node.value, slice=ast.Constant(value=int(node.attr.lstrip('fb'))),
+                                                       ctx=ast.Load()), node)
+            return node
+
+    tree.body = [Back().visit(st) for st in tree.body
+                 if not (isinstance(st, ast.ClassDef) and st.name in records)]
+    ast.fix_missing_locations(tree)
+
+
+def _match_subscript(tree):
+    """`m[1]` / `m["name"]` of a match object of the re pass (class _ail_re_Match): the typed path reads them as
+    group(1) / groupn("name"); here the class gets the __getitem__ that does it."""
+    for st in tree.body:
+        if isinstance(st, ast.ClassDef) and st.name == '_ail_re_Match':
+            names = {m.name for m in st.body if isinstance(m, ast.FunctionDef)}
+            if '__getitem__' not in names and 'group' in names and 'groupn' in names:
+                st.body.append(ast.parse(_MATCH_GETITEM).body[0])
+                ast.fix_missing_locations(st)
+
+
+def _hoist_ail_tables(tree):
+    """The tables the front end's passes append at the end of the module (`_ail_re_p0 = [...]`, the compiled
+    patterns of the re pass) are constants the typed path reads at build time; this path runs the module body in
+    order, so they move to the top, before the code that runs main()."""
+    def is_table(st):
+        if not (isinstance(st, ast.Assign) and len(st.targets) == 1 and isinstance(st.targets[0], ast.Name)
+                and st.targets[0].id.startswith('_ail_')):
+            return False
+        try:
+            ast.literal_eval(st.value)
+        except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+            return False
+        return True
+    tables = [st for st in tree.body if is_table(st)]
+    if not tables:
+        return
+    rest = [st for st in tree.body if not is_table(st)]
+    k = 0
+    while k < len(rest) and isinstance(rest[k], (ast.Import, ast.ImportFrom)):
+        k += 1
+    tree.body = rest[:k] + tables + rest[k:]
+
+
+def _alias_target(stmt):
+    if isinstance(stmt, ast.Assign):
+        return stmt.targets[0]
+    if isinstance(stmt, ast.AnnAssign):
+        return stmt.target
+    return stmt.name
+
+
+def _drop_type_aliases(tree):
+    """Module-level type aliases (`Grid = list[list[int]]`, `T = TypeVar("T")`, `type P = tuple[int, int]`) that the
+    program only names in annotations: the general path does not read annotations, so they go (branch safetynet).
+    An alias the program also uses as a value stays, and is refused there by name as before."""
+    def annotation_ids(node):
+        out = set()
+        for n in ast.walk(node):
+            ann = []
+            if isinstance(n, ast.arg) and n.annotation is not None:
+                ann.append(n.annotation)
+            elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.returns is not None:
+                ann.append(n.returns)
+            elif isinstance(n, ast.AnnAssign):
+                ann.append(n.annotation)
+            elif isinstance(n, ast.ClassDef):
+                # `class Stack(Generic[T])`, `class Ints(Stack[int])`: the type arguments of a base
+                ann.extend(b.slice for b in n.bases if isinstance(b, ast.Subscript))
+            for a in ann:
+                out.update(id(m) for m in ast.walk(a))
+        return out
+    candidates = {}
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name) \
+                and _is_type_expr(stmt.value):
+            candidates[stmt.targets[0].id] = stmt
+        elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.value is not None \
+                and _is_type_expr(stmt.value) and ast.unparse(stmt.annotation) in ('TypeAlias', 'typing.TypeAlias'):
+            candidates[stmt.target.id] = stmt
+        elif type(stmt).__name__ == 'TypeAlias':
+            candidates[stmt.name.id] = stmt
+    if not candidates:
+        return
+    in_ann = annotation_ids(tree)
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Name) and n.id in candidates and isinstance(n.ctx, ast.Load) and id(n) not in in_ann:
+            del candidates[n.id]
+        elif isinstance(n, ast.Name) and n.id in candidates and isinstance(n.ctx, ast.Store) \
+                and n is not _alias_target(candidates[n.id]):
+            del candidates[n.id]
+    drop = {id(st) for st in candidates.values()}
+    tree.body = [st for st in tree.body if id(st) not in drop]
+
+
 class _PreC(ast.AST):
     """An already-compiled C expression standing in for an argument node (see _precompute_args)."""
     _fields = ('c',)
@@ -1040,6 +1344,17 @@ class Compiler(boxclosure.ClosureMixin):
         self.mix_typed = {}
         self.mix_units = []
         self.mix_guard_checks = {}
+        self.class_values = []     # classes used as values (a call through a value may construct one)
+        self.user_method_names = frozenset()   # every method name a class of the program defines
+        self.uses_argv = False     # sys.argv: main takes argc / argv
+        self.bytes_prelude = False # bytes / bytearray are the classes of prelude_bytes.py
+        self.reads_args = False    # the program reads `.args` (of an exception)
+        self.uses_ni = False       # the program returns NotImplemented (safetyrt.patch_notimplemented)
+        self.generators = False    # the program has generator functions (safetyrt.GEN)
+        self.want_slice = False    # compile with the class of slice objects (build() retries with it on NeedSlice)
+        self.prelude_names = set() # functions and methods of the preludes added here (not the program's own)
+        self.rt_needs = set()      # safetyrt.py fragments this program uses (none: the C it always had)
+        self.lib_tuples = False    # genlib.py pieces are in the program: their tuples meet the tuple pass's records
 
     # ------------------------------------------------------------------------------- entry point
     def compile(self, source):
@@ -1063,8 +1378,20 @@ class Compiler(boxclosure.ClosureMixin):
         self.threads = threadlib.inject(tree)                       # G12: the thread prelude (threadlib.py)
         if self.threads:
             self.allow_mix = False      # typed clones would run on the typed runtime, which has no lock
+        self._add_bytes_prelude(tree)                               # bytes / bytearray (safetyrt.py, prelude_bytes.py)
+        self.reads_args = any(isinstance(n, ast.Attribute) and n.attr == 'args' for n in ast.walk(tree))
+        _drop_type_aliases(tree)                                    # `Grid = list[list[int]]`, `T = TypeVar("T")`
+        _hoist_ail_tables(tree)                                     # the re pass's pattern tables, before main()
+        _match_subscript(tree)                                      # m["name"] / m[1] of the re pass's match objects
+        _unwiden(tree)                                              # the tuple pass's float(+n) is the int n again
+        _untuple_records(tree)                                      # the tuple pass's _AilT_ records are tuples again
+        self._add_notimplemented(tree)                              # NotImplemented (safetyrt.patch_notimplemented)
+        self._dataclass_methods(tree)                               # a @dataclass's __eq__ (and __hash__ when frozen)
         filelib.rewrite_tree(tree, Unsupported, general=True)      # G7: open / with / os -> primitives + prelude
         mix_tree = copy.deepcopy(tree)          # the mixed-mode typed clones see the source as written
+        mix_tree.body = [n for n in mix_tree.body if not getattr(n, '_ail_safety', False)]
+        self._add_genlib(tree)                                      # json, itertools, functools ... (genlib.py)
+        self._add_safety_preludes(tree)
         _hoist_defaults(tree)
         self.module_names = _scan_assigned_names(tree.body)
         for n in ast.walk(tree):
@@ -1098,6 +1425,14 @@ class Compiler(boxclosure.ClosureMixin):
             elif isinstance(n, ast.ClassDef):
                 self._register_class(n)
 
+        self.user_method_names = frozenset(m for c in self.classes.values() for m in c['methods'])
+        # classes the program uses as values (`make = Fenwick; make(data)`): a call through a value may construct one
+        called = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
+        self.class_values = sorted({n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id in self.classes
+                                    and isinstance(n.ctx, ast.Load) and id(n) not in called} | {
+            c for c in self.classes if any(i.get('is_classmethod') for i in self.classes[c]['methods'].values())
+            or any(self._is_subclass_of(c, k) for k in self.classes
+                   if any(i.get('is_classmethod') for i in self.classes[k]['methods'].values()))})
         import dunderrt
         # operator methods, identity ==, hashing, str() through the class chain and AttributeError on a non-instance
         # are dispatched by the run time in every program that has a class (C30-C32: they were silent or fatal)
@@ -1178,6 +1513,11 @@ class Compiler(boxclosure.ClosureMixin):
             parts.append(cruntime.BOXCASE)
         if getattr(self, 'needs_type_name', False):
             parts.append(TYPE_NAME_C)
+        if getattr(self, 'needs_padfill', False):
+            parts.append(PADFILL_C)
+        if self.rt_needs:
+            import safetyrt
+            parts.append(safetyrt.text(self.rt_needs))
         if self.mix_typed:
             # mix_call.h relies on ail_obj/ail_ctx/ail_box_*/ail_float_val/ail_view_to_str/ail_str,
             # all already defined by PREAMBLE above -- inlined here (not #include'd: `out`'s own
@@ -1186,6 +1526,7 @@ class Compiler(boxclosure.ClosureMixin):
             parts.append('\n/* ---- mixed-mode calling convention (BRIEF_mixed_mode.md) ---- */\n')
             parts.append(_mix_call_h_text())
             parts.append('\n')
+            parts.append(_MIX_DRAIN_DEF)
             for mname, mix in sorted(self.mix_typed.items()):
                 parts.append('/* AIL_MIXED_TYPED: %s */\n' % mname)
                 parts.append('extern %s;\n' % mix['sig'])
@@ -1257,15 +1598,24 @@ class Compiler(boxclosure.ClosureMixin):
                               self.global_slots['class:' + cname], cls['dc_hide']))
         if self.dunder_ops:
             setup.append('    ail__gcx = cx;\n')
+        if self.uses_ni:
+            setup.append('    ail2n_cls = g_slots_arr[%d];\n' % self.global_slots['class:_AilNotImplementedType'])
         if self.threads:
             setup.append('    ail_th_body_fn = %s; ail_th_atexit_fn = %s;\n'
                          % (self.functions['_ail_thread_body']['cname'], self.functions['_ail_th_atexit']['cname']))
         if array_entry is not None:
+            if self.uses_argv:
+                raise Unsupported('sys.argv in a program whose entry is its last function')
             parts.append(self._array_entry_main(array_entry, tree, setup))
             return ''.join(parts)
-        parts.append('int main(void) {\n')
+        parts.append('int main(int argc, char **argv) {\n' if self.uses_argv else 'int main(void) {\n')
         parts.append('    ail_ctx cxs, *cx = &cxs;\n    ail_ctx_init(cx);\n')
         parts.extend(setup)
+        if self.uses_argv:
+            k = self.global_slots['g:__ail_sys_argv']
+            parts.append('    g_slots_arr[%d] = ail_list_new(cx);\n'
+                         '    for (int _a = 0; _a < argc; _a++) { ail_obj _s = ail_bi_str_from_utf8(cx, argv[_a], (int64_t)strlen(argv[_a])); '
+                         'ail_list_append(cx, g_slots_arr[%d], _s); }\n' % (k, k))
         parts.append('    ail_st st = AIL_OK; (void)st;\n')
         parts.append('    ail_completion comp = AIL_COMPLETE_NORMAL; (void)comp;\n')
         parts.append('    AIL_FRAME_ENTER(cx, f, %d);\n' % max(main_ctx.next_slot, 1))
@@ -1278,6 +1628,265 @@ class Compiler(boxclosure.ClosureMixin):
             import threadrt
             return threadrt.patch_main(''.join(parts))
         return ''.join(parts)
+
+    def _dataclass_methods(self, tree):
+        """The __eq__ a @dataclass generates (fields compared as a tuple, only against an instance of the same class),
+        and the __hash__ of a frozen one; ail_syntax writes only the __init__ and the `# ail:dataclass` marker. A
+        dataclass with eq and not frozen keeps no __hash__, so it is unhashable as in CPython."""
+        lines = self.source_lines
+        for node in tree.body:
+            if not isinstance(node, ast.ClassDef) or not (2 <= node.lineno <= len(lines) + 1):
+                continue
+            text = lines[node.lineno - 2].strip()
+            if not text.startswith('# ail:dataclass') or ' noeq' in text:
+                continue
+            names = {m.name for m in node.body if isinstance(m, ast.FunctionDef)}
+            if '__eq__' in names or '__init__' not in names:
+                continue
+            init = [m for m in node.body if isinstance(m, ast.FunctionDef) and m.name == '__init__'][0]
+            hit = re.search(r'\bnocmp=(\S*)', text)
+            nocmp = set(hit.group(1).split(',')) if hit else set()
+            fields = [a.arg for a in init.args.args[1:] if a.arg not in nocmp]
+            tup = lambda who: '(%s)' % ''.join('%s.%s, ' % (who, f) for f in fields)
+            src = ('def __eq__(self, other):\n'
+                   '    if not _ail_same_class(self, other):\n'
+                   '        return False\n'
+                   '    return %s == %s\n' % (tup('self'), tup('other')))
+            if ' frozen' in text and '__hash__' not in names:
+                src += 'def __hash__(self):\n    return hash(%s)\n' % tup('self')
+            for fn in ast.parse(src).body:
+                node.body.append(fn)
+            ast.fix_missing_locations(node)
+
+    def _add_notimplemented(self, tree):
+        """`return NotImplemented` in an operator method: the value is the one instance of a hidden class, and the
+        operator dispatch (safetyrt.patch_notimplemented) tries the other operand next, as CPython does."""
+        own = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.ClassDef))}
+        own |= _scan_assigned_names(tree.body)
+        uses = [n for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id == 'NotImplemented'
+                and isinstance(n.ctx, ast.Load)]
+        if not uses or 'NotImplemented' in own:
+            return
+        import safetyrt
+        for n in uses:
+            n.id = '_AIL_NOTIMPLEMENTED'
+        pre = ast.parse(safetyrt.NI_PRELUDE).body
+        for n in pre:
+            n._ail_safety = True
+            for m in ast.walk(n):
+                if isinstance(m, ast.FunctionDef):
+                    self.prelude_names.add(m.name)
+        k = 0
+        while k < len(tree.body) and isinstance(tree.body[k], (ast.Import, ast.ImportFrom)):
+            k += 1
+        tree.body[k:k] = pre
+        self.uses_ni = True
+
+    def _add_bytes_prelude(self, tree):
+        """bytes and bytearray as the classes of prelude_bytes.py, when the program uses them (branch safetynet):
+        b"..." literals, str.encode, int.to_bytes / int.from_bytes, str(b, encoding), sys.stdin.buffer /
+        sys.stdout.buffer, binary files. Other programs are left as they are."""
+        import safetyrt
+        own = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.ClassDef))}
+        own |= _scan_assigned_names(tree.body)
+        if own & safetyrt.BYTES_NAMES:
+            return
+
+        def is_sys_buffer(n):
+            return (isinstance(n, ast.Attribute) and n.attr == 'buffer' and isinstance(n.value, ast.Attribute)
+                    and n.value.attr in ('stdin', 'stdout') and isinstance(n.value.value, ast.Name)
+                    and n.value.value.id == 'sys')
+        methods = {m.name for c in ast.walk(tree) if isinstance(c, ast.ClassDef) for m in c.body
+                   if isinstance(m, ast.FunctionDef)}
+        used = False
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Constant) and isinstance(n.value, bytes):
+                used = True
+            elif isinstance(n, ast.Name) and n.id in safetyrt.BYTES_WORDS:
+                used = True
+            elif isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and (
+                    (n.func.attr in ('encode', 'to_bytes') and n.func.attr not in methods)
+                    or (n.func.attr == 'from_bytes' and isinstance(n.func.value, ast.Name) and n.func.value.id == 'int')):
+                used = True
+            elif is_sys_buffer(n):
+                used = True
+            elif (isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == 'open'
+                  and any(isinstance(a, ast.Constant) and isinstance(a.value, str) and 'b' in a.value
+                          for a in n.args[1:2] + [k.value for k in n.keywords if k.arg == 'mode'])):
+                used = True
+            elif (isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == 'str'
+                  and 'str' not in own and (len(n.args) >= 2 or n.keywords)):
+                used = True
+        if not used:
+            return
+
+        def check_codec(call, enc_pos, err_pos, what):
+            for pos, kw, allowed, noun in ((enc_pos, 'encoding', safetyrt.ENCODINGS, 'encoding'),
+                                           (err_pos, 'errors', safetyrt.ERROR_HANDLERS, 'error handler')):
+                node = call.args[pos] if pos is not None and len(call.args) > pos else None
+                for k in call.keywords:
+                    if k.arg == kw:
+                        node = k.value
+                if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    norm = node.value.lower().replace('_', '-').replace(' ', '-')
+                    if norm not in allowed:
+                        raise Unsupported('%s with the %s %r on the general path (built: utf-8, ascii, latin-1; '
+                                          'errors strict, ignore, replace)' % (what, noun, node.value))
+
+        compiler = self
+
+        class Rewrite(ast.NodeTransformer):
+            def visit_Constant(self, node):
+                if isinstance(node.value, bytes):
+                    return ast.copy_location(ast.Call(func=ast.Name(id='_ail_mkb', ctx=ast.Load()),
+                                                      args=[ast.Constant(value=node.value.decode('latin-1'))],
+                                                      keywords=[]), node)
+                return node
+
+            def visit_Attribute(self, node):
+                if is_sys_buffer(node) and isinstance(node.ctx, ast.Load):
+                    cls = '_AilStdoutBuffer' if node.value.attr == 'stdout' else '_AilStdinBuffer'
+                    return ast.copy_location(ast.Call(func=ast.Name(id=cls, ctx=ast.Load()), args=[], keywords=[]),
+                                             node)
+                self.generic_visit(node)
+                return node
+
+            def visit_Call(self, node):
+                self.generic_visit(node)
+                f = node.func
+                if isinstance(f, ast.Attribute) and f.attr == 'encode' and 'encode' not in methods:
+                    check_codec(node, 0, 1, 'str.encode()')
+                    return ast.copy_location(ast.Call(func=ast.Name(id='_ail_str_encode', ctx=ast.Load()),
+                                                      args=[f.value] + node.args, keywords=node.keywords), node)
+                if isinstance(f, ast.Attribute) and f.attr == 'decode' and 'decode' not in methods:
+                    check_codec(node, 0, 1, 'bytes.decode()')
+                if isinstance(f, ast.Attribute) and f.attr == 'to_bytes' and 'to_bytes' not in methods:
+                    return ast.copy_location(ast.Call(func=ast.Name(id='_ail_to_bytes', ctx=ast.Load()),
+                                                      args=[f.value] + node.args, keywords=node.keywords), node)
+                if (isinstance(f, ast.Attribute) and f.attr == 'from_bytes' and isinstance(f.value, ast.Name)
+                        and f.value.id == 'int'):
+                    return ast.copy_location(ast.Call(func=ast.Name(id='_ail_from_bytes', ctx=ast.Load()),
+                                                      args=node.args, keywords=node.keywords), node)
+                if isinstance(f, ast.Name) and f.id in ('bytes', 'bytearray'):
+                    check_codec(node, 1, 2, '%s()' % f.id)
+                if isinstance(f, ast.Name) and f.id == 'str' and 'str' not in own and (len(node.args) >= 2 or node.keywords):
+                    check_codec(node, 1, 2, 'str()')
+                    return ast.copy_location(ast.Call(func=ast.Name(id='_ail_str_decode', ctx=ast.Load()),
+                                                      args=node.args, keywords=node.keywords), node)
+                if (isinstance(f, ast.Name) and f.id == 'int' and 'int' not in own and len(node.args) == 2
+                        and not node.keywords):
+                    return ast.copy_location(ast.Call(func=ast.Name(id='_ail_int2', ctx=ast.Load()),
+                                                      args=node.args, keywords=[]), node)
+                return node
+
+        tree.body = [Rewrite().visit(n) for n in tree.body]
+        ast.fix_missing_locations(tree)
+        text = safetyrt.bytes_prelude()
+        if any(isinstance(n, ast.Name) and n.id == 'read_bytes' for n in ast.walk(tree)):
+            text += safetyrt.READ_BYTES
+        pre = ast.parse(text).body
+        for n in pre:
+            n._ail_safety = True
+            for m in ast.walk(n):
+                if isinstance(m, ast.FunctionDef):
+                    self.prelude_names.add(m.name)
+        imports = 0
+        while imports < len(tree.body) and isinstance(tree.body[imports], (ast.Import, ast.ImportFrom)):
+            imports += 1
+        tree.body[imports:imports] = pre
+        self.bytes_prelude = True
+        self.want_slice = True
+        self.rt_needs.add('bytes')
+
+    def _add_genlib(self, tree):
+        """Library names of the general path (genlib.py): renamed to the Python-source pieces of prelude_genlib.py,
+        which are added after the program's imports. A program that uses none of them is left as it is."""
+        import genlib
+        text, used = genlib.rewrite(tree)
+        if not text:
+            return
+        self.lib_tuples = True
+        pre = ast.parse(text).body
+        have = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+        pre = [n for n in pre if not (isinstance(n, ast.FunctionDef) and n.name in have)]   # math helpers the program has
+        for n in pre:
+            n._ail_safety = True
+            for m in ast.walk(n):
+                if isinstance(m, ast.FunctionDef):
+                    self.prelude_names.add(m.name)
+            if isinstance(n, ast.FunctionDef) and n.name == '_ail_math_sqrt':
+                for stmt in ast.walk(n):      # as in compile(): the correctly rounded C sqrt, not pow()
+                    if isinstance(stmt, ast.Return) and isinstance(stmt.value, ast.BinOp) and isinstance(stmt.value.op, ast.Pow):
+                        stmt.value = ast.Call(func=ast.Name(id='_ail_c_sqrt', ctx=ast.Load()), args=[stmt.value.left], keywords=[])
+        imports = 0
+        while imports < len(tree.body) and (isinstance(tree.body[imports], (ast.Import, ast.ImportFrom)) or (
+                imports == 0 and isinstance(tree.body[imports], ast.Expr)
+                and isinstance(tree.body[imports].value, ast.Constant))):
+            imports += 1
+        tree.body[imports:imports] = pre
+        ast.fix_missing_locations(tree)
+
+    def _add_safety_preludes(self, tree):
+        """The Python-source classes of safetyrt.py this program needs, added at the top of the module (branch
+        safetynet). `slice(...)` written in the program, or a slice of an instance (build() retries), brings in
+        the class of slice objects."""
+        own = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.ClassDef))}
+        own |= _scan_assigned_names(tree.body)
+        if 'slice' in own:
+            self.want_slice = False
+            return
+        # generator functions: the class of generator objects (safetyrt.GEN_PRELUDE)
+        gens = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and _own_yields(n)]
+        if gens and 'generator' not in own:
+            import safetyrt
+            if self.threads:
+                raise Unsupported('a generator function in a program with threads (the general path runs a generator '
+                                  'on a stack of its own, which the thread lock does not follow)')
+            pre = ast.parse(safetyrt.GEN_PRELUDE).body
+            for n in pre:
+                n._ail_safety = True
+                for m in ast.walk(n):
+                    if isinstance(m, ast.FunctionDef):
+                        self.prelude_names.add(m.name)
+            tree.body[0:0] = pre
+            self.generators = True
+            self.rt_needs.add('gen')
+            for g in gens:
+                yf = _YieldFromLoop()
+                g.body = [yf.visit(st) for st in g.body]
+                ast.fix_missing_locations(g)
+        calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                 and n.func.id == 'slice']
+        if calls:
+            self.want_slice = True
+        if not self.want_slice:
+            return
+        import safetyrt
+        for n in calls:
+            # slice(stop) / slice(start, stop): the class takes all three
+            if not n.keywords and 1 <= len(n.args) <= 2 and not any(isinstance(a, ast.Starred) for a in n.args):
+                none = ast.Constant(value=None)
+                n.args = [none] + n.args + [ast.Constant(value=None)] if len(n.args) == 1 else n.args + [none]
+        pre = ast.parse(safetyrt.SLICE_PRELUDE).body
+        for n in ast.walk(ast.Module(body=pre, type_ignores=[])):
+            if isinstance(n, ast.FunctionDef):
+                self.prelude_names.add(n.name)
+        tree.body[0:0] = pre
+        self.rt_needs.add('slice')
+
+    def _slice_obj(self, sl, ctx):
+        """A slice object for `a:b:c` (the class of safetyrt.SLICE_PRELUDE)."""
+        none = ast.Constant(value=None)
+        call = ast.Call(func=ast.Name(id='slice', ctx=ast.Load()),
+                        args=[sl.lower or none, sl.upper or none, sl.step or none], keywords=[])
+        return self.expr(call, ctx)
+
+    def _slice_bounds(self, sl, ctx):
+        """The three bounds of `a:b:c` as values (None where omitted)."""
+        return [self.expr(e, ctx) if e is not None else 'ail_box_none()' for e in (sl.lower, sl.upper, sl.step)]
+
+    def _any_class_defines(self, mname):
+        return any(mname in c['methods'] for c in self.classes.values())
 
     def _array_entry_main(self, info, tree, setup_lines):
         """The judge suite's own array/argv calling convention for a whole-program shape with
@@ -1440,6 +2049,7 @@ class Compiler(boxclosure.ClosureMixin):
                                   (pname, node.name))
         lru = False
         is_static = False
+        is_property = is_setter = is_classmethod = False
         for dec in node.decorator_list:
             dec_bare = dec.func if isinstance(dec, ast.Call) else dec
             nm = None
@@ -1451,6 +2061,13 @@ class Compiler(boxclosure.ClosureMixin):
                 lru = True
             elif is_method and isinstance(dec, ast.Name) and dec.id == 'staticmethod':
                 is_static = True
+            elif is_method and isinstance(dec, ast.Name) and dec.id == 'property' and len(node.decorator_list) == 1:
+                is_property = True       # a getter, called on each read of obj.NAME (branch safetynet)
+            elif (is_method and isinstance(dec, ast.Attribute) and dec.attr == 'setter'
+                  and isinstance(dec.value, ast.Name) and dec.value.id == node.name and len(node.decorator_list) == 1):
+                is_setter = True         # called on each obj.NAME = value
+            elif is_method and isinstance(dec, ast.Name) and dec.id == 'classmethod' and len(node.decorator_list) == 1:
+                is_classmethod = True    # the first parameter is the class (of the instance it is called on)
             else:
                 raise Unsupported('the decorator on def %s (only @staticmethod on a method and '
                                   '@functools.lru_cache/@lru_cache/@cache are supported)' %
@@ -1461,12 +2078,27 @@ class Compiler(boxclosure.ClosureMixin):
         info = {'node': node, 'params': params, 'kwonly': kwonly, 'vararg': vararg, 'kwarg': kwarg,
                'defaults': defaults, 'kw_defaults': kw_defaults, 'cname': cname,
                'is_method': is_method, 'is_static': is_static, 'owner_class': owner_class,
-               'lru_cache': lru, 'all_params': all_params}
+               'lru_cache': lru, 'all_params': all_params,
+               'is_property': is_property, 'is_setter': is_setter, 'is_classmethod': is_classmethod,
+               'generator': bool(self.generators and _own_yields(node))}
+        if info['generator'] and lru:
+            raise Unsupported('@lru_cache on the generator function %s' % node.name)
         if not is_method:
             self.functions[node.name] = info
         return info
 
     def _register_class(self, node):
+        # typing's Generic / Protocol bases add nothing at run time; `Base[T]` is Base
+        bases = []
+        for b in node.bases:
+            core = b.value if isinstance(b, ast.Subscript) else b
+            name = core.id if isinstance(core, ast.Name) else core.attr if isinstance(core, ast.Attribute) else None
+            if name in ('Generic', 'Protocol') and name not in self.classes:
+                continue
+            if isinstance(b, ast.Subscript) and isinstance(b.value, ast.Name) and b.value.id in self.classes:
+                b = b.value
+            bases.append(b)
+        node.bases = bases
         if len(node.bases) > 1:
             raise Unsupported('multiple inheritance in class %s' % node.name)
         base = None
@@ -1486,12 +2118,17 @@ class Compiler(boxclosure.ClosureMixin):
         for item in node.body:
             if isinstance(item, ast.FunctionDef):
                 mcname = 'pm_%s_%s' % (node.name, item.name)
-                info = self._register_function(item, cname=mcname, is_method=True,
+                setter = any(isinstance(d, ast.Attribute) and d.attr == 'setter' for d in item.decorator_list)
+                info = self._register_function(item, cname=mcname + ('__set' if setter else ''), is_method=True,
                                                 owner_class=node.name)
-                methods[item.name] = info
+                methods[('__ail_set_' + item.name) if info.get('is_setter') else item.name] = info
             elif isinstance(item, ast.Assign) and len(item.targets) == 1 and \
                     isinstance(item.targets[0], ast.Name):
                 class_attrs.append((item.targets[0].id, item.value))
+            elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                # `count: int = 0` is a class attribute; `name: str` alone declares nothing at run time
+                if item.value is not None:
+                    class_attrs.append((item.target.id, item.value))
             elif isinstance(item, (ast.Pass, ast.Expr)):
                 continue
             else:
@@ -1502,7 +2139,7 @@ class Compiler(boxclosure.ClosureMixin):
         hide = 0
         if (marker and 2 <= node.lineno <= len(marker) + 1
                 and marker[node.lineno - 2].strip().startswith('# ail:dataclass')
-                and '__repr__' not in methods
+                and '__repr__' not in methods and ' norepr' not in marker[node.lineno - 2]
                 and '__init__' in methods):
             # ail_syntax.py replaced `@dataclass` by this marker comment (and wrote the __init__):
             # print / repr / str / containers show ClassName(field=repr, ...) like CPython
@@ -1605,6 +2242,7 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.fn_node = node
         ctx.qualname = (info['owner_class'] + '.' + node.name) if info.get('is_method') else node.name
         ctx.fn_params = set(info['all_params'])
+        ctx.is_generator = info.get('generator', False)
         if info['is_method'] and not info['is_static'] and info['params']:
             ctx.var_kind[info['params'][0]] = 'instance:' + info['owner_class']
             ctx.owner_class = info['owner_class']
@@ -1646,7 +2284,9 @@ class Compiler(boxclosure.ClosureMixin):
         # name (what every caller -- including a recursive call inside this very body -- resolves
         # to) is the wrapper _emit_lru_wrapper defines below. Forward-declared here too, so the
         # impl can be called from anywhere in the file regardless of emission order.
-        impl_cname = info['cname'] + ('_impl' if info['lru_cache'] else '')
+        impl_cname = info['cname'] + ('_impl' if info['lru_cache'] else '_gbody' if info.get('generator') else '')
+        if info.get('generator'):
+            self.top_decls.append('static ail_st %s(ail_ctx *cx, ail_obj *out%s);\n' % (impl_cname, sig))
         if info['lru_cache']:
             self.top_decls.append('static ail_st %s(ail_ctx *cx, ail_obj *out%s);\n' %
                                   (impl_cname, sig))
@@ -1661,15 +2301,50 @@ class Compiler(boxclosure.ClosureMixin):
         self.top_defs.append(full)
         if info['lru_cache']:
             self._emit_lru_wrapper(info)
+        if info.get('generator'):
+            self._emit_generator_wrapper(info, impl_cname, sig)
+
+    def _emit_generator_wrapper(self, info, impl_cname, sig):
+        """Calling a generator function makes a generator object holding the arguments (safetyrt.GEN); its
+        first next() runs the body on a stack of its own."""
+        params = info['all_params']
+        n = len(params)
+        unpack = ', '.join('v->p[%d]' % i for i in range(n))
+        self.top_defs.append(
+            'static ail_st pg_%s(ail_ctx *cx, ail_obj *out, ail_obj a) {\n'
+            '    ail_vecobj *v = (ail_vecobj *)a.o; (void)v;\n'
+            '    return %s(cx, out%s);\n}\n\n' % (info['cname'], impl_cname, (', ' + unpack) if n else ''))
+        self.top_defs.append(
+            'static ail_st %s(ail_ctx *cx, ail_obj *out%s) {\n'
+            '    AIL_FRAME_ENTER(cx, f, 1);\n'
+            '    ail_obj _a[%d] = { %s };\n'
+            '    f.slots[0] = ail_tuple_new(cx, _a, %d);\n'
+            '    ail_st st = ail2g_make(cx, out, g_slots_arr[%d], f.slots[0], pg_%s, %s);\n'
+            '    AIL_FRAME_LEAVE(cx, f);\n    return st;\n}\n\n'
+            % (info['cname'], sig, max(n, 1), ', '.join(cid(p) for p in params) or 'ail_box_none()', n,
+               self.global_slots['class:generator'], info['cname'], c_str_literal(info['node'].name)))
 
     def _register_nested(self, node, outer_ctx):
-        if node.args.vararg or node.args.kwarg or node.args.kwonlyargs or node.args.posonlyargs \
-                or node.args.defaults:
+        def constant(e):
+            try:
+                ast.literal_eval(e)
+                return True
+            except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+                return False
+        # defaults that are constants (CPython evaluates them once, when the def runs: for a constant the value
+        # filled in at each call is the same), *args packed into a tuple at the call, keyword-only parameters
+        if node.args.kwarg or node.args.posonlyargs or not all(constant(d) for d in node.args.defaults) \
+                or not all(d is None or constant(d) for d in node.args.kw_defaults):
             raise Unsupported('a nested def %s with *args/**kwargs/keyword-only/default '
                               'parameters' % node.name)
         if node.decorator_list:
             raise Unsupported('a decorator on nested def %s' % node.name)
-        params = [a.arg for a in node.args.args]
+        positional = [a.arg for a in node.args.args]
+        vararg = node.args.vararg.arg if node.args.vararg else None
+        kwonly = [a.arg for a in node.args.kwonlyargs]
+        defaults = dict(zip(positional[len(positional) - len(node.args.defaults):], node.args.defaults))
+        defaults.update({k: d for k, d in zip(kwonly, node.args.kw_defaults) if d is not None})
+        params = positional + ([vararg] if vararg else []) + kwonly
         nonlocal_names = _nonlocal_names(node.body)
         own_bound = set(params) | _scan_assigned_names(node.body) | {node.name}
         free = sorted(_free_reads(node.body, own_bound) & set(outer_ctx.slot_of) |
@@ -1682,7 +2357,8 @@ class Compiler(boxclosure.ClosureMixin):
         cname = 'pn_%d_%s' % (self.nested_n, node.name)
         by_ptr = [nm for nm in free if nm in nonlocal_names]
         by_val = [nm for nm in free if nm not in nonlocal_names]
-        info = {'node': node, 'params': params, 'cname': cname, 'by_val': by_val, 'by_ptr': by_ptr}
+        info = {'node': node, 'params': params, 'cname': cname, 'by_val': by_val, 'by_ptr': by_ptr,
+                'positional': positional, 'vararg': vararg, 'kwonly': kwonly, 'defaults': defaults}
         outer_ctx.nested_funcs[node.name] = info
         # Compile the nested function body now, in its OWN Ctx/frame, with captured names
         # pre-registered: by-value captures get an ordinary local slot (copied in from the
@@ -1738,12 +2414,50 @@ class Compiler(boxclosure.ClosureMixin):
         self.top_defs.append(full)
 
     def _call_nested_function(self, name, args, kwargs, ctx):
-        if kwargs:
-            raise Unsupported('a nested function %s() called with keyword arguments' % name)
         info = ctx.nested_funcs[name]
-        if len(args) != len(info['params']):
+        if any(isinstance(a, ast.Starred) for a in args):
+            raise Unsupported('a starred argument in a call of the nested function %s()' % name)
+        positional = info.get('positional', info['params'])
+        vararg, kwonly, defaults = info.get('vararg'), info.get('kwonly', []), info.get('defaults', {})
+        bound = {}
+        for p, a in zip(positional, args):
+            bound[p] = a
+        extra = list(args[len(positional):])
+        if extra and not vararg:
             raise Unsupported('%s() called with the wrong number of arguments' % name)
-        argcs = [self.expr(a, ctx) for a in args]
+        for k, v in kwargs.items():
+            if k not in positional and k not in kwonly or k in bound:
+                raise Unsupported('%s() called with the keyword argument %r it cannot take' % (name, k))
+            bound[k] = v
+        nodes = []
+        for p in positional + kwonly:
+            if p in bound:
+                nodes.append(bound[p])
+            elif p in defaults:
+                nodes.append(copy.deepcopy(defaults[p]))
+            else:
+                raise Unsupported('%s() called with the wrong number of arguments' % name)
+        star = object()
+        if vararg:
+            nodes.insert(len(positional), star)
+        # positional arguments first as written, then keyword values as written (CPython's order)
+        order = list(args) + list(kwargs.values())
+        done = {}
+        for a in order:
+            done[id(a)] = self.expr(a, ctx)
+        argcs = []
+        for n in nodes:
+            if n is star:
+                tup = ctx.tmp()
+                if extra:
+                    arr = ctx.new_cvar('va')
+                    ctx.emit('ail_obj %s[%d] = { %s };' % (arr, len(extra), ', '.join(done[id(e)] for e in extra)))
+                    ctx.emit('%s = ail_tuple_new(cx, %s, %d);' % (tup, arr, len(extra)))
+                else:
+                    ctx.emit('%s = ail_tuple_new(cx, NULL, 0);' % tup)
+                argcs.append(tup)
+            else:
+                argcs.append(done[id(n)] if id(n) in done else self.expr(n, ctx))
         capexprs = [self.name_ref(nm, ctx) for nm in info['by_val']]
         ptrexprs = ['&' + self.name_ref(nm, ctx) if nm not in ctx.ptr_names else cid('ptr_' + nm)
                    for nm in info['by_ptr']]
@@ -1865,6 +2579,8 @@ class Compiler(boxclosure.ClosureMixin):
                    'set': 'set', 'frozenset': 'frozenset', 'tuple': 'tuple',
                    'range': 'range'}.get(node.func.id)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if not self._builtin_method_proven(node, ctx):
+                return None
             # A handful of methods PROVABLY return a fixed kind regardless of their receiver's
             # own kind -- propagating through these (safely; never guessed) recovers real
             # coverage for the extremely common `x.lower().count(...)`-style chain without
@@ -1901,6 +2617,15 @@ class Compiler(boxclosure.ClosureMixin):
                             return None
                         return self.infer_kind(kv, ctx)
         return None
+
+    def _builtin_method_proven(self, call, ctx):
+        """`recv.m(...)` is the built-in method `m` (of str, list, dict, ...) unless a class of the program also
+        defines `m` and the receiver is not proven to be a str: then the result's kind is not known (a user `split`
+        or `strip` returns what it returns), and the str-only fast paths must not be taken."""
+        attr = call.func.attr
+        if attr not in self.user_method_names:
+            return True
+        return self.infer_kind(call.func.value, ctx) == 'str'
 
     def _descendants(self, cname):
         """The classes below the given class (strict), deepest first."""
@@ -2352,7 +3077,7 @@ class Compiler(boxclosure.ClosureMixin):
                 node.func.id == 'range':
             return 'int'
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and \
-                node.func.attr in ('split', 'rsplit', 'splitlines'):
+                node.func.attr in ('split', 'rsplit', 'splitlines') and self._builtin_method_proven(node, ctx):
             return 'str'
         if isinstance(node, ast.IfExp):
             k1 = self._infer_elem_kind(node.body, ctx)
@@ -2376,7 +3101,7 @@ class Compiler(boxclosure.ClosureMixin):
                 iter_node.func.id == 'range':
             return 'int'
         if isinstance(iter_node, ast.Call) and isinstance(iter_node.func, ast.Attribute) and \
-                iter_node.func.attr in ('splitlines', 'split', 'rsplit'):
+                iter_node.func.attr in ('splitlines', 'split', 'rsplit') and self._builtin_method_proven(iter_node, ctx):
             return 'str'
         return None
 
@@ -2452,6 +3177,16 @@ class Compiler(boxclosure.ClosureMixin):
         is_global = self._is_global_name(node.id, ctx)
         if not is_global and node.id not in ctx.slot_of and node.id not in ctx.ptr_names \
                 and node.id not in ctx.clo_index:
+            arity = self._BUILTIN_VALUE_ARITY.get(node.id)
+            if arity is not None and node.id not in self.from_imports:
+                # a builtin function as a value (`f = len`, `callable(abs)`, `{"len": len}`): the lambda that calls it
+                names = ['_akb%d' % i for i in range(arity)]
+                lam = ast.Lambda(args=ast.arguments(posonlyargs=[], args=[ast.arg(arg=n) for n in names], vararg=None,
+                                                    kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[]),
+                                 body=ast.Call(func=ast.Name(id=node.id, ctx=ast.Load()),
+                                               args=[ast.Name(id=n, ctx=ast.Load()) for n in names], keywords=[]))
+                ast.fix_missing_locations(ast.copy_location(lam, node))
+                return self.expr(lam, ctx)
             raise Unsupported("name '%s' is not defined" % node.id)
         t = ctx.tmp()
         if is_global:
@@ -2466,6 +3201,11 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.check()
         return t
 
+    # builtins usable as function values, with the one arity they are called with through the value
+    _BUILTIN_VALUE_ARITY = {'len': 1, 'abs': 1, 'ord': 1, 'chr': 1, 'bool': 1, 'repr': 1, 'sorted': 1, 'sum': 1,
+                            'any': 1, 'all': 1, 'reversed': 1, 'iter': 1, 'hex': 1, 'oct': 1, 'bin': 1,
+                            'divmod': 2, 'pow': 2, 'isinstance': 2}
+
     BINOP_FN = {ast.Add: 'ail_op_add', ast.Sub: 'ail_op_sub', ast.Mult: 'ail_op_mul',
                ast.Div: 'ail_op_truediv', ast.FloorDiv: 'ail_op_floordiv',
                ast.Mod: 'ail_op_mod', ast.Pow: 'ail_op_pow',
@@ -2479,7 +3219,30 @@ class Compiler(boxclosure.ClosureMixin):
     def expr_BinOp(self, node, ctx):
         if (isinstance(node.op, ast.Mod) and isinstance(node.left, ast.Constant)
                 and isinstance(node.left.value, str)):
-            return self._percent_format(node.left.value, node.right, ctx)
+            mark = len(ctx.lines)
+            slots = ctx.next_slot
+            try:
+                return self._percent_format(node.left.value, node.right, ctx)
+            except Unsupported as e:
+                if not any(m in str(e) for m in self._PCT_RUNTIME):
+                    raise
+                del ctx.lines[mark:]
+            return self._percent_runtime(node, ctx)
+        if isinstance(node.op, ast.Mod) and (
+                self.infer_kind(node.left, ctx) == 'str'
+                or (self.infer_kind(node.left, ctx) is None and (isinstance(node.right, (ast.Tuple, ast.Dict))
+                                                                 or self.infer_kind(node.right, ctx) in ('tuple', 'dict')))):
+            if self.infer_kind(node.left, ctx) == 'str':
+                return self._percent_runtime(node, ctx)
+            # a value of unknown kind % a tuple / dict: a str formats, anything else takes the operator
+            l = self.expr(node.left, ctx)
+            rr = self.expr(node.right, ctx)
+            self.rt_needs.add('fmt')
+            t = ctx.tmp()
+            ctx.emit('st = %s.tag == AIL_T_STR ? ail2f_percent(cx, &%s, %s, %s) : ail_op_mod(cx, &%s, %s, %s);'
+                     % (l, t, l, rr, t, l, rr))
+            ctx.check()
+            return t
         # `s1 | s2` / `s1 & s2` / `s1 - s2` / `s1 ^ s2` -- Python spells set union/intersection/
         # difference/symmetric_difference with the SAME operators as int bitwise-or/and/sub/xor
         # (S052's own inventory row: "set operators | & - ^"); the core's ail_op_bitor etc. only
@@ -2523,6 +3286,20 @@ class Compiler(boxclosure.ClosureMixin):
         return t
 
     _PCT_RE = re.compile(r'%([-+ 0#]*)(\d*)(?:\.(\d+))?([sdfr%])')
+    # the refusals of `_percent_format` that the run-time formatter (safetyrt.FMT) answers instead
+    _PCT_RUNTIME = ('% formatting with too few arguments', 'a % directive this compiler does not recognise',
+                    "the '#' flag in %-format", 'precision on an int', '%r with a width or precision',
+                    '% formatting with too many arguments')
+
+    def _percent_runtime(self, node, ctx):
+        """`fmt % args` formatted when the program runs (CPython's printf-style rules, safetyrt.FMT)."""
+        l = self.expr(node.left, ctx)
+        r = self.expr(node.right, ctx)
+        self.rt_needs.add('fmt')
+        t = ctx.tmp()
+        ctx.emit('st = ail2f_percent(cx, &%s, %s, %s);' % (t, l, r))
+        ctx.check()
+        return t
 
     def _percent_format(self, fmt_str, rhs_node, ctx):
         """`"%s %d" % (a, b)` -- a literal format string only (matches the same restriction
@@ -2737,7 +3514,8 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.emit('if (st != AIL_OK) goto %s;' % ctx.cur_err_target())
             ctx.emit('%s = ail_box_bool(%s%s);' % (t, '!' if isinstance(op, ast.NotIn) else '', civar))
             return t
-        cname = self._inst_class(an, ctx) if an is not None else None
+        # with NotImplemented in the program the run time's dispatch decides (it tries the other operand next)
+        cname = self._inst_class(an, ctx) if an is not None and not self.uses_ni else None
         dunder = {ast.Eq: '__eq__', ast.Lt: '__lt__'}.get(type(op))
         invert = False
         if cname and type(op) is ast.NotEq:
@@ -2912,8 +3690,29 @@ class Compiler(boxclosure.ClosureMixin):
         if isinstance(node.slice, ast.Slice):
             sliced = self._inst_class(node.value, ctx)
             if sliced and self._resolve_method(sliced, '__getitem__'):
-                raise Unsupported('slicing a %s through __getitem__: the general path has no slice objects to hand '
-                                  'to it (C42)' % sliced)
+                # the slice object goes to __getitem__ (safetyrt.SLICE_PRELUDE)
+                if not self.want_slice:
+                    raise NeedSlice()
+                key = self._slice_obj(node.slice, ctx)
+                return self._subscript_with_key(node, c, key, ctx)
+            if self.want_slice and self.infer_kind(node.value, ctx) not in ('str', 'list', 'tuple') \
+                    and self._any_class_defines('__getitem__'):
+                # a value of unknown kind: an instance takes a slice object, anything else is sliced
+                lo, hi, step = self._slice_bounds(node.slice, ctx)
+                t = ctx.tmp()
+                ctx.emit('if (%s.tag == AIL_T_INST) {' % c)
+                ctx.indent += 1
+                key = self._slice_obj(node.slice, ctx)
+                ctx.emit('st = ail_op_getitem(cx, &%s, %s, %s);' % (t, c, key))
+                ctx.check()
+                ctx.indent -= 1
+                ctx.emit('} else {')
+                ctx.indent += 1
+                ctx.emit('st = ail2s_getslice(cx, &%s, %s, %s, %s, %s);' % (t, c, lo, hi, step))
+                ctx.check()
+                ctx.indent -= 1
+                ctx.emit('}')
+                return t
             def bound(e, default):
                 if e is None:
                     return '0', str(default)
@@ -2928,6 +3727,9 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.check()
             return t
         key = self.expr(node.slice, ctx)
+        return self._subscript_with_key(node, c, key, ctx)
+
+    def _subscript_with_key(self, node, c, key, ctx):
         dd_kind = self.infer_kind(node.value, ctx)
         if dd_kind and dd_kind.startswith('defaultdict:'):
             factory = {'int': 'AIL_DD_INT', 'list': 'AIL_DD_LIST', 'set': 'AIL_DD_SET',
@@ -2953,6 +3755,11 @@ class Compiler(boxclosure.ClosureMixin):
         t = ctx.tmp()
         if info:
             ctx.emit('st = %s(cx, &%s, %s, %s);' % (info['cname'], t, c, key))
+        elif self.want_slice and self.infer_kind(node.slice, ctx) not in ('int', 'bool', 'str') \
+                and not isinstance(node.slice, ast.Slice):
+            # the key may be a slice object (`s = slice(1, 3); xs[s]`, or one a __getitem__ passes on)
+            ctx.emit('st = ail2s_getitem(cx, &%s, %s, %s, g_slots_arr[%d]);'
+                     % (t, c, key, self.global_slots['class:slice']))
         else:
             ctx.emit('st = ail_op_getitem(cx, &%s, %s, %s);' % (t, c, key))
         ctx.check()
@@ -2992,16 +3799,65 @@ class Compiler(boxclosure.ClosureMixin):
                         return self.expr(hits[-1], ctx)
                     break
                 k = self.classes[k]['base']
+        prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
+        if prop_owners:
+            return self._property_read(node, prop_owners, ctx)
         obj = self.expr(node.value, ctx)
+        if node.attr == 'args' and not any('args' in c['methods'] for c in self.classes.values()):
+            # e.args of an exception value (the run time's own carry their message)
+            self.rt_needs.add('exc')
+            t = ctx.tmp()
+            ctx.emit('st = ail2x_args(cx, &%s, %s);' % (t, obj))
+            ctx.check()
+            return t
         self.attr_names.add(node.attr)
         t = ctx.tmp()
-        ctx.emit('st = ail_inst_getattr(cx, &%s, %s, g_attr_%s, %s);' %
-                (t, obj, node.attr, c_str_literal(node.attr)))
+        if self.lib_tuples and re.fullmatch(r'f[0-9]+', node.attr) and any(c.startswith('_AilT_') for c in self.classes):
+            # `_tu.f0` of the record classes the tuple pass (tuplib.py) writes for tuple[...] annotations: a value
+            # that a library function built as a plain tuple (itertools.product, zip with cycle ...) is indexed
+            ctx.emit('if (%s.tag == AIL_T_TUPLE) st = ail_op_getitem(cx, &%s, %s, ail_box_int(%s)); else '
+                     'st = ail_inst_getattr(cx, &%s, %s, g_attr_%s, %s);' %
+                     (obj, t, obj, node.attr[1:], t, obj, node.attr, c_str_literal(node.attr)))
+        else:
+            ctx.emit('st = ail_inst_getattr(cx, &%s, %s, g_attr_%s, %s);' %
+                    (t, obj, node.attr, c_str_literal(node.attr)))
         ctx.check()
+        return t
+
+    def _property_owner_cond(self, obj, c):
+        return '((%s.tag == AIL_T_INST || %s.tag == AIL_T_EXC) && ail_class_is_or_subclass(((ail_instobj *)%s.o)->cls, ' \
+               'g_slots_arr[%d]))' % (obj, obj, obj, self.global_slots['class:' + c])
+
+    def _property_read(self, node, owners, ctx):
+        """obj.NAME where a class of the program has a @property NAME: its getter for an instance of such a class
+        (the most derived first), the attribute otherwise."""
+        obj = self.expr(node.value, ctx)
+        owners = sorted(owners, key=lambda c: -sum(1 for k in self.classes if self._is_subclass_of(c, k)))
+        t = ctx.tmp()
+        first = True
+        for c in owners:
+            info = self.classes[c]['methods'][node.attr]
+            ctx.emit('%sif (%s) {' % ('' if first else '} else ', self._property_owner_cond(obj, c)))
+            first = False
+            ctx.indent += 1
+            ctx.emit('st = %s(cx, &%s, %s);' % (info['cname'], t, obj))
+            ctx.check()
+            ctx.indent -= 1
+        ctx.emit('} else {')
+        ctx.indent += 1
+        self.attr_names.add(node.attr)
+        ctx.emit('st = ail_inst_getattr(cx, &%s, %s, g_attr_%s, %s);' % (t, obj, node.attr, c_str_literal(node.attr)))
+        ctx.check()
+        ctx.indent -= 1
+        ctx.emit('}')
         return t
 
     def _module_attr_value(self, alias, attr, ctx):
         mod = self.module_aliases.get(alias, alias)
+        if mod == 'sys' and attr == 'argv':
+            # one list of the command line, made when the program starts (it can be changed like any list)
+            self.uses_argv = True
+            return 'g_slots_arr[%d]' % self._module_global_slot('__ail_sys_argv')
         if mod == 'math' and attr == 'pi':
             return 'ail_box_float(cx, 3.141592653589793)'
         if mod == 'math' and attr == 'e':
@@ -3025,7 +3881,13 @@ class Compiler(boxclosure.ClosureMixin):
         raise Unsupported('%s.%s used as a plain value' % (alias, attr))
 
     def expr_Yield(self, node, ctx):
-        raise Unsupported('yield (generator functions are not modelled by the general path)')
+        if not getattr(ctx, 'is_generator', False):
+            raise Unsupported('yield (generator functions are not modelled by the general path)')
+        v = self.expr(node.value, ctx) if node.value is not None else 'ail_box_none()'
+        t = ctx.tmp()
+        ctx.emit('st = ail2g_yield(cx, &%s, %s);' % (t, v))
+        ctx.check()
+        return t
 
     def expr_YieldFrom(self, node, ctx):
         raise Unsupported('yield from (generator functions are not modelled by the general path)')
@@ -3129,6 +3991,17 @@ class Compiler(boxclosure.ClosureMixin):
                               "or no type char at all -- are supported)" % type_char)
         return spec
 
+    _CORE_SPEC_RE = re.compile(r'^(?:.?[<>^])?[+ ]?0?[0-9]*(?:\.[0-9]+)?[dfs]?$')
+
+    def _core_fmtspec(self, spec, kind):
+        """True for the specs the core's ail_obj_format builds as CPython does (`d`/`.Nf`/`s` with fill, align,
+        sign and width; no type only for a str or an int: the core writes a float without one as `f`); the rest
+        go to safetyrt.FMT."""
+        type_char = spec[-1] if spec and spec[-1].isalpha() else ''
+        if not spec or (type_char == '' and kind not in ('str', 'int')):
+            return False
+        return type_char in ('', 'd', 'f', 's') and bool(self._CORE_SPEC_RE.match(spec))
+
     def expr_JoinedStr(self, node, ctx):
         pieces = []
         for v in node.values:
@@ -3148,10 +4021,22 @@ class Compiler(boxclosure.ClosureMixin):
                         pieces.append(t)
                         continue
                     val = t
+                elif v.conversion == ord('s') and v.format_spec is not None:
+                    # !s with a spec: the spec applies to str(value)
+                    val = self._to_str_slot(val, cname, ctx)
                 if v.format_spec is not None:
                     if not (len(v.format_spec.values) == 1 and
-                           isinstance(v.format_spec.values[0], ast.Constant)):
-                        raise Unsupported('an f-string format spec that is itself computed')
+                           isinstance(v.format_spec.values[0], ast.Constant)) or \
+                            not self._core_fmtspec(v.format_spec.values[0].value, self.infer_kind(v.value, ctx)):
+                        # a spec the core's formatter does not build, or one computed at run time:
+                        # CPython's whole mini-language (safetyrt.FMT)
+                        specv = self.expr(v.format_spec, ctx)
+                        self.rt_needs.add('fmt')
+                        t = ctx.tmp()
+                        ctx.emit('st = ail2f_format(cx, &%s, %s, %s);' % (t, val, specv))
+                        ctx.check()
+                        pieces.append(t)
+                        continue
                     spec = v.format_spec.values[0].value
                     specslot = self._str_lit_slot(self._fmtspec_to_c(spec), ctx)
                     t = ctx.tmp()
@@ -3222,6 +4107,14 @@ class Compiler(boxclosure.ClosureMixin):
             if kw.arg is None:
                 raise Unsupported('a **kwargs call argument')
         f = node.func
+        if (isinstance(f, ast.Call) and isinstance(f.func, ast.Name) and f.func.id == 'getattr'
+                and 'getattr' not in self.functions and len(f.args) == 2 and not f.keywords
+                and isinstance(f.args[1], ast.Constant) and isinstance(f.args[1].value, str)
+                and f.args[1].value.isidentifier()):
+            # getattr(obj, "name")(...) is obj.name(...)
+            node = ast.copy_location(ast.Call(func=ast.Attribute(value=f.args[0], attr=f.args[1].value, ctx=ast.Load()),
+                                              args=node.args, keywords=node.keywords), node)
+            f = node.func
         # A single starred argument and nothing else (`f(*xs)`) -- xs's LENGTH is not known
         # until runtime, but every shape below still has a fixed-arity C calling convention
         # available: print(*xs) (the runtime's print already takes a (vals, n) array+count
@@ -3257,6 +4150,13 @@ class Compiler(boxclosure.ClosureMixin):
                 # `Cls(*xs)` with a fixed-arity __init__: as for a function, N is known from the definition
                 return self._call_class_fixed_star(f.id, init, node.args[0].value, ctx)
         if any(isinstance(a, ast.Starred) for a in node.args):
+            kwargs = {kw.arg: kw.value for kw in node.keywords}
+            if isinstance(f, ast.Name) and f.id == 'print' and 'print' not in self.functions:
+                # print(a, *xs, b): the arguments, stars expanded, as one list
+                return self._call_print_list(self._star_args_list(node.args, ctx), kwargs, ctx)
+            folded = self._star_fold(node)
+            if folded is not None:
+                return self.expr(folded, ctx)
             raise Unsupported('a starred (*args) call argument (only print(*xs), zip(*rows), '
                               'and a call to a def f(*args) or a fixed-arity def with no '
                               'defaults are modelled)')
@@ -3284,6 +4184,63 @@ class Compiler(boxclosure.ClosureMixin):
             self._extend_from_iter(lst, self._resolve_iter_src(star_val, ctx), ctx)
             return lst
         return self.expr(star_val, ctx)
+
+    def _star_args_list(self, args, ctx):
+        """The positional arguments of a call, starred ones expanded, left to right, as a new list."""
+        lst = ctx.tmp()
+        ctx.emit('%s = ail_list_new(cx);' % lst)
+        for a in args:
+            if isinstance(a, ast.Starred):
+                self._extend_from_iter(lst, self._resolve_iter_src(a.value, ctx), ctx)
+            else:
+                ctx.emit('ail_list_append(cx, %s, %s);' % (lst, self.expr(a, ctx)))
+        return lst
+
+    def _call_print_list(self, lst, kwargs, ctx):
+        if 'file' in kwargs or 'flush' in kwargs:
+            raise Unsupported('print() with file= or flush=')
+        sep = self.expr(kwargs['sep'], ctx) if 'sep' in kwargs else self._str_lit_slot(' ', ctx)
+        end = self.expr(kwargs['end'], ctx) if 'end' in kwargs else self._str_lit_slot('\n', ctx)
+        ctx.emit('st = ail2_do_print(cx, ((ail_vecobj *)(%s).o)->p, ((ail_vecobj *)(%s).o)->n, '
+                 '%s, %s);' % (lst, lst, sep, end))
+        ctx.check()
+        return 'ail_box_none()'
+
+    def _star_fold(self, node):
+        """`math.gcd(*xs)`, `math.lcm(*xs)`, `s.union(*sets)` / intersection / difference: the same fold written
+        with functools.reduce over the one starred argument (math.gcd() is 0, math.lcm() is 1)."""
+        if len(node.args) != 1 or not isinstance(node.args[0], ast.Starred) or node.keywords:
+            return None
+        f, seq = node.func, node.args[0].value
+        lam2 = None
+        init = None
+        if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and \
+                self.module_aliases.get(f.value.id) == 'math' and f.attr in ('gcd', 'lcm'):
+            lam2 = lambda a, b: ast.Call(func=ast.Attribute(value=ast.Name(id=f.value.id, ctx=ast.Load()), attr=f.attr,
+                                                            ctx=ast.Load()), args=[a, b], keywords=[])
+            init = ast.Constant(value=0 if f.attr == 'gcd' else 1)
+        elif isinstance(f, ast.Attribute) and f.attr in ('union', 'intersection', 'difference') and \
+                f.attr not in self.user_method_names:
+            # s.union(*xs) == reduce(lambda a, b: a.union(b), xs, s)
+            lam2 = lambda a, b: ast.Call(func=ast.Attribute(value=a, attr=f.attr, ctx=ast.Load()), args=[b], keywords=[])
+            init = f.value
+        if lam2 is None:
+            return None
+        a, b = ast.Name(id='_ak0', ctx=ast.Load()), ast.Name(id='_ak1', ctx=ast.Load())
+        lam = ast.Lambda(args=ast.arguments(posonlyargs=[], args=[ast.arg(arg='_ak0'), ast.arg(arg='_ak1')], vararg=None,
+                                            kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[]),
+                         body=lam2(a, b))
+        if not ('_ail_reduce' in self.from_imports):
+            self.from_imports['_ail_reduce'] = ('functools', 'reduce')
+        call = ast.Call(func=ast.Name(id='_ail_reduce', ctx=ast.Load()),
+                        args=[lam, seq, init], keywords=[])
+        if f.attr in ('union', 'intersection', 'difference'):
+            # the method is called on the receiver itself when there is nothing to fold: s.union() is a copy
+            call = ast.Call(func=ast.Name(id='_ail_reduce', ctx=ast.Load()),
+                            args=[lam, seq, ast.Call(func=ast.Attribute(value=init, attr='copy', ctx=ast.Load()), args=[],
+                                                     keywords=[])], keywords=[])
+        ast.fix_missing_locations(ast.copy_location(call, node))
+        return call
 
     def _call_print_star(self, star_val, kwargs, ctx):
         if 'file' in kwargs or 'flush' in kwargs:
@@ -3529,7 +4486,7 @@ class Compiler(boxclosure.ClosureMixin):
                 continue                                     # a list-returning candidate -- ditto
             mangled = pyfunc._mangle_csym(name) + '__typed'
             try:
-                info2 = {}
+                info2 = {'_checked_arrays': True}   # a clone gets its lists from boxed code: every index is checked
                 csrc = pyfunc.to_c(defs_src, entry=name, sig=pymix._scalar_sig(cand['params']),
                                    name=mangled, info=info2)
             except Exception:
@@ -3556,6 +4513,9 @@ class Compiler(boxclosure.ClosureMixin):
             sig_text = _mix_extract_signature(csrc, mangled)
             if sig_text is None or not _mix_validate_signature(sig_text, mangled, params, ret):
                 continue
+            csrc = _mix_drain_before_exit(csrc)
+            if csrc is None:
+                continue                                     # a trap path this patch does not know: stay boxed
             self.mix_typed[name] = {
                 'mangled': mangled, 'params': params, 'ret': ret,
                 'is_bool_ret': bool(cand.get('is_bool_ret')), 'sig': sig_text,
@@ -3664,12 +4624,31 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.check()
         return t
 
+    def _is_subclass_of(self, name, base):
+        seen = 0
+        while name in self.classes and seen < 64:
+            if name == base:
+                return True
+            name = self.classes[name]['base']
+            seen += 1
+        return False
+
+    def _is_exc_class(self, name):
+        """The class derives from a builtin exception class."""
+        seen = 0
+        while name in self.classes and seen < 64:
+            name = self.classes[name]['base']
+            seen += 1
+        return name in EXC_IDS
+
     def _call_class(self, name, args, kwargs, ctx):
         cls = self.classes[name]
         info = self._resolve_method(name, '__init__')
         t = ctx.tmp()
         ctx.emit('%s = ail_inst_new(cx, g_slots_arr[%d]);' %
                 (t, self.global_slots['class:' + name]))
+        if self._is_exc_class(name):
+            return self._call_exc_class(name, info, t, args, kwargs, ctx)
         # class attributes are copied onto the instance, base class first so a subclass value wins
         # (a class attribute the subclass does not redefine is read through the base, as CPython does)
         chain = []
@@ -3692,11 +4671,44 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('%s() called with arguments but has no __init__' % name)
         return t
 
+    def _call_exc_class(self, name, info, t, args, kwargs, ctx):
+        """An instance of an exception class of the program: args set as BaseException.__new__ sets them (the
+        call's positional arguments), then the class's __init__ (whose super().__init__ resets them), then the
+        message; the result is an exception value (safetyrt.EXC)."""
+        self.rt_needs.add('exc')
+        if any(isinstance(a, ast.Starred) for a in args):
+            raise Unsupported('an exception class called with a starred argument')
+        if info:
+            argcs = self._bind_args(name, info, args, kwargs, ctx)
+            positional = argcs[:len(args)]
+        else:
+            if kwargs:
+                raise Unsupported('%s() takes no keyword arguments' % name)
+            argcs = positional = [self.expr(a, ctx) for a in args]
+        tup = ctx.tmp()
+        if positional:
+            arr = ctx.new_cvar('ea')
+            ctx.emit('ail_obj %s[%d] = { %s };' % (arr, len(positional), ', '.join(positional)))
+            ctx.emit('%s = ail_tuple_new(cx, %s, %d);' % (tup, arr, len(positional)))
+        else:
+            ctx.emit('%s = ail_tuple_new(cx, NULL, 0);' % tup)
+        ctx.emit('st = ail2x_setargs(cx, %s, %s);' % (t, tup))
+        ctx.check()
+        if info:
+            dummy = ctx.tmp()
+            ctx.emit('st = %s(cx, &%s, %s%s);' % (info['cname'], dummy, t, ''.join(', ' + a for a in argcs)))
+            ctx.check()
+        ctx.emit('st = ail2x_finish(cx, &%s);' % t)
+        ctx.check()
+        return t
+
     def _call_fileprim(self, name, args, kwargs, ctx):
         """The stage-G7 file / os primitives (filelib.PRIMS) -> ailo_* (filert.py)."""
         ret, kinds = filelib.PRIMS[name]
         if filelib.is_sql_prim(name):
             raise Unsupported('sqlite3 is built in typed code only (the general path has no bytes values and no C handles)')
+        if ('bytes' in kinds or ret == 'bytes') and self.bytes_prelude and not filelib.is_proc_prim(name):
+            return self._call_bytes_fileprim(name, args, kwargs, ctx)
         if 'bytes' in kinds or ret == 'bytes':
             if filelib.is_proc_prim(name):
                 raise Unsupported('subprocess bytes: the general path has no bytes values, so they are built in typed code '
@@ -3717,6 +4729,27 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.check()
         return t
 
+    def _call_bytes_fileprim(self, name, args, kwargs, ctx):
+        """A binary-file primitive of filelib (`_ail_f_bread` ...) with the bytes of prelude_bytes.py."""
+        ret, kinds = filelib.PRIMS[name]
+        if kwargs or len(args) != len(kinds):
+            raise Unsupported('%s takes %d positional arguments' % (name, len(kinds)))
+        self.uses_fileio = True
+        self.rt_needs.update(('bytes', 'bytesfile'))
+        t = ctx.tmp()
+        if name == '_ail_f_bwrite':
+            h = self.expr(args[0], ctx)
+            raw = self._call_user_function('_ail_bs', [args[1]], {}, ctx)
+            ctx.emit('st = ail2bf_write(cx, &%s, %s, %s);' % (t, h, raw))
+            ctx.check()
+            return t
+        which = {'_ail_f_bread': 0, '_ail_f_breadline': 1, '_ail_f_bnext': 2}[name]
+        h = self.expr(args[0], ctx)
+        n = self.expr(args[1], ctx) if len(args) > 1 else 'ail_box_none()'
+        ctx.emit('st = ail2bf_read(cx, &%s, %s, %s, %d);' % (t, h, n, which))
+        ctx.check()
+        return self._call_user_function('_ail_mkb', [_PreC(t)], {}, ctx)
+
     # G9: the wall clock and the OS time zone (clockrt.py): name -> (C call, argument count)
     _CLOCK_PRIMS = {'_ail_time': ('ailc_gtime(cx, &{t})', 0), '_ail_time_ns': ('ailc_gtime_ns(cx, &{t})', 0),
                     '_ail_sleep_ns': ('ailc_gsleep_ns(cx, &{t}, {a0})', 1),
@@ -3736,6 +4769,23 @@ class Compiler(boxclosure.ClosureMixin):
         for i, each in enumerate(argcs):
             fields['a%d' % i] = each
         ctx.emit('st = %s;' % cfn.format(**fields))
+        ctx.check()
+        return t
+
+    def _call_safety_prim(self, name, args, kwargs, ctx):
+        """A primitive of the safetyrt.py preludes (C in safetyrt.FRAGMENTS)."""
+        import safetyrt
+        cfn, count, frag = safetyrt.PRIMS[name]
+        if kwargs or (count is not None and len(args) != count):
+            raise Unsupported('%s takes %d positional arguments' % (name, count))
+        self.rt_needs.add(frag)
+        argcs = [self.expr(a, ctx) for a in args]
+        t = ctx.tmp()
+        fields = {'t': t, 'arr': '(ail_obj[]){%s}' % ', '.join(argcs) if argcs else 'NULL', 'n': len(argcs)}
+        for i, each in enumerate(argcs):
+            fields['a%d' % i] = each
+        ctx.emit(('st = %s;' % cfn.format(**fields)) if not cfn.startswith('=') else
+                 '%s %s;' % (t, cfn.format(**fields)))
         ctx.check()
         return t
 
@@ -3795,6 +4845,10 @@ class Compiler(boxclosure.ClosureMixin):
             return self._call_thread_prim(name, args, kwargs, ctx)
         if name in self._CLOCK_PRIMS and name not in self.functions and name not in self.classes:
             return self._call_clock(name, args, kwargs, ctx)
+        if name.startswith('_ail_') and name not in self.functions and name not in self.classes:
+            import safetyrt
+            if name in safetyrt.PRIMS:
+                return self._call_safety_prim(name, args, kwargs, ctx)
         if name in self.classes:
             return self._call_class(name, args, kwargs, ctx)
         if name in ctx.nested_funcs:
@@ -3941,7 +4995,36 @@ class Compiler(boxclosure.ClosureMixin):
     def _b_print(self, args, kwargs, ctx):
         if any(isinstance(a, ast.Starred) for a in args):
             raise Unsupported('print(*args) with a starred argument')
-        if 'file' in kwargs or 'flush' in kwargs:
+        fobj = kwargs.get('file')
+
+        def sys_stream(n, name):
+            return (isinstance(n, ast.Attribute) and n.attr == name and isinstance(n.value, ast.Name)
+                    and n.value.id == 'sys' and 'sys' not in self.module_names)
+        if 'flush' in kwargs and not (fobj is None or sys_stream(fobj, 'stdout') or sys_stream(fobj, 'stderr')):
+            raise Unsupported('print() with file= or flush=')
+        if 'flush' in kwargs:
+            # the program's output is the same text whenever it is flushed
+            self.expr(kwargs['flush'], ctx)
+            kwargs = {k: v for k, v in kwargs.items() if k != 'flush'}
+        if fobj is not None and sys_stream(fobj, 'stdout'):
+            kwargs = {k: v for k, v in kwargs.items() if k != 'file'}
+        elif fobj is not None and sys_stream(fobj, 'stderr'):
+            # print(..., file=sys.stderr): the same text, written to stderr
+            def or_default(key, text):
+                v = kwargs.get(key)
+                if v is None or (isinstance(v, ast.Constant) and v.value is None):
+                    return ast.Constant(value=text)
+                return v
+            parts = ast.List(elts=[ast.Call(func=ast.Name(id='str', ctx=ast.Load()), args=[a], keywords=[])
+                                   for a in args], ctx=ast.Load())
+            text = ast.BinOp(left=ast.Call(func=ast.Attribute(value=or_default('sep', ' '), attr='join', ctx=ast.Load()),
+                                           args=[parts], keywords=[]),
+                             op=ast.Add(), right=or_default('end', '\n'))
+            call = ast.Call(func=ast.Name(id='_ail_stderr_write', ctx=ast.Load()), args=[text], keywords=[])
+            ast.fix_missing_locations(ast.copy_location(call, fobj))
+            self.expr(call, ctx)
+            return 'ail_box_none()'
+        elif fobj is not None:
             raise Unsupported('print() with file= or flush=')
         vs = []
         flags = []
@@ -4034,6 +5117,9 @@ class Compiler(boxclosure.ClosureMixin):
         return t
 
     def _conv(self, fname, fn, args, kwargs, ctx):
+        if not args and not kwargs and fname in ('int', 'float'):
+            # int() is 0, float() is 0.0
+            return 'ail_box_int(0)' if fname == 'int' else 'ail_box_float(cx, 0.0)'
         if len(args) != 1 or kwargs:
             raise Unsupported('%s() with other than exactly one positional argument' % fname)
         v = self.expr(args[0], ctx)
@@ -4114,6 +5200,8 @@ class Compiler(boxclosure.ClosureMixin):
         return t
 
     def _b_bool(self, args, kwargs, ctx):
+        if not args and not kwargs:
+            return 'ail_box_bool(0)'
         if len(args) != 1 or kwargs:
             raise Unsupported('bool() with other than exactly one positional argument')
         v = self.expr(args[0], ctx)
@@ -4225,6 +5313,106 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.check()
         return t
 
+    def _method_owners_check(self, obj_c, mname):
+        """C condition: obj is an instance of a class (or subclass of one) that defines the method `mname`."""
+        owners = [c for c in self.class_order if mname in self.classes[c]['methods']]
+        if not owners:
+            return '0'
+        return '(%s.tag == AIL_T_INST && (%s))' % (obj_c, ' || '.join(
+            'ail_class_is_or_subclass(((ail_instobj *)%s.o)->cls, g_slots_arr[%d])' % (obj_c, self.global_slots['class:' + c])
+            for c in owners))
+
+    def _attr_builtin_target(self, node):
+        if isinstance(node, ast.Name) and (node.id in self.module_aliases or node.id == 'sys'):
+            raise Unsupported('getattr / hasattr / setattr on the module %s (only instances of the program\'s classes)'
+                              % node.id)
+
+    def _b_getattr(self, args, kwargs, ctx):
+        if len(args) not in (2, 3) or kwargs:
+            raise Unsupported('getattr() with other than (object, name[, default])')
+        self._attr_builtin_target(args[0])
+        if isinstance(args[1], ast.Constant) and isinstance(args[1].value, str) and \
+                any(args[1].value in c['methods'] for c in self.classes.values()):
+            raise Unsupported('getattr() of the method %s as a value (getattr(obj, "%s")(...) is built)'
+                              % (args[1].value, args[1].value))
+        o, n = self.expr(args[0], ctx), self.expr(args[1], ctx)
+        d = self.expr(args[2], ctx) if len(args) == 3 else 'ail_box_none()'
+        self.rt_needs.add('attr')
+        t = ctx.tmp()
+        ctx.emit('st = ail2a_getattr(cx, &%s, %s, %s, %d, %s);' % (t, o, n, 1 if len(args) == 3 else 0, d))
+        ctx.check()
+        return t
+
+    def _b_hasattr(self, args, kwargs, ctx):
+        if len(args) != 2 or kwargs:
+            raise Unsupported('hasattr() with other than (object, name)')
+        self._attr_builtin_target(args[0])
+        o, n = self.expr(args[0], ctx), self.expr(args[1], ctx)
+        meth = '0'
+        if isinstance(args[1], ast.Constant) and isinstance(args[1].value, str):
+            meth = self._method_owners_check(o, args[1].value)
+        else:
+            # a name known at run time: compared with the methods of each class the object may belong to
+            conds = []
+            for c in self.class_order:
+                for m in sorted(self.classes[c]['methods']):
+                    conds.append('(ail2a_streq(%s, %s) && %s.tag == AIL_T_INST && ail_class_is_or_subclass('
+                                 '((ail_instobj *)%s.o)->cls, g_slots_arr[%d]))'
+                                 % (n, c_str_literal(m), o, o, self.global_slots['class:' + c]))
+            meth = '(%s)' % ' || '.join(conds) if conds else '0'
+        self.rt_needs.add('attr')
+        t = ctx.tmp()
+        ctx.emit('st = ail2a_hasattr(cx, &%s, %s, %s, %s);' % (t, o, n, meth))
+        ctx.check()
+        return t
+
+    def _b_setattr(self, args, kwargs, ctx):
+        if len(args) != 3 or kwargs:
+            raise Unsupported('setattr() with other than (object, name, value)')
+        self._attr_builtin_target(args[0])
+        o, n, v = (self.expr(a, ctx) for a in args)
+        self.rt_needs.add('attr')
+        t = ctx.tmp()
+        ctx.emit('st = ail2a_setattr(cx, &%s, %s, %s, %s);' % (t, o, n, v))
+        ctx.check()
+        return t
+
+    def _b_vars(self, args, kwargs, ctx):
+        if len(args) != 1 or kwargs:
+            raise Unsupported('vars() with other than one argument')
+        self._attr_builtin_target(args[0])
+        o = self.expr(args[0], ctx)
+        self.rt_needs.add('attr')
+        t = ctx.tmp()
+        ctx.emit('st = ail2a_vars(cx, &%s, %s);' % (t, o))
+        ctx.check()
+        return t
+
+    def _b_callable(self, args, kwargs, ctx):
+        if len(args) != 1 or kwargs:
+            raise Unsupported('callable() with other than one argument')
+        a = args[0]
+        if isinstance(a, ast.Attribute) and any(a.attr in c['methods'] for c in self.classes.values()):
+            # callable(obj.method): true for an instance whose class has the method, else the attribute's value decides
+            o = self.expr(a.value, ctx)
+            t = ctx.tmp()
+            ctx.emit('if (%s) %s = ail_box_bool(1); else {' % (self._method_owners_check(o, a.attr), t))
+            ctx.indent += 1
+            self.attr_names.add(a.attr)
+            v = ctx.tmp()
+            ctx.emit('st = ail_inst_getattr(cx, &%s, %s, g_attr_%s, %s);' % (v, o, a.attr, c_str_literal(a.attr)))
+            ctx.check()
+            ctx.emit('%s = ail_box_bool(%s.tag == AIL_T_FUNC || %s.tag == AIL_T_BOUND || %s.tag == AIL_T_CLASS);'
+                     % (t, v, v, v))
+            ctx.indent -= 1
+            ctx.emit('}')
+            return t
+        o = self.expr(args[0], ctx)
+        t = ctx.tmp()
+        ctx.emit('%s = ail_box_bool(%s.tag == AIL_T_FUNC || %s.tag == AIL_T_BOUND || %s.tag == AIL_T_CLASS || %s);'
+                 % (t, o, o, o, self._method_owners_check(o, '__call__')))
+        return t
+
     def _b_isinstance(self, args, kwargs, ctx):
         if len(args) != 2 or kwargs:
             raise Unsupported('isinstance() with other than 2 arguments')
@@ -4241,6 +5429,13 @@ class Compiler(boxclosure.ClosureMixin):
                 checks.append('%s.tag==%s' % (v, TYPE_TAG[tname]))
             elif tname == 'range':
                 checks.append('%s.tag==AIL_T_RANGE' % v)
+            elif tname in EXC_IDS and tname not in self.classes:
+                checks.append('((%s.tag==AIL_T_INST || %s.tag==AIL_T_EXC) && ail_class_is_or_subclass('
+                              '((ail_instobj *)%s.o)->cls, cx->builtin_cls[%s]))' % (v, v, v, EXC_IDS[tname]))
+            elif tname in self.classes and self._is_exc_class(tname):
+                checks.append('((%s.tag==AIL_T_INST || %s.tag==AIL_T_EXC) && ail_class_is_or_subclass('
+                              '((ail_instobj *)%s.o)->cls, g_slots_arr[%d]))' %
+                              (v, v, v, self.global_slots['class:' + tname]))
             elif tname in self.classes:
                 checks.append('(%s.tag==AIL_T_INST && ail_class_is_or_subclass('
                               '((ail_instobj *)%s.o)->cls, g_slots_arr[%d]))' %
@@ -4269,6 +5464,13 @@ class Compiler(boxclosure.ClosureMixin):
         return t
 
     def _b_zip(self, args, kwargs, ctx):
+        if len(args) > 2 and not kwargs and not any(isinstance(a, ast.Starred) for a in args):
+            z, parts = self._nested_zip(args)
+            lam = ast.Lambda(args=ast.arguments(posonlyargs=[], args=[ast.arg(arg='_akz')], vararg=None, kwonlyargs=[],
+                                                kw_defaults=[], kwarg=None, defaults=[]),
+                             body=ast.Tuple(elts=parts, ctx=ast.Load()))
+            ast.fix_missing_locations(ast.copy_location(lam, args[0]))
+            return self._b_map([lam, z], {}, ctx)
         if len(args) != 2 or (kwargs and set(kwargs) - {'strict'}):
             raise Unsupported('zip() with other than (a, b[, strict=])')
         a0 = self.expr(args[0], ctx)
@@ -4310,6 +5512,26 @@ class Compiler(boxclosure.ClosureMixin):
         return t
 
     def _lib_defaultdict(self, args, kwargs, ctx):
+        if not kwargs and len(args) == 1 and not (isinstance(args[0], ast.Name) and args[0].id in ('int', 'list', 'set', 'str')
+                                                   and args[0].id not in self.module_names):
+            # any other factory: a function the dict calls for a missing key (safetyrt.patch_defaultdict)
+            f = args[0]
+            if isinstance(f, ast.Constant) and f.value is None:
+                t = ctx.tmp()
+                ctx.emit('%s = ail_dict_new(cx);' % t)
+                return t
+            if not (isinstance(f, ast.Lambda) and not f.args.args and not f.args.vararg):
+                lam = ast.Lambda(args=ast.arguments(posonlyargs=[], args=[], vararg=None, kwonlyargs=[], kw_defaults=[],
+                                                    kwarg=None, defaults=[]),
+                                 body=ast.Call(func=f, args=[], keywords=[]))
+                ast.fix_missing_locations(ast.copy_location(lam, f))
+                f = lam
+            fnobj = self._wrap_cfunc(ctx, self._func_pointer_of(f, ctx))
+            self.rt_needs.add('ddict')
+            self.custom_dd = True
+            t = ctx.tmp()
+            ctx.emit('%s = ail_dict_new_default(cx, 5); ((ail_mapobj *)%s.o)->dd_fn = %s;' % (t, t, fnobj))
+            return t
         if kwargs or len(args) != 1 or not isinstance(args[0], ast.Name) or \
                 args[0].id not in ('int', 'list', 'set', 'str'):
             raise Unsupported('defaultdict() with other than exactly one of int/list/set/str '
@@ -4338,7 +5560,7 @@ class Compiler(boxclosure.ClosureMixin):
             lnames = [p.arg for p in la.args]
             free = _lambda_free_reads([ast.Expr(value=node.body)],
                                       set(lnames) | set(self.module_names) | set(self.classes) |
-                                      set(self.functions) | {'True', 'False', 'None'}, ctx)
+                                      set(self.functions) | set(self.from_imports) | set(self.module_aliases) | {'True', 'False', 'None'}, ctx)
             if free:
                 raise Unsupported('a lambda closing over a local variable (%s)' %
                                   ', '.join(sorted(free)))
@@ -4367,12 +5589,31 @@ class Compiler(boxclosure.ClosureMixin):
                 raise Unsupported('%s used as a %d-argument library callback but its arity '
                                   'does not match' % (node.id, arity))
             cname = 'plib_%s' % info['cname']
+            # one wrapper per function, however many callbacks name it
+            emitted = self.__dict__.setdefault('_plib_done', set())
+            if cname in emitted:
+                return cname
+            emitted.add(cname)
             params = ', '.join('ail_obj %s' % p for p in pnames)
             sig = 'ail_ctx *cx, ail_obj *out, %s, void *ud' % params
             self.top_decls.append('static ail_st %s(%s);\n' % (cname, sig))
             self.top_defs.append('static ail_st %s(%s) { (void)ud; return %s(cx, out, %s); }\n\n'
                                  % (cname, sig, info['cname'], ', '.join(pnames)))
             return cname
+        if isinstance(node, ast.Name) and self.from_imports.get(node.id, ('', ''))[0] == 'operator' \
+                and self.from_imports[node.id][1] in self._OPERATOR_FUNCS and arity == 2:
+            # `from operator import mul`: the operator itself
+            names = ['_ak0', '_ak1']
+            lam = ast.Lambda(args=ast.arguments(posonlyargs=[], args=[ast.arg(arg=n) for n in names], vararg=None,
+                                                kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[]),
+                             body=ast.BinOp(left=ast.Name(id='_ak0', ctx=ast.Load()),
+                                            op=self._OPERATOR_FUNCS[self.from_imports[node.id][1]](),
+                                            right=ast.Name(id='_ak1', ctx=ast.Load())))
+            ast.fix_missing_locations(ast.copy_location(lam, node))
+            return self._func_pointer_lib(lam, ctx, arity)
+        synth = self._callable_as_lambda(node, arity, ctx)
+        if synth is not None:
+            return self._func_pointer_lib(synth, ctx, arity)
         raise Unsupported('a library callback that is not a lambda or a %d-argument def' % arity)
 
     def _lib_reduce(self, args, kwargs, ctx):
@@ -4638,6 +5879,15 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('format() with other than (value[, spec])')
         v = self.expr(args[0], ctx)
         has_spec = len(args) == 2
+        if has_spec and not (isinstance(args[1], ast.Constant) and isinstance(args[1].value, str)
+                             and self._core_fmtspec(args[1].value, self.infer_kind(args[0], ctx))):
+            # CPython's whole mini-language (safetyrt.FMT)
+            spec = self.expr(args[1], ctx)
+            self.rt_needs.add('fmt')
+            t = ctx.tmp()
+            ctx.emit('st = ail2f_format(cx, &%s, %s, %s);' % (t, v, spec))
+            ctx.check()
+            return t
         spec = self.expr(args[1], ctx) if has_spec else self._str_lit_slot('', ctx)
         t = ctx.tmp()
         ctx.emit('st = ail_bi_format(cx, &%s, %s, %d, %s);' % (t, v, 1 if has_spec else 0, spec))
@@ -4665,6 +5915,21 @@ class Compiler(boxclosure.ClosureMixin):
     def _b_next(self, args, kwargs, ctx):
         if len(args) not in (1, 2) or kwargs:
             raise Unsupported('next() with other than (iterator[, default])')
+        if isinstance(args[0], ast.GeneratorExp):
+            # the loops of the generator expression stop at its first element (nothing after it is evaluated)
+            t = ctx.tmp()
+            found = ctx.new_label('next')
+
+            def add(n, c, _t):
+                c.emit('%s = %s; goto %s;' % (t, self.expr(n.elt, c), found))
+            self._emit_comp(args[0], ctx, 'ail_box_none()', add)
+            if len(args) == 2:
+                ctx.emit('%s = %s;' % (t, self.expr(args[1], ctx)))
+            else:
+                ctx.emit('st = ail_raise_c(cx, AIL_B_STOPITERATION, ""); goto %s;' % ctx.cur_err_target())
+                ctx.uses_st = True
+            ctx.emit('%s: ;' % found)
+            return t
         v = self.expr(args[0], ctx)
         t = ctx.tmp()
         if len(args) == 2:
@@ -4687,7 +5952,7 @@ class Compiler(boxclosure.ClosureMixin):
             pname = a.args[0].arg if a.args else '_x'
             free = _lambda_free_reads([ast.Expr(value=node.body)],
                                       {pname} | set(self.module_names) | set(self.classes) |
-                                      set(self.functions) | {'True', 'False', 'None'}, ctx)
+                                      set(self.functions) | set(self.from_imports) | set(self.module_aliases) | {'True', 'False', 'None'}, ctx)
             # A local of the enclosing function that the lambda only reads is captured BY VALUE when the
             # key function object is built (`_wrap_cfunc` / `_minmax` hand the values over as the
             # closure cells); the lambda runs inside the call it is an argument of, so the value cannot
@@ -4750,7 +6015,10 @@ class Compiler(boxclosure.ClosureMixin):
             body = {'str': '*out = ail_obj_str(cx, arg); return AIL_OK;',
                    'len': 'return ail_op_len(cx, out, arg);',
                    'abs': None}[node.id]
-            if node.id == 'abs':
+            if node.id == 'abs' and self.dunder_ops:
+                # an instance may define __abs__ (dunderrt.py patches ail_bi_abs to ask the class)
+                body = 'return ail_bi_abs(cx, out, arg);'
+            elif node.id == 'abs':
                 body = ('if (arg.tag == AIL_T_FLOAT) { *out = ail_box_float(cx, fabs('
                         'ail_float_val(arg))); return AIL_OK; } '
                         'if (arg.i < 0) return ail_op_neg(cx, out, arg); *out = arg; '
@@ -4761,8 +6029,50 @@ class Compiler(boxclosure.ClosureMixin):
                 'static ail_st %s(ail_ctx *cx, ail_obj *out, ail_obj arg, void *closure) {\n'
                 '    (void)closure; %s\n}\n\n' % (wrap, body))
             return wrap
+        synth = self._callable_as_lambda(node, 1, ctx)
+        if synth is not None:
+            return self._func_pointer_of(synth, ctx)
         raise Unsupported('a key=/map() argument that is not a lambda, a one-argument def, or '
                           'one of int/float/str/abs/len')
+
+    _OPERATOR_FUNCS = {'add': ast.Add, 'sub': ast.Sub, 'mul': ast.Mult, 'truediv': ast.Div, 'floordiv': ast.FloorDiv,
+                       'mod': ast.Mod, 'pow': ast.Pow, 'and_': ast.BitAnd, 'or_': ast.BitOr, 'xor': ast.BitXor,
+                       'lshift': ast.LShift, 'rshift': ast.RShift}
+
+    def _callable_as_lambda(self, node, arity, ctx):
+        """`key=ord`, `key=str.lower`, `key=d.get`, `map(int, ...)`, `reduce(operator.add, ...)`: the function value
+        written as the lambda that calls it (`lambda _ak0: ord(_ak0)`), which the callers above compile. A name
+        must be a builtin, a function of the program or a local holding a function; an attribute is read when the
+        lambda runs, as the bound method CPython would have fetched (branch safetynet)."""
+        names = ['_ak%d' % i for i in range(arity)]
+        args = [ast.Name(id=n, ctx=ast.Load()) for n in names]
+        lam_args = ast.arguments(posonlyargs=[], args=[ast.arg(arg=n) for n in names], vararg=None, kwonlyargs=[],
+                                 kw_defaults=[], kwarg=None, defaults=[])
+        body = None
+        if isinstance(node, ast.Name):
+            if node.id in self.classes:
+                body = ast.Call(func=node, args=args, keywords=[])
+            elif node.id in _BUILTIN_NAMES and node.id not in self.module_names and node.id not in self.functions:
+                body = ast.Call(func=node, args=args, keywords=[])
+            elif node.id in self.functions or node.id in self.module_names or node.id in ctx.slot_of:
+                body = ast.Call(func=node, args=args, keywords=[])
+        elif isinstance(node, ast.Attribute):
+            if (isinstance(node.value, ast.Name) and node.value.id == 'str' and 'str' not in self.classes
+                    and 'str' not in self.module_names):
+                # str.lower -> lambda s: s.lower()
+                body = ast.Call(func=ast.Attribute(value=args[0], attr=node.attr, ctx=ast.Load()), args=args[1:],
+                                keywords=[])
+            elif (isinstance(node.value, ast.Name) and self.module_aliases.get(node.value.id) == 'operator'
+                  and node.attr in self._OPERATOR_FUNCS and arity == 2):
+                body = ast.BinOp(left=args[0], op=self._OPERATOR_FUNCS[node.attr](), right=args[1])
+            elif isinstance(node.value, (ast.Name, ast.Attribute)):
+                body = ast.Call(func=node, args=args, keywords=[])
+        if body is None:
+            return None
+        lam = ast.Lambda(args=lam_args, body=body)
+        ast.copy_location(lam, node)
+        ast.fix_missing_locations(lam)
+        return lam
 
     def _wrap_cfunc(self, ctx, cname):
         """A bare C function pointer (from _func_pointer_of, `ail_cfunc1`-shaped) wrapped into a
@@ -4794,6 +6104,9 @@ class Compiler(boxclosure.ClosureMixin):
         t = ctx.tmp()
         ctx.emit('%s = ail_list_new(cx);' % t)
         self._extend_from_iter(t, src, ctx, ordered=('key' in kwargs))
+        if 'key' in kwargs and self._cmp_to_key_arg(kwargs['key']) is not None:
+            self._sort_with_cmp(t, kwargs, ctx, 'sorted()')
+            return t
         keyfn = self._wrap_cfunc(ctx, self._func_pointer_of(kwargs['key'], ctx)) \
             if 'key' in kwargs else 'ail_box_none()'
         if 'reverse' in kwargs:
@@ -4807,7 +6120,63 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.check()
         return t
 
+    def _nested_zip(self, iters):
+        """zip(a, b, c, ...) as zip(zip(zip(a, b), c), ...) and a map that flattens each item back to (x, y, z, ...)."""
+        z = ast.Call(func=ast.Name(id='zip', ctx=ast.Load()), args=list(iters[:2]), keywords=[])
+        for extra in iters[2:]:
+            z = ast.Call(func=ast.Name(id='zip', ctx=ast.Load()), args=[z, extra], keywords=[])
+        n = len(iters)
+
+        def path(i):
+            # item i of the nested pair: ((a, b), c) -> a = p[0][0], b = p[0][1], c = p[1]
+            node = ast.Name(id='_akz', ctx=ast.Load())
+            idx = []
+            if i == 0:
+                idx = [0] * (n - 1)
+            else:
+                idx = [0] * (n - 1 - i) + [1]
+            for k in idx:
+                node = ast.Subscript(value=node, slice=ast.Constant(value=k), ctx=ast.Load())
+            return node
+        return z, [path(i) for i in range(n)]
+
+    def _apply_callable(self, f, parts):
+        """The expression `f(*parts)`: a lambda's body with its parameters replaced, an operator function's operator,
+        else the call."""
+        if isinstance(f, ast.Lambda):
+            if len(f.args.args) != len(parts) or f.args.vararg or f.args.defaults or f.args.kwonlyargs:
+                raise Unsupported('map() with a lambda of the wrong arity')
+            names = {a.arg: p for a, p in zip(f.args.args, parts)}
+
+            class Sub(ast.NodeTransformer):
+                def visit_Name(self, node):
+                    if node.id in names and isinstance(node.ctx, ast.Load):
+                        return copy.deepcopy(names[node.id])
+                    return node
+
+                def visit_Lambda(self, node):
+                    return node
+            return Sub().visit(copy.deepcopy(f.body))
+        op = None
+        if isinstance(f, ast.Name) and self.from_imports.get(f.id, ('', ''))[0] == 'operator':
+            op = self._OPERATOR_FUNCS.get(self.from_imports[f.id][1])
+        elif (isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name)
+              and self.module_aliases.get(f.value.id) == 'operator'):
+            op = self._OPERATOR_FUNCS.get(f.attr)
+        if op is not None and len(parts) == 2:
+            return ast.BinOp(left=parts[0], op=op(), right=parts[1])
+        return ast.Call(func=f, args=parts, keywords=[])
+
     def _b_map(self, args, kwargs, ctx):
+        if len(args) > 2 and not kwargs and not any(isinstance(a, ast.Starred) for a in args):
+            # map(f, a, b, ...): f applied to the items of zip(a, b, ...), stopping at the shortest
+            z, parts = self._nested_zip(args[1:])
+            f = args[0]
+            lam = ast.Lambda(args=ast.arguments(posonlyargs=[], args=[ast.arg(arg='_akz')], vararg=None, kwonlyargs=[],
+                                                kw_defaults=[], kwarg=None, defaults=[]), body=None)
+            lam.body = self._apply_callable(f, parts)
+            ast.fix_missing_locations(ast.copy_location(lam, f))
+            return self._b_map([lam, z], {}, ctx)
         if len(args) != 2 or kwargs:
             raise Unsupported('map() with other than exactly (function, iterable)')
         fn = self._func_pointer_of(args[0], ctx)
@@ -5172,6 +6541,21 @@ class Compiler(boxclosure.ClosureMixin):
             if base is None:
                 raise Unsupported('super() in a class with no base class')
             info = self._resolve_method(base, f.attr)
+            if info is None and f.attr == '__init__' and self._is_exc_class(ctx.owner_class) and not kwargs \
+                    and not any(isinstance(a, ast.Starred) for a in args):
+                # BaseException.__init__(*args): the exception's args
+                vals = [self.expr(a, ctx) for a in args]
+                tup = ctx.tmp()
+                if vals:
+                    arr = ctx.new_cvar('ea')
+                    ctx.emit('ail_obj %s[%d] = { %s };' % (arr, len(vals), ', '.join(vals)))
+                    ctx.emit('%s = ail_tuple_new(cx, %s, %d);' % (tup, arr, len(vals)))
+                else:
+                    ctx.emit('%s = ail_tuple_new(cx, NULL, 0);' % tup)
+                self.rt_needs.add('exc')
+                ctx.emit('st = ail2x_setargs(cx, %s, %s);' % (self.name_ref(ctx.self_name, ctx), tup))
+                ctx.check()
+                return 'ail_box_none()'
             if info is None:
                 raise Unsupported('super().%s() -- no such method on the base class' % f.attr)
             argcs = [self.name_ref(ctx.self_name, ctx)] + self._bind_args(f.attr, info, args, kwargs, ctx)
@@ -5182,6 +6566,23 @@ class Compiler(boxclosure.ClosureMixin):
             return t
         if isinstance(recv, ast.Name) and recv.id == 'dict' and f.attr == 'fromkeys':
             return self._dict_fromkeys(args, kwargs, ctx)
+        if (isinstance(recv, ast.Name) and recv.id in self.classes and recv.id not in ctx.slot_of
+                and recv.id not in self.module_names):
+            # `C.f(...)` of a @staticmethod: the function itself, with the arguments as written; of a @classmethod: C first
+            info = self._resolve_method(recv.id, f.attr)
+            if info is not None and info.get('is_classmethod'):
+                argcs = ['g_slots_arr[%d]' % self.global_slots['class:' + recv.id]] + \
+                    self._bind_args(f.attr, info, args, kwargs, ctx)
+                t = ctx.tmp()
+                ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t, ''.join(', ' + a for a in argcs)))
+                ctx.check()
+                return t
+            if info is not None and info.get('is_static'):
+                argcs = self._bind_args(f.attr, info, args, kwargs, ctx)
+                t = ctx.tmp()
+                ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t, ''.join(', ' + a for a in argcs)))
+                ctx.check()
+                return t
         if (isinstance(recv, ast.Name) and recv.id in self.classes and recv.id not in ctx.slot_of
                 and recv.id not in self.module_names and args and not isinstance(args[0], ast.Starred)):
             # `Base.m(self, x)`: the method as Base resolves it, called on the object passed first
@@ -5203,13 +6604,13 @@ class Compiler(boxclosure.ClosureMixin):
 
                 def mkargs(info, recv_c=recv_c, pargs=pargs, pkw=pkw):
                     a = self._bind_args(f.attr, info, pargs, pkw, ctx)
-                    return a if info.get('is_static') else [recv_c] + a
+                    return a if info.get('is_static') else [self._self_arg(info, recv_c)] + a
                 return self._emit_virtual(plan, recv_c, mkargs, ctx, f.attr)
             info = self._resolve_method(cname, f.attr)
             if info:
                 argcs = self._bind_args(f.attr, info, args, kwargs, ctx)
                 if not info.get('is_static'):
-                    argcs = [recv_c] + argcs
+                    argcs = [self._self_arg(info, recv_c)] + argcs
                 t = ctx.tmp()
                 ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t,
                          ''.join(', ' + a for a in argcs)))
@@ -5257,6 +6658,13 @@ class Compiler(boxclosure.ClosureMixin):
         raise Unsupported('the method .%s() (on a %s)' % (f.attr, kind or 'value of unknown '
                                                           'static kind'))
 
+    @staticmethod
+    def _self_arg(info, recv_c):
+        """The first argument of a method called on recv: the object, or for a @classmethod its class."""
+        if info.get('is_classmethod'):
+            return '((ail_instobj *)(%s).o)->cls' % recv_c
+        return recv_c
+
     def _dynamic_user_method(self, recv_c, f, args, kwargs, ctx, builtin):
         """`x.meth(...)` where the receiver's class is not known statically but some user class
         defines `meth`: test the run-time class (most derived first) and call that method; any
@@ -5273,7 +6681,11 @@ class Compiler(boxclosure.ClosureMixin):
             return None
         owners.sort(key=depth, reverse=True)
         t = ctx.tmp()
-        ctx.emit('if (%s.tag == AIL_T_INST) {' % recv_c)
+        if any(self._is_exc_class(c) for c in owners):
+            # an exception object is an exception value (safetyrt.EXC) and has its class's methods too
+            ctx.emit('if (%s.tag == AIL_T_INST || %s.tag == AIL_T_EXC) {' % (recv_c, recv_c))
+        else:
+            ctx.emit('if (%s.tag == AIL_T_INST) {' % recv_c)
         ctx.indent += 1
         first = True
         for c in owners:
@@ -5284,7 +6696,7 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.indent += 1
             argcs = self._bind_args(f.attr, info, args, kwargs, ctx)
             if not info.get('is_static'):
-                argcs = [recv_c] + argcs
+                argcs = [self._self_arg(info, recv_c)] + argcs
             ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t, ''.join(', ' + a for a in argcs)))
             ctx.check()
             ctx.indent -= 1
@@ -5554,9 +6966,49 @@ class Compiler(boxclosure.ClosureMixin):
         }, "object has no attribute 'count'")
         return t
 
+    def _cmp_to_key_arg(self, node):
+        """f for `functools.cmp_to_key(f)` / `cmp_to_key(f)`, else None."""
+        if isinstance(node, ast.Call) and len(node.args) == 1 and not node.keywords:
+            f = node.func
+            if isinstance(f, ast.Name) and self.from_imports.get(f.id) == ('functools', 'cmp_to_key'):
+                return node.args[0]
+            if (isinstance(f, ast.Attribute) and f.attr == 'cmp_to_key' and isinstance(f.value, ast.Name)
+                    and self.module_aliases.get(f.value.id) == 'functools'):
+                return node.args[0]
+        return None
+
+    def _sort_with_cmp(self, lst, kwargs, ctx, what):
+        """Sort `lst` in place by the comparison function of cmp_to_key; reverse=True compares the other way round,
+        which keeps equal items in their order as CPython's reverse sort does."""
+        rev = False
+        if 'reverse' in kwargs:
+            if not (isinstance(kwargs['reverse'], ast.Constant) and isinstance(kwargs['reverse'].value, bool)):
+                raise Unsupported('%s with a non-constant reverse=' % what)
+            rev = kwargs['reverse'].value
+        f = self._cmp_to_key_arg(kwargs['key'])
+        if rev:
+            lam = ast.Lambda(args=ast.arguments(posonlyargs=[], args=[ast.arg(arg='_ak0'), ast.arg(arg='_ak1')],
+                                                vararg=None, kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[]),
+                             body=ast.Call(func=f, args=[ast.Name(id='_ak1', ctx=ast.Load()),
+                                                         ast.Name(id='_ak0', ctx=ast.Load())], keywords=[]))
+            ast.fix_missing_locations(ast.copy_location(lam, f))
+            fn = self._func_pointer_lib(lam, ctx, 2)
+        else:
+            fn = self._func_pointer_lib(f, ctx, 2)
+        ctx.emit('st = ail_functools_sort_with_cmp(cx, %s, %s, NULL);' % (lst, fn))
+        ctx.check()
+
     def _m_sort(self, recv, kind, args, kwargs, ctx):
         if args:
             raise Unsupported('.sort() with positional arguments')
+        if 'key' in kwargs and self._cmp_to_key_arg(kwargs['key']) is not None:
+            if kind not in ('list', None):
+                raise Unsupported('.sort(key=cmp_to_key(...)) on a %s' % kind)
+            ctx.emit('if (%s.tag != AIL_T_LIST) { st = ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, "object has no attribute '
+                     '\'sort\'"); goto %s; }' % (recv, ctx.cur_err_target()))
+            ctx.uses_st = True
+            self._sort_with_cmp(recv, kwargs, ctx, '.sort()')
+            return 'ail_box_none()'
         keyfn = self._wrap_cfunc(ctx, self._func_pointer_of(kwargs['key'], ctx)) \
             if 'key' in kwargs else 'ail_box_none()'
         rev = '0'
@@ -5887,7 +7339,8 @@ class Compiler(boxclosure.ClosureMixin):
         via the same ail_iter/ail_next loop every other iterable-consuming builtin here uses."""
         elt_kind = self.infer_kind(args[0], ctx)
         src = self._resolve_iter_src(args[0], ctx)
-        if elt_kind == 'list':
+        # `d.values()` of a proven dict is walked as an iterator (_resolve_iter_src), not the list it would be
+        if elt_kind == 'list' and not self._is_dict_view_call(args[0], ctx):
             lst = src
         else:
             lst = ctx.tmp()
@@ -6026,10 +7479,55 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.emit('%s = ail_box_bool(ail_str_isdigit(cx, ail_view_to_str(%s)));' % (t, recv))
         return t
 
-    def _m_isalpha(self, recv, kind, args, kwargs, ctx):
+    _UNICODE_PRED = {'isalpha': 0, 'isalnum': 1, 'isupper': 2, 'islower': 3, 'istitle': 4}
+
+    def _unicode_pred(self, name, recv, ctx):
+        """str.isalpha / isalnum / isupper / islower / istitle over all of Unicode (safetyrt.STRPRED2)."""
+        self.rt_needs.add('strpred')
         t = ctx.tmp()
-        ctx.emit('%s = ail_box_bool(ail_str_isalpha(ail_view_to_str(%s)));' % (t, recv))
+        ctx.emit('st = ail2p_method(cx, &%s, %s, %d, "%s");' % (t, recv, self._UNICODE_PRED[name], name))
+        ctx.check()
         return t
+
+    def _m_isalpha(self, recv, kind, args, kwargs, ctx):
+        return self._unicode_pred('isalpha', recv, ctx)
+
+    def _num_method(self, name, recv, cond, value, ctx):
+        """A method of int (or float) on a value: CPython's AttributeError for any other kind."""
+        t = ctx.tmp()
+        ctx.emit('if (!(%s)) { char _m[128]; snprintf(_m, sizeof _m, "\'%%s\' object has no attribute \'%s\'", '
+                 'ail_type_name(%s.tag)); st = ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, _m); goto %s; }'
+                 % (cond, name, recv, ctx.cur_err_target()))
+        ctx.uses_st = True
+        ctx.emit('%s = %s;' % (t, value))
+        return t
+
+    def _m_bit_length(self, recv, kind, args, kwargs, ctx):
+        if args or kwargs:
+            raise Unsupported('int.bit_length() takes no arguments')
+        x = '(%s).i' % recv
+        mag = '(%s < 0 ? (uint64_t)0 - (uint64_t)%s : (uint64_t)%s)' % (x, x, x)
+        return self._num_method('bit_length', recv, '%s.tag == AIL_T_INT || %s.tag == AIL_T_BOOL' % (recv, recv),
+                                'ail_box_int(%s ? 64 - __builtin_clzll(%s) : 0)' % (mag, mag), ctx)
+
+    def _m_bit_count(self, recv, kind, args, kwargs, ctx):
+        if args or kwargs:
+            raise Unsupported('int.bit_count() takes no arguments')
+        x = '(%s).i' % recv
+        mag = '(%s < 0 ? (uint64_t)0 - (uint64_t)%s : (uint64_t)%s)' % (x, x, x)
+        return self._num_method('bit_count', recv, '%s.tag == AIL_T_INT || %s.tag == AIL_T_BOOL' % (recv, recv),
+                                'ail_box_int(__builtin_popcountll(%s))' % mag, ctx)
+
+    def _m_is_integer(self, recv, kind, args, kwargs, ctx):
+        if args or kwargs:
+            raise Unsupported('is_integer() takes no arguments')
+        return self._num_method(
+            'is_integer', recv, '%s.tag == AIL_T_INT || %s.tag == AIL_T_BOOL || %s.tag == AIL_T_FLOAT' % (recv, recv, recv),
+            'ail_box_bool(%s.tag != AIL_T_FLOAT || (isfinite(ail_float_val(%s)) && floor(ail_float_val(%s)) == '
+            'ail_float_val(%s)))' % (recv, recv, recv, recv), ctx)
+
+    def _m_istitle(self, recv, kind, args, kwargs, ctx):
+        return self._unicode_pred('istitle', recv, ctx)
 
     def _m_isascii(self, recv, kind, args, kwargs, ctx):
         if kind not in ('str', None):
@@ -6085,8 +7583,22 @@ class Compiler(boxclosure.ClosureMixin):
         return 'ail_view_to_str(%s).p[0]' % v
 
     def _pad_method(self, fn, recv, args, kwargs, ctx):
+        fill = args[1] if len(args) > 1 else None
+        if fill is not None and not (isinstance(fill, ast.Constant) and isinstance(fill.value, str)
+                                     and len(fill.value) == 1 and ord(fill.value) < 0x10000):
+            # a fill that is not one BMP character known now: checked at run time (TypeError for
+            # a str of any other length or a non-str, as CPython), and written whole (a character
+            # outside the BMP is two UTF-16 units here)
+            width = '(%s).i' % self.expr(args[0], ctx)
+            fill_c = self.expr(fill, ctx)
+            t = ctx.tmp()
+            self.needs_padfill = True
+            mode = {'ail_meth_str_ljust': 0, 'ail_meth_str_rjust': 1, 'ail_meth_str_center': 2}[fn]
+            ctx.emit('st = ail_meth_str_pad_fill(cx, &%s, %s, %s, %s, %d);' % (t, recv, width, fill_c, mode))
+            ctx.check()
+            return t
         width = '(%s).i' % self.expr(args[0], ctx)
-        fillchar = self._one_char(args[1] if len(args) > 1 else None, ctx)
+        fillchar = self._one_char(fill, ctx)
         t = ctx.tmp()
         ctx.emit('%s = %s(cx, %s, %s, %s);' % (t, fn, recv, width, fillchar))
         return t
@@ -6125,6 +7637,17 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _str_predicate(self, name, recv, ctx):
         key = 'str.' + name
+        if name in self._UNICODE_PRED and key not in self.names_methods:
+            return self._unicode_pred(name, recv, ctx)
+        if name in ('isdecimal', 'isnumeric') and key not in self.names_methods:
+            # CPython's own tables (the core's DIGITS), on a str; anything else has no such attribute
+            t = ctx.tmp()
+            ctx.emit('if (%s.tag != AIL_T_STR) { char _m[128]; snprintf(_m, sizeof _m, "\'%%s\' object has no attribute '
+                     '\'%s\'", ail_type_name(%s.tag)); st = ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, _m); goto %s; }'
+                     % (recv, name, recv, ctx.cur_err_target()))
+            ctx.uses_st = True
+            ctx.emit('%s = ail_box_bool(ail_str_%s(cx, ail_view_to_str(%s)));' % (t, name, recv))
+            return t
         if key not in self.names_methods:
             # the method tables are not shipped with this tree; str.isspace has a runtime function of its
             # own (isupper / islower / isalnum stop on a non-ASCII character there, so they stay refused)
@@ -6217,14 +7740,36 @@ class Compiler(boxclosure.ClosureMixin):
         if isinstance(target, ast.Attribute):
             obj = self.expr(target.value, ctx)
             self.attr_names.add(target.attr)
+            setters = [c for c in self.class_order if '__ail_set_' + target.attr in self.classes[c]['methods']]
+            if setters:
+                # obj.NAME = v where a class has a property setter for NAME
+                first = True
+                for c in setters:
+                    info = self.classes[c]['methods']['__ail_set_' + target.attr]
+                    ctx.emit('%sif (%s) {' % ('' if first else '} else ', self._property_owner_cond(obj, c)))
+                    first = False
+                    ctx.indent += 1
+                    dummy = ctx.tmp()
+                    ctx.emit('st = %s(cx, &%s, %s, %s);' % (info['cname'], dummy, obj, value_c))
+                    ctx.check()
+                    ctx.indent -= 1
+                ctx.emit('} else {')
+                ctx.emit('    ail_inst_setattr(cx, %s, g_attr_%s, %s);' % (obj, target.attr, value_c))
+                ctx.emit('}')
+                return
             ctx.emit('ail_inst_setattr(cx, %s, g_attr_%s, %s);' % (obj, target.attr, value_c))
             return
         if isinstance(target, ast.Subscript):
             c = self.expr(target.value, ctx)
             if isinstance(target.slice, ast.Slice):
-                raise Unsupported('slice assignment (lst[a:b] = ...)')
+                self._store_slice(target, c, value_c, ctx, delete=False)
+                return
             key = self.expr(target.slice, ctx)
-            ctx.emit('st = ail_op_setitem(cx, %s, %s, %s);' % (c, key, value_c))
+            if self.want_slice and self.infer_kind(target.slice, ctx) not in ('int', 'bool', 'str'):
+                ctx.emit('st = ail2s_setitem(cx, %s, %s, %s, g_slots_arr[%d], 0);'
+                         % (c, key, value_c, self.global_slots['class:slice']))
+            else:
+                ctx.emit('st = ail_op_setitem(cx, %s, %s, %s);' % (c, key, value_c))
             ctx.check()
             return
         if isinstance(target, (ast.Tuple, ast.List)):
@@ -6263,6 +7808,21 @@ class Compiler(boxclosure.ClosureMixin):
                 # a real sequence), so `a, b = map(...)` / `a, b = zip(...)` / any other lazy
                 # ITER value unpack correctly instead of hitting "object of type 'iterator' has
                 # no len()" (found via the vibe corpus's own t20: `a, b = map(int, ...)`).
+                if self.lib_tuples and any(c.startswith('_AilT_') for c in self.classes) and '__iter__' not in self.user_method_names:
+                    # a record class of the tuple pass (tuplib.py) that reaches this unpack through a library call
+                    # (random.choice(moves), max(pairs) ...): its fields are the elements
+                    n = len(target.elts)
+                    ctx.emit('if (%s.tag == AIL_T_INST) {' % vt)
+                    ctx.indent += 1
+                    ctx.emit('ail_obj _rec[%d];' % n)
+                    for i in range(n):
+                        self.attr_names.add('f%d' % i)
+                        ctx.emit('st = ail_inst_getattr(cx, &_rec[%d], %s, g_attr_f%d, "f%d"); if (st != AIL_OK) goto %s;' %
+                                 (i, vt, i, i, ctx.cur_err_target()))
+                    ctx.emit('%s = ail_tuple_new(cx, _rec, %d);' % (vt, n))
+                    ctx.indent -= 1
+                    ctx.emit('}')
+                    ctx.uses_st = True
                 itv = ctx.tmp()
                 ctx.emit('st = ail_iter(cx, &%s, %s);' % (itv, vt))
                 ctx.check()
@@ -6348,7 +7908,7 @@ class Compiler(boxclosure.ClosureMixin):
         if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) and \
                 isinstance(node.value, ast.Call) and \
                 isinstance(node.value.func, ast.Attribute) and \
-                node.value.func.attr == 'split' and \
+                node.value.func.attr == 'split' and self._builtin_method_proven(node.value, ctx) and \
                 not node.value.keywords and len(node.value.args) <= 1 and \
                 self._list_poolable(node.targets[0].id, ctx):
             recv = self.expr(node.value.func.value, ctx)
@@ -6619,10 +8179,45 @@ class Compiler(boxclosure.ClosureMixin):
             elif isinstance(target, ast.Subscript) and not isinstance(target.slice, ast.Slice):
                 c = self.expr(target.value, ctx)
                 key = self.expr(target.slice, ctx)
-                ctx.emit('st = ail_op_delitem(cx, %s, %s);' % (c, key))
+                if self.want_slice and self.infer_kind(target.slice, ctx) not in ('int', 'bool', 'str'):
+                    ctx.emit('st = ail2s_setitem(cx, %s, %s, ail_box_none(), g_slots_arr[%d], 1);'
+                             % (c, key, self.global_slots['class:slice']))
+                else:
+                    ctx.emit('st = ail_op_delitem(cx, %s, %s);' % (c, key))
                 ctx.check()
+            elif isinstance(target, ast.Subscript):
+                self._store_slice(target, self.expr(target.value, ctx), None, ctx, delete=True)
             else:
                 raise Unsupported('del on a %s' % type(target).__name__)
+
+    def _store_slice(self, target, c, value_c, ctx, delete):
+        """`c[a:b:k] = value` / `del c[a:b:k]`: a list in place (safetyrt.SLICE); an instance that defines
+        __setitem__ / __delitem__ gets a slice object."""
+        mname = '__delitem__' if delete else '__setitem__'
+        kind = self.infer_kind(target.value, ctx)
+        inst = kind is None or kind.startswith('instance:')
+        self.rt_needs.add('slice')
+        if inst and self._any_class_defines(mname):
+            if not self.want_slice:
+                raise NeedSlice()
+            ctx.emit('if (%s.tag == AIL_T_INST) {' % c)
+            ctx.indent += 1
+            key = self._slice_obj(target.slice, ctx)
+            if delete:
+                ctx.emit('st = ail_op_delitem(cx, %s, %s);' % (c, key))
+            else:
+                ctx.emit('st = ail_op_setitem(cx, %s, %s, %s);' % (c, key, value_c))
+            ctx.check()
+            ctx.indent -= 1
+            ctx.emit('} else {')
+            ctx.indent += 1
+        lo, hi, step = self._slice_bounds(target.slice, ctx)
+        ctx.emit('st = ail2s_setslice(cx, %s, %s, %s, %s, %s, %d);'
+                 % (c, lo, hi, step, value_c or 'ail_box_none()', 1 if delete else 0))
+        ctx.check()
+        if inst and self._any_class_defines(mname):
+            ctx.indent -= 1
+            ctx.emit('}')
 
     def stmt_With(self, node, ctx):
         raise Unsupported('a with statement (context managers are not modelled by the general '
@@ -6680,6 +8275,19 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.uses_st = True
             return
         exc = node.exc
+        if (isinstance(exc, ast.Call) and isinstance(exc.func, ast.Name) and exc.func.id in self.classes
+                and self._is_exc_class(exc.func.id)) or (
+                not (isinstance(exc, ast.Call) and isinstance(exc.func, ast.Name)) and
+                not (isinstance(exc, ast.Name) and exc.id in EXC_IDS)):
+            # an exception object of the program's own class, or any value: built, completed and raised as itself
+            if isinstance(exc, ast.Name) and exc.id in self.classes and self._is_exc_class(exc.id) and \
+                    exc.id not in ctx.slot_of:
+                exc = ast.Call(func=exc, args=[], keywords=[])
+            v = self.expr(exc, ctx)
+            self.rt_needs.add('exc')
+            ctx.emit('st = ail2x_raise(cx, %s); goto %s;' % (v, ctx.cur_err_target()))
+            ctx.uses_st = True
+            return
         if isinstance(exc, ast.Call) and isinstance(exc.func, ast.Name):
             tname = exc.func.id
             if exc.keywords or any(isinstance(a, ast.Starred) for a in exc.args):
@@ -6699,6 +8307,15 @@ class Compiler(boxclosure.ClosureMixin):
                     msg_c = self._to_str_slot(mv, cname, ctx)
             elif len(exc.args) > 1:
                 raise Unsupported('raising %s with more than one argument' % tname)
+            if tname in EXC_IDS and self.reads_args and exc.args:
+                # the value keeps the argument for e.args (KeyError('k').args is ('k',), not its message)
+                self.rt_needs.add('exc')
+                arr = ctx.new_cvar('ea')
+                ctx.emit('ail_obj %s[1] = { %s };' % (arr, mv))
+                ctx.emit('st = ail2x_raise_builtin(cx, cx->builtin_cls[%s], %s, %s, 1); goto %s;' %
+                         (EXC_IDS[tname], msg_c, arr, ctx.cur_err_target()))
+                ctx.uses_st = True
+                return
             if tname in EXC_IDS:
                 ctx.emit('st = ail_raise(cx, cx->builtin_cls[%s], %s); goto %s;' %
                         (EXC_IDS[tname], msg_c, ctx.cur_err_target()))
@@ -6901,6 +8518,11 @@ class Compiler(boxclosure.ClosureMixin):
         pass
 
 
+class NeedSlice(Exception):
+    """The program slices an instance (or assigns to a slice of one): compile it again with the class of
+    slice objects (safetyrt.SLICE_PRELUDE)."""
+
+
 def build(source, report, allow_mix=True):
     """pyc.py's own hook (env AIL_GENERAL=v2): the WHOLE C source for `source` compiled through
     the v2 general path (this file's own preamble + the program, #including ail_obj2.h by
@@ -6908,13 +8530,22 @@ def build(source, report, allow_mix=True):
     step, per the brief), and `report['boxed']` filled with every function name plus '<module>'
     that went through this path (whole-program: pyc.py only calls this when the typed path
     refused something and the source is whole-program shaped)."""
+    if '_ail_par_range' in source:
+        import typedpar                          # a typed-parallel loop runs as the plain loop here
+        source = typedpar.general_text(source)
     hints = {}
+    want_slice = False
     for _attempt in range(16):
         compiler = Compiler(allow_mix=allow_mix)
         compiler.cell_hints = hints
+        compiler.want_slice = want_slice
         try:
             body = compiler.compile(source)
             break
+        except NeedSlice:
+            if want_slice:
+                raise Unsupported('a slice object the general path could not build')
+            want_slice = True
         except boxclosure.NeedCells as need:
             # a closure shares names its enclosing function kept in plain slots: cells from the start
             hints.setdefault(need.fname, set()).update(need.names)
@@ -6923,7 +8554,19 @@ def build(source, report, allow_mix=True):
     if compiler.dunder_ops:
         import dunderrt
         body = dunderrt.patch(body)
-    report['boxed'] = list(compiler.boxed_names)
+    if compiler.generators:
+        import safetyrt
+        body = safetyrt.patch_generators(body)
+    if 'exc' in compiler.rt_needs:
+        import safetyrt
+        body = safetyrt.patch_exc(body)
+    if compiler.uses_ni:
+        import safetyrt
+        body = safetyrt.patch_notimplemented(body)
+    if getattr(compiler, 'custom_dd', False):
+        import safetyrt
+        body = safetyrt.patch_defaultdict(body)
+    report['boxed'] = [n for n in compiler.boxed_names if n not in compiler.prelude_names]
     if compiler.threads:
         # G12: the prelude's own functions are not the program's; the link needs the thread library
         import threadlib
