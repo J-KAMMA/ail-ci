@@ -210,7 +210,7 @@ IR_SHARES = ("list", "list_store", "list_loop")
 
 
 def ir_on():
-    return os.environ.get("AIL_IR", "0").strip().lower() not in ("", "0", "off", "no")
+    return os.environ.get("AIL_IR", "1").strip().lower() not in ("0", "off", "no", "false")   # the IR is the default
 
 
 NONASCII_CASE = '''
