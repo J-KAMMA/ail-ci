@@ -51,6 +51,21 @@ ail check prog.py            # 型・構文の検査だけ（Cコンパイラ不
   ネットワーク不要。sdistは作りません）。バージョンの出どころは `packaging/ail_lang/__init__.py` の1か所です。
   `test_ail_packaging` がホイールの中身をSDK選択と突き合わせ、新しいvenvへのインストールで実行します。
 
+## 厳格モード: 型付き経路で作れないなら拒否する（--strict）
+
+型付き経路が受け付けないプログラムは、既定では遅い一般経路（約20倍遅い）で作られ、`note: ... built on the general path (about 20x slower) ...; run with --strict to see why` の1行が出ます（`AIL_QUIET_FALLBACK=1` で消せます）。速さを保証したいときは `--strict` を付けます。
+
+```
+ail build --strict prog.py -o prog     # ail run --strict prog.py も、環境変数 AIL_STRICT=1 も同じ
+ail build --strict --json prog.py      # 妨げ(blocker)の一覧を機械可読のJSON(ail.strict/1)で標準出力へ
+```
+
+- 型付き経路で作れるプログラムは、付けない場合と同じCコード・同じ実行ファイルになります。
+- 作れない場合は終了コード3で、最初の1件ではなく見つかった妨げをすべて出します。各件に `file:line:col`、該当コード、構成要素、型付きにならない理由、`write instead:`（型付きで通る書き換え）が付きます。
+- 並び順は、その妨げが止めているコードの量（その関数と、それを呼ぶ関数の行数）が多い順です。上から直し、もう一度実行します。
+- JSONは `blockers[]` に `rank path line column function statement construct why write_instead blocks_lines blocks_functions message` を持ちます。LLMに渡せば1回で直せます。
+- `AIL_NO_GENERAL=1` だけを付けた場合は従来どおり最初の拒否1件で止まります。
+
 ## リスト式を連結する
 
 list[int]/list[float]/list[str]/list[bytes]のローカルへ、関数・型付きcallbackの戻り値や条件式・sliceをextendできます。
@@ -7233,3 +7248,40 @@ fn main()->int {
 `strip(chars)` / `lstrip(chars)` / `rstrip(chars)` は、元の文字列、削る文字列の順に一度ずつ評価します。後の評価が元の構造体フィールドを書き換えても、処理する元の値は保持します。例外時も通常のfinallyと解放が働きます。
 
 `api-builtin str.lstrip` / `str.rstrip` で、引数なしとstr 1引数の署名を取得できます。integer/float64 codecの問い合わせには、幅、符号、byteorder、長さの整列、空入力でも検査する条件を含めます。整数codecは幅1/2/4が符号なし、8が符号付き64ビットです。byteorderは0がlittle endian、1がbig endianです。
+## `@export` でAILをCライブラリにする
+
+Pythonの書き方のファイルで、他言語から呼ばせたい最上位の型付き関数に `@export` を付けます
+（`from ail_ffi import export`。CPythonでは型の検査だけをして関数をそのまま返すので、同じファイルが `python3` でも動きます）。
+
+```python
+from dataclasses import dataclass
+from ail_ffi import export
+
+@dataclass
+class Point:
+    x: int
+    y: float
+    visible: bool
+
+@export
+def weight(p: Point) -> float:
+    return p.x * p.y if p.visible else 0.0
+```
+
+```
+ail build --lib geometry geometry.py -o outdir
+```
+
+`outdir` には `libgeometry.so`（macOSは `.dylib`）・`libgeometry.a`・`geometry.h` ができます（`outdir` は既存のディレクトリ、省略時は `.`。既存ファイルは上書きしません）。
+公開されるのは `@export` の関数だけで、ほかの関数・クラス・定数は非公開です。
+
+- 型の対応: `int`→`int64_t`、`float`→`double`、`bool`→`bool`、`str`→`const char *`（結果は `char **`、mallocされる）、
+  `bytes`→ポインタ＋長さ、`list[int]`/`list[float]`→ポインタ＋要素数（結果は `T **` と `size_t *`）、
+  intとfloatとboolだけのdataclass→同じ並びのC構造体（`const geometry_Point *` で渡す）。
+- すべての関数は `int` の状態を返します。0が成功、1 ValueError、2 ZeroDivisionError、3 IndexError、4 KeyError、5 EOFError、6 OSError、7 RuntimeError、8 内部、9 引数不正（`GEOMETRY_ERR_*`）。結果は成功時だけ書かれます。
+- `geometry_last_error()` が呼んだスレッドの直近の失敗を `"ValueError: 本文"` で返します（成功後は空文字）。例外でホストが落ちることはありません。
+- str・bytes・listの結果は `geometry_free()` で1回だけ解放します。
+- 初期化・終了関数はありません（呼び出しをまたぐ状態がないため）。どのスレッドからも呼べ、内部のミューテックスで直列化されます。静的ライブラリは `-lm -lpthread` でリンクします。
+- CPythonとの差: `int` は64ビット、NULを含むstrの結果は拒否、dataclassは返せません。
+
+C・Python ctypes・Rustからの呼び出し例は `language_examples/c_export/`（geometry.py、host.c、host.rs）にあり、`test_ail_c_export.py` がCPython結果との一致とAddressSanitizerでの検査を行います。
