@@ -2298,7 +2298,9 @@ class _Surface:
         # (the typed path builds the __eq__ a dataclass generates from it too: ` noeq` for eq=False and
         # ` nocmp=` for fields declared compare=False, both written before ` hide=`)
         eq_off = isinstance(options.get('eq'), ast.Constant) and not options['eq'].value
-        marker = '# ail:dataclass' + (' noeq' if eq_off else '') + (
+        frozen = any(isinstance(options.get(k), ast.Constant) and options[k].value is True
+                     for k in ('frozen', 'unsafe_hash'))
+        marker = '# ail:dataclass' + (' noeq' if eq_off else '') + (' frozen' if frozen else '') + (
             ' nocmp=' + ','.join(sorted(uncompared)) if uncompared else '')
         self.edits.append((at, self.offset(decorator.end_lineno, decorator.end_col_offset),
                            '' if repr_off else marker, False))
@@ -2410,7 +2412,36 @@ class _Surface:
 
     def file_uses(self, name, body, binary, binding=None):
         """Every use of the file object `name` in `body` (other than `binding`, the name it is
-        opened into) is one this pass maps."""
+        opened into) is one this pass maps, and the file is consumed (read, or walked line by line) at
+        most once: each mapped use reads the whole file again, where CPython's second read of the same
+        file object finds it at its end (`f.read(), f.read()` is the text and '')."""
+        consuming = []
+        statements = set(map(id, body))
+
+        def repeated(node):
+            # inside a loop (or a comprehension) of the body: the use runs more than once
+            child, up = node, self.parents.get(node)
+            while up is not None and id(child) not in statements:
+                if isinstance(up, (ast.For, ast.While, ast.AsyncFor)) and child is not getattr(up, 'iter', None):
+                    return True
+                if isinstance(up, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp, ast.Lambda,
+                                   ast.FunctionDef)):
+                    return True
+                child, up = up, self.parents.get(up)
+            return False
+        for statement in body:
+            for node in ast.walk(statement):
+                if not (isinstance(node, ast.Name) and node.id == name) or node is binding:
+                    continue
+                parent = self.parents.get(node)
+                grand = self.parents.get(parent)
+                if isinstance(parent, ast.Attribute) and isinstance(grand, ast.Call) and grand.func is parent \
+                        and not grand.args and not grand.keywords and parent.attr in ('read', 'readlines'):
+                    consuming.append(grand)
+                elif isinstance(parent, ast.For) and parent.iter is node:
+                    consuming.append(node)
+        if len(consuming) > 1 or any(repeated(each) for each in consuming):
+            return False
         for statement in body:
             for node in ast.walk(statement):
                 if not (isinstance(node, ast.Name) and node.id == name) or node is binding:

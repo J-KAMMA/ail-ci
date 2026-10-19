@@ -164,12 +164,12 @@ class Exprs:
         return n
 
     def coerce(self, n, t, want):
-        """An int where a float is expected becomes a float (the compiler's slots do not widen inside classes)."""
+        """An int where a float is expected becomes a float (the compiler's slots do not widen inside classes).
+        It is written `float(+n)`, which the typed path builds as float(n) and the general path reads back as the
+        int it was (CPython keeps the int: `dist[v] = 3` stores 3, not 3.0; pyboxed2._unwiden)."""
         w, d = deep(want), deep(t)
         if w == FLT and d in (INT, BOOL):
-            if isinstance(n, ast.Constant) and type(n.value) is int:
-                return const(float(n.value)), FLT
-            return call('float', n), FLT
+            return call('float', ast.UnaryOp(op=ast.UAdd(), operand=n)), FLT
         return n, t
 
     def ex_Constant(self, node, want=None, ctx=None):
