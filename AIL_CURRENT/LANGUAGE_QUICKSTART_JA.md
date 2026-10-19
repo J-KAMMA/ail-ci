@@ -51,6 +51,42 @@ ail check prog.py            # 型・構文の検査だけ（Cコンパイラ不
   ネットワーク不要。sdistは作りません）。バージョンの出どころは `packaging/ail_lang/__init__.py` の1か所です。
   `test_ail_packaging` がホイールの中身をSDK選択と突き合わせ、新しいvenvへのインストールで実行します。
 
+## プロジェクト・言語サーバー・デバッグ（ail new / ail lsp / ail build --debug）
+
+```
+ail new hello && cd hello    # hello/ail.toml, hello/src/main.py, hello/.gitignore を作る
+ail run                      # ファイル名なし: 今のディレクトリから上へ探したプロジェクトのentryをビルドして実行
+ail build                    # build/hello を作る（作り直しも可。--debug なら build/hello-debug）
+ail check                    # entry の型・構文検査（Cコンパイラ不要）
+ail lsp                      # 言語サーバー（標準入出力）
+```
+
+`ail.toml`（または pyproject.toml の `[tool.ail]`。両方あれば ail.toml）のキーは次の5つだけです。未知のキーや型違いは名前を挙げて止まります。
+
+```
+name = "hello"            # 実行ファイル名（省略: ディレクトリ名）
+entry = "src/main.py"     # 入口のモジュール（必須。.py か .ail）
+link = ["z", "m"]         # リンクするCライブラリ（-lz -lm。名前だけ）
+strict = false            # true: 遅い汎用経路で動くプログラムをビルドせず、理由と write instead を出して止める
+module_path = ["src"]     # 追加のモジュールディレクトリ（-I と同じ。entryのディレクトリは常に探す）
+```
+
+- `strict = true` は型付き経路だけを許します（`AIL_NO_GENERAL=1` と同じ）。言語サーバーでも、型付き経路の拒否が警告ではなく**エラー**になります。
+  `ail check --strict`（別ブランチ）が入ったら、その JSON（ail.check/1）をそのまま使えます。
+- パッケージレジストリはまだありません。他のプロジェクトのコードは `module_path` で置いたディレクトリから読みます。
+- `ail build prog.py -o prog` の単体ファイル形式は今まで通りです。`--link LIB` は `compile` にもあります。
+- **言語サーバー** `ail lsp`: ファイルを開いた時・保存した時に `ail check` を走らせて診断を出します（ディスク上のファイルを検査）。
+  読み込めない・構文エラー・汎用経路でも作れないものは**エラー**、型付き経路が断ったが汎用経路で作れるものは**警告**
+  「runs on the slow general path because …」です。どちらも `write instead:` の書き換え案を含み、診断にマウスを置く（hover）と案が出ます。
+  二次式になりやすい書き方（slow_patterns）は情報です。警告かエラーかを決めるため、その時だけ1回ビルドします（Cコンパイラが要り、結果は
+  ソースのハッシュごとに覚えます。無ければ警告に「Cコンパイラが無いので分からない」と付きます）。
+- **デバッグ** `ail build --debug`: `-g -O0` でビルドし、各文の前に元の `.py`/`.ail` の行への `#line` を入れます。gdb で
+  `break prog.py:12` → `run` → `next` と Python の行で進められます（モジュールを import していればそのファイルの行）。
+  捕まえなかった例外は、CPython互換のメッセージの後に `  raised near /path/prog.py:3`（最後に実行を始めた文＝raiseの行、
+  実行時エラーならそれが起きた文）を1行足します。`--debug` なしの標準エラーは従来のまま（DIFFERENCES A4）です。
+  汎用経路にフォールバックしたプログラムには行対応が無いので、そう表示します（`strict = true` で事前に気付けます）。
+  `--separate` やオブジェクトの結合ではモジュール側の .o は `-O2` のままです。
+
 ## リスト式を連結する
 
 list[int]/list[float]/list[str]/list[bytes]のローカルへ、関数・型付きcallbackの戻り値や条件式・sliceをextendできます。
