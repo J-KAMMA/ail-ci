@@ -78,7 +78,7 @@ RUNTIME = {
 _CHECKED_RAISES = {
     'add': (OVERFLOW,), 'sub': (OVERFLOW,), 'mul': (OVERFLOW,), 'neg': (OVERFLOW,),
     'shl': (OVERFLOW, VALUE), 'shr': (VALUE,), 'pow': (OVERFLOW, VALUE),
-    'fptosi': (VALUE,),
+    'fptosi': (OVERFLOW, VALUE),
 }
 _ALWAYS_RAISES = {
     'floordiv': (ZERODIV, OVERFLOW), 'floormod': (ZERODIV,),
