@@ -588,7 +588,10 @@ class SwitchTests(unittest.TestCase):
         from ir import driver
         saved = {k: os.environ.get(k) for k in ('AIL_IR', 'AIL_IR_FUNCS', 'AIL_IR_STATS')}
         try:
-            os.environ['AIL_IR'] = mode
+            if mode is None:
+                os.environ.pop('AIL_IR', None)           # unset: the default
+            else:
+                os.environ['AIL_IR'] = mode
             os.environ.pop('AIL_IR_STATS', None)
             os.environ.pop('AIL_IR_FUNCS', None)
             os.environ.update(extra)
@@ -614,6 +617,18 @@ class SwitchTests(unittest.TestCase):
         allow, stats_allow = self.to_c('1', AIL_IR_FUNCS='total')
         self.assertEqual(allow, off)
         self.assertEqual({e['path'] for e in stats_allow}, {'legacy'})
+
+    def test_unset_is_the_ir_and_the_off_spellings_are_the_legacy_emitter(self):
+        # the IR is the default (2026-10-19); AIL_IR=0 is the opt-out and keeps the legacy emitter's C
+        off, stats_off = self.to_c('0')
+        on, stats_on = self.to_c('1')
+        default, stats_default = self.to_c(None)
+        self.assertEqual(default, on)
+        self.assertEqual({e['fn']: e['path'] for e in stats_default}, {e['fn']: e['path'] for e in stats_on})
+        self.assertEqual(self.to_c('')[0], on)               # an empty value is no value
+        for spelling in ('0', 'off', 'no', 'false', 'OFF'):
+            text, stats = self.to_c(spelling)
+            self.assertEqual((text, stats), (off, []), spelling)
 
     def test_failure_falls_back_under_1_and_raises_under_verify(self):
         original = emit_c.emit_function
