@@ -51,6 +51,21 @@ ail check prog.py            # 型・構文の検査だけ（Cコンパイラ不
   ネットワーク不要。sdistは作りません）。バージョンの出どころは `packaging/ail_lang/__init__.py` の1か所です。
   `test_ail_packaging` がホイールの中身をSDK選択と突き合わせ、新しいvenvへのインストールで実行します。
 
+## 厳格モード: 型付き経路で作れないなら拒否する（--strict）
+
+型付き経路が受け付けないプログラムは、既定では遅い一般経路（約20倍遅い）で作られ、`note: ... built on the general path (about 20x slower) ...; run with --strict to see why` の1行が出ます（`AIL_QUIET_FALLBACK=1` で消せます）。速さを保証したいときは `--strict` を付けます。
+
+```
+ail build --strict prog.py -o prog     # ail run --strict prog.py も、環境変数 AIL_STRICT=1 も同じ
+ail build --strict --json prog.py      # 妨げ(blocker)の一覧を機械可読のJSON(ail.strict/1)で標準出力へ
+```
+
+- 型付き経路で作れるプログラムは、付けない場合と同じCコード・同じ実行ファイルになります。
+- 作れない場合は終了コード3で、最初の1件ではなく見つかった妨げをすべて出します。各件に `file:line:col`、該当コード、構成要素、型付きにならない理由、`write instead:`（型付きで通る書き換え）が付きます。
+- 並び順は、その妨げが止めているコードの量（その関数と、それを呼ぶ関数の行数）が多い順です。上から直し、もう一度実行します。
+- JSONは `blockers[]` に `rank path line column function statement construct why write_instead blocks_lines blocks_functions message` を持ちます。LLMに渡せば1回で直せます。
+- `AIL_NO_GENERAL=1` だけを付けた場合は従来どおり最初の拒否1件で止まります。
+
 ## リスト式を連結する
 
 list[int]/list[float]/list[str]/list[bytes]のローカルへ、関数・型付きcallbackの戻り値や条件式・sliceをextendできます。
