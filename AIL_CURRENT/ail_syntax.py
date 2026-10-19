@@ -91,6 +91,39 @@ def _relib():
     return _relib.module
 
 
+def _raisefrom():
+    """python/pkg-v12/raisefrom.py (`raise X from Y`: the cause dropped, it changes no output here)."""
+    if not hasattr(_raisefrom, "module"):
+        spec = importlib.util.spec_from_file_location(
+            "_ail_raisefrom", Path(__file__).parent / "python" / "pkg-v12" / "raisefrom.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _raisefrom.module = module
+    return _raisefrom.module
+
+
+def _matchlower():
+    """python/pkg-v12/matchlower.py (the match statement lowered to an if/elif chain)."""
+    if not hasattr(_matchlower, "module"):
+        spec = importlib.util.spec_from_file_location(
+            "_ail_matchlower", Path(__file__).parent / "python" / "pkg-v12" / "matchlower.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _matchlower.module = module
+    return _matchlower.module
+
+
+def _nestfn():
+    """python/pkg-v12/nestfn.py (nested functions that share names with their enclosing function, lifted)."""
+    if not hasattr(_nestfn, "module"):
+        spec = importlib.util.spec_from_file_location(
+            "_ail_nestfn", Path(__file__).parent / "python" / "pkg-v12" / "nestfn.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _nestfn.module = module
+    return _nestfn.module
+
+
 def _optlib():
     """python/pkg-v12/optlib.py (scalar `int | None` / `Optional[str]`, lowered onto a flag and a value)."""
     if not hasattr(_optlib, "module"):
@@ -2523,6 +2556,12 @@ def _modtables():
 def python_surface(source, notes=None, library=False):
     """Map the Python spellings above onto the compiler's own; `notes` collects (line, why) for
     the constructs left as written."""
+    if "raise" in source and " from " in source:
+        source = _raisefrom().rewrite(source, notes)
+    if "match" in source:
+        source = _matchlower().rewrite(source, notes)
+    if "def " in source:
+        source = _nestfn().rewrite(source, notes)
     if "sqlite3" in source:
         source = _sqllower().rewrite_text(source, notes)
     if any(name in source for name in ("threading", "queue", "concurrent")):

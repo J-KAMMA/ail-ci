@@ -116,6 +116,12 @@ class Calls:
         for j, i in enumerate(keep):
             if i in fixed:
                 args[j] = fixed[i]
+            elif has_tuple(deep(ts[j])) and not has_tuple(deep(wants[j])):
+                # the tuple would become a class while the parameter is not known to hold one: inside
+                # the function `isinstance(v, tuple)`, `len(v)`, `v[0]` would not see a tuple
+                self.refuse(node, 'a tuple passed to parameter %d of %s(), whose type is not told (it also '
+                            'receives other kinds); annotate the parameter' % (i + 1, sig.name if hasattr(sig, 'name')
+                                                                               else ast.unparse(node.func)))
         kws = []
         for kw in node.keywords:
             w = next((p[1] for p in sig.params if p[0] == kw.arg), None)
@@ -227,6 +233,18 @@ class Calls:
         return self.done(node, args, kws, STR)
 
     def b_isinstance(self, node, want, ctx):
+        # `isinstance(t, tuple)` of a tuple this pass turns into a class (the lowered `match` writes
+        # it): settled here, since the class would answer False on the general path
+        if len(node.args) == 2 and not node.keywords and isinstance(node.args[0], ast.Name):
+            spec = node.args[1]
+            names = spec.elts if isinstance(spec, ast.Tuple) else [spec]
+            builtin = ('int', 'float', 'str', 'bool', 'bytes', 'list', 'tuple', 'dict', 'set', 'frozenset',
+                       'bytearray', 'range')
+            if names and all(isinstance(n, ast.Name) and n.id in builtin for n in names):
+                n, t = self.exv(node.args[0])
+                if is_tuple(deep(t)):
+                    self.force()
+                    return const(any(x.id == 'tuple' for x in names)), BOOL
         return self.generic_call(node)[0], BOOL
 
     def b_any(self, node, want, ctx):

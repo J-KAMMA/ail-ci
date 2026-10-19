@@ -15198,12 +15198,19 @@ static inline ail_st ail_set_sorted_list(ail_ctx *cx, ail_obj *out, ail_obj s) {
 /* ===================================================================================
    Object-level dispatch: len/contains/getitem/setitem/delitem/getslice.
    =================================================================================== */
+/* len() and indexing of a range (a `match` sequence pattern reads both) */
+static inline int64_t ail__range_len(const ail_rangeobj *r) {
+    if (r->step > 0 && r->start < r->stop) return (r->stop - r->start - 1) / r->step + 1;
+    if (r->step < 0 && r->start > r->stop) return (r->start - r->stop - 1) / (-r->step) + 1;
+    return 0;
+}
 static inline ail_st ail_op_len(ail_ctx *cx, ail_obj *out, ail_obj x) {
     switch (x.tag) {
         case AIL_T_STR: *out = ail_box_int(x.sv.len); return AIL_OK;
         case AIL_T_LIST: case AIL_T_TUPLE: *out = ail_box_int(((ail_vecobj *)x.o)->n); return AIL_OK;
         case AIL_T_DICT: *out = ail_box_int(((ail_mapobj *)x.o)->n); return AIL_OK;
         case AIL_T_SET: case AIL_T_FROZENSET: *out = ail_box_int(AIL_SETOBJ(x)->used); return AIL_OK;
+        case AIL_T_RANGE: *out = ail_box_int(ail__range_len((ail_rangeobj *)x.o)); return AIL_OK;
         default: { char buf[64]; snprintf(buf, sizeof buf, "object of type '%s' has no len()", ail_type_name(x.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
     }
 }
@@ -15245,6 +15252,14 @@ static inline ail_st ail_op_getitem(ail_ctx *cx, ail_obj *out, ail_obj c, ail_ob
             if (key.tag != AIL_T_INT && key.tag != AIL_T_BOOL) return ail_raise_c(cx, AIL_B_TYPEERROR, "string indices must be integers");
             return ail_str_index(cx, out, c, key.i);
         case AIL_T_DICT: return ail_dict_getitem(cx, out, c, key);
+        case AIL_T_RANGE: {
+            ail_rangeobj *r = (ail_rangeobj *)c.o;
+            int64_t n = ail__range_len(r), i = key.i;
+            if (key.tag != AIL_T_INT && key.tag != AIL_T_BOOL) return ail_raise_c(cx, AIL_B_TYPEERROR, "range indices must be integers or slices");
+            if (i < 0) i += n;
+            if (i < 0 || i >= n) return ail_raise_c(cx, AIL_B_INDEXERROR, "range object index out of range");
+            *out = ail_box_int(r->start + i * r->step); return AIL_OK;
+        }
         default: { char buf[64]; snprintf(buf, sizeof buf, "'%s' object is not subscriptable", ail_type_name(c.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
     }
 }
@@ -15503,7 +15518,8 @@ static inline void ail_obj_write_repr(ail_ctx *cx, ail_obj x, FILE *f) {
         }
         case AIL_T_RANGE: {
             ail_rangeobj *r = (ail_rangeobj *)x.o;
-            fprintf(f, "range(%lld, %lld, %lld)", (long long)r->start, (long long)r->stop, (long long)r->step);
+            if (r->step == 1) fprintf(f, "range(%lld, %lld)", (long long)r->start, (long long)r->stop);
+            else fprintf(f, "range(%lld, %lld, %lld)", (long long)r->start, (long long)r->stop, (long long)r->step);
             break;
         }
         case AIL_T_INST: {

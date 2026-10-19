@@ -204,7 +204,7 @@ def _builtin_handler_codes(code):
         # whole-file builtins raise the class of their errno once the OS-family codes exist).
         base = (code, 11, 12, 13, 14, 15, 16) if filelib.ACTIVE else (code, 11, 12, 13, 14, 15)
         return base + (30, 31) if urllower.ACTIVE else base        # G12: URLError and HTTPError are OSErrors
-    if code == EXC_NAMES['URLError']:
+    if code == EXC_NAMES['URLError'] and urllower.ACTIVE:    # (without urllib, 30 and 31 are user classes' codes)
         return (code, EXC_NAMES['HTTPError'])
     if code == EXC_NAMES['sqlite3_Error']:
         return tuple(range(19, 28))                      # G11: the base class of every sqlite3 error
@@ -1324,6 +1324,8 @@ def _etype(node, ctx):
         if f == 'jsdiv':
             return FLT
         if f == '__ail_class_id' and _HIER or f == 'isinstance' and _is_class_isinstance(node, ctx):
+            return INT
+        if f == 'isinstance' and _static_isinstance(node, ctx) is not None:
             return INT
         if f == 'pow' and len(a) == 3 and f not in ctx.funcs:
             return INT
@@ -8174,6 +8176,26 @@ def _build_strformat_value(node, ctx):
         i = j + 1
     if buf:
         pieces.append(('lit', ''.join(buf)))
+    # C41: the fields are built in the order of the template, but CPython evaluates the arguments left to
+    # right, once each, before any field.  An argument that can run code is therefore evaluated into a
+    # temporary first, in argument order, whenever the fields do not use the arguments in exactly that order.
+    stages = []
+    used = [p[1] for p in pieces if p[0] == 'field']
+    if used != list(range(len(args))) and not _chain_borrow_safe(args):
+        staged = []
+        for a in args:
+            kind = _etype(a, ctx)
+            if kind not in (INT, FLT, STR) or _is_bool_expr(a, ctx):
+                raise Unsupported('.format() with an argument that calls a function and is a %s, whose fields use '
+                                  'the arguments out of order, twice or not at all; CPython evaluates the '
+                                  'arguments left to right once each before any field and this build would not.\n'
+                                  '  write instead: call the function on its own line first (`t = f(...)`) and '
+                                  'pass `t`' % kind)
+            cell, tname = ctx.temp(kind)
+            value = _str_value(a, ctx) if kind == STR else _expr(a, ctx)
+            stages.append('(%s = %s)' % (cell, value))
+            staged.append(ast.copy_location(ast.Name(id=tname, ctx=ast.Load()), a))
+        args = staged
     parts_c = []
     for p in pieces:
         if p[0] == 'lit':
@@ -8196,7 +8218,8 @@ def _build_strformat_value(node, ctx):
                                       '.format() field with spec', str_default_align='<', pre_c=pre))
         else:
             parts_c.append(pre if pre is not None else _fmt_default_conv(argnode, kind, ctx))
-    return _concat_chain(parts_c, ctx)
+    chain = _concat_chain(parts_c, ctx)
+    return '(%s)' % ', '.join(stages + [chain]) if stages else chain
 
 
 def _str_refusal(node, ctx):
@@ -14419,6 +14442,8 @@ def _attr_assign_inner(target, value, ctx, ind):
             raise Unsupported('assigning a float to %s.%s, an int field; this language has no '
                               'implicit truncation, so say `int(...)` if that is what you mean'
                               % (t[1], target.attr))
+        if ft == FLT and actual == INT:
+            _refuse_int_in_float_slot(value, 'the float field %s.%s' % (t[1], target.attr))
         v = _expr(value, ctx)
     if ft in (LIST, FLIST):
         capture_value = '(void)%s' % v
@@ -14938,6 +14963,20 @@ def _mixed_rows_argument(name, fields, ctx):
     return expression, [packed + '.p', packed + '.n', blob + '.p', blob + '.n']
 
 
+def _refuse_int_in_float_slot(node, where):
+    """C39: an int handed to a float slot is converted at the call, so `print(x)` shows 3.0 where CPython
+    (which keeps the int, annotations convert nothing) shows 3, and `x * 2` stays an int there.  The brace
+    surface defines that conversion as its ABI; a Python program is refused by name, which sends the default
+    build to the general path (that path keeps the int)."""
+    if os.environ.get('AIL_SURFACE') != 'python' or getattr(node, '_ail_synth', False) or '_ail_' in where:
+        return                  # (the library's own functions, `_ail_math_sqrt(x: float)`, convert by design)
+    raise Unsupported('an int where %s is annotated float; CPython keeps the int (annotations convert nothing), '
+                      'so a later print or str() of it, or an int-valued result of arithmetic on it, shows 3 where '
+                      'this build would show 3.0.\n'
+                      '  write instead: pass a float (`%s`) if the value is meant to be a float'
+                      % (where, ast.unparse(node) + '.0' if isinstance(node, ast.Constant) else 'float(%s)' % ast.unparse(node)))
+
+
 def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dynamic=None, owned_result=False, grid_result=False,
                     proven_self=False):
     """The C for calling another compiled function (or method, under its mangled name) by name,
@@ -15307,6 +15346,8 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
                     at = None
                 if at not in NUM:
                     raise _argument_type_error('passing %s where %s() wants %s' % (at, fname, kind), fname, pname, index, kind, at)
+                if kind == FLT and at == INT:
+                    _refuse_int_in_float_slot(arg, 'the float parameter %r of %s()' % (pname, fname))
                 if kind == INT and at == FLT:
                     raise _argument_type_error('passing a float to %s(), whose %r is an int64; this '
                                                'language has no implicit truncation.\n'
@@ -15575,6 +15616,127 @@ def _is_class_isinstance(node, ctx):
     return bool(names) and all(isinstance(n, ast.Name) and n.id in ctx.classes for n in names)
 
 
+def _bare_except_to_exception(tree):
+    """A bare `except:` catches what `except Exception:` catches here: every exception the program can
+    raise (CPython's bare except also takes SystemExit and KeyboardInterrupt; `sys.exit()` ends the
+    process here, so a program that calls it keeps the bare except, which is refused by name)."""
+    handlers = [n for n in ast.walk(tree) if isinstance(n, ast.ExceptHandler) and n.type is None]
+    if not handlers:
+        return
+    exits = any(isinstance(n, ast.Call) and ast.unparse(n.func) in ('sys.exit', 'exit', 'quit', 'raise_system_exit')
+                for n in ast.walk(tree))
+    exits = exits or any(isinstance(n, ast.Name) and n.id in ('SystemExit', 'KeyboardInterrupt', 'BaseException')
+                         for n in ast.walk(tree))
+    if exits:
+        for h in handlers:
+            h._ail_bare_exit = True
+        return
+    for h in handlers:
+        h.type = ast.copy_location(ast.Name(id='Exception', ctx=ast.Load()), h)
+
+
+_HAS_ISINSTANCE = False       # the program calls isinstance (set by _to_c_once)
+_STATIC_TYPES = frozenset(('int', 'float', 'str', 'bool', 'bytes', 'list', 'tuple', 'dict', 'set', 'frozenset',
+                           'bytearray', 'range'))
+
+
+def _static_isinstance(node, ctx):
+    """True or False when `isinstance(x, T)` is settled by the type x has when the program is built:
+    T a builtin type (or a tuple of them), or a class of a program without inheritance; x a name or
+    a field. None otherwise (left to `_is_class_isinstance`, or refused as before). A variable here
+    never changes its type, so this is CPython's answer; a bool is also an int, as in CPython."""
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'isinstance'
+            and len(node.args) == 2 and not node.keywords
+            and all('isinstance' not in table for table in (ctx.funcs, ctx.classes, ctx.kind, ctx.types))):
+        return None
+    value, spec = node.args
+    names = spec.elts if isinstance(spec, ast.Tuple) else [spec]
+    if not names or not all(isinstance(n, ast.Name) for n in names):
+        return None
+    targets = {n.id for n in names}
+    user = targets & set(ctx.classes)
+    if not targets <= (_STATIC_TYPES | user) or (user and _HIER):
+        return None
+    if not (isinstance(value, ast.Name) or isinstance(value, ast.Constant)
+            or isinstance(value, ast.Attribute) and isinstance(value.value, ast.Name)):
+        return None
+    try:
+        kind = _etype(value, ctx)
+    except Unsupported:
+        return None
+    if kind == INT:
+        actual = {'int', 'bool'} if _is_bool_expr(value, ctx) else {'int'}
+    elif kind == FLT:
+        actual = {'float'}
+    elif kind == STR:
+        actual = {'str'}
+    elif kind == BYTES:
+        actual = {'bytes'}
+    elif kind == BYTEARRAY:
+        actual = {'bytearray'}
+    elif kind in (LIST, FLIST, SLIST, BLIST, 'array') or _is_olist_kind(kind) or (
+            isinstance(kind, tuple) and kind and kind[0] in ('nest', 'row')):
+        actual = {'list'}
+    elif kind in SETS:
+        actual = {'set'}
+    elif kind in MAPS or kind == DICT:
+        actual = {'dict'}
+    elif kind == RANGE:
+        actual = {'range'}
+    elif _is_obj_kind(kind):
+        if kind[1].startswith('_AilT_'):
+            actual = {'tuple'}
+        elif kind[1].startswith(('_AilRow_', '_AilDeque', '_AilEnv_')) or kind[1] in _NULLABLE:
+            return None
+        else:
+            actual = {kind[1]}
+    else:
+        return None
+    return bool(actual & targets)
+
+
+def _static_truth(node, ctx):
+    """True/False when the test `node` is settled when the program is built (`_static_isinstance`, and
+    `not` / `and` / `or` over such tests with operands that cannot raise or change anything)."""
+    if isinstance(node, ast.Call):
+        return _static_isinstance(node, ctx)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        inner = _static_truth(node.operand, ctx)
+        return None if inner is None else not inner
+    if isinstance(node, ast.BoolOp):
+        values = [_static_truth(v, ctx) for v in node.values]
+        stop = False if isinstance(node.op, ast.And) else True
+        for k, v in enumerate(values):
+            if v is stop and all(_pure_test(w) for w in node.values[:k]):
+                return stop
+        if all(v is (not stop) for v in values):
+            return not stop
+    return None
+
+
+def _pure_test(node):
+    return all(isinstance(n, (ast.Name, ast.Load, ast.Constant, ast.Compare, ast.BoolOp, ast.UnaryOp, ast.Not, ast.And,
+                              ast.Or, ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Is, ast.IsNot,
+                              ast.Tuple, ast.Attribute)) or
+               isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == 'isinstance'
+               for n in ast.walk(node))
+
+
+def _fold_static_test(node, ctx):
+    """`node` (an if/while test) with the operands of a top-level `and` that are settled True dropped;
+    None when nothing is settled."""
+    if not (isinstance(node, ast.BoolOp) and isinstance(node.op, ast.And)):
+        return None
+    kept = [v for v in node.values if _static_truth(v, ctx) is not True]
+    if len(kept) == len(node.values):
+        return None
+    if not kept:
+        return ast.Constant(value=True)
+    if len(kept) == 1:
+        return kept[0]
+    return ast.copy_location(ast.BoolOp(op=ast.And(), values=kept), node)
+
+
 def _isinstance_value(node, ctx):
     """An int64 0/1: whether the run-time class of `x` is one of the classes or below one. A class the
     static class already is (or is below) needs no test; one it cannot be is 0."""
@@ -15618,6 +15780,9 @@ def _call(node, ctx):
         return _tcp_poll_value(node, ctx)[0]
     if _is_class_isinstance(node, ctx):
         return _isinstance_value(node, ctx)
+    known = _static_isinstance(node, ctx)
+    if known is not None:
+        return '1' if known else '0'
     if isinstance(node.func, ast.Name) and node.func.id not in ctx.funcs and node.func.id not in ctx.classes and node.func.id not in ctx.kind and node.func.id not in ctx.types and any(callable_types.valid(_fn_kind(arg, ctx)) for arg in node.args):
         raise Unsupported('builtins and codecs do not accept function values')
     if callable_types.valid(_fn_kind(node.func, ctx)) and not (isinstance(node.func, ast.Name) and node.func.id in ctx.funcs and node.func.id not in ctx.kind and node.func.id not in ctx.types):
@@ -16264,6 +16429,8 @@ def _call(node, ctx):
                 if (_is_obj_kind(kind) and actual != kind and actual != NULLK and not _obj_subtype(actual, kind)
                         or not _is_obj_kind(kind) and (actual not in NUM or kind == INT and actual != INT)):
                     raise _argument_type_error('constructor %s() needs %s, got %s' % (f, kind, actual), f, pname, argument_index, kind, actual)
+                if kind == FLT and actual == INT:
+                    _refuse_int_in_float_slot(arg, 'the float parameter %r of the constructor %s()' % (pname, f))
                 value = rec(arg)
                 out.append(value)
             if len(ctx.pre) != before:
@@ -17480,6 +17647,13 @@ def _method(node, ctx, *, as_stmt=False):
         ctx.parts.add('STAB')
         return 'ail_stab_put(&%s, %s, 0)' % (c, _str_value(a[0], ctx))
     if m == 'add' and t == SET and len(a) == 1:
+        if _is_obj_kind(_etype(a[0], ctx)) or _is_ref_kind(_etype(a[0], ctx)):
+            # C40: the table holds the instance's address as an int64 and no reference, so a freed
+            # instance's address is reused by the next one and two different instances become one element.
+            raise Unsupported('a class instance as a set element: the typed set keeps only the instance address '
+                              '(no reference), and a freed instance address is reused, so '
+                              'distinct instances would collapse into one element; a set of instances is '
+                              'taken by the general path')
         if _etype(a[0], ctx) == FLT:
             raise Unsupported('a set holds integers; adding a float would truncate it, and a '
                               'set is never widened to floats (SEMANTICS.md section 13 says why '
@@ -17707,6 +17881,12 @@ def _truthy(node, ctx):
             return '%s.n' % ctx.cname(node.id)
     if _etype(node, ctx) == BLIST:
         return '(%s)->n' % _blist_value(node, ctx)
+    if isinstance(node, ast.Attribute) and _field_list_kind(node, ctx) in (LIST, FLIST, SLIST):
+        # `if self.items:` / `while env.stack:` -- a list field is empty or not, read in place
+        # (the value form copies the list, and a copy is not a number)
+        owner_kind, _ = _field_info(node, ctx)
+        capture, owner = _owner_capture(node.value, owner_kind, ctx)
+        return '({ %s; (%s->f_%s.n != 0); })' % (capture, owner, node.attr)
     if _is_str_expr(node, ctx):
         return '(%s).n' % _str_value(node, ctx)
     return _expr(node, ctx)
@@ -18945,6 +19125,14 @@ def _loop_stmts(body, ctx, ind):
 
 
 def _stmt(node, ctx, ind):
+    if (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id in ctx.optional
+            and not (isinstance(node.value, ast.Constant) and node.value.value is None)):
+        # a local assigned None and a value: built as an Optional local (see `_NoneLocal`), before
+        # any numeric-binding or int-plus-flag lowering can take the store
+        kind = _scalar_kind_of(node.value, ctx)
+        if kind is not None:
+            raise _NoneLocal(node.targets[0].id, kind, node.lineno)
     if (isinstance(node, ast.Return) and not getattr(ctx, 'finally_emitting_return', False)
             and (ctx.finally_stack or ctx.finally_returns)):
         ctx.finally_emitting_return = True
@@ -19830,8 +20018,14 @@ def _stmt_inner(node, ctx, ind):
                 and node.value.func.value.id in ctx.tstride):
             return _assign_row_pop(t.id, node.value, ctx, pad)
         if t.id in ctx.optional:
-            # `best = None` then `best = v`: one int and one flag saying whether it was ever set.
-            # It cannot represent None as a *result*, so returning one traps rather than lying.
+            # `best = None` then `best = v`: once the kind of v is known here, the program is built
+            # again with `best: <kind> | None` at its first assignment (optlib.py: a flag and a value,
+            # None printed as None, a use that may see None refused by name). Before that, this was one
+            # int and one flag; a float stored into it was truncated and a None printed as 0.
+            if not (isinstance(node.value, ast.Constant) and node.value.value is None):
+                kind = _scalar_kind_of(node.value, ctx)
+                if kind is not None:
+                    raise _NoneLocal(t.id, kind, node.lineno)
             c = ctx.declare(t.id, INT)
             if isinstance(node.value, ast.Constant) and node.value.value is None:
                 return '%s%s = 0; %s = 0;\n' % (pad, c, ctx.has(t.id))
@@ -20580,6 +20774,16 @@ def _stmt_inner(node, ctx, ind):
         fused = _if_add_fusion(node, ctx)
         if fused is not None:
             return _stmt(fused, ctx, ind)
+        if _HAS_ISINSTANCE:
+            # a test settled when the program is built (an `isinstance` of a typed value, as the
+            # lowered `match` writes): only the branch that runs is compiled
+            known = _static_truth(node.test, ctx)
+            if known is not None:
+                taken = node.body if known else node.orelse
+                return '%s{\n%s%s}\n' % (pad, _stmts(taken, ctx, ind + 1), pad) if taken else ''
+            folded = _fold_static_test(node.test, ctx)
+            if folded is not None:
+                node = ast.copy_location(ast.If(test=folded, body=node.body, orelse=node.orelse), node)
         c = _cond(node.test, ctx)
         pre = _flush(ctx, pad)
         out = '%s%sif (%s) {\n%s%s}\n' % (pre, pad, c, _stmts(node.body, ctx, ind + 1), pad)
@@ -20995,7 +21199,8 @@ def _stmt_inner(node, ctx, ind):
 
 def _raise_stmt(node, ctx, pad):
     if node.cause is not None:
-        raise Unsupported('raise ... from ...; exception chaining is not supported')
+        raise Unsupported('raise ... from ... in a program that reads __cause__, __context__ or __traceback__; '
+                          'the cause of an exception is not kept here')
     ctx.parts.add('DIE')
     ctx.has_try = True
     if node.exc is None:
@@ -21057,6 +21262,10 @@ def _try_stmt(node, ctx, ind):
     seen = set()
     for h in node.handlers:
         if h.type is None:
+            if getattr(h, '_ail_bare_exit', False):
+                raise Unsupported('a bare except: in a program that calls sys.exit() (or names SystemExit): CPython\'s '
+                                  'bare except also catches the SystemExit, and sys.exit() ends the program here.\n'
+                                  '  write instead: except Exception:')
             raise Unsupported('a bare except: with no name; name the exception')
         # `except (A, B):` -- an exception tuple names every type it catches; each element
         # must be one of the named exceptions directly, and a name repeated anywhere in
@@ -30086,6 +30295,23 @@ def _dispatcher_c(text, fn, csym):
     return '\n'.join(keep + [line] + body + ['}', ''])
 
 
+def _check_nested_env(c):
+    """The environment class nestfn.py writes for names shared with nested functions: a field whose
+    type the rewrite could not tell (its docstring names the nested function) is refused here by the
+    shared name, not later as an untyped field."""
+    if not c.name.startswith('_AilEnv_'):
+        return
+    doc = ast.get_docstring(c) or ''
+    if not doc.startswith('nested: '):
+        return
+    name, _, inner = doc[len('nested: '):].split(',')[0].strip().partition('=')
+    refusal = Unsupported(
+        'the type of %r, which the nested function %r changes or rebinds with nonlocal, cannot be told '
+        'from the program; annotate it where it is first assigned (`%s: list[int] = []`), or the typed '
+        'path cannot share it' % (name, inner, name))
+    raise refusal
+
+
 def _scan_classes(classdefs):
     """Every `class` in the source, validated and reduced to its fixed shape -- SEMANTICS.md
     section 25. Each out-of-scope construct is refused by its own name, at this one pre-pass,
@@ -30110,6 +30336,7 @@ def _scan_classes(classdefs):
     for c in classdefs:
         if c.decorator_list:
             raise _refusal_at(c, 'a decorator on class %r' % c.name)
+        _check_nested_env(c)
         info = classes[c.name]
         info.base = bases[c.name]
         init_fn = None
@@ -32533,11 +32760,14 @@ def _check_nested_captures(nested_captures, sigs):
         params = dict(sigs[fname][0])
         for cap in captured:
             kind = params.get(cap)
-            if kind not in (INT, FLT):
+            # A container or object the nested function only reads is an ordinary argument of the
+            # call: the call runs inside the enclosing activation, and a parameter is read-only here
+            # (a change to it is refused by name). A nested function that changes a captured container
+            # or rebinds a name is lifted with a shared environment before this pass (nestfn.py).
+            if kind is None:
                 raise Unsupported(
-                    'a nested function captures %r, which is a container (or object), not a '
-                    'plain number; capturing anything but a scalar int/float is not available -- '
-                    'pass it as an ordinary argument to a top-level function instead' % cap)
+                    'a nested function captures %r, whose type cannot be told here; annotate it '
+                    'where it is first assigned, or pass it as an ordinary argument' % cap)
 
 
 def _old_sort_key_shape(key):
@@ -32747,9 +32977,26 @@ def _to_c_unshadowed(source, name=None, strict=True, info=None, entry=None, sig=
     otherwise the refusal says which loop or handler to rename."""
     snapshot = dict(info) if info is not None else None
     renamed, tried, copied, line_shifts = {}, set(), set(), []
+    optional_tried = set()
     while True:
         try:
             return _to_c_sorted(source, name, strict, info, entry, sig, library, external)
+        except _NoneLocal as hint:
+            # `x = None` and `x = <int/float/str/bool>`: annotate and lower it as an Optional local
+            if (hint.name, hint.line) in optional_tried or len(optional_tried) >= 16:
+                raise Unsupported('%r is assigned None and a %s; annotate it where it is first assigned '
+                                  '(`%s: %s | None = None`)' % (hint.name, hint.kind, hint.name, hint.kind))
+            optional_tried.add((hint.name, hint.line))
+            lowered, why = _optional_local_source(source, hint)
+            if lowered is None:
+                refusal = Unsupported(why)
+                refusal.source_line = hint.line
+                raise refusal
+            source = lowered
+            if info is not None:
+                info.clear()
+                info.update(snapshot)
+            continue
         except Unsupported as error:
             message = error.args[0] if error.args and isinstance(error.args[0], str) else ''
             param = rebinding.param_name(message)
@@ -32805,6 +33052,58 @@ def _to_c_unshadowed(source, name=None, strict=True, info=None, entry=None, sig=
                     error.type_details = {key: nested_lists.explain(value) if isinstance(value, str) else value
                                           for key, value in details.items()}
             raise
+
+
+class _NoneLocal(Unsupported):
+    """`name` (a local the program assigns None) takes a value of the scalar `kind` at `line`."""
+
+    def __init__(self, name, kind, line):
+        Unsupported.__init__(self, '%r is assigned None and a %s' % (name, kind))
+        self.name, self.kind, self.line = name, kind, line
+
+
+def _scalar_kind_of(node, ctx):
+    """'int' / 'float' / 'str' / 'bool' for a value of that kind here, else None."""
+    try:
+        kind = _etype(node, ctx)
+    except Unsupported:
+        return None
+    if kind == INT:
+        return 'bool' if _is_bool_expr(node, ctx) else 'int'
+    return {FLT: 'float', STR: 'str'}.get(kind)
+
+
+def _optional_local_source(source, hint):
+    """(the source with `name: kind | None` at the first assignment of the name in the function that
+    holds `line`, lowered by optlib.py; None and the reason when the lowering does not take it)."""
+    import optlib
+    try:
+        tree = ast.parse(source.strip())
+    except SyntaxError:
+        return None, str(hint)
+    fns = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
+           and n.lineno <= hint.line <= n.end_lineno]
+    if not fns:
+        return None, str(hint)
+    fn = min(fns, key=lambda f: f.end_lineno - f.lineno)
+    first = None
+    for n in ast.walk(fn):
+        if (isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name)
+                and n.targets[0].id == hint.name and (first is None or (n.lineno, n.col_offset) < (first.lineno, first.col_offset))):
+            first = n
+    if first is None:
+        return None, str(hint)
+    ann = ast.BinOp(left=ast.Name(id=hint.kind, ctx=ast.Load()), op=ast.BitOr(), right=ast.Constant(value=None))
+    new = ast.copy_location(ast.AnnAssign(target=ast.Name(id=hint.name, ctx=ast.Store()), annotation=ann,
+                                          value=first.value, simple=1), first)
+    optlib._replace_stmt(fn, first, new)
+    text = optlib._pad(tree, [])
+    notes = []
+    lowered = optlib.rewrite(text, notes)
+    if lowered == text:
+        why = notes[0][1] if notes else str(hint)
+        return None, '%s (%r is assigned None and a %s here)' % (why, hint.name, hint.kind)
+    return lowered, None
 
 
 def _refusal_line_from_names(source, message):
@@ -32937,6 +33236,10 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     # special methods, class attributes, static/class methods and properties become plain methods,
     # functions and module variables first; a program without them is left untouched (dunders.py)
     dunders.rewrite(tree, source, Unsupported)
+    global _HAS_ISINSTANCE
+    _HAS_ISINSTANCE = any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == 'isinstance'
+                          for n in ast.walk(tree))
+    _bare_except_to_exception(tree)
     threadlib.refuse_typed(tree, Unsupported)        # G12: threads are built on the general path only
     modtables.rewrite(tree, Unsupported, library, entry)
     stdlib4.rewrite(tree, Unsupported)
@@ -34765,6 +35068,21 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
             for t in n.targets:
                 if isinstance(t, ast.Name) and t.id not in struct_names:
                     ctx.optional.add(t.id)
+    if ctx.optional:
+        # a local that is only ever None: `print(x)` has to say None, so it is an Optional local too
+        none_stores = {id(n.targets[0]) for n in ast.walk(fn) if isinstance(n, ast.Assign) and len(n.targets) == 1
+                       and isinstance(n.value, ast.Constant) and n.value.value is None}
+        other_stores = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name) and n.id in ctx.optional
+                        and isinstance(n.ctx, (ast.Store, ast.Del)) and id(n) not in none_stores}
+        read = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
+        for name in sorted(ctx.optional - other_stores):
+            if name not in read:
+                continue
+            first = min((n for n in ast.walk(fn) if isinstance(n, ast.Assign) and len(n.targets) == 1
+                         and isinstance(n.targets[0], ast.Name) and n.targets[0].id == name),
+                        key=lambda n: (n.lineno, n.col_offset), default=None)
+            if first is not None:
+                raise _NoneLocal(name, 'int', first.lineno)
 
     # A local is a float if it is ever assigned one, wherever that assignment sits. Deciding this
     # line by line would make `total = 0` an int and then reject `total = total / 2` two lines
