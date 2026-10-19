@@ -1535,6 +1535,12 @@ def main(argv=None):
                 for line in _fallback_notes(args, source, result.stderr, locate=not objects and not separate,
                                              source_map=loading['source_map']):
                     print(line, file=sys.stderr)
+                # typedpar.py: why a thread / executor / pool use runs under the general path's lock
+                for path, entries in notes.items():
+                    for line, text in entries:
+                        if text.startswith('not run in parallel'):
+                            print('note: %s:%d: %s' % (_relpath(Path(path)) if Path(path) == source else path,
+                                                       line, text), file=sys.stderr)
             return native_build.emit(args, {'output': str(output), 'bytes': output.stat().st_size,
                 'sha256': hashlib.sha256(output.read_bytes()).hexdigest()})
     project = ROOT/'example' if args.command == 'selftest' else Path(args.project).resolve()
