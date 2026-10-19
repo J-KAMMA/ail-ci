@@ -36,6 +36,7 @@ import runpy
 from pyfront import Unsupported, refuse_complex_pow
 import filelib
 import pyfunc
+import boxclosure
 try:
     import pymix
 except ImportError:
@@ -954,6 +955,10 @@ class Ctx:
         self.nested_funcs = {}     # name -> info, for a def nested directly in this function
         self.global_decls = set()
         self.owner_class = None    # set for a method: the class it is defined on (for super())
+        self.cell_slots = set()    # names whose frame slot holds a CELL (shared with a closure)
+        self.clo_index = {}        # in a closure: captured name -> index of its CELL in `clo`
+        self.closure_defs = set()  # nested defs of this body that are function values
+        self.qualname = ''         # CPython's __qualname__ of the function being compiled
         self.self_name = None      # set for a method: its own first parameter's name
 
     def emit(self, line):
@@ -1003,7 +1008,7 @@ class _PreC(ast.AST):
         self.c = c
 
 
-class Compiler:
+class Compiler(boxclosure.ClosureMixin):
     def __init__(self, allow_mix=True):
         self.allow_mix = allow_mix
         self.threads = False       # G12: the program uses threads (threadlib.inject)
@@ -1046,6 +1051,10 @@ class Compiler:
                     if isinstance(stmt, ast.Return) and isinstance(stmt.value, ast.BinOp) and isinstance(stmt.value.op, ast.Pow):
                         stmt.value = ast.Call(func=ast.Name(id='_ail_c_sqrt', ctx=ast.Load()), args=[stmt.value.left], keywords=[])
         self.source_lines = source.splitlines()
+        # a bare except: would have to catch the SystemExit that sys.exit() raises in CPython
+        self.exits = any(isinstance(n, ast.Call) and ast.unparse(n.func) in ('sys.exit', 'exit', 'quit')
+                         for n in ast.walk(tree)) and any(
+            isinstance(n, ast.ExceptHandler) and n.type is None for n in ast.walk(tree))
         self.uses_fileio = False
         self.uses_proc = False
         self.uses_path = False
@@ -1362,13 +1371,18 @@ class Compiler:
         declaration in some function (both folded into self.module_names by compile()). This is
         exactly Python's own rule: a name assigned anywhere in a function is local for the WHOLE
         function; anything else falls through to the module global of the same name."""
-        return name not in ctx.slot_of and name not in ctx.ptr_names and name in self.module_names
+        return (name not in ctx.slot_of and name not in ctx.ptr_names and name not in ctx.clo_index
+                and name in self.module_names)
 
     def name_ref(self, name, ctx):
         """The C lvalue/rvalue for `name`'s CURRENT storage -- a nonlocal-captured pointer
         dereference, the module-lifetime global root, or this activation's own frame slot, in
         that priority order. Bypasses ail_op_load's UnboundLocalError check (used where the
         caller is about to overwrite it, e.g. an assignment target, or has already checked)."""
+        if name in ctx.clo_index:
+            return '(((ail_cellobj *)(clo[%d]).o)->val)' % ctx.clo_index[name]
+        if name in ctx.cell_slots:
+            return '(((ail_cellobj *)(%s).o)->val)' % ctx.slot_expr(ctx.slot_of[name])
         if name in ctx.ptr_names:
             return '(*%s)' % cid('ptr_' + name)
         if self._is_global_name(name, ctx):
@@ -1377,7 +1391,7 @@ class Compiler:
 
     def _declare_if_local(self, name, ctx):
         if not self._is_global_name(name, ctx) and name not in ctx.ptr_names \
-                and name not in ctx.global_decls:
+                and name not in ctx.global_decls and name not in ctx.clo_index:
             ctx.declare_local(name)
 
     # ------------------------------------------------------------------ import statement checks
@@ -1589,6 +1603,7 @@ class Compiler:
         node = info['node']
         ctx = Ctx(info['cname'])
         ctx.fn_node = node
+        ctx.qualname = (info['owner_class'] + '.' + node.name) if info.get('is_method') else node.name
         ctx.fn_params = set(info['all_params'])
         if info['is_method'] and not info['is_static'] and info['params']:
             ctx.var_kind[info['params'][0]] = 'instance:' + info['owner_class']
@@ -1608,15 +1623,20 @@ class Compiler:
         # nested defs (S043/S045): registered before compiling the body so a call to one appearing
         # textually before its own def (rare, but forward reference within one function body is
         # otherwise no different from any other statement order) still resolves.
+        ctx.closure_defs = boxclosure.escaping_defs(node.body)
+        for name in sorted(ctx.closure_defs):
+            ctx.declare_local(name)
         for n in node.body:
-            if isinstance(n, ast.FunctionDef):
+            if isinstance(n, ast.FunctionDef) and n.name not in ctx.closure_defs:
                 self._register_nested(n, ctx)
+        self.init_cells(ctx)
 
         sig = ''.join(', ail_obj %s' % cid(p) for p in info['all_params'])
         preamble_lines = []
         for p in info['all_params']:
             preamble_lines.append('    f.slots[%d] = %s;' % (ctx.slot_of[p], cid(p)))
         self.block(node.body, ctx)
+        preamble_lines += self.cell_preamble(ctx)
         n_slots = max(ctx.next_slot, 1)
         body = '\n'.join(preamble_lines) + ('\n' if preamble_lines else '')
         body += ctx.body_text()
@@ -1670,6 +1690,7 @@ class Compiler:
         # pointer parameter directly, so a write inside the nested function is visible to the
         # enclosing activation immediately (its frame slot IS the storage).
         nctx = Ctx(cname)
+        nctx.qualname = (outer_ctx.qualname + '.<locals>.' if outer_ctx.qualname else '') + node.name
         for nm in by_val:
             nctx.declare_local(nm)
         for nm in by_ptr:
@@ -1680,12 +1701,24 @@ class Compiler:
         for nm in sorted(locals_):
             if nm not in nctx.slot_of:
                 nctx.declare_local(nm)
+        # a nested function that calls itself: the call inside forwards its own captures (by value:
+        # its copy, which it cannot rebind; nonlocal: the pointer it was handed)
+        if node.name not in nctx.slot_of:
+            nctx.nested_funcs[node.name] = info
+        # a def inside a nested function is a function value (cells for what it shares)
+        nctx.closure_defs = {n.name for n in ast.walk(ast.Module(body=node.body, type_ignores=[]))
+                             if isinstance(n, ast.FunctionDef)} if any(
+            isinstance(n, ast.FunctionDef) for st in node.body for n in ast.walk(st)) else set()
+        for name in sorted(nctx.closure_defs):
+            nctx.declare_local(name)
+        self.init_cells(nctx)
         preamble_lines = []
         for p in params:
             preamble_lines.append('    f.slots[%d] = %s;' % (nctx.slot_of[p], cid(p)))
         for nm in by_val:
             preamble_lines.append('    f.slots[%d] = %s;' % (nctx.slot_of[nm], cid('cap_' + nm)))
         self.block(node.body, nctx)
+        preamble_lines += self.cell_preamble(nctx)
         n_slots = max(nctx.next_slot, 1)
         sig = (''.join(', ail_obj *%s' % cid('ptr_' + nm) for nm in by_ptr) +
               ''.join(', ail_obj %s' % cid('cap_' + nm) for nm in by_val) +
@@ -1712,7 +1745,7 @@ class Compiler:
             raise Unsupported('%s() called with the wrong number of arguments' % name)
         argcs = [self.expr(a, ctx) for a in args]
         capexprs = [self.name_ref(nm, ctx) for nm in info['by_val']]
-        ptrexprs = ['&' + self.name_ref(nm, ctx) if nm not in ctx.ptr_names else self.name_ref('ptr_' + nm, ctx)
+        ptrexprs = ['&' + self.name_ref(nm, ctx) if nm not in ctx.ptr_names else cid('ptr_' + nm)
                    for nm in info['by_ptr']]
         # a by-pointer capture inside a DOUBLY-nested def (rare) would need the pointer
         # forwarded rather than re-taken; not modelled -- outer_ctx.ptr_names never applies to a
@@ -2410,12 +2443,15 @@ class Compiler:
             # still needs a compile-time-known class NAME at the call site (see _call_name);
             # only the "class used as a plain value" shape is covered here.
             return 'g_slots_arr[%d]' % self.global_slots['class:' + node.id]
-        if node.id in self.functions or node.id in ctx.nested_funcs:
+        if node.id in ctx.nested_funcs:
             raise Unsupported('using function %s as a first-class value' % node.id)
+        if node.id in self.functions and node.id not in ctx.slot_of and node.id not in ctx.clo_index:
+            return self.function_value(node.id, ctx)
         if node.id in self.module_aliases or node.id in ('sys',):
             raise Unsupported('the module %s used as a plain value' % node.id)
         is_global = self._is_global_name(node.id, ctx)
-        if not is_global and node.id not in ctx.slot_of and node.id not in ctx.ptr_names:
+        if not is_global and node.id not in ctx.slot_of and node.id not in ctx.ptr_names \
+                and node.id not in ctx.clo_index:
             raise Unsupported("name '%s' is not defined" % node.id)
         t = ctx.tmp()
         if is_global:
@@ -2703,15 +2739,27 @@ class Compiler:
             return t
         cname = self._inst_class(an, ctx) if an is not None else None
         dunder = {ast.Eq: '__eq__', ast.Lt: '__lt__'}.get(type(op))
+        invert = False
+        if cname and type(op) is ast.NotEq:
+            # C42: `!=` asks __ne__ when the class (or a subclass) defines it, otherwise it is the negation of __eq__
+            # (object.__ne__); a class with neither compares by identity below
+            if self._resolve_method(cname, '__ne__') or self._dunder_plan(cname, '__ne__'):
+                dunder = '__ne__'
+            elif self._resolve_method(cname, '__eq__') or self._dunder_plan(cname, '__eq__'):
+                dunder, invert = '__eq__', True
         info = self._resolve_method(cname, dunder) if (cname and dunder) else None
         plan = self._dunder_plan(cname, dunder) if (cname and dunder) else None
         if plan:
             t = self._emit_virtual(plan, a, lambda i: [a, b], ctx, dunder)
+            if invert:
+                t2 = ctx.tmp()
+                ctx.emit('%s = ail_box_bool(!ail_obj_truthy(%s));' % (t2, t))
+                return t2
             return t
         if info:
             ctx.emit('st = %s(cx, &%s, %s, %s);' % (info['cname'], t, a, b))
             ctx.check()
-            if type(op) is ast.NotEq:
+            if invert:
                 ctx.emit('%s = ail_box_bool(!ail_obj_truthy(%s));' % (t, t))
             return t
         if cname and type(op) is ast.Eq:
@@ -2862,6 +2910,10 @@ class Compiler:
     def expr_Subscript(self, node, ctx):
         c = self.expr(node.value, ctx)
         if isinstance(node.slice, ast.Slice):
+            sliced = self._inst_class(node.value, ctx)
+            if sliced and self._resolve_method(sliced, '__getitem__'):
+                raise Unsupported('slicing a %s through __getitem__: the general path has no slice objects to hand '
+                                  'to it (C42)' % sliced)
             def bound(e, default):
                 if e is None:
                     return '0', str(default)
@@ -2982,7 +3034,7 @@ class Compiler:
         raise Unsupported('await (async is not modelled by the general path)')
 
     def expr_Lambda(self, node, ctx):
-        raise Unsupported('a lambda used outside a key=/func argument this compiler recognises')
+        return self.closure_value(node, ctx)
 
     # ---- comprehensions: materialised (a GeneratorExp behaves like a ListComp -- eager, not
     # lazy; see the report). Loop targets get ordinary permanent frame slots (declared once,
@@ -3214,7 +3266,7 @@ class Compiler:
             return self._call_name(f.id, args, kwargs, ctx)
         if isinstance(f, ast.Attribute):
             return self._call_attribute(f, args, kwargs, ctx)
-        raise Unsupported('a call through a computed function value')
+        return self.call_value(self.expr(f, ctx), args, kwargs, ctx)
 
     def _star_vec_src(self, star_val, ctx, what):
         """A starred call argument's value, cast to `ail_vecobj *` -- only safe for a genuine
@@ -3747,6 +3799,8 @@ class Compiler:
             return self._call_class(name, args, kwargs, ctx)
         if name in ctx.nested_funcs:
             return self._call_nested_function(name, args, kwargs, ctx)
+        if name in ctx.closure_defs or name in ctx.clo_index or name in ctx.cell_slots:
+            return self.call_value(self.expr(ast.Name(id=name, ctx=ast.Load()), ctx), args, kwargs, ctx)
         if name in self.functions:
             return self._call_user_function(name, args, kwargs, ctx)
         if name in filelib.PRIMS:
@@ -3801,6 +3855,8 @@ class Compiler:
         if name == '__import__':
             raise Unsupported("call to __import__(); a program is built whole, so a module name cannot be "
                               "chosen at run time\n  write instead: import the module at the top of the file")
+        if name in ctx.slot_of or name in ctx.ptr_names or self._is_global_name(name, ctx):
+            return self.call_value(self.expr(ast.Name(id=name, ctx=ast.Load()), ctx), args, kwargs, ctx)
         raise Unsupported("the name '%s' is not a known function/class/builtin" % name)
 
     # ---- a small, honest core of builtins implemented directly against the FIXED v2 API
@@ -4183,6 +4239,8 @@ class Compiler:
                 checks.append('(%s.tag==AIL_T_INT||%s.tag==AIL_T_BOOL)' % (v, v))
             elif tname in TYPE_TAG:
                 checks.append('%s.tag==%s' % (v, TYPE_TAG[tname]))
+            elif tname == 'range':
+                checks.append('%s.tag==AIL_T_RANGE' % v)
             elif tname in self.classes:
                 checks.append('(%s.tag==AIL_T_INST && ail_class_is_or_subclass('
                               '((ail_instobj *)%s.o)->cls, g_slots_arr[%d]))' %
@@ -6601,7 +6659,8 @@ class Compiler:
 
     def stmt_Raise(self, node, ctx):
         if node.cause is not None:
-            raise Unsupported('raise ... from ...')
+            raise Unsupported('raise ... from ... in a program that reads __cause__, __context__ or '
+                              '__traceback__ (the cause of an exception is not kept here)')
         if node.exc is None:
             if ctx.reraise_stack:
                 # C22: the handler cleared the pending exception at entry; re-raise the copy it
@@ -6663,6 +6722,10 @@ class Compiler:
         raise Unsupported('a raise of a non-builtin / non-constructor exception expression')
 
     def stmt_FunctionDef(self, node, ctx):
+        if node.name in ctx.closure_defs:
+            value = self.closure_value(node, ctx, node.name)
+            ctx.emit('%s = %s;' % (self.name_ref(node.name, ctx), value))
+            return
         pass  # a nested def was already registered+compiled by _register_nested (module
               # docstring's closure design); a TOP-LEVEL FunctionDef never reaches stmt() at
               # all (compile()'s own module-body pass skips FunctionDef/ClassDef outright).
@@ -6680,6 +6743,10 @@ class Compiler:
     def stmt_Try(self, node, ctx):
         for h in node.handlers:
             if h.type is None:
+                if self.exits:
+                    raise Unsupported('a bare except: in a program that calls sys.exit(): CPython\'s bare except '
+                                      'also catches the SystemExit, and sys.exit() ends the program here.\n'
+                                      '  write instead: except Exception:')
                 continue
             types = h.type.elts if isinstance(h.type, ast.Tuple) else [h.type]
             for t in types:
@@ -6841,8 +6908,18 @@ def build(source, report, allow_mix=True):
     step, per the brief), and `report['boxed']` filled with every function name plus '<module>'
     that went through this path (whole-program: pyc.py only calls this when the typed path
     refused something and the source is whole-program shaped)."""
-    compiler = Compiler(allow_mix=allow_mix)
-    body = compiler.compile(source)
+    hints = {}
+    for _attempt in range(16):
+        compiler = Compiler(allow_mix=allow_mix)
+        compiler.cell_hints = hints
+        try:
+            body = compiler.compile(source)
+            break
+        except boxclosure.NeedCells as need:
+            # a closure shares names its enclosing function kept in plain slots: cells from the start
+            hints.setdefault(need.fname, set()).update(need.names)
+    else:
+        raise Unsupported('closures nested too deeply to settle their shared names')
     if compiler.dunder_ops:
         import dunderrt
         body = dunderrt.patch(body)

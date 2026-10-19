@@ -59,7 +59,7 @@ CASES = [
      '', ['`global`', 'pass the value in as a parameter']),
     ('nonlocal_statement', 'python',
      'def main() -> None:\n    total = 0\n\n    def add(n: int) -> None:\n        nonlocal total\n'
-     '        total += n\n\n    add(3)\n    print(total)\n\n\nmain()\n',
+     '        total += n\n\n    step = add\n    step(3)\n    print(total)\n\n\nmain()\n',
      '5:', ['nonlocal', 'return the new one']),
     ('generator', 'python',
      'def gen(n: int):\n    for i in range(n):\n        yield i\n\n\n'
@@ -68,10 +68,13 @@ CASES = [
     ('walrus', 'python',
      'def main() -> None:\n    xs = [1, 2, 3]\n    if (n := len(xs)) > 2:\n        print(n)\n\n\nmain()\n',
      '3:', ['the walrus operator', 'n = len(xs)']),
+    # a match the lowering takes is built (test_ail_match); a positional class pattern of a class
+    # without __match_args__ is left as written and refused
     ('match_statement', 'python',
-     'def main() -> None:\n    x = 3\n    match x:\n        case 1:\n            print("one")\n'
+     'class P:\n    def __init__(self, x: int) -> None:\n        self.x = x\n\n\n'
+     'def main() -> None:\n    p = P(3)\n    match p:\n        case P(3):\n            print("three")\n'
      '        case _:\n            print("other")\n\n\nmain()\n',
-     '3:', ['a `match` statement', 'if` / `elif` / `else` chain']),
+     '8:', ['a `match` statement', 'if` / `elif` / `else` chain', '__match_args__']),
     ('while_else', 'python',
      'def main() -> None:\n    i = 0\n    while i < 3:\n        i += 1\n    else:\n        print("done")\n\n\nmain()\n',
      '3:', ['while-else is unsupported', 'a flag set before the loop']),

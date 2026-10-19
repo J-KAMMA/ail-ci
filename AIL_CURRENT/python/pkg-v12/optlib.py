@@ -262,8 +262,11 @@ class Lowerer:
                     if opt.get(n.target.id, kind) != kind:
                         raise Refused(n, '%r is annotated with two different Optional kinds' % n.target.id)
                     opt[n.target.id] = kind
-        has_nested = any(isinstance(n, (ast.FunctionDef, ast.Lambda, ast.AsyncFunctionDef)) and n is not node
-                         for n in ast.walk(node))
+        # a lambda or nested def that reads an Optional variable would need the pair inside it
+        nested_reads = set()
+        for n in ast.walk(node):
+            if isinstance(n, (ast.FunctionDef, ast.Lambda, ast.AsyncFunctionDef)) and n is not node:
+                nested_reads.update(m.id for m in ast.walk(n) if isinstance(m, ast.Name))
         # names that take an Optional call / another Optional name: fixpoint
         changed = True
         while changed:
@@ -279,8 +282,9 @@ class Lowerer:
                             for n in ast.walk(node))
         if not opt and not uses_opt_call and not (info and info.ret):
             return node
-        if has_nested and opt:
-            raise Refused(node, '%s() has a nested function or lambda and an Optional variable; not built' % node.name)
+        if nested_reads & set(opt):
+            raise Refused(node, '%s() has a nested function or lambda that reads an Optional variable (%s); not built'
+                          % (node.name, ', '.join(sorted(nested_reads & set(opt)))))
         self.opt = opt
         # a parameter cannot be reassigned on the typed path: an Optional parameter that the body assigns
         # is copied into a local pair on entry
@@ -1111,6 +1115,216 @@ def _pad(tree, source_lines):
     return '\n'.join(out) + '\n'
 
 
+def _own_nodes(fn):
+    """The nodes of `fn`'s body, not entering nested functions, lambdas or classes."""
+    out = []
+
+    def walk(n):
+        out.append(n)
+        for c in ast.iter_child_nodes(n):
+            if isinstance(c, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                continue
+            walk(c)
+    for st in fn.body:
+        walk(st)
+    return out
+
+
+def _elem_kind(t):
+    """The element kind of `list[int]`, `set[str]`, ... (a scalar kind) or None."""
+    if not t:
+        return None
+    if t == 'range':
+        return 'int'
+    for head in ('list[', 'set[', 'frozenset['):
+        if t.startswith(head) and t.endswith(']') and t[len(head):-1] in KINDS:
+            return t[len(head):-1]
+    return None
+
+
+class _LocalKinds:
+    """The scalar kind of each local of one function, told from annotations, constants, builtin calls,
+    arithmetic and loops over annotated lists or ranges; None where it cannot be told."""
+
+    def __init__(self, fn, returns):
+        self.fn = fn
+        self.returns = returns
+        self.nodes = _own_nodes(fn)
+        self.known = {}
+        for a in fn.args.args + fn.args.kwonlyargs:
+            if a.annotation is not None:
+                self.known[a.arg] = ast.unparse(a.annotation)
+        for n in self.nodes:
+            if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name):
+                self.known[n.target.id] = ast.unparse(n.annotation)
+        self.values = {}
+        self.loops = {}
+        for n in self.nodes:
+            if isinstance(n, ast.Assign):
+                for t in n.targets:
+                    if isinstance(t, ast.Name):
+                        self.values.setdefault(t.id, []).append(n.value)
+                    else:
+                        for e in ast.walk(t):
+                            if isinstance(e, ast.Name):
+                                self.values.setdefault(e.id, []).append(None)
+            elif isinstance(n, ast.AugAssign) and isinstance(n.target, ast.Name):
+                self.values.setdefault(n.target.id, []).append(
+                    ast.BinOp(left=ast.Name(id=n.target.id, ctx=ast.Load()), op=n.op, right=n.value))
+            elif isinstance(n, (ast.For, ast.comprehension)):
+                if isinstance(n.target, ast.Name):
+                    self.loops.setdefault(n.target.id, []).append(n.iter)
+                else:
+                    for e in ast.walk(n.target):
+                        if isinstance(e, ast.Name):
+                            self.loops.setdefault(e.id, []).append(None)
+            elif isinstance(n, (ast.With, ast.ExceptHandler, ast.NamedExpr, ast.Import, ast.ImportFrom, ast.Global,
+                                ast.Nonlocal)):
+                for e in ast.walk(n):
+                    if isinstance(e, ast.Name) and isinstance(e.ctx, ast.Store):
+                        self.values.setdefault(e.id, []).append(None)
+                if isinstance(n, (ast.Global, ast.Nonlocal)):
+                    for name in n.names:
+                        self.values.setdefault(name, []).append(None)
+        self.busy = set()
+
+    def kind(self, name):
+        if name in self.known:
+            return self.known[name]
+        if name in self.busy:
+            return None
+        self.busy.add(name)
+        try:
+            kinds = set()
+            for it in self.loops.get(name, []):
+                kinds.add(_elem_kind(self.expr(it)) if it is not None else None)
+            for v in self.values.get(name, []):
+                if v is None:
+                    kinds.add(None)
+                elif not _is_none(v):
+                    kinds.add(self.expr(v))
+            kinds.discard('?')
+            return kinds.pop() if len(kinds) == 1 else None
+        finally:
+            self.busy.discard(name)
+
+    def expr(self, e):
+        if isinstance(e, ast.Constant):
+            v = e.value
+            return ('bool' if isinstance(v, bool) else 'int' if isinstance(v, int) else 'float' if isinstance(v, float)
+                    else 'str' if isinstance(v, str) else None)
+        if isinstance(e, ast.Name):
+            return self.kind(e.id)
+        if isinstance(e, ast.BinOp):
+            a, b = self.expr(e.left), self.expr(e.right)
+            if a == b == 'str' and isinstance(e.op, ast.Add) or a == 'str' and isinstance(e.op, ast.Mod):
+                return 'str'
+            if a in ('int', 'bool') and b in ('int', 'bool'):
+                return 'float' if isinstance(e.op, ast.Div) else 'int'
+            if a in ('int', 'float', 'bool') and b in ('int', 'float', 'bool'):
+                return 'float'
+            return None
+        if isinstance(e, ast.UnaryOp):
+            t = self.expr(e.operand)
+            if isinstance(e.op, ast.Not):
+                return 'bool'
+            return 'int' if t == 'bool' else t if t in ('int', 'float') else None
+        if isinstance(e, ast.Compare):
+            return 'bool'
+        if isinstance(e, ast.IfExp):
+            a, b = self.expr(e.body), self.expr(e.orelse)
+            return a if a == b else None
+        if isinstance(e, ast.Subscript) and not isinstance(e.slice, ast.Slice):
+            t = self.expr(e.value)
+            return 'str' if t == 'str' else _elem_kind(t) if t and t.startswith('list[') else None
+        if isinstance(e, ast.Call):
+            f = e.func
+            if isinstance(f, ast.Name):
+                if f.id in ('int', 'len', 'ord') and f.id not in self.known:
+                    return 'int'
+                if f.id == 'float':
+                    return 'float'
+                if f.id in ('str', 'chr', 'repr'):
+                    return 'str'
+                if f.id == 'range':
+                    return 'range'
+                if f.id in self.returns:
+                    return self.returns[f.id]
+                if f.id in ('abs', 'max', 'min') and e.args and not e.keywords:
+                    ts = {self.expr(a) for a in e.args}
+                    if len(e.args) == 1:
+                        return _elem_kind(ts.pop()) if f.id != 'abs' else ts.pop()
+                    return ts.pop() if len(ts) == 1 else None
+                return None
+            if isinstance(f, ast.Attribute):
+                t = self.expr(f.value)
+                if t == 'str' and f.attr in ('strip', 'lstrip', 'rstrip', 'lower', 'upper', 'replace', 'title',
+                                             'capitalize', 'zfill', 'ljust', 'rjust', 'center', 'format'):
+                    return 'str'
+                if t == 'str' and f.attr in ('split', 'splitlines', 'rsplit'):
+                    return 'list[str]'
+                if isinstance(f.value, ast.Constant) and isinstance(f.value.value, str) and f.attr == 'join':
+                    return 'str'
+                if t == 'str' and f.attr in ('find', 'rfind', 'count', 'index'):
+                    return 'int'
+        return None
+
+
+def annotate_none_locals(tree):
+    """`x = None` and, elsewhere in the same function, `x = <a value of one scalar kind>`, with no
+    annotation on x: the first binding of x gets `x: <kind> | None`, which the Optional lowering below
+    takes (it refuses the uses it cannot prove, by name). Returns the number of names annotated."""
+    count = 0
+    returns = {}
+    for n in tree.body:
+        if isinstance(n, ast.FunctionDef) and n.returns is not None:
+            r = ast.unparse(n.returns)
+            if r in KINDS:
+                returns[n.name] = r
+    fns = [n for n in tree.body if isinstance(n, ast.FunctionDef)]
+    fns += [m for c in tree.body if isinstance(c, ast.ClassDef) for m in c.body if isinstance(m, ast.FunctionDef)]
+    for fn in fns:
+        if any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)) for st in fn.body
+               for n in ast.walk(st)):
+            continue
+        kinds = _LocalKinds(fn, returns)
+        params = {a.arg for a in fn.args.args + fn.args.kwonlyargs + fn.args.posonlyargs}
+        firsts = {}
+        for n in kinds.nodes:
+            if isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name):
+                firsts.setdefault(n.targets[0].id, n)
+        for name, values in kinds.values.items():
+            if name in params or name in kinds.known or name in kinds.loops or None in values:
+                continue
+            if not any(_is_none(v) for v in values) or all(_is_none(v) for v in values):
+                continue
+            kind = kinds.kind(name)
+            if kind not in KINDS:
+                continue
+            first = firsts.get(name)
+            if first is None:
+                continue
+            ann = ast.BinOp(left=ast.Name(id=kind, ctx=ast.Load()), op=ast.BitOr(), right=ast.Constant(value=None))
+            new = ast.AnnAssign(target=ast.Name(id=name, ctx=ast.Store()), annotation=ann, value=first.value, simple=1)
+            ast.copy_location(new, first)
+            _replace_stmt(fn, first, new)
+            count += 1
+    return count
+
+
+def _replace_stmt(fn, old, new):
+    for parent in ast.walk(fn):
+        for field in ('body', 'orelse', 'finalbody'):
+            block = getattr(parent, field, None)
+            if isinstance(block, list) and old in block:
+                block[block.index(old)] = new
+                return
+        for h in getattr(parent, 'handlers', []) or []:
+            if old in h.body:
+                h.body[h.body.index(old)] = new
+                return
+
+
 def candidate(tree):
     for node in ast.walk(tree):
         ann = None
@@ -1132,7 +1346,8 @@ def rewrite(source, notes=None):
         tree = ast.parse(source)
     except (SyntaxError, ValueError):
         return source
-    if not candidate(tree):
+    annotated = annotate_none_locals(tree)
+    if not candidate(tree) and not annotated:
         return source
     try:
         lowered = Lowerer(tree).run()

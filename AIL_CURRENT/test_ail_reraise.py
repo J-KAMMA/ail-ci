@@ -434,7 +434,9 @@ class ReraiseTests(unittest.TestCase):
 
     def test_invalid_data_chaining_custom_handlers_still_refused(self):
         cases=('def run(n:int)->int:\n raise ValueError(1)\n',
-               'def run(n:int)->int:\n raise ValueError() from None\n',
+               # `from` is dropped (it changes no output); reading the cause is still refused
+               'def run(n:int)->int:\n try:\n  raise ValueError()\n except ValueError as e:\n  print(e.__cause__)\n'
+               ' raise ValueError() from None\n',
                'class Custom(Exception):\n pass\ndef run(n:int)->int:\n try:\n  raise ValueError()\n except Custom:\n  return 0\n return 0\n')
         for index,source in enumerate(cases):
             path=self.write('bad'+str(index)+'.py',source+'\ndef main()->int:\n return run(0)\nmain()\n'); out=self.root/('bad'+str(index))

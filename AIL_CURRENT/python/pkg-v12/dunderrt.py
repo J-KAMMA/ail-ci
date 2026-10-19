@@ -29,7 +29,7 @@ D2 = {'__add__': 'ADD', '__radd__': 'RADD', '__sub__': 'SUB', '__rsub__': 'RSUB'
       '__rmul__': 'RMUL', '__truediv__': 'TRUEDIV', '__rtruediv__': 'RTRUEDIV', '__floordiv__': 'FLOORDIV',
       '__rfloordiv__': 'RFLOORDIV', '__mod__': 'MOD', '__rmod__': 'RMOD', '__pow__': 'POW', '__rpow__': 'RPOW',
       '__eq__': 'EQ', '__gt__': 'GT', '__round__': 'ROUND', '__getitem__': 'GETITEM', '__contains__': 'CONTAINS',
-      '__delitem__': 'DELITEM'}
+      '__delitem__': 'DELITEM', '__ne__': 'NE'}
 D3 = {'__setitem__': 'SETITEM'}
 # an operator method that is a hook here; a program defining one of these turns the patch on
 HOOKED = frozenset(D1) | frozenset(D2) | frozenset(D3)
@@ -42,7 +42,7 @@ enum { AIL_D1_NEG, AIL_D1_POS, AIL_D1_ABS, AIL_D1_HASH, AIL_D1_BOOL, AIL_D1_INT,
        AIL_D1_CEIL, AIL_D1_TRUNC, AIL_D1_LEN, AIL_D1_INDEX, AIL_ND1 };
 enum { AIL_D2_ADD, AIL_D2_RADD, AIL_D2_SUB, AIL_D2_RSUB, AIL_D2_MUL, AIL_D2_RMUL, AIL_D2_TRUEDIV, AIL_D2_RTRUEDIV,
        AIL_D2_FLOORDIV, AIL_D2_RFLOORDIV, AIL_D2_MOD, AIL_D2_RMOD, AIL_D2_POW, AIL_D2_RPOW, AIL_D2_EQ, AIL_D2_GT,
-       AIL_D2_ROUND, AIL_D2_GETITEM, AIL_D2_CONTAINS, AIL_D2_DELITEM, AIL_ND2 };
+       AIL_D2_ROUND, AIL_D2_GETITEM, AIL_D2_CONTAINS, AIL_D2_DELITEM, AIL_D2_NE, AIL_ND2 };
 enum { AIL_D3_SETITEM, AIL_ND3 };
 typedef ail_st (*ail_d3_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj, ail_obj);
 typedef ail_st (*ail_d1_fn)(ail_ctx *, ail_obj *, ail_obj);
@@ -156,13 +156,42 @@ __attribute__((noinline)) static int ail_dun_cmp_rev(ail_ctx *cx, int64_t *out, 
     }
     return 0;
 }
+/* C42: inside `==`, `!=` and `in` an exception raised by a user __eq__ called for the elements of a container is kept
+   here and raised by the operator; elsewhere (index, count, remove, dict and set probes) it is still dropped */
+static ail_st ail__eq_err; static int ail__eq_scope;
 __attribute__((noinline)) static int ail_dun_eq_raw(ail_obj a, ail_obj b) {
     ail_d2_fn f = ail_dun2(a, AIL_D2_EQ);
     ail_obj r;
-    if (f && ail__gcx) { if (f(ail__gcx, &r, a, b) != AIL_OK) return 0; return ail_obj_truthy(r); }
+    if (f && ail__gcx) {
+        if (ail__eq_scope && ail__eq_err) return 0;
+        ail_st est = f(ail__gcx, &r, a, b);
+        if (est != AIL_OK) { if (ail__eq_scope) ail__eq_err = est; return 0; }
+        return ail_obj_truthy(r);
+    }
     f = ail_dun2(b, AIL_D2_EQ);
-    if (f && ail__gcx) { if (f(ail__gcx, &r, b, a) != AIL_OK) return 0; return ail_obj_truthy(r); }
+    if (f && ail__gcx) {
+        if (ail__eq_scope && ail__eq_err) return 0;
+        ail_st est = f(ail__gcx, &r, b, a);
+        if (est != AIL_OK) { if (ail__eq_scope) ail__eq_err = est; return 0; }
+        return ail_obj_truthy(r);
+    }
     return a.tag == b.tag && a.o == b.o;
+}
+/* `a == b` / `a != b` when an operand is an instance (C42): the user's method decides, whatever the other operand is
+   (None included) and an exception it raises propagates; `!=` asks __ne__ and otherwise inverts __eq__; the reflected
+   method of the right operand is the next try, identity the last. */
+__attribute__((noinline)) static ail_st ail_dun_op_eq(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, int ne) {
+    ail_d2_fn f; ail_obj r; ail_st st;
+    for (int side = 0; side < 2; side++) {
+        ail_obj x = side ? b : a, y = side ? a : b;
+        if (ne && (f = ail_dun2(x, AIL_D2_NE))) return f(cx, out, x, y);
+        if ((f = ail_dun2(x, AIL_D2_EQ))) {
+            st = f(cx, &r, x, y); if (st != AIL_OK) return st;
+            *out = ne ? ail_box_bool(!ail_truthy_u(r)) : r; return AIL_OK;
+        }
+    }
+    int same = a.tag == b.tag && a.o == b.o;
+    *out = ail_box_bool(ne ? !same : same); return AIL_OK;
 }
 '''
 
@@ -215,6 +244,34 @@ def _edits():
     e.append(('static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {\n',
               'static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {\n'
               '    if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) return ail_dun_eq_raw(a, b);\n'))
+    e.append(('static inline ail_st ail_op_eq(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { (void)cx; *out = ail_box_bool(ail_obj_eq_raw(a, b)); return AIL_OK; }',
+              'static inline ail_st ail_op_eq(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n'
+              '    if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) return ail_dun_op_eq(cx, out, a, b, 0);\n'
+              '    int sv_scope = ail__eq_scope; ail_st sv_err = ail__eq_err; ail__eq_scope = 1; ail__eq_err = 0;\n'
+              '    int eq = ail_obj_eq_raw(a, b);\n'
+              '    ail_st e = ail__eq_err; ail__eq_scope = sv_scope; ail__eq_err = sv_err; if (e) return e;\n'
+              '    *out = ail_box_bool(eq); return AIL_OK;\n}'))
+    e.append(('static inline ail_st ail_op_ne(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { (void)cx; *out = ail_box_bool(!ail_obj_eq_raw(a, b)); return AIL_OK; }',
+              'static inline ail_st ail_op_ne(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n'
+              '    if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) return ail_dun_op_eq(cx, out, a, b, 1);\n'
+              '    int sv_scope = ail__eq_scope; ail_st sv_err = ail__eq_err; ail__eq_scope = 1; ail__eq_err = 0;\n'
+              '    int eq = ail_obj_eq_raw(a, b);\n'
+              '    ail_st e = ail__eq_err; ail__eq_scope = sv_scope; ail__eq_err = sv_err; if (e) return e;\n'
+              '    *out = ail_box_bool(!eq); return AIL_OK;\n}'))
+    e.append(('            for (int64_t i = 0; i < v->n; i++) if (ail_member_eq(v->p[i], item)) { *out = 1; return AIL_OK; }\n'
+              '            *out = 0; return AIL_OK;\n',
+              '            int sv_scope = ail__eq_scope; ail_st sv_err = ail__eq_err; ail__eq_scope = 1; ail__eq_err = 0;\n'
+              '            int found = 0;\n'
+              '            for (int64_t i = 0; i < v->n && !ail__eq_err; i++) if (ail_member_eq(v->p[i], item)) { found = 1; break; }\n'
+              '            ail_st e = ail__eq_err; ail__eq_scope = sv_scope; ail__eq_err = sv_err; if (e) return e;\n'
+              '            *out = found; return AIL_OK;\n'))
+    # a slice of an instance: there are no slice objects, so __getitem__ cannot be given one (named, not "not subscriptable")
+    e.append(('    char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable", ail_type_name(c.tag));\n'
+              '    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n}\n\n/* ====',
+              '    if (c.tag == AIL_T_INST && ail_dun2(c, AIL_D2_GETITEM))\n'
+              '        return ail_raise_c(cx, AIL_B_NOTIMPLEMENTEDERROR, "slicing an instance through __getitem__ is not supported: this path has no slice objects");\n'
+              '    char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable", ail_type_name(c.tag));\n'
+              '    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n}\n\n/* ===='))
     # hashing
     e.append(('        default: {\n            char buf[64]; snprintf(buf, sizeof buf, "unhashable type: \'%s\'", ail_type_name(x.tag));\n'
               '            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n        }\n    }\n}\nstatic inline ail_st ail_obj_cmp(',
