@@ -1006,3 +1006,37 @@ slower than typed code), where operator methods dispatch on the run-time class (
 - Also: user classes may define `__add__ __sub__ __mul__ __truediv__ __floordiv__ __mod__ __pow__` (and the `__r..__` forms), `__neg__ __pos__ __abs__ __bool__ __int__ __float__
   __round__ __floor__ __ceil__ __trunc__ __index__ __hash__ __eq__ __len__ __getitem__ __setitem__ __delitem__ __contains__`; instances hash and compare by identity unless the
   class says otherwise. `d1 | d2` on dicts, `type(x).__name__`, `x.__class__.__name__`, `Cls(*xs)` for a class with a fixed `__init__`.
+
+## Native libraries: C and Rust (`ail_ffi`, `link`, `ail_cbuf`)
+
+```python
+from ail_ffi import *
+from ail_cbuf import get_i32, get_i64, put_i64      # copy ail_cbuf.py beside the program
+
+link("m", "z")                                       # -lm -lz; the CPython shim loads the same libraries
+
+@extern(header="math.h", symbol="frexp")
+def c_frexp(x: c_double, e: ptr(c_int)) -> c_double: ...            # out-parameter: a bytearray(4)
+@extern(header="zlib.h", symbol="compress")
+def z_compress(dest: bytearray, dest_len: ptr(c_ulong), src: bytes, n: length("src", c_ulong)) -> c_int: ...
+@extern(header="zlib.h", symbol="uncompress", check="nonzero", exc=ValueError)   # error code -> exception
+def z_uncompress(dest: bytearray, dest_len: ptr(c_ulong), src: bytes, n: length("src", c_ulong)) -> c_int: ...
+@extern(header="sqlite3.h", trust=True)              # the prototype names `sqlite3 **`: not compared
+def sqlite3_open(path: c_char_p, db: ptr(c_void_p)) -> c_int: ...    # void ** out-parameter: read with get_i64
+
+e = bytearray(4)
+m = c_frexp(48.0, e)
+print(m, get_i32(e, 0))                              # 0.75 6
+```
+
+- `link("name", ...)` once per file; `pkg_config="x"` for pkg-config flags; a path links that file. Stubs without `lib=` search the C
+  library, then the linked libraries.
+- Out-parameters and structs are byte buffers: `ptr(T)` (writable) / `cptr(T)` (read only) over a `bytearray` / `bytes`, element types are
+  ints, `c_float`, `c_double`, `c_bool`, `c_void_p`; `c_mut_void_p` / `c_const_void_p` for a struct; fields are read and written at the C
+  offsets with `get_i32 get_u32 get_i64 get_f64 put_i32 put_i64 put_f64 ...`.
+- `trust=True` for a prototype that names a struct (`struct tm *`, `sqlite3 *`): the header is included, its prototype is not compared.
+- Callbacks (AIL functions called from C) are not supported.
+- Rust: export `#[no_mangle] pub extern "C"` functions from a `cdylib` / `staticlib` crate (`panic = "abort"`), generate a header with
+  cbindgen, and `python3 tools/ail_bindgen.py crate.h --lib ./libcrate.so --check fn=nonzero:ValueError` writes the stubs.
+  Recipe: `docs/design/NATIVE_LIBRARIES.md`.
+
