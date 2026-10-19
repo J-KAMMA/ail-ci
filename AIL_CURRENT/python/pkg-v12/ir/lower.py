@@ -2301,6 +2301,10 @@ class Lowering(TextLowering):
             a, b = self.expr(args[0]), self.expr(args[1])
             t = I.F64 if I.F64 in (a.type, b.type) else I.I64
             a, b = self.coerce(a, t), self.coerce(b, t)
+            if t == I.F64:
+                # CPython keeps the first argument unless the second is smaller (larger): NaN stays first (silent6)
+                c = self.b.value('cmp.lt' if f == 'min' else 'cmp.gt', [b, a], I.I1)
+                return self.b.value('select', [c, b, a], t)
             c = self.b.value('cmp.lt' if f == 'min' else 'cmp.gt', [a, b], I.I1)
             return self.b.value('select', [c, a, b], t)
         if f == 'print' and statement:

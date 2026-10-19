@@ -684,6 +684,7 @@ def _slow_patterns(text, source_map):
 
 
 _FALLBACK_NOTE = 'note: built on the general path'
+_FALLBACK_HINT = '; run with --strict to see why'
 _LINE_MARKER = re.compile(r'^ail-source-line: (\d+)\r?\n?', re.M)
 
 
@@ -704,8 +705,8 @@ def _marker_where(source_map, line):
 
 
 def _fallback_notes(args, source, stderr, locate=True, source_map=None):
-    """The compile-time `note: file:line:col: built on the general path (several times slower)
-    because <typed refusal>` lines the compiler printed, positioned like a refusal. Advisory only:
+    """The compile-time `note: file:line:col: built on the general path (about 20x slower)
+    because <typed refusal>; run with --strict ...` lines the compiler printed, positioned like a refusal. Advisory only:
     stdout and the exit status are never affected; AIL_QUIET_FALLBACK=1 silences it."""
     if os.environ.get('AIL_QUIET_FALLBACK') or not stderr or _FALLBACK_NOTE not in stderr:
         return []
@@ -716,6 +717,8 @@ def _fallback_notes(args, source, stderr, locate=True, source_map=None):
         for line in stderr.splitlines():
             if not line.startswith(_FALLBACK_NOTE):
                 continue
+            hint = _FALLBACK_HINT if line.endswith(_FALLBACK_HINT) else ''
+            line = line[:len(line) - len(hint)]       # the position lookup reads the refusal text alone
             if python:
                 line = python_wording(line)
             if str(source) in _MERGED_ENTRIES:
@@ -729,10 +732,124 @@ def _fallback_notes(args, source, stderr, locate=True, source_map=None):
                     where = _marker_where(source_map or {}, marked)
                 if where:
                     line = 'note: %s: built on the general path%s' % (where, line[len(_FALLBACK_NOTE):])
-            notes.append(line)
+            notes.append(line + hint)
     except Exception:
         return notes
     return notes
+
+
+def _strict_requested(args):
+    """`--strict` or AIL_STRICT=1: build on the typed path or refuse (never the general path)."""
+    return bool(getattr(args, 'strict', False)) or str(os.environ.get('AIL_STRICT', '')).strip().lower() not in (
+        '', '0', 'off', 'no', 'false')
+
+
+def _strict_blockers(args, source, objects, python):
+    """(blockers, incomplete): every typed-path blocker of the program, with file:line:col, ranked."""
+    origins, source_map = {}, {}
+    text, _, _ = _load_sources(source, args.module, args.syntax, module_paths=args.module_path,
+                               origins=origins, source_map=source_map, local_imports=True)
+    names = _MERGED_ENTRIES[str(source)].names if str(source) in _MERGED_ENTRIES else None
+
+    def reword(message):
+        if names:
+            message = ail_modules.unmangle(message, names)
+        return python_wording(message) if python else message
+
+    compiler_path = str(ROOT / 'python/pkg-v12')
+    previous_path, previous_bytecode = sys.path[:], sys.dont_write_bytecode
+    saved_surface = os.environ.get('AIL_SURFACE')
+    try:
+        sys.dont_write_bytecode = True
+        sys.path.insert(0, compiler_path)
+        from pyfunc import Unsupported, to_c
+        import strictmode
+        external = None
+        if objects:
+            from module_object import load_objects
+            external = load_objects(list(objects))
+        if python:
+            os.environ['AIL_SURFACE'] = 'python'
+        else:
+            os.environ.pop('AIL_SURFACE', None)
+        blockers, incomplete = strictmode.collect(text, to_c, Unsupported, external=external, reword=reword)
+    finally:
+        if saved_surface is None:
+            os.environ.pop('AIL_SURFACE', None)
+        else:
+            os.environ['AIL_SURFACE'] = saved_surface
+        sys.path[:] = previous_path
+        sys.dont_write_bytecode = previous_bytecode
+    for blocker in blockers:
+        position = source_map.get(blocker.get('line'))
+        origin = origins.get(blocker.get('function'))
+        path = line = column = None
+        if position is not None:
+            path, line = position[0], position[1]
+            column = position[2] if len(position) > 2 and position[2] is not None else blocker.get('column')
+        elif origin is not None:
+            path, line, column = origin[0], origin[1], origin[2]
+        else:
+            path, line, column = str(source), blocker.get('line'), blocker.get('column')
+        shown = _relpath(path)
+        blocker['path'] = path if shown.startswith('..') else shown
+        blocker['line'], blocker['column'] = line, column
+        if names:
+            for key in ('function', 'statement', 'construct', 'why', 'write_instead'):
+                if isinstance(blocker.get(key), str):
+                    blocker[key] = ail_modules.unmangle(blocker[key], names)
+            blocker['blocks_functions'] = [ail_modules.unmangle(name, names) for name in blocker['blocks_functions']]
+    return blockers, incomplete
+
+
+def _strict_text(blockers, incomplete):
+    count = len(blockers)
+    lines = ['strict: %d typed-path blocker%s; nothing was built (ranked by the code each one keeps off the typed path)'
+             % (count, '' if count == 1 else 's')]
+    for blocker in blockers:
+        where = blocker['path'] + (':%s' % blocker['line'] if blocker.get('line') else '') + (
+            ':%s' % blocker['column'] if blocker.get('line') and blocker.get('column') else '')
+        lines.append('')
+        lines.append('%d. %s  blocks %d line%s%s' % (
+            blocker['rank'], where, blocker['blocks_lines'], '' if blocker['blocks_lines'] == 1 else 's',
+            ' (' + ', '.join(blocker['blocks_functions']) + ')' if blocker['blocks_functions'] else ''))
+        if blocker.get('statement'):
+            lines.append('   code:          ' + blocker['statement'])
+        lines.append('   construct:     ' + blocker['construct'])
+        lines.append('   why not typed: ' + blocker['why'])
+        lines.append('   write instead: ' + blocker['write_instead'])
+    if incomplete:
+        lines += ['', 'strict: the list may be incomplete (%s)' % incomplete]
+    return '\n'.join(lines) + '\n'
+
+
+def _strict_json(args, source, blockers, incomplete):
+    return json.dumps(dict(
+        schema='ail.strict/1', status='refused', strict=True, command=args.command, source=str(source),
+        exit_code=3, blocker_count=len(blockers), incomplete=incomplete,
+        blockers=[{key: blocker.get(key) for key in (
+            'rank', 'path', 'line', 'column', 'function', 'statement', 'construct', 'why', 'write_instead',
+            'blocks_lines', 'blocks_functions', 'message')} for blocker in blockers]), ensure_ascii=False)
+
+
+def _strict_refusal(args, source, objects, first_message):
+    """Print every blocker (text on stderr, or `ail.strict/1` JSON on stdout with --json); the exit status
+    is the refusal's, 3. None when the blockers cannot be collected (the caller prints the first refusal)."""
+    try:
+        python = _python_source(args, source.read_bytes())
+        blockers, incomplete = _strict_blockers(args, source, objects, python)
+    except Exception:
+        if os.environ.get('AIL_STRICT_DEBUG'):
+            import traceback
+            traceback.print_exc()
+        return None
+    if not blockers:
+        return None
+    if getattr(args, 'json', False):
+        print(_strict_json(args, source, blockers, incomplete))
+    else:
+        sys.stderr.write(_strict_text(blockers, incomplete))
+    return 3
 
 
 def _source_check(args):
@@ -1169,6 +1286,9 @@ def main(argv=None):
         help='link an existing typed .o and its adjacent .o.json without its source')
     compile_cmd.add_argument('--syntax', choices=('auto', 'python', 'ail'), default='auto',
         help='source syntax; auto detects fn/const/use/struct declarations, ail uses brace-delimited blocks')
+    compile_cmd.add_argument('--strict', action='store_true',
+        help='build on the typed path or refuse, listing every blocker with a rewrite (also AIL_STRICT=1); '
+             'with --json the blockers are printed as ail.strict/1 JSON')
     compile_cmd.add_argument('--static', action='store_true',
         help='link the C library statically (larger binary that runs on any Linux); default is dynamic')
     compile_cmd.add_argument('--target', choices=sorted(ZIG_TARGETS),
@@ -1460,6 +1580,7 @@ def main(argv=None):
             target = Path(tmp) / 'program'
             build_source = Path(tmp) / 'combined.ail'
             build_source.write_text(source_text, encoding='utf-8')
+            strict = _strict_requested(args)
             command = [sys.executable, '-B', str(ROOT/'python/pkg-v12/pyc.py'),
                        '--file', str(build_source), str(target), '--strict']
             for object_path in [*objects, *ffi_objects]:
@@ -1469,7 +1590,7 @@ def main(argv=None):
                 unit_map_path.write_text(json.dumps(unit_map), encoding='utf-8')
                 command += ['--link-units', str(unit_map_path)]
             environment = _surface_env(args, source, {**os.environ, 'AIL_REPORT_SOURCE_LINE': '1',
-                                                **({'AIL_NO_GENERAL': '1'} if contracts else {}), **ffi_env})
+                                                **({'AIL_NO_GENERAL': '1'} if contracts or strict else {}), **ffi_env})
             cache = None if separate or getattr(args, 'target', None) else _build_cache(args)
             frontend = None
             if cache is not None and not native_build.enabled(args):
@@ -1500,6 +1621,10 @@ def main(argv=None):
                     timeout=660, env=environment)
                 if frontend and result.returncode == 0 and target.is_file():
                     cache.put('fe', frontend, cache.pack({'stderr': result.stderr or ''}, target.read_bytes()))
+            if result.returncode == 3 and strict and not separate and not ffi_objects:
+                refused = _strict_refusal(args, source, objects, result.stderr or result.stdout)
+                if refused is not None:
+                    return refused
             if result.returncode:
                 message, marked = _split_line_marker(result.stderr or result.stdout)
                 python = result.returncode == 3 and _python_source(args, source.read_bytes())
