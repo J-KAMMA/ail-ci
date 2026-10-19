@@ -19,6 +19,25 @@ loops as `file:line: slow: ...; fix`: `x in xs` / `.index` / `.count` / `.remove
 current key, nested loops over one list, a struct heap keyed by a computed value. They never
 fail the build; fix them when n can be large. `s += t` on a str is linear (no hint).
 
+### Strict mode: the typed path or a refusal
+
+A program the typed path cannot take is built on the general path, about 20x slower, and `compile`
+prints one `note: ... built on the general path (about 20x slower) because ...; run with --strict to see
+why` line (`AIL_QUIET_FALLBACK=1` silences it). Strict mode never falls back:
+
+```text
+python3 ail_chatgpt.py compile prog.py --strict -o prog          # also AIL_STRICT=1, ail build --strict, ail run --strict
+python3 ail_chatgpt.py compile prog.py --strict --json -o prog   # blockers as ail.strict/1 JSON on stdout
+```
+
+A typed program builds exactly as without the flag (same C, same executable). Otherwise exit status 3 and
+every blocker the compiler can find in one pass, not only the first: `file:line:col`, the code, the
+construct, why it is not typed and a `write instead:` rewrite, the one that keeps the most code off the
+typed path first (`blocks N lines (f, main)`: the function and every caller). Fix them all, run again.
+The JSON has `schema`, `status`, `blocker_count`, `incomplete` (null, or why the list may be short) and
+`blockers[]` with `rank path line column function statement construct why write_instead blocks_lines
+blocks_functions message`. `AIL_NO_GENERAL=1` alone still stops at the first refusal.
+
 ## Text I/O: main, arguments, stdin lines, print, files
 
 ```ail
@@ -1006,3 +1025,37 @@ slower than typed code), where operator methods dispatch on the run-time class (
 - Also: user classes may define `__add__ __sub__ __mul__ __truediv__ __floordiv__ __mod__ __pow__` (and the `__r..__` forms), `__neg__ __pos__ __abs__ __bool__ __int__ __float__
   __round__ __floor__ __ceil__ __trunc__ __index__ __hash__ __eq__ __len__ __getitem__ __setitem__ __delitem__ __contains__`; instances hash and compare by identity unless the
   class says otherwise. `d1 | d2` on dicts, `type(x).__name__`, `x.__class__.__name__`, `Cls(*xs)` for a class with a fixed `__init__`.
+
+### Native libraries: C and Rust (`ail_ffi`, `link`, `ail_cbuf`)
+
+```python
+from ail_ffi import *
+from ail_cbuf import get_i32, get_i64, put_i64      # copy ail_cbuf.py beside the program
+
+link("m", "z")                                       # -lm -lz; the CPython shim loads the same libraries
+
+@extern(header="math.h", symbol="frexp")
+def c_frexp(x: c_double, e: ptr(c_int)) -> c_double: ...            # out-parameter: a bytearray(4)
+@extern(header="zlib.h", symbol="compress")
+def z_compress(dest: bytearray, dest_len: ptr(c_ulong), src: bytes, n: length("src", c_ulong)) -> c_int: ...
+@extern(header="zlib.h", symbol="uncompress", check="nonzero", exc=ValueError)   # error code -> exception
+def z_uncompress(dest: bytearray, dest_len: ptr(c_ulong), src: bytes, n: length("src", c_ulong)) -> c_int: ...
+@extern(header="sqlite3.h", trust=True)              # the prototype names `sqlite3 **`: not compared
+def sqlite3_open(path: c_char_p, db: ptr(c_void_p)) -> c_int: ...    # void ** out-parameter: read with get_i64
+
+e = bytearray(4)
+m = c_frexp(48.0, e)
+print(m, get_i32(e, 0))                              # 0.75 6
+```
+
+- `link("name", ...)` once per file; `pkg_config="x"` for pkg-config flags; a path links that file. Stubs without `lib=` search the C
+  library, then the linked libraries.
+- Out-parameters and structs are byte buffers: `ptr(T)` (writable) / `cptr(T)` (read only) over a `bytearray` / `bytes`, element types are
+  ints, `c_float`, `c_double`, `c_bool`, `c_void_p`; `c_mut_void_p` / `c_const_void_p` for a struct; fields are read and written at the C
+  offsets with `get_i32 get_u32 get_i64 get_f64 put_i32 put_i64 put_f64 ...`.
+- `trust=True` for a prototype that names a struct (`struct tm *`, `sqlite3 *`): the header is included, its prototype is not compared.
+- Callbacks (AIL functions called from C) are not supported.
+- Rust: export `#[no_mangle] pub extern "C"` functions from a `cdylib` / `staticlib` crate (`panic = "abort"`), generate a header with
+  cbindgen, and `python3 AIL_CURRENT/ail_bindgen.py crate.h --lib ./libcrate.so --check fn=nonzero:ValueError` writes the stubs.
+  Recipe: `docs/design/NATIVE_LIBRARIES.md`.
+
