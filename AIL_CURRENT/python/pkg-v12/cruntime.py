@@ -15595,6 +15595,14 @@ static inline ail_st ail_op_contains(ail_ctx *cx, int *out, ail_obj c, ail_obj i
         default: { char buf[64]; snprintf(buf, sizeof buf, "argument of type '%s' is not iterable", ail_type_name(c.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
     }
 }
+/* A deque is a two-element LIST wrapper (p[0] = the data list, p[1] = maxlen), so item access has to go
+   through p[0]: writing the wrapper itself would overwrite its data pointer (and maxlen) instead of an
+   item. CPython's texts: a non-int index or a slice is a TypeError, an out-of-range index is a
+   "deque index out of range" IndexError. */
+static inline ail_st ail__deque_needs_int(ail_ctx *cx, ail_obj key) {
+    char buf[96]; snprintf(buf, sizeof buf, "sequence index must be integer, not '%s'", ail__tname_c(key));
+    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+}
 static inline ail_st ail_op_getitem(ail_ctx *cx, ail_obj *out, ail_obj c, ail_obj key) {
     if (c.tag == AIL_T_LIST && __builtin_expect(((ail_gcobj *)c.o)->aux, 0)) {   /* a dict view */
         char vb[64]; snprintf(vb, sizeof vb, "'%s' object is not subscriptable", ail__tname_c(c));
@@ -15602,7 +15610,9 @@ static inline ail_st ail_op_getitem(ail_ctx *cx, ail_obj *out, ail_obj c, ail_ob
     }
     if (c.tag == AIL_T_LIST && __builtin_expect(((ail_gcobj *)c.o)->flags, 0)) {   /* a deque: its data (IndexError text of deque) */
         ail_obj dq = ((ail_vecobj *)c.o)->p[0];
-        if ((key.tag == AIL_T_INT || key.tag == AIL_T_BOOL) && (key.i >= (int64_t)((ail_vecobj *)dq.o)->n || key.i < -(int64_t)((ail_vecobj *)dq.o)->n))
+        if (key.tag != AIL_T_INT && key.tag != AIL_T_BOOL)
+            return ail__deque_needs_int(cx, key);          /* "sequence index must be integer, not 'str'" */
+        if (key.i >= (int64_t)((ail_vecobj *)dq.o)->n || key.i < -(int64_t)((ail_vecobj *)dq.o)->n)
             return ail_raise_c(cx, AIL_B_INDEXERROR, "deque index out of range");
         c = dq;
     }
@@ -15631,6 +15641,13 @@ static inline ail_st ail_op_getitem(ail_ctx *cx, ail_obj *out, ail_obj c, ail_ob
     }
 }
 static inline ail_st ail_op_setitem(ail_ctx *cx, ail_obj c, ail_obj key, ail_obj val) {
+    if (c.tag == AIL_T_LIST && __builtin_expect(((ail_gcobj *)c.o)->flags, 0)) {   /* a deque: write its data list */
+        ail_obj dq = ((ail_vecobj *)c.o)->p[0];
+        if (key.tag != AIL_T_INT && key.tag != AIL_T_BOOL) return ail__deque_needs_int(cx, key);
+        ail_vecobj *dv = (ail_vecobj *)dq.o;
+        int64_t ni; ail_st st = ail__norm_index(cx, &ni, key.i, dv->n, "deque"); if (st != AIL_OK) return st;
+        dv->p[ni] = val; return AIL_OK;
+    }
     if (c.tag == AIL_T_LIST) {
         if (key.tag != AIL_T_INT && key.tag != AIL_T_BOOL) return ail_raise_c(cx, AIL_B_TYPEERROR, "list indices must be integers or slices");
         return ail_list_setitem(cx, c, key.i, val);
@@ -15640,9 +15657,21 @@ static inline ail_st ail_op_setitem(ail_ctx *cx, ail_obj c, ail_obj key, ail_obj
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
 }
 static inline ail_st ail_op_delitem(ail_ctx *cx, ail_obj c, ail_obj key) {
+    if (c.tag == AIL_T_LIST && __builtin_expect(((ail_gcobj *)c.o)->flags, 0)) {   /* a deque: delete from its data list */
+        ail_obj dq = ((ail_vecobj *)c.o)->p[0];
+        if (key.tag != AIL_T_INT && key.tag != AIL_T_BOOL) return ail__deque_needs_int(cx, key);
+        ail_vecobj *dv = (ail_vecobj *)dq.o;
+        int64_t ni; ail_st st = ail__norm_index(cx, &ni, key.i, dv->n, "deque"); if (st != AIL_OK) return st;
+        for (int64_t k = ni; k + 1 < dv->n; k++) dv->p[k] = dv->p[k + 1];
+        dv->n--; return AIL_OK;
+    }
     if (c.tag == AIL_T_LIST) {
         if (key.tag != AIL_T_INT && key.tag != AIL_T_BOOL) return ail_raise_c(cx, AIL_B_TYPEERROR, "list indices must be integers or slices");
         return ail_list_delitem(cx, c, key.i);
+    }
+    if (c.tag == AIL_T_DICT && __builtin_expect(((ail_gcobj *)c.o)->flags, 0)) {   /* a Counter: __delitem__ ignores a missing key */
+        int found; ail_st st = ail_map_del(cx, &found, (ail_mapobj *)c.o, key); if (st != AIL_OK) return st;
+        return AIL_OK;
     }
     if (c.tag == AIL_T_DICT) return ail_dict_del(cx, c, key);
     char buf[64]; snprintf(buf, sizeof buf, "'%s' object doesn't support item deletion", ail_type_name(c.tag));
@@ -15654,6 +15683,8 @@ static inline ail_st ail_op_getslice(ail_ctx *cx, ail_obj *out, ail_obj c, int h
         char vb[64]; snprintf(vb, sizeof vb, "'%s' object is not subscriptable", ail__tname_c(c));
         return ail_raise_c(cx, AIL_B_TYPEERROR, vb);
     }
+    if (c.tag == AIL_T_LIST && __builtin_expect(((ail_gcobj *)c.o)->flags, 0))   /* a deque has no slices */
+        return ail_raise_c(cx, AIL_B_TYPEERROR, "sequence index must be integer, not 'slice'");
     if (c.tag == AIL_T_LIST || c.tag == AIL_T_TUPLE) return ail_vec_getslice(cx, out, c, has_lo, lo, has_hi, hi, has_step, step);
     char buf[64]; snprintf(buf, sizeof buf, "'%s' object is not subscriptable", ail_type_name(c.tag));
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);

@@ -1784,6 +1784,7 @@ class Scope:
     def stmt(self, st):
         r = self.r
         self.pre = []
+        self.print_stmt = False
         if isinstance(st, (ast.FunctionDef, ast.ClassDef)):
             return
         if isinstance(st, ast.Assign):
@@ -2015,6 +2016,8 @@ class Scope:
     def expr_stmt(self, st):
         r = self.r
         call = st.value
+        self.print_stmt = (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+                           and call.func.id == 'print' and not any(isinstance(a, ast.Starred) for a in call.args))
         if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute):
             c = self.coll(call.func.value)
             if c is not None:
@@ -2698,11 +2701,13 @@ class _X(ast.NodeTransformer):
                                     generators=[gen])
             self.refuse(node, '%s(c.most_common(n)) is not built' % fname)
         new_args = []
+        vals = []                     # per argument: (its value, the collection it is, how it is converted)
         for a in args:
             sr = self.set_row(a)
             if sr is not None:
                 if fname in ('len', 'sorted', 'sum', 'min', 'max', 'any', 'all'):
                     new_args.append(self.set_row_expr(*sr))
+                    vals.append((None, None, 'plain'))
                     continue
                 self.refuse(node, '%s(d[k]) of a defaultdict(set) row is not built; %s' % (fname, self.SET_ROW_NOTE))
             c = self.coll(a)
@@ -2710,15 +2715,19 @@ class _X(ast.NodeTransformer):
                 t = r.infer(a, self.env)
                 if isinstance(t, C) and t.kind == 'ctr':
                     # print(c + d): the Counter a helper built, printed as a Counter
-                    new_args.append(call(self.ctr_repr_name(t), self.visit(a)))
+                    v = self.visit(a)
+                    new_args.append(call(self.ctr_repr_name(t), v))
+                    vals.append((v, t, 'text'))
                     continue
             if c is None or id(a) in self.okbare:
                 new_args.append(self.visit(a))
+                vals.append((None if id(a) in self.okbare else new_args[-1], c, 'plain'))
                 continue
             res = self.arg_use(node, fname, c, a)
             if isinstance(res, tuple):
                 return res[0]
             new_args.append(res)
+            vals.append((a, c, 'text'))
         node.args = new_args
         for kw in node.keywords:
             kc = self.coll(kw.value)
@@ -2729,7 +2738,39 @@ class _X(ast.NodeTransformer):
                     self.refuse(node, 'a collection passed as %s= to %s() is not built' % (kw.arg, fname))
             else:
                 kw.value = self.visit(kw.value)
+        if fname == 'print':
+            self.defer_print_text(node, vals)
         return node
+
+    def defer_print_text(self, node, vals):
+        """`print(f, f["y"])`: CPython evaluates every argument before it turns any of them into text, so the
+        repr of a defaultdict / OrderedDict / deque (and every other argument beside it) must be built after
+        the later arguments ran -- otherwise a key that a later argument inserts is missing from the text.
+        The arguments that are not themselves converted are bound to locals first, in order; a converted
+        collection keeps its own name (a second name for a container would be a copy, not an alias)."""
+        r = self.r
+        if not getattr(self.s, 'print_stmt', False) or len(node.args) < 2 or len(vals) != len(node.args):
+            return
+        if not any(isinstance(v[1], C) for v in vals):
+            return                                   # nothing is converted: the plain rewrite is already right
+        for v, c, how in vals:
+            if v is None or isinstance(v, ast.Starred):
+                return
+            if isinstance(c, C) and not isinstance(v, ast.Name):
+                return                               # a collection read in another shape: keep the plain rewrite
+            if how == 'plain' and isinstance(c, C):
+                return                               # a bare collection value would have to be copied into a local
+        names = []
+        for v, c, how in vals:
+            if how == 'text':
+                names.append(None)
+                continue
+            nm = r.new_name('p')
+            self.s.pre.append('%s = %s' % (nm, ast.unparse(v)))
+            names.append(nm)
+        for i, (v, c, how) in enumerate(vals):
+            if names[i] is not None:
+                node.args[i] = mk(names[i])
 
     def arg_use(self, node, fname, c, a):
         r = self.r
