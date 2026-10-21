@@ -31,12 +31,12 @@ sys.path.insert(0, str(ROOT / "python" / "pkg-v12"))
 import relib  # noqa: E402
 
 
-def compile_python(directory, text, name):
+def compile_python(directory, text, name, general=False):
     source, exe = Path(directory, name + ".ail"), Path(directory, name)
     source.write_text(text, encoding="utf-8")
     built = subprocess.run([sys.executable, "-B", str(ROOT / "ail_chatgpt.py"), "compile", source.name,
                             "--syntax", "python", "-o", exe.name], cwd=directory, capture_output=True,
-                           text=True, timeout=900, env=dict(os.environ, AIL_NO_GENERAL="1"))
+                           text=True, timeout=900, env=dict(os.environ) if general else dict(os.environ, AIL_NO_GENERAL="1"))
     return built, source, exe
 
 
@@ -260,6 +260,56 @@ def main() -> int:
 main()
 '''
 
+ANNOTATED_AND_CALLABLE = r'''import re
+from typing import Final
+PAT: Final[re.Pattern[str]] = re.compile(r"(\d+)-(?P<w>[a-z]+)")
+SEP: Final[str] = r"\s*,\s*"
+PART: str = "[a-z]+"
+FULL = re.compile(rf"{PART}@{PART}\.com")
+def bump(m: re.Match[str]) -> str:
+    return str(int(m.group(1)) + 1) + "<" + m.group(2) + ">"
+def main() -> None:
+    s = "10-ab 20-cd 30-ef é 5-zz"
+    print(PAT.sub(bump, s))
+    print(PAT.sub(bump, s, 2))
+    print(PAT.sub(lambda m: m.group(0).upper(), s))
+    print(re.sub(SEP, bump2(), "a , b,c"))
+    print(re.sub(r"x*", lambda m: "-", "abc"))
+    print(PAT.sub(bump, ""))
+    print(FULL.findall("foo@example.com xx a@mail.example.org"))
+    print(re.split(SEP, "a , b,c"))
+def bump2():
+    return ";"
+main()
+'''
+
+SUBN_AND_COMPILED_ARGS = r'''import re
+from typing import Final
+IMG: Final[re.Pattern[str]] = re.compile(r".+\.(?:png|jpg)\Z", re.IGNORECASE)
+B = re.compile(rb"\d+")
+W = re.compile(r"\w+")
+def up(m: re.Match[str]) -> str:
+    return m.group(0).upper()
+def main() -> None:
+    for n in ["a.PNG", "b.txt", "c.jpg"]:
+        m = re.match(IMG, n)
+        print(n, m is not None, bool(re.search(IMG, n)))
+    print(re.findall(IMG, "x.png"))
+    out, k = W.subn(up, "ab cd ef")
+    print(out, k)
+    print(W.subn(up, "ab cd ef", 2))
+    print(W.subn("<>", "ab cd ef", count=1))
+    print(W.subn("<>", ""))
+    print(re.subn(r"\d", lambda m: "#", "a1b22"))
+    print(re.subn(r"\d", "N", "a1b22", 1))
+    print(B.subn(lambda m: b"N", b"a1b22"))
+    print(B.sub(lambda m: m.group(0)[::-1], b"a12b345"))
+    print(W.pattern, IMG.pattern, W.subn("é", "ab"))
+    print(W.subn(lambda m: str(len(m.group(0))), "héllo wörld"))
+main()
+'''
+
+
 REFUSALS = [
     ("group in lookahead", 're.search(r"a(?=(b))", s)', "capturing group inside a lookahead"),
     ("variable lookbehind", 're.search(r"(?<=a+)b", s)', "fixed-width"),
@@ -277,10 +327,9 @@ REFUSALS = [
     ("compile in a call", 're.search(re.compile("a"), s)', "string literal"),
     ("findall groups", 're.findall(r"(a)(b)", s)', "tuples"),
     ("split groups", 're.split(r"(,)", s)', "group"),
-    ("sub function", 're.sub(r"a", lambda m: "b", s)', "replacement"),
     ("bad template", 're.sub(r"a", r"\\q", s)', "bad escape"),
     ("bad group in template", 're.sub(r"a", r"\\3", s)', "invalid group reference"),
-    ("subn", 're.subn(r"a", "b", s)', "re.subn is not built"),
+    ("subn template", 're.subn(r"a", r"\\g<0>", s)', "subn with a replacement template"),
     ("groups value", 're.search(r"(a)", s).groups()', "m.groups()"),
     ("groupdict", 're.search(r"(a)", s).groupdict()', "m.groupdict()"),
     ("unbalanced", 're.search(r"(a", s)', "missing )"),
@@ -534,10 +583,39 @@ def big_text_program():
         "    return 0", "", "", "main()", ""])
 
 
+SUB_NONE = r'''import re
+def rep(m): return None
+def up(m): return m.group(0).upper()
+def odd(m):
+    if m.group(0) in "ace": return None
+    return "[" + m.group(0) + "]"
+def main():
+    print(repr(re.sub(r"\w", rep, "a")))
+    print(repr(re.sub(r"\w", rep, "")))
+    print(repr(re.sub(r"\d+", rep, "x12y3z")))
+    print(repr(re.sub(r"\w", odd, "abcdef")))
+    print(re.subn(r"\w", odd, "abcdef"), re.subn(r"\w", odd, "abcdef", count=2))
+    print(re.sub(r"\w", lambda m: None if m.group(0) == "b" else "-", "abc"))
+    p = re.compile(r"[aeiou]")
+    print(repr(p.sub(rep, "education")), p.sub(up, "education"), p.subn(rep, "aeiou"))
+    for f in (rep, up, odd):
+        print(repr(re.sub("[a-c]", lambda m: f(m), "abcabc")))
+    d = {"f": odd}
+    print(re.sub(r"\w", lambda m: d["f"](m), "xaz"))
+    print(re.sub("[a-c]", rep, "abcabc"), re.sub("[a-c]", up, "abcabc"))
+    print(re.sub(rb"\w", lambda m: None, b"abc"))
+    try:
+        print(re.sub(r"\w", lambda m: 5, "ab"))
+    except TypeError:
+        print("TE")
+main()
+'''
+
+
 class ReTests(unittest.TestCase):
-    def same_as_cpython(self, text, name, stdin=b"", minimum_lines=1, run_timeout=600):
+    def same_as_cpython(self, text, name, stdin=b"", minimum_lines=1, run_timeout=600, general=False):
         with tempfile.TemporaryDirectory() as directory:
-            built, source, exe = compile_python(directory, text, name)
+            built, source, exe = compile_python(directory, text, name, general)
             self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
             ran = subprocess.run([str(exe)], input=stdin, capture_output=True, timeout=run_timeout)
             expected = subprocess.run([sys.executable, str(source)], input=stdin, capture_output=True, timeout=600)
@@ -562,6 +640,15 @@ class ReTests(unittest.TestCase):
     def test_str_api_matches_cpython(self):
         out = self.same_as_cpython(BASIC, "re_basic", minimum_lines=100)
         self.assertIn(b"[1|1|1]" if False else b"<1>", out)
+
+    def test_annotated_patterns_and_callable_sub_match_cpython(self):
+        self.same_as_cpython(ANNOTATED_AND_CALLABLE, "re_annotated", minimum_lines=8, general=True)
+
+    def test_callable_sub_returning_none_is_empty(self):
+        self.same_as_cpython(SUB_NONE, "re_sub_none", minimum_lines=10, general=True)
+
+    def test_subn_and_compiled_pattern_arguments_match_cpython(self):
+        self.same_as_cpython(SUBN_AND_COMPILED_ARGS, "re_subn", minimum_lines=12, general=True)
 
     def test_bytes_api_matches_cpython(self):
         self.same_as_cpython(BYTES_PROGRAM, "re_bytes", stdin=BYTES_INPUT, minimum_lines=8)
