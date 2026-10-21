@@ -17691,14 +17691,18 @@ static inline ail_obj ail_bi_sys_maxsize(void) { return ail_box_int(INT64_MAX); 
    Shared helpers.
    =================================================================================== */
 
-/* Clamp a Python-style optional [start:end) window against length n, slice-index rules
-   (negative wraps once, then clamps to [0,n]; an inverted result collapses to empty at
-   `a`, never negative-length) -- used by every str method that takes start/end. */
-static inline void ail__win(int64_t n, int has_lo, int64_t lo, int has_hi, int64_t hi, int64_t *out_lo, int64_t *out_hi) {
-    int64_t a = has_lo ? lo : 0; if (a < 0) { a += n; if (a < 0) a = 0; } else if (a > n) a = n;
+/* Clamp a Python-style optional [start:end) window against length n -- used by every str
+   method that takes start/end (and by list/tuple index). A negative bound wraps once and then
+   clamps to 0; end clamps down to n, but start does NOT: CPython treats a start past the end as
+   an empty INVALID window ("abc".find("", 4) is -1), while start == n is valid and empty
+   ("abc".find("", 3) is 3). Returns 0 for an invalid window (start > end or start > n), so
+   find/rfind/index/rindex/count/startswith/endswith answer -1/0/False instead of matching the
+   collapsed empty window CPython never searches. */
+static inline int ail__win(int64_t n, int has_lo, int64_t lo, int has_hi, int64_t hi, int64_t *out_lo, int64_t *out_hi) {
+    int64_t a = has_lo ? lo : 0; if (a < 0) { a += n; if (a < 0) a = 0; }
     int64_t b = has_hi ? hi : n; if (b < 0) { b += n; if (b < 0) b = 0; } else if (b > n) b = n;
-    if (b < a) b = a;
     *out_lo = a; *out_hi = b;
+    return a <= n && a <= b;
 }
 static inline int ail__chr_in(uint16_t c, ail_str set) {
     for (int64_t i = 0; i < set.n; i++) if (ail_chr(set, i) == c) return 1;
@@ -17996,7 +18000,7 @@ static inline ail_st ail_meth_str_startswith(ail_ctx *cx, int *out, ail_obj sobj
                                               ail_obj *prefixes, int64_t n_prefixes,
                                               int has_lo, int64_t lo, int has_hi, int64_t hi) {
     ail_str s = ail_view_to_str(sobj);
-    int64_t a, b; ail__win(s.n, has_lo, lo, has_hi, hi, &a, &b);
+    int64_t a, b; if (!ail__win(s.n, has_lo, lo, has_hi, hi, &a, &b)) { *out = 0; return AIL_OK; }
     ail_str win = ail_view(s, a); win.n = b - a;
     for (int64_t i = 0; i < n_prefixes; i++) {
         if (prefixes[i].tag != AIL_T_STR) {
@@ -18011,7 +18015,7 @@ static inline ail_st ail_meth_str_endswith(ail_ctx *cx, int *out, ail_obj sobj,
                                             ail_obj *suffixes, int64_t n_suffixes,
                                             int has_lo, int64_t lo, int has_hi, int64_t hi) {
     ail_str s = ail_view_to_str(sobj);
-    int64_t a, b; ail__win(s.n, has_lo, lo, has_hi, hi, &a, &b);
+    int64_t a, b; if (!ail__win(s.n, has_lo, lo, has_hi, hi, &a, &b)) { *out = 0; return AIL_OK; }
     ail_str win = ail_view(s, a); win.n = b - a;
     for (int64_t i = 0; i < n_suffixes; i++) {
         if (suffixes[i].tag != AIL_T_STR) {
@@ -18028,14 +18032,14 @@ static inline ail_st ail_meth_str_endswith(ail_ctx *cx, int *out, ail_obj sobj,
    =================================================================================== */
 static inline int64_t ail_meth_str_find(ail_obj sobj, ail_obj subobj, int has_lo, int64_t lo, int has_hi, int64_t hi) {
     ail_str s = ail_view_to_str(sobj), sub = ail_view_to_str(subobj);
-    int64_t a, b; ail__win(s.n, has_lo, lo, has_hi, hi, &a, &b);
+    int64_t a, b; if (!ail__win(s.n, has_lo, lo, has_hi, hi, &a, &b)) return -1;
     ail_str win = ail_view(s, a); win.n = b - a;
     int64_t r = ail_str_find(win, sub);
     return r < 0 ? -1 : r + a;
 }
 static inline int64_t ail_meth_str_rfind(ail_obj sobj, ail_obj subobj, int has_lo, int64_t lo, int has_hi, int64_t hi) {
     ail_str s = ail_view_to_str(sobj), sub = ail_view_to_str(subobj);
-    int64_t a, b; ail__win(s.n, has_lo, lo, has_hi, hi, &a, &b);
+    int64_t a, b; if (!ail__win(s.n, has_lo, lo, has_hi, hi, &a, &b)) return -1;
     int64_t wn = b - a;
     if (sub.n == 0) return b; /* CPython: rfind("") returns the (clamped) end of the window */
     for (int64_t i = wn - sub.n; i >= 0; i--) {
@@ -18061,7 +18065,7 @@ static inline ail_st ail_meth_str_rindex(ail_ctx *cx, int64_t *out, ail_obj sobj
    =================================================================================== */
 static inline int64_t ail_meth_str_count(ail_obj sobj, ail_obj subobj, int has_lo, int64_t lo, int has_hi, int64_t hi) {
     ail_str s = ail_view_to_str(sobj), sub = ail_view_to_str(subobj);
-    int64_t a, b; ail__win(s.n, has_lo, lo, has_hi, hi, &a, &b);
+    int64_t a, b; if (!ail__win(s.n, has_lo, lo, has_hi, hi, &a, &b)) return 0;
     ail_str win = ail_view(s, a); win.n = b - a;
     return ail_str_count(win, sub);
 }
@@ -18463,7 +18467,7 @@ static inline ail_st ail_meth_list_remove(ail_ctx *cx, ail_obj lst, ail_obj x) {
 static inline ail_st ail_meth_list_index(ail_ctx *cx, int64_t *out, ail_obj lst, ail_obj x, int has_lo, int64_t lo, int has_hi, int64_t hi) {
     int is_dq = ((ail_gcobj *)lst.o)->flags != 0;
     ail_vecobj *v = (ail_vecobj *)AIL_DQ_DATA(lst).o;
-    int64_t a, b; ail__win(v->n, has_lo, lo, has_hi, hi, &a, &b);
+    int64_t a, b; if (!ail__win(v->n, has_lo, lo, has_hi, hi, &a, &b)) { a = 0; b = 0; }
     for (int64_t i = a; i < b; i++) if (ail_member_eq(v->p[i], x)) { *out = i; return AIL_OK; }
     ail_obj rs[2]; rs[0] = ail_obj_repr(cx, x); rs[1] = ail_box_none();
     AIL_ROOT_N(cx, fr, rs, 2);
@@ -18931,7 +18935,7 @@ static inline ail_st ail_op_isub(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b
 #define ail_meth_tuple_count ail_vec_count
 static inline ail_st ail_meth_tuple_index(ail_ctx *cx, int64_t *out, ail_obj tup, ail_obj x, int has_lo, int64_t lo, int has_hi, int64_t hi) {
     ail_vecobj *v = (ail_vecobj *)tup.o;
-    int64_t a, b; ail__win(v->n, has_lo, lo, has_hi, hi, &a, &b);
+    int64_t a, b; if (!ail__win(v->n, has_lo, lo, has_hi, hi, &a, &b)) { a = 0; b = 0; }
     for (int64_t i = a; i < b; i++) if (ail_member_eq(v->p[i], x)) { *out = i; return AIL_OK; }
     return ail_raise_c(cx, AIL_B_VALUEERROR, "tuple.index(x): x not in tuple");
 }
