@@ -188,6 +188,13 @@ class Region(object):
         self.instrs = list(instrs or [])
 
 
+# `ail build --debug`: the source position (file name, line) of the statement an instruction was lowered
+# from, by id(instruction) -> (instruction, position); the instruction is held so its id is not reused. Kept
+# out of `Instr.attrs` so no pass (value numbering compares attrs) and no printed text sees it. Empty in a
+# release build; the driver clears it around each function.
+SRC = {}
+
+
 class Instr(object):
     __slots__ = ('op', 'operands', 'results', 'attrs', 'regions')
 
