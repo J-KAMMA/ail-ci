@@ -207,10 +207,11 @@ main()
 # it shares like CPython, so these compile and print what CPython prints. The other kinds (dict, set,
 # bytearray, `+=` on a list) are not in the IR yet: the legacy emitter refuses them by name.
 IR_SHARES = ("list", "list_store", "list_loop")
+IR_SHARES_TYPED = ("field_read", "field_read_other_way")
 
 
 def ir_on():
-    return os.environ.get("AIL_IR", "0").strip().lower() not in ("", "0", "off", "no")
+    return os.environ.get("AIL_IR", "1").strip().lower() not in ("0", "off", "no", "false")   # the IR is the default
 
 
 NONASCII_CASE = '''
@@ -530,7 +531,7 @@ def run_both(directory, text, name, env=None):
         return built, None, expected
     return built, subprocess.run([str(exe)], capture_output=True, timeout=60), expected
 
-# (round 3) an int64 overflow is a stop (`AIL limit: int_overflow`, exit 3), not an exception: no `except`
+# (round 3) an int64 overflow is a stop (`integer overflow`, exit 1 as A1 declares; it was `AIL limit`, exit 3), not an exception: no `except`
 # and no `finally` block may run on the way out. The general path used to run the `finally` bodies first,
 # printing lines CPython never prints (fuzz seed 2074400336). `v += [9]` after `a = v` forces that path.
 LIMIT_IN_TRY = '''
@@ -725,7 +726,12 @@ class FuzzFindings(unittest.TestCase):
         for name, text in SHARE.items():
             with self.subTest(name):
                 with tempfile.TemporaryDirectory() as directory:
-                    built, _, _ = run_both(directory, text, 'typed_' + name, {'AIL_NO_GENERAL': '1'})
+                    built, ran, expected = run_both(directory, text, 'typed_' + name, {'AIL_NO_GENERAL': '1'})
+                    if ir_on() and name in IR_SHARES_TYPED:
+                        # the IR owns the function and shares the container: CPython's result
+                        self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                        self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout))
+                        continue
                     self.assertEqual(built.returncode, 3, built.stdout + built.stderr)
                     self.assertIn('second reference to the same container', built.stdout + built.stderr)
 
@@ -797,9 +803,10 @@ class FuzzFindings(unittest.TestCase):
                     with tempfile.TemporaryDirectory() as directory:
                         built, ran, _ = run_both(directory, text, 'limit_' + label + '_' + mode, env)
                         self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
-                        self.assertEqual(ran.returncode, 3, ran.stderr)
+                        self.assertEqual(ran.returncode, 1, ran.stderr)    # A1: exit 1 (C74; it was 3)
                         self.assertEqual(ran.stdout.replace(b'\r\n', b'\n'), b'3\n')   # Windows text-mode stdout writes CRLF
-                        self.assertIn(b'AIL limit: int_overflow', ran.stderr)
+                        self.assertIn(b'integer overflow', ran.stderr)
+                        self.assertNotIn(b'AIL limit', ran.stderr)
 
     def test_list_extend_with_itself_adds_the_items_once(self):
         for name, env in (('selfext', None), ('selfext_ir', {'AIL_IR': '1'})):

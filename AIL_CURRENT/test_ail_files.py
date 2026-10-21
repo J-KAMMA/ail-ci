@@ -1233,11 +1233,14 @@ class FileRefusalAndRuntimeTests(ProgramBase):
         self.refused("def main() -> int:\n    with open('x', 'w', closefd=False) as f:\n        f.write('a')\n    print(1)\n    return 0\n\n\nmain()\n",
                      "closefd")
 
-    def test_binary_files_are_refused_on_the_general_path(self):
+    def test_binary_files_on_the_general_path(self):
+        # refused until branch safetynet; the general path has bytes values now (prelude_bytes.py)
         text = ("class Box:\n    def __init__(self, v):\n        self.v = v\n\n\nb = Box(1)\nb.w = 2\nmixed = [1, 'a']\n"
-                "with open('x.bin', 'wb') as f:\n    f.write(b'ab')\nprint(1)\n")
-        stderr = self.refused(text, "binary file", general_ok=True)
-        self.assertIn("typed code only", stderr)
+                "with open('x.bin', 'wb') as f:\n    f.write(b'ab\\x00\\xff')\nprint(1)\n"
+                "with open('x.bin', 'rb') as f:\n    print(f.read(), f.read())\n"
+                "with open('x.bin', 'ab') as f:\n    f.write(bytes([10, 99]))\n"
+                "for line in open('x.bin', 'rb'):\n    print(line)\n")
+        self.compare("binary_general", text, general=True, irs=("0",))
 
     def test_whole_file_read_uses_universal_newlines(self):
         """C18: CPython's text mode turns CRLF and a lone CR into LF."""

@@ -24,15 +24,22 @@ module text with the same behaviour as CPython running `python3 entry.py`:
 * a program with no import of a local module is not touched at all (the caller gets None), so
   single-file programs compile to the same C as before.
 
-Everything this does not model is refused by name with a `write instead:` hint: imports below the
-top level, a module used as a value, relative imports in the entry file, a submodule attribute read
+A local import inside a function (the usual way to break an import cycle) is moved to the module's top
+level when the modules it runs have no side effects at import time (only definitions and constants); the
+function then reads the name as a module alias. Otherwise it is refused, naming the effect's file:line.
+
+Everything this does not model is refused by name with a `write instead:` hint: imports in a class body,
+condition or `try` and function-level imports of a module with effects, a module used as a value, relative imports in the entry file, a submodule attribute read
 before the import that binds it, names rebound in a way that cannot be told apart after the merge,
 and import cycles that CPython only survives through partly initialised modules. (`importlib` and
 `__import__` are not modelled by the front end and are refused there.)
 """
 import ast
 import builtins
+import collections
 import copy
+import itertools
+import operator
 import os
 import sys
 from pathlib import Path
@@ -45,6 +52,17 @@ BUILTINS = frozenset(dir(builtins))
 MODULE_DUNDERS = frozenset(('__file__', '__package__', '__path__', '__spec__', '__loader__', '__cached__',
                             '__builtins__'))
 NEVER = 10 ** 9
+_UNKNOWN = object()                     # a module-level name bound to something the compiler cannot evaluate
+
+
+class _Unfoldable(Exception):
+    pass
+
+
+class _Raises(Exception):
+    def __init__(self, node):
+        Exception.__init__(self)
+        self.node = node
 # G5a: standard modules the compiler ships as AIL source over the C FFI (stdlib/*.py). They are searched
 # after the entry directory and AIL_PATH, so a program's own `zlib.py` still wins.
 BUNDLED_DIR = Path(__file__).resolve().parent / 'stdlib'
@@ -110,6 +128,9 @@ class Mod:
         self.bound_partial = set()
         self.analysed = False
         self.done = False
+        self.lazy = {}                  # id(synthetic top-level import) -> the function-level import it stands for
+        self.lazy_only = set()          # names bound only by function-level local imports (not module attributes)
+        self.pure_cache = False
 
 
 class Imp:
@@ -428,19 +449,668 @@ class Program:
     # -- discovery: which modules does each statement import
 
     def discover(self, mod):
-        body = mod.tree.body
-        top = {id(n) for n in body}
-        for node in ast.walk(mod.tree):
-            if isinstance(node, (ast.Import, ast.ImportFrom)) and id(node) not in top and self.is_local_import(node):
-                self.refuse(mod, node, "import of a local module or package below the top level (inside a "
-                            "function, class or condition) is not supported: CPython runs it when that code runs, "
-                            "and the program is built before it runs.\n"
-                            "  write instead: move the import to the top of the file")
-        for node in body:
+        self.lift_lazy(mod)
+        for node in mod.tree.body:
             if isinstance(node, ast.Import):
                 self.d_import(mod, node)
             elif isinstance(node, ast.ImportFrom):
                 self.d_from(mod, node)
+
+    def lift_lazy(self, mod):
+        """A local import inside a function is moved to the module's top level: a synthetic copy goes
+        at the end of the module body (at the start for the entry file) and the statement itself
+        becomes `pass`; the function then reads the name as a module-level alias. That is the same
+        program as CPython's when the imported modules have no side effects at import time (checked
+        when the module is spliced in: see `impure`); any other local import below the top level is
+        refused."""
+        top = {id(n) for n in mod.tree.body}
+        found = []
+
+        def refuse(node, why):
+            self.refuse(mod, node, "import of a local module or package below the top level (%s) is not "
+                        "supported: CPython runs it when that code runs, and the program is built before it runs.\n"
+                        "  write instead: move the import to the top of the file" % why)
+
+        def handle(parent, field, items, index, child, scope, tried):
+            if isinstance(child, (ast.Import, ast.ImportFrom)):
+                if id(child) in top or not self.is_local_import(child):
+                    return
+                if scope != 'func':
+                    refuse(child, "inside a condition or loop at module level" if scope == 'module'
+                           else "inside a class body")
+                if tried:
+                    refuse(child, "inside a try block, whose ImportError handler the compiler cannot model")
+                for a in child.names:
+                    name = a.asname or a.name.split('.')[0]
+                    if name in BUILTINS:
+                        refuse(child, "in a function, binding the builtin name %r: every reader of %r in the "
+                               "module would change meaning" % (name, name))
+                found.append((items, index, child))
+                return
+            kind = scope
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                kind, tried = 'func', False
+            elif isinstance(child, ast.ClassDef):
+                kind = 'class'
+            elif isinstance(child, (ast.Try, getattr(ast, 'TryStar', ast.Try))):
+                tried = True
+            visit(child, kind, tried)
+
+        def visit(node, scope, tried):
+            for field, value in ast.iter_fields(node):
+                if isinstance(value, list):
+                    for index, child in enumerate(value):
+                        if isinstance(child, ast.AST):
+                            handle(node, field, value, index, child, scope, tried)
+                elif isinstance(value, ast.AST):
+                    handle(node, field, [value], 0, value, scope, tried)
+        visit(mod.tree, 'module', False)
+        if not found:
+            return
+        self.check_init_calls(mod, [n for _, _, n in found])
+        synthetic = []
+        for items, index, node in found:
+            clone = copy.deepcopy(node)
+            ast.copy_location(clone, node)
+            mod.lazy[id(clone)] = node
+            synthetic.append(clone)
+            items[index] = ast.copy_location(ast.Pass(), node)
+        body = mod.tree.body
+        if mod.entry:
+            at = 0                    # after the docstring and the leading imports: those run first
+            while at < len(body) and (isinstance(body[at], (ast.Import, ast.ImportFrom))
+                                      or at == 0 and isinstance(body[at], ast.Expr)
+                                      and isinstance(body[at].value, ast.Constant)
+                                      and isinstance(body[at].value.value, str)):
+                at += 1
+            body[at:at] = synthetic
+        else:
+            body.extend(synthetic)
+        others = {n for n in _scan_scope([x for x in body if id(x) not in mod.lazy])[0]}
+        for x in ast.walk(mod.tree):
+            if isinstance(x, ast.Global):
+                others.update(x.names)
+        for clone in synthetic:
+            mod.lazy_only.update((a.asname or a.name.split('.')[0]) for a in clone.names)
+        mod.lazy_only -= others
+
+    def check_init_calls(self, mod, nodes):
+        """A function with a function-level import that the module's own top-level code calls (or reaches
+        through another function) would run that import while the module is still starting, before the
+        point where the merged program has it: refused. A class counts when it is called (`C()`,
+        `C.make()`), not when it is only named as a base. (The entry file needs no check: its imports
+        go first.)"""
+        if mod.entry:
+            return
+        ids = {id(n) for n in nodes}
+        defs = {n.name: n for n in mod.tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+
+        def used(node, whole):
+            """Name nodes read when `node` runs as part of the module body (`whole`: its function bodies too);
+            a class name only when it is called."""
+            out = []
+
+            def walk(n, called):
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)) and not whole:
+                    for d in (n.decorator_list if not isinstance(n, ast.Lambda) else []) + _defaults(n.args):
+                        walk(d, False)
+                    return
+                if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load):
+                    if called or not isinstance(defs.get(n.id), ast.ClassDef):
+                        out.append(n)
+                    return
+                if isinstance(n, ast.Call):
+                    walk(n.func, True)
+                    for c in n.args + [k.value for k in n.keywords]:
+                        walk(c, False)
+                    return
+                for c in ast.iter_child_nodes(n):
+                    walk(c, called and isinstance(n, (ast.Attribute, ast.Subscript)))
+            walk(node, False)
+            return out
+        tainted = {name for name, n in defs.items() if any(id(x) in ids for x in ast.walk(n))}
+        changed = True
+        while changed:
+            changed = False
+            for name, n in defs.items():
+                if name not in tainted and any(x.id in tainted for x in used(n, True)):
+                    tainted.add(name)
+                    changed = True
+        if not tainted:
+            return
+        for n in mod.tree.body:
+            if isinstance(n, (ast.Import, ast.ImportFrom)):
+                continue
+            for x in used(n, False):
+                if x.id in tainted:
+                    self.refuse(mod, x, "%r is used while %s is still starting, and it (or something it calls) "
+                                "has a function-level import of a local module: the compiler runs that import when "
+                                "%s has finished starting, so the module would not be there yet.\n"
+                                "  write instead: move the import to the top of the file, or call %r from the "
+                                "entry file's code" % (x.id, mod.name, mod.name, x.id))
+
+    # -- import-time side effects of a module spliced in by a function-level import
+
+    PURE_DECORATORS = frozenset(('dataclass', 'unique'))
+
+    def reads_state(self, mod, n, skip):
+        """`n` reads a value of another local module that may differ between the end of the importing
+        module and the first call of the function (`cfg.level`, a `from cfg import level` name), or
+        passes a module object around: such a read is an effect of the module body."""
+        if isinstance(n, ast.Attribute) and id(n) not in skip:
+            chain = []
+            cur = n
+            while isinstance(cur, ast.Attribute):
+                skip.add(id(cur))
+                chain.append(cur.attr)
+                cur = cur.value
+            entry = mod.alias.get(cur.id) if isinstance(cur, ast.Name) else None
+            if entry is None or entry[0] != 'mod':
+                return None
+            if isinstance(cur, ast.Name):
+                skip.add(id(cur))
+            owner = entry[1]
+            for index, attr in enumerate(reversed(chain)):
+                kind = owner.kinds.get(attr)
+                last = index == len(chain) - 1
+                if kind in ('func', 'class') and attr not in self.ext_names(owner) and last:
+                    return None
+                sub = self.child(owner, attr) if kind is None else None
+                if sub is None:
+                    return n
+                owner = sub
+            return None
+        if isinstance(n, ast.Name) and id(n) not in skip and isinstance(n.ctx, ast.Load):
+            entry = mod.alias.get(n.id)
+            if entry is None:
+                return None
+            if entry[0] == 'mod':
+                return n
+            kind = entry[1].kinds.get(entry[2])
+            if kind in ('func', 'class') and not self.mutable(entry[1], entry[2]):
+                return None
+            return n
+        return None
+
+    def ext_names(self, owner):
+        return {key for (o, key) in self.ext if o is owner}
+
+    def hooked(self, mod, seen=None):
+        """`mod` (or a local module it imports) defines a class hook that runs code when a class is
+        created: `__init_subclass__`, `__set_name__`, a metaclass keyword."""
+        seen = set() if seen is None else seen
+        if mod in seen:
+            return None
+        seen.add(mod)
+        for n in ast.walk(mod.tree):
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in ('__init_subclass__',
+                                                                                    '__set_name__'):
+                return n
+            if isinstance(n, ast.ClassDef) and any(k.arg == 'metaclass' for k in n.keywords):
+                return n
+        for entry in mod.alias.values():
+            bad = self.hooked(entry[1], seen)
+            if bad is not None:
+                return bad
+        return None
+
+    def impure_expr(self, mod, node, env=None):
+        """The first sub-expression of `node` that may do something when evaluated (a call, a read of another
+        module's state) or may raise (a division by zero, an index out of range, an unbound name), else None.
+        The expression is first evaluated here when it only holds constants and names bound to constants; a
+        result means it cannot raise, an exception means it does."""
+        if node is None:
+            return None
+        env = self.module_env(mod) if env is None else env
+        try:
+            self.fold(mod, node, env)
+            return None
+        except _Raises as exc:
+            return exc.node
+        except _Unfoldable:
+            pass
+        return self.check_expr(mod, node, env)
+
+    def module_env(self, mod):
+        return collections.ChainMap({})
+
+    # -- constant folding of module-level expressions (to decide whether they can raise)
+
+    FOLD_CALLS = {'range': range, 'len': len, 'list': list, 'tuple': tuple, 'set': set, 'frozenset': frozenset,
+                  'dict': dict, 'int': int, 'float': float, 'str': str, 'bool': bool, 'abs': abs, 'min': min,
+                  'max': max, 'sum': sum, 'sorted': sorted, 'ord': ord, 'chr': chr}
+    FOLD_BINOPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv,
+                   ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod, ast.Pow: operator.pow,
+                   ast.LShift: operator.lshift, ast.RShift: operator.rshift, ast.BitOr: operator.or_,
+                   ast.BitAnd: operator.and_, ast.BitXor: operator.xor}
+    FOLD_COMPARE = {ast.Eq: operator.eq, ast.NotEq: operator.ne, ast.Lt: operator.lt, ast.LtE: operator.le,
+                    ast.Gt: operator.gt, ast.GtE: operator.ge, ast.Is: operator.is_, ast.IsNot: operator.is_not,
+                    ast.In: lambda a, b: a in b, ast.NotIn: lambda a, b: a not in b}
+    FOLD_LIMIT = 10000
+
+    def fold_check(self, value):
+        """A value the evaluation may keep: integers that fit 64 bits, containers of bounded size."""
+        if isinstance(value, int) and not -(1 << 63) <= value < (1 << 63):
+            raise _Unfoldable()
+        if isinstance(value, (str, bytes, list, tuple, set, frozenset, dict)) and len(value) > self.FOLD_LIMIT:
+            raise _Unfoldable()
+        return value
+
+    def fold_apply(self, node, func, *args):
+        try:
+            return self.fold_check(func(*args))
+        except (_Unfoldable, _Raises):
+            raise
+        except Exception:
+            raise _Raises(node)
+
+    def fold(self, mod, node, env):
+        """The value of `node` when it is made of constants, names bound to constants, containers, operators,
+        comprehensions and total builtins; _Raises if CPython would raise; _Unfoldable if not known."""
+        kind = type(node)
+        if kind is ast.Constant:
+            return self.fold_check(node.value)
+        if kind is ast.Name:
+            value = env.get(node.id, _UNKNOWN)
+            if value is _UNKNOWN:
+                raise _Unfoldable()
+            return value
+        if kind in (ast.Tuple, ast.List, ast.Set):
+            items = []
+            for e in node.elts:
+                if isinstance(e, ast.Starred):
+                    raise _Unfoldable()
+                items.append(self.fold(mod, e, env))
+            if kind is ast.Tuple:
+                return tuple(items)
+            return self.fold_apply(node, list if kind is ast.List else set, items)
+        if kind is ast.Dict:
+            if any(k is None for k in node.keys):
+                raise _Unfoldable()
+            result = {}
+            for k, v in zip(node.keys, node.values):
+                key, value = self.fold(mod, k, env), self.fold(mod, v, env)
+                self.fold_apply(node, result.__setitem__, key, value)
+            return result
+        if kind is ast.BinOp:
+            op = self.FOLD_BINOPS.get(type(node.op))
+            left, right = self.fold(mod, node.left, env), self.fold(mod, node.right, env)
+            if op is None:
+                raise _Unfoldable()
+            if isinstance(node.op, (ast.Pow, ast.LShift)) and isinstance(right, int) and abs(right) > 256:
+                raise _Unfoldable()
+            if isinstance(node.op, ast.Mult) and isinstance(right, int) and isinstance(left, (str, bytes, list, tuple)):
+                if len(left) * max(right, 0) > self.FOLD_LIMIT:
+                    raise _Unfoldable()
+            if isinstance(node.op, ast.Mult) and isinstance(left, int) and isinstance(right, (str, bytes, list, tuple)):
+                if len(right) * max(left, 0) > self.FOLD_LIMIT:
+                    raise _Unfoldable()
+            return self.fold_apply(node, op, left, right)
+        if kind is ast.UnaryOp:
+            value = self.fold(mod, node.operand, env)
+            op = {ast.Not: operator.not_, ast.USub: operator.neg, ast.UAdd: operator.pos,
+                  ast.Invert: operator.invert}[type(node.op)]
+            return self.fold_apply(node, op, value)
+        if kind is ast.BoolOp:
+            is_and = isinstance(node.op, ast.And)
+            value = None
+            for e in node.values:
+                value = self.fold(mod, e, env)
+                if bool(value) != is_and:
+                    break
+            return value
+        if kind is ast.IfExp:
+            return self.fold(mod, node.body if self.fold(mod, node.test, env) else node.orelse, env)
+        if kind is ast.Compare:
+            left = self.fold(mod, node.left, env)
+            result = True
+            for op, comparator in zip(node.ops, node.comparators):
+                right = self.fold(mod, comparator, env)
+                result = self.fold_apply(node, self.FOLD_COMPARE[type(op)], left, right)
+                if not result:
+                    break
+                left = right
+            return result
+        if kind is ast.Subscript:
+            value = self.fold(mod, node.value, env)
+            if isinstance(node.slice, ast.Slice):
+                parts = [None if p is None else self.fold(mod, p, env)
+                         for p in (node.slice.lower, node.slice.upper, node.slice.step)]
+                index = slice(*parts)
+            else:
+                index = self.fold(mod, node.slice, env)
+            return self.fold_apply(node, operator.getitem, value, index)
+        if kind is ast.JoinedStr:
+            out = []
+            for part in node.values:
+                if isinstance(part, ast.Constant):
+                    out.append(part.value)
+                    continue
+                value = self.fold(mod, part.value, env)
+                value = {-1: lambda v: v, 115: str, 114: repr, 97: ascii}[part.conversion](value)
+                spec = self.fold(mod, part.format_spec, env) if part.format_spec is not None else ''
+                out.append(self.fold_apply(node, format, value, spec))
+            return self.fold_check(''.join(out))
+        if kind is ast.Call:
+            func = node.func
+            if (not isinstance(func, ast.Name) or func.id not in self.FOLD_CALLS or func.id in env
+                    or func.id in mod.kinds or func.id in mod.alias or func.id in mod.std):
+                raise _Unfoldable()
+            if any(isinstance(a, ast.Starred) for a in node.args) or any(k.arg is None for k in node.keywords):
+                raise _Unfoldable()
+            args = [self.fold(mod, a, env) for a in node.args]
+            kwargs = {k.arg: self.fold(mod, k.value, env) for k in node.keywords}
+            return self.fold_apply(node, self.FOLD_CALLS[func.id], *args, **kwargs)
+        if kind in (ast.ListComp, ast.SetComp, ast.DictComp):
+            out = []
+            self.fold_generators(mod, node, node.generators, 0, env.new_child(), out)
+            if kind is ast.ListComp:
+                return out
+            if kind is ast.SetComp:
+                return self.fold_apply(node, set, out)
+            result = {}
+            for k, v in out:
+                self.fold_apply(node, result.__setitem__, k, v)
+            return result
+        raise _Unfoldable()
+
+    def fold_generators(self, mod, node, generators, depth, env, out):
+        if depth == len(generators):
+            if isinstance(node, ast.DictComp):
+                out.append((self.fold(mod, node.key, env), self.fold(mod, node.value, env)))
+            else:
+                out.append(self.fold(mod, node.elt, env))
+            self.fold_check(out)
+            return
+        gen = generators[depth]
+        if gen.is_async:
+            raise _Unfoldable()
+        source = self.fold(mod, gen.iter, env if depth else env.parents)
+        try:
+            items = list(itertools.islice(iter(source), self.FOLD_LIMIT + 1))
+        except Exception:
+            raise _Raises(gen.iter)
+        if len(items) > self.FOLD_LIMIT:
+            raise _Unfoldable()
+        for item in items:
+            inner = env.new_child()
+            if not self.fold_target(gen.target, item, inner):
+                raise _Unfoldable()
+            if all(self.fold(mod, cond, inner) for cond in gen.ifs):
+                self.fold_generators(mod, node, generators, depth + 1, inner, out)
+
+    def fold_target(self, target, item, env):
+        if isinstance(target, ast.Name):
+            env[target.id] = item
+            return True
+        if isinstance(target, (ast.Tuple, ast.List)) and not any(isinstance(e, ast.Starred) for e in target.elts):
+            try:
+                values = list(item)
+            except Exception:
+                return False
+            return len(values) == len(target.elts) and all(self.fold_target(t, v, env)
+                                                           for t, v in zip(target.elts, values))
+        return False
+
+    # -- the expressions that are not folded
+
+    SAFE_CALLS = frozenset(('dataclass', 'field', 'auto', 'namedtuple', 'Enum', 'IntEnum'))
+    STD_ATTRS = frozenset(('math.pi', 'math.e', 'math.inf', 'math.tau', 'math.nan', 'sys.maxsize', 'os.sep',
+                           'os.linesep'))
+
+    def unhashable_name(self, mod, name):
+        for n in mod.tree.body:
+            if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in n.targets):
+                if isinstance(n.value, (ast.List, ast.Set, ast.Dict, ast.ListComp, ast.SetComp, ast.DictComp)):
+                    return True
+        return False
+
+    def check_expr(self, mod, node, env):
+        """The expression is not a known constant: accept the forms that cannot raise or run code."""
+        if node is None or isinstance(node, ast.Constant):
+            return None
+        kind = type(node)
+        if kind is ast.Name:
+            if node.id not in env and not hasattr(builtins, node.id):
+                return node
+            return self.reads_state(mod, node, set())
+        if kind is ast.Attribute:
+            bad = self.reads_state(mod, node, set())
+            if bad is not None:
+                return bad
+            chain, cur = [], node
+            while isinstance(cur, ast.Attribute):
+                chain.append(cur.attr)
+                cur = cur.value
+            if not isinstance(cur, ast.Name):
+                return node
+            entry = mod.alias.get(cur.id)
+            if entry is not None and entry[0] == 'mod':
+                return None
+            if cur.id in mod.std and cur.id not in mod.kinds and '.'.join([cur.id] + chain[::-1]) in self.STD_ATTRS:
+                return None
+            if len(chain) == 1 and mod.kinds.get(cur.id) == 'class':
+                for c in mod.tree.body:
+                    if isinstance(c, ast.ClassDef) and c.name == cur.id and not c.keywords:
+                        names = {t.id for s in c.body if isinstance(s, ast.Assign) for t in s.targets
+                                 if isinstance(t, ast.Name)}
+                        names |= {s.target.id for s in c.body if isinstance(s, ast.AnnAssign)}
+                        names |= {s.name for s in c.body if isinstance(s, (ast.FunctionDef, ast.ClassDef))}
+                        if chain[0] in names:
+                            return None
+            return node
+        if kind in (ast.Tuple, ast.List, ast.Set, ast.Dict):
+            parts = node.elts if kind is not ast.Dict else node.values
+            if kind is ast.Dict and any(k is None for k in node.keys):
+                return node
+            keys = node.elts if kind is ast.Set else (node.keys if kind is ast.Dict else [])
+            for k in keys:
+                if isinstance(k, (ast.List, ast.Set, ast.Dict, ast.ListComp, ast.SetComp, ast.DictComp)):
+                    return k
+                if isinstance(k, ast.Name) and self.unhashable_name(mod, k.id):
+                    return k
+            for e in list(keys) + list(parts):
+                if isinstance(e, ast.Starred):
+                    return e
+                bad = self.impure_expr(mod, e, env)
+                if bad is not None:
+                    return bad
+            return None
+        if kind in (ast.BoolOp, ast.IfExp) or (kind is ast.UnaryOp and isinstance(node.op, ast.Not)):
+            for e in ast.iter_child_nodes(node):
+                if isinstance(e, ast.expr):
+                    bad = self.impure_expr(mod, e, env)
+                    if bad is not None:
+                        return bad
+            return None
+        if kind is ast.Compare and all(isinstance(o, (ast.Eq, ast.NotEq, ast.Is, ast.IsNot)) for o in node.ops):
+            for e in [node.left] + node.comparators:
+                bad = self.impure_expr(mod, e, env)
+                if bad is not None:
+                    return bad
+            return None
+        if kind is ast.JoinedStr:
+            for part in node.values:
+                if isinstance(part, ast.FormattedValue):
+                    if part.format_spec is not None or part.conversion != -1:
+                        return part
+                    bad = self.impure_expr(mod, part.value, env)
+                    if bad is not None:
+                        return bad
+            return None
+        if kind is ast.Lambda:
+            for d in _defaults(node.args):
+                bad = self.impure_expr(mod, d, env)
+                if bad is not None:
+                    return bad
+            return None
+        if kind is ast.Call:
+            if not (isinstance(node.func, ast.Name) and node.func.id in self.SAFE_CALLS
+                    and env.get(node.func.id, _UNKNOWN) is _UNKNOWN and node.func.id not in mod.kinds and node.func.id not in mod.alias):
+                return node
+            for a in node.args + [k.value for k in node.keywords]:
+                if isinstance(a, ast.Starred) or any(k.arg is None for k in node.keywords):
+                    return a
+                bad = self.impure_expr(mod, a, env)
+                if bad is not None:
+                    return bad
+            return None
+        return node
+
+    def annotation_bad(self, mod, ann, env):
+        """A def/variable annotation is evaluated when the definition runs: accept names, dotted names,
+        subscripts of the standard generics and `|`."""
+        if ann is None or isinstance(ann, ast.Constant):
+            return None
+        if isinstance(ann, ast.Name):
+            return None if ann.id in env or hasattr(builtins, ann.id) else ann
+        if isinstance(ann, ast.Attribute):
+            root = ann
+            while isinstance(root, ast.Attribute):
+                root = root.value
+            return None if isinstance(root, ast.Name) and root.id in env else ann
+        if isinstance(ann, ast.Subscript):
+            root = ann.value
+            if not (isinstance(root, ast.Name) and (root.id in mod.std or root.id in
+                                                    ('list', 'dict', 'set', 'tuple', 'frozenset', 'type'))
+                    and root.id not in mod.kinds):
+                return ann
+            elts = ann.slice.elts if isinstance(ann.slice, ast.Tuple) else [ann.slice]
+            return next((b for b in (self.annotation_bad(mod, e, env) for e in elts) if b is not None), None)
+        if isinstance(ann, ast.BinOp) and isinstance(ann.op, ast.BitOr):
+            return self.annotation_bad(mod, ann.left, env) or self.annotation_bad(mod, ann.right, env)
+        return ann
+
+    def impure_decorator(self, mod, d, env=None):
+        """Only `@dataclass`, `@dataclass(...)` and `@unique` (from the standard library) are known to do
+        nothing but build the class or function; any other decorator is a call into code the compiler
+        has not read."""
+        target = d.func if isinstance(d, ast.Call) else d
+        root = target
+        while isinstance(root, ast.Attribute):
+            root = root.value
+        name = target.attr if isinstance(target, ast.Attribute) else getattr(target, 'id', None)
+        if (name not in self.PURE_DECORATORS or not isinstance(root, ast.Name) or root.id in mod.kinds
+                or root.id in mod.alias):
+            return d
+        if isinstance(d, ast.Call):
+            for a in d.args + [k.value for k in d.keywords]:
+                bad = self.impure_expr(mod, a, env)
+                if bad is not None:
+                    return bad
+        return None
+
+    def impure(self, mod):
+        """The first top-level statement or expression of `mod` with an effect other than binding names (a
+        call, a print, a loop, an assert...) or that can raise (`1 // 0`, `d['k']`, an unbound name),
+        else None."""
+        if mod.pure_cache is not False:
+            return mod.pure_cache
+        future = any(isinstance(n, ast.ImportFrom) and n.module == '__future__'
+                     and any(a.name == 'annotations' for a in n.names) for n in mod.tree.body)
+
+        def bind_import(node, env):
+            imp = mod.imps.get(id(node))
+            if imp is not None:
+                for name, _ in imp.binds:
+                    env[name] = _UNKNOWN
+            for a in node.names:
+                if a.name == '*':
+                    continue
+                env[a.asname or a.name.partition('.')[0]] = _UNKNOWN
+
+        def fn(node, env):
+            for d in node.decorator_list:
+                bad = self.impure_decorator(mod, d, env)
+                if bad is not None:
+                    return bad
+            for d in _defaults(node.args):
+                bad = self.impure_expr(mod, d, env)
+                if bad is not None:
+                    return bad
+            if not future:
+                a = node.args
+                for arg in a.posonlyargs + a.args + a.kwonlyargs + [a.vararg, a.kwarg]:
+                    if arg is not None:
+                        bad = self.annotation_bad(mod, arg.annotation, env)
+                        if bad is not None:
+                            return bad
+                bad = self.annotation_bad(mod, node.returns, env)
+                if bad is not None:
+                    return bad
+            env[node.name] = _UNKNOWN
+            return None
+
+        def assign(target, value, node, env):
+            try:
+                env[target.id] = self.fold(mod, value, env)
+            except (_Unfoldable, _Raises):
+                env[target.id] = _UNKNOWN
+
+        def stmt(node, in_class, env):
+            if isinstance(node, ast.ImportFrom):
+                imp = mod.imps.get(id(node))
+                for name, entry in (imp.binds if imp is not None else ()):
+                    if entry[0] == 'member':
+                        inner = self.resolve(entry[1], entry[2], 0, True)
+                        if inner[0] == 'var' and self.mutable(inner[1], inner[2]):
+                            return node         # copies a value another module changes: see check_lazy_values
+                bind_import(node, env)
+                return None
+            if isinstance(node, (ast.Import, ast.Pass)):
+                if isinstance(node, ast.Import):
+                    bind_import(node, env)
+                return None
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                return fn(node, env)
+            if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                return None
+            if isinstance(node, ast.Assign):
+                bad = self.impure_expr(mod, node.value, env) or next(
+                    (t for t in node.targets if not isinstance(t, ast.Name)), None)
+                if bad is None:
+                    for t in node.targets:
+                        assign(t, node.value, node, env)
+                return bad
+            if isinstance(node, ast.AnnAssign):
+                bad = (self.impure_expr(mod, node.value, env)
+                       or (None if future else self.annotation_bad(mod, node.annotation, env))
+                       or (None if isinstance(node.target, ast.Name) else node.target))
+                if bad is None and node.value is not None:
+                    assign(node.target, node.value, node, env)
+                return bad
+            if isinstance(node, ast.ClassDef) and not in_class:
+                for e in node.decorator_list:
+                    bad = self.impure_decorator(mod, e, env)
+                    if bad is not None:
+                        return bad
+                for e in node.bases + [k.value for k in node.keywords]:
+                    bad = self.impure_expr(mod, e, env)
+                    if bad is not None:
+                        return bad
+                if node.bases or node.keywords:
+                    bad = self.hooked(mod)
+                    if bad is not None:
+                        return bad
+                inner_env = env.new_child()
+                for inner in node.body:
+                    bad = stmt(inner, True, inner_env)
+                    if bad is not None:
+                        return bad
+                env[node.name] = _UNKNOWN
+                return None
+            return node
+        got = None
+        env = collections.ChainMap({})
+        for node in mod.tree.body:
+            if id(node) in mod.lazy:
+                continue
+            bad = stmt(node, False, env)
+            if bad is not None:
+                got = bad
+                break
+        mod.pure_cache = got
+        return got
 
     def missing(self, mod, node, name):
         self.refuse(mod, node, "no module named %r: the search path (%s) has no such file or directory.\n"
@@ -616,7 +1286,7 @@ class Program:
         if mod.bound_busy:
             return mod.bound_partial
         mod.bound_busy = True
-        names = set(_scan_scope(mod.tree.body)[0])
+        names = set(_scan_scope(mod.tree.body)[0]) - mod.lazy_only
         for node in ast.walk(mod.tree):
             if isinstance(node, ast.Global):
                 names.update(node.names)
@@ -753,16 +1423,18 @@ class Program:
     def mutable(self, owner, key):
         return owner.kinds.get(key) == 'multi' or (owner, key) in self.ext
 
-    def resolve(self, mod, name, depth=0):
+    def resolve(self, mod, name, depth=0, outside=False):
         """('module', Mod) | ('var', owner, key) | ('std', signature) | ('none',) for `name` in `mod`.
         A name imported with `from m import x` whose source can change gets its own copy in `mod`."""
         if depth > 60:
             self.refuse(mod, mod.tree, "imports of %r form a loop" % name)
+        if outside and name in mod.lazy_only:
+            return ('none',)             # bound inside a function only: not an attribute of the module
         entry = mod.alias.get(name)
         if entry is not None:
             if entry[0] == 'mod':
                 return ('module', entry[1])
-            inner = self.resolve(entry[1], entry[2], depth + 1)
+            inner = self.resolve(entry[1], entry[2], depth + 1, True)
             if inner[0] == 'var' and self.mutable(inner[1], inner[2]):
                 return ('var', mod, name)
             return inner
@@ -784,7 +1456,7 @@ class Program:
         if attr == '__all__' and target.all_names is not None:
             self.refuse(importer, node, "%s.__all__ is read by the compiler and not kept in the program.\n"
                         "  write instead: do not read __all__ at run time" % target.name)
-        found = self.resolve(target, attr)
+        found = self.resolve(target, attr, 0, True)
         sub = found[1] if found[0] == 'module' else (self.child(target, attr) if found[0] == 'none' else None)
         if sub is not None:
             self.refuse(importer, node, "%s.%s is a module, used as a value; this compiler needs a module to be "
@@ -805,6 +1477,24 @@ class Program:
                         "  write instead: use one of those names, or define %r in %s"
                         % (target.name, attr, ', '.join(names) or 'nothing', attr, target.path.name))
         return self.merged_name(found[1], found[2])
+
+    def check_lazy_values(self, mods):
+        """`from m import x` inside a function reads x when the function runs; the merged program copies
+        it once, so it is refused for a variable that changes."""
+        for mod in mods:
+            for key, orig in mod.lazy.items():
+                for name, entry in mod.imps[key].binds:
+                    if entry[0] != 'member':
+                        continue
+                    inner = self.resolve(entry[1], entry[2], 0, True)
+                    if inner[0] == 'var' and self.mutable(inner[1], inner[2]):
+                        self.refuse(mod, orig, "`from %s import %s` inside a function: %s.%s is a variable that "
+                                    "changes while the program runs, and CPython copies its value when the "
+                                    "function runs, which the merged program cannot do.\n"
+                                    "  write instead: `import %s` in the function and read `%s.%s`, or move the "
+                                    "import to the top of the file" % (entry[1].name, entry[2], entry[1].name,
+                                                                       entry[2], entry[1].name,
+                                                                       entry[1].name.rpartition('.')[2], entry[2]))
 
     def prepare_stores(self, mods):
         """Find every `m.attr = v` in the program: a name written from outside is a module global that
@@ -976,7 +1666,7 @@ class Rewriter(ast.NodeTransformer):
 
     def module_value(self, base, attr, node):
         """The module that `base.attr` denotes: an imported name, or a submodule already imported."""
-        found = self.program.resolve(base, attr)
+        found = self.program.resolve(base, attr, 0, True)
         if found[0] == 'module':
             return found[1]
         if found[0] != 'none':
@@ -1236,6 +1926,7 @@ def merge_program(entry_path, entry_text, read=None):
         return None
     mods = [entry] + reachable
     program.prepare_stores(mods)
+    program.check_lazy_values(mods)
     _assign_names(program, mods)
 
     output, std_seen, future, stack, positions = [], {}, [], [], {}
@@ -1282,12 +1973,31 @@ def merge_program(entry_path, entry_text, read=None):
                 stamp(copy_stmt, mod)
                 output.append(copy_stmt)
 
+    lazy_ctx = []
+
     def expand(mod):
+        if lazy_ctx and not mod.entry:
+            bad = program.impure(mod)
+            if bad is not None:
+                where, orig = lazy_ctx[-1]
+                line = getattr(bad, 'lineno', 1)
+                what = ("copies (`%s`) a variable that another module changes while the program runs"
+                        % ast.unparse(bad) if isinstance(bad, ast.ImportFrom) else
+                        "runs code with an effect or an expression that can raise (`%s`)"
+                        % ast.unparse(bad).split('\n')[0][:60])
+                program.refuse(where, orig, "function-level `%s`: the module body %s at import time (%s:%d), "
+                               "and the compiler runs it when the importing module has finished, not when "
+                               "the function first runs.\n"
+                               "  write instead: move the import to the top of the file, or keep %s to "
+                               "definitions and constants"
+                               % (ast.unparse(orig), what, mod.path, line, mod.path.name))
         stack.append(mod)
         for index, node in enumerate(mod.tree.body):
             positions[mod] = index
             imp = mod.imps.get(id(node))
             if imp is not None and imp.local:
+                if id(node) in mod.lazy:
+                    lazy_ctx.append((mod, mod.lazy[id(node)]))
                 for target in imp.chain:
                     if target in stack:
                         if target in imp.stars:
@@ -1301,16 +2011,28 @@ def merge_program(entry_path, entry_text, read=None):
                         child = program.child(owner, orig)
                         if child is None:
                             cycle = ' -> '.join(m.name for m in stack[stack.index(owner):] + [owner])
-                            program.refuse(mod, node, "import cycle %s: `from %s import %s` runs before %s "
-                                           "has defined %s, so CPython raises ImportError.\n"
-                                           "  write instead: move %s into a module that both import"
-                                           % (cycle, owner.name, orig, owner.name, orig, orig))
+                            if id(node) in mod.lazy:
+                                # a function-level import: CPython binds the name when the function runs, which is
+                                # valid; AIL resolves imports at build time and cannot order this cycle
+                                program.refuse(mod, node, "import cycle %s: `from %s import %s` inside a function "
+                                               "is valid Python (it runs when the function is called), but AIL "
+                                               "resolves imports when it builds and cannot order this cycle.\n"
+                                               "  write instead: `import %s` and use `%s.%s`, or move %s into a "
+                                               "module that both import"
+                                               % (cycle, owner.name, orig, owner.name, owner.name, orig, orig))
+                            else:
+                                program.refuse(mod, node, "import cycle %s: `from %s import %s` runs before %s "
+                                               "has defined %s, so CPython raises ImportError.\n"
+                                               "  write instead: move %s into a module that both import"
+                                               % (cycle, owner.name, orig, owner.name, orig, orig))
                         # the name is not bound yet, so CPython imports the submodule of that name
                         for key, entry in imp.binds:
                             if entry == ('member', owner, orig):
                                 mod.alias[key] = ('mod', child)
                         if child not in stack and not child.done:
                             expand(child)
+                if id(node) in mod.lazy:
+                    lazy_ctx.pop()
                 snapshots(mod, imp)
                 continue
             if isinstance(node, (ast.Import, ast.ImportFrom)):
