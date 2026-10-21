@@ -29,10 +29,13 @@ level when the modules it runs have no side effects at import time (only definit
 function then reads the name as a module alias. Otherwise it is refused, naming the effect's file:line.
 
 Everything this does not model is refused by name with a `write instead:` hint: imports in a class body,
-condition or `try` and function-level imports of a module with effects, a module used as a value, relative imports in the entry file, a submodule attribute read
-before the import that binds it, names rebound in a way that cannot be told apart after the merge,
-and import cycles that CPython only survives through partly initialised modules. (`importlib` and
-`__import__` are not modelled by the front end and are refused there.)
+condition or `try` and function-level imports of a module with effects, `import *` below module level
+(CPython's SyntaxError), a star import of a name a module creates only inside a function (`global X`,
+so whether CPython binds it depends on whether the function has run yet), a module used as a value,
+relative imports in the entry file, a submodule attribute read before the import that binds it, names
+rebound in a way that cannot be told apart after the merge, and import cycles that CPython only survives
+through partly initialised modules. (`importlib` and `__import__` are not modelled by the front end and
+are refused there.)
 """
 import ast
 import builtins
@@ -475,6 +478,13 @@ class Program:
             if isinstance(child, (ast.Import, ast.ImportFrom)):
                 if id(child) in top or not self.is_local_import(child):
                     return
+                if (scope != 'module' and isinstance(child, ast.ImportFrom)
+                        and any(a.name == '*' for a in child.names)):
+                    self.refuse(mod, child, "`from %s%s import *` %s: CPython raises SyntaxError "
+                                "(`import *` is only allowed at module level).\n"
+                                "  write instead: move the star import to the top of the file, or name what you use"
+                                % ('.' * child.level, child.module or '',
+                                   "inside a class body" if scope == 'class' else "inside a function"))
                 if scope != 'func':
                     refuse(child, "inside a condition or loop at module level" if scope == 'module'
                            else "inside a class body")
@@ -1259,7 +1269,14 @@ class Program:
                         % (target.name, mod.path.name))
         imp.stars.append(target)
         bound = self.bound_names(target)
+        fn_only = self.fn_only(target)
         for name in self.star_list(target, mod, node):
+            if name in fn_only:
+                self.refuse(mod, node, "`from %s import *`: %s creates %r only inside a function (a `global` "
+                            "statement), so CPython's star import binds it only when that function has run by then; "
+                            "this compiler cannot tell whether it has.\n"
+                            "  write instead: bind %r at the top level of %s, or import it by name after the call "
+                            "that creates it" % (target.name, target.path.name, name, name, target.path.name))
             if name.startswith('_'):
                 self.refuse(mod, node, "`from %s import *` would bind the private name %s (it is listed in "
                             "__all__); this compiler refuses private names even though CPython allows them.\n"
@@ -1278,6 +1295,12 @@ class Program:
                             % (target.name, target.path.name, name, name))
             imp.chain.append(child)
             imp.binds.append((name, ('mod', child)))
+
+    def fn_only(self, mod):
+        """Names `mod` binds through a `global` inside a function and not at its top level: they enter
+        its namespace when that function runs, not when its body has finished."""
+        top = _scan_scope(mod.tree.body)[0]
+        return {n for node in ast.walk(mod.tree) if isinstance(node, ast.Global) for n in node.names} - top
 
     def bound_names(self, mod):
         """Names bound in the namespace of `mod` when its body has run (None: not known)."""
