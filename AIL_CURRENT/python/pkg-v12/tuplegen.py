@@ -269,6 +269,8 @@ MODF = '''def _ail_modf(x: float) -> _AilT_f_f:
     return _AilT_f_f(f, t)
 '''
 DIVMOD_F = '''def _ail_divmod_f(a: float, b: float) -> _AilT_f_f:
+    if b == 0:
+        raise ZeroDivisionError("float divmod()")
     return _AilT_f_f(a // b, a % b)
 '''
 PARTITION = '''def _ail_partition(s: str, sep: str) -> _AilT_s_s_s:
