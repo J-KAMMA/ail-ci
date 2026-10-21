@@ -1468,6 +1468,24 @@ def _nonlocal_names(stmts):
     return out
 
 
+def _global_names(stmts):
+    """The names a body itself declares `global` (not those of a def, lambda or class nested in it:
+    each has its own scope, exactly as `_scope_directives` treats them)."""
+    out = set()
+
+    def walk(node):
+        if isinstance(node, (ast.FunctionDef, ast.ClassDef, ast.Lambda)):
+            return
+        if isinstance(node, ast.Global):
+            out.update(node.names)
+            return
+        for child in ast.iter_child_nodes(node):
+            walk(child)
+    for stmt in stmts:
+        walk(stmt)
+    return out
+
+
 # ---------------------------------------------------------------------------------------------
 def _unbindable_names(node):
     """Names the function can unbind or hand to another scope: `del`, `except ... as` (deleted when the handler ends),
@@ -3054,10 +3072,7 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.var_kind[info['params'][0]] = 'instance:' + info['owner_class']
             ctx.owner_class = info['owner_class']
             ctx.self_name = info['params'][0]
-        globals_decl = set()
-        for n in ast.walk(node):
-            if isinstance(n, ast.Global):
-                globals_decl.update(n.names)
+        globals_decl = _global_names(node.body)
         ctx.global_decls = globals_decl
         for p in info['all_params']:
             if p not in globals_decl:
@@ -3174,9 +3189,10 @@ class Compiler(boxclosure.ClosureMixin):
         defaults.update({k: d for k, d in zip(kwonly, node.args.kw_defaults) if d is not None})
         params = positional + ([vararg] if vararg else []) + kwonly
         nonlocal_names = _nonlocal_names(node.body)
+        global_names = _global_names(node.body)
         own_bound = set(params) | _scan_assigned_names(node.body) | {node.name}
-        free = sorted(_free_reads(node.body, own_bound) & set(outer_ctx.slot_of) |
-                      (nonlocal_names & set(outer_ctx.slot_of)))
+        free = sorted((_free_reads(node.body, own_bound) & set(outer_ctx.slot_of) |
+                       (nonlocal_names & set(outer_ctx.slot_of))) - global_names)
         for nm in nonlocal_names:
             if nm not in outer_ctx.slot_of:
                 raise Unsupported('nonlocal %s in nested def %s: no enclosing local of that '
@@ -3195,6 +3211,7 @@ class Compiler(boxclosure.ClosureMixin):
         # enclosing activation immediately (its frame slot IS the storage).
         nctx = Ctx(cname)
         nctx.qualname = (outer_ctx.qualname + '.<locals>.' if outer_ctx.qualname else '') + node.name
+        nctx.global_decls = global_names
         for nm in by_val:
             nctx.declare_local(nm)
         nctx.free_names = set(by_val)
@@ -3202,7 +3219,7 @@ class Compiler(boxclosure.ClosureMixin):
             nctx.ptr_names.add(nm)
         for p in params:
             nctx.declare_local(p)
-        locals_ = _scan_assigned_names(node.body) - set(params) - set(by_ptr)
+        locals_ = _scan_assigned_names(node.body) - set(params) - set(by_ptr) - global_names
         for nm in sorted(locals_):
             if nm not in nctx.slot_of:
                 nctx.declare_local(nm)
@@ -4963,6 +4980,16 @@ class Compiler(boxclosure.ClosureMixin):
             self.rt_needs.add('exc')
             t = ctx.tmp()
             ctx.emit('st = ail2x_args(cx, &%s, %s);' % (t, obj))
+            ctx.check()
+            return t
+        if node.attr == 'value' and not any('value' in c['methods'] for c in self.classes.values()):
+            # StopIteration.value: args[0] (or an explicitly set value), and the ordinary attribute
+            # lookup for every other object (a user class's .value, else AttributeError)
+            self.rt_needs.add('exc')
+            self.attr_names.add('value')
+            t = ctx.tmp()
+            ctx.emit('if (ail2x_value(cx, &%s, %s)) st = AIL_OK; else '
+                     'st = ail_inst_getattr(cx, &%s, %s, g_attr_value, "value");' % (t, obj, t, obj))
             ctx.check()
             return t
         self.attr_names.add(node.attr)
@@ -7310,13 +7337,23 @@ class Compiler(boxclosure.ClosureMixin):
             return t
         v = self.expr(args[0], ctx)
         t = ctx.tmp()
-        if len(args) == 2:
-            dflt = self.expr(args[1], ctx)
-            ctx.emit('st = ail_it_next(cx, &%s, %s);' % (t, v))
-            ctx.emit('if (st == AIL_STOP) { st = AIL_OK; %s = %s; }' % (t, dflt))
-            ctx.check()
+        gslot = self.global_slots.get('class:generator')
+        if gslot is not None:
+            # next(g) must keep the StopIteration a generator raises on return (its .value is the
+            # return value); the for-loop protocol's own wrapper turns it into AIL_STOP instead.
+            self.rt_needs.add('gen')
+            ctx.emit('if (%s.tag == AIL_T_INST && ((ail_instobj *)%s.o)->cls.o == g_slots_arr[%d].o) '
+                     'st = ail2g_resume(cx, &%s, %s, ail_box_none()); else st = ail_it_next(cx, &%s, %s);'
+                     % (v, v, gslot, t, v, t, v))
         else:
             ctx.emit('st = ail_it_next(cx, &%s, %s);' % (t, v))
+        if len(args) == 2:
+            dflt = self.expr(args[1], ctx)
+            ctx.emit('if (st == AIL_EXC && ail_exc_matches_b(cx, AIL_B_STOPITERATION)) '
+                     '{ ail_exc_clear(cx); st = AIL_OK; %s = %s; }' % (t, dflt))
+            ctx.emit('else if (st == AIL_STOP) { st = AIL_OK; %s = %s; }' % (t, dflt))
+            ctx.check()
+        else:
             ctx.emit('if (st == AIL_STOP) { st = ail_raise_c(cx, AIL_B_STOPITERATION, ""); '
                      'goto %s; }' % ctx.cur_err_target())
             ctx.check()

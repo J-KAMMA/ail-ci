@@ -1051,12 +1051,12 @@ __asm__(".text\n.globl ail2g_switch\n.hidden ail2g_switch\n.type ail2g_switch,@f
 typedef ail_st (*ail2g_body)(ail_ctx *, ail_obj *, ail_obj);
 enum { AIL2G_NEW, AIL2G_SUSPENDED, AIL2G_RUNNING, AIL2G_DONE };
 typedef struct ail2g {
-    int state, scanned;
+    int state, scanned, closing;
     ail2g_body body;
     ail_gcobj *inst;            /* the generator object (not owned: the collector decides) */
     ail_obj args;               /* while NEW: the call's arguments (also an attribute of the object) */
     ail_frame *top;             /* the frames of the body while it is suspended */
-    ail_obj value, sent;
+    ail_obj value, sent, ret;
     ail_st status;
     const char *name;
 #ifdef _WIN32
@@ -1111,6 +1111,7 @@ static void ail2g_gc_hook(ail_ctx *cx) {
             if (!g || g->scanned || !g->inst->mark) continue;
             g->scanned = 1; changed = 1;
             ail_gc_mark_value(g->args); ail_gc_mark_value(g->value); ail_gc_mark_value(g->sent);
+            ail_gc_mark_value(g->ret);
             if (g->state == AIL2G_SUSPENDED) ail2g_mark_chain(g->top);
         }
     }
@@ -1130,8 +1131,9 @@ static void ail2g_entry(void) {
     AIL_FRAME_ENTER(cx, fr, 1);
     fr.slots[0] = g->args;
     g->args = ail_box_none();
-    ail_obj r;
+    ail_obj r = ail_box_none();
     g->status = g->body(cx, &r, fr.slots[0]);
+    if (g->status == AIL_OK) g->ret = r;
     AIL_FRAME_LEAVE(cx, fr);
     g->state = AIL2G_DONE;
     g->top = NULL;
@@ -1151,7 +1153,7 @@ static inline ail_st ail2g_make(ail_ctx *cx, ail_obj *out, ail_obj cls, ail_obj 
     fr.slots[1] = ail_inst_new(cx, cls);
     ail2g *g = (ail2g *)ail_xcalloc(sizeof *g);
     g->state = AIL2G_NEW; g->body = body; g->inst = fr.slots[1].o; g->args = args; g->name = name;
-    g->value = g->sent = ail_box_none();
+    g->value = g->sent = g->ret = ail_box_none();
     int64_t h = -1;
     for (int64_t i = 0; i < ail2g_n; i++) if (!ail2g_tab[i]) { h = i; break; }
     if (h < 0) {
@@ -1171,6 +1173,24 @@ static inline ail_st ail2g_of(ail_ctx *cx, ail_obj inst, ail2g **out) {
     if (h.tag != AIL_T_INT || h.i < 0 || h.i >= ail2g_n || !ail2g_tab[h.i]) ail_die("generator: lost handle");
     *out = ail2g_tab[h.i];
     return AIL_OK;
+}
+/* a generator that returns v raises StopIteration(v): .value/.args carry v (None: no arguments) */
+static inline ail_st ail2g_stop(ail_ctx *cx, ail_obj v) {
+    if (v.tag == AIL_T_NONE) return ail_raise_c(cx, AIL_B_STOPITERATION, "");
+    AIL_FRAME_ENTER(cx, fr, 2);
+    fr.slots[0] = v;
+    ail_obj one[1] = { v };
+    fr.slots[1] = ail_tuple_new(cx, one, 1);
+    ail_obj cls = cx->builtin_cls[AIL_B_STOPITERATION];
+    fr.slots[0] = ail_inst_new(cx, cls);
+    fr.slots[0].tag = AIL_T_EXC;
+    ail_obj empty = ail_str_from_cstr(cx, "");
+    ail_inst_setattr(cx, fr.slots[0], AIL_ATTR_MESSAGE, empty);
+    ail_inst_setattr(cx, fr.slots[0], ail_intern(cx, "args"), fr.slots[1]);
+    ail_raise(cx, cls, empty);
+    cx->exc.value = fr.slots[0];
+    AIL_FRAME_LEAVE(cx, fr);
+    return AIL_EXC;
 }
 /* next(g) / g.send(v) */
 static inline ail_st ail2g_resume(ail_ctx *cx, ail_obj *out, ail_obj inst, ail_obj sendv) {
@@ -1231,7 +1251,7 @@ static inline ail_st ail2g_resume(ail_ctx *cx, ail_obj *out, ail_obj inst, ail_o
     cx->frames = w.top;
     if (g->state == AIL2G_SUSPENDED) { *out = g->value; g->value = ail_box_none(); return AIL_OK; }
     ail2g_free_stack(g);
-    if (g->status == AIL_OK) return ail_raise_c(cx, AIL_B_STOPITERATION, "");
+    if (g->status == AIL_OK) return ail2g_stop(cx, g->ret);
     if (g->status == AIL_EXC && ail_exc_matches_b(cx, AIL_B_STOPITERATION)) {
         ail_exc_clear(cx);
         return ail_raise_c(cx, AIL_B_RUNTIMEERROR, "generator raised StopIteration");
@@ -1254,16 +1274,33 @@ static inline ail_st ail2g_yield(ail_ctx *cx, ail_obj *sent, ail_obj value) {
 #endif
     *sent = g->sent;
     g->sent = ail_box_none();
+    if (g->closing) return ail_raise_c(cx, AIL_B_GENERATOREXIT, "");
     return AIL_OK;
 }
-/* g.close(): a generator that has not finished is finished (its finally blocks do not run) */
+/* g.close(): throw GeneratorExit at the suspended yield so its finally blocks run. A generator
+   that catches it and yields again is an error, as in CPython; one that returns or lets it
+   propagate closes quietly. A close of a generator that never started runs no body code. */
 static inline ail_st ail2g_close(ail_ctx *cx, ail_obj *out, ail_obj inst) {
     ail2g *g; ail_st st = ail2g_of(cx, inst, &g);
     if (st != AIL_OK) return st;
-    if (g->state == AIL2G_RUNNING) return ail_raise_c(cx, AIL_B_VALUEERROR, "generator already executing");
-    if (g->state != AIL2G_DONE) { g->state = AIL2G_DONE; g->top = NULL; ail2g_free_stack(g); }
     *out = ail_box_none();
-    return AIL_OK;
+    if (g->state == AIL2G_RUNNING) return ail_raise_c(cx, AIL_B_VALUEERROR, "generator already executing");
+    if (g->state == AIL2G_DONE) return AIL_OK;
+    if (g->state == AIL2G_NEW) { g->state = AIL2G_DONE; ail2g_free_stack(g); return AIL_OK; }
+    g->closing = 1;
+    st = ail2g_resume(cx, out, inst, ail_box_none());
+    if (st == AIL_OK) {
+        /* it yielded while closing: CPython's "generator ignored GeneratorExit" */
+        g->state = AIL2G_DONE; g->top = NULL; ail2g_free_stack(g);
+        return ail_raise_c(cx, AIL_B_RUNTIMEERROR, "generator ignored GeneratorExit");
+    }
+    if (st == AIL_EXC) {
+        if (ail_exc_matches_b(cx, AIL_B_GENERATOREXIT)) { ail_exc_clear(cx); *out = ail_box_none(); return AIL_OK; }
+        if (g->state == AIL2G_DONE && g->status == AIL_OK && ail_exc_matches_b(cx, AIL_B_STOPITERATION)) {
+            ail_exc_clear(cx); *out = ail_box_none(); return AIL_OK;
+        }
+    }
+    return st;
 }
 static inline ail_st ail2g_name(ail_ctx *cx, ail_obj *out, ail_obj inst) {
     ail2g *g; ail_st st = ail2g_of(cx, inst, &g);
@@ -1441,6 +1478,30 @@ static inline ail_st ail2x_raise_builtin(ail_ctx *cx, ail_obj cls, ail_obj msg, 
     cx->exc.value = fr.slots[2];
     AIL_FRAME_LEAVE(cx, fr);
     return AIL_EXC;
+}
+/* StopIteration.value: an explicitly set value attribute, else args[0], else None. Returns 1
+   when e is a StopIteration (or a subclass), 0 for every other value so the caller can fall
+   back to the ordinary attribute lookup (a user class's own .value, or AttributeError). */
+static int64_t ail2x_value_id;
+static inline int ail2x_value(ail_ctx *cx, ail_obj *out, ail_obj e) {
+    if (e.tag != AIL_T_EXC && e.tag != AIL_T_INST) return 0;
+    ail_instobj *ii = (ail_instobj *)e.o;
+    if (ii->cls.tag != AIL_T_CLASS ||
+            !ail_class_is_or_subclass(ii->cls, cx->builtin_cls[AIL_B_STOPITERATION])) return 0;
+    if (!ail2x_value_id) ail2x_value_id = ail_intern(cx, "value");
+    for (int64_t i = 0; i < ii->n; i++)
+        if (ii->attrs[i].name_id == ail2x_value_id) { *out = ii->attrs[i].val; return 1; }
+    if (!ail2x_args_id) ail2x_args_id = ail_intern(cx, "args");
+    for (int64_t i = 0; i < ii->n; i++) if (ii->attrs[i].name_id == ail2x_args_id) {
+        ail_obj args = ii->attrs[i].val;
+        if (args.tag == AIL_T_TUPLE) {
+            ail_vecobj *v = (ail_vecobj *)args.o;
+            *out = v->n ? v->p[0] : ail_box_none();
+        } else *out = ail_box_none();
+        return 1;
+    }
+    *out = ail_box_none();
+    return 1;
 }
 /* e.args of any exception value: what it carries, else (message,) as CPython's builtins hold it */
 static inline ail_st ail2x_args(ail_ctx *cx, ail_obj *out, ail_obj e) {
