@@ -5,7 +5,8 @@
             -> specsel (speculative selects; simplify again when it changed anything) -> window
 
 `optimize(fn, program)` runs them on one lowered function. `AIL_IR_PASSES` (comma list, default
-all) selects passes, for tests and for pricing each pass separately.
+all) selects passes, for tests and for pricing each pass separately. `AIL_IR_DUMP_FINAL=path` appends
+the text of every function after the last pass (for reading what the passes made of a program).
 """
 import os
 
@@ -84,4 +85,7 @@ def optimize(fn, program, facts=None, check=None):
         stats['windows'] = window.run(fn)
         after()
     E.summarize_program(program)
+    if os.environ.get('AIL_IR_DUMP_FINAL'):
+        from .. import text
+        open(os.environ['AIL_IR_DUMP_FINAL'], 'a').write('--- final\n' + text.print_function(fn))
     return stats
