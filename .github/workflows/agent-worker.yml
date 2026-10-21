@@ -1,0 +1,59 @@
+name: agent-worker
+# One AIL coding-agent worker run (DeepSeek V4.1 Flash through OpenCode Go, a $10/month flat plan with no extra charges)
+# on a job-* branch prepared by the maintainer's ci_job script. Owner-approved 2026-10-21.
+# - Dispatch only (repo writers). Runs only on job-* branches.
+# - Only the OpenCode key is used; it reaches agent.py through a file that agent.py deletes before any tool runs, and the
+#   tool shells never see it. The checkout keeps no credentials; results are pushed in a separate step after the agent
+#   has exited. The reviewer runs on the maintainer's machine, not here.
+on:
+  workflow_dispatch:
+    inputs:
+      max_turns:
+        default: '250'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  worker:
+    if: startsWith(github.ref_name, 'job-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: python3 --version && gcc --version | head -1
+      - name: Key file
+        env:
+          K: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          umask 077
+          printf '%s' "$K" > "$RUNNER_TEMP/agent.key"
+      - name: Worker
+        run: |
+          git config user.name "AIL agent"
+          git config user.email "agent@example.invalid"
+          mkdir -p "$HOME/tools" "$HOME/corpus"
+          cp .agent/cmp.sh .agent/cmpu.sh "$HOME/tools/" 2>/dev/null || true
+          [ -d corpus/gdev ] && ln -sfn "$PWD/corpus/gdev" "$HOME/corpus/gdev"
+          python3 .agent/agent.py --provider openai --base-url https://opencode.ai/inference/go/openai/v1 \
+            --model deepseek-v4.1-flash --price-in 0.15 --price-out 0.60 \
+            --dir "$PWD" --prompt-file .agent/task.md --log .agent/work0.jsonl \
+            --budget-usd 6 --max-turns "${{ inputs.max_turns }}" --key-file "$RUNNER_TEMP/agent.key" \
+            > .agent/report.md 2>&1 || true
+          tail -40 .agent/report.md
+      - name: Push results
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -f "$RUNNER_TEMP/agent.key"
+          git add .agent/report.md
+          git commit -q -m "agent worker report" || true
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}" "HEAD:${{ github.ref_name }}"
