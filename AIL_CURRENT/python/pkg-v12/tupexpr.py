@@ -12,6 +12,10 @@ def unopt(t):
     return t
 
 
+# read-only sequence annotations of a parameter or a result, read as a list (see `Exprs.sig_ann`)
+SIGNATURE_SEQUENCES = frozenset(('Sequence', 'Collection'))
+
+
 class Exprs:
     # ------------------------------------------------------------------------------------------
     # plumbing
@@ -94,7 +98,8 @@ class Exprs:
                 node.value.attr if isinstance(node.value, ast.Attribute) else None)
             sl = node.slice
             args = list(sl.elts) if isinstance(sl, ast.Tuple) else [sl]
-            if base in ('list', 'List'):
+            if base in ('list', 'List') or (base in SIGNATURE_SEQUENCES and getattr(self, 'in_signature', False)
+                                             and isinstance(node.value, ast.Name) and node.value.id not in self.classes):
                 return ('list', self.ann(args[0]))
             if base in ('set', 'Set', 'frozenset', 'FrozenSet'):
                 return ('set', self.ann(args[0]))
@@ -121,6 +126,28 @@ class Exprs:
             return node, t
         self.use_type(t)
         return ast.parse(ann_text(t), mode='eval').body, t
+
+    def sig_ann(self, node):
+        """`ann` of a parameter's or a result's annotation, where a read-only `Sequence[T]` /
+        `Collection[T]` is the list it is on the typed path (pyfunc._read_only_sequence_annotations: a
+        caller must pass a list there)."""
+        saved, self.in_signature = getattr(self, 'in_signature', False), True
+        try:
+            return self.ann(node)
+        finally:
+            self.in_signature = saved
+
+    def sig_map_ann(self, node):
+        """`map_ann` in a signature; a `Sequence[...]` keeps its own name outside."""
+        saved, self.in_signature = getattr(self, 'in_signature', False), True
+        try:
+            new, t = self.map_ann(node)
+        finally:
+            self.in_signature = saved
+        if (new is not node and isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name)
+                and node.value.id in SIGNATURE_SEQUENCES and isinstance(new, ast.Subscript)):
+            new.value = ast.Name(id=node.value.id, ctx=ast.Load())
+        return new, t
 
     # ------------------------------------------------------------------------------------------
     # the walk
@@ -163,13 +190,23 @@ class Exprs:
                         'a length instead')
         return n
 
-    def coerce(self, n, t, want):
-        """An int where a float is expected becomes a float (the compiler's slots do not widen inside classes)."""
+    def coerce(self, n, t, want, math=False):
+        """An int where a float is expected: CPython keeps the int (annotations convert nothing), so converting
+        it here would make a later print or str() show 3.0 where CPython shows 3, and the lowered source is what
+        the general path compiles too.  Refused by name (the source is left as written, so the typed path refuses
+        it and the default build takes the general path, which keeps the int).  `math=True` is a call into a
+        math function, which converts its argument whatever the int's later use (silent6, C39 as found on the
+        tuple pass)."""
         w, d = deep(want), deep(t)
         if w == FLT and d in (INT, BOOL):
-            if isinstance(n, ast.Constant) and type(n.value) is int:
-                return const(float(n.value)), FLT
-            return call('float', n), FLT
+            if math:
+                if isinstance(n, ast.Constant) and type(n.value) is int:
+                    return const(float(n.value)), FLT
+                return call('float', n), FLT
+            self.refuse(n, 'an int where a float is expected (%s); CPython keeps the int (annotations convert '
+                        'nothing), so a later print or str() of it shows 3 where this build would show 3.0. '
+                        'Write instead: a float (`%s`) if the value is meant to be a float.'
+                        % (ast.unparse(n), ast.unparse(n) + '.0' if isinstance(n, ast.Constant) else 'float(%s)' % ast.unparse(n)))
         return n, t
 
     def ex_Constant(self, node, want=None, ctx=None):
@@ -666,7 +703,7 @@ class Exprs:
             node.body = body
         finally:
             self.env, self.alias = saved_env, saved_alias
-        return node, ('callable', bt)
+        return node, ('callable', tuple(params), bt)
 
     def ex_Lambda(self, node, want=None, ctx=None):
         self.refuse(node, 'a lambda used as a value here; a lambda is built only to be called, passed to a '

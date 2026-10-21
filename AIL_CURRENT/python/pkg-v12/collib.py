@@ -373,6 +373,7 @@ def _ail_dq_rotate_@T(q: _AilDeque_@T, k: int) -> None:
 
 
 def _ail_dq_in_@T(q: _AilDeque_@T, x: @TA) -> bool:
+    @NANIN
     j = q.head
     mask = len(q.buf) - 1
     for i in range(q.n):
@@ -383,6 +384,7 @@ def _ail_dq_in_@T(q: _AilDeque_@T, x: @TA) -> bool:
 
 
 def _ail_dq_count_@T(q: _AilDeque_@T, x: @TA) -> int:
+    @NANCOUNT
     c = 0
     j = q.head
     mask = len(q.buf) - 1
@@ -394,6 +396,7 @@ def _ail_dq_count_@T(q: _AilDeque_@T, x: @TA) -> int:
 
 
 def _ail_dq_index_@T(q: _AilDeque_@T, x: @TA) -> int:
+    @NANINDEX
     j = q.head
     mask = len(q.buf) - 1
     for i in range(q.n):
@@ -404,13 +407,14 @@ def _ail_dq_index_@T(q: _AilDeque_@T, x: @TA) -> int:
 
 
 def _ail_dq_remove_@T(q: _AilDeque_@T, x: @TA) -> None:
+    @NANREMOVE
     xs = _ail_dq_list_@T(q)
     for i in range(len(xs)):
         if xs[i] == x:
             xs.pop(i)
             _ail_dq_fill_@T(q, xs)
             return
-    raise ValueError("deque.remove(x): x not in deque")
+    raise ValueError(f"{x@R} is not in deque")
 
 
 def _ail_dq_insert_@T(q: _AilDeque_@T, i: int, x: @TA) -> None:
@@ -1183,7 +1187,14 @@ class Rewriter:
             alloc = 'z: %s = %s\n    return [z for i in range(n)]' % (ann(t), zero(t))
         else:
             alloc = 'return ' + ('["" for i in range(n)]' if t == 'str' else '[%s] * n' % zero(t))
-        return dict(Z=zero(t), R=rsuf(t), ALLOC=alloc, **subs(T=t))
+        nan = {}
+        for key, op in (('NANIN', 'x in deque'), ('NANCOUNT', 'deque.count'), ('NANINDEX', 'deque.index'),
+                        ('NANREMOVE', 'deque.remove')):
+            # a deque of floats holds unboxed doubles: a NaN has no identity, and CPython finds a NaN only as the same
+            # object. One `x != x` on the searched argument, outside the element loop: the typed path stops by name
+            # (pyfunc: _ail_nan_stop); the general path (boxed floats, identity-then-==) lets it through (DIFFERENCES C119)
+            nan[key] = ('if x != x:\n        _ail_nan_stop("%s")' % op) if t == 'float' else 'pass'
+        return dict(Z=zero(t), R=rsuf(t), ALLOC=alloc, **nan, **subs(T=t))
 
     def dq(self, c, op):
         return self.emit(DQ_BLOCKS, '_ail_dq_%s_@T' % op, **self.dq_subs(c.V))
@@ -2912,6 +2923,12 @@ def rewrite(source, notes=None):
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError):
+        return source
+    import dictviews
+    view = dictviews.escape(tree)
+    if view is not None:             # a dict view shown as a value: the general path has it, this rewrite would show a list
+        if notes is not None:
+            notes.append((getattr(view, 'lineno', 1), dictviews.refusal(view)))
         return source
     rw = Rewriter(source, tree)
     try:

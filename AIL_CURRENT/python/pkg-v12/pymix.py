@@ -626,7 +626,7 @@ def analyze(source, classes=()):
                                      ' this function' % '/'.join(blocking))
             continue
         try:
-            info = {}
+            info = {'_mixed_clone': True}
             pyfunc.to_c(defs_src, entry=name, sig=_scalar_sig(f.params), info=info)
         except Unsupported as e:
             report.rejected[name] = (REASON_TO_C_REFUSED, str(e)[:160])

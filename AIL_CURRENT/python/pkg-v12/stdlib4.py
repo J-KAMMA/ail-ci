@@ -11,7 +11,7 @@ lowered to code that produces what CPython 3.12 produces or refused here by name
 what to write instead): a refusal leaves the program as written and adds a `note:` line, and the import the
 compiler then meets is reported by its first note (ail_chatgpt._python_notes).
 
-* csv: see csvlib.py.
+* csv: see csvlib.py (csvgen.py / prelude_csv.py when csvlib refuses: the general path).
 * datetime: see dtlib.py.
 * int.bit_length() / bit_count(): see smalllib.py.
 """
@@ -166,8 +166,20 @@ def rewrite_text(source, notes=None):
                        '(the name stands for an imported module here)' % alias)
         modules = imports.modules()
         if 'csv' in modules:
+            import copy
             import csvlib
-            csvlib.Csv(imports, tree, helpers).run()
+            snapshot = copy.deepcopy(tree.body)
+            try:
+                csvlib.Csv(imports, tree, helpers).run()
+            except Refused as csv_refusal:
+                # the list-and-cursor lowering cannot hold this use: the general path gets the Python-source csv
+                import csvgen
+                tree.body = snapshot
+                del helpers[:]
+                try:
+                    csvgen.run(imports, tree, helpers)
+                except Refused:
+                    raise csv_refusal
         if 'datetime' in modules:
             import dtlib
             dtlib.rewrite(imports, tree, helpers, time_used)

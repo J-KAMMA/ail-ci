@@ -273,6 +273,11 @@ static void *ail_th_entry(void *p) {
     }
     if (st == AIL_LIMIT) {
         ail_out_flush(cx);
+        if (cx->limit.name && !strcmp(cx->limit.name, "int_overflow")) {
+            fputs("integer overflow\n", stderr);      /* as the main thread ends it (ail_main_finish) */
+            fflush(stderr);
+            _exit(1);
+        }
         fprintf(stderr, "AIL limit: %s\n", cx->limit.name ? cx->limit.name : "?");
         fflush(stderr);
         _exit(3);
