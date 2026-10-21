@@ -1615,6 +1615,8 @@ def _ail_re_plain(repl: str) -> bool:
 def _ail_re_sublit(p: list[int], s: str, repl: str, count: int) -> str:
     if not _ail_re_plain(repl):
         raise ValueError("re.sub: a replacement with a backslash has to be a string literal")
+    if count < 0:
+        return s
     @PREP@
     @TEXT@
     @WK@
@@ -1689,6 +1691,8 @@ _WK = """    wk = _ail_re_Wk([0, 0, 4 * n + 2048, 0])
 
 _SUB_TEMPLATE = """
 def _ail_re_sub%(k)d(s: str, count: int) -> str:
+    if count < 0:
+        return s
 %(prep)s%(text)s%(wk)s    vm = _ail_re_new(%(table)s)
     out: list[str] = []
     pos = 0
@@ -1883,7 +1887,7 @@ class Library:
             self.subs.append("""
 
 def %(name)s(s: %(kind)s, fn%(ann)s, count: int) -> %(ret)s:
-%(check)s    out: list[%(kind)s] = []
+%(check)s%(neg)s    out: list[%(kind)s] = []
     last = 0
     cnt = 0
     for m in _ail_re_finditer%(sfx)s(%(table)s, s):
@@ -1901,6 +1905,7 @@ def %(name)s(s: %(kind)s, fn%(ann)s, count: int) -> %(ret)s:
        'call': '' if literal else '        r = fn(m)\n        if r is None:\n            r = %s\n' % empty,
        'check': ('    if %s"\\\\" in fn:\n        raise ValueError("re.sub: a replacement with a backslash has to be a string literal")\n'
                  % ('b' if program.is_bytes else '')) if literal else '',
+       'neg': '    if count < 0:\n        return %s\n' % ('(s, 0)' if counted else 's'),
        'result': '(%s.join(out), cnt)' % empty if counted else '%s.join(out)' % empty})
         return self.sub_keys[key]
 

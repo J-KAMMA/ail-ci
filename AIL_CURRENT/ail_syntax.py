@@ -1462,6 +1462,9 @@ class _Surface:
         self.callable_names = plain_defs - rebound
         self.ambiguous_names = plain_defs & rebound    # a def and a variable of one name: which one is not told
         self.re_consts = {}            # NAME -> str for a name bound once to a string literal
+        self.re_callables = {}         # NAME -> 'callable' | 'table' | 'seq': a function value, see collect_repl
+        self.attr_fields = {node.attr for node in ast.walk(self.tree)
+                            if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store)}
         self.re_lib = None
         self.testing = set()           # re calls whose result is only tested
         self.re_subst = {}             # findall-loop name -> (match variable, group number)
@@ -1576,6 +1579,7 @@ class _Surface:
                 stored[name] = stored.get(name, 0) + 1
         if self.re_on:
             self.collect_re(stored)
+            self.collect_repl(stored)
         for node in ast.walk(self.tree):
             if (isinstance(node, ast.Assign) and len(node.targets) == 1
                     and isinstance(node.targets[0], ast.Name) and stored[node.targets[0].id] == 1):
@@ -1726,6 +1730,150 @@ class _Surface:
                     self.re_patterns[bound[0]] = index
                     self.re_nodes.add(node)
 
+    def collect_repl(self, stored):
+        """The names whose value is a function: a def, a lambda, a `Callable[...]` parameter (or one whose every
+        call site passes a function), an alias of one of those (`f = up`, `g = f`), a dict or list literal that
+        holds only functions (`TABLE["k"]`, `FS[0]`) and the target of a loop over such a list. Such a value as
+        the replacement of re.sub / subn is called with each Match, as in CPython; every other expression keeps
+        the string-replacement lowering (a str value)."""
+        shapes = {}                    # NAME -> [('def',) | ('arg', ann) | ('value', expr) | ('loop', iter) | ('other',)]
+        handled = set()                # the Name nodes of a plain `a = b = value` and of a for target
+
+        def add(name, item):
+            shapes.setdefault(name, []).append(item)
+
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.Assign):
+                targets = node.targets
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                targets = [node.target]
+            else:
+                continue
+            if (node.value is not None and all(isinstance(target, ast.Name) for target in targets)
+                    and all(stored.get(target.id) == 1 for target in targets)):
+                for target in targets:
+                    add(target.id, ('value', node.value))
+                    handled.add(id(target))
+        for node in ast.walk(self.tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                add(node.name, ('def',))
+            elif isinstance(node, ast.ClassDef):
+                add(node.name, ('class',))          # a class is not a function value
+            elif isinstance(node, ast.arg):
+                add(node.arg, ('arg', node.annotation))
+            elif isinstance(node, ast.For) and isinstance(node.target, ast.Name):
+                add(node.target.id, ('loop', node.iter))     # `for f in (up, low)` / `for f in FNS`
+                handled.add(id(node.target))
+            elif isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load) and id(node) not in handled:
+                add(node.id, ('other',))            # a with / except target, an augmented assign, a tuple target
+        # an unannotated parameter is a function when every call of its function passes a function there
+        param_at = {}                  # NAME -> [(function name, positional index, parameter name), ...]
+        calls = {}                     # function name -> [call]
+        for node in ast.walk(self.tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for index, item in enumerate(node.args.posonlyargs + node.args.args):
+                    if item.annotation is None:
+                        param_at.setdefault(item.arg, []).append((node.name, index, item.arg))
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                calls.setdefault(node.func.id, []).append(node)
+        self.re_callables = {}
+        changed = True
+        while changed:                              # a def, `f = up`, `g = f`, `TABLE = {"a": up}`, a parameter
+            changed = False
+            for name, items in shapes.items():
+                if name in self.re_callables:
+                    continue
+                kinds = {item[0] for item in items}
+                if kinds == {'def'}:
+                    kind = 'callable'
+                elif kinds == {'arg'}:
+                    # a `Callable[...]` parameter, or one whose every call site passes a function
+                    told = all(self.re_param_callable(param_at.get(name), calls) if item[1] is None
+                               else self.re_callable_annotation(item[1]) for item in items)
+                    kind = 'callable' if told else None
+                elif kinds == {'value'}:
+                    kind = self.re_value_kind(items[0][1])
+                elif kinds == {'loop'}:
+                    # a loop over a list or tuple of functions: the target is a function at every turn (the keys
+                    # of a dict are not, so only 'seq' counts here)
+                    kind = 'callable' if self.re_value_kind(items[0][1]) == 'seq' else None
+                else:
+                    kind = None
+                if kind is not None:
+                    self.re_callables[name] = kind
+                    changed = True
+
+    def re_param_callable(self, at, calls):
+        """Whether every call of each function passes a function value to an unannotated parameter."""
+        if not at:
+            return False
+        for function, index, param in at:
+            found = False
+            for call in calls.get(function, ()):
+                if any(isinstance(arg, ast.Starred) for arg in call.args) or any(item.arg is None for item in call.keywords):
+                    return False
+                if len(call.args) > index:
+                    value = call.args[index]
+                else:
+                    given = [item.value for item in call.keywords if item.arg == param]
+                    if len(given) != 1:
+                        return False
+                    value = given[0]
+                if self.re_repl_kind(value) != 'callable':
+                    return False
+                found = True
+            if not found:
+                return False
+        return True
+
+    def re_value_kind(self, value):
+        """'callable', 'table' (a dict of functions) or 'seq' (a list or tuple of them) for an expression, or None
+        when it is not told."""
+        if isinstance(value, ast.Lambda):
+            return 'callable'
+        if isinstance(value, ast.Name):
+            return self.re_callables.get(value.id)
+        if isinstance(value, ast.Dict) and value.keys and all(key is not None for key in value.keys):
+            items, kind = list(value.values), 'table'
+        elif isinstance(value, (ast.List, ast.Tuple)) and value.elts:
+            items, kind = list(value.elts), 'seq'
+        else:
+            return None
+        for item in items:
+            if not (isinstance(item, ast.Lambda) or (isinstance(item, ast.Name)
+                                                     and self.re_callables.get(item.id) == 'callable')):
+                return None
+        return kind
+
+    def re_repl_kind(self, node):
+        """'callable' when the replacement expression is a function value (`up`, `f`, `TABLE["k"]`, `FS[0]`)."""
+        if isinstance(node, ast.Lambda):
+            return 'callable'
+        if isinstance(node, ast.Name):
+            return self.re_callables.get(node.id)
+        if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
+            if self.re_callables.get(node.value.id) in ('table', 'seq'):
+                return 'callable'
+        return None
+
+    @staticmethod
+    def re_callable_annotation(annotation):
+        """Whether a parameter annotation names Callable (`Callable[[re.Match[str]], str]`)."""
+        node = annotation
+        while isinstance(node, ast.Subscript):
+            node = node.value
+        return isinstance(node, ast.Name) and node.id == 'Callable'
+
+    def re_bound_method(self, node):
+        """The note text for a bound method used as the replacement, or None: a method is not a value in this
+        program (`f = obj.m` does not build either), so say so when the program is built."""
+        if not isinstance(node, ast.Attribute) or self.path(node) is not None:
+            return None
+        if node.attr not in self.user_methods or node.attr in self.attr_fields:
+            return None
+        return (f'a bound method ({node.attr}) as the replacement is not built: a method is not a value in this '
+                f'program; write `lambda m: obj.{node.attr}(m)` instead')
+
     def re_str(self, node):
         if isinstance(node, ast.Constant) and isinstance(node.value, (str, bytes)):
             return node.value
@@ -1862,9 +2010,16 @@ class _Surface:
             if isinstance(repl, ast.Name) and repl.id in self.ambiguous_names:
                 self.re_refuse(node, name, f'the replacement {repl.id!r} is both a function and a variable in this program')
                 return None
-            if isinstance(repl, ast.Lambda) or (isinstance(repl, ast.Name) and repl.id in self.callable_names):
-                # a callable replacement: called with each Match, its result is the replacement text
+            if self.re_repl_kind(repl) == 'callable':
+                # a callable replacement (a lambda, a def, a name that holds one, a table lookup, a parameter):
+                # called with each Match, its result is the replacement text
                 return call(lib.sub_callable(index, counted), subject, repl, count)
+            # not a function this program knows: a bound method cannot be a value here, so refuse it by name
+            # instead of reading it as a replacement string at run time
+            bound = self.re_bound_method(repl)
+            if bound is not None:
+                self.re_refuse(node, name, bound)
+                return None
             if counted:
                 return call(lib.sub_callable(index, True, True), subject, repl, count)
             return call('_ail_re_sublit' + sfx, table, subject, repl, count)
