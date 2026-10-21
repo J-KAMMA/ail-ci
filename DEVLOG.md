@@ -13,9 +13,11 @@ Fixed two silent-difference causes:
    hash for pop/setdefault, clones the entry table for `copy`, removes the last entry directly
    for `popitem`, and reuses stored hashes for update/dict.  `dict.pop` on an empty dict also
    takes CPython's no-hash fast path.
-2. Dict and set literals hashed each element as it was evaluated.  CPython 3.12's
-   `BUILD_MAP`/`BUILD_SET` evaluate every key/value/element first, then hash/insert.  Both the
-   general runtime and the typed literal emitter now do the two phases.
+2. Dict and set literals on the general path hashed each element as it was evaluated.  CPython
+   3.12's `BUILD_MAP`/`BUILD_SET` evaluate every key/value/element first, then hash/insert; the
+   general lowering now does the two phases.  The typed literal emitter still inserts per pair,
+   but its keys are scalar int/str/bytes/float values with no user `__hash__`, so no silent
+   stdout difference was observed on that path.
 
 Remaining (not fixed): same-size dict mutation during iteration still differs by path/declared
 structural-mutation rule; `reversed(dict)` and `dict | dict` are accepted then stop at run time;
