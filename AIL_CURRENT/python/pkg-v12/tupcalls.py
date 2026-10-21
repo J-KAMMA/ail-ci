@@ -267,7 +267,15 @@ class Calls:
         self.no_tuple_items(node, ts[:1], 'sum')
         et = elem_of(ts[0]) if ts else None
         if len(args) > 1:
-            et = deep(ts[1])
+            st = deep(ts[1])
+            if st == STR:
+                self.refuse(node, 'sum() with a str start (CPython raises TypeError: sum() can\'t sum strings)')
+            if is_tuple(st):
+                # The result is a tuple whose length depends on how many items are added, which
+                # the fixed-shape tuple class cannot represent: leave the type open so the
+                # generic runtime reprs and passes it as the ordinary tuple value it is.
+                return self.done(node, args, kws, None)
+            et = st
         return self.done(node, args, kws, et if et in (INT, FLT, BOOL) else (INT if et is None else et))
 
     def b_range(self, node, want, ctx):

@@ -16428,6 +16428,14 @@ def _call(node, ctx):
     if f in ('sum', 'max', 'min', 'any', 'all') and f not in ctx.funcs and len(a) == 1:
         return _inline_fold(f, a[0], ctx)
     if f in ('min', 'max') and f not in ctx.funcs and len(a) == 2:
+        # A mixed int/float pair cannot be compared by C's usual arithmetic conversions: the int
+        # is rounded to double first, so 9007199254740993 and 9007199254740992.0 compare equal
+        # and min()/max() picks the wrong operand. The general path keeps both operands boxed and
+        # compares them exactly, so leave this shape to it.
+        if _etype(a[0], ctx) in (INT, FLT) and _etype(a[1], ctx) in (INT, FLT) \
+                and _etype(a[0], ctx) != _etype(a[1], ctx):
+            raise Unsupported('%s() of an int and a float needs the general path (exact comparison)'
+                              % f)
         # splice each operand ONCE -- the plain ternary text evaluates a
         # side-effecting operand twice (`min(v, f(3))` would call f twice).
         # Numeric operands with a call inside hoist into a statement

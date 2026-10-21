@@ -7672,6 +7672,13 @@ class Compiler(boxclosure.ClosureMixin):
         acc = ctx.tmp()
         start_node = args[1] if len(args) == 2 else kwargs.get('start')
         ctx.emit('%s = %s;' % (acc, self.expr(start_node, ctx) if start_node is not None else 'ail_box_int(0)'))
+        if start_node is not None:
+            # CPython's builtin_sum rejects a str start outright; summing a list of strs with the
+            # default 0 start still fails in +, but with "".join's advice it does not concatenate.
+            msg = '''"sum() can't sum strings [use ''.join(seq) instead]"'''
+            ctx.emit('if ((%s).tag == AIL_T_STR) { st = ail_raise_c(cx, AIL_B_TYPEERROR, %s); }'
+                     % (acc, msg))
+            ctx.check()
         it = ctx.tmp(); val = ctx.tmp()
         sst = "sumst_" + "".join(ch for ch in acc if ch.isalnum())
         ctx.emit('ail_sumst %s; ail_sum_begin(&%s, %s);' % (sst, sst, acc))

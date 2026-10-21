@@ -10055,7 +10055,10 @@ static inline ail_obj ail_obj_mod(ail_obj a, ail_obj b) {
         double x = ail__as_double(a), y = ail__as_double(b);
         if (y == 0.0) ail_raise_c(AIL_ERR_ZERODIV, "float modulo");
         double r = fmod(x, y);
-        if (r != 0.0 && ((r < 0) != (y < 0))) r += y;
+        /* CPython's float_rem: a zero remainder takes the divisor's sign
+           (-0.0 for 5.0 % -5.0), a non-zero one the divisor's sign too. */
+        if (r == 0.0) r = copysign(0.0, y);
+        else if ((r < 0) != (y < 0)) r += y;
         return ail_box_float(r);
     }
     ail_raise_c(AIL_ERR_TYPE, "unsupported operand type(s) for %%");
@@ -14745,7 +14748,10 @@ static inline ail_st ail_op_mod(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)
         double x = ail__as_double(a), y = ail__as_double(b);
         if (y == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "float modulo");
         double r = fmod(x, y);
-        if (r != 0.0 && ((r < 0) != (y < 0))) r += y;
+        /* CPython's float_rem: a zero remainder takes the divisor's sign
+           (-0.0 for 5.0 % -5.0), a non-zero one the divisor's sign too. */
+        if (r == 0.0) r = copysign(0.0, y);
+        else if ((r < 0) != (y < 0)) r += y;
         *out = ail_box_float(cx, r); return AIL_OK;
     }
     return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %");
