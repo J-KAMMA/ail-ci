@@ -7849,15 +7849,9 @@ class Compiler(boxclosure.ClosureMixin):
         if len(args) != 2 or kwargs:
             raise Unsupported('divmod() with other than exactly 2 arguments')
         a = self.expr(args[0], ctx); b = self.expr(args[1], ctx)
-        q = ctx.tmp(); r = ctx.tmp()
-        ctx.emit('st = ail_op_floordiv(cx, &%s, %s, %s);' % (q, a, b))
-        ctx.check()
-        ctx.emit('st = ail_op_mod(cx, &%s, %s, %s);' % (r, a, b))
-        ctx.check()
-        arr = ctx.new_cvar('dm')
-        ctx.emit('ail_obj %s[2] = { %s, %s };' % (arr, q, r))
         t = ctx.tmp()
-        ctx.emit('%s = ail_tuple_new(cx, %s, 2);' % (t, arr))
+        ctx.emit('st = ail_bi_divmod(cx, &%s, %s, %s);' % (t, a, b))
+        ctx.check()
         return t
 
     def _b_pow(self, args, kwargs, ctx):

@@ -26,6 +26,8 @@ def _ail_en_tname(x) -> str:
         return "dict"
     if isinstance(x, set):
         return "set"
+    if isinstance(x, _AilEnum):
+        return x.cname
     return "object"
 
 

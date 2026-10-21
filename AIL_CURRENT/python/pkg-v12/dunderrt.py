@@ -462,6 +462,16 @@ def _edits():
               "        }\n"
               "        /* fall through */\n"
               "        default: { char buf[80]; snprintf(buf, sizeof buf, \"float() argument must be a string or a number, not '%s'\", ail_type_name(x.tag));"))
+    # pow(base, exp, mod): an IntEnum / IntFlag member is an int subclass, so the 3-arg form
+    # accepts it (through __index__) before the core's int-only check.
+    e.append(('static inline ail_st ail_bi_pow(ail_ctx *cx, ail_obj *out, ail_obj base, ail_obj exp, int has_mod, ail_obj modv) {\n'
+              '    if (!has_mod) return ail_op_pow(cx, out, base, exp);\n',
+              'static inline ail_st ail_bi_pow(ail_ctx *cx, ail_obj *out, ail_obj base, ail_obj exp, int has_mod, ail_obj modv) {\n'
+              '    if (!has_mod) return ail_op_pow(cx, out, base, exp);\n'
+              '    ail_obj *pp[3] = { &base, &exp, &modv };\n'
+              '    for (int i = 0; i < 3; i++) if (pp[i]->tag == AIL_T_INST) {\n'
+              '        ail_d1_fn f = ail_dun1(*pp[i], AIL_D1_INDEX); if (f) { ail_obj v; ail_st st = f(cx, &v, *pp[i]); if (st != AIL_OK) return st; *pp[i] = v; }\n'
+              '    }\n'))
     e.append(('static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, int64_t n) {\n',
               'static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, int64_t n) {\n'
               '    if (x.tag == AIL_T_INST) { ail_d2_fn f = ail_dun2(x, AIL_D2_ROUND); if (f) return f(cx, out, x, has_n ? ail_box_int(n) : ail_box_none()); }\n'))
