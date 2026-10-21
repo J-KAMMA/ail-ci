@@ -29290,6 +29290,77 @@ def _caller_ctx(f, sigs, arity_seed=None, classes=None, owned_str_fns=None, owne
     return ctx
 
 
+_CALLER_CTX_MEMO = {}
+_CALLER_CTX_MEMO_MAX = 4096
+
+
+class _SignatureKey:
+    """The question `_caller_ctx_memo` answers against: every function's parameter kinds and return
+    kind as `sigs` stands at the start of one pass, and every function's row-arity seed.
+
+    Built once per pass (`_signature_key`) rather than once per call, because the passes below ask
+    it once per FUNCTION. `__hash__` is the value computed with the key (so a cache lookup costs a
+    hash of one small object, not of the whole signature table), and `__eq__` is identity first:
+    a hit inside the pass that built the key never compares the parts at all.
+    """
+    __slots__ = ('parts', 'digest')
+
+    def __init__(self, sigs, arity_seeds):
+        self.parts = (tuple((name, tuple(params), ret) for name, (params, ret) in sigs.items()),
+                      tuple((name, tuple(sorted(seed.items()))) for name, seed in arity_seeds.items()))
+        self.digest = hash(self.parts)
+
+    def __hash__(self):
+        return self.digest
+
+    def __eq__(self, other):
+        return self is other or (isinstance(other, _SignatureKey) and self.parts == other.parts)
+
+
+def _signature_key(sigs, arity_seeds):
+    return _SignatureKey(sigs, arity_seeds)
+
+
+def _caller_ctx_memo(f, sigs, arity_seed, classes, owned_str_fns, owned_bytes_fns, key):
+    """`_caller_ctx`, memoised for the three whole-program passes inside `_signatures`.
+
+    `_signatures`'s interleaved fixed point asks the same question of the same function again and
+    again: `_propagate_signatures_pass`, `_infer_strparam_pass` and `_plan_clones` each build a
+    caller context for every function, once per pass per round, and a round normally leaves most
+    functions' signatures exactly where the previous one did. `_caller_ctx` is a pure function of
+    (the function's AST, `sigs`, `arity_seed`, `classes`) -- it emits no C and writes nothing
+    outside the `Ctx` it returns -- so a second build for the same inputs hands back the context
+    already built; on corpus/gdev that removed 67-70% of the time spent in `_caller_ctx`.
+
+    The key is the question (`_SignatureKey`: every signature and every arity seed), not just the
+    function: the function's identity is checked with `is` on the hit, so a recycled `id()` can
+    never answer for the wrong function. `sigs` is mutated in place between rounds, so a hit
+    re-points the cached context's `ctx.funcs` at the caller's own `sigs` object: its CONTENT is
+    the one the key matched (that is what the key is), and `ctx.funcs[name][1]` -- the callee
+    return-kind lookup `_etype` does -- must read the live dict, exactly as a freshly built context
+    would.
+
+    Callers must treat the returned context as READ-ONLY. The three passes do (`_claim`, through
+    `_call_site_signature`, only asks `_etype`/`Ctx.type_of` questions); the two other users of
+    `_caller_ctx` in this file -- `_borrowed_callback_helper` and `_to_c_once`'s base context --
+    write to what they get back and keep calling `_caller_ctx` itself.
+
+    The memo lives for one `_signatures` call (`_signatures` clears it on entry) and is dropped if
+    it ever grows past `_CALLER_CTX_MEMO_MAX` entries.
+    """
+    index = (key, id(f))
+    hit = _CALLER_CTX_MEMO.get(index)
+    if hit is not None and hit[0] is f:
+        ctx = hit[1]
+        ctx.funcs = sigs
+        return ctx
+    ctx = _caller_ctx(f, sigs, arity_seed, classes, owned_str_fns, owned_bytes_fns)
+    if len(_CALLER_CTX_MEMO) >= _CALLER_CTX_MEMO_MAX:
+        _CALLER_CTX_MEMO.clear()
+    _CALLER_CTX_MEMO[index] = (f, ctx)
+    return ctx
+
+
 def _claim(arg, ctx):
     """What the compiler has ALREADY determined about one call argument's kind, asked through the
     same machinery that types a local (`_etype`, over the caller's own fully-typed `ctx` --
@@ -29402,8 +29473,9 @@ def _propagate_signatures_pass(fns, sigs, recursive, arity_seeds, classes=None,
     """
     by_name = {f.name: f for f in fns}
     claims = {}
-    for f in fns:
-        caller_ctx = _caller_ctx(f, sigs, arity_seeds[f.name], classes, owned_str_fns, owned_bytes_fns)
+    key = _signature_key(sigs, arity_seeds)      # one key for the whole pass: `sigs` is written
+    for f in fns:                                 # only AFTER the loop (see `claims` below)
+        caller_ctx = _caller_ctx_memo(f, sigs, arity_seeds[f.name], classes, owned_str_fns, owned_bytes_fns, key)
         for n in ast.walk(f):
             if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)):
                 continue
@@ -29522,8 +29594,9 @@ def _infer_strparam_pass(fns, sigs, recursive, arity_seeds, classes=None,
     # answers the identical question on every call.
     float_only = {g2: _float_call_only_names(g2fn) for g2, g2fn in by_name.items()}
     claims = {}                     # {(fname, pname): set of claims, STR / SLIST / 'other'}
+    key = _signature_key(sigs, arity_seeds)      # as in `_propagate_signatures_pass` above
     for f in fns:
-        caller_ctx = _caller_ctx(f, sigs, arity_seeds.get(f.name), classes, owned_str_fns, owned_bytes_fns)
+        caller_ctx = _caller_ctx_memo(f, sigs, arity_seeds.get(f.name), classes, owned_str_fns, owned_bytes_fns, key)
         slist_locals = getattr(caller_ctx, 'slist_names', frozenset())
         for n in ast.walk(f):
             if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
@@ -29810,8 +29883,9 @@ def _plan_clones(fns, sigs, arity_seeds, recursive, classes=None, owned_str_fns=
     grid_fns = {f.name for f in fns if _is_grid_return_annotation(f.returns)}
     entry = fns[-1].name                # the entry point is never cloned -- see SEMANTICS.md §26
     site_lists = {}
+    key = _signature_key(sigs, arity_seeds)      # this pass only reads `sigs`
     for f in fns:
-        caller_ctx = _caller_ctx(f, sigs, arity_seeds.get(f.name), classes, owned_str_fns, owned_bytes_fns)
+        caller_ctx = _caller_ctx_memo(f, sigs, arity_seeds.get(f.name), classes, owned_str_fns, owned_bytes_fns, key)
         for n in ast.walk(f):
             if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)):
                 continue
@@ -29895,6 +29969,9 @@ def _signatures(fns, entry_sig=None, classes=None, external=None):
 
     Returns `(sigs, arity_seeds, clones)` -- see `_propagate_signatures_pass` and `_plan_clones`.
     """
+    # Every context this function's passes build is memoised for the length of THIS call only (see
+    # `_caller_ctx_memo`): the rounds below ask the same question of most functions again and again.
+    _CALLER_CTX_MEMO.clear()
     classes = classes if classes is not None else _TDict()   # tracked: an untracked {} shared with every ctx made them all bypass the query cache
     owned_str_fns = {f.name for f in fns if isinstance(f.returns, ast.Name)
                      and f.returns.id == '__ail_checked_str__'}
