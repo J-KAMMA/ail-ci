@@ -662,13 +662,13 @@ static inline ail_obj ail2f_done(ail_ctx *cx, ail2f_buf *b) {
     free(b->p); b->p = NULL;
     return ail_str_buf_done(bu, b->n);
 }
-typedef struct { uint16_t fill; char align, sign; int alt, zero, has_width, has_prec; int64_t width, prec; char group, type; } ail2f_spec;
+typedef struct { uint16_t fill; char align, sign; int alt, zero, fill_given, has_width, has_prec; int64_t width, prec; char group, type; } ail2f_spec;
 /* 0, or -1 with the ValueError text in msg */
 static inline int ail2f_parse(ail_str s, ail2f_spec *f, char *msg, size_t msz) {
     memset(f, 0, sizeof *f); f->fill = ' ';
     int64_t i = 0, n = s.n;
     #define AIL2F_ALIGN(c) ((c) == '<' || (c) == '>' || (c) == '=' || (c) == '^')
-    if (n >= 2 && AIL2F_ALIGN(ail_chr(s, 1))) { f->fill = ail_chr(s, 0); f->align = (char)ail_chr(s, 1); i = 2; }
+    if (n >= 2 && AIL2F_ALIGN(ail_chr(s, 1))) { f->fill = ail_chr(s, 0); f->align = (char)ail_chr(s, 1); f->fill_given = 1; i = 2; }
     else if (n >= 1 && AIL2F_ALIGN(ail_chr(s, 0))) { f->align = (char)ail_chr(s, 0); i = 1; }
     if (i < n && (ail_chr(s, i) == '+' || ail_chr(s, i) == '-' || ail_chr(s, i) == ' ')) f->sign = (char)ail_chr(s, i++);
     if (i < n && ail_chr(s, i) == 'z') i++;
@@ -709,7 +709,7 @@ static inline ail_obj ail2f_pad_num(ail_ctx *cx, const char *sign, const char *p
         int every = (f->type == 'x' || f->type == 'X' || f->type == 'b' || f->type == 'o') ? 4 : 3;
         int64_t o = 0;
         int64_t zero_width = 0;
-        if (f->zero && !f->align) {
+        if (f->zero && !f->fill_given && (!f->align || f->align == '=')) {
             /* with '0' padding the grouping covers the padding too */
             zero_width = f->width - (int64_t)strlen(sign) - (int64_t)strlen(prefix) - (blen - ip);
         }
@@ -730,7 +730,7 @@ static inline ail_obj ail2f_pad_num(ail_ctx *cx, const char *sign, const char *p
     }
     int64_t len = (int64_t)strlen(sign) + (int64_t)strlen(prefix) + (int64_t)strlen(b);
     char align = f->align ? f->align : (f->zero ? '=' : '>');
-    uint16_t fill = (f->zero && !f->align) ? '0' : f->fill;
+    uint16_t fill = (f->zero && !f->fill_given) ? '0' : f->fill;
     int64_t pad = f->width > len ? f->width - len : 0;
     int64_t left = align == '>' ? pad : align == '^' ? pad / 2 : 0;
     int64_t right = align == '<' ? pad : align == '^' ? pad - pad / 2 : 0;
@@ -745,7 +745,7 @@ static inline ail_obj ail2f_pad_num(ail_ctx *cx, const char *sign, const char *p
 }
 static inline ail_obj ail2f_pad_str(ail_ctx *cx, ail_str s, int64_t len, ail2f_spec *f, char dflt) {
     char align = f->align ? f->align : dflt;
-    uint16_t fill = (f->zero && !f->align) ? '0' : f->fill;
+    uint16_t fill = (f->zero && !f->fill_given) ? '0' : f->fill;
     int64_t pad = f->width > len ? f->width - len : 0;
     int64_t left = align == '>' ? pad : align == '^' ? pad / 2 : 0;
     ail2f_buf o = {0, 0, 0};

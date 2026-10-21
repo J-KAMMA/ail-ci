@@ -8202,6 +8202,9 @@ def _fstring_field(fv, ctx):
     if fv.conversion == 114:
         pre = _repr_conv(val, kind, ctx)
         kind = STR
+    elif fv.conversion == 115:
+        pre = _fmt_default_conv(val, kind, ctx)
+        kind = STR
     if fv.format_spec is None:
         return pre if pre is not None else _fmt_default_conv(val, kind, ctx)
     fs = fv.format_spec
@@ -8457,6 +8460,9 @@ def _build_strformat_value(node, ctx):
         pre = None
         if conv == 'r':
             pre = _repr_conv(argnode, kind, ctx)
+            kind = STR
+        elif conv == 's':
+            pre = _fmt_default_conv(argnode, kind, ctx)
             kind = STR
         if spectext:
             spec = _parse_braces_spec(spectext)

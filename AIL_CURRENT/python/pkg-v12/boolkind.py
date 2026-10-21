@@ -242,6 +242,8 @@ def is_dict_value(node, env, lists):
 
 def bool_seq_value(node, env, names, lists):
     """A list (or `d.values()`) whose every element is a bool; iterating it yields those elements."""
+    if isinstance(node, ast.Tuple):
+        return bool(node.elts) and all(boolish(e, env, names, lists) for e in node.elts)
     return bool_list_value(node, env, names, lists) and not is_dict_value(node, env, lists)
 
 

@@ -212,6 +212,8 @@ class TextLowering(object):
             raise self.NotS0('a bool in an f-string')
         if fv.format_spec is None:
             return self.default_conv(val, kind)
+        if fv.conversion == 115:
+            raise self.NotS0('a str conversion with a format spec')
         fs = fv.format_spec
         if not isinstance(fs, ast.JoinedStr) or len(fs.values) > 1 \
                 or (fs.values and not isinstance(fs.values[0], ast.Constant)):
@@ -233,6 +235,11 @@ class TextLowering(object):
     def fmt_value(self, val_node, kind, spec, orig_text, str_default_align):
         """The runtime formatter call for a parsed spec (legacy `_fmt_build`)."""
         P = self.P
+        # A sign, '#', grouping, '=' or an unusual type stays on the legacy path, whose
+        # ail_fmt_gen reproduces CPython's sign/zero-padding rules; the small fmt_int/fmt_float
+        # here have no sign flag and would silently drop it.
+        if P._fmt_general_needed(spec, kind):
+            raise self.NotS0('a general format spec')
         P._resolve_fmt_type(spec, kind, orig_text, 'an f-string field with spec')
         width = spec['width'] or 0
         zero = 1 if spec['zero'] else 0
