@@ -1,0 +1,89 @@
+name: agent-worker
+# One AIL coding-agent worker run (DeepSeek V4.1 Flash through OpenCode Go, a $10/month flat plan with no extra charges)
+# on a job-* branch prepared by the maintainer's ci_job script. Owner-approved 2026-10-21.
+# - Dispatch only (repo writers). Runs only on job-* branches.
+# - Only the OpenCode key is used. harness=oc (default): the pinned OpenCode CLI (v1.19.3, sha256-checked) reads it from
+#   its auth file in $HOME, outside the checkout, removed after the run. harness=agentpy: agent.py reads a key file and
+#   deletes it before any tool runs. Before the push, the results are scanned for the key and the push is refused if found. The checkout keeps no credentials; results are pushed in a separate step after the agent
+#   has exited. The reviewer runs on the maintainer's machine, not here.
+on:
+  workflow_dispatch:
+    inputs:
+      max_turns:
+        default: '250'
+      harness:
+        default: 'oc'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  worker:
+    if: startsWith(github.ref_name, 'job-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: python3 --version && gcc --version | head -1
+      - name: Key file
+        env:
+          K: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          umask 077
+          printf '%s' "$K" > "$RUNNER_TEMP/agent.key"
+      - name: OpenCode CLI
+        if: inputs.harness == 'oc'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$HOME/opt/opencode" "$RUNNER_TEMP/oc"
+          gh release download v1.19.3 --repo sst/opencode -p opencode-linux-x64.tar.gz -D "$RUNNER_TEMP/oc"
+          tar -xzf "$RUNNER_TEMP/oc/opencode-linux-x64.tar.gz" -C "$HOME/opt/opencode"
+          echo "179ca421d61eefeadfa0c50e084a6e79c1623734732f0f4593f81ccfd3ab7ee9  $HOME/opt/opencode/opencode" | sha256sum -c -
+          mkdir -p "$HOME/.config/opencode"
+          cp .agent/opencode.json "$HOME/.config/opencode/opencode.json"
+      - name: Worker
+        run: |
+          git rev-parse HEAD > "$RUNNER_TEMP/start"
+          git config user.name "AIL agent"
+          git config user.email "agent@example.com"
+          mkdir -p "$HOME/tools" "$HOME/corpus"
+          cp .agent/cmp.sh .agent/cmpu.sh "$HOME/tools/" 2>/dev/null || true
+          [ -d corpus/gdev ] && ln -sfn "$PWD/corpus/gdev" "$HOME/corpus/gdev"
+          if [ "${{ inputs.harness }}" = oc ]; then
+            mkdir -p "$HOME/.local/share/opencode"
+            ( umask 077; printf '{"opencode-go":{"type":"api","key":"%s"}}' "$(cat "$RUNNER_TEMP/agent.key")" > "$HOME/.local/share/opencode/auth.json" )
+            rm -f "$RUNNER_TEMP/agent.key"
+            "$HOME/opt/opencode/opencode" run --format json --dir "$PWD"               "Do the task described in the attached file, in this directory. When finished, reply with a short final report."               -f .agent/task.md > "$RUNNER_TEMP/oc.jsonl" 2> "$RUNNER_TEMP/oc.err" || true
+            rm -f "$HOME/.local/share/opencode/auth.json"
+            python3 .agent/oc_report.py "$RUNNER_TEMP/oc.jsonl" > .agent/report.md 2>&1 || true
+            tail -5 "$RUNNER_TEMP/oc.err" >> .agent/report.md
+          else
+            python3 .agent/agent.py --provider openai --base-url https://opencode.ai/inference/go/openai/v1               --model deepseek-v4.1-flash --price-in 0.15 --price-out 0.60               --dir "$PWD" --prompt-file .agent/task.md --log .agent/work0.jsonl               --budget-usd 6 --max-turns "${{ inputs.max_turns }}" --key-file "$RUNNER_TEMP/agent.key"               > .agent/report.md 2>&1 || true
+          fi
+          tail -40 .agent/report.md
+      - name: Key scan
+        id: scan
+        if: always()
+        env:
+          K: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          rm -f "$RUNNER_TEMP/agent.key" "$HOME/.local/share/opencode/auth.json"
+          if grep -rqF -e "$K" --exclude-dir=.git . || git log -p "$(cat "$RUNNER_TEMP/start")..HEAD" | grep -qF -e "$K"; then
+            echo "key found in results: not pushing"; exit 1
+          fi
+      - name: Push results
+        if: always() && steps.scan.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git add .agent/report.md
+          git commit -q -m "agent worker report" || true
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}" "HEAD:${{ github.ref_name }}"
