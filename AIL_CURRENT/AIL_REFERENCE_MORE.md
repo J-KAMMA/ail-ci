@@ -74,10 +74,14 @@ row 1: 0 0
 - `fn main()` takes no parameters and returns the exit code (falling off the end is 0); `sys.argv`
   is a `list[str]` with the program name first; `sys.exit(n)` works anywhere.
 - Input: `for line in sys.stdin` (keeps `\n`; input that is not UTF-8 exits 1: read bytes instead),
-  `input()` (`EOFError` at the end), `open(path).read()` (only this form).
-- Output: `print(*values, sep=, end=, file=sys.stderr)` (ints, floats, strs, bools). stdout is
-  buffered and still flushed by `sys.exit` or an uncaught exception: when a program must print
-  nothing on error, collect the lines and print them at the end.
+  `input()` (`EOFError` at the end), `open(path).read()` and `for line in open(path)`.
+- Files: `with open(p, "w") as f: f.write(text)` and the same for read; modes `r w a x` with `b` / `+`,
+  `encoding=`, `errors=`, `newline=`, `read/readline/readlines/write/seek/tell/close` (typed path too).
+- Output: `print(*values, sep=, end=, file=sys.stderr)` (ints, floats, strs, bools; a list or
+  tuple prints as its repr, `print(*xs)` walks a list / tuple / generator, and `Cls(*xs)` is built;
+  a starred argument to an ordinary function is refused). stdout is buffered and still flushed by
+  `sys.exit` or an uncaught exception: when a program must print nothing on error, collect the lines
+  and print them at the end.
 - Files: `read_bytes(path)`, `file_chunks(path, 65536)` (bytes chunks, constant memory),
   `write_text(path, s)`, `write_bytes`, `append_bytes`, `path_exists`, `file_size`, `list_dir`.
 - `for line in sys.stdin` with `split`/`int`/`isdigit` and one `print(f"...")` per output line is
@@ -158,6 +162,9 @@ sys.exit(main())
 - Every statement ends with `;`, never after `}`. Blocks use braces: `if c { } elif d { } else { }`
   (no `else if`), `while c { }`, `for x in xs { }`, `try { } except E as e { } finally { }`.
   Comments start with `#`. Logic is `and or not`.
+- `with expr as name:` / `with a as x, b as y:` is built: `with open(...)` on the typed path, and on
+  the general path user `__enter__` / `__exit__` (a true result suppresses) and `contextlib.contextmanager`,
+  `suppress`, `closing`, `nullcontext` (the default build falls back).
 - `let x = 1;` or `let x: list[str] = [];`: an initializer is required and fixes the type.
   `const N = 3;` takes a number, str, bytes or numeric-list literal.
 
@@ -209,6 +216,8 @@ KeyError 6
 - `struct P { x: int; name: str; }` is built `P(1, "a")` or `P(name="a", x=1)`; every field needs
   a value (list/dict/set fields take `[]`/`{}`/`set()`). Methods: `impl P { fn m(self, d: int) ->
   int { ... } }`. A field may be any type, the struct's own type only as `P | None` or `list[P]`.
+  A Python `@dataclass` class may derive from one `@dataclass` base on the general path (the default
+  build falls back): inherited fields, `==` and printing work there.
 - A struct is a shared reference (assignment, list elements and arguments alias it), as are nested
   lists and their rows; `let ys = xs;` copies a flat list. No tuples: return a struct.
 - Flat `list`, `dict` and `set` parameters are read-only: to modify one in a helper, keep it in a
@@ -242,7 +251,8 @@ fn main() {
 ## Trees: linked lists, `Node | None`
 
 A struct field, parameter, result or `let` written `Node | None` (or `Optional[Node]`) may be `None`.
-Only structs can be None (`int | None` is refused: use a sentinel such as -1). Test with `is None`,
+On the typed path `int | None`, `float | None` and `str | None` are built too; `bool`, `bytes` and
+`list[T]` with `| None` need the general path (the default build falls back). Test with `is None`,
 `is not None`, `if x`; `a is b` compares identity. Reading or writing a field (or calling a method)
 through None raises `RuntimeError` (message `field access on None`), catchable. Structs are
 reference counted: trees and lists are freed when unreferenced, a reference cycle (parent pointer,
@@ -293,7 +303,8 @@ field access on None
   `IndexError`; `xs[-1]` works.
 - `list(x)` copies any list, set, dict (its keys), `d.keys()`, `d.values()`, str (its characters)
   or range into a new list. On a list field, `x in st.xs` and `st.xs.count(x)` read it in place.
-- A flat list parameter is read-only (Structs). `print(xs)` is refused: `", ".join(xs)`.
+- A flat list parameter is read-only on the typed path (Structs). `print(xs)` is the list's repr;
+  `print` of a dict needs the general path (the default build falls back).
 - `x in xs`, `index`, `count`, `remove`, `pop(0)`, `insert(0, x)` are O(n), as in Python: in a
   loop use a set or `[False] * n`, a queue as list + head index (BFS), a heap (Heaps).
 
@@ -328,13 +339,13 @@ results, with Python's meaning:
 ## Dicts: `dict[str, T]`, `dict[int, T]`
 
 - T: int, float, str, bytes. Insertion ordered. Key an int id as an int (`d[r.id]`, never
-  `d[str(r.id)]`). `dict[str, Struct]` and `dict[str, list[T]]` are refused: map the key to an
-  index into a `list[Struct]` or a `list[list[T]]` (Word count).
+  `d[str(r.id)]`). `dict[str, Struct]` and `dict[str, list[T]]` need the general path (the default
+  build falls back); the typed path maps the key to an index into a `list[Struct]` or a `list[list[T]]`.
 - `d[k]` (`KeyError`), `get(k, default)` (one-argument `get(k)` is refused: there is no None for a
   value; use `d.get(k, -1)` or `if k in d`), `setdefault`, `pop(k[, default])`, `del d[k]`, `in`,
   `len`, `keys()`, `values()`, `items()`, `update`, `copy`, `clear`; `for k in d`,
   `for k, v in d.items()`, `sorted(d)`, `list(d)` / `list(d.keys())` (keys in insertion order),
-  `list(d.values())`. No dict comprehensions. A dict parameter is read-only.
+  `list(d.values())`, dict comprehensions. A dict parameter is read-only on the typed path.
 
 ## Sets: `set[int]`, `set[str]`
 
@@ -363,8 +374,9 @@ module (`compile-library`) takes no table.
   `find/rfind/index/rindex/count(sub[, start[, end]])`, `startswith/endswith`, `replace`,
   `lower/upper`, `isdigit/isalpha/isalnum/isspace/isupper/islower/isdecimal/isnumeric/istitle`,
   `encode()`; `in`, `+`, `*`, `<`, slices with steps, `ord`, `chr`, `str(int|float|bool)`,
-  `hex(int)`. Missing: `partition`, `title`, `capitalize`, `zfill`, `ljust`, `translate`,
-  `removeprefix`. `+` never mixes str and a number: `"n=" + str(n)`.
+  `hex(int)`, `partition`, `rpartition`, `ljust`, `rjust`, `center`. Missing on the typed path:
+  `title`, `capitalize`, `zfill`, `removeprefix`, `removesuffix` (the default build falls back and
+  runs them); `translate` is refused on every path. `+` never mixes str and a number: `"n=" + str(n)`.
 - f-strings `{expr}`, `{n:5d}`, `{n:05d}`, `{x:.2f}`, `{x:8.3f}`, `{s:>6}` (`<`, `^`);
   `"%d %5s %-5s %.9f" % (...)`; `"{} {:.2f}".format(...)`. Specs follow CPython: `[[fill]align][sign][#][0]
   [width][, or _][.precision][type]` with int types d x X o b (and e f g %), float types f F e E g G %
@@ -390,7 +402,7 @@ True 1 3.5 3 2 1024
 on. The pattern is parsed when the program is built and matched by a linear-time engine written in the
 language itself (leftmost-first, CPython's priority), so groups and spans equal CPython's.
 
-- Functions and methods: `match fullmatch search findall finditer split sub escape`; `flags=` or the
+- Functions and methods: `match fullmatch search findall finditer split sub subn escape`; `flags=` or the
   last positional flags (`re.I re.M re.S re.X re.A`, joined with `|`), `count=`, `maxsplit=`.
   `finditer` returns a list of matches, not an iterator (use it in a `for` or with `len`).
 - Pattern syntax: literals, `.`, classes (`[a-z]`, `[^...]`, ranges, `\d \w \s` and their
@@ -403,7 +415,8 @@ language itself (leftmost-first, CPython's priority), so groups and spans equal 
   with `m.group(i)` raises `ValueError` (there is no None str), so test `m.start(i) >= 0` first.
   `findall` with one group returns that group ('' when it did not take part).
 - `sub(pattern, repl, s[, count])`: a literal `repl` may use `\1`, `\g<1>`, `\g<name>`, `\n`;
-  a non-literal `repl` must have no backslash; a function is not built. Empty matches follow CPython 3.7+.
+  a non-literal `repl` must have no backslash. `subn` and a function `repl` run on the general path
+  (the default build falls back; the typed path needs a literal repl). Empty matches follow CPython 3.7+.
 - Cost: matching is O(len(pattern) x len(text)). On an ASCII str or a bytes subject (and a pattern without
   lookaround) a DFA built with the program finds the spans, so scans over megabytes (`findall`, `finditer`,
   `sub`, `split`, `search`) and short `fullmatch` calls run at or below CPython's time, with 2 to 5 times
@@ -417,7 +430,7 @@ language itself (leftmost-first, CPython's priority), so groups and spans equal 
   atomic groups, possessive quantifiers, conditionals, scoped flags `(?i:...)`, a repeated group that
   can match the empty string (`(a*)*`), `re.IGNORECASE` with a non-ASCII pattern character (a non-ASCII
   subject with `re.I` raises `ValueError`), `findall` with several groups and `split` with groups
-  (tuples, None), `subn`, `m.groups()` / `m.groupdict()` / `m.span()` as values, a pattern that is not a
+  (tuples, None), `m.groups()` / `m.groupdict()` / `m.span()` as values, a pattern that is not a
   literal, `pos` / `endpos`.
 
 ```python
@@ -711,9 +724,10 @@ hi]])`. Same results and heap layout as CPython, O(log n), the list changed in p
 `for` walks a list, str, bytes (also `data[i:j]`, `s.encode()`), bytearray, a dict,
 `range(a, b, step)`, `enumerate(list)`, `reversed(list)`, `sorted(...)`, `s.split(...)`,
 `s.splitlines()`, a call returning a list, `sys.stdin`. `break`, `continue`, `pass`,
-`x if c else y`, list comprehensions (also nested `for`). `parallel for` (Parallel).
-No `for ... else`, `zip`, tuple unpacking except `for k, v in d.items()`, `enumerate(str)`, dict
-comprehensions, `global`, `isinstance`.
+`x if c else y`, list and dict comprehensions (also nested `for`), `zip(a, b)` as the iterable of
+`for a, b in`, `isinstance(x, int)` (and str / float / bool). `parallel for` (Parallel).
+No `for ... else`, `list(zip(...))`, `enumerate(zip(...))`, `enumerate(str)`, tuple unpacking
+beyond `for a, b in zip(...)` / `enumerate(...)` / `d.items()`, or `isinstance` of a struct.
 
 ## Exceptions
 
@@ -738,16 +752,16 @@ needs a final `return`. Handler names: Local names.
 |---|---|
 | tuples beyond the Tuples section, `zip` over non-lists | a struct; index loops |
 | a lambda that escapes, nested `def` | a top-level `fn` passed as `Callable[[A], R]` |
-| global variables you change | a struct holding the state, passed to each function (a literal read-only table is fine) |
-| `dict[str, Struct]`, `dict[str, list[T]]` | a `dict[str, int]` index into a `list[Struct]` (or a `list[list[T]]`) |
-| `None` for int, str, list | a sentinel (-1, ""), or raise. A struct may be `Node \| None` |
-| `xs[i] = v` or `xs.append(v)` on a list parameter | a struct field `s.xs`, or return a new list |
+| changing a global list / str / dict | a struct holding the state, passed to each function; a module-level int / float may use `global` |
+| `dict[str, Struct]`, `dict[str, list[T]]` on the typed path | a `dict[str, int]` index into a `list[Struct]` (or a `list[list[T]]`); the default build falls back |
+| `None` for a list on the typed path | a sentinel (-1, ""), or raise; int / float / str may be `int \| None` |
+| `xs[i] = v` or `xs.append(v)` on a list parameter (typed path) | a struct field `s.xs`, or return a new list; the default build falls back |
 | one name holding an int, later a str | a second name |
-| `str(b)` of bytes | `b.decode()` |
-| `print(xs)`, `p1 == p2` on structs | print or compare fields; `", ".join(xs)` |
+| `str(b)` of bytes on the typed path | `b.decode()`; the default build prints the repr |
+| `print` of a dict on the typed path | `sorted(d.items())`; a list and a tuple print as their repr |
 | `d.get(k)` (None when missing) | `d.get(k, -1)` with a sentinel, or `if k in d { ... d[k] ... }` |
 | `int(s)` on text that may overflow | `parse_int64_decimal(s)` from `checked_integer` (`ValueError`) |
-| `with open(p) as f`, `f.write` | `read_bytes`, `write_text`, `file_chunks` |
+| a file mode, encoding or `os` call that is not built | `read_bytes`, `write_text`, `file_chunks` |
 | big integers (`Fraction` has 64-bit parts) | limbs in a `list[int]`; a `@dataclass` class |
 
 ```ail-refused
@@ -1009,10 +1023,13 @@ slower than typed code), where operator methods dispatch on the run-time class (
   floats (a float gives a float), `== < <= > >=`, `abs round(x[, n]) int float math.floor math.ceil`, `limit_denominator`, `numerator`, `denominator`,
   `is_integer`, `as_integer_ratio`, `Fraction.from_float`, `sum / min / max / sorted`, dict keys and set members. `str`/`repr` as CPython (`3/4`, `Fraction(3, 4)`).
   Not built: `Fraction.from_decimal`, `format` specs, `divmod`, `decimal` (refused by name).
-- `enum`: `Enum`, `IntEnum`, `StrEnum`, `auto()`, `@unique`. Members print as `Color.RED`, repr `<Color.RED: 1>`; `Color(1)` (ValueError `1 is not a valid Color`),
+- `enum`: `Enum`, `IntEnum`, `StrEnum`, `Flag`, `IntFlag`, `auto()`, `@unique`. Members print as `Color.RED`, repr `<Color.RED: 1>`; `Color(1)` (ValueError `1 is not a valid Color`),
   `Color["RED"]` (KeyError), `for c in Color`, `list(Color)`, `len(Color)`, `Color.__members__`, aliases, `.name`, `.value`, methods, members as dict keys and set
-  members, `==` / `is`. An `IntEnum` member compares, adds and indexes like its value (`int(m)`, `m + 1`, `lst[m]`). Refused by name: `Flag`/`IntFlag`, the
-  functional API, mixed-in bases (`class C(str, Enum)`), `__init__`/`__new__` in an enum, class methods. `isinstance(m, int)` is False.
+  members, `==` / `is`. An `IntEnum` member compares, adds and indexes like its value (`int(m)`, `m + 1`, `lst[m]`). `Flag` / `IntFlag` compose with `| & ^ ~ << >>`,
+  test with `in`, iterate `list(m)` and format; a member past 63 bits is refused. Refused by name: the functional API, mixed-in bases (`class C(str, Enum)`),
+  `__init__`/`__new__` in an enum, class methods. `isinstance(m, int)` is False.
+- `contextlib`: `contextmanager`, `suppress`, `closing`, `nullcontext` and user `with` classes on the general path (the default build falls back);
+  `with a as x, b as y:`, `return` / `break` / `continue` / an exception inside, and an `__exit__` returning True suppressing. Not built: `ExitStack`.
 - `collections.namedtuple("P", "x y", defaults=[..])`, `class P(NamedTuple)` (annotations, defaults, methods) and `class P(namedtuple(..))`: fields, indexing, unpacking,
   iteration, `==` with tuples, ordering, hashing, `repr` `P(x=1, y=2)`, `_asdict()`, `_replace(x=..)`, `P._make(xs)`, `P._fields`, `count`, `index`. Refused:
   `rename=`, `module=`, `__new__`, `_field_defaults`. Slices `p[1:]` and `isinstance(p, tuple)` are not built. `collections.ChainMap(*maps)`: lookups, `get`, `in`,

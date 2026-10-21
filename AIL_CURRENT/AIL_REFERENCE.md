@@ -48,25 +48,25 @@ sys.exit(main())
 
 - Annotate parameters, results and empty containers (`xs: list[int] = []`). A name keeps one
   type in its function: give a new type a new name.
-- Top level: imports, constants, read-only tables (`N = 10`, `STOP = {"a"}`, `T = {"k": 1}`),
-  `@dataclass` classes (methods, no inheritance), functions, `sys.exit(main())`. No globals you
-  change, nested `def`, own exception classes (MORE).
+- Top level: imports, constants, read-only tables (`N = 10`, `STOP = {"a"}`),
+  `@dataclass` classes (methods; inheritance on the general path), functions, `sys.exit(main())`.
+  No other globals you change (an int/float `global` works), nested `def`, own exception classes (MORE).
 - `int` is 64-bit (`OverflowError`, no big ints). Types: int, float, str, bool, bytes, `list`,
-  `dict`, `set`, `tuple[int, str]` (`return a, b`; `a, b = f()`), dataclasses. `None` only for a
-  class (`nxt: Optional["Node"]`); else a sentinel (-1, "").
-- A list, dict or set parameter is read-only: change a dataclass field (`acc.keys.append`) or
-  return a new one.
-- `print` takes numbers, str, bool, tuples, never a list, dict or `*xs`: `" ".join([str(x) for x
-  in xs])`. A dict literal only as `d: dict[str, int] = {...}`.
+  `dict`, `set`, `tuple[int, str]` (`return a, b`; `a, b = f()`), dataclasses. `None` for a class
+  or int/float/str (`int | None`; `Optional["Node"]`); else a sentinel (-1, "").
+- List/dict/set params are read-only (typed): change a dataclass field
+  (`acc.keys.append`) or return one.
+- `print` takes numbers, str, bool, tuples, lists, `*xs` (dict: general path):
+  `" ".join([str(x) for x in xs])`.
 - Exceptions: kinds by name (`except (ValueError, KeyError) as e:`, no bare `except`);
   `print(e)`, `str(e)`, `e.args` read like CPython's.
 - Bind before use: `words = s.split()`, `x = heapq.heappop(h)` (not inside another call). Sort
-  with `xs.sort(key=lambda ...)`; `min`/`max` take no `key=`.
+  with `xs.sort(key=...)`; `min`/`max` take `key=`.
 - Text: `for line in sys.stdin` (keeps `\n`), `input()`, `sys.stdin.read()`, `int(s)`
   (`ValueError`). Bytes: `sys.stdin.buffer.read()`, `data[i]` is an int, `data[a:b]` an O(1)
   view, `.decode()`, `sys.stdout.buffer.write(bytearray)`.
-- Modules: `sys re math heapq bisect json`, `collections` (Counter, defaultdict, deque),
+- Modules: `sys re math heapq bisect json csv`, `collections` (Counter, defaultdict, deque),
   `itertools`, `functools`, `random` (after `random.seed(n)`).
 - Speed: fix `slow:` hints (`x in list`, `.pop(0)`: set, deque).
 
-MORE (`sed -n A,Bp AIL_REFERENCE_MORE.md`): Commands 8-48, Text I/O 50-84, Bytes 86-149, Syntax 151-162, Local names 164-189, Numbers 191-205, Structs 207-240, Trees 242-284, Lists 286-298, Sort keys 300-307, Nested lists 309-326, Dicts 328-337, Sets 339-357, Strings 359-384, Regex 386-442, Collections 444-524, Tuples, lambdas (Python syntax) 526-585, Libraries 587-690, Heaps 692-707, Loops 709-716, Exceptions 718-733, Refused 735-776, Word count 778-810, Dijkstra 812-854, BFS 856-900, Modules 902-930, Speed 932-951, Parallel 953-1096, Export 1099-1131.
+MORE (`sed -n A,Bp AIL_REFERENCE_MORE.md`): Commands 8-48, Text I/O 50-88, Bytes 90-153, Syntax 155-169, Local names 171-196, Numbers 198-212, Structs 214-249, Trees 251-294, Lists 296-309, Sort keys 311-318, Nested lists 320-337, Dicts 339-348, Sets 350-368, Strings 370-396, Regex 398-455, Collections 457-537, Tuples, lambdas (Python syntax) 539-598, Libraries 600-703, Heaps 705-720, Loops 722-730, Exceptions 732-747, Refused 749-790, Word count 792-824, Dijkstra 826-868, BFS 870-914, Modules 916-944, Speed 946-965, Parallel 967-1113, Export 1116-1148.
