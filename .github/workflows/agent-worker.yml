@@ -4,7 +4,7 @@ name: agent-worker
 # - Dispatch only (repo writers). Runs only on job-* branches.
 # - Only the OpenCode key is used. harness=oc (default): the pinned OpenCode CLI (v1.19.3, sha256-checked) reads it from
 #   its auth file in $HOME, outside the checkout, removed after the run. harness=agentpy: agent.py reads a key file and
-#   deletes it before any tool runs. Before the push, the results are scanned for the key and the push is refused if found. The checkout keeps no credentials; results are pushed in a separate step after the agent
+#   deletes it before any tool runs. The OpenCode run is cut off after 120 minutes. Before the push, the results are scanned for the key and the push is refused if found. The checkout keeps no credentials; results are pushed in a separate step after the agent
 #   has exited. The reviewer runs on the maintainer's machine, not here.
 on:
   workflow_dispatch:
@@ -61,7 +61,7 @@ jobs:
             mkdir -p "$HOME/.local/share/opencode"
             ( umask 077; printf '{"opencode-go":{"type":"api","key":"%s"}}' "$(cat "$RUNNER_TEMP/agent.key")" > "$HOME/.local/share/opencode/auth.json" )
             rm -f "$RUNNER_TEMP/agent.key"
-            "$HOME/opt/opencode/opencode" run --format json --dir "$PWD"               "Do the task described in the attached file, in this directory. When finished, reply with a short final report."               -f .agent/task.md > "$RUNNER_TEMP/oc.jsonl" 2> "$RUNNER_TEMP/oc.err" || true
+            timeout 120m "$HOME/opt/opencode/opencode" run --format json --dir "$PWD"               "Do the task described in the attached file, in this directory. When finished, reply with a short final report."               -f .agent/task.md > "$RUNNER_TEMP/oc.jsonl" 2> "$RUNNER_TEMP/oc.err" || true
             rm -f "$HOME/.local/share/opencode/auth.json"
             python3 .agent/oc_report.py "$RUNNER_TEMP/oc.jsonl" > .agent/report.md 2>&1 || true
             tail -5 "$RUNNER_TEMP/oc.err" >> .agent/report.md
