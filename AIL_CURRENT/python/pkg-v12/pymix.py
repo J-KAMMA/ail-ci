@@ -216,10 +216,43 @@ def _walk_own_body(fn_node):
             stack.extend(ast.iter_child_nodes(n))
 
 
+def _handler_names(handler):
+    """The five named exceptions an `except` clause catches (all of them for a bare `except:` / Exception)."""
+    t = handler.type
+    names = ([t.id] if isinstance(t, ast.Name) else
+             [e.id for e in t.elts if isinstance(e, ast.Name)] if isinstance(t, ast.Tuple) else [])
+    if t is None or 'Exception' in names or 'BaseException' in names:
+        return sorted(EXC_TYPE_NAMES)
+    return [name for name in names if name in EXC_TYPE_NAMES]
+
+
+def _reraise_sites(fn_node):
+    """[(node, exc_name), ...] for every `raise` / `raise e` (e the handler's own name) inside an `except` clause
+    of `fn_node`: the exception it caught leaves again, so the handler does not make it stay inside the function
+    (DIFFERENCES C147: a typed clone whose handler re-raised let the exception past the caller's handler)."""
+    found = []
+
+    def visit(node, handlers):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.FunctionDef):
+                continue
+            if isinstance(child, ast.ExceptHandler):
+                visit(child, handlers + [child])
+                continue
+            if isinstance(child, ast.Raise) and handlers and (
+                    child.exc is None
+                    or (isinstance(child.exc, ast.Name) and child.exc.id == handlers[-1].name)):
+                found.extend((child, name) for name in _handler_names(handlers[-1]))
+            visit(child, handlers)
+    visit(fn_node, [])
+    return found
+
+
 def _self_raise_sites(fn_node):
     """[(node, exc_name), ...] for every operation directly inside `fn_node` (not inside a nested
     `def`) that could raise one of the five named exceptions."""
-    return [(n, exc) for n in _walk_own_body(fn_node) for exc in [_raise_site_exc(n)] if exc]
+    return ([(n, exc) for n in _walk_own_body(fn_node) for exc in [_raise_site_exc(n)] if exc]
+            + _reraise_sites(fn_node))
 
 
 def _escapes(fn_facts, parents):
@@ -626,7 +659,7 @@ def analyze(source, classes=()):
                                      ' this function' % '/'.join(blocking))
             continue
         try:
-            info = {}
+            info = {'_mixed_clone': True}
             pyfunc.to_c(defs_src, entry=name, sig=_scalar_sig(f.params), info=info)
         except Unsupported as e:
             report.rejected[name] = (REASON_TO_C_REFUSED, str(e)[:160])

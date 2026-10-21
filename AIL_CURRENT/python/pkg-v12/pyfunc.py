@@ -43,9 +43,12 @@ import sqllower
 import pathlower
 import proclib
 import urllower
+import hashlower
 import threadlib
 import iterlower
+import typedforms
 import tryhoist
+import unbound
 import stdlib3
 import stdlib4
 import float64_fusion
@@ -1242,6 +1245,8 @@ def _etype(node, ctx):
             return FLT
         if isinstance(node.slice, ast.Slice) and _is_bytes_expr(node.value, ctx):
             return BYTES
+        if _is_slist_slice(node, ctx):
+            return SLIST
         if (isinstance(node.value, ast.Name) and node.value.id in ctx.rowof
                 and ctx.rowof[node.value.id] in ctx.trowsf):
             # `p[j]` where `p` is a row variable over a FLOAT-uniform tuple list -- reads a
@@ -1359,6 +1364,8 @@ def _etype(node, ctx):
         if f == 'jscharat':
             return STR
         if _is_int_hex_call(node, ctx):
+            return STR
+        if f in _STR_BUILTINS and _is_builtin_name(f, ctx):
             return STR
         if f == 'float':
             return FLT
@@ -5180,6 +5187,15 @@ def _seq(node, ctx):
         temporary, value = _numeric_field_value(node, field_kind, ctx)
         ctx.pre.append('(void)%s;' % value)
         return '%s.p' % temporary, '%s.n' % temporary
+    repeat = _list_repeat_parts(node)
+    if repeat is not None:
+        # `for x in [0] * n` / `[1] + [0] * n`: CPython builds the repeated list first, and so does
+        # this, into a temp the walk reads (int elements only)
+        kinds = {_etype(element, ctx) for element in repeat[0]}
+        if kinds == {INT} and not any(_is_handle_producing(e, ctx) for e in repeat[0]):
+            temporary, value = _list_repeat_value(node, LIST, ctx)
+            ctx.pre.append('(void)%s;' % value)
+            return '%s.p' % temporary, '%s.n' % temporary
     raise Unsupported(_bind_first(node))
 
 
@@ -6037,6 +6053,60 @@ def _is_str_lower_call(node, ctx):
             and _is_str_expr(node.func.value, ctx))
 
 
+def _is_str_casefold_call(node, ctx):
+    """`s.casefold()`, no arguments: CPython's full case folding (the CASEFOLD table, generated
+    from CPython 3.12 by tools/gen_casemap.py)."""
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == 'casefold' and not node.args and not node.keywords
+            and _is_str_expr(node.func.value, ctx))
+
+
+def _is_str_pad_call(node, ctx):
+    """`s.ljust(w)` / `s.rjust(w)` / `s.center(w)`, optionally with a one-character str literal fill
+    (`s.ljust(w, ".")`): positional arguments only. A fill that is not a one-character literal is
+    left to the general path (CPython raises TypeError for a fill of any other length)."""
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr in ('ljust', 'rjust', 'center') and not node.keywords
+            and 1 <= len(node.args) <= 2 and not any(isinstance(a, ast.Starred) for a in node.args)):
+        return False
+    if len(node.args) == 2 and _pad_fill(node.args[1], ctx) is None:
+        return False
+    return _is_str_expr(node.func.value, ctx)
+
+
+def _pad_fill(node, ctx):
+    """The fill character of a pad call: a one-character str literal, or a module constant bound to
+    one (`FILL = "_"`); None otherwise."""
+    if _is_strlit(node):
+        return node.value if len(node.value) == 1 else None
+    if (isinstance(node, ast.Name) and node.id not in ctx.types and node.id not in ctx.kind
+            and dict.__contains__(getattr(ctx, 'modconsts', {}), node.id)):
+        entry = ctx.modconsts[node.id]
+        if (isinstance(entry, tuple) and len(entry) == 2 and entry[0] == STR
+                and isinstance(entry[1], str) and len(entry[1]) == 1):
+            return entry[1]
+    return None
+
+
+def _str_pad_value(node, ctx):
+    """CPython's pad (unicodeobject.c `pad`): no change when the width is not wider than the text;
+    center puts the odd extra column on the left exactly when the margin and the width are both
+    odd (`left = marg / 2 + (marg & width & 1)`). The receiver is evaluated before the width."""
+    if _etype(node.args[0], ctx) != INT or _is_handle_producing(node.args[0], ctx):
+        raise Unsupported('str.%s() needs an int width' % node.func.attr)
+    fill = _pad_fill(node.args[1], ctx) if len(node.args) == 2 else ' '
+    data = fill.encode('utf-8')
+    literal = '"%s"' % ''.join('\\x%02x' % b for b in data)
+    recv, _ = ctx.temp(STR)
+    width, _ = ctx.temp(INT)
+    ctx.pre.append('%s = %s;' % (recv, _map_inline(lambda: _str_value(node.func.value, ctx), ctx)))
+    ctx.pre.append('%s = %s;' % (width, _map_inline(lambda: _expr(node.args[0], ctx), ctx)))
+    ctx.parts.update(('STR', 'STRPAD'))
+    return 'ail_str_pad(&%s, %s, %s, (const uint8_t *)%s, %d, %d)' % (
+        ctx.sarena(), recv, width, literal, len(data),
+        {'ljust': 0, 'rjust': 1, 'center': 2}[node.func.attr])
+
+
 def _is_str_upper_call(node, ctx):
     """`s.upper()`, no arguments -- AIL_TASK_p3idioms_20260916.md idiom 7, the mirror image of
     `_is_str_lower_call` just above: ASCII-only case mapping (`ail_str_upper`, cruntime.py's STR
@@ -6366,11 +6436,20 @@ def _is_slist_expr(node, ctx):
                 and not all(_is_empty_list_lit(value) for value in branches))
     if (isinstance(node, ast.ListComp) and node.generators
             and not _is_sys_stdin_bare(node.generators[0].iter)):
-        return _listcomp_kind(node, ctx) == SLIST
+        try:
+            return _listcomp_kind(node, ctx) == SLIST
+        except Unsupported as unknown:
+            # a pre-pass asks before the comprehension's source has a kind (`" ".join([f(w) for w
+            # in words])` ahead of `words = line.split()` being typed): not known to be one yet
+            if 'is read before it is assigned' in str(unknown):
+                return False
+            raise
     if isinstance(node, ast.Attribute) and _field_kind(node, ctx) == SLIST:
         return True
     if (isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice)
             and isinstance(node.value, ast.Attribute) and _field_kind(node.value, ctx) == SLIST):
+        return True
+    if _is_slist_slice(node, ctx):
         return True
     if (_is_map_snapshot(node, ctx, 'keys') and _map_kind(node.func.value, ctx) not in INT_KEYED
             or _is_map_snapshot(node, ctx, 'values') and _mvk(_map_kind(node.func.value, ctx)) == STR):
@@ -6401,11 +6480,120 @@ def _is_slist_expr(node, ctx):
     return False
 
 
+def _is_slist_slice(node, ctx):
+    """`xs[a:b]` / `xs[a:b:c]` where `xs` is a bound list-of-str local or an inline `.split()` /
+    `.splitlines()` call: a new list of str (CPython copies the selected references)."""
+    if not (isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice)):
+        return False
+    source = node.value
+    if isinstance(source, ast.Name):
+        try:
+            return ctx.type_of(source.id) == SLIST
+        except Unsupported:
+            return False
+    return _is_slist_call(source, ctx) or _is_slist_slice(source, ctx)
+
+
+def _slist_slice_c(node, ctx):
+    """The spine of `xs[a:b:c]` over a list of str, built into a fresh temp: the views the slice
+    selects, with CPython's own slice.indices clamping for either sign of a literal step. A bound
+    name is read after the bounds (reading a name has no effect of its own, and a bound that
+    mutates the list, `xs[:xs.pop()]`, must see the list after the mutation, as CPython does); an
+    inline `.split()` is evaluated first, before the bounds, in CPython's order."""
+    step = _literal_slice_step(node.slice.step)
+    ctx.parts.add('SLIST')
+    if isinstance(node.value, ast.Name):
+        source = None
+    elif _is_slist_slice(node.value, ctx):
+        source = _slist_slice_c(node.value, ctx)
+    else:
+        source = _slist_call_temp(node.value, ctx)
+    bounds = []
+    for bound in (node.slice.lower, node.slice.upper):
+        if bound is None:
+            bounds.append(None)
+            continue
+        if _etype(bound, ctx) != INT or _is_handle_producing(bound, ctx):
+            raise Unsupported('a slice bound of a list of str must be an int')
+        temp, _ = ctx.temp(INT)
+        ctx.pre.append('%s = %s;' % (temp, _map_inline(lambda: _expr(bound, ctx), ctx)))
+        bounds.append(temp)
+    if source is None:
+        source = ctx.cname(node.value.id)
+    result, _ = ctx.temp(SLIST)
+    if step > 0:
+        lo = bounds[0] or '0'
+        hi = bounds[1] or '_n'
+        clamp = ('if (_lo < 0) { _lo += _n; if (_lo < 0) _lo = 0; } else if (_lo > _n) _lo = _n; '
+                 'if (_hi < 0) { _hi += _n; if (_hi < 0) _hi = 0; } else if (_hi > _n) _hi = _n; '
+                 'for (int64_t _i = _lo; _i < _hi; _i += %d) ' % step)
+    else:
+        lo = bounds[0] or '_n - 1'
+        hi = bounds[1] or '-_n - 1'
+        clamp = ('if (_lo < 0) { _lo += _n; if (_lo < -1) _lo = -1; } else if (_lo > _n - 1) _lo = _n - 1; '
+                 'if (_hi < 0) { _hi += _n; if (_hi < -1) _hi = -1; } else if (_hi > _n - 1) _hi = _n - 1; '
+                 'for (int64_t _i = _lo; _i > _hi; _i -= %d) ' % -step)
+    ctx.pre.append('{ const ail_slist *_src = &%s; int64_t _n = _src->n; int64_t _lo = %s; '
+                   'int64_t _hi = %s; ail_slist_clear(&%s); %sail_slist_push(&%s, _src->p[_i]); }'
+                   % (source, lo, hi, result, clamp, result))
+    return result
+
+
+def _literal_slice_step(step):
+    """The step of a slice this file copies (1 when absent); a step that is not an int literal, or
+    is 0 (CPython raises ValueError), is refused by name."""
+    if step is None:
+        return 1
+    value = _slice_step_literal(step)
+    if value == 0:
+        if isinstance(step, ast.Constant) and isinstance(step.value, int) and not isinstance(step.value, bool):
+            raise Unsupported('a slice step of 0; CPython raises ValueError -- the general path '
+                              'reports it catchably')
+        raise Unsupported('a slice step that is not an int literal; write the step as a number '
+                          '(xs[::2], xs[::-1])')
+    return value
+
+
+def _stepped_slice_temp(node, ctx):
+    """`xs[a:b:c]` iterated (a `for`, a comprehension, sum(), ...) with a literal step: CPython
+    copies the slice first, so this copies it too, into a fresh temp, and the walk reads the copy.
+    For a list of str or a plain list of int bound to a name; None for anything else (the caller
+    refuses it as before)."""
+    if _is_slist_slice(node, ctx):
+        return _slist_slice_c(node, ctx)
+    source = node.value
+    if not (isinstance(source, ast.Name) and ctx.type_of(source.id) == LIST
+            and all(source.id not in group for group in (
+                ctx.tstride, ctx.rowof, ctx.nlist, ctx.blist, ctx.strlist, ctx.srowtypes,
+                ctx.handles, ctx.rowparam))):
+        return None
+    step = _literal_slice_step(node.slice.step)
+    bounds = []
+    for bound in (node.slice.lower, node.slice.upper):
+        if bound is None:
+            bounds.append(None)
+            continue
+        _need_int(bound, ctx, 'a slice bound')
+        temp, _ = ctx.temp(INT)
+        ctx.pre.append('%s = %s;' % (temp, _map_inline(lambda: _expr(bound, ctx), ctx)))
+        bounds.append(temp)
+    ctx.parts.add('LIST')
+    src = ctx.cname(source.id)
+    result, _ = ctx.temp(LIST)
+    lo = bounds[0] or ('0' if step > 0 else '%s.n - 1' % src)
+    hi = bounds[1] or ('%s.n' % src if step > 0 else '0 - %s.n - 1' % src)
+    ctx.pre.append('ail_list_clear(&%s); ail_list_slice_into(&%s, &%s, %s, %s, %d);'
+                   % (result, result, src, lo, hi, step))
+    return result
+
+
 def _slist_arg_c(node, ctx):
     """The C `ail_slist` VALUE a node already proven `_is_slist_expr` denotes -- either an
     existing local's own struct, or an inline call built into a temp (`_slist_call_temp`)."""
     if isinstance(node, ast.Name):
         return ctx.cname(node.id)
+    if _is_slist_slice(node, ctx):
+        return _slist_slice_c(node, ctx)
     if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
             and node.func.id == 'sorted' and node.func.id not in ctx.funcs
             and node.func.id not in ctx.classes and _is_slist_expr(node, ctx)):
@@ -6758,7 +6946,9 @@ def _is_join_call_slist_arg_ok(node, ctx, slist_names):
             and node.func.attr == 'join' and not node.keywords and len(node.args) == 1
             and _is_str_expr(node.func.value, ctx)
             and (_is_slist_call(node.args[0], ctx)
-                 or (isinstance(node.args[0], ast.Name) and node.args[0].id in slist_names)))
+                 or (isinstance(node.args[0], ast.Name) and node.args[0].id in slist_names)
+                 # a str's join returns a str whatever the comprehension holds (or raises)
+                 or isinstance(node.args[0], ast.ListComp)))
 
 
 def _is_named_slist_index(node, slist_names):
@@ -6844,9 +7034,20 @@ def _is_chr_call(node, ctx):
 
 
 def _is_int_hex_call(node, ctx):
+    """hex(n), bin(n) or oct(n) of an int (the name is the builtin: no def, class or variable of that name)."""
     return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-            and node.func.id == 'hex' and 'hex' not in ctx.funcs and 'hex' not in ctx.classes
-            and all('hex' not in getattr(ctx, attr, {}) for attr in ('kind', 'types', 'modconsts')))
+            and node.func.id in _INT_RADIX_CALLS and _is_builtin_name(node.func.id, ctx))
+
+
+# the builtins that give a str (bin/oct/hex are built here; format and ascii are refused by name later, but their
+# type is a str, so a `b: str = bin(n)` is not reported as "assigning int" -- DIFFERENCES C73)
+_INT_RADIX_CALLS = {'hex': ('ail_int_hex', 'HEXINT'), 'bin': ('ail_int_bin', 'HEXINT'), 'oct': ('ail_int_oct', 'HEXINT')}
+_STR_BUILTINS = frozenset(('format', 'ascii'))
+
+
+def _is_builtin_name(name, ctx):
+    return (name not in ctx.funcs and name not in ctx.classes
+            and all(name not in getattr(ctx, attr, {}) for attr in ('kind', 'types', 'modconsts')))
 
 
 def _is_hex_call(node, ctx):
@@ -6989,6 +7190,7 @@ def _is_str_expr(node, ctx):
     if _is_int_hex_call(node, ctx) or _is_chr_call(node, ctx) or _is_hex_call(node, ctx) or _is_owned_str_call(node, ctx) or _is_strlit(node) or _is_str_call(node, ctx) or _is_sys_stdin_call(node) \
             or _is_input_call(node) or _is_str_strip_call(node, ctx) \
             or _is_str_lower_call(node, ctx) or _is_str_upper_call(node, ctx) \
+            or _is_str_pad_call(node, ctx) or _is_str_casefold_call(node, ctx) \
             or _is_str_join_call(node, ctx) or _is_str_replace_call(node, ctx) \
             or _is_open_read_call(node) \
             or _is_sys_argv_index(node) or _is_utf8_codec_call(node, ctx, 'decode'):
@@ -7098,7 +7300,7 @@ def _fileprim_value(node, ctx):
                                           args=node.args, keywords=[]), node)
         name = specific
         ret, kinds = filelib.PRIMS[name]
-    ctx.parts.add({'proc': 'PROCIO', 'path': 'PATHIO', 'file': 'FILEIO', 'sql': 'SQLIO', 'http': 'HTTPIO', 'url': 'URLIO'}[filelib.prim_kind(name)])
+    ctx.parts.add({'proc': 'PROCIO', 'path': 'PATHIO', 'file': 'FILEIO', 'sql': 'SQLIO', 'http': 'HTTPIO', 'url': 'URLIO', 'hash': 'HASHIO'}[filelib.prim_kind(name)])
     ctx.has_try = True
     stages, names = [], []
     for arg, kind in zip(node.args, kinds):
@@ -7201,16 +7403,17 @@ def _str_value(node, ctx, *, owned_join_return=False):
     if _is_smap_value(node, ctx):
         return _map_need(node, ctx) if isinstance(node, ast.Subscript) else _map_method(node, ctx)
     if _is_int_hex_call(node, ctx):
+        radix_call, radix_part = _INT_RADIX_CALLS[node.func.id]
         if node.keywords or len(node.args) != 1:
-            raise Unsupported('hex() requires one positional integer')
+            raise Unsupported('%s() requires one positional integer' % node.func.id)
         if _etype(node.args[0], ctx) != INT or _is_handle_producing(node.args[0], ctx):
-            raise Unsupported('hex() requires an integer')
-        ctx.parts.add('HEXINT')
+            raise Unsupported('%s() requires an integer' % node.func.id)
+        ctx.parts.add(radix_part)
         ctx.has_try = True
         saved, ctx.pre = ctx.pre, []
         try:
             value = _expr(node.args[0], ctx)
-            call = 'ail_int_hex(&%s, %s)' % (ctx.sarena(), value)
+            call = '%s(&%s, %s)' % (radix_call, ctx.sarena(), value)
             return '({ %s %s; })' % (' '.join(ctx.pre), call) if ctx.pre else call
         finally:
             ctx.pre = saved
@@ -7431,6 +7634,12 @@ def _str_value(node, ctx, *, owned_join_return=False):
         recv = _str_value(node.func.value, ctx)
         ctx.parts.update(('STR', 'CASEMAP'))
         return 'ail_str_upper(&%s, %s)' % (ctx.sarena(), recv)
+    if _is_str_pad_call(node, ctx):
+        return _str_pad_value(node, ctx)
+    if _is_str_casefold_call(node, ctx):
+        recv = _str_value(node.func.value, ctx)
+        ctx.parts.update(('STR', 'CASEMAP', 'CASEFOLD'))
+        return 'ail_str_casefold(&%s, %s)' % (ctx.sarena(), recv)
     if _is_str_join_call(node, ctx):
         streamed = _owned_callback_join(node, ctx)
         if streamed is not None:
@@ -7444,7 +7653,8 @@ def _str_value(node, ctx, *, owned_join_return=False):
                 value = _str_value(node.func.value, ctx)
                 steps = [*ctx.pre, '%s = %s;' % (separator, value)]
                 ctx.pre = []
-                if isinstance(node.args[0], ast.Name) or _is_slist_call(node.args[0], ctx):
+                if (isinstance(node.args[0], ast.Name) or _is_slist_call(node.args[0], ctx)
+                        or _is_slist_slice(node.args[0], ctx)):
                     source = _slist_arg_c(node.args[0], ctx)
                 else:
                     source = _expr(node.args[0], ctx)
@@ -7461,7 +7671,8 @@ def _str_value(node, ctx, *, owned_join_return=False):
                 value = _str_value(node.func.value, ctx)
                 steps = [*ctx.pre, '%s = %s;' % (separator, value)]
                 ctx.pre = []
-                source = _expr(node.args[0], ctx)
+                source = (_slist_arg_c(node.args[0], ctx) if _is_slist_slice(node.args[0], ctx)
+                          else _expr(node.args[0], ctx))
                 steps.extend(ctx.pre)
                 ctx.parts.update(('STR', 'SLIST'))
                 return '({ %s ail_str_join(&%s, %s, %s); })' % (
@@ -7921,6 +8132,39 @@ def _concat_chain(parts_c, ctx):
     return '(' + ', '.join([*stages, call]) + ')'
 
 
+_LIST_TEXT_KINDS = (LIST, 'array', FLIST, SLIST)
+
+
+def _list_text_ok(val, kind, ctx):
+    """Whether `val` (of `kind`) is a flat list of ints, floats or strs whose str() / repr() --
+    what `print(xs)` and `f"{xs}"` show -- `_list_text` builds. Not a list of bools (CPython shows
+    True/False, the list holds 0/1) and not a list of lists (its elements are handles)."""
+    if kind not in _LIST_TEXT_KINDS or _seq_yields_handles(val, ctx):
+        return False
+    probe = ast.Subscript(value=val, slice=ast.Constant(value=0), ctx=ast.Load())
+    return not _is_bool_expr(probe, ctx)
+
+
+def _list_text(val, kind, ctx):
+    """The C str for str(xs) of a flat list: CPython's list repr, the elements' reprs joined by
+    ", " in brackets -- `[1, -2]`, `[0.1, inf]`, `['a', "b'c"]` (cruntime.py's LISTTEXT)."""
+    ctx.parts.update(('STR', 'FMT', 'STRREPR', 'LISTTEXT'))
+    ctx.needs_sarena = True
+    if kind == SLIST:
+        ctx.parts.add('SLIST')
+        # a view of the list (not an owned temp: the list keeps its own spine)
+        return '({ ail_slist _lt = %s; ail_list_text_s(&%s, _lt.p, _lt.n); })' % (
+            _slist_arg_c(val, ctx), ctx.sarena())
+    suffix = 'f' if kind == FLIST else 'i'
+    if _is_list_call(val, ctx) or _is_flist_call(val, ctx):
+        # a function's result: an owned temporary of this function, freed with the others
+        value = _list_call_value(val, ctx)[0]
+        return '({ ail_%s _lt = %s; ail_list_text_%s(&%s, _lt.p, _lt.n); })' % (
+            'flist' if kind == FLIST else 'list', value, suffix, ctx.sarena())
+    p, n = _seq(val, ctx)
+    return 'ail_list_text_%s(&%s, %s, %s)' % (suffix, ctx.sarena(), p, n)
+
+
 def _repr_conv(val, kind, ctx):
     """The C str for `{val!r}`: repr() of a str (quotes, escapes), and for an int or float, which
     repr and str spell the same, the default conversion."""
@@ -7949,6 +8193,8 @@ def _fstring_field(fv, ctx):
         ctx.needs_sarena = True
         cell, _ = ctx.temp(BYTES)
         return '(%s = %s, ail__bytes_repr(&%s, %s.p, %s.n))' % (cell, _bytes_value(val, ctx), ctx.sarena(), cell, cell)
+    if fv.format_spec is None and _list_text_ok(val, kind, ctx):
+        return _list_text(val, kind, ctx)
     if kind not in (INT, FLT, STR):
         raise Unsupported('an f-string field of type %s; only an int, float or str expression '
                           'is built inside {}' % kind)
@@ -10511,6 +10757,12 @@ def _iter_plan(node, ctx):
             pre.extend(ctx.pre); ctx.pre = []
             pre.append('(void)%s;' % expression)
             return '0', '%s.n' % c, '%s.p[@]' % c, pre
+    if (isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice)
+            and node.slice.step is not None):
+        stepped = _stepped_slice_temp(node, ctx)
+        if stepped is not None:
+            pre.extend(ctx.pre); ctx.pre = []
+            return '0', '%s.n' % stepped, '%s.p[@]' % stepped, pre
     if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
         # `sorted(xs)[1:-1]` -- the bounds move and nothing is copied, which is what iterating a
         # slice costs here and is not what it costs in Python
@@ -12074,7 +12326,7 @@ def _set_method(node, ctx, *, as_stmt=False):
             return _map_field_method(node, ctx, as_stmt=as_stmt)
         return _set_pop(kind, _map_mutable(node.func.value, ctx), ctx)
     if method == 'pop':
-        raise Unsupported('set.pop() takes no argument (it removes the newest element); '
+        raise Unsupported('set.pop() takes no argument (it removes the first element); '
                           'remove a given one with s.remove(x) or s.discard(x)')
     if method not in ('add', 'discard', 'remove', 'clear', 'update') or len(args) != (method != 'clear'):
         raise Unsupported('%s.%s() is unsupported or has wrong arguments; a typed set has add(x), '
@@ -12295,6 +12547,81 @@ def _numeric_compare(node,ctx):
  _nb_ok=(%s);_nb_left=_nb_right;
 }'''.replace('_ail_nb_value',_numeric_value_type(ctx)) % (right,check))
     return '({ '+' '.join(steps)+' _nb_ok; })'
+def _small_int_identity(op, left, right, ctx):
+    """C text of `left is right` / `is not` when one side is an int literal of -5..256 (CPython caches those ints) and the other
+    is a bool or a float (never that object: False, the operand still evaluated) or an int (`==`); None for any other operand."""
+    if not isinstance(op, (ast.Is, ast.IsNot)):
+        return None
+    import numidentity
+    if numidentity.small_int(left) is not None:
+        other = right
+    elif numidentity.small_int(right) is not None:
+        other = left
+    else:
+        return None
+    if _etype(other, ctx) == FLT or _etype(other, ctx) == INT and _is_bool_expr(other, ctx):
+        return '((void)(%s), %d)' % (_expr(other, ctx), 1 if isinstance(op, ast.IsNot) else 0)
+    if _etype(other, ctx) == INT:
+        # an int operand is the cached object exactly when it is equal
+        return '(%s %s %s)' % (_expr(left, ctx), '==' if isinstance(op, ast.Is) else '!=', _expr(right, ctx))
+    return None
+
+
+def _singleton_identity(op, left, right, ctx):
+    """C text of `x is True` / `is False` / `is None` (and `is not`) when `x` is an int, a float or a bool of the typed path (DIFFERENCES
+    C115-silent2-1): an int or a float is never the bool singleton and never None (False, the operand still evaluated); a bool is
+    True / False exactly when it is that value, never None. None for any other operand, which stays refused or handled elsewhere."""
+    if not isinstance(op, (ast.Is, ast.IsNot)):
+        return None
+    def single(e):
+        return isinstance(e, ast.Constant) and (e.value is None or type(e.value) is bool)
+    if single(right) and not single(left):
+        other, const = left, right.value
+    elif single(left) and not single(right):
+        other, const = right, left.value
+    else:
+        return None
+    if isinstance(other, ast.Name) and other.id in ctx.optional:
+        return None
+    kind = _etype(other, ctx)
+    if kind != FLT and kind != INT:
+        return None
+    isnot = isinstance(op, ast.IsNot)
+    if kind == INT and _is_bool_expr(other, ctx) and const is not None:
+        return '((%s) %s 0)' % (_expr(other, ctx), '!=' if (const is True) != isnot else '==')
+    return '((void)(%s), %d)' % (_expr(other, ctx), 1 if isnot else 0)
+
+
+def _nan_stop(op, what='the searched value'):
+    """C text of the run-time stop for a NaN argument of a typed float search (DIFFERENCES C119). CPython finds a NaN
+    only as the same object; an unboxed double has no identity, so the typed answer is exact for every other argument
+    (identity cannot change a non-NaN `==`) and a NaN argument stops here, by name, once per call."""
+    return ('ail_die("NaN searched with %s: CPython matches a NaN only as the same object and an unboxed double cannot '
+            'keep that identity (DIFFERENCES C119); use math.isnan");' % op)
+
+
+def _member_nan_applies(node, ctx):
+    """Whether a lowered `$v = <argument>` statement searches a list of floats with a float (the C119 check applies)."""
+    op, receiver = node._ail_member_check
+    target = node.targets[0]
+    probe = ast.Compare(left=ast.Subscript(value=receiver, slice=ast.Constant(0), ctx=ast.Load()), ops=[ast.Eq()],
+                        comparators=[ast.Name(id=target.id, ctx=ast.Load())])
+    ast.copy_location(probe, node)
+    ast.fix_missing_locations(probe)
+    for sub in ast.walk(probe):
+        sub._ail_synth = True
+    return all(_etype(value, ctx) == FLT for value in (probe.left, *probe.comparators))
+
+
+def _member_nan_check(node, ctx, ind):
+    """After the `$v = <argument>` statement of a lowered count / index / remove, a float list gets one `v != v` test
+    (outside the element loop, which is unchanged)."""
+    if not _member_nan_applies(node, ctx):
+        return ''
+    name = _expr(ast.Name(id=node.targets[0].id, ctx=ast.Load()), ctx)
+    return '%sif (%s != %s) { %s }\n' % ('    ' * ind, name, name, _nan_stop(node._ail_member_check[0]))
+
+
 def _expr(node, ctx):
     if dunders.is_exc_code(node):
         return '((int64_t)ail_handled_code)'   # the code of the exception being handled (dunders.py)
@@ -13053,6 +13380,8 @@ def _expr(node, ctx):
                 parts.append('(%s %s %s)' % (_null_test_pointer(left, ctx),
                                              '==' if isinstance(op, ast.Is) else '!=',
                                              _null_test_pointer(right, ctx)))
+            elif (_single := _singleton_identity(op, left, right, ctx)) is not None:
+                parts.append(_single)
             elif isinstance(op, (ast.Is, ast.IsNot)) and isinstance(right, ast.Constant) \
                     and right.value is None:
                 if not (isinstance(left, ast.Name) and left.id in ctx.optional):
@@ -13061,6 +13390,9 @@ def _expr(node, ctx):
                                             '==' if isinstance(op, ast.Is) else '!='))
             elif isinstance(op, (ast.In, ast.NotIn)):
                 parts.append(_contains(left, right, ctx, isinstance(op, ast.NotIn)))
+            elif _small_int_identity(op, left, right, ctx) is not None:
+                # `x is 0` (DIFFERENCES C115): CPython caches -5..256, so against an int it is `==`, and a bool or a float is never it
+                parts.append(_small_int_identity(op, left, right, ctx))
             elif type(op) in CMPOP:
                 if _etype(left, ctx) == BLIST or _etype(right, ctx) == BLIST:
                     if type(op) not in (ast.Eq, ast.NotEq):
@@ -13202,8 +13534,9 @@ def _field_list_count(node, ctx):
     capture, owner = _owner_capture(field.value, owner_kind, ctx)
     ctype, value = _field_list_item(node.args[0], kind, ctx, 'count()')
     ctx.parts.add(kind.upper() + 'COUNT')
-    return '({ %s; %s _item = %s; ail_%s_count(&%s->f_%s, _item); })' % (
-        capture, ctype, value, 'pslist' if kind == SLIST else kind, owner, field.attr)
+    return '({ %s; %s _item = %s; %sail_%s_count(&%s->f_%s, _item); })' % (
+        capture, ctype, value, ('if (_item != _item) { %s } ' % _nan_stop('list.count')) if kind == FLIST else '',
+        'pslist' if kind == SLIST else kind, owner, field.attr)
 
 
 def _contains(item, holder, ctx, negate):
@@ -13211,9 +13544,9 @@ def _contains(item, holder, ctx, negate):
         holder = holder.func.value                       # `k in d.keys()` is `k in d`
     if _is_map_snapshot(holder, ctx, 'values') and _mvk(_map_kind(holder.func.value, ctx)) == FLT:
         value, source = _map_value(item, ctx, FDICT), _map_snapshot(holder, ctx, FLIST)
-        return ('({ double _value = %s; ail_flist _values = %s; int _found = 0; '
+        return ('({ double _value = %s; ail_flist _values = %s; int _found = 0; if (_value != _value) { %s } '
                 'for (int64_t _i = 0; _i < _values.n; ++_i) if (_values.p[_i] == _value) { _found = 1; break; } '
-                '%s_found; })') % (value, source, '!' if negate else '')
+                '%s_found; })') % (value, source, _nan_stop('x in d.values()'), '!' if negate else '')
     if (_is_map_snapshot(holder, ctx, 'keys') or _is_map_snapshot(holder, ctx, 'values')
             and _mvk(_map_kind(holder.func.value, ctx)) == STR):
         value, source = _map_key(item, ctx, SDICT), _map_snapshot(holder, ctx, SLIST)
@@ -16105,10 +16438,17 @@ def _call(node, ctx):
             p, q = '_mx%d' % ctx.tmp, '_my%d' % ctx.tmp
             ta = 'double' if _etype(a[0], ctx) == FLT else 'int64_t'
             tb = 'double' if _etype(a[1], ctx) == FLT else 'int64_t'
+            if FLT in (_etype(a[0], ctx), _etype(a[1], ctx)):
+                # CPython keeps the first argument unless the second is smaller (larger): NaN stays first (silent6)
+                return ('({ %s %s = %s; %s %s = %s; (%s %s %s ? %s : %s); })'
+                        % (ta, p, rec(a[0]), tb, q, rec(a[1]), q,
+                           '<' if f == 'min' else '>', p, q, p))
             return ('({ %s %s = %s; %s %s = %s; (%s %s %s ? %s : %s); })'
                     % (ta, p, rec(a[0]), tb, q, rec(a[1]), p,
                        '<' if f == 'min' else '>', q, p, q))
         x, y = rec(a[0]), rec(a[1])
+        if FLT in (_etype(a[0], ctx), _etype(a[1], ctx)):
+            return '((%s) %s (%s) ? (%s) : (%s))' % (y, '<' if f == 'min' else '>', x, y, x)
         return '((%s) %s (%s) ? (%s) : (%s))' % (x, '<' if f == 'min' else '>', y, x, y)
     if f == 'abs' and len(a) == 1:
         inner = rec(a[0])
@@ -16893,8 +17233,11 @@ def _pair_plan(src, ctx):
     own docstring for the identical bug this mirrors, and `_inline_pair_fold` for the fix).
     """
     if isinstance(src, ast.Call) and isinstance(src.func, ast.Name) and src.func.id == 'enumerate':
-        if len(src.args) != 1:
-            raise Unsupported('enumerate() with %d arguments' % len(src.args))
+        if len(src.args) != 1 or src.keywords:
+            # `enumerate(xs, start=1)` inside a comprehension or a fold: refused by name (the
+            # index counted from 0 here, whatever the start said)
+            raise Unsupported('enumerate() with a start inside a comprehension or a fold; write '
+                              'the loop out, or add the start to the index')
         lo, n, elem, pre = _iter_plan(src.args[0], ctx)
         # `enumerate`'s index counts from zero -- always, regardless of where the underlying
         # sequence itself starts. For most shapes (an array, a list, a range with no start) `lo` is
@@ -17991,6 +18334,9 @@ def _owned_callback_join(node, ctx):
     params, result = callable_types.unpack(kind)
     if result != STR or len(params) != 1 or params[0] not in (INT, FLT, STR):
         return None
+    if (call.func.id not in ctx.kind and call.func.id not in ctx.types
+            and call.func.id in ctx.funcs and call.func.id not in getattr(ctx, 'owned_str_fns', ())):
+        return None     # no owned-return entry to stream through: built the ordinary way below
     # Predicates with allocations, container aliases or nested scopes retain the normal path.
     if any(isinstance(n, (ast.Call, ast.Subscript, ast.Attribute, ast.NamedExpr,
                           ast.ListComp, ast.GeneratorExp, ast.Lambda))
@@ -19042,9 +19388,81 @@ def _bytes_local_releasable(name, ctx):
     return stores == 1
 
 
+_DEBUG_LINE_MAPS = {}
+
+
+_REWRITE_LINES = {}
+
+
+def debug_snapshot_lines(tree):
+    """`--debug`: pyc's script rewrite unparses its tree, and the text parsed again numbers its lines afresh
+    (one blank line between functions, a synthesised `def`), so a `#line` taken from it would be wrong from
+    the second function on. Before the unparse: the (node type, line, end line) of every node of the tree
+    (None for a node the rewrite made up). None outside --debug."""
+    if os.environ.get('AIL_DEBUG') != '1':
+        return None
+    return [(type(n).__name__, getattr(n, 'lineno', None), getattr(n, 'end_lineno', None)) for n in ast.walk(tree)]
+
+
+def debug_remember_lines(snapshot, text):
+    """Key the snapshot by the text `ast.unparse` made of the tree (see debug_snapshot_lines)."""
+    if snapshot is not None:
+        _REWRITE_LINES[text] = snapshot
+
+
+def debug_restore_lines(tree, source):
+    """`--debug`: put the lines `debug_remember_lines` kept back on `tree`, the parse of `source`; a node the
+    rewrite made up gets line 0 (no mapping). Skipped when the shapes differ. A no-op outside --debug."""
+    kept = _REWRITE_LINES.get(source) if os.environ.get('AIL_DEBUG') == '1' else None
+    nodes = list(ast.walk(tree)) if kept else ()
+    if not kept or [type(n).__name__ for n in nodes] != [k[0] for k in kept]:
+        return
+    for node, (_, line, end) in zip(nodes, kept):
+        if hasattr(node, 'lineno'):
+            node.lineno = line or 0
+            node.end_lineno = end or 0
+
+
+def _debug_where(node):
+    """`ail build --debug` (AIL_DEBUG=1 and AIL_LINE_MAP=<json {combined line: [path, line]}>): the (file name,
+    line) a statement maps back to, or None (always, and no file is read, in every other build)."""
+    if os.environ.get('AIL_DEBUG') != '1':
+        return None
+    path = os.environ.get('AIL_LINE_MAP')
+    if not path:
+        return None
+    table = _DEBUG_LINE_MAPS.get(path)
+    if table is None:
+        try:
+            with open(path, encoding='utf-8') as handle:
+                table = {int(key): tuple(value) for key, value in json.load(handle).items()}
+        except (OSError, ValueError):
+            table = {}
+        _DEBUG_LINE_MAPS[path] = table
+    where = table.get(getattr(node, 'lineno', None))
+    if not where:
+        return None
+    return str(where[0]).replace(chr(92), '/').replace('"', chr(92) + '"'), where[1]
+
+
+def _debug_site(node, ind):
+    """The C lines that point gdb at the source line of a statement (`#line`) and record it for the
+    uncaught-exception report (AIL_DBG_SITE). Empty in every build but `--debug`. The IR emitter
+    (ir/emit_c.py) writes the same two lines from `_debug_where`."""
+    where = _debug_where(node)
+    if not where:
+        return ''
+    name, line = where
+    # a directive numbers the line AFTER it: one before the site store, one before the statement's first C line
+    return '#line %d "%s"\n%sAIL_DBG_SITE("%s:%d");\n#line %d "%s"\n' % (line, name, '    ' * ind, name, line, line, name)
+
+
 def _stmts(body, ctx, ind):
     emitted, index = [], 0
     while index < len(body):
+        site = _debug_site(body[index], ind)
+        if site:
+            emitted.append(site)
         proof = (float64_fusion.candidate(body, index, ctx.fn_node, ctx.float64_pipelines)
                  if getattr(ctx, 'float64_pipelines', None) else None)
         fused = _emit_float64_pipeline(proof, ctx, ind) if proof else None
@@ -19125,6 +19543,13 @@ def _loop_stmts(body, ctx, ind):
 
 
 def _stmt(node, ctx, ind):
+    if getattr(node, '_ail_member_check', None) and not getattr(node, '_ail_member_done', False):
+        node._ail_member_done = True
+        try:
+            emitted = _stmt(node, ctx, ind)
+        finally:
+            node._ail_member_done = False
+        return emitted + _member_nan_check(node, ctx, ind)
     if (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
             and node.targets[0].id in ctx.optional
             and not (isinstance(node.value, ast.Constant) and node.value.value is None)):
@@ -21034,6 +21459,10 @@ def _stmt_inner(node, ctx, ind):
                                   'discarded open() leaves a file object nothing here can hold, '
                                   'so beyond that one read there is still no file or socket '
                                   'capability, and the host keeps that boundary')
+            if (isinstance(v.func, ast.Name) and v.func.id == '_ail_nan_stop' and len(v.args) == 1
+                    and isinstance(v.args[0], ast.Constant) and isinstance(v.args[0].value, str)):
+                # NaN argument of a search of a typed float deque (collib.py dq_subs): stops by name, as the float list does (C119)
+                return '%s%s\n' % (pad, _nan_stop(v.args[0].value))
             if _is_sys_exit_call(v):
                 # F3's sibling for the PROCESS exit status (scope item 3): `sys.exit(n)` is a
                 # two-door name exactly like `print` above -- it never returns a value CPython
@@ -21524,6 +21953,8 @@ def _print_stmt(node, ctx, pad):
         elif t == EXCEPTION:
             _exc_text_parts(ctx)
             writers.append(('str', stage(STR, 'ail_exc_text(%s, &%s)' % (_exception_value(a0, ctx), ctx.sarena()))))
+        elif _list_text_ok(a0, t, ctx):
+            writers.append(('str', stage(STR, _list_text(a0, t, ctx))))
         else:
             raise Unsupported('print() given a %s, not a number or a str.\n'
                                '  write instead: print an element or a measurement (`print(xs[0])`, '
@@ -24089,6 +24520,8 @@ def _par_for(node, ctx, ind):
         raise Unsupported('parallel for cannot be nested')
     ctx.parts.add('PAR')
     info = node.par
+    if info.get('cap'):
+        ctx.parts.add('PARN')                   # typedpar.py: at most `workers` threads
     first_local = len(ctx.locals)
     ctx.par_depth += 1
     try:
@@ -24099,6 +24532,8 @@ def _par_for(node, ctx, ind):
                                   'writes': ['v_' + n for n in info['writes']],
                                   'fresh': ['v_' + n for n in ctx.locals[first_local:]],
                                   'line': getattr(node, 'lineno', None)}
+    if info.get('cap'):
+        ctx.par_regions[info['k']]['cap'] = 'v_' + info['cap']
     pad = '    ' * ind
     return '%s/*@par:begin:%d*/\n%s%s/*@par:end:%d*/\n' % (pad, info['k'], inner, pad, info['k'])
 
@@ -24131,6 +24566,14 @@ def _par_outline(generated, sig, decls, ctx, cname):
             raise Unsupported('parallel for: internal error, region %d was not recorded' % k)
         where = ' (line %d)' % facts['line'] if facts['line'] else ''
         bad = sorted({h for h in re.findall(r'\b(?:ail|ck)_\w+', text) if h not in _PAR_HELPERS})
+        if facts.get('cap') and 'ail_raise_msg' in bad:
+            bad.remove('ail_raise_msg')     # PARN makes it trap on a worker (cruntime._piece), like ail_die
+        if bad and set(bad) <= {'ail_list', 'ail_flist'}:
+            # only the type names of a borrowed list parameter viewed as a list: `(ail_list){p, n, n}`
+            # (typedpar.py's helpers take their lists that way); any other use stays refused
+            view = r'\(ail_f?list\)\{\((?:const )?(?:int64_t|double) \*\)v_\w+, v_\w+_len, v_\w+_len\}'
+            if not re.search(r'\bail_f?list\b', re.sub(view, '', text)):
+                bad = []
         if bad:
             raise Unsupported('parallel for%s: the body reaches %s, which is not known to be thread-safe; '
                               'a parallel body may only compute int/float values and read or write '
@@ -24175,6 +24618,10 @@ def _par_outline(generated, sig, decls, ctx, cname):
             '        if (%s == %s) ail_die("parallel for: two names refer to one bytearray");\n' % (w, other)
             for w in refs if w in facts['writes'] for other in refs
             if other != w and not (other in facts['writes'] and other < w))
+        if facts.get('cap'):
+            return ('    {\n        static ail_par_site _ps%d;\n        void *_pa%d[] = {%s};\n%s'
+                    '        ail_par_run_n(%s, _pa%d, %s, %s, &_ps%d, %s);\n    }\n'
+                    % (k, k, array, guards, worker, k, facts['lo'], facts['hi'], k, facts['cap']))
         return ('    {\n        static ail_par_site _ps%d;\n        void *_pa%d[] = {%s};\n%s'
                 '        ail_par_run(%s, _pa%d, %s, %s, &_ps%d);\n    }\n'
                 % (k, k, array, guards, worker, k, facts['lo'], facts['hi'], k))
@@ -24739,6 +25186,60 @@ def _for_inner(node, ctx, ind):
     finally:
         if previous == FLT and kind == INT:
             ctx.types[name] = FLT
+def _enumerate_start(call):
+    """The start of `enumerate(xs, s)` / `enumerate(xs, start=s)`, None for `enumerate(xs)`; any
+    other argument shape is refused by name (the index must never silently count from 0)."""
+    if len(call.args) == 1 and not call.keywords:
+        return None
+    if len(call.args) == 2 and not call.keywords and not isinstance(call.args[1], ast.Starred):
+        return call.args[1]
+    if (len(call.args) == 1 and len(call.keywords) == 1 and call.keywords[0].arg == 'start'):
+        return call.keywords[0].value
+    raise Unsupported('enumerate() takes an iterable and an optional start')
+
+
+def _for_enumerate_start(node, it, ctx, ind):
+    """`for i, v in enumerate(xs, start)`: the start is evaluated once, after the iterable (CPython's
+    order), and `i` is start + the position; the walk itself keeps its own counter, so a body that
+    rebinds `i` changes nothing about the next step."""
+    pad = '    ' * ind
+    if not (isinstance(node.target, ast.Tuple) and len(node.target.elts) == 2
+            and all(isinstance(e, ast.Name) for e in node.target.elts)):
+        raise Unsupported('enumerate() without an (i, v) target')
+    source, start = it.args[0], _enumerate_start(it)
+    if _is_slist_expr(source, ctx):
+        kind = STR
+    elif isinstance(source, ast.Name) and ctx.type_of(source.id) in (LIST, 'array') and not any(
+            source.id in group for group in (ctx.tstride, ctx.rowof, ctx.nlist, ctx.blist, ctx.strlist,
+                                             ctx.srowtypes, ctx.handles, ctx.rowparam)):
+        kind = INT
+    elif isinstance(source, ast.Name) and _is_flist_name(source, ctx) and source.id not in ctx.tstride:
+        kind = FLT
+    else:
+        raise Unsupported('enumerate() with a start over something other than a named list of int, '
+                          'float or str')
+    if _etype(start, ctx) != INT or _is_handle_producing(start, ctx):
+        raise Unsupported('enumerate() needs an int start')
+    iname, vname = (e.id for e in node.target.elts)
+    if kind == STR:
+        base = _slist_arg_c(source, ctx)
+        ctx.parts.add('SLIST')
+        count, element = '%s.n' % base, '%s.p[%%s]' % base
+    else:
+        p, n = _seq(source, ctx)
+        count, element = n, '%s[%%s]' % p
+    first, _ = ctx.temp(INT)
+    ctx.pre.append('%s = %s;' % (first, _map_inline(lambda: _expr(start, ctx), ctx)))
+    counter, _ = ctx.temp(INT)
+    i = ctx.declare(iname)
+    v = ctx.declare(vname, kind)
+    pre = _flush(ctx, pad)
+    _use(ctx.need, 'ck_add')
+    head = ('%sfor (%s = 0; %s < %s; %s++) {\n%s    %s = ck_add(%s, %s);\n%s    %s = %s;\n'
+            % (pad, counter, counter, count, counter, pad, i, first, counter, pad, v, element % counter))
+    return pre + head + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n'
+
+
 def _for_inner_impl(node, ctx, ind):
     pad = '    ' * ind
     if node.orelse:
@@ -25315,7 +25816,15 @@ def _for_inner_impl(node, ctx, ind):
     if (isinstance(it, ast.Subscript) and isinstance(it.slice, ast.Slice)
             and isinstance(it.value, ast.Name) and ctx.type_of(it.value.id) == SLIST):
         if it.slice.step is not None:
-            raise Unsupported('a slice with a step; only a contiguous slice is built -- copy the elements you want with .append() in a loop, stepping the index yourself')
+            # `for w in words[::-1]`: CPython walks a copy of the slice, and so does this
+            if not isinstance(node.target, ast.Name):
+                raise Unsupported('a tuple target over a slice of a list of str')
+            copied = _slist_slice_c(it, ctx)
+            pre = _flush(ctx, pad)
+            v = ctx.declare(node.target.id, STR)
+            head = '%sfor (%s = 0; %s < %s.n; %s++) {\n%s    %s = %s.p[%s];\n' % (
+                pad, idx, idx, copied, idx, pad, v, copied, idx)
+            return pre + head + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n'
         for b in (it.slice.lower, it.slice.upper):
             if b is not None:
                 _need_int(b, ctx, 'a slice bound')
@@ -25405,6 +25914,8 @@ def _for_inner_impl(node, ctx, ind):
                                pad, head, _guard_rewrite(body, False), pad, pad))
                 return pre + snap + head + _guard_rewrite(body, False) + pad + '}\n'
             return pre + snap + reserve + head + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n'
+        if it.func.id == 'enumerate' and _enumerate_start(it) is not None:
+            return _for_enumerate_start(node, it, ctx, ind)
         if it.func.id == 'enumerate' and len(it.args) == 1:
             if not (isinstance(node.target, ast.Tuple) and len(node.target.elts) == 2
                     and all(isinstance(e, ast.Name) for e in node.target.elts)):
@@ -26172,6 +26683,15 @@ def _promote_floats(fn, ctx):
                         and n.value.func.id not in ctx.funcs and n.value.func.id not in ctx.classes
                         and len(n.value.args) == 1 and isinstance(n.value.args[0], ast.Name)
                         and (n.value.args[0].id in slist_names or ctx.types.get(n.value.args[0].id) == SLIST)):
+                    slist_names.add(name)
+                    changed = True
+                if (name not in slist_names and isinstance(n.value, ast.Subscript)
+                        and isinstance(n.value.slice, ast.Slice)
+                        and (isinstance(n.value.value, ast.Name)
+                             and (n.value.value.id in slist_names
+                                  or ctx.types.get(n.value.value.id) == SLIST)
+                             or _is_slist_call(n.value.value, ctx))):
+                    # `rest = words[1:]`: a slice of a list of str is a list of str
                     slist_names.add(name)
                     changed = True
                 if (name not in slist_names and isinstance(n.value, ast.Call)
@@ -29373,7 +29893,7 @@ def _signatures(fns, entry_sig=None, classes=None, external=None):
 
     Returns `(sigs, arity_seeds, clones)` -- see `_propagate_signatures_pass` and `_plan_clones`.
     """
-    classes = classes or {}
+    classes = classes if classes is not None else _TDict()   # tracked: an untracked {} shared with every ctx made them all bypass the query cache
     owned_str_fns = {f.name for f in fns if isinstance(f.returns, ast.Name)
                      and f.returns.id == '__ail_checked_str__'}
     external = external or {}
@@ -29642,6 +30162,28 @@ def _field_annotation_kind(annotation, classes):
     return kind if (kind in (LIST, FLIST, SLIST, BLIST, *MAPS) or _is_olist_kind(kind)) else None
 
 
+def _range_list_as_comprehension(value, ctx):
+    """`list(range(...))` as the field value of a constructor: the comprehension of the same
+    elements (`[i for i in range(...)]`), which a field already takes. Anything else is returned
+    as it is."""
+    if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id == 'list'
+            and len(value.args) == 1 and not value.keywords
+            and isinstance(value.args[0], ast.Call) and isinstance(value.args[0].func, ast.Name)
+            and value.args[0].func.id == 'range' and not value.args[0].keywords
+            and 1 <= len(value.args[0].args) <= 3
+            and not any(isinstance(a, ast.Starred) for a in value.args[0].args)
+            and 'list' not in ctx.funcs and 'range' not in ctx.funcs
+            and 'list' not in ctx.classes and 'range' not in ctx.classes):
+        return value
+    name = '_ail_range_item'
+    comp = ast.ListComp(elt=ast.Name(id=name, ctx=ast.Load()),
+                        generators=[ast.comprehension(target=ast.Name(id=name, ctx=ast.Store()),
+                                                      iter=value.args[0], ifs=[], is_async=0)])
+    ast.copy_location(comp, value)
+    ast.fix_missing_locations(comp)
+    return comp
+
+
 def _compile_init(init_fn, info, classes):
     """Walk `__init__`'s body once, establishing `info.field_order`/`field_types` AS it goes (so
     `self.b = self.a + 1` on the line right after `self.a = ...` can read `self.a`'s type -- see
@@ -29685,7 +30227,16 @@ def _compile_init(init_fn, info, classes):
                 'establish the fixed shape; found a %s' % (info.name, type(stmt).__name__))
         field, value = stmt.targets[0].attr, stmt.value
         before = len(ctx.pre)
+        value = _range_list_as_comprehension(value, ctx)
         ftype = _etype(value, ctx)
+        repeat = _list_repeat_parts(value)
+        if repeat is not None and ftype not in (LIST, FLIST, SLIST):
+            # `self.size = [1] * n`: a list of the repeated elements (ints only, or floats only)
+            kinds = {_etype(element, ctx) for element in repeat[0]}
+            if kinds == {INT}:
+                ftype = LIST
+            elif kinds == {FLT}:
+                ftype = FLIST
         if declared is not None and _empty_container_literal(value):
             ftype = declared
         if isinstance(value, ast.Name) and value.id in info.numeric_list_params:
@@ -31752,7 +32303,7 @@ class _ListLowering:
         self.counter += 1
         return '_ail_l%d' % self.counter
 
-    def build(self, text, at, **subs):
+    def build(self, text, at, member=None, **subs):
         """Parse a statement template; `$x` becomes a fresh name per template instance and each
         `__NAME` is replaced by a copy of the user's expression `subs[NAME]`."""
         tag = self.fresh()
@@ -31771,6 +32322,11 @@ class _ListLowering:
                 ast.copy_location(node, at)
                 node._ail_synth = True
             ast.fix_missing_locations(statement)
+        if member:
+            # the float-list NaN check (C119) goes after `$v = __V`; `member` is (operation, receiver)
+            first = out[0]
+            if isinstance(first, ast.Assign) and first.targets[0].id == tag + 'v':
+                first._ail_member_check = (member, subs['X'])
         return out, tag
 
     def pure(self, node):
@@ -31974,7 +32530,7 @@ class _ListLowering:
                 if $r < 0:
                     raise ValueError("list.remove(x): x not in list")
                 __X.pop($r)
-            ''', node, X=receiver, V=value)
+            ''', node, member='list.remove', X=receiver, V=value)
             self.changed = True
             return prelude + out
         return None
@@ -32493,7 +33049,7 @@ class _ListLowering:
                         if __X[$k] == $v:
                             $c += 1
                         $k += 1
-                ''', node, X=receiver, V=args[0])
+                ''', node, member='list.count', X=receiver, V=args[0])
                 prelude.extend(out)
                 return self.result(tag + 'c', node)
             out, tag = self.build('''
@@ -32502,7 +33058,7 @@ class _ListLowering:
                 for $x in __X:
                     if $x == $v:
                         $c += 1
-            ''', node, X=receiver, V=args[0])
+            ''', node, member='list.count', X=receiver, V=args[0])
             prelude.extend(out)
             return self.result(tag + 'c', node)
         if not 1 <= len(args) <= 3:
@@ -32525,7 +33081,7 @@ class _ListLowering:
             subs['S'] = args[1]
         if len(args) == 3:
             subs['E'] = args[2]
-        out, tag = self.build('\n'.join(lines), node, **subs)
+        out, tag = self.build('\n'.join(lines), node, member='list.index', **subs)
         prelude.extend(out)
         return self.result(tag + 'r', node)
 
@@ -32694,6 +33250,18 @@ def _lower_set_method_spellings(tree):
     Lower().visit(tree)
 
 
+def _is_self_field_store(stmt):
+    """`self.<name> = <expr>` (or annotated), a docstring, or `pass`."""
+    if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str):
+        return True
+    if isinstance(stmt, ast.Pass):
+        return True
+    targets = (stmt.targets if isinstance(stmt, ast.Assign)
+               else [stmt.target] if isinstance(stmt, ast.AnnAssign) and stmt.value is not None else None)
+    return (targets is not None and len(targets) == 1 and isinstance(targets[0], ast.Attribute)
+            and isinstance(targets[0].value, ast.Name) and targets[0].value.id == 'self')
+
+
 def _lower_list_operations(tree):
     """Rewrite the list operations described above in every function of `tree`, in place."""
     wanted = False
@@ -32717,10 +33285,19 @@ def _lower_list_operations(tree):
     if not wanted:
         return
     lowering = _ListLowering(tree)
+    inits = {id(item) for node in ast.walk(tree) if isinstance(node, ast.ClassDef)
+             for item in node.body if isinstance(item, ast.FunctionDef) and item.name == '__init__'}
     for fn in [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]:
         lowering.evidence.scan_function(fn)
         lowering.current_fn = fn
+        original = copy.deepcopy(fn.body) if id(fn) in inits else None
         fn.body = lowering.body(fn.body)
+        if (id(fn) in inits and all(_is_self_field_store(st) for st in original)
+                and not all(_is_self_field_store(st) for st in fn.body)):
+            # a constructor of plain field stores keeps them: the constructor builds each field
+            # value itself (`self.parent = list(range(n))`), and a lowered prelude statement
+            # would be refused there as a statement that is not a field store
+            fn.body = original
     if lowering.changed:
         ast.fix_missing_locations(tree)
 
@@ -32929,12 +33506,142 @@ def _explain_str_minmax(source, error):
         return
 
 
+_READ_ONLY_SEQUENCES = frozenset(('Sequence', 'Iterable', 'Collection', 'Reversible'))
+
+
+def _read_only_sequence_annotations(tree):
+    """`def f(xs: Sequence[int]) -> Iterable[str]`: a read-only sequence annotation of a function's
+    parameter or result is read as the list it names (`list[int]`, `list[str]`, nested:
+    `Sequence[Sequence[int]]` is `list[list[int]]`). A list parameter here is read-only and a
+    caller must pass a real list -- a tuple, a range, a set, a str, a generator or a dict view is
+    refused at the call -- so the object the function sees is the list CPython would hand it, and
+    its text (`print(xs)`) is the same. Annotations of locals and fields are left as written, and
+    so is the name when the program defines a class or function of that name itself."""
+    own = {n.name for n in tree.body if isinstance(n, (ast.ClassDef, ast.FunctionDef))}
+
+    def head(node):
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) \
+                and node.value.id in ('typing', 'abc', 't'):
+            return node.attr
+        return None
+
+    def fix(node):
+        if isinstance(node, ast.Subscript):
+            name = head(node.value)
+            node.slice = fix(node.slice)
+            if name in _READ_ONLY_SEQUENCES and name not in own and not isinstance(node.slice, ast.Tuple):
+                return ast.copy_location(ast.Subscript(value=ast.Name(id='list', ctx=ast.Load()),
+                                                       slice=node.slice, ctx=ast.Load()), node)
+            return node
+        if isinstance(node, ast.Tuple):
+            node.elts = [fix(e) for e in node.elts]
+        return node
+
+    for fn in ast.walk(tree):
+        if isinstance(fn, ast.FunctionDef):
+            for a in fn.args.posonlyargs + fn.args.args + fn.args.kwonlyargs:
+                if a.annotation is not None:
+                    a.annotation = fix(a.annotation)
+            if fn.returns is not None:
+                fn.returns = fix(fn.returns)
+    ast.fix_missing_locations(tree)
+
+
+def _lower_element_tuple_assigns(tree):
+    """`a[i], a[j] = a[j], a[i]` -- a tuple assignment with an element (or a field) among its targets
+    and a tuple display of the same length on the right -- as the statements CPython runs: every
+    value on the right into a fresh local, left to right, then each target stored in turn, left to
+    right (`a[i]` is evaluated when it is stored, after the targets before it). Assignments whose
+    targets are all names or fields are left to `_parallel_assign`."""
+    counter = [0]
+    used = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+
+    def fresh():
+        while True:
+            counter[0] += 1
+            name = '_ail_sw%d' % counter[0]
+            if name not in used:
+                return name
+
+    def lower(stmt):
+        if not (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1
+                and isinstance(stmt.targets[0], (ast.Tuple, ast.List)) and isinstance(stmt.value, ast.Tuple)):
+            return None
+        targets, values = stmt.targets[0].elts, stmt.value.elts
+        if (len(targets) != len(values) or len(targets) < 2
+                or any(isinstance(e, ast.Starred) for e in targets + values)
+                or not all(isinstance(e, (ast.Name, ast.Attribute, ast.Subscript)) for e in targets)
+                or not any(isinstance(e, ast.Subscript) for e in targets)
+                or any(isinstance(e, ast.Subscript) and isinstance(e.slice, ast.Slice) for e in targets)):
+            return None
+        names = [fresh() for _ in values]
+        out = [ast.copy_location(ast.Assign(targets=[ast.Name(id=n, ctx=ast.Store())], value=v), stmt)
+               for n, v in zip(names, values)]
+        out += [ast.copy_location(ast.Assign(targets=[t], value=ast.Name(id=n, ctx=ast.Load())), stmt)
+                for t, n in zip(targets, names)]
+        return out
+
+    def walk(body):
+        """Lower in place; a body with nothing to lower keeps its own list object, untouched."""
+        index = 0
+        while index < len(body):
+            stmt = body[index]
+            for field in ('body', 'orelse', 'finalbody'):
+                inner = getattr(stmt, field, None)
+                if isinstance(inner, list) and inner and isinstance(inner[0], ast.stmt):
+                    walk(inner)
+            if isinstance(stmt, ast.Try) or hasattr(ast, 'TryStar') and isinstance(stmt, ast.TryStar):
+                for handler in stmt.handlers:
+                    walk(handler.body)
+            if isinstance(stmt, ast.Match):
+                for case in stmt.cases:
+                    walk(case.body)
+            lowered = lower(stmt)
+            if lowered is None:
+                index += 1
+            else:
+                body[index:index + 1] = lowered
+                index += len(lowered)
+                changed[0] = True
+
+    changed = [False]
+    walk(tree.body)
+    if changed[0]:
+        ast.fix_missing_locations(tree)
+
+
+def _dict_view_escape(source):
+    """A dict view that the typed path would show as a list (dictviews.py): the refusal text, or None."""
+    import dictviews
+    # Only a program written as Python (AIL_SURFACE=python, set by ailc for a def-syntax entry) has views. In the AIL brace
+    # syntax `m.keys()` / `.values()` / `.items()` is a typed list snapshot by design (`let ks: list[str] = m.keys(); ks[0]`).
+    # The Python-source passes (collib / tuplib, run by python_surface) only ever see Python and always check.
+    if os.environ.get('AIL_SURFACE') != 'python':
+        return None
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return None
+    node = dictviews.escape(tree)
+    return None if node is None else dictviews.refusal(node)
+
+
 def to_c(source, name=None, strict=True, info=None, entry=None, sig=None, library=False, external=None):
     """Compile `source` (see `_to_c_unshadowed`) after renaming every module-level definition
     that shadows a built-in name (`fn abs`, `fn heappush`, `const max`, ...) together with every
     reference Python resolves to it (shadowing.py), so no name-keyed built-in dispatch anywhere in
     the compiler can capture a call that belongs to the user. Refusals and the per-function unit
     names in `info` are reported under the user's own spelling."""
+    _view = _dict_view_escape(source)
+    if _view is not None:
+        raise Unsupported(_view)
+    if os.environ.get('AIL_SURFACE') == 'python':
+        import numidentity                       # `is` on numbers (DIFFERENCES C114, C115)
+        _number_is = numidentity.refusal(source)
+        if _number_is is not None:
+            raise Unsupported(_number_is)
     linked = [key for section in ('exports', 'constants') for key in (external or {}).get(section, {})]
     source, shadow = shadowing.rename_all(source, Unsupported, linked)
     if shadow:
@@ -33233,6 +33940,9 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         from module_object import _struct_source
         source = _struct_source(external['structs']) + source
     tree = ast.parse(source.strip())
+    debug_restore_lines(tree, source.strip())
+    _read_only_sequence_annotations(tree)
+    _lower_element_tuple_assigns(tree)
     # special methods, class attributes, static/class methods and properties become plain methods,
     # functions and module variables first; a program without them is left untouched (dunders.py)
     dunders.rewrite(tree, source, Unsupported)
@@ -33245,7 +33955,10 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     stdlib4.rewrite(tree, Unsupported)
     stdlib3.rewrite(tree, Unsupported)
     iterlower.rewrite(tree)
+    typedforms.rewrite(tree)
+    hashlower.rewrite_tree(tree, Unsupported)             # crypto: hashlib / hmac / secrets / base64, int.to_bytes -> primitives + prelude
     filelib.rewrite_tree(tree, Unsupported)
+    unbound.rewrite(tree, Unsupported, entry, info, library or any(external.values()))        # a local read before it is assigned raises UnboundLocalError (unbound.py)
     EXC_NAMES.clear()
     EXC_NAMES.update(_BUILTIN_EXC_NAMES)
     if userexc.collect(tree, {k: v for k, v in _BUILTIN_EXC_NAMES.items() if urllower.ACTIVE or k not in ('URLError', 'HTTPError')}):          # S4e: user exception classes become codes and constructor functions
@@ -33331,7 +34044,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     global _FIELD_STORES
     _FIELD_STORES = _scan_field_stores(tree, library)
     classdefs = [n for n in tree.body if isinstance(n, ast.ClassDef)]
-    classes = _scan_classes(classdefs) if classdefs else {}
+    classes = _scan_classes(classdefs) if classdefs else _TDict()
     if _HIER and _BOOLS is not boolkind.EMPTY:
         # an inherited bool field prints as a bool through the subclass too
         for _cls in _HIER:
@@ -34734,7 +35447,7 @@ def _one_function(*args, **kwargs):
         import aliasrefuse
         aliasrefuse.refuse_instead(_sys_modules()[__name__], args[0], refusal)
         raise
-    if os.environ.get('AIL_IR', '0').strip().lower() in ('', '0', 'off', 'no'):
+    if os.environ.get('AIL_IR', '1').strip().lower() in ('0', 'off', 'no', 'false'):
         final = result
     else:
         import sys as _sys
