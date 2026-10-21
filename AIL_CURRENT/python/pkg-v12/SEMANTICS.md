@@ -9563,7 +9563,7 @@ Found by the library agents; each is checked against CPython 3.12 by `test_ail_q
 
 The general (boxed) runtime keeps a `set` / `frozenset` in insertion order, as the typed path does (DIFFERENCES.md A2):
 `ail_setobj` is a dense entries array (a removed element leaves a hole that iteration skips, and re-adding it puts it at
-the end) with an open-addressed index. Iteration, `repr`, `list()`, `pop()` (the newest element) and the results of
+the end) with an open-addressed index. Iteration, `repr`, `list()`, `pop()` (the first element in iteration order) and the results of
 operators and methods follow the typed path's `ail_*set_combine`: `a | b` is a's elements then b's new ones, `a & b` and
 `a - b` keep a's order, `a ^ b` is a's elements not in b then b's elements not in a, and the in-place forms and the named
 methods (`union`, `intersection_update`, ...) give the same order as the operator. A result has the type of the left
@@ -9578,3 +9578,11 @@ frozenset, as CPython does. `==` on dicts compares keys and values (it always an
 
 `test_ail_sets_general.py` builds programs on the typed path, the default build (`AIL_IR=0`/`1`) and the general path and
 requires identical output, and compares the order-free results with CPython 3.12.
+
+## Build switch: unboxed values on the general path (`AIL_UNIFIED`, default on since 2026-10-21)
+
+The general path infers int / float / bool variables, parameters and results (`unified.py`, docs/design/UNIFIED_IR.md)
+and keeps them as C values; the language's answers do not change (same output, stderr and exit status as the boxed build and
+as CPython; `test_ail_unified.py`). `AIL_UNIFIED=0` (or `off`, `no`, `false`) turns it off and gives the all-boxed C;
+`AIL_UNIFIED=1` is accepted. A program that names `nan` / `inf` keeps its floats boxed (NaN identity, DIFFERENCES C117).
+`AIL_UNIFIED_POOL=1` (the size-class free list under the collector) is a separate opt-in, off by default.

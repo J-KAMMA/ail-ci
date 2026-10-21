@@ -1117,5 +1117,120 @@ class UnchangedPrograms(unittest.TestCase):
         self.assertIn("ail_dun1", dunderrt.patch(patched))
 
 
+# a program that draws from every Random method (and the module-level functions) for many seeds; the general
+# path runs it with the Mersenne Twister in C (randrt.py) and its output must be CPython 3.12's byte for byte
+BOXED_RANDOM = r"""import random
+import sys
+
+
+def pick_op(ctl: random.Random) -> int:
+    return ctl.randrange(16)
+
+
+def main() -> None:
+    seeds = [int(t) for t in sys.stdin.read().split()]
+    for seed in seeds:
+        rng = random.Random(seed)
+        ctl = random.Random(seed ^ 12345)
+        pool = [ctl.randint(-50, 50) for _ in range(ctl.randint(0, 40))]
+        big = list(range(ctl.choice([30, 200, 1000, 5000])))
+        out = []
+        for step in range(60):
+            op = pick_op(ctl)
+            try:
+                if op == 0:
+                    out.append(rng.random())
+                elif op == 1:
+                    a = ctl.randint(-1000, 1000)
+                    b = ctl.randint(-1000, 1000)
+                    out.append(rng.randint(a, b))
+                elif op == 2:
+                    a = ctl.randint(-100, 100)
+                    b = ctl.randint(-100, 300)
+                    c = ctl.choice([1, 2, 3, -1, -3, 7, 0])
+                    out.append(rng.randrange(a, b, c))
+                elif op == 3:
+                    out.append(rng.randrange(ctl.randint(-3, 10 ** 12)))
+                elif op == 4:
+                    out.append(rng.getrandbits(ctl.randint(0, 62)))
+                elif op == 5:
+                    out.append(rng.choice(pool))
+                elif op == 6:
+                    rng.shuffle(pool)
+                    out.append(pool[:5])
+                elif op == 7:
+                    out.append(rng.sample(pool, ctl.randint(0, len(pool))))
+                elif op == 8:
+                    out.append(rng.sample(big, ctl.randint(0, 40)))
+                elif op == 9:
+                    out.append(rng.uniform(ctl.random() * 10 - 5, ctl.randint(-3, 9)))
+                elif op == 10:
+                    out.append(rng.gauss(ctl.random(), 2))
+                elif op == 11:
+                    out.append(rng.gauss())
+                elif op == 12:
+                    out.append(rng.expovariate(ctl.random() + 0.5))
+                elif op == 13:
+                    out.append(rng.triangular(0.0, 10.0, ctl.random() * 10))
+                elif op == 14:
+                    out.append(rng.choices(pool, k=3))
+                else:
+                    rng.seed(ctl.randint(-10 ** 12, 10 ** 12))
+                    out.append(rng.random())
+            except Exception as e:
+                out.append((type(e).__name__, str(e)))
+        print(seed, out)
+        words = rng.sample("the quick brown fox jumps".split(), 3)
+        print(words, rng.sample(range(100), 5), rng.sample("hello world", 3), rng.choice("abc"))
+    random.seed(7)
+    print(random.random(), random.randint(1, 100), random.gauss(0, 1), random.choice([4, 5, 6]))
+    lst = list(range(20))
+    random.shuffle(lst)
+    print(lst, random.sample(lst, 4), random.uniform(1, 3))
+
+
+main()
+"""
+
+
+class BoxedRandom(unittest.TestCase):
+    def seeds(self, batch):
+        rnd = random.Random(batch)
+        pool = [0, 1, -1, 2 ** 32, 2 ** 32 - 1, 2 ** 33 + 5, -2 ** 40]
+        return " ".join(str(rnd.choice(pool + [rnd.randint(-10 ** 9, 10 ** 9), rnd.randint(0, 2 ** 62)])) for _ in range(120)) + "\n"
+
+    def test_every_method_matches_cpython(self):
+        with tempfile.TemporaryDirectory() as directory:
+            built, source, exe = compile_python(directory, BOXED_RANDOM, "boxed_random")
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            Path(directory, "oracle.py").write_text(BOXED_RANDOM, encoding="utf-8")
+            for batch in (1, 2, 3):
+                stdin = self.seeds(batch).encode()
+                want = subprocess.run([sys.executable, "-X", "utf8", str(Path(directory, "oracle.py"))], input=stdin,
+                                      capture_output=True, timeout=300)
+                got = subprocess.run([str(exe)], input=stdin, capture_output=True, timeout=300)
+                self.assertEqual(got.returncode, want.returncode, got.stderr[-300:])
+                self.assertEqual(got.stdout, want.stdout, "batch %d" % batch)
+
+    def c_of(self, text, name):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory, name + ".ail")
+            source.write_text(text, encoding="utf-8")
+            built = subprocess.run([sys.executable, "-B", str(ROOT / "ail_chatgpt.py"), "compile", source.name, "--syntax", "python",
+                                    "-o", name, "--debug-dir", "dbg"], cwd=directory, capture_output=True, text=True, timeout=1800)
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            return Path(directory, "dbg", "program.c").read_text(encoding="utf-8")
+
+    def test_c_only_where_random_objects_are(self):
+        body = self.c_of("import random\n\nr = random.Random(3)\nprint(r.random(), r.randint(1, 6))\n", "uses")
+        self.assertIn("ail2r_new", body)
+        self.assertNotIn("pm_Random__genrand", body)
+        self.assertNotIn("pm_Random__refill", body)
+        body = self.c_of("class Box:\n    def __init__(self, v):\n        self.v = v\n\nprint(Box(1).v, [Box(2)][0].v)\n", "plain")
+        self.assertNotIn("ail2r_", body)
+        body = self.c_of("class Random:\n    def __init__(self):\n        self.x = 1\n\nprint(Random().x)\n", "own")
+        self.assertNotIn("ail2r_", body)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -202,7 +202,7 @@ def _dataclass_markers(source):
         m = re.match(r'\s*class\s+([A-Za-z_]\w*)', lines[i + 1])
         if not m:
             continue
-        info = {'noeq': ' noeq' in text, 'nocmp': set(), 'hide': set()}
+        info = {'noeq': ' noeq' in text, 'norepr': ' norepr' in text, 'nocmp': set(), 'hide': set()}
         for key in ('nocmp', 'hide'):
             hit = re.search(r'\b%s=(\S*)' % key, text)
             if hit:
@@ -322,7 +322,7 @@ class _Model:
             return True
         if self.dataclass is not None and not self.dataclass['noeq'] and method == '__eq__':
             return True
-        if self.dataclass is not None and method == '__repr__':
+        if self.dataclass is not None and method == '__repr__' and not self.dataclass['norepr']:
             return True
         return False
 
@@ -1237,7 +1237,7 @@ class _Rewriter(ast.NodeTransformer):
         if m is None:
             return False
         if method in ('__eq__', '__repr__') and m.dataclass is not None and method not in m.methods:
-            if method == '__eq__' and m.dataclass['noeq']:
+            if method == '__eq__' and m.dataclass['noeq'] or method == '__repr__' and m.dataclass['norepr']:
                 return False
             m.want.add(method)
             return True

@@ -101,10 +101,13 @@ __attribute__((noinline)) static ail_st ail_dun_binop(ail_ctx *cx, ail_obj *out,
 }
 static inline int ail_obj_truthy(ail_obj x);
 static inline int ail_member_eq(ail_obj a, ail_obj b);
+static inline int ail__is_counter(ail_obj x);
+static inline ail_st ail_counter_unary(ail_ctx *cx, ail_obj *out, ail_obj a, int neg);
 static inline ail_st ail_dun_pos(ail_ctx *cx, ail_obj *out, ail_obj x) {
     if (x.tag == AIL_T_INST) { ail_d1_fn f = ail_dun1(x, AIL_D1_POS); if (f) return f(cx, out, x); }
     else if (x.tag == AIL_T_INT || x.tag == AIL_T_FLOAT) { *out = x; return AIL_OK; }
     else if (x.tag == AIL_T_BOOL) { *out = ail_box_int(x.i); return AIL_OK; }
+    else if (ail__is_counter(x)) return ail_counter_unary(cx, out, x, 0);
     char buf[140], tn[80]; ail__dun_tname(tn, sizeof tn, x);
     snprintf(buf, sizeof buf, "bad operand type for unary +: '%s'", tn);
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
@@ -220,6 +223,16 @@ def _binop_guard(fwd, rev, op):
             'AIL_D2_%s, AIL_D2_%s, "%s");\n    ' % (fwd, rev, op))
 
 
+_VIEW_OP_EQ = (
+    'static inline ail_st ail_op_eq(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n'
+    '    if (__builtin_expect(ail__view_kind(a) || ail__view_kind(b), 0)) { int r = 0; ail_st st = ail__view_eq(cx, &r, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(r); return AIL_OK; }\n'
+    '    *out = ail_box_bool(ail_obj_eq_raw(a, b)); return AIL_OK;\n}')
+_VIEW_OP_NE = (
+    'static inline ail_st ail_op_ne(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n'
+    '    if (__builtin_expect(ail__view_kind(a) || ail__view_kind(b), 0)) { int r = 0; ail_st st = ail__view_eq(cx, &r, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(!r); return AIL_OK; }\n'
+    '    *out = ail_box_bool(!ail_obj_eq_raw(a, b)); return AIL_OK;\n}')
+
+
 def _edits():
     """(old, new) text replacements, each applied to exactly one place of the runtime."""
     e = []
@@ -244,16 +257,18 @@ def _edits():
     e.append(('static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {\n',
               'static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {\n'
               '    if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) return ail_dun_eq_raw(a, b);\n'))
-    e.append(('static inline ail_st ail_op_eq(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { (void)cx; *out = ail_box_bool(ail_obj_eq_raw(a, b)); return AIL_OK; }',
+    e.append((_VIEW_OP_EQ,
               'static inline ail_st ail_op_eq(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n'
               '    if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) return ail_dun_op_eq(cx, out, a, b, 0);\n'
+              '    if (__builtin_expect(ail__view_kind(a) || ail__view_kind(b), 0)) { int r = 0; ail_st st = ail__view_eq(cx, &r, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(r); return AIL_OK; }\n'
               '    int sv_scope = ail__eq_scope; ail_st sv_err = ail__eq_err; ail__eq_scope = 1; ail__eq_err = 0;\n'
               '    int eq = ail_obj_eq_raw(a, b);\n'
               '    ail_st e = ail__eq_err; ail__eq_scope = sv_scope; ail__eq_err = sv_err; if (e) return e;\n'
               '    *out = ail_box_bool(eq); return AIL_OK;\n}'))
-    e.append(('static inline ail_st ail_op_ne(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { (void)cx; *out = ail_box_bool(!ail_obj_eq_raw(a, b)); return AIL_OK; }',
+    e.append((_VIEW_OP_NE,
               'static inline ail_st ail_op_ne(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n'
               '    if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) return ail_dun_op_eq(cx, out, a, b, 1);\n'
+              '    if (__builtin_expect(ail__view_kind(a) || ail__view_kind(b), 0)) { int r = 0; ail_st st = ail__view_eq(cx, &r, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(!r); return AIL_OK; }\n'
               '    int sv_scope = ail__eq_scope; ail_st sv_err = ail__eq_err; ail__eq_scope = 1; ail__eq_err = 0;\n'
               '    int eq = ail_obj_eq_raw(a, b);\n'
               '    ail_st e = ail__eq_err; ail__eq_scope = sv_scope; ail__eq_err = sv_err; if (e) return e;\n'
