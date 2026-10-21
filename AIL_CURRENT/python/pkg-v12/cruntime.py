@@ -14985,8 +14985,7 @@ static inline ail_st ail__vec_merge_sort(ail_ctx *cx, ail_obj *p, ail_obj *keys,
    =================================================================================== */
 static inline ail_st ail_list_sort(ail_ctx *cx, ail_obj lst, ail_obj key_fn_or_none, int reverse) {
     ail_vecobj *v = (ail_vecobj *)lst.o;
-    if (v->n < 2) return AIL_OK;
-    if (reverse) for (int64_t i = 0, j = v->n - 1; i < j; i++, j--) { ail_obj t = v->p[i]; v->p[i] = v->p[j]; v->p[j] = t; }
+    if (v->n == 0) return AIL_OK;
     /* the keys a key function made exist only in this array, and a key function or a user __lt__
        may collect: the array (zeroed, so the unfilled tail reads as unbound) is a frame */
     int64_t n = v->n;
@@ -14996,11 +14995,19 @@ static inline ail_st ail_list_sort(ail_ctx *cx, ail_obj lst, ail_obj key_fn_or_n
     AIL_ROOT1(cx, frl, lst); /* the list itself may be fresh (nlargest's, statistics' materialized copy) */
     AIL_ROOT_N(cx, fr, keys, (int32_t)(n < INT32_MAX ? n : INT32_MAX));
     ail_st st = AIL_OK;
+    /* CPython calls the key on the input in its ORIGINAL order even for reverse=True; it then
+       reverses elements and keys together, stable-sorts ascending and reverses the elements
+       back.  Reversing before the key calls used to expose the reversed order to a key with
+       side effects (and to its exception's position). */
     if (key_fn_or_none.tag == AIL_T_FUNC) {
         ail_funcobj *f = (ail_funcobj *)key_fn_or_none.o;
         for (int64_t i = 0; i < n && st == AIL_OK; i++) st = f->fn(cx, &keys[i], v->p[i], f->cells);
     } else {
         for (int64_t i = 0; i < n; i++) keys[i] = v->p[i];
+    }
+    if (reverse) for (int64_t i = 0, j = n - 1; i < j; i++, j--) {
+        ail_obj t = v->p[i]; v->p[i] = v->p[j]; v->p[j] = t;
+        t = keys[i]; keys[i] = keys[j]; keys[j] = t;
     }
     if (st == AIL_OK) st = ail__vec_merge_sort(cx, v->p, keys, tmp, ktmp, 0, n);
     AIL_FRAME_LEAVE(cx, fr);
@@ -19766,6 +19773,10 @@ static inline ail_st ail__repeat_next(ail_ctx *cx, ail_obj *out, ail_iterobj *it
 static inline ail_st ail__default_add(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, void *ud) { (void)ud; return ail_op_add(cx, out, a, b); }
 static inline ail_st ail_it_accumulate(ail_ctx *cx, ail_obj *out, ail_obj iterable,
                                         ail_lib_fn2 func, int has_initial, ail_obj initial) {
+    /* CPython 3.12's signature spells the default as initial=None, and the C implementation
+       treats an actual None as "not given": accumulate([], initial=None) is [], not [None],
+       and accumulate([1, 2], initial=None) is [1, 3]. */
+    if (has_initial && initial.tag == AIL_T_NONE) has_initial = 0;
     ail_obj src; ail_st st = ail_iter(cx, &src, iterable); if (st != AIL_OK) return st;
     int64_t cb = ail__fn2_box(func ? func : ail__default_add);
     ail_obj wrap = ail__iter_wrap(cx, AIL_LIT_ACCUMULATE, src, has_initial ? initial : ail_box_unbound(), cb);

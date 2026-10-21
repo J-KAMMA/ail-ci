@@ -672,9 +672,10 @@ class Groupby(Src):
         self.st = st
         self.call = call
         self.i, self.j, self.k, self.t = (st.fresh(n) for n in ("gi", "gj", "gk", "gt"))
+        self.kj, self.cached, self.have = (st.fresh(n) for n in ("gkj", "gc", "gh"))
 
     def setup(self, st):
-        return self.seq.setup(st, False) + [assign(self.i, const(0))]
+        return self.seq.setup(st, False) + [assign(self.i, const(0)), assign(self.have, const(0))]
 
     def key_of(self, element):
         if self.key is None:
@@ -687,17 +688,29 @@ class Groupby(Src):
     def step(self, st, out, exh):
         holder = self.seq.holder
         at = lambda index: ast.Subscript(value=_name(holder), slice=_name(index), ctx=ast.Load())
-        body = code('''
-            if @I >= len(@H):
-                EXH
-            @J = @I + 1
-        ''', exh, I=self.i, H=holder, J=self.j)
-        body.insert(1, assign(self.k, self.key_of(at(self.i))))
+        body = [ast.If(
+            test=ast.Compare(left=_name(self.i), ops=[ast.GtE()], comparators=[_call(_name('len'), _name(holder))]),
+            body=[copy.deepcopy(s) for s in exh], orelse=[])]
+        # The key of the element that starts a group was already computed by the look-ahead
+        # that ended the previous group; reuse it instead of calling the key twice (CPython
+        # calls it exactly once per element).
+        body.append(ast.If(
+            test=_name(self.have),
+            body=[assign(self.k, _name(self.cached)), assign(self.have, const(0))],
+            orelse=[assign(self.k, self.key_of(at(self.i)))]))
+        body.append(assign(self.j, ast.BinOp(left=_name(self.i), op=ast.Add(), right=const(1))))
         body.append(ast.While(
-            test=ast.BoolOp(op=ast.And(), values=[
-                ast.Compare(left=_name(self.j), ops=[ast.Lt()], comparators=[_call(_name('len'), _name(holder))]),
-                ast.Compare(left=self.key_of(at(self.j)), ops=[ast.Eq()], comparators=[_name(self.k)])]),
-            body=code('@J += 1', J=self.j), orelse=[]))
+            test=ast.Compare(left=_name(self.j), ops=[ast.Lt()],
+                             comparators=[_call(_name('len'), _name(holder))]),
+            body=[
+                assign(self.kj, self.key_of(at(self.j))),
+                ast.If(
+                    test=ast.Compare(left=_name(self.kj), ops=[ast.NotEq()], comparators=[_name(self.k)]),
+                    body=[assign(self.cached, _name(self.kj)), assign(self.have, const(1)), ast.Break()],
+                    orelse=[]),
+                ast.AugAssign(target=_name(self.j, True), op=ast.Add(), value=const(1)),
+            ],
+            orelse=[]))
         body.append(assign(out[0], _name(self.k)))
         body += code('@O = [@H[@T] for @T in range(@I, @J)]', O=out[1], H=holder, T=self.t, I=self.i, J=self.j)
         body.append(assign(self.i, _name(self.j)))
