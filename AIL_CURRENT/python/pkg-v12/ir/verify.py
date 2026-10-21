@@ -784,7 +784,12 @@ class _Checker(object):
                       'spec.get takes (int or float list or span, i64, i1) and yields the element')
 
     def op_span_set(self, ins, scope, stack, where, top):
-        self._index_mode(ins, where)
+        if ins.attrs.get('mode') == 'vck':
+            # a byte store whose index is proven, its value still checked (licm.py)
+            self.want(where, ins.operands[0].type == I.T('span', I.T('u8')),
+                      'mode vck is for a byte store through a span<u8>')
+        else:
+            self._index_mode(ins, where)
         self.nresults(ins, where, 0)
         elem = self._span_elem(ins.operands[0])
         self.want(where, elem is not None and ins.operands[1].type == I.I64 and ins.operands[2].type == elem,
