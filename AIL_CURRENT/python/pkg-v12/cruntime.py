@@ -16046,7 +16046,13 @@ static inline void ail__write_repr_body(ail_ctx *cx, ail_obj x, FILE *f) {
                 }
             }
             for (int64_t i = 0; i < ii->n; i++) if (ii->attrs[i].name_id == AIL_ATTR_MESSAGE) {
-                ail_obj r = ail_str_repr(cx, ii->attrs[i].val); ail_str_write(ail_view_to_str(r), f);
+                /* a KeyError's message is already repr(key) (CPython's str(e) is repr(args[0])), so repr(e) is
+                   ClassName(<that message>); every other builtin keeps the plain text and shows it repr'd */
+                if (ail_class_is_or_subclass(ii->cls, cx->builtin_cls[AIL_B_KEYERROR]))
+                    ail_str_write(ail_view_to_str(ii->attrs[i].val), f);
+                else {
+                    ail_obj r = ail_str_repr(cx, ii->attrs[i].val); ail_str_write(ail_view_to_str(r), f);
+                }
             }
             fputc(')', f);
             break;

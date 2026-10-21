@@ -1979,14 +1979,27 @@ def patch_exc(c_text):
     if c_text.count(old) != 1:
         raise AssertionError('safetyrt: no place for exception args in repr')
     c_text = c_text.replace(old, '            {\n                int64_t args_id = ail_intern(cx, "args");')
-    # an exception raised with no argument (`raise ValueError`) shows as ValueError()
+    # an exception raised with no argument (`raise ValueError`) shows as ValueError(); a KeyError without args
+    # keeps its message raw (it already is repr(key))
     old = ('            for (int64_t i = 0; i < ii->n; i++) if (ii->attrs[i].name_id == AIL_ATTR_MESSAGE) {\n'
-           '                ail_obj r = ail_str_repr(cx, ii->attrs[i].val); ail_str_write(ail_view_to_str(r), f);\n')
+           '                /* a KeyError\'s message is already repr(key) (CPython\'s str(e) is repr(args[0])), so repr(e) is\n'
+           '                   ClassName(<that message>); every other builtin keeps the plain text and shows it repr\'d */\n'
+           '                if (ail_class_is_or_subclass(ii->cls, cx->builtin_cls[AIL_B_KEYERROR]))\n'
+           '                    ail_str_write(ail_view_to_str(ii->attrs[i].val), f);\n'
+           '                else {\n'
+           '                    ail_obj r = ail_str_repr(cx, ii->attrs[i].val); ail_str_write(ail_view_to_str(r), f);\n'
+           '                }\n'
+           '            }\n')
     if c_text.count(old) != 1:
         raise AssertionError('safetyrt: no place for an empty exception message in repr')
     return c_text.replace(old, '            for (int64_t i = 0; i < ii->n; i++) if (ii->attrs[i].name_id == AIL_ATTR_MESSAGE\n'
                                '                    && !(ii->attrs[i].val.tag == AIL_T_STR && ii->attrs[i].val.sv.len == 0)) {\n'
-                               '                ail_obj r = ail_str_repr(cx, ii->attrs[i].val); ail_str_write(ail_view_to_str(r), f);\n')
+                               '                if (ail_class_is_or_subclass(ii->cls, cx->builtin_cls[AIL_B_KEYERROR]))\n'
+                               '                    ail_str_write(ail_view_to_str(ii->attrs[i].val), f);\n'
+                               '                else {\n'
+                               '                    ail_obj r = ail_str_repr(cx, ii->attrs[i].val); ail_str_write(ail_view_to_str(r), f);\n'
+                               '                }\n'
+                               '            }\n')
 
 
 def patch_generators(c_text):

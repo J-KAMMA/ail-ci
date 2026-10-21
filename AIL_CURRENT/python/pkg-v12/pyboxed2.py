@@ -9905,11 +9905,15 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.emit('if (!ail_obj_truthy(%s)) {' % cond)
         ctx.indent += 1
         if node.msg is not None:
-            msg = self.expr(node.msg, ctx)
+            raw = self.expr(node.msg, ctx)
             cname = self._inst_class(node.msg, ctx)
-            msg = self._to_str_slot(msg, cname, ctx)
-            ctx.emit('st = ail_raise(cx, cx->builtin_cls[AIL_B_ASSERTIONERROR], %s); goto %s;' %
-                    (msg, ctx.cur_err_target()))
+            msg = self._to_str_slot(raw, cname, ctx)
+            # the value keeps the message object: repr(e) is AssertionError(5), e.args is (5,)
+            self.rt_needs.add('exc')
+            arr = ctx.new_cvar('ea')
+            ctx.emit('ail_obj %s[1] = { %s };' % (arr, raw))
+            ctx.emit('st = ail2x_raise_builtin(cx, cx->builtin_cls[AIL_B_ASSERTIONERROR], %s, %s, 1); goto %s;' %
+                    (msg, arr, ctx.cur_err_target()))
         else:
             ctx.emit('st = ail_raise_c(cx, AIL_B_ASSERTIONERROR, ""); goto %s;' %
                     ctx.cur_err_target())

@@ -22058,8 +22058,9 @@ def _assert_stmt(node, ctx, pad):
     catchable with `except AssertionError`; uncaught it prints `AssertionError: msg` (or just
     `AssertionError`) to stderr and exits 1, like CPython's last traceback line.
 
-    The message is evaluated only on failure, as in Python. An int or float message is
-    converted with str(), as `AssertionError(5)` prints `5`; a bytes message is refused.
+    The message is evaluated only on failure, as in Python. The message object itself is
+    kept (AssertionError(5), repr(e) == "AssertionError(5)", e.args == (5,)); its text is
+    str() of it; a bytes message is refused.
     """
     c = _cond(node.test, ctx)
     pre = _flush(ctx, pad)
@@ -22070,12 +22071,9 @@ def _assert_stmt(node, ctx, pad):
     if _is_bytes_expr(node.msg, ctx):
         raise Unsupported('assert with a bytes message; use a str message')
     t = _etype(node.msg, ctx)
-    message = node.msg
-    if t in NUM:
-        message = ast.copy_location(ast.Call(func=ast.Name(id='str', ctx=ast.Load()), args=[node.msg], keywords=[]), node.msg)
-    elif t != STR:
+    if t not in NUM and t != STR:
         raise Unsupported('assert given a %s message, not a number or str' % (t,))
-    call = ast.copy_location(ast.Call(func=ast.Name(id='AssertionError', ctx=ast.Load()), args=[message], keywords=[]), node.msg)
+    call = ast.copy_location(ast.Call(func=ast.Name(id='AssertionError', ctx=ast.Load()), args=[node.msg], keywords=[]), node.msg)
     value = _exception_value(call, ctx)
     inner = _flush(ctx, pad + '    ')
     return (pre + '%sif (!(%s)) {\n%s%s    ail_raise_value(%s);\n%s}\n'
