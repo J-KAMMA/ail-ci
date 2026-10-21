@@ -2468,6 +2468,20 @@ def _draw(comp, node, ctx, t):
     return r
 
 
+def _fdivmod_lines(x, y, r, rem):
+    """The C statements for CPython's float_divmod (float `//` and `%`), inlined: the remainder
+    comes from fmod, the quotient is snapped from it. floor(x / y) computed directly loses the
+    q*y+remainder identity at a rounding boundary (6.0 // 0.4 is 14.0, not 15.0), and a zero
+    remainder takes the DIVISOR's sign (7.5 % -0.5 is -0.0). Same algorithm as the typed path's
+    ail_ffloormod and the boxed runtime's ail__fdivmod."""
+    return ['{ double _fm = fmod(%s, %s), _fq = (%s - _fm) / %s;' % (x, y, x, y),
+            '  if (_fm != 0.0) { if ((%s < 0.0) != (_fm < 0.0)) { _fm += %s; _fq -= 1.0; } }' % (y, y),
+            '  else _fm = copysign(0.0, %s);' % y,
+            '  if (_fq != 0.0) { double _fl = floor(_fq); _fq = _fq - _fl > 0.5 ? _fl + 1.0 : _fl; }',
+            '  else _fq = copysign(0.0, %s / %s);' % (x, y),
+            '  %s = %s; }' % (r, '_fm' if rem else '_fq')]
+
+
 def _binop(comp, node, ctx, t):
     op = node.op
     lt, rt = ntype(comp, ctx, node.left), ntype(comp, ctx, node.right)
@@ -2528,10 +2542,9 @@ def _binop(comp, node, ctx, t):
     elif isinstance(op, ast.Div):
         guarded('%s == 0.0' % y, ['%s = %s / %s;' % (r, x, y)])
     elif isinstance(op, ast.FloorDiv):
-        guarded('%s == 0.0' % y, ['%s = floor(%s / %s);' % (r, x, y)])
+        guarded('%s == 0.0' % y, _fdivmod_lines(x, y, r, False))
     elif isinstance(op, ast.Mod):
-        guarded('%s == 0.0' % y, ['%s = fmod(%s, %s);' % (r, x, y),
-                                  'if (%s != 0.0 && ((%s < 0) != (%s < 0))) %s += %s;' % (r, r, y, r, y)])
+        guarded('%s == 0.0' % y, _fdivmod_lines(x, y, r, True))
     else:
         raise Conflict((ctx.u.name, '*'), 'float operator %s' % type(op).__name__)
     return r

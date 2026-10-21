@@ -10025,6 +10025,25 @@ static inline ail_obj ail_obj_mul(ail_obj a, ail_obj b) {
     ail_raise_c(AIL_ERR_TYPE, buf);
     return ail_box_none();
 }
+/* CPython's float_divmod: take the remainder first and snap the quotient from it. floor(a / b)
+   computed directly loses the q*b+r identity at a rounding boundary (6.0 // 0.4 is 14.0, not
+   15.0), and a zero remainder takes the DIVISOR's sign (7.5 % -0.5 is -0.0, -7.5 % 0.5 is 0.0). */
+static inline double ail__fdivmod(double a, double b, int remainder) {
+    double r = fmod(a, b);
+    double q = (a - r) / b;
+    if (r != 0.0) {
+        if ((b < 0.0) != (r < 0.0)) { r += b; q -= 1.0; }
+    } else {
+        r = copysign(0.0, b);
+    }
+    if (q != 0.0) {
+        double lo = floor(q);
+        q = q - lo > 0.5 ? lo + 1.0 : lo;
+    } else {
+        q = copysign(0.0, a / b);
+    }
+    return remainder ? r : q;
+}
 static inline ail_obj ail_obj_floordiv(ail_obj a, ail_obj b) {
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t x = a.i, y = b.i;
@@ -10037,7 +10056,7 @@ static inline ail_obj ail_obj_floordiv(ail_obj a, ail_obj b) {
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         double x = ail__as_double(a), y = ail__as_double(b);
         if (y == 0.0) ail_raise_c(AIL_ERR_ZERODIV, "float floor division by zero");
-        return ail_box_float(floor(x / y));
+        return ail_box_float(ail__fdivmod(x, y, 0));
     }
     ail_raise_c(AIL_ERR_TYPE, "unsupported operand type(s) for //");
     return ail_box_none();
@@ -10054,9 +10073,7 @@ static inline ail_obj ail_obj_mod(ail_obj a, ail_obj b) {
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         double x = ail__as_double(a), y = ail__as_double(b);
         if (y == 0.0) ail_raise_c(AIL_ERR_ZERODIV, "float modulo");
-        double r = fmod(x, y);
-        if (r != 0.0 && ((r < 0) != (y < 0))) r += y;
-        return ail_box_float(r);
+        return ail_box_float(ail__fdivmod(x, y, 1));
     }
     ail_raise_c(AIL_ERR_TYPE, "unsupported operand type(s) for %%");
     return ail_box_none();
@@ -10569,10 +10586,14 @@ static inline ail_fmtspec ail__parse_fmtspec(ail_str spec) {
     int64_t i = 0, n = spec.n;
     char c0 = i < n ? (char)ail_chr(spec, i) : 0;
     char c1 = i + 1 < n ? (char)ail_chr(spec, i + 1) : 0;
-    if (n >= 2 && (c1 == '<' || c1 == '>' || c1 == '^')) { f.fill = c0; f.align = c1; i += 2; }
+    int fill_given = 0;
+    if (n >= 2 && (c1 == '<' || c1 == '>' || c1 == '^')) { f.fill = c0; f.align = c1; fill_given = 1; i += 2; }
     else if (n >= 1 && (c0 == '<' || c0 == '>' || c0 == '^')) { f.align = c0; i += 1; }
     if (i < n && (ail_chr(spec, i) == '+' || ail_chr(spec, i) == '-' || ail_chr(spec, i) == ' ')) i++;
-    if (i < n && ail_chr(spec, i) == '0') { if (!f.align) { f.align = '='; f.fill = '0'; } i++; }
+    /* CPython's '0' flag: the padding fills with zeros and '=' alignment is assumed, but only for
+       the parts not written: `{:<06d}` is '420000' (fill '0', align '<'), while `{:*<06d}` has a
+       fill character, so the '0' there is just the first digit of the width ('42****'). */
+    if (i < n && ail_chr(spec, i) == '0') { if (!f.align) f.align = '='; if (!fill_given) f.fill = '0'; i++; }
     while (i < n && ail_chr(spec, i) >= '0' && ail_chr(spec, i) <= '9') { f.width = f.width * 10 + (int)(ail_chr(spec, i) - '0'); i++; }
     if (i < n && ail_chr(spec, i) == '.') {
         i++; f.has_prec = 1; f.prec = 0;
@@ -10586,7 +10607,7 @@ static inline ail_str ail__pad(const char *content, int64_t clen, ail_fmtspec f,
     int64_t pad = f.width - clen; if (pad < 0) pad = 0;
     uint16_t *q = ail_str_alloc_buf(clen + pad);
     int64_t o = 0;
-    if (align == '=' && numeric && clen > 0 && (content[0] == '-' || content[0] == '+')) {
+    if (align == '=' && numeric && clen > 0 && (content[0] == '-' || content[0] == '+' || content[0] == ' ')) {
         q[o++] = content[0];
         for (int64_t k = 0; k < pad; k++) q[o++] = (unsigned char)f.fill;
         for (int64_t k = 1; k < clen; k++) q[o++] = (unsigned char)content[k];
@@ -14716,6 +14737,24 @@ static inline ail_st ail_op_mul(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)
     char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for *: '%s' and '%s'", ail_type_name(a.tag), ail_type_name(b.tag));
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
 }
+/* CPython's float_divmod (see ail__fdivmod in the OBJ fragment): remainder first, then a quotient
+   snapped from it, so `6.0 // 0.4` is 14.0 and a zero remainder has the divisor's sign. */
+static inline double ail__op_fdivmod(double a, double b, int remainder) {
+    double r = fmod(a, b);
+    double q = (a - r) / b;
+    if (r != 0.0) {
+        if ((b < 0.0) != (r < 0.0)) { r += b; q -= 1.0; }
+    } else {
+        r = copysign(0.0, b);
+    }
+    if (q != 0.0) {
+        double lo = floor(q);
+        q = q - lo > 0.5 ? lo + 1.0 : lo;
+    } else {
+        q = copysign(0.0, a / b);
+    }
+    return remainder ? r : q;
+}
 static inline ail_st ail_op_floordiv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t x = a.i, y = b.i;
@@ -14728,7 +14767,7 @@ static inline ail_st ail_op_floordiv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_o
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         double x = ail__as_double(a), y = ail__as_double(b);
         if (y == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "float floor division by zero");
-        *out = ail_box_float(cx, floor(x / y)); return AIL_OK;
+        *out = ail_box_float(cx, ail__op_fdivmod(x, y, 0)); return AIL_OK;
     }
     return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for //");
 }
@@ -14744,9 +14783,7 @@ static inline ail_st ail_op_mod(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         double x = ail__as_double(a), y = ail__as_double(b);
         if (y == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "float modulo");
-        double r = fmod(x, y);
-        if (r != 0.0 && ((r < 0) != (y < 0))) r += y;
-        *out = ail_box_float(cx, r); return AIL_OK;
+        *out = ail_box_float(cx, ail__op_fdivmod(x, y, 1)); return AIL_OK;
     }
     return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %");
 }
@@ -16252,10 +16289,14 @@ static inline ail_fmtspec ail__parse_fmtspec(ail_str spec) {
     int64_t i = 0, n = spec.n;
     char c0 = i < n ? (char)ail_chr(spec, i) : 0;
     char c1 = i + 1 < n ? (char)ail_chr(spec, i + 1) : 0;
-    if (n >= 2 && (c1 == '<' || c1 == '>' || c1 == '^')) { f.fill = c0; f.align = c1; i += 2; }
+    int fill_given = 0;
+    if (n >= 2 && (c1 == '<' || c1 == '>' || c1 == '^')) { f.fill = c0; f.align = c1; fill_given = 1; i += 2; }
     else if (n >= 1 && (c0 == '<' || c0 == '>' || c0 == '^')) { f.align = c0; i += 1; }
     if (i < n && (ail_chr(spec, i) == '+' || ail_chr(spec, i) == '-' || ail_chr(spec, i) == ' ')) { if (ail_chr(spec, i) != '-') f.sign = (char)ail_chr(spec, i); i++; }
-    if (i < n && ail_chr(spec, i) == '0') { if (!f.align) { f.align = '='; f.fill = '0'; } i++; }
+    /* CPython's '0' flag: the padding fills with zeros and '=' alignment is assumed, but only for
+       the parts not written: `{:<06d}` is '420000' (fill '0', align '<'), while `{:*<06d}` has a
+       fill character, so the '0' there is just the first digit of the width ('42****'). */
+    if (i < n && ail_chr(spec, i) == '0') { if (!f.align) f.align = '='; if (!fill_given) f.fill = '0'; i++; }
     while (i < n && ail_chr(spec, i) >= '0' && ail_chr(spec, i) <= '9') { f.width = f.width * 10 + (int)(ail_chr(spec, i) - '0'); i++; }
     if (i < n && (ail_chr(spec, i) == ',' || ail_chr(spec, i) == '_')) { f.group = (char)ail_chr(spec, i); i++; }
     if (i < n && ail_chr(spec, i) == '.') { i++; f.has_prec = 1; f.prec = 0; while (i < n && ail_chr(spec, i) >= '0' && ail_chr(spec, i) <= '9') { f.prec = f.prec * 10 + (int)(ail_chr(spec, i) - '0'); i++; } }
@@ -16267,7 +16308,8 @@ static inline ail_obj ail__pad(ail_ctx *cx, const char *content, int64_t clen, a
     int64_t pad = f.width - clen; if (pad < 0) pad = 0;
     ail_strbuild bu = ail_str_buf(cx, clen + pad);
     int64_t o = 0;
-    if (align == '=' && numeric && clen > 0 && (content[0] == '-' || content[0] == '+')) {
+    if (align == '=' && numeric && clen > 0 && (content[0] == '-' || content[0] == '+' || content[0] == ' ')) {
+        /* the sign (a '-' or the ' ' / '+' flag) stays left of the zeros: `'% 08.3f'` is ' 001.500' */
         bu.buf[o++] = content[0];
         for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (unsigned char)f.fill;
         for (int64_t k = 1; k < clen; k++) bu.buf[o++] = (unsigned char)content[k];

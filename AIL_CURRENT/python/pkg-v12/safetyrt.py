@@ -662,18 +662,22 @@ static inline ail_obj ail2f_done(ail_ctx *cx, ail2f_buf *b) {
     free(b->p); b->p = NULL;
     return ail_str_buf_done(bu, b->n);
 }
-typedef struct { uint16_t fill; char align, sign; int alt, zero, has_width, has_prec; int64_t width, prec; char group, type; } ail2f_spec;
+typedef struct { uint16_t fill; char align, sign; int alt, zero, fill_given, has_width, has_prec; int64_t width, prec; char group, type; } ail2f_spec;
 /* 0, or -1 with the ValueError text in msg */
 static inline int ail2f_parse(ail_str s, ail2f_spec *f, char *msg, size_t msz) {
     memset(f, 0, sizeof *f); f->fill = ' ';
     int64_t i = 0, n = s.n;
     #define AIL2F_ALIGN(c) ((c) == '<' || (c) == '>' || (c) == '=' || (c) == '^')
-    if (n >= 2 && AIL2F_ALIGN(ail_chr(s, 1))) { f->fill = ail_chr(s, 0); f->align = (char)ail_chr(s, 1); i = 2; }
+    if (n >= 2 && AIL2F_ALIGN(ail_chr(s, 1))) { f->fill = ail_chr(s, 0); f->align = (char)ail_chr(s, 1); f->fill_given = 1; i = 2; }
     else if (n >= 1 && AIL2F_ALIGN(ail_chr(s, 0))) { f->align = (char)ail_chr(s, 0); i = 1; }
     if (i < n && (ail_chr(s, i) == '+' || ail_chr(s, i) == '-' || ail_chr(s, i) == ' ')) f->sign = (char)ail_chr(s, i++);
     if (i < n && ail_chr(s, i) == 'z') i++;
     if (i < n && ail_chr(s, i) == '#') { f->alt = 1; i++; }
-    if (i < n && ail_chr(s, i) == '0') { f->zero = 1; i++; }
+    /* CPython's '0' flag: the padding fills with zeros, but only where the spec did not write a
+       fill character -- `{:<06d}` is '420000' and `{:*<06d}` is '42****' (there the '0' is the
+       first digit of the width). The '=' alignment the flag implies is added by the padding code
+       (ail2f_pad_num), not here: a written alignment must stay visible to the str checks. */
+    if (i < n && ail_chr(s, i) == '0') { f->zero = 1; if (!f->fill_given) f->fill = '0'; i++; }
     while (i < n && ail_chr(s, i) >= '0' && ail_chr(s, i) <= '9') {
         f->has_width = 1;
         if (f->width > 100000000) { snprintf(msg, msz, "Too many decimal digits in format string"); return -1; }
@@ -698,8 +702,16 @@ static inline int ail2f_parse(ail_str s, ail2f_spec *f, char *msg, size_t msz) {
     }
     return 0;
 }
+/* The fill in effect: the '0' flag fills with zeros only where no fill character was written
+   (`{:*<06d}` has fill '*' -- its '0' is the first digit of the width). */
+static inline uint16_t ail2f_zfill(ail2f_spec *f) {
+    return (f->zero && !f->fill_given) ? (uint16_t)'0' : f->fill;
+}
 /* body is the digits (and point / exponent) without sign; prefix is "0x" etc. Numbers: default align '>' */
 static inline ail_obj ail2f_pad_num(ail_ctx *cx, const char *sign, const char *prefix, const char *body, ail2f_spec *f) {
+    /* numbers default to '>' alignment, or to '=' when the '0' flag asked for zero padding */
+    char align = f->align ? f->align : (f->zero ? '=' : '>');
+    uint16_t fill = ail2f_zfill(f);
     /* grouping of the integer digits */
     char grouped[512]; const char *b = body;
     if (f->group) {
@@ -709,8 +721,9 @@ static inline ail_obj ail2f_pad_num(ail_ctx *cx, const char *sign, const char *p
         int every = (f->type == 'x' || f->type == 'X' || f->type == 'b' || f->type == 'o') ? 4 : 3;
         int64_t o = 0;
         int64_t zero_width = 0;
-        if (f->zero && !f->align) {
-            /* with '0' padding the grouping covers the padding too */
+        if (align == '=' && fill == '0') {
+            /* '=' alignment with a zero fill: the grouping covers the padding zeros too
+               (CPython: '{:08,d}'.format(1234) is '0,001,234', '{:<08,d}' is '1,234000') */
             zero_width = f->width - (int64_t)strlen(sign) - (int64_t)strlen(prefix) - (blen - ip);
         }
         int64_t digits = ip, total = digits;
@@ -729,8 +742,6 @@ static inline ail_obj ail2f_pad_num(ail_ctx *cx, const char *sign, const char *p
         b = grouped;
     }
     int64_t len = (int64_t)strlen(sign) + (int64_t)strlen(prefix) + (int64_t)strlen(b);
-    char align = f->align ? f->align : (f->zero ? '=' : '>');
-    uint16_t fill = (f->zero && !f->align) ? '0' : f->fill;
     int64_t pad = f->width > len ? f->width - len : 0;
     int64_t left = align == '>' ? pad : align == '^' ? pad / 2 : 0;
     int64_t right = align == '<' ? pad : align == '^' ? pad - pad / 2 : 0;
@@ -745,7 +756,7 @@ static inline ail_obj ail2f_pad_num(ail_ctx *cx, const char *sign, const char *p
 }
 static inline ail_obj ail2f_pad_str(ail_ctx *cx, ail_str s, int64_t len, ail2f_spec *f, char dflt) {
     char align = f->align ? f->align : dflt;
-    uint16_t fill = (f->zero && !f->align) ? '0' : f->fill;
+    uint16_t fill = ail2f_zfill(f);
     int64_t pad = f->width > len ? f->width - len : 0;
     int64_t left = align == '>' ? pad : align == '^' ? pad / 2 : 0;
     ail2f_buf o = {0, 0, 0};
@@ -947,8 +958,10 @@ static inline ail_st ail2f_percent(ail_ctx *cx, ail_obj *out, ail_obj fmtobj, ai
                 arg = args; ai++;
             }
         }
-        if (left) f.align = '<'; else f.align = '>';
-        if (f.zero && !left) { f.align = 0; }
+        /* '-' and '0' together: CPython's %-formatting IGNORES the '0' flag next to '-'
+           ("%-08d" % 255 is '255     '), so the padding is spaces there. */
+        if (left) { f.align = '<'; f.zero = 0; } else f.align = '>';
+        if (f.zero) { f.align = 0; }
         f.has_width = f.width > 0;
         ail_obj piece;
         if (t == 's' || t == 'r' || t == 'a') {

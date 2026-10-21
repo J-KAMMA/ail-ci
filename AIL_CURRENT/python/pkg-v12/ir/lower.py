@@ -2300,13 +2300,18 @@ class Lowering(TextLowering):
         if f == 'abs' and len(args) == 1:
             v = self.expr(args[0])
             if v.type == I.F64:
+                # abs(-0.0) is +0.0: `v < 0 ? -v : v` would keep the sign of a negative zero
+                zero = self.const(I.F64, 0.0)
                 neg = self.b.value('fneg', [v], I.F64)
+                iszero = self.b.value('cmp.eq', [v, zero], I.I1)
+                pos = self.b.value('select', [iszero, zero, v], I.F64)
             else:
                 v = self.coerce(v, I.I64)
+                zero = self.const(I.I64, 0)
                 neg = self.b.value('neg', [v], I.I64, {'mode': 'ck' if self.strict else 'nsw'})
-            zero = self.const(v.type, 0.0 if v.type == I.F64 else 0)
+                pos = v
             c = self.b.value('cmp.lt', [v, zero], I.I1)
-            return self.b.value('select', [c, neg, v], v.type)
+            return self.b.value('select', [c, neg, pos], v.type)
         if f in ('min', 'max') and len(args) == 2:
             a, b = self.expr(args[0]), self.expr(args[1])
             t = I.F64 if I.F64 in (a.type, b.type) else I.I64

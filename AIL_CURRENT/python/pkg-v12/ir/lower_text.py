@@ -233,6 +233,14 @@ class TextLowering(object):
     def fmt_value(self, val_node, kind, spec, orig_text, str_default_align):
         """The runtime formatter call for a parsed spec (legacy `_fmt_build`)."""
         P = self.P
+        if P._fmt_general_needed(spec, kind):
+            # A sign, '#', grouping, a fill character, an int/float type other than 'd'/'f', or
+            # the '0' flag next to an explicit alignment: the three small formatters cannot
+            # express those -- `ail_fmt_spec_int`'s zero flag pads left of the sign and ignores
+            # the alignment, so `f"{n:<06d}"` came out '000042' and `f"{n:,d}"` lost its commas.
+            # Leave the field to the legacy emitter, whose `_fmt_build` calls the general
+            # formatter (`ail_fmt_gen`) for exactly these specs.
+            raise self.NotS0('a format spec the small formatters cannot express')
         P._resolve_fmt_type(spec, kind, orig_text, 'an f-string field with spec')
         width = spec['width'] or 0
         zero = 1 if spec['zero'] else 0

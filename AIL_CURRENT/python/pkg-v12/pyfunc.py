@@ -8300,6 +8300,9 @@ def _percent_pieces(fmt_text):
                               "specifier" % fmt_text)
         typ = fmt_text[k]
         k += 1
+        if leftalign:
+            # CPython's %-formatting ignores the '0' flag next to '-': "%-08d" % 255 is '255     '
+            zero = False
         pieces.append(('spec', {'leftalign': leftalign, 'zero': zero, 'width': width,
                                  'precision': precision, 'type': typ,
                                  'src': fmt_text[i:k]}))
@@ -16452,17 +16455,20 @@ def _call(node, ctx):
         return '((%s) %s (%s) ? (%s) : (%s))' % (x, '<' if f == 'min' else '>', y, x, y)
     if f == 'abs' and len(a) == 1:
         inner = rec(a[0])
+        isflt = _etype(a[0], ctx) == FLT
         strict_int = ctx.need is not None and not _neg_is_float(a[0], ctx)
         if strict_int:
             _use(ctx.need, 'ck_neg')
         neg = 'ck_neg(%s)' if strict_int else '-(%s)'
+        # abs(-0.0) is +0.0 in CPython: `x < 0 ? -x : x` would hand the negative zero back
+        pos = '((%s) == 0.0 ? 0.0 : (%s))' if isflt else '%s'
         if _calls(a[0]) and _etype(a[0], ctx) in NUM:
             ctx.tmp += 1
             p = '_ab%d' % ctx.tmp
-            return ('({ %s %s = %s; ((%s) < 0 ? %s : (%s)); })'
-                    % ('double' if _etype(a[0], ctx) == FLT else 'int64_t',
-                       p, inner, p, neg % p, p))
-        return '((%s) < 0 ? %s : (%s))' % (inner, neg % inner, inner)
+            return ('({ %s %s = %s; ((%s) < 0 ? %s : %s); })'
+                    % ('double' if isflt else 'int64_t',
+                       p, inner, p, neg % p, pos % (p, p) if isflt else pos % p))
+        return ('((%s) < 0 ? %s : %s)' % (inner, neg % inner, pos % (inner, inner) if isflt else pos % inner))
     if _is_fileprim_call(node, ctx, 'int') or _is_fileprim_call(node, ctx, 'float'):
         return _fileprim_value(node, ctx)
     if f in _AIL_CLOCK and f not in ctx.funcs:
