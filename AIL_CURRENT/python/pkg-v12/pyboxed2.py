@@ -8535,41 +8535,57 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.check()
         return 'ail_box_none()'
 
+    def _str_window_bounds(self, args, ctx):
+        """Emit the optional start/end arguments of a str search and return
+        (has_lo, lo, has_hi, hi) as C expressions. CPython treats a None bound as
+        "from the start" / "to the end", and the value may arrive through a variable,
+        list item, attribute or call, so the tag is tested at run time."""
+        out = []
+        for pos in (1, 2):
+            if len(args) <= pos:
+                out.extend(('0', '0'))
+                continue
+            b = ctx.tmp()
+            ctx.emit('%s = %s;' % (b, self.expr(args[pos], ctx)))
+            out.extend(('(%s.tag != AIL_T_NONE)' % b,
+                        '((%s.tag != AIL_T_NONE) ? (%s).i : 0)' % (b, b)))
+        return out
+
     def _m_index(self, recv, kind, args, kwargs, ctx):
         v = self.expr(args[0], ctx)
-        has_lo = len(args) > 1
-        lo = '(%s).i' % self.expr(args[1], ctx) if has_lo else '0'
-        has_hi = len(args) > 2
-        hi = '(%s).i' % self.expr(args[2], ctx) if has_hi else '0'
         t = ctx.tmp()
 
-        def mk(fn):
+        def mk(fn, none_is_default):
             def do(c):
+                if none_is_default:
+                    has_lo, lo, has_hi, hi = self._str_window_bounds(args, c)
+                else:
+                    has_lo = '1' if len(args) > 1 else '0'
+                    lo = '(%s).i' % self.expr(args[1], c) if len(args) > 1 else '0'
+                    has_hi = '1' if len(args) > 2 else '0'
+                    hi = '(%s).i' % self.expr(args[2], c) if len(args) > 2 else '0'
                 ix = c.new_cvar('ix')
                 c.emit('int64_t %s;' % ix)
-                c.emit('st = %s(cx, &%s, %s, %s, %d, %s, %d, %s); if (st != AIL_OK) goto %s;' %
+                c.emit('st = %s(cx, &%s, %s, %s, %s, %s, %s, %s); if (st != AIL_OK) goto %s;' %
                       (fn, ix, recv, v, has_lo, lo, has_hi, hi, c.cur_err_target()))
                 c.uses_st = True
                 c.emit('%s = ail_box_int(%s);' % (t, ix))
             return do
 
         self._tag_branch(ctx, recv, kind, {
-            'str': mk('ail_meth_str_index'),
-            'list': mk('ail_meth_list_index'),
-            'tuple': mk('ail_meth_tuple_index'),
+            'str': mk('ail_meth_str_index', True),
+            'list': mk('ail_meth_list_index', False),
+            'tuple': mk('ail_meth_tuple_index', False),
         }, "object has no attribute 'index'", nargs=len(args))
         return t
 
     def _m_count(self, recv, kind, args, kwargs, ctx):
         v = self.expr(args[0], ctx)
-        has_lo = len(args) > 1
-        lo = '(%s).i' % self.expr(args[1], ctx) if has_lo else '0'
-        has_hi = len(args) > 2
-        hi = '(%s).i' % self.expr(args[2], ctx) if has_hi else '0'
         t = ctx.tmp()
 
         def do_str(c):
-            c.emit('%s = ail_box_int(ail_meth_str_count(%s, %s, %d, %s, %d, %s));' %
+            has_lo, lo, has_hi, hi = self._str_window_bounds(args, c)
+            c.emit('%s = ail_box_int(ail_meth_str_count(%s, %s, %s, %s, %s, %s));' %
                    (t, recv, v, has_lo, lo, has_hi, hi))
 
         def mk_vec(fn):
@@ -9056,17 +9072,14 @@ class Compiler(boxclosure.ClosureMixin):
         array -- a non-str scalar then raises CPython's own TypeError inside the callee."""
         v = ctx.new_cvar('sw')
         ctx.emit('ail_obj %s = %s;' % (v, self.expr(args[0], ctx)))
-        has_lo = len(args) > 1
-        lo = '(%s).i' % self.expr(args[1], ctx) if has_lo else '0'
-        has_hi = len(args) > 2
-        hi = '(%s).i' % self.expr(args[2], ctx) if has_hi else '0'
+        has_lo, lo, has_hi, hi = self._str_window_bounds(args, ctx)
         arr, px, np, b = (ctx.new_cvar(x) for x in ('swa', 'swp', 'swn', 'swb'))
         ctx.emit('ail_obj %s[1], *%s; int64_t %s; int %s;' % (arr, px, np, b))
         ctx.emit('if (%s.tag == AIL_T_TUPLE) { %s = ((ail_vecobj *)%s.o)->p; %s = ((ail_vecobj *)%s.o)->n; }'
                  % (v, px, v, np, v))
         ctx.emit('else { %s[0] = %s; %s = %s; %s = 1; }' % (arr, v, px, arr, np))
         t = ctx.tmp()
-        ctx.emit('st = %s(cx, &%s, %s, %s, %s, %d, %s, %d, %s);' %
+        ctx.emit('st = %s(cx, &%s, %s, %s, %s, %s, %s, %s, %s);' %
                  (fn, b, recv, px, np, has_lo, lo, has_hi, hi))
         ctx.check()
         ctx.emit('%s = ail_box_bool(%s);' % (t, b))
@@ -9074,36 +9087,27 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _m_find(self, recv, kind, args, kwargs, ctx):
         v = self.expr(args[0], ctx)
-        has_lo = len(args) > 1
-        lo = '(%s).i' % self.expr(args[1], ctx) if has_lo else '0'
-        has_hi = len(args) > 2
-        hi = '(%s).i' % self.expr(args[2], ctx) if has_hi else '0'
+        has_lo, lo, has_hi, hi = self._str_window_bounds(args, ctx)
         t = ctx.tmp()
-        ctx.emit('%s = ail_box_int(ail_meth_str_find(%s, %s, %d, %s, %d, %s));' %
+        ctx.emit('%s = ail_box_int(ail_meth_str_find(%s, %s, %s, %s, %s, %s));' %
                  (t, recv, v, has_lo, lo, has_hi, hi))
         return t
 
     def _m_rfind(self, recv, kind, args, kwargs, ctx):
         v = self.expr(args[0], ctx)
-        has_lo = len(args) > 1
-        lo = '(%s).i' % self.expr(args[1], ctx) if has_lo else '0'
-        has_hi = len(args) > 2
-        hi = '(%s).i' % self.expr(args[2], ctx) if has_hi else '0'
+        has_lo, lo, has_hi, hi = self._str_window_bounds(args, ctx)
         t = ctx.tmp()
-        ctx.emit('%s = ail_box_int(ail_meth_str_rfind(%s, %s, %d, %s, %d, %s));' %
+        ctx.emit('%s = ail_box_int(ail_meth_str_rfind(%s, %s, %s, %s, %s, %s));' %
                  (t, recv, v, has_lo, lo, has_hi, hi))
         return t
 
     def _m_rindex(self, recv, kind, args, kwargs, ctx):
         v = self.expr(args[0], ctx)
-        has_lo = len(args) > 1
-        lo = '(%s).i' % self.expr(args[1], ctx) if has_lo else '0'
-        has_hi = len(args) > 2
-        hi = '(%s).i' % self.expr(args[2], ctx) if has_hi else '0'
+        has_lo, lo, has_hi, hi = self._str_window_bounds(args, ctx)
         t = ctx.tmp()
         ix = ctx.new_cvar('ix')
         ctx.emit('int64_t %s;' % ix)
-        ctx.emit('st = ail_meth_str_rindex(cx, &%s, %s, %s, %d, %s, %d, %s); if (st != AIL_OK) goto %s;' %
+        ctx.emit('st = ail_meth_str_rindex(cx, &%s, %s, %s, %s, %s, %s, %s); if (st != AIL_OK) goto %s;' %
                  (ix, recv, v, has_lo, lo, has_hi, hi, ctx.cur_err_target()))
         ctx.uses_st = True
         ctx.emit('%s = ail_box_int(%s);' % (t, ix))
