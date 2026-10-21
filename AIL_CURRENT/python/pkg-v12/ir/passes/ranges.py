@@ -340,12 +340,17 @@ class Analysis(object):
                 op.startswith('cmp.') and self.const(ins.operands[1]) is None):
             self.decide_cmp(ins, env)
         if op == 'span.set':
-            if ins.attrs.get('mode') == 'ck' or ins in self.decision:
-                ok = self.in_bounds(env, ins.operands[0], ins.operands[1], ins)
-                if ok and ins.operands[0].type == I.T('span', I.T('u8')):
+            mode = ins.attrs.get('mode')
+            if mode in ('ck', 'vck') or ins in self.decision:
+                # a byte store has two checks: the index (vck: already proven by licm's guard) and
+                # the value; with only the index proven it keeps the value check (vck)
+                idx_ok = mode == 'vck' or self.in_bounds(env, ins.operands[0], ins.operands[1], ins)
+                byte = ins.operands[0].type == I.T('span', I.T('u8'))
+                val_ok = True
+                if byte:
                     vlo, vhi = self.bounds(env, ins.operands[2])
-                    ok = 0 <= vlo and vhi <= 255
-                self.decision[ins] = 'nck' if ok else 'ck'
+                    val_ok = 0 <= vlo and vhi <= 255
+                self.decision[ins] = 'nck' if idx_ok and val_ok else 'vck' if idx_ok and byte else 'ck'
             return
         if not ins.results or ins.regions:
             return
@@ -582,11 +587,13 @@ def run(fn, facts=None):
         if ins.op in ('floordiv', 'floormod') and analysis.decision.get(ins) == 'nonneg':
             ins.attrs['mode'] = 'nonneg'
         if ins.op in ('bytes.get', 'span.get', 'span.set'):
-            if ins.op == 'span.set' and ins.attrs.get('mode') == 'ck':
+            if ins.op == 'span.set' and ins.attrs.get('mode') in ('ck', 'vck'):
                 idx_total += 1
-                if analysis.decision.get(ins) == 'nck':
-                    ins.attrs['mode'] = 'nck'
-                    idx_new += 1
+                d = analysis.decision.get(ins)
+                if d == 'nck' or (d == 'vck' and ins.attrs['mode'] == 'ck'):
+                    if ins.attrs['mode'] == 'ck':
+                        idx_new += 1
+                    ins.attrs['mode'] = d
             elif ins.op == 'span.set':
                 idx_legacy += 1
             elif ins.attrs.get('mode') == 'ck':
