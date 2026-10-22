@@ -1,5 +1,14 @@
 # Development log
 
+## 2026-10-22 -- C169 review fix: self-referential receivers no longer recurse
+
+Passing the same `seen` set through `value_class`/`attribute_class` into `name_class` makes a
+receiver that is re-bound through its own attribute (`b = b.other`, or a chain of such bindings)
+resolve to unknown instead of restarting the walk with a fresh set and overflowing the stack.
+The general path then answers CPython's result; the typed-only build refuses the self-referential
+class by name.  `test_ail_c169.py` adds the cycle case for both general/default builds and asserts
+the typed path's named refusal.
+
 ## 2026-10-22 -- C169 review fixes: receiver class and rebinding in typed bounds
 
 The typed list lowering now resolves an `obj.field` index bound against the receiver's visible

@@ -32478,7 +32478,7 @@ class _ListLowering:
         if isinstance(node, ast.Name):
             return self.index_name_kind(node.id, seen)
         if isinstance(node, ast.Attribute):
-            cls = self.attribute_class(node.value)
+            cls = self.attribute_class(node.value, seen)
             if cls is None:
                 return None
             kind = self.evidence.class_fields.get(cls, {}).get(node.attr)
@@ -32510,7 +32510,7 @@ class _ListLowering:
         if isinstance(node, ast.Name):
             return self.name_class(node.id, seen)
         if isinstance(node, ast.Attribute):
-            cls = self.attribute_class(node.value)
+            cls = self.attribute_class(node.value, seen)
             if cls is None:
                 return None
             kind = self.evidence.class_fields.get(cls, {}).get(node.attr)
