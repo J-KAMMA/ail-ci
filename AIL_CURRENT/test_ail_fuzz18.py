@@ -164,6 +164,10 @@ class Num:
         return self.v + 0.25
 
 
+class Bad:
+    pass
+
+
 def show(label, fn):
     try:
         print(label, repr(fn()))
@@ -178,6 +182,8 @@ def main():
     show('fabs fraction', lambda: math.fabs(Fraction(-1, 2)))
     show('floor fraction', lambda: math.floor(Fraction(7, 2)))
     show('ceil fraction', lambda: math.ceil(Fraction(7, 2)))
+    show('floor fraction near1', lambda: math.floor(Fraction(2 ** 53 + 1, 2 ** 53)))
+    show('ceil fraction near1', lambda: math.ceil(Fraction(2 ** 53 + 1, 2 ** 53)))
     show('copysign fraction', lambda: math.copysign(half, -1.0))
     show('fsum fraction', lambda: math.fsum([half, Fraction(1, 3)]))
     n = Num(2.0)
@@ -188,6 +194,10 @@ def main():
     show('ceil floatdunder', lambda: math.ceil(n))
     show('copysign floatdunder', lambda: math.copysign(n, 1.0))
     show('fsum floatdunder', lambda: math.fsum([n]))
+    show('sin bad object', lambda: math.sin(Bad()))
+    show('fsum bad object', lambda: math.fsum([Bad()]))
+    show('floor bad object', lambda: math.floor(Bad()))
+    show('ceil bad object', lambda: math.ceil(Bad()))
     for bad in ('a', None):
         show('sin ' + repr(bad), lambda bad=bad: math.sin(bad))
         show('fsum ' + repr(bad), lambda bad=bad: math.fsum([bad]))

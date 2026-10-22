@@ -1186,15 +1186,18 @@ _MATH_HELPERS['checknum'] = (
     'def _ail_math_checknum(x: float) -> float:\n'
     '    if isinstance(x, (int, float)):\n'
     '        return float(x)\n'
-    '    if isinstance(x, str) or type(x).__name__ in ("bytes", "bytearray"):\n'
-    '        raise TypeError("must be real number, not " + type(x).__name__)\n'
-    '    try:\n'
-    '        return float(x)\n'
-    '    except TypeError:\n'
-    '        raise TypeError("must be real number, not " + type(x).__name__)\n')
-# math.floor / math.ceil keep int arguments as they are and leave __floordiv__ to an object that has
-# one (Fraction); a float is converted after the infinity / NaN checks that int() makes, and any other
-# object with only __float__ / __index__ goes through checknum.
+    '    if not isinstance(x, (int, float)):\n'
+    '        name = type(x).__name__\n'
+    '        if name in ("str", "bytes", "bytearray", "complex", "list", "tuple", "dict", "set",\n'
+    '                    "frozenset", "range", "slice", "memoryview", "NoneType"):\n'
+    '            raise TypeError("must be real number, not " + name)\n'
+    '        if hasattr(x, "__float__") or hasattr(x, "__index__"):\n'
+    '            return float(x)\n'
+    '        raise TypeError("must be real number, not " + name)\n'
+    '    return float(x)\n')
+# math.floor / math.ceil keep int arguments (and bool as 0 / 1), use an object's own __floordiv__
+# when it has one (Fraction stays exact), and otherwise convert through checknum.  A float is
+# checked for NaN / infinity before int() so the message and exception match CPython.
 _MATH_HELPERS['floor'] = (
     'def _ail_math_floor(x: float) -> int:\n'
     '    if isinstance(x, float):\n'
@@ -1205,10 +1208,12 @@ _MATH_HELPERS['floor'] = (
     '        return int(x // 1)\n'
     '    if isinstance(x, int):\n'
     '        return int(x)\n'
-    '    try:\n'
-    '        return int(x // 1)\n'
-    '    except TypeError:\n'
-    '        return _ail_math_floor(_ail_math_checknum(x))\n')
+    '    if not isinstance(x, (int, float)):\n'
+    '        y = _ail_math_checknum(x)\n'
+    '        if hasattr(x, "__floordiv__"):\n'
+    '            return int(x // 1)\n'
+    '        return _ail_math_floor(y)\n'
+    '    return int(x)\n')
 _MATH_HELPERS['ceil'] = (
     'def _ail_math_ceil(x: float) -> int:\n'
     '    if isinstance(x, float):\n'
@@ -1219,10 +1224,12 @@ _MATH_HELPERS['ceil'] = (
     '        return -int(-x // 1)\n'
     '    if isinstance(x, int):\n'
     '        return int(x)\n'
-    '    try:\n'
-    '        return -int(-x // 1)\n'
-    '    except TypeError:\n'
-    '        return _ail_math_ceil(_ail_math_checknum(x))\n')
+    '    if not isinstance(x, (int, float)):\n'
+    '        y = _ail_math_checknum(x)\n'
+    '        if hasattr(x, "__floordiv__"):\n'
+    '            return -int(-x // 1)\n'
+    '        return _ail_math_ceil(y)\n'
+    '    return int(x)\n')
 _MATH_DEPS = {'log2args': ('log',), 'comb': ('gcd',), 'lcm': ('gcd',), 'tw_fill': ('tw_wrap',)}
 for _name in (*_MATH_ONE, *_MATH_PREDICATES, *_MATH_PLAIN_TWO, 'sqrt', 'fabs', 'degrees', 'radians',
               'fmod', 'pow', 'fsum', 'floor', 'ceil'):
