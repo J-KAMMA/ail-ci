@@ -129,6 +129,11 @@ class Mod:
         self.bound_done = False
         self.bound_busy = False
         self.bound_partial = set()
+        self.top_def = set()            # names definitely bound when the body has run
+        self.top_poss = set()           # names bound on at least one path of the body
+        self.top_unknown = False        # a star import whose names cannot be read
+        self.top_done = False
+        self.top_busy = False
         self.analysed = False
         self.done = False
         self.lazy = {}                  # id(synthetic top-level import) -> the function-level import it stands for
@@ -207,6 +212,87 @@ def _scan_scope(nodes):
     for n in nodes:
         walk(n)
     return stores, globals_, nonlocals, sites
+
+
+def _target_names(target):
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, (ast.Tuple, ast.List)):
+        names = set()
+        for item in target.elts:
+            names |= _target_names(item)
+        return names
+    if isinstance(target, ast.Starred):
+        return _target_names(target.value)
+    return set()
+
+
+def _pattern_names(pattern):
+    if isinstance(pattern, (ast.MatchAs, ast.MatchStar)):
+        names = {pattern.name} if pattern.name else set()
+        if isinstance(pattern, ast.MatchAs) and pattern.pattern is not None:
+            names |= _pattern_names(pattern.pattern)
+        return names
+    if isinstance(pattern, ast.MatchMapping):
+        names = {pattern.rest} if pattern.rest else set()
+        for sub in pattern.patterns:
+            names |= _pattern_names(sub)
+        return names
+    if isinstance(pattern, ast.MatchSequence):
+        names = set()
+        for sub in pattern.patterns:
+            names |= _pattern_names(sub)
+        return names
+    if isinstance(pattern, ast.MatchClass):
+        names = set()
+        for sub in list(pattern.patterns) + list(pattern.kwd_patterns):
+            names |= _pattern_names(sub)
+        return names
+    if isinstance(pattern, ast.MatchOr):
+        names = set()
+        for sub in pattern.patterns:
+            names |= _pattern_names(sub)
+        return names
+    return set()
+
+
+def _safe_expr(node):
+    """True when evaluating `node` cannot raise (constants and containers of them)."""
+    if isinstance(node, ast.Constant):
+        return True
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        return all(_safe_expr(e) for e in node.elts)
+    if isinstance(node, ast.Dict):
+        return all(k is None or _safe_expr(k) for k in node.keys) and all(_safe_expr(v) for v in node.values)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Not)):
+        return _safe_expr(node.operand)
+    return False
+
+
+def _safe_stmt(node):
+    """True when executing this module-level statement cannot raise, so an `except` around it cannot run."""
+    if isinstance(node, (ast.Pass, ast.Global, ast.Nonlocal, ast.Break, ast.Continue)):
+        return True
+    if isinstance(node, ast.Expr):
+        return _safe_expr(node.value)
+    if isinstance(node, ast.Assign):
+        return all(isinstance(t, ast.Name) for t in node.targets) and _safe_expr(node.value)
+    if isinstance(node, ast.AnnAssign):
+        return isinstance(node.target, ast.Name) and (node.value is None or _safe_expr(node.value))
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return (not node.decorator_list and not _defaults(node.args) and not node.args.kw_defaults
+                and all(a.annotation is None for a in node.args.posonlyargs + node.args.args + node.args.kwonlyargs)
+                and node.args.vararg is None and node.args.kwarg is None and node.returns is None)
+    if isinstance(node, ast.If):
+        return _safe_expr(node.test) and all(_safe_stmt(n) for n in node.body + node.orelse)
+    if isinstance(node, ast.ClassDef):
+        return (not node.decorator_list and not node.bases and not node.keywords
+                and all(_safe_stmt(n) for n in node.body))
+    return False
+
+
+def _may_raise(nodes):
+    return not all(_safe_stmt(node) for node in nodes)
 
 
 def _function_locals(node):
@@ -1269,14 +1355,35 @@ class Program:
                         % (target.name, mod.path.name))
         imp.stars.append(target)
         bound = self.bound_names(target)
+        definite, possible = self._top_bindings(target)
         fn_only = self.fn_only(target)
-        for name in self.star_list(target, mod, node):
+        names = self.star_list(target, mod, node)
+        checked = set(names)
+        if target.all_names is not None:
+            checked |= set(target.all_names)
+        else:
+            checked |= {n for n in fn_only if not n.startswith('_')}
+        for name in sorted(checked):
             if name in fn_only:
                 self.refuse(mod, node, "`from %s import *`: %s creates %r only inside a function (a `global` "
                             "statement), so CPython's star import binds it only when that function has run by then; "
                             "this compiler cannot tell whether it has.\n"
                             "  write instead: bind %r at the top level of %s, or import it by name after the call "
                             "that creates it" % (target.name, target.path.name, name, name, target.path.name))
+        uncertain = possible - definite
+        if target.all_names is not None:
+            uncertain &= set(target.all_names)
+        else:
+            uncertain = {n for n in uncertain if not n.startswith('_')}
+        for name in sorted(uncertain - fn_only):
+            self.refuse(mod, node, "`from %s import *`: %s binds %r only on some paths through its body "
+                        "(a conditional `del`, an assignment in a branch or handler, or a loop that may not "
+                        "run), so CPython may or may not export it; this compiler needs it to be present or "
+                        "absent on every path.\n"
+                        "  write instead: bind or delete %r unconditionally in %s, or name what you use "
+                        "(`from %s import name`)" % (target.name, target.path.name, name, name,
+                                                      target.path.name, target.name))
+        for name in names:
             if name.startswith('_'):
                 self.refuse(mod, node, "`from %s import *` would bind the private name %s (it is listed in "
                             "__all__); this compiler refuses private names even though CPython allows them.\n"
@@ -1302,6 +1409,259 @@ class Program:
         top = _scan_scope(mod.tree.body)[0]
         return {n for node in ast.walk(mod.tree) if isinstance(node, ast.Global) for n in node.names} - top
 
+    def _top_bindings(self, mod):
+        """(definitely bound, possibly bound) module names after the body has run.
+
+        Branches are followed only when their test is a constant this compiler can fold; a `del` and
+        an `except ... as X` remove the name they cover, and a `global` inside a function binds
+        nothing by itself.  This is what `from m import *` copies: names that are only possibly
+        there cannot be read as one module global at build time."""
+        if mod.top_done:
+            return mod.top_def, mod.top_poss
+        if mod.top_busy:
+            return mod.top_def, mod.top_poss
+        mod.top_busy = True
+        unknown = [False]
+
+        def truth(test, env):
+            try:
+                return bool(self.fold(mod, test, collections.ChainMap(env)))
+            except (_Unfoldable, _Raises, RecursionError):
+                return None
+
+        def iter_kind(node, env):
+            try:
+                value = self.fold(mod, node, collections.ChainMap(env))
+                iterator = iter(value)
+            except (TypeError, _Unfoldable, _Raises, RecursionError):
+                return None
+            try:
+                next(iterator)
+            except StopIteration:
+                return 'empty'
+            except Exception:
+                return None
+            return 'nonempty'
+
+        def bind(state, names, definite=True):
+            d, p, env = state
+            p = set(p) | set(names)
+            return (set(d) | set(names) if definite else d), p, dict(env)
+
+        def unbind(state, names):
+            d, p, env = state
+            env = dict(env)
+            for name in names:
+                env.pop(name, None)
+            return set(d) - set(names), set(p) - set(names), env
+
+        def merge(states):
+            states = [state for state in states if state is not None]
+            if not states:
+                return None
+            definite = set(states[0][0])
+            possible = set()
+            for d, p, _ in states:
+                definite &= d
+                possible |= p
+            env = {}
+            keys = set(states[0][2])
+            for d, p, e in states[1:]:
+                keys &= set(e)
+            for key in keys:
+                value = states[0][2][key]
+                if value is _UNKNOWN:
+                    continue
+                if all(e[key] == value for _, _, e in states[1:]):
+                    env[key] = value
+            return definite, possible, env
+
+        def run_seq(nodes, state):
+            for node in nodes:
+                state, flow = run_node(node, state)
+                if flow != 'next':
+                    return state, False
+            return state, True
+
+        def run_if(node, state):
+            choice = truth(node.test, state[2])
+            if choice is True:
+                body_state, body_falls = run_seq(node.body, state)
+                return body_state, 'next' if body_falls else 'exit'
+            if choice is False:
+                else_state, else_falls = run_seq(node.orelse, state)
+                return else_state, 'next' if else_falls else 'exit'
+            body_state, body_falls = run_seq(node.body, state)
+            else_state, else_falls = run_seq(node.orelse, state)
+            paths = [s for s, falls in ((body_state, body_falls), (else_state, else_falls)) if falls]
+            merged = merge(paths)
+            if merged is None:
+                return merge([body_state, else_state]) or state, 'exit'
+            return merged, 'next'
+
+        def run_for(node, state):
+            zero_state, _ = run_seq(node.orelse, state)
+            kind = iter_kind(node.iter, state[2])
+            if kind == 'empty':
+                return zero_state, 'next'
+            body_state, body_falls = run_seq(node.body, state)
+            after_body, _ = run_seq(node.orelse, body_state)
+            if kind == 'nonempty' and body_falls:
+                return after_body, 'next'
+            return merge([after_body, zero_state]) or state, 'next'
+
+        def run_while(node, state):
+            zero_state, _ = run_seq(node.orelse, state)
+            choice = truth(node.test, state[2])
+            if choice is False:
+                return zero_state, 'next'
+            body_state, body_falls = run_seq(node.body, state)
+            after_body, _ = run_seq(node.orelse, body_state)
+            if choice is True and body_falls:
+                return after_body, 'next'
+            return merge([after_body, zero_state]) or state, 'next'
+
+        def run_try(node, state):
+            body_state, body_falls = run_seq(node.body, state)
+            normal = None
+            if body_falls:
+                if node.orelse:
+                    normal, _ = run_seq(node.orelse, body_state)
+                else:
+                    normal = body_state
+            paths = [normal] if normal is not None else []
+            if node.handlers and not (body_falls and not _may_raise(node.body)):
+                into = merge([state, body_state]) or state
+                for handler in node.handlers:
+                    handler_state, handler_falls = run_seq(handler.body, into)
+                    if handler.name:
+                        handler_state = unbind(handler_state, [handler.name])
+                    if handler_falls:
+                        paths.append(handler_state)
+            if node.finalbody and paths:
+                final_paths = []
+                for path in paths:
+                    after_final, final_falls = run_seq(node.finalbody, path)
+                    if final_falls:
+                        final_paths.append(after_final)
+                paths = final_paths
+            merged = merge(paths)
+            if merged is None:
+                return state, 'exit'
+            return merged, 'next'
+
+        def run_match(node, state):
+            paths = []
+            catch_all = False
+            for case in node.cases:
+                pattern = case.pattern
+                if isinstance(pattern, ast.MatchAs) and pattern.pattern is None:
+                    catch_all = True
+                case_state = bind(state, _pattern_names(pattern))
+                if case.guard is not None:
+                    choice = truth(case.guard, case_state[2])
+                    if choice is not False:
+                        body_state, _ = run_seq(case.body, case_state)
+                        paths.append(body_state)
+                    if choice is not True:
+                        paths.append(case_state)
+                else:
+                    body_state, _ = run_seq(case.body, case_state)
+                    paths.append(body_state)
+            if not catch_all:
+                paths.append(state)
+            return merge(paths) or state, 'next'
+
+        def run_node(node, state):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                return bind(state, [node.name]), 'next'
+            if isinstance(node, ast.Assign):
+                value = _UNKNOWN
+                if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                    try:
+                        value = self.fold(mod, node.value, collections.ChainMap(state[2]))
+                    except (_Unfoldable, _Raises, RecursionError):
+                        value = _UNKNOWN
+                names = set()
+                for target in node.targets:
+                    names |= _target_names(target)
+                new = bind(state, names)
+                if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                    new[2][node.targets[0].id] = value
+                else:
+                    for name in names:
+                        new[2][name] = _UNKNOWN
+                return new, 'next'
+            if isinstance(node, ast.AnnAssign):
+                if not isinstance(node.target, ast.Name):
+                    return state, 'next'
+                if node.value is None:
+                    return state, 'next'
+                try:
+                    value = self.fold(mod, node.value, collections.ChainMap(state[2]))
+                except (_Unfoldable, _Raises, RecursionError):
+                    value = _UNKNOWN
+                new = bind(state, [node.target.id])
+                new[2][node.target.id] = value
+                return new, 'next'
+            if isinstance(node, ast.AugAssign):
+                names = _target_names(node.target)
+                new = bind(state, names)
+                for name in names:
+                    new[2][name] = _UNKNOWN
+                return new, 'next'
+            if isinstance(node, ast.Delete):
+                names = set()
+                for target in node.targets:
+                    names |= _target_names(target)
+                return unbind(state, names), 'next'
+            if isinstance(node, ast.Import):
+                return bind(state, {a.asname or a.name.split('.')[0] for a in node.names}), 'next'
+            if isinstance(node, ast.ImportFrom):
+                if node.module == '__future__':
+                    return state, 'next'
+                if any(a.name == '*' for a in node.names):
+                    names = set()
+                    imp = mod.imps.get(id(node))
+                    for target in (imp.stars if imp is not None else ()):
+                        bound = self.bound_names(target)
+                        if bound is None:
+                            unknown[0] = True
+                        else:
+                            names |= set(self.star_list(target, mod, node))
+                    return bind(state, names), 'next'
+                return bind(state, {a.asname or a.name for a in node.names}), 'next'
+            if isinstance(node, ast.If):
+                return run_if(node, state)
+            if isinstance(node, (ast.For, ast.AsyncFor)):
+                return run_for(node, state)
+            if isinstance(node, ast.While):
+                return run_while(node, state)
+            if isinstance(node, (ast.With, ast.AsyncWith)):
+                for item in node.items:
+                    state = bind(state, _target_names(item.optional_vars)) if item.optional_vars is not None else state
+                body_state, body_falls = run_seq(node.body, state)
+                return body_state, 'next' if body_falls else 'exit'
+            if isinstance(node, ast.Try):
+                return run_try(node, state)
+            if isinstance(node, ast.Match):
+                return run_match(node, state)
+            if isinstance(node, (ast.Raise, ast.Return)):
+                return state, 'exit'
+            if isinstance(node, ast.Break):
+                return state, 'break'
+            if isinstance(node, ast.Continue):
+                return state, 'continue'
+            return state, 'next'
+
+        state, _ = run_seq(mod.tree.body, (set(), set(), {}))
+        mod.top_def = set(state[0]) - mod.lazy_only
+        mod.top_poss = set(state[1]) - mod.lazy_only
+        mod.top_unknown = unknown[0]
+        mod.top_busy = False
+        mod.top_done = True
+        return mod.top_def, mod.top_poss
+
     def bound_names(self, mod):
         """Names bound in the namespace of `mod` when its body has run (None: not known)."""
         if mod.bound_done:
@@ -1309,20 +1669,9 @@ class Program:
         if mod.bound_busy:
             return mod.bound_partial
         mod.bound_busy = True
-        names = set(_scan_scope(mod.tree.body)[0]) - mod.lazy_only
-        for node in ast.walk(mod.tree):
-            if isinstance(node, ast.Global):
-                names.update(node.names)
-        mod.bound_partial = names
-        unknown = False
-        for node in mod.tree.body:
-            if isinstance(node, ast.ImportFrom) and any(a.name == '*' for a in node.names):
-                _, target, _ = self.from_target(mod, node)
-                if target is None:
-                    unknown = True
-                elif target is not mod:
-                    names.update(self.star_list(target, mod, node))
-        mod.bound = None if unknown else names
+        definite, _ = self._top_bindings(mod)
+        mod.bound_partial = set(definite)
+        mod.bound = None if mod.top_unknown else set(definite)
         mod.bound_busy = False
         mod.bound_done = True
         return mod.bound

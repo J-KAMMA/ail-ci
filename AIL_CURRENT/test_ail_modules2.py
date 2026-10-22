@@ -115,6 +115,33 @@ ALL_STAR = {
                     'main.py': 'from a import *\nimport a\nprint(add(1), x)\na.sx()\nprint(add(2), x, a.x)\n'},
     'star_global_only': {'m.py': 'def setx():\n    global X\n    X = 1\n',
                          'main.py': 'from m import *\nprint("after star")\n'},
+    'star_del_false': {'m.py': 'X = 1\nif 1 > 2:\n    del X\n',
+                       'main.py': 'from m import *\nprint(X)\n'},
+    'star_del_true': {'m.py': 'X = 1\nif 1 < 2:\n    del X\n',
+                      'main.py': 'from m import *\nprint("ok")\n'},
+    'star_del_unknown': {'m.py': 'X = 1\ndef flag():\n    return False\nif flag():\n    del X\n',
+                         'main.py': 'from m import *\nprint("ok")\n'},
+    'star_rebind_before_star': {'m.py': 'X = 1\nif 1 > 2:\n    del X\n',
+                                'main.py': 'X = 5\nfrom m import *\nprint(X)\n'},
+    'star_except_as_removes_earlier': {'m.py': 'X = 1\ntry:\n    raise Exception\n'
+                                               'except Exception as X:\n    pass\n',
+                                       'main.py': 'from m import *\nprint("ok")\n'},
+    'star_except_as_not_run': {'m.py': 'X = 1\ntry:\n    pass\nexcept Exception as X:\n    pass\n',
+                               'main.py': 'from m import *\nprint(X)\n'},
+    'star_except_call_may_raise': {'m.py': 'X = 1\ndef boom():\n    raise Exception\n'
+                                           'try:\n    boom()\nexcept Exception as X:\n    pass\n',
+                                   'main.py': 'from m import *\nprint("ok")\n'},
+    'star_for_false_global': {'m.py': 'def setx():\n    global X\n    X = 1\n'
+                                      'for X in range(False):\n    pass\n',
+                              'main.py': 'from m import *\nprint("ok")\n'},
+    'star_for_true': {'m.py': 'X = 1\nfor X in [2]:\n    pass\n',
+                      'main.py': 'from m import *\nprint(X)\n'},
+    'star_handler_assign_not_run': {'m.py': 'def setx():\n    global X\n    X = 1\n'
+                                            'try:\n    pass\nexcept Exception:\n    X = 2\n',
+                                    'main.py': 'from m import *\nprint("ok")\n'},
+    'star_nonliteral_branch': {'m.py': 'def setx():\n    global X\n    X = 1\n'
+                                       'def flag():\n    return False\nif flag():\n    X = 2\n',
+                               'main.py': 'from m import *\nprint("ok")\n'},
     'star_in_function': {'a.py': 'x = 1\n',
                          'main.py': 'def f():\n    from a import *\n    return x\n\nprint(f())\n'},
     'star_in_class': {'a.py': 'x = 1\n', 'main.py': 'class K:\n    from a import *\n\nprint(K.x)\n'},
@@ -292,6 +319,28 @@ class AllAndStar(ModulesBase):
     def test_star_import_of_a_name_created_only_inside_a_function_is_refused(self):
         # CPython binds it only when that function has run by the time of the star import
         self.refused(ALL_STAR['star_global_only'], "main.py:1:1", "'X'", "write instead")
+
+    def test_conditional_del_only_removes_the_name_when_it_runs(self):
+        self.same_as_cpython(ALL_STAR['star_del_false'])
+        self.same_as_cpython(ALL_STAR['star_del_true'])
+        self.refused(ALL_STAR['star_del_unknown'], "main.py:1:1", "'X'", "only on some paths",
+                     "write instead")
+        # the earlier own binding is a build-time conflict, never a silent wrong `5`
+        self.refused(ALL_STAR['star_rebind_before_star'], "main.py:1:1", "'X' is imported and also assigned",
+                     "write instead")
+
+    def test_except_handler_name_deletes_an_earlier_binding(self):
+        self.same_as_cpython(ALL_STAR['star_except_as_removes_earlier'])
+        self.same_as_cpython(ALL_STAR['star_except_as_not_run'])
+        self.refused(ALL_STAR['star_except_call_may_raise'], "main.py:1:1", "'X'", "only on some paths",
+                     "write instead")
+
+    def test_names_bound_only_in_false_loops_and_handlers_are_not_exported(self):
+        self.same_as_cpython(ALL_STAR['star_for_false_global'])
+        self.same_as_cpython(ALL_STAR['star_for_true'])
+        self.same_as_cpython(ALL_STAR['star_handler_assign_not_run'])
+        self.refused(ALL_STAR['star_nonliteral_branch'], "main.py:1:1", "'X'", "only on some paths",
+                     "write instead")
 
     def test_star_import_below_module_level_is_refused_as_cpython_s_syntax_error(self):
         self.refused(ALL_STAR['star_in_function'], "main.py:2:5", "SyntaxError",
