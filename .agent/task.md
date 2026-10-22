@@ -1,4 +1,12 @@
-**Widen the standard library.** Compile every program in `~/corpus/gdev`. Collect the refusals caused by an unsupported standard-library module or function, for example "not in the subset: <module>.<name>". Pick the 2 most frequent ones that are small and pure Python in CPython, and implement them as AIL-written library code following the existing library pattern (see how `bisect` or `heapq` are provided). Both builds must match CPython, checked with `bash ~/tools/cmp.sh`. Report the census of refused programs before and after, add tests, then commit.
+You continue on the current branch, where your earlier work is committed. **Fix only these findings from the last review, nothing else:**
+
+1. `urlencode` ignores `doseq` for a sequence of pairs; expected `a=1&a=2&b=3`, got `a=%5B%271%27%2C+%272%27%5D&b=3`.
+2. `urlsplit` does not validate bracketed netloc: `http://x[::1]/` must raise `Invalid IPv6 URL` but is accepted; `http://[abc]/` must raise `"'abc' does not appear to be an IPv4 or IPv6 address"` but is accepted.
+3. `IPv4Address.is_private`/`is_global` are wrong: `192.0.0.8` should be `(True, False)` but is `(False, True)` (the code approximates `192.0.0.0/24` as `/29` + `192.0.0.170/31`), and multicast (`224.0.0.1`) should be `is_global=True` but is `False`.
+4. `IPv4Address` does not reject `/` before parsing: `1.2.3.4/24` must say `Unexpected '/' in '1.2.3.4/24'`, not `Only decimal digits permitted ...`.
+5. `IPv4Address.__hash__` hashes the integer; CPython hashes `hex(int(ip))`, so `hash(A("1.1.1.1")) == hash(16843009)` must be `False`, not `True`.
+
+Probe both builds with `bash ~/tools/cmp.sh`, add each fixed case to the tests, then commit. If a finding cannot be fixed safely, refuse the construct by name at compile time instead of leaving a silent wrong answer.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.

@@ -10,11 +10,24 @@ log=.agent/pipeline.md
 git branch -f work HEAD            # the reviewer diffs work..HEAD, as in the sandbox
 echo "# job $(git rev-parse --abbrev-ref HEAD)  started $(date -u +%FT%TZ)  worker=oc reviewer=oc (GitHub)" > "$log"
 
+# the same key also serves OpenCode Zen's free models: add that provider entry to the auth file (nothing is printed)
+python3 - <<'EOF'
+import json, os
+p = os.path.expanduser('~/.local/share/opencode/auth.json')
+a = json.load(open(p)); a['opencode'] = a['opencode-go']; json.dump(a, open(p, 'w'))
+EOF
 run_oc() {  # $1 prompt file, $2 tag, $3 minutes -> final text on stdout
-  timeout "${3}m" "$OC" run --format json --dir "$PWD" \
-    "Do the task described in the attached file, in this directory. When finished, reply with a short final report." \
-    -f "$1" > "$RUNNER_TEMP/$2.jsonl" 2> "$RUNNER_TEMP/$2.err"
-  local rc=$?
+  # the free Zen build of the same model first (zero retention, not used for training); the Go plan's paid model when
+  # the free one is refused or rate-limited. Never another free model: some of them train on data.
+  local rc model
+  for model in opencode/deepseek-v4.1-flash-free opencode-go/deepseek-v4.1-flash; do
+    timeout "${3}m" "$OC" run --format json --dir "$PWD" -m "$model" \
+      "Do the task described in the attached file, in this directory. When finished, reply with a short final report." \
+      -f "$1" > "$RUNNER_TEMP/$2.jsonl" 2> "$RUNNER_TEMP/$2.err"
+    rc=$?
+    grep -qiE '"type": ?"error".*(rate|limit|quota|429|503|free)' "$RUNNER_TEMP/$2.jsonl" || break
+  done
+  echo "[model $model]"
   python3 .agent/oc_report.py "$RUNNER_TEMP/$2.jsonl"
   [ $rc = 124 ] && echo "(cut off after $3 minutes)"
   return 0
