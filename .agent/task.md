@@ -1,4 +1,10 @@
-**One thing only (DIFFERENCES C169):** `list.index(x, None)` and `tuple.index(x, None)` read the `None` as index 0, but CPython raises `TypeError: slice indices must be integers or have an __index__ method`. The same goes for a `None` stop, and for None passed through a variable or a parameter. A float or str bound must raise CPython's TypeError too. Probe both builds with `bash ~/tools/cmp.sh`, add tests in a new `test_ail_c169.py`, close row C169, then commit.
+You continue on the current branch, where your earlier work is committed. **Fix only these findings from the last review, nothing else:**
+
+1. Typed `index_bound_kind` attribute case: resolve the receiver’s class or return `None`; do not accept any class’s same-named field. Probe and expected/actual as in defect 1.
+2. Typed `index_name_kind` name case: treat tuple/starred (and other) bindings as unknown, not `int`. Probe and expected/actual as in defect 2.
+3. Add typed-only coverage (`AIL_NO_GENERAL=1`) so `test_ail_c169.py` actually exercises the typed lowering rather than the general fallback.
+
+Probe both builds with `bash ~/tools/cmp.sh`, add each fixed case to the tests, then commit. If a finding cannot be fixed safely, refuse the construct by name at compile time instead of leaving a silent wrong answer.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
