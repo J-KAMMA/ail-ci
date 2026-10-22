@@ -1,0 +1,15 @@
+Done. Two commits on `job-resub2-10220600`; working tree clean apart from the agent harness files.
+
+**What changed**
+- `AIL_CURRENT/ail_syntax.py`: new `collect_repl` / `re_item_kind` / `re_param_callable` / `re_value_kind` / `re_repl_kind` / `re_bound_method`. The `repl` of `re.sub`/`subn` (and `Pattern.sub`/`subn`, which share `re_emit`) now goes to the callable helper (`_ail_re_subN(s, fn, count)`, `fn` gets the Match) when the value is a function this program can tell: lambda, def, name holding one (`f = up`, `g = f`, `h = i = up`, `f = lambda m: ...`), dict/list of functions indexed at run time (`TABLE["k"]` per constant key, `FS[0]`), loop target over such a list, a call of a def whose every return is a function, and a parameter annotated `Callable[...]` or whose every call site passes a function. Everything else keeps the string lowering (`_ail_re_sublit`). A bound method is refused by name with the lambda spelling to write instead.
+- `AIL_CURRENT/python/pkg-v12/relib.py`: `count < 0` replaced everything; CPython replaces nothing. Fixed in `_ail_re_sublit`, `_ail_re_subK` and `sub_callable` (str and bytes, sub and subn).
+- `test_ail_resub2.py` (8 tests), `AIL_REFERENCE_MORE.md` (regex section), `DEVLOG.md`, `DIFFERENCES.md` (rows `C?-job-resub2-10220600-1..3`), MANIFEST refreshed, `--check` clean.
+
+**Tests on the final commit (455ee28)**: `test_ail_resub2` ok, `test_ail_re` ok (534s), `test_ail_slow_patterns` ok, `test_ail_safetynet` ok, `test_ail_files` ok, `test_ail_corpus_findings3` ok — 0 failed.
+
+**Probes (`bash ~/tools/cmp.sh`, g = general path, d = default build)** — all match CPython unless noted:
+p0 def/count/subn/alias/lambda · p1b lambda workaround · p2 dict of defs · p3 lambda in a var · p5 capturing lambda · p6 lambda var + count · p7 str repl (var, dict, attribute, concat, subn) · p8 unannotated param (functions at every call site) · p9 function and str through arguments, f-string · p10 compiled-pattern methods, named groups, count 0/-1/99, empty subject/empty match · p11 literal-repl negative counts · p12 bytes (alias, subn, negative counts, `\2\1` template) · p13 aliasing `g=f`, `h=i=up`, list item, int-keyed dict, runtime index, count var · p15 method name that is also a field · p16 `Callable[...]` param (sub/subn/-1) · p17 loops over tuple/list/module tuple, dict-key loop · p18 `make()` returning a lambda · p19 comprehension · p20 · p21 · p33 · p41 str from dict/attribute/nested dict/mixed dict · p42 repeated key.
+Refused by name (both builds): p1, p14 (bound method of a variable / of `self`), p4 (`re.sub(P, 42, s)`, pre-existing).
+
+**Not verified / left silent** (recorded as DIFFERENCES rows 2–3): a method whose name is also a field of some class still takes the string path and fails at run time; an unannotated parameter whose call sites mix functions and strings keeps the string path. Also avoided in the tests, and confirmed pre-existing with the pristine export (`00c2e0`): the typed path refuses `re.sub(COMPILED, …)`, a dict-literal subscript as a str repl (typed as int), tuple-unpacking a `subn` call, and an unannotated param threaded into `_ail_re_sublit`.
+[cost $0.44, turns 207]
