@@ -34,18 +34,38 @@ _MUTATORS = frozenset(('append', 'extend', 'insert', 'remove', 'pop', 'clear', '
 _BOTTOM = object()
 
 
+def _constant_value(e):
+    """the value of an expression CPython folds into a code-object constant (a tuple of them included), or (False, None)"""
+    if isinstance(e, ast.Constant) and (e.value is None or e.value is Ellipsis
+                                         or type(e.value) in (bool, int, float, complex, str, bytes)):
+        return True, e.value
+    if (isinstance(e, ast.UnaryOp) and isinstance(e.op, (ast.USub, ast.UAdd))
+            and isinstance(e.operand, ast.Constant) and type(e.operand.value) in (int, float, complex)):
+        return True, -e.operand.value if isinstance(e.op, ast.USub) else +e.operand.value
+    if isinstance(e, ast.Tuple):
+        values = []
+        for item in e.elts:
+            ok, value = _constant_value(item)
+            if not ok:
+                return False, None
+            values.append(value)
+        return True, tuple(values)
+    return False, None
+
+
 def _same(a, b):
     if a is None or b is None or a is _BOTTOM or b is _BOTTOM:
         return a is b
-    return (a.kind, a.lit) == (b.kind, b.lit)
+    return (a.kind, a.lit, a.value) == (b.kind, b.lit, b.value)
 
 
 class _K(object):
-    """kind of an expression: 'int', 'float' or 'num' (an int or a float), and `lit` (made of constants only)"""
-    __slots__ = ('kind', 'lit')
+    """kind of an expression: 'int', 'float', 'num' (an int or a float) or 'tuple' (a tuple constant), `lit` (made of
+    constants only) and, for a tuple, its constant value (None when the value is not one tuple)"""
+    __slots__ = ('kind', 'lit', 'value')
 
-    def __init__(self, kind, lit=False):
-        self.kind, self.lit = kind, lit
+    def __init__(self, kind, lit=False, value=None):
+        self.kind, self.lit, self.value = kind, lit, value
 
 
 def _join(a, b):
@@ -53,6 +73,10 @@ def _join(a, b):
         return b
     if b is None:
         return a
+    if a.kind == 'tuple' or b.kind == 'tuple':
+        if a.kind == b.kind == 'tuple' and a.value is not None and a.value == b.value:
+            return _K('tuple', a.lit and b.lit, a.value)
+        return _K('tuple', False)
     return _K(a.kind if a.kind == b.kind else 'num', a.lit and b.lit)
 
 
@@ -224,6 +248,9 @@ class _Scan(object):
             if isinstance(e.value, bool) or not isinstance(e.value, (int, float, complex)):
                 return None
             return _K('int' if isinstance(e.value, int) else 'float' if isinstance(e.value, float) else 'num', True)
+        if isinstance(e, ast.Tuple):
+            ok, value = _constant_value(e)
+            return _K('tuple', True, value) if ok else None
         if isinstance(e, ast.UnaryOp) and isinstance(e.op, (ast.USub, ast.UAdd, ast.Invert)):
             return self.kind(e.operand, s, own)
         if isinstance(e, ast.BinOp):
@@ -302,8 +329,25 @@ def _exempt(e):
     return isinstance(e, ast.Constant) and (e.value is None or e.value is Ellipsis or isinstance(e.value, (bool, str, bytes)))
 
 
-def find(tree):
-    """the first `is` / `is not` comparison of the program that this module refuses: (node, text), or None"""
+def _tuple_may_be_same(ka, kb):
+    """whether an `is` with a tuple constant operand can be True in CPython: the same tuple constant (or a tuple whose
+    value this scan does not know), while an operand known to be a non-tuple is never the same object"""
+    a = ka is not None and ka.kind == 'tuple'
+    b = kb is not None and kb.kind == 'tuple'
+    if not (a or b):
+        return False
+    if a and kb is not None and kb.kind != 'tuple':
+        return False
+    if b and ka is not None and ka.kind != 'tuple':
+        return False
+    if a and b and ka.value is not None and kb.value is not None:
+        return ka.value == kb.value
+    return True
+
+
+def find(tree, only_tuple=False):
+    """the first `is` / `is not` comparison of the program that this module refuses: (node, text), or None. With
+    `only_tuple`, only the tuple-constant case is looked for (the tuple rewrite asks before it lowers the literal)."""
     scan = None
     owners = {}
     for sc in ast.walk(tree):
@@ -330,6 +374,15 @@ def find(tree):
             # and False for everything else, whatever the operand's history (the other operand is lowered that way)
             if _derived(a, b) or _derived(b, a):
                 continue            # `(x or "o") is not x`: the same object (or its stand-in), not two constants that CPython merges
+            if _tuple_may_be_same(ka, kb):
+                return n, ('`%s` with a tuple constant (line %d, DIFFERENCES C?-job-fuzz39-10230820-1): CPython merges '
+                           'equal tuple constants of a code object (`a = (); b = (); a is b` is True; `()` is a '
+                           'singleton) and here each tuple display is a value of its own; compare with `==`'
+                           % ('is not' if isinstance(o, ast.IsNot) else 'is', n.lineno))
+            if only_tuple:
+                continue
+            if (ka is not None and ka.kind == 'tuple') or (kb is not None and kb.kind == 'tuple'):
+                continue                # a tuple constant is not a number: an unequal tuple pair is False on both
             sa, sb = small_int(a) is not None, small_int(b) is not None
             if (sa and _fits(b, kb)) or (sb and _fits(a, ka)):
                 continue
@@ -341,6 +394,77 @@ def find(tree):
                 return n, ('`%s` between ints (line %d, DIFFERENCES C114): CPython shares the ints -5..256 and makes two '
                            'objects of two equal ints computed at run time, here an int is a value; compare numbers with '
                            '`==`' % ('is not' if isinstance(o, ast.IsNot) else 'is', n.lineno))
+    if not only_tuple:
+        got = _tuple_argument_refusal(tree, scan)
+        if got is not None:
+            return got
+    return None
+
+
+def _call_scope(call, tree, scan):
+    best = tree
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            if node.lineno <= call.lineno <= (node.end_lineno or node.lineno):
+                if best is tree or (node.end_lineno or node.lineno) - node.lineno < (best.end_lineno or best.lineno) - best.lineno:
+                    best = node
+    return scan.scopes.get(id(best), scan.module)
+
+
+def _argument_tuple_risk(ka, kb):
+    """one argument is a known tuple constant and the other is not known to be a different non-tuple (CPython may
+    pass the same constant object to both parameters)"""
+    a = ka is not None and ka.kind == 'tuple' and ka.value is not None
+    b = kb is not None and kb.kind == 'tuple' and kb.value is not None
+    if not (a or b):
+        return False
+    if a and b:
+        return ka.value == kb.value
+    if a and kb is not None and kb.kind != 'tuple':
+        return False
+    if b and ka is not None and ka.kind != 'tuple':
+        return False
+    return True
+
+
+def _tuple_argument_refusal(tree, scan):
+    """`def same(a, b): return a is b` called with two equal tuple constants: CPython merges the literals of one code
+    object, so both parameters are the same object; here they are two. Refuse at the comparison, naming the line."""
+    functions = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)]
+    for fn in functions:
+        args = [a.arg for a in fn.args.posonlyargs + fn.args.args]
+        for node in _own_nodes(fn):
+            if not isinstance(node, ast.Compare):
+                continue
+            sides = [node.left] + list(node.comparators)
+            for i, op in enumerate(node.ops):
+                if not isinstance(op, (ast.Is, ast.IsNot)):
+                    continue
+                a, b = sides[i], sides[i + 1]
+                if not (isinstance(a, ast.Name) and isinstance(b, ast.Name)):
+                    continue
+                if a.id not in args or b.id not in args or _exempt(a) or _exempt(b):
+                    continue
+                ai, bi = args.index(a.id), args.index(b.id)
+                for call in calls:
+                    if call.func.id != fn.name:
+                        continue
+                    if max(ai, bi) >= len(call.args):
+                        continue
+                    scope = _call_scope(call, tree, scan)
+                    aa, bb = call.args[ai], call.args[bi]
+                    if (isinstance(aa, (ast.Name, ast.Attribute, ast.Subscript))
+                            and isinstance(bb, (ast.Name, ast.Attribute, ast.Subscript))
+                            and ast.dump(aa) == ast.dump(bb)):
+                        continue            # the same expression twice: the same object on both
+                    ka, kb = scan.kind(aa, scope), scan.kind(bb, scope)
+                    if _argument_tuple_risk(ka, kb):
+                        return node, ('`%s` between two values that may be tuple constants (line %d, DIFFERENCES '
+                                      'C?-job-fuzz39-10230820-1): CPython merges equal tuple constants of a code object, '
+                                      'so the same literal passed to both parameters is one object; each tuple display '
+                                      'here is a value of its own; compare with `==`'
+                                      % ('is not' if isinstance(op, ast.IsNot) else 'is', node.lineno))
     return None
 
 
@@ -353,4 +477,17 @@ def refusal(source):
     except (SyntaxError, ValueError):
         return None
     got = find(tree)
+    return None if got is None else got[1]
+
+
+def tuple_refusal(source):
+    """the refusal text for an `is` with a tuple constant, or None (the tuple rewrite leaves such a literal alone so
+    this module still sees it after the surface pass)"""
+    if ' is ' not in source:
+        return None
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return None
+    got = find(tree, only_tuple=True)
     return None if got is None else got[1]
