@@ -2,8 +2,8 @@
 
 ## 2026-10-21 — fuzz11 (generators and closures, branch job-fuzz11-10220826)
 
-Ran 96 small programs in /tmp (45 general generator/closure shapes, 11 generator edge probes,
-35 closure/default/global shapes, 5 final boundary probes) on both builds with
+Ran 97 small programs in /tmp (45 general generator/closure shapes, 11 generator edge probes,
+35 closure/default/global shapes, 6 final boundary probes) on both builds with
 `bash ~/tools/cmp.sh`. Silent differences found, fixed in this branch:
 
 * generator return values: StopIteration now carries `value`/`args`, `next(g)` keeps the
