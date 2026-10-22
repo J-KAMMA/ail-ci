@@ -2382,6 +2382,13 @@ class Compiler(boxclosure.ClosureMixin):
                 init = [m for m in node.body if isinstance(m, ast.FunctionDef) and m.name == '__init__']
                 return [a.arg for a in init[0].args.args[1:]] if init else []
 
+            def hash_fields():
+                # CPython hashes a field when its hash= is true, else when its compare= is true; nohash= names
+                # the fields (inherited ones included) where that answer is false.
+                hit = re.search(r'\bnohash=(\S*)', text)
+                skip = set(hit.group(1).split(',')) if hit else set()
+                return [f for f in all_fields() if f not in skip]
+
             def field_hash(fields):
                 return 'def __hash__(self):\n    return hash((%s))\n' % ''.join('self.%s, ' % f for f in fields)
 
@@ -2433,7 +2440,7 @@ class Compiler(boxclosure.ClosureMixin):
                     kind = hash_kind(node)
                 if kind == 'field':
                     if '__hash__' not in names:
-                        for fn in ast.parse(field_hash(all_fields())).body:
+                        for fn in ast.parse(field_hash(hash_fields())).body:
                             fn._ail_gen = True
                             node.body.append(fn)
                         ast.fix_missing_locations(node)
@@ -2474,7 +2481,7 @@ class Compiler(boxclosure.ClosureMixin):
                     if expr is not None:
                         inject_custom(expr)
             elif (' frozen' in text or ' unsafehash' in text) and '__hash__' not in names:
-                src += field_hash(all_fields())
+                src += field_hash(hash_fields())
             for fn in ast.parse(src).body:
                 fn._ail_gen = True              # unified.float_search_risk looks at the program's own code only
                 node.body.append(fn)

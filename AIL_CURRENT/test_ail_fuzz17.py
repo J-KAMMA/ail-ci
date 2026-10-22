@@ -15,6 +15,9 @@ Three silent differences found by small random programs are fixed:
   identity-valid __hash__ (a constant; unequal objects may collide), unless the class defines __eq__ itself.
 * Assigning to an enum member's .value or .name (`E.A.value = 9`) silently changed the member; CPython raises
   AttributeError. Such an assignment (including the augmented form) is refused by name at compile time.
+* A generated dataclass hash takes a field's `hash=` when given, else its `compare=`; a frozen `compare=False`
+  field no longer changes the hash. `unsafe_hash=True` with an explicit `__hash__` is refused by name, as CPython
+  refuses the class.
 
 Still open (listed in the report): frozen dataclass field assignment is not refused, enum membership by a
 plain value (`1 in E`) is False, expressions that evaluate to an equal enum value (`B = 1 + 0`) do not
@@ -313,6 +316,70 @@ def main() -> None:
 main()
 '''
 
+HASH_FIELD_FLAGS = r'''from dataclasses import dataclass, field
+
+
+@dataclass(frozen=True)
+class Frozen:
+    x: int
+    eq_only: int = field(default=0, compare=True, hash=False)
+    cmp_off: int = field(default=0, compare=False)
+    both: int = field(default=0, compare=False, hash=True)
+
+
+@dataclass(frozen=True)
+class Base:
+    x: int = 0
+    n: int = field(default=0, compare=False)
+    h: int = field(default=0, hash=False)
+
+
+@dataclass(frozen=True)
+class Sub(Base):
+    z: int = 0
+
+
+@dataclass(eq=False, unsafe_hash=True)
+class Unsafe:
+    x: int
+    n: int = field(default=0, compare=False)
+    h: int = field(default=0, hash=False)
+    both: int = field(default=0, compare=False, hash=True)
+
+
+def main() -> None:
+    a = Frozen(1, 2, 3, 4)
+    print(hash(a) == hash(Frozen(9, 2, 3, 4)), hash(a) == hash(Frozen(1, 9, 3, 4)),
+          hash(a) == hash(Frozen(1, 2, 9, 4)), hash(a) == hash(Frozen(1, 2, 3, 9)))
+    print(a == Frozen(9, 2, 3, 4), a == Frozen(1, 9, 3, 4),
+          a == Frozen(1, 2, 9, 4), a == Frozen(1, 2, 3, 9))
+    print(len({a, Frozen(9, 2, 3, 4)}), len({a, Frozen(1, 9, 3, 4)}),
+          len({a, Frozen(1, 2, 9, 4)}), len({a, Frozen(1, 2, 3, 9)}))
+    s = Sub(1, 2, 3)
+    print(hash(s) == hash(Sub(9, 2, 3)), hash(s) == hash(Sub(1, 9, 3)),
+          hash(s) == hash(Sub(1, 2, 9)))
+    u = Unsafe(1, 2, 3, 4)
+    print(hash(u) == hash(Unsafe(9, 2, 3, 4)), hash(u) == hash(Unsafe(1, 9, 3, 4)),
+          hash(u) == hash(Unsafe(1, 2, 9, 4)), hash(u) == hash(Unsafe(1, 2, 3, 9)))
+
+
+main()
+'''
+
+UNSAFE_HASH_EXPLICIT = r'''from dataclasses import dataclass
+
+
+@dataclass(eq=False, unsafe_hash=True)
+class A:
+    x: int
+
+    def __hash__(self) -> int:
+        return 7
+
+
+print("after")
+'''
+
 ENUM_MEMBER_ALIASES = r'''from enum import Enum, IntEnum, StrEnum
 
 
@@ -574,6 +641,12 @@ class Fuzz17Tests(unittest.TestCase):
 
     def test_eq_false_unsafe_hash_and_annotated_hash(self):
         self.check('eqfalse_unsafe_hash', EQFALSE_UNSAFE_HASH)
+
+    def test_hash_uses_hash_flag_else_compare(self):
+        self.check('hash_field_flags', HASH_FIELD_FLAGS)
+
+    def test_unsafe_hash_with_explicit_hash_is_refused(self):
+        self.refused('unsafe_hash_conflict', UNSAFE_HASH_EXPLICIT, 'CPython refuses that class')
 
     def test_enum_member_writes_through_aliases(self):
         self.check('enum_member_aliases', ENUM_MEMBER_ALIASES)

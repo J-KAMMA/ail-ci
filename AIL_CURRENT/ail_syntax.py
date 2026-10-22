@@ -1442,7 +1442,7 @@ class _Surface:
         self.dc_val = False             # the program calls asdict: the helper that converts a value
         self.dc_fields_used = set()     # classes whose fields() is called
         self.post_init = set()         # dataclasses whose generated __init__ calls __post_init__
-        self.dc_annotations = {}       # class name -> [(field, annotation text, hidden from repr)]
+        self.dc_annotations = {}       # class name -> [(field, annotation text, hidden from repr, hashed)]
         self.consumed = set()
         self.void = set()
         self.re_on = False             # `import re` seen
@@ -2458,9 +2458,8 @@ class _Surface:
                 and st.target.id == '__hash__' and st.value is not None)
             for st in node.body)
         if unsafe_hash and explicit_hash:
-            self.note(node, '@dataclass(unsafe_hash=True) on a class that defines __hash__ is not built; '
-                      'CPython refuses that class')
-            return
+            raise SyntaxErrorAIL('@dataclass(unsafe_hash=True) on a class that defines __hash__ is not built; '
+                                 'CPython refuses that class', lineno=node.lineno, offset=node.col_offset + 1)
         for option, value in options.items():
             enabled = not (isinstance(value, ast.Constant) and not value.value)
             if option == 'init' and not enabled:
@@ -2484,14 +2483,30 @@ class _Surface:
                 self.note(statement, 'an InitVar in a @dataclass is not built')
                 return
             default = None
+            hash_ok = True
             value = statement.value
             if (isinstance(value, ast.Call) and self.path(value.func) == 'dataclasses.field'):
                 options = {item.arg: item.value for item in value.keywords}
                 if isinstance(options.get('repr'), ast.Constant) and not options['repr'].value:
                     hidden.add(statement.target.id)
-                if 'compare' in options and not (isinstance(options['compare'], ast.Constant)
-                                                 and options['compare'].value):
+                compare_ok = True
+                if 'compare' in options:
+                    compared = options['compare']
+                    if isinstance(compared, ast.Constant):
+                        compare_ok = bool(compared.value)
+                    else:
+                        self.note(statement, 'field(compare=...) in a @dataclass is built with a constant only')
+                        return
+                if not compare_ok:
                     uncompared.add(statement.target.id)
+                hash_ok = compare_ok
+                if 'hash' in options:
+                    hashed = options['hash']
+                    if isinstance(hashed, ast.Constant):
+                        hash_ok = compare_ok if hashed.value is None else bool(hashed.value)
+                    else:
+                        self.note(statement, 'field(hash=...) in a @dataclass is built with a constant only')
+                        return
                 factory = options.pop('default_factory', None)
                 plain = options.pop('default', None)
                 if isinstance(options.get('init'), ast.Constant) and options['init'].value is False:
@@ -2510,7 +2525,7 @@ class _Surface:
                     default = ast.unparse(self.rewritten(plain)[0])
             elif value is not None:
                 default = ast.unparse(self.rewritten(value)[0])
-            fields.append((statement, statement.target.id, ast.unparse(annotation), default))
+            fields.append((statement, statement.target.id, ast.unparse(annotation), default, hash_ok))
         start = self.offset(decorator.lineno, decorator.col_offset)
         at = start - 1
         while at >= 0 and self.data[at:at + 1] in (b' ', b'\t'):
@@ -2522,20 +2537,21 @@ class _Surface:
         # (the typed path builds the __eq__ a dataclass generates from it too: ` noeq` for eq=False and
         # ` nocmp=` for fields declared compare=False, both written before ` hide=`)
         # ` norepr` for repr=False (the marker is written all the same: the general path's generated __eq__ reads it)
+        # ` nohash=` names the fields the generated __hash__ leaves out (hash= if given, else compare)
         marker = '# ail:dataclass' + (' noeq' if eq_off else '') + (' frozen' if frozen else '') + (
             ' unsafehash' if unsafe_hash else '') + (' norepr' if repr_off else '') + (
             ' nocmp=' + ','.join(sorted(uncompared)) if uncompared else '')
         self.edits.append((at, self.offset(decorator.end_lineno, decorator.end_col_offset), marker, False))
         # a dataclass that extends another one: its fields come after the base's (a field of the same
         # name keeps the base's position)
-        merged = []                    # (name, annotation, default, hidden, init=False)
+        merged = []                    # (name, annotation, default, hidden, init=False, hashed)
         for base in node.bases:
             if isinstance(base, ast.Name) and base.id in self.dc_annotations:
                 inherited = self.dc_default[base.id]
-                merged = [(name, annotation, inherited.get(name), shown, name in self.dc_initless.get(base.id, ()))
-                          for name, annotation, shown in self.dc_annotations[base.id]]
-        for _, name, annotation, default in fields:
-            entry = (name, annotation, default, name in hidden, name in initless)
+                merged = [(name, annotation, inherited.get(name), shown, name in self.dc_initless.get(base.id, ()),
+                           hashed) for name, annotation, shown, hashed in self.dc_annotations[base.id]]
+        for _, name, annotation, default, hash_ok in fields:
+            entry = (name, annotation, default, name in hidden, name in initless, hash_ok)
             for index, old in enumerate(merged):
                 if old[0] == name:
                     merged[index] = entry
@@ -2552,7 +2568,7 @@ class _Surface:
             later |= self.dc_later.get(base.id, set()) if isinstance(base, ast.Name) else set()
         self.dc_later[node.name] = later
         body = '; '.join(f'self.{name} = {name}' if not skip else f'self.{name} = {default}'
-                         for name, _, default, _, skip in merged
+                         for name, _, default, _, skip, _ in merged
                          if not skip or default is not None or name in later) or 'pass'
         if (any(isinstance(each, ast.FunctionDef) and each.name == '__post_init__' for each in node.body)
                 or any(isinstance(base, ast.Name) and base.id in self.post_init for base in node.bases)):
@@ -2608,9 +2624,10 @@ class _Surface:
             anchor = node.body[-1]
             anchor_at = self.offset(anchor.end_lineno, anchor.end_col_offset)
             self.edits.append((anchor_at, anchor_at, '\n' + body_indent + init, True))
-        self.dataclasses[node.name] = [(name, default) for name, _, default, _, skip in merged if not skip]
-        self.dc_annotations[node.name] = [(name, annotation, shown) for name, annotation, _, shown, _ in merged]
-        self.dc_initless[node.name] = {name for name, *_, skip in merged if skip}
+        self.dataclasses[node.name] = [(name, default) for name, _, default, _, skip, _ in merged if not skip]
+        self.dc_annotations[node.name] = [(name, annotation, shown, hashed)
+                                             for name, annotation, _, shown, _, hashed in merged]
+        self.dc_initless[node.name] = {name for name, _, _, _, skip, _ in merged if skip}
         self.dc_all[node.name] = [name for name, *_ in merged]
         self.dc_default[node.name] = {name: default for name, _, default, *_ in merged}
         extra = ''
@@ -2621,7 +2638,9 @@ class _Surface:
         if any(each[3] for each in merged):
             # which fields repr leaves out, for the general path's marker lookup (also needed by a repr=False
             # class that inherits the base's generated repr)
-            extra += ' hide=' + ','.join(name for name, _, _, shown, _ in merged if shown)
+            extra += ' hide=' + ','.join(name for name, _, _, shown, _, _ in merged if shown)
+        if any(not hashed for *_, hashed in merged):
+            extra += ' nohash=' + ','.join(name for name, _, _, _, _, hashed in merged if not hashed)
         # a __hash__ binding written as an annotation (`__hash__: int = 5`) is removed with the fields it belongs
         # to; hand its expression to pyboxed2 so the eq=False path still honours it (bytes.fromhex keeps spaces out
         # of the marker line)

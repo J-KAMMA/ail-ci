@@ -1,5 +1,25 @@
 # AIL development log
 
+## 2026-10-22 — job-fuzz17 review follow-up (10221632)
+
+Review of `65fffea` found two remaining defects, both fixed:
+
+- the generated dataclass hash now picks a field by `hash=` when given, else by `compare=`; a frozen
+  `compare=False` field no longer changes the hash, and `unsafe_hash=True` now honours `hash=False` /
+  `compare=False` / `compare=False, hash=True`. The marker carries `nohash=` for the merged field list, so
+  inherited and overridden flags propagate.
+- `@dataclass(unsafe_hash=True)` together with an explicit `__hash__` (def, assignment, or annotated value) is a
+  fatal compile-time refusal; previously a note was printed and the class was still built. CPython raises
+  `TypeError` for that class.
+
+Probes in `/tmp/probes` (`h8b_frozen_set`, `h9_unsafe_compare`, `h15`–`h24`, plus the reviewer's `h7`, `h8`,
+`h14`) match CPython on both builds; `h11`/`h11b`/`h23` are refused by name on both. Existing dataclass, Enum
+and repr probes still match, apart from the pre-existing rows in `DIFFERENCES.md` (object repr, function-valued
+field equality, own-`__init__` unsafe hash). Required tests (`test_ail_fuzz17`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`) plus `test_ail_dunders` and `test_ail_python_syntax` pass on the
+final commit; manifest `--check` passes.
+
+
 ## 2026-10-22 — job-fuzz17 review fixes (10221632)
 
 Three follow-up defects from the review of the dataclass/Enum branch are fixed:
