@@ -13,7 +13,17 @@ F2  float `//`, `%` and `divmod` used floor(x / y) and a bare fmod sign fix.  Th
 
 F3  a math helper that called the C function directly accepted a str / None for a float
     argument and printed garbage (`math.copysign("a", 1)`).  Every float helper now checks
-    `isinstance(x, (int, float))` and raises CPython's TypeError instead.
+    the argument and raises CPython's TypeError instead; a Fraction or an object with
+    `__float__` / `__index__` is converted instead of being rejected.
+
+F4  `math.floor` / `math.ceil` of an infinity were lowered through int(x // 1), whose new
+    float `//` gives NaN, so they raised ValueError "cannot convert float NaN to integer".
+    They now raise CPython's OverflowError "cannot convert float infinity to integer", keep
+    int arguments, and use `__floor__` / `__ceil__` when an object supplies one.
+
+F5  `math.fsum`, `math.sin`, `math.sqrt` and the other float helpers rejected valid numeric
+    objects (Fraction, a class with `__float__`) with "must be real number, not ...".
+    They now convert them as `float()` does and only reject types without a float conversion.
 
 Each program is built twice (default build, AIL_UNIFIED_FORCE=1 general path) and must print
 what CPython 3.12 prints with the same exit status.
@@ -103,6 +113,90 @@ main()
 """
 
 
+FLOORINF = r"""import math
+
+
+class Box:
+    def __init__(self):
+        self.f = 2.5
+        self.n = -2.5
+
+
+def show(label, fn):
+    try:
+        print(label, repr(fn()))
+    except Exception as e:
+        print(label, type(e).__name__, str(e))
+
+
+def main():
+    for v in (float('inf'), float('-inf'), float('nan')):
+        show('floor ' + repr(v), lambda v=v: math.floor(v))
+        show('ceil ' + repr(v), lambda v=v: math.ceil(v))
+        show('trunc ' + repr(v), lambda v=v: math.trunc(v))
+    for v in (-0.0, 0.5, -0.5, 3.7, -3.7, 7, -7, True, False):
+        show('floor ' + repr(v), lambda v=v: math.floor(v))
+        show('ceil ' + repr(v), lambda v=v: math.ceil(v))
+    b = Box()
+    d = {'a': 4.5, 'b': -4.5, 'i': 9}
+    show('floor attr', lambda: math.floor(b.f))
+    show('ceil attr', lambda: math.ceil(b.n))
+    show('floor dict', lambda: math.floor(d['a']))
+    show('ceil dictint', lambda: math.ceil(d['i']))
+    show('floor str', lambda: math.floor('a'))
+    show('ceil str', lambda: math.ceil('a'))
+    show('floor none', lambda: math.floor(None))
+    show('ceil none', lambda: math.ceil(None))
+
+
+main()
+"""
+
+NUMERIC = r"""import math
+from fractions import Fraction
+
+
+class Num:
+    def __init__(self, v):
+        self.v = v
+
+    def __float__(self):
+        return self.v + 0.25
+
+
+def show(label, fn):
+    try:
+        print(label, repr(fn()))
+    except Exception as e:
+        print(label, type(e).__name__, str(e))
+
+
+def main():
+    half = Fraction(1, 2)
+    show('sin fraction', lambda: math.sin(half))
+    show('sqrt fraction', lambda: math.sqrt(Fraction(1, 4)))
+    show('fabs fraction', lambda: math.fabs(Fraction(-1, 2)))
+    show('floor fraction', lambda: math.floor(Fraction(7, 2)))
+    show('ceil fraction', lambda: math.ceil(Fraction(7, 2)))
+    show('copysign fraction', lambda: math.copysign(half, -1.0))
+    show('fsum fraction', lambda: math.fsum([half, Fraction(1, 3)]))
+    n = Num(2.0)
+    show('sin floatdunder', lambda: math.sin(n))
+    show('sqrt floatdunder', lambda: math.sqrt(n))
+    show('fabs floatdunder', lambda: math.fabs(n))
+    show('floor floatdunder', lambda: math.floor(n))
+    show('ceil floatdunder', lambda: math.ceil(n))
+    show('copysign floatdunder', lambda: math.copysign(n, 1.0))
+    show('fsum floatdunder', lambda: math.fsum([n]))
+    for bad in ('a', None):
+        show('sin ' + repr(bad), lambda bad=bad: math.sin(bad))
+        show('fsum ' + repr(bad), lambda bad=bad: math.fsum([bad]))
+
+
+main()
+"""
+
+
 @unittest.skipUnless(HAVE_CC, 'needs gcc')
 class MathFuzz18(unittest.TestCase):
     def test_fsum_special_values_and_int_elements(self):
@@ -113,6 +207,12 @@ class MathFuzz18(unittest.TestCase):
 
     def test_math_helpers_reject_wrong_types(self):
         check_program(self, 'fuzz18_badtypes', BADTYPES)
+
+    def test_floor_ceil_infinity_and_nan(self):
+        check_program(self, 'fuzz18_floorinf', FLOORINF)
+
+    def test_helpers_convert_numeric_objects(self):
+        check_program(self, 'fuzz18_numeric', NUMERIC)
 
 
 if __name__ == '__main__':

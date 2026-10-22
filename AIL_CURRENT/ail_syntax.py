@@ -1184,12 +1184,48 @@ _MATH_HELPERS['tw_dedent'] = (
     '    return "\\n".join(out)\n')
 _MATH_HELPERS['checknum'] = (
     'def _ail_math_checknum(x: float) -> float:\n'
-    '    if not isinstance(x, (int, float)):\n'
+    '    if isinstance(x, (int, float)):\n'
+    '        return float(x)\n'
+    '    if isinstance(x, (str, bytes, bytearray)):\n'
     '        raise TypeError("must be real number, not " + type(x).__name__)\n'
-    '    return float(x)\n')
+    '    try:\n'
+    '        return float(x)\n'
+    '    except TypeError:\n'
+    '        raise TypeError("must be real number, not " + type(x).__name__)\n')
+# math.floor / math.ceil keep int arguments as they are and leave __floordiv__ to an object that has
+# one (Fraction); a float is converted after the infinity / NaN checks that int() makes, and any other
+# object with only __float__ / __index__ goes through checknum.
+_MATH_HELPERS['floor'] = (
+    'def _ail_math_floor(x: float) -> int:\n'
+    '    if isinstance(x, float):\n'
+    '        if x != x:\n'
+    '            raise ValueError("cannot convert float NaN to integer")\n'
+    '        if x - x != 0.0:\n'
+    '            raise OverflowError("cannot convert float infinity to integer")\n'
+    '        return int(x // 1)\n'
+    '    if isinstance(x, int):\n'
+    '        return int(x)\n'
+    '    try:\n'
+    '        return int(x // 1)\n'
+    '    except TypeError:\n'
+    '        return _ail_math_floor(_ail_math_checknum(x))\n')
+_MATH_HELPERS['ceil'] = (
+    'def _ail_math_ceil(x: float) -> int:\n'
+    '    if isinstance(x, float):\n'
+    '        if x != x:\n'
+    '            raise ValueError("cannot convert float NaN to integer")\n'
+    '        if x - x != 0.0:\n'
+    '            raise OverflowError("cannot convert float infinity to integer")\n'
+    '        return -int(-x // 1)\n'
+    '    if isinstance(x, int):\n'
+    '        return int(x)\n'
+    '    try:\n'
+    '        return -int(-x // 1)\n'
+    '    except TypeError:\n'
+    '        return _ail_math_ceil(_ail_math_checknum(x))\n')
 _MATH_DEPS = {'log2args': ('log',), 'comb': ('gcd',), 'lcm': ('gcd',), 'tw_fill': ('tw_wrap',)}
 for _name in (*_MATH_ONE, *_MATH_PREDICATES, *_MATH_PLAIN_TWO, 'sqrt', 'fabs', 'degrees', 'radians',
-              'fmod', 'pow', 'fsum'):
+              'fmod', 'pow', 'fsum', 'floor', 'ceil'):
     _MATH_DEPS[_name] = _MATH_DEPS.get(_name, ()) + ('checknum',)
 import string as _string_module
 
@@ -2227,19 +2263,14 @@ class _Surface:
                 helper = 'log2args'
             elif name == 'fabs' and len(args) == 1:
                 helper = 'fabs'
+            elif len(args) == 1 and name in ('floor', 'ceil'):
+                helper = name
             if name == 'trunc' and len(args) == 1:
                 # int(x) truncates a float toward zero and returns an int argument as it is.
                 return ast.Call(func=ast.Name(id='int', ctx=ast.Load()), args=args, keywords=[])
             if helper is not None:
                 self.helper(helper)
                 return ast.Call(func=ast.Name(id='_ail_math_' + helper, ctx=ast.Load()), args=args, keywords=[])
-            if len(args) == 1 and name in ('floor', 'ceil'):
-                def call(function, argument):
-                    return ast.Call(func=ast.Name(id=function, ctx=ast.Load()), args=[argument], keywords=[])
-                if name == 'floor':      # int(x // 1): floor of an int or a float, as an int
-                    return call('int', ast.BinOp(left=args[0], op=ast.FloorDiv(), right=ast.Constant(value=1)))
-                return ast.UnaryOp(op=ast.USub(), operand=call('int', ast.BinOp(
-                    left=ast.UnaryOp(op=ast.USub(), operand=args[0]), op=ast.FloorDiv(), right=ast.Constant(value=1))))
         self.note(node, f'math.{name}() with these arguments is not built; the math names built here '
                   f'are {_MATH_BUILT}')
         return None
