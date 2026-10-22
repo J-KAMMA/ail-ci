@@ -415,6 +415,15 @@ def _ail_b_fromhex_s(text):
     return r
 
 
+def _ail_ba_repr(s):
+    """CPython's bytearray repr: its inner bytes repr keeps a double-quoted form when the value
+    holds only single quotes, but unlike bytes it still escapes that quote (bytearray(b"\\'"))."""
+    r = _ail_b_repr(s)
+    if r.startswith('"'):
+        r = r.replace("'", "\\'")
+    return r
+
+
 def _ail_b_cmp_other(other, op, me):
     if isinstance(other, bytes):
         return other._s
@@ -672,10 +681,10 @@ class bytearray:
         return len(self._a) > 0
 
     def __repr__(self):
-        return "bytearray(b" + _ail_b_repr(_ail_b_from_ints(self._a)) + ")"
+        return "bytearray(b" + _ail_ba_repr(_ail_b_from_ints(self._a)) + ")"
 
     def __str__(self):
-        return "bytearray(b" + _ail_b_repr(_ail_b_from_ints(self._a)) + ")"
+        return "bytearray(b" + _ail_ba_repr(_ail_b_from_ints(self._a)) + ")"
 
     def __int__(self):
         s = _ail_b_from_ints(self._a)
@@ -739,17 +748,66 @@ class bytearray:
 #@METHODS bytearray _ail_mkba _ail_b_from_ints(self._a)
 
 
+def _ail_b_raw_args(fmt):
+    """One flag per value-consuming `%` directive: True when the argument must stay a bytes /
+    bytearray object (`%r` and `%a` repr it, `b"%r" % b"ab"` is `b"b'ab'"`), False when it is
+    unwrapped to its bytes (`%s` / `%b`). Width and precision stars consume their own ints."""
+    flags = []
+    i = 0
+    n = len(fmt)
+    while i < n:
+        c = fmt[i]
+        i += 1
+        if c != "%" or i >= n:
+            continue
+        if fmt[i] == "%":
+            i += 1
+            continue
+        if fmt[i] == "(":
+            j = fmt.find(")", i + 1)
+            if j < 0:
+                continue
+            i = j + 1
+        while i < n and (fmt[i] == "-" or fmt[i] == "+" or fmt[i] == " " or fmt[i] == "#" or fmt[i] == "0"):
+            i += 1
+        if i < n and fmt[i] == "*":
+            flags.append(False)
+            i += 1
+        else:
+            while i < n and fmt[i].isdigit():
+                i += 1
+        if i < n and fmt[i] == ".":
+            i += 1
+            if i < n and fmt[i] == "*":
+                flags.append(False)
+                i += 1
+            else:
+                while i < n and fmt[i].isdigit():
+                    i += 1
+        while i < n and (fmt[i] == "h" or fmt[i] == "l" or fmt[i] == "L"):
+            i += 1
+        if i < n:
+            flags.append(fmt[i] == "r" or fmt[i] == "a")
+            i += 1
+    return flags
+
+
 def _ail_b_percent(fmt, args):
+    flags = _ail_b_raw_args(fmt)
     vals = []
     if isinstance(args, tuple):
+        i = 0
         for a in args:
-            vals.append(_ail_b_pval(a))
+            vals.append(_ail_b_pval(a, i < len(flags) and flags[i]))
+            i += 1
     else:
-        vals.append(_ail_b_pval(args))
+        vals.append(_ail_b_pval(args, len(flags) > 0 and flags[0]))
     return _ail_pct(fmt, tuple(vals))
 
 
-def _ail_b_pval(a):
+def _ail_b_pval(a, raw=False):
+    if raw:
+        return a
     if isinstance(a, bytes):
         return a._s
     if isinstance(a, bytearray):
