@@ -97,6 +97,7 @@ def main() -> None:
         print("ZeroDivisionError", e)
     s = {Fraction(1, 2), Fraction(2, 4), Fraction(3, 4)}
     print(len(s), Fraction(1, 2) in s, Fraction(2) == 2, hash(Fraction(1, 2)) == hash(Fraction(2, 4)))
+    print(hash(Fraction(2 ** 61, 1)), hash(Fraction(2 ** 61 - 1, 1)), hash(Fraction(-1, 1)), hash(Fraction(-5, 1)))
     print(f"{Fraction(7, 3)} {Fraction(7, 3)!r} {str(Fraction(6, 3))}")
 
 
@@ -853,6 +854,8 @@ class PreludeFraction(unittest.TestCase):
                 want = "overflow"
             if got != "overflow":
                 self.assertEqual(got, want, x)
+        for n in (5, 2 ** 61, 2 ** 61 - 1, -1, -5):
+            self.assertEqual(hash(P.Fraction(n, 1)), hash(n), n)
         ops = {"+": lambda a, b: a + b, "-": lambda a, b: a - b, "*": lambda a, b: a * b, "/": lambda a, b: a / b,
                "//": lambda a, b: a // b, "%": lambda a, b: a % b, "**": lambda a, b: a ** b}
 
