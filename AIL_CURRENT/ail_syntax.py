@@ -853,6 +853,7 @@ _MATH_HELPERS = {
             out[k] = d[k]
     return out''',
     'sqrt': '''def _ail_math_sqrt(x: float) -> float:
+    x = _ail_math_checknum(x)
     if x < 0.0:
         raise ValueError("math domain error")
     if x == 0.0:
@@ -884,6 +885,7 @@ _MATH_HELPERS = {
 
 def _math_one_helper(name, overflow):
     return (f'def _ail_math_{name}(x: float) -> float:\n'
+            f'    x = _ail_math_checknum(x)\n'
             f'    r = _ail_c_{name}(x)\n'
             '    if r != r:\n'
             '        if x == x:\n'
@@ -899,13 +901,23 @@ for _name, _overflow in _MATH_ONE.items():
     _MATH_HELPERS[_name] = _math_one_helper(_name, _overflow)
 for _name in _MATH_PLAIN_TWO:
     _MATH_HELPERS[_name] = (f'def _ail_math_{_name}(x: float, y: float) -> float:\n'
+                            f'    x = _ail_math_checknum(x)\n'
+                            f'    y = _ail_math_checknum(y)\n'
                             f'    return _ail_c_{_name}(x, y)\n')
-_MATH_HELPERS['fabs'] = 'def _ail_math_fabs(x: float) -> float:\n    return _ail_c_fabs(x)\n'
-_MATH_HELPERS['isnan'] = 'def _ail_math_isnan(x: float) -> bool:\n    return x != x\n'
-_MATH_HELPERS['isinf'] = 'def _ail_math_isinf(x: float) -> bool:\n    return x - x != 0.0 and x == x\n'
-_MATH_HELPERS['isfinite'] = 'def _ail_math_isfinite(x: float) -> bool:\n    return x - x == 0.0\n'
-_MATH_HELPERS['degrees'] = f'def _ail_math_degrees(x: float) -> float:\n    return x * {180.0 / math.pi!r}\n'
-_MATH_HELPERS['radians'] = f'def _ail_math_radians(x: float) -> float:\n    return x * {math.pi / 180.0!r}\n'
+_MATH_HELPERS['fabs'] = ('def _ail_math_fabs(x: float) -> float:\n'
+                         '    x = _ail_math_checknum(x)\n    return _ail_c_fabs(x)\n')
+_MATH_HELPERS['isnan'] = ('def _ail_math_isnan(x: float) -> bool:\n'
+                          '    x = _ail_math_checknum(x)\n    return x != x\n')
+_MATH_HELPERS['isinf'] = ('def _ail_math_isinf(x: float) -> bool:\n'
+                          '    x = _ail_math_checknum(x)\n    return x - x != 0.0 and x == x\n')
+_MATH_HELPERS['isfinite'] = ('def _ail_math_isfinite(x: float) -> bool:\n'
+                             '    x = _ail_math_checknum(x)\n    return x - x == 0.0\n')
+_MATH_HELPERS['degrees'] = (f'def _ail_math_degrees(x: float) -> float:\n'
+                            '    x = _ail_math_checknum(x)\n'
+                            f'    return x * {180.0 / math.pi!r}\n')
+_MATH_HELPERS['radians'] = (f'def _ail_math_radians(x: float) -> float:\n'
+                            '    x = _ail_math_checknum(x)\n'
+                            f'    return x * {math.pi / 180.0!r}\n')
 _MATH_HELPERS['log2args'] = (
     'def _ail_math_log2args(x: float, base: float) -> float:\n'
     '    num = _ail_math_log(x)\n'
@@ -915,6 +927,8 @@ _MATH_HELPERS['log2args'] = (
     '    return num / den\n')
 _MATH_HELPERS['fmod'] = (
     'def _ail_math_fmod(x: float, y: float) -> float:\n'
+    '    x = _ail_math_checknum(x)\n'
+    '    y = _ail_math_checknum(y)\n'
     '    if y - y != 0.0 and y == y and x - x == 0.0:\n'
     '        return x\n'
     '    r = _ail_c_fmod(x, y)\n'
@@ -925,6 +939,8 @@ _MATH_HELPERS['fmod'] = (
 # turns the finite cases' errno into ValueError / OverflowError.
 _MATH_HELPERS['pow'] = (
     'def _ail_math_pow(x: float, y: float) -> float:\n'
+    '    x = _ail_math_checknum(x)\n'
+    '    y = _ail_math_checknum(y)\n'
     '    if x - x != 0.0 or y - y != 0.0:\n'
     '        if x != x:\n'
     '            if y == 0.0:\n'
@@ -1018,21 +1034,16 @@ _MATH_HELPERS['lcm'] = (
 # loud RuntimeError: CPython may break a line after a hyphen and expands tabs, neither of which is built.
 _MATH_HELPERS['fsum'] = (
     'def _ail_math_fsum(xs: list[float]) -> float:\n'
-    '    plain = 0.0\n'
-    '    finite = True\n'
-    '    for v in xs:\n'
-    '        plain += v\n'
-    '        if v - v != 0.0:\n'
-    '            finite = False\n'
-    '    if not finite:\n'
-    '        return plain\n'
     '    partials = [0.0] * (len(xs) + 1)\n'
-    '    m = 0\n'
+    '    n = 0\n'
+    '    special_sum = 0.0\n'
+    '    inf_sum = 0.0\n'
     '    for v in xs:\n'
-    '        x = v\n'
+    '        x = _ail_math_checknum(v)\n'
+    '        xsave = x\n'
     '        i = 0\n'
     '        j = 0\n'
-    '        while j < m:\n'
+    '        while j < n:\n'
     '            y = partials[j]\n'
     '            if abs(x) < abs(y):\n'
     '                t = x\n'
@@ -1045,11 +1056,22 @@ _MATH_HELPERS['fsum'] = (
     '                i += 1\n'
     '            x = hi\n'
     '            j += 1\n'
+    '        n = i\n'
     '        if x != 0.0:\n'
-    '            partials[i] = x\n'
-    '            i += 1\n'
-    '        m = i\n'
-    '    n = m\n'
+    '            if x - x != 0.0:\n'
+    '                if xsave - xsave == 0.0:\n'
+    '                    raise OverflowError("intermediate overflow in fsum")\n'
+    '                if xsave == xsave:\n'
+    '                    inf_sum += xsave\n'
+    '                special_sum += xsave\n'
+    '                n = 0\n'
+    '            else:\n'
+    '                partials[n] = x\n'
+    '                n += 1\n'
+    '    if special_sum != 0.0:\n'
+    '        if inf_sum != inf_sum:\n'
+    '            raise ValueError("-inf + inf in fsum")\n'
+    '        return special_sum\n'
     '    hi = 0.0\n'
     '    if n > 0:\n'
     '        n -= 1\n'
@@ -1160,7 +1182,15 @@ _MATH_HELPERS['tw_dedent'] = (
     '        else:\n'
     '            out.append(line[len(margin):])\n'
     '    return "\\n".join(out)\n')
+_MATH_HELPERS['checknum'] = (
+    'def _ail_math_checknum(x: float) -> float:\n'
+    '    if not isinstance(x, (int, float)):\n'
+    '        raise TypeError("must be real number, not " + type(x).__name__)\n'
+    '    return float(x)\n')
 _MATH_DEPS = {'log2args': ('log',), 'comb': ('gcd',), 'lcm': ('gcd',), 'tw_fill': ('tw_wrap',)}
+for _name in (*_MATH_ONE, *_MATH_PREDICATES, *_MATH_PLAIN_TWO, 'sqrt', 'fabs', 'degrees', 'radians',
+              'fmod', 'pow', 'fsum'):
+    _MATH_DEPS[_name] = _MATH_DEPS.get(_name, ()) + ('checknum',)
 import string as _string_module
 
 _STRING_CONSTANTS = {name: getattr(_string_module, name) for name in (
@@ -1981,6 +2011,8 @@ class _Surface:
                         for each in node.decorator_list)}
 
     def helper(self, name):
+        for dependency in _MATH_DEPS.get(name, ()):
+            self.helper(dependency)
         if name not in self.helpers:
             self.helpers.append(name)
 
@@ -2199,9 +2231,7 @@ class _Surface:
                 # int(x) truncates a float toward zero and returns an int argument as it is.
                 return ast.Call(func=ast.Name(id='int', ctx=ast.Load()), args=args, keywords=[])
             if helper is not None:
-                for each in (*_MATH_DEPS.get(helper, ()), helper):
-                    if each not in self.helpers:
-                        self.helpers.append(each)
+                self.helper(helper)
                 return ast.Call(func=ast.Name(id='_ail_math_' + helper, ctx=ast.Load()), args=args, keywords=[])
             if len(args) == 1 and name in ('floor', 'ceil'):
                 def call(function, argument):

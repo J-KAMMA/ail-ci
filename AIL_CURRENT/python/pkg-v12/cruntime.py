@@ -10037,7 +10037,24 @@ static inline ail_obj ail_obj_floordiv(ail_obj a, ail_obj b) {
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         double x = ail__as_double(a), y = ail__as_double(b);
         if (y == 0.0) ail_raise_c(AIL_ERR_ZERODIV, "float floor division by zero");
-        return ail_box_float(floor(x / y));
+        double mod = fmod(x, y);
+        double div = (x - mod) / y;
+        double floordiv;
+        if (mod != 0.0) {
+            if ((y < 0.0) != (mod < 0.0)) {
+                mod += y;
+                div -= 1.0;
+            }
+        } else {
+            mod = copysign(0.0, y);
+        }
+        if (div != 0.0) {
+            floordiv = floor(div);
+            if (div - floordiv > 0.5) floordiv += 1.0;
+        } else {
+            floordiv = copysign(0.0, x / y);
+        }
+        return ail_box_float(floordiv);
     }
     ail_raise_c(AIL_ERR_TYPE, "unsupported operand type(s) for //");
     return ail_box_none();
@@ -10055,7 +10072,11 @@ static inline ail_obj ail_obj_mod(ail_obj a, ail_obj b) {
         double x = ail__as_double(a), y = ail__as_double(b);
         if (y == 0.0) ail_raise_c(AIL_ERR_ZERODIV, "float modulo");
         double r = fmod(x, y);
-        if (r != 0.0 && ((r < 0) != (y < 0))) r += y;
+        if (r != 0.0) {
+            if ((r < 0.0) != (y < 0.0)) r += y;
+        } else {
+            r = copysign(0.0, y);
+        }
         return ail_box_float(r);
     }
     ail_raise_c(AIL_ERR_TYPE, "unsupported operand type(s) for %%");
@@ -14728,7 +14749,24 @@ static inline ail_st ail_op_floordiv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_o
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         double x = ail__as_double(a), y = ail__as_double(b);
         if (y == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "float floor division by zero");
-        *out = ail_box_float(cx, floor(x / y)); return AIL_OK;
+        double mod = fmod(x, y);
+        double div = (x - mod) / y;
+        double floordiv;
+        if (mod != 0.0) {
+            if ((y < 0.0) != (mod < 0.0)) {
+                mod += y;
+                div -= 1.0;
+            }
+        } else {
+            mod = copysign(0.0, y);
+        }
+        if (div != 0.0) {
+            floordiv = floor(div);
+            if (div - floordiv > 0.5) floordiv += 1.0;
+        } else {
+            floordiv = copysign(0.0, x / y);
+        }
+        *out = ail_box_float(cx, floordiv); return AIL_OK;
     }
     return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for //");
 }
@@ -14745,7 +14783,11 @@ static inline ail_st ail_op_mod(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)
         double x = ail__as_double(a), y = ail__as_double(b);
         if (y == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "float modulo");
         double r = fmod(x, y);
-        if (r != 0.0 && ((r < 0) != (y < 0))) r += y;
+        if (r != 0.0) {
+            if ((r < 0.0) != (y < 0.0)) r += y;
+        } else {
+            r = copysign(0.0, y);
+        }
         *out = ail_box_float(cx, r); return AIL_OK;
     }
     return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %");
