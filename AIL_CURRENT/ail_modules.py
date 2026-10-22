@@ -1455,6 +1455,97 @@ class Program:
                 env.pop(name, None)
             return set(d) - set(names), set(p) - set(names), env
 
+        global_names = {n for g in ast.walk(mod.tree) if isinstance(g, ast.Global) for n in g.names}
+
+        def mutable(value):
+            if isinstance(value, (list, dict, set, bytearray)):
+                return True
+            if isinstance(value, (tuple, frozenset)):
+                return any(mutable(item) for item in value)
+            return False
+
+        def invalidate_all(state):
+            d, p, env = state
+            return d, p, {name: value for name, value in env.items()
+                          if name not in global_names and not mutable(value)}
+
+        def calls_in(node):
+            if node is None:
+                return []
+            found = []
+
+            def walk(n):
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    for d in n.decorator_list:
+                        walk(d)
+                    for d in _defaults(n.args):
+                        walk(d)
+                    return
+                if isinstance(n, ast.Lambda):
+                    for d in _defaults(n.args):
+                        walk(d)
+                    return
+                if isinstance(n, ast.Call):
+                    found.append(n)
+                for child in ast.iter_child_nodes(n):
+                    walk(child)
+            walk(node)
+            return found
+
+        def immediate_calls(node):
+            if isinstance(node, ast.If):
+                return calls_in(node.test)
+            if isinstance(node, (ast.For, ast.AsyncFor)):
+                return calls_in(node.iter)
+            if isinstance(node, ast.While):
+                return calls_in(node.test)
+            if isinstance(node, (ast.With, ast.AsyncWith)):
+                out = []
+                for item in node.items:
+                    out.extend(calls_in(item.context_expr))
+                return out
+            if isinstance(node, ast.Match):
+                out = calls_in(node.subject)
+                for case in node.cases:
+                    if case.guard is not None:
+                        out.extend(calls_in(case.guard))
+                return out
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                out = []
+                for d in node.decorator_list:
+                    out.extend(calls_in(d))
+                for d in _defaults(node.args):
+                    out.extend(calls_in(d))
+                return out
+            if isinstance(node, ast.ClassDef):
+                out = []
+                for d in node.decorator_list:
+                    out.extend(calls_in(d))
+                for b in node.bases:
+                    out.extend(calls_in(b))
+                for k in node.keywords:
+                    out.extend(calls_in(k.value))
+                return out
+            if isinstance(node, ast.Try):
+                return []
+            return calls_in(node)
+
+        def invalidate(state, calls):
+            env = state[2]
+            for call in calls:
+                func = call.func
+                if (isinstance(func, ast.Name) and func.id in self.FOLD_CALLS
+                        and func.id not in env and func.id not in mod.kinds
+                        and func.id not in mod.alias and func.id not in mod.std
+                        and not any(isinstance(a, ast.Starred) for a in call.args)
+                        and not any(k.arg is None for k in call.keywords)):
+                    continue
+                return invalidate_all(state)
+            return state
+
+        def mutates_target(target):
+            return any(isinstance(n, (ast.Attribute, ast.Subscript)) for n in ast.walk(target))
+
         def merge(states):
             states = [state for state in states if state is not None]
             if not states:
@@ -1504,7 +1595,13 @@ class Program:
             kind = iter_kind(node.iter, state[2])
             if kind == 'empty':
                 return zero_state, 'next'
-            body_state, body_falls = run_seq(node.body, state)
+            targets = _target_names(node.target)
+            body_start = bind(state, targets, definite=(kind == 'nonempty'))
+            values = dict(body_start[2])
+            for name in targets:
+                values[name] = _UNKNOWN
+            body_start = body_start[0], body_start[1], values
+            body_state, body_falls = run_seq(node.body, body_start)
             after_body, _ = run_seq(node.orelse, body_state)
             if kind == 'nonempty' and body_falls:
                 return after_body, 'next'
@@ -1573,9 +1670,12 @@ class Program:
             return merge(paths) or state, 'next'
 
         def run_node(node, state):
+            state = invalidate(state, immediate_calls(node))
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 return bind(state, [node.name]), 'next'
             if isinstance(node, ast.Assign):
+                if any(mutates_target(t) for t in node.targets):
+                    state = invalidate_all(state)
                 value = _UNKNOWN
                 if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
                     try:
@@ -1593,6 +1693,8 @@ class Program:
                         new[2][name] = _UNKNOWN
                 return new, 'next'
             if isinstance(node, ast.AnnAssign):
+                if mutates_target(node.target):
+                    state = invalidate_all(state)
                 if not isinstance(node.target, ast.Name):
                     return state, 'next'
                 if node.value is None:
@@ -1605,12 +1707,16 @@ class Program:
                 new[2][node.target.id] = value
                 return new, 'next'
             if isinstance(node, ast.AugAssign):
+                if mutates_target(node.target):
+                    state = invalidate_all(state)
                 names = _target_names(node.target)
                 new = bind(state, names)
                 for name in names:
                     new[2][name] = _UNKNOWN
                 return new, 'next'
             if isinstance(node, ast.Delete):
+                if any(mutates_target(target) for target in node.targets):
+                    state = invalidate_all(state)
                 names = set()
                 for target in node.targets:
                     names |= _target_names(target)

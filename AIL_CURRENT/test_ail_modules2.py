@@ -142,6 +142,19 @@ ALL_STAR = {
     'star_nonliteral_branch': {'m.py': 'def setx():\n    global X\n    X = 1\n'
                                        'def flag():\n    return False\nif flag():\n    X = 2\n',
                                'main.py': 'from m import *\nprint("ok")\n'},
+    'star_for_target_exported': {'m.py': 'for i in [1, 2, 3]:\n    pass\n',
+                                 'main.py': 'from m import *\nprint(i)\n'},
+    'star_for_target_empty': {'m.py': 'for i in []:\n    pass\n',
+                              'main.py': 'from m import *\nprint("ok")\n'},
+    'star_call_mutates_global_condition': {'m.py': 'def setx():\n    global X\n    X = 5\n'
+                                                   'X = 1\nsetx()\nif X > 2:\n    Y = 1\n',
+                                           'main.py': 'from m import *\nprint("ok")\n'},
+    'star_call_mutates_list_iterable': {'m.py': 'L = []\nL.append(1)\nfor X in L:\n    pass\n',
+                                        'main.py': 'from m import *\nprint("ok")\n'},
+    'star_list_item_mutation': {'m.py': 'L = [1]\nL[0] = 2\nfor X in L:\n    pass\n',
+                                'main.py': 'from m import *\nprint("ok")\n'},
+    'star_alias_list_mutation': {'m.py': 'L = []\nM = L\nM.append(1)\nfor X in L:\n    pass\n',
+                                  'main.py': 'from m import *\nprint("ok")\n'},
     'star_in_function': {'a.py': 'x = 1\n',
                          'main.py': 'def f():\n    from a import *\n    return x\n\nprint(f())\n'},
     'star_in_class': {'a.py': 'x = 1\n', 'main.py': 'class K:\n    from a import *\n\nprint(K.x)\n'},
@@ -341,6 +354,20 @@ class AllAndStar(ModulesBase):
         self.same_as_cpython(ALL_STAR['star_handler_assign_not_run'])
         self.refused(ALL_STAR['star_nonliteral_branch'], "main.py:1:1", "'X'", "only on some paths",
                      "write instead")
+
+    def test_loop_targets_are_exported_like_cpython(self):
+        self.same_as_cpython(ALL_STAR['star_for_target_exported'])
+        self.same_as_cpython(ALL_STAR['star_for_target_empty'])
+
+    def test_calls_that_can_change_a_folded_value_are_not_folded(self):
+        self.refused(ALL_STAR['star_call_mutates_global_condition'], "main.py:1:1", "'Y'",
+                     "only on some paths", "write instead")
+        self.refused(ALL_STAR['star_call_mutates_list_iterable'], "main.py:1:1", "'X'",
+                     "only on some paths", "write instead")
+        self.refused(ALL_STAR['star_list_item_mutation'], "main.py:1:1", "'X'",
+                     "only on some paths", "write instead")
+        self.refused(ALL_STAR['star_alias_list_mutation'], "main.py:1:1", "'X'",
+                     "only on some paths", "write instead")
 
     def test_star_import_below_module_level_is_refused_as_cpython_s_syntax_error(self):
         self.refused(ALL_STAR['star_in_function'], "main.py:2:5", "SyntaxError",
