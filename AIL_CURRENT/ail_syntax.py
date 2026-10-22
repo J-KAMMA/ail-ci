@@ -1186,7 +1186,7 @@ _MATH_HELPERS['checknum'] = (
     'def _ail_math_checknum(x: float) -> float:\n'
     '    if isinstance(x, (int, float)):\n'
     '        return float(x)\n'
-    '    if isinstance(x, (str, bytes, bytearray)):\n'
+    '    if isinstance(x, str) or type(x).__name__ in ("bytes", "bytearray"):\n'
     '        raise TypeError("must be real number, not " + type(x).__name__)\n'
     '    try:\n'
     '        return float(x)\n'
