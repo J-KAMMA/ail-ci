@@ -22,6 +22,7 @@ The scan is syntactic and per scope, so it can miss a number reached through a c
 (DIFFERENCES C115-silent2-1), and it can refuse an `is` that would have been right.
 """
 import ast
+import re
 
 _ARITH = (ast.Add, ast.Sub, ast.Div, ast.FloorDiv, ast.Pow, ast.LShift, ast.RShift, ast.BitAnd, ast.BitOr, ast.BitXor)
 _BOTH = (ast.Mult, ast.Mod)
@@ -381,8 +382,9 @@ def find(tree, only_tuple=False):
                            % ('is not' if isinstance(o, ast.IsNot) else 'is', n.lineno))
             if only_tuple:
                 continue
-            if (ka is not None and ka.kind == 'tuple') or (kb is not None and kb.kind == 'tuple'):
-                continue                # a tuple constant is not a number: an unequal tuple pair is False on both
+            if ((ka is not None and ka.kind == 'tuple' and ka.value is not None)
+                    or (kb is not None and kb.kind == 'tuple' and kb.value is not None)):
+                continue                # a known tuple constant is not a number: an unequal pair is False on both
             sa, sb = small_int(a) is not None, small_int(b) is not None
             if (sa and _fits(b, kb)) or (sb and _fits(a, ka)):
                 continue
@@ -470,7 +472,7 @@ def _tuple_argument_refusal(tree, scan):
 
 def refusal(source):
     """the refusal text for a program (Python source) that has such a comparison, or None"""
-    if ' is ' not in source:
+    if re.search(r'\bis\b', source) is None:
         return None
     try:
         tree = ast.parse(source)
@@ -483,7 +485,7 @@ def refusal(source):
 def tuple_refusal(source):
     """the refusal text for an `is` with a tuple constant, or None (the tuple rewrite leaves such a literal alone so
     this module still sees it after the surface pass)"""
-    if ' is ' not in source:
+    if re.search(r'\bis\b', source) is None:
         return None
     try:
         tree = ast.parse(source)

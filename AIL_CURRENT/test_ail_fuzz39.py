@@ -53,14 +53,15 @@ def check_program(test, name, text):
             test.assertEqual(got.returncode, want[1], (name, general, got.stderr[-800:]))
 
 
-def check_refused(test, name, text):
+def check_refused(test, name, text, marker='C?-job-fuzz39-10230820-1', word='tuple'):
     with tempfile.TemporaryDirectory(prefix='ail-fuzz39-') as directory:
         for general in (True, False):
             _, built = build(directory, name + ('g' if general else 'd'), text, general)
             test.assertNotEqual(built.returncode, 0, (name, general))
             message = built.stdout + built.stderr
-            test.assertIn('C?-job-fuzz39-10230820-1', message, (name, general, message[-1200:]))
-            test.assertIn('tuple', message, (name, general, message[-1200:]))
+            test.assertIn(marker, message, (name, general, message[-1200:]))
+            if word is not None:
+                test.assertIn(word, message, (name, general, message[-1200:]))
 
 
 REFUSED = {
@@ -71,6 +72,13 @@ REFUSED = {
                           '    print(same((), ()))\n\n\nmain()\n'),
     'through_data': ('def same(a, b):\n    return a is b\n\n\ndef main():\n    d = {"k": (1,)}\n'
                       '    xs = [(1,)]\n    print(same(d["k"], (1,)))\n    print(xs[0] is (1,))\n\n\nmain()\n'),
+    'is_before_parenthesis': 'def main():\n    a = ()\n    b = ()\n    print(a is(b))\n\n\nmain()\n',
+}
+
+NUMBER_REFUSED = {
+    'mixed_tuple_and_float_binding': ('def show(a):\n    print(a)\n\n\ndef f() -> None:\n    x = (1,)\n'
+                                      '    x = 2.5\n    z = 2.5\n    print(x is z)\n\n\ndef main() -> None:\n'
+                                      '    f()\n    show((1, 2))\n\n\nmain()\n'),
 }
 
 MATCH = {
@@ -137,6 +145,10 @@ class TupleConstantIdentity(unittest.TestCase):
     def test_refused_by_name(self):
         for name, text in sorted(REFUSED.items()):
             check_refused(self, 'refuse_' + name, text)
+
+    def test_mixed_binding_still_refuses_the_number(self):
+        for name, text in sorted(NUMBER_REFUSED.items()):
+            check_refused(self, 'number_' + name, text, 'C115', None)
 
     def test_other_identity_and_copying_is_cpython(self):
         for name, text in sorted(MATCH.items()):
