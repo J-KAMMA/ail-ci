@@ -1,5 +1,14 @@
 # Development log
 
+## 2026-10-22 -- job-integ1-10230230: integrate four accepted jobs
+
+Integrated the fix commits of `job-c169-10221631`, `job-cov6-10221632`, `job-fuzz8-10221632` and
+`job-intenum4-10221632`, skipping their `.agent/` and `corpus/` changes. The c169 records live in
+`docs/spec/`; the other three write the root records. Conflicts were limited to `MANIFEST.json`
+(union of pins) and the shared `DEVLOG.md` / `DIFFERENCES.md` (both sides kept). Placeholder
+difference ids were numbered C170-C187. Targeted tests and the full suite were run on the final
+commit.
+
 ## 2026-10-22 -- C169 review fix: self-referential receivers no longer recurse
 
 Passing the same `seen` set through `value_class`/`attribute_class` into `name_class` makes a

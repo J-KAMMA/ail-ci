@@ -1,5 +1,14 @@
 # DEVLOG
 
+## 2026-10-22 -- job-integ1-10230230: integrate four accepted jobs
+
+Integrated the fix commits of `job-c169-10221631`, `job-cov6-10221632`, `job-fuzz8-10221632` and
+`job-intenum4-10221632`, skipping their `.agent/` and `corpus/` changes. The c169 records live in
+`docs/spec/`; the other three write the root records. Conflicts were limited to `MANIFEST.json`
+(union of pins) and the shared `DEVLOG.md` / `DIFFERENCES.md` (both sides kept). Placeholder
+difference ids were numbered C170-C187. Targeted tests and the full suite were run on the final
+commit.
+
 ## 2026-10-22 — job-cov6-10221632: fix the Fraction hash regression
 
 - `Fraction.__hash__` returns `hash(numerator)` when the denominator is 1, so an integral
@@ -63,7 +72,7 @@
    together with `itertools.accumulate(..., initial=b.x)` or `groupby([b.x, ...])` no longer aborts
    every build with `RecursionError`; the typed path declines and the default build falls back,
    matching CPython (`[2, 3.5]`, `1 [1, 1]` / `2 [2]`).
-2. Corrected `DIFFERENCES.md` row `C?-job-fuzz8-10221632-2`: mutable-element groupby keys do not
+2. Corrected `DIFFERENCES.md` row `C181`: mutable-element groupby keys do not
    run on a typed recompute.  `--strict` refuses the pattern (`'_ilN_gc' is read before it is
    assigned`) and the default build uses the general path.
 
