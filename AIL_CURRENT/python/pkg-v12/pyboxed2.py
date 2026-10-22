@@ -1454,6 +1454,371 @@ _IMPLICIT_LIB = {**{n: 'heapq' for n in ('heappush', 'heappop', 'heapify', 'heap
                                           'insort_right')}}
 
 
+def _module_global_names(tree):
+    """Names a module-level def can see as globals: module assignments, top-level defs/classes and imports."""
+    names = _scan_assigned_names(tree.body)
+    for n in tree.body:
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(n.name)
+        elif isinstance(n, ast.Import):
+            for a in n.names:
+                names.add(a.asname or a.name.split('.')[0])
+        elif isinstance(n, ast.ImportFrom):
+            for a in n.names:
+                names.add(a.asname or a.name)
+    return names
+
+
+def _function_local_names(fn):
+    """The names a function binds itself (parameters, assignments, loop targets, nested def/class names)."""
+    names = {a.arg for a in list(fn.args.posonlyargs) + list(fn.args.args) + list(fn.args.kwonlyargs)}
+    if fn.args.vararg:
+        names.add(fn.args.vararg.arg)
+    if fn.args.kwarg:
+        names.add(fn.args.kwarg.arg)
+    names |= _scan_assigned_names(fn.body)
+    directives = set()
+    for n in ast.walk(ast.Module(body=fn.body, type_ignores=[])):
+        if isinstance(n, (ast.Global, ast.Nonlocal)):
+            directives.update(n.names)
+    names -= directives
+
+    class Defs(ast.NodeVisitor):
+        def visit_FunctionDef(self, node):
+            self.names.add(node.name)
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_ClassDef(self, node):
+            self.names.add(node.name)
+
+        def visit_Lambda(self, node):
+            pass
+
+        def visit_ListComp(self, node):
+            pass
+
+        visit_SetComp = visit_DictComp = visit_GeneratorExp = visit_ListComp
+
+    v = Defs()
+    v.names = names
+    for stmt in fn.body:
+        v.visit(stmt)
+    return names
+
+
+def _late_bound_names(stmts, line):
+    """Enclosing function locals whose value at generator-consumption time can differ from their
+    value when the generator expression was made: assigned later, or anywhere in a loop that
+    contains the expression (the next iteration may rebind them before it is consumed)."""
+    assigns = []
+    loops = []
+
+    def walk_expr(e):
+        if isinstance(e, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp, ast.Lambda)):
+            return
+        for child in ast.iter_child_nodes(e):
+            if isinstance(child, ast.expr):
+                walk_expr(child)
+
+    def add_target(t, lids, lineno):
+        for name in _assign_target_names(t):
+            assigns.append((name, lineno, lids))
+
+    def walk(body, lids):
+        for n in body:
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            if isinstance(n, ast.Assign):
+                for t in n.targets:
+                    add_target(t, lids, n.lineno)
+                walk_expr(n.value)
+            elif isinstance(n, ast.AugAssign):
+                add_target(n.target, lids, n.lineno)
+                walk_expr(n.value)
+            elif isinstance(n, ast.AnnAssign):
+                add_target(n.target, lids, n.lineno)
+                if n.value is not None:
+                    walk_expr(n.value)
+            elif isinstance(n, (ast.For, ast.AsyncFor)):
+                lid = id(n)
+                loops.append((lid, [(getattr(s, 'lineno', 0), getattr(s, 'end_lineno', 0)) for s in n.body]))
+                add_target(n.target, lids + (lid,), n.lineno)
+                walk_expr(n.iter)
+                walk(n.body, lids + (lid,))
+                walk(n.orelse, lids)
+            elif isinstance(n, ast.While):
+                lid = id(n)
+                loops.append((lid, [(getattr(s, 'lineno', 0), getattr(s, 'end_lineno', 0)) for s in n.body]))
+                walk_expr(n.test)
+                walk(n.body, lids + (lid,))
+                walk(n.orelse, lids)
+            elif isinstance(n, ast.If):
+                walk_expr(n.test)
+                walk(n.body, lids)
+                walk(n.orelse, lids)
+            elif isinstance(n, ast.Try):
+                walk(n.body, lids)
+                for h in n.handlers:
+                    if h.name:
+                        assigns.append((h.name, h.lineno, lids))
+                    walk(h.body, lids)
+                walk(n.orelse, lids)
+                walk(n.finalbody, lids)
+            elif isinstance(n, ast.With):
+                for item in n.items:
+                    walk_expr(item.context_expr)
+                    if item.optional_vars is not None:
+                        add_target(item.optional_vars, lids, n.lineno)
+                walk(n.body, lids)
+            elif isinstance(n, ast.Delete):
+                for t in n.targets:
+                    add_target(t, lids, n.lineno)
+            elif isinstance(n, ast.Expr):
+                walk_expr(n.value)
+            elif isinstance(n, (ast.Return, ast.Raise, ast.Assert)):
+                for child in ast.iter_child_nodes(n):
+                    if isinstance(child, ast.expr):
+                        walk_expr(child)
+
+    walk(stmts, ())
+    enclosing = {lid for lid, ranges in loops
+                 if any(start <= line <= end for start, end in ranges)}
+    late = set()
+    for name, lineno, lids in assigns:
+        if lineno > line or any(lid in enclosing for lid in lids):
+            late.add(name)
+    return late
+
+
+class _GetterReads(ast.NodeTransformer):
+    """Reads of a late-bound local become `getter()`; the getter is a lambda made where the
+    generator expression is, so the general path's closure cells see later rebindings."""
+
+    def __init__(self, names):
+        self.names = set(names)
+        self.bound = set()
+
+    def visit_Name(self, node):
+        if isinstance(node.ctx, ast.Load) and node.id in self.names and node.id not in self.bound:
+            return ast.copy_location(
+                ast.Call(func=ast.Name(id=node.id, ctx=ast.Load()), args=[], keywords=[]), node)
+        return node
+
+    def visit_For(self, node):
+        node.iter = self.visit(node.iter)
+        own = {t.id for t in ast.walk(node.target) if isinstance(t, ast.Name)}
+        saved, self.bound = self.bound, self.bound | own
+        try:
+            node.body = [self.visit(s) for s in node.body]
+        finally:
+            self.bound = saved
+        node.orelse = [self.visit(s) for s in node.orelse]
+        return node
+
+    visit_AsyncFor = visit_For
+
+    def visit_While(self, node):
+        node.test = self.visit(node.test)
+        node.body = [self.visit(s) for s in node.body]
+        node.orelse = [self.visit(s) for s in node.orelse]
+        return node
+
+    def visit_If(self, node):
+        node.test = self.visit(node.test)
+        node.body = [self.visit(s) for s in node.body]
+        node.orelse = [self.visit(s) for s in node.orelse]
+        return node
+
+    def visit_Lambda(self, node):
+        for d in node.args.defaults:
+            self.visit(d)
+        for d in node.args.kw_defaults:
+            if d is not None:
+                self.visit(d)
+        own = {a.arg for a in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]}
+        if node.args.vararg:
+            own.add(node.args.vararg.arg)
+        if node.args.kwarg:
+            own.add(node.args.kwarg.arg)
+        saved, self.bound = self.bound, self.bound | own
+        try:
+            node.body = self.visit(node.body)
+        finally:
+            self.bound = saved
+        return node
+
+    def _comp(self, node):
+        saved = self.bound
+        try:
+            for g in node.generators:
+                g.iter = self.visit(g.iter)
+                own = {t.id for t in ast.walk(g.target) if isinstance(t, ast.Name)}
+                self.bound = self.bound | own
+                g.ifs = [self.visit(c) for c in g.ifs]
+            if isinstance(node, ast.DictComp):
+                node.key = self.visit(node.key)
+                node.value = self.visit(node.value)
+            else:
+                node.elt = self.visit(node.elt)
+        finally:
+            self.bound = saved
+        return node
+
+    visit_ListComp = _comp
+    visit_SetComp = _comp
+    visit_GeneratorExp = _comp
+    visit_DictComp = _comp
+
+
+def _lower_genexps(tree, global_names):
+    """A generator expression is lazy in CPython: its outermost iterable is evaluated when it is
+    created, every later iterable / condition / element when the generator is consumed, and a list
+    it walks is walked live.  The general path used to materialise it as a list immediately, so
+    `g = (x for x in xs); xs.append(4); list(g)` lost the 4.  Lower each generator expression to a
+    call of a module-level generator function (the general path already builds those lazily), with
+    the outermost iterable and any enclosing function locals passed as arguments.  Function locals
+    are passed by value (a list/dict/instance is a reference, so mutations are seen) unless the
+    enclosing scope can rebind them after creation, in which case they travel as a getter lambda
+    whose closure cell keeps them live; a module global is left to resolve as a global at
+    consumption time."""
+    builtins_ = _BUILTIN_NAMES
+    taken = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+    taken |= _scan_assigned_names(tree.body) | set(global_names)
+    counter = [0]
+    new_defs = []
+
+    def fresh():
+        while True:
+            counter[0] += 1
+            name = '_ail_genexp_%d' % counter[0]
+            if name not in taken:
+                taken.add(name)
+                return name
+
+    def make_def(gen, visible, late):
+        free = _free_reads(gen, set())
+        late_params = sorted(n for n in free if n in visible and n in late)
+        params = sorted(n for n in free
+                        if n not in late_params and (
+                            n in visible
+                            or (n in global_names and n in builtins_)
+                            or (n not in global_names and n not in builtins_)))
+        src = fresh()
+        name = fresh()
+        body = [ast.Expr(value=ast.Yield(value=copy.deepcopy(gen.elt)))]
+        for i in range(len(gen.generators) - 1, -1, -1):
+            g = gen.generators[i]
+            for cond in reversed(g.ifs):
+                body = [ast.If(test=copy.deepcopy(cond), body=body, orelse=[])]
+            it = ast.Name(id=src, ctx=ast.Load()) if i == 0 else copy.deepcopy(g.iter)
+            body = [ast.For(target=copy.deepcopy(g.target), iter=it, body=body, orelse=[])]
+        if late_params:
+            getter = _GetterReads(late_params)
+            body = [getter.visit(stmt) for stmt in body]
+        args = ast.arguments(posonlyargs=[], args=[ast.arg(arg=src)] + [ast.arg(arg=p) for p in params + late_params],
+                             vararg=None, kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[])
+        fn = ast.FunctionDef(name=name, args=args, body=body, decorator_list=[],
+                             returns=None, type_comment=None)
+        for n in ast.walk(fn):
+            if 'lineno' in n._attributes:
+                ast.copy_location(n, gen)
+        new_defs.append(fn)
+        call_args = [copy.deepcopy(gen.generators[0].iter)]
+        call_args += [ast.Name(id=p, ctx=ast.Load()) for p in params]
+        for p in late_params:
+            lam_args = ast.arguments(posonlyargs=[], args=[], vararg=None, kwonlyargs=[],
+                                     kw_defaults=[], kwarg=None, defaults=[])
+            call_args.append(ast.copy_location(
+                ast.Lambda(args=lam_args, body=ast.Name(id=p, ctx=ast.Load())), gen))
+        call = ast.Call(func=ast.Name(id=name, ctx=ast.Load()), args=call_args, keywords=[])
+        return ast.copy_location(call, gen)
+
+    def direct_genexps(stmts):
+        out = []
+
+        class Find(ast.NodeVisitor):
+            def visit_FunctionDef(self, node):
+                pass
+
+            visit_AsyncFunctionDef = visit_FunctionDef
+
+            def visit_Lambda(self, node):
+                pass
+
+            def visit_ClassDef(self, node):
+                pass
+
+            def visit_GeneratorExp(self, node):
+                out.append(node)
+
+        find = Find()
+        for stmt in stmts:
+            find.visit(stmt)
+        return out
+
+    def process_body(stmts, visible):
+        repl = {}
+        for gen in direct_genexps(stmts):
+            late = _late_bound_names(stmts, gen.lineno) if visible else set()
+            repl[id(gen)] = make_def(gen, visible, late)
+
+        class Replace(ast.NodeTransformer):
+            def visit_FunctionDef(self, node):
+                return node
+
+            visit_AsyncFunctionDef = visit_FunctionDef
+
+            def visit_Lambda(self, node):
+                return node
+
+            def visit_ClassDef(self, node):
+                return node
+
+            def visit_GeneratorExp(self, node):
+                return repl.get(id(node), node)
+
+        replace = Replace()
+        for i, stmt in enumerate(stmts):
+            stmts[i] = replace.visit(stmt)
+
+    def walk_scopes(node, enclosing):
+        if isinstance(node, ast.Module):
+            process_body(node.body, set())
+            for stmt in node.body:
+                walk_nested(stmt, set())
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            own = _function_local_names(node)
+            visible = set(enclosing) | own
+            process_body(node.body, visible)
+            for stmt in node.body:
+                walk_nested(stmt, visible)
+        elif isinstance(node, ast.ClassDef):
+            for stmt in node.body:
+                walk_nested(stmt, set(enclosing))
+
+    def walk_nested(stmt, visible):
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            walk_scopes(stmt, visible)
+            return
+        for child in ast.iter_child_nodes(stmt):
+            if isinstance(child, ast.stmt):
+                walk_nested(child, visible)
+
+    walk_scopes(tree, set())
+    for i in range(len(new_defs)):
+        walk_scopes(new_defs[i], set())
+    if new_defs:
+        imports = 0
+        if tree.body and isinstance(tree.body[0], ast.Expr) and isinstance(tree.body[0].value, ast.Constant) \
+                and isinstance(tree.body[0].value.value, str):
+            imports = 1
+        while imports < len(tree.body) and isinstance(tree.body[imports], (ast.Import, ast.ImportFrom)):
+            imports += 1
+        tree.body[imports:imports] = new_defs
+    ast.fix_missing_locations(tree)
+
+
 def _lambda_free_reads(body, bound, ctx):
     """The names a lambda body reads that it does not own: a local of the enclosing function would be a
     closure (refused). A builtin the function does not shadow (`len`, `set`, `sorted`, `min` ...) is not."""
@@ -2051,6 +2416,7 @@ class Compiler(boxclosure.ClosureMixin):
         self._add_notimplemented(tree)                              # NotImplemented (safetyrt.patch_notimplemented)
         self._dataclass_methods(tree)                               # a @dataclass's __eq__ (and __hash__ when frozen)
         filelib.rewrite_tree(tree, Unsupported, general=True)      # G7: open / with / os -> primitives + prelude
+        _lower_genexps(tree, _module_global_names(tree))  # a generator expression stays lazy (CPython)
         mix_tree = copy.deepcopy(tree)          # the mixed-mode typed clones see the source as written
         mix_tree.body = [n for n in mix_tree.body if not getattr(n, '_ail_safety', False)]
         self.user_top = {(type(n).__name__, n.name) for n in mix_tree.body if isinstance(n, (ast.FunctionDef, ast.ClassDef))}

@@ -784,10 +784,10 @@ class Exprs:
         need = has_tuple(et) or (kind == 'dict' and has_tuple(kt)) or iter_tuple
         if kind == 'dict' and is_table_dict(t) or kind == 'set' and is_table_set(t):
             need = True
-        if need and not hoist:
+        if need and kind != 'iter' and not hoist:
             node2 = orig
             return self.comp(node2, want, kind, True)
-        if need:
+        if need and kind != 'iter':
             if self.nohoist:
                 self.refuse(node, 'a comprehension building tuples inside a condition, a lambda or another '
                             'comprehension; build the list in a statement first')
