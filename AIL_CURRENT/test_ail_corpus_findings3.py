@@ -19,6 +19,26 @@ with CPython (AIL_IR=0 and 1).
     dedent (default options; text with a hyphen or a tab is a RuntimeError); str.strip(chars) on the general path.
 6. a lambda that only calls builtins (`key=lambda w: (len(w), w)`) was refused on the general path as "closing
    over a local variable (len)".
+11. a comprehension inside a lambda is a scope of its own: `filter(lambda rec: all(key in rec for key in required),
+    records)` was refused on the general path because `key` (the comprehension's own loop target) was read as an
+    enclosing local, i.e. as a closure; only `required` is one, and it is captured.
+12. `itertools.takewhile` / `dropwhile` with a predicate that reads a local (a closure) were refused on the general
+    path: the raw-function-pointer callbacks of the C iterators carry no user data (`ail_it_takewhile` takes no
+    `ud`), so the two functions are now the Python pieces `_ail_takewhile` / `_ail_dropwhile` of genlib.
+13. `bytes.hex(sep[, bytes_per_sep])` (and the bytearray method) was refused on the general path ("accepts no
+    arguments"); it is now the Python method `_ail_bm_hex` of the bytes prelude, with CPython 3.12's grouping
+    (a positive group counts from the left, a negative one from the right, 0 is one group) and its errors.
+14. `bisect.bisect(...)`: ail_syntax renames it to `bisect` (CPython's alias of bisect_right) but the general path
+    did not know that name; `bisect` is now in the implicit library of pyboxed2 (`_lib_bisect = _lib_bisect_right`).
+15. `max(a, *xs, key=...)` / `max(*xs)` / `min(...)` with a starred argument (beside other positional arguments)
+    was refused on the general path; the arguments are expanded into one list, which max/min iterate -- a lone
+    expanded argument is CPython's "iterate the single argument", and no argument at all is its TypeError.
+16. `max` / `min` with `default=` and more than one positional argument is CPython's TypeError ("Cannot specify a
+    default for max() with multiple positional arguments"), never a value -- the expansion above only learns the
+    count at run time, so the refusal is emitted there; with two literal arguments it is decided at compile time.
+17. `itertools.takewhile` / `dropwhile` open the iterable at CALL time (CPython's TypeError for a non-iterable is
+    raised there, not on the first `next`): the pieces above are plain wrappers around the generator. A keyword
+    call is refused by name, as CPython takes no keyword argument either.
 """
 import os
 import subprocess
@@ -353,6 +373,212 @@ if __name__ == "__main__":
     main()
 """
 
+COMP_LAMBDA = r"""from typing import Any
+
+
+def has_all_required_keys(record: dict[str, Any], required: tuple[str, ...]) -> bool:
+    return all(key in record for key in required)
+
+
+def filter_records(records: list[dict[str, Any]], required: tuple[str, ...]) -> list[dict[str, Any]]:
+    return list(filter(lambda rec: all(key in rec for key in required), records))
+
+
+def main() -> None:
+    required: tuple[str, ...] = ("id", "name", "email")
+    records: list[dict[str, Any]] = [
+        {"id": 1, "name": "Alice", "email": "alice@example.com"},
+        {"id": 2, "name": "Bob"},
+        {},
+        {"name": "Eve", "email": "eve@example.org", "id": 5},
+    ]
+    kept = filter_records(records, required)
+    print(len(kept), kept[0]["name"], kept[1]["id"])
+    dropped = [rec for rec in records if not has_all_required_keys(rec, required)]
+    print(len(dropped), [sorted(rec) for rec in dropped])
+    pairs = [(1, "a"), (2, "b"), (3, "c")]
+    tags = ["x", "y"]
+    print([p for p in pairs if any(p[0] == i + 1 for i in range(2))], tags)
+    ranges = [n for n in range(6) if all(n != m for m in (0, 3))]
+    print(ranges, sum(x for x in ranges if x > 2))
+
+
+if __name__ == "__main__":
+    main()
+"""
+
+WHILE_CLOSURE = r"""import itertools
+
+
+def split_at_first_exceeding(values: list[int], threshold: int) -> tuple[list[int], list[int]]:
+    prefix: list[int] = list(itertools.takewhile(lambda x: x <= threshold, values))
+    rest: list[int] = list(itertools.dropwhile(lambda x: x <= threshold, values))
+    return prefix, rest
+
+
+def main() -> None:
+    data: list[int] = [3, 8, 2, 7, 15, 4]
+    threshold: int = 10
+    prefix, rest = split_at_first_exceeding(data, threshold)
+    print(prefix, rest)
+    low, high = 2, 4
+    print(list(itertools.takewhile(lambda v: low <= v <= high, [2, 3, 9])),
+          list(itertools.dropwhile(lambda v: low <= v <= high, [2, 3, 9])))
+    print(list(itertools.islice(itertools.takewhile(lambda v: v < threshold, itertools.count()), 3)))
+    empty: list[int] = []
+    print(list(itertools.takewhile(lambda v: v > 0, empty)), list(itertools.dropwhile(lambda v: v > 0, empty)))
+    # a non-iterable is CPython's TypeError at CALL time, before anything iterates the result
+    try:
+        itertools.takewhile(lambda v: v < threshold, 5)
+        print("no raise")
+    except TypeError as e:
+        print("TypeError", e)
+    try:
+        itertools.dropwhile(lambda v: v < threshold, None)
+        print("no raise")
+    except TypeError as e:
+        print("TypeError", e)
+    were = itertools.takewhile(lambda v: v < threshold, data)
+    print(list(were))
+
+
+if __name__ == "__main__":
+    main()
+"""
+
+HEX_SEP = r"""def pack_bits(bits: list[bool]) -> bytes:
+    out = bytearray()
+    value = 0
+    for i, bit in enumerate(bits):
+        if bit:
+            value |= 1 << (7 - i % 8)
+        if i % 8 == 7:
+            out.append(value)
+            value = 0
+    return bytes(out)
+
+
+def show(data: bytes, sep: str) -> str:
+    return data.hex(sep)
+
+
+def main() -> None:
+    bits: list[bool] = [True, False, True, True, False, False, False, True, True, True]
+    packed: bytes = pack_bits(bits)
+    print(packed.hex(), packed.hex(" "), packed.hex(":"))
+    print(show(packed, "-"), bytearray(packed).hex(" "))
+    print(packed.hex(" ", 2), packed.hex(" ", -2), packed.hex(":", 0), packed.hex(":", 100))
+    print(b"".hex(":"), b"\x01".hex("ab" if False else ":"))
+    table = {"x": b"\xde\xad\xbe\xef"}
+    print(table["x"].hex("."))
+    for sep in ("", "ab", 1):
+        try:
+            print(packed.hex(sep))
+        except (TypeError, ValueError) as e:
+            print(type(e).__name__, e)
+    for group in (2147483648, -2147483649, 2147483647, -2147483648):
+        try:
+            print(packed.hex(":", group))
+        except OverflowError as e:
+            print(type(e).__name__, e)
+
+
+if __name__ == "__main__":
+    main()
+"""
+
+BISECT_MODULE = r"""import bisect
+
+
+def describe(sorted_values: list[int], target: int) -> tuple[int, int, int]:
+    left: int = bisect.bisect_left(sorted_values, target)
+    right: int = bisect.bisect_right(sorted_values, target)
+    return left, right, right - left
+
+
+def main() -> None:
+    xs: list[int] = [1, 3, 3, 5, 7]
+    for target in (0, 1, 3, 4, 7):
+        print(target, describe(xs, target), bisect.bisect(xs, target))
+    preview: list[int] = xs.copy()
+    bisect.insort(preview, 4)
+    bisect.insort_left(preview, 3)
+    bisect.insort_right(preview, 3)
+    print(preview, preview.count(3))
+    words: list[str] = ["ant", "bee", "cow"]
+    print(bisect.bisect(words, "boo"), bisect.bisect_left(words, "ant"))
+    print(bisect.bisect(xs, 3, 0, 2), bisect.bisect_right(xs, 9))
+    print(bisect.bisect(xs, 3, lo=1, hi=4), bisect.bisect_right(xs, 3, hi=-1))
+    for lo, hi in ((-1, 9), (0, 99), (0, -1), (5, 6), (0, -2), (2, 1)):
+        try:
+            print(bisect.bisect(xs, 3, lo, hi))
+        except (ValueError, IndexError) as e:
+            print(type(e).__name__, e)
+    for lo, hi in ((-1, 9), (0, 99), (0, -1)):
+        try:
+            print(bisect.bisect_left(xs, 3, lo, hi))
+        except (ValueError, IndexError) as e:
+            print(type(e).__name__, e)
+    try:
+        bisect.insort(preview, 4, 0, 99)
+    except IndexError as e:
+        print(type(e).__name__, e)
+    print(bisect.bisect_left(xs, 3, 0, None), bisect.bisect_right(xs, 3, hi=None))
+    print(bisect.bisect(xs, 9, lo=1, hi=None), bisect.bisect_left([], 1, 0, None))
+    bisect.insort_left(preview, 3, 0, None)
+    bisect.insort_right(preview, 3, hi=None)
+    print(preview)
+    for bad in (1.5, "1", None, [0]):
+        try:
+            print(bisect.bisect_left(xs, 3, bad, None))
+        except TypeError as e:
+            print("lo", type(e).__name__, e)
+    for bad in (1.5, "2", [0]):
+        try:
+            print(bisect.bisect_left(xs, 3, 0, bad))
+        except TypeError as e:
+            print("hi", type(e).__name__, e)
+    try:
+        print(bisect.bisect_left(xs, 3, -1, 1.0))
+    except TypeError as e:
+        print("order", type(e).__name__, e)
+
+
+if __name__ == "__main__":
+    main()
+"""
+
+STAR_MAX = r"""def widest(rows: list[tuple[str, int]]) -> int:
+    return max(len("name"), *(len(name) for name, _ in rows))
+
+
+def main() -> None:
+    rows = [("ab", 1), ("abcd", 2)]
+    print(widest(rows))
+    xs = [3, 9, 2]
+    print(max(*xs), min(*xs), max(0, *xs), min(xs[0], *xs[1:]))
+    print(min([4, 1], *[]), max([4, 1], *[]), min("b", *[]))
+    print(max(*[[1, 5], [2]], key=len), min(*["bb", "a"], key=len))
+    print(max(3, 3.5, *xs), min(-1, *xs, 0))
+    vals = {"a": 1, "b": 7}
+    print(max(*vals.values()), max(vals["a"], *xs))
+    for call in (0, 1):
+        try:
+            print(max(*[]) if call == 0 else min(*[]))
+        except TypeError as e:
+            print("TypeError", e)
+    for call in (0, 1):
+        try:
+            print(max(*xs, default=0) if call == 0 else min(xs[0], *xs[1:], default=1))
+        except TypeError as e:
+            print("TypeError", e)
+    print(max(*[[1, 5]], default=0), min([], default=-2), max([4, 2], *[]))
+
+
+if __name__ == "__main__":
+    main()
+"""
+
 CASES = [
     ('print_star_statement_typed', PRINT_STAR_STATEMENT),
     ('datetime_in_tuples_ordered_and_subtracted', DT_TUPLE_ORDER),
@@ -369,6 +595,11 @@ CASES = [
     ('sorted_generator_of_dates', DATE_GENEXP),
     ('print_star_of_a_computed_list', PRINT_STAR),
     ('math_comb_perm_lcm', MATH_INT),
+    ('comprehension_loop_variable_in_lambda', COMP_LAMBDA),
+    ('takewhile_dropwhile_closure', WHILE_CLOSURE),
+    ('bytes_hex_separator', HEX_SEP),
+    ('bisect_module_bisect_on_general_path', BISECT_MODULE),
+    ('starred_max_min_arguments', STAR_MAX),
 ]
 
 
