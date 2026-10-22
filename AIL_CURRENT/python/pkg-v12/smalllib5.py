@@ -225,7 +225,7 @@ def run_io(tree, text):
             csv_only.add(var)
 
     def lines_of(call):
-        if len(call.args) != 1 or call.keywords:
+        if len(call.args) != 1 or any(k.arg != 'newline' for k in call.keywords):
             refuse(call, 'io.StringIO(text) with the text is the form that is built for csv.reader')
         return ast.Call(func=ast.Attribute(value=call.args[0], attr='splitlines', ctx=ast.Load()),
                         args=[ast.Constant(value=True)], keywords=[])
