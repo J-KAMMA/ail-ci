@@ -24,12 +24,14 @@ counts as unequal). Instances without `__eq__` / `__hash__` compare and hash by 
 # special method -> table index; D1 = (self), D2 = (self, other)
 D1 = {'__neg__': 'NEG', '__pos__': 'POS', '__abs__': 'ABS', '__hash__': 'HASH', '__bool__': 'BOOL',
       '__int__': 'INT', '__float__': 'FLOAT', '__floor__': 'FLOOR', '__ceil__': 'CEIL', '__trunc__': 'TRUNC',
-      '__len__': 'LEN', '__index__': 'INDEX'}
+      '__len__': 'LEN', '__index__': 'INDEX', '__invert__': 'INVERT'}
 D2 = {'__add__': 'ADD', '__radd__': 'RADD', '__sub__': 'SUB', '__rsub__': 'RSUB', '__mul__': 'MUL',
       '__rmul__': 'RMUL', '__truediv__': 'TRUEDIV', '__rtruediv__': 'RTRUEDIV', '__floordiv__': 'FLOORDIV',
       '__rfloordiv__': 'RFLOORDIV', '__mod__': 'MOD', '__rmod__': 'RMOD', '__pow__': 'POW', '__rpow__': 'RPOW',
       '__eq__': 'EQ', '__gt__': 'GT', '__round__': 'ROUND', '__getitem__': 'GETITEM', '__contains__': 'CONTAINS',
-      '__delitem__': 'DELITEM', '__ne__': 'NE'}
+      '__delitem__': 'DELITEM', '__ne__': 'NE', '__and__': 'AND', '__rand__': 'RAND', '__or__': 'OR', '__ror__': 'ROR',
+      '__xor__': 'XOR', '__rxor__': 'RXOR', '__lshift__': 'LSHIFT', '__rlshift__': 'RLSHIFT', '__rshift__': 'RSHIFT',
+      '__rrshift__': 'RRSHIFT', '__format__': 'FORMAT'}
 D3 = {'__setitem__': 'SETITEM'}
 # an operator method that is a hook here; a program defining one of these turns the patch on
 HOOKED = frozenset(D1) | frozenset(D2) | frozenset(D3)
@@ -39,10 +41,11 @@ ALREADY_BOUND = frozenset(('__eq__', '__len__', '__getitem__', '__contains__'))
 
 ENUMS = '''
 enum { AIL_D1_NEG, AIL_D1_POS, AIL_D1_ABS, AIL_D1_HASH, AIL_D1_BOOL, AIL_D1_INT, AIL_D1_FLOAT, AIL_D1_FLOOR,
-       AIL_D1_CEIL, AIL_D1_TRUNC, AIL_D1_LEN, AIL_D1_INDEX, AIL_ND1 };
+       AIL_D1_CEIL, AIL_D1_TRUNC, AIL_D1_LEN, AIL_D1_INDEX, AIL_D1_INVERT, AIL_ND1 };
 enum { AIL_D2_ADD, AIL_D2_RADD, AIL_D2_SUB, AIL_D2_RSUB, AIL_D2_MUL, AIL_D2_RMUL, AIL_D2_TRUEDIV, AIL_D2_RTRUEDIV,
        AIL_D2_FLOORDIV, AIL_D2_RFLOORDIV, AIL_D2_MOD, AIL_D2_RMOD, AIL_D2_POW, AIL_D2_RPOW, AIL_D2_EQ, AIL_D2_GT,
-       AIL_D2_ROUND, AIL_D2_GETITEM, AIL_D2_CONTAINS, AIL_D2_DELITEM, AIL_D2_NE, AIL_ND2 };
+       AIL_D2_ROUND, AIL_D2_GETITEM, AIL_D2_CONTAINS, AIL_D2_DELITEM, AIL_D2_NE, AIL_D2_AND, AIL_D2_RAND, AIL_D2_OR,
+       AIL_D2_ROR, AIL_D2_XOR, AIL_D2_RXOR, AIL_D2_LSHIFT, AIL_D2_RLSHIFT, AIL_D2_RSHIFT, AIL_D2_RRSHIFT, AIL_D2_FORMAT, AIL_ND2 };
 enum { AIL_D3_SETITEM, AIL_ND3 };
 typedef ail_st (*ail_d3_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj, ail_obj);
 typedef ail_st (*ail_d1_fn)(ail_ctx *, ail_obj *, ail_obj);
@@ -79,11 +82,27 @@ static void ail__dun_tname(char *buf, size_t n, ail_obj x) {
             ail_str s = ail_view_to_str(((ail_classobj *)c.o)->name);
             size_t k = 0;
             for (int64_t i = 0; i < s.n && k + 1 < n; i++) { uint32_t ch = (uint32_t)ail_chr(s, i); buf[k++] = ch < 128 ? (char)ch : '?'; }
-            buf[k] = 0; return;
+            buf[k] = 0;
+            /* a typed deque is a class `_AilDeque_<T>` from the collections pass, shown as CPython's deque */
+            if (!strncmp(buf, "_AilDeque_", 10)) snprintf(buf, n, "%s", "collections.deque");
+            return;
         }
+    }
+    if (x.tag == AIL_T_DICT) {
+        if (((ail_gcobj *)x.o)->flags == 1) { snprintf(buf, n, "%s", "Counter"); return; }
+        if (((ail_mapobj *)x.o)->dd_factory || ((ail_gcobj *)x.o)->flags == 2) {
+            snprintf(buf, n, "%s", "collections.defaultdict"); return;
+        }
+    }
+    if (x.tag == AIL_T_LIST && ((ail_gcobj *)x.o)->flags) { snprintf(buf, n, "%s", "collections.deque"); return; }
+    if (x.tag == AIL_T_LIST && ((ail_gcobj *)x.o)->aux) {
+        snprintf(buf, n, "%s", ((ail_gcobj *)x.o)->aux == 1 ? "dict_keys"
+                               : ((ail_gcobj *)x.o)->aux == 2 ? "dict_values" : "dict_items");
+        return;
     }
     snprintf(buf, n, "%s", ail_type_name(x.tag));
 }
+static const char *ail__dun_tname_s(ail_obj x) { static char b[80]; ail__dun_tname(b, sizeof b, x); return b; }
 __attribute__((noinline, cold)) static ail_st ail_dun_noattr(ail_ctx *cx, ail_obj inst, const char *name_for_msg) {
     char b2[200], tn[80]; ail__dun_tname(tn, sizeof tn, inst);
     snprintf(b2, sizeof b2, "'%s' object has no attribute '%s'", tn, name_for_msg);
@@ -96,15 +115,39 @@ __attribute__((noinline)) static ail_st ail_dun_binop(ail_ctx *cx, ail_obj *out,
     if (f) return f(cx, out, b, a);
     char buf[240], na[80], nb[80];
     ail__dun_tname(na, sizeof na, a); ail__dun_tname(nb, sizeof nb, b);
+    if (op[0] == '+' && (a.tag == AIL_T_LIST || a.tag == AIL_T_TUPLE || a.tag == AIL_T_STR
+                         || !strcmp(na, "collections.deque"))) {
+        const char *n = a.tag == AIL_T_TUPLE ? "tuple" : a.tag == AIL_T_STR ? "str"
+                      : (!strcmp(na, "collections.deque")
+                         || (a.tag == AIL_T_LIST && ((ail_gcobj *)a.o)->flags)) ? "deque" : "list";
+        snprintf(buf, sizeof buf, "can only concatenate %s (not \\"%s\\") to %s", n, nb, n);
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
+    if (op[0] == '*') {
+        int aseq = a.tag == AIL_T_LIST || a.tag == AIL_T_TUPLE || a.tag == AIL_T_STR
+                || (a.tag == AIL_T_INST && (!strcmp(na, "bytes") || !strcmp(na, "bytearray")
+                                             || !strcmp(na, "collections.deque")));
+        int bseq = b.tag == AIL_T_LIST || b.tag == AIL_T_TUPLE || b.tag == AIL_T_STR
+                || (b.tag == AIL_T_INST && (!strcmp(nb, "bytes") || !strcmp(nb, "bytearray")
+                                             || !strcmp(nb, "collections.deque")));
+        if (aseq || bseq) {
+            const char *tn = aseq ? nb : na;
+            snprintf(buf, sizeof buf, "can't multiply sequence by non-int of type '%s'", tn);
+            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+        }
+    }
     snprintf(buf, sizeof buf, "unsupported operand type(s) for %s: '%s' and '%s'", op, na, nb);
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
 }
 static inline int ail_obj_truthy(ail_obj x);
 static inline int ail_member_eq(ail_obj a, ail_obj b);
+static inline int ail__is_counter(ail_obj x);
+static inline ail_st ail_counter_unary(ail_ctx *cx, ail_obj *out, ail_obj a, int neg);
 static inline ail_st ail_dun_pos(ail_ctx *cx, ail_obj *out, ail_obj x) {
     if (x.tag == AIL_T_INST) { ail_d1_fn f = ail_dun1(x, AIL_D1_POS); if (f) return f(cx, out, x); }
     else if (x.tag == AIL_T_INT || x.tag == AIL_T_FLOAT) { *out = x; return AIL_OK; }
     else if (x.tag == AIL_T_BOOL) { *out = ail_box_int(x.i); return AIL_OK; }
+    else if (ail__is_counter(x)) return ail_counter_unary(cx, out, x, 0);
     char buf[140], tn[80]; ail__dun_tname(tn, sizeof tn, x);
     snprintf(buf, sizeof buf, "bad operand type for unary +: '%s'", tn);
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
@@ -215,9 +258,31 @@ __attribute__((noinline)) static ail_st ail_dun_hash(ail_ctx *cx, int64_t *out, 
 '''
 
 
+# runtime functions that only some programs carry (the formatter of safetyrt.py)
+OPTIONAL = (
+            '            uint16_t ch;\n            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) {\n',
+            
+            '"%%%c format: a real number is required, not %s", (char)t, ail_type_name(arg.tag)',
+            '"%%%c format: an integer is required, not %s", (char)t, ail_type_name(arg.tag)',
+            '"must be real number, not %s", ail_type_name(arg.tag)',
+            'static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {\n',
+            '            int64_t iv;\n            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) iv = arg.i;\n',
+            '            double d;\n            if (arg.tag == AIL_T_FLOAT) d = ail_float_val(arg);\n')
+
+
 def _binop_guard(fwd, rev, op):
     return ('if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) return ail_dun_binop(cx, out, a, b, '
             'AIL_D2_%s, AIL_D2_%s, "%s");\n    ' % (fwd, rev, op))
+
+
+_VIEW_OP_EQ = (
+    'static inline ail_st ail_op_eq(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n'
+    '    if (__builtin_expect(ail__view_kind(a) || ail__view_kind(b), 0)) { int r = 0; ail_st st = ail__view_eq(cx, &r, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(r); return AIL_OK; }\n'
+    '    *out = ail_box_bool(ail_obj_eq_raw(a, b)); return AIL_OK;\n}')
+_VIEW_OP_NE = (
+    'static inline ail_st ail_op_ne(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n'
+    '    if (__builtin_expect(ail__view_kind(a) || ail__view_kind(b), 0)) { int r = 0; ail_st st = ail__view_eq(cx, &r, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(!r); return AIL_OK; }\n'
+    '    *out = ail_box_bool(!ail_obj_eq_raw(a, b)); return AIL_OK;\n}')
 
 
 def _edits():
@@ -244,16 +309,18 @@ def _edits():
     e.append(('static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {\n',
               'static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {\n'
               '    if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) return ail_dun_eq_raw(a, b);\n'))
-    e.append(('static inline ail_st ail_op_eq(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { (void)cx; *out = ail_box_bool(ail_obj_eq_raw(a, b)); return AIL_OK; }',
+    e.append((_VIEW_OP_EQ,
               'static inline ail_st ail_op_eq(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n'
               '    if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) return ail_dun_op_eq(cx, out, a, b, 0);\n'
+              '    if (__builtin_expect(ail__view_kind(a) || ail__view_kind(b), 0)) { int r = 0; ail_st st = ail__view_eq(cx, &r, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(r); return AIL_OK; }\n'
               '    int sv_scope = ail__eq_scope; ail_st sv_err = ail__eq_err; ail__eq_scope = 1; ail__eq_err = 0;\n'
               '    int eq = ail_obj_eq_raw(a, b);\n'
               '    ail_st e = ail__eq_err; ail__eq_scope = sv_scope; ail__eq_err = sv_err; if (e) return e;\n'
               '    *out = ail_box_bool(eq); return AIL_OK;\n}'))
-    e.append(('static inline ail_st ail_op_ne(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { (void)cx; *out = ail_box_bool(!ail_obj_eq_raw(a, b)); return AIL_OK; }',
+    e.append((_VIEW_OP_NE,
               'static inline ail_st ail_op_ne(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n'
               '    if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) return ail_dun_op_eq(cx, out, a, b, 1);\n'
+              '    if (__builtin_expect(ail__view_kind(a) || ail__view_kind(b), 0)) { int r = 0; ail_st st = ail__view_eq(cx, &r, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(!r); return AIL_OK; }\n'
               '    int sv_scope = ail__eq_scope; ail_st sv_err = ail__eq_err; ail__eq_scope = 1; ail__eq_err = 0;\n'
               '    int eq = ail_obj_eq_raw(a, b);\n'
               '    ail_st e = ail__eq_err; ail__eq_scope = sv_scope; ail__eq_err = sv_err; if (e) return e;\n'
@@ -277,6 +344,17 @@ def _edits():
               '            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n        }\n    }\n}\nstatic inline ail_st ail_obj_cmp(',
               HASH_CASE + '        default: {\n            char buf[64]; snprintf(buf, sizeof buf, "unhashable type: \'%s\'", ail_type_name(x.tag));\n'
               '            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n        }\n    }\n}\nstatic inline ail_st ail_obj_cmp('))
+    # hash() of an instance whose class has __hash__ is that method's int (CPython: -1 becomes -2), not the table hash
+    e.append(('static inline ail_st ail_pyhash_inst(ail_ctx *cx, int64_t *out, ail_obj x) { return ail_obj_hash(cx, out, x); }\n',
+              'static inline ail_st ail_pyhash_inst(ail_ctx *cx, int64_t *out, ail_obj x) {\n'
+              '    ail_d1_fn hf = ail_dun1(x, AIL_D1_HASH);\n'
+              '    if (!hf) return ail_obj_hash(cx, out, x);\n'
+              '    ail_obj hr; ail_st hst = hf(cx, &hr, x); if (hst != AIL_OK) return hst;\n'
+              '    if (hr.tag == AIL_T_INT || hr.tag == AIL_T_BOOL) {\n'
+              '        int64_t hv = hr.i;\n'
+              '        if (ail_dun1(x, AIL_D1_INT)) hv = ail_pyhash_int(hv);   /* IntEnum / IntFlag: int.__hash__ of the value */\n'
+              '        *out = hv == -1 ? -2 : hv; return AIL_OK;\n    }\n'
+              '    return ail_raise_c(cx, AIL_B_TYPEERROR, "__hash__ method should return an integer");\n}\n'))
     # ordering: a on the left with no < answer (its > may answer), or the instance on the right (out of line, so that the
     # comparison of two instances, the hot case of a sort, keeps its size)
     e.append(('            if (b.tag == AIL_T_INST) { st = kc->lt_fn(cx, &r, b, a); if (st != AIL_OK) return st; if (ail_obj_truthy(r)) { *out = 1; return AIL_OK; } }\n'
@@ -285,10 +363,7 @@ def _edits():
               '            else { ail_st gst; if (ail_dun_cmp_gt(cx, out, a, b, &gst)) return gst; }\n'
               '            *out = 0; return AIL_OK;\n        }\n    }\n'
               '    if (b.tag == AIL_T_INST && a.tag != AIL_T_INST) { ail_st rst; if (ail_dun_cmp_rev(cx, out, a, b, &rst)) return rst; }\n'))
-    # an attribute of a value that is not an instance is an AttributeError (the unpatched runtime reads the int as a pointer)
-    e.append(('    ail_instobj *o = (ail_instobj *)inst.o;\n    for (int64_t i = 0; i < o->n; i++) if (o->attrs[i].name_id == name_id) { *out = o->attrs[i].val; return AIL_OK; }\n',
-              '    if (__builtin_expect(inst.tag != AIL_T_INST && inst.tag != AIL_T_EXC, 0)) return ail_dun_noattr(cx, inst, name_for_msg);\n'
-              '    ail_instobj *o = (ail_instobj *)inst.o;\n    for (int64_t i = 0; i < o->n; i++) if (o->attrs[i].name_id == name_id) { *out = o->attrs[i].val; return AIL_OK; }\n'))
+    # (an attribute of a value that is not an instance is an AttributeError: cruntime's ail_inst_getattr checks the tag itself)
     # str() of an instance: the first class of the chain that defines __str__ wins, whether or not a class below it defines
     # __repr__ (object.__str__ only falls back to repr when no class defines __str__)
     e.append(('            if (kc->repr_fn) break;\n        }\n    }\n    ail_obj_write_repr(cx, x, f);',
@@ -304,6 +379,53 @@ def _edits():
                           ('**', 'POW', 'RPOW')):
         e.append(('    return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %s");' % sym,
                   '    ' + _binop_guard(fwd, rev, sym) + 'return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %s");' % sym))
+    # bitwise operators and ~ on an instance (Flag / IntFlag classes, user __or__ ...)
+    e.append(('static inline ail_st ail__bit_logic(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, char op) {\n',
+              'static inline ail_st ail__bit_logic(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, char op) {\n'
+              '    if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) return op == \'&\' ? ail_dun_binop(cx, out, a, b, AIL_D2_AND, AIL_D2_RAND, "&")'
+              ' : op == \'|\' ? ail_dun_binop(cx, out, a, b, AIL_D2_OR, AIL_D2_ROR, "|") : ail_dun_binop(cx, out, a, b, AIL_D2_XOR, AIL_D2_RXOR, "^");\n'))
+    e.append(('static inline ail_st ail_op_lshift(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n',
+              'static inline ail_st ail_op_lshift(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n'
+              '    if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) return ail_dun_binop(cx, out, a, b, AIL_D2_LSHIFT, AIL_D2_RLSHIFT, "<<");\n'))
+    e.append(('static inline ail_st ail_op_rshift(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n',
+              'static inline ail_st ail_op_rshift(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n'
+              '    if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) return ail_dun_binop(cx, out, a, b, AIL_D2_RSHIFT, AIL_D2_RRSHIFT, ">>");\n'))
+    e.append(('static inline ail_st ail_op_invert(ail_ctx *cx, ail_obj *out, ail_obj a) {\n',
+              'static inline ail_st ail_op_invert(ail_ctx *cx, ail_obj *out, ail_obj a) {\n'
+              '    if (a.tag == AIL_T_INST) { ail_d1_fn f = ail_dun1(a, AIL_D1_INVERT); if (f) return f(cx, out, a); }\n'))
+    # format(x, spec) / f"{x:spec}" of an instance whose class defines __format__ (an Enum / Flag member does)
+    e.append(('static inline ail_st ail_obj_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {\n',
+              'static inline ail_st ail_obj_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {\n'
+              '    if (x.tag == AIL_T_INST) { ail_d2_fn ff = ail_dun2(x, AIL_D2_FORMAT); if (ff) return ff(cx, out, x, specobj); }\n'))
+    e.append(('static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {\n',
+              'static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {\n'
+              '    if (x.tag == AIL_T_INST) { ail_d2_fn ff = ail_dun2(x, AIL_D2_FORMAT); if (ff) return ff(cx, out, x, specobj); }\n'))
+    # `%d` / `%x` / `%f` of an instance (an IntEnum / IntFlag member): int() / index() / float() of it, as PyUnicode_Format does
+    e.append(('            int64_t iv;\n            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) iv = arg.i;\n',
+              '            int64_t iv;\n'
+              '            if (arg.tag == AIL_T_INST) {\n'
+              '                int dec = t == \'d\' || t == \'i\' || t == \'u\';\n'
+              '                ail_d1_fn cf = dec ? ail_dun1(arg, AIL_D1_INT) : 0;\n'
+              '                if (!cf) cf = ail_dun1(arg, AIL_D1_INDEX);\n'
+              '                if (!cf && dec) cf = ail_dun1(arg, AIL_D1_TRUNC);\n'
+              '                if (cf) { ail_obj cv; st = cf(cx, &cv, arg); if (st != AIL_OK) goto fail; arg = cv; }\n'
+              '            }\n'
+              '            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) iv = arg.i;\n'))
+    e.append(('            double d;\n            if (arg.tag == AIL_T_FLOAT) d = ail_float_val(arg);\n',
+              '            double d;\n'
+              '            if (arg.tag == AIL_T_INST) {\n'
+              '                ail_d1_fn cf = ail_dun1(arg, AIL_D1_FLOAT); if (!cf) cf = ail_dun1(arg, AIL_D1_INDEX);\n'
+              '                if (cf) { ail_obj cv; st = cf(cx, &cv, arg); if (st != AIL_OK) goto fail; arg = cv; }\n'
+              '            }\n'
+              '            if (arg.tag == AIL_T_FLOAT) d = ail_float_val(arg);\n'))
+    e.append(('"%%%c format: a real number is required, not %s", (char)t, ail_type_name(arg.tag)',
+              '"%%%c format: a real number is required, not %s", (char)t, ail__dun_tname_s(arg)'))
+    e.append(('"%%%c format: an integer is required, not %s", (char)t, ail_type_name(arg.tag)',
+              '"%%%c format: an integer is required, not %s", (char)t, ail__dun_tname_s(arg)'))
+    e.append(('"must be real number, not %s", ail_type_name(arg.tag)',
+              '"must be real number, not %s", ail__dun_tname_s(arg)'))
+    e.append(('            uint16_t ch;\n            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) {\n',
+              '            uint16_t ch;\n            if (arg.tag == AIL_T_INST) { ail_d1_fn cf = ail_dun1(arg, AIL_D1_INDEX); if (cf) { ail_obj cv; st = cf(cx, &cv, arg); if (st != AIL_OK) goto fail; arg = cv; } }\n            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) {\n'))
     # the add in front of the dispatch helpers: they must be visible before ail_op_add
     e.append(('/* sum(): CPython 3.12 builtin_sum_impl.', '/* sum(): CPython 3.12 builtin_sum_impl.'))
     # unary and builtin conversions
@@ -379,6 +501,8 @@ def patch(text):
         if old == new:
             continue
         count = text.count(old)
+        if count == 0 and old in OPTIONAL:
+            continue
         if count != 1:
             raise RuntimeError('dunderrt: %d places match %r' % (count, old[:70]))
         text = text.replace(old, new)
