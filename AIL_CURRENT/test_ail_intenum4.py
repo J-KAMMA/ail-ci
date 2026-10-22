@@ -649,9 +649,136 @@ p('C.A > E.A', lambda: gt(C.A, E.A))
 p('C.A >= E.A', lambda: ge(C.A, E.A))
 '''
 
+REVIEW_SRC = r'''from enum import Enum, IntEnum, IntFlag
+
+class E(Enum):
+    A = 1
+    B = 2
+
+class H(Enum):
+    A = 2
+
+class C(IntEnum):
+    A = 5
+    Z = 0
+    NEG = -5
+
+class F(IntFlag):
+    X = 5
+
+class I:
+    def __index__(self):
+        return 5
+
+class N:
+    def __index__(self):
+        return 5
+    def __divmod__(self, other):
+        return NotImplemented
+
+class R:
+    def __index__(self):
+        return 5
+    def __rdivmod__(self, other):
+        return NotImplemented
+
+class Q:
+    def __floordiv__(self, other):
+        return 10
+    def __mod__(self, other):
+        return 11
+
+class RQ:
+    def __rfloordiv__(self, other):
+        return 20
+    def __rmod__(self, other):
+        return 21
+
+class Lt:
+    def __lt__(self, other):
+        return True
+
+class Gt:
+    def __gt__(self, other):
+        return True
+
+class Box:
+    def __init__(self, x):
+        self.x = x
+
+def p(label: str, f) -> None:
+    try:
+        print(label, repr(f()))
+    except Exception as e:
+        print(label, type(e).__name__ + ': ' + str(e))
+
+def dm(a, b):
+    return divmod(a, b)
+
+def lt(a, b):
+    return a < b
+
+def le(a, b):
+    return a <= b
+
+def gt(a, b):
+    return a > b
+
+def ge(a, b):
+    return a >= b
+
+# a plain Enum against a non-Enum raises the named TypeError, never AttributeError,
+# and the other operand's reflected comparison is tried first.
+p('E.A < 5', lambda: lt(E.A, 5))
+p('E.A <= 5', lambda: le(E.A, 5))
+p('E.A > 5', lambda: gt(E.A, 5))
+p('E.A >= 5', lambda: ge(E.A, 5))
+p('5 < E.A', lambda: lt(5, E.A))
+p('E.A < "x"', lambda: lt(E.A, "x"))
+p('E.A >= None', lambda: ge(E.A, None))
+p('arg E.A < 5', lambda: lt(E.A, [5][0]))
+p('list E.A < 5', lambda: [E.A, 5][0] < [E.A, 5][1])
+p('attr E.A < 5', lambda: Box(E.A).x < 5)
+p('dict E.A < 5', lambda: {'a': E.A}['a'] < 5)
+p('E.A < Gt()', lambda: lt(E.A, Gt()))
+p('E.A > Lt()', lambda: gt(E.A, Lt()))
+p('E.A <= H.A', lambda: le(E.A, H.A))
+p('E.A >= E.B', lambda: ge(E.A, E.B))
+p('E.A < C.A', lambda: lt(E.A, C.A))
+
+# divmod: a plain __index__ object is not converted; __floordiv__ / __mod__ alone do not count.
+p('I 2', lambda: dm(I(), 2))
+p('2 I', lambda: dm(2, I()))
+p('I I', lambda: dm(I(), I()))
+p('N 2', lambda: dm(N(), 2))
+p('2 R', lambda: dm(2, R()))
+p('Q 2', lambda: dm(Q(), 2))
+p('2 RQ', lambda: dm(2, RQ()))
+p('arg I 2', lambda: dm([I()][0], 2))
+p('list I 2', lambda: dm([I(), 2][0], [I(), 2][1]))
+p('attr I 2', lambda: dm(Box(I()).x, 2))
+p('dict I 2', lambda: dm({'a': I()}['a'], 2))
+
+# an IntEnum / IntFlag member keeps int-subclass divmod, with the original names on failure.
+p('C.A 2', lambda: dm(C.A, 2))
+p('2 C.A', lambda: dm(2, C.A))
+p('C.NEG 2', lambda: dm(C.NEG, 2))
+p('C.A C.Z', lambda: dm(C.A, C.Z))
+p('C.A 0.0', lambda: dm(C.A, 0.0))
+p('C.A 2.5', lambda: dm(C.A, 2.5))
+p('2.5 C.A', lambda: dm(2.5, C.A))
+p('F.X 2', lambda: dm(F.X, 2))
+p('C.A E.A', lambda: dm(C.A, E.A))
+p('E.A C.A', lambda: dm(E.A, C.A))
+p('C.A "x"', lambda: dm(C.A, "x"))
+'''
+
 class IntEnum4Tests(Base):
     def test_review_findings(self):
         self.same(FINDINGS_SRC)
+
+    def test_review_regressions(self):
+        self.same(REVIEW_SRC)
 
     def test_exponentiation_and_cross_kind_equality(self):
         self.same(ENUM_SRC)

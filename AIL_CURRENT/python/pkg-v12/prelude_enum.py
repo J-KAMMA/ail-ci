@@ -35,20 +35,28 @@ class _AilEnum:
         return NotImplemented
 
     def __lt__(self, other):
-        raise TypeError("'<' not supported between instances of '" + self.cname
-                        + "' and '" + other.cname + "'")
+        if isinstance(other, _AilEnum):
+            raise TypeError("'<' not supported between instances of '" + self.cname
+                            + "' and '" + other.cname + "'")
+        return NotImplemented
 
     def __le__(self, other):
-        raise TypeError("'<=' not supported between instances of '" + self.cname
-                        + "' and '" + other.cname + "'")
+        if isinstance(other, _AilEnum):
+            raise TypeError("'<=' not supported between instances of '" + self.cname
+                            + "' and '" + other.cname + "'")
+        return NotImplemented
 
     def __gt__(self, other):
-        raise TypeError("'>' not supported between instances of '" + self.cname
-                        + "' and '" + other.cname + "'")
+        if isinstance(other, _AilEnum):
+            raise TypeError("'>' not supported between instances of '" + self.cname
+                            + "' and '" + other.cname + "'")
+        return NotImplemented
 
     def __ge__(self, other):
-        raise TypeError("'>=' not supported between instances of '" + self.cname
-                        + "' and '" + other.cname + "'")
+        if isinstance(other, _AilEnum):
+            raise TypeError("'>=' not supported between instances of '" + self.cname
+                            + "' and '" + other.cname + "'")
+        return NotImplemented
 
 
 class _AilIntEnum(_AilEnum):
@@ -157,6 +165,20 @@ class _AilIntEnum(_AilEnum):
 
     def __rmod__(self, other):
         return self._ail_en_int_operand(other, '%', True) % self.value
+
+    def __divmod__(self, other):
+        if isinstance(other, _AilIntEnum):
+            return divmod(self.value, other.value)
+        if isinstance(other, (int, float)):
+            return divmod(self.value, other)
+        return NotImplemented
+
+    def __rdivmod__(self, other):
+        if isinstance(other, _AilIntEnum):
+            return divmod(other.value, self.value)
+        if isinstance(other, (int, float)):
+            return divmod(other, self.value)
+        return NotImplemented
 
     def __pow__(self, other):
         return self.value ** self._ail_en_int_operand(other, '** or pow()', False)

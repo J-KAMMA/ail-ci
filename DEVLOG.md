@@ -1,3 +1,14 @@
+## 2026-10-22 — IntEnum / IntFlag review round 2 (branch job-intenum4-10221632)
+
+- Plain `Enum` ordering returns `NotImplemented` when the other operand is not an enum, so a non-enum
+  operand gets CPython's named `TypeError` (`'E' and 'int'`) and a custom reflected `__lt__` / `__gt__`
+  still runs; ordering two enums keeps the named, operator-specific error.
+- `divmod()` no longer converts every instance through `__index__`: a plain class with only `__index__`
+  now raises CPython's `divmod()` `TypeError`. `_AilIntEnum` defines `__divmod__` / `__rdivmod__`
+  (int, float and IntEnum operands), so `IntEnum` / `IntFlag` members keep int-subclass divmod.
+- Extended `AIL_CURRENT/test_ail_intenum4.py` with the non-enum ordering, reflected comparison and
+  plain `__index__` / `__divmod__` cases, including values through parameters, lists, attributes and dicts.
+
 ## 2026-10-22 — IntEnum / IntFlag review fixes (branch job-intenum4-10221632)
 
 - 3-argument `pow()`: a float anywhere keeps the int-only message; without a float, a non-index operand
