@@ -112,6 +112,47 @@ main()
 '''
 
 
+STALE_BOUND_KIND = r"""def main() -> None:
+    s = "abcdef"
+    x = 2
+    if False:
+        x = None
+    print(repr(s[x:]), repr(s[:x]))
+    y = 3
+    while False:
+        y = None
+    print(repr(s[y:]), repr(s[:y]))
+    z = 1
+    for _ in range(0):
+        z = None
+    print(repr(s[z:]), repr(s[:z]))
+    t = 2
+    if False:
+        t = 1.5
+    print(repr(s[t:]), repr(s[:t]))
+    u = 2
+    if False:
+        u = "x"
+    print(repr(s[u:]), repr(s[:u]))
+    for flag in (False, True):
+        v = 2
+        if flag:
+            v = None
+        print("none", repr(s[v:]))
+        w = 2
+        if flag:
+            w = 1.5
+        try:
+            print("float", repr(s[:w]))
+        except TypeError:
+            print("float TypeError")
+    print(repr(["a", "b", "c", "d"][x:]), repr(("a", "b", "c", "d")[:x]))
+
+
+main()
+"""
+
+
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -154,6 +195,9 @@ class Fuzz25Tests(unittest.TestCase):
 
     def test_slice_bounds_from_sources(self):
         self.check('bound_sources', BOUND_SOURCES)
+
+    def test_stale_bound_kind_from_unreachable_branch(self):
+        self.check('stale_bound_kind', STALE_BOUND_KIND)
 
 
 if __name__ == '__main__':

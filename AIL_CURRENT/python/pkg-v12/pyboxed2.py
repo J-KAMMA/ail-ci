@@ -4871,12 +4871,16 @@ class Compiler(boxclosure.ClosureMixin):
             def bound(e, default):
                 if e is None:
                     return '0', str(default)
-                v = self.expr(e, ctx)
-                kind = self.infer_kind(e, ctx)
-                if kind == 'none':
+                if isinstance(e, ast.Constant) and e.value is None:
                     return '0', '0'
-                if kind in ('int', 'bool'):
+                if (isinstance(e, ast.Constant) and isinstance(e.value, (int, bool))) or \
+                        (isinstance(e, ast.UnaryOp) and isinstance(e.op, (ast.USub, ast.UAdd))
+                         and isinstance(e.operand, ast.Constant)
+                         and isinstance(e.operand.value, int)
+                         and not isinstance(e.operand.value, bool)):
+                    v = self.expr(e, ctx)
                     return '1', '(%s).i' % v
+                v = self.expr(e, ctx)
                 t = ctx.tmp()
                 ctx.emit('%s = %s;' % (t, v))
                 self.needs_argchk = True
