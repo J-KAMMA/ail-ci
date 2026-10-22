@@ -20,8 +20,6 @@ CLI = str(ROOT / "ail_chatgpt.py")
 PROGRAM = r'''
 def show(s: str) -> None:
     print(repr(s), len(repr(s)))
-    print(f"{s!r}", "%r" % s)
-    print([s], {s: 1})
 
 
 def main() -> None:
