@@ -572,7 +572,7 @@ def patch(text, include_order=True):
     return text[:k] + text[k:].replace('ail_obj_truthy(', 'ail_truthy_u(')
 
 
-def install(cls_global, cls_methods, all_params_of):
+def install(cls_global, cls_methods, all_params_of, include_order=True):
     """C statements for the program's setup code: the tables of one class."""
     lines = []
     for name, key in D1.items():
@@ -580,6 +580,8 @@ def install(cls_global, cls_methods, all_params_of):
         if info and len(all_params_of(info)) == 1:
             lines.append('    ((ail_classobj *)%s.o)->d1[AIL_D1_%s] = %s;\n' % (cls_global, key, info['cname']))
     for name, key in D2.items():
+        if key in ('LE', 'GE') and not include_order:
+            continue
         info = cls_methods.get(name)
         if info and len(all_params_of(info)) == 2:
             lines.append('    ((ail_classobj *)%s.o)->d2[AIL_D2_%s] = %s;\n' % (cls_global, key, info['cname']))

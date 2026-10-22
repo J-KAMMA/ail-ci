@@ -2291,7 +2291,8 @@ class Compiler(boxclosure.ClosureMixin):
                              (self.global_slots['class:' + cname], itr['cname']))
             if self.dunder_ops:
                 setup.extend(dunderrt.install('g_slots_arr[%d]' % self.global_slots['class:' + cname],
-                                              cls['methods'], lambda info: info['all_params']))
+                                              cls['methods'], lambda info: info['all_params'],
+                                              include_order=getattr(self, 'order_cmp', True)))
             if cls.get('dc'):
                 setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->dc = %d; '
                              '((ail_classobj *)g_slots_arr[%d].o)->dc_hide = %dULL;\n' %
