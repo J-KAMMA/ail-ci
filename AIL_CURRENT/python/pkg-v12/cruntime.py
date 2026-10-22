@@ -15668,6 +15668,40 @@ static inline ail_obj ail_range_new(ail_ctx *cx, int64_t start, int64_t stop, in
     ail_obj o; o.tag = AIL_T_RANGE; o.o = (ail_gcobj *)r; return o;
 }
 
+/* A slice bound that arrived as a value, not as an already-converted int: CPython treats None as
+   an omitted bound and raises TypeError for anything that is not an int (or an __index__ object,
+   which this runtime does not model). Reading `(v).i` instead silently used a float's or a str's
+   payload bits, and an explicit None as 0: `a[None:None]` returned an empty list. */
+static inline ail_st ail_op_slice_bound(ail_ctx *cx, ail_obj v, int *has, int64_t *out) {
+    if (v.tag == AIL_T_NONE || v.tag == AIL_T_UNBOUND) { *has = 0; *out = 0; return AIL_OK; }
+    if (v.tag == AIL_T_INT || v.tag == AIL_T_BOOL) { *has = 1; *out = v.i; return AIL_OK; }
+    return ail_raise_c(cx, AIL_B_TYPEERROR, "slice indices must be integers or None or have an __index__ method");
+}
+static inline ail_st ail_op_getslice_obj(ail_ctx *cx, ail_obj *out, ail_obj c, ail_obj lo, ail_obj hi, ail_obj step) {
+    int hl, hh, hs; int64_t l, h, s; ail_st st;
+    if ((st = ail_op_slice_bound(cx, lo, &hl, &l)) != AIL_OK) return st;
+    if ((st = ail_op_slice_bound(cx, hi, &hh, &h)) != AIL_OK) return st;
+    if ((st = ail_op_slice_bound(cx, step, &hs, &s)) != AIL_OK) return st;
+    return ail_op_getslice(cx, out, c, hl, l, hh, h, hs, s);
+}
+/* list.index / tuple.index start and stop: CPython accepts an int but NOT None (the message omits
+   "or None"), unlike a slice. With allow_none the str form is converted: find/index/count take None
+   to mean the default bound. */
+static inline ail_st ail_op_index_bound(ail_ctx *cx, ail_obj v, int allow_none, int *has, int64_t *out) {
+    if (allow_none && (v.tag == AIL_T_NONE || v.tag == AIL_T_UNBOUND)) { *has = 0; *out = 0; return AIL_OK; }
+    if (v.tag == AIL_T_INT || v.tag == AIL_T_BOOL) { *has = 1; *out = v.i; return AIL_OK; }
+    return ail_raise_c(cx, AIL_B_TYPEERROR, allow_none
+        ? "slice indices must be integers or None or have an __index__ method"
+        : "slice indices must be integers or have an __index__ method");
+}
+/* list.insert / list.pop index: CPython's integer conversion (None is NOT accepted). */
+static inline ail_st ail_op_int_index(ail_ctx *cx, ail_obj v, int64_t *out) {
+    if (v.tag == AIL_T_INT || v.tag == AIL_T_BOOL) { *out = v.i; return AIL_OK; }
+    if (v.tag == AIL_T_FLOAT) return ail_raise_c(cx, AIL_B_TYPEERROR, "'float' object cannot be interpreted as an integer");
+    char buf[96]; snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail_type_name(v.tag));
+    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+}
+
 /* ===================================================================================
    Iteration protocol -- one shared ail_iterobj (see the enum/struct near the top),
    ail_iter() to obtain an iterator (iter(it) is it, matching Python), ail_next() to

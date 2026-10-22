@@ -4850,10 +4850,15 @@ class Compiler(boxclosure.ClosureMixin):
                     raise NeedSlice()
                 key = self._slice_obj(node.slice, ctx)
                 return self._subscript_with_key(node, c, key, ctx)
+            # Every bound is converted by the runtime, exactly as CPython's slice.indices does:
+            # None means an omitted bound and a non-int is a TypeError.  Reading `(v).i` here used
+            # to turn `a[None:None]` into an empty slice and a float bound into a wrong one.
+            lo = self.expr(node.slice.lower, ctx) if node.slice.lower is not None else 'ail_box_none()'
+            hi = self.expr(node.slice.upper, ctx) if node.slice.upper is not None else 'ail_box_none()'
+            step = self.expr(node.slice.step, ctx) if node.slice.step is not None else 'ail_box_none()'
             if self.want_slice and self.infer_kind(node.value, ctx) not in ('str', 'list', 'tuple') \
                     and self._any_class_defines('__getitem__'):
                 # a value of unknown kind: an instance takes a slice object, anything else is sliced
-                lo, hi, step = self._slice_bounds(node.slice, ctx)
                 t = ctx.tmp()
                 ctx.emit('if (%s.tag == AIL_T_INST) {' % c)
                 ctx.indent += 1
@@ -4863,22 +4868,13 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.indent -= 1
                 ctx.emit('} else {')
                 ctx.indent += 1
-                ctx.emit('st = ail2s_getslice(cx, &%s, %s, %s, %s, %s);' % (t, c, lo, hi, step))
+                ctx.emit('st = ail_op_getslice_obj(cx, &%s, %s, %s, %s, %s);' % (t, c, lo, hi, step))
                 ctx.check()
                 ctx.indent -= 1
                 ctx.emit('}')
                 return t
-            def bound(e, default):
-                if e is None:
-                    return '0', str(default)
-                v = self.expr(e, ctx)
-                return '1', '(%s).i' % v
-            hlo, lo = bound(node.slice.lower, 0)
-            hhi, hi = bound(node.slice.upper, 0)
-            hst, st_ = bound(node.slice.step, 1)
             t = ctx.tmp()
-            ctx.emit('st = ail_op_getslice(cx, &%s, %s, %s, %s, %s, %s, %s, %s);' %
-                    (t, c, hlo, lo, hhi, hi, hst, st_))
+            ctx.emit('st = ail_op_getslice_obj(cx, &%s, %s, %s, %s, %s);' % (t, c, lo, hi, step))
             ctx.check()
             return t
         key = self.expr(node.slice, ctx)
@@ -8345,8 +8341,12 @@ class Compiler(boxclosure.ClosureMixin):
 
         def do_list(c):
             # a list or a deque (a flagged wrapper list; the kind is a run-time fact)
-            c.emit('st = ail_meth_list_insert2(cx, %s, (%s).i, %s); if (st != AIL_OK) goto %s;' %
-                   (recv, i, v, c.cur_err_target()))
+            idx = c.new_cvar('ii')
+            c.emit('int64_t %s;' % idx)
+            c.emit('st = ail_op_int_index(cx, %s, &%s); if (st != AIL_OK) goto %s;' %
+                   (i, idx, c.cur_err_target()))
+            c.emit('st = ail_meth_list_insert2(cx, %s, %s, %s); if (st != AIL_OK) goto %s;' %
+                   (recv, idx, v, c.cur_err_target()))
             c.uses_st = True
 
         self._tag_branch(ctx, recv, kind, {'list': do_list}, "object has no attribute 'insert'")
@@ -8486,8 +8486,12 @@ class Compiler(boxclosure.ClosureMixin):
                 raise Unsupported('.pop() on a list with more than one index argument')
             if args:
                 i = self.expr(args[0], ctx)
-                c.emit('st = ail_meth_list_pop(cx, &%s, %s, 1, (%s).i); if (st != AIL_OK) goto %s;' %
-                      (t, recv, i, c.cur_err_target()))
+                idx = c.new_cvar('pi')
+                c.emit('int64_t %s;' % idx)
+                c.emit('st = ail_op_int_index(cx, %s, &%s); if (st != AIL_OK) goto %s;' %
+                      (i, idx, c.cur_err_target()))
+                c.emit('st = ail_meth_list_pop(cx, &%s, %s, 1, %s); if (st != AIL_OK) goto %s;' %
+                      (t, recv, idx, c.cur_err_target()))
             else:
                 c.emit('st = ail_meth_list_pop(cx, &%s, %s, 0, 0); if (st != AIL_OK) goto %s;' %
                       (t, recv, c.cur_err_target()))
@@ -8537,39 +8541,59 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _m_index(self, recv, kind, args, kwargs, ctx):
         v = self.expr(args[0], ctx)
-        has_lo = len(args) > 1
-        lo = '(%s).i' % self.expr(args[1], ctx) if has_lo else '0'
-        has_hi = len(args) > 2
-        hi = '(%s).i' % self.expr(args[2], ctx) if has_hi else '0'
+        lv = self.expr(args[1], ctx) if len(args) > 1 else None
+        hv = self.expr(args[2], ctx) if len(args) > 2 else None
         t = ctx.tmp()
 
-        def mk(fn):
+        def mk(fn, allow_none):
             def do(c):
+                def bound(value, tag):
+                    if value is None:
+                        return '0', '0'
+                    flag = c.new_cvar('h' + tag)
+                    num = c.new_cvar('b' + tag)
+                    c.emit('int %s; int64_t %s;' % (flag, num))
+                    c.emit('st = ail_op_index_bound(cx, %s, %d, &%s, &%s); if (st != AIL_OK) goto %s;' %
+                          (value, 1 if allow_none else 0, flag, num, c.cur_err_target()))
+                    c.uses_st = True
+                    return flag, num
+                has_lo, lo = bound(lv, 'l')
+                has_hi, hi = bound(hv, 'r')
                 ix = c.new_cvar('ix')
                 c.emit('int64_t %s;' % ix)
-                c.emit('st = %s(cx, &%s, %s, %s, %d, %s, %d, %s); if (st != AIL_OK) goto %s;' %
+                c.emit('st = %s(cx, &%s, %s, %s, %s, %s, %s, %s); if (st != AIL_OK) goto %s;' %
                       (fn, ix, recv, v, has_lo, lo, has_hi, hi, c.cur_err_target()))
                 c.uses_st = True
                 c.emit('%s = ail_box_int(%s);' % (t, ix))
             return do
 
         self._tag_branch(ctx, recv, kind, {
-            'str': mk('ail_meth_str_index'),
-            'list': mk('ail_meth_list_index'),
-            'tuple': mk('ail_meth_tuple_index'),
+            'str': mk('ail_meth_str_index', True),
+            'list': mk('ail_meth_list_index', False),
+            'tuple': mk('ail_meth_tuple_index', False),
         }, "object has no attribute 'index'", nargs=len(args))
         return t
 
     def _m_count(self, recv, kind, args, kwargs, ctx):
         v = self.expr(args[0], ctx)
-        has_lo = len(args) > 1
-        lo = '(%s).i' % self.expr(args[1], ctx) if has_lo else '0'
-        has_hi = len(args) > 2
-        hi = '(%s).i' % self.expr(args[2], ctx) if has_hi else '0'
+        lv = self.expr(args[1], ctx) if len(args) > 1 else None
+        hv = self.expr(args[2], ctx) if len(args) > 2 else None
         t = ctx.tmp()
 
         def do_str(c):
-            c.emit('%s = ail_box_int(ail_meth_str_count(%s, %s, %d, %s, %d, %s));' %
+            def bound(value, tag):
+                if value is None:
+                    return '0', '0'
+                flag = c.new_cvar('h' + tag)
+                num = c.new_cvar('b' + tag)
+                c.emit('int %s; int64_t %s;' % (flag, num))
+                c.emit('st = ail_op_index_bound(cx, %s, 1, &%s, &%s); if (st != AIL_OK) goto %s;' %
+                      (value, flag, num, c.cur_err_target()))
+                c.uses_st = True
+                return flag, num
+            has_lo, lo = bound(lv, 'l')
+            has_hi, hi = bound(hv, 'r')
+            c.emit('%s = ail_box_int(ail_meth_str_count(%s, %s, %s, %s, %s, %s));' %
                    (t, recv, v, has_lo, lo, has_hi, hi))
 
         def mk_vec(fn):
