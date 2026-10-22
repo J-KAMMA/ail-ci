@@ -173,6 +173,140 @@ class _AilUrl:
         return self.__repr__()
 
 
+def _ail_up_hexdigit_ok(c: str) -> bool:
+    return ((c >= "0" and c <= "9") or (c >= "a" and c <= "f") or (c >= "A" and c <= "F"))
+
+
+def _ail_up_is_hextet(part: str) -> bool:
+    if part == "" or len(part) > 4:
+        return False
+    i = 0
+    while i < len(part):
+        if not _ail_up_hexdigit_ok(part[i]):
+            return False
+        i = i + 1
+    return True
+
+
+def _ail_up_is_ipv4(text: str) -> bool:
+    if text == "":
+        return False
+    parts = text.split(".")
+    if len(parts) != 4:
+        return False
+    for part in parts:
+        if part == "":
+            return False
+        i = 0
+        while i < len(part):
+            if part[i] < "0" or part[i] > "9":
+                return False
+            i = i + 1
+        if len(part) > 3:
+            return False
+        if len(part) > 1 and part[0] == "0":
+            return False
+        if int(part) > 255:
+            return False
+    return True
+
+
+def _ail_up_is_ipv6(text: str) -> bool:
+    if text == "":
+        return False
+    addr, sep, scope = text.partition("%")
+    if sep and (scope == "" or "%" in scope):
+        return False
+    parts = addr.split(":")
+    if len(parts) < 3:
+        return False
+    if "." in parts[len(parts) - 1]:
+        if not _ail_up_is_ipv4(parts[len(parts) - 1]):
+            return False
+        parts = parts[0:len(parts) - 1]
+        parts.append("0")
+        parts.append("0")
+    if len(parts) > 9:
+        return False
+    skip_index = -1
+    i = 1
+    while i < len(parts) - 1:
+        if parts[i] == "":
+            if skip_index >= 0:
+                return False
+            skip_index = i
+        i = i + 1
+    if skip_index >= 0:
+        hi = skip_index
+        lo = len(parts) - skip_index - 1
+        if parts[0] == "":
+            hi = hi - 1
+            if hi != 0:
+                return False
+        if parts[len(parts) - 1] == "":
+            lo = lo - 1
+            if lo != 0:
+                return False
+        if 8 - (hi + lo) < 1:
+            return False
+    else:
+        if len(parts) != 8:
+            return False
+        if parts[0] == "" or parts[len(parts) - 1] == "":
+            return False
+        hi = len(parts)
+        lo = 0
+    i = 0
+    while i < hi:
+        if not _ail_up_is_hextet(parts[i]):
+            return False
+        i = i + 1
+    i = len(parts) - lo
+    while i < len(parts):
+        if not _ail_up_is_hextet(parts[i]):
+            return False
+        i = i + 1
+    return True
+
+
+def _ail_up_is_ipvfuture(host: str) -> bool:
+    if host[0:1] != "v":
+        return False
+    i = 1
+    digits = 0
+    while i < len(host) and _ail_up_hexdigit_ok(host[i]):
+        i = i + 1
+        digits = digits + 1
+    if digits == 0 or i >= len(host) or host[i] != ".":
+        return False
+    return i + 1 < len(host)
+
+
+def _ail_up_check_bracketed_host(hostname: str) -> None:
+    if hostname[0:1] == "v":
+        if not _ail_up_is_ipvfuture(hostname):
+            raise ValueError("IPvFuture address is invalid")
+    else:
+        if _ail_up_is_ipv4(hostname):
+            raise ValueError("An IPv4 address cannot be in brackets")
+        if not _ail_up_is_ipv6(hostname):
+            raise ValueError(repr(hostname) + " does not appear to be an IPv4 or IPv6 address")
+
+
+def _ail_up_check_bracketed_netloc(netloc: str) -> None:
+    hostname_and_port = netloc.rpartition("@")[2]
+    before_bracket, have_open, bracketed = hostname_and_port.partition("[")
+    if have_open:
+        if before_bracket != "":
+            raise ValueError("Invalid IPv6 URL")
+        hostname, _, rest = bracketed.partition("]")
+        if rest != "" and rest[0:1] != ":":
+            raise ValueError("Invalid IPv6 URL")
+    else:
+        hostname, _, port = hostname_and_port.partition(":")
+    _ail_up_check_bracketed_host(hostname)
+
+
 def _ail_up_split(url0: str, scheme_hint: str, allow_fragments: bool, is_parse: bool) -> _AilUrl:
     start = 0
     while start < len(url0) and ord(url0[start]) <= 32:
@@ -202,6 +336,8 @@ def _ail_up_split(url0: str, scheme_hint: str, allow_fragments: bool, is_parse: 
         url = url[delim:]
         if ("[" in netloc and "]" not in netloc) or ("]" in netloc and "[" not in netloc):
             raise ValueError("Invalid IPv6 URL")
+        if "[" in netloc and "]" in netloc:
+            _ail_up_check_bracketed_netloc(netloc)
     fragment = ""
     if allow_fragments:
         h = url.find("#")
@@ -364,21 +500,24 @@ def _ail_up_append(out: str, key, val, safe: str, encoding, errors) -> str:
             + _ail_up_quote(str(val), safe, True, encoding, errors))
 
 
+def _ail_up_append_doseq(out: str, key, val, doseq: bool, safe: str, encoding, errors) -> str:
+    if doseq and (isinstance(val, list) or isinstance(val, tuple)):
+        item = 0
+        while item < len(val):
+            out = _ail_up_append(out, key, val[item], safe, encoding, errors)
+            item = item + 1
+        return out
+    return _ail_up_append(out, key, val, safe, encoding, errors)
+
+
 def _AilUrlEncode(query, doseq: bool = False, safe: str = "", encoding=None, errors=None, quote_via=None) -> str:
     out = ""
     if isinstance(query, dict):
         for key in query:
-            val = query[key]
-            if doseq and (isinstance(val, list) or isinstance(val, tuple)):
-                item = 0
-                while item < len(val):
-                    out = _ail_up_append(out, key, val[item], safe, encoding, errors)
-                    item = item + 1
-            else:
-                out = _ail_up_append(out, key, val, safe, encoding, errors)
+            out = _ail_up_append_doseq(out, key, query[key], doseq, safe, encoding, errors)
     else:
         for pair in query:
-            out = _ail_up_append(out, pair[0], pair[1], safe, encoding, errors)
+            out = _ail_up_append_doseq(out, pair[0], pair[1], doseq, safe, encoding, errors)
     return out
 
 

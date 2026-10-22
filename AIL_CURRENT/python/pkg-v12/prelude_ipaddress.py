@@ -44,6 +44,8 @@ def _ail_ip_in(v: int, net: int, mask: int) -> bool:
 
 
 def _ail_ip_private(v: int) -> bool:
+    if v == 3221225481 or v == 3221225482:
+        return False
     if _ail_ip_in(v, 0, 4278190080):
         return True
     if _ail_ip_in(v, 167772160, 4278190080):
@@ -54,7 +56,7 @@ def _ail_ip_private(v: int) -> bool:
         return True
     if _ail_ip_in(v, 2886729728, 4293918720):
         return True
-    if _ail_ip_in(v, 3221225472, 4294967288):
+    if _ail_ip_in(v, 3221225472, 4294967040):
         return True
     if _ail_ip_in(v, 3221225642, 4294967294):
         return True
@@ -95,7 +97,10 @@ class _AilIPv4Address:
                 raise ValueError(repr(address) + " (len " + str(len(address)) + " != 4) is not permitted as an IPv4 address")
             v = (address[0] * 16777216) + (address[1] * 65536) + (address[2] * 256) + address[3]
         else:
-            v = _ail_ip_parse(str(address))
+            text = str(address)
+            if "/" in text:
+                raise ValueError("Unexpected '/' in " + repr(address))
+            v = _ail_ip_parse(text)
         self._value = v
         self.version = 4
         self.max_prefixlen = 32
@@ -114,8 +119,7 @@ class _AilIPv4Address:
         self.is_link_local = _ail_ip_in(v, 2851995648, 4294901760)
         self.is_multicast = _ail_ip_in(v, 3758096384, 4026531840)
         self.is_unspecified = v == 0
-        self.is_global = not (self.is_private or self.is_reserved or self.is_loopback or self.is_link_local
-                              or self.is_multicast or self.is_unspecified or _ail_ip_shared(v))
+        self.is_global = not self.is_private and not _ail_ip_shared(v)
 
     def __str__(self) -> str:
         return self.compressed
@@ -158,7 +162,7 @@ class _AilIPv4Address:
         return self._value >= other._value
 
     def __hash__(self) -> int:
-        return hash(self._value)
+        return hash(hex(self._value))
 
     def __add__(self, other):
         if isinstance(other, int):

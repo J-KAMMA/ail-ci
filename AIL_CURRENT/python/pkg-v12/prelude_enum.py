@@ -38,7 +38,7 @@ class _AilIntEnum(_AilEnum):
         return str(self.value)
 
     def __hash__(self):
-        return self.value
+        return hash(self.value)
 
     def __eq__(self, other):
         if isinstance(other, _AilEnum):

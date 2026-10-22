@@ -352,7 +352,6 @@ def _edits():
               '    ail_obj hr; ail_st hst = hf(cx, &hr, x); if (hst != AIL_OK) return hst;\n'
               '    if (hr.tag == AIL_T_INT || hr.tag == AIL_T_BOOL) {\n'
               '        int64_t hv = hr.i;\n'
-              '        if (ail_dun1(x, AIL_D1_INT)) hv = ail_pyhash_int(hv);   /* IntEnum / IntFlag: int.__hash__ of the value */\n'
               '        *out = hv == -1 ? -2 : hv; return AIL_OK;\n    }\n'
               '    return ail_raise_c(cx, AIL_B_TYPEERROR, "__hash__ method should return an integer");\n}\n'))
     # ordering: a on the left with no < answer (its > may answer), or the instance on the right (out of line, so that the
