@@ -49,7 +49,8 @@ def main() -> None:
     print(d["a"], d["b"][0], d["a"] == 16843009, d["a"] == "1.1.1.1")
     print(A("1.2.3.4") < A("1.2.3.5"), A("1.2.3.4") <= A("1.2.3.4"), A("1.2.3.5") > A("1.2.3.4"))
     print(str(A(0)), str(A(4294967295)), str(A(b"\xff\x00\x01\x02")))
-    for bad in ["", "1.2.3", "1.2.3.4.5", "256.1.1.1", "01.2.3.4", "1..2.3", "1.2.3.x"]:
+    for bad in ["", "1.2.3", "1.2.3.4.5", "256.1.1.1", "01.2.3.4", "1..2.3", "1.2.3.x",
+                "1234.1.1.1", "9999.1.1.1", "1.2.3.4444"]:
         try:
             ipa.IPv4Address(bad)
             print("no error", bad)
@@ -113,6 +114,28 @@ def main() -> None:
     print(up.urlencode([("a", "1"), ("b", "2")]))
     print(up.urljoin("http://a/b/c/d;p?q", "../g"), up.urljoin("http://a/b/c/d;p?q", "//g/x"),
           up.urljoin("http://a/b/c/d;p?q", "?y"), up.urljoin("http://a/b/c/d;p?q", "#s"))
+    for text in ["foo://h/a;b?q", "http://h/a;b/c", "http://h/a/b;c", "http://h/a;b;c/d",
+                 "http://h/a;b?c;d#e;f"]:
+        q = up.urlparse(text)
+        print("params", text, q.path, repr(q.params), q.geturl())
+    print("emptyhost", repr(us("http://:80/").hostname), repr(us("http://user@:99/x").hostname),
+          repr(us("http://h:80/").hostname))
+    print("strictempty", up.parse_qsl("", strict_parsing=True), up.parse_qs("", strict_parsing=True))
+    try:
+        print(up.parse_qsl("a=1&", strict_parsing=True))
+    except ValueError as e:
+        print("ValueError", e)
+    print("enc", up.quote("é", encoding="latin-1"), up.unquote("%E9", encoding="latin-1"),
+          up.unquote_plus("%E9", encoding="latin-1"), up.parse_qsl("x=%E9", encoding="latin-1"))
+    print("enc2", up.quote("é", encoding="latin-1", errors="replace"),
+          up.unquote("%E9", encoding="latin-1", errors="ignore"),
+          up.urlencode({"x": "é"}, encoding="latin-1"))
+    print("join", up.urljoin("x", ";x"), up.urljoin("x", ";x?y#s"),
+          up.urljoin("http://a/b/c/d;p?q", ";x"))
+    try:
+        print(us("http://h:65536/"))
+    except ValueError as e:
+        print("ValueError", e)
     try:
         print(us("http://x:abc/"))
     except ValueError as e:
@@ -171,12 +194,27 @@ class Stdlib6Test(unittest.TestCase):
         self.assertEqual((str(a), int(a), a.packed, a.is_private), ('192.168.1.10', 3232235786,
                                                                    b'\xc0\xa8\x01\n', True))
         self.assertEqual(str(ip._AilIPv4Address(16909060)), '1.2.3.4')
+        with self.assertRaises(ValueError) as raised:
+            ip._AilIPv4Address('1234.1.1.1')
+        self.assertEqual(str(raised.exception),
+                         "At most 3 characters permitted in '1234' in '1234.1.1.1'")
         up = load_prelude('urlparse')
         p = up._AilUrlSplit('https://User:pa%20ss@Example.COM:8443/a/b?x=1#f')
         self.assertEqual((p.scheme, p.hostname, p.port, p.username, p.password, p.path, p.query, p.fragment),
                          ('https', 'example.com', 8443, 'User', 'pa%20ss', '/a/b', 'x=1', 'f'))
         self.assertEqual(up._AilParseQs('a=1&a=2&b=', keep_blank_values=True),
                          {'a': ['1', '2'], 'b': ['']})
+        self.assertEqual((up._AilUrlParse('foo://h/a;b?q').params,
+                          up._AilUrlParse('http://h/a;b/c').params), ('', ''))
+        self.assertEqual(up._AilUrlParse('http://h/a/b;c').params, 'c')
+        self.assertIsNone(up._AilUrlSplit('http://:80/').hostname)
+        self.assertEqual(up._AilParseQsl('', strict_parsing=True), [])
+        self.assertEqual(up._AilParseQs('', strict_parsing=True), {})
+        self.assertEqual(up._ail_up_quote('é', '/', False, 'latin-1', None), '%E9')
+        self.assertEqual(up._ail_up_unquote('%E9', False, 'latin-1', 'replace'), 'é')
+        self.assertEqual(up._AilParseQsl('x=%E9', encoding='latin-1'), [('x', 'é')])
+        self.assertEqual(up._AilUrlJoin('x', ';x'), '/;x')
+        self.assertEqual(up._AilUrlJoin('x', ';x?y#s'), '/;x?y#s')
 
     def test_unsupported_names_are_refused(self):
         for source, needle in [

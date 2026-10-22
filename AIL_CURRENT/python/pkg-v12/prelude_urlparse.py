@@ -29,32 +29,41 @@ def _ail_up_isalpha(c: str) -> bool:
     return (c >= "a" and c <= "z") or (c >= "A" and c <= "Z")
 
 
-def _ail_up_unquote(s: str, plus: bool) -> str:
+def _ail_up_unquote(s: str, plus: bool, encoding: str | None, errors: str | None) -> str:
+    if encoding is None:
+        encoding = "utf-8"
+    if errors is None:
+        errors = "replace"
+    out = ""
     buf = bytearray()
     i = 0
     while i < len(s):
         c = s[i]
-        if plus and c == "+":
+        if ord(c) >= 128:
+            out = out + bytes(buf).decode(encoding, errors) + c
+            buf = bytearray()
+            i = i + 1
+        elif plus and c == "+":
             buf.append(32)
             i = i + 1
         elif c == "%" and i + 2 < len(s) and _ail_up_hexval(s[i + 1]) >= 0 and _ail_up_hexval(s[i + 2]) >= 0:
             buf.append(_ail_up_hexval(s[i + 1]) * 16 + _ail_up_hexval(s[i + 2]))
             i = i + 3
         else:
-            b = c.encode("utf-8")
-            j = 0
-            while j < len(b):
-                buf.append(b[j])
-                j = j + 1
+            buf.append(ord(c))
             i = i + 1
-    return bytes(buf).decode("utf-8", "replace")
+    return out + bytes(buf).decode(encoding, errors)
 
 
-def _ail_up_quote(s: str, safe: str, plus: bool) -> str:
+def _ail_up_quote(s: str, safe: str, plus: bool, encoding: str | None, errors: str | None) -> str:
+    if encoding is None:
+        encoding = "utf-8"
+    if errors is None:
+        errors = "strict"
     keep = safe
     if plus and " " in s:
         keep = safe + " "
-    data = s.encode("utf-8")
+    data = s.encode(encoding, errors)
     out = ""
     for b in data:
         c = chr(b)
@@ -86,17 +95,12 @@ class _AilUrl:
         self._port = ""
         if netloc == "":
             return
-        at = netloc.rfind("@")
-        hostinfo = netloc
-        if at >= 0:
-            userinfo = netloc[0:at]
-            hostinfo = netloc[at + 1:]
-            colon = userinfo.find(":")
-            if colon >= 0:
-                self.username = userinfo[0:colon]
-                self.password = userinfo[colon + 1:]
-            else:
-                self.username = userinfo
+        userinfo, have_info, hostinfo = netloc.rpartition("@")
+        if have_info:
+            name, have_password, secret = userinfo.partition(":")
+            self.username = name
+            if have_password:
+                self.password = secret
         host = hostinfo
         port = ""
         if hostinfo.startswith("["):
@@ -110,11 +114,14 @@ class _AilUrl:
             elif rest != "":
                 raise ValueError("Invalid IPv6 URL")
         else:
-            colon = hostinfo.rfind(":")
-            if colon >= 0:
-                host = hostinfo[0:colon]
-                port = hostinfo[colon + 1:]
-        self.hostname = host.lower()
+            host, have_colon, port = hostinfo.partition(":")
+            if not have_colon:
+                port = ""
+        if host != "":
+            label, percent, zone = host.partition("%")
+            self.hostname = label.lower() + percent + zone
+        else:
+            self.hostname = None
         self._port = port
 
     @property
@@ -126,7 +133,10 @@ class _AilUrl:
             if self._port[i] < "0" or self._port[i] > "9":
                 raise ValueError("Port could not be cast to integer value as " + repr(self._port))
             i = i + 1
-        return int(self._port)
+        value = int(self._port)
+        if value < 0 or value > 65535:
+            raise ValueError("Port out of range 0-65535")
+        return value
 
     def _values(self) -> list:
         if self._is_parse:
@@ -204,24 +214,37 @@ def _ail_up_split(url0: str, scheme_hint: str, allow_fragments: bool, is_parse: 
         query = url[q + 1:]
         url = url[0:q]
     params = ""
-    if is_parse:
-        semi = url.find(";")
-        if semi >= 0:
-            params = url[semi + 1:]
-            url = url[0:semi]
+    if is_parse and _ail_up_usesparams(scheme) and ";" in url:
+        url, params = _ail_up_splitparams(url)
     return _AilUrl(scheme, netloc, url, params, query, fragment, is_parse)
+
+
+def _ail_up_splitparams(url: str):
+    if "/" in url:
+        i = url.find(";", url.rfind("/"))
+        if i < 0:
+            return url, ""
+    else:
+        i = url.find(";")
+    return url[0:i], url[i + 1:]
+
+
+def _ail_up_usesparams(scheme: str) -> bool:
+    names = ["", "ftp", "hdl", "prospero", "http", "imap", "https", "shttp", "rtsp", "rtsps", "rtspu", "sip",
+             "sips", "mms", "sftp", "tel"]
+    return scheme in names
 
 
 def _ail_up_usesnetloc(scheme: str) -> bool:
     names = ["", "ftp", "http", "gopher", "nntp", "telnet", "imap", "wais", "file", "mms", "https", "shttp",
-             "snews", "prospero", "rtsp", "rtspu", "rsync", "svn", "svn+ssh", "sftp", "nfs", "git", "git+ssh",
-             "ws", "wss"]
+             "snews", "prospero", "rtsp", "rtsps", "rtspu", "rsync", "svn", "svn+ssh", "sftp", "nfs", "git",
+             "git+ssh", "ws", "wss", "itms-services"]
     return scheme in names
 
 
 def _ail_up_usesrelative(scheme: str) -> bool:
     names = ["", "ftp", "http", "gopher", "nntp", "imap", "wais", "file", "https", "shttp", "mms", "prospero",
-             "rtsp", "rtspu", "sftp", "svn", "svn+ssh", "ws", "wss"]
+             "rtsp", "rtsps", "rtspu", "sftp", "svn", "svn+ssh", "ws", "wss"]
     return scheme in names
 
 
@@ -240,29 +263,35 @@ def _ail_up_unsplit(scheme: str, netloc: str, path0: str, query: str, fragment: 
     return url
 
 
+def _ail_up_urlunparse(scheme: str, netloc: str, path0: str, params: str, query: str, fragment: str) -> str:
+    path = path0
+    if params != "":
+        path = path + ";" + params
+    return _ail_up_unsplit(scheme, netloc, path, query, fragment)
+
+
 def _ail_up_urljoin(base: str, url: str, allow_fragments: bool) -> str:
     if base == "":
         return url
     if url == "":
         return base
-    b = _ail_up_split(base, "", allow_fragments, False)
-    u = _ail_up_split(url, "", allow_fragments, False)
+    b = _ail_up_split(base, "", allow_fragments, True)
+    u = _ail_up_split(url, b.scheme, allow_fragments, True)
     scheme = u.scheme
-    if scheme == "":
-        scheme = b.scheme
     if scheme != b.scheme or not _ail_up_usesrelative(scheme):
         return url
     netloc = u.netloc
     if _ail_up_usesnetloc(scheme):
         if netloc != "":
-            return _ail_up_unsplit(scheme, netloc, u.path, u.query, u.fragment)
+            return _ail_up_urlunparse(scheme, netloc, u.path, u.params, u.query, u.fragment)
         netloc = b.netloc
-    if u.path == "":
+    if u.path == "" and u.params == "":
         path = b.path
+        params = b.params
         query = u.query
         if query == "":
             query = b.query
-        return _ail_up_unsplit(scheme, netloc, path, query, u.fragment)
+        return _ail_up_urlunparse(scheme, netloc, path, params, query, u.fragment)
     base_parts = b.path.split("/")
     if base_parts[len(base_parts) - 1] != "":
         base_parts.pop()
@@ -293,7 +322,7 @@ def _ail_up_urljoin(base: str, url: str, allow_fragments: bool) -> str:
     joined = "/".join(resolved)
     if joined == "":
         joined = "/"
-    return _ail_up_unsplit(scheme, netloc, joined, u.query, u.fragment)
+    return _ail_up_urlunparse(scheme, netloc, joined, u.params, u.query, u.fragment)
 
 
 def _AilUrlSplit(url: str, scheme: str = "", allow_fragments: bool = True):
@@ -309,29 +338,30 @@ def _AilUrlUnsplit(parts):
 
 
 def _AilUnquote(s: str, encoding: str = "utf-8", errors: str = "replace") -> str:
-    return _ail_up_unquote(s, False)
+    return _ail_up_unquote(s, False, encoding, errors)
 
 
 def _AilUnquotePlus(s: str, encoding: str = "utf-8", errors: str = "replace") -> str:
-    return _ail_up_unquote(s, True)
+    return _ail_up_unquote(s, True, encoding, errors)
 
 
 def _AilQuote(s: str, safe: str = "/", encoding=None, errors=None) -> str:
-    return _ail_up_quote(s, safe, False)
+    return _ail_up_quote(s, safe, False, encoding, errors)
 
 
 def _AilQuotePlus(s: str, safe: str = "", encoding=None, errors=None) -> str:
-    return _ail_up_quote(s, safe, True)
+    return _ail_up_quote(s, safe, True, encoding, errors)
 
 
 def _AilUrlJoin(base: str, url: str, allow_fragments: bool = True) -> str:
     return _ail_up_urljoin(base, url, allow_fragments)
 
 
-def _ail_up_append(out: str, key, val, safe: str) -> str:
+def _ail_up_append(out: str, key, val, safe: str, encoding, errors) -> str:
     if out != "":
         out = out + "&"
-    return out + _ail_up_quote(str(key), safe, True) + "=" + _ail_up_quote(str(val), safe, True)
+    return (out + _ail_up_quote(str(key), safe, True, encoding, errors) + "="
+            + _ail_up_quote(str(val), safe, True, encoding, errors))
 
 
 def _AilUrlEncode(query, doseq: bool = False, safe: str = "", encoding=None, errors=None, quote_via=None) -> str:
@@ -342,25 +372,28 @@ def _AilUrlEncode(query, doseq: bool = False, safe: str = "", encoding=None, err
             if doseq and (isinstance(val, list) or isinstance(val, tuple)):
                 item = 0
                 while item < len(val):
-                    out = _ail_up_append(out, key, val[item], safe)
+                    out = _ail_up_append(out, key, val[item], safe, encoding, errors)
                     item = item + 1
             else:
-                out = _ail_up_append(out, key, val, safe)
+                out = _ail_up_append(out, key, val, safe, encoding, errors)
     else:
         for pair in query:
-            out = _ail_up_append(out, pair[0], pair[1], safe)
+            out = _ail_up_append(out, pair[0], pair[1], safe, encoding, errors)
     return out
 
 
 def _AilParseQsl(qs: str, keep_blank_values: bool = False, strict_parsing: bool = False,
                  encoding: str = "utf-8", errors: str = "replace", max_num_fields=None,
                  separator: str = "&") -> list:
+    if separator == "":
+        raise ValueError("Separator must be of type string or bytes.")
+    if qs == "":
+        return []
+    if max_num_fields is not None and max_num_fields < len(qs.split(separator)):
+        raise ValueError("Max number of fields exceeded")
     pairs = []
-    count = 0
     for field in qs.split(separator):
-        if field == "":
-            if strict_parsing:
-                raise ValueError("bad query field: ''")
+        if field == "" and not strict_parsing:
             continue
         eq = field.find("=")
         if eq >= 0:
@@ -372,10 +405,8 @@ def _AilParseQsl(qs: str, keep_blank_values: bool = False, strict_parsing: bool 
             name = field
             value = ""
         if value != "" or keep_blank_values:
-            count = count + 1
-            if max_num_fields is not None and count > max_num_fields:
-                raise ValueError("Max number of fields exceeded")
-            pairs.append((_ail_up_unquote(name, True), _ail_up_unquote(value, True)))
+            pairs.append((_ail_up_unquote(name, True, encoding, errors),
+                          _ail_up_unquote(value, True, encoding, errors)))
     return pairs
 
 
