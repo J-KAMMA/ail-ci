@@ -9,6 +9,15 @@ Found with a small program compared against CPython on both builds:
    reads that same object, so mutating it through one instance is visible through all of them;
    assigning `self.items = ...` still shadows it on that one instance, as CPython does.
 
+2. A class body runs ONCE, at its class-definition statement, so an attribute whose value is not
+   a literal is fixed there, not at the first read or construction:
+       x = 10
+       class C:
+           y = x + 1
+       x = 20            # C.y stays 11
+   The slots are now filled when the module body reaches the class definition; a side-effecting
+   expression runs exactly once even when many instances are built.
+
 The other shapes below (inheritance of a shared class attribute, a subclass redefining it,
 empty / negative / huge literals, and reads through an argument, a list item and a dict value)
 are fuzzed too and compared with CPython on both builds.
@@ -140,6 +149,48 @@ def main() -> None:
 main()
 '''
 
+CLASS_ATTR_DEFINITION_TIME = r'''calls = [0]
+
+
+def make() -> list[int]:
+    calls[0] += 1
+    return [calls[0]]
+
+
+x = 10
+source = [1, 2]
+
+
+class C:
+    y = x + 1
+    frozen = list(source)
+    made = make()
+
+
+class Base:
+    local = list(source)
+
+
+class Sub(Base):
+    local = [7]
+
+
+x = 20
+source = [3]
+
+
+def main() -> None:
+    a = C()
+    b = C()
+    print(C.y, a.y, b.y)
+    print(C.frozen, C.made, calls[0])
+    print(Base.local, Sub.local, Sub().local)
+    print([C.y][0], {"v": C.frozen}["v"])
+
+
+main()
+'''
+
 
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
@@ -186,6 +237,9 @@ class Fuzz29Tests(unittest.TestCase):
 
     def test_class_attribute_reads(self):
         self.check('class_attr_reads', CLASS_ATTR_READS)
+
+    def test_class_attributes_fixed_at_definition(self):
+        self.check('class_attr_definition_time', CLASS_ATTR_DEFINITION_TIME)
 
 
 if __name__ == '__main__':

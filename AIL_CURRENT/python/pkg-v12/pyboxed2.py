@@ -2167,7 +2167,10 @@ class Compiler(boxclosure.ClosureMixin):
         for name in sorted(self.module_names):
             self._module_global_slot(name)
         for n in tree.body:
-            if isinstance(n, (ast.FunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom)):
+            if isinstance(n, ast.ClassDef):
+                self._init_class_attrs(n.name, main_ctx)
+                continue
+            if isinstance(n, (ast.FunctionDef, ast.Import, ast.ImportFrom)):
                 continue
             self._module_stmt(n, main_ctx)
         if not has_toplevel_exec:
@@ -2957,9 +2960,10 @@ class Compiler(boxclosure.ClosureMixin):
                     if a in hidden_names:
                         hide |= 1 << i
         # A class attribute is one value per CLASS, not one per instance: CPython evaluates the
-        # class body once and every instance reads that same object, so mutating a list/dict held
-        # there is visible through every instance.  Give each attribute a module-lifetime slot,
-        # fill it on first use, and share the reference with every instance and class read.
+        # class body once, at the class-definition statement, and every instance reads that same
+        # object, so mutating a list/dict held there is visible through every instance.  Give each
+        # attribute a module-lifetime slot, fill it at the definition point in the module body, and
+        # share the reference with every instance and class read.
         for i, (aname, aval) in enumerate(class_attrs):
             class_attrs[i] = (aname, aval, self._module_global_slot('__ail_ca_%s_%d' % (node.name, i)))
         self.classes[node.name] = {'base': base, 'methods': methods, 'class_attrs': class_attrs,
@@ -5921,12 +5925,29 @@ class Compiler(boxclosure.ClosureMixin):
             seen += 1
         return name in EXC_IDS
 
+    def _init_class_attrs(self, name, ctx):
+        """Evaluate a class body's attributes once, at its class-definition statement."""
+        for _aname, aval, slot in self.classes[name].get('class_attrs', []):
+            v = self.expr(aval, ctx)
+            ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
+
+    def _class_attr_value(self, slot, value, ctx):
+        """The one shared value of a class attribute, filling the slot lazily only when the module
+        body did not run (the array-entry shape, where there is no executable module statement)."""
+        if value is not None:
+            ctx.emit('if (g_slots_arr[%d].tag == AIL_T_UNBOUND) {' % slot)
+            ctx.indent += 1
+            v = self.expr(value, ctx)
+            ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
+            ctx.indent -= 1
+            ctx.emit('}')
+        return 'g_slots_arr[%d]' % slot
+
     def _cached_class_attr(self, slot, value, ctx):
-        """The one shared value of a class attribute: fill its module-lifetime slot on first use."""
-        v = self.expr(value, ctx)
+        """Read a class attribute through the class object, not through an instance."""
+        v = self._class_attr_value(slot, value, ctx)
         t = ctx.tmp()
-        ctx.emit('if (g_slots_arr[%d].tag == AIL_T_UNBOUND) g_slots_arr[%d] = %s;' % (slot, slot, v))
-        ctx.emit('%s = g_slots_arr[%d];' % (t, slot))
+        ctx.emit('%s = %s;' % (t, v))
         return t
 
     def _call_class(self, name, args, kwargs, ctx):
@@ -5947,11 +5968,8 @@ class Compiler(boxclosure.ClosureMixin):
         for kls in reversed(chain):
             for aname, aval, slot in self.classes[kls].get('class_attrs', []):
                 self.attr_names.add(aname)
-                v = self.expr(aval, ctx)
-                ctx.emit('if (g_slots_arr[%d].tag == AIL_T_UNBOUND) g_slots_arr[%d] = %s;'
-                         % (slot, slot, v))
-                ctx.emit('ail_inst_setattr(cx, %s, g_attr_%s, g_slots_arr[%d]);' %
-                         (t, aname, slot))
+                v = self._class_attr_value(slot, aval, ctx)
+                ctx.emit('ail_inst_setattr(cx, %s, g_attr_%s, %s);' % (t, aname, v))
         if info:
             argcs = self._bind_args(name, info, args, kwargs, ctx)
             dummy = ctx.tmp()
