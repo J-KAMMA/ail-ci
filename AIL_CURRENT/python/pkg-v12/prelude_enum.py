@@ -30,7 +30,25 @@ class _AilEnum:
         return self._idx
 
     def __eq__(self, other):
-        return self is other
+        if isinstance(other, _AilEnum) and self.cname == other.cname:
+            return self is other
+        return NotImplemented
+
+    def __lt__(self, other):
+        raise TypeError("'<' not supported between instances of '" + self.cname
+                        + "' and '" + other.cname + "'")
+
+    def __le__(self, other):
+        raise TypeError("'<=' not supported between instances of '" + self.cname
+                        + "' and '" + other.cname + "'")
+
+    def __gt__(self, other):
+        raise TypeError("'>' not supported between instances of '" + self.cname
+                        + "' and '" + other.cname + "'")
+
+    def __ge__(self, other):
+        raise TypeError("'>=' not supported between instances of '" + self.cname
+                        + "' and '" + other.cname + "'")
 
 
 class _AilIntEnum(_AilEnum):
@@ -209,6 +227,22 @@ class _AilStrEnum(_AilEnum):
             raise TypeError("'>' not supported between instances of '" + self.cname
                             + "' and '" + other.cname + "'")
         return self.value > other
+
+    def __le__(self, other):
+        if isinstance(other, _AilStrEnum):
+            return self.value <= other.value
+        if isinstance(other, _AilEnum):
+            raise TypeError("'<=' not supported between instances of '" + self.cname
+                            + "' and '" + other.cname + "'")
+        return self.value <= other
+
+    def __ge__(self, other):
+        if isinstance(other, _AilStrEnum):
+            return self.value >= other.value
+        if isinstance(other, _AilEnum):
+            raise TypeError("'>=' not supported between instances of '" + self.cname
+                            + "' and '" + other.cname + "'")
+        return self.value >= other
 
     def __add__(self, other):
         return self.value + other

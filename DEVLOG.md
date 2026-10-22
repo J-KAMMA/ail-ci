@@ -107,6 +107,19 @@ on the default build and `AIL_UNIFIED_FORCE=1`.  Fixed three causes (all now in
    per element instead of twice on each group boundary (`itlib.Groupby`).
 
 Remaining differences found are recorded in `DIFFERENCES.md`; they were not fixed in this job.
+## 2026-10-22 — IntEnum / IntFlag review fixes (branch job-intenum4-10221632)
+
+- 3-argument `pow()`: a float anywhere keeps the int-only message; without a float, a non-index operand
+  names the original operands (`'C', 'E', 'int'`), after any `IntEnum` / `IntFlag` `__index__` conversion.
+- `divmod()` now dispatches only through `__divmod__` / `__rdivmod__`, converts an `IntEnum` / `IntFlag`
+  operand through `__index__`, names the original classes in the `TypeError`, and keeps `float divmod()` /
+  `integer division or modulo by zero` for zero divisors. `__floordiv__` / `__mod__` alone no longer fake it.
+- Plain `Enum` equality returns `NotImplemented` across classes so the other operand's `__eq__` runs; plain
+  enum ordering names both classes and the actual operator (`<`, `<=`, `>`, `>=`). Custom ordering now also
+  raises the operator-specific `TypeError` instead of borrowing `__lt__` for `<=` / `>=`.
+- Added the review cases to `AIL_CURRENT/test_ail_intenum4.py` (both directions, float/int zero, user
+  `__divmod__` / `__rdivmod__` / `NotImplemented`, values through parameters, lists, attributes and dicts).
+
 # Dev log
 
 ## 2026-10-21 — IntEnum / IntFlag leftovers (branch job-intenum4-10220559)

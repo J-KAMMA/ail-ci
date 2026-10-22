@@ -499,7 +499,160 @@ def main() -> None:
 main()
 '''
 
+FINDINGS_SRC = r'''from enum import Enum, IntEnum
+
+class C(IntEnum):
+    A = 3
+    Z = 0
+
+class E(Enum):
+    A = 2
+
+class H(Enum):
+    A = 7
+
+class Cq(IntEnum):
+    A = 1
+    def __eq__(self, other):
+        print("Cq.__eq__")
+        return True
+
+class Q:
+    def __floordiv__(self, other):
+        return 10
+    def __mod__(self, other):
+        return 11
+
+class R:
+    def __rfloordiv__(self, other):
+        return 20
+    def __rmod__(self, other):
+        return 21
+
+class D:
+    def __divmod__(self, other):
+        return (7, 8)
+
+class RR:
+    def __rdivmod__(self, other):
+        return (9, 10)
+
+class N:
+    def __divmod__(self, other):
+        return NotImplemented
+    def __rdivmod__(self, other):
+        return NotImplemented
+
+class Box:
+    def __init__(self, a, b, c):
+        self.a = a
+        self.b = b
+        self.c = c
+
+def p(label: str, f) -> None:
+    try:
+        print(label, repr(f()))
+    except Exception as e:
+        print(label, type(e).__name__ + ': ' + str(e))
+
+def pow3(a, b, c):
+    return pow(a, b, c)
+
+def dm(a, b):
+    return divmod(a, b)
+
+def eq(a, b) -> bool:
+    return a == b
+
+def lt(a, b) -> bool:
+    return a < b
+
+def le(a, b) -> bool:
+    return a <= b
+
+def gt(a, b) -> bool:
+    return a > b
+
+def ge(a, b) -> bool:
+    return a >= b
+
+# 3-argument pow: float operands keep CPython's int-only message, non-numeric
+# operands name the original enum class, not the converted int.
+p('pow 2.0', lambda: pow3(2.0, 3, 5))
+p('pow exp 2.0', lambda: pow3(3, 2.0, 5))
+p('pow mod 5.0', lambda: pow3(3, 2, 5.0))
+p('pow C.A 2.0', lambda: pow3(C.A, 2.0, 5))
+p('pow E.A 2.0', lambda: pow3(E.A, 2.0, 5))
+p('pow E.A C.A', lambda: pow3(E.A, C.A, 5))
+p('pow C.A E.A', lambda: pow3(C.A, E.A, 5))
+p('pow E.A C.A 0', lambda: pow3(E.A, C.A, 0))
+p('pow C.A str', lambda: pow3(C.A, "x", 5))
+p('pow C.A C.A', lambda: pow3(C.A, C.A, 5))
+
+b = Box(C.A, C.A, 5)
+p('pow attr', lambda: pow3(b.a, b.b, b.c))
+xs = [C.A, C.A, 5]
+p('pow list', lambda: pow3(xs[0], xs[1], xs[2]))
+dd = {'a': C.A, 'b': C.A, 'c': 5}
+p('pow dict', lambda: pow3(dd['a'], dd['b'], dd['c']))
+
+# divmod: only __divmod__ / __rdivmod__ count; names are the original classes;
+# IntEnum converts to int, and a float with a zero divisor is "float divmod()".
+p('divmod E.A C.A', lambda: dm(E.A, C.A))
+p('divmod C.A E.A', lambda: dm(C.A, E.A))
+p('divmod C.A str', lambda: dm(C.A, "x"))
+p('divmod C.A 0.0', lambda: dm(C.A, 0.0))
+p('divmod E.A 0.0', lambda: dm(E.A, 0.0))
+p('divmod C.A 0', lambda: dm(C.A, 0))
+p('divmod 0 C.A', lambda: dm(0, C.A))
+p('divmod C.A 2.0', lambda: dm(C.A, 2.0))
+p('divmod 2.0 C.A', lambda: dm(2.0, C.A))
+p('divmod Q 2', lambda: dm(Q(), 2))
+p('divmod 2 R', lambda: dm(2, R()))
+p('divmod Q R', lambda: dm(Q(), R()))
+p('divmod D 2', lambda: dm(D(), 2))
+p('divmod 2 RR', lambda: dm(2, RR()))
+p('divmod D RR', lambda: dm(D(), RR()))
+p('divmod N 2', lambda: dm(N(), 2))
+p('divmod 2 N', lambda: dm(2, N()))
+b2 = Box(C.A, C.Z, 0)
+p('divmod attr zero', lambda: dm(b2.a, b2.b))
+ys = [C.A, C.Z]
+p('divmod list zero', lambda: dm(ys[0], ys[1]))
+md = {'a': C.A, 'z': C.Z}
+p('divmod dict zero', lambda: dm(md['a'], md['z']))
+
+# equality defers to the other operand's class across enum classes
+p('P.A == Cq.A', lambda: eq(E.A, Cq.A))
+p('Cq.A == P.A', lambda: eq(Cq.A, E.A))
+p('E.A == C.A', lambda: eq(E.A, C.A))
+p('C.A == E.A', lambda: eq(C.A, E.A))
+p('E.A == H.A', lambda: eq(E.A, H.A))
+p('H.A == E.A', lambda: eq(H.A, E.A))
+p('E.A == E.A', lambda: eq(E.A, E.A))
+p('E.A != H.A', lambda: E.A != H.A)
+p('E.A != C.A', lambda: E.A != C.A)
+
+# plain Enum ordering names both classes and the operator; no '<' substitution
+p('E.A < H.A', lambda: lt(E.A, H.A))
+p('E.A <= H.A', lambda: le(E.A, H.A))
+p('E.A > H.A', lambda: gt(E.A, H.A))
+p('E.A >= H.A', lambda: ge(E.A, H.A))
+p('H.A < E.A', lambda: lt(H.A, E.A))
+p('H.A <= E.A', lambda: le(H.A, E.A))
+p('E.A < E.A', lambda: lt(E.A, E.A))
+p('E.A <= E.A', lambda: le(E.A, E.A))
+p('C.A < 5', lambda: lt(C.A, 5))
+p('C.A <= 3', lambda: le(C.A, 3))
+p('5 < C.A', lambda: lt(5, C.A))
+p('C.A > E.A', lambda: gt(C.A, E.A))
+p('C.A >= E.A', lambda: ge(C.A, E.A))
+'''
+
 class IntEnum4Tests(Base):
+    def test_review_findings(self):
+        self.same(FINDINGS_SRC)
+
     def test_exponentiation_and_cross_kind_equality(self):
         self.same(ENUM_SRC)
 
