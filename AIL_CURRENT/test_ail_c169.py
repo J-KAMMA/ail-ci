@@ -343,6 +343,34 @@ def main() -> None:
 main()
 '''
 
+CYCLE = r'''class Box:
+    def __init__(self, lo: int, hi: int) -> None:
+        self.lo = lo
+        self.hi = hi
+        self.other = self
+
+
+def find(xs, box):
+    box = box.other
+    return xs.index(20, box.lo, box.hi)
+
+
+def main() -> None:
+    xs = [10, 20, 30, 20]
+    b = Box(1, 3)
+    b = b.other
+    print(xs.index(20, b.lo, b.hi))
+    a = Box(0, 4)
+    a = a.other
+    print(find(xs, a))
+    n = Box(1, 3)
+    n = n.lo
+    print(xs.index(20, n))
+
+
+main()
+'''
+
 LONG = r'''class SupercalifragilisticexpialidociousIndexObjectForTestingReallyAndThenMoreExtraCharactersForLength:
     def __init__(self) -> None:
         self.x = 1
@@ -426,6 +454,15 @@ class IndexBounds(unittest.TestCase):
 
     def test_tuple_and_starred_bindings_are_unknown(self):
         self.check('tuple_bindings', TUPLE_BINDINGS)
+
+    def test_self_referential_attribute_receiver_does_not_recurse(self):
+        self.check('cycle', CYCLE)
+
+    def test_typed_path_refuses_a_self_referential_class_by_name(self):
+        with tempfile.TemporaryDirectory(prefix='ail-c169-') as directory:
+            _, error = _build_run(directory, 'cycle', CYCLE, 'typed')
+            self.assertIsNotNone(error)
+            self.assertIn('class Box contains itself', error)
 
     def test_long_index_type_name_is_not_truncated(self):
         self.check('long', LONG)
