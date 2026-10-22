@@ -1,11 +1,10 @@
-**Package imports.** Make these work like CPython for multi-file programs, or refuse them by name with the user's file:line:
-- relative imports (`from . import x`, `from .mod import f`, `from ..pkg import y`);
-- `__all__` with `from m import *`;
-- `import a.b as c`;
-- a module's `if __name__ == "__main__":` block not running on import;
-- importing the same module twice through different names.
+You continue on the current branch, where your earlier work is committed. **Fix only these findings from the last review, nothing else:**
 
-Follow how `test_ail_multifile.py` builds multi-file programs. Probe each case against CPython. Add tests in `test_ail_modules2.py`, then commit.
+1. Conditional `del` now removes a live binding, producing wrong output. `m.py`: `X = 1` / `if 1 > 2:` / `    del X`; `main.py`: `X = 5` / `from m import *` / `print(X)`. CPython: `1`; HEAD default and general builds: `5` (exit 0). `_top_bindings` walks both arms of a non-literal condition and applies `del` unconditionally.
+2. `except ... as X` still leaves a previously bound `X` exported. `m.py`: `X = 1` / `try:` / `    raise Exception` / `except Exception as X:` / `    pass`; `main.py`: `from m import *` / `print("ok")`. CPython: `ok`; HEAD builds then raises `NameError: name 'm__X' is not defined` (exit 1). The handler name must delete any earlier binding; the new code only avoids adding it.
+3. Non-literal false branches still make a global-only name look bound. `m.py`: `def setx():` / `    global X` / `    X = 1` / `if 1 > 2:` / `    X = 2`; `main.py`: `from m import *` / `print("ok")`. CPython: `ok`; HEAD builds then raises `NameError: name 'm__X' is not defined` (exit 1). Same for `for X in range(False)` and assigning `X` inside a handler that does not run.
+
+Probe both builds with `bash ~/tools/cmp.sh`, add each fixed case to the tests, then commit. If a finding cannot be fixed safely, refuse the construct by name at compile time instead of leaving a silent wrong answer.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
