@@ -6,8 +6,10 @@ _PyEval_SliceIndex: an int, a bool or an object with __index__ is an index; None
 anything else raise TypeError("slice indices must be integers or have an __index__ method").  The
 general path now evaluates both bounds, converts __index__ and tests the tags at run time (the value
 may reach the call through a variable, a list item, an attribute or a dict value).  A bad __index__
-return is CPython's "__index__ returned non-int (type ...)".  list, tuple and deque are covered; str
-bounds keep their own None default.
+return is CPython's "__index__ returned non-int (type ...)", with the whole type name.  The typed
+list lowering converts visibly int/bool bounds itself, raises for visibly non-index ones and leaves
+anything else (including __index__ objects) to that path, so local typed lists behave the same.  list,
+tuple and deque are covered; str bounds keep their own None default.
 
 Each program is built with the general path forced and with the default build; stdout, the exit status
 and the last stderr line must equal CPython's.
@@ -220,6 +222,88 @@ main()
 '''
 
 
+LOCAL = r'''class Box:
+    def __init__(self, lo, hi):
+        self.lo = lo
+        self.hi = hi
+
+
+def attempt(label, xs, needle, lo, hi) -> None:
+    try:
+        print(label, xs.index(needle, lo, hi))
+    except Exception as e:
+        print(label, type(e).__name__, str(e))
+
+
+def main() -> None:
+    xs = [10, 20, 30, 20]
+    b = 1.0
+    box = Box(None, 2.0)
+    d = {"lo": "1", "hi": 3}
+    bounds = [None, 0, 1, -1, 1.0, "1", True]
+    for i in range(len(bounds)):
+        v = bounds[i]
+        attempt("item", xs, 20, v, 3)
+    for label, lo, hi in (("var", b, 3), ("attr-lo", box.lo, box.hi), ("attr-hi", 0, box.hi),
+                          ("dict-lo", d["lo"], d["hi"]), ("dict-hi", 0, d["hi"])):
+        attempt(label, xs, 20, lo, hi)
+    t = (10, 20, 30, 20)
+    attempt("tuple", t, 20, box.lo, box.hi)
+    attempt("literal-int", xs, 20, 1, 3)
+    attempt("literal-zero", xs, 10, 0, 0)
+    attempt("literal-neg", xs, 20, -2, -1)
+
+
+main()
+'''
+
+LONG = r'''class SupercalifragilisticexpialidociousIndexObjectForTestingReallyAndThenMoreExtraCharactersForLength:
+    def __init__(self) -> None:
+        self.x = 1
+
+
+class Bound:
+    def __index__(self):
+        return SupercalifragilisticexpialidociousIndexObjectForTestingReallyAndThenMoreExtraCharactersForLength()
+
+
+def attempt(label, xs, needle, lo) -> None:
+    try:
+        print(label, xs.index(needle, lo))
+    except Exception as e:
+        print(label, type(e).__name__, str(e))
+
+
+def main() -> None:
+    attempt("long", [10, 20, 30], 20, Bound())
+
+
+main()
+'''
+
+WIDTHS = r'''MAX = 9223372036854775807
+MIN = -9223372036854775807
+
+
+def attempt(label, xs, needle, lo, hi) -> None:
+    try:
+        print(label, xs.index(needle, lo, hi))
+    except Exception as e:
+        print(label, type(e).__name__, str(e))
+
+
+def main() -> None:
+    xs = [10, 20, 30, 20]
+    vals = [0, -1, MAX, MIN, 4611686018427387904, -4611686018427387904]
+    for i in range(0, len(vals), 2):
+        attempt("both", xs, 20, vals[i], vals[i + 1])
+    attempt("start", xs, 20, MIN, 4)
+    attempt("stop", xs, 20, 0, MAX)
+
+
+main()
+'''
+
 @unittest.skipUnless(HAVE_CC, 'gcc is required')
 class IndexBounds(unittest.TestCase):
     def check(self, name, text, modes=('general', 'default')):
@@ -244,6 +328,15 @@ class IndexBounds(unittest.TestCase):
 
     def test_uncaught_typeerror(self):
         self.check('uncaught', UNCAUGHT)
+
+    def test_typed_local_list_bounds(self):
+        self.check('local', LOCAL)
+
+    def test_long_index_type_name_is_not_truncated(self):
+        self.check('long', LONG)
+
+    def test_int64_width_bounds(self):
+        self.check('widths', WIDTHS)
 
 
 if __name__ == '__main__':
