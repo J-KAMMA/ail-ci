@@ -246,6 +246,67 @@ print(list(itertools.accumulate(o.xs, initial=L[0])))
 print(list(itertools.accumulate([1, 2], initial=round(2.5))))
 '''
 
+ATTR_CYCLE = r'''import itertools
+
+class Box:
+    x: int = 1
+    y: int = 0
+    xs: list[float] = [1.5, 2.5]
+
+class Inner:
+    x: int = 1
+
+class Holder:
+    inner: Inner
+
+def via_arg(xs: list[float], init: int) -> None:
+    print(list(itertools.accumulate(xs, initial=init)))
+
+def run_acc(b: Box) -> None:
+    b.x = b.x + 1
+    print(list(itertools.accumulate([1.5], initial=b.x)))
+    via_arg([1.5, 2.5], b.x)
+    L = [b.x, b.x + 1]
+    print(list(itertools.accumulate([1.5], initial=L[0])))
+    D = {"i": b.x}
+    print(list(itertools.accumulate([1.5], initial=D["i"])))
+
+def run_self(b: Box) -> None:
+    b.x = b.x
+    print(list(itertools.accumulate([1.5], initial=b.x)))
+    xs = [1.5, 2.5]
+    b.xs = xs
+    b.xs = b.xs
+    print(list(itertools.accumulate(b.xs, initial=0.0)))
+
+def run_two_names(b: Box) -> None:
+    b.y = 2
+    b.x = b.y
+    b.y = b.x
+    print(list(itertools.accumulate([1.5], initial=b.x)))
+
+def run_groupby(b: Box) -> None:
+    for k, grp in itertools.groupby([b.x, b.x, b.x + 1]):
+        print(k, list(grp))
+    b.x = b.x + 1
+
+def run_nested(b: Holder) -> None:
+    b.inner.x = b.inner.x + 1
+    print(list(itertools.accumulate([1.5], initial=b.inner.x)))
+
+b = Box()
+run_acc(b)
+b = Box()
+run_self(b)
+b = Box()
+run_two_names(b)
+b = Box()
+run_groupby(b)
+h = Holder()
+h.inner = Inner()
+run_nested(h)
+'''
+
 class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="ail-fuzz8-")
@@ -316,6 +377,15 @@ class AccumulateInitialKind(Base):
     def test_one_argument_round_is_an_int(self):
         out = self.same(ACC_ROUND_INITIAL)
         self.assertIn(b"[2, 3.5, 6.0]\n", out)
+
+
+class AttributeKindCycle(Base):
+    def test_self_referential_attribute_falls_back(self):
+        out = self.same(ATTR_CYCLE)
+        self.assertIn(b"[2, 3.5]\n[2, 3.5, 6.0]\n[2, 3.5]\n[2, 3.5]\n", out)
+        self.assertIn(b"[1, 2.5]\n[0.0, 1.5, 4.0]\n", out)
+        self.assertIn(b"[2, 3.5]\n", out)
+        self.assertIn(b"1 [1, 1]\n2 [2]\n", out)
 
 
 if __name__ == "__main__":

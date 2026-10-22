@@ -1154,6 +1154,10 @@ class Streams:
         return out
 
     def _attribute_kind(self, node, seen):
+        key = ('attr', node.attr)
+        if key in seen:
+            return None
+        seen = seen | {key}
         sources = self._attribute_sources(node.attr)
         if not sources:
             return None
@@ -1166,6 +1170,10 @@ class Streams:
         return self._same_kind(kinds)
 
     def _attribute_container(self, node, seen):
+        key = ('attr', node.attr)
+        if key in seen:
+            return None
+        seen = seen | {key}
         sources = self._attribute_sources(node.attr)
         if not sources:
             return None
