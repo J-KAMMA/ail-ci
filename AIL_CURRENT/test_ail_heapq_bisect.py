@@ -119,6 +119,23 @@ fn main() {
     print("final", show_i(h), ",".join(sl), show_i(sorted_i), ",".join(sorted_s), show_items(byt));
     let e: list[int] = [];
     try { print(bisect_left(e, 1, -1)); } except ValueError as err { print("lo", err.message); }
+    let e2: list[int] = [1, 2, 2, 3];
+    print("bneg", bisect(e2, 2, 0, -1), bisect(e2, 2, 0, -2));
+    try { print("bhi", bisect(e2, 2, 0, 99)); } except IndexError as err { print("bhi", err.message); }
+    try { print("bhi", bisect_left(e2, 2, 0, 99)); } except IndexError as err { print("bhi", err.message); }
+    try { bisect(e2, 2, -1, 3); } except ValueError as err { print("blo", err.message); }
+    let e3: list[int] = [1, 2, 2, 3];
+    try { insort(e3, 2, 0, 99); } except IndexError as err { print("bins", err.message); }
+    let e4: list[int] = [1, 2, 2, 3];
+    insort(e4, 2, 0, -1);
+    print("binsneg", show_i(e4));
+    let e5: list[int] = [1, 2, 2, 3];
+    print("bnone", bisect_left(e5, 2, 0, None), bisect_right(e5, 2, hi=None),
+          bisect_left(e5, 2, lo=1, hi=None), bisect(e5, 9, 0, None));
+    insort_left(e5, 3, 0, None);
+    insort_right(e5, 1, hi=None);
+    insort(e5, 2, lo=0, hi=None);
+    print("binsnone", show_i(e5));
 }
 """
 
@@ -206,9 +223,104 @@ def main():
         print(bisect_left([], 1, -1))
     except ValueError as err:
         print("lo", err)
+    e2 = [1, 2, 2, 3]
+    print("bneg", bisect(e2, 2, 0, -1), bisect(e2, 2, 0, -2))
+    try:
+        print("bhi", bisect(e2, 2, 0, 99))
+    except IndexError as err:
+        print("bhi", err)
+    try:
+        print("bhi", bisect_left(e2, 2, 0, 99))
+    except IndexError as err:
+        print("bhi", err)
+    try:
+        bisect(e2, 2, -1, 3)
+    except ValueError as err:
+        print("blo", err)
+    e3 = [1, 2, 2, 3]
+    try:
+        insort(e3, 2, 0, 99)
+    except IndexError as err:
+        print("bins", err)
+    e4 = [1, 2, 2, 3]
+    insort(e4, 2, 0, -1)
+    print("binsneg", show_i(e4))
+    e5 = [1, 2, 2, 3]
+    print("bnone", bisect_left(e5, 2, 0, None), bisect_right(e5, 2, hi=None),
+          bisect_left(e5, 2, lo=1, hi=None), bisect(e5, 9, 0, None))
+    insort_left(e5, 3, 0, None)
+    insort_right(e5, 1, hi=None)
+    insort(e5, 2, lo=0, hi=None)
+    print("binsnone", show_i(e5))
 
 
 main()
+'''
+
+# The bounds of a Python-syntax program (the general path: `_bisect_call` boxes lo and hi, so the
+# conversions CPython's C _bisect does -- lo with the index converter, hi with the one that also
+# takes None -- have to be emitted; a bare `(value).i` read a float's payload as a number).
+BOUNDS_PYTHON = r'''
+import bisect
+
+
+class Box:
+    def __init__(self, lo, hi):
+        self.lo = lo
+        self.hi = hi
+
+
+def note(tag, v):
+    print("eval", tag)
+    return v
+
+
+xs = [1, 2, 2, 4]
+print(bisect.bisect_left(xs, 2, 0, None), bisect.bisect_right(xs, 2, hi=None))
+print(bisect.bisect_left(xs, 2, lo=1, hi=None), bisect.bisect(xs, 2, 1, None))
+print(bisect.bisect_left([], 1, 0, None), bisect.bisect_right(xs, 2, True, True))
+none_pair = [1, None]
+print(bisect.bisect_left(xs, 4, none_pair[0], none_pair[1]))
+box = Box(0, None)
+print(bisect.bisect_right(xs, 2, box.lo, box.hi), bisect.bisect_left(xs, 2, hi=box.hi))
+ys = [1, 3]
+bisect.insort_left(ys, 2, 0, None)
+bisect.insort_right(ys, 2, hi=None)
+bisect.insort(ys, 0, 0, None)
+print(ys, bisect.bisect_left(xs, 2, 0, -1), bisect.bisect_left(xs, 2, 0, -2))
+for bad in ("1", 1.0, None):
+    try:
+        print(bisect.bisect_left(xs, 2, bad, None))
+    except TypeError as err:
+        print("lo", type(err).__name__, err)
+for bad in ("2", 1.0, [1]):
+    try:
+        print(bisect.bisect_left(xs, 2, 0, bad))
+    except TypeError as err:
+        print("hi", type(err).__name__, err)
+try:
+    print(bisect.bisect_left(xs, 2, -1, None))
+except ValueError as err:
+    print("neg", type(err).__name__, err)
+try:
+    print(bisect.bisect_left(xs, 2, -1, 1.0))
+except TypeError as err:
+    print("order", type(err).__name__, err)
+try:
+    print(bisect.bisect_left(xs, 2, None, 1.0))
+except TypeError as err:
+    print("order", type(err).__name__, err)
+print(note("a", bisect.bisect_left(xs, 2, note("lo", 0), note("hi", None))))
+try:
+    print(bisect.bisect_left(xs, 2, note("lo", 1), note("hi", 1.0)))
+except TypeError as err:
+    print("order", type(err).__name__, err)
+keep = [1, 5]
+try:
+    bisect.insort_left(keep, 3, 0, 1.5)
+except TypeError as err:
+    print("insort", type(err).__name__, err)
+print(keep)
 '''
 
 SHADOW = """
@@ -251,6 +363,11 @@ REFUSED = [
     ('fn main() { let h: list[int] = []; heappush(h, 1, reverse=True); }', 'key='),
     ('struct N { t: int; } fn main() { let h: list[N] = []; heappush(h, N(1), key=3); }', 'key='),
     ('struct N { t: int; u: int; } fn main() { let h: list[N] = []; print(bisect_left(h, 1, key=lambda n: (n.t, n.u))); }', 'tuple key'),
+    # bisect's bounds are ints (CPython reads them as Py_ssize_t); hi may also be None, lo may not
+    ('fn main() { let xs: list[int] = [1]; print(bisect_left(xs, 1, None)); }', 'lo must be an int'),
+    ('fn main() { let xs: list[int] = [1]; let h = 1.5; print(bisect_left(xs, 1, 0, h)); }', 'declared int'),
+    ('fn main() { let xs: list[int] = [1]; print(bisect_right(xs, 1, hi="2")); }', 'declared int'),
+    ('fn main() { let xs: list[int] = [1]; insort_left(xs, 1, 1.5); }', 'declared int'),
 ]
 
 
@@ -313,6 +430,27 @@ class HeapqBisectTests(unittest.TestCase):
             ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)
             self.assertEqual(ran.stdout, "12\n0\n")
 
+    def test_bounds_on_the_general_path(self):
+        """A Python-syntax program: lo/hi boxed values, so CPython's own conversions apply."""
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory, "bounds.py")
+            exe, debug = Path(directory, "bounds"), Path(directory, "bounds-debug")
+            source.write_text(BOUNDS_PYTHON)
+            built = subprocess.run([sys.executable, str(ROOT / "ail_chatgpt.py"), "compile", str(source),
+                                    "--syntax", "python", "-o", str(exe), "--debug-dir", str(debug)],
+                                   capture_output=True, text=True, timeout=300)
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)
+            expected = subprocess.run([sys.executable, str(source)], capture_output=True, text=True, timeout=60)
+            self.assertEqual(expected.returncode, 0, expected.stderr)
+            self.assertEqual(ran.returncode, 0, ran.stderr)
+            self.assertEqual(ran.stdout, expected.stdout)
+            for word in ("argument should be integer or None, not 'float'",
+                         "argument should be integer or None, not 'str'",
+                         "'NoneType' object cannot be interpreted as an integer",
+                         "ValueError lo must be non-negative", "eval hi", "order TypeError"):
+                self.assertIn(word, ran.stdout)
+
     def test_misuse_is_refused_with_a_route(self):
         with tempfile.TemporaryDirectory() as directory:
             for index, (text, hint) in enumerate(REFUSED):
@@ -321,6 +459,25 @@ class HeapqBisectTests(unittest.TestCase):
                     self.assertNotEqual(built.returncode, 0)
                     self.assertFalse(exe.exists())
                     self.assertIn(hint, built.stdout + built.stderr)
+
+
+# These tests pin the C text of the legacy emitter, the AIL_IR=0 opt-out (the IR is the default since
+# 2026-10-19 and has its own text, pinned in test_ail_ir_*): the whole module builds with AIL_IR=0
+# unless the caller set AIL_IR.
+_SAVED_AIL_IR = []
+
+
+def setUpModule():
+    import os as _os
+    _SAVED_AIL_IR.append(_os.environ.get('AIL_IR'))
+    if _SAVED_AIL_IR[-1] is None:
+        _os.environ['AIL_IR'] = '0'
+
+
+def tearDownModule():
+    import os as _os
+    if _SAVED_AIL_IR.pop() is None:
+        _os.environ.pop('AIL_IR', None)
 
 
 if __name__ == "__main__":
