@@ -2956,7 +2956,14 @@ class Compiler(boxclosure.ClosureMixin):
                 for i, a in enumerate(names):
                     if a in hidden_names:
                         hide |= 1 << i
-        self.classes[node.name] = {'base': base, 'methods': methods, 'class_attrs': class_attrs, 'dc': dc, 'dc_hide': hide}
+        # A class attribute is one value per CLASS, not one per instance: CPython evaluates the
+        # class body once and every instance reads that same object, so mutating a list/dict held
+        # there is visible through every instance.  Give each attribute a module-lifetime slot,
+        # fill it on first use, and share the reference with every instance and class read.
+        for i, (aname, aval) in enumerate(class_attrs):
+            class_attrs[i] = (aname, aval, self._module_global_slot('__ail_ca_%s_%d' % (node.name, i)))
+        self.classes[node.name] = {'base': base, 'methods': methods, 'class_attrs': class_attrs,
+                                   'dc': dc, 'dc_hide': hide}
         self.class_order.append(node.name)
 
     def _resolve_method(self, klass, mname):
@@ -3454,11 +3461,11 @@ class Compiler(boxclosure.ClosureMixin):
             recv_kind = self.get_kind(node.value.id, ctx)
             if recv_kind and recv_kind.startswith('instance:'):
                 cname = recv_kind.split(':', 1)[1]
-                for kls, kv in self.classes[cname].get('class_attrs', []):
+                for kls, kv, _slot in self.classes[cname].get('class_attrs', []):
                     if kls == node.attr:
                         # a subclass may rebind the attribute to a value of another kind
                         if any(node.attr == a for d in self._descendants(cname)
-                               for a, _ in self.classes[d].get('class_attrs', [])):
+                               for a, _v, _s in self.classes[d].get('class_attrs', [])):
                             return None
                         return self.infer_kind(kv, ctx)
         return None
@@ -4947,12 +4954,9 @@ class Compiler(boxclosure.ClosureMixin):
             # so read the literal the lookup through the bases finds, as CPython does
             k = node.value.id
             while k is not None and k in self.classes:
-                hits = [v for a, v in self.classes[k].get('class_attrs', []) if a == node.attr]
+                hits = [(v, s) for a, v, s in self.classes[k].get('class_attrs', []) if a == node.attr]
                 if hits:
-                    if isinstance(hits[-1], ast.Constant) or (isinstance(hits[-1], ast.UnaryOp)
-                                                              and isinstance(hits[-1].operand, ast.Constant)):
-                        return self.expr(hits[-1], ctx)
-                    break
+                    return self._cached_class_attr(hits[-1][1], hits[-1][0], ctx)
                 k = self.classes[k]['base']
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
         if prop_owners:
@@ -5917,6 +5921,14 @@ class Compiler(boxclosure.ClosureMixin):
             seen += 1
         return name in EXC_IDS
 
+    def _cached_class_attr(self, slot, value, ctx):
+        """The one shared value of a class attribute: fill its module-lifetime slot on first use."""
+        v = self.expr(value, ctx)
+        t = ctx.tmp()
+        ctx.emit('if (g_slots_arr[%d].tag == AIL_T_UNBOUND) g_slots_arr[%d] = %s;' % (slot, slot, v))
+        ctx.emit('%s = g_slots_arr[%d];' % (t, slot))
+        return t
+
     def _call_class(self, name, args, kwargs, ctx):
         cls = self.classes[name]
         info = self._resolve_method(name, '__init__')
@@ -5933,10 +5945,13 @@ class Compiler(boxclosure.ClosureMixin):
             chain.append(k)
             k = self.classes[k]['base']
         for kls in reversed(chain):
-            for aname, aval in self.classes[kls].get('class_attrs', []):
+            for aname, aval, slot in self.classes[kls].get('class_attrs', []):
                 self.attr_names.add(aname)
                 v = self.expr(aval, ctx)
-                ctx.emit('ail_inst_setattr(cx, %s, g_attr_%s, %s);' % (t, aname, v))
+                ctx.emit('if (g_slots_arr[%d].tag == AIL_T_UNBOUND) g_slots_arr[%d] = %s;'
+                         % (slot, slot, v))
+                ctx.emit('ail_inst_setattr(cx, %s, g_attr_%s, g_slots_arr[%d]);' %
+                         (t, aname, slot))
         if info:
             argcs = self._bind_args(name, info, args, kwargs, ctx)
             dummy = ctx.tmp()
