@@ -7395,15 +7395,7 @@ class Compiler(boxclosure.ClosureMixin):
             wrap = 'pbf_%d' % self.lambda_n
             body = {'str': '*out = ail_obj_str(cx, arg); return AIL_OK;',
                    'len': 'return ail_op_len(cx, out, arg);',
-                   'abs': None}[node.id]
-            if node.id == 'abs' and self.dunder_ops:
-                # an instance may define __abs__ (dunderrt.py patches ail_bi_abs to ask the class)
-                body = 'return ail_bi_abs(cx, out, arg);'
-            elif node.id == 'abs':
-                body = ('if (arg.tag == AIL_T_FLOAT) { *out = ail_box_float(cx, fabs('
-                        'ail_float_val(arg))); return AIL_OK; } '
-                        'if (arg.i < 0) return ail_op_neg(cx, out, arg); *out = arg; '
-                        'return AIL_OK;')
+                   'abs': 'return ail_bi_abs(cx, out, arg);'}[node.id]
             self.top_decls.append('static ail_st %s(ail_ctx *cx, ail_obj *out, ail_obj arg, '
                                   'void *closure);\n' % wrap)
             self.top_defs.append(
@@ -7797,16 +7789,8 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('abs() with other than exactly one argument')
         v = self.expr(args[0], ctx)
         t = ctx.tmp()
-        if self.dunder_ops:
-            # an instance may define __abs__ (dunderrt.py patches ail_bi_abs to ask the class)
-            ctx.emit('st = ail_bi_abs(cx, &%s, %s);' % (t, v))
-            ctx.check()
-            return t
-        ctx.emit('if ((%s).tag == AIL_T_FLOAT) { %s = ail_box_float(cx, fabs(ail_float_val(%s))); }'
-                 % (v, t, v))
-        ctx.emit('else { st = ((%s).i < 0) ? ail_op_neg(cx, &%s, %s) : (( %s = %s), AIL_OK); '
-                 'if (st != AIL_OK) goto %s; }' % (v, t, v, t, v, ctx.cur_err_target()))
-        ctx.uses_st = True
+        ctx.emit('st = ail_bi_abs(cx, &%s, %s);' % (t, v))
+        ctx.check()
         return t
 
     def _b_chr(self, args, kwargs, ctx):
@@ -7849,15 +7833,9 @@ class Compiler(boxclosure.ClosureMixin):
         if len(args) != 2 or kwargs:
             raise Unsupported('divmod() with other than exactly 2 arguments')
         a = self.expr(args[0], ctx); b = self.expr(args[1], ctx)
-        q = ctx.tmp(); r = ctx.tmp()
-        ctx.emit('st = ail_op_floordiv(cx, &%s, %s, %s);' % (q, a, b))
-        ctx.check()
-        ctx.emit('st = ail_op_mod(cx, &%s, %s, %s);' % (r, a, b))
-        ctx.check()
-        arr = ctx.new_cvar('dm')
-        ctx.emit('ail_obj %s[2] = { %s, %s };' % (arr, q, r))
         t = ctx.tmp()
-        ctx.emit('%s = ail_tuple_new(cx, %s, 2);' % (t, arr))
+        ctx.emit('st = ail_bi_divmod(cx, &%s, %s, %s);' % (t, a, b))
+        ctx.check()
         return t
 
     def _b_pow(self, args, kwargs, ctx):
