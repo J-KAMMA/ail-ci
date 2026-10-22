@@ -4628,7 +4628,8 @@ class Compiler(boxclosure.ClosureMixin):
             return t
         # with NotImplemented in the program the run time's dispatch decides (it tries the other operand next)
         cname = self._inst_class(an, ctx) if an is not None and not self.uses_ni else None
-        dunder = {ast.Eq: '__eq__', ast.Lt: '__lt__'}.get(type(op))
+        dunder = {ast.Eq: '__eq__', ast.Lt: '__lt__', ast.LtE: '__le__',
+                  ast.Gt: '__gt__', ast.GtE: '__ge__'}.get(type(op))
         invert = False
         if cname and type(op) is ast.NotEq:
             # C42: `!=` asks __ne__ when the class (or a subclass) defines it, otherwise it is the negation of __eq__
@@ -5086,7 +5087,7 @@ class Compiler(boxclosure.ClosureMixin):
         self._emit_comp_generators(node.generators, 0, node, ctx, t, add_stmt_fn, set())
         return t
 
-    def _emit_comp_generators(self, generators, i, node, ctx, t, add_stmt_fn, declared):
+    def _emit_comp_generators(self, generators, i, node, ctx, t, add_stmt_fn, declared, stop=None):
         if i == len(generators):
             add_stmt_fn(node, ctx, t)
             return
@@ -5099,7 +5100,9 @@ class Compiler(boxclosure.ClosureMixin):
             cc = self.expr(cond, ctx)
             ctx.emit('if (ail_obj_truthy(%s)) {' % cc)
             ctx.indent += 1
-        self._emit_comp_generators(generators, i + 1, node, ctx, t, add_stmt_fn, declared)
+        self._emit_comp_generators(generators, i + 1, node, ctx, t, add_stmt_fn, declared, stop)
+        if stop is not None:
+            ctx.emit('if (%s) break;' % stop)
         for cond in gen.ifs:
             ctx.indent -= 1
             ctx.emit('}')
@@ -7763,17 +7766,19 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.emit('%s = ail_box_bool(%sail_str_any_outside(%s, %dLL, %dLL));'
                          % (res, neg, v, lo, hi))
                 return res
-            # fused: still evaluates EVERY element in the same order (the existing path
-            # materialises the genexpr eagerly before scanning), so side effects and
-            # exception positions are identical -- only the LIST object, the per-element
-            # append, the ITER object and the second scan are skipped.
+            # fused, and lazy like CPython's own any()/all(): the first decisive element
+            # stops the generator, so a later element's side effects (or a raise) never happen.
+            done = ctx.new_cvar('done')
+            ctx.emit('int %s = 0;' % done)
             def add(n, c, _t):
                 v = self.expr(n.elt, c)
                 if name == 'any':
-                    c.emit('if (ail_obj_truthy(%s)) %s = ail_box_bool(1);' % (v, res))
+                    c.emit('if (!%s && ail_obj_truthy(%s)) { %s = ail_box_bool(1); %s = 1; }'
+                           % (done, v, res, done))
                 else:
-                    c.emit('if (!ail_obj_truthy(%s)) %s = ail_box_bool(0);' % (v, res))
-            self._emit_comp_generators(arg.generators, 0, arg, ctx, res, add, set())
+                    c.emit('if (!%s && !ail_obj_truthy(%s)) { %s = ail_box_bool(0); %s = 1; }'
+                           % (done, v, res, done))
+            self._emit_comp_generators(arg.generators, 0, arg, ctx, res, add, set(), done)
             return res
         src = self._resolve_iter_src(arg, ctx)
         it = ctx.tmp(); val = ctx.tmp()

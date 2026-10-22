@@ -1909,6 +1909,7 @@ static ail_obj ail2n_cls;
 static inline int ail2n_is(ail_obj x) {
     return x.tag == AIL_T_INST && ail2n_cls.tag == AIL_T_CLASS && ((ail_instobj *)x.o)->cls.o == ail2n_cls.o;
 }
+#define AIL2N_IS(r) ail2n_is(r)
 static void ail2n_tname(char *buf, size_t n, ail_obj x) {
     if (x.tag == AIL_T_INST && ((ail_instobj *)x.o)->cls.tag == AIL_T_CLASS) {
         ail_str s = ail_view_to_str(((ail_classobj *)((ail_instobj *)x.o)->cls.o)->name);
