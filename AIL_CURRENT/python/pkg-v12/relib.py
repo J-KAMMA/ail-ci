@@ -1583,7 +1583,7 @@ def _ail_re_split(p: list[int], s: str, maxsplit: int) -> list[str]:
     mustadv = 0
     cnt = 0
     while pos <= n:
-        if maxsplit > 0 and cnt >= maxsplit:
+        if maxsplit < 0 or (maxsplit > 0 and cnt >= maxsplit):
             break
         if p[16] != 0 and asc == 1:  #P
             pos = _ail_re_pre(p[2], t2 if dec == 1 else t, pos)  #P
@@ -1625,7 +1625,7 @@ def _ail_re_sublit(p: list[int], s: str, repl: str, count: int) -> str:
     mustadv = 0
     cnt = 0
     while pos <= n:
-        if count > 0 and cnt >= count:
+        if count < 0 or (count > 0 and cnt >= count):
             break
         if p[16] != 0 and asc == 1:  #P
             pos = _ail_re_pre(p[2], t2 if dec == 1 else t, pos)  #P
@@ -1696,7 +1696,7 @@ def _ail_re_sub%(k)d(s: str, count: int) -> str:
     mustadv = 0
     cnt = 0
     while pos <= n:
-        if count > 0 and cnt >= count:
+        if count < 0 or (count > 0 and cnt >= count):
             break
         if %(table)s[16] != 0 and asc == 1:  #P
             pos = _ail_re_pre(%(pid)d, t2 if dec == 1 else t, pos)  #P
@@ -1887,7 +1887,7 @@ def %(name)s(s: %(kind)s, fn%(ann)s, count: int) -> %(ret)s:
     last = 0
     cnt = 0
     for m in _ail_re_finditer%(sfx)s(%(table)s, s):
-        if count > 0 and cnt >= count:
+        if count < 0 or (count > 0 and cnt >= count):
             break
         a = m.start(0)
         out.append(s[last:a])
