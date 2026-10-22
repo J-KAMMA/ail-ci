@@ -1,5 +1,20 @@
 # DEVLOG
 
+## 2026-10-22 -- job-fuzz19-10220951 review fixes
+
+The review found two regressions in the fuzz19 commit, both fixed and covered by tests:
+
+* The lazy `any()`/`all()` fused loop stopped without closing the temporary generator expression's
+  source, so a generator's `finally` never ran. The loop now closes abandoned sources (outermost
+  first, matching CPython's deallocation order); `g.close()` itself now resumes a suspended generator
+  with a private completion status so its `finally` blocks run too.
+* Runtime-dispatched `<`, `<=`, `>` and `>=` boxed the method's result to bool. They now return the
+  method's value, as the statically dispatched path does, for list items, dict values, attributes,
+  arguments and chains.
+
+Also, the ordering helpers and enum entries are only emitted for a program that actually contains an
+ordering comparison, so a class program that never compares instances gets the same C as before.
+
 ## 2026-10-22 -- job-fuzz19-10220951 (control flow)
 
 Fuzz round 19 compared 80 small control-flow programs (for/while else, break/continue, nested

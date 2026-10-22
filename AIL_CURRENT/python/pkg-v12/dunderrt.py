@@ -52,6 +52,7 @@ typedef ail_st (*ail_d3_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj, ail_obj);
 typedef ail_st (*ail_d1_fn)(ail_ctx *, ail_obj *, ail_obj);
 typedef ail_st (*ail_d2_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj);
 '''
+ENUMS_BASE = ENUMS.replace('''       AIL_D2_ROR, AIL_D2_XOR, AIL_D2_RXOR, AIL_D2_LSHIFT, AIL_D2_RLSHIFT, AIL_D2_RSHIFT, AIL_D2_RRSHIFT, AIL_D2_FORMAT,\n       AIL_D2_LE, AIL_D2_GE, AIL_ND2 };''', '''       AIL_D2_ROR, AIL_D2_XOR, AIL_D2_RXOR, AIL_D2_LSHIFT, AIL_D2_RLSHIFT, AIL_D2_RSHIFT, AIL_D2_RRSHIFT, AIL_D2_FORMAT, AIL_ND2 };''')
 
 FUNCS = '''
 /* ---- operator special methods on instances (dunderrt.py) ---- */
@@ -200,49 +201,6 @@ __attribute__((noinline)) static int ail_dun_cmp_rev(ail_ctx *cx, int64_t *out, 
     }
     return 0;
 }
-#ifndef AIL2N_IS
-#define AIL2N_IS(r) 0
-#endif
-static inline ail_st (*ail_dun_lt_fn(ail_obj x))(ail_ctx *, ail_obj *, ail_obj, ail_obj) {
-    if (x.tag == AIL_T_INST) {
-        for (ail_obj k = ((ail_instobj *)x.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base)
-            if (((ail_classobj *)k.o)->lt_fn) return ((ail_classobj *)k.o)->lt_fn;
-    }
-    return 0;
-}
-/* op: 0 <, 1 <=, 2 >, 3 >= -- CPython's rich comparison: the left method first, then the
-   reflected method of the right operand.  Returns 0 when neither side has one. */
-__attribute__((noinline)) static int ail_dun_cmp_method(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, int op, ail_st *stp) {
-    ail_obj r;
-    ail_d2_fn f;
-    ail_st (*lf)(ail_ctx *, ail_obj *, ail_obj, ail_obj);
-    if (op == 0) {
-        lf = ail_dun_lt_fn(a);
-        if (lf) { *stp = lf(cx, &r, a, b); if (*stp != AIL_OK) return 1; if (!AIL2N_IS(r)) { *out = ail_box_bool(ail_obj_truthy(r)); return 1; } }
-        f = ail_dun2(b, AIL_D2_GT);
-        if (f) { *stp = f(cx, &r, b, a); if (*stp != AIL_OK) return 1; if (!AIL2N_IS(r)) { *out = ail_box_bool(ail_obj_truthy(r)); return 1; } }
-        return 0;
-    }
-    if (op == 1) {
-        f = ail_dun2(a, AIL_D2_LE);
-        if (f) { *stp = f(cx, &r, a, b); if (*stp != AIL_OK) return 1; if (!AIL2N_IS(r)) { *out = ail_box_bool(ail_obj_truthy(r)); return 1; } }
-        f = ail_dun2(b, AIL_D2_GE);
-        if (f) { *stp = f(cx, &r, b, a); if (*stp != AIL_OK) return 1; if (!AIL2N_IS(r)) { *out = ail_box_bool(ail_obj_truthy(r)); return 1; } }
-        return 0;
-    }
-    if (op == 2) {
-        f = ail_dun2(a, AIL_D2_GT);
-        if (f) { *stp = f(cx, &r, a, b); if (*stp != AIL_OK) return 1; if (!AIL2N_IS(r)) { *out = ail_box_bool(ail_obj_truthy(r)); return 1; } }
-        lf = ail_dun_lt_fn(b);
-        if (lf) { *stp = lf(cx, &r, b, a); if (*stp != AIL_OK) return 1; if (!AIL2N_IS(r)) { *out = ail_box_bool(ail_obj_truthy(r)); return 1; } }
-        return 0;
-    }
-    f = ail_dun2(a, AIL_D2_GE);
-    if (f) { *stp = f(cx, &r, a, b); if (*stp != AIL_OK) return 1; if (!AIL2N_IS(r)) { *out = ail_box_bool(ail_obj_truthy(r)); return 1; } }
-    f = ail_dun2(b, AIL_D2_LE);
-    if (f) { *stp = f(cx, &r, b, a); if (*stp != AIL_OK) return 1; if (!AIL2N_IS(r)) { *out = ail_box_bool(ail_obj_truthy(r)); return 1; } }
-    return 0;
-}
 /* C42: inside `==`, `!=` and `in` an exception raised by a user __eq__ called for the elements of a container is kept
    here and raised by the operator; elsewhere (index, count, remove, dict and set probes) it is still dropped */
 static ail_st ail__eq_err; static int ail__eq_scope;
@@ -283,6 +241,52 @@ __attribute__((noinline)) static ail_st ail_dun_op_eq(ail_ctx *cx, ail_obj *out,
 '''
 
 HASH_CASE = '''        case AIL_T_INST: return ail_dun_hash(cx, out, x);
+'''
+
+ORDER_FUNCS = r'''
+#ifndef AIL2N_IS
+#define AIL2N_IS(r) 0
+#endif
+static inline ail_st (*ail_dun_lt_fn(ail_obj x))(ail_ctx *, ail_obj *, ail_obj, ail_obj) {
+    if (x.tag == AIL_T_INST) {
+        for (ail_obj k = ((ail_instobj *)x.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base)
+            if (((ail_classobj *)k.o)->lt_fn) return ((ail_classobj *)k.o)->lt_fn;
+    }
+    return 0;
+}
+/* op: 0 <, 1 <=, 2 >, 3 >= -- CPython's rich comparison: the left method first, then the
+   reflected method of the right operand.  Returns 0 when neither side has one. */
+__attribute__((noinline)) static int ail_dun_cmp_method(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, int op, ail_st *stp) {
+    ail_obj r;
+    ail_d2_fn f;
+    ail_st (*lf)(ail_ctx *, ail_obj *, ail_obj, ail_obj);
+    if (op == 0) {
+        lf = ail_dun_lt_fn(a);
+        if (lf) { *stp = lf(cx, &r, a, b); if (*stp != AIL_OK) return 1; if (!AIL2N_IS(r)) { *out = r; return 1; } }
+        f = ail_dun2(b, AIL_D2_GT);
+        if (f) { *stp = f(cx, &r, b, a); if (*stp != AIL_OK) return 1; if (!AIL2N_IS(r)) { *out = r; return 1; } }
+        return 0;
+    }
+    if (op == 1) {
+        f = ail_dun2(a, AIL_D2_LE);
+        if (f) { *stp = f(cx, &r, a, b); if (*stp != AIL_OK) return 1; if (!AIL2N_IS(r)) { *out = r; return 1; } }
+        f = ail_dun2(b, AIL_D2_GE);
+        if (f) { *stp = f(cx, &r, b, a); if (*stp != AIL_OK) return 1; if (!AIL2N_IS(r)) { *out = r; return 1; } }
+        return 0;
+    }
+    if (op == 2) {
+        f = ail_dun2(a, AIL_D2_GT);
+        if (f) { *stp = f(cx, &r, a, b); if (*stp != AIL_OK) return 1; if (!AIL2N_IS(r)) { *out = r; return 1; } }
+        lf = ail_dun_lt_fn(b);
+        if (lf) { *stp = lf(cx, &r, b, a); if (*stp != AIL_OK) return 1; if (!AIL2N_IS(r)) { *out = r; return 1; } }
+        return 0;
+    }
+    f = ail_dun2(a, AIL_D2_GE);
+    if (f) { *stp = f(cx, &r, a, b); if (*stp != AIL_OK) return 1; if (!AIL2N_IS(r)) { *out = r; return 1; } }
+    f = ail_dun2(b, AIL_D2_LE);
+    if (f) { *stp = f(cx, &r, b, a); if (*stp != AIL_OK) return 1; if (!AIL2N_IS(r)) { *out = r; return 1; } }
+    return 0;
+}
 '''
 
 HASH_FUNC = '''static inline ail_st ail_obj_hash(ail_ctx *cx, int64_t *out, ail_obj x);
@@ -329,12 +333,12 @@ _VIEW_OP_NE = (
     '    *out = ail_box_bool(!ail_obj_eq_raw(a, b)); return AIL_OK;\n}')
 
 
-def _edits():
+def _edits(include_order=True):
     """(old, new) text replacements, each applied to exactly one place of the runtime."""
     e = []
     # tables in the class object
     e.append(('typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or NONE */; int builtin_id;',
-              ENUMS + 'typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or NONE */; int builtin_id;'))
+              (ENUMS if include_order else ENUMS_BASE) + 'typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or NONE */; int builtin_id;'))
     e.append(('ail_st (*lt_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj); /* user __lt__ (self, other), or 0 */ } ail_classobj;',
               'ail_st (*lt_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj); /* user __lt__ (self, other), or 0 */\n'
               '                 ail_st (*d1[AIL_ND1])(ail_ctx *, ail_obj *, ail_obj); /* operator methods (self), dunderrt.py */\n'
@@ -536,16 +540,17 @@ def _edits():
     e.append(('        default: { char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable"',
               '        case AIL_T_INST: { ail_d2_fn f = ail_dun2(c, AIL_D2_GETITEM); if (f) return f(cx, out, c, key); }\n        /* fall through */\n'
               '        default: { char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable"'))
-    e.append(('static inline ail_st ail_op_lt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 0)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0); return AIL_OK; }', 'static inline ail_st ail_op_lt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) {\n        ail_st dst; if (ail_dun_cmp_method(cx, out, a, b, 0, &dst)) return dst;\n        char buf[240], na[80], nb[80]; ail__dun_tname(na, sizeof na, a); ail__dun_tname(nb, sizeof nb, b); snprintf(buf, sizeof buf, "\'<\' not supported between instances of \'%s\' and \'%s\'", na, nb);\n        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n    }\n    if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 0)); return AIL_OK; }\n    int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0); return AIL_OK;\n}'))
-    e.append(('static inline ail_st ail_op_le(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 1)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK; }', 'static inline ail_st ail_op_le(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) {\n        ail_st dst; if (ail_dun_cmp_method(cx, out, a, b, 1, &dst)) return dst;\n        char buf[240], na[80], nb[80]; ail__dun_tname(na, sizeof na, a); ail__dun_tname(nb, sizeof nb, b); snprintf(buf, sizeof buf, "\'<=\' not supported between instances of \'%s\' and \'%s\'", na, nb);\n        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n    }\n    if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 1)); return AIL_OK; }\n    int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK;\n}'))
-    e.append(('static inline ail_st ail_op_gt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 2)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0); return AIL_OK; }', 'static inline ail_st ail_op_gt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) {\n        ail_st dst; if (ail_dun_cmp_method(cx, out, a, b, 2, &dst)) return dst;\n        char buf[240], na[80], nb[80]; ail__dun_tname(na, sizeof na, a); ail__dun_tname(nb, sizeof nb, b); snprintf(buf, sizeof buf, "\'>\' not supported between instances of \'%s\' and \'%s\'", na, nb);\n        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n    }\n    if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 2)); return AIL_OK; }\n    int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0); return AIL_OK;\n}'))
-    e.append(('static inline ail_st ail_op_ge(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 3)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK; }', 'static inline ail_st ail_op_ge(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) {\n        ail_st dst; if (ail_dun_cmp_method(cx, out, a, b, 3, &dst)) return dst;\n        char buf[240], na[80], nb[80]; ail__dun_tname(na, sizeof na, a); ail__dun_tname(nb, sizeof nb, b); snprintf(buf, sizeof buf, "\'>=\' not supported between instances of \'%s\' and \'%s\'", na, nb);\n        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n    }\n    if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 3)); return AIL_OK; }\n    int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK;\n}'))
+    if include_order:
+        e.append(('static inline ail_st ail_op_lt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 0)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0); return AIL_OK; }', 'static inline ail_st ail_op_lt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) {\n        ail_st dst; if (ail_dun_cmp_method(cx, out, a, b, 0, &dst)) return dst;\n        char buf[240], na[80], nb[80]; ail__dun_tname(na, sizeof na, a); ail__dun_tname(nb, sizeof nb, b); snprintf(buf, sizeof buf, "\'<\' not supported between instances of \'%s\' and \'%s\'", na, nb);\n        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n    }\n    if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 0)); return AIL_OK; }\n    int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0); return AIL_OK;\n}'))
+        e.append(('static inline ail_st ail_op_le(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 1)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK; }', 'static inline ail_st ail_op_le(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) {\n        ail_st dst; if (ail_dun_cmp_method(cx, out, a, b, 1, &dst)) return dst;\n        char buf[240], na[80], nb[80]; ail__dun_tname(na, sizeof na, a); ail__dun_tname(nb, sizeof nb, b); snprintf(buf, sizeof buf, "\'<=\' not supported between instances of \'%s\' and \'%s\'", na, nb);\n        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n    }\n    if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 1)); return AIL_OK; }\n    int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK;\n}'))
+        e.append(('static inline ail_st ail_op_gt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 2)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0); return AIL_OK; }', 'static inline ail_st ail_op_gt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) {\n        ail_st dst; if (ail_dun_cmp_method(cx, out, a, b, 2, &dst)) return dst;\n        char buf[240], na[80], nb[80]; ail__dun_tname(na, sizeof na, a); ail__dun_tname(nb, sizeof nb, b); snprintf(buf, sizeof buf, "\'>\' not supported between instances of \'%s\' and \'%s\'", na, nb);\n        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n    }\n    if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 2)); return AIL_OK; }\n    int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0); return AIL_OK;\n}'))
+        e.append(('static inline ail_st ail_op_ge(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 3)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK; }', 'static inline ail_st ail_op_ge(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) {\n        ail_st dst; if (ail_dun_cmp_method(cx, out, a, b, 3, &dst)) return dst;\n        char buf[240], na[80], nb[80]; ail__dun_tname(na, sizeof na, a); ail__dun_tname(nb, sizeof nb, b); snprintf(buf, sizeof buf, "\'>=\' not supported between instances of \'%s\' and \'%s\'", na, nb);\n        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n    }\n    if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 3)); return AIL_OK; }\n    int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK;\n}'))
     return e
 
 
-def patch(text):
+def patch(text, include_order=True):
     """The generated C with the operator-method dispatch added to the general-path runtime."""
-    for old, new in _edits():
+    for old, new in _edits(include_order):
         if old == new:
             continue
         count = text.count(old)
@@ -558,7 +563,7 @@ def patch(text):
     anchor = 'static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {\n'
     if text.count(anchor) != 1:
         raise RuntimeError('dunderrt: no unique anchor for the helpers')
-    text = text.replace(anchor, FUNCS + HASH_FUNC + anchor, 1)
+    text = text.replace(anchor, FUNCS + (ORDER_FUNCS if include_order else '') + HASH_FUNC + anchor, 1)
     # the conditions of the program's own code (if / while / and / or / ?:) ask the class of an instance
     mark = '/* ---- interned attribute-name ids ---- */'
     k = text.find(mark)

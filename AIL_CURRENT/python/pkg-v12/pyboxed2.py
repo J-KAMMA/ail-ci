@@ -2021,6 +2021,10 @@ class Compiler(boxclosure.ClosureMixin):
     def compile(self, source):
         tree = ast.parse(source)
         self._module_tree = tree          # the element-kind records (_elem_record_exact) are judged on the whole module
+        # only a program with an ordering comparison needs the extra <=/>/>= dispatch (dunderrt_order)
+        self.order_cmp = any(isinstance(n, ast.Compare)
+                             and any(isinstance(op, (ast.Lt, ast.LtE, ast.Gt, ast.GtE)) for op in n.ops)
+                             for n in ast.walk(tree))
         for fn in tree.body:
             # math.sqrt is the correctly rounded C sqrt; the helper's `x ** 0.5` is pow(), which can differ in the last bit
             if isinstance(fn, ast.FunctionDef) and fn.name == '_ail_math_sqrt':
@@ -3550,7 +3554,7 @@ class Compiler(boxclosure.ClosureMixin):
         if self.threads and not ctx.fname.lower().startswith(('pf__ail', 'pm__ail')):
             ctx.emit('AIL_GIL_CHECK(cx);')
 
-    def _open_iter_loop(self, iter_node, ctx):
+    def _open_iter_loop(self, iter_node, ctx, with_iter=False):
         """Emit the iterable evaluation + `for (;;) {` head of an iteration loop.
         Returns the tmp holding each element. Uses an indexed loop for
         containers whose kind is proven (no 112B iterator object and no
@@ -3582,7 +3586,7 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('{ ail_vecobj *_v = (ail_vecobj *)%s.o;'
                      ' if (%s >= %s) break; %s = _v->p[%s++]; }'
                      % (it, idx, hi, val, idx))
-            return val
+            return (val, it) if with_iter else val
         src = self._resolve_iter_src(iter_node, ctx)
         it = ctx.tmp()
         val = ctx.tmp()
@@ -3603,7 +3607,7 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('{ ail_vecobj *_v = (ail_vecobj *)%s.o;'
                      ' if (%s >= _v->n) break; %s = _v->p[%s++]; }'
                      % (it, idx, val, idx))
-            return val
+            return (val, it) if with_iter else val
         if k == 'str':
             idx = ctx.new_cvar('i')
             ctx.emit('%s = %s;' % (it, src))
@@ -3615,7 +3619,7 @@ class Compiler(boxclosure.ClosureMixin):
                      ' if (%s >= _s.sv.len) break;'
                      ' %s = ail_str_view(_s.sv.backing, _s.sv.off + %s, 1); %s++; }'
                      % (it, idx, val, idx, idx))
-            return val
+            return (val, it) if with_iter else val
         ctx.emit('st = ail_iter(cx, &%s, %s);' % (it, src))
         ctx.check()
         ctx.emit('for (;;) {')
@@ -3624,7 +3628,7 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.emit('st = ail_it_next(cx, &%s, %s);' % (val, it))
         ctx.emit('if (st == AIL_STOP) { st = AIL_OK; break; }')
         ctx.check()
-        return val
+        return (val, it) if with_iter else val
 
 
     _PURE_BUILTINS = frozenset({
@@ -5087,22 +5091,43 @@ class Compiler(boxclosure.ClosureMixin):
         self._emit_comp_generators(node.generators, 0, node, ctx, t, add_stmt_fn, set())
         return t
 
-    def _emit_comp_generators(self, generators, i, node, ctx, t, add_stmt_fn, declared, stop=None):
+    def _emit_comp_generators(self, generators, i, node, ctx, t, add_stmt_fn, declared, stop=None,
+                              open_its=None):
         if i == len(generators):
             add_stmt_fn(node, ctx, t)
             return
         gen = generators[i]
         if gen.is_async:
             raise Unsupported('an async for in a comprehension')
-        val = self._open_iter_loop(gen.iter, ctx)
+        close_it = stop is not None and self.generators
+        opened = self._open_iter_loop(gen.iter, ctx, with_iter=close_it)
+        if close_it:
+            val, it = opened
+            open_its.append(it)
+        else:
+            val = opened
         self._declare_comp_target(gen.target, val, ctx, declared)
         for cond in gen.ifs:
             cc = self.expr(cond, ctx)
             ctx.emit('if (ail_obj_truthy(%s)) {' % cc)
             ctx.indent += 1
-        self._emit_comp_generators(generators, i + 1, node, ctx, t, add_stmt_fn, declared, stop)
+        self._emit_comp_generators(generators, i + 1, node, ctx, t, add_stmt_fn, declared, stop, open_its)
         if stop is not None:
-            ctx.emit('if (%s) break;' % stop)
+            if close_it:
+                # a temporary generator expression abandoned early closes its generator source, so its
+                # finally blocks run exactly where CPython's deallocation would run them.  CPython closes
+                # the OUTERMOST iterator first, so close every still-open one in that order.
+                ctx.emit('if (%s) {' % stop)
+                ctx.indent += 1
+                for oi in open_its:
+                    ctx.emit('ail2g_close_opt(cx, %s);' % oi)
+                ctx.emit('break;')
+                ctx.indent -= 1
+                ctx.emit('}')
+            else:
+                ctx.emit('if (%s) break;' % stop)
+        if close_it:
+            open_its.pop()
         for cond in gen.ifs:
             ctx.indent -= 1
             ctx.emit('}')
@@ -7778,7 +7803,7 @@ class Compiler(boxclosure.ClosureMixin):
                 else:
                     c.emit('if (!%s && !ail_obj_truthy(%s)) { %s = ail_box_bool(0); %s = 1; }'
                            % (done, v, res, done))
-            self._emit_comp_generators(arg.generators, 0, arg, ctx, res, add, set(), done)
+            self._emit_comp_generators(arg.generators, 0, arg, ctx, res, add, set(), done, [])
             return res
         src = self._resolve_iter_src(arg, ctx)
         it = ctx.tmp(); val = ctx.tmp()
@@ -10274,7 +10299,7 @@ def build(source, report, allow_mix=True):
         raise Unsupported('closures nested too deeply to settle their shared names')
     if compiler.dunder_ops:
         import dunderrt
-        body = dunderrt.patch(body)
+        body = dunderrt.patch(body, include_order=getattr(compiler, 'order_cmp', True))
     if compiler.generators:
         import safetyrt
         body = safetyrt.patch_generators(body)

@@ -13,7 +13,8 @@
    C?-job-fuzz19-10220951-2): the fused generator loop evaluated every element before looking at
    the answer.  A later element's side effect (and a walrus binding it reads) was visible, and an
    exception after the decisive element was raised where CPython never reaches it.  The loop now
-   stops at the first decisive element, at every nesting level.
+   stops at the first decisive element, at every nesting level, and closes abandoned generator
+   sources (outermost first) so their finally blocks run.  g.close() itself now does the same.
 
 Each program is built twice (default build and AIL_UNIFIED_FORCE=1 general path) and must print
 what CPython prints with the same exit status.
@@ -115,6 +116,88 @@ def main2():
         print("TypeError ge")
 main()
 main2()
+'''
+
+RICH_VALUES = r'''class N:
+    def __init__(self, n):
+        self.n = n
+    def __lt__(self, o):
+        return 5
+    def __le__(self, o):
+        return 6
+    def __gt__(self, o):
+        return 7
+    def __ge__(self, o):
+        return 8
+    def __eq__(self, o):
+        return 9
+    def __ne__(self, o):
+        return 10
+
+
+class H:
+    pass
+
+
+def f(a, b):
+    return (a < b, a <= b, a > b, a >= b)
+
+
+def main():
+    xs = [N(1), N(2)]
+    print(xs[0] < xs[1], xs[0] <= xs[1], xs[0] > xs[1], xs[0] >= xs[1],
+          xs[0] == xs[1], xs[0] != xs[1])
+    d = {"k": N(2)}
+    print(xs[0] < d["k"], d["k"] >= xs[0])
+    h = H()
+    h.v = N(2)
+    print(xs[0] <= h.v, h.v > xs[0])
+    print(f(xs[0], xs[1]))
+    print(xs[0] < xs[1] < xs[0])
+main()
+'''
+
+FINALLY = r'''closed = []
+
+
+def gen(tag):
+    try:
+        for i in range(10):
+            yield i
+    finally:
+        closed.append(tag)
+
+
+def main():
+    print(any(x > 1 for x in gen("a")), closed)
+    closed.clear()
+    print(all(x < 1 for x in gen("b")), closed)
+    closed.clear()
+    print(any(x > 9 for x in gen("c")), closed)
+    closed.clear()
+    g = gen("d")
+    print(next(g), closed)
+    g.close()
+    print(closed)
+main()
+'''
+
+NESTED_CLOSE = r'''log = []
+
+
+def gen(tag):
+    try:
+        for i in range(5):
+            yield i
+    finally:
+        log.append(tag)
+
+
+def main():
+    print(any(x + y > 1 for x in gen("a") for y in gen("b")), log)
+    log.clear()
+    print(all(x + y < 1 for x in gen("c") for y in gen("d")), log)
+main()
 '''
 
 LAZY = r'''def gen(n, log):
@@ -219,6 +302,24 @@ class ControlFlow(Base):
         self.assertIn(b"gt 2 3", out)
         self.assertIn(b"le 1 2", out)
         self.assertIn(b"ge 3 2", out)
+
+    def test_rich_comparison_values(self):
+        out = self.same(RICH_VALUES)
+        self.assertIn(b"5 6 7 8 9 10", out)
+        self.assertIn(b"(5, 6, 7, 8)", out)
+        self.assertIn(b"\n5\n", out)
+
+    def test_any_all_finalize_generator(self):
+        out = self.same(FINALLY)
+        self.assertIn(b"True ['a']", out)
+        self.assertIn(b"False ['b']", out)
+        self.assertIn(b"False ['c']", out)
+        self.assertIn(b"0 []\n['d']", out)
+
+    def test_any_all_close_nested_generators(self):
+        out = self.same(NESTED_CLOSE)
+        self.assertIn(b"True ['a', 'b']", out)
+        self.assertIn(b"False ['c', 'd']", out)
 
     def test_any_all_are_lazy(self):
         out = self.same(LAZY)

@@ -1051,7 +1051,7 @@ __asm__(".text\n.globl ail2g_switch\n.hidden ail2g_switch\n.type ail2g_switch,@f
 typedef ail_st (*ail2g_body)(ail_ctx *, ail_obj *, ail_obj);
 enum { AIL2G_NEW, AIL2G_SUSPENDED, AIL2G_RUNNING, AIL2G_DONE };
 typedef struct ail2g {
-    int state, scanned;
+    int state, scanned, closing;
     ail2g_body body;
     ail_gcobj *inst;            /* the generator object (not owned: the collector decides) */
     ail_obj args;               /* while NEW: the call's arguments (also an attribute of the object) */
@@ -1072,7 +1072,8 @@ static ail2g **ail2g_tab; static int64_t ail2g_n, ail2g_cap;
 static ail2g *ail2g_current;
 static ail2g_wait *ail2g_waiting;    /* the callers' frames while a generator runs */
 static ail_ctx *ail2g_cx;
-static int64_t ail2g_id_h, ail2g_id_a;
+static int64_t ail2g_id_h, ail2g_id_a; static int ail2g_ids;
+#define AIL2G_CLOSE ((ail_st)4)   /* private close completion, not an AIL_EXC */
 #define AIL2G_STACK ((size_t)8 << 20)
 
 #ifndef _WIN32
@@ -1144,7 +1145,7 @@ static void ail2g_entry(void) {
 #endif
 }
 static inline ail_st ail2g_make(ail_ctx *cx, ail_obj *out, ail_obj cls, ail_obj args, ail2g_body body, const char *name) {
-    if (!ail2g_id_h) { ail2g_id_h = ail_intern(cx, "_h"); ail2g_id_a = ail_intern(cx, "_a"); }
+    if (!ail2g_ids) { ail2g_id_h = ail_intern(cx, "_h"); ail2g_id_a = ail_intern(cx, "_a"); ail2g_ids = 1; }
     ail2g_cx = cx;
     AIL_FRAME_ENTER(cx, fr, 2);
     fr.slots[0] = args;
@@ -1172,18 +1173,26 @@ static inline ail_st ail2g_of(ail_ctx *cx, ail_obj inst, ail2g **out) {
     *out = ail2g_tab[h.i];
     return AIL_OK;
 }
-/* next(g) / g.send(v) */
-static inline ail_st ail2g_resume(ail_ctx *cx, ail_obj *out, ail_obj inst, ail_obj sendv) {
+/* next(g) / g.send(v), and the close path: closing resumes the body so that a throw at the pending
+   yield unwinds through its finally blocks (CPython's close does the same).  AIL2G_CLOSE is the private
+   completion status used for that throw; it is not an AIL_EXC, so no except clause catches it. */
+static inline ail_st ail2g_run(ail_ctx *cx, ail_obj *out, ail_obj inst, ail_obj sendv, int closing) {
     ail2g *g; ail_st st = ail2g_of(cx, inst, &g);
     if (st != AIL_OK) return st;
-    if (g->state == AIL2G_DONE) return ail_raise_c(cx, AIL_B_STOPITERATION, "");
-    if (g->state == AIL2G_RUNNING) return ail_raise_c(cx, AIL_B_VALUEERROR, "generator already executing");
-    if (g->state == AIL2G_NEW && sendv.tag != AIL_T_NONE)
-        return ail_raise_c(cx, AIL_B_TYPEERROR, "can't send non-None value to a just-started generator");
+    if (closing) {
+        if (g->state == AIL2G_DONE) { *out = ail_box_none(); return AIL_OK; }
+        if (g->state == AIL2G_NEW) { g->state = AIL2G_DONE; g->top = NULL; ail2g_free_stack(g); *out = ail_box_none(); return AIL_OK; }
+    } else {
+        if (g->state == AIL2G_DONE) return ail_raise_c(cx, AIL_B_STOPITERATION, "");
+        if (g->state == AIL2G_RUNNING) return ail_raise_c(cx, AIL_B_VALUEERROR, "generator already executing");
+        if (g->state == AIL2G_NEW && sendv.tag != AIL_T_NONE)
+            return ail_raise_c(cx, AIL_B_TYPEERROR, "can't send non-None value to a just-started generator");
+    }
     ail2g_wait w; w.top = cx->frames; w.next = ail2g_waiting; ail2g_waiting = &w;
     ail2g *outer = ail2g_current;
     ail2g_current = g;
     g->sent = sendv;
+    g->closing = closing;
     int fresh = g->state == AIL2G_NEW;
     if (fresh && ++ail2g_fresh >= 256) { ail2g_fresh = 0; ail_gc_collect(cx); }
     cx->frames = fresh ? NULL : g->top;
@@ -1229,14 +1238,28 @@ static inline ail_st ail2g_resume(ail_ctx *cx, ail_obj *out, ail_obj inst, ail_o
     ail2g_current = outer;
     ail2g_waiting = w.next;
     cx->frames = w.top;
-    if (g->state == AIL2G_SUSPENDED) { *out = g->value; g->value = ail_box_none(); return AIL_OK; }
+    g->closing = 0;
+    if (g->state == AIL2G_SUSPENDED) {
+        if (closing) {
+            g->state = AIL2G_DONE; g->top = NULL; ail2g_free_stack(g);
+            return ail_raise_c(cx, AIL_B_RUNTIMEERROR, "generator ignored GeneratorExit");
+        }
+        *out = g->value; g->value = ail_box_none(); return AIL_OK;
+    }
     ail2g_free_stack(g);
+    if (closing) {
+        if (g->status == AIL_OK || g->status == AIL2G_CLOSE) { *out = ail_box_none(); return AIL_OK; }
+        return g->status;
+    }
     if (g->status == AIL_OK) return ail_raise_c(cx, AIL_B_STOPITERATION, "");
     if (g->status == AIL_EXC && ail_exc_matches_b(cx, AIL_B_STOPITERATION)) {
         ail_exc_clear(cx);
         return ail_raise_c(cx, AIL_B_RUNTIMEERROR, "generator raised StopIteration");
     }
     return g->status;
+}
+static inline ail_st ail2g_resume(ail_ctx *cx, ail_obj *out, ail_obj inst, ail_obj sendv) {
+    return ail2g_run(cx, out, inst, sendv, 0);
 }
 /* `yield value` inside the body: the value goes out, the sent one comes back */
 static inline ail_st ail2g_yield(ail_ctx *cx, ail_obj *sent, ail_obj value) {
@@ -1254,16 +1277,30 @@ static inline ail_st ail2g_yield(ail_ctx *cx, ail_obj *sent, ail_obj value) {
 #endif
     *sent = g->sent;
     g->sent = ail_box_none();
+    if (g->closing) return AIL2G_CLOSE;
     return AIL_OK;
 }
-/* g.close(): a generator that has not finished is finished (its finally blocks do not run) */
+/* g.close(): resume a suspended generator with a private throw at its yield, so its finally blocks run */
 static inline ail_st ail2g_close(ail_ctx *cx, ail_obj *out, ail_obj inst) {
     ail2g *g; ail_st st = ail2g_of(cx, inst, &g);
     if (st != AIL_OK) return st;
     if (g->state == AIL2G_RUNNING) return ail_raise_c(cx, AIL_B_VALUEERROR, "generator already executing");
-    if (g->state != AIL2G_DONE) { g->state = AIL2G_DONE; g->top = NULL; ail2g_free_stack(g); }
-    *out = ail_box_none();
-    return AIL_OK;
+    return ail2g_run(cx, out, inst, ail_box_none(), 1);
+}
+/* the fused any()/all() loop abandons the temporary generator expression: close a generator source
+   (an ordinary iterator needs nothing), ignoring any exception its finally raises, as deallocation does */
+static inline void ail2g_close_opt(ail_ctx *cx, ail_obj inst) {
+    if (inst.tag == AIL_T_ITER) {
+        ail_iterobj *io = (ail_iterobj *)inst.o;
+        if (io->kind != AIL_IT_USER) return;
+        inst = io->target;
+    }
+    if (inst.tag != AIL_T_INST || !ail2g_ids) return;
+    ail_obj h;
+    if (ail_inst_getattr(cx, &h, inst, ail2g_id_h, "_h") != AIL_OK) { ail_exc_clear(cx); return; }
+    if (h.tag != AIL_T_INT || h.i < 0 || h.i >= ail2g_n || !ail2g_tab[h.i]) return;
+    ail_obj out;
+    if (ail2g_close(cx, &out, inst) != AIL_OK) ail_exc_clear(cx);
 }
 static inline ail_st ail2g_name(ail_ctx *cx, ail_obj *out, ail_obj inst) {
     ail2g *g; ail_st st = ail2g_of(cx, inst, &g);
