@@ -1,5 +1,24 @@
 # Development log
 
+## 2026-10-22 — job-fuzz18-10221632: review fixes
+
+* `math.floor` / `math.ceil` now call an object's own `__floor__` / `__ceil__` before any
+  conversion and return the dunder's result unchanged (CPython returns `J.__floor__()` as
+  is); only an object without the dunder falls back to `__float__` / `__index__` conversion.
+  int and float arguments are unchanged. The dunder call is kept resolvable on the general
+  path by a never-instantiated `_AilMathStub` helper class (pulled in by the floor/ceil
+  helpers), and `__floor__` / `__ceil__` are now accepted dunders so the typed path scans
+  the stub without refusing it.
+* `_ail_math_checknum` rejects `type` and `function` values by name before its `hasattr`
+  probe, so `math.sin/sqrt/fsum/floor/...` on a class or function raises CPython's
+  `TypeError must be real number, not type` / `... not function` instead of leaking the
+  general path's `NotImplementedError hasattr() ...`.
+* `test_ail_fuzz18.py` gains F6 (`__floor__` / `__ceil__`, direct/argument/attribute/list/
+  dict, dunder results, int/float/bool/inf/NaN/wrong types) and F7 (class/function through
+  sin/sqrt/fsum/floor/ceil/copysign/pow/isnan/fabs, argument and list/dict).
+* Residual builtin-function/iterator type-name and `hasattr` differences are recorded as
+  DIFFERENCES rows C?-job-fuzz18-10221632-3.
+
 ## 2026-10-22 — job-fuzz18-10220949: review fixes
 
 * `math.floor` / `math.ceil` now go through helpers that raise CPython's `OverflowError

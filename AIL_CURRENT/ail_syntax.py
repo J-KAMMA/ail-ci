@@ -1182,22 +1182,29 @@ _MATH_HELPERS['tw_dedent'] = (
     '        else:\n'
     '            out.append(line[len(margin):])\n'
     '    return "\\n".join(out)\n')
+# Type names of the non-numeric builtins whose values must be rejected before any hasattr()
+# probe: the general path only models hasattr() for instances of the program's classes, so a
+# `type` or `function` value would otherwise surface as NotImplementedError.  CPython reports
+# these (and the other builtins) as "must be real number, not <typename>".
+_NONNUM_TYPE_NAMES = ('str', 'bytes', 'bytearray', 'complex', 'list', 'tuple', 'dict', 'set',
+                      'frozenset', 'range', 'slice', 'memoryview', 'NoneType', 'type', 'function')
 _MATH_HELPERS['checknum'] = (
     'def _ail_math_checknum(x: float) -> float:\n'
     '    if isinstance(x, (int, float)):\n'
     '        return float(x)\n'
     '    if not isinstance(x, (int, float)):\n'
     '        name = type(x).__name__\n'
-    '        if name in ("str", "bytes", "bytearray", "complex", "list", "tuple", "dict", "set",\n'
-    '                    "frozenset", "range", "slice", "memoryview", "NoneType"):\n'
+    '        if name in ' + repr(_NONNUM_TYPE_NAMES) + ':\n'
     '            raise TypeError("must be real number, not " + name)\n'
     '        if hasattr(x, "__float__") or hasattr(x, "__index__"):\n'
     '            return float(x)\n'
     '        raise TypeError("must be real number, not " + name)\n'
     '    return float(x)\n')
-# math.floor / math.ceil keep int arguments (and bool as 0 / 1), use an object's own __floordiv__
-# when it has one (Fraction stays exact), and otherwise convert through checknum.  A float is
-# checked for NaN / infinity before int() so the message and exception match CPython.
+# math.floor / math.ceil keep int arguments (and bool as 0 / 1), and for any other object call its
+# own __floor__ / __ceil__ when it has one (Fraction stays exact, and CPython returns the dunder's
+# result unchanged).  Only when there is no __floor__ / __ceil__ is the argument converted through
+# checknum (CPython's PyFloat_AsDouble fallback).  A float is checked for NaN / infinity before
+# int() so the message and exception match CPython.
 _MATH_HELPERS['floor'] = (
     'def _ail_math_floor(x: float) -> int:\n'
     '    if isinstance(x, float):\n'
@@ -1209,10 +1216,12 @@ _MATH_HELPERS['floor'] = (
     '    if isinstance(x, int):\n'
     '        return int(x)\n'
     '    if not isinstance(x, (int, float)):\n'
-    '        y = _ail_math_checknum(x)\n'
-    '        if hasattr(x, "__floordiv__"):\n'
-    '            return int(x // 1)\n'
-    '        return _ail_math_floor(y)\n'
+    '        name = type(x).__name__\n'
+    '        if name in ' + repr(_NONNUM_TYPE_NAMES) + ':\n'
+    '            raise TypeError("must be real number, not " + name)\n'
+    '        if hasattr(x, "__floor__"):\n'
+    '            return x.__floor__()\n'
+    '        return _ail_math_floor(_ail_math_checknum(x))\n'
     '    return int(x)\n')
 _MATH_HELPERS['ceil'] = (
     'def _ail_math_ceil(x: float) -> int:\n'
@@ -1225,15 +1234,30 @@ _MATH_HELPERS['ceil'] = (
     '    if isinstance(x, int):\n'
     '        return int(x)\n'
     '    if not isinstance(x, (int, float)):\n'
-    '        y = _ail_math_checknum(x)\n'
-    '        if hasattr(x, "__floordiv__"):\n'
-    '            return -int(-x // 1)\n'
-    '        return _ail_math_ceil(y)\n'
+    '        name = type(x).__name__\n'
+    '        if name in ' + repr(_NONNUM_TYPE_NAMES) + ':\n'
+    '            raise TypeError("must be real number, not " + name)\n'
+    '        if hasattr(x, "__ceil__"):\n'
+    '            return x.__ceil__()\n'
+    '        return _ail_math_ceil(_ail_math_checknum(x))\n'
     '    return int(x)\n')
+# The general path only compiles `x.__floor__()` / `x.__ceil__()` while some program class
+# defines that method, so floor / ceil pull in this never-instantiated stub: it keeps the
+# dunder call resolvable (the run-time dispatch still calls the receiver's own class method).
+_MATH_HELPERS['floorstub'] = (
+    'class _AilMathStub:\n'
+    '    def __init__(self):\n'
+    '        self.v = 0\n'
+    '    def __floor__(self):\n'
+    '        return 0\n'
+    '    def __ceil__(self):\n'
+    '        return 0\n')
 _MATH_DEPS = {'log2args': ('log',), 'comb': ('gcd',), 'lcm': ('gcd',), 'tw_fill': ('tw_wrap',)}
 for _name in (*_MATH_ONE, *_MATH_PREDICATES, *_MATH_PLAIN_TWO, 'sqrt', 'fabs', 'degrees', 'radians',
               'fmod', 'pow', 'fsum', 'floor', 'ceil'):
     _MATH_DEPS[_name] = _MATH_DEPS.get(_name, ()) + ('checknum',)
+for _name in ('floor', 'ceil'):
+    _MATH_DEPS[_name] = _MATH_DEPS.get(_name, ()) + ('floorstub',)
 import string as _string_module
 
 _STRING_CONSTANTS = {name: getattr(_string_module, name) for name in (

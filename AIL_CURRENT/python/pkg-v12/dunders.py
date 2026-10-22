@@ -49,7 +49,8 @@ _SWAP = {'__lt__': '__gt__', '__gt__': '__lt__', '__le__': '__ge__', '__ge__': '
          '__eq__': '__eq__', '__ne__': '__ne__'}
 ORDER = ('__lt__', '__le__', '__gt__', '__ge__')
 METHODS = ({'__str__', '__repr__', '__eq__', '__ne__', '__hash__', '__len__', '__bool__', '__contains__',
-            '__getitem__', '__setitem__', '__iter__', '__abs__', '__enter__', '__exit__'}
+            '__getitem__', '__setitem__', '__iter__', '__abs__', '__enter__', '__exit__',
+            '__floor__', '__ceil__'}
            | set(ORDER) | set(_UN.values())
            | {'__%s__' % n for n in _BIN.values()} | {'__r%s__' % n for n in _BIN.values()}
            | {'__i%s__' % n for n in _BIN.values()})

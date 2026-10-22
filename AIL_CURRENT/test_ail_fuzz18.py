@@ -25,6 +25,15 @@ F5  `math.fsum`, `math.sin`, `math.sqrt` and the other float helpers rejected va
     objects (Fraction, a class with `__float__`) with "must be real number, not ...".
     They now convert them as `float()` does and only reject types without a float conversion.
 
+F6  `math.floor` / `math.ceil` converted an object through `__float__` and ignored its own
+    `__floor__` / `__ceil__` (or rejected it when it had no `__float__`).  They now call the
+    dunder when it exists and return its result unchanged, falling back to `__float__` /
+    `__index__` conversion only when it does not; an int/float is unchanged.
+
+F7  `math.sin` / `sqrt` / `fsum` / `floor` / ... on a class or a function leaked the general
+    path's internal `NotImplementedError hasattr() ...`; they now raise CPython's
+    `TypeError must be real number, not type` / `... not function`.
+
 Each program is built twice (default build, AIL_UNIFIED_FORCE=1 general path) and must print
 what CPython 3.12 prints with the same exit status.
 """
@@ -207,6 +216,158 @@ main()
 """
 
 
+FLOOR_DUNDER = r"""import math
+
+
+class Both:
+    def __float__(self):
+        return 2.5
+
+    def __floor__(self):
+        return 99
+
+    def __ceil__(self):
+        return 100
+
+
+class FloorCeil:
+    def __floor__(self):
+        return 41
+
+    def __ceil__(self):
+        return 42
+
+
+class FloatOnly:
+    def __float__(self):
+        return -2.5
+
+
+class IndexOnly:
+    def __index__(self):
+        return 7
+
+
+class Odd:
+    def __floor__(self):
+        return 1.9
+
+    def __ceil__(self):
+        return 2.9
+
+
+class Box:
+    def __init__(self):
+        self.a = Both()
+        self.b = FloorCeil()
+        self.c = FloatOnly()
+        self.d = IndexOnly()
+        self.e = Odd()
+        self.n = -2.5
+
+
+def show(label, fn):
+    try:
+        print(label, repr(fn()))
+    except Exception as e:
+        print(label, type(e).__name__, str(e))
+
+
+def take(x):
+    return math.floor(x), math.ceil(x)
+
+
+def main():
+    show('both', lambda: take(Both()))
+    show('floorceil', lambda: take(FloorCeil()))
+    show('floatonly', lambda: take(FloatOnly()))
+    show('indexonly', lambda: take(IndexOnly()))
+    show('odd', lambda: take(Odd()))
+    b = Box()
+    show('attr both', lambda: take(b.a))
+    show('attr floorceil', lambda: take(b.b))
+    show('attr floatonly', lambda: take(b.c))
+    show('attr indexonly', lambda: take(b.d))
+    show('attr odd', lambda: take(b.e))
+    show('attr float', lambda: math.floor(b.n) + math.ceil(b.n))
+    items = [Both(), FloorCeil(), FloatOnly(), IndexOnly(), Odd()]
+    show('list', lambda: [take(x) for x in items])
+    d = {'a': Both(), 'b': FloorCeil(), 'c': FloatOnly(), 'd': IndexOnly(), 'e': Odd()}
+    show('dict', lambda: [take(d[k]) for k in ('a', 'b', 'c', 'd', 'e')])
+    o = Both()
+    show('alias', lambda: (math.floor(o), math.ceil(o), math.floor(o), math.ceil(o)))
+    for v in (2.5, -2.5, 0.0, -0.0, 3, -3, True, False,
+              float('inf'), float('-inf'), float('nan')):
+        show('num ' + repr(v), lambda v=v: take(v))
+    for v in ('a', [1], (1,), {1}, {1: 2}, range(3), None):
+        show('floor ' + type(v).__name__, lambda v=v: math.floor(v))
+        show('ceil ' + type(v).__name__, lambda v=v: math.ceil(v))
+
+
+main()
+"""
+
+CLASSTYPE = r"""import math
+
+
+class P:
+    def __init__(self):
+        self.x = 1
+
+
+class Num:
+    def __float__(self):
+        return 1.5
+
+
+class Box:
+    def __init__(self):
+        self.t = P
+        self.n = Num()
+
+
+def f():
+    return 1
+
+
+def show(label, fn):
+    try:
+        print(label, repr(fn()))
+    except Exception as e:
+        print(label, type(e).__name__, str(e))
+
+
+def take(x):
+    return math.sin(x)
+
+
+def main():
+    show('sin type', lambda: math.sin(P))
+    show('sin function', lambda: math.sin(f))
+    show('sqrt type', lambda: math.sqrt(P))
+    show('sqrt function', lambda: math.sqrt(f))
+    show('fsum type', lambda: math.fsum([P]))
+    show('fsum function', lambda: math.fsum([f]))
+    show('floor type', lambda: math.floor(P))
+    show('ceil function', lambda: math.ceil(f))
+    show('copysign type', lambda: math.copysign(P, 1.0))
+    show('pow function', lambda: math.pow(f, 2.0))
+    show('isnan type', lambda: math.isnan(P))
+    show('fabs function', lambda: math.fabs(f))
+    b = Box()
+    show('arg type', lambda: take(b.t))
+    xs = [P, f, Num()]
+    show('list', lambda: [take(v) for v in xs])
+    d = {'t': P, 'n': Num()}
+    show('dict', lambda: [take(d[k]) for k in ('t', 'n')])
+    show('num still ok', lambda: take(b.n))
+    show('num floor', lambda: math.floor(Num()))
+
+
+main()
+"""
+
+
 @unittest.skipUnless(HAVE_CC, 'needs gcc')
 class MathFuzz18(unittest.TestCase):
     def test_fsum_special_values_and_int_elements(self):
@@ -223,6 +384,12 @@ class MathFuzz18(unittest.TestCase):
 
     def test_helpers_convert_numeric_objects(self):
         check_program(self, 'fuzz18_numeric', NUMERIC)
+
+    def test_floor_ceil_call_their_own_dunders(self):
+        check_program(self, 'fuzz18_floor_dunder', FLOOR_DUNDER)
+
+    def test_helpers_reject_class_and_function_by_name(self):
+        check_program(self, 'fuzz18_classtype', CLASSTYPE)
 
 
 if __name__ == '__main__':
