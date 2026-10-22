@@ -1,5 +1,17 @@
 # DEVLOG
 
+## 2026-10-22 — job-cov6-10221632: fix the Fraction hash regression
+
+- `Fraction.__hash__` returns `hash(numerator)` when the denominator is 1, so an integral
+  `Fraction` hashes as the equal `int` again (e.g. `Fraction(2 ** 61, 1)` and `Fraction(2 ** 61 - 1, 1)`
+  hash to 1 and 0), with `-1` still canonicalised to `-2` by the runtime.
+- Added the integral-hash cases to `test_ail_stdlib5` (compiled `f1` program and the direct prelude
+  comparison).
+- Probes `probe_fracbase` and `probe_fractionhash` match CPython on both builds for the integral
+  cases (direct values, `2 ** 63 - 1` boundary, negatives, argument, list item, attribute, dict key).
+  The non-integral `Fraction(1, 2)` hash remains the pre-existing declared difference.
+- `test_ail_stdlib5`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
+
 ## 2026-10-22 — job-cov6-10221632: fix the batch-6 review defects
 
 - `urlencode(..., doseq=True)` now expands list/tuple values in a sequence of pairs, not only in a dict
