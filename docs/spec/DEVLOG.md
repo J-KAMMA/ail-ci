@@ -1,5 +1,15 @@
 # Development log
 
+## 2026-10-22 -- C169 review fixes: typed list.index bounds and long __index__ names
+
+The default typed list lowering now classifies `list.index` start/stop bounds: visibly int/bool
+bounds keep the fast loop, visibly non-index ones (None, float, str, ...) raise the slice-index
+TypeError, and anything else (including objects with `__index__`) goes to the general path, which
+performs CPython's full conversion.  A local typed list therefore no longer coerces a float bound.
+`__index__ returned non-int (type ...)` now formats the complete type name: the general runtime grows
+its name buffer to the class name's length and the bound check sizes the message accordingly.
+`test_ail_c169.py` gained local typed-list, int64-width and long-name cases.
+
 ## 2026-10-22 -- C169: list.index / tuple.index bounds
 
 Closed C169.  The general path now evaluates a start/stop bound once, converts an instance through

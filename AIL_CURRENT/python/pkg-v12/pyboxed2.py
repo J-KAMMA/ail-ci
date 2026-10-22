@@ -8572,9 +8572,11 @@ class Compiler(boxclosure.ClosureMixin):
                      % (b, fn, b, fn, xv, had, fn, xv, b, ctx.cur_err_target(), b, xv))
         err = ctx.cur_err_target()
         if had is not None:
-            ctx.emit('if (%s.tag != AIL_T_INT && %s.tag != AIL_T_BOOL) { char buf[80]; '
-                     'if (%s) { snprintf(buf, sizeof buf, "__index__ returned non-int (type %%s)", ail__tname_c(%s)); '
-                     'st = ail_raise_c(cx, AIL_B_TYPEERROR, buf); } else { st = ail_raise_c(cx, AIL_B_TYPEERROR, '
+            ctx.emit('if (%s.tag != AIL_T_INT && %s.tag != AIL_T_BOOL) { '
+                     'if (%s) { const char *tn = ail__tname_c(%s); size_t n = strlen(tn) + 64; '
+                     'char *buf = (char *)malloc(n); if (!buf) ail_die("out of memory"); '
+                     'snprintf(buf, n, "__index__ returned non-int (type %%s)", tn); '
+                     'st = ail_raise_c(cx, AIL_B_TYPEERROR, buf); free(buf); } else { st = ail_raise_c(cx, AIL_B_TYPEERROR, '
                      '"slice indices must be integers or have an __index__ method"); } goto %s; }'
                      % (b, b, had, b, err))
         else:

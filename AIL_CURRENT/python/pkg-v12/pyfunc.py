@@ -32382,6 +32382,87 @@ class _ListLowering:
         self.counter += 1
         return '_ail_l%d' % self.counter
 
+    def index_annotation_kind(self, annotation):
+        if isinstance(annotation, ast.Name):
+            if annotation.id in ('int', 'bool'):
+                return 'int'
+            if annotation.id in ('float', 'str', 'bytes'):
+                return 'nonindex'
+        if isinstance(annotation, ast.Constant) and annotation.value is None:
+            return 'nonindex'
+        return None
+
+    def index_bound_kind(self, node, seen=None):
+        """'int' when a list.index start/stop is visibly an int or bool, 'nonindex' when it is
+        visibly not an index at all, else None. None means the call is left to the general path,
+        which also handles __index__ (the typed path has no dunder support)."""
+        seen = set() if seen is None else seen
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, (int, bool)):
+                return 'int'
+            if node.value is None or isinstance(node.value, (float, str, bytes)):
+                return 'nonindex'
+            return None
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            return self.index_bound_kind(node.operand, seen)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.keywords:
+                return None
+            name = node.func.id
+            if name in ('int', 'len', 'ord', 'bool'):
+                return 'int'
+            if name in ('float', 'str', 'bytes', 'list', 'tuple', 'dict', 'set', 'frozenset',
+                        'bytearray', 'range'):
+                return 'nonindex'
+            return None
+        if isinstance(node, ast.Name):
+            return self.index_name_kind(node.id, seen)
+        if isinstance(node, ast.Attribute):
+            for fields in self.evidence.class_fields.values():
+                kind = fields.get(node.attr)
+                if kind in ('int', 'bool'):
+                    return 'int'
+                if kind in ('float', 'str', 'bytes'):
+                    return 'nonindex'
+            return None
+        if isinstance(node, (ast.Compare, ast.BoolOp)):
+            return 'int'
+        if isinstance(node, ast.IfExp):
+            kinds = (self.index_bound_kind(node.body, seen), self.index_bound_kind(node.orelse, seen))
+            return kinds[0] if kinds[0] == kinds[1] else None
+        return None
+
+    def index_name_kind(self, name, seen):
+        if name in seen:
+            return None
+        seen.add(name)
+        fn = getattr(self, 'current_fn', None)
+        if fn is None:
+            return None
+        for arg in [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs]:
+            if arg.arg == name and arg.annotation is not None:
+                return self.index_annotation_kind(arg.annotation)
+        kinds = []
+        for item in ast.walk(fn):
+            if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name) and item.target.id == name:
+                kind = self.index_annotation_kind(item.annotation)
+                if kind is None:
+                    return None
+                kinds.append(kind)
+            elif (isinstance(item, ast.Assign) and len(item.targets) == 1
+                  and isinstance(item.targets[0], ast.Name) and item.targets[0].id == name):
+                kind = self.index_bound_kind(item.value, seen)
+                if kind is None:
+                    return None
+                kinds.append(kind)
+            elif isinstance(item, (ast.For, ast.AsyncFor)):
+                if any(isinstance(sub, ast.Name) and sub.id == name for sub in ast.walk(item.target)):
+                    return None
+            elif (isinstance(item, ast.AugAssign) and isinstance(item.target, ast.Name)
+                  and item.target.id == name):
+                return None
+        return kinds[0] if kinds and len(set(kinds)) == 1 else None
+
     def build(self, text, at, member=None, **subs):
         """Parse a statement template; `$x` becomes a fresh name per template instance and each
         `__NAME` is replaced by a copy of the user's expression `subs[NAME]`."""
@@ -33127,8 +33208,15 @@ class _ListLowering:
         return False
 
     def index_or_count(self, node, prelude):
-        receiver = self.bind(node.func.value, prelude, node)
         args = node.args
+        bound_kinds = []
+        if node.func.attr == 'index' and len(args) > 1:
+            bound_kinds = [self.index_bound_kind(arg) for arg in args[1:]]
+            if any(kind is None for kind in bound_kinds):
+                # It may be an int, a float, None or an object with __index__; only the general
+                # path knows how to convert all of those.
+                return node
+        receiver = self.bind(node.func.value, prelude, node)
         if node.func.attr == 'count':
             if len(args) != 1:
                 return node
@@ -33158,14 +33246,23 @@ class _ListLowering:
             return node
         lines = ['$v = __V', '$n = len(__X)']
         if len(args) >= 2:
-            lines += ['$s = __S', 'if $s < 0:', '    $s += $n', '    if $s < 0:', '        $s = 0']
+            lines += ['$s = __S']
+            if len(args) == 3:
+                lines += ['$e = __E']
+            if bound_kinds[0] == 'nonindex':
+                lines += ['raise TypeError("slice indices must be integers or have an __index__ method")']
+            else:
+                lines += ['if $s < 0:', '    $s += $n', '    if $s < 0:', '        $s = 0']
+            if len(args) == 3:
+                if bound_kinds[1] == 'nonindex':
+                    lines += ['raise TypeError("slice indices must be integers or have an __index__ method")']
+                else:
+                    lines += ['if $e < 0:', '    $e += $n', '    if $e < 0:', '        $e = 0',
+                              'if $e > $n:', '    $e = $n']
+            else:
+                lines += ['$e = $n']
         else:
-            lines += ['$s = 0']
-        if len(args) == 3:
-            lines += ['$e = __E', 'if $e < 0:', '    $e += $n', '    if $e < 0:', '        $e = 0',
-                      'if $e > $n:', '    $e = $n']
-        else:
-            lines += ['$e = $n']
+            lines += ['$s = 0', '$e = $n']
         lines += ['$r = -1', '$k = $s', 'while $k < $e:', '    if __X[$k] == $v:', '        $r = $k',
                   '        break', '    $k += 1', 'if $r < 0:',
                   '    raise ValueError(f"{$v!r} is not in list")']
