@@ -2157,6 +2157,245 @@ def bytes_prelude():
     return '\n'.join(out) + '\n'
 
 
+def _case_table(mapping):
+    keys = sorted(mapping)
+    at = []
+    pool = bytearray()
+    for cp in keys:
+        b = mapping[cp].encode('utf-8')
+        at.append((len(pool) << 3) | len(b))
+        pool += b
+    return keys, at, pool
+
+
+def _c_u32(name, values):
+    out = ['static const uint32_t %s[%d] = {' % (name, len(values))]
+    for i in range(0, len(values), 12):
+        out.append('    ' + ', '.join(str(v) for v in values[i:i + 12]) + ',')
+    out.append('};')
+    return '\n'.join(out)
+
+
+def _c_u8(name, values):
+    out = ['static const uint8_t %s[%d] = {' % (name, len(values))]
+    for i in range(0, len(values), 24):
+        out.append('    ' + ', '.join(str(v) for v in values[i:i + 24]) + ',')
+    out.append('};')
+    return '\n'.join(out)
+
+
+def _case_ranges(pred):
+    spans = []
+    start = None
+    for cp in range(0x110000):
+        hit = not (0xD800 <= cp <= 0xDFFF) and pred(chr(cp))
+        if hit and start is None:
+            start = cp
+        elif not hit and start is not None:
+            spans.append((start, cp - 1))
+            start = None
+    if start is not None:
+        spans.append((start, 0x10FFFF))
+    return spans
+
+
+def _c_ranges(name, spans):
+    out = ['static const uint32_t %s[%d][2] = {' % (name, len(spans))]
+    for lo, hi in spans:
+        out.append('    {%d, %d},' % (lo, hi))
+    out.append('};')
+    return '\n'.join(out)
+
+
+_CASE_TEXT = None
+
+
+def unicode_case_text():
+    """BOXCASE plus str.title/capitalize/swapcase/casefold over all of Unicode.
+
+    The tables are derived from the running CPython, so the boxed results are that
+    interpreter's own (the same source tools/gen_casemap.py uses)."""
+    global _CASE_TEXT
+    if _CASE_TEXT is not None:
+        return _CASE_TEXT
+    import cruntime
+    lower = {}
+    upper = {}
+    title = {}
+    fold = {}
+    for cp in range(0x110000):
+        if 0xD800 <= cp <= 0xDFFF:
+            continue
+        c = chr(cp)
+        lo = c.lower()
+        up = c.upper()
+        ti = c.title()
+        if lo != c:
+            lower[cp] = lo
+        if up != c:
+            upper[cp] = up
+        if ti != c:
+            title[cp] = ti
+        fo = c.casefold()
+        if fo != lower.get(cp, c):
+            fold[cp] = fo
+    upper_spans = _case_ranges(str.isupper)
+    lower_spans = _case_ranges(str.islower)
+    title_spans = _case_ranges(str.istitle)
+    lower_keys, lower_at, lower_pool = _case_table(lower)
+    upper_keys, upper_at, upper_pool = _case_table(upper)
+    title_keys, title_at, title_pool = _case_table(title)
+    fold_keys, fold_at, fold_pool = _case_table(fold)
+    tables = '\n'.join([
+        _c_u32('ail2c_upper_cp', upper_keys), _c_u32('ail2c_upper_at', upper_at),
+        _c_u8('ail2c_upper_pool', upper_pool), _c_u32('ail2c_lower_cp', lower_keys),
+        _c_u32('ail2c_lower_at', lower_at), _c_u8('ail2c_lower_pool', lower_pool),
+        _c_u32('ail2c_title_cp', title_keys), _c_u32('ail2c_title_at', title_at),
+        _c_u8('ail2c_title_pool', title_pool), _c_u32('ail2c_fold_cp', fold_keys),
+        _c_u32('ail2c_fold_at', fold_at), _c_u8('ail2c_fold_pool', fold_pool),
+        _c_ranges('ail2c_upper', upper_spans), _c_ranges('ail2c_lower', lower_spans),
+        _c_ranges('ail2c_titlecase', title_spans),
+    ])
+    funcs = r'''
+static int64_t ail2c_decode(ail_str s, uint32_t **out) {
+    uint32_t *cp = (uint32_t *)ail_xmalloc(sizeof(uint32_t) * (size_t)(s.n ? s.n : 1));
+    int64_t m = 0;
+    for (int64_t i = 0; i < s.n; i++) {
+        uint32_t c = (uint32_t)ail_chr(s, i);
+        if (c >= 0xD800u && c < 0xDC00u && i + 1 < s.n) {
+            uint32_t d = (uint32_t)ail_chr(s, i + 1);
+            if (d >= 0xDC00u && d < 0xE000u) { c = 0x10000u + ((c - 0xD800u) << 10) + (d - 0xDC00u); i++; }
+        }
+        cp[m++] = c;
+    }
+    *out = cp;
+    return m;
+}
+
+static void ail2c_put_mapped(uint16_t *buf, int64_t *o, uint32_t c, const uint32_t *keys,
+                             const uint32_t *at, const uint8_t *pool, int64_t count) {
+    int64_t f = ail__case_find(keys, count, c);
+    if (f < 0) { ail__put_cp(buf, o, c); return; }
+    uint32_t len = at[f] & 7, off = at[f] >> 3;
+    for (uint32_t q = 0; q < len; ) {          /* the replacement is stored as UTF-8 */
+        uint32_t b0 = pool[off + q], r;
+        if (b0 < 0x80) { r = b0; q += 1; }
+        else if (b0 < 0xE0) { r = ((b0 & 0x1Fu) << 6) | (pool[off + q + 1] & 0x3Fu); q += 2; }
+        else if (b0 < 0xF0) { r = ((b0 & 0x0Fu) << 12) | ((pool[off + q + 1] & 0x3Fu) << 6) | (pool[off + q + 2] & 0x3Fu); q += 3; }
+        else { r = ((b0 & 0x07u) << 18) | ((pool[off + q + 1] & 0x3Fu) << 12) | ((pool[off + q + 2] & 0x3Fu) << 6) | (pool[off + q + 3] & 0x3Fu); q += 4; }
+        ail__put_cp(buf, o, r);
+    }
+}
+
+static ail_st ail2c_title(ail_ctx *cx, ail_obj *out, ail_obj sobj) {
+    ail_str s = ail_view_to_str(sobj);
+    uint32_t *cp;
+    int64_t m = ail2c_decode(s, &cp);
+    ail_strbuild bu = ail_str_buf1(cx, m ? 6 * m : 1, sobj);
+    int64_t o = 0;
+    int prev = 0;
+    for (int64_t k = 0; k < m; k++) {
+        uint32_t c = cp[k];
+        int is_lower = ail__case_in(ail2c_lower, (int64_t)(sizeof ail2c_lower / sizeof ail2c_lower[0]), c);
+        int is_upper = ail__case_in(ail2c_upper, (int64_t)(sizeof ail2c_upper / sizeof ail2c_upper[0]), c);
+        int is_title = ail__case_in(ail2c_titlecase,
+                                    (int64_t)(sizeof ail2c_titlecase / sizeof ail2c_titlecase[0]), c);
+        if (is_lower || is_upper || is_title) {
+            if (prev) {
+                if (c == 0x3A3) ail__put_cp(bu.buf, &o, ail__final_sigma_cp(cp, m, k) ? 0x3C2 : 0x3C3);
+                else ail2c_put_mapped(bu.buf, &o, c, ail2c_lower_cp, ail2c_lower_at, ail2c_lower_pool,
+                                      (int64_t)(sizeof ail2c_lower_cp / sizeof ail2c_lower_cp[0]));
+            } else ail2c_put_mapped(bu.buf, &o, c, ail2c_title_cp, ail2c_title_at, ail2c_title_pool,
+                                    (int64_t)(sizeof ail2c_title_cp / sizeof ail2c_title_cp[0]));
+            prev = 1;
+        } else {
+            ail__put_cp(bu.buf, &o, c);
+            prev = 0;
+        }
+    }
+    free(cp);
+    *out = ail_str_buf_done(bu, o);
+    return AIL_OK;
+}
+
+static ail_st ail2c_capitalize(ail_ctx *cx, ail_obj *out, ail_obj sobj) {
+    ail_str s = ail_view_to_str(sobj);
+    uint32_t *cp;
+    int64_t m = ail2c_decode(s, &cp);
+    ail_strbuild bu = ail_str_buf1(cx, m ? 6 * m : 1, sobj);
+    int64_t o = 0;
+    for (int64_t k = 0; k < m; k++) {
+        uint32_t c = cp[k];
+        if (k == 0) ail2c_put_mapped(bu.buf, &o, c, ail2c_title_cp, ail2c_title_at, ail2c_title_pool,
+                                     (int64_t)(sizeof ail2c_title_cp / sizeof ail2c_title_cp[0]));
+        else if (c == 0x3A3) ail__put_cp(bu.buf, &o, ail__final_sigma_cp(cp, m, k) ? 0x3C2 : 0x3C3);
+        else ail2c_put_mapped(bu.buf, &o, c, ail2c_lower_cp, ail2c_lower_at, ail2c_lower_pool,
+                              (int64_t)(sizeof ail2c_lower_cp / sizeof ail2c_lower_cp[0]));
+    }
+    free(cp);
+    *out = ail_str_buf_done(bu, o);
+    return AIL_OK;
+}
+
+static ail_st ail2c_swapcase(ail_ctx *cx, ail_obj *out, ail_obj sobj) {
+    ail_str s = ail_view_to_str(sobj);
+    uint32_t *cp;
+    int64_t m = ail2c_decode(s, &cp);
+    ail_strbuild bu = ail_str_buf1(cx, m ? 6 * m : 1, sobj);
+    int64_t o = 0;
+    for (int64_t k = 0; k < m; k++) {
+        uint32_t c = cp[k];
+        if (ail__case_in(ail2c_upper, (int64_t)(sizeof ail2c_upper / sizeof ail2c_upper[0]), c)) {
+            if (c == 0x3A3) ail__put_cp(bu.buf, &o, ail__final_sigma_cp(cp, m, k) ? 0x3C2 : 0x3C3);
+            else ail2c_put_mapped(bu.buf, &o, c, ail2c_lower_cp, ail2c_lower_at, ail2c_lower_pool,
+                                  (int64_t)(sizeof ail2c_lower_cp / sizeof ail2c_lower_cp[0]));
+        } else if (ail__case_in(ail2c_lower, (int64_t)(sizeof ail2c_lower / sizeof ail2c_lower[0]), c)) {
+            ail2c_put_mapped(bu.buf, &o, c, ail2c_upper_cp, ail2c_upper_at, ail2c_upper_pool,
+                             (int64_t)(sizeof ail2c_upper_cp / sizeof ail2c_upper_cp[0]));
+        } else ail__put_cp(bu.buf, &o, c);
+    }
+    free(cp);
+    *out = ail_str_buf_done(bu, o);
+    return AIL_OK;
+}
+
+static ail_st ail2c_casefold(ail_ctx *cx, ail_obj *out, ail_obj sobj) {
+    ail_str s = ail_view_to_str(sobj);
+    uint32_t *cp;
+    int64_t m = ail2c_decode(s, &cp);
+    ail_strbuild bu = ail_str_buf1(cx, m ? 6 * m : 1, sobj);
+    int64_t o = 0;
+    for (int64_t k = 0; k < m; k++) {
+        uint32_t c = cp[k];
+        if (c < 0x80) ail__put_cp(bu.buf, &o, c >= 65 && c <= 90 ? c + 32 : c);
+        else {
+            int64_t f = ail__case_find(ail2c_fold_cp,
+                                       (int64_t)(sizeof ail2c_fold_cp / sizeof ail2c_fold_cp[0]), c);
+            if (f >= 0) {
+                uint32_t len = ail2c_fold_at[f] & 7, off = ail2c_fold_at[f] >> 3;
+                for (uint32_t q = 0; q < len; ) {
+                    uint32_t b0 = ail2c_fold_pool[off + q], r;
+                    if (b0 < 0x80) { r = b0; q += 1; }
+                    else if (b0 < 0xE0) { r = ((b0 & 0x1Fu) << 6) | (ail2c_fold_pool[off + q + 1] & 0x3Fu); q += 2; }
+                    else if (b0 < 0xF0) { r = ((b0 & 0x0Fu) << 12) | ((ail2c_fold_pool[off + q + 1] & 0x3Fu) << 6) | (ail2c_fold_pool[off + q + 2] & 0x3Fu); q += 3; }
+                    else { r = ((b0 & 0x07u) << 18) | ((ail2c_fold_pool[off + q + 1] & 0x3Fu) << 12) | ((ail2c_fold_pool[off + q + 2] & 0x3Fu) << 6) | (ail2c_fold_pool[off + q + 3] & 0x3Fu); q += 4; }
+                    ail__put_cp(bu.buf, &o, r);
+                }
+            } else ail2c_put_mapped(bu.buf, &o, c, ail2c_lower_cp, ail2c_lower_at, ail2c_lower_pool,
+                                    (int64_t)(sizeof ail2c_lower_cp / sizeof ail2c_lower_cp[0]));
+        }
+    }
+    free(cp);
+    *out = ail_str_buf_done(bu, o);
+    return AIL_OK;
+}
+'''
+    _CASE_TEXT = cruntime.BOXCASE + \
+        '\n/* ---- str.title/capitalize/swapcase/casefold, full Unicode (safetyrt.py) ---- */\n' + \
+        tables + funcs
+    return _CASE_TEXT
+
+
 def text(needed):
     """The fragments `needed` names, in a fixed order (so the C does not depend on the order of first use)."""
     return ''.join(FRAGMENTS[k] for k in ORDER if k in needed)
