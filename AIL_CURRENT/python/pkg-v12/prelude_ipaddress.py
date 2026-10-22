@@ -24,6 +24,8 @@ def _ail_ip_parse(text: str) -> int:
             if part[i] < "0" or part[i] > "9":
                 raise ValueError("Only decimal digits permitted in " + repr(part) + " in " + repr(text))
             i = i + 1
+        if len(part) > 3:
+            raise ValueError("At most 3 characters permitted in " + repr(part) + " in " + repr(text))
         if len(part) > 1 and part[0] == "0":
             raise ValueError("Leading zeros are not permitted in " + repr(part) + " in " + repr(text))
         n = 0
