@@ -14965,6 +14965,27 @@ static inline ail_st ail__vec_merge_sort(ail_ctx *cx, ail_obj *p, ail_obj *keys,
     for (int64_t x = lo; x < hi; x++) { p[x] = tmp[x]; keys[x] = ktmp[x]; }
     return AIL_OK;
 }
+/* A sort key that is, or contains (in a tuple/list), a NaN has no total order: CPython's result then
+   depends on TimSort's own run detection, which this runtime's merge sort does not reproduce. The
+   typed path already refuses such a sort with ValueError (FLISTSORT / KEYSORT / the IR record sort);
+   without this check the general path silently returned a different permutation for the same
+   program (`sorted([3.0, nan, 1.0, nan, 2.0])`). Refuse it by name instead. The depth bound keeps a
+   self-referential container from recursing forever; nothing that deep is ordered by CPython either. */
+static int ail_sort_key_has_nan(ail_obj x, int depth) {
+    if (depth > 64) return 0;
+    if (x.tag == AIL_T_FLOAT) { double v = ail_float_val(x); return v != v; }
+    if (x.tag == AIL_T_LIST || x.tag == AIL_T_TUPLE) {
+        ail_vecobj *v = (ail_vecobj *)x.o;
+        for (int64_t i = 0; i < v->n; i++)
+            if (ail_sort_key_has_nan(v->p[i], depth + 1)) return 1;
+    } else if (x.tag == AIL_T_DICT) {
+        ail_mapobj *m = (ail_mapobj *)x.o;
+        for (int64_t i = 0; i < m->n; i++)
+            if (ail_sort_key_has_nan(m->entries[i].key, depth + 1) ||
+                ail_sort_key_has_nan(m->entries[i].val, depth + 1)) return 1;
+    }
+    return 0;
+}
 /* ail_list_sort -- the key function (if not AIL_T_NONE) is called EXACTLY ONCE per
    element, into a scratch `keys` array (decorate), the merge sort above compares only
    those decorations (never re-invoking the key), then the element array is left permuted
@@ -14992,6 +15013,14 @@ static inline ail_st ail_list_sort(ail_ctx *cx, ail_obj lst, ail_obj key_fn_or_n
         for (int64_t i = 0; i < n && st == AIL_OK; i++) st = f->fn(cx, &keys[i], v->p[i], f->cells);
     } else {
         for (int64_t i = 0; i < n; i++) keys[i] = v->p[i];
+    }
+    if (st == AIL_OK) {
+        for (int64_t i = 0; i < n; i++)
+            if (ail_sort_key_has_nan(keys[i], 0)) {
+                st = ail_raise_c(cx, AIL_B_VALUEERROR,
+                                 "sorting a list whose key is or contains NaN is not supported");
+                break;
+            }
     }
     if (st == AIL_OK) st = ail__vec_merge_sort(cx, v->p, keys, tmp, ktmp, 0, n);
     AIL_FRAME_LEAVE(cx, fr);
