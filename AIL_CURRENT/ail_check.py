@@ -43,6 +43,7 @@ MODULES = (
     'test_ail_fuzz3n',
     'test_ail_c169',
     'test_ail_fuzz8',
+    'test_ail_intenum4',
 )
 
 

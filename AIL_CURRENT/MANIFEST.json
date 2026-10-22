@@ -1008,7 +1008,7 @@
     "test_ail_str_find_alias.py": "2dd4e33b572c730b22c452951de0afb632942917681dd8a4768a712eb54d3553",
     "ail_builtin_api.py": "1ec0d7b3092af502f0195cdee6d8cb11f82c078732cbb75d5c5c5f96721d5425",
     "test_ail_builtin_api.py": "f4ed0186a304be917c36526a5818b1d2b6561c7529698f79ce62cc9ac83b5686",
-    "ail_check.py": "6662a57c50410e19b0ce17255aa6c3a2e9e9ff790098d1bc2431804bff20b78a",
+    "ail_check.py": "6093caf1a490dde489b40ad6f04219c7beff2d59544b2a2c1d9bea84342bbe71",
     "test_ail_sdk.py": "af18bc35a3d951ce733ca3b73a05c91e58e44c15b12131b1e92c42807c909872",
     "test_ail_str_rfind.py": "9216fc98dd70e3f9de393ff29798602dce499c3600552c6a7b6b77a2b1a432b5",
     "ail_builtin_syntax_forms.py": "8b6a4a90b4ccfcac48a9a3938fcf7c7df3b1ec14a5ca1096dc8e1130d378c7e8",
@@ -1229,13 +1229,13 @@
     "test_ail_optional_locals.py": "aa1bfbde7f5eefd181d3698629e6e6bad6583dfd6cb12ca6a1cf64f8fbe0bfff",
     "test_ail_raise_from.py": "4e66dd112d7845444f686238af999f174e91b29fb10c3d52a579cad5c54a2639",
     "test_ail_boolfield.py": "af635061d2bd405dfb2a127fb9ef50dc2335040ec6af864370e175a0e3f836f4",
-    "python/pkg-v12/dunderrt.py": "5d703c26ec0fd3de6a36fa4936feaab15978d95b83b57056c0370781a77771c7",
+    "python/pkg-v12/dunderrt.py": "0cea593f1162b4d6c3a429dd4d8a6bfd1e8b37cb4b6e038b1e70afd17cfb7d91",
     "python/pkg-v12/enumlib.py": "9399b30ee9bfca47bd93a096735158f6ccc6042d601b5c73f7665ae5f5adf56f",
     "python/pkg-v12/ntlib.py": "01a9148313be99a12b173e85e1268088e49fcadc4558903402274704951e2962",
     "python/pkg-v12/prelude_array.py": "21d85806b20bde9bc6461edee51582fab194ff98208d0d2e28b23a576814c02e",
     "python/pkg-v12/prelude_calendar.py": "e29da6b48061dc44f1aa4e90c00af08d75d7cfcff32e385bded43b1ac52f32d8",
     "python/pkg-v12/prelude_chainmap.py": "eabcb0670c8f02aba4bb9d5d4c6adbb676e00cce2e54b7f4be5636cd4b45a848",
-    "python/pkg-v12/prelude_enum.py": "364c01d4894be2113ca465c841e91237d42ba2f78725d84ddfd0bced06bdee1a",
+    "python/pkg-v12/prelude_enum.py": "9f66149064f9111a52b30b72ba601798086f79d0848bff28a1d0f61b18f68980",
     "python/pkg-v12/prelude_fraction.py": "7a26332328d99fbb78a0f924f977a963fe1d4e8e58070b9761eb8ee7daf2387e",
     "python/pkg-v12/prelude_nt.py": "7df2a175e300106bf1bb32e79dbb167d17822a2458e98edb45e018d916032e40",
     "python/pkg-v12/prelude_ordereddict.py": "af3526dfc2cefc2dcfe6fa850dfe6004c4b76c5333c98de75ac66c7929be7347",
@@ -1337,7 +1337,8 @@
     "python/pkg-v12/prelude_urlparse.py": "5667acdca1bb5d788ca1e73904ee09333c0e6738de8118c324f3674c7967e803",
     "python/pkg-v12/stdlib6.py": "40f2e261d5d31688163a1842dfbeef71fe8b2f3489ff79eef4fd8fc7d96d7b47",
     "test_ail_stdlib6.py": "3470f08043ff6622140f9e81a4c405f5ca532d5497e6ad7f512d44c890f5a80e",
-    "test_ail_fuzz8.py": "f0548c51062d12f5984f73573853e0adf76ef265f16c2412a300bbacc3413688"
+    "test_ail_fuzz8.py": "f0548c51062d12f5984f73573853e0adf76ef265f16c2412a300bbacc3413688",
+    "test_ail_intenum4.py": "6c8513d330bb35cbdca50b623ff72c7ff70320e829486ad18f769c23eff91b91"
   },
   "files": {
     "python/pkg-v12/pipeline.py": "d185d3cd067d1ca503f1fda8e2d8f415e93a0db26fbef6d4b919dd4c0b9a1251",
@@ -1413,7 +1414,7 @@
     "test_ail_str_find_alias.py": "2dd4e33b572c730b22c452951de0afb632942917681dd8a4768a712eb54d3553",
     "ail_builtin_api.py": "1ec0d7b3092af502f0195cdee6d8cb11f82c078732cbb75d5c5c5f96721d5425",
     "test_ail_builtin_api.py": "f4ed0186a304be917c36526a5818b1d2b6561c7529698f79ce62cc9ac83b5686",
-    "ail_check.py": "6662a57c50410e19b0ce17255aa6c3a2e9e9ff790098d1bc2431804bff20b78a",
+    "ail_check.py": "6093caf1a490dde489b40ad6f04219c7beff2d59544b2a2c1d9bea84342bbe71",
     "test_ail_sdk.py": "af18bc35a3d951ce733ca3b73a05c91e58e44c15b12131b1e92c42807c909872",
     "test_ail_str_rfind.py": "9216fc98dd70e3f9de393ff29798602dce499c3600552c6a7b6b77a2b1a432b5",
     "ail_builtin_syntax_forms.py": "8b6a4a90b4ccfcac48a9a3938fcf7c7df3b1ec14a5ca1096dc8e1130d378c7e8",
@@ -1630,13 +1631,13 @@
     "test_ail_optional_locals.py": "aa1bfbde7f5eefd181d3698629e6e6bad6583dfd6cb12ca6a1cf64f8fbe0bfff",
     "test_ail_raise_from.py": "4e66dd112d7845444f686238af999f174e91b29fb10c3d52a579cad5c54a2639",
     "test_ail_boolfield.py": "af635061d2bd405dfb2a127fb9ef50dc2335040ec6af864370e175a0e3f836f4",
-    "python/pkg-v12/dunderrt.py": "5d703c26ec0fd3de6a36fa4936feaab15978d95b83b57056c0370781a77771c7",
+    "python/pkg-v12/dunderrt.py": "0cea593f1162b4d6c3a429dd4d8a6bfd1e8b37cb4b6e038b1e70afd17cfb7d91",
     "python/pkg-v12/enumlib.py": "9399b30ee9bfca47bd93a096735158f6ccc6042d601b5c73f7665ae5f5adf56f",
     "python/pkg-v12/ntlib.py": "01a9148313be99a12b173e85e1268088e49fcadc4558903402274704951e2962",
     "python/pkg-v12/prelude_array.py": "21d85806b20bde9bc6461edee51582fab194ff98208d0d2e28b23a576814c02e",
     "python/pkg-v12/prelude_calendar.py": "e29da6b48061dc44f1aa4e90c00af08d75d7cfcff32e385bded43b1ac52f32d8",
     "python/pkg-v12/prelude_chainmap.py": "eabcb0670c8f02aba4bb9d5d4c6adbb676e00cce2e54b7f4be5636cd4b45a848",
-    "python/pkg-v12/prelude_enum.py": "364c01d4894be2113ca465c841e91237d42ba2f78725d84ddfd0bced06bdee1a",
+    "python/pkg-v12/prelude_enum.py": "9f66149064f9111a52b30b72ba601798086f79d0848bff28a1d0f61b18f68980",
     "python/pkg-v12/prelude_fraction.py": "7a26332328d99fbb78a0f924f977a963fe1d4e8e58070b9761eb8ee7daf2387e",
     "python/pkg-v12/prelude_nt.py": "7df2a175e300106bf1bb32e79dbb167d17822a2458e98edb45e018d916032e40",
     "python/pkg-v12/prelude_ordereddict.py": "af3526dfc2cefc2dcfe6fa850dfe6004c4b76c5333c98de75ac66c7929be7347",
@@ -1738,6 +1739,7 @@
     "python/pkg-v12/prelude_urlparse.py": "5667acdca1bb5d788ca1e73904ee09333c0e6738de8118c324f3674c7967e803",
     "python/pkg-v12/stdlib6.py": "40f2e261d5d31688163a1842dfbeef71fe8b2f3489ff79eef4fd8fc7d96d7b47",
     "test_ail_stdlib6.py": "3470f08043ff6622140f9e81a4c405f5ca532d5497e6ad7f512d44c890f5a80e",
-    "test_ail_fuzz8.py": "f0548c51062d12f5984f73573853e0adf76ef265f16c2412a300bbacc3413688"
+    "test_ail_fuzz8.py": "f0548c51062d12f5984f73573853e0adf76ef265f16c2412a300bbacc3413688",
+    "test_ail_intenum4.py": "6c8513d330bb35cbdca50b623ff72c7ff70320e829486ad18f769c23eff91b91"
   }
 }

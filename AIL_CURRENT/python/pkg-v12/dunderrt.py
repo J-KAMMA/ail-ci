@@ -24,7 +24,7 @@ counts as unequal). Instances without `__eq__` / `__hash__` compare and hash by 
 # special method -> table index; D1 = (self), D2 = (self, other)
 D1 = {'__neg__': 'NEG', '__pos__': 'POS', '__abs__': 'ABS', '__hash__': 'HASH', '__bool__': 'BOOL',
       '__int__': 'INT', '__float__': 'FLOAT', '__floor__': 'FLOOR', '__ceil__': 'CEIL', '__trunc__': 'TRUNC',
-      '__len__': 'LEN', '__index__': 'INDEX', '__invert__': 'INVERT'}
+      '__len__': 'LEN', '__index__': 'INDEX', '__invert__': 'INVERT', '__ail_int_enum__': 'INTENUM'}
 D2 = {'__add__': 'ADD', '__radd__': 'RADD', '__sub__': 'SUB', '__rsub__': 'RSUB', '__mul__': 'MUL',
       '__rmul__': 'RMUL', '__truediv__': 'TRUEDIV', '__rtruediv__': 'RTRUEDIV', '__floordiv__': 'FLOORDIV',
       '__rfloordiv__': 'RFLOORDIV', '__mod__': 'MOD', '__rmod__': 'RMOD', '__pow__': 'POW', '__rpow__': 'RPOW',
@@ -43,7 +43,7 @@ ALREADY_BOUND = frozenset(('__eq__', '__len__', '__getitem__', '__contains__'))
 
 ENUMS = '''
 enum { AIL_D1_NEG, AIL_D1_POS, AIL_D1_ABS, AIL_D1_HASH, AIL_D1_BOOL, AIL_D1_INT, AIL_D1_FLOAT, AIL_D1_FLOOR,
-       AIL_D1_CEIL, AIL_D1_TRUNC, AIL_D1_LEN, AIL_D1_INDEX, AIL_D1_INVERT, AIL_ND1 };
+       AIL_D1_CEIL, AIL_D1_TRUNC, AIL_D1_LEN, AIL_D1_INDEX, AIL_D1_INVERT, AIL_D1_INTENUM, AIL_ND1 };
 enum { AIL_D2_ADD, AIL_D2_RADD, AIL_D2_SUB, AIL_D2_RSUB, AIL_D2_MUL, AIL_D2_RMUL, AIL_D2_TRUEDIV, AIL_D2_RTRUEDIV,
        AIL_D2_FLOORDIV, AIL_D2_RFLOORDIV, AIL_D2_MOD, AIL_D2_RMOD, AIL_D2_POW, AIL_D2_RPOW, AIL_D2_EQ, AIL_D2_GT,
        AIL_D2_LT, AIL_D2_LE, AIL_D2_GE, AIL_D2_DIVMOD, AIL_D2_RDIVMOD,
@@ -470,6 +470,7 @@ def _edits():
               '    ail_obj hr; ail_st hst = hf(cx, &hr, x); if (hst != AIL_OK) return hst;\n'
               '    if (hr.tag == AIL_T_INT || hr.tag == AIL_T_BOOL) {\n'
               '        int64_t hv = hr.i;\n'
+              '        if (ail_dun1(x, AIL_D1_INTENUM)) hv = ail_pyhash_int(hv);   /* IntEnum / IntFlag: int.__hash__ of the value */\n'
               '        *out = hv == -1 ? -2 : hv; return AIL_OK;\n    }\n'
               '    return ail_raise_c(cx, AIL_B_TYPEERROR, "__hash__ method should return an integer");\n}\n'))
     # ordering: a on the left with no < answer (its > may answer), or the instance on the right (out of line, so that the

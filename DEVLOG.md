@@ -1,13 +1,28 @@
 # DEVLOG
 
+## 2026-10-22 -- job-integ1-10230230: fix the IntEnum hash conflict and register its test
+
+- Restored the intenum4 IntEnum/IntFlag hash contract while keeping cov6's Fraction fix: `_AilIntEnum.__hash__`
+  returns the raw value (so a dict/set bucket matches the equal int, whose table hash is taken from the raw
+  value), and the runtime re-hashes it as `int.__hash__` only for members marked `__ail_int_enum__`
+  (`hash(E.NEG) == hash(-1)`, `hash(E.BIG) == hash(2 ** 61)`, and equal int keys are found).
+- Registered `test_ail_intenum4` in `ail_check.MODULES`, so the full suite and the CI shards now load it.
+- Probes `/tmp/probes/intenum_hash_bounds.py` and `/tmp/probes/intenum_hash_routes.py` (hash values, negative /
+  boundary / zero members, dict and set lookups both ways, through an argument, a list item, an attribute,
+  a dict value, and IntFlag) match CPython on both builds, as do the reviewer probes `intenumdict.py`,
+  `hashmix.py`, `hashmix2.py` and `intenumops.py` (`cov6more.py` differs only in the documented
+  `AddressValueError`/`ValueError` alias).
+- Targeted `par_check.py -j 2`: intenum4, stdlib5, stdlib6, dunders, c169, fuzz8, safetynet, files,
+  corpus_findings3 all pass (9/9). The full suite was left to CI, per the job rules.
+
 ## 2026-10-22 -- job-integ1-10230230: integrate four accepted jobs
 
 Integrated the fix commits of `job-c169-10221631`, `job-cov6-10221632`, `job-fuzz8-10221632` and
 `job-intenum4-10221632`, skipping their `.agent/` and `corpus/` changes. The c169 records live in
 `docs/spec/`; the other three write the root records. Conflicts were limited to `MANIFEST.json`
 (union of pins) and the shared `DEVLOG.md` / `DIFFERENCES.md` (both sides kept). Placeholder
-difference ids were numbered C170-C187. Targeted tests and the full suite were run on the final
-commit.
+difference ids were numbered C170-C187. Targeted tests were run on the final commit; the full suite
+is left to CI, per the job rules.
 
 ## 2026-10-22 — job-cov6-10221632: fix the Fraction hash regression
 

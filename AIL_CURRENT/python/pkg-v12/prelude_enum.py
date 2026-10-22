@@ -64,7 +64,10 @@ class _AilIntEnum(_AilEnum):
         return str(self.value)
 
     def __hash__(self):
-        return hash(self.value)
+        return self.value
+
+    def __ail_int_enum__(self):
+        return True
 
     def _ail_en_int_operand(self, other, op: str, reverse: bool):
         # CPython compares and combines an IntEnum / IntFlag with another int subclass by value;
