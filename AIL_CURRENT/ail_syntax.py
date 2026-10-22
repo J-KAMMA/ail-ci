@@ -2499,8 +2499,6 @@ class _Surface:
             elif value is not None:
                 default = ast.unparse(self.rewritten(value)[0])
             fields.append((statement, statement.target.id, ast.unparse(annotation), default))
-        if not fields:
-            return
         start = self.offset(decorator.lineno, decorator.col_offset)
         at = start - 1
         while at >= 0 and self.data[at:at + 1] in (b' ', b'\t'):
@@ -2550,7 +2548,7 @@ class _Surface:
             self.post_init.add(node.name)
         init = f'def __init__(self, {parameters}): {body}'
         wanted = self.dc_wanted()
-        pad = '\n' + ' ' * fields[0][0].col_offset
+        pad = '\n' + ' ' * (fields[0][0].col_offset if fields else node.body[0].col_offset)
         if order_on:
             # order=True: the four comparisons of the tuple of the compared fields (an instance of another class,
             # a subclass included, answers NotImplemented, so the comparison raises TypeError, as in CPython)
@@ -2571,10 +2569,17 @@ class _Surface:
             init += (f'{pad}def _ail_replace(self, kw):{inner}for k in kw:{inner}    if k not in {known}:'
                      f'{inner}        raise TypeError("{node.name}.__init__() got an unexpected keyword argument " + repr(k))'
                      f'{inner}return {node.name}({values})')
-        self.replace(fields[0][0], init, True)
-        for statement, *_ in fields[1:]:
-            self.replace(statement, '', True)  # a class body here holds methods only, not `pass`
-        self.consumed.update(statement for statement, *_ in fields)
+        if fields:
+            self.replace(fields[0][0], init, True)
+            for statement, *_ in fields[1:]:
+                self.replace(statement, '', True)  # a class body here holds methods only, not `pass`
+            self.consumed.update(statement for statement, *_ in fields)
+        else:
+            # a @dataclass with no fields of its own (an empty class, or one extending a fieldless dataclass):
+            # still gets the generated __init__, __eq__ and repr CPython gives it
+            anchor = node.body[-1]
+            at = self.offset(anchor.end_lineno, anchor.end_col_offset)
+            self.edits.append((at, at, '\n' + ' ' * node.body[0].col_offset + init, True))
         self.dataclasses[node.name] = [(name, default) for name, _, default, _, skip in merged if not skip]
         self.dc_annotations[node.name] = [(name, annotation, shown) for name, annotation, _, shown, _ in merged]
         self.dc_initless[node.name] = {name for name, *_, skip in merged if skip}

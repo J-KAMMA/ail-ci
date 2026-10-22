@@ -42,6 +42,7 @@ class Info:
         self.kind = kind
         self.members = []          # (member name, variable)
         self.aliases = []          # (alias name, member variable)
+        self.map_order = []        # (name, variable) in definition order, aliases included (__members__)
         self.values = {}           # variable -> (value expression, position)
         self.order = []            # a Flag class: the variables in definition order, an alias repeating its member
         self.ints = {}             # a Flag class: variable -> its int value
@@ -156,7 +157,8 @@ def lower_class(cls, kind, binder, enums):
     info = Info(cls.name, kind_name)
     body = []
     last = None
-    seen_values = []               # (member var, value dump)
+    seen_values = []               # (member var, literal value, value dump)
+    unique = any(binder.attr(dec) == 'unique' for dec in cls.decorator_list)
     flag_env, flag_by_value, flag_values = {}, {}, []
     index = 0
     for item in cls.body:
@@ -179,6 +181,9 @@ def lower_class(cls, kind, binder, enums):
                        % (cls.name, target, number))
             flag_env[target] = number
             if number in flag_by_value:
+                if unique:
+                    refuse(item, 'enum class %s: @unique with a duplicate value (%s aliases another member) is not built; '
+                           'give each member a distinct value' % (cls.name, target))
                 info.aliases.append((target, flag_by_value[number]))
                 info.order.append(flag_by_value[number])
             else:
@@ -205,14 +210,21 @@ def lower_class(cls, kind, binder, enums):
             lit = literal(value)
             last = lit if lit is not None else last
             dump = ast.dump(value)
-            for var, other in seen_values:
-                if other == dump and lit is not None:
+            for var, other_lit, other_dump in seen_values:
+                # CPython aliases equal values, not only equal source text: `A = 0; B = False`, `A = 1; B = 1.0`.
+                same = (lit == other_lit) if lit is not None and other_lit is not None else other_dump == dump
+                if same:
+                    if unique:
+                        refuse(item, 'enum class %s: @unique with a duplicate value (%s aliases another member) is not '
+                               'built; give each member a distinct value' % (cls.name, target))
                     info.aliases.append((target, var))
+                    info.map_order.append((target, var))
                     break
             else:
                 var = info.var(target)
                 info.members.append((target, var))
-                seen_values.append((var, dump))
+                info.map_order.append((target, var))
+                seen_values.append((var, lit, dump))
                 info.values[var] = (copy.deepcopy(value), index)
                 index += 1
             continue
@@ -421,7 +433,7 @@ def generated(info):
         value, index = info.values[var]
         lines.append('%s = %s(%r, %r, %s, %d)' % (var, info.name, info.name, member, ast.unparse(value), index))
     lines.append('%s = [%s]' % (info.all, ', '.join(var for _, var in info.members)))
-    entries = ['%r: %s' % (m, v) for m, v in info.members] + ['%r: %s' % (a, v) for a, v in info.aliases]
+    entries = ['%r: %s' % (m, v) for m, v in info.map_order]
     lines.append('%s = {%s}' % (info.map, ', '.join(entries)))
     lines.append('def %s(v):\n    for m in %s:\n        if m.value == v:\n            return m\n'
                  '    raise ValueError(repr(v) + " is not a valid %s")' % (info.call, info.all, info.name))
@@ -454,6 +466,31 @@ class Uses(ast.NodeTransformer):
             return ast.copy_location(ast.Call(func=ast.Name(id='_ail_en_noattr', ctx=ast.Load()),
                                               args=[ast.Constant(value=info.name), ast.Constant(value=node.attr)],
                                               keywords=[]), node)
+        return self.generic_visit(node)
+
+    def _member_attr(self, node):
+        """(info, member) for `Enum.MEMBER` (the base of an assignment target), else None."""
+        if isinstance(node, ast.Attribute):
+            info = self.enum_of(node.value)
+            if info is not None and info.attr_target(node.attr) is not None:
+                return info, node.attr
+        return None
+
+    def visit_Assign(self, node):
+        for target in node.targets:
+            if isinstance(target, ast.Attribute) and target.attr in ('value', 'name'):
+                found = self._member_attr(target.value)
+                if found is not None:
+                    refuse(target, 'enum member %s.%s: setting .%s is not built; a member is immutable'
+                           % (found[0].name, found[1], target.attr))
+        return self.generic_visit(node)
+
+    def visit_AugAssign(self, node):
+        if isinstance(node.target, ast.Attribute) and node.target.attr in ('value', 'name'):
+            found = self._member_attr(node.target.value)
+            if found is not None:
+                refuse(node.target, 'enum member %s.%s: setting .%s is not built; a member is immutable'
+                       % (found[0].name, found[1], node.target.attr))
         return self.generic_visit(node)
 
     def visit_Call(self, node):

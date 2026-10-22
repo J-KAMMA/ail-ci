@@ -2335,9 +2335,19 @@ class Compiler(boxclosure.ClosureMixin):
             if not isinstance(node, ast.ClassDef) or not (2 <= node.lineno <= len(lines) + 1):
                 continue
             text = lines[node.lineno - 2].strip()
-            if not text.startswith('# ail:dataclass') or ' noeq' in text:
+            if not text.startswith('# ail:dataclass'):
                 continue
             names = {m.name for m in node.body if isinstance(m, ast.FunctionDef)}
+            if ' noeq' in text:
+                # eq=False keeps object identity: CPython keeps object.__hash__, unless the class defines __eq__
+                # itself (which sets __hash__ to None). The runtime treats a dataclass as unhashable without a
+                # __hash__, so give it one; any constant is valid for identity equality (unequal objects may collide).
+                if '__hash__' not in names and '__eq__' not in names and '__init__' in names:
+                    for fn in ast.parse('def __hash__(self):\n    return 0\n').body:
+                        fn._ail_gen = True
+                        node.body.append(fn)
+                    ast.fix_missing_locations(node)
+                continue
             if '__eq__' in names or '__init__' not in names:
                 continue
             init = [m for m in node.body if isinstance(m, ast.FunctionDef) and m.name == '__init__'][0]
