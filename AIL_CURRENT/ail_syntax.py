@@ -2548,7 +2548,18 @@ class _Surface:
             self.post_init.add(node.name)
         init = f'def __init__(self, {parameters}): {body}'
         wanted = self.dc_wanted()
-        pad = '\n' + ' ' * (fields[0][0].col_offset if fields else node.body[0].col_offset)
+        # the indentation of the class body, as written (tabs included). An inline suite (`class E: pass`) has
+        # its first statement on the class's own line; its body is made a block first, one level in from the
+        # class/decorator indentation, not from the column after the colon.
+        base_indent = self.data[self.starts[decorator.lineno - 1]:at].decode('utf8')
+        first = fields[0][0] if fields else node.body[0]
+        inline = first.lineno == node.lineno
+        if inline:
+            body_indent = base_indent + ('\t' if '\t' in base_indent else '    ')
+        else:
+            body_indent = self.data[self.starts[first.lineno - 1]:
+                                    self.offset(first.lineno, first.col_offset)].decode('utf8')
+        pad = '\n' + body_indent
         if order_on:
             # order=True: the four comparisons of the tuple of the compared fields (an instance of another class,
             # a subclass included, answers NotImplemented, so the comparison raises TypeError, as in CPython)
@@ -2569,6 +2580,10 @@ class _Surface:
             init += (f'{pad}def _ail_replace(self, kw):{inner}for k in kw:{inner}    if k not in {known}:'
                      f'{inner}        raise TypeError("{node.name}.__init__() got an unexpected keyword argument " + repr(k))'
                      f'{inner}return {node.name}({values})')
+        if inline:
+            # an inline suite cannot be continued by an indented block: start a block before its first statement
+            first_at = self.offset(first.lineno, first.col_offset)
+            self.edits.append((first_at, first_at, '\n' + body_indent, False))
         if fields:
             self.replace(fields[0][0], init, True)
             for statement, *_ in fields[1:]:
@@ -2578,8 +2593,8 @@ class _Surface:
             # a @dataclass with no fields of its own (an empty class, or one extending a fieldless dataclass):
             # still gets the generated __init__, __eq__ and repr CPython gives it
             anchor = node.body[-1]
-            at = self.offset(anchor.end_lineno, anchor.end_col_offset)
-            self.edits.append((at, at, '\n' + ' ' * node.body[0].col_offset + init, True))
+            anchor_at = self.offset(anchor.end_lineno, anchor.end_col_offset)
+            self.edits.append((anchor_at, anchor_at, '\n' + body_indent + init, True))
         self.dataclasses[node.name] = [(name, default) for name, _, default, _, skip in merged if not skip]
         self.dc_annotations[node.name] = [(name, annotation, shown) for name, annotation, _, shown, _ in merged]
         self.dc_initless[node.name] = {name for name, *_, skip in merged if skip}

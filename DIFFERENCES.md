@@ -14,3 +14,6 @@ Rows added by job-fuzz17-10220947 (placeholder ids; renumber on merge).
 | C?-job-fuzz17-10220947-8 | exception text | TypeError names the class `instance`, not the class name |
 | C?-job-fuzz17-10220947-9 | tuple ordering | comparing tuples holding None raises TypeError where CPython can order them |
 | C?-job-fuzz17-10220947-10 | object repr |  a class without `__repr__` prints `<R object>` without the module and address |
+| C?-job-fuzz17-10220947-11 | class `__doc__` | `X.__doc__` on a plain or dataclass class raises AttributeError instead of returning its docstring |
+| C?-job-fuzz17-10220947-12 | `@dataclass(order=True, eq=False)` | the class is built (and compares) where CPython raises `ValueError: eq must be true if order is true` |
+| C?-job-fuzz17-10220947-13 | IntEnum values | an IntEnum member declared with a float value (`C = 2.0`) keeps `2.0` in repr; CPython stores the coerced int `2` |

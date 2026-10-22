@@ -2331,6 +2331,38 @@ class Compiler(boxclosure.ClosureMixin):
         and the __hash__ of a frozen one; ail_syntax writes only the __init__ and the `# ail:dataclass` marker. A
         dataclass with eq and not frozen keeps no __hash__, so it is unhashable as in CPython."""
         lines = self.source_lines
+        classes = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
+
+        def bound(node, name):
+            """'none' / 'custom' when the class body binds `name` (a def, an assignment, an annotation with a
+            value), else None. A `__hash__ = None` or `__eq__ = ...` assignment counts, as in CPython."""
+            for st in node.body:
+                if isinstance(st, ast.FunctionDef):
+                    if st.name == name:
+                        return 'custom'
+                elif isinstance(st, ast.Assign):
+                    if any(isinstance(e, ast.Name) and e.id == name for t in st.targets for e in ast.walk(t)):
+                        return 'none' if isinstance(st.value, ast.Constant) and st.value.value is None else 'custom'
+                elif (isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Name)
+                      and st.target.id == name and st.value is not None):
+                    return 'none' if isinstance(st.value, ast.Constant) and st.value.value is None else 'custom'
+            return None
+
+        def hash_kind(node, seen=()):
+            """'custom' / 'none' / 'object': the __hash__ a normal class with this body would have (its own
+            binding, else None because it defines __eq__, else the first base's, else object's)."""
+            own = bound(node, '__hash__')
+            if own is not None:
+                return own
+            if bound(node, '__eq__') is not None:
+                return 'none'
+            for base in node.bases:
+                if isinstance(base, ast.Name) and base.id in classes and base.id not in seen:
+                    kind = hash_kind(classes[base.id], seen + (node.name,))
+                    if kind != 'object':
+                        return kind
+            return 'object'
+
         for node in tree.body:
             if not isinstance(node, ast.ClassDef) or not (2 <= node.lineno <= len(lines) + 1):
                 continue
@@ -2339,14 +2371,34 @@ class Compiler(boxclosure.ClosureMixin):
                 continue
             names = {m.name for m in node.body if isinstance(m, ast.FunctionDef)}
             if ' noeq' in text:
-                # eq=False keeps object identity: CPython keeps object.__hash__, unless the class defines __eq__
-                # itself (which sets __hash__ to None). The runtime treats a dataclass as unhashable without a
-                # __hash__, so give it one; any constant is valid for identity equality (unequal objects may collide).
-                if '__hash__' not in names and '__eq__' not in names and '__init__' in names:
-                    for fn in ast.parse('def __hash__(self):\n    return 0\n').body:
+                # eq=False keeps the __hash__ the class would have without the dataclass decorator: its own
+                # binding (`__hash__ = None` included), or None because it defines __eq__, or the base's, or
+                # object's identity hash. The runtime treats such a dataclass as unhashable without a __hash__,
+                # so inject one only when the answer is object identity; _ail_dc_id(self) is such a hash.
+                kind = hash_kind(node)
+                if kind == 'object' and '__init__' in names:
+                    for fn in ast.parse('def __hash__(self):\n    return _ail_dc_id(self)\n').body:
                         fn._ail_gen = True
                         node.body.append(fn)
                     ast.fix_missing_locations(node)
+                elif kind == 'custom':
+                    # an assigned `__hash__ = lambda ...` / `__hash__ = f` is a class attribute the runtime
+                    # does not call as a method: replace it with the equivalent def, so the class has one
+                    for index, st in enumerate(node.body):
+                        value = (st.value if isinstance(st, (ast.Assign, ast.AnnAssign)) else None)
+                        if value is None:
+                            continue
+                        targets = st.targets if isinstance(st, ast.Assign) else [st.target]
+                        if not any(isinstance(e, ast.Name) and e.id == '__hash__'
+                                   for t in targets for e in ast.walk(t)):
+                            continue
+                        fn = ast.parse('def __hash__(self):\n    return (%s)(self)\n'
+                                       % ast.unparse(value)).body[0]
+                        fn._ail_gen = True
+                        ast.copy_location(fn, st)
+                        node.body[index] = fn
+                        ast.fix_missing_locations(node)
+                        break
                 continue
             if '__eq__' in names or '__init__' not in names:
                 continue

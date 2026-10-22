@@ -57,7 +57,9 @@ def main() -> None:
     print(e, repr(e), e == Empty(), e == Child(), e != Empty())
     print(Child(), Grand(), Grand() == Grand(), Child(2) == Child(2))
     print(asdict(e), astuple_ok(e), replace(e) == e)
-    print(Plain() == Plain(), hash(Plain()) == hash(Plain()), len({Plain(), Plain()}))
+    p1 = Plain()
+    p2 = Plain()
+    print(Plain() == Plain(), hash(p1) == hash(p1), len({p1, p2}))
 
 
 def astuple_ok(x) -> bool:
@@ -198,6 +200,164 @@ E.A.value += 1
 print(E.A.value)
 '''
 
+EQFALSE_HASH_SEMANTICS = r'''from dataclasses import dataclass
+
+
+@dataclass(eq=False)
+class P:
+    x: int
+
+
+class Base:
+    def __hash__(self) -> int:
+        return 7
+    def __eq__(self, other) -> bool:
+        return True
+
+
+@dataclass(eq=False)
+class Q(Base):
+    x: int
+
+
+@dataclass(eq=False)
+class H:
+    x: int
+    __hash__ = lambda self: 11
+
+
+@dataclass(eq=False)
+class N:
+    x: int
+    __hash__ = None
+
+
+@dataclass
+class E:
+    x: int
+
+
+@dataclass(eq=False)
+class C(E):
+    y: int
+
+
+def h(x) -> int:
+    return hash(x)
+
+
+def main() -> None:
+    a = P(1)
+    b = P(1)
+    print(a == b, hash(a) == hash(b), len({a, b}), {a: "a", b: "b"}[b])
+    print(hash(Q(1)), Q(1) == Q(2), hash(H(1)))
+    for cls in (N, C):
+        try:
+            hash(cls(1) if cls is N else cls(1, 2))
+        except TypeError as exc:
+            print(type(exc).__name__, str(exc))
+    print(h(a) == hash(a), h([a][0]) == hash(a), h({"k": a}["k"]) == hash(a))
+
+
+main()
+'''
+
+INLINE_TAB_DATACLASS = '''from dataclasses import dataclass
+
+
+@dataclass
+class E: pass
+
+
+@dataclass
+class D: """doc"""
+
+
+@dataclass
+class A: tag = 3
+
+
+@dataclass(eq=False)
+class F: pass
+
+
+@dataclass
+class T:
+\tpass
+
+
+def main() -> None:
+    print(E(), repr(E()), E() == E())
+    print(D(), D() == D())
+    print(A(), A.tag, A() == A())
+    f = F()
+    print(f == F(), hash(f) == hash(f))
+    print(T(), T() == T())
+
+
+main()
+'''
+
+ENUM_TUPLE_TARGET = r'''from enum import Enum
+
+
+class E(Enum):
+    A = 1
+
+
+def main() -> None:
+    E.A.value, x = 9, 2
+    print(E.A.value, x)
+
+
+main()
+'''
+
+ENUM_FOR_TARGET = r'''from enum import Enum
+
+
+class E(Enum):
+    A = 1
+
+
+def main() -> None:
+    for E.A.name in ["X"]:
+        print(E.A.name)
+
+
+main()
+'''
+
+ENUM_SETATTR_TARGET = r'''from enum import Enum
+
+
+class E(Enum):
+    A = 1
+
+
+def main() -> None:
+    setattr(E.A, "value", 9)
+    print(E.A.value)
+
+
+main()
+'''
+
+ENUM_NESTED_TARGET = r'''from enum import Enum
+
+
+class E(Enum):
+    A = 1
+
+
+def main() -> None:
+    [E.A.value for E.A.name in ["X"]]
+    E.A.value: int = 9
+
+
+main()
+'''
+
 
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
@@ -269,6 +429,24 @@ class Fuzz17Tests(unittest.TestCase):
 
     def test_enum_member_augmented_assignment_is_refused(self):
         self.refused('member_aug', MEMBER_AUG, 'setting .value is not built')
+
+    def test_eq_false_hash_semantics(self):
+        self.check('eqfalse_hash_semantics', EQFALSE_HASH_SEMANTICS)
+
+    def test_inline_and_tab_empty_dataclass(self):
+        self.check('inline_tab_dataclass', INLINE_TAB_DATACLASS)
+
+    def test_enum_member_write_through_tuple_target_is_refused(self):
+        self.refused('enum_tuple_target', ENUM_TUPLE_TARGET, 'setting .value is not built')
+
+    def test_enum_member_write_through_for_target_is_refused(self):
+        self.refused('enum_for_target', ENUM_FOR_TARGET, 'setting .name is not built')
+
+    def test_enum_member_write_through_setattr_is_refused(self):
+        self.refused('enum_setattr', ENUM_SETATTR_TARGET, 'setting .value is not built')
+
+    def test_enum_member_write_through_nested_targets_is_refused(self):
+        self.refused('enum_nested_target', ENUM_NESTED_TARGET, 'setting .')
 
 
 if __name__ == '__main__':

@@ -1,5 +1,23 @@
 # AIL development log
 
+## 2026-10-22 — job-fuzz17 review fixes
+
+Review of `2aed49e` found three defects, all fixed:
+
+- `@dataclass(eq=False)` keeps the `__hash__` CPython would: its own `__hash__` (including `= None` and an
+  assigned lambda/function), `None` when it defines `__eq__`, an inherited base hash, or an id-based
+  identity hash only when the answer is `object.__hash__` (no constant hash, so distinct live instances no
+  longer collide). Inherited fieldless dataclasses follow the same rule.
+- an inline (`class E: pass`) or tab-indented empty `@dataclass` keeps the real class indentation (the
+  decorator column, not the column after the colon); an inline suite is made into a block first, so repr,
+  equality and `__doc__` agree with CPython.
+- enum member writes are refused by name for tuple/list and nested targets, `for` / `with` targets,
+  comprehensions, annotated targets and `setattr(E.A, "value" | "name", ...)`, not only a lone attribute.
+
+Probes in `/tmp/rprobes` (reviewer set) and `/tmp/probes` (fresh `q17_*` programs) cover both builds.
+Required tests pass on the final commit.
+
+
 ## 2026-10-22 — job-fuzz17: dataclasses and enums
 
 Differential fuzzing (99 small programs, both builds) against CPython 3.12 found these silent wrong answers,

@@ -476,24 +476,57 @@ class Uses(ast.NodeTransformer):
                 return info, node.attr
         return None
 
+    def _refuse_target(self, target):
+        """Refuse a write to E.MEMBER.value / .name anywhere in a target (a lone attribute, an item of a
+        tuple/list target, a for target, a with-as target)."""
+        for node in ast.walk(target):
+            if (isinstance(node, ast.Attribute) and node.attr in ('value', 'name')
+                    and isinstance(node.ctx, ast.Store)):
+                found = self._member_attr(node.value)
+                if found is not None:
+                    refuse(node, 'enum member %s.%s: setting .%s is not built; a member is immutable'
+                           % (found[0].name, found[1], node.attr))
+
     def visit_Assign(self, node):
         for target in node.targets:
-            if isinstance(target, ast.Attribute) and target.attr in ('value', 'name'):
-                found = self._member_attr(target.value)
-                if found is not None:
-                    refuse(target, 'enum member %s.%s: setting .%s is not built; a member is immutable'
-                           % (found[0].name, found[1], target.attr))
+            self._refuse_target(target)
         return self.generic_visit(node)
 
     def visit_AugAssign(self, node):
-        if isinstance(node.target, ast.Attribute) and node.target.attr in ('value', 'name'):
-            found = self._member_attr(node.target.value)
-            if found is not None:
-                refuse(node.target, 'enum member %s.%s: setting .%s is not built; a member is immutable'
-                       % (found[0].name, found[1], node.target.attr))
+        self._refuse_target(node.target)
+        return self.generic_visit(node)
+
+    def visit_For(self, node):
+        self._refuse_target(node.target)
+        return self.generic_visit(node)
+
+    def visit_AsyncFor(self, node):
+        self._refuse_target(node.target)
+        return self.generic_visit(node)
+
+    def visit_comprehension(self, node):
+        self._refuse_target(node.target)
+        return self.generic_visit(node)
+
+    def visit_With(self, node):
+        for item in node.items:
+            if item.optional_vars is not None:
+                self._refuse_target(item.optional_vars)
+        return self.generic_visit(node)
+
+    def visit_AsyncWith(self, node):
+        for item in node.items:
+            if item.optional_vars is not None:
+                self._refuse_target(item.optional_vars)
         return self.generic_visit(node)
 
     def visit_Call(self, node):
+        if (isinstance(node.func, ast.Name) and node.func.id == 'setattr' and len(node.args) >= 2
+                and isinstance(node.args[1], ast.Constant) and node.args[1].value in ('value', 'name')):
+            found = self._member_attr(node.args[0])
+            if found is not None:
+                refuse(node, 'enum member %s.%s: setting .%s is not built; a member is immutable'
+                       % (found[0].name, found[1], node.args[1].value))
         info = self.enum_of(node.func)
         if info is not None:
             if len(node.args) != 1 or node.keywords:
@@ -546,6 +579,7 @@ class Uses(ast.NodeTransformer):
         return node
 
     def visit_AnnAssign(self, node):
+        self._refuse_target(node.target)
         node.target = self.visit(node.target)
         if node.value is not None:
             node.value = self.visit(node.value)

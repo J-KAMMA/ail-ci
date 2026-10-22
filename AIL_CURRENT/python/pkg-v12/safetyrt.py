@@ -1486,6 +1486,13 @@ static inline ail_st ail2e_same_class(ail_ctx *cx, ail_obj *out, ail_obj a, ail_
     *out = ail_box_bool(r);
     return AIL_OK;
 }
+/* identity of an instance, as the int its object pointer is: the __hash__ an eq=False dataclass with
+   object's identity hash gets (CPython's object.__hash__ is id-derived too) */
+static inline ail_st ail2e_dc_id(ail_ctx *cx, ail_obj *out, ail_obj a) {
+    (void)cx;
+    *out = ail_box_int((int64_t)(uintptr_t)a.o);
+    return AIL_OK;
+}
 /* the class name of an instance or exception (what `type(e).__name__` is) */
 static inline ail_st ail2e_exc_name(ail_ctx *cx, ail_obj *out, ail_obj a) {
     if (a.tag != AIL_T_INST && a.tag != AIL_T_EXC) return ail_raise_c(cx, AIL_B_TYPEERROR, "_ail_exc_name: not an instance");
@@ -2080,6 +2087,7 @@ PRIMS = {
     '_ail_gen_name': ('ail2g_name(cx, &{t}, {a0})', 1, 'gen'),
     '_ail_stderr_write': ('ail2e_write(cx, &{t}, {a0})', 1, 'misc'),
     '_ail_same_class': ('ail2e_same_class(cx, &{t}, {a0}, {a1})', 2, 'misc'),
+    '_ail_dc_id': ('ail2e_dc_id(cx, &{t}, {a0})', 1, 'misc'),
     '_ail_exc_name': ('ail2e_exc_name(cx, &{t}, {a0})', 1, 'misc'),
 }
 PRIMS.update({name: (cfn, count, 'rng') for name, (cfn, count) in randrt.PRIMS.items()})   # random.Random (randrt.py)
