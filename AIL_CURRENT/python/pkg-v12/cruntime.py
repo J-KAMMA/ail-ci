@@ -26591,12 +26591,16 @@ AIL_NOIPA __attribute__((unused)) static double ail_m_hypot(double x, double y) 
 
 
 # The unprintable-code-point table the boxed runtime's repr() already carries (generated from
-# str.isprintable()), reused here by text so there is one table to regenerate.
+# str.isprintable()), reused here by text so there is one table to regenerate. Adapt it to the
+# running CPython exactly as repr_runtime_for_host does: the stored table is 3.13.6's (Unicode
+# 15.1), and a few newly assigned code points (U+2FFC..U+2FFF, U+31EF, ...) are printable there
+# but not in the 3.12 oracle (Unicode 15.0), where repr() must still spell them \uXXXX.
 def _unprintable_table():
     marker = 'static const uint32_t ail_repr_unprintable[][2] = {\n'
-    start = OBJ2.index(marker)
-    end = OBJ2.index('};', start) + 2
-    return OBJ2[start:end].replace('ail_repr_unprintable', 'ail_fmt_unprintable') + '\n'
+    source = repr_runtime_for_host(OBJ2)
+    start = source.index(marker)
+    end = source.index('};', start) + 2
+    return source[start:end].replace('ail_repr_unprintable', 'ail_fmt_unprintable') + '\n'
 
 
 _UNPRINTABLE_TABLE = _unprintable_table()
