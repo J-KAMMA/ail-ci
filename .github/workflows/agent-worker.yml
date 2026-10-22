@@ -5,7 +5,8 @@ name: agent-worker
 # - Only the OpenCode key is used. harness=oc (default): the pinned OpenCode CLI (v1.19.3, sha256-checked) reads it from
 #   its auth file in $HOME, outside the checkout, removed after the run. harness=agentpy: agent.py reads a key file and
 #   deletes it before any tool runs. The OpenCode run is cut off after 120 minutes. Before the push, the results are scanned for the key and the push is refused if found. The checkout keeps no credentials; results are pushed in a separate step after the agent
-#   has exited. The reviewer runs on the maintainer's machine, not here.
+#   has exited. With .agent/pipeline.sh present the reviewer and one fix round run here too (OpenCode CLI); the
+#   maintainer still spot-checks before merging.
 on:
   workflow_dispatch:
     inputs:
@@ -25,7 +26,7 @@ jobs:
   worker:
     if: startsWith(github.ref_name, 'job-')
     runs-on: ubuntu-24.04
-    timeout-minutes: 240
+    timeout-minutes: 330
     steps:
       - uses: actions/checkout@v4
         with:
@@ -61,10 +62,17 @@ jobs:
             mkdir -p "$HOME/.local/share/opencode"
             ( umask 077; printf '{"opencode-go":{"type":"api","key":"%s"}}' "$(cat "$RUNNER_TEMP/agent.key")" > "$HOME/.local/share/opencode/auth.json" )
             rm -f "$RUNNER_TEMP/agent.key"
-            timeout 120m "$HOME/opt/opencode/opencode" run --format json --dir "$PWD"               "Do the task described in the attached file, in this directory. When finished, reply with a short final report."               -f .agent/task.md > "$RUNNER_TEMP/oc.jsonl" 2> "$RUNNER_TEMP/oc.err" || true
-            rm -f "$HOME/.local/share/opencode/auth.json"
-            python3 .agent/oc_report.py "$RUNNER_TEMP/oc.jsonl" > .agent/report.md 2>&1 || true
-            tail -5 "$RUNNER_TEMP/oc.err" >> .agent/report.md
+            if [ -f .agent/pipeline.sh ]; then
+              # worker, reviewer and one fix round here, so the maintainer's machine only merges
+              bash .agent/pipeline.sh || true
+              rm -f "$HOME/.local/share/opencode/auth.json"
+              cp .agent/pipeline.md .agent/report.md
+            else
+              timeout 120m "$HOME/opt/opencode/opencode" run --format json --dir "$PWD" "Do the task described in the attached file, in this directory. When finished, reply with a short final report." -f .agent/task.md > "$RUNNER_TEMP/oc.jsonl" 2> "$RUNNER_TEMP/oc.err" || true
+              rm -f "$HOME/.local/share/opencode/auth.json"
+              python3 .agent/oc_report.py "$RUNNER_TEMP/oc.jsonl" > .agent/report.md 2>&1 || true
+              tail -5 "$RUNNER_TEMP/oc.err" >> .agent/report.md
+            fi
           else
             python3 .agent/agent.py --provider openai --base-url https://opencode.ai/inference/go/openai/v1               --model deepseek-v4.1-flash --price-in 0.15 --price-out 0.60               --dir "$PWD" --prompt-file .agent/task.md --log .agent/work0.jsonl               --budget-usd 6 --max-turns "${{ inputs.max_turns }}" --key-file "$RUNNER_TEMP/agent.key"               > .agent/report.md 2>&1 || true
           fi
@@ -84,6 +92,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          git add .agent/report.md
+          git add .agent/report.md $(ls .agent/pipeline.md 2>/dev/null)
           git commit -q -m "agent worker report" || true
           git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}" "HEAD:${{ github.ref_name }}"
