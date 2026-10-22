@@ -49,8 +49,14 @@ def main() -> None:
     print(d["a"], d["b"][0], d["a"] == 16843009, d["a"] == "1.1.1.1")
     print(A("1.2.3.4") < A("1.2.3.5"), A("1.2.3.4") <= A("1.2.3.4"), A("1.2.3.5") > A("1.2.3.4"))
     print(str(A(0)), str(A(4294967295)), str(A(b"\xff\x00\x01\x02")))
+    for text in ["192.0.0.8", "192.0.0.9", "192.0.0.10", "192.0.0.170", "224.0.0.1",
+                 "100.64.0.1", "240.0.0.1", "255.255.255.255"]:
+        a = A(text)
+        print("flags", text, a.is_private, a.is_global)
+    print("hash", hash(A("1.1.1.1")) == hash(hex(16843009)),
+          hash(A("1.1.1.1")) == hash(16843009))
     for bad in ["", "1.2.3", "1.2.3.4.5", "256.1.1.1", "01.2.3.4", "1..2.3", "1.2.3.x",
-                "1234.1.1.1", "9999.1.1.1", "1.2.3.4444"]:
+                "1234.1.1.1", "9999.1.1.1", "1.2.3.4444", "1.2.3.4/24", "1.2.3.4/", "/24"]:
         try:
             ipa.IPv4Address(bad)
             print("no error", bad)
@@ -112,6 +118,16 @@ def main() -> None:
     print(up.quote("a b/c?d=e&f", safe="/"), up.quote_plus("a b/c?d=e&f"), up.quote("héllo"))
     print(up.urlencode({"a": "1", "b": "x y&z"}), up.urlencode({"a": ["1", "2"]}, doseq=True))
     print(up.urlencode([("a", "1"), ("b", "2")]))
+    print(up.urlencode([("a", ["1", "2"]), ("b", "3")], doseq=True))
+    print(up.urlencode([("a", ("1", "2")), ("b", "3")], doseq=True))
+    print(up.urlencode([("a", []), ("b", "3")], doseq=True))
+    for text in ["http://x[::1]/", "http://[abc]/", "http://[]/", "http://[::1]x/",
+                 "http://[1.2.3.4]/", "http://[v.x]/"]:
+        try:
+            print(us(text))
+            print("no error", text)
+        except ValueError as e:
+            print("ValueError", e)
     print(up.urljoin("http://a/b/c/d;p?q", "../g"), up.urljoin("http://a/b/c/d;p?q", "//g/x"),
           up.urljoin("http://a/b/c/d;p?q", "?y"), up.urljoin("http://a/b/c/d;p?q", "#s"))
     for text in ["foo://h/a;b?q", "http://h/a;b/c", "http://h/a/b;c", "http://h/a;b;c/d",
@@ -215,6 +231,30 @@ class Stdlib6Test(unittest.TestCase):
         self.assertEqual(up._AilParseQsl('x=%E9', encoding='latin-1'), [('x', 'é')])
         self.assertEqual(up._AilUrlJoin('x', ';x'), '/;x')
         self.assertEqual(up._AilUrlJoin('x', ';x?y#s'), '/;x?y#s')
+        self.assertEqual(up._AilUrlEncode([('a', ['1', '2']), ('b', '3')], doseq=True),
+                         'a=1&a=2&b=3')
+        self.assertEqual(up._AilUrlEncode([('a', ('1', '2')), ('b', '3')], doseq=True),
+                         'a=1&a=2&b=3')
+        self.assertEqual(up._AilUrlEncode([('a', []), ('b', '3')], doseq=True), 'b=3')
+        for text, message in [('http://x[::1]/', 'Invalid IPv6 URL'),
+                              ('http://[abc]/', "'abc' does not appear to be an IPv4 or IPv6 address"),
+                              ('http://[::1]x/', 'Invalid IPv6 URL'),
+                              ('http://[1.2.3.4]/', 'An IPv4 address cannot be in brackets'),
+                              ('http://[v.x]/', 'IPvFuture address is invalid')]:
+            with self.assertRaises(ValueError) as raised:
+                up._AilUrlSplit(text)
+            self.assertEqual(str(raised.exception), message)
+        self.assertEqual((ip._AilIPv4Address('192.0.0.8').is_private,
+                          ip._AilIPv4Address('192.0.0.8').is_global), (True, False))
+        self.assertEqual((ip._AilIPv4Address('224.0.0.1').is_private,
+                          ip._AilIPv4Address('224.0.0.1').is_global), (False, True))
+        self.assertFalse(ip._AilIPv4Address('192.0.0.9').is_private)
+        self.assertTrue(ip._AilIPv4Address('192.0.0.10').is_global)
+        with self.assertRaises(ValueError) as raised:
+            ip._AilIPv4Address('1.2.3.4/24')
+        self.assertEqual(str(raised.exception), "Unexpected '/' in '1.2.3.4/24'")
+        self.assertFalse(hash(ip._AilIPv4Address('1.1.1.1')) == hash(16843009))
+        self.assertEqual(hash(ip._AilIPv4Address('1.1.1.1')), hash(hex(16843009)))
 
     def test_unsupported_names_are_refused(self):
         for source, needle in [

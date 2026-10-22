@@ -1,5 +1,21 @@
 # DEVLOG
 
+## 2026-10-22 — job-cov6-10221632: fix the batch-6 review defects
+
+- `urlencode(..., doseq=True)` now expands list/tuple values in a sequence of pairs, not only in a dict
+  (`[("a", ["1", "2"]), ("b", "3")]` gives `a=1&a=2&b=3`).
+- `urlsplit`/`urlparse` run CPython's bracketed-netloc check: `x[::1]` and data after `]` are
+  `Invalid IPv6 URL`, while `[abc]` is `"'abc' does not appear to be an IPv4 or IPv6 address"` and
+  bracketed IPv4 is refused.
+- `IPv4Address.is_private` uses `192.0.0.0/24` with the `192.0.0.9`/`192.0.0.10` exceptions;
+  `is_global` is `not is_private and not 100.64.0.0/10`, so multicast is global.
+- `IPv4Address` rejects `/` before octet parsing, and `__hash__` hashes `hex(value)`. The runtime no
+  longer re-hashes the `__hash__` result of every class with `__int__`; `IntEnum.__hash__` returns
+  `hash(value)` itself.
+- Probes `probe_doseq`, `probe_url_brackets`, `probe_ip_fixes2` and the hash property probes match
+  CPython on both builds. `test_ail_stdlib6`, `test_ail_fuzz1.HashValues` and
+  `test_ail_stdlib5.CompiledPrograms` pass.
+
 ## 2026-10-22 — job-cov6-10220953: fix the batch-6 review defects
 
 - `urlparse` now splits `params` only for `uses_params` schemes and only after the last `/`;
