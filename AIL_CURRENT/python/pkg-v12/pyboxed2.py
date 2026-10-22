@@ -1020,6 +1020,49 @@ static inline void ail2_sys_exit(ail_ctx *cx, int has_arg, ail_obj arg) {
     ail_ctx_destroy(cx);
     exit(code);
 }
+
+/* CPython's UNPACK_SEQUENCE texts.  The counts are part of the message: `a, b = xs` says
+   "(expected 2, got 1)" or "(expected 2)", and a starred target says "(expected at least 2,
+   got 1)".  A non-iterable operand says "cannot unpack non-iterable int object", never the
+   plain iter() message "'int' object is not iterable". */
+__attribute__((noinline, cold)) static ail_st ail2_unpack_too_few(ail_ctx *cx, int64_t want, int64_t got) {
+    char buf[96];
+    snprintf(buf, sizeof buf, "not enough values to unpack (expected %lld, got %lld)",
+             (long long)want, (long long)got);
+    return ail_raise_c(cx, AIL_B_VALUEERROR, buf);
+}
+__attribute__((noinline, cold)) static ail_st ail2_unpack_too_many(ail_ctx *cx, int64_t want) {
+    char buf[80];
+    snprintf(buf, sizeof buf, "too many values to unpack (expected %lld)", (long long)want);
+    return ail_raise_c(cx, AIL_B_VALUEERROR, buf);
+}
+__attribute__((noinline, cold)) static ail_st ail2_unpack_too_few_at_least(ail_ctx *cx, int64_t want, int64_t got) {
+    char buf[104];
+    snprintf(buf, sizeof buf, "not enough values to unpack (expected at least %lld, got %lld)",
+             (long long)want, (long long)got);
+    return ail_raise_c(cx, AIL_B_VALUEERROR, buf);
+}
+/* ail_iter(), but a non-iterable operand gets CPython's unpack wording.  A user __iter__ that
+   raises its own TypeError is left alone (the class has an iter method, so its exception is
+   the program's, not a missing-protocol error). */
+__attribute__((noinline, cold)) static ail_st ail2_unpack_iter(ail_ctx *cx, ail_obj *out, ail_obj v) {
+    ail_st st = ail_iter(cx, out, v);
+    if (st == AIL_EXC) {
+        int has_iter = 0;
+        if (v.tag == AIL_T_INST) {
+            for (ail_obj k = ((ail_instobj *)v.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+                ail_classobj *kc = (ail_classobj *)k.o;
+                if (kc->iter_iter || kc->iter_next) { has_iter = 1; break; }
+            }
+        }
+        if (!has_iter) {
+            char buf[160];
+            snprintf(buf, sizeof buf, "cannot unpack non-iterable %s object", ail__tname_c(v));
+            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+        }
+    }
+    return st;
+}
 /* ============================================================================================= */
 '''
 PREAMBLE = _PREAMBLE_HEAD + _PREAMBLE_TAIL
@@ -6575,11 +6618,13 @@ class Compiler(boxclosure.ClosureMixin):
         # same scope as the other unambiguous-name methods).
         return self._dict_fromkeys(args, kwargs, ctx)
 
-    def _extend_from_iter(self, listexpr, src, ctx, ordered=True):
+    def _extend_from_iter(self, listexpr, src, ctx, ordered=True, unpack=False):
         it = ctx.tmp(); val = ctx.tmp()
         # ordered=False: the order the elements arrive in cannot show (sorted() with no key), so a set whose
         # CPython order cannot be reproduced (str ...) may still be read
-        ctx.emit('st = %s(cx, &%s, %s);' % ('ail_iter', it, src))
+        # unpack=True: this materialises a starred unpack target, so a missing iteration protocol
+        # gets CPython's "cannot unpack non-iterable ... object" wording.
+        ctx.emit('st = %s(cx, &%s, %s);' % ('ail2_unpack_iter' if unpack else 'ail_iter', it, src))
         ctx.check()
         ctx.emit('for (;;) {')
         ctx.indent += 1
@@ -9433,11 +9478,10 @@ class Compiler(boxclosure.ClosureMixin):
                     ctx.check()
                     lenv = ctx.new_cvar('n')
                     ctx.emit('int64_t %s = (%s).i;' % (lenv, leno))
-                    ctx.emit('if (%s < %d) { st = ail_raise_c(cx, AIL_B_VALUEERROR, '
-                             '"not enough values to unpack (expected %d)"); goto %s; }' %
+                    ctx.emit('if (%s < %d) { st = ail2_unpack_too_few(cx, %d, %s); goto %s; }' %
+                             (lenv, n, n, lenv, ctx.cur_err_target()))
+                    ctx.emit('if (%s > %d) { st = ail2_unpack_too_many(cx, %d); goto %s; }' %
                              (lenv, n, n, ctx.cur_err_target()))
-                    ctx.emit('if (%s > %d) { st = ail_raise_c(cx, AIL_B_VALUEERROR, "too many '
-                             'values to unpack"); goto %s; }' % (lenv, n, ctx.cur_err_target()))
                     ctx.uses_st = True
                     for i, e in enumerate(target.elts):
                         val = ctx.tmp()
@@ -9467,21 +9511,20 @@ class Compiler(boxclosure.ClosureMixin):
                     ctx.emit('}')
                     ctx.uses_st = True
                 itv = ctx.tmp()
-                ctx.emit('st = ail_iter(cx, &%s, %s);' % (itv, vt))
+                ctx.emit('st = ail2_unpack_iter(cx, &%s, %s);' % (itv, vt))
                 ctx.check()
                 slots = []
                 for i, e in enumerate(target.elts):
                     val = ctx.tmp()
                     ctx.emit('st = ail_it_next(cx, &%s, %s);' % (val, itv))
-                    ctx.emit('if (st == AIL_STOP) { st = ail_raise_c(cx, AIL_B_VALUEERROR, '
-                             '"not enough values to unpack (expected %d)"); goto %s; }' %
-                             (len(target.elts), ctx.cur_err_target()))
+                    ctx.emit('if (st == AIL_STOP) { st = ail2_unpack_too_few(cx, %d, %d); goto %s; }' %
+                             (len(target.elts), i, ctx.cur_err_target()))
                     ctx.check()
                     slots.append((e, val))
                 extra = ctx.tmp()
                 ctx.emit('st = ail_it_next(cx, &%s, %s);' % (extra, itv))
-                ctx.emit('if (st == AIL_OK) { st = ail_raise_c(cx, AIL_B_VALUEERROR, "too many '
-                         'values to unpack"); goto %s; }' % ctx.cur_err_target())
+                ctx.emit('if (st == AIL_OK) { st = ail2_unpack_too_many(cx, %d); goto %s; }' %
+                         (len(target.elts), ctx.cur_err_target()))
                 ctx.emit('if (st != AIL_STOP) goto %s;' % ctx.cur_err_target())
                 ctx.emit('st = AIL_OK;')
                 ctx.uses_st = True
@@ -9495,7 +9538,7 @@ class Compiler(boxclosure.ClosureMixin):
             # for `b`'s own list value).
             mtl = ctx.tmp()
             ctx.emit('%s = ail_list_new(cx);' % mtl)
-            self._extend_from_iter(mtl, vt, ctx)
+            self._extend_from_iter(mtl, vt, ctx, unpack=True)
             vt = mtl
             lenobj = ctx.tmp()
             ctx.emit('st = ail_op_len(cx, &%s, %s);' % (lenobj, vt))
@@ -9504,8 +9547,8 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('int64_t %s = (%s).i;' % (lenv, lenobj))
             star_i = star_positions[0]
             n_before, n_after = star_i, len(target.elts) - star_i - 1
-            ctx.emit('if (%s < %d) { st = ail_raise_c(cx, AIL_B_VALUEERROR, "not enough values '
-                     'to unpack"); goto %s; }' % (lenv, n_before + n_after, ctx.cur_err_target()))
+            ctx.emit('if (%s < %d) { st = ail2_unpack_too_few_at_least(cx, %d, %s); goto %s; }' %
+                     (lenv, n_before + n_after, n_before + n_after, lenv, ctx.cur_err_target()))
             ctx.uses_st = True
             for i, e in enumerate(target.elts[:star_i]):
                 it = ctx.tmp()
