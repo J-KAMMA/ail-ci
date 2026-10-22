@@ -1,5 +1,16 @@
 # Development log
 
+## 2026-10-22 -- C169 review fixes: receiver class and rebinding in typed bounds
+
+The typed list lowering now resolves an `obj.field` index bound against the receiver's visible
+class -- a parameter/local annotation, constructor assignment, alias or `self` field chain -- and
+falls back when it cannot.  It no longer accepts any class's same-named field, which made a float
+field look like an int when another class declared that name as int.  `index_name_kind` now treats
+tuple, starred, with, except, import, walrus, comprehension and nested-definition bindings as
+unknown instead of reusing an earlier int assignment.  `test_ail_c169.py` builds the typed-lowering
+case with `AIL_NO_GENERAL=1` (so it no longer silently exercises the general fallback) and adds
+regression cases for class-field receivers and tuple/starred bindings.
+
 ## 2026-10-22 -- C169 review fixes: typed list.index bounds and long __index__ names
 
 The default typed list lowering now classifies `list.index` start/stop bounds: visibly int/bool
