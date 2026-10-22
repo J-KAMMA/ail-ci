@@ -28,7 +28,9 @@ D1 = {'__neg__': 'NEG', '__pos__': 'POS', '__abs__': 'ABS', '__hash__': 'HASH', 
 D2 = {'__add__': 'ADD', '__radd__': 'RADD', '__sub__': 'SUB', '__rsub__': 'RSUB', '__mul__': 'MUL',
       '__rmul__': 'RMUL', '__truediv__': 'TRUEDIV', '__rtruediv__': 'RTRUEDIV', '__floordiv__': 'FLOORDIV',
       '__rfloordiv__': 'RFLOORDIV', '__mod__': 'MOD', '__rmod__': 'RMOD', '__pow__': 'POW', '__rpow__': 'RPOW',
-      '__eq__': 'EQ', '__gt__': 'GT', '__round__': 'ROUND', '__getitem__': 'GETITEM', '__contains__': 'CONTAINS',
+      '__eq__': 'EQ', '__gt__': 'GT', '__lt__': 'LT', '__le__': 'LE', '__ge__': 'GE',
+      '__divmod__': 'DIVMOD', '__rdivmod__': 'RDIVMOD',
+      '__round__': 'ROUND', '__getitem__': 'GETITEM', '__contains__': 'CONTAINS',
       '__delitem__': 'DELITEM', '__ne__': 'NE', '__and__': 'AND', '__rand__': 'RAND', '__or__': 'OR', '__ror__': 'ROR',
       '__xor__': 'XOR', '__rxor__': 'RXOR', '__lshift__': 'LSHIFT', '__rlshift__': 'RLSHIFT', '__rshift__': 'RSHIFT',
       '__rrshift__': 'RRSHIFT', '__format__': 'FORMAT'}
@@ -44,6 +46,7 @@ enum { AIL_D1_NEG, AIL_D1_POS, AIL_D1_ABS, AIL_D1_HASH, AIL_D1_BOOL, AIL_D1_INT,
        AIL_D1_CEIL, AIL_D1_TRUNC, AIL_D1_LEN, AIL_D1_INDEX, AIL_D1_INVERT, AIL_ND1 };
 enum { AIL_D2_ADD, AIL_D2_RADD, AIL_D2_SUB, AIL_D2_RSUB, AIL_D2_MUL, AIL_D2_RMUL, AIL_D2_TRUEDIV, AIL_D2_RTRUEDIV,
        AIL_D2_FLOORDIV, AIL_D2_RFLOORDIV, AIL_D2_MOD, AIL_D2_RMOD, AIL_D2_POW, AIL_D2_RPOW, AIL_D2_EQ, AIL_D2_GT,
+       AIL_D2_LT, AIL_D2_LE, AIL_D2_GE, AIL_D2_DIVMOD, AIL_D2_RDIVMOD,
        AIL_D2_ROUND, AIL_D2_GETITEM, AIL_D2_CONTAINS, AIL_D2_DELITEM, AIL_D2_NE, AIL_D2_AND, AIL_D2_RAND, AIL_D2_OR,
        AIL_D2_ROR, AIL_D2_XOR, AIL_D2_RXOR, AIL_D2_LSHIFT, AIL_D2_RLSHIFT, AIL_D2_RSHIFT, AIL_D2_RRSHIFT, AIL_D2_FORMAT, AIL_ND2 };
 enum { AIL_D3_SETITEM, AIL_ND3 };
@@ -199,6 +202,35 @@ __attribute__((noinline)) static int ail_dun_cmp_rev(ail_ctx *cx, int64_t *out, 
     }
     return 0;
 }
+static inline int ail_dun_notni(ail_obj x) { (void)x; return 1; }
+__attribute__((noinline)) static int ail_dun_cmp_op(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b,
+                                                     int fwd, int rev, ail_st *stp) {
+    ail_d2_fn f; ail_obj r;
+    if (a.tag == AIL_T_INST) {
+        f = ail_dun2(a, fwd);
+        if (f) {
+            *stp = f(cx, &r, a, b);
+            if (*stp != AIL_OK) return 1;
+            if (ail_dun_notni(r)) { *out = ail_box_bool(ail_obj_truthy(r)); return 1; }
+        }
+    }
+    if (b.tag == AIL_T_INST) {
+        f = ail_dun2(b, rev);
+        if (f) {
+            *stp = f(cx, &r, b, a);
+            if (*stp != AIL_OK) return 1;
+            if (ail_dun_notni(r)) { *out = ail_box_bool(ail_obj_truthy(r)); return 1; }
+        }
+    }
+    *stp = AIL_OK;
+    return 0;
+}
+__attribute__((noinline, cold)) static ail_st ail_dun_cmp_fail(ail_ctx *cx, ail_obj a, ail_obj b, const char *op) {
+    char na[80], nb[80], buf[200];
+    ail__dun_tname(na, sizeof na, a); ail__dun_tname(nb, sizeof nb, b);
+    snprintf(buf, sizeof buf, "'%s' not supported between instances of '%s' and '%s'", op, na, nb);
+    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+}
 /* C42: inside `==`, `!=` and `in` an exception raised by a user __eq__ called for the elements of a container is kept
    here and raised by the operator; elsewhere (index, count, remove, dict and set probes) it is still dropped */
 static ail_st ail__eq_err; static int ail__eq_scope;
@@ -283,6 +315,97 @@ _VIEW_OP_NE = (
     'static inline ail_st ail_op_ne(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n'
     '    if (__builtin_expect(ail__view_kind(a) || ail__view_kind(b), 0)) { int r = 0; ail_st st = ail__view_eq(cx, &r, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(!r); return AIL_OK; }\n'
     '    *out = ail_box_bool(!ail_obj_eq_raw(a, b)); return AIL_OK;\n}')
+
+
+CMP_WRAPPERS = [
+    ("""static inline ail_st ail_op_lt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 0)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0); return AIL_OK; }""",
+     """static inline ail_st ail_op_lt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 0)); return AIL_OK; } if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) { ail_st dst; if (ail_dun_cmp_op(cx, out, a, b, AIL_D2_LT, AIL_D2_GT, &dst)) return dst; return ail_dun_cmp_fail(cx, a, b, "<"); } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0); return AIL_OK; }"""),
+    ("""static inline ail_st ail_op_le(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 1)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK; }""",
+     """static inline ail_st ail_op_le(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 1)); return AIL_OK; } if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) { ail_st dst; if (ail_dun_cmp_op(cx, out, a, b, AIL_D2_LE, AIL_D2_GE, &dst)) return dst; return ail_dun_cmp_fail(cx, a, b, "<="); } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK; }"""),
+    ("""static inline ail_st ail_op_gt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 2)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0); return AIL_OK; }""",
+     """static inline ail_st ail_op_gt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 2)); return AIL_OK; } if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) { ail_st dst; if (ail_dun_cmp_op(cx, out, a, b, AIL_D2_GT, AIL_D2_LT, &dst)) return dst; return ail_dun_cmp_fail(cx, a, b, ">"); } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0); return AIL_OK; }"""),
+    ("""static inline ail_st ail_op_ge(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 3)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK; }""",
+     """static inline ail_st ail_op_ge(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 3)); return AIL_OK; } if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) { ail_st dst; if (ail_dun_cmp_op(cx, out, a, b, AIL_D2_GE, AIL_D2_LE, &dst)) return dst; return ail_dun_cmp_fail(cx, a, b, ">="); } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK; }"""),
+]
+
+POW_OLD = """static inline ail_st ail_bi_pow(ail_ctx *cx, ail_obj *out, ail_obj base, ail_obj exp, int has_mod, ail_obj modv) {
+    if (!has_mod) return ail_op_pow(cx, out, base, exp);
+"""
+
+POW_NEW = """static inline ail_st ail_bi_pow(ail_ctx *cx, ail_obj *out, ail_obj base, ail_obj exp, int has_mod, ail_obj modv) {
+    if (!has_mod) return ail_op_pow(cx, out, base, exp);
+    ail_obj oa = base, ob = exp, om = modv;
+    ail_obj *pp[3] = { &base, &exp, &modv };
+    for (int i = 0; i < 3; i++) if (pp[i]->tag == AIL_T_INST) {
+        ail_d1_fn xf = ail_dun1(*pp[i], AIL_D1_INDEX);
+        if (xf) { ail_obj v; ail_st xst = xf(cx, &v, *pp[i]); if (xst != AIL_OK) return xst; *pp[i] = v; }
+    }
+    if (!ail__is_intlike(base.tag) || !ail__is_intlike(exp.tag) || !ail__is_intlike(modv.tag)) {
+        if (oa.tag == AIL_T_FLOAT || ob.tag == AIL_T_FLOAT || om.tag == AIL_T_FLOAT)
+            return ail_raise_c(cx, AIL_B_TYPEERROR, "pow() 3rd argument not allowed unless all arguments are integers");
+        char na[80], nb[80], nm[80], buf[240];
+        ail__dun_tname(na, sizeof na, oa); ail__dun_tname(nb, sizeof nb, ob); ail__dun_tname(nm, sizeof nm, om);
+        snprintf(buf, sizeof buf, "unsupported operand type(s) for ** or pow(): '%s', '%s', '%s'", na, nb, nm);
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
+"""
+
+DIVMOD_OLD = """static inline ail_st ail_bi_divmod(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
+        if (a.tag == AIL_T_FLOAT || b.tag == AIL_T_FLOAT) {
+            if (ail__as_double(b) == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "float divmod()");
+        }
+    } else {
+        char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for divmod(): '%s' and '%s'", ail_type_name(a.tag), ail_type_name(b.tag));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
+    AIL_FRAME_ENTER(cx, fr, 2);
+    ail_st st = ail_op_floordiv(cx, &fr.slots[0], a, b);
+    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    st = ail_op_mod(cx, &fr.slots[1], a, b);
+    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    ail_obj pr[2]; pr[0] = fr.slots[0]; pr[1] = fr.slots[1];
+    *out = ail_tuple_new(cx, pr, 2);
+    AIL_FRAME_LEAVE(cx, fr);
+    return AIL_OK;
+}"""
+
+DIVMOD_NEW = """static inline ail_st ail_bi_divmod(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    ail_obj oa = a, ob = b;
+    ail_d2_fn f; ail_obj r; ail_st st;
+    if (a.tag == AIL_T_INST) {
+        f = ail_dun2(a, AIL_D2_DIVMOD);
+        if (f) { st = f(cx, &r, a, b); if (st != AIL_OK) return st; if (ail_dun_notni(r)) { *out = r; return AIL_OK; } }
+    }
+    if (b.tag == AIL_T_INST) {
+        f = ail_dun2(b, AIL_D2_RDIVMOD);
+        if (f) { st = f(cx, &r, b, a); if (st != AIL_OK) return st; if (ail_dun_notni(r)) { *out = r; return AIL_OK; } }
+    }
+    ail_obj *pp[2] = { &a, &b };
+    for (int i = 0; i < 2; i++) if (pp[i]->tag == AIL_T_INST) {
+        ail_d1_fn xf = ail_dun1(*pp[i], AIL_D1_INDEX);
+        if (xf) { ail_obj v; st = xf(cx, &v, *pp[i]); if (st != AIL_OK) return st; *pp[i] = v; }
+    }
+    if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
+        if (a.tag == AIL_T_FLOAT || b.tag == AIL_T_FLOAT) {
+            if (ail__as_double(b) == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "float divmod()");
+        }
+    } else {
+        char na[80], nb[80], buf[200];
+        ail__dun_tname(na, sizeof na, oa); ail__dun_tname(nb, sizeof nb, ob);
+        snprintf(buf, sizeof buf, "unsupported operand type(s) for divmod(): '%s' and '%s'", na, nb);
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
+    AIL_FRAME_ENTER(cx, fr, 2);
+    st = ail_op_floordiv(cx, &fr.slots[0], a, b);
+    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    st = ail_op_mod(cx, &fr.slots[1], a, b);
+    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    ail_obj pr[2]; pr[0] = fr.slots[0]; pr[1] = fr.slots[1];
+    *out = ail_tuple_new(cx, pr, 2);
+    AIL_FRAME_LEAVE(cx, fr);
+    return AIL_OK;
+}"""
 
 
 def _edits():
@@ -463,16 +586,13 @@ def _edits():
               "        }\n"
               "        /* fall through */\n"
               "        default: { char buf[80]; snprintf(buf, sizeof buf, \"float() argument must be a string or a number, not '%s'\", ail_type_name(x.tag));"))
-    # pow(base, exp, mod): an IntEnum / IntFlag member is an int subclass, so the 3-arg form
-    # accepts it (through __index__) before the core's int-only check.
-    e.append(('static inline ail_st ail_bi_pow(ail_ctx *cx, ail_obj *out, ail_obj base, ail_obj exp, int has_mod, ail_obj modv) {\n'
-              '    if (!has_mod) return ail_op_pow(cx, out, base, exp);\n',
-              'static inline ail_st ail_bi_pow(ail_ctx *cx, ail_obj *out, ail_obj base, ail_obj exp, int has_mod, ail_obj modv) {\n'
-              '    if (!has_mod) return ail_op_pow(cx, out, base, exp);\n'
-              '    ail_obj *pp[3] = { &base, &exp, &modv };\n'
-              '    for (int i = 0; i < 3; i++) if (pp[i]->tag == AIL_T_INST) {\n'
-              '        ail_d1_fn f = ail_dun1(*pp[i], AIL_D1_INDEX); if (f) { ail_obj v; ail_st st = f(cx, &v, *pp[i]); if (st != AIL_OK) return st; *pp[i] = v; }\n'
-              '    }\n'))
+    for old, new in CMP_WRAPPERS:
+        e.append((old, new))
+    # divmod(a, b): __divmod__ / __rdivmod__ decide first (CPython never uses __floordiv__ / __mod__ for it);
+    # an IntEnum / IntFlag member is converted through __index__ only after that, and the error names the
+    # original operands.
+    e.append((DIVMOD_OLD, DIVMOD_NEW))
+    e.append((POW_OLD, POW_NEW))
     e.append(('static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, int64_t n) {\n',
               'static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, int64_t n) {\n'
               '    if (x.tag == AIL_T_INST) { ail_d2_fn f = ail_dun2(x, AIL_D2_ROUND); if (f) return f(cx, out, x, has_n ? ail_box_int(n) : ail_box_none()); }\n'))
