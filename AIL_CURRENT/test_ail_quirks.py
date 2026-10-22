@@ -715,6 +715,35 @@ main()
 '''
         self.same(text, 'fold_over_generator_of_instances', modes=MODES, allow=())
 
+    def test_class_loop_variable_read_after_loop(self):
+        # unbound.py guards a possibly-unassigned read; for a class value the guard wraps the whole attribute read
+        text = '''
+class Item:
+    def __init__(self, v: int) -> None:
+        self.v = v
+
+    def twice(self, k: int) -> int:
+        return self.v * 2 + k
+
+
+def last(rows: list[Item]) -> int:
+    for r in rows:
+        pass
+    return r.v + r.twice(1)
+
+
+def main() -> None:
+    print(last([Item(1), Item(4)]))
+    try:
+        print(last([]))
+    except UnboundLocalError as e:
+        print("unbound", e)
+
+
+main()
+'''
+        self.same(text, 'class_loop_variable_read_after_loop', modes=MODES, allow=())
+
     def test_fold_over_dataclass_instances(self):
         text = '''
 from dataclasses import dataclass
