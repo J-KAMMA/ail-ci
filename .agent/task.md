@@ -1,6 +1,10 @@
-**Find and fix silent wrong answers in one area: dataclasses and enums (field defaults and default_factory, frozen, order, eq, repr, replace, asdict, astuple; Enum iteration, value and name lookup, aliases, auto(), Flag combinations, comparisons).** Write 30 or more small random programs in this area, including edge cases: empty, zero, negative, huge, wrong types, nesting. Run each with `bash ~/tools/cmp.sh` on both builds.
+You continue on the current branch, where your earlier work is committed. **Fix only these findings from the last review, nothing else:**
 
-For every program whose stdout differs from CPython with no error, either fix the cause or refuse it by name at compile time. Fix at most 3 causes and list the rest in your report. Add the fixed cases as tests in a new `test_ail_fuzz17.py`, then commit.
+1. Honour `unsafe_hash`/annotated `__hash__` in the `eq=False` path (`q01`, `q02`, `q12`).
+2. Refuse or handle member writes through aliases and variable-name `setattr` (`q03`, `q04b`, `q09`).
+3. Use the base's generated repr for an empty `repr=False` dataclass, and avoid the compiler crash (`q05`, `q11b`).
+
+Probe both builds with `bash ~/tools/cmp.sh`, add each fixed case to the tests, then commit. If a finding cannot be fixed safely, refuse the construct by name at compile time instead of leaving a silent wrong answer.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
