@@ -56,12 +56,30 @@
     `quote_plus`, `unquote`, `unquote_plus`, `urljoin`, `urlencode`. Other names are refused by name.
 - The four corpus programs that needed these (`g01_004`, `g01_020`, `g17_020`, `g20_020`) now match
   CPython on both builds. Tests: `test_ail_stdlib6`.
+## 2026-10-22 - fuzz8 review 2 fixes (job-fuzz8-10221632)
+
+1. `_attribute_kind` / `_attribute_container` now add the attribute to the recursion guard `seen`
+   and return `None` on a cycle instead of recursing forever.  `b.x = b.x + 1` (or `b.x = b.x`)
+   together with `itertools.accumulate(..., initial=b.x)` or `groupby([b.x, ...])` no longer aborts
+   every build with `RecursionError`; the typed path declines and the default build falls back,
+   matching CPython (`[2, 3.5]`, `1 [1, 1]` / `2 [2]`).
+2. Corrected `DIFFERENCES.md` row `C?-job-fuzz8-10221632-2`: mutable-element groupby keys do not
+   run on a typed recompute.  `--strict` refuses the pattern (`'_ilN_gc' is read before it is
+   assigned`) and the default build uses the general path.
+
+`AIL_CURRENT/test_ail_fuzz8.py` covers self-referential and cross-name attribute cycles through
+arguments, list items, dict values, nested attributes and groupby.  Probes:
+`/tmp/probes/attr_cycle_acc.py`, `attr_cycle_self.py`, `attr_cycle_groupby.py`,
+`attr_cycle_two_names.py`, `attr_cycle_nested.py`, `attr_cycle_float.py`,
+`attr_cycle_dict_list.py`.
+
 ## 2026-10-22 - fuzz8 review fixes (job-fuzz8-10221632)
 
-1. `itertools.groupby` on the typed path no longer reuses a look-ahead key for a list of mutable
-   elements.  The key is still evaluated once per element for scalar/str element lists, but for
-   mutable elements it is recomputed when the next group starts, so a mutation in the loop body is
-   seen the way CPython sees it.  Probe `gb_cache_regress_len.py` now prints `1 3` / `3 1`.
+1. `itertools.groupby` no longer reuses a stale look-ahead key for a list of mutable elements.
+   The typed path still declines that pattern (`--strict`: `'_ilN_gc' is read before it is
+   assigned`) and the default build falls back to the general path, which matches CPython.
+   Scalar/str element lists stay on the typed path and call the key once per element.  Probe
+   `gb_cache_regress_len.py` prints `1 3` / `3 1`.
 2. `itertools.accumulate(xs, initial=v)` on the typed path is refused by name when the types of
    `v` and the elements differ.  One-argument `round()` is now classified as `int` through local
    bindings, list items, attributes and dict values, so the float-list probe falls back to the
