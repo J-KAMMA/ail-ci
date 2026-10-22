@@ -381,11 +381,6 @@ DIVMOD_NEW = """static inline ail_st ail_bi_divmod(ail_ctx *cx, ail_obj *out, ai
         f = ail_dun2(b, AIL_D2_RDIVMOD);
         if (f) { st = f(cx, &r, b, a); if (st != AIL_OK) return st; if (ail_dun_notni(r)) { *out = r; return AIL_OK; } }
     }
-    ail_obj *pp[2] = { &a, &b };
-    for (int i = 0; i < 2; i++) if (pp[i]->tag == AIL_T_INST) {
-        ail_d1_fn xf = ail_dun1(*pp[i], AIL_D1_INDEX);
-        if (xf) { ail_obj v; st = xf(cx, &v, *pp[i]); if (st != AIL_OK) return st; *pp[i] = v; }
-    }
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         if (a.tag == AIL_T_FLOAT || b.tag == AIL_T_FLOAT) {
             if (ail__as_double(b) == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "float divmod()");
@@ -587,9 +582,9 @@ def _edits():
               "        default: { char buf[80]; snprintf(buf, sizeof buf, \"float() argument must be a string or a number, not '%s'\", ail_type_name(x.tag));"))
     for old, new in CMP_WRAPPERS:
         e.append((old, new))
-    # divmod(a, b): __divmod__ / __rdivmod__ decide first (CPython never uses __floordiv__ / __mod__ for it);
-    # an IntEnum / IntFlag member is converted through __index__ only after that, and the error names the
-    # original operands.
+    # divmod(a, b): __divmod__ / __rdivmod__ decide first (CPython never uses __floordiv__ / __mod__ for it,
+    # nor does it coerce a plain __index__ object); _AilIntEnum provides both methods, and the error names
+    # the original operands.
     e.append((DIVMOD_OLD, DIVMOD_NEW))
     e.append((POW_OLD, POW_NEW))
     e.append(('static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, int64_t n) {\n',
