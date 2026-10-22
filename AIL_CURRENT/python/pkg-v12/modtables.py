@@ -29,6 +29,7 @@ A program with no such table is not touched.
 """
 import ast
 import copy
+import re
 
 MUTATORS = frozenset(('add', 'discard', 'remove', 'pop', 'popitem', 'clear', 'update', 'setdefault',
                       'append', 'extend', 'insert', 'sort', 'reverse', 'difference_update',
@@ -36,6 +37,9 @@ MUTATORS = frozenset(('add', 'discard', 'remove', 'pop', 'popitem', 'clear', 'up
 # methods that read the table and return a new value, never the table itself
 READ_METHODS = frozenset(('get', 'items', 'keys', 'values', 'copy', 'union', 'intersection', 'difference',
                           'symmetric_difference', 'issubset', 'issuperset', 'isdisjoint'))
+# ... of a list table, and of a tuple table (which is built as a list: no method that answers a list)
+LIST_READ_METHODS = frozenset(('index', 'count', 'copy'))
+TUPLE_READ_METHODS = frozenset(('index', 'count'))
 # built-ins that read their argument and hand back a new value (or an iterator over it)
 SAFE_FUNCS = frozenset(('len', 'sorted', 'list', 'tuple', 'set', 'frozenset', 'dict', 'min', 'max', 'sum',
                         'any', 'all', 'enumerate', 'reversed', 'iter', 'zip', 'map', 'filter'))
@@ -51,13 +55,16 @@ class Table:
     def __init__(self, name, node, annotation, has_bytes, what, literal):
         self.name = name
         self.node = node                # the module-level statement
-        self.annotation = annotation    # 'set[str]', 'dict[str, int]', ...
+        self.annotation = annotation    # 'set[str]', 'dict[str, int]', 'list[tuple[int, str]]', ...
         self.has_bytes = has_bytes
-        self.what = what                # 'set' or 'dict'
-        self.literal = literal          # the (deduplicated) ast.Set / ast.Dict
+        self.what = what                # 'set', 'dict', 'list' or 'tuple' (a tuple table is built as a list)
+        self.literal = literal          # the (deduplicated) ast.Set / ast.Dict, or the ast.List
         # CPython walks a set of ints in hash order (a str set in a per-run random one, which no
         # program can rely on); the compiler walks any set in insertion order
         self.ordered_by_hash = what == 'set' and 'int' in annotation
+        # a list of lists or of objects: its elements can be changed in place, so the table must be
+        # built exactly once (see `_check_single_build`)
+        self.mutable = what in ('list', 'tuple') and not annotation.startswith('list[tuple[')
 
 
 # ---------------------------------------------------------------- the literal
@@ -132,10 +139,47 @@ def _classify(value):
     return None
 
 
+def _list_element(e):
+    """(type text, mutable) of one element of a list / tuple table: a tuple of int / float / str
+    literals, a non-empty list of literals of one kind, or a call `C(<literals>)` of a class (checked
+    to be the program's own, pure-constructor class by `_find_tables`); else None. A bare literal is
+    not one: a list of numbers or of strs is already a module constant."""
+    if isinstance(e, ast.Tuple) and e.elts:
+        parts = [_scalar(x) for x in e.elts]
+        if any(p is None or p[0] == 'bytes' for p in parts):
+            return None
+        return 'tuple[%s]' % ', '.join(p[0] for p in parts), False
+    if isinstance(e, ast.List) and e.elts:
+        parts = [_scalar(x) for x in e.elts]
+        if any(p is None or p[0] == 'bytes' for p in parts) or len({p[0] for p in parts}) != 1:
+            return None
+        return 'list[%s]' % parts[0][0], True
+    if (isinstance(e, ast.Call) and isinstance(e.func, ast.Name)
+            and all(_scalar(a) is not None for a in e.args)
+            and all(k.arg is not None and _scalar(k.value) is not None for k in e.keywords)):
+        return e.func.id, True
+    return None
+
+
+def _classify_list(value):
+    """('list' or 'tuple', 'list[T]', False, ast.List) for a non-empty list or tuple display whose
+    elements `_list_element` accepts, all of one type T; else None."""
+    if not isinstance(value, (ast.List, ast.Tuple)) or not value.elts:
+        return None
+    items = [_list_element(e) for e in value.elts]
+    if any(i is None for i in items) or len({i[0] for i in items}) != 1:
+        return None
+    lit = ast.List(elts=[copy.deepcopy(e) for e in value.elts], ctx=ast.Load())
+    return ('list' if isinstance(value, ast.List) else 'tuple', 'list[%s]' % items[0][0], False, lit)
+
+
 def classify(value, tuples_ok=True):
     """`(what, annotation, has_bytes, deduplicated literal)` for a non-empty set / dict display of
-    literals of ONE kind (a dict: one key kind, one value kind), else None."""
+    literals of ONE kind (a dict: one key kind, one value kind), or a list / tuple display that
+    `_classify_list` accepts; else None."""
     found = _classify(value)
+    if found is None:
+        found = _classify_list(value)
     if found is not None and not tuples_ok and 'tuple[' in found[1]:
         return None
     return found
@@ -163,6 +207,8 @@ def table_assign(node, tuples_ok=True):
         name, value = node.target.id, display(node.value)
     else:
         return None
+    if value is None and _classify_list(node.value) is not None:
+        value = node.value
     if value is None:
         return None
     if classify(value, tuples_ok) is None:
@@ -202,6 +248,8 @@ def _parents(root):
 def _refuse(Unsupported, line, text):
     error = Unsupported(text)
     error.source_line = line
+    named = re.match(r"'([^']+)' is a module-level", text)
+    error.table = named.group(1) if named else None      # the table the refusal is about
     return error
 
 
@@ -253,7 +301,14 @@ def _find_tables(tree, select):
                     stores[base.id] = stores.get(base.id, 0) + 1
     tables = {}
     active = False
+    classes = {}            # pure-constructor classes defined so far (a table may only build those)
+    defined = {}
+    for n in tree.body:
+        if isinstance(n, (ast.FunctionDef, ast.ClassDef)):
+            defined[n.name] = defined.get(n.name, 0) + 1
     for node in tree.body:
+        if isinstance(node, ast.ClassDef) and defined.get(node.name) == 1 and _pure_constructor(node):
+            classes[node.name] = node
         found = table_assign(node)
         if found is None:
             if not _passive(node):
@@ -267,8 +322,39 @@ def _find_tables(tree, select):
             continue        # `set` / `frozenset` is the program's own function
         if active or name in taken or stores.get(name, 0) != 1 or name in tables:
             continue
+        if what in ('list', 'tuple') and '[' not in annotation[5:-1] and annotation[5:-1] not in classes:
+            continue        # objects of a class not defined above, or one whose constructor runs code
+        if (what == 'list' and isinstance(node, ast.Assign)
+                and re.fullmatch(r'list\[tuple\[(int|float)(, (int|float))*\]\]', annotation)
+                and _rowconst_in_place(tree, name)):
+            continue        # `DIRS = [(0, 1), (1, 0)]` read in place: the tuple pass keeps it as number columns
         tables[name] = Table(name, node, annotation, has_bytes, what, literal)
     return tables
+
+
+def _rowconst_in_place(tree, name):
+    from tupcommon import rowconst_in_place
+    return rowconst_in_place(tree, name)
+
+
+def _pure_constructor(cls):
+    """Whether making an instance of `cls` runs nothing but field stores: no base class, no class
+    decorator other than `@dataclass` (no arguments), and an `__init__` / `__post_init__`, if
+    written, that calls nothing. Building a table of such objects once in main() is then the same as
+    building it at import time."""
+    if cls.bases or cls.keywords:
+        return False
+    for d in cls.decorator_list:
+        if not (isinstance(d, ast.Name) and d.id == 'dataclass'):
+            return False
+    for item in cls.body:
+        if isinstance(item, ast.FunctionDef) and item.name in ('__init__', '__post_init__', '__new__'):
+            if item.name == '__new__' or any(isinstance(n, (ast.Call, ast.Yield, ast.Await)) for n in ast.walk(item)):
+                return False
+        elif isinstance(item, (ast.AnnAssign, ast.Assign)) and item.value is not None and any(
+                isinstance(n, ast.Call) for n in ast.walk(item.value)):
+            return False    # a default computed by a call (`field(default_factory=list)`)
+    return True
 
 
 def _order_free(n, parents):
@@ -288,10 +374,104 @@ def _order_free(n, parents):
     return False
 
 
+def _judge(n, name, t, parents, bound, own, Unsupported, seen):
+    """Refuse a use `n` of table `t` (spelled `name` here: the table, or a parameter it was passed
+    to) that could change or share it; return whether `n` is a use the table allows."""
+    p = parents.get(n)
+    ok = False
+    if isinstance(p, ast.Compare) and n in p.comparators:
+        ok = isinstance(p.ops[p.comparators.index(n)], (ast.In, ast.NotIn))
+    elif isinstance(p, ast.Subscript) and p.value is n:
+        ok = isinstance(p.ctx, ast.Load) and not isinstance(p.slice, ast.Slice)
+        if isinstance(p.ctx, (ast.Store, ast.Del)):
+            raise _refuse(Unsupported, n.lineno,
+                          "%r is a module-level %s; `%s` would change a table every other function "
+                          "reads.\n  write instead: leave the table read-only; a table that changes is "
+                          "a local (`%s = %s(%s)` for a copy), or a dataclass field"
+                          % (t.name, t.what, _snippet(p), name.lower(), t.what, name))
+    elif isinstance(p, ast.Attribute) and p.value is n:
+        call = parents.get(p)
+        if p.attr in MUTATORS:
+            raise _refuse(Unsupported, n.lineno,
+                          "%r is a module-level %s; `%s.%s(...)` would change a table every other "
+                          "function reads.\n  write instead: leave the table read-only; a table that "
+                          "changes is a local (`%s = %s(%s)` for a copy), or a dataclass field"
+                          % (t.name, t.what, name, p.attr, name.lower(), t.what, name))
+        methods = (READ_METHODS if t.what in ('set', 'dict')
+                   else LIST_READ_METHODS if t.what == 'list' else TUPLE_READ_METHODS)
+        ok = p.attr in methods and isinstance(call, ast.Call) and call.func is p
+    elif isinstance(p, ast.BinOp) and isinstance(p.op, (ast.BitOr, ast.BitAnd, ast.Sub, ast.BitXor)) \
+            and t.what in ('set', 'dict'):
+        ok = True       # a new set (a new dict for `|`)
+    elif isinstance(p, ast.AugAssign) and p.target is n:
+        raise _refuse(Unsupported, n.lineno,
+                      "%r is a module-level %s; `%s` would change a table every other function "
+                      "reads.\n  write instead: leave the table read-only, or build a new one "
+                      "(`%s = %s | other`)" % (t.name, t.what, _snippet(p), name.lower(), name))
+    elif isinstance(p, ast.Call) and n in p.args and isinstance(p.func, ast.Name):
+        ok = p.func.id in SAFE_FUNCS and p.func.id not in bound
+        if not ok and p.func.id in own and p.func.id not in bound:
+            # handed to one of the program's own functions: fine when that function only reads it
+            ok = _param_reads_only(own[p.func.id], p.args.index(n), t, own, Unsupported, seen)
+    elif isinstance(p, ast.Call) and n in p.args and isinstance(p.func, ast.Attribute) \
+            and p.func.attr == 'join' and isinstance(p.func.value, ast.Constant):
+        ok = True
+    elif isinstance(p, (ast.For, ast.AsyncFor)) and p.iter is n:
+        ok = True
+    elif isinstance(p, ast.comprehension) and p.iter is n:
+        ok = True
+    elif isinstance(p, (ast.If, ast.While, ast.IfExp)) and p.test is n:
+        ok = True
+    elif isinstance(p, ast.UnaryOp) and isinstance(p.op, ast.Not):
+        ok = True
+    if ok:
+        walked = isinstance(p, (ast.For, ast.AsyncFor, ast.comprehension)) or (
+            isinstance(p, ast.Call) and isinstance(p.func, ast.Name) and p.func.id in SAFE_FUNCS)
+        if t.ordered_by_hash and walked and not _order_free(n, parents):
+            raise _refuse(Unsupported, n.lineno,
+                          "%r is a module-level set of ints; `%s` walks it in hash order in CPython and "
+                          "in insertion order here, so the two can differ.\n"
+                          "  write instead: `sorted(%s)` for a fixed order" % (t.name, _snippet(p), name))
+    return ok
+
+
+def _param_reads_only(fn, index, t, own, Unsupported, seen):
+    """Whether parameter `index` of `fn` -- which a caller hands table `t` -- is only read in place
+    in `fn` (the same uses a table allows, passing it on included), never rebound, and not seen
+    by a nested def or lambda. The parameter then is the table, read-only, in both CPython and here."""
+    params = fn.args.posonlyargs + fn.args.args
+    if fn.args.vararg is not None or index >= len(params) or fn.decorator_list:
+        return False
+    pname = params[index].arg
+    key = (fn.name, index, t.name)
+    if key in seen:
+        return True                     # recursion: judged by the uses already being looked at
+    seen.add(key)
+    stored = {x.id for x in ast.walk(fn) if isinstance(x, ast.Name) and isinstance(x.ctx, (ast.Store, ast.Del))}
+    if pname in stored or any(isinstance(x, (ast.Global, ast.Nonlocal)) and pname in x.names for x in ast.walk(fn)):
+        return False
+    for inner in ast.walk(fn):
+        if inner is not fn and isinstance(inner, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            if any(isinstance(x, ast.Name) and x.id == pname for x in ast.walk(inner)):
+                return False
+    parents = _parents(fn)
+    bound = _bound_names(fn) - {pname}
+    try:
+        for x in ast.walk(fn):
+            if isinstance(x, ast.Name) and x.id == pname and isinstance(x.ctx, ast.Load):
+                if not _judge(x, pname, t, parents, bound, own, Unsupported, seen):
+                    return False
+    except Unsupported:
+        return False
+    return True
+
+
 def _check_uses(tables, functions, Unsupported):
     """Refuse, by name, every use of a table that could change it or share it; return, per function,
     the tables it reads."""
     reads = {}
+    tops = [fn for fn, owner in functions if owner is None]
+    own = {fn.name: fn for fn in tops} if len({fn.name for fn in tops}) == len(tops) else {}
     for fn, owner in functions:
         bound = _bound_names(fn)
         parents = _parents(fn)
@@ -307,61 +487,14 @@ def _check_uses(tables, functions, Unsupported):
             if not (isinstance(n, ast.Name) and n.id in tables and n.id not in bound):
                 continue
             t = tables[n.id]
-            p = parents.get(n)
-            ok = False
-            if isinstance(p, ast.Compare) and n in p.comparators:
-                ok = isinstance(p.ops[p.comparators.index(n)], (ast.In, ast.NotIn))
-            elif isinstance(p, ast.Subscript) and p.value is n:
-                ok = isinstance(p.ctx, ast.Load) and not isinstance(p.slice, ast.Slice)
-                if isinstance(p.ctx, (ast.Store, ast.Del)):
-                    raise _refuse(Unsupported, n.lineno,
-                                  "%r is a module-level %s; `%s` would change a table every other function "
-                                  "reads.\n  write instead: leave the table read-only; a table that changes is "
-                                  "a local (`%s = %s(%s)` for a copy), or a dataclass field"
-                                  % (n.id, t.what, _snippet(p), n.id.lower(), t.what, n.id))
-            elif isinstance(p, ast.Attribute) and p.value is n:
-                call = parents.get(p)
-                if p.attr in MUTATORS:
-                    raise _refuse(Unsupported, n.lineno,
-                                  "%r is a module-level %s; `%s.%s(...)` would change a table every other "
-                                  "function reads.\n  write instead: leave the table read-only; a table that "
-                                  "changes is a local (`%s = %s(%s)` for a copy), or a dataclass field"
-                                  % (n.id, t.what, n.id, p.attr, n.id.lower(), t.what, n.id))
-                ok = p.attr in READ_METHODS and isinstance(call, ast.Call) and call.func is p
-            elif isinstance(p, ast.BinOp) and isinstance(p.op, (ast.BitOr, ast.BitAnd, ast.Sub, ast.BitXor)):
-                ok = True       # a new set (a new dict for `|`)
-            elif isinstance(p, ast.AugAssign) and p.target is n:
-                raise _refuse(Unsupported, n.lineno,
-                              "%r is a module-level %s; `%s` would change a table every other function "
-                              "reads.\n  write instead: leave the table read-only, or build a new one "
-                              "(`%s = %s | other`)" % (n.id, t.what, _snippet(p), n.id.lower(), n.id))
-            elif isinstance(p, ast.Call) and n in p.args and isinstance(p.func, ast.Name):
-                ok = p.func.id in SAFE_FUNCS and p.func.id not in bound
-            elif isinstance(p, ast.Call) and n in p.args and isinstance(p.func, ast.Attribute) \
-                    and p.func.attr == 'join' and isinstance(p.func.value, ast.Constant):
-                ok = True
-            elif isinstance(p, (ast.For, ast.AsyncFor)) and p.iter is n:
-                ok = True
-            elif isinstance(p, ast.comprehension) and p.iter is n:
-                ok = True
-            elif isinstance(p, (ast.If, ast.While, ast.IfExp)) and p.test is n:
-                ok = True
-            elif isinstance(p, ast.UnaryOp) and isinstance(p.op, ast.Not):
-                ok = True
-            if not ok:
+            if not _judge(n, n.id, t, parents, bound, own, Unsupported, set()):
+                p = parents.get(n)
                 raise _refuse(Unsupported, n.lineno,
                               "%r is a module-level %s; `%s` uses the whole table as a value, which would "
                               "make a second reference where CPython shares the one object.\n"
                               "  write instead: read it in place (`x in %s`, `%s[k]`, `for x in %s`, "
                               "`len(%s)`), or `%s(%s)` for a copy"
                               % (n.id, t.what, _snippet(p), n.id, n.id, n.id, n.id, t.what, n.id))
-            walked = isinstance(p, (ast.For, ast.AsyncFor, ast.comprehension)) or (
-                isinstance(p, ast.Call) and isinstance(p.func, ast.Name) and p.func.id in SAFE_FUNCS)
-            if t.ordered_by_hash and walked and not _order_free(n, parents):
-                raise _refuse(Unsupported, n.lineno,
-                              "%r is a module-level set of ints; `%s` walks it in hash order in CPython and "
-                              "in insertion order here, so the two can differ.\n"
-                              "  write instead: `sorted(%s)` for a fixed order" % (n.id, _snippet(p), n.id))
             mine.add(n.id)
         for n in ast.walk(fn):
             if n is not fn and isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -379,8 +512,23 @@ def _check_uses(tables, functions, Unsupported):
 
 def rewrite(tree, Unsupported, library=False, entry=None, select='plain'):
     tables = _find_tables(tree, select)
+    while tables:
+        try:
+            plan = _plan(tree, tables, Unsupported, library, entry)
+            break
+        except Unsupported as refusal:
+            # In the front end (`rewrite_text`) a list or tuple table that cannot be lowered is left
+            # as written -- the typed path then refuses it by name -- and the other tables still are.
+            name = getattr(refusal, 'table', None)
+            if Unsupported is not Refusal or name not in tables or tables[name].what not in ('list', 'tuple'):
+                raise
+            del tables[name]
     if not tables:
         return
+    _apply(tree, tables, plan)
+
+
+def _plan(tree, tables, Unsupported, library, entry):
     functions = []
     for node in tree.body:
         if isinstance(node, ast.FunctionDef):
@@ -407,8 +555,6 @@ def rewrite(tree, Unsupported, library=False, entry=None, select='plain'):
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name):
                 module_calls.add(n.func.id)
     reads = _check_uses(tables, functions, Unsupported)
-    # drop the table statements: the readers get it from the parameter or the local below
-    tree.body = [n for n in tree.body if id(n) not in table_nodes]
 
     top_fns = [fn for fn, owner in functions if owner is None]
     names = [fn.name for fn in top_fns]
@@ -420,6 +566,7 @@ def rewrite(tree, Unsupported, library=False, entry=None, select='plain'):
 
     calls = {fn: [] for fn, _ in functions}      # (call node, callee name)
     escaped = set(module_calls)                   # called from module-level code: no parameter to pass
+    as_value = set()                              # named other than as the callee of a call
     for fn, _ in functions:
         for n in ast.walk(fn):
             if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) and n.id in by_name \
@@ -429,6 +576,7 @@ def rewrite(tree, Unsupported, library=False, entry=None, select='plain'):
                     calls[fn].append((p, n.id))
                 else:
                     escaped.add(n.id)
+                    as_value.add(n.id)
     for fn in top_fns:
         if fn.decorator_list:
             escaped.add(fn.name)
@@ -460,22 +608,95 @@ def rewrite(tree, Unsupported, library=False, entry=None, select='plain'):
                                   "  write instead: rename the local %r" % (
                                       clash[0], tables[clash[0]].what, fn.name, callee, clash[0]))
 
+    hidden, local = {}, {}
+    for fn, owner in functions:
+        if owner is None and fn.name in threaded:
+            hidden[fn] = sorted(need[fn])
+            local[fn] = sorted(t for t in reads[fn] if t not in threadable)
+        else:
+            local[fn] = sorted(need[fn] | {t for t in reads[fn] if t not in threadable})
+    _check_single_build(tree, tables, functions, local, calls, as_value, library, entry_name, Unsupported)
+    return functions, need, threaded, calls, hidden, local
+
+
+def _called_once_from_module(tree, name):
+    """Whether the module's own statements call `name` exactly once, as a plain statement (at the
+    top level or in a top-level `if`, never in a loop), and mention it nowhere else."""
+    count = 0
+
+    def visit(statements):
+        nonlocal count
+        for s in statements:
+            if isinstance(s, (ast.FunctionDef, ast.ClassDef)):
+                continue
+            if (isinstance(s, ast.Expr) and isinstance(s.value, ast.Call) and isinstance(s.value.func, ast.Name)
+                    and s.value.func.id == name):
+                count += 1
+                if any(isinstance(n, ast.Name) and n.id == name for a in s.value.args + [k.value for k in s.value.keywords]
+                       for n in ast.walk(a)):
+                    count += 2
+                continue
+            if isinstance(s, ast.If):
+                if any(isinstance(n, ast.Name) and n.id == name for n in ast.walk(s.test)):
+                    count += 2
+                visit(s.body)
+                visit(s.orelse)
+                continue
+            if any(isinstance(n, ast.Name) and n.id == name for n in ast.walk(s)):
+                count += 2      # in a loop, a try, an expression: maybe more than once
+    visit(tree.body)
+    return count == 1
+
+
+def _check_single_build(tree, tables, functions, local, calls, as_value, library, entry_name, Unsupported):
+    """A table whose elements can be changed in place (a list of lists, a list of objects) is one
+    object in CPython, so it must be built once: by exactly one function, a top-level one that runs
+    exactly once -- the entry no function calls, or a function the module's own code calls once."""
+    called = {callee for fn, _ in functions for _, callee in calls[fn]}
+    for name, tab in tables.items():
+        if not tab.mutable:
+            continue
+        builders = [(fn, owner) for fn, owner in functions if name in local[fn]]
+        once = False
+        if len(builders) == 1 and builders[0][1] is None and not library:
+            fn = builders[0][0]
+            once = (fn.name not in called and fn.name not in as_value and not fn.decorator_list
+                    and (fn.name == entry_name and not _module_mentions(tree, fn.name)
+                         or _called_once_from_module(tree, fn.name)))
+        if not once:
+            raise _refuse(Unsupported, tab.node.lineno,
+                          "%r is a module-level %s whose elements can be changed in place, and more than one "
+                          "function (or one that runs more than once) would build its own copy, where "
+                          "CPython has one object.\n"
+                          "  write instead: build it in main() and pass it to the functions that read it"
+                          % (name, tab.what))
+
+
+def _module_mentions(tree, name):
+    return any(isinstance(n, ast.Name) and n.id == name
+               for top in tree.body if not isinstance(top, (ast.FunctionDef, ast.ClassDef))
+               for n in ast.walk(top))
+
+
+def _apply(tree, tables, plan):
+    functions, need, threaded, calls, hidden, local = plan
+    by_name = {fn.name: fn for fn, owner in functions if owner is None}
+    # drop the table statements: the readers get it from the parameter or the local below
+    table_nodes = {id(t.node) for t in tables.values()}
+    tree.body = [n for n in tree.body if id(n) not in table_nodes]
+
     def annotation(t):
         return ast.parse(tables[t].annotation, mode='eval').body
 
     for fn, owner in functions:
-        if owner is None and fn.name in threaded:
-            hidden = sorted(need[fn])
-            lead = [ast.arg(arg=t, annotation=annotation(t)) for t in hidden]
+        if fn in hidden:
+            lead = [ast.arg(arg=t, annotation=annotation(t)) for t in hidden[fn]]
             if fn.args.posonlyargs:
                 fn.args.posonlyargs = lead + fn.args.posonlyargs
             else:
                 fn.args.args = lead + fn.args.args
-            local = sorted(t for t in reads[fn] if t not in threadable)
-        else:
-            local = sorted(need[fn] | {t for t in reads[fn] if t not in threadable})
         statements = []
-        for t in local:
+        for t in local[fn]:
             tab = tables[t]
             statements.append(ast.copy_location(ast.AnnAssign(
                 target=ast.Name(id=t, ctx=ast.Store()), annotation=annotation(t),
@@ -496,7 +717,7 @@ def rewrite_text(source, library=False, notes=None):
     """The program with its tuple tables lowered, as source text; `source` itself when it has none (or
     one cannot be lowered -- the reason is then added to `notes`, and the tuple lowering refuses the
     table in its own words)."""
-    if '(' not in source or ('{' not in source and 'set' not in source):
+    if '(' not in source:
         return source
     try:
         tree = ast.parse(source)
