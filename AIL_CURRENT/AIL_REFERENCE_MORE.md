@@ -416,7 +416,15 @@ language itself (leftmost-first, CPython's priority), so groups and spans equal 
   `findall` with one group returns that group ('' when it did not take part).
 - `sub(pattern, repl, s[, count])`: a literal `repl` may use `\1`, `\g<1>`, `\g<name>`, `\n`;
   a non-literal `repl` must have no backslash. `subn` and a function `repl` run on the general path
-  (the default build falls back; the typed path needs a literal repl). Empty matches follow CPython 3.7+.
+  (the default build falls back; the typed path needs a literal repl). A `repl` this program can tell is a
+  function is called with each Match, as in CPython -- `m.group(i)`, `m.group("name")`, `m.start()`,
+  `m.end()` work, a `None` result is an empty piece, `subn` returns `(text, n)`: a lambda, a def, a name
+  that holds one (`f = up`, `g = f`, `h = i = up`, `f = lambda m: ...`), a dict or list of functions
+  indexed at run time (`TABLE["k"]`, `FS[0]`), the target of a loop over such a list, a call of a def whose
+  every return is a function, or a parameter (annotated `Callable[...]`, or one whose every call site
+  passes a function). `count` is CPython's, `0` or a negative count replacing nothing. A bound method is
+  refused by name (`a method is not a value in this program`), with `lambda m: obj.method(m)` to write
+  instead. Empty matches follow CPython 3.7+.
 - Cost: matching is O(len(pattern) x len(text)). On an ASCII str or a bytes subject (and a pattern without
   lookaround) a DFA built with the program finds the spans, so scans over megabytes (`findall`, `finditer`,
   `sub`, `split`, `search`) and short `fullmatch` calls run at or below CPython's time, with 2 to 5 times
@@ -431,7 +439,7 @@ language itself (leftmost-first, CPython's priority), so groups and spans equal 
   can match the empty string (`(a*)*`), `re.IGNORECASE` with a non-ASCII pattern character (a non-ASCII
   subject with `re.I` raises `ValueError`), `findall` with several groups and `split` with groups
   (tuples, None), `m.groups()` / `m.groupdict()` / `m.span()` as values, a pattern that is not a
-  literal, `pos` / `endpos`.
+  literal, `pos` / `endpos`, a bound method as the replacement.
 
 ```python
 import re

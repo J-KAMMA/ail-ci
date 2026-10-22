@@ -1463,6 +1463,8 @@ class _Surface:
         self.ambiguous_names = plain_defs & rebound    # a def and a variable of one name: which one is not told
         self.re_consts = {}            # NAME -> str for a name bound once to a string literal
         self.re_callables = {}         # NAME -> 'callable' | 'table' | 'seq': a function value, see collect_repl
+        self.re_returns = {}           # NAME -> the expressions a def returns, see collect_repl
+        self.re_dicts = {}             # NAME -> (keys, values) of a dict literal, see collect_repl
         self.attr_fields = {node.attr for node in ast.walk(self.tree)
                             if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store)}
         self.re_lib = None
@@ -1579,7 +1581,7 @@ class _Surface:
                 stored[name] = stored.get(name, 0) + 1
         if self.re_on:
             self.collect_re(stored)
-            self.collect_repl(stored)
+            self.collect_repl()
         for node in ast.walk(self.tree):
             if (isinstance(node, ast.Assign) and len(node.targets) == 1
                     and isinstance(node.targets[0], ast.Name) and stored[node.targets[0].id] == 1):
@@ -1730,7 +1732,7 @@ class _Surface:
                     self.re_patterns[bound[0]] = index
                     self.re_nodes.add(node)
 
-    def collect_repl(self, stored):
+    def collect_repl(self):
         """The names whose value is a function: a def, a lambda, a `Callable[...]` parameter (or one whose every
         call site passes a function), an alias of one of those (`f = up`, `g = f`), a dict or list literal that
         holds only functions (`TABLE["k"]`, `FS[0]`) and the target of a loop over such a list. Such a value as
@@ -1749,8 +1751,7 @@ class _Surface:
                 targets = [node.target]
             else:
                 continue
-            if (node.value is not None and all(isinstance(target, ast.Name) for target in targets)
-                    and all(stored.get(target.id) == 1 for target in targets)):
+            if node.value is not None and all(isinstance(target, ast.Name) for target in targets):
                 for target in targets:
                     add(target.id, ('value', node.value))
                     handled.add(id(target))
@@ -1766,6 +1767,13 @@ class _Surface:
                 handled.add(id(node.target))
             elif isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load) and id(node) not in handled:
                 add(node.id, ('other',))            # a with / except target, an augmented assign, a tuple target
+        # a def whose every return is a function value: calling it yields one (`re.sub(P, make(), s)`)
+        self.re_returns = {}           # function name -> [returned expression]
+        for node in ast.walk(self.tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                own = [item for item in _own_nodes(node) if isinstance(item, ast.Return)]
+                if own and all(item.value is not None for item in own):
+                    self.re_returns.setdefault(node.name, []).extend(item.value for item in own)
         # an unannotated parameter is a function when every call of its function passes a function there
         param_at = {}                  # NAME -> [(function name, positional index, parameter name), ...]
         calls = {}                     # function name -> [call]
@@ -1776,6 +1784,14 @@ class _Surface:
                         param_at.setdefault(item.arg, []).append((node.name, index, item.arg))
             elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
                 calls.setdefault(node.func.id, []).append(node)
+        # a name bound to a dict literal, by key: `TABLE["k"]` tells its own value even when the table mixes
+        # functions and strings
+        self.re_dicts = {}
+        for name, items in shapes.items():
+            if len(items) == 1 and items[0][0] == 'value' and isinstance(items[0][1], ast.Dict):
+                value = items[0][1]
+                if all(key is not None for key in value.keys):
+                    self.re_dicts[name] = (list(value.keys), list(value.values))
         self.re_callables = {}
         changed = True
         while changed:                              # a def, `f = up`, `g = f`, `TABLE = {"a": up}`, a parameter
@@ -1783,25 +1799,28 @@ class _Surface:
             for name, items in shapes.items():
                 if name in self.re_callables:
                     continue
-                kinds = {item[0] for item in items}
-                if kinds == {'def'}:
-                    kind = 'callable'
-                elif kinds == {'arg'}:
-                    # a `Callable[...]` parameter, or one whose every call site passes a function
-                    told = all(self.re_param_callable(param_at.get(name), calls) if item[1] is None
-                               else self.re_callable_annotation(item[1]) for item in items)
-                    kind = 'callable' if told else None
-                elif kinds == {'value'}:
-                    kind = self.re_value_kind(items[0][1])
-                elif kinds == {'loop'}:
-                    # a loop over a list or tuple of functions: the target is a function at every turn (the keys
-                    # of a dict are not, so only 'seq' counts here)
-                    kind = 'callable' if self.re_value_kind(items[0][1]) == 'seq' else None
-                else:
-                    kind = None
-                if kind is not None:
-                    self.re_callables[name] = kind
+                told = {self.re_item_kind(item, param_at.get(name), calls) for item in items}
+                if len(told) == 1 and None not in told:     # every binding of the name tells the same shape
+                    self.re_callables[name] = told.pop()
                     changed = True
+
+    def re_item_kind(self, item, at, calls):
+        """'callable' / 'table' / 'seq' for one binding of a name, or None when it is not told."""
+        kind = item[0]
+        if kind == 'def':
+            return 'callable'
+        if kind == 'arg':
+            # a `Callable[...]` parameter, or one whose every call site passes a function
+            if item[1] is not None:
+                return 'callable' if self.re_callable_annotation(item[1]) else None
+            return 'callable' if self.re_param_callable(at, calls) else None
+        if kind == 'value':
+            return self.re_value_kind(item[1])
+        if kind == 'loop':
+            # a loop over a list or tuple of functions: the target is a function at every turn (the keys of a
+            # dict are not, so only 'seq' counts here)
+            return 'callable' if self.re_value_kind(item[1]) == 'seq' else None
+        return None                                     # a class, a with / except target, an augmented assign
 
     def re_param_callable(self, at, calls):
         """Whether every call of each function passes a function value to an unannotated parameter."""
@@ -1826,13 +1845,18 @@ class _Surface:
                 return False
         return True
 
-    def re_value_kind(self, value):
+    def re_value_kind(self, value, depth=0):
         """'callable', 'table' (a dict of functions) or 'seq' (a list or tuple of them) for an expression, or None
         when it is not told."""
         if isinstance(value, ast.Lambda):
             return 'callable'
         if isinstance(value, ast.Name):
             return self.re_callables.get(value.id)
+        if isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and depth < 6:
+            returns = self.re_returns.get(value.func.id)
+            if returns and all(self.re_value_kind(each, depth + 1) == 'callable' for each in returns):
+                return 'callable'
+            return None
         if isinstance(value, ast.Dict) and value.keys and all(key is not None for key in value.keys):
             items, kind = list(value.values), 'table'
         elif isinstance(value, (ast.List, ast.Tuple)) and value.elts:
@@ -1852,8 +1876,19 @@ class _Surface:
         if isinstance(node, ast.Name):
             return self.re_callables.get(node.id)
         if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
+            table = self.re_dicts.get(node.value.id)
+            key = node.slice
+            if (table is not None and isinstance(key, ast.Constant) and isinstance(key.value, (str, int))
+                    and not isinstance(key.value, bool)):
+                for each, value in reversed(list(zip(*table))):     # a repeated key: CPython keeps the last one
+                    if (isinstance(each, ast.Constant) and type(each.value) is type(key.value)
+                            and each.value == key.value):
+                        return 'callable' if self.re_value_kind(value) == 'callable' else None
             if self.re_callables.get(node.value.id) in ('table', 'seq'):
                 return 'callable'
+            return None
+        if isinstance(node, ast.Call):
+            return self.re_value_kind(node)
         return None
 
     @staticmethod
