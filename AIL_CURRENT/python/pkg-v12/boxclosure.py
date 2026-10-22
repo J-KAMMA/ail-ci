@@ -327,6 +327,9 @@ class ClosureMixin:
     def function_value(self, name, ctx):
         """A FUNC object for the top-level function `name` (plain positional parameters only)."""
         from pyfront import Unsupported
+        if getattr(self, 'uplan', None) is not None:
+            import unified
+            unified.boxed_body_hook(self, name)
         info = self.functions[name]
         if info.get('vararg') or info.get('kwarg') or info.get('kwonly') or info.get('defaults') \
                 or info.get('is_method'):
@@ -372,6 +375,42 @@ class ClosureMixin:
             ctx.emit('%s = %s;' % (s, c))
         self._need_callv()
         t = ctx.tmp()
+        classes = getattr(self, 'class_values', ())
+        if classes:
+            from pyboxed2 import _PreC
+            # a class held in a variable: construct it, as calling the class by name does
+            ctx.emit('if (%s.tag == AIL_T_CLASS) {' % fv)
+            ctx.indent += 1
+            first = True
+            for cname in classes:
+                ctx.emit('%sif (%s.o == g_slots_arr[%d].o) {' % ('' if first else '} else ', fv,
+                                                                  self.global_slots['class:' + cname]))
+                first = False
+                ctx.indent += 1
+                mark = len(ctx.lines)
+                try:
+                    r = self._call_class(cname, [_PreC(x) for x in slots], {}, ctx)
+                    ctx.emit('%s = %s;' % (t, r))
+                except Unsupported:
+                    del ctx.lines[mark:]
+                    ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "%s() takes other arguments"); goto %s;'
+                             % (cname, ctx.cur_err_target()))
+                    ctx.uses_st = True
+                ctx.indent -= 1
+            ctx.emit('} else {')
+            ctx.indent += 1
+            ctx.emit('st = ail__callv(cx, &%s, %s, %s, %d);' % (t, fv, ('&' + slots[0]) if slots else 'NULL', len(slots)))
+            ctx.check()
+            ctx.indent -= 1
+            ctx.emit('}')
+            ctx.indent -= 1
+            ctx.emit('} else {')
+            ctx.indent += 1
+            ctx.emit('st = ail__callv(cx, &%s, %s, %s, %d);' % (t, fv, ('&' + slots[0]) if slots else 'NULL', len(slots)))
+            ctx.check()
+            ctx.indent -= 1
+            ctx.emit('}')
+            return t
         ctx.emit('st = ail__callv(cx, &%s, %s, %s, %d);' % (t, fv, ('&' + slots[0]) if slots else 'NULL', len(slots)))
         ctx.check()
         return t
