@@ -32367,9 +32367,69 @@ class _ListEvidence:
         return None
 
 
+def _target_binds(target, name):
+    """True when an assignment target binds `name`."""
+    if isinstance(target, ast.Name):
+        return target.id == name
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return any(_target_binds(item, name) for item in target.elts)
+    if isinstance(target, ast.Starred):
+        return _target_binds(target.value, name)
+    return False
+
+
+def _import_binds(item, name):
+    for alias in item.names:
+        if alias.name == '*':
+            continue
+        bound = alias.asname or (alias.name if isinstance(item, ast.ImportFrom)
+                                 else alias.name.split('.')[0])
+        if bound == name:
+            return True
+    return False
+
+
+def _other_binding(item, name):
+    """True when `item` binds `name` in a form the index analysis cannot classify. A plain
+    `name = value` (or `name: T = value`) is handled by the caller and is not an "other" binding."""
+    if isinstance(item, ast.Assign):
+        return (not (len(item.targets) == 1 and isinstance(item.targets[0], ast.Name)
+                     and item.targets[0].id == name)
+                and any(_target_binds(target, name) for target in item.targets))
+    if isinstance(item, ast.AnnAssign):
+        return _target_binds(item.target, name) and not isinstance(item.target, ast.Name)
+    if isinstance(item, (ast.For, ast.AsyncFor, ast.comprehension)):
+        return _target_binds(item.target, name)
+    if isinstance(item, (ast.AugAssign, ast.NamedExpr)):
+        return _target_binds(item.target, name)
+    if isinstance(item, (ast.With, ast.AsyncWith)):
+        return any(entry.optional_vars is not None and _target_binds(entry.optional_vars, name)
+                   for entry in item.items)
+    if isinstance(item, ast.ExceptHandler):
+        return item.name == name
+    if isinstance(item, (ast.Import, ast.ImportFrom)):
+        return _import_binds(item, name)
+    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return item.name == name
+    if isinstance(item, ast.Lambda):
+        args = [*item.args.posonlyargs, *item.args.args, *item.args.kwonlyargs]
+        args += [arg for arg in (item.args.vararg, item.args.kwarg) if arg is not None]
+        return any(arg.arg == name for arg in args)
+    if isinstance(item, (ast.Global, ast.Nonlocal)):
+        return name in item.names
+    if isinstance(item, ast.Delete):
+        return any(_target_binds(target, name) for target in item.targets)
+    if isinstance(item, (ast.MatchAs, ast.MatchStar)):
+        return item.name == name
+    if isinstance(item, ast.MatchMapping):
+        return item.rest == name
+    return False
+
+
 class _ListLowering:
     def __init__(self, tree):
         self.evidence = _ListEvidence(tree)
+        self.tree = tree
         self.counter = 0
         self.changed = False
         self.target = None        # (name, annotation) a whole-statement result may be built in directly
@@ -32418,12 +32478,14 @@ class _ListLowering:
         if isinstance(node, ast.Name):
             return self.index_name_kind(node.id, seen)
         if isinstance(node, ast.Attribute):
-            for fields in self.evidence.class_fields.values():
-                kind = fields.get(node.attr)
-                if kind in ('int', 'bool'):
-                    return 'int'
-                if kind in ('float', 'str', 'bytes'):
-                    return 'nonindex'
+            cls = self.attribute_class(node.value)
+            if cls is None:
+                return None
+            kind = self.evidence.class_fields.get(cls, {}).get(node.attr)
+            if kind in ('int', 'bool'):
+                return 'int'
+            if kind in ('float', 'str', 'bytes'):
+                return 'nonindex'
             return None
         if isinstance(node, (ast.Compare, ast.BoolOp)):
             return 'int'
@@ -32432,6 +32494,87 @@ class _ListLowering:
             return kinds[0] if kinds[0] == kinds[1] else None
         return None
 
+    def containing_class(self, fn):
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.ClassDef):
+                if any(item is fn for item in node.body):
+                    return node.name
+        return None
+
+    def value_class(self, node, seen):
+        """The class of a value visibly built or held in a name/field, else None."""
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in self.evidence.classes:
+                return node.func.id
+            return None
+        if isinstance(node, ast.Name):
+            return self.name_class(node.id, seen)
+        if isinstance(node, ast.Attribute):
+            cls = self.attribute_class(node.value)
+            if cls is None:
+                return None
+            kind = self.evidence.class_fields.get(cls, {}).get(node.attr)
+            return kind if kind in self.evidence.classes else None
+        return None
+
+    def attribute_class(self, node, seen=None):
+        """The class of the object an attribute is read from, when this is visibly known."""
+        seen = set() if seen is None else seen
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in self.evidence.classes:
+                return node.func.id
+            return None
+        if isinstance(node, ast.Name):
+            return self.name_class(node.id, seen)
+        if isinstance(node, ast.Attribute):
+            cls = self.attribute_class(node.value, seen)
+            if cls is None:
+                return None
+            kind = self.evidence.class_fields.get(cls, {}).get(node.attr)
+            return kind if kind in self.evidence.classes else None
+        return None
+
+    def name_class(self, name, seen):
+        """The class of a local or parameter `name`, when every visible binding agrees."""
+        if name in seen:
+            return None
+        seen.add(name)
+        fn = getattr(self, 'current_fn', None)
+        if fn is None:
+            return None
+        if name == 'self':
+            return self.containing_class(fn)
+        classes = self.evidence.classes
+        candidates = []
+        unknown = False
+
+        def note(cls):
+            nonlocal unknown
+            if cls is None:
+                unknown = True
+            else:
+                candidates.append(cls)
+
+        args = [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs]
+        args += [arg for arg in (fn.args.vararg, fn.args.kwarg) if arg is not None]
+        for arg in args:
+            if arg.arg == name:
+                annotation = arg.annotation
+                note(annotation.id if isinstance(annotation, ast.Name) and annotation.id in classes else None)
+        for item in ast.walk(fn):
+            if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name) and item.target.id == name:
+                annotation = item.annotation
+                note(annotation.id if isinstance(annotation, ast.Name) and annotation.id in classes else None)
+            elif (isinstance(item, ast.Assign) and len(item.targets) == 1
+                  and isinstance(item.targets[0], ast.Name) and item.targets[0].id == name):
+                note(self.value_class(item.value, seen))
+            elif _other_binding(item, name):
+                unknown = True
+        if unknown:
+            return None
+        kinds = set(candidates)
+        return kinds.pop() if len(kinds) == 1 else None
+
     def index_name_kind(self, name, seen):
         if name in seen:
             return None
@@ -32439,7 +32582,9 @@ class _ListLowering:
         fn = getattr(self, 'current_fn', None)
         if fn is None:
             return None
-        for arg in [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs]:
+        args = [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs]
+        args += [arg for arg in (fn.args.vararg, fn.args.kwarg) if arg is not None]
+        for arg in args:
             if arg.arg == name and arg.annotation is not None:
                 return self.index_annotation_kind(arg.annotation)
         kinds = []
@@ -32455,11 +32600,7 @@ class _ListLowering:
                 if kind is None:
                     return None
                 kinds.append(kind)
-            elif isinstance(item, (ast.For, ast.AsyncFor)):
-                if any(isinstance(sub, ast.Name) and sub.id == name for sub in ast.walk(item.target)):
-                    return None
-            elif (isinstance(item, ast.AugAssign) and isinstance(item.target, ast.Name)
-                  and item.target.id == name):
+            elif _other_binding(item, name):
                 return None
         return kinds[0] if kinds and len(set(kinds)) == 1 else None
 

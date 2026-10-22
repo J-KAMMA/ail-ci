@@ -11,8 +11,9 @@ list lowering converts visibly int/bool bounds itself, raises for visibly non-in
 anything else (including __index__ objects) to that path, so local typed lists behave the same.  list,
 tuple and deque are covered; str bounds keep their own None default.
 
-Each program is built with the general path forced and with the default build; stdout, the exit status
-and the last stderr line must equal CPython's.
+Each program is built with the general path forced and with the default build; the typed-lowering
+cases also build with AIL_NO_GENERAL=1, so the typed path itself must answer.  stdout, the exit
+status and the last stderr line must equal CPython's.
 """
 import os
 import shutil
@@ -47,7 +48,9 @@ def _build_run(directory, name, text, mode):
     env = dict(os.environ, AIL_NO_CACHE='1', AIL_QUIET_FALLBACK='1')
     env.pop('AIL_NO_GENERAL', None)
     env.pop('AIL_UNIFIED_FORCE', None)
-    if mode == 'general':
+    if mode == 'typed':
+        env['AIL_NO_GENERAL'] = '1'
+    elif mode == 'general':
         env['AIL_UNIFIED_FORCE'] = '1'
     cmd = [sys.executable, '-B', CHATGPT, 'compile', src.name, '--syntax', 'python', '-o', exe.name]
     built = subprocess.run(cmd, cwd=directory, capture_output=True, text=True, timeout=900, env=env)
@@ -257,6 +260,89 @@ def main() -> None:
 main()
 '''
 
+ATTRS = r'''class IntBox:
+    def __init__(self, lo: int, hi: int) -> None:
+        self.lo = lo
+        self.hi = hi
+
+
+class FloatBox:
+    def __init__(self, lo: float, hi: float) -> None:
+        self.lo = lo
+        self.hi = hi
+
+
+def attempt(label: str, xs, needle, lo, hi) -> None:
+    try:
+        print(label, xs.index(needle, lo, hi))
+    except Exception as e:
+        print(label, type(e).__name__, str(e))
+
+
+def main() -> None:
+    xs = [10, 20, 30, 20]
+    f = FloatBox(1.0, 3.0)
+    i = IntBox(1, 3)
+    attempt("float-attr", xs, 20, f.lo, f.hi)
+    attempt("int-attr", xs, 20, i.lo, i.hi)
+    attempt("mixed", xs, 20, i.lo, f.hi)
+
+
+main()
+'''
+
+TUPLE_BINDINGS = r'''def attempt(label: str, xs, needle, lo) -> None:
+    try:
+        print(label, xs.index(needle, lo))
+    except Exception as e:
+        print(label, type(e).__name__, str(e))
+
+
+def main() -> None:
+    xs = [10, 20, 30, 20]
+    x = 1
+    x, y = 2.0, 3
+    attempt("tuple-float", xs, 20, x)
+    z = 1
+    *z, = [2.0]
+    attempt("starred-float", xs, 20, z)
+    u = 1
+    u, v = 1, 2
+    attempt("tuple-int", xs, 20, u)
+
+
+main()
+'''
+
+TYPED_ATTRS = r'''class FloatBox:
+    def __init__(self, lo: float, hi: float) -> None:
+        self.lo = lo
+        self.hi = hi
+
+
+class IntBox:
+    def __init__(self, lo: int, hi: int) -> None:
+        self.lo = lo
+        self.hi = hi
+
+
+def find(xs: list[int], box: IntBox) -> int:
+    return xs.index(20, box.lo, box.hi)
+
+
+def main() -> None:
+    xs: list[int] = [10, 20, 30, 20]
+    box = IntBox(0, 4)
+    print(xs.index(20, 1, 3))
+    print(xs.index(20, box.lo, box.hi))
+    print(xs.index(20, -2, 4))
+    print(xs.index(20, True, 2))
+    print(find(xs, box))
+
+
+main()
+'''
+
 LONG = r'''class SupercalifragilisticexpialidociousIndexObjectForTestingReallyAndThenMoreExtraCharactersForLength:
     def __init__(self) -> None:
         self.x = 1
@@ -331,6 +417,15 @@ class IndexBounds(unittest.TestCase):
 
     def test_typed_local_list_bounds(self):
         self.check('local', LOCAL)
+
+    def test_typed_lowering_alone(self):
+        self.check('typed_attrs', TYPED_ATTRS, modes=('typed', 'general', 'default'))
+
+    def test_attribute_bound_uses_the_receivers_class(self):
+        self.check('attrs', ATTRS)
+
+    def test_tuple_and_starred_bindings_are_unknown(self):
+        self.check('tuple_bindings', TUPLE_BINDINGS)
 
     def test_long_index_type_name_is_not_truncated(self):
         self.check('long', LONG)
