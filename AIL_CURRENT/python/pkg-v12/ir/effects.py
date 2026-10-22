@@ -78,7 +78,7 @@ RUNTIME = {
 _CHECKED_RAISES = {
     'add': (OVERFLOW,), 'sub': (OVERFLOW,), 'mul': (OVERFLOW,), 'neg': (OVERFLOW,),
     'shl': (OVERFLOW, VALUE), 'shr': (VALUE,), 'pow': (OVERFLOW, VALUE),
-    'fptosi': (VALUE,),
+    'fptosi': (OVERFLOW, VALUE),
 }
 _ALWAYS_RAISES = {
     'floordiv': (ZERODIV, OVERFLOW), 'floormod': (ZERODIV,),
@@ -252,7 +252,7 @@ def instr_effects(ins, fn, program, places=None, defs=None, summaries=None):
         d = (defs if defs is not None else defs_of(fn)).get(ins.operands[0])
         loc = 'Elem(%s)' % (_root(d.operands[0], fn, defs) if d is not None and d.op == 'span.of' else 'Any')
         eff = Effects(raises=[INDEX]) if ins.attrs.get('mode', 'ck') == 'ck' else NONE
-        if op == 'span.set' and ins.operands[0].type == I.T('span', I.T('u8')) and ins.attrs.get('mode', 'ck') == 'ck':
+        if op == 'span.set' and ins.operands[0].type == I.T('span', I.T('u8')) and ins.attrs.get('mode', 'ck') in ('ck', 'vck'):
             eff = eff | Effects(raises=[VALUE])
         return eff | (Effects(writes=[loc]) if op == 'span.set' else Effects(reads=[loc]))
     if op == 'spec.get':
