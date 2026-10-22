@@ -31,7 +31,7 @@ REPO = ROOT.parent
 BACKEND = REPO / "packaging" / "ail_wheel_backend.py"
 PRIVATE_PARTS = ("experiments", "a held-out task set", "evidence", "design", "bench", "tests")
 LICENSE_FILES = ("LICENSE-APACHE", "LICENSE-MIT")
-PACKAGE_FILES = ("__init__.py", "__main__.py", "cli.py")
+PACKAGE_FILES = ("__init__.py", "__main__.py", "cli.py", "project.py", "lsp.py")
 CC = os.environ.get("PIPE_CC") or shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
 
 wheel_dir = None
