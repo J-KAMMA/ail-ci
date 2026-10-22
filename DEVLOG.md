@@ -1,5 +1,18 @@
 # Development log
 
+## 2026-10-22 — job-fuzz18-10221632: review fix, named class
+
+* The class/function rejection in `_ail_math_checknum` (and `floor` / `ceil`) matched the
+  run-time type *name*, so a legal user class named `function` with `__float__` (or
+  `__floor__` / `__ceil__`) was refused.  The `type` / `function` names are gone from the
+  reject list; on the general path the `__float__` / `__index__` / `__floor__` / `__ceil__`
+  `hasattr()` probes now answer from the program's classes, so a real class or function still
+  answers False and reaches the CPython `TypeError`, while an instance of a user class with
+  that name converts normally.
+* `test_ail_fuzz18.py` F8 adds a user class named `function` (with all three dunders and
+  `__call__`), an `__index__`-only class, an inner `TypeError` from `__float__`, and reaches
+  them directly, through an argument, a list item, a dict value and an attribute.
+
 ## 2026-10-22 — job-fuzz18-10221632: review fixes
 
 * `math.floor` / `math.ceil` now call an object's own `__floor__` / `__ceil__` before any

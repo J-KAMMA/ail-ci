@@ -34,6 +34,11 @@ F7  `math.sin` / `sqrt` / `fsum` / `floor` / ... on a class or a function leaked
     path's internal `NotImplementedError hasattr() ...`; they now raise CPython's
     `TypeError must be real number, not type` / `... not function`.
 
+F8  the class/function rejection matched the run-time type *name*, so a legal user class named
+    `function` (with `__float__`, `__floor__` or `__ceil__`) was rejected.  The numeric
+    `hasattr()` probes now answer from the program's classes, so only a real class or function
+    value is refused and a user class with that name converts normally.
+
 Each program is built twice (default build, AIL_UNIFIED_FORCE=1 general path) and must print
 what CPython 3.12 prints with the same exit status.
 """
@@ -320,10 +325,39 @@ class Num:
         return 1.5
 
 
+class function:
+    def __init__(self, v=2.25):
+        self.v = v
+
+    def __float__(self):
+        return self.v
+
+    def __floor__(self):
+        return 71
+
+    def __ceil__(self):
+        return 81
+
+    def __call__(self):
+        return 5
+
+
+class function_index:
+    def __index__(self):
+        return 4
+
+
+class function_badfloat:
+    def __float__(self):
+        raise TypeError("inner boom")
+
+
 class Box:
     def __init__(self):
         self.t = P
         self.n = Num()
+        self.f = function()
+        self.i = function_index()
 
 
 def f():
@@ -362,6 +396,16 @@ def main():
     show('dict', lambda: [take(d[k]) for k in ('t', 'n')])
     show('num still ok', lambda: take(b.n))
     show('num floor', lambda: math.floor(Num()))
+    show('named function sin', lambda: math.sin(function()))
+    show('named function floor', lambda: math.floor(function()))
+    show('named function ceil', lambda: math.ceil(function()))
+    show('named function arg', lambda: take(function()))
+    show('named function list', lambda: take([function(), function(1.5)][0]))
+    show('named function dict', lambda: take({'a': function(), 'b': function(3.5)}['a']))
+    show('named function attr', lambda: take(b.f))
+    show('named function index', lambda: take(function_index()))
+    show('named function attr index', lambda: take(b.i))
+    show('named function inner', lambda: take(function_badfloat()))
 
 
 main()

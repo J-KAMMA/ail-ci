@@ -1182,12 +1182,13 @@ _MATH_HELPERS['tw_dedent'] = (
     '        else:\n'
     '            out.append(line[len(margin):])\n'
     '    return "\\n".join(out)\n')
-# Type names of the non-numeric builtins whose values must be rejected before any hasattr()
-# probe: the general path only models hasattr() for instances of the program's classes, so a
-# `type` or `function` value would otherwise surface as NotImplementedError.  CPython reports
-# these (and the other builtins) as "must be real number, not <typename>".
+# Type names of the non-numeric builtins whose values are rejected before any hasattr() probe.
+# A class or function value is NOT matched by name here: a user class may itself be named
+# `type` / `function`.  The general path answers the __float__/__index__ hasattr() probes from
+# the program's classes only, so a class or function value answers False instead of leaking its
+# NotImplementedError, and then reaches the "must be real number, not <typename>" fallback.
 _NONNUM_TYPE_NAMES = ('str', 'bytes', 'bytearray', 'complex', 'list', 'tuple', 'dict', 'set',
-                      'frozenset', 'range', 'slice', 'memoryview', 'NoneType', 'type', 'function')
+                      'frozenset', 'range', 'slice', 'memoryview', 'NoneType')
 _MATH_HELPERS['checknum'] = (
     'def _ail_math_checknum(x: float) -> float:\n'
     '    if isinstance(x, (int, float)):\n'

@@ -6629,6 +6629,12 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.check()
         return t
 
+    # Numeric protocol dunders are looked up on the type, never on the instance, and the
+    # general path only models class methods.  Answering these four probes directly also keeps
+    # a class or function value (which has no such method) from falling into ail2a_hasattr's
+    # need_inst() and leaking its NotImplementedError for the whole program.
+    _METHOD_ONLY_DUNDERS = frozenset(('__float__', '__index__', '__floor__', '__ceil__'))
+
     def _b_hasattr(self, args, kwargs, ctx):
         if len(args) != 2 or kwargs:
             raise Unsupported('hasattr() with other than (object, name)')
@@ -6637,6 +6643,10 @@ class Compiler(boxclosure.ClosureMixin):
         meth = '0'
         if isinstance(args[1], ast.Constant) and isinstance(args[1].value, str):
             meth = self._method_owners_check(o, args[1].value)
+            if args[1].value in self._METHOD_ONLY_DUNDERS:
+                t = ctx.tmp()
+                ctx.emit('%s = ail_box_bool(%s);' % (t, meth))
+                return t
         else:
             # a name known at run time: compared with the methods of each class the object may belong to
             conds = []
