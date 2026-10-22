@@ -195,6 +195,57 @@ print(calls)
 '''
 
 
+
+GROUPBY_MUTABLE = r'''import itertools
+
+def key_len(v):
+    return len(v)
+
+def run(rows: list[list[int]]) -> None:
+    for k, grp in itertools.groupby(rows, key=key_len):
+        if k == 1:
+            rows[3].append(9)
+        print(k, len(list(grp)))
+
+def run_lambda(rows: list[list[int]]) -> None:
+    for k, grp in itertools.groupby(rows, key=lambda v: len(v)):
+        if k == 1:
+            rows[3].append(7)
+        print(k, len(list(grp)))
+
+def run_len(rows: list[list[int]]) -> None:
+    for k, grp in itertools.groupby(rows, key=len):
+        if k == 1:
+            rows[3].append(5)
+        print(k, len(list(grp)))
+
+run([[1], [1], [2], [2, 2]])
+run_lambda([[1], [1], [2], [2, 2]])
+run_len([[1], [1], [2], [2, 2]])
+'''
+
+ACC_ROUND_INITIAL = r'''import itertools
+
+class Box:
+    pass
+
+def via_arg(xs: list[float], init: int) -> None:
+    print(list(itertools.accumulate(xs, initial=init)))
+
+o = Box()
+o.init = round(2.5)
+o.xs = [1.5, 2.5]
+L = [round(2.5)]
+D = {"i": round(2.5), "xs": [1.5, 2.5]}
+
+print(list(itertools.accumulate([1.5, 2.5], initial=round(2.5))))
+via_arg([1.5, 2.5], round(2.5))
+print(list(itertools.accumulate(o.xs, initial=o.init)))
+print(list(itertools.accumulate(D["xs"], initial=D["i"])))
+print(list(itertools.accumulate(o.xs, initial=L[0])))
+print(list(itertools.accumulate([1, 2], initial=round(2.5))))
+'''
+
 class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="ail-fuzz8-")
@@ -253,6 +304,18 @@ class GroupbyKeyCalls(Base):
         out = self.same(GROUPBY_CALLS)
         self.assertIn(b"[0, 1, 2, 3, 4, 5]\n", out)
         self.assertNotIn(b"[0, 1, 2, 2, 3, 4, 4, 5]\n", out)
+
+
+class GroupbyMutableElements(Base):
+    def test_look_ahead_key_is_not_stale(self):
+        out = self.same(GROUPBY_MUTABLE)
+        self.assertIn(b"1 3\n3 1\n1 3\n3 1\n1 3\n3 1\n", out)
+
+
+class AccumulateInitialKind(Base):
+    def test_one_argument_round_is_an_int(self):
+        out = self.same(ACC_ROUND_INITIAL)
+        self.assertIn(b"[2, 3.5, 6.0]\n", out)
 
 
 if __name__ == "__main__":
