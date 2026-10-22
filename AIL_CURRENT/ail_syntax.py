@@ -836,6 +836,22 @@ _MATH_BUILT = ('math.sqrt, floor, ceil, trunc, isqrt, gcd and lcm (two arguments
 # Exact CPython results: sqrt keeps -0.0 and raises ValueError below zero, isqrt and gcd are
 # integer-only (no float rounding reaches the answer).
 _MATH_HELPERS = {
+    'star_max': '''def _ail_star_max(lead, rest):
+    xs = lead + list(rest)
+    if len(xs) == 1:
+        return max(xs[0])
+    return max(xs)''',
+    'star_min': '''def _ail_star_min(lead, rest):
+    xs = lead + list(rest)
+    if len(xs) == 1:
+        return min(xs[0])
+    return min(xs)''',
+    'dmerge': '''def _ail_dmerge(parts):
+    out = {}
+    for d in parts:
+        for k in d:
+            out[k] = d[k]
+    return out''',
     'sqrt': '''def _ail_math_sqrt(x: float) -> float:
     if x < 0.0:
         raise ValueError("math domain error")
@@ -1195,6 +1211,25 @@ _FILE_HINT = ('this use of a file is not built: only reading it whole (`f.read()
               '`write_bytes(path, data)` to write one')
 
 
+def _annotation_only_names(tree, names):
+    """Whether every mention of each of `names` (the ABCs of a `from collections.abc import ...`)
+    is inside an annotation, where the import has nothing to do."""
+    inside = set()
+    for node in ast.walk(tree):
+        annotations = []
+        if isinstance(node, ast.arg):
+            annotations.append(node.annotation)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            annotations.append(node.returns)
+        elif isinstance(node, ast.AnnAssign):
+            annotations.append(node.annotation)
+        for annotation in annotations:
+            if annotation is not None:
+                inside.update(id(n) for n in ast.walk(annotation))
+    wanted = set(names)
+    return not any(isinstance(n, ast.Name) and n.id in wanted and id(n) not in inside for n in ast.walk(tree))
+
+
 def _own_nodes(function):
     """Nodes of `function` itself, not of the functions, lambdas or classes nested in it."""
     pending = list(ast.iter_child_nodes(function))
@@ -1209,8 +1244,9 @@ _RE_MODES = {'match': 0, 'fullmatch': 1, 'search': 2}
 # module function -> positional parameters after the pattern
 _RE_PARAMS = {'match': ('string', 'flags'), 'fullmatch': ('string', 'flags'), 'search': ('string', 'flags'),
               'findall': ('string', 'flags'), 'finditer': ('string', 'flags'),
-              'split': ('string', 'maxsplit', 'flags'), 'sub': ('repl', 'string', 'count', 'flags')}
-_RE_BUILT = ('re.match / fullmatch / search / findall / finditer / split / sub / escape and re.compile(literal) '
+              'split': ('string', 'maxsplit', 'flags'), 'sub': ('repl', 'string', 'count', 'flags'),
+              'subn': ('repl', 'string', 'count', 'flags')}
+_RE_BUILT = ('re.match / fullmatch / search / findall / finditer / split / sub / subn / escape and re.compile(literal) '
              'with a string-literal pattern (a literal, or a name bound once to one), flags I M S X A, '
              'literals . classes \\d \\w \\s anchors ^ $ \\A \\Z \\b \\B * + ? {m,n} lazy variants | groups '
              '(capturing, (?:), (?P<name>)); lookaround, backreferences, atomic / possessive forms and '
@@ -1322,12 +1358,37 @@ class _SurfaceExpr(ast.NodeTransformer):
             node.func = self.visit(node.func)
         return node
 
+    def visit_Dict(self, node):
+        self.generic_visit(node)
+        if None not in node.keys:
+            return node
+        # {**a, 'k': v, **b}: the parts merged in order (a later key replaces an earlier one, keeping its position)
+        parts, run = [], ([], [])
+        for key, value in zip(node.keys, node.values):
+            if key is None:
+                if run[0]:
+                    parts.append(ast.Dict(keys=run[0], values=run[1]))
+                    run = ([], [])
+                parts.append(value)
+            else:
+                run[0].append(key)
+                run[1].append(value)
+        if run[0]:
+            parts.append(ast.Dict(keys=run[0], values=run[1]))
+        self.surface.helper('dmerge')
+        return self.replaced(ast.Call(func=ast.Name(id='_ail_dmerge', ctx=ast.Load()),
+                                      args=[ast.List(elts=parts, ctx=ast.Load())], keywords=[]), node)
+
     def visit_Attribute(self, node):
         surface = self.surface
         path = surface.path(node)
         if path is not None:
             new = surface.value(node, path)
             return node if new is None else self.replaced(new, node)
+        if (isinstance(node.value, ast.Name) and node.value.id in surface.re_patterns and node.attr == 'pattern'
+                and not surface.re_lib.programs[surface.re_patterns[node.value.id]].is_bytes):
+            return self.replaced(ast.Constant(value=surface.re_lib.programs[surface.re_patterns[node.value.id]].pattern),
+                                 node)
         if isinstance(node.value, ast.Name) and node.value.id in surface.files:
             surface.note(node, f'{node.value.id}.{node.attr}: ' + _FILE_HINT)
             return node
@@ -1347,7 +1408,7 @@ class _SurfaceExpr(ast.NodeTransformer):
         if node.id in surface.re_patterns:
             surface.keep.add('re')
             surface.note(node, f'the compiled pattern {node.id} is used as a value; only {node.id}.match / '
-                         'fullmatch / search / findall / finditer / split / sub (...) calls are built')
+                         'fullmatch / search / findall / finditer / split / sub / subn (...) calls are built')
         elif node.id in surface.files:
             surface.note(node, f'the file object {node.id} is used as a value: ' + _FILE_HINT)
         elif node.id in surface.names:
@@ -1374,12 +1435,32 @@ class _Surface:
         self.keep = set()              # dropped-by-default modules still needed as written
         self.files = {}                # file object name -> (path expression, binary)
         self.dataclasses = {}          # class name -> [(field, default text | None)]
+        self.dc_initless = {}           # dataclass -> its field(init=False) names
+        self.dc_default = {}            # dataclass -> {field: default text | None}, init=False fields included
+        self.dc_later = {}              # dataclass -> attributes its __post_init__ (or a base's) assigns
+        self.dc_all = {}                # dataclass -> every field name, in order
+        self.dc_val = False             # the program calls asdict: the helper that converts a value
+        self.dc_fields_used = set()     # classes whose fields() is called
+        self.post_init = set()         # dataclasses whose generated __init__ calls __post_init__
         self.dc_annotations = {}       # class name -> [(field, annotation text, hidden from repr)]
         self.consumed = set()
         self.void = set()
         self.re_on = False             # `import re` seen
         self.re_patterns = {}          # NAME -> (library index) for NAME = re.compile(literal)
         self.re_nodes = set()          # those assignment statements
+        self.def_names = {node.name for node in ast.walk(self.tree)
+                          if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        # names that stand for a function (a def outside a class, the name bound nowhere else): the replacement
+        # of re.sub that is called with each match
+        methods = {id(item) for node in ast.walk(self.tree) if isinstance(node, ast.ClassDef) for item in node.body}
+        rebound = {node.id for node in ast.walk(self.tree) if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load)}
+        rebound |= {node.arg for node in ast.walk(self.tree) if isinstance(node, ast.arg)}
+        rebound |= {(alias.asname or alias.name).split('.')[0] for node in ast.walk(self.tree)
+                    if isinstance(node, (ast.Import, ast.ImportFrom)) for alias in node.names}
+        plain_defs = {node.name for node in ast.walk(self.tree)
+                      if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and id(node) not in methods}
+        self.callable_names = plain_defs - rebound
+        self.ambiguous_names = plain_defs & rebound    # a def and a variable of one name: which one is not told
         self.re_consts = {}            # NAME -> str for a name bound once to a string literal
         self.re_lib = None
         self.testing = set()           # re calls whose result is only tested
@@ -1441,6 +1522,20 @@ class _Surface:
         text = data.decode('utf8')
         if self.helpers:
             text = text.rstrip('\n') + '\n\n\n' + '\n\n'.join(_MATH_HELPERS[name] for name in self.helpers)
+        if self.dc_val:
+            kinds = ''.join(f'    if isinstance(v, {name}):\n        return v._ail_asdict()\n'
+                            for name in sorted(self.dataclasses))
+            text = text.rstrip('\n') + '\n\n\ndef _ail_dcv(v):\n' + kinds + (
+                '    if isinstance(v, list):\n        return [_ail_dcv(x) for x in v]\n'
+                '    if isinstance(v, tuple):\n        return tuple([_ail_dcv(x) for x in v])\n'
+                '    if isinstance(v, dict):\n        return {_ail_dcv(k): _ail_dcv(x) for k, x in v.items()}\n'
+                '    if isinstance(v, set):\n        return {_ail_dcv(x) for x in v}\n'
+                '    return v\n')
+        if self.dc_fields_used:
+            text = text.rstrip('\n') + '\n\n\nclass _AilField:\n    def __init__(self, name: str):\n        self.name = name\n'
+            for name in sorted(self.dc_fields_used):
+                items = ', '.join(f'_AilField({field!r})' for field in self.dc_all.get(name, []))
+                text += f'\n\ndef _ail_dc_fields_{name}():\n    return [{items}]\n'
         if self.re_lib is not None and (self.re_lib.programs or self.re_lib.uses_escape):
             text = text.rstrip('\n') + '\n\n' + python_surface(self.re_lib.text())
         return text
@@ -1604,20 +1699,31 @@ class _Surface:
                                            attr='read', ctx=ast.Load()), args=[], keywords=[])
 
     # -- re -----------------------------------------------------------------------------------
+    @staticmethod
+    def re_bind(node):
+        """(name, value) of `NAME = value` or `NAME: annotation = value` (a single plain name), else None."""
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            return node.targets[0].id, node.value
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+            return node.target.id, node.value
+        return None
+
     def collect_re(self, stored):
         self.re_lib = _relib().Library()
         for node in ast.walk(self.tree):
-            if (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
-                    and stored[node.targets[0].id] == 1 and isinstance(node.value, ast.Constant)
-                    and isinstance(node.value.value, (str, bytes))):
-                self.re_consts[node.targets[0].id] = node.value.value
+            bound = self.re_bind(node)
+            if bound is not None and stored[bound[0]] == 1:
+                text = self.re_str(bound[1])
+                if text is not None:
+                    self.re_consts[bound[0]] = text
         for node in ast.walk(self.tree):
-            if (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
-                    and stored[node.targets[0].id] == 1 and isinstance(node.value, ast.Call)
-                    and self.path(node.value.func) == 're.compile'):
-                index = self.re_pattern(node.value, 'compile', node.value.args, node.value.keywords, ('flags',))
+            bound = self.re_bind(node)
+            if (bound is not None and stored[bound[0]] == 1 and isinstance(bound[1], ast.Call)
+                    and self.path(bound[1].func) == 're.compile'):
+                call = bound[1]
+                index = self.re_pattern(call, 'compile', call.args, call.keywords, ('flags',))
                 if index is not None:
-                    self.re_patterns[node.targets[0].id] = index
+                    self.re_patterns[bound[0]] = index
                     self.re_nodes.add(node)
 
     def re_str(self, node):
@@ -1625,6 +1731,20 @@ class _Surface:
             return node.value
         if isinstance(node, ast.Name) and node.id in self.re_consts:
             return self.re_consts[node.id]
+        if isinstance(node, ast.JoinedStr):
+            # an f-string whose every field is a plain {name} of a constant str (no conversion, no format spec)
+            parts = []
+            for item in node.values:
+                if isinstance(item, ast.Constant) and isinstance(item.value, str):
+                    parts.append(item.value)
+                elif (isinstance(item, ast.FormattedValue) and item.conversion == -1 and item.format_spec is None):
+                    text = self.re_str(item.value)
+                    if not isinstance(text, str):
+                        return None
+                    parts.append(text)
+                else:
+                    return None
+            return ''.join(parts)
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
             left, right = self.re_str(node.left), self.re_str(node.right)
             if left is not None and right is not None and type(left) is type(right):
@@ -1717,14 +1837,18 @@ class _Surface:
                                'is not built; use a pattern without groups')
                 return None
             return call('_ail_re_split' + sfx, table, subject, given.get('maxsplit', ast.Constant(value=0)))
-        if name == 'sub':
+        if name in ('sub', 'subn'):
             count = given.get('count', ast.Constant(value=0))
             repl = given['repl']
             text = self.re_str(repl)
+            counted = name == 'subn'
             if text is not None and isinstance(text, bytes) != program.is_bytes:
                 self.re_refuse(node, name, 'a bytes pattern needs a bytes replacement and a str pattern a str one')
                 return None
             if text is not None and (b'\\' if program.is_bytes else '\\') in text:
+                if counted:
+                    self.re_refuse(node, name, 'subn with a replacement template that has a backslash is not built')
+                    return None
                 try:
                     function = lib.sub_function(index, text)
                 except _relib().ReRefused as exc:
@@ -1732,12 +1856,17 @@ class _Surface:
                     return None
                 return call(function, subject, count)
             if text is None and not (isinstance(repl, (ast.Name, ast.Attribute, ast.Subscript, ast.JoinedStr,
-                                                       ast.BinOp, ast.Call))):
+                                                       ast.BinOp, ast.Call, ast.Lambda))):
                 self.re_refuse(node, name, 'a function (or lambda) as the replacement is not built')
                 return None
-            if isinstance(repl, ast.Lambda):
-                self.re_refuse(node, name, 'a function (or lambda) as the replacement is not built')
+            if isinstance(repl, ast.Name) and repl.id in self.ambiguous_names:
+                self.re_refuse(node, name, f'the replacement {repl.id!r} is both a function and a variable in this program')
                 return None
+            if isinstance(repl, ast.Lambda) or (isinstance(repl, ast.Name) and repl.id in self.callable_names):
+                # a callable replacement: called with each Match, its result is the replacement text
+                return call(lib.sub_callable(index, counted), subject, repl, count)
+            if counted:
+                return call(lib.sub_callable(index, True, True), subject, repl, count)
             return call('_ail_re_sublit' + sfx, table, subject, repl, count)
         return None
 
@@ -1767,6 +1896,9 @@ class _Surface:
             self.re_refuse(node, name, 'these arguments are not built')
             return None
         pattern_node = given.pop('pattern')
+        if isinstance(pattern_node, ast.Name) and pattern_node.id in self.re_patterns and 'flags' not in given:
+            # re.match(COMPILED, s) is COMPILED.match(s)
+            return self.re_emit(node, name, self.re_patterns[pattern_node.id], given)
         shell = [pattern_node] + ([given['flags']] if 'flags' in given else [])
         index = self.re_pattern(node, name, shell[:1], [ast.keyword(arg='flags', value=given['flags'])]
                                 if 'flags' in given else [], ('flags',))
@@ -1810,8 +1942,60 @@ class _Surface:
                       'm.group("name"), m.start(i), m.end(i), and `a, b = m.span()` / `a, b = m.groups()`')
         return None
 
+    def dc_wanted(self):
+        """The dataclasses functions the program calls (asdict, replace, fields), found once before any class is lowered."""
+        if getattr(self, '_dc_wanted', None) is None:
+            self._dc_wanted = {path.split('.')[1] for node in ast.walk(self.tree)
+                               if isinstance(node, ast.Call) and (path := self.path(node.func)) is not None
+                               and path in ('dataclasses.asdict', 'dataclasses.replace', 'dataclasses.fields')}
+        return self._dc_wanted
+
+    def dc_call(self, node, name):
+        """asdict(x) / replace(x, f=v) / fields(Cls) on a dataclass lowered by dataclass(): calls of the methods and
+        helper written there (`_ail_asdict`, `_ail_replace`, `_ail_dc_fields_Cls`)."""
+        args = node.args
+        if any(isinstance(arg, ast.Starred) for arg in args) or any(item.arg is None for item in node.keywords):
+            return None
+        if name == 'asdict' and len(args) == 1 and not node.keywords:
+            return ast.Call(func=ast.Attribute(value=args[0], attr='_ail_asdict', ctx=ast.Load()), args=[], keywords=[])
+        if name == 'replace' and len(args) == 1:
+            changes = ast.Dict(keys=[ast.Constant(value=item.arg) for item in node.keywords],
+                               values=[item.value for item in node.keywords])
+            return ast.Call(func=ast.Attribute(value=args[0], attr='_ail_replace', ctx=ast.Load()), args=[changes],
+                            keywords=[])
+        if name == 'fields' and len(args) == 1 and not node.keywords and isinstance(args[0], ast.Name) \
+                and args[0].id in self.dc_classes() and not any(
+                    isinstance(each, ast.Attribute) and each.attr in ('type', 'default', 'default_factory', 'init', 'repr',
+                                                                      'compare', 'metadata', 'kw_only', 'hash')
+                    for each in ast.walk(self.tree)):
+            # (the Field objects carry the name only; a program that reads .type / .default ... is refused below)
+            self.dc_fields_used.add(args[0].id)
+            return ast.Call(func=ast.Name(id='_ail_dc_fields_' + args[0].id, ctx=ast.Load()), args=[], keywords=[])
+        self.note(node, f'dataclasses.{name}(...) with these arguments is not built; asdict(x), replace(x, f=v) and '
+                  'fields(DataclassName) are')
+        return None
+
+    def dc_classes(self):
+        return {node.name for node in self.tree.body if isinstance(node, ast.ClassDef)
+                and any(self.path(each.func if isinstance(each, ast.Call) else each) == 'dataclasses.dataclass'
+                        for each in node.decorator_list)}
+
+    def helper(self, name):
+        if name not in self.helpers:
+            self.helpers.append(name)
+
     def call(self, node, path):
         func = node.func
+        if (isinstance(func, ast.Name) and func.id in ('max', 'min') and func.id not in self.names
+                and func.id not in self.def_names and len(node.args) >= 2 and not node.keywords
+                and isinstance(node.args[-1], ast.Starred)
+                and not any(isinstance(arg, ast.Starred) for arg in node.args[:-1])):
+            # max(a, *rest): the maximum of a and the items of rest (max(a) alone, when rest is empty, as CPython)
+            self.helper('star_' + func.id)
+            return ast.Call(func=ast.Name(id='_ail_star_' + func.id, ctx=ast.Load()),
+                            args=[ast.List(elts=node.args[:-1], ctx=ast.Load()), node.args[-1].value], keywords=[])
+        if path in ('dataclasses.asdict', 'dataclasses.replace', 'dataclasses.fields'):
+            return self.dc_call(node, path.split('.')[1])
         if self.re_on:
             if path is not None and path.startswith('re.') and path.count('.') == 1:
                 return self.re_call(node, path[3:])
@@ -2162,6 +2346,8 @@ class _Surface:
             self.block(node.body, function, owner)
             self.re_subst = saved
             self.block(node.orelse, function, owner)
+        elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and self.object_setattr(node):
+            pass
         elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and self.output(node):
             pass
         elif isinstance(node, ast.With) and self.with_open(node, function, owner):
@@ -2179,6 +2365,23 @@ class _Surface:
             self.block(node.orelse, function, owner)
         else:
             self.generic(node, function, owner)
+
+    def object_setattr(self, node):
+        """`object.__setattr__(self, "name", value)` (how a frozen dataclass's __post_init__ sets a field) as the
+        assignment `self.name = value`; a frozen instance is not write-protected on either path."""
+        call = node.value
+        func = call.func
+        if not (isinstance(func, ast.Attribute) and func.attr == '__setattr__' and isinstance(func.value, ast.Name)
+                and func.value.id == 'object' and 'object' not in self.names and 'object' not in self.modules
+                and len(call.args) == 3 and not call.keywords
+                and not any(isinstance(arg, ast.Starred) for arg in call.args)
+                and isinstance(call.args[0], ast.Name)
+                and isinstance(call.args[1], ast.Constant) and isinstance(call.args[1].value, str)
+                and call.args[1].value.isidentifier()):
+            return False
+        value = ast.unparse(self.rewritten(call.args[2])[0])
+        self.replace(node, f'{call.args[0].id}.{call.args[1].value} = {value}', True)
+        return True
 
     def generic(self, node, function, owner):
         for _, value in ast.iter_fields(node):
@@ -2242,9 +2445,13 @@ class _Surface:
     def dataclass(self, node, decorator):
         options = {item.arg: item.value for item in decorator.keywords} if isinstance(decorator, ast.Call) else {}
         repr_off = isinstance(options.get('repr'), ast.Constant) and not options['repr'].value
+        eq_off = isinstance(options.get('eq'), ast.Constant) and not options['eq'].value   # (`options` is reused below)
+        order_on = isinstance(options.get('order'), ast.Constant) and options['order'].value is True
+        frozen = any(isinstance(options.get(k), ast.Constant) and options[k].value is True
+                     for k in ('frozen', 'unsafe_hash'))
         for option, value in options.items():
             enabled = not (isinstance(value, ast.Constant) and not value.value)
-            if option == 'init' and not enabled or option == 'order' and enabled:
+            if option == 'init' and not enabled:
                 self.note(node, f'@dataclass({option}={ast.unparse(value)}) is not built; @dataclass '
                           'with annotated fields is, as the __init__ it generates')
                 return
@@ -2253,12 +2460,16 @@ class _Surface:
         fields = []
         hidden = set()
         uncompared = set()
+        initless = set()               # field(init=False): not a parameter of __init__
         for statement in node.body:
             if not (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)):
                 continue
             annotation, _ = self.normalized(statement.annotation)
             if 'ClassVar' in ast.unparse(annotation):
                 self.note(statement, 'a ClassVar in a @dataclass is not built')
+                return
+            if 'InitVar' in ast.unparse(annotation):
+                self.note(statement, 'an InitVar in a @dataclass is not built')
                 return
             default = None
             value = statement.value
@@ -2271,6 +2482,9 @@ class _Surface:
                     uncompared.add(statement.target.id)
                 factory = options.pop('default_factory', None)
                 plain = options.pop('default', None)
+                if isinstance(options.get('init'), ast.Constant) and options['init'].value is False:
+                    initless.add(statement.target.id)
+                    options.pop('init')
                 if value.args or set(options) - {'repr', 'compare', 'hash'}:
                     self.note(statement, 'field(...) in a @dataclass is built with default= or '
                               'default_factory= only')
@@ -2297,41 +2511,86 @@ class _Surface:
         # ClassName(field=..., ...) for it; the typed path never sees a comment
         # (the typed path builds the __eq__ a dataclass generates from it too: ` noeq` for eq=False and
         # ` nocmp=` for fields declared compare=False, both written before ` hide=`)
-        eq_off = isinstance(options.get('eq'), ast.Constant) and not options['eq'].value
-        marker = '# ail:dataclass' + (' noeq' if eq_off else '') + (
+        # ` norepr` for repr=False (the marker is written all the same: the general path's generated __eq__ reads it)
+        marker = '# ail:dataclass' + (' noeq' if eq_off else '') + (' frozen' if frozen else '') + (' norepr' if repr_off else '') + (
             ' nocmp=' + ','.join(sorted(uncompared)) if uncompared else '')
-        self.edits.append((at, self.offset(decorator.end_lineno, decorator.end_col_offset),
-                           '' if repr_off else marker, False))
+        self.edits.append((at, self.offset(decorator.end_lineno, decorator.end_col_offset), marker, False))
         # a dataclass that extends another one: its fields come after the base's (a field of the same
         # name keeps the base's position)
-        merged = []                    # (name, annotation, default, hidden)
+        merged = []                    # (name, annotation, default, hidden, init=False)
         for base in node.bases:
             if isinstance(base, ast.Name) and base.id in self.dc_annotations:
-                inherited = dict((name, default) for name, default in self.dataclasses[base.id])
-                merged = [(name, annotation, inherited.get(name), shown)
+                inherited = self.dc_default[base.id]
+                merged = [(name, annotation, inherited.get(name), shown, name in self.dc_initless.get(base.id, ()))
                           for name, annotation, shown in self.dc_annotations[base.id]]
         for _, name, annotation, default in fields:
-            entry = (name, annotation, default, name in hidden)
+            entry = (name, annotation, default, name in hidden, name in initless)
             for index, old in enumerate(merged):
                 if old[0] == name:
                     merged[index] = entry
                     break
             else:
                 merged.append(entry)
-        parameters = ', '.join(f'{name}: {annotation}' for name, annotation, _, _ in merged)
-        body = '; '.join(f'self.{name} = {name}' for name, _, _, _ in merged)
-        self.replace(fields[0][0], f'def __init__(self, {parameters}): {body}', True)
+        given = [each for each in merged if not each[4]]
+        parameters = ', '.join(f'{name}: {annotation}' for name, annotation, *_ in given)
+        # a field(init=False) is set to its default. With none it is left unset (reading it raises AttributeError),
+        # unless some __post_init__ assigns it: then it gets a place in the field order (repr) first, as None
+        later = {t.attr for fn in node.body if isinstance(fn, ast.FunctionDef) and fn.name == '__post_init__'
+                 for t in ast.walk(fn) if isinstance(t, ast.Attribute) and isinstance(t.ctx, ast.Store)}
+        for base in node.bases:
+            later |= self.dc_later.get(base.id, set()) if isinstance(base, ast.Name) else set()
+        self.dc_later[node.name] = later
+        body = '; '.join(f'self.{name} = {name}' if not skip else f'self.{name} = {default}'
+                         for name, _, default, _, skip in merged
+                         if not skip or default is not None or name in later) or 'pass'
+        if (any(isinstance(each, ast.FunctionDef) and each.name == '__post_init__' for each in node.body)
+                or any(isinstance(base, ast.Name) and base.id in self.post_init for base in node.bases)):
+            # the generated __init__ ends with the call dataclass makes (a base class's hook is inherited)
+            body += '; self.__post_init__()'
+            self.post_init.add(node.name)
+        init = f'def __init__(self, {parameters}): {body}'
+        wanted = self.dc_wanted()
+        pad = '\n' + ' ' * fields[0][0].col_offset
+        if order_on:
+            # order=True: the four comparisons of the tuple of the compared fields (an instance of another class,
+            # a subclass included, answers NotImplemented, so the comparison raises TypeError, as in CPython)
+            compared = [name for name, *_ in merged if name not in uncompared]
+            ours = '(' + ''.join(f'self.{name}, ' for name in compared) + ')'
+            theirs = '(' + ''.join(f'other.{name}, ' for name in compared) + ')'
+            for dunder, operator in (('lt', '<'), ('le', '<='), ('gt', '>'), ('ge', '>=')):
+                init += f'{pad}def __{dunder}__(self, other): return {ours} {operator} {theirs} if type(other) is type(self) else NotImplemented'
+        if 'asdict' in wanted:
+            pairs = ', '.join(f'{name!r}: _ail_dcv(self.{name})' for name, *_ in merged)
+            init += f'{pad}def _ail_asdict(self): return {{{pairs}}}'
+            self.dc_val = True
+        if 'replace' in wanted and not any(each[4] for each in merged):
+            values = ', '.join(f'kw[{name!r}] if {name!r} in kw else self.{name}' for name, *_ in merged)
+            known = '[' + ', '.join(repr(name) for name, *_ in merged) + ']'
+            inner = pad + '    '
+            # an unknown field name is the TypeError of the constructor call dataclasses.replace makes
+            init += (f'{pad}def _ail_replace(self, kw):{inner}for k in kw:{inner}    if k not in {known}:'
+                     f'{inner}        raise TypeError("{node.name}.__init__() got an unexpected keyword argument " + repr(k))'
+                     f'{inner}return {node.name}({values})')
+        self.replace(fields[0][0], init, True)
         for statement, *_ in fields[1:]:
             self.replace(statement, '', True)  # a class body here holds methods only, not `pass`
         self.consumed.update(statement for statement, *_ in fields)
-        self.dataclasses[node.name] = [(name, default) for name, _, default, _ in merged]
-        self.dc_annotations[node.name] = [(name, annotation, shown) for name, annotation, _, shown in merged]
-        if not repr_off and any(shown for *_, shown in merged):
+        self.dataclasses[node.name] = [(name, default) for name, _, default, _, skip in merged if not skip]
+        self.dc_annotations[node.name] = [(name, annotation, shown) for name, annotation, _, shown, _ in merged]
+        self.dc_initless[node.name] = {name for name, *_, skip in merged if skip}
+        self.dc_all[node.name] = [name for name, *_ in merged]
+        self.dc_default[node.name] = {name: default for name, _, default, *_ in merged}
+        extra = ''
+        if any(each[4] for each in merged):
+            # the field order of repr and ==, which the parameters of __init__ no longer give (pyboxed2 reads it)
+            extra += ' fields=' + ','.join(name for name, *_ in merged)
+        if not repr_off and any(each[3] for each in merged):
             # which fields repr leaves out, for the general path's marker lookup
-            skipped = ','.join(name for name, _, _, shown in merged if shown)
+            extra += ' hide=' + ','.join(name for name, _, _, shown, _ in merged if shown)
+        if extra:
             for index, (start, end, text, flag) in enumerate(self.edits):
                 if text == marker and start == at:
-                    self.edits[index] = (start, end, marker + ' hide=' + skipped, flag)
+                    self.edits[index] = (start, end, marker + extra, flag)
 
     def ann_assign(self, node, function, owner):
         if isinstance(node.target, ast.Attribute) and node.value is None:
@@ -2410,7 +2669,36 @@ class _Surface:
 
     def file_uses(self, name, body, binary, binding=None):
         """Every use of the file object `name` in `body` (other than `binding`, the name it is
-        opened into) is one this pass maps."""
+        opened into) is one this pass maps, and the file is consumed (read, or walked line by line) at
+        most once: each mapped use reads the whole file again, where CPython's second read of the same
+        file object finds it at its end (`f.read(), f.read()` is the text and '')."""
+        consuming = []
+        statements = set(map(id, body))
+
+        def repeated(node):
+            # inside a loop (or a comprehension) of the body: the use runs more than once
+            child, up = node, self.parents.get(node)
+            while up is not None and id(child) not in statements:
+                if isinstance(up, (ast.For, ast.While, ast.AsyncFor)) and child is not getattr(up, 'iter', None):
+                    return True
+                if isinstance(up, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp, ast.Lambda,
+                                   ast.FunctionDef)):
+                    return True
+                child, up = up, self.parents.get(up)
+            return False
+        for statement in body:
+            for node in ast.walk(statement):
+                if not (isinstance(node, ast.Name) and node.id == name) or node is binding:
+                    continue
+                parent = self.parents.get(node)
+                grand = self.parents.get(parent)
+                if isinstance(parent, ast.Attribute) and isinstance(grand, ast.Call) and grand.func is parent \
+                        and not grand.args and not grand.keywords and parent.attr in ('read', 'readlines'):
+                    consuming.append(grand)
+                elif isinstance(parent, ast.For) and parent.iter is node:
+                    consuming.append(node)
+        if len(consuming) > 1 or any(repeated(each) for each in consuming):
+            return False
         for statement in body:
             for node in ast.walk(statement):
                 if not (isinstance(node, ast.Name) and node.id == name) or node is binding:
@@ -2503,6 +2791,9 @@ class _Surface:
                         if kept else 'pass', True)
             elif not node.level and node.module in ('typing', 'dataclasses', '__future__'):
                 self.replace(node, 'pass', True)
+            elif (not node.level and node.module == 'collections.abc'
+                  and _annotation_only_names(self.tree, [alias.asname or alias.name for alias in node.names])):
+                self.replace(node, 'pass', True)
             elif not node.level and node.module in _SMALL_MODULES:
                 built = _SMALL_MODULES[node.module]
                 if node.module not in self.keep and all(alias.name in built for alias in node.names):
@@ -2553,9 +2844,139 @@ def _modtables():
     return _modtables.module
 
 
+_ALIAS_TYPE_NAMES = frozenset((
+    'int', 'float', 'str', 'bool', 'bytes', 'None', 'list', 'dict', 'set', 'tuple', 'frozenset', 'bytearray',
+    'List', 'Dict', 'Set', 'Tuple', 'FrozenSet', 'Optional', 'Union', 'Sequence', 'Iterable', 'Collection',
+    'Mapping', 'Final'))
+
+
+def _inline_type_aliases(source):
+    """`Grid = list[list[int]]`, `Point: TypeAlias = tuple[int, int]`, `type Row = list[str]`: a
+    module-level name bound once to a type, and named nowhere but in annotations (its own and other
+    aliases' included), is written out in those annotations and its statement becomes `pass` -- the
+    annotation then says what it means to every pass that reads annotations. Lines and columns of
+    everything else are kept. A program without such an alias is returned unchanged."""
+    if '=' not in source and 'type ' not in source:
+        return source
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return source
+    classes = {n.name for n in tree.body if isinstance(n, ast.ClassDef)}
+    candidates = {}
+    for node in tree.body:
+        name = value = None
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            name, value = node.targets[0].id, node.value
+        elif (isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None
+              and (isinstance(node.annotation, ast.Name) and node.annotation.id == 'TypeAlias'
+                   or isinstance(node.annotation, ast.Attribute) and node.annotation.attr == 'TypeAlias')):
+            name, value = node.target.id, node.value
+        elif hasattr(ast, 'TypeAlias') and isinstance(node, ast.TypeAlias) and not node.type_params:
+            name, value = node.name.id, node.value
+        if name is not None and name not in classes:
+            candidates.setdefault(name, []).append((node, value))
+    candidates = {k: v[0] for k, v in candidates.items() if len(v) == 1}
+    if not candidates:
+        return source
+
+    def is_type(e, names):
+        if isinstance(e, ast.Name):
+            return e.id in _ALIAS_TYPE_NAMES or e.id in classes or e.id in names
+        if isinstance(e, ast.Constant):
+            return e.value is None
+        if isinstance(e, ast.Attribute):
+            return isinstance(e.value, ast.Name) and e.value.id in ('typing', 't') and e.attr in _ALIAS_TYPE_NAMES
+        if isinstance(e, ast.Subscript):
+            inner = e.slice.elts if isinstance(e.slice, ast.Tuple) else [e.slice]
+            return is_type(e.value, names) and all(
+                is_type(x, names) or isinstance(x, ast.Constant) and x.value is Ellipsis for x in inner)
+        if isinstance(e, ast.BinOp) and isinstance(e.op, ast.BitOr):
+            return is_type(e.left, names) and is_type(e.right, names)
+        return False
+
+    aliases = dict(candidates)
+    changed = True
+    while changed:                    # an alias may name another alias
+        changed = False
+        for name in list(aliases):
+            node, value = aliases[name]
+            if not is_type(value, set(aliases)):
+                del aliases[name]
+                changed = True
+    if not aliases:
+        return source
+    # every mention must sit in an annotation or in an alias's own value
+    allowed = set()
+    for node in ast.walk(tree):
+        spots = []
+        if isinstance(node, ast.arg):
+            spots.append(node.annotation)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            spots.append(node.returns)
+        elif isinstance(node, ast.AnnAssign):
+            spots.append(node.annotation)
+        for spot in spots:
+            if spot is not None:
+                allowed.update(id(x) for x in ast.walk(spot))
+    for node, value in aliases.values():
+        allowed.update(id(x) for x in ast.walk(value))
+        allowed.update(id(x) for x in ast.walk(node))
+    for x in ast.walk(tree):
+        if isinstance(x, ast.Name) and x.id in aliases and id(x) not in allowed:
+            return source             # used as a value somewhere: leave every alias as written
+    lines = source.splitlines(True)
+    starts = [0]
+    for line in lines:
+        starts.append(starts[-1] + len(line))
+
+    def offset(lineno, col):
+        return starts[lineno - 1] + len(lines[lineno - 1].encode('utf8')[:col].decode('utf8', 'replace'))
+
+    def text_of(name, depth=0):
+        _, value = aliases[name]
+        out = ast.get_source_segment(source, value)
+        if out is None or depth > 20:
+            return None
+        inner = sorted(((x.lineno, x.col_offset, x.end_lineno, x.end_col_offset, x.id) for x in ast.walk(value)
+                        if isinstance(x, ast.Name) and x.id in aliases), reverse=True)
+        base_line, base_col = value.lineno, value.col_offset
+        for line, col, end_line, end_col, ref in inner:
+            sub = text_of(ref, depth + 1)
+            if sub is None:
+                return None
+            if line != base_line or end_line != base_line:
+                return None           # a multi-line alias value with an inner alias: left alone
+            out = out[:col - base_col] + sub + out[end_col - base_col:]
+        if isinstance(value, ast.BinOp):
+            out = '(' + out + ')'
+        return ' '.join(out.split())
+
+    edits = []
+    texts = {}
+    for name in aliases:
+        texts[name] = text_of(name)
+        if texts[name] is None:
+            return source
+    alias_nodes = {id(node) for node, _ in aliases.values()}
+    in_alias = {id(y) for node, _ in aliases.values() for y in ast.walk(node)}
+    for node in tree.body:
+        if id(node) in alias_nodes:
+            start = offset(node.lineno, node.col_offset)
+            end = offset(node.end_lineno, node.end_col_offset)
+            edits.append((start, end, 'pass' + '\n' * source[start:end].count('\n')))
+    for x in ast.walk(tree):
+        if isinstance(x, ast.Name) and x.id in aliases and id(x) in allowed and id(x) not in in_alias:
+            edits.append((offset(x.lineno, x.col_offset), offset(x.end_lineno, x.end_col_offset), texts[x.id]))
+    for start, end, text in sorted(edits, reverse=True):
+        source = source[:start] + text + source[end:]
+    return source
+
+
 def python_surface(source, notes=None, library=False):
     """Map the Python spellings above onto the compiler's own; `notes` collects (line, why) for
     the constructs left as written."""
+    source = _inline_type_aliases(source)
     if "raise" in source and " from " in source:
         source = _raisefrom().rewrite(source, notes)
     if "match" in source:
@@ -2564,6 +2985,10 @@ def python_surface(source, notes=None, library=False):
         source = _nestfn().rewrite(source, notes)
     if "sqlite3" in source:
         source = _sqllower().rewrite_text(source, notes)
+    if any(name in source for name in ("concurrent", "multiprocessing", "threading")):
+        _threadlib()                             # puts python/pkg-v12 on sys.path
+        import typedpar                          # typed parallelism without the lock (TYPED_PARALLEL.md)
+        source = typedpar.rewrite_text(source, notes)
     if any(name in source for name in ("threading", "queue", "concurrent")):
         source = _threadlib().rewrite_text(source, notes)
     if any(name in source for name in ("fractions", "enum", "namedtuple", "NamedTuple", "ChainMap", "keyword", "calendar",
@@ -2575,7 +3000,7 @@ def python_surface(source, notes=None, library=False):
         source = _collib().rewrite(source, notes)
     if "None" in source or "Optional" in source:
         source = _optlib().rewrite(source, notes)
-    if "(" in source and ("{" in source or "set" in source):
+    if "(" in source:
         source = _modtables().rewrite_text(source, library, notes)
     source = _tuplib().rewrite(source, notes)
     try:
