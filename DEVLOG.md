@@ -1,5 +1,26 @@
 # AIL development log
 
+## 2026-10-22 — job-fuzz17 review fixes (10221632)
+
+Three follow-up defects from the review of the dataclass/Enum branch are fixed:
+
+- `@dataclass(eq=False)` now honours `unsafe_hash=True` (field hash, including fieldless classes) and an annotated
+  `__hash__` binding (`__hash__: object = lambda ...`, `= None`, or a non-callable value that fails as CPython does);
+  the marker carries the expression because field lowering consumes the annotation. `unsafe_hash=True` together
+  with an explicit `__hash__` is refused by name, as CPython refuses the class. A subclass inherits a base's
+  generated hash.
+- Enum members are read-only for `.name` / `.value` at run time, so writes through an alias, a function argument,
+  a list item, a dict value, an attribute, or a variable-name `setattr()` raise the same `AttributeError` as CPython
+  (the direct forms stay compile-time refusals). Other attributes remain settable.
+- A `repr=False` dataclass with no own repr inherits the base dataclass's generated repr (its field order and hidden
+  fields) instead of printing `<C object>`. The f-string lowering no longer crashes with a tuple-valued type in its
+  refusal message, so `f"{C(1)}"` builds and agrees with CPython.
+
+Probes in `/tmp/probes` (`q_hash_routes`, `q_repr_chain`, plus the extracted test programs) match CPython on both
+builds. Targeted tests (`test_ail_fuzz17`, `test_ail_genlib`, `test_ail_stdlib5`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`) pass on the final commit.
+
+
 ## 2026-10-22 — job-fuzz17 review fixes
 
 Review of `2aed49e` found three defects, all fixed:

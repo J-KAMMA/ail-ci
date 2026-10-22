@@ -2447,8 +2447,20 @@ class _Surface:
         repr_off = isinstance(options.get('repr'), ast.Constant) and not options['repr'].value
         eq_off = isinstance(options.get('eq'), ast.Constant) and not options['eq'].value   # (`options` is reused below)
         order_on = isinstance(options.get('order'), ast.Constant) and options['order'].value is True
-        frozen = any(isinstance(options.get(k), ast.Constant) and options[k].value is True
-                     for k in ('frozen', 'unsafe_hash'))
+        frozen = isinstance(options.get('frozen'), ast.Constant) and options['frozen'].value is True
+        unsafe_hash = isinstance(options.get('unsafe_hash'), ast.Constant) and options['unsafe_hash'].value is True
+        # CPython refuses @dataclass(unsafe_hash=True) on a class that binds __hash__ itself; keep that a named
+        # compile-time refusal rather than emitting a class whose hash depends on which binding wins.
+        explicit_hash = any(
+            (isinstance(st, ast.FunctionDef) and st.name == '__hash__')
+            or (isinstance(st, ast.Assign) and any(isinstance(t, ast.Name) and t.id == '__hash__' for t in st.targets))
+            or (isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Name)
+                and st.target.id == '__hash__' and st.value is not None)
+            for st in node.body)
+        if unsafe_hash and explicit_hash:
+            self.note(node, '@dataclass(unsafe_hash=True) on a class that defines __hash__ is not built; '
+                      'CPython refuses that class')
+            return
         for option, value in options.items():
             enabled = not (isinstance(value, ast.Constant) and not value.value)
             if option == 'init' and not enabled:
@@ -2510,7 +2522,8 @@ class _Surface:
         # (the typed path builds the __eq__ a dataclass generates from it too: ` noeq` for eq=False and
         # ` nocmp=` for fields declared compare=False, both written before ` hide=`)
         # ` norepr` for repr=False (the marker is written all the same: the general path's generated __eq__ reads it)
-        marker = '# ail:dataclass' + (' noeq' if eq_off else '') + (' frozen' if frozen else '') + (' norepr' if repr_off else '') + (
+        marker = '# ail:dataclass' + (' noeq' if eq_off else '') + (' frozen' if frozen else '') + (
+            ' unsafehash' if unsafe_hash else '') + (' norepr' if repr_off else '') + (
             ' nocmp=' + ','.join(sorted(uncompared)) if uncompared else '')
         self.edits.append((at, self.offset(decorator.end_lineno, decorator.end_col_offset), marker, False))
         # a dataclass that extends another one: its fields come after the base's (a field of the same
@@ -2601,12 +2614,24 @@ class _Surface:
         self.dc_all[node.name] = [name for name, *_ in merged]
         self.dc_default[node.name] = {name: default for name, _, default, *_ in merged}
         extra = ''
-        if any(each[4] for each in merged):
-            # the field order of repr and ==, which the parameters of __init__ no longer give (pyboxed2 reads it)
+        if merged:
+            # the field order of repr and ==, which the parameters of __init__ no longer give when a field is
+            # init=False (pyboxed2 reads it; a generated __hash__ hashes every field, init=False included)
             extra += ' fields=' + ','.join(name for name, *_ in merged)
-        if not repr_off and any(each[3] for each in merged):
-            # which fields repr leaves out, for the general path's marker lookup
+        if any(each[3] for each in merged):
+            # which fields repr leaves out, for the general path's marker lookup (also needed by a repr=False
+            # class that inherits the base's generated repr)
             extra += ' hide=' + ','.join(name for name, _, _, shown, _ in merged if shown)
+        # a __hash__ binding written as an annotation (`__hash__: int = 5`) is removed with the fields it belongs
+        # to; hand its expression to pyboxed2 so the eq=False path still honours it (bytes.fromhex keeps spaces out
+        # of the marker line)
+        hash_source = None
+        for st in node.body:
+            if (isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Name)
+                    and st.target.id == '__hash__' and st.value is not None):
+                hash_source = ast.unparse(st.value)
+        if hash_source is not None:
+            extra += ' hashhex=' + hash_source.encode('utf8').hex()
         if extra:
             for index, (start, end, text, flag) in enumerate(self.edits):
                 if text == marker and start == at:

@@ -16,6 +16,8 @@ class _AilEnum:
         self.name = name
         self.value = value
         self._idx = idx
+        # set last: the runtime refuses later writes to .name / .value through any alias (CPython's Enum does)
+        self.__ail_enum_member__ = 1
 
     def __repr__(self) -> str:
         return "<%s.%s: %s>" % (self.cname, self.name, repr(self.value))

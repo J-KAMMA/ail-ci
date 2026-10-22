@@ -2370,51 +2370,111 @@ class Compiler(boxclosure.ClosureMixin):
             if not text.startswith('# ail:dataclass'):
                 continue
             names = {m.name for m in node.body if isinstance(m, ast.FunctionDef)}
+            hit = re.search(r'\bhashhex=(\S*)', text)
+            hash_expr = bytes.fromhex(hit.group(1)).decode('utf8') if hit else None
+            marker_hash = None if hash_expr is None else ('none' if hash_expr == 'None' else 'custom')
+
+            def all_fields():
+                # every dataclass field, in declaration order (init=False included); the marker's `fields=` has it
+                order = re.search(r'\bfields=(\S*)', text)
+                if order:
+                    return order.group(1).split(',')
+                init = [m for m in node.body if isinstance(m, ast.FunctionDef) and m.name == '__init__']
+                return [a.arg for a in init[0].args.args[1:]] if init else []
+
+            def field_hash(fields):
+                return 'def __hash__(self):\n    return hash((%s))\n' % ''.join('self.%s, ' % f for f in fields)
+
+            def body_hash_expr():
+                for st in node.body:
+                    value = st.value if isinstance(st, (ast.Assign, ast.AnnAssign)) else None
+                    if value is None:
+                        continue
+                    targets = st.targets if isinstance(st, ast.Assign) else [st.target]
+                    if any(isinstance(e, ast.Name) and e.id == '__hash__'
+                           for t in targets for e in ast.walk(t)):
+                        return ast.unparse(value)
+                return None
+
+            def inject_custom(expr):
+                # a __hash__ binding (its annotation was consumed with the fields) is a class attribute the
+                # runtime does not call as a method: write the equivalent def, replacing the binding if present
+                for index, st in enumerate(node.body):
+                    value = (st.value if isinstance(st, (ast.Assign, ast.AnnAssign)) else None)
+                    if value is None:
+                        continue
+                    targets = st.targets if isinstance(st, ast.Assign) else [st.target]
+                    if not any(isinstance(e, ast.Name) and e.id == '__hash__'
+                               for t in targets for e in ast.walk(t)):
+                        continue
+                    fn = ast.parse('def __hash__(self):\n    return (%s)(self)\n' % expr).body[0]
+                    fn._ail_gen = True
+                    ast.copy_location(fn, st)
+                    node.body[index] = fn
+                    ast.fix_missing_locations(node)
+                    return
+                for fn in ast.parse('def __hash__(self):\n    return (%s)(self)\n' % expr).body:
+                    fn._ail_gen = True
+                    node.body.append(fn)
+                ast.fix_missing_locations(node)
+
             if ' noeq' in text:
                 # eq=False keeps the __hash__ the class would have without the dataclass decorator: its own
                 # binding (`__hash__ = None` included), or None because it defines __eq__, or the base's, or
-                # object's identity hash. The runtime treats such a dataclass as unhashable without a __hash__,
-                # so inject one only when the answer is object identity; _ail_dc_id(self) is such a hash.
-                kind = hash_kind(node)
-                if kind == 'object' and '__init__' in names:
+                # object's identity hash. unsafe_hash=True adds the field hash CPython generates. The runtime
+                # treats such a dataclass as unhashable without a __hash__, so inject identity only when the
+                # answer really is object identity; _ail_dc_id(self) is such a hash.
+                unsafe = ' unsafehash' in text
+                if unsafe:
+                    kind = 'field'
+                elif marker_hash is not None:
+                    kind = marker_hash
+                else:
+                    kind = hash_kind(node)
+                if kind == 'field':
+                    if '__hash__' not in names:
+                        for fn in ast.parse(field_hash(all_fields())).body:
+                            fn._ail_gen = True
+                            node.body.append(fn)
+                        ast.fix_missing_locations(node)
+                elif kind == 'object' and '__init__' in names:
                     for fn in ast.parse('def __hash__(self):\n    return _ail_dc_id(self)\n').body:
                         fn._ail_gen = True
                         node.body.append(fn)
                     ast.fix_missing_locations(node)
                 elif kind == 'custom':
-                    # an assigned `__hash__ = lambda ...` / `__hash__ = f` is a class attribute the runtime
-                    # does not call as a method: replace it with the equivalent def, so the class has one
-                    for index, st in enumerate(node.body):
-                        value = (st.value if isinstance(st, (ast.Assign, ast.AnnAssign)) else None)
-                        if value is None:
-                            continue
-                        targets = st.targets if isinstance(st, ast.Assign) else [st.target]
-                        if not any(isinstance(e, ast.Name) and e.id == '__hash__'
-                                   for t in targets for e in ast.walk(t)):
-                            continue
-                        fn = ast.parse('def __hash__(self):\n    return (%s)(self)\n'
-                                       % ast.unparse(value)).body[0]
-                        fn._ail_gen = True
-                        ast.copy_location(fn, st)
-                        node.body[index] = fn
-                        ast.fix_missing_locations(node)
-                        break
+                    if marker_hash == 'custom':
+                        inject_custom(hash_expr)
+                    else:
+                        expr = body_hash_expr()
+                        if expr is not None:
+                            inject_custom(expr)
                 continue
             if '__eq__' in names or '__init__' not in names:
                 continue
             init = [m for m in node.body if isinstance(m, ast.FunctionDef) and m.name == '__init__'][0]
             hit = re.search(r'\bnocmp=(\S*)', text)
             nocmp = set(hit.group(1).split(',')) if hit else set()
-            order = re.search(r'\bfields=(\S*)', text)       # field(init=False) fields are not parameters of __init__
-            fields = [a for a in (order.group(1).split(',') if order else [a.arg for a in init.args.args[1:]])
-                      if a not in nocmp]
+            fields = [f for f in all_fields() if f not in nocmp]
             tup = lambda who: '(%s)' % ''.join('%s.%s, ' % (who, f) for f in fields)
             src = ('def __eq__(self, other):\n'
                    '    if not _ail_same_class(self, other):\n'
                    '        return False\n'
                    '    return %s == %s\n' % (tup('self'), tup('other')))
-            if ' frozen' in text and '__hash__' not in names:
-                src += 'def __hash__(self):\n    return hash(%s)\n' % tup('self')
+            own_hash = bound(node, '__hash__')
+            if marker_hash is not None and ' unsafehash' not in text:
+                # an explicit __hash__ wins over the frozen/eq rules (and its annotation was consumed with the
+                # fields, so the expression comes from the marker)
+                if marker_hash == 'custom':
+                    inject_custom(hash_expr)
+            elif own_hash is not None:
+                # an assigned __hash__ / __hash__ = None stays explicit, even with frozen=True
+                if own_hash == 'custom':
+                    expr = body_hash_expr()
+                    if expr is not None:
+                        inject_custom(expr)
+            elif (' frozen' in text or ' unsafehash' in text) and '__hash__' not in names:
+                src += field_hash(all_fields())
             for fn in ast.parse(src).body:
                 fn._ail_gen = True              # unified.float_search_risk looks at the program's own code only
                 node.body.append(fn)
@@ -3001,23 +3061,30 @@ class Compiler(boxclosure.ClosureMixin):
         hide = 0
         if (marker and 2 <= node.lineno <= len(marker) + 1
                 and marker[node.lineno - 2].strip().startswith('# ail:dataclass')
-                and '__repr__' not in methods and ' norepr' not in marker[node.lineno - 2]
-                and '__init__' in methods):
+                and '__repr__' not in methods and '__init__' in methods):
             # ail_syntax.py replaced `@dataclass` by this marker comment (and wrote the __init__):
             # print / repr / str / containers show ClassName(field=repr, ...) like CPython
-            init = [i for i in node.body if isinstance(i, ast.FunctionDef) and i.name == '__init__'][0]
-            dc = len(init.args.args)             # self + the fields = field count + 1
             line = marker[node.lineno - 2].strip()
-            names = [a.arg for a in init.args.args[1:]]
-            order = re.search(r'\bfields=(\S*)', line)      # field(init=False) fields are not parameters of __init__
-            if order:
-                names = order.group(1).split(',')
-                dc = len(names) + 1
-            if ' hide=' in line:
-                hidden_names = set(line.split(' hide=', 1)[1].split(' ')[0].split(','))
-                for i, a in enumerate(names):
-                    if a in hidden_names:
-                        hide |= 1 << i
+            base_info = self.classes.get(base) if base is not None else None
+            if ' norepr' in line:
+                # repr=False adds no __repr__, so an ordinary subclass inherits the base's. When that base is a
+                # dataclass with a generated repr, use exactly its field order and hidden mask (not this class's
+                # own fields), so `@dataclass(repr=False) class C(B): ...` prints C(x=..., ...) as CPython does.
+                if base_info is not None and base_info.get('dc'):
+                    dc, hide = base_info['dc'], base_info.get('dc_hide', 0)
+            else:
+                init = [i for i in node.body if isinstance(i, ast.FunctionDef) and i.name == '__init__'][0]
+                dc = len(init.args.args)             # self + the fields = field count + 1
+                names = [a.arg for a in init.args.args[1:]]
+                order = re.search(r'\bfields=(\S*)', line)      # field(init=False) fields are not parameters of __init__
+                if order:
+                    names = order.group(1).split(',')
+                    dc = len(names) + 1
+                if ' hide=' in line:
+                    hidden_names = set(line.split(' hide=', 1)[1].split(' ')[0].split(','))
+                    for i, a in enumerate(names):
+                        if a in hidden_names:
+                            hide |= 1 << i
         self.classes[node.name] = {'base': base, 'methods': methods, 'class_attrs': class_attrs, 'dc': dc, 'dc_hide': hide}
         self.class_order.append(node.name)
 

@@ -1341,6 +1341,10 @@ static inline ail_st ail2a_setattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_o
     int64_t id = -1;
     for (int64_t i = 0; i < cx->intern_n; i++) if (strcmp(cx->intern_tab[i], buf) == 0) { id = i; break; }
     if (id < 0) { char *dup = (char *)ail_xmalloc(strlen(buf) + 1); strcpy(dup, buf); id = ail_intern(cx, dup); }
+    if (ail_enum_member_locked(cx, obj, id)) {
+        char m[320]; snprintf(m, sizeof m, "<enum 'Enum'> cannot set attribute '%s'", buf);
+        return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, m);
+    }
     ail_inst_setattr(cx, obj, id, v);
     *out = ail_box_none();
     return AIL_OK;

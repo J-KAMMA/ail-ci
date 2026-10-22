@@ -262,6 +262,142 @@ def main() -> None:
 main()
 '''
 
+EQFALSE_UNSAFE_HASH = r'''from dataclasses import dataclass
+
+
+@dataclass(eq=False, unsafe_hash=True)
+class P:
+    x: int
+    y: int = 0
+
+
+@dataclass(eq=False, unsafe_hash=True)
+class E:
+    pass
+
+
+@dataclass(eq=False, unsafe_hash=True)
+class B:
+    x: int
+
+
+@dataclass(eq=False)
+class C(B):
+    y: int
+
+
+@dataclass(eq=False)
+class H:
+    x: int
+    __hash__: object = lambda self: 11
+
+
+@dataclass(eq=False)
+class N:
+    x: int
+    __hash__: object = None
+
+
+def main() -> None:
+    a, b, c = P(1), P(1), P(2)
+    print(a == b, hash(a) == hash(b), hash(a) == hash(c), len({a, b, c}))
+    print(hash(E()) == hash(E()), len({E(), E()}))
+    print(hash(C(1, 2)) == hash(C(1, 3)), hash(C(1, 2)) == hash(C(2, 3)))
+    print(hash(H(1)), H(1) == H(2))
+    try:
+        hash(N(1))
+    except TypeError as exc:
+        print(type(exc).__name__)
+
+
+main()
+'''
+
+ENUM_MEMBER_ALIASES = r'''from enum import Enum, IntEnum, StrEnum
+
+
+class E(Enum):
+    A = 1
+
+
+class I(IntEnum):
+    A = 1
+
+
+class S(StrEnum):
+    A = "a"
+
+
+def show(label, fn):
+    try:
+        fn()
+    except AttributeError as exc:
+        print(label, type(exc).__name__, str(exc))
+
+
+def via_argument(x):
+    x.name = "Z"
+
+
+class Box:
+    pass
+
+
+def main() -> None:
+    m = E.A
+    show("alias", lambda: setattr(m, "value", 9))
+    show("argument", lambda: via_argument(E.A))
+    xs = [E.A]
+    show("list", lambda: setattr(xs[0], "value", 7))
+    d = {"k": E.A}
+    show("dict", lambda: setattr(d["k"], "value", 8))
+    box = Box()
+    box.m = E.A
+    show("attribute", lambda: setattr(box.m, "name", "Q"))
+    key = "value"
+    show("setattr-name", lambda: setattr(E.A, key, 9))
+    show("setattr-alias", lambda: setattr(m, "name", "X"))
+    show("intenum", lambda: setattr(I.A, key, 2))
+    show("strenum", lambda: setattr(S.A, key, "b"))
+    m.foo = 3
+    print(m.foo, E.A.value, E.A.name, I.A.value, S.A.value)
+
+
+main()
+'''
+
+REPR_FALSE_INHERITS = r'''from dataclasses import dataclass, field
+
+
+@dataclass
+class B:
+    x: int
+    y: int = field(default=2, repr=False)
+
+
+@dataclass(repr=False)
+class C(B):
+    pass
+
+
+@dataclass
+class D(B):
+    z: int = 3
+
+
+@dataclass(repr=False)
+class E(D):
+    pass
+
+
+def main() -> None:
+    print(C(1), repr(C(1)), f"{C(1)}")
+    print(E(1), repr(E(1)), f"{E(1)}")
+
+
+main()
+'''
+
 INLINE_TAB_DATACLASS = '''from dataclasses import dataclass
 
 
@@ -435,6 +571,15 @@ class Fuzz17Tests(unittest.TestCase):
 
     def test_inline_and_tab_empty_dataclass(self):
         self.check('inline_tab_dataclass', INLINE_TAB_DATACLASS)
+
+    def test_eq_false_unsafe_hash_and_annotated_hash(self):
+        self.check('eqfalse_unsafe_hash', EQFALSE_UNSAFE_HASH)
+
+    def test_enum_member_writes_through_aliases(self):
+        self.check('enum_member_aliases', ENUM_MEMBER_ALIASES)
+
+    def test_repr_false_inherits_base_generated_repr(self):
+        self.check('repr_false_inherits', REPR_FALSE_INHERITS)
 
     def test_enum_member_write_through_tuple_target_is_refused(self):
         self.refused('enum_tuple_target', ENUM_TUPLE_TARGET, 'setting .value is not built')

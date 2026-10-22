@@ -16400,8 +16400,26 @@ static __attribute__((noinline, cold)) ail_st ail_attr_not_inst(ail_ctx *cx, ail
     char buf[160]; snprintf(buf, sizeof buf, "'%s' object has no attribute '%s'", ail__tname_c(inst), name_for_msg);
     return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, buf);
 }
+static inline int ail_enum_member_locked(ail_ctx *cx, ail_obj inst, int64_t name_id) {
+    /* an Enum member created by prelude_enum.py carries __ail_enum_member__; .name / .value are read-only on it
+       (CPython: AttributeError), including through an alias, a container or a run-time setattr() */
+    if (inst.tag != AIL_T_INST || name_id < 0 || name_id >= cx->intern_n) return 0;
+    const char *nm = cx->intern_tab[name_id];
+    if (strcmp(nm, "name") != 0 && strcmp(nm, "value") != 0) return 0;
+    ail_instobj *o = (ail_instobj *)inst.o;
+    for (int64_t i = 0; i < o->n; i++) {
+        int64_t id = o->attrs[i].name_id;
+        if (id >= 0 && id < cx->intern_n && strcmp(cx->intern_tab[id], "__ail_enum_member__") == 0) return 1;
+    }
+    return 0;
+}
 static inline ail_st ail_inst_setattr_chk(ail_ctx *cx, ail_obj inst, int64_t name_id, ail_obj val) {
     if (__builtin_expect((unsigned)(inst.tag - AIL_T_INST) > 1u, 0)) return ail_attr_not_inst(cx, inst, cx->intern_tab[name_id]);   /* INST, EXC are adjacent */
+    if (ail_enum_member_locked(cx, inst, name_id)) {
+        char m[160];
+        snprintf(m, sizeof m, "<enum 'Enum'> cannot set attribute '%s'", cx->intern_tab[name_id]);
+        return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, m);
+    }
     ail_inst_setattr(cx, inst, name_id, val);
     return AIL_OK;
 }

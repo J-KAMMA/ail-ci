@@ -8197,7 +8197,7 @@ def _fstring_field(fv, ctx):
         return _list_text(val, kind, ctx)
     if kind not in (INT, FLT, STR):
         raise Unsupported('an f-string field of type %s; only an int, float or str expression '
-                          'is built inside {}' % kind)
+                          'is built inside {}' % (kind,))
     pre = None
     if fv.conversion == 114:
         pre = _repr_conv(val, kind, ctx)
