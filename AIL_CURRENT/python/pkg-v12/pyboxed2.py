@@ -4872,7 +4872,19 @@ class Compiler(boxclosure.ClosureMixin):
                 if e is None:
                     return '0', str(default)
                 v = self.expr(e, ctx)
-                return '1', '(%s).i' % v
+                kind = self.infer_kind(e, ctx)
+                if kind == 'none':
+                    return '0', '0'
+                if kind in ('int', 'bool'):
+                    return '1', '(%s).i' % v
+                t = ctx.tmp()
+                ctx.emit('%s = %s;' % (t, v))
+                self.needs_argchk = True
+                ctx.uses_st = True
+                ctx.emit('if (%s.tag != AIL_T_INT && %s.tag != AIL_T_BOOL && %s.tag != AIL_T_NONE) '
+                         '{ st = ail2_argerr(cx, %s, 7, "", 0); goto %s; }'
+                         % (t, t, t, t, ctx.cur_err_target()))
+                return '(%s.tag != AIL_T_NONE)' % t, '(%s).i' % t
             hlo, lo = bound(node.slice.lower, 0)
             hhi, hi = bound(node.slice.upper, 0)
             hst, st_ = bound(node.slice.step, 1)
