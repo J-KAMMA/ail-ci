@@ -1,8 +1,18 @@
-**IntEnum / IntFlag leftovers, three silent differences only:**
-1. `C.B ** 2` on an IntEnum member raises TypeError; CPython gives the int result.
-2. `IntEnum` member `== ` a plain `Enum` member with the same value gives True; CPython gives False.
-3. `5 % 0` says "integer division or modulo by zero"; CPython 3.12 says "integer modulo by zero" (check `//` and divmod texts too).
-Probe both builds with `bash ~/tools/cmp.sh`, add tests to a new `test_ail_intenum4.py`, then commit.
+You continue on the current branch, where your earlier work is committed. **Fix only these findings from the last review, nothing else:**
+
+1. **3-arg `pow()` misreports float operands** (`/tmp/rprobes/p_powfloat.py`, both builds).
+`pow(2.0, 3, 5)` expected `TypeError: pow() 3rd argument not allowed unless all arguments are integers`; actual `TypeError: unsupported operand type(s) for ** or pow(): 'float', 'int', 'int'`. Same for `(3, 2.0, 5)`, `(3, 2, 5.0)` and `pow(C.A, 2.0, 5)`. Base was correct, so this is a regression.
+
+2. **`divmod()` instance dispatch is too broad and loses divmod-specific diagnostics** (`p_divmod_err.py`, `p_mod_enum.py`, `p_divmod_more.py`).
+`divmod(E.A, C.A)` expected `TypeError: unsupported operand type(s) for divmod(): 'E' and 'C'`; actual `... for //: 'E' and 'C'`. `divmod(C.A, "x")` expected `... divmod(): 'C' and 'str'`; actual `... for //` (no operand names). `divmod(C.A, 0.0)` expected `ZeroDivisionError: float divmod()`; actual `ZeroDivisionError: float floor division by zero`. A class defining only `__floordiv__`/`__mod__` (`Q`) gives `divmod(Q(), 2) == (10, 11)` where CPython raises the `divmod()` TypeError; a `__rfloordiv__`/`__rmod__` class gives `(20, 21)` for `divmod(2, R())`.
+
+3. **3-arg `pow()` converts an enum before naming the failing operand** (`p_pow_enum.py`).
+`pow(C.A, E.A, 5)` expected `TypeError: unsupported operand type(s) for ** or pow(): 'C', 'E', 'int'`; actual `'int', 'E', 'int'`. `pow(E.A, C.A, 5)` expected `'E', 'C', 'int'`; actual `'E', 'int', 'int'`.
+
+4. **Plain Enum on the left still does not defer to the other operand** (`p_eq_custom2.py`, `p_enum_plain_ord.py`).
+With `C(IntEnum).__eq__` overridden to return True, `E.A == C.A` expected `True` (and `C.__eq__` runs); actual `False` because `_AilEnum.__eq__` returns identity instead of `NotImplemented` across classes. Plain Enum ordering also still says `'instance'` and `'<'`: `E.A <= H.A` expected `TypeError: '<=' not supported between instances of 'E' and 'H'`; actual `TypeError: '<' not supported between instances of 'instance' and 'instance'`.
+
+Probe both builds with `bash ~/tools/cmp.sh`, add each fixed case to the tests, then commit. If a finding cannot be fixed safely, refuse the construct by name at compile time instead of leaving a silent wrong answer.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
