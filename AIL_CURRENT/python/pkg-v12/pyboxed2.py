@@ -8551,6 +8551,38 @@ class Compiler(boxclosure.ClosureMixin):
                         '((%s.tag != AIL_T_NONE) ? (%s).i : 0)' % (b, b)))
         return out
 
+    def _seq_index_bound(self, arg, ctx):
+        """Evaluate a list / tuple .index() start or stop and convert it as CPython does: an int or a
+        bool, or an instance with __index__, is an index; anything else (None, a float, a str, ...) is
+        the slice-index TypeError. The value is kept in a frame slot so the tag is tested at run time
+        (it may arrive through a variable, a list item, an attribute or a call)."""
+        b = ctx.tmp()
+        ctx.emit('%s = %s;' % (b, self.expr(arg, ctx)))
+        return b
+
+    def _check_seq_index_bound(self, b, ctx):
+        had = None
+        if self.dunder_ops:
+            fn = ctx.new_cvar('xfn')
+            xv = ctx.new_cvar('xiv')
+            had = ctx.new_cvar('xhad')
+            ctx.emit('int %s = 0;' % had)
+            ctx.emit('if (%s.tag == AIL_T_INST) { ail_d1_fn %s = ail_dun1(%s, AIL_D1_INDEX); '
+                     'if (%s) { ail_obj %s; %s = 1; st = %s(cx, &%s, %s); if (st != AIL_OK) goto %s; %s = %s; } }'
+                     % (b, fn, b, fn, xv, had, fn, xv, b, ctx.cur_err_target(), b, xv))
+        err = ctx.cur_err_target()
+        if had is not None:
+            ctx.emit('if (%s.tag != AIL_T_INT && %s.tag != AIL_T_BOOL) { char buf[80]; '
+                     'if (%s) { snprintf(buf, sizeof buf, "__index__ returned non-int (type %%s)", ail__tname_c(%s)); '
+                     'st = ail_raise_c(cx, AIL_B_TYPEERROR, buf); } else { st = ail_raise_c(cx, AIL_B_TYPEERROR, '
+                     '"slice indices must be integers or have an __index__ method"); } goto %s; }'
+                     % (b, b, had, b, err))
+        else:
+            ctx.emit('if (%s.tag != AIL_T_INT && %s.tag != AIL_T_BOOL) { st = ail_raise_c(cx, AIL_B_TYPEERROR, '
+                     '"slice indices must be integers or have an __index__ method"); goto %s; }'
+                     % (b, b, err))
+        ctx.uses_st = True
+
     def _m_index(self, recv, kind, args, kwargs, ctx):
         v = self.expr(args[0], ctx)
         t = ctx.tmp()
@@ -8560,10 +8592,16 @@ class Compiler(boxclosure.ClosureMixin):
                 if none_is_default:
                     has_lo, lo, has_hi, hi = self._str_window_bounds(args, c)
                 else:
-                    has_lo = '1' if len(args) > 1 else '0'
-                    lo = '(%s).i' % self.expr(args[1], c) if len(args) > 1 else '0'
-                    has_hi = '1' if len(args) > 2 else '0'
-                    hi = '(%s).i' % self.expr(args[2], c) if len(args) > 2 else '0'
+                    b_lo = self._seq_index_bound(args[1], c) if len(args) > 1 else None
+                    b_hi = self._seq_index_bound(args[2], c) if len(args) > 2 else None
+                    if b_lo is not None:
+                        self._check_seq_index_bound(b_lo, c)
+                    if b_hi is not None:
+                        self._check_seq_index_bound(b_hi, c)
+                    has_lo = '1' if b_lo is not None else '0'
+                    lo = '(%s).i' % b_lo if b_lo is not None else '0'
+                    has_hi = '1' if b_hi is not None else '0'
+                    hi = '(%s).i' % b_hi if b_hi is not None else '0'
                 ix = c.new_cvar('ix')
                 c.emit('int64_t %s;' % ix)
                 c.emit('st = %s(cx, &%s, %s, %s, %s, %s, %s, %s); if (st != AIL_OK) goto %s;' %
