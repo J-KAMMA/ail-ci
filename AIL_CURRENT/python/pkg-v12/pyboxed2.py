@@ -3550,12 +3550,22 @@ class Compiler(boxclosure.ClosureMixin):
         if self.threads and not ctx.fname.lower().startswith(('pf__ail', 'pm__ail')):
             ctx.emit('AIL_GIL_CHECK(cx);')
 
-    def _open_iter_loop(self, iter_node, ctx):
+    def _open_iter_loop(self, iter_node, ctx, opened=None):
         """Emit the iterable evaluation + `for (;;) {` head of an iteration loop.
         Returns the tmp holding each element. Uses an indexed loop for
         containers whose kind is proven (no 112B iterator object and no
         per-element call); everything else takes the generic
-        ail_iter/ail_it_next path unchanged."""
+        ail_iter/ail_it_next path unchanged. `opened` is an already-created
+        iterator (next() opens the outermost one before its default runs)."""
+        if opened is not None:
+            val = ctx.tmp()
+            ctx.emit('for (;;) {')
+            ctx.indent += 1
+            self._gil_check(ctx)
+            ctx.emit('st = ail_it_next(cx, &%s, %s);' % (val, opened))
+            ctx.emit('if (st == AIL_STOP) { st = AIL_OK; break; }')
+            ctx.check()
+            return val
         # G12: with threads another thread may change the list between iterations; iterate the slice
         plan = None if self.threads else self._slice_iter_plan(iter_node, ctx)
         if plan is not None:
@@ -5086,14 +5096,14 @@ class Compiler(boxclosure.ClosureMixin):
         self._emit_comp_generators(node.generators, 0, node, ctx, t, add_stmt_fn, set())
         return t
 
-    def _emit_comp_generators(self, generators, i, node, ctx, t, add_stmt_fn, declared):
+    def _emit_comp_generators(self, generators, i, node, ctx, t, add_stmt_fn, declared, opened=None):
         if i == len(generators):
             add_stmt_fn(node, ctx, t)
             return
         gen = generators[i]
         if gen.is_async:
             raise Unsupported('an async for in a comprehension')
-        val = self._open_iter_loop(gen.iter, ctx)
+        val = self._open_iter_loop(gen.iter, ctx, opened)
         self._declare_comp_target(gen.target, val, ctx, declared)
         for cond in gen.ifs:
             cc = self.expr(cond, ctx)
@@ -7294,15 +7304,22 @@ class Compiler(boxclosure.ClosureMixin):
         if len(args) not in (1, 2) or kwargs:
             raise Unsupported('next() with other than (iterator[, default])')
         if isinstance(args[0], ast.GeneratorExp):
-            # the loops of the generator expression stop at its first element (nothing after it is evaluated)
+            gen = args[0]
+            first = gen.generators[0]
+            src = self._resolve_iter_src(first.iter, ctx)
+            opened = ctx.tmp()
+            ctx.emit('st = ail_iter(cx, &%s, %s);' % (opened, src))
+            ctx.check()
+            if len(args) == 2:
+                dflt = self.expr(args[1], ctx)
             t = ctx.tmp()
             found = ctx.new_label('next')
 
             def add(n, c, _t):
                 c.emit('%s = %s; goto %s;' % (t, self.expr(n.elt, c), found))
-            self._emit_comp(args[0], ctx, 'ail_box_none()', add)
+            self._emit_comp_generators(gen.generators, 0, gen, ctx, t, add, set(), opened=opened)
             if len(args) == 2:
-                ctx.emit('%s = %s;' % (t, self.expr(args[1], ctx)))
+                ctx.emit('%s = %s;' % (t, dflt))
             else:
                 ctx.emit('st = ail_raise_c(cx, AIL_B_STOPITERATION, ""); goto %s;' % ctx.cur_err_target())
                 ctx.uses_st = True
