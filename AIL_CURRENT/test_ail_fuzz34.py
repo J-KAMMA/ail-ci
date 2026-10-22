@@ -11,6 +11,11 @@ Found with small programs compared against CPython:
 3. An enclosing function local read by the generator was copied when it was made, so a later
    rebinding was invisible: `n = 2; g = (i + n for i in range(3)); n = 10; list(g)` printed the
    old n. The local is now passed as a getter, which the general path's closure cells keep live.
+
+A walrus inside a generator expression binds in the scope that contains the expression, not in the
+generator's implicit function.  The lowering copies the body into a module-level generator function,
+so the target would become a local there; that shape is refused by name rather than silently losing
+the binding.  A lambda inside the expression is a real scope and keeps its own walrus.
 """
 import os
 import subprocess
@@ -113,6 +118,31 @@ print(sorted(v for v in {3: "c", 1: "a", 2: "b"}))
 '''
 
 
+WALRUS_LAMBDA = r'''g = ((lambda v: (w := v) + 1)(x) for x in [1, 2, 3])
+print(list(g))
+'''
+
+WALRUS_REFUSED = [
+    r'''def f():
+    n = 1
+    g = ((n := x) for x in [1, 2, 3])
+    return list(g), n
+print(f())
+''',
+    r'''def f():
+    total = 0
+    g = (x for x in [1, 2, 3] if (total := total + x) > 1)
+    return list(g), total
+print(f())
+''',
+    r'''def f():
+    g = ((m := x) for x in [1, 2])
+    return list(g), m
+print(f())
+''',
+]
+
+
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '.py')
     src.write_text(text, encoding='utf-8')
@@ -156,6 +186,19 @@ class Fuzz34Tests(unittest.TestCase):
 
     def test_generator_expression_exhaustion(self):
         self.check('genexp_exhaust', EXHAUST)
+
+    def test_lambda_inside_generator_expression_keeps_its_walrus(self):
+        self.check('genexp_lambda_walrus', WALRUS_LAMBDA)
+
+    def test_walrus_inside_generator_expression_is_refused_by_name(self):
+        for index, text in enumerate(WALRUS_REFUSED):
+            with tempfile.TemporaryDirectory(prefix='ail-fuzz34-') as directory:
+                for general in (True, False):
+                    got, err = _build_and_run(directory, 'walrus_%d_%s' % (index, 'g' if general else 'd'),
+                                              text, general)
+                    self.assertIsNone(got, 'walrus case %d was built (general=%s)' % (index, general))
+                    self.assertIn('walrus operator (:=) inside a generator expression', err,
+                                  'walrus case %d (general=%s)\n%s' % (index, general, err))
 
 
 if __name__ == '__main__':

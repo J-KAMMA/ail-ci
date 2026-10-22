@@ -1671,6 +1671,33 @@ class _GetterReads(ast.NodeTransformer):
     visit_DictComp = _comp
 
 
+def _genexp_has_walrus(gen):
+    """A `:=` inside a generator expression binds in the scope that contains the expression, not in
+    the implicit generator function (and a nested comprehension does not stop it).  Lowering copies
+    the body into a module-level generator function, where it would become a local of that function,
+    so that shape is refused instead of silently losing the binding.  A lambda or def inside the
+    expression is a real scope of its own and is left alone."""
+    found = [False]
+
+    class Find(ast.NodeVisitor):
+        def visit_Lambda(self, node):
+            pass
+
+        def visit_FunctionDef(self, node):
+            pass
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_ClassDef(self, node):
+            pass
+
+        def visit_NamedExpr(self, node):
+            found[0] = True
+
+    Find().visit(gen)
+    return found[0]
+
+
 def _lower_genexps(tree, global_names):
     """A generator expression is lazy in CPython: its outermost iterable is evaluated when it is
     created, every later iterable / condition / element when the generator is consumed, and a list
@@ -1760,6 +1787,9 @@ def _lower_genexps(tree, global_names):
     def process_body(stmts, visible):
         repl = {}
         for gen in direct_genexps(stmts):
+            if _genexp_has_walrus(gen):
+                raise Unsupported('the walrus operator (:=) inside a generator expression; '
+                                  'bind the name in a statement before the generator expression')
             late = _late_bound_names(stmts, gen.lineno) if visible else set()
             repl[id(gen)] = make_def(gen, visible, late)
 
