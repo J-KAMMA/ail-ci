@@ -1,5 +1,33 @@
 # DEVLOG
 
+## 2026-10-23 - class objects as values (job-pre14-10240042)
+
+The first pre-existing difference from the `fuzz62` review was the class object reached through a
+value: `k = C; k.K`, a list/dict element, an attribute, a parameter, or a `@classmethod`'s `cls`
+raised `AttributeError: 'type' object has no attribute ...` because the general path sent it to
+`ail_inst_getattr` (which only knows INST/EXC). The fix is in `pyboxed2.py`:
+
+* `expr_Attribute` now emits an `AIL_T_CLASS` dispatch for classes that can escape as values and
+  their bases, reading the same class-attribute expression CPython's MRO lookup finds.
+* `_dynamic_user_method` has a CLASS receiver branch: classmethods get the class as `cls`,
+  staticmethods bind normally, and instance methods require an explicit first argument (a missing
+  `self` is the same TypeError as CPython).
+* A classmethod's first parameter is no longer typed as an instance, so `cls.K` and `cls.method()`
+  take the class-object path.
+* The CLASS attribute dispatch is emitted only when a name actually escapes as a value
+  (`k = C`, a container/argument/attribute, or a classmethod that reads from `cls`), not for
+  `C()`, `C.attr`, annotation-only, identity-comparison or base-class uses. Plain programs
+  therefore keep byte-identical generated C; this was checked with `--debug-dir` against the
+  base commit for attribute reads, classmethod calls without `cls.attr`, identity comparisons,
+  and annotation-only uses.
+
+Both builds (`AIL_UNIFIED_FORCE=1` and the default) now match CPython 3.12 on 18 differential
+probes covering aliases, arguments, lists, dicts, attributes, constants of every scalar type,
+inheritance/overrides, classmethod/staticmethod/instance calls, invalid argument lists, errors,
+and classmethod recursion.
+`test_ail_pre14.py` pins the class-object value shapes; it joins the selected suite and was run
+with `test_ail_safetynet.py`, `test_ail_files.py`, and `test_ail_corpus_findings3.py`.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
