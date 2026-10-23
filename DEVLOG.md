@@ -1,5 +1,24 @@
 # DEVLOG
 
+## 2026-10-23 - Fix __slots__ review regressions (job-pre6-10240010)
+
+The reviewer of `8c7368a` found three defects in the slot check. Fixes:
+
+* Builtin exception classes are created directly in `ail_ctx_init` (zeroed memory), so their
+  `n_slots` stayed 0 and every caught `ValueError` became slot-only. They now get
+  `slot_ids = NULL`, `n_slots = -1` (plus empty `class_attr_ids`), so `e.custom = 5` works
+  again; `ail__free_payload` also frees the two class arrays.
+* `_class_readonly` now collects method names (except internal `__ail_set_*` setter keys)
+  as well as class-body attributes, and `_register_class` adds those names to `attr_names`
+  for a slots class. `c.f = 3` now says `'C' object attribute 'f' is read-only`.
+* The class-body `attr_names` update is gated on `__slots__`, so a class without slots no
+  longer emits `g_attr_*` names it never stores (the generated C for `n1` now matches base).
+
+`test_ail_pre6` gained a builtin-exception-attribute case and a method/class-attribute
+read-only case, both built on the default and forced-general paths. Probes in
+`/tmp/probes/slots_exc_attrs.py`, `slots_method_ro.py` and the existing slots probes all
+match CPython on both builds; `n1`'s generated `g_attr_*` set is identical to base.
+
 ## 2026-10-23 - Enforce __slots__ on the general path (job-pre6-10240010)
 
 fuzz67 p18 was still a difference on this tree: the general path ignored a class's

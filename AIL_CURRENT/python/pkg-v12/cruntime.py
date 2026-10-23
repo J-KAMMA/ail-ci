@@ -14151,6 +14151,7 @@ static inline void ail__free_payload(ail_gcobj *o) {
         case AIL_K_SET: free(((ail_setobj *)o)->ent); free(((ail_setobj *)o)->index); break;
         case AIL_K_INST: free(((ail_instobj *)o)->attrs); break;
         case AIL_K_FUNC: free(((ail_funcobj *)o)->cells); break;
+        case AIL_K_CLASS: free(((ail_classobj *)o)->slot_ids); free(((ail_classobj *)o)->class_attr_ids); break;
         default: break;
     }
 }
@@ -16502,6 +16503,10 @@ static inline void ail_ctx_init(ail_ctx *cx) {
             parent = AIL_B_CONNECTIONERROR;
         c->base = (i == AIL_B_EXCEPTION) ? ail_box_none() : cx->builtin_cls[parent];
         c->builtin_id = i;
+        /* a builtin class (and so its instances, e.g. a caught ValueError) has a __dict__:
+           n_slots < 0 keeps ail_inst_setattr_chk from treating it as slot-only */
+        c->slot_ids = 0; c->n_slots = -1;
+        c->class_attr_ids = 0; c->n_class_attrs = 0;
         ail_obj r; r.tag = AIL_T_CLASS; r.o = (ail_gcobj *)c;
         cx->builtin_cls[i] = r;
     }

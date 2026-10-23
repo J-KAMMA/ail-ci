@@ -4,7 +4,9 @@
 (`c.b = 3`) instead of raising AttributeError.  The general runtime now carries the
 class's slot names and checks every attribute store; the class-body names keep
 CPython's different "object attribute ... is read-only" message.  A __slots__ value
-that is not a literal string/tuple/list is refused by name at compile time.
+that is not a literal string/tuple/list is refused by name at compile time.  Builtin
+exception instances keep a __dict__ (n_slots = -1 in ail_ctx_init), and a slots
+instance's methods are read-only just like its class-body attributes.
 """
 import os
 import shutil
@@ -64,6 +66,32 @@ c.a = 1
 print(c.a)
 """
 
+BUILTIN_EXCEPTION = r"""try:
+    raise ValueError("boom")
+except ValueError as err:
+    err.custom = 5
+    print(err.custom, err.args[0])
+"""
+
+READONLY_METHOD = r"""class C:
+    __slots__ = ("a",)
+    x = 7
+    def __init__(self):
+        self.a = 1
+    def f(self):
+        return self.a
+
+c = C()
+print(c.a, c.x, c.f())
+for name in ("b", "x", "f", "__slots__"):
+    try:
+        setattr(c, name, 3)
+        print(name, "set")
+    except AttributeError as err:
+        print(name, "AttributeError", str(err))
+print(c.a, c.x)
+"""
+
 
 class Slots(unittest.TestCase):
     def setUp(self):
@@ -104,6 +132,28 @@ class Slots(unittest.TestCase):
         for name, build in (('default', self.build_default), ('general', self.build_general)):
             with self.subTest(name):
                 built, exe = build(SLOTS)
+                self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                got = subprocess.run([str(exe)], cwd=self.dir, capture_output=True, timeout=120)
+                self.assertEqual(got.returncode, want.returncode, got.stderr)
+                self.assertEqual(got.stdout, want.stdout)
+
+    def test_builtin_exception_instances_still_accept_attributes(self):
+        want = self.run_cpython(BUILTIN_EXCEPTION)
+        self.assertEqual(want.returncode, 0, want.stderr)
+        for name, build in (('default', self.build_default), ('general', self.build_general)):
+            with self.subTest(name):
+                built, exe = build(BUILTIN_EXCEPTION)
+                self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                got = subprocess.run([str(exe)], cwd=self.dir, capture_output=True, timeout=120)
+                self.assertEqual(got.returncode, want.returncode, got.stderr)
+                self.assertEqual(got.stdout, want.stdout)
+
+    def test_methods_are_read_only_on_a_slots_instance(self):
+        want = self.run_cpython(READONLY_METHOD)
+        self.assertEqual(want.returncode, 0, want.stderr)
+        for name, build in (('default', self.build_default), ('general', self.build_general)):
+            with self.subTest(name):
+                built, exe = build(READONLY_METHOD)
                 self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
                 got = subprocess.run([str(exe)], cwd=self.dir, capture_output=True, timeout=120)
                 self.assertEqual(got.returncode, want.returncode, got.stderr)

@@ -2959,7 +2959,11 @@ class Compiler(boxclosure.ClosureMixin):
             else:
                 raise Unsupported('__slots__ in class %s is not a string or a tuple/list of strings' % node.name)
             self.attr_names.update(slots)
-        self.attr_names.update(aname for aname, _ in class_attrs)
+        if slots is not None:
+            # the class object carries these names for the __slots__ read-only check; a class
+            # without __slots__ needs no g_attr_* entry for a name it never stores
+            self.attr_names.update(aname for aname, _ in class_attrs)
+            self.attr_names.update(m for m in methods if not m.startswith('__ail_set_'))
         dc = 0
         marker = getattr(self, 'source_lines', None)
         hide = 0
@@ -3017,10 +3021,14 @@ class Compiler(boxclosure.ClosureMixin):
         k = cname
         while k is not None and k in self.classes and k not in seen:
             seen.add(k)
-            for name, _ in self.classes[k].get('class_attrs', []):
+            info = self.classes[k]
+            for name, _ in info.get('class_attrs', []):
                 if name not in out:
                     out.append(name)
-            k = self.classes[k]['base']
+            for name in info.get('methods', {}):
+                if not name.startswith('__ail_set_') and name not in out:
+                    out.append(name)
+            k = info['base']
         return out
 
     def _resolve_method(self, klass, mname):
