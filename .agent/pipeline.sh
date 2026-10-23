@@ -16,20 +16,33 @@ import json, os
 p = os.path.expanduser('~/.local/share/opencode/auth.json')
 a = json.load(open(p)); a['opencode'] = a['opencode-go']; json.dump(a, open(p, 'w'))
 EOF
+# $RUNNER_TEMP/free_out exists once the free quota is used up: the rest of this job uses the paid model (a file, because run_oc runs in a subshell)
 run_oc() {  # $1 prompt file, $2 tag, $3 minutes -> final text on stdout
-  # the free Zen build of the same model first (zero retention, not used for training); the Go plan's paid model when
-  # the free one is refused or rate-limited. Never another free model: some of them train on data.
-  local rc model
+  # The free Zen build of the model first (zero retention, not used for training); the paid Go model when it fails.
+  # When the free quota is used up OpenCode does not exit, it retries silently (2026-10-24), so a watchdog reads
+  # OpenCode's own log and switches at once.
+  local rc model mins pid quota
   for model in opencode/deepseek-v4.1-flash-free opencode-go/deepseek-v4.1-flash; do
-    timeout "${3}m" "$OC" run --format json --dir "$PWD" -m "$model" \
-      "Do the task described in the attached file, in this directory. When finished, reply with a short final report." \
-      -f "$1" > "$RUNNER_TEMP/$2.jsonl" 2> "$RUNNER_TEMP/$2.err"
-    rc=$?
+    [ "$model" = opencode/deepseek-v4.1-flash-free ] && [ -f "$RUNNER_TEMP/free_out" ] && continue
+    mins=$3; quota=0
+    rm -rf "$HOME/.local/share/opencode/log"
+    timeout "${mins}m" "$OC" run --format json --dir "$PWD" -m "$model" "Do the task described in the attached file, in this directory. When finished, reply with a short final report." -f "$1" > "$RUNNER_TEMP/$2.jsonl" 2> "$RUNNER_TEMP/$2.err" &
+    pid=$!
+    while kill -0 $pid 2>/dev/null; do
+      sleep 20
+      if [ "$model" = opencode/deepseek-v4.1-flash-free ] && grep -qs "Free usage limit reached\|Model access is disabled" "$HOME"/.local/share/opencode/log/*; then
+        quota=1; touch "$RUNNER_TEMP/free_out"; pkill -P $pid 2>/dev/null; kill $pid 2>/dev/null; break
+      fi
+    done
+    wait $pid; rc=$?
+    [ $quota = 1 ] && { echo "(free quota used up; paid model from here)"; continue; }
+    [ "$model" != opencode/deepseek-v4.1-flash-free ] && break
     grep -qiE '"type": ?"error".*(rate|limit|quota|429|503|free)' "$RUNNER_TEMP/$2.jsonl" || break
   done
   echo "[model $model]"
   python3 .agent/oc_report.py "$RUNNER_TEMP/$2.jsonl"
-  [ $rc = 124 ] && echo "(cut off after $3 minutes)"
+  python3 .agent/oc_steps.py "$RUNNER_TEMP/$2.jsonl" 2>/dev/null | sed "s/^/    /"
+  [ $rc = 124 ] && echo "(cut off after $mins minutes)"
   return 0
 }
 commit_leftovers() {  # an agent's uncommitted edits still count as its work
