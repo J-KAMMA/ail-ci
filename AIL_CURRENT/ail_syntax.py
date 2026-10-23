@@ -2368,7 +2368,7 @@ class _Surface:
 
     def object_setattr(self, node):
         """`object.__setattr__(self, "name", value)` (how a frozen dataclass's __post_init__ sets a field) as the
-        assignment `self.name = value`; a frozen instance is not write-protected on either path."""
+        assignment `self.name = value`; check_frozen_stores refuses the writes a frozen instance would reject."""
         call = node.value
         func = call.func
         if not (isinstance(func, ast.Attribute) and func.attr == '__setattr__' and isinstance(func.value, ast.Name)
@@ -2817,9 +2817,63 @@ class _Surface:
 
     def run(self):
         self.collect()
+        self.check_frozen_stores()
         self.block(self.tree.body, None, None)
         self.finish_imports()
         return self.apply()
+
+    def frozen_classes(self):
+        """{class name: its field names} for `@dataclass(frozen=True)` classes in this source."""
+        found = {}
+        for node in ast.walk(self.tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            for decorator in node.decorator_list:
+                target = decorator.func if isinstance(decorator, ast.Call) else decorator
+                if (self.path(target) == 'dataclasses.dataclass' and isinstance(decorator, ast.Call)
+                        and any(keyword.arg == 'frozen' and isinstance(keyword.value, ast.Constant)
+                                and keyword.value.value for keyword in decorator.keywords)):
+                    found[node.name] = {statement.target.id for statement in node.body
+                                        if isinstance(statement, ast.AnnAssign)
+                                        and isinstance(statement.target, ast.Name)}
+        return found
+
+    def check_frozen_stores(self):
+        """Refuse a field write a frozen dataclass would answer with FrozenInstanceError. The field name
+        is what the write names, so this covers every receiver (a local, a parameter, a list item, a
+        dict value, a nested field); `self.f` inside another class is that class's own field."""
+        frozen = self.frozen_classes()
+        owners = {}
+        for name, fields in frozen.items():
+            for field in fields:
+                owners.setdefault(field, name)
+        if not owners:
+            return
+
+        def refuse(node, field, owner):
+            where = 'self.' + field if owner is not None else field
+            raise SyntaxErrorAIL(
+                'assignment to %s, a field of the frozen dataclass %s: a frozen instance raises '
+                'FrozenInstanceError instead\n'
+                '  write instead: construct a new instance, or use dataclasses.replace(...)'
+                % (where, owners[field]), lineno=node.lineno, offset=node.col_offset + 1)
+
+        def walk(node, owner):
+            for child in ast.iter_child_nodes(node):
+                current = child if isinstance(child, ast.ClassDef) else owner
+                if isinstance(child, ast.Attribute) and child.attr in owners and isinstance(
+                        child.ctx, (ast.Store, ast.Del)):
+                    if not (isinstance(child.value, ast.Name) and child.value.id == 'self'
+                            and owner is not None and owner.name not in frozen):
+                        refuse(child, child.attr, owner)
+                elif (isinstance(child, ast.Call) and isinstance(child.func, ast.Name)
+                      and child.func.id in ('setattr', 'delattr') and len(child.args) >= 2
+                      and isinstance(child.args[1], ast.Constant)
+                      and isinstance(child.args[1].value, str) and child.args[1].value in owners):
+                    refuse(child, child.args[1].value, None)
+                walk(child, current)
+
+        walk(self.tree, None)
 
 
 def _sqllower():
