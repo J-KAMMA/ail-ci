@@ -1,5 +1,24 @@
 # DEVLOG
 
+## 2026-10-23 - Positional-only parameters on the general path (job-pre1-10240007)
+
+The modules3 review recorded a pre-existing CPython difference: `def f(a, /, *, b=2)` (and any
+other `def` with positional-only parameters) was refused by name, so `kwonly_default` matched
+neither build. `pyboxed2.Compiler._register_function` now binds `posonlyargs` before `args`;
+`_bind_args` and the nested-def call binder still refuse a call that passes a positional-only name
+as a keyword by name, and the unified hints read the positional-only annotations too. Defaults,
+`*args`/`**kwargs`, static methods and methods with positional-only parameters bind in CPython's
+order. A non-positional-only program's `program.c` and `program_mix0.c` hash identically to the
+base tree.
+
+Probes (`cmp.sh`, default and `AIL_UNIFIED_FORCE=1`): 20 programs cover int/str/float/bool/None,
+tuple/dict/list, empty/negative, defaults, values through arguments, list items, attributes and dict
+values, aliasing, methods/static methods, nested defs and `*args`/`**kwargs`; 14 match CPython and
+6 are refused by name (calls passing a positional-only name as a keyword, a missing argument, and
+the pre-existing starred-call limit). New `AIL_CURRENT/test_ail_pre1.py` (4 tests); on the final
+commit `test_ail_pre1`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`
+pass. This CI mirror has no `DIFFERENCES` file, so no row was added.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

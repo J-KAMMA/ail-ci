@@ -2828,9 +2828,8 @@ class Compiler(boxclosure.ClosureMixin):
 
     # ------------------------------------------------------------------------- function register
     def _register_function(self, node, cname=None, is_method=False, owner_class=None):
-        if node.args.posonlyargs:
-            raise Unsupported('positional-only parameters in def %s' % node.name)
-        params = [a.arg for a in node.args.args]
+        posonly = [a.arg for a in node.args.posonlyargs]
+        params = posonly + [a.arg for a in node.args.args]
         kwonly = [a.arg for a in node.args.kwonlyargs]
         vararg = node.args.vararg.arg if node.args.vararg else None
         kwarg = node.args.kwarg.arg if node.args.kwarg else None
@@ -2875,7 +2874,7 @@ class Compiler(boxclosure.ClosureMixin):
         cname = cname or ('pf_' + node.name)
         all_params = list(params) + list(kwonly) + ([vararg] if vararg else []) + \
             ([kwarg] if kwarg else [])
-        info = {'node': node, 'params': params, 'kwonly': kwonly, 'vararg': vararg, 'kwarg': kwarg,
+        info = {'node': node, 'params': params, 'posonly': posonly, 'kwonly': kwonly, 'vararg': vararg, 'kwarg': kwarg,
                'defaults': defaults, 'kw_defaults': kw_defaults, 'cname': cname,
                'is_method': is_method, 'is_static': is_static, 'owner_class': owner_class,
                'lru_cache': lru, 'all_params': all_params,
@@ -3161,13 +3160,14 @@ class Compiler(boxclosure.ClosureMixin):
                 return False
         # defaults that are constants (CPython evaluates them once, when the def runs: for a constant the value
         # filled in at each call is the same), *args packed into a tuple at the call, keyword-only parameters
-        if node.args.kwarg or node.args.posonlyargs or not all(constant(d) for d in node.args.defaults) \
+        if node.args.kwarg or not all(constant(d) for d in node.args.defaults) \
                 or not all(d is None or constant(d) for d in node.args.kw_defaults):
             raise Unsupported('a nested def %s with *args/**kwargs/keyword-only/default '
                               'parameters' % node.name)
         if node.decorator_list:
             raise Unsupported('a decorator on nested def %s' % node.name)
-        positional = [a.arg for a in node.args.args]
+        posonly = [a.arg for a in node.args.posonlyargs]
+        positional = posonly + [a.arg for a in node.args.args]
         vararg = node.args.vararg.arg if node.args.vararg else None
         kwonly = [a.arg for a in node.args.kwonlyargs]
         defaults = dict(zip(positional[len(positional) - len(node.args.defaults):], node.args.defaults))
@@ -3185,7 +3185,7 @@ class Compiler(boxclosure.ClosureMixin):
         cname = 'pn_%d_%s' % (self.nested_n, node.name)
         by_ptr = [nm for nm in free if nm in nonlocal_names]
         by_val = [nm for nm in free if nm not in nonlocal_names]
-        info = {'node': node, 'params': params, 'cname': cname, 'by_val': by_val, 'by_ptr': by_ptr,
+        info = {'node': node, 'params': params, 'posonly': posonly, 'cname': cname, 'by_val': by_val, 'by_ptr': by_ptr,
                 'positional': positional, 'vararg': vararg, 'kwonly': kwonly, 'defaults': defaults}
         outer_ctx.nested_funcs[node.name] = info
         # Compile the nested function body now, in its OWN Ctx/frame, with captured names
@@ -3255,6 +3255,8 @@ class Compiler(boxclosure.ClosureMixin):
         if extra and not vararg:
             raise Unsupported('%s() called with the wrong number of arguments' % name)
         for k, v in kwargs.items():
+            if k in info.get('posonly', ()):
+                raise Unsupported('%s() got the positional-only argument %s as a keyword' % (name, k))
             if k not in positional and k not in kwonly or k in bound:
                 raise Unsupported('%s() called with the keyword argument %r it cannot take' % (name, k))
             bound[k] = v
@@ -5660,6 +5662,9 @@ class Compiler(boxclosure.ClosureMixin):
         allnames = set(params) | set(kwonly)
         for kwname, kwnode in kwargs.items():
             v = self.expr(kwnode, ctx)
+            if kwname in info.get('posonly', ()):
+                raise Unsupported('%s() got the positional-only argument %s as a keyword' %
+                                  (fname, kwname))
             if kwname in allnames:
                 kwvals[kwname] = v
             elif kwarg:
