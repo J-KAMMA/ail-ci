@@ -17171,10 +17171,12 @@ static inline ail_st ail_bi_divmod(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj
             AIL_FRAME_LEAVE(cx, frf);
             return AIL_OK;
         }
-    } else {
+    } else if (a.tag != AIL_T_INST && b.tag != AIL_T_INST) {
         char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for divmod(): '%s' and '%s'", ail_type_name(a.tag), ail_type_name(b.tag));
         return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
     }
+    /* an instance operand falls through to ail_op_floordiv/ail_op_mod, whose dunderrt
+       dispatch serves classes (Fraction, IntEnum) that define __floordiv__/__mod__ */
     AIL_FRAME_ENTER(cx, fr, 2);
     ail_st st = ail_op_floordiv(cx, &fr.slots[0], a, b);
     if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }

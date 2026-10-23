@@ -14,6 +14,14 @@ Found by small programs compared with CPython 3.12 on both builds:
    divisor and wrong-type messages also said `//` instead of `divmod()`. The boxed
    lowering now calls `ail_bi_divmod`, whose float branch is CPython's own fmod/floor
    algorithm (and keeps the `float divmod()` / `divmod(): 'str' and 'int'` text).
+   The typed tuple helper `_ail_divmod_f` now uses the same algorithm, so directly
+   typed float `divmod` calls also match (`divmod(inf, 2.0)` is `(nan, nan)`).
+
+3. `divmod()` on instances regressed when the boxed lowering started rejecting every
+   non-numeric tag: a Fraction or IntEnum supports `divmod` through its
+   `__floordiv__`/`__mod__` methods, which the runtime's operator path dispatches.
+   Instance operands now fall through to that path; only non-instance wrong types keep
+   the `divmod(): 'str' and 'int'` message.
 """
 import os
 import subprocess
@@ -110,6 +118,81 @@ main()
 '''
 
 
+DIRECT_DIVMOD_CASE = r'''def main() -> None:
+    print(divmod(1.0, 0.1))
+    print(divmod(-1.0, 0.1))
+    print(divmod(1.0, -0.1))
+    print(divmod(-1.0, -0.1))
+    print(divmod(float("inf"), 2.0))
+    print(divmod(float("-inf"), 2.0))
+    print(divmod(2.0, float("inf")))
+    print(divmod(-2.0, float("inf")))
+    print(divmod(2.0, float("-inf")))
+    print(divmod(float("nan"), 2.0))
+    print(divmod(-0.0, 3.0))
+    print(divmod(0.0, -3.0))
+    print(divmod(1e16, 3.0))
+    print(divmod(-1e16, 3.0))
+    print(divmod(1e300, 1e-300))
+    vals = [(5.5, 2.5), (7, 2.0), (7.0, 2)]
+    for a, b in vals:
+        print(divmod(a, b))
+    for a, b in ((3.0, -0.0), (1.0, 0.0), (0.0, 0.0)):
+        try:
+            print(divmod(a, b))
+        except ZeroDivisionError as e:
+            print("ZeroDivisionError", e)
+    print("end")
+
+
+main()
+'''
+
+INSTANCE_DIVMOD_CASE = r'''from fractions import Fraction
+from enum import IntEnum
+
+
+class E(IntEnum):
+    A = 7
+
+
+class Box:
+    def __init__(self, v: Fraction):
+        self.v = v
+
+
+def frac_pair(a: Fraction, b: int):
+    return divmod(a, b)
+
+
+def main() -> None:
+    q, r = divmod(Fraction(7, 2), 2)
+    print(q, r, repr(q), repr(r))
+    print(divmod(2, Fraction(7, 2)))
+    xs = [Fraction(7, 2), Fraction(-7, 2)]
+    for x in xs:
+        print(frac_pair(x, 2))
+        print(divmod(x, 2))
+    d = {"x": Fraction(7, 2)}
+    print(divmod(d["x"], 2))
+    box = Box(Fraction(7, 2))
+    print(divmod(box.v, 2))
+    print(divmod(E.A, 2))
+    print(divmod(E.A, -2))
+    print(divmod(-E.A, 2))
+    print(repr(divmod(E.A, 2)))
+    es = [E.A, -E.A]
+    for x in es:
+        print(divmod(x, 2))
+    ed = {"x": E.A}
+    print(divmod(ed["x"], 2))
+    print("end")
+
+
+main()
+'''
+
+
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -152,6 +235,12 @@ class Fuzz41Tests(unittest.TestCase):
 
     def test_divmod_floats(self):
         self.check('divmod_floats', DIVMOD_CASE)
+
+    def test_divmod_direct_floats(self):
+        self.check('divmod_direct', DIRECT_DIVMOD_CASE)
+
+    def test_divmod_instances(self):
+        self.check('divmod_instances', INSTANCE_DIVMOD_CASE)
 
 
 if __name__ == '__main__':
