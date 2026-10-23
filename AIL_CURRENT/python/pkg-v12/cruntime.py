@@ -14265,6 +14265,9 @@ static inline ail_st ail_raise(ail_ctx *cx, ail_obj cls, ail_obj msg) {
     cx->exc_pending = 1;
     return AIL_EXC;
 }
+/* a KeyError from the runtime (a missing dict key, set.remove, popitem) keeps the offending
+   key as its argument: str(e) is repr(key), repr(e) is KeyError(repr(key)) and e.args is (key,) */
+static inline ail_st ail_raise_key(ail_ctx *cx, ail_obj key);
 static inline ail_st ail_hit_limit(ail_ctx *cx, const char *name, const char *detail) {
     cx->limit.name = name; cx->limit.detail = detail;
     return AIL_LIMIT;
@@ -15090,7 +15093,7 @@ static inline ail_st ail_dict_getitem(ail_ctx *cx, ail_obj *out, ail_obj d, ail_
     ail_obj *v; ail_st st = ail_map_get(cx, &v, (ail_mapobj *)d.o, key); if (st != AIL_OK) return st;
     if (!v) {
         int fac = ((ail_mapobj *)d.o)->dd_factory;
-        if (!fac) return ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], ail_obj_repr(cx, key));
+        if (!fac) return ail_raise_key(cx, key);
         ail_obj dflt = fac == 1 ? ail_box_int(0) : fac == 2 ? ail_list_new(cx) : fac == 3 ? ail_set_new(cx) : ail_str_from_cstr(cx, "");
         st = ail_map_set(cx, (ail_mapobj *)d.o, key, dflt); if (st != AIL_OK) return st;
         *out = dflt; return AIL_OK;
@@ -15114,14 +15117,14 @@ static inline ail_st ail_dict_setdefault(ail_ctx *cx, ail_obj *out, ail_obj d, a
 }
 static inline ail_st ail_dict_pop(ail_ctx *cx, ail_obj *out, ail_obj d, ail_obj key, int has_default, ail_obj dflt) {
     ail_obj *v; ail_st st = ail_map_get(cx, &v, (ail_mapobj *)d.o, key); if (st != AIL_OK) return st;
-    if (!v) { if (has_default) { *out = dflt; return AIL_OK; } return ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], ail_obj_repr(cx, key)); }
+    if (!v) { if (has_default) { *out = dflt; return AIL_OK; } return ail_raise_key(cx, key); }
     ail_obj val = *v;
     int found; st = ail_map_del(cx, &found, (ail_mapobj *)d.o, key); if (st != AIL_OK) return st;
     *out = val; return AIL_OK;
 }
 static inline ail_st ail_dict_del(ail_ctx *cx, ail_obj d, ail_obj key) {
     int found; ail_st st = ail_map_del(cx, &found, (ail_mapobj *)d.o, key); if (st != AIL_OK) return st;
-    if (!found) return ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], ail_obj_repr(cx, key));
+    if (!found) return ail_raise_key(cx, key);
     return AIL_OK;
 }
 static inline int64_t ail_dict_len(ail_obj d) { return ((ail_mapobj *)d.o)->n; }
@@ -16432,6 +16435,20 @@ static inline int64_t ail_intern(ail_ctx *cx, const char *name) {
     if (cx->intern_n >= AIL_INTERN_MAX) ail_die("too many interned names");
     cx->intern_tab[cx->intern_n] = name;
     return cx->intern_n++;
+}
+static inline ail_st ail_raise_key(ail_ctx *cx, ail_obj key) {
+    AIL_FRAME_ENTER(cx, fr, 4);
+    fr.slots[0] = key;
+    fr.slots[1] = ail_obj_repr(cx, key);
+    fr.slots[2] = ail_inst_new(cx, cx->builtin_cls[AIL_B_KEYERROR]);
+    fr.slots[2].tag = AIL_T_EXC;
+    fr.slots[3] = ail_tuple_new(cx, &fr.slots[0], 1);
+    ail_inst_setattr(cx, fr.slots[2], AIL_ATTR_MESSAGE, fr.slots[1]);
+    ail_inst_setattr(cx, fr.slots[2], ail_intern(cx, "args"), fr.slots[3]);
+    ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], fr.slots[1]);
+    cx->exc.value = fr.slots[2];
+    AIL_FRAME_LEAVE(cx, fr);
+    return AIL_EXC;
 }
 
 /* ===================================================================================
@@ -18500,10 +18517,7 @@ static inline void ail_meth_list_clear(ail_obj lst) {
 
 static inline ail_st ail_meth_dict_popitem(ail_ctx *cx, ail_obj *out, ail_obj d) {
     ail_mapobj *m = (ail_mapobj *)d.o;
-    if (m->n == 0) {
-        ail_obj msg = ail_str_repr(cx, ail_str_from_cstr(cx, "popitem(): dictionary is empty"));
-        return ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], msg);
-    }
+    if (m->n == 0) return ail_raise_key(cx, ail_str_from_cstr(cx, "popitem(): dictionary is empty"));
     ail_obj key = m->entries[m->n - 1].key, val = m->entries[m->n - 1].val;
     int found; ail_st st = ail_map_del(cx, &found, m, key); if (st != AIL_OK) return st;
     ail_obj pr[2]; pr[0] = key; pr[1] = val;
@@ -18621,16 +18635,13 @@ static inline ail_st ail_meth_set_update(ail_ctx *cx, ail_obj s, ail_obj other) 
 static inline ail_st ail_meth_set_remove(ail_ctx *cx, ail_obj s, ail_obj x) {
     ail_st st = ail_setm_need_mut(cx, s, "remove"); if (st != AIL_OK) return st;
     int found; st = ail_setx_discard_key(cx, &found, AIL_SETOBJ(s), x); if (st != AIL_OK) return st;
-    if (!found) { ail_obj msg = ail_obj_repr(cx, x); return ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], msg); }
+    if (!found) return ail_raise_key(cx, x);
     return AIL_OK;
 }
 static inline ail_st ail_meth_set_pop(ail_ctx *cx, ail_obj *out, ail_obj s) {
     ail_st st = ail_setm_need_mut(cx, s, "pop"); if (st != AIL_OK) return st;
     ail_setobj *so = AIL_SETOBJ(s);
-    if (so->used == 0) {
-        ail_obj msg = ail_str_repr(cx, ail_str_from_cstr(cx, "pop from an empty set"));
-        return ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], msg);
-    }
+    if (so->used == 0) return ail_raise_key(cx, ail_str_from_cstr(cx, "pop from an empty set"));
     int64_t k = so->fin;                      /* the first element in iteration order (insertion order), as CPython's {1, 2}.pop() */
     while (!ail_setx_live(&so->ent[k])) k++;
     so->fin = k + 1;
