@@ -492,6 +492,57 @@ def _edits():
     e.append(('        default: { char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable"',
               '        case AIL_T_INST: { ail_d2_fn f = ail_dun2(c, AIL_D2_GETITEM); if (f) return f(cx, out, c, key); }\n        /* fall through */\n'
               '        default: { char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable"'))
+    # the old sequence protocol: an instance with __getitem__ and no __iter__/__next__ iterates by
+    # calling __getitem__(0), __getitem__(1), ... until IndexError (CPython's PySeqIter_New)
+    e.append(('''    if (!fn) {
+        char buf[96]; snprintf(buf, sizeof buf, "'%s' object is not iterable", ail_type_name(obj.tag));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
+    *out = ail__iter_wrap(cx, AIL_IT_USER, obj, ail_box_none(), 0);
+    return AIL_OK;
+''',
+              '''    if (!fn) {
+        if (ail_dun2(obj, AIL_D2_GETITEM)) {
+            *out = ail__iter_wrap(cx, AIL_IT_SEQGET, obj, ail_box_none(), 0);
+            return AIL_OK;
+        }
+        char buf[96]; snprintf(buf, sizeof buf, "'%s' object is not iterable", ail_type_name(obj.tag));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
+    *out = ail__iter_wrap(cx, AIL_IT_USER, obj, ail_box_none(), 0);
+    return AIL_OK;
+'''))
+    e.append(('''        case AIL_IT_USER: {
+            for (ail_obj k = ((ail_instobj *)it->target.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+                ail_classobj *kc = (ail_classobj *)k.o;
+                if (kc->iter_next) return kc->iter_next(cx, out, it->target);
+            }
+            return AIL_STOP;
+        }
+''',
+              '''        case AIL_IT_USER: {
+            for (ail_obj k = ((ail_instobj *)it->target.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+                ail_classobj *kc = (ail_classobj *)k.o;
+                if (kc->iter_next) return kc->iter_next(cx, out, it->target);
+            }
+            return AIL_STOP;
+        }
+        case AIL_IT_SEQGET: {
+            if (it->idx < 0) return AIL_STOP;
+            ail_d2_fn f = ail_dun2(it->target, AIL_D2_GETITEM);
+            if (!f) { it->idx = -1; return AIL_STOP; }
+            ail_obj key = ail_box_int(it->idx);
+            ail_st st = f(cx, out, it->target, key);
+            if (st == AIL_EXC && cx->exc_pending
+                    && ail_class_is_or_subclass(cx->exc.cls, cx->builtin_cls[AIL_B_INDEXERROR])) {
+                ail_exc_clear(cx);
+                it->idx = -1;
+                return AIL_STOP;
+            }
+            if (st == AIL_OK) it->idx++;
+            return st;
+        }
+'''))
     return e
 
 

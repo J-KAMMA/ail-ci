@@ -14081,7 +14081,7 @@ typedef struct { ail_gcobj hdr; ail_obj func, self; } ail_boundobj;
 enum {
     AIL_IT_LIST = 1, AIL_IT_TUPLE, AIL_IT_STR, AIL_IT_DICT_KEYS, AIL_IT_DICT_VALUES,
     AIL_IT_DICT_ITEMS, AIL_IT_SET, AIL_IT_RANGE, AIL_IT_ENUMERATE, AIL_IT_ZIP,
-    AIL_IT_REVERSED, AIL_IT_MAP, AIL_IT_FILTER, AIL_IT_STREAM, AIL_IT_USER
+    AIL_IT_REVERSED, AIL_IT_MAP, AIL_IT_FILTER, AIL_IT_STREAM, AIL_IT_USER, AIL_IT_SEQGET
 };
 typedef struct { ail_gcobj hdr; int kind; ail_obj target; ail_obj extra; int64_t idx, idx2; ail_st (*read_next)(ail_ctx *, ail_obj *); } ail_iterobj;
 
