@@ -16768,10 +16768,13 @@ static inline ail_st ail_obj_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_ob
     if (type == 'f') {
         if (!ail__is_num(x.tag)) return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported format string passed to non-float");
         int prec = f.has_prec ? f.prec : 6;
-        char buf[66]; int len = snprintf(buf + 1, sizeof buf - 1, "%.*f", prec, ail__as_double(x));
+        int need = snprintf(NULL, 0, "%.*f", prec, ail__as_double(x));
+        if (need < 0) return ail_hit_limit(cx, "format_float", "formatting a float failed");
+        char *buf = (char *)ail_xmalloc((size_t)need + 2);
+        int len = snprintf(buf + 1, (size_t)need + 1, "%.*f", prec, ail__as_double(x));
         const char *txt = ail__apply_sign(buf, &len, f.sign);
-        if (f.group) { char *g = ail__group_digits(txt, &len, f); *out = ail__pad(cx, g, len, f, 1); free(g); return AIL_OK; }
-        *out = ail__pad(cx, txt, len, f, 1); return AIL_OK;
+        if (f.group) { char *g = ail__group_digits(txt, &len, f); *out = ail__pad(cx, g, len, f, 1); free(g); free(buf); return AIL_OK; }
+        *out = ail__pad(cx, txt, len, f, 1); free(buf); return AIL_OK;
     }
     if (type == 's') {
         ail_obj content = (x.tag == AIL_T_STR) ? x : ail_obj_str(cx, x);
