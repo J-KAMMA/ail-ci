@@ -19,4 +19,6 @@ End your report with exactly one of these lines:
 
 Keep the report short. Use `-j 2` at most. Be economical with tokens.
 
+**Time box.** Run `date` when you start and before each new probe or test run. After 35 minutes, start no new probe or test: write your report and verdict from what you have, and list what you did not check under "Unverified".
+
 --- TASK AND WORKER REPORT ---
