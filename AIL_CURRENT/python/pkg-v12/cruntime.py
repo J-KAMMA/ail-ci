@@ -14400,6 +14400,10 @@ static inline int ail_is(ail_obj a, ail_obj b) {
         ail_die("`is` between two equal ints outside -5..256: CPython's answer depends on where each int was made (DIFFERENCES C114); compare with ==");
     return ail_identical(a, b);
 }
+/* Counter.__eq__ treats a missing key as a count of zero (collections.Counter), while plain
+   dict equality compares key sets; this is the counter-only comparison, defined after
+   ail_obj_eq_raw. */
+static inline int ail_counter_eq_raw(ail_obj a, ail_obj b);
 static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         if (a.tag == AIL_T_FLOAT && b.tag == AIL_T_FLOAT) return ail_float_val(a) == ail_float_val(b);
@@ -14416,6 +14420,7 @@ static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {
         case AIL_T_DICT: {
             ail_mapobj *x = (ail_mapobj *)a.o, *y = (ail_mapobj *)b.o;
             if (x == y) return 1;
+            if (((ail_gcobj *)a.o)->flags == 1 && ((ail_gcobj *)b.o)->flags == 1) return ail_counter_eq_raw(a, b);
             if (x->n != y->n) return 0;
             int64_t ymask = y->index_cap - 1;
             for (int64_t i = 0; i < x->n; i++) {
@@ -14441,6 +14446,39 @@ static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {
         }
         default: return 0; /* instance/exception ==: out of scope, matches v1 */
     }
+}
+/* Counter.__eq__: missing keys are zero, so only a non-zero count that the other side lacks
+   or disagrees with makes two Counters unequal. */
+static inline int ail_counter_eq_raw(ail_obj a, ail_obj b) {
+    ail_mapobj *x = (ail_mapobj *)a.o, *y = (ail_mapobj *)b.o;
+    int64_t ymask = y->index_cap - 1, xmask = x->index_cap - 1;
+    for (int64_t i = 0; i < x->n; i++) {
+        int64_t h = x->entries[i].hash, slot = (int64_t)((uint64_t)h & (uint64_t)ymask);
+        int found = 0;
+        for (;;) {
+            int64_t e = y->index[slot];
+            if (e == -1) break;
+            if (y->entries[e].hash == h && (ail_identical(y->entries[e].key, x->entries[i].key) || ail_obj_eq_raw(y->entries[e].key, x->entries[i].key))) {
+                found = 1;
+                if (!(ail_identical(y->entries[e].val, x->entries[i].val) || ail_obj_eq_raw(y->entries[e].val, x->entries[i].val))) return 0;
+                break;
+            }
+            slot = (slot + 1) & ymask;
+        }
+        if (!found && !(ail_identical(x->entries[i].val, ail_box_int(0)) || ail_obj_eq_raw(x->entries[i].val, ail_box_int(0)))) return 0;
+    }
+    for (int64_t i = 0; i < y->n; i++) {
+        int64_t h = y->entries[i].hash, slot = (int64_t)((uint64_t)h & (uint64_t)xmask);
+        int found = 0;
+        for (;;) {
+            int64_t e = x->index[slot];
+            if (e == -1) break;
+            if (x->entries[e].hash == h && (ail_identical(x->entries[e].key, y->entries[i].key) || ail_obj_eq_raw(x->entries[e].key, y->entries[i].key))) { found = 1; break; }
+            slot = (slot + 1) & xmask;
+        }
+        if (!found && !(ail_identical(y->entries[i].val, ail_box_int(0)) || ail_obj_eq_raw(y->entries[i].val, ail_box_int(0)))) return 0;
+    }
+    return 1;
 }
 /* `x in c` / dict & set lookup: identity-then-equality, exactly like CPython, so a NaN
    found by identity still matches even though it never matches by value (== 0 always). */
