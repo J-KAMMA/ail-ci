@@ -5,6 +5,7 @@ import hashlib
 import json
 import keyword
 import math
+import os
 from pathlib import Path
 import platform
 import re
@@ -328,7 +329,7 @@ def _valid_export_kind(kind, kinds, *, result=False):
                  and all('struct:' + name in kinds for name in callable_types.struct_names(kind))))
 
 
-def typed_module(source, *, integer_lists=False, structs=None, imported_structs=None):
+def typed_module(source, *, integer_lists=False, structs=None, imported_structs=None, internal=()):
     from pyfunc import _module_const_scalar, _annotation_kind, _olist_sort_spec, FLIST, SLIST, SDICT, FDICT, SMAP, BMAP, LIST
     tree = ast.parse(source)
     functions = [node for node in tree.body if isinstance(node, ast.FunctionDef)]
@@ -340,6 +341,8 @@ def typed_module(source, *, integer_lists=False, structs=None, imported_structs=
     for node in tree.body:
         if isinstance(node, ast.FunctionDef):
             name = node.name
+        elif isinstance(node, ast.ClassDef) and node.name in internal:
+            name = node.name          # a private class of the caller: compiled as ordinary code, never a struct export
         elif isinstance(node, ast.ClassDef) and structs is not None:
             name = node.name
             structs[name] = _struct_spec(node, known_struct_names, integer_lists=integer_lists)
@@ -405,6 +408,8 @@ def typed_module(source, *, integer_lists=False, structs=None, imported_structs=
                         and (returns(node.body) or node.orelse and returns(node.orelse)))
                    for node in statements)
     for fn in functions:
+        if fn.name in internal:
+            continue          # a helper the caller keeps private: compiled, never exported or renamed
         if fn.name in RESERVED:
             raise Unsupported('object exports cannot use a reserved builtin name: ' + fn.name)
         args = fn.args
@@ -522,7 +527,7 @@ def typed_module(source, *, integer_lists=False, structs=None, imported_structs=
                 method.body = [self.visit(stmt) for stmt in method.body]
             return node
         def visit_FunctionDef(self, node):
-            node.name = names[node.name]
+            node.name = names.get(node.name, node.name)
             return self.generic_visit(node)
         def visit_Lambda(self, node):
             # Only validated field-key lambdas survived; their names are locally bound.
@@ -817,7 +822,7 @@ def link_objects(source, output, paths, *, unit_map=None):
             c_path = Path(directory) / 'entry.c'
             c_path.write_text(code, encoding='utf8')
             native_diagnostics.generated(c_path, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
-            result = native_diagnostics.run([compiler(), *FLAGS, *link_flags(), str(c_path),
+            result = native_diagnostics.run([compiler(), *(['-g', '-O0', '-DAIL_DEBUG_SITE=1', '-DAIL_DBG_SITE(s)=((void)0)', *FLAGS[1:]] if os.environ.get('AIL_DEBUG') == '1' else FLAGS), *link_flags(), str(c_path),
                                      *staged_objects, '-o', str(output)]
                                     + (['-lm'] if info.get('libm') else []) + ffi_link_args()
                                     + (['-lws2_32'] if platform.system() == 'Windows'
