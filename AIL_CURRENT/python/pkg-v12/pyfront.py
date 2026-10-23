@@ -134,6 +134,66 @@ def _number_constant(node):
     return None
 
 
+_I64_MIN = -(1 << 63)
+_I64_MAX = (1 << 63) - 1
+
+
+def _exact_int_constant(node):
+    """The exact Python value of a constant integer expression, or None.
+
+    `2**63` is a BinOp, not an `ast.Constant`, so a check for literals alone misses the one
+    shape an index most often exceeds int64 in.  The evaluator is deliberately small -- the
+    operators Python folds for a constant integer index -- and refuses to multiply out an
+    exponent that would build a huge Python int; `None` means "not a compile-time constant".
+    """
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        return node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        value = _exact_int_constant(node.operand)
+        if value is None:
+            return None
+        return -value if isinstance(node.op, ast.USub) else value
+    if isinstance(node, ast.BinOp):
+        left, right = _exact_int_constant(node.left), _exact_int_constant(node.right)
+        if left is None or right is None:
+            return None
+        if isinstance(node.op, ast.Add):
+            return left + right
+        if isinstance(node.op, ast.Sub):
+            return left - right
+        if isinstance(node.op, ast.Mult):
+            return left * right
+        if isinstance(node.op, ast.Pow):
+            if right < 0 or right > 4096 or left.bit_length() * right > 100000:
+                return None
+            return left ** right
+        if isinstance(node.op, ast.LShift):
+            if right < 0 or right > 100000 or left.bit_length() + right > 100000:
+                return None
+            return left << right
+    return None
+
+
+def refuse_out_of_range_delete_index(target):
+    """Refuse `del a[2**63]` by name: an AIL int is int64, so the index cannot be represented.
+
+    CPython's int is unbounded and its list delete raises IndexError ("cannot fit 'int' into an
+    index-sized integer") only once the index is above sys.maxsize.  Keeping the expression as
+    arithmetic here would instead trap "integer overflow" while computing it -- a different
+    answer from a different place.  The value is known now, so the honest result is a compile-time
+    refusal naming the delete and the index.
+    """
+    value = _exact_int_constant(target.slice)
+    if value is None or _I64_MIN <= value <= _I64_MAX:
+        return
+    refusal = Unsupported(
+        'del %s: the constant index %d is outside the 64-bit signed integer range of an AIL int, '
+        'so it cannot be represented as an index here (CPython\'s int is unbounded: it raises '
+        'IndexError for an index outside sys.maxsize\'s range)' % (ast.unparse(target), value))
+    refusal.source_line = getattr(target, 'lineno', None)
+    raise refusal
+
+
 def refuse_complex_pow(node):
     """`(-4.0) ** 0.5`: a negative base to a fractional power is a complex number in Python, and this
     language has no complex type. Constant operands are refused here, at compile time; any other

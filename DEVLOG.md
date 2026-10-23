@@ -1,5 +1,22 @@
 # DEVLOG
 
+## 2026-10-23 - pre7: refuse `del` with an out-of-int64 constant index (job-pre7-10240010)
+
+`q14` (`del a[2**63]`) was the first of the three recorded pre-existing differences that still
+differed on this tree: both builds computed `2**63` at run time and trapped `integer overflow`,
+where CPython raises `IndexError: cannot fit 'int' into an index-sized integer` before the delete.
+An AIL int is int64, so the index cannot be represented. `pyfront.refuse_out_of_range_delete_index`
+now evaluates a constant integer index (`2**63`, `10**19`, `-2**63-1`, ...) and refuses the
+`del` by name at compile time on both the typed path (`pyfunc.py`) and the general path
+(`pyboxed2.py`); it applies through a name, a list item, an attribute and a dict value. In-range
+constant indexes are untouched, and the C runtime has no change (no hot code touched).
+
+`q26` and `q39` are still different and were not touched.
+
+Tests on this commit: `test_ail_pre7` (new, both builds), `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`; `update_manifest.py --check` and
+`ci_shards.py --check` rc 0.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

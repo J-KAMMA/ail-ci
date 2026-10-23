@@ -33,7 +33,7 @@ import os
 import re
 import runpy
 
-from pyfront import Unsupported, refuse_complex_pow
+from pyfront import Unsupported, refuse_complex_pow, refuse_out_of_range_delete_index
 import filelib
 import hashlower
 import pyfunc
@@ -9846,6 +9846,7 @@ class Compiler(boxclosure.ClosureMixin):
                     ctx.check()
                 ctx.emit('%s = ail_box_unbound();' % self.name_ref(target.id, ctx))
             elif isinstance(target, ast.Subscript) and not isinstance(target.slice, ast.Slice):
+                refuse_out_of_range_delete_index(target)
                 c = self.expr(target.value, ctx)
                 key = self.expr(target.slice, ctx)
                 if self.want_slice and self.infer_kind(target.slice, ctx) not in ('int', 'bool', 'str'):
