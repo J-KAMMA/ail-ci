@@ -10376,7 +10376,7 @@ def build(source, report, allow_mix=True):
     if '_ail_par_range' in source:
         import typedpar                          # a typed-parallel loop runs as the plain loop here
         source = typedpar.general_text(source)
-    if ' is ' in source:
+    if re.search(r'\bis\b', source) is not None:
         import numidentity                       # `is` on numbers (DIFFERENCES C114, C115)
         number_is = numidentity.refusal(source)
         if number_is is not None:
