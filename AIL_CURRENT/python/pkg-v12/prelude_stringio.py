@@ -114,6 +114,14 @@ class _AilStringIO:
     def close(self):
         self.closed = True
 
+    def __enter__(self):
+        self._open()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.closed = True
+        return False
+
     def isatty(self) -> bool:
         return False
 
