@@ -14401,12 +14401,16 @@ static inline int ail_is(ail_obj a, ail_obj b) {
     return ail_identical(a, b);
 }
 static inline uint64_t ail__range_count(const ail_rangeobj *r); /* defined with the iteration helpers below */
-/* CPython compares two ranges by the sequence they denote: equal lengths, then equal start and step; every
-   empty range equals every other empty range, whatever its start/step. */
+/* CPython compares two ranges by the sequence they denote: equal lengths, then equal start; every empty
+   range equals every other empty range, and a length-1 range is fixed by its start alone (whatever its
+   step); only longer ranges need equal steps too. */
 static inline int ail__range_eq(const ail_rangeobj *a, const ail_rangeobj *b) {
     uint64_t an = ail__range_count(a), bn = ail__range_count(b);
     if (an != bn) return 0;
-    return an == 0 || (a->start == b->start && a->step == b->step);
+    if (an == 0) return 1;
+    if (a->start != b->start) return 0;
+    if (an == 1) return 1;
+    return a->step == b->step;
 }
 static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {

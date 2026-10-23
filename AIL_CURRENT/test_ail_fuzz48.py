@@ -2,7 +2,8 @@
 
 `range(0, 10, 2) == range(0, 9, 2)` printed False where CPython prints True: ail_obj_eq_raw
 fell through to the default `==` case for AIL_T_RANGE. CPython compares the two sequences
-(equal lengths, then equal start and step; every empty range equals every other empty range),
+(equal lengths, then equal start; every empty range equals every other empty range and a
+length-1 range is fixed by its start alone),
 so the runtime now does the same. The values reach the comparison as arguments, list items, a
 dict value and an attribute, and both builds are compared with CPython.
 """
@@ -32,6 +33,10 @@ def main():
     eq(range(0, 0, 2), range(5, 5, 3))
     eq(range(3, 3, -1), range(-7, -7, 9))
     eq(range(1, 2), range(1, 1))
+    eq(range(0, 1, 2), range(0, 1, 1))
+    eq(range(0, 1, 2), range(0, 5, 7))
+    eq(range(0, 1, 2), range(1, 2, 2))
+    eq(range(5, 4, -1), range(5, 4, -7))
     eq(range(-9223372036854775807, 9223372036854775807, 3),
        range(-9223372036854775807, 9223372036854775807, 3))
     eq(range(-9223372036854775807, 9223372036854775807, 3),
