@@ -157,7 +157,16 @@ static inline ail_st ail_dun_contains(ail_ctx *cx, int *out, ail_obj c, ail_obj 
     if (f) { ail_obj r; ail_st st = f(cx, &r, c, item); if (st != AIL_OK) return st; *out = ail_obj_truthy(r); return AIL_OK; }
     AIL_FRAME_ENTER(cx, fr, 2);
     ail_st st = ail_iter(cx, &fr.slots[0], c);
-    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    if (st != AIL_OK) {
+        if (st == AIL_EXC && ail_exc_matches_b(cx, AIL_B_TYPEERROR)) {
+            /* CPython's _PySequence_IterSearch rewrites a TypeError from getting the
+               iterator, e.g. "iter() returned non-iterator", as this message */
+            char tb[160], tn[80]; ail__dun_tname(tn, sizeof tn, c);
+            snprintf(tb, sizeof tb, "argument of type '%s' is not iterable", tn);
+            ail_raise_c(cx, AIL_B_TYPEERROR, tb);
+        }
+        AIL_FRAME_LEAVE(cx, fr); return st;
+    }
     for (;;) {
         ail_obj e; st = ail_next(cx, &e, fr.slots[0]);
         if (st == AIL_STOP) { *out = 0; AIL_FRAME_LEAVE(cx, fr); return AIL_OK; }
@@ -502,6 +511,10 @@ def _edits():
     return AIL_OK;
 ''',
               '''    if (!fn) {
+        if (fi) {
+            char nbuf[128]; snprintf(nbuf, sizeof nbuf, "iter() returned non-iterator of type '%s'", ail__tname_c(obj));
+            return ail_raise_c(cx, AIL_B_TYPEERROR, nbuf);
+        }
         if (ail_dun2(obj, AIL_D2_GETITEM)) {
             *out = ail__iter_wrap(cx, AIL_IT_SEQGET, obj, ail_box_none(), 0);
             return AIL_OK;
@@ -534,7 +547,8 @@ def _edits():
             ail_obj key = ail_box_int(it->idx);
             ail_st st = f(cx, out, it->target, key);
             if (st == AIL_EXC && cx->exc_pending
-                    && ail_class_is_or_subclass(cx->exc.cls, cx->builtin_cls[AIL_B_INDEXERROR])) {
+                    && (ail_class_is_or_subclass(cx->exc.cls, cx->builtin_cls[AIL_B_INDEXERROR])
+                        || ail_class_is_or_subclass(cx->exc.cls, cx->builtin_cls[AIL_B_STOPITERATION]))) {
                 ail_exc_clear(cx);
                 it->idx = -1;
                 return AIL_STOP;

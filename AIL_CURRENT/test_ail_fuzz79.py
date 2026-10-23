@@ -14,12 +14,14 @@ on both builds (the typed path refused the program and the default build fell
 back to the general path).  Nothing was printed where CPython prints the items.
 
 The general runtime now gives such an instance an AIL_IT_SEQGET iterator that
-calls __getitem__ with 0, 1, ... and stops on an IndexError (other exceptions
-still propagate), and remembers exhaustion so a later next() does not call
-__getitem__ again, matching CPython's sequence iterator.  __iter__ still wins
-when a class defines both, and an inherited __getitem__ is found through the
-base classes.  The programs below compare stdout and the exit code with CPython
-on the forced general build and on the default build.
+calls __getitem__ with 0, 1, ... and stops on an IndexError or StopIteration
+(other exceptions still propagate), and remembers exhaustion so a later next()
+does not call __getitem__ again, matching CPython's sequence iterator.  __iter__
+still wins when a class defines both, and an inherited __getitem__ is found
+through the base classes.  An __iter__ that returns self without a __next__ is
+not an iterator: it raises TypeError instead of falling back to __getitem__.
+The programs below compare stdout and the exit code with CPython on the forced
+general build and on the default build.
 """
 import os
 import subprocess
@@ -171,11 +173,93 @@ def main():
 main()
 '''
 
+ITERSELF = r'''class C:
+    def __iter__(self):
+        return self
+
+    def __getitem__(self, i):
+        if i >= 2:
+            raise IndexError
+        return i
+
+
+class Sub(C):
+    pass
+
+
+def main():
+    try:
+        print(list(C()))
+    except TypeError as e:
+        print("TypeError", e)
+    try:
+        it = iter(C())
+        print("iter ok")
+        print(next(it))
+    except TypeError as e:
+        print("TypeError2", e)
+    try:
+        print([x for x in Sub()])
+    except TypeError as e:
+        print("TypeError3", e)
+    print("done")
+
+
+main()
+'''
+
+STOPITER_PARTIAL = r'''class S:
+    def __init__(self, n):
+        self.n = n
+
+    def __getitem__(self, i):
+        if i >= self.n:
+            raise StopIteration
+        return i * 10
+
+
+class MyStop(StopIteration):
+    pass
+
+
+class S2:
+    def __getitem__(self, i):
+        if i >= 2:
+            raise MyStop("end")
+        return i
+
+
+def main():
+    for x in S(3):
+        print(x)
+    print("after")
+    for x in iter(S(3)):
+        print("n", x)
+    print(list(S(0)))
+    print(list(S2()))
+    it = iter(S(3))
+    print(next(it), next(it), next(it))
+    try:
+        next(it)
+    except StopIteration:
+        print("stop")
+    try:
+        next(it)
+    except StopIteration:
+        print("stop again")
+    print("done")
+
+
+main()
+'''
+
 CASES = [
     ('basic', BASIC),
     ('consumers', CONSUMERS),
     ('inherit', INHERIT),
     ('details', DETAILS),
+    ('iterself', ITERSELF),
+    ('stopiter_partial', STOPITER_PARTIAL),
 ]
 
 
@@ -227,6 +311,12 @@ class Fuzz79Tests(unittest.TestCase):
 
     def test_protocol_details(self):
         self.check('details', DETAILS)
+
+    def test_iter_returning_self_without_next(self):
+        self.check('iterself', ITERSELF)
+
+    def test_stopiteration_ends_sequence(self):
+        self.check('stopiter_partial', STOPITER_PARTIAL)
 
 
 if __name__ == '__main__':
