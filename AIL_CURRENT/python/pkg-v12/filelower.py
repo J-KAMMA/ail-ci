@@ -523,6 +523,10 @@ class _Lowerer(ast.NodeTransformer):
             elif isinstance(context, ast.Name) and self.file_kind(context):
                 target = None
                 shown = self.N(context.id)
+            elif self.general:
+                item.context_expr = self.visit(item.context_expr)
+                body = [ast.With(items=[item], body=body, type_comment=None)]      # a manager: withlib.py lowers it
+                continue
             else:
                 self.refuse(node, 'a `with` statement other than `with open(path) as f:` or `with f:` on a file '
                                   'variable; there are no other context managers.\n'
