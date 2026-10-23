@@ -9911,9 +9911,17 @@ class Compiler(boxclosure.ClosureMixin):
         if node.msg is not None:
             msg = self.expr(node.msg, ctx)
             cname = self._inst_class(node.msg, ctx)
-            msg = self._to_str_slot(msg, cname, ctx)
-            ctx.emit('st = ail_raise(cx, cx->builtin_cls[AIL_B_ASSERTIONERROR], %s); goto %s;' %
-                    (msg, ctx.cur_err_target()))
+            text = self._to_str_slot(msg, cname, ctx)
+            if self.reads_args:
+                # the value keeps the message itself for e.args (AssertionError(42).args is (42,))
+                self.rt_needs.add('exc')
+                arr = ctx.new_cvar('ea')
+                ctx.emit('ail_obj %s[1] = { %s };' % (arr, msg))
+                ctx.emit('st = ail2x_raise_builtin(cx, cx->builtin_cls[AIL_B_ASSERTIONERROR], %s, %s, 1); goto %s;' %
+                        (text, arr, ctx.cur_err_target()))
+            else:
+                ctx.emit('st = ail_raise(cx, cx->builtin_cls[AIL_B_ASSERTIONERROR], %s); goto %s;' %
+                        (text, ctx.cur_err_target()))
         else:
             ctx.emit('st = ail_raise_c(cx, AIL_B_ASSERTIONERROR, ""); goto %s;' %
                     ctx.cur_err_target())

@@ -1,5 +1,15 @@
 # DEVLOG
 
+## 2026-10-23 - assert message keeps its value in e.args (job-pre15-10240045)
+
+`assert False, 42` now raises `AssertionError(42)`, so `e.args` is `(42,)` (CPython's value), not
+`('42',)`. The typed path converts a numeric message with `str()` only when the program does not
+read `e.args`; otherwise it builds the exception with the number itself. The general path now keeps
+the message value for `e.args` whenever the program reads it (also covering list/dict/tuple
+messages). Uncaught output stays `AssertionError: 42`. New `test_ail_pre15.py` covers int, float
+and bool messages, int64 limits, negative/empty/str messages, and values arriving through an
+argument, a list item, an attribute and a dict value, on the typed and general paths.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
