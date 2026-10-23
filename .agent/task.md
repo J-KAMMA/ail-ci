@@ -1,3 +1,6 @@
+**Finish this job.** Your earlier commits are on this branch, but the last review ran out of time before giving a verdict. Check that the work meets the original task below, measure as it asks, and fix anything missing. If the change does not reach the keep threshold, revert it and say so. Commit.
+
+--- ORIGINAL TASK ---
 **Speed: binary_cursor_records, second step.** It is still 4.7x slower than C. The earlier measurement found:
 - the per-record loop is 59.5% of the run;
 - unchecked reads alone would be worth about 16%;
@@ -32,5 +35,11 @@ Commit.
 - **Budget:** stop at the budget note, leaving a committed, consistent state.
 - **Report:** keep it brief, with numbers.
 - Test data: email addresses only on example.com / example.org (the public export audit rejects any other domain).
+
+**Work in few steps** (each step costs model time):
+- Write all probe programs first, then run them together with one command, for example a loop over `bash ~/tools/cmp.sh`, instead of one command per program.
+- Search only inside the repository (`grep -rn ... AIL_CURRENT tools`), never across `/home` or `/tmp`.
+- Read a file once, using a range that is large enough, instead of many small reads.
+- Do not re-run a test that already passed unless you changed code since.
 
 **Where you run:** a GitHub Actions runner (4 cores). Commit your work on the current branch; do not push.
