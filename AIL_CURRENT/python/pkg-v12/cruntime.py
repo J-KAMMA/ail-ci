@@ -9853,7 +9853,7 @@ static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {
         default: return 0; /* dict/set/instance/exception equality: OUT of scope, see comment above */
     }
 }
-static inline int64_t ail_obj_cmp(ail_obj a, ail_obj b) {
+static inline int64_t ail_obj_cmp_op(ail_obj a, ail_obj b, const char *op) {
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         if (a.tag == AIL_FLOAT && b.tag == AIL_FLOAT) {
             double av = a.f, bv = b.f;
@@ -9866,21 +9866,22 @@ static inline int64_t ail_obj_cmp(ail_obj a, ail_obj b) {
     if (a.tag == AIL_STR && b.tag == AIL_STR) return ail_str_cmp(a.s, b.s);
     if ((a.tag == AIL_TUPLE && b.tag == AIL_TUPLE) || (a.tag == AIL_LIST && b.tag == AIL_LIST)) {
         int64_t n = a.v->n < b.v->n ? a.v->n : b.v->n;
-        for (int64_t i = 0; i < n; i++) { int64_t c = ail_obj_cmp(a.v->p[i], b.v->p[i]); if (c != 0) return c; }
+        for (int64_t i = 0; i < n; i++) { int64_t c = ail_obj_cmp_op(a.v->p[i], b.v->p[i], op); if (c != 0) return c; }
         return a.v->n == b.v->n ? 0 : (a.v->n < b.v->n ? -1 : 1);
     }
     char buf[128];
-    snprintf(buf, sizeof buf, "'<' not supported between instances of '%s' and '%s'",
+    snprintf(buf, sizeof buf, "'%s' not supported between instances of '%s' and '%s'", op,
              ail_type_name(a.tag), ail_type_name(b.tag));
     ail_raise_c(AIL_ERR_TYPE, buf);
     return 0;
 }
+static inline int64_t ail_obj_cmp(ail_obj a, ail_obj b) { return ail_obj_cmp_op(a, b, "<"); }
 static inline ail_obj ail_obj_eq(ail_obj a, ail_obj b) { return ail_box_bool(ail_obj_eq_raw(a, b)); }
 static inline ail_obj ail_obj_ne(ail_obj a, ail_obj b) { return ail_box_bool(!ail_obj_eq_raw(a, b)); }
-static inline ail_obj ail_obj_lt(ail_obj a, ail_obj b) { return ail_box_bool(ail_obj_cmp(a, b) < 0); }
-static inline ail_obj ail_obj_le(ail_obj a, ail_obj b) { int64_t c = ail_obj_cmp(a, b); return ail_box_bool(c < 0 || (c == 0 && !((a.tag == AIL_FLOAT && a.f != a.f) || (b.tag == AIL_FLOAT && b.f != b.f)))); }
-static inline ail_obj ail_obj_gt(ail_obj a, ail_obj b) { return ail_box_bool(ail_obj_cmp(a, b) > 0); }
-static inline ail_obj ail_obj_ge(ail_obj a, ail_obj b) { int64_t c = ail_obj_cmp(a, b); return ail_box_bool(c > 0 || (c == 0 && !((a.tag == AIL_FLOAT && a.f != a.f) || (b.tag == AIL_FLOAT && b.f != b.f)))); }
+static inline ail_obj ail_obj_lt(ail_obj a, ail_obj b) { return ail_box_bool(ail_obj_cmp_op(a, b, "<") < 0); }
+static inline ail_obj ail_obj_le(ail_obj a, ail_obj b) { int64_t c = ail_obj_cmp_op(a, b, "<="); return ail_box_bool(c < 0 || (c == 0 && !((a.tag == AIL_FLOAT && a.f != a.f) || (b.tag == AIL_FLOAT && b.f != b.f)))); }
+static inline ail_obj ail_obj_gt(ail_obj a, ail_obj b) { return ail_box_bool(ail_obj_cmp_op(a, b, ">") > 0); }
+static inline ail_obj ail_obj_ge(ail_obj a, ail_obj b) { int64_t c = ail_obj_cmp_op(a, b, ">="); return ail_box_bool(c > 0 || (c == 0 && !((a.tag == AIL_FLOAT && a.f != a.f) || (b.tag == AIL_FLOAT && b.f != b.f)))); }
 
 /* ===================================================================================
    dict / set -- open-addressed index over a dense, insertion-ordered entries array (see
@@ -14506,7 +14507,7 @@ static inline ail_st ail_obj_hash(ail_ctx *cx, int64_t *out, ail_obj x) {
         }
     }
 }
-static inline ail_st ail_obj_cmp(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b) {
+static inline ail_st ail_obj_cmp_op(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b, const char *op) {
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         if (a.tag == AIL_T_FLOAT && b.tag == AIL_T_FLOAT) {
             double av = ail_float_val(a), bv = ail_float_val(b);
@@ -14523,7 +14524,7 @@ static inline ail_st ail_obj_cmp(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b
         ail_vecobj *va = (ail_vecobj *)a.o, *vb = (ail_vecobj *)b.o;
         int64_t n = va->n < vb->n ? va->n : vb->n;
         for (int64_t i = 0; i < n; i++) {
-            int64_t c; ail_st st = ail_obj_cmp(cx, &c, va->p[i], vb->p[i]); if (st != AIL_OK) return st;
+            int64_t c; ail_st st = ail_obj_cmp_op(cx, &c, va->p[i], vb->p[i], op); if (st != AIL_OK) return st;
             if (c != 0) { *out = c; return AIL_OK; }
         }
         *out = va->n == vb->n ? 0 : (va->n < vb->n ? -1 : 1); return AIL_OK;
@@ -14541,9 +14542,10 @@ static inline ail_st ail_obj_cmp(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b
         }
     }
     char buf[128];
-    snprintf(buf, sizeof buf, "'<' not supported between instances of '%s' and '%s'", ail_type_name(a.tag), ail_type_name(b.tag));
+    snprintf(buf, sizeof buf, "'%s' not supported between instances of '%s' and '%s'", op, ail_type_name(a.tag), ail_type_name(b.tag));
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
 }
+static inline ail_st ail_obj_cmp(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b) { return ail_obj_cmp_op(cx, out, a, b, "<"); }
 static inline ail_st ail__view_eq(ail_ctx *cx, int *res, ail_obj a, ail_obj b);
 static inline ail_st ail_op_eq(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
     if (__builtin_expect(ail__view_kind(a) || ail__view_kind(b), 0)) { int r = 0; ail_st st = ail__view_eq(cx, &r, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(r); return AIL_OK; }
@@ -14557,10 +14559,10 @@ static inline ail_st ail_op_ne(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) 
 static inline int ail__nan_operand(ail_obj a, ail_obj b) {
     return (a.tag == AIL_T_FLOAT && ail_float_val(a) != ail_float_val(a)) || (b.tag == AIL_T_FLOAT && ail_float_val(b) != ail_float_val(b));
 }
-static inline ail_st ail_op_lt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 0)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0); return AIL_OK; }
-static inline ail_st ail_op_le(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 1)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK; }
-static inline ail_st ail_op_gt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 2)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0); return AIL_OK; }
-static inline ail_st ail_op_ge(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 3)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK; }
+static inline ail_st ail_op_lt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 0)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp_op(cx, &c, a, b, "<"); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0); return AIL_OK; }
+static inline ail_st ail_op_le(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 1)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp_op(cx, &c, a, b, "<="); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK; }
+static inline ail_st ail_op_gt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 2)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp_op(cx, &c, a, b, ">"); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0); return AIL_OK; }
+static inline ail_st ail_op_ge(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 3)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp_op(cx, &c, a, b, ">="); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK; }
 
 /* ===================================================================================
    Arithmetic. int64 overflow -> AIL_LIMIT (uncatchable), per the owner decision -- the
@@ -15128,11 +15130,12 @@ static inline ail_obj ail_dict_new_default(ail_ctx *cx, int factory) {
     ail_obj r = ail_dict_new(cx); ((ail_mapobj *)r.o)->dd_factory = (int8_t)factory; return r;
 }
 static inline ail_obj ail_set_new(ail_ctx *cx);
+static inline ail_st ail_raise_key_arg(ail_ctx *cx, ail_obj arg);
 static inline ail_st ail_dict_getitem(ail_ctx *cx, ail_obj *out, ail_obj d, ail_obj key) {
     ail_obj *v; ail_st st = ail_map_get(cx, &v, (ail_mapobj *)d.o, key); if (st != AIL_OK) return st;
     if (!v) {
         int fac = ((ail_mapobj *)d.o)->dd_factory;
-        if (!fac) return ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], ail_obj_repr(cx, key));
+        if (!fac) return ail_raise_key_arg(cx, key);
         ail_obj dflt = fac == 1 ? ail_box_int(0) : fac == 2 ? ail_list_new(cx) : fac == 3 ? ail_set_new(cx) : ail_str_from_cstr(cx, "");
         st = ail_map_set(cx, (ail_mapobj *)d.o, key, dflt); if (st != AIL_OK) return st;
         *out = dflt; return AIL_OK;
@@ -15156,14 +15159,14 @@ static inline ail_st ail_dict_setdefault(ail_ctx *cx, ail_obj *out, ail_obj d, a
 }
 static inline ail_st ail_dict_pop(ail_ctx *cx, ail_obj *out, ail_obj d, ail_obj key, int has_default, ail_obj dflt) {
     ail_obj *v; ail_st st = ail_map_get(cx, &v, (ail_mapobj *)d.o, key); if (st != AIL_OK) return st;
-    if (!v) { if (has_default) { *out = dflt; return AIL_OK; } return ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], ail_obj_repr(cx, key)); }
+    if (!v) { if (has_default) { *out = dflt; return AIL_OK; } return ail_raise_key_arg(cx, key); }
     ail_obj val = *v;
     int found; st = ail_map_del(cx, &found, (ail_mapobj *)d.o, key); if (st != AIL_OK) return st;
     *out = val; return AIL_OK;
 }
 static inline ail_st ail_dict_del(ail_ctx *cx, ail_obj d, ail_obj key) {
     int found; ail_st st = ail_map_del(cx, &found, (ail_mapobj *)d.o, key); if (st != AIL_OK) return st;
-    if (!found) return ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], ail_obj_repr(cx, key));
+    if (!found) return ail_raise_key_arg(cx, key);
     return AIL_OK;
 }
 static inline int64_t ail_dict_len(ail_obj d) { return ((ail_mapobj *)d.o)->n; }
@@ -16440,6 +16443,24 @@ static inline void ail_inst_setattr(ail_ctx *cx, ail_obj inst, int64_t name_id, 
         cx->gc_bytes += (size_t)nc * sizeof(ail_attr);
     }
     o->attrs[o->n].name_id = name_id; o->attrs[o->n].val = val; o->n++;
+}
+/* A KeyError of one argument: str(e) is repr(arg), while e.args and repr(e) keep the argument
+   itself (CPython's KeyError.__str__ quirk).  The dict/set runtime used to pass the already
+   quoted text as the only argument, so str(e) was right but e.args was ("'k'",) not ('k',). */
+static inline ail_st ail_raise_key_arg(ail_ctx *cx, ail_obj arg) {
+    AIL_FRAME_ENTER(cx, fr, 3);
+    fr.slots[0] = arg;
+    fr.slots[1] = ail_obj_repr(cx, arg);
+    ail_obj items[1] = { arg };
+    fr.slots[2] = ail_tuple_new(cx, items, 1);
+    ail_obj inst = ail_inst_new(cx, cx->builtin_cls[AIL_B_KEYERROR]);
+    inst.tag = AIL_T_EXC;
+    ail_inst_setattr(cx, inst, AIL_ATTR_MESSAGE, fr.slots[1]);
+    ail_inst_setattr(cx, inst, ail_intern(cx, "args"), fr.slots[2]);
+    ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], fr.slots[1]);
+    cx->exc.value = inst;
+    AIL_FRAME_LEAVE(cx, fr);
+    return AIL_EXC;
 }
 static __attribute__((noinline, cold)) ail_st ail_attr_not_inst(ail_ctx *cx, ail_obj inst, const char *name_for_msg) {
     /* attribute access on a value that is not an instance (None, int, str, list ...): CPython's message */
@@ -18547,8 +18568,8 @@ static inline void ail_meth_list_clear(ail_obj lst) {
 static inline ail_st ail_meth_dict_popitem(ail_ctx *cx, ail_obj *out, ail_obj d) {
     ail_mapobj *m = (ail_mapobj *)d.o;
     if (m->n == 0) {
-        ail_obj msg = ail_str_repr(cx, ail_str_from_cstr(cx, "popitem(): dictionary is empty"));
-        return ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], msg);
+        ail_obj msg = ail_str_from_cstr(cx, "popitem(): dictionary is empty");
+        return ail_raise_key_arg(cx, msg);
     }
     ail_obj key = m->entries[m->n - 1].key, val = m->entries[m->n - 1].val;
     int found; ail_st st = ail_map_del(cx, &found, m, key); if (st != AIL_OK) return st;
@@ -18667,15 +18688,15 @@ static inline ail_st ail_meth_set_update(ail_ctx *cx, ail_obj s, ail_obj other) 
 static inline ail_st ail_meth_set_remove(ail_ctx *cx, ail_obj s, ail_obj x) {
     ail_st st = ail_setm_need_mut(cx, s, "remove"); if (st != AIL_OK) return st;
     int found; st = ail_setx_discard_key(cx, &found, AIL_SETOBJ(s), x); if (st != AIL_OK) return st;
-    if (!found) { ail_obj msg = ail_obj_repr(cx, x); return ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], msg); }
+    if (!found) return ail_raise_key_arg(cx, x);
     return AIL_OK;
 }
 static inline ail_st ail_meth_set_pop(ail_ctx *cx, ail_obj *out, ail_obj s) {
     ail_st st = ail_setm_need_mut(cx, s, "pop"); if (st != AIL_OK) return st;
     ail_setobj *so = AIL_SETOBJ(s);
     if (so->used == 0) {
-        ail_obj msg = ail_str_repr(cx, ail_str_from_cstr(cx, "pop from an empty set"));
-        return ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], msg);
+        ail_obj msg = ail_str_from_cstr(cx, "pop from an empty set");
+        return ail_raise_key_arg(cx, msg);
     }
     int64_t k = so->fin;                      /* the first element in iteration order (insertion order), as CPython's {1, 2}.pop() */
     while (!ail_setx_live(&so->ent[k])) k++;
@@ -26637,12 +26658,16 @@ AIL_NOIPA __attribute__((unused)) static double ail_m_hypot(double x, double y) 
 
 
 # The unprintable-code-point table the boxed runtime's repr() already carries (generated from
-# str.isprintable()), reused here by text so there is one table to regenerate.
+# str.isprintable()), reused here by text so there is one table to regenerate. Adapt it to the
+# running CPython exactly as repr_runtime_for_host does: the stored table is 3.13.6's (Unicode
+# 15.1), and a few newly assigned code points (U+2FFC..U+2FFF, U+31EF, ...) are printable there
+# but not in the 3.12 oracle (Unicode 15.0), where repr() must still spell them \uXXXX.
 def _unprintable_table():
     marker = 'static const uint32_t ail_repr_unprintable[][2] = {\n'
-    start = OBJ2.index(marker)
-    end = OBJ2.index('};', start) + 2
-    return OBJ2[start:end].replace('ail_repr_unprintable', 'ail_fmt_unprintable') + '\n'
+    source = repr_runtime_for_host(OBJ2)
+    start = source.index(marker)
+    end = source.index('};', start) + 2
+    return source[start:end].replace('ail_repr_unprintable', 'ail_fmt_unprintable') + '\n'
 
 
 _UNPRINTABLE_TABLE = _unprintable_table()
