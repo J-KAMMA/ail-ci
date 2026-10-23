@@ -14042,7 +14042,8 @@ static inline int ail__view_eq_raw(ail_obj a, ail_obj b);
 static inline ail_st ail_setx_update_any(ail_ctx *cx, ail_setobj *so, ail_obj other);
 static inline int ail_setx_eq(ail_obj a, ail_obj b);
 static inline int ail_setx_cmp(ail_obj a, ail_obj b, int op /* 0 lt, 1 le, 2 gt, 3 ge */);
-static inline int64_t ail_frozenset_hash(const ail_setobj *so);
+static inline ail_st ail_pyhash(ail_ctx *cx, int64_t *out, ail_obj x);
+static inline ail_st ail_frozenset_hash(ail_ctx *cx, int64_t *out, const ail_setobj *so);
 static inline ail_st ail_set_union(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b);
 static inline ail_st ail_set_intersection(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b);
 static inline ail_st ail_meth_set_difference(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b);
@@ -14448,7 +14449,7 @@ static inline int ail_member_eq(ail_obj a, ail_obj b) { return ail_identical(a, 
 
 static inline ail_st ail_obj_hash(ail_ctx *cx, int64_t *out, ail_obj x) {
     switch (x.tag) {
-        case AIL_T_FROZENSET: *out = ail_frozenset_hash(AIL_SETOBJ(x)); return AIL_OK;
+        case AIL_T_FROZENSET: return ail_frozenset_hash(cx, out, AIL_SETOBJ(x));
         case AIL_T_NONE: *out = 0xA1EC1; return AIL_OK;
         case AIL_T_BOOL: case AIL_T_INT: {
             uint64_t h = (uint64_t)x.i; h ^= h >> 33; h *= 0xff51afd7ed558ccdULL; h ^= h >> 33;
@@ -15410,18 +15411,24 @@ static inline ail_st ail__view_setop(ail_ctx *cx, ail_obj *out, ail_obj a, ail_o
     AIL_FRAME_LEAVE(cx, fr);
     return st;
 }
-/* an order-free hash of the elements, so equal frozensets hash alike */
-static inline int64_t ail_frozenset_hash(const ail_setobj *so) {
+/* an order-free hash of the elements, so equal frozensets hash alike; the element hashes are the
+   Python ones (hash(1) == hash(1.0) == hash(True)), as CPython's frozenset_hash uses */
+static inline ail_st ail_frozenset_hash(ail_ctx *cx, int64_t *out, const ail_setobj *so) {
     uint64_t hash = 0;
     for (int64_t i = 0; i < so->n; i++) {
         if (!ail_setx_live(&so->ent[i])) continue;
-        uint64_t h = (uint64_t)so->ent[i].hash;
+        int64_t eh; ail_st st = ail_pyhash(cx, &eh, so->ent[i].key);
+        if (st != AIL_OK) return st;
+        uint64_t h = (uint64_t)eh;
+        if (h == (uint64_t)-1) h = (uint64_t)-2;
         hash ^= ((h ^ 89869747ULL) ^ (h << 16)) * 3644798167ULL;
     }
     hash ^= ((uint64_t)so->used + 1) * 1927868237ULL;
     hash ^= (hash >> 11) ^ (hash >> 25);
     hash = hash * 69069U + 907133923ULL;
-    return (int64_t)hash;
+    if (hash == (uint64_t)-1) hash = 590923713ULL;
+    *out = (int64_t)hash;
+    return AIL_OK;
 }
 static inline int ail_setx_cmp(ail_obj a, ail_obj b, int op /* 0 lt, 1 le, 2 gt, 3 ge */) {
     const ail_setobj *x = AIL_SETOBJ(a), *y = AIL_SETOBJ(b);

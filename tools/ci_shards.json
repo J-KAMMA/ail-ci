@@ -233,7 +233,8 @@
   "test_json_pointer_batch": 12.0,
   "test_json_pointer_scan": 49.1,
   "test_json_query_cli": 274.3,
-  "test_json_query_file": 82.2
+  "test_json_query_file": 82.2,
+  "test_ail_fuzz52": 20.0
  },
  "assignment": [
   [
@@ -394,6 +395,7 @@
    "test_ail_float_argument_widening",
    "test_ail_fuzz3",
    "test_ail_fuzz3n",
+   "test_ail_fuzz52",
    "test_ail_gcfix",
    "test_ail_gcstress",
    "test_ail_libc_names",
