@@ -466,6 +466,9 @@ def _edits():
     e.append(('static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, int64_t n) {\n',
               'static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, int64_t n) {\n'
               '    if (x.tag == AIL_T_INST) { ail_d2_fn f = ail_dun2(x, AIL_D2_ROUND); if (f) return f(cx, out, x, has_n ? ail_box_int(n) : ail_box_none()); }\n'))
+    e.append(('static inline ail_st ail_bi_round_obj(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, ail_obj n) {\n',
+              'static inline ail_st ail_bi_round_obj(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, ail_obj n) {\n'
+              '    if (x.tag == AIL_T_INST) { ail_d2_fn f = ail_dun2(x, AIL_D2_ROUND); if (f) return f(cx, out, x, has_n ? n : ail_box_none()); }\n'))
     for fn, key in (('floor', 'FLOOR'), ('ceil', 'CEIL'), ('trunc', 'TRUNC')):
         e.append(('static inline ail_st ail_math_%s(ail_ctx *cx, ail_obj *out, ail_obj x) {\n' % fn,
                   'static inline ail_st ail_math_%s(ail_ctx *cx, ail_obj *out, ail_obj x) {\n'

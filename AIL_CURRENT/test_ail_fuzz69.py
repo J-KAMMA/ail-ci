@@ -106,6 +106,69 @@ print(tryit(1.0, 2), tryit(1, -1), tryit(-2.5, -1))
 '''
 
 
+# CPython checks the receiver before ndigits: a non-number x raises its own type error even
+# when ndigits is also wrong, and an instance __round__ gets the ndigits value unchanged.
+ROUND_RECEIVER_FIRST = r'''def r(x, n):
+    try:
+        return repr(round(x, n))
+    except Exception as e:
+        return type(e).__name__ + ": " + str(e)
+
+
+class C:
+    def __init__(self, v):
+        self.v = v
+
+
+o = C([])
+xs = [[], "x", None]
+d = {"x": [], "n": 2.0, "s": "2"}
+print(r([], 2.0), r("x", 2.0), r(None, 2.0))
+print(r({}, 2.0), r((1,), 2.0), r([], "2"), r([], [2]), r([], 0))
+print(r(o.v, d["n"]), r(xs[0], d["n"]), r(d["x"], d["n"]))
+print(r(xs[1], d["s"]), r(o.v, xs[2]), r(xs[2], 1))
+print(r(1, 2.0), r(True, "2"), r(1, [2]), r(1.0, 2.0), r(-2.5, "2"))
+
+
+class U:
+    def __init__(self, v):
+        self.v = v
+
+    def __round__(self, n=None):
+        return (self.v, type(n).__name__, n)
+
+
+u = U("a")
+us = [U("b"), 2.0]
+ud = {"c": U("c"), "n": 3.0}
+print(round(u, 2.0), round(u, "2"), round(u, [2]))
+print(round(u), round(u, None), round(us[0], us[1]))
+print(round(ud["c"], ud["n"]), round(U(-1), -1))
+'''
+
+
+# The typed path's overflow uses CPython's wording, not the int64 boundary's "integer overflow".
+ROUND_OVERFLOW_MESSAGE = r'''class C:
+    def __init__(self, v):
+        self.v = v
+
+
+def r(x, n):
+    try:
+        return repr(round(x, n))
+    except Exception as e:
+        return type(e).__name__ + ": " + str(e)
+
+
+o = C(1.7976931348623157e308)
+xs = [-1.7976931348623157e308]
+d = {"x": 1.7976931348623157e308, "n": -308}
+print(r(1.7976931348623157e308, -308), r(-1.7976931348623157e308, -308))
+print(r(9.99e307, -308), r(o.v, d["n"]), r(xs[0], d["n"]))
+print(r(d["x"], -308), r(1.7976931348623157e308, d["n"]))
+'''
+
+
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -154,6 +217,12 @@ class Fuzz69Tests(unittest.TestCase):
 
     def test_round_ndigits_type(self):
         self.check('round_types', ROUND_TYPES)
+
+    def test_round_receiver_checked_before_ndigits(self):
+        self.check('round_receiver_first', ROUND_RECEIVER_FIRST)
+
+    def test_round_overflow_message(self):
+        self.check('round_overflow_message', ROUND_OVERFLOW_MESSAGE)
 
 
 if __name__ == '__main__':

@@ -8674,8 +8674,8 @@ static int64_t ail_round0(double x) {
 }
 /* The typed path's round(x, n) for finite x and n < 0: the same exact-decimal rule as the
    general path's ail_round_float_neg (which see).  The result is a double, so a decimal result
-   beyond DBL_MAX is ail_die("integer overflow"): a program that names OverflowError maps that
-   message to its catchable code, and one that does not still stops with exit 1. */
+   beyond DBL_MAX is CPython's OverflowError; the trap uses CPython's own wording, mapped to
+   OverflowError by the OVERFLOWEXC splice when the program catches it. */
 static int ail_round_n_neg(double x, int64_t n, double *out) {
     int neg = signbit(x) != 0;
     double ax = fabs(x);
@@ -8738,7 +8738,7 @@ static double ail_round_n(double x, int64_t n) {
     if (!isfinite(x)) return x;              /* nan and infinities round to themselves */
     if (n < 0) {
         double r;
-        if (ail_round_n_neg(x, n, &r)) ail_die("integer overflow");
+        if (ail_round_n_neg(x, n, &r)) ail_die("rounded value too large to represent");
         return r;
     }
     if (n > 323) return x;                   /* CPython's NDIGITS_MAX: x is already unchanged */
@@ -17272,6 +17272,9 @@ static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_
    `n.i` before this check made round(1.0, 2.0) return 1.0 instead of raising. */
 static inline ail_st ail_bi_round_obj(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, ail_obj n) {
     if (!has_n || n.tag == AIL_T_NONE) return ail_bi_round(cx, out, x, 0, 0);
+    /* CPython validates the receiver before ndigits: round([], 2.0) is the list type error,
+       and an instance __round__ receives the ndigits value unchanged (a float is not rejected). */
+    if (!ail__is_intlike(x.tag) && x.tag != AIL_T_FLOAT) return ail_bi_round(cx, out, x, 1, 0);
     if (!ail__is_intlike(n.tag)) {
         char buf[96];
         snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail_type_name(n.tag));
@@ -27817,7 +27820,7 @@ _OVERFLOW_EXCEPTION_EDITS = (
     ('if (code < 1 || code > 9) code = AIL_EXC_RUNTIME;', 'if (code < 1 || code > 10) code = AIL_EXC_RUNTIME;'),
     ('    if (!strcmp(w, "key error")) return AIL_EXC_KEY;\n',
      '    if (!strcmp(w, "key error")) return AIL_EXC_KEY;\n'
-     '    if (!strcmp(w, "integer overflow") || !strcmp(w, "(34, \'Numerical result out of range\')")) return AIL_EXC_OVERFLOW;\n'),
+     '    if (!strcmp(w, "integer overflow") || !strcmp(w, "rounded value too large to represent") || !strcmp(w, "(34, \'Numerical result out of range\')")) return AIL_EXC_OVERFLOW;\n'),
 )
 
 
