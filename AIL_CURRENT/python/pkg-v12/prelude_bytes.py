@@ -814,6 +814,8 @@ def _ail_to_bytes(n, length=1, byteorder="big", signed=False):
 def _ail_from_bytes(data, byteorder="big", signed=False):
     if byteorder != "big" and byteorder != "little":
         raise ValueError("byteorder must be either 'little' or 'big'")
+    if data is None or isinstance(data, int) or isinstance(data, str):
+        raise TypeError("cannot convert '" + type(data).__name__ + "' object to bytes")
     s = _ail_b_source(data, None, None)
     vals = _ail_b_ints(s)
     if byteorder == "little":
