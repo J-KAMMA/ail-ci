@@ -755,6 +755,11 @@ static inline ail_obj ail2f_pad_str(ail_ctx *cx, ail_str s, int64_t len, ail2f_s
     return ail2f_done(cx, &o);
 }
 static inline const char *ail2f_signstr(int neg, char sign) { return neg ? "-" : sign == '+' ? "+" : sign == ' ' ? " " : ""; }
+static inline size_t ail2f_body_need(ail2f_spec *f) {
+    int64_t prec = f->has_prec ? f->prec : 6;
+    if (prec < 0) prec = 6;
+    return (size_t)prec + 400;
+}
 /* the digits of a float in one of e E f F g G % or the repr form (type 0) */
 static inline void ail2f_float_body(char *out, size_t osz, double v, ail2f_spec *f, char type) {
     if (isinf(v) || isnan(v)) {
@@ -765,7 +770,6 @@ static inline void ail2f_float_body(char *out, size_t osz, double v, ail2f_spec 
         return;
     }
     int64_t prec = f->has_prec ? f->prec : 6;
-    if (prec > 300) prec = 300;
     char fmt[16];
     if (type == 0 && !f->has_prec) {
         ail_fmt_float(out, osz, v);
@@ -773,7 +777,11 @@ static inline void ail2f_float_body(char *out, size_t osz, double v, ail2f_spec 
     }
     if (type == 0) {
         int p = prec < 1 ? 1 : (int)prec;
-        char e[400]; snprintf(e, sizeof e, "%.*e", p - 1, v);
+        size_t esz = (size_t)p + 64;
+        char estack[400];
+        char *e = esz <= sizeof estack ? estack : (char *)malloc(esz);
+        if (!e) ail_die("out of memory");
+        snprintf(e, esz, "%.*e", p - 1, v);
         char *ep = strchr(e, 'e'); int x = atoi(ep + 1);
         if (x < -4 || x >= p - 1) {
             /* exponent form: the digits without trailing zeros (unless #) */
@@ -787,6 +795,7 @@ static inline void ail2f_float_body(char *out, size_t osz, double v, ail2f_spec 
             if (L && out[L - 1] == '.') { out[L] = '0'; out[L + 1] = 0; }
             else if (!strchr(out, '.')) strcat(out, ".0");
         }
+        if (e != estack) free(e);
         return;
     }
     if (type == 'n') type = 'g';
@@ -822,9 +831,14 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
     }
     if (x.tag == AIL_T_INT || x.tag == AIL_T_BOOL) {
         if (type == 'e' || type == 'E' || type == 'f' || type == 'F' || type == 'g' || type == 'G' || type == '%') {
-            char body[400]; double d = (double)x.i;
-            ail2f_float_body(body, sizeof body, fabs(d), &f, type);
-            *out = ail2f_pad_num(cx, ail2f_signstr(d < 0, f.sign), "", body, &f); return AIL_OK;
+            char bstack[512]; double d = (double)x.i;
+            size_t bsz = ail2f_body_need(&f);
+            char *body = bsz <= sizeof bstack ? bstack : (char *)malloc(bsz);
+            if (!body) ail_die("out of memory");
+            ail2f_float_body(body, bsz, fabs(d), &f, type);
+            *out = ail2f_pad_num(cx, ail2f_signstr(d < 0, f.sign), "", body, &f);
+            if (body != bstack) free(body);
+            return AIL_OK;
         }
         if (type && type != 'd' && type != 'n' && type != 'b' && type != 'o' && type != 'x' && type != 'X' && type != 'c') {
             snprintf(msg, sizeof msg, "Unknown format code '%c' for object of type '%s'", type, x.tag == AIL_T_BOOL ? "bool" : "int");
@@ -861,10 +875,14 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
         }
         if (f.group && type == 'n') { snprintf(msg, sizeof msg, "Cannot specify '%c' with 'n'.", f.group); return ail_raise_c(cx, AIL_B_VALUEERROR, msg); }
         double d = ail_float_val(x);
-        char body[400];
+        char bstack[512];
+        size_t bsz = ail2f_body_need(&f);
+        char *body = bsz <= sizeof bstack ? bstack : (char *)malloc(bsz);
+        if (!body) ail_die("out of memory");
         int neg = signbit(d) && !isnan(d);
-        ail2f_float_body(body, sizeof body, fabs(d), &f, type);
+        ail2f_float_body(body, bsz, fabs(d), &f, type);
         *out = ail2f_pad_num(cx, ail2f_signstr(neg, f.sign), "", body, &f);
+        if (body != bstack) free(body);
         return AIL_OK;
     }
     if (x.tag == AIL_T_NONE) return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported format string passed to NoneType.__format__");
@@ -988,11 +1006,15 @@ static inline ail_st ail2f_percent(ail_ctx *cx, ail_obj *out, ail_obj fmtobj, ai
             if (arg.tag == AIL_T_FLOAT) d = ail_float_val(arg);
             else if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) d = (double)arg.i;
             else { snprintf(msg, sizeof msg, "must be real number, not %s", ail_type_name(arg.tag)); st = ail_raise_c(cx, AIL_B_TYPEERROR, msg); goto fail; }
-            char body[400];
+            char bstack[512];
+            size_t bsz = ail2f_body_need(&f);
+            char *body = bsz <= sizeof bstack ? bstack : (char *)malloc(bsz);
+            if (!body) ail_die("out of memory");
             if (!f.has_prec) { f.has_prec = 1; f.prec = 6; }
-            ail2f_float_body(body, sizeof body, fabs(d), &f, (char)t);
+            ail2f_float_body(body, bsz, fabs(d), &f, (char)t);
             f.type = (char)t; f.has_prec = 0;
             piece = ail2f_pad_num(cx, ail2f_signstr(signbit(d) && !isnan(d), f.sign), "", body, &f);
+            if (body != bstack) free(body);
         } else if (t == 'c') {
             uint16_t ch;
             if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) {
