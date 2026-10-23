@@ -43,6 +43,15 @@ MODULES = (
     'test_ail_fuzz3',
     'test_ail_fuzz3n',
     'test_ail_fuzz20',
+    'test_ail_c169',
+    'test_ail_fuzz21',
+    'test_ail_fuzz23',
+    'test_ail_fuzz24',
+    'test_ail_fuzz27',
+    'test_ail_fuzz30',
+    'test_ail_fuzz31',
+    'test_ail_fuzz32',
+    'test_ail_fuzz33',
 )
 
 
