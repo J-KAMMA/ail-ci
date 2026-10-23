@@ -5017,16 +5017,14 @@ class Compiler(boxclosure.ClosureMixin):
                 hits = [(v, s) for a, v, s in self.classes[k].get('class_attrs', []) if a == node.attr]
                 if hits:
                     value, slot = hits[-1]
-                    literal = (ast.Constant, ast.List, ast.Tuple, ast.Dict, ast.Set)
-                    if isinstance(value, literal) or (isinstance(value, ast.UnaryOp)
-                                                      and isinstance(value.operand, ast.Constant)):
-                        return self._cached_class_attr(slot, value, ctx)
-                    raise Unsupported('reading the class attribute %s.%s through the class: its value is '
-                                      'not a constant, and the general path can only read a class attribute '
-                                      'through the class when it is an int/float/str/bytes/bool or a list/dict/set/tuple literal.\n'
-                                      '  write instead: read it from an instance (`%s().%s`) or store the '
-                                      'value in a module-level constant'
-                                      % (node.value.id, node.attr, node.value.id, node.attr))
+                    if isinstance(value, (ast.ListComp, ast.DictComp, ast.SetComp, ast.GeneratorExp)):
+                        raise Unsupported('reading the class attribute %s.%s through the class: its value is '
+                                          'a comprehension, and the general path cannot evaluate a class-body '
+                                          'comprehension at class-definition time.\n'
+                                          '  write instead: read it from an instance (`%s().%s`) or store the '
+                                          'value in a module-level constant'
+                                          % (node.value.id, node.attr, node.value.id, node.attr))
+                    return self._cached_class_attr(slot, value, ctx)
                 k = self.classes[k]['base']
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
         if prop_owners:

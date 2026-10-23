@@ -12,8 +12,9 @@
   placeholder ids numbered with `tools/diff_ids.py` (new C170-C173).
 - The only code overlap needing a manual merge was `pyboxed2.py`: fuzz28 refuses a computed class
   attribute read through the class, while fuzz29 shares class attributes through module-lifetime
-  slots.  Both are kept: literal list/tuple/dict/set class attributes are read through the shared
-  slot, other computed values are still refused by name.
+  slots.  Both are kept: ordinary computed class attributes (including `x + 1`, `list(source)` and
+  `make()`) are read through the shared definition-time slot; a class-body comprehension read
+  through the class is still refused by name, as fuzz28 requires.
 
 ## 2026-10-22 -- job-fuzz21-10230420: CPython unpack error text
 
