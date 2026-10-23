@@ -208,6 +208,26 @@ class RefusalMessageForm(unittest.TestCase):
             self.assertTrue(built.stderr.startswith(
                 "prog.ail:3:1: not in the subset: import of 'html' is not available"), built.stderr)
 
+    def test_unavailable_import_ignores_mentions_in_comments_and_strings(self):
+        # A mention in a comment, a string literal or a docstring is not the import statement.
+        cases = (
+            ('inline comment', 'x = 1  # import html here\nimport html\n', 2),
+            ('string literal', 'text = "import html"\nimport html\n', 2),
+            ('docstring', '"""a note:\nimport html\n"""\nx = 1\nimport html\n', 5),
+        )
+        tail = ('\n\ndef main() -> None:\n    print(html.escape("<"))\n\n\nmain()\n')
+        for name, head, line in cases:
+            with self.subTest(name), tempfile.TemporaryDirectory() as directory:
+                Path(directory, 'prog.ail').write_text(head + tail, encoding='utf-8')
+                built = subprocess.run(
+                    [sys.executable, '-B', str(HERE / 'ail_chatgpt.py'), 'compile', 'prog.ail',
+                     '--syntax', 'python', '-o', 'prog'], cwd=directory, capture_output=True,
+                    text=True, timeout=600, env=dict(os.environ, AIL_QUIET_FALLBACK='1'))
+                self.assertEqual(built.returncode, 3, built.stdout + built.stderr)
+                self.assertTrue(built.stderr.startswith(
+                    "prog.ail:%d:1: not in the subset: import of 'html' is not available" % line),
+                    built.stderr)
+
 
 if __name__ == '__main__':
     unittest.main()

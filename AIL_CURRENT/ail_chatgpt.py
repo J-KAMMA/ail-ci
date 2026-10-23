@@ -1088,12 +1088,82 @@ def _python_notes(message, notes, source):
     return message + '\n'
 
 
+def _code_without_comments_and_strings(text):
+    """Source text with comment and string-literal contents blanked, so a text scan cannot find a
+    construct named only inside one. Line breaks are kept, so positions still line up."""
+    out = list(text)
+    at, size = 0, len(text)
+    while at < size:
+        char = text[at]
+        if char == '#' or text.startswith('//', at):
+            end = text.find('\n', at)
+            end = size if end < 0 else end
+            for index in range(at, end):
+                out[index] = ' '
+            at = end
+            continue
+        if char in ('"', "'"):
+            triple = text.startswith(char * 3, at)
+            end = at + (3 if triple else 1)
+            while end < size:
+                if text[end] == '\\':
+                    end += 2
+                    continue
+                if triple and text.startswith(char * 3, end):
+                    end += 3
+                    break
+                if not triple and text[end] == char:
+                    end += 1
+                    break
+                end += 1
+            for index in range(at, min(end, size)):
+                if out[index] != '\n':
+                    out[index] = ' '
+            at = end
+            continue
+        at += 1
+    return ''.join(out)
+
+
+def _import_statement_position(source, imported):
+    """Where the source actually imports `imported`, ignoring mentions in comments and strings.
+    The Python tree names the statement precisely; for other syntaxes a blanked text scan does."""
+    wanted = {part.strip() for part in imported.split(',') if part.strip()}
+    if not wanted:
+        return None
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, TypeError, ValueError, UnicodeError, OSError):
+        tree = None
+    if tree is not None:
+        found = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [node.module] if node.module else []
+            else:
+                continue
+            if any(name in wanted for name in names):
+                found.append((node.lineno, node.col_offset + 1))
+        if found:
+            return min(found)
+    names = '|'.join(re.escape(name) for name in sorted(wanted, key=len, reverse=True))
+    compiled = re.compile(r'\b(?:import|from)\s+(?:%s)\b' % names)
+    for number, line in enumerate(_code_without_comments_and_strings(source).splitlines(), 1):
+        found = compiled.search(line)
+        if found:
+            return number, found.start() + 1
+    return None
+
+
 def _text_position(source, message, function=None):
     """(line, column) of the construct a refusal names, found by reading the source text. This is
     the fallback for refusals the type check cannot map to a statement (a signature, an
     annotation): the position of the def, parameter or annotation the message quotes."""
     try:
-        lines = Path(source).read_text(encoding='utf8').splitlines()
+        text = Path(source).read_text(encoding='utf8')
+        lines = text.splitlines()
     except (OSError, UnicodeError):
         return None
     head = message.split('\n', 1)[0]
@@ -1119,9 +1189,11 @@ def _text_position(source, message, function=None):
     if named_line and int(named_line[1]) <= len(lines):
         at = int(named_line[1])
         return at, len(lines[at - 1]) - len(lines[at - 1].lstrip()) + 1
-    imported = name_in(r"^import of '([^']+)'")
+    imported = re.search(r"^import of '([^']+)'", head)
     if imported:
-        return find(r'\b(?:import|from)\s+%s\b' % imported)
+        at = _import_statement_position(text, imported[1])
+        if at is not None:
+            return at
     nullable = name_in(r'^(\w+) \| None')
     if nullable:
         return find(r'\b%s\s*\|\s*None|Optional\s*\[\s*%s' % (nullable, nullable))
