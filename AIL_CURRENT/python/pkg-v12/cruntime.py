@@ -8672,10 +8672,76 @@ static int64_t ail_round0(double x) {
         ail_die("round() result does not fit in this language's int64");
     return (int64_t)r;
 }
+/* The typed path's round(x, n) for finite x and n < 0: the same exact-decimal rule as the
+   general path's ail_round_float_neg (which see).  The result is a double, so a decimal result
+   beyond DBL_MAX is ail_die("integer overflow"): a program that names OverflowError maps that
+   message to its catchable code, and one that does not still stops with exit 1. */
+static int ail_round_n_neg(double x, int64_t n, double *out) {
+    int neg = signbit(x) != 0;
+    double ax = fabs(x);
+    int64_t k = -n;
+    if (!(ax > 0.0)) { *out = x; return 0; }
+    if (k > 308) { *out = neg ? -0.0 : 0.0; return 0; }
+    char buf[900], digits[900], text[900];
+    snprintf(buf, sizeof buf, "%.*e", 800, ax);
+    int nd = 0, e = 0;
+    char *p = buf;
+    while (*p && *p != 'e' && *p != 'E') {
+        if (*p >= '0' && *p <= '9') digits[nd++] = *p;
+        p++;
+    }
+    if (*p) e = atoi(p + 1);
+    int64_t keep = (int64_t)e + n + 1;
+    if (keep <= 0) {
+        int up = 0;
+        if (keep == 0) {
+            if (digits[0] > '5') up = 1;
+            else if (digits[0] == '5') {
+                for (int i = 1; i < nd; i++) if (digits[i] != '0') { up = 1; break; }
+            }
+        }
+        if (!up) { *out = neg ? -0.0 : 0.0; return 0; }
+        snprintf(text, sizeof text, "1e%lld", (long long)k);
+        double r = strtod(text, NULL);
+        *out = neg ? -r : r;
+        return 0;
+    }
+    if (keep >= nd) { *out = x; return 0; }
+    int up = 0;
+    char c = digits[keep];
+    if (c > '5') up = 1;
+    else if (c == '5') {
+        int any = 0;
+        for (int i = (int)keep + 1; i < nd; i++) if (digits[i] != '0') { any = 1; break; }
+        up = any || ((digits[keep - 1] - '0') & 1);
+    }
+    int nkeep = (int)keep, ne = e;
+    if (up) {
+        int i = nkeep - 1;
+        while (i >= 0 && digits[i] == '9') { digits[i] = '0'; i--; }
+        if (i >= 0) digits[i]++;
+        else { digits[0] = '1'; nkeep = 1; ne = e + 1; }
+    }
+    int pos = 0;
+    if (neg) text[pos++] = '-';
+    text[pos++] = digits[0];
+    if (nkeep > 1) {
+        text[pos++] = '.';
+        for (int i = 1; i < nkeep; i++) text[pos++] = digits[i];
+    }
+    pos += snprintf(text + pos, sizeof text - (size_t)pos, "e%d", ne);
+    double r = strtod(text, NULL);
+    *out = r;
+    return !isfinite(r);
+}
 static double ail_round_n(double x, int64_t n) {
-    if (n < 0) ail_die("round(x, n) with a negative n is not built -- CPython rounds to the "
-                       "nearest power of ten there, a different operation from this one");
-    if (n > 320) n = 320;                    /* every double's decimal expansion is exact by here */
+    if (!isfinite(x)) return x;              /* nan and infinities round to themselves */
+    if (n < 0) {
+        double r;
+        if (ail_round_n_neg(x, n, &r)) ail_die("integer overflow");
+        return r;
+    }
+    if (n > 323) return x;                   /* CPython's NDIGITS_MAX: x is already unchanged */
     char buf[512];
     int need = snprintf(buf, sizeof buf, "%.*f", (int)n, x);
     if (need < 0) ail_die("round(): formatting the float failed");
@@ -17084,6 +17150,73 @@ static inline ail_st ail_bi_abs(ail_ctx *cx, ail_obj *out, ail_obj x) {
    is itself correctly-rounded-to-nearest-ties-to-even from the exact binary value (matches
    CPython's own _Py_dg_dtoa-based algorithm on every value checked while building this).
    =================================================================================== */
+/* round(x, n) for a finite float x and n < 0: CPython rounds to the nearest multiple of
+   10**(-n), ties to even, then to the nearest double; a decimal result beyond DBL_MAX is
+   CPython's OverflowError.  Scaling by a computed 10**k is not exact (10**300 is not a
+   double, and 1e300 / 1e300 * 1e300 came back as 1.0000000000000002e300), so the exact
+   decimal expansion of the double is printed with enough digits (a double's expansion
+   terminates by 767 significant digits) and rounded as decimal text, like CPython's own
+   _Py_dg_dtoa-based path.  n < -308 is CPython's NDIGITS_MIN: every finite double rounds
+   to signed zero.  Returns 1 when the result overflows. */
+static int ail_round_float_neg(double x, int64_t n, double *out) {
+    int neg = signbit(x) != 0;
+    double ax = fabs(x);
+    int64_t k = -n;
+    if (!(ax > 0.0)) { *out = x; return 0; }
+    if (k > 308) { *out = neg ? -0.0 : 0.0; return 0; }
+    char buf[900], digits[900], text[900];
+    snprintf(buf, sizeof buf, "%.*e", 800, ax);
+    int nd = 0, e = 0;
+    char *p = buf;
+    while (*p && *p != 'e' && *p != 'E') {
+        if (*p >= '0' && *p <= '9') digits[nd++] = *p;
+        p++;
+    }
+    if (*p) e = atoi(p + 1);
+    int64_t keep = (int64_t)e + n + 1;      /* digits whose decimal place is >= 10**k */
+    if (keep <= 0) {
+        int up = 0;
+        if (keep == 0) {
+            if (digits[0] > '5') up = 1;
+            else if (digits[0] == '5') {
+                for (int i = 1; i < nd; i++) if (digits[i] != '0') { up = 1; break; }
+            }
+        }
+        if (!up) { *out = neg ? -0.0 : 0.0; return 0; }
+        snprintf(text, sizeof text, "1e%lld", (long long)k);
+        double r = strtod(text, NULL);
+        *out = neg ? -r : r;
+        return 0;
+    }
+    if (keep >= nd) { *out = x; return 0; }
+    int up = 0;
+    char c = digits[keep];
+    if (c > '5') up = 1;
+    else if (c == '5') {
+        int any = 0;
+        for (int i = (int)keep + 1; i < nd; i++) if (digits[i] != '0') { any = 1; break; }
+        up = any || ((digits[keep - 1] - '0') & 1);
+    }
+    int nkeep = (int)keep, ne = e;
+    if (up) {
+        int i = nkeep - 1;
+        while (i >= 0 && digits[i] == '9') { digits[i] = '0'; i--; }
+        if (i >= 0) digits[i]++;
+        else { digits[0] = '1'; nkeep = 1; ne = e + 1; }
+    }
+    int pos = 0;
+    if (neg) text[pos++] = '-';
+    text[pos++] = digits[0];
+    if (nkeep > 1) {
+        text[pos++] = '.';
+        for (int i = 1; i < nkeep; i++) text[pos++] = digits[i];
+    }
+    pos += snprintf(text + pos, sizeof text - (size_t)pos, "e%d", ne);
+    double r = strtod(text, NULL);
+    *out = r;
+    return !isfinite(r);
+}
+
 static inline ail_st ail_bi_round_int_ndigits(ail_ctx *cx, ail_obj *out, int64_t v, int64_t n) {
     if (-n >= 19) { *out = ail_box_int(0); return AIL_OK; } /* 10^19 exceeds int64 range: any
         int64 value rounds to 0 at this scale -- documented simplification, never exercised
@@ -17122,21 +17255,29 @@ static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_
     double v = ail_float_val(x);
     if (v != v || isinf(v)) { *out = ail_box_float(cx, v); return AIL_OK; }
     double result;
+    if (n > 323) { *out = ail_box_float(cx, v); return AIL_OK; }
     if (n >= 0) {
-        int nd = (int)(n > 323 ? 323 : n);
+        int nd = (int)n;
         char buf[400];
         snprintf(buf, sizeof buf, "%.*f", nd, v);
         result = strtod(buf, NULL);
-    } else {
-        int64_t nn = -n;
-        double scale = 1.0;
-        for (int64_t k = 0; k < nn && k < 400; k++) scale *= 10.0;
-        double scaled = v / scale;
-        double rr = nearbyint(scaled);
-        result = rr * scale;
+    } else if (ail_round_float_neg(v, n, &result)) {
+        return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "rounded value too large to represent");
     }
     *out = ail_box_float(cx, result);
     return AIL_OK;
+}
+/* The general path's round() takes ndigits as a value: CPython accepts None (the one-argument
+   form) and an index-like int, and rejects a float or str with its own TypeError. Reading
+   `n.i` before this check made round(1.0, 2.0) return 1.0 instead of raising. */
+static inline ail_st ail_bi_round_obj(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, ail_obj n) {
+    if (!has_n || n.tag == AIL_T_NONE) return ail_bi_round(cx, out, x, 0, 0);
+    if (!ail__is_intlike(n.tag)) {
+        char buf[96];
+        snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail_type_name(n.tag));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
+    return ail_bi_round(cx, out, x, 1, n.i);
 }
 
 /* ===================================================================================

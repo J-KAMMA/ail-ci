@@ -16860,9 +16860,10 @@ def _call(node, ctx):
         # AIL_TASK_p3idioms_20260916.md idiom 9. Two separate reasons live under one name:
         # round(x) is round-HALF-TO-EVEN of the float's own exact binary value, returned as an
         # int (`ail_round0`, cruntime.py's ROUND block); round(x, n) additionally has to decide a
-        # DECIMAL representation and returns a float (`ail_round_n`, the same block). Only a float
-        # `x` is built -- Python's own round(<int>) is already exact and needs no help from this
-        # compiler, and round() of a str is not a shape Python has at all.
+        # DECIMAL representation (a negative n rounds to a power of ten) and returns a float
+        # (`ail_round_n`, the same block). Only a float `x` is built -- Python's own round(<int>)
+        # is already exact and needs no help from this compiler, and round() of a str is not a
+        # shape Python has at all.
         if _etype(a[0], ctx) != FLT:
             raise Unsupported('round() of %s; only round() of a float is built here (round(<int>)'
                               ' is already exact in Python and this compiler leaves it as the '
@@ -16875,12 +16876,6 @@ def _call(node, ctx):
         n = a[1]
         if _etype(n, ctx) != INT:
             raise Unsupported('round(x, n): n must be an int')
-        nc = _int_const(n)
-        if nc is not None and nc < 0:
-            raise Unsupported('round(x, n) with a negative n; not built -- CPython rounds to the '
-                              'nearest power of ten there (round(1234, -2) == 1200), a different '
-                              'operation from rounding to n decimal PLACES, which is the only one '
-                              'built here')
         ctx.parts.add('ROUND')
         return 'ail_round_n(%s, %s)' % (x, rec(n))
     if f == 'round':
@@ -16890,8 +16885,8 @@ def _call(node, ctx):
         # both malformed Python already, so this stays a plain, honest refusal rather than a
         # message describing a limitation the door above no longer has.
         raise Unsupported("round(x) or round(x, n) with 0, 1 or 2 positional arguments and no "
-                          "keywords is what is built; a negative n and a str/bytes x are refused "
-                          "separately, by name, at the door above")
+                          "keywords is what is built; a str/bytes x is refused separately, by name, "
+                          "at the door above")
     if f == 'reversed':
         raise Unsupported('reversed(); walk the sequence backwards by index instead '
                           '(i = len(xs) - 1, then while i >= 0: ... i -= 1)')
