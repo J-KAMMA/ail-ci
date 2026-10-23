@@ -16406,6 +16406,12 @@ static inline ail_st ail_inst_setattr_chk(ail_ctx *cx, ail_obj inst, int64_t nam
     return AIL_OK;
 }
 static inline ail_st ail_inst_getattr(ail_ctx *cx, ail_obj *out, ail_obj inst, int64_t name_id, const char *name_for_msg) {
+    if (__builtin_expect(inst.tag == AIL_T_CLASS, 0)) {
+        /* A class value's `__name__` is the name from its class statement. CPython keeps that
+           even when the class body assigns `__name__` (the assignment lands in the class dict). */
+        if (strcmp(name_for_msg, "__name__") == 0) { *out = ((ail_classobj *)inst.o)->name; return AIL_OK; }
+        return ail_attr_not_inst(cx, inst, name_for_msg);
+    }
     if (__builtin_expect((unsigned)(inst.tag - AIL_T_INST) > 1u, 0)) return ail_attr_not_inst(cx, inst, name_for_msg);
     ail_instobj *o = (ail_instobj *)inst.o;
     for (int64_t i = 0; i < o->n; i++) if (o->attrs[i].name_id == name_id) { *out = o->attrs[i].val; return AIL_OK; }

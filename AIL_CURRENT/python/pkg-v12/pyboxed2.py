@@ -4951,6 +4951,11 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.emit('st = ail_type_name_of(cx, &%s, %s);' % (t, v))
                 ctx.check()
                 return t
+            if (isinstance(node.value, ast.Name) and node.value.id in self.classes
+                    and node.value.id not in ctx.slot_of and node.value.id not in self.module_names):
+                # `C.__name__`: the name from the class statement. CPython keeps that even when
+                # the class body assigns `__name__` (the assignment only lands in the class dict).
+                return self.expr_Constant(ast.Constant(value=node.value.id), ctx)
         if isinstance(node.value, ast.Name) and (node.value.id in self.module_aliases or
                                                   node.value.id == 'sys'):
             return self._module_attr_value(node.value.id, node.attr, ctx)
