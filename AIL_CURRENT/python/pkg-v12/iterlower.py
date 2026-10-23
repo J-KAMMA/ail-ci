@@ -642,8 +642,21 @@ class _Lower:
             for inner in ast.walk(part):
                 if isinstance(inner, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
                     return None
+        target_name = node.targets[0].id if isinstance(node, ast.Assign) else node.target.id
+        # CPython evaluates the whole comprehension before it rebinds the target, so
+        # `d = {k: d[k] for k in d}` reads the OLD d. This rewrite fills the target itself and would
+        # empty it first; leave such a comprehension to the ordinary path, which evaluates the value
+        # before assigning. A generator that binds the same name shadows the target, so it is not a
+        # read of it.
+        if target_name not in mapping and any(
+                isinstance(n, ast.Name) and n.id == target_name and isinstance(n.ctx, ast.Load)
+                for part in [comp.key, comp.value, comp.generators[0].iter]
+                + [c for g in comp.generators for c in g.ifs]
+                + [g.iter for g in comp.generators[1:]]
+                for n in ast.walk(part)):
+            return None
         renamer = _Rename(mapping)
-        store = ast.Subscript(value=_name(node.targets[0].id if isinstance(node, ast.Assign) else node.target.id),
+        store = ast.Subscript(value=_name(target_name),
                               slice=_mark(renamer.visit(copy.deepcopy(comp.key))), ctx=ast.Store())
         inner = [ast.Assign(targets=[store], value=_mark(renamer.visit(copy.deepcopy(comp.value))))]
         for gen in reversed(comp.generators):
