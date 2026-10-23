@@ -2197,7 +2197,10 @@ class Compiler(boxclosure.ClosureMixin):
                 parts.append(threadrt.patch_clock(clockrt.general_text()))
             else:
                 parts.append(clockrt.general_text())
-        if getattr(self, 'needs_boxcase', False):
+        if getattr(self, 'needs_unicode_case', False):
+            import safetyrt
+            parts.append(safetyrt.unicode_case_text())
+        elif getattr(self, 'needs_boxcase', False):
             import cruntime
             parts.append(cruntime.BOXCASE)
         if getattr(self, 'needs_type_name', False):
@@ -9252,20 +9255,29 @@ class Compiler(boxclosure.ClosureMixin):
         return self._pad_method('ail_meth_str_center', recv, args, kwargs, ctx)
 
     def _m_title(self, recv, kind, args, kwargs, ctx):
+        if kind not in ('str', None):
+            raise Unsupported('.title() (on a %s)' % kind)
+        self.needs_unicode_case = True
         t = ctx.tmp()
-        ctx.emit('st = ail_meth_str_title(cx, &%s, %s);' % (t, recv))
+        ctx.emit('st = ail2c_title(cx, &%s, %s);' % (t, recv))
         ctx.check()
         return t
 
     def _m_capitalize(self, recv, kind, args, kwargs, ctx):
+        if kind not in ('str', None):
+            raise Unsupported('.capitalize() (on a %s)' % kind)
+        self.needs_unicode_case = True
         t = ctx.tmp()
-        ctx.emit('st = ail_meth_str_capitalize(cx, &%s, %s);' % (t, recv))
+        ctx.emit('st = ail2c_capitalize(cx, &%s, %s);' % (t, recv))
         ctx.check()
         return t
 
     def _m_swapcase(self, recv, kind, args, kwargs, ctx):
+        if kind not in ('str', None):
+            raise Unsupported('.swapcase() (on a %s)' % kind)
+        self.needs_unicode_case = True
         t = ctx.tmp()
-        ctx.emit('st = ail_meth_str_swapcase(cx, &%s, %s);' % (t, recv))
+        ctx.emit('st = ail2c_swapcase(cx, &%s, %s);' % (t, recv))
         ctx.check()
         return t
 
@@ -9324,8 +9336,9 @@ class Compiler(boxclosure.ClosureMixin):
     def _m_casefold(self, recv, kind, args, kwargs, ctx):
         if kind not in ('str', None):
             raise Unsupported('.casefold() (on a %s)' % kind)
+        self.needs_unicode_case = True
         t = ctx.tmp()
-        ctx.emit('st = ail_meth_str_casefold(cx, &%s, %s);' % (t, recv))
+        ctx.emit('st = ail2c_casefold(cx, &%s, %s);' % (t, recv))
         ctx.check()
         return t
 
