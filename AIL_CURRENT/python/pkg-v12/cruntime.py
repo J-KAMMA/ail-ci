@@ -14081,7 +14081,8 @@ typedef struct { ail_gcobj hdr; ail_obj func, self; } ail_boundobj;
 enum {
     AIL_IT_LIST = 1, AIL_IT_TUPLE, AIL_IT_STR, AIL_IT_DICT_KEYS, AIL_IT_DICT_VALUES,
     AIL_IT_DICT_ITEMS, AIL_IT_SET, AIL_IT_RANGE, AIL_IT_ENUMERATE, AIL_IT_ZIP,
-    AIL_IT_REVERSED, AIL_IT_MAP, AIL_IT_FILTER, AIL_IT_STREAM, AIL_IT_USER
+    AIL_IT_REVERSED, AIL_IT_MAP, AIL_IT_FILTER, AIL_IT_STREAM, AIL_IT_USER,
+    AIL_IT_ZIP_N
 };
 typedef struct { ail_gcobj hdr; int kind; ail_obj target; ail_obj extra; int64_t idx, idx2; ail_st (*read_next)(ail_ctx *, ail_obj *); } ail_iterobj;
 
@@ -15749,6 +15750,52 @@ static inline ail_st ail_iter_zip(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj 
     if (st != AIL_OK) return st;
     *out = ail__iter_wrap(cx, AIL_IT_ZIP, ia, ib, 0); return AIL_OK;
 }
+/* zip(*rows): one iterator per row, made now (CPython's zip() calls iter() on every
+   argument at once), advanced together on each step. Keeping the iterators, rather than a
+   snapshot of the rows' values, preserves CPython's view of a row that is changed after the
+   zip object is made. */
+static inline ail_st ail_it_next(ail_ctx *cx, ail_obj *out, ail_obj itobj); /* defined below */
+static inline ail_st ail_iter_zip_n(ail_ctx *cx, ail_obj *out, ail_obj rows) {
+    if (!(rows.tag == AIL_T_LIST || rows.tag == AIL_T_TUPLE)) {
+        char buf[64]; snprintf(buf, sizeof buf, "'%s' object is not iterable", ail_type_name(rows.tag));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
+    int64_t n = ((ail_vecobj *)rows.o)->n;
+    AIL_ROOT1(cx, fr0, rows);
+    ail_obj its = ail_list_new(cx);
+    AIL_FRAME_LEAVE(cx, fr0);
+    ail_obj keep0[2]; keep0[0] = rows; keep0[1] = its;
+    AIL_ROOT_N(cx, fr1, keep0, 2);
+    for (int64_t i = 0; i < n; i++) {
+        ail_obj keep[2]; keep[0] = keep0[1]; keep[1] = ((ail_vecobj *)keep0[0].o)->p[i];
+        AIL_ROOT_N(cx, fr2, keep, 2);
+        ail_st st = ail_iter(cx, &keep[1], keep[1]);
+        if (st == AIL_OK) ail_list_append(cx, keep[0], keep[1]);
+        AIL_FRAME_LEAVE(cx, fr2);
+        if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr1); return st; }
+    }
+    *out = ail__iter_wrap(cx, AIL_IT_ZIP_N, keep0[1], ail_box_none(), 0);
+    AIL_FRAME_LEAVE(cx, fr1);
+    return AIL_OK;
+}
+static inline ail_st ail__zip_n_next(ail_ctx *cx, ail_obj *out, ail_iterobj *it) {
+    ail_vecobj *its = (ail_vecobj *)it->target.o;
+    int64_t n = its->n;
+    if (n == 0) return AIL_STOP;
+    ail_obj *vals = (ail_obj *)ail_xmalloc((size_t)n * sizeof(ail_obj));
+    for (int64_t i = 0; i < n; i++) vals[i] = ail_box_none();
+    AIL_ROOT_N(cx, fr, vals, (int32_t)(n < INT32_MAX ? n : INT32_MAX));
+    ail_st st = AIL_OK;
+    for (int64_t i = 0; i < n; i++) {
+        st = ail_it_next(cx, &vals[i], its->p[i]);
+        if (st != AIL_OK) break;
+    }
+    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); free(vals); return st; }
+    ail_obj tup = ail_tuple_new(cx, vals, n);
+    AIL_FRAME_LEAVE(cx, fr);
+    free(vals);
+    *out = tup; return AIL_OK;
+}
 static inline ail_st ail_iter_reversed(ail_ctx *cx, ail_obj *out, ail_obj seq) {
     int64_t n;
     if (seq.tag == AIL_T_RANGE) {
@@ -15860,6 +15907,7 @@ static inline ail_st ail_next(ail_ctx *cx, ail_obj *out, ail_obj iterobj) {
             ail_obj pr[2]; pr[0] = x; pr[1] = y;
             *out = ail_tuple_new(cx, pr, 2); return AIL_OK;
         }
+        case AIL_IT_ZIP_N: return ail__zip_n_next(cx, out, it);
         case AIL_IT_MAP: {
             ail_obj x; ail_st st = ail_next(cx, &x, it->target); if (st != AIL_OK) return st;
             ail_funcobj *f = (ail_funcobj *)it->extra.o;

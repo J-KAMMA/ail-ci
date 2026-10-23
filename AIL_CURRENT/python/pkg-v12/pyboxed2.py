@@ -5522,67 +5522,16 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _call_zip_star(self, star_val, ctx):
         """`zip(*rows)` -- no N-ary zip primitive in the core (API.md's ail_iter_zip is the
-        2-iterable form only); built here as a runtime loop over `rows` (each row
-        materialised, truncated to the shortest, same as real zip()) producing a LIST of
-        TUPLEs (eager, like every other iterable this emitter materialises -- see the report)."""
+        2-iterable form only); the rows are materialised (as `f(*xs)` must), then one iterator
+        per row is made at once and advanced together, matching CPython's zip(): a row changed
+        after the zip object exists is seen when the zip is consumed, and a later row is not
+        included. Returns a real iterator (AIL_T_ITER), not a list of tuples."""
         rows = ctx.tmp()
         ctx.emit('%s = ail_list_new(cx);' % rows)
         self._extend_from_iter(rows, self._resolve_iter_src(star_val, ctx), ctx)
-        nrows = ctx.new_cvar('nr')
-        ctx.emit('int64_t %s = ((ail_vecobj *)(%s).o)->n;' % (nrows, rows))
-        matl = ctx.tmp()
-        ctx.emit('%s = ail_list_new(cx);' % matl)
-        i_ = ctx.new_cvar('zi')
-        ctx.emit('for (int64_t %s = 0; %s < %s; %s++) {' % (i_, i_, nrows, i_))
-        ctx.indent += 1
-        rowv = ctx.tmp()
-        ctx.emit('st = ail_op_getitem(cx, &%s, %s, ail_box_int(%s));' % (rowv, rows, i_))
-        ctx.check()
-        onemat = ctx.tmp()
-        ctx.emit('%s = ail_list_new(cx);' % onemat)
-        self._extend_from_iter(onemat, rowv, ctx)
-        ctx.emit('ail_list_append(cx, %s, %s);' % (matl, onemat))
-        ctx.indent -= 1
-        ctx.emit('}')
-        minlen = ctx.new_cvar('ml')
-        ctx.emit('int64_t %s = -1;' % minlen)
-        j_ = ctx.new_cvar('zj')
-        ctx.emit('for (int64_t %s = 0; %s < %s; %s++) {' % (j_, j_, nrows, j_))
-        ctx.indent += 1
-        rl = ctx.tmp()
-        ctx.emit('st = ail_op_getitem(cx, &%s, %s, ail_box_int(%s));' % (rl, matl, j_))
-        ctx.check()
-        rln = ctx.new_cvar('rln')
-        ctx.emit('int64_t %s = ((ail_vecobj *)(%s).o)->n;' % (rln, rl))
-        ctx.emit('if (%s < 0 || %s < %s) %s = %s;' % (minlen, rln, minlen, minlen, rln))
-        ctx.indent -= 1
-        ctx.emit('}')
-        ctx.emit('if (%s < 0) %s = 0;' % (minlen, minlen))
         out = ctx.tmp()
-        ctx.emit('%s = ail_list_new(cx);' % out)
-        k_ = ctx.new_cvar('zk')
-        ctx.emit('for (int64_t %s = 0; %s < %s; %s++) {' % (k_, k_, minlen, k_))
-        ctx.indent += 1
-        arr = ctx.new_cvar('ztup')
-        ctx.emit('ail_obj *%s = (ail_obj *)ail_xmalloc((size_t)%s * sizeof(ail_obj));' % (arr, nrows))
-        m_ = ctx.new_cvar('zm')
-        ctx.emit('for (int64_t %s = 0; %s < %s; %s++) {' % (m_, m_, nrows, m_))
-        ctx.indent += 1
-        rl2 = ctx.tmp()
-        ctx.emit('st = ail_op_getitem(cx, &%s, %s, ail_box_int(%s));' % (rl2, matl, m_))
+        ctx.emit('st = ail_iter_zip_n(cx, &%s, %s);' % (out, rows))
         ctx.check()
-        el = ctx.tmp()
-        ctx.emit('st = ail_op_getitem(cx, &%s, %s, ail_box_int(%s));' % (el, rl2, k_))
-        ctx.check()
-        ctx.emit('%s[%s] = %s;' % (arr, m_, el))
-        ctx.indent -= 1
-        ctx.emit('}')
-        tup = ctx.tmp()
-        ctx.emit('%s = ail_tuple_new(cx, %s, %s);' % (tup, arr, nrows))
-        ctx.emit('free(%s);' % arr)
-        ctx.emit('ail_list_append(cx, %s, %s);' % (out, tup))
-        ctx.indent -= 1
-        ctx.emit('}')
         return out
 
     def _bind_star(self, fname, info, star, kwargs, strip_self, params, ctx):
