@@ -6,8 +6,11 @@ parts with `_ail_dmerge`, which did `for k in d: out[k] = d[k]`: a non-mapping
 iterable was read as a list of keys and then indexed by those keys.  For
 `[1, 2]` it set `out[1] = 2` and then indexed out of range (IndexError), and
 for an empty list or an empty str it silently produced `{}`.  The helper now
-checks `isinstance(d, dict)` first and raises TypeError, so the construct is
+raises TypeError when the part has no `keys()`, so the construct is
 CPython-identical (catchable, and an uncaught one exits 1 as CPython does).
+A part that is not a dict but does have `keys()` is a mapping: ChainMap and
+custom classes with `keys` / `__getitem__` are merged through `keys()`, as
+CPython does (`__iter__` is not consulted).
 """
 import os
 import subprocess
@@ -52,7 +55,7 @@ def main() -> None:
 main()
 '''
 
-DICT_STAR_OK = r'''from collections import defaultdict
+DICT_STAR_OK = r'''from collections import ChainMap, defaultdict
 
 
 def main() -> None:
@@ -70,6 +73,78 @@ def main() -> None:
     d["b"] = 2
     print({**d})
     print({**{"q": 0}, **a, "z": 9})
+    cm: ChainMap[str, int] = ChainMap(a, b)
+    print({**cm})
+    print({**cm, "w": 4})
+    print("done")
+
+
+main()
+'''
+
+DICT_STAR_PROTOCOL = r'''class Map:
+    def __init__(self) -> None:
+        self.data: dict[str, int] = {"a": 1, "b": 2}
+
+    def keys(self) -> list[str]:
+        return ["a", "b"]
+
+    def __iter__(self):
+        return iter(["a", "b"])
+
+    def __getitem__(self, k: str) -> int:
+        return self.data[k]
+
+
+class KeysOnly:
+    def __init__(self) -> None:
+        self.data: dict[str, int] = {"k": 7}
+
+    def keys(self) -> list[str]:
+        return ["k"]
+
+    def __getitem__(self, k: str) -> int:
+        return self.data[k]
+
+
+class Weird:
+    def __init__(self) -> None:
+        self.data: dict[str, int] = {"a": 1, "b": 2}
+
+    def keys(self) -> list[str]:
+        return ["a"]
+
+    def __iter__(self):
+        return iter(["b"])
+
+    def __getitem__(self, k: str) -> int:
+        return self.data[k]
+
+
+class Box:
+    pass
+
+
+def show(d) -> None:
+    print({**d})
+
+
+def main() -> None:
+    m: Map = Map()
+    k: KeysOnly = KeysOnly()
+    w: Weird = Weird()
+    show(m)
+    show(k)
+    show(w)
+    print({**m, "c": 3})
+    print({**k, **m, "a": 9})
+    rows: list[Map] = [m]
+    show(rows[0])
+    box: Box = Box()
+    box.m = m
+    show(box.m)
+    dd: dict[str, Map] = {"m": m}
+    show(dd["m"])
     print("done")
 
 
@@ -118,6 +193,9 @@ class Fuzz78Tests(unittest.TestCase):
 
     def test_dict_star_mapping(self):
         self.check('dict_star_mapping', DICT_STAR_OK)
+
+    def test_dict_star_mapping_protocol(self):
+        self.check('dict_star_mapping_protocol', DICT_STAR_PROTOCOL)
 
 
 if __name__ == '__main__':

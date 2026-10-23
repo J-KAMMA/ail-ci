@@ -849,9 +849,15 @@ _MATH_HELPERS = {
     'dmerge': '''def _ail_dmerge(parts):
     out = {}
     for d in parts:
-        if not isinstance(d, dict):
+        if isinstance(d, dict):
+            for k in d:
+                out[k] = d[k]
+            continue
+        try:
+            ks = list(d.keys())
+        except AttributeError:
             raise TypeError("'" + type(d).__name__ + "' object is not a mapping")
-        for k in d:
+        for k in ks:
             out[k] = d[k]
     return out''',
     'sqrt': '''def _ail_math_sqrt(x: float) -> float:
