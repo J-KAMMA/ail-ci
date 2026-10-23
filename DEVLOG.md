@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-23 - print sep/end TypeError names the value's class (job-pre4-10240009)
+
+Review fix on top of the entry below. The new sep/end type check used `ail_type_name`, so
+every class instance was reported as `not instance` (a user class and `bytes` both differ
+from CPython). Both print checkers now use `ail__tname_c`, which already names the class;
+`ail__tname_c` also names an exception object's class now, so
+`print(..., sep=e)` with a caught `ValueError` says `not ValueError`. `test_ail_pre4.py`
+adds the user-class / bytes / bytearray / caught-exception case on stdout and stderr.
+
+Probes (`/tmp/probes/`, both builds): d_inst, d_sources, d_other, d_names2, d_exc3 all
+match CPython. Tests: test_ail_pre4, test_ail_safetynet, test_ail_files,
+test_ail_corpus_findings3.
+
 ## 2026-10-23 - print sep/end evaluation order and None (job-pre4-10240009)
 
 The first recorded difference still reproduced on this tree: on the general path,

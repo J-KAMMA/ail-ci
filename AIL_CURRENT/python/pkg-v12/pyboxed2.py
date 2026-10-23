@@ -705,11 +705,11 @@ static inline void ail2_print_write_end(FILE *f, ail_obj end) {
 static inline ail_st ail2_print_check(ail_ctx *cx, ail_obj sep, ail_obj end) {
     char buf[96];
     if (sep.tag != AIL_T_STR && sep.tag != AIL_T_NONE) {
-        snprintf(buf, sizeof buf, "sep must be None or a string, not %s", ail_type_name(sep.tag));
+        snprintf(buf, sizeof buf, "sep must be None or a string, not %s", ail__tname_c(sep));
         return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
     }
     if (end.tag != AIL_T_STR && end.tag != AIL_T_NONE) {
-        snprintf(buf, sizeof buf, "end must be None or a string, not %s", ail_type_name(end.tag));
+        snprintf(buf, sizeof buf, "end must be None or a string, not %s", ail__tname_c(end));
         return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
     }
     return AIL_OK;

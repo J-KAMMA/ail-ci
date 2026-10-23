@@ -14557,7 +14557,7 @@ static int ail__cnt_cmp_desc(const void *pa, const void *pb) {
     return c ? c : (ia < ib ? -1 : ia > ib);
 }
 static inline const char *ail__tname_c(ail_obj x) {
-    if (x.tag == AIL_T_INST && ((ail_instobj *)x.o)->cls.tag == AIL_T_CLASS) {      /* an instance names its class (bytes, ...) */
+    if ((x.tag == AIL_T_INST || x.tag == AIL_T_EXC) && ((ail_instobj *)x.o)->cls.tag == AIL_T_CLASS) {      /* an instance names its class (bytes, an exception, ...) */
         static char tnb[80];
         ail_str cs = ail_view_to_str(((ail_classobj *)((ail_instobj *)x.o)->cls.o)->name);
         size_t k = 0;

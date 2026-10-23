@@ -94,6 +94,47 @@ def main():
 main()
 """
 
+PRINT_NAMES = r"""import sys
+
+
+class C:
+    pass
+
+
+def main():
+    for v in (C(), b"z", bytearray(b"z")):
+        try:
+            print("a", "b", sep=v)
+        except TypeError as e:
+            print(type(e).__name__, e)
+        try:
+            print("a", "b", end=v)
+        except TypeError as e:
+            print(type(e).__name__, e)
+        try:
+            print("a", "b", sep=v, file=sys.stderr)
+        except TypeError as e:
+            print(type(e).__name__, e)
+        try:
+            print("a", "b", end=v, file=sys.stderr)
+        except TypeError as e:
+            print(type(e).__name__, e)
+    try:
+        int("x")
+    except ValueError as e:
+        try:
+            print("a", "b", sep=e)
+        except TypeError as t:
+            print(type(t).__name__, t)
+        try:
+            print("a", "b", end=e, file=sys.stderr)
+        except TypeError as t:
+            print(type(t).__name__, t)
+
+
+main()
+"""
+
 
 def build_and_run(directory, text, name, general):
     source, exe = Path(directory, name + '.ail'), Path(directory, name)
@@ -133,6 +174,9 @@ class Pre4(unittest.TestCase):
 
     def test_p13_nonstr_sep_end_raise_cpython_typeerror(self):
         self.check('p13types', PRINT_TYPES)
+
+    def test_p13_nonstr_sep_end_names_the_value_class(self):
+        self.check('p13names', PRINT_NAMES)
 
 
 if __name__ == '__main__':

@@ -1507,7 +1507,7 @@ static inline ail_st ail2e_print_field(ail_ctx *cx, ail_obj *out, ail_obj v, ail
     if (v.tag == AIL_T_NONE) { *out = dflt; return AIL_OK; }
     if (v.tag == AIL_T_STR) { *out = v; return AIL_OK; }
     char buf[96];
-    snprintf(buf, sizeof buf, "%s must be None or a string, not %s", which, ail_type_name(v.tag));
+    snprintf(buf, sizeof buf, "%s must be None or a string, not %s", which, ail__tname_c(v));
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
 }
 '''
