@@ -411,7 +411,7 @@ class LICM(object):
             d = defs.get(v)
             if d is None or depth > 6:
                 return []
-            if d.op.startswith('cmp.') and d.operands[0].type == I.I64:
+            if d.op.startswith('cmp.') and d.operands[0].type == I.I64 and d.operands[1].type == I.I64:
                 return [(d.op[4:], d.operands[0], d.operands[1])]
             if d.op == 'if' and len(d.results) == 1:
                 ty, oy = d.regions[0].instrs[-1], d.regions[1].instrs[-1]
