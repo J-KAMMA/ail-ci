@@ -15256,6 +15256,7 @@ static inline void ail_setx_swap_bodies(ail_setobj *a, ail_setobj *b) {
     ail_setobj t = *a;
     a->ent = b->ent; a->n = b->n; a->cap = b->cap; a->used = b->used; a->index = b->index; a->index_cap = b->index_cap;
     b->ent = t.ent; b->n = t.n; b->cap = t.cap; b->used = t.used; b->index = t.index; b->index_cap = t.index_cap;
+    int64_t f = a->fin; a->fin = b->fin; b->fin = f;   /* the pop cursor belongs to the body it indexes */
     uint32_t sz = a->hdr.size; a->hdr.size = b->hdr.size; b->hdr.size = sz;
 }
 static inline ail_st ail_setx_add_key(ail_ctx *cx, ail_setobj *so, ail_obj key) {
