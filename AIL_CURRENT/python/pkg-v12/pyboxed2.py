@@ -2114,6 +2114,16 @@ class Compiler(boxclosure.ClosureMixin):
         if unified.enabled() and ('<program>', '*') not in self.u_demote and not unified.nan_capable(mix_tree):
             self.uplan = unified.analyze(self, tree, self.u_demote)
 
+        has_toplevel_exec = any(not isinstance(n, (ast.FunctionDef, ast.ClassDef, ast.Import,
+                                                    ast.ImportFrom))
+                                and not getattr(n, '_ail_hoisted', False)
+                                for n in tree.body)
+        fn_order = [n.name for n in tree.body if isinstance(n, ast.FunctionDef)]
+        array_entry = self.functions[fn_order[-1]] if (not has_toplevel_exec and fn_order) else None
+        # With a module body the class attributes are installed at the class statement's own
+        # place (their expressions may read module globals defined before it); the array-entry
+        # shape has no module body, so keeps the old per-instance copy.
+        self.class_attrs_on_class = array_entry is None
         for name in self.functions:
             info = self.functions[name]
             u_sig = unified.signature(self.uplan, info) if self.uplan is not None else None
@@ -2167,7 +2177,11 @@ class Compiler(boxclosure.ClosureMixin):
         for name in sorted(self.module_names):
             self._module_global_slot(name)
         for n in tree.body:
-            if isinstance(n, (ast.FunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom)):
+            if isinstance(n, ast.ClassDef):
+                if self.class_attrs_on_class:
+                    self._emit_class_attrs(n, main_ctx)
+                continue
+            if isinstance(n, (ast.FunctionDef, ast.Import, ast.ImportFrom)):
                 continue
             self._module_stmt(n, main_ctx)
         if not has_toplevel_exec:
@@ -2768,6 +2782,16 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _module_stmt(self, node, ctx):
         self.stmt(node, ctx)
+
+    def _emit_class_attrs(self, node, ctx):
+        # CPython evaluates class-body assignments once, in order.  Install them on the class
+        # object: instances read them through their class unless an instance assignment shadows
+        # one, so a mutable class value is shared rather than copied per instance.
+        for aname, aval in self.classes.get(node.name, {}).get('class_attrs', []):
+            self.attr_names.add(aname)
+            v = self.expr(aval, ctx)
+            ctx.emit('ail_class_setattr(cx, g_slots_arr[%d], g_attr_%s, %s);'
+                     % (self.global_slots['class:' + node.name], aname, v))
 
     def _is_global_name(self, name, ctx):
         """True iff `name` resolves to the module-lifetime GC root (`g_slots_arr`) rather than
@@ -4941,10 +4965,13 @@ class Compiler(boxclosure.ClosureMixin):
                                                   node.value.id == 'sys'):
             return self._module_attr_value(node.value.id, node.attr, ctx)
         if (isinstance(node.value, ast.Name) and node.value.id in self.classes
-                and node.value.id not in ctx.slot_of and node.value.id not in self.module_names):
-            # `C.K` where K is a constant class attribute of C or of a base of C: the class name as a
-            # value does not reach its attributes (`AttributeError: 'instance' object has no attribute`),
-            # so read the literal the lookup through the bases finds, as CPython does
+                and node.value.id not in ctx.slot_of and node.value.id not in self.module_names
+                and not getattr(self, 'class_attrs_on_class', False)):
+            # Array-entry shape only: `C.K` where K is a constant class attribute of C or of a base
+            # of C.  Its class objects have no attribute table (the values are copied per instance),
+            # so read the literal the lookup through the bases finds, as CPython does.  With a
+            # module body the class table exists and is read at run time, so a rebound class
+            # attribute (`C.n += 1`) is seen.
             k = node.value.id
             while k is not None and k in self.classes:
                 hits = [v for a, v in self.classes[k].get('class_attrs', []) if a == node.attr]
@@ -5925,18 +5952,19 @@ class Compiler(boxclosure.ClosureMixin):
                 (t, self.global_slots['class:' + name]))
         if self._is_exc_class(name):
             return self._call_exc_class(name, info, t, args, kwargs, ctx)
-        # class attributes are copied onto the instance, base class first so a subclass value wins
-        # (a class attribute the subclass does not redefine is read through the base, as CPython does)
-        chain = []
-        k = name
-        while k is not None and k in self.classes and k not in chain:
-            chain.append(k)
-            k = self.classes[k]['base']
-        for kls in reversed(chain):
-            for aname, aval in self.classes[kls].get('class_attrs', []):
-                self.attr_names.add(aname)
-                v = self.expr(aval, ctx)
-                ctx.emit('ail_inst_setattr(cx, %s, g_attr_%s, %s);' % (t, aname, v))
+        if not getattr(self, 'class_attrs_on_class', True):
+            # the array-entry shape has no module body to install class attributes: keep the old
+            # per-instance copy there (the class object's own attribute table stays empty).
+            chain = []
+            k = name
+            while k is not None and k in self.classes and k not in chain:
+                chain.append(k)
+                k = self.classes[k]['base']
+            for kls in reversed(chain):
+                for aname, aval in self.classes[kls].get('class_attrs', []):
+                    self.attr_names.add(aname)
+                    v = self.expr(aval, ctx)
+                    ctx.emit('ail_inst_setattr(cx, %s, g_attr_%s, %s);' % (t, aname, v))
         if info:
             argcs = self._bind_args(name, info, args, kwargs, ctx)
             dummy = ctx.tmp()

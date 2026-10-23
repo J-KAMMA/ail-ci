@@ -14056,6 +14056,7 @@ typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or
                  unsigned long long dc_hide; /* bit i set: field i is left out of the repr (field(repr=False)) */
                  ail_st (*iter_iter)(ail_ctx *, ail_obj *, ail_obj); /* user __iter__ (self only), or 0 */
                  ail_st (*iter_next)(ail_ctx *, ail_obj *, ail_obj); /* user __next__ wrapped: StopIteration -> AIL_STOP, or 0 */
+                 ail_attr *attrs; int64_t n, cap; /* class attributes (CPython's class __dict__, in insertion order) */
                  ail_st (*repr_fn)(ail_ctx *, ail_obj *, ail_obj); /* user __repr__ (self only), or 0 */
                  ail_st (*str_fn)(ail_ctx *, ail_obj *, ail_obj); /* user __str__ (self only), or 0 */
                  ail_st (*lt_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj); /* user __lt__ (self, other), or 0 */ } ail_classobj;
@@ -14126,7 +14127,8 @@ static inline void ail_gc_mark_value(ail_obj v) {
             for (int64_t i = 0; i < ii->n; i++) ail_gc_mark_value(ii->attrs[i].val);
             break;
         }
-        case AIL_K_CLASS: { ail_classobj *c = (ail_classobj *)o; ail_gc_mark_value(c->name); ail_gc_mark_value(c->base); break; }
+        case AIL_K_CLASS: { ail_classobj *c = (ail_classobj *)o; ail_gc_mark_value(c->name); ail_gc_mark_value(c->base);
+            for (int64_t i = 0; i < c->n; i++) ail_gc_mark_value(c->attrs[i].val); break; }
         case AIL_K_FUNC: {
             ail_funcobj *f = (ail_funcobj *)o;
             for (int32_t i = 0; i < f->n_cells; i++) ail_gc_mark_value(f->cells[i]);
@@ -14148,6 +14150,7 @@ static inline void ail__free_payload(ail_gcobj *o) {
         case AIL_K_DICT: free(((ail_mapobj *)o)->entries); free(((ail_mapobj *)o)->index); break;
         case AIL_K_SET: free(((ail_setobj *)o)->ent); free(((ail_setobj *)o)->index); break;
         case AIL_K_INST: free(((ail_instobj *)o)->attrs); break;
+        case AIL_K_CLASS: free(((ail_classobj *)o)->attrs); break;
         case AIL_K_FUNC: free(((ail_funcobj *)o)->cells); break;
         default: break;
     }
@@ -16377,6 +16380,28 @@ static inline ail_obj ail_inst_new(ail_ctx *cx, ail_obj cls) {
     o->cls = cls;
     ail_obj r; r.tag = AIL_T_INST; r.o = (ail_gcobj *)o; return r;
 }
+static inline void ail_class_setattr(ail_ctx *cx, ail_obj cls, int64_t name_id, ail_obj val) {
+    ail_classobj *c = (ail_classobj *)cls.o;
+    for (int64_t i = 0; i < c->n; i++) if (c->attrs[i].name_id == name_id) { c->attrs[i].val = val; return; }
+    if (c->n == c->cap) {
+        int64_t nc = c->cap ? c->cap * 2 : 4;
+        ail_attr *na = (ail_attr *)ail_xmalloc((size_t)nc * sizeof(ail_attr));
+        if (c->n) memcpy(na, c->attrs, (size_t)c->n * sizeof(ail_attr));
+        free(c->attrs);
+        c->attrs = na; c->cap = nc;
+        c->hdr.size += (uint32_t)((size_t)nc * sizeof(ail_attr)); /* conservative, like ail_inst_setattr */
+        cx->gc_bytes += (size_t)nc * sizeof(ail_attr);
+    }
+    c->attrs[c->n].name_id = name_id; c->attrs[c->n].val = val; c->n++;
+}
+static inline int ail_class_getattr(ail_obj cls, int64_t name_id, ail_obj *out) {
+    for (ail_obj k = cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+        ail_classobj *c = (ail_classobj *)k.o;
+        for (int64_t i = 0; i < c->n; i++)
+            if (c->attrs[i].name_id == name_id) { *out = c->attrs[i].val; return 1; }
+    }
+    return 0;
+}
 static inline void ail_inst_setattr(ail_ctx *cx, ail_obj inst, int64_t name_id, ail_obj val) {
     ail_instobj *o = (ail_instobj *)inst.o;
     for (int64_t i = 0; i < o->n; i++) if (o->attrs[i].name_id == name_id) { o->attrs[i].val = val; return; }
@@ -16401,14 +16426,21 @@ static __attribute__((noinline, cold)) ail_st ail_attr_not_inst(ail_ctx *cx, ail
     return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, buf);
 }
 static inline ail_st ail_inst_setattr_chk(ail_ctx *cx, ail_obj inst, int64_t name_id, ail_obj val) {
+    if (inst.tag == AIL_T_CLASS) { ail_class_setattr(cx, inst, name_id, val); return AIL_OK; }
     if (__builtin_expect((unsigned)(inst.tag - AIL_T_INST) > 1u, 0)) return ail_attr_not_inst(cx, inst, cx->intern_tab[name_id]);   /* INST, EXC are adjacent */
     ail_inst_setattr(cx, inst, name_id, val);
     return AIL_OK;
 }
 static inline ail_st ail_inst_getattr(ail_ctx *cx, ail_obj *out, ail_obj inst, int64_t name_id, const char *name_for_msg) {
+    if (inst.tag == AIL_T_CLASS) {
+        if (ail_class_getattr(inst, name_id, out)) return AIL_OK;
+        char cbuf[160]; snprintf(cbuf, sizeof cbuf, "'type' object has no attribute '%s'", name_for_msg);
+        return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, cbuf);
+    }
     if (__builtin_expect((unsigned)(inst.tag - AIL_T_INST) > 1u, 0)) return ail_attr_not_inst(cx, inst, name_for_msg);
     ail_instobj *o = (ail_instobj *)inst.o;
     for (int64_t i = 0; i < o->n; i++) if (o->attrs[i].name_id == name_id) { *out = o->attrs[i].val; return AIL_OK; }
+    if (ail_class_getattr(o->cls, name_id, out)) return AIL_OK;
     char buf[160]; snprintf(buf, sizeof buf, "'%s' object has no attribute '%s'", inst.tag == AIL_T_INST ? ail__tname_c(inst) : "instance", name_for_msg);
     return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, buf);
 }
