@@ -1,10 +1,10 @@
 """Differential fuzz round 80: enum details.
 
-Found with ten small programs compared against CPython on both builds: an empty `Enum` (or
-`IntEnum`, `StrEnum`, `Flag`, `IntFlag`) class was accepted, and iterating it printed what CPython
-prints, but `E(0)` printed `E(0)` (a pseudo-member) where CPython raises TypeError and `F(0)`
-became a member where CPython raises TypeError too. An empty enum class is now refused by name at
-compile time on both builds. Members as dict keys, iteration order (aliases, Flags), value lookup
+Found with ten small programs compared against CPython on both builds: an empty `Flag` (`IntFlag`)
+accepted `F(0)` and made a pseudo-member `<F: 0>` where CPython raises TypeError.  Calling an
+empty `Enum`, `IntEnum`, `StrEnum`, `Flag` or `IntFlag` is now refused by name at compile time on
+both builds; an empty enum that is only iterated or used as a base class for a non-empty enum still
+builds and matches CPython.  Members as dict keys, iteration order (aliases, Flags), value lookup
 errors, IntEnum arithmetic, `auto()` and enum values in `match` patterns were compared and agreed.
 
 Other differences seen in the same ten programs (not fixed here): `+IntEnum` (unary plus) is a
@@ -20,13 +20,36 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-EMPTY = {
-    'Enum': 'from enum import Enum\n\nclass E(Enum):\n    pass\n\nprint(list(E))\n',
-    'IntEnum': 'from enum import IntEnum\n\nclass E(IntEnum):\n    pass\n\nprint(list(E))\n',
-    'StrEnum': 'from enum import StrEnum\n\nclass E(StrEnum):\n    pass\n\nprint(list(E))\n',
-    'Flag': 'from enum import Flag\n\nclass E(Flag):\n    pass\n\nprint(list(E))\n',
-    'IntFlag': 'from enum import IntFlag\n\nclass E(IntFlag):\n    pass\n\nprint(list(E))\n',
+EMPTY_USE = {
+    kind: 'from enum import %s\n\nclass E(%s):\n    pass\n\nprint(list(E), len(E), E.__members__)\n' % (kind, kind)
+    for kind in ('Enum', 'IntEnum', 'StrEnum', 'Flag', 'IntFlag')
 }
+
+EMPTY_CALL = {
+    kind: 'from enum import %s\n\nclass E(%s):\n    pass\n\nprint(E(0))\n' % (kind, kind)
+    for kind in ('Enum', 'IntEnum', 'StrEnum', 'Flag', 'IntFlag')
+}
+
+EMPTY_BASE = r'''from enum import Enum
+
+
+class Base(Enum):
+    def describe(self) -> str:
+        return "value=" + str(self.value)
+
+    @property
+    def doubled(self) -> int:
+        return self.value * 2
+
+
+class A(Base):
+    X = 1
+    Y = 2
+
+
+print(A.X.describe(), A.X.doubled, list(A), len(A))
+print([(m.name, m.value) for m in A])
+'''
 
 NONEMPTY = r'''from enum import Enum, IntEnum, Flag, IntFlag, auto
 
@@ -102,27 +125,39 @@ def _build(directory, name, text, general):
 
 
 class Fuzz80Tests(unittest.TestCase):
-    def test_empty_enums_are_refused_by_name(self):
-        for kind, text in EMPTY.items():
-            with self.subTest(kind=kind), tempfile.TemporaryDirectory(prefix='ail-fuzz80-') as directory:
-                want, code, err = _cpython(directory, kind, text)
-                self.assertEqual((want, code), (b'[]\n', 0), err)
-                for general in (True, False):
-                    built, exe = _build(directory, '%s_%s' % (kind, 'g' if general else 'd'), text, general)
-                    self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
-                    self.assertIn('has no members this compiler builds; an empty %s is not built' % kind, built.stdout + built.stderr)
-                    self.assertFalse(exe.exists())
-
-    def test_nonempty_enums_still_match_cpython(self):
+    def check_matches_cpython(self, name, text):
         with tempfile.TemporaryDirectory(prefix='ail-fuzz80-') as directory:
-            want, code, err = _cpython(directory, 'nonempty', NONEMPTY)
+            want, code, err = _cpython(directory, name, text)
             self.assertEqual(code, 0, err)
             for general in (True, False):
-                built, exe = _build(directory, 'nonempty_%s' % ('g' if general else 'd'), NONEMPTY, general)
+                built, exe = _build(directory, '%s_%s' % (name, 'g' if general else 'd'), text, general)
                 self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
                 got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory)
                 self.assertEqual((got.stdout.replace(b'\r\n', b'\n'), got.returncode), (want, code),
                                  got.stderr.decode('utf-8', 'replace')[-1500:])
+
+    def test_empty_enums_iterate_as_cpython(self):
+        for kind, text in EMPTY_USE.items():
+            with self.subTest(kind=kind):
+                self.check_matches_cpython(kind + '_use', text)
+
+    def test_empty_enum_calls_are_refused_by_name(self):
+        for kind, text in EMPTY_CALL.items():
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory(prefix='ail-fuzz80-') as directory:
+                want, code, err = _cpython(directory, kind, text)
+                self.assertNotEqual(code, 0, want)
+                for general in (True, False):
+                    built, exe = _build(directory, '%s_%s' % (kind, 'g' if general else 'd'), text, general)
+                    self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
+                    self.assertIn('has no members this compiler builds; calling an empty %s is not built' % kind,
+                                  built.stdout + built.stderr)
+                    self.assertFalse(exe.exists())
+
+    def test_empty_enum_base_can_be_extended(self):
+        self.check_matches_cpython('empty_base', EMPTY_BASE)
+
+    def test_nonempty_enums_still_match_cpython(self):
+        self.check_matches_cpython('nonempty', NONEMPTY)
 
 
 if __name__ == '__main__':

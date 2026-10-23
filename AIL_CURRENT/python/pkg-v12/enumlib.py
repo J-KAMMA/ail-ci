@@ -236,10 +236,6 @@ def lower_class(cls, kind, binder, enums):
         for tgt in item.targets if isinstance(item, ast.Assign) else [item.target] if isinstance(item, ast.AnnAssign) else []:
             if isinstance(tgt, ast.Name):
                 info.attrs.add(tgt.id)
-    if not info.members and not info.aliases:
-        refuse(cls, 'enum class %s has no members this compiler builds; an empty %s is not built (CPython '
-               'iterates it as empty and raises TypeError when it is called); give it at least one plain member'
-               % (cls.name, info.kind))
     new = copy.copy(cls)
     new.bases = [base]
     new.body = body or [ast.Pass()]
@@ -463,6 +459,9 @@ class Uses(ast.NodeTransformer):
     def visit_Call(self, node):
         info = self.enum_of(node.func)
         if info is not None:
+            if not info.members and not info.aliases:
+                refuse(node, 'enum class %s has no members this compiler builds; calling an empty %s is not built '
+                       '(CPython raises TypeError); give it at least one plain member' % (info.name, info.kind))
             if len(node.args) != 1 or node.keywords:
                 refuse(node, 'enum %s(...): one value is built (Color(1)); the functional API is not' % info.name)
             self.generic_visit(node)
