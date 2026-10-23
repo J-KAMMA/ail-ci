@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-22 -- job-fuzz21-10230420: CPython unpack error text
+
+- fuzz21 (unpacking): the general path's `UNPACK_SEQUENCE` errors now use CPython's wording and
+  counts -- `too many values to unpack (expected N)`, `not enough values to unpack (expected N, got M)`,
+  `(expected at least N, got M)` for a starred target, and `cannot unpack non-iterable X object`.
+  Added `AIL_CURRENT/test_ail_fuzz21.py` and registered it in `ail_check.MODULES`.
+
 ## 2026-10-22 -- job-fuzz20-10230625: int.from_bytes source type
 
 - fuzz20: `int.from_bytes` on the general path converted its argument with the `bytes()` constructor

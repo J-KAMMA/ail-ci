@@ -9,3 +9,4 @@ so the changes are recorded with the code they describe.
 | C170 | closed | ipaddress | `IPv4Address` is built; `IPv4Network`, `IPv4Interface`, `ip_address` and IPv6 are refused by name. |
 | C171 | closed | urllib.parse | The pure-Python functions listed in `stdlib6.py` are built; other names (for example `urldefrag`) are refused by name. |
 | C172 | closed | int.from_bytes | the general path accepted int and None as the bytes source (int 1 became one zero byte, None became empty) |
+| C173 | open | integers | An integer literal/expression beyond 64 bits (for example `10**50`) traps with `integer overflow` on both builds; CPython prints the value. This is outside unpacking, which the same probe otherwise matches. |
