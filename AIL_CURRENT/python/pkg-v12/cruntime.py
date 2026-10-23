@@ -5643,6 +5643,9 @@ BYTES = r"""
    and stdlib, so this block brings its own header. It is emitted only when a program
    reaches bytes, so a program that does not is unchanged byte for byte. */
 #include <string.h>
+#ifndef _WIN32
+#include <sys/mman.h>
+#endif
 
 /* The type is Python's `bytes`, not its `str`, and that is the whole design decision.
    `bytes` is an immutable sequence of integers 0..255: `b[i]` is an int, iterating yields ints,
@@ -6076,8 +6079,61 @@ static int64_t ail_bytes_endswith_range(ail_bytes h, ail_bytes nd, int64_t start
     if (nd.n > end - start) return 0;
     return memcmp(h.p + (end - nd.n), nd.p, (size_t)nd.n) == 0;
 }
+/* A `read_bytes` result for a large regular file is a read-only mapping (see FILEBYTES), but the
+   arena frees every block with free(). This table says which blocks are mappings; the four block
+   frees below and `ail_bytes_return_exact` consult it. Nothing else is registered, so a free with
+   no mapping live is a single atomic load and a free(). The spinlock covers `par`, where a read in
+   one worker can be released in another; the critical section is a handful of loads. */
+#ifndef _WIN32
+typedef struct { unsigned char *p; size_t n; } ail_barena_map;
+AIL_LINK_STATE(ail_barena_map *, ail_barena_maps, = NULL);
+AIL_LINK_STATE(int64_t, ail_barena_maps_n, = 0);
+AIL_LINK_STATE(int64_t, ail_barena_maps_cap, = 0);
+AIL_LINK_STATE(unsigned char, ail_barena_map_lock, = 0);
+static void ail_barena_map_acquire(void) {
+    while (__atomic_test_and_set(&ail_barena_map_lock, __ATOMIC_ACQUIRE)) {
+        while (__atomic_load_n(&ail_barena_map_lock, __ATOMIC_RELAXED)) { }
+    }
+}
+static void ail_barena_map_release(void) {
+    __atomic_store_n(&ail_barena_map_lock, 0, __ATOMIC_RELEASE);
+}
+/* Called after a successful mmap and before the arena owns it. */
+static void ail_barena_map_add(unsigned char *p, size_t n) {
+    ail_barena_map_acquire();
+    if (ail_barena_maps_n == ail_barena_maps_cap) {
+        int64_t cap = ail_barena_maps_cap ? ail_barena_maps_cap * 2 : 8;
+        ail_barena_map *next = (ail_barena_map *)realloc(ail_barena_maps, (size_t)cap * sizeof *next);
+        if (!next) { ail_barena_map_release(); munmap(p, n); ail_die("out of memory"); }
+        ail_barena_maps = next; ail_barena_maps_cap = cap;
+    }
+    ail_barena_maps[ail_barena_maps_n++] = (ail_barena_map){p, n};
+    ail_barena_map_release();
+}
+static int ail_barena_map_drop(unsigned char *p) {
+    if (!p || __atomic_load_n(&ail_barena_maps_n, __ATOMIC_RELAXED) == 0) return 0;
+    ail_barena_map_acquire();
+    int found = 0;
+    size_t n = 0;
+    for (int64_t i = 0; i < ail_barena_maps_n; i++) {
+        if (ail_barena_maps[i].p != p) continue;
+        n = ail_barena_maps[i].n;
+        ail_barena_maps[i] = ail_barena_maps[--ail_barena_maps_n];
+        found = 1;
+        break;
+    }
+    ail_barena_map_release();
+    if (found) munmap(p, n);
+    return found;
+}
+static void ail_barena_free_block(unsigned char *p) {
+    if (!ail_barena_map_drop(p)) free(p);
+}
+#else
+static void ail_barena_free_block(unsigned char *p) { free(p); }
+#endif
 static void ail_barena_free(ail_barena *A) {
-    for (int64_t i = 0; i < A->n; i++) free(A->blk[i]);
+    for (int64_t i = 0; i < A->n; i++) ail_barena_free_block(A->blk[i]);
     free(A->blk); A->blk = 0; A->n = A->cap = 0;
 }
 /* Both allocators below hand a fresh block to the arena the same way -- grow-by-doubling, then
@@ -6100,7 +6156,7 @@ static void ail_barena_push(ail_barena *A, unsigned char *q) {
 static void ail_barena_release(ail_barena *A, const unsigned char *p) {
     if (!A || !p) return;
     for (int64_t i = A->n - 1; i >= 0; --i)
-        if (A->blk[i] == p) { free(A->blk[i]); A->blk[i] = 0; return; }
+        if (A->blk[i] == p) { ail_barena_free_block(A->blk[i]); A->blk[i] = 0; return; }
 }
 /* Unsized byte blocks cannot prove ownership of interior views. Snapshot and
    copy every live root before freeing the original range, preserving aliases. */
@@ -6135,7 +6191,7 @@ static void ail_barena_keep_roots(ail_barena *A, int64_t mark, ail_bytes **roots
         *roots[r] = (ail_bytes){q, b.n};
     }
     free(saved);
-    for (int64_t i = mark; i < end; ++i) free(A->blk[i]);
+    for (int64_t i = mark; i < end; ++i) ail_barena_free_block(A->blk[i]);
     for (int64_t i = 0; i < count; ++i) A->blk[mark + i] = A->blk[end + i];
     A->n = mark + count;
 }
@@ -6164,7 +6220,7 @@ static void ail_barena_keep_read_root(ail_barena *A, int64_t mark, ail_bytes **r
     }
     unsigned char *kept = A->blk[owner];
     for (int64_t i = mark; i < end; ++i)
-        if (i != owner) free(A->blk[i]);
+        if (i != owner) ail_barena_free_block(A->blk[i]);
     A->blk[mark] = kept;
     A->n = mark + 1;
 }
@@ -24030,6 +24086,38 @@ static ail_bytes ail_file_read_bytes_range(ail_barena *A, ail_str path, int64_t 
 }
 static ail_bytes ail_file_read_bytes(ail_barena *A, ail_str path) {
     FILE *f = ail_file_open(path, 0);
+#ifndef _WIN32
+    /* A whole regular file can be handed out as a read-only mapping instead of copying it into a
+       malloc block: the scan touches the page cache in place. The mapping is registered with the
+       arena, so release, checkpoints and the caller's own arena all munmap it. The floor keeps
+       small reads (where mmap's setup costs more than the copy) and the usual non-regular files on
+       the legacy path; AIL_READ_BYTES_MMAP_MIN=0 turns the mapping off. As with IR input windows,
+       a file changed or truncated underneath the program is observed, not snapshotted. */
+    {
+        const char *env = getenv("AIL_READ_BYTES_MMAP_MIN");
+        int64_t floor = 1048576;
+        if (env && *env) {
+            char *end;
+            long long v = strtoll(env, &end, 10);
+            if (!*end && v >= 0) floor = (int64_t)v;
+        }
+        struct stat st;
+        int fd = fileno(f);
+        if (floor > 0 && fd >= 0 && fstat(fd, &st) == 0 && S_ISREG(st.st_mode) &&
+                st.st_size > 0 && (uintmax_t)st.st_size <= SIZE_MAX &&
+                (uintmax_t)st.st_size <= PTRDIFF_MAX && (uintmax_t)st.st_size <= INT64_MAX &&
+                (int64_t)st.st_size >= floor) {
+            size_t mlen = (size_t)st.st_size;
+            void *m = mmap(NULL, mlen, PROT_READ, MAP_PRIVATE, fd, 0);
+            if (m != MAP_FAILED) {
+                if (fclose(f) != 0) { munmap(m, mlen); ail_raise_named(AIL_EXC_OS); }
+                ail_barena_map_add((unsigned char *)m, mlen);
+                ail_barena_push(A, (unsigned char *)m);
+                return (ail_bytes){(const unsigned char *)m, (int64_t)mlen};
+            }
+        }
+    }
+#endif
     int64_t cap = ail_file_read_capacity(f), n = 0;
     unsigned char *buf = (unsigned char *)malloc((size_t)cap);
     if (!buf && cap != 65536) {
@@ -26067,7 +26155,7 @@ static void ail_utf8_ephemeral_cleanup(void **resources) {
         if (B->blk[i] != p) continue;
         B->blk[i] = B->blk[--B->n];
         B->blk[B->n] = NULL;
-        free((void *)p);
+        ail_barena_free_block((unsigned char *)p);
         return;
     }
 }
