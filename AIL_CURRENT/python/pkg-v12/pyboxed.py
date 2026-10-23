@@ -1631,7 +1631,9 @@ class Compiler:
         return self._emit_comp(node, ctx, 'ail_list_new()', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        return self.expr_ListComp(node, ctx)
+        t = self.expr_ListComp(node, ctx)
+        ctx.emit('((ail_vecobj *)(%s).o)->from_generator = 1;' % t)
+        return t
 
     def expr_SetComp(self, node, ctx):
         def add(n, c, t):

@@ -5,9 +5,11 @@ Found with small programs compared against CPython on both builds:
 `reversed(<generator expression>)` is a TypeError in CPython (a generator has no __len__,
 __getitem__ or __reversed__). This front end materialises a generator expression eagerly as a
 list, so both builds silently reversed it: `list(reversed(x for x in [1, 2, 3]))` printed
-[3, 2, 1] where CPython prints "typeerror", and the empty form printed []. A name bound to a
-generator expression in the same scope had the same wrong answer. The front end now refuses
-`reversed()` of a generator expression by name, before either emitter sees it.
+[3, 2, 1] where CPython prints "typeerror", and the empty form printed []. The same wrong answer
+came out when the generator travelled through a name, an argument, a list item, an attribute or
+a dict value. Materialised generator expressions now carry a `from_generator` mark on their list
+backing, and `ail_iter_reversed` raises the same TypeError as CPython. A real list built from the
+generator (`list(g)`, `sorted(g)`, a list comprehension) has no mark and stays reversible.
 
 The other shapes below (stable key=len ordering, reverse=, nested lists/tuples, dict keys and
 items, negative-step ranges, comprehensions) are compared with CPython on both builds.
@@ -21,33 +23,57 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-GEN_REVERSED_DIRECT = '''def main() -> None:
-    try:
-        print(list(reversed(x for x in [1, 2, 3])))
-    except TypeError:
-        print("typeerror")
-    try:
-        print(list(reversed((y * 2 for y in range(4)))))
-    except TypeError:
-        print("typeerror")
-    try:
-        print(list(reversed((z for z in []))))
-    except TypeError:
-        print("typeerror")
-main()
-'''
-
-GEN_REVERSED_NAME = '''def main() -> None:
-    g = (x for x in [1, 2, 3])
+GEN_REVERSED = '''def show(g) -> None:
     try:
         print(list(reversed(g)))
     except TypeError:
         print("typeerror")
-    h = (y for y in [])
+
+def main() -> None:
+    show(x for x in [1, 2, 3])
+    show(x for x in [])
+    g = (x for x in [1, 2, 3])
+    show(g)
+    h = (x for x in range(0))
+    show(h)
     try:
-        print(list(reversed(h)))
+        print(list(reversed(x for x in [1, 2, 3])))
+    except TypeError as e:
+        print(type(e).__name__)
+    try:
+        for x in reversed(y for y in [1, 2, 3]):
+            print(x)
     except TypeError:
         print("typeerror")
+    print("done")
+main()
+'''
+
+GEN_REVERSED_SLOTS = '''class Box:
+    def __init__(self) -> None:
+        self.v: object = [1, 2, 3]
+
+def show(g) -> None:
+    try:
+        print(list(reversed(g)))
+    except TypeError:
+        print("typeerror")
+
+def main() -> None:
+    items: list[object] = []
+    items.append(x for x in [1, 2, 3])
+    show(items[0])
+    d: dict[str, object] = {}
+    d["g"] = (x for x in [1, 2, 3])
+    show(d["g"])
+    b: Box = Box()
+    b.v = (x for x in [1, 2, 3])
+    show(b.v)
+    show(list(x for x in [1, 2, 3]))
+    show(sorted(x for x in [3, 1, 2]))
+    show(tuple(x for x in [1, 2, 3]))
+    show([x for x in (y for y in [1, 2, 3])])
+    print("done")
 main()
 '''
 
@@ -92,7 +118,7 @@ def _cpython(directory, name, text):
     return done.stdout.replace(b'\r\n', b'\n'), done.returncode, done.stderr
 
 
-def _build(directory, name, text, general):
+def _build_and_run(directory, name, text, general):
     src = Path(directory) / (name + '.ail')
     src.write_text(text, encoding='utf-8')
     exe = Path(directory) / ('exe_' + name)
@@ -105,36 +131,29 @@ def _build(directory, name, text, general):
     built = subprocess.run([sys.executable, '-B', str(ROOT / 'ail_chatgpt.py'), 'compile', src.name,
                             '--syntax', 'python', '-o', exe.name], cwd=directory,
                            capture_output=True, text=True, timeout=900, env=env)
-    return built, exe
+    if built.returncode != 0:
+        return None, (built.stdout + built.stderr)[-3000:]
+    got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory)
+    return (got.stdout.replace(b'\r\n', b'\n'), got.returncode), got.stderr.decode('utf-8', 'replace')[-1500:]
 
 
 class Fuzz83Tests(unittest.TestCase):
-    def refused(self, text, word):
+    def same(self, slug, text):
         with tempfile.TemporaryDirectory(prefix='ail-fuzz83-') as directory:
-            for general in (True, False):
-                built, _ = _build(directory, 'gen_reversed_%s' % ('g' if general else 'd'), text, general)
-                self.assertNotEqual(built.returncode, 0, 'built a program CPython rejects')
-                self.assertIn(word, built.stdout + built.stderr)
-
-    def same(self, text):
-        with tempfile.TemporaryDirectory(prefix='ail-fuzz83-') as directory:
-            want, want_rc, err = _cpython(directory, 'same', text)
+            want, want_rc, err = _cpython(directory, slug, text)
             self.assertEqual(want_rc, 0, err)
             for general in (True, False):
-                name = 'same_%s' % ('g' if general else 'd')
-                built, exe = _build(directory, name, text, general)
-                self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
-                got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory)
-                self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want,
-                                 'general=%s\n%s' % (general, text[:2000]))
-                self.assertEqual(got.returncode, 0)
+                name = '%s_%s' % (slug, 'g' if general else 'd')
+                got, build_err = _build_and_run(directory, name, text, general)
+                self.assertIsNotNone(got, '%s (general=%s)\n%s' % (text[:2000], general, build_err))
+                self.assertEqual(got, (want, 0), '%s (general=%s)\n%s' % (text[:2000], general, build_err))
 
     def test_generator_expression_is_not_reversible(self):
-        for text in (GEN_REVERSED_DIRECT, GEN_REVERSED_NAME):
-            self.refused(text, 'generator expression')
+        self.same('gen_reversed', GEN_REVERSED)
+        self.same('gen_reversed_slots', GEN_REVERSED_SLOTS)
 
     def test_sorted_and_reversed_sequences(self):
-        self.same(SORTED_REVERSED)
+        self.same('sorted_reversed', SORTED_REVERSED)
 
 
 if __name__ == '__main__':
