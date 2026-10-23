@@ -119,6 +119,39 @@ main()
 """
 
 
+COLLISION = r"""_ail_default_0 = 99
+
+def f(t=([],)):
+    return t
+
+def main():
+    print(_ail_default_0)
+    print(f())
+
+main()
+"""
+
+COLLISION_FREE = r"""_ail_default_0 = 99
+_ail_default_1 = 98
+
+def _ail_default_2(x):
+    return x + 1
+
+def f(a=[], b=({"k": []},)):
+    a.append(1)
+    b[0]["k"].append(1)
+    return (len(a), len(b[0]["k"]), _ail_default_0, _ail_default_1, _ail_default_2(0))
+
+def main():
+    print(_ail_default_0, _ail_default_1, _ail_default_2(41))
+    print(f())
+    print(f())
+    print(_ail_default_0, _ail_default_1, _ail_default_2(41))
+
+main()
+"""
+
+
 def run_py(path):
     r = subprocess.run([sys.executable, "-B", str(path)], capture_output=True, timeout=60)
     return r.returncode, r.stdout
@@ -187,6 +220,15 @@ class TupleDefaults(Base):
     def test_plain_mutable_defaults_still_shared(self):
         out = self.same(MUTABLE_DEFAULTS)
         self.assertEqual(out, b"(1, 1, 1)\n(2, 2, 2)\n(2, 3, 3)\n")
+
+    def test_hoisted_name_does_not_clobber_user_global(self):
+        out = self.same(COLLISION)
+        self.assertEqual(out, b"99\n([],)\n")
+
+    def test_hoisted_names_skip_names_the_program_uses(self):
+        out = self.same(COLLISION_FREE)
+        self.assertEqual(out, b"99 98 42\n(1, 1, 99, 98, 1)\n(2, 2, 99, 98, 1)\n"
+                         b"99 98 42\n")
 
 
 if __name__ == "__main__":
