@@ -121,6 +121,74 @@ def main():
 main()
 '''
 
+_OPAQUE_PROGRAM = '''from collections import Counter
+
+
+def f():
+    return 1
+
+
+def g():
+    return 2
+
+
+class K:
+    pass
+
+
+def same(x, y):
+    return (x == y, x != y)
+
+
+def via_list(items, i):
+    return items[i] == items[i]
+
+
+def via_dict(table, k):
+    return table[k] == table[k]
+
+
+class Box:
+    def __init__(self, v):
+        self.v = v
+
+
+def main():
+    c = Counter()
+    c["f"] = f
+    print("func", same(c, c), via_list([c], 0), via_dict({"k": c}, "k"), Box(c).v == c)
+    r = Counter()
+    r["r"] = range(3)
+    print("range", same(r, r), via_list([r], 0), via_dict({"k": r}, "k"), Box(r).v == r)
+    k = Counter()
+    k["k"] = K
+    print("class", same(k, k), via_list([k], 0), via_dict({"k": k}, "k"), Box(k).v == k)
+    o = Counter()
+    o["o"] = K()
+    print("inst", same(o, o), via_list([o], 0), via_dict({"k": o}, "k"), Box(o).v == o)
+    d = Counter()
+    d["f"] = g
+    print("distinct", same(c, d), same(d, c), via_list([c, d], 0))
+    n = Counter()
+    n["n"] = float("nan")
+    print("nan", same(n, n), n != n)
+
+
+main()
+'''
+
+_CYCLE_PROGRAM = '''from collections import Counter
+
+
+def main():
+    c = Counter()
+    c["a"] = c
+    print(c == c)
+
+
+main()
+'''
+
 
 @unittest.skipUnless(HAVE_CC, 'no C compiler')
 class Pre17Differential(unittest.TestCase):
@@ -129,3 +197,16 @@ class Pre17Differential(unittest.TestCase):
 
     def test_counter_missing_counts_are_zero(self):
         check_program(self, 'p1_missing_zero', _MISSING_PROGRAM)
+
+    def test_counter_identity_counts_through_opaque_contexts(self):
+        check_program(self, 'p1_opaque', _OPAQUE_PROGRAM)
+
+    def test_counter_self_reference_does_not_crash(self):
+        text = _CYCLE_PROGRAM
+        with tempfile.TemporaryDirectory(prefix='ail-pre17-') as directory:
+            want = _cpython(directory, 'p1_cycle', text)
+            self.assertEqual(want, (b'', 1), text)
+            for general in (True, False):
+                got, err = _build_run(directory, 'p1_cycle', text, general)
+                self.assertIsNotNone(got, '%s (general=%s)\n%s' % (text, general, err))
+                self.assertEqual(got, want, '%s (general=%s)\n%s' % (text, general, err))

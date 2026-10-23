@@ -1,5 +1,17 @@
 # DEVLOG
 
+## 2026-10-23 - Counter equality review fixes (job-pre17-10240052)
+
+The review found two defects in the previous Counter equality branch. Counts whose `==` is
+identity-based (function, class, range, instance) compared False to themselves whenever the
+comparison reached the runtime directly instead of the collib helper (`same(c, c)`, a list item,
+a dict value, an attribute); the branch now falls back to `ail_identical` for non-float counts,
+while a NaN count still never equals itself. A self-referential count (`c["a"] = c; c == c`)
+recursed until the C stack overflowed; the recursion is now bounded and traps with
+`recursion depth exceeded` (exit 1, empty stdout), matching CPython's RecursionError probe.
+`test_ail_pre17.py` now covers the opaque contexts, distinct identity counts, and the cycle on
+both builds.
+
 ## 2026-10-23 - Counter equality (job-pre17-10240052)
 
 The first pre-existing difference from job `fuzz64` that still reproduced here was `p1_identity`:
