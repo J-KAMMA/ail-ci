@@ -14,11 +14,11 @@ call is still rejected, and a field store, unknown call or alias still forgets i
 
 | app | ms ail/base/c/rust | ail/base | ail/c |
 | --- | --- | --- | --- |
-| binary_cursor_records | 40.9/47.2/9.8/9.4 | 0.863 [0.860, 0.872] faster | 4.185 [4.139, 4.212] slower |
+| binary_cursor_records | 40.8/47.2/9.8/9.5 | 0.866 [0.863, 0.871] faster | 4.145 [4.119, 4.170] slower |
 
 Before (HEAD 4ffe276) the AIL/C ratio was `4.728 [4.701, 4.824] slower`; the ranges do not overlap
-(13.7% less AIL time, above the 3% keep threshold). Result:
-`bench/results/2026-10-23-4ffe276-dirty.json`. The new test checks that generated
+(13.4% less AIL time, above the 3% keep threshold). Result:
+`bench/results/2026-10-23-12f2492.json`. The new test checks that generated
 `Cursor__read_u8`/`read_u32_le` contain no `ail_bytes_get`, while the unguarded method keeps its
 check.
 
