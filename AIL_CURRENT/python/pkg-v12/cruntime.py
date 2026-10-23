@@ -18092,7 +18092,7 @@ static inline ail_st ail_meth_str_startswith(ail_ctx *cx, int *out, ail_obj sobj
     ail_str win = ail_view(s, valid ? a : 0); win.n = valid ? b - a : 0;
     for (int64_t i = 0; i < n_prefixes; i++) {
         if (prefixes[i].tag != AIL_T_STR) {
-            char buf[96]; snprintf(buf, sizeof buf, "tuple for startswith must only contain str, not %s", ail_type_name(prefixes[i].tag));
+            char buf[96]; snprintf(buf, sizeof buf, "tuple for startswith must only contain str, not %s", ail__tname_c(prefixes[i]));
             return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
         }
         if (valid && ail_str_startswith(win, ail_view_to_str(prefixes[i]))) { *out = 1; return AIL_OK; }
@@ -18107,7 +18107,7 @@ static inline ail_st ail_meth_str_endswith(ail_ctx *cx, int *out, ail_obj sobj,
     ail_str win = ail_view(s, valid ? a : 0); win.n = valid ? b - a : 0;
     for (int64_t i = 0; i < n_suffixes; i++) {
         if (suffixes[i].tag != AIL_T_STR) {
-            char buf[96]; snprintf(buf, sizeof buf, "tuple for endswith must only contain str, not %s", ail_type_name(suffixes[i].tag));
+            char buf[96]; snprintf(buf, sizeof buf, "tuple for endswith must only contain str, not %s", ail__tname_c(suffixes[i]));
             return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
         }
         if (valid && ail_str_endswith(win, ail_view_to_str(suffixes[i]))) { *out = 1; return AIL_OK; }
