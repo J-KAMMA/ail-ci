@@ -1,5 +1,20 @@
 # DEVLOG
 
+## 2026-10-23 - reversed() of a generator expression (job-pre11-10240012)
+
+`list(reversed((x, x) for x in [1, 2, 3]))` silently printed `[(3, 3), (2, 2), (1, 1)]` because the
+tuple pass hoisted the generator expression to a plain list. CPython evaluates only the outermost
+iterable, then raises `TypeError: 'generator' object is not reversible` without running the element
+expressions. The typed path now refuses that direct shape by name, so the default build falls back
+to the general path; its `_b_reversed` evaluates the outermost iterable (including side effects),
+calls `ail_iter`, and then raises the same TypeError. The same runtime path catches the error in a
+`try`/`except TypeError`, and list, tuple, range and str stay reversible.
+
+Verified with `cmp.sh` on both builds for tuple, plain, empty, conditional, two-loop, nested and
+non-iterable-outer generator expressions, `try`/`except` and `try`/`finally`, plus the reversible
+types. `test_ail_pre11.py`: 3 tests, 0 failed. No DIFFERENCES file is present in this export, so no
+`C?-` row was added.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

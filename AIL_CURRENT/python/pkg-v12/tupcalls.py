@@ -275,6 +275,9 @@ class Calls:
         return self.done(node, args, kws, ('range',))
 
     def b_reversed(self, node, want, ctx):
+        if any(isinstance(a, ast.GeneratorExp) for a in node.args):
+            self.refuse(node, 'reversed() of a generator expression (CPython raises TypeError: '
+                        "'generator' object is not reversible); materialise it with list() first")
         args, ts, kws = self.args_ex(node)
         self.no_tuple_items(node, ts, 'reversed')
         return self.done(node, args, kws, ('iter', elem_of(ts[0]) if ts else None))

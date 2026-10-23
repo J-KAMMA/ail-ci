@@ -6772,6 +6772,21 @@ class Compiler(boxclosure.ClosureMixin):
     def _b_reversed(self, args, kwargs, ctx):
         if len(args) != 1 or kwargs:
             raise Unsupported('reversed() with other than exactly one positional argument')
+        if isinstance(args[0], ast.GeneratorExp):
+            gen = args[0]
+            if gen.generators:
+                outer = gen.generators[0].iter
+                while isinstance(outer, ast.GeneratorExp) and outer.generators:
+                    outer = outer.generators[0].iter
+                src = self.expr(outer, ctx)
+                it = ctx.tmp()
+                ctx.emit('st = ail_iter(cx, &%s, %s);' % (it, src))
+                ctx.check()
+            t = ctx.tmp()
+            ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "\'generator\' object is not reversible"); '
+                     'goto %s;' % ctx.cur_err_target())
+            ctx.uses_st = True
+            return t
         v = self.expr(args[0], ctx)
         t = ctx.tmp()
         ctx.emit('st = ail_iter_reversed(cx, &%s, %s);' % (t, v))
