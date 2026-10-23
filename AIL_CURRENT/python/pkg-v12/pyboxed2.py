@@ -1090,7 +1090,7 @@ def _assign_target_names(t):
 
 
 _HOISTED_DEFAULTS = (ast.List, ast.Dict, ast.Set, ast.ListComp, ast.DictComp, ast.SetComp,
-                     ast.GeneratorExp, ast.Call)
+                     ast.GeneratorExp, ast.Call, ast.Tuple)
 
 
 _SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
@@ -1356,8 +1356,36 @@ def _hoist_defaults(tree):
     the class, for a method) and read from there. The assignments are marked `_ail_hoisted` so the
     'only defs and classes' entry-point convention does not count them as module statements.
     Any other default that is not a literal (a name, `x * 2`, an attribute, a subscript) is hoisted too:
-    `X = 2; def f(a=X): ...; X = 3` must see 2 (fuzz1, difffuzz seeds 101/113/305)."""
+    `X = 2; def f(a=X): ...; X = 3` must see 2 (fuzz1, difffuzz seeds 101/113/305). A TUPLE is
+    hoisted even when `ast.literal_eval` accepts it: `def f(t=([],))` must share the list inside
+    the tuple between calls, and rebuilding the tuple at each call would hand out a fresh list."""
     out, count = [], 0
+    # A hoisted default is a module global, so its name must not shadow a name the program binds or
+    # mentions anywhere (a user global `_ail_default_0` was overwritten by the first hoisted default).
+    used = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+    used.update(n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.ClassDef)))
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.Import, ast.ImportFrom)):
+            used.update((a.asname or a.name).split('.')[0] for a in n.names)
+        elif isinstance(n, ast.arg):
+            used.add(n.arg)
+        elif isinstance(n, (ast.Global, ast.Nonlocal)):
+            used.update(n.names)
+        elif isinstance(n, ast.ExceptHandler) and n.name:
+            used.add(n.name)
+        elif isinstance(n, (ast.MatchAs, ast.MatchStar)) and n.name:
+            used.add(n.name)
+        elif isinstance(n, ast.MatchMapping) and n.rest:
+            used.add(n.rest)
+
+    def fresh_name():
+        nonlocal count
+        while True:
+            name = '_ail_default_%d' % count
+            count += 1
+            if name not in used:
+                used.add(name)
+                return name
     bound_at = [_module_stmt_binds(stmt) for stmt in tree.body]
     _refuse_lambda_forward_defaults(tree, bound_at)
     for si, stmt in enumerate(tree.body):
@@ -1380,8 +1408,7 @@ def _hoist_defaults(tree):
                             raise Unsupported('a default in def %s uses %s, which is defined '
                                               'after the def (CPython raises NameError there)'
                                               % (f.name, nm.id))
-                    name = '_ail_default_%d' % count
-                    count += 1
+                    name = fresh_name()
                     assign = ast.Assign(targets=[ast.Name(id=name, ctx=ast.Store())], value=d)
                     ast.copy_location(assign, d)
                     ast.copy_location(assign.targets[0], d)
