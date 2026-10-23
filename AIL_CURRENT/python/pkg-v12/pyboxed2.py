@@ -7396,14 +7396,10 @@ class Compiler(boxclosure.ClosureMixin):
             body = {'str': '*out = ail_obj_str(cx, arg); return AIL_OK;',
                    'len': 'return ail_op_len(cx, out, arg);',
                    'abs': None}[node.id]
-            if node.id == 'abs' and self.dunder_ops:
-                # an instance may define __abs__ (dunderrt.py patches ail_bi_abs to ask the class)
+            if node.id == 'abs':
+                # ail_bi_abs also turns a bool argument into an int, as CPython's abs() does;
+                # the old inline lowering returned the bool tag unchanged (True instead of 1).
                 body = 'return ail_bi_abs(cx, out, arg);'
-            elif node.id == 'abs':
-                body = ('if (arg.tag == AIL_T_FLOAT) { *out = ail_box_float(cx, fabs('
-                        'ail_float_val(arg))); return AIL_OK; } '
-                        'if (arg.i < 0) return ail_op_neg(cx, out, arg); *out = arg; '
-                        'return AIL_OK;')
             self.top_decls.append('static ail_st %s(ail_ctx *cx, ail_obj *out, ail_obj arg, '
                                   'void *closure);\n' % wrap)
             self.top_defs.append(
@@ -7797,16 +7793,11 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('abs() with other than exactly one argument')
         v = self.expr(args[0], ctx)
         t = ctx.tmp()
-        if self.dunder_ops:
-            # an instance may define __abs__ (dunderrt.py patches ail_bi_abs to ask the class)
-            ctx.emit('st = ail_bi_abs(cx, &%s, %s);' % (t, v))
-            ctx.check()
-            return t
-        ctx.emit('if ((%s).tag == AIL_T_FLOAT) { %s = ail_box_float(cx, fabs(ail_float_val(%s))); }'
-                 % (v, t, v))
-        ctx.emit('else { st = ((%s).i < 0) ? ail_op_neg(cx, &%s, %s) : (( %s = %s), AIL_OK); '
-                 'if (st != AIL_OK) goto %s; }' % (v, t, v, t, v, ctx.cur_err_target()))
-        ctx.uses_st = True
+        # ail_bi_abs gives int for an int or bool argument and float for a float, as CPython's
+        # abs() does; the old inline lowering kept a bool's tag (abs(False) printed False, not 0).
+        # dunderrt.py patches this same helper when an instance may define __abs__.
+        ctx.emit('st = ail_bi_abs(cx, &%s, %s);' % (t, v))
+        ctx.check()
         return t
 
     def _b_chr(self, args, kwargs, ctx):
