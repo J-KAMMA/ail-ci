@@ -170,6 +170,7 @@ class _Cx(object):
     def __init__(self, kind, loops_start, scopes_start):
         self.kind = kind
         self.lines = []
+        self.where = None                  # --debug: the (file, line) of the statement being written into `lines`
         self.loops_start = loops_start     # loops with a smaller index belong to an outer function
         self.scopes_start = scopes_start
         self.escapes = {}                  # (op, id(loop)) -> (status, op, loop)
@@ -297,7 +298,25 @@ class Emitter(TextEmitter):
         return name
 
     def line(self, depth, text):
+        where = self.cx.where
+        if where is not None:
+            # --debug: `#line` numbers the line after it, so each C line carries its statement's line
+            self.cx.lines.append('#line %d "%s"' % (where[1], where[0]))
         self.cx.lines.append('    ' * depth + text)
+
+    def source_line(self, ins, depth):
+        """`ail build --debug`: from an instruction lowered from a different statement than the last one
+        written to this C function on, AIL_DBG_SITE (the uncaught-exception report) and a `#line N "file"`
+        before each C line (`line`: gdb, addr2line, assert) -- the legacy emitter's two lines
+        (pyfunc._debug_site), but one per C line. Nothing in a release build (I.SRC is empty)."""
+        entry = I.SRC.get(id(ins))
+        if entry is None or entry[1] == self.cx.where:
+            return
+        self.cx.where = entry[1]
+        if ins.op not in ('reraise', 'yield'):
+            # (a region's closing yield and a bare re-raise are not statements that begin to run: the site
+            # stays that of the last statement that did, e.g. the raise a `finally` lets through)
+            self.line(depth, 'AIL_DBG_SITE("%s:%d");' % entry[1])
 
     def use(self, *helpers):
         self.need.update(helpers)
@@ -395,7 +414,8 @@ class Emitter(TextEmitter):
         if self.is_pending or self.frame:
             self.parts.add('IREXC')
         self.region(fn.body, 1, None)
-        text = '%s {\n%s\n}\n' % (ir_sig, '\n'.join(self.cx.lines))
+        close = '' if self.cx.where is None else '#line %d "%s"\n' % (self.cx.where[1], self.cx.where[0])
+        text = '%s {\n%s\n%s}\n' % (ir_sig, '\n'.join(self.cx.lines), close)
         out = ''.join(self.aux) + text
         if self.byval:
             kind = 'flist' if fn.attrs['ret_list'] == 'flist' else 'list'
@@ -411,6 +431,9 @@ class Emitter(TextEmitter):
             else:
                 body = '    %s;\n    if (__builtin_expect(ail_pending, 0)) ail_ir_rethrow();\n' % call
             out += '%s {\n%s}\n' % (sig, body)
+        if self.cx.where is not None:
+            # --debug: what follows (runtime helpers, the next function) is not on the user's last line
+            out += '#line 1 "<ail-generated>"\n'
         return sig, out
 
     # ------------------------------------------------------------------ exits
@@ -518,6 +541,8 @@ class Emitter(TextEmitter):
         o = [self.ref(v) for v in ins.operands] if op not in ('local.alloc', 'const') else []
         if op in ('local.alloc', 'const'):
             return
+        if I.SRC:
+            self.source_line(ins, depth)
         if op in ('add', 'sub', 'mul'):
             if ins.attrs.get('mode') == 'ck':
                 helper = _CK_HELPER[op]
@@ -589,9 +614,19 @@ class Emitter(TextEmitter):
         if op == 'sitofp':
             return self.assign_new(depth, ins.result, '((double)(%s))' % o[0])
         if op == 'fptosi':
+            # as the legacy `_numeric_to_int`: nan is a ValueError; an infinity, and a finite value
+            # that does not fit int64, an OverflowError (the "integer overflow" die)
             self.parts.add('DIE')
-            self.line(depth, 'if (!(%s >= -9223372036854775808.0 && %s < 9223372036854775808.0)) '
-                             'ail_raise_named(AIL_EXC_VALUE);' % (o[0], o[0]))
+            self.exception_parts([10])
+            import exctext
+            if exctext.ACTIVE:
+                self.parts.update(('STR', 'STRRET', 'DIE', 'EXCSTR'))
+                inner = ('if (%(x)s != %(x)s) ail_raise_msg(AIL_EXC_VALUE, "cannot convert float NaN to integer"); '
+                         'if (__builtin_isinf(%(x)s)) ail_die("cannot convert float infinity to integer"); ')
+            else:
+                inner = 'if (%(x)s != %(x)s) ail_raise_named(AIL_EXC_VALUE); '
+            self.line(depth, ('if (!(%(x)s >= -9223372036854775808.0 && %(x)s < 9223372036854775808.0)) { '
+                              + inner + 'ail_die("integer overflow"); }') % {'x': o[0]})
             return self.assign_new(depth, ins.result, '(int64_t)%s' % o[0])
         if op == 'load':
             return self.assign_new(depth, ins.result, o[0])
@@ -655,6 +690,11 @@ class Emitter(TextEmitter):
                                        'ail__bytearray_get_slow(%s, %s))' % (o[1], sn, sp, o[1], B, o[1]))
             if ins.attrs.get('mode') == 'nck':
                 return self.line(depth, '%s[%s] = (unsigned char)(%s);' % (sp, o[1], o[2]))
+            if ins.attrs.get('mode') == 'vck':
+                # the index is proven in range; the value keeps its check (the slow path raises it)
+                return self.line(depth, 'if ((uint64_t)(%s) <= 255) %s[%s] = (unsigned char)(%s); '
+                                        'else ail__bytearray_set_slow(%s, %s, %s);'
+                                 % (o[2], sp, o[1], o[2], B, o[1], o[2]))
             return self.line(depth, 'if ((uint64_t)(%s) < (uint64_t)%s && (uint64_t)(%s) <= 255) %s[%s] = '
                                     '(unsigned char)(%s); else ail__bytearray_set_slow(%s, %s, %s);'
                              % (o[1], sn, o[2], sp, o[1], o[2], B, o[1], o[2]))
@@ -965,7 +1005,8 @@ class Emitter(TextEmitter):
         self.aux.append('\n'.join(
             ['static int %s(void *frv) {' % fname,
              '    struct %s__fr *fr = (struct %s__fr *)frv;' % (sym, sym)]
-            + body.lines + ['    return 0;', '}', '']))
+            + body.lines + ['    return 0;', '}']
+            + (['#line 1 "<ail-generated>"'] if body.where is not None else []) + ['']))
         st = 'st%d' % n
         self.line(depth, 'int %s = ail_ir_try(%s, fr);' % (st, fname))
         if kind == 'catch':
