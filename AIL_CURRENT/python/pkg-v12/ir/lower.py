@@ -33,7 +33,7 @@ from . import flowtypes
 from . import ifadd
 from .lower_text import TextLowering, NotS0
 from .emit_text import allocates_bytes
-from pyfront import is_negative_int64_min_power
+from pyfront import is_negative_int64_min
 
 BYTES = I.T('bytes')
 BYTEARRAY = I.T('obj', I.T('bytearray'))
@@ -2119,7 +2119,7 @@ class Lowering(TextLowering):
         op = node.op
         if isinstance(op, ast.USub):
             operand = node.operand
-            if is_negative_int64_min_power(node):
+            if is_negative_int64_min(node):
                 return self.const(I.I64, -(1 << 63))
             if isinstance(operand, ast.Constant) and type(operand.value) in (int, float):
                 value = -operand.value

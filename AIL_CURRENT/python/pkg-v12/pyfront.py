@@ -134,23 +134,31 @@ def _number_constant(node):
     return None
 
 
-def is_negative_int64_min_power(node):
-    """Is `node` the spelling `-2**63` (or `-(2**63)`)?
+def is_negative_int64_min(node):
+    """Is `node` an exact spelling of INT64_MIN: `-2**63`, `-(2**63)`, `-(1 << 63)`
+    or the decimal literal `-9223372036854775808`?
 
     Python parses `-2**63` as `UnaryOp(USub, BinOp(Pow, Constant(2), Constant(63)))`:
-    the positive power is outside int64, but its negation, INT64_MIN, is inside. Emitting
-    the power first raises `integer overflow` at run time, before the minus can bring the
-    result back into range. The decimal literal `-9223372036854775808` is a different AST
-    shape (`USub(Constant(9223372036854775808))`) and is not what this helper detects.
+    the positive operand is outside int64, but its negation, INT64_MIN, is inside. Emitting
+    the operand first raises `integer overflow` at run time, before the minus can bring the
+    result back into range. `-(1 << 63)` and the decimal literal are the same value in other
+    AST shapes.
     """
     if not (isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub)):
         return False
-    power = node.operand
-    if not (isinstance(power, ast.BinOp) and isinstance(power.op, ast.Pow)):
-        return False
-    base, exponent = _number_constant(power.left), _number_constant(power.right)
-    return (type(base) is int and type(exponent) is int
-            and base == 2 and exponent == 63)
+    operand = node.operand
+    value = _number_constant(operand)
+    if type(value) is int and value == 1 << 63:
+        return True
+    if isinstance(operand, ast.BinOp) and isinstance(operand.op, ast.Pow):
+        base, exponent = _number_constant(operand.left), _number_constant(operand.right)
+        return (type(base) is int and type(exponent) is int
+                and base == 2 and exponent == 63)
+    if isinstance(operand, ast.BinOp) and isinstance(operand.op, ast.LShift):
+        base, count = _number_constant(operand.left), _number_constant(operand.right)
+        return (type(base) is int and type(count) is int
+                and base == 1 and count == 63)
+    return False
 
 
 def refuse_complex_pow(node):
