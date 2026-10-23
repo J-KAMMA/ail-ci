@@ -14558,10 +14558,19 @@ static int ail__cnt_cmp_desc(const void *pa, const void *pb) {
 }
 static inline const char *ail__tname_c(ail_obj x) {
     if (x.tag == AIL_T_INST && ((ail_instobj *)x.o)->cls.tag == AIL_T_CLASS) {      /* an instance names its class (bytes, ...) */
-        static char tnb[80];
+        static char *tnb;
+        static size_t tnb_cap;
         ail_str cs = ail_view_to_str(((ail_classobj *)((ail_instobj *)x.o)->cls.o)->name);
+        size_t need = (size_t)cs.n + 1;
+        if (need > tnb_cap) {
+            size_t cap = tnb_cap ? tnb_cap : 80;
+            while (cap < need) cap *= 2;
+            char *grown = (char *)realloc(tnb, cap);
+            if (!grown) ail_die("out of memory");
+            tnb = grown; tnb_cap = cap;
+        }
         size_t k = 0;
-        for (int64_t i = 0; i < cs.n && k + 1 < sizeof tnb; i++) { uint32_t ch = (uint32_t)ail_chr(cs, i); tnb[k++] = ch < 128 ? (char)ch : '?'; }
+        for (int64_t i = 0; i < cs.n; i++) { uint32_t ch = (uint32_t)ail_chr(cs, i); tnb[k++] = ch < 128 ? (char)ch : '?'; }
         tnb[k] = 0;
         /* the collections pass lowers a typed deque to a class `_AilDeque_<T>`: CPython's operand text names it
            `collections.deque`, never the generated class */
