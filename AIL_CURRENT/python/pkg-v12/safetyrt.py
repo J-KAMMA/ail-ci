@@ -810,6 +810,7 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
     }
     if (x.tag == AIL_T_STR) {
         if (type && type != 's') { snprintf(msg, sizeof msg, "Unknown format code '%c' for object of type 'str'", type); return ail_raise_c(cx, AIL_B_VALUEERROR, msg); }
+        if (f.sign == ' ') return ail_raise_c(cx, AIL_B_VALUEERROR, "Space not allowed in string format specifier");
         if (f.sign) return ail_raise_c(cx, AIL_B_VALUEERROR, "Sign not allowed in string format specifier");
         if (f.alt) return ail_raise_c(cx, AIL_B_VALUEERROR, "Alternate form (#) not allowed in string format specifier");
         if (f.align == '=') return ail_raise_c(cx, AIL_B_VALUEERROR, "'=' alignment not allowed in string format specifier");
