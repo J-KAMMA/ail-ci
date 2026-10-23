@@ -14396,17 +14396,39 @@ static inline int ail_identical(ail_obj a, ail_obj b) {
    in CPython when one was copied from the other and two objects when each was computed, and an int here is a value, so the answer
    is not known: refused by name (DIFFERENCES C114; a statically visible case is refused when compiling, see numidentity.py) */
 static inline const char *ail__tname_c(ail_obj x);
-static inline int ail_is(ail_obj a, ail_obj b) {
+static inline int64_t ail_intern(ail_ctx *cx, const char *name);
+/* True only for a view of a whole string LITERAL (see the static `lit` objects the general path emits): allocated strings,
+   slices and concatenations all have a heap backing with a nonzero `size`. CPython merges equal constants of one code object,
+   so two equal literal strings here are the ones whose `is` answer it cannot reproduce. */
+static inline int ail__str_literal(ail_obj x) {
+    if (x.tag != AIL_T_STR || !x.sv.backing) return 0;
+    ail_strback *b = (ail_strback *)x.sv.backing;
+    return b->hdr.size == 0 && b->hdr.gcnext == NULL && x.sv.off == 0 && x.sv.len == b->n;
+}
+/* the str `_s` behind a bytes instance (prelude_bytes.py), or NONE: bytearray holds a list of ints instead and is mutable,
+   so CPython never interns it and this must never refuse it */
+static inline ail_obj ail__bytes_text(ail_ctx *cx, ail_obj x) {
+    if (x.tag != AIL_T_INST || strcmp(ail__tname_c(x), "bytes")) return ail_box_none();
+    ail_instobj *o = (ail_instobj *)x.o;
+    int64_t ns = ail_intern(cx, "_s");
+    for (int64_t i = 0; i < o->n; i++)
+        if (o->attrs[i].name_id == ns) return o->attrs[i].val;
+    return ail_box_none();
+}
+static inline int ail_is(ail_ctx *cx, ail_obj a, ail_obj b) {
     if (__builtin_expect(a.tag == AIL_T_INT && b.tag == AIL_T_INT && a.i == b.i && (a.i < -5 || a.i > 256), 0))
         ail_die("`is` between two equal ints outside -5..256: CPython's answer depends on where each int was made (DIFFERENCES C114); compare with ==");
     if (__builtin_expect(a.tag == AIL_T_STR && b.tag == AIL_T_STR && !ail_identical(a, b)
+                         && (ail__str_literal(a) || ail__str_literal(b) || a.sv.len <= 1)
                          && ail_str_eq(ail_view_to_str(a), ail_view_to_str(b)), 0))
-        ail_die("`is` between equal strings or bytes: CPython interns equal constants, so the answer depends on where each was made (DIFFERENCES C?-job-fuzz90-10231630-1); compare with ==");
+        ail_die("`is` between equal strings: CPython merges equal constants and shares the empty and one-character ones, so the answer depends on where each was made (DIFFERENCES C?-job-fuzz90-10231630-1); compare with ==");
     if (__builtin_expect(a.tag == AIL_T_INST && b.tag == AIL_T_INST && a.o != b.o
                          && ((ail_instobj *)a.o)->cls.o == ((ail_instobj *)b.o)->cls.o, 0)) {
-        const char *tn = ail__tname_c(a);
-        if (!strcmp(tn, "bytes") || !strcmp(tn, "bytearray"))
-            ail_die("`is` between bytes: CPython interns equal bytes constants, so the answer depends on where each was made (DIFFERENCES C?-job-fuzz90-10231630-1); compare with ==");
+        ail_obj sa = ail__bytes_text(cx, a), sb = ail__bytes_text(cx, b);
+        if (sa.tag == AIL_T_STR && sb.tag == AIL_T_STR && !ail_identical(sa, sb)
+            && (ail__str_literal(sa) || ail__str_literal(sb) || sa.sv.len <= 1)
+            && ail_str_eq(ail_view_to_str(sa), ail_view_to_str(sb)))
+            ail_die("`is` between equal bytes: CPython shares constants, the empty value and one-byte values, so the answer depends on where each was made (DIFFERENCES C?-job-fuzz90-10231630-1); compare with ==");
     }
     return ail_identical(a, b);
 }

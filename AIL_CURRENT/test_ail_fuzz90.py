@@ -1,9 +1,11 @@
 """Silent wrong answers in chained comparisons and identity, against CPython 3.12.
 
 `is` on str/bytes was a silent False where CPython interns equal constants and answers True
-(`same("a", "a")`, `b"a" is b"a"`).  A direct pair of string constants is now refused by name
-at compile time; a value that reaches the comparison through an argument, a list item, an
-attribute or a dict value stops by name on both builds with the same DIFFERENCES id.
+(`same("a", "a")`, `b"a" is b"a"`).  A direct pair of text constants is refused by name at
+compile time; a literal that reaches the comparison through an argument, a list item, an
+attribute or a dict value stops by name on both builds with the same DIFFERENCES id.  Equal
+strings built at run time (length > 1), unequal bytes and mutable bytearrays still answer as
+CPython does; equal empty / one-character values are shared in CPython and stop by name.
 
 Chained comparisons with a side effect in the middle, membership over lists of lists and
 `None == ...` were already CPython-identical; the programs below keep those shapes covered.
@@ -161,6 +163,31 @@ REFUSED = {
     'bytes': 'print(b"a" is b"a")\n',
 }
 
+DYNAMIC = r'''def same(a, b):
+    return a is b
+
+
+def main() -> None:
+    n = 2
+    a = "x" * n
+    b = "x" * n
+    print(a is b, same(a, b), same("x" * n, "x" * n))
+    c = b"ab" * n
+    d = b"ab" * n
+    print(c is d, same(c, d), same(bytes([97, 98]), bytes([97, 98])))
+    print(same(bytearray(b"a"), bytearray(b"a")), same(b"a", b"b"))
+
+
+main()
+'''
+
+SINGLETONS = {
+    'empty_str': ('def same(a, b):\n    return a is b\n\n\ndef main() -> None:\n    print("start")\n'
+                  '    print(same("x" * 0, "y" * 0))\n\n\nmain()\n', b'start\n'),
+    'one_byte': ('def same(a, b):\n    return a is b\n\n\ndef main() -> None:\n    print("start")\n'
+                 '    print(same(bytes([97]), bytes([97])))\n\n\nmain()\n', b'start\n'),
+}
+
 STOPPED = {
     'argument': ('def same(a, b):\n    return a is b, a is not b\n\n\n'
                  'def main() -> None:\n    print("start")\n    print(same("a", "a"))\n\n\nmain()\n',
@@ -189,6 +216,13 @@ class Fuzz90(unittest.TestCase):
     def test_text_identity_through_values_stops_by_name(self):
         for name, (text, stdout) in sorted(STOPPED.items()):
             check_stopped(self, 'stop_' + name, text, stdout)
+
+    def test_runtime_built_and_mutable_values_match_cpython(self):
+        check_program(self, 'dynamic', DYNAMIC)
+
+    def test_shared_empty_and_one_byte_values_stop_by_name(self):
+        for name, (text, stdout) in sorted(SINGLETONS.items()):
+            check_stopped(self, 'single_' + name, text, stdout)
 
     def test_non_text_identity_and_different_types_still_match(self):
         check_program(self, 'allowed', ALLOWED)

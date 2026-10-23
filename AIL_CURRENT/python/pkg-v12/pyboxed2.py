@@ -4601,10 +4601,10 @@ class Compiler(boxclosure.ClosureMixin):
         the right-hand operand's own AST node)."""
         t = ctx.tmp()
         if isinstance(op, ast.Is):
-            ctx.emit('%s = ail_box_bool(ail_is(%s, %s));' % (t, a, b))
+            ctx.emit('%s = ail_box_bool(ail_is(cx, %s, %s));' % (t, a, b))
             return t
         if isinstance(op, ast.IsNot):
-            ctx.emit('%s = ail_box_bool(!ail_is(%s, %s));' % (t, a, b))
+            ctx.emit('%s = ail_box_bool(!ail_is(cx, %s, %s));' % (t, a, b))
             return t
         if isinstance(op, (ast.In, ast.NotIn)):
             cname = self._inst_class(bn, ctx) if bn is not None else None
