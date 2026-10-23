@@ -9065,23 +9065,29 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.check()
         return t
 
-    def _sep_maxsplit(self, args, kwargs, ctx):
+    def _sep_maxsplit(self, args, kwargs, ctx, name):
         """split/rsplit's (sep, maxsplit) pair, keyword forms merged into the
         positional slots CPython gives them: sep= fills slot 0 when it is free,
         maxsplit= fills slot 1 (inserting a None sep when only the keyword is
-        given, exactly like s.split(maxsplit=1) == s.split(None, 1))."""
+        given, exactly like s.split(maxsplit=1) == s.split(None, 1)). A keyword
+        whose slot is ALREADY filled by a positional is CPython's "got multiple
+        values for argument" TypeError -- refused by name here, the same way
+        expandtabs' own tabsize does."""
         a = list(args)
-        if 'sep' in kwargs and len(a) < 1:
+        if 'sep' in kwargs:
+            if len(a) >= 1:
+                raise Unsupported(".%s() got multiple values for argument 'sep'" % name)
             a.append(kwargs['sep'])
         if 'maxsplit' in kwargs:
+            if len(a) >= 2:
+                raise Unsupported(".%s() got multiple values for argument 'maxsplit'" % name)
             while len(a) < 1:
                 a.append(ast.Constant(value=None))
-            if len(a) < 2:
-                a.append(kwargs['maxsplit'])
+            a.append(kwargs['maxsplit'])
         return a
 
     def _m_split(self, recv, kind, args, kwargs, ctx):
-        args = self._sep_maxsplit(args, kwargs, ctx)
+        args = self._sep_maxsplit(args, kwargs, ctx, 'split')
         has_sep = args and not (isinstance(args[0], ast.Constant) and args[0].value is None)
         sep = self.expr(args[0], ctx) if has_sep else 'ail_box_none()'
         has_max = len(args) > 1
@@ -9095,6 +9101,8 @@ class Compiler(boxclosure.ClosureMixin):
     def _m_splitlines(self, recv, kind, args, kwargs, ctx):
         keep = '0'
         if args:
+            if 'keepends' in kwargs:
+                raise Unsupported(".splitlines() got multiple values for argument 'keepends'")
             keep = 'ail_obj_truthy(%s)' % self.expr(args[0], ctx)
         elif 'keepends' in kwargs:
             keep = 'ail_obj_truthy(%s)' % self.expr(kwargs['keepends'], ctx)
@@ -9340,7 +9348,7 @@ class Compiler(boxclosure.ClosureMixin):
         return t
 
     def _m_rsplit(self, recv, kind, args, kwargs, ctx):
-        args = self._sep_maxsplit(args, kwargs, ctx)
+        args = self._sep_maxsplit(args, kwargs, ctx, 'rsplit')
         has_sep = args and not (isinstance(args[0], ast.Constant) and args[0].value is None)
         sep = self.expr(args[0], ctx) if has_sep else 'ail_box_none()'
         has_max = len(args) > 1
