@@ -17590,12 +17590,33 @@ static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_
 static inline ail_st ail_bi_divmod(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         if (a.tag == AIL_T_FLOAT || b.tag == AIL_T_FLOAT) {
-            if (ail__as_double(b) == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "float divmod()");
+            double x = ail__as_double(a), y = ail__as_double(b);
+            if (y == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "float divmod()");
+            double r = fmod(x, y);
+            int adjust = r != 0.0 && ((r < 0.0) != (y < 0.0));
+            double q = (x - r) / y;
+            if (adjust) q -= 1.0;
+            double rem = r == 0.0 ? copysign(0.0, y) : adjust ? r + y : r;
+            double quot;
+            if (q == 0.0) quot = copysign(0.0, x / y);
+            else {
+                quot = floor(q);
+                if (q - quot > 0.5) quot += 1.0;
+            }
+            AIL_FRAME_ENTER(cx, frf, 2);
+            frf.slots[0] = ail_box_float(cx, quot);
+            frf.slots[1] = ail_box_float(cx, rem);
+            ail_obj prf[2]; prf[0] = frf.slots[0]; prf[1] = frf.slots[1];
+            *out = ail_tuple_new(cx, prf, 2);
+            AIL_FRAME_LEAVE(cx, frf);
+            return AIL_OK;
         }
-    } else {
+    } else if (a.tag != AIL_T_INST && b.tag != AIL_T_INST) {
         char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for divmod(): '%s' and '%s'", ail_type_name(a.tag), ail_type_name(b.tag));
         return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
     }
+    /* an instance operand falls through to ail_op_floordiv/ail_op_mod, whose dunderrt
+       dispatch serves classes (Fraction, IntEnum) that define __floordiv__/__mod__ */
     AIL_FRAME_ENTER(cx, fr, 2);
     ail_st st = ail_op_floordiv(cx, &fr.slots[0], a, b);
     if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }

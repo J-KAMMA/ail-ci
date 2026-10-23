@@ -134,6 +134,16 @@ class _AilIntEnum(_AilEnum):
     def __rmod__(self, other):
         return other % self.value
 
+    def __divmod__(self, other):
+        if isinstance(other, _AilEnum):
+            return (self.value // other.value, self.value % other.value)
+        return (self.value // other, self.value % other)
+
+    def __rdivmod__(self, other):
+        if isinstance(other, _AilEnum):
+            return (other.value // self.value, other.value % self.value)
+        return (other // self.value, other % self.value)
+
     def __lshift__(self, other):
         if isinstance(other, _AilEnum):
             return self.value << other.value
