@@ -10026,6 +10026,18 @@ static inline ail_obj ail_obj_mul(ail_obj a, ail_obj b) {
     ail_raise_c(AIL_ERR_TYPE, buf);
     return ail_box_none();
 }
+/* CPython's float_divmod: one computation for //, % and divmod, so the sign of a zero
+   remainder, a quotient one below a rounded division and the infinity/NaN cases agree. */
+static inline double ail_obj_ffloormod(double a, double b, int remainder) {
+    double r = fmod(a, b);
+    int adjust = r != 0.0 && ((r < 0.0) != (b < 0.0));
+    if (remainder) return r == 0.0 ? copysign(0.0, b) : adjust ? r + b : r;
+    double q = (a - r) / b;
+    if (adjust) q -= 1.0;
+    if (q == 0.0) return copysign(0.0, a / b);
+    double lower = floor(q);
+    return q - lower > 0.5 ? lower + 1.0 : lower;
+}
 static inline ail_obj ail_obj_floordiv(ail_obj a, ail_obj b) {
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t x = a.i, y = b.i;
@@ -10038,7 +10050,7 @@ static inline ail_obj ail_obj_floordiv(ail_obj a, ail_obj b) {
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         double x = ail__as_double(a), y = ail__as_double(b);
         if (y == 0.0) ail_raise_c(AIL_ERR_ZERODIV, "float floor division by zero");
-        return ail_box_float(floor(x / y));
+        return ail_box_float(ail_obj_ffloormod(x, y, 0));
     }
     ail_raise_c(AIL_ERR_TYPE, "unsupported operand type(s) for //");
     return ail_box_none();
@@ -10055,9 +10067,7 @@ static inline ail_obj ail_obj_mod(ail_obj a, ail_obj b) {
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         double x = ail__as_double(a), y = ail__as_double(b);
         if (y == 0.0) ail_raise_c(AIL_ERR_ZERODIV, "float modulo");
-        double r = fmod(x, y);
-        if (r != 0.0 && ((r < 0) != (y < 0))) r += y;
-        return ail_box_float(r);
+        return ail_box_float(ail_obj_ffloormod(x, y, 1));
     }
     ail_raise_c(AIL_ERR_TYPE, "unsupported operand type(s) for %%");
     return ail_box_none();
@@ -14727,6 +14737,18 @@ static inline ail_st ail_op_mul(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)
     char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for *: '%s' and '%s'", ail_type_name(a.tag), ail_type_name(b.tag));
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
 }
+/* CPython's float_divmod: one computation for //, % and divmod, so the sign of a zero
+   remainder, a quotient one below a rounded division and the infinity/NaN cases agree. */
+static inline double ail_obj2_ffloormod(double a, double b, int remainder) {
+    double r = fmod(a, b);
+    int adjust = r != 0.0 && ((r < 0.0) != (b < 0.0));
+    if (remainder) return r == 0.0 ? copysign(0.0, b) : adjust ? r + b : r;
+    double q = (a - r) / b;
+    if (adjust) q -= 1.0;
+    if (q == 0.0) return copysign(0.0, a / b);
+    double lower = floor(q);
+    return q - lower > 0.5 ? lower + 1.0 : lower;
+}
 static inline ail_st ail_op_floordiv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t x = a.i, y = b.i;
@@ -14739,7 +14761,7 @@ static inline ail_st ail_op_floordiv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_o
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         double x = ail__as_double(a), y = ail__as_double(b);
         if (y == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "float floor division by zero");
-        *out = ail_box_float(cx, floor(x / y)); return AIL_OK;
+        *out = ail_box_float(cx, ail_obj2_ffloormod(x, y, 0)); return AIL_OK;
     }
     return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for //");
 }
@@ -14755,9 +14777,7 @@ static inline ail_st ail_op_mod(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         double x = ail__as_double(a), y = ail__as_double(b);
         if (y == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "float modulo");
-        double r = fmod(x, y);
-        if (r != 0.0 && ((r < 0) != (y < 0))) r += y;
-        *out = ail_box_float(cx, r); return AIL_OK;
+        *out = ail_box_float(cx, ail_obj2_ffloormod(x, y, 1)); return AIL_OK;
     }
     return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %");
 }
