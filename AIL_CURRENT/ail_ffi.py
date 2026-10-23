@@ -35,7 +35,13 @@ Annotations (the stub's whole contract; a missing parameter or return annotation
     results    any of the above except bytes/bytearray; `c_char_p` is copied and decoded (NULL gives "");
                `None` is void; a missing return annotation is refused
 
-`@extern(...)` options: `lib` (library name for -l, or a path to a shared library relative to the
+`link("m", "z")` at module level names libraries for every stub of the file that has no `lib=`.
+`ptr(c_void_p)` is `void **`, the out-parameter that returns a handle (sqlite3_open). A struct passed by pointer
+is a bytearray (`c_mut_void_p`) / bytes (`c_const_void_p`) laid out by hand with the C offsets; give a stub whose
+C prototype names a struct `trust=True` (the exact-prototype check cannot spell the struct).
+
+`@extern(...)` options: `trust` (True: the header is included but its prototype is not compared with the stub;
+for a C prototype that names a struct), `lib` (library name for -l, or a path to a shared library relative to the
 declaring file; None is the C library), `header` (checked against the real prototype at compile time;
 without one the declaration is trusted and `ail check --ffi` says so), `symbol` (the C name when it differs
 from the stub name), `pkg_config` (link flags from pkg-config, compile side only), `check` (one of
@@ -60,7 +66,7 @@ import ctypes.util
 import os
 import sys
 
-__all__ = ['extern', 'length', 'ptr', 'cptr', 'declarations', 'c_int', 'c_uint', 'c_short', 'c_ushort', 'c_long', 'c_ulong',
+__all__ = ['extern', 'export', 'exports', 'link', 'length', 'ptr', 'cptr', 'declarations', 'c_int', 'c_uint', 'c_short', 'c_ushort', 'c_long', 'c_ulong',
            'c_longlong', 'c_ulonglong', 'c_size_t', 'c_ssize_t', 'c_int8', 'c_int16', 'c_int32', 'c_int64',
            'c_uint8', 'c_uint16', 'c_uint32', 'c_uint64', 'c_byte', 'c_ubyte', 'c_bool', 'c_double', 'c_float',
            'c_char_p', 'c_mut_char_p', 'c_void_p', 'c_const_void_p', 'c_mut_void_p']
@@ -131,8 +137,8 @@ class ptr:
     const = False
 
     def __init__(self, ctype):
-        if not isinstance(ctype, CType) or ctype.kind not in ('int', 'float', 'bool'):
-            raise TypeError('%s(integer, float or bool C type)' % type(self).__name__)
+        if not isinstance(ctype, CType) or ctype.kind not in ('int', 'float', 'bool', 'handle'):
+            raise TypeError('%s(integer, float, bool or c_void_p C type)' % type(self).__name__)
         self.ctype = ctype
 
     @property
@@ -160,6 +166,33 @@ class length:
 
 
 _DECLARED = []
+_LINKED = {}                            # declaring file -> [library name or path, ...] from link()
+
+
+def link(*libs, pkg_config=None):
+    """Module-level declaration: the libraries this file's `@extern` stubs (those without `lib=`) resolve their
+    symbols in, in order after the C library. `link("m", "z")` is `-lm -lz` when compiled and the same two
+    libraries loaded by name here. A name is a library name; a path (`./libfoo.so`, relative to this file) is
+    that file. `pkg_config=` (compile side) takes the link flags from pkg-config for these names."""
+    if not libs or not all(isinstance(lib, str) and lib for lib in libs):
+        raise TypeError('link("name", ...) takes library names or paths')
+    filename = sys._getframe(1).f_code.co_filename
+    _LINKED.setdefault(filename, []).extend(libs)
+
+
+class _Chain:
+    """Symbol lookup over the C library and then each linked library."""
+
+    def __init__(self, libraries):
+        self.libraries = libraries
+
+    def __getattr__(self, name):
+        for library in self.libraries:
+            try:
+                return getattr(library, name)
+            except AttributeError:
+                continue
+        raise AttributeError('symbol %r not found in the C library or any link() library' % name)
 
 
 def declarations():
@@ -183,6 +216,9 @@ def _classify(annotation):
 
 def _load(lib, filename):
     if lib is None:
+        linked = _LINKED.get(filename)
+        if linked:
+            return _Chain([ctypes.CDLL(None, use_errno=True)] + [_load(name, filename) for name in linked])
         return ctypes.CDLL(None, use_errno=True)
     if '/' in lib or os.sep in lib or lib.endswith(('.so', '.dylib', '.dll')) or '.so.' in lib:
         base = os.path.dirname(os.path.abspath(filename)) if filename else os.getcwd()
@@ -253,7 +289,7 @@ def _build_sources(sources, lib, filename):
     return ctypes.CDLL(target, use_errno=True)
 
 
-def extern(lib=None, header=None, *, symbol=None, check=None, errno=False, exc=None, pkg_config=None, sources=None):
+def extern(lib=None, header=None, *, symbol=None, check=None, errno=False, exc=None, pkg_config=None, sources=None, trust=False):
     if check is not None and check not in CHECKS:
         raise ValueError('check must be one of %s' % ', '.join(sorted(CHECKS)))
     if exc is not None and exc not in EXCEPTIONS.values():
@@ -406,6 +442,70 @@ def extern(lib=None, header=None, *, symbol=None, check=None, errno=False, exc=N
         return call
 
     return declare
+
+
+_EXPORTED = []
+_EXPORT_SCALARS = (int, float, bool, str, bytes)
+
+
+def _export_type(annotation, *, result):
+    """Check one @export annotation against the C-library type table (the one `ail build --lib` uses)."""
+    import dataclasses
+    import typing
+    if annotation is None or annotation is type(None):
+        return result
+    if annotation in _EXPORT_SCALARS:
+        return True
+    if typing.get_origin(annotation) is list and typing.get_args(annotation) in ((int,), (float,)):
+        return True
+    if not result and isinstance(annotation, type) and dataclasses.is_dataclass(annotation):
+        return all(f.type in (int, float, bool) for f in dataclasses.fields(annotation))
+    return False
+
+
+def export(function=None):
+    """Mark a top-level typed function as part of the C library built by `ail build --lib NAME prog.py`.
+
+        from ail_ffi import export
+
+        @export
+        def add(a: int, b: int) -> int:
+            return a + b
+
+    On CPython the decorator checks the annotations and returns the function unchanged, so the file
+    runs as ordinary Python and is the reference the compiled library is compared against. Allowed
+    types: int float bool str bytes list[int] list[float] (a result may also be None); a parameter may
+    also be a dataclass whose fields are int, float or bool (a C struct passed by pointer). Every
+    parameter and the result must be annotated; defaults, *args and **kwargs are refused.
+    """
+    def mark(fn):
+        import inspect
+        import typing
+        if not inspect.isfunction(fn):
+            raise TypeError('@export applies to a top-level function')
+        signature = inspect.signature(fn)
+        if any(p.default is not p.empty or p.kind is not p.POSITIONAL_OR_KEYWORD
+               for p in signature.parameters.values()):
+            raise TypeError('@export %s: plain parameters without defaults only' % fn.__name__)
+        if signature.return_annotation is signature.empty:
+            raise TypeError('@export %s: the result needs an annotation (-> None for no result)' % fn.__name__)
+        hints = typing.get_type_hints(fn)
+        for name in signature.parameters:
+            if name not in hints or not _export_type(hints[name], result=False):
+                raise TypeError('@export %s: parameter %s needs one of int float bool str bytes list[int] '
+                                'list[float] or a dataclass of int/float/bool' % (fn.__name__, name))
+        if not _export_type(hints.get('return'), result=True):
+            raise TypeError('@export %s: the result must be int float bool str bytes list[int] list[float] or None'
+                            % fn.__name__)
+        _EXPORTED.append(fn)
+        fn.__ail_export__ = True
+        return fn
+    return mark if function is None else mark(function)
+
+
+def exports():
+    """The functions marked with @export so far, in declaration order."""
+    return list(_EXPORTED)
 
 
 def param_empty():
