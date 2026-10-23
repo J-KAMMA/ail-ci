@@ -351,7 +351,7 @@ class Gen:
     def repr_expr(self, t, x):
         t = deep(t)
         if t in (INT, FLT, BOOL):
-            return 'repr(%s)' % x
+            return '("%%r" %% (%s,))' % x
         if t == STR:
             return '%s(%s)' % (self.srepr(), x)
         if is_tuple(t):

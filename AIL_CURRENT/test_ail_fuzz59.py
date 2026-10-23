@@ -5,11 +5,12 @@ Found with small programs compared against CPython on both builds:
 `b: list[int]` with `b[1:2] = "ab"` keeps the str elements, as CPython does; when the same
 function also assigns a tuple of ints to a slice of `b`, the list is statically a list[int] and
 the generated list-repr helper formatted each element with `str(x)`. A str element then printed
-unquoted: `[1, a, b, 3]` where CPython prints `[1, 'a', 'b', 3]`. The helper now uses `repr(x)`,
-which is the same text for int/float/bool and quotes a str that reached a slot of another static
-type. The slice programs below (extended and negative steps, None bounds, slice objects, delete,
-length mismatch, sources through arguments / items / attributes / dict values) keep the area
-compared with CPython on both builds.
+unquoted: `[1, a, b, 3]` where CPython prints `[1, 'a', 'b', 3]`. The helper now formats each
+scalar with `%r` (the built-in repr, also when the program defines its own `repr`), which is the
+same text for int/float/bool and quotes a str that reached a slot of another static type. The
+slice programs below (extended and negative steps, None bounds, slice objects, delete, length
+mismatch, sources through arguments / items / attributes / dict values) keep the area compared
+with CPython on both builds.
 """
 import os
 import subprocess
@@ -38,6 +39,20 @@ MIXED_REPR = r'''def main() -> None:
     t[1:2] = (4, 5)
     print(t, (t[0], t[1]), [t[1:3]])
     print([1, 2, 3], (1, 2, 3), [], (), [True], (1.5, -0.0))
+
+main()
+'''
+
+SHADOW_REPR = r'''def repr(x: int) -> str:
+    return "R" + str(x)
+
+
+def main() -> None:
+    print([1, 2, 3])
+    print((1, 2), repr(5))
+    print([True, 1.5, -0.0], (False, 2.0))
+    xs: list[int] = [7, 8, 9]
+    print(xs, (xs[0], xs[1]))
 
 main()
 '''
@@ -236,6 +251,9 @@ class Fuzz59Tests(unittest.TestCase):
 
     def test_repr_after_slice_stores_another_type(self):
         self.check('mixed_repr', MIXED_REPR)
+
+    def test_repr_shadow_does_not_reach_generated_helpers(self):
+        self.check('shadow_repr', SHADOW_REPR)
 
     def test_extended_and_negative_steps(self):
         self.check('extended', EXTENDED)
