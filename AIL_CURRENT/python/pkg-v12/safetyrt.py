@@ -662,7 +662,7 @@ static inline ail_obj ail2f_done(ail_ctx *cx, ail2f_buf *b) {
     free(b->p); b->p = NULL;
     return ail_str_buf_done(bu, b->n);
 }
-typedef struct { uint16_t fill; char align, sign; int alt, zero, has_width, has_prec; int64_t width, prec; char group, type; } ail2f_spec;
+typedef struct { uint16_t fill; char align, sign; int alt, zero, z, has_width, has_prec; int64_t width, prec; char group, type; } ail2f_spec;
 /* 0, or -1 with the ValueError text in msg */
 static inline int ail2f_parse(ail_str s, ail2f_spec *f, char *msg, size_t msz) {
     memset(f, 0, sizeof *f); f->fill = ' ';
@@ -671,7 +671,7 @@ static inline int ail2f_parse(ail_str s, ail2f_spec *f, char *msg, size_t msz) {
     if (n >= 2 && AIL2F_ALIGN(ail_chr(s, 1))) { f->fill = ail_chr(s, 0); f->align = (char)ail_chr(s, 1); i = 2; }
     else if (n >= 1 && AIL2F_ALIGN(ail_chr(s, 0))) { f->align = (char)ail_chr(s, 0); i = 1; }
     if (i < n && (ail_chr(s, i) == '+' || ail_chr(s, i) == '-' || ail_chr(s, i) == ' ')) f->sign = (char)ail_chr(s, i++);
-    if (i < n && ail_chr(s, i) == 'z') i++;
+    if (i < n && ail_chr(s, i) == 'z') { f->z = 1; i++; }
     if (i < n && ail_chr(s, i) == '#') { f->alt = 1; i++; }
     if (i < n && ail_chr(s, i) == '0') { f->zero = 1; i++; }
     while (i < n && ail_chr(s, i) >= '0' && ail_chr(s, i) <= '9') {
@@ -794,6 +794,15 @@ static inline void ail2f_float_body(char *out, size_t osz, double v, ail2f_spec 
     snprintf(fmt, sizeof fmt, "%%%s.*%c", f->alt ? "#" : "", type);
     snprintf(out, osz, fmt, (int)prec, v);
 }
+/* 1 when the mantissa of a formatted float body is all zeros (z: -0.0 after rounding becomes 0.0) */
+static inline int ail2f_body_zero(const char *b) {
+    int digits = 0;
+    for (; *b; b++) {
+        if (*b == 'e' || *b == 'E' || *b == '%') break;
+        if (*b >= '0' && *b <= '9') { digits = 1; if (*b != '0') return 0; }
+    }
+    return digits;
+}
 static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {
     if (specobj.tag != AIL_T_STR) return ail_raise_c(cx, AIL_B_TYPEERROR, "format() argument 2 must be str");
     ail_str spec = ail_view_to_str(specobj);
@@ -811,9 +820,10 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
     if (x.tag == AIL_T_STR) {
         if (type && type != 's') { snprintf(msg, sizeof msg, "Unknown format code '%c' for object of type 'str'", type); return ail_raise_c(cx, AIL_B_VALUEERROR, msg); }
         if (f.sign) return ail_raise_c(cx, AIL_B_VALUEERROR, "Sign not allowed in string format specifier");
+        if (f.group) { snprintf(msg, sizeof msg, "Cannot specify '%c' with 's'.", f.group); return ail_raise_c(cx, AIL_B_VALUEERROR, msg); }
+        if (f.z) return ail_raise_c(cx, AIL_B_VALUEERROR, "Negative zero coercion (z) not allowed in string format specifier");
         if (f.alt) return ail_raise_c(cx, AIL_B_VALUEERROR, "Alternate form (#) not allowed in string format specifier");
         if (f.align == '=') return ail_raise_c(cx, AIL_B_VALUEERROR, "'=' alignment not allowed in string format specifier");
-        if (f.group) { snprintf(msg, sizeof msg, "Cannot specify '%c' with 's'.", f.group); return ail_raise_c(cx, AIL_B_VALUEERROR, msg); }
         ail_str s = ail_view_to_str(x);
         int64_t len = s.n;
         if (f.has_prec && f.prec < len) len = f.prec;
@@ -831,6 +841,7 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
             return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
         }
         if (f.has_prec) return ail_raise_c(cx, AIL_B_VALUEERROR, "Precision not allowed in integer format specifier");
+        if (f.z) return ail_raise_c(cx, AIL_B_VALUEERROR, "Negative zero coercion (z) not allowed in integer format specifier");
         if (type == 'c') {
             if (f.sign) return ail_raise_c(cx, AIL_B_VALUEERROR, "Sign not allowed with integer format specifier 'c'");
             if (f.alt) return ail_raise_c(cx, AIL_B_VALUEERROR, "Alternate form (#) not allowed with integer format specifier 'c'");
@@ -864,6 +875,7 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
         char body[400];
         int neg = signbit(d) && !isnan(d);
         ail2f_float_body(body, sizeof body, fabs(d), &f, type);
+        if (f.z && neg && ail2f_body_zero(body)) neg = 0;
         *out = ail2f_pad_num(cx, ail2f_signstr(neg, f.sign), "", body, &f);
         return AIL_OK;
     }
