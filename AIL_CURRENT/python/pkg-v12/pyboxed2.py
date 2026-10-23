@@ -694,11 +694,50 @@ static inline int ail2_print_scalar(ail_obj x) {
    any other non-str. The general path used to read a None's zero payload as an
    empty str -- `print("a", "b", sep=None)` wrote "ab" -- and a non-str silently
    lost the separator/newline instead of raising. */
+static inline const char *ail2_print_tname(ail_obj v, char *tnb, size_t cap) {
+    if ((v.tag == AIL_T_INST || v.tag == AIL_T_EXC) && ((ail_instobj *)v.o)->cls.tag == AIL_T_CLASS) {
+        ail_str cs = ail_view_to_str(((ail_classobj *)((ail_instobj *)v.o)->cls.o)->name);
+        size_t k = 0;
+        for (int64_t i = 0; i < cs.n && k + 1 < cap; i++) {
+            uint32_t ch = (uint32_t)ail_chr(cs, i);
+            tnb[k++] = ch < 128 ? (char)ch : '?';
+        }
+        tnb[k] = 0;
+        if (!strncmp(tnb, "_AilDeque_", 10)) return "collections.deque";
+        if (!strncmp(tnb, "_AilDDL_", 8) || !strncmp(tnb, "_AilDSS_", 8)) return "collections.defaultdict";
+        return tnb;
+    }
+    if (v.tag == AIL_T_ITER) {
+        ail_iterobj *it = (ail_iterobj *)v.o;
+        switch (it->kind) {
+            case AIL_IT_LIST: return "list_iterator";
+            case AIL_IT_TUPLE: return "tuple_iterator";
+            case AIL_IT_STR: return "str_iterator";
+            case AIL_IT_DICT_KEYS: return "dict_keyiterator";
+            case AIL_IT_DICT_VALUES: return "dict_valueiterator";
+            case AIL_IT_DICT_ITEMS: return "dict_itemiterator";
+            case AIL_IT_SET: return "set_iterator";
+            case AIL_IT_RANGE: return "range_iterator";
+            case AIL_IT_ENUMERATE: return "enumerate";
+            case AIL_IT_ZIP: return "zip";
+            case AIL_IT_MAP: return "map";
+            case AIL_IT_FILTER: return "filter";
+            case AIL_IT_USER: return ail__tname_c(it->target);
+            case AIL_IT_REVERSED:
+                if (it->target.tag == AIL_T_LIST) return "list_reverseiterator";
+                if (it->target.tag == AIL_T_RANGE) return "range_iterator";
+                return "reversed";
+            default: return "iterator";
+        }
+    }
+    return ail__tname_c(v);
+}
 static inline ail_st ail2_print_opt(ail_ctx *cx, ail_obj *v, const char *name, const char *dflt) {
     if (v->tag == AIL_T_NONE) { *v = ail_str_from_cstr(cx, dflt); return AIL_OK; }
     if (v->tag != AIL_T_STR) {
-        char buf[96];
-        snprintf(buf, sizeof buf, "%s must be None or a string, not %s", name, ail_type_name(v->tag));
+        char buf[160], tnb[80];
+        snprintf(buf, sizeof buf, "%s must be None or a string, not %s",
+                 name, ail2_print_tname(*v, tnb, sizeof tnb));
         return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
     }
     return AIL_OK;
@@ -706,8 +745,14 @@ static inline ail_st ail2_print_opt(ail_ctx *cx, ail_obj *v, const char *name, c
 
 static inline ail_st ail2_do_print(ail_ctx *cx, ail_obj *vals, int64_t n, ail_obj sep, ail_obj end) {
     ail_st opt_st;
-    if ((opt_st = ail2_print_opt(cx, &sep, "sep", " ")) != AIL_OK) return opt_st;
-    if ((opt_st = ail2_print_opt(cx, &end, "end", "\n")) != AIL_OK) return opt_st;
+    ail_obj opts[2] = { sep, end };
+    AIL_ROOT_N(cx, fr, opts, 2);
+    if ((opt_st = ail2_print_opt(cx, &opts[0], "sep", " ")) != AIL_OK
+        || (opt_st = ail2_print_opt(cx, &opts[1], "end", "\n")) != AIL_OK) {
+        AIL_FRAME_LEAVE(cx, fr);
+        return opt_st;
+    }
+    sep = opts[0]; end = opts[1];
     if (sep.tag == AIL_T_STR && end.tag == AIL_T_STR) {
         int scalar = 1;
         for (int64_t i = 0; i < n; i++) if (!ail2_print_scalar(vals[i])) { scalar = 0; break; }
@@ -717,6 +762,7 @@ static inline ail_st ail2_do_print(ail_ctx *cx, ail_obj *vals, int64_t n, ail_ob
                 ail2_out_scalar(cx, vals[i]);
             }
             ail2_out_str(cx, ail_view_to_str(end));
+            AIL_FRAME_LEAVE(cx, fr);
             return AIL_OK;
         }
     }
@@ -730,6 +776,7 @@ static inline ail_st ail2_do_print(ail_ctx *cx, ail_obj *vals, int64_t n, ail_ob
     ail2_text_stream_close(f, &buf, &sz);
     ail_st st = ail_out_write(cx, buf, (size_t)sz);
     free(buf);
+    AIL_FRAME_LEAVE(cx, fr);
     return st;
 }
 /* sepb4[i]==1 writes sep before part i -- lets a proven-str concat tree
@@ -738,8 +785,14 @@ static inline ail_st ail2_do_print(ail_ctx *cx, ail_obj *vals, int64_t n, ail_ob
 static inline ail_st ail2_do_print_parts(ail_ctx *cx, ail_obj *vals, const unsigned char *sepb4,
                                          int64_t n, ail_obj sep, ail_obj end) {
     ail_st opt_st;
-    if ((opt_st = ail2_print_opt(cx, &sep, "sep", " ")) != AIL_OK) return opt_st;
-    if ((opt_st = ail2_print_opt(cx, &end, "end", "\n")) != AIL_OK) return opt_st;
+    ail_obj opts[2] = { sep, end };
+    AIL_ROOT_N(cx, fr, opts, 2);
+    if ((opt_st = ail2_print_opt(cx, &opts[0], "sep", " ")) != AIL_OK
+        || (opt_st = ail2_print_opt(cx, &opts[1], "end", "\n")) != AIL_OK) {
+        AIL_FRAME_LEAVE(cx, fr);
+        return opt_st;
+    }
+    sep = opts[0]; end = opts[1];
     if (sep.tag == AIL_T_STR && end.tag == AIL_T_STR) {
         int scalar = 1;
         for (int64_t i = 0; i < n; i++) if (!ail2_print_scalar(vals[i])) { scalar = 0; break; }
@@ -749,6 +802,7 @@ static inline ail_st ail2_do_print_parts(ail_ctx *cx, ail_obj *vals, const unsig
                 ail2_out_scalar(cx, vals[i]);
             }
             ail2_out_str(cx, ail_view_to_str(end));
+            AIL_FRAME_LEAVE(cx, fr);
             return AIL_OK;
         }
     }
@@ -762,6 +816,7 @@ static inline ail_st ail2_do_print_parts(ail_ctx *cx, ail_obj *vals, const unsig
     ail2_text_stream_close(f, &buf, &sz);
     ail_st st = ail_out_write(cx, buf, (size_t)sz);
     free(buf);
+    AIL_FRAME_LEAVE(cx, fr);
     return st;
 }
 

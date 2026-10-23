@@ -12,9 +12,10 @@ empty string and silently lost the separator/newline; CPython raises
 TypeError "sep must be None or a string, not int".
 
 The general runtime now normalises None to the default and raises CPython's
-TypeError for any other non-str before writing a byte. The programs below keep
-the literal, argument, list, dict and attribute shapes plus no-argument and
-flush forms compared with CPython on both builds.
+TypeError for any other non-str before writing a byte, naming rich types (bytes,
+instances, iterators, exceptions) as CPython does. The programs below keep the
+literal, argument, list, dict and attribute shapes plus no-argument and flush
+forms compared with CPython on both builds.
 """
 import os
 import subprocess
@@ -64,8 +65,17 @@ def main() -> None:
 main()
 '''
 
-PRINT_WRONG_TYPES = r'''def main() -> None:
-    for v in [5, 1.5, True, [1]]:
+PRINT_WRONG_TYPES = r'''class C:
+    def __init__(self) -> None:
+        self.x = 1
+
+
+class E(Exception):
+    pass
+
+
+def main() -> None:
+    for v in [5, 1.5, True, [1], b"xy", bytearray(b"xy"), C(), iter([1]), E("x")]:
         try:
             print("a", "b", sep=v)
         except TypeError as e:

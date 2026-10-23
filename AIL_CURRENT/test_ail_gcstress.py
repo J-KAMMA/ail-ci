@@ -78,6 +78,36 @@ def main() -> None:
 
 main()
 ''',
+    'print_options': r'''
+class C:
+    def __init__(self) -> None:
+        self.sep = None
+        self.end = None
+
+
+def show(sep, end) -> None:
+    print("a", "b", sep=sep, end=end)
+
+
+def main() -> None:
+    print("x" * 100, "y" * 100, sep=None, end=None)
+    print("x", "y", sep=None)
+    print("x", "y", end=None)
+    s = None
+    e = None
+    show(s, e)
+    xs = [None, "-"]
+    print("x", "y", sep=xs[0], end=xs[0])
+    d = {"s": None}
+    print("x", "y", sep=d["s"], end=d["s"])
+    c = C()
+    print("x", "y", sep=c.sep, end=c.end)
+    print(*[], sep=None, end=None)
+    print("done")
+
+
+main()
+''',
     'strings': r'''
 def main() -> None:
     words = ["Éclair", "straße", "ΣΊΣΥΦΟΣ", "plain", "MiXeD"]
@@ -291,6 +321,9 @@ class GCStress(unittest.TestCase):
 
     def test_strings(self):
         self.check('strings')
+
+    def test_print_options(self):
+        self.check('print_options')
 
     def test_collections_heapq_copy(self):
         self.check('collections_heapq_copy')
