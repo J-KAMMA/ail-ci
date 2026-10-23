@@ -14477,6 +14477,17 @@ static inline ail_st ail_obj_hash(ail_ctx *cx, int64_t *out, ail_obj x) {
             }
             *out = (int64_t)h; return AIL_OK;
         }
+        case AIL_T_LIST: {
+            int kind = ail__view_kind(x);
+            if (kind == 2) {   /* dict_values inherits object.__hash__: hashable by identity, unlike the other views */
+                uint64_t h = (uint64_t)(uintptr_t)x.o;
+                h ^= h >> 33; h *= 0xff51afd7ed558ccdULL; h ^= h >> 33;
+                *out = (int64_t)h; return AIL_OK;
+            }
+            const char *name = kind == 1 ? "dict_keys" : kind == 3 ? "dict_items" : "list";
+            char buf[64]; snprintf(buf, sizeof buf, "unhashable type: '%s'", name);
+            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+        }
         default: {
             char buf[64]; snprintf(buf, sizeof buf, "unhashable type: '%s'", ail_type_name(x.tag));
             return ail_raise_c(cx, AIL_B_TYPEERROR, buf);

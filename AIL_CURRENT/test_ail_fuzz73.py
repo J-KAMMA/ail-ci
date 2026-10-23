@@ -10,6 +10,11 @@ snapshot list, so `[1] in d.keys()` printed `False`. The list branch of
 Values and items views keep CPython's compare-by-equality membership, so an unhashable
 tuple value in `d.items()` still matches (CPython does not hash it there).
 
+Unlike the keys and items views, a `dict_values` view inherits `object.__hash__` in
+CPython, so `d.values() in d.keys()` is a plain `False` and `hash(d.values())` works. It
+is hashed by identity here; keys and items views remain unhashable and now name
+themselves (`dict_keys` / `dict_items`) in the error, not the internal snapshot `list`.
+
 The programs below also keep hashable membership (numeric equal keys, tuples,
 frozensets, huge/negative/zero keys), empty views, aliases and the other two view kinds
 compared with CPython on both builds.
@@ -96,6 +101,40 @@ main()
 '''
 
 
+VIEWS_AS_ITEM = r'''def show(label, f):
+    try:
+        print(label, f())
+    except TypeError as e:
+        print(label, "TypeError", str(e))
+
+
+def main() -> None:
+    d = {"a": 1, (1, 2): 3}
+    show("keys-as-item", lambda: d.keys() in d.keys())
+    show("items-as-item", lambda: d.items() in d.keys())
+    show("values-as-item", lambda: d.values() in d.keys())
+    show("values-hashable", lambda: isinstance(hash(d.values()), int))
+    show("values-eq-self", lambda: d.values() == d.values())
+    show("values-in-values", lambda: d.values() in d.values())
+    show("list-literal", lambda: [d.keys()] in d.keys())
+    show("tuple-literal", lambda: (d.keys(),) in d.keys())
+    show("arg-keys", lambda: (lambda x: x in d.keys())(d.keys()))
+    show("dict-value", lambda: {"v": d.items()}["v"] in d.keys())
+    show("empty-keys-item", lambda: {}.keys() in d.keys())
+    show("empty-values-item", lambda: {}.values() in {}.keys())
+    show("hash-keys", lambda: hash(d.keys()))
+    show("hash-items", lambda: hash(d.items()))
+    show("hash-tuple-keys", lambda: hash((d.keys(),)))
+    show("hash-values", lambda: isinstance(hash(d.values()), int))
+    show("after-del", lambda: (d.pop((1, 2)), d.keys() in d.keys())[1])
+    show("values-after-clear", lambda: (d.clear(), d.values() in d.keys())[1])
+    print("done")
+
+
+main()
+'''
+
+
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -138,6 +177,9 @@ class Fuzz73Tests(unittest.TestCase):
 
     def test_keys_view_membership_hashable_and_other_views(self):
         self.check('view_keys_hashable', HASHABLE_AND_OTHER_VIEWS)
+
+    def test_views_used_as_the_item(self):
+        self.check('view_items_all', VIEWS_AS_ITEM)
 
 
 if __name__ == '__main__':
