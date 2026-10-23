@@ -44,7 +44,7 @@ NATIVE = {'int8': 'int8_t', 'int16': 'int16_t', 'int32': 'int32_t', 'uint8': 'ui
           'uint32': 'uint32_t', 'int': 'int64_t', 'uint64_bits': 'uint64_t'}
 EXCEPTIONS = ('OSError', 'ValueError', 'RuntimeError', 'KeyError', 'IndexError', 'OverflowError', 'EOFError')
 CHECKS = {'negative': '< 0', 'nonzero': '!= 0', 'null': '== 0', 'minus1': '== -1'}
-OPTIONS = ('lib', 'header', 'symbol', 'check', 'errno', 'exc', 'pkg_config', 'sources')
+OPTIONS = ('lib', 'header', 'symbol', 'check', 'errno', 'exc', 'pkg_config', 'sources', 'trust')
 
 
 class Param:
@@ -62,6 +62,7 @@ class Decl:
         self.check = self.exc = None
         self.sources = []
         self.errno = False
+        self.trust = False             # trust=True: the header is included but its prototype is not compared
         self.params = []
         self.result = None             # annotation name, or None for void
         self.tag = None                # per-file hash
@@ -88,7 +89,7 @@ def elem_info(name):
     """(C type, size in bytes) of the element type of ptr(T) / cptr(T)."""
     if name in INTS:
         return INTS[name][0], INTS[name][2] // 8
-    return {'c_double': ('double', 8), 'c_float': ('float', 4), 'c_bool': ('_Bool', 1)}[name]
+    return {'c_double': ('double', 8), 'c_float': ('float', 4), 'c_bool': ('_Bool', 1), 'c_void_p': ('void *', 8)}[name]
 
 
 def p_ctype(p):
@@ -129,8 +130,10 @@ class Session:
         self.workdir = None if workdir is None else Path(workdir)
         self.forbid = forbid
         self.decls = []
+        self.links = {}                 # declaring file -> [(library, pkg_config, directory)] from link()
         self.lowered = {}               # resolved path -> lowered text
         self.link_args = []
+        self.extra_libs = []            # `compile --link LIB`: the same as link("LIB") for the whole program
         self.notes = []
         self._owned = False
 
@@ -171,7 +174,7 @@ class Session:
             if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi' and node.level == 0:
                 for alias in node.names:
                     if alias.name == '*':
-                        imported.update(set(INTS) | PARAM_ANN | {'extern', 'length', 'ptr', 'cptr', 'declarations'})
+                        imported.update(set(INTS) | PARAM_ANN | {'extern', 'link', 'length', 'ptr', 'cptr', 'declarations'})
                         continue
                     if alias.asname not in (None, alias.name):
                         self._refuse(path, node, 'ail_ffi: import its names plainly (`from ail_ffi import extern, c_int`)')
@@ -186,6 +189,10 @@ class Session:
             return text
         decls = []
         for node in tree.body:
+            if isinstance(node, ast.Expr) and self._is_link(node.value, imported, module_names):
+                self._link(path, node.value)
+                blank.append((node.lineno, node.end_lineno))
+                continue
             if not isinstance(node, ast.FunctionDef):
                 continue
             deco = [d for d in node.decorator_list if self._is_extern(d, imported, module_names)]
@@ -220,6 +227,29 @@ class Session:
             for decl in decls:
                 block.extend(self._wrapper(decl))
         return '\n'.join(lines).rstrip('\n') + '\n' + '\n'.join(block) + ('\n' if block else '')
+
+    @staticmethod
+    def _is_link(node, imported, module_names):
+        if not isinstance(node, ast.Call):
+            return False
+        func = node.func
+        if isinstance(func, ast.Name):
+            return func.id == 'link' and 'link' in imported
+        return (isinstance(func, ast.Attribute) and func.attr == 'link' and isinstance(func.value, ast.Name)
+                and func.value.id in module_names)
+
+    def _link(self, path, call):
+        """`link("m", "z", pkg_config="zlib")` at module level: libraries for the stubs that have no `lib=`."""
+        libs = [a.value for a in call.args if isinstance(a, ast.Constant) and isinstance(a.value, str) and a.value]
+        pkg = None
+        for keyword in call.keywords:
+            if keyword.arg == 'pkg_config' and isinstance(keyword.value, ast.Constant) and isinstance(keyword.value.value, str):
+                pkg = keyword.value.value
+            else:
+                self._refuse(path, keyword.value, 'link: only pkg_config="name" is an option')
+        if not libs or len(libs) != len(call.args):
+            self._refuse(path, call, 'link("name", ...) takes library names or paths as string literals')
+        self.links.setdefault(str(path), []).extend((lib, pkg, str(path.parent)) for lib in libs)
 
     @staticmethod
     def _is_extern(node, imported, module_names):
@@ -273,6 +303,7 @@ class Session:
             decl.sources = [e.value for e in value.elts]
         decl.check = constant('check', str)
         decl.errno = bool(constant('errno', bool))
+        decl.trust = bool(constant('trust', bool))
         if decl.check is not None and decl.check not in CHECKS:
             self._refuse(path, options['check'], '%s: check must be one of %s' % (node.name, ', '.join(sorted(CHECKS))))
         if decl.errno and decl.check is None:
@@ -315,8 +346,8 @@ class Session:
                 if len(ann.args) != 1 or ann.keywords:
                     self._refuse(path, ann, '%s: %s(element C type)' % (node.name, kind))
                 element = self._ann_name(path, node, ann.args[0], imported, module_names, node.name)
-                if element not in INTS and element not in ('c_double', 'c_float', 'c_bool'):
-                    self._refuse(path, ann, '%s: %s takes an integer, float or bool C type' % (node.name, kind))
+                if element not in INTS and element not in ('c_double', 'c_float', 'c_bool', 'c_void_p'):
+                    self._refuse(path, ann, '%s: %s takes an integer, float, bool or c_void_p C type' % (node.name, kind))
                 param = Param(arg.arg, 'bytearray' if kind == 'ptr' else 'bytes')
                 param.elem = element
                 if default is not None:
@@ -446,8 +477,8 @@ class Session:
             rows.append(dict(
                 name=d.name, path=d.path, line=d.line, lib=d.lib, header=d.header, symbol=d.symbol,
                 prototype=d.prototype(),
-                header_checked=d.header is not None,
-                trusted_declaration=d.header is None,
+                header_checked=d.header is not None and not d.trust,
+                trusted_declaration=d.header is None or d.trust,
                 writes=[p.name for p in d.params if p.ann in ('bytearray', 'c_mut_void_p')],
                 errors=None if d.check is None else dict(check=d.check, errno=d.errno, exception=d.exc),
                 pointer_arguments=[p.name for p in d.params if p.ann in ('bytes', 'bytearray', 'c_const_void_p', 'c_mut_void_p', 'c_char_p', 'c_mut_char_p', 'c_void_p')]))
@@ -482,7 +513,8 @@ class Session:
             if not source.is_file():
                 raise ValueError('FFI source file not found: ' + str(source))
             shutil.copyfile(source, work / name)
-        code = ['#include <stddef.h>', '#include <stdint.h>', '#include <errno.h>', '#include <string.h>',
+        code = ['#ifndef _DEFAULT_SOURCE', '#define _DEFAULT_SOURCE 1', '#endif',      # POSIX and BSD declarations (gmtime_r, timegm) under -std=c11
+                '#include <stddef.h>', '#include <stdint.h>', '#include <errno.h>', '#include <string.h>',
                 '#include <sys/types.h>',
                 '#include <stdlib.h>']
         code += ['#include <%s>' % h for h in headers_system]
@@ -505,8 +537,9 @@ class Session:
                 extern_decls.append('extern %s;' % d.prototype())
             ptypes = ', '.join(d.c_params()) or 'void'
             ret = 'void' if d.result is None else result_ctype(d.result)
-            asserts.append('_Static_assert(_Generic(&%s, %s (*)(%s): 1, default: 0), "ail_ffi: the declaration of %s does not match its C prototype");'
-                           % (d.symbol, ret, ptypes, d.symbol))
+            if not d.trust:
+                asserts.append('_Static_assert(_Generic(&%s, %s (*)(%s): 1, default: 0), "ail_ffi: the declaration of %s does not match its C prototype");'
+                               % (d.symbol, ret, ptypes, d.symbol))
             if any(t in ('c_long', 'c_ulong') for t in [p.ann for p in d.params] + [d.result]):
                 asserts.append('_Static_assert(sizeof(long) == 8, "ail_ffi: c_long/c_ulong need a 64 bit long");')
             if any(t == 'c_size_t' or t == 'c_ssize_t' for t in [p.ann for p in d.params] + [d.result]):
@@ -590,7 +623,12 @@ class Session:
                 call_args.append('(%s)(void *)%s' % (cast, n))
                 bytearrays.append(n)
         res = d.result
-        real = '%s(%s)' % (d.symbol, ', '.join(call_args))
+        if d.trust:
+            # the header's prototype names types the stub cannot spell (a struct): call through the stub's own prototype
+            real = '((%s (*)(%s))%s)(%s)' % ('void' if res is None else result_ctype(res), ', '.join(d.c_params()) or 'void',
+                                             d.symbol, ', '.join(call_args))
+        else:
+            real = '%s(%s)' % (d.symbol, ', '.join(call_args))
         if res is None:
             ret_kind, native_ret, convert = 'void', 'void', None
         elif res in INTS:
@@ -653,24 +691,26 @@ class Session:
         functions[d.export] = dict(symbol=d.export, params=params, result=ret_kind)
         bodies.append('%s %s(%s) {\n%s\n}' % (native_ret, d.export, ', '.join(c_params) or 'void', '\n'.join(lines)))
 
+    def _flags(self, lib, directory, pkg_config):
+        if '/' in lib or lib.endswith(('.so', '.dylib', '.dll', '.a')) or '.so.' in lib:
+            path = Path(os.path.normpath(os.path.join(directory, lib)))
+            return [str(path), '-Wl,-rpath,' + str(path.parent)]
+        if pkg_config and shutil.which('pkg-config'):
+            found = subprocess.run(['pkg-config', '--libs', pkg_config], capture_output=True, text=True)
+            if found.returncode == 0 and found.stdout.strip():
+                return shlex.split(found.stdout)
+        return ['-l' + lib]
+
     def _link_args(self):
         args, seen = [], set()
-        for d in self.decls:
-            if d.lib is None:
-                continue
-            flags = []
-            lib = d.lib
-            if '/' in lib or lib.endswith(('.so', '.dylib', '.dll')) or '.so.' in lib:
-                path = Path(os.path.normpath(os.path.join(d.directory, lib)))
-                flags = [str(path), '-Wl,-rpath,' + str(path.parent)]
-            else:
-                if d.pkg_config and shutil.which('pkg-config'):
-                    found = subprocess.run(['pkg-config', '--libs', d.pkg_config], capture_output=True, text=True)
-                    if found.returncode == 0 and found.stdout.strip():
-                        flags = shlex.split(found.stdout)
-                if not flags:
-                    flags = ['-l' + lib]
-            for flag in flags:
+        wanted = [(d.lib, d.pkg_config, d.directory) for d in self.decls if d.lib is not None]
+        used = {d.path for d in self.decls}
+        for key, entries in self.links.items():
+            if key in used:
+                wanted.extend(entries)
+        wanted.extend((lib, None, os.getcwd()) for lib in self.extra_libs)
+        for lib, pkg, directory in wanted:
+            for flag in self._flags(lib, directory, pkg):
                 if flag not in seen:
                     seen.add(flag)
                     args.append(flag)

@@ -27,6 +27,9 @@ import ast
 import copy
 
 PAR_ITER = 'par_range'
+# typedpar.py's spelling: `_ail_par_range(lo, hi, workers)`, the same loop on at most `workers` threads
+# (ThreadPoolExecutor(max_workers=...).map, Pool(processes).map, joined Threads)
+PAR_ITER_CAP = '_ail_par_range'
 _BUILTINS = {'int': (1, 1), 'float': (1, 1), 'abs': (1, 1), 'min': (2, 2), 'max': (2, 2), 'round': (1, 1),
              'len': (1, 1), 'wrapping_add': (2, 2), 'wrapping_sub': (2, 2), 'wrapping_mul': (2, 2)}
 _ARITH = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow, ast.LShift, ast.RShift,
@@ -37,7 +40,7 @@ _HOW = ('; write results into a list or bytearray element indexed by the loop va
 
 def is_par(node):
     return (isinstance(node, ast.For) and isinstance(node.iter, ast.Call)
-            and isinstance(node.iter.func, ast.Name) and node.iter.func.id == PAR_ITER)
+            and isinstance(node.iter.func, ast.Name) and node.iter.func.id in (PAR_ITER, PAR_ITER_CAP))
 
 
 def _refuse(Unsupported, node, message):
@@ -383,6 +386,12 @@ def _rename(body, names, prefix):
 
 def _make(node, funcs, counter, U):
     it = node.iter
+    cap = None
+    if it.func.id == PAR_ITER_CAP:
+        if it.keywords or len(it.args) != 3:
+            raise _refuse(U, node, 'internal error: _ail_par_range takes (lo, hi, workers)')
+        cap = it.args[2]
+        it.args = it.args[:2]
     if it.keywords or len(it.args) not in (1, 2):
         raise _refuse(U, node, 'use range(stop) or range(start, stop); a step is not available')
     if not isinstance(node.target, ast.Name) or node.orelse:
@@ -404,6 +413,9 @@ def _make(node, funcs, counter, U):
                 'writes': sorted(body.writes)}
     pre = [ast.Assign(targets=[ast.Name(id=lo_name, ctx=ast.Store())], value=lo),
            ast.Assign(targets=[ast.Name(id=hi_name, ctx=ast.Store())], value=hi)]
+    if cap is not None:
+        node.par['cap'] = '_par_cap%d' % k
+        pre.append(ast.Assign(targets=[ast.Name(id=node.par['cap'], ctx=ast.Store())], value=cap))
     for stmt in pre + [node]:
         ast.copy_location(stmt, node)
         ast.fix_missing_locations(stmt)
