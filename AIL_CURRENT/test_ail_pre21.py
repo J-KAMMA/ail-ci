@@ -1,9 +1,10 @@
 """Pre-21: the sign of a zero float remainder follows the divisor, like CPython.
 
-The boxed runtime computed a float `%` with `fmod` and only corrected the sign of a NONZERO
-remainder, so the zero cases kept `fmod`'s sign (the dividend's): `0.0 % -3.0` printed `0.0`
-and `-0.0 % 3.0` printed `-0.0`. CPython returns a zero with the divisor's sign in both cases.
-The typed path's `ail_ffloormod` already did this; the boxed path now copies it.
+The boxed runtime and the unified path's inline fast path computed a float `%` with `fmod` and
+only corrected the sign of a NONZERO remainder, so the zero cases kept `fmod`'s sign (the
+dividend's): `0.0 % -3.0` printed `0.0` and `-0.0 % 3.0` printed `-0.0`. CPython returns a zero
+with the divisor's sign in both cases. The typed path's `ail_ffloormod` already did this; the
+other paths now copy it.
 """
 import os
 import subprocess
