@@ -2167,7 +2167,10 @@ class Compiler(boxclosure.ClosureMixin):
         for name in sorted(self.module_names):
             self._module_global_slot(name)
         for n in tree.body:
-            if isinstance(n, (ast.FunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom)):
+            if isinstance(n, ast.ClassDef):
+                self._init_class_attrs(n.name, main_ctx)
+                continue
+            if isinstance(n, (ast.FunctionDef, ast.Import, ast.ImportFrom)):
                 continue
             self._module_stmt(n, main_ctx)
         if not has_toplevel_exec:
@@ -2959,7 +2962,15 @@ class Compiler(boxclosure.ClosureMixin):
                 for i, a in enumerate(names):
                     if a in hidden_names:
                         hide |= 1 << i
-        self.classes[node.name] = {'base': base, 'methods': methods, 'class_attrs': class_attrs, 'dc': dc, 'dc_hide': hide}
+        # A class attribute is one value per CLASS, not one per instance: CPython evaluates the
+        # class body once, at the class-definition statement, and every instance reads that same
+        # object, so mutating a list/dict held there is visible through every instance.  Give each
+        # attribute a module-lifetime slot, fill it at the definition point in the module body, and
+        # share the reference with every instance and class read.
+        for i, (aname, aval) in enumerate(class_attrs):
+            class_attrs[i] = (aname, aval, self._module_global_slot('__ail_ca_%s_%d' % (node.name, i)))
+        self.classes[node.name] = {'base': base, 'methods': methods, 'class_attrs': class_attrs,
+                                   'dc': dc, 'dc_hide': hide}
         self.class_order.append(node.name)
 
     def _resolve_method(self, klass, mname):
@@ -3457,11 +3468,11 @@ class Compiler(boxclosure.ClosureMixin):
             recv_kind = self.get_kind(node.value.id, ctx)
             if recv_kind and recv_kind.startswith('instance:'):
                 cname = recv_kind.split(':', 1)[1]
-                for kls, kv in self.classes[cname].get('class_attrs', []):
+                for kls, kv, _slot in self.classes[cname].get('class_attrs', []):
                     if kls == node.attr:
                         # a subclass may rebind the attribute to a value of another kind
                         if any(node.attr == a for d in self._descendants(cname)
-                               for a, _ in self.classes[d].get('class_attrs', [])):
+                               for a, _v, _s in self.classes[d].get('class_attrs', [])):
                             return None
                         return self.infer_kind(kv, ctx)
         return None
@@ -4950,12 +4961,9 @@ class Compiler(boxclosure.ClosureMixin):
             # so read the literal the lookup through the bases finds, as CPython does
             k = node.value.id
             while k is not None and k in self.classes:
-                hits = [v for a, v in self.classes[k].get('class_attrs', []) if a == node.attr]
+                hits = [(v, s) for a, v, s in self.classes[k].get('class_attrs', []) if a == node.attr]
                 if hits:
-                    if isinstance(hits[-1], ast.Constant) or (isinstance(hits[-1], ast.UnaryOp)
-                                                              and isinstance(hits[-1].operand, ast.Constant)):
-                        return self.expr(hits[-1], ctx)
-                    break
+                    return self._cached_class_attr(hits[-1][1], hits[-1][0], ctx)
                 k = self.classes[k]['base']
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
         if prop_owners:
@@ -5920,6 +5928,31 @@ class Compiler(boxclosure.ClosureMixin):
             seen += 1
         return name in EXC_IDS
 
+    def _init_class_attrs(self, name, ctx):
+        """Evaluate a class body's attributes once, at its class-definition statement."""
+        for _aname, aval, slot in self.classes[name].get('class_attrs', []):
+            v = self.expr(aval, ctx)
+            ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
+
+    def _class_attr_value(self, slot, value, ctx):
+        """The one shared value of a class attribute, filling the slot lazily only when the module
+        body did not run (the array-entry shape, where there is no executable module statement)."""
+        if value is not None:
+            ctx.emit('if (g_slots_arr[%d].tag == AIL_T_UNBOUND) {' % slot)
+            ctx.indent += 1
+            v = self.expr(value, ctx)
+            ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
+            ctx.indent -= 1
+            ctx.emit('}')
+        return 'g_slots_arr[%d]' % slot
+
+    def _cached_class_attr(self, slot, value, ctx):
+        """Read a class attribute through the class object, not through an instance."""
+        v = self._class_attr_value(slot, value, ctx)
+        t = ctx.tmp()
+        ctx.emit('%s = %s;' % (t, v))
+        return t
+
     def _call_class(self, name, args, kwargs, ctx):
         cls = self.classes[name]
         info = self._resolve_method(name, '__init__')
@@ -5936,9 +5969,9 @@ class Compiler(boxclosure.ClosureMixin):
             chain.append(k)
             k = self.classes[k]['base']
         for kls in reversed(chain):
-            for aname, aval in self.classes[kls].get('class_attrs', []):
+            for aname, aval, slot in self.classes[kls].get('class_attrs', []):
                 self.attr_names.add(aname)
-                v = self.expr(aval, ctx)
+                v = self._class_attr_value(slot, aval, ctx)
                 ctx.emit('ail_inst_setattr(cx, %s, g_attr_%s, %s);' % (t, aname, v))
         if info:
             argcs = self._bind_args(name, info, args, kwargs, ctx)
