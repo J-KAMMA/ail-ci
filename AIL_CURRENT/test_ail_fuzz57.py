@@ -13,6 +13,11 @@ Found with small programs compared against CPython on both builds: the error rea
 code through a variable, a list item, an attribute and a dict value, and through an
 inherited property (the message names the subclass). Properties with setters still work
 through the same sources, for zero, negative, huge and wrong-typed values.
+
+The owner scan follows the MRO only through classes that define the name themselves: a
+subclass that shadows an inherited property with a plain method or a class attribute
+stores and reads an ordinary attribute instead of raising. The no-setter message is built
+from allocated strings, so class and property names of any length appear in full.
 """
 import os
 import subprocess
@@ -178,6 +183,126 @@ def main() -> None:
 main()
 '''
 
+SHADOW_SOURCES = r'''class Base:
+    def __init__(self):
+        self._x = 1
+
+    @property
+    def x(self):
+        return self._x
+
+
+class MethodShadow(Base):
+    def x(self):
+        return 5
+
+
+class Leaf(MethodShadow):
+    pass
+
+
+class AttrShadow(Base):
+    x = 9
+
+
+class DeepAttr(MethodShadow):
+    x = 11
+
+
+class SetterShadow(Base):
+    @property
+    def x(self):
+        return self._x
+
+    @x.setter
+    def x(self, v):
+        self._x = v
+
+
+class MethodBase:
+    def x(self):
+        return 3
+
+
+class PropertyOverMethod(MethodBase):
+    @property
+    def x(self):
+        return 7
+
+
+class Box:
+    pass
+
+
+def put(o, v):
+    try:
+        o.x = v
+        print("stored", o.x)
+    except AttributeError as e:
+        print("AE", e)
+
+
+def main() -> None:
+    b = Base()
+    print(b.x)
+    try:
+        b.x = 2
+    except AttributeError as e:
+        print("AE", e)
+    m = MethodShadow()
+    print(m.x())
+    m.x = 6
+    print(m.x)
+    leaf = Leaf()
+    leaf.x = 7
+    print(leaf.x)
+    a = AttrShadow()
+    print(a.x)
+    a.x = 8
+    print(a.x)
+    d = DeepAttr()
+    print(d.x)
+    d.x = 10
+    print(d.x)
+    s = SetterShadow()
+    s.x = 12
+    print(s.x)
+    try:
+        PropertyOverMethod().x = 1
+    except AttributeError as e:
+        print("AE", e)
+    print(PropertyOverMethod().x, MethodBase().x())
+    box = Box()
+    box.o = leaf
+    table = {"o": leaf}
+    xs = [leaf]
+    put(leaf, 0)
+    put(xs[0], -3)
+    put(box.o, 10 ** 18)
+    put(table["o"], "text")
+    print(leaf.x, xs[0].x, box.o.x, table["o"].x)
+
+
+main()
+'''
+
+LONG_NAMES_SOURCES = (
+    'class ' + 'C' * 120 + ':\n'
+    '    @property\n'
+    '    def ' + 'q' * 200 + '(self):\n'
+    '        return 1\n'
+    '\n'
+    'class ' + 'D' * 130 + '(' + 'C' * 120 + '):\n'
+    '    pass\n'
+    '\n'
+    'for o in (' + 'C' * 120 + '(), ' + 'D' * 130 + '()):\n'
+    '    try:\n'
+    '        o.' + 'q' * 200 + ' = 2\n'
+    '    except AttributeError as e:\n'
+    '        print(len(str(e)), e)\n'
+)
+
+
 
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
@@ -227,6 +352,12 @@ class Fuzz57Tests(unittest.TestCase):
 
     def test_nested_property_getters(self):
         self.check('nested_getters', NESTED_GETTERS)
+
+    def test_shadowed_inherited_property(self):
+        self.check('shadowed', SHADOW_SOURCES)
+
+    def test_long_property_error_names(self):
+        self.check('long_names', LONG_NAMES_SOURCES)
 
 
 if __name__ == '__main__':

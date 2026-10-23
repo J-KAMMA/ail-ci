@@ -574,17 +574,28 @@ __attribute__((noinline, cold)) static ail_st ail2_no_attr(ail_ctx *cx, ail_obj 
 
 PROP_NO_SET_C = r'''
 /* `obj.NAME = v` where the class's @property NAME has no setter: CPython raises AttributeError
-   with the instance's class name (a subclass included), before any attribute is stored. */
+   with the instance's class name (a subclass included), before any attribute is stored.  The
+   class and property names have no length limit (build the message from allocations, not a
+   fixed stack buffer). */
 __attribute__((noinline, cold)) static ail_st ail2_prop_no_setter(ail_ctx *cx, ail_obj x, const char *name) {
-    char tn[80], buf[200];
+    ail_obj parts[5];
+    parts[0] = parts[1] = parts[2] = parts[3] = parts[4] = ail_box_none();
+    AIL_ROOT_N(cx, fr, parts, 5);
     if ((x.tag == AIL_T_INST || x.tag == AIL_T_EXC) && ((ail_instobj *)x.o)->cls.tag == AIL_T_CLASS) {
-        ail_str s = ail_view_to_str(((ail_classobj *)((ail_instobj *)x.o)->cls.o)->name);
-        size_t k = 0;
-        for (int64_t i = 0; i < s.n && k + 1 < sizeof tn; i++) { uint32_t ch = (uint32_t)ail_chr(s, i); tn[k++] = ch < 128 ? (char)ch : '?'; }
-        tn[k] = 0;
-    } else snprintf(tn, sizeof tn, "%s", ail__tname_c(x));
-    snprintf(buf, sizeof buf, "property '%s' of '%s' object has no setter", name, tn);
-    return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, buf);
+        parts[3] = ((ail_classobj *)((ail_instobj *)x.o)->cls.o)->name;
+    } else {
+        parts[3] = ail_str_from_cstr(cx, ail__tname_c(x));
+    }
+    parts[0] = ail_str_from_cstr(cx, "property '");
+    parts[1] = ail_str_from_cstr(cx, name);
+    parts[2] = ail_str_from_cstr(cx, "' of '");
+    parts[4] = ail_str_from_cstr(cx, "' object has no setter");
+    for (int i = 1; i < 5; i++) {
+        parts[0] = ail_str_cat(cx, parts[0], parts[i]);
+    }
+    ail_obj msg = parts[0];
+    AIL_FRAME_LEAVE(cx, fr);
+    return ail_raise(cx, cx->builtin_cls[AIL_B_ATTRIBUTEERROR], msg);
 }
 '''
 
@@ -4974,7 +4985,7 @@ class Compiler(boxclosure.ClosureMixin):
                 k = self.classes[k]['base']
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
         if prop_owners:
-            return self._property_read(node, prop_owners, ctx)
+            return self._property_read(node, self._attr_definers(node.attr, read=True), ctx)
         obj = self.expr(node.value, ctx)
         if node.attr == 'args' and not any('args' in c['methods'] for c in self.classes.values()):
             # e.args of an exception value (the run time's own carry their message)
@@ -5006,19 +5017,38 @@ class Compiler(boxclosure.ClosureMixin):
         return '((%s.tag == AIL_T_INST || %s.tag == AIL_T_EXC) && ail_class_is_or_subclass(((ail_instobj *)%s.o)->cls, ' \
                'g_slots_arr[%d]))' % (obj, obj, obj, self.global_slots['class:' + c])
 
+    def _attr_definers(self, attr, read=False):
+        """The classes that define `attr` themselves, not through a base: a method (a @property
+        getter included), a property setter, or a class attribute.  A class that shadows an
+        inherited property with one of the first or last kinds makes an assignment store an
+        ordinary instance attribute (CPython's MRO lookup stops before the base property)."""
+        out = []
+        for c in self.class_order:
+            info = self.classes[c]
+            defines_read = attr in info['methods'] or any(a == attr for a, _v in info.get('class_attrs', ()))
+            if defines_read if read else (defines_read or ('__ail_set_' + attr) in info['methods']):
+                out.append(c)
+        return out
+
     def _property_read(self, node, owners, ctx):
         """obj.NAME where a class of the program has a @property NAME: its getter for an instance of such a class
-        (the most derived first), the attribute otherwise."""
+        (the most derived first), the attribute otherwise.  A more-derived plain method or class
+        attribute shadows the inherited property, so that branch reads an ordinary attribute."""
         obj = self.expr(node.value, ctx)
         owners = sorted(owners, key=lambda c: -sum(1 for k in self.classes if self._is_subclass_of(c, k)))
         t = ctx.tmp()
         first = True
         for c in owners:
-            info = self.classes[c]['methods'][node.attr]
+            info = self.classes[c]['methods'].get(node.attr)
             ctx.emit('%sif (%s) {' % ('' if first else '} else ', self._property_owner_cond(obj, c)))
             first = False
             ctx.indent += 1
-            ctx.emit('st = %s(cx, &%s, %s);' % (info['cname'], t, obj))
+            if info is not None and info.get('is_property'):
+                ctx.emit('st = %s(cx, &%s, %s);' % (info['cname'], t, obj))
+            else:
+                self.attr_names.add(node.attr)
+                ctx.emit('st = ail_inst_getattr(cx, &%s, %s, g_attr_%s, %s);' %
+                         (t, obj, node.attr, c_str_literal(node.attr)))
             ctx.check()
             ctx.indent -= 1
         ctx.emit('} else {')
@@ -9399,23 +9429,29 @@ class Compiler(boxclosure.ClosureMixin):
             self.attr_names.add(target.attr)
             # A property getter or setter is a class-level descriptor: an assignment runs the setter
             # of the most derived class that has one, else CPython raises AttributeError ("no setter").
-            owners = [c for c in self.class_order
-                      if self.classes[c]['methods'].get(target.attr, {}).get('is_property')
-                      or '__ail_set_' + target.attr in self.classes[c]['methods']]
-            if owners:
-                owners = sorted(owners, key=lambda c: -sum(1 for k in self.classes if self._is_subclass_of(c, k)))
+            prop_owners = [c for c in self.class_order
+                           if self.classes[c]['methods'].get(target.attr, {}).get('is_property')
+                           or '__ail_set_' + target.attr in self.classes[c]['methods']]
+            if prop_owners:
+                # Walk the MRO from the most derived defining class: a plain method or a class
+                # attribute in a subclass shadows an inherited property, so that branch stores.
+                owners = sorted(self._attr_definers(target.attr),
+                                key=lambda c: -sum(1 for k in self.classes if self._is_subclass_of(c, k)))
                 first = True
                 for c in owners:
                     ctx.emit('%sif (%s) {' % ('' if first else '} else ', self._property_owner_cond(obj, c)))
                     first = False
                     ctx.indent += 1
-                    setter = self.classes[c]['methods'].get('__ail_set_' + target.attr)
+                    info = self.classes[c]['methods']
+                    setter = info.get('__ail_set_' + target.attr)
                     if setter is not None:
                         dummy = ctx.tmp()
                         ctx.emit('st = %s(cx, &%s, %s, %s);' % (setter['cname'], dummy, obj, value_c))
-                    else:
+                    elif info.get(target.attr, {}).get('is_property'):
                         self.needs_prop_no_setter = True
                         ctx.emit('st = ail2_prop_no_setter(cx, %s, %s);' % (obj, c_str_literal(target.attr)))
+                    else:
+                        ctx.emit('st = ail_inst_setattr_chk(cx, %s, g_attr_%s, %s);' % (obj, target.attr, value_c))
                     ctx.check()
                     ctx.indent -= 1
                 ctx.emit('} else {')
