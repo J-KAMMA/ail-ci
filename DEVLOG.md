@@ -1,5 +1,19 @@
 # DEVLOG
 
+## 2026-10-23 - f03: `int(1e300)` is refused at compile time (job-pre9-10240011)
+
+CPython's int is unbounded, so `int(1e300)` returns an exact big integer; AIL's int is 64-bit
+(SEMANTICS section 1) and the conversion instead ended the program at the int64 boundary
+(`integer overflow`) on both the typed/default and general builds. The value is known at compile
+time, so `int(<float literal>)` outside [-2**63, 2**63) is now refused by name in all three
+emitters (`pyfunc.py`, `pyboxed2.py`, `pyboxed.py`, through `pyfront.refuse_int_float_literal`),
+the same way an out-of-range integer literal already was. In-range float literals and values
+arriving through arguments, lists, attributes, dicts or variables keep the ordinary conversion.
+
+`test_ail_pre9.py` covers the refused literals (1e300, -1e300, 2**63 as a float, an infinity
+literal) in default/general builds on AIL_IR=0/1, and compares in-range literal and flow results
+with CPython. No `docs/spec/DIFFERENCES.md` exists in this export, so no row was added.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
