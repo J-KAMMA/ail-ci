@@ -806,7 +806,7 @@ static inline ail_st ail2_aug_probe(ail_ctx *cx, ail_obj *cur, ail_obj **slot,
         if (st != AIL_OK) return st;
         if (!v) {
             int fac = m->dd_factory;
-            if (!fac) return ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], ail_obj_repr(cx, key));
+            if (!fac) return ail_raise_key(cx, key);
             ail_obj dflt = fac == 1 ? ail_box_int(0) : fac == 2 ? ail_list_new(cx)
                          : fac == 3 ? ail_set_new(cx) : ail_str_from_cstr(cx, "");
             st = ail_map_set(cx, m, key, dflt); if (st != AIL_OK) return st;

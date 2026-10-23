@@ -1,5 +1,26 @@
 # DEVLOG
 
+## 2026-10-23 - Runtime KeyError keeps its key (job-pre12-10240013)
+
+The review of job fuzz81 listed a pre-existing difference for typed tuple-keyed containers:
+a missing key in a `dict[tuple[int, int], int]` or `set[tuple[int, int]]` printed
+`KeyError('(4, 5)')` with `e.args == ('(4, 5)',)`, where CPython keeps the tuple itself
+(`KeyError((4, 5))`, `e.args == ((4, 5),)`). The tuple program falls back to the general path,
+which raised the runtime `KeyError` with `ail_obj_repr(key)` as the message and therefore as the
+argument.
+
+* `cruntime.py` now has `ail_raise_key`, which stores the raw key in `KeyError.args[0]` while
+  keeping `repr(key)` as the message. Dict lookup, `pop`, `del`, `popitem`, `set.remove` and
+  `set.pop` use it; `pyboxed2.py` uses it for the augmented `d[k] += v` probe. Scalar keys on the
+  general path are fixed by the same cause.
+* `test_ail_pre12.py` covers tuple-keyed dict get/pop with the key coming from a literal, a
+  variable, an argument, a list item, an attribute and a dict value, tuple-keyed `set.remove`,
+  `discard`, `popitem`/`set.pop` on empty containers, scalar keys on the same runtime path, and
+  non-raising `get`/`pop`/`setdefault`.
+* Probes `pre12_scalar_types`, `pre12_tuple_types`, `pre12_sources`, `pre12_setops`,
+  `pre12_dictops`, `pre12_aug`, `pre12_nonraise`, `pre12_plain` and the review cases r19/r20 match
+  CPython on both builds.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
