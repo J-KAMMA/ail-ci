@@ -4998,7 +4998,12 @@ class Compiler(boxclosure.ClosureMixin):
                     if isinstance(hits[-1], ast.Constant) or (isinstance(hits[-1], ast.UnaryOp)
                                                               and isinstance(hits[-1].operand, ast.Constant)):
                         return self.expr(hits[-1], ctx)
-                    break
+                    raise Unsupported('reading the class attribute %s.%s through the class: its value is '
+                                      'not a constant, and the general path can only read a class attribute '
+                                      'through the class when it is an int/float/str/bytes/bool literal.\n'
+                                      '  write instead: read it from an instance (`%s().%s`) or store the '
+                                      'value in a module-level constant'
+                                      % (node.value.id, node.attr, node.value.id, node.attr))
                 k = self.classes[k]['base']
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
         if prop_owners:
