@@ -1,5 +1,21 @@
 # DEVLOG
 
+## 2026-10-23 - reversed(dict) (job-pre5-10240009)
+
+The fuzz73 review's pre-existing difference reproduced on both builds: `reversed(d)` raised
+`TypeError: 'dict' object is not reversible` while CPython returns the keys in reverse insertion
+order. `ail_iter_reversed` now has a dict case, and the new `AIL_IT_DICT_REV_KEYS` iterator walks
+the dense entry array backwards. It keeps CPython's size check on every live step
+(`dictionary changed size during iteration`) and marks itself exhausted once a next past the end
+has been attempted, so a later resize is not reported after StopIteration.
+
+`test_ail_pre5.py` covers empty, one/many entries, int/str/bool/tuple/None/float keys, int64-width
+and negative keys, Unicode keys, reverse order after deletion/update, values reaching the call as
+an argument, a list item, an attribute and a dict value, aliasing, defaultdict, a 200-entry dict,
+the typed path, and mutation (delete, add, same-size replace, clear+refill, value-only update,
+empty then add, yielded-all then add, exhausted then add). It runs on the general path and on the
+default build with IR 0 and 1. No DIFFERENCES file exists in this export, so no row was added.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

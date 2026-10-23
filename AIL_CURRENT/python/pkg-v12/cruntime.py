@@ -14080,7 +14080,7 @@ typedef struct { ail_gcobj hdr; ail_obj func, self; } ail_boundobj;
    these need per-kind allocation beyond the ail_iterobj itself. */
 enum {
     AIL_IT_LIST = 1, AIL_IT_TUPLE, AIL_IT_STR, AIL_IT_DICT_KEYS, AIL_IT_DICT_VALUES,
-    AIL_IT_DICT_ITEMS, AIL_IT_SET, AIL_IT_RANGE, AIL_IT_ENUMERATE, AIL_IT_ZIP,
+    AIL_IT_DICT_ITEMS, AIL_IT_DICT_REV_KEYS, AIL_IT_SET, AIL_IT_RANGE, AIL_IT_ENUMERATE, AIL_IT_ZIP,
     AIL_IT_REVERSED, AIL_IT_MAP, AIL_IT_FILTER, AIL_IT_STREAM, AIL_IT_USER
 };
 typedef struct { ail_gcobj hdr; int kind; ail_obj target; ail_obj extra; int64_t idx, idx2; ail_st (*read_next)(ail_ctx *, ail_obj *); } ail_iterobj;
@@ -15764,8 +15764,18 @@ static inline ail_st ail_iter_reversed(ail_ctx *cx, ail_obj *out, ail_obj seq) {
     }
     if (seq.tag == AIL_T_LIST || seq.tag == AIL_T_TUPLE) n = ((ail_vecobj *)seq.o)->n;
     else if (seq.tag == AIL_T_STR) n = seq.sv.len;
+    else if (seq.tag == AIL_T_DICT) {
+        /* reversed(d) walks the dense entry array from the end; idx2 is the size the iterator
+           started with (as for keys()), and -1 marks it exhausted so a later resize is not
+           reported after the last item, as CPython does. */
+        n = ((ail_mapobj *)seq.o)->n;
+        *out = ail__iter_wrap(cx, AIL_IT_DICT_REV_KEYS, seq, ail_box_none(), n - 1);
+        ((ail_iterobj *)out->o)->idx2 = n;
+        return AIL_OK;
+    }
     else { char buf[64]; snprintf(buf, sizeof buf, "'%s' object is not reversible", ail_type_name(seq.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
-    *out = ail__iter_wrap(cx, AIL_IT_REVERSED, seq, ail_box_none(), n - 1); return AIL_OK;
+    *out = ail__iter_wrap(cx, AIL_IT_REVERSED, seq, ail_box_none(), n - 1);
+    return AIL_OK;
 }
 static inline ail_st ail_iter_map(ail_ctx *cx, ail_obj *out, ail_obj fn, ail_obj iterable) {
     AIL_ROOT1(cx, fr, fn);
@@ -15827,6 +15837,13 @@ static inline ail_st ail_next(ail_ctx *cx, ail_obj *out, ail_obj iterobj) {
             it->idx2 = (int64_t)(left - UINT64_C(1));
             it->idx = (int64_t)((uint64_t)it->idx + (uint64_t)it->extra.i);   /* wraps only past the last item */
             return AIL_OK;
+        }
+        case AIL_IT_DICT_REV_KEYS: {
+            ail_mapobj *m = (ail_mapobj *)it->target.o;
+            if (it->idx2 < 0) return AIL_STOP;   /* already exhausted: later resizes are not reported */
+            if (m->n != it->idx2) return ail_raise_c(cx, AIL_B_RUNTIMEERROR, "dictionary changed size during iteration");
+            if (it->idx < 0) { it->idx2 = -1; return AIL_STOP; }
+            *out = m->entries[it->idx--].key; return AIL_OK;
         }
         case AIL_IT_REVERSED: {
             if (it->idx < 0) return AIL_STOP;
