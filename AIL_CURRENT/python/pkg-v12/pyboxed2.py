@@ -33,7 +33,7 @@ import os
 import re
 import runpy
 
-from pyfront import Unsupported, refuse_complex_pow
+from pyfront import Unsupported, is_negative_int64_min_power, refuse_complex_pow
 import filelib
 import hashlower
 import pyfunc
@@ -4508,6 +4508,8 @@ class Compiler(boxclosure.ClosureMixin):
         return acc
 
     def expr_UnaryOp(self, node, ctx):
+        if is_negative_int64_min_power(node):
+            return 'ail_box_int(-9223372036854775807LL - 1LL)'
         v = self.expr(node.operand, ctx)
         if isinstance(node.op, ast.USub):
             t = ctx.tmp()

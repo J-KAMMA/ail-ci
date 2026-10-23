@@ -1,5 +1,30 @@
 # DEVLOG
 
+## 2026-10-23 - `-2**63` no longer overflows (job-pre3-10240008)
+
+`print(-2**63 < 0)` and comparisons chained over it raised `integer overflow` on both builds;
+CPython prints `False`. The value is INT64_MIN and is inside int64, but Python parses the spelling
+as `-(2**63)`, so evaluating the positive power first overflows before the minus can bring it back
+into range. Only a one-line `print(<expression>)` escaped, by falling back to the general path.
+
+The spelling is now recognised in every emitter:
+
+* `pyfront.is_negative_int64_min_power` identifies `UnaryOp(USub, BinOp(Pow, 2, 63))`.
+* `pyboxed2.expr_UnaryOp` (general path) boxes INT64_MIN directly.
+* `pyfunc._expr` (typed legacy emitter) returns the INT64_MIN constant.
+* `ir/lower.py` (the default typed emitter) lowers it to the same constant. This path was the
+  missing one: the legacy `_expr` special case ran during its probe compile, but the final C came
+  from the IR, which evaluated `ail_ipow(2, 63)` and then `ck_neg`.
+
+`test_ail_pre3.py` covers the reported chain plus `==`, `!=`, `<=`/`>=`, function arguments, list
+items, dict values, class attributes, aliasing, empty containers, float operands and the adjacent
+int64 literals. Each program is built with the general path forced, the default IR build and the
+typed legacy build (`AIL_IR=0`); stdout and exit status match CPython in all three.
+
+No new DIFFERENCES row: this removes the difference instead of documenting one. Forms that still
+compute an out-of-range intermediate are unchanged, e.g. `2**63`, `-2**64`, `-2**63 - 1` and
+`-(2**63 - 1)`.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

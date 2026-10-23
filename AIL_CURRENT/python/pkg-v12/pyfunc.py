@@ -66,7 +66,8 @@ import typedinherit
 import shadowing
 import rangecheck
 from pipeline import PipelineError
-from pyfront import BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Unsupported, _use, refuse_complex_pow
+from pyfront import (BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Unsupported, _use,
+                    is_negative_int64_min_power, refuse_complex_pow)
 
 # A capability marker, not a behaviour: lets a SHARED judge (one file imported against many
 # `pkg-*` copies of this module, e.g. `test_floatparam.py`) ask "does THIS copy infer a float
@@ -13206,6 +13207,8 @@ def _expr(node, ctx):
         if not isinstance(node.op, ast.Not) and _is_ref_kind(_etype(node.operand, ctx)):
             raise Unsupported('a unary numeric operation on a struct is unsupported')
         if isinstance(node.op, ast.USub):
+            if is_negative_int64_min_power(node):
+                return _c_int_literal(-(1 << 63))
             if (isinstance(node.operand, ast.Constant)
                     and type(node.operand.value) is int and node.operand.value == 1 << 63):
                 return _c_int_literal(-(1 << 63))

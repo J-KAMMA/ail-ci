@@ -134,6 +134,25 @@ def _number_constant(node):
     return None
 
 
+def is_negative_int64_min_power(node):
+    """Is `node` the spelling `-2**63` (or `-(2**63)`)?
+
+    Python parses `-2**63` as `UnaryOp(USub, BinOp(Pow, Constant(2), Constant(63)))`:
+    the positive power is outside int64, but its negation, INT64_MIN, is inside. Emitting
+    the power first raises `integer overflow` at run time, before the minus can bring the
+    result back into range. The decimal literal `-9223372036854775808` is a different AST
+    shape (`USub(Constant(9223372036854775808))`) and is not what this helper detects.
+    """
+    if not (isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub)):
+        return False
+    power = node.operand
+    if not (isinstance(power, ast.BinOp) and isinstance(power.op, ast.Pow)):
+        return False
+    base, exponent = _number_constant(power.left), _number_constant(power.right)
+    return (type(base) is int and type(exponent) is int
+            and base == 2 and exponent == 63)
+
+
 def refuse_complex_pow(node):
     """`(-4.0) ** 0.5`: a negative base to a fractional power is a complex number in Python, and this
     language has no complex type. Constant operands are refused here, at compile time; any other
