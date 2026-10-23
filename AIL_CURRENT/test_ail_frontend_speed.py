@@ -10,6 +10,7 @@ The bound is on CPU time of the child process, so a loaded machine cannot fail i
 used 14-17 s of CPU here, the current one about 1.5 s. A second test pins that turning the cache off
 (AIL_QUERY_CACHE=0) generates byte-identical C.
 """
+import ast
 import json
 import os
 import resource
@@ -109,6 +110,49 @@ fn main() {
 }
 """
 
+PYTHON_OBJ = """\
+def heads(words: list) -> list:
+    out: list = []
+    for w in words:
+        out.append(w[:1])
+    return out
+
+
+def total(rows: list) -> int:
+    t: int = 0
+    for row in rows:
+        for cell in row:
+            t = t + cell
+    return t
+
+
+DATA: list = [1, 2, 3]
+
+
+def main() -> None:
+    print(total([[1, 2], [3]]), heads(["ab", "cd"]))
+"""
+
+PYTHON_SCRIPT = """\
+def fib(n: int) -> int:
+    a: int = 0
+    b: int = 1
+    for _ in range(n):
+        a, b = b, a + b
+    return a
+
+
+def main() -> None:
+    print(fib(10))
+"""
+
+PYC_TO_C = """
+import sys
+sys.path[:0] = [sys.argv[1] + "/python/pkg-v12", sys.argv[1]]
+import pyc
+sys.stdout.write(pyc.to_c(sys.stdin.read(), strict=True))
+"""
+
 TO_C = """
 import sys
 sys.path[:0] = [sys.argv[1] + "/python/pkg-v12", sys.argv[1]]
@@ -145,6 +189,64 @@ class FrontendSpeed(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             outputs.append(result.stdout)
         self.assertIn('norm', outputs[0])
+        self.assertEqual(outputs[0], outputs[1])
+
+
+class FastWalk(unittest.TestCase):
+    """`fastwalk.walk` replaces the front end's `ast.walk`. It must yield exactly what the standard
+    library yields -- every node, once, in the same breadth-first order -- and installing it must
+    not change a byte of the generated C."""
+
+    @staticmethod
+    def reference(node):
+        """The standard library's own walk (ast.py: a deque fed with iter_child_nodes)."""
+        from collections import deque
+        todo = deque([node])
+        while todo:
+            current = todo.popleft()
+            yield current
+            todo.extend(ast.iter_child_nodes(current))
+
+    def sources(self):
+        return (PYTHON_SCRIPT, PYTHON_OBJ)
+
+    def ail_source(self, source):
+        """The AIL-syntax programs, translated to the block syntax the compiler parses as Python."""
+        sys.path[:0] = [str(ROOT / 'python/pkg-v12'), str(ROOT)]
+        try:
+            from ail_syntax import translate
+            return translate(source)
+        finally:
+            del sys.path[:2]
+
+    def test_yields_the_standard_librarys_nodes(self):
+        sys.path.insert(0, str(ROOT / 'python/pkg-v12'))
+        try:
+            import fastwalk
+        finally:
+            sys.path.pop(0)
+        for source in self.sources() + (self.ail_source(NBODY), self.ail_source(SMALL)):
+            tree = ast.parse(source)
+            self.assertEqual([id(n) for n in fastwalk.walk(tree)], [id(n) for n in self.reference(tree)])
+            # ... including a subtree and a leaf, and a node the walk reaches twice nowhere
+            for root in (tree.body[0], tree.body[-1], tree):
+                self.assertEqual([id(n) for n in fastwalk.walk(root)], [id(n) for n in self.reference(root)])
+
+    def test_install_is_the_walk_the_compiler_uses(self):
+        probe = ('import sys; sys.path[:0] = [sys.argv[1] + "/python/pkg-v12"]; import ast, fastwalk, pyc; '
+                 'print(ast.walk is fastwalk.walk)')
+        result = subprocess.run([sys.executable, '-c', probe, str(ROOT)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), 'True')
+
+    def test_generated_c_is_identical_to_the_standard_walk(self):
+        outputs = []
+        for mode in ('1', '0'):
+            result = subprocess.run([sys.executable, '-c', PYC_TO_C, str(ROOT)], input=PYTHON_SCRIPT,
+                                    capture_output=True, text=True, env=dict(os.environ, AIL_FASTWALK=mode))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            outputs.append(result.stdout)
+        self.assertIn('int64_t fib', outputs[0])
         self.assertEqual(outputs[0], outputs[1])
 
 
