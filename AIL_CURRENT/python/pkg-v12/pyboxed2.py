@@ -2106,6 +2106,11 @@ class Compiler(boxclosure.ClosureMixin):
         # operator methods, identity ==, hashing, str() through the class chain and AttributeError on a non-instance
         # are dispatched by the run time in every program that has a class (C30-C32: they were silent or fatal)
         self.dunder_ops = bool(self.classes)
+        # a class defining an in-place operator makes the run time ask it (dunderrt.patch(inplace=...))
+        self.dunder_inplace = any(
+            any(name in cls['methods'] for name in ('__iadd__', '__isub__', '__imul__',
+                                                    '__iand__', '__ior__', '__ixor__'))
+            for cls in self.classes.values())
 
         # BRIEF_mixed_mode.md: after every top-level function is registered (`self.functions`,
         # needed to check a candidate for *args/**kwargs/keyword-only parameters) and before any
@@ -9649,6 +9654,10 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('st = %s(cx, &%s, %s, %s);' % (fn, new, cur, rhs))
             ctx.check()
             ctx.emit('%s = %s;' % (self.name_ref(t.id, ctx), new))
+            if isinstance(_tk, str) and _tk.startswith('instance:'):
+                # `a += b` is `a = a.__iadd__(b)`: the method may return any type (CPython rebinds the
+                # name), so the class kind settled at the first assignment no longer holds
+                self.set_kind(t.id, None, ctx)
             return
         if isinstance(t, ast.Attribute):
             obj = self.expr(t.value, ctx)
@@ -10269,7 +10278,7 @@ def build(source, report, allow_mix=True):
         raise Unsupported('closures nested too deeply to settle their shared names')
     if compiler.dunder_ops:
         import dunderrt
-        body = dunderrt.patch(body)
+        body = dunderrt.patch(body, inplace=compiler.dunder_inplace)
     if compiler.generators:
         import safetyrt
         body = safetyrt.patch_generators(body)

@@ -31,7 +31,9 @@ D2 = {'__add__': 'ADD', '__radd__': 'RADD', '__sub__': 'SUB', '__rsub__': 'RSUB'
       '__eq__': 'EQ', '__gt__': 'GT', '__round__': 'ROUND', '__getitem__': 'GETITEM', '__contains__': 'CONTAINS',
       '__delitem__': 'DELITEM', '__ne__': 'NE', '__and__': 'AND', '__rand__': 'RAND', '__or__': 'OR', '__ror__': 'ROR',
       '__xor__': 'XOR', '__rxor__': 'RXOR', '__lshift__': 'LSHIFT', '__rlshift__': 'RLSHIFT', '__rshift__': 'RSHIFT',
-      '__rrshift__': 'RRSHIFT', '__format__': 'FORMAT'}
+      '__rrshift__': 'RRSHIFT', '__format__': 'FORMAT',
+      '__iadd__': 'IADD', '__isub__': 'ISUB', '__imul__': 'IMUL', '__iand__': 'IAND', '__ior__': 'IOR',
+      '__ixor__': 'IXOR'}
 D3 = {'__setitem__': 'SETITEM'}
 # an operator method that is a hook here; a program defining one of these turns the patch on
 HOOKED = frozenset(D1) | frozenset(D2) | frozenset(D3)
@@ -51,6 +53,14 @@ typedef ail_st (*ail_d3_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj, ail_obj);
 typedef ail_st (*ail_d1_fn)(ail_ctx *, ail_obj *, ail_obj);
 typedef ail_st (*ail_d2_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj);
 '''
+# the same table with the in-place operators appended: only a program whose classes define one gets this
+# enum, so every other program keeps the exact runtime text it had
+ENUMS_INPLACE = ENUMS.replace(
+    'AIL_D2_RRSHIFT, AIL_D2_FORMAT, AIL_ND2 };',
+    'AIL_D2_RRSHIFT, AIL_D2_FORMAT,\n'
+    '       AIL_D2_IADD, AIL_D2_ISUB, AIL_D2_IMUL, AIL_D2_IAND, AIL_D2_IOR, AIL_D2_IXOR, AIL_ND2 };')
+if 'AIL_D2_IADD' not in ENUMS_INPLACE:
+    raise RuntimeError('dunderrt: no place for the in-place operators in ENUMS')
 
 FUNCS = '''
 /* ---- operator special methods on instances (dunderrt.py) ---- */
@@ -285,12 +295,13 @@ _VIEW_OP_NE = (
     '    *out = ail_box_bool(!ail_obj_eq_raw(a, b)); return AIL_OK;\n}')
 
 
-def _edits():
+def _edits(inplace=False):
     """(old, new) text replacements, each applied to exactly one place of the runtime."""
     e = []
+    enums = ENUMS_INPLACE if inplace else ENUMS
     # tables in the class object
     e.append(('typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or NONE */; int builtin_id;',
-              ENUMS + 'typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or NONE */; int builtin_id;'))
+              enums + 'typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or NONE */; int builtin_id;'))
     e.append(('ail_st (*lt_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj); /* user __lt__ (self, other), or 0 */ } ail_classobj;',
               'ail_st (*lt_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj); /* user __lt__ (self, other), or 0 */\n'
               '                 ail_st (*d1[AIL_ND1])(ail_ctx *, ail_obj *, ail_obj); /* operator methods (self), dunderrt.py */\n'
@@ -393,6 +404,16 @@ def _edits():
     e.append(('static inline ail_st ail_op_invert(ail_ctx *cx, ail_obj *out, ail_obj a) {\n',
               'static inline ail_st ail_op_invert(ail_ctx *cx, ail_obj *out, ail_obj a) {\n'
               '    if (a.tag == AIL_T_INST) { ail_d1_fn f = ail_dun1(a, AIL_D1_INVERT); if (f) return f(cx, out, a); }\n'))
+    # `a += b`, `a -= b`, ... of an instance call __iadd__ / __isub__ / ... first (CPython); the runtime's
+    # in-place helpers used to fall straight back to __add__ / __sub__ / ..., so `a += b` ran __add__.
+    # Only a program whose classes define one of these pays for the check; the others keep their text.
+    if inplace:
+        for fn, key in (('iadd', 'IADD'), ('isub', 'ISUB'), ('imul', 'IMUL'),
+                        ('ibitor', 'IOR'), ('ibitand', 'IAND'), ('ibitxor', 'IXOR')):
+            e.append(('static inline ail_st ail_op_%s(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n' % fn,
+                      'static inline ail_st ail_op_%s(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n'
+                      '    if (a.tag == AIL_T_INST) { ail_d2_fn f = ail_dun2(a, AIL_D2_%s); if (f) return f(cx, out, a, b); }\n'
+                      % (fn, key)))
     # format(x, spec) / f"{x:spec}" of an instance whose class defines __format__ (an Enum / Flag member does)
     e.append(('static inline ail_st ail_obj_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {\n',
               'static inline ail_st ail_obj_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {\n'
@@ -495,9 +516,9 @@ def _edits():
     return e
 
 
-def patch(text):
+def patch(text, inplace=False):
     """The generated C with the operator-method dispatch added to the general-path runtime."""
-    for old, new in _edits():
+    for old, new in _edits(inplace):
         if old == new:
             continue
         count = text.count(old)
