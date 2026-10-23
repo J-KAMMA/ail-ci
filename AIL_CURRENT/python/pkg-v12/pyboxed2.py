@@ -9911,9 +9911,16 @@ class Compiler(boxclosure.ClosureMixin):
         if node.msg is not None:
             msg = self.expr(node.msg, ctx)
             cname = self._inst_class(node.msg, ctx)
-            msg = self._to_str_slot(msg, cname, ctx)
-            ctx.emit('st = ail_raise(cx, cx->builtin_cls[AIL_B_ASSERTIONERROR], %s); goto %s;' %
-                    (msg, ctx.cur_err_target()))
+            text = self._to_str_slot(msg, cname, ctx)
+            # CPython raises AssertionError(msg): the argument stays an object (e.args is
+            # (msg,), and repr(e) shows its repr), while str(e) is str(msg). Keeping the
+            # object here makes tuple/list/dict messages match too, where the old path
+            # replaced the argument with its string form.
+            args = ctx.new_cvar('aa')
+            ctx.emit('ail_obj %s[1] = { %s };' % (args, msg))
+            self.rt_needs.add('exc')
+            ctx.emit('st = ail2x_raise_builtin(cx, cx->builtin_cls[AIL_B_ASSERTIONERROR], %s, %s, 1); goto %s;' %
+                    (text, args, ctx.cur_err_target()))
         else:
             ctx.emit('st = ail_raise_c(cx, AIL_B_ASSERTIONERROR, ""); goto %s;' %
                     ctx.cur_err_target())

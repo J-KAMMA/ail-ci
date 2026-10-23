@@ -22065,10 +22065,18 @@ def _assert_stmt(node, ctx, pad):
     pre = _flush(ctx, pad)
     ctx.parts.update(('DIE', 'ASSERTEXC'))
     ctx.has_try = True
+    # A function that asserts may raise an exception, so a mixed-mode typed clone of it
+    # must stay boxed: an exception raised in a clone's own runtime cannot be caught by the
+    # surrounding boxed program. This is the same marker print() uses for its own stdio.
+    ctx.uses_io = True
     if node.msg is None:
         return pre + '%sif (!(%s)) ail_raise_named(%d);\n' % (pad, c, EXC_NAMES['AssertionError'])
     if _is_bytes_expr(node.msg, ctx):
         raise Unsupported('assert with a bytes message; use a str message')
+    if isinstance(node.msg, ast.Tuple):
+        raise Unsupported('assert with a tuple message; the typed path keeps an exception '
+                          'argument as a str, number, bool or None, and a tuple would lose its '
+                          'type in e.args (the general path keeps it)')
     t = _etype(node.msg, ctx)
     message = node.msg
     if t in NUM:
