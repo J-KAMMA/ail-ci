@@ -309,9 +309,14 @@ def _ail_bm_removesuffix(s, suffix):
     return s
 
 
+_AIL_B_DEFAULT_FILL = []
+
+
 def _ail_b_fill(fillchar, name):
-    if fillchar is None:
+    if fillchar is _AIL_B_DEFAULT_FILL:
         return " "
+    if fillchar is None:
+        raise TypeError(name + "() argument 2 must be a byte string of length 1, not None")
     f = _ail_bs(fillchar)
     if len(f) != 1:
         raise TypeError(name + "() argument 2 must be a byte string of length 1, not " + type(fillchar).__name__)
