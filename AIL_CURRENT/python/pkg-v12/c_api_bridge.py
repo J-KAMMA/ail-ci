@@ -78,7 +78,7 @@ def object_prefix(body, name):
     validate_namespace(name)
     trap = name + '_ail_bridge_trap'
     replacements = {
-        'fflush(stdout); fputs(w, stderr); fputc(10, stderr); _Exit(1);':
+        'fflush(stdout); fputs(w, stderr); AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);':
             f'{trap}(ail_exc_kind_of(w) ? ail_exc_kind_of(w) : 8, w);',
     }
     for old, new in replacements.items():

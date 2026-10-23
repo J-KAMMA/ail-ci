@@ -246,6 +246,11 @@ class Stmts:
         if tgt.id == '_':
             return
         cur = self.env.get(tgt.id)
+        old, new = R(cur), R(t)
+        if isinstance(old, tuple) and isinstance(new, tuple) and old[0] != new[0] \
+                and old[0] in ('dict', 'set', 'list', 'tuple') and new[0] in ('dict', 'set', 'list', 'tuple'):
+            # one type per name: a name rebound to another container type would keep the first type for its methods
+            self.refuse(tgt, 'the name %r is bound to a %s and to a %s' % (tgt.id, old[0], new[0]))
         if cur is None or R(cur) is None:
             self.env[tgt.id] = t
 
