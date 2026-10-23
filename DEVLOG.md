@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-23 - root the mapping value in dict() (job-pre25-10240322)
+
+Review defect in the keys()/`__getitem__` path above: `ail_dict_update_pairs` kept the
+value returned by `__getitem__` only in a C local, so `ail_dict_set()`'s user `__hash__`
+could allocate, trigger GC and free the value before it was stored. The frame now has a
+third slot (`fr.slots[2]`) for that value, and `ail_op_getitem` writes into it directly.
+Covered by a new `test_ail_gcstress` program (`dict_from_mapping`), built with
+`-DAIL_GC_STRESS` under ASan, and by three `/tmp/probes` compared on both builds. Ran
+`test_ail_pre25`, `test_ail_gcstress`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` on the final tree: 5 modules, 0 failed (166s, `-j 2`).
+
 ## 2026-10-23 - keys-only mappings in dict() (job-pre25-10240322)
 
 A class that implements the mapping protocol with `keys()` and `__getitem__` but no

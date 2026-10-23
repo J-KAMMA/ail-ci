@@ -168,6 +168,30 @@ def main() -> None:
 
 main()
 ''',
+    'dict_from_mapping': r'''
+class K:
+    def __hash__(self):
+        junk = [i for i in range(10)]
+        return len(junk)
+
+    def __repr__(self):
+        return "K"
+
+
+class M:
+    def keys(self):
+        return [K()]
+
+    def __getitem__(self, k):
+        return [1, 2, 3, 4]
+
+
+def main() -> None:
+    print(dict(M()))
+
+
+main()
+''',
     'classes_generators_exceptions': r'''
 from functools import reduce
 
@@ -297,6 +321,9 @@ class GCStress(unittest.TestCase):
 
     def test_numbers_and_stats(self):
         self.check('numbers_and_stats')
+
+    def test_dict_from_mapping(self):
+        self.check('dict_from_mapping')
 
     def test_classes_generators_exceptions(self):
         self.check('classes_generators_exceptions')
