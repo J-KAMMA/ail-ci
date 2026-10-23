@@ -974,7 +974,7 @@
     "test_ail_owned_type_repair.py": "69c06613a1270419a92e7bbfbd18ded38fffcb613f5cf1f017df763974b741b6",
     "python/pkg-v12/callable_types.py": "403e4bc3a2186c803407ba1192a3551209d5b3659435d67633b49c30b256c5a3",
     "language_examples/integer_quantiles.ail": "f4fbb4396faa7f571470997a7fa1773f966f35de581da6604986411d3ba345e1",
-    "python/pkg-v12/cruntime.py": "b51e4ed0c8dad7ff966dc7a546704b0e131ae17f0af8dd83398613d6ea3de01a",
+    "python/pkg-v12/cruntime.py": "d15eece2f2de1ce455bd9e6c7200bae8947327c19f6121d2a141fed8a460fea8",
     "test_ail_string_field_mutation.py": "76683df6504ef82ce482a0cecef0bd5fd4c68066a7e9b349664e46d527f742c4",
     "test_ail_owned_type_details.py": "8d5c657a91b53c1e322d13686c5471f7185697d641738b26746405804286e1e5",
     "test_ail_list_expression_extend.py": "2835cffcac2a3a7c08606152c2441ad7d7c340967e94cb93b9ce9457d47e8784",
@@ -1000,12 +1000,12 @@
     "python/pkg-v12/c_api_bridge.py": "06825f38216030996522ba6faf74d2682e4176a156b057851b67c98fef0bcce6",
     "ail_chatgpt.py": "9c8bc37c0c440ec1e8c318bf3e10e667c7e550046773994cadb8e926b9168dec",
     "ail_sdk.py": "a83730d50ef012c406d66156891e8ae70266bf386e11eed7b0b1f2dab3e5d19b",
-    "python/pkg-v12/pyfunc.py": "5069068be302d606c1ec57a240565d4de8042bbdd5c0667261894af575f0365a",
+    "python/pkg-v12/pyfunc.py": "70f6a977e4b6f49d021f586be2915e8ce9599b2bab5cb3ba5492c7d3d666aceb",
     "python/pkg-v12/SEMANTICS.md": "ec47c968f28e6b1c3518d707a62a4aa562e84655b6ea2b459af5facc4cc8a8f0",
     "test_ail_str_find_alias.py": "2dd4e33b572c730b22c452951de0afb632942917681dd8a4768a712eb54d3553",
     "ail_builtin_api.py": "1ec0d7b3092af502f0195cdee6d8cb11f82c078732cbb75d5c5c5f96721d5425",
     "test_ail_builtin_api.py": "f4ed0186a304be917c36526a5818b1d2b6561c7529698f79ce62cc9ac83b5686",
-    "ail_check.py": "42cb73cee35c6b954cce4e40aeb47250c90862b324ed58e02c9c6cad84e5b20a",
+    "ail_check.py": "105e587a74db0172b96c74ef297a9eb5de769410270319440e6055c5a8e72169",
     "test_ail_sdk.py": "af18bc35a3d951ce733ca3b73a05c91e58e44c15b12131b1e92c42807c909872",
     "test_ail_str_rfind.py": "9216fc98dd70e3f9de393ff29798602dce499c3600552c6a7b6b77a2b1a432b5",
     "ail_builtin_syntax_forms.py": "8b6a4a90b4ccfcac48a9a3938fcf7c7df3b1ec14a5ca1096dc8e1130d378c7e8",
@@ -1347,7 +1347,8 @@
     "test_ail_fuzz36.py": "9f4803a591220e778d1de0c6660104f315046d6b380dc0162b21dd9d922e1494",
     "test_ail_fuzz37.py": "0f155e88a9cb2c3635020593bb59570b424d8fc95942e94ecab9a6e0d234c98d",
     "test_ail_fuzz38.py": "3193ee833574e8b60511267034b109faada894abcc78239fe39cdab73ba6c7df",
-    "test_ail_fuzz39.py": "54eb56c1c8db1e6f0217cfe39a6cc891a378aa04bdc88761cd286004b3cde0da"
+    "test_ail_fuzz39.py": "54eb56c1c8db1e6f0217cfe39a6cc891a378aa04bdc88761cd286004b3cde0da",
+    "test_ail_fuzz44.py": "5849d5d1f646af05b0a73c7c5e798c54b2b7b9d5609409f3ce221ffbe4edea77"
   },
   "files": {
     "python/pkg-v12/pipeline.py": "d185d3cd067d1ca503f1fda8e2d8f415e93a0db26fbef6d4b919dd4c0b9a1251",
@@ -1392,7 +1393,7 @@
     "test_ail_owned_type_repair.py": "69c06613a1270419a92e7bbfbd18ded38fffcb613f5cf1f017df763974b741b6",
     "python/pkg-v12/callable_types.py": "403e4bc3a2186c803407ba1192a3551209d5b3659435d67633b49c30b256c5a3",
     "language_examples/integer_quantiles.ail": "f4fbb4396faa7f571470997a7fa1773f966f35de581da6604986411d3ba345e1",
-    "python/pkg-v12/cruntime.py": "b51e4ed0c8dad7ff966dc7a546704b0e131ae17f0af8dd83398613d6ea3de01a",
+    "python/pkg-v12/cruntime.py": "d15eece2f2de1ce455bd9e6c7200bae8947327c19f6121d2a141fed8a460fea8",
     "test_ail_string_field_mutation.py": "76683df6504ef82ce482a0cecef0bd5fd4c68066a7e9b349664e46d527f742c4",
     "test_ail_owned_type_details.py": "8d5c657a91b53c1e322d13686c5471f7185697d641738b26746405804286e1e5",
     "test_ail_list_expression_extend.py": "2835cffcac2a3a7c08606152c2441ad7d7c340967e94cb93b9ce9457d47e8784",
@@ -1418,12 +1419,12 @@
     "python/pkg-v12/c_api_bridge.py": "06825f38216030996522ba6faf74d2682e4176a156b057851b67c98fef0bcce6",
     "ail_chatgpt.py": "9c8bc37c0c440ec1e8c318bf3e10e667c7e550046773994cadb8e926b9168dec",
     "ail_sdk.py": "a83730d50ef012c406d66156891e8ae70266bf386e11eed7b0b1f2dab3e5d19b",
-    "python/pkg-v12/pyfunc.py": "5069068be302d606c1ec57a240565d4de8042bbdd5c0667261894af575f0365a",
+    "python/pkg-v12/pyfunc.py": "70f6a977e4b6f49d021f586be2915e8ce9599b2bab5cb3ba5492c7d3d666aceb",
     "python/pkg-v12/SEMANTICS.md": "ec47c968f28e6b1c3518d707a62a4aa562e84655b6ea2b459af5facc4cc8a8f0",
     "test_ail_str_find_alias.py": "2dd4e33b572c730b22c452951de0afb632942917681dd8a4768a712eb54d3553",
     "ail_builtin_api.py": "1ec0d7b3092af502f0195cdee6d8cb11f82c078732cbb75d5c5c5f96721d5425",
     "test_ail_builtin_api.py": "f4ed0186a304be917c36526a5818b1d2b6561c7529698f79ce62cc9ac83b5686",
-    "ail_check.py": "42cb73cee35c6b954cce4e40aeb47250c90862b324ed58e02c9c6cad84e5b20a",
+    "ail_check.py": "105e587a74db0172b96c74ef297a9eb5de769410270319440e6055c5a8e72169",
     "test_ail_sdk.py": "af18bc35a3d951ce733ca3b73a05c91e58e44c15b12131b1e92c42807c909872",
     "test_ail_str_rfind.py": "9216fc98dd70e3f9de393ff29798602dce499c3600552c6a7b6b77a2b1a432b5",
     "ail_builtin_syntax_forms.py": "8b6a4a90b4ccfcac48a9a3938fcf7c7df3b1ec14a5ca1096dc8e1130d378c7e8",
@@ -1761,6 +1762,7 @@
     "test_ail_fuzz36.py": "9f4803a591220e778d1de0c6660104f315046d6b380dc0162b21dd9d922e1494",
     "test_ail_fuzz37.py": "0f155e88a9cb2c3635020593bb59570b424d8fc95942e94ecab9a6e0d234c98d",
     "test_ail_fuzz38.py": "3193ee833574e8b60511267034b109faada894abcc78239fe39cdab73ba6c7df",
-    "test_ail_fuzz39.py": "54eb56c1c8db1e6f0217cfe39a6cc891a378aa04bdc88761cd286004b3cde0da"
+    "test_ail_fuzz39.py": "54eb56c1c8db1e6f0217cfe39a6cc891a378aa04bdc88761cd286004b3cde0da",
+    "test_ail_fuzz44.py": "5849d5d1f646af05b0a73c7c5e798c54b2b7b9d5609409f3ce221ffbe4edea77"
   }
 }
