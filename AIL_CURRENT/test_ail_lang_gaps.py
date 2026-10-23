@@ -6,7 +6,7 @@
   True/False; `{b:>5}` and `%d` format the number. Comparisons, `in`, `is`, `not` and the predicates
   are bools too, so `print(3 > 2)` shows True (it showed 1). A declared bool slot refuses an int.
 * sets: `list(s)`, `== != < <= > >=`, union/intersection/difference/symmetric_difference (and the
-  `*_update` statements), issubset/issuperset/isdisjoint, `s.pop()` (the newest element: AIL sets
+  `*_update` statements), issubset/issuperset/isdisjoint, `s.pop()` (the first element in iteration order: AIL sets
   keep insertion order; KeyError when empty), for set[int], set[str], fields and unannotated int sets.
 * dicts: `list(d)`, `list(d.keys())`, `list(d.values())`; one-argument `d.get(k)` is refused (no None
   for a value) with the `d.get(k, default)` rewrite.
