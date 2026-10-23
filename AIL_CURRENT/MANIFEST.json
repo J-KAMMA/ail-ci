@@ -552,7 +552,7 @@
     "language_examples/csv_project.ail": "ee2afe13d1efb12b4fe2381edbe3c2af801e6dbd1d6d0ea60ebee08af0ce0862",
     "language_examples/csv_table_main.ail": "2fdcf6c280bf30e80f18f7d9456e2fd57e6c9a1f365bd9dd323506c02e196666",
     "test_ail_map_fields.py": "80ca4fa8c353332713b3baeb96263aef88757b7ea075e4fc0aa7d7ec7c7d89c7",
-    "language_examples/utf8_stream.ail": "e1625b222e5bc8d6275155be68d2e0f1b0be42e0450d582b5b08cb5faee5cad9",
+    "language_examples/utf8_stream.ail": "24bc70595616ff825e7a5de2787d5ac5cec1dce7263b5f1598a63738d533cef7",
     "language_examples/csv_stream.ail": "a175c2f7d47a19967f5bd89e45fe8806ddc523fe15568134e1c2dbb309d90598",
     "language_examples/csv_stream_main.ail": "6a8a54c085eadff79715033b7dcfdb8aacd0297a083759d93e6c3637136fcd9c",
     "language_examples/binary_file_chunks.ail": "9ead8f32999770c81e667412bb47faab76a5210e4e735756cda5ac13a5990053",
