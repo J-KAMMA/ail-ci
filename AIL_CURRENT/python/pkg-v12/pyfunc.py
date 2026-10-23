@@ -17591,6 +17591,12 @@ def _method(node, ctx, *, as_stmt=False):
         raise Unsupported('records append takes one positional tuple')
     if record and m == 'extend':
         raise Unsupported('extending a declared records list is unsupported; append matching tuples')
+    if not as_stmt and m in ('append', 'clear', 'extend', 'reverse', 'sort'):
+        # CPython's in-place list methods return None. The typed path has no None value, so using
+        # the result inside an expression emitted a void C call into a temporary (`v_x = ail_list_push(...)`)
+        # that failed only in the C compiler. Refuse by name here so the default build takes the
+        # general path, which evaluates the mutation and yields None, and --strict names the shape.
+        raise Unsupported('list.%s() returns None; use it as a statement' % m)
     if declared in (LIST, FLIST, SLIST) and m == 'clear' and not a and not node.keywords:
         ctx.parts.add({LIST: 'LIST', FLIST: 'FLIST', SLIST: 'SLIST'}[declared])
         return 'ail_%s_clear(&%s)' % ({LIST: 'list', FLIST: 'flist', SLIST: 'slist'}[declared], ctx.cname(name))
@@ -21524,7 +21530,9 @@ def _stmt_inner(node, ctx, ind):
                 return _flush(ctx, pad) + '%s%s;\n' % (pad, call_c)
             if (isinstance(v.func, ast.Attribute)
                     and v.func.attr in ('append', 'clear', 'extend', 'reverse', 'sort')
-                    and _is_olist_kind(_etype(v.func.value, ctx))):
+                    and (_is_olist_kind(_etype(v.func.value, ctx))
+                         or isinstance(v.func.value, ast.Name)
+                         and _etype(v.func.value, ctx) in (LIST, FLIST, SLIST))):
                 call_c = _method(v, ctx, as_stmt=True)
                 return _flush(ctx, pad) + '%s%s;\n' % (pad, call_c)
             if (isinstance(v.func, ast.Attribute) and isinstance(v.func.value, ast.Attribute)
