@@ -33,7 +33,7 @@ import os
 import re
 import runpy
 
-from pyfront import Unsupported, refuse_complex_pow
+from pyfront import Unsupported, refuse_complex_pow, refuse_reversed_generator
 import filelib
 import hashlower
 import pyfunc
@@ -2020,6 +2020,7 @@ class Compiler(boxclosure.ClosureMixin):
     # ------------------------------------------------------------------------------- entry point
     def compile(self, source):
         tree = ast.parse(source)
+        refuse_reversed_generator(tree)
         self._module_tree = tree          # the element-kind records (_elem_record_exact) are judged on the whole module
         for fn in tree.body:
             # math.sqrt is the correctly rounded C sqrt; the helper's `x ** 0.5` is pow(), which can differ in the last bit

@@ -147,6 +147,67 @@ def refuse_complex_pow(node):
         raise refusal
 
 
+def refuse_reversed_generator(tree):
+    """`reversed(<generator expression>)` is a TypeError in CPython: a generator has no
+    `__len__`/`__getitem__` and no `__reversed__`. This front end materialises a generator
+    expression eagerly as a list, so the general path used to reverse it silently and print
+    values CPython never prints. Refuse the construct by name instead, including a name bound
+    to a generator expression in the same scope (or a module-level name used from a function).
+    A user definition named `reversed` shadows the builtin, so the check is skipped then.
+    """
+    if any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n.name == 'reversed'
+           for n in ast.walk(tree)):
+        return
+
+    def generator_names(body):
+        names = set()
+
+        def scan(node):
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                    continue
+                if isinstance(child, ast.Assign) and isinstance(child.value, ast.GeneratorExp):
+                    for target in child.targets:
+                        if isinstance(target, ast.Name):
+                            names.add(target.id)
+                elif (isinstance(child, ast.AnnAssign) and isinstance(child.value, ast.GeneratorExp)
+                      and isinstance(child.target, ast.Name)):
+                    names.add(child.target.id)
+                scan(child)
+
+        for stmt in body:
+            scan(stmt)
+        return names
+
+    module_generators = generator_names(tree.body)
+
+    def check_scope(body, inherited):
+        names = generator_names(body) | inherited
+
+        def check(node):
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    check_scope(child.body, module_generators)
+                    continue
+                if isinstance(child, ast.ClassDef):
+                    check_scope(child.body, module_generators)
+                    continue
+                if (isinstance(child, ast.Call) and isinstance(child.func, ast.Name)
+                        and child.func.id == 'reversed' and child.args):
+                    arg = child.args[0]
+                    if isinstance(arg, ast.GeneratorExp) or (isinstance(arg, ast.Name) and arg.id in names):
+                        refusal = Unsupported(
+                            'reversed() of a generator expression: CPython generators are not reversible '
+                            '(reversed() raises TypeError). Build a list first, or walk it with a loop')
+                        refusal.source_line = getattr(child, 'lineno', None)
+                        raise refusal
+                check(child)
+
+        check(ast.Module(body=body, type_ignores=[]))
+
+    check_scope(tree.body, set())
+
+
 def _use(need, *names):
     need.update(names)
     need.add('ail_die')
