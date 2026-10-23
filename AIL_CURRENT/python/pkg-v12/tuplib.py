@@ -367,6 +367,9 @@ def rewrite(source, notes=None):
         return source
     if not candidate(tree):
         return source
+    import numidentity
+    if numidentity.tuple_refusal(source) is not None:
+        return source                  # leave the tuple `is` for numidentity's refusal (it names the difference)
     import dictviews
     view = dictviews.escape(tree)
     if view is not None:             # a dict view shown as a value: the general path has it, this pass would show a list
