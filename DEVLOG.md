@@ -1,5 +1,22 @@
 # DEVLOG
 
+## 2026-10-23 - keys-only mappings in dict() (job-pre25-10240322)
+
+A class that implements the mapping protocol with `keys()` and `__getitem__` but no
+`__iter__` was fed to the general path's pair iterator: `dict(m)` raised
+`TypeError: 'instance' object is not iterable` instead of using `keys()` (CPython
+`{'a': 1}`). The same argument also made `dict.update(m)` and
+`defaultdict(factory, m)` take the wrong protocol, and a class whose `keys()` and
+`__iter__` disagree was built from `__iter__`.
+
+`dunderrt.py` now installs a class's `keys` method in its runtime method table and
+patches `ail_dict_update_pairs` to use the mapping protocol (`keys()` then `m[k]`)
+when it is present, including CPython's non-iterable-keys message. A missing
+`__getitem__` reports the object's class name, not `instance`. Verified with
+`bash ~/tools/cmp.sh` on six probes (basic, key/return types, keys/iter
+disagreement, mapping through an argument/list item/attribute/dict value, errors,
+inheritance and generator keys) and with `test_ail_pre25`.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

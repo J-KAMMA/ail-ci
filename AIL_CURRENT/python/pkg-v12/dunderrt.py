@@ -24,7 +24,7 @@ counts as unequal). Instances without `__eq__` / `__hash__` compare and hash by 
 # special method -> table index; D1 = (self), D2 = (self, other)
 D1 = {'__neg__': 'NEG', '__pos__': 'POS', '__abs__': 'ABS', '__hash__': 'HASH', '__bool__': 'BOOL',
       '__int__': 'INT', '__float__': 'FLOAT', '__floor__': 'FLOOR', '__ceil__': 'CEIL', '__trunc__': 'TRUNC',
-      '__len__': 'LEN', '__index__': 'INDEX', '__invert__': 'INVERT'}
+      '__len__': 'LEN', '__index__': 'INDEX', '__invert__': 'INVERT', 'keys': 'KEYS'}
 D2 = {'__add__': 'ADD', '__radd__': 'RADD', '__sub__': 'SUB', '__rsub__': 'RSUB', '__mul__': 'MUL',
       '__rmul__': 'RMUL', '__truediv__': 'TRUEDIV', '__rtruediv__': 'RTRUEDIV', '__floordiv__': 'FLOORDIV',
       '__rfloordiv__': 'RFLOORDIV', '__mod__': 'MOD', '__rmod__': 'RMOD', '__pow__': 'POW', '__rpow__': 'RPOW',
@@ -41,7 +41,7 @@ ALREADY_BOUND = frozenset(('__eq__', '__len__', '__getitem__', '__contains__'))
 
 ENUMS = '''
 enum { AIL_D1_NEG, AIL_D1_POS, AIL_D1_ABS, AIL_D1_HASH, AIL_D1_BOOL, AIL_D1_INT, AIL_D1_FLOAT, AIL_D1_FLOOR,
-       AIL_D1_CEIL, AIL_D1_TRUNC, AIL_D1_LEN, AIL_D1_INDEX, AIL_D1_INVERT, AIL_ND1 };
+       AIL_D1_CEIL, AIL_D1_TRUNC, AIL_D1_LEN, AIL_D1_INDEX, AIL_D1_INVERT, AIL_D1_KEYS, AIL_ND1 };
 enum { AIL_D2_ADD, AIL_D2_RADD, AIL_D2_SUB, AIL_D2_RSUB, AIL_D2_MUL, AIL_D2_RMUL, AIL_D2_TRUEDIV, AIL_D2_RTRUEDIV,
        AIL_D2_FLOORDIV, AIL_D2_RFLOORDIV, AIL_D2_MOD, AIL_D2_RMOD, AIL_D2_POW, AIL_D2_RPOW, AIL_D2_EQ, AIL_D2_GT,
        AIL_D2_ROUND, AIL_D2_GETITEM, AIL_D2_CONTAINS, AIL_D2_DELITEM, AIL_D2_NE, AIL_D2_AND, AIL_D2_RAND, AIL_D2_OR,
@@ -477,6 +477,40 @@ def _edits():
     e.append(('        default: { char buf[64]; snprintf(buf, sizeof buf, "argument of type \'%s\' is not iterable"',
               '        case AIL_T_INST: return ail_dun_contains(cx, out, c, item);\n'
               '        default: { char buf[64]; snprintf(buf, sizeof buf, "argument of type \'%s\' is not iterable"'))
+    # dict(mapping) / dict.update(mapping) / defaultdict(factory, mapping): CPython uses the
+    # mapping protocol (keys() then m[k]), not iteration, when the object has keys()
+    e.append(('static inline ail_st ail_dict_update_pairs(ail_ctx *cx, ail_obj d, ail_obj other) {\n'
+              '    AIL_FRAME_ENTER(cx, fr, 2); /* 0=it 1=the pair */\n',
+              'static inline ail_st ail_dict_update_pairs(ail_ctx *cx, ail_obj d, ail_obj other) {\n'
+              '    AIL_FRAME_ENTER(cx, fr, 2); /* 0=it 1=the pair */\n'
+              '    ail_d1_fn kf = ail_dun1(other, AIL_D1_KEYS);\n'
+              '    if (kf) {\n'
+              '        ail_st mst = kf(cx, &fr.slots[0], other);\n'
+              '        if (mst != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return mst; }\n'
+              '        if (!(fr.slots[0].tag == AIL_T_ITER || fr.slots[0].tag == AIL_T_LIST || fr.slots[0].tag == AIL_T_TUPLE ||\n'
+              '              fr.slots[0].tag == AIL_T_STR || fr.slots[0].tag == AIL_T_DICT || fr.slots[0].tag == AIL_T_SET ||\n'
+              '              fr.slots[0].tag == AIL_T_FROZENSET || fr.slots[0].tag == AIL_T_RANGE || fr.slots[0].tag == AIL_T_INST)) {\n'
+              '            char kb[200], kn[80];\n'
+              '            ail__dun_tname(kn, sizeof kn, other);\n'
+              '            snprintf(kb, sizeof kb, "%s.keys() returned a non-iterable (type %s)", kn, ail_type_name(fr.slots[0].tag));\n'
+              '            AIL_FRAME_LEAVE(cx, fr);\n'
+              '            return ail_raise_c(cx, AIL_B_TYPEERROR, kb);\n'
+              '        }\n'
+              '        mst = ail_iter(cx, &fr.slots[1], fr.slots[0]);\n'
+              '        if (mst != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return mst; }\n'
+              '        for (;;) {\n'
+              '            mst = ail_it_next(cx, &fr.slots[0], fr.slots[1]);\n'
+              '            if (mst == AIL_STOP) { mst = AIL_OK; break; }\n'
+              '            if (mst != AIL_OK) break;\n'
+              '            ail_obj mval;\n'
+              '            mst = ail_op_getitem(cx, &mval, other, fr.slots[0]);\n'
+              '            if (mst != AIL_OK) break;\n'
+              '            mst = ail_dict_set(cx, d, fr.slots[0], mval);\n'
+              '            if (mst != AIL_OK) break;\n'
+              '        }\n'
+              '        AIL_FRAME_LEAVE(cx, fr);\n'
+              '        return mst;\n'
+              '    }\n'))
     e.append(('static inline ail_st ail_op_getitem(ail_ctx *cx, ail_obj *out, ail_obj c, ail_obj key) {\n',
               'static inline ail_st ail_op_getitem(ail_ctx *cx, ail_obj *out, ail_obj c, ail_obj key) {\n'
               '    if (key.tag == AIL_T_INST && (c.tag == AIL_T_LIST || c.tag == AIL_T_TUPLE || c.tag == AIL_T_STR)) {   /* __index__ */\n'
@@ -489,9 +523,9 @@ def _edits():
     e.append(('    char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object doesn\'t support item deletion", ail_type_name(c.tag));',
               '    if (c.tag == AIL_T_INST) { ail_d2_fn f = ail_dun2(c, AIL_D2_DELITEM); if (f) { ail_obj r; return f(cx, &r, c, key); } }\n'
               '    char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object doesn\'t support item deletion", ail_type_name(c.tag));'))
-    e.append(('        default: { char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable"',
+    e.append(('        default: { char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable", ail_type_name(c.tag));',
               '        case AIL_T_INST: { ail_d2_fn f = ail_dun2(c, AIL_D2_GETITEM); if (f) return f(cx, out, c, key); }\n        /* fall through */\n'
-              '        default: { char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable"'))
+              '        default: { char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable", c.tag == AIL_T_INST ? ail__dun_tname_s(c) : ail_type_name(c.tag));'))
     return e
 
 
