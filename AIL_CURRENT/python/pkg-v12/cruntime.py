@@ -10025,6 +10025,18 @@ static inline ail_obj ail_obj_mul(ail_obj a, ail_obj b) {
     ail_raise_c(AIL_ERR_TYPE, buf);
     return ail_box_none();
 }
+/* CPython's float_divmod: one computation for //, % and divmod, so the sign of a zero
+   remainder, a quotient one below a rounded division and the infinity/NaN cases agree. */
+static inline double ail_obj_ffloormod(double a, double b, int remainder) {
+    double r = fmod(a, b);
+    int adjust = r != 0.0 && ((r < 0.0) != (b < 0.0));
+    if (remainder) return r == 0.0 ? copysign(0.0, b) : adjust ? r + b : r;
+    double q = (a - r) / b;
+    if (adjust) q -= 1.0;
+    if (q == 0.0) return copysign(0.0, a / b);
+    double lower = floor(q);
+    return q - lower > 0.5 ? lower + 1.0 : lower;
+}
 static inline ail_obj ail_obj_floordiv(ail_obj a, ail_obj b) {
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t x = a.i, y = b.i;
@@ -10037,7 +10049,7 @@ static inline ail_obj ail_obj_floordiv(ail_obj a, ail_obj b) {
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         double x = ail__as_double(a), y = ail__as_double(b);
         if (y == 0.0) ail_raise_c(AIL_ERR_ZERODIV, "float floor division by zero");
-        return ail_box_float(floor(x / y));
+        return ail_box_float(ail_obj_ffloormod(x, y, 0));
     }
     ail_raise_c(AIL_ERR_TYPE, "unsupported operand type(s) for //");
     return ail_box_none();
@@ -10054,9 +10066,7 @@ static inline ail_obj ail_obj_mod(ail_obj a, ail_obj b) {
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         double x = ail__as_double(a), y = ail__as_double(b);
         if (y == 0.0) ail_raise_c(AIL_ERR_ZERODIV, "float modulo");
-        double r = fmod(x, y);
-        if (r != 0.0 && ((r < 0) != (y < 0))) r += y;
-        return ail_box_float(r);
+        return ail_box_float(ail_obj_ffloormod(x, y, 1));
     }
     ail_raise_c(AIL_ERR_TYPE, "unsupported operand type(s) for %%");
     return ail_box_none();
@@ -14400,6 +14410,18 @@ static inline int ail_is(ail_obj a, ail_obj b) {
         ail_die("`is` between two equal ints outside -5..256: CPython's answer depends on where each int was made (DIFFERENCES C114); compare with ==");
     return ail_identical(a, b);
 }
+static inline uint64_t ail__range_count(const ail_rangeobj *r); /* defined with the iteration helpers below */
+/* CPython compares two ranges by the sequence they denote: equal lengths, then equal start; every empty
+   range equals every other empty range, and a length-1 range is fixed by its start alone (whatever its
+   step); only longer ranges need equal steps too. */
+static inline int ail__range_eq(const ail_rangeobj *a, const ail_rangeobj *b) {
+    uint64_t an = ail__range_count(a), bn = ail__range_count(b);
+    if (an != bn) return 0;
+    if (an == 0) return 1;
+    if (a->start != b->start) return 0;
+    if (an == 1) return 1;
+    return a->step == b->step;
+}
 static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         if (a.tag == AIL_T_FLOAT && b.tag == AIL_T_FLOAT) return ail_float_val(a) == ail_float_val(b);
@@ -14439,6 +14461,7 @@ static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {
             for (int64_t i = 0; i < va->n; i++) if (!(ail_identical(va->p[i], vb->p[i]) || ail_obj_eq_raw(va->p[i], vb->p[i]))) return 0;
             return 1;
         }
+        case AIL_T_RANGE: return ail__range_eq((ail_rangeobj *)a.o, (ail_rangeobj *)b.o);
         default: return 0; /* instance/exception ==: out of scope, matches v1 */
     }
 }
@@ -14725,6 +14748,18 @@ static inline ail_st ail_op_mul(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)
     char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for *: '%s' and '%s'", ail_type_name(a.tag), ail_type_name(b.tag));
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
 }
+/* CPython's float_divmod: one computation for //, % and divmod, so the sign of a zero
+   remainder, a quotient one below a rounded division and the infinity/NaN cases agree. */
+static inline double ail_obj2_ffloormod(double a, double b, int remainder) {
+    double r = fmod(a, b);
+    int adjust = r != 0.0 && ((r < 0.0) != (b < 0.0));
+    if (remainder) return r == 0.0 ? copysign(0.0, b) : adjust ? r + b : r;
+    double q = (a - r) / b;
+    if (adjust) q -= 1.0;
+    if (q == 0.0) return copysign(0.0, a / b);
+    double lower = floor(q);
+    return q - lower > 0.5 ? lower + 1.0 : lower;
+}
 static inline ail_st ail_op_floordiv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t x = a.i, y = b.i;
@@ -14737,7 +14772,7 @@ static inline ail_st ail_op_floordiv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_o
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         double x = ail__as_double(a), y = ail__as_double(b);
         if (y == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "float floor division by zero");
-        *out = ail_box_float(cx, floor(x / y)); return AIL_OK;
+        *out = ail_box_float(cx, ail_obj2_ffloormod(x, y, 0)); return AIL_OK;
     }
     return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for //");
 }
@@ -14753,9 +14788,7 @@ static inline ail_st ail_op_mod(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         double x = ail__as_double(a), y = ail__as_double(b);
         if (y == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "float modulo");
-        double r = fmod(x, y);
-        if (r != 0.0 && ((r < 0) != (y < 0))) r += y;
-        *out = ail_box_float(cx, r); return AIL_OK;
+        *out = ail_box_float(cx, ail_obj2_ffloormod(x, y, 1)); return AIL_OK;
     }
     return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %");
 }
@@ -16336,10 +16369,13 @@ static inline ail_st ail_obj_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_ob
     if (type == 'f') {
         if (!ail__is_num(x.tag)) return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported format string passed to non-float");
         int prec = f.has_prec ? f.prec : 6;
-        char buf[66]; int len = snprintf(buf + 1, sizeof buf - 1, "%.*f", prec, ail__as_double(x));
+        int need = snprintf(NULL, 0, "%.*f", prec, ail__as_double(x));
+        if (need < 0) return ail_hit_limit(cx, "format_float", "formatting a float failed");
+        char *buf = (char *)ail_xmalloc((size_t)need + 2);
+        int len = snprintf(buf + 1, (size_t)need + 1, "%.*f", prec, ail__as_double(x));
         const char *txt = ail__apply_sign(buf, &len, f.sign);
-        if (f.group) { char *g = ail__group_digits(txt, &len, f); *out = ail__pad(cx, g, len, f, 1); free(g); return AIL_OK; }
-        *out = ail__pad(cx, txt, len, f, 1); return AIL_OK;
+        if (f.group) { char *g = ail__group_digits(txt, &len, f); *out = ail__pad(cx, g, len, f, 1); free(g); free(buf); return AIL_OK; }
+        *out = ail__pad(cx, txt, len, f, 1); free(buf); return AIL_OK;
     }
     if (type == 's') {
         ail_obj content = (x.tag == AIL_T_STR) ? x : ail_obj_str(cx, x);
