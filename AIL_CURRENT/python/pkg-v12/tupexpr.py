@@ -298,7 +298,11 @@ class Exprs:
         elem = None
         for t in ts:
             t = deep(t)
-            if t is None or t == 'none':
+            if t is None:
+                continue
+            if t == 'none':
+                if deep(want_elem) is None:
+                    return None
                 continue
             if elem is None:
                 elem = t
@@ -311,6 +315,8 @@ class Exprs:
                 if deep(elem) != t:
                     self.refuse(node, 'a %s holding tuples of different shapes is not built; '
                                       'keep one tuple shape in the %s' % (where, where))
+            elif deep(elem) != t and not ({deep(elem), t} <= {INT, FLT, BOOL}):
+                return None
         if elem is None and deep(want_elem) is not None:
             elem = want_elem
         return elem
