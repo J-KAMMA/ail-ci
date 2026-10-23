@@ -1125,6 +1125,17 @@ def _is_literal_default(d):
         return False
 
 
+def _int_constant(n):
+    """An int constant, including the UnaryOp spelling `-2` / `+2`, else None."""
+    if isinstance(n, ast.Constant) and type(n.value) is int:
+        return n.value
+    if isinstance(n, ast.UnaryOp) and isinstance(n.op, (ast.USub, ast.UAdd)) \
+            and isinstance(n.operand, ast.Constant) \
+            and type(n.operand.value) is int:
+        return -n.operand.value if isinstance(n.op, ast.USub) else n.operand.value
+    return None
+
+
 def _module_stmt_binds(stmt):
     """Names a module-level statement binds (def, class, assignment targets, imports)."""
     if isinstance(stmt, (ast.FunctionDef, ast.ClassDef)):
@@ -7848,6 +7859,9 @@ class Compiler(boxclosure.ClosureMixin):
     def _b_chr(self, args, kwargs, ctx):
         if len(args) != 1 or kwargs:
             raise Unsupported('chr() with other than exactly one argument')
+        n = _int_constant(args[0])
+        if n is not None and 0xFFFF < n <= 0x10FFFF:
+            raise Unsupported('chr() of the non-BMP code point U+%04X: the general path stores 16-bit strings' % n)
         v = self.expr(args[0], ctx)
         t = ctx.tmp()
         ctx.emit('st = ail_bi_chr(cx, &%s, %s);' % (t, v))

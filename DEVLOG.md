@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-23 - non-BMP chr() on the general path (job-pre20-10240301)
+
+`chr(0x1F600)` in an untyped program stopped with
+`AIL internal error: chr() non-BMP code point requires 32-bit strings`: the general runtime
+stores UTF-16 code units, so it cannot represent a code point above U+FFFF. A literal
+non-BMP argument is now refused at build time by name (`chr() of the non-BMP code point
+U+1F600 ...`), and a value only known at run time stops with `AIL limit: chr_non_bmp`
+instead of an internal error. The typed/default path already represents these characters
+and still matches CPython. `test_ail_pre20.py` covers the build refusal, the named runtime
+limit, the BMP boundary (U+FFFF is still accepted), and chr()'s range errors.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
