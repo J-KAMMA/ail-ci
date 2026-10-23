@@ -522,7 +522,10 @@
     "python/pkg-v12/prelude_format.py",
     "python/pkg-v12/prelude_with.py",
     "python/pkg-v12/withlib.py",
-    "python/pkg-v12/fastwalk.py"
+    "python/pkg-v12/fastwalk.py",
+    "python/pkg-v12/stdlib6.py",
+    "python/pkg-v12/prelude_ipaddress.py",
+    "python/pkg-v12/prelude_urlparse.py"
   ],
   "sha256": {
     "language_examples/binary_cursor_integer_profile_host.c": "b131b559b7f4a501631d7ee86c0f9a3797b00231e6f28fae6904445821d1a6e9",
@@ -1005,7 +1008,7 @@
     "test_ail_str_find_alias.py": "2dd4e33b572c730b22c452951de0afb632942917681dd8a4768a712eb54d3553",
     "ail_builtin_api.py": "1ec0d7b3092af502f0195cdee6d8cb11f82c078732cbb75d5c5c5f96721d5425",
     "test_ail_builtin_api.py": "f4ed0186a304be917c36526a5818b1d2b6561c7529698f79ce62cc9ac83b5686",
-    "ail_check.py": "8aa8a21d29d46b85bdc348cba96286177b237ce99f38ec7764f5eeb952538817",
+    "ail_check.py": "4cda20460dda87243ea97ba3eca592d673c9d9e41afa1daf5e09d053d4feb619",
     "test_ail_sdk.py": "af18bc35a3d951ce733ca3b73a05c91e58e44c15b12131b1e92c42807c909872",
     "test_ail_str_rfind.py": "9216fc98dd70e3f9de393ff29798602dce499c3600552c6a7b6b77a2b1a432b5",
     "ail_builtin_syntax_forms.py": "8b6a4a90b4ccfcac48a9a3938fcf7c7df3b1ec14a5ca1096dc8e1130d378c7e8",
@@ -1344,7 +1347,9 @@
     "test_ail_fuzz30.py": "1e19cbe6dd9ddfd955ebc94f0ac9f18d3774145c6f202d27cc69572ed7266f0c",
     "test_ail_fuzz31.py": "b4eb7aace424175af5087bea344c879c9befae71efe949418f830d82d0b77c72",
     "test_ail_fuzz32.py": "ede7f24d29fae6c9b23dc86de1b1a16bb9c0dbb60ab0a959a17c6eae2401311a",
-    "test_ail_stdlib6.py": "3470f08043ff6622140f9e81a4c405f5ca532d5497e6ad7f512d44c890f5a80e"
+    "test_ail_stdlib6.py": "3470f08043ff6622140f9e81a4c405f5ca532d5497e6ad7f512d44c890f5a80e",
+    "test_ail_fuzz29.py": "6bbf2f7c69adedbd9a35bb17a010b3a8f59270124c0f201e3f11e162d8fc0cd8",
+    "test_ail_fuzz35.py": "26267b57a09c69794a2ca8871b0e8d60133a5ced19b6917c2a1b699620c9e84f"
   },
   "files": {
     "python/pkg-v12/pipeline.py": "d185d3cd067d1ca503f1fda8e2d8f415e93a0db26fbef6d4b919dd4c0b9a1251",
@@ -1420,7 +1425,7 @@
     "test_ail_str_find_alias.py": "2dd4e33b572c730b22c452951de0afb632942917681dd8a4768a712eb54d3553",
     "ail_builtin_api.py": "1ec0d7b3092af502f0195cdee6d8cb11f82c078732cbb75d5c5c5f96721d5425",
     "test_ail_builtin_api.py": "f4ed0186a304be917c36526a5818b1d2b6561c7529698f79ce62cc9ac83b5686",
-    "ail_check.py": "8aa8a21d29d46b85bdc348cba96286177b237ce99f38ec7764f5eeb952538817",
+    "ail_check.py": "4cda20460dda87243ea97ba3eca592d673c9d9e41afa1daf5e09d053d4feb619",
     "test_ail_sdk.py": "af18bc35a3d951ce733ca3b73a05c91e58e44c15b12131b1e92c42807c909872",
     "test_ail_str_rfind.py": "9216fc98dd70e3f9de393ff29798602dce499c3600552c6a7b6b77a2b1a432b5",
     "ail_builtin_syntax_forms.py": "8b6a4a90b4ccfcac48a9a3938fcf7c7df3b1ec14a5ca1096dc8e1130d378c7e8",
@@ -1755,6 +1760,8 @@
     "test_ail_fuzz30.py": "1e19cbe6dd9ddfd955ebc94f0ac9f18d3774145c6f202d27cc69572ed7266f0c",
     "test_ail_fuzz31.py": "b4eb7aace424175af5087bea344c879c9befae71efe949418f830d82d0b77c72",
     "test_ail_fuzz32.py": "ede7f24d29fae6c9b23dc86de1b1a16bb9c0dbb60ab0a959a17c6eae2401311a",
-    "test_ail_stdlib6.py": "3470f08043ff6622140f9e81a4c405f5ca532d5497e6ad7f512d44c890f5a80e"
+    "test_ail_stdlib6.py": "3470f08043ff6622140f9e81a4c405f5ca532d5497e6ad7f512d44c890f5a80e",
+    "test_ail_fuzz29.py": "6bbf2f7c69adedbd9a35bb17a010b3a8f59270124c0f201e3f11e162d8fc0cd8",
+    "test_ail_fuzz35.py": "26267b57a09c69794a2ca8871b0e8d60133a5ced19b6917c2a1b699620c9e84f"
   }
 }

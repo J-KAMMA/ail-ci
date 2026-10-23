@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-10-23 -- integration: fix the batch-6 review defects
+
+- Added `python/pkg-v12/stdlib6.py`, `python/pkg-v12/prelude_ipaddress.py` and
+  `python/pkg-v12/prelude_urlparse.py` to `MANIFEST.json`'s `sdk_files`, so the exported SDK carries
+  the stdlib6 entry point and the prelude files its `prelude()` reads.
+- Registered `test_ail_fuzz29` and `test_ail_fuzz35` in `AIL_CURRENT/ail_check.MODULES`; they were the
+  only added fuzz modules missing from the suite.
+
 ## 2026-10-23 -- integration: take the accepted c169/cov6/fuzz20-35 branches
 
 - Added the accepted job branches `job-c169-10221631`, `job-cov6-10221632`,
