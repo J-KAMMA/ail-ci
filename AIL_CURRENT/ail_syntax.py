@@ -849,6 +849,8 @@ _MATH_HELPERS = {
     'dmerge': '''def _ail_dmerge(parts):
     out = {}
     for d in parts:
+        if not isinstance(d, dict):
+            raise TypeError("'" + type(d).__name__ + "' object is not a mapping")
         for k in d:
             out[k] = d[k]
     return out''',
