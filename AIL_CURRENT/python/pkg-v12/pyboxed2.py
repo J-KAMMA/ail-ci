@@ -572,6 +572,22 @@ __attribute__((noinline, cold)) static ail_st ail2_no_attr(ail_ctx *cx, ail_obj 
 }
 '''
 
+PROP_NO_SET_C = r'''
+/* `obj.NAME = v` where the class's @property NAME has no setter: CPython raises AttributeError
+   with the instance's class name (a subclass included), before any attribute is stored. */
+__attribute__((noinline, cold)) static ail_st ail2_prop_no_setter(ail_ctx *cx, ail_obj x, const char *name) {
+    char tn[80], buf[200];
+    if ((x.tag == AIL_T_INST || x.tag == AIL_T_EXC) && ((ail_instobj *)x.o)->cls.tag == AIL_T_CLASS) {
+        ail_str s = ail_view_to_str(((ail_classobj *)((ail_instobj *)x.o)->cls.o)->name);
+        size_t k = 0;
+        for (int64_t i = 0; i < s.n && k + 1 < sizeof tn; i++) { uint32_t ch = (uint32_t)ail_chr(s, i); tn[k++] = ch < 128 ? (char)ch : '?'; }
+        tn[k] = 0;
+    } else snprintf(tn, sizeof tn, "%s", ail__tname_c(x));
+    snprintf(buf, sizeof buf, "property '%s' of '%s' object has no setter", name, tn);
+    return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, buf);
+}
+'''
+
 BISECTBOUND_C = r'''
 /* bisect's lo= / hi= bounds. CPython's C _bisect converts lo with the plain index converter and
    hi with the one that also accepts None ("to the end of the sequence"), and does so BEFORE the
@@ -2210,6 +2226,8 @@ class Compiler(boxclosure.ClosureMixin):
             parts.append(ARGCHK_C)
         if getattr(self, 'needs_bisect_bound', False):
             parts.append(BISECTBOUND_C)
+        if getattr(self, 'needs_prop_no_setter', False):
+            parts.append(PROP_NO_SET_C)
         if getattr(self, 'needs_stararity', False):
             parts.append(stararity.C)
         if self.rt_needs:
@@ -9379,17 +9397,25 @@ class Compiler(boxclosure.ClosureMixin):
         if isinstance(target, ast.Attribute):
             obj = self.expr(target.value, ctx)
             self.attr_names.add(target.attr)
-            setters = [c for c in self.class_order if '__ail_set_' + target.attr in self.classes[c]['methods']]
-            if setters:
-                # obj.NAME = v where a class has a property setter for NAME
+            # A property getter or setter is a class-level descriptor: an assignment runs the setter
+            # of the most derived class that has one, else CPython raises AttributeError ("no setter").
+            owners = [c for c in self.class_order
+                      if self.classes[c]['methods'].get(target.attr, {}).get('is_property')
+                      or '__ail_set_' + target.attr in self.classes[c]['methods']]
+            if owners:
+                owners = sorted(owners, key=lambda c: -sum(1 for k in self.classes if self._is_subclass_of(c, k)))
                 first = True
-                for c in setters:
-                    info = self.classes[c]['methods']['__ail_set_' + target.attr]
+                for c in owners:
                     ctx.emit('%sif (%s) {' % ('' if first else '} else ', self._property_owner_cond(obj, c)))
                     first = False
                     ctx.indent += 1
-                    dummy = ctx.tmp()
-                    ctx.emit('st = %s(cx, &%s, %s, %s);' % (info['cname'], dummy, obj, value_c))
+                    setter = self.classes[c]['methods'].get('__ail_set_' + target.attr)
+                    if setter is not None:
+                        dummy = ctx.tmp()
+                        ctx.emit('st = %s(cx, &%s, %s, %s);' % (setter['cname'], dummy, obj, value_c))
+                    else:
+                        self.needs_prop_no_setter = True
+                        ctx.emit('st = ail2_prop_no_setter(cx, %s, %s);' % (obj, c_str_literal(target.attr)))
                     ctx.check()
                     ctx.indent -= 1
                 ctx.emit('} else {')

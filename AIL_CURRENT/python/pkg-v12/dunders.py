@@ -1354,6 +1354,10 @@ class _Rewriter(ast.NodeTransformer):
                 self.globals_needed.add(gname)
                 self.p.changed = True
                 return ast.copy_location(ast.Name(id=gname, ctx=t.ctx), t)
+            m = self.model(self.T(t.value))
+            if m is not None and t.attr in m.props and isinstance(t.ctx, ast.Store):
+                self.refuse(t, 'an assignment to the read-only property %s.%s (a @property without a setter)'
+                            % (m.name, t.attr))
             t.value = self.visit(t.value)
             return t
         if isinstance(t, ast.Subscript):
