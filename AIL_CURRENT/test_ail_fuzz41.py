@@ -161,6 +161,28 @@ class Box:
         self.v = v
 
 
+class OnlyFloor:
+    def __init__(self, n: int):
+        self.n = n
+
+    def __floordiv__(self, other: int):
+        return self.n // other
+
+    def __mod__(self, other: int):
+        return self.n % other
+
+
+class HasDivmod:
+    def __init__(self, n: int):
+        self.n = n
+
+    def __divmod__(self, other: int):
+        return (self.n // other, self.n % other)
+
+    def __rdivmod__(self, other: int):
+        return (other // self.n, other % self.n)
+
+
 def frac_pair(a: Fraction, b: int):
     return divmod(a, b)
 
@@ -186,6 +208,12 @@ def main() -> None:
         print(divmod(x, 2))
     ed = {"x": E.A}
     print(divmod(ed["x"], 2))
+    try:
+        divmod(OnlyFloor(7), 2)
+    except TypeError as e:
+        print("TypeError", e)
+    print(divmod(HasDivmod(7), 2))
+    print(divmod(2, HasDivmod(7)))
     print("end")
 
 
