@@ -9853,7 +9853,7 @@ static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {
         default: return 0; /* dict/set/instance/exception equality: OUT of scope, see comment above */
     }
 }
-static inline int64_t ail_obj_cmp(ail_obj a, ail_obj b) {
+static inline int64_t ail_obj_cmp_op(ail_obj a, ail_obj b, const char *op) {
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         if (a.tag == AIL_FLOAT && b.tag == AIL_FLOAT) {
             double av = a.f, bv = b.f;
@@ -9866,21 +9866,22 @@ static inline int64_t ail_obj_cmp(ail_obj a, ail_obj b) {
     if (a.tag == AIL_STR && b.tag == AIL_STR) return ail_str_cmp(a.s, b.s);
     if ((a.tag == AIL_TUPLE && b.tag == AIL_TUPLE) || (a.tag == AIL_LIST && b.tag == AIL_LIST)) {
         int64_t n = a.v->n < b.v->n ? a.v->n : b.v->n;
-        for (int64_t i = 0; i < n; i++) { int64_t c = ail_obj_cmp(a.v->p[i], b.v->p[i]); if (c != 0) return c; }
+        for (int64_t i = 0; i < n; i++) { int64_t c = ail_obj_cmp_op(a.v->p[i], b.v->p[i], op); if (c != 0) return c; }
         return a.v->n == b.v->n ? 0 : (a.v->n < b.v->n ? -1 : 1);
     }
     char buf[128];
-    snprintf(buf, sizeof buf, "'<' not supported between instances of '%s' and '%s'",
+    snprintf(buf, sizeof buf, "'%s' not supported between instances of '%s' and '%s'", op,
              ail_type_name(a.tag), ail_type_name(b.tag));
     ail_raise_c(AIL_ERR_TYPE, buf);
     return 0;
 }
+static inline int64_t ail_obj_cmp(ail_obj a, ail_obj b) { return ail_obj_cmp_op(a, b, "<"); }
 static inline ail_obj ail_obj_eq(ail_obj a, ail_obj b) { return ail_box_bool(ail_obj_eq_raw(a, b)); }
 static inline ail_obj ail_obj_ne(ail_obj a, ail_obj b) { return ail_box_bool(!ail_obj_eq_raw(a, b)); }
-static inline ail_obj ail_obj_lt(ail_obj a, ail_obj b) { return ail_box_bool(ail_obj_cmp(a, b) < 0); }
-static inline ail_obj ail_obj_le(ail_obj a, ail_obj b) { int64_t c = ail_obj_cmp(a, b); return ail_box_bool(c < 0 || (c == 0 && !((a.tag == AIL_FLOAT && a.f != a.f) || (b.tag == AIL_FLOAT && b.f != b.f)))); }
-static inline ail_obj ail_obj_gt(ail_obj a, ail_obj b) { return ail_box_bool(ail_obj_cmp(a, b) > 0); }
-static inline ail_obj ail_obj_ge(ail_obj a, ail_obj b) { int64_t c = ail_obj_cmp(a, b); return ail_box_bool(c > 0 || (c == 0 && !((a.tag == AIL_FLOAT && a.f != a.f) || (b.tag == AIL_FLOAT && b.f != b.f)))); }
+static inline ail_obj ail_obj_lt(ail_obj a, ail_obj b) { return ail_box_bool(ail_obj_cmp_op(a, b, "<") < 0); }
+static inline ail_obj ail_obj_le(ail_obj a, ail_obj b) { int64_t c = ail_obj_cmp_op(a, b, "<="); return ail_box_bool(c < 0 || (c == 0 && !((a.tag == AIL_FLOAT && a.f != a.f) || (b.tag == AIL_FLOAT && b.f != b.f)))); }
+static inline ail_obj ail_obj_gt(ail_obj a, ail_obj b) { return ail_box_bool(ail_obj_cmp_op(a, b, ">") > 0); }
+static inline ail_obj ail_obj_ge(ail_obj a, ail_obj b) { int64_t c = ail_obj_cmp_op(a, b, ">="); return ail_box_bool(c > 0 || (c == 0 && !((a.tag == AIL_FLOAT && a.f != a.f) || (b.tag == AIL_FLOAT && b.f != b.f)))); }
 
 /* ===================================================================================
    dict / set -- open-addressed index over a dense, insertion-ordered entries array (see
@@ -14483,7 +14484,7 @@ static inline ail_st ail_obj_hash(ail_ctx *cx, int64_t *out, ail_obj x) {
         }
     }
 }
-static inline ail_st ail_obj_cmp(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b) {
+static inline ail_st ail_obj_cmp_op(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b, const char *op) {
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         if (a.tag == AIL_T_FLOAT && b.tag == AIL_T_FLOAT) {
             double av = ail_float_val(a), bv = ail_float_val(b);
@@ -14500,7 +14501,7 @@ static inline ail_st ail_obj_cmp(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b
         ail_vecobj *va = (ail_vecobj *)a.o, *vb = (ail_vecobj *)b.o;
         int64_t n = va->n < vb->n ? va->n : vb->n;
         for (int64_t i = 0; i < n; i++) {
-            int64_t c; ail_st st = ail_obj_cmp(cx, &c, va->p[i], vb->p[i]); if (st != AIL_OK) return st;
+            int64_t c; ail_st st = ail_obj_cmp_op(cx, &c, va->p[i], vb->p[i], op); if (st != AIL_OK) return st;
             if (c != 0) { *out = c; return AIL_OK; }
         }
         *out = va->n == vb->n ? 0 : (va->n < vb->n ? -1 : 1); return AIL_OK;
@@ -14518,9 +14519,10 @@ static inline ail_st ail_obj_cmp(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b
         }
     }
     char buf[128];
-    snprintf(buf, sizeof buf, "'<' not supported between instances of '%s' and '%s'", ail_type_name(a.tag), ail_type_name(b.tag));
+    snprintf(buf, sizeof buf, "'%s' not supported between instances of '%s' and '%s'", op, ail_type_name(a.tag), ail_type_name(b.tag));
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
 }
+static inline ail_st ail_obj_cmp(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b) { return ail_obj_cmp_op(cx, out, a, b, "<"); }
 static inline ail_st ail__view_eq(ail_ctx *cx, int *res, ail_obj a, ail_obj b);
 static inline ail_st ail_op_eq(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
     if (__builtin_expect(ail__view_kind(a) || ail__view_kind(b), 0)) { int r = 0; ail_st st = ail__view_eq(cx, &r, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(r); return AIL_OK; }
@@ -14534,10 +14536,10 @@ static inline ail_st ail_op_ne(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) 
 static inline int ail__nan_operand(ail_obj a, ail_obj b) {
     return (a.tag == AIL_T_FLOAT && ail_float_val(a) != ail_float_val(a)) || (b.tag == AIL_T_FLOAT && ail_float_val(b) != ail_float_val(b));
 }
-static inline ail_st ail_op_lt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 0)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0); return AIL_OK; }
-static inline ail_st ail_op_le(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 1)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK; }
-static inline ail_st ail_op_gt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 2)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0); return AIL_OK; }
-static inline ail_st ail_op_ge(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 3)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK; }
+static inline ail_st ail_op_lt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 0)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp_op(cx, &c, a, b, "<"); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0); return AIL_OK; }
+static inline ail_st ail_op_le(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 1)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp_op(cx, &c, a, b, "<="); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK; }
+static inline ail_st ail_op_gt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 2)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp_op(cx, &c, a, b, ">"); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0); return AIL_OK; }
+static inline ail_st ail_op_ge(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 3)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp_op(cx, &c, a, b, ">="); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK; }
 
 /* ===================================================================================
    Arithmetic. int64 overflow -> AIL_LIMIT (uncatchable), per the owner decision -- the
