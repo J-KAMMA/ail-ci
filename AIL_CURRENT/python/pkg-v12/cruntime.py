@@ -17138,6 +17138,23 @@ static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_
     *out = ail_box_float(cx, result);
     return AIL_OK;
 }
+/* The general path's round() takes ndigits as a VALUE: CPython accepts None (the
+   one-argument form), an int/bool, and an instance with __index__; a float or str is
+   CPython's own "'float' object cannot be interpreted as an integer" TypeError. Reading
+   `n.i` in the emitter made round(x, None) return the float round(x, 0) and made an
+   __index__ instance use whatever happened to sit in the union's int member. */
+static inline ail_st ail_bi_round_obj(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, ail_obj n) {
+    if (!has_n || n.tag == AIL_T_NONE) return ail_bi_round(cx, out, x, 0, 0);
+    /* CPython validates the receiver before ndigits: round([], 2.0) is the list type
+       error, not the ndigits one. */
+    if (!ail__is_intlike(x.tag) && x.tag != AIL_T_FLOAT) return ail_bi_round(cx, out, x, 1, 0);
+    if (!ail__is_intlike(n.tag)) {
+        char buf[96];
+        snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail_type_name(n.tag));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
+    return ail_bi_round(cx, out, x, 1, n.i);
+}
 
 /* ===================================================================================
    B016: divmod(a, b). Checks float-by-zero up front for CPython's specific "float

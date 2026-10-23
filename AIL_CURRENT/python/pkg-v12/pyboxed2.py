@@ -2140,6 +2140,33 @@ class Compiler(boxclosure.ClosureMixin):
             for mname, info in self.classes[cname]['methods'].items():
                 self._emit_function(info)
 
+        # A no-argument user __round__ is not a (self, ndigits) d2 call: CPython calls the
+        # method with no argument at all, so a required ndigits is a TypeError and a default
+        # is used as written. These wrappers give the runtime an exact no-argument entry.
+        self._round0_names = {}
+        for cname in self.class_order:
+            info = self.classes[cname]['methods'].get('__round__')
+            if not info:
+                continue
+            params = info['all_params']
+            if len(params) == 1:
+                body = '    return %s(cx, out, self);\n' % info['cname']
+            elif len(params) == 2 and params[1] in info['defaults']:
+                dflt = self._round_default_c(info['defaults'][params[1]])
+                if dflt is None:
+                    continue
+                body = '    return %s(cx, out, self, %s);\n' % (info['cname'], dflt)
+            elif len(params) == 2:
+                msg = c_str_literal("%s.__round__() missing 1 required positional argument: '%s'"
+                                    % (cname, params[1]))
+                body = '    return ail_raise_c(cx, AIL_B_TYPEERROR, %s);\n' % msg
+            else:
+                continue
+            wname = 'pr0_%d_%s' % (len(self._round0_names), cname)
+            self._round0_names[cname] = wname
+            self.top_defs.append('static ail_st %s(ail_ctx *cx, ail_obj *out, ail_obj self) {\n'
+                                 '    (void)out;\n%s}\n\n' % (wname, body))
+
         has_toplevel_exec = any(not isinstance(n, (ast.FunctionDef, ast.ClassDef, ast.Import,
                                                     ast.ImportFrom))
                                 and not getattr(n, '_ail_hoisted', False)
@@ -2288,6 +2315,10 @@ class Compiler(boxclosure.ClosureMixin):
             if self.dunder_ops:
                 setup.extend(dunderrt.install('g_slots_arr[%d]' % self.global_slots['class:' + cname],
                                               cls['methods'], lambda info: info['all_params']))
+                r0 = getattr(self, '_round0_names', {}).get(cname)
+                if r0:
+                    setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->round0 = %s;\n' %
+                                 (self.global_slots['class:' + cname], r0))
             if cls.get('dc'):
                 setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->dc = %d; '
                              '((ail_classobj *)g_slots_arr[%d].o)->dc_hide = %dULL;\n' %
@@ -7878,11 +7909,36 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('round() with other than (number[, ndigits])')
         v = self.expr(args[0], ctx)
         has_n = len(args) == 2
-        n = '(%s).i' % self.expr(args[1], ctx) if has_n else '0'
+        n = self.expr(args[1], ctx) if has_n else 'ail_box_none()'
         t = ctx.tmp()
-        ctx.emit('st = ail_bi_round(cx, &%s, %s, %d, %s);' % (t, v, has_n, n))
+        ctx.emit('st = ail_bi_round_obj(cx, &%s, %s, %d, %s);' % (t, v, has_n, n))
         ctx.check()
         return t
+
+    @staticmethod
+    def _round_default_c(d):
+        """A literal default for __round__'s ndigits, as a C expression; None when it is not
+        a simple literal (those keep the old fallback rather than guessing)."""
+        if not isinstance(d, ast.Constant):
+            return None
+        v = d.value
+        if v is None:
+            return 'ail_box_none()'
+        if type(v) is bool:
+            return 'ail_box_bool(%d)' % (1 if v else 0)
+        if type(v) is int:
+            if v == -2 ** 63:
+                return 'ail_box_int(INT64_MIN)'
+            if -2 ** 63 < v < 2 ** 63:
+                return 'ail_box_int(%dLL)' % v
+            return None
+        if type(v) is float:
+            if v != v or v in (float('inf'), float('-inf')):
+                return None
+            return 'ail_box_float(%r)' % v
+        if type(v) is str:
+            return 'ail_box_str(ail_cstr(%s))' % c_str_literal(v)
+        return None
 
     def _emit_sys_exit(self, args, kwargs, ctx):
         if len(args) > 1 or kwargs:

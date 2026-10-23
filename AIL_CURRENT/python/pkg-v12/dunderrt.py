@@ -293,11 +293,12 @@ def _edits():
               ENUMS + 'typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or NONE */; int builtin_id;'))
     e.append(('ail_st (*lt_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj); /* user __lt__ (self, other), or 0 */ } ail_classobj;',
               'ail_st (*lt_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj); /* user __lt__ (self, other), or 0 */\n'
+              '                 ail_st (*round0)(ail_ctx *, ail_obj *, ail_obj); /* user __round__() with no ndigits */\n'
               '                 ail_st (*d1[AIL_ND1])(ail_ctx *, ail_obj *, ail_obj); /* operator methods (self), dunderrt.py */\n'
               '                 ail_st (*d2[AIL_ND2])(ail_ctx *, ail_obj *, ail_obj, ail_obj); /* operator methods (self, other) */\n'
               '                 ail_st (*d3[AIL_ND3])(ail_ctx *, ail_obj *, ail_obj, ail_obj, ail_obj); /* (self, key, value) */ } ail_classobj;'))
     e.append(('c->iter_iter = 0; c->iter_next = 0; c->repr_fn = 0; c->str_fn = 0; c->lt_fn = 0;',
-              'c->iter_iter = 0; c->iter_next = 0; c->repr_fn = 0; c->str_fn = 0; c->lt_fn = 0;\n'
+              'c->iter_iter = 0; c->iter_next = 0; c->repr_fn = 0; c->str_fn = 0; c->lt_fn = 0; c->round0 = 0;\n'
               '    memset(c->d1, 0, sizeof c->d1); memset(c->d2, 0, sizeof c->d2); memset(c->d3, 0, sizeof c->d3);'))
     # truthiness and equality
     # ail_obj_truthy itself is left alone (the runtime's own tests stay as small as they were); bool() and `not` ask the class here,
@@ -466,6 +467,22 @@ def _edits():
     e.append(('static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, int64_t n) {\n',
               'static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, int64_t n) {\n'
               '    if (x.tag == AIL_T_INST) { ail_d2_fn f = ail_dun2(x, AIL_D2_ROUND); if (f) return f(cx, out, x, has_n ? ail_box_int(n) : ail_box_none()); }\n'))
+    e.append(('static inline ail_st ail_bi_round_obj(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, ail_obj n) {\n',
+              'static inline ail_st ail_bi_round_obj(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, ail_obj n) {\n'
+              '    if (x.tag == AIL_T_INST) {\n'
+              '        if (!has_n || n.tag == AIL_T_NONE) {\n'
+              '            for (ail_obj k = ((ail_instobj *)x.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base)\n'
+              '                if (((ail_classobj *)k.o)->round0) return ((ail_classobj *)k.o)->round0(cx, out, x);\n'
+              '        }\n'
+              '        ail_d2_fn f = ail_dun2(x, AIL_D2_ROUND);\n'
+              '        if (f) return f(cx, out, x, has_n ? n : ail_box_none());\n'
+              '    }\n'
+              '    if (has_n && n.tag == AIL_T_INST && (ail__is_intlike(x.tag) || x.tag == AIL_T_FLOAT)) {\n'
+              '        ail_d1_fn f = ail_dun1(n, AIL_D1_INDEX);\n'
+              '        if (f) { ail_obj iv; ail_st st = f(cx, &iv, n); if (st != AIL_OK) return st;\n'
+              '            if (!ail__is_intlike(iv.tag)) { char buf[96]; snprintf(buf, sizeof buf, "__index__ returned non-int (type %s)", ail_type_name(iv.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }\n'
+              '            n = iv; }\n'
+              '    }\n'))
     for fn, key in (('floor', 'FLOOR'), ('ceil', 'CEIL'), ('trunc', 'TRUNC')):
         e.append(('static inline ail_st ail_math_%s(ail_ctx *cx, ail_obj *out, ail_obj x) {\n' % fn,
                   'static inline ail_st ail_math_%s(ail_ctx *cx, ail_obj *out, ail_obj x) {\n'

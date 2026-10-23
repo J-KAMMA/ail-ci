@@ -1,5 +1,29 @@
 # DEVLOG
 
+## 2026-10-23 - round() ndigits on the general path (job-pre10-10240012)
+
+`round()` read `ndigits` through the union's integer member before its type checks. A missing
+value or `None` therefore became 0, `round(2.5, None)` produced `2.0` instead of CPython's
+`2`, and `round(2.5, 1.5)` or `round(2.5, "1")` silently rounded instead of raising
+`TypeError: 'float'/'str' object cannot be interpreted as an integer`. An `__index__` instance
+in that position passed the old int member by accident (right for `I()` only when the instance
+happened to store 2), so `round(1.5, I(0))` returned `1.5` instead of `2.0`.
+
+A user `__round__` had a related one-argument form: `round(u)` and `round(u, None)` passed
+`None`/0 to a `(self, ndigits)` method, so a required second parameter never raised CPython's
+`U.__round__() missing 1 required positional argument: 'n'`, and a method with
+`ndigits=None` saw 0 instead of None.
+
+* `ail_bi_round_obj` keeps the raw ndigits object and validates the receiver before it; a
+  missing value or `None` goes through the one-argument `ail_bi_round`, other non-integers
+  raise the CPython message, and an instance is accepted through `__index__`.
+* `dunderrt.py` converts an instance ndigits with `__index__` and adds a per-class
+  `round0` entry so the no-ndigits call reaches the user method with no argument. Generated
+  wrappers in `pyboxed2.py` encode `__round__(self)`, use a literal default as written, and
+  raise the required-argument `TypeError` for `__round__(self, n)`.
+* `test_ail_pre10.py` covers these cases, including values arriving through an argument, a
+  list item, an attribute and a dict value, on both the general path and the default build.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
