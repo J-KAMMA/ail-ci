@@ -1,11 +1,11 @@
-"""Differential round 40: sorting a key that is or contains NaN is refused, never silently reordered.
+"""Differential round 40: sorting with NaN keys follows CPython's TimSort permutation.
 
 Found with small sorting programs against CPython 3.12 on both builds: the general path sorted a
 list holding NaN (a literal, arithmetic, an argument, a list item, an attribute, a dict value or a
-tuple field) into a merge-sort permutation, while CPython's TimSort left the order its own way. The
-typed path already raises ValueError (FLISTSORT / KEYSORT / the IR record sort); the general path's
-`ail_list_sort` now scans its decorated keys (recursing through tuples/lists and dict entries) and
-raises the same ValueError before sorting. The normal sorting cases below stay CPython-identical.
+tuple field) into this runtime's merge-sort permutation, while CPython's TimSort left the order its
+own way. The general path now runs a direct port of CPython 3.12's TimSort when a decorated key is
+or contains NaN, and the typed float-list path does the same. Normal sorts keep the existing fast
+paths. The cases below include the review's over-broad-refusal and reverse-mutation probes.
 """
 import os
 import subprocess
@@ -41,7 +41,7 @@ def main():
 main()
 '''
 
-NAN_CAUGHT = r'''class Box:
+NAN_SORTS = r'''class Box:
     pass
 
 
@@ -51,70 +51,61 @@ def sorter(items):
 
 def main():
     m = (1e308 * 10.0) - (1e308 * 10.0)
+    n = float("nan")
+    print(sorted([3.0, n, 1.0, n, 2.0]))
+    print(sorted([3.0, n, 1.0, n, 2.0], reverse=True))
+    print(sorted([3.0, n, 1.0, n, 2.0], key=lambda x: x))
+    print(sorted([3.0, m, 1.0, 2.0]))
+    print(sorted([3.0, m, 1.0, 2.0], reverse=True))
+
     box = Box()
     box.rows = [m, 2.0, 1.0]
     d = {"a": m, "b": 3.0, "c": 1.0}
+    print(sorted(sorter([3.0, m, 1.0])))
+    xs = [3.0, 1.0]
+    xs.append(m)
+    print(sorted(xs))
+    print(sorted(box.rows))
+    print(sorted(d.values()))
+
+    x = [("a", m), ("b", 1.0), ("c", 2.0)]
     try:
-        print(sorted([3.0, float("nan"), 1.0]))
+        x.sort(key=lambda r: r[1], reverse=True)
     except ValueError:
-        print("refused literal")
+        print("caught")
+    print(x)
+    y = [3.0, m, 1.0, 2.0]
     try:
-        print(sorted([3.0, m, 1.0]))
+        y.sort(reverse=True)
     except ValueError:
-        print("refused arithmetic")
+        print("caught")
+    print(y)
+    z: list[float] = [3.0, float("nan"), 1.0, 2.0]
     try:
-        print(sorter([3.0, m, 1.0]))
+        z.sort(reverse=True)
     except ValueError:
-        print("refused argument")
-    try:
-        xs = [3.0, 1.0]
-        xs.append(m)
-        print(sorted(xs))
-    except ValueError:
-        print("refused list item")
-    try:
-        print(sorted(box.rows))
-    except ValueError:
-        print("refused attribute")
-    try:
-        print(sorted(d.values()))
-    except ValueError:
-        print("refused dict value")
-    try:
-        print(sorted([(2.0, 1.0), (m, 2.0)]))
-    except ValueError:
-        print("refused tuple")
-    try:
-        print(sorted([(2.0, 1.0), (m, 2.0)], key=lambda r: r[0]))
-    except ValueError:
-        print("refused tuple key")
-    try:
-        print(sorted([3.0, m, 1.0], reverse=True))
-    except ValueError:
-        print("refused reverse")
-    try:
-        ys = [3.0, m, 1.0]
-        ys.sort()
-        print(ys)
-    except ValueError:
-        print("refused sort method")
+        print("caught")
+    print(z)
+
+    rows = [(2, m), (1, m), (3, 0.5)]
+    print(sorted(rows, key=lambda r: (r[0], r[1])))
+    print(sorted([(2, m), (1, m)]))
+    print(sorted([(2, m), (1, m)], reverse=True))
+    print(sorted([(m, 2.0), (n, 1.0)]))
+    print(sorted([(m, 2.0), (m, 1.0)]))
+
+    big = []
+    for i in range(130):
+        big.append(float((i * 37) % 19))
+    big[5] = m
+    big[77] = n
+    print(sorted(big))
+    print(sorted(big, reverse=True))
+    print(sorted(big, key=lambda v: -v))
 
 
 main()
 '''
-
-NAN_UNCAUGHT = r'''def main():
-    m = (1e308 * 10.0) - (1e308 * 10.0)
-    print(sorted([2.0, m, 1.0]))
-
-
-main()
-'''
-
-NAN_EXPECTED = b''.join(name + b'\n' for name in (
-    b'refused literal', b'refused arithmetic', b'refused argument', b'refused list item',
-    b'refused attribute', b'refused dict value', b'refused tuple', b'refused tuple key',
-    b'refused reverse', b'refused sort method'))
 
 
 def _cpython(directory, name, text):
@@ -158,22 +149,8 @@ class Fuzz40Tests(unittest.TestCase):
     def test_stability_and_key_functions(self):
         self.check_same('stable', STABLE)
 
-    def test_nan_refused_through_every_source(self):
-        with tempfile.TemporaryDirectory(prefix='ail-fuzz40-') as directory:
-            for general in (True, False):
-                got, err = _build_and_run(directory, 'nan_%s' % ('g' if general else 'd'),
-                                          NAN_CAUGHT, general)
-                self.assertIsNotNone(got, err)
-                self.assertEqual(got, (NAN_EXPECTED, 0), err)
-
-    def test_uncaught_nan_names_valueerror(self):
-        with tempfile.TemporaryDirectory(prefix='ail-fuzz40-') as directory:
-            for general in (True, False):
-                got, err = _build_and_run(directory, 'nan_uncaught_%s' % ('g' if general else 'd'),
-                                          NAN_UNCAUGHT, general)
-                self.assertIsNotNone(got, err)
-                self.assertEqual(got, (b'', 1), err)
-                self.assertIn('ValueError', err)
+    def test_nan_sort_matches_cpython(self):
+        self.check_same('nan', NAN_SORTS)
 
 
 if __name__ == '__main__':
