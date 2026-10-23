@@ -302,6 +302,16 @@ def _exempt(e):
     return isinstance(e, ast.Constant) and (e.value is None or e.value is Ellipsis or isinstance(e.value, (bool, str, bytes)))
 
 
+def _text_constant(e):
+    return isinstance(e, ast.Constant) and isinstance(e.value, (str, bytes))
+
+
+def _text_refusal(op, line):
+    return ('`%s` on two string/bytes constants (line %d, DIFFERENCES C?-job-fuzz90-10231630-1): CPython merges equal '
+            'constants of a code object and interns strings, so `"a" is "a"` can be True, while here each string value '
+            'has its own address; compare strings with `==`' % ('is not' if isinstance(op, ast.IsNot) else 'is', line))
+
+
 def find(tree):
     """the first `is` / `is not` comparison of the program that this module refuses: (node, text), or None"""
     scan = None
@@ -321,6 +331,8 @@ def find(tree):
             if not isinstance(o, (ast.Is, ast.IsNot)):
                 continue
             a, b = sides[i], sides[i + 1]
+            if _text_constant(a) and _text_constant(b):
+                return n, _text_refusal(o, n.lineno)
             if _exempt(a) or _exempt(b):
                 continue
             ka, kb = scan.kind(a, s), scan.kind(b, s)

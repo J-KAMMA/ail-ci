@@ -14395,9 +14395,19 @@ static inline int ail_identical(ail_obj a, ail_obj b) {
 /* the `is` operator (not the identity-then-equality of a container search): two ints of one value outside -5..256 are one object
    in CPython when one was copied from the other and two objects when each was computed, and an int here is a value, so the answer
    is not known: refused by name (DIFFERENCES C114; a statically visible case is refused when compiling, see numidentity.py) */
+static inline const char *ail__tname_c(ail_obj x);
 static inline int ail_is(ail_obj a, ail_obj b) {
     if (__builtin_expect(a.tag == AIL_T_INT && b.tag == AIL_T_INT && a.i == b.i && (a.i < -5 || a.i > 256), 0))
         ail_die("`is` between two equal ints outside -5..256: CPython's answer depends on where each int was made (DIFFERENCES C114); compare with ==");
+    if (__builtin_expect(a.tag == AIL_T_STR && b.tag == AIL_T_STR && !ail_identical(a, b)
+                         && ail_str_eq(ail_view_to_str(a), ail_view_to_str(b)), 0))
+        ail_die("`is` between equal strings or bytes: CPython interns equal constants, so the answer depends on where each was made (DIFFERENCES C?-job-fuzz90-10231630-1); compare with ==");
+    if (__builtin_expect(a.tag == AIL_T_INST && b.tag == AIL_T_INST && a.o != b.o
+                         && ((ail_instobj *)a.o)->cls.o == ((ail_instobj *)b.o)->cls.o, 0)) {
+        const char *tn = ail__tname_c(a);
+        if (!strcmp(tn, "bytes") || !strcmp(tn, "bytearray"))
+            ail_die("`is` between bytes: CPython interns equal bytes constants, so the answer depends on where each was made (DIFFERENCES C?-job-fuzz90-10231630-1); compare with ==");
+    }
     return ail_identical(a, b);
 }
 static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {
