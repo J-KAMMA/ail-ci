@@ -33,6 +33,7 @@ MODULES = (
     'test_ail_gcstress',
     'test_ail_gcroots',
     'test_ail_deqctr',
+    'test_ail_pre17',
     'test_ail_gaps_api1',
     'test_ail_gaps_api2',
     'test_ail_silent1',

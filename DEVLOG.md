@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-23 - Counter equality (job-pre17-10240052)
+
+The first pre-existing difference from job `fuzz64` that still reproduced here was `p1_identity`:
+`Counter` with a NaN count compared to itself returned True, while CPython returns False. CPython's
+`Counter.__eq__` compares every count with `==` (no whole-mapping identity shortcut, so a NaN never
+equals even the same object) and treats a missing count as zero. The general runtime's dict
+equality now has a Counter branch with those rules; plain dict, list and tuple identity semantics
+are unchanged. `test_ail_pre17.py` covers NaN counts (self, copy, fresh, argument/list/dict/attribute
+aliases) and missing/zero, negative, float and bool counts on both builds. The other recorded
+differences (`p14`, `p15`, `p16`) were left untouched.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

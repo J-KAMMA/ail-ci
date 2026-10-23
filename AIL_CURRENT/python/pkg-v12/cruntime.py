@@ -14400,6 +14400,7 @@ static inline int ail_is(ail_obj a, ail_obj b) {
         ail_die("`is` between two equal ints outside -5..256: CPython's answer depends on where each int was made (DIFFERENCES C114); compare with ==");
     return ail_identical(a, b);
 }
+static inline int ail__is_counter(ail_obj x);
 static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         if (a.tag == AIL_T_FLOAT && b.tag == AIL_T_FLOAT) return ail_float_val(a) == ail_float_val(b);
@@ -14415,6 +14416,38 @@ static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {
         case AIL_T_STR: return ail_str_eq(ail_view_to_str(a), ail_view_to_str(b));
         case AIL_T_DICT: {
             ail_mapobj *x = (ail_mapobj *)a.o, *y = (ail_mapobj *)b.o;
+            if (ail__is_counter(a) && ail__is_counter(b)) {
+                /* Counter.__eq__: all counts agree, a missing count is zero, and counts
+                   compare with == only -- unlike dict equality there is no shortcut for the
+                   whole mapping being the same object, so a NaN count makes c == c False. */
+                int64_t ymask = y->index_cap - 1;
+                for (int64_t i = 0; i < x->n; i++) {
+                    int64_t h = x->entries[i].hash, slot = (int64_t)((uint64_t)h & (uint64_t)ymask);
+                    ail_obj other = ail_box_int(0);
+                    for (;;) {
+                        int64_t e = y->index[slot];
+                        if (e == -1) break;
+                        if (y->entries[e].hash == h && (ail_identical(y->entries[e].key, x->entries[i].key) || ail_obj_eq_raw(y->entries[e].key, x->entries[i].key))) {
+                            other = y->entries[e].val; break;
+                        }
+                        slot = (slot + 1) & ymask;
+                    }
+                    if (!ail_obj_eq_raw(x->entries[i].val, other)) return 0;
+                }
+                int64_t xmask = x->index_cap - 1;
+                for (int64_t i = 0; i < y->n; i++) {
+                    int64_t h = y->entries[i].hash, slot = (int64_t)((uint64_t)h & (uint64_t)xmask);
+                    int found = 0;
+                    for (;;) {
+                        int64_t e = x->index[slot];
+                        if (e == -1) break;
+                        if (x->entries[e].hash == h && (ail_identical(x->entries[e].key, y->entries[i].key) || ail_obj_eq_raw(x->entries[e].key, y->entries[i].key))) { found = 1; break; }
+                        slot = (slot + 1) & xmask;
+                    }
+                    if (!found && !ail_obj_eq_raw(y->entries[i].val, ail_box_int(0))) return 0;
+                }
+                return 1;
+            }
             if (x == y) return 1;
             if (x->n != y->n) return 0;
             int64_t ymask = y->index_cap - 1;
