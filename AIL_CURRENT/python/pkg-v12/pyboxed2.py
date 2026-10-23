@@ -9324,9 +9324,9 @@ class Compiler(boxclosure.ClosureMixin):
     def _m_casefold(self, recv, kind, args, kwargs, ctx):
         if kind not in ('str', None):
             raise Unsupported('.casefold() (on a %s)' % kind)
+        self.needs_boxcase = True          # appends the case and fold tables (cruntime.BOXCASE)
         t = ctx.tmp()
-        ctx.emit('st = ail_meth_str_casefold(cx, &%s, %s);' % (t, recv))
-        ctx.check()
+        ctx.emit('%s = ail_boxed_casefold(cx, %s);' % (t, recv))
         return t
 
     def _m_zfill(self, recv, kind, args, kwargs, ctx):

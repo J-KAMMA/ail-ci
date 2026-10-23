@@ -21855,8 +21855,9 @@ static ail_str ail_str_casefold(ail_sarena *A, ail_str s) {
 # (CASEMAP above), over its UTF-16 strings. Appended to a boxed program only when it calls .lower() or
 # .upper(), so no other boxed program carries the tables.
 BOXCASE = r"""
-/* ---- str.lower() / str.upper(), full Unicode (tables from tools/gen_casemap.py) ---- */
+/* ---- str.lower() / str.upper() / str.casefold(), full Unicode (tables from tools/gen_casemap.py) ---- */
 @CASETABLES@
+@FOLDTABLES@
 /* CPython's handle_capital_sigma over a decoded code point array. */
 static int ail__final_sigma_cp(const uint32_t *cp, int64_t m, int64_t at) {
     int64_t j = at;
@@ -21932,7 +21933,53 @@ static ail_obj ail_boxed_case(ail_ctx *cx, ail_obj sobj, int upper) {
     free(cp);
     return ail_str_buf_done(bu, o);
 }
-""".replace('@CASETABLES@', CASEMAP[CASEMAP.index('static const uint32_t ail__lower_cp'):CASEMAP.index('static int ail__final_sigma(')])
+static ail_obj ail_boxed_casefold(ail_ctx *cx, ail_obj sobj) {
+    ail_str s = ail_view_to_str(sobj);
+    int ascii = 1;
+    for (int64_t i = 0; i < s.n; i++) if (ail_chr(s, i) > 127) { ascii = 0; break; }
+    ail_strbuild bu = ail_str_buf1(cx, ascii ? s.n : 3 * s.n, sobj);
+    int64_t o = 0;
+    if (ascii) {
+        for (int64_t i = 0; i < s.n; i++) {
+            uint16_t c = ail_chr(s, i);
+            bu.buf[o++] = (uint16_t)(c >= 65 && c <= 90 ? c + 32 : c);
+        }
+        return ail_str_buf_done(bu, o);
+    }
+    const int64_t nfold = (int64_t)(sizeof ail__fold_cp / sizeof ail__fold_cp[0]);
+    const int64_t nlower = (int64_t)(sizeof ail__lower_cp / sizeof ail__lower_cp[0]);
+    for (int64_t i = 0; i < s.n; i++) {
+        uint32_t c = (uint32_t)ail_chr(s, i);
+        int64_t k;
+        if (c < 0x80) {
+            bu.buf[o++] = (uint16_t)(c >= 65 && c <= 90 ? c + 32 : c);
+        } else if ((k = ail__case_find(ail__fold_cp, nfold, c)) >= 0) {
+            uint32_t len = ail__fold_at[k] & 7, off = ail__fold_at[k] >> 3;
+            for (uint32_t q = 0; q < len; ) {
+                uint32_t b0 = ail__fold_pool[off + q], r;
+                if (b0 < 0x80) { r = b0; q += 1; }
+                else if (b0 < 0xE0) { r = ((b0 & 0x1Fu) << 6) | (ail__fold_pool[off + q + 1] & 0x3Fu); q += 2; }
+                else if (b0 < 0xF0) { r = ((b0 & 0x0Fu) << 12) | ((ail__fold_pool[off + q + 1] & 0x3Fu) << 6) | (ail__fold_pool[off + q + 2] & 0x3Fu); q += 3; }
+                else { r = ((b0 & 0x07u) << 18) | ((ail__fold_pool[off + q + 1] & 0x3Fu) << 12) | ((ail__fold_pool[off + q + 2] & 0x3Fu) << 6) | (ail__fold_pool[off + q + 3] & 0x3Fu); q += 4; }
+                ail__put_cp(bu.buf, &o, r);
+            }
+        } else if ((k = ail__case_find(ail__lower_cp, nlower, c)) >= 0) {
+            uint32_t len = ail__lower_at[k] & 7, off = ail__lower_at[k] >> 3;
+            for (uint32_t q = 0; q < len; ) {
+                uint32_t b0 = ail__lower_pool[off + q], r;
+                if (b0 < 0x80) { r = b0; q += 1; }
+                else if (b0 < 0xE0) { r = ((b0 & 0x1Fu) << 6) | (ail__lower_pool[off + q + 1] & 0x3Fu); q += 2; }
+                else if (b0 < 0xF0) { r = ((b0 & 0x0Fu) << 12) | ((ail__lower_pool[off + q + 1] & 0x3Fu) << 6) | (ail__lower_pool[off + q + 2] & 0x3Fu); q += 3; }
+                else { r = ((b0 & 0x07u) << 18) | ((ail__lower_pool[off + q + 1] & 0x3Fu) << 12) | ((ail__lower_pool[off + q + 2] & 0x3Fu) << 6) | (ail__lower_pool[off + q + 3] & 0x3Fu); q += 4; }
+                ail__put_cp(bu.buf, &o, r);
+            }
+        } else {
+            bu.buf[o++] = (uint16_t)c;
+        }
+    }
+    return ail_str_buf_done(bu, o);
+}
+""".replace('@CASETABLES@', CASEMAP[CASEMAP.index('static const uint32_t ail__lower_cp'):CASEMAP.index('static int ail__final_sigma(')]).replace('@FOLDTABLES@', CASEFOLD[CASEFOLD.index('static const uint32_t ail__fold_cp'):CASEFOLD.index('static ail_str ail_str_casefold')])
 
 # BEGIN GENERATED STRPRED
 STRPRED = r'''/* Full Unicode str.isalpha()/isalnum()/isdigit()/isdecimal()/isnumeric()/isspace()/isupper()/
