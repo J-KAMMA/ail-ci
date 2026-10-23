@@ -14306,6 +14306,9 @@ static inline int ail_class_is_or_subclass(ail_obj cls, ail_obj target) {
     }
     return 0;
 }
+static inline ail_obj ail_classmethod_receiver(ail_obj recv) {
+    return recv.tag == AIL_T_CLASS ? recv : ((ail_instobj *)recv.o)->cls;
+}
 /* True iff an exception is pending AND its class is `target_cls` or a subclass of it --
    the primitive `except SomeClass:` compiles to. */
 static inline int ail_exc_matches(ail_ctx *cx, ail_obj target_cls) {
