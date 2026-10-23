@@ -31,6 +31,10 @@ A missing symbol is "anything". Symbols are:
     '#lo@N' / '#hi@N' / '#k@N'  the bounds of the N-th `for _ in range(a, b)`, fixed when the
                loop starts, and its hidden counter (the loop runs as `k = a; while k < b
                { i = k; body; k += 1 }`).
+    '#fld:o.f' the int field f of an unaliased object parameter o; '#len:#fld:o.f' the length of
+               its bytes/list field. o is tracked only when every use of it is `o.f` or
+               `o.method(...)`, so no other name of this function can reach f; a store to a field,
+               an unknown method call, or any unanalysed construct forgets its facts.
 
 Value rules (an expression's abstract value has the same shape):
     int literals, module int constants: exact.        True/False, comparisons, `not`: [0, 1].
@@ -43,7 +47,9 @@ Value rules (an expression's abstract value has the same shape):
         interval rules. find/rfind/count on str/bytes: [-1, 2**48] / [0, 2**48].
     a + b, a - b, a * b: exact interval arithmetic (on Python ints); a +/- constant keeps every
         symbolic bound shifted by the constant; a - b is also bounded through a shared symbol
-        (b <= s + c and a >= s + d  =>  a - b >= d - c).
+        (b <= s + c and a >= s + d  =>  a - b >= d - c), and between two exact symbols it records
+        the identity `a - b == sa - sb`, so a later guard on the difference (e.g. `available < 4`)
+        refines the operands themselves (`position <= len - 4`).
     After a checked operation the value is in int64 (otherwise it raised), so results are clipped.
     X[i] of a tracked int list: the union of every value ever stored into X (its fresh value,
         X[j] = v, X[j] op= v, append/insert); found by re-running the whole analysis until that
@@ -55,8 +61,11 @@ Value rules (an expression's abstract value has the same shape):
 Statement rules: `x = e` replaces x's facts (and every fact mentioning x; `x = x + c` shifts
 them instead); `X.append(v)`, `X.insert(i, v)`, `X.pop()` as statements that do not mention X
 otherwise shift #len:X by exactly +1/-1 (any other method call forgets #len:X before its
-statement); `if`/`while`/`assert` tests refine the state on each branch (<, <=, >, >=, ==, !=
-between int expressions -- never a float or text comparison -- with `and`/`or`/`not`, including
+statement); `o.m()` for a zero-argument method whose body is only guards and a return, with no
+assignment, loop, try or call outside the pure builtins, is analysed in place against the
+caller's field facts, so its guard proves facts for the caller (this is how `remaining()` gives
+`read_u8` its `position <= len - 1`); `if`/`while`/`assert` tests refine the state on each branch
+(<, <=, >, >=, ==, != between int expressions -- never a float or text comparison -- with `and`/`or`/`not`, including
 inside short-circuit operands); joins keep only facts true on both sides (a fact missing on one
 side is kept when that side's numeric bounds imply it); loops iterate to a fixed point with
 widening (bounds that keep moving go to int64's ends, symbolic facts that weaken are dropped),
@@ -128,12 +137,19 @@ class Info:
 
     kind(name) -> 'int' | 'list' | 'flist' | 'bytes' | 'bytearray' | None (None: not reasoned
     about); const(name) -> int value of a module constant or None; shadowed: names that are user
-    functions or classes (a user `len` is not the built-in)."""
+    functions or classes (a user `len` is not the built-in). field(owner, attr) -> the field's
+    kind or None; fields(owner) -> every field kind of a class instance, or None; method(owner,
+    attr) -> the method's original FunctionDef, or None."""
 
-    def __init__(self, kind, const=lambda name: None, shadowed=frozenset()):
+    def __init__(self, kind, const=lambda name: None, shadowed=frozenset(),
+                 field=lambda owner, attr: None, fields=lambda owner: None,
+                 method=lambda owner, attr: None):
         self.kind = kind
         self.const = const
         self.shadowed = shadowed
+        self.field = field
+        self.fields = fields
+        self.method = method
 
 
 def analyze(fn, info):
@@ -194,6 +210,9 @@ class _Analyzer:
         self.kinds = {}
         self.loop_ids = {}
         self.stored_cache = {}
+        self.tracked_objects = set()
+        self.field_kinds = {}
+        self.inline_returns = []
 
     # ---- setup ----
     def kind(self, name):
@@ -205,6 +224,131 @@ class _Analyzer:
             self.kinds[name] = k
         return self.kinds[name]
 
+    def _trackable_objects(self):
+        """The single object parameter whose every use is `name.field` or `name.method(...)`:
+        a receiver that cannot be aliased by another name or parameter of this function. A
+        second parameter could be the same object, so a function with any other parameter is
+        never tracked. Only a tracked receiver may carry field facts."""
+        a = self.fn.args
+        if a.posonlyargs or a.kwonlyargs or a.vararg or a.kwarg or len(a.args) != 1:
+            return set()
+        name = a.args[0].arg
+        try:
+            fields = self.info.fields(name)
+        except Exception:
+            fields = None
+        if os.environ.get('AIL_RANGE_DEBUG_INLINE'):
+            print('track', name, fields, file=sys.stderr)
+        if not fields or any(k not in ('int', 'bytes') for k in fields.values()):
+            return set()
+        cands = {name}
+        parent = {}
+        for p in ast.walk(self.fn):
+            for c in ast.iter_child_nodes(p):
+                parent[id(c)] = p
+        for n in ast.walk(self.fn):
+            if isinstance(n, ast.Name) and n.id in cands:
+                p = parent.get(id(n))
+                if not (isinstance(p, ast.Attribute) and p.value is n):
+                    cands.discard(n.id)
+        for lam in ast.walk(self.fn):
+            if isinstance(lam, ast.Lambda):
+                cands -= {n.id for n in ast.walk(lam) if isinstance(n, ast.Name)}
+        return cands
+
+    def field_kind(self, owner, attr):
+        key = (owner, attr)
+        if key not in self.field_kinds:
+            try:
+                k = self.info.field(owner, attr)
+            except Exception:
+                k = None
+            self.field_kinds[key] = k
+        return self.field_kinds[key]
+
+    @staticmethod
+    def field_sym(owner, attr):
+        return '#fld:%s.%s' % (owner, attr)
+
+    @staticmethod
+    def field_len_sym(owner, attr):
+        return '#len:#fld:%s.%s' % (owner, attr)
+
+    def object_field_syms(self, owner):
+        try:
+            fields = self.info.fields(owner) or ()
+        except Exception:
+            fields = ()
+        for attr in fields:
+            yield self.field_sym(owner, attr)
+            yield self.field_len_sym(owner, attr)
+
+    def drop_fields(self, S, owner):
+        for sym in self.object_field_syms(owner):
+            self.drop_refs(S, sym)
+            self.drop_markers(S, (sym,))
+
+    def drop_markers(self, S, names):
+        """Forget difference facts whose operands are about to change."""
+        for key in list(S):
+            if key.startswith('#sub|'):
+                parts = key.split('|')
+                if len(parts) == 5 and (parts[1] in names or parts[2] in names):
+                    self.drop_refs(S, key)
+
+    def inline_candidate(self, fn):
+        """A zero-argument method whose body is only guards and a return, with no assignment,
+        loop, try, nested definition or call outside the pure builtins. Such a body can be run
+        against the caller's field facts; nothing it does can change the caller's state except
+        the branch facts its own guard proves."""
+        if not isinstance(fn, ast.FunctionDef):
+            return False
+        a = fn.args
+        if (a.posonlyargs or a.kwonlyargs or a.vararg or a.kwarg or a.defaults
+                or len(a.args) != 1 or a.args[0].arg != 'self'):
+            return False
+        if os.environ.get('AIL_RANGE_DEBUG_INLINE'):
+            print('inline?', fn.name, file=sys.stderr)
+        if len(fn.body) > 12:
+            return False
+        pure = ('len', 'ord', 'bool', 'abs', 'min', 'max')
+        exceptions = set()
+        for n in ast.walk(fn):
+            if isinstance(n, ast.Raise) and n.exc is not None:
+                exc = n.exc.func if isinstance(n.exc, ast.Call) else n.exc
+                if isinstance(exc, ast.Name) and exc.id not in self.info.shadowed:
+                    exceptions.add(exc.id)
+        allowed = {'self'} | exceptions
+        for n in ast.walk(fn):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) \
+                    and n.func.id in pure and n.func.id not in self.info.shadowed \
+                    and not n.keywords:
+                allowed.add(n.func.id)
+        for n in ast.walk(fn):
+            if n is fn:
+                continue
+            if isinstance(n, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.For, ast.AsyncFor,
+                              ast.While, ast.Try, ast.With, ast.AsyncWith, ast.FunctionDef,
+                              ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda, ast.Yield,
+                              ast.YieldFrom, ast.Await, ast.Global, ast.Nonlocal, ast.Delete,
+                              ast.NamedExpr, ast.comprehension)):
+                return False
+            if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
+                return False
+            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) and n.id not in allowed:
+                return False
+            if isinstance(n, ast.Attribute) and isinstance(n.ctx, (ast.Store, ast.Del)):
+                return False
+            if isinstance(n, ast.Call):
+                if not (isinstance(n.func, ast.Name)
+                        and (n.func.id in pure or n.func.id in exceptions)
+                        and n.func.id not in self.info.shadowed and not n.keywords):
+                    return False
+            if isinstance(n, ast.stmt) and not isinstance(n, (ast.If, ast.Raise, ast.Return,
+                                                              ast.Pass, ast.Expr)):
+                return False
+        return True
+
     def run(self):
         fn = self.fn
         # A lambda cannot rebind this function's names (no `nonlocal` in a lambda) but may be
@@ -214,6 +358,7 @@ class _Analyzer:
                                               ast.Global, ast.Nonlocal, ast.Yield, ast.YieldFrom, ast.Await)):
                 raise _Abort("nested definition or generator")
         self.tracked_lists = self._trackable_lists()
+        self.tracked_objects = self._trackable_objects()
         # Element ranges of tracked int lists: every value such a list ever holds is stored by a
         # statement of this function (it is never aliased), so the union of the stored values'
         # ranges bounds every element read. Found by re-running the analysis until that union is
@@ -468,7 +613,12 @@ class _Analyzer:
         """S is modified in place. `val` was computed in S before the assignment."""
         if not self.is_int(name):
             return
+        self.drop_markers(S, (name,))
         lo, hi, ub, lb = val
+        ub = {s: c for s, c in ub.items()
+              if not (s.startswith('#sub|') and name in s.split('|')[1:3])}
+        lb = {s: c for s, c in lb.items()
+              if not (s.startswith('#sub|') and name in s.split('|')[1:3])}
         k = ub.get(name)
         if k is not None and lb.get(name) == k:
             # name = name + k: shift the facts of everything that mentions the old value
@@ -494,9 +644,13 @@ class _Analyzer:
         for name in names:
             if self.is_int(name):
                 self.drop_refs(S, name)
+                self.drop_markers(S, (name,))
             ls = self.len_sym(name)
             if ls:
                 self.drop_refs(S, ls)
+                self.drop_markers(S, (ls,))
+            if name in self.tracked_objects:
+                self.drop_fields(S, name)
 
     # ---- joins ----
     def join(self, a, b):
@@ -587,6 +741,8 @@ class _Analyzer:
             ls = self.len_sym(x)
             if ls:
                 self.drop_refs(S, ls)
+            if x in self.tracked_objects:
+                self.drop_fields(S, x)
 
     def ev(self, e, S):
         """Abstract value of e in state S; records proofs for nodes inside e."""
@@ -666,6 +822,9 @@ class _Analyzer:
             return TOP
         if isinstance(e, ast.Attribute):
             self.ev(e.value, S)
+            if isinstance(e.value, ast.Name) and e.value.id in self.tracked_objects \
+                    and self.field_kind(e.value.id, e.attr) == 'int':
+                return self.sym_val(S, self.field_sym(e.value.id, e.attr))
             return TOP
         if isinstance(e, ast.Dict):
             for x in list(e.keys) + list(e.values):
@@ -674,6 +833,9 @@ class _Analyzer:
             return TOP
         # comprehensions, f-strings, lambdas, starred, slices...: never descended into
         self.opaque(e)
+        for n in ast.walk(e):
+            if isinstance(n, ast.Name) and n.id in self.tracked_objects:
+                self.drop_fields(S, n.id)
         return TOP
 
     def subscript(self, e, S):
@@ -687,6 +849,18 @@ class _Analyzer:
                 self.ev(base, S)
             return TOP
         idx = self.ev(sl, S)
+        if isinstance(base, ast.Attribute) and isinstance(base.value, ast.Name) \
+                and base.value.id in self.tracked_objects:
+            self.ev(base, S)
+            owner, attr = base.value.id, base.attr
+            fk = self.field_kind(owner, attr)
+            if fk in ('list', 'flist', 'bytes'):
+                ls = self.field_len_sym(owner, attr)
+                ok = self.recording and idx[0] >= 0 and self.prove_le(S, idx, ls, -1)
+                self.note(self.proofs.inbounds, e, ok)
+            if fk in ('bytes', 'bytearray'):
+                return (0, 255, {}, {})
+            return TOP
         if not isinstance(base, ast.Name):
             self.ev(base, S)
             return TOP
@@ -718,15 +892,20 @@ class _Analyzer:
                 return True
             best[s] = c
         frontier = dict(best)
+        seen = set()
         for _ in range(_DEPTH):
             nxt = {}
             for s, c in frontier.items():
+                if s in seen:
+                    continue
+                seen.add(s)
                 for s2, c2 in S.get(s, TOP)[2].items():
                     cc = c + c2
                     if s2 == target and cc <= k:
                         return True
                     if s2 not in best or cc < best[s2]:
                         best[s2] = cc
+                    if s2 not in seen and (s2 not in nxt or cc < nxt[s2]):
                         nxt[s2] = cc
                     if self.eff_hi(S, s2, 1) + cc <= self.eff_lo(S, target) + k:
                         return True
@@ -741,6 +920,18 @@ class _Analyzer:
         for kw in e.keywords:
             self.ev(kw.value, S)
         f = e.func
+        tracked_call = (isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name)
+                        and f.value.id in self.tracked_objects)
+        pure_builtin = (isinstance(f, ast.Name) and f.id in
+                        ('len', 'ord', 'bool', 'abs', 'min', 'max')
+                        and f.id not in self.info.shadowed and not e.keywords)
+        if not tracked_call and not pure_builtin:
+            # A field handed to other code (or the receiver of a method on the field) may be
+            # mutated there; the field facts must not survive that call.
+            for n in ast.walk(e):
+                if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) \
+                        and n.value.id in self.tracked_objects:
+                    self.drop_fields(S, n.value.id)
         if isinstance(f, ast.Attribute):
             if not isinstance(f.value, ast.Name):
                 self.ev(f.value, S)
@@ -754,6 +945,28 @@ class _Analyzer:
                     self.store_elem(f.value.id, TOP)
                 if f.attr == 'pop':
                     return self.elem_val(f.value.id)
+            if f.value.id in self.tracked_objects:
+                try:
+                    callee = self.info.method(f.value.id, f.attr)
+                except Exception:
+                    callee = None
+                if callee is not None and not e.args and not e.keywords \
+                        and self.inline_candidate(callee):
+                    saved = self.recording
+                    self.recording = False
+                    self.inline_returns.append([])
+                    try:
+                        out = self.exec_block(callee.body, dict(S))
+                    finally:
+                        rets = self.inline_returns.pop()
+                        self.recording = saved
+                    if out is None and len(rets) == 1:
+                        retS, val = rets[0]
+                        S.clear()
+                        S.update(retS)
+                        return val
+                self.drop_fields(S, f.value.id)
+                return TOP
             # only the built-in text/byte/list methods (a struct may define its own `find`)
             if self.kind(f.value.id) in ('str', 'bytes', 'bytearray') and not e.keywords:
                 if f.attr in ('find', 'rfind'):
@@ -772,6 +985,12 @@ class _Analyzer:
                     return self.sym_val(S, ls)
                 if self.kind(a.id) in ('list', 'flist', 'bytes', 'bytearray'):
                     return (0, LENMAX, {}, {})
+            if isinstance(a, ast.Attribute) and isinstance(a.value, ast.Name) \
+                    and a.value.id in self.tracked_objects:
+                fk = self.field_kind(a.value.id, a.attr)
+                if fk in ('list', 'flist', 'bytes', 'bytearray'):
+                    return self.sym_val(S, self.field_len_sym(a.value.id, a.attr))
+                return TOP
             return (0, MAX, {}, {})
         if name == 'ord' and len(args) == 1:
             return (0, 0x10FFFF, {}, {})
@@ -855,6 +1074,13 @@ class _Analyzer:
             for s, d in aub.items():
                 if s in blb:
                     hi = min(hi, d - blb[s])
+            ea, eb = self.exact_syms(a), self.exact_syms(b)
+            if len(ea) == 1 and len(eb) == 1:
+                # Keep the identity `result == (sa + oa) - (sb + ob)` so a guard on the result
+                # (`available < n`) can refine the operands themselves (`position <= len - n`).
+                marker = '#sub|%s|%s|%d|%d' % (ea[0][0], eb[0][0], ea[0][1], eb[0][1])
+                ub[marker] = 0
+                lb[marker] = 0
         elif isinstance(op, ast.Mult):
             ps = (alo * blo, alo * bhi, ahi * blo, ahi * bhi)
             lo, hi = min(ps), max(ps)
@@ -974,6 +1200,28 @@ class _Analyzer:
         a = self.peek(left, S)
         b = self.peek(right, S)
         S = dict(S)
+        marker = self.sub_marker(a)
+        if marker is not None and b[0] == b[1] and t is not ast.NotEq:
+            _, sa, sb, oa, ob = marker.split('|')
+            d = b[0] - int(oa) + int(ob)
+            if t is ast.Lt:
+                self.add_lb(S, sb, sa, -(d - 1))
+                self.add_ub(S, sa, sb, d - 1)
+            elif t is ast.LtE:
+                self.add_lb(S, sb, sa, -d)
+                self.add_ub(S, sa, sb, d)
+            elif t is ast.Gt:
+                self.add_ub(S, sb, sa, -(d + 1))
+                self.add_lb(S, sa, sb, d + 1)
+            elif t is ast.GtE:
+                self.add_ub(S, sb, sa, -d)
+                self.add_lb(S, sa, sb, d)
+            elif t is ast.Eq:
+                self.add_lb(S, sb, sa, -d)
+                self.add_ub(S, sa, sb, d)
+                self.add_ub(S, sb, sa, -d)
+                self.add_lb(S, sa, sb, d)
+            return S
         if t is ast.Lt:
             ok = self.le(S, left, a, right, b, -1)
         elif t is ast.LtE:
@@ -1011,10 +1259,20 @@ class _Analyzer:
             return False
         if isinstance(e, ast.Subscript) and not isinstance(e.slice, ast.Slice) and isinstance(e.value, ast.Name):
             return self.kind(e.value.id) in ('bytes', 'bytearray', 'list')
+        if isinstance(e, ast.Attribute) and isinstance(e.value, ast.Name) \
+                and e.value.id in self.tracked_objects:
+            return self.field_kind(e.value.id, e.attr) == 'int'
         return False
 
     def exact_syms(self, val):
         return [(s, c) for s, c in val[2].items() if val[3].get(s) == c]
+
+    @staticmethod
+    def sub_marker(val):
+        for s, c in val[2].items():
+            if s.startswith('#sub|') and c == 0 and val[3].get(s) == 0:
+                return s
+        return None
 
     def le(self, S, le, a, re, b, k):
         """Add a <= b + k to S (in place). False when that is impossible."""
@@ -1207,9 +1465,12 @@ class _Analyzer:
             self.loops[-1][1].append(S)
             return None
         if isinstance(st, ast.Return):
+            val = TOP
             if st.value is not None:
                 self.pre_kill(S, [st.value])
-                self.ev(st.value, S)
+                val = self.ev(st.value, S)
+            if self.inline_returns:
+                self.inline_returns[-1].append((S, val))
             return None
         if isinstance(st, ast.Raise):
             return None
@@ -1268,6 +1529,16 @@ class _Analyzer:
                 self.ev(t.value, S)
         elif isinstance(t, ast.Attribute):
             self.ev(t.value, S)
+            if isinstance(t.value, ast.Name) and t.value.id in self.tracked_objects:
+                sym = self.field_sym(t.value.id, t.attr)
+                self.drop_refs(S, sym)
+                self.drop_markers(S, (sym,))
+                if self.field_kind(t.value.id, t.attr) == 'int':
+                    self.set_sym(S, sym, val)
+                else:
+                    ls = self.field_len_sym(t.value.id, t.attr)
+                    self.drop_refs(S, ls)
+                    self.drop_markers(S, (ls,))
         else:
             self.forget(S, t)
 
