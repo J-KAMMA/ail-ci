@@ -14030,7 +14030,7 @@ typedef struct { ail_gcobj hdr; ail_mapentry *entries; int64_t n, cap; int64_t *
                  int8_t dd_factory; /* defaultdict marker: 0 plain dict, 1 int, 2 list, 3 set, 4 str (2026-09-16) */ } ail_mapobj;
 /* set / frozenset: insertion-ordered like the typed path's sets (DIFFERENCES.md A2). An entry whose key tag is UNBOUND is a
    hole left by a removal; `n` counts entries used including holes, `used` the live ones. */
-typedef struct { ail_obj key; int64_t hash; } ail_setentry;
+typedef struct { ail_obj key; int64_t hash; int64_t pyhash; } ail_setentry;
 /* `fin`: every entry before it is a hole (set.pop() takes the first live entry and moves it on, so draining a set is linear) */
 typedef struct { ail_gcobj hdr; ail_setentry *ent; int64_t n, cap, used; int64_t *index; int64_t index_cap; int64_t fin; } ail_setobj;
 #define AIL_SETOBJ(x) ((ail_setobj *)(x).o)
@@ -14043,6 +14043,8 @@ static inline ail_st ail_setx_update_any(ail_ctx *cx, ail_setobj *so, ail_obj ot
 static inline int ail_setx_eq(ail_obj a, ail_obj b);
 static inline int ail_setx_cmp(ail_obj a, ail_obj b, int op /* 0 lt, 1 le, 2 gt, 3 ge */);
 static inline ail_st ail_pyhash(ail_ctx *cx, int64_t *out, ail_obj x);
+static inline int64_t ail_pyhash_int(int64_t v);
+static inline ail_st ail_dun_hash_pair(ail_ctx *cx, int64_t *tab, int64_t *py, ail_obj x);
 static inline ail_st ail_frozenset_hash(ail_ctx *cx, int64_t *out, const ail_setobj *so);
 static inline ail_st ail_set_union(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b);
 static inline ail_st ail_set_intersection(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b);
@@ -15211,11 +15213,11 @@ static inline int64_t ail_setx_find(const ail_setobj *so, ail_obj key, int64_t h
 static inline int ail_setx_contains_entry(const ail_setobj *so, ail_obj key, int64_t hash) {
     return ail_setx_find(so, key, hash) >= 0;
 }
-static inline void ail_setx_add_entry(ail_ctx *cx, ail_setobj *so, ail_obj key, int64_t hash) {
+static inline void ail_setx_add_entry(ail_ctx *cx, ail_setobj *so, ail_obj key, int64_t hash, int64_t pyhash) {
     if (ail_setx_find(so, key, hash) >= 0) return;
     if (so->n == so->cap) ail_setx_rebuild(cx, so, so->used * 2 > so->cap ? so->cap * 2 : so->cap);
     int64_t k = so->n++;
-    so->ent[k].key = key; so->ent[k].hash = hash;
+    so->ent[k].key = key; so->ent[k].hash = hash; so->ent[k].pyhash = pyhash;
     so->used++;
     int64_t mask = so->index_cap - 1, slot = (int64_t)((uint64_t)hash & (uint64_t)mask);
     while (so->index[slot] != -1) slot = (slot + 1) & mask;
@@ -15251,8 +15253,8 @@ static inline void ail_setx_swap_bodies(ail_setobj *a, ail_setobj *b) {
     uint32_t sz = a->hdr.size; a->hdr.size = b->hdr.size; b->hdr.size = sz;
 }
 static inline ail_st ail_setx_add_key(ail_ctx *cx, ail_setobj *so, ail_obj key) {
-    int64_t h; ail_st st = ail_obj_hash(cx, &h, key); if (st != AIL_OK) return st;
-    ail_setx_add_entry(cx, so, key, h);
+    int64_t h, ph; ail_st st = ail_dun_hash_pair(cx, &h, &ph, key); if (st != AIL_OK) return st;
+    ail_setx_add_entry(cx, so, key, h, ph);
     return AIL_OK;
 }
 /* a set used as a key to look up (`{1} in {frozenset({1})}`, s.discard({1})) is treated as the frozenset of its elements */
@@ -15261,7 +15263,7 @@ static inline ail_st ail_setx_key_for_lookup(ail_ctx *cx, ail_obj *key) {
         ail_setobj *src = AIL_SETOBJ(*key);
         ail_obj fs = ail_frozenset_new(cx); ail_setobj *dst = AIL_SETOBJ(fs);
         int64_t pos = 0; ail_setentry *e;
-        while (ail_setx_next(src, &pos, &e)) ail_setx_add_entry(cx, dst, e->key, e->hash);
+        while (ail_setx_next(src, &pos, &e)) ail_setx_add_entry(cx, dst, e->key, e->hash, e->pyhash);
         *key = fs;
     }
     return AIL_OK;
@@ -15283,7 +15285,7 @@ static inline ail_obj ail_setx_newlike(ail_ctx *cx, ail_obj like) { return ail_s
 static inline void ail_setx_merge(ail_ctx *cx, ail_setobj *so, const ail_setobj *other) {
     if (other == so) return;
     int64_t pos = 0; ail_setentry *e;
-    while (ail_setx_next(other, &pos, &e)) ail_setx_add_entry(cx, so, e->key, e->hash);
+    while (ail_setx_next(other, &pos, &e)) ail_setx_add_entry(cx, so, e->key, e->hash, e->pyhash);
 }
 static inline ail_obj ail_setx_copy_as(ail_ctx *cx, int frozen, const ail_setobj *src) {
     ail_obj r = ail_setx_new(cx, frozen);
@@ -15296,7 +15298,7 @@ static inline void ail_setx_filter(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_ob
     ail_setobj *a = AIL_SETOBJ(ao), *b = AIL_SETOBJ(bo);
     int64_t pos = 0; ail_setentry *e;
     while (ail_setx_next(a, &pos, &e))
-        if (ail_setx_contains_entry(b, e->key, e->hash) == keep) ail_setx_add_entry(cx, AIL_SETOBJ(r), e->key, e->hash);
+        if (ail_setx_contains_entry(b, e->key, e->hash) == keep) ail_setx_add_entry(cx, AIL_SETOBJ(r), e->key, e->hash, e->pyhash);
     *out = r;
 }
 static inline void ail_setx_intersection(ail_ctx *cx, ail_obj *out, ail_obj ao, ail_obj bo) { ail_setx_filter(cx, out, ao, bo, 1); }
@@ -15307,7 +15309,7 @@ static inline void ail_setx_symmetric_difference(ail_ctx *cx, ail_obj *out, ail_
     ail_setobj *a = AIL_SETOBJ(ao), *b = AIL_SETOBJ(bo);
     int64_t pos = 0; ail_setentry *e;
     while (ail_setx_next(b, &pos, &e))
-        if (!ail_setx_contains_entry(a, e->key, e->hash)) ail_setx_add_entry(cx, AIL_SETOBJ(r), e->key, e->hash);
+        if (!ail_setx_contains_entry(a, e->key, e->hash)) ail_setx_add_entry(cx, AIL_SETOBJ(r), e->key, e->hash, e->pyhash);
     AIL_FRAME_LEAVE(cx, fr);
     *out = r;
 }
@@ -15414,12 +15416,11 @@ static inline ail_st ail__view_setop(ail_ctx *cx, ail_obj *out, ail_obj a, ail_o
 /* an order-free hash of the elements, so equal frozensets hash alike; the element hashes are the
    Python ones (hash(1) == hash(1.0) == hash(True)), as CPython's frozenset_hash uses */
 static inline ail_st ail_frozenset_hash(ail_ctx *cx, int64_t *out, const ail_setobj *so) {
+    (void)cx;
     uint64_t hash = 0;
     for (int64_t i = 0; i < so->n; i++) {
         if (!ail_setx_live(&so->ent[i])) continue;
-        int64_t eh; ail_st st = ail_pyhash(cx, &eh, so->ent[i].key);
-        if (st != AIL_OK) return st;
-        uint64_t h = (uint64_t)eh;
+        uint64_t h = (uint64_t)so->ent[i].pyhash;
         if (h == (uint64_t)-1) h = (uint64_t)-2;
         hash ^= ((h ^ 89869747ULL) ^ (h << 16)) * 3644798167ULL;
     }
@@ -17582,6 +17583,13 @@ static inline ail_st ail_pyhash(ail_ctx *cx, int64_t *out, ail_obj x) {
         }
         default: return ail_obj_hash(cx, out, x);
     }
+}
+/* The set entry keeps both hashes: the table's private one and the element's Python hash, captured
+   when the element is inserted. dunderrt.py replaces this fallback (no instances exist without it)
+   with one that calls a user __hash__ only once. */
+static inline ail_st ail_dun_hash_pair(ail_ctx *cx, int64_t *tab, int64_t *py, ail_obj x) {
+    ail_st st = ail_obj_hash(cx, tab, x); if (st != AIL_OK) return st;
+    return ail_pyhash(cx, py, x);
 }
 static inline ail_st ail_bi_hash(ail_ctx *cx, ail_obj *out, ail_obj x) {
     int64_t h; ail_st st = ail_pyhash(cx, &h, x); if (st != AIL_OK) return st;

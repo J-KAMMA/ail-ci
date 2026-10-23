@@ -12,6 +12,9 @@ The programs also keep the surrounding behaviour compared on both builds: mixed 
 and bool keys and memberships, tuples and frozensets as dict keys, nested containers, empty,
 zero, negative and huge keys, and values reaching the code through an argument, a list item,
 an attribute and a dict value.
+
+A frozenset stores the element's Python hash when it is inserted: hash(frozenset(...)) must
+not call a user __hash__ again, and it must keep working after that hash changes.
 """
 import os
 import subprocess
@@ -111,6 +114,38 @@ main()
 '''
 
 
+HASH_CACHE = r'''class K:
+    def __init__(self, value):
+        self.calls = 0
+        self.value = value
+
+    def __hash__(self):
+        self.calls += 1
+        return self.value
+
+    def __eq__(self, other):
+        return self is other
+
+
+def main():
+    for value in (7, -1, 2305843009213693951):
+        k = K(value)
+        f = frozenset({k})
+        print(k.calls)
+        h = hash(f)
+        print(k.calls)
+        print(hash(f) == h)
+        print(k.calls)
+        k.value = 99
+        print(hash(f) == h, k.calls)
+        d = {f: "found"}
+        print(d[f], k.calls)
+
+
+main()
+'''
+
+
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -159,6 +194,9 @@ class Fuzz52Tests(unittest.TestCase):
 
     def test_frozenset_and_tuple_keys(self):
         self.check('frozen_tuple_keys', FROZEN_AND_TUPLE_KEYS)
+
+    def test_frozenset_hash_is_captured(self):
+        self.check('frozenset_hash_cache', HASH_CACHE)
 
 
 if __name__ == '__main__':

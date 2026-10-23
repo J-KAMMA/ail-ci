@@ -241,6 +241,46 @@ __attribute__((noinline)) static ail_st ail_dun_op_eq(ail_ctx *cx, ail_obj *out,
 HASH_CASE = '''        case AIL_T_INST: return ail_dun_hash(cx, out, x);
 '''
 
+HASH_PAIR_FALLBACK = '''/* The set entry keeps both hashes: the table's private one and the element's Python hash, captured
+   when the element is inserted. dunderrt.py replaces this fallback (no instances exist without it)
+   with one that calls a user __hash__ only once. */
+static inline ail_st ail_dun_hash_pair(ail_ctx *cx, int64_t *tab, int64_t *py, ail_obj x) {
+    ail_st st = ail_obj_hash(cx, tab, x); if (st != AIL_OK) return st;
+    return ail_pyhash(cx, py, x);
+}
+'''
+
+HASH_PAIR = '''/* dunderrt.py: the table hash and the Python hash from one user __hash__ call, so that a
+   frozenset can keep the element's Python hash without invoking __hash__ again. */
+static inline ail_st ail_dun_hash_pair(ail_ctx *cx, int64_t *tab, int64_t *py, ail_obj x) {
+    if (x.tag != AIL_T_INST) {
+        ail_st st = ail_obj_hash(cx, tab, x); if (st != AIL_OK) return st;
+        return ail_pyhash(cx, py, x);
+    }
+    ail_d1_fn hf = ail_dun1(x, AIL_D1_HASH);
+    if (hf) {
+        ail_obj hr; ail_st hst = hf(cx, &hr, x); if (hst != AIL_OK) return hst;
+        if (!(hr.tag == AIL_T_INST && hr.o == x.o)) {
+            if (hr.tag == AIL_T_INT || hr.tag == AIL_T_BOOL) {
+                int64_t raw = hr.i;
+                uint64_t h = (uint64_t)raw; h ^= h >> 33; h *= 0xff51afd7ed558ccdULL; h ^= h >> 33;
+                *tab = (int64_t)h;
+                int64_t p = ail_dun1(x, AIL_D1_INT) ? ail_pyhash_int(raw) : raw;
+                *py = p == -1 ? -2 : p;
+                return AIL_OK;
+            }
+            ail_st rst = ail_obj_hash(cx, tab, hr); if (rst != AIL_OK) return rst; *py = *tab; return AIL_OK;
+        }
+    } else if (ail_dun2(x, AIL_D2_EQ) || ((ail_classobj *)((ail_instobj *)x.o)->cls.o)->dc) {
+        char hb[120], hn[80]; ail__dun_tname(hn, sizeof hn, x);
+        snprintf(hb, sizeof hb, "unhashable type: '%s'", hn);
+        return ail_raise_c(cx, AIL_B_TYPEERROR, hb);
+    }
+    uint64_t hv = (uint64_t)(uintptr_t)x.o; hv ^= hv >> 33; hv *= 0xff51afd7ed558ccdULL; hv ^= hv >> 33;
+    *tab = (int64_t)hv; *py = (int64_t)hv; return AIL_OK;
+}
+'''
+
 HASH_FUNC = '''static inline ail_st ail_obj_hash(ail_ctx *cx, int64_t *out, ail_obj x);
 __attribute__((noinline)) static ail_st ail_dun_hash(ail_ctx *cx, int64_t *out, ail_obj x) {
     ail_d1_fn hf = ail_dun1(x, AIL_D1_HASH);
@@ -492,6 +532,7 @@ def _edits():
     e.append(('        default: { char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable"',
               '        case AIL_T_INST: { ail_d2_fn f = ail_dun2(c, AIL_D2_GETITEM); if (f) return f(cx, out, c, key); }\n        /* fall through */\n'
               '        default: { char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable"'))
+    e.append((HASH_PAIR_FALLBACK, HASH_PAIR))
     return e
 
 
