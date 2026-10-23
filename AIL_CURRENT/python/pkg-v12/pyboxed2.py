@@ -2180,7 +2180,8 @@ class Compiler(boxclosure.ClosureMixin):
                for n in ast.walk(tree)):
             # UnboundLocalError is a NameError (`except NameError` takes it); only a program that names NameError
             # in a handler gets the line, so no other program's C changes (DIFFERENCES C76)
-            anchor = '        c->base = (i == AIL_B_EXCEPTION) ? ail_box_none() : cx->builtin_cls[parent];\n'
+            anchor = ('        c->base = (i == AIL_B_EXCEPTION || i == AIL_B_GENERATOREXIT) '
+                      '? ail_box_none() : cx->builtin_cls[parent];\n')
             if anchor in parts[0]:
                 parts[0] = parts[0].replace(anchor, '        if (i == AIL_B_UNBOUNDLOCALERROR) parent = AIL_B_NAMEERROR;\n' + anchor, 1)
         if self.uses_fileio:
@@ -10088,7 +10089,7 @@ class Compiler(boxclosure.ClosureMixin):
         for h in node.handlers:
             conds = []
             if h.type is None:
-                conds = ['ail_exc_matches_b(cx, AIL_B_EXCEPTION)']
+                conds = ['ail_exc_matches_b(cx, AIL_B_EXCEPTION) || ail_exc_matches_b(cx, AIL_B_GENERATOREXIT)']
             else:
                 types = h.type.elts if isinstance(h.type, ast.Tuple) else [h.type]
                 for t in types:

@@ -16458,8 +16458,7 @@ static inline void ail_ctx_init(ail_ctx *cx) {
             parent = AIL_B_CONNECTIONERROR;
         /* GeneratorExit derives from BaseException, not Exception (CPython): `except Exception` must not
            catch the close() request a generator's finally block sees. */
-        c->base = (i == AIL_B_EXCEPTION || i == AIL_B_GENERATOREXIT) ? ail_box_none()
-                                                                     : cx->builtin_cls[parent];
+        c->base = (i == AIL_B_EXCEPTION || i == AIL_B_GENERATOREXIT) ? ail_box_none() : cx->builtin_cls[parent];
         c->builtin_id = i;
         ail_obj r; r.tag = AIL_T_CLASS; r.o = (ail_gcobj *)c;
         cx->builtin_cls[i] = r;

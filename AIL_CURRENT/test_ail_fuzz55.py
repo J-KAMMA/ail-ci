@@ -153,6 +153,38 @@ def main():
 main()
 """
 
+BARE_EXCEPT = r"""def k():
+    try:
+        yield 1
+    except:
+        print("caught bare")
+    finally:
+        print("fin k")
+
+
+def e():
+    try:
+        yield 2
+    except Exception:
+        print("wrong: Exception caught")
+    finally:
+        print("fin e")
+
+
+def main():
+    c = k()
+    print(next(c))
+    print("close->", c.close())
+    print("closed")
+    d = e()
+    print(next(d))
+    print("close->", d.close())
+    print("closed e")
+
+
+main()
+"""
+
 CLOSE_CONTAINERS = r"""class Box:
     def __init__(self):
         self.g = None
@@ -235,6 +267,9 @@ class GeneratorClose(unittest.TestCase):
 
     def test_close_through_containers(self):
         self.same(CLOSE_CONTAINERS)
+
+    def test_bare_except_catches_close_but_exception_does_not(self):
+        self.same(BARE_EXCEPT)
 
 
 if __name__ == "__main__":
