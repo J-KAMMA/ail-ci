@@ -690,7 +690,24 @@ static inline int ail2_print_scalar(ail_obj x) {
         || x.tag == AIL_T_NONE || x.tag == AIL_T_FLOAT;
 }
 
+/* print's sep=/end=: CPython treats None as the default and raises TypeError for
+   any other non-str. The general path used to read a None's zero payload as an
+   empty str -- `print("a", "b", sep=None)` wrote "ab" -- and a non-str silently
+   lost the separator/newline instead of raising. */
+static inline ail_st ail2_print_opt(ail_ctx *cx, ail_obj *v, const char *name, const char *dflt) {
+    if (v->tag == AIL_T_NONE) { *v = ail_str_from_cstr(cx, dflt); return AIL_OK; }
+    if (v->tag != AIL_T_STR) {
+        char buf[96];
+        snprintf(buf, sizeof buf, "%s must be None or a string, not %s", name, ail_type_name(v->tag));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
+    return AIL_OK;
+}
+
 static inline ail_st ail2_do_print(ail_ctx *cx, ail_obj *vals, int64_t n, ail_obj sep, ail_obj end) {
+    ail_st opt_st;
+    if ((opt_st = ail2_print_opt(cx, &sep, "sep", " ")) != AIL_OK) return opt_st;
+    if ((opt_st = ail2_print_opt(cx, &end, "end", "\n")) != AIL_OK) return opt_st;
     if (sep.tag == AIL_T_STR && end.tag == AIL_T_STR) {
         int scalar = 1;
         for (int64_t i = 0; i < n; i++) if (!ail2_print_scalar(vals[i])) { scalar = 0; break; }
@@ -720,6 +737,9 @@ static inline ail_st ail2_do_print(ail_ctx *cx, ail_obj *vals, int64_t n, ail_ob
    strictly between real print() arguments and nowhere else. */
 static inline ail_st ail2_do_print_parts(ail_ctx *cx, ail_obj *vals, const unsigned char *sepb4,
                                          int64_t n, ail_obj sep, ail_obj end) {
+    ail_st opt_st;
+    if ((opt_st = ail2_print_opt(cx, &sep, "sep", " ")) != AIL_OK) return opt_st;
+    if ((opt_st = ail2_print_opt(cx, &end, "end", "\n")) != AIL_OK) return opt_st;
     if (sep.tag == AIL_T_STR && end.tag == AIL_T_STR) {
         int scalar = 1;
         for (int64_t i = 0; i < n; i++) if (!ail2_print_scalar(vals[i])) { scalar = 0; break; }
