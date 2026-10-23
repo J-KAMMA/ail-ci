@@ -1,5 +1,12 @@
 # DEVLOG
 
+## 2026-10-23 - fuzz44 review: isolated value-form regression test
+
+- Reviewer defect: the correctness programs in `test_ail_fuzz44.py` all contained a construct that
+  forced the general path on the base commit, so the module passed there except for the diagnostic
+  text test. Added an isolated `is None` value-form case for each of `append`, `reverse`, `sort` and
+  `extend`; all four fail on the base default build (`False`) and match CPython (`True`) on HEAD.
+
 ## 2026-10-23 - fuzz44: list mutation methods used as values
 
 - `xs.append(v)`, `xs.extend(it)`, `xs.reverse()`, `xs.sort()` and `xs.clear()` return None in

@@ -49,6 +49,45 @@ def main():
 main()
 '''
 
+ISOLATED_VALUE_FORMS = (
+    ('append', '''
+def main():
+    xs = [1, 2]
+    print(xs.append(3) is None)
+    print(xs)
+
+
+main()
+'''),
+    ('reverse', '''
+def main():
+    xs = [1, 2]
+    print(xs.reverse() is None)
+    print(xs)
+
+
+main()
+'''),
+    ('sort', '''
+def main():
+    xs = [2, 1]
+    print(xs.sort() is None)
+    print(xs)
+
+
+main()
+'''),
+    ('extend', '''
+def main():
+    xs = [1, 2]
+    print(xs.extend([3, 4]) is None)
+    print(xs)
+
+
+main()
+'''),
+)
+
 MUTATE_AND_COMPARE = '''
 def main():
     xs = [1, 2, 1, 3, 1]
@@ -168,6 +207,11 @@ class ListMutationValues(unittest.TestCase):
 
     def test_list_method_values_are_none(self):
         self.check('value_returns', VALUE_RETURNS)
+
+    def test_isolated_value_form_returns_none(self):
+        for name, text in ISOLATED_VALUE_FORMS:
+            with self.subTest(method=name):
+                self.check('isolated_' + name, text)
 
     def test_remove_copy_slice_equality_and_reverse(self):
         self.check('mutate_compare', MUTATE_AND_COMPARE)
