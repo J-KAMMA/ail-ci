@@ -1900,6 +1900,51 @@ def _hoist_ail_tables(tree):
     tree.body = rest[:k] + tables + rest[k:]
 
 
+def _module_class_aliases(tree, classes):
+    """Module-level `name = Class` (and chains of such assignments): names a call may construct
+    with, so an explicit instance argument can be told from a class object passed as `self`."""
+    aliases = set()
+    for _ in range(8):
+        before = len(aliases)
+        for stmt in tree.body:
+            if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 \
+                    and isinstance(stmt.targets[0], ast.Name) and isinstance(stmt.value, ast.Name):
+                target, value = stmt.targets[0].id, stmt.value.id
+                if value in classes or value in aliases:
+                    aliases.add(target)
+            elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) \
+                    and isinstance(stmt.value, ast.Name):
+                target, value = stmt.target.id, stmt.value.id
+                if value in classes or value in aliases:
+                    aliases.add(target)
+        if len(aliases) == before:
+            break
+    return aliases
+
+
+def _bare_class_method_call(tree, classes):
+    """True when a `Class.method(...)` instance-method call has no positional instance argument
+    (or a starred one), so it reaches the dynamic receiver dispatch and may see a CLASS receiver."""
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name) and node.func.value.id in classes):
+            continue
+        info = None
+        k = node.func.value.id
+        seen = 0
+        while k in classes and seen < 64:
+            info = classes[k]['methods'].get(node.func.attr)
+            if info is not None:
+                break
+            k = classes[k]['base']
+            seen += 1
+        if info is not None and info.get('is_method') and not info.get('is_static') \
+                and not info.get('is_classmethod') \
+                and (not node.args or isinstance(node.args[0], ast.Starred)):
+            return True
+    return False
+
+
 def _alias_target(stmt):
     if isinstance(stmt, ast.Assign):
         return stmt.targets[0]
@@ -2150,6 +2195,9 @@ class Compiler(boxclosure.ClosureMixin):
             c for c in self.classes for info in self.classes[c]['methods'].values()
             if info.get('is_classmethod') and info['params'] and uses_class_object(info)}
         self.class_value_exprs = sorted(escaping | class_attr_classes)
+        self.class_aliases = _module_class_aliases(tree, self.classes)
+        self._prepare_class_attr_slots(tree)
+        self.needs_class_dispatch = bool(self.class_value_exprs) or _bare_class_method_call(tree, self.classes)
         import dunderrt
         # operator methods, identity ==, hashing, str() through the class chain and AttributeError on a non-instance
         # are dispatched by the run time in every program that has a class (C30-C32: they were silent or fatal)
@@ -2215,7 +2263,12 @@ class Compiler(boxclosure.ClosureMixin):
         for name in sorted(self.module_names):
             self._module_global_slot(name)
         for n in tree.body:
-            if isinstance(n, (ast.FunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom)):
+            if isinstance(n, ast.ClassDef):
+                # Evaluate the class body's attributes once, at the point the class statement
+                # runs (CPython's own order), into their module-lifetime slots.
+                self._emit_class_attr_inits(n.name, main_ctx)
+                continue
+            if isinstance(n, (ast.FunctionDef, ast.Import, ast.ImportFrom)):
                 continue
             self._module_stmt(n, main_ctx)
         if not has_toplevel_exec:
@@ -4998,10 +5051,26 @@ class Compiler(boxclosure.ClosureMixin):
             # so read the literal the lookup through the bases finds, as CPython does
             k = node.value.id
             while k is not None and k in self.classes:
+                if node.attr in self.classes[k]['methods']:
+                    # a method binding at or above the attribute is a function value in CPython:
+                    # only refuse when an attribute would otherwise be read through the shadowing
+                    probe = self.classes[k]['base']
+                    shadowed = False
+                    seen_probe = 0
+                    while probe in self.classes and seen_probe < 64:
+                        if any(a == node.attr for a, _ in self.classes[probe].get('class_attrs', [])):
+                            shadowed = True
+                            break
+                        probe = self.classes[probe]['base']
+                        seen_probe += 1
+                    if shadowed:
+                        raise Unsupported('class attribute %s is shadowed by a method binding in %s '
+                                          '(a function value read from a class is not modelled)' %
+                                          (node.attr, node.value.id))
+                    break
                 hits = [v for a, v in self.classes[k].get('class_attrs', []) if a == node.attr]
                 if hits:
-                    if isinstance(hits[-1], ast.Constant) or (isinstance(hits[-1], ast.UnaryOp)
-                                                              and isinstance(hits[-1].operand, ast.Constant)):
+                    if self._inline_class_attr(hits[-1]):
                         return self.expr(hits[-1], ctx)
                     break
                 k = self.classes[k]['base']
@@ -5026,12 +5095,12 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('if (%s.tag == AIL_T_CLASS) {' % obj)
             ctx.indent += 1
             first = True
-            for c, aval in class_attrs:
+            for c, (owner, aval) in class_attrs:
                 ctx.emit('%sif (ail_class_is_or_subclass(%s, g_slots_arr[%d])) {' %
                          ('' if first else '} else ', obj, self.global_slots['class:' + c]))
                 first = False
                 ctx.indent += 1
-                v = self.expr(aval, ctx)
+                v = self._class_attr_value(owner, node.attr, aval, ctx)
                 ctx.emit('%s = %s;' % (t, v))
                 ctx.indent -= 1
             ctx.emit('} else {')
@@ -5071,27 +5140,96 @@ class Compiler(boxclosure.ClosureMixin):
         return '((%s.tag == AIL_T_INST || %s.tag == AIL_T_EXC) && ail_class_is_or_subclass(((ail_instobj *)%s.o)->cls, ' \
                'g_slots_arr[%d]))' % (obj, obj, obj, self.global_slots['class:' + c])
 
+    def _live_classes(self):
+        """Classes that can be reached as CLASS values (and their bases), from the names the
+        program lets escape plus classmethods that touch their `cls` object."""
+        live = set()
+        for c in getattr(self, 'class_value_exprs', ()):
+            while c in self.classes and c not in live:
+                live.add(c)
+                c = self.classes[c]['base']
+        return live
+
+    @staticmethod
+    def _inline_class_attr(value):
+        """Only these are safe to re-evaluate at every read (the direct `C.attr` path's rule)."""
+        return isinstance(value, ast.Constant) or (
+            isinstance(value, ast.UnaryOp) and isinstance(value.operand, ast.Constant))
+
+    def _prepare_class_attr_slots(self, tree):
+        """One module-lifetime slot per non-inline class attribute of a class that can be seen as
+        a value: the class body runs once, so reads see the object created then. Programs with no
+        top-level executable statement use the array-entry main, whose setup happens before any
+        module statement; keep their previous per-read evaluation rather than an uninitialised
+        slot."""
+        self.class_attr_slots = {}
+        self.class_attr_live = self._live_classes()
+        has_toplevel_exec = any(
+            not isinstance(n, (ast.FunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom))
+            and not getattr(n, '_ail_hoisted', False) for n in tree.body)
+        if not has_toplevel_exec:
+            return
+        for c in self.class_order:
+            if c not in self.class_attr_live:
+                continue
+            for a, v in self.classes[c].get('class_attrs', []):
+                if self._inline_class_attr(v):
+                    continue
+                key = 'cattr:%s:%s' % (c, a)
+                if key not in self.global_slots:
+                    self.global_slots[key] = self.next_global_slot
+                    self.next_global_slot += 1
+                self.class_attr_slots[(c, a)] = self.global_slots[key]
+
+    def _class_attr_value(self, cname, aname, aval, ctx):
+        slot = self.class_attr_slots.get((cname, aname))
+        if slot is not None:
+            return 'g_slots_arr[%d]' % slot
+        return self.expr(aval, ctx)
+
+    def _emit_class_attr_inits(self, cname, ctx):
+        for aname, aval in self.classes[cname].get('class_attrs', []):
+            slot = self.class_attr_slots.get((cname, aname))
+            if slot is None:
+                continue
+            ctx.emit('g_slots_arr[%d] = %s;' % (slot, self.expr(aval, ctx)))
+
     def _class_attr_owners(self, name):
-        """Classes of the program that set class attribute `name`, most derived first. A class
-        object reached through a variable is matched against these by run time class identity;
-        the first match is the attribute CPython's MRO lookup would find."""
+        """Runtime classes that can carry a CLASS value, with the value their MRO lookup finds for
+        `name`, most derived first. A method/staticmethod/classmethod binding at or above a class
+        attribute is a first-class function value in CPython, which this emitter does not model:
+        refuse that construct by name instead of reading the shadowed attribute."""
+        live = getattr(self, 'class_attr_live', None)
+        if live is None:
+            live = self._live_classes()
+        if not any(any(a == name for a, _ in self.classes[c].get('class_attrs', []))
+                   for c in live):
+            return []
+
         def depth(c):
             n = 0
             while self.classes[c]['base'] in self.classes:
                 c = self.classes[c]['base']
                 n += 1
             return n
-        # Only classes that can actually be seen as class objects take the run-time dispatch:
-        # a program that never uses a class as a value (and has no classmethod reading from
-        # `cls`) keeps its previous C. Include their bases, since an inherited attribute is
-        # owned by a base that is not itself named as a value.
-        live = set()
-        for c in self.class_value_exprs:
-            while c in self.classes and c not in live:
-                live.add(c)
-                c = self.classes[c]['base']
-        owners = [(c, v) for c in self.class_order
-                  for a, v in self.classes[c].get('class_attrs', []) if a == name and c in live]
+
+        owners = []
+        for c in self.class_order:
+            if c not in live:
+                continue
+            k = c
+            seen = 0
+            while k is not None and k in self.classes and seen < 64:
+                hit = [v for a, v in self.classes[k].get('class_attrs', []) if a == name]
+                if hit:
+                    owners.append((c, (k, hit[-1])))
+                    break
+                if name in self.classes[k]['methods']:
+                    raise Unsupported('class attribute %s is shadowed by a method binding in %s '
+                                      '(a function value read from a class is not modelled)' %
+                                      (name, c))
+                k = self.classes[k]['base']
+                seen += 1
         owners.sort(key=lambda cv: depth(cv[0]), reverse=True)
         return owners
 
@@ -6042,7 +6180,7 @@ class Compiler(boxclosure.ClosureMixin):
         for kls in reversed(chain):
             for aname, aval in self.classes[kls].get('class_attrs', []):
                 self.attr_names.add(aname)
-                v = self.expr(aval, ctx)
+                v = self._class_attr_value(kls, aname, aval, ctx)
                 ctx.emit('ail_inst_setattr(cx, %s, g_attr_%s, %s);' % (t, aname, v))
         if info:
             argcs = self._bind_args(name, info, args, kwargs, ctx)
@@ -8315,6 +8453,78 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.uses_st = True
         return False
 
+    @staticmethod
+    def _quoted_names(names):
+        q = ["'%s'" % n for n in names]
+        if len(q) == 1:
+            return q[0]
+        if len(q) == 2:
+            return q[0] + ' and ' + q[1]
+        return ', '.join(q[:-1]) + ' and ' + q[-1]
+
+    def _call_display(self, attr, info):
+        owner = info.get('owner_class')
+        return ('%s.%s' % (owner, attr)) if owner else attr
+
+    def _call_shape_error(self, attr, info, args, kwargs, given_pos):
+        """CPython's TypeError text for a call shape this emitter can still reach. Returns None
+        when the shape binds (or when a starred argument hides the shape from this check)."""
+        if any(isinstance(a, (ast.Starred, _StarC)) for a in args):
+            return None
+        names = list(info['params'])
+        total = len(names)
+        kwonly = list(info.get('kwonly') or ())
+        defaults = info.get('defaults') or {}
+        kw_defaults = info.get('kw_defaults') or {}
+        vararg = info.get('vararg')
+        kwarg = info.get('kwarg')
+        display = self._call_display(attr, info)
+        bound = names[:min(given_pos, total)]
+        for kwname in kwargs:
+            if kwname in bound:
+                return '%s() got multiple values for argument %r' % (display, kwname)
+            if kwname not in set(names) | set(kwonly) and not kwarg:
+                return '%s() got an unexpected keyword argument %r' % (display, kwname)
+        if given_pos > total and not vararg:
+            required = total - len(defaults)
+            if required < total:
+                return ('%s() takes from %d to %d positional arguments but %d %s given'
+                        % (display, required, total, given_pos,
+                           'was' if given_pos == 1 else 'were'))
+            return ('%s() takes %d positional argument%s but %d %s given'
+                    % (display, total, '' if total == 1 else 's', given_pos,
+                       'was' if given_pos == 1 else 'were'))
+        missing = [n for n in names[given_pos:] if n not in kwargs and n not in defaults]
+        if missing:
+            return ('%s() missing %d required positional argument%s: %s'
+                    % (display, len(missing), '' if len(missing) == 1 else 's',
+                       self._quoted_names(missing)))
+        missing_kw = [n for n in kwonly if n not in kwargs and n not in kw_defaults]
+        if missing_kw:
+            return ('%s() missing %d required keyword-only argument%s: %s'
+                    % (display, len(missing_kw), '' if len(missing_kw) == 1 else 's',
+                       self._quoted_names(missing_kw)))
+        return None
+
+    def _safe_explicit_self(self, node, ctx):
+        """An explicit `self` this emitter can pass to an instance method called through a
+        class object: an instance (or a value that cannot be a CLASS object -- a literal, a
+        display, a unary constant). A name, attribute, subscript or opaque call may hold a class
+        object, which the method body would then treat as an instance."""
+        kind = self.infer_kind(node, ctx)
+        if kind and kind.startswith('instance:'):
+            return True
+        if isinstance(node, (ast.Constant, ast.List, ast.Tuple, ast.Dict, ast.Set,
+                             ast.ListComp, ast.DictComp, ast.SetComp, ast.JoinedStr, ast.Lambda)):
+            return True
+        if isinstance(node, ast.UnaryOp) and isinstance(node.operand, ast.Constant):
+            return True
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            name = node.func.id
+            if name in self.classes or name in getattr(self, 'class_aliases', ()):
+                return True
+        return False
+
     def _dynamic_user_method(self, recv_c, f, args, kwargs, ctx, builtin):
         """`x.meth(...)` where the receiver's class is not known statically but some user class
         defines `meth`: test the run-time class (most derived first) and call that method; any
@@ -8330,6 +8540,7 @@ class Compiler(boxclosure.ClosureMixin):
         if not owners:
             return None
         owners.sort(key=depth, reverse=True)
+        class_dispatch = getattr(self, 'needs_class_dispatch', True)
         t = ctx.tmp()
         if any(self._is_exc_class(c) for c in owners):
             # an exception object is an exception value (safetyrt.EXC) and has its class's methods too
@@ -8344,46 +8555,46 @@ class Compiler(boxclosure.ClosureMixin):
                      ('' if first else 'else ', recv_c, self.global_slots['class:' + c]))
             first = False
             ctx.indent += 1
-            mark = len(ctx.lines)
-            try:
+            given = len(args) + (0 if info.get('is_static') else 1)
+            err = self._call_shape_error(f.attr, info, args, kwargs, given)
+            if err is not None:
+                if not class_dispatch:
+                    raise Unsupported(err)
+                ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, %s); goto %s;'
+                         % (c_str_literal(err), ctx.cur_err_target()))
+                ctx.uses_st = True
+            else:
                 argcs = self._bind_args(f.attr, info, args, kwargs, ctx)
                 if not info.get('is_static'):
                     argcs = [self._self_arg(info, recv_c)] + argcs
                 ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t, ''.join(', ' + a for a in argcs)))
                 ctx.check()
-            except Unsupported as exc:
-                # `C.m(self, ...)` on an INSTANCE receiver passes `self` AND the method's own
-                # arguments -- too many for the instance call. The class-object branch below
-                # still handles the same call; an instance gets CPython's TypeError. Only the
-                # binder's own argument-shape errors are softened; an unsupported argument
-                # expression keeps its compile-time refusal.
-                if not str(exc).startswith(f.attr + '()'):
-                    raise
-                del ctx.lines[mark:]
-                given = len(args) + (0 if info.get('is_static') else 1)
-                ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "%s() takes %d positional argument%s '
-                         'but %d %s given"); goto %s;'
-                         % (f.attr, len(info['params']), '' if len(info['params']) == 1 else 's',
-                            given, 'was' if given == 1 else 'were', ctx.cur_err_target()))
-                ctx.uses_st = True
             ctx.indent -= 1
             ctx.emit('}')
         self.needs_noattr = True
         ctx.emit('else { st = ail2_no_attr(cx, %s, "%s"); goto %s; }' % (recv_c, f.attr, ctx.cur_err_target()))
         ctx.uses_st = True
         ctx.indent -= 1
-        ctx.emit('} else if (%s.tag == AIL_T_CLASS) {' % recv_c)
-        ctx.indent += 1
-        first = True
-        for c in owners:
-            info = self.classes[c]['methods'][f.attr]
-            ctx.emit('%sif (ail_class_is_or_subclass(%s, g_slots_arr[%d])) {' %
-                     ('' if first else 'else ', recv_c, self.global_slots['class:' + c]))
-            first = False
+        if class_dispatch:
+            ctx.emit('} else if (%s.tag == AIL_T_CLASS) {' % recv_c)
             ctx.indent += 1
-            mark = len(ctx.lines)
-            try:
+            first = True
+            for c in owners:
+                info = self.classes[c]['methods'][f.attr]
+                ctx.emit('%sif (ail_class_is_or_subclass(%s, g_slots_arr[%d])) {' %
+                         ('' if first else 'else ', recv_c, self.global_slots['class:' + c]))
+                first = False
+                ctx.indent += 1
                 if info.get('is_classmethod'):
+                    given = 1 + len(args)
+                else:
+                    given = len(args)
+                err = self._call_shape_error(f.attr, info, args, kwargs, given)
+                if err is not None:
+                    ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, %s); goto %s;'
+                             % (c_str_literal(err), ctx.cur_err_target()))
+                    ctx.uses_st = True
+                elif info.get('is_classmethod'):
                     argcs = [recv_c] + self._bind_args(f.attr, info, args, kwargs, ctx)
                     ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t, ''.join(', ' + a for a in argcs)))
                     ctx.check()
@@ -8391,31 +8602,24 @@ class Compiler(boxclosure.ClosureMixin):
                     argcs = self._bind_args(f.attr, info, args, kwargs, ctx)
                     ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t, ''.join(', ' + a for a in argcs)))
                     ctx.check()
-                elif args:
+                else:
+                    if not args and 'self' in kwargs:
+                        raise Unsupported('%s through a class object with self passed by keyword'
+                                          % f.attr)
+                    if args and not self._safe_explicit_self(args[0], ctx):
+                        raise Unsupported('%s through a class object with a non-instance argument '
+                                          'expression (a class object passed as self is not '
+                                          'modelled)' % f.attr)
                     first_arg = self.expr(args[0], ctx)
                     argcs = [first_arg] + self._bind_args(f.attr, info, args[1:], kwargs, ctx)
                     ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t, ''.join(', ' + a for a in argcs)))
                     ctx.check()
-                else:
-                    ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "%s() missing 1 required '
-                             'positional argument: \'self\'"); goto %s;' % (f.attr, ctx.cur_err_target()))
-                    ctx.uses_st = True
-            except Unsupported as exc:
-                # The same call shape can be valid on an INSTANCE receiver (the branch above)
-                # and invalid on the class object; do not refuse the whole program for a shape
-                # the class branch alone reaches at run time.
-                if not str(exc).startswith(f.attr + '()'):
-                    raise
-                del ctx.lines[mark:]
-                ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "%s() received an invalid '
-                         'argument list"); goto %s;' % (f.attr, ctx.cur_err_target()))
-                ctx.uses_st = True
+                ctx.indent -= 1
+                ctx.emit('}')
+            self.needs_noattr = True
+            ctx.emit('else { st = ail2_no_attr(cx, %s, "%s"); goto %s; }' % (recv_c, f.attr, ctx.cur_err_target()))
+            ctx.uses_st = True
             ctx.indent -= 1
-            ctx.emit('}')
-        self.needs_noattr = True
-        ctx.emit('else { st = ail2_no_attr(cx, %s, "%s"); goto %s; }' % (recv_c, f.attr, ctx.cur_err_target()))
-        ctx.uses_st = True
-        ctx.indent -= 1
         ctx.emit('} else {')
         ctx.indent += 1
         mark = len(ctx.lines)
