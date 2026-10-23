@@ -57,9 +57,12 @@ def is_slist(t):
 class _Builder(object):
     def __init__(self):
         self.region = None
+        self.where = None             # --debug: (file, line) of the statement being lowered
 
     def emit(self, op, operands=(), types=(), attrs=None, regions=()):
         ins = I.Instr(op, operands, [I.Value(t) for t in types], attrs, regions)
+        if self.where:
+            I.SRC[id(ins)] = (ins, self.where)
         self.region.instrs.append(ins)
         return ins
 
@@ -459,8 +462,11 @@ class Lowering(TextLowering):
         for s in body:
             if self.b.terminated():
                 return            # dead code after return/break/continue
+            outer = self.b.where
+            self.b.where = self.P._debug_where(s) or outer       # None outside --debug
             self.stmt(s)
             self.drop_after(s)
+            self.b.where = outer
 
     def drop_after(self, s):
         """An owned list whose last mention is statement `s` is dropped when `s` completes (the
@@ -1248,6 +1254,10 @@ class Lowering(TextLowering):
         if isinstance(s, ast.Assign):
             if len(s.targets) != 1:
                 raise NotS0('assignment shape')
+            if getattr(s, '_ail_member_check', None) and self.P._member_nan_applies(s, self.ctx):
+                # a float list searched by count / index / remove: the run-time stop for a NaN argument (DIFFERENCES C119)
+                # is emitted by the legacy lowering; the IR has no stop operation
+                raise NotS0('list.count / index / remove of a float: NaN-argument stop (C119)')
             target = s.targets[0]
             if isinstance(target, (ast.Attribute, ast.Subscript)):
                 return self.store_target(target, s.value)
@@ -2301,6 +2311,10 @@ class Lowering(TextLowering):
             a, b = self.expr(args[0]), self.expr(args[1])
             t = I.F64 if I.F64 in (a.type, b.type) else I.I64
             a, b = self.coerce(a, t), self.coerce(b, t)
+            if t == I.F64:
+                # CPython keeps the first argument unless the second is smaller (larger): NaN stays first (silent6)
+                c = self.b.value('cmp.lt' if f == 'min' else 'cmp.gt', [b, a], I.I1)
+                return self.b.value('select', [c, b, a], t)
             c = self.b.value('cmp.lt' if f == 'min' else 'cmp.gt', [a, b], I.I1)
             return self.b.value('select', [c, a, b], t)
         if f == 'print' and statement:
