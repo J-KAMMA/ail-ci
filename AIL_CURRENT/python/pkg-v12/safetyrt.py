@@ -1814,12 +1814,23 @@ def patch_sortprim(c_text):
     if c_text.count(head) != 1:
         return c_text            # a program without the runtime's sort: nothing to do
     out = c_text.replace(head, SORT_PRIM + head)
+    old_block = ('    if (st == AIL_OK) {\n'
+                 '        if (has_nan) st = ail__ts_sort(cx, keys, v->p, n, ktmp, tmp);\n'
+                 '        else st = ail__vec_merge_sort(cx, v->p, keys, tmp, ktmp, 0, n);\n'
+                 '    }\n')
+    new_block = ('    if (st == AIL_OK && !has_nan) {\n'
+                 '        if (!ail2u_sort_prim(v->p, keys, tmp, n)) {\n'
+                 '            ktmp = (ail_obj *)ail_xmalloc((size_t)n * sizeof(ail_obj));\n'
+                 '            st = ail__vec_merge_sort(cx, v->p, keys, tmp, ktmp, 0, n);\n'
+                 '        }\n'
+                 '    } else if (st == AIL_OK) {\n'
+                 '        ktmp = (ail_obj *)ail_xmalloc((size_t)n * sizeof(ail_obj));\n'
+                 '        st = ail__ts_sort(cx, keys, v->p, n, ktmp, tmp);\n'
+                 '    }\n')
     for old, new in (
             ('    ail_obj *ktmp = (ail_obj *)ail_xmalloc((size_t)n * sizeof(ail_obj));\n    AIL_ROOT1(cx, frl, lst);',
              '    ail_obj *ktmp = NULL;\n    AIL_ROOT1(cx, frl, lst);'),
-            ('    if (st == AIL_OK) st = ail__vec_merge_sort(cx, v->p, keys, tmp, ktmp, 0, n);\n',
-             '    if (st == AIL_OK && !ail2u_sort_prim(v->p, keys, tmp, n)) { ktmp = (ail_obj *)ail_xmalloc((size_t)n * sizeof(ail_obj)); '
-             'st = ail__vec_merge_sort(cx, v->p, keys, tmp, ktmp, 0, n); }\n')):
+            (old_block, new_block)):
         if out.count(old) != 1:
             raise AssertionError('safetyrt: the runtime sort changed shape: %r' % old[:60])
         out = out.replace(old, new)
