@@ -21,9 +21,11 @@ The same held for `n -= k`, `n *= k`, `n &= k`, `n |= k`, `n ^= k` (the runtime
 has ail_op_isub / imul / ibitor / ibitand / ibitxor), for an item of a list or a
 dict and for an attribute of an object. The general emitter now dispatches
 __iadd__ / __isub__ / __imul__ / __iand__ / __ior__ / __ixor__ for an instance
-before the plain operator, and the class kind of a name stops being trusted
-after an augmented assignment of an instance (the method may return another
-type, as CPython allows). The typed path already used __iadd__ and is unchanged.
+before the plain operator. A name that is ever the target of an augmented
+assignment is never given a trusted class kind: its method may return another
+type, as CPython allows, and statements emitted earlier (a loop body, a lambda
+made before the assignment) would otherwise use a stale kind. The typed path
+already used __iadd__ and is unchanged.
 
 The programs below compare stdout and the exit status with CPython 3.12 on the
 general build and on the default build, including the fallbacks that must not
@@ -290,6 +292,88 @@ def main():
 main()
 '''
 
+LOOP_IADD_CHANGES_TYPE = r'''class B:
+    def foo(self):
+        return "B"
+
+    def __add__(self, o):
+        return B()
+
+
+class A:
+    def __init__(self):
+        self.n = 0
+
+    def foo(self):
+        return "A"
+
+    def __iadd__(self, o):
+        return B()
+
+
+a = A()
+i = 0
+while i < 3:
+    print(a.foo())
+    a += 1
+    i += 1
+print(type(a).__name__)
+print("done")
+'''
+
+LAMBDA_IADD_CHANGES_TYPE = r'''class B:
+    def foo(self):
+        return "B"
+
+
+class A:
+    def __init__(self):
+        self.n = 0
+
+    def foo(self):
+        return "A"
+
+    def __iadd__(self, o):
+        return B()
+
+
+a = A()
+f = lambda: a.foo()
+print(f())
+a += 1
+print(f())
+'''
+
+CLOSURE_IADD_CHANGES_TYPE = r'''class B:
+    def foo(self):
+        return "B"
+
+
+class A:
+    def __init__(self):
+        self.n = 0
+
+    def foo(self):
+        return "A"
+
+    def __iadd__(self, o):
+        return B()
+
+
+def main():
+    a = A()
+
+    def f():
+        return a.foo()
+
+    print(f())
+    a += 1
+    print(f())
+
+
+main()
+'''
+
 REFLECTED = r'''class R:
     def __init__(self, n):
         self.n = n
@@ -428,6 +512,15 @@ class Fuzz49Tests(unittest.TestCase):
 
     def test_add_fallback_unchanged(self):
         self.check('add_fallback', ADD_FALLBACK)
+
+    def test_loop_iadd_changes_type(self):
+        self.check('loop_iadd_type', LOOP_IADD_CHANGES_TYPE)
+
+    def test_lambda_before_iadd_changes_type(self):
+        self.check('lambda_iadd_type', LAMBDA_IADD_CHANGES_TYPE)
+
+    def test_closure_before_iadd_changes_type(self):
+        self.check('closure_iadd_type', CLOSURE_IADD_CHANGES_TYPE)
 
     def test_reflected_operators_unchanged(self):
         self.check('reflected', REFLECTED)
