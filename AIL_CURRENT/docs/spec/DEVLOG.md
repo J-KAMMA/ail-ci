@@ -2,6 +2,11 @@
 
 ## 2026-10-23
 
+- pre24 review: `C.__name__` no longer ignores the binding of `C`. A parameter or local shadow
+  reads the argument/local, and a module-scope rebinding (`C = 5`, conditional, or through
+  `global C`) is seeded at the class-definition point and then shadows the class object, so the
+  attribute raises `AttributeError` like CPython. A class body that reads its own name now raises
+  `NameError` (the name is unbound until the body finishes). `test_ail_pre24.py`.
 - pre24/fuzz67: a class value's `__name__` (`C.__name__`, and through an argument, a list item,
   an instance attribute or a dict value) raised `AttributeError: 'type' object has no attribute
   '__name__'` on both builds. The general path now returns the class-statement name, even when

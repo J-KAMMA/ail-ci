@@ -2169,6 +2169,13 @@ class Compiler(boxclosure.ClosureMixin):
         for n in tree.body:
             if isinstance(n, ast.ClassDef):
                 self._init_class_attrs(n.name, main_ctx)
+                if n.name in self.module_names:
+                    # The name is also rebound at module scope somewhere (`C = 5`, a `global C`
+                    # write, ...): reads resolve through the module slot, so seed it with the
+                    # class object at the definition point. A later assignment then shadows it.
+                    main_ctx.emit('g_slots_arr[%d] = g_slots_arr[%d];' %
+                                  (self.global_slots['g:' + n.name],
+                                   self.global_slots['class:' + n.name]))
                 continue
             if isinstance(n, (ast.FunctionDef, ast.Import, ast.ImportFrom)):
                 continue
@@ -4257,14 +4264,28 @@ class Compiler(boxclosure.ClosureMixin):
     def expr_Name(self, node, ctx):
         if node.id in ('True', 'False'):
             return 'ail_box_bool(%d)' % (1 if node.id == 'True' else 0)
-        if node.id in self.classes:
+        if node.id == getattr(ctx, 'class_body_name', None):
+            # The class name is not bound until its body has finished (CPython raises NameError
+            # for `class C: x = C`), while the compiler creates every class object before the
+            # module body runs. Raise it here so an own-name read in the body is not mistaken
+            # for a reference to the half-built class.
+            t = ctx.tmp()
+            ctx.emit('st = ail_raise_c(cx, AIL_B_NAMEERROR, "name \'%s\' is not defined");' % node.id)
+            ctx.check()
+            ctx.emit('%s = ail_box_none();' % t)
+            return t
+        if (node.id in self.classes and node.id not in ctx.slot_of
+                and node.id not in ctx.ptr_names and node.id not in ctx.clo_index
+                and node.id not in self.module_names):
             # A class is already a real ail_obj CLASS value, permanently rooted in the
             # module-lifetime frame (g_slots_arr) -- returning that reference directly lets a
             # class be stored in a variable, passed as an argument, or compared/isinstance'd,
-            # the same as any other value. What is NOT modelled: calling a class reached only
-            # through such a reference as a constructor (`cls = RomanNumeral; cls(x)`) -- that
-            # still needs a compile-time-known class NAME at the call site (see _call_name);
-            # only the "class used as a plain value" shape is covered here.
+            # the same as any other value. A local/parameter or a module-scope binding of the
+            # same name shadows it, so those go through the ordinary name lookup below. What is
+            # NOT modelled: calling a class reached only through such a reference as a
+            # constructor (`cls = RomanNumeral; cls(x)`) -- that still needs a compile-time-known
+            # class NAME at the call site (see _call_name); only the "class used as a plain
+            # value" shape is covered here.
             return 'g_slots_arr[%d]' % self.global_slots['class:' + node.id]
         if node.id in ctx.nested_funcs:
             raise Unsupported('using function %s as a first-class value' % node.id)
@@ -4952,9 +4973,11 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.check()
                 return t
             if (isinstance(node.value, ast.Name) and node.value.id in self.classes
-                    and node.value.id not in ctx.slot_of and node.value.id not in self.module_names):
+                    and node.value.id not in ctx.slot_of and node.value.id not in self.module_names
+                    and node.value.id != getattr(ctx, 'class_body_name', None)):
                 # `C.__name__`: the name from the class statement. CPython keeps that even when
                 # the class body assigns `__name__` (the assignment only lands in the class dict).
+                # Inside C's own body the name is not bound yet, so fall through to expr_Name.
                 return self.expr_Constant(ast.Constant(value=node.value.id), ctx)
         if isinstance(node.value, ast.Name) and (node.value.id in self.module_aliases or
                                                   node.value.id == 'sys'):
@@ -5935,9 +5958,14 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _init_class_attrs(self, name, ctx):
         """Evaluate a class body's attributes once, at its class-definition statement."""
-        for _aname, aval, slot in self.classes[name].get('class_attrs', []):
-            v = self.expr(aval, ctx)
-            ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
+        old_body = getattr(ctx, 'class_body_name', None)
+        ctx.class_body_name = name
+        try:
+            for _aname, aval, slot in self.classes[name].get('class_attrs', []):
+                v = self.expr(aval, ctx)
+                ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
+        finally:
+            ctx.class_body_name = old_body
 
     def _class_attr_value(self, slot, value, ctx):
         """The one shared value of a class attribute, filling the slot lazily only when the module

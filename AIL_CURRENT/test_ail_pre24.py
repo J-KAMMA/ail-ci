@@ -102,6 +102,76 @@ class Pre24Tests(unittest.TestCase):
     def test_class_value_name(self):
         self.check('class_value_name', CLASS_NAMES)
 
+    def test_class_body_own_name_is_nameerror(self):
+        self.check('class_body_own_name', r'''class C:
+    x = C.__name__
+
+
+print(C.x)
+''', rc=1)
+
+    def test_rebound_class_name(self):
+        self.check('rebound_class_name', r'''class C:
+    pass
+
+
+print(C.__name__)
+C = 5
+try:
+    print(C.__name__)
+except AttributeError as e:
+    print("AE", type(e).__name__)
+''')
+
+    def test_conditional_rebinding(self):
+        self.check('conditional_rebinding', r'''class C:
+    pass
+
+
+if len("x") == 2:
+    C = 5
+print(C.__name__)
+if len("xy") == 2:
+    C = 5
+try:
+    print(C.__name__)
+except AttributeError:
+    print("AE")
+''')
+
+    def test_global_rebinding_in_function(self):
+        self.check('global_rebinding', r'''class C:
+    pass
+
+
+def rebind():
+    global C
+    C = 5
+
+
+rebind()
+try:
+    print(C.__name__)
+except AttributeError:
+    print("AE")
+''')
+
+    def test_parameter_shadowing_class_name(self):
+        self.check('parameter_shadowing', r'''class C:
+    pass
+
+
+class D(C):
+    pass
+
+
+def f(C):
+    return C.__name__
+
+
+print(f(D), f(C))
+''')
+
 
 if __name__ == '__main__':
     unittest.main()
