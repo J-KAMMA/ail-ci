@@ -442,6 +442,12 @@ class Fraction:
             return Fraction((other * db) % (self.numerator * da), da * db)
         raise TypeError("unsupported operand type(s) for %%: '%s' and 'Fraction'" % _ail_fr_tname(other))
 
+    def __divmod__(self, other):
+        return (self // other, self % other)
+
+    def __rdivmod__(self, other):
+        return (other // self, other % self)
+
     def __pow__(self, other):
         if isinstance(other, Fraction) and other.denominator == 1:
             other = other.numerator
