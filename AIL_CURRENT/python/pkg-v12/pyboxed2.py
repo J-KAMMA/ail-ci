@@ -7778,8 +7778,8 @@ class Compiler(boxclosure.ClosureMixin):
         if has_default:
             ctx.emit('if (!%s) %s = %s;' % (have, best, dflt))
         else:
-            ctx.emit('if (!%s) { st = ail_raise_c(cx, AIL_B_VALUEERROR, "%s() arg is an empty '
-                     'sequence"); goto %s; }' % (have, name, ctx.cur_err_target()))
+            ctx.emit('if (!%s) { st = ail_raise_c(cx, AIL_B_VALUEERROR, "%s() iterable argument is '
+                     'empty"); goto %s; }' % (have, name, ctx.cur_err_target()))
             ctx.uses_st = True
         return best
 
