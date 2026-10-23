@@ -1,5 +1,27 @@
 # DEVLOG
 
+## 2026-10-23 - Enforce __slots__ on the general path (job-pre6-10240010)
+
+fuzz67 p18 was still a difference on this tree: the general path ignored a class's
+`__slots__`, so `c.b = 3` on a class declaring only `a` succeeded and `c.b` read 3,
+where CPython raises AttributeError. The typed path already refused the unknown field;
+both `bash ~/tools/cmp.sh` builds fell back to the general path and printed `1 3`.
+
+`pyboxed2.py` now records a class's `__slots__` (a literal string or a tuple/list of
+strings; anything else is refused by name), including inherited slots, and emits the
+allowed names plus the class-body names onto the class object. `cruntime.py`'s v2
+runtime checks every attribute store against them: an undeclared name raises CPython's
+`'C' object has no attribute 'b'`, while assigning a class-body name raises
+`'C' object attribute 'PASS' is read-only`. `setattr()` uses the same checked store.
+A class with an inherited `__dict__` (a base without `__slots__`, a builtin exception
+base, or `__dict__` in `__slots__`) still accepts arbitrary attributes.
+
+The new `test_ail_pre6.py` builds the case through the default and forced-general
+paths and compares stdout/exit with CPython, and checks the dynamic-`__slots__`
+refusal. Probes in `/tmp/probes/slots*.py` cover empty/string/tuple slots, inheritance,
+class attributes, `setattr`, aliases through an argument, list item, attribute and dict
+value, and no-slots classes; all match CPython or are refused by name.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

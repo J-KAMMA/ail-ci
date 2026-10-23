@@ -14052,6 +14052,8 @@ typedef struct { int64_t name_id; ail_obj val; } ail_attr;
 typedef struct { ail_gcobj hdr; ail_obj cls; ail_attr *attrs; int64_t n, cap; } ail_instobj;
 
 typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or NONE */; int builtin_id;
+                 int64_t *slot_ids; int64_t n_slots; /* __slots__ names; n_slots < 0 means "has a __dict__" */
+                 int64_t *class_attr_ids; int64_t n_class_attrs; /* class-body names, for CPython's read-only message */
                  int dc; /* @dataclass: field count + 1 (0 = not a dataclass); repr/str print the first dc-1 attributes */
                  unsigned long long dc_hide; /* bit i set: field i is left out of the repr (field(repr=False)) */
                  ail_st (*iter_iter)(ail_ctx *, ail_obj *, ail_obj); /* user __iter__ (self only), or 0 */
@@ -16364,6 +16366,8 @@ static inline ail_obj ail_class_new(ail_ctx *cx, const char *name, ail_obj base)
     ail_classobj *c = (ail_classobj *)ail_gc_alloc(cx, AIL_K_CLASS, sizeof *c);
     c->base = base;
     c->builtin_id = -1;
+    c->slot_ids = 0; c->n_slots = -1;
+    c->class_attr_ids = 0; c->n_class_attrs = 0;
     c->dc = 0; c->dc_hide = 0;
     c->iter_iter = 0; c->iter_next = 0; c->repr_fn = 0; c->str_fn = 0; c->lt_fn = 0;
     ail_obj r; r.tag = AIL_T_CLASS; r.o = (ail_gcobj *)c;
@@ -16371,6 +16375,28 @@ static inline ail_obj ail_class_new(ail_ctx *cx, const char *name, ail_obj base)
     c->name = ail_str_from_cstr(cx, name);
     AIL_FRAME_LEAVE(cx, fr);
     return r;
+}
+static inline void ail_class_enforce_slots(ail_ctx *cx, ail_obj cls) {
+    ail_classobj *c = (ail_classobj *)cls.o;
+    if (c->n_slots < 0) c->n_slots = 0;
+}
+static inline void ail_class_add_class_attr(ail_ctx *cx, ail_obj cls, int64_t name_id) {
+    ail_classobj *c = (ail_classobj *)cls.o;
+    int64_t nc = c->n_class_attrs + 1;
+    int64_t *na = (int64_t *)ail_xmalloc((size_t)nc * sizeof(int64_t));
+    if (c->n_class_attrs > 0) memcpy(na, c->class_attr_ids, (size_t)c->n_class_attrs * sizeof(int64_t));
+    free(c->class_attr_ids);
+    c->class_attr_ids = na; c->n_class_attrs = nc;
+    c->class_attr_ids[nc - 1] = name_id;
+}
+static inline void ail_class_add_slot(ail_ctx *cx, ail_obj cls, int64_t name_id) {
+    ail_classobj *c = (ail_classobj *)cls.o;
+    int64_t nc = (c->n_slots < 0 ? 0 : c->n_slots) + 1;
+    int64_t *na = (int64_t *)ail_xmalloc((size_t)nc * sizeof(int64_t));
+    if (c->n_slots > 0) memcpy(na, c->slot_ids, (size_t)c->n_slots * sizeof(int64_t));
+    free(c->slot_ids);
+    c->slot_ids = na; c->n_slots = nc;
+    c->slot_ids[nc - 1] = name_id;
 }
 static inline ail_obj ail_inst_new(ail_ctx *cx, ail_obj cls) {
     ail_instobj *o = (ail_instobj *)ail_gc_alloc(cx, AIL_K_INST, sizeof *o);
@@ -16402,6 +16428,26 @@ static __attribute__((noinline, cold)) ail_st ail_attr_not_inst(ail_ctx *cx, ail
 }
 static inline ail_st ail_inst_setattr_chk(ail_ctx *cx, ail_obj inst, int64_t name_id, ail_obj val) {
     if (__builtin_expect((unsigned)(inst.tag - AIL_T_INST) > 1u, 0)) return ail_attr_not_inst(cx, inst, cx->intern_tab[name_id]);   /* INST, EXC are adjacent */
+    ail_instobj *o = (ail_instobj *)inst.o;
+    if (o->cls.tag == AIL_T_CLASS) {
+        ail_classobj *kc = (ail_classobj *)o->cls.o;
+        if (kc->n_slots >= 0) {   /* __slots__: only the declared names may be assigned */
+            int64_t i;
+            for (i = 0; i < kc->n_slots; i++) if (kc->slot_ids[i] == name_id) break;
+            if (i == kc->n_slots) {
+                int64_t j;
+                for (j = 0; j < kc->n_class_attrs; j++) if (kc->class_attr_ids[j] == name_id) break;
+                char buf[160];
+                if (j < kc->n_class_attrs)
+                    snprintf(buf, sizeof buf, "'%s' object attribute '%s' is read-only",
+                             ail__tname_c(inst), cx->intern_tab[name_id]);
+                else
+                    snprintf(buf, sizeof buf, "'%s' object has no attribute '%s'",
+                             ail__tname_c(inst), cx->intern_tab[name_id]);
+                return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, buf);
+            }
+        }
+    }
     ail_inst_setattr(cx, inst, name_id, val);
     return AIL_OK;
 }

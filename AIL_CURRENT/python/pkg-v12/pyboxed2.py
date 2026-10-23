@@ -2268,6 +2268,16 @@ class Compiler(boxclosure.ClosureMixin):
                 base_expr = 'ail_box_none()'
             setup.append('    g_slots_arr[%d] = ail_class_new(cx, %s, %s);\n' %
                          (self.global_slots['class:' + cname], c_str_literal(cname), base_expr))
+            enforced = self._class_slots(cname)
+            if enforced is not None:
+                setup.append('    ail_class_enforce_slots(cx, g_slots_arr[%d]);\n' %
+                             self.global_slots['class:' + cname])
+                for aname in enforced:
+                    setup.append('    ail_class_add_slot(cx, g_slots_arr[%d], g_attr_%s);\n' %
+                                 (self.global_slots['class:' + cname], aname))
+                for aname in self._class_readonly(cname):
+                    setup.append('    ail_class_add_class_attr(cx, g_slots_arr[%d], g_attr_%s);\n' %
+                                 (self.global_slots['class:' + cname], aname))
             nxt = cls['methods'].get('__next__')
             if nxt and nxt['all_params'] == ['self']:
                 setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->iter_next = pit_%s;\n' %
@@ -2934,6 +2944,22 @@ class Compiler(boxclosure.ClosureMixin):
             else:
                 raise Unsupported('a class body statement other than def/assignment/pass/'
                                   'docstring in %s' % node.name)
+        slots = None
+        for aname, aval in class_attrs:
+            if aname != '__slots__':
+                continue
+            try:
+                value = ast.literal_eval(aval)
+            except (ValueError, SyntaxError):
+                raise Unsupported('__slots__ in class %s is not a string or a tuple/list of strings' % node.name)
+            if isinstance(value, str):
+                slots = [value]
+            elif isinstance(value, (tuple, list)) and all(isinstance(v, str) for v in value):
+                slots = list(value)
+            else:
+                raise Unsupported('__slots__ in class %s is not a string or a tuple/list of strings' % node.name)
+            self.attr_names.update(slots)
+        self.attr_names.update(aname for aname, _ in class_attrs)
         dc = 0
         marker = getattr(self, 'source_lines', None)
         hide = 0
@@ -2956,8 +2982,46 @@ class Compiler(boxclosure.ClosureMixin):
                 for i, a in enumerate(names):
                     if a in hidden_names:
                         hide |= 1 << i
-        self.classes[node.name] = {'base': base, 'methods': methods, 'class_attrs': class_attrs, 'dc': dc, 'dc_hide': hide}
+        self.classes[node.name] = {'base': base, 'methods': methods, 'class_attrs': class_attrs,
+                                   'slots': slots, 'dc': dc, 'dc_hide': hide}
         self.class_order.append(node.name)
+
+    def _class_slots(self, cname):
+        """The __slots__ names an instance of `cname` may carry, or None when it has a __dict__.
+        A class with __slots__ still gets a __dict__ if any base lacks it (or is a builtin
+        exception), and __dict__ in __slots__ asks for one explicitly."""
+        names = []
+        seen = set()
+        k = cname
+        while k is not None and k in self.classes and k not in seen:
+            seen.add(k)
+            info = self.classes[k]
+            own = info.get('slots')
+            if own is None or '__dict__' in own:
+                return None
+            names.extend(own)
+            k = info['base']
+        if k is not None and k not in self.classes:   # a builtin base (Exception and friends) has a __dict__
+            return None
+        out = []
+        for name in names:
+            if name not in out:
+                out.append(name)
+        return out
+
+    def _class_readonly(self, cname):
+        """Class-body names along the base chain: assigning them through a slots instance is
+        CPython's 'object attribute ... is read-only', not 'has no attribute'."""
+        out = []
+        seen = set()
+        k = cname
+        while k is not None and k in self.classes and k not in seen:
+            seen.add(k)
+            for name, _ in self.classes[k].get('class_attrs', []):
+                if name not in out:
+                    out.append(name)
+            k = self.classes[k]['base']
+        return out
 
     def _resolve_method(self, klass, mname):
         seen = set()
