@@ -236,6 +236,10 @@ def lower_class(cls, kind, binder, enums):
         for tgt in item.targets if isinstance(item, ast.Assign) else [item.target] if isinstance(item, ast.AnnAssign) else []:
             if isinstance(tgt, ast.Name):
                 info.attrs.add(tgt.id)
+    if not info.members and not info.aliases:
+        refuse(cls, 'enum class %s has no members this compiler builds; an empty %s is not built (CPython '
+               'iterates it as empty and raises TypeError when it is called); give it at least one plain member'
+               % (cls.name, info.kind))
     new = copy.copy(cls)
     new.bases = [base]
     new.body = body or [ast.Pass()]
