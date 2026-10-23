@@ -23,9 +23,9 @@ straight-line rule are unchanged. In `csv_table` this fires on `parse_int64_deci
 | ms ail/base/c/rust | ail/base | ail/c | ail/rust |
 | --- | --- | --- | --- |
 | 14.5/14.5/6.1/6.9 | 0.995 [0.992,1.016] tie | 2.390 [2.341,2.456] slower | 2.093 [2.053,2.252] slower |
-| 12.1/14.6/6.1/6.9 | 0.829 [0.818,0.843] faster | 1.989 [1.943,1.995] slower | 1.762 [1.730,1.801] slower |
+| 12.1/14.6/6.1/6.9 | 0.841 [0.814,0.852] faster | 1.979 [1.972,2.031] slower | 1.770 [1.717,1.800] slower |
 
-RSS 5.5/5.5/3.3/3.8 -> 5.5/5.5/3.3/3.7 MiB, binary 107/107/20/1928 -> 111/107/20/1928 KiB,
+RSS 5.5/5.5/3.3/3.8 -> 5.5/5.5/3.3/3.6 MiB, binary 107/107/20/1928 -> 111/107/20/1928 KiB,
 build disk 400/400/44/1952 -> 412/400/44/1952 KiB. The app's boundary controls and Python
 oracle still pass byte-for-byte.
 
