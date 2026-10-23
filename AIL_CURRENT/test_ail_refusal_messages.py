@@ -193,6 +193,21 @@ class RefusalMessageForm(unittest.TestCase):
                 built = compile_case(directory, syntax, source)
                 self.assertRegex(built.stderr, r'^prog\.ail:\d+:\d+: ')
 
+    def test_unavailable_import_is_located_after_the_general_path_fails(self):
+        # With the fallback on, the general path appends its own reason, so the check's message is
+        # no longer an exact substring; the import line still has to be named.
+        source = ('# a header\n# and another\nimport html\n\n\ndef main() -> None:\n'
+                  '    print(html.escape("<"))\n\n\nmain()\n')
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, 'prog.ail').write_text(source, encoding='utf-8')
+            built = subprocess.run(
+                [sys.executable, '-B', str(HERE / 'ail_chatgpt.py'), 'compile', 'prog.ail',
+                 '--syntax', 'python', '-o', 'prog'], cwd=directory, capture_output=True,
+                text=True, timeout=600, env=dict(os.environ, AIL_QUIET_FALLBACK='1'))
+            self.assertEqual(built.returncode, 3, built.stdout + built.stderr)
+            self.assertTrue(built.stderr.startswith(
+                "prog.ail:3:1: not in the subset: import of 'html' is not available"), built.stderr)
+
 
 if __name__ == '__main__':
     unittest.main()

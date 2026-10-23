@@ -1119,6 +1119,9 @@ def _text_position(source, message, function=None):
     if named_line and int(named_line[1]) <= len(lines):
         at = int(named_line[1])
         return at, len(lines[at - 1]) - len(lines[at - 1].lstrip()) + 1
+    imported = name_in(r"^import of '([^']+)'")
+    if imported:
+        return find(r'\b(?:import|from)\s+%s\b' % imported)
     nullable = name_in(r'^(\w+) \| None')
     if nullable:
         return find(r'\b%s\s*\|\s*None|Optional\s*\[\s*%s' % (nullable, nullable))
