@@ -340,6 +340,8 @@ class Gen:
         elts = t[1]
         params = ', '.join('%s: %s' % (fld(e, i), ann_text(e)) for i, e in enumerate(elts))
         body = '\n'.join('        self.%s = %s' % (fld(e, i), fld(e, i)) for i, e in enumerate(elts))
+        if not elts:
+            body = '        pass'   # the empty tuple: a class with no fields still needs a body
         self.out[name] = 'class %s:\n    def __init__(self, %s):\n%s\n' % (name, params, body)
         for e in elts:
             if is_tuple(e):
@@ -369,6 +371,9 @@ class Gen:
         self.out[name] = None
         cls = self.tcls(t)
         elts = t[1]
+        if not elts:
+            self.out[name] = 'def %s(t: %s) -> str:\n    return "()"\n' % (name, cls)
+            return name
         parts = ' + ", " + '.join(self.repr_expr(e, 't.' + fld(e, i)) for i, e in enumerate(elts))
         tail = ' + ",)"' if len(elts) == 1 else ' + ")"'
         self.out[name] = 'def %s(t: %s) -> str:\n    return "(" + %s%s\n' % (name, cls, parts, tail)
