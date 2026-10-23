@@ -313,19 +313,32 @@ class _Analyzer:
             return False
         pure = ('len', 'ord', 'bool', 'abs', 'min', 'max')
         exceptions = set()
+        # Type annotations are not runtime expressions: the AIL front end writes its return
+        # type as `__ail_checked_int__`, a bare Name the body never reads. Walk them only to
+        # ignore every node inside.
+        annotations = set()
+        for node in (fn.returns, *(arg.annotation for arg in fn.args.args),
+                     *(arg.annotation for arg in fn.args.posonlyargs),
+                     *(arg.annotation for arg in fn.args.kwonlyargs)):
+            if node is not None:
+                annotations.update(id(x) for x in ast.walk(node))
         for n in ast.walk(fn):
+            if id(n) in annotations:
+                continue
             if isinstance(n, ast.Raise) and n.exc is not None:
                 exc = n.exc.func if isinstance(n.exc, ast.Call) else n.exc
                 if isinstance(exc, ast.Name) and exc.id not in self.info.shadowed:
                     exceptions.add(exc.id)
         allowed = {'self'} | exceptions
         for n in ast.walk(fn):
+            if id(n) in annotations:
+                continue
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) \
                     and n.func.id in pure and n.func.id not in self.info.shadowed \
                     and not n.keywords:
                 allowed.add(n.func.id)
         for n in ast.walk(fn):
-            if n is fn:
+            if n is fn or id(n) in annotations:
                 continue
             if isinstance(n, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.For, ast.AsyncFor,
                               ast.While, ast.Try, ast.With, ast.AsyncWith, ast.FunctionDef,

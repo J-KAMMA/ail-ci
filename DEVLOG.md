@@ -1,5 +1,36 @@
 # DEVLOG
 
+## 2026-10-23 - method bounds with annotated returns (job-perf3b-10240813)
+
+The earlier method-field analysis did not fire on the real accessors: the AIL front end writes
+`-> int` as the bare name `__ail_checked_int__`, and `inline_candidate` walked the `FunctionDef`
+including its return and argument annotations, so that load made every annotated zero-argument
+method look impure and `remaining()` was never analysed in place. Annotations are not runtime body
+expressions; `rangecheck.py` now collects the id of every annotation node and skips those nodes in
+the candidate walk. Nothing else changes: a method with an assignment, loop, try or non-builtin
+call is still rejected, and a field store, unknown call or alias still forgets its facts.
+
+`python3 bench/compare.py --app binary_cursor_records`, median of nine windows on this runner:
+
+| app | ms ail/base/c/rust | ail/base | ail/c |
+| --- | --- | --- | --- |
+| binary_cursor_records | 40.9/47.2/9.8/9.4 | 0.863 [0.860, 0.872] faster | 4.185 [4.139, 4.212] slower |
+
+Before (HEAD 4ffe276) the AIL/C ratio was `4.728 [4.701, 4.824] slower`; the ranges do not overlap
+(13.7% less AIL time, above the 3% keep threshold). Result:
+`bench/results/2026-10-23-4ffe276-dirty.json`. The new test checks that generated
+`Cursor__read_u8`/`read_u32_le` contain no `ail_bytes_get`, while the unguarded method keeps its
+check.
+
+Probes (`bash ~/tools/cmp.sh /tmp/probes/<name>.py $PWD`, CPython and both compiler paths agree):
+`cursor_fields.py` and `bcursor_fields.py` (annotated `remaining`/`read_*` analysed in place,
+u8/u16/u32 widths, empty, exact short and long boundaries, negative position, aliasing, values
+through an argument, a list item, an attribute and a dict value), `method_side_effects.py`
+(annotated methods with a store, a loop and a try are not inlined; out-of-range reads still raise),
+`range_guards.py` (plain guarded reads on bytes/list plus unguarded bytes indexing). Tests:
+`test_ail_range_checks.py`, `test_ail_binary_cursor_cli.py`, `test_ail_safetynet.py`,
+`test_ail_files.py`, `test_ail_corpus_findings3.py` all pass.
+
 ## 2026-10-23 - range proofs through struct fields and safe method inlining (job-perf3b-10240127)
 
 `binary_cursor_records` was 4.99x slower than C because every `read_*` method rechecked the same
