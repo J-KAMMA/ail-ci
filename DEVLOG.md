@@ -1,5 +1,42 @@
 # DEVLOG
 
+## 2026-10-23 - csv_table: inline small leaf loops (job-perf4-10240813)
+
+`field += ch` was already in place and its slow path is about 1% of calls, so this job took
+the next cost. Profiling a 132 MB three-million-row input (`gprof -pg`) put
+`csv_table_group_scan` at 79% and `parse_int64_decimal` at 2.15% flat. Flat cost understates
+it: replacing the parse with a constant saved 7.3% of wall time, while asking gcc to inline
+that same nine-statement leaf loop saved 20% (1.24 s -> 0.99 s, user 1.08 s -> 0.84 s). The
+extra is the call boundary in the row loop, not the digit loop. The feed/chunk copy was a
+larger upper bound (14.5% if the chunk buffer is reused unsafely) but safe per-chunk ownership
+saved only 1.6%, so it was rejected.
+
+The compiler now asks for `always_inline` on a function whose body is one `for` loop, no
+other loop/try/with/yield, no call to another function or class constructor, a scalar numeric
+return, at most 12 statements and 180 AST nodes; recursion, entry points and the existing
+straight-line rule are unchanged. In `csv_table` this fires on `parse_int64_decimal` and
+`parse_int64_decimal_bytes` only. String/list/object returns are excluded: inlining
+`json_quote` as well measured 1.42 s, slower than 1.25 s.
+
+`python3 bench/compare.py --app csv_table`, before -> after:
+
+| ms ail/base/c/rust | ail/base | ail/c | ail/rust |
+| --- | --- | --- | --- |
+| 14.5/14.5/6.1/6.9 | 0.995 [0.992,1.016] tie | 2.390 [2.341,2.456] slower | 2.093 [2.053,2.252] slower |
+| 12.1/14.6/6.1/6.9 | 0.829 [0.818,0.843] faster | 1.989 [1.943,1.995] slower | 1.762 [1.730,1.801] slower |
+
+RSS 5.5/5.5/3.3/3.8 -> 5.5/5.5/3.3/3.7 MiB, binary 107/107/20/1928 -> 111/107/20/1928 KiB,
+build disk 400/400/44/1952 -> 412/400/44/1952 KiB. The app's boundary controls and Python
+oracle still pass byte-for-byte.
+
+Tests: `test_ail_integer_codec test_csv_group_scan test_ail_csv_rewrite_stream
+test_ail_csv_writer test_ail_utf8_stream_fuzz test_csv_column_stats_stream` (24 tests) and
+`test_ail_safetynet test_ail_files test_ail_corpus_findings3` (25 tests, 1 skipped) pass.
+Probes `/tmp/probes/loop_inline.py` and `/tmp/probes/loop_inline_objects.py`
+(`bash ~/tools/cmp.sh`) cover negative/empty/invalid parse paths, early return, break/continue,
+loops reached through arguments, list items and dict values, and string/list/dict mutations;
+both builds match CPython stdout on every case.
+
 ## 2026-10-23 - csv_table: one UTF-8 scan per chunk (job-perf4-10240013)
 
 `field += ch` was already in place. The generated code calls `ail_str_cat`, whose first
