@@ -18,6 +18,34 @@ loops as `file:line: slow: ...; fix`: `x in xs` / `.index` / `.count` / `.remove
 / `.insert(0, x)`, `min`/`max`/`sort` of a list the loop keeps changing, a scan of all rows for the
 current key, nested loops over one list, a struct heap keyed by a computed value. They never
 fail the build; fix them when n can be large. `s += t` on a str is linear (no hint).
+Projects (`ail new`, `ail.toml`), `ail lsp` and `ail build --debug`: see Tooling at the end.
+
+### Strict mode: the typed path or a refusal
+
+A program the typed path cannot take is built on the general path, about 20x slower, and `compile`
+prints one `note: ... built on the general path (about 20x slower) because ...; run with --strict to see
+why` line (`AIL_QUIET_FALLBACK=1` silences it). Strict mode never falls back:
+
+```text
+python3 ail_chatgpt.py compile prog.py --strict -o prog          # also AIL_STRICT=1, ail build --strict, ail run --strict
+python3 ail_chatgpt.py compile prog.py --strict --json -o prog   # blockers as ail.strict/1 JSON on stdout
+```
+
+A typed program builds exactly as without the flag (same C, same executable). Otherwise exit status 3 and
+every blocker the compiler can find in one pass, not only the first: `file:line:col`, the code, the
+construct, why it is not typed and a `write instead:` rewrite, the one that keeps the most code off the
+typed path first (`blocks N lines (f, main)`: the function and every caller). Fix them all, run again.
+The JSON has `schema`, `status`, `blocker_count`, `incomplete` (null, or why the list may be short) and
+`blockers[]` with `rank path line column function statement construct why write_instead blocks_lines
+blocks_functions message`. `AIL_NO_GENERAL=1` alone still stops at the first refusal.
+
+### The general path's unboxing: `AIL_UNIFIED` (default on since 2026-10-21)
+
+On the general path the compiler infers int / float / bool locals, parameters and results and keeps them as C
+values (about 1.7x faster on general-only programs; same output, stderr and exit status, same RSS within 0.5%).
+It is on by default. `AIL_UNIFIED=0` (also `off`, `no`, `false`) builds the general path with every value boxed, as
+before; `AIL_UNIFIED=1` is still accepted. The size-class free list under the collector is a separate switch and
+stays off unless `AIL_UNIFIED_POOL=1` (it costs RSS). Typed-path programs are not affected.
 
 ## Text I/O: main, arguments, stdin lines, print, files
 
@@ -46,10 +74,14 @@ row 1: 0 0
 - `fn main()` takes no parameters and returns the exit code (falling off the end is 0); `sys.argv`
   is a `list[str]` with the program name first; `sys.exit(n)` works anywhere.
 - Input: `for line in sys.stdin` (keeps `\n`; input that is not UTF-8 exits 1: read bytes instead),
-  `input()` (`EOFError` at the end), `open(path).read()` (only this form).
-- Output: `print(*values, sep=, end=, file=sys.stderr)` (ints, floats, strs, bools). stdout is
-  buffered and still flushed by `sys.exit` or an uncaught exception: when a program must print
-  nothing on error, collect the lines and print them at the end.
+  `input()` (`EOFError` at the end), `open(path).read()` and `for line in open(path)`.
+- Files: `with open(p, "w") as f: f.write(text)` and the same for read; modes `r w a x` with `b` / `+`,
+  `encoding=`, `errors=`, `newline=`, `read/readline/readlines/write/seek/tell/close` (typed path too).
+- Output: `print(*values, sep=, end=, file=sys.stderr)` (ints, floats, strs, bools; a list or
+  tuple prints as its repr, `print(*xs)` walks a list / tuple / generator, and `Cls(*xs)` and `f(*xs)`
+  are built, binding like a plain call). stdout is buffered and still flushed by
+  `sys.exit` or an uncaught exception: when a program must print nothing on error, collect the lines
+  and print them at the end.
 - Files: `read_bytes(path)`, `file_chunks(path, 65536)` (bytes chunks, constant memory),
   `write_text(path, s)`, `write_bytes`, `append_bytes`, `path_exists`, `file_size`, `list_dir`.
 - `for line in sys.stdin` with `split`/`int`/`isdigit` and one `print(f"...")` per output line is
@@ -130,6 +162,9 @@ sys.exit(main())
 - Every statement ends with `;`, never after `}`. Blocks use braces: `if c { } elif d { } else { }`
   (no `else if`), `while c { }`, `for x in xs { }`, `try { } except E as e { } finally { }`.
   Comments start with `#`. Logic is `and or not`.
+- `with expr as name:` / `with a as x, b as y:` is built: `with open(...)` on the typed path, and on
+  the general path user `__enter__` / `__exit__` (a true result suppresses) and `contextlib.contextmanager`,
+  `suppress`, `closing`, `nullcontext` (the default build falls back).
 - `let x = 1;` or `let x: list[str] = [];`: an initializer is required and fixes the type.
   `const N = 3;` takes a number, str, bytes or numeric-list literal.
 
@@ -181,6 +216,8 @@ KeyError 6
 - `struct P { x: int; name: str; }` is built `P(1, "a")` or `P(name="a", x=1)`; every field needs
   a value (list/dict/set fields take `[]`/`{}`/`set()`). Methods: `impl P { fn m(self, d: int) ->
   int { ... } }`. A field may be any type, the struct's own type only as `P | None` or `list[P]`.
+  A Python `@dataclass` class may derive from one `@dataclass` base on the general path (the default
+  build falls back): inherited fields, `==` and printing work there.
 - A struct is a shared reference (assignment, list elements and arguments alias it), as are nested
   lists and their rows; `let ys = xs;` copies a flat list. No tuples: return a struct.
 - Flat `list`, `dict` and `set` parameters are read-only: to modify one in a helper, keep it in a
@@ -214,7 +251,8 @@ fn main() {
 ## Trees: linked lists, `Node | None`
 
 A struct field, parameter, result or `let` written `Node | None` (or `Optional[Node]`) may be `None`.
-Only structs can be None (`int | None` is refused: use a sentinel such as -1). Test with `is None`,
+On the typed path `int | None`, `float | None` and `str | None` are built too; `bool`, `bytes` and
+`list[T]` with `| None` need the general path (the default build falls back). Test with `is None`,
 `is not None`, `if x`; `a is b` compares identity. Reading or writing a field (or calling a method)
 through None raises `RuntimeError` (message `field access on None`), catchable. Structs are
 reference counted: trees and lists are freed when unreferenced, a reference cycle (parent pointer,
@@ -265,7 +303,8 @@ field access on None
   `IndexError`; `xs[-1]` works.
 - `list(x)` copies any list, set, dict (its keys), `d.keys()`, `d.values()`, str (its characters)
   or range into a new list. On a list field, `x in st.xs` and `st.xs.count(x)` read it in place.
-- A flat list parameter is read-only (Structs). `print(xs)` is refused: `", ".join(xs)`.
+- A flat list parameter is read-only on the typed path (Structs). `print(xs)` is the list's repr;
+  `print` of a dict needs the general path (the default build falls back).
 - `x in xs`, `index`, `count`, `remove`, `pop(0)`, `insert(0, x)` are O(n), as in Python: in a
   loop use a set or `[False] * n`, a queue as list + head index (BFS), a heap (Heaps).
 
@@ -300,20 +339,20 @@ results, with Python's meaning:
 ## Dicts: `dict[str, T]`, `dict[int, T]`
 
 - T: int, float, str, bytes. Insertion ordered. Key an int id as an int (`d[r.id]`, never
-  `d[str(r.id)]`). `dict[str, Struct]` and `dict[str, list[T]]` are refused: map the key to an
-  index into a `list[Struct]` or a `list[list[T]]` (Word count).
+  `d[str(r.id)]`). `dict[str, Struct]` and `dict[str, list[T]]` need the general path (the default
+  build falls back); the typed path maps the key to an index into a `list[Struct]` or a `list[list[T]]`.
 - `d[k]` (`KeyError`), `get(k, default)` (one-argument `get(k)` is refused: there is no None for a
   value; use `d.get(k, -1)` or `if k in d`), `setdefault`, `pop(k[, default])`, `del d[k]`, `in`,
   `len`, `keys()`, `values()`, `items()`, `update`, `copy`, `clear`; `for k in d`,
   `for k, v in d.items()`, `sorted(d)`, `list(d)` / `list(d.keys())` (keys in insertion order),
-  `list(d.values())`. No dict comprehensions. A dict parameter is read-only.
+  `list(d.values())`, dict comprehensions. A dict parameter is read-only on the typed path.
 
 ## Sets: `set[int]`, `set[str]`
 
 `let s: set[int] = set();` (or `{1, 2}`, `set(xs)`): `add discard remove clear update copy`,
 `x in s`, `len`, `for`, `sorted`, `list(s)`, `sum/min/max` (int), `| & - ^` and `|= &= -= ^=`
 (also `union intersection difference symmetric_difference`, `*_update`), `== != <= < >= >`
-(`issubset`, `issuperset`), `isdisjoint`. Insertion ordered; `s.pop()` removes the newest element
+(`issubset`, `issuperset`), `isdisjoint`. Insertion ordered; `s.pop()` removes the first element in that order
 (`KeyError` when empty). A set parameter is read-only.
 
 Module-level tables (Python syntax): `STOP = {"a", "the"}`, `STOP: set[str] = {...}`, `TABLE = {"x": 1}`,
@@ -335,8 +374,9 @@ module (`compile-library`) takes no table.
   `find/rfind/index/rindex/count(sub[, start[, end]])`, `startswith/endswith`, `replace`,
   `lower/upper`, `isdigit/isalpha/isalnum/isspace/isupper/islower/isdecimal/isnumeric/istitle`,
   `encode()`; `in`, `+`, `*`, `<`, slices with steps, `ord`, `chr`, `str(int|float|bool)`,
-  `hex(int)`. Missing: `partition`, `title`, `capitalize`, `zfill`, `ljust`, `translate`,
-  `removeprefix`. `+` never mixes str and a number: `"n=" + str(n)`.
+  `hex(int)`, `partition`, `rpartition`, `ljust`, `rjust`, `center`. Missing on the typed path:
+  `title`, `capitalize`, `zfill`, `removeprefix`, `removesuffix` (the default build falls back and
+  runs them); `translate` is refused on every path. `+` never mixes str and a number: `"n=" + str(n)`.
 - f-strings `{expr}`, `{n:5d}`, `{n:05d}`, `{x:.2f}`, `{x:8.3f}`, `{s:>6}` (`<`, `^`);
   `"%d %5s %-5s %.9f" % (...)`; `"{} {:.2f}".format(...)`. Specs follow CPython: `[[fill]align][sign][#][0]
   [width][, or _][.precision][type]` with int types d x X o b (and e f g %), float types f F e E g G %
@@ -355,14 +395,14 @@ fn main() {
 True 1 3.5 3 2 1024
 ```
 
-## Regular expressions: re (Python syntax)
+## Regex: re (Python syntax)
 
 `import re` with the pattern spelled as a literal: a str or bytes literal, or a name bound once to one
 (`WORD = r"[a-z]+"`), or `P = re.compile(literal[, flags])` bound once and used as `P.search(s)` and so
 on. The pattern is parsed when the program is built and matched by a linear-time engine written in the
 language itself (leftmost-first, CPython's priority), so groups and spans equal CPython's.
 
-- Functions and methods: `match fullmatch search findall finditer split sub escape`; `flags=` or the
+- Functions and methods: `match fullmatch search findall finditer split sub subn escape`; `flags=` or the
   last positional flags (`re.I re.M re.S re.X re.A`, joined with `|`), `count=`, `maxsplit=`.
   `finditer` returns a list of matches, not an iterator (use it in a `for` or with `len`).
 - Pattern syntax: literals, `.`, classes (`[a-z]`, `[^...]`, ranges, `\d \w \s` and their
@@ -375,7 +415,8 @@ language itself (leftmost-first, CPython's priority), so groups and spans equal 
   with `m.group(i)` raises `ValueError` (there is no None str), so test `m.start(i) >= 0` first.
   `findall` with one group returns that group ('' when it did not take part).
 - `sub(pattern, repl, s[, count])`: a literal `repl` may use `\1`, `\g<1>`, `\g<name>`, `\n`;
-  a non-literal `repl` must have no backslash; a function is not built. Empty matches follow CPython 3.7+.
+  a non-literal `repl` must have no backslash. `subn` and a function `repl` run on the general path
+  (the default build falls back; the typed path needs a literal repl). Empty matches follow CPython 3.7+.
 - Cost: matching is O(len(pattern) x len(text)). On an ASCII str or a bytes subject (and a pattern without
   lookaround) a DFA built with the program finds the spans, so scans over megabytes (`findall`, `finditer`,
   `sub`, `split`, `search`) and short `fullmatch` calls run at or below CPython's time, with 2 to 5 times
@@ -389,7 +430,7 @@ language itself (leftmost-first, CPython's priority), so groups and spans equal 
   atomic groups, possessive quantifiers, conditionals, scoped flags `(?i:...)`, a repeated group that
   can match the empty string (`(a*)*`), `re.IGNORECASE` with a non-ASCII pattern character (a non-ASCII
   subject with `re.I` raises `ValueError`), `findall` with several groups and `split` with groups
-  (tuples, None), `subn`, `m.groups()` / `m.groupdict()` / `m.span()` as values, a pattern that is not a
+  (tuples, None), `m.groups()` / `m.groupdict()` / `m.span()` as values, a pattern that is not a
   literal, `pos` / `endpos`.
 
 ```python
@@ -683,9 +724,10 @@ hi]])`. Same results and heap layout as CPython, O(log n), the list changed in p
 `for` walks a list, str, bytes (also `data[i:j]`, `s.encode()`), bytearray, a dict,
 `range(a, b, step)`, `enumerate(list)`, `reversed(list)`, `sorted(...)`, `s.split(...)`,
 `s.splitlines()`, a call returning a list, `sys.stdin`. `break`, `continue`, `pass`,
-`x if c else y`, list comprehensions (also nested `for`). `parallel for` (Parallel).
-No `for ... else`, `zip`, tuple unpacking except `for k, v in d.items()`, `enumerate(str)`, dict
-comprehensions, `global`, `isinstance`.
+`x if c else y`, list and dict comprehensions (also nested `for`), `zip(a, b)` as the iterable of
+`for a, b in`, `isinstance(x, int)` (and str / float / bool). `parallel for` (Parallel).
+No `for ... else`, `list(zip(...))`, `enumerate(zip(...))`, `enumerate(str)`, tuple unpacking
+beyond `for a, b in zip(...)` / `enumerate(...)` / `d.items()`, or `isinstance` of a struct.
 
 ## Exceptions
 
@@ -710,16 +752,16 @@ needs a final `return`. Handler names: Local names.
 |---|---|
 | tuples beyond the Tuples section, `zip` over non-lists | a struct; index loops |
 | a lambda that escapes, nested `def` | a top-level `fn` passed as `Callable[[A], R]` |
-| global variables you change | a struct holding the state, passed to each function (a literal read-only table is fine) |
-| `dict[str, Struct]`, `dict[str, list[T]]` | a `dict[str, int]` index into a `list[Struct]` (or a `list[list[T]]`) |
-| `None` for int, str, list | a sentinel (-1, ""), or raise. A struct may be `Node \| None` |
-| `xs[i] = v` or `xs.append(v)` on a list parameter | a struct field `s.xs`, or return a new list |
+| changing a global list / str / dict | a struct holding the state, passed to each function; a module-level int / float may use `global` |
+| `dict[str, Struct]`, `dict[str, list[T]]` on the typed path | a `dict[str, int]` index into a `list[Struct]` (or a `list[list[T]]`); the default build falls back |
+| `None` for a list on the typed path | a sentinel (-1, ""), or raise; int / float / str may be `int \| None` |
+| `xs[i] = v` or `xs.append(v)` on a list parameter (typed path) | a struct field `s.xs`, or return a new list; the default build falls back |
 | one name holding an int, later a str | a second name |
-| `str(b)` of bytes | `b.decode()` |
-| `print(xs)`, `p1 == p2` on structs | print or compare fields; `", ".join(xs)` |
+| `str(b)` of bytes on the typed path | `b.decode()`; the default build prints the repr |
+| `print` of a dict on the typed path | `sorted(d.items())`; a list and a tuple print as their repr |
 | `d.get(k)` (None when missing) | `d.get(k, -1)` with a sentinel, or `if k in d { ... d[k] ... }` |
 | `int(s)` on text that may overflow | `parse_int64_decimal(s)` from `checked_integer` (`ValueError`) |
-| `with open(p) as f`, `f.write` | `read_bytes`, `write_text`, `file_chunks` |
+| a file mode, encoding or `os` call that is not built | `read_bytes`, `write_text`, `file_chunks` |
 | big integers (`Fraction` has 64-bit parts) | limbs in a `list[int]`; a `@dataclass` class |
 
 ```ail-refused
@@ -981,10 +1023,13 @@ slower than typed code), where operator methods dispatch on the run-time class (
   floats (a float gives a float), `== < <= > >=`, `abs round(x[, n]) int float math.floor math.ceil`, `limit_denominator`, `numerator`, `denominator`,
   `is_integer`, `as_integer_ratio`, `Fraction.from_float`, `sum / min / max / sorted`, dict keys and set members. `str`/`repr` as CPython (`3/4`, `Fraction(3, 4)`).
   Not built: `Fraction.from_decimal`, `format` specs, `divmod`, `decimal` (refused by name).
-- `enum`: `Enum`, `IntEnum`, `StrEnum`, `auto()`, `@unique`. Members print as `Color.RED`, repr `<Color.RED: 1>`; `Color(1)` (ValueError `1 is not a valid Color`),
+- `enum`: `Enum`, `IntEnum`, `StrEnum`, `Flag`, `IntFlag`, `auto()`, `@unique`. Members print as `Color.RED`, repr `<Color.RED: 1>`; `Color(1)` (ValueError `1 is not a valid Color`),
   `Color["RED"]` (KeyError), `for c in Color`, `list(Color)`, `len(Color)`, `Color.__members__`, aliases, `.name`, `.value`, methods, members as dict keys and set
-  members, `==` / `is`. An `IntEnum` member compares, adds and indexes like its value (`int(m)`, `m + 1`, `lst[m]`). Refused by name: `Flag`/`IntFlag`, the
-  functional API, mixed-in bases (`class C(str, Enum)`), `__init__`/`__new__` in an enum, class methods. `isinstance(m, int)` is False.
+  members, `==` / `is`. An `IntEnum` member compares, adds and indexes like its value (`int(m)`, `m + 1`, `lst[m]`). `Flag` / `IntFlag` compose with `| & ^ ~ << >>`,
+  test with `in`, iterate `list(m)` and format; a member past 63 bits is refused. Refused by name: the functional API, mixed-in bases (`class C(str, Enum)`),
+  `__init__`/`__new__` in an enum, class methods. `isinstance(m, int)` is False.
+- `contextlib`: `contextmanager`, `suppress`, `closing`, `nullcontext` and user `with` classes on the general path (the default build falls back);
+  `with a as x, b as y:`, `return` / `break` / `continue` / an exception inside, and an `__exit__` returning True suppressing. Not built: `ExitStack`.
 - `collections.namedtuple("P", "x y", defaults=[..])`, `class P(NamedTuple)` (annotations, defaults, methods) and `class P(namedtuple(..))`: fields, indexing, unpacking,
   iteration, `==` with tuples, ordering, hashing, `repr` `P(x=1, y=2)`, `_asdict()`, `_replace(x=..)`, `P._make(xs)`, `P._fields`, `count`, `index`. Refused:
   `rename=`, `module=`, `__new__`, `_field_defaults`. Slices `p[1:]` and `isinstance(p, tuple)` are not built. `collections.ChainMap(*maps)`: lookups, `get`, `in`,
@@ -1006,3 +1051,98 @@ slower than typed code), where operator methods dispatch on the run-time class (
 - Also: user classes may define `__add__ __sub__ __mul__ __truediv__ __floordiv__ __mod__ __pow__` (and the `__r..__` forms), `__neg__ __pos__ __abs__ __bool__ __int__ __float__
   __round__ __floor__ __ceil__ __trunc__ __index__ __hash__ __eq__ __len__ __getitem__ __setitem__ __delitem__ __contains__`; instances hash and compare by identity unless the
   class says otherwise. `d1 | d2` on dicts, `type(x).__name__`, `x.__class__.__name__`, `Cls(*xs)` for a class with a fixed `__init__`.
+
+### Tooling: projects, language server, debugging (last section of this file)
+
+`ail` (packaging/ail_lang/cli.py) is the command; `python -m ail_lang` is the same. With `AIL_SDK_DIR=<AIL_CURRENT>` it runs from a source checkout.
+
+- **Project.** `ail new NAME` creates `NAME/ail.toml`, `NAME/src/main.py` and `NAME/.gitignore`. `ail build`, `ail run` and `ail check` with no source
+  file use the project found from the current directory upwards: `ail.toml` (top-level keys) or `[tool.ail]` in pyproject.toml, `ail.toml` first.
+  Keys: `name` (default: the directory name), `entry` (required, .py or .ail), `link` (plain library names, passed as `--link LIB`, i.e. `-lLIB`),
+  `strict` (default false), `module_path` (directories, passed as `-I`). Unknown keys, wrong types, a missing entry, and a bad name or link are refused
+  by name. `ail build` writes `build/NAME` (`build/NAME-debug` with `--debug`), replacing the previous one; `-o` overrides. There is no package registry.
+- **strict.** `strict = true` adds `--strict` to the build: a program the typed path refuses is not built on the slow general path; every blocker is listed with its `write instead:` (exit 3, ail.strict/1 with `--json`). The language server shows those as errors. `link` and `compile --link LIB` are `link("LIB")` of the source (cratebridge), one code path (`Session.extra_libs`).
+- **Language server.** `ail lsp` (stdio, JSON-RPC 2.0, standard library only). Capabilities: open/close sync, `didSave`, hover. On didOpen and didSave it
+  runs `ail check` (schema `ail.check/1`) on the file on disk (a file that does not exist yet is checked from the buffer text). Severity: a source that
+  does not load or parse, or that the build refuses, is an Error; a typed-path blocker that the general path builds is a Warning `runs on the slow general
+  path because <reason>`; `slow_patterns` are Information. The Warning/Error split costs one build of the program (needs a C compiler; remembered per source
+  hash; without a compiler the Warning says it cannot tell). Messages keep the `write instead:` text; hover on a diagnostic shows it as **write instead:**.
+  The blocker list is `compile --strict --json` (no C compiler needed); the Warning/Error split is the one build. A problem in an imported module is published on that module's file. Classification lives in `lsp.Diagnoser.classify`; when `ail check --strict`
+  reports blockers and refusals itself, that is the only place to change.
+- **Debugging.** `ail build --debug` (`compile --debug`, environment `AIL_DEBUG=1`) compiles with `-g -O0`, and writes `#line N "file"` before every C line of every
+  statement (the combined-source line is mapped back through the loader's source map, so imported modules point at their own files). It uses the same code generator as
+  a release build: the IR path (`AIL_IR` is no longer forced to 0), the legacy emitter for what the IR refuses, and the general path (pyboxed2) for a program built there.
+  A debug build's C differs from the release C by `#line` and `AIL_DBG_SITE` lines alone, and a release build's C has none (`test_ail_debug_lines`). gdb, `addr2line`
+  and `assert` name the user's `.py` line. The typed paths also record `file:line` of the statement being run: an uncaught exception or runtime trap prints its usual
+  message, then `  raised near file:line`; a normal build's stderr is unchanged (DIFFERENCES A4). The line is the last statement that began to run, so for an
+  exception raised after a call returns within one statement it can name the callee's last statement, and for one that a `finally` lets through, the last statement of
+  the `finally` (C121). The general path has `#line` but no `raised near` (a note says so; C123); `--separate` and linked objects have no line mapping.
+  A function the legacy emitter writes puts one `#line` per statement, so a debugger stepping inside a long one shows the next lines (C122). The build cache
+  keeps debug and normal builds apart. `-O0` uses more stack per call than `-O2`, so very deep recursion fails sooner.
+### Native libraries: C and Rust (`ail_ffi`, `link`, `ail_cbuf`)
+
+```python
+from ail_ffi import *
+from ail_cbuf import get_i32, get_i64, put_i64      # copy ail_cbuf.py beside the program
+
+link("m", "z")                                       # -lm -lz; the CPython shim loads the same libraries
+
+@extern(header="math.h", symbol="frexp")
+def c_frexp(x: c_double, e: ptr(c_int)) -> c_double: ...            # out-parameter: a bytearray(4)
+@extern(header="zlib.h", symbol="compress")
+def z_compress(dest: bytearray, dest_len: ptr(c_ulong), src: bytes, n: length("src", c_ulong)) -> c_int: ...
+@extern(header="zlib.h", symbol="uncompress", check="nonzero", exc=ValueError)   # error code -> exception
+def z_uncompress(dest: bytearray, dest_len: ptr(c_ulong), src: bytes, n: length("src", c_ulong)) -> c_int: ...
+@extern(header="sqlite3.h", trust=True)              # the prototype names `sqlite3 **`: not compared
+def sqlite3_open(path: c_char_p, db: ptr(c_void_p)) -> c_int: ...    # void ** out-parameter: read with get_i64
+
+e = bytearray(4)
+m = c_frexp(48.0, e)
+print(m, get_i32(e, 0))                              # 0.75 6
+```
+
+- `link("name", ...)` once per file; `pkg_config="x"` for pkg-config flags; a path links that file. Stubs without `lib=` search the C
+  library, then the linked libraries.
+- Out-parameters and structs are byte buffers: `ptr(T)` (writable) / `cptr(T)` (read only) over a `bytearray` / `bytes`, element types are
+  ints, `c_float`, `c_double`, `c_bool`, `c_void_p`; `c_mut_void_p` / `c_const_void_p` for a struct; fields are read and written at the C
+  offsets with `get_i32 get_u32 get_i64 get_f64 put_i32 put_i64 put_f64 ...`.
+- `trust=True` for a prototype that names a struct (`struct tm *`, `sqlite3 *`): the header is included, its prototype is not compared.
+- Callbacks (AIL functions called from C) are not supported.
+- Rust: export `#[no_mangle] pub extern "C"` functions from a `cdylib` / `staticlib` crate (`panic = "abort"`), generate a header with
+  cbindgen, and `python3 AIL_CURRENT/ail_bindgen.py crate.h --lib ./libcrate.so --check fn=nonzero:ValueError` writes the stubs.
+  Recipe: `docs/design/NATIVE_LIBRARIES.md`.
+
+
+## Export
+
+`@export` marks the top-level typed functions of a Python-syntax file as the C API of a library. The same
+file runs on CPython (`from ail_ffi import export` is a checking no-op there) and builds with
+
+    ail build --lib NAME prog.py [-o DIR]        # or: ail_chatgpt.py compile --lib NAME prog.py -o DIR
+
+into `DIR/libNAME.so` (`.dylib` on macOS), `DIR/libNAME.a` and `DIR/NAME.h` (DIR must exist, default `.`; an
+existing file is never overwritten; Linux and macOS). Only the `@export` functions are public; every other
+function, class and literal constant of the file is private and may use any typed AIL. `@dataclass` classes
+and the `ail_ffi` / `dataclasses` imports are consumed by the build; `if __name__ == "__main__":` blocks
+are dropped.
+
+| annotation | C parameter | C result (out-parameter) |
+|---|---|---|
+| `int` / `float` / `bool` | `int64_t` / `double` / `bool` | `int64_t *` / `double *` / `bool *` |
+| `str` | `const char *` (UTF-8, NUL terminated) | `char **`, malloc'd, NUL terminated |
+| `bytes` | `const uint8_t *p, size_t p_len` | `uint8_t **, size_t *`, malloc'd |
+| `list[int]` / `list[float]` | `const int64_t *` / `const double *` + `size_t` count | `T **, size_t *`, malloc'd |
+| dataclass of `int`/`float`/`bool` | `const NAME_Type *` (C struct, same field order) | not allowed |
+| `None` | | none |
+
+Every function returns `int`: 0 on success, otherwise `NAME_ERR_VALUE` 1, `_ZERO_DIVISION` 2, `_INDEX` 3,
+`_KEY` 4, `_EOF` 5, `_OS` 6, `_RUNTIME` 7, `_INTERNAL` 8 (allocation failure, invalid result), `_ARGUMENT` 9
+(NULL where a pointer is required, a NUL in a str result). Results are written only on success.
+`const char *NAME_last_error(void)` returns `"ValueError: text"` for the calling thread's last call (empty after
+a success; valid until that thread's next call). An exception that escapes an exported function never ends the
+process. `NAME_free(void *)` releases every str, bytes and list result (once; NULL is fine; an empty bytes or
+list result may be NULL). No init or teardown function exists because no state survives a call. Calls from any
+number of threads are allowed: one internal mutex serializes them (no calls from signal handlers; link the
+static library with `-lm -lpthread`). Differences from CPython: `int` is 64 bit, `str` results containing a
+NUL are refused, and a dataclass cannot be returned. A file without `@export` and the existing
+`compile-library` (view structs, `NAME_error`) are unchanged.
