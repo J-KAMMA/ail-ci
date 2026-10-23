@@ -1125,6 +1125,23 @@ def _is_literal_default(d):
         return False
 
 
+def _is_mutable_literal_default(d):
+    """A literal default that builds a list, dict or set (also inside a tuple).  A nested def's
+    defaults are filled in at each call site, so such a value would be a fresh object per call;
+    CPython evaluates it once, when the def runs."""
+    try:
+        value = ast.literal_eval(d)
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return False
+
+    def mutable(v):
+        if isinstance(v, (list, dict, set)):
+            return True
+        return isinstance(v, tuple) and any(mutable(x) for x in v)
+
+    return mutable(value)
+
+
 def _module_stmt_binds(stmt):
     """Names a module-level statement binds (def, class, assignment targets, imports)."""
     if isinstance(stmt, (ast.FunctionDef, ast.ClassDef)):
@@ -3160,7 +3177,11 @@ class Compiler(boxclosure.ClosureMixin):
             except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
                 return False
         # defaults that are constants (CPython evaluates them once, when the def runs: for a constant the value
-        # filled in at each call is the same), *args packed into a tuple at the call, keyword-only parameters
+        # filled in at each call is the same), *args packed into a tuple at the call, keyword-only parameters.
+        # A mutable literal would be a fresh object at each call, so it is refused by name instead.
+        if any(_is_mutable_literal_default(d) for d in node.args.defaults + node.args.kw_defaults):
+            raise Unsupported('a nested def %s with a mutable default (CPython evaluates the '
+                              'default once, when the def runs)' % node.name)
         if node.args.kwarg or node.args.posonlyargs or not all(constant(d) for d in node.args.defaults) \
                 or not all(d is None or constant(d) for d in node.args.kw_defaults):
             raise Unsupported('a nested def %s with *args/**kwargs/keyword-only/default '
