@@ -10,6 +10,11 @@ class Calls:
     def fill(self, hole, t):
         """Settle an unknown element type once something of that type goes in."""
         t = deep(t)
+        cur = deep(hole)
+        if (cur is not None and t is not None and t != 'none' and cur != t
+                and (is_tuple(cur) or is_tuple(t))):
+            raise Refused((1, 'a container holding tuples of different shapes is not built; keep one '
+                              'tuple shape in the container'))
         if isinstance(hole, Hole) and R(hole) is None and t is not None and t != 'none':
             hole.t = t
 
