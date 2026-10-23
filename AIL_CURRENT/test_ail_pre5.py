@@ -206,11 +206,70 @@ d['b'] = 2
 show('exhausted-then-add', lambda: next(it))
 """
 
+SAMESIZE = r"""d = {'a': 1, 'b': 2, 'c': 3}
+it = reversed(d)
+print(next(it))
+del d['a']
+d['a'] = 9
+print(list(it))
+
+d = {'a': 1, 'b': 2, 'c': 3}
+it = reversed(d)
+print(next(it))
+del d['a']
+d['z'] = 9
+print(list(it))
+
+d = {'a': 1, 'b': 2, 'c': 3}
+it = reversed(d)
+print(next(it))
+del d['b']
+d['b'] = 9
+print(list(it))
+
+d = {'a': 1, 'b': 2, 'c': 3}
+it = reversed(d)
+print(next(it))
+del d['b']
+d['z'] = 9
+print(list(it))
+
+d = {'a': 1, 'b': 2, 'c': 3, 'd': 4}
+it = reversed(d)
+print(next(it))
+del d['a']
+del d['b']
+d['x'] = 8
+d['y'] = 9
+print(list(it))
+
+d = {'a': 1, 'b': 2, 'c': 3}
+it = reversed(d)
+k, v = d.popitem()
+d[k] = v
+print(list(it))
+
+d = {'a': 1, 'b': 2, 'c': 3}
+it = reversed(d)
+print(next(it))
+d['z'] = 9
+try:
+    next(it)
+except RuntimeError:
+    print('size error')
+del d['z']
+try:
+    next(it)
+except RuntimeError:
+    print('size error stays')
+"""
+
 CASES = [
     ('basic', BASIC),
     ('containers', CONTAINERS),
     ('typed', TYPED),
     ('mutation', MUTATION),
+    ('samesize', SAMESIZE),
 ]
 
 

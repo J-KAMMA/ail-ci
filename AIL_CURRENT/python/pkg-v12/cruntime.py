@@ -14027,6 +14027,10 @@ static inline void ail_fmt_float(char *out, size_t cap, double v) {
    =================================================================================== */
 typedef struct { ail_obj key, val; int64_t hash; } ail_mapentry;
 typedef struct { ail_gcobj hdr; ail_mapentry *entries; int64_t n, cap; int64_t *index; int64_t index_cap;
+                 /* physical layout for reversed(d): entries appended on insert, holes (UNBOUND) on
+                    delete, reset on clear. CPython's reverse iterator walks its entry array that way
+                    and skips holes, so a same-size delete+insert must not shift an in-flight cursor. */
+                 ail_obj *phys; int64_t nphys, phys_cap, phys_usable;
                  int8_t dd_factory; /* defaultdict marker: 0 plain dict, 1 int, 2 list, 3 set, 4 str (2026-09-16) */ } ail_mapobj;
 /* set / frozenset: insertion-ordered like the typed path's sets (DIFFERENCES.md A2). An entry whose key tag is UNBOUND is a
    hole left by a removal; `n` counts entries used including holes, `used` the live ones. */
@@ -14145,7 +14149,7 @@ static inline void ail_gc_mark_value(ail_obj v) {
 static inline void ail__free_payload(ail_gcobj *o) {
     switch (o->kind) {
         case AIL_K_LIST: case AIL_K_TUPLE: free(((ail_vecobj *)o)->p); break;
-        case AIL_K_DICT: free(((ail_mapobj *)o)->entries); free(((ail_mapobj *)o)->index); break;
+        case AIL_K_DICT: free(((ail_mapobj *)o)->entries); free(((ail_mapobj *)o)->index); free(((ail_mapobj *)o)->phys); break;
         case AIL_K_SET: free(((ail_setobj *)o)->ent); free(((ail_setobj *)o)->index); break;
         case AIL_K_INST: free(((ail_instobj *)o)->attrs); break;
         case AIL_K_FUNC: free(((ail_funcobj *)o)->cells); break;
@@ -15014,7 +15018,46 @@ static inline ail_mapobj *ail_map_new(ail_ctx *cx) {
     m->index_cap = 8;
     m->index = (int64_t *)ail_xmalloc((size_t)m->index_cap * sizeof(int64_t));
     for (int64_t i = 0; i < m->index_cap; i++) m->index[i] = -1;
+    m->phys = NULL; m->nphys = 0; m->phys_cap = 0; m->phys_usable = 0;
     return m;
+}
+/* Reverse-dict iteration mirrors CPython's physical entry array: a new key appends a slot, a
+   delete leaves a hole, and a resize compacts the holes. The dense `entries` array itself still
+   compacts on every delete, so it cannot be used as the cursor's coordinate system. `phys_cap`
+   and `phys_usable` track CPython's dk_size and dk_usable so holes are closed at the same point
+   (right before an insertion when the usable slots run out), because a reverse iterator that is
+   already running keeps its old physical position across such a resize. */
+static inline int64_t ail_map_phys_newsize(int64_t used) {
+    int64_t minsize = (used * 3 | 8) - 1;   /* GROWTH_RATE(d) == ma_used * 3 */
+    int64_t need = minsize | 7;
+    int64_t size = 8;
+    while (size < need) size <<= 1;
+    return size;
+}
+static inline void ail_map_phys_resize(ail_mapobj *m) {
+    int64_t used = m->n, nc = ail_map_phys_newsize(used), j = 0;
+    ail_obj *np = (ail_obj *)ail_xmalloc((size_t)nc * sizeof(ail_obj));
+    for (int64_t i = 0; i < m->nphys; i++) {
+        if (m->phys[i].tag != AIL_T_UNBOUND) np[j++] = m->phys[i];
+    }
+    free(m->phys);
+    m->phys = np; m->phys_cap = nc; m->nphys = j;
+    m->phys_usable = ((nc << 1) / 3) - j;
+}
+static inline void ail_map_phys_push(ail_ctx *cx, ail_mapobj *m, ail_obj key) {
+    (void)cx;
+    if (m->phys_usable <= 0) ail_map_phys_resize(m);
+    if (m->nphys >= m->phys_cap) ail_map_phys_resize(m);   /* safety: keep the append in bounds */
+    m->phys[m->nphys++] = key;
+    m->phys_usable--;
+}
+static inline void ail_map_phys_delete(ail_mapobj *m, ail_obj key) {
+    for (int64_t i = m->nphys - 1; i >= 0; i--) {
+        if (m->phys[i].tag != AIL_T_UNBOUND && ail_member_eq(m->phys[i], key)) {
+            m->phys[i] = ail_box_unbound();
+            return;
+        }
+    }
 }
 static inline void ail_map_grow_entries(ail_ctx *cx, ail_mapobj *m) {
     int64_t oldcap = m->cap;
@@ -15058,6 +15101,7 @@ static inline ail_st ail_map_set(ail_ctx *cx, ail_mapobj *m, ail_obj key, ail_ob
         slot = (slot + 1) & mask;
     }
     if (m->n == m->cap) ail_map_grow_entries(cx, m);
+    ail_map_phys_push(cx, m, key);
     int64_t idx = m->n++;
     m->entries[idx].key = key; m->entries[idx].val = val; m->entries[idx].hash = h;
     if (m->n * 3 >= m->index_cap * 2) { ail_map_rehash(m, m->index_cap * 2); return AIL_OK; }
@@ -15071,6 +15115,7 @@ static inline ail_st ail_map_del(ail_ctx *cx, int *found, ail_mapobj *m, ail_obj
         int64_t e = m->index[slot];
         if (e == -1) { *found = 0; return AIL_OK; }
         if (m->entries[e].hash == h && ail_member_eq(m->entries[e].key, key)) {
+            ail_map_phys_delete(m, m->entries[e].key);
             for (int64_t k = e; k + 1 < m->n; k++) m->entries[k] = m->entries[k + 1];
             m->n--;
             ail_map_rehash(m, m->index_cap);
@@ -15476,6 +15521,7 @@ static inline ail_st ail_meth_set_symmetric_difference(ail_ctx *cx, ail_obj *out
 }
 static inline void ail_map_clear(ail_mapobj *m) {
     m->n = 0;
+    free(m->phys); m->phys = NULL; m->nphys = 0; m->phys_cap = 0; m->phys_usable = 0;
     for (int64_t i = 0; i < m->index_cap; i++) m->index[i] = -1;
 }
 /* In-place update ops of two sets (`b` is a real set/frozenset; the iterable forms are in the method section).
@@ -15765,12 +15811,13 @@ static inline ail_st ail_iter_reversed(ail_ctx *cx, ail_obj *out, ail_obj seq) {
     if (seq.tag == AIL_T_LIST || seq.tag == AIL_T_TUPLE) n = ((ail_vecobj *)seq.o)->n;
     else if (seq.tag == AIL_T_STR) n = seq.sv.len;
     else if (seq.tag == AIL_T_DICT) {
-        /* reversed(d) walks the dense entry array from the end; idx2 is the size the iterator
-           started with (as for keys()), and -1 marks it exhausted so a later resize is not
-           reported after the last item, as CPython does. */
-        n = ((ail_mapobj *)seq.o)->n;
-        *out = ail__iter_wrap(cx, AIL_IT_DICT_REV_KEYS, seq, ail_box_none(), n - 1);
-        ((ail_iterobj *)out->o)->idx2 = n;
+        /* reversed(d) walks the dict's physical slot array from the end (idx is the position
+           above the next slot, as CPython's di_pos), skipping holes. idx2 is the size the
+           iterator started with (as for keys()), and -1 marks it exhausted so a later resize
+           is not reported after the last item, as CPython does. */
+        ail_mapobj *m = (ail_mapobj *)seq.o;
+        *out = ail__iter_wrap(cx, AIL_IT_DICT_REV_KEYS, seq, ail_box_none(), m->nphys);
+        ((ail_iterobj *)out->o)->idx2 = m->n;
         return AIL_OK;
     }
     else { char buf[64]; snprintf(buf, sizeof buf, "'%s' object is not reversible", ail_type_name(seq.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
@@ -15840,10 +15887,16 @@ static inline ail_st ail_next(ail_ctx *cx, ail_obj *out, ail_obj iterobj) {
         }
         case AIL_IT_DICT_REV_KEYS: {
             ail_mapobj *m = (ail_mapobj *)it->target.o;
-            if (it->idx2 < 0) return AIL_STOP;   /* already exhausted: later resizes are not reported */
-            if (m->n != it->idx2) return ail_raise_c(cx, AIL_B_RUNTIMEERROR, "dictionary changed size during iteration");
-            if (it->idx < 0) { it->idx2 = -1; return AIL_STOP; }
-            *out = m->entries[it->idx--].key; return AIL_OK;
+            if (it->idx2 == -1) return AIL_STOP;   /* already exhausted: later resizes are not reported */
+            if (it->idx2 == -2) return ail_raise_c(cx, AIL_B_RUNTIMEERROR, "dictionary changed size during iteration");
+            if (m->n != it->idx2) { it->idx2 = -2; return ail_raise_c(cx, AIL_B_RUNTIMEERROR, "dictionary changed size during iteration"); }
+            if (it->idx > m->nphys) it->idx = m->nphys;   /* clear() starts a shorter physical array */
+            while (it->idx > 0) {
+                ail_obj k = m->phys[--it->idx];
+                if (k.tag != AIL_T_UNBOUND) { *out = k; return AIL_OK; }
+            }
+            it->idx2 = -1;
+            return AIL_STOP;
         }
         case AIL_IT_REVERSED: {
             if (it->idx < 0) return AIL_STOP;
@@ -18522,7 +18575,11 @@ static inline ail_st ail_meth_dict_popitem(ail_ctx *cx, ail_obj *out, ail_obj d)
         return ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], msg);
     }
     ail_obj key = m->entries[m->n - 1].key, val = m->entries[m->n - 1].val;
+    /* CPython's popitem truncates dk_nentries at the popped slot instead of leaving a hole. */
+    int64_t pi = m->nphys - 1;
+    while (pi >= 0 && m->phys[pi].tag == AIL_T_UNBOUND) pi--;
     int found; ail_st st = ail_map_del(cx, &found, m, key); if (st != AIL_OK) return st;
+    if (pi >= 0) m->nphys = pi;
     ail_obj pr[2]; pr[0] = key; pr[1] = val;
     *out = ail_tuple_new(cx, pr, 2);
     return AIL_OK;
@@ -18557,9 +18614,7 @@ static inline ail_st ail_dict_update_pairs(ail_ctx *cx, ail_obj d, ail_obj other
     return st;
 }
 static inline void ail_meth_dict_clear(ail_obj d) {
-    ail_mapobj *m = (ail_mapobj *)d.o;
-    m->n = 0;
-    for (int64_t i = 0; i < m->index_cap; i++) m->index[i] = -1;
+    ail_map_clear((ail_mapobj *)d.o);
 }
 static inline ail_st ail_meth_dict_copy(ail_ctx *cx, ail_obj *out, ail_obj d) {
     ail_mapobj *m = (ail_mapobj *)d.o;

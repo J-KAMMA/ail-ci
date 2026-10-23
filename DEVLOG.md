@@ -1,5 +1,21 @@
 # DEVLOG
 
+## 2026-10-23 - reversed(dict) same-size mutation fix (job-pre5-10240009, review)
+
+The review's p7 defect reproduced on both builds: deletion compacted the dense `entries` array,
+so an in-flight reverse cursor pointed at a different key after a same-size delete+insert. The
+reverse iterator no longer indexes `entries`. Each dict now also keeps CPython's physical entry
+layout (`phys`): a new key appends a slot, deletion leaves a hole, `popitem` truncates at the
+popped slot, `clear` resets the layout, and a resize compacts holes with CPython's
+`GROWTH_RATE = used*3` / `USABLE_FRACTION = 2/3` timing. `AIL_IT_DICT_REV_KEYS` walks that array
+from the saved `di_pos`, skips holes, clamps after `clear`, and makes the size-mismatch
+`RuntimeError` sticky like CPython's `di_used = -1`.
+
+`test_ail_pre5.py` gained a `samesize` case: delete/re-add at the head and middle, delete+add a
+different key, a resize during iteration that exposes post-creation keys, `popitem`+re-insert, and
+the sticky size error. Probes p1-p8 in `/tmp/probes` (basic, edges, containers, mutation, clear,
+no-feature, randomized churn, popitem) match CPython on both builds.
+
 ## 2026-10-23 - reversed(dict) (job-pre5-10240009)
 
 The fuzz73 review's pre-existing difference reproduced on both builds: `reversed(d)` raised
