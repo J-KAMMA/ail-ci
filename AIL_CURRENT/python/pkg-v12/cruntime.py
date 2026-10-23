@@ -16402,6 +16402,16 @@ static inline int ail_class_getattr(ail_obj cls, int64_t name_id, ail_obj *out) 
     }
     return 0;
 }
+static inline int ail_class_getattr_name(ail_ctx *cx, ail_obj cls, const char *name, ail_obj *out) {
+    for (ail_obj k = cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+        ail_classobj *c = (ail_classobj *)k.o;
+        for (int64_t i = 0; i < c->n; i++) {
+            int64_t nid = c->attrs[i].name_id;
+            if (nid >= 0 && nid < cx->intern_n && strcmp(cx->intern_tab[nid], name) == 0) { *out = c->attrs[i].val; return 1; }
+        }
+    }
+    return 0;
+}
 static inline void ail_inst_setattr(ail_ctx *cx, ail_obj inst, int64_t name_id, ail_obj val) {
     ail_instobj *o = (ail_instobj *)inst.o;
     for (int64_t i = 0; i < o->n; i++) if (o->attrs[i].name_id == name_id) { o->attrs[i].val = val; return; }
@@ -17767,6 +17777,8 @@ static inline ail_st ail_meth_inst_getattr_by_name(ail_ctx *cx, ail_obj *out, ai
         int64_t nid = o->attrs[i].name_id;
         if (nid >= 0 && nid < cx->intern_n && strcmp(cx->intern_tab[nid], name) == 0) { *out = o->attrs[i].val; return AIL_OK; }
     }
+    if (inst.tag == AIL_T_INST && o->cls.tag == AIL_T_CLASS
+            && ail_class_getattr_name(cx, o->cls, name, out)) return AIL_OK;
     char buf[128]; snprintf(buf, sizeof buf, "'instance' object has no attribute '%s'", name);
     return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, buf);
 }

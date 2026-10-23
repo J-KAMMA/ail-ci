@@ -1305,6 +1305,8 @@ static inline int ail2a_find(ail_ctx *cx, ail_obj obj, const char *name, ail_obj
         int64_t nid = o->attrs[i].name_id;
         if (nid >= 0 && nid < cx->intern_n && strcmp(cx->intern_tab[nid], name) == 0) { *out = o->attrs[i].val; return 1; }
     }
+    if (obj.tag == AIL_T_INST && o->cls.tag == AIL_T_CLASS
+            && ail_class_getattr_name(cx, o->cls, name, out)) return 1;
     return 0;
 }
 static inline ail_st ail2a_need_inst(ail_ctx *cx, ail_obj obj, const char *fn) {

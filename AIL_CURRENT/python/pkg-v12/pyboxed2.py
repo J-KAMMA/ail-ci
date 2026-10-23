@@ -3476,7 +3476,8 @@ class Compiler(boxclosure.ClosureMixin):
             return k1 if k1 == k2 else None
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
             recv_kind = self.get_kind(node.value.id, ctx)
-            if recv_kind and recv_kind.startswith('instance:'):
+            if (recv_kind and recv_kind.startswith('instance:')
+                    and not getattr(self, 'class_attrs_on_class', False)):
                 cname = recv_kind.split(':', 1)[1]
                 for kls, kv in self.classes[cname].get('class_attrs', []):
                     if kls == node.attr:

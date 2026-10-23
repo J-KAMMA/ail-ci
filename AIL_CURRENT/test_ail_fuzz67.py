@@ -231,8 +231,47 @@ a.xs.append('mixed')
 print(a.xs, b.xs, Acc.count())
 '''
 
+ATTR_FALLBACK = r'''class Base:
+    x = 5
+    xs = [1]
+
+
+class C(Base):
+    def __init__(self):
+        self.y = 2
+
+
+c = C()
+print(getattr(c, 'x', 'missing'), getattr(c, 'xs', 'missing'))
+print(getattr(c, 'nope', 'missing'))
+print(hasattr(c, 'x'), hasattr(c, 'y'), hasattr(c, 'z'))
+print(getattr(c, 'x'))
+print('{0.xs}'.format(c), '{0.y}'.format(c))
+c.xs.append(9)
+print(Base.xs, C.xs, c.xs)
+C.x = {'a': 4, 'b': 5}
+print(len(c.x), sorted(c.x), getattr(c, 'x'))
+print('{0.x}'.format(c))
+try:
+    getattr(c, 'nope')
+except AttributeError as e:
+    print('AttributeError', e)
+
+
+class D:
+    v = [10, 20]
+
+
+d = D()
+D.v = 'ab'
+print(len(d.v), d.v[0], d.v[1])
+for ch in d.v:
+    print(ch)
+'''
+
 CASES = [
     ('shared_list', SHARED_LIST),
+    ('attr_fallback', ATTR_FALLBACK),
     ('class_read', CLASS_READ),
     ('shadow', SHADOW),
     ('rebind', REBIND),
