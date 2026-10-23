@@ -15570,6 +15570,10 @@ static inline ail_st ail_op_contains(ail_ctx *cx, int *out, ail_obj c, ail_obj i
             }
             *out = ail_str_find(ail_view_to_str(c), ail_view_to_str(item)) >= 0; return AIL_OK;
         case AIL_T_LIST: case AIL_T_TUPLE: {
+            if (c.tag == AIL_T_LIST && __builtin_expect(((ail_gcobj *)c.o)->aux == 1, 0)) {
+                /* a dict_keys view is set-like: CPython hashes the item first, so an unhashable one raises */
+                int64_t h; ail_st st = ail_obj_hash(cx, &h, item); if (st != AIL_OK) return st;
+            }
             ail_vecobj *v = (ail_vecobj *)c.o;
             for (int64_t i = 0; i < v->n; i++) if (ail_member_eq(v->p[i], item)) { *out = 1; return AIL_OK; }
             *out = 0; return AIL_OK;
