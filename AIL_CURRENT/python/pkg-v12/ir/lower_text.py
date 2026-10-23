@@ -231,8 +231,17 @@ class TextLowering(object):
         return self.rt('str_from_float', [self.coerce(self.expr(node), I.F64)])
 
     def fmt_value(self, val_node, kind, spec, orig_text, str_default_align):
-        """The runtime formatter call for a parsed spec (legacy `_fmt_build`)."""
+        """The runtime formatter call for a parsed spec (legacy `_fmt_build`).
+
+        The three small formatters only cover [[fill]align][0][width][.precision] and a
+        negative sign. Everything the legacy emitter sends to `ail_fmt_gen` (a sign, '#',
+        grouping, '=' alignment, a type-less float, or a type other than f/d) has no IR
+        instruction: refuse the whole function so the legacy emitter builds it, rather than
+        silently dropping the flag from the format spec.
+        """
         P = self.P
+        if P._fmt_general_needed(spec, kind):
+            raise self.NotS0('a format spec needing the general formatter: %r' % (orig_text,))
         P._resolve_fmt_type(spec, kind, orig_text, 'an f-string field with spec')
         width = spec['width'] or 0
         zero = 1 if spec['zero'] else 0
