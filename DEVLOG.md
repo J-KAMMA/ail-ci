@@ -11,16 +11,16 @@ an explicit `__attribute__((noreturn))` declaration in `cruntime.py`. No app sou
 Profiling: rdtsc instrumentation of the generated C (40M records, 496 MiB) put the per-record loop at
 709,541,927 of 1,193,992,702 cycles (59.5% of the function). The accessor checks are inside that loop;
 hand-edited generated C put the `ck_sub` in `remaining()` alone at ~8% overall and all unchecked reads
-at ~16%, so the 7.4% below is in line with that ceiling.
+at ~16%, so the 9.1% below is in line with that ceiling.
 
 `python3 bench/compare.py --app binary_cursor_records`:
 
 | | AIL/C | AIL new/base/C/Rust ms | RSS MiB new/base/C/Rust | binary KiB new/base/C/Rust |
 | --- | ---: | ---: | ---: | ---: |
 | before | 5.091 [5.041, 5.253] | 50.8/50.8/10.0/9.6 | 1.7/1.7/2.5/2.7 | 39/39/15/1912 |
-| after | 4.715 [4.640, 4.760] | 45.9/50.9/9.8/9.5 | 1.7/1.7/2.5/2.6 | 35/39/15/1912 |
+| after | 4.630 [4.607, 4.674] | 46.0/51.0/9.9/9.6 | 1.7/1.7/2.5/2.7 | 35/39/15/1912 |
 
-Ratio improved 7.4%; `compare.py` checked every timed run byte-for-byte against its Python oracle.
+Ratio improved 9.1%; `compare.py` checked every timed run byte-for-byte against its Python oracle.
 Tests: `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`,
 `test_ail_exception_values_core`, `test_ail_exception_values_app`, `test_ail_excfix`,
 `test_c_api_bridge`, `test_ail_parallel_for`, `test_ail_short_style_traps` all pass. Probes
