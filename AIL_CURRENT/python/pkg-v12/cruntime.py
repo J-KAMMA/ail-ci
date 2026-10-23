@@ -14443,29 +14443,46 @@ static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {
     }
 }
 /* `x in c` / dict & set lookup: identity-then-equality, exactly like CPython, so a NaN
-   found by identity still matches even though it never matches by value (== 0 always). */
-static inline int ail_member_eq(ail_obj a, ail_obj b) { return ail_identical(a, b) || ail_obj_eq_raw(a, b); }
+   found by identity still matches even though it never matches by value (== 0 always).
+   The scalar/scalar-str cases are the overwhelmingly common dict/set keys and are folded
+   here so the lookup path does not pay an out-of-line ail_obj_eq_raw call for them. */
+static inline int ail_member_eq(ail_obj a, ail_obj b) {
+    if (ail_identical(a, b)) return 1;
+    if (a.tag == b.tag) {
+        if (a.tag == AIL_T_STR) return ail_str_eq(ail_view_to_str(a), ail_view_to_str(b));
+        if (a.tag == AIL_T_INT || a.tag == AIL_T_BOOL || a.tag == AIL_T_NONE) return a.i == b.i;
+    }
+    return ail_obj_eq_raw(a, b);
+}
 
-static inline ail_st ail_obj_hash(ail_ctx *cx, int64_t *out, ail_obj x) {
+static inline ail_st ail_obj_hash_slow(ail_ctx *cx, int64_t *out, ail_obj x);
+/* Hash values are byte-for-byte the old ones (public `hash()` output and table placement
+   are unchanged); only the common int/str/none cases are forced inline at call sites. */
+static inline __attribute__((always_inline)) ail_st ail_obj_hash(ail_ctx *cx, int64_t *out, ail_obj x) {
     switch (x.tag) {
-        case AIL_T_FROZENSET: *out = ail_frozenset_hash(AIL_SETOBJ(x)); return AIL_OK;
         case AIL_T_NONE: *out = 0xA1EC1; return AIL_OK;
         case AIL_T_BOOL: case AIL_T_INT: {
             uint64_t h = (uint64_t)x.i; h ^= h >> 33; h *= 0xff51afd7ed558ccdULL; h ^= h >> 33;
-            *out = (int64_t)h; return AIL_OK;
-        }
-        case AIL_T_FLOAT: {
-            double v = ail_float_val(x); uint64_t h;
-            if (v != v) h = (uint64_t)(uintptr_t)x.o; /* NaN: hash by box identity, as CPython does */
-            else if (v == (double)(int64_t)v && v >= -9.2e18 && v <= 9.2e18) h = (uint64_t)(int64_t)v;
-            else memcpy(&h, &v, sizeof h);
-            h ^= h >> 33; h *= 0xff51afd7ed558ccdULL; h ^= h >> 33;
             *out = (int64_t)h; return AIL_OK;
         }
         case AIL_T_STR: {
             ail_str s = ail_view_to_str(x);
             uint64_t h = 1469598103934665603ULL;
             for (int64_t i = 0; i < s.n; i++) { h ^= (uint32_t)ail_chr(s, i); h *= 1099511628211ULL; }
+            *out = (int64_t)h; return AIL_OK;
+        }
+        default: return ail_obj_hash_slow(cx, out, x);
+    }
+}
+static inline ail_st ail_obj_hash_slow(ail_ctx *cx, int64_t *out, ail_obj x) {
+    switch (x.tag) {
+        case AIL_T_FROZENSET: *out = ail_frozenset_hash(AIL_SETOBJ(x)); return AIL_OK;
+        case AIL_T_FLOAT: {
+            double v = ail_float_val(x); uint64_t h;
+            if (v != v) h = (uint64_t)(uintptr_t)x.o; /* NaN: hash by box identity, as CPython does */
+            else if (v == (double)(int64_t)v && v >= -9.2e18 && v <= 9.2e18) h = (uint64_t)(int64_t)v;
+            else memcpy(&h, &v, sizeof h);
+            h ^= h >> 33; h *= 0xff51afd7ed558ccdULL; h ^= h >> 33;
             *out = (int64_t)h; return AIL_OK;
         }
         case AIL_T_TUPLE: {
