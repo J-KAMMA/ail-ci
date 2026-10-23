@@ -259,7 +259,7 @@ class Fraction:
 
     def __hash__(self):
         if self.denominator == 1:
-            return self.numerator
+            return hash(self.numerator)
         return self.numerator * 1000003 + self.denominator
 
     def __bool__(self) -> bool:
