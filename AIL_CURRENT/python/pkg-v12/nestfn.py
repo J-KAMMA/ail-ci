@@ -516,6 +516,11 @@ class _Outer:
         # a shared name the enclosing function binds only after that statement starts as the empty
         # value of its type; the binding itself is a store into the environment
         self.late = [r for r in self.ref if r not in before]
+        # a shared name deleted before the environment is made would be read unbound when the environment is built
+        for stmt in self.rest[:P]:
+            for n in ast.walk(stmt):
+                if isinstance(n, ast.Delete) and any(isinstance(t, ast.Name) and t.id in ref for t in n.targets):
+                    raise _Skip()
         # forms the renaming does not cover
         for stmt in self.rest[P:]:
             for n in ast.walk(stmt):
