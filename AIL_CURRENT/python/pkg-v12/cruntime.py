@@ -14460,7 +14460,9 @@ static inline int ail_counter_eq_raw(ail_obj a, ail_obj b) {
             if (e == -1) break;
             if (y->entries[e].hash == h && (ail_identical(y->entries[e].key, x->entries[i].key) || ail_obj_eq_raw(y->entries[e].key, x->entries[i].key))) {
                 found = 1;
-                if (!(ail_identical(y->entries[e].val, x->entries[i].val) || ail_obj_eq_raw(y->entries[e].val, x->entries[i].val))) return 0;
+                /* CPython's Counter.__eq__ compares counts with plain `==` (no identity shortcut),
+                   so a NaN count the two sides share as one object is still unequal */
+                if (!ail_obj_eq_raw(y->entries[e].val, x->entries[i].val)) return 0;
                 break;
             }
             slot = (slot + 1) & ymask;

@@ -100,6 +100,31 @@ main()
 '''
 
 
+COUNTER_EQ_NAN = r'''from collections import Counter
+
+def main() -> int:
+    nan = float('nan')
+    a = Counter()
+    a["k"] = nan
+    b = Counter()
+    b["k"] = nan
+    b["z"] = 0
+    print(a == b, b == a, a != b, b != a)
+    c = Counter()
+    c["k"] = float('nan')
+    print(a == c, c == a, a != c, c != a)
+    d = Counter()
+    d["k"] = 1
+    d["z"] = 0
+    e = Counter()
+    e["k"] = 1
+    print(d == e, e == d, d != e)
+    return 0
+
+main()
+'''
+
+
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -142,6 +167,9 @@ class Fuzz64Tests(unittest.TestCase):
 
     def test_counter_eq_zero_counts_typed(self):
         self.check('counter_eq_typed', COUNTER_EQ_TYPED)
+
+    def test_counter_eq_nan_shared_count(self):
+        self.check('counter_eq_nan', COUNTER_EQ_NAN)
 
 
 if __name__ == '__main__':
