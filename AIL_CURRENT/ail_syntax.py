@@ -179,6 +179,17 @@ def _stdlib5():
     return _stdlib5.module
 
 
+def _stdlib6():
+    """python/pkg-v12/stdlib6.py (library batch 6: ipaddress.IPv4Address, urllib.parse)."""
+    if not hasattr(_stdlib6, "module"):
+        here = str(Path(__file__).parent / "python" / "pkg-v12")
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import stdlib6
+        _stdlib6.module = stdlib6
+    return _stdlib6.module
+
+
 def _stdlib4():
     """python/pkg-v12/stdlib4.py (library batch 4: csv, datetime, ... lowered before the other source passes)."""
     if not hasattr(_stdlib4, "module"):
@@ -2996,6 +3007,8 @@ def python_surface(source, notes=None, library=False):
         source = _stdlib5().rewrite_text(source, notes)
     if any(name in source for name in ("csv", "datetime", "decimal", "fractions", "time", "zoneinfo")):
         source = _stdlib4().rewrite_text(source, notes)
+    if "ipaddress" in source or "urllib.parse" in source:
+        source = _stdlib6().rewrite_text(source, notes)
     if "collections" in source:
         source = _collib().rewrite(source, notes)
     if "None" in source or "Optional" in source:
