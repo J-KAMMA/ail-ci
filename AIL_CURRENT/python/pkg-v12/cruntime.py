@@ -14411,6 +14411,18 @@ static inline int ail_is(ail_obj a, ail_obj b) {
         ail_die("`is` between two equal ints outside -5..256: CPython's answer depends on where each int was made (DIFFERENCES C114); compare with ==");
     return ail_identical(a, b);
 }
+static inline uint64_t ail__range_count(const ail_rangeobj *r); /* defined with the iteration helpers below */
+/* CPython compares two ranges by the sequence they denote: equal lengths, then equal start; every empty
+   range equals every other empty range, and a length-1 range is fixed by its start alone (whatever its
+   step); only longer ranges need equal steps too. */
+static inline int ail__range_eq(const ail_rangeobj *a, const ail_rangeobj *b) {
+    uint64_t an = ail__range_count(a), bn = ail__range_count(b);
+    if (an != bn) return 0;
+    if (an == 0) return 1;
+    if (a->start != b->start) return 0;
+    if (an == 1) return 1;
+    return a->step == b->step;
+}
 static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         if (a.tag == AIL_T_FLOAT && b.tag == AIL_T_FLOAT) return ail_float_val(a) == ail_float_val(b);
@@ -14450,6 +14462,7 @@ static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {
             for (int64_t i = 0; i < va->n; i++) if (!(ail_identical(va->p[i], vb->p[i]) || ail_obj_eq_raw(va->p[i], vb->p[i]))) return 0;
             return 1;
         }
+        case AIL_T_RANGE: return ail__range_eq((ail_rangeobj *)a.o, (ail_rangeobj *)b.o);
         default: return 0; /* instance/exception ==: out of scope, matches v1 */
     }
 }
