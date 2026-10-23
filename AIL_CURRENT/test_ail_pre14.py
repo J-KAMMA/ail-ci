@@ -68,6 +68,56 @@ print(A.make().val(), B.make().val(), C.make().val())
 '''
 
 
+CLS_FORMS = r'''class A:
+    K = 1
+
+    @classmethod
+    def who(cls):
+        return "A" + str(cls.K)
+
+    @classmethod
+    def make(cls):
+        return cls()
+
+    @staticmethod
+    def tag():
+        return "A"
+
+    def val(self):
+        return self.K + 10
+
+
+class B(A):
+    K = 2
+
+    @classmethod
+    def who(cls):
+        return "B" + str(cls.K)
+
+    @staticmethod
+    def tag():
+        return "B"
+
+
+class C(B):
+    pass
+
+
+class Holder:
+    def __init__(self, k):
+        self.k = k
+
+
+alias = C
+h = Holder(C)
+print(A.K, A.who(), A().who(), A.make().val(), A.tag())
+print(B.K, B.who(), B().who(), B.make().val(), B.tag())
+print(C.K, C.who(), C().who(), C.make().val(), C.tag())
+print(alias.who(), alias().who(), alias.make().val(), h.k.who())
+print(alias.val(alias()), h.k.val(C()))
+'''
+
+
 class Pre14Tests(unittest.TestCase):
     def check(self, slug, text):
         with tempfile.TemporaryDirectory(prefix='ail-pre14-') as directory:
@@ -98,6 +148,9 @@ class Pre14Tests(unittest.TestCase):
 
     def test_class_object_values(self):
         self.check('value_forms', VALUE_FORMS)
+
+    def test_classmethod_class_object(self):
+        self.check('cls_forms', CLS_FORMS)
 
 
 if __name__ == '__main__':

@@ -8351,10 +8351,14 @@ class Compiler(boxclosure.ClosureMixin):
                     argcs = [self._self_arg(info, recv_c)] + argcs
                 ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t, ''.join(', ' + a for a in argcs)))
                 ctx.check()
-            except Unsupported:
+            except Unsupported as exc:
                 # `C.m(self, ...)` on an INSTANCE receiver passes `self` AND the method's own
                 # arguments -- too many for the instance call. The class-object branch below
-                # still handles the same call; an instance gets CPython's TypeError.
+                # still handles the same call; an instance gets CPython's TypeError. Only the
+                # binder's own argument-shape errors are softened; an unsupported argument
+                # expression keeps its compile-time refusal.
+                if not str(exc).startswith(f.attr + '()'):
+                    raise
                 del ctx.lines[mark:]
                 given = len(args) + (0 if info.get('is_static') else 1)
                 ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "%s() takes %d positional argument%s '
@@ -8396,10 +8400,12 @@ class Compiler(boxclosure.ClosureMixin):
                     ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "%s() missing 1 required '
                              'positional argument: \'self\'"); goto %s;' % (f.attr, ctx.cur_err_target()))
                     ctx.uses_st = True
-            except Unsupported:
+            except Unsupported as exc:
                 # The same call shape can be valid on an INSTANCE receiver (the branch above)
                 # and invalid on the class object; do not refuse the whole program for a shape
                 # the class branch alone reaches at run time.
+                if not str(exc).startswith(f.attr + '()'):
+                    raise
                 del ctx.lines[mark:]
                 ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "%s() received an invalid '
                          'argument list"); goto %s;' % (f.attr, ctx.cur_err_target()))
