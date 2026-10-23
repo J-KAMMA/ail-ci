@@ -17150,7 +17150,7 @@ static inline ail_st ail_bi_round_obj(ail_ctx *cx, ail_obj *out, ail_obj x, int 
     if (!ail__is_intlike(x.tag) && x.tag != AIL_T_FLOAT) return ail_bi_round(cx, out, x, 1, 0);
     if (!ail__is_intlike(n.tag)) {
         char buf[96];
-        snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail_type_name(n.tag));
+        snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail__tname_c(n));
         return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
     }
     return ail_bi_round(cx, out, x, 1, n.i);

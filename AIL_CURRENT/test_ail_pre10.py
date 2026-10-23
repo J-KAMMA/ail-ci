@@ -150,6 +150,130 @@ main()
 '''
 
 
+ROUND_LITERAL_DEFAULTS = r'''class F:
+    def __round__(self, n=1.5):
+        return repr(n)
+
+
+class S:
+    def __round__(self, n="hi"):
+        return repr(n)
+
+
+class E:
+    def __round__(self, n=""):
+        return repr(n)
+
+
+class T:
+    def __round__(self, n=True):
+        return repr(n)
+
+
+class Z:
+    def __round__(self, n=0):
+        return repr(n)
+
+
+class N:
+    def __round__(self, n=-3):
+        return repr(n)
+
+
+class H:
+    def __init__(self, o):
+        self.o = o
+
+
+def r0(x):
+    try:
+        return repr(round(x))
+    except Exception as e:
+        return type(e).__name__ + ": " + str(e)
+
+
+def rn(x, n):
+    try:
+        return repr(round(x, n))
+    except Exception as e:
+        return type(e).__name__ + ": " + str(e)
+
+
+def through(x):
+    return r0(x)
+
+
+def main():
+    f, s, e, t, z, n = F(), S(), E(), T(), Z(), N()
+    print(r0(f), rn(f, None), rn(f, 2))
+    print(r0(s), rn(s, None), rn(s, 3))
+    print(r0(e), rn(e, None))
+    print(r0(t), rn(t, None), rn(t, False))
+    print(r0(z), rn(z, None), rn(z, 4))
+    print(r0(n), rn(n, None), rn(n, 5))
+    xs = [f, s]
+    d = {"f": f, "s": s}
+    h = H(s)
+    print(through(xs[0]), rn(xs[1], None), r0(d["f"]), rn(d["s"], 4))
+    print(r0(h.o), rn(h.o, None))
+
+
+main()
+'''
+
+ROUND_UNUSED_LITERAL_DEFAULT = r'''class F:
+    def __round__(self, n=1.5):
+        return n
+
+
+class S:
+    def __round__(self, n="hi"):
+        return n
+
+
+print("ok")
+'''
+
+ROUND_NOINDEX_NAME = r'''class NoIndex:
+    pass
+
+
+class Sub(NoIndex):
+    pass
+
+
+class H:
+    def __init__(self, n):
+        self.n = n
+
+
+def r(x, n):
+    try:
+        return repr(round(x, n))
+    except Exception as e:
+        return type(e).__name__ + ": " + str(e)
+
+
+def through(x, n):
+    return r(x, n)
+
+
+def main():
+    n = NoIndex()
+    s = Sub()
+    xs = [n, s]
+    d = {"n": n, "s": s}
+    h = H(n)
+    print(r(2.5, n), r(2.5, s), r(2.5, NoIndex()))
+    print(through(2.5, n), r(2.5, xs[0]), r(2.5, xs[1]))
+    print(r(2.5, d["n"]), r(2.5, d["s"]), r(2.5, h.n))
+    print(r(1, n), r(True, s))
+
+
+main()
+'''
+
+
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -195,6 +319,15 @@ class Pre10Tests(unittest.TestCase):
 
     def test_user_round_without_ndigits(self):
         self.check('round_noarg', ROUND_NOARG)
+
+    def test_user_round_literal_defaults(self):
+        self.check('round_literal_defaults', ROUND_LITERAL_DEFAULTS)
+
+    def test_unused_round_literal_defaults_build(self):
+        self.check('round_unused_literal_defaults', ROUND_UNUSED_LITERAL_DEFAULT)
+
+    def test_noindex_uses_the_instance_class_name(self):
+        self.check('round_noindex_name', ROUND_NOINDEX_NAME)
 
 
 if __name__ == '__main__':

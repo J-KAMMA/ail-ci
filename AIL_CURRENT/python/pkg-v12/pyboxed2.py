@@ -7916,12 +7916,61 @@ class Compiler(boxclosure.ClosureMixin):
         return t
 
     @staticmethod
+    def _round_default_value(d):
+        """(True, value) for a side-effect-free constant default expression, else (False, None).
+        CPython evaluates the default once when the class is defined; folding +,-,*,**,//,%
+        and unary +/-/~ over constants keeps `n=-1` and `n=1+2` equivalent to that value."""
+        if isinstance(d, ast.Constant):
+            return True, d.value
+        if isinstance(d, ast.UnaryOp) and isinstance(d.op, (ast.USub, ast.UAdd, ast.Invert)):
+            ok, v = Compiler._round_default_value(d.operand)
+            if not ok:
+                return False, None
+            try:
+                if isinstance(d.op, ast.USub):
+                    return True, -v
+                if isinstance(d.op, ast.UAdd):
+                    return True, +v
+                return True, ~v
+            except Exception:
+                return False, None
+        if isinstance(d, ast.BinOp) and isinstance(d.op, (ast.Add, ast.Sub, ast.Mult,
+                                                          ast.Pow, ast.FloorDiv, ast.Mod)):
+            okl, a = Compiler._round_default_value(d.left)
+            okr, b = Compiler._round_default_value(d.right)
+            if not okl or not okr:
+                return False, None
+            if not all(type(x) in (bool, int) for x in (a, b)):
+                return False, None
+            try:
+                if isinstance(d.op, ast.Add):
+                    return True, a + b
+                if isinstance(d.op, ast.Sub):
+                    return True, a - b
+                if isinstance(d.op, ast.Mult):
+                    return True, a * b
+                if isinstance(d.op, ast.Pow):
+                    if abs(b) > 128:
+                        return False, None
+                    return True, a ** b
+                if isinstance(d.op, ast.FloorDiv):
+                    if b == 0:
+                        return False, None
+                    return True, a // b
+                if b == 0:
+                    return False, None
+                return True, a % b
+            except Exception:
+                return False, None
+        return False, None
+
+    @staticmethod
     def _round_default_c(d):
-        """A literal default for __round__'s ndigits, as a C expression; None when it is not
-        a simple literal (those keep the old fallback rather than guessing)."""
-        if not isinstance(d, ast.Constant):
+        """A constant default for __round__'s ndigits, as a C expression; None when it is
+        not safely constant (those keep the old fallback rather than guessing)."""
+        ok, v = Compiler._round_default_value(d)
+        if not ok:
             return None
-        v = d.value
         if v is None:
             return 'ail_box_none()'
         if type(v) is bool:
@@ -7935,9 +7984,9 @@ class Compiler(boxclosure.ClosureMixin):
         if type(v) is float:
             if v != v or v in (float('inf'), float('-inf')):
                 return None
-            return 'ail_box_float(%r)' % v
+            return 'ail_box_float(cx, %r)' % v
         if type(v) is str:
-            return 'ail_box_str(ail_cstr(%s))' % c_str_literal(v)
+            return 'ail_str_from_cstr(cx, %s)' % c_str_literal(v)
         return None
 
     def _emit_sys_exit(self, args, kwargs, ctx):
