@@ -397,7 +397,7 @@ static ail_obj ail_builtin_all(ail_obj src) {
 }
 static ail_obj ail_builtin_min(ail_obj src, ail_obj (*keyfn)(ail_obj), int has_default, ail_obj dflt) {
     int64_t n = ail_iter_len(src);
-    if (n == 0) { if (has_default) return dflt; ail_raise_c(AIL_ERR_VALUE, "min() arg is an empty sequence"); }
+    if (n == 0) { if (has_default) return dflt; ail_raise_c(AIL_ERR_VALUE, "min() iterable argument is empty"); }
     ail_obj best = ail_iter_at(src, 0);
     ail_obj bestk = keyfn ? keyfn(best) : best;
     for (int64_t i = 1; i < n; i++) {
@@ -409,7 +409,7 @@ static ail_obj ail_builtin_min(ail_obj src, ail_obj (*keyfn)(ail_obj), int has_d
 }
 static ail_obj ail_builtin_max(ail_obj src, ail_obj (*keyfn)(ail_obj), int has_default, ail_obj dflt) {
     int64_t n = ail_iter_len(src);
-    if (n == 0) { if (has_default) return dflt; ail_raise_c(AIL_ERR_VALUE, "max() arg is an empty sequence"); }
+    if (n == 0) { if (has_default) return dflt; ail_raise_c(AIL_ERR_VALUE, "max() iterable argument is empty"); }
     ail_obj best = ail_iter_at(src, 0);
     ail_obj bestk = keyfn ? keyfn(best) : best;
     for (int64_t i = 1; i < n; i++) {
