@@ -1,5 +1,26 @@
 # DEVLOG
 
+## 2026-10-23 - print sep/end evaluation order and None (job-pre4-10240009)
+
+The first recorded difference still reproduced on this tree: on the general path,
+`print(..., end=g(), sep=f())` evaluated `sep` before `end` because every boxed print
+looked the keywords up by name instead of following their source order. `_b_print`,
+`_call_print_list` and `_call_print_star` now evaluate keyword values in source order
+after the positional arguments. The `file=sys.stderr` transform stages its arguments and
+keywords in the same order before converting/writing.
+
+The same path also mishandled a non-literal None: `sep=none()` / `end=holder.v` became an
+empty separator instead of CPython's defaults on stdout, and the stderr `.join` raised
+`AttributeError`; a non-str value was silently stringified on stdout. None now selects the
+default and any other non-str raises CPython's `sep/end must be None or a string, not <type>`
+TypeError on both streams. New `test_ail_pre4.py` covers source-order keywords, None from
+arguments/attributes/list items/dict values on both streams, and the TypeError text.
+
+Probes (`/tmp/probes/`) compared with CPython on both builds: p12b, p12, p12_values,
+p12_stdout_star, p12_stderr, p12_typed, p13, p13out, p13_values, p13_out_values, p13_star,
+p13_empty, p13_types. Tests: test_ail_pre4, test_ail_safetynet, test_ail_files,
+test_ail_corpus_findings3, test_ail_fallback_note all pass.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

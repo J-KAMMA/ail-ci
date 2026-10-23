@@ -1502,6 +1502,14 @@ static inline ail_st ail2e_write(ail_ctx *cx, ail_obj *out, ail_obj s) {
     *out = ail_box_none();
     return AIL_OK;
 }
+/* print(sep=/end=) on the stderr path: None is the default, anything else must be a str. */
+static inline ail_st ail2e_print_field(ail_ctx *cx, ail_obj *out, ail_obj v, ail_obj dflt, const char *which) {
+    if (v.tag == AIL_T_NONE) { *out = dflt; return AIL_OK; }
+    if (v.tag == AIL_T_STR) { *out = v; return AIL_OK; }
+    char buf[96];
+    snprintf(buf, sizeof buf, "%s must be None or a string, not %s", which, ail_type_name(v.tag));
+    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+}
 '''
 
 def _hash_core():
@@ -2079,6 +2087,8 @@ PRIMS = {
     '_ail_gen_close': ('ail2g_close(cx, &{t}, {a0})', 1, 'gen'),
     '_ail_gen_name': ('ail2g_name(cx, &{t}, {a0})', 1, 'gen'),
     '_ail_stderr_write': ('ail2e_write(cx, &{t}, {a0})', 1, 'misc'),
+    '_ail_print_sep': ('ail2e_print_field(cx, &{t}, {a0}, {a1}, "sep")', 2, 'misc'),
+    '_ail_print_end': ('ail2e_print_field(cx, &{t}, {a0}, {a1}, "end")', 2, 'misc'),
     '_ail_same_class': ('ail2e_same_class(cx, &{t}, {a0}, {a1})', 2, 'misc'),
     '_ail_exc_name': ('ail2e_exc_name(cx, &{t}, {a0})', 1, 'misc'),
 }

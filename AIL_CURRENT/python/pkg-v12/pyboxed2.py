@@ -690,7 +690,33 @@ static inline int ail2_print_scalar(ail_obj x) {
         || x.tag == AIL_T_NONE || x.tag == AIL_T_FLOAT;
 }
 
+/* CPython's print treats an explicit None sep/end as the default exactly like an absent one
+   (`print('a', 'b', sep=None)` writes a space), so the memstream paths below need the same
+   distinction the fast path already gets from requiring a STR. */
+static inline void ail2_print_write_sep(FILE *f, ail_obj sep) {
+    if (sep.tag == AIL_T_NONE) fputc(' ', f);
+    else ail_str_write(ail_view_to_str(sep), f);
+}
+static inline void ail2_print_write_end(FILE *f, ail_obj end) {
+    if (end.tag == AIL_T_NONE) fputc('\n', f);
+    else ail_str_write(ail_view_to_str(end), f);
+}
+/* CPython validates sep before end and names the offending type; None is always the default. */
+static inline ail_st ail2_print_check(ail_ctx *cx, ail_obj sep, ail_obj end) {
+    char buf[96];
+    if (sep.tag != AIL_T_STR && sep.tag != AIL_T_NONE) {
+        snprintf(buf, sizeof buf, "sep must be None or a string, not %s", ail_type_name(sep.tag));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
+    if (end.tag != AIL_T_STR && end.tag != AIL_T_NONE) {
+        snprintf(buf, sizeof buf, "end must be None or a string, not %s", ail_type_name(end.tag));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
+    return AIL_OK;
+}
 static inline ail_st ail2_do_print(ail_ctx *cx, ail_obj *vals, int64_t n, ail_obj sep, ail_obj end) {
+    ail_st checked = ail2_print_check(cx, sep, end);
+    if (checked != AIL_OK) return checked;
     if (sep.tag == AIL_T_STR && end.tag == AIL_T_STR) {
         int scalar = 1;
         for (int64_t i = 0; i < n; i++) if (!ail2_print_scalar(vals[i])) { scalar = 0; break; }
@@ -706,10 +732,10 @@ static inline ail_st ail2_do_print(ail_ctx *cx, ail_obj *vals, int64_t n, ail_ob
     char *buf = NULL; size_t sz = 0;
     FILE *f = ail2_text_stream_open(&buf, &sz);
     for (int64_t i = 0; i < n; i++) {
-        if (i) ail_str_write(ail_view_to_str(sep), f);
+        if (i) ail2_print_write_sep(f, sep);
         ail_obj_write_str(cx, vals[i], f);
     }
-    ail_str_write(ail_view_to_str(end), f);
+    ail2_print_write_end(f, end);
     ail2_text_stream_close(f, &buf, &sz);
     ail_st st = ail_out_write(cx, buf, (size_t)sz);
     free(buf);
@@ -720,6 +746,8 @@ static inline ail_st ail2_do_print(ail_ctx *cx, ail_obj *vals, int64_t n, ail_ob
    strictly between real print() arguments and nowhere else. */
 static inline ail_st ail2_do_print_parts(ail_ctx *cx, ail_obj *vals, const unsigned char *sepb4,
                                          int64_t n, ail_obj sep, ail_obj end) {
+    ail_st checked = ail2_print_check(cx, sep, end);
+    if (checked != AIL_OK) return checked;
     if (sep.tag == AIL_T_STR && end.tag == AIL_T_STR) {
         int scalar = 1;
         for (int64_t i = 0; i < n; i++) if (!ail2_print_scalar(vals[i])) { scalar = 0; break; }
@@ -735,10 +763,10 @@ static inline ail_st ail2_do_print_parts(ail_ctx *cx, ail_obj *vals, const unsig
     char *buf = NULL; size_t sz = 0;
     FILE *f = ail2_text_stream_open(&buf, &sz);
     for (int64_t i = 0; i < n; i++) {
-        if (sepb4[i]) ail_str_write(ail_view_to_str(sep), f);
+        if (sepb4[i]) ail2_print_write_sep(f, sep);
         ail_obj_write_str(cx, vals[i], f);
     }
-    ail_str_write(ail_view_to_str(end), f);
+    ail2_print_write_end(f, end);
     ail2_text_stream_close(f, &buf, &sz);
     ail_st st = ail_out_write(cx, buf, (size_t)sz);
     free(buf);
@@ -5381,8 +5409,16 @@ class Compiler(boxclosure.ClosureMixin):
     def _call_print_list(self, lst, kwargs, ctx):
         if 'file' in kwargs or 'flush' in kwargs:
             raise Unsupported('print() with file= or flush=')
-        sep = self.expr(kwargs['sep'], ctx) if 'sep' in kwargs else self._str_lit_slot(' ', ctx)
-        end = self.expr(kwargs['end'], ctx) if 'end' in kwargs else self._str_lit_slot('\n', ctx)
+        sep = end = None
+        for key, value in kwargs.items():
+            if key == 'sep':
+                sep = self.expr(value, ctx)
+            elif key == 'end':
+                end = self.expr(value, ctx)
+        if sep is None:
+            sep = self._str_lit_slot(' ', ctx)
+        if end is None:
+            end = self._str_lit_slot('\n', ctx)
         ctx.emit('st = ail2_do_print(cx, ((ail_vecobj *)(%s).o)->p, ((ail_vecobj *)(%s).o)->n, '
                  '%s, %s);' % (lst, lst, sep, end))
         ctx.check()
@@ -5501,8 +5537,16 @@ class Compiler(boxclosure.ClosureMixin):
         if 'file' in kwargs or 'flush' in kwargs:
             raise Unsupported('print() with file= or flush=')
         src = self._star_vec_src(star_val, ctx, 'print')
-        sep = self.expr(kwargs['sep'], ctx) if 'sep' in kwargs else self._str_lit_slot(' ', ctx)
-        end = self.expr(kwargs['end'], ctx) if 'end' in kwargs else self._str_lit_slot('\n', ctx)
+        sep = end = None
+        for key, value in kwargs.items():
+            if key == 'sep':
+                sep = self.expr(value, ctx)
+            elif key == 'end':
+                end = self.expr(value, ctx)
+        if sep is None:
+            sep = self._str_lit_slot(' ', ctx)
+        if end is None:
+            end = self._str_lit_slot('\n', ctx)
         ctx.emit('st = ail2_do_print(cx, ((ail_vecobj *)(%s).o)->p, ((ail_vecobj *)(%s).o)->n, '
                  '%s, %s);' % (src, src, sep, end))
         ctx.check()
@@ -6291,18 +6335,43 @@ class Compiler(boxclosure.ClosureMixin):
         if fobj is not None and sys_stream(fobj, 'stdout'):
             kwargs = {k: v for k, v in kwargs.items() if k != 'file'}
         elif fobj is not None and sys_stream(fobj, 'stderr'):
-            # print(..., file=sys.stderr): the same text, written to stderr
-            def or_default(key, text):
-                v = kwargs.get(key)
-                if v is None or (isinstance(v, ast.Constant) and v.value is None):
-                    return ast.Constant(value=text)
-                return v
-            parts = ast.List(elts=[ast.Call(func=ast.Name(id='str', ctx=ast.Load()), args=[a], keywords=[])
-                                   for a in args], ctx=ast.Load())
-            text = ast.BinOp(left=ast.Call(func=ast.Attribute(value=or_default('sep', ' '), attr='join', ctx=ast.Load()),
+            # print(..., file=sys.stderr): build the same text, written to stderr. Evaluate the
+            # positional arguments first, then sep/end in the order the source spells them (the
+            # general path used to force sep before end), and only then convert/write.
+            def stage(v):
+                name = ctx.new_cvar('ail_prv')
+                node = ast.copy_location(
+                    ast.NamedExpr(target=ast.copy_location(ast.Name(id=name, ctx=ast.Store()), v),
+                                  value=v), v)
+                return node, ast.copy_location(ast.Name(id=name, ctx=ast.Load()), v)
+            staged = []
+            arg_names = []
+            for a in args:
+                node, name = stage(a)
+                staged.append(node)
+                arg_names.append(name)
+            kw_names = {}
+            for key, v in kwargs.items():
+                if key in ('sep', 'end'):
+                    node, name = stage(v)
+                    staged.append(node)
+                    kw_names[key] = name
+            def field(key, text):
+                v = kw_names.get(key)
+                if v is None:
+                    v = ast.copy_location(ast.Constant(value=None), fobj)
+                return ast.Call(func=ast.Name(id='_ail_print_' + key, ctx=ast.Load()),
+                                args=[v, ast.Constant(value=text)], keywords=[])
+            parts = ast.List(elts=[ast.Call(func=ast.Name(id='str', ctx=ast.Load()), args=[name], keywords=[])
+                                   for name in arg_names], ctx=ast.Load())
+            text = ast.BinOp(left=ast.Call(func=ast.Attribute(value=field('sep', ' '), attr='join', ctx=ast.Load()),
                                            args=[parts], keywords=[]),
-                             op=ast.Add(), right=or_default('end', '\n'))
+                             op=ast.Add(), right=field('end', '\n'))
             call = ast.Call(func=ast.Name(id='_ail_stderr_write', ctx=ast.Load()), args=[text], keywords=[])
+            if staged:
+                # The staged tuple is non-empty (hence true), so `and` evaluates it, left to right,
+                # before the write -- exactly the order CPython evaluates the call's arguments in.
+                call = ast.BoolOp(op=ast.And(), values=[ast.Tuple(elts=staged, ctx=ast.Load()), call])
             ast.fix_missing_locations(ast.copy_location(call, fobj))
             self.expr(call, ctx)
             return 'ail_box_none()'
@@ -6326,8 +6395,16 @@ class Compiler(boxclosure.ClosureMixin):
                 for j, leaf in enumerate(leaves):
                     vs.append(self._print_concat_leaf(leaf, ctx))
                     flags.append('1' if i and not j else '0')
-        sep = self.expr(kwargs['sep'], ctx) if 'sep' in kwargs else self._str_lit_slot(' ', ctx)
-        end = self.expr(kwargs['end'], ctx) if 'end' in kwargs else self._str_lit_slot('\n', ctx)
+        sep = end = None
+        for key, value in kwargs.items():
+            if key == 'sep':
+                sep = self.expr(value, ctx)
+            elif key == 'end':
+                end = self.expr(value, ctx)
+        if sep is None:
+            sep = self._str_lit_slot(' ', ctx)
+        if end is None:
+            end = self._str_lit_slot('\n', ctx)
         if not vs:
             ctx.emit('st = ail2_do_print(cx, NULL, 0, %s, %s);' % (sep, end))
         elif not any_flat:
