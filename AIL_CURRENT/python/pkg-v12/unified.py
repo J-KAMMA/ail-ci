@@ -2531,7 +2531,8 @@ def _binop(comp, node, ctx, t):
         guarded('%s == 0.0' % y, ['%s = floor(%s / %s);' % (r, x, y)])
     elif isinstance(op, ast.Mod):
         guarded('%s == 0.0' % y, ['%s = fmod(%s, %s);' % (r, x, y),
-                                  'if (%s != 0.0 && ((%s < 0) != (%s < 0))) %s += %s;' % (r, r, y, r, y)])
+                                  'if (%s != 0.0) { if ((%s < 0) != (%s < 0)) %s += %s; } else %s = copysign(0.0, %s);'
+                                  % (r, r, y, r, y, r, y)])
     else:
         raise Conflict((ctx.u.name, '*'), 'float operator %s' % type(op).__name__)
     return r
