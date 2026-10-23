@@ -1,5 +1,20 @@
 # Development log
 
+## 2026-10-23 -- integration: take the accepted c169/cov6/fuzz20-35 branches
+
+- Added the accepted job branches `job-c169-10221631`, `job-cov6-10221632`,
+  `job-fuzz20-10230625`, `job-fuzz21-10230420`, `job-fuzz22-10230420`, `job-fuzz23-10230421`,
+  `job-fuzz24-10230422`, `job-fuzz27-10230628`, `job-fuzz28-10230629`, `job-fuzz29-10230630`,
+  `job-fuzz30-10230631`, `job-fuzz31-10230632`, `job-fuzz32-10230813`, `job-fuzz33-10230814` and
+  `job-fuzz35-10230816` on top of this export, one commit per branch.
+- `.agent/` and `corpus/` changes from those branches were left out.  The per-job ledger variants
+  (`DEVLOG.md`, `DIFFERENCES.md`, `AIL_CURRENT/docs/spec/`) were merged into `docs/spec/` and their
+  placeholder ids numbered with `tools/diff_ids.py` (new C170-C173).
+- The only code overlap needing a manual merge was `pyboxed2.py`: fuzz28 refuses a computed class
+  attribute read through the class, while fuzz29 shares class attributes through module-lifetime
+  slots.  Both are kept: literal list/tuple/dict/set class attributes are read through the shared
+  slot, other computed values are still refused by name.
+
 ## 2026-10-22 -- job-fuzz21-10230420: CPython unpack error text
 
 - fuzz21 (unpacking): the general path's `UNPACK_SEQUENCE` errors now use CPython's wording and
