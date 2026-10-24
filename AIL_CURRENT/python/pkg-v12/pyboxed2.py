@@ -7880,31 +7880,42 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.emit('%s = ail_box_bool(%sail_str_any_outside(%s, %dLL, %dLL));'
                          % (res, neg, v, lo, hi))
                 return res
-            # fused: still evaluates EVERY element in the same order (the existing path
-            # materialises the genexpr eagerly before scanning), so side effects and
-            # exception positions are identical -- only the LIST object, the per-element
-            # append, the ITER object and the second scan are skipped.
+            # fused: like CPython, stop at the deciding element.  The truth test goes
+            # through ail_truthy_chk so an exception from a user __bool__ reaches the
+            # caller instead of being swallowed (the condition rewrite cannot carry a
+            # status).  Only the LIST object, the per-element append, the ITER object
+            # and the second scan are skipped.
+            done = ctx.new_label('any_all')
             def add(n, c, _t):
                 v = self.expr(n.elt, c)
+                cond = c.new_cvar('truth')
+                c.emit('int %s = 0;' % cond)
+                c.emit('st = ail_truthy_chk(cx, &%s, %s);' % (cond, v))
+                c.check()
                 if name == 'any':
-                    c.emit('if (ail_obj_truthy(%s)) %s = ail_box_bool(1);' % (v, res))
+                    c.emit('if (%s) { %s = ail_box_bool(1); goto %s; }' % (cond, res, done))
                 else:
-                    c.emit('if (!ail_obj_truthy(%s)) %s = ail_box_bool(0);' % (v, res))
+                    c.emit('if (!%s) { %s = ail_box_bool(0); goto %s; }' % (cond, res, done))
             self._emit_comp_generators(arg.generators, 0, arg, ctx, res, add, set())
+            ctx.emit('%s: ;' % done)
             return res
         src = self._resolve_iter_src(arg, ctx)
         it = ctx.tmp(); val = ctx.tmp()
+        cond = ctx.new_cvar('truth')
         ctx.emit('st = ail_iter(cx, &%s, %s);' % (it, src))
         ctx.check()
+        ctx.emit('int %s = 0;' % cond)
         ctx.emit('for (;;) {')
         ctx.indent += 1
         ctx.emit('st = ail_it_next(cx, &%s, %s);' % (val, it))
         ctx.emit('if (st == AIL_STOP) { st = AIL_OK; break; }')
         ctx.check()
+        ctx.emit('st = ail_truthy_chk(cx, &%s, %s);' % (cond, val))
+        ctx.check()
         if name == 'any':
-            ctx.emit('if (ail_obj_truthy(%s)) { %s = ail_box_bool(1); break; }' % (val, res))
+            ctx.emit('if (%s) { %s = ail_box_bool(1); break; }' % (cond, res))
         else:
-            ctx.emit('if (!ail_obj_truthy(%s)) { %s = ail_box_bool(0); break; }' % (val, res))
+            ctx.emit('if (!%s) { %s = ail_box_bool(0); break; }' % (cond, res))
         ctx.indent -= 1
         ctx.emit('}')
         return res

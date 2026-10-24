@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - pre28: any()/all() let a raising __bool__ out
+
+The first difference still present from pre13 was p6: on the general path `any`/`all` tested
+elements with the int-returning `ail_truthy_u`, which treats an exception from a user
+`__bool__` as true and drops it.  `any([B(False), B(False, True)])` printed True where CPython
+raises ValueError; a generator expression, an argument, a list item, an attribute and a dict
+value behaved the same.  The emitters now call an error-propagating `ail_truthy_chk` (the
+dunderrt patch points it at the checked `__bool__`/`__len__` helper), and the fused generator
+path stops at the deciding element instead of scanning past it.  Added `test_ail_pre28.py`.
+The other pre13 items (p7 eager inner generator expression, r8/r9 unclosed generator, r15
+tuple destructuring) were reproduced as still differing and are left for their own jobs;
+r15 was already fixed on this tree and matches CPython on both builds.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

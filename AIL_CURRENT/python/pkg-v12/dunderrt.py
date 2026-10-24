@@ -177,6 +177,23 @@ __attribute__((noinline)) static int ail_dun_truthy(ail_obj x) {
     if (f(ail__gcx, &r, x) != AIL_OK) return 1;
     return ail_obj_truthy(r);
 }
+/* any()/all() need the exception from __bool__; the condition rewrite below cannot carry a
+   status, so those two builtins emit ail_truthy_chk and this macro points it at the checked
+   helper. */
+__attribute__((noinline)) static ail_st ail_dun_truthy_chk(ail_ctx *cx, int *out, ail_obj x) {
+    ail_d1_fn f = ail_dun1(x, AIL_D1_BOOL);
+    ail_obj r;
+    if (!f) f = ail_dun1(x, AIL_D1_LEN);
+    if (f && ail__gcx) {
+        ail_st st = f(cx, &r, x);
+        if (st != AIL_OK) return st;
+        *out = ail_obj_truthy(r);
+        return AIL_OK;
+    }
+    *out = ail_obj_truthy(x);
+    return AIL_OK;
+}
+#define ail_truthy_chk(cx, out, x) ail_dun_truthy_chk((cx), (out), (x))
 __attribute__((noinline)) static int ail_dun_cmp_gt(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b, ail_st *stp) {
     ail_d2_fn gf = ail_dun2(a, AIL_D2_GT);
     ail_obj r;

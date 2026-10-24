@@ -14388,6 +14388,15 @@ static inline int ail_obj_truthy(ail_obj x) {
     }
 }
 
+/* any()/all() ask the truth value of each element and must let an exception from a user
+   __bool__ (or __len__) out.  The base runtime has no class tables; dunderrt.py replaces
+   this through a macro in a program that has classes. */
+static inline ail_st ail_truthy_chk(ail_ctx *cx, int *out, ail_obj x) {
+    (void)cx;
+    *out = ail_obj_truthy(x);
+    return AIL_OK;
+}
+
 /* Identity: address (or tag+payload) equality -- see the ail_obj union comment for why
    FLOAT compares by box pointer here, matching CPython's `is` for the same reason CPython
    itself gives every float object its own address. STR compares by (backing, offset,
