@@ -1,5 +1,15 @@
 # DEVLOG
 
+## 2026-10-24 - pre59: itertools permutations/combinations reject negative r
+
+DIFFERENCES row `C?-job-fuzz8-10220554-1` still reproduced on this tree: the general-path
+`ail_it_permutations`, `ail_it_combinations` and `ail_it_combinations_wr` returned an empty
+iterator for `r < 0`, while CPython raises `ValueError: r must be non-negative` for all three.
+The runtime now checks the sign before the "r larger than the pool" early exit, so empty pools,
+`r == n`, `r == 0` and `r > n` keep their CPython results.  The typed for-loop path already had
+the same check in `itlib.PoolStream`.  Added `test_ail_pre59.py` with negative, zero, empty-pool,
+keyword, argument/list/attribute/dict and typed-loop cases on both builds.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
