@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - any/all generator expressions stop at the decisive element (job-pre13-10240022)
+
+The general path's fused `any`/`all` generator expression walked every element even after the
+answer was known, so `any(hit(log, a, b) for a, b in pairs)` called `hit` for every pair; CPython
+stops at the first truthy element. The fused loops now jump to one label at that element (the same
+shape as the existing `next(genexp)` fusion), so tuple/list destructuring targets, filters and
+nested for-clauses all stop where CPython does. Empty and no-decisive-element sequences keep the
+old result. Added `AIL_CURRENT/test_ail_pre13.py`, which builds the cases on the general path and
+the default build and compares both with CPython 3.12.
+
+The fused emitter in this tree already short-circuited equivalently, so the code side of this
+re-application was a no-op; the regression test and its registration are new.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
