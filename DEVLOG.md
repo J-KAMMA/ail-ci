@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - pre43 review: trailing dummy runs and dict index tombstones
+
+job-pre43-10241006 review fix. The first pass undercounted the trailing dummy run after
+`del`/reinsert/`del`: a deleted last key joins the dummies already immediately before it, not
+just one, so `ail_map_del` now tracks that run per entry (`dead_before`) and `popitem()` keeps
+the dummies before the popped slot as CPython does. The review's `/tmp/rprobes/p11_min.py` now
+prints no `__eq__` after `-- dict(c)`. While probing delete/reinsert, the same key-table shape
+showed that AIL compacted the sparse index on every delete; CPython leaves a dummy index slot,
+skips it on lookup and reuses the first one on insert after probing for an equal key. AIL now
+does the same, which also closes the remaining `update`/`dict()` call-count difference in
+`p14_updshape.py`. Probes: `pre43_fix_{tail_merge,runs,internal_gap,repeat_pop,through,equal_alias}.py`
+and reviewer p1-p15 all match CPython on both builds; `test_ail_pre43` gained the tail-gap case.
+
 ## 2026-10-24 - pre43: dict construction call counts follow CPython's key-table shape
 
 job-pre43-10241006. The open difference recorded by the rbfuzz4 reviewer (DIFFERENCES #4) was

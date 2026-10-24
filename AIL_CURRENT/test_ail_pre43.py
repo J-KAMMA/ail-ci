@@ -234,6 +234,63 @@ main()
 '''
 
 
+TAILGAP = r'''class K:
+    def __init__(self, v):
+        self.v = v
+    def __hash__(self):
+        print("H", self.v)
+        return 0
+    def __eq__(self, other):
+        print("E", self.v, other.v)
+        return self.v == other.v
+
+
+def build(n):
+    d = {}
+    for i in range(n):
+        d[K(i)] = i
+    return d
+
+
+def main():
+    d = build(4)
+    del d[K(3)]
+    d[K(9)] = 9
+    del d[K(9)]
+    print("-- popitem", d.popitem()[0].v)
+    c = d.copy()
+    print("-- dict(c)")
+    e = dict(c)
+    print(sorted(k.v for k in e))
+
+    d = build(4)
+    del d[K(1)]
+    del d[K(3)]
+    print("-- middle and tail", [k.v for k in d])
+    print("-- popitem 2", d.popitem()[0].v)
+    c = d.copy()
+    print("-- copy", [k.v for k in c])
+    print("-- dict(copy)", [k.v for k in dict(c)])
+    u = {}
+    u.update(c)
+    print("-- update", [k.v for k in u])
+
+    d = build(6)
+    for i in (5, 4, 3):
+        del d[K(i)]
+        d[K(100 + i)] = 100 + i
+        del d[K(100 + i)]
+    print("-- tail cycles", [k.v for k in d])
+    print("-- copy", [k.v for k in d.copy()])
+    print("-- dict", [k.v for k in dict(d)])
+    print("-- pop", d.popitem()[0].v)
+    print("-- final", [k.v for k in dict(d)])
+
+
+main()
+'''
+
+
 class Pre43Tests(unittest.TestCase):
     def run_cpython(self, directory, text):
         src = Path(directory) / 'cpython_main.py'
@@ -282,6 +339,9 @@ class Pre43Tests(unittest.TestCase):
 
     def test_table_shape_after_update_copy_popitem_clear(self):
         self.check('capacity', CAPACITY)
+
+    def test_trailing_dummies_after_delete_reinsert_popitem(self):
+        self.check('tailgap', TAILGAP)
 
 
 if __name__ == '__main__':

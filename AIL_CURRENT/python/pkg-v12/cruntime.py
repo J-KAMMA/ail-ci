@@ -14036,7 +14036,7 @@ static inline void ail_fmt_float(char *out, size_t cap, double v) {
    Remaining container payload structs (dict/set, instance, class, range, cell, func,
    bound, iterator).
    =================================================================================== */
-typedef struct { ail_obj key, val; int64_t hash; } ail_mapentry;
+typedef struct { ail_obj key, val; int64_t hash; int64_t dead_before; } ail_mapentry;
 typedef struct { ail_gcobj hdr; ail_mapentry *entries; int64_t n, cap; int64_t *index; int64_t index_cap;
                  int8_t dd_factory; /* defaultdict marker: 0 plain dict, 1 int, 2 list, 3 set, 4 str (2026-09-16) */
                  int8_t dirty;      /* a deletion left a dummy slot, as CPython's dk_nentries > ma_used */
@@ -15098,6 +15098,7 @@ static inline int64_t ail_map_estimate_size(int64_t n) { return ail_map_calc_siz
 /* A resize compacts the live entries (dropping dummies), as CPython's dictresize does. */
 static inline void ail_map_resize(ail_mapobj *m, int64_t new_cap) {
     ail_map_rehash(m, new_cap);
+    for (int64_t i = 0; i < m->n; i++) m->entries[i].dead_before = 0;
     m->nentries = m->n;
     m->tail_dead = 0;
     m->dirty = 0;
@@ -15108,7 +15109,20 @@ static inline ail_st ail_map_get(ail_ctx *cx, ail_obj **out, ail_mapobj *m, ail_
     for (;;) {
         int64_t e = m->index[slot];
         if (e == -1) { *out = NULL; return AIL_OK; }
+        if (e == -2) { slot = (slot + 1) & mask; continue; }   /* CPython's dummy index slot */
         if (m->entries[e].hash == h && ail_member_eq(m->entries[e].key, key)) { *out = &m->entries[e].val; return AIL_OK; }
+        slot = (slot + 1) & mask;
+    }
+}
+/* Probe for insertion the way CPython's insertdict does: a dummy is remembered but probing
+   continues to the first empty slot, so a later equal key still updates instead of duplicating. */
+static inline int64_t ail_map_insert_slot(ail_mapobj *m, ail_obj key, int64_t h, int64_t *slotp) {
+    int64_t mask = m->index_cap - 1, slot = (int64_t)((uint64_t)h & (uint64_t)mask), freeslot = -1;
+    for (;;) {
+        int64_t e = m->index[slot];
+        if (e == -1) { *slotp = freeslot >= 0 ? freeslot : slot; return -1; }
+        if (e == -2) { if (freeslot < 0) freeslot = slot; slot = (slot + 1) & mask; continue; }
+        if (m->entries[e].hash == h && ail_member_eq(m->entries[e].key, key)) { *slotp = slot; return e; }
         slot = (slot + 1) & mask;
     }
 }
@@ -15124,6 +15138,7 @@ static inline void ail_map_insert_new(ail_ctx *cx, ail_mapobj *m, ail_obj key, a
     if (m->n == m->cap) ail_map_grow_entries(cx, m);
     int64_t idx = m->n++;
     m->entries[idx].key = key; m->entries[idx].val = val; m->entries[idx].hash = h;
+    m->entries[idx].dead_before = m->tail_dead;   /* dummies between the old last key and this one */
     m->nentries++;
     m->tail_dead = 0;   /* a new key sits after any old dummies */
     m->index[*slotp] = idx;
@@ -15131,26 +15146,16 @@ static inline void ail_map_insert_new(ail_ctx *cx, ail_mapobj *m, ail_obj key, a
 }
 static inline ail_st ail_map_set(ail_ctx *cx, ail_mapobj *m, ail_obj key, ail_obj val) {
     int64_t h; ail_st st = ail_obj_hash(cx, &h, key); if (st != AIL_OK) return st;
-    int64_t mask = m->index_cap - 1, slot = (int64_t)((uint64_t)h & (uint64_t)mask);
-    for (;;) {
-        int64_t e = m->index[slot];
-        if (e == -1) break;
-        if (m->entries[e].hash == h && ail_member_eq(m->entries[e].key, key)) { m->entries[e].val = val; return AIL_OK; }
-        slot = (slot + 1) & mask;
-    }
+    int64_t slot, e = ail_map_insert_slot(m, key, h, &slot);
+    if (e >= 0) { m->entries[e].val = val; return AIL_OK; }
     ail_map_insert_new(cx, m, key, val, h, &slot);
     return AIL_OK;
 }
 /* Insert with a hash taken from another dict's entry: CPython's update/dict(d) never hash
    such a key again, only __eq__ on a real collision. */
 static inline ail_st ail_map_set_hashed(ail_ctx *cx, ail_mapobj *m, ail_obj key, ail_obj val, int64_t h) {
-    int64_t mask = m->index_cap - 1, slot = (int64_t)((uint64_t)h & (uint64_t)mask);
-    for (;;) {
-        int64_t e = m->index[slot];
-        if (e == -1) break;
-        if (m->entries[e].hash == h && ail_member_eq(m->entries[e].key, key)) { m->entries[e].val = val; return AIL_OK; }
-        slot = (slot + 1) & mask;
-    }
+    int64_t slot, e = ail_map_insert_slot(m, key, h, &slot);
+    if (e >= 0) { m->entries[e].val = val; return AIL_OK; }
     ail_map_insert_new(cx, m, key, val, h, &slot);
     return AIL_OK;
 }
@@ -15187,12 +15192,19 @@ static inline ail_st ail_map_del(ail_ctx *cx, int *found, ail_mapobj *m, ail_obj
     for (;;) {
         int64_t e = m->index[slot];
         if (e == -1) { *found = 0; return AIL_OK; }
+        if (e == -2) { slot = (slot + 1) & mask; continue; }   /* CPython's dummy index slot */
         if (m->entries[e].hash == h && ail_member_eq(m->entries[e].key, key)) {
             int was_last = (e == m->n - 1);
+            int64_t gap = m->entries[e].dead_before;
             for (int64_t k = e; k + 1 < m->n; k++) m->entries[k] = m->entries[k + 1];
+            if (was_last) {
+                m->tail_dead += gap + 1;   /* the deleted key joins the trailing dummy run */
+            } else {
+                m->entries[e].dead_before += gap + 1;   /* its dummy joins the run before the next key */
+            }
             m->n--;
-            ail_map_rehash(m, m->index_cap);
-            if (was_last) m->tail_dead++;
+            m->index[slot] = -2;   /* leave CPython's dummy in place, do not compact the index */
+            for (int64_t k = 0; k < m->index_cap; k++) if (m->index[k] > e) m->index[k]--;
             m->dirty = (m->nentries != m->n);
             *found = 1; return AIL_OK;
         }
@@ -18666,11 +18678,13 @@ static inline ail_st ail_meth_dict_popitem(ail_ctx *cx, ail_obj *out, ail_obj d)
         return ail_raise_key_arg(cx, msg);
     }
     int64_t lastpos = m->nentries - 1 - m->tail_dead;   /* CPython sets dk_nentries to the removed entry's slot */
-    ail_obj key = m->entries[m->n - 1].key, val = m->entries[m->n - 1].val;
+    int64_t lastidx = m->n - 1;
+    int64_t gap = m->entries[lastidx].dead_before;
+    ail_obj key = m->entries[lastidx].key, val = m->entries[lastidx].val;
     m->n--;
-    ail_map_rehash(m, m->index_cap);   /* drop its index entry; no lookup, hash or eq */
+    for (int64_t k = 0; k < m->index_cap; k++) if (m->index[k] == lastidx) { m->index[k] = -2; break; }   /* no lookup, hash or eq */
     m->nentries = lastpos;
-    m->tail_dead = 0;
+    m->tail_dead = gap;   /* dummies before the removed slot are now trailing, as in CPython */
     m->dirty = (m->nentries != m->n);
     ail_obj pr[2]; pr[0] = key; pr[1] = val;
     *out = ail_tuple_new(cx, pr, 2);
