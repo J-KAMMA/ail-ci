@@ -21,6 +21,14 @@ keeps Horspool. `bench/compare.py --app binary_search`: base 98.2 ms, new 69.2 m
 (AIL/C 1.414 -> 0.994, ranges non-overlapping). Probes for empty, negative, windowed and
 64-byte needles through arguments, list items, attributes and dict values match CPython on both
 builds.
+## 2026-10-24 -- pre26: repr(e.args[i]) keeps the argument's kind
+
+On the typed path `e.args[i]` reads as text, so `repr(e.args[i])` repr'd that text: a
+`ValueError(3.0)` handler printed `'3.0'` where CPython prints `3.0`, and int, bool and None
+arguments were quoted the same way.  The handler rewrite now lowers `repr(e.args[i])`,
+`f"{e.args[i]!r}"` and `%r` of one argument to a new `_ail_exc_arg_repr` accessor that formats
+the stored argument (a str keeps its quotes, a number does not).  Both builds agree with
+CPython; `test_ail_pre26.py` keeps the probe, including negative and out-of-range indexes.
 
 ## 2026-10-23 -- fuzz37: ordering TypeError names the written operator
 
