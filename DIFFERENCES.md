@@ -4,6 +4,8 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre90-10242040-1 | `chr()` / 16-bit strings | The general path's v2 runtime could not store a surrogate or non-BMP code point: `chr(0x10000)` built and then died with an internal error at run time, although the same text as a literal was already refused by name at compile time. Constant `chr()` calls in those ranges are now refused by name at compile time on both builds, and the runtime store follows the host unit width so a 32-bit build stores the value instead of truncating it. | refused |
+| C?-job-pre90-10242040-2 | `chr()` / 16-bit strings | A non-BMP code point that reaches `chr()` only at run time still dies with the 16-bit runtime's internal error; compile-time constants are refused by name by row 1. | open |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |
