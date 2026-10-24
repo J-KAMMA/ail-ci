@@ -1,5 +1,17 @@
 # DEVLOG
 
+## 2026-10-24 - pre40: int() of an out-of-range module float read through a global
+
+`x = 1e300` followed by `def f(): global x; return int(x)` still stopped at run time with
+`integer overflow`, where CPython prints a 301-digit integer. The front end now refuses the
+conversion by name (`int() of a float outside int64: ... (CPython makes a big integer)`), using a
+scope-aware constant evaluator. A module name that is written anywhere in a function (or otherwise
+rebound) is not treated as a constant, and `global x` no longer shadows the module value, so
+`global x; x = 1.5; int(x)` and reads after another function mutates it still match CPython.
+In-range, non-finite, fitting-expression and literal-container conversions are unchanged. Added
+`test_ail_pre40.py`; this also carries the accepted pre31 checker for literal, container, argument
+and identity-wrapper values.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
