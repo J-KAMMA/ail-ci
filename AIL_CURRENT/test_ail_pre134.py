@@ -97,6 +97,30 @@ del C, D
 print("done")
 ''', 'del on the class name C')
 
+    def test_delete_rebound_class_name_is_refused(self):
+        self.refuse('del_rebound_class', r'''class C:
+    pass
+
+
+C = 5
+del C
+print("done")
+''', 'del on the class name C')
+
+    def test_delete_class_name_with_global_declaration_is_refused(self):
+        self.refuse('del_global_class', r'''class C:
+    pass
+
+
+def drop():
+    global C
+    del C
+
+
+drop()
+print("done")
+''', 'del on the class name C')
+
     def test_delete_plain_names_and_items(self):
         self.check('del_plain', r'''def local():
     x = 1

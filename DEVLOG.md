@@ -4,8 +4,9 @@
 
 `class C: pass; del C` made both builds fail with the compiler's own `KeyError: 'C'`.
 A class name is read from its dedicated class slot, not an ordinary frame/global slot,
-so deleting the binding cannot be cleared the way a local or module variable is. The
-construct is now refused by name at compile time (`del on the class name C`); deleting
+so deleting the binding cannot be cleared the way a local or module variable is. This
+also covers a class name that is rebound at module scope. The construct is now refused
+by name at compile time (`del on the class name C`); deleting
 ordinary globals, locals, list/dict items and slices is unchanged and still matches
 CPython on both builds. Added `test_ail_pre134.py`.
 

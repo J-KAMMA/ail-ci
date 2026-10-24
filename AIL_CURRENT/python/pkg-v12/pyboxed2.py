@@ -10008,12 +10008,12 @@ class Compiler(boxclosure.ClosureMixin):
     def stmt_Delete(self, node, ctx):
         for target in node.targets:
             if isinstance(target, ast.Name):
-                if (target.id in self.classes and not self._is_global_name(target.id, ctx)
-                        and target.id not in ctx.slot_of and target.id not in ctx.ptr_names
-                        and target.id not in ctx.clo_index):
+                if (target.id in self.classes and target.id not in ctx.slot_of
+                        and target.id not in ctx.ptr_names and target.id not in ctx.clo_index):
                     # A class name is not an ordinary frame/global slot: expr_Name reads the
                     # dedicated class slot, so deleting the binding cannot be modelled. Refuse by
-                    # name instead of failing later with `KeyError: 'C'` from name_ref.
+                    # name instead of failing later with `KeyError: 'C'` from name_ref (or reading
+                    # the class slot again when the name was also rebound at module scope).
                     raise Unsupported('del on the class name %s' % target.id)
                 if (not self._is_global_name(target.id, ctx) and target.id in ctx.slot_of
                         and target.id not in ctx.ptr_names and target.id not in ctx.clo_index):
