@@ -1,5 +1,15 @@
 # DEVLOG
 
+## 2026-10-24 - pre31: int() of a float outside int64 is refused by name
+
+`x = 1e300; int(x)` stopped with `integer overflow` on both builds where CPython prints a 301-digit
+integer. This language's ints are int64, so the front end now refuses a conversion the compiler can
+see is outside int64 when the float is a literal, a single-binding module constant, or a literal
+reached through an argument, a list item, a tuple item or a dict value; the message names
+`int() of a float outside int64` and the value. The conversion is unchanged when the result fits
+(including the -2**63 edge). Run-time float values still stop at the documented int64 limit.
+Added `test_ail_pre31.py` (9 refused programs, 1 matching program, both builds).
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

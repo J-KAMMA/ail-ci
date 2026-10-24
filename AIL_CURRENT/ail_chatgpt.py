@@ -3,6 +3,7 @@ import ast
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import platform
@@ -75,10 +76,82 @@ def _module_constant(node):
             and bool(value.elts) and all(map(_literal_number, value.elts)))
 
 
+def _constant_float(node, known):
+    if isinstance(node, ast.Constant) and type(node.value) is float:
+        return node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        value = _constant_float(node.operand, known)
+        if value is None:
+            return None
+        return -value if isinstance(node.op, ast.USub) else value
+    if isinstance(node, ast.Name):
+        return known.get(node.id)
+    return None
+
+
+def _outside_int64_float(node, known):
+    value = _constant_float(node, known)
+    if value is not None:
+        return value if math.isfinite(value) and not -(1 << 63) <= int(value) < 1 << 63 else None
+    for child in ast.iter_child_nodes(node):
+        found = _outside_int64_float(child, known)
+        if found is not None:
+            return found
+    return None
+
+
 def _check_int64_literals(tree):
+    counts = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            counts[node.id] = counts.get(node.id, 0) + 1
+    known = {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name) and counts.get(node.targets[0].id) == 1):
+            value = _constant_float(node.value, known)
+            if value is not None:
+                known[node.targets[0].id] = value
+    int_shadowed = any((isinstance(node, ast.FunctionDef) and node.name == 'int')
+                       or (isinstance(node, ast.arg) and node.arg == 'int')
+                       or (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == 'int')
+                       for node in ast.walk(tree))
+    int_params = {}
+    for fn in tree.body:
+        if not isinstance(fn, ast.FunctionDef):
+            continue
+        names = [arg.arg for arg in (*fn.args.posonlyargs, *fn.args.args)]
+        mapped = {name: index for index, name in enumerate(names)}
+        used = {}
+        for sub in ast.walk(fn):
+            if (not int_shadowed and isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name)
+                    and sub.func.id == 'int' and len(sub.args) == 1 and not sub.keywords
+                    and isinstance(sub.args[0], ast.Name) and sub.args[0].id in mapped):
+                used[sub.args[0].id] = mapped[sub.args[0].id]
+        if used:
+            int_params[fn.name] = used
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in int_params:
+            for index in int_params[node.func.id].values():
+                if index >= len(node.args):
+                    continue
+                value = _outside_int64_float(node.args[index], known)
+                if value is not None:
+                    error = ValueError(f'int() of a float outside int64: {value!r} (CPython makes a big integer)')
+                    error.source_line = node.lineno
+                    error.source_column = node.col_offset
+                    raise error
     nodes = [tree]
     while nodes:
         node = nodes.pop()
+        if (not int_shadowed and isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'int' and len(node.args) == 1 and not node.keywords):
+            value = _outside_int64_float(node.args[0], known)
+            if value is not None:
+                error = ValueError(f'int() of a float outside int64: {value!r} (CPython makes a big integer)')
+                error.source_line = node.lineno
+                error.source_column = node.col_offset
+                raise error
         if (isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub))
                 and isinstance(node.operand, ast.Constant) and type(node.operand.value) is int):
             value = -node.operand.value if isinstance(node.op, ast.USub) else node.operand.value

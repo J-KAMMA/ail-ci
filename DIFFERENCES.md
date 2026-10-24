@@ -8,3 +8,4 @@ Deliberate differences from CPython and open silent differences found by differe
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |
 | C?-job-fuzz39-10230820-1 | `is` / `is not` with a tuple constant | merges equal tuple constants of a code object (`a = (); b = (); a is b` is True; `()` is a singleton) | each tuple display is an object of its own | refused by name; `test_ail_fuzz39.py` |
+| C?-job-pre31-10240902-1 | `int()` of a float outside int64 | prints the exact big integer (`int(1e300)` has 301 digits) | refused at compile time when the float is a literal, a single-binding module constant, or a literal reached through an argument / list item / tuple item / dict value; a run-time value still stops at the int64 limit | refused by name; `test_ail_pre31.py` |
