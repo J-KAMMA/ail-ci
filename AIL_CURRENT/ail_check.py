@@ -62,6 +62,7 @@ MODULES = (
     'test_ail_fuzz39',
     'test_ail_fuzz41',
     'test_ail_fuzz55',
+    'test_ail_fuzz56',
 )
 
 
