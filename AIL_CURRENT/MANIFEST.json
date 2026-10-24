@@ -726,8 +726,8 @@
     "python/pkg-v12/build_py.py": "707b59c87d4d1f5912db6d9c8777ed02ca9bb6ef03d35dd464c2a61bae541e3a",
     "python/pkg-v12/mix_call.h": "ec783385fd7741b83f6c76cee13b6e02f9206304cf48421c1054a8fb2e515fdc",
     "python/pkg-v12/pipeline.py": "d185d3cd067d1ca503f1fda8e2d8f415e93a0db26fbef6d4b919dd4c0b9a1251",
-    "python/pkg-v12/pyboxed.py": "2013251852d13e9cc02fe7a047eeb68fa231d2cf0ca1bea6a89f4382932508b2",
-    "python/pkg-v12/pyboxed2.py": "828600d0f0257c2bb93325c79fa509d625c704adfd9a10c81b268ffc0ed73b13",
+    "python/pkg-v12/pyboxed.py": "4e89fe38230642a12090020275c620840ece810adf4bb1c0f8196a74109f490e",
+    "python/pkg-v12/pyboxed2.py": "71d52e7d3ac65f8904423c94d6b92464ce0847508a6f2b2191d41527ed73c78b",
     "python/pkg-v12/pyfront.py": "50bbe1545db1ad1598aaf8a64e77ad3b3700dfa9186cc1f355fa1d820c4ae2b4",
     "language_examples/checked_float64.ail": "b1815c80687ffa4c6cd1dac58997c1df93f41237fb45bfc2894fc9b5969b4266",
     "language_examples/csv_float_group.ail": "48c53a693e6138fa227d4c0cbbb1d08de8bd33034af0292bbcaf3dff1a1f1c97",
@@ -1005,7 +1005,7 @@
     "test_ail_str_find_alias.py": "2dd4e33b572c730b22c452951de0afb632942917681dd8a4768a712eb54d3553",
     "ail_builtin_api.py": "1ec0d7b3092af502f0195cdee6d8cb11f82c078732cbb75d5c5c5f96721d5425",
     "test_ail_builtin_api.py": "f4ed0186a304be917c36526a5818b1d2b6561c7529698f79ce62cc9ac83b5686",
-    "ail_check.py": "c506a35cefb8849b69b2e2e6b7b63608a382440945c02bf985cad7eb968e2715",
+    "ail_check.py": "a649fba7f6c26abaa4b841fc3c9fdb28feea3d6fed05848299ca52d4655953e1",
     "test_ail_sdk.py": "af18bc35a3d951ce733ca3b73a05c91e58e44c15b12131b1e92c42807c909872",
     "test_ail_str_rfind.py": "9216fc98dd70e3f9de393ff29798602dce499c3600552c6a7b6b77a2b1a432b5",
     "ail_builtin_syntax_forms.py": "8b6a4a90b4ccfcac48a9a3938fcf7c7df3b1ec14a5ca1096dc8e1130d378c7e8",
@@ -1348,16 +1348,17 @@
     "test_ail_fuzz37.py": "0f155e88a9cb2c3635020593bb59570b424d8fc95942e94ecab9a6e0d234c98d",
     "test_ail_fuzz38.py": "3193ee833574e8b60511267034b109faada894abcc78239fe39cdab73ba6c7df",
     "test_ail_fuzz39.py": "54eb56c1c8db1e6f0217cfe39a6cc891a378aa04bdc88761cd286004b3cde0da",
-    "test_ail_fuzz41.py": "6f12ab5c6d4d5434edb9d63ff4a2342130c70b993b8c726dc2bcf9cd741f74be"
+    "test_ail_fuzz41.py": "6f12ab5c6d4d5434edb9d63ff4a2342130c70b993b8c726dc2bcf9cd741f74be",
+    "test_ail_pre42.py": "a8753c4831fb1917ad6053ff7a028a0b87a3a152f5526615bc5b5e3ff8689c49"
   },
   "files": {
     "python/pkg-v12/pipeline.py": "d185d3cd067d1ca503f1fda8e2d8f415e93a0db26fbef6d4b919dd4c0b9a1251",
     "python/pkg-v12/mix_call.h": "ec783385fd7741b83f6c76cee13b6e02f9206304cf48421c1054a8fb2e515fdc",
     "python/pkg-v12/test_all.py": "43d526770825dc09f7d279e9ba03b983033fc28205885b8ae24d210528df8750",
-    "python/pkg-v12/pyboxed2.py": "828600d0f0257c2bb93325c79fa509d625c704adfd9a10c81b268ffc0ed73b13",
+    "python/pkg-v12/pyboxed2.py": "71d52e7d3ac65f8904423c94d6b92464ce0847508a6f2b2191d41527ed73c78b",
     "python/pkg-v12/pyfront.py": "50bbe1545db1ad1598aaf8a64e77ad3b3700dfa9186cc1f355fa1d820c4ae2b4",
     "python/pkg-v12/build_py.py": "707b59c87d4d1f5912db6d9c8777ed02ca9bb6ef03d35dd464c2a61bae541e3a",
-    "python/pkg-v12/pyboxed.py": "2013251852d13e9cc02fe7a047eeb68fa231d2cf0ca1bea6a89f4382932508b2",
+    "python/pkg-v12/pyboxed.py": "4e89fe38230642a12090020275c620840ece810adf4bb1c0f8196a74109f490e",
     "python/pkg-v12/build_app.py": "6f53a62ad54c027be98b1028d4d86da2eaedf35c796651ce65a9ff48b9a8268b",
     "python/pkg-v12/test_pipeline.py": "a1daa5a8a99f68539c6472b7fcb2f88a33c3d8ede4eab52c005f5b042bc4afe5",
     "python/pkg-v12/semir.py": "99a966ef1290683b5955bfc101156955f9277122c6ec08a9a0f6624fc3cb73de",
@@ -1424,7 +1425,7 @@
     "test_ail_str_find_alias.py": "2dd4e33b572c730b22c452951de0afb632942917681dd8a4768a712eb54d3553",
     "ail_builtin_api.py": "1ec0d7b3092af502f0195cdee6d8cb11f82c078732cbb75d5c5c5f96721d5425",
     "test_ail_builtin_api.py": "f4ed0186a304be917c36526a5818b1d2b6561c7529698f79ce62cc9ac83b5686",
-    "ail_check.py": "c506a35cefb8849b69b2e2e6b7b63608a382440945c02bf985cad7eb968e2715",
+    "ail_check.py": "a649fba7f6c26abaa4b841fc3c9fdb28feea3d6fed05848299ca52d4655953e1",
     "test_ail_sdk.py": "af18bc35a3d951ce733ca3b73a05c91e58e44c15b12131b1e92c42807c909872",
     "test_ail_str_rfind.py": "9216fc98dd70e3f9de393ff29798602dce499c3600552c6a7b6b77a2b1a432b5",
     "ail_builtin_syntax_forms.py": "8b6a4a90b4ccfcac48a9a3938fcf7c7df3b1ec14a5ca1096dc8e1130d378c7e8",
@@ -1763,6 +1764,7 @@
     "test_ail_fuzz37.py": "0f155e88a9cb2c3635020593bb59570b424d8fc95942e94ecab9a6e0d234c98d",
     "test_ail_fuzz38.py": "3193ee833574e8b60511267034b109faada894abcc78239fe39cdab73ba6c7df",
     "test_ail_fuzz39.py": "54eb56c1c8db1e6f0217cfe39a6cc891a378aa04bdc88761cd286004b3cde0da",
-    "test_ail_fuzz41.py": "6f12ab5c6d4d5434edb9d63ff4a2342130c70b993b8c726dc2bcf9cd741f74be"
+    "test_ail_fuzz41.py": "6f12ab5c6d4d5434edb9d63ff4a2342130c70b993b8c726dc2bcf9cd741f74be",
+    "test_ail_pre42.py": "a8753c4831fb1917ad6053ff7a028a0b87a3a152f5526615bc5b5e3ff8689c49"
   }
 }

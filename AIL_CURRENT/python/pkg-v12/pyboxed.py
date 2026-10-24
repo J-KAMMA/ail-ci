@@ -1631,6 +1631,9 @@ class Compiler:
         return self._emit_comp(node, ctx, 'ail_list_new()', add)
 
     def expr_GeneratorExp(self, node, ctx):
+        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
+            raise Unsupported('a generator expression nested inside another generator expression '
+                              '(the inner one would be materialised eagerly, not lazily)')
         return self.expr_ListComp(node, ctx)
 
     def expr_SetComp(self, node, ctx):

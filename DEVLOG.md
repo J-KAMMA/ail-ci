@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - nested generator expressions (job-pre42-10241006)
+
+The general path materialises a generator expression like a list comprehension, so a generator
+expression nested inside another one was evaluated when the outer object was built (CPython creates
+it only when its element is reached).  The order of side effects differed, and consuming such an
+outer generator could end in `AIL internal error: ail_it_next: unknown library iterator kind`.
+Both general emitters now refuse the construct by name (`a generator expression nested inside
+another generator expression (the inner one would be materialised eagerly, not lazily)`); a
+generator expression with no generator expression inside it, including one holding a list
+comprehension, still builds and matches CPython.  Added `AIL_CURRENT/test_ail_pre42.py`.  The other
+pre-existing items recorded by the pre28 reviewer (`r89` unclosed non-fused generator, cleanup lost
+when the element expression raises, non-bool `__bool__`) still differ and were not changed here.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
