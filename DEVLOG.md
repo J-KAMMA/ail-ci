@@ -1,5 +1,17 @@
 # DEVLOG
 
+## 2026-10-24 - qtest1: str search start/end bounds use __index__
+
+`str.startswith`/`endswith` (and `find`/`count`/`index`) read an instance start/end
+as its pointer payload after the general path's tag check rejected `AIL_T_INST`.
+`"abcabc".startswith(("bc",), Idx(1))` with an `__index__` class printed a caught
+TypeError where CPython returns True. The shared str window now converts an
+instance bound through `__index__` with CPython's slice-index messages (None still
+means the default bound), and the static check admits instances so the runtime
+conversion is reachable. Added `AIL_CURRENT/test_ail_qtest1.py`; tuple prefixes,
+empty prefixes, None, negative/huge bounds and wrong types stay compared on both
+builds.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

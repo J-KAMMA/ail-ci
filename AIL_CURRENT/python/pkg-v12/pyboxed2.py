@@ -8203,7 +8203,7 @@ class Compiler(boxclosure.ClosureMixin):
     }
     _ARG_BAD = {'s': '%(a)s.tag != AIL_T_STR', 'ts': '%(a)s.tag != AIL_T_STR && %(a)s.tag != AIL_T_TUPLE',
                 'sn': '%(a)s.tag != AIL_T_STR && %(a)s.tag != AIL_T_NONE',
-                'i': '%(a)s.tag != AIL_T_INT && %(a)s.tag != AIL_T_BOOL && %(a)s.tag != AIL_T_NONE',
+                'i': '%(a)s.tag != AIL_T_INT && %(a)s.tag != AIL_T_BOOL && %(a)s.tag != AIL_T_NONE && %(a)s.tag != AIL_T_INST',
                 'n': '%(a)s.tag != AIL_T_INT && %(a)s.tag != AIL_T_BOOL',
                 'it': '%(a)s.tag == AIL_T_INT || %(a)s.tag == AIL_T_FLOAT || %(a)s.tag == AIL_T_BOOL || %(a)s.tag == AIL_T_NONE'}
     _ARG_KINDS = {'it': ('list', 'tuple', 'str', 'dict', 'set', 'deque'), 's': ('str',), 'ts': ('str', 'tuple'), 'sn': ('str',), 'i': ('int', 'bool'), 'n': ('int', 'bool')}
@@ -8651,7 +8651,9 @@ class Compiler(boxclosure.ClosureMixin):
         """Emit the optional start/end arguments of a str search and return
         (has_lo, lo, has_hi, hi) as C expressions. CPython treats a None bound as
         "from the start" / "to the end", and the value may arrive through a variable,
-        list item, attribute or call, so the tag is tested at run time."""
+        list item, attribute or call, so the tag is tested at run time. An instance
+        bound is converted through __index__ exactly as CPython's PyNumber_AsSsize_t
+        does, so a start/end object is not read as its pointer payload."""
         out = []
         for pos in (1, 2):
             if len(args) <= pos:
@@ -8659,6 +8661,7 @@ class Compiler(boxclosure.ClosureMixin):
                 continue
             b = ctx.tmp()
             ctx.emit('%s = %s;' % (b, self.expr(args[pos], ctx)))
+            self._check_seq_index_bound(b, ctx, allow_none=True)
             out.extend(('(%s.tag != AIL_T_NONE)' % b,
                         '((%s.tag != AIL_T_NONE) ? (%s).i : 0)' % (b, b)))
         return out
@@ -8672,7 +8675,7 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.emit('%s = %s;' % (b, self.expr(arg, ctx)))
         return b
 
-    def _check_seq_index_bound(self, b, ctx):
+    def _check_seq_index_bound(self, b, ctx, allow_none=False):
         had = None
         if self.dunder_ops:
             fn = ctx.new_cvar('xfn')
@@ -8683,18 +8686,20 @@ class Compiler(boxclosure.ClosureMixin):
                      'if (%s) { ail_obj %s; %s = 1; st = %s(cx, &%s, %s); if (st != AIL_OK) goto %s; %s = %s; } }'
                      % (b, fn, b, fn, xv, had, fn, xv, b, ctx.cur_err_target(), b, xv))
         err = ctx.cur_err_target()
+        none = ' && %s.tag != AIL_T_NONE' % b if allow_none else ''
+        text = 'slice indices must be integers%s or have an __index__ method' % (' or None' if allow_none else '')
         if had is not None:
-            ctx.emit('if (%s.tag != AIL_T_INT && %s.tag != AIL_T_BOOL) { '
+            ctx.emit('if (%s.tag != AIL_T_INT && %s.tag != AIL_T_BOOL%s) { '
                      'if (%s) { const char *tn = ail__tname_c(%s); size_t n = strlen(tn) + 64; '
                      'char *buf = (char *)malloc(n); if (!buf) ail_die("out of memory"); '
                      'snprintf(buf, n, "__index__ returned non-int (type %%s)", tn); '
                      'st = ail_raise_c(cx, AIL_B_TYPEERROR, buf); free(buf); } else { st = ail_raise_c(cx, AIL_B_TYPEERROR, '
-                     '"slice indices must be integers or have an __index__ method"); } goto %s; }'
-                     % (b, b, had, b, err))
+                     '"%s"); } goto %s; }'
+                     % (b, b, none, had, b, text, err))
         else:
-            ctx.emit('if (%s.tag != AIL_T_INT && %s.tag != AIL_T_BOOL) { st = ail_raise_c(cx, AIL_B_TYPEERROR, '
-                     '"slice indices must be integers or have an __index__ method"); goto %s; }'
-                     % (b, b, err))
+            ctx.emit('if (%s.tag != AIL_T_INT && %s.tag != AIL_T_BOOL%s) { st = ail_raise_c(cx, AIL_B_TYPEERROR, '
+                     '"%s"); goto %s; }'
+                     % (b, b, none, text, err))
         ctx.uses_st = True
 
     def _m_index(self, recv, kind, args, kwargs, ctx):
