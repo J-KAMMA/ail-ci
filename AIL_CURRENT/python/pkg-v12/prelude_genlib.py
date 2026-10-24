@@ -4,7 +4,7 @@
 # math.isclose, statistics, datetime (see genlib.py, which picks the pieces a program uses and renames the library names
 # to these). The file is importable by CPython, so the tests can compare each function with the library.
 #
-# Integers are 64-bit; strings are 16-bit (a \ud800 escape or a character beyond U+FFFF is not built).
+# Integers are 64-bit; strings store one 32-bit code point per unit (a lone \ud800 escape is refused).
 import math
 
 
@@ -290,8 +290,14 @@ def _ail_json_string(s, n, end):
             if v < 0:
                 _ail_json_fail('Invalid \\uXXXX escape', s, end - 5)
             nxt = end
-            if v >= 55296 and v <= 57343:
-                raise ValueError('a surrogate escape in JSON text is not supported on the general path (strings are 16-bit)')
+            if v >= 0xD800 and v <= 0xDBFF and nxt + 6 <= n and s[nxt] == '\\' and s[nxt + 1] == 'u':
+                v2 = _ail_json_hexval(s, nxt + 2)
+                if v2 >= 0xDC00 and v2 <= 0xDFFF:
+                    v = 0x10000 + ((v - 0xD800) << 10) + (v2 - 0xDC00)
+                    nxt = nxt + 6
+                    end = nxt
+            if v >= 0xD800 and v <= 0xDFFF:
+                raise ValueError('a lone surrogate escape in JSON text is not supported on the general path')
             parts.append(chr(v))
     return (''.join(parts), end)
 

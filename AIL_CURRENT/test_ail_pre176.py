@@ -61,22 +61,57 @@ main()
 '''
 
 
+LONE = r'''import json
+
+
+class Holder:
+    def __init__(self, s):
+        self.s = s
+
+
+def take(s):
+    return json.loads(s)
+
+
+def attempt(s):
+    try:
+        take(s)
+    except ValueError:
+        return "Refused"
+    return "accepted"
+
+
+def main():
+    for text in ('"\\ud800"', '"\\udc00"', '"\\ud800x"',
+                 '"\\ud800\\ud800"', '"\\ud800\\u0041"', '"x\\udfff"'):
+        print(attempt(text))
+    print(attempt(Holder('"\\ud800"').s))
+    print(attempt({"k": '"\\udc00"'}["k"]))
+    pair = take('"\\ud83d\\ude00"')
+    print("accepted", len(pair), ord(pair))
+    print([ord(take('"\\ud7ff"')), ord(take('"\\ue000"')), ord(take('"\\uffff"'))])
+    print(attempt(['"\\udc00"'][0]))
+
+
+main()
+'''
+
 def surface(text):
     import ail_syntax
     return ail_syntax.fold_constants(ail_syntax.python_surface(text))
 
 
-def build(directory, general):
+def build(directory, general, program=PROGRAM):
     source = Path(directory, 'p.ail')
     exe = Path(directory, 'p_g' if general else 'p_d')
     env = dict(os.environ, AIL_NO_CACHE='1', AIL_IR='0')
     env.pop('AIL_NO_GENERAL', None)
     if general:
-        source.write_text(surface(PROGRAM), encoding='utf-8')
+        source.write_text(surface(program), encoding='utf-8')
         env['AIL_SURFACE'] = 'python'
         cmd = [sys.executable, '-B', str(PYC), exe.name, '--file', source.name, '--general-only']
     else:
-        source.write_text(PROGRAM, encoding='utf-8')
+        source.write_text(program, encoding='utf-8')
         cmd = [sys.executable, '-B', str(ROOT / 'ail_chatgpt.py'), 'compile', source.name,
                '--syntax', 'python', '-o', exe.name]
     return subprocess.run(cmd, cwd=directory, capture_output=True, text=True, timeout=900, env=env), exe
@@ -100,3 +135,18 @@ class Pre176NonBmpChr(unittest.TestCase):
 
     def test_default_build(self):
         self.check(False)
+
+    def check_lone(self, general):
+        with tempfile.TemporaryDirectory() as d:
+            res, exe = build(d, general, LONE)
+            self.assertEqual(res.returncode, 0, res.stderr[-2000:])
+            got = subprocess.run([str(exe)], cwd=d, capture_output=True, timeout=300)
+            want = (b'Refused\n' * 8) + b'accepted 1 128512\n[55295, 57344, 65535]\nRefused\n'
+            self.assertEqual(got.stdout, want, got.stderr[-500:])
+            self.assertEqual(got.returncode, 0, got.stderr[-500:])
+
+    def test_lone_surrogate_general_path(self):
+        self.check_lone(True)
+
+    def test_lone_surrogate_default_build(self):
+        self.check_lone(False)

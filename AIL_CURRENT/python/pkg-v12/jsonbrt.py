@@ -39,7 +39,7 @@ def _ail_json_string(s, n, end):
             _ail_json_fail('Invalid \\\\escape', s, r[1])
         if code == 4:
             _ail_json_fail('Invalid \\\\uXXXX escape', s, r[1])
-        raise ValueError('a surrogate escape in JSON text is not supported on the general path (strings are 16-bit)')
+        raise ValueError('a lone surrogate escape in JSON text is not supported on the general path')
     return r
 '''
 
@@ -214,6 +214,9 @@ static ail_st ail2j_scan(ail_ctx *cx, ail_obj *out, ail_obj so, ail_obj no, ail_
                     end = nxt;
                 }
             }
+            /* A lone surrogate is not a scalar value: refuse it by name, as the base did,
+               rather than storing it and later writing invalid UTF-8 from print()/encode(). */
+            if (v >= 0xD800 && v <= 0xDFFF) { free(buf); return ail2j_fail(cx, out, 0, 5); }
             buf[bn++] = (uint32_t)v;
         }
     }

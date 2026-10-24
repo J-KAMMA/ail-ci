@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - review fix: lone JSON surrogate escapes refused by name (job-pre176-10250447)
+
+The widened string backing let `json.loads('"\ud800"')` produce a lone surrogate value, which
+`print()` and `encode()` then wrote as raw invalid UTF-8 (`ed a0 80`) instead of raising
+`UnicodeEncodeError` as CPython does. Strings on this runtime cannot hold non-scalar values
+(only JSON's `\u` escapes could introduce one), so the JSON scanner refuses a high surrogate not
+followed by a low surrogate, and a low surrogate on its own, by name again: the same
+`ValueError: a lone surrogate escape in JSON text is not supported on the general path` the base
+raised. Valid surrogate pairs still decode to one non-BMP code point. Added the lone-surrogate
+cases (argument, attribute, dict value, valid pair) to `test_ail_pre176.py`.
+
 ## 2026-10-24 - dynamic non-BMP chr() on the general path (job-pre176-10250447)
 
 A dynamic `chr(n)` with `n > 0xFFFF` failed on the general path because the v2 string backing stored
