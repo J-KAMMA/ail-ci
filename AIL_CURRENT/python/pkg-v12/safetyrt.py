@@ -972,29 +972,48 @@ static inline ail_st ail2f_percent(ail_ctx *cx, ail_obj *out, ail_obj fmtobj, ai
         } else if (t == 'd' || t == 'i' || t == 'u' || t == 'o' || t == 'x' || t == 'X') {
             int64_t iv;
             if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) iv = arg.i;
-            else if (arg.tag == AIL_T_FLOAT && (t == 'd' || t == 'i' || t == 'u')) {
+            char *fdigits = NULL;
+            int fneg = 0;
+            if (arg.tag == AIL_T_FLOAT && (t == 'd' || t == 'i' || t == 'u')) {
                 double d = ail_float_val(arg);
                 if (isnan(d)) { st = ail_raise_c(cx, AIL_B_VALUEERROR, "cannot convert float NaN to integer"); goto fail; }
                 if (isinf(d)) { st = ail_raise_c(cx, AIL_B_OVERFLOWERROR, "cannot convert float infinity to integer"); goto fail; }
-                if (d >= 9223372036854775808.0 || d < -9223372036854775808.0) { st = ail_hit_limit(cx, "integer overflow", "int64"); goto fail; }
-                iv = (int64_t)d;
-            } else {
+                double it = trunc(fabs(d));
+                fneg = it != 0.0 && d < 0.0;
+                int need = snprintf(NULL, 0, "%.0f", it);
+                if (need < 0) { st = ail_hit_limit(cx, "format_int", "formatting a float as an integer failed"); goto fail; }
+                fdigits = (char *)malloc((size_t)need + 1);
+                if (!fdigits) { st = ail_hit_limit(cx, "format_int", "out of memory"); goto fail; }
+                snprintf(fdigits, (size_t)need + 1, "%.0f", it);
+            } else if (!(arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL)) {
                 if (t == 'd' || t == 'i' || t == 'u') snprintf(msg, sizeof msg, "%%%c format: a real number is required, not %s", (char)t, ail_type_name(arg.tag));
                 else snprintf(msg, sizeof msg, "%%%c format: an integer is required, not %s", (char)t, ail_type_name(arg.tag));
                 st = ail_raise_c(cx, AIL_B_TYPEERROR, msg); goto fail;
             }
-            uint64_t m = iv < 0 ? (uint64_t)0 - (uint64_t)iv : (uint64_t)iv;
-            int base = t == 'o' ? 8 : (t == 'x' || t == 'X') ? 16 : 10;
-            const char *dig = t == 'X' ? "0123456789ABCDEF" : "0123456789abcdef";
-            char tmp[80], body[200]; int k = 0;
-            do { tmp[k++] = dig[m % (uint64_t)base]; m /= (uint64_t)base; } while (m);
-            int z = 0;
-            if (f.has_prec) while (k + z < f.prec && k + z < 150) body[z++] = '0';
-            for (int q = 0; q < k; q++) body[z + q] = tmp[k - 1 - q];
-            body[z + k] = 0;
-            const char *prefix = !f.alt ? "" : base == 8 ? "0o" : t == 'X' ? "0X" : base == 16 ? "0x" : "";
-            f.type = 'd'; f.has_prec = 0;
-            piece = ail2f_pad_num(cx, ail2f_signstr(iv < 0, f.sign), prefix, body, &f);
+            if (fdigits) {
+                int64_t k = (int64_t)strlen(fdigits), z = 0;
+                if (f.has_prec && f.prec > k) z = f.prec - k;
+                char *body = (char *)malloc((size_t)(z + k) + 1);
+                if (!body) { free(fdigits); st = ail_hit_limit(cx, "format_int", "out of memory"); goto fail; }
+                memset(body, '0', (size_t)z);
+                memcpy(body + z, fdigits, (size_t)k + 1);
+                f.type = 'd'; f.has_prec = 0;
+                piece = ail2f_pad_num(cx, ail2f_signstr(fneg, f.sign), "", body, &f);
+                free(body); free(fdigits);
+            } else {
+                uint64_t m = iv < 0 ? (uint64_t)0 - (uint64_t)iv : (uint64_t)iv;
+                int base = t == 'o' ? 8 : (t == 'x' || t == 'X') ? 16 : 10;
+                const char *dig = t == 'X' ? "0123456789ABCDEF" : "0123456789abcdef";
+                char tmp[80], body[200]; int k = 0;
+                do { tmp[k++] = dig[m % (uint64_t)base]; m /= (uint64_t)base; } while (m);
+                int z = 0;
+                if (f.has_prec) while (k + z < f.prec && k + z < 150) body[z++] = '0';
+                for (int q = 0; q < k; q++) body[z + q] = tmp[k - 1 - q];
+                body[z + k] = 0;
+                const char *prefix = !f.alt ? "" : base == 8 ? "0o" : t == 'X' ? "0X" : base == 16 ? "0x" : "";
+                f.type = 'd'; f.has_prec = 0;
+                piece = ail2f_pad_num(cx, ail2f_signstr(iv < 0, f.sign), prefix, body, &f);
+            }
         } else if (t == 'e' || t == 'E' || t == 'f' || t == 'F' || t == 'g' || t == 'G') {
             double d;
             if (arg.tag == AIL_T_FLOAT) d = ail_float_val(arg);
