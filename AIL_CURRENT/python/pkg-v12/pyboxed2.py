@@ -2187,6 +2187,7 @@ class Compiler(boxclosure.ClosureMixin):
         # used only to refuse a property read from the class instead of looking it up as an attribute.
         self.class_containers = {}
         self.class_fields = set()
+        self.class_container_alias = {}
         self.param_class = set()
         for call in ast.walk(tree):
             if (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
@@ -3614,27 +3615,101 @@ class Compiler(boxclosure.ClosureMixin):
         out.sort(key=depth, reverse=True)
         return out
 
+    _CLASS_MUTATORS = frozenset({
+        'append', 'appendleft', 'clear', 'extend', 'extendleft', 'insert', 'pop', 'popleft',
+        'remove', 'reverse', 'rotate', 'sort', 'update', 'popitem', 'setdefault',
+        '__setitem__', '__delitem__', '__iadd__', '__imul__'})
+
+    def _forget_class_container(self, name):
+        self.class_containers.pop(name, None)
+        group = self.class_container_alias.pop(name, None)
+        if group is not None:
+            group.discard(name)
+
+    def _drop_class_container(self, node):
+        """An item write, deletion or mutating method call changes a container that was recorded as
+        carrying class values, so a later `name[i]` is no longer known to be a class.  A simple name
+        assigned the same container aliases it, and every alias is dropped together."""
+        if isinstance(node, ast.Subscript):
+            node = node.value
+        if not isinstance(node, ast.Name):
+            return
+        group = self.class_container_alias.get(node.id)
+        if group is None:
+            self.class_containers.pop(node.id, None)
+            return
+        for name in list(group):
+            self.class_containers.pop(name, None)
+            self.class_container_alias.pop(name, None)
+            group.discard(name)
+
+    def _drop_class_field(self, node, ctx):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            c = self._inst_class(node.value, ctx)
+            if c:
+                self.class_fields.discard((c, node.attr))
+
+    def _mutation_keeps_classes(self, call, ctx):
+        """A mutating method on a recorded all-class container keeps the record only while every value
+        it adds also carries a class; removing an item keeps the remaining ones class-valued."""
+        attr = call.func.attr
+        if attr in ('append', 'appendleft'):
+            values = call.args
+        elif attr == 'insert':
+            values = call.args[1:]
+        elif attr in ('extend', 'extendleft', 'update'):
+            values = list(call.args) + [kw.value for kw in call.keywords]
+        elif attr == 'setdefault':
+            values = list(call.args) + [kw.value for kw in call.keywords]
+        elif attr == '__setitem__':
+            values = call.args[1:] if len(call.args) >= 2 else call.args
+        elif attr == 'clear':
+            return False
+        else:
+            return True
+        return bool(values) and all(self._is_class_value(v, ctx) for v in values)
+
     def _track_class_data(self, value, targets, ctx):
         """Remember simple data that carries class values, for _is_class_value (a list/dict literal
-        of classes, or a field assigned one).  A later plain assignment drops the container record."""
+        of classes, or a field assigned one).  A later plain assignment, item write, deletion or
+        mutating method call drops the record."""
         carries = self._is_class_value(value, ctx)
+        alias_kind = None
+        alias_group = None
+        if isinstance(value, ast.Name) and value.id in self.class_containers:
+            alias_kind = self.class_containers[value.id]
+            alias_group = self.class_container_alias.setdefault(value.id, {value.id})
         for target in targets:
             if isinstance(target, ast.Name):
-                self.class_containers.pop(target.id, None)
+                self._forget_class_container(target.id)
+            elif isinstance(target, ast.Subscript):
+                if not carries:
+                    self._drop_class_container(target)
             elif isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name):
                 c = self._inst_class(target.value, ctx)
-                if c and carries:
-                    self.class_fields.add((c, target.attr))
-        if isinstance(value, (ast.List, ast.Tuple)) and value.elts and \
+                if c:
+                    if carries:
+                        self.class_fields.add((c, target.attr))
+                    else:
+                        self.class_fields.discard((c, target.attr))
+        if alias_kind is not None:
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    self.class_containers[target.id] = alias_kind
+                    self.class_container_alias[target.id] = alias_group
+                    alias_group.add(target.id)
+        elif isinstance(value, (ast.List, ast.Tuple)) and value.elts and \
                 all(self._is_class_value(e, ctx) for e in value.elts):
             for target in targets:
                 if isinstance(target, ast.Name):
                     self.class_containers[target.id] = 'seq'
+                    self.class_container_alias[target.id] = {target.id}
         elif isinstance(value, ast.Dict) and value.values and \
                 all(self._is_class_value(v, ctx) for v in value.values):
             for target in targets:
                 if isinstance(target, ast.Name):
                     self.class_containers[target.id] = 'dict'
+                    self.class_container_alias[target.id] = {target.id}
 
     def _is_class_value(self, node, ctx):
         """True when this expression provably carries a class value (a name, an alias, an item of a
@@ -5460,6 +5535,9 @@ class Compiler(boxclosure.ClosureMixin):
             if kw.arg is None:
                 raise Unsupported('a **kwargs call argument')
         f = node.func
+        if isinstance(f, ast.Attribute) and f.attr in self._CLASS_MUTATORS:
+            if not self._mutation_keeps_classes(node, ctx):
+                self._drop_class_container(f.value)
         if (isinstance(f, ast.Call) and isinstance(f.func, ast.Name) and f.func.id == 'getattr'
                 and 'getattr' not in self.functions and len(f.args) == 2 and not f.keywords
                 and isinstance(f.args[1], ast.Constant) and isinstance(f.args[1].value, str)
@@ -9880,6 +9958,13 @@ class Compiler(boxclosure.ClosureMixin):
              ast.RShift: 'ail_op_rshift'}
 
     def stmt_AugAssign(self, node, ctx):
+        if isinstance(node.target, ast.Name) and node.target.id in self.class_containers and \
+                (isinstance(node.op, ast.Mult) or
+                 (isinstance(node.op, ast.Add) and self._is_class_value(node.value, ctx))):
+            pass                    # every value stays class-valued (`xs += [C]`, `xs *= 2`)
+        else:
+            self._drop_class_container(node.target)
+        self._drop_class_field(node.target, ctx)
         fn = self.AUG_FN.get(type(node.op))
         setfn = self._SET_OP_FN.get(type(node.op))
         if setfn and isinstance(node.target, ast.Name) and \
@@ -10109,6 +10194,10 @@ class Compiler(boxclosure.ClosureMixin):
 
     def stmt_Delete(self, node, ctx):
         for target in node.targets:
+            if isinstance(target, ast.Name):
+                self._forget_class_container(target.id)
+            elif isinstance(target, ast.Attribute):
+                self._drop_class_field(target, ctx)
             if isinstance(target, ast.Name):
                 if (not self._is_global_name(target.id, ctx) and target.id in ctx.slot_of
                         and target.id not in ctx.ptr_names and target.id not in ctx.clo_index):

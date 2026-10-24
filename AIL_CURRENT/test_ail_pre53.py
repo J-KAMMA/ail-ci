@@ -289,12 +289,134 @@ main()
 }
 
 
+REBOUND_TO_INSTANCES = {
+    'field': '''
+class C:
+    @property
+    def p(self):
+        return 1
+
+
+class H:
+    pass
+
+
+def main():
+    h = H()
+    h.o = C
+    h.o = C()
+    print(h.o.p)
+
+
+main()
+''',
+    'list_item': '''
+class C:
+    @property
+    def p(self):
+        return 1
+
+
+def main():
+    xs = [C]
+    xs[0] = C()
+    print(xs[0].p)
+
+
+main()
+''',
+    'list_append': '''
+class C:
+    @property
+    def p(self):
+        return 1
+
+
+def main():
+    xs = [C]
+    xs.append(C())
+    print(xs[1].p)
+
+
+main()
+''',
+    'list_extend': '''
+class C:
+    @property
+    def p(self):
+        return 1
+
+
+def main():
+    xs = [C]
+    xs.extend([C()])
+    print(xs[1].p)
+
+
+main()
+''',
+    'list_delitem': '''
+class C:
+    @property
+    def p(self):
+        return 1
+
+
+def main():
+    xs = [C, C()]
+    del xs[0]
+    print(xs[0].p)
+
+
+main()
+''',
+    'dict_value': '''
+class C:
+    @property
+    def p(self):
+        return 1
+
+
+def main():
+    d = {'k': C}
+    d['k'] = C()
+    print(d['k'].p)
+
+
+main()
+''',
+    'dict_update': '''
+class C:
+    @property
+    def p(self):
+        return 1
+
+
+def main():
+    d = {'k': C}
+    d.update(k=C())
+    print(d['k'].p)
+
+
+main()
+''',
+}
+
+
 @unittest.skipUnless(HAVE_CC, 'gcc is required')
 class PropertyFromClass(unittest.TestCase):
     def test_refused_by_name(self):
         for name, text in sorted(PROPERTY_FROM_CLASS.items()):
             with self.subTest(name):
                 check_refused(self, 'refuse_' + name, text)
+
+
+@unittest.skipUnless(HAVE_CC, 'gcc is required')
+class ClassDataReboundToInstances(unittest.TestCase):
+    def test_mutation_drops_the_class_record(self):
+        for name, text in sorted(REBOUND_TO_INSTANCES.items()):
+            with self.subTest(name):
+                check_program(self, 'rebound_' + name, text)
 
 
 @unittest.skipUnless(HAVE_CC, 'gcc is required')

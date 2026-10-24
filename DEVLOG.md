@@ -1,3 +1,13 @@
+## 2026-10-24 - pre53 review: rebinding and mutation drop class-carrying data
+
+The property-from-class refusal remembered class-carrying fields and containers forever, so a field
+later rebound to an instance (`h.o = C(); h.o = C()`) and a `[C]` list / `{'k': C}` dict later given
+an instance element (`xs[0] = C()`, `xs.append(C())`, `d['k'] = C()`) were still refused.  Whole-name
+assignment, item writes that add a non-class value, deletions and mutating method calls now drop the
+record; a method that only adds class values (`xs.append(C)`, `xs += [C]`) keeps it, and simple
+container aliases share one record so a mutation through `ys = xs` also invalidates `xs`.  Added
+these cases to `AIL_CURRENT/test_ail_pre53.py`.
+
 # DEVLOG
 
 ## 2026-10-24 - pre53: property objects read from a class, and class-attribute shadowing
