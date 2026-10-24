@@ -30861,7 +30861,9 @@ def _dispatcher(sname, m, impls, owners, classes, by_name):
     on the run-time class, compiled like any other function. Its parameters are the methods' own."""
     fns = [by_name[classes[o].method_cname(m)] for o in impls]
     own = _resolve_method(classes, sname, m)
-    rep = by_name[classes[own].method_cname(m)] if own is not None else fns[0]
+    rep = by_name.get(classes[own].method_cname(m)) if own is not None else None
+    if rep is None:
+        rep = fns[0]
     def shown(f):
         return f.name.replace('__', '.')
     for f in fns:
