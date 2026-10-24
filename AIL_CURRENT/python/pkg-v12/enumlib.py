@@ -459,6 +459,9 @@ class Uses(ast.NodeTransformer):
     def visit_Call(self, node):
         info = self.enum_of(node.func)
         if info is not None:
+            if not info.members and not info.aliases:
+                refuse(node, 'enum class %s has no members this compiler builds; calling an empty %s is not built '
+                       '(CPython raises TypeError); give it at least one plain member' % (info.name, info.kind))
             if len(node.args) != 1 or node.keywords:
                 refuse(node, 'enum %s(...): one value is built (Color(1)); the functional API is not' % info.name)
             self.generic_visit(node)
