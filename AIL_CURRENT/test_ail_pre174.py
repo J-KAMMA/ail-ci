@@ -4,7 +4,9 @@
 the intermediate `2**E*2` is 2**63.  CPython's integers are unbounded, so the
 module-constant folder now evaluates the whole expression exactly and checks
 only the final value.  The same expressions are folded where the value is used:
-as a call argument, a list item, an attribute value and a dict value.  The
+as a call argument, a list item, an attribute value and a dict value.  Only
+expressions that read a module constant are folded, and never inside a
+comprehension or a nested scope where the spelling may be a local.  The
 general emitters also read the single literal `-9223372036854775808` as INT64_MIN
 instead of refusing its positive operand.  Results that do not fit int64 still
 stop with `integer overflow`.
@@ -15,6 +17,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+import ail_syntax
 
 ROOT = Path(__file__).resolve().parent
 
@@ -44,7 +48,6 @@ print(c.v, c.w)
 d = {"min": -(2**E*2), "max": 2**E+2**E-1}
 print(d["min"], d["max"])
 print((2**E*2) - (2**E*2) - 1)
-print(2**62 * 2 - 1)
 '''
 
 ASSIGN = r'''E = 62
@@ -56,14 +59,22 @@ B = 0
 print(A, B)
 '''
 
-FUNCTION_LITERAL = r'''def main():
-    print(-(2**62*2))
-    print(2**62+2**62-1)
-    print(-(2**64 - 2**63))
-    print(~(2**63 - 1))
+COMPREHENSION = r'''x = 10
+print([x + 1 for x in range(3)])
+print(list(x + 1 for x in range(3)))
+print({x + 1 for x in range(3)})
+print({x: x + 1 for x in range(3)})
+print(x)
+E = 62
+print([E // 2 for E in range(4)])
+print(sum(E + 1 for E in range(3)))
+print(E)
+print([x ** 2 for x in [3]])
+'''
 
-
-main()
+PLAIN = r'''print(3 + 4)
+print([1 + 2, 3 * 4])
+print(2 ** 10)
 '''
 
 MIN_LITERAL = r'''print(-9223372036854775808)
@@ -76,11 +87,6 @@ print(C().v)
 def f():
     return -9223372036854775808
 print(f())
-'''
-
-PURE_LITERAL_MAX = r'''print(2**63 - 1)
-print(2**63 - 2**63)
-print(-(2**64 - 2**63))
 '''
 
 OUT_OF_RANGE = r'''print(2**63)
@@ -134,14 +140,15 @@ class Pre174Tests(unittest.TestCase):
     def test_assigned_and_rebound(self):
         self.check('assigned', ASSIGN)
 
-    def test_function_literal_boundaries(self):
-        self.check('function_literal', FUNCTION_LITERAL)
+    def test_comprehension_targets_are_not_module_constants(self):
+        self.check('comprehension', COMPREHENSION)
+
+    def test_plain_expressions_are_not_folded(self):
+        self.check('plain', PLAIN)
+        self.assertEqual(ail_syntax.fold_constants(PLAIN), PLAIN)
 
     def test_min_literal_positions(self):
         self.check('min_literal', MIN_LITERAL)
-
-    def test_pure_literal_max_and_exact_intermediates(self):
-        self.check('pure_literal', PURE_LITERAL_MAX)
 
     def test_out_of_range_result_still_stops(self):
         text = OUT_OF_RANGE

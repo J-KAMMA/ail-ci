@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - pre174 review fixes: narrow the fold, keep comprehension targets (job-pre174-10250445)
+
+The review found that the new `_fold_expressions` was too broad. It substituted a module constant
+for a comprehension loop target of the same spelling (`x = 10; [x + 1 for x in range(3)]` printed
+`[11, 11, 11]`), and it folded every literal expression such as `print(3 + 4)`, changing the
+generated C of programs that do not use the feature. Name substitution is now suppressed inside
+`ListComp`/`SetComp`/`DictComp`/`GeneratorExp` (as it already was in def/class/lambda), and only a
+maximal constant expression that actually reads a known module constant is rewritten. Ordinary
+literal expressions are left for the emitter, so their C is unchanged. Exact-intermediate folding
+(`_fold_exact`) and the INT64_MIN literal support in both general emitters are unchanged. The test
+module now covers comprehensions and asserts that a plain expression source is not folded (7 tests,
+both builds).
+
 ## 2026-10-24 - int64-boundary constant expressions fold exactly (job-pre174-10250445)
 
 The module-constant folder evaluated every step of a constant expression as an int64, so

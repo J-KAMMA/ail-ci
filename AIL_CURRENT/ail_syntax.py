@@ -775,32 +775,36 @@ def _module_scope_bindings(tree):
 
 
 def _fold_expressions(node, known, edits, allow_names=True):
-    """Rewrite the maximal constant subexpression of `node` to its literal. A name may only be
-    replaced where the module scope is the scope that is read: inside a def/class/lambda a local of
-    the same spelling would shadow the module constant, so only literal-only expressions fold there."""
+    """Rewrite a maximal constant expression that reads a module constant. Only an expression that
+    uses `known` is rewritten: folding `3 + 4` would change C for programs that do not use the
+    feature. A name may only be replaced where the module scope is the scope that is read: inside a
+    def/class/lambda, or a comprehension, the same spelling may be a local or a loop target, so
+    names are not substituted there."""
     if isinstance(node, (ast.Name, ast.Constant)):
         return
-    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda,
+                         ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
         allow_names = False
-    if (isinstance(node, (ast.UnaryOp, ast.BinOp))
-            and (allow_names or not any(isinstance(n, ast.Name) for n in ast.walk(node)))):
-        try:
-            value = _fold(node, known)
-        except (_NotConstant, ArithmeticError, ValueError, TypeError, RecursionError):
-            pass
-        else:
-            if not _is_literal(node):
-                edits.append((node, repr(value)))
-            return
+    if isinstance(node, (ast.UnaryOp, ast.BinOp)) and allow_names:
+        uses_known = any(isinstance(name, ast.Name) and name.id in known for name in ast.walk(node))
+        if uses_known:
+            try:
+                value = _fold(node, known)
+            except (_NotConstant, ArithmeticError, ValueError, TypeError, RecursionError):
+                pass
+            else:
+                if not _is_literal(node):
+                    edits.append((node, repr(value)))
+                return
     for child in ast.iter_child_nodes(node):
         _fold_expressions(child, known, edits, allow_names)
 
 
 def fold_constants(text):
     """`NAME = <constant arithmetic>` bound once in module scope, rewritten to its literal value,
-    and every maximal constant expression at module scope rewritten the same way. A name that a
-    nested block, a loop or a `global` function rebinds is not folded: its value at the line that
-    reads it is not the first one. Intermediates are evaluated exactly, so an answer that fits
+    and maximal constant expressions that read such a name rewritten where they are used. A name
+    that a nested block, a loop or a `global` function rebinds is not folded: its value at the line
+    that reads it is not the first one. Intermediates are evaluated exactly, so an answer that fits
     int64 is folded even when a step on the way to it does not."""
     try:
         tree = ast.parse(text)
