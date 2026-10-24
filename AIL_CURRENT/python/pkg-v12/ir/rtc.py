@@ -87,8 +87,8 @@ _entry('fmt_int', (N,), (S,), 'ail_fmt_spec_int({A}, {0}, {width}, {align}, {zer
        parts=('STR', 'FMT'), arena='s', attrs=('width', 'align', 'zero', 'fill'))
 _entry('fmt_float', (F,), (S,), 'ail_fmt_spec_float({A}, {0}, {width}, {align}, {zero}, {prec}, {fill})', _ALLOC,
        parts=('STR', 'FREPR', 'FMT'), arena='s', attrs=('width', 'align', 'zero', 'prec', 'fill'))
-_entry('fmt_str', (S,), (S,), 'ail_fmt_spec_str({A}, {0}, {width}, {align}, {prec})', _ALLOC,
-       parts=('STR', 'FMT'), arena='s', attrs=('width', 'align', 'prec'))
+_entry('fmt_str', (S,), (S,), 'ail_fmt_gen_str({A}, {0}, {fill}, {align}, {width}, {prec})', _ALLOC,
+       parts=('STR', 'FMT', 'FMTGEN'), arena='s', attrs=('width', 'align', 'fill', 'prec'))
 
 # --- numbers from text
 _entry('str_to_int', (S,), (N,), 'ail_str_to_int({0})', Effects(raises=[VALUE]), parts=('STR',))
