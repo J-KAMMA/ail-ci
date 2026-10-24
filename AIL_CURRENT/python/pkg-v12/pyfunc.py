@@ -7160,10 +7160,12 @@ def _check_utf8_codec_args(node):
         if keyword.arg not in ('encoding', 'errors') or keyword.arg in values:
             raise Unsupported('invalid or duplicate UTF-8 conversion argument')
         values[keyword.arg] = keyword.value
+    import safetyrt
     for name, value in values.items():
         if not _is_strlit(value):
             raise Unsupported('UTF-8 encoding and errors must be string literals')
-        if (name == 'encoding' and value.value.lower().replace('_', '-') not in ('utf-8', 'utf8')
+        norm = safetyrt.normalize_encoding_name(value.value)
+        if (name == 'encoding' and norm not in ('utf_8', 'utf8', 'u8', 'utf', 'cp65001', 'utf8_ucs2', 'utf8_ucs4')
                 or name == 'errors' and value.value != 'strict'):
             raise Unsupported('only UTF-8 with strict errors is supported')
 

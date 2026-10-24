@@ -29,17 +29,37 @@ def _ail_b_raise():
     raise ValueError(m)
 
 
+def _ail_b_codec_name(encoding):
+    parts = []
+    punct = False
+    for c in encoding:
+        o = ord(c)
+        if (o >= 48 and o <= 57) or (o >= 65 and o <= 90) or (o >= 97 and o <= 122) or o == 46:
+            if punct and parts:
+                parts.append("_")
+            if o >= 65 and o <= 90:
+                c = chr(o + 32)
+            parts.append(c)
+            punct = False
+        else:
+            punct = True
+    return "".join(parts)
+
+
 def _ail_b_codec(encoding):
     if not isinstance(encoding, str):
         raise TypeError("encode() argument 'encoding' must be str, not " + type(encoding).__name__)
-    e = encoding.lower().replace("_", "-").replace(" ", "-")
-    if e in ("utf-8", "utf8", "u8", "utf", "cp65001", "utf8-ucs2", "utf8-ucs4"):
+    e = _ail_b_codec_name(encoding)
+    if (e == "utf_8" or e == "utf8" or e == "u8" or e == "utf" or e == "cp65001" or e == "utf8_ucs2"
+            or e == "utf8_ucs4"):
         return 0
-    if e in ("ascii", "us-ascii", "646", "us", "ansi-x3.4-1968", "ansi-x3.4-1986", "ansi-x3-4-1968",
-             "cp367", "csascii", "ibm367", "iso646-us", "iso-646.irv-1991", "iso-ir-6"):
+    if (e == "ascii" or e == "us_ascii" or e == "646" or e == "us" or e == "ansi_x3.4_1968"
+            or e == "ansi_x3.4_1986" or e == "ansi_x3_4_1968" or e == "cp367" or e == "csascii" or e == "ibm367"
+            or e == "iso646_us" or e == "iso_646.irv_1991" or e == "iso_ir_6"):
         return 1
-    if e in ("latin-1", "latin1", "iso-8859-1", "iso8859-1", "iso8859", "8859", "cp819", "l1", "latin",
-             "iso-ir-100", "csisolatin1", "ibm819", "iso-8859-1-1987"):
+    if (e == "latin_1" or e == "latin1" or e == "iso_8859_1" or e == "iso8859_1" or e == "8859" or e == "cp819"
+            or e == "l1" or e == "latin" or e == "iso_ir_100" or e == "csisolatin1" or e == "ibm819"
+            or e == "iso8859" or e == "iso_8859_1_1987"):
         return 2
     raise LookupError("unknown encoding: " + encoding)
 
