@@ -1327,6 +1327,20 @@ static inline ail_st ail2a_cname(ail_ctx *cx, ail_obj name, char *buf, size_t n)
     buf[k] = 0;
     return AIL_OK;
 }
+/* ail2a_cname into a buffer sized for the name: the encoder writes at most 3 bytes per
+   code point, so a long attribute name is no longer truncated (and `heap` says whether the
+   returned buffer must be freed). */
+static inline ail_st ail2a_cname_sized(ail_ctx *cx, ail_obj name, char *sbuf, size_t sn,
+                                       char **out, int *heap) {
+    int64_t units = name.tag == AIL_T_STR ? ail_view_to_str(name).n : 0;
+    size_t need = (size_t)(units > 0 ? units : 0) * 3 + 1;
+    char *buf = need <= sn ? sbuf : (char *)ail_xmalloc(need);
+    *heap = buf != sbuf;
+    ail_st st = ail2a_cname(cx, name, buf, need <= sn ? sn : need);
+    if (st != AIL_OK) { if (*heap) free(buf); return st; }
+    *out = buf;
+    return AIL_OK;
+}
 static inline int ail2a_streq(ail_obj s, const char *lit) {
     if (s.tag != AIL_T_STR) return 0;
     ail_str v = ail_view_to_str(s);
@@ -1350,12 +1364,25 @@ static inline ail_st ail2a_need_inst(ail_ctx *cx, ail_obj obj, const char *fn) {
 }
 /* getattr(obj, name[, default]); is_method: the class of obj has a method of that name */
 static inline ail_st ail2a_getattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_obj name, int has_dflt, ail_obj dflt) {
-    char buf[256]; ail_st st = ail2a_cname(cx, name, buf, sizeof buf); if (st != AIL_OK) return st;
-    if ((st = ail2a_need_inst(cx, obj, "getattr")) != AIL_OK) return st;
+    char sbuf[256], *buf; int heap;
+    ail_st st = ail2a_cname_sized(cx, name, sbuf, sizeof sbuf, &buf, &heap); if (st != AIL_OK) return st;
+    if ((st = ail2a_need_inst(cx, obj, "getattr")) != AIL_OK) { if (heap) free(buf); return st; }
     ail_prop *pr = ail_inst_find_prop_name(cx, obj, buf);
-    if (pr && pr->get) return pr->get(cx, out, obj);
-    if (ail2a_find(cx, obj, buf, out)) return AIL_OK;
-    if (has_dflt) { *out = dflt; return AIL_OK; }
+    if (pr && pr->get) {
+        /* A getter that raises AttributeError makes the attribute "missing"; with a default
+           getattr() returns it (CPython), without one the error propagates unchanged. */
+        st = pr->get(cx, out, obj);
+        if (st == AIL_EXC && has_dflt && ail_exc_matches_b(cx, AIL_B_ATTRIBUTEERROR)) {
+            ail_exc_clear(cx);
+            *out = dflt;
+            if (heap) free(buf);
+            return AIL_OK;
+        }
+        if (heap) free(buf);
+        return st;
+    }
+    if (ail2a_find(cx, obj, buf, out)) { if (heap) free(buf); return AIL_OK; }
+    if (has_dflt) { *out = dflt; if (heap) free(buf); return AIL_OK; }
     char m[320]; snprintf(m, sizeof m, "'%s' object has no attribute '%s'", ail_type_name(obj.tag), buf);
     if (obj.tag == AIL_T_INST && ((ail_instobj *)obj.o)->cls.tag == AIL_T_CLASS) {
         ail_str cn = ail_view_to_str(((ail_classobj *)((ail_instobj *)obj.o)->cls.o)->name);
@@ -1364,23 +1391,29 @@ static inline ail_st ail2a_getattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_o
         cb[k] = 0;
         snprintf(m, sizeof m, "'%s' object has no attribute '%s'", cb, buf);
     }
-    return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, m);
+    st = ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, m);
+    if (heap) free(buf);
+    return st;
 }
 static inline ail_st ail2a_hasattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_obj name, int is_method) {
-    char buf[256]; ail_st st = ail2a_cname(cx, name, buf, sizeof buf); if (st != AIL_OK) return st;
-    if (is_method) { *out = ail_box_bool(1); return AIL_OK; }
-    if ((st = ail2a_need_inst(cx, obj, "hasattr")) != AIL_OK) return st;
+    char sbuf[256], *buf; int heap;
+    ail_st st = ail2a_cname_sized(cx, name, sbuf, sizeof sbuf, &buf, &heap); if (st != AIL_OK) return st;
+    if (is_method) { *out = ail_box_bool(1); if (heap) free(buf); return AIL_OK; }
+    if ((st = ail2a_need_inst(cx, obj, "hasattr")) != AIL_OK) { if (heap) free(buf); return st; }
     ail_obj v; *out = ail_box_bool(ail2a_find(cx, obj, buf, &v));
+    if (heap) free(buf);
     return AIL_OK;
 }
 static inline ail_st ail2a_setattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_obj name, ail_obj v) {
-    char buf[256]; ail_st st = ail2a_cname(cx, name, buf, sizeof buf); if (st != AIL_OK) return st;
-    if ((st = ail2a_need_inst(cx, obj, "setattr")) != AIL_OK) return st;
+    char sbuf[256], *buf; int heap;
+    ail_st st = ail2a_cname_sized(cx, name, sbuf, sizeof sbuf, &buf, &heap); if (st != AIL_OK) return st;
+    if ((st = ail2a_need_inst(cx, obj, "setattr")) != AIL_OK) { if (heap) free(buf); return st; }
     int64_t id = -1;
     for (int64_t i = 0; i < cx->intern_n; i++) if (strcmp(cx->intern_tab[i], buf) == 0) { id = i; break; }
     if (id < 0) { char *dup = (char *)ail_xmalloc(strlen(buf) + 1); strcpy(dup, buf); id = ail_intern(cx, dup); }
     st = ail_inst_setattr_chk(cx, obj, id, v);
     *out = ail_box_none();
+    if (heap) free(buf);
     return st;
 }
 static inline ail_st ail2a_vars(ail_ctx *cx, ail_obj *out, ail_obj obj) {

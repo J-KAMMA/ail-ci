@@ -16572,14 +16572,25 @@ static inline ail_st ail_inst_setattr_chk(ail_ctx *cx, ail_obj inst, int64_t nam
     ail_prop *pr = ail_inst_find_prop(inst, name_id);
     if (pr) {
         if (!pr->set) {
-            /* CPython: `property 'x' of 'C' object has no setter` (the run-time class's name) */
-            ail_str cn = ail_view_to_str(((ail_classobj *)((ail_instobj *)inst.o)->cls.o)->name);
-            char cb[100]; size_t k = 0;
-            for (int64_t i = 0; i < cn.n && k + 1 < sizeof cb; i++) cb[k++] = (char)ail_chr(cn, i);
-            cb[k] = 0;
-            char m[256]; snprintf(m, sizeof m, "property '%s' of '%s' object has no setter",
-                                  cx->intern_tab[name_id], cb);
-            return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, m);
+            /* CPython: `property 'x' of 'C' object has no setter` (the run-time class's name).
+               Built at its real length: class and property names are not bounded. */
+            ail_obj kls = ((ail_instobj *)inst.o)->cls;
+            AIL_ROOT1(cx, fr, kls);
+            ail_str cn = ail_view_to_str(((ail_classobj *)kls.o)->name);
+            const char *pn = cx->intern_tab[name_id];
+            int64_t pn_n = (int64_t)strlen(pn);
+            const char *pre = "property '", *mid = "' of '", *post = "' object has no setter";
+            ail_strbuild b = ail_str_buf(cx, (int64_t)strlen(pre) + pn_n +
+                                             (int64_t)strlen(mid) + cn.n + (int64_t)strlen(post));
+            int64_t k = 0;
+            for (int64_t i = 0; pre[i]; i++) b.buf[k++] = (unsigned char)pre[i];
+            for (int64_t i = 0; i < pn_n; i++) b.buf[k++] = (unsigned char)pn[i];
+            for (int64_t i = 0; mid[i]; i++) b.buf[k++] = (unsigned char)mid[i];
+            for (int64_t i = 0; i < cn.n; i++) b.buf[k++] = ail_chr(cn, i);
+            for (int64_t i = 0; post[i]; i++) b.buf[k++] = (unsigned char)post[i];
+            ail_obj msg = ail_str_buf_done(b, k);
+            AIL_FRAME_LEAVE(cx, fr);
+            return ail_raise(cx, cx->builtin_cls[AIL_B_ATTRIBUTEERROR], msg);
         }
         ail_obj dummy; return pr->set(cx, &dummy, inst, val);
     }

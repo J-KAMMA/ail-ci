@@ -107,6 +107,78 @@ main()
 '''
 
 
+GETATTR_DEFAULT = r'''class A:
+    def __init__(self):
+        self.data = ["x", 1]
+        self.last = "x"
+        self.table = {"n": "x"}
+
+    @property
+    def x(self):
+        raise AttributeError("boom")
+
+    @property
+    def y(self):
+        raise ValueError("bad")
+
+    @property
+    def z(self):
+        return 42
+
+
+def name_from_arg(n):
+    return getattr(a, n, "from-arg")
+
+
+def alias(a, key, d):
+    return getattr(a, key, d)
+
+
+a = A()
+nx = "x"
+ny = "y"
+nz = "z"
+for d in (0, -1, 3.5, "s", [1, 2], {"k": "v"}, None, True):
+    print("dflt", type(d).__name__, repr(getattr(a, nx, d)))
+    print("named", repr(name_from_arg(nx)))
+print("list-name", repr(getattr(a, a.data[0], a.data[1])))
+print("attr-name", repr(getattr(a, a.last, 7)))
+print("dict-name", repr(getattr(a, a.table["n"], 8)))
+print("alias", repr(alias(a, nx, 9)))
+print("ok", getattr(a, nz, 5))
+try:
+    print(getattr(a, nx))
+except AttributeError as e:
+    print("AE", e)
+try:
+    print(getattr(a, ny, 5))
+except ValueError as e:
+    print("VE", e)
+print("still-ok", getattr(a, nz, 5))
+'''
+
+LONG_CLASS_NAME = 'C' * 130
+LONG_PROP_NAME = 'p' * 300
+LONG_NAMES = ('class %s:\n' % LONG_CLASS_NAME) + (
+    '    @property\n'
+    '    def short(self):\n'
+    '        return 1\n'
+    '\n'
+    '    @property\n'
+    '    def %s(self):\n' % LONG_PROP_NAME) + (
+    '        return 2\n'
+    '\n'
+    'o = %s()\n' % LONG_CLASS_NAME) + (
+    'for name in ("short", "%s", "%s"):\n' % (LONG_PROP_NAME, LONG_PROP_NAME[:-1])) + (
+    '    try:\n'
+    '        setattr(o, name, 3)\n'
+    '        print("stored", name)\n'
+    '    except AttributeError as e:\n'
+    '        print(len(str(e)), str(e))\n'
+    'print(o.short)\n'
+)
+
+
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -146,6 +218,12 @@ class Pre178Tests(unittest.TestCase):
 
     def test_setattr_property(self):
         self.check('setattr_property', SETATTR_PROPERTY)
+
+    def test_getattr_property_default(self):
+        self.check('getattr_property_default', GETATTR_DEFAULT)
+
+    def test_property_error_long_names(self):
+        self.check('property_error_long_names', LONG_NAMES)
 
 
 if __name__ == '__main__':

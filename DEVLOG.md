@@ -1,5 +1,20 @@
 # DEVLOG
 
+## 2026-10-24 - review fixes: getattr default and unbounded property message (job-pre178-10250448)
+
+Review found two defects in the property-descriptor change. First, `getattr(obj, name, default)` on a
+property whose getter raises `AttributeError` propagated the getter's error instead of returning the
+default (`ail2a_getattr` returned the getter result before the default branch). It now clears that
+`AttributeError` and returns the default; a getter raising any other exception still propagates, and
+no default still propagates the `AttributeError`. Second, the read-only-property `AttributeError` was
+formatted through fixed `char` buffers, so a class name over 99 chars or a whole message over 255 was
+truncated. The message is now built into a string buffer sized from the real property and class name
+lengths, and the run-time name conversion behind `getattr`/`setattr`/`hasattr` grows its buffer from
+the name, so a long property name reaches the descriptor table instead of being cut at 255 bytes.
+`test_ail_pre178.py` gained the default-argument case (including defaults through arguments, list
+items, attributes and dict values) and 130/300-character class and property names; the reviewer's
+`r11`, `r15` and `r16` probes match CPython on both builds.
+
 ## 2026-10-24 - setattr on a read-only property names CPython's AttributeError (job-pre178-10250448)
 
 The first pre-existing difference recorded by the fuzz57 reviewer still reproduces on this tree:
