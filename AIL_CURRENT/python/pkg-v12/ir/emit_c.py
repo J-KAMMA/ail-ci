@@ -75,6 +75,8 @@ LINKAGE_PREFIX = {
 }
 
 _CMP = {'eq': '==', 'ne': '!=', 'lt': '<', 'le': '<=', 'gt': '>', 'ge': '>='}
+_CMP_CODE = {'eq': 0, 'ne': 1, 'lt': 2, 'le': 3, 'gt': 4, 'ge': 5}
+_CMP_REVERSE = {'eq': 'eq', 'ne': 'ne', 'lt': 'gt', 'le': 'ge', 'gt': 'lt', 'ge': 'le'}
 _CK_HELPER = {'add': 'ck_add', 'sub': 'ck_sub', 'mul': 'ck_mul'}
 _PLAIN = {'add': '+', 'sub': '-', 'mul': '*', 'and': '&', 'or': '|', 'xor': '^',
           'fadd': '+', 'fsub': '-', 'fmul': '*'}
@@ -604,7 +606,16 @@ class Emitter(TextEmitter):
             self.use(helper)
             return self.assign_new(depth, ins.result, '%s(%s, %s)' % (helper, o[0], o[1]))
         if op.startswith('cmp.'):
-            return self.assign_new(depth, ins.result, '(%s %s %s)' % (o[0], _CMP[op[4:]], o[1]))
+            pred = op[4:]
+            a, b = ins.operands
+            if {a.type, b.type} == {I.I64, I.F64}:
+                self.parts.add('CMPIF')
+                if a.type == I.I64:
+                    return self.assign_new(depth, ins.result, 'ail__ir_cmp_int_float(%s, %s, %d)'
+                                           % (o[0], o[1], _CMP_CODE[pred]))
+                return self.assign_new(depth, ins.result, 'ail__ir_cmp_int_float(%s, %s, %d)'
+                                       % (o[1], o[0], _CMP_CODE[_CMP_REVERSE[pred]]))
+            return self.assign_new(depth, ins.result, '(%s %s %s)' % (o[0], _CMP[pred], o[1]))
         if op == 'select':
             if ins.attrs.get('spec') and ins.result.type == I.I64:
                 return self.assign_new(depth, ins.result, self.mask_select(ins, o))

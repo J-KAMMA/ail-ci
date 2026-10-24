@@ -23173,6 +23173,36 @@ ORDER.insert(ORDER.index('LIST') + 1, 'NUMFIELD')
 ORDER.insert(ORDER.index('FDIV') + 1, 'FFLOORMOD')
 SOURCE['FFLOORMOD'] = FFLOORMOD
 REQUIRES['FFLOORMOD'] = ['DIE']
+CMPIF = r'''
+/* Exact int64-vs-double comparison for the IR's plain scalar compares.  The predicate code is
+   0 eq, 1 ne, 2 lt, 3 le, 4 gt, 5 ge; the integer is the left operand.  Casting the int to
+   double first loses precision past 2**53 (9007199254740993 == 9007199254740992.0). */
+static inline int64_t ail__ir_cmp_int_float(int64_t i, double d, int pred) {
+    int c;
+    if (d != d) return pred == 1;               /* NaN: only != is true */
+    if (d >= 9223372036854775808.0) c = -1;
+    else if (d < -9223372036854775808.0) c = 1;
+    else {
+        int64_t di = (int64_t)d;
+        if (i < di) c = -1;
+        else if (i > di) c = 1;
+        else if (d > (double)di) c = -1;
+        else if (d < (double)di) c = 1;
+        else c = 0;
+    }
+    switch (pred) {
+        case 0: return c == 0;
+        case 1: return c != 0;
+        case 2: return c < 0;
+        case 3: return c <= 0;
+        case 4: return c > 0;
+        default: return c >= 0;
+    }
+}
+'''
+ORDER.insert(ORDER.index('FFLOORMOD') + 1, 'CMPIF')
+SOURCE['CMPIF'] = CMPIF
+REQUIRES['CMPIF'] = []
 SOURCE['NUMFIELD'] = NUMFIELD
 REQUIRES['NUMFIELD'] = ['LIST', 'FLIST', 'DIE']
 ORDER.insert(ORDER.index('NUMFIELD') + 1, 'NUMVIEW')
