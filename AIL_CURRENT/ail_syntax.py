@@ -894,6 +894,36 @@ class _ConstantExprFolder(ast.NodeVisitor):
         self.visit(node.body)
         self._leave(old)
 
+    def _visit_comprehension(self, node):
+        """A comprehension has a scope of its own in Python 3: its targets shadow a module
+        constant in the element, the conditions and the later iterables. The first iterable is
+        evaluated in the enclosing scope, but blocking every target for the whole comprehension
+        is the safe direction: it only skips a fold."""
+        targets = set()
+        for generator in node.generators:
+            for sub in ast.walk(generator.target):
+                if isinstance(sub, ast.Name):
+                    targets.add(sub.id)
+        old = self.allowed
+        self.allowed = {name: value for name, value in old.items() if name not in targets}
+        try:
+            if isinstance(node, ast.DictComp):
+                self.visit(node.key)
+                self.visit(node.value)
+            else:
+                self.visit(node.elt)
+            for generator in node.generators:
+                self.visit(generator.iter)
+                for condition in generator.ifs:
+                    self.visit(condition)
+        finally:
+            self.allowed = old
+
+    visit_ListComp = _visit_comprehension
+    visit_SetComp = _visit_comprehension
+    visit_DictComp = _visit_comprehension
+    visit_GeneratorExp = _visit_comprehension
+
     def visit_ClassDef(self, node):
         for decorator in node.decorator_list:
             self.visit(decorator)
