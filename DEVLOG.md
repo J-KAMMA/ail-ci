@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - qtest4: bytes/bytearray fillchar wrong-type message (job-qtest4-10241728)
+
+Probing `str.center`/`ljust`/`rjust` and their bytes/bytearray forms over empty, zero,
+negative and huge widths, widths narrower than the text, multi-character and wrong-type
+fills: the str forms matched CPython on both builds, but the bytes wrappers sent a
+non-bytes fill through `_ail_bs` first.  A caught `b"abc".ljust(5, 7)` printed
+`a bytes-like object is required, not 'int'` where CPython prints
+`ljust() argument 2 must be a byte string of length 1, not int`; the same held for
+bool/str/float/list/tuple/dict/set fills on all three methods, including a width narrower
+than the text (CPython validates the fill before it pads).  `_ail_b_fill` now rejects a
+fill that is not bytes/bytearray with CPython's message; `None` keeps its `not None`
+spelling.  Added `test_ail_qtest4.py` (the bytes case and a str control).
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
