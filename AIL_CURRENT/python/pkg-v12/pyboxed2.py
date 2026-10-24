@@ -2076,6 +2076,8 @@ class Compiler(boxclosure.ClosureMixin):
         self.mix_units = []
         self.mix_guard_checks = {}
         self.class_values = []     # classes used as values (a call through a value may construct one)
+        self._defining_class = None  # the class whose attributes are being evaluated (it is unbound then)
+        self._expanding_attrs = set()  # class-attribute slots whose value is being compiled (no lazy re-entry)
         self.user_method_names = frozenset()   # every method name a class of the program defines
         self.uses_argv = False     # sys.argv: main takes argc / argv
         self.bytes_prelude = False # bytes / bytearray are the classes of prelude_bytes.py
@@ -4339,6 +4341,11 @@ class Compiler(boxclosure.ClosureMixin):
         if node.id in ('True', 'False'):
             return 'ail_box_bool(%d)' % (1 if node.id == 'True' else 0)
         if node.id in self.classes:
+            # A class name is unbound while its own body runs (`class C: x = C` is CPython's NameError).
+            ctx.emit('if ((g_slots_arr[%d]).tag == AIL_T_UNBOUND) { st = ail_raise_c(cx, AIL_B_NAMEERROR, '
+                     '"name \'%s\' is not defined"); goto %s; }' %
+                     (self.global_slots['class:' + node.id], node.id, ctx.cur_err_target()))
+            ctx.uses_st = True
             # A class is already a real ail_obj CLASS value, permanently rooted in the
             # module-lifetime frame (g_slots_arr) -- returning that reference directly lets a
             # class be stored in a variable, passed as an argument, or compared/isinstance'd,
@@ -6015,18 +6022,45 @@ class Compiler(boxclosure.ClosureMixin):
         return name in EXC_IDS
 
     def _init_class_attrs(self, name, ctx):
-        """Evaluate a class body's attributes once, at its class-definition statement."""
-        for _aname, aval, slot in self.classes[name].get('class_attrs', []):
-            v = self.expr(aval, ctx)
-            ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
+        """Evaluate a class body's attributes once, at its class-definition statement.  CPython does not
+        bind the class name until the body has finished, so the class's own global slot is UNBOUND here
+        (`class C: x = C` is a NameError) and restored afterwards; a body that raises leaves it unbound."""
+        attrs = self.classes[name].get('class_attrs', [])
+        if not attrs:
+            return
+        cslot = self.global_slots['class:' + name]
+        saved = ctx.tmp()
+        ctx.emit('%s = g_slots_arr[%d];' % (saved, cslot))
+        ctx.emit('g_slots_arr[%d] = ail_box_unbound();' % cslot)
+        prev = self._defining_class
+        self._defining_class = name
+        try:
+            for _aname, aval, slot in attrs:
+                self._expanding_attrs.add(slot)
+                try:
+                    v = self.expr(aval, ctx)
+                finally:
+                    self._expanding_attrs.discard(slot)
+                ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
+        finally:
+            self._defining_class = prev
+        ctx.emit('g_slots_arr[%d] = %s;' % (cslot, saved))
 
     def _class_attr_value(self, slot, value, ctx):
         """The one shared value of a class attribute, filling the slot lazily only when the module
-        body did not run (the array-entry shape, where there is no executable module statement)."""
+        body did not run (the array-entry shape, where there is no executable module statement).  A
+        value that refers to its own class (through a call or a class held in a value) must not make
+        the compiler expand that class's attributes again; the slot is then read as it is."""
+        if slot in self._expanding_attrs:
+            return 'g_slots_arr[%d]' % slot
         if value is not None:
             ctx.emit('if (g_slots_arr[%d].tag == AIL_T_UNBOUND) {' % slot)
             ctx.indent += 1
-            v = self.expr(value, ctx)
+            self._expanding_attrs.add(slot)
+            try:
+                v = self.expr(value, ctx)
+            finally:
+                self._expanding_attrs.discard(slot)
             ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
             ctx.indent -= 1
             ctx.emit('}')
@@ -6040,6 +6074,12 @@ class Compiler(boxclosure.ClosureMixin):
         return t
 
     def _call_class(self, name, args, kwargs, ctx):
+        if name == self._defining_class:
+            # `class C: x = C()`: the class name is not bound while its own body runs
+            ctx.emit('st = ail_raise_c(cx, AIL_B_NAMEERROR, "name \'%s\' is not defined"); goto %s;' %
+                     (name, ctx.cur_err_target()))
+            ctx.uses_st = True
+            return 'ail_box_none()'
         cls = self.classes[name]
         info = self._resolve_method(name, '__init__')
         t = ctx.tmp()

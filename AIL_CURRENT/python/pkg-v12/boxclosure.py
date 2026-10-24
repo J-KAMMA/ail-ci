@@ -375,7 +375,7 @@ class ClosureMixin:
             ctx.emit('%s = %s;' % (s, c))
         self._need_callv()
         t = ctx.tmp()
-        classes = getattr(self, 'class_values', ())
+        classes = [c for c in getattr(self, 'class_values', ()) if c != self._defining_class]
         if classes:
             from pyboxed2 import _PreC
             # a class held in a variable: construct it, as calling the class by name does

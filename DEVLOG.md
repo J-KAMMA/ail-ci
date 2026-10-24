@@ -1,5 +1,15 @@
 # DEVLOG
 
+## 2026-10-24 - pre135: a class name is unbound inside its own class body
+
+The general path created every class object before the module body, so `class C: x = C` read the
+class instead of raising CPython's `NameError`, and `class C: x = (lambda: C)()` recursed in the
+compiler (`boxclosure.bound_names`) when the call-through-value branch tried to construct C again.
+`_init_class_attrs` now leaves the class's own global slot UNBOUND while the body's attributes run
+(restoring it afterwards), class-name reads check that slot, and a class whose attributes are being
+expanded is not expanded again.  A lambda that reads C later, after the class statement, still
+works.  Added `AIL_CURRENT/test_ail_pre135.py` (registered in `ail_check.MODULES`).
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
