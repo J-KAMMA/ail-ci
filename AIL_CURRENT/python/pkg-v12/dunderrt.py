@@ -326,11 +326,20 @@ def _edits():
               '    int eq = ail_obj_eq_raw(a, b);\n'
               '    ail_st e = ail__eq_err; ail__eq_scope = sv_scope; ail__eq_err = sv_err; if (e) return e;\n'
               '    *out = ail_box_bool(!eq); return AIL_OK;\n}'))
-    e.append(('            for (int64_t i = 0; i < v->n; i++) if (ail_member_eq(v->p[i], item)) { *out = 1; return AIL_OK; }\n'
+    e.append(('            /* `x in g` on a materialised generator expression consumes it up to and including the\n'
+              '               match (or to the end when absent), sharing the same cursor as next() and loops */\n'
+              '            int gen = c.tag == AIL_T_LIST && v->from_generator;\n'
+              '            for (int64_t i = gen ? v->gen_idx : 0; i < v->n; i++) {\n'
+              '                if (ail_member_eq(v->p[i], item)) { if (gen) v->gen_idx = i + 1; *out = 1; return AIL_OK; }\n'
+              '            }\n'
+              '            if (gen) v->gen_idx = v->n;\n'
               '            *out = 0; return AIL_OK;\n',
+              '            int gen = c.tag == AIL_T_LIST && v->from_generator;\n'
               '            int sv_scope = ail__eq_scope; ail_st sv_err = ail__eq_err; ail__eq_scope = 1; ail__eq_err = 0;\n'
               '            int found = 0;\n'
-              '            for (int64_t i = 0; i < v->n && !ail__eq_err; i++) if (ail_member_eq(v->p[i], item)) { found = 1; break; }\n'
+              '            int64_t i = gen ? v->gen_idx : 0;\n'
+              '            for (; i < v->n && !ail__eq_err; i++) if (ail_member_eq(v->p[i], item)) { found = 1; break; }\n'
+              '            if (gen) v->gen_idx = found ? i + 1 : i;\n'
               '            ail_st e = ail__eq_err; ail__eq_scope = sv_scope; ail__eq_err = sv_err; if (e) return e;\n'
               '            *out = found; return AIL_OK;\n'))
     # a slice of an instance: there are no slice objects, so __getitem__ cannot be given one (named, not "not subscriptable")
