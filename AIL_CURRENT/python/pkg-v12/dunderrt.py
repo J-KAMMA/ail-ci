@@ -296,9 +296,11 @@ def _edits():
               'ail_st (*lt_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj); /* user __lt__ (self, other), or 0 */\n'
               '                 ail_st (*d1[AIL_ND1])(ail_ctx *, ail_obj *, ail_obj); /* operator methods (self), dunderrt.py */\n'
               '                 ail_st (*d2[AIL_ND2])(ail_ctx *, ail_obj *, ail_obj, ail_obj); /* operator methods (self, other) */\n'
-              '                 ail_st (*d3[AIL_ND3])(ail_ctx *, ail_obj *, ail_obj, ail_obj, ail_obj); /* (self, key, value) */ } ail_classobj;'))
+              '                 ail_st (*d3[AIL_ND3])(ail_ctx *, ail_obj *, ail_obj, ail_obj, ail_obj); /* (self, key, value) */\n'
+              '                 int iter_none, next_none; /* the class BODY assigns __iter__ = None / __next__ = None */ } ail_classobj;'))
     e.append(('c->iter_iter = 0; c->iter_next = 0; c->repr_fn = 0; c->str_fn = 0; c->lt_fn = 0;',
               'c->iter_iter = 0; c->iter_next = 0; c->repr_fn = 0; c->str_fn = 0; c->lt_fn = 0;\n'
+              '    c->iter_none = 0; c->next_none = 0;\n'
               '    memset(c->d1, 0, sizeof c->d1); memset(c->d2, 0, sizeof c->d2); memset(c->d3, 0, sizeof c->d3);'))
     # truthiness and equality
     # ail_obj_truthy itself is left alone (the runtime's own tests stay as small as they were); bool() and `not` ask the class here,
@@ -507,20 +509,58 @@ def _edits():
     e.append(('        default: { char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable"',
               '        case AIL_T_INST: { ail_d2_fn f = ail_dun2(c, AIL_D2_GETITEM); if (f) return f(cx, out, c, key); }\n        /* fall through */\n'
               '        default: { char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable"'))
-    # the sequence protocol: iterating an instance with __getitem__ and no __iter__ / __next__ calls
-    # __getitem__(0), __getitem__(1), ... until IndexError.  A dedicated iterator kind carries the index.
+    # the sequence protocol: iterating an instance with __getitem__ and no __iter__ calls
+    # __getitem__(0), __getitem__(1), ... until IndexError or StopIteration.  A dedicated iterator
+    # kind carries the index and stays exhausted once the sequence ends.
     e.append(('    AIL_IT_REVERSED, AIL_IT_MAP, AIL_IT_FILTER, AIL_IT_STREAM, AIL_IT_USER\n};',
               '    AIL_IT_REVERSED, AIL_IT_MAP, AIL_IT_FILTER, AIL_IT_STREAM, AIL_IT_USER, AIL_IT_GETITEM\n};'))
-    e.append(('''    if (!fn) {
+    e.append(('''    ail_st (*fi)(ail_ctx *, ail_obj *, ail_obj) = 0, (*fn)(ail_ctx *, ail_obj *, ail_obj) = 0;
+    for (ail_obj k = ((ail_instobj *)obj.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+        ail_classobj *kc = (ail_classobj *)k.o;
+        if (!fi) fi = kc->iter_iter;
+        if (!fn) fn = kc->iter_next;
+    }
+    if (fi) {
+        ail_obj r; ail_st st = fi(cx, &r, obj); if (st != AIL_OK) return st;
+        if (!(r.tag == AIL_T_INST && r.o == obj.o)) return ail_iter(cx, out, r); /* ail_iter roots r */
+    }
+    if (!fn) {
         char buf[96]; snprintf(buf, sizeof buf, "'%s' object is not iterable", ail_type_name(obj.tag));
         return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
     }''',
-              '''    if (!fn) {
+              '''    ail_st (*fi)(ail_ctx *, ail_obj *, ail_obj) = 0, (*fn)(ail_ctx *, ail_obj *, ail_obj) = 0;
+    int has_iter_none = 0, has_next_none = 0;
+    for (ail_obj k = ((ail_instobj *)obj.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+        ail_classobj *kc = (ail_classobj *)k.o;
+        if (!fi && !has_iter_none) {
+            if (kc->iter_iter) fi = kc->iter_iter;
+            else if (kc->iter_none) has_iter_none = 1;   /* a class-body __iter__ = None shadows a base method */
+        }
+        if (!fn && !has_next_none) {
+            if (kc->iter_next) fn = kc->iter_next;
+            else if (kc->next_none) has_next_none = 1;
+        }
+    }
+    if (fi) {
+        ail_obj r; ail_st st = fi(cx, &r, obj); if (st != AIL_OK) return st;
+        if (!(r.tag == AIL_T_INST && r.o == obj.o)) return ail_iter(cx, out, r); /* ail_iter roots r */
+        if (!fn && !has_next_none) {
+            char buf[128]; snprintf(buf, sizeof buf, "iter() returned non-iterator of type '%s'", ail__tname_c(obj));
+            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+        }
+        *out = ail__iter_wrap(cx, AIL_IT_USER, obj, ail_box_none(), 0);
+        return AIL_OK;
+    }
+    if (has_iter_none) {
+        char buf[96]; snprintf(buf, sizeof buf, "'%s' object is not iterable", ail__tname_c(obj));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
+    if (!fn) {
         if (ail_dun2(obj, AIL_D2_GETITEM)) {
             *out = ail__iter_wrap(cx, AIL_IT_GETITEM, obj, ail_box_none(), 0);
             return AIL_OK;
         }
-        char buf[96]; snprintf(buf, sizeof buf, "'%s' object is not iterable", ail_type_name(obj.tag));
+        char buf[96]; snprintf(buf, sizeof buf, "'%s' object is not iterable", ail__tname_c(obj));
         return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
     }'''))
     e.append(('''        case AIL_IT_USER: {
@@ -532,17 +572,23 @@ def _edits():
         }
         case AIL_IT_LIST: case AIL_IT_TUPLE: {''',
               '''        case AIL_IT_USER: {
+            int next_none = 0;
             for (ail_obj k = ((ail_instobj *)it->target.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
                 ail_classobj *kc = (ail_classobj *)k.o;
                 if (kc->iter_next) return kc->iter_next(cx, out, it->target);
+                if (kc->next_none) { next_none = 1; break; }
             }
+            if (next_none) return ail_raise_c(cx, AIL_B_TYPEERROR, "'NoneType' object is not callable");
             return AIL_STOP;
         }
         case AIL_IT_GETITEM: {
+            if (it->idx2) return AIL_STOP;   /* exhausted: never ask __getitem__ again */
             ail_d2_fn f = ail_dun2(it->target, AIL_D2_GETITEM);
             if (!f) return AIL_STOP;
             ail_obj r; ail_st st = f(cx, &r, it->target, ail_box_int(it->idx));
-            if (st == AIL_EXC && ail_exc_matches_b(cx, AIL_B_INDEXERROR)) { ail_exc_clear(cx); return AIL_STOP; }
+            if (st == AIL_EXC && (ail_exc_matches_b(cx, AIL_B_INDEXERROR) || ail_exc_matches_b(cx, AIL_B_STOPITERATION))) {
+                ail_exc_clear(cx); it->idx2 = 1; return AIL_STOP;
+            }
             if (st != AIL_OK) return st;
             it->idx++;
             *out = r; return AIL_OK;

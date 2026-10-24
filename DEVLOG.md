@@ -1,5 +1,21 @@
 # DEVLOG
 
+## 2026-10-24 - pre60 review fixes: sequence iterator boundaries
+
+Reviewer probes `r_exhaust`, `r_stopiter`, `r_iterself` and `r_iter_none` still differed
+on the pre60 commit. The `AIL_IT_GETITEM` sequence iterator now marks itself exhausted on
+the first `IndexError` or `StopIteration` (clearing either exception) and never calls
+`__getitem__` again, so an appended element cannot revive it. `ail__iter_inst` now
+distinguishes a class-body `__iter__ = None` (blocks the fallback, `'C' object is not
+iterable`) from an `__iter__` method returning `self` without `__next__` (TypeError
+`iter() returned non-iterator of type 'C'`); an inherited `__next__ = None` is reported as
+`'NoneType' object is not callable` at the next step. Probes `r_exhaust`, `r_stopiter`,
+`r_iterself`, `r_iter_none`, `r_iter_next_none`, `r_iter_none_inherit`,
+`r_iter_override`, `r_iterself_inherit`, `r_stopiter_sub`, `r_index_after_stop`,
+`r_revive_after_stopiter`, `r_arg_list_attr_dict`, `r_mutate_mid`, `r_getitem_attr` and
+the earlier `seq_*` probes match CPython on both builds. `test_ail_pre60` now has four
+programs (exhaustion, StopIteration, `__iter__ = None`, self-returning `__iter__`).
+
 ## 2026-10-24 - pre60: iteration through __getitem__ (sequence protocol)
 
 The first pre-existing pre38 difference still present was `p_seqproto2`: an instance with

@@ -2362,6 +2362,12 @@ class Compiler(boxclosure.ClosureMixin):
                 setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->iter_iter = %s;\n' %
                              (self.global_slots['class:' + cname], itr['cname']))
             if self.dunder_ops:
+                for aname, aval, _aslot in cls.get('class_attrs', []):
+                    field = {'__iter__': 'iter_none', '__next__': 'next_none'}.get(aname)
+                    if field and isinstance(aval, ast.Constant) and aval.value is None:
+                        setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->%s = 1;\n' %
+                                     (self.global_slots['class:' + cname], field))
+            if self.dunder_ops:
                 setup.extend(dunderrt.install('g_slots_arr[%d]' % self.global_slots['class:' + cname],
                                               cls['methods'], lambda info: info['all_params']))
             if cls.get('dc'):

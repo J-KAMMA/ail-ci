@@ -1,11 +1,13 @@
 """pre60: iterating an instance whose only iteration protocol is __getitem__.
 
 CPython falls back to the sequence protocol: it calls ``obj[0]``, ``obj[1]``, ... and
-stops at the first ``IndexError``.  AIL refused such an instance on both builds with
-``TypeError: 'instance' object is not iterable``.  The general-path runtime now has an
-iterator kind that carries the index and calls ``__getitem__``; ``__iter__`` still wins
-when the class defines both.  Every program below is compared with CPython 3.12 on the
-default and forced-general builds.
+stops at the first ``IndexError`` or ``StopIteration``.  AIL refused such an instance on
+both builds with ``TypeError: 'instance' object is not iterable``.  The general-path
+runtime now has an iterator kind that carries the index and calls ``__getitem__``; it
+stays exhausted once the sequence ends.  ``__iter__`` still wins when the class defines
+it, a class-body ``__iter__ = None`` blocks the fallback, and an ``__iter__`` that
+returns ``self`` without ``__next__`` is refused.  Every program below is compared with
+CPython 3.12 on the default and forced-general builds.
 """
 import os
 import subprocess
@@ -71,6 +73,97 @@ def main():
 main()
 '''
 
+EXHAUST = r'''class C:
+    def __init__(self):
+        self.xs = [1, 2]
+        self.calls = 0
+
+    def __getitem__(self, i):
+        self.calls += 1
+        if i >= len(self.xs):
+            raise IndexError
+        return self.xs[i]
+
+
+class StopSeq:
+    def __init__(self):
+        self.calls = 0
+
+    def __getitem__(self, i):
+        self.calls += 1
+        if i == 0:
+            return "a"
+        if i == 1:
+            raise StopIteration
+        raise IndexError
+
+
+class MyStop(StopIteration):
+    pass
+
+
+class SubStop:
+    def __getitem__(self, i):
+        if i == 0:
+            return "b"
+        raise MyStop("done")
+
+
+class MyIndex(IndexError):
+    pass
+
+
+class SubIndex:
+    def __getitem__(self, i):
+        if i < 2:
+            return i
+        raise MyIndex("done")
+
+
+def main():
+    c = C()
+    it = iter(c)
+    print(next(it), next(it))
+    try:
+        next(it)
+    except StopIteration:
+        print("stop")
+    before = c.calls
+    try:
+        next(it)
+    except StopIteration:
+        print("still stop")
+    print("extra calls", c.calls - before)
+    c.xs.append(3)
+    try:
+        print("revived", next(it))
+    except StopIteration:
+        print("still exhausted")
+
+    s = StopSeq()
+    print(list(s), s.calls)
+    si = iter(s)
+    try:
+        next(si)
+    except StopIteration:
+        print("bad")
+    before = s.calls
+    try:
+        next(si)
+    except StopIteration:
+        print("stop again")
+    print("extra calls", s.calls - before)
+
+    print(list(SubStop()), list(SubIndex()))
+    empty = C()
+    empty.xs = []
+    print(list(empty), empty.calls)
+    print(list(C()))
+
+
+main()
+'''
+
 PROTOCOL = r'''class MyIndexError(IndexError):
     pass
 
@@ -128,6 +221,100 @@ main()
 '''
 
 
+ITER_BLOCKS = r'''class SelfIter:
+    def __init__(self, xs):
+        self.xs = xs
+
+    def __iter__(self):
+        return self
+
+    def __getitem__(self, i):
+        if i >= len(self.xs):
+            raise IndexError
+        return self.xs[i]
+
+
+class NoIter:
+    __iter__ = None
+
+    def __getitem__(self, i):
+        if i >= 2:
+            raise IndexError
+        return i
+
+
+class BaseNoIter:
+    __iter__ = None
+
+    def __getitem__(self, i):
+        if i >= 2:
+            raise IndexError
+        return i
+
+
+class ChildNoIter(BaseNoIter):
+    pass
+
+
+class Override(BaseNoIter):
+    def __iter__(self):
+        return iter([8, 9])
+
+
+class BaseSelf:
+    def __iter__(self):
+        return self
+
+    def __getitem__(self, i):
+        if i >= 2:
+            raise IndexError
+        return i
+
+
+class ChildSelf(BaseSelf):
+    pass
+
+
+class NextNone:
+    __next__ = None
+
+    def __iter__(self):
+        return self
+
+    def __getitem__(self, i):
+        if i >= 2:
+            raise IndexError
+        return i
+
+
+def main():
+    try:
+        list(SelfIter([1, 2]))
+    except TypeError as e:
+        print("TypeError", e)
+    try:
+        list(NoIter())
+    except TypeError as e:
+        print("TypeError", e)
+    try:
+        list(ChildNoIter())
+    except TypeError as e:
+        print("TypeError", e)
+    print(list(Override()))
+    try:
+        list(ChildSelf())
+    except TypeError as e:
+        print("TypeError", e)
+    try:
+        list(NextNone())
+    except TypeError as e:
+        print("TypeError", e)
+
+
+main()
+'''
+
+
 def _run_py(path):
     done = subprocess.run([sys.executable, '-B', str(path)], capture_output=True, timeout=120,
                           env=dict(os.environ, PYTHONUTF8='1'))
@@ -168,6 +355,12 @@ class Pre60Tests(unittest.TestCase):
 
     def test_sequence_protocol_errors(self):
         self.check('seqproto_errors', PROTOCOL)
+
+    def test_sequence_protocol_exhaustion(self):
+        self.check('seqproto_exhaust', EXHAUST)
+
+    def test_iter_blocks_fallback(self):
+        self.check('iter_blocks', ITER_BLOCKS)
 
 
 def _write(directory, slug, text):
