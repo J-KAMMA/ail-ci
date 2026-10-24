@@ -1743,6 +1743,8 @@ class Ctx:
         self.var_kind = {}         # local name -> inferred kind, for dunder/method dispatch
         self.elem_kind = {}        # local name -> proven element kind of the bound iterable
         self.nested_funcs = {}     # name -> info, for a def nested directly in this function
+        self.nested_def_flags = {} # name -> C int set when that nested def statement runs
+        self.def_flag_decls = []   # those flags, declared at the top of the C body
         self.global_decls = set()
         self.owner_class = None    # set for a method: the class it is defined on (for super())
         self.cell_slots = set()    # names whose frame slot holds a CELL (shared with a closure)
@@ -3193,6 +3195,7 @@ class Compiler(boxclosure.ClosureMixin):
                 preamble_lines.append('    f.slots[%d] = %s;' % (ctx.slot_of[p], cid(p)))
         self.block(node.body, ctx)
         preamble_lines += self.cell_preamble(ctx)
+        preamble_lines += ['    int %s = 0;' % flag for flag in ctx.def_flag_decls]
         n_slots = max(ctx.next_slot, 1)
         body = '\n'.join(preamble_lines) + ('\n' if preamble_lines else '')
         body += ctx.body_text()
@@ -3273,6 +3276,14 @@ class Compiler(boxclosure.ClosureMixin):
                               'parameters' % node.name)
         if node.decorator_list:
             raise Unsupported('a decorator on nested def %s' % node.name)
+        # CPython binds the function when the def statement runs; a call textually before it (or
+        # after a def statement that did not run) reads an unbound local. The direct call path
+        # resolves the function statically, so keep a C flag that the def statement sets and the
+        # call checks.
+        if node.name not in outer_ctx.nested_def_flags:
+            flag = outer_ctx.new_cvar('ndef')
+            outer_ctx.nested_def_flags[node.name] = flag
+            outer_ctx.def_flag_decls.append(flag)
         positional = [a.arg for a in node.args.args]
         vararg = node.args.vararg.arg if node.args.vararg else None
         kwonly = [a.arg for a in node.args.kwonlyargs]
@@ -3330,6 +3341,7 @@ class Compiler(boxclosure.ClosureMixin):
             preamble_lines.append('    f.slots[%d] = %s;' % (nctx.slot_of[nm], cid('cap_' + nm)))
         self.block(node.body, nctx)
         preamble_lines += self.cell_preamble(nctx)
+        preamble_lines += ['    int %s = 0;' % flag for flag in nctx.def_flag_decls]
         n_slots = max(nctx.next_slot, 1)
         sig = (''.join(', ail_obj *%s' % cid('ptr_' + nm) for nm in by_ptr) +
               ''.join(', ail_obj %s' % cid('cap_' + nm) for nm in by_val) +
@@ -3350,6 +3362,12 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _call_nested_function(self, name, args, kwargs, ctx):
         info = ctx.nested_funcs[name]
+        flag = ctx.nested_def_flags.get(name)
+        if flag:
+            ctx.uses_st = True
+            ctx.emit('if (!%s) { st = ail_raise_c(cx, AIL_B_UNBOUNDLOCALERROR, %s); goto %s; }' %
+                     (flag, c_str_literal("cannot access local variable '%s' where it is not "
+                                          "associated with a value" % name), ctx.cur_err_target()))
         if any(isinstance(a, ast.Starred) for a in args):
             raise Unsupported('a starred argument in a call of the nested function %s()' % name)
         positional = info.get('positional', info['params'])
@@ -10212,6 +10230,10 @@ class Compiler(boxclosure.ClosureMixin):
         if node.name in ctx.closure_defs:
             value = self.closure_value(node, ctx, node.name)
             ctx.emit('%s = %s;' % (self.name_ref(node.name, ctx), value))
+            return
+        flag = ctx.nested_def_flags.get(node.name)
+        if flag:
+            ctx.emit('%s = 1;' % flag)
             return
         pass  # a nested def was already registered+compiled by _register_nested (module
               # docstring's closure design); a TOP-LEVEL FunctionDef never reaches stmt() at
