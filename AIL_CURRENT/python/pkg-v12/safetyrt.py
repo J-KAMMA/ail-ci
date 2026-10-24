@@ -807,7 +807,23 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
     if (specobj.tag != AIL_T_STR) return ail_raise_c(cx, AIL_B_TYPEERROR, "format() argument 2 must be str");
     ail_str spec = ail_view_to_str(specobj);
     if (spec.n == 0) { *out = ail_obj_str(cx, x); return AIL_OK; }
-    ail2f_spec f; char msg[160];
+    char msg[160];
+    /* object.__format__ rejects a non-empty spec before a type's parser ever sees it: None and any
+       type without its own __format__ (an instance is dispatched by dunderrt before this body) */
+    if (x.tag != AIL_T_STR && x.tag != AIL_T_INT && x.tag != AIL_T_BOOL && x.tag != AIL_T_FLOAT) {
+        if (x.tag == AIL_T_NONE) return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported format string passed to NoneType.__format__");
+        const char *tn = ail_type_name(x.tag);
+        char nb[80];
+        if ((x.tag == AIL_T_INST || x.tag == AIL_T_EXC) && ((ail_instobj *)x.o)->cls.tag == AIL_T_CLASS) {
+            ail_str cs = ail_view_to_str(((ail_classobj *)((ail_instobj *)x.o)->cls.o)->name);
+            size_t k = 0;
+            for (int64_t i = 0; i < cs.n && k + 1 < sizeof nb; i++) { uint32_t ch = (uint32_t)ail_chr(cs, i); nb[k++] = ch < 128 ? (char)ch : '?'; }
+            nb[k] = 0; tn = nb;
+        }
+        snprintf(msg, sizeof msg, "unsupported format string passed to %s.__format__", tn);
+        return ail_raise_c(cx, AIL_B_TYPEERROR, msg);
+    }
+    ail2f_spec f;
     if (ail2f_parse(spec, &f, msg, sizeof msg)) return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
     char type = f.type;
     if (f.group && type) {
