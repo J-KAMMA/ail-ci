@@ -10412,6 +10412,14 @@ _GENEXP_EAGER_METHODS = frozenset({'join', 'extend', 'update', 'array'})
 _GENEXP_SAFE_CALLS = frozenset({
     'len', 'str', 'bool', 'abs', 'repr', 'ord', 'chr', 'round', 'hash', 'id', 'type', 'isinstance',
 })
+# Methods of the builtin value types whose call cannot raise one of the catchable traps.
+_GENEXP_SAFE_METHODS = frozenset({
+    'upper', 'lower', 'strip', 'lstrip', 'rstrip', 'zfill', 'ljust', 'rjust', 'center', 'replace',
+    'format', 'title', 'capitalize', 'swapcase', 'casefold', 'startswith', 'endswith', 'find',
+    'rfind', 'count', 'isdigit', 'isalpha', 'isalnum', 'isspace', 'isupper', 'islower', 'split',
+    'rsplit', 'splitlines', 'partition', 'rpartition', 'removeprefix', 'removesuffix',
+    'bit_length', 'bit_count', 'is_integer', 'get', 'keys', 'values', 'items',
+})
 
 
 def _genexp_consumed_in_place(node, parents):
@@ -10459,7 +10467,13 @@ def _genexp_can_raise(node, user_functions):
                 return True
             elif isinstance(n, ast.Call):
                 f = n.func
-                if not isinstance(f, ast.Name) or f.id in user_functions or f.id not in _GENEXP_SAFE_CALLS:
+                if isinstance(f, ast.Name):
+                    if f.id in user_functions or f.id not in _GENEXP_SAFE_CALLS:
+                        return True
+                elif isinstance(f, ast.Attribute):
+                    if f.attr not in _GENEXP_SAFE_METHODS:
+                        return True
+                else:
                     return True
     return False
 
