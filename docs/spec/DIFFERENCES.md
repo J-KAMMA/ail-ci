@@ -12,7 +12,7 @@ New rows found by the fuzz jobs use the placeholder id `C?-<branch>-N`.
 
 | id | area | difference |
 |----|------|------------|
-| C?-job-fuzz21-10230420-1 | integers | An integer literal/expression beyond 64 bits (for example `10**50`) traps with `integer overflow` on both builds; CPython prints the value. This is outside unpacking, which the same probe otherwise matches. |
+| C?-job-fuzz21-10230420-1 | integers | A statically known integer constant expression beyond 64 bits (for example `10**50` or `MAX * 2`) is now refused at compile time by name (`int64 constant expression out of range: ...`) on both builds; a value that only reaches the operation at run time still traps with `integer overflow`. CPython prints the value. This is outside unpacking, which the same probe otherwise matches. |
 # Differences from CPython
 
 This export carries the rows found by the jobs run here; the full list is maintained upstream.
