@@ -4,6 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre97-10242045-1 | `str.split` / `rsplit` maxsplit | A constant maxsplit expression above int64 (for example `10**30`) compiled and then stopped at run time with `integer overflow`, where CPython raises `OverflowError`; `2**63 - 1` also overflowed on the intermediate power although the final limit fits. A constant maxsplit is now folded exactly at compile time: a value that fits is emitted as one literal, and a value above int64 is refused by name on both builds. A direct literal above int64 was already refused by name. | fixed / refused; `test_ail_pre97.py` |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |

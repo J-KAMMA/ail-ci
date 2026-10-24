@@ -1,5 +1,15 @@
 # DEVLOG
 
+## 2026-10-24 - pre97: constant str.split/rsplit maxsplit
+
+pre70's reviewer left qtest2's second item alone: a maxsplit constant above int64 compiled and
+then stopped with `integer overflow` where CPython raises `OverflowError`, and `2**63 - 1` also
+overflowed on the intermediate power although the final limit fits.  A constant maxsplit
+expression is now folded exactly at compile time in the typed emitter and in the general
+emitter (before its argument pre-evaluation): a value that fits is emitted as one int64 literal,
+and a value above int64 is refused by name on both builds without evaluating a huge power.
+`test_ail_pre97.py` covers both refusal forms and the in-range boundaries.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
