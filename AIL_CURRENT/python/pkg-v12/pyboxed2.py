@@ -7416,6 +7416,9 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('next() with other than (iterator[, default])')
         if isinstance(args[0], ast.GeneratorExp):
             gen = args[0]
+            if any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
+                raise Unsupported('a generator expression nested inside another generator expression '
+                                  '(the inner one would be materialised eagerly, not lazily)')
             first = gen.generators[0]
             src = self._resolve_iter_src(first.iter, ctx)
             opened = ctx.tmp()
@@ -7875,6 +7878,9 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.emit('%s = ail_box_bool(%d);' % (res, 0 if name == 'any' else 1))
         arg = args[0]
         if isinstance(arg, ast.GeneratorExp):
+            if any(n is not arg and isinstance(n, ast.GeneratorExp) for n in ast.walk(arg)):
+                raise Unsupported('a generator expression nested inside another generator expression '
+                                  '(the inner one would be materialised eagerly, not lazily)')
             plan = self._str_scan_plan(arg, name, ctx)
             if plan is not None:
                 iternode, lo, hi = plan

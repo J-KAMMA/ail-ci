@@ -100,6 +100,19 @@ def main() -> None:
 main()
 """
 
+NEXT = r"""def src(n):
+    print("src", n)
+    return [n, n + 1]
+
+
+def main() -> None:
+    print(next(((y for y in src(x)) for x in [1, 2]), None))
+    print("done")
+
+
+main()
+"""
+
 REFUSED = {
     'element': ELEMENT,
     'unused': UNUSED,
@@ -107,6 +120,7 @@ REFUSED = {
     'second_for_clause': DOUBLE_LOOP,
     'fold_element': FOLD,
     'condition': CONDITION,
+    'next_argument': NEXT,
 }
 
 PLAIN = r"""def src(x: int):
