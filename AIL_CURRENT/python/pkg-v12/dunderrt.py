@@ -67,6 +67,19 @@ static inline ail_d1_fn ail_dun1(ail_obj x, int i) {
         if (((ail_classobj *)k.o)->d1[i]) return ((ail_classobj *)k.o)->d1[i];
     return 0;
 }
+static inline int ail__dun_cls_named(ail_obj k, const char *nm) {
+    ail_str s = ail_view_to_str(((ail_classobj *)k.o)->name);
+    size_t l = strlen(nm);
+    if ((size_t)s.n != l) return 0;
+    for (size_t i = 0; i < l; i++) if (ail_chr(s, (int64_t)i) != (unsigned char)nm[i]) return 0;
+    return 1;
+}
+static inline int ail__dun_is_intenum(ail_obj x) {
+    if (x.tag != AIL_T_INST) return 0;
+    for (ail_obj k = ((ail_instobj *)x.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base)
+        if (ail__dun_cls_named(k, "_AilIntEnum")) return 1;
+    return 0;
+}
 static inline ail_d3_fn ail_dun3(ail_obj x, int i) {
     if (x.tag != AIL_T_INST) return 0;
     for (ail_obj k = ((ail_instobj *)x.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base)
@@ -339,7 +352,7 @@ POW_NEW = """static inline ail_st ail_bi_pow(ail_ctx *cx, ail_obj *out, ail_obj 
     if (!has_mod) return ail_op_pow(cx, out, base, exp);
     ail_obj oa = base, ob = exp, om = modv;
     ail_obj *pp[3] = { &base, &exp, &modv };
-    for (int i = 0; i < 3; i++) if (pp[i]->tag == AIL_T_INST) {
+    for (int i = 0; i < 3; i++) if (pp[i]->tag == AIL_T_INST && ail__dun_is_intenum(*pp[i])) {
         ail_d1_fn xf = ail_dun1(*pp[i], AIL_D1_INDEX);
         if (xf) { ail_obj v; ail_st xst = xf(cx, &v, *pp[i]); if (xst != AIL_OK) return xst; *pp[i] = v; }
     }

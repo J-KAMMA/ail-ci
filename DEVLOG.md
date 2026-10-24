@@ -1,5 +1,15 @@
 # DEVLOG
 
+## 2026-10-24 - Fix over-broad 3-argument pow() index conversion (job-rbintenum4-10241809)
+
+Review follow-up. The re-applied `pow(base, exp, mod)` change converted *any* instance with
+`__index__` to an int, so `pow(I(), 3, 5)` printed `3` where CPython 3.12 raises
+`TypeError: unsupported operand type(s) for ** or pow(): 'I', 'int', 'int'`. The runtime now converts
+an instance operand only when its class chain contains `_AilIntEnum` (which covers `IntEnum` and
+`IntFlag` members); any other `__index__` object keeps CPython's three-name operand error. Added
+regression cases for all three positions, including values reaching `pow()` through a parameter, a
+list item, an attribute and a dict value, and corrected the corresponding `DIFFERENCES` row text.
+
 ## 2026-10-24 - Re-apply IntEnum / IntFlag leftovers (job-rbintenum4-10241809)
 
 Re-applied the accepted `job-intenum4-10221632` change on top of the current export. The tree already had

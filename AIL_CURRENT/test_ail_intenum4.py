@@ -543,6 +543,10 @@ class N:
     def __rdivmod__(self, other):
         return NotImplemented
 
+class I:
+    def __index__(self):
+        return 2
+
 class Box:
     def __init__(self, a, b, c):
         self.a = a
@@ -588,6 +592,16 @@ p('pow C.A E.A', lambda: pow3(C.A, E.A, 5))
 p('pow E.A C.A 0', lambda: pow3(E.A, C.A, 0))
 p('pow C.A str', lambda: pow3(C.A, "x", 5))
 p('pow C.A C.A', lambda: pow3(C.A, C.A, 5))
+# a plain __index__ object is not an int subclass: 3-argument pow rejects it in every position.
+p('pow I 3 5', lambda: pow3(I(), 3, 5))
+p('pow 2 I 5', lambda: pow3(2, I(), 5))
+p('pow 2 3 I', lambda: pow3(2, 3, I()))
+bi = Box(I(), 3, 5)
+p('pow attr I', lambda: pow3(bi.a, bi.b, bi.c))
+xi = [2, I(), 5]
+p('pow list I', lambda: pow3(xi[0], xi[1], xi[2]))
+di = {'a': 2, 'b': 3, 'c': I()}
+p('pow dict I', lambda: pow3(di['a'], di['b'], di['c']))
 
 b = Box(C.A, C.A, 5)
 p('pow attr', lambda: pow3(b.a, b.b, b.c))
