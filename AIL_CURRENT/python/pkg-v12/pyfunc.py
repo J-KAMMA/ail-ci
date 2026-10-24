@@ -6468,7 +6468,7 @@ def _is_slist_expr(node, ctx):
                     or node.func.id == 'sorted' and _map_kind(node.args[0], ctx) == SSET)
         if isinstance(node.func, ast.Attribute):
             method = _class_method_name(node, ctx)
-            if method:
+            if method and method in ctx.funcs:
                 return ctx.funcs[method][1] == SLIST
             if node.func.attr == 'copy' and not node.args and not node.keywords:
                 return _is_slist_expr(node.func.value, ctx)
@@ -14976,9 +14976,10 @@ def _numeric_call_name(node, ctx):
     if not isinstance(node, ast.Call):
         return None
     if isinstance(node.func, ast.Name):
-        return node.func.id
+        return node.func.id if node.func.id in ctx.funcs else None
     if isinstance(node.func, ast.Attribute):
-        return _class_method_name(node, ctx)
+        name = _class_method_name(node, ctx)
+        return name if name in ctx.funcs else None
     return None
 
 
@@ -17409,6 +17410,12 @@ def _method(node, ctx, *, as_stmt=False):
         return _bytes_value(node, ctx)
     mangled = _class_method_name(node, ctx)
     if mangled is not None:
+        if mangled not in ctx.funcs:
+            # A method call while only the class shapes are being scanned (a field initializer):
+            # the method's signature is not in this context, so refuse by name instead of a KeyError.
+            raise _refusal_at(node, 'a method call (.%s()) in a field initializer; the method '
+                                    'signature is not available while the class shapes are scanned'
+                              % at.attr)
         # `proven_self`: `_VTARGET` may name the method of the only subclass the program constructs
         # (TYPED_INHERITANCE.md section 3); the receiver is then that subclass, whatever its static class
         return _call_user_func(mangled,

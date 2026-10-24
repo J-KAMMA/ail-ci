@@ -5,9 +5,16 @@ MT19937 and the methods built on it, bit for bit): `random randint randrange cho
 getrandbits choices expovariate triangular seed`. Any number of generators, kept in variables, fields, lists or
 passed to functions.
 
+The typed path gets prelude_random_typed.py, the same class without method defaults (the typed class lowering
+refuses them) and with randrange's one- and three-argument forms renamed by `_rewrite_randrange` to `randrange1` /
+`randrange3`; the boxed class carries those names too. The typed class keeps random, getrandbits, randrange, randint,
+choice, uniform, gauss and expovariate; shuffle, sample, choices and triangular stay on the general path.
+
 A program that also calls the module-level functions (`random.seed(1)`, `random.randint(1, 6)`) keeps their state
 apart from every `Random` object, as CPython does: they become calls of one hidden generator, `_ail_rng`, which the
 program seeds with `random.seed(<int>)` (without a seed it starts from 0, where CPython starts from the OS).
+When `random.seed` is the only module-level function used, the hidden generator is never read, so its creation
+and the seed call are dropped (a module-level name bound to a constructor is not a typed module constant).
 A program that only uses the module-level functions is not touched here (stdlib3 builds those on the typed path).
 
 Not built, refused by name: `random.Random()` without a seed (not reproducible), a seed that is a str / bytes /
@@ -23,6 +30,123 @@ MODULE_FUNCS = {'seed', 'random', 'randint', 'randrange', 'uniform', 'gauss', 'c
                 'getrandbits', 'choices', 'expovariate', 'triangular'}
 
 
+def _scope_nodes(root):
+    """Nodes of one scope: a module's top-level statements or one function's body, without
+    descending into nested defs or classes (each has its own scope)."""
+    stack = list(ast.iter_child_nodes(root))
+    while stack:
+        node = stack.pop()
+        yield node
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        stack.extend(ast.iter_child_nodes(node))
+
+
+def _target_names(target):
+    if isinstance(target, ast.Name):
+        return [target.id]
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return [name for item in target.elts for name in _target_names(item)]
+    if isinstance(target, ast.Starred):
+        return _target_names(target.value)
+    return []
+
+
+def _random_annotation(annotation):
+    return isinstance(annotation, ast.Name) and annotation.id == 'Random'
+
+
+def _random_value(value, known):
+    if isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id == 'Random':
+        return True
+    return isinstance(value, ast.Name) and value.id in known
+
+
+def _scope_known(scope, module_known):
+    """Names of one scope that hold a `Random` at every binding: parameters annotated
+    `random.Random`, a local assigned only `Random(...)` values or aliases of one, and a module
+    name visible here that the scope does not shadow. A name that is also bound by a `for`,
+    `with`, import or any other form has no value here and is not included, so a call is only
+    rewritten when the receiver is provably a Random."""
+    values = {}
+    bound = set()
+    params = set()
+    if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        for arg in scope.args.args + scope.args.kwonlyargs:
+            bound.add(arg.arg)
+            if _random_annotation(arg.annotation):
+                params.add(arg.arg)
+        if scope.args.vararg is not None:
+            bound.add(scope.args.vararg.arg)
+        if scope.args.kwarg is not None:
+            bound.add(scope.args.kwarg.arg)
+    for node in _scope_nodes(scope):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                for name in _target_names(target):
+                    values.setdefault(name, []).append(node.value)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            bound.add(node.target.id)
+            if _random_annotation(node.annotation):
+                params.add(node.target.id)
+            if node.value is not None:
+                values.setdefault(node.target.id, []).append(node.value)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bound.add(node.id)
+    known = params | (module_known - bound)
+    changed = True
+    while changed:
+        changed = False
+        for name in bound:
+            if name in known:
+                continue
+            current = values.get(name)
+            if current and all(_random_value(value, known) for value in current):
+                known.add(name)
+                changed = True
+    return known
+
+
+def _rewrite_randrange(scope, known):
+    """`r.randrange(x)` on a proven Random -> `randrange1`; three arguments -> `randrange3`.
+    The typed prelude has no method defaults, so the one- and three-argument spellings get
+    their own methods (the boxed class has the same three names)."""
+    for node in _scope_nodes(scope):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == 'randrange' and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in known and not node.keywords):
+            continue
+        if len(node.args) == 1:
+            node.func.attr = 'randrange1'
+        elif len(node.args) == 3:
+            node.func.attr = 'randrange3'
+
+
+def _rewrite_random_calls(tree, extra=()):
+    module_known = _scope_known(tree, set()) | set(extra)
+    _rewrite_randrange(tree, module_known)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            known = _scope_known(node, module_known)
+            _rewrite_randrange(node, known)
+
+
+class _SeedDrop(ast.NodeTransformer):
+    """A `_ail_rng.seed(x)` call statement whose generator is never read is dead; drop it."""
+
+    def visit_Expr(self, node):
+        call = node.value
+        if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute) and \
+                call.func.attr == 'seed' and isinstance(call.func.value, ast.Name) and \
+                call.func.value.id == '_ail_rng':
+            return None
+        return self.generic_visit(node)
+
+
+def _is_random_ctor(value):
+    return isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id == 'Random'
+
+
 def run(tree, text):
     peek = stdlib5.peek_imports(tree, 'random')
     if not peek:
@@ -35,6 +159,7 @@ def run(tree, text):
             refuse(tree.body[0] if tree.body else tree, 'the program binds the name Random itself; rename it')
     rb = stdlib5.take_imports(tree, 'random', set(), whole=False)
     module_used = {'yes': False}
+    module_draw = {'yes': False}
 
     def fix(node):
         if isinstance(node, ast.Call) and peek.attr(node.func) == 'Random':
@@ -51,9 +176,27 @@ def run(tree, text):
             return stdlib5.name('Random')
         if found in MODULE_FUNCS:
             module_used['yes'] = True
+            if found != 'seed':
+                module_draw['yes'] = True
             return ast.Attribute(value=stdlib5.name('_ail_rng'), attr=found, ctx=ast.Load())
         return None
     tree.body = [stdlib5.Replace(fix).visit(s) for s in tree.body]
+    if not module_draw['yes']:
+        # Only `random.seed(x)` used the hidden generator: its state is never read, so the
+        # module-level `_ail_rng = Random(x)` and the seed call can go (the typed path refuses
+        # a module-level name bound to a call, and there is nothing to keep).
+        kept = []
+        for node in tree.body:
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                values = [node.value] if node.value is not None else []
+                if values and all(isinstance(t, ast.Name) and t.id == '_ail_rng' for t in targets) and \
+                        all(_is_random_ctor(v) for v in values):
+                    continue
+            kept.append(node)
+        tree.body = kept
+        tree.body = [_SeedDrop().visit(node) for node in tree.body]
+    _rewrite_random_calls(tree, {'_ail_rng'} if module_draw['yes'] else ())
     # what is left of the module's names is not a call we can send to the hidden generator
     for each in ast.walk(tree):
         if isinstance(each, ast.Attribute) and isinstance(each.value, ast.Name) and each.value.id in peek.aliases:
@@ -77,7 +220,7 @@ def run(tree, text):
                 tree.body[index].value, ast.Constant):
             index += 1
         tree.body.insert(index, ast.Import(names=[ast.alias(name='math', asname=None)]))
-    chunk = stdlib5.prelude('random')
-    if module_used['yes']:
+    chunk = stdlib5.prelude('random_typed')
+    if module_draw['yes']:
         chunk += '\n_ail_rng = Random(0)\n'
     text.append(chunk)

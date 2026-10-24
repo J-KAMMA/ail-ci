@@ -23,6 +23,12 @@ class Random:
     def randrange(self, start, stop=None, step=1):
         return _ail_rg_range(self.mt, start, stop, step, 0)
 
+    def randrange1(self, start):
+        return _ail_rg_range(self.mt, start, None, 1, 0)
+
+    def randrange3(self, start, stop, step):
+        return _ail_rg_range(self.mt, start, stop, step, 0)
+
     def randint(self, a, b):
         return _ail_rg_range(self.mt, a, b, 1, 1)
 

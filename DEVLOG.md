@@ -1,5 +1,24 @@
 # DEVLOG
 
+## 2026-10-24 - census refusal 2: Random on the typed path (job-cov8-10240949)
+
+The gdev census (510 programs, compile-only, `fallback_census.py --jobs 2`) grouped the 358 typed
+first refusals by their first line.  The target was the 10 programs whose first refusal was
+`Random.randrange must take plain positional arguments, no defaults, *args or **kwargs`; the only
+larger classes are the deliberate generator (`yield`, 12) and scalar-`None` (10) refusals.  Before:
+145 typed / 311 general / 47 refused by both / 7 error.  After: 149 typed / 307 general / 47 / 7;
+the `Random.randrange` class is gone and the 10 programs build and match CPython on both builds.
+
+The typed class lowering has no method defaults, so `prelude_random_typed.py` spells the one- and
+three-argument forms as `randrange1` / `randrange3`; `randlib.py` rewrites a call on a proven
+`Random` (a local, an alias or an annotated parameter) to the right name.  The typed prelude also
+drops the hidden module generator when `random.seed` is its only module-level use.  The boxed
+prelude gained the same two method names.  `pyfunc.py` now refuses a method call whose signature is
+not available while class shapes are scanned by name instead of raising `KeyError`, including the
+field-initializer call in `g13_028.py`.  Added `test_ail_cov8.py`; probes cover zero, negative,
+large and `2**31` seeds, empty/negative/zero-step ranges, `getrandbits` widths, attributes, list
+items, dict values, aliases and both builds.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
