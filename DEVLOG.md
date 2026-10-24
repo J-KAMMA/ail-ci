@@ -1,5 +1,20 @@
 # DEVLOG
 
+## 2026-10-24 - re-apply fuzz3n: str search None bounds (C168)
+
+Re-applied job-fuzz3n-10220658 on this tree. The change itself was already in the export:
+`_str_window_bounds` in `AIL_CURRENT/python/pkg-v12/pyboxed2.py` tests each supplied start/end
+tag and passes `has_lo = 0` / `has_hi = 0` for a `None`, and `AIL_CURRENT/test_ail_fuzz3n.py`
+(registered in `ail_check.MODULES`) covers the literal, variable, argument, list-item, dict-value
+and attribute forms on both builds. The job's diff also listed `list.index` / `tuple.index` with
+a `None` bound as an open difference, but this tree already closes that case with C169
+(`_seq_index_bound` / `_check_seq_index_bound`), so no open row was added.
+
+Tests on this commit: `test_ail_fuzz3n`, `test_ail_c169`, `test_ail_safetynet`, `test_ail_files`
+and `test_ail_corpus_findings3` all pass (43 tests, 1 skipped for missing zig). Probes
+`/tmp/probes/p_basic.py`, `p_sources.py`, `p_windows.py` and `p_types.py` match CPython on the
+general and default builds.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
