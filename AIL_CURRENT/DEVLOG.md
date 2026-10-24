@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 -- pre41: nested generator expression as an any()/all() iterable
+
+A reviewer of pre28 recorded that an inner generator expression used as the iterable
+(`any(x for x in (y for y in ...))`) is materialised eagerly. The general path still
+builds the inner `GeneratorExp` as a list before the outer scan, so elements after the
+deciding one run their side effects: with `mark()` printing each value,
+`any(x for x in (mark(i) for i in [0, 1, 2]))` printed `inner 0`, `inner 1`, `inner 2`
+where CPython stops after `inner 1`. The current emitter cannot model a lazy nested
+generator, so the general path now refuses that shape by name at compile time on both
+builds instead of answering differently. Generator expressions over eager iterables
+(lists, ranges, arguments, list comprehensions) still build unchanged. Added
+`test_ail_pre41.py` (8 refused shapes, one eager program compared with CPython).
+
 ## 2026-10-23 -- fuzz37: ordering TypeError names the written operator
 
 Fuzzing while loops and counters against CPython on both builds found that an
