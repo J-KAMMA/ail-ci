@@ -7921,6 +7921,13 @@ class Compiler(boxclosure.ClosureMixin):
     def _b_chr(self, args, kwargs, ctx):
         if len(args) != 1 or kwargs:
             raise Unsupported('chr() with other than exactly one argument')
+        try:
+            code = ast.literal_eval(args[0])
+        except (ValueError, TypeError, SyntaxError):
+            code = None
+        if isinstance(code, int) and not isinstance(code, bool) and 0x10000 <= code <= 0x10FFFF:
+            raise Unsupported('chr() of the non-BMP code point U+%04X in the 16-bit v2 runtime'
+                              % code)
         v = self.expr(args[0], ctx)
         t = ctx.tmp()
         ctx.emit('st = ail_bi_chr(cx, &%s, %s);' % (t, v))

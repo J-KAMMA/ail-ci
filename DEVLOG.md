@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - pre36: refuse a non-BMP chr() constant on the general path
+
+The general (boxed) path's 16-bit str runtime cannot hold a code point above U+FFFF, so
+`chr(0x1F600)` compiled and then died at run time with `AIL internal error: chr() non-BMP code
+point requires 32-bit strings`; CPython prints the character, and the default build already did.
+A constant `chr()` argument in U+10000..U+10FFFF is now refused at compile time on the general
+path by name. BMP boundaries, negative arguments, arguments above U+10FFFF and the default build
+are unchanged. A non-BMP value that is not a constant still reaches the old runtime fatal (a
+pre-existing difference, not fixed here). Added `AIL_CURRENT/test_ail_pre36.py` and registered it
+in `ail_check.MODULES`.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
