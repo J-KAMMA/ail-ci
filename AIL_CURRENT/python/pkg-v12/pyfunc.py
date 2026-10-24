@@ -66,7 +66,7 @@ import typedinherit
 import shadowing
 import rangecheck
 from pipeline import PipelineError
-from pyfront import BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Unsupported, _use, refuse_complex_pow
+from pyfront import BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Unsupported, _use, refuse_complex_pow, refuse_unrepresentable_delete_bounds
 
 # A capability marker, not a behaviour: lets a SHARED judge (one file imported against many
 # `pkg-*` copies of this module, e.g. `test_floatparam.py`) ask "does THIS copy infer a float
@@ -21613,6 +21613,9 @@ def _stmt_inner(node, ctx, ind):
             return _discard_value(node.value, ctx, pad)
         return _discard_value(node.value, ctx, pad)
     if isinstance(node, ast.Delete):
+        for target in node.targets:
+            if isinstance(target, ast.Subscript):
+                refuse_unrepresentable_delete_bounds(target)
         if any(isinstance(target, ast.Subscript) and isinstance(target.value, ast.Attribute) and _field_kind(target.value, ctx) == SLIST for target in node.targets):
             if len(node.targets) != 1:
                 raise Unsupported('string list field deletion requires one target')
