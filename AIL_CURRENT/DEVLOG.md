@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 -- statically known unary int64 overflow (job-pre172-10250444)
+
+The first pre-existing difference left by job-pre108 was pure unary overflow: `-MIN`, both on a
+module constant and as `-(-9223372036854775808)`, compiled on the default build and then stopped at
+run time with `integer overflow`, while CPython printed a bignum; the general path refused the
+`MIN` literal with a different message. A new front-end check evaluates unary `+`/`-` over integer
+literals and module-level int constants and refuses an out-of-int64 result by name (`int64 constant
+expression out of range: ...`) on both builds. A module constant shadowed by a parameter is not
+folded, and values that only reach the unary operation as variables keep the fixed-width trap.
+Added `test_ail_pre172.py` and registered it in `ail_check.MODULES`.
+
 ## 2026-10-23 -- fuzz37: ordering TypeError names the written operator
 
 Fuzzing while loops and counters against CPython on both builds found that an

@@ -2,6 +2,7 @@
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre172-10250444-1 | integers / unary constants | A statically known unary integer expression outside int64 (`-MIN` on a module constant, or `-(-9223372036854775808)`) used to compile on the default build and trap at run time with `integer overflow`; CPython prints a bignum. Both builds now refuse it by name (`int64 constant expression out of range: ...`); variables that only reach the operation at run time keep the fixed-width trap. Covered by `test_ail_pre172.py`. | fixed |
 | C?-job-fuzz20-10230625-1 | int.from_bytes | the general path accepted int and None as the bytes source (int 1 became one zero byte, None became empty) | fixed: both now raise TypeError like CPython |
 # Differences from CPython 3.12
 

@@ -5,6 +5,7 @@ so the change is recorded with the code it describes.
 
 | id | status | difference |
 | --- | --- | --- |
+| C?-job-pre172-10250444-1 | fixed | A statically known unary integer expression outside int64 (`-MIN` on a module constant, or `-(-9223372036854775808)`) used to compile on the default build and trap at run time with `integer overflow`; CPython prints a bignum. Both builds now refuse it by name (`int64 constant expression out of range: ...`); variables that only reach the operation at run time keep the fixed-width trap. Covered by `test_ail_pre172.py`. |
 | C169 | closed | `list.index` / `tuple.index` read a `None`, float or str bound as index 0 instead of raising CPython's `TypeError: slice indices must be integers or have an __index__ method`.  Both bounds are now converted at run time (int / bool / `__index__`); the typed lowering handles visible int/bool and non-index bounds and leaves the rest to that path, and a bad `__index__` return is CPython's `__index__ returned non-int (type ...)` with the complete type name.  Covered by `test_ail_c169.py`. |
 # Differences from CPython
 

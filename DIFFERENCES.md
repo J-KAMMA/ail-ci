@@ -4,6 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre172-10250444-1 | integers / unary constants | A statically known unary integer expression outside int64 (`-MIN` on a module constant, or `-(-9223372036854775808)`) compiled on the default build and then stopped at run time with `integer overflow`; CPython prints a bignum. The front end now refuses the construct by name (`int64 constant expression out of range: ...`) on both builds. Values that only reach the unary operation as variables keep the fixed-width trap. | fixed |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |
