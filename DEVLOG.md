@@ -1,5 +1,21 @@
 # DEVLOG
 
+## 2026-10-24 - Counter repr orders str/sequence/bytes counts (job-pre145-10250217)
+
+The pre-existing difference recorded by the pre120 reviewer: CPython's `Counter.__repr__` prints the
+entries by count (`most_common` order) for any counts that `<` orders, and falls back to insertion
+order when a comparison raises `TypeError`. AIL's repr sorter handled only numbers, so a Counter whose
+counts are str, list, tuple, bytes or bytearray kept insertion order: `Counter({'b': [2], 'a': [1]})`
+printed `a` first on both builds. The sorter now orders numbers, str, list/tuple (lexicographic,
+nested) and bytes/bytearray content, and the repr sorts only when every pair of counts is orderable,
+matching CPython's catch-and-fall-back. Equal counts keep insertion order. Added
+`AIL_CURRENT/test_ail_pre145.py` (three programs, both builds) and registered it in
+`ail_check.MODULES`.
+
+Observed and not changed (pre-existing, other pre120 rows): `Counter(mapping)` with a non-int value
+still raises `TypeError` instead of keeping the value, and `most_common()` on mixed-type counts still
+names its `TypeError` operands in the opposite order.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

@@ -14604,15 +14604,90 @@ static inline ail_st ail_op_ge(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) 
    =================================================================================== */
 /* a DICT whose header flag is set is a collections.Counter (ail_counter_new); its operators are defined with the collections code below */
 static inline int ail__is_counter(ail_obj x) { return x.tag == AIL_T_DICT && ((ail_gcobj *)x.o)->flags == 1; }   /* flags 2: defaultdict(None) */
-/* the order of Counter.most_common(): by count, the largest first, equal counts in insertion order */
+/* the order of Counter.most_common(): by count, the largest first, equal counts in insertion order.
+   Repr orders the same way, and CPython's sort accepts any counts that `<` orders, not only numbers. */
 static ail_mapentry *ail__cnt_ents_g;
+static int ail__cnt_cls_is(ail_obj x, const char *want) {
+    if (x.tag != AIL_T_INST) return 0;
+    ail_obj c = ((ail_instobj *)x.o)->cls;
+    if (c.tag != AIL_T_CLASS) return 0;
+    ail_obj nm = ((ail_classobj *)c.o)->name;
+    if (nm.tag != AIL_T_STR) return 0;
+    ail_str s = ail_view_to_str(nm);
+    size_t n = strlen(want);
+    if ((size_t)s.n != n) return 0;
+    for (size_t i = 0; i < n; i++) if (ail_chr(s, (int64_t)i) != (unsigned char)want[i]) return 0;
+    return 1;
+}
+static int ail__cnt_str_attr(ail_obj x, ail_str *out) {   /* prelude bytes: its one str attribute `_s` */
+    ail_instobj *o = (ail_instobj *)x.o;
+    for (int64_t i = 0; i < o->n; i++) if (o->attrs[i].val.tag == AIL_T_STR) { *out = ail_view_to_str(o->attrs[i].val); return 1; }
+    return 0;
+}
+static int ail__cnt_intlist_attr(ail_obj x, ail_vecobj **out) {   /* prelude bytearray: its int-list attribute `_a` */
+    ail_instobj *o = (ail_instobj *)x.o;
+    for (int64_t i = 0; i < o->n; i++) if (o->attrs[i].val.tag == AIL_T_LIST) { *out = (ail_vecobj *)o->attrs[i].val.o; return 1; }
+    return 0;
+}
+static int ail__cnt_byteslike(ail_obj x, int *kind, ail_str *s, ail_vecobj **v) {
+    if (ail__cnt_cls_is(x, "bytes")) { if (!ail__cnt_str_attr(x, s)) return 0; *kind = 1; return 1; }
+    if (ail__cnt_cls_is(x, "bytearray")) { if (!ail__cnt_intlist_attr(x, v)) return 0; *kind = 2; return 1; }
+    return 0;
+}
+static int ail__cnt_byteslike_cmp(ail_obj a, ail_obj b) {
+    int ka, kb; ail_str sa, sb; ail_vecobj *va, *vb;
+    if (!ail__cnt_byteslike(a, &ka, &sa, &va) || !ail__cnt_byteslike(b, &kb, &sb, &vb)) return 0;
+    int64_t na = ka == 1 ? sa.n : va->n, nb = kb == 1 ? sb.n : vb->n;
+    int64_t n = na < nb ? na : nb;
+    for (int64_t i = 0; i < n; i++) {
+        uint16_t x = ka == 1 ? ail_chr(sa, i) : (uint16_t)va->p[i].i;
+        uint16_t y = kb == 1 ? ail_chr(sb, i) : (uint16_t)vb->p[i].i;
+        if (x != y) return x < y ? -1 : 1;
+    }
+    return na < nb ? -1 : na > nb ? 1 : 0;
+}
+/* CPython's Counter repr catches the TypeError from an unorderable count and falls back to
+   insertion order; this predicate mirrors that: only sort when every pair is orderable. */
+static int ail__cnt_sortable(ail_obj x) {
+    if (ail__is_num(x.tag) || x.tag == AIL_T_STR || x.tag == AIL_T_LIST || x.tag == AIL_T_TUPLE) return 1;
+    {   int kind; ail_str s; ail_vecobj *v;
+        return ail__cnt_byteslike(x, &kind, &s, &v); }
+}
+static int ail__cnt_comparable(ail_obj a, ail_obj b) {
+    if (ail__is_num(a.tag) && ail__is_num(b.tag)) return 1;
+    if (a.tag == AIL_T_STR && b.tag == AIL_T_STR) return 1;
+    if ((a.tag == AIL_T_LIST && b.tag == AIL_T_LIST) || (a.tag == AIL_T_TUPLE && b.tag == AIL_T_TUPLE)) {
+        ail_vecobj *va = (ail_vecobj *)a.o, *vb = (ail_vecobj *)b.o;
+        int64_t n = va->n < vb->n ? va->n : vb->n;
+        for (int64_t i = 0; i < n; i++) if (!ail__cnt_comparable(va->p[i], vb->p[i])) return 0;
+        return 1;
+    }
+    if ((ail__cnt_cls_is(a, "bytes") || ail__cnt_cls_is(a, "bytearray"))
+        && (ail__cnt_cls_is(b, "bytes") || ail__cnt_cls_is(b, "bytearray"))) {
+        int ka, kb; ail_str sa, sb; ail_vecobj *va, *vb;
+        return ail__cnt_byteslike(a, &ka, &sa, &va) && ail__cnt_byteslike(b, &kb, &sb, &vb);
+    }
+    return 0;
+}
+static int ail__cnt_val_cmp(ail_obj a, ail_obj b) {
+    if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) return a.i < b.i ? -1 : a.i > b.i ? 1 : 0;
+    if (ail__is_num(a.tag) && ail__is_num(b.tag)) { double x = ail__as_double(a), y = ail__as_double(b); return x < y ? -1 : x > y ? 1 : 0; }
+    if (a.tag == AIL_T_STR && b.tag == AIL_T_STR) { int64_t c = ail_str_cmp(ail_view_to_str(a), ail_view_to_str(b)); return c < 0 ? -1 : c > 0 ? 1 : 0; }
+    if ((a.tag == AIL_T_LIST && b.tag == AIL_T_LIST) || (a.tag == AIL_T_TUPLE && b.tag == AIL_T_TUPLE)) {
+        ail_vecobj *va = (ail_vecobj *)a.o, *vb = (ail_vecobj *)b.o;
+        int64_t n = va->n < vb->n ? va->n : vb->n;
+        for (int64_t i = 0; i < n; i++) { int c = ail__cnt_val_cmp(va->p[i], vb->p[i]); if (c) return c; }
+        return va->n < vb->n ? -1 : va->n > vb->n ? 1 : 0;
+    }
+    if ((ail__cnt_cls_is(a, "bytes") || ail__cnt_cls_is(a, "bytearray"))
+        && (ail__cnt_cls_is(b, "bytes") || ail__cnt_cls_is(b, "bytearray")))
+        return ail__cnt_byteslike_cmp(a, b);
+    return 0;   /* incomparable counts: leave insertion order */
+}
 static int ail__cnt_cmp_desc(const void *pa, const void *pb) {
     int64_t ia = *(const int64_t *)pa, ib = *(const int64_t *)pb;
-    ail_obj va = ail__cnt_ents_g[ia].val, vb = ail__cnt_ents_g[ib].val;
-    int c;
-    if (ail__is_intlike(va.tag) && ail__is_intlike(vb.tag)) c = va.i > vb.i ? -1 : va.i < vb.i ? 1 : 0;
-    else { double x = ail__as_double(va), y = ail__as_double(vb); c = x > y ? -1 : x < y ? 1 : 0; }
-    return c ? c : (ia < ib ? -1 : ia > ib);
+    int c = ail__cnt_val_cmp(ail__cnt_ents_g[ia].val, ail__cnt_ents_g[ib].val);
+    return c ? -c : (ia < ib ? -1 : ia > ib);
 }
 static inline const char *ail__tname_c(ail_obj x) {
     if (x.tag == AIL_T_INST && ((ail_instobj *)x.o)->cls.tag == AIL_T_CLASS) {      /* an instance names its class (bytes, ...) */
@@ -16053,9 +16128,15 @@ static inline void ail__write_repr_body(ail_ctx *cx, ail_obj x, FILE *f) {
             if (((ail_gcobj *)x.o)->flags) {   /* a Counter: `Counter({'b': 2, 'a': 1})`, the entries by count, the largest first (most_common) */
                 if (m->n == 0) { fputs("Counter()", f); break; }
                 int64_t *idx = (int64_t *)ail_xmalloc((size_t)m->n * sizeof(int64_t));
-                int numeric = 1;
-                for (int64_t i = 0; i < m->n; i++) { idx[i] = i; if (!ail__is_num(m->entries[i].val.tag)) numeric = 0; }
-                if (numeric) { ail__cnt_ents_g = m->entries; qsort(idx, (size_t)m->n, sizeof(int64_t), ail__cnt_cmp_desc); }
+                int sortable = 1;
+                for (int64_t i = 0; i < m->n; i++) {
+                    idx[i] = i;
+                    if (!ail__cnt_sortable(m->entries[i].val)) { sortable = 0; break; }
+                }
+                for (int64_t i = 0; sortable && i < m->n; i++)
+                    for (int64_t j = i + 1; sortable && j < m->n; j++)
+                        if (!ail__cnt_comparable(m->entries[i].val, m->entries[j].val)) sortable = 0;
+                if (sortable) { ail__cnt_ents_g = m->entries; qsort(idx, (size_t)m->n, sizeof(int64_t), ail__cnt_cmp_desc); }
                 fputs("Counter({", f);
                 for (int64_t k = 0; k < m->n; k++) { int64_t i = idx[k]; if (k) fputs(", ", f); ail_obj_write_repr(cx, m->entries[i].key, f); fputs(": ", f); ail_obj_write_repr(cx, m->entries[i].val, f); }
                 fputs("})", f);
