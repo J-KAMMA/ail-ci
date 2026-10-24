@@ -1,5 +1,19 @@
 # DEVLOG
 
+## 2026-10-24 - pre138: integer `%` by zero names modulo
+
+CPython 3.12 splits the ZeroDivisionError text of the integer operators: `1 % 0` says
+`integer modulo by zero`, while `1 // 0` and `divmod(1, 0)` keep `integer division or modulo by
+zero`. The boxed emitters in `python/pkg-v12/cruntime.py` (`ail_obj_mod`, `ail_op_mod`) raised the
+combined `//` text for `%`, so a caught `x % 0` printed the wrong message on both builds; the typed
+path already named modulo. Both helpers now raise the modulo text. `//`, divmod(), the three float
+messages and `INT64_MIN % -1` (0) stay as they were. Added `test_ail_pre138.py` and its shard.
+
+The two notes recorded by the pre21 reviewer no longer differ on this tree: `tools/ci_shards.py
+--check` is clean (both fuzz modules and this one are mapped), and the float-`%` area that job
+touched matches CPython on both builds. `perf_event_paranoid` is 4 here, so instruction counts
+remain unmeasurable.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
