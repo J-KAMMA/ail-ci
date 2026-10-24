@@ -5,6 +5,7 @@ Deliberate differences from CPython and open silent differences found by differe
 | id | area | difference | status |
 | --- | --- | --- | --- |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
+| C?-job-pre171-10250443-1 | mixed mode / indirect call | A negative shift (`<<`/`>>`, also augmented) in a helper called from a lambda, a list entry or a callback escaped the caller's boxed `try` on the default build because `pymix` followed only direct calls by name; the helper's typed `ValueError` bypassed the handler. Trap-capable candidates invoked indirectly are now rejected to the general path, and the typed shift guards name CPython's `negative shift count`. | fixed; `test_ail_pre171.py` |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |
 | C?-job-fuzz39-10230820-1 | `is` / `is not` with a tuple constant | merges equal tuple constants of a code object (`a = (); b = (); a is b` is True; `()` is a singleton) | each tuple display is an object of its own | refused by name; `test_ail_fuzz39.py` |

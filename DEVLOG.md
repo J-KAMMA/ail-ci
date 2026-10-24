@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - indirect typed calls keep the caller's boxed handler (job-pre171-10250443)
+
+`pymix` rejected an exception-capable typed candidate only when a direct call site was lexically
+inside a boxed `try`. A helper with a shift trap reached through a lambda, a list entry or a
+callback had no such direct site, so its typed `ValueError` bypassed the caller's handler and the
+default build stopped after two cases (`pre109_lambda_list_tmp.py`). `pymix` now marks
+value-referenced, lambda-invoked and transitively indirect functions and rejects trap-capable
+candidates used that way. The typed `ck_shl`/`ck_shr` guards also carry CPython's
+`negative shift count`, adopting the exception so a caught shift does not leak. Added
+`AIL_CURRENT/test_ail_pre171.py` (4 programs, both builds). The int64 shift overflow above 63 bits
+remains a separate, unfixed difference.
+
+
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
 
 The general path's native `statistics` helpers kept a heap result in a C local across an
