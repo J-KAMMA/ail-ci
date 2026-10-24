@@ -5,6 +5,7 @@ Deliberate differences from CPython and open silent differences found by differe
 | id | area | difference | status |
 | --- | --- | --- | --- |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
+| C?-job-pre120-10242313-1 | collections.Counter constructor/update | CPython 3.12's `Counter.update(mapping)` copies the mapping with `dict.update` when the counter is empty and only adds counts when it is not, so `Counter({"a": "x"})` keeps `"x"`; the general path added `0 + "x"` and raised `TypeError` (`Counter().update({"a": "x"})` did the same). Empty mapping updates now copy values; non-empty updates still add in CPython's operand order. Counter `repr` now orders string counts like `most_common`, and the operators' comparison with 0 names the operator CPython names. | fixed; `test_ail_pre120.py` |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |
 | C?-job-fuzz39-10230820-1 | `is` / `is not` with a tuple constant | merges equal tuple constants of a code object (`a = (); b = (); a is b` is True; `()` is a singleton) | each tuple display is an object of its own | refused by name; `test_ail_fuzz39.py` |
