@@ -1,5 +1,21 @@
 # DEVLOG
 
+## 2026-10-24 - pre56: known overflowing integer powers are refused at compile time
+
+CPython computes `10 ** 40` and `pow(10, 40)` exactly, but AIL's `int` is int64, so the compiled
+programs stopped with `integer overflow` from `ail_ipow` / `ail_obj_pow`. A shared AST check in
+`ail_chatgpt.py` now evaluates integer `**` and two-argument `pow()` when their operands are
+compile-time constants -- directly, through module, local or nested-function names, a list item,
+a dict value or a class attribute -- and refuses a result outside int64 by name on both builds.
+The check is skipped for imported modules, so their existing module-body refusal is unchanged.
+Powers whose exact value fits are untouched (`2 ** 62`, `(-2) ** 63`, modular `pow()`, negative
+exponents), and a shadowed `pow` or a comprehension target is not mistaken for a constant.
+
+New `AIL_CURRENT/test_ail_pre56.py` covers ten overflowing shapes and a valid-boundary program
+on both builds. Probes: `/tmp/probes/pow{1,2,3,_local,_list,_dict,_attr,_ok,_shadow,_arg,_comp,
+_lambda,_neg,_bound,_nested,_global,_mut}.py`. The remaining run-time-only overflow is the
+language's documented int64 stop, not a silent difference.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

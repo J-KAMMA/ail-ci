@@ -586,6 +586,10 @@ promises that overflow traps under `--strict`, and it did not here. It traps in 
 well, and that is a deliberate exception to §1's rule that the default follows C: **C has no `**`,
 so there is no C behaviour to follow**, and a power that silently wraps has no defensible reading.
 
+When the base and exponent are compile-time constants, the exact value is already known, so the
+compiler refuses a result outside int64 by name -- the same treatment an out-of-range integer
+literal gets -- instead of emitting a program whose only possible outcome is that run-time stop.
+
 **The collecting form wrote into a caller's buffer without being told its size.** That is in the
 back end rather than here, and it is fixed the same way: the capacity travels with the pointer and
 overrunning it stops the program.
