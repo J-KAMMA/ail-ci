@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - dict probing and key-table shape for user-hash keys (job-pre73-10241831)
+
+Reproduced the pre57-recorded fuzz scenario (`n=10,hmul=32,every,update0`): deleting and
+reinserting every key with `__hash__ = (v * 32) % 64` made the base builds call user `__eq__`
+25 more times than CPython and print a different checksum; `dict(d)`/`copy()`/`update` also
+rehashed and re-compared keys CPython copies from stored hashes.  Ported the accepted pre57
+runtime change: CPython 3.12's perturbed probe sequence, dummy index slots,
+`dk_nentries`/`dk_usable`/trailing-dummy accounting, stored-hash `update`/`dict(d)`/`copy`,
+and direct instance `__hash__` values (`-1` becomes `-2`).  Added `test_ail_pre73.py`
+(5 programs, both builds).
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

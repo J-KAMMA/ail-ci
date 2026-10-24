@@ -4,6 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre73-10241831-1 | dict with user `__hash__`/`__eq__` | After delete+reinsert, `dict(d)`, `copy()` and `update()` rehashed every key and called user `__eq__` more often (or in a different order) than CPython 3.12, and the index was rehashed on every delete. AIL now uses CPython's perturbed probing, dummy index slots, `dk_nentries`/`dk_usable`/trailing-dummy accounting and stored-hash merges, so `__hash__`/`__eq__` call counts and order match. | fixed |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |
