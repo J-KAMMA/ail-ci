@@ -1,5 +1,27 @@
 # DEVLOG
 
+## 2026-10-24 - heapq.nlargest/nsmallest with NaN (job-pre95-10242044)
+
+`heapq.nlargest`/`nsmallest` were lowered to one `list.sort` followed by truncation. That is
+equivalent to CPython's heapq only when the ordering is transitive. With a NaN in the input the
+comparison is non-transitive, and CPython selects a different set/permutation: the original probe
+`[2.0, nan, 3.0]` returned `[2.0, nan]` for `nlargest(2, xs)` on both builds instead of CPython's
+`[nan, 2.0]`. The same wrong permutations appeared for `nsmallest` and for keyed tuples.
+
+The runtime now ports the mechanism from CPython 3.12 `Lib/heapq.py`: a min-heap (nlargest) or
+max-heap (nsmallest) over the decorated `(value, order)` / `(key, order, value)` tuples, root
+replacement in input order, and a final `list.sort(reverse=...)` of those decorations. CPython's
+3.12 Timsort/Powersort from `Objects/listobject.c` is ported too, because a different sort can pick
+a different permutation under NaN even when it is given the same decorated list. Both heaps and
+the sort use a Python-semantics `<` helper (identity-first tuple equality, false for NaN `<`).
+The new helpers are GC-rooted across comparisons and key calls.
+
+Verified with `/tmp/probes/p10.py` (the original), `p11_many.py` (empty/negative/k=0/k=1/k>len,
+ints/floats/strings/tuples, duplicates, inf, keyed tuples, 500- and 300-element arrays),
+`p12_sources.py` (argument/list item/attribute/dict value, generator, aliasing) and
+`p13_errors.py` (mixed-type TypeError): both builds match CPython. New regression module:
+`AIL_CURRENT/test_ail_pre95.py`.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

@@ -28,3 +28,4 @@ Rows added by job-fuzz8-10220554 use the placeholder id form requested for this 
 | ID | Area | Status | Description |
 | --- | --- | --- | --- |
 | C?-job-fuzz65-10231438-1 | heapq / list repr | fixed | After a caught `heappush` TypeError on a `list[int]` (CPython appends before comparing), the annotation-specialized list repr printed a string element as `x` instead of `'x'` when a tuple comparison had generated that helper. Scalar elements now use the runtime value's `repr`. |
+| C?-job-pre95-10242044-1 | heapq | fixed | `nlargest`/`nsmallest` with NaN in the input (including keyed tuples) returned a different permutation from CPython because the lowering sorted the whole iterable and truncated. The runtime now ports CPython 3.12's decorated heap selection and Timsort/Powersort, with Python tuple/NaN `<` semantics, so both builds match; `test_ail_pre95.py`. |
