@@ -1,5 +1,15 @@
 # DEVLOG
 
+## 2026-10-24 - pre45: a str method used as a value is refused by name
+
+`f = "ab".upper` compiled on both builds and then failed at run time with
+`AttributeError: 'str' object has no attribute 'upper'`. The general path now refuses a
+str method fetched as a value (DIFFERENCES C?-job-pre45-10241007-1) when the receiver is
+a str or of unknown kind; a receiver known to be an instance is left to its field lookup,
+and `"ab".upper()` calls are unchanged. The other two pre30 findings needed no change:
+`getattr(c, "add")` is already refused by name, and `cls.attr` in a classmethod remains a
+pre-existing difference outside this job's first case. Added `test_ail_pre45.py`.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

@@ -2086,6 +2086,7 @@ class Compiler(boxclosure.ClosureMixin):
         self.prelude_names = set() # functions and methods of the preludes added here (not the program's own)
         self.rt_needs = set()      # safetyrt.py fragments this program uses (none: the C it always had)
         self.lib_tuples = False    # genlib.py pieces are in the program: their tuples meet the tuple pass's records
+        self.attr_store_names = set()
 
     # ------------------------------------------------------------------------------- entry point
     def compile(self, source):
@@ -2157,6 +2158,9 @@ class Compiler(boxclosure.ClosureMixin):
                     and n.func.id not in self.from_imports and n.func.id not in own
                     and n.func.id not in self.module_names):
                 self.from_imports[n.func.id] = (_IMPLICIT_LIB[n.func.id], n.func.id)
+
+        self.attr_store_names = {n.attr for n in ast.walk(tree)
+                                 if isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Store)}
 
         for n in tree.body:
             if isinstance(n, ast.FunctionDef):
@@ -5048,6 +5052,13 @@ class Compiler(boxclosure.ClosureMixin):
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
         if prop_owners:
             return self._property_read(node, prop_owners, ctx)
+        if node.attr in self._STR_ONLY_METHODS:
+            recv_kind = self.infer_kind(node.value, ctx)
+            own_recv = isinstance(node.value, ast.Name) and node.value.id in ('self', 'cls', ctx.self_name)
+            if not own_recv and (recv_kind == 'str' or
+                                 (recv_kind is None and node.attr not in self.attr_store_names)):
+                raise Unsupported('the str method %s used as a value (a bound method value is not modelled; '
+                                  'call it: x.%s(...), DIFFERENCES C?-job-pre45-10241007-1)' % (node.attr, node.attr))
         obj = self.expr(node.value, ctx)
         if node.attr == 'args' and not any('args' in c['methods'] for c in self.classes.values()):
             # e.args of an exception value (the run time's own carry their message)
