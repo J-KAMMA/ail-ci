@@ -4338,7 +4338,9 @@ class Compiler(boxclosure.ClosureMixin):
     def expr_Name(self, node, ctx):
         if node.id in ('True', 'False'):
             return 'ail_box_bool(%d)' % (1 if node.id == 'True' else 0)
-        if node.id in self.classes:
+        if (node.id in self.classes and node.id not in ctx.slot_of and node.id not in ctx.ptr_names
+                and node.id not in ctx.clo_index and node.id not in ctx.free_names
+                and node.id not in ctx.cell_slots):
             # A class is already a real ail_obj CLASS value, permanently rooted in the
             # module-lifetime frame (g_slots_arr) -- returning that reference directly lets a
             # class be stored in a variable, passed as an argument, or compared/isinstance'd,
