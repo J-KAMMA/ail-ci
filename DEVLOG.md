@@ -51,6 +51,16 @@ without a sign are unchanged.
 widths/alignment, empty and non-ASCII values, values from an argument/list item/attribute/dict
 value, and numeric sign formatting on both builds. It and `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` pass on the final commit.
+## 2026-10-24 - build time in the AIL/C/Rust comparison (job-bench2-10241946)
+
+`bench/compare.py` now records build wall time in the existing post-timing build-disk pass: the median
+of three cold builds (fresh build directory, `AIL_CACHE` and TMPDIR) and three incremental builds after
+appending one harmless comment line to the app's AIL, C or Rust source with the caches warm. The JSON
+has `build_time_ms` and the table has `cold build s ail/c/rust` and `incremental build s ail/c/rust`
+beside the unchanged columns. The full run is in `bench/results/2026-10-24-buildtime.md`: AIL cold
+builds took 2.02-7.12 s versus C 0.07-0.34 s and Rust 2.40-2.61 s; AIL incremental builds took
+0.17-0.40 s. Timestamped cold compiles (LD_PRELOAD exec/exit log) spend 55-65% in the AIL front end,
+31-44% in the C compiler and 2-3% linking. No language behaviour changed, so no DIFFERENCES row.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
