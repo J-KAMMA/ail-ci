@@ -477,6 +477,14 @@ def cid(name):
     return 'pv_' + name
 
 
+def _int_constant(node):
+    """A slice bound known at compile time to be an int (a literal, optionally signed). Such a
+    bound cannot be None, so the old fast path -- no tag test, no slot -- stays exactly as it was."""
+    while isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        node = node.operand
+    return isinstance(node, ast.Constant) and isinstance(node.value, int)
+
+
 # ---------------------------------------------------------------------------------------------
 # The C preamble every generated program gets, on top of #include "ail_obj2.h" (absolute path,
 # per the brief -- folding this into cruntime.py's fragment table is the coordinator's later
@@ -4988,10 +4996,12 @@ class Compiler(boxclosure.ClosureMixin):
             def bound(e, default):
                 if e is None:
                     return '0', str(default)
+                v = self.expr(e, ctx)
+                if _int_constant(e):
+                    return '1', '(%s).i' % v
                 # None is an omitted bound, also when the None arrives at run time (a variable,
                 # an argument, a list item, an attribute); read the value once so a bound with
                 # an effect keeps its single evaluation.
-                v = self.expr(e, ctx)
                 t = ctx.tmp()
                 ctx.emit('%s = %s;' % (t, v))
                 return ('(%s.tag != AIL_T_NONE && %s.tag != AIL_T_UNBOUND)' % (t, t),

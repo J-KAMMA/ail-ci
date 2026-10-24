@@ -1,3 +1,16 @@
+## 2026-10-24 - pre161 review fixes (job-pre161-10250350)
+
+Review: the run-time `None` support tagged every slice bound, so programs with no explicit `None`
+got an extra slot and two tag tests per bound (60M-iteration loop 0.579s base, 0.633s HEAD), and
+the pyboxed v1 edit named v2-only `AIL_T_NONE` / `AIL_T_UNBOUND` / auto-declared temps that v1
+does not have, breaking its build. A bound that is a compile-time int constant (literal or folded
+`-1`) now keeps the old no-tag path in pyboxed2; only other expressions are read once and
+tag-checked. The v1 emitter is back to its base bound code (literal `None` is handled by the
+front-end normalization), so v1 builds again. Verified: no-feature general `program.c` is byte
+identical to base, the 60M loop runs 0.57s (base 0.57s), and literal/runtime/store probes plus v1
+probes match CPython. Literal `None` bounds are still normalized to omitted bounds once, for every
+lowering (typed, pyboxed and pyboxed2).
+
 ## 2026-10-24 - explicit None slice bounds (job-pre161-10250350)
 
 `x[None:None:-1]` is `x[::-1]` in CPython, but a local `x = 'abcde'` answered `''` and
@@ -5,9 +18,10 @@
 then read the None value's `.i` as an index. Literal `None` bounds are now normalized to omitted
 bounds once, for every lowering (typed, pyboxed and pyboxed2); a bound that is None only at run
 time -- through a variable, argument, list item, attribute or dict value -- is read once and its
-tag checked in the general emitter, so it too means "omitted". Added
-`test_ail_pre161.py` covering str/list/tuple/bytes/bytearray, empty and single-element inputs,
-negative bounds, repetition and slice-copy aliasing on both builds.
+tag checked in the pyboxed2 emitter, so it too means "omitted"; the v1 emitter keeps its base
+treatment of run-time bounds. Added `test_ail_pre161.py` covering str/list/tuple/bytes/bytearray,
+empty and single-element inputs, negative bounds, repetition and slice-copy aliasing on both
+builds.
 
 # DEVLOG
 

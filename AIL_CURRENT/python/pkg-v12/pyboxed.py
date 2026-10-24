@@ -1550,14 +1550,8 @@ class Compiler:
             def bound(e, default):
                 if e is None:
                     return '0', str(default)
-                # None is an omitted bound, also when the None arrives at run time (a variable,
-                # an argument, a list item, an attribute); read the value once so a bound with
-                # an effect keeps its single evaluation.
                 v = self.expr(e, ctx)
-                t = ctx.tmp()
-                ctx.emit('%s = %s;' % (t, v))
-                return ('(%s.tag != AIL_T_NONE && %s.tag != AIL_T_UNBOUND)' % (t, t),
-                        '(%s).i' % t)
+                return '1', '(%s).i' % v
             hlo, lo = bound(node.slice.lower, 0)
             hhi, hi = bound(node.slice.upper, 0)
             hst, st = bound(node.slice.step, 1)

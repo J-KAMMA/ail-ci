@@ -3,10 +3,11 @@
 `x[None:None:-1]` is `x[::-1]`: an explicit None bound is an omitted one.  Lowerings that decided
 a bound was present from its AST node alone read the None's `.i` and sliced from 0, so a local
 `x = 'abcde'` answered '' where CPython answers 'edcba'.  Literal None bounds are now normalized
-away for every lowering; a bound that is None only at run time (through a variable, an argument, a
-list item, an attribute or a dict value) is read once and its tag checked, so it too means
-"omitted".  str, list, tuple, bytes and bytearray are covered, including empty and single-element
-sequences, negative bounds, repetition (a negative step), and the slice being an independent copy.
+away for every lowering; on pyboxed2 a bound that is None only at run time (through a variable, an
+argument, a list item, an attribute or a dict value) is read once and its tag checked, so it too
+means "omitted" (the v1 emitter keeps its base treatment).  str, list, tuple, bytes and bytearray
+are covered, including empty and single-element sequences, negative bounds, repetition (a negative
+step), and the slice being an independent copy.
 
 Each program is built with the general path forced and with the default build; the typed-lowering
 case also builds with AIL_NO_GENERAL=1, so the typed path itself must answer.  stdout, the exit
