@@ -4,7 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
-| C?-job-pre51-10241239-1 | format() spec errors | A space sign on a str printed "Sign not allowed..." instead of CPython's "Space not allowed..."; an invalid spec omitted the spec and value type (for example `' +8'` for an int); an unknown format code printed the raw control/space/non-ASCII character instead of CPython's `\xNN`. The general path now produces CPython's wording; the float `z` flag already matched. `test_ail_pre51.py` keeps the cases. | fixed |
+| C?-job-pre51-10241239-1 | format() spec errors | A space sign on a str printed "Sign not allowed..." instead of CPython's "Space not allowed..."; an invalid spec omitted the spec and value type (for example `' +8'` for an int); an unknown format code printed the raw control/space/non-ASCII character instead of CPython's `\xNN`. The general path now produces CPython's wording, including a non-ASCII or embedded-NUL spec (copied as code units, not UTF-8 bytes); the float `z` flag already matched. `test_ail_pre51.py` keeps the cases. | fixed |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |

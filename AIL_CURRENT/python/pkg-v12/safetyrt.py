@@ -706,29 +706,21 @@ static inline void ail2f_code_text(char *out, size_t osz, uint32_t c) {
     if (c <= 0x20 || c >= 0x80) snprintf(out, osz, "\\x%x", (unsigned)c);
     else snprintf(out, osz, "%c", (int)c);
 }
-/* the whole spec and the value's type, as CPython's "Invalid format specifier" does */
-static inline ail_st ail2f_bad_spec(ail_ctx *cx, ail_str spec, const char *tn) {
-    size_t cap = (size_t)spec.n * 4 + strlen(tn) + 64, k = 0;
-    char *m = (char *)malloc(cap);
-    if (!m) ail_die("out of memory");
+/* the whole spec and the value's type, as CPython's "Invalid format specifier" does; the spec is
+   copied as code units so non-ASCII (including surrogate pairs) and an embedded NUL survive */
+static inline ail_st ail2f_bad_spec(ail_ctx *cx, ail_obj specobj, ail_str spec, const char *tn) {
     const char *pre = "Invalid format specifier '";
-    memcpy(m, pre, strlen(pre)); k = strlen(pre);
-    for (int64_t i = 0; i < spec.n; i++) {
-        uint32_t c = ail_chr(spec, i);
-        if (c >= 0xD800 && c < 0xDC00 && i + 1 < spec.n) {
-            uint32_t d = ail_chr(spec, i + 1);
-            if (d >= 0xDC00 && d < 0xE000) { c = 0x10000u + ((c - 0xD800u) << 10) + (d - 0xDC00u); i++; }
-        }
-        if (c < 0x80) m[k++] = (char)c;
-        else if (c < 0x800) { m[k++] = (char)(0xC0u | (c >> 6)); m[k++] = (char)(0x80u | (c & 0x3Fu)); }
-        else if (c < 0x10000) { m[k++] = (char)(0xE0u | (c >> 12)); m[k++] = (char)(0x80u | ((c >> 6) & 0x3Fu)); m[k++] = (char)(0x80u | (c & 0x3Fu)); }
-        else { m[k++] = (char)(0xF0u | (c >> 18)); m[k++] = (char)(0x80u | ((c >> 12) & 0x3Fu)); m[k++] = (char)(0x80u | ((c >> 6) & 0x3Fu)); m[k++] = (char)(0x80u | (c & 0x3Fu)); }
-    }
-    int w = snprintf(m + k, cap - k, "' for object of type '%s'", tn);
-    (void)w;
-    ail_st st = ail_raise_c(cx, AIL_B_VALUEERROR, m);
-    free(m);
-    return st;
+    const char *post = "' for object of type '";
+    int64_t pre_n = (int64_t)strlen(pre), post_n = (int64_t)strlen(post), tn_n = (int64_t)strlen(tn);
+    ail_strbuild bu = ail_str_buf1(cx, pre_n + spec.n + post_n + tn_n + 2, specobj);
+    int64_t k = 0;
+    for (int64_t i = 0; i < pre_n; i++) bu.buf[k++] = (unsigned char)pre[i];
+    for (int64_t i = 0; i < spec.n; i++) bu.buf[k++] = ail_chr(spec, i);
+    for (int64_t i = 0; i < post_n; i++) bu.buf[k++] = (unsigned char)post[i];
+    for (int64_t i = 0; i < tn_n; i++) bu.buf[k++] = (unsigned char)tn[i];
+    bu.buf[k++] = '\'';
+    ail_obj msg = ail_str_buf_done(bu, k);
+    return ail_raise(cx, cx->builtin_cls[AIL_B_VALUEERROR], msg);
 }
 /* body is the digits (and point / exponent) without sign; prefix is "0x" etc. Numbers: default align '>' */
 static inline ail_obj ail2f_pad_num(ail_ctx *cx, const char *sign, const char *prefix, const char *body, ail2f_spec *f) {
@@ -844,7 +836,7 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
                       x.tag == AIL_T_BOOL ? "bool" : x.tag == AIL_T_INT ? "int" :
                       x.tag == AIL_T_NONE ? "NoneType" : ail_type_name(x.tag);
     int parsed = ail2f_parse(spec, &f, msg, sizeof msg);
-    if (parsed == -2) return ail2f_bad_spec(cx, spec, vtn);
+    if (parsed == -2) return ail2f_bad_spec(cx, specobj, spec, vtn);
     if (parsed) return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
     uint32_t type = f.type;
     if (f.group && type) {

@@ -3,7 +3,9 @@
 The general path's format-spec parser built its own errors.  A space sign on a
 str said "Sign not allowed" instead of CPython's "Space not allowed"; an
 invalid spec omitted the spec and the value's type; and an unknown format code
-printed the raw character instead of CPython's escaped '\\xNN'.  The float 'z'
+printed the raw character instead of CPython's escaped '\\xNN'.  A non-ASCII
+or embedded-NUL spec is copied as code units, so the invalid-spec message keeps
+the whole spec instead of double-encoding or truncating it.  The float 'z'
 (negative-zero coercion) flag already formatted correctly and is kept here
 together with its width/precision forms.  Each program runs through CPython and
 both builds.
@@ -38,13 +40,16 @@ def apply(v, s):
 
 def main():
     for s in [' 8', ' 8s', ' 8.2s', ' ', ' +8', ' +8s', ' +q', ' 8d', '-8',
-              'q', '\x01', '\x80', '\u2603', '', '8', '.2', '>8']:
+              'q', '\x01', '\x80', '\u2603', '', '8', '.2', '>8',
+              '8\u2603x', 'a\x00b']:
         show('abc', s)
     for s in [' 8', ' +8', ' 8d', '8 ', '8\x01', '8\x80', '8q', '8\u2603',
-              ' ', 'z', 'a\x01b', '+08d', '#x', ',d']:
+              ' ', 'z', 'a\x01b', '+08d', '#x', ',d', '8\u2603x', '8\u00e9x',
+              'a\x00b', 'x\x00', '\x00x', '8\u2603.2']:
         show(123, s)
     for s in [' 8', ' +8', '8 ', '8\x01', '8\x80', '8q', '8\u2603', 'z',
-              '.2z', '8z', 'z.2f', '+z', 'z#.0f', '<z10.2f', 'z08.2f']:
+              '.2z', '8z', 'z.2f', '+z', 'z#.0f', '<z10.2f', 'z08.2f',
+              '8\u2603x', 'a\x00b']:
         show(1.5, s)
     for s in [' 8', ' +8', '8 ', '8q', '8\x80', 'z', 'b', '08x']:
         show(True, s)
@@ -54,6 +59,10 @@ def main():
     print(apply(box.v, ' +8'))
     print(apply(d['i'], '8 '))
     print(apply(d['i'], '8\x80'))
+    print(apply(d['i'], '8\u2603x'))
+    print(apply(d['i'], 'a\x00b'))
+    print(apply([9][0], '8\u2603x'))
+    print(apply(box.v, 'x\x00'))
 
 
 main()

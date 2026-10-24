@@ -1,5 +1,15 @@
 # DEVLOG
 
+## 2026-10-24 - pre51 review: invalid-spec message built from code units
+
+The reviewer found the new invalid-spec text was built as UTF-8 bytes in a C string and then
+re-read by `ail_str_from_cstr`: non-ASCII specs were double-encoded (`8\xe2\x98\x83x` became `8\xc3\xa2\xc2\x98\xc2\x83x`) and an embedded NUL truncated the message. `ail2f_bad_spec` now
+copies the spec into the 16-bit string buffer as code units (through `ail_str_buf1`, which roots
+the spec object), so non-ASCII, surrogate pairs and an embedded NUL survive verbatim. Extended
+`test_ail_pre51.py` with non-ASCII and NUL invalid specs for int/str/float and through an
+argument, list item, attribute and dict value. Probes match CPython on both builds. The separate
+single-NUL format-code difference (`format(1, '\x00')`) is still open on both builds.
+
 ## 2026-10-24 - pre51: format spec errors and the float z flag
 
 Reproducing the first pre-existing difference from pre29 found that the float `z` flag already
