@@ -8345,15 +8345,25 @@ def _build_percent_value(node, ctx):
         if kind not in (INT, FLT, STR):
             raise Unsupported('%%-formatting a value of type %s; only int, float or str is '
                               'built' % kind)
-        if v['type'] == 's' and kind in (INT, FLT) and not v['zero']:
-            # `"%s" % n` is `str(n)` padded as a str (CPython), so a bool shows True/False.
-            argnode = ast.copy_location(ast.Call(func=ast.Name(id='str', ctx=ast.Load()),
-                                                 args=[argnode], keywords=[]), argnode)
+        pre = None
+        if v['type'] == 'r':
+            # `%r` is CPython's repr conversion, not a format-spec type: build the repr first,
+            # then pad/truncate it as a str (`"%r" % 'x'` is "'x'").  The '0' flag has no effect
+            # on a str conversion in CPython (`"%05r" % 42` is "   42").
+            pre = _repr_conv(argnode, kind, ctx)
             kind = STR
-        spec = {'align': '<' if v['leftalign'] else None, 'zero': v['zero'],
-                'width': v['width'], 'precision': v['precision'], 'type': v['type']}
+            spec = {'align': '<' if v['leftalign'] else None, 'zero': False,
+                    'width': v['width'], 'precision': v['precision'], 'type': 's'}
+        else:
+            if v['type'] == 's' and kind in (INT, FLT) and not v['zero']:
+                # `"%s" % n` is `str(n)` padded as a str (CPython), so a bool shows True/False.
+                argnode = ast.copy_location(ast.Call(func=ast.Name(id='str', ctx=ast.Load()),
+                                                     args=[argnode], keywords=[]), argnode)
+                kind = STR
+            spec = {'align': '<' if v['leftalign'] else None, 'zero': v['zero'],
+                    'width': v['width'], 'precision': v['precision'], 'type': v['type']}
         parts_c.append(_fmt_build(argnode, kind, spec, v['src'], ctx, '%%-formatting conversion',
-                                  str_default_align='>'))
+                                  str_default_align='>', pre_c=pre))
     return _concat_chain(parts_c, ctx)
 
 
@@ -30861,7 +30871,9 @@ def _dispatcher(sname, m, impls, owners, classes, by_name):
     on the run-time class, compiled like any other function. Its parameters are the methods' own."""
     fns = [by_name[classes[o].method_cname(m)] for o in impls]
     own = _resolve_method(classes, sname, m)
-    rep = by_name[classes[own].method_cname(m)] if own is not None else fns[0]
+    rep = by_name.get(classes[own].method_cname(m)) if own is not None else None
+    if rep is None:
+        rep = fns[0]
     def shown(f):
         return f.name.replace('__', '.')
     for f in fns:
