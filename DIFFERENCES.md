@@ -37,3 +37,7 @@ Known differences from CPython. New rows use `C?-<branch>-N` until a maintainer 
 | id | area | difference | status |
 |----|------|------------|--------|
 | C?-job-fuzz89-10231611-1 | bytes.split / bytes.rsplit | With a `None` separator and a reached `maxsplit`, the unsplit remainder lost its outer whitespace (`b" a ".split(None, 0)` gave `[b"a"]`; CPython gives `[b"a "]`, and the mirror case in `rsplit`). | fixed in safetyrt.py |
+
+| id | area | difference | status |
+| --- | --- | --- | --- |
+| C?-job-pre177-10250448-1 | int64 / constant subscript | A constant subscript index (or a constant `**`) that leaves int64 is refused by name (`int64 index out of range` / `int64 constant out of range`, exit 2) instead of stopping with `integer overflow`; CPython raises `IndexError: cannot fit 'int' into an index-sized integer` for `xs[10**20]`. In-range constant index expressions still match CPython. | refused by name; `test_ail_pre177.py` |

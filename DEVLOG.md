@@ -71,6 +71,26 @@ The general path's bytes/bytearray `find`, `rfind`, `count`, `index`, `rindex`, 
 bool or an instance's `__index__` (with CPython's `__index__ returned non-int (type ...)` when the
 result is not an int); `None` keeps its default.  `_ail_b_rng` keeps the clamping, and all seven
 methods share it.  `test_ail_pre173.py` covers both builds and keeps the case.
+## 2026-10-24 - constant int64 index overflow is refused by name (job-pre177-10250448)
+
+The first pre-existing difference on this tree is `xs[10**20]`: CPython reaches the list and
+raises `IndexError: cannot fit 'int' into an index-sized integer`, while AIL computed the index
+in int64 and stopped with `integer overflow` (exit 1) before the subscript.
+
+`AIL_CURRENT/ail_chatgpt.py` now evaluates constant integer arithmetic in the existing
+`_check_int64_literals` pass. A constant subscript index whose value or intermediate step leaves
+int64 is refused with `int64 index out of range: <value>`; a constant `**` outside int64 is
+refused with `int64 constant out of range: <value>` wherever it appears (an argument, a list
+item, an attribute, a dict value, or a plain value), matching the existing refusal of huge
+integer literals. Both refusals exit 2 and build no executable. In-range constant index
+expressions (`xs[2**1]`, `xs[1<<1]`, `xs[(2**62)//(2**61)]`, ...) are unchanged and match
+CPython on both builds.
+
+Probes in `/tmp/probes` cover list/str/bytes/tuple indexes, negative and shifted huge indexes,
+an intermediate overflow whose final value is in range, the four value flows above, and the
+in-range boundary; every probe matches CPython or is refused by name. `test_ail_pre177.py` is
+registered in `ail_check.MODULES` and `tools/ci_shards.json`. `test_ail_pre177`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
 
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
 
