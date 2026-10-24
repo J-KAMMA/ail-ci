@@ -4482,7 +4482,8 @@ class Compiler(boxclosure.ClosureMixin):
     # the refusals of `_percent_format` that the run-time formatter (safetyrt.FMT) answers instead
     _PCT_RUNTIME = ('% formatting with too few arguments', 'a % directive this compiler does not recognise',
                     "the '#' flag in %-format", 'precision on an int', '%r with a width or precision',
-                    '% formatting with too many arguments')
+                    '% formatting with too many arguments',
+                    'conversion of a value that is not proven to be an int')
 
     def _percent_runtime(self, node, ctx):
         """`fmt % args` formatted when the program runs (CPython's printf-style rules, safetyrt.FMT)."""
@@ -4529,6 +4530,11 @@ class Compiler(boxclosure.ClosureMixin):
                 buf = []
             if argi >= len(argcs):
                 raise Unsupported('%% formatting with too few arguments')
+            if typ in ('d', 'i', 'u') and self.infer_kind(arg_nodes[argi], ctx) not in ('int', 'bool'):
+                # CPython's %d/i/u also accept a float (truncating it, and raising on inf/nan),
+                # which ail_obj_format's 'd' spec deliberately does not; let the run-time
+                # formatter own that conversion instead of compiling a narrower one.
+                raise Unsupported('a %%%s conversion of a value that is not proven to be an int' % typ)
             val = argcs[argi]
             argi += 1
             if typ == 'r':

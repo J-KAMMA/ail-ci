@@ -4,6 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre68-10241806-1 | literal %-format `%d` with a float | A literal `"%d" % 3.7` was compiled to `ail_obj_format`'s `d` spec, which rejected the float (`TypeError: unsupported format string passed to non-int`) instead of CPython's truncation to `3` (and `OverflowError` / `ValueError` for infinity / NaN). `d`, `i` and `u` conversions whose argument is not proven to be an int now use the run-time formatter. | fixed |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |
