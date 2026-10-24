@@ -10975,6 +10975,7 @@ enum {
     AIL_B_NAMEERROR, AIL_B_OVERFLOWERROR, AIL_B_UNBOUNDLOCALERROR,
     AIL_B_RUNTIMEERROR, AIL_B_ASSERTIONERROR, AIL_B_NOTIMPLEMENTEDERROR, AIL_B_EOFERROR, AIL_B_OSERROR,
     AIL_B_CONNECTIONERROR, AIL_B_BLOCKINGIOERROR, AIL_B_CHILDPROCESSERROR, AIL_B_BROKENPIPEERROR, AIL_B_CONNECTIONABORTEDERROR, AIL_B_CONNECTIONREFUSEDERROR, AIL_B_CONNECTIONRESETERROR, AIL_B_FILEEXISTSERROR, AIL_B_FILENOTFOUNDERROR, AIL_B_INTERRUPTEDERROR, AIL_B_ISADIRECTORYERROR, AIL_B_NOTADIRECTORYERROR, AIL_B_PERMISSIONERROR, AIL_B_PROCESSLOOKUPERROR, AIL_B_TIMEOUTERROR,
+    AIL_B_GENERATOREXIT,
     AIL_B_COUNT
 };
 
@@ -14261,6 +14262,7 @@ static inline const char *ail_builtin_name(int id) {
         case AIL_B_PERMISSIONERROR: return "PermissionError";
         case AIL_B_PROCESSLOOKUPERROR: return "ProcessLookupError";
         case AIL_B_TIMEOUTERROR: return "TimeoutError";
+        case AIL_B_GENERATOREXIT: return "GeneratorExit";
         default: return "Exception";
     }
 }
@@ -16531,7 +16533,9 @@ static inline void ail_ctx_init(ail_ctx *cx) {
         if (i == AIL_B_BROKENPIPEERROR || i == AIL_B_CONNECTIONABORTEDERROR ||
             i == AIL_B_CONNECTIONREFUSEDERROR || i == AIL_B_CONNECTIONRESETERROR)
             parent = AIL_B_CONNECTIONERROR;
-        c->base = (i == AIL_B_EXCEPTION) ? ail_box_none() : cx->builtin_cls[parent];
+        /* GeneratorExit derives from BaseException, not Exception (CPython): `except Exception` must not
+           catch the close() request a generator's finally block sees. */
+        c->base = (i == AIL_B_EXCEPTION || i == AIL_B_GENERATOREXIT) ? ail_box_none() : cx->builtin_cls[parent];
         c->builtin_id = i;
         ail_obj r; r.tag = AIL_T_CLASS; r.o = (ail_gcobj *)c;
         cx->builtin_cls[i] = r;
