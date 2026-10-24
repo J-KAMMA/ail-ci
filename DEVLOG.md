@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - pre124: module-scope annotations are evaluated
+
+A module-level `target: annotation` without a value dropped the whole statement on both builds:
+`touch(b).x: ann()` never called `ann` and `xs[touch(i)]: ann()` never evaluated `xs` or `i`
+(CPython evaluates the target parts and then the annotation). An annotated assignment with a value
+also never evaluated its annotation. `ail_syntax` now keeps those evaluations in one expression or
+semicolon statement, in CPython order, for every target form (name, attribute, subscript, slice and
+extended slice). Under `from __future__ import annotations` only the target is evaluated, as in
+CPython, and static type expressions (`int`, `list[int]`, `A | None`) stay unevaluated. Added
+`AIL_CURRENT/test_ail_pre124.py`.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
