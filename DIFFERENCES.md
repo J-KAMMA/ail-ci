@@ -4,6 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre143-10250205-1 | module-constant constant folding | An all-int expression over a module constant was evaluated at run time in int64, so `E = 63; 2 ** E - 1` stopped as `integer overflow` where CPython prints 9223372036854775807. `ail_syntax.fold_constants` now folds such an expression exactly when the final value fits int64, and leaves a name the function binds itself, a name assigned after the module-level statement that reads it, and an out-of-int64 result alone. | fixed |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |

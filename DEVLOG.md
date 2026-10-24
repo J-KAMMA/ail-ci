@@ -1,5 +1,17 @@
 # DEVLOG
 
+## 2026-10-24 - pre143: fold module-constant int expressions exactly
+
+A reviewer of pre113 recorded, as already present before that job, that a function-body
+expression using a module constant as exponent (`E = 63; 2 ** E - 1`) stopped as `integer
+overflow` where CPython prints 9223372036854775807: the tree had no exact constant fold, and a
+module constant is emitted as a global read. `ail_syntax.fold_constants` now evaluates an
+all-int `BinOp` built from literals and single-binding module int constants with Python's
+unbounded ints, and rewrites it to the one literal when the final value fits int64. It reads
+the module constants available at that module-level statement, treats a function's own binding
+(parameter, local, `nonlocal`) as shadowing, and folds nothing when the result itself leaves
+int64. Added `test_ail_pre143.py` (5 programs, both builds).
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

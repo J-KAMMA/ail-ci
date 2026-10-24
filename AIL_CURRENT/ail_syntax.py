@@ -713,6 +713,207 @@ def _fold(node, known):
     return value
 
 
+_FOLD_INT_LIMIT = 4096
+
+
+def _fold_int_exact(node, known):
+    """The exact Python value of an all-int expression, else _NotConstant.
+
+    Unlike `_fold`, an intermediate may leave int64: Python evaluates `(1 << 63) - 1` and
+    `2**65 - 2**65` exactly, so the result fits even though an intermediate does not. Only the
+    final value is range-checked, by the caller. An operation that is not int arithmetic
+    (`2 ** -1` is a float), one that raises at run time (`1 // 0`, `1 << -1`), and one whose
+    value would grow past `_FOLD_INT_LIMIT` bits are not folded.
+    """
+    if isinstance(node, ast.Constant):
+        if type(node.value) is int:
+            return node.value
+        raise _NotConstant
+    if isinstance(node, ast.Name):
+        if node.id in known:
+            return known[node.id]
+        raise _NotConstant
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
+        value = _fold_int_exact(node.operand, known)
+        if isinstance(node.op, ast.USub):
+            return -value
+        return value if isinstance(node.op, ast.UAdd) else ~value
+    if not isinstance(node, ast.BinOp):
+        raise _NotConstant
+    left, right = _fold_int_exact(node.left, known), _fold_int_exact(node.right, known)
+    op = type(node.op)
+    try:
+        if op is ast.Add:
+            value = left + right
+        elif op is ast.Sub:
+            value = left - right
+        elif op is ast.Mult:
+            if left and right and left.bit_length() + right.bit_length() > _FOLD_INT_LIMIT:
+                raise _NotConstant
+            value = left * right
+        elif op is ast.FloorDiv:
+            value = left // right
+        elif op is ast.Mod:
+            value = left % right
+        elif op is ast.Pow:
+            if right < 0:
+                raise _NotConstant
+            if right == 0:
+                value = 1
+            elif left in (0, 1):
+                value = left
+            elif left == -1:
+                value = -1 if right & 1 else 1
+            elif left.bit_length() * right > _FOLD_INT_LIMIT:
+                raise _NotConstant
+            else:
+                value = left ** right
+        elif op is ast.LShift:
+            if right < 0:
+                raise _NotConstant
+            if left == 0:
+                value = 0
+            elif left.bit_length() + right > _FOLD_INT_LIMIT:
+                raise _NotConstant
+            else:
+                value = left << right
+        elif op is ast.RShift:
+            if right < 0:
+                raise _NotConstant
+            value = left >> right
+        elif op is ast.BitAnd:
+            value = left & right
+        elif op is ast.BitOr:
+            value = left | right
+        elif op is ast.BitXor:
+            value = left ^ right
+        else:
+            raise _NotConstant
+    except (ArithmeticError, ValueError):
+        raise _NotConstant
+    if value.bit_length() > _FOLD_INT_LIMIT:
+        raise _NotConstant
+    return value
+
+
+def _bound_names(root):
+    """Every name a function or lambda can bind locally, including nested scopes.
+
+    An over-approximation, deliberately: a name bound anywhere in the subtree blocks folding
+    that name for the whole subtree. Missing a fold only leaves the runtime expression as it was.
+    """
+    names = set()
+    for node in ast.walk(root):
+        if isinstance(node, ast.arg):
+            names.add(node.arg)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            names.add(node.id)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            names.add(node.name)
+        elif isinstance(node, ast.alias):
+            names.add((node.asname or node.name).split('.')[0])
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            names.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            names.add(node.rest)
+    return names
+
+
+class _ConstantExprFolder(ast.NodeVisitor):
+    """Fold an all-int `BinOp` in place to one int literal when its exact value fits int64.
+
+    Module-level statements see only the module constants assigned before them, in source
+    order. A function body sees every module constant (module scope is a fixed set of one-time
+    constants, SEMANTICS section 29) except those the function binds itself, which Python would
+    resolve locally. A class body is skipped for its own expressions: methods do not see it.
+    """
+
+    def __init__(self, consts, edits, skip):
+        self.consts = consts
+        self.edits = edits
+        self.skip = skip
+        self.allowed = {}
+        self.blocked = set()
+
+    def visit(self, node):
+        if id(node) in self.skip:
+            return
+        if isinstance(node, ast.expr) and self._fold(node):
+            return
+        super().visit(node)
+
+    def _fold(self, node):
+        if not isinstance(node, ast.BinOp):
+            return False
+        if not any(isinstance(child, ast.Name) and child.id in self.allowed
+                   for child in ast.walk(node)):
+            # This job's difference is a module constant used in an expression. A purely literal
+            # expression keeps the C it had; folding it is a separate change.
+            return False
+        try:
+            value = _fold_int_exact(node, self.allowed)
+        except _NotConstant:
+            return False
+        if not -(1 << 63) < value < (1 << 63):
+            # outside int64: the runtime's own overflow stop is the declared answer. The exact
+            # int64 minimum is left alone too: a direct literal for it is refused by name elsewhere.
+            return False
+        self.edits.append((node, '(%d)' % value))
+        return True
+
+    def _enter(self, root):
+        """A function body may read every module constant except the names any enclosing function
+        or this one binds; a local binding in an enclosing function shadows the module one."""
+        old = self.allowed, self.blocked
+        self.blocked = self.blocked | _bound_names(root)
+        self.allowed = {name: value for name, value in self.consts.items()
+                        if name not in self.blocked}
+        return old
+
+    def _leave(self, old):
+        self.allowed, self.blocked = old
+
+    def visit_FunctionDef(self, node):
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        for default in node.args.defaults + [d for d in node.args.kw_defaults if d is not None]:
+            self.visit(default)
+        old = self._enter(node)
+        for statement in node.body:
+            self.visit(statement)
+        self._leave(old)
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+    def visit_Lambda(self, node):
+        for default in node.args.defaults + [d for d in node.args.kw_defaults if d is not None]:
+            self.visit(default)
+        old = self._enter(node)
+        self.visit(node.body)
+        self._leave(old)
+
+    def visit_ClassDef(self, node):
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        for base in node.bases:
+            self.visit(base)
+        for keyword in node.keywords:
+            self.visit(keyword.value)
+        # A class body evaluates names against its own namespace, so this pass does not model
+        # it. A method body does not see the class namespace, so only bodies are folded here;
+        # method decorators and defaults (evaluated in the class body) are left alone.
+        for statement in node.body:
+            if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                old = self._enter(statement)
+                for inner in statement.body:
+                    self.visit(inner)
+                self._leave(old)
+            elif isinstance(statement, ast.ClassDef):
+                self.visit(statement)
+
+
 def _is_literal(node):
     return (isinstance(node, ast.Constant) or isinstance(node, ast.UnaryOp)
             and isinstance(node.op, (ast.USub, ast.UAdd)) and isinstance(node.operand, ast.Constant))
@@ -736,10 +937,15 @@ def _module_scope_bindings(tree):
     def walk(node):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             bind(node.name)
+            declared = set()
             for sub in ast.walk(node):
                 if isinstance(sub, ast.Global):
-                    for name in sub.names:
-                        bind(name, 2)
+                    declared.update(sub.names)
+            if declared:
+                stored_here = {sub.id for sub in ast.walk(node)
+                               if isinstance(sub, ast.Name) and isinstance(sub.ctx, (ast.Store, ast.Del))}
+                for name in declared & stored_here:
+                    bind(name, 2)
             return
         if isinstance(node, ast.Lambda):
             return
@@ -767,9 +973,14 @@ def _module_scope_bindings(tree):
 
 
 def fold_constants(text):
-    """Top-level `NAME = <constant arithmetic>` bound once in module scope, rewritten to its literal
-    value. A name that a nested block, a loop or a `global` function rebinds is not folded: its value
-    at the line that reads it is not the first one."""
+    """Rewrite constant arithmetic to its literal value.
+
+    A top-level `NAME = <constant arithmetic>` bound once in module scope is folded, and an
+    all-int expression inside a function body is folded when every operand is a literal or such a
+    module constant. A name that a nested block, a loop or a `global` function rebinds is not
+    used: its value at the line that reads it is not the first one, and a name the function binds
+    itself is local there.
+    """
     try:
         tree = ast.parse(text)
     except SyntaxError:
@@ -788,13 +999,30 @@ def fold_constants(text):
         known[node.targets[0].id] = value
         if not _is_literal(node.value):
             edits.append((node.value, repr(value)))
+    consts = {name: value for name, value in known.items() if type(value) is int}
+    if consts:
+        # A statement may use a module constant only after the assignment that binds it. Inside
+        # a function body all of them are available (module scope is a fixed set of constants).
+        folder = _ConstantExprFolder(consts, edits, {id(node) for node, _ in edits})
+        first_at = {}
+        for index, node in enumerate(tree.body):
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name)):
+                first_at.setdefault(node.targets[0].id, index)
+        for index, node in enumerate(tree.body):
+            folder.allowed = {name: value for name, value in consts.items()
+                              if first_at.get(name, len(tree.body)) < index}
+            folder.visit(node)
     if not edits:
         return text
     data = text.encode('utf8')
     starts = _byte_offsets(data)
-    for node, literal in reversed(edits):
+    spans = []
+    for node, literal in edits:
         start = starts[node.lineno - 1] + node.col_offset
         end = starts[node.end_lineno - 1] + node.end_col_offset
+        spans.append((start, end, literal))
+    for start, end, literal in sorted(spans, reverse=True):
         padding = data[start:end].count(b'\n')
         replacement = ('(' + literal + '\n' * padding + ')') if padding else literal
         data = data[:start] + replacement.encode('utf8') + data[end:]
