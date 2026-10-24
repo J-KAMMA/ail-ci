@@ -5,6 +5,7 @@ Deliberate differences from CPython and open silent differences found by differe
 | id | area | difference | status |
 | --- | --- | --- | --- |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
+| C?-job-pre117-10242227-1 | nested def defaults | A nested `def` with a literal list/dict/set default (or a tuple holding one) rebuilt it at every call, so `def f(x, acc=[]); f(1); f(2)` printed `[1] [2]` where CPython shares the definition-time object and prints `[1] [1, 2]`. The general path now refuses it by name on both builds. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |
 | C?-job-fuzz39-10230820-1 | `is` / `is not` with a tuple constant | merges equal tuple constants of a code object (`a = (); b = (); a is b` is True; `()` is a singleton) | each tuple display is an object of its own | refused by name; `test_ail_fuzz39.py` |

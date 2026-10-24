@@ -1,5 +1,15 @@
 # DEVLOG
 
+## 2026-10-24 - pre117: mutable literal defaults of nested defs
+
+A nested `def` with a literal list/dict/set default (or a tuple holding one) rebuilt the default
+at every call site. `def f(x, acc=[]); f(1); f(2)` printed `[1] [2]` where CPython shares the
+object built when the `def` ran and prints `[1] [1, 2]`; an empty default was wrong by identity
+even when one call hid it. The general path now refuses the construct by name on both builds,
+matching the fuzz94 fix. An immutable-default program (negative/int-boundary, empty tuple, tuple,
+values through an argument, a list item, a dict value and an attribute) still matches CPython.
+Added `AIL_CURRENT/test_ail_pre117.py` and registered it in `ail_check.MODULES`.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
