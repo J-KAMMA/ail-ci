@@ -8867,11 +8867,20 @@ static ail_str ail_fmt_spec_int(ail_sarena *A, int64_t v, int64_t width, int ali
    `.Nf` formatting exactly, sign on `-0.0` included. */
 static ail_str ail_fmt_spec_float(ail_sarena *A, double v, int64_t width, int align, int zero,
                                    int64_t prec, int fill) {
-    char buf[512];
-    int n = snprintf(buf, sizeof buf, "%.*f", (int)(prec < 0 ? 6 : prec), v);
+    char stackbuf[512];
+    int n = snprintf(stackbuf, sizeof stackbuf, "%.*f", (int)(prec < 0 ? 6 : prec), v);
     if (n < 0) ail_die("formatting a float failed");
-    if ((size_t)n >= sizeof buf) n = (int)sizeof buf - 1;   /* pathological width/precision */
-    return ail__fmt_pad(A, buf, n, width, align, zero, fill);
+    char *heap = NULL;
+    char *buf = stackbuf;
+    if ((size_t)n >= sizeof stackbuf) {
+        heap = (char *)malloc((size_t)n + 1);
+        if (!heap) ail_die("out of memory");
+        snprintf(heap, (size_t)n + 1, "%.*f", (int)(prec < 0 ? 6 : prec), v);
+        buf = heap;
+    }
+    ail_str r = ail__fmt_pad(A, buf, n, width, align, zero, fill);
+    if (heap) free(heap);
+    return r;
 }
 
 /* `{s:<8}` / `{s:>8}` / `{s:^8}` and `%-8s`/`%8s` -- the str half. Space fill only (any other

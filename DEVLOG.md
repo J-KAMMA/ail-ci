@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - fuzz71: fixed-point float formatting no longer truncates at a buffer
+
+The typed core's `ail_fmt_spec_float` formatted into `char buf[512]`, the general path's
+`ail_obj_format` into `char buf[64]`/`char buf[66]`, and the full runtime's
+`ail2f_float_body` into `char body[400]` after clamping a precision above 300 to 300.
+CPython prints every digit a huge value or a large precision needs, so those paths produced a
+short string; where `snprintf`'s would-be length was trusted, they also read past the stack
+buffer.  Each path now sizes its buffer from the would-be length (stack buffer first, heap
+when it does not fit) and the runtime's exponent helper does the same.  The general path's
+`ail_obj_format` already had an equivalent heap fix on this tree and is unchanged.
+`test_ail_fuzz71.py` builds `f"{1e308:.0f}"`, `f"{1.5:.600f}"`, `%.600f`,
+`"{:.600f}".format(...)`, negative values and widths wider than the result on both builds.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
