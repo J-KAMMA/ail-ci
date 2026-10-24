@@ -9,8 +9,10 @@ though the base build matched CPython. It also rejected a `random.Random` subcla
 `self.gauss`. The check now refuses only when the receiver is statically a `Random` (or a subclass)
 and no class in its chain assigns the same instance attribute. A dynamic receiver falls back to the
 old run-time `AttributeError` (recorded as `C?-job-pre129-10242352-2`), while the original
-`f = random.expovariate` / `g = r.expovariate` case stays refused by name. Extended
-`AIL_CURRENT/test_ail_pre129.py` with the argument, container and subclass-field cases.
+`f = random.expovariate` / `g = r.expovariate` case stays refused by name; randlib's hidden
+`_ail_rng` is now recorded as a known `Random` before functions are compiled, so the module-level
+form is refused too. Extended `AIL_CURRENT/test_ail_pre129.py` with the argument, container and
+subclass-field cases.
 
 ## 2026-10-24 - pre129: Random bound methods refused by name
 ## 2026-10-24 - pre129: Random bound methods refused by name

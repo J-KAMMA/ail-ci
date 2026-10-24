@@ -2163,6 +2163,10 @@ class Compiler(boxclosure.ClosureMixin):
                 self._register_function(n)
             elif isinstance(n, ast.ClassDef):
                 self._register_class(n)
+        if '_ail_rng' in self.module_names and 'Random' in self.classes:
+            # randlib's hidden module-level generator (`_ail_rng = Random(0)`): its kind is known
+            # before any function is compiled, since the module body is emitted after them.
+            self.global_var_kind['_ail_rng'] = 'instance:Random'
 
         self.user_method_names = frozenset(m for c in self.classes.values() for m in c['methods'])
         # classes the program uses as values (`make = Fenwick; make(data)`): a call through a value may construct one
