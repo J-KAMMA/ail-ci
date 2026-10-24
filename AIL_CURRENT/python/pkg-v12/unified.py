@@ -43,6 +43,8 @@ come from unified_lists.py, solved again in every round of the fixed point, and 
 import ast
 import os
 
+import pyfunc
+
 INT, FLOAT, BOOL, OBJ = 'int', 'float', 'bool', 'obj'
 BOT = None
 SCALAR = (INT, FLOAT, BOOL)
@@ -2149,6 +2151,10 @@ def nexpr(comp, node, ctx):
     t = ntype(comp, ctx, node)
     if t not in SCALAR:
         raise Conflict((fp.name, '*'), 'unboxed value of a boxed expression %s' % ast.dump(node)[:80])
+    if isinstance(node, (ast.BinOp, ast.UnaryOp)):
+        folded = pyfunc.fold_int_constant(node)
+        if folded is not None:
+            return _c_const(folded)
     if isinstance(node, ast.Constant):
         return _c_const(node.value)
     if isinstance(node, ast.Name):
