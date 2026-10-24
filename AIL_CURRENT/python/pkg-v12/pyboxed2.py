@@ -7933,9 +7933,6 @@ class Compiler(boxclosure.ClosureMixin):
     def _b_chr(self, args, kwargs, ctx):
         if len(args) != 1 or kwargs:
             raise Unsupported('chr() with other than exactly one argument')
-        cp = pyfunc._int_const(args[0])
-        if cp is not None and 0 <= cp <= 0xffff and not 0xd800 <= cp <= 0xdfff:
-            return self._str_lit_slot(chr(cp), ctx)
         v = self.expr(args[0], ctx)
         t = ctx.tmp()
         ctx.emit('st = ail_bi_chr(cx, &%s, %s);' % (t, v))

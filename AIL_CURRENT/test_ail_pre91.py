@@ -182,6 +182,66 @@ print(str([em]), str((mu,)))
 print(repr("x" + chr(0x10FFFF) + "y"))
 print(repr(["a" + chr(0x10000)]), repr({chr(0x10FFFF): chr(0x1F600)}))
 '''
+IDENTITY = '''def f():
+    return chr(0x100)
+
+
+def g():
+    return chr(0x1F600)
+
+
+def h(n):
+    return chr(n)
+
+
+a, b = f(), f()
+print(a is b, a == b)
+xs = [f(), f()]
+print(xs[0] is xs[1])
+c, d = g(), g()
+print(c is d, c == d, c is not d)
+n = 0x10000
+ys = [0x1F600]
+print(h(n) is h(n), h(ys[0]) is h(ys[0]), h(ys[0]) == h(ys[0]))
+
+
+class C:
+    pass
+
+
+o = C()
+o.n = 0x100
+dd = {"n": 0x1F600}
+print(h(o.n) is h(o.n), h(dd["n"]) is h(dd["n"]))
+'''
+FORMAT_FILL = '''em = chr(0x1F600)
+mu = chr(0x1D11E)
+for fill in (em, mu, chr(0x10FFFF)):
+    print(repr(format("x", fill + ">5")), len(format("x", fill + ">5")))
+    print(repr(format("ab", fill + "^6")), len(format("ab", fill + "^6")))
+    print(repr(format("abc", fill + "<7")), len(format("abc", fill + "<7")))
+    print(repr(format(42, fill + ">6")), len(format(42, fill + ">6")))
+    print(repr(format(-7, fill + "<6")), len(format(-7, fill + "<6")))
+    print(repr(format(1.5, fill + ">7")), len(format(1.5, fill + ">7")))
+print(repr(f"{'x':{em}>5}"), repr(f"{'x':{mu}^6}"))
+spec = em + ">5"
+print(repr(format("x", spec)))
+
+
+def via_arg(v, s) -> None:
+    print(repr(format(v, s)), len(format(v, s)))
+
+
+def main() -> None:
+    vals = ["x", 42, 1.5]
+    specs = [em + ">5", mu + "^6"]
+    via_arg(vals[0], specs[0])
+    via_arg(vals[1], specs[1])
+    via_arg(vals[2], specs[0])
+
+
+main()
+'''
 
 
 def _run_cpython(directory, text, name):
@@ -268,6 +328,14 @@ class Pre91Tests(unittest.TestCase):
     def test_repr(self):
         for general in (True, False):
             self.compare(REPR, 'repr', general)
+
+    def test_chr_call_identity(self):
+        for general in (True, False):
+            self.compare(IDENTITY, 'identity', general)
+
+    def test_non_bmp_format_fill(self):
+        for general in (True, False):
+            self.compare(FORMAT_FILL, 'format_fill', general)
 
 
 if __name__ == '__main__':

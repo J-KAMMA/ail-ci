@@ -1,5 +1,24 @@
 # DEVLOG
 
+## 2026-10-24 - job-pre91: review fixes (chr identity, non-BMP format fill)
+
+The reviewer found that a BMP `chr(const)` constant fold added by the previous
+commit returned one static string per call site, so `f() is f()` and
+`[f(), f()][0] is [f(), f()][1]` printed `True` where CPython (and the base)
+print `False`.  Removed the fold; `chr()` goes through `ail_bi_chr` again.
+
+Also fixed the non-BMP fill case that the surrogate-pair work made reachable:
+`format("x", chr(0x1F600) + ">5")` was refused as an invalid specifier.
+`ail2f_parse` now reads the fill as one code point (possibly a surrogate pair)
+and the padding loops emit the fill through a code-point helper, for strings,
+ints and floats.
+
+Probes `pre91_identity.py` and `pre91_fmtfill.py` (identity through calls,
+arguments, list items, attributes, dict values; every align, empty/negative
+values, ints/floats/strs) match CPython on both builds.  `test_ail_pre91.py`
+gains identity and non-BMP-fill programs.
+
+
 ## 2026-10-24 - job-pre91: non-BMP strings on the 16-bit general path
 
 `chr(0x1F600)` and `"%c" % 0x1F600` died with `AIL internal error` on both
