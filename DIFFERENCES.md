@@ -4,6 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre69-10241828-1 | integer `**` | A constant integer power whose exact result leaves int64 (`10 ** 100`, `2 ** 63`) compiled on both builds and then stopped the program at run time with `integer overflow`, where CPython prints the exact value. The value is known at compile time, so both builds now refuse it by name (`does not fit in a 64-bit signed integer`); float operands, a negative constant exponent and powers that fit are unchanged. | refused by name; `test_ail_pre69.py` |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |

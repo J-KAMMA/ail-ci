@@ -1,5 +1,20 @@
 # DEVLOG
 
+## 2026-10-24 - pre69: an overflowing constant integer power is refused by name
+
+`10 ** 100` (and every other constant integer power whose exact result leaves int64, such as
+`2 ** 63`) used to compile on both builds and then stop at run time with `integer overflow`,
+where CPython prints the exact value. The value is known while compiling, so `pyfront.py` now
+raises one shared refusal (`does not fit in a 64-bit signed integer`) that `pyfunc.py` and both
+general emitters (`pyboxed2.py`, `pyboxed.py`) call at the `**` codegen point. Float operands, a
+negative constant exponent and every power that fits (`2 ** 62`, `(-2) ** 63`, `0 ** 0`,
+`1 ** 1000000`, ...) are untouched. A huge exponent is judged without evaluating the power.
+
+Added `test_ail_pre69.py` (five refused constructs covering a top-level expression, an argument,
+a list item and an attribute; one accepted program mixing fitting and float powers) and updated
+`pkg-v12/test_all.py`, whose constant-exponent case now expects the compile-time refusal while a
+variable exponent still traps at run time. Manifest `--check` passes.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

@@ -872,10 +872,12 @@ def integer_power():
           compile_fn('def run(xs):\n    for v in xs:\n        pass\n    return 7 ** 20')([0]),
           7 ** 20)
 
-    # the overflow check inside ail_ipow itself: an exact integer power that does not fit traps,
-    # for both a constant exponent and a variable one (SEMANTICS.md section 8)
-    _traps('2 ** 63 overflows (constant integer exponent)',
-           'def run(xs):\n    for v in xs:\n        pass\n    return 2 ** 63\n', 'overflow')
+    # an exact integer power that does not fit: a CONSTANT exponent is known at compile time, so
+    # it is refused by name there (CPython's int is unbounded); a variable exponent can only be
+    # stopped by the run-time check inside ail_ipow (SEMANTICS.md section 8)
+    refuses('2 ** 63 is refused at compile time (constant integer exponent)',
+            lambda: pyfunc_to_c('def run(xs):\n    for v in xs:\n        pass\n    return 2 ** 63\n',
+                                name='run', strict=True))
     _traps('2 ** n overflows (variable integer exponent, n == 63)',
            'def run(xs):\n    for v in xs:\n        pass\n    n = 63\n    return 2 ** n\n',
            'overflow')

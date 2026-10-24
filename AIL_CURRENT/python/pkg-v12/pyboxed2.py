@@ -33,7 +33,7 @@ import os
 import re
 import runpy
 
-from pyfront import Unsupported, refuse_complex_pow
+from pyfront import Unsupported, refuse_complex_pow, refuse_int_pow_overflow
 import filelib
 import hashlower
 import pyfunc
@@ -4471,6 +4471,7 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('the %s binary operator' % type(node.op).__name__)
         if isinstance(node.op, ast.Pow):
             refuse_complex_pow(node)
+            refuse_int_pow_overflow(node)
         l = self.expr(node.left, ctx)
         r = self.expr(node.right, ctx)
         t = ctx.tmp()

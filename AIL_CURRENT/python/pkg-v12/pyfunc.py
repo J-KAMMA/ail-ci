@@ -66,7 +66,7 @@ import typedinherit
 import shadowing
 import rangecheck
 from pipeline import PipelineError
-from pyfront import BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Unsupported, _use, refuse_complex_pow
+from pyfront import BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Unsupported, _use, refuse_complex_pow, refuse_int_pow_overflow
 
 # A capability marker, not a behaviour: lets a SHARED judge (one file imported against many
 # `pkg-*` copies of this module, e.g. `test_floatparam.py`) ask "does THIS copy infer a float
@@ -13281,6 +13281,7 @@ def _expr(node, ctx):
                                      int(isinstance(node.op, ast.Mod)))
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
         refuse_complex_pow(node)
+        refuse_int_pow_overflow(node)
         if _etype(node, ctx) == INT:
             ctx.parts.update(('DIE', 'IPOW'))
             return _ordered_numeric_pair(node.left, node.right, ctx, 'ail_ipow({}, {})')

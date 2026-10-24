@@ -147,6 +147,51 @@ def refuse_complex_pow(node):
         raise refusal
 
 
+_I64_MIN = -(1 << 63)
+_I64_MAX = (1 << 63) - 1
+
+
+def _int_constant(node):
+    """The value of an int literal with unary signs, else None. A bool is not an int here."""
+    value = _number_constant(node)
+    return value if type(value) is int else None
+
+
+def _pow_fits_int64(base, exponent):
+    """Whether the exact integer power `base ** exponent` (exponent >= 0) has an int64 answer.
+
+    Never evaluates a huge power: a base of magnitude two or more is already out at exponent 64,
+    and the remaining exponents are small enough to compute exactly."""
+    if exponent == 0 or base in (0, 1, -1):
+        return True
+    if exponent == 1:
+        return _I64_MIN <= base <= _I64_MAX
+    if exponent >= 64:
+        return False
+    return _I64_MIN <= base ** exponent <= _I64_MAX
+
+
+def refuse_int_pow_overflow(node):
+    """A constant integer `**` whose exact result leaves int64 is refused by name here.
+
+    CPython answers it exactly because its int is unbounded; this compiler's int is 64-bit, so the
+    generated code would stop at run time with `integer overflow`. The value is known at compile
+    time, so the refusal is too. Float operands and a negative exponent take the float path and
+    are untouched."""
+    if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow)):
+        return
+    base, exponent = _int_constant(node.left), _int_constant(node.right)
+    if base is None or exponent is None or exponent < 0 or _pow_fits_int64(base, exponent):
+        return
+    refusal = Unsupported(
+        'the integer constant (%d) ** (%d) does not fit in a 64-bit signed integer, and an '
+        'integer here is one (SEMANTICS section 1). CPython computes it exactly, because its '
+        'int is unbounded; this compiler would have to wrap it, which is a different answer'
+        % (base, exponent))
+    refusal.source_line = getattr(node, 'lineno', None)
+    raise refusal
+
+
 def _use(need, *names):
     need.update(names)
     need.add('ail_die')
