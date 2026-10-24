@@ -33,6 +33,16 @@ rewrite. A bare annotation on a name (`count: int`) is unchanged. Added
 `ann_sub_undef.py`, `ann_attr_name_target.py`, `ann_sub_name_target.py`,
 `ann_attr_alias.py`, `ann_sub_dict_str.py`, `ann_sub_routes.py`, `ann_sub_empty_negative.py`,
 and `ann_name_type.py`).
+## 2026-10-24 -- out-of-range int64 constant expressions are refused by name
+
+Only a bare integer literal was checked against int64. A pure integer constant expression that left
+the range (`10 ** 30` in a return, argument, list item, attribute, dict value or module constant)
+was lowered and stopped at run time with `integer overflow`, and `__index__` returning `10 ** 30`
+printed a misleading sequence `TypeError`. `_check_int64_literals` now evaluates pure integer
+constant expressions (with guards for huge exponents and shifts) and refuses an out-of-range value
+at compile time with `int64 literal out of range`, on both builds. In-range expressions such as
+`2 ** 62`, `(1 << 62) - 1`, `-(2 ** 62)` and `2 ** (63 - 1)` are unchanged. `test_ail_pre159.py`
+holds the literal, expression, `__index__` and value-path cases and the in-range CPython check.
 
 ## 2026-10-23 -- fuzz37: ordering TypeError names the written operator
 
