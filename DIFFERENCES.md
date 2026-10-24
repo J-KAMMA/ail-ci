@@ -33,3 +33,4 @@ Known differences from CPython. New rows use `C?-<branch>-N` until a maintainer 
 | id | area | difference | status |
 |----|------|------------|--------|
 | C?-job-fuzz89-10231611-1 | bytes.split / bytes.rsplit | With a `None` separator and a reached `maxsplit`, the unsplit remainder lost its outer whitespace (`b" a ".split(None, 0)` gave `[b"a"]`; CPython gives `[b"a "]`, and the mirror case in `rsplit`). | fixed in safetyrt.py |
+| C?-job-pre101-10242138-1 | itertools / permutations | fixed | `itertools.permutations(xs, None)` / `r=None` returned `[()]` on the general path instead of the full-length permutations. A literal or keyword None is now treated as omitted, and a run-time None is tested for (`has_r = (r.tag != AIL_T_NONE)`). The typed path already handled the literal; it refuses a None-typed variable by name. |
