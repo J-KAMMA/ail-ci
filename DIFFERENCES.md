@@ -4,6 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre61-10241247-1 | `functools.partial` with bound values | The general path built the synthetic inner lambdas of `partial(f, 1)` / `partial(lambda a, b: a * b, 6)` without a source location, so the lambda scan stopped with `AttributeError: 'Lambda' object has no attribute 'lineno'` instead of compiling. The partial lowering now copies the call's location onto every lambda it builds, and the bound-value forms match CPython. | fixed |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |
