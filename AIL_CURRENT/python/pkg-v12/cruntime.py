@@ -616,6 +616,7 @@ static const char *ail_exception_name(int code) {
          "RuntimeError", "UnicodeDecodeError"};
     return code >= 1 && code <= 8 ? names[code] : "RuntimeError";
 }
+static void ail_exception_uncaught(ail_exception *value) __attribute__((noreturn));
 static void ail_exception_uncaught(ail_exception *value) {
     fflush(stdout);
     fputs(ail_exception_name(value->code), stderr);
@@ -643,6 +644,7 @@ __attribute__((unused)) static void ail_raise_value_adopt(ail_exception *value) 
     if (ail_exc_top >= 0) { ail_exc_unwind(); ail_exc_throw(); }
     ail_exception_uncaught(value);
 }
+static void ail_raise_named(int code) __attribute__((noreturn));
 static void ail_raise_named(int code) {
     if (code < 1 || code > 8) code = AIL_EXC_RUNTIME;
     ail_exception_store(&ail_exc_value, ail_exception_new(code, NULL, 0, 1), 1);
