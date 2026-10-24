@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - `in` shares the saved-genexpr cursor (job-pre166-10250412)
+
+Review of the preceding commit found that `x in g` on a materialised generator expression still
+scanned the whole backing list and ignored `gen_idx`, so it could report already-consumed items
+and did not advance the shared cursor. `ail_op_contains` now searches from `gen_idx` and leaves
+the cursor after a match (or at the end when absent); the dunder-aware runtime patch keeps the
+same semantics when a user `__eq__` raises. `test_ail_pre166` gained plain and dunder membership
+cases. Probes covered matches, misses, duplicate values, equality across int/float/bool, empty
+generators, aliases, list items, slices, attributes, dict values, arguments, `iter()` mixing and
+custom `__eq__` (including an exception), on both builds.
+
 ## 2026-10-24 - next() of a saved generator expression (job-pre166-10250412)
 
 Both emitters materialise a generator expression as a list, so `next(g)` worked only when the

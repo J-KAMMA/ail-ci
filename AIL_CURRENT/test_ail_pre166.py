@@ -3,9 +3,10 @@
 Both emitters materialise a generator expression as a list, so `next(g)` where `g` is not a
 direct `next(<genexpr>)` argument (stored in a name, an argument, a list item, a dict value or
 an attribute, or returned in a list) hit `AIL internal error: iterator: unknown kind`. The list
-now carries its own cursor, shared by next() and iteration over that object like a real
-generator's, so repeated next() calls advance it and exhaustion is StopIteration (or the
-default). `next()` of a plain list/tuple/str/dict/set/number/None now raises CPython's
+now carries its own cursor, shared by next(), iteration over that object and `in` (which
+consumes up to and including a match, or to the end) like a real generator's, so repeated next()
+calls advance it and exhaustion is StopIteration (or the default). `next()` of a plain
+list/tuple/str/dict/set/number/None now raises CPython's
 `TypeError: '<type>' object is not an iterator` instead of the same internal error.
 
 The other shapes are unchanged and compared with CPython on both builds.
@@ -110,6 +111,67 @@ except StopIteration:
     print("stop")
 inner = (x for x in [3, 4])
 print(next(inner), next(inner), next(inner, "end"))
+''',
+    'membership': '''g = (x for x in [1, 2, 3])
+print(next(g))
+print(1 in g)
+print(3 in g)
+print(next(g, "end"))
+
+h = (x for x in [1, 2, 4])
+print(2 in h, next(h, "end"))
+print(4 in h, next(h, "end"))
+
+e = (x for x in [])
+print(7 in e, next(e, "empty"))
+
+def check(it, value):
+    return value in it
+
+d = {"g": (x for x in [5, 6, 7])}
+print(check(d["g"], 6), next(d["g"], "end"))
+
+class Box:
+    def __init__(self):
+        self.g = (x for x in [8, 9])
+
+box = Box()
+print(9 in box.g, next(box.g, "end"))
+
+mixed = (x for x in [10, 11, 12])
+print(next(mixed), 11 in mixed, list(mixed))
+''',
+    'membership_dunder': '''class C:
+    def __init__(self, v):
+        self.v = v
+
+    def __eq__(self, other):
+        return self.v == other
+
+
+g = (C(i) for i in [1, 2, 3])
+print(1 in g)
+print(next(g).v)
+print(3 in g)
+print(next(g, "end"))
+
+
+class Boom:
+    def __eq__(self, other):
+        raise ValueError("boom")
+
+
+h = (Boom() for _ in range(2))
+try:
+    1 in h
+except ValueError as e:
+    print(type(e).__name__, str(e))
+try:
+    next(h)
+    print("more")
+except StopIteration:
+    print("stop")
+print(next(h, "end"))
 ''',
     'rebind': '''g = (x for x in [1])
 print(next(g))
