@@ -1,5 +1,20 @@
 # DEVLOG
 
+## 2026-10-24 - non-BMP chr() on the 16-bit general path (job-pre66-10241805)
+
+- The general path now stores a run-time `chr(0x1F600)` as a UTF-16 surrogate pair instead of
+  aborting with "requires 32-bit strings". Direct printing (`ail2_out_str`), `len`, `ord`,
+  indexing/slicing, forward/reversed iteration, comparison, `repr`, containers and
+  `find`/`rfind`/`count`/`startswith`/`endswith` use code-point offsets; window bounds are
+  converted at the surrogate boundary. `ail_bi_str_from_utf8` also encodes astral UTF-8 as a pair.
+- BMP `chr()` constants are still folded at compile time; constants above U+FFFF go through the
+  runtime. Non-BMP string literals are still refused by name on the general path, and surrogate
+  code points remain unsupported.
+- Added `AIL_CURRENT/test_ail_pre66.py` with both-build differential coverage for the target and
+  dynamic carriers (variables, arguments, attributes, list/dict values), plus unchanged BMP,
+  out-of-range and wrong-type cases. Probes: `/tmp/probes/pre66_*.py`; test modules
+  `test_ail_pre66`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` pass.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
