@@ -97,6 +97,19 @@ The two notes recorded by the pre21 reviewer no longer differ on this tree: `too
 --check` is clean (both fuzz modules and this one are mapped), and the float-`%` area that job
 touched matches CPython on both builds. `perf_event_paranoid` is 4 here, so instruction counts
 remain unmeasurable.
+## 2026-10-24 - pre142: next() of a saved generator expression is refused by name
+
+A reviewer of job pre116 recorded, as pre-existing, that a saved non-raising generator
+expression dies with `AIL internal error: iterator: unknown kind` on both builds. Both
+emitters materialise a `GeneratorExp` as an eager list, so `next(g)` handed a list to the
+iterator dispatcher; the direct `next(x for x in xs)` shape is lowered to a real iterator
+and already matched CPython. `ail_chatgpt._check_saved_genexpr_next` now refuses the saved
+shape at compile time on both builds, following the value through assignments, aliases,
+list items, attributes, dict values, returns and parameters (including wrappers). Controls
+are unchanged: direct `next(genexpr)` and saved genexprs consumed by `for`/`list`/`sum`
+match CPython. A second `list(g)` still re-iterates the materialised list instead of being
+empty -- a separate pre-existing difference. Added `test_ail_pre142.py`; probes in
+`/tmp/probes`.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
