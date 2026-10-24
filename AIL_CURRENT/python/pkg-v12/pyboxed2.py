@@ -5049,7 +5049,7 @@ class Compiler(boxclosure.ClosureMixin):
             while k is not None and k in self.classes:
                 hits = [(v, s) for a, v, s in self.classes[k].get('class_attrs', []) if a == node.attr]
                 if hits:
-                    return self._cached_class_attr(hits[-1][1], hits[-1][0], ctx)
+                    return self._cached_class_attr(node.attr, hits[-1][1], hits[-1][0], k, ctx)
                 k = self.classes[k]['base']
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
         if prop_owners:
@@ -6018,11 +6018,19 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _init_class_attrs(self, name, ctx):
         """Evaluate a class body's attributes once, at its class-definition statement."""
-        for _aname, aval, slot in self.classes[name].get('class_attrs', []):
+        cls = 'g_slots_arr[%d]' % self.global_slots['class:' + name]
+        for aname, aval, slot in self.classes[name].get('class_attrs', []):
             v = self.expr(aval, ctx)
             ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
+            self._publish_class_attr(cls, aname, v, ctx)
 
-    def _class_attr_value(self, slot, value, ctx):
+    def _publish_class_attr(self, cls, aname, v, ctx):
+        """Register a class attribute on the class object, so a class value reached indirectly
+        (`f(C)`, `[C][0]`, `{'k': C}`, an attribute) reads it through the base chain like CPython."""
+        self.attr_names.add(aname)
+        ctx.emit('ail_class_setattr(cx, %s, g_attr_%s, %s);' % (cls, aname, v))
+
+    def _class_attr_value(self, slot, value, ctx, aname=None, owner=None):
         """The one shared value of a class attribute, filling the slot lazily only when the module
         body did not run (the array-entry shape, where there is no executable module statement)."""
         if value is not None:
@@ -6030,13 +6038,16 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.indent += 1
             v = self.expr(value, ctx)
             ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
+            if owner is not None and aname is not None:
+                self._publish_class_attr('g_slots_arr[%d]' % self.global_slots['class:' + owner],
+                                         aname, v, ctx)
             ctx.indent -= 1
             ctx.emit('}')
         return 'g_slots_arr[%d]' % slot
 
-    def _cached_class_attr(self, slot, value, ctx):
+    def _cached_class_attr(self, aname, slot, value, owner, ctx):
         """Read a class attribute through the class object, not through an instance."""
-        v = self._class_attr_value(slot, value, ctx)
+        v = self._class_attr_value(slot, value, ctx, aname, owner)
         t = ctx.tmp()
         ctx.emit('%s = %s;' % (t, v))
         return t
@@ -6059,7 +6070,7 @@ class Compiler(boxclosure.ClosureMixin):
         for kls in reversed(chain):
             for aname, aval, slot in self.classes[kls].get('class_attrs', []):
                 self.attr_names.add(aname)
-                v = self._class_attr_value(slot, aval, ctx)
+                v = self._class_attr_value(slot, aval, ctx, aname, kls)
                 ctx.emit('ail_inst_setattr(cx, %s, g_attr_%s, %s);' % (t, aname, v))
         if info:
             argcs = self._bind_args(name, info, args, kwargs, ctx)

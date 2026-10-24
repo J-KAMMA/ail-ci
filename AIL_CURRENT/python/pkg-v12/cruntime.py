@@ -14083,6 +14083,7 @@ typedef struct { int64_t name_id; ail_obj val; } ail_attr;
 typedef struct { ail_gcobj hdr; ail_obj cls; ail_attr *attrs; int64_t n, cap; } ail_instobj;
 
 typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or NONE */; int builtin_id;
+                 ail_attr *cattrs; int64_t cn, ccap; /* class attributes, read through the class value itself */
                  int dc; /* @dataclass: field count + 1 (0 = not a dataclass); repr/str print the first dc-1 attributes */
                  unsigned long long dc_hide; /* bit i set: field i is left out of the repr (field(repr=False)) */
                  ail_st (*iter_iter)(ail_ctx *, ail_obj *, ail_obj); /* user __iter__ (self only), or 0 */
@@ -14157,7 +14158,8 @@ static inline void ail_gc_mark_value(ail_obj v) {
             for (int64_t i = 0; i < ii->n; i++) ail_gc_mark_value(ii->attrs[i].val);
             break;
         }
-        case AIL_K_CLASS: { ail_classobj *c = (ail_classobj *)o; ail_gc_mark_value(c->name); ail_gc_mark_value(c->base); break; }
+        case AIL_K_CLASS: { ail_classobj *c = (ail_classobj *)o; ail_gc_mark_value(c->name); ail_gc_mark_value(c->base);
+                            for (int64_t i = 0; i < c->cn; i++) ail_gc_mark_value(c->cattrs[i].val); break; }
         case AIL_K_FUNC: {
             ail_funcobj *f = (ail_funcobj *)o;
             for (int32_t i = 0; i < f->n_cells; i++) ail_gc_mark_value(f->cells[i]);
@@ -14179,6 +14181,7 @@ static inline void ail__free_payload(ail_gcobj *o) {
         case AIL_K_DICT: free(((ail_mapobj *)o)->entries); free(((ail_mapobj *)o)->index); break;
         case AIL_K_SET: free(((ail_setobj *)o)->ent); free(((ail_setobj *)o)->index); break;
         case AIL_K_INST: free(((ail_instobj *)o)->attrs); break;
+        case AIL_K_CLASS: free(((ail_classobj *)o)->cattrs); break;
         case AIL_K_FUNC: free(((ail_funcobj *)o)->cells); break;
         default: break;
     }
@@ -16486,6 +16489,30 @@ static inline void ail_inst_setattr(ail_ctx *cx, ail_obj inst, int64_t name_id, 
     }
     o->attrs[o->n].name_id = name_id; o->attrs[o->n].val = val; o->n++;
 }
+/* Class attributes live on the CLASS object too, not only on each instance: `C.m` where C is reached
+   through a variable, a parameter, a list/dict value or an attribute reads this table (CPython's lookup
+   through the base chain). */
+static inline void ail_class_setattr(ail_ctx *cx, ail_obj cls, int64_t name_id, ail_obj val) {
+    ail_classobj *c = (ail_classobj *)cls.o;
+    for (int64_t i = 0; i < c->cn; i++) if (c->cattrs[i].name_id == name_id) { c->cattrs[i].val = val; return; }
+    if (c->cn == c->ccap) {
+        int64_t nc = c->ccap ? c->ccap * 2 : 4;
+        ail_attr *na = (ail_attr *)ail_xmalloc((size_t)nc * sizeof(ail_attr));
+        if (c->cn) memcpy(na, c->cattrs, (size_t)c->cn * sizeof(ail_attr));
+        free(c->cattrs);
+        c->cattrs = na; c->ccap = nc;
+        cx->gc_bytes += (size_t)nc * sizeof(ail_attr);
+    }
+    c->cattrs[c->cn].name_id = name_id; c->cattrs[c->cn].val = val; c->cn++;
+}
+static inline ail_st ail_class_getattr(ail_ctx *cx, ail_obj *out, ail_obj cls, int64_t name_id, const char *name_for_msg) {
+    for (ail_obj k = cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+        ail_classobj *c = (ail_classobj *)k.o;
+        for (int64_t i = 0; i < c->cn; i++) if (c->cattrs[i].name_id == name_id) { *out = c->cattrs[i].val; return AIL_OK; }
+    }
+    char buf[160]; snprintf(buf, sizeof buf, "'type' object has no attribute '%s'", name_for_msg);
+    return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, buf);
+}
 /* A KeyError of one argument: str(e) is repr(arg), while e.args and repr(e) keep the argument
    itself (CPython's KeyError.__str__ quirk).  The dict/set runtime used to pass the already
    quoted text as the only argument, so str(e) was right but e.args was ("'k'",) not ('k',). */
@@ -16515,6 +16542,7 @@ static inline ail_st ail_inst_setattr_chk(ail_ctx *cx, ail_obj inst, int64_t nam
     return AIL_OK;
 }
 static inline ail_st ail_inst_getattr(ail_ctx *cx, ail_obj *out, ail_obj inst, int64_t name_id, const char *name_for_msg) {
+    if (inst.tag == AIL_T_CLASS) return ail_class_getattr(cx, out, inst, name_id, name_for_msg);
     if (__builtin_expect((unsigned)(inst.tag - AIL_T_INST) > 1u, 0)) return ail_attr_not_inst(cx, inst, name_for_msg);
     ail_instobj *o = (ail_instobj *)inst.o;
     for (int64_t i = 0; i < o->n; i++) if (o->attrs[i].name_id == name_id) { *out = o->attrs[i].val; return AIL_OK; }
