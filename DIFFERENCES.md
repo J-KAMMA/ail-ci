@@ -36,3 +36,5 @@ Known differences from CPython. New rows use `C?-<branch>-N` until a maintainer 
 | id | area | difference | status |
 |----|------|------------|--------|
 | C?-job-fuzz89-10231611-1 | bytes.split / bytes.rsplit | With a `None` separator and a reached `maxsplit`, the unsplit remainder lost its outer whitespace (`b" a ".split(None, 0)` gave `[b"a"]`; CPython gives `[b"a "]`, and the mirror case in `rsplit`). | fixed in safetyrt.py |
+| C?-job-pre128-10242352-1 | %-format / `__trunc__` | fixed | A class defining only `__trunc__` printed 5 for `%d` / `%i` / `%u`, including every width and sign spelling, on both builds; CPython asks `__int__` then `__index__` and raises `TypeError`. The general-path percent formatter no longer falls back to `__trunc__`; `__int__` and `__index__` still work. `test_ail_pre128.py`. |
+| C?-job-pre128-10242352-2 | %-format of a computed template | open | `spec % v` where the format string is held in a variable (for example a loop variable) is lowered as the `%` operator and raises `TypeError: unsupported operand type(s) for %`; CPython formats `5`, `'hi'`, `'03.14'`. General dynamic-format limitation, not float-specific. |
