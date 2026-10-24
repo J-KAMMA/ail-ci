@@ -10085,7 +10085,7 @@ static inline ail_obj ail_obj_floordiv(ail_obj a, ail_obj b) {
 static inline ail_obj ail_obj_mod(ail_obj a, ail_obj b) {
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t x = a.i, y = b.i;
-        if (y == 0) ail_raise_c(AIL_ERR_ZERODIV, "integer division or modulo by zero");
+        if (y == 0) ail_raise_c(AIL_ERR_ZERODIV, "integer modulo by zero");
         if (x == INT64_MIN && y == -1) return ail_box_int(0);
         int64_t r = x % y;
         if (r != 0 && ((r < 0) != (y < 0))) r += y;
@@ -14835,7 +14835,7 @@ static inline ail_st ail_op_floordiv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_o
 static inline ail_st ail_op_mod(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t x = a.i, y = b.i;
-        if (y == 0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "integer division or modulo by zero");
+        if (y == 0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "integer modulo by zero");
         if (x == INT64_MIN && y == -1) { *out = ail_box_int(0); return AIL_OK; }
         int64_t r = x % y;
         if (r != 0 && ((r < 0) != (y < 0))) r += y;
