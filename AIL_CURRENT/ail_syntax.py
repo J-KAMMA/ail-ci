@@ -2600,6 +2600,13 @@ class _Surface:
                     self.edits[index] = (start, end, marker + extra, flag)
 
     def ann_assign(self, node, function, owner):
+        if (function is None and owner is None and node.value is None
+                and not isinstance(node.target, ast.Name)):
+            raise SyntaxErrorAIL(
+                'a module-scope annotation on an attribute or subscript without a value is not supported: '
+                'CPython evaluates the target and the annotation, and this compiler does neither\n'
+                '  write instead: use a plain assignment (`obj.attr = value`) or drop the annotation',
+                lineno=node.lineno, offset=node.col_offset + 1)
         if isinstance(node.target, ast.Attribute) and node.value is None:
             self.replace(node, 'pass', True)
             return
