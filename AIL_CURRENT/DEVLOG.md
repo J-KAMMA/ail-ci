@@ -1,5 +1,17 @@
 # DEVLOG
 
+## 2026-10-24 - pre86: `permutations(xs, None)` means r=len(pool)
+
+`itertools.permutations(iterable, None)` produced only `()` on both builds; CPython treats an
+explicit None like the omitted default r and yields the full permutations. The general path lowered
+r with `(r).i`, reading None as 0. The emitted call now passes the boxed r and the runtime helper
+tests its tag: None means r=len(pool) (so a value arriving through a variable, argument, list item,
+attribute or dict value works), an int or bool is the requested r, and any other type raises
+CPython 3.12's `TypeError: Expected int as r`. The typed path already handled a literal None.
+Added `AIL_CURRENT/test_ail_pre86.py` (five programs, both builds). Still observed, not changed:
+negative r returns `[]` on the general path instead of `ValueError` (the open fuzz8 row) and the
+default build cannot compile a positive literal r with `list(permutations(...))` (difference #2).
+
 ## 2026-10-23 -- fuzz37: ordering TypeError names the written operator
 
 Fuzzing while loops and counters against CPython on both builds found that an

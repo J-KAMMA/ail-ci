@@ -7101,9 +7101,20 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('permutations() with other than (iterable[, r])')
         r_node = args[1] if len(args) > 1 else kwargs.get('r')
         src = self._resolve_iter_src(args[0], ctx)
-        r = '0' if r_node is None else '(%s).i' % self.expr(r_node, ctx)
+        if r_node is None:
+            has_r, r = '0', '0'
+        else:
+            # CPython's r=None is the same as leaving r out (r=len(pool)); the value may arrive
+            # through a variable, a list item, an attribute or a call, so test the tag at run time.
+            rv = ctx.tmp()
+            ctx.emit('%s = %s;' % (rv, self.expr(r_node, ctx)))
+            ctx.emit('if (%s.tag != AIL_T_NONE && %s.tag != AIL_T_INT && %s.tag != AIL_T_BOOL) '
+                     '{ st = ail_raise_c(cx, AIL_B_TYPEERROR, "Expected int as r"); goto %s; }'
+                     % (rv, rv, rv, ctx.cur_err_target()))
+            ctx.uses_st = True
+            has_r, r = '(%s.tag != AIL_T_NONE)' % rv, '(%s).i' % rv
         t = ctx.tmp()
-        ctx.emit('st = ail_it_permutations(cx, &%s, %s, %d, %s);' % (t, src, 0 if r_node is None else 1, r))
+        ctx.emit('st = ail_it_permutations(cx, &%s, %s, %s, %s);' % (t, src, has_r, r))
         ctx.check()
         return t
 
