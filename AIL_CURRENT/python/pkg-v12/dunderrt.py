@@ -193,7 +193,14 @@ __attribute__((noinline)) static ail_st ail_dun_truthy_chk(ail_ctx *cx, int *out
     *out = ail_obj_truthy(x);
     return AIL_OK;
 }
-#define ail_truthy_chk(cx, out, x) ail_dun_truthy_chk((cx), (out), (x))
+/* The common element is a primitive, whose truthiness needs no dunder lookup: keep that path
+   inline (ail_truthy_u's fast path) instead of paying a noinline call per element. */
+static inline ail_st ail_truthy_chk_fast(ail_ctx *cx, int *out, ail_obj x) {
+    if (__builtin_expect(x.tag == AIL_T_INST, 0)) return ail_dun_truthy_chk(cx, out, x);
+    *out = ail_obj_truthy(x);
+    return AIL_OK;
+}
+#define ail_truthy_chk(cx, out, x) ail_truthy_chk_fast((cx), (out), (x))
 __attribute__((noinline)) static int ail_dun_cmp_gt(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b, ail_st *stp) {
     ail_d2_fn gf = ail_dun2(a, AIL_D2_GT);
     ail_obj r;

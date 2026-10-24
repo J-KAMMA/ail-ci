@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - pre28 review: fused generator cleanup and inline truth fast path
+
+The review of the previous pre28 commit found two regressions.  Stopping the fused `any`/`all`
+generator-expression path at the deciding element left a generator-function iterable open, so
+its `finally` cleanup disappeared where the old eager shape had exhausted it.  When a
+comprehension iterable is one of the program's generator calls (`g()` or `o.m()`), the elements
+are materialised first again and only then scanned with the error-propagating truth check; the
+scan still stops at the deciding element, and all other iterables keep the fused path.
+Second, calling the `noinline` checked truth helper for every element made `any`/`all` over
+primitives ~14% slower in a class program; `ail_truthy_chk` now has an inline
+`x.tag != AIL_T_INST` fast path and only calls the checked helper for instances.  Extended
+`test_ail_pre28.py` with the generator-cleanup cases.
+
 ## 2026-10-24 - pre28: any()/all() let a raising __bool__ out
 
 The first difference still present from pre13 was p6: on the general path `any`/`all` tested

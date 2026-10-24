@@ -7,10 +7,12 @@ printed True instead of raising ValueError, and the same happened through a
 generator expression, an argument, a list item, an attribute and a dict value.
 
 The fused generator path now also stops at the deciding element, as CPython does,
-so an error after the result is decided is not evaluated.  Both builds must match
-CPython's stdout and exit status; the remaining pre13 differences (the inner
-generator expression in p7, the unclosed generator in r8/r9 and tuple
-destructuring in r15) are outside this job.
+so an error after the result is decided is not evaluated.  When the iterable is a
+generator function, its elements are materialised first (the old shape) so that
+exhausting it runs the generator's finally cleanup, which this runtime's close()
+does not.  Both builds must match CPython's stdout and exit status; the remaining
+pre13 differences (the inner generator expression in p7, the unclosed generator in
+r8/r9 and tuple destructuring in r15) are outside this job.
 """
 import os
 import subprocess
@@ -150,6 +152,72 @@ main()
 '''
 
 
+PROGRAM_GEN = r'''def g():
+    try:
+        yield 1
+        yield 2
+        yield 3
+    finally:
+        print("cleanup")
+
+
+def h():
+    try:
+        yield True
+        yield False
+        yield True
+    finally:
+        print("cleanup h")
+
+
+class B:
+    def __init__(self, v, boom):
+        self.v = v
+        self.boom = boom
+
+    def __bool__(self):
+        if self.boom:
+            raise ValueError("bad bool")
+        return self.v
+
+
+def gb():
+    try:
+        yield B(False, False)
+        yield B(False, True)
+        yield B(True, False)
+    finally:
+        print("cleanup b")
+
+
+def show(tag, fn):
+    try:
+        print(tag, fn())
+    except Exception as e:
+        print(tag, type(e).__name__, e)
+
+
+def main():
+    show("any", lambda: any(x for x in g()))
+    print("mid")
+    show("any filter", lambda: any(x for x in g() if x == 3))
+    print("mid2")
+    show("all", lambda: all(x for x in h()))
+    print("mid3")
+    show("all filter", lambda: all(x for x in g() if x < 3))
+    print("mid4")
+    show("any bool", lambda: any(x for x in gb()))
+    print("mid5")
+    show("all bool", lambda: all(x for x in gb()))
+    print("mid6")
+    show("nested", lambda: any(x for y in g() for x in [y]))
+    print("end")
+
+
+main()
+'''
+
+
 def cpython(directory, text):
     src = Path(directory) / 'p_cpython.py'
     src.write_text(text, encoding='utf-8')
@@ -174,16 +242,22 @@ def build(directory, text, general):
 
 
 class AnyAllTruthTests(unittest.TestCase):
-    def test_raising_bool_propagates(self):
+    def check(self, program):
         with tempfile.TemporaryDirectory(prefix='ail-pre28-') as directory:
-            want = cpython(directory, PROGRAM)
+            want = cpython(directory, program)
             for general in (True, False):
-                exe, built = build(directory, PROGRAM, general)
+                exe, built = build(directory, program, general)
                 self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
                 got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory)
                 self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want[0],
                                  'general=%s\n%s' % (general, got.stderr.decode('utf-8', 'replace')[-1500:]))
                 self.assertEqual(got.returncode, want[1], 'general=%s' % general)
+
+    def test_raising_bool_propagates(self):
+        self.check(PROGRAM)
+
+    def test_generator_iterable_cleanup(self):
+        self.check(PROGRAM_GEN)
 
 
 if __name__ == '__main__':

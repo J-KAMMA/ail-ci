@@ -7865,12 +7865,25 @@ class Compiler(boxclosure.ClosureMixin):
             return None
         return (g.iter, lo, hi)
 
+    def _is_generator_call(self, node):
+        """`f(...)` / `o.m(...)` where f/m is one of the program's generator functions."""
+        if not isinstance(node, ast.Call):
+            return False
+        f = node.func
+        if isinstance(f, ast.Name):
+            return bool((self.functions.get(f.id) or {}).get('generator'))
+        if isinstance(f, ast.Attribute):
+            return any((c['methods'].get(f.attr) or {}).get('generator')
+                       for c in self.classes.values())
+        return False
+
     def _any_all(self, name, args, kwargs, ctx):
         if len(args) != 1 or kwargs:
             raise Unsupported('%s() with other than exactly one argument' % name)
         res = ctx.tmp()
         ctx.emit('%s = ail_box_bool(%d);' % (res, 0 if name == 'any' else 1))
         arg = args[0]
+        full = False
         if isinstance(arg, ast.GeneratorExp):
             plan = self._str_scan_plan(arg, name, ctx)
             if plan is not None:
@@ -7885,21 +7898,37 @@ class Compiler(boxclosure.ClosureMixin):
             # caller instead of being swallowed (the condition rewrite cannot carry a
             # status).  Only the LIST object, the per-element append, the ITER object
             # and the second scan are skipped.
-            done = ctx.new_label('any_all')
-            def add(n, c, _t):
-                v = self.expr(n.elt, c)
-                cond = c.new_cvar('truth')
-                c.emit('int %s = 0;' % cond)
-                c.emit('st = ail_truthy_chk(cx, &%s, %s);' % (cond, v))
-                c.check()
-                if name == 'any':
-                    c.emit('if (%s) { %s = ail_box_bool(1); goto %s; }' % (cond, res, done))
-                else:
-                    c.emit('if (!%s) { %s = ail_box_bool(0); goto %s; }' % (cond, res, done))
-            self._emit_comp_generators(arg.generators, 0, arg, ctx, res, add, set())
-            ctx.emit('%s: ;' % done)
-            return res
-        src = self._resolve_iter_src(arg, ctx)
+            #
+            # A generator-function iterable is the exception: this runtime's generator
+            # close() does not run its finally blocks, and CPython's observable cleanup
+            # for the cases the eager path handled came from exhausting the generator.
+            # Materialise those elements first (the old shape), then scan the list; the
+            # scan still stops at the deciding element.
+            full = any(self._is_generator_call(g.iter) for g in arg.generators)
+            if full:
+                vals = ctx.tmp()
+                ctx.emit('%s = ail_list_new(cx);' % vals)
+                def add(n, c, _t):
+                    c.emit('ail_list_append(cx, %s, %s);' % (vals, self.expr(n.elt, c)))
+                self._emit_comp_generators(arg.generators, 0, arg, ctx, vals, add, set())
+                src = vals
+            else:
+                done = ctx.new_label('any_all')
+                def add(n, c, _t):
+                    v = self.expr(n.elt, c)
+                    cond = c.new_cvar('truth')
+                    c.emit('int %s = 0;' % cond)
+                    c.emit('st = ail_truthy_chk(cx, &%s, %s);' % (cond, v))
+                    c.check()
+                    if name == 'any':
+                        c.emit('if (%s) { %s = ail_box_bool(1); goto %s; }' % (cond, res, done))
+                    else:
+                        c.emit('if (!%s) { %s = ail_box_bool(0); goto %s; }' % (cond, res, done))
+                self._emit_comp_generators(arg.generators, 0, arg, ctx, res, add, set())
+                ctx.emit('%s: ;' % done)
+                return res
+        if not (isinstance(arg, ast.GeneratorExp) and full):
+            src = self._resolve_iter_src(arg, ctx)
         it = ctx.tmp(); val = ctx.tmp()
         cond = ctx.new_cvar('truth')
         ctx.emit('st = ail_iter(cx, &%s, %s);' % (it, src))
