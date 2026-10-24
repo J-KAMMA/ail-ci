@@ -30,6 +30,34 @@ fn _utf8_complete_length(data: bytes) -> int {
     return position;
 }
 
+# The length of `data` when its last character is complete, else -1. A chunk that ends
+# between characters is the only one that needs the full `_utf8_complete_length` scan;
+# for the common case the whole buffer can go straight to decode, which validates it
+# once instead of scanning it first and validating it again.
+fn _utf8_tail_complete(data: bytes) -> int {
+    let n: int = len(data);
+    if n == 0 { return 0; }
+    let last: int = data[n - 1];
+    if last < 128 { return n; }
+    if last >= 192 { return -1; }
+    let i: int = n - 1;
+    while i > 0 and i > n - 4 {
+        let previous: int = data[i - 1];
+        if previous < 128 or previous > 191 { break; }
+        i -= 1;
+    }
+    let lead_index: int = i - 1;
+    if lead_index < 0 { return -1; }
+    let lead: int = data[lead_index];
+    let width: int = 0;
+    if lead >= 194 and lead <= 223 { width = 2; }
+    elif lead >= 224 and lead <= 239 { width = 3; }
+    elif lead >= 240 and lead <= 244 { width = 4; }
+    else { return -1; }
+    if n - lead_index == width { return n; }
+    return -1;
+}
+
 fn _utf8_decoder_check(decoder: Utf8Decoder) -> void {
     if decoder.closed != 0 { raise ValueError; }
     let pending: bytes = decoder.pending;
@@ -41,7 +69,8 @@ fn utf8_decoder_new() -> Utf8Decoder { return Utf8Decoder(b"", 0); }
 fn utf8_decode_feed(decoder: Utf8Decoder, data: bytes) -> str {
     _utf8_decoder_check(decoder);
     let combined: bytes = decoder.pending + data;
-    let complete: int = _utf8_complete_length(combined);
+    let complete: int = _utf8_tail_complete(combined);
+    if complete < 0 { complete = _utf8_complete_length(combined); }
     let text: str = combined[:complete].decode("utf-8");
     let pending: bytes = combined[complete:];
     decoder.pending = pending;
