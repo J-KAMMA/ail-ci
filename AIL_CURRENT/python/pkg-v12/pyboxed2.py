@@ -6333,25 +6333,25 @@ class Compiler(boxclosure.ClosureMixin):
         leaves = self._str_concat_leaves(node, ctx)
         if leaves is None or len(leaves) < 2:
             return None
-        fmt = []
-        vs = []
+        plan = []
         for leaf in leaves:
             if (isinstance(leaf, ast.Call) and isinstance(leaf.func, ast.Name)
                     and leaf.func.id == 'str' and 'str' not in self.functions
                     and len(leaf.args) == 1 and not leaf.keywords):
                 argk = self.infer_kind(leaf.args[0], ctx)
                 if argk in ('int', 'float', 'bool', 'none'):
-                    fmt.append('1')
-                    vs.append(self.expr(leaf.args[0], ctx))
+                    plan.append(('1', leaf.args[0]))
                     continue
                 if argk == 'str':
-                    fmt.append('0')
-                    vs.append(self.expr(leaf.args[0], ctx))
+                    plan.append(('0', leaf.args[0]))
                     continue
-            fmt.append('0')
-            vs.append(self.expr(leaf, ctx))
+            plan.append(('0', leaf))
+        fmt = [f for f, _part in plan]
         if len(leaves) == 2 and '1' not in fmt:
             return None
+        # Emit the leaves only once the decision above is final: an expression leaf
+        # can have side effects, and the caller emits them again when this returns None.
+        vs = [self.expr(part, ctx) for _f, part in plan]
         arr = ctx.new_cvar('cat')
         fl = ctx.new_cvar('catf')
         ctx.emit('ail_obj %s[%d] = { %s };' % (arr, len(vs), ', '.join(vs)))
