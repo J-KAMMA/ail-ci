@@ -1168,6 +1168,23 @@ def _is_literal_default(d):
         return False
 
 
+def _literal_default_is_mutable(d):
+    """True for a literal default that builds a list/dict/set (or a tuple holding one)."""
+    try:
+        value = ast.literal_eval(d)
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return False
+
+    def mutable(v):
+        if isinstance(v, (list, dict, set, bytearray)):
+            return True
+        if isinstance(v, tuple):
+            return any(mutable(x) for x in v)
+        return False
+
+    return mutable(value)
+
+
 def _module_stmt_binds(stmt):
     """Names a module-level statement binds (def, class, assignment targets, imports)."""
     if isinstance(stmt, (ast.FunctionDef, ast.ClassDef)):
@@ -3250,6 +3267,12 @@ class Compiler(boxclosure.ClosureMixin):
                 or not all(d is None or constant(d) for d in node.args.kw_defaults):
             raise Unsupported('a nested def %s with *args/**kwargs/keyword-only/default '
                               'parameters' % node.name)
+        # A mutable literal default is evaluated at each call site below, giving every call a fresh
+        # object where CPython shares the one built when the def ran; refuse it by name instead.
+        for d in list(node.args.defaults) + [d for d in node.args.kw_defaults if d is not None]:
+            if _literal_default_is_mutable(d):
+                raise Unsupported('a nested def %s with a mutable literal default (list/dict/set); '
+                                  'CPython shares one default object between calls' % node.name)
         if node.decorator_list:
             raise Unsupported('a decorator on nested def %s' % node.name)
         positional = [a.arg for a in node.args.args]
