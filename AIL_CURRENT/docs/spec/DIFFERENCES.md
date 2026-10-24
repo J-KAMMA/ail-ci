@@ -2,6 +2,7 @@
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre51-10241239-1 | format() spec errors | A space sign on a str printed "Sign not allowed..." instead of CPython's "Space not allowed..."; an invalid spec omitted the spec and value type (for example `' +8'` for an int); an unknown format code printed the raw control/space/non-ASCII character instead of CPython's `\xNN`. The general path now produces CPython's wording; the float `z` flag already matched. `test_ail_pre51.py` keeps the cases. | fixed |
 | C?-job-fuzz20-10230625-1 | int.from_bytes | the general path accepted int and None as the bytes source (int 1 became one zero byte, None became empty) | fixed: both now raise TypeError like CPython |
 # Differences from CPython 3.12
 
