@@ -51,7 +51,7 @@ class _AilGenCM:
         except StopIteration:
             return True
         except Exception as e2:
-            if _ail_exc_name(e2) == _ail_exc_name(exc) and str(e2) == str(exc):
+            if e2 is exc:
                 return False
             raise
         raise RuntimeError("generator didn't stop after throw()")
