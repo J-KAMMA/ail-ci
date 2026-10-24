@@ -4,7 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
-| C?-job-pre167-10250412-1 | integer `%` by zero | The boxed and unified `%` emitters used `//`'s combined text, so `%` by zero through a callback lambda, an argument, a list item, an attribute or a dict value printed `integer division or modulo by zero`; CPython 3.12 prints `integer modulo by zero` (only `//` and divmod keep the combined text). An uncaught typed division trap also printed only the bare text; the fatal `ail_die` path now prefixes `ZeroDivisionError:`. Added `test_ail_pre167.py`. | fixed |
+| C?-job-pre167-10250412-1 | integer `%` by zero | The boxed and unified `%` emitters used `//`'s combined text, so `%` by zero through a callback lambda, an argument, a list item, an attribute or a dict value printed `integer division or modulo by zero`; CPython 3.12 prints `integer modulo by zero` (only `//` and divmod keep the combined text). Both message literals now match CPython; added `test_ail_pre167.py`. | fixed |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |

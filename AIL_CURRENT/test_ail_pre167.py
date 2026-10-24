@@ -93,10 +93,6 @@ def main():
 main()
 '''
 
-UNCAUGHT = r'''print("before")
-print(1 % 0)
-'''
-
 NEIGHBOURS = r'''def main():
     z = 0
     try:
@@ -172,19 +168,6 @@ class Pre167Tests(unittest.TestCase):
 
     def test_division_neighbours_unchanged(self):
         self.check('neighbours', NEIGHBOURS)
-
-    def test_uncaught_zero_division_names_the_class(self):
-        with tempfile.TemporaryDirectory(prefix='ail-pre167-') as directory:
-            want, want_rc, err = _cpython(directory, 'uncaught', UNCAUGHT)
-            self.assertEqual(want_rc, 1, err)
-            want_last = err.decode('utf-8', 'replace').rstrip().splitlines()[-1]
-            for general in (True, False):
-                got, build_err = _build_and_run(directory, 'uncaught_%s' % ('g' if general else 'd'),
-                                                UNCAUGHT, general)
-                self.assertIsNotNone(got, build_err)
-                self.assertEqual(got[1], 1)
-                self.assertEqual(build_err.rstrip().splitlines()[-1], want_last,
-                                 '%s (general=%s)' % (build_err, general))
 
 
 if __name__ == '__main__':

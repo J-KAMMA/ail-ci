@@ -7,11 +7,10 @@ keep `integer division or modulo by zero`.  The boxed and unified `%` emitters s
 used the combined `//` text, so `%` by zero through a callback lambda, an argument, a
 list item, an attribute or a dict value printed the wrong message on both builds.
 Changed the two message literals in `cruntime.py` (`ail_obj_mod`, `ail_op_mod`); the
-typed path already had the right text.  An uncaught division trap from the typed
-`pymod`/`pydiv` helpers printed only the bare text because it reaches `ail_die`
-directly; the fatal path now prefixes CPython's `ZeroDivisionError:` name (other
-trap texts are unchanged).  Added `test_ail_pre167.py` with the callback lambda case,
-the value routes, the uncaught last line and the `//`/divmod/float neighbours.
+typed path already had the right text.  Added `test_ail_pre167.py` with the callback
+lambda case, the value routes and the `//`/divmod/float neighbours.  An uncaught typed
+division trap still prints only its bare text (it reaches `ail_die` directly); that is
+the separate pre-existing item recorded before pre138 and is unchanged here.
 
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
 

@@ -560,12 +560,11 @@ static int ail_exc_kind_of(const char *w) {
 }
 static void ail_die(const char *w) {
     /* Unchanged for every program that never opens a `try`: ail_exc_top stays -1 for the whole
-       run, the catch branch is never taken, and the fatal path keeps pkg-v6's text -- now with
-       CPython's class name for a division trap, which typed pymod/pydiv reach directly. Only a
-       program that DOES open a `try` pays this one extra comparison, and only on the failure path
-       a trap already was -- never on the path that succeeds. */
-    int k = ail_exc_kind_of(w);
+       run, this branch is never taken, and everything below is byte-for-byte what pkg-v6 already
+       does. Only a program that DOES open a `try` pays this one extra comparison, and only on the
+       failure path a trap already was -- never on the path that succeeds. */
     if (ail_exc_top >= 0) {
+        int k = ail_exc_kind_of(w);
         if (k) { ail_exception_store(&ail_exc_value, NULL, 1); ail_exc_code = k; ail_exc_unwind(); ail_exc_throw(); }
     }
     /* `fflush(stdout)` here is F3's correctness fix, not a new feature (DESIGN_FOUNDATION_20260914.md
@@ -576,16 +575,7 @@ static void ail_die(const char *w) {
        (and uncaught) path only -- never reached by a program that does not trap, so it is
        invisible to every speed measurement in this tree (see APP_WEIGHT_AND_SPEED_20260913.md;
        none of it runs a trap). Destination and exit status are unchanged: stderr, then _Exit(1). */
-    fflush(stdout);
-    if (k == AIL_EXC_ZERODIV) {
-        /* CPython names the class on the last stderr line; the typed helpers reach this fatal
-           path directly through ail_die(), while the boxed one goes through uncaught(). */
-        fputs("ZeroDivisionError: ", stderr);
-        fputs(!strcmp(w, "integer division by zero") ? "integer division or modulo by zero" : w, stderr);
-    } else {
-        fputs(w, stderr);
-    }
-    AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);
+    fflush(stdout); fputs(w, stderr); AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);
 }
 /* Large buffers (whole files, decoded arrays) take one page fault per 4 KiB on first touch; on
    Linux with THP in "madvise" mode (the common default) asking for huge pages makes that one fault
