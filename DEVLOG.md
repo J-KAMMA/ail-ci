@@ -1,5 +1,14 @@
 # DEVLOG
 
+## 2026-10-24 - fuzz94: mutable default of a nested def
+
+A nested `def` directly in its enclosing body copied a mutable literal default into every call
+site, so `def f(x, acc=[]); f(1); f(2)` printed `[1] [2]` where CPython shares the list built when
+the `def` ran and prints `[1] [1, 2]`. The general path now refuses that construct by name
+(`a nested def f with a mutable literal default (list/dict/set)`), on both builds. Immutable
+defaults, keyword calls, recursion, loop closures with `nonlocal` and early returns were compared
+against CPython and agree. Added `test_ail_fuzz94.py`.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
