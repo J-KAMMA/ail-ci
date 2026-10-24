@@ -147,6 +147,16 @@ leak), and `pymix` treats non-literal shift counts in `BinOp` and `AugAssign` as
 boxed caller keeps its handler.  `test_ail_pre109.py` covers constants, arguments, list items,
 attributes, dict values, augmented shifts, valid shifts and an uncaught failure on both builds;
 1,000,000 caught shifts keep maxrss at 11,564 KB.
+## 2026-10-24 - bench table ratio bounds near 1.0 (job-pre110-10242223)
+
+The bench2 review left one pre-existing display quirk: `numeric_scale_binary`'s ail/base ratio
+printed `0.990 [0.981, 1.000] faster` even though the real upper bound was 0.9996.  A plain
+`%.3f` rounded 0.9996 to 1.000, so the row looked like a tie while the verdict (computed from the
+unrounded bounds) said faster.  `bench/compare.py`'s `fmt` now adds decimals only when 3-decimal
+rounding would put a value on the wrong side of 1.0, so this row reads
+`0.990 [0.981, 0.9996] faster`; ordinary ratios keep three decimals and the verdict rule is
+unchanged.  No compiler or runtime file is touched.  `AIL_CURRENT/test_ail_pre110.py` pins the
+below/above/tie/exact-one cases and the no-range median.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
