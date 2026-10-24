@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - pre126: itertools `r` validation (job-pre126-10242351)
+
+The first still-differing item in the job-pre101 review was the general path's negative
+`r`: `permutations`, `combinations` and `combinations_with_replacement` returned `[]`
+instead of raising `ValueError: r must be non-negative`; the same code read `r` as a raw
+int64 field, so a float, str, None, list, tuple or bytes was also accepted.  Both general
+emitters now pass the `r` object to one runtime converter (`ail_it_r_index`), which checks
+the type and sign; `permutations` keeps treating a None `r` as "not given".  Added
+`AIL_CURRENT/test_ail_pre126.py`; probes in `/tmp/probes/pre126_r_bounds.py`,
+`pre126_r_types.py` and `pre126_r_sources.py` match CPython on both builds.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
