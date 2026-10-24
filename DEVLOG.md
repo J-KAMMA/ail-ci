@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - next() of a saved generator expression (job-pre166-10250412)
+
+Both emitters materialise a generator expression as a list, so `next(g)` worked only when the
+genexpr was written directly in the `next()` call. Stored in a name, an argument, a list item, a
+dict value or an attribute, or returned inside a list, it hit `AIL internal error: iterator:
+unknown kind`. The list now carries a `gen_idx` cursor, shared by `next()` and by iteration over
+that object the way a real generator's cursor is, and `ail_it_next` raises CPython's
+`TypeError: '<type>' object is not an iterator` for a value that is not an iterator (so
+`next([1, 2])` is no longer an internal error). `AIL_CURRENT/test_ail_pre166.py` compares the
+stored-genexpr shapes, aliasing, mixing `next()` with iteration, exhaustion/defaults and
+non-iterator types with CPython on both builds. Existing `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` still pass.
+
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
 
 The general path's native `statistics` helpers kept a heap result in a C local across an
