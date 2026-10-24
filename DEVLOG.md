@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - integer `%` by zero names modulo (job-pre167-10250412)
+
+CPython 3.12 uses `integer modulo by zero` for integer `%`, while `//` and `divmod`
+keep `integer division or modulo by zero`.  The boxed and unified `%` emitters still
+used the combined `//` text, so `%` by zero through a callback lambda, an argument, a
+list item, an attribute or a dict value printed the wrong message on both builds.
+Changed the two message literals in `cruntime.py` (`ail_obj_mod`, `ail_op_mod`); the
+typed path already had the right text.  An uncaught division trap from the typed
+`pymod`/`pydiv` helpers printed only the bare text because it reaches `ail_die`
+directly; the fatal path now prefixes CPython's `ZeroDivisionError:` name (other
+trap texts are unchanged).  Added `test_ail_pre167.py` with the callback lambda case,
+the value routes, the uncaught last line and the `//`/divmod/float neighbours.
+
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
 
 The general path's native `statistics` helpers kept a heap result in a C local across an
