@@ -2165,6 +2165,24 @@ class Compiler(boxclosure.ClosureMixin):
                 self._register_class(n)
 
         self.user_method_names = frozenset(m for c in self.classes.values() for m in c['methods'])
+        # module-level names bound only to a class (or to another such name): a property read through
+        # one is still a property object read from a class, even when a function emitted earlier reads it
+        module_binds = {}
+        for st in tree.body:
+            if isinstance(st, ast.Assign) and len(st.targets) == 1 and isinstance(st.targets[0], ast.Name):
+                module_binds.setdefault(st.targets[0].id, []).append(st.value)
+            elif (isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Name)
+                  and st.value is not None):
+                module_binds.setdefault(st.target.id, []).append(st.value)
+        aliases = set(self.classes)
+        changed = True
+        while changed:
+            changed = False
+            for alias, values in module_binds.items():
+                if alias not in aliases and all(isinstance(v, ast.Name) and v.id in aliases for v in values):
+                    aliases.add(alias)
+                    changed = True
+        self.class_aliases = aliases - set(self.classes)
         # classes the program uses as values (`make = Fenwick; make(data)`): a call through a value may construct one
         called = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
         self.class_values = sorted({n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id in self.classes
@@ -5047,6 +5065,16 @@ class Compiler(boxclosure.ClosureMixin):
                 k = self.classes[k]['base']
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
         if prop_owners:
+            class_recv = (isinstance(node.value, ast.Name) and node.value.id in self.classes
+                          and node.value.id not in ctx.slot_of and node.value.id not in self.module_names)
+            class_recv = class_recv or (isinstance(node.value, ast.Name)
+                                        and node.value.id in self.class_aliases)
+            class_recv = class_recv or self.infer_kind(node.value, ctx) == 'class'
+            if class_recv:
+                # the class value is not a model of the type object here, so reading the
+                # property object it holds (`C.p`, whose type is `property`) cannot be built
+                raise Unsupported('reading the property %s from the class (a property object '
+                                  'is not modelled; DIFFERENCES C?-job-pre53-10241240-1)' % node.attr)
             return self._property_read(node, prop_owners, ctx)
         obj = self.expr(node.value, ctx)
         if node.attr == 'args' and not any('args' in c['methods'] for c in self.classes.values()):
@@ -5081,14 +5109,22 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _property_read(self, node, owners, ctx):
         """obj.NAME where a class of the program has a @property NAME: its getter for an instance of such a class
-        (the most derived first), the attribute otherwise."""
+        (the most derived first), the attribute otherwise.  A descendant that binds NAME as a class attribute
+        shadows the property, as CPython's class attribute lookup does before it reaches the base class."""
         obj = self.expr(node.value, ctx)
         owners = sorted(owners, key=lambda c: -sum(1 for k in self.classes if self._is_subclass_of(c, k)))
         t = ctx.tmp()
         first = True
         for c in owners:
             info = self.classes[c]['methods'][node.attr]
-            ctx.emit('%sif (%s) {' % ('' if first else '} else ', self._property_owner_cond(obj, c)))
+            cond = self._property_owner_cond(obj, c)
+            shadows = [d for d in self.class_order if d != c and self._is_subclass_of(d, c)
+                       and any(a == node.attr for a, _v, _s in self.classes[d].get('class_attrs', []))]
+            if shadows:
+                cond = '(%s && !(%s))' % (cond, ' || '.join(
+                    'ail_class_is_or_subclass(((ail_instobj *)%s.o)->cls, g_slots_arr[%d])' %
+                    (obj, self.global_slots['class:' + d]) for d in shadows))
+            ctx.emit('%sif (%s) {' % ('' if first else '} else ', cond))
             first = False
             ctx.indent += 1
             ctx.emit('st = %s(cx, &%s, %s);' % (info['cname'], t, obj))
@@ -9739,6 +9775,9 @@ class Compiler(boxclosure.ClosureMixin):
             return
         value_c = self.expr(node.value, ctx)
         kind = self.infer_kind(node.value, ctx)
+        if isinstance(node.value, ast.Name) and (node.value.id in self.classes
+                                                 or self.get_kind(node.value.id, ctx) == 'class'):
+            kind = 'class'             # a class value in a name (`D = C`): reading `D.p` is the same
         ekind = self._infer_elem_kind(node.value, ctx)
         for target in node.targets:
             self._assign_target(target, value_c, ctx, value_kind=kind)
@@ -9757,6 +9796,9 @@ class Compiler(boxclosure.ClosureMixin):
             return
         value_c = self.expr(node.value, ctx)
         kind = self.infer_kind(node.value, ctx)
+        if isinstance(node.value, ast.Name) and (node.value.id in self.classes
+                                                 or self.get_kind(node.value.id, ctx) == 'class'):
+            kind = 'class'
         self._assign_target(node.target, value_c, ctx, value_kind=kind)
         if isinstance(node.target, ast.Name):
             self.set_kind(node.target.id, kind, ctx)

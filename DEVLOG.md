@@ -1,5 +1,17 @@
 # DEVLOG
 
+## 2026-10-24 - pre53: property objects read from a class, and class-attribute shadowing
+
+The general path's property read ran a getter only for an instance, then looked the name up as an
+instance attribute.  `C.p` of a `@property` therefore died with `AttributeError: 'type' object has
+no attribute 'p'` instead of returning the property object, and a subclass whose class attribute
+shadows a base property still called the base getter (`B().x` printed 1 where CPython prints 2).
+Reading a property from a class value (a class name, or a simple name bound to one) is now
+refused by name (a property object is not modelled; DIFFERENCES C?-job-pre53-10241240-1); the class attribute now shadows the base property.
+Added `AIL_CURRENT/test_ail_pre53.py`, which keeps direct, inherited and aliased class reads refused and
+compares shadowing through a parameter, list item, attribute, dict value and deep subclass with
+CPython on both builds.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
