@@ -562,6 +562,22 @@ HANDLE = 'handle'
 # language's rule unconditionally, so it is wired in below regardless of `strict`.
 FLOOR_BIN = {k: v for k, v in STRICT_BIN.items() if k in (ast.Mod, ast.FloorDiv)}
 
+# pyfront's floor helpers trap with `ail_die`, which is right for its allocation-free pipeline
+# (there is no exception machinery there) but wrong on the typed path: a zero divisor must raise
+# ZeroDivisionError so a `try` can catch it and an uncaught one names its class, exactly as
+# CPython does.  The same helper text is used, with only the zero-divisor call replaced; the
+# INT64_MIN / -1 overflow stays a fatal trap.
+TYPED_ZERODIV_HELPER = (
+    'static void ail_raise_zerodiv(const char *w) {\n'
+    '    ail_raise_value_adopt(ail_exception_new(AIL_EXC_ZERODIV, (const uint8_t *)w,\n'
+    '                                            (int64_t)strlen(w), 1));\n}\n')
+TYPED_FLOOR_HELPERS = {
+    'pymod': HELPERS['pymod'].replace('ail_die("integer modulo by zero")',
+                                      'ail_raise_zerodiv("integer modulo by zero")'),
+    'pydiv': HELPERS['pydiv'].replace('ail_die("integer division by zero")',
+                                      'ail_raise_zerodiv("integer division or modulo by zero")'),
+}
+
 
 def _int_const(node):
     """The value of `node` if it is a compile-time integer constant, else None.
@@ -13275,13 +13291,11 @@ def _expr(node, ctx):
         # Python's `/` is always true division. C's `/` between integers is not, which is the one
         # difference that silently turns a mean into the floor of a mean.
         ctx.parts.add('DIE')
-        if exctext.ACTIVE and FLT in (_etype(node.left, ctx), _etype(node.right, ctx)):
-            ctx.parts.add('FDIVF')           # CPython words a float division by zero differently from int / int
-            return _ordered_numeric_pair(node.left, node.right, ctx,
-                                         'ail_fdiv_f((double)({}), (double)({}))')
         ctx.parts.add('FDIV')
+        helper = ('ail_fdiv_f' if FLT in (_etype(node.left, ctx), _etype(node.right, ctx))
+                  else 'ail_fdiv')
         return _ordered_numeric_pair(node.left, node.right, ctx,
-                                     'ail_fdiv((double)({}), (double)({}))')
+                                     helper + '((double)({}), (double)({}))')
     if (isinstance(node, ast.BinOp) and isinstance(node.op, (ast.FloorDiv, ast.Mod))
             and _etype(node, ctx) == FLT):
         ctx.parts.add('FFLOORMOD')
@@ -24574,7 +24588,7 @@ _PAR_CAPTURE_TYPES = ('int64_t', 'double', 'ail_flist', 'ail_list', 'ail_bytes',
 # traps are intercepted, see cruntime._PARALLEL_DIE_EDITS) and nothing that allocates, counts
 # references or touches an arena.
 _PAR_HELPERS = frozenset((
-    'ail_die', 'ail_raise_named', 'ail_fdiv', 'ck_add', 'ck_sub', 'ck_mul', 'ck_neg', 'ck_shl', 'ck_shlk', 'ck_shr',
+    'ail_die', 'ail_raise_named', 'ail_fdiv', 'ail_fdiv_f', 'ck_add', 'ck_sub', 'ck_mul', 'ck_neg', 'ck_shl', 'ck_shlk', 'ck_shr',
     'ail_list_get', 'ail_list_set', 'ail_flist_get', 'ail_flist_set', 'ail_bytearray_get',
     'ail_bytearray_set', 'ail_bytearray_len', 'ail_bytearray_index', 'ail_bytearray_meta', 'ail_bytes_get',
     'ail_ffloormod', 'ail_fsqrt', 'ail_ipow', 'ail_round0',
@@ -34895,7 +34909,9 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     # not a --strict-only cost, so it is emitted whenever the program uses `%` or `//` regardless
     # of `strict`.
     if floor:
-        head += ''.join(HELPERS[h] for h in HELPER_ORDER if h in floor)
+        head += TYPED_ZERODIV_HELPER
+        head += ''.join(TYPED_FLOOR_HELPERS.get(h, HELPERS[h])
+                        for h in HELPER_ORDER if h in floor)
     if strict and need:
         head += ''.join(HELPERS[h] for h in HELPER_ORDER if h in need and h != 'ail_die')
     if classes:

@@ -3685,9 +3685,16 @@ AIL_LINK_STATE(int64_t, ail_exc_depth[AIL_EXC_MAX_DEPTH], );
 
 FDIV = r'''
 /* Python's `/` raises on a zero divisor; C's returns an infinity. An answer that is not a number
-   must not be handed back as if it were one. */
-static double ail_fdiv(double a, double b) {
-    if (b == 0) ail_die("division by zero");
+   must not be handed back as if it were one.  The float spelling is separate because CPython
+   words a float division by zero differently from int / int. */
+static inline double ail_fdiv(double a, double b) {
+    if (b == 0) ail_raise_value_adopt(ail_exception_new(AIL_EXC_ZERODIV,
+        (const uint8_t *)"division by zero", (int64_t)strlen("division by zero"), 1));
+    return a / b;
+}
+static inline double ail_fdiv_f(double a, double b) {
+    if (b == 0) ail_raise_value_adopt(ail_exception_new(AIL_EXC_ZERODIV,
+        (const uint8_t *)"float division by zero", (int64_t)strlen("float division by zero"), 1));
     return a / b;
 }
 '''
@@ -3697,7 +3704,11 @@ FFLOORMOD = r'''
 /* Correct the remainder's sign and snap the quotient after removing it.
    Direct floor(a / b) loses the quotient/remainder relationship near rounding boundaries. */
 static double ail_ffloormod(double a, double b, int remainder) {
-    if (b == 0.0) ail_die("division by zero");
+    if (b == 0.0) {
+        const char *w = remainder ? "float modulo" : "float floor division by zero";
+        ail_raise_value_adopt(ail_exception_new(AIL_EXC_ZERODIV, (const uint8_t *)w,
+                                                (int64_t)strlen(w), 1));
+    }
     double r = fmod(a, b);
     int adjust = r != 0.0 && (r < 0.0) != (b < 0.0);
     if (remainder) return r == 0.0 ? copysign(0.0, b) : adjust ? r + b : r;
@@ -10092,7 +10103,7 @@ static inline ail_obj ail_obj_floordiv(ail_obj a, ail_obj b) {
 static inline ail_obj ail_obj_mod(ail_obj a, ail_obj b) {
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t x = a.i, y = b.i;
-        if (y == 0) ail_raise_c(AIL_ERR_ZERODIV, "integer division or modulo by zero");
+        if (y == 0) ail_raise_c(AIL_ERR_ZERODIV, "integer modulo by zero");
         if (x == INT64_MIN && y == -1) return ail_box_int(0);
         int64_t r = x % y;
         if (r != 0 && ((r < 0) != (y < 0))) r += y;
@@ -10109,7 +10120,8 @@ static inline ail_obj ail_obj_mod(ail_obj a, ail_obj b) {
 static inline ail_obj ail_obj_truediv(ail_obj a, ail_obj b) {
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         double x = ail__as_double(a), y = ail__as_double(b);
-        if (y == 0.0) ail_raise_c(AIL_ERR_ZERODIV, "division by zero");
+        if (y == 0.0) ail_raise_c(AIL_ERR_ZERODIV,
+            (a.tag == AIL_T_FLOAT || b.tag == AIL_T_FLOAT) ? "float division by zero" : "division by zero");
         return ail_box_float(x / y);
     }
     ail_raise_c(AIL_ERR_TYPE, "unsupported operand type(s) for /");
@@ -14842,7 +14854,7 @@ static inline ail_st ail_op_floordiv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_o
 static inline ail_st ail_op_mod(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t x = a.i, y = b.i;
-        if (y == 0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "integer division or modulo by zero");
+        if (y == 0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "integer modulo by zero");
         if (x == INT64_MIN && y == -1) { *out = ail_box_int(0); return AIL_OK; }
         int64_t r = x % y;
         if (r != 0 && ((r < 0) != (y < 0))) r += y;
@@ -14858,7 +14870,8 @@ static inline ail_st ail_op_mod(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)
 static inline ail_st ail_op_truediv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         double x = ail__as_double(a), y = ail__as_double(b);
-        if (y == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "division by zero");
+        if (y == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR,
+            (a.tag == AIL_T_FLOAT || b.tag == AIL_T_FLOAT) ? "float division by zero" : "division by zero");
         *out = ail_box_float(cx, x / y); return AIL_OK;
     }
     return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for /");
@@ -27736,9 +27749,6 @@ REQUIRES['EXCFLOAT'] = ['FREPR', 'EXCSTR']
 ORDER.insert(ORDER.index('EXCFLOAT') + 1, 'EXCSTR')
 SOURCE['EXCSTR'] = _exctext.CPART
 REQUIRES['EXCSTR'] = ['STR', 'STRRET', 'STRREPR', 'DIE', 'OSEXC']
-ORDER.insert(ORDER.index('EXCSTR') + 1, 'FDIVF')
-SOURCE['FDIVF'] = _exctext.CFDIVF
-REQUIRES['FDIVF'] = ['DIE', 'EXCSTR']
 
 # set.pop() takes the first element of an int / str set (SETOPS / SSETOPS), which needs a position kept in the table
 # (`ofin`, `fin`). The fields and what keeps them true are spliced in only for a program that pops a set, so the C of every other
@@ -27834,6 +27844,8 @@ def _piece_text(p, want):
         text = _exctext.apply(text, (('static void ail_raise_msg(int code, const char *t) {\n',
                                       'static void ail_raise_msg(int code, const char *t) {\n'
                                       '    if (ail_par_cur) ail_par_trap(t, code);\n'),), 'the DIE block (PARN)')
+    if p in _PARALLEL_DIV_EDITS and 'PAR' in want:
+        text = _parallel_div(p, text)
     return _parallel_die(text) if p == 'DIE' and 'PAR' in want else text
 
 
@@ -27856,6 +27868,44 @@ def _parallel_die(text):
     for old, new in _PARALLEL_DIE_EDITS:
         if text.count(old) != 1:
             raise AssertionError('DIE block changed; update _PARALLEL_DIE_EDITS: ' + old)
+        text = text.replace(old, new)
+    return text
+
+
+# A zero divisor raises on the calling thread, where the exception stack is safe to touch. Inside a
+# `parallel for` worker there is no such stack: keep the trap that PAR already records and re-raises
+# after the join instead. Only the failure path differs; the helper text and messages are unchanged.
+_PARALLEL_DIV_EDITS = {
+    'FDIV': (
+        ('    if (b == 0) ail_raise_value_adopt(ail_exception_new(AIL_EXC_ZERODIV,\n'
+         '        (const uint8_t *)"division by zero", (int64_t)strlen("division by zero"), 1));\n',
+         '    if (b == 0) {\n'
+         '        if (ail_par_cur) ail_die("division by zero");\n'
+         '        ail_raise_value_adopt(ail_exception_new(AIL_EXC_ZERODIV,\n'
+         '            (const uint8_t *)"division by zero", (int64_t)strlen("division by zero"), 1));\n'
+         '    }\n'),
+        ('    if (b == 0) ail_raise_value_adopt(ail_exception_new(AIL_EXC_ZERODIV,\n'
+         '        (const uint8_t *)"float division by zero", (int64_t)strlen("float division by zero"), 1));\n',
+         '    if (b == 0) {\n'
+         '        if (ail_par_cur) ail_die("float division by zero");\n'
+         '        ail_raise_value_adopt(ail_exception_new(AIL_EXC_ZERODIV,\n'
+         '            (const uint8_t *)"float division by zero", (int64_t)strlen("float division by zero"), 1));\n'
+         '    }\n'),
+    ),
+    'FFLOORMOD': (
+        ('        const char *w = remainder ? "float modulo" : "float floor division by zero";\n'
+         '        ail_raise_value_adopt(ail_exception_new(AIL_EXC_ZERODIV, (const uint8_t *)w,\n',
+         '        const char *w = remainder ? "float modulo" : "float floor division by zero";\n'
+         '        if (ail_par_cur) ail_die(w);\n'
+         '        ail_raise_value_adopt(ail_exception_new(AIL_EXC_ZERODIV, (const uint8_t *)w,\n'),
+    ),
+}
+
+
+def _parallel_div(p, text):
+    for old, new in _PARALLEL_DIV_EDITS[p]:
+        if text.count(old) != 1:
+            raise AssertionError('%s changed; update _PARALLEL_DIV_EDITS: %s' % (p, old))
         text = text.replace(old, new)
     return text
 
