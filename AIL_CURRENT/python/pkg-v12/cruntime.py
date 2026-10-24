@@ -27860,9 +27860,13 @@ _PARALLEL_DIE_EDITS = (
     ('static void ail_die(const char *w);\n',
      'AIL_LINK_STATE(_Thread_local void *, ail_par_cur, = NULL);\n'
      'static void ail_par_trap(const char *w, int code) __attribute__((noreturn));\n'
+     'static void ail_par_trap_value(ail_exception *value) __attribute__((noreturn));\n'
      'static void ail_die(const char *w);\n'),
     ('static void ail_die(const char *w) {\n', 'static void ail_die(const char *w) {\n    if (ail_par_cur) ail_par_trap(w, 0);\n'),
     ('static void ail_raise_named(int code) {\n', 'static void ail_raise_named(int code) {\n    if (ail_par_cur) ail_par_trap(NULL, code);\n'),
+    ('__attribute__((unused)) static void ail_raise_value_adopt(ail_exception *value) {\n',
+     '__attribute__((unused)) static void ail_raise_value_adopt(ail_exception *value) {\n'
+     '    if (ail_par_cur) ail_par_trap_value(value);\n'),
 )
 
 
@@ -28202,6 +28206,21 @@ static void ail_par_trap(const char *w, int code) {
     if (w) { strncpy(c->msg, w, sizeof c->msg - 1); c->msg[sizeof c->msg - 1] = 0; }
     longjmp(c->jb, 1);
 }
+/* An adopted exception (ck_shl/ck_shr's ValueError, ail_raise_msg) reaches here on a worker:
+   record its code and message for the caller's re-raise, release the worker's only reference,
+   and unwind to the block runner instead of longjmp-ing across threads. */
+static void ail_par_trap_value(ail_exception *value) {
+    ail_par_ctx *c = (ail_par_ctx *)ail_par_cur;
+    c->code = value ? value->code : AIL_EXC_RUNTIME;
+    c->msg[0] = 0;
+    if (value && value->n > 0) {
+        int64_t n = value->n < (int64_t)sizeof c->msg ? value->n : (int64_t)sizeof c->msg - 1;
+        memcpy(c->msg, value->p, (size_t)n);
+        c->msg[n] = 0;
+    }
+    ail_exception_release(value);
+    longjmp(c->jb, 1);
+}
 static int64_t ail_par_now(void) {
 #ifdef _WIN32
     LARGE_INTEGER f, t; QueryPerformanceFrequency(&f); QueryPerformanceCounter(&t);
@@ -28337,6 +28356,8 @@ static void ail_par_go_wide(ail_par_fn fn, void **args, int64_t lo, int64_t hi) 
         char msg[192];
         int code = J->fail_code;
         memcpy(msg, J->fail_msg, sizeof msg);
+        if (msg[0] && code)
+            ail_raise_value_adopt(ail_exception_new(code, (const uint8_t *)msg, (int64_t)strlen(msg), 1));
         if (msg[0]) ail_die(msg);
         ail_raise_named(code ? code : AIL_EXC_RUNTIME);
     }
