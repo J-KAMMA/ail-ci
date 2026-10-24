@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - pre52: an optional import is refused by name at its own line
+
+`try: import html ... except ImportError:` reached the general emitter's try check, which refused
+`ImportError` as an unsupported caught exception type without a position. The check now names the
+import in the try body (`import of 'html' guarded by except ImportError`), points at its line and
+column, and says to move it to the top of the file; `ModuleNotFoundError` gets the same message.
+An import only in a handler, `else` or `finally` is not called guarded, so it keeps the caught-type
+refusal, now located at the `try`. Other unsupported caught types are located at their `try` too.
+`except Exception` is unchanged. Added `AIL_CURRENT/test_ail_pre52.py` (fifteen refusals and four
+accepted programs, both builds).
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
