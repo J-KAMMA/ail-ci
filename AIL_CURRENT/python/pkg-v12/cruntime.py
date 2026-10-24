@@ -14082,14 +14082,23 @@ static inline ail_st ail_meth_set_symmetric_difference(ail_ctx *cx, ail_obj *out
 typedef struct { int64_t name_id; ail_obj val; } ail_attr;
 typedef struct { ail_gcobj hdr; ail_obj cls; ail_attr *attrs; int64_t n, cap; } ail_instobj;
 
+/* A class attribute read through a class VALUE (an alias, an argument, a list item, ...):
+   name id -> module-global slot holding the one shared value.  The slots live in the
+   program's g_slots_arr (ail__class_attr_slots points at it), so the attribute stays live
+   and a later class-body/global assignment is still seen through the class. */
+typedef struct { int64_t name_id, slot; } ail_caent;
+
 typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or NONE */; int builtin_id;
                  int dc; /* @dataclass: field count + 1 (0 = not a dataclass); repr/str print the first dc-1 attributes */
                  unsigned long long dc_hide; /* bit i set: field i is left out of the repr (field(repr=False)) */
+                 ail_caent *ca; int64_t ca_n, ca_cap; /* class attributes read through a class value */
                  ail_st (*iter_iter)(ail_ctx *, ail_obj *, ail_obj); /* user __iter__ (self only), or 0 */
                  ail_st (*iter_next)(ail_ctx *, ail_obj *, ail_obj); /* user __next__ wrapped: StopIteration -> AIL_STOP, or 0 */
                  ail_st (*repr_fn)(ail_ctx *, ail_obj *, ail_obj); /* user __repr__ (self only), or 0 */
                  ail_st (*str_fn)(ail_ctx *, ail_obj *, ail_obj); /* user __str__ (self only), or 0 */
                  ail_st (*lt_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj); /* user __lt__ (self, other), or 0 */ } ail_classobj;
+
+static ail_obj *ail__class_attr_slots = 0;
 
 typedef struct { ail_gcobj hdr; int64_t start, stop, step; } ail_rangeobj;
 
@@ -14179,6 +14188,7 @@ static inline void ail__free_payload(ail_gcobj *o) {
         case AIL_K_DICT: free(((ail_mapobj *)o)->entries); free(((ail_mapobj *)o)->index); break;
         case AIL_K_SET: free(((ail_setobj *)o)->ent); free(((ail_setobj *)o)->index); break;
         case AIL_K_INST: free(((ail_instobj *)o)->attrs); break;
+        case AIL_K_CLASS: free(((ail_classobj *)o)->ca); break;
         case AIL_K_FUNC: free(((ail_funcobj *)o)->cells); break;
         default: break;
     }
@@ -16456,12 +16466,75 @@ static inline ail_obj ail_class_new(ail_ctx *cx, const char *name, ail_obj base)
     c->base = base;
     c->builtin_id = -1;
     c->dc = 0; c->dc_hide = 0;
+    c->ca = 0; c->ca_n = 0; c->ca_cap = 0;
     c->iter_iter = 0; c->iter_next = 0; c->repr_fn = 0; c->str_fn = 0; c->lt_fn = 0;
     ail_obj r; r.tag = AIL_T_CLASS; r.o = (ail_gcobj *)c;
     AIL_ROOT1(cx, fr, r);
     c->name = ail_str_from_cstr(cx, name);
     AIL_FRAME_LEAVE(cx, fr);
     return r;
+}
+static inline void ail_class_attr_add(ail_ctx *cx, ail_obj cls, int64_t name_id, int64_t slot) {
+    (void)cx;
+    ail_classobj *c = (ail_classobj *)cls.o;
+    if (c->ca_n == c->ca_cap) {
+        int64_t nc = c->ca_cap ? c->ca_cap * 2 : 4;
+        ail_caent *na = (ail_caent *)ail_xmalloc((size_t)nc * sizeof(ail_caent));
+        if (c->ca_n) memcpy(na, c->ca, (size_t)c->ca_n * sizeof(ail_caent));
+        free(c->ca);
+        c->ca = na; c->ca_cap = nc;
+        c->hdr.size += (uint32_t)((size_t)nc * sizeof(ail_caent)); /* conservative, as ail_inst_setattr */
+    }
+    c->ca[c->ca_n].name_id = name_id;
+    c->ca[c->ca_n].slot = slot;
+    c->ca_n++;
+}
+static inline int ail_class_attr_find_id(ail_obj cls, int64_t name_id, ail_obj *out) {
+    /* 1 = found, 2 = defined as a method/property in the class body (slot -1: it hides a base
+       class attribute, but the general path cannot hand out the function/property value). */
+    for (ail_obj k = cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+        ail_classobj *kc = (ail_classobj *)k.o;
+        for (int64_t i = kc->ca_n - 1; i >= 0; i--)
+            if (kc->ca[i].name_id == name_id) {
+                if (kc->ca[i].slot < 0) return 2;
+                if (ail__class_attr_slots) *out = ail__class_attr_slots[kc->ca[i].slot];
+                return 1;
+            }
+    }
+    return 0;
+}
+static inline void ail_class_name_c(ail_obj cls, char *buf, size_t cap) {
+    ail_str cn = ail_view_to_str(((ail_classobj *)cls.o)->name);
+    size_t k = 0;
+    for (int64_t i = 0; i < cn.n; i++) {
+        uint32_t c = (uint32_t)ail_chr(cn, i);
+        if (c < 0x80) {
+            if (k + 1 >= cap) break;
+            buf[k++] = (char)c;
+        } else if (c < 0x800) {
+            if (k + 2 >= cap) break;
+            buf[k++] = (char)(0xC0 | (c >> 6)); buf[k++] = (char)(0x80 | (c & 0x3F));
+        } else {
+            if (k + 3 >= cap) break;
+            buf[k++] = (char)(0xE0 | (c >> 12)); buf[k++] = (char)(0x80 | ((c >> 6) & 0x3F));
+            buf[k++] = (char)(0x80 | (c & 0x3F));
+        }
+    }
+    buf[k] = 0;
+}
+static inline int ail_class_attr_find_name(ail_ctx *cx, ail_obj cls, const char *name, ail_obj *out) {
+    for (ail_obj k = cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+        ail_classobj *kc = (ail_classobj *)k.o;
+        for (int64_t i = kc->ca_n - 1; i >= 0; i--) {
+            int64_t nid = kc->ca[i].name_id;
+            if (nid >= 0 && nid < cx->intern_n && strcmp(cx->intern_tab[nid], name) == 0) {
+                if (kc->ca[i].slot < 0) return 2;
+                if (ail__class_attr_slots) *out = ail__class_attr_slots[kc->ca[i].slot];
+                return 1;
+            }
+        }
+    }
+    return 0;
 }
 static inline ail_obj ail_inst_new(ail_ctx *cx, ail_obj cls) {
     ail_instobj *o = (ail_instobj *)ail_gc_alloc(cx, AIL_K_INST, sizeof *o);
@@ -16515,6 +16588,23 @@ static inline ail_st ail_inst_setattr_chk(ail_ctx *cx, ail_obj inst, int64_t nam
     return AIL_OK;
 }
 static inline ail_st ail_inst_getattr(ail_ctx *cx, ail_obj *out, ail_obj inst, int64_t name_id, const char *name_for_msg) {
+    if (inst.tag == AIL_T_CLASS) {
+        if (strcmp(name_for_msg, "__name__") == 0) {
+            *out = ((ail_classobj *)inst.o)->name;
+            return AIL_OK;
+        }
+        int ca = ail_class_attr_find_id(inst, name_id, out);
+        if (ca == 1) return AIL_OK;
+        char nb[100], cbuf[220];
+        ail_class_name_c(inst, nb, sizeof nb);
+        if (ca == 2) {
+            snprintf(cbuf, sizeof cbuf, "reading method/property '%s' through the class value %s "
+                     "is not built on the general path", name_for_msg, nb);
+            return ail_raise_c(cx, AIL_B_NOTIMPLEMENTEDERROR, cbuf);
+        }
+        snprintf(cbuf, sizeof cbuf, "type object '%s' has no attribute '%s'", nb, name_for_msg);
+        return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, cbuf);
+    }
     if (__builtin_expect((unsigned)(inst.tag - AIL_T_INST) > 1u, 0)) return ail_attr_not_inst(cx, inst, name_for_msg);
     ail_instobj *o = (ail_instobj *)inst.o;
     for (int64_t i = 0; i < o->n; i++) if (o->attrs[i].name_id == name_id) { *out = o->attrs[i].val; return AIL_OK; }

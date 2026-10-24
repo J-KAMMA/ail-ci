@@ -1,5 +1,17 @@
 # DEVLOG
 
+## 2026-10-24 - pre170: last duplicate class-body attribute through a class value
+
+The pre157 review's first still-unverified probe pair was `b_dup`/`g_dup2`: a class body with a
+duplicate assignment (`class C: x = 1; x = 2`) read through an alias or `getattr()` returned the
+first value (or failed), where CPython keeps the last. The general path now registers every
+class-body entry in source order on the class object and the runtime lookup scans each class
+backwards, so the last definition wins through aliases, arguments, list/dict items, instance
+attributes and `getattr`/`hasattr`. The array-entry shape evaluates the class bodies before the
+entry call, and reading a method/property through a directly known class value is refused by
+name. Added `test_ail_pre170.py` (4 tests, both builds); probes `p_dup`, `p_dup2`, `p_sources`,
+`p_missing` and `p_array` match CPython.
+
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
 
 The general path's native `statistics` helpers kept a heap result in a C local across an
