@@ -1,5 +1,17 @@
 # DEVLOG
 
+## 2026-10-24 - job-pre91: non-BMP strings on the 16-bit general path
+
+`chr(0x1F600)` and `"%c" % 0x1F600` died with `AIL internal error` on both
+builds while CPython printed the code point.  The 16-bit general path now
+stores non-BMP values as UTF-16 surrogate pairs but measures them in code
+points: printing, `len`, `ord`, indexing, slicing, iteration (including the
+str fast path), comparison, containers, searching, padding and `repr` agree
+with CPython.  `%c` and `format(v, "c")` encode a non-BMP int (and accept a
+one-code-point str), and `chr()` no longer rejects it.  Non-BMP string
+literals are still refused by name on that path.  Added
+`test_ail_pre91.py` (10 programs, two builds each).
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

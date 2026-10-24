@@ -4,6 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre91-10242041-1 | non-BMP strings (16-bit general path) | `chr(0x1F600)`, `"%c" % 0x1F600`, `format(0x1F600, "c")` and iteration over a non-BMP string died with an internal error or split the surrogate pair. Non-BMP values are now stored as surrogate pairs but measured in code points for printing, `len`, `ord`, indexing, slicing, iteration, comparison, containers, searching, padding and `repr`; `%c` and format `c` encode the pair. Non-BMP literals remain refused by name. | fixed |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |

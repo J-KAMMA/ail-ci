@@ -254,6 +254,10 @@ def _ail_unprintable(o: int) -> bool:
         return True
     if o == 65279 or (o >= 65529 and o <= 65531):
         return True
+    if o >= 205744 and o <= 917759:
+        return True
+    if o >= 918000 and o <= 1114111:
+        return True
     return False
 '''
 DIVMOD_I = '''def _ail_divmod_i(a: int, b: int) -> _AilT_i_i:

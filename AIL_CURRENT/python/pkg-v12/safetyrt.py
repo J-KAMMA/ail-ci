@@ -750,7 +750,12 @@ static inline ail_obj ail2f_pad_str(ail_ctx *cx, ail_str s, int64_t len, ail2f_s
     int64_t left = align == '>' ? pad : align == '^' ? pad / 2 : 0;
     ail2f_buf o = {0, 0, 0};
     for (int64_t k = 0; k < left; k++) ail2f_put(&o, fill);
-    for (int64_t k = 0; k < len; k++) ail2f_put(&o, ail_chr(s, k));
+    for (int64_t k = 0, i = 0; k < len; k++) {
+        int64_t w = ail__str_width(s, i);
+        ail2f_put(&o, ail_chr(s, i));
+        if (w == 2) ail2f_put(&o, ail_chr(s, i + 1));
+        i += w;
+    }
     for (int64_t k = 0; k < pad - left; k++) ail2f_put(&o, fill);
     return ail2f_done(cx, &o);
 }
@@ -825,7 +830,7 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
         if (f.alt) return ail_raise_c(cx, AIL_B_VALUEERROR, "Alternate form (#) not allowed in string format specifier");
         if (f.align == '=') return ail_raise_c(cx, AIL_B_VALUEERROR, "'=' alignment not allowed in string format specifier");
         ail_str s = ail_view_to_str(x);
-        int64_t len = s.n;
+        int64_t len = ail_str_len_points(s);
         if (f.has_prec && f.prec < len) len = f.prec;
         *out = ail2f_pad_str(cx, s, len, &f, '<');
         return AIL_OK;
@@ -846,8 +851,14 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
             if (f.sign) return ail_raise_c(cx, AIL_B_VALUEERROR, "Sign not allowed with integer format specifier 'c'");
             if (f.alt) return ail_raise_c(cx, AIL_B_VALUEERROR, "Alternate form (#) not allowed with integer format specifier 'c'");
             if (x.i < 0 || x.i > 0x10FFFF) return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "%c arg not in range(0x110000)");
-            if (x.i > 0xFFFF) ail_die("format 'c': a code point above U+FFFF in the 16-bit v2 runtime");
-            uint16_t c = (uint16_t)x.i; ail_str s; s.p = &c; s.n = 1; s.bytes = 0;
+            uint16_t c[2]; int64_t cn;
+            if (x.i > 0xFFFF) {
+                uint32_t v = (uint32_t)x.i - 0x10000u;
+                c[0] = (uint16_t)(0xD800u + (v >> 10));
+                c[1] = (uint16_t)(0xDC00u + (v & 0x3FFu));
+                cn = 2;
+            } else { c[0] = (uint16_t)x.i; cn = 1; }
+            ail_str s; s.p = c; s.n = cn; s.bytes = 0;
             *out = ail2f_pad_str(cx, s, 1, &f, '>'); return AIL_OK;
         }
         if (f.group == ',' && (type == 'b' || type == 'o' || type == 'x' || type == 'X')) {
@@ -966,7 +977,7 @@ static inline ail_st ail2f_percent(ail_ctx *cx, ail_obj *out, ail_obj fmtobj, ai
         if (t == 's' || t == 'r' || t == 'a') {
             fr.slots[2] = t == 's' ? ail_obj_str(cx, arg) : ail_obj_repr(cx, arg);
             ail_str v = ail_view_to_str(fr.slots[2]);
-            int64_t len = v.n; if (f.has_prec && f.prec < len) len = f.prec;
+            int64_t len = ail_str_len_points(v); if (f.has_prec && f.prec < len) len = f.prec;
             f.zero = 0; if (!f.align) f.align = '>';
             piece = ail2f_pad_str(cx, v, len, &f, '>');
         } else if (t == 'd' || t == 'i' || t == 'u' || t == 'o' || t == 'x' || t == 'X') {
@@ -1006,14 +1017,23 @@ static inline ail_st ail2f_percent(ail_ctx *cx, ail_obj *out, ail_obj fmtobj, ai
             f.type = (char)t; f.has_prec = 0;
             piece = ail2f_pad_num(cx, ail2f_signstr(signbit(d) && !isnan(d), f.sign), "", body, &f);
         } else if (t == 'c') {
-            uint16_t ch;
+            uint16_t ch[2]; int64_t chn; uint32_t cp;
             if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) {
                 if (arg.i < 0 || arg.i > 0x10FFFF) { st = ail_raise_c(cx, AIL_B_OVERFLOWERROR, "%c arg not in range(0x110000)"); goto fail; }
-                if (arg.i > 0xFFFF) ail_die("%c: a code point above U+FFFF in the 16-bit v2 runtime");
-                ch = (uint16_t)arg.i;
-            } else if (arg.tag == AIL_T_STR && ail_view_to_str(arg).n == 1) ch = ail_chr(ail_view_to_str(arg), 0);
-            else { st = ail_raise_c(cx, AIL_B_TYPEERROR, "%c requires int or char"); goto fail; }
-            ail_str v; v.p = &ch; v.n = 1; v.bytes = 0;
+                cp = (uint32_t)arg.i;
+            } else if (arg.tag == AIL_T_STR) {
+                ail_str a = ail_view_to_str(arg);
+                if (ail_str_len_points(a) != 1) { st = ail_raise_c(cx, AIL_B_TYPEERROR, "%c requires int or char"); goto fail; }
+                int64_t w;
+                cp = ail__str_point(a, 0, &w);
+            } else { st = ail_raise_c(cx, AIL_B_TYPEERROR, "%c requires int or char"); goto fail; }
+            if (cp > 0xFFFF) {
+                uint32_t v = cp - 0x10000u;
+                ch[0] = (uint16_t)(0xD800u + (v >> 10));
+                ch[1] = (uint16_t)(0xDC00u + (v & 0x3FFu));
+                chn = 2;
+            } else { ch[0] = (uint16_t)cp; chn = 1; }
+            ail_str v; v.p = ch; v.n = chn; v.bytes = 0;
             f.zero = 0; if (!f.align) f.align = '>';
             piece = ail2f_pad_str(cx, v, 1, &f, '>');
         } else {
