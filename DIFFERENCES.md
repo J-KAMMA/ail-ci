@@ -28,3 +28,11 @@ Rows added by job-fuzz8-10220554 use the placeholder id form requested for this 
 | ID | Area | Status | Description |
 | --- | --- | --- | --- |
 | C?-job-fuzz65-10231438-1 | heapq / list repr | fixed | After a caught `heappush` TypeError on a `list[int]` (CPython appends before comparing), the annotation-specialized list repr printed a string element as `x` instead of `'x'` when a tuple comparison had generated that helper. Scalar elements now use the runtime value's `repr`. |
+
+# pre139: non-BMP chr() on the general path
+
+| id | area | difference | status |
+| --- | --- | --- | --- |
+| C?-job-pre139-10250110-1 | str / chr | The general 16-bit v2 path died with an internal error for a non-BMP `chr()` value (from an argument, a list item, an attribute or a dict value) where CPython and the default build print the character. The value is now stored as a UTF-16 surrogate pair, and the point-based string operations (print/write, repr, len, ord, index, slice, iterate, reversed, compare, find/count, startswith/endswith, pad, replace) see one code point. Non-BMP literals are still refused by name in this runtime. | fixed |
+| C?-job-pre139-10250110-2 | bytes.decode | A UTF-8 decode to a non-BMP code point still dies on the general path (`decode: a code point above U+FFFF in the 16-bit v2 runtime`); the default build matches CPython. | open |
+| C?-job-pre139-10250110-3 | chr surrogate | A lone surrogate passed to `chr()` still differs: the general path dies with an internal error and the default build raises ValueError, where CPython returns the surrogate character. | open |

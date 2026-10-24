@@ -661,8 +661,9 @@ _PREAMBLE_TAIL = r'''
 static inline int64_t ail2_fmt_ascii(ail_ctx *cx, ail_obj x, char *b);
 static inline void ail2_out_str(ail_ctx *cx, ail_str s) {
     ail_out_reserve(cx, (size_t)s.n * 4);
-    for (int64_t i = 0; i < s.n; i++) {
-        uint32_t c = (uint32_t)s.p[i];
+    for (int64_t i = 0; i < s.n; ) {
+        uint32_t c = ail_s2_pat(s, i);
+        i += ail_s2_pwidth(s, i);
         if (c < 0x80) cx->out_buf[cx->out_len++] = (char)c;
         else if (c < 0x800) {
             cx->out_buf[cx->out_len++] = (char)(0xC0 | (c >> 6));

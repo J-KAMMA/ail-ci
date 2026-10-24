@@ -1,5 +1,25 @@
 # DEVLOG
 
+## 2026-10-24 - pre139: non-BMP chr() on the general path
+
+The general (16-bit v2) path died with an internal error for a non-BMP `chr()` value
+("chr() non-BMP code point requires 32-bit strings") whether the value came from an
+argument, a list item, an attribute or a dict value; the default build matched CPython.
+The v2 runtime now stores such a value as a UTF-16 surrogate pair, and the point-based
+string operations see one code point: print/write, repr, len, ord, indexing, slicing,
+iteration, reversed, comparison, find/rfind/index/rindex/count, startswith/endswith,
+the pad methods and replace. `ail_bi_str_from_utf8` (the byte decoder behind
+repr/stdin) stores pairs too, and the scalar print fast path decodes them. Non-BMP
+*literals* are still refused by name in this runtime, as before. Added
+`AIL_CURRENT/test_ail_pre139.py` (both builds) and registered it in
+`ail_check.MODULES`.
+
+Probes with `bash ~/tools/cmp.sh` on both builds: r4, boundaries, containers, types,
+errors, methods, iteration, bmp, chrdirect and chrlit match CPython; lit is refused by
+name on the general path and matches on the default build. The reviewer's r10
+(`bytes.decode` still dies on the general path) and r9 (a lone surrogate passed to
+`chr()`) are separate causes and are untouched.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
