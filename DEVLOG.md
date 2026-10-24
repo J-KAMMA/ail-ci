@@ -1,5 +1,17 @@
 # DEVLOG
 
+## 2026-10-24 - pre57: dict key-table shape after delete/reinsert
+
+The pre43 reviewer recorded as pre-existing that `update` / `dict()` after a delete+reinsert
+called a user `__eq__` a different number of times from CPython 3.12 (p14 omitted `E 20 11`), and
+that source dict construction after delete+insert could print the same calls in a different
+order. The cause was `ail_map_del` rebuilding the whole index: CPython leaves a dummy index slot
+and keeps `dk_nentries`. The runtime now tracks `nentries`, trailing dummies and dummy slots, uses
+stored hashes for dict-to-dict merge/copy, and dict equality skips `-2` slots (the pre43 fix read
+`index[-2]` there). `test_ail_pre57.py` covers p10/p14-style update/dict/copy/popitem shapes,
+dict equality with tombstones, source order, arguments/list items/attributes/dict values, and
+empty/negative/plain boundaries on both builds.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
