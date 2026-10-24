@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - pre39: keyword wrapper int() refusal
+
+`def take(x): return int(x); take(x=1e300)` stopped with `integer overflow` on both builds where
+CPython prints a 301-digit integer. The front end's `int()`-of-an-out-of-int64-float check (the
+pre31 machinery, absent from this tree) now binds call arguments by parameter name as well as by
+position, so keyword calls to wrappers and identity functions, including keyword-only wrappers, are
+refused by name. Out-of-range literals, module constants, list/tuple items and dict values reached
+this way are refused too; in-range conversions, non-finite floats and run-time-only values are
+unchanged and compared with CPython. Added `test_ail_pre39.py` (11 refused programs, 4 matching
+programs, both builds).
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
