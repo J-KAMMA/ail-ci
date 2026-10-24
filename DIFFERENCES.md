@@ -4,6 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-qtest3-10241647-1 | str.partition / str.rpartition | A non-str separator (int, float, None) reached the general-path helper, whose `len(sep)` ran before `find(sep)`: it raised `TypeError: object of type 'int' has no len()` where CPython raises `TypeError: must be str, not int` (same for float and NoneType). `partition`/`rpartition` now call `find`/`rfind` first, so the separator type check wins; empty separators still raise `ValueError: empty separator`, and bytes, list, str subclasses and multi-character/repeated separators are unchanged. Both builds match CPython. | fixed |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |
