@@ -242,6 +242,15 @@ expression outside a `del` are unchanged, and the C runtime is untouched.
 
 Tests on this commit: `test_ail_pre19` (new, both builds), `test_ail_safetynet`,
 `test_ail_files`, `test_ail_corpus_findings3`; `update_manifest.py --check` rc 0.
+## 2026-10-23 - A constant power outside int64 is refused by name (job-pre2)
+
+The pre-existing `r_aliasing.py` difference was `2 ** 63`: CPython prints
+9223372036854775808, while AIL compiled it and then stopped with `integer overflow`. The value is
+known at compile time and has no int64 answer, so `_check_int64_literals` now evaluates a constant
+integer `**` and raises `int64 constant power out of range: <base> ** <exponent>` before codegen
+(the same place an out-of-range literal is refused). `2 ** 62`, `(-2) ** 63` (INT64_MIN) and the
+float/small-power cases still compile and match CPython. `test_ail_pre2.py` covers both builds and
+both syntaxes.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 

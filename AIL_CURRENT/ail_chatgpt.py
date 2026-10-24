@@ -12,7 +12,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from ail_syntax import SyntaxErrorAIL, detect, fold_constants, python_surface, python_wording, translate
+from ail_syntax import (_NotConstant, SyntaxErrorAIL, _fold, detect, fold_constants, python_surface,
+                        python_wording, translate)
 import ail_sexpr
 import ail_modules
 
@@ -75,6 +76,26 @@ def _module_constant(node):
             and bool(value.elts) and all(map(_literal_number, value.elts)))
 
 
+_INT64_MIN = -(1 << 63)
+_INT64_MAX = (1 << 63) - 1
+
+
+def _constant_integer(node):
+    try:
+        value = _fold(node, {})
+    except (_NotConstant, ArithmeticError, ValueError, TypeError, RecursionError):
+        return None
+    return value if type(value) is int else None
+
+
+def _constant_power_overflows(base, exponent):
+    if exponent < 0:
+        return False
+    if exponent >= 64:
+        return abs(base) > 1
+    return not _INT64_MIN <= base ** exponent <= _INT64_MAX
+
+
 def _check_int64_literals(tree):
     nodes = [tree]
     while nodes:
@@ -84,10 +105,20 @@ def _check_int64_literals(tree):
             value = -node.operand.value if isinstance(node.op, ast.USub) else node.operand.value
         elif isinstance(node, ast.Constant) and type(node.value) is int:
             value = node.value
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+            base = _constant_integer(node.left)
+            exponent = _constant_integer(node.right)
+            if base is not None and exponent is not None and _constant_power_overflows(base, exponent):
+                error = ValueError(f'int64 constant power out of range: {base} ** {exponent}')
+                error.source_line = node.lineno
+                error.source_column = node.col_offset
+                raise error
+            nodes.extend(ast.iter_child_nodes(node))
+            continue
         else:
             nodes.extend(ast.iter_child_nodes(node))
             continue
-        if not -(1 << 63) <= value < 1 << 63:
+        if not _INT64_MIN <= value <= _INT64_MAX:
             error = ValueError(f'int64 literal out of range: {value}')
             error.source_line = node.lineno
             error.source_column = node.col_offset
