@@ -1,5 +1,19 @@
 # DEVLOG
 
+## 2026-10-24 - getattr chain reads refused by name (job-pre179-10250449)
+
+The fuzz60 reviewer's r02 was still a silent difference on this tree: `getattr(e, "__context__")`
+(and the same read through `hasattr`, with a default, or through `setattr`) built and then raised
+`AttributeError` or returned the default where CPython returns None/False.  The general path's
+builtin attribute helpers now refuse a literal chain name by name on both builds, matching the
+existing direct `e.__context__` refusal.  A name computed at run time still works: getattr reads
+None for `__context__`/`__cause__` and False for `__suppress_context__`, and hasattr is true for
+all four chain names; ordinary getattr/hasattr/setattr of program fields is unchanged.  r04
+(`continue` out of try/finally) and r09 (`del e.__context__`) were already named refusals on both
+builds.  `test_ail_pre179.py` covers the literal refusals, run-time names through an argument, a
+list item, an attribute and a dict value, computed names, and ordinary fields.  Probes match
+CPython or are refused by name; the four required modules pass on the final commit.
+
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
 
 The general path's native `statistics` helpers kept a heap result in a C local across an

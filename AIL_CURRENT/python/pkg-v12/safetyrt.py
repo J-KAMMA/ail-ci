@@ -1353,6 +1353,11 @@ static inline ail_st ail2a_getattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_o
     char buf[256]; ail_st st = ail2a_cname(cx, name, buf, sizeof buf); if (st != AIL_OK) return st;
     if ((st = ail2a_need_inst(cx, obj, "getattr")) != AIL_OK) return st;
     if (ail2a_find(cx, obj, buf, out)) return AIL_OK;
+    /* a name computed at run time: an exception's chain attributes exist even though no field holds them */
+    if (obj.tag == AIL_T_EXC) {
+        if (strcmp(buf, "__cause__") == 0 || strcmp(buf, "__context__") == 0) { *out = ail_box_none(); return AIL_OK; }
+        if (strcmp(buf, "__suppress_context__") == 0) { *out = ail_box_bool(0); return AIL_OK; }
+    }
     if (has_dflt) { *out = dflt; return AIL_OK; }
     char m[320]; snprintf(m, sizeof m, "'%s' object has no attribute '%s'", ail_type_name(obj.tag), buf);
     if (obj.tag == AIL_T_INST && ((ail_instobj *)obj.o)->cls.tag == AIL_T_CLASS) {
@@ -1368,7 +1373,11 @@ static inline ail_st ail2a_hasattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_o
     char buf[256]; ail_st st = ail2a_cname(cx, name, buf, sizeof buf); if (st != AIL_OK) return st;
     if (is_method) { *out = ail_box_bool(1); return AIL_OK; }
     if ((st = ail2a_need_inst(cx, obj, "hasattr")) != AIL_OK) return st;
-    ail_obj v; *out = ail_box_bool(ail2a_find(cx, obj, buf, &v));
+    ail_obj v;
+    int found = ail2a_find(cx, obj, buf, &v);
+    if (!found && obj.tag == AIL_T_EXC && (strcmp(buf, "__cause__") == 0 || strcmp(buf, "__context__") == 0 ||
+                                           strcmp(buf, "__suppress_context__") == 0 || strcmp(buf, "__traceback__") == 0)) found = 1;
+    *out = ail_box_bool(found);
     return AIL_OK;
 }
 static inline ail_st ail2a_setattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_obj name, ail_obj v) {
