@@ -1348,16 +1348,21 @@ static inline ail_st ail2a_need_inst(ail_ctx *cx, ail_obj obj, const char *fn) {
     char m[160]; snprintf(m, sizeof m, "%s() on a '%s' value is not built on the general path (only instances of the program's classes)", fn, ail_type_name(obj.tag));
     return ail_raise_c(cx, AIL_B_NOTIMPLEMENTEDERROR, m);
 }
+static inline int ail2a_chain_name(const char *name) {
+    return strcmp(name, "__cause__") == 0 || strcmp(name, "__context__") == 0 ||
+           strcmp(name, "__suppress_context__") == 0 || strcmp(name, "__traceback__") == 0;
+}
+static inline ail_st ail2a_chain_refused(ail_ctx *cx, const char *name) {
+    char m[320]; snprintf(m, sizeof m, "reading %s (exception chaining is not kept here)", name);
+    return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, m);
+}
 /* getattr(obj, name[, default]); is_method: the class of obj has a method of that name */
 static inline ail_st ail2a_getattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_obj name, int has_dflt, ail_obj dflt) {
     char buf[256]; ail_st st = ail2a_cname(cx, name, buf, sizeof buf); if (st != AIL_OK) return st;
     if ((st = ail2a_need_inst(cx, obj, "getattr")) != AIL_OK) return st;
     if (ail2a_find(cx, obj, buf, out)) return AIL_OK;
-    /* a name computed at run time: an exception's chain attributes exist even though no field holds them */
-    if (obj.tag == AIL_T_EXC) {
-        if (strcmp(buf, "__cause__") == 0 || strcmp(buf, "__context__") == 0) { *out = ail_box_none(); return AIL_OK; }
-        if (strcmp(buf, "__suppress_context__") == 0) { *out = ail_box_bool(0); return AIL_OK; }
-    }
+    /* a name computed at run time: refuse it by name on an exception, like the direct attribute form */
+    if (obj.tag == AIL_T_EXC && ail2a_chain_name(buf)) return ail2a_chain_refused(cx, buf);
     if (has_dflt) { *out = dflt; return AIL_OK; }
     char m[320]; snprintf(m, sizeof m, "'%s' object has no attribute '%s'", ail_type_name(obj.tag), buf);
     if (obj.tag == AIL_T_INST && ((ail_instobj *)obj.o)->cls.tag == AIL_T_CLASS) {
@@ -1375,8 +1380,7 @@ static inline ail_st ail2a_hasattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_o
     if ((st = ail2a_need_inst(cx, obj, "hasattr")) != AIL_OK) return st;
     ail_obj v;
     int found = ail2a_find(cx, obj, buf, &v);
-    if (!found && obj.tag == AIL_T_EXC && (strcmp(buf, "__cause__") == 0 || strcmp(buf, "__context__") == 0 ||
-                                           strcmp(buf, "__suppress_context__") == 0 || strcmp(buf, "__traceback__") == 0)) found = 1;
+    if (!found && obj.tag == AIL_T_EXC && ail2a_chain_name(buf)) return ail2a_chain_refused(cx, buf);
     *out = ail_box_bool(found);
     return AIL_OK;
 }

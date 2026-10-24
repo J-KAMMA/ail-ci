@@ -1,11 +1,12 @@
-"""Pre-179: a getattr-style read of an exception's chain attributes names the refusal.
+"""Pre-179: getattr-style reads of an exception's chain attributes name the refusal.
 
 The direct attribute forms (`e.__context__`, ...) were already refused by name because only one
 exception is ever live.  The same read through `getattr`/`hasattr` still built and then raised
 `AttributeError` (or returned the default / False) where CPython returns None, False or the
-traceback.  Literal chain names are now refused by name on both builds, and a name computed at run
-time reads CPython's values (context/cause None, suppress_context False, and hasattr True for all
-four).  Ordinary getattr/hasattr/setattr of a program's own fields is unchanged.
+traceback.  Literal chain names are now refused by name at compile time on both builds, and a chain
+name computed at run time is refused by name when it reaches an exception, so no fabricated value
+is returned.  Ordinary getattr/hasattr/setattr of a program's own fields is unchanged (including a
+computed write of a chain-named field, which the following read sees as usual).
 """
 import os
 import subprocess
@@ -31,31 +32,47 @@ DYNAMIC = r'''class Holder:
     pass
 
 
-def show(e, names) -> None:
-    for name in names:
-        print("get", name, repr(getattr(e, name)))
-        print("getd", name, repr(getattr(e, name, "missing")))
-        print("has", name, hasattr(e, name))
+def via(kind, e, name) -> None:
+    try:
+        if kind == "get":
+            print("value", name, repr(getattr(e, name)))
+        elif kind == "default":
+            print("value", name, repr(getattr(e, name, "missing")))
+        else:
+            print("value", name, hasattr(e, name))
+    except AttributeError as x:
+        print("refused", kind, name, "exception chaining" in str(x))
 
 
 def f() -> None:
     try:
         int("x")
     except ValueError as e:
-        show(e, ["__context__", "__cause__", "__suppress_context__"])
+        names = ["__con" + "text__", "__ca" + "use__", "__suppress_" + "context__", "__trace" + "back__"]
+        for name in names:
+            via("get", e, name)
+            via("default", e, name)
+            via("has", e, name)
         items = [e]
-        show(items[0], ["__context__", "__cause__"])
+        via("get", items[0], "__ca" + "use__")
         h = Holder()
         h.e = e
-        show(h.e, ["__suppress_context__", "__cause__"])
+        via("get", h.e, "__con" + "text__")
         d = {"e": e}
-        show(d["e"], ["__context__", "__suppress_context__"])
-        for name in ["__con" + "text__", "__ca" + "use__", "__suppress_" + "context__"]:
-            print("computed", name, repr(getattr(e, name)), hasattr(e, name))
-        for name in ["__context__", "__cause__", "__suppress_context__", "__traceback__"]:
-            print("tb-has", name, hasattr(e, name))
+        via("get", d["e"], "__suppress_" + "context__")
+        setattr(e, "__ca" + "use__", None)
+        print("after-set", getattr(e, "__ca" + "use__"), hasattr(e, "__ca" + "use__"))
 
 f()
+'''
+
+UNCAUGHT = r'''def f(name: str) -> None:
+    try:
+        int("x")
+    except ValueError as e:
+        print(getattr(e, name))
+
+f("__con" + "text__")
 '''
 
 ORDINARY = r'''class Box:
@@ -67,6 +84,10 @@ def read(obj, name) -> None:
     print(hasattr(obj, name))
 
 
+def write(obj, name, value) -> None:
+    setattr(obj, name, value)
+
+
 def f() -> None:
     b = Box()
     b.x = 1
@@ -74,9 +95,12 @@ def f() -> None:
     read(b, "x")
     read(b, "y")
     read(b, "z")
+    read(b, "__context__")
     print(getattr(b, "x"), getattr(b, "z", "d"))
     setattr(b, "z", 3)
     print(b.z, hasattr(b, "z"))
+    write(b, "w", 4)
+    print(b.w, getattr(b, "w"), hasattr(b, "w"))
 
 f()
 '''
@@ -138,8 +162,31 @@ class Pre179Tests(unittest.TestCase):
                     self.assertIn(attr, shown)
                     self.assertIn("exception chaining", shown)
 
-    def test_dynamic_chain_reads_match_cpython(self):
-        self.check_output("dynamic", DYNAMIC)
+    def test_dynamic_chain_reads_refused_by_name(self):
+        want = set()
+        for attr in ("__context__", "__cause__", "__suppress_context__", "__traceback__"):
+            for kind in ("get", "default", "has"):
+                want.add("refused %s %s True" % (kind, attr))
+        for general in (False, True):
+            built = self.build("dynamic", DYNAMIC, general)
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            got = subprocess.run([str(self.dir / ("exe_dynamic" + ("_g" if general else "_d")))],
+                                 cwd=self.dir, capture_output=True, text=True, timeout=120)
+            self.assertEqual(got.returncode, 0, got.stderr)
+            lines = got.stdout.splitlines()
+            self.assertEqual(set(line for line in lines if line.startswith("refused ")), want)
+            self.assertFalse([line for line in lines if line.startswith("value ")], lines)
+            self.assertEqual(lines.count("after-set None True"), 1, lines)
+
+    def test_uncaught_dynamic_chain_read_names_refusal(self):
+        for general in (False, True):
+            built = self.build("uncaught", UNCAUGHT, general)
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            got = subprocess.run([str(self.dir / ("exe_uncaught" + ("_g" if general else "_d")))],
+                                 cwd=self.dir, capture_output=True, text=True, timeout=120)
+            self.assertNotEqual(got.returncode, 0)
+            self.assertIn("reading __context__", got.stderr)
+            self.assertIn("exception chaining", got.stderr)
 
     def test_ordinary_getattr_is_unchanged(self):
         self.check_output("ordinary", ORDINARY)
