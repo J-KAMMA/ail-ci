@@ -134,6 +134,82 @@ def _number_constant(node):
     return None
 
 
+_I64_MIN = -(1 << 63)
+_I64_MAX = (1 << 63) - 1
+_CONST_BITS_LIMIT = 100000
+
+
+def _int_constant_with_overflow(node):
+    """The exact Python value of a constant integer expression and whether an AIL int64 would overflow."""
+    if isinstance(node, ast.Constant) and type(node.value) in (int, bool):
+        value = int(node.value)
+        return value, not (_I64_MIN <= value <= _I64_MAX)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        value, overflow = _int_constant_with_overflow(node.operand)
+        if value is None:
+            return None, overflow
+        value = -value if isinstance(node.op, ast.USub) else value
+        return value, overflow or not (_I64_MIN <= value <= _I64_MAX)
+    if not isinstance(node, ast.BinOp):
+        return None, False
+    left, left_overflow = _int_constant_with_overflow(node.left)
+    right, right_overflow = _int_constant_with_overflow(node.right)
+    overflow = left_overflow or right_overflow
+    if left is None or right is None:
+        return None, overflow
+    if isinstance(node.op, ast.Add):
+        value = left + right
+    elif isinstance(node.op, ast.Sub):
+        value = left - right
+    elif isinstance(node.op, ast.Mult):
+        value = left * right
+    elif isinstance(node.op, ast.Pow):
+        if right < 0:
+            return None, overflow
+        if right == 0 or left in (0, 1):
+            value = 1
+        elif left == -1:
+            value = -1 if right & 1 else 1
+        else:
+            if max(1, abs(left).bit_length()) * right > _CONST_BITS_LIMIT:
+                return None, True
+            value = left ** right
+    elif isinstance(node.op, ast.LShift):
+        if right < 0:
+            return None, overflow
+        if left == 0:
+            value = 0
+        else:
+            if max(1, abs(left).bit_length()) + right > _CONST_BITS_LIMIT:
+                return None, True
+            value = left << right
+    else:
+        return None, overflow
+    return value, overflow or not (_I64_MIN <= value <= _I64_MAX)
+
+
+def refuse_unrepresentable_delete_bounds(target):
+    """Refuse a `del` whose constant index or slice bound cannot be evaluated as an AIL int64."""
+    if isinstance(target.slice, ast.Slice):
+        bounds = (target.slice.lower, target.slice.upper, target.slice.step)
+        what = 'slice bound'
+    else:
+        bounds = (target.slice,)
+        what = 'index'
+    for bound in bounds:
+        if bound is None:
+            continue
+        value, overflow = _int_constant_with_overflow(bound)
+        if not overflow and (value is None or _I64_MIN <= value <= _I64_MAX):
+            continue
+        refusal = Unsupported(
+            'del %s: the constant %s %s cannot be evaluated within the 64-bit signed integer range '
+            'of an AIL int, so it cannot be used here (CPython\'s int is unbounded)' % (
+                ast.unparse(target), what, ast.unparse(bound)))
+        refusal.source_line = getattr(target, 'lineno', None)
+        raise refusal
+
+
 def refuse_complex_pow(node):
     """`(-4.0) ** 0.5`: a negative base to a fractional power is a complex number in Python, and this
     language has no complex type. Constant operands are refused here, at compile time; any other
