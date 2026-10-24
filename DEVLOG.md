@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - pre87: integer modulo by zero names CPython's message
+
+The general path and the default build's fallback reported
+`ZeroDivisionError: integer division or modulo by zero` for integer `% 0`.
+CPython reserves that text for `//` and `divmod`; `%` raises
+`integer modulo by zero`.  Both emitters now pass the shorter text from
+`ail_obj_mod` and `ail_op_mod`, while the floor-division helpers keep
+CPython's wording.  `test_ail_pre87.py` compares both builds with CPython for
+a plain helper, a typed helper, a lambda, a list item, an attribute, a dict
+value, negative and INT64_MIN dividends, bools, an IntEnum and an IntFlag; a
+second program keeps the neighbouring `//`, `divmod` and float zero messages
+unchanged.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
