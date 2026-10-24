@@ -1,5 +1,15 @@
 # DEVLOG
 
+## 2026-10-24 - pre131: negative r for itertools pool iterators
+
+The general path's `ail_it_permutations`, `ail_it_combinations` and
+`ail_it_combinations_wr` returned an empty iterator for `r < 0`; CPython raises
+`ValueError: r must be non-negative`.  All three now raise after the pool is materialized,
+so a non-iterable pool still raises its TypeError first, and `r=0`, `r > len(pool)` and
+positive r are unchanged.  The default build reaches the same helper when r is computed at
+run time.  Added `AIL_CURRENT/test_ail_pre131.py` (literal, argument, list-item, attribute
+and dict-value values, empty pools and positive controls, both builds).
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

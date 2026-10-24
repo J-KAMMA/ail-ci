@@ -13,7 +13,7 @@ Rows added by job-fuzz8-10220554 use the placeholder id form requested for this 
 
 | id | status | area | description |
 |---|---|---|---|
-| C?-job-fuzz8-10220554-1 | open | itertools | `permutations` / `combinations` / `combinations_with_replacement` with a negative `r` return `[]` on the general path; CPython raises `ValueError: r must be non-negative`. |
+| C?-job-fuzz8-10220554-1 | fixed | itertools | `permutations` / `combinations` / `combinations_with_replacement` with a negative `r` returned `[]` on the general path; CPython raises `ValueError: r must be non-negative`. The three general-path runtime iterators now raise after materializing the pool (so a non-iterable pool still raises its TypeError first). `test_ail_pre131.py`. |
 | C?-job-fuzz8-10220554-2 | open | enumerate | `enumerate(xs, start)` with `None`, a float, a str or a list is accepted on the general path (None becomes 0, the others are read as a pointer-sized value) instead of raising `TypeError: '<type>' object cannot be interpreted as an integer`. |
 | C?-job-fuzz8-10220554-3 | open | reversed | `reversed` of a dict, a dict view or a bytearray raises `TypeError: '<type>' object is not reversible` at run time; CPython 3.12 reverses all of them. |
 | C?-job-fuzz8-10220554-4 | open | groupby | `print`/`repr` of an unread `groupby` grouper shows `<object>`; CPython shows `<itertools._grouper object at 0x...>` (the address cannot match byte for byte anyway). |
