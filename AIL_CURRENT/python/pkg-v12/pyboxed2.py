@@ -1743,6 +1743,9 @@ class Ctx:
         self.var_kind = {}         # local name -> inferred kind, for dunder/method dispatch
         self.elem_kind = {}        # local name -> proven element kind of the bound iterable
         self.nested_funcs = {}     # name -> info, for a def nested directly in this function
+        self.nested_def_flags = {} # name -> C int set when that nested def statement runs
+        self.nested_def_may_rebind = set() # names that something else in this scope can bind too
+        self.def_flag_decls = []   # those flags, declared at the top of the C body
         self.global_decls = set()
         self.owner_class = None    # set for a method: the class it is defined on (for super())
         self.cell_slots = set()    # names whose frame slot holds a CELL (shared with a closure)
@@ -3193,6 +3196,7 @@ class Compiler(boxclosure.ClosureMixin):
                 preamble_lines.append('    f.slots[%d] = %s;' % (ctx.slot_of[p], cid(p)))
         self.block(node.body, ctx)
         preamble_lines += self.cell_preamble(ctx)
+        preamble_lines += ['    int %s = 0;' % flag for flag in ctx.def_flag_decls]
         n_slots = max(ctx.next_slot, 1)
         body = '\n'.join(preamble_lines) + ('\n' if preamble_lines else '')
         body += ctx.body_text()
@@ -3273,6 +3277,19 @@ class Compiler(boxclosure.ClosureMixin):
                               'parameters' % node.name)
         if node.decorator_list:
             raise Unsupported('a decorator on nested def %s' % node.name)
+        # CPython binds the function when the def statement runs; a call textually before it (or
+        # after a def statement that did not run) reads an unbound local. The direct call path
+        # resolves the function statically, so keep a C flag that the def statement sets and the
+        # call checks.
+        if node.name not in outer_ctx.nested_def_flags:
+            flag = outer_ctx.new_cvar('ndef')
+            outer_ctx.nested_def_flags[node.name] = flag
+            outer_ctx.def_flag_decls.append(flag)
+            # `_emit_function` already gave a slot to every name the body binds some other way
+            # (a parameter, an assignment, `except ... as`, a loop target), so a slot here means
+            # the name can hold that value when the call runs.
+            if node.name in outer_ctx.slot_of:
+                outer_ctx.nested_def_may_rebind.add(node.name)
         positional = [a.arg for a in node.args.args]
         vararg = node.args.vararg.arg if node.args.vararg else None
         kwonly = [a.arg for a in node.args.kwonlyargs]
@@ -3330,6 +3347,7 @@ class Compiler(boxclosure.ClosureMixin):
             preamble_lines.append('    f.slots[%d] = %s;' % (nctx.slot_of[nm], cid('cap_' + nm)))
         self.block(node.body, nctx)
         preamble_lines += self.cell_preamble(nctx)
+        preamble_lines += ['    int %s = 0;' % flag for flag in nctx.def_flag_decls]
         n_slots = max(nctx.next_slot, 1)
         sig = (''.join(', ail_obj *%s' % cid('ptr_' + nm) for nm in by_ptr) +
               ''.join(', ail_obj %s' % cid('cap_' + nm) for nm in by_val) +
@@ -3350,6 +3368,42 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _call_nested_function(self, name, args, kwargs, ctx):
         info = ctx.nested_funcs[name]
+        flag = ctx.nested_def_flags.get(name)
+        if flag and name in ctx.nested_def_may_rebind:
+            if kwargs:
+                raise Unsupported('a call of %s() with keyword arguments, where another binding '
+                                  'of the name may be live (the general path cannot call an '
+                                  'arbitrary value with keywords)' % name)
+            # The def sets the flag when it runs, but another binding of the same name (a
+            # parameter, except ... as, an assignment) makes the name hold that value instead.
+            # When the def has not run, read the slot: unbound raises UnboundLocalError, any
+            # other value is called (see _mark_rebound).
+            result = ctx.tmp()
+            ctx.emit('if (%s) {' % flag)
+            ctx.indent += 1
+            direct = self._call_nested_direct(name, info, args, kwargs, ctx)
+            ctx.emit('%s = %s;' % (result, direct))
+            ctx.indent -= 1
+            ctx.emit('} else {')
+            ctx.indent += 1
+            fv = ctx.tmp()
+            ctx.uses_st = True
+            ctx.emit('st = ail_op_load(cx, &%s, %s, %s);' %
+                     (fv, self.name_ref(name, ctx), c_str_literal(name)))
+            ctx.emit('if (st != AIL_OK) goto %s;' % ctx.cur_err_target())
+            fallback = self.call_value(fv, args, kwargs, ctx)
+            ctx.emit('%s = %s;' % (result, fallback))
+            ctx.indent -= 1
+            ctx.emit('}')
+            return result
+        if flag:
+            ctx.uses_st = True
+            ctx.emit('if (!%s) { st = ail_raise_c(cx, AIL_B_UNBOUNDLOCALERROR, %s); goto %s; }' %
+                     (flag, c_str_literal("cannot access local variable '%s' where it is not "
+                                          "associated with a value" % name), ctx.cur_err_target()))
+        return self._call_nested_direct(name, info, args, kwargs, ctx)
+
+    def _call_nested_direct(self, name, info, args, kwargs, ctx):
         if any(isinstance(a, ast.Starred) for a in args):
             raise Unsupported('a starred argument in a call of the nested function %s()' % name)
         positional = info.get('positional', info['params'])
@@ -4707,6 +4761,7 @@ class Compiler(boxclosure.ClosureMixin):
         v = self.expr(node.value, ctx)
         ctx.declare_local(node.target.id)
         ctx.emit('%s = %s;' % (self.name_ref(node.target.id, ctx), v))
+        self._mark_rebound(node.target.id, ctx)
         self.set_kind(node.target.id, self.infer_kind(node.value, ctx), ctx)
         return self.name_ref(node.target.id, ctx)
 
@@ -9570,10 +9625,17 @@ class Compiler(boxclosure.ClosureMixin):
         return t
 
     # ------------------------------------------------------------------------------- statements
+    def _mark_rebound(self, name, ctx):
+        """A name bound by something other than its own nested def is no longer that function."""
+        flag = ctx.nested_def_flags.get(name)
+        if flag:
+            ctx.emit('%s = 0;' % flag)
+
     def _assign_target(self, target, value_c, ctx, value_kind=None):
         if isinstance(target, ast.Name):
             self._declare_if_local(target.id, ctx)
             ctx.emit('%s = %s;' % (self.name_ref(target.id, ctx), value_c))
+            self._mark_rebound(target.id, ctx)
             return
         if isinstance(target, ast.Attribute):
             if target.attr in ('__cause__', '__context__', '__suppress_context__', '__traceback__'):
@@ -9848,6 +9910,7 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('st = %s(cx, &%s, %s, %s);' % (fn, new, cur, rhs))
             ctx.check()
             ctx.emit('%s = %s;' % (self.name_ref(t.id, ctx), new))
+            self._mark_rebound(t.id, ctx)
             return
         if isinstance(t, ast.Attribute):
             obj = self.expr(t.value, ctx)
@@ -9980,6 +10043,7 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _unbind_name(self, name, ctx):
         ctx.emit('%s = ail_box_unbound();' % self.name_ref(name, ctx))
+        self._mark_rebound(name, ctx)
 
     def _unbind_leaving(self, ctx, loops=None):
         """The `except ... as k` names a jump out of the handler body ends: all of them for a return (`loops` None),
@@ -10051,6 +10115,7 @@ class Compiler(boxclosure.ClosureMixin):
                              % (ctx.tmp(), self.name_ref(target.id, ctx), c_str_literal(target.id)))
                     ctx.check()
                 ctx.emit('%s = ail_box_unbound();' % self.name_ref(target.id, ctx))
+                self._mark_rebound(target.id, ctx)
             elif isinstance(target, ast.Subscript) and not isinstance(target.slice, ast.Slice):
                 c = self.expr(target.value, ctx)
                 key = self.expr(target.slice, ctx)
@@ -10225,6 +10290,10 @@ class Compiler(boxclosure.ClosureMixin):
             value = self.closure_value(node, ctx, node.name)
             ctx.emit('%s = %s;' % (self.name_ref(node.name, ctx), value))
             return
+        flag = ctx.nested_def_flags.get(node.name)
+        if flag:
+            ctx.emit('%s = 1;' % flag)
+            return
         pass  # a nested def was already registered+compiled by _register_nested (module
               # docstring's closure design); a TOP-LEVEL FunctionDef never reaches stmt() at
               # all (compile()'s own module-body pass skips FunctionDef/ClassDef outright).
@@ -10318,6 +10387,7 @@ class Compiler(boxclosure.ClosureMixin):
                 if not self._is_global_name(h.name, ctx):      # a module-level `as k` is a module global, as in CPython
                     ctx.declare_local(h.name)
                 ctx.emit('%s = ail_exc_as_value(cx);' % self.name_ref(h.name, ctx))
+                self._mark_rebound(h.name, ctx)
                 if h.type is not None and not isinstance(h.type, ast.Tuple):
                     self.set_kind(h.name, 'instance:' + h.type.id if h.type.id in self.classes
                                  else None, ctx)
