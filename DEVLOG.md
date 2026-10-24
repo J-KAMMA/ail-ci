@@ -17,7 +17,8 @@ prelude gained the same two method names.  `pyfunc.py` now refuses a method call
 not available while class shapes are scanned by name instead of raising `KeyError`, including the
 field-initializer call in `g13_028.py`.  Added `test_ail_cov8.py`; probes cover zero, negative,
 large and `2**31` seeds, empty/negative/zero-step ranges, `getrandbits` widths, attributes, list
-items, dict values, aliases and both builds.
+items, dict values, aliases and both builds.  `test_ail_stdlib5.py` now asks for the general path
+(AIL_UNIFIED_FORCE=1) in its boxed-Random C check, which had relied on the old fallback.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 

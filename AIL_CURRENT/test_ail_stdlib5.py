@@ -1216,8 +1216,11 @@ class BoxedRandom(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory, name + ".ail")
             source.write_text(text, encoding="utf-8")
+            # The class Random now builds on the typed path too; this test is about the general
+            # (boxed) path's C primitives, so ask for it explicitly.
             built = subprocess.run([sys.executable, "-B", str(ROOT / "ail_chatgpt.py"), "compile", source.name, "--syntax", "python",
-                                    "-o", name, "--debug-dir", "dbg"], cwd=directory, capture_output=True, text=True, timeout=1800)
+                                    "-o", name, "--debug-dir", "dbg"], cwd=directory, capture_output=True, text=True, timeout=1800,
+                                   env=dict(os.environ, AIL_UNIFIED_FORCE="1"))
             self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
             return Path(directory, "dbg", "program.c").read_text(encoding="utf-8")
 
