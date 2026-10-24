@@ -3,11 +3,13 @@
 CPython evaluates the annotation of `x: expr` at module and class level even though the
 statement binds no value, so a call in `expr` is observable. The source pass used to drop
 that expression, so `x: note('module')` printed nothing. A module-level annotation whose
-whole expression is a call is now run as an expression statement. A class body is not run
-as code by this compiler, and a call nested in a larger annotation cannot be split out
-without changing short-circuit evaluation, so both are refused by name instead of silently
-losing the side effect. Function-local annotations are not evaluated, as in CPython, and
-`from __future__ import annotations` turns evaluation off everywhere.
+whole expression is a call is now run as an expression statement, after the subexpressions
+CPython evaluates for an attribute target's value or a subscript target's value and
+index/slice. A class body is not run as code by this compiler, and a call nested in a larger
+annotation cannot be split out without changing short-circuit evaluation, so both are refused
+by name instead of silently losing the side effect. Function-local annotations are not
+evaluated, as in CPython, and `from __future__ import annotations` turns evaluation off
+everywhere.
 
 Both builds (default and AIL_UNIFIED_FORCE=1) are compared with CPython.
 """
@@ -65,6 +67,69 @@ class Holder:
 print('after')
 '''
 
+TARGET_ORDER = r'''state = {'x': 0}
+
+class Holder:
+    pass
+
+def note(tag):
+    print('note', tag)
+
+def touch(value):
+    state['x'] = value
+    return 0
+
+def make(value):
+    state['x'] = value
+    return Holder()
+
+items = [10]
+items[touch(5)]: note(state['x'])
+make(7).value: note(state['x'])
+
+def lower():
+    print('lower')
+    return 0
+
+def upper():
+    print('upper')
+    return 1
+
+items[lower():upper()]: note('slice')
+print('after')
+'''
+
+WALRUS_TARGET = r'''class Holder:
+    pass
+
+def note(value):
+    print('note', value)
+
+(h := Holder()).value: note(h is not None)
+print('after')
+'''
+
+OBJECT_TARGET = r'''class Box:
+    def __getitem__(self, index):
+        print('getitem', index)
+        return 7
+
+def obj():
+    print('obj')
+    return Box()
+
+def idx():
+    print('idx')
+    return 3
+
+def note(tag):
+    print('note', tag)
+
+obj()[idx()]: note('subscript')
+obj().value: note('attribute')
+print('after')
+'''
+
 
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
@@ -114,6 +179,15 @@ class Pre64BareAnnotationTests(unittest.TestCase):
 
     def test_module_level_annotation_is_evaluated(self):
         self.check('module_level', MODULE_LEVEL)
+
+    def test_target_subexpressions_are_evaluated(self):
+        self.check('target_order', TARGET_ORDER)
+
+    def test_walrus_target_is_evaluated(self):
+        self.check('walrus_target', WALRUS_TARGET)
+
+    def test_object_and_index_targets_are_evaluated(self):
+        self.check('object_target', OBJECT_TARGET)
 
     def test_class_body_call_is_refused(self):
         self.check_refused('class_call', CLASS_CALL)

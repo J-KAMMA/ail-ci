@@ -2609,9 +2609,11 @@ class _Surface:
             if calls:
                 if owner is None and isinstance(node.annotation, ast.Call):
                     # CPython evaluates the annotation expression at module level, even though it
-                    # stores no value; a call there can have an observable side effect. A class
-                    # body is not run as code here, so that case is refused below.
-                    self.replace(node, ast.unparse(node.annotation), True)
+                    # stores no value; a call there can have an observable side effect. It evaluates
+                    # an attribute target's value expression, or a subscript target's value and
+                    # index/slice, just before the annotation. A class body is not run as code
+                    # here, so that case is refused below.
+                    self.replace(node, self.bare_annotation_text(node), True)
                     return
                 raise SyntaxErrorAIL(
                     'a bare annotation whose annotation expression calls a function is not built at '
@@ -2628,6 +2630,33 @@ class _Surface:
             return
         self.annotation(node.annotation)
         self.expression(node.value)
+
+    def bare_annotation_text(self, node):
+        """The module-level bare annotation `target: call()` as one expression statement that keeps
+        CPython's evaluation order: an attribute target's value expression, or a subscript target's
+        value and index/slice parts, are evaluated before the annotation. A simple name target has
+        nothing to evaluate."""
+        annotation = ast.unparse(node.annotation)
+        target = node.target
+        parts = []
+        if isinstance(target, ast.Attribute):
+            parts.append(ast.unparse(target.value))
+        elif isinstance(target, ast.Subscript):
+            parts.append(ast.unparse(target.value))
+            if isinstance(target.slice, ast.Slice):
+                parts.extend(ast.unparse(part) for part in
+                             (target.slice.lower, target.slice.upper, target.slice.step)
+                             if part is not None)
+            else:
+                parts.append(ast.unparse(target.slice))
+        elif not isinstance(target, ast.Name):
+            raise SyntaxErrorAIL(
+                'a bare annotation whose annotation expression calls a function is not built for this '
+                'kind of target, where CPython evaluates it at module level.\n'
+                '  write instead: put the call in its own statement before the annotation',
+                lineno=node.lineno, offset=node.col_offset + 1)
+        parts.append(annotation)
+        return parts[0] if len(parts) == 1 else '(' + ', '.join(parts) + ')'
 
     def starts_processes(self):
         if not hasattr(self, '_starts_processes'):

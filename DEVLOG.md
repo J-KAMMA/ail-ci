@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - pre64 review fix: evaluate a bare annotation's target subexpressions
+
+A module-level bare annotation whose whole annotation expression is a call now keeps
+CPython's evaluation order for the target: an attribute target's value expression, and a
+subscript target's value plus index/slice parts, run before the annotation call. Before this
+fix `items[touch()]: note(state['x'])` and `make().v: note(state['x'])` read the stale
+state, `obj().value: note()` and `obj()[idx()]: note()` skipped `obj`/`idx`, and
+`(h := H()).v: note(h)` failed to build ("name 'h' is not defined"). Regression cases for
+target order, slices, object/index targets and a walrus target were added to
+`AIL_CURRENT/test_ail_pre64.py`; probes are `/tmp/probes/pre64_target_*.py`.
+
 ## 2026-10-24 - pre64: a module-level bare annotation evaluates its expression
 
 CPython evaluates the annotation of a bare `x: expr` at module and class level even though
