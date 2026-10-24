@@ -24,7 +24,7 @@ one-parameter function with a default is called with none).
 """
 import ast
 
-TAG = 0x41494C          # "AIL": cells[0] = (TAG << 32) | (lo << 16) | hi
+TAG = 0x41494C          # "AIL": cells[0] = (TAG << 32) | (bound << 55) | (lo << 16) | hi
 
 
 def _c_name(qual, params):
@@ -372,14 +372,17 @@ class ClosureMixin:
         if a.vararg or a.kwarg or a.kwonlyargs or a.posonlyargs:
             raise Unsupported('a method value with *args, **kwargs or keyword-only parameters')
         bind_class = bool(info.get('is_classmethod'))
-        params = [x.arg for x in a.args]
+        all_params = [x.arg for x in a.args]
         if bind_class:
-            if not params:
+            if not all_params:
                 raise Unsupported('@classmethod %s.%s takes no cls parameter' % (owner, info['node'].name))
-            params = params[1:]
+            params = all_params[1:]
+        else:
+            params = all_params
         defaults = info.get('defaults', {})
         nd = sum(1 for p in params if p in defaults)
-        lo, hi = len(params) - nd, len(params)
+        bound = 1 if bind_class else 0
+        lo, hi = bound + len(params) - nd, bound + len(params)
         default_cs = []
         for p in params:
             if p not in defaults:
@@ -414,14 +417,24 @@ class ClosureMixin:
             self.top_defs.append('static ail_st %s(ail_ctx *cx, ail_obj *out, ail_obj arg, void *closure) {\n'
                                  '    ail_obj *clo = (ail_obj *)closure; (void)clo; %sreturn %s;\n}\n\n'
                                  % (adapter, pre, call))
-        cells = ['ail_box_int((int64_t)((0x%XLL << 32) | (%dLL << 16) | %dLL))' % (TAG, lo, hi)]
+        # CPython's arity message names the class that defines the function, not the class the
+        # value was read through (`D.cm` of an inherited classmethod reports `C.cm`).
+        name_owner = owner
+        k = owner
+        while k in self.classes:
+            if self.classes[k]['methods'].get(info['node'].name) is info:
+                name_owner = k
+                break
+            k = self.classes[k]['base']
+        cells = ['ail_box_int((int64_t)((0x%XLL << 32) | (%dLL << 55) | (%dLL << 16) | %dLL))'
+                 % (TAG, bound, lo, hi)]
         cells += default_cs
         t = ctx.tmp()
         ctx.emit('{ ail_funcobj *_fo = (ail_funcobj *)ail_gc_alloc(cx, AIL_K_FUNC, sizeof(ail_funcobj)); '
                  '_fo->fn = %s; _fo->n_cells = 0; _fo->name = "%s"; '
                  '_fo->cells = (ail_obj *)ail_xmalloc(%d * sizeof(ail_obj)); %s _fo->n_cells = %d; '
                  '%s.tag = AIL_T_FUNC; %s.o = (ail_gcobj *)_fo; }'
-                 % (adapter, _c_name(owner + '.' + info['node'].name, params), len(cells),
+                 % (adapter, _c_name(name_owner + '.' + info['node'].name, all_params), len(cells),
                     ' '.join('_fo->cells[%d] = %s;' % (i, c) for i, c in enumerate(cells)),
                     len(cells), t, t))
         return t
@@ -493,37 +506,39 @@ class ClosureMixin:
             '        return ail_raise_c(cx, AIL_B_TYPEERROR, msg);\n'
             '    }\n'
             '    ail_funcobj *f = (ail_funcobj *)fv.o;\n'
-            '    int64_t lo = 1, hi = 1;\n'
-            '    if (f->n_cells > 0 && f->cells[0].tag == AIL_T_INT && (f->cells[0].i >> 32) == 0x%XLL) {\n'
+            '    int64_t lo = 1, hi = 1, bound = 0;\n'
+            '    if (f->n_cells > 0 && f->cells[0].tag == AIL_T_INT && ((f->cells[0].i >> 32) & 0x7fffffLL) == 0x%XLL) {\n'
             '        lo = (f->cells[0].i >> 16) & 0xffff; hi = f->cells[0].i & 0xffff;\n'
+            '        bound = (f->cells[0].i >> 55) & 0x7;\n'
             '    }\n'
+            '    int64_t given = n + bound;\n'
             '    int nl = 0;\n'
             '    while (f->name[nl] && f->name[nl] != 1) nl++;\n'
-            '    if (n > hi) {\n'
+            '    if (given > hi) {\n'
             '        if (lo < hi)\n'
             '            snprintf(msg, sizeof msg, "%%.*s() takes from %%lld to %%lld positional arguments but %%lld %%s given",\n'
-            '                     nl, f->name, (long long)lo, (long long)hi, (long long)n, n == 1 ? "was" : "were");\n'
+            '                     nl, f->name, (long long)lo, (long long)hi, (long long)given, given == 1 ? "was" : "were");\n'
             '        else\n'
             '            snprintf(msg, sizeof msg, "%%.*s() takes %%lld positional argument%%s but %%lld %%s given", nl, f->name,\n'
-            '                     (long long)hi, hi == 1 ? "" : "s", (long long)n, n == 1 ? "was" : "were");\n'
+            '                     (long long)hi, hi == 1 ? "" : "s", (long long)given, given == 1 ? "was" : "were");\n'
             '        return ail_raise_c(cx, AIL_B_TYPEERROR, msg);\n'
             '    }\n'
-            '    if (n < lo) {\n'
+            '    if (given < lo) {\n'
             '        /* CPython names the missing parameters: \'a\', \'b\' and \'c\' */\n'
             '        const char *p = f->name + nl; int64_t k = 0;\n'
             '        int len = snprintf(msg, sizeof msg, "%%.*s() missing %%lld required positional argument%%s: ",\n'
-            '                           nl, f->name, (long long)(lo - n), lo - n == 1 ? "" : "s");\n'
+            '                           nl, f->name, (long long)(lo - given), lo - given == 1 ? "" : "s");\n'
             '        while (*p == 1) {\n'
             '            const char *q = ++p; while (*p && *p != 1) p++;\n'
-            '            if (k >= n && k < lo && len < (int)sizeof msg) {\n'
+            '            if (k >= given && k < lo && len < (int)sizeof msg) {\n'
             '                int64_t left = lo - k - 1;\n'
             '                len += snprintf(msg + len, sizeof msg - len, "\'%%.*s\'%%s", (int)(p - q), q,\n'
-            '                                left == 0 ? "" : left == 1 ? (lo - n > 2 ? ", and " : " and ") : ", ");\n'
+            '                                left == 0 ? "" : left == 1 ? (lo - given > 2 ? ", and " : " and ") : ", ");\n'
             '            }\n'
             '            k++;\n'
             '        }\n'
             '        return ail_raise_c(cx, AIL_B_TYPEERROR, msg);\n'
             '    }\n'
-            '    if (hi == 1) return f->fn(cx, out, n == 1 ? args[0] : ail_box_unbound(), f->cells);\n'
+            '    if (hi - bound == 1) return f->fn(cx, out, n == 1 ? args[0] : ail_box_unbound(), f->cells);\n'
             '    return f->fn(cx, out, ail_tuple_new(cx, args, n), f->cells);\n'
             '}\n' % TAG)

@@ -2182,15 +2182,21 @@ class Compiler(boxclosure.ClosureMixin):
                 self._register_class(n)
 
         self.module_class_aliases = {}
+        self.module_class_alias_early = set()
         _stores = {}
         for _n in ast.walk(tree):
             if isinstance(_n, ast.Name) and isinstance(_n.ctx, ast.Store):
                 _stores[_n.id] = _stores.get(_n.id, 0) + 1
+        _class_at = {n.name: i for i, n in enumerate(tree.body) if isinstance(n, ast.ClassDef)}
+        _assign_at = {id(n): i for i, n in enumerate(tree.body) if isinstance(n, ast.Assign)}
         for _n in tree.body:
             if (isinstance(_n, ast.Assign) and len(_n.targets) == 1
                     and isinstance(_n.targets[0], ast.Name) and isinstance(_n.value, ast.Name)
                     and _n.value.id in self.classes and _stores.get(_n.targets[0].id) == 1):
                 self.module_class_aliases[_n.targets[0].id] = _n.value.id
+                _ci = _class_at.get(_n.value.id)
+                if _ci is not None and _assign_at.get(id(_n), _ci) < _ci:
+                    self.module_class_alias_early.add(id(_n))
         self.user_method_names = frozenset(m for c in self.classes.values() for m in c['methods'])
         # classes the program uses as values (`make = Fenwick; make(data)`): a call through a value may construct one
         called = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
@@ -3082,6 +3088,21 @@ class Compiler(boxclosure.ClosureMixin):
             k = info['base']
         return None
 
+    def _module_class_alias(self, node, ctx):
+        return (isinstance(node, ast.Name) and node.id in getattr(self, 'module_class_aliases', {})
+                and self._is_global_name(node.id, ctx))
+
+    def _check_module_class_alias(self, node, ctx):
+        """A module-level alias is resolved statically, so check that its one assignment has
+        run: `g = K.f` before `K = C` (or after `del K`) is a NameError, as in CPython."""
+        if not self._module_class_alias(node, ctx):
+            return
+        slot = self.name_ref(node.id, ctx)
+        ctx.emit('if ((%s).tag == AIL_T_UNBOUND) { st = ail_raise_c(cx, AIL_B_NAMEERROR, '
+                 '"name \'%s\' is not defined"); goto %s; }'
+                 % (slot, node.id, ctx.cur_err_target()))
+        ctx.uses_st = True
+
     def _class_value_owner(self, node, ctx):
         """The class a Name expression denotes as a value, if it is known statically."""
         if not isinstance(node, ast.Name):
@@ -3091,8 +3112,7 @@ class Compiler(boxclosure.ClosureMixin):
         vk = self.get_kind(node.id, ctx)
         if vk and vk.startswith('class:') and vk.split(':', 1)[1] in self.classes:
             return vk.split(':', 1)[1]
-        if (node.id in getattr(self, 'module_class_aliases', {})
-                and self._is_global_name(node.id, ctx)):
+        if self._module_class_alias(node, ctx):
             return self.module_class_aliases[node.id]
         return None
 
@@ -5090,6 +5110,7 @@ class Compiler(boxclosure.ClosureMixin):
         if isinstance(node.value, ast.Name):
             owner = self._class_value_owner(node.value, ctx)
             if owner is not None:
+                self._check_module_class_alias(node.value, ctx)
                 # `C.K` where K is a constant class attribute of C or of a base of C: the class name as a
                 # value does not reach its attributes (`AttributeError: 'instance' object has no attribute`),
                 # so read the literal the lookup through the bases finds, as CPython does.  A method read
@@ -8126,6 +8147,7 @@ class Compiler(boxclosure.ClosureMixin):
             return self._dict_fromkeys(args, kwargs, ctx)
         owner = self._class_value_owner(recv, ctx)
         if owner is not None:
+            self._check_module_class_alias(recv, ctx)
             # `C.f(...)` of a @staticmethod: the function itself, with the arguments as written; of a @classmethod: C first
             info = self._resolve_method(owner, f.attr)
             if info is not None and info.get('is_classmethod'):
@@ -9755,6 +9777,11 @@ class Compiler(boxclosure.ClosureMixin):
         raise Unsupported('an assignment target of type %s' % type(target).__name__)
 
     def stmt_Assign(self, node, ctx):
+        if id(node) in getattr(self, 'module_class_alias_early', ()):
+            ctx.emit('st = ail_raise_c(cx, AIL_B_NAMEERROR, "name \'%s\' is not defined"); goto %s;'
+                     % (node.value.id, ctx.cur_err_target()))
+            ctx.uses_st = True
+            return
         if isinstance(node.value, ast.List) and not node.value.elts and \
                 len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) and \
                 self._list_poolable(node.targets[0].id, ctx):

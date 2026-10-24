@@ -1,5 +1,23 @@
 # DEVLOG
 
+## 2026-10-24 - Method-value review fixes: alias order and classmethod arity (job-pre169-10250442)
+
+Two defects in the previous method-value change are fixed:
+
+* A module-level class alias is still resolved statically, but the read now checks that its
+  single assignment has actually run.  `g = K.f` before `K = C`, and after `del K`, raises
+  `NameError` like CPython (`p13`, `p18`); a module-level `K = C` that precedes the `class C`
+  statement raises `NameError` at that assignment, preserving earlier output (`p14`).
+* The `ail__callv` tag word now carries the number of bound receivers.  A classmethod value
+  reports the full signature including the bound `cls` (`C.cm() takes 2 positional arguments
+  but 3 were given`, `takes from 1 to 2 ... but 3`), and missing-parameter names skip the
+  bound `cls`.  Dispatch still uses the caller's own arity.  The message names the class that
+  DEFINES an inherited function (`D.cm` reports `C.cm`), as CPython does.
+
+Added `test_ail_pre169.py` cases for use-before-assignment, deletion, alias-before-class,
+module-scope binding flow, classmethod value arity and inherited method arity.  Probes match
+CPython on both builds; `test_ail_pre169` and `test_ail_safetynet` pass.
+
 ## 2026-10-24 - Method values read through a class (job-pre169-10250442)
 
 `d_methods` was the first remaining pre-existing difference: reading a method through its

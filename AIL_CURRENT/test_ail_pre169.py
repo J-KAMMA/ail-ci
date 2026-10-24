@@ -220,6 +220,251 @@ main()
 '''
 
 
+ALIAS_USE_BEFORE_ASSIGN = r'''class C:
+    tag = "C"
+
+    def __init__(self, n):
+        self.n = n
+
+    def f(self, x):
+        return self.n + x
+
+    @staticmethod
+    def s(x):
+        return x * 2
+
+    @classmethod
+    def cm(cls, x):
+        return 100 + x
+
+
+def call(fn, c, x):
+    return fn(c, x)
+
+
+def main():
+    for label, use in (
+            ("method", lambda: K.f(C(1), 2)),
+            ("attr", lambda: K.tag),
+            ("direct", lambda: K.f(C(1), 3)),
+            ("static", lambda: K.s(6)),
+            ("cm", lambda: K.cm(4)),
+            ("container", lambda: [K.f, K.s][0](C(1), 5)),
+            ("passed", lambda: call(K.f, C(1), 6))):
+        try:
+            print(label, use())
+        except NameError:
+            print(label, "NameError")
+
+    def inner():
+        try:
+            return K.f(C(1), 7)
+        except NameError:
+            return "NameError"
+    print("nested", inner())
+
+
+main()
+K = C
+'''
+
+ALIAS_DELETED = r'''class C:
+    tag = "C"
+
+    def __init__(self, n):
+        self.n = n
+
+    def f(self, x):
+        return self.n + x
+
+    @classmethod
+    def cm(cls, x):
+        return 50 + x
+
+
+K = C
+del K
+
+
+def main():
+    for label, use in (
+            ("method", lambda: K.f(C(1), 2)),
+            ("attr", lambda: K.tag),
+            ("direct", lambda: K.f(C(1), 3)),
+            ("cm", lambda: K.cm(4))):
+        try:
+            print(label, use())
+        except NameError:
+            print(label, "NameError")
+
+
+main()
+'''
+
+ALIAS_BEFORE_CLASS = r'''print("start")
+K = C
+print("unreachable")
+
+class C:
+    tag = "C"
+
+    def __init__(self, n):
+        self.n = n
+
+    def f(self, x):
+        return self.n + x
+
+
+def main():
+    g = K.f
+    print(g(K(1), 2), K.tag)
+
+
+main()
+'''
+
+CLASSMETHOD_VALUE_ARITY = r'''class C:
+    @classmethod
+    def only(cls):
+        return "only"
+
+    @classmethod
+    def one(cls, x):
+        return x + 1
+
+    @classmethod
+    def opt(cls, x=5):
+        return x + 2
+
+    @classmethod
+    def two(cls, x, y=10):
+        return x + y
+
+
+class D(C):
+    pass
+
+
+K = C
+M = D
+
+
+def run(label, call):
+    try:
+        print(label, call())
+    except TypeError as e:
+        print(label, "TypeError", e)
+
+
+def main():
+    only = C.only
+    one = C.one
+    opt = C.opt
+    two = C.two
+    run("only0", lambda: only())
+    run("only1", lambda: only(1))
+    run("one0", lambda: one())
+    run("one1", lambda: one(2))
+    run("one2", lambda: one(2, 3))
+    run("opt0", lambda: opt())
+    run("opt1", lambda: opt(4))
+    run("opt2", lambda: opt(4, 5))
+    run("two0", lambda: two())
+    run("two1", lambda: two(6))
+    run("two2", lambda: two(6, 7))
+    run("two3", lambda: two(6, 7, 8))
+    alias = K.one
+    run("alias", lambda: alias(9))
+    run("alias_bad", lambda: alias(9, 10))
+    run("sub", lambda: M.two(11))
+
+
+main()
+'''
+
+
+INHERITED_METHOD_ARITY = r'''class C:
+    def f(self, x):
+        return x
+
+    @staticmethod
+    def s(x):
+        return x
+
+    @classmethod
+    def cm(cls, x):
+        return x
+
+
+class D(C):
+    pass
+
+
+K = D
+
+
+def run(label, call):
+    try:
+        print(label, call())
+    except TypeError as e:
+        print(label, "TypeError", e)
+
+
+def main():
+    f = D.f
+    s = K.s
+    cm = K.cm
+    run("f0", lambda: f())
+    run("f1", lambda: f(1))
+    run("f2", lambda: f(1, 2))
+    run("f3", lambda: f(1, 2, 3))
+    run("s0", lambda: s())
+    run("s2", lambda: s(1, 2))
+    run("cm0", lambda: cm())
+    run("cm2", lambda: cm(1, 2))
+
+
+main()
+'''
+
+
+ALIAS_MODULE_FLOW = r'''class C:
+    tag = "C"
+
+    def __init__(self, n):
+        self.n = n
+
+    def f(self, x):
+        return self.n + x
+
+
+try:
+    g = K.f
+    print("got", g(C(1), 2))
+except NameError:
+    print("NameError method")
+
+try:
+    print(K.tag)
+except NameError:
+    print("NameError attr")
+
+K = C
+
+try:
+    print("after", K.f(C(1), 3), K.tag)
+except NameError:
+    print("unexpected NameError")
+
+del K
+
+try:
+    print(K.f(C(1), 4))
+except NameError:
+    print("NameError after del")
+'''
+
+
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -274,6 +519,24 @@ class Pre169Tests(unittest.TestCase):
 
     def test_class_name_shadowing_is_not_a_class_value(self):
         self.check('shadowed_class_name', SHADOWED_CLASS_NAME)
+
+    def test_module_alias_use_before_assignment(self):
+        self.check('alias_use_before', ALIAS_USE_BEFORE_ASSIGN)
+
+    def test_module_alias_after_del(self):
+        self.check('alias_deleted', ALIAS_DELETED)
+
+    def test_module_alias_before_class_definition(self):
+        self.check('alias_before_class', ALIAS_BEFORE_CLASS, rc=1)
+
+    def test_classmethod_value_arity_errors(self):
+        self.check('classmethod_value_arity', CLASSMETHOD_VALUE_ARITY)
+
+    def test_inherited_method_value_arity_names_the_defining_class(self):
+        self.check('inherited_method_arity', INHERITED_METHOD_ARITY)
+
+    def test_module_alias_binding_at_module_scope(self):
+        self.check('alias_module_flow', ALIAS_MODULE_FLOW)
 
 
 if __name__ == '__main__':
