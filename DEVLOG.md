@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - pre141: nested-def defaults evaluated once at the def
+
+The pre117 reviewer recorded that a nested `def` whose default was not a literal constant (a name,
+an expression, an attribute, a list item, a dict value, a call) was refused by both builds while
+CPython accepts it. `_register_nested` now evaluates every non-scalar default into a hidden local
+at the `def` statement, and `_call_nested_function` reads that local at each call, so the default
+keeps the value it had when the `def` ran. Mutable literal defaults (list/dict/set, or a tuple
+holding one) use the same path, so `acc=[]` is now shared between calls as CPython shares it
+instead of being rebuilt per call. Literal scalar/tuple defaults still fill in at the call site;
+`**kwargs` and positional-only parameters remain refused by name. Added
+`AIL_CURRENT/test_ail_pre141.py`. The nested-class refusal recorded by the same reviewer is a
+different construct and is unchanged.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

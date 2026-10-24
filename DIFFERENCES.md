@@ -4,6 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre141-10250111-1 | nested def defaults | Both builds refused a nested `def` whose default was not a literal constant (a name, an expression, an attribute, a list item, a dict value, a call), while CPython evaluates it once when the `def` runs. Non-scalar defaults now evaluate into a hidden local at the `def` statement (mutable literal defaults too, so `acc=[]` is shared between calls); literal scalar/tuple defaults are unchanged. | fixed |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |
