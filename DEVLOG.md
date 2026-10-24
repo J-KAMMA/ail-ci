@@ -1,5 +1,30 @@
 # DEVLOG
 
+## 2026-10-24 - pre139 review fixes: width, expandtabs, %c and O(1) len/index
+
+Four defects in the previous pre139 change, all on the general (16-bit v2) path:
+
+* `len()` and indexing scanned every unit, so `len(s)` and `s[i]` became O(n) for all
+  strings (`"abcdefghij" * 20000`, 20 000 x `len`: 5.65 s; 30 000 x `s[i]`: 1.26 s).
+  A STRBACK now records in its gc header's `aux` byte whether the backing holds a high
+  surrogate; backings without one answer `len()`/index in O(1). Writers of pairs mark
+  it (`chr`, the UTF-8 decoder, `ail_str_to_view`, and every `ail_str_buf_done`, plus
+  the flattened concat that fills a backing directly), so `alloc(0)`, copy and builder
+  paths all carry it. Both probes are back to 0.00 s with unchanged output.
+* Format width and precision counted UTF-16 units, so `f"{e:>3}"` printed one space and
+  `f"{e:^4}"` was short by one. `ail_obj_format` (f-strings, `.format`) and
+  `ail2f_format`/`ail2f_pad_str` (`format()`, `%s`, `%c`) now count code points.
+* `expandtabs` advanced one column per unit; a pair now advances one column and is
+  copied whole.
+* `"%c" % chr(0x1F600)` raised `TypeError`; a one-code-point str is accepted, and the
+  same int form (`"%c" % 0x1F600`) now works too, as do widths (`"%3c"`).
+
+Probes with `bash ~/tools/cmp.sh` on both builds: p_fmtwidth, p_expandtabs, p_percent,
+p_bmp_len, p_perf_len, p_perf_index, p_stdin_astral (astral stdin: `len` 1) and the
+earlier containers/methods/boundaries/iteration/bmp/errors/types all match CPython on
+both builds; `test_ail_pre139` covers the new operations. r9 (lone surrogate via
+`chr`) and r10 (`bytes.decode`) are unchanged pre-existing differences.
+
 ## 2026-10-24 - pre139: non-BMP chr() on the general path
 
 The general (16-bit v2) path died with an internal error for a non-BMP `chr()` value

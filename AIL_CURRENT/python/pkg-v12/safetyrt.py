@@ -743,6 +743,7 @@ static inline ail_obj ail2f_pad_num(ail_ctx *cx, const char *sign, const char *p
     for (int64_t k = 0; k < right; k++) ail2f_put(&o, fill);
     return ail2f_done(cx, &o);
 }
+/* len is the number of CODE POINTS to emit; a code point may be two UTF-16 units. */
 static inline ail_obj ail2f_pad_str(ail_ctx *cx, ail_str s, int64_t len, ail2f_spec *f, char dflt) {
     char align = f->align ? f->align : dflt;
     uint16_t fill = (f->zero && !f->align) ? '0' : f->fill;
@@ -750,7 +751,12 @@ static inline ail_obj ail2f_pad_str(ail_ctx *cx, ail_str s, int64_t len, ail2f_s
     int64_t left = align == '>' ? pad : align == '^' ? pad / 2 : 0;
     ail2f_buf o = {0, 0, 0};
     for (int64_t k = 0; k < left; k++) ail2f_put(&o, fill);
-    for (int64_t k = 0; k < len; k++) ail2f_put(&o, ail_chr(s, k));
+    int64_t u = 0;
+    for (int64_t k = 0; k < len; k++) {
+        int64_t w = ail_s2_pwidth(s, u);
+        for (int64_t z = 0; z < w; z++) ail2f_put(&o, ail_chr(s, u + z));
+        u += w;
+    }
     for (int64_t k = 0; k < pad - left; k++) ail2f_put(&o, fill);
     return ail2f_done(cx, &o);
 }
@@ -825,7 +831,7 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
         if (f.alt) return ail_raise_c(cx, AIL_B_VALUEERROR, "Alternate form (#) not allowed in string format specifier");
         if (f.align == '=') return ail_raise_c(cx, AIL_B_VALUEERROR, "'=' alignment not allowed in string format specifier");
         ail_str s = ail_view_to_str(x);
-        int64_t len = s.n;
+        int64_t len = ail_s2_npoints(s);
         if (f.has_prec && f.prec < len) len = f.prec;
         *out = ail2f_pad_str(cx, s, len, &f, '<');
         return AIL_OK;
@@ -966,7 +972,7 @@ static inline ail_st ail2f_percent(ail_ctx *cx, ail_obj *out, ail_obj fmtobj, ai
         if (t == 's' || t == 'r' || t == 'a') {
             fr.slots[2] = t == 's' ? ail_obj_str(cx, arg) : ail_obj_repr(cx, arg);
             ail_str v = ail_view_to_str(fr.slots[2]);
-            int64_t len = v.n; if (f.has_prec && f.prec < len) len = f.prec;
+            int64_t len = ail_s2_npoints(v); if (f.has_prec && f.prec < len) len = f.prec;
             f.zero = 0; if (!f.align) f.align = '>';
             piece = ail2f_pad_str(cx, v, len, &f, '>');
         } else if (t == 'd' || t == 'i' || t == 'u' || t == 'o' || t == 'x' || t == 'X') {
@@ -1006,14 +1012,20 @@ static inline ail_st ail2f_percent(ail_ctx *cx, ail_obj *out, ail_obj fmtobj, ai
             f.type = (char)t; f.has_prec = 0;
             piece = ail2f_pad_num(cx, ail2f_signstr(signbit(d) && !isnan(d), f.sign), "", body, &f);
         } else if (t == 'c') {
-            uint16_t ch;
+            uint16_t ch[2];
+            ail_str v;
             if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) {
                 if (arg.i < 0 || arg.i > 0x10FFFF) { st = ail_raise_c(cx, AIL_B_OVERFLOWERROR, "%c arg not in range(0x110000)"); goto fail; }
-                if (arg.i > 0xFFFF) ail_die("%c: a code point above U+FFFF in the 16-bit v2 runtime");
-                ch = (uint16_t)arg.i;
-            } else if (arg.tag == AIL_T_STR && ail_view_to_str(arg).n == 1) ch = ail_chr(ail_view_to_str(arg), 0);
-            else { st = ail_raise_c(cx, AIL_B_TYPEERROR, "%c requires int or char"); goto fail; }
-            ail_str v; v.p = &ch; v.n = 1; v.bytes = 0;
+                if (arg.i > 0xFFFF) {
+                    uint32_t vv = (uint32_t)arg.i - 0x10000u;
+                    ch[0] = (uint16_t)(0xD800u + (vv >> 10));
+                    ch[1] = (uint16_t)(0xDC00u + (vv & 0x3FFu));
+                    v.p = ch; v.n = 2;
+                } else { ch[0] = (uint16_t)arg.i; v.p = ch; v.n = 1; }
+                v.bytes = 0;
+            } else if (arg.tag == AIL_T_STR && ail_s2_npoints(ail_view_to_str(arg)) == 1) {
+                v = ail_view_to_str(arg);
+            } else { st = ail_raise_c(cx, AIL_B_TYPEERROR, "%c requires int or char"); goto fail; }
             f.zero = 0; if (!f.align) f.align = '>';
             piece = ail2f_pad_str(cx, v, 1, &f, '>');
         } else {

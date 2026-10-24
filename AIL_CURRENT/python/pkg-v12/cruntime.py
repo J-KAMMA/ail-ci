@@ -11135,6 +11135,18 @@ typedef struct { ail_gcobj hdr; int64_t n; uint16_t data[]; } ail_strback;
 
 static inline uint16_t *ail_strback_data(ail_gcobj *o) { return ((ail_strback *)o)->data; }
 
+/* aux on a STRBACK records that the backing holds a high surrogate, i.e. that some
+   non-BMP code point is stored as a UTF-16 pair. A backing without one has one unit
+   per code point, so len()/index can take the O(1) path instead of scanning. Heap
+   backings are calloc'd (aux 0) and the emitted static literals zero it too; every
+   writer of a pair below calls ail_strback_mark. */
+static inline void ail_strback_mark(ail_strback *b, int64_t n) {
+    for (int64_t i = 0; i < n; i++) {
+        uint16_t c = b->data[i];
+        if (c >= 0xD800u && c < 0xDC00u) { b->hdr.aux = 1; return; }
+    }
+}
+
 static inline ail_strback *ail_strback_alloc(ail_ctx *cx, int64_t n) {
     size_t sz = sizeof(ail_strback) + (size_t)(n > 0 ? n : 0) * sizeof(uint16_t);
     ail_strback *b = (ail_strback *)ail_gc_alloc(cx, AIL_K_STRBACK, sz);
@@ -11218,6 +11230,7 @@ static inline ail_str ail_view_to_str(ail_obj s) {
 static inline ail_obj ail_str_to_view(ail_ctx *cx, ail_str s) {
     ail_strback *b = ail_strback_alloc(cx, s.n);
     if (s.n) ail_str_put(b->data, s);
+    ail_strback_mark(b, s.n);
     return ail_str_view((ail_gcobj *)b, 0, s.n);
 }
 static inline ail_obj ail_str_from_cstr(ail_ctx *cx, const char *c) {
@@ -11258,6 +11271,7 @@ static inline ail_obj ail_str_buf_done(ail_strbuild b, int64_t actual_n) {
     b.back->n = actual_n; /* header claimed worst_n bytes at alloc time; shrinking n here
                               only affects the logical length, not the allocation, which is
                               fine -- the extra tail bytes are simply never read. */
+    ail_strback_mark(b.back, actual_n);
     return ail_str_view((ail_gcobj *)b.back, 0, actual_n);
 }
 
@@ -12886,10 +12900,11 @@ static inline ail_obj ail_str_rstrip_view(ail_obj s) {
 }
 static inline ail_st ail_str_index(ail_ctx *cx, ail_obj *out, ail_obj s, int64_t i) {
     ail_str t = ail_view_to_str(s);
-    int64_t n = ail_s2_npoints(t);
+    int bmp = !((ail_gcobj *)s.sv.backing)->aux;
+    int64_t n = bmp ? t.n : ail_s2_npoints(t);
     if (i < 0) i += n;
     if (i < 0 || i >= n) return ail_raise_c(cx, AIL_B_INDEXERROR, "string index out of range");
-    int64_t u = ail_s2_unit_at(t, i);
+    int64_t u = bmp ? i : ail_s2_unit_at(t, i);
     *out = ail_str_view(s.sv.backing, s.sv.off + u, ail_s2_pwidth(t, u));
     return AIL_OK;
 }
@@ -15658,7 +15673,11 @@ static inline int64_t ail__range_at(int64_t start, int64_t step, uint64_t ordina
 }
 static inline ail_st ail_op_len(ail_ctx *cx, ail_obj *out, ail_obj x) {
     switch (x.tag) {
-        case AIL_T_STR: *out = ail_box_int(ail_s2_npoints(ail_view_to_str(x))); return AIL_OK;
+        case AIL_T_STR: {
+            ail_strback *bk = (ail_strback *)x.sv.backing;
+            *out = ail_box_int(bk->hdr.aux ? ail_s2_npoints(ail_view_to_str(x)) : x.sv.len);
+            return AIL_OK;
+        }
         case AIL_T_LIST: if (__builtin_expect(((ail_gcobj *)x.o)->flags, 0)) { *out = ail_box_int(((ail_vecobj *)((ail_vecobj *)x.o)->p[0].o)->n); return AIL_OK; } /* a deque */
             /* fall through */
         case AIL_T_TUPLE: *out = ail_box_int(((ail_vecobj *)x.o)->n); return AIL_OK;
@@ -16230,6 +16249,7 @@ static inline ail_obj ail_bi_str_from_utf8(ail_ctx *cx, const char *p, int64_t n
             uint32_t v = cp - 0x10000u;
             back->data[o++] = (uint16_t)(0xD800u + (v >> 10));
             back->data[o++] = (uint16_t)(0xDC00u + (v & 0x3FFu));
+            back->hdr.aux = 1;
         } else back->data[o++] = (uint16_t)cp;
     }
     back->n = o;
@@ -16468,17 +16488,22 @@ static inline ail_st ail_obj_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_ob
         ail_obj content = (x.tag == AIL_T_STR) ? x : ail_obj_str(cx, x);
         AIL_ROOT1(cx, fr, content);
         ail_str cs = ail_view_to_str(content);
-        if (f.has_prec && f.prec >= 0 && f.prec < cs.n) cs.n = f.prec;
-        /* code points, not bytes: a non-ASCII character must reach the result whole */
+        /* width and precision count code points, not UTF-16 units */
+        int64_t pn = ail_s2_npoints(cs);
+        if (f.has_prec && f.prec >= 0 && f.prec < pn) pn = f.prec;
         char align = f.align ? f.align : '<';
-        int64_t pad = f.width - cs.n; if (pad < 0) pad = 0;
+        int64_t pad = f.width - pn; if (pad < 0) pad = 0;
         int64_t lp = (align == '>' || align == '=') ? pad : (align == '^') ? pad / 2 : 0;
-        ail_strbuild bu = ail_str_buf(cx, cs.n + pad);
+        ail_strbuild bu = ail_str_buf(cx, pn * 2 + pad);
         AIL_FRAME_LEAVE(cx, fr);
-        cs = ail_view_to_str(content); if (f.has_prec && f.prec >= 0 && f.prec < cs.n) cs.n = f.prec;
-        int64_t o = 0;
+        cs = ail_view_to_str(content);
+        int64_t o = 0, u = 0;
         for (int64_t k = 0; k < lp; k++) bu.buf[o++] = (uint16_t)f.fill;
-        for (int64_t k = 0; k < cs.n; k++) bu.buf[o++] = ail_chr(cs, k);
+        for (int64_t k = 0; k < pn; k++) {
+            int64_t w = ail_s2_pwidth(cs, u);
+            for (int64_t z = 0; z < w; z++) bu.buf[o++] = ail_chr(cs, u + z);
+            u += w;
+        }
         for (int64_t k = 0; k < pad - lp; k++) bu.buf[o++] = (uint16_t)f.fill;
         *out = ail_str_buf_done(bu, o);
         return AIL_OK;
@@ -17606,6 +17631,7 @@ static inline ail_st ail_bi_chr(ail_ctx *cx, ail_obj *out, ail_obj x) {
         ail_strback *b = ail_strback_alloc(cx, 2);
         b->data[0] = (uint16_t)(0xD800u + (v >> 10));
         b->data[1] = (uint16_t)(0xDC00u + (v & 0x3FFu));
+        b->hdr.aux = 1;
         *out = ail_str_view((ail_gcobj *)b, 0, 2);
         return AIL_OK;
     }
@@ -18463,12 +18489,14 @@ static inline ail_st ail_meth_str_rpartition(ail_ctx *cx, ail_obj *out, ail_obj 
    =================================================================================== */
 static inline int64_t ail__expandtabs_len(ail_str s, int64_t tabsize) {
     int64_t col = 0, out = 0;
-    for (int64_t i = 0; i < s.n; i++) {
-        uint16_t c = ail_chr(s, i);
+    for (int64_t i = 0; i < s.n; ) {
+        uint32_t c = ail_s2_pat(s, i);
+        int64_t w = ail_s2_pwidth(s, i);
         if (c == '\t') {
             if (tabsize > 0) { int64_t sp = tabsize - (col % tabsize); out += sp; col += sp; }
-        } else if (c == '\n' || c == '\r') { out++; col = 0; }
-        else { out++; col++; }
+        } else if (c == '\n' || c == '\r') { out += w; col = 0; }
+        else { out += w; col++; }
+        i += w;
     }
     return out;
 }
@@ -18477,12 +18505,14 @@ static inline ail_obj ail_meth_str_expandtabs(ail_ctx *cx, ail_obj sobj, int64_t
     int64_t total = ail__expandtabs_len(s, tabsize);
     ail_strbuild bu = ail_str_buf1(cx, total, sobj);
     int64_t col = 0, o = 0;
-    for (int64_t i = 0; i < s.n; i++) {
-        uint16_t c = ail_chr(s, i);
+    for (int64_t i = 0; i < s.n; ) {
+        uint32_t c = ail_s2_pat(s, i);
+        int64_t w = ail_s2_pwidth(s, i);
         if (c == '\t') {
             if (tabsize > 0) { int64_t sp = tabsize - (col % tabsize); for (int64_t k = 0; k < sp; k++) bu.buf[o++] = ' '; col += sp; }
-        } else if (c == '\n' || c == '\r') { bu.buf[o++] = c; col = 0; }
-        else { bu.buf[o++] = c; col++; }
+        } else if (c == '\n' || c == '\r') { for (int64_t z = 0; z < w; z++) bu.buf[o++] = ail_chr(s, i + z); col = 0; }
+        else { for (int64_t z = 0; z < w; z++) bu.buf[o++] = ail_chr(s, i + z); col++; }
+        i += w;
     }
     return ail_str_buf_done(bu, total);
 }

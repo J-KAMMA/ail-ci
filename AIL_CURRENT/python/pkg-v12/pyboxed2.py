@@ -785,6 +785,7 @@ static inline ail_obj ail2_str_catn(ail_ctx *cx, ail_obj *parts, const unsigned 
             k += s.n;
         }
     }
+    ail_strback_mark(b, total);
     return ail_str_view((ail_gcobj *)b, 0, total);
 }
 
