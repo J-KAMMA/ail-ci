@@ -2361,6 +2361,14 @@ class Compiler(boxclosure.ClosureMixin):
             if itr and itr['all_params'] == ['self']:
                 setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->iter_iter = %s;\n' %
                              (self.global_slots['class:' + cname], itr['cname']))
+            kmeth = cls['methods'].get('keys')
+            if kmeth and kmeth['all_params'] == ['self']:
+                setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->keys_fn = %s;\n' %
+                             (self.global_slots['class:' + cname], kmeth['cname']))
+            gmeth = cls['methods'].get('__getitem__')
+            if gmeth and len(gmeth['all_params']) == 2:
+                setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->getitem_fn = %s;\n' %
+                             (self.global_slots['class:' + cname], gmeth['cname']))
             if self.dunder_ops:
                 setup.extend(dunderrt.install('g_slots_arr[%d]' % self.global_slots['class:' + cname],
                                               cls['methods'], lambda info: info['all_params']))
@@ -6658,10 +6666,21 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.emit('%s = ail_dict_new(cx);' % t)
         if args:
             sv = ctx.tmp()
-            ctx.emit('%s = %s;' % (sv, self._resolve_iter_src(args[0], ctx)))
-            ctx.emit('if (%s.tag == AIL_T_DICT) { st = ail_meth_dict_update(cx, %s, %s); } '
-                     'else { st = ail_dict_update_pairs(cx, %s, %s); } ' %
-                     (sv, t, sv, t, sv))
+            if self._is_sys_stdin(args[0]):
+                ctx.emit('%s = %s;' % (sv, self._resolve_iter_src(args[0], ctx)))
+                ctx.emit('if (%s.tag == AIL_T_DICT) { st = ail_meth_dict_update(cx, %s, %s); } '
+                         'else { st = ail_dict_update_pairs(cx, %s, %s); } ' %
+                         (sv, t, sv, t, sv))
+            else:
+                # The source is evaluated once. A user instance whose class has keys() (or a keys
+                # attribute) takes CPython's mapping protocol; anything else is the pair sequence.
+                self.attr_names.add('keys')
+                ctx.emit('%s = %s;' % (sv, self.expr(args[0], ctx)))
+                handled = ctx.new_cvar('handled')
+                ctx.emit('if (%s.tag == AIL_T_DICT) { st = ail_meth_dict_update(cx, %s, %s); } '
+                         'else { int %s = 0; st = ail__dict_update_mapping_inst(cx, %s, %s, g_attr_keys, &%s); '
+                         'if (st == AIL_OK && !%s) st = ail_dict_update_pairs(cx, %s, %s); }' %
+                         (sv, t, sv, handled, t, sv, handled, handled, t, sv))
             ctx.check()
         for kname, kval in kwargs.items():
             v = self.expr(kval, ctx)

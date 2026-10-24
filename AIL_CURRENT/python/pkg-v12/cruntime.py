@@ -14063,6 +14063,8 @@ typedef struct { int64_t name_id; ail_obj val; } ail_attr;
 typedef struct { ail_gcobj hdr; ail_obj cls; ail_attr *attrs; int64_t n, cap; } ail_instobj;
 
 typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or NONE */; int builtin_id;
+                 ail_st (*keys_fn)(ail_ctx *, ail_obj *, ail_obj); /* user keys() (self only): the mapping protocol of dict(inst) */
+                 ail_st (*getitem_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj); /* user __getitem__ (self, key): dict(inst) values */
                  int dc; /* @dataclass: field count + 1 (0 = not a dataclass); repr/str print the first dc-1 attributes */
                  unsigned long long dc_hide; /* bit i set: field i is left out of the repr (field(repr=False)) */
                  ail_st (*iter_iter)(ail_ctx *, ail_obj *, ail_obj); /* user __iter__ (self only), or 0 */
@@ -15742,7 +15744,7 @@ static inline ail_st ail__iter_inst(ail_ctx *cx, ail_obj *out, ail_obj obj) {
         if (!(r.tag == AIL_T_INST && r.o == obj.o)) return ail_iter(cx, out, r); /* ail_iter roots r */
     }
     if (!fn) {
-        char buf[96]; snprintf(buf, sizeof buf, "'%s' object is not iterable", ail_type_name(obj.tag));
+        char buf[96]; snprintf(buf, sizeof buf, "'%s' object is not iterable", ail__tname_c(obj));
         return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
     }
     *out = ail__iter_wrap(cx, AIL_IT_USER, obj, ail_box_none(), 0);
@@ -16415,6 +16417,7 @@ static inline ail_obj ail_class_new(ail_ctx *cx, const char *name, ail_obj base)
     c->builtin_id = -1;
     c->dc = 0; c->dc_hide = 0;
     c->iter_iter = 0; c->iter_next = 0; c->repr_fn = 0; c->str_fn = 0; c->lt_fn = 0;
+    c->keys_fn = 0; c->getitem_fn = 0;
     ail_obj r; r.tag = AIL_T_CLASS; r.o = (ail_gcobj *)c;
     AIL_ROOT1(cx, fr, r);
     c->name = ail_str_from_cstr(cx, name);
@@ -18623,6 +18626,84 @@ static inline ail_st ail_dict_update_pairs(ail_ctx *cx, ail_obj d, ail_obj other
         }
         st = ail_dict_set(cx, d, v->p[0], v->p[1]);
         i++;
+    }
+    AIL_FRAME_LEAVE(cx, fr);
+    return st;
+}
+/* dict(<user instance>): CPython's dict_merge takes the MAPPING protocol when the object has a
+   `keys` attribute -- it calls keys(), then maps every key through __getitem__ -- and only
+   otherwise walks the object as a sequence of pairs.  The class object records the two user
+   methods (pyboxed2.py fills keys_fn/getitem_fn) and class/instance attributes live in the
+   instance table, so this also covers `keys = [...]` (which is not callable) and a `keys`
+   attribute set in __init__.  A keys() result that cannot be iterated gets CPython's own
+   mapping wording rather than the generic iteration error. */
+static inline int ail__dict_iter_supported(ail_obj x) {
+    if (x.tag == AIL_T_INST) {
+        for (ail_obj k = ((ail_instobj *)x.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base)
+            if (((ail_classobj *)k.o)->iter_iter || ((ail_classobj *)k.o)->iter_next) return 1;
+        return 0;
+    }
+    switch (x.tag) {
+        case AIL_T_LIST: case AIL_T_TUPLE: case AIL_T_STR: case AIL_T_DICT:
+        case AIL_T_SET: case AIL_T_FROZENSET: case AIL_T_RANGE: case AIL_T_ITER: return 1;
+        default: return 0;
+    }
+}
+static inline ail_st ail__dict_update_mapping_inst(ail_ctx *cx, ail_obj d, ail_obj other,
+                                                    int64_t keys_id, int *handled) {
+    *handled = 0;
+    if (other.tag != AIL_T_INST) return AIL_OK;
+    ail_st (*kf)(ail_ctx *, ail_obj *, ail_obj) = 0;
+    ail_st (*gf)(ail_ctx *, ail_obj *, ail_obj, ail_obj) = 0;
+    for (ail_obj k = ((ail_instobj *)other.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+        ail_classobj *kc = (ail_classobj *)k.o;
+        if (!kf) kf = kc->keys_fn;
+        if (!gf) gf = kc->getitem_fn;
+    }
+    ail_obj keysv;
+    /* PyObject_GetAttr(inst, "keys") looks in the instance table before the class's methods: a
+       value set by __init__ (or a class attribute copied onto the instance) shadows keys() */
+    ail_instobj *o = (ail_instobj *)other.o;
+    int found = 0;
+    for (int64_t i = 0; i < o->n; i++)
+        if (o->attrs[i].name_id == keys_id) { keysv = o->attrs[i].val; found = 1; break; }
+    if (found) {
+        if (keysv.tag == AIL_T_FUNC) {
+            /* a function in the class body is a descriptor: through the instance it is bound to self */
+            ail_funcobj *fo = (ail_funcobj *)keysv.o;
+            ail_st st = fo->fn(cx, &keysv, other, fo->cells); if (st != AIL_OK) return st;
+        } else {
+            char nb[96]; snprintf(nb, sizeof nb, "'%s' object is not callable", ail__tname_c(keysv));
+            return ail_raise_c(cx, AIL_B_TYPEERROR, nb);
+        }
+    } else if (kf) {
+        ail_st st = kf(cx, &keysv, other); if (st != AIL_OK) return st;
+    } else {
+        return AIL_OK;
+    }
+    if (!ail__dict_iter_supported(keysv)) {
+        char buf[192], ot[96], kt[96];
+        snprintf(ot, sizeof ot, "%s", ail__tname_c(other));
+        snprintf(kt, sizeof kt, "%s", ail__tname_c(keysv));
+        snprintf(buf, sizeof buf, "%s.keys() returned a non-iterable (type %s)", ot, kt);
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
+    *handled = 1;
+    AIL_FRAME_ENTER(cx, fr, 4); /* 0=keys 1=iterator 2=key 3=value */
+    fr.slots[0] = keysv;
+    ail_st st = ail_iter(cx, &fr.slots[1], keysv);
+    while (st == AIL_OK) {
+        st = ail_it_next(cx, &fr.slots[2], fr.slots[1]);
+        if (st == AIL_STOP) { st = AIL_OK; break; }
+        if (st != AIL_OK) break;
+        if (!gf) {
+            char buf[96]; snprintf(buf, sizeof buf, "'%s' object is not subscriptable", ail__tname_c(other));
+            st = ail_raise_c(cx, AIL_B_TYPEERROR, buf); break;
+        }
+        st = gf(cx, &fr.slots[3], other, fr.slots[2]);
+        if (st != AIL_OK) break;
+        st = ail_dict_set(cx, d, fr.slots[2], fr.slots[3]);
+        if (st != AIL_OK) break;
     }
     AIL_FRAME_LEAVE(cx, fr);
     return st;

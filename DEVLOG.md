@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 -- job-pre38: dict(<user instance>) mapping protocol (pre25 q01/q07)
+
+`dict(D())` where `D` has a `keys` method (or a `keys` class / instance attribute) now takes
+CPython's mapping protocol: call `keys()` once, then map every key through `__getitem__`.
+The class object records the two user methods, and the runtime helper also finds a class or
+instance attribute named `keys` (so `keys = [..]` / `keys = ".."` is CPython's
+`'list'/'str' object is not callable`). A keys result with no iteration protocol is
+`D.keys() returned a non-iterable (type NoIter)`. Iterating an instance with neither
+`__iter__` nor `__next__` now names its class (`'D' object is not iterable`), not `instance`.
+Both builds agree with CPython on the probes; the pair-sequence error text (pre25 q02) is
+unchanged and remains a separate difference. Added `test_ail_pre38.py` (two programs, both
+builds).
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
