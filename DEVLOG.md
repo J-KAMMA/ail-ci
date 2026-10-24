@@ -8,7 +8,7 @@ pre31 machinery, absent from this tree) now binds call arguments by parameter na
 position, so keyword calls to wrappers and identity functions, including keyword-only wrappers, are
 refused by name. Out-of-range literals, module constants, list/tuple items and dict values reached
 this way are refused too; in-range conversions, non-finite floats and run-time-only values are
-unchanged and compared with CPython. Added `test_ail_pre39.py` (11 refused programs, 4 matching
+unchanged and compared with CPython. Added `test_ail_pre39.py` (12 refused programs, 4 matching
 programs, both builds).
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
