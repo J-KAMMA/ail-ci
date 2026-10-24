@@ -1,5 +1,19 @@
 # DEVLOG
 
+## 2026-10-24 - pre87 review: callback exceptions cross back to boxed try
+
+The default build still aborted on `% 0` (and `// 0`) raised through a lambda or a
+helper passed as a value. `pymix.py` selected a typed clone for the helper, and the
+clone's `ail_die` trap only unwinds the typed `try` stack; the boxed caller's `try`
+lives on `ail_ctx` and never saw it. An escape analysis already rejects clones whose
+exceptions reach a boxed `try`, but it only followed direct `Call(Name)` edges, so a
+lambda body or a function passed as a value looked like an uncaught module-level path.
+`_protected` now treats both as possibly-protected: names referenced as values and
+call sites inside a lambda are not mixed, so the call stays boxed and returns its
+error through `cx`. Added `CALLBACK_ZERO` to `test_ail_pre87.py` (lambda, named
+callback, list item, dict value, alias, `//`, `divmod`, negative, INT64_MIN, bool,
+IntEnum, IntFlag).
+
 ## 2026-10-24 - pre87: integer modulo by zero names CPython's message
 
 The general path and the default build's fallback reported

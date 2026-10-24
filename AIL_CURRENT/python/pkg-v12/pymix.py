@@ -293,21 +293,56 @@ def _escapes(fn_facts, parents):
     return esc, call_sites
 
 
-def _protected(name, exc, call_sites, parents, seen=frozenset()):
+def _value_referenced(tree, function_names):
+    """Module functions that appear as a value rather than as the direct callee of a `Call` --
+    passed to another function, stored in a container, returned, and so on.  Such a function can
+    be invoked from boxed code the module's own call graph cannot see, possibly under a `try`."""
+    parents = _build_parents(tree)
+    found = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+                and node.id in function_names):
+            parent = parents.get(node)
+            if not (isinstance(parent, ast.Call) and parent.func is node):
+                found.add(node.id)
+    return found
+
+
+def _inside_lambda(node, parents):
+    """True iff `node` is lexically inside an `ast.Lambda` body.  A lambda is a function value
+    whose call sites are not `ast.Call(Name)` nodes, so it can be invoked from anywhere -- the
+    same blind spot as a function passed as a value."""
+    cur = node
+    while cur in parents:
+        cur = parents[cur]
+        if isinstance(cur, ast.Lambda):
+            return True
+    return False
+
+
+def _protected(name, exc, call_sites, parents, indirect=frozenset(), seen=frozenset()):
     """True iff SOME call site reaching `name` (directly, or through a chain of ordinary boxed
     calls) sits inside a `try/except` for `exc` anywhere up that chain -- walked the way CPython's
     own frame unwinding would, since that is exactly the behaviour a rejected candidate is standing
     in for (see module docstring: crossing the typed/boxed boundary loses every handler that is not
-    lexically inside the SAME typed closure)."""
+    lexically inside the SAME typed closure).
+
+    A function that is passed as a value, or called from inside a lambda, can also be invoked by
+    boxed code the call graph never records; a `try` there is just as invisible, so such a path is
+    treated as protected (conservatively) rather than as ending uncaught."""
     if name in seen:
         return False
+    if name in indirect:
+        return True
     for call_node, caller_name in call_sites.get(name, ()):
+        if _inside_lambda(call_node, parents):
+            return True
         scope, trys = _enclosing_scope_and_trys(call_node, parents)
         if any(_handler_catches(h, exc) for t in trys for h in t.handlers):
             return True
         if scope == MODULE_SCOPE:
             continue                                    # this path ends uncaught -- safe on its own
-        if _protected(scope, exc, call_sites, parents, seen | {name}):
+        if _protected(scope, exc, call_sites, parents, indirect, seen | {name}):
             return True
     return False
 
@@ -636,6 +671,7 @@ def analyze(source, classes=()):
     defs_src = _defs_only_source(tree)
     parents = _build_parents(tree)
     esc, call_sites = _escapes(fn_facts, parents)
+    indirect = _value_referenced(tree, {n for n in fn_facts if n != MODULE_SCOPE})
     report = MixReport()
     rets = {name: f.ret for name, f in fn_facts.items()}
     # One C return ABI cannot preserve distinct Python tags on different branches.
@@ -670,7 +706,8 @@ def analyze(source, classes=()):
         if name in unsafe_returns:
             report.rejected[name] = (REASON_UNRESOLVED_RET, 'return branches require distinct tags')
             continue
-        blocking = sorted(exc for exc in esc.get(name, ()) if _protected(name, exc, call_sites, parents))
+        blocking = sorted(exc for exc in esc.get(name, ())
+                          if _protected(name, exc, call_sites, parents, indirect))
         if blocking:
             report.rejected[name] = (REASON_EXC_CAPABLE,
                                      '%s can escape to a boxed try/except reachable from a call to'

@@ -131,6 +131,73 @@ main()
 '''
 
 
+CALLBACK_ZERO = r'''from enum import IntEnum, IntFlag
+
+
+class Z(IntEnum):
+    ZERO = 0
+
+
+class F(IntFlag):
+    ZERO = 0
+
+
+def mod_plain(a, b):
+    return a % b
+
+
+def floor_plain(a, b):
+    return a // b
+
+
+def divmod_plain(a, b):
+    return divmod(a, b)
+
+
+def show(label, f):
+    try:
+        print(label, f())
+    except ZeroDivisionError as e:
+        print(label, type(e).__name__, str(e))
+
+
+def cb_mod():
+    return mod_plain(-7, 0)
+
+
+def cb_floor():
+    return floor_plain(5, 0)
+
+
+def cb_divmod():
+    return divmod_plain(5, 0)
+
+
+def main():
+    xs = [mod_plain, floor_plain]
+    d = {"mod": mod_plain, "floor": floor_plain}
+    show("lambda-mod", lambda: mod_plain(5, 0))
+    show("lambda-floor", lambda: floor_plain(5, 0))
+    show("lambda-divmod", lambda: divmod_plain(5, 0))
+    show("lambda-negative", lambda: mod_plain(-7, 0))
+    show("lambda-min", lambda: mod_plain(-9223372036854775807 - 1, 0))
+    show("lambda-bool", lambda: mod_plain(5, False))
+    show("lambda-intenum", lambda: mod_plain(5, Z.ZERO))
+    show("lambda-intflag", lambda: mod_plain(5, F.ZERO))
+    show("named", cb_mod)
+    show("named-floor", cb_floor)
+    show("named-divmod", cb_divmod)
+    show("list-item", lambda: xs[0](5, 0))
+    show("dict-value", lambda: d["mod"](5, 0))
+    g = cb_mod
+    show("alias", g)
+    print("done")
+
+
+main()
+'''
+
+
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -174,6 +241,9 @@ class Pre87Tests(unittest.TestCase):
 
     def test_zero_neighbours(self):
         self.check('zero_neighbours', ZERO_NEIGHBOURS)
+
+    def test_callback_zero(self):
+        self.check('callback_zero', CALLBACK_ZERO)
 
 
 if __name__ == '__main__':
