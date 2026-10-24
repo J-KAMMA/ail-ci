@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - pre35 difference 1: round() results beyond int64
+
+`round(1e300)` is a 301-digit int in CPython, but the runtime's `ail_bi_round` stopped with
+`round() result does not fit in this language's int64`. The general build now keeps that result
+as a decimal big integer (`AIL_T_BIGINT`, the inline view layout already used by `str`): printing,
+`+`, `-`, `*`, unary `-`, comparisons, equality, hashing, `abs()`, `int()`, `float()` and container
+display agree with CPython. The direct build has no boxed integer, so it refuses a statically
+visible out-of-range constant at compile time and a dynamic value by name at run time, instead of
+the old int64-overflow message. `test_ail_pre35.py` covers literals, the int64 boundaries, half-even
+rounding, `round(x, n)`, the arithmetic above, and the direct build's named refusal.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

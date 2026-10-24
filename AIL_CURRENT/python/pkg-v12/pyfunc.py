@@ -66,7 +66,7 @@ import typedinherit
 import shadowing
 import rangecheck
 from pipeline import PipelineError
-from pyfront import BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Unsupported, _use, refuse_complex_pow
+from pyfront import BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Unsupported, _number_constant, _use, refuse_complex_pow
 
 # A capability marker, not a behaviour: lets a SHARED judge (one file imported against many
 # `pkg-*` copies of this module, e.g. `test_floatparam.py`) ask "does THIS copy infer a float
@@ -16870,6 +16870,14 @@ def _call(node, ctx):
                               'shape Python has)' % _kindword(a[0], ctx))
         x = rec(a[0])
         if len(a) == 1:
+            c = _number_constant(a[0])
+            if isinstance(c, float) and c == c and abs(c) != float('inf'):
+                r = round(c)
+                if r < -(1 << 63) or r > (1 << 63) - 1:
+                    raise Unsupported(
+                        'not in the subset: round() of a float whose integer result is outside '
+                        'int64 in the direct build; use the general build (AIL_UNIFIED_FORCE=1), '
+                        'or keep the value a float with round(x, n)')
             ctx.parts.add('ROUND')
             return 'ail_round0(%s)' % x
         n = a[1]
