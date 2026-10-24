@@ -1,5 +1,19 @@
 # DEVLOG
 
+## 2026-10-24 - round() negative ndigits boundary (job-pre160-10250349)
+
+Review follow-up. The new `__index__` route made `round(float, ndigits)` reachable with any int64,
+and the negative-scale loop multiplied `1.0` by 10 until it overflowed to `inf`; `inf/inf` then
+produced `nan` for every ndigits at or below -309 (`round(2.5, -309)` was `nan`, CPython `0.0`).
+The float branch now returns a signed zero for `nn <= -309` (10**309 exceeds DBL_MAX, so every
+finite double is nearer zero than the first representable multiple) and raises
+`OverflowError: rounded value too large to represent` when rescaling overflows, matching CPython.
+The int branch's `-n >= 19` test overflowed for `n == INT64_MIN`; it now tests `n <= -19` directly.
+Extended `test_ail_pre160.py` with the boundary program (literals, `__index__`, argument/list item/
+attribute/dict routes, signed zero, INT64_MIN for float, overflow, int ndigits). The DIFFERENCES
+row now says the `integer overflow` stop happens while evaluating the out-of-int64 expression
+inside `__index__`, not on an already-returned index (base did not wrap either).
+
 ## 2026-10-24 - round() ndigits conversion (job-pre160-10250349)
 
 CPython checks the number type before converting `round`'s ndigits: an instance with `__round__`

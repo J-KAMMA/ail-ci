@@ -17196,9 +17196,9 @@ static inline ail_st ail_bi_abs(ail_ctx *cx, ail_obj *out, ail_obj x) {
    CPython's own _Py_dg_dtoa-based algorithm on every value checked while building this).
    =================================================================================== */
 static inline ail_st ail_bi_round_int_ndigits(ail_ctx *cx, ail_obj *out, int64_t v, int64_t n) {
-    if (-n >= 19) { *out = ail_box_int(0); return AIL_OK; } /* 10^19 exceeds int64 range: any
-        int64 value rounds to 0 at this scale -- documented simplification, never exercised
-        by a case here (no test uses ndigits this extreme) */
+    if (n <= -19) { *out = ail_box_int(0); return AIL_OK; } /* 10^19 exceeds int64 range: any
+        int64 value rounds to 0 at this scale -- documented simplification.  The comparison is
+        on n itself because -INT64_MIN is not representable. */
     int64_t p = 1;
     for (int64_t k = 0; k < -n; k++) p *= 10;
     int64_t q = v / p, r = v % p;
@@ -17243,13 +17243,18 @@ static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_
             char buf[400];
             snprintf(buf, sizeof buf, "%.*f", nd, v);
             result = strtod(buf, NULL);
+        } else if (nn <= -309) {
+            /* 10**309 exceeds DBL_MAX, so every finite double is nearer to zero than to the
+               first representable multiple of the scale.  CPython returns a signed zero. */
+            result = copysign(0.0, v);
         } else {
             int64_t neg = -nn;
             double scale = 1.0;
-            for (int64_t k = 0; k < neg && k < 400; k++) scale *= 10.0;
+            for (int64_t k = 0; k < neg; k++) scale *= 10.0;
             double scaled = v / scale;
             double rr = nearbyint(scaled);
             result = rr * scale;
+            if (isinf(result)) return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "rounded value too large to represent");
         }
         *out = ail_box_float(cx, result);
         return AIL_OK;

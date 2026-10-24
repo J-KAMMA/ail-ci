@@ -6,9 +6,11 @@ float converts ndigits with `__index__` only after that check, and None means "n
 general path used to read the ndigits value's raw int field: `__index__` was never called, a str or
 list ndigits was silently accepted, an instance without `__round__` was named `instance`, and a
 `__round__` method received a garbage integer instead of the object.  These programs compare with
-CPython on both builds.  An out-of-int64 `__index__` result cannot be represented (AIL integers are
-int64), so that program must stop by name ("integer overflow") rather than answer with a wrapped
-value.
+CPython on both builds.  The negative-ndigits boundary is included: an ndigits at or below -309
+rounds every finite float to a signed zero, and a rounded magnitude above DBL_MAX raises
+OverflowError.  An out-of-int64 intermediate inside `__index__` (for example `10**30`) cannot be
+evaluated at all (AIL integers are int64), so that program stops by name ("integer overflow") while
+running `__index__`; CPython uses its arbitrary-precision result.
 """
 import os
 import shutil
@@ -160,6 +162,60 @@ print(round(2.5, A()))
 print(round(2.5, B()))
 '''
 
+NEGATIVE = r'''class Idx:
+    def __init__(self, v):
+        self.v = v
+
+    def __index__(self):
+        return self.v
+
+
+class Box:
+    def __init__(self, n):
+        self.n = n
+
+
+class MinIdx:
+    def __index__(self):
+        return -9223372036854775807 - 1
+
+
+class Min1Idx:
+    def __index__(self):
+        return -9223372036854775807
+
+
+def use(n):
+    return round(2.5, n)
+
+
+def show(label, v, n):
+    try:
+        print(label, repr(round(v, n)))
+    except Exception as e:
+        print(label, type(e).__name__, e)
+
+
+i = Idx(-309)
+xs = [Idx(-400)]
+b = Box(Idx(-309))
+d = {"n": Idx(-400)}
+print(use(i), round(2.5, xs[0]), round(2.5, b.n), round(2.5, d["n"]))
+for n in (-2, -308, -309, -310, -323, -324, -400, -1000):
+    show("lit", 2.5, n)
+    show("idx", 2.5, Idx(n))
+    show("neg", -2.5, Idx(n))
+    show("zero", -0.0, Idx(n))
+show("min", 2.5, MinIdx())
+show("min1", 2.5, Min1Idx())
+for n in (-306, -307, -308):
+    show("ovf", 1.7976931348623157e308, Idx(n))
+    show("ovfl", -1.7976931348623157e308, n)
+for n in (-18, -19, -20, -100, -400):
+    show("int", 7, Idx(n))
+    show("intl", -7, n)
+'''
+
 
 @unittest.skipUnless(HAVE_CC, 'gcc is required')
 class RoundNDigits(unittest.TestCase):
@@ -168,6 +224,14 @@ class RoundNDigits(unittest.TestCase):
             want = _cpython(tmp, 'round', ROUND)
             for mode in ('general', 'default'):
                 got, error = _build_run(tmp, 'round', ROUND, mode)
+                self.assertIsNone(error, mode + ': ' + str(error))
+                self.assertEqual(got, want, mode)
+
+    def test_negative_ndigits_boundaries(self):
+        with tempfile.TemporaryDirectory(prefix='ail-pre160-') as tmp:
+            want = _cpython(tmp, 'negative', NEGATIVE)
+            for mode in ('general', 'default'):
+                got, error = _build_run(tmp, 'negative', NEGATIVE, mode)
                 self.assertIsNone(error, mode + ': ' + str(error))
                 self.assertEqual(got, want, mode)
 
