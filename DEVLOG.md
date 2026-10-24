@@ -59,6 +59,22 @@ formatters now keep a decimal point in the mantissa when the alternate form is r
 including `#.0`, widths, zero padding and grouping. Added `test_ail_pre132.py` (dynamic
 specs, literal f-strings, values through arguments, lists, attributes and dicts, and
 empty/int/str specs) on both builds.
+## 2026-10-24 - pre133: Fraction prelude tuple notes
+
+A reviewer of job `errmsgoc` listed two differences that predated it.  The non-empty container
+class attribute (`class A__B: n = {1: 2}`, `n = [1, 2]`) already matches CPython on both builds
+of this tree, so it was only added as a regression case.  The other one remained: when a program
+that imports `fractions` is refused for an unrelated reason, the tuple pass processes the
+injected `prelude_fraction.py` and leaves `cannot tell the type of element 0 of this tuple` notes
+for `as_integer_ratio`, `__divmod__` and `__rdivmod__`; their line numbers are in the merged
+prelude text, past the user's file.  The three methods now name the element types with locals
+(`n: int`, `q: Fraction`), so the tuple pass has nothing to refuse; a refusal now shows only its
+own note, and the returned tuples still match CPython on both builds.
+
+Added `AIL_CURRENT/test_ail_pre133.py` (container class attributes, Fraction tuple returns, and
+the refusal note) and registered it in `ail_check.MODULES`.  Probes in `/tmp/probes/`:
+`classattr.py`, `classattr2.py`, `classattr4.py`, `classattr6.py`, `frac_divmod.py`,
+`frac_misc.py`, `fr_note.py`.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
