@@ -11793,6 +11793,40 @@ def _ordered_numeric_pair(left, right, ctx, form):
                                            form.format(ltmp, rtmp))
 
 
+_MIXED_CMP_CHECK = {
+    ast.Eq: '(_ail_mc == 0)', ast.NotEq: '(_ail_mc != 0)',
+    ast.Lt: '(_ail_mc == -1)', ast.LtE: '(_ail_mc <= 0)',
+    ast.Gt: '(_ail_mc == 1)', ast.GtE: '(_ail_mc == 0 || _ail_mc == 1)',
+}
+_MIXED_CMP_REVERSE = {ast.Lt: ast.Gt, ast.LtE: ast.GtE, ast.Gt: ast.Lt, ast.GtE: ast.LtE,
+                      ast.Eq: ast.Eq, ast.NotEq: ast.NotEq}
+
+
+def _mixed_numeric_relation(int_name, float_name, op, int_left):
+    relation = type(op) if int_left else _MIXED_CMP_REVERSE[type(op)]
+    return ('({ int64_t _ail_mi = %s; double _ail_mf = %s; int64_t _ail_mc; '
+            'if (_ail_mf != _ail_mf) _ail_mc = 2; '
+            'else if (_ail_mf >= 9223372036854775808.0) _ail_mc = -1; '
+            'else if (_ail_mf < -9223372036854775808.0) _ail_mc = 1; '
+            'else { int64_t _ail_mt = (int64_t)_ail_mf; '
+            '_ail_mc = (_ail_mi > _ail_mt) - (_ail_mi < _ail_mt); '
+            'if (!_ail_mc) _ail_mc = (_ail_mf < (double)_ail_mt) - (_ail_mf > (double)_ail_mt); } '
+            '%s; })' % (int_name, float_name, _MIXED_CMP_CHECK[relation]))
+
+
+def _mixed_numeric_pair(left, right, op, ctx):
+    left_c = _expr(left, ctx)
+    right_c = _expr(right, ctx)
+    lk, rk = _etype(left, ctx), _etype(right, ctx)
+    ltmp, lname = ctx.temp(FLT if lk == FLT else INT)
+    rtmp, rname = ctx.temp(FLT if rk == FLT else INT)
+    if getattr(ctx, 'experimental_ephemeral_numeric_temps', False):
+        ctx.ephemeral_numeric_temps.update({lname, rname} - ctx.source_names)
+    relation = (_mixed_numeric_relation(ltmp, rtmp, op, True) if lk == INT
+                else _mixed_numeric_relation(rtmp, ltmp, op, False))
+    return '((%s = %s), (%s = %s), %s)' % (ltmp, left_c, rtmp, right_c, relation)
+
+
 def _map_kind(node, ctx):
     if isinstance(node, ast.BinOp) and type(node.op) in SET_OPS:
         # A typed set with a typed set of the same kind, or with a set literal: .
@@ -13350,18 +13384,23 @@ def _expr(node, ctx):
             first, _ = ctx.temp(kind)
             start = '%s = %s' % (first, value_expr(node.left))
             links = []
-            previous = first
+            previous, previous_kind = first, kind
             for op, value in zip(node.ops, node.comparators):
-                current, _ = ctx.temp(_etype(value, ctx))
+                value_kind = _etype(value, ctx)
+                current, _ = ctx.temp(value_kind)
                 if kind in (STR, BYTES):
                     comparison = '(%s(%s, %s) %s 0)' % (
                         cmp_func, previous, current, CMPOP[type(op)])
+                elif previous_kind == INT and value_kind == FLT:
+                    comparison = _mixed_numeric_relation(previous, current, op, True)
+                elif previous_kind == FLT and value_kind == INT:
+                    comparison = _mixed_numeric_relation(current, previous, op, False)
                 else:
                     comparison = '(%s %s %s)' % (
                         previous, CMPOP[type(op)], current)
                 links.append('((%s = %s), %s)' % (
                     current, value_expr(value), comparison))
-                previous = current
+                previous, previous_kind = current, value_kind
             return '((%s), (%s))' % (start, ' && '.join(links))
         if len(node.ops) == 1:
             _lz = _len_emptiness_compare(node, ctx)
@@ -13440,6 +13479,8 @@ def _expr(node, ctx):
                     parts.append(_str_compare(left, op, right, ctx))
                 elif _is_bytes_expr(left, ctx) or _is_bytes_expr(right, ctx):
                     parts.append(_bytes_compare(left, op, right, ctx))
+                elif {_etype(left, ctx), _etype(right, ctx)} == {INT, FLT}:
+                    parts.append(_mixed_numeric_pair(left, right, op, ctx))
                 else:
                     parts.append(_ordered_numeric_pair(left, right, ctx,
                                  '({} %s {})' % CMPOP[type(op)]))
