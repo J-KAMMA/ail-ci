@@ -14564,10 +14564,14 @@ static inline ail_st ail_op_ne(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) 
 static inline int ail__nan_operand(ail_obj a, ail_obj b) {
     return (a.tag == AIL_T_FLOAT && ail_float_val(a) != ail_float_val(a)) || (b.tag == AIL_T_FLOAT && ail_float_val(b) != ail_float_val(b));
 }
-static inline ail_st ail_op_lt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 0)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp_op(cx, &c, a, b, "<"); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0); return AIL_OK; }
-static inline ail_st ail_op_le(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 1)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp_op(cx, &c, a, b, "<="); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK; }
-static inline ail_st ail_op_gt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 2)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp_op(cx, &c, a, b, ">"); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0); return AIL_OK; }
-static inline ail_st ail_op_ge(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 3)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp_op(cx, &c, a, b, ">="); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK; }
+static inline int ail__is_counter(ail_obj x);
+/* Counter ordering (CPython 3.12 collections.Counter): subset/superset over the union of the keys, missing counts
+   read as 0; < and > are the proper forms (<= and >= plus inequality). op: 0 <, 1 <=, 2 >, 3 >=. */
+static inline ail_st ail_counter_cmp(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, int op);
+static inline ail_st ail_op_lt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (ail__is_counter(a) && ail__is_counter(b)) return ail_counter_cmp(cx, out, a, b, 0); if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 0)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp_op(cx, &c, a, b, "<"); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0); return AIL_OK; }
+static inline ail_st ail_op_le(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (ail__is_counter(a) && ail__is_counter(b)) return ail_counter_cmp(cx, out, a, b, 1); if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 1)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp_op(cx, &c, a, b, "<="); if (st != AIL_OK) return st; *out = ail_box_bool(c < 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK; }
+static inline ail_st ail_op_gt(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (ail__is_counter(a) && ail__is_counter(b)) return ail_counter_cmp(cx, out, a, b, 2); if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 2)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp_op(cx, &c, a, b, ">"); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0); return AIL_OK; }
+static inline ail_st ail_op_ge(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { if (ail__is_counter(a) && ail__is_counter(b)) return ail_counter_cmp(cx, out, a, b, 3); if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) { (void)cx; *out = ail_box_bool(ail_setx_cmp(a, b, 3)); return AIL_OK; } int64_t c; ail_st st = ail_obj_cmp_op(cx, &c, a, b, ">="); if (st != AIL_OK) return st; *out = ail_box_bool(c > 0 || (c == 0 && !ail__nan_operand(a, b))); return AIL_OK; }
 
 /* ===================================================================================
    Arithmetic. int64 overflow -> AIL_LIMIT (uncatchable), per the owner decision -- the
@@ -19592,6 +19596,28 @@ static inline ail_st ail_counter_unary(ail_ctx *cx, ail_obj *out, ail_obj a, int
     }
     AIL_FRAME_LEAVE(cx, fr);
     *out = r; return AIL_OK;
+}
+/* Counter ordering: every key of both operands is compared with missing counts read as 0. <= / >= are the subset /
+   superset tests, < / > their proper forms (the base test and Counter inequality, which also treats a missing key as
+   0). op: 0 <, 1 <=, 2 >, 3 >=. Counts compare with the ordinary operators, so a NaN count makes the test false. */
+static inline ail_st ail_counter_cmp(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, int op) {
+    ail_mapobj *m[2] = { (ail_mapobj *)a.o, (ail_mapobj *)b.o };
+    int le = op == 0 || op == 1, result = 1, equal = 1;
+    for (int side = 0; side < 2; side++) {
+        for (int64_t i = 0; i < m[side]->n; i++) {
+            ail_obj key = m[side]->entries[i].key, av, bv, r;
+            ail_st st = ail_dict_get(cx, &av, a, key, ail_box_int(0)); if (st != AIL_OK) return st;
+            st = ail_dict_get(cx, &bv, b, key, ail_box_int(0)); if (st != AIL_OK) return st;
+            st = le ? ail_op_le(cx, &r, av, bv) : ail_op_ge(cx, &r, av, bv); if (st != AIL_OK) return st;
+            if (!ail_obj_truthy(r)) { result = 0; equal = 0; break; }
+            st = ail_op_ne(cx, &r, av, bv); if (st != AIL_OK) return st;
+            if (ail_obj_truthy(r)) equal = 0;
+        }
+        if (!result) break;
+    }
+    if (op == 0 || op == 2) result = result && !equal;
+    *out = ail_box_bool(result);
+    return AIL_OK;
 }
 /* c += d, c -= d, c &= d, c |= d: the result of the operator, stored into c itself (a second name for c sees it) */
 static inline ail_st ail_counter_inplace(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, int op) {
