@@ -1,5 +1,17 @@
 # DEVLOG
 
+## 2026-10-24 -- statically known int64 constant overflow (job-pre108-10242222)
+
+The pre-existing `ttypes.py` difference used `[9223372036854775807 * 2, ...]`: CPython prints
+bignums, while AIL compiled the program and then stopped at run time with `integer overflow`. A new
+front-end check evaluates integer constant expressions built from literals and module-level int
+constants (`+`, `-`, `*`, and `**` with a non-negative exponent) and refuses an out-of-int64
+result by name (`int64 constant expression out of range: ...`) on both the general and the default
+build. The check is conservative: a module constant shadowed by a local or a parameter is not
+folded, shifts keep their existing refusal messages, and values that only reach the operation at
+run time still trap with `integer overflow`. Added `test_ail_pre108.py` and registered it in
+`ail_check.MODULES`.
+
 ## 2026-10-23 -- fuzz37: ordering TypeError names the written operator
 
 Fuzzing while loops and counters against CPython on both builds found that an

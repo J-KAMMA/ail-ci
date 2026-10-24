@@ -94,6 +94,79 @@ def _check_int64_literals(tree):
             raise error
 
 
+_INT_BINARY = {
+    ast.Add: lambda a, b: a + b,
+    ast.Sub: lambda a, b: a - b,
+    ast.Mult: lambda a, b: a * b,
+}
+
+
+def _constant_int(node, known):
+    """The int value of a constant expression, or None when it is not statically known.
+    Names resolve only through known module constants; a local of the same name keeps the
+    expression out of known, so a shadowed constant is never folded by mistake."""
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        return node.value
+    if isinstance(node, ast.Name):
+        return known.get(node.id)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        value = _constant_int(node.operand, known)
+        if value is None:
+            return None
+        return -value if isinstance(node.op, ast.USub) else value
+    if isinstance(node, ast.BinOp):
+        left = _constant_int(node.left, known)
+        if left is None:
+            return None
+        if isinstance(node.op, ast.Pow):
+            right = _constant_int(node.right, known)
+            if right is None or right < 0:
+                return None
+            if abs(left) <= 1:
+                return left ** right
+            if right > 64:
+                return 1 << 64 if left > 0 else -(1 << 64)
+            return left ** right
+        operation = _INT_BINARY.get(type(node.op))
+        if operation is None:
+            return None
+        right = _constant_int(node.right, known)
+        if right is None:
+            return None
+        return operation(left, right)
+    return None
+
+
+def _check_int64_constants(tree):
+    """Refuse a statically known integer constant expression outside int64 by name.
+    The runtime fixed-width trap stays the documented behaviour for values that only reach
+    the operation as variables, but a folded constant must not compile and then trap."""
+    stores = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            stores[node.id] = stores.get(node.id, 0) + 1
+    parameters = {node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)}
+    known = {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Name) or stores.get(target.id) != 1 or target.id in parameters:
+            continue
+        value = _constant_int(node.value, known)
+        if value is not None:
+            known[target.id] = value
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.BinOp):
+            continue
+        value = _constant_int(node, known)
+        if value is not None and not -(1 << 63) <= value < 1 << 63:
+            error = ValueError(f'int64 constant expression out of range: {value}')
+            error.source_line = node.lineno
+            error.source_column = node.col_offset
+            raise error
+
+
 def _returns_on_every_path(statements):
     def loop_exit(body):
         pending = list(body)
@@ -302,6 +375,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                     _check_importable(tree)
             if not declarations_only:
                 _check_int64_literals(tree)
+                _check_int64_constants(tree)
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)
             if source_map is not None:

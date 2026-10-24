@@ -11,5 +11,6 @@ form `C?-<branch>-N`.
 
 | id | area | difference |
 | --- | --- | --- |
+| C?-job-pre108-10242222-1 | integers | A statically known integer constant expression outside int64 (for example `9223372036854775807 * 2`) used to compile and then stop at run time with `integer overflow`; CPython prints a bignum. The front end now evaluates literal and module-constant expressions and refuses the construct by name (`int64 constant expression out of range: ...`) on both builds. Values that only reach the operation at run time keep the fixed-width trap. |
 | C?-job-fuzz51-10231205-1 | bytes/bytearray padding | `ljust`, `rjust` and `center` with an explicit `None` fillchar now raise CPython's TypeError instead of silently padding with spaces. This is a fixed silent difference; `test_ail_fuzz51.py` keeps the case. |
 | C?-job-fuzz37-10230931-1 | ordering comparisons | A TypeError from `<`, `<=`, `>`, `>=` on built-in values that cannot be ordered now names the operator that was written, as CPython does, instead of always naming `<`. This is not a deliberate difference; the row records the fixed behaviour and the fuzz37 regression test. |
