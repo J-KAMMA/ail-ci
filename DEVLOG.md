@@ -1,5 +1,12 @@
 # DEVLOG
 
+## 2026-10-24 - fuzz42: bool abs()
+
+- fuzz42: the general path's `abs()` kept a bool argument's BOOL tag, so `abs(False)` printed
+  `False` and `abs(True)` printed `True` where CPython prints `0` and `1`. The plain call and the
+  builtin-as-`key=`/`map()` wrapper now use `ail_bi_abs`, which boxes an intlike argument as an
+  int. Added `test_ail_fuzz42.py` and registered it in `ail_check.MODULES`.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
