@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - pre125: module-scope bare attribute/subscript annotations
+
+CPython evaluates the target's base object and index expressions, then the annotation
+expression, for `obj.attr: note()` / `xs[i]: note()` at module scope (and stores neither).
+Both builds silently ran neither. Since this compiler cannot evaluate type syntax as a value,
+the Python surface now refuses the construct by name before codegen, with the plain-assignment
+rewrite. A bare annotation on a name (`count: int`) is unchanged. Added
+`test_ail_pre125.py`; probes in `/tmp/probes` (`ann_attr_module.py`, `ann_sub_module.py`,
+`ann_attr_simple.py`, `ann_sub_simple.py`, `ann_sub_getitem.py`, `ann_attr_undef.py`,
+`ann_sub_undef.py`, `ann_attr_name_target.py`, `ann_sub_name_target.py`,
+`ann_attr_alias.py`, `ann_sub_dict_str.py`, `ann_sub_routes.py`, `ann_sub_empty_negative.py`,
+and `ann_name_type.py`).
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
