@@ -26,6 +26,7 @@ the legacy path's locals). A parameter that is never assigned stays an SSA value
 import ast
 import os
 
+from pyfront import int_constant
 from . import ir as I
 from . import effects as E
 from . import ownership
@@ -1762,10 +1763,13 @@ class Lowering(TextLowering):
                 if entry[0] == self.P.FLT and isinstance(value, float):
                     return self.const(I.F64, value)
             raise NotS0('name %r' % node.id)
+        if isinstance(node, ast.BinOp):
+            constant = int_constant(node)
+            if type(constant) is int and -(1 << 63) <= constant < (1 << 63):
+                return self.const(I.I64, constant)
+            return self.binop(node)
         if isinstance(node, ast.UnaryOp):
             return self.unary(node)
-        if isinstance(node, ast.BinOp):
-            return self.binop(node)
         if isinstance(node, ast.BoolOp):
             if os.environ.get('AIL_SURFACE') == 'python' and not all(self.P._is_bool_expr(v, self.ctx)
                                                                     for v in node.values):
