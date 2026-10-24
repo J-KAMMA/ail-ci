@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - bytes.count memmem: self-contained declaration (job-perf7-10240917)
+
+Review found the short-needle `bytes.count` path called `memmem` without a declaration in the
+emitted C, so `gcc -std=c11` (a mode AIL uses for `to_c` and C-object builds) assumed an implicit
+`int` return and truncated the pointer (segfault). The `BYTES` block now declares `memmem`
+itself on non-Windows, after `<string.h>`; glibc and musl both export the symbol, and the
+declaration is compatible with the header's when `_GNU_SOURCE`/`_DEFAULT_SOURCE` is set.
+`rp7_count_small.py` now prints `4 2 2` under `-std=c11 -O2` and `-std=gnu17`; all count probes
+match CPython on both builds, and `binary_search` is unchanged at 64.9 ms vs base 92.0 ms
+(`ail/base 0.711 [0.706,0.717]`). Required tests pass.
+
 ## 2026-10-24 - bytes.count: memmem for short needles (job-perf7-10240917)
 
 `binary_search` (`count` of a 7-byte needle over a 64 MiB file) spent ~69 ms of its 94 ms in

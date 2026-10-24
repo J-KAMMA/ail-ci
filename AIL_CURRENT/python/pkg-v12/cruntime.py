@@ -5643,6 +5643,12 @@ BYTES = r"""
    and stdlib, so this block brings its own header. It is emitted only when a program
    reaches bytes, so a program that does not is unchanged byte for byte. */
 #include <string.h>
+#ifndef _WIN32
+/* <string.h> declares memmem only under _GNU_SOURCE/_DEFAULT_SOURCE, and AIL also compiles
+   the emitted C with -std=c11, which defines neither. Declare it here so the runtime is
+   self-contained in every build mode; glibc and musl both export the symbol. */
+void *memmem(const void *haystack, size_t haystacklen, const void *needle, size_t needlelen);
+#endif
 
 /* The type is Python's `bytes`, not its `str`, and that is the whole design decision.
    `bytes` is an immutable sequence of integers 0..255: `b[i]` is an int, iterating yields ints,
