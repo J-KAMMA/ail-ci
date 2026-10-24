@@ -1055,9 +1055,10 @@ def _exc_attr_value(node, ctx):
 
 
 def _is_exc_arg_call(node, ctx):
-    """`_ail_exc_arg(e, i)` -- e.args[i] as a str (exctext.py)."""
-    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == '_ail_exc_arg'
-            and '_ail_exc_arg' not in ctx.funcs and not node.keywords and len(node.args) == 2)
+    """`_ail_exc_arg(e, i)` / `_ail_exc_arg_repr(e, i)` -- e.args[i] as a str (exctext.py)."""
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id in ('_ail_exc_arg', '_ail_exc_arg_repr')
+            and node.func.id not in ctx.funcs and not node.keywords and len(node.args) == 2)
 
 
 def _exc_intrinsic_arg(node, ctx):
@@ -1085,14 +1086,15 @@ def _exc_intrinsic_value(node, ctx):
 
 
 def _exc_arg_value(node, ctx):
-    """`_ail_exc_arg(e, i)`: the i-th argument of the exception as a str, in the arena."""
+    """`_ail_exc_arg(e, i)` / `_ail_exc_arg_repr(e, i)`: the i-th argument as a str, in the arena."""
     value = _exc_intrinsic_arg(node, ctx)
     if _etype(node.args[1], ctx) != INT:
         raise Unsupported('e.args[...] takes an int index')
     _exc_text_parts(ctx)
     ctx.has_try = True
     index = _map_inline(lambda: _expr(node.args[1], ctx), ctx)
-    return 'ail_exc_argstr(%s, %s, &%s)' % (value, index, ctx.sarena())
+    fname = 'ail_exc_argrepr' if node.func.id == '_ail_exc_arg_repr' else 'ail_exc_argstr'
+    return '%s(%s, %s, &%s)' % (fname, value, index, ctx.sarena())
 
 
 def _is_jd_result_call(node, ctx):
@@ -1335,7 +1337,7 @@ def _etype(node, ctx):
         if f == 'pow' and len(a) == 3 and f not in ctx.funcs:
             return INT
         if f in _EXC_INTRINSICS and f not in ctx.funcs:
-            return STR if f == '_ail_exc_arg' else INT
+            return STR if f in ('_ail_exc_arg', '_ail_exc_arg_repr') else INT
         if f in exctext.ATTR_INTRINSICS and f not in ctx.funcs:
             return {'s': STR, 'i': INT, 'f': FLT}[f[-1]]
         if f in _AIL_SYSINFO and f not in ctx.funcs:

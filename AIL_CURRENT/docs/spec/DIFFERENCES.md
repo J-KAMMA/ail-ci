@@ -2,6 +2,7 @@
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre26-10240859-1 | exception arguments | `repr(e.args[i])` on the typed path quoted numeric, bool and None arguments (`'3.0'` instead of `3.0`); `repr`, `!r` and `%r` now format the stored argument. | fixed |
 | C?-job-fuzz20-10230625-1 | int.from_bytes | the general path accepted int and None as the bytes source (int 1 became one zero byte, None became empty) | fixed: both now raise TypeError like CPython |
 # Differences from CPython 3.12
 
