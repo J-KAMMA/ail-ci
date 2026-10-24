@@ -1,5 +1,19 @@
 # DEVLOG
 
+## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
+
+The general path's native `statistics` helpers kept a heap result in a C local across an
+allocating call. `ail2q_partials` built its result list and then boxed every float in it, and
+`ail2q_ssd_dd` boxed its first tuple element before allocating the second; both relied on
+`AIL2Z_PAUSE` to stop collection. `AIL_GC_STRESS` collects at every allocation regardless of
+the threshold, so the unrooted list/tuple elements were freed and overwritten:
+AddressSanitizer reported a heap-use-after-free in `ail2q_partials` on
+`corpus/gdev/g03_000.py` and `g03_018.py`. Both now register the live locals with
+`AIL_ROOT1` / `AIL_ROOT_N` until the last allocation. Added
+`test_ail_gcstress.PROGRAMS['statistics_partials']` and its test; it fails with the old
+runtime and passes now. The analogous code in `jsonbrt.py` was checked: `ail_tuple_new`
+already roots the item array it is given, so no change was needed there.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
@@ -141,3 +155,10 @@ Remaining differences found are recorded in `DIFFERENCES.md`; they were not fixe
 - Fixed `tuplegen.lrepr`: scalar list elements use `repr(x)`, so the value's own repr is used; compound elements keep their existing helper.
 - Added `AIL_CURRENT/test_ail_fuzz65.py` and registered it in `ail_check.py`.
 - Other observed, not fixed: `list[tuple]` heaps with a wrong-typed item still fail while printing (`int` not subscriptable) instead of printing CPython's list; `nan`/`inf` literals remain refused by name.
+## 2026-10-23 -- job-fuzz89-10231611
+
+- Fixed the general path's `bytes`/`bytearray` whitespace `split`/`rsplit` when `maxsplit` is
+  reached: the remainder now keeps the outer whitespace, as CPython does
+  (`b" a ".split(None, 0) == [b"a "]`, `b"  a  b  ".rsplit(None, 1) == [b"  a", b"b"]`).
+  The typed-path loops already had CPython's rule.
+- Added `test_ail_fuzz89.py` (both builds against CPython) and registered it in `ail_check.py`.

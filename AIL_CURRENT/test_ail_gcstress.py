@@ -168,6 +168,20 @@ def main() -> None:
 
 main()
 ''',
+    'statistics_partials': r'''
+import statistics
+
+
+def main() -> None:
+    data = [1.5, 2.25, 3.0, 2.25, 4.75, 3.0, 2.25, 5.5, 6.125, 7.0]
+    print(statistics.mean(data), statistics.fmean(data))
+    print(statistics.pvariance(data), statistics.variance(data))
+    print(statistics.pstdev(data), statistics.stdev(data))
+    print(statistics.mean([float(i) for i in range(200)]))
+
+
+main()
+''',
     'classes_generators_exceptions': r'''
 from functools import reduce
 
@@ -297,6 +311,9 @@ class GCStress(unittest.TestCase):
 
     def test_numbers_and_stats(self):
         self.check('numbers_and_stats')
+
+    def test_statistics_partials(self):
+        self.check('statistics_partials')
 
     def test_classes_generators_exceptions(self):
         self.check('classes_generators_exceptions')
