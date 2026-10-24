@@ -122,23 +122,47 @@ def _ail_b_source(source, encoding, errors):
     return _ail_b_from_ints(source)
 
 
+def _ail_b_bound(x):
+    if x is None:
+        return None
+    if isinstance(x, bool):
+        return 1 if x else 0
+    if isinstance(x, int):
+        return x
+    has = False
+    try:
+        has = hasattr(x, "__index__")
+    except Exception:
+        has = False
+    if not has:
+        raise TypeError("slice indices must be integers or None or have an __index__ method")
+    r = getattr(x, "__index__")()
+    if not isinstance(r, int):
+        raise TypeError("__index__ returned non-int (type " + type(r).__name__ + ")")
+    return int(r)
+
+
 def _ail_b_rng(n, start, end):
     st = 0
     en = n
     if start is not None:
-        st = start
-        if st < 0:
-            st = st + n
-            if st < 0:
-                st = 0
+        st = _ail_b_bound(start)
     if end is not None:
-        en = end
+        en = _ail_b_bound(end)
+    if start is not None:
+        if st < 0:
+            if st < -n:
+                st = 0
+            else:
+                st = st + n
+    if end is not None:
         if en > n:
             en = n
         elif en < 0:
-            en = en + n
-            if en < 0:
+            if en < -n:
                 en = 0
+            else:
+                en = en + n
     return (st, en)
 
 
