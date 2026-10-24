@@ -478,9 +478,26 @@ def _edits():
               "        }\n"
               "        /* fall through */\n"
               "        default: { char buf[80]; snprintf(buf, sizeof buf, \"float() argument must be a string or a number, not '%s'\", ail_type_name(x.tag));"))
-    e.append(('static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, int64_t n) {\n',
-              'static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, int64_t n) {\n'
-              '    if (x.tag == AIL_T_INST) { ail_d2_fn f = ail_dun2(x, AIL_D2_ROUND); if (f) return f(cx, out, x, has_n ? ail_box_int(n) : ail_box_none()); }\n'))
+    e.append(('static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, ail_obj n) {\n',
+              'static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, ail_obj n) {\n'
+              '    if (x.tag == AIL_T_INST) { ail_d2_fn f = ail_dun2(x, AIL_D2_ROUND); if (f) return f(cx, out, x, has_n ? n : ail_box_none()); }\n'))
+    # round() of an instance without __round__ names the class, as CPython does
+    e.append(('static inline ail_st ail_bi_round_no_method(ail_ctx *cx, ail_obj x) {\n'
+              '    char buf[80]; snprintf(buf, sizeof buf, "type %s doesn\'t define __round__ method", ail_type_name(x.tag));\n',
+              'static inline ail_st ail_bi_round_no_method(ail_ctx *cx, ail_obj x) {\n'
+              '    char buf[80]; snprintf(buf, sizeof buf, "type %s doesn\'t define __round__ method", ail__dun_tname_s(x));\n'))
+    # round(x, ndigits): the ndigits __index__ conversion belongs to the int/float paths only
+    e.append(('    { char buf[96]; snprintf(buf, sizeof buf, "\'%s\' object cannot be interpreted as an integer", ail_type_name(nobj.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }\n',
+              '    if (nobj.tag == AIL_T_INST) {\n'
+              '        ail_d1_fn f = ail_dun1(nobj, AIL_D1_INDEX);\n'
+              '        if (f) {\n'
+              '            ail_obj r; ail_st st = f(cx, &r, nobj);\n'
+              '            if (st != AIL_OK) return st;\n'
+              '            if (r.tag == AIL_T_INT || r.tag == AIL_T_BOOL) { *out = r.i; return AIL_OK; }\n'
+              '            { char buf[96]; snprintf(buf, sizeof buf, "__index__ returned non-int (type %s)", ail__dun_tname_s(r)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }\n'
+              '        }\n'
+              '    }\n'
+              '    { char buf[96]; snprintf(buf, sizeof buf, "\'%s\' object cannot be interpreted as an integer", ail__dun_tname_s(nobj)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }\n'))
     for fn, key in (('floor', 'FLOOR'), ('ceil', 'CEIL'), ('trunc', 'TRUNC')):
         e.append(('static inline ail_st ail_math_%s(ail_ctx *cx, ail_obj *out, ail_obj x) {\n' % fn,
                   'static inline ail_st ail_math_%s(ail_ctx *cx, ail_obj *out, ail_obj x) {\n'
