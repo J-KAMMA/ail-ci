@@ -21,7 +21,7 @@ same exception the typed path uses) -- never a silent gap, never a bare gcc erro
 import ast
 import re
 
-from pyfront import Unsupported, refuse_complex_pow
+from pyfront import Unsupported, normalize_none_slice_bounds, refuse_complex_pow
 
 # ---------------------------------------------------------------------------------------------
 # Exception-type-name -> the runtime's AIL_ERR_* id. Only the runtime's own built-in exception
@@ -839,6 +839,7 @@ class Compiler:
     # ---------------------------------------------------------------------------- entry point
     def compile(self, source):
         tree = ast.parse(source)
+        normalize_none_slice_bounds(tree)
         self.module_names = _scan_assigned_names(tree.body)
         for n in ast.walk(tree):
             if isinstance(n, ast.FunctionDef):
@@ -1549,8 +1550,14 @@ class Compiler:
             def bound(e, default):
                 if e is None:
                     return '0', str(default)
+                # None is an omitted bound, also when the None arrives at run time (a variable,
+                # an argument, a list item, an attribute); read the value once so a bound with
+                # an effect keeps its single evaluation.
                 v = self.expr(e, ctx)
-                return '1', '(%s).i' % v
+                t = ctx.tmp()
+                ctx.emit('%s = %s;' % (t, v))
+                return ('(%s.tag != AIL_T_NONE && %s.tag != AIL_T_UNBOUND)' % (t, t),
+                        '(%s).i' % t)
             hlo, lo = bound(node.slice.lower, 0)
             hhi, hi = bound(node.slice.upper, 0)
             hst, st = bound(node.slice.step, 1)

@@ -122,6 +122,24 @@ class Unsupported(PipelineError):
     """Outside the subset. The message names the construct, so the boundary stays measurable."""
 
 
+class _NoneSliceBounds(ast.NodeTransformer):
+    """`x[None:None:-1]` is `x[::-1]` in Python: an explicit None bound means an omitted one. Some
+    lowerings test for a bound by AST presence, so normalize the literal here, once, for all of
+    them -- a bound that is None only at run time stays a value and is resolved by the runtime."""
+
+    def visit_Slice(self, node):
+        self.generic_visit(node)
+        for field in ('lower', 'upper', 'step'):
+            bound = getattr(node, field)
+            if isinstance(bound, ast.Constant) and bound.value is None:
+                setattr(node, field, None)
+        return node
+
+
+def normalize_none_slice_bounds(tree):
+    return _NoneSliceBounds().visit(tree)
+
+
 def _number_constant(node):
     """The value of an int/float literal, with any unary signs (`-4.0`, `+(-2)`), else None."""
     sign = 1

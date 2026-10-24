@@ -1,3 +1,14 @@
+## 2026-10-24 - explicit None slice bounds (job-pre161-10250350)
+
+`x[None:None:-1]` is `x[::-1]` in CPython, but a local `x = 'abcde'` answered `''` and
+`x[3:None:-1]` answered `'dcb'`. Lowerings decided a bound was present from the AST node alone,
+then read the None value's `.i` as an index. Literal `None` bounds are now normalized to omitted
+bounds once, for every lowering (typed, pyboxed and pyboxed2); a bound that is None only at run
+time -- through a variable, argument, list item, attribute or dict value -- is read once and its
+tag checked in the general emitter, so it too means "omitted". Added
+`test_ail_pre161.py` covering str/list/tuple/bytes/bytearray, empty and single-element inputs,
+negative bounds, repetition and slice-copy aliasing on both builds.
+
 # DEVLOG
 
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
