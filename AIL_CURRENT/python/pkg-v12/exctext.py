@@ -31,7 +31,7 @@ TEXT, REPR, TYPE, QUAL, ARGSREPR = '__ail_text__', '__ail_repr__', '__ail_type__
 FILENAME = '__ail_filename__'
 VIRTUAL_FIELDS = (TEXT, REPR, TYPE, QUAL, ARGSREPR, FILENAME)
 OS_CLASS_NAMES = ('OSError', 'FileNotFoundError', 'PermissionError', 'IsADirectoryError', 'FileExistsError', 'NotADirectoryError')
-INTRINSICS = ('_ail_exc_arg', '_ail_exc_nargs', '_ail_exc_isa', '_ail_exc_is')
+INTRINSICS = ('_ail_exc_arg', '_ail_exc_arg_repr', '_ail_exc_nargs', '_ail_exc_isa', '_ail_exc_is')
 ATTR_INTRINSICS = ('_ail_exc_attr_s', '_ail_exc_attr_i', '_ail_exc_attr_f')
 
 
@@ -139,9 +139,16 @@ class _Handler(ast.NodeTransformer):
         return self.generic_visit(node)
 
     # -- text contexts
+    def arg_repr(self, node):
+        """`repr(e.args[i])` keeps the argument's kind: a numeric argument is not its textual form."""
+        if isinstance(node, ast.Subscript) and self.is_args(node.value) and not isinstance(node.slice, ast.Slice):
+            return self.call('_ail_exc_arg_repr', [ast.Name(self.name, ast.Load()), self.visit(node.slice)], node)
+        return None
+
     def visit_FormattedValue(self, node):
         if node.conversion in (115, 114) or node.conversion == -1 and node.format_spec is None:
-            text = self.text_of(node.value, want_repr=node.conversion == 114)
+            text = (self.arg_repr(node.value) if node.conversion == 114 else None) \
+                or self.text_of(node.value, want_repr=node.conversion == 114)
             if text is not None:
                 spec = self.visit(node.format_spec) if node.format_spec is not None else None
                 return ast.copy_location(ast.FormattedValue(value=text, conversion=-1, format_spec=spec), node)
@@ -155,10 +162,14 @@ class _Handler(ast.NodeTransformer):
                 return self.generic_visit(node)
             if not node.keywords:
                 if func.id in ('str', 'repr') and len(node.args) == 1:
-                    text = self.text_of(node.args[0], want_repr=func.id == 'repr')
+                    arg = node.args[0]
+                    if func.id == 'repr':
+                        text = self.arg_repr(arg)
+                        if text is not None:
+                            return text
+                    text = self.text_of(arg, want_repr=func.id == 'repr')
                     if text is not None:
                         return text
-                    arg = node.args[0]
                     if (func.id == 'str' and isinstance(arg, ast.Subscript) and self.is_args(arg.value)
                             and not isinstance(arg.slice, ast.Slice)):
                         return self.visit(arg)           # e.args[i] already reads as its text
@@ -205,7 +216,8 @@ class _Handler(ast.NodeTransformer):
             if len(specs) == len(operands):
                 new, as_s = [], []
                 for index, (spec, operand) in enumerate(zip(specs, operands)):
-                    got = self.text_of(operand, want_repr=spec == 'r') if spec in ('s', 'r') else None
+                    got = (self.arg_repr(operand) if spec == 'r' else None) \
+                        or (self.text_of(operand, want_repr=spec == 'r') if spec in ('s', 'r') else None)
                     new.append(got or operand)
                     if got is not None:
                         as_s.append(index)
@@ -777,6 +789,17 @@ static ail_str ail_exc_argstr(const ail_exception *e, int64_t i, ail_sarena *A) 
     ail_exarg a = ail_exc_arg(e, i);
     ail_str s = ail__exc_piece(&a, 0, A);
     return a.kind == 0 ? ail_exception_string_copy(s, A) : s;
+}
+/* repr(e.args[i]): a str argument keeps its quotes, a numeric one stays numeric ("3.0", not "'3.0'"). */
+static ail_str ail_exc_argrepr(const ail_exception *e, int64_t i, ail_sarena *A) {
+    int64_t n = ail_exc_nargs(e);
+    if (i < 0) i += n;
+    if (i < 0 || i >= n) {
+        static const char m[] = "tuple index out of range";
+        ail_raise_value_adopt(ail_exception_new(AIL_EXC_INDEX, (const uint8_t *)m, (int64_t)sizeof m - 1, 1));
+    }
+    ail_exarg a = ail_exc_arg(e, i);
+    return ail__exc_piece(&a, 1, A);
 }
 /* the message of an exception built from arguments: what str(e) would be, kept in p/n for e.message and for the
    report of an uncaught exception (a single str argument is the message itself) */
