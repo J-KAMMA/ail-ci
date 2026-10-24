@@ -18574,12 +18574,14 @@ static inline ail_st ail_meth_str_rpartition(ail_ctx *cx, ail_obj *out, ail_obj 
    =================================================================================== */
 static inline int64_t ail__expandtabs_len(ail_str s, int64_t tabsize) {
     int64_t col = 0, out = 0;
-    for (int64_t i = 0; i < s.n; i++) {
+    for (int64_t i = 0; i < s.n; ) {
+        int64_t w = ail__str_width(s, i);
         uint16_t c = ail_chr(s, i);
         if (c == '\t') {
             if (tabsize > 0) { int64_t sp = tabsize - (col % tabsize); out += sp; col += sp; }
         } else if (c == '\n' || c == '\r') { out++; col = 0; }
-        else { out++; col++; }
+        else { out += w; col++; }
+        i += w;
     }
     return out;
 }
@@ -18588,12 +18590,14 @@ static inline ail_obj ail_meth_str_expandtabs(ail_ctx *cx, ail_obj sobj, int64_t
     int64_t total = ail__expandtabs_len(s, tabsize);
     ail_strbuild bu = ail_str_buf1(cx, total, sobj);
     int64_t col = 0, o = 0;
-    for (int64_t i = 0; i < s.n; i++) {
+    for (int64_t i = 0; i < s.n; ) {
+        int64_t w = ail__str_width(s, i);
         uint16_t c = ail_chr(s, i);
         if (c == '\t') {
             if (tabsize > 0) { int64_t sp = tabsize - (col % tabsize); for (int64_t k = 0; k < sp; k++) bu.buf[o++] = ' '; col += sp; }
         } else if (c == '\n' || c == '\r') { bu.buf[o++] = c; col = 0; }
-        else { bu.buf[o++] = c; col++; }
+        else { for (int64_t k = 0; k < w; k++) bu.buf[o++] = ail_chr(s, i + k); col++; }
+        i += w;
     }
     return ail_str_buf_done(bu, total);
 }

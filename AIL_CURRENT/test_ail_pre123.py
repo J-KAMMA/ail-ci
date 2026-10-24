@@ -92,10 +92,43 @@ def main() -> None:
 main()
 """
 
+EXPAND = r"""def take(s: str, n: int) -> str:
+    return s.expandtabs(n)
+
+
+class Box:
+    def __init__(self, v: str) -> None:
+        self.v: str = v
+
+
+def main() -> None:
+    em = b'\xf0\x9f\x98\x80'.decode()
+    mu = b'\xf0\x9d\x84\x9e'.decode()
+    print(repr(('a' + em + 'b\tc').expandtabs(4)))
+    print(repr((em + '\tX').expandtabs(4)), repr(('\t' + em + '\t').expandtabs(4)))
+    print(repr((em + em + 'x\ty').expandtabs(8)))
+    print(repr(('ab\t' + mu + '\tcd\ne\tf\rg\thi').expandtabs(4)))
+    print(repr(('a' + em + 'b\tc').expandtabs(0)), repr(('a' + em + 'b\tc').expandtabs(-3)))
+    print(repr(('a' + em + 'b\tc').expandtabs()))
+    print(repr(''.expandtabs(4)), repr('\t'.expandtabs(4)), repr(em.expandtabs(4)))
+    print(repr(take('a' + em + '\tb', 4)))
+    xs = ['a' + em + '\tb', mu + '\t' + em]
+    print(repr(xs[0].expandtabs(4)), repr(xs[1].expandtabs(2)))
+    d = {'k': 'x' + em + '\ty'}
+    print(repr(d['k'].expandtabs(3)))
+    b = Box('q' + mu + '\tz')
+    print(repr(b.v.expandtabs(4)))
+    print(repr(('p' + em + '\tq').split('\t')[0].expandtabs(5)))
+
+
+main()
+"""
+
 CASES = [
     ('decode_astral', DECODE),
     ('astral_operations', OPS),
     ('astral_carriers_errors', CARRIERS),
+    ('astral_expandtabs', EXPAND),
 ]
 
 

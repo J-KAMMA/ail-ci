@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - job-pre123-10242349: astral `str.expandtabs` (review fix)
+
+Reviewer defect: `expandtabs` advanced the column once per UTF-16 storage unit, so an astral
+code point shifted every later tab stop by one.  Both passes now step by `ail__str_width` and
+advance `col` once per code point, while still sizing the output in storage units; ASCII/BMP
+strings behave as before.  Added an `astral_expandtabs` case (tab before/after a pair, BMP and
+astral mixed, `tabsize` 0/negative/default, `\n`/`\r` reset, empty input, and values through a
+function argument, list item, dict value, attribute and a split result) to
+`test_ail_pre123.py`.  Probes `p_expand_basic` and `p_expand_carriers` match CPython in both
+builds.
+
 ## 2026-10-24 - job-pre123-10242349: astral UTF-8 decode on the general path
 
 The first pre-existing difference from the pre91 review was still present on this tree: decoding
