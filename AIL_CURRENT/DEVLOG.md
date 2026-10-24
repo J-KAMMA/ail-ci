@@ -1,5 +1,17 @@
 # DEVLOG
 
+## 2026-10-24 - pre86 follow-up: validate r after materialising the pool
+
+The reviewer found that the new eager r tag check ran before the iterable was materialised, so
+`permutations(5, "x")` raised `Expected int as r` where CPython (and the base) raise
+`'int' object is not iterable`. The tag test now lives in `ail_it_permutations` after
+`ail__materialize`, with the boxed r rooted in the helper frame; the caller also forces the
+iterable expression into a temp before evaluating r so both arguments keep CPython's left-to-right
+order. `test_ail_pre86.py` gained an order/error-precedence program covering `it()/rv()`, a
+non-iterable pool with a bad r, and a bad r on its own. All reviewer probes r1-r14 and the new
+`/tmp/probes/p86_perm_*` probes match CPython on both builds except the pre-existing negative-r
+`[]` difference and the pre-existing default-build positive-literal compile failure.
+
 ## 2026-10-24 - pre86: `permutations(xs, None)` means r=len(pool)
 
 `itertools.permutations(iterable, None)` produced only `()` on both builds; CPython treats an

@@ -5,8 +5,9 @@ argument is None, so an explicit None means r=len(pool) and the full
 permutations are produced.  The general path lowered the boxed value with
 `(r).i`, so a None (or a value reaching the call through an argument, a list
 item, an attribute or a dict value) became r=0.  The run-time helper now tests
-the tag at run time: None keeps the pool size, an int or bool is the requested
-r, and anything else raises CPython 3.12's TypeError.
+the tag after materialising the pool: None keeps the pool size, an int or bool
+is the requested r, and anything else raises CPython 3.12's TypeError.  Testing
+after materialisation also keeps a non-iterable pool's error ahead of a bad r.
 
 Each program is built on both builds and compared with CPython.
 """
@@ -119,6 +120,44 @@ main()
 '''
 
 
+PERM_ORDER = r'''from itertools import permutations
+
+
+def it():
+    print("iter")
+    return [1, 2]
+
+
+def rv():
+    print("r")
+    return None
+
+
+print(list(permutations(it(), rv())))
+
+
+def badit():
+    print("baditer")
+    return 5
+
+
+def badr():
+    print("badr")
+    return "x"
+
+
+try:
+    permutations(badit(), badr())
+except TypeError as e:
+    print("TE", e)
+
+try:
+    permutations(5, "x")
+except TypeError as e:
+    print(e)
+'''
+
+
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -171,6 +210,9 @@ class Pre86Tests(unittest.TestCase):
 
     def test_permutations_none_types(self):
         self.check('perm_none_types', PERM_NONE_TYPES)
+
+    def test_permutations_none_order(self):
+        self.check('perm_none_order', PERM_ORDER)
 
 
 if __name__ == '__main__':

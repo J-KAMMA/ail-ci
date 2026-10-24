@@ -20118,12 +20118,15 @@ static inline ail_st ail_it_product_repeat(ail_ctx *cx, ail_obj *out, ail_obj a,
     AIL_FRAME_LEAVE(cx, fr);
     return ail_iter(cx, out, res);
 }
-static inline ail_st ail_it_permutations(ail_ctx *cx, ail_obj *out, ail_obj iterable, int has_r, int64_t r) {
-    ail_obj pr_[2]; pr_[1] = ail_box_none();
-    ail_st st = ail__materialize(cx, &pr_[0], iterable); if (st != AIL_OK) return st;
-    AIL_ROOT_N(cx, fr, pr_, 2); /* 0=pool 1=result */
+static inline ail_st ail_it_permutations(ail_ctx *cx, ail_obj *out, ail_obj iterable, int has_r, ail_obj rbox) {
+    ail_obj pr_[3]; pr_[1] = ail_box_none(); pr_[2] = rbox;
+    AIL_ROOT_N(cx, fr, pr_, 3); /* 0=pool 1=result 2=boxed r */
+    ail_st st = ail__materialize(cx, &pr_[0], iterable); if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
     ail_vecobj *pool = (ail_vecobj *)pr_[0].o;
-    int64_t n = pool->n; int64_t rr = has_r ? r : n;
+    int64_t n = pool->n; int64_t rr;
+    if (!has_r || pr_[2].tag == AIL_T_NONE) rr = n;
+    else if (pr_[2].tag == AIL_T_INT || pr_[2].tag == AIL_T_BOOL) rr = pr_[2].i;
+    else { AIL_FRAME_LEAVE(cx, fr); return ail_raise_c(cx, AIL_B_TYPEERROR, "Expected int as r"); }
     pr_[1] = ail_list_new(cx); ail_obj res = pr_[1];
     if (rr < 0 || rr > n) { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
     int64_t *indices = (int64_t *)ail_xmalloc((size_t)(n > 0 ? n : 1) * sizeof(int64_t));
