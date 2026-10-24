@@ -507,6 +507,47 @@ def _edits():
     e.append(('        default: { char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable"',
               '        case AIL_T_INST: { ail_d2_fn f = ail_dun2(c, AIL_D2_GETITEM); if (f) return f(cx, out, c, key); }\n        /* fall through */\n'
               '        default: { char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable"'))
+    # the sequence protocol: iterating an instance with __getitem__ and no __iter__ / __next__ calls
+    # __getitem__(0), __getitem__(1), ... until IndexError.  A dedicated iterator kind carries the index.
+    e.append(('    AIL_IT_REVERSED, AIL_IT_MAP, AIL_IT_FILTER, AIL_IT_STREAM, AIL_IT_USER\n};',
+              '    AIL_IT_REVERSED, AIL_IT_MAP, AIL_IT_FILTER, AIL_IT_STREAM, AIL_IT_USER, AIL_IT_GETITEM\n};'))
+    e.append(('''    if (!fn) {
+        char buf[96]; snprintf(buf, sizeof buf, "'%s' object is not iterable", ail_type_name(obj.tag));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }''',
+              '''    if (!fn) {
+        if (ail_dun2(obj, AIL_D2_GETITEM)) {
+            *out = ail__iter_wrap(cx, AIL_IT_GETITEM, obj, ail_box_none(), 0);
+            return AIL_OK;
+        }
+        char buf[96]; snprintf(buf, sizeof buf, "'%s' object is not iterable", ail_type_name(obj.tag));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }'''))
+    e.append(('''        case AIL_IT_USER: {
+            for (ail_obj k = ((ail_instobj *)it->target.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+                ail_classobj *kc = (ail_classobj *)k.o;
+                if (kc->iter_next) return kc->iter_next(cx, out, it->target);
+            }
+            return AIL_STOP;
+        }
+        case AIL_IT_LIST: case AIL_IT_TUPLE: {''',
+              '''        case AIL_IT_USER: {
+            for (ail_obj k = ((ail_instobj *)it->target.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+                ail_classobj *kc = (ail_classobj *)k.o;
+                if (kc->iter_next) return kc->iter_next(cx, out, it->target);
+            }
+            return AIL_STOP;
+        }
+        case AIL_IT_GETITEM: {
+            ail_d2_fn f = ail_dun2(it->target, AIL_D2_GETITEM);
+            if (!f) return AIL_STOP;
+            ail_obj r; ail_st st = f(cx, &r, it->target, ail_box_int(it->idx));
+            if (st == AIL_EXC && ail_exc_matches_b(cx, AIL_B_INDEXERROR)) { ail_exc_clear(cx); return AIL_STOP; }
+            if (st != AIL_OK) return st;
+            it->idx++;
+            *out = r; return AIL_OK;
+        }
+        case AIL_IT_LIST: case AIL_IT_TUPLE: {'''))
     return e
 
 

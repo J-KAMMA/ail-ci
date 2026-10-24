@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - pre60: iteration through __getitem__ (sequence protocol)
+
+The first pre-existing pre38 difference still present was `p_seqproto2`: an instance with
+`__getitem__` but no `__iter__` / `__next__` was iterable in CPython through the sequence
+protocol (`obj[0]`, `obj[1]`, ... until `IndexError`), but AIL refused it on both builds with
+`TypeError: 'instance' object is not iterable`. The general-path runtime now has an
+`AIL_IT_GETITEM` iterator kind carrying the index; `__iter__` still takes precedence when a
+class defines both. Added `test_ail_pre60.py` (basic/empty/mixed values, argument/list
+item/attribute/dict value, aliasing, `IndexError` subclass, non-`IndexError` propagation,
+inheritance, `__iter__` precedence). Probes `seq_basic`, `seq_values`, `seq_alias`,
+`seq_errors`, and `p_seqproto2` match CPython on both builds; `test_ail_pre60`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
