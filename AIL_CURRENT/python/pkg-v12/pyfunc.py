@@ -24579,7 +24579,7 @@ _PAR_CAPTURE_TYPES = ('int64_t', 'double', 'ail_flist', 'ail_list', 'ail_bytes',
 # traps are intercepted, see cruntime._PARALLEL_DIE_EDITS) and nothing that allocates, counts
 # references or touches an arena.
 _PAR_HELPERS = frozenset((
-    'ail_die', 'ail_raise_named', 'ail_fdiv', 'ck_add', 'ck_sub', 'ck_mul', 'ck_neg', 'ck_shl', 'ck_shlk', 'ck_shr',
+    'ail_die', 'ail_raise_named', 'ail_fdiv', 'ail_fdiv_f', 'ck_add', 'ck_sub', 'ck_mul', 'ck_neg', 'ck_shl', 'ck_shlk', 'ck_shr',
     'ail_list_get', 'ail_list_set', 'ail_flist_get', 'ail_flist_set', 'ail_bytearray_get',
     'ail_bytearray_set', 'ail_bytearray_len', 'ail_bytearray_index', 'ail_bytearray_meta', 'ail_bytes_get',
     'ail_ffloormod', 'ail_fsqrt', 'ail_ipow', 'ail_round0',

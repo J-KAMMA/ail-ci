@@ -27777,6 +27777,8 @@ def _piece_text(p, want):
         text = _exctext.apply(text, (('static void ail_raise_msg(int code, const char *t) {\n',
                                       'static void ail_raise_msg(int code, const char *t) {\n'
                                       '    if (ail_par_cur) ail_par_trap(t, code);\n'),), 'the DIE block (PARN)')
+    if p in _PARALLEL_DIV_EDITS and 'PAR' in want:
+        text = _parallel_div(p, text)
     return _parallel_die(text) if p == 'DIE' and 'PAR' in want else text
 
 
@@ -27799,6 +27801,44 @@ def _parallel_die(text):
     for old, new in _PARALLEL_DIE_EDITS:
         if text.count(old) != 1:
             raise AssertionError('DIE block changed; update _PARALLEL_DIE_EDITS: ' + old)
+        text = text.replace(old, new)
+    return text
+
+
+# A zero divisor raises on the calling thread, where the exception stack is safe to touch. Inside a
+# `parallel for` worker there is no such stack: keep the trap that PAR already records and re-raises
+# after the join instead. Only the failure path differs; the helper text and messages are unchanged.
+_PARALLEL_DIV_EDITS = {
+    'FDIV': (
+        ('    if (b == 0) ail_raise_value_adopt(ail_exception_new(AIL_EXC_ZERODIV,\n'
+         '        (const uint8_t *)"division by zero", (int64_t)strlen("division by zero"), 1));\n',
+         '    if (b == 0) {\n'
+         '        if (ail_par_cur) ail_die("division by zero");\n'
+         '        ail_raise_value_adopt(ail_exception_new(AIL_EXC_ZERODIV,\n'
+         '            (const uint8_t *)"division by zero", (int64_t)strlen("division by zero"), 1));\n'
+         '    }\n'),
+        ('    if (b == 0) ail_raise_value_adopt(ail_exception_new(AIL_EXC_ZERODIV,\n'
+         '        (const uint8_t *)"float division by zero", (int64_t)strlen("float division by zero"), 1));\n',
+         '    if (b == 0) {\n'
+         '        if (ail_par_cur) ail_die("float division by zero");\n'
+         '        ail_raise_value_adopt(ail_exception_new(AIL_EXC_ZERODIV,\n'
+         '            (const uint8_t *)"float division by zero", (int64_t)strlen("float division by zero"), 1));\n'
+         '    }\n'),
+    ),
+    'FFLOORMOD': (
+        ('        const char *w = remainder ? "float modulo" : "float floor division by zero";\n'
+         '        ail_raise_value_adopt(ail_exception_new(AIL_EXC_ZERODIV, (const uint8_t *)w,\n',
+         '        const char *w = remainder ? "float modulo" : "float floor division by zero";\n'
+         '        if (ail_par_cur) ail_die(w);\n'
+         '        ail_raise_value_adopt(ail_exception_new(AIL_EXC_ZERODIV, (const uint8_t *)w,\n'),
+    ),
+}
+
+
+def _parallel_div(p, text):
+    for old, new in _PARALLEL_DIV_EDITS[p]:
+        if text.count(old) != 1:
+            raise AssertionError('%s changed; update _PARALLEL_DIV_EDITS: %s' % (p, old))
         text = text.replace(old, new)
     return text
 
