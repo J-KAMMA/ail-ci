@@ -144,10 +144,18 @@ class _FnFacts:
 
 EXC_TYPE_NAMES = frozenset({'ValueError', 'ZeroDivisionError', 'IndexError', 'KeyError', 'EOFError'})
 _TRAP_EXC = {ast.Div: 'ZeroDivisionError', ast.FloorDiv: 'ZeroDivisionError', ast.Mod: 'ZeroDivisionError'}
+# ck_shl/ck_shr raise ValueError for a negative count, so a shift is a trap unless the count is a
+# non-negative literal. Keeping this here (not only in the C guard) is what lets a candidate be
+# rejected before its typed clone can bypass a caller's boxed handler.
+_SHIFT_EXC = {ast.LShift: 'ValueError', ast.RShift: 'ValueError'}
 
 
 def _provably_nonzero(node):
     return isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and node.value != 0
+
+
+def _provably_nonnegative(node):
+    return isinstance(node, ast.Constant) and isinstance(node.value, int) and node.value >= 0
 
 
 def _build_parents(tree):
@@ -193,6 +201,10 @@ def _raise_site_exc(node):
         return node.exc.id if node.exc.id in EXC_TYPE_NAMES else None
     if isinstance(node, ast.BinOp) and type(node.op) in _TRAP_EXC and not _provably_nonzero(node.right):
         return _TRAP_EXC[type(node.op)]
+    if isinstance(node, ast.BinOp) and type(node.op) in _SHIFT_EXC and not _provably_nonnegative(node.right):
+        return _SHIFT_EXC[type(node.op)]
+    if isinstance(node, ast.AugAssign) and type(node.op) in _SHIFT_EXC and not _provably_nonnegative(node.value):
+        return _SHIFT_EXC[type(node.op)]
     if isinstance(node, ast.Subscript):
         return 'IndexError'                             # list/str; dict subscript is KeyError too,
                                                           # but IndexError is always in play here
@@ -293,21 +305,76 @@ def _escapes(fn_facts, parents):
     return esc, call_sites
 
 
-def _protected(name, exc, call_sites, parents, seen=frozenset()):
+def _enclosing_function(node, parents):
+    cur = node
+    while cur in parents:
+        par = parents[cur]
+        if isinstance(par, ast.FunctionDef):
+            return par.name
+        cur = par
+    return MODULE_SCOPE
+
+
+def _inside_lambda(node, parents):
+    cur = node
+    while cur in parents:
+        par = parents[cur]
+        if isinstance(par, ast.Lambda):
+            return True
+        if isinstance(par, ast.FunctionDef):
+            return False
+        cur = par
+    return False
+
+
+def _indirect_names(tree, fn_facts, parents):
+    """Function names whose call sites are not statically tied to one invocation point: a name
+    loaded as a value (stored in a list, passed as a callback), a call inside a `lambda`, or a
+    function called by one of those.  A boxed `try` at the eventual invocation site cannot be seen
+    from such a call site, so an exception-escaping candidate used this way is not safe to type."""
+    names = set(fn_facts)
+    indirect = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in names:
+            par = parents.get(node)
+            if not (isinstance(par, ast.Call) and par.func is node):
+                indirect.add(node.id)
+    edges = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in names:
+            callee = node.func.id
+            if _inside_lambda(node, parents):
+                indirect.add(callee)
+            caller = _enclosing_function(node, parents)
+            if caller != MODULE_SCOPE:
+                edges.append((caller, callee))
+    while True:
+        added = {callee for caller, callee in edges if caller in indirect} - indirect
+        if not added:
+            return indirect
+        indirect |= added
+
+
+def _protected(name, exc, call_sites, parents, indirect=frozenset(), seen=frozenset()):
     """True iff SOME call site reaching `name` (directly, or through a chain of ordinary boxed
     calls) sits inside a `try/except` for `exc` anywhere up that chain -- walked the way CPython's
     own frame unwinding would, since that is exactly the behaviour a rejected candidate is standing
     in for (see module docstring: crossing the typed/boxed boundary loses every handler that is not
-    lexically inside the SAME typed closure)."""
+    lexically inside the SAME typed closure).  A name invoked indirectly is treated as protected:
+    the invocation site (and therefore any handler above it) is not statically known."""
     if name in seen:
         return False
+    if name in indirect:
+        return True
     for call_node, caller_name in call_sites.get(name, ()):
         scope, trys = _enclosing_scope_and_trys(call_node, parents)
         if any(_handler_catches(h, exc) for t in trys for h in t.handlers):
             return True
         if scope == MODULE_SCOPE:
             continue                                    # this path ends uncaught -- safe on its own
-        if _protected(scope, exc, call_sites, parents, seen | {name}):
+        if scope in indirect:
+            return True
+        if _protected(scope, exc, call_sites, parents, indirect, seen | {name}):
             return True
     return False
 
@@ -636,6 +703,7 @@ def analyze(source, classes=()):
     defs_src = _defs_only_source(tree)
     parents = _build_parents(tree)
     esc, call_sites = _escapes(fn_facts, parents)
+    indirect = _indirect_names(tree, fn_facts, parents)
     report = MixReport()
     rets = {name: f.ret for name, f in fn_facts.items()}
     # One C return ABI cannot preserve distinct Python tags on different branches.
@@ -670,7 +738,8 @@ def analyze(source, classes=()):
         if name in unsafe_returns:
             report.rejected[name] = (REASON_UNRESOLVED_RET, 'return branches require distinct tags')
             continue
-        blocking = sorted(exc for exc in esc.get(name, ()) if _protected(name, exc, call_sites, parents))
+        blocking = sorted(exc for exc in esc.get(name, ())
+                          if _protected(name, exc, call_sites, parents, indirect))
         if blocking:
             report.rejected[name] = (REASON_EXC_CAPABLE,
                                      '%s can escape to a boxed try/except reachable from a call to'

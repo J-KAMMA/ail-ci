@@ -112,6 +112,29 @@ build to the general path and makes `AIL_NO_GENERAL=1` report the refusal. Added
 `test_ail_pre168.py`: literal and variable `r`, a return, pools and `r` from an argument /
 list item / attribute / dict value, int, float, str, tuple and empty pools, all compared with
 CPython on the general and default builds, plus the typed refusal.
+## 2026-10-24 - parallel workers trap through the boxed path (job-pre171-10250443)
+
+Review follow-up. Routing the typed shift guards' `ValueError` through
+`ail_raise_value_adopt` skipped the `parallel for` interception, which covered only `ail_die` and
+`ail_raise_named`; a negative shift in a worker longjmp-ed to the caller's frame and the default
+build segfaulted (exit 139) instead of catching. `ail_raise_value_adopt` now records the worker's
+code and message through `ail_par_trap_value` and unwinds inside the worker, releasing its
+reference; the join re-raises that code and message on the calling thread. Added the parallel
+case to `test_ail_pre171.py`. Probes at 1/2/4/8 threads match CPython for `<<`, `>>`, `<<=`,
+negative counts from arguments, valid shifts, and the uncaught path.
+
+## 2026-10-24 - indirect typed calls keep the caller's boxed handler (job-pre171-10250443)
+
+`pymix` rejected an exception-capable typed candidate only when a direct call site was lexically
+inside a boxed `try`. A helper with a shift trap reached through a lambda, a list entry or a
+callback had no such direct site, so its typed `ValueError` bypassed the caller's handler and the
+default build stopped after two cases (`pre109_lambda_list_tmp.py`). `pymix` now marks
+value-referenced, lambda-invoked and transitively indirect functions and rejects trap-capable
+candidates used that way. The typed `ck_shl`/`ck_shr` guards also carry CPython's
+`negative shift count`, adopting the exception so a caught shift does not leak. Added
+`AIL_CURRENT/test_ail_pre171.py` (4 programs, both builds). The int64 shift overflow above 63 bits
+remains a separate, unfixed difference.
+
 
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
 
