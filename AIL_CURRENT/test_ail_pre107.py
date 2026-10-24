@@ -4,7 +4,9 @@ The Random preludes declared expovariate(lambd) without the default, so
 `random.expovariate()` was refused by both builds while `gauss(mu)` already
 matched after cov8.  The general path's module-level functions go through
 prelude_random_boxed.py, and the typed Random object through prelude_random.py;
-both now default lambd to 1.0, as CPython does.
+both now default lambd to 1.0, as CPython does.  On this tree the default
+build reaches the general path for these programs because its typed path still
+refuses Random's plain-positional randrange requirement (pre-existing).
 
 The programs cover the default and explicit rates, int/float/negative/zero and
 infinite rates, a value reaching the call through an argument, a list item, an

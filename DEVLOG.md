@@ -5,11 +5,13 @@
 Job cov8 recorded `gauss(mu)` / `expovariate()` without defaults as pre-existing. On this
 tree `random.gauss(2.5)` already matches CPython on both builds; `random.expovariate()` and
 `Random.expovariate()` were still refused because the two Random preludes declared
-`expovariate(lambd)` without CPython 3.12's `lambd=1.0`. Both now default to 1.0, so the
-module-level general path and a typed-path `Random` object match CPython after
-`random.seed(<int>)`, including explicit int/float/negative/infinite rates, keyword calls,
-a zero rate's `ZeroDivisionError`, and rates passed through an argument, a list item, an
-attribute and a dict value. Added `AIL_CURRENT/test_ail_pre107.py`.
+`expovariate(lambd)` without CPython 3.12's `lambd=1.0`. Both now default to 1.0.
+The module-level function and a `Random` object match CPython after `random.seed(<int>)`,
+including explicit int/float/negative/infinite rates, keyword calls, a zero rate's
+`ZeroDivisionError`, and rates passed through an argument, a list item, an attribute and a
+dict value. On this tree the default build reaches the general path for these programs:
+the typed path still refuses `Random` for its plain-positional `randrange` requirement (an
+unrelated pre-existing gap). Added `AIL_CURRENT/test_ail_pre107.py`.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
