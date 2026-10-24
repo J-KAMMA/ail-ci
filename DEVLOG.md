@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - pre129: Random bound methods refused by name
+
+Job pre107's reviewer recorded a pre-existing difference: CPython returns a bound method for
+`f = random.expovariate` / `g = r.expovariate`, but both builds raised
+`AttributeError: 'Random' object has no attribute 'expovariate'` at run time. The general path
+dispatches method calls directly and does not build method values, so the read became a field
+lookup. Such a read on a `Random` (or on a receiver whose class is not statically known) is now
+refused at compile time as `random.Random.<method> read as a value (a bound method) is not built;
+call it`. Direct calls and non-Random classes with a field of the same name are unchanged; the
+known `f` field shadowing a method still matches CPython. Added `AIL_CURRENT/test_ail_pre129.py`.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

@@ -4,6 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre129-10242352-1 | random / bound methods | CPython returns a bound method for `f = random.expovariate` / `g = r.expovariate` and a later call draws from the generator; the general path read the method as a missing instance field and raised `AttributeError: 'Random' object has no attribute ...` at run time on both builds. A Random method read as a value (including through an argument, list item, attribute or dict value) is now refused by name at compile time; direct calls are unchanged. | refused by name; `test_ail_pre129.py` |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |

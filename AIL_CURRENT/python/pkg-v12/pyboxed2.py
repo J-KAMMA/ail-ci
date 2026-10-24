@@ -5054,6 +5054,15 @@ class Compiler(boxclosure.ClosureMixin):
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
         if prop_owners:
             return self._property_read(node, prop_owners, ctx)
+        rnd = self.classes.get('Random')
+        if rnd is not None and node.attr in rnd['methods']:
+            # CPython returns a bound method for `f = r.expovariate`; this path only dispatches method
+            # calls, so the read found no field and raised AttributeError at run time. Refuse by name
+            # instead (pre129); a receiver whose class is known and is not Random may just have that field.
+            cname = self._inst_class(node.value, ctx)
+            if cname is None or cname == 'Random' or self._is_subclass_of(cname, 'Random'):
+                raise Unsupported('random.Random.%s read as a value (a bound method) is not built; call it'
+                                  % node.attr)
         obj = self.expr(node.value, ctx)
         if node.attr == 'args' and not any('args' in c['methods'] for c in self.classes.values()):
             # e.args of an exception value (the run time's own carry their message)
