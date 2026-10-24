@@ -661,8 +661,10 @@ _PREAMBLE_TAIL = r'''
 static inline int64_t ail2_fmt_ascii(ail_ctx *cx, ail_obj x, char *b);
 static inline void ail2_out_str(ail_ctx *cx, ail_str s) {
     ail_out_reserve(cx, (size_t)s.n * 4);
-    for (int64_t i = 0; i < s.n; i++) {
-        uint32_t c = (uint32_t)s.p[i];
+    for (int64_t i = 0; i < s.n; ) {
+        int64_t width;
+        uint32_t c = ail__str_point(s, i, &width);
+        i += width;
         if (c < 0x80) cx->out_buf[cx->out_len++] = (char)c;
         else if (c < 0x800) {
             cx->out_buf[cx->out_len++] = (char)(0xC0 | (c >> 6));
@@ -781,6 +783,7 @@ static inline ail_obj ail2_str_catn(ail_ctx *cx, ail_obj *parts, const unsigned 
         } else {
             ail_str s = ail_view_to_str(parts[i]);
             memcpy(b->data + k, s.p, (size_t)s.n * sizeof *b->data);
+            if (ail__str_has_astral(s)) b->hdr.aux = 1;
             k += s.n;
         }
     }
@@ -3708,8 +3711,9 @@ class Compiler(boxclosure.ClosureMixin):
             self._gil_check(ctx)
             ctx.emit('{ ail_obj _s = %s;'
                      ' if (%s >= _s.sv.len) break;'
-                     ' %s = ail_str_view(_s.sv.backing, _s.sv.off + %s, 1); %s++; }'
-                     % (it, idx, val, idx, idx))
+                     ' int64_t _w = ail__str_width(ail_view_to_str(_s), %s);'
+                     ' %s = ail_str_view(_s.sv.backing, _s.sv.off + %s, _w); %s += _w; }'
+                     % (it, idx, idx, val, idx, idx))
             return val
         ctx.emit('st = ail_iter(cx, &%s, %s);' % (it, src))
         ctx.check()

@@ -1,5 +1,21 @@
 # DEVLOG
 
+## 2026-10-24 - job-pre123-10242349: astral UTF-8 decode on the general path
+
+The first pre-existing difference from the pre91 review was still present on this tree: decoding
+UTF-8 containing a code point above U+FFFF died with
+`AIL internal error: decode: a code point above U+FFFF in the 16-bit v2 runtime`.  The general
+path now stores such a code point as a UTF-16 surrogate pair, as pre91's other non-BMP work does,
+and the string runtime treats a pair as one code point for `len`, `ord`, indexing, slicing,
+iteration, `reversed`, search (`find`/`rfind`/`count`/`in`), `startswith`/`endswith`,
+`replace` (including a finite count and an empty old), `split`/`rsplit`, and `strip`/`lstrip`/
+`rstrip`.  A string whose storage is ASCII/BMP keeps the old unit loops; an `aux` bit on the
+string backing records whether a pair scan is needed, so the common case does not pay for a
+per-operation scan.  `bytes.decode` with `strict`/`ignore`/`replace`, `latin-1` and a
+`bytearray` receiver all match CPython.  Added `test_ail_pre123.py` (three programs, both
+builds); the required `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` modules pass.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
