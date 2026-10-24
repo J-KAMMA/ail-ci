@@ -34,6 +34,17 @@ class C(B):
     items = [3]
 
 
+class Dup:
+    x = 1
+    x = 2
+    y = 3
+
+
+class DupChild(Dup):
+    x = 4
+
+
+
 def read(cls):
     return cls.k
 
@@ -107,21 +118,25 @@ def main():
     B.items.append(4)
     print(C.items, A.items)
     print(read_name(C))
+    D = Dup
+    E = DupChild
+    print(D.x, D.y, getattr(D, "x"), getattr(D, "y"))
+    print(E.x, E.y, getattr(E, "x"), D.x, hasattr(E, "x"))
 
 
 main()
 '''
 
 
-def _cpython(directory, name, text):
+def _cpython(directory, name, text, args=()):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
-    done = subprocess.run([sys.executable, '-B', str(src)], capture_output=True, timeout=120,
-                          env=dict(os.environ, PYTHONUTF8='1'))
+    done = subprocess.run([sys.executable, '-B', str(src)] + list(args), capture_output=True,
+                          timeout=120, env=dict(os.environ, PYTHONUTF8='1'))
     return done.stdout.replace(b'\r\n', b'\n'), done.returncode, done.stderr
 
 
-def _build_and_run(directory, name, text, general):
+def _build_and_run(directory, name, text, general, run_args=()):
     src = Path(directory) / (name + '.ail')
     src.write_text(text, encoding='utf-8')
     exe = Path(directory) / ('exe_' + name + ('_g' if general else '_d'))
@@ -136,7 +151,7 @@ def _build_and_run(directory, name, text, general):
                            capture_output=True, text=True, timeout=900, env=env)
     if built.returncode != 0:
         return None, (built.stdout + built.stderr)[-3000:]
-    got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory)
+    got = subprocess.run([str(exe)] + list(run_args), capture_output=True, timeout=120, cwd=directory)
     return (got.stdout.replace(b'\r\n', b'\n'), got.returncode), got.stderr.decode('utf-8', 'replace')[-1500:]
 
 
@@ -153,6 +168,57 @@ class Pre157Tests(unittest.TestCase):
 
     def test_class_attributes(self):
         self.check('class_attributes', CLASS_ATTRIBUTES)
+
+    def test_class_body_order(self):
+        text = r'''class Order:
+    def x(self):
+        return 9
+
+    x = 7
+    y = 8
+
+
+O = Order
+print(Order.x, O.x, O.y)
+'''
+        self.check('class_body_order', text)
+
+    def test_shadowing_method_or_property_is_refused(self):
+        programs = {
+            'method': 'class B:\n    x = 1\n\nclass C(B):\n    def x(self):\n        return 9\n\nA = C\nprint(A.x)\n',
+            'property': 'class B:\n    x = 1\n\nclass C(B):\n    @property\n    def x(self):\n        return 7\n\nA = C\nprint(A.x)\n',
+        }
+        for kind, text in programs.items():
+            for general in (True, False):
+                with tempfile.TemporaryDirectory(prefix='ail-pre157-') as directory:
+                    got, build_err = _build_and_run(directory, 'shadow_' + kind, text, general)
+                    self.assertIsNone(got, '%s (general=%s)' % (text, general))
+                    self.assertIn('reading %s C.x through a class value' % kind, build_err)
+
+    def test_array_entry_initialises_class_attributes(self):
+        text = r'''class B:
+    x = 1
+    y = 2
+
+
+class C(B):
+    x = 5
+    x = 6
+
+
+def entry(xs):
+    A = C
+    b = B
+    print(A.x, b.y, getattr(A, "x"), C.x)
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-pre157-') as directory:
+            empty = Path(directory) / 'empty'
+            empty.write_bytes(b'')
+            for general in (True, False):
+                got, build_err = _build_and_run(directory, 'array_' + ('g' if general else 'd'),
+                                                text, general, (str(empty),))
+                self.assertIsNotNone(got, build_err)
+                self.assertEqual(got, (b'6 2 6 6\n', 0), build_err)
 
 
 if __name__ == '__main__':

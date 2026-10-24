@@ -2346,8 +2346,14 @@ class Compiler(boxclosure.ClosureMixin):
                 base_expr = 'ail_box_none()'
             setup.append('    g_slots_arr[%d] = ail_class_new(cx, %s, %s);\n' %
                          (self.global_slots['class:' + cname], c_str_literal(cname), base_expr))
-            for aname, _aval, aslot in cls.get('class_attrs', []):
-                # a class attribute read through a class VALUE (alias/argument/...) looks it up by name
+            for entry in cls.get('class_body', []):
+                # A class attribute read through a class VALUE (alias/argument/...) looks it up by
+                # name.  A method or property in the class body is a sentinel (slot -1): it hides a
+                # base class's attribute of the same name, but cannot be returned as a value here.
+                if entry[0] == 'a':
+                    aname, aslot = entry[1], entry[3]
+                else:
+                    aname, aslot = entry[1], -1
                 setup.append('    ail_class_attr_add(cx, g_slots_arr[%d], ail_intern(cx, %s), %d);\n' %
                              (self.global_slots['class:' + cname], c_str_literal(aname), aslot))
             nxt = cls['methods'].get('__next__')
@@ -2385,7 +2391,7 @@ class Compiler(boxclosure.ClosureMixin):
         if array_entry is not None:
             if self.uses_argv:
                 raise Unsupported('sys.argv in a program whose entry is its last function')
-            parts.append(self._array_entry_main(array_entry, tree, setup))
+            parts.append(self._array_entry_main(array_entry, tree, setup, main_ctx))
             return ''.join(parts)
         parts.append('int main(int argc, char **argv) {\n' if self.uses_argv else 'int main(void) {\n')
         parts.append('    ail_ctx cxs, *cx = &cxs;\n    ail_ctx_init(cx);\n')
@@ -2768,7 +2774,7 @@ class Compiler(boxclosure.ClosureMixin):
     def _any_class_defines(self, mname):
         return any(mname in c['methods'] for c in self.classes.values())
 
-    def _array_entry_main(self, info, tree, setup_lines):
+    def _array_entry_main(self, info, tree, setup_lines, class_init_ctx):
         """The judge suite's own array/argv calling convention for a whole-program shape with
         NO top-level executable statement (only def/class/import) -- ported from pyboxed.py/v1's
         _array_entry_main (fixed there first for the identical failure this morning): argv[1] is
@@ -2810,8 +2816,12 @@ class Compiler(boxclosure.ClosureMixin):
         lines.append('    close(ail2_fd);\n')
         lines.append('    int64_t ail2_n = (int64_t)((size_t)ail2_st.st_size / sizeof *ail2_src);\n')
         lines.append('    ail_st st = AIL_OK; (void)st;\n')
-        nslots = 2 + len(extra)  # 0: xs list, 1: return value, 2..: extra int params
+        nslots = max(2 + len(extra), class_init_ctx.next_slot)  # 0: xs list, 1: return value, 2..: extra int params
         lines.append('    AIL_FRAME_ENTER(cx, f, %d);\n' % max(nslots, 1))
+        # No module body runs in this shape, so the class bodies' attributes (registered above
+        # against their module slots) would stay UNBOUND; evaluate them before the entry call.
+        lines.append(class_init_ctx.body_text())
+        lines.append('    if (st != AIL_OK) goto L_leave;\n')
         lines.append('    f.slots[0] = ail_list_new(cx);\n')
         lines.append('    for (int64_t ail2_i = 0; ail2_i < ail2_n; ail2_i++) '
                      'ail_list_append(cx, f.slots[0], ail_box_int(ail2_src[ail2_i]));\n')
@@ -2830,6 +2840,8 @@ class Compiler(boxclosure.ClosureMixin):
                          'int rc = ail_main_finish(cx, st); ail_ctx_destroy(cx); return rc; }\n')
         lines.append('    AIL_FRAME_LEAVE(cx, f);\n')
         lines.append('    { int rc = ail_main_finish(cx, AIL_OK); ail_ctx_destroy(cx); return rc; }\n')
+        lines.append('L_leave:\n')
+        lines.append('    { int rc = ail_main_finish(cx, st); ail_ctx_destroy(cx); return rc; }\n')
         lines.append('}\n')
         return ''.join(lines)
 
@@ -2997,6 +3009,7 @@ class Compiler(boxclosure.ClosureMixin):
         self._class_global_slot(node.name)
         methods = {}
         class_attrs = []
+        body_order = []          # class dict order: ('p'/'m', name) or ('a', class_attrs index)
         for item in node.body:
             if isinstance(item, ast.FunctionDef):
                 mcname = 'pm_%s_%s' % (node.name, item.name)
@@ -3004,13 +3017,16 @@ class Compiler(boxclosure.ClosureMixin):
                 info = self._register_function(item, cname=mcname + ('__set' if setter else ''), is_method=True,
                                                 owner_class=node.name)
                 methods[('__ail_set_' + item.name) if info.get('is_setter') else item.name] = info
+                body_order.append(('p' if info.get('is_property') else 'm', item.name))
             elif isinstance(item, ast.Assign) and len(item.targets) == 1 and \
                     isinstance(item.targets[0], ast.Name):
                 class_attrs.append((item.targets[0].id, item.value))
+                body_order.append(('a', len(class_attrs) - 1))
             elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
                 # `count: int = 0` is a class attribute; `name: str` alone declares nothing at run time
                 if item.value is not None:
                     class_attrs.append((item.target.id, item.value))
+                    body_order.append(('a', len(class_attrs) - 1))
             elif isinstance(item, (ast.Pass, ast.Expr)):
                 continue
             else:
@@ -3045,9 +3061,34 @@ class Compiler(boxclosure.ClosureMixin):
         # share the reference with every instance and class read.
         for i, (aname, aval) in enumerate(class_attrs):
             class_attrs[i] = (aname, aval, self._module_global_slot('__ail_ca_%s_%d' % (node.name, i)))
+        class_body = []
+        for kind, what in body_order:
+            class_body.append((kind,) + (class_attrs[what] if kind == 'a' else (what,)))
         self.classes[node.name] = {'base': base, 'methods': methods, 'class_attrs': class_attrs,
-                                   'dc': dc, 'dc_hide': hide}
+                                   'class_body': class_body, 'dc': dc, 'dc_hide': hide}
         self.class_order.append(node.name)
+
+    def _class_definition(self, cname, attr):
+        """The last definition of `attr` in `cname`'s own class body: ('a', name, value, slot) for a
+        class attribute, ('m'/'p', None, None) for a method/property (which shadows a base class
+        attribute of the same name but has no value the general path can hand out)."""
+        for entry in reversed(self.classes[cname].get('class_body', [])):
+            if entry[0] == 'a':
+                if entry[1] == attr:
+                    return entry
+            elif entry[1] == attr:
+                return (entry[0], None, None)
+        return None
+
+    def _class_chain_definition(self, cname, attr):
+        seen = set()
+        while cname is not None and cname in self.classes and cname not in seen:
+            seen.add(cname)
+            hit = self._class_definition(cname, attr)
+            if hit is not None:
+                return cname, hit
+            cname = self.classes[cname]['base']
+        return None, None
 
     def _resolve_method(self, klass, mname):
         seen = set()
@@ -3497,6 +3538,8 @@ class Compiler(boxclosure.ClosureMixin):
         if isinstance(node, ast.JoinedStr):
             return 'str'
         if isinstance(node, ast.Name):
+            if node.id in self.classes:
+                return 'class:' + node.id
             return self.get_kind(node.id, ctx)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             if node.func.id in self.classes:
@@ -5045,17 +5088,21 @@ class Compiler(boxclosure.ClosureMixin):
         if isinstance(node.value, ast.Name) and (node.value.id in self.module_aliases or
                                                   node.value.id == 'sys'):
             return self._module_attr_value(node.value.id, node.attr, ctx)
-        if (isinstance(node.value, ast.Name) and node.value.id in self.classes
-                and node.value.id not in ctx.slot_of and node.value.id not in self.module_names):
-            # `C.K` where K is a constant class attribute of C or of a base of C: the class name as a
-            # value does not reach its attributes (`AttributeError: 'instance' object has no attribute`),
-            # so read the literal the lookup through the bases finds, as CPython does
-            k = node.value.id
-            while k is not None and k in self.classes:
-                hits = [(v, s) for a, v, s in self.classes[k].get('class_attrs', []) if a == node.attr]
-                if hits:
-                    return self._cached_class_attr(hits[-1][1], hits[-1][0], ctx)
-                k = self.classes[k]['base']
+        # `C.K` / `A.K` where A aliases a class: read the last definition the class body's own
+        # base chain finds.  A method or property of the same name shadows a base class attribute,
+        # but is not a value the general path can hand out, so refuse it by name (it used to fall
+        # through to the base attribute).
+        direct = (isinstance(node.value, ast.Name) and node.value.id in self.classes
+                  and node.value.id not in ctx.slot_of and node.value.id not in self.module_names)
+        value_kind = self.infer_kind(node.value, ctx)
+        cname = node.value.id if direct else (value_kind[6:] if value_kind and value_kind.startswith('class:') else None)
+        if cname is not None:
+            owner, hit = self._class_chain_definition(cname, node.attr)
+            if hit is not None and (direct or hit[0] in ('m', 'p')):
+                if hit[0] == 'a':
+                    return self._cached_class_attr(hit[3], hit[2], ctx)
+                raise Unsupported("reading %s %s.%s through a class value" %
+                                  ('property' if hit[0] == 'p' else 'method', owner, node.attr))
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
         if prop_owners:
             return self._property_read(node, prop_owners, ctx)

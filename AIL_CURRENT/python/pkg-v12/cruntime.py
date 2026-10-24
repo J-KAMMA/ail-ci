@@ -16490,10 +16490,13 @@ static inline void ail_class_attr_add(ail_ctx *cx, ail_obj cls, int64_t name_id,
     c->ca_n++;
 }
 static inline int ail_class_attr_find_id(ail_obj cls, int64_t name_id, ail_obj *out) {
+    /* 1 = found, 2 = defined as a method/property in the class body (slot -1: it hides a base
+       class attribute, but the general path cannot hand out the function/property value). */
     for (ail_obj k = cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
         ail_classobj *kc = (ail_classobj *)k.o;
-        for (int64_t i = 0; i < kc->ca_n; i++)
+        for (int64_t i = kc->ca_n - 1; i >= 0; i--)
             if (kc->ca[i].name_id == name_id) {
+                if (kc->ca[i].slot < 0) return 2;
                 if (ail__class_attr_slots) *out = ail__class_attr_slots[kc->ca[i].slot];
                 return 1;
             }
@@ -16522,9 +16525,10 @@ static inline void ail_class_name_c(ail_obj cls, char *buf, size_t cap) {
 static inline int ail_class_attr_find_name(ail_ctx *cx, ail_obj cls, const char *name, ail_obj *out) {
     for (ail_obj k = cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
         ail_classobj *kc = (ail_classobj *)k.o;
-        for (int64_t i = 0; i < kc->ca_n; i++) {
+        for (int64_t i = kc->ca_n - 1; i >= 0; i--) {
             int64_t nid = kc->ca[i].name_id;
             if (nid >= 0 && nid < cx->intern_n && strcmp(cx->intern_tab[nid], name) == 0) {
+                if (kc->ca[i].slot < 0) return 2;
                 if (ail__class_attr_slots) *out = ail__class_attr_slots[kc->ca[i].slot];
                 return 1;
             }
@@ -16589,9 +16593,15 @@ static inline ail_st ail_inst_getattr(ail_ctx *cx, ail_obj *out, ail_obj inst, i
             *out = ((ail_classobj *)inst.o)->name;
             return AIL_OK;
         }
-        if (ail_class_attr_find_id(inst, name_id, out)) return AIL_OK;
-        char nb[100], cbuf[160];
+        int ca = ail_class_attr_find_id(inst, name_id, out);
+        if (ca == 1) return AIL_OK;
+        char nb[100], cbuf[220];
         ail_class_name_c(inst, nb, sizeof nb);
+        if (ca == 2) {
+            snprintf(cbuf, sizeof cbuf, "reading method/property '%s' through the class value %s "
+                     "is not built on the general path", name_for_msg, nb);
+            return ail_raise_c(cx, AIL_B_NOTIMPLEMENTEDERROR, cbuf);
+        }
         snprintf(cbuf, sizeof cbuf, "type object '%s' has no attribute '%s'", nb, name_for_msg);
         return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, cbuf);
     }

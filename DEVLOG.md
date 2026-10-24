@@ -1,5 +1,23 @@
 # DEVLOG
 
+## 2026-10-24 - pre157 review: class-body order, shadowing, array entry
+
+Review fixes on top of the pre157 entry below. The class body's own order is now kept, so a
+duplicate assignment and a method/property that shadows a class attribute both resolve to the
+LAST definition (the runtime lookup scans each class's entries backwards). A method or property
+in the class body is registered as a shadow sentinel: a statically known class-value read is
+refused by name (`reading method/property C.x through a class value`), and an otherwise dynamic
+read raises a named NotImplementedError instead of returning the shadowed base attribute.
+
+The no-top-level-statement array-entry shape now evaluates the class bodies' attributes after
+the class objects are made and before calling the entry function, so a class value read from
+there sees the shared slot (`5`) instead of `<unbound>`.
+
+Probes in `/tmp/probes`: `p_dup`, `p_order`, `p_containers` and the empty-input `p_array` match
+CPython on both builds; `p_method_arg` is refused by name. `test_ail_pre157.py` has 4 tests
+(including class-body order, refusal, and the array-entry shape); `test_ail_safetynet` passes.
+Only compiler/tests/docs changed. Added DIFFERENCES row `C?-job-pre157-10250225-2`.
+
 ## 2026-10-24 - pre157: class attributes read through a class value
 
 The first still-differing pre127 item was `r6_local/cell/nonlocal`, `p14_class_value_arg`,
