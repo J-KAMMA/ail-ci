@@ -55,8 +55,10 @@ AIL_OBJ2_H = os.path.join(V2_DIR, 'ail_obj2.h').replace(os.sep, '/')
 WIDE_EMBED = os.environ.get('AIL_V2_WIDE_EMBED') == '1'
 if WIDE_EMBED and os.environ.get('AIL_V2_INCLUDE_ABS'):
     raise ValueError('AIL_V2_WIDE_EMBED and AIL_V2_INCLUDE_ABS are mutually exclusive')
-WIDE_STRINGS = WIDE_EMBED or bool(os.environ.get('AIL_V2_INCLUDE_ABS'))
-STRBACK_C_TYPE = 'int32_t' if WIDE_STRINGS else 'uint16_t'
+# The embedded v2 runtime (cruntime.SOURCE['OBJ2']) stores one 32-bit code point per unit,
+# so generated string literals must use int32_t and may contain non-BMP characters.
+WIDE_STRINGS = True
+STRBACK_C_TYPE = 'int32_t'
 
 # ---------------------------------------------------------------------------------------------
 # BRIEF_mixed_mode.md (2026-09-16): per-FUNCTION typed compilation inside this general-path

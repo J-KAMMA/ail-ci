@@ -261,7 +261,7 @@ __attribute__((noinline)) static ail_st ail_dun_hash(ail_ctx *cx, int64_t *out, 
 
 # runtime functions that only some programs carry (the formatter of safetyrt.py)
 OPTIONAL = (
-            '            uint16_t ch;\n            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) {\n',
+            '            uint32_t ch;\n            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) {\n',
             
             '"%%%c format: a real number is required, not %s", (char)t, ail_type_name(arg.tag)',
             '"%%%c format: an integer is required, not %s", (char)t, ail_type_name(arg.tag)',
@@ -439,8 +439,8 @@ def _edits():
               '"%%%c format: an integer is required, not %s", (char)t, ail__dun_tname_s(arg)'))
     e.append(('"must be real number, not %s", ail_type_name(arg.tag)',
               '"must be real number, not %s", ail__dun_tname_s(arg)'))
-    e.append(('            uint16_t ch;\n            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) {\n',
-              '            uint16_t ch;\n            if (arg.tag == AIL_T_INST) { ail_d1_fn cf = ail_dun1(arg, AIL_D1_INDEX); if (cf) { ail_obj cv; st = cf(cx, &cv, arg); if (st != AIL_OK) goto fail; arg = cv; } }\n            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) {\n'))
+    e.append(('            uint32_t ch;\n            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) {\n',
+              '            uint32_t ch;\n            if (arg.tag == AIL_T_INST) { ail_d1_fn cf = ail_dun1(arg, AIL_D1_INDEX); if (cf) { ail_obj cv; st = cf(cx, &cv, arg); if (st != AIL_OK) goto fail; arg = cv; } }\n            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) {\n'))
     # the add in front of the dispatch helpers: they must be visible before ail_op_add
     e.append(('/* sum(): CPython 3.12 builtin_sum_impl.', '/* sum(): CPython 3.12 builtin_sum_impl.'))
     # unary and builtin conversions

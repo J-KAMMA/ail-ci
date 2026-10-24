@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - dynamic non-BMP chr() on the general path (job-pre176-10250447)
+
+A dynamic `chr(n)` with `n > 0xFFFF` failed on the general path because the v2 string backing stored
+16-bit code units and `chr` refused values it could not represent. The backing, views, builders and
+the generated string literals now use one 32-bit code point per unit (`cruntime.py`, `pyboxed2.py`);
+the auxiliary general-path fragments that read string units (`safetyrt.py`, `jsonbrt.py`, `rebrt.py`,
+`dunderrt.py`) were widened with them, including `%`/`format`, JSON escaping (surrogate pair output
+and input), regex DFA subjects and case mapping. Surrogate code points are still refused by name in
+`chr()` and in literals. Added `test_ail_pre176.py` with the same program on the general and default
+builds; it fails on the base with the old `chr() non-BMP code point requires 32-bit strings` die.
+
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
 
 The general path's native `statistics` helpers kept a heap result in a C local across an

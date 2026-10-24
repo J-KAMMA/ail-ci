@@ -3,7 +3,7 @@
 (branch safetynet). A program that uses none of them gets the C it always had.
 
 * STRPRED2: str.isalpha / isalnum / isupper / islower / istitle over all of Unicode (CPython 3.12's tables,
-  cruntime.STRPRED), for the v2 string units (UTF-16, a surrogate pair is one code point). The core's
+  cruntime.STRPRED), for the v2 string units (one 32-bit code point per unit). The core's
   ASCII-only versions stopped the program on a non-ASCII character.
 """
 import cruntime
@@ -258,7 +258,7 @@ static inline ail_st ail2b_encode(ail_ctx *cx, ail_obj *out, ail_obj so, ail_obj
     ail_str s = ail_view_to_str(so);
     int e = (int)enc.i, eh = (int)err.i;
     static const char *names[3] = {"utf-8", "ascii", "latin-1"};
-    unsigned char *buf = (unsigned char *)ail_xmalloc((size_t)(s.n * 3 + 1));
+    unsigned char *buf = (unsigned char *)ail_xmalloc((size_t)(s.n * 4 + 1));
     int64_t k = 0, pos = 0;
     for (int64_t i = 0; i < s.n; pos++) {
         uint32_t c = ail_chr(s, i); int64_t start = i; i++;
@@ -302,7 +302,7 @@ static inline ail_st ail2b_encode(ail_ctx *cx, ail_obj *out, ail_obj so, ail_obj
     return AIL_OK;
 }
 /* one UTF-8 sequence at p[i]: its code point, or the length of the invalid part (CPython's maximal subpart) and why */
-static inline int64_t ail2b_utf8_step(const uint16_t *p, int64_t n, int64_t i, uint32_t *cp, const char **why) {
+static inline int64_t ail2b_utf8_step(const uint32_t *p, int64_t n, int64_t i, uint32_t *cp, const char **why) {
     uint32_t c = p[i];
     if (c < 0x80) { *cp = c; return 1; }
     int need; uint32_t lo = 0x80, hi = 0xBF;
@@ -325,8 +325,8 @@ static inline ail_st ail2b_decode(ail_ctx *cx, ail_obj *out, ail_obj so, ail_obj
     ail_str s = ail_view_to_str(so);
     int e = (int)enc.i, eh = (int)err.i;
     static const char *names[3] = {"utf-8", "ascii", "latin-1"};
-    /* the units of a bytes str are bytes; a view's buffer is uint16_t unless it is pure ASCII */
-    uint16_t *p = (uint16_t *)ail_xmalloc((size_t)(s.n + 1) * sizeof(uint16_t));
+    /* the units of a bytes str are bytes; a view's buffer is uint32_t unless it is pure ASCII */
+    uint32_t *p = (uint32_t *)ail_xmalloc((size_t)(s.n + 1) * sizeof(uint32_t));
     for (int64_t i = 0; i < s.n; i++) p[i] = ail_chr(s, i);
     ail_strbuild bu = ail_str_buf(cx, s.n);
     int64_t o = 0;
@@ -337,7 +337,7 @@ static inline ail_st ail2b_decode(ail_ctx *cx, ail_obj *out, ail_obj so, ail_obj
         else len = ail2b_utf8_step(p, s.n, i, &cp, &why);
         if (len > 0) {
             if (cp > 0xFFFF) ail_die("decode: a code point above U+FFFF in the 16-bit v2 runtime");
-            bu.buf[o++] = (uint16_t)cp; i += len; continue;
+            bu.buf[o++] = (uint32_t)cp; i += len; continue;
         }
         int64_t bad = -len;
         if (eh == 1) { i += bad; continue; }
@@ -377,7 +377,7 @@ static inline ail_st ail2b_from_ints(ail_ctx *cx, ail_obj *out, ail_obj src) {
     }
     ail_strback *b = ail_strback_alloc(cx, v->n);
     v = (ail_vecobj *)fr.slots[0].o;
-    for (int64_t i = 0; i < v->n; i++) b->data[i] = (uint16_t)v->p[i].i;
+    for (int64_t i = 0; i < v->n; i++) b->data[i] = (uint32_t)v->p[i].i;
     *out = ail_str_view((ail_gcobj *)b, 0, v->n);
     AIL_FRAME_LEAVE(cx, fr);
     return AIL_OK;
@@ -402,13 +402,13 @@ static inline ail_st ail2b_repr(ail_ctx *cx, ail_obj *out, ail_obj so) {
     ail_st st = ail2b_need(cx, so); if (st != AIL_OK) return st;
     ail_str s = ail_view_to_str(so);
     int sq = 0, dq = 0;
-    for (int64_t i = 0; i < s.n; i++) { uint16_t c = ail_chr(s, i); if (c == '\'') sq = 1; else if (c == '"') dq = 1; }
-    uint16_t q = (sq && !dq) ? '"' : '\'';
+    for (int64_t i = 0; i < s.n; i++) { uint32_t c = ail_chr(s, i); if (c == '\'') sq = 1; else if (c == '"') dq = 1; }
+    uint32_t q = (sq && !dq) ? '"' : '\'';
     ail_strbuild bu = ail_str_buf1(cx, s.n * 4 + 2, so);
     int64_t o = 0;
     bu.buf[o++] = q;
     for (int64_t i = 0; i < s.n; i++) {
-        uint16_t c = ail_chr(s, i);
+        uint32_t c = ail_chr(s, i);
         if (c == q || c == '\\') { bu.buf[o++] = '\\'; bu.buf[o++] = c; }
         else if (c == '\t') { bu.buf[o++] = '\\'; bu.buf[o++] = 't'; }
         else if (c == '\n') { bu.buf[o++] = '\\'; bu.buf[o++] = 'n'; }
@@ -422,10 +422,10 @@ static inline ail_st ail2b_repr(ail_ctx *cx, ail_obj *out, ail_obj so) {
     *out = ail_str_buf_done(bu, o);
     return AIL_OK;
 }
-static inline int ail2b_isspace(uint16_t c) { return c == ' ' || (c >= 9 && c <= 13); }
-static inline int ail2b_isupper(uint16_t c) { return c >= 'A' && c <= 'Z'; }
-static inline int ail2b_islower(uint16_t c) { return c >= 'a' && c <= 'z'; }
-static inline int ail2b_isdigit(uint16_t c) { return c >= '0' && c <= '9'; }
+static inline int ail2b_isspace(uint32_t c) { return c == ' ' || (c >= 9 && c <= 13); }
+static inline int ail2b_isupper(uint32_t c) { return c >= 'A' && c <= 'Z'; }
+static inline int ail2b_islower(uint32_t c) { return c >= 'a' && c <= 'z'; }
+static inline int ail2b_isdigit(uint32_t c) { return c >= '0' && c <= '9'; }
 /* upper / lower / swapcase / title / capitalize, ASCII only: 0..4 */
 static inline ail_st ail2b_case(ail_ctx *cx, ail_obj *out, ail_obj so, ail_obj which) {
     ail_st st = ail2b_need(cx, so); if (st != AIL_OK) return st;
@@ -433,7 +433,7 @@ static inline ail_st ail2b_case(ail_ctx *cx, ail_obj *out, ail_obj so, ail_obj w
     ail_strbuild bu = ail_str_buf1(cx, s.n, so);
     int w = (int)which.i, prev = 0;
     for (int64_t i = 0; i < s.n; i++) {
-        uint16_t c = ail_chr(s, i), r = c;
+        uint32_t c = ail_chr(s, i), r = c;
         int up = ail2b_isupper(c), lo = ail2b_islower(c);
         if (w == 0) { if (lo) r = c - 32; }
         else if (w == 1) { if (up) r = c + 32; }
@@ -455,7 +455,7 @@ static inline ail_st ail2b_pred(ail_ctx *cx, ail_obj *out, ail_obj so, ail_obj w
     if (w == 4 || w == 7) {
         int cased = 0; r = 1;
         for (int64_t i = 0; i < s.n; i++) {
-            uint16_t c = ail_chr(s, i);
+            uint32_t c = ail_chr(s, i);
             if (w == 4 ? ail2b_isupper(c) : ail2b_islower(c)) { r = 0; break; }
             if (w == 4 ? ail2b_islower(c) : ail2b_isupper(c)) cased = 1;
         }
@@ -464,7 +464,7 @@ static inline ail_st ail2b_pred(ail_ctx *cx, ail_obj *out, ail_obj so, ail_obj w
     if (w == 6) {
         int cased = 0, prev = 0; r = 1;
         for (int64_t i = 0; i < s.n; i++) {
-            uint16_t c = ail_chr(s, i);
+            uint32_t c = ail_chr(s, i);
             if (ail2b_isupper(c)) { if (prev) { r = 0; break; } prev = 1; cased = 1; }
             else if (ail2b_islower(c)) { if (!prev) { r = 0; break; } prev = 1; cased = 1; }
             else prev = 0;
@@ -473,7 +473,7 @@ static inline ail_st ail2b_pred(ail_ctx *cx, ail_obj *out, ail_obj so, ail_obj w
     }
     r = 1;
     for (int64_t i = 0; i < s.n && r; i++) {
-        uint16_t c = ail_chr(s, i);
+        uint32_t c = ail_chr(s, i);
         int a = ail2b_isupper(c) || ail2b_islower(c), d = ail2b_isdigit(c);
         r = w == 0 ? (a || d) : w == 1 ? a : w == 3 ? d : ail2b_isspace(c);
     }
@@ -556,8 +556,8 @@ static inline ail_st ail2b_translate(ail_ctx *cx, ail_obj *out, ail_obj so, ail_
     ail_str s = ail_view_to_str(so);
     unsigned char drop[256]; memset(drop, 0, sizeof drop);
     if (del.tag == AIL_T_STR) { ail_str d = ail_view_to_str(del); for (int64_t i = 0; i < d.n; i++) drop[ail_chr(d, i) & 255] = 1; }
-    uint16_t map[256];
-    for (int i = 0; i < 256; i++) map[i] = (uint16_t)i;
+    uint32_t map[256];
+    for (int i = 0; i < 256; i++) map[i] = (uint32_t)i;
     if (table.tag == AIL_T_STR) {
         ail_str t = ail_view_to_str(table);
         if (t.n != 256) return ail_raise_c(cx, AIL_B_VALUEERROR, "translation table must be 256 characters long");
@@ -566,7 +566,7 @@ static inline ail_st ail2b_translate(ail_ctx *cx, ail_obj *out, ail_obj so, ail_
     ail_strbuild bu = ail_str_buf1(cx, s.n, so);
     int64_t o = 0;
     s = ail_view_to_str(so);
-    for (int64_t i = 0; i < s.n; i++) { uint16_t c = ail_chr(s, i) & 255; if (!drop[c]) bu.buf[o++] = map[c]; }
+    for (int64_t i = 0; i < s.n; i++) { uint32_t c = ail_chr(s, i) & 255; if (!drop[c]) bu.buf[o++] = map[c]; }
     *out = ail_str_buf_done(bu, o);
     return AIL_OK;
 }
@@ -576,12 +576,12 @@ static inline ail_st ail2b_hex(ail_ctx *cx, ail_obj *out, ail_obj so) {
     ail_str s = ail_view_to_str(so);
     ail_strbuild bu = ail_str_buf1(cx, s.n * 2, so);
     static const char hx[] = "0123456789abcdef";
-    for (int64_t i = 0; i < s.n; i++) { uint16_t c = ail_chr(s, i); bu.buf[2 * i] = hx[(c >> 4) & 15]; bu.buf[2 * i + 1] = hx[c & 15]; }
+    for (int64_t i = 0; i < s.n; i++) { uint32_t c = ail_chr(s, i); bu.buf[2 * i] = hx[(c >> 4) & 15]; bu.buf[2 * i + 1] = hx[c & 15]; }
     *out = ail_str_buf_done(bu, s.n * 2);
     return AIL_OK;
 }
 /* bytes.fromhex(s): None and ail2b_err on a bad digit */
-static inline int ail2b_hexval(uint16_t c) {
+static inline int ail2b_hexval(uint32_t c) {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
     if (c >= 'A' && c <= 'F') return c - 'A' + 10;
@@ -593,7 +593,7 @@ static inline ail_st ail2b_fromhex(ail_ctx *cx, ail_obj *out, ail_obj so) {
     ail_strbuild bu = ail_str_buf1(cx, s.n / 2 + 1, so);
     int64_t o = 0, i = 0;
     while (i < s.n) {
-        uint16_t c = ail_chr(s, i);
+        uint32_t c = ail_chr(s, i);
         if (c == ' ' || (c >= 9 && c <= 13)) { i++; continue; }
         int hi = ail2b_hexval(c);
         if (hi < 0 || i + 1 >= s.n || ail2b_hexval(ail_chr(s, i + 1)) < 0) {
@@ -602,7 +602,7 @@ static inline ail_st ail2b_fromhex(ail_ctx *cx, ail_obj *out, ail_obj so) {
             snprintf(ail2b_err, sizeof ail2b_err, "non-hexadecimal number found in fromhex() arg at position %lld", (long long)at);
             ail2b_errkind = 4; *out = ail_box_none(); return AIL_OK;
         }
-        bu.buf[o++] = (uint16_t)(hi * 16 + ail2b_hexval(ail_chr(s, i + 1)));
+        bu.buf[o++] = (uint32_t)(hi * 16 + ail2b_hexval(ail_chr(s, i + 1)));
         i += 2;
     }
     *out = ail_str_buf_done(bu, o);
@@ -614,7 +614,7 @@ static inline ail_st ail2b_numsafe(ail_ctx *cx, ail_obj *out, ail_obj so) {
     ail_st st = ail2b_need(cx, so); if (st != AIL_OK) return st;
     ail_str s = ail_view_to_str(so);
     int r = 1;
-    for (int64_t i = 0; i < s.n; i++) { uint16_t c = ail_chr(s, i); if (c >= 0x80 || (c >= 0x1c && c <= 0x1f)) { r = 0; break; } }
+    for (int64_t i = 0; i < s.n; i++) { uint32_t c = ail_chr(s, i); if (c >= 0x80 || (c >= 0x1c && c <= 0x1f)) { r = 0; break; } }
     *out = ail_box_bool(r);
     return AIL_OK;
 }
@@ -652,19 +652,19 @@ FMT = r'''
 /* ---- format specs and %-formatting over all the standard types (safetyrt.py FMT) ----
    CPython 3.12's format() mini-language for int, bool, float and str, and printf-style `%` with a
    format or arguments known only at run time. */
-typedef struct { uint16_t *p; int64_t n, cap; } ail2f_buf;
-static inline void ail2f_put(ail2f_buf *b, uint16_t c) {
-    if (b->n == b->cap) { b->cap = b->cap ? b->cap * 2 : 64; b->p = (uint16_t *)realloc(b->p, (size_t)b->cap * sizeof(uint16_t)); if (!b->p) ail_die("out of memory"); }
+typedef struct { uint32_t *p; int64_t n, cap; } ail2f_buf;
+static inline void ail2f_put(ail2f_buf *b, uint32_t c) {
+    if (b->n == b->cap) { b->cap = b->cap ? b->cap * 2 : 64; b->p = (uint32_t *)realloc(b->p, (size_t)b->cap * sizeof(uint32_t)); if (!b->p) ail_die("out of memory"); }
     b->p[b->n++] = c;
 }
 static inline void ail2f_puts(ail2f_buf *b, const char *s) { while (*s) ail2f_put(b, (unsigned char)*s++); }
 static inline ail_obj ail2f_done(ail_ctx *cx, ail2f_buf *b) {
     ail_strbuild bu = ail_str_buf(cx, b->n);
-    if (b->n) memcpy(bu.buf, b->p, (size_t)b->n * sizeof(uint16_t));
+    if (b->n) memcpy(bu.buf, b->p, (size_t)b->n * sizeof(uint32_t));
     free(b->p); b->p = NULL;
     return ail_str_buf_done(bu, b->n);
 }
-typedef struct { uint16_t fill; char align, sign; int alt, zero, z, has_width, has_prec; int64_t width, prec; char group, type; } ail2f_spec;
+typedef struct { uint32_t fill; char align, sign; int alt, zero, z, has_width, has_prec; int64_t width, prec; char group, type; } ail2f_spec;
 /* 0, or -1 with the ValueError text in msg */
 static inline int ail2f_parse(ail_str s, ail2f_spec *f, char *msg, size_t msz) {
     memset(f, 0, sizeof *f); f->fill = ' ';
@@ -694,7 +694,7 @@ static inline int ail2f_parse(ail_str s, ail2f_spec *f, char *msg, size_t msz) {
     }
     if (n - i > 1) { snprintf(msg, msz, "Invalid format specifier"); return -1; }
     if (i < n) {
-        uint16_t t = ail_chr(s, i);
+        uint32_t t = ail_chr(s, i);
         if (t > 127) { snprintf(msg, msz, "Invalid format specifier"); return -1; }
         f->type = (char)t;
     }
@@ -732,7 +732,7 @@ static inline ail_obj ail2f_pad_num(ail_ctx *cx, const char *sign, const char *p
     }
     int64_t len = (int64_t)strlen(sign) + (int64_t)strlen(prefix) + (int64_t)strlen(b);
     char align = f->align ? f->align : (f->zero ? '=' : '>');
-    uint16_t fill = (f->zero && !f->align) ? '0' : f->fill;
+    uint32_t fill = (f->zero && !f->align) ? '0' : f->fill;
     int64_t pad = f->width > len ? f->width - len : 0;
     int64_t left = align == '>' ? pad : align == '^' ? pad / 2 : 0;
     int64_t right = align == '<' ? pad : align == '^' ? pad - pad / 2 : 0;
@@ -747,7 +747,7 @@ static inline ail_obj ail2f_pad_num(ail_ctx *cx, const char *sign, const char *p
 }
 static inline ail_obj ail2f_pad_str(ail_ctx *cx, ail_str s, int64_t len, ail2f_spec *f, char dflt) {
     char align = f->align ? f->align : dflt;
-    uint16_t fill = (f->zero && !f->align) ? '0' : f->fill;
+    uint32_t fill = (f->zero && !f->align) ? '0' : f->fill;
     int64_t pad = f->width > len ? f->width - len : 0;
     int64_t left = align == '>' ? pad : align == '^' ? pad / 2 : 0;
     ail2f_buf o = {0, 0, 0};
@@ -848,8 +848,7 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
             if (f.sign) return ail_raise_c(cx, AIL_B_VALUEERROR, "Sign not allowed with integer format specifier 'c'");
             if (f.alt) return ail_raise_c(cx, AIL_B_VALUEERROR, "Alternate form (#) not allowed with integer format specifier 'c'");
             if (x.i < 0 || x.i > 0x10FFFF) return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "%c arg not in range(0x110000)");
-            if (x.i > 0xFFFF) ail_die("format 'c': a code point above U+FFFF in the 16-bit v2 runtime");
-            uint16_t c = (uint16_t)x.i; ail_str s; s.p = &c; s.n = 1; s.bytes = 0;
+            uint32_t c = (uint32_t)x.i; ail_str s; s.p = &c; s.n = 1; s.bytes = 0;
             *out = ail2f_pad_str(cx, s, 1, &f, '>'); return AIL_OK;
         }
         if (f.group == ',' && (type == 'b' || type == 'o' || type == 'x' || type == 'X')) {
@@ -909,7 +908,7 @@ static inline ail_st ail2f_percent(ail_ctx *cx, ail_obj *out, ail_obj fmtobj, ai
     ail2f_buf o = {0, 0, 0};
     ail_st st = AIL_OK; char msg[160];
     for (int64_t i = 0; i < s.n; i++) {
-        uint16_t c = ail_chr(s, i);
+        uint32_t c = ail_chr(s, i);
         if (c != '%') { ail2f_put(&o, c); continue; }
         int64_t start = i;
         i++;
@@ -928,7 +927,7 @@ static inline ail_st ail2f_percent(ail_ctx *cx, ail_obj *out, ail_obj fmtobj, ai
         ail2f_spec f; memset(&f, 0, sizeof f); f.fill = ' ';
         int left = 0;
         for (; i < s.n; i++) {
-            uint16_t q = ail_chr(s, i);
+            uint32_t q = ail_chr(s, i);
             if (q == '-') left = 1; else if (q == '+') f.sign = '+'; else if (q == ' ') { if (f.sign != '+') f.sign = ' '; }
             else if (q == '#') f.alt = 1; else if (q == '0') f.zero = 1; else break;
         }
@@ -950,7 +949,7 @@ static inline ail_st ail2f_percent(ail_ctx *cx, ail_obj *out, ail_obj fmtobj, ai
         }
         while (i < s.n && (ail_chr(s, i) == 'h' || ail_chr(s, i) == 'l' || ail_chr(s, i) == 'L')) i++;
         if (i >= s.n) { st = ail_raise_c(cx, AIL_B_VALUEERROR, "incomplete format"); goto fail; }
-        uint16_t t = ail_chr(s, i);
+        uint32_t t = ail_chr(s, i);
         if (t == '%') { ail2f_put(&o, '%'); continue; }
         if (!have) {
             if (is_tuple) {
@@ -1008,11 +1007,10 @@ static inline ail_st ail2f_percent(ail_ctx *cx, ail_obj *out, ail_obj fmtobj, ai
             f.type = (char)t; f.has_prec = 0;
             piece = ail2f_pad_num(cx, ail2f_signstr(signbit(d) && !isnan(d), f.sign), "", body, &f);
         } else if (t == 'c') {
-            uint16_t ch;
+            uint32_t ch;
             if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) {
                 if (arg.i < 0 || arg.i > 0x10FFFF) { st = ail_raise_c(cx, AIL_B_OVERFLOWERROR, "%c arg not in range(0x110000)"); goto fail; }
-                if (arg.i > 0xFFFF) ail_die("%c: a code point above U+FFFF in the 16-bit v2 runtime");
-                ch = (uint16_t)arg.i;
+                ch = (uint32_t)arg.i;
             } else if (arg.tag == AIL_T_STR && ail_view_to_str(arg).n == 1) ch = ail_chr(ail_view_to_str(arg), 0);
             else { st = ail_raise_c(cx, AIL_B_TYPEERROR, "%c requires int or char"); goto fail; }
             ail_str v; v.p = &ch; v.n = 1; v.bytes = 0;
@@ -1562,7 +1560,7 @@ static inline ail_st ail2h_algo(ail_ctx *cx, ail_obj *out, ail_obj name) {
     ail_str s = ail_view_to_str(name);
     uint8_t b[32];
     int64_t n = s.n > 31 ? 31 : s.n;
-    for (int64_t i = 0; i < n; i++) { uint16_t c = ail_chr(s, i); b[i] = c < 0x80 ? (uint8_t)c : 0xff; }
+    for (int64_t i = 0; i < n; i++) { uint32_t c = ail_chr(s, i); b[i] = c < 0x80 ? (uint8_t)c : 0xff; }
     *out = ail_box_int(s.n > 31 ? -1 : ailhs_algo_of(b, n));
     return AIL_OK;
 }
@@ -2310,7 +2308,7 @@ static int64_t ail2c_decode(ail_str s, uint32_t **out) {
     return m;
 }
 
-static void ail2c_put_mapped(uint16_t *buf, int64_t *o, uint32_t c, const uint32_t *keys,
+static void ail2c_put_mapped(uint32_t *buf, int64_t *o, uint32_t c, const uint32_t *keys,
                              const uint32_t *at, const uint8_t *pool, int64_t count) {
     int64_t f = ail__case_find(keys, count, c);
     if (f < 0) { ail__put_cp(buf, o, c); return; }

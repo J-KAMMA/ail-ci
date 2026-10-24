@@ -13,7 +13,7 @@ are primitives here, with the control flow of the Python functions line for line
   Python wrapper (prelude_genlib._ail_json_string, unchanged by this file's use) raises what code names: 1 invalid
   control character, 2 unterminated string, 3 invalid escape, 4 invalid \\uXXXX escape, 5 a surrogate escape.
 
-Strings are 16-bit units on this path, as in the Python source. A string without escapes comes back as a view of
+Strings are 32-bit code-point units on this path, as in the Python source. A string without escapes comes back as a view of
 the text (no copy). A program that does not use json gets the C it always had.
 """
 
@@ -56,7 +56,7 @@ static ail_st ail2j_needstr(ail_ctx *cx, ail_obj x) {
 }
 static inline int ail2j_isint(ail_obj x) { return x.tag == AIL_T_INT || x.tag == AIL_T_BOOL; }
 static const char ail2j_hex[] = "0123456789abcdef";
-static inline void ail2j_u(uint16_t *o, uint32_t n) {
+static inline void ail2j_u(uint32_t *o, uint32_t n) {
     o[0] = '\\'; o[1] = 'u'; o[2] = ail2j_hex[(n >> 12) & 15]; o[3] = ail2j_hex[(n >> 8) & 15];
     o[4] = ail2j_hex[(n >> 4) & 15]; o[5] = ail2j_hex[n & 15];
 }
@@ -67,18 +67,19 @@ static ail_st ail2j_quote(ail_ctx *cx, ail_obj *out, ail_obj so, ail_obj asc) {
     int ascii = ail_obj_truthy(asc);
     int64_t len = 2;
     for (int64_t i = 0; i < s.n; i++) {
-        uint16_t c = ail_chr(s, i);
+        uint32_t c = ail_chr(s, i);
         if (c == '"' || c == '\\' || c == '\n' || c == '\r' || c == '\t' || c == '\b' || c == '\f') len += 2;
         else if (c < 32) len += 6;
+        else if (ascii && c > 0xFFFF) len += 12;
         else if (ascii && c > 126) len += 6;
         else len += 1;
     }
     ail_strbuild bu = ail_str_buf(cx, len);
-    uint16_t *o = bu.buf;
+    uint32_t *o = bu.buf;
     int64_t k = 0;
     o[k++] = '"';
     for (int64_t i = 0; i < s.n; i++) {
-        uint16_t c = ail_chr(s, i);
+        uint32_t c = ail_chr(s, i);
         switch (c) {
             case '"': o[k++] = '\\'; o[k++] = '"'; break;
             case '\\': o[k++] = '\\'; o[k++] = '\\'; break;
@@ -88,7 +89,13 @@ static ail_st ail2j_quote(ail_ctx *cx, ail_obj *out, ail_obj so, ail_obj asc) {
             case '\b': o[k++] = '\\'; o[k++] = 'b'; break;
             case '\f': o[k++] = '\\'; o[k++] = 'f'; break;
             default:
-                if (c < 32 || (ascii && c > 126)) { ail2j_u(o + k, c); k += 6; }
+                if (c < 32) { ail2j_u(o + k, c); k += 6; }
+                else if (ascii && c > 0xFFFF) {
+                    uint32_t v = c - 0x10000;
+                    ail2j_u(o + k, 0xD800 + (v >> 10)); k += 6;
+                    ail2j_u(o + k, 0xDC00 + (v & 0x3FF)); k += 6;
+                }
+                else if (ascii && c > 126) { ail2j_u(o + k, c); k += 6; }
                 else o[k++] = c;
         }
     }
@@ -105,13 +112,13 @@ static ail_st ail2j_ws(ail_ctx *cx, ail_obj *out, ail_obj so, ail_obj no, ail_ob
     if (n > s.n) n = s.n;
     if (i < 0) { *out = io; return AIL_OK; }
     while (i < n) {
-        uint16_t c = ail_chr(s, i);
+        uint32_t c = ail_chr(s, i);
         if (c == ' ' || c == '\t' || c == '\n' || c == '\r') i++; else break;
     }
     *out = ail_box_int(i);
     return AIL_OK;
 }
-static inline int ail2j_hexval(uint16_t c) {
+static inline int ail2j_hexval(uint32_t c) {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
     if (c >= 'A' && c <= 'F') return c - 'A' + 10;
@@ -130,11 +137,11 @@ static ail_st ail2j_scan(ail_ctx *cx, ail_obj *out, ail_obj so, ail_obj no, ail_
     int64_t n = no.i, end = eo.i, begin = end - 1;
     if (n > s.n) n = s.n;
     if (end < 0 || end > n) return ail_raise_c(cx, AIL_B_INDEXERROR, "string index out of range");
-    uint16_t *buf = NULL;            /* built when an escape turns up */
+    uint32_t *buf = NULL;            /* built when an escape turns up */
     int64_t bn = 0, first = end;     /* [first, end) is the run copied so far when buf is NULL */
     for (;;) {
         int64_t nxt = end;
-        uint16_t c = 0;
+        uint32_t c = 0;
         while (nxt < n) {
             c = ail_chr(s, nxt);
             if (c == '"' || c == '\\') break;
@@ -143,7 +150,7 @@ static ail_st ail2j_scan(ail_ctx *cx, ail_obj *out, ail_obj so, ail_obj no, ail_
         }
         if (nxt >= n) { if (buf) free(buf); return ail2j_fail(cx, out, begin, 2); }
         if (nxt > end) {
-            if (buf) { memcpy(buf + bn, s.p + end, (size_t)(nxt - end) * 2); bn += nxt - end; }
+            if (buf) { memcpy(buf + bn, s.p + end, (size_t)(nxt - end) * sizeof(uint32_t)); bn += nxt - end; }
         }
         nxt++;
         if (c == '"') {
@@ -155,7 +162,7 @@ static ail_st ail2j_scan(ail_ctx *cx, ail_obj *out, ail_obj so, ail_obj no, ail_
                 text = ail_str_view(so.sv.backing, so.sv.off + first, stop - first);
             } else {
                 ail_strbuild bu = ail_str_buf(cx, bn);
-                if (bn) memcpy(bu.buf, buf, (size_t)bn * 2);
+                if (bn) memcpy(bu.buf, buf, (size_t)bn * sizeof(uint32_t));
                 text = ail_str_buf_done(bu, bn);
                 free(buf);
             }
@@ -166,9 +173,9 @@ static ail_st ail2j_scan(ail_ctx *cx, ail_obj *out, ail_obj so, ail_obj no, ail_
         }
         if (nxt == n) { if (buf) free(buf); return ail2j_fail(cx, out, begin, 2); }
         if (!buf) {   /* the first escape: copy the run seen so far */
-            buf = (uint16_t *)ail_xmalloc((size_t)(n - first + 1) * 2);
+            buf = (uint32_t *)ail_xmalloc((size_t)(n - first + 1) * sizeof(uint32_t));
             bn = nxt - 1 - first;
-            if (bn) memcpy(buf, s.p + first, (size_t)bn * 2);
+            if (bn) memcpy(buf, s.p + first, (size_t)bn * sizeof(uint32_t));
         }
         c = ail_chr(s, nxt);
         if (c != 'u') {
@@ -193,8 +200,21 @@ static ail_st ail2j_scan(ail_ctx *cx, ail_obj *out, ail_obj so, ail_obj no, ail_
                 v = v * 16 + h;
             }
             nxt = end;
-            if (v >= 55296 && v <= 57343) { free(buf); return ail2j_fail(cx, out, 0, 5); }
-            buf[bn++] = (uint16_t)v;
+            if (v >= 0xD800 && v <= 0xDBFF && nxt + 6 <= n
+                && ail_chr(s, nxt) == '\\' && ail_chr(s, nxt + 1) == 'u') {
+                int v2 = 0, ok = 1;
+                for (int j = 0; j < 4; j++) {
+                    int h = ail2j_hexval(ail_chr(s, nxt + 2 + j));
+                    if (h < 0) { ok = 0; break; }
+                    v2 = v2 * 16 + h;
+                }
+                if (ok && v2 >= 0xDC00 && v2 <= 0xDFFF) {
+                    v = 0x10000 + ((v - 0xD800) << 10) + (v2 - 0xDC00);
+                    nxt += 6;
+                    end = nxt;
+                }
+            }
+            buf[bn++] = (uint32_t)v;
         }
     }
 }

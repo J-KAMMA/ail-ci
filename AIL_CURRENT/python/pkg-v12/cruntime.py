@@ -9342,10 +9342,6 @@ static char *ail__units_ascii(ail_str s, char *stack, int64_t cap, int64_t *len)
     int64_t k = 0;
     for (int64_t i = 0; i < s.n; i++) {
         uint32_t c = (uint32_t)ail_chr(s, i);
-        if (c >= 0xD800u && c < 0xDC00u && i + 1 < s.n) {
-            uint32_t d = (uint32_t)ail_chr(s, i + 1);
-            if (d >= 0xDC00u && d < 0xE000u) { c = 0x10000u + ((c - 0xD800u) << 10) + (d - 0xDC00u); i++; }
-        }
         int x = ail__asc_xform(c);
         if (x < 0) { b[k++] = '?'; break; }
         b[k++] = (char)x;
@@ -11122,7 +11118,7 @@ static inline void ail_vec_reserve(ail_ctx *cx, ail_vecobj *v, int64_t need) {
 /* ail_str2.h -- string backing/view representation and algorithms for ail_obj2.h.
 
    Representation (documented fully in API.md's "string view rule"): a GC object
-   AIL_K_STRBACK holds a contiguous, immutable uint16_t code-point buffer (the "backing");
+   AIL_K_STRBACK holds a contiguous, immutable uint32_t code-point buffer (the "backing");
    every ail_obj with tag AIL_T_STR is a VIEW -- {backing pointer, offset, length} stored
    INLINE in the ail_obj itself (see ail_obj2.h's union), not a second heap indirection.
    A slice with step==1 (including .strip()/.lstrip()/.rstrip(), and plain index/substring
@@ -11140,12 +11136,12 @@ static inline void ail_vec_reserve(ail_ctx *cx, ail_vecobj *v, int64_t need) {
 #ifndef AIL_STR2_H
 #define AIL_STR2_H
 
-typedef struct { ail_gcobj hdr; int64_t n; uint16_t data[]; } ail_strback;
+typedef struct { ail_gcobj hdr; int64_t n; uint32_t data[]; } ail_strback;
 
-static inline uint16_t *ail_strback_data(ail_gcobj *o) { return ((ail_strback *)o)->data; }
+static inline uint32_t *ail_strback_data(ail_gcobj *o) { return ((ail_strback *)o)->data; }
 
 static inline ail_strback *ail_strback_alloc(ail_ctx *cx, int64_t n) {
-    size_t sz = sizeof(ail_strback) + (size_t)(n > 0 ? n : 0) * sizeof(uint16_t);
+    size_t sz = sizeof(ail_strback) + (size_t)(n > 0 ? n : 0) * sizeof(uint32_t);
     ail_strback *b = (ail_strback *)ail_gc_alloc(cx, AIL_K_STRBACK, sz);
     b->n = n;
     return b;
@@ -11157,7 +11153,7 @@ static inline ail_obj ail_str_view(ail_gcobj *backing, int64_t off, int64_t len)
 /* The fast-path/typed-boundary shape, unchanged from cruntime.py: a borrowed pointer,
    never allocates. ail_view_to_str is zero-copy; ail_str_to_view copies (does not
    re-decode) into a fresh backing -- the "convertible both ways" pair the brief asks for. */
-typedef struct { const uint16_t *p; int64_t n; _Bool bytes; } ail_str;
+typedef struct { const uint32_t *p; int64_t n; _Bool bytes; } ail_str;
 /* `bytes` is 1 only for a string proven pure ASCII, whose elements are
    uint8_t. For ASCII a byte element IS the uint16 element value and the
    unit count IS the byte count, so `.n` and every read keep their
@@ -11165,22 +11161,22 @@ typedef struct { const uint16_t *p; int64_t n; _Bool bytes; } ail_str;
    place that knows it. */
 /* the one place that knows the element width; declared here because
    comparisons use it earlier */
-static inline uint16_t ail_chr(ail_str s, int64_t i);
+static inline uint32_t ail_chr(ail_str s, int64_t i);
 static inline size_t ail_str_esz(ail_str s);
 static inline ail_str ail_view(ail_str s, int64_t i);
-static inline void ail_str_put(uint16_t *dst, ail_str s);
-static inline size_t ail_str_esz(ail_str s) { return s.bytes ? 1u : sizeof(uint16_t); }
+static inline void ail_str_put(uint32_t *dst, ail_str s);
+static inline size_t ail_str_esz(ail_str s) { return s.bytes ? 1u : sizeof(uint32_t); }
 static inline ail_str ail_view(ail_str s, int64_t i) {
     ail_str r; r.bytes = s.bytes; r.n = s.n - i;
-    r.p = s.p ? (s.bytes ? (const uint16_t *)((const uint8_t *)s.p + i) : s.p + i) : 0;
+    r.p = s.p ? (s.bytes ? (const uint32_t *)((const uint8_t *)s.p + i) : s.p + i) : 0;
     return r;
 }
-static inline void ail_str_put(uint16_t *dst, ail_str s) {
+static inline void ail_str_put(uint32_t *dst, ail_str s) {
     if (s.bytes) {
         for (int64_t i = 0; i < s.n; i++) dst[i] = ((const uint8_t *)s.p)[i];
-    } else if (s.n) memcpy(dst, s.p, (size_t)s.n * sizeof(uint16_t));
+    } else if (s.n) memcpy(dst, s.p, (size_t)s.n * sizeof(uint32_t));
 }
-static inline uint16_t ail_chr(ail_str s, int64_t i) {
+static inline uint32_t ail_chr(ail_str s, int64_t i) {
     return s.bytes ? ((const uint8_t *)s.p)[i] : s.p[i];
 }
 
@@ -11200,7 +11196,7 @@ static inline ail_obj ail_str_from_cstr(ail_ctx *cx, const char *c) {
 }
 /* A little builder for algorithms that fill a buffer of known/worst-case length and then
    trim to the actual length written (mirrors v1's ail_str_alloc_buf pattern). */
-typedef struct { ail_strback *back; uint16_t *buf; } ail_strbuild;
+typedef struct { ail_strback *back; uint32_t *buf; } ail_strbuild;
 static inline ail_strbuild ail_str_buf(ail_ctx *cx, int64_t worst_n) {
     ail_strbuild r; r.back = ail_strback_alloc(cx, worst_n); r.buf = r.back->data; return r;
 }
@@ -11270,7 +11266,7 @@ static inline void ail_str_write(ail_str s, FILE *f) {
         }
     }
 }
-static inline int ail__is_ws(uint16_t c) {
+static inline int ail__is_ws(uint32_t c) {
     return (c >= 0x09 && c <= 0x0D) || (c >= 0x1C && c <= 0x20)
         || c == 0x85 || c == 0xA0 || c == 0x1680 || (c >= 0x2000 && c <= 0x200A)
         || c == 0x2028 || c == 0x2029 || c == 0x202F || c == 0x205F || c == 0x3000;
@@ -11315,8 +11311,8 @@ static inline int ail_str_endswith(ail_str s, ail_str suf) {
     return ail_str_suffix_eq(s, off, suf);
 }
 /*@DIGITS_DG@*/
-/* str.isdigit() / isdecimal() / isnumeric() of a str, CPython's own tables (DIGITS_ND / DIGITS_DG). A str is
-   UTF-16 here, so a surrogate pair is one code point. */
+/* str.isdigit() / isdecimal() / isnumeric() of a str, CPython's own tables (DIGITS_ND / DIGITS_DG).
+   The backing stores one code point per unit, so no surrogate decoding is needed. */
 static inline int ail__udigit(uint32_t c);      /* defined with the int()/float() parser below */
 static inline int ail__in_ranges(const uint32_t (*tab)[2], int n, uint32_t c) {
     int lo = 0, hi = n - 1;
@@ -11332,10 +11328,6 @@ static inline int ail__str_all_prop(ail_str s, int kind) {
     if (s.n == 0) return 0;
     for (int64_t i = 0; i < s.n; i++) {
         uint32_t c = (uint32_t)ail_chr(s, i);
-        if (c >= 0xD800u && c < 0xDC00u && i + 1 < s.n) {
-            uint32_t d = (uint32_t)ail_chr(s, i + 1);
-            if (d >= 0xDC00u && d < 0xE000u) { c = 0x10000u + ((c - 0xD800u) << 10) + (d - 0xDC00u); i++; }
-        }
         int ok = c < 128 ? (c >= 48 && c <= 57)
                : kind == 0 ? ail__in_ranges(ail__dg, (int)(sizeof ail__dg / sizeof ail__dg[0]), c)
                : kind == 1 ? ail__udigit(c) >= 0
@@ -12024,7 +12016,7 @@ static const int32_t ail__xid_start[][2] = {
     {196608, 201546},
     {201552, 205743},
 };
-static const uint16_t ail__xid_start_n = 667;
+static const uint32_t ail__xid_start_n = 667;
 static const int32_t ail__xid_cont[][2] = {
     {48, 57},
     {65, 90},
@@ -12802,7 +12794,7 @@ static const int32_t ail__xid_cont[][2] = {
     {201552, 205743},
     {917760, 917999},
 };
-static const uint16_t ail__xid_cont_n = 775;
+static const uint32_t ail__xid_cont_n = 775;
 static inline int ail__xid_lookup(const int32_t t[][2], int32_t n, int32_t c) {
     int32_t lo = 0, hi = n - 1;
     while (lo <= hi) {
@@ -12870,10 +12862,10 @@ static inline ail_obj ail_str_cat(ail_ctx *cx, ail_obj a, ail_obj b) {
     return ail_str_buf_done(bu, sa.n + sb.n);
 }
 static inline ail_obj ail_str_of_int(ail_ctx *cx, int64_t v) {
-    uint16_t tmp[24]; int k = 0;
+    uint32_t tmp[24]; int k = 0;
     uint64_t m = v < 0 ? (uint64_t)0 - (uint64_t)v : (uint64_t)v;
     if (m == 0) tmp[k++] = 48;
-    while (m) { tmp[k++] = (uint16_t)(48 + (int)(m % 10)); m /= 10; }
+    while (m) { tmp[k++] = (uint32_t)(48 + (int)(m % 10)); m /= 10; }
     int64_t n = k + (v < 0 ? 1 : 0);
     ail_strbuild bu = ail_str_buf(cx, n);
     int64_t o = 0;
@@ -12895,7 +12887,7 @@ static inline ail_obj ail_str_lower(ail_ctx *cx, ail_obj s) {
     for (int64_t i = 0; i < t.n; i++) {
         uint32_t c = (uint32_t)ail_chr(t, i);
         if (c > 127) ail_die(".lower() reached a non-ASCII code point; ASCII-only in this runtime");
-        bu.buf[i] = (c >= 65 && c <= 90) ? (uint16_t)(c + 32) : (uint16_t)c;
+        bu.buf[i] = (c >= 65 && c <= 90) ? (uint32_t)(c + 32) : (uint32_t)c;
     }
     return ail_str_buf_done(bu, t.n);
 }
@@ -12905,7 +12897,7 @@ static inline ail_obj ail_str_upper(ail_ctx *cx, ail_obj s) {
     for (int64_t i = 0; i < t.n; i++) {
         uint32_t c = (uint32_t)ail_chr(t, i);
         if (c > 127) ail_die(".upper() reached a non-ASCII code point; ASCII-only in this runtime");
-        bu.buf[i] = (c >= 97 && c <= 122) ? (uint16_t)(c - 32) : (uint16_t)c;
+        bu.buf[i] = (c >= 97 && c <= 122) ? (uint32_t)(c - 32) : (uint32_t)c;
     }
     return ail_str_buf_done(bu, t.n);
 }
@@ -13740,17 +13732,13 @@ static inline ail_obj ail_str_repr(ail_ctx *cx, ail_obj sobj) {
 
 /*@NUMPARSE@*/
 /* The ASCII text int()/float() parse for a str (see NUMPARSE): the buffer is `stack` or a malloc'd block.
-   A str is UTF-16 here, so a surrogate pair is one code point (the mathematical digits are Nd). */
+   The backing stores one code point per unit (the mathematical digits are Nd). */
 static char *ail__units_ascii(ail_str s, char *stack, int64_t cap, int64_t *len) {
     char *b = s.n < cap ? stack : (char *)malloc((size_t)s.n + 1);
     if (!b) ail_die("out of memory");
     int64_t k = 0;
     for (int64_t i = 0; i < s.n; i++) {
         uint32_t c = (uint32_t)ail_chr(s, i);
-        if (c >= 0xD800u && c < 0xDC00u && i + 1 < s.n) {
-            uint32_t d = (uint32_t)ail_chr(s, i + 1);
-            if (d >= 0xDC00u && d < 0xE000u) { c = 0x10000u + ((c - 0xD800u) << 10) + (d - 0xDC00u); i++; }
-        }
         int x = ail__asc_xform(c);
         if (x < 0) { b[k++] = '?'; break; }
         b[k++] = (char)x;
@@ -13761,7 +13749,7 @@ static char *ail__units_ascii(ail_str s, char *stack, int64_t cap, int64_t *len)
 /* int()/float() parsing, CPython's rules (NUMPARSE above); overflow of the parsed
    int beyond int64 is an AIL_LIMIT (see API.md), not a Python exception, per the owner's
    "int64 in v1" decision -- consistent with arithmetic overflow's treatment. */
-static inline int ail__is_int_ws(uint16_t c) { return ail__is_ws(c) && !(c >= 0x1C && c <= 0x1F); }
+static inline int ail__is_int_ws(uint32_t c) { return ail__is_ws(c) && !(c >= 0x1C && c <= 0x1F); }
 static inline ail_st ail_str_to_int(ail_ctx *cx, int64_t *out, ail_obj sobj) {
     ail_str s = ail_view_to_str(sobj);
     char stackbuf[128];
@@ -13929,7 +13917,7 @@ static inline ail_st ail_str_join(ail_ctx *cx, ail_obj *out, ail_obj sepobj, ail
     AIL_FRAME_LEAVE(cx, fr);
     int64_t o = 0;
     for (int64_t i = 0; i < v->n; i++) {
-        if (i > 0 && sep.n) { memcpy(bu.buf + o, ail_view_to_str(sepobj).p, (size_t)sep.n * sizeof(uint16_t)); o += sep.n; }
+        if (i > 0 && sep.n) { memcpy(bu.buf + o, ail_view_to_str(sepobj).p, (size_t)sep.n * sizeof(uint32_t)); o += sep.n; }
         ail_str piece = ail_view_to_str(v->p[i]);
         if (piece.n) { ail_str_put(bu.buf + o, piece); o += piece.n; }
     }
@@ -14103,7 +14091,7 @@ typedef struct { ail_gcobj hdr; ail_obj val; } ail_cellobj;
    ail_obj array precisely so closures over locals participate in GC like everything else). */
 typedef ail_st (*ail_cfunc1)(ail_ctx *cx, ail_obj *out, ail_obj arg, void *closure);
 
-typedef struct { ail_gcobj hdr; ail_cfunc1 fn; ail_obj *cells; uint16_t n_cells; const char *name; } ail_funcobj;
+typedef struct { ail_gcobj hdr; ail_cfunc1 fn; ail_obj *cells; uint32_t n_cells; const char *name; } ail_funcobj;
 typedef struct { ail_gcobj hdr; ail_obj func, self; } ail_boundobj;
 
 /* Iterator kinds -- one shared struct + a `kind` switch in ail_next, rather than a
@@ -14358,7 +14346,7 @@ static inline int ail_exc_is_int_limit(ail_ctx *cx) {
     static const char prefix[] = "Exceeds the limit";
     ail_str m = ail_view_to_str(cx->exc.msg);
     for (int64_t i = 0; prefix[i]; i++)
-        if (i >= m.n || ail_chr(m, i) != (uint16_t)(unsigned char)prefix[i]) return 0;
+        if (i >= m.n || ail_chr(m, i) != (uint32_t)(unsigned char)prefix[i]) return 0;
     return 1;
 }
 static inline ail_obj ail_exc_as_value(ail_ctx *cx); /* defined after ail_inst_new, in the classes
@@ -16186,8 +16174,6 @@ static inline ail_obj ail_bi_str_from_utf8(ail_ctx *cx, const char *p, int64_t n
         }
         if (cp < minimum || (cp >= 0xD800 && cp <= 0xDFFF) || cp > 0x10FFFF)
             ail_die("stdin is not valid UTF-8");
-        if (cp > 0xFFFF && sizeof(back->data[0]) < 4)
-            ail_die("stdin code point above U+FFFF in the 16-bit v2 runtime");
         back->data[o++] = cp;
     }
     back->n = o;
@@ -16357,19 +16343,19 @@ static inline ail_obj ail__pad(ail_ctx *cx, const char *content, int64_t clen, a
     int64_t o = 0;
     if (align == '=' && numeric && clen > 0 && (content[0] == '-' || content[0] == '+')) {
         bu.buf[o++] = content[0];
-        for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (uint16_t)f.fill;
+        for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (uint32_t)f.fill;
         for (int64_t k = 1; k < clen; k++) bu.buf[o++] = (unsigned char)content[k];
     } else if (align == '>' || align == '=') {
-        for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (uint16_t)f.fill;
+        for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (uint32_t)f.fill;
         for (int64_t k = 0; k < clen; k++) bu.buf[o++] = (unsigned char)content[k];
     } else if (align == '^') {
         int64_t lp = pad / 2, rp = pad - lp;
-        for (int64_t k = 0; k < lp; k++) bu.buf[o++] = (uint16_t)f.fill;
+        for (int64_t k = 0; k < lp; k++) bu.buf[o++] = (uint32_t)f.fill;
         for (int64_t k = 0; k < clen; k++) bu.buf[o++] = (unsigned char)content[k];
-        for (int64_t k = 0; k < rp; k++) bu.buf[o++] = (uint16_t)f.fill;
+        for (int64_t k = 0; k < rp; k++) bu.buf[o++] = (uint32_t)f.fill;
     } else {
         for (int64_t k = 0; k < clen; k++) bu.buf[o++] = (unsigned char)content[k];
-        for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (uint16_t)f.fill;
+        for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (uint32_t)f.fill;
     }
     return ail_str_buf_done(bu, o);
 }
@@ -16435,9 +16421,9 @@ static inline ail_st ail_obj_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_ob
         AIL_FRAME_LEAVE(cx, fr);
         cs = ail_view_to_str(content); if (f.has_prec && f.prec >= 0 && f.prec < cs.n) cs.n = f.prec;
         int64_t o = 0;
-        for (int64_t k = 0; k < lp; k++) bu.buf[o++] = (uint16_t)f.fill;
+        for (int64_t k = 0; k < lp; k++) bu.buf[o++] = (uint32_t)f.fill;
         for (int64_t k = 0; k < cs.n; k++) bu.buf[o++] = ail_chr(cs, k);
-        for (int64_t k = 0; k < pad - lp; k++) bu.buf[o++] = (uint16_t)f.fill;
+        for (int64_t k = 0; k < pad - lp; k++) bu.buf[o++] = (uint32_t)f.fill;
         *out = ail_str_buf_done(bu, o);
         return AIL_OK;
     }
@@ -16705,7 +16691,7 @@ static inline long ail_peak_rss_kb(void) {
    (B008's implicit truthy predicate) is this file's one case of needing to manufacture a
    FUNC value itself, so the constructor lives here rather than in core.
    =================================================================================== */
-static inline ail_obj ail_bi_make_cfunc(ail_ctx *cx, ail_cfunc1 fn, ail_obj *cells, uint16_t n_cells, const char *name) {
+static inline ail_obj ail_bi_make_cfunc(ail_ctx *cx, ail_cfunc1 fn, ail_obj *cells, uint32_t n_cells, const char *name) {
     ail_funcobj *f = (ail_funcobj *)ail_gc_alloc(cx, AIL_K_FUNC, sizeof *f);
     f->fn = fn; f->cells = cells; f->n_cells = n_cells; f->name = name;
     ail_obj r; r.tag = AIL_T_FUNC; r.o = (ail_gcobj *)f; return r;
@@ -17352,7 +17338,7 @@ static inline ail_st ail_bi_pow(ail_ctx *cx, ail_obj *out, ail_obj base, ail_obj
    CPython-verified text and full base= support (2..36, plus base 0 autodetecting a 0x/0o/
    0b prefix, matching CPython exactly).
    =================================================================================== */
-static inline int ail__digit_val(uint16_t c) {
+static inline int ail__digit_val(uint32_t c) {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'a' && c <= 'z') return c - 'a' + 10;
     if (c >= 'A' && c <= 'Z') return c - 'A' + 10;
@@ -17446,7 +17432,7 @@ static inline ail_st ail_bi_float(ail_ctx *cx, ail_obj *out, ail_obj x) {
         char *bb = heap ? heap : stackbuf;
         ok = 1;
         for (int64_t k = 0; k < len; k++) {
-            uint16_t c = ail_chr(s, i + k);
+            uint32_t c = ail_chr(s, i + k);
             if (c < 0 || c > 126) { ok = 0; break; }
             bb[k] = (char)c;
         }
@@ -17552,14 +17538,14 @@ static inline ail_st ail_bi_dict_fromkeys(ail_ctx *cx, ail_obj *out, ail_obj ite
     AIL_FRAME_LEAVE(cx, fr);
     return AIL_OK;
 }
-/* B028/B029: chr()/ord(). The folded runtime stores 16-bit code points.
-   Refuse values it cannot represent instead of truncating them. */
+/* B028/B029: chr()/ord(). The backing stores one 32-bit code point per unit, so every
+   scalar (BMP and non-BMP) is representable. Surrogates are not scalar values and are
+   still refused at run time, as before. */
 static inline ail_st ail_bi_chr(ail_ctx *cx, ail_obj *out, ail_obj x) {
     if (!ail__is_intlike(x.tag)) { char buf[80]; snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail_type_name(x.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
     if (x.i < 0 || x.i > 0x10FFFF) return ail_raise_c(cx, AIL_B_VALUEERROR, "chr() arg not in range(0x110000)");
     if (x.i >= 0xD800 && x.i <= 0xDFFF) ail_die("chr() surrogate code point is unsupported");
-    if (x.i > 0xFFFF) ail_die("chr() non-BMP code point requires 32-bit strings");
-    ail_strback *b = ail_strback_alloc(cx, 1); b->data[0] = (uint16_t)x.i;
+    ail_strback *b = ail_strback_alloc(cx, 1); b->data[0] = (uint32_t)x.i;
     *out = ail_str_view((ail_gcobj *)b, 0, 1);
     return AIL_OK;
 }
@@ -17836,14 +17822,14 @@ static inline int ail__win(int64_t n, int has_lo, int64_t lo, int has_hi, int64_
     *out_lo = a; *out_hi = b;
     return a <= n && a <= b;
 }
-static inline int ail__chr_in(uint16_t c, ail_str set) {
+static inline int ail__chr_in(uint32_t c, ail_str set) {
     for (int64_t i = 0; i < set.n; i++) if (ail_chr(set, i) == c) return 1;
     return 0;
 }
-static inline int ail__is_ascii_alpha(uint16_t c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
-static inline int ail__is_ascii_digit(uint16_t c) { return c >= '0' && c <= '9'; }
-static inline uint16_t ail__to_lower1(uint16_t c) { return (c >= 'A' && c <= 'Z') ? c + 32 : c; }
-static inline uint16_t ail__to_upper1(uint16_t c) { return (c >= 'a' && c <= 'z') ? c - 32 : c; }
+static inline int ail__is_ascii_alpha(uint32_t c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
+static inline int ail__is_ascii_digit(uint32_t c) { return c >= '0' && c <= '9'; }
+static inline uint32_t ail__to_lower1(uint32_t c) { return (c >= 'A' && c <= 'Z') ? c + 32 : c; }
+static inline uint32_t ail__to_upper1(uint32_t c) { return (c >= 'a' && c <= 'z') ? c - 32 : c; }
 
 /* A RuntimeError CLASS -- see the file banner's "core changes needed" note. Callers build
    this ONCE (it must live in a rooted frame slot for as long as it might be raised/printed)
@@ -17976,7 +17962,7 @@ static inline ail_st ail_meth_str_rsplit(ail_ctx *cx, ail_obj *out, ail_obj sobj
    M003 -- str.splitlines(keepends). Line boundaries recognised, as CPython's: \n \r \r\n \v \f
    \x1c \x1d \x1e \x85 U+2028 U+2029.
    =================================================================================== */
-static inline int ail__is_line_boundary(uint16_t c) {
+static inline int ail__is_line_boundary(uint32_t c) {
     return c == '\n' || c == '\r' || c == 0x0B || c == 0x0C || (c >= 0x1C && c <= 0x1E)
         || c == 0x85 || c == 0x2028 || c == 0x2029;
 }
@@ -18087,7 +18073,7 @@ static inline ail_st ail_meth_str_swapcase(ail_ctx *cx, ail_obj *out, ail_obj s)
     ail_str t = ail_view_to_str(s);
     ail_strbuild bu = ail_str_buf1(cx, t.n, s);
     for (int64_t i = 0; i < t.n; i++) {
-        uint16_t c = ail_chr(t, i);
+        uint32_t c = ail_chr(t, i);
         if ((uint32_t)c > 127) return ail_hit_limit(cx, "str_swapcase_nonascii", "swapcase() reached a non-ASCII code point");
         if (c >= 'a' && c <= 'z') bu.buf[i] = c - 32;
         else if (c >= 'A' && c <= 'Z') bu.buf[i] = c + 32;
@@ -18099,7 +18085,7 @@ static inline ail_st ail_meth_str_capitalize(ail_ctx *cx, ail_obj *out, ail_obj 
     ail_str t = ail_view_to_str(s);
     ail_strbuild bu = ail_str_buf1(cx, t.n, s);
     for (int64_t i = 0; i < t.n; i++) {
-        uint16_t c = ail_chr(t, i);
+        uint32_t c = ail_chr(t, i);
         if ((uint32_t)c > 127) return ail_hit_limit(cx, "str_capitalize_nonascii", "capitalize() reached a non-ASCII code point");
         bu.buf[i] = (i == 0) ? ail__to_upper1(c) : ail__to_lower1(c);
     }
@@ -18110,7 +18096,7 @@ static inline ail_st ail_meth_str_title(ail_ctx *cx, ail_obj *out, ail_obj s) {
     ail_strbuild bu = ail_str_buf1(cx, t.n, s);
     int prev_cased = 0;
     for (int64_t i = 0; i < t.n; i++) {
-        uint16_t c = ail_chr(t, i);
+        uint32_t c = ail_chr(t, i);
         if ((uint32_t)c > 127) return ail_hit_limit(cx, "str_title_nonascii", "title() reached a non-ASCII code point");
         if (ail__is_ascii_alpha(c)) {
             bu.buf[i] = prev_cased ? ail__to_lower1(c) : ail__to_upper1(c);
@@ -18261,7 +18247,7 @@ static inline int ail_meth_str_isalnum(ail_obj sobj) {
     for (int64_t i = 0; i < s.n; i++) {
         uint32_t c = (uint32_t)ail_chr(s, i);
         if (c > 127) ail_die(".isalnum() reached a non-ASCII code point; ASCII-only in this runtime");
-        if (!(ail__is_ascii_alpha((uint16_t)c) || ail__is_ascii_digit((uint16_t)c))) return 0;
+        if (!(ail__is_ascii_alpha((uint32_t)c) || ail__is_ascii_digit((uint32_t)c))) return 0;
     }
     return 1;
 }
@@ -18297,7 +18283,7 @@ static inline int ail_meth_str_islower(ail_obj sobj) {
 /* ===================================================================================
    M015 -- str.ljust/rjust/center/zfill.
    =================================================================================== */
-static inline ail_obj ail_meth_str_ljust(ail_ctx *cx, ail_obj sobj, int64_t width, uint16_t fillc) {
+static inline ail_obj ail_meth_str_ljust(ail_ctx *cx, ail_obj sobj, int64_t width, uint32_t fillc) {
     ail_str s = ail_view_to_str(sobj);
     if (s.n >= width) return sobj;
     int64_t pad = width - s.n;
@@ -18306,7 +18292,7 @@ static inline ail_obj ail_meth_str_ljust(ail_ctx *cx, ail_obj sobj, int64_t widt
     for (int64_t i = 0; i < pad; i++) bu.buf[s.n + i] = fillc;
     return ail_str_buf_done(bu, width);
 }
-static inline ail_obj ail_meth_str_rjust(ail_ctx *cx, ail_obj sobj, int64_t width, uint16_t fillc) {
+static inline ail_obj ail_meth_str_rjust(ail_ctx *cx, ail_obj sobj, int64_t width, uint32_t fillc) {
     ail_str s = ail_view_to_str(sobj);
     if (s.n >= width) return sobj;
     int64_t pad = width - s.n;
@@ -18318,7 +18304,7 @@ static inline ail_obj ail_meth_str_rjust(ail_ctx *cx, ail_obj sobj, int64_t widt
 /* CPython's odd-padding rule: marg = width-len; left = marg/2 + (marg & 1 & width) --
    the extra character (when marg is odd) goes to the LEFT iff width itself is odd,
    otherwise it goes to the right. Ported (mechanism) from CPython's own do_string_pad. */
-static inline ail_obj ail_meth_str_center(ail_ctx *cx, ail_obj sobj, int64_t width, uint16_t fillc) {
+static inline ail_obj ail_meth_str_center(ail_ctx *cx, ail_obj sobj, int64_t width, uint32_t fillc) {
     ail_str s = ail_view_to_str(sobj);
     if (s.n >= width) return sobj;
     int64_t marg = width - s.n;
@@ -18397,7 +18383,7 @@ static inline ail_st ail_meth_str_rpartition(ail_ctx *cx, ail_obj *out, ail_obj 
 static inline int64_t ail__expandtabs_len(ail_str s, int64_t tabsize) {
     int64_t col = 0, out = 0;
     for (int64_t i = 0; i < s.n; i++) {
-        uint16_t c = ail_chr(s, i);
+        uint32_t c = ail_chr(s, i);
         if (c == '\t') {
             if (tabsize > 0) { int64_t sp = tabsize - (col % tabsize); out += sp; col += sp; }
         } else if (c == '\n' || c == '\r') { out++; col = 0; }
@@ -18411,7 +18397,7 @@ static inline ail_obj ail_meth_str_expandtabs(ail_ctx *cx, ail_obj sobj, int64_t
     ail_strbuild bu = ail_str_buf1(cx, total, sobj);
     int64_t col = 0, o = 0;
     for (int64_t i = 0; i < s.n; i++) {
-        uint16_t c = ail_chr(s, i);
+        uint32_t c = ail_chr(s, i);
         if (c == '\t') {
             if (tabsize > 0) { int64_t sp = tabsize - (col % tabsize); for (int64_t k = 0; k < sp; k++) bu.buf[o++] = ' '; col += sp; }
         } else if (c == '\n' || c == '\r') { bu.buf[o++] = c; col = 0; }
@@ -18463,7 +18449,7 @@ static inline ail_st ail__str_format_fill(ail_ctx *cx, ail_obj *out, ail_obj fmt
     #define AIL__FLUSH_LIT() do { if (i > litstart) { ail_vec_reserve(cx, pieces, pieces->n + 1); \
         pieces->p[pieces->n++] = ail_str_view(fmtobj.sv.backing, fmtobj.sv.off + litstart, i - litstart); } } while (0)
     while (i < f.n) {
-        uint16_t c = ail_chr(f, i);
+        uint32_t c = ail_chr(f, i);
         if (c == '{') {
             if (i + 1 < f.n && ail_chr(f, i + 1) == '{') {
                 AIL__FLUSH_LIT();
@@ -22014,11 +22000,8 @@ static int ail__final_sigma_cp(const uint32_t *cp, int64_t m, int64_t at) {
     }
     return 1;
 }
-static inline void ail__put_cp(uint16_t *buf, int64_t *o, uint32_t c) {
-    if (c >= 0x10000u) {
-        buf[(*o)++] = (uint16_t)(0xD800u + ((c - 0x10000u) >> 10));
-        buf[(*o)++] = (uint16_t)(0xDC00u + ((c - 0x10000u) & 0x3FFu));
-    } else buf[(*o)++] = (uint16_t)c;
+static inline void ail__put_cp(uint32_t *buf, int64_t *o, uint32_t c) {
+    buf[(*o)++] = c;
 }
 static ail_obj ail_boxed_case(ail_ctx *cx, ail_obj sobj, int upper) {
     ail_str s = ail_view_to_str(sobj);
@@ -22028,8 +22011,8 @@ static ail_obj ail_boxed_case(ail_ctx *cx, ail_obj sobj, int upper) {
     int64_t o = 0;
     if (ascii) {
         for (int64_t i = 0; i < s.n; i++) {
-            uint16_t c = ail_chr(s, i);
-            bu.buf[o++] = upper ? (uint16_t)(c >= 97 && c <= 122 ? c - 32 : c) : (uint16_t)(c >= 65 && c <= 90 ? c + 32 : c);
+            uint32_t c = ail_chr(s, i);
+            bu.buf[o++] = upper ? (uint32_t)(c >= 97 && c <= 122 ? c - 32 : c) : (uint32_t)(c >= 65 && c <= 90 ? c + 32 : c);
         }
         return ail_str_buf_done(bu, o);
     }
@@ -22037,10 +22020,6 @@ static ail_obj ail_boxed_case(ail_ctx *cx, ail_obj sobj, int upper) {
     int64_t m = 0;
     for (int64_t i = 0; i < s.n; i++) {
         uint32_t c = (uint32_t)ail_chr(s, i);
-        if (c >= 0xD800u && c < 0xDC00u && i + 1 < s.n) {
-            uint32_t d = (uint32_t)ail_chr(s, i + 1);
-            if (d >= 0xDC00u && d < 0xE000u) { c = 0x10000u + ((c - 0xD800u) << 10) + (d - 0xDC00u); i++; }
-        }
         cp[m++] = c;
     }
     const uint32_t *keys = upper ? ail__upper_cp : ail__lower_cp;
@@ -22051,7 +22030,7 @@ static ail_obj ail_boxed_case(ail_ctx *cx, ail_obj sobj, int upper) {
     for (int64_t k = 0; k < m; k++) {
         uint32_t c = cp[k];
         if (c < 0x80) {
-            bu.buf[o++] = upper ? (uint16_t)(c >= 97 && c <= 122 ? c - 32 : c) : (uint16_t)(c >= 65 && c <= 90 ? c + 32 : c);
+            bu.buf[o++] = upper ? (uint32_t)(c >= 97 && c <= 122 ? c - 32 : c) : (uint32_t)(c >= 65 && c <= 90 ? c + 32 : c);
         } else if (!upper && c == 0x3A3) {
             bu.buf[o++] = ail__final_sigma_cp(cp, m, k) ? 0x3C2 : 0x3C3;
         } else {

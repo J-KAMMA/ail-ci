@@ -84,7 +84,7 @@ REX = r'''
 typedef struct {
     const ail_obj *P;               /* the pattern table */
     int64_t ncap, nprog, opo, xo, asc;
-    const uint16_t *sp;             /* the subject as units (a bytes object's str) ... */
+    const uint32_t *sp;             /* the subject as units (a bytes object's str) ... */
     const ail_obj *lp;              /* ... or as a list of code points */
     int64_t n;
     int fb;                         /* a Unicode predicate was needed: the caller falls back to the Python text */
@@ -315,7 +315,7 @@ static ail_st ail2x_run_p(ail_ctx *cx, ail_obj *out, ail_obj res, ail_obj p, ail
     return AIL_OK;
 }
 /* the byte DFA: _ail_re_dp, _ail_re_ds, _ail_re_dm */
-static int64_t ail2x_dp(const ail_obj *P, const uint16_t *sb, int64_t n, int64_t s, ail_obj *W) {
+static int64_t ail2x_dp(const ail_obj *P, const uint32_t *sb, int64_t n, int64_t s, ail_obj *W) {
     int64_t d = P[14].i, ncls = P[d].i, co = P[d + 3].i, tb = P[d + 4].i, ib = P[d + 6].i;
     int64_t st = P[ib + ncls].i;
     if (s > 0) st = P[ib + P[co + sb[s - 1]].i].i;
@@ -331,7 +331,7 @@ static int64_t ail2x_dp(const ail_obj *P, const uint16_t *sb, int64_t n, int64_t
     W[3] = ail_box_int(pos - s);
     return last;
 }
-static int64_t ail2x_ds(const ail_obj *P, const uint16_t *sb, int64_t n, int64_t pos, ail_obj *W) {
+static int64_t ail2x_ds(const ail_obj *P, const uint32_t *sb, int64_t n, int64_t pos, ail_obj *W) {
     int64_t d = P[14].i, co = P[d + 3].i, k = P[d + 2].i, qo = P[d + 8].i, ncls = P[d].i;
     int64_t s = pos;
     while (s <= n) {
@@ -356,7 +356,7 @@ static int64_t ail2x_ds(const ail_obj *P, const uint16_t *sb, int64_t n, int64_t
     }
     return -1;
 }
-static int ail2x_dm(const ail_obj *P, const uint16_t *sb, int64_t n) {
+static int ail2x_dm(const ail_obj *P, const uint32_t *sb, int64_t n) {
     int64_t d = P[14].i, ncls = P[d].i, co = P[d + 3].i, tb = P[d + 5].i;
     int64_t st = P[P[d + 7].i + ncls].i, pos = 0;
     while (pos < n) {
@@ -367,7 +367,7 @@ static int ail2x_dm(const ail_obj *P, const uint16_t *sb, int64_t n) {
     return (P[tb + st + ncls].i & 1) == 1;
 }
 /* a table and a text the DFA primitives can read without going out of range (they are what relib.py built) */
-static int ail2x_dfa_ok(ail_obj p, ail_obj s, ail_obj no, ail_obj w, const ail_obj **P, const uint16_t **sb, int64_t *n,
+static int ail2x_dfa_ok(ail_obj p, ail_obj s, ail_obj no, ail_obj w, const ail_obj **P, const uint32_t **sb, int64_t *n,
                         ail_obj **W) {
     if (p.tag != AIL_T_LIST || s.tag != AIL_T_STR || no.tag != AIL_T_INT) return 0;
     const ail_vecobj *pv = (const ail_vecobj *)p.o;
@@ -378,14 +378,14 @@ static int ail2x_dfa_ok(ail_obj p, ail_obj s, ail_obj no, ail_obj w, const ail_o
     return 1;
 }
 static ail_st ail2x_dp_p(ail_ctx *cx, ail_obj *out, ail_obj p, ail_obj s, ail_obj no, ail_obj s0, ail_obj w) {
-    const ail_obj *P; const uint16_t *sb; int64_t n; ail_obj *W;
+    const ail_obj *P; const uint32_t *sb; int64_t n; ail_obj *W;
     if (!ail2x_dfa_ok(p, s, no, w, &P, &sb, &n, &W) || !W || s0.tag != AIL_T_INT || s0.i < 0 || s0.i > n)
         return ail_raise_c(cx, AIL_B_VALUEERROR, "re: the DFA primitive got a table or text it cannot read");
     *out = ail_box_int(ail2x_dp(P, sb, n, s0.i, W));
     return AIL_OK;
 }
 static ail_st ail2x_ds_p(ail_ctx *cx, ail_obj *out, ail_obj p, ail_obj s, ail_obj no, ail_obj pos, ail_obj w) {
-    const ail_obj *P; const uint16_t *sb; int64_t n; ail_obj *W;
+    const ail_obj *P; const uint32_t *sb; int64_t n; ail_obj *W;
     if (!ail2x_dfa_ok(p, s, no, w, &P, &sb, &n, &W) || !W || pos.tag != AIL_T_INT || pos.i < 0
         || W[2].tag != AIL_T_INT)
         return ail_raise_c(cx, AIL_B_VALUEERROR, "re: the DFA primitive got a table or text it cannot read");
@@ -393,7 +393,7 @@ static ail_st ail2x_ds_p(ail_ctx *cx, ail_obj *out, ail_obj p, ail_obj s, ail_ob
     return AIL_OK;
 }
 static ail_st ail2x_dm_p(ail_ctx *cx, ail_obj *out, ail_obj p, ail_obj s, ail_obj no) {
-    const ail_obj *P; const uint16_t *sb; int64_t n; ail_obj *W;
+    const ail_obj *P; const uint32_t *sb; int64_t n; ail_obj *W;
     if (!ail2x_dfa_ok(p, s, no, (ail_obj){.tag = AIL_T_NONE}, &P, &sb, &n, &W))
         return ail_raise_c(cx, AIL_B_VALUEERROR, "re: the DFA primitive got a table or text it cannot read");
     *out = ail_box_bool(ail2x_dm(P, sb, n));
