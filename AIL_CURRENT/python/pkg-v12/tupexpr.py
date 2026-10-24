@@ -308,6 +308,8 @@ class Exprs:
                 elem = t
             elif elem == INT and t == FLT:
                 elem = FLT
+            elif (elem == INT and t == BOOL) or (elem == BOOL and t == INT):
+                elem = INT
             elif is_tuple(elem) or is_tuple(t):
                 # A list / set / dict cannot hold two different tuple classes: CPython's list of
                 # tuples of different shapes (the empty tuple beside a non-empty one included) is
@@ -315,8 +317,18 @@ class Exprs:
                 if deep(elem) != t:
                     self.refuse(node, 'a %s holding tuples of different shapes is not built; '
                                       'keep one tuple shape in the %s' % (where, where))
-            elif deep(elem) != t and not ({deep(elem), t} <= {INT, FLT, BOOL}):
-                return None
+            elif deep(elem) != t:
+                if {deep(elem), t} <= {INT, FLT, BOOL}:
+                    return None
+                # Keeping the first element's type here dropped every later element to the shape
+                # of the first: `print([["a"], {"x": "y"}])` was typed list[list[str]] and the
+                # dict was printed as its keys (only when another statement, such as repr(),
+                # made this pass emit its rewritten source).  A display with two element types
+                # has no single AIL element type; leave the source as written so the generic
+                # path prints the real objects.
+                self.refuse(node, 'a %s display holding elements of different types (%s and %s) '
+                                  'is not built; keep one element type in the %s'
+                                  % (where, ann_text(elem), ann_text(t), where))
         if elem is None and deep(want_elem) is not None:
             elem = want_elem
         return elem
