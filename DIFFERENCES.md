@@ -28,3 +28,4 @@ Rows added by job-fuzz8-10220554 use the placeholder id form requested for this 
 | ID | Area | Status | Description |
 | --- | --- | --- | --- |
 | C?-job-fuzz65-10231438-1 | heapq / list repr | fixed | After a caught `heappush` TypeError on a `list[int]` (CPython appends before comparing), the annotation-specialized list repr printed a string element as `x` instead of `'x'` when a tuple comparison had generated that helper. Scalar elements now use the runtime value's `repr`. |
+| C?-job-pre104-10242140-1 | round | fixed | The default build stopped on one-argument `round()` of nan/inf through the runtime trap (`round() of nan`, `round() result does not fit...`), so a `try` could not catch it and an uncaught program printed the trap instead of CPython's exception. Both builds now raise ValueError / OverflowError with CPython's text; finite values, including the int64-boundary trap, are unchanged. |
