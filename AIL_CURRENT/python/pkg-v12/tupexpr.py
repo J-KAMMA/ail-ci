@@ -296,17 +296,17 @@ class Exprs:
     def seq_type(self, ts, want_elem, node=None, where='list'):
         """The element type of a display whose element types are `ts`."""
         elem = None
+        saw_none = False
         for t in ts:
             t = deep(t)
             if t is None:
                 continue
             if t == 'none':
-                if deep(want_elem) is None:
-                    return None
+                saw_none = True
                 continue
             if elem is None:
                 elem = t
-            elif elem == INT and t == FLT:
+            elif {elem, t} == {INT, FLT}:
                 elem = FLT
             elif is_tuple(elem) or is_tuple(t):
                 # A list / set / dict cannot hold two different tuple classes: CPython's list of
@@ -315,8 +315,16 @@ class Exprs:
                 if deep(elem) != t:
                     self.refuse(node, 'a %s holding tuples of different shapes is not built; '
                                       'keep one tuple shape in the %s' % (where, where))
-            elif deep(elem) != t and not ({deep(elem), t} <= {INT, FLT, BOOL}):
-                return None
+            elif known(elem) and known(t) and deep(elem) != t:
+                # The display would otherwise take the first element's type and str() / repr()
+                # of it would quietly drop the other types (str([1, "a"]) showed [1, a]).
+                # Leave the source as written: the general path holds CPython's mixed list.
+                self.refuse(node, 'a %s holding values of different types is not built; '
+                                  'keep one type in the %s or convert the values first'
+                                  % (where, where))
+        if saw_none and elem is not None and known(elem):
+            self.refuse(node, 'a %s mixing None with another type is not built; '
+                              'keep one type in the %s' % (where, where))
         if elem is None and deep(want_elem) is not None:
             elem = want_elem
         return elem

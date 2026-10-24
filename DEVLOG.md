@@ -1,5 +1,19 @@
 # DEVLOG
 
+## 2026-10-24 - Re-applied job fuzz68 (mixed-type container displays)
+
+The accepted `fuzz68` change was re-applied on this tree. `Exprs.seq_type` in
+`AIL_CURRENT/python/pkg-v12/tupexpr.py` now refuses a list / set / dict display whose known
+element types differ (int + float still widen to float), and refuses a display that mixes `None`
+with another type, so the general path builds CPython's mixed container instead of lowering it
+with the first element's type and losing the text of the others (`[1, "a", None, True]`).
+The tuple-shape refusal and the `want_elem` fallback from this tree are kept. `test_ail_fuzz68`
+covers the value through an argument, a list item, an attribute and a dict value on both builds.
+Required checks: `test_ail_fuzz68`, `test_ail_tuples`, `test_ail_typed_tuples`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` pass; probes for mixed,
+None / bool, set / dict, homogeneous, tuple-shape and aliasing displays match CPython on both
+builds. `tools/diff_ids.py` is not present in this tree, so it was not run.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
