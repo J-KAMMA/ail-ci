@@ -6,7 +6,9 @@ int64, naming the construct and the value instead of compiling a program that st
 `integer overflow`. The pre31 check covered positional arguments; this module pins the keyword
 spellings as well (`take(x=...)`, an identity call and a keyword-only wrapper), beside the
 positional and literal shapes it already handled. Values that fit int64, non-finite floats and
-run-time-only floats are unchanged and still compared with CPython.
+run-time-only floats are unchanged and still compared with CPython. A name the constant collector
+cannot resolve is unknown rather than the literal `None`, so a dict whose `None` entry holds a huge
+float is not mistaken for the entry an unresolved key selects.
 """
 import os
 import shutil
@@ -75,6 +77,7 @@ REFUSED = {
     'module_constant': 'x = 1e300\nprint(int(x))\n',
     'keyword_module_constant': 'x = 1e300\n\n\ndef take(v):\n    return int(v)\n\n\nprint(take(v=x))\n',
     'upper_bound': 'print(int(1e19))\n',
+    'known_numeric_dict_key': 'k = 0\nx = {0: 1e300, 1: 1.5}[k]\nprint(int(x))\n',
 }
 
 MATCH = {
@@ -151,6 +154,67 @@ try:
     nan_take(x=float("nan"))
 except ValueError as error:
     print(type(error).__name__)
+''',
+    'unknown_key_dict': '''
+k: str = "a"
+x = {None: 1e300, "a": 1.5}[k]
+print(int(x))
+''',
+    'unknown_key_keyword_wrapper': '''
+k: str = "a"
+x = {None: 1e300, "a": 1.5}[k]
+
+
+def take(v):
+    return int(v)
+
+print(take(v=x))
+''',
+    'unknown_key_unpacked': '''
+k, = ("a",)
+x = {None: 1e300, "a": 1.5}[k]
+
+
+def take(v):
+    return int(v)
+
+print(take(v=x))
+''',
+    'unknown_key_list_item': '''
+k: int = 1
+x = [1e300, 2.5][k]
+print(int(x))
+''',
+    'unknown_key_tuple_item': '''
+k: int = 1
+x = (1e300, 2.5)[k]
+print(int(x))
+''',
+    'unknown_key_attribute': '''
+class Box:
+    def __init__(self, v):
+        self.v = v
+
+
+k: str = "a"
+d = {None: 1e300, "a": Box(1.5)}
+x = d[k].v
+print(int(x))
+''',
+    'unknown_key_boundary': '''
+k: str = "a"
+x = {None: 1e300, "a": 9.0e18}[k]
+print(int(x))
+''',
+    'unknown_key_negative': '''
+k: str = "a"
+x = {None: 1e300, "a": -9.0e18}[k]
+
+
+def take(v):
+    return int(v)
+
+print(take(v=x))
 ''',
 }
 

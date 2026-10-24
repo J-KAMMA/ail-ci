@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - pre39 review fix: unresolved names are unknown, not None
+
+The constant collector used `known.get`, whose missing default is `None`, so an unresolved
+subscript key became the literal `None` and selected a dict's `None` entry. `k: str = "a"; x =
+{None: 1e300, "a": 1.5}[k]` was falsely refused as `int()` of `1e+300` where CPython and the base
+print `1`; the same happened through `take(v=x)`. The collector now maps a missing name to
+`_UNKNOWN`, so that program and its keyword-wrapper, unpacked-key, list/tuple-item and attribute
+spellings compile and match CPython. Numeric keys that are genuinely known still fold: `k = 0; x =
+{0: 1e300, 1: 1.5}[k]` remains refused by name. `test_ail_pre39.py` now has 13 refused programs and
+12 matching programs, both builds.
+
 ## 2026-10-24 - pre39: keyword wrapper int() refusal
 
 `def take(x): return int(x); take(x=1e300)` stopped with `integer overflow` on both builds where

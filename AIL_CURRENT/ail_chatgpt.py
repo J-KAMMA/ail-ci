@@ -410,7 +410,8 @@ def _check_int64_literals(tree):
             name = node.targets[0].id
             if module_counts.get(name) != 1 or name in global_names:
                 continue
-            value = _constant_value(node.value, known.get, lambda unused: True, {})
+            value = _constant_value(node.value, lambda name: known.get(name, _UNKNOWN),
+                                    lambda unused: True, {})
             if type(value) in (int, float):
                 known[name] = value
     int_shadowed = any((isinstance(node, ast.FunctionDef) and node.name == 'int')
