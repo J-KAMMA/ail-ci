@@ -19,3 +19,10 @@ New rows found by the fuzz jobs use the placeholder id `C?-<branch>-N`.
 | C?-job-fuzz61-10231419-2 | open | string encoding | A run-time name of a codec outside utf-8/ascii/latin-1 (for example `cp1252`, `utf-8-sig`, `utf-16`) raises `LookupError` where CPython encodes or decodes. The same name written as a literal is refused at compile time by name. |
 | C?-job-fuzz61-10231419-3 | open | string encoding | `b"".decode(name)` looks the codec up and raises `LookupError` for an unknown name; CPython returns `b""` without looking it up. `"".encode(name)` does validate the name in both. |
 | C?-job-fuzz61-10231419-4 | open | exceptions | `UnicodeEncodeError` / `UnicodeDecodeError` values do not expose `.encoding`, `.object`, `.start`, `.end` or `.reason`. |
+# Differences from CPython
+
+This export carries the rows found by the jobs run here; the full list is maintained upstream.
+
+| id | area | difference |
+|---|---|---|
+| C?-job-fuzz70-10231500-1 | assert | A typed-only (`--strict` / `AIL_NO_GENERAL=1`) build refuses `assert cond, tuple_message` by name. The default build and the general path keep the message object in `AssertionError.args`, as CPython does. |
