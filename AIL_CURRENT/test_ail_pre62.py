@@ -7,7 +7,8 @@ int64, naming the construct and the value instead of compiling a program that st
 wrapper arguments; this module pins values that only exist while the program runs: a simple
 function's return value, a local (including a closure or an augmented/annotated assignment), a
 default argument used by an omitted call, `float("1e300")`, and a keyword method wrapper. Values
-that fit int64, non-finite floats, branches and mutated containers stay compared with CPython.
+that fit int64, non-finite floats, branches, unreachable statements, and mutated containers stay
+compared with CPython, and a method is only tied to its own class's receiver.
 """
 import os
 import shutil
@@ -101,6 +102,25 @@ MATCH = {
     'global_in_range': 'x = 1.5\n\ndef f():\n    global x\n    return int(x)\n\nprint(f())\n',
     'expression_that_fits': ('x = 1e300\n\ndef take(x):\n    return int(x)\n\n\n'
                              'print(take(x=1e300 * 0), take(x=1e300 - 1e300))\n'),
+    'dead_branch_wrapper': ('def take(x=1e300, flag=False):\n    if flag:\n        return int(x)\n'
+                            '    return 0\n\n\nprint(take())\n'),
+    'dead_if_false': ('def take(x=1e300):\n    if False:\n        return int(x)\n'
+                      '    return 7\n\n\nprint(take())\n'),
+    'dead_literal': 'if False:\n    print(int(1e300))\nprint("ok")\n',
+    'dead_global_branch': ('x = 1e300\n\ndef f(flag=False):\n    if flag:\n        return int(x)\n'
+                           '    return 0\n\n\nprint(f())\n'),
+    'dead_loop_wrapper': ('def take(x=1e300):\n    for i in range(3):\n        if i > 5:\n'
+                          '            return int(x)\n    return 3\n\n\nprint(take())\n'),
+    'dead_after_return': ('def take(x=1e300):\n    return 7\n    return int(x)\n\n\n'
+                          'print(take())\n'),
+    'conditional_expression': ('def take(x=1e300):\n    return int(x) if x else 5\n\n\n'
+                                'print(take(0.0))\n'),
+    'unrelated_method': ('class A:\n    def take(self, x):\n        return int(x)\n\n\n'
+                         'class B:\n    def take(self, x):\n        return x\n\n\n'
+                         'print(B().take(x=1e300))\n'),
+    'method_receiver': ('class A:\n    def take(self, x):\n        return int(x)\n\n\n'
+                        'class B:\n    def take(self, x):\n        return x\n\n\n'
+                        'print(A().take(x=1.5), B().take(x=1e300))\n'),
 }
 
 

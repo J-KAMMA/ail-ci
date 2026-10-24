@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - pre62 review: only reachable conversions and matching receivers
+
+The review found two false refusals in the run-time `int()` check. Parameter wrappers scanned
+inside branches and loops, so a default of `1e300` was refused even when the conversion was never
+executed (`if flag`, `if False`, a loop that never reaches it, or code after `return`); the scan
+now stops at control flow and at statements that return on every path, and the checker skips
+conversions in conditional code. Methods were keyed by bare attribute name across all classes, so
+`B().take(x=1e300)` was refused because an unrelated `A.take` contains `int(x)`; methods are now
+mapped per class and checked only when the receiver is a direct constructor call of that class.
+Added the reviewer's cases to `test_ail_pre62.py` (13 refused, 19 matching, both builds).
+
 ## 2026-10-24 - pre62: out-of-int64 floats reached at run time
 
 The pre39 review recorded that `int()` of an out-of-int64 float still stopped with

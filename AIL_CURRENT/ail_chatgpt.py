@@ -90,6 +90,23 @@ def _shallow_walk(nodes):
         stack.extend(ast.iter_child_nodes(node))
 
 
+def _unconditional_walk(nodes):
+    for node in nodes:
+        stack = [node]
+        while stack:
+            current = stack.pop()
+            yield current
+            if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                                    ast.Lambda, ast.If, ast.For, ast.AsyncFor, ast.While,
+                                    ast.Try, ast.With, ast.AsyncWith, ast.Match, ast.IfExp,
+                                    ast.BoolOp, ast.ListComp, ast.SetComp, ast.DictComp,
+                                    ast.GeneratorExp)):
+                continue
+            stack.extend(ast.iter_child_nodes(current))
+        if _returns_on_every_path([node]):
+            break
+
+
 def _binding_counts(nodes):
     counts = {}
 
@@ -292,7 +309,7 @@ def _int_params_of(fn, int_shadowed):
             defaults[name] = default
     rebound = {name for name in mapped if _binding_counts(fn.body).get(name, 0)}
     used = {}
-    for sub in _shallow_walk(fn.body):
+    for sub in _unconditional_walk(fn.body):
         if (not int_shadowed and isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name)
                 and sub.func.id == 'int' and len(sub.args) == 1 and not sub.keywords
                 and isinstance(sub.args[0], ast.Name) and sub.args[0].id in mapped
@@ -313,24 +330,28 @@ def _wrapper_int_params(tree, int_shadowed, module_counts):
     return functions
 
 
-def _method_int_params(tree, int_shadowed):
+def _method_int_params(tree, int_shadowed, module_counts):
     found = {}
-    clashes = set()
     for node in tree.body:
-        if not isinstance(node, ast.ClassDef):
+        if not isinstance(node, ast.ClassDef) or module_counts.get(node.name) != 1:
             continue
+        methods = {}
         for fn in node.body:
             if not isinstance(fn, ast.FunctionDef) or fn.decorator_list:
                 continue
             used = _int_params_of(fn, int_shadowed)
-            if not used:
-                continue
-            if fn.name in found and found[fn.name] != used:
-                clashes.add(fn.name)
-            found[fn.name] = used
-    for name in clashes:
-        found.pop(name, None)
+            if used:
+                methods[fn.name] = used
+        if methods:
+            found[node.name] = methods
     return found
+
+
+def _class_of_receiver(node, classes):
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and isinstance(node.func.ctx, ast.Load) and node.func.id in classes):
+        return node.func.id
+    return None
 
 
 def _constant_functions(tree, module_counts):
@@ -450,6 +471,7 @@ class _Int64CallChecker(ast.NodeVisitor):
         self.unstable = set(unstable)
         self.shadow = [set()]
         self.locals = [{}]
+        self.conditional = 0
 
     def _global_name(self, name):
         return not any(name in scope for scope in self.shadow)
@@ -481,20 +503,24 @@ class _Int64CallChecker(ast.NodeVisitor):
                 self._refuse(node, value)
 
     def visit_Call(self, node):
-        if (not self.int_shadowed and isinstance(node.func, ast.Name) and node.func.id == 'int'
-                and self._global_name('int') and len(node.args) == 1 and not node.keywords):
-            value = self._value(node.args[0])
-            if _outside_int64_float(value):
-                self._refuse(node, value)
-        if (isinstance(node.func, ast.Name) and node.func.id in self.int_params
-                and self._global_name(node.func.id)):
-            for name, (index, default) in self.int_params[node.func.id].items():
-                argument = _bound_argument(node, name, index)
-                self._check_int_argument(node, argument if argument is not None else default)
-        if isinstance(node.func, ast.Attribute) and node.func.attr in self.method_int_params:
-            for name, (index, default) in self.method_int_params[node.func.attr].items():
-                argument = _bound_argument(node, name, index)
-                self._check_int_argument(node, argument if argument is not None else default)
+        if not self.conditional:
+            if (not self.int_shadowed and isinstance(node.func, ast.Name) and node.func.id == 'int'
+                    and self._global_name('int') and len(node.args) == 1 and not node.keywords):
+                value = self._value(node.args[0])
+                if _outside_int64_float(value):
+                    self._refuse(node, value)
+            if (isinstance(node.func, ast.Name) and node.func.id in self.int_params
+                    and self._global_name(node.func.id)):
+                for name, (index, default) in self.int_params[node.func.id].items():
+                    argument = _bound_argument(node, name, index)
+                    self._check_int_argument(node, argument if argument is not None else default)
+            if isinstance(node.func, ast.Attribute):
+                owner = _class_of_receiver(node.func.value, self.method_int_params)
+                if owner is not None:
+                    methods = self.method_int_params[owner]
+                    for name, (index, default) in methods.get(node.func.attr, {}).items():
+                        argument = _bound_argument(node, name, index)
+                        self._check_int_argument(node, argument if argument is not None else default)
         self.generic_visit(node)
 
     def _visit_outer_arguments(self, args):
@@ -514,6 +540,8 @@ class _Int64CallChecker(ast.NodeVisitor):
         self.locals.append({})
         for statement in node.body:
             self.visit(statement)
+            if _returns_on_every_path([statement]):
+                break
         self.locals.pop()
         self.shadow.pop()
 
@@ -556,7 +584,9 @@ class _Int64CallChecker(ast.NodeVisitor):
             names |= set(_binding_counts([generator.target]))
         self.shadow.append(names)
         self.locals.append({})
+        self.conditional += 1
         self.generic_visit(node)
+        self.conditional -= 1
         self.locals.pop()
         self.shadow.pop()
 
@@ -601,10 +631,22 @@ class _Int64CallChecker(ast.NodeVisitor):
             self.generic_visit(node)
 
     def _visit_control(self, node):
+        self.conditional += 1
         self.generic_visit(node)
+        self.conditional -= 1
         for name in _binding_counts([node]):
             for scope in self.locals:
                 scope.pop(name, None)
+
+    def visit_IfExp(self, node):
+        self.conditional += 1
+        self.generic_visit(node)
+        self.conditional -= 1
+
+    def visit_BoolOp(self, node):
+        self.conditional += 1
+        self.generic_visit(node)
+        self.conditional -= 1
 
     def visit_If(self, node):
         self._visit_control(node)
@@ -672,7 +714,7 @@ def _check_int64_literals(tree):
                        for node in ast.walk(tree))
     passthrough = _passthrough_functions(tree, module_counts)
     int_params = _wrapper_int_params(tree, int_shadowed, module_counts)
-    method_int_params = _method_int_params(tree, int_shadowed)
+    method_int_params = _method_int_params(tree, int_shadowed, module_counts)
     functions = _constant_functions(tree, module_counts)
     function_stores = set()
     for node in ast.walk(tree):
