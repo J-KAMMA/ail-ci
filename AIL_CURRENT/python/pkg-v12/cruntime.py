@@ -10574,14 +10574,14 @@ static inline ail_obj ail_str_join_obj(ail_str sep, ail_obj lst) {
    this subset (',' thousands separators, 'x'/'o'/'b'/'e'/'%' types, nested replacement
    fields) is OUT -- see the file-level note at the bottom.
    =================================================================================== */
-typedef struct { char fill; char align; int width; int prec; int has_prec; char type; } ail_fmtspec;
+typedef struct { int fill; char align; int width; int prec; int has_prec; char type; } ail_fmtspec;
 static inline ail_fmtspec ail__parse_fmtspec(ail_str spec) {
     ail_fmtspec f; f.fill = ' '; f.align = 0; f.width = 0; f.prec = -1; f.has_prec = 0; f.type = 0;
     int64_t i = 0, n = spec.n;
-    char c0 = i < n ? (char)ail_chr(spec, i) : 0;
-    char c1 = i + 1 < n ? (char)ail_chr(spec, i + 1) : 0;
-    if (n >= 2 && (c1 == '<' || c1 == '>' || c1 == '^')) { f.fill = c0; f.align = c1; i += 2; }
-    else if (n >= 1 && (c0 == '<' || c0 == '>' || c0 == '^')) { f.align = c0; i += 1; }
+    int c0 = i < n ? (int)ail_chr(spec, i) : 0;
+    int c1 = i + 1 < n ? (int)ail_chr(spec, i + 1) : 0;
+    if (n >= 2 && (c1 == '<' || c1 == '>' || c1 == '^')) { f.fill = c0; f.align = (char)c1; i += 2; }
+    else if (n >= 1 && (c0 == '<' || c0 == '>' || c0 == '^')) { f.align = (char)c0; i += 1; }
     if (i < n && (ail_chr(spec, i) == '+' || ail_chr(spec, i) == '-' || ail_chr(spec, i) == ' ')) i++;
     if (i < n && ail_chr(spec, i) == '0') { if (!f.align) { f.align = '='; f.fill = '0'; } i++; }
     while (i < n && ail_chr(spec, i) >= '0' && ail_chr(spec, i) <= '9') { f.width = f.width * 10 + (int)(ail_chr(spec, i) - '0'); i++; }
@@ -10599,19 +10599,19 @@ static inline ail_str ail__pad(const char *content, int64_t clen, ail_fmtspec f,
     int64_t o = 0;
     if (align == '=' && numeric && clen > 0 && (content[0] == '-' || content[0] == '+')) {
         q[o++] = content[0];
-        for (int64_t k = 0; k < pad; k++) q[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < pad; k++) q[o++] = (uint16_t)f.fill;
         for (int64_t k = 1; k < clen; k++) q[o++] = (unsigned char)content[k];
     } else if (align == '>' || align == '=') {
-        for (int64_t k = 0; k < pad; k++) q[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < pad; k++) q[o++] = (uint16_t)f.fill;
         for (int64_t k = 0; k < clen; k++) q[o++] = (unsigned char)content[k];
     } else if (align == '^') {
         int64_t lp = pad / 2, rp = pad - lp;
-        for (int64_t k = 0; k < lp; k++) q[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < lp; k++) q[o++] = (uint16_t)f.fill;
         for (int64_t k = 0; k < clen; k++) q[o++] = (unsigned char)content[k];
-        for (int64_t k = 0; k < rp; k++) q[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < rp; k++) q[o++] = (uint16_t)f.fill;
     } else {
         for (int64_t k = 0; k < clen; k++) q[o++] = (unsigned char)content[k];
-        for (int64_t k = 0; k < pad; k++) q[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < pad; k++) q[o++] = (uint16_t)f.fill;
     }
     ail_str r; r.bytes = 0; r.p = q;  r.n = o; return r;
 }
@@ -16292,14 +16292,14 @@ static inline ail_obj ail_to_bool(ail_obj x) { return ail_box_bool(ail_obj_truth
    not an uncatchable ail_die -- more consistent with this file's own AIL_LIMIT contract
    than v1's choice, and documented as a deliberate improvement in API.md.
    =================================================================================== */
-typedef struct { char fill; char align; int width; int prec; int has_prec; char type; char sign; char group; } ail_fmtspec;
+typedef struct { int fill; char align; int width; int prec; int has_prec; char type; char sign; char group; } ail_fmtspec;
 static inline ail_fmtspec ail__parse_fmtspec(ail_str spec) {
     ail_fmtspec f; f.fill = ' '; f.align = 0; f.width = 0; f.prec = -1; f.has_prec = 0; f.type = 0; f.sign = 0; f.group = 0;
     int64_t i = 0, n = spec.n;
-    char c0 = i < n ? (char)ail_chr(spec, i) : 0;
-    char c1 = i + 1 < n ? (char)ail_chr(spec, i + 1) : 0;
-    if (n >= 2 && (c1 == '<' || c1 == '>' || c1 == '^')) { f.fill = c0; f.align = c1; i += 2; }
-    else if (n >= 1 && (c0 == '<' || c0 == '>' || c0 == '^')) { f.align = c0; i += 1; }
+    int c0 = i < n ? (int)ail_chr(spec, i) : 0;
+    int c1 = i + 1 < n ? (int)ail_chr(spec, i + 1) : 0;
+    if (n >= 2 && (c1 == '<' || c1 == '>' || c1 == '^')) { f.fill = c0; f.align = (char)c1; i += 2; }
+    else if (n >= 1 && (c0 == '<' || c0 == '>' || c0 == '^')) { f.align = (char)c0; i += 1; }
     if (i < n && (ail_chr(spec, i) == '+' || ail_chr(spec, i) == '-' || ail_chr(spec, i) == ' ')) { if (ail_chr(spec, i) != '-') f.sign = (char)ail_chr(spec, i); i++; }
     if (i < n && ail_chr(spec, i) == '0') { if (!f.align) { f.align = '='; f.fill = '0'; } i++; }
     while (i < n && ail_chr(spec, i) >= '0' && ail_chr(spec, i) <= '9') { f.width = f.width * 10 + (int)(ail_chr(spec, i) - '0'); i++; }
@@ -16315,19 +16315,19 @@ static inline ail_obj ail__pad(ail_ctx *cx, const char *content, int64_t clen, a
     int64_t o = 0;
     if (align == '=' && numeric && clen > 0 && (content[0] == '-' || content[0] == '+')) {
         bu.buf[o++] = content[0];
-        for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (uint16_t)f.fill;
         for (int64_t k = 1; k < clen; k++) bu.buf[o++] = (unsigned char)content[k];
     } else if (align == '>' || align == '=') {
-        for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (uint16_t)f.fill;
         for (int64_t k = 0; k < clen; k++) bu.buf[o++] = (unsigned char)content[k];
     } else if (align == '^') {
         int64_t lp = pad / 2, rp = pad - lp;
-        for (int64_t k = 0; k < lp; k++) bu.buf[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < lp; k++) bu.buf[o++] = (uint16_t)f.fill;
         for (int64_t k = 0; k < clen; k++) bu.buf[o++] = (unsigned char)content[k];
-        for (int64_t k = 0; k < rp; k++) bu.buf[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < rp; k++) bu.buf[o++] = (uint16_t)f.fill;
     } else {
         for (int64_t k = 0; k < clen; k++) bu.buf[o++] = (unsigned char)content[k];
-        for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (uint16_t)f.fill;
     }
     return ail_str_buf_done(bu, o);
 }
@@ -16393,9 +16393,9 @@ static inline ail_st ail_obj_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_ob
         AIL_FRAME_LEAVE(cx, fr);
         cs = ail_view_to_str(content); if (f.has_prec && f.prec >= 0 && f.prec < cs.n) cs.n = f.prec;
         int64_t o = 0;
-        for (int64_t k = 0; k < lp; k++) bu.buf[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < lp; k++) bu.buf[o++] = (uint16_t)f.fill;
         for (int64_t k = 0; k < cs.n; k++) bu.buf[o++] = ail_chr(cs, k);
-        for (int64_t k = 0; k < pad - lp; k++) bu.buf[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < pad - lp; k++) bu.buf[o++] = (uint16_t)f.fill;
         *out = ail_str_buf_done(bu, o);
         return AIL_OK;
     }
