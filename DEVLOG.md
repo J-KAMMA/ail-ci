@@ -26,6 +26,17 @@ three decimals, including negative, zero, non-finite and no-range values. No com
 runtime file is touched. `AIL_CURRENT/test_ail_pre163.py` pins the recorded row, both sides of
 1.0, exact ties, the next floats around 1.0, and values arriving through an argument, a list
 item, an attribute and a dict value.
+## 2026-10-24 - integer `%` by zero names modulo (job-pre167-10250412)
+
+CPython 3.12 uses `integer modulo by zero` for integer `%`, while `//` and `divmod`
+keep `integer division or modulo by zero`.  The boxed and unified `%` emitters still
+used the combined `//` text, so `%` by zero through a callback lambda, an argument, a
+list item, an attribute or a dict value printed the wrong message on both builds.
+Changed the two message literals in `cruntime.py` (`ail_obj_mod`, `ail_op_mod`); the
+typed path already had the right text.  Added `test_ail_pre167.py` with the callback
+lambda case, the value routes and the `//`/divmod/float neighbours.  An uncaught typed
+division trap still prints only its bare text (it reaches `ail_die` directly); that is
+the separate pre-existing item recorded before pre138 and is unchanged here.
 
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
 
