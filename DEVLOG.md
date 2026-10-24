@@ -1,5 +1,25 @@
 # DEVLOG
 
+## 2026-10-24 - pre148: negative r in the boxed itertools combinators
+
+The general path's `ail_it_permutations`, `ail_it_combinations` and
+`ail_it_combinations_wr` returned an empty iterator for a negative `r`
+(DIFFERENCES `C?-job-fuzz8-10220554-1`). CPython materializes the pool and then raises
+`ValueError: r must be non-negative` while constructing the iterator (verified: the
+pool's `__iter__` runs before the check). Each of the three now returns
+`ail_raise_c(cx, AIL_B_VALUEERROR, "r must be non-negative")` after materializing, in the
+same order as CPython; `r > n` still returns an empty iterator, as CPython does. The
+typed path already raised in `PoolStream.setup`.
+
+`test_ail_pre148.py` covers a literal, a function argument, a list item, a dict value,
+an attribute, a bool, the keyword form, empty pools, `r=0`, `r>n`, values that already
+worked, and an uncaught ValueError (exit status 1), on both builds.
+
+Found but not fixed (recorded as open `C?-job-pre148-10250219-1`):
+`itertools.product(xs, repeat=-1)` whose result is discarded does not raise on either
+build (the error appears only when the iterator is consumed), while CPython raises at
+the call. Consuming it matches CPython.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
