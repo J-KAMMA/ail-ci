@@ -203,6 +203,8 @@ def _raise_site_exc(node):
         return _TRAP_EXC[type(node.op)]
     if isinstance(node, ast.BinOp) and type(node.op) in _SHIFT_EXC and not _provably_nonnegative(node.right):
         return _SHIFT_EXC[type(node.op)]
+    if isinstance(node, ast.AugAssign) and type(node.op) in _SHIFT_EXC and not _provably_nonnegative(node.value):
+        return _SHIFT_EXC[type(node.op)]
     if isinstance(node, ast.Subscript):
         return 'IndexError'                             # list/str; dict subscript is KeyError too,
                                                           # but IndexError is always in play here

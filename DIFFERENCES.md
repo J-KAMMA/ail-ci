@@ -4,7 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
-| C?-job-pre85-10242021-1 | int shifts | The typed `ck_shl`/`ck_shr` guards raised `ValueError` without CPython's `negative shift count` message, and mixed-mode selection could put a typed clone of a shift helper under a boxed `try`, where its exception escaped the boxed handler stack. The guards now carry the message and a shift with a possibly negative count is a ValueError trap in `pymix`. | fixed |
+| C?-job-pre85-10242021-1 | int shifts | The typed `ck_shl`/`ck_shr` guards raised `ValueError` without CPython's `negative shift count` message, and mixed-mode selection could put a typed clone of a shift helper under a boxed `try`, where its exception escaped the boxed handler stack. The guards now carry the message and a shift with a possibly negative count is a ValueError trap in `pymix` for both `BinOp` and augmented assignment. | fixed |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |

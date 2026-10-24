@@ -8,8 +8,10 @@ job's review notes point at. A negative shift count is a `ValueError`; the gener
 was `''`. Both guards now carry CPython's message. A second cause was mixed-mode selection:
 `pymix` did not treat `<<`/`>>` as exception-capable, so a typed clone of a shift helper could be
 selected under a boxed `try` and its ValueError escaped to the other handler stack. A shift whose
-count is not a non-negative literal is now a ValueError trap in the selection analysis. Added
-`AIL_CURRENT/test_ail_pre85.py` (3 programs, both builds).
+count is not a non-negative literal is now a ValueError trap in the selection analysis, including
+augmented assignments (`<<=`/`>>=`, whose count is the `AugAssign` value). Added
+`AIL_CURRENT/test_ail_pre85.py` (4 programs, both builds; one mixed-mode `<<=`/`>>=` under a boxed
+`try`).
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 

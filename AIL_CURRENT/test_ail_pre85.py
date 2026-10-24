@@ -173,6 +173,35 @@ def main():
 main()
 '''
 
+AUG_SHIFT_MIXED = r'''def aug_shl(a, b):
+    a <<= b
+    return a
+
+
+def aug_shr(a, b):
+    a >>= b
+    return a
+
+
+mixed = [1, "two", 3.0]
+print(mixed)
+
+
+def main():
+    try:
+        print("l", aug_shl(1, -1))
+    except ValueError as e:
+        print("l caught", type(e).__name__, repr(str(e)), repr(e.args))
+    try:
+        print("r", aug_shr(8, -1))
+    except ValueError as e:
+        print("r caught", type(e).__name__, repr(str(e)), repr(e.args))
+    print("done")
+
+
+main()
+'''
+
 
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
@@ -219,6 +248,9 @@ class Pre85Tests(unittest.TestCase):
 
     def test_valid_shifts(self):
         self.check('shift_valid', SHIFT_VALID)
+
+    def test_augmented_shift_in_mixed_mode(self):
+        self.check('shift_aug_mixed', AUG_SHIFT_MIXED)
 
 
 if __name__ == '__main__':
