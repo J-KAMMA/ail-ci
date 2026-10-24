@@ -1473,6 +1473,10 @@ class _Surface:
         self.testing = set()           # re calls whose result is only tested
         self.re_subst = {}             # findall-loop name -> (match variable, group number)
         self.re_subst_now = None
+        self.future_annotations = any(
+            isinstance(node, ast.ImportFrom) and not node.level and node.module == '__future__'
+            and any(alias.name == 'annotations' for alias in node.names)
+            for node in self.tree.body)
         self.classes = {node.name for node in self.tree.body if isinstance(node, ast.ClassDef)}
         self.user_methods = {item.name for node in ast.walk(self.tree) if isinstance(node, ast.ClassDef)
                              for item in node.body if isinstance(item, ast.FunctionDef)}
@@ -2600,6 +2604,21 @@ class _Surface:
                     self.edits[index] = (start, end, marker + extra, flag)
 
     def ann_assign(self, node, function, owner):
+        if node.value is None and function is None and not self.future_annotations:
+            calls = [part for part in ast.walk(node.annotation) if isinstance(part, ast.Call)]
+            if calls:
+                if owner is None and isinstance(node.annotation, ast.Call):
+                    # CPython evaluates the annotation expression at module level, even though it
+                    # stores no value; a call there can have an observable side effect. A class
+                    # body is not run as code here, so that case is refused below.
+                    self.replace(node, ast.unparse(node.annotation), True)
+                    return
+                raise SyntaxErrorAIL(
+                    'a bare annotation whose annotation expression calls a function is not built at '
+                    'module or class level, where CPython evaluates it.\n'
+                    '  write instead: assign a value (`x: Type = value`), or put the call in its own '
+                    'statement before the annotation',
+                    lineno=node.lineno, offset=node.col_offset + 1)
         if isinstance(node.target, ast.Attribute) and node.value is None:
             self.replace(node, 'pass', True)
             return

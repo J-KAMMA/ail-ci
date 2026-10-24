@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - pre64: a module-level bare annotation evaluates its expression
+
+CPython evaluates the annotation of a bare `x: expr` at module and class level even though
+the statement binds no value, so a call there is observable. The source pass dropped the
+expression, so `x: note("module")` printed nothing. A module-level bare annotation whose
+whole expression is a call now becomes that expression statement, for a simple name, an
+attribute target and a subscript target, and both builds print what CPython prints. A class
+body is not run as code here, and a call nested in a larger annotation cannot be lifted out
+without changing short-circuit evaluation, so those are refused by name instead of silently
+losing the side effect. Function-local bare annotations stay unevaluated, and
+`from __future__ import annotations` keeps every annotation unevaluated.
+Added `AIL_CURRENT/test_ail_pre64.py`; probes are `/tmp/probes/bare_ann_*.py`.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
