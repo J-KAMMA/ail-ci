@@ -1412,9 +1412,10 @@ class Emitter(TextEmitter):
             self.count += 1
             n, i = 'ir%d' % self.count, 'ir%d' % (self.count + 1)
             self.count += 1
-            self.line(depth, '{ int64_t %s = %s; ail_%s_free(%s); if (%s > 0) { ail_%s_reserve(%s, %s); '
+            self.line(depth, '{ int64_t %s = %s; ail_%s_free(%s); if (%s > 0) { '
+                             'if (%s > (1LL << 60)) ail_die("MemoryError"); ail_%s_reserve(%s, %s); '
                              'for (int64_t %s = 0; %s < %s; %s++) (%s)->p[%s] = %s; (%s)->n = %s; } }'
-                      % (n, o[2], f, L, n, f, L, n, i, i, n, i, L, i, o[1], L, n))
+                      % (n, o[2], f, L, n, n, f, L, n, i, i, n, i, L, i, o[1], L, n))
             return
         if op == 'list.lit':
             self.line(depth, '{ ail_%s_free(%s);%s }' % (

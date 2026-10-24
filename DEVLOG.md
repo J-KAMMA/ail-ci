@@ -1,5 +1,15 @@
 # DEVLOG
 
+## 2026-10-24 - pre55: oversized list/tuple repeats stop by name or MemoryError (job-pre55-10241243)
+
+`[1, 2] * (2**63 - 1)` and `[1, 2] * 9223372036854775807` segfaulted (exit 139) on both builds, and
+`[] * 2**62` looped over the whole count instead of returning an empty list. Constant list/tuple
+repeats whose element count exceeds `2**60` are now refused by name in `pyboxed2.expr_BinOp`; dynamic
+repeats are guarded in the boxed `ail_op_mul`, in the typed `_list_repeat_value`, and in the
+one-element `list.repeat` IR, which stop with CPython's `MemoryError`. Empty and negative counts are
+unchanged. Added `AIL_CURRENT/test_ail_pre55.py` and registered it in `ail_check.MODULES`.
+
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

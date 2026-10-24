@@ -23,3 +23,7 @@ Rows added by job-fuzz8-10220554 use the placeholder id form requested for this 
 | C?-job-fuzz8-10220554-8 | refused | zip | `zip(..., strict=True)` is refused by name when there are more than two iterables. |
 | C?-job-fuzz8-10221632-1 | refused | accumulate | On the typed path `itertools.accumulate(xs, initial=v)` is refused by name when `v` has a different type from the elements (for example one-argument `round()` is an `int` over a `list[float]`); the default build falls back to the general path, which matches CPython. |
 | C?-job-fuzz8-10221632-2 | open | groupby | With mutable elements (for example `list[list[int]]`) the typed path cannot lower the key look-ahead yet: `--strict` refuses it (`'_ilN_gc' is read before it is assigned`), so the default build falls back to the general path, which matches CPython. Keys over scalar/str element lists stay on the typed path and are called once per element. |
+
+| id | status | area | description |
+|---|---|---|---|
+| C?-job-pre55-10241243-1 | fixed | list/tuple repeat | CPython raises `MemoryError` for `[1, 2] * (2**63 - 1)`; AIL segfaulted (exit 139) for both that spelling and `[1, 2] * 9223372036854775807`, looped over the full count for `[] * 2**62`, and stopped dynamically typed repeats with `out of memory` or `list too long`. Constant list/tuple repeats are now refused by name when the element count exceeds `2**60`; dynamic repeats stop with `MemoryError` on both builds. `test_ail_pre55.py`. |
