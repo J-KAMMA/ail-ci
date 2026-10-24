@@ -19,7 +19,7 @@ A program that only uses the module-level functions is not touched here (stdlib3
 
 Not built, refused by name: `random.Random()` without a seed (not reproducible), a seed that is a str / bytes /
 float / None (CPython hashes those), `random.SystemRandom`, `getstate` / `setstate`, `randbytes`, the other
-distributions. getrandbits(k) beyond 62 bits is a RuntimeError (integers are 64-bit).
+distributions. getrandbits(k) beyond 63 bits is a RuntimeError (integers are 64-bit).
 """
 import ast
 
@@ -62,43 +62,93 @@ def _random_value(value, known):
     return isinstance(value, ast.Name) and value.id in known
 
 
-def _scope_known(scope, module_known):
-    """Names of one scope that hold a `Random` at every binding: parameters annotated
-    `random.Random`, a local assigned only `Random(...)` values or aliases of one, and a module
-    name visible here that the scope does not shadow. A name that is also bound by a `for`,
-    `with`, import or any other form has no value here and is not included, so a call is only
-    rewritten when the receiver is provably a Random."""
+def _import_names(node):
+    names = []
+    for alias in node.names:
+        if alias.asname:
+            names.append(alias.asname)
+        elif isinstance(node, ast.Import):
+            names.append(alias.name.split('.')[0])
+        else:
+            names.append(alias.name)
+    return names
+
+
+def _scope_bindings(scope):
+    """(values, safe, unsafe, params, random_params) for one scope. `safe` names are bound only
+    by a plain assignment / annotated assignment; `unsafe` names have at least one binding the
+    analysis cannot follow (for, with, except, import, comprehension, def/class, augmented
+    assignment, a walrus, del, a global/nonlocal declaration). A name in both is treated as
+    unsafe."""
     values = {}
-    bound = set()
+    safe = set()
+    unsafe = set()
     params = set()
     if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
         for arg in scope.args.args + scope.args.kwonlyargs:
-            bound.add(arg.arg)
+            params.add(arg.arg)
             if _random_annotation(arg.annotation):
-                params.add(arg.arg)
+                values.setdefault(arg.arg, [])
         if scope.args.vararg is not None:
-            bound.add(scope.args.vararg.arg)
+            params.add(scope.args.vararg.arg)
         if scope.args.kwarg is not None:
-            bound.add(scope.args.kwarg.arg)
+            params.add(scope.args.kwarg.arg)
     for node in _scope_nodes(scope):
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 for name in _target_names(target):
+                    safe.add(name)
                     values.setdefault(name, []).append(node.value)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            bound.add(node.target.id)
+            safe.add(node.target.id)
             if _random_annotation(node.annotation):
-                params.add(node.target.id)
+                values.setdefault(node.target.id, [])
             if node.value is not None:
                 values.setdefault(node.target.id, []).append(node.value)
-        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
-            bound.add(node.id)
-    known = params | (module_known - bound)
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            unsafe.update(_target_names(node.target))
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if item.optional_vars is not None:
+                    unsafe.update(_target_names(item.optional_vars))
+        elif isinstance(node, ast.ExceptHandler):
+            if node.name:
+                unsafe.add(node.name)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            unsafe.update(_import_names(node))
+        elif isinstance(node, ast.AugAssign):
+            unsafe.update(_target_names(node.target))
+        elif isinstance(node, ast.NamedExpr):
+            unsafe.update(_target_names(node.target))
+        elif isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            for generator in node.generators:
+                unsafe.update(_target_names(generator.target))
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            unsafe.add(node.name)
+        elif isinstance(node, ast.Delete):
+            for target in node.targets:
+                unsafe.update(_target_names(target))
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            unsafe.update(node.names)
+    # an annotated parameter is a Random only while no other binding rebinds it
+    random_params = {name for name in params if name in values and not values[name]}
+    return values, safe, unsafe, params, random_params
+
+
+def _scope_known(scope, module_known):
+    """Names of one scope that hold a `Random` at every binding: parameters annotated
+    `random.Random`, a local assigned only `Random(...)` values or aliases of one, and a module
+    name visible here that the scope does not shadow. A name that is also bound by a `for`,
+    `with`, `except`, import, comprehension or any other form has no value here and is not
+    included, so a call is only rewritten when the receiver is provably a Random."""
+    values, safe, unsafe, params, random_params = _scope_bindings(scope)
+    bound = safe | unsafe | params
+    known = set(module_known - bound) | (random_params - (safe | unsafe))
     changed = True
     while changed:
         changed = False
-        for name in bound:
-            if name in known:
+        for name in safe:
+            if name in known or name in unsafe:
                 continue
             current = values.get(name)
             if current and all(_random_value(value, known) for value in current):
@@ -116,6 +166,8 @@ def _rewrite_randrange(scope, known):
                 and node.func.attr == 'randrange' and isinstance(node.func.value, ast.Name)
                 and node.func.value.id in known and not node.keywords):
             continue
+        if any(isinstance(arg, ast.Starred) for arg in node.args):
+            continue                        # the arity is not known here; `randrange` takes two
         if len(node.args) == 1:
             node.func.attr = 'randrange1'
         elif len(node.args) == 3:
@@ -125,10 +177,20 @@ def _rewrite_randrange(scope, known):
 def _rewrite_random_calls(tree, extra=()):
     module_known = _scope_known(tree, set()) | set(extra)
     _rewrite_randrange(tree, module_known)
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            known = _scope_known(node, module_known)
-            _rewrite_randrange(node, known)
+
+    def walk_scope(scope, outer_known):
+        for node in _scope_nodes(scope):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                known = _scope_known(node, outer_known)
+                _rewrite_randrange(node, known)
+                walk_scope(node, known)
+            elif isinstance(node, ast.ClassDef):
+                # the class body sees its own names; a method sees the enclosing scope, not the
+                # class attributes, so descend with the outer names
+                _rewrite_randrange(node, _scope_known(node, outer_known))
+                walk_scope(node, outer_known)
+
+    walk_scope(tree, module_known)
 
 
 class _SeedDrop(ast.NodeTransformer):
@@ -141,6 +203,27 @@ class _SeedDrop(ast.NodeTransformer):
                 call.func.value.id == '_ail_rng':
             return None
         return self.generic_visit(node)
+
+
+def _seed_calls_are_bare(tree):
+    """Whether every use of the hidden generator left after the rewrite is a bare
+    `_ail_rng.seed(x)` statement. A seed whose result is read (`x = random.seed(7)`, an `if`)
+    is not a statement we may drop; the generator has to stay for it."""
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == '_ail_rng':
+            parent = parents.get(node)
+            if not (isinstance(parent, ast.Attribute) and parent.value is node and parent.attr == 'seed'):
+                return False
+        elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == '_ail_rng':
+            if node.attr != 'seed':
+                return False
+            call = parents.get(node)
+            if not (isinstance(call, ast.Call) and call.func is node):
+                return False
+            if not isinstance(parents.get(call), ast.Expr):
+                return False
+    return True
 
 
 def _is_random_ctor(value):
@@ -181,10 +264,11 @@ def run(tree, text):
             return ast.Attribute(value=stdlib5.name('_ail_rng'), attr=found, ctx=ast.Load())
         return None
     tree.body = [stdlib5.Replace(fix).visit(s) for s in tree.body]
-    if not module_draw['yes']:
-        # Only `random.seed(x)` used the hidden generator: its state is never read, so the
-        # module-level `_ail_rng = Random(x)` and the seed call can go (the typed path refuses
-        # a module-level name bound to a call, and there is nothing to keep).
+    dropped = False
+    if not module_draw['yes'] and _seed_calls_are_bare(tree):
+        # Only bare `random.seed(x)` statements used the hidden generator: its state is never
+        # read, so the module-level `_ail_rng = Random(0)` and those calls can go (the typed
+        # path refuses a module-level name bound to a call, and there is nothing to keep).
         kept = []
         for node in tree.body:
             if isinstance(node, (ast.Assign, ast.AnnAssign)):
@@ -196,7 +280,9 @@ def run(tree, text):
             kept.append(node)
         tree.body = kept
         tree.body = [_SeedDrop().visit(node) for node in tree.body]
-    _rewrite_random_calls(tree, {'_ail_rng'} if module_draw['yes'] else ())
+        dropped = True
+    keep_hidden = module_draw['yes'] or (module_used['yes'] and not dropped)
+    _rewrite_random_calls(tree, {'_ail_rng'} if keep_hidden else ())
     # what is left of the module's names is not a call we can send to the hidden generator
     for each in ast.walk(tree):
         if isinstance(each, ast.Attribute) and isinstance(each.value, ast.Name) and each.value.id in peek.aliases:
@@ -221,6 +307,6 @@ def run(tree, text):
             index += 1
         tree.body.insert(index, ast.Import(names=[ast.alias(name='math', asname=None)]))
     chunk = stdlib5.prelude('random_typed')
-    if module_draw['yes']:
+    if keep_hidden:
         chunk += '\n_ail_rng = Random(0)\n'
     text.append(chunk)

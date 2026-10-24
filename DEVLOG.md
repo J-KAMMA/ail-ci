@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - review fix: Random proof, starred calls, widths, seed expressions (job-cov8-10240949)
+
+The Random proof no longer treats a name as a Random when any binding is a `for` / `with` /
+`except` target, an import, a comprehension target, a nested def/class, an augmented assignment,
+a walrus, `del` or a global/nonlocal declaration; a nested function now receives its enclosing
+scope's names instead of the module's.  A starred `randrange(...)` call is left as `randrange`
+(the arity is not known at the rewrite), so `r.randrange(*[1, 10])` no longer becomes a
+two-argument `randrange1`.  `getrandbits` and `_randbelow` now handle 63 bits on the typed prelude
+(and the boxed C helper), so `randrange(2**62)` matches CPython again.  The hidden module generator
+is dropped only when every remaining `random.seed` use is a bare statement; `x = random.seed(7)`,
+`if random.seed(7) is None:` and a seed passed to a function keep it.  Extended `test_ail_cov8.py`
+with for/with/except/import binding analysis, starred calls, 63-bit widths and seed expressions.
+
 ## 2026-10-24 - census refusal 2: Random on the typed path (job-cov8-10240949)
 
 The gdev census (510 programs, compile-only, `fallback_census.py --jobs 2`) grouped the 358 typed

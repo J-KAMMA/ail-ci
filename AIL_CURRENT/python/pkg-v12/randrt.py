@@ -142,7 +142,7 @@ static inline double ail2r_rand(ail_obj *p) {
     uint32_t a = ail2r_u32(p) >> 5, b = ail2r_u32(p) >> 6;
     return (a * 67108864.0 + b) * (1.0 / 9007199254740992.0);
 }
-/* getrandbits(k), 1 <= k <= 64: the first word is the low 32 bits */
+/* getrandbits(k), 1 <= k <= 63: the first word is the low 32 bits */
 static inline uint64_t ail2r_getbits(ail_obj *p, int k) {
     if (k <= 32) return (uint64_t)(ail2r_u32(p) >> (32 - k));
     uint64_t low = ail2r_u32(p);
@@ -165,7 +165,7 @@ static inline ail_st ail2r_bits(ail_ctx *cx, ail_obj *out, ail_obj L, ail_obj k)
     if ((st = ail2r_need_int(cx, k)) != AIL_OK) return st;
     if (k.i < 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "number of bits must be non-negative");
     if (k.i == 0) { *out = ail_box_int(0); return AIL_OK; }
-    if (k.i > 62) return ail_raise_c(cx, AIL_B_RUNTIMEERROR, "getrandbits: more than 62 bits needs integers beyond 64 bits");
+    if (k.i > 63) return ail_raise_c(cx, AIL_B_RUNTIMEERROR, "getrandbits: more than 63 bits needs integers beyond 64 bits");
     *out = ail_box_int((int64_t)ail2r_getbits(p, (int)k.i));
     return AIL_OK;
 }

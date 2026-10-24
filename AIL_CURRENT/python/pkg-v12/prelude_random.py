@@ -109,8 +109,8 @@ class Random:
             return 0
         if k <= 32:
             return self._genrand() >> (32 - k)
-        if k > 62:
-            raise RuntimeError("getrandbits: more than 62 bits needs integers beyond 64 bits")
+        if k > 63:
+            raise RuntimeError("getrandbits: more than 63 bits needs integers beyond 64 bits")
         words = (k - 1) // 32 + 1
         r = 0
         shift = 0

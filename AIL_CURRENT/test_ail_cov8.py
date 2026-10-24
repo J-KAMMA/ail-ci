@@ -11,6 +11,7 @@ drops the hidden generator when `random.seed` is the only module-level function 
 * the typed-only programs must also build with AIL_STRICT=1;
 * prelude_random_typed.py is plain Python: random draws are compared with CPython's Random.
 """
+import ast
 import math
 import os
 import random
@@ -121,6 +122,90 @@ if __name__ == "__main__":
     main()
 '''
 
+PROGRAMS['shadow'] = r'''import random
+
+
+class Fake:
+    def randrange(self, n: int) -> int:
+        return 999
+
+
+class FakeError(ValueError):
+    def randrange(self, n: int) -> int:
+        return 888
+
+
+class Ctx:
+    def __enter__(self) -> Fake:
+        return Fake()
+
+    def __exit__(self, a: int, b: int, c: int) -> None:
+        return None
+
+
+def main() -> None:
+    r = random.Random(1)
+    for r in [Fake()]:
+        print(r.randrange(10))
+    r = random.Random(1)
+    with Ctx() as r:
+        print(r.randrange(10))
+    r = random.Random(1)
+    try:
+        raise FakeError("x")
+    except FakeError as r:
+        print(r.randrange(10))
+    print(random.Random(1).randrange(10))
+
+
+main()
+'''
+PROGRAMS['star'] = r'''import random
+
+
+def main() -> None:
+    r = random.Random(1)
+    print(r.randrange(*[1, 10]))
+    pair = (1, 10)
+    print(r.randrange(*pair))
+
+
+main()
+'''
+PROGRAMS['width'] = r'''import random
+
+
+def main() -> None:
+    r = random.Random(1)
+    print(r.randrange(2 ** 62))
+    print(r.getrandbits(63))
+    print(r.randrange(9223372036854775807))
+    print(r.randrange(-2 ** 62, -2 ** 62 + 10))
+    print(r.randrange(0, 2 ** 62, 3))
+
+
+main()
+'''
+PROGRAMS['seedexpr'] = r'''import random
+
+
+def show(x) -> None:
+    print(x)
+
+
+def main() -> None:
+    r = random.Random(7)
+    x = random.seed(7)
+    print(x)
+    if random.seed(8) is None:
+        print("none")
+    show(random.seed(9))
+    print(r.randrange(10))
+
+
+main()
+'''
+
 TYPED_ONLY = ('forms', 'seedonly')
 
 
@@ -172,6 +257,26 @@ class Programs(unittest.TestCase):
             self.assertNotIn("Traceback", built.stdout + built.stderr)
 
 
+class Analysis(unittest.TestCase):
+    def test_shadowing_bindings_are_not_random(self):
+        sys.path.insert(0, str(PKG))
+        try:
+            import randlib
+        finally:
+            sys.path.remove(str(PKG))
+        source = ("r = Random(1)\n"
+                  "for r in []:\n    pass\n"
+                  "r = Random(1)\n"
+                  "with ctx as r:\n    pass\n"
+                  "r = Random(1)\n"
+                  "try:\n    pass\nexcept E as r:\n    pass\n"
+                  "r = Random(1)\n"
+                  "from m import x as r\n"
+                  "r = Random(1)\n")
+        self.assertNotIn("r", randlib._scope_known(ast.parse(source), set()))
+        self.assertIn("r", randlib._scope_known(ast.parse("r = Random(1)\n"), set()))
+
+
 class PreludeRandomTyped(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -192,6 +297,14 @@ class PreludeRandomTyped(unittest.TestCase):
                 self.assertEqual(ours.getrandbits(17), theirs.getrandbits(17))
                 self.assertEqual(ours.choice([10, 20, 30]), theirs.choice([10, 20, 30]))
                 self.assertEqual(ours.uniform(1.0, 2.0), theirs.uniform(1.0, 2.0))
+
+    def test_wide_widths(self):
+        ours = self.ns["Random"](1)
+        theirs = random.Random(1)
+        self.assertEqual(ours.randrange1(2 ** 62), theirs.randrange(2 ** 62))
+        self.assertEqual(ours.getrandbits(63), theirs.getrandbits(63))
+        self.assertEqual(ours.randrange1(2 ** 63 - 1), theirs.randrange(2 ** 63 - 1))
+        self.assertEqual(ours.randrange3(0, 2 ** 62, 3), theirs.randrange(0, 2 ** 62, 3))
 
     def test_empty_ranges(self):
         ours = self.ns["Random"](1)
