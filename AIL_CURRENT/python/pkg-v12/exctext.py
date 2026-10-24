@@ -514,10 +514,6 @@ PART_EDITS = {
     'BINARYFILE': (
         ('    if (!F->fp) { free(F); ail_file_fail(open_errno); }\n', '    if (!F->fp) { free(F); ail_exc_os_fail(open_errno, path); }\n'),
     ),
-    'FFLOORMOD': (
-        ('    if (b == 0.0) ail_die("division by zero");\n    double r = fmod(a, b);',
-         '    if (b == 0.0) ail_die(remainder ? "float modulo" : "float floor division by zero");\n    double r = fmod(a, b);'),
-    ),
 }
 PART_EDITS['STRWIN'] = (
     ('    int64_t r = ail_str_find_in(s, sub, has_lo, lo, has_hi, hi);\n    if (r < 0) ail_raise_named(AIL_EXC_VALUE);',
@@ -581,14 +577,6 @@ def part_edit(part, text):
         text = _key_error_calls(text)
     return text
 
-
-CFDIVF = r'''
-/* `/` with a float operand: CPython's text differs from the int / int one */
-static double ail_fdiv_f(double a, double b) {
-    if (b == 0) ail_die("float division by zero");
-    return a / b;
-}
-'''
 
 CFLOAT ='#define AIL_EXC_FLOAT 1   /* a float among the arguments of an exception: its text needs the float printer */\n'
 
