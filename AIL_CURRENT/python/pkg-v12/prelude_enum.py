@@ -30,7 +30,33 @@ class _AilEnum:
         return self._idx
 
     def __eq__(self, other):
-        return self is other
+        if isinstance(other, _AilEnum) and self.cname == other.cname:
+            return self is other
+        return NotImplemented
+
+    def __lt__(self, other):
+        if isinstance(other, _AilEnum):
+            raise TypeError("'<' not supported between instances of '" + self.cname
+                            + "' and '" + other.cname + "'")
+        return NotImplemented
+
+    def __le__(self, other):
+        if isinstance(other, _AilEnum):
+            raise TypeError("'<=' not supported between instances of '" + self.cname
+                            + "' and '" + other.cname + "'")
+        return NotImplemented
+
+    def __gt__(self, other):
+        if isinstance(other, _AilEnum):
+            raise TypeError("'>' not supported between instances of '" + self.cname
+                            + "' and '" + other.cname + "'")
+        return NotImplemented
+
+    def __ge__(self, other):
+        if isinstance(other, _AilEnum):
+            raise TypeError("'>=' not supported between instances of '" + self.cname
+                            + "' and '" + other.cname + "'")
+        return NotImplemented
 
 
 class _AilIntEnum(_AilEnum):
@@ -40,30 +66,48 @@ class _AilIntEnum(_AilEnum):
     def __hash__(self):
         return self.value
 
-    def __eq__(self, other):
+    def _ail_en_int_operand(self, other, op: str, reverse: bool):
+        # CPython compares and combines an IntEnum / IntFlag with another int subclass by value;
+        # any other Enum member is a plain object (its own __eq__ is identity), not an int.
+        if isinstance(other, _AilIntEnum):
+            return other.value
         if isinstance(other, _AilEnum):
+            if reverse:
+                raise TypeError("unsupported operand type(s) for " + op + ": '" + other.cname
+                                + "' and '" + self.cname + "'")
+            raise TypeError("unsupported operand type(s) for " + op + ": '" + self.cname
+                            + "' and '" + other.cname + "'")
+        return other
+
+    def _ail_en_int_compare(self, other, op: str, reverse: bool):
+        if isinstance(other, _AilIntEnum):
+            return other.value
+        if isinstance(other, _AilEnum):
+            if reverse:
+                raise TypeError("'" + op + "' not supported between instances of '" + other.cname
+                                + "' and '" + self.cname + "'")
+            raise TypeError("'" + op + "' not supported between instances of '" + self.cname
+                            + "' and '" + other.cname + "'")
+        return other
+
+    def __eq__(self, other):
+        if isinstance(other, _AilIntEnum):
             return self.value == other.value
+        if isinstance(other, _AilEnum):
+            return False
         return self.value == other
 
     def __lt__(self, other):
-        if isinstance(other, _AilEnum):
-            return self.value < other.value
-        return self.value < other
+        return self.value < self._ail_en_int_compare(other, '<', False)
 
     def __gt__(self, other):
-        if isinstance(other, _AilEnum):
-            return self.value > other.value
-        return self.value > other
+        return self.value > self._ail_en_int_compare(other, '>', False)
 
     def __le__(self, other):
-        if isinstance(other, _AilEnum):
-            return self.value <= other.value
-        return self.value <= other
+        return self.value <= self._ail_en_int_compare(other, '<=', False)
 
     def __ge__(self, other):
-        if isinstance(other, _AilEnum):
-            return self.value >= other.value
-        return self.value >= other
+        return self.value >= self._ail_en_int_compare(other, '>=', False)
 
     def __bool__(self) -> bool:
         return self.value != 0
@@ -87,102 +131,90 @@ class _AilIntEnum(_AilEnum):
         return abs(self.value)
 
     def __add__(self, other):
-        if isinstance(other, _AilEnum):
-            return self.value + other.value
-        return self.value + other
+        return self.value + self._ail_en_int_operand(other, '+', False)
 
     def __radd__(self, other):
-        return other + self.value
+        return self._ail_en_int_operand(other, '+', True) + self.value
 
     def __sub__(self, other):
-        if isinstance(other, _AilEnum):
-            return self.value - other.value
-        return self.value - other
+        return self.value - self._ail_en_int_operand(other, '-', False)
 
     def __rsub__(self, other):
-        return other - self.value
+        return self._ail_en_int_operand(other, '-', True) - self.value
 
     def __mul__(self, other):
-        if isinstance(other, _AilEnum):
-            return self.value * other.value
-        return self.value * other
+        return self.value * self._ail_en_int_operand(other, '*', False)
 
     def __rmul__(self, other):
-        return other * self.value
+        return self._ail_en_int_operand(other, '*', True) * self.value
 
     def __truediv__(self, other):
-        if isinstance(other, _AilEnum):
-            return self.value / other.value
-        return self.value / other
+        return self.value / self._ail_en_int_operand(other, '/', False)
 
     def __rtruediv__(self, other):
-        return other / self.value
+        return self._ail_en_int_operand(other, '/', True) / self.value
 
     def __floordiv__(self, other):
-        if isinstance(other, _AilEnum):
-            return self.value // other.value
-        return self.value // other
+        return self.value // self._ail_en_int_operand(other, '//', False)
 
     def __rfloordiv__(self, other):
-        return other // self.value
+        return self._ail_en_int_operand(other, '//', True) // self.value
 
     def __mod__(self, other):
-        if isinstance(other, _AilEnum):
-            return self.value % other.value
-        return self.value % other
+        return self.value % self._ail_en_int_operand(other, '%', False)
 
     def __rmod__(self, other):
-        return other % self.value
+        return self._ail_en_int_operand(other, '%', True) % self.value
 
     def __divmod__(self, other):
-        if isinstance(other, _AilEnum):
-            return (self.value // other.value, self.value % other.value)
-        return (self.value // other, self.value % other)
+        if isinstance(other, _AilIntEnum):
+            return divmod(self.value, other.value)
+        if isinstance(other, (int, float)):
+            return divmod(self.value, other)
+        return NotImplemented
 
     def __rdivmod__(self, other):
-        if isinstance(other, _AilEnum):
-            return (other.value // self.value, other.value % self.value)
-        return (other // self.value, other % self.value)
+        if isinstance(other, _AilIntEnum):
+            return divmod(other.value, self.value)
+        if isinstance(other, (int, float)):
+            return divmod(other, self.value)
+        return NotImplemented
+
+    def __pow__(self, other):
+        return self.value ** self._ail_en_int_operand(other, '** or pow()', False)
+
+    def __rpow__(self, other):
+        return self._ail_en_int_operand(other, '** or pow()', True) ** self.value
 
     def __lshift__(self, other):
-        if isinstance(other, _AilEnum):
-            return self.value << other.value
-        return self.value << other
+        return self.value << self._ail_en_int_operand(other, '<<', False)
 
     def __rlshift__(self, other):
-        return other << self.value
+        return self._ail_en_int_operand(other, '<<', True) << self.value
 
     def __rshift__(self, other):
-        if isinstance(other, _AilEnum):
-            return self.value >> other.value
-        return self.value >> other
+        return self.value >> self._ail_en_int_operand(other, '>>', False)
 
     def __rrshift__(self, other):
-        return other >> self.value
+        return self._ail_en_int_operand(other, '>>', True) >> self.value
 
     def __and__(self, other):
-        if isinstance(other, _AilEnum):
-            return self.value & other.value
-        return self.value & other
+        return self.value & self._ail_en_int_operand(other, '&', False)
 
     def __rand__(self, other):
-        return other & self.value
+        return self._ail_en_int_operand(other, '&', True) & self.value
 
     def __or__(self, other):
-        if isinstance(other, _AilEnum):
-            return self.value | other.value
-        return self.value | other
+        return self.value | self._ail_en_int_operand(other, '|', False)
 
     def __ror__(self, other):
-        return other | self.value
+        return self._ail_en_int_operand(other, '|', True) | self.value
 
     def __xor__(self, other):
-        if isinstance(other, _AilEnum):
-            return self.value ^ other.value
-        return self.value ^ other
+        return self.value ^ self._ail_en_int_operand(other, '^', False)
 
     def __rxor__(self, other):
-        return other ^ self.value
+        return self._ail_en_int_operand(other, '^', True) ^ self.value
 
     def __invert__(self):
         return ~self.value
@@ -196,19 +228,43 @@ class _AilStrEnum(_AilEnum):
         return hash(self.value)
 
     def __eq__(self, other):
-        if isinstance(other, _AilEnum):
+        if isinstance(other, _AilStrEnum):
             return self.value == other.value
+        if isinstance(other, _AilEnum):
+            return False
         return self.value == other
 
     def __lt__(self, other):
-        if isinstance(other, _AilEnum):
+        if isinstance(other, _AilStrEnum):
             return self.value < other.value
+        if isinstance(other, _AilEnum):
+            raise TypeError("'<' not supported between instances of '" + self.cname
+                            + "' and '" + other.cname + "'")
         return self.value < other
 
     def __gt__(self, other):
-        if isinstance(other, _AilEnum):
+        if isinstance(other, _AilStrEnum):
             return self.value > other.value
+        if isinstance(other, _AilEnum):
+            raise TypeError("'>' not supported between instances of '" + self.cname
+                            + "' and '" + other.cname + "'")
         return self.value > other
+
+    def __le__(self, other):
+        if isinstance(other, _AilStrEnum):
+            return self.value <= other.value
+        if isinstance(other, _AilEnum):
+            raise TypeError("'<=' not supported between instances of '" + self.cname
+                            + "' and '" + other.cname + "'")
+        return self.value <= other
+
+    def __ge__(self, other):
+        if isinstance(other, _AilStrEnum):
+            return self.value >= other.value
+        if isinstance(other, _AilEnum):
+            raise TypeError("'>=' not supported between instances of '" + self.cname
+                            + "' and '" + other.cname + "'")
+        return self.value >= other
 
     def __add__(self, other):
         return self.value + other

@@ -1972,6 +1972,8 @@ def patch_notimplemented(c_text):
                          'static inline ail_st ail_obj_cmp(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b) {') if m in c_text]
     first = min(marks, key=c_text.index)
     c_text = c_text.replace(first, NI_DECLS + first, 1)
+    c_text = one(c_text, 'static inline int ail_dun_notni(ail_obj x) { (void)x; return 1; }',
+                 'static inline int ail_dun_notni(ail_obj x) { return !ail2n_is(x); }')
     c_text = one(c_text, 'ail_obj r; ail_st st = kc->lt_fn(cx, &r, a, b); if (st != AIL_OK) return st;',
                  'ail_obj r; ail_st st = kc->lt_fn(cx, &r, a, b); if (st != AIL_OK) return st;\n'
                  '            if (ail2n_is(r)) return ail2n_lt_error(cx, a, b);')

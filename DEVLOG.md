@@ -1,5 +1,14 @@
 # DEVLOG
 
+## 2026-10-24 - Re-apply IntEnum / IntFlag leftovers (job-rbintenum4-10241809)
+
+Re-applied the accepted `job-intenum4-10221632` change on top of the current export. The tree already had
+later divmod dispatch and float `divmod` work, so those parts were kept as-is and only the missing pieces
+were merged: `_AilIntEnum.__pow__` / `__rpow__`, `__divmod__` / `__rdivmod__`, cross-kind equality and
+ordering (including plain `Enum` returning `NotImplemented`), the `AIL_D2_LT` / `LE` / `GE` comparison
+dispatch, the 3-argument `pow()` index conversion and original-name errors, and the `integer modulo by
+zero` text. Added `AIL_CURRENT/test_ail_intenum4.py` unchanged from the accepted branch.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
