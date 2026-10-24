@@ -582,6 +582,103 @@ def _int_const(node):
 
 
 
+_I64_MIN = -(1 << 63)
+_I64_MAX = (1 << 63) - 1
+_MAXSPLIT_NOT_CONST = object()
+_MAXSPLIT_TOO_BIG = object()
+_MAXSPLIT_BITS = 4096
+
+
+def _maxsplit_const(node):
+    """The exact value of a constant int expression, a not-constant sentinel, or a too-big one.
+
+    `str.split`/`rsplit` take their maxsplit through the same int64 expression emitter as every
+    other int, so `2**63 - 1` overflowed at run time on the intermediate power even though the
+    final limit fits. Fold the expression here; an exponent that must leave int64 is recognised
+    without evaluating it (`2**100000000` is never built)."""
+    if isinstance(node, ast.Constant):
+        return node.value if type(node.value) is int else _MAXSPLIT_NOT_CONST
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
+        value = _maxsplit_const(node.operand)
+        if value is _MAXSPLIT_NOT_CONST or value is _MAXSPLIT_TOO_BIG:
+            return value
+        if isinstance(node.op, ast.USub):
+            return -value
+        return value if isinstance(node.op, ast.UAdd) else ~value
+    if not isinstance(node, ast.BinOp):
+        return _MAXSPLIT_NOT_CONST
+    op = type(node.op)
+    if op not in (ast.Add, ast.Sub, ast.Mult, ast.Pow, ast.LShift, ast.RShift,
+                  ast.FloorDiv, ast.Mod, ast.BitAnd, ast.BitOr, ast.BitXor):
+        return _MAXSPLIT_NOT_CONST
+    left = _maxsplit_const(node.left)
+    right = _maxsplit_const(node.right)
+    if left is _MAXSPLIT_NOT_CONST or right is _MAXSPLIT_NOT_CONST:
+        return _MAXSPLIT_NOT_CONST
+    if left is _MAXSPLIT_TOO_BIG or right is _MAXSPLIT_TOO_BIG:
+        return _MAXSPLIT_TOO_BIG
+    if op is ast.Pow:
+        if right < 0:
+            return _MAXSPLIT_NOT_CONST
+        if right == 0:
+            return 1
+        if left in (0, 1, -1):
+            return left ** right if left != -1 else (-1 if right & 1 else 1)
+        if right >= 64:
+            return _MAXSPLIT_TOO_BIG
+        value = left ** right
+    elif op is ast.LShift:
+        if right < 0:
+            return _MAXSPLIT_NOT_CONST
+        if left == 0:
+            return 0
+        if right >= _MAXSPLIT_BITS or left.bit_length() + right > _MAXSPLIT_BITS:
+            return _MAXSPLIT_TOO_BIG
+        value = left << right
+    elif op is ast.RShift:
+        if right < 0:
+            return _MAXSPLIT_NOT_CONST
+        if right >= _MAXSPLIT_BITS:
+            return 0 if left >= 0 else -1
+        value = left >> right
+    elif op is ast.FloorDiv or op is ast.Mod:
+        if right == 0:
+            return _MAXSPLIT_NOT_CONST
+        value = left // right if op is ast.FloorDiv else left % right
+    elif op is ast.Mult:
+        if left == 0 or right == 0:
+            return 0
+        if left.bit_length() + right.bit_length() > _MAXSPLIT_BITS:
+            return _MAXSPLIT_TOO_BIG
+        value = left * right
+    elif op is ast.Add:
+        value = left + right
+    elif op is ast.Sub:
+        value = left - right
+    elif op is ast.BitAnd:
+        value = left & right
+    elif op is ast.BitOr:
+        value = left | right
+    else:
+        value = left ^ right
+    return _MAXSPLIT_TOO_BIG if value.bit_length() > _MAXSPLIT_BITS else value
+
+
+def fold_maxsplit_constant(node):
+    """The exact maxsplit value, or None when it is not a constant; out of int64 is refused."""
+    value = _maxsplit_const(node)
+    if value is _MAXSPLIT_NOT_CONST:
+        return None
+    if value is _MAXSPLIT_TOO_BIG or not _I64_MIN <= value <= _I64_MAX:
+        refusal = Unsupported(
+            'the str.split()/rsplit() maxsplit constant does not fit in a 64-bit signed '
+            'integer, and an integer here is one (SEMANTICS section 1); CPython accepts it '
+            'exactly and raises OverflowError only at run time')
+        refusal.source_line = getattr(node, 'lineno', None)
+        raise refusal
+    return value
+
+
 def _neg_is_float(node, ctx):
     """Is the thing being negated (or abs()'d) a float?
 
@@ -6344,8 +6441,12 @@ def _slist_value(node, ctx):
     if count is not None or attr == 'rsplit':
         # `split(sep, maxsplit)` / any `rsplit`: CPython's own split/rsplit loops (SPLITN). The
         # receiver, separator and limit are evaluated once, in that order.
-        if count is not None and _etype(count, ctx) != INT:
-            raise Unsupported('str.%s() maxsplit must be an integer' % attr)
+        if count is not None:
+            folded = fold_maxsplit_constant(count)
+            if folded is not None:
+                count = ast.copy_location(ast.Constant(value=folded), count)
+            if _etype(count, ctx) != INT:
+                raise Unsupported('str.%s() maxsplit must be an integer' % attr)
         ctx.parts.update(('SLIST', 'SPLITN'))
         if sep is not None:
             ctx.has_try = True

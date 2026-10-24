@@ -8310,6 +8310,11 @@ class Compiler(boxclosure.ClosureMixin):
         spec = self._STR_ARGS.get(name)
         if not spec or any(isinstance(a, _StarC) for a in args):
             return args
+        if name in ('split', 'rsplit') and len(args) > 1 and not isinstance(args[1], _PreC):
+            folded = pyfunc.fold_maxsplit_constant(args[1])
+            if folded is not None:
+                args = list(args)
+                args[1] = ast.copy_location(ast.Constant(value=folded), args[1])
         need = []
         for pos, chk, style in spec:
             if pos < len(args) and (force or not isinstance(args[pos], _PreC)) \
@@ -9193,12 +9198,18 @@ class Compiler(boxclosure.ClosureMixin):
             a.append(kwargs['maxsplit'])
         return a
 
+    def _maxsplit_expr(self, node, ctx):
+        folded = pyfunc.fold_maxsplit_constant(node)
+        if folded is not None:
+            node = ast.copy_location(ast.Constant(value=folded), node)
+        return '(%s).i' % self.expr(node, ctx)
+
     def _m_split(self, recv, kind, args, kwargs, ctx):
         args = self._sep_maxsplit(args, kwargs, ctx, 'split')
         has_sep = args and not (isinstance(args[0], ast.Constant) and args[0].value is None)
         sep = self.expr(args[0], ctx) if has_sep else 'ail_box_none()'
         has_max = len(args) > 1
-        maxs = '(%s).i' % self.expr(args[1], ctx) if has_max else '0'
+        maxs = self._maxsplit_expr(args[1], ctx) if has_max else '0'
         t = ctx.tmp()
         ctx.emit('st = ail_meth_str_split(cx, &%s, %s, %d, %s, %d, %s);' %
                 (t, recv, 0 if has_sep else 1, sep, 1 if has_max else 0, maxs))
@@ -9459,7 +9470,7 @@ class Compiler(boxclosure.ClosureMixin):
         has_sep = args and not (isinstance(args[0], ast.Constant) and args[0].value is None)
         sep = self.expr(args[0], ctx) if has_sep else 'ail_box_none()'
         has_max = len(args) > 1
-        maxs = '(%s).i' % self.expr(args[1], ctx) if has_max else '0'
+        maxs = self._maxsplit_expr(args[1], ctx) if has_max else '0'
         t = ctx.tmp()
         ctx.emit('st = ail_meth_str_rsplit(cx, &%s, %s, %d, %s, %d, %s);' %
                 (t, recv, 0 if has_sep else 1, sep, 1 if has_max else 0, maxs))
