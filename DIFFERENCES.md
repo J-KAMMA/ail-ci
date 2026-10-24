@@ -4,6 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre82-10241844-1 | format: space sign with `0` padding | On both builds `f"{1.5: 010.2f}"` printed `00000 1.50` (the space sign landed after the zero fill); CPython prints ` 000001.50`. The literal `"% 010.2f" % 1.5` is constant-folded to the same call and printed the same wrong text. The general path's `ail__pad` only kept `-`/`+` in front of the zero fill; it now treats a space sign the same way. Floats, ints, bools, inf/nan and explicit `=`/fill specs share the helper. | fixed; `test_ail_pre82.py` |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |

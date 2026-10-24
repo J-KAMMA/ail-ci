@@ -1,5 +1,17 @@
 # DEVLOG
 
+## 2026-10-24 - pre82: space sign before zero padding (general path)
+
+The first pre-existing difference recorded by the review of `rbfuzz71` still reproduced on this
+tree. On both builds `f"{1.5: 010.2f}"` printed `00000 1.50` where CPython prints ` 000001.50`;
+the literal `"% 010.2f" % 1.5` is constant-folded to the same `ail_obj_format` call and printed the
+same wrong text. The general path's `ail__pad` only kept `-`/`+` in front of the zero fill, so a
+space sign ended up after the zeros. It now treats a space sign the same way, which also covers
+ints, bools, inf/nan and explicit `=`/fill specs. Added `AIL_CURRENT/test_ail_pre82.py` (default
+build and `AIL_UNIFIED_FORCE=1`) and registered it in `ail_check.MODULES`. The other items from
+that review are untouched: the >2**31 precision case and the broken v1 `pyboxed` build were not
+part of this fix.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
