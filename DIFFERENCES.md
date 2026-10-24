@@ -4,6 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre103-10242139-1 | `format()` spec parser / NUL | A spec that was a single NUL byte was read as "no type", so `format(1, '\x00')`, `format('a', '\x00')` and a NUL after width/sign/grouping returned the value; CPython raises `ValueError: Unknown format code '\x0' for object of type 'int'` (or `'str'`). The general formatter now tracks whether a type code was present; a float still accepts the NUL, as CPython does. | fixed |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |

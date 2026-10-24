@@ -1,5 +1,21 @@
 # DEVLOG
 
+## 2026-10-24 - pre103: a single NUL byte is a format code
+
+`format(1, '\x00')`, `format('a', '\x00')` and the same spec after a width, sign
+or grouping flag returned the value on both builds; CPython raises `ValueError:
+Unknown format code '\x0' for object of type 'int'` (or `'str'`).  The general
+formatter's spec parser recorded the NUL only as `type == 0`, which is also how
+it spells "no type"; it now tracks the presence of a type separately, so a NUL
+reaches the unknown-code error.  A float keeps CPython's quirk of accepting the
+NUL as no type, and None/instance keep the TypeError naming the class.  Unknown
+control codes now use CPython's `\x<hex>` spelling in the message.
+`test_ail_pre103.py` covers int/bool/str/float/None/instance values, width and
+flag boundaries, and a spec arriving through an argument, a list item, an
+attribute and a dict value on both builds.  NUL followed by another character
+still uses the pre-existing generic `Invalid format specifier` text.
+
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
