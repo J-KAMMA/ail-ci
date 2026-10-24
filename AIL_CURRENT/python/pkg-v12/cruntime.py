@@ -1598,12 +1598,13 @@ static int64_t ail__str_to_int_full(ail_str s) {
         }
     }
     char stackbuf[128];
-    int64_t len, v = 0;
+    int64_t len, v = 0, ndigits = 0;
     char *b = ail__str_ascii(s, stackbuf, (int64_t)sizeof stackbuf, &len);
-    int rc = ail__asc_to_int(b, len, 10, &v);
+    int rc = ail__asc_to_int(b, len, 10, &v, &ndigits);
     if (b != stackbuf) free(b);
     if (rc == 1) ail_raise_named(AIL_EXC_VALUE);
     if (rc == 2) ail_die("integer overflow");
+    if (rc == 3) ail_raise_named(AIL_EXC_VALUE);
     return v;
 }
 /* `float(<str>)` -- AIL_TASK_p3shapes_20260916.md mechanism 3, the one str-to-number conversion
@@ -9355,12 +9356,17 @@ static char *ail__units_ascii(ail_str s, char *stack, int64_t cap, int64_t *len)
 
 static inline int64_t ail_str_to_int(ail_str s) {
     char stackbuf[128];
-    int64_t len, v = 0;
+    int64_t len, v = 0, ndigits = 0;
     char *b = ail__units_ascii(s, stackbuf, (int64_t)sizeof stackbuf, &len);
-    int rc = ail__asc_to_int(b, len, 10, &v);
+    int rc = ail__asc_to_int(b, len, 10, &v, &ndigits);
     if (b != stackbuf) free(b);
     if (rc == 1) ail_raise_c(AIL_ERR_VALUE, "invalid literal for int() with base 10");
     if (rc == 2) ail_die("OverflowError: integer overflow (this runtime's int64 boundary, not catchable)");
+    if (rc == 3) {
+        char msg[192];
+        snprintf(msg, sizeof msg, "Exceeds the limit (4300 digits) for integer string conversion: value has %lld digits; use sys.set_int_max_str_digits() to increase the limit", (long long)ndigits);
+        ail_raise_c(AIL_ERR_VALUE, msg);
+    }
     return v;
 }
 static inline double ail_str_to_float(ail_str s) {
@@ -13760,12 +13766,17 @@ static inline int ail__is_int_ws(uint16_t c) { return ail__is_ws(c) && !(c >= 0x
 static inline ail_st ail_str_to_int(ail_ctx *cx, int64_t *out, ail_obj sobj) {
     ail_str s = ail_view_to_str(sobj);
     char stackbuf[128];
-    int64_t len, v = 0;
+    int64_t len, v = 0, ndigits = 0;
     char *b = ail__units_ascii(s, stackbuf, (int64_t)sizeof stackbuf, &len);
-    int rc = ail__asc_to_int(b, len, 10, &v);
+    int rc = ail__asc_to_int(b, len, 10, &v, &ndigits);
     if (b != stackbuf) free(b);
     if (rc == 1) return ail_raise_c(cx, AIL_B_VALUEERROR, "invalid literal for int() with base 10");
     if (rc == 2) return ail_hit_limit(cx, "int_overflow", "int() literal exceeds int64");
+    if (rc == 3) {
+        char msg[192];
+        snprintf(msg, sizeof msg, "Exceeds the limit (4300 digits) for integer string conversion: value has %lld digits; use sys.set_int_max_str_digits() to increase the limit", (long long)ndigits);
+        return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
+    }
     *out = v;
     return AIL_OK;
 }
@@ -13796,12 +13807,17 @@ static inline ail_st ail_str_to_int_base(ail_ctx *cx, int64_t *out, ail_obj sobj
         return ail_raise_c(cx, AIL_B_VALUEERROR, "int() base must be >= 2 and <= 36, or 0");
     ail_str s = ail_view_to_str(sobj);
     char stackbuf[128];
-    int64_t len, v = 0;
+    int64_t len, v = 0, ndigits = 0;
     char *b = ail__units_ascii(s, stackbuf, (int64_t)sizeof stackbuf, &len);
-    int rc = ail__asc_to_int(b, len, base, &v);
+    int rc = ail__asc_to_int(b, len, base, &v, &ndigits);
     if (b != stackbuf) free(b);
     if (rc == 1) return ail__int_badlit(cx, sobj, base);
     if (rc == 2) return ail_hit_limit(cx, "int_overflow", "int() literal exceeds int64");
+    if (rc == 3) {
+        char msg[192];
+        snprintf(msg, sizeof msg, "Exceeds the limit (4300 digits) for integer string conversion: value has %lld digits; use sys.set_int_max_str_digits() to increase the limit", (long long)ndigits);
+        return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
+    }
     *out = v;
     return AIL_OK;
 }
@@ -14341,6 +14357,15 @@ static inline int ail_exc_matches_b(ail_ctx *cx, int builtin_id) {
 static inline void ail_exc_clear(ail_ctx *cx) { cx->exc_pending = 0; }
 static inline ail_obj ail_exc_class(ail_ctx *cx) { return cx->exc.cls; }
 static inline ail_obj ail_exc_msg(ail_ctx *cx) { return cx->exc.msg; }
+/* True for the ValueError int(<str>) raises past CPython's 4300-digit conversion limit. The
+   generated int()/float() ValueError message fix-up must leave that one alone. */
+static inline int ail_exc_is_int_limit(ail_ctx *cx) {
+    static const char prefix[] = "Exceeds the limit";
+    ail_str m = ail_view_to_str(cx->exc.msg);
+    for (int64_t i = 0; prefix[i]; i++)
+        if (i >= m.n || ail_chr(m, i) != (uint16_t)(unsigned char)prefix[i]) return 0;
+    return 1;
+}
 static inline ail_obj ail_exc_as_value(ail_ctx *cx); /* defined after ail_inst_new, in the classes
                                                   section: builds (once) the INST bound by
                                                   `except E as e`. */
@@ -20855,8 +20880,11 @@ static inline int ail__asc_xform(uint32_t c) {
 /* PyLong_FromString on the ASCII text t[0..n), base 0 or 2..36: optional white space, sign, a 0x/0o/0b
    prefix that matches the base (or picks it, for base 0), single underscores between digits (also right
    after a prefix), no leading zeros in base 0 unless the number is all zeros. 0 = ok, 1 = invalid
-   literal, 2 = valid but outside int64. A literal that is both too long and malformed is invalid. */
-static int ail__asc_to_int(const char *t, int64_t n, int64_t base, int64_t *out) {
+   literal, 2 = valid but outside int64, 3 = more than CPython's 4300 digits for a non-power-of-two
+   base (ValueError "Exceeds the limit...", checked before overflow so a long all-zero literal is
+   refused even though its value would fit). A literal that is both too long and malformed is invalid. */
+static int ail__asc_to_int(const char *t, int64_t n, int64_t base, int64_t *out, int64_t *ndigits) {
+    if (ndigits) *ndigits = 0;
     int64_t i = 0, j = n;
     while (i < j && AIL__ASC_SPACE((unsigned char)t[i])) i++;
     while (j > i && AIL__ASC_SPACE((unsigned char)t[j - 1])) j--;
@@ -20869,22 +20897,14 @@ static int ail__asc_to_int(const char *t, int64_t n, int64_t base, int64_t *out)
         int pb = c == 'x' ? 16 : c == 'o' ? 8 : c == 'b' ? 2 : 0;
         if (pb && (base == 0 || base == pb)) { base = pb; i += 2; prefixed = 1; }
     }
-    if (base == 0) {
+    int zero_base = base == 0, leading_zero = 0;
+    if (zero_base) {
         base = 10;
-        if (t[i] == '0') {                       /* "0", "00", "0_0": only zeros, no leading zero before a digit */
-            int64_t k = i;
-            while (k < j) {
-                if (t[k] == '0') k++;
-                else if (t[k] == '_' && k + 1 < j && t[k + 1] == '0' && k > i) k++;
-                else return 1;
-            }
-            *out = 0;
-            return 0;
-        }
+        leading_zero = i < j && t[i] == '0';
     }
     if (prefixed && i < j && t[i] == '_') i++;
     uint64_t m = 0, limit = (uint64_t)INT64_MAX + (uint64_t)neg;
-    int ovf = 0, digits = 0, last_us = 0;
+    int ovf = 0, digits = 0, last_us = 0, any_nonzero = 0;
     for (; i < j; i++) {
         int c = (unsigned char)t[i], d;
         if (c == '_') {
@@ -20894,6 +20914,7 @@ static int ail__asc_to_int(const char *t, int64_t n, int64_t base, int64_t *out)
         }
         d = c >= '0' && c <= '9' ? c - '0' : (c | 0x20) >= 'a' && (c | 0x20) <= 'z' ? (c | 0x20) - 'a' + 10 : 99;
         if (d >= base) return 1;
+        if (d) any_nonzero = 1;
         if (!ovf) {
             if (m > (limit - (uint64_t)d) / (uint64_t)base) ovf = 1;
             else m = m * (uint64_t)base + (uint64_t)d;
@@ -20902,6 +20923,13 @@ static int ail__asc_to_int(const char *t, int64_t n, int64_t base, int64_t *out)
         last_us = 0;
     }
     if (!digits || last_us) return 1;
+    if (ndigits) *ndigits = digits;
+    /* CPython 3.12's int_max_str_digits: 4300 for base 10 and every other non-power-of-two base;
+       base 2/4/8/16/32 is exempt (its conversion is linear). The check comes before overflow and
+       before base 0's "no leading zero before a digit" rule, so a long all-but-zero literal is a
+       limit ValueError where CPython raises one; an invalid digit still wins over both. */
+    if (digits > 4300 && !(base == 2 || base == 4 || base == 8 || base == 16 || base == 32)) return 3;
+    if (zero_base && leading_zero && any_nonzero) return 1;
     if (ovf) return 2;
     *out = m == (uint64_t)INT64_MAX + 1u ? INT64_MIN : neg ? -(int64_t)m : (int64_t)m;
     return 0;
@@ -26965,18 +26993,24 @@ static void ail__int_base_fail(ail_str s, int64_t base) {
     free(msg);
     ail_raise_value_adopt(value);
 }
+static void ail__int_base_limit_fail(int64_t ndigits) {
+    char text[192];
+    int n = snprintf(text, sizeof text, "Exceeds the limit (4300 digits) for integer string conversion: value has %lld digits; use sys.set_int_max_str_digits() to increase the limit", (long long)ndigits);
+    ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE, (const uint8_t *)text, n, 1));
+}
 static int64_t ail_str_to_int_base(ail_str s, int64_t base) {
     if (base != 0 && (base < 2 || base > 36)) {
         static const char text[] = "int() base must be >= 2 and <= 36, or 0";
         ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE, (const uint8_t *)text, (int64_t)sizeof text - 1, 1));
     }
     char stackbuf[128];
-    int64_t len, v = 0;
+    int64_t len, v = 0, ndigits = 0;
     char *b = ail__str_ascii(s, stackbuf, (int64_t)sizeof stackbuf, &len);
-    int rc = ail__asc_to_int(b, len, base, &v);
+    int rc = ail__asc_to_int(b, len, base, &v, &ndigits);
     if (b != stackbuf) free(b);
     if (rc == 1) ail__int_base_fail(s, base);
     if (rc == 2) ail_die("integer overflow");
+    if (rc == 3) ail__int_base_limit_fail(ndigits);
     return v;
 }
 '''
