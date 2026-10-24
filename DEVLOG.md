@@ -1,5 +1,24 @@
 # DEVLOG
 
+## 2026-10-24 - slice bounds with a non-callable __index__ (job-pre71-10241830)
+
+The general path sliced `str`/`list`/`tuple` bounds by reading the bound
+object's union `.i`, so a class attribute such as `__index__ = 5` silently
+produced an empty slice where CPython raises `TypeError: 'int' object is not
+callable`, and a callable `__index__` was never invoked. Slice bounds that are
+not provably ints now go through `ail2s_getslice`, which converts `step` first
+(zero step is `ValueError: slice step cannot be zero`), then `lower`, then
+`upper`, in CPython's evaluation order. Instances are converted by a
+`__index__` method (via `ail_dun1`) or an instance-table attribute; a value
+that is not callable reports `'<type>' object is not callable`, and a non-int
+result reports `__index__ returned non-int (type X)`. The same conversion is
+used by `ail2s_indices` and `ail2s_setslice`, so assignment and deletion match
+too. Programs whose bounds are all ints keep the previous fast path and
+generated C. `test_ail_pre71.py` covers str/list/tuple receivers, lower/upper/
+step, non-callable int/str/float/None/list attributes, callable methods,
+indirection through arguments, list items, attributes and dict values, list
+slice assignment/deletion, `slice.indices`, and the error ordering.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

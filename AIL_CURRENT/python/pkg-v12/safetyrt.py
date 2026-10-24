@@ -75,20 +75,66 @@ static inline ail_st ail2p_method(ail_ctx *cx, ail_obj *out, ail_obj s, int whic
 
 SLICE = r'''
 /* ---- slice objects, slices of instances, slice assignment (safetyrt.py SLICE) ---- */
+static int64_t ail2s_ids[4];
+/* CPython's _PyEval_SliceIndexNotNone for an instance: look __index__ up, call it, then require an
+   int.  A plain class attribute (`__index__ = 5`) is in the instance's attribute table and is not
+   callable, so calling it raises "'int' object is not callable" before any bound is applied. */
+static inline ail_st ail2s_index_inst(ail_ctx *cx, ail_obj v, int64_t *out) {
+    if (!ail2s_ids[3]) ail2s_ids[3] = ail_intern(cx, "__index__");
+    ail_instobj *o = (ail_instobj *)v.o;
+    for (int64_t i = 0; i < o->n; i++) if (o->attrs[i].name_id == ail2s_ids[3]) {
+        ail_obj cb = o->attrs[i].val;
+        if (cb.tag != AIL_T_FUNC) {
+            char buf[96];
+            snprintf(buf, sizeof buf, "'%s' object is not callable", ail_type_name(cb.tag));
+            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+        }
+        break;
+    }
+#ifdef AIL_HAVE_DUN1
+    {
+        ail_d1_fn f = ail_dun1(v, AIL_D1_INDEX);
+        if (f) {
+            ail_obj r; ail_st st = f(cx, &r, v);
+            if (st != AIL_OK) return st;
+            if (r.tag != AIL_T_INT && r.tag != AIL_T_BOOL) {
+                const char *tn = ail__tname_c(r);
+                size_t n = strlen(tn) + 40;
+                char *buf = (char *)malloc(n);
+                if (!buf) ail_die("out of memory");
+                snprintf(buf, n, "__index__ returned non-int (type %s)", tn);
+                st = ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+                free(buf);
+                return st;
+            }
+            *out = r.i;
+            return AIL_OK;
+        }
+    }
+#endif
+    return ail_raise_c(cx, AIL_B_TYPEERROR, "slice indices must be integers or None or have an __index__ method");
+}
 static inline ail_st ail2s_bound(ail_ctx *cx, ail_obj v, int *has, int64_t *out) {
     if (v.tag == AIL_T_NONE || v.tag == AIL_T_UNBOUND) { *has = 0; *out = 0; return AIL_OK; }
     if (v.tag == AIL_T_INT || v.tag == AIL_T_BOOL) { *has = 1; *out = v.i; return AIL_OK; }
+    if (v.tag == AIL_T_INST) {
+        ail_st st = ail2s_index_inst(cx, v, out);
+        if (st != AIL_OK) return st;
+        *has = 1;
+        return AIL_OK;
+    }
     return ail_raise_c(cx, AIL_B_TYPEERROR, "slice indices must be integers or None or have an __index__ method");
 }
 /* c[lo:hi:step] with bounds that may be None at run time */
 static inline ail_st ail2s_getslice(ail_ctx *cx, ail_obj *out, ail_obj c, ail_obj lo, ail_obj hi, ail_obj step) {
     int hl, hh, hs; int64_t l, h, s; ail_st st;
+    /* PySlice_Unpack converts step first, rejects a zero step, then converts start and stop */
+    if ((st = ail2s_bound(cx, step, &hs, &s)) != AIL_OK) return st;
+    if (hs && s == 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "slice step cannot be zero");
     if ((st = ail2s_bound(cx, lo, &hl, &l)) != AIL_OK) return st;
     if ((st = ail2s_bound(cx, hi, &hh, &h)) != AIL_OK) return st;
-    if ((st = ail2s_bound(cx, step, &hs, &s)) != AIL_OK) return st;
     return ail_op_getslice(cx, out, c, hl, l, hh, h, hs, s);
 }
-static int64_t ail2s_ids[3];
 static inline ail_st ail2s_fields(ail_ctx *cx, ail_obj k, ail_obj *lo, ail_obj *hi, ail_obj *step) {
     if (!ail2s_ids[0]) { ail2s_ids[0] = ail_intern(cx, "start"); ail2s_ids[1] = ail_intern(cx, "stop"); ail2s_ids[2] = ail_intern(cx, "step"); }
     ail_st st;
@@ -121,9 +167,10 @@ static inline ail_st ail2s_setitem(ail_ctx *cx, ail_obj c, ail_obj key, ail_obj 
 /* slice.indices(n) */
 static inline ail_st ail2s_indices(ail_ctx *cx, ail_obj *out, ail_obj lo, ail_obj hi, ail_obj step, ail_obj n) {
     int hl, hh, hs; int64_t l, h, s; ail_st st;
+    if ((st = ail2s_bound(cx, step, &hs, &s)) != AIL_OK) return st;
+    if (hs && s == 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "slice step cannot be zero");
     if ((st = ail2s_bound(cx, lo, &hl, &l)) != AIL_OK) return st;
     if ((st = ail2s_bound(cx, hi, &hh, &h)) != AIL_OK) return st;
-    if ((st = ail2s_bound(cx, step, &hs, &s)) != AIL_OK) return st;
     if (n.tag != AIL_T_INT && n.tag != AIL_T_BOOL) return ail_raise_c(cx, AIL_B_TYPEERROR, "'str' object cannot be interpreted as an integer");
     if (n.i < 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "length should not be negative");
     ail_slice_idx r; if ((st = ail__slice_resolve(cx, &r, n.i, hl, l, hh, h, hs, s)) != AIL_OK) return st;
@@ -138,9 +185,10 @@ static inline ail_st ail2s_setslice(ail_ctx *cx, ail_obj c, ail_obj lo, ail_obj 
         return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
     }
     int hl, hh, hs; int64_t l, h, s; ail_st st;
+    if ((st = ail2s_bound(cx, step, &hs, &s)) != AIL_OK) return st;
+    if (hs && s == 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "slice step cannot be zero");
     if ((st = ail2s_bound(cx, lo, &hl, &l)) != AIL_OK) return st;
     if ((st = ail2s_bound(cx, hi, &hh, &h)) != AIL_OK) return st;
-    if ((st = ail2s_bound(cx, step, &hs, &s)) != AIL_OK) return st;
     ail_vecobj *v = (ail_vecobj *)c.o;
     ail_slice_idx r; if ((st = ail__slice_resolve(cx, &r, v->n, hl, l, hh, h, hs, s)) != AIL_OK) return st;
     ail_obj *src = NULL; int64_t m = 0; ail_obj *copy = NULL;

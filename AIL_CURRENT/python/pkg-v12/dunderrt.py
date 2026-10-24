@@ -40,6 +40,7 @@ HOOKED = frozenset(D1) | frozenset(D2) | frozenset(D3)
 ALREADY_BOUND = frozenset(('__eq__', '__len__', '__getitem__', '__contains__'))
 
 ENUMS = '''
+#define AIL_HAVE_DUN1 1
 enum { AIL_D1_NEG, AIL_D1_POS, AIL_D1_ABS, AIL_D1_HASH, AIL_D1_BOOL, AIL_D1_INT, AIL_D1_FLOAT, AIL_D1_FLOOR,
        AIL_D1_CEIL, AIL_D1_TRUNC, AIL_D1_LEN, AIL_D1_INDEX, AIL_D1_INVERT, AIL_ND1 };
 enum { AIL_D2_ADD, AIL_D2_RADD, AIL_D2_SUB, AIL_D2_RSUB, AIL_D2_MUL, AIL_D2_RMUL, AIL_D2_TRUEDIV, AIL_D2_RTRUEDIV,

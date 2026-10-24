@@ -4968,6 +4968,19 @@ class Compiler(boxclosure.ClosureMixin):
                     return '0', str(default)
                 v = self.expr(e, ctx)
                 return '1', '(%s).i' % v
+            def plainly_int(e):
+                return e is None or self.infer_kind(e, ctx) in ('int', 'bool')
+            rkind = self.infer_kind(node.value, ctx)
+            if (rkind is None or rkind in ('str', 'list', 'tuple')) \
+                    and not all(plainly_int(e) for e in (node.slice.lower, node.slice.upper, node.slice.step)):
+                # a bound that is not provably an int may be None, a float or an instance with
+                # __index__: evaluate all three in Python's order and convert them at run time
+                self.rt_needs.add('slice')
+                lo, hi, step = self._slice_bounds(node.slice, ctx)
+                t = ctx.tmp()
+                ctx.emit('st = ail2s_getslice(cx, &%s, %s, %s, %s, %s);' % (t, c, lo, hi, step))
+                ctx.check()
+                return t
             hlo, lo = bound(node.slice.lower, 0)
             hhi, hi = bound(node.slice.upper, 0)
             hst, st_ = bound(node.slice.step, 1)
