@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - pre47 review: folded INT64_MIN in the pipeline emitter (job-pre47-10241039)
+
+The fold pass ran before `to_pipeline_c` too, but `pyfront._c_expr` emitted a folded INT64_MIN as
+`ck_neg(9223372036854775808)`, which traps at run time; the earlier fix only taught `pyboxed`,
+`pyboxed2` and `pyfunc` the unary spelling. `_c_expr` now emits the same
+`(-9223372036854775807LL - 1)` two's-complement form, so `sum((-2**63) for x in xs)` and its
+variants answer `-9223372036854775808` instead of `integer overflow`. Out-of-range constants in a
+pipeline expression are still refused by name. Probes covered the negated power, `x + (-2**63)`,
+`-1 << 63`, `max`, guarded folds, the direct spelling, a sum over empty input, INT64_MAX, strict
+and unchecked builds, and refusals; all matched CPython or were refused by name.
+
 ## 2026-10-24 - pre47: constant integer expressions (job-pre47-10241039)
 
 `-(-2)**63` is exactly 2**63 in CPython; the compiler emitted the fitting inner `(-2)**63` and

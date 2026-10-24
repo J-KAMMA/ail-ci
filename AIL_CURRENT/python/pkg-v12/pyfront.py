@@ -313,9 +313,20 @@ def _c_expr(node, var, need=None):
             return '1' if node.value else '0'
         if not isinstance(node.value, int):
             raise Unsupported('non-integer constant %r' % (node.value,))
+        if not _INT64_MIN <= node.value <= _INT64_MAX:
+            raise Unsupported('an integer literal outside int64: %d' % node.value)
         return str(node.value)
     if isinstance(node, ast.UnaryOp):
         if isinstance(node.op, ast.USub):
+            # Python parses the literal -9223372036854775808 as a unary minus over the positive
+            # literal 9223372036854775808, which does not fit any signed C type. The folded source
+            # for INT64_MIN therefore reaches here as that spelling, and `ck_neg` would trap on the
+            # very value the constant is meant to denote. Build it as INT64_MIN's two's-complement
+            # definition instead; pyboxed, pyboxed2 and pyfunc already accept the same spelling.
+            if (isinstance(node.operand, ast.Constant)
+                    and type(node.operand.value) is int
+                    and node.operand.value == 1 << 63):
+                return '(-9223372036854775807LL - 1)'
             if need is not None:
                 _use(need, 'ck_neg')
                 return 'ck_neg(%s)' % rec(node.operand)

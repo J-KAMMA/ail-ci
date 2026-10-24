@@ -8,6 +8,7 @@ default and the general path. `2**63 - 1` and `-2**63` are in range and must sti
 """
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -89,6 +90,30 @@ class Box:
 print(Box().v)
 print({'a': (-2)**63}['a'])
 ''')
+
+    def test_int64_min_in_pipeline_element(self):
+        # A folded INT64_MIN reaches the pipeline emitter as Python spells it, a unary minus over
+        # the positive literal 9223372036854775808. Emitting ck_neg(9223372036854775808) trapped on
+        # the value the constant denotes; this is the pipeline counterpart of the script cases above.
+        cases = {
+            'pipe_neg_pow': 'sum((-2**63) for x in xs)',
+            'pipe_add': 'sum(x + (-2**63) for x in xs)',
+            'pipe_shift': 'sum(-1 << 63 for x in xs)',
+            'pipe_max': 'max((-2**63) for x in xs)',
+            'pipe_min_guard': 'min((-2**63) for x in xs if x == 0)',
+        }
+        with tempfile.TemporaryDirectory(prefix='ail-pre47-') as directory:
+            (Path(directory) / 'data.bin').write_bytes(struct.pack('<q', 0))
+            for name, text in cases.items():
+                with self.subTest(program=name, step='build'):
+                    built, exe = build(directory, name, text + '\n', False)
+                    self.assertEqual(built.returncode, 0, (built.stdout + built.stderr)[-1500:])
+                with self.subTest(program=name, step='run'):
+                    got = subprocess.run([str(exe), 'data.bin'], cwd=directory,
+                                         capture_output=True, timeout=120)
+                    self.assertEqual(got.stdout.replace(b'\r\n', b'\n'),
+                                     b'-9223372036854775808\n')
+                    self.assertEqual(got.returncode, 0, got.stderr[-500:])
 
     def test_negated_even_power_is_refused(self):
         self.check_refused('negated', 'print(-(-2)**63)\n')
