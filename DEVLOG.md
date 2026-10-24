@@ -1,5 +1,20 @@
 # DEVLOG
 
+## 2026-10-24 - cov7: the census's internal-crash refusals now build
+
+The gdev census (510 programs, `AIL_NO_CACHE=1`) refused 53 before this job.  Grouped by the
+first line of the build output, the most common group was the 3 internal tracebacks (not
+deliberate refusals): two programs using `functools.partial` crashed in
+`pyboxed2._refuse_lambda_forward_defaults` because the general path's partial rewrite made
+`Lambda` nodes without a line number, and one visitor program crashed in
+`pyfunc._dispatcher` with `KeyError: 'Visitor__visit_directory'` because an abstract base method
+(removed as a stub) was chosen as the dispatcher's representative.  The partial rewrite now
+copies locations onto both lambdas, and the dispatcher falls back to the first concrete
+implementation when the base has no body.  `g17_004`, `g17_024` and `g13_036` now compile and
+print what CPython prints on both builds; the census refused 50 afterwards.  Added the positional
+partial program to `test_ail_silent6.py` and an abstract-visitor hierarchy to
+`test_ail_typed_inherit.py`.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
