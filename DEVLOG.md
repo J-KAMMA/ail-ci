@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - r52_ovf: constant powers cancel before the int64 check (job-pre32-10240902)
+
+`fold_constants` refused to fold `2**63 - 1` and `-(2**63)` because it range-checked the
+intermediate `2**63`, so both builds then aborted at run time with `integer overflow`. It now
+re-evaluates a constant expression containing `**` exactly (Python's integers) only when the
+ordinary fold failed, and writes the final int64 value: both expressions print CPython's result.
+A constant expression whose final value really is outside int64 is written as a literal and
+refused by name (`int64 literal out of range`) instead of ending the program at run time. The
+minimum is written as `(-9223372036854775807 - 1)` so the typed path never sees a positive
+out-of-range literal. Variable-exponent powers are unchanged (they still stop at the int64 limit).
+Added `AIL_CURRENT/test_ail_pre32.py` (both builds, arguments, list items, attributes, dict values,
+and the refusal).
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
