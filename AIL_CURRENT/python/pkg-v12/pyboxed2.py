@@ -2086,6 +2086,8 @@ class Compiler(boxclosure.ClosureMixin):
         self.prelude_names = set() # functions and methods of the preludes added here (not the program's own)
         self.rt_needs = set()      # safetyrt.py fragments this program uses (none: the C it always had)
         self.lib_tuples = False    # genlib.py pieces are in the program: their tuples meet the tuple pass's records
+        self.attr_store_names = set()  # attribute names stored anywhere (a field, not a str method value)
+        self.param_str_names = set()   # (function qualname, parameter) that only ever receives a str
 
     # ------------------------------------------------------------------------------- entry point
     def compile(self, source):
@@ -2157,6 +2159,25 @@ class Compiler(boxclosure.ClosureMixin):
                     and n.func.id not in self.from_imports and n.func.id not in own
                     and n.func.id not in self.module_names):
                 self.from_imports[n.func.id] = (_IMPLICIT_LIB[n.func.id], n.func.id)
+
+        self.attr_store_names = {n.attr for n in ast.walk(tree)
+                                 if isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Store)}
+        for c in ast.walk(tree):
+            if not isinstance(c, ast.ClassDef):
+                continue
+            for item in c.body:
+                if isinstance(item, ast.Assign):
+                    self.attr_store_names.update(t.id for t in item.targets if isinstance(t, ast.Name))
+                elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                    self.attr_store_names.add(item.target.id)
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Call) and len(n.args) >= 2 and isinstance(n.args[1], ast.Constant) \
+                    and isinstance(n.args[1].value, str):
+                fn = n.func
+                if (isinstance(fn, ast.Name) and fn.id == 'setattr') or \
+                        (isinstance(fn, ast.Attribute) and fn.attr in ('setattr', '__setattr__')):
+                    self.attr_store_names.add(n.args[1].value)
+        self._infer_str_parameters(tree)
 
         for n in tree.body:
             if isinstance(n, ast.FunctionDef):
@@ -3433,6 +3454,32 @@ class Compiler(boxclosure.ClosureMixin):
                              (cname, sig, '\n'.join(lines)))
 
     # ------------------------------------------------------------------------------ kind tracking
+    def _static_str_expr(self, node):
+        """Syntactically certain to produce a str (used only to infer which parameters are always str)."""
+        if isinstance(node, ast.Constant):
+            return isinstance(node.value, str)
+        if isinstance(node, ast.JoinedStr):
+            return True
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            return self._static_str_expr(node.left) and self._static_str_expr(node.right)
+        return False
+
+    def _infer_str_parameters(self, tree):
+        """A parameter whose every direct call passes a definitely-str value: a string reaching a
+        str-only method read through it is a bound method value, not a user attribute."""
+        funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+        calls = {}
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in funcs \
+                    and not n.keywords and not any(isinstance(a, ast.Starred) for a in n.args):
+                calls.setdefault(n.func.id, []).append(n.args)
+        for name, fn in funcs.items():
+            params = [a.arg for a in fn.args.posonlyargs + fn.args.args]
+            for i, p in enumerate(params):
+                args = [c[i] for c in calls.get(name, []) if i < len(c)]
+                if args and all(self._static_str_expr(a) for a in args):
+                    self.param_str_names.add((name, p))
+
     def get_kind(self, name, ctx):
         if name in ctx.var_kind:
             return ctx.var_kind[name]
@@ -3491,7 +3538,12 @@ class Compiler(boxclosure.ClosureMixin):
         if isinstance(node, ast.JoinedStr):
             return 'str'
         if isinstance(node, ast.Name):
-            return self.get_kind(node.id, ctx)
+            k = self.get_kind(node.id, ctx)
+            if k is not None:
+                return k
+            if node.id not in ctx.var_kind and (getattr(ctx, 'qualname', None), node.id) in self.param_str_names:
+                return 'str'
+            return None
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             if node.func.id in self.classes:
                 return 'instance:' + node.func.id
@@ -5048,6 +5100,13 @@ class Compiler(boxclosure.ClosureMixin):
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
         if prop_owners:
             return self._property_read(node, prop_owners, ctx)
+        if node.attr in self._STR_ONLY_METHODS:
+            recv_kind = self.infer_kind(node.value, ctx)
+            own_recv = isinstance(node.value, ast.Name) and node.value.id in ('self', 'cls', ctx.self_name)
+            if not own_recv and (recv_kind == 'str' or
+                                 (recv_kind is None and node.attr not in self.attr_store_names)):
+                raise Unsupported('the str method %s used as a value (a bound method value is not modelled; '
+                                  'call it: x.%s(...), DIFFERENCES C?-job-pre63-10241306-1)' % (node.attr, node.attr))
         obj = self.expr(node.value, ctx)
         if node.attr == 'args' and not any('args' in c['methods'] for c in self.classes.values()):
             # e.args of an exception value (the run time's own carry their message)

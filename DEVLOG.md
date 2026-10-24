@@ -1,5 +1,17 @@
 # DEVLOG
 
+## 2026-10-24 - pre63: str method values refused by name
+
+The first pre-existing difference from the pre45 review still on this tree was a str method fetched as
+a value (`f = s.upper`): both builds compiled it and then raised
+`AttributeError: 'str' object has no attribute 'upper'` at run time, where CPython returns a bound
+method. The general path now refuses the construct by name
+(`C?-job-pre63-10241306-1`), including the residual case where an unrelated class field with the same
+name (`self.upper = 1`) used to suppress the refusal. Parameters whose every direct call passes a
+definitely-str value are recognised, so `take("ab")` is refused too. Class attributes (including
+annotated, inherited and setattr-created ones) and instance fields named like str methods still build
+and match CPython. Added `AIL_CURRENT/test_ail_pre63.py`.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
