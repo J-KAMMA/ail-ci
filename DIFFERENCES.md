@@ -13,6 +13,7 @@ Rows added by job-fuzz8-10220554 use the placeholder id form requested for this 
 
 | id | status | area | description |
 |---|---|---|---|
+| C?-job-pre152-10250222-1 | fixed | class value attributes | `C.__name__` (also through a variable, argument, list item, dict value or attribute) raised `AttributeError: 'type' object has no attribute '__name__'`; `ail_inst_getattr` accepted only INST/EXC receivers, and a class body or base `__name__` shadowed the type's own. Now `type.__name__` wins as in CPython, and the class missing-attribute message is `type object 'C' has no attribute 'x'`. |
 | C?-job-fuzz8-10220554-1 | open | itertools | `permutations` / `combinations` / `combinations_with_replacement` with a negative `r` return `[]` on the general path; CPython raises `ValueError: r must be non-negative`. |
 | C?-job-fuzz8-10220554-2 | open | enumerate | `enumerate(xs, start)` with `None`, a float, a str or a list is accepted on the general path (None becomes 0, the others are read as a pointer-sized value) instead of raising `TypeError: '<type>' object cannot be interpreted as an integer`. |
 | C?-job-fuzz8-10220554-3 | open | reversed | `reversed` of a dict, a dict view or a bytearray raises `TypeError: '<type>' object is not reversible` at run time; CPython 3.12 reverses all of them. |

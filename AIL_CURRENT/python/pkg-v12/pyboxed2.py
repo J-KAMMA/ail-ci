@@ -5040,7 +5040,7 @@ class Compiler(boxclosure.ClosureMixin):
         if isinstance(node.value, ast.Name) and (node.value.id in self.module_aliases or
                                                   node.value.id == 'sys'):
             return self._module_attr_value(node.value.id, node.attr, ctx)
-        if (isinstance(node.value, ast.Name) and node.value.id in self.classes
+        if (isinstance(node.value, ast.Name) and node.value.id in self.classes and node.attr != '__name__'
                 and node.value.id not in ctx.slot_of and node.value.id not in self.module_names):
             # `C.K` where K is a constant class attribute of C or of a base of C: the class name as a
             # value does not reach its attributes (`AttributeError: 'instance' object has no attribute`),

@@ -16505,8 +16505,18 @@ static inline ail_st ail_raise_key_arg(ail_ctx *cx, ail_obj arg) {
     return AIL_EXC;
 }
 static __attribute__((noinline, cold)) ail_st ail_attr_not_inst(ail_ctx *cx, ail_obj inst, const char *name_for_msg) {
-    /* attribute access on a value that is not an instance (None, int, str, list ...): CPython's message */
-    char buf[160]; snprintf(buf, sizeof buf, "'%s' object has no attribute '%s'", ail__tname_c(inst), name_for_msg);
+    /* attribute access on a value that is not an instance (None, int, str, list ...): CPython's message
+       (a class value names itself: `type object 'C' has no attribute 'x'`) */
+    char buf[192];
+    if (inst.tag == AIL_T_CLASS) {
+        ail_str s = ail_view_to_str(((ail_classobj *)inst.o)->name);
+        char tn[80]; size_t k = 0;
+        for (int64_t i = 0; i < s.n && k + 1 < sizeof tn; i++) {
+            uint32_t ch = (uint32_t)ail_chr(s, i); tn[k++] = ch < 128 ? (char)ch : '?';
+        }
+        tn[k] = 0;
+        snprintf(buf, sizeof buf, "type object '%.80s' has no attribute '%s'", tn, name_for_msg);
+    } else snprintf(buf, sizeof buf, "'%s' object has no attribute '%s'", ail__tname_c(inst), name_for_msg);
     return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, buf);
 }
 static inline ail_st ail_inst_setattr_chk(ail_ctx *cx, ail_obj inst, int64_t name_id, ail_obj val) {
@@ -16515,6 +16525,12 @@ static inline ail_st ail_inst_setattr_chk(ail_ctx *cx, ail_obj inst, int64_t nam
     return AIL_OK;
 }
 static inline ail_st ail_inst_getattr(ail_ctx *cx, ail_obj *out, ail_obj inst, int64_t name_id, const char *name_for_msg) {
+    if (__builtin_expect(inst.tag == AIL_T_CLASS, 0)) {
+        /* a class read as a value (`C.__name__`, also through a variable, a list item or a dict value): CPython's
+           type.__name__ is the class's own name, whatever the class body holds under that key */
+        if (strcmp(name_for_msg, "__name__") == 0) { *out = ((ail_classobj *)inst.o)->name; return AIL_OK; }
+        return ail_attr_not_inst(cx, inst, name_for_msg);
+    }
     if (__builtin_expect((unsigned)(inst.tag - AIL_T_INST) > 1u, 0)) return ail_attr_not_inst(cx, inst, name_for_msg);
     ail_instobj *o = (ail_instobj *)inst.o;
     for (int64_t i = 0; i < o->n; i++) if (o->attrs[i].name_id == name_id) { *out = o->attrs[i].val; return AIL_OK; }
