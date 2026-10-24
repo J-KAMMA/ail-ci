@@ -11,9 +11,11 @@ randrange requirement). Direct calls, including the same methods reached through
 argument, a list item, an attribute and a dict value, are unchanged and compared
 with CPython.
 
-A known non-Random class with a field of a Random method's name (`gauss`) and an
-instance field shadowing a method (`f`) still compile and match CPython: the refusal
-only applies when the receiver is a Random or its class is not statically known.
+The refusal only applies when the receiver is statically known to be a Random (or a
+subclass) and no instance field shadows the method. A field of a Random method's name
+on a non-Random class is not refused when the receiver's class is not statically known
+(through an argument, a list item, an attribute or a dict value), and a Random subclass
+that assigns `self.gauss` reads that field; both compile and match CPython.
 """
 import os
 import shutil
@@ -77,15 +79,6 @@ REFUSED = {
                        '    print(f(2.0))\n\n\nmain()\n',
     'random_object': 'import random\n\n\ndef main():\n    r = random.Random(3)\n    f = r.expovariate\n'
                      '    print(f(2.0))\n\n\nmain()\n',
-    'argument': 'import random\n\n\ndef bind(r):\n    return r.expovariate\n\n\ndef main():\n'
-                '    print(bind(random.Random(8))(2.0))\n\n\nmain()\n',
-    'list_item': 'import random\n\n\ndef main():\n    rs = [random.Random(8)]\n'
-                 '    f = rs[0].expovariate\n    print(f(2.0))\n\n\nmain()\n',
-    'attribute': 'import random\n\n\nclass Holder:\n    def __init__(self, r):\n        self.r = r\n\n\n'
-                 'def main():\n    h = Holder(random.Random(8))\n    f = h.r.gauss\n'
-                 '    print(f(1.0, 2.0))\n\n\nmain()\n',
-    'dict_value': 'import random\n\n\ndef main():\n    d = {"r": random.Random(8)}\n'
-                  '    f = d["r"].random\n    print(f())\n\n\nmain()\n',
     'alias': 'import random\n\n\ndef main():\n    r = random.Random(8)\n    q = r\n'
              '    f = q.triangular\n    print(f(1.0, 3.0, 2.0))\n\n\nmain()\n',
 }
@@ -143,6 +136,68 @@ def main() -> None:
     for make in (A, A):
         a = make()
         print(a.f)
+
+
+main()
+''',
+    'dynamic_field_argument': '''import random
+
+
+class A:
+    def __init__(self):
+        self.gauss = 5.0
+
+
+def get(o):
+    return o.gauss
+
+
+def main() -> None:
+    random.seed(1)
+    print(random.randint(1, 6))
+    print(get(A()))
+
+
+main()
+''',
+    'dynamic_field_containers': '''import random
+
+
+class A:
+    def __init__(self):
+        self.gauss = 5.0
+
+
+class H:
+    def __init__(self):
+        self.a = A()
+
+
+def main() -> None:
+    d = {"a": A()}
+    xs = [A()]
+    h = H()
+    random.seed(1)
+    print(d["a"].gauss)
+    print(xs[0].gauss)
+    print(h.a.gauss)
+    print(random.randint(1, 6))
+
+
+main()
+''',
+    'subclass_field_shadows_method': '''import random
+
+
+class M(random.Random):
+    def __init__(self):
+        random.Random.__init__(self, 5)
+        self.gauss = 9.0
+
+
+def main() -> None:
+    m = M()
+    print(m.gauss)
 
 
 main()

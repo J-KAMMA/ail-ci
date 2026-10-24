@@ -5058,9 +5058,12 @@ class Compiler(boxclosure.ClosureMixin):
         if rnd is not None and node.attr in rnd['methods']:
             # CPython returns a bound method for `f = r.expovariate`; this path only dispatches method
             # calls, so the read found no field and raised AttributeError at run time. Refuse by name
-            # instead (pre129); a receiver whose class is known and is not Random may just have that field.
+            # instead (pre129) only when the receiver is statically known to be a Random (or a subclass)
+            # and no instance field shadows the method: an unknown class may just have that field, and a
+            # subclass that assigns `self.NAME` reads that field, as CPython does.
             cname = self._inst_class(node.value, ctx)
-            if cname is None or cname == 'Random' or self._is_subclass_of(cname, 'Random'):
+            if cname is not None and self._is_subclass_of(cname, 'Random') \
+                    and not self._has_instance_attr(cname, node.attr):
                 raise Unsupported('random.Random.%s read as a value (a bound method) is not built; call it'
                                   % node.attr)
         obj = self.expr(node.value, ctx)
@@ -6013,6 +6016,36 @@ class Compiler(boxclosure.ClosureMixin):
                 return True
             name = self.classes[name]['base']
             seen += 1
+        return False
+
+    def _has_instance_attr(self, cname, attr):
+        """Whether the class or one of its bases assigns `self.attr` in a method (so a read of
+        `obj.attr` finds an instance field, which shadows a Random method of the same name)."""
+        seen = set()
+        k = cname
+        while k in self.classes and k not in seen and len(seen) < 64:
+            seen.add(k)
+            for info in self.classes[k]['methods'].values():
+                node = info.get('node')
+                if node is None or info.get('is_static'):
+                    continue
+                params = list(getattr(node.args, 'posonlyargs', [])) + list(node.args.args)
+                if not params:
+                    continue
+                self_name = params[0].arg
+                for each in ast.walk(node):
+                    if isinstance(each, ast.Assign):
+                        targets = each.targets
+                    elif isinstance(each, (ast.AnnAssign, ast.AugAssign)):
+                        targets = [each.target]
+                    else:
+                        continue
+                    for target in targets:
+                        if (isinstance(target, ast.Attribute) and target.attr == attr
+                                and isinstance(target.value, ast.Name)
+                                and target.value.id == self_name):
+                            return True
+            k = self.classes[k]['base']
         return False
 
     def _is_exc_class(self, name):

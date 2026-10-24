@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - pre129 review fix: refuse only a statically known Random bound-method value
+
+The review found the refusal added above was too broad: it fired for every receiver whose class
+was not statically known, so a non-Random field named `gauss` / `uniform` / `choice` read through
+an argument, list item, dict value or attribute chain (with `random` imported) was rejected even
+though the base build matched CPython. It also rejected a `random.Random` subclass that assigns
+`self.gauss`. The check now refuses only when the receiver is statically a `Random` (or a subclass)
+and no class in its chain assigns the same instance attribute. A dynamic receiver falls back to the
+old run-time `AttributeError` (recorded as `C?-job-pre129-10242352-2`), while the original
+`f = random.expovariate` / `g = r.expovariate` case stays refused by name. Extended
+`AIL_CURRENT/test_ail_pre129.py` with the argument, container and subclass-field cases.
+
+## 2026-10-24 - pre129: Random bound methods refused by name
 ## 2026-10-24 - pre129: Random bound methods refused by name
 
 Job pre107's reviewer recorded a pre-existing difference: CPython returns a bound method for
