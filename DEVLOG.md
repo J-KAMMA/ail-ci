@@ -51,6 +51,14 @@ without a sign are unchanged.
 widths/alignment, empty and non-ASCII values, values from an argument/list item/attribute/dict
 value, and numeric sign formatting on both builds. It and `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` pass on the final commit.
+## 2026-10-24 - pre132: alternate-form repr for a type-less float field
+
+`format(1e300, '#')` and `format(1e300, '#\x00')` printed `1e+300` where CPython prints
+`1.e+300`; the compile-time literal f-string path (`ail_fmt_gen`) had the same gap. Both
+formatters now keep a decimal point in the mantissa when the alternate form is requested,
+including `#.0`, widths, zero padding and grouping. Added `test_ail_pre132.py` (dynamic
+specs, literal f-strings, values through arguments, lists, attributes and dicts, and
+empty/int/str specs) on both builds.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
