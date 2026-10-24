@@ -184,6 +184,18 @@ evaluated too; the annotation itself stays a hint there. Added `test_ail_pre93.p
 function, future-annotation and module cases, including arguments, list/dict/attribute
 receivers, nested subscripts, slices, negative and empty indexes, and non-subscriptable
 bases.
+## 2026-10-24 - pre96: a parameter shadows a class name (job-pre96-10242044)
+
+The general emitter's `expr_Name` returned the module-lifetime class value for every name
+that matched a class definition, even when the current function had a local slot for that
+name.  In `class U: ...; def f(U): return U.m()` the argument was ignored: both builds read
+the class object and raised `AttributeError: 'type' object has no attribute 'm'`, where
+CPython returns 42 from the instance's class attribute or method.  A class name now becomes
+a class value only when the activation has no parameter, local, cell or closure binding for
+it; a shadowing binding is loaded from its own slot.  This also covers a nested function's
+parameter, a method parameter, and values arriving through a list item, an attribute and a
+dict value.  `test_ail_pre96.py` keeps the probes; no emitted C changes for a program that
+does not shadow a class name.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
