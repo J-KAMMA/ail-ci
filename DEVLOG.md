@@ -1,5 +1,20 @@
 # DEVLOG
 
+## 2026-10-24 - pre137: negative r in the itertools choosers
+
+`permutations`, `combinations` and `combinations_with_replacement` with `r < 0` returned `[]`
+on the general path; CPython raises `ValueError: r must be non-negative`. The shared chooser
+runtime now raises that catchable error after the pool is materialized, so a non-iterable
+argument still raises TypeError first, as in CPython. Coverage: `r` reaching the call as a
+literal, a local, an argument, a list item, an attribute and a dict value, plus r = 0, r > n,
+an empty pool and booleans. Added `AIL_CURRENT/test_ail_pre137.py` and registered it in
+`ail_check.MODULES`. Other observed, not fixed (identical on the base): a float, str or explicit
+None `r` still disagrees with CPython (`permutations(xs, 1.5)` prints `[]` instead of TypeError,
+`combinations_with_replacement(xs, None)` prints `[()]`), and explicit `permutations(xs, None)`
+is treated as 0 instead of the omitted default. The default build also cannot compile a
+top-level `print(list(itertools.permutations(...)))` (a pre-existing typed-list error, the same
+with a non-negative `r`).
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
