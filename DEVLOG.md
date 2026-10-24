@@ -68,3 +68,54 @@ the non-ASCII `lower`/`upper` limit remains a documented pre-existing difference
   and `e.args`. A mixed-mode typed clone is no longer selected for a function that asserts, so a
   failed assert inside a helper is caught by the surrounding boxed `try`. Typed-only builds still
   refuse a tuple assert message by name. New coverage: `test_ail_fuzz70.py`.
+## 2026-10-22 - fuzz8 review 2 fixes (job-fuzz8-10221632)
+
+1. `_attribute_kind` / `_attribute_container` now add the attribute to the recursion guard `seen`
+   and return `None` on a cycle instead of recursing forever.  `b.x = b.x + 1` (or `b.x = b.x`)
+   together with `itertools.accumulate(..., initial=b.x)` or `groupby([b.x, ...])` no longer aborts
+   every build with `RecursionError`; the typed path declines and the default build falls back,
+   matching CPython (`[2, 3.5]`, `1 [1, 1]` / `2 [2]`).
+2. Corrected `DIFFERENCES.md` row `C?-job-fuzz8-10221632-2`: mutable-element groupby keys do not
+   run on a typed recompute.  `--strict` refuses the pattern (`'_ilN_gc' is read before it is
+   assigned`) and the default build uses the general path.
+
+`AIL_CURRENT/test_ail_fuzz8.py` covers self-referential and cross-name attribute cycles through
+arguments, list items, dict values, nested attributes and groupby.  Probes:
+`/tmp/probes/attr_cycle_acc.py`, `attr_cycle_self.py`, `attr_cycle_groupby.py`,
+`attr_cycle_two_names.py`, `attr_cycle_nested.py`, `attr_cycle_float.py`,
+`attr_cycle_dict_list.py`.
+
+## 2026-10-22 - fuzz8 review fixes (job-fuzz8-10221632)
+
+1. `itertools.groupby` no longer reuses a stale look-ahead key for a list of mutable elements.
+   The typed path still declines that pattern (`--strict`: `'_ilN_gc' is read before it is
+   assigned`) and the default build falls back to the general path, which matches CPython.
+   Scalar/str element lists stay on the typed path and call the key once per element.  Probe
+   `gb_cache_regress_len.py` prints `1 3` / `3 1`.
+2. `itertools.accumulate(xs, initial=v)` on the typed path is refused by name when the types of
+   `v` and the elements differ.  One-argument `round()` is now classified as `int` through local
+   bindings, list items, attributes and dict values, so the float-list probe falls back to the
+   general path and prints `[2, 3.5, 6.0]` instead of `[2.0, 3.5, 6.0]`.
+
+`AIL_CURRENT/test_ail_fuzz8.py` has both cases; the typed groupby/accumulate modules, safetynet,
+files and corpus_findings3 pass on the final commit.
+
+
+## 2026-10-21 - fuzz8: iteration tools (job-fuzz8-10220554)
+
+Ran 65 small differential programs over chain / islice / product / permutations / combinations /
+combinations_with_replacement / accumulate / groupby / zip_longest / starmap / enumerate /
+zip(strict=) / sorted / min / max / reversed / map / filter, each through `bash ~/tools/cmp.sh`
+on the default build and `AIL_UNIFIED_FORCE=1`.  Fixed three causes (all now in
+`AIL_CURRENT/test_ail_fuzz8.py`, with probes in `/tmp/probes`):
+
+1. `itertools.accumulate(..., initial=None)` now treats None as "not given", as CPython 3.12 does
+   (`cruntime.ail_it_accumulate`).  Constant, argument, list-item, attribute and dict-value routes
+   are tested.
+2. `sorted` / `list.sort` call their key on the input in the original order even for
+   `reverse=True`, and call it once for a one-element list (`cruntime.ail_list_sort`).  Before, the
+   elements were reversed before the key calls, which only showed with a key that has a side effect.
+3. The typed path's `itertools.groupby` reuses the look-ahead key, so it calls the key exactly once
+   per element instead of twice on each group boundary (`itlib.Groupby`).
+
+Remaining differences found are recorded in `DIFFERENCES.md`; they were not fixed in this job.
