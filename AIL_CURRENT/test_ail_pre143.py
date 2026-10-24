@@ -58,6 +58,7 @@ main()
 '''
 
 SHADOWING = r'''E = 63
+V = 1
 
 
 def parameter(E):
@@ -85,9 +86,9 @@ def read_global():
 
 
 def write_global():
-    global E
-    E = 5
-    return 2 ** E - 1
+    global V
+    V = 5
+    return 2 ** V - 1
 
 
 def plain():
