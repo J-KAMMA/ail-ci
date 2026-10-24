@@ -805,6 +805,7 @@ static inline ail_st ail2_aug_probe(ail_ctx *cx, ail_obj *cur, ail_obj **slot,
         ail_obj *v; ail_st st = ail_map_get(cx, &v, m, key);
         if (st != AIL_OK) return st;
         if (!v) {
+            if (ail__is_counter(c)) { *cur = ail_box_int(0); return AIL_OK; }   /* Counter.__missing__: no insert */
             int fac = m->dd_factory;
             if (!fac) return ail_raise_key_arg(cx, key);
             ail_obj dflt = fac == 1 ? ail_box_int(0) : fac == 2 ? ail_list_new(cx)
