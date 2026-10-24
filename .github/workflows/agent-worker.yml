@@ -2,7 +2,7 @@ name: agent-worker
 # One AIL coding-agent worker run (DeepSeek V4.1 Flash through OpenCode Go, a $10/month flat plan with no extra charges)
 # on a job-* branch prepared by the maintainer's ci_job script. Owner-approved 2026-10-21.
 # - Dispatch only (repo writers). Runs only on job-* branches.
-# - Only the OpenCode key is used. harness=oc (default): the pinned OpenCode CLI (v1.19.3, sha256-checked) reads it from
+# - Only the OpenCode key is used. harness=oc (default): the pinned OpenCode CLI (v1.19.4, sha256-checked; 1.19.3 bundled a Bun with CVE-2026-111497) reads it from
 #   its auth file in $HOME, outside the checkout, removed after the run. harness=agentpy: agent.py reads a key file and
 #   deletes it before any tool runs. The OpenCode run is cut off after 120 minutes. Before the push, the results are scanned for the key and the push is refused if found. The checkout keeps no credentials; results are pushed in a separate step after the agent
 #   has exited. With .agent/pipeline.sh present the reviewer and one fix round run here too (OpenCode CLI); the
@@ -45,9 +45,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p "$HOME/opt/opencode" "$RUNNER_TEMP/oc"
-          gh release download v1.19.3 --repo sst/opencode -p opencode-linux-x64.tar.gz -D "$RUNNER_TEMP/oc"
+          gh release download v1.19.4 --repo sst/opencode -p opencode-linux-x64.tar.gz -D "$RUNNER_TEMP/oc"
           tar -xzf "$RUNNER_TEMP/oc/opencode-linux-x64.tar.gz" -C "$HOME/opt/opencode"
-          echo "179ca421d61eefeadfa0c50e084a6e79c1623734732f0f4593f81ccfd3ab7ee9  $HOME/opt/opencode/opencode" | sha256sum -c -
+          echo "538fcb1b6408c8d4608822acee19f7ff5b3a3eb3383c0633c4f06170857312a7  $HOME/opt/opencode/opencode" | sha256sum -c -
           mkdir -p "$HOME/.config/opencode"
           cp .agent/opencode.json "$HOME/.config/opencode/opencode.json"
       - name: Worker
