@@ -4552,7 +4552,7 @@ class Compiler(boxclosure.ClosureMixin):
                     raise Unsupported("the '#' flag in %%-format %r (not built; CPython "
                                       "only differs at precision 0)" % fmt_str[i:i + 6])
                 if prec is not None and typ == 'd':
-                    raise Unsupported('%%.%dd precision on an int (not built; only '
+                    raise Unsupported('%%.%sd precision on an int (not built; only '
                                       'floats take .N)' % prec)
                 sign_c = '+' if '+' in flags else (' ' if ' ' in flags else '')
                 spec_txt = ('<' if '-' in flags else '') + sign_c + \
@@ -4562,7 +4562,17 @@ class Compiler(boxclosure.ClosureMixin):
                 spec_txt += typ
             specslot = self._str_lit_slot(spec_txt, ctx)
             t = ctx.tmp()
-            if self.dunder_ops:
+            if typ == 'd':
+                # %d accepts a float and truncates it toward zero; non-numbers get CPython's
+                # "a real number is required" message.  ail2f_percent already implements both
+                # (the %i/%u and computed-template paths use it), so keep the direct
+                # ail_obj_format for the common int/bool case and hand everything else to it.
+                self.rt_needs.add('fmt')
+                dirslot = self._str_lit_slot(m.group(0), ctx)
+                ctx.emit('if (%s.tag == AIL_T_INT || %s.tag == AIL_T_BOOL) { st = ail_obj_format(cx, &%s, %s, %s); }'
+                         ' else { st = ail2f_percent(cx, &%s, %s, %s); }'
+                         % (val, val, t, val, specslot, t, dirslot, val))
+            elif self.dunder_ops:
                 # an instance (an IntEnum / IntFlag member, a user class) is converted by %'s rules (str(), int(), float()),
                 # not by its __format__ with a spec made up from the directive
                 self.rt_needs.add('fmt')
