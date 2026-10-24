@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - parallel workers trap through the boxed path (job-pre171-10250443)
+
+Review follow-up. Routing the typed shift guards' `ValueError` through
+`ail_raise_value_adopt` skipped the `parallel for` interception, which covered only `ail_die` and
+`ail_raise_named`; a negative shift in a worker longjmp-ed to the caller's frame and the default
+build segfaulted (exit 139) instead of catching. `ail_raise_value_adopt` now records the worker's
+code and message through `ail_par_trap_value` and unwinds inside the worker, releasing its
+reference; the join re-raises that code and message on the calling thread. Added the parallel
+case to `test_ail_pre171.py`. Probes at 1/2/4/8 threads match CPython for `<<`, `>>`, `<<=`,
+negative counts from arguments, valid shifts, and the uncaught path.
+
 ## 2026-10-24 - indirect typed calls keep the caller's boxed handler (job-pre171-10250443)
 
 `pymix` rejected an exception-capable typed candidate only when a direct call site was lexically

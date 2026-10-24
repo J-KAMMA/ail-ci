@@ -148,6 +148,28 @@ print(fns[0]())
 print("after")
 '''
 
+PARALLEL_SHIFT = r'''fn work(n: int, b: int, mode: int) -> int {
+    let xs: list[int] = [0] * n;
+    parallel for i in range(0, n) {
+        let t = i * 3;
+        if i == n - 1 {
+            if mode == 0 { xs[i] = t << b; } else { if mode == 1 { xs[i] = t >> b; } else { let u = t; u <<= b; xs[i] = u; } }
+        } else { xs[i] = t; }
+    }
+    return xs[5];
+}
+fn main() {
+    try { print(work(1000, -1, 0)); }
+    except ValueError as e { print("caught0", e.kind, str(e)); }
+    try { print(work(1000, -2, 1)); }
+    except ValueError as e { print("caught1", e.kind, str(e)); }
+    try { print(work(1000, -3, 2)); }
+    except ValueError as e { print("caught2", e.kind, str(e)); }
+    print(work(1000, 2, 0));
+    print("done");
+}
+'''
+
 
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
@@ -176,6 +198,21 @@ def _build_and_run(directory, name, text, general):
     return (got.stdout.replace(b'\r\n', b'\n'), got.returncode), got.stderr.decode('utf-8', 'replace')[-1500:]
 
 
+def _build_and_run_ail(directory, name, text, threads):
+    src = Path(directory) / (name + '.ail')
+    src.write_text(text, encoding='utf-8')
+    exe = Path(directory) / ('exe_' + name)
+    env = dict(os.environ, AIL_NO_CACHE='1', AIL_QUIET_FALLBACK='1', AIL_THREADS=str(threads))
+    env.pop('AIL_UNIFIED_FORCE', None)
+    built = subprocess.run([sys.executable, '-B', str(ROOT / 'ail_chatgpt.py'), 'compile', src.name,
+                            '-o', exe.name], cwd=directory,
+                           capture_output=True, text=True, timeout=900, env=env)
+    if built.returncode != 0:
+        return None, (built.stdout + built.stderr)[-3000:]
+    got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory, env=env)
+    return (got.stdout.replace(b'\r\n', b'\n'), got.returncode), got.stderr.decode('utf-8', 'replace')[-1500:]
+
+
 class Pre171Tests(unittest.TestCase):
     def check(self, slug, text, rc=0, stderr_last=None):
         with tempfile.TemporaryDirectory(prefix='ail-pre171-') as directory:
@@ -200,6 +237,17 @@ class Pre171Tests(unittest.TestCase):
 
     def test_indirect_explicit_raise(self):
         self.check('indirect_raise', INDIRECT_RAISE)
+
+    def test_parallel_for_negative_shift_traps_on_the_caller(self):
+        expected = (b"caught0 ValueError negative shift count\n"
+                    b"caught1 ValueError negative shift count\n"
+                    b"caught2 ValueError negative shift count\n"
+                    b"15\ndone\n", 0)
+        with tempfile.TemporaryDirectory(prefix='ail-pre171-par-') as directory:
+            for threads in (1, 4):
+                got, err = _build_and_run_ail(directory, 'parallel_shift_%d' % threads, PARALLEL_SHIFT, threads)
+                self.assertIsNotNone(got, err)
+                self.assertEqual(got, expected, 'AIL_THREADS=%d\n%s' % (threads, err))
 
     def test_uncaught_indirect_shift_names_the_value_error(self):
         self.check('indirect_uncaught', UNCAUGHT, rc=1, stderr_last='ValueError: negative shift count')
