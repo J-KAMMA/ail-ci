@@ -1,5 +1,14 @@
 # DEVLOG
 
+## 2026-10-24 - pre30: bound method values refused by name
+
+`f = obj.method` used to compile as an ordinary attribute read and fail at run time with
+`AttributeError: 'C' object has no attribute 'method'` (CPython returns a bound method).
+Both emitters now refuse the read at compile time, naming the method, in `pyfunc._attr_read`
+and `pyboxed2.Compiler.expr_Attribute`.  Direct calls, properties, class attributes,
+static/class methods and ordinary function values are unchanged.  Added
+`AIL_CURRENT/test_ail_pre30.py` (9 refusal programs and 1 matching program, both builds).
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

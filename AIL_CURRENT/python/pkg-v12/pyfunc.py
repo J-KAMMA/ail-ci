@@ -13775,6 +13775,12 @@ def _attr_read(node, ctx):
                           'math.ceil, math.isqrt, math.gcd, math.fabs (called) and math.pi, '
                           'math.e, math.tau, math.inf, math.nan -- %s is refused, by name, the '
                           'same as every other unimplemented attribute' % (math_path, math_path))
+    kind = _etype(node.value, ctx)
+    if _is_obj_kind(kind) and kind[1] in ctx.classes:
+        cls = ctx.classes[kind[1]]
+        if node.attr in cls.methods and node.attr not in cls.field_types:
+            raise Unsupported('bound method %s.%s read as a value is not built; call it (%s.%s(...))'
+                              % (kind[1], node.attr, kind[1], node.attr))
     _, field_kind = _field_info(node, ctx)
     borrowed = _borrowed_element_receiver(node.value, ctx) if field_kind in NUM else None
     if borrowed is not None:

@@ -5048,6 +5048,13 @@ class Compiler(boxclosure.ClosureMixin):
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
         if prop_owners:
             return self._property_read(node, prop_owners, ctx)
+        cname = self._inst_class(node.value, ctx)
+        if cname is not None:
+            info = self._resolve_method(cname, node.attr)
+            if info is not None:
+                kind = 'method' if info.get('is_static') else 'bound method'
+                raise Unsupported('%s %s.%s read as a value is not built; call it (%s.%s(...))'
+                                  % (kind, cname, node.attr, cname, node.attr))
         obj = self.expr(node.value, ctx)
         if node.attr == 'args' and not any('args' in c['methods'] for c in self.classes.values()):
             # e.args of an exception value (the run time's own carry their message)
