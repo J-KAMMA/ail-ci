@@ -1,5 +1,22 @@
 # DEVLOG
 
+## 2026-10-24 - pre127: a parameter or local shadows a class name (job-pre127-10242351)
+
+The first still-differing item from the pre96 list is `r6`: the general emitter's
+`expr_Name` returned the module-lifetime class value for every name that matched a class
+definition, even when the current function had a local slot for that name.  In
+`class U: ...; def f(U): return U.m()` the argument was ignored: both builds read the class
+object and raised `AttributeError: 'type' object has no attribute 'm'` where CPython returns
+42 from the instance's class attribute or method.  A class name now becomes a class value
+only when the activation has no parameter, local, cell or closure binding for it; a
+shadowing binding is loaded from its own slot.  The probes cover a nested parameter, a method
+parameter, a local, a cell, a `nonlocal` closure, an annotated parameter, and values arriving
+through a list item, an attribute and a dict value.  `r7` (`cls.__name__`), `r8`
+(`K = "abc"; f = K.upper`) and `r9` (class through a list item, `[U][0].m`) still differ on
+this tree and were not changed.  `test_ail_pre127.py` keeps the r6 probes; emitted C is
+unchanged for a program that does not shadow a class name.
+
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
