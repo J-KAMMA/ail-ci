@@ -4,6 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre116-10242227-1 | generator expressions | A generator expression saved as a value (assignment, argument, list item, attribute, dict value or return) was materialised eagerly on the general path. A `%`/`//` by zero (or another catchable trap) in its body therefore raised before the caller's `try` instead of at `next()`, and the default build exited 1 with empty stdout. The general path now refuses a saved generator whose lazy body can raise, by the typed path's own name "a generator expression used as a value"; immediate consumers and tuple unpacking keep the eager lowering. `test_ail_pre116.py`. | refused |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |

@@ -2090,6 +2090,11 @@ class Compiler(boxclosure.ClosureMixin):
     # ------------------------------------------------------------------------------- entry point
     def compile(self, source):
         tree = ast.parse(source)
+        lazy_genexp = _lazy_raising_genexp(tree)
+        if lazy_genexp is not None:
+            refusal = Unsupported(_GENEXP_VALUE_REFUSAL)
+            refusal.source_line = getattr(lazy_genexp, 'lineno', None)
+            raise refusal
         self._module_tree = tree          # the element-kind records (_elem_record_exact) are judged on the whole module
         for fn in tree.body:
             # math.sqrt is the correctly rounded C sqrt; the helper's `x ** 0.5` is pow(), which can differ in the last bit
@@ -10387,6 +10392,93 @@ class Compiler(boxclosure.ClosureMixin):
 class NeedSlice(Exception):
     """The program slices an instance (or assigns to a slice of one): compile it again with the class of
     slice objects (safetyrt.SLICE_PRELUDE)."""
+
+
+_GENEXP_VALUE_REFUSAL = (
+    'a generator expression used as a value.\n'
+    '  write instead: consume it in place (`sum(x * x for x in xs)`, `any(...)`, `all(...)`), '
+    'or fill a list with a loop')
+
+# Calls that consume their whole argument before returning, so materialising the generator at the
+# call is observationally the same point in the program.  `next`/`any`/`all`/`sum` and the list
+# constructors have their own fused paths in this emitter; the rest simply read every element.
+_GENEXP_EAGER_CALLS = frozenset({
+    'list', 'tuple', 'set', 'frozenset', 'dict', 'sorted', 'sum', 'min', 'max', 'any', 'all',
+    'next', 'bytes', 'bytearray', 'Counter', 'array',
+})
+_GENEXP_EAGER_METHODS = frozenset({'join', 'extend', 'update', 'array'})
+# Builtins whose call cannot raise one of the five catchable traps this compiler models, so a
+# generator element that only uses them keeps the existing eager lowering.
+_GENEXP_SAFE_CALLS = frozenset({
+    'len', 'str', 'bool', 'abs', 'repr', 'ord', 'chr', 'round', 'hash', 'id', 'type', 'isinstance',
+})
+
+
+def _genexp_consumed_in_place(node, parents):
+    """True iff `node` is evaluated by a construct that reads every element at the same point:
+    a for/comprehension source, a starred unpack, a tuple/list unpacking assignment, or an
+    argument/Method call whose callee is one of the consuming builtins above."""
+    par = parents.get(node)
+    if isinstance(par, (ast.For, ast.AsyncFor)) and par.iter is node:
+        return True
+    if isinstance(par, ast.comprehension) and par.iter is node:
+        return True
+    if isinstance(par, ast.Starred):
+        return True
+    if isinstance(par, (ast.Assign, ast.AnnAssign)):
+        target = par.targets[0] if isinstance(par, ast.Assign) and len(par.targets) == 1 else getattr(par, 'target', None)
+        if isinstance(target, (ast.Tuple, ast.List)):
+            return True
+    if isinstance(par, ast.Call) and node in par.args:
+        f = par.func
+        if isinstance(f, ast.Name) and f.id in _GENEXP_EAGER_CALLS:
+            return True
+        if isinstance(f, ast.Attribute) and f.attr in _GENEXP_EAGER_METHODS:
+            return True
+    return False
+
+
+def _genexp_can_raise(node, user_functions):
+    """True iff evaluating the generator's body can raise one of the catchable traps (directly,
+    or through a call the body makes).  The outermost iterable is excluded: CPython evaluates
+    it when the generator object is made, so the existing eager lowering already has the same
+    point for it.  Targets are excluded too; only the element and the lazy clauses matter."""
+    roots = [node.elt]
+    for i, gen in enumerate(node.generators):
+        if i:
+            roots.append(gen.iter)
+        roots.extend(gen.ifs)
+    for root in roots:
+        for n in ast.walk(root):
+            if isinstance(n, ast.BinOp) and isinstance(n.op, (ast.Div, ast.FloorDiv, ast.Mod)):
+                r = n.right
+                if not (isinstance(r, ast.Constant) and isinstance(r.value, (int, float))
+                        and not isinstance(r.value, bool) and r.value != 0):
+                    return True
+            elif isinstance(n, ast.Subscript):
+                return True
+            elif isinstance(n, ast.Call):
+                f = n.func
+                if not isinstance(f, ast.Name) or f.id in user_functions or f.id not in _GENEXP_SAFE_CALLS:
+                    return True
+    return False
+
+
+def _lazy_raising_genexp(tree):
+    """The first generator expression saved as a value whose body can raise, or None.  The typed
+    path already refuses this construct by name; the general path used to materialise it eagerly,
+    so an exception the CPython generator would raise only at `next()` aborted before the caller's
+    `try` could catch it."""
+    parents = {}
+    for par in ast.walk(tree):
+        for child in ast.iter_child_nodes(par):
+            parents[child] = par
+    user_functions = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.GeneratorExp) and not _genexp_consumed_in_place(node, parents) \
+                and _genexp_can_raise(node, user_functions):
+            return node
+    return None
 
 
 def build(source, report, allow_mix=True):

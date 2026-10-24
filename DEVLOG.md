@@ -1,5 +1,20 @@
 # DEVLOG
 
+## 2026-10-24 - pre116: a saved generator expression that can raise is refused
+
+The first pre-existing difference the pre87 reviewer recorded was `% 0` through a generator
+expression: `g = (helper(5, 0) for _ in range(1)); next(g)` inside a `try` aborted on both builds.
+The general path materialised every generator expression eagerly, so the error was raised at the
+assignment rather than at `next()`, before the handler was live (the typed path already refused
+the construct by name).  `pyboxed2.Compiler` now refuses a generator expression used as a value
+when its lazy body contains a division/modulo by a non-literal divisor, a subscript, or a call
+that can raise (`int`, `input`, `next`, a method, or a user function).  Immediate consumers
+(`sum`, `any`, `all`, `list`, `tuple`, `sorted`, `for`, `*`, `join`/`extend`/`update`) and tuple
+unpacking keep the existing eager lowering, so the common forms still match CPython.
+`test_ail_pre116.py` covers assignment, argument, list item, attribute and dict value, plus `//`,
+negative, bool, IntEnum and empty sources; it also keeps the immediate-consumer and
+safe-returned-generator controls compared with CPython on both builds.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
