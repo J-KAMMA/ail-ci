@@ -119,3 +119,9 @@ on the default build and `AIL_UNIFIED_FORCE=1`.  Fixed three causes (all now in
    per element instead of twice on each group boundary (`itlib.Groupby`).
 
 Remaining differences found are recorded in `DIFFERENCES.md`; they were not fixed in this job.
+## 2026-10-23
+
+- job-fuzz82: typed path refuses `del` on an item of a module-level numeric list by name.
+  Before, `del xs[-1]` was a silent no-op (the const table's `.n` write was dropped) and an
+  earlier index memmoved over const data and crashed; the default build now falls back to the
+  general path and matches CPython. Added `AIL_CURRENT/test_ail_fuzz82.py`.
