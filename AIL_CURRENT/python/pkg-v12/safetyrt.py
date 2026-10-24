@@ -750,7 +750,12 @@ static inline ail_obj ail2f_pad_str(ail_ctx *cx, ail_str s, int64_t len, ail2f_s
     int64_t left = align == '>' ? pad : align == '^' ? pad / 2 : 0;
     ail2f_buf o = {0, 0, 0};
     for (int64_t k = 0; k < left; k++) ail2f_put(&o, fill);
-    for (int64_t k = 0; k < len; k++) ail2f_put(&o, ail_chr(s, k));
+    for (int64_t k = 0, i = 0; k < len; k++) {
+        int64_t w = ail__str_width(s, i);
+        ail2f_put(&o, ail_chr(s, i));
+        if (w == 2) ail2f_put(&o, ail_chr(s, i + 1));
+        i += w;
+    }
     for (int64_t k = 0; k < pad - left; k++) ail2f_put(&o, fill);
     return ail2f_done(cx, &o);
 }
@@ -825,7 +830,7 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
         if (f.alt) return ail_raise_c(cx, AIL_B_VALUEERROR, "Alternate form (#) not allowed in string format specifier");
         if (f.align == '=') return ail_raise_c(cx, AIL_B_VALUEERROR, "'=' alignment not allowed in string format specifier");
         ail_str s = ail_view_to_str(x);
-        int64_t len = s.n;
+        int64_t len = ail_str_len_points(s);
         if (f.has_prec && f.prec < len) len = f.prec;
         *out = ail2f_pad_str(cx, s, len, &f, '<');
         return AIL_OK;
@@ -966,7 +971,7 @@ static inline ail_st ail2f_percent(ail_ctx *cx, ail_obj *out, ail_obj fmtobj, ai
         if (t == 's' || t == 'r' || t == 'a') {
             fr.slots[2] = t == 's' ? ail_obj_str(cx, arg) : ail_obj_repr(cx, arg);
             ail_str v = ail_view_to_str(fr.slots[2]);
-            int64_t len = v.n; if (f.has_prec && f.prec < len) len = f.prec;
+            int64_t len = ail_str_len_points(v); if (f.has_prec && f.prec < len) len = f.prec;
             f.zero = 0; if (!f.align) f.align = '>';
             piece = ail2f_pad_str(cx, v, len, &f, '>');
         } else if (t == 'd' || t == 'i' || t == 'u' || t == 'o' || t == 'x' || t == 'X') {

@@ -1,5 +1,20 @@
 # DEVLOG
 
+## 2026-10-24 - pre66 review fixes: reverse slices and code-point widths (job-pre66-10241805)
+
+- Fixed the review's first defect: the boxed `ail_str_getslice` step-1 path computed the view
+  length as `last - first` without clamping. A slice whose start is after its stop (for example
+  `s[4:2]`, `s[10:2]`, or the loop-bound case) therefore produced a negative-length view: `== ""`
+  was false and appending to it corrupted the heap. Empty/reverse slices are now a zero-length view.
+- Fixed the second defect: `str.ljust/rjust/center/zfill` and the `%`/`format`/f-string width and
+  precision paths counted UTF-16 units instead of code points. They now count and copy whole code
+  points (a surrogate pair is one character), so `chr(0x1F600) + "!"` pads to width 4, not 3, and
+  `"%.1s"`/`{:.1}` truncate to one whole astral character.
+- Extended `test_ail_pre66.py` with both-build differential cases for reverse/empty slices through
+  a function, list item, attribute and dict value, and for pad/`%`/`format` widths and precision.
+  Probes: `/tmp/probes/r_slice.py`, `r_slice_step.py`, `r_slice_astral.py`, `r_pad.py`,
+  `r_format.py`.
+
 ## 2026-10-24 - non-BMP chr() on the 16-bit general path (job-pre66-10241805)
 
 - The general path now stores a run-time `chr(0x1F600)` as a UTF-16 surrogate pair instead of

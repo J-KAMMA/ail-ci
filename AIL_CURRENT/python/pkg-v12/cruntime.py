@@ -12998,7 +12998,7 @@ static inline ail_st ail_str_getslice(ail_ctx *cx, ail_obj *out, ail_obj sobj,
     }
     int64_t first = ail__str_units_at(s, start < 0 ? 0 : start);
     if (step == 1) {
-        int64_t last = ail__str_units_at(s, stop < 0 ? 0 : stop);
+        int64_t last = stop > start ? ail__str_units_at(s, stop < 0 ? 0 : stop) : first;
         *out = ail_str_view(sobj.sv.backing, sobj.sv.off + first, last - first);
         return AIL_OK;
     }
@@ -16467,17 +16467,23 @@ static inline ail_st ail_obj_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_ob
         ail_obj content = (x.tag == AIL_T_STR) ? x : ail_obj_str(cx, x);
         AIL_ROOT1(cx, fr, content);
         ail_str cs = ail_view_to_str(content);
-        if (f.has_prec && f.prec >= 0 && f.prec < cs.n) cs.n = f.prec;
-        /* code points, not bytes: a non-ASCII character must reach the result whole */
+        int64_t len = ail_str_len_points(cs);
+        if (f.has_prec && f.prec >= 0 && f.prec < len) len = f.prec;
+        /* code points, not units: a non-ASCII character must reach the result whole */
         char align = f.align ? f.align : '<';
-        int64_t pad = f.width - cs.n; if (pad < 0) pad = 0;
+        int64_t pad = f.width - len; if (pad < 0) pad = 0;
         int64_t lp = (align == '>' || align == '=') ? pad : (align == '^') ? pad / 2 : 0;
         ail_strbuild bu = ail_str_buf(cx, cs.n + pad);
         AIL_FRAME_LEAVE(cx, fr);
-        cs = ail_view_to_str(content); if (f.has_prec && f.prec >= 0 && f.prec < cs.n) cs.n = f.prec;
+        cs = ail_view_to_str(content);
         int64_t o = 0;
         for (int64_t k = 0; k < lp; k++) bu.buf[o++] = (uint16_t)f.fill;
-        for (int64_t k = 0; k < cs.n; k++) bu.buf[o++] = ail_chr(cs, k);
+        for (int64_t k = 0, i = 0; k < len; k++) {
+            int64_t w = ail__str_width(cs, i);
+            bu.buf[o++] = ail_chr(cs, i);
+            if (w == 2) bu.buf[o++] = ail_chr(cs, i + 1);
+            i += w;
+        }
         for (int64_t k = 0; k < pad - lp; k++) bu.buf[o++] = (uint16_t)f.fill;
         *out = ail_str_buf_done(bu, o);
         return AIL_OK;
@@ -18360,49 +18366,75 @@ static inline int ail_meth_str_islower(ail_obj sobj) {
    =================================================================================== */
 static inline ail_obj ail_meth_str_ljust(ail_ctx *cx, ail_obj sobj, int64_t width, uint16_t fillc) {
     ail_str s = ail_view_to_str(sobj);
-    if (s.n >= width) return sobj;
-    int64_t pad = width - s.n;
-    ail_strbuild bu = ail_str_buf1(cx, width, sobj);
-    for (int64_t i = 0; i < s.n; i++) bu.buf[i] = ail_chr(s, i);
-    for (int64_t i = 0; i < pad; i++) bu.buf[s.n + i] = fillc;
-    return ail_str_buf_done(bu, width);
+    int64_t len = ail_str_len_points(s);
+    if (len >= width) return sobj;
+    int64_t pad = width - len;
+    ail_strbuild bu = ail_str_buf1(cx, s.n + pad, sobj);
+    int64_t o = 0;
+    for (int64_t i = 0; i < s.n; ) {
+        int64_t w = ail__str_width(s, i);
+        bu.buf[o++] = ail_chr(s, i);
+        if (w == 2) bu.buf[o++] = ail_chr(s, i + 1);
+        i += w;
+    }
+    for (int64_t i = 0; i < pad; i++) bu.buf[o++] = fillc;
+    return ail_str_buf_done(bu, o);
 }
 static inline ail_obj ail_meth_str_rjust(ail_ctx *cx, ail_obj sobj, int64_t width, uint16_t fillc) {
     ail_str s = ail_view_to_str(sobj);
-    if (s.n >= width) return sobj;
-    int64_t pad = width - s.n;
-    ail_strbuild bu = ail_str_buf1(cx, width, sobj);
-    for (int64_t i = 0; i < pad; i++) bu.buf[i] = fillc;
-    for (int64_t i = 0; i < s.n; i++) bu.buf[pad + i] = ail_chr(s, i);
-    return ail_str_buf_done(bu, width);
+    int64_t len = ail_str_len_points(s);
+    if (len >= width) return sobj;
+    int64_t pad = width - len;
+    ail_strbuild bu = ail_str_buf1(cx, s.n + pad, sobj);
+    int64_t o = 0;
+    for (int64_t i = 0; i < pad; i++) bu.buf[o++] = fillc;
+    for (int64_t i = 0; i < s.n; ) {
+        int64_t w = ail__str_width(s, i);
+        bu.buf[o++] = ail_chr(s, i);
+        if (w == 2) bu.buf[o++] = ail_chr(s, i + 1);
+        i += w;
+    }
+    return ail_str_buf_done(bu, o);
 }
 /* CPython's odd-padding rule: marg = width-len; left = marg/2 + (marg & 1 & width) --
    the extra character (when marg is odd) goes to the LEFT iff width itself is odd,
    otherwise it goes to the right. Ported (mechanism) from CPython's own do_string_pad. */
 static inline ail_obj ail_meth_str_center(ail_ctx *cx, ail_obj sobj, int64_t width, uint16_t fillc) {
     ail_str s = ail_view_to_str(sobj);
-    if (s.n >= width) return sobj;
-    int64_t marg = width - s.n;
+    int64_t len = ail_str_len_points(s);
+    if (len >= width) return sobj;
+    int64_t marg = width - len;
     int64_t left = marg / 2 + (marg & 1 & width);
     int64_t right = marg - left;
-    ail_strbuild bu = ail_str_buf1(cx, width, sobj);
+    ail_strbuild bu = ail_str_buf1(cx, s.n + marg, sobj);
     int64_t o = 0;
     for (int64_t i = 0; i < left; i++) bu.buf[o++] = fillc;
-    for (int64_t i = 0; i < s.n; i++) bu.buf[o++] = ail_chr(s, i);
+    for (int64_t i = 0; i < s.n; ) {
+        int64_t w = ail__str_width(s, i);
+        bu.buf[o++] = ail_chr(s, i);
+        if (w == 2) bu.buf[o++] = ail_chr(s, i + 1);
+        i += w;
+    }
     for (int64_t i = 0; i < right; i++) bu.buf[o++] = fillc;
-    return ail_str_buf_done(bu, width);
+    return ail_str_buf_done(bu, o);
 }
 static inline ail_obj ail_meth_str_zfill(ail_ctx *cx, ail_obj sobj, int64_t width) {
     ail_str s = ail_view_to_str(sobj);
-    if (s.n >= width) return sobj;
+    int64_t len = ail_str_len_points(s);
+    if (len >= width) return sobj;
     int has_sign = s.n > 0 && (ail_chr(s, 0) == '+' || ail_chr(s, 0) == '-');
-    int64_t pad = width - s.n;
-    ail_strbuild bu = ail_str_buf1(cx, width, sobj);
+    int64_t pad = width - len;
+    ail_strbuild bu = ail_str_buf1(cx, s.n + pad, sobj);
     int64_t o = 0;
     if (has_sign) bu.buf[o++] = ail_chr(s, 0);
     for (int64_t i = 0; i < pad; i++) bu.buf[o++] = '0';
-    for (int64_t i = has_sign ? 1 : 0; i < s.n; i++) bu.buf[o++] = ail_chr(s, i);
-    return ail_str_buf_done(bu, width);
+    for (int64_t i = has_sign ? 1 : 0; i < s.n; ) {
+        int64_t w = ail__str_width(s, i);
+        bu.buf[o++] = ail_chr(s, i);
+        if (w == 2) bu.buf[o++] = ail_chr(s, i + 1);
+        i += w;
+    }
+    return ail_str_buf_done(bu, o);
 }
 
 /* ===================================================================================

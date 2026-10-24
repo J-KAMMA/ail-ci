@@ -28,4 +28,6 @@ Rows added by job-fuzz8-10220554 use the placeholder id form requested for this 
 | ID | Area | Status | Description |
 | --- | --- | --- | --- |
 | C?-job-fuzz65-10231438-1 | heapq / list repr | fixed | After a caught `heappush` TypeError on a `list[int]` (CPython appends before comparing), the annotation-specialized list repr printed a string element as `x` instead of `'x'` when a tuple comparison had generated that helper. Scalar elements now use the runtime value's `repr`. |
+| C?-job-pre66-10241805-2 | str slicing | fixed | With `start > stop`, the boxed step-1 slice path built a view with a negative length, so an empty slice compared unequal to `""` and appending to it corrupted the heap. The view length is now clamped to zero. |
+| C?-job-pre66-10241805-3 | str padding / widths | fixed | `str.ljust/rjust/center/zfill` and `%`/`format`/f-string width and precision counted UTF-16 units, so an astral character counted as two columns. They now count and copy whole code points. |
 | C?-job-pre66-10241805-1 | chr / boxed strings | fixed | `chr()` above U+FFFF aborted on the 16-bit general path. It is now stored as a surrogate pair, with code-point behavior for printing, `len`/`ord`, indexing/slicing, iteration, comparison, `repr`, containers and str search windows. BMP behavior and non-BMP literal refusal are unchanged. |

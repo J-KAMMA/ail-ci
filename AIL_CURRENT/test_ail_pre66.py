@@ -90,6 +90,59 @@ def main() -> None:
 
 main()
 '''
+SLICE_REVERSE = '''def sl(s, a, b) -> None:
+    t = s[a:b]
+    print(repr(t), t == "", len(t), bool(t))
+    print(repr(t + "x"), len(t + "x"))
+
+
+sl("abcdef", 4, 2)
+sl("abcdef", 10, 2)
+sl("abcdef", -2, -4)
+sl("", 0, 0)
+s = "a" + chr(0x1F600) + "bc"
+for a, b, c in [(4, 1, -1), (3, 1, -1), (1, 4, 2), (0, 4, 3), (-1, -5, -2), (3, 3, -1), (2, 0, -2)]:
+    t = s[a:b:c]
+    print(repr(t), len(t), t == "")
+print(repr(s[3:1]), len(s[3:1]), s[3:1] == "")
+print(repr(s[2:1]), repr(s[1:3]))
+xs = ["abcdef"]
+d = {"s": "abcdef"}
+
+
+class C:
+    def __init__(self) -> None:
+        self.s = "abcdef"
+
+
+c = C()
+print(repr(xs[0][4:2]), len(xs[0][4:2]), xs[0][4:2] == "")
+print(repr(d["s"][4:2]), len(d["s"][4:2]), d["s"][4:2] == "")
+print(repr(c.s[4:2]), len(c.s[4:2]), c.s[4:2] == "")
+'''
+PAD_WIDTH = '''em = chr(0x1F600)
+s = em + "!"
+for w in (1, 2, 3, 4, 5):
+    print(repr(s.ljust(w)), len(s.ljust(w)))
+    print(repr(s.rjust(w)), len(s.rjust(w)))
+    print(repr(s.center(w)), len(s.center(w)))
+    print(repr(s.zfill(w)), len(s.zfill(w)))
+print(repr(("-" + em).zfill(4)), len(("-" + em).zfill(4)))
+print(repr(("+" + em + "!").zfill(5)), len(("+" + em + "!").zfill(5)))
+print(repr((em + "!").ljust(4, em)), len((em + "!").ljust(4, em)))
+print(repr((em + "!").center(4, em)), len((em + "!").center(4, em)))
+for w in (1, 2, 4, 5):
+    print(repr("%*s" % (w, s)), len("%*s" % (w, s)))
+    print(repr("{:>{w}}".format(s, w=w)), len("{:>{w}}".format(s, w=w)))
+    print(repr(f"{s:^{w}}"), len(f"{s:^{w}}"))
+print(repr("%.1s" % s), len("%.1s" % s))
+print(repr("%.2s" % s), len("%.2s" % s))
+print(repr("{:.1}".format(s)), len("{:.1}".format(s)))
+print(repr("{:.2}".format(s)), len("{:.2}".format(s)))
+u = "a" + chr(0x10000) + "b"
+print(repr("%4s" % u), len("%4s" % u))
+print(repr("%.2s" % u), len("%.2s" % u))
+'''
 
 
 def _run_cpython(directory, text, name):
@@ -157,6 +210,14 @@ class Pre66Tests(unittest.TestCase):
     def test_bmp_at_runtime_through_carriers(self):
         for general in (True, False):
             self.compare(BMP_CARRIERS, 'bmp_carriers', general)
+
+    def test_slice_with_start_after_stop(self):
+        for general in (True, False):
+            self.compare(SLICE_REVERSE, 'slice_reverse', general)
+
+    def test_code_point_widths(self):
+        for general in (True, False):
+            self.compare(PAD_WIDTH, 'pad_width', general)
 
 
 if __name__ == '__main__':
