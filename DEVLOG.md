@@ -125,3 +125,19 @@ Remaining differences found are recorded in `DIFFERENCES.md`; they were not fixe
   Before, `del xs[-1]` was a silent no-op (the const table's `.n` write was dropped) and an
   earlier index memmoved over const data and crashed; the default build now falls back to the
   general path and matches CPython. Added `AIL_CURRENT/test_ail_fuzz82.py`.
+# Development log
+
+## 2026-10-23 — job-fuzz61-10231419
+
+- String encoding: a run-time encoding name now accepts every CPython alias of `utf-8`, `ascii`
+  and `latin-1` (`csascii`, `cp367`, `ibm367`, `csisolatin1`, `ibm819`, `utf8_ucs2`,
+  `utf8_ucs4`, ...), on both builds. Literal spellings are accepted by `safetyrt.ENCODINGS`
+  instead of refused by name. New test: `test_ail_fuzz61`.
+# Development log
+
+## 2026-10-23 — job-fuzz65-10231438 (heapq/bisect)
+
+- Found: `heappush(h, "x")` on an annotated `list[int]` raises TypeError after CPython has already appended the string. When the same file also compares tuples (a `bisect` on `list[tuple[int, int]]`), `tuplegen.lrepr` generated an int-specialized `str(x)` for each element, so `print(h)` showed `x` instead of `'x'` (silent wrong stdout, exit 0, both builds). The same helper raised a spurious TypeError while printing a `list[str]` that held an appended int.
+- Fixed `tuplegen.lrepr`: scalar list elements use `repr(x)`, so the value's own repr is used; compound elements keep their existing helper.
+- Added `AIL_CURRENT/test_ail_fuzz65.py` and registered it in `ail_check.py`.
+- Other observed, not fixed: `list[tuple]` heaps with a wrong-typed item still fail while printing (`int` not subscriptable) instead of printing CPython's list; `nan`/`inf` literals remain refused by name.

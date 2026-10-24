@@ -5015,6 +5015,11 @@ class Compiler(boxclosure.ClosureMixin):
         return t
 
     def expr_Attribute(self, node, ctx):
+        if node.attr in ('__cause__', '__context__', '__suppress_context__', '__traceback__'):
+            # Chaining is not modelled: only one exception is ever live, there is no cause and no
+            # context to read. Refuse by name instead of reaching the instance's (missing) field,
+            # which would raise AttributeError where CPython returns a value.
+            raise Unsupported('reading %s (exception chaining is not kept here)' % node.attr)
         if node.attr == '__name__':
             # `type(x).__name__` and `x.__class__.__name__`: the name of the run-time class
             inner = None
@@ -8165,7 +8170,7 @@ class Compiler(boxclosure.ClosureMixin):
     def _self_arg(info, recv_c):
         """The first argument of a method called on recv: the object, or for a @classmethod its class."""
         if info.get('is_classmethod'):
-            return '((ail_instobj *)(%s).o)->cls' % recv_c
+            return 'ail_classmethod_receiver(%s)' % recv_c
         return recv_c
 
     # methods that, among the kinds the general path models, only str has (bytes and bytearray are classes
@@ -9541,6 +9546,8 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('%s = %s;' % (self.name_ref(target.id, ctx), value_c))
             return
         if isinstance(target, ast.Attribute):
+            if target.attr in ('__cause__', '__context__', '__suppress_context__', '__traceback__'):
+                raise Unsupported('writing %s (exception chaining is not kept here)' % target.attr)
             obj = self.expr(target.value, ctx)
             self.attr_names.add(target.attr)
             setters = [c for c in self.class_order if '__ail_set_' + target.attr in self.classes[c]['methods']]
