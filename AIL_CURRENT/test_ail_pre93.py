@@ -232,6 +232,100 @@ print("module2", events)
 '''
 
 
+IMPORTED = r'''from math import floor
+
+events = []
+
+
+def touch(label, value):
+    events.append(label)
+    return value
+
+
+class Box:
+    def __init__(self):
+        self.x = 1
+
+
+boxes = [Box(), Box(), Box()]
+items = [3, 4, 5]
+table = {"k": [6, 7, 8]}
+
+
+def sub_argument(xs, y):
+    xs[floor(y)]: int
+    print("isub", events)
+
+
+def sub_list_item(y):
+    items[floor(y)]: int
+    print("ilist", events)
+
+
+def sub_dict_value(key, y):
+    table[key][floor(y)]: int
+    print("idict", events)
+
+
+def attr_argument(box, y):
+    touch("abase", box).x: int
+    print("iattr", events)
+
+
+def attr_index(y):
+    boxes[floor(y)].x: int
+    print("aindex", events)
+
+
+sub_argument([0], 1.7)
+sub_list_item(2.9)
+sub_dict_value("k", 1.5)
+attr_argument(Box(), 0)
+attr_index(1.7)
+'''
+
+
+MULTISLICE = r'''events = []
+
+
+def touch(label, value):
+    events.append(label)
+    return value
+
+
+def pairs(xs):
+    xs[touch("p0", 0):touch("p1", 1), touch("p2", 1):touch("p3", 2)]: int
+    print("pairs", events)
+
+
+def mixed(xs, b):
+    xs[touch("a", 0), b:touch("c", 2)]: int
+    print("mixed", events)
+
+
+def with_step(xs, lo, hi, step):
+    xs[touch("lo", lo):touch("hi", hi):touch("step", step), touch("neg", -1)]: int
+    print("step", events)
+
+
+def open_slice(xs, lo):
+    xs[touch("olo", lo):, touch("on", -1)]: int
+    print("open", events)
+
+
+def empty(xs):
+    xs[touch("e0", 0), touch("e1", 0):touch("e2", 0)]: int
+    print("empty", events)
+
+
+pairs([0, 1, 2])
+mixed(["x", "y", "z"], 1)
+with_step([0, 1, 2, 3, 4, 5], 0, 4, 2)
+open_slice([0, 1, 2], 1)
+empty([])
+'''
+
+
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -272,6 +366,12 @@ class Pre93Tests(unittest.TestCase):
 
     def test_target_subexpressions_in_functions(self):
         self.check('functions', FUNCTIONS)
+
+    def test_imported_names_in_target_subexpressions(self):
+        self.check('imported', IMPORTED)
+
+    def test_tuple_slice_target_subexpressions(self):
+        self.check('multislice', MULTISLICE)
 
     def test_target_subexpressions_with_future_annotations(self):
         self.check('future', FUTURE)

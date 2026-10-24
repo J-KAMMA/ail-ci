@@ -1426,17 +1426,20 @@ class _SurfaceExpr(ast.NodeTransformer):
 
 
 def _annotation_target_parts(target):
+    def extend(parts, node):
+        if isinstance(node, ast.Slice):
+            parts.extend(part for part in (node.lower, node.upper, node.step) if part is not None)
+        elif isinstance(node, ast.Tuple):
+            for element in node.elts:
+                extend(parts, element)
+        else:
+            parts.append(node)
+
     if isinstance(target, ast.Attribute):
         return [target.value]
     if isinstance(target, ast.Subscript):
         parts = [target.value]
-        inner = target.slice
-        if isinstance(inner, ast.Slice):
-            parts.extend(part for part in (inner.lower, inner.upper, inner.step) if part is not None)
-        elif isinstance(inner, ast.Tuple):
-            parts.extend(inner.elts)
-        else:
-            parts.append(inner)
+        extend(parts, target.slice)
         return parts
     return []
 
@@ -2619,7 +2622,7 @@ class _Surface:
         if node.value is None and isinstance(node.target, (ast.Attribute, ast.Subscript)):
             if function is not None or owner is None:
                 parts = _annotation_target_parts(node.target)
-                self.replace(node, '; '.join(ast.unparse(part) for part in parts) or 'pass', True)
+                self.replace(node, '; '.join(ast.unparse(self.rewritten(part)[0]) for part in parts) or 'pass', True)
                 return
             if isinstance(node.target, ast.Attribute):
                 self.replace(node, 'pass', True)

@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - bare annotation targets: surface rewrites and tuple slices (job-pre93-10242042)
+
+Review fixes for the entry below. Each annotation target part now goes through the surface
+rewriter, so an imported name inside a target (for example `from math import floor` then
+`xs[floor(y)]: int`) is lowered like any other expression instead of being refused as an
+unknown function; `math.floor` in a target works the same way. A `Slice` nested in a tuple
+target is flattened into its lower/upper/step parts (recursively for nested tuples), so
+`xs[a:b, c:d]: int` evaluates `a`, `b`, `c`, `d` in order and `xs[a, b:c]: int` evaluates
+`a`, `b`, `c`, rather than emitting malformed source. `test_ail_pre93.py` gained imported-name,
+tuple-slice, open-slice, step and empty-list cases.
+
 ## 2026-10-24 - bare annotations evaluate their target subexpressions (job-pre93-10242042)
 
 CPython compiles `box().x: int` in a function to `box(); POP_TOP` (no attribute read, no
