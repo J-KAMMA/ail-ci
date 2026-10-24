@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - fuzz28: class-body comprehension read through the class
+
+Re-applied `job-fuzz28` on the current tree. A class-body list/set/dict comprehension is a class
+attribute; CPython reads it as `C.ys`, but a comprehension that uses a class-scope name cannot be
+built here. The general path now refuses that read by name (`reading the class attribute C.ys
+through the class`) instead of failing with an unrelated name error at the class definition.
+
+The current tree already evaluates class attributes once into module-lifetime slots and supports
+computed values (including comprehensions over module-level names) through the class, so the
+literal-only refusal is applied only when evaluating the attribute actually fails. That keeps
+`test_ail_fuzz29`'s definition-time, shared and inherited class attributes working. Added
+`test_ail_fuzz28.py` and registered it in `ail_check.MODULES`.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
