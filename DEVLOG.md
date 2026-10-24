@@ -13,6 +13,27 @@ AddressSanitizer reported a heap-use-after-free in `ail2q_partials` on
 `test_ail_gcstress.PROGRAMS['statistics_partials']` and its test; it fails with the old
 runtime and passes now. The analogous code in `jsonbrt.py` was checked: `ail_tuple_new`
 already roots the item array it is given, so no change was needed there.
+## 2026-10-24 - bytes.count memmem: self-contained declaration (job-perf7-10240917)
+
+Review found the short-needle `bytes.count` path called `memmem` without a declaration in the
+emitted C, so `gcc -std=c11` (a mode AIL uses for `to_c` and C-object builds) assumed an implicit
+`int` return and truncated the pointer (segfault). The `BYTES` block now declares `memmem`
+itself on non-Windows, after `<string.h>`; glibc and musl both export the symbol, and the
+declaration is compatible with the header's when `_GNU_SOURCE`/`_DEFAULT_SOURCE` is set.
+`rp7_count_small.py` now prints `4 2 2` under `-std=c11 -O2` and `-std=gnu17`; all count probes
+match CPython on both builds, and `binary_search` is unchanged at 64.9 ms vs base 92.0 ms
+(`ail/base 0.711 [0.706,0.717]`). Required tests pass.
+
+## 2026-10-24 - bytes.count: memmem for short needles (job-perf7-10240917)
+
+`binary_search` (`count` of a 7-byte needle over a 64 MiB file) spent ~69 ms of its 94 ms in
+`ail_bytes_count_range`, which used the byte-pair Horspool scan. For a short needle glibc
+`memmem` is about twice as fast on the same data (38 ms vs 71 ms), so the non-Windows
+short-needle path now uses the same non-overlapping `memmem` loop as the C reference; Windows
+keeps Horspool. `bench/compare.py --app binary_search`: base 98.2 ms, new 69.2 ms
+(AIL/C 1.414 -> 0.994, ranges non-overlapping). Probes for empty, negative, windowed and
+64-byte needles through arguments, list items, attributes and dict values match CPython on both
+builds.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
