@@ -8686,7 +8686,12 @@ class Compiler(boxclosure.ClosureMixin):
                      'if (%s) { ail_obj %s; %s = 1; st = %s(cx, &%s, %s); if (st != AIL_OK) goto %s; %s = %s; } }'
                      % (b, fn, b, fn, xv, had, fn, xv, b, ctx.cur_err_target(), b, xv))
         err = ctx.cur_err_target()
-        none = ' && %s.tag != AIL_T_NONE' % b if allow_none else ''
+        # A source argument that was actually None may be skipped (allow_none), but a None
+        # returned by __index__ must still raise: only a run-time had == 0 counts as "no bound".
+        if had is not None:
+            none = ' && (%s || %s.tag != AIL_T_NONE)' % (had, b) if allow_none else ''
+        else:
+            none = ' && %s.tag != AIL_T_NONE' % b if allow_none else ''
         text = 'slice indices must be integers%s or have an __index__ method' % (' or None' if allow_none else '')
         if had is not None:
             ctx.emit('if (%s.tag != AIL_T_INT && %s.tag != AIL_T_BOOL%s) { '

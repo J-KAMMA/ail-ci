@@ -35,6 +35,11 @@ class Bad:
         return 1.5
 
 
+class NoneIdx:
+    def __index__(self):
+        return None
+
+
 def probe(tag: str, f) -> None:
     try:
         print(tag, f())
@@ -79,6 +84,12 @@ def main() -> None:
     probe("nested", lambda: s.startswith(("a", ("b",))))
     probe("noindex", lambda: s.startswith(("bc",), NoIdx(1)))
     probe("badindex", lambda: s.startswith(("bc",), Bad()))
+    probe("none-index-start", lambda: s.startswith(("bc",), NoneIdx()))
+    probe("none-index-end", lambda: s.endswith(("bc",), NoneIdx()))
+    probe("none-index-both", lambda: s.startswith(("bc",), Idx(1), NoneIdx()))
+    probe("none-index-find", lambda: s.find("bc", 0, NoneIdx()))
+    probe("none-index-count", lambda: s.count("b", NoneIdx()))
+    probe("none-index-index", lambda: s.index("bc", NoneIdx()))
     probe("float", lambda: s.startswith(("bc",), 1.5))
     probe("str", lambda: s.startswith(("bc",), "x"))
     probe("list", lambda: s.startswith(("bc",), [1]))

@@ -5,6 +5,7 @@ Deliberate differences from CPython and open silent differences found by differe
 | id | area | difference | status |
 | --- | --- | --- | --- |
 | C?-job-qtest1-10241455-1 | str search: start/end bounds | An instance with `__index__` passed as the start or end of `str.startswith`/`endswith` (also `find`/`count`/`index`) was rejected with `TypeError: slice indices must be integers or None or have an __index__ method`, where CPython converts it through `__index__` and returns the result; the general path now performs that conversion with CPython's messages on both builds. | fixed |
+| C?-job-qtest1-10241455-2 | str search: start/end bounds | An object whose `__index__` returns None was treated as a missing start/end bound, so `"abcabc".startswith(("bc",), N())` returned True (and find/count/index returned 1/2/1) where CPython raises `TypeError: __index__ returned non-int (type NoneType)`; None is now a default bound only when the source argument itself was None. | fixed |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |
