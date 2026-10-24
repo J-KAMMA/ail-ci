@@ -10085,7 +10085,8 @@ class Compiler(boxclosure.ClosureMixin):
             # CPython raises AssertionError(msg): the argument stays an object (e.args is
             # (msg,), and repr(e) shows its repr), while str(e) is str(msg). Keeping the
             # object here makes tuple/list/dict messages match too, where the old path
-            # replaced the argument with its string form.
+            # replaced the argument with its string form. This covers numeric messages
+            # as well: `assert False, 42` is AssertionError(42), whose args are (42,).
             args = ctx.new_cvar('aa')
             ctx.emit('ail_obj %s[1] = { %s };' % (args, msg))
             self.rt_needs.add('exc')
