@@ -1,5 +1,19 @@
 # DEVLOG
 
+## 2026-10-24 - json_query scan: validate literal tokens from bytes (job-perf5b-10241003)
+
+Timing the generated C of `json_query` on the 1.3 MB benchmark document gave read 1.0 ms, strict
+UTF-8 validation 0.46 ms, the validating JSON scan 4.35 ms, rendering 0.12 ms and the output write
+0.14 ms; the scan is the hot part. A 39 MB profile showed 781,921 calls that decoded a scalar token
+(`null`, `true`, `false` or a number) to `str` only to validate it. `_json_scan_run` now calls a new
+byte-level `_json_scan_literal_kind`, which applies the same number state machine directly to the
+already UTF-8-validated token bytes, so no per-token `bytes.decode`, slice-to-`str` or second UTF-8
+validation is made. The file is still read into an owned buffer; no mmap or other view is used.
+
+`bench/compare.py --app json_query`, nine windows: ail 7.9 ms before, 7.4 ms after, ail/base
+0.933 [0.930, 0.954] faster (before: 1.004 [0.986, 1.025] tie); output and boundary controls are
+unchanged. `test_json_pointer_scan` exercises the changed path against the node-list parser.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

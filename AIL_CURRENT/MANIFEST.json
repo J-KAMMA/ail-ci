@@ -930,7 +930,7 @@
     "test_ail_argv_slices.py": "9fda4e212236fa66a4f3ad7733a5d6a02fa27051396cfa034bc4f44aad975fcb",
     "language_examples/cli_args.ail": "56fad985a43f291bc3bab72cde469c1f49cf0991d4699f94b88480ef6631c972",
     "language_examples/json_pointer_batch.ail": "c89e2180b82f198d0b7f97cc1739f3709ea79575468a7c57e36508937201f131",
-    "language_examples/json_pointer_scan.ail": "56c1d5f610de1e1676e2128bddca6fbfc53a092a6e2b1a95e2d14eb5ad4e3e36",
+    "language_examples/json_pointer_scan.ail": "e439b31364d288e85c8ce0cd07280ae8b9d4003de60c181712ac188791fcae3a",
     "test_json_pointer_scan.py": "45f36d46db0bbea6f4adb631ffd43c9abc9d3c0ddf24d62cf295dab26deb52c1",
     "language_examples/csv_group_scan.ail": "b47ac92a7dc8bb36ae67b8472901c95bd308fb631ab071c98913f1649b96ca61",
     "test_csv_group_scan.py": "5b667457f4f20b3d7b781361a451eb184d9a8c214f9aa592868738177a47043f",

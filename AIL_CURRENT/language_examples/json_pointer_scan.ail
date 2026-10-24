@@ -45,6 +45,45 @@ fn _json_scan_next(state: int) -> int {
     raise ValueError;
 }
 
+# _json_literal_kind over data[lo:hi]: a valid token is ASCII, so its bytes are read directly.
+fn _json_scan_literal_kind(data: bytes, lo: int, hi: int) -> int {
+    let length: int = hi - lo;
+    if length == 4 and data[lo] == 110 and data[lo + 1] == 117 and data[lo + 2] == 108 and data[lo + 3] == 108 { return 0; }
+    if length == 4 and data[lo] == 116 and data[lo + 1] == 114 and data[lo + 2] == 117 and data[lo + 3] == 101 { return 1; }
+    if length == 5 and data[lo] == 102 and data[lo + 1] == 97 and data[lo + 2] == 108 and data[lo + 3] == 115 and data[lo + 4] == 101 { return 1; }
+    let state: int = 0;
+    for k in range(lo, hi) {
+        let c: int = data[k];
+        let digit: int = c >= 48 and c <= 57;
+        if state == 0 or state == 1 {
+            if c == 45 and state == 0 { state = 1; }
+            elif c == 48 { state = 2; }
+            elif digit { state = 3; }
+            else { raise ValueError; }
+        } elif state == 2 or state == 3 {
+            if digit and state == 3 { state = 3; }
+            elif c == 46 { state = 4; }
+            elif c == 101 or c == 69 { state = 6; }
+            else { raise ValueError; }
+        } elif state == 4 or state == 7 {
+            if not digit { raise ValueError; }
+            if state == 4 { state = 5; } else { state = 8; }
+        } elif state == 5 {
+            if digit { state = 5; }
+            elif c == 101 or c == 69 { state = 6; }
+            else { raise ValueError; }
+        } elif state == 6 {
+            if c == 43 or c == 45 { state = 7; }
+            elif digit { state = 8; }
+            else { raise ValueError; }
+        } else {
+            if not digit { raise ValueError; }
+        }
+    }
+    if state != 2 and state != 3 and state != 5 and state != 8 { raise ValueError; }
+    return 2;
+}
+
 # Validate the string body data[lo:hi] (between the quotes) that holds a backslash, exactly as
 # json_unquote does, without decoding.
 fn _json_scan_check_body(data: bytes, lo: int, hi: int) -> void {
@@ -211,7 +250,7 @@ fn _json_scan_run(data: bytes, pointers: list[str], lw: int, maxd: int) -> JsonP
             i += 1; continue;
         }
         if start >= 0 {
-            _json_literal_kind(data[start:i].decode("utf-8"));
+            _json_scan_literal_kind(data, start, i);
             let next: int = _json_scan_next(state);
             if state == 0 or len(act) > top {
                 _json_scan_leaf(ptrs, segs, act, data, state, kesc, key, ks, ke, elem, top, depth, 0, start, i, lw);
