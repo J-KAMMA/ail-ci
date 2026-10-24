@@ -83,6 +83,7 @@ MODULES = (
     'test_ail_fuzz89',
     'test_ail_pre18',
     'test_ail_pre102',
+    'test_ail_pre104',
 )
 
 
