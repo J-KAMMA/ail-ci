@@ -4,6 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre136-10250030-1 | `round()` / `__round__` | `round(obj)` and `round(obj, None)` passed a boxed None (and `None` was read as `0`) instead of calling `__round__` with no second argument, so a default such as `n=1.5` or `n="hi"` never applied; a one-parameter `__round__` failed and `*args` methods got the wrong arguments. `round(2.5, -10**6)` overflowed the scale and printed `nan` (CPython `0.0`), and `round(2.5, NoIndex())` printed `2.5` instead of naming the class. The default wrapper and boxed ndigits path now match CPython on both builds. | fixed |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |

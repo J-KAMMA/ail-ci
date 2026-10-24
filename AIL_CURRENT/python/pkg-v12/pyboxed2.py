@@ -2325,6 +2325,7 @@ class Compiler(boxclosure.ClosureMixin):
         parts.extend(self.top_defs)
         parts.append('\n/* ---- module body ---- */\n')
         setup = []
+        round_wrappers = []
         setup.append('    memset(g_slots_arr, 0, sizeof g_slots_arr);\n')
         setup.append('    g_frame.slots = g_slots_arr; g_frame.n = %d; '
                      'g_frame.prev = cx->frames; cx->frames = &g_frame;\n' % max(ng, 1))
@@ -2363,8 +2364,14 @@ class Compiler(boxclosure.ClosureMixin):
                 setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->iter_iter = %s;\n' %
                              (self.global_slots['class:' + cname], itr['cname']))
             if self.dunder_ops:
+                rw = self._round_wrapper(cname, cls['methods'].get('__round__'))
+                override = None
+                if rw:
+                    round_wrappers.append(rw[1])
+                    override = {'__round__': rw[0]}
                 setup.extend(dunderrt.install('g_slots_arr[%d]' % self.global_slots['class:' + cname],
-                                              cls['methods'], lambda info: info['all_params']))
+                                              cls['methods'], lambda info: info['all_params'],
+                                              override))
             if cls.get('dc'):
                 setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->dc = %d; '
                              '((ail_classobj *)g_slots_arr[%d].o)->dc_hide = %dULL;\n' %
@@ -2377,6 +2384,7 @@ class Compiler(boxclosure.ClosureMixin):
         if self.threads:
             setup.append('    ail_th_body_fn = %s; ail_th_atexit_fn = %s;\n'
                          % (self.functions['_ail_thread_body']['cname'], self.functions['_ail_th_atexit']['cname']))
+        parts.extend(round_wrappers)
         if array_entry is not None:
             if self.uses_argv:
                 raise Unsupported('sys.argv in a program whose entry is its last function')
@@ -7989,12 +7997,111 @@ class Compiler(boxclosure.ClosureMixin):
         if not args or len(args) > 2 or kwargs:
             raise Unsupported('round() with other than (number[, ndigits])')
         v = self.expr(args[0], ctx)
-        has_n = len(args) == 2
-        n = '(%s).i' % self.expr(args[1], ctx) if has_n else '0'
         t = ctx.tmp()
-        ctx.emit('st = ail_bi_round(cx, &%s, %s, %d, %s);' % (t, v, has_n, n))
+        if len(args) == 2:
+            nd = self.expr(args[1], ctx)
+            ctx.emit('st = ail_bi_round(cx, &%s, %s, 1, %s);' % (t, v, nd))
+        else:
+            ctx.emit('st = ail_bi_round(cx, &%s, %s, 0, ail_box_none());' % (t, v))
         ctx.check()
         return t
+
+    def _round_default_c(self, node):
+        """The C expression for a __round__ default that survived _hoist_defaults (a literal or
+        the module global a hoisted default was moved to), or None when it cannot be emitted."""
+        if isinstance(node, ast.Name):
+            slot = self.global_slots.get('g:' + node.id)
+            if slot is not None:
+                return 'g_slots_arr[%d]' % slot
+            return None
+        try:
+            v = ast.literal_eval(node)
+        except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+            return None
+        if v is None:
+            return 'ail_box_none()'
+        if isinstance(v, bool):
+            return 'ail_box_bool(%d)' % (1 if v else 0)
+        if isinstance(v, int):
+            if v > 0x7FFFFFFFFFFFFFFF or v < -0x8000000000000000:
+                return None
+            return 'ail_box_int(%dLL)' % v
+        if isinstance(v, float):
+            if v != v or v in (float('inf'), float('-inf')):
+                return None
+            return 'ail_box_float(cx, %r)' % v
+        if isinstance(v, str):
+            if any(0xd800 <= ord(c) <= 0xdfff for c in v):
+                return None
+            return 'ail_str_from_cstr(cx, %s)' % c_str_literal(v)
+        return None
+
+    def _round_wrapper(self, cname, info):
+        """A (name, C text) wrapper for a __round__ method whose signature the d2 table cannot
+        call directly: the optional ndigits argument needs CPython's default when round() is
+        called without it (and when it is passed None), and a one-parameter method must be
+        called with only self. None means keep the old direct d2 entry."""
+        if not info:
+            return None
+        params = info['params']
+        if not params or len(params) > 2:
+            return None
+        defaults = info['defaults']
+        kwonly = info['kwonly']
+        kw_defaults = info['kw_defaults']
+        vararg = info['vararg']
+        kwarg = info['kwarg']
+
+        def call_args(provided):
+            args = ['self']
+            if len(params) == 2:
+                args.append('nd' if provided else self._round_default_c(defaults.get(params[1])))
+                if args[-1] is None:
+                    return None
+            for pname in kwonly:
+                c = self._round_default_c(kw_defaults.get(pname))
+                if c is None:
+                    return None
+                args.append(c)
+            if vararg:
+                args.append('ail_tuple_new(cx, &nd, 1)' if provided and len(params) == 1
+                            else 'ail_tuple_new(cx, NULL, 0)')
+            if kwarg:
+                args.append('ail_dict_new(cx)')
+            return args
+
+        def missing(names):
+            if len(names) == 1:
+                names_s = "'%s'" % names[0]
+            elif len(names) == 2:
+                names_s = "'%s' and '%s'" % tuple(names)
+            else:
+                names_s = ', '.join("'%s'" % n for n in names[:-1]) + ", and '%s'" % names[-1]
+            return '%s() missing %d required positional argument%s: %s' % (
+                cname + '.__round__', len(names), '' if len(names) == 1 else 's', names_s)
+
+        lines = ['static ail_st pround_%s(ail_ctx *cx, ail_obj *out, ail_obj self, ail_obj nd) {\n' % cname,
+                 '    if (nd.tag == AIL_T_NONE) {\n']
+        miss = [p for p in params[1:] if p not in defaults]
+        if miss:
+            lines.append('        return ail_raise_c(cx, AIL_B_TYPEERROR, %s);\n'
+                         % c_str_literal(missing(miss)))
+        else:
+            args = call_args(False)
+            if args is None:
+                return None
+            lines.append('        return %s(cx, out, %s);\n' % (info['cname'], ', '.join(args)))
+        lines.append('    }\n')
+        if len(params) == 1 and not vararg:
+            lines.append('    return ail_raise_c(cx, AIL_B_TYPEERROR, %s);\n'
+                         % c_str_literal('%s.__round__() takes 1 positional argument but 2 were given' % cname))
+        else:
+            args = call_args(True)
+            if args is None:
+                return None
+            lines.append('    return %s(cx, out, %s);\n' % (info['cname'], ', '.join(args)))
+        lines.append('}\n')
+        return ('pround_%s' % cname, ''.join(lines))
 
     def _emit_sys_exit(self, args, kwargs, ctx):
         if len(args) > 1 or kwargs:

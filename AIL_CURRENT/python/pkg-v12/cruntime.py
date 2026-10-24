@@ -17183,7 +17183,14 @@ static inline ail_st ail_bi_round_int_ndigits(ail_ctx *cx, ail_obj *out, int64_t
     *out = ail_box_int(result);
     return AIL_OK;
 }
-static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, int64_t n) {
+static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, ail_obj nd) {
+    int64_t n = 0;
+    if (has_n && nd.tag != AIL_T_NONE) {
+        if (nd.tag == AIL_T_INT || nd.tag == AIL_T_BOOL) n = nd.i;
+        else { char buf[96]; snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail_type_name(nd.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
+    } else {
+        has_n = 0;
+    }
     if (!has_n) {
         if (ail__is_intlike(x.tag)) { *out = ail_box_int(x.i); return AIL_OK; }
         if (x.tag != AIL_T_FLOAT) { char buf[80]; snprintf(buf, sizeof buf, "type %s doesn't define __round__ method", ail_type_name(x.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
@@ -17210,6 +17217,7 @@ static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_
         result = strtod(buf, NULL);
     } else {
         int64_t nn = -n;
+        if (nn >= 309) { *out = ail_box_float(cx, copysign(0.0, v)); return AIL_OK; }
         double scale = 1.0;
         for (int64_t k = 0; k < nn && k < 400; k++) scale *= 10.0;
         double scaled = v / scale;

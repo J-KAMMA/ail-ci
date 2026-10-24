@@ -478,9 +478,19 @@ def _edits():
               "        }\n"
               "        /* fall through */\n"
               "        default: { char buf[80]; snprintf(buf, sizeof buf, \"float() argument must be a string or a number, not '%s'\", ail_type_name(x.tag));"))
-    e.append(('static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, int64_t n) {\n',
-              'static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, int64_t n) {\n'
-              '    if (x.tag == AIL_T_INST) { ail_d2_fn f = ail_dun2(x, AIL_D2_ROUND); if (f) return f(cx, out, x, has_n ? ail_box_int(n) : ail_box_none()); }\n'))
+    e.append(('static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, ail_obj nd) {\n',
+              'static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, ail_obj nd) {\n'
+              '    if (x.tag == AIL_T_INST) { ail_d2_fn f = ail_dun2(x, AIL_D2_ROUND); if (f) return f(cx, out, x, has_n ? nd : ail_box_none()); }\n'))
+    e.append(('        else { char buf[96]; snprintf(buf, sizeof buf, "\'%s\' object cannot be interpreted as an integer", ail_type_name(nd.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }\n',
+              '        else {\n'
+              '            if (nd.tag == AIL_T_INST) {\n'
+              '                ail_d1_fn xf = ail_dun1(nd, AIL_D1_INDEX);\n'
+              '                if (xf) { ail_obj iv; ail_st xst = xf(cx, &iv, nd); if (xst != AIL_OK) return xst;\n'
+              '                    if (iv.tag == AIL_T_INT || iv.tag == AIL_T_BOOL) n = iv.i;\n'
+              '                    else { char b2[96]; snprintf(b2, sizeof b2, "\'%s\' object cannot be interpreted as an integer", ail__dun_tname_s(iv)); return ail_raise_c(cx, AIL_B_TYPEERROR, b2); } }\n'
+              '                else { char b2[96]; snprintf(b2, sizeof b2, "\'%s\' object cannot be interpreted as an integer", ail__dun_tname_s(nd)); return ail_raise_c(cx, AIL_B_TYPEERROR, b2); }\n'
+              '            } else { char b2[96]; snprintf(b2, sizeof b2, "\'%s\' object cannot be interpreted as an integer", ail__dun_tname_s(nd)); return ail_raise_c(cx, AIL_B_TYPEERROR, b2); }\n'
+              '        }\n'))
     for fn, key in (('floor', 'FLOOR'), ('ceil', 'CEIL'), ('trunc', 'TRUNC')):
         e.append(('static inline ail_st ail_math_%s(ail_ctx *cx, ail_obj *out, ail_obj x) {\n' % fn,
                   'static inline ail_st ail_math_%s(ail_ctx *cx, ail_obj *out, ail_obj x) {\n'
@@ -534,7 +544,7 @@ def patch(text):
     return text[:k] + text[k:].replace('ail_obj_truthy(', 'ail_truthy_u(')
 
 
-def install(cls_global, cls_methods, all_params_of):
+def install(cls_global, cls_methods, all_params_of, override=None):
     """C statements for the program's setup code: the tables of one class."""
     lines = []
     for name, key in D1.items():
@@ -542,6 +552,9 @@ def install(cls_global, cls_methods, all_params_of):
         if info and len(all_params_of(info)) == 1:
             lines.append('    ((ail_classobj *)%s.o)->d1[AIL_D1_%s] = %s;\n' % (cls_global, key, info['cname']))
     for name, key in D2.items():
+        if override and name in override:
+            lines.append('    ((ail_classobj *)%s.o)->d2[AIL_D2_%s] = %s;\n' % (cls_global, key, override[name]))
+            continue
         info = cls_methods.get(name)
         if info and len(all_params_of(info)) == 2:
             lines.append('    ((ail_classobj *)%s.o)->d2[AIL_D2_%s] = %s;\n' % (cls_global, key, info['cname']))

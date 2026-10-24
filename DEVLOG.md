@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - round() defaults, None ndigits and huge negative ndigits (job-pre136-10250030)
+
+`round(obj)` and `round(obj, None)` now call a user `__round__` with no second argument, so the
+method's own default applies; a one-parameter `__round__` is called with only `self` (and refuses a
+second argument by name), and `*args`/`**kwargs` methods get CPython's empty tuple/dict. The d2
+table entry is a generated wrapper (pyboxed2 `_round_wrapper`), with `_round_default_c` emitting
+general-path constructors (`ail_box_float(cx, ...)`, `ail_str_from_cstr(cx, ...)`, module globals
+for hoisted defaults). `ail_bi_round` takes the boxed ndigits, treats `None` as omitted, and runs
+`__index__` for the builtin paths, so `round(2.5, NoIndex())` names the class. The negative-ndigits
+scale no longer overflows to infinity: `round(2.5, -10**6)` is `0.0` (and `-0.0` for `-2.5`).
+Added `AIL_CURRENT/test_ail_pre136.py` (both builds against CPython) and registered it in
+`ail_check.MODULES`.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
