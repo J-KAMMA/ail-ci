@@ -4,6 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre105-10242140-1 | multi-name import | On the typed path, `import math, html` (with `html` used, so the general path also refuses) was refused as `import of 'math, html'`, denying the supported `math`; the refusal now names the first module outside the modelled set (`html`, or `html.parser`) at the import's line. | fixed; `test_ail_pre105.py` |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |
