@@ -7215,11 +7215,19 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.check()
         return t
 
+    def _heapq_src(self, node, ctx):
+        # A dict view has len() in CPython, so nlargest/nsmallest take the sorted() short-cut when
+        # n >= size.  _resolve_iter_src would hand over a bare iterator (no len), which instead
+        # takes the decorated-heap path; keep the view itself here.
+        if self._is_dict_view_call(node, ctx):
+            return self.expr(node, ctx)
+        return self._resolve_iter_src(node, ctx)
+
     def _lib_nlargest(self, args, kwargs, ctx):
         if len(args) != 2 or kwargs and set(kwargs) - {'key'}:
             raise Unsupported('nlargest() with other than (n, iterable[, key=])')
         n = '(%s).i' % self.expr(args[0], ctx)
-        src = self._resolve_iter_src(args[1], ctx)
+        src = self._heapq_src(args[1], ctx)
         keyfn = self._wrap_cfunc(ctx, self._func_pointer_of(kwargs['key'], ctx)) \
             if 'key' in kwargs else 'ail_box_none()'
         t = ctx.tmp()
@@ -7231,7 +7239,7 @@ class Compiler(boxclosure.ClosureMixin):
         if len(args) != 2 or kwargs and set(kwargs) - {'key'}:
             raise Unsupported('nsmallest() with other than (n, iterable[, key=])')
         n = '(%s).i' % self.expr(args[0], ctx)
-        src = self._resolve_iter_src(args[1], ctx)
+        src = self._heapq_src(args[1], ctx)
         keyfn = self._wrap_cfunc(ctx, self._func_pointer_of(kwargs['key'], ctx)) \
             if 'key' in kwargs else 'ail_box_none()'
         t = ctx.tmp()

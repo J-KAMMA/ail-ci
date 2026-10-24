@@ -1,5 +1,22 @@
 # DEVLOG
 
+## 2026-10-24 - heapq.nlargest/nsmallest: zero/negative n and unsized iterables (job-pre95-10242044)
+
+Follow-up to the NaN heap-selection port from the previous commit, fixing two defects found in
+review. First, `n <= 0` returned `[]` before validating the iterable, so `nlargest(0, 5)` and
+`nsmallest(-1, 5)` stopped raising `TypeError` (a regression against base). The zero/negative path
+now calls `iter(iterable)` first, matching CPython, and consumes nothing. Second, the sorted()
+short-cut was chosen whenever `n >= len(materialized)`, even for generators and iterators, which
+CPython never does because `len()` fails for them; those now always use the decorated-heap path.
+The heap's initial decoration now holds `min(n, len)` items, so `n > len` is safe. Dict views keep
+`len()` and therefore the sorted short-cut, while `iter(d.values())`/`iter(d.items())` remain
+unsized, as in CPython; `_lib_nlargest`/`_lib_nsmallest` pass the view itself to the runtime.
+
+Probes `/tmp/probes/q1_zero_neg.py`, `q2_iterall_nan.py`, `q3_dictviews.py`,
+`q4_sources_alias.py` (plus the earlier `p10`-`p13`, `/tmp/rprobes/rp7_noniter.py`,
+`rp8_iterall.py`) match CPython on both builds. `test_ail_pre95.py` gained
+`test_nan_iterable_without_len_and_zero_n`.
+
 ## 2026-10-24 - heapq.nlargest/nsmallest with NaN (job-pre95-10242044)
 
 `heapq.nlargest`/`nsmallest` were lowered to one `list.sort` followed by truncation. That is

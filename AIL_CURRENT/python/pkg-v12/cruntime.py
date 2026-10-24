@@ -21070,20 +21070,24 @@ static inline ail_st ail__heapq_heap(ail_ctx *cx, ail_obj *out, ail_obj lst, int
     int has_key = key_fn_or_none.tag == AIL_T_FUNC;
     int is_max = !reverse;
     int64_t m = v->n;
+    /* The initial decorated heap holds min(n, len) items: CPython builds it with
+       zip(range(...), iterable), which stops at the end of the iterable.  This matters for
+       iterables without len() when n exceeds their size (the heap path is still used). */
+    int64_t k = n < m ? n : m;
     ail_funcobj *f = has_key ? (ail_funcobj *)key_fn_or_none.o : NULL;
-    ail_obj *deco = (ail_obj *)ail_xcalloc((size_t)n * sizeof(ail_obj));
-    AIL_ROOT_N(cx, fr, deco, (int32_t)(n < INT32_MAX ? n : INT32_MAX));
+    ail_obj *deco = (ail_obj *)ail_xcalloc((size_t)k * sizeof(ail_obj));
+    AIL_ROOT_N(cx, fr, deco, (int32_t)(k < INT32_MAX ? k : INT32_MAX));
     ail_st st = AIL_OK;
-    for (int64_t i = 0; i < n; i++) {
+    for (int64_t i = 0; i < k; i++) {
         ail_obj elem = v->p[i], key = elem;
         if (has_key) { st = f->fn(cx, &key, elem, f->cells); if (st != AIL_OK) goto done; }
         st = ail__heapq_make_deco(cx, &deco[i], key, elem, reverse ? -i : i, has_key);
         if (st != AIL_OK) goto done;
     }
-    st = ail__heapq_heapify(cx, deco, n, is_max);
+    st = ail__heapq_heapify(cx, deco, k, is_max);
     if (st != AIL_OK) goto done;
     int64_t order = reverse ? -n : n;
-    for (int64_t i = n; i < m; i++) {
+    for (int64_t i = k; i < m; i++) {
         ail_obj elem = v->p[i], key = elem;
         if (has_key) { st = f->fn(cx, &key, elem, f->cells); if (st != AIL_OK) goto done; }
         ail_vecobj *top = (ail_vecobj *)deco[0].o;
@@ -21094,15 +21098,15 @@ static inline ail_st ail__heapq_heap(ail_ctx *cx, ail_obj *out, ail_obj lst, int
             ail_obj nd;
             st = ail__heapq_make_deco(cx, &nd, key, elem, order, has_key);
             if (st != AIL_OK) goto done;
-            st = ail__heapq_replace(cx, deco, n, nd, is_max);
+            st = ail__heapq_replace(cx, deco, k, nd, is_max);
             if (st != AIL_OK) goto done;
             order += reverse ? -1 : 1;
         }
     }
-    st = ail__ts_sort(cx, deco, NULL, n, reverse);
+    st = ail__ts_sort(cx, deco, NULL, k, reverse);
     if (st != AIL_OK) goto done;
     ail_obj res = ail_list_new(cx);
-    for (int64_t i = 0; i < n; i++) {
+    for (int64_t i = 0; i < k; i++) {
         ail_vecobj *t = (ail_vecobj *)deco[i].o;
         ail_list_append(cx, res, has_key ? t->p[2] : t->p[0]);
     }
@@ -21112,18 +21116,52 @@ done:
     free(deco);
     return st;
 }
+/* CPython's len(iterable) probe: only sized types take the sorted() short-cut; iterators
+   and generators fall through to the decorated-heap path even when n >= their size. */
+static inline int ail__heapq_sized(ail_obj x) {
+    switch (x.tag) {
+        case AIL_T_STR: case AIL_T_LIST: case AIL_T_TUPLE: case AIL_T_DICT:
+        case AIL_T_SET: case AIL_T_FROZENSET: case AIL_T_RANGE: return 1;
+        default: return 0;
+    }
+}
 static inline ail_st ail__heapq_select(ail_ctx *cx, ail_obj *out, int64_t n, ail_obj iterable, ail_obj key_fn_or_none, int reverse) {
-    if (n <= 0) { *out = ail_list_new(cx); return AIL_OK; }
-    ail_obj lst;
-    ail_st st = ail__materialize(cx, &lst, iterable);
+    ail_st st;
+    if (n == 1) {
+        ail_obj lst; st = ail__materialize(cx, &lst, iterable);
+        if (st != AIL_OK) return st;
+        AIL_ROOT1(cx, fr, lst);
+        st = ail__heapq_one(cx, out, lst, key_fn_or_none, reverse);
+        AIL_FRAME_LEAVE(cx, fr);
+        return st;
+    }
+    int sized = ail__heapq_sized(iterable);
+    int64_t size = 0;
+    if (sized) {
+        ail_obj l; st = ail_op_len(cx, &l, iterable);
+        if (st != AIL_OK) return st;
+        size = l.i;
+    }
+    if (sized && n >= size) {
+        ail_obj lst; st = ail__materialize(cx, &lst, iterable);
+        if (st != AIL_OK) return st;
+        AIL_ROOT1(cx, fr, lst);
+        st = ail__heapq_all_sorted(cx, out, lst, key_fn_or_none, reverse);
+        AIL_FRAME_LEAVE(cx, fr);
+        return st;
+    }
+    if (n <= 0) {
+        /* CPython still calls iter(iterable) before its empty result (so a non-iterable
+           raises TypeError), then zip(range(n), it) consumes nothing. */
+        ail_obj it; st = ail_iter(cx, &it, iterable);
+        if (st != AIL_OK) return st;
+        *out = ail_list_new(cx);
+        return AIL_OK;
+    }
+    ail_obj lst; st = ail__materialize(cx, &lst, iterable);
     if (st != AIL_OK) return st;
     AIL_ROOT1(cx, fr, lst);
-    if (n == 1) st = ail__heapq_one(cx, out, lst, key_fn_or_none, reverse);
-    else {
-        int64_t m = ((ail_vecobj *)lst.o)->n;
-        if (n >= m) st = ail__heapq_all_sorted(cx, out, lst, key_fn_or_none, reverse);
-        else st = ail__heapq_heap(cx, out, lst, n, key_fn_or_none, reverse);
-    }
+    st = ail__heapq_heap(cx, out, lst, n, key_fn_or_none, reverse);
     AIL_FRAME_LEAVE(cx, fr);
     return st;
 }

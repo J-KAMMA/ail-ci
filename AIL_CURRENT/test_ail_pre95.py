@@ -73,6 +73,60 @@ main()
 '''
 
 
+NAN_ITER = r'''import heapq
+nan = float('nan')
+
+
+def gen(xs):
+    for x in xs:
+        yield x
+
+
+def main() -> None:
+    for bad in (5, None, 3.5):
+        for n in (0, -1, -7):
+            try:
+                print("L", n, repr(bad), heapq.nlargest(n, bad))
+            except TypeError:
+                print("L", n, repr(bad), "TypeError")
+            try:
+                print("S", n, repr(bad), heapq.nsmallest(n, bad))
+            except TypeError:
+                print("S", n, repr(bad), "TypeError")
+
+    xs = [nan, 2.0, 3.0]
+    for n in (1, 2, 3, 4, 9):
+        print("gen", n, heapq.nlargest(n, gen(xs)), heapq.nsmallest(n, gen(xs)))
+        print("it", n, heapq.nlargest(n, iter(xs)), heapq.nsmallest(n, iter(xs)))
+        print("gk", n, heapq.nlargest(n, gen(xs), key=lambda x: x),
+              heapq.nsmallest(n, gen(xs), key=lambda x: x))
+
+    pairs = [(nan, "b"), (2.0, "a"), (3.0, "c")]
+    for n in (2, 3, 4):
+        print("pg", n, heapq.nlargest(n, gen(pairs)), heapq.nsmallest(n, gen(pairs)))
+        print("pgk", n, heapq.nlargest(n, gen(pairs), key=lambda p: p[0]),
+              heapq.nsmallest(n, gen(pairs), key=lambda p: p[0]))
+
+    d = {"a": nan, "b": 2.0, "c": 3.0}
+    for n in (2, 3, 4, 9):
+        print("dv", n, heapq.nlargest(n, d.values()), heapq.nsmallest(n, d.values()))
+        print("di", n, heapq.nlargest(n, d.items(), key=lambda kv: kv[1]),
+              heapq.nsmallest(n, d.items(), key=lambda kv: kv[1]))
+        print("iv", n, heapq.nlargest(n, iter(d.values())),
+              heapq.nsmallest(n, iter(d.values())))
+        print("ii", n, heapq.nlargest(n, iter(d.items()), key=lambda kv: kv[1]),
+              heapq.nsmallest(n, iter(d.items()), key=lambda kv: kv[1]))
+
+    for n in (0, -1, -9):
+        print("zero", n, heapq.nlargest(n, xs), heapq.nsmallest(n, xs))
+        print("zerogen", n, heapq.nlargest(n, gen(xs)), heapq.nsmallest(n, gen(xs)))
+        print("zerod", n, heapq.nlargest(n, d.values()), heapq.nsmallest(n, d.values()))
+
+
+main()
+'''
+
+
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -113,6 +167,9 @@ class Pre95Tests(unittest.TestCase):
 
     def test_nan_nlargest_nsmallest(self):
         self.check('nan_select', NAN_SELECT)
+
+    def test_nan_iterable_without_len_and_zero_n(self):
+        self.check('nan_iter', NAN_ITER)
 
 
 if __name__ == '__main__':
