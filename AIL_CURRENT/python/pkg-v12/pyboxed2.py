@@ -1724,6 +1724,7 @@ class Ctx:
         self.uses_comp = False
         self.retval_slot = None
         self.var_kind = {}         # local name -> inferred kind, for dunder/method dispatch
+        self.var_class = {}        # local name -> the user class it holds (only a class-value alias)
         self.elem_kind = {}        # local name -> proven element kind of the bound iterable
         self.nested_funcs = {}     # name -> info, for a def nested directly in this function
         self.global_decls = set()
@@ -2053,6 +2054,7 @@ class Compiler(boxclosure.ClosureMixin):
         self.module_names = set()
         self.global_var_kind = {}
         self.global_elem_kind = {}
+        self.global_var_class = {}
         self.boxed_names = []
         self.top_decls = []
         self.top_defs = []
@@ -2172,6 +2174,19 @@ class Compiler(boxclosure.ClosureMixin):
             c for c in self.classes if any(i.get('is_classmethod') for i in self.classes[c]['methods'].values())
             or any(self._is_subclass_of(c, k) for k in self.classes
                    if any(i.get('is_classmethod') for i in self.classes[k]['methods'].values()))})
+        # module-level class aliases (`K = U`): function bodies are compiled before the module
+        # body here, so record them once up front (class_value() then sees them in every scope)
+        self.global_var_class = {}
+
+        def alias_value(v):
+            if isinstance(v, ast.Name):
+                return v.id if v.id in self.classes else self.global_var_class.get(v.id)
+            return None
+        for n in tree.body:
+            if isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name):
+                self.global_var_class[n.targets[0].id] = alias_value(n.value)
+            elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name) and n.value is not None:
+                self.global_var_class[n.target.id] = alias_value(n.value)
         import dunderrt
         # operator methods, identity ==, hashing, str() through the class chain and AttributeError on a non-instance
         # are dispatched by the run time in every program that has a class (C30-C32: they were silent or fatal)
@@ -2233,6 +2248,7 @@ class Compiler(boxclosure.ClosureMixin):
         main_ctx.fn_node = tree
         main_ctx.fn_params = frozenset()
         main_ctx.var_kind = self.global_var_kind
+        main_ctx.var_class = self.global_var_class
         main_ctx.elem_kind = self.global_elem_kind
         for name in sorted(self.module_names):
             self._module_global_slot(name)
@@ -3467,6 +3483,24 @@ class Compiler(boxclosure.ClosureMixin):
         else:
             ctx.elem_kind[name] = kind
 
+    def set_class_value(self, name, cname, ctx):
+        """Record that `name` provably holds the user class `cname` (a class alias), else forget it."""
+        if name in ctx.global_decls:
+            self.global_var_class[name] = cname
+        else:
+            ctx.var_class[name] = cname
+
+    def class_value(self, node, ctx):
+        """The user class `node` provably holds (a class name or a name aliasing one), else None."""
+        if isinstance(node, ast.Name):
+            if node.id in self.classes and node.id not in ctx.slot_of:
+                return node.id
+            if node.id in ctx.var_class:
+                return ctx.var_class[node.id]
+            if node.id in self.module_names:
+                return self.global_var_class.get(node.id)
+        return None
+
     def infer_kind(self, node, ctx):
         if isinstance(node, ast.Constant):
             v = node.value
@@ -4687,6 +4721,7 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.declare_local(node.target.id)
         ctx.emit('%s = %s;' % (self.name_ref(node.target.id, ctx), v))
         self.set_kind(node.target.id, self.infer_kind(node.value, ctx), ctx)
+        self.set_class_value(node.target.id, self.class_value(node.value, ctx), ctx)
         return self.name_ref(node.target.id, ctx)
 
     def _cmp_once(self, a, an, op, b, bn, ctx):
@@ -5051,9 +5086,23 @@ class Compiler(boxclosure.ClosureMixin):
                 if hits:
                     return self._cached_class_attr(hits[-1][1], hits[-1][0], ctx)
                 k = self.classes[k]['base']
+        cls_owner = self.class_value(node.value, ctx)
+        if cls_owner is not None:
+            info = self._resolve_method(cls_owner, node.attr)
+            if info is not None and not info.get('is_property') and not info.get('is_setter'):
+                # methods live as C functions, not as attributes of the class or instance object,
+                # so fetching one as a value would raise AttributeError; refuse by name instead
+                raise Unsupported('the user method %s.%s fetched as a value is not built '
+                                  '(DIFFERENCES C?-job-pre72-10241830-1)' % (cls_owner, node.attr))
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
         if prop_owners:
             return self._property_read(node, prop_owners, ctx)
+        inst_owner = self._inst_class(node.value, ctx)
+        if inst_owner is not None:
+            info = self._resolve_method(inst_owner, node.attr)
+            if info is not None and not info.get('is_property') and not info.get('is_setter'):
+                raise Unsupported('the user method %s.%s fetched as a value is not built '
+                                  '(DIFFERENCES C?-job-pre72-10241830-1)' % (inst_owner, node.attr))
         obj = self.expr(node.value, ctx)
         if node.attr == 'args' and not any('args' in c['methods'] for c in self.classes.values()):
             # e.args of an exception value (the run time's own carry their message)
@@ -9753,10 +9802,12 @@ class Compiler(boxclosure.ClosureMixin):
             if isinstance(target, ast.Name):
                 self.set_kind(target.id, kind, ctx)
                 self.set_elem_kind(target.id, ekind, ctx)
+                self.set_class_value(target.id, self.class_value(node.value, ctx), ctx)
             elif isinstance(target, (ast.Tuple, ast.List)):
                 for e in target.elts:
                     if isinstance(e, ast.Name):
                         self.set_kind(e.id, None, ctx)
+                        self.set_class_value(e.id, None, ctx)
 
     def stmt_AnnAssign(self, node, ctx):
         if isinstance(node.target, ast.Name):
@@ -9769,6 +9820,7 @@ class Compiler(boxclosure.ClosureMixin):
         if isinstance(node.target, ast.Name):
             self.set_kind(node.target.id, kind, ctx)
             self.set_elem_kind(node.target.id, self._infer_elem_kind(node.value, ctx), ctx)
+            self.set_class_value(node.target.id, self.class_value(node.value, ctx), ctx)
 
     AUG_FN = {ast.Add: 'ail_op_add', ast.Sub: 'ail_op_sub', ast.Mult: 'ail_op_mul',
              ast.Div: 'ail_op_truediv', ast.FloorDiv: 'ail_op_floordiv',

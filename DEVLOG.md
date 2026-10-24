@@ -1,5 +1,23 @@
 # DEVLOG
 
+## 2026-10-24 - pre72: a user method fetched as a value is refused by name
+
+The first difference still present from job pre63 (p2/p8): `class U: def upper(self): ...` then
+`f = U.upper` compiled on both builds and raised `AttributeError: 'type' object has no attribute
+'upper'` at run time (CPython returns the plain function; the instance form `u.upper` failed the
+same way). Methods live as C functions, not as attributes of the class or instance object, so
+there is nothing for the attribute lookup to return. `pyboxed2.expr_Attribute` now refuses the
+construct by name when the receiver is provably a user class (a direct class name, or an alias
+`K = U`, local or module level) or a statically known instance type, with `the user method
+U.upper fetched as a value is not built (DIFFERENCES C?-job-pre72-10241830-1)`.
+
+Unchanged and verified against CPython on both builds: calls (`u.m()`, `U.m(u, ...)`,
+static/class methods), class-attribute reads, fields through an argument/list/dict, property
+reads and `callable(u.m)`. A receiver of unknown static type (an argument, list item or dict
+value holding the class) still takes the old runtime AttributeError -- the already recorded p12
+open difference for non-provable receivers. New `test_ail_pre72.py` covers 6 refused shapes and
+5 accepted ones.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
