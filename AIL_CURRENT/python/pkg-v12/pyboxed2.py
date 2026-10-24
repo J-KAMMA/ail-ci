@@ -6540,8 +6540,9 @@ class Compiler(boxclosure.ClosureMixin):
         # ail_str2.h). Corrected here at the call site: on exactly that failure, for a STR
         # argument, rebuild the message CPython actually raises and re-raise it.
         if fname in ('int', 'float'):
+            keep_limit = ' && !ail_exc_is_int_limit(cx)' if fname == 'int' else ''
             ctx.emit('if (st == AIL_EXC && (%s).tag == AIL_T_STR && '
-                     'ail_exc_matches_b(cx, AIL_B_VALUEERROR)) {' % v)
+                     'ail_exc_matches_b(cx, AIL_B_VALUEERROR)%s) {' % (v, keep_limit))
             ctx.indent += 1
             ctx.emit('ail_exc_clear(cx);')
             base = ('invalid literal for int() with base 10: ' if fname == 'int'
