@@ -974,7 +974,7 @@
     "test_ail_owned_type_repair.py": "69c06613a1270419a92e7bbfbd18ded38fffcb613f5cf1f017df763974b741b6",
     "python/pkg-v12/callable_types.py": "403e4bc3a2186c803407ba1192a3551209d5b3659435d67633b49c30b256c5a3",
     "language_examples/integer_quantiles.ail": "f4fbb4396faa7f571470997a7fa1773f966f35de581da6604986411d3ba345e1",
-    "python/pkg-v12/cruntime.py": "cc8139387131698edfcdd9f545625c8cd0b380b2e27c5c6da94bd43f790d08b5",
+    "python/pkg-v12/cruntime.py": "f474b0bbcba19a23bd6c24c03e2348674c6f73bbcff69c89681489507176a3ee",
     "test_ail_string_field_mutation.py": "76683df6504ef82ce482a0cecef0bd5fd4c68066a7e9b349664e46d527f742c4",
     "test_ail_owned_type_details.py": "8d5c657a91b53c1e322d13686c5471f7185697d641738b26746405804286e1e5",
     "test_ail_list_expression_extend.py": "2835cffcac2a3a7c08606152c2441ad7d7c340967e94cb93b9ce9457d47e8784",
@@ -1356,7 +1356,8 @@
     "test_ail_fuzz77.py": "b9a3fa2d351ff685f5ef55091a73139bef4166957e79b0527955d93f7ec76fb3",
     "test_ail_fuzz8.py": "f0548c51062d12f5984f73573853e0adf76ef265f16c2412a300bbacc3413688",
     "test_ail_fuzz80.py": "2e4407b28f324cd682777bf2d615aa5cf6b5c439339e52e85ac1b725615cf017",
-    "test_ail_fuzz82.py": "a3f8edec899961acaebd0890ff2a2006c640ccc14907046cca39767665a424ac"
+    "test_ail_fuzz82.py": "a3f8edec899961acaebd0890ff2a2006c640ccc14907046cca39767665a424ac",
+    "test_ail_fuzz71.py": "2cbb88a13b39c47aa09b29e038f84fffdc3663afe2239f6924709f1eca386a49"
   },
   "files": {
     "python/pkg-v12/pipeline.py": "d185d3cd067d1ca503f1fda8e2d8f415e93a0db26fbef6d4b919dd4c0b9a1251",
@@ -1401,7 +1402,7 @@
     "test_ail_owned_type_repair.py": "69c06613a1270419a92e7bbfbd18ded38fffcb613f5cf1f017df763974b741b6",
     "python/pkg-v12/callable_types.py": "403e4bc3a2186c803407ba1192a3551209d5b3659435d67633b49c30b256c5a3",
     "language_examples/integer_quantiles.ail": "f4fbb4396faa7f571470997a7fa1773f966f35de581da6604986411d3ba345e1",
-    "python/pkg-v12/cruntime.py": "cc8139387131698edfcdd9f545625c8cd0b380b2e27c5c6da94bd43f790d08b5",
+    "python/pkg-v12/cruntime.py": "f474b0bbcba19a23bd6c24c03e2348674c6f73bbcff69c89681489507176a3ee",
     "test_ail_string_field_mutation.py": "76683df6504ef82ce482a0cecef0bd5fd4c68066a7e9b349664e46d527f742c4",
     "test_ail_owned_type_details.py": "8d5c657a91b53c1e322d13686c5471f7185697d641738b26746405804286e1e5",
     "test_ail_list_expression_extend.py": "2835cffcac2a3a7c08606152c2441ad7d7c340967e94cb93b9ce9457d47e8784",
@@ -1779,6 +1780,7 @@
     "test_ail_fuzz77.py": "b9a3fa2d351ff685f5ef55091a73139bef4166957e79b0527955d93f7ec76fb3",
     "test_ail_fuzz8.py": "f0548c51062d12f5984f73573853e0adf76ef265f16c2412a300bbacc3413688",
     "test_ail_fuzz80.py": "2e4407b28f324cd682777bf2d615aa5cf6b5c439339e52e85ac1b725615cf017",
-    "test_ail_fuzz82.py": "a3f8edec899961acaebd0890ff2a2006c640ccc14907046cca39767665a424ac"
+    "test_ail_fuzz82.py": "a3f8edec899961acaebd0890ff2a2006c640ccc14907046cca39767665a424ac",
+    "test_ail_fuzz71.py": "2cbb88a13b39c47aa09b29e038f84fffdc3663afe2239f6924709f1eca386a49"
   }
 }

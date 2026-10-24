@@ -1,5 +1,13 @@
 # DEVLOG
 
+## 2026-10-24 - fuzz71 review fix: v1 ail_obj_format and manifest pin
+
+Applies the remaining v1 `ail_obj_format` hunk: its fixed-point float path formatted into
+`char buf[64]` and now sizes from the would-be length (stack first, heap when it does not fit),
+mirroring the v2 path that already had that fix.  Regenerates `MANIFEST.json` so
+`test_ail_fuzz71.py` is pinned, and corrects the entry below: the "already fixed" general path is
+v2 only.
+
 ## 2026-10-24 - fuzz71: fixed-point float formatting no longer truncates at a buffer
 
 The typed core's `ail_fmt_spec_float` formatted into `char buf[512]`, the general path's
@@ -8,8 +16,9 @@ The typed core's `ail_fmt_spec_float` formatted into `char buf[512]`, the genera
 CPython prints every digit a huge value or a large precision needs, so those paths produced a
 short string; where `snprintf`'s would-be length was trusted, they also read past the stack
 buffer.  Each path now sizes its buffer from the would-be length (stack buffer first, heap
-when it does not fit) and the runtime's exponent helper does the same.  The general path's
-`ail_obj_format` already had an equivalent heap fix on this tree and is unchanged.
+when it does not fit) and the runtime's exponent helper does the same.  The v2 general path's
+`ail_obj_format` already had an equivalent heap fix on this tree; the v1 one was fixed in the
+review-fix entry above.
 `test_ail_fuzz71.py` builds `f"{1e308:.0f}"`, `f"{1.5:.600f}"`, `%.600f`,
 `"{:.600f}".format(...)`, negative values and widths wider than the result on both builds.
 
