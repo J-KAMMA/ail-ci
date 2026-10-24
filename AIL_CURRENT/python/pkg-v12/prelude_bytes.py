@@ -122,23 +122,33 @@ def _ail_b_source(source, encoding, errors):
     return _ail_b_from_ints(source)
 
 
+def _ail_b_bound(x):
+    if x is None:
+        return None
+    return _ail_b_index(x)
+
+
 def _ail_b_rng(n, start, end):
     st = 0
     en = n
     if start is not None:
-        st = start
-        if st < 0:
-            st = st + n
-            if st < 0:
-                st = 0
+        st = _ail_b_bound(start)
     if end is not None:
-        en = end
+        en = _ail_b_bound(end)
+    if start is not None:
+        if st < 0:
+            if st < -n:
+                st = 0
+            else:
+                st = st + n
+    if end is not None:
         if en > n:
             en = n
         elif en < 0:
-            en = en + n
-            if en < 0:
+            if en < -n:
                 en = 0
+            else:
+                en = en + n
     return (st, en)
 
 
