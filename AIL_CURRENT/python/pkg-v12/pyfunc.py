@@ -1699,6 +1699,11 @@ def _scan_module_consts(tree):
             # is not one: there is no regular-expression engine here, and no subset of one. Saying
             # that plainly is the whole value of the message.
             named = [a.name for a in node.names] if isinstance(node, ast.Import) else [mod]
+            # Name the module that is actually outside the modelled set, not the whole
+            # comma-joined import list: `import math, html` used to say "import of
+            # 'math, html' is not available", which wrongly denies the supported `math`.
+            modelled = {'math', 'sys', 'collections', 'itertools', 'functools', 'heapq', 'bisect', 're', 'json'}
+            unavailable = next((name for name in named if name.split('.')[0] not in modelled), None)
             regex = next((name for name in named if name in ('re', 'regex')), None)
             builtin = next((name for name in named if name in ('heapq', 'bisect')), None)
             if regex == 're':
@@ -1741,7 +1746,7 @@ def _scan_module_consts(tree):
                                     "modules it models (math, sys, collections, itertools, functools, "
                                     "heapq, bisect, re, json).\n"
                                     "  write instead: drop the import and write what you need by hand "
-                                    "with plain lists, dicts and loops" % mod)
+                                    "with plain lists, dicts and loops" % (unavailable or mod))
             error.source_line = node.lineno    # the import itself, not a later use of the name
             raise error
         if not isinstance(node, ast.Assign):
