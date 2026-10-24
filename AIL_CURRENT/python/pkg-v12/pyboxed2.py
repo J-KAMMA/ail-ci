@@ -5249,6 +5249,7 @@ class Compiler(boxclosure.ClosureMixin):
         return spec
 
     _CORE_SPEC_RE = re.compile(r'^(?:.?[<>^])?[+ ]?0?[0-9]*(?:\.[0-9]+)?[dfs]?$')
+    _CORE_SIGN_RE = re.compile(r'^(?:.?[<>^])?[+ -]')
 
     def _core_fmtspec(self, spec, kind):
         """True for the specs the core's ail_obj_format builds as CPython does (`d`/`.Nf`/`s` with fill, align,
@@ -5256,6 +5257,10 @@ class Compiler(boxclosure.ClosureMixin):
         go to safetyrt.FMT."""
         type_char = spec[-1] if spec and spec[-1].isalpha() else ''
         if not spec or (type_char == '' and kind not in ('str', 'int')):
+            return False
+        if kind == 'str' and self._CORE_SIGN_RE.match(spec):
+            # a sign flag on a str is a ValueError in CPython (Space/Sign not allowed); the core's
+            # str formatting silently ignores it, while safetyrt.FMT raises the exact message
             return False
         return type_char in ('', 'd', 'f', 's') and bool(self._CORE_SPEC_RE.match(spec))
 
