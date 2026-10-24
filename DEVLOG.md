@@ -1,3 +1,20 @@
+## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
+
+The first still-differing item from the task's list was the encoding-name normalization: `b"abc".decode("utf\t8")`,
+`"abc".encode("iso-8859-1:1987")`, `bytes("abc", "iso-8859-1:1987")` and `str(b"\xe9", "ISO\t8859-1")` failed
+with LookupError (or a compile-time refusal) while CPython accepts them. The bytes prelude now normalizes a
+name the way `encodings.normalize_encoding` does (punctuation runs become one underscore, leading/trailing
+punctuation is dropped) and matches the normal form against CPython's aliases for UTF-8, ASCII and Latin-1.
+The general path's literal-codec check and the typed path's UTF-8 literal check use the same normalization, so
+a literal name and a dynamic name agree. Unsupported names still raise LookupError (a literal one is refused
+by name at compile time).
+
+Probes in `/tmp/probes` (`p1`-`p5`) covered literal and dynamic names through an argument, list item,
+attribute and dict value, encode/decode, `bytes()`/`str()`/`bytearray`, empty input, non-str types, aliases,
+normalized punctuation, unknown names and codec width boundaries on both `cmp.sh` builds; `p3`/`p5` are
+refused by name. `p4` also matches CPython on the typed path (`AIL_NO_GENERAL=1`) and both IR builds.
+`test_ail_pre23.py` runs the literal and dynamic cases on both IR builds.
+
 # DEVLOG
 
 ## 2026-10-24 - pre165: forward call of a nested def is unbound
