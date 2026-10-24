@@ -4,6 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre62-10241248-1 | `int()` of a float outside int64 reached at run time | CPython prints the exact big integer (`int(1e300)` has 301 digits) | refused at compile time when a simple function return, a local (closure, augmented/annotated assignment), an omitted default argument, `float("1e300")` or a keyword method wrapper carries a constant outside int64; a value that cannot be seen statically still stops at the int64 limit | fixed |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |

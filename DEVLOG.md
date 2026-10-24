@@ -1,5 +1,17 @@
 # DEVLOG
 
+## 2026-10-24 - pre62: out-of-int64 floats reached at run time
+
+The pre39 review recorded that `int()` of an out-of-int64 float still stopped with
+`integer overflow` when the value only exists at run time (its `j_runtime` probe), plus defaults,
+locals/closures, augmented/annotated assignments and keyword method wrappers. The front end now
+follows those constant routes: a simple function's return value (including straight-line locals
+and arguments), local and closure assignments, module globals, omitted defaults, `float("...")`
+constants and method keyword arguments are refused by name when the float is finite and outside
+int64. Values that fit, non-finite floats, branches, mutated lists, rebound globals/functions and
+values the collector cannot see are unchanged; a rebound or mutated name is not assumed constant.
+Added `AIL_CURRENT/test_ail_pre62.py` (13 refused programs, 10 matching programs, both builds).
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
