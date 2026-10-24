@@ -4552,6 +4552,15 @@ class Compiler(boxclosure.ClosureMixin):
                 raise Unsupported('%% formatting with too few arguments')
             val = argcs[argi]
             argi += 1
+            if typ == 'd':
+                self.rt_needs.add('fmt')
+                dirslot = self._str_lit_slot(m.group(0), ctx)
+                t = ctx.tmp()
+                ctx.emit('st = ail2f_percent(cx, &%s, %s, %s);' % (t, dirslot, val))
+                ctx.check()
+                pieces.append(t)
+                i = m.end()
+                continue
             if typ == 'r':
                 if width or prec:
                     raise Unsupported('%r with a width or precision')
