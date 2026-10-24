@@ -6310,7 +6310,9 @@ def _split_shape(node, ctx):
     elif sep is not None and not _is_str_expr(sep, ctx):
         return None
     if isinstance(count, ast.Constant) and count.value is None:
-        return None
+        # CPython raises TypeError for maxsplit=None; treating it as an absent limit here
+        # let the general path read the None object's int slot as maxsplit=0 instead.
+        raise Unsupported('.%s() maxsplit cannot be None (CPython raises TypeError)' % node.func.attr)
     return sep, count
 
 
