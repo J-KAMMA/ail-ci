@@ -1,5 +1,19 @@
 # DEVLOG
 
+## 2026-10-24 - pre127 review fix: a shadowing binding also wins at a call site (job-pre127-10242351)
+
+The review found two defects in the r6 fix.  `expr_Name` read a parameter, local, cell or
+closure binding instead of the class, but `_call_name` still checked `self.classes` first, so
+`U()` in the same activation called the class constructor regardless.  A self-referential
+`U = U()` in a function therefore constructed the class and silently succeeded instead of
+raising `UnboundLocalError` (also for `U: object = U()` and `U, x = U(), 5`), and a loop target
+`for U in items:` left `U()` after the loop calling the class instead of raising `TypeError` on
+the instance.  `_call_name` now applies the same shadowing test as `expr_Name` before taking
+the class-constructor path.  `test_ail_pre127.py` gains both shapes; the probes also cover an
+unshadowed constructor, `global U`, a parameter holding the class itself, local/cell bindings
+of an instance, list/attribute/dict sources of a class value, an empty loop and a use before
+the assignment.  Module-level `U = U()` (already different on the base tree) is unchanged.
+
 ## 2026-10-24 - pre127: a parameter or local shadows a class name (job-pre127-10242351)
 
 The first still-differing item from the pre96 list is `r6`: the general emitter's

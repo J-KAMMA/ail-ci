@@ -121,6 +121,56 @@ print(local(), cell(), nonlocal_cell())
 '''
 
 
+SELF_REFERENTIAL_LOCAL = r'''class U:
+    m = 3
+
+    def value(self):
+        return 4
+
+
+def plain():
+    U = U()
+    return U.m, U.value()
+
+
+def annotated():
+    U: object = U()
+    return U.m, U.value()
+
+
+def tuple_target():
+    U, x = U(), 5
+    return U.m, U.value(), x
+
+
+for f in (plain, annotated, tuple_target):
+    try:
+        f()
+    except UnboundLocalError:
+        print("UnboundLocalError")
+'''
+
+LOOP_TARGET_SHADOWS_CLASS = r'''class U:
+    m = 8
+
+    def value(self):
+        return 9
+
+
+def f(items):
+    total = 0
+    for U in items:
+        total = total + U.m
+    return total, U().value()
+
+
+try:
+    print(f([U(), U()]))
+except TypeError:
+    print("TypeError")
+'''
+
+
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -167,6 +217,12 @@ class Pre127Tests(unittest.TestCase):
 
     def test_local_cell_closure(self):
         self.check('local_cell_closure', LOCAL_CELL_CLOSURE)
+
+    def test_self_referential_local(self):
+        self.check('self_referential_local', SELF_REFERENTIAL_LOCAL)
+
+    def test_loop_target_shadows_class(self):
+        self.check('loop_target_shadows_class', LOOP_TARGET_SHADOWS_CLASS)
 
 
 if __name__ == '__main__':

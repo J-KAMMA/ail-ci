@@ -4,7 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
-| C?-job-pre127-10242351-1 | class name shadowed by a parameter or local | `expr_Name` returned the module-level class value even when the activation had its own binding, so `def f(U): return U.m()` read the class object and both builds raised `AttributeError: 'type' object has no attribute 'm'` (CPython 42). Local, parameter, cell and closure bindings now win over the class value. | fixed; `test_ail_pre127.py` |
+| C?-job-pre127-10242351-1 | class name shadowed by a parameter or local | `expr_Name` returned the module-level class value even when the activation had its own binding, so `def f(U): return U.m()` read the class object and both builds raised `AttributeError: 'type' object has no attribute 'm'` (CPython 42). Local, parameter, cell and closure bindings now win over the class value; the constructor-call path honours the same binding, so a self-referential `U = U()` raises `UnboundLocalError` and `U()` after a loop target `U` raises `TypeError`. | fixed; `test_ail_pre127.py` |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |
