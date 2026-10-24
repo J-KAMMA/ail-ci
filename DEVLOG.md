@@ -1,5 +1,15 @@
 # DEVLOG
 
+## 2026-10-24 - pre75: itertools negative r (job-pre75-10241832)
+
+`itertools.permutations` / `combinations` / `combinations_with_replacement` on the general
+path returned `[]` for a negative `r`; CPython consumes the iterable and then raises
+`ValueError: r must be non-negative`. The runtime helpers now raise it, and the default
+build's `list(...)` collection of the same shape no longer emits invalid C: a negative `r`
+literal is refused by name at compile time on both builds, while a non-literal negative
+`r` (argument, list item, attribute, dict value) raises the ValueError on both. Added
+`AIL_CURRENT/test_ail_pre75.py`; probes are in `/tmp/probes/pre75_*.py`.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
