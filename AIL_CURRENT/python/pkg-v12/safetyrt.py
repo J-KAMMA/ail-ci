@@ -2018,8 +2018,11 @@ BYTES_NAMES = frozenset(('bytes', 'bytearray', 'read_stdin_bytes', 'read_bytes',
 # a program that mentions one of these uses bytes
 BYTES_WORDS = frozenset(('bytes', 'bytearray', 'read_stdin_bytes', 'read_bytes', 'write_stdout_bytes', 'UnicodeError',
                          'UnicodeDecodeError', 'UnicodeEncodeError'))
-ENCODINGS = {'utf-8', 'utf8', 'u8', 'utf', 'cp65001', 'ascii', 'us-ascii', '646', 'us', 'latin-1', 'latin1',
-             'iso-8859-1', 'iso8859-1', '8859', 'cp819', 'l1', 'latin', 'iso-ir-100'}
+ENCODINGS = {'utf-8', 'utf8', 'u8', 'utf', 'cp65001', 'utf8-ucs2', 'utf8-ucs4',
+             'ascii', 'us-ascii', '646', 'us', 'ansi-x3.4-1968', 'ansi-x3.4-1986', 'ansi-x3-4-1968',
+             'cp367', 'csascii', 'ibm367', 'iso646-us', 'iso-646.irv-1991', 'iso-ir-6',
+             'latin-1', 'latin1', 'iso-8859-1', 'iso8859-1', 'iso8859', '8859', 'cp819', 'l1', 'latin',
+             'iso-ir-100', 'csisolatin1', 'ibm819', 'iso-8859-1-1987'}
 ERROR_HANDLERS = {'strict', 'ignore', 'replace'}
 READ_BYTES = '''
 def read_bytes(path):
