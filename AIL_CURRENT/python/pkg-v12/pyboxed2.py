@@ -7930,7 +7930,20 @@ class Compiler(boxclosure.ClosureMixin):
     def _b_chr(self, args, kwargs, ctx):
         if len(args) != 1 or kwargs:
             raise Unsupported('chr() with other than exactly one argument')
-        v = self.expr(args[0], ctx)
+        arg = args[0]
+        # The 16-bit general path cannot store a non-BMP character or a lone surrogate, so a
+        # constant argument that asks for one is refused here rather than left to ail_bi_chr's
+        # internal stop. Values outside the argument range stay for the runtime's ValueError.
+        value = None
+        if isinstance(arg, ast.Constant) and type(arg.value) is int:
+            value = arg.value
+        elif (isinstance(arg, ast.UnaryOp) and isinstance(arg.op, (ast.USub, ast.UAdd))
+              and isinstance(arg.operand, ast.Constant) and type(arg.operand.value) is int):
+            value = -arg.operand.value if isinstance(arg.op, ast.USub) else arg.operand.value
+        if value is not None and (0xD800 <= value <= 0xDFFF or 0x10000 <= value <= 0x10FFFF):
+            raise Unsupported('chr() of U+%04X is refused: the 16-bit general path cannot hold a '
+                              'non-BMP or surrogate character' % value)
+        v = self.expr(arg, ctx)
         t = ctx.tmp()
         ctx.emit('st = ail_bi_chr(cx, &%s, %s);' % (t, v))
         ctx.check()
