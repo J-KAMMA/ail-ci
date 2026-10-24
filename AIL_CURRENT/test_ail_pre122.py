@@ -1,11 +1,13 @@
 """Pre-existing differences revisited (job pre122).
 
-A non-BMP character used as a format-spec fill cannot exist in the 16-bit general runtime: its
-only route there is chr(), which stopped with an uncatchable "requires 32-bit strings" error
-instead of the ValueError the format parser would have raised. The general path now refuses a
-constant chr() of a non-BMP code point, or of a lone surrogate, by name at compile time. BMP
-fills (including non-Latin-1 ones) and every BMP chr() still match CPython, and out-of-range
-chr() arguments still raise CPython's ValueError at run time.
+The 16-bit general runtime stores a non-BMP character as a surrogate pair, one CPython
+character, so `chr(0x1F600)` and a format-spec fill made from it now match CPython instead of
+stopping with an uncatchable "requires 32-bit strings" error. That includes values arriving
+through an argument, a list item, an attribute and a dict value, and the string operations a
+surrogate pair implies (len/ord/repr/index/slice/iteration/comparison/encode/decode). A lone
+surrogate still has no printable representation and a constant `chr()` of one is refused by
+name. BMP fills (including non-Latin-1 ones) and every BMP chr() still match CPython, and
+out-of-range chr() arguments still raise CPython's ValueError.
 
 The exact cases are compared with CPython on the default build and on the forced general path.
 """
@@ -21,11 +23,58 @@ ROOT = Path(__file__).resolve().parent
 NON_BMP_FILL = '''
 print(repr(format("x", chr(0x1F600) + ">5")))
 print(repr(f"{'x':{chr(0x1F600)}>5}"))
+print(repr(format(42, chr(0x1F600) + "^8d")))
 '''
 
-NON_BMP_VIA_LIST = '''
-xs = [chr(0x1F600)]
-print(repr(format("x", xs[0] + ">5")))
+NON_BMP_DYNAMIC = '''
+def mk(n):
+    return chr(n)
+
+
+class Box:
+    def __init__(self, v):
+        self.v = v
+
+
+s = mk(0x1F600)
+xs = [mk(0x1F600)]
+d = {"k": mk(0x1F600)}
+b = Box(mk(0x1F600))
+for v in (s, xs[0], d["k"], b.v):
+    print(len(v), ord(v), repr(v))
+    print(repr(format("x", v + ">4")))
+    print(repr(f"{'x':{v}<4}"))
+    print(repr(format(-7, v + "^7d")))
+'''
+
+NON_BMP_STRING_OPS = '''
+def mk(n):
+    return chr(n)
+
+
+s = mk(0x1F600)
+t = mk(0x10000)
+print(repr(s), repr(t))
+print(len(s), ord(s), repr(s[0]), repr(s[-1]))
+print(repr(s + s), repr(s * 2))
+print(list(s), list(reversed(s)))
+print(s == mk(0x1F600), s < "\\uE000", s > "\\uE000", t < "\\uE000")
+print(repr(s[::-1]), repr(s[0:2]))
+print(repr("abc".join([s, t])))
+print(repr(s.encode("utf-8")))
+print(repr(b'\\xf0\\x9f\\x98\\x80'.decode("utf-8")))
+'''
+
+NON_BMP_CONSTANT = '''
+print(repr(chr(0x1F600 + 0)))
+'''
+
+NON_BMP_DEAD = '''
+def f():
+    return chr(0x1F600)
+
+
+print("ok", len("ok"))
 '''
 
 SURROGATE_CHR = '''
@@ -68,7 +117,7 @@ main()
 
 CHR_BOUNDARIES = '''
 def main():
-    for n in (0, 65, 0x263A, 0xD7FF, 0xE000, 0xFFFF):
+    for n in (0, 65, 0x263A, 0xD7FF, 0xE000, 0xFFFF, 0x10000, 0x1F600, 0x10FFFF):
         c = chr(n)
         print(n, repr(c), len(c), ord(c))
     for n in (-1, 0x110000):
@@ -132,9 +181,20 @@ class Pre122Tests(unittest.TestCase):
                 self.assertIn('not in the subset', output, output[-2000:])
                 self.assertIn(name, output, output[-2000:])
 
-    def test_non_bmp_format_fill_is_refused_by_name(self):
-        self.refused('non_bmp_fill', NON_BMP_FILL, 'chr() of U+1F600 is refused')
-        self.refused('non_bmp_via_list', NON_BMP_VIA_LIST, 'chr() of U+1F600 is refused')
+    def test_non_bmp_format_fill_matches_cpython(self):
+        self.check('non_bmp_fill', NON_BMP_FILL)
+
+    def test_non_bmp_through_arguments_lists_attrs_dicts(self):
+        self.check('non_bmp_dynamic', NON_BMP_DYNAMIC)
+
+    def test_non_bmp_string_operations_match_cpython(self):
+        self.check('non_bmp_ops', NON_BMP_STRING_OPS)
+
+    def test_non_bmp_constant_expression_matches_cpython(self):
+        self.check('non_bmp_constant', NON_BMP_CONSTANT)
+
+    def test_uncalled_non_bmp_function_still_builds(self):
+        self.check('non_bmp_dead', NON_BMP_DEAD)
 
     def test_lone_surrogate_chr_is_refused_by_name(self):
         self.refused('surrogate_chr', SURROGATE_CHR, 'chr() of U+D800 is refused')

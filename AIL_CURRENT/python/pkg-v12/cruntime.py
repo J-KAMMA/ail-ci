@@ -11174,6 +11174,41 @@ static inline void ail_str_put(uint16_t *dst, ail_str s) {
 static inline uint16_t ail_chr(ail_str s, int64_t i) {
     return s.bytes ? ((const uint8_t *)s.p)[i] : s.p[i];
 }
+/* A str is UTF-16: a non-BMP character is a surrogate pair (one CPython character). These
+   helpers are the one place that knows, so len/index/slice/iteration/repr and format all
+   count and copy whole characters rather than UTF-16 units. */
+static inline int ail__is_hi_surrogate(uint32_t c) { return c >= 0xD800u && c < 0xDC00u; }
+static inline int ail__is_lo_surrogate(uint32_t c) { return c >= 0xDC00u && c < 0xE000u; }
+static inline uint32_t ail__cp_at(ail_str s, int64_t i) {
+    uint32_t c = ail_chr(s, i);
+    if (ail__is_hi_surrogate(c) && i + 1 < s.n) {
+        uint32_t d = ail_chr(s, i + 1);
+        if (ail__is_lo_surrogate(d)) return 0x10000u + ((c - 0xD800u) << 10) + (d - 0xDC00u);
+    }
+    return c;
+}
+static inline int64_t ail__cp_next(ail_str s, int64_t i) {
+    uint32_t c = ail_chr(s, i);
+    if (ail__is_hi_surrogate(c) && i + 1 < s.n && ail__is_lo_surrogate(ail_chr(s, i + 1))) return i + 2;
+    return i + 1;
+}
+static inline int64_t ail__cp_prev(ail_str s, int64_t end) {
+    int64_t i = end - 1;
+    if (i > 0 && ail__is_lo_surrogate(ail_chr(s, i)) && ail__is_hi_surrogate(ail_chr(s, i - 1))) return i - 1;
+    return i;
+}
+static inline int64_t ail__cp_len(ail_str s) {
+    if (s.bytes) return s.n;
+    int64_t n = 0;
+    for (int64_t i = 0; i < s.n; i = ail__cp_next(s, i)) n++;
+    return n;
+}
+static inline int64_t ail__cp_unit_at(ail_str s, int64_t cp) {
+    if (s.bytes) return cp <= 0 ? 0 : cp < s.n ? cp : s.n;
+    int64_t i = 0;
+    while (cp-- > 0 && i < s.n) i = ail__cp_next(s, i);
+    return i;
+}
 
 static inline ail_str ail_view_to_str(ail_obj s) {
     ail_str r; r.bytes = 0; r.p = ail_strback_data(s.sv.backing) + s.sv.off;  r.n = s.sv.len; return r;
@@ -11192,6 +11227,13 @@ static inline ail_obj ail_str_from_cstr(ail_ctx *cx, const char *c) {
 /* A little builder for algorithms that fill a buffer of known/worst-case length and then
    trim to the actual length written (mirrors v1's ail_str_alloc_buf pattern). */
 typedef struct { ail_strback *back; uint16_t *buf; } ail_strbuild;
+static inline void ail__cp_put(uint16_t *buf, int64_t *o, uint32_t c) {
+    if (c > 0xFFFFu) {
+        c -= 0x10000u;
+        buf[(*o)++] = (uint16_t)(0xD800u + (c >> 10));
+        buf[(*o)++] = (uint16_t)(0xDC00u + (c & 0x3FFu));
+    } else buf[(*o)++] = (uint16_t)c;
+}
 static inline ail_strbuild ail_str_buf(ail_ctx *cx, int64_t worst_n) {
     ail_strbuild r; r.back = ail_strback_alloc(cx, worst_n); r.buf = r.back->data; return r;
 }
@@ -11229,9 +11271,18 @@ static inline ail_obj ail_str_buf_done(ail_strbuild b, int64_t actual_n) {
    v1's ail_obj.h, which itself ports them from cruntime.py's STR block.
    =================================================================================== */
 static inline int64_t ail_str_cmp(ail_str a, ail_str b) {
-    int64_t n = a.n < b.n ? a.n : b.n;
-    for (int64_t i = 0; i < n; i++) if (ail_chr(a, i) != ail_chr(b, i)) return ail_chr(a, i) < ail_chr(b, i) ? -1 : 1;
-    return a.n == b.n ? 0 : (a.n < b.n ? -1 : 1);
+    if (a.bytes && b.bytes) {
+        int64_t n = a.n < b.n ? a.n : b.n;
+        int r = n ? memcmp(a.p, b.p, (size_t)n) : 0;
+        return r ? (r < 0 ? -1 : 1) : a.n == b.n ? 0 : (a.n < b.n ? -1 : 1);
+    }
+    int64_t i = 0, j = 0;
+    while (i < a.n && j < b.n) {
+        uint32_t ca = ail__cp_at(a, i), cb = ail__cp_at(b, j);
+        if (ca != cb) return ca < cb ? -1 : 1;
+        i = ail__cp_next(a, i); j = ail__cp_next(b, j);
+    }
+    return i < a.n ? 1 : j < b.n ? -1 : 0;
 }
 static inline int ail_str_eq(ail_str a, ail_str b) {
     if (a.n != b.n) return 0;
@@ -11246,7 +11297,8 @@ static inline void ail_str_write(ail_str s, FILE *f) {
     /* bytes strings hold only <0x80 units, so their UTF-8 is the buffer. */
     if (s.bytes && s.n) { fwrite(s.p, 1, (size_t)s.n, f); return; }
     for (int64_t i = 0; i < s.n; i++) {
-        uint32_t c = (uint32_t)ail_chr(s, i);
+        uint32_t c = ail__cp_at(s, i);
+        if (c > 0xFFFFu) i++;   /* the pair was consumed as one character */
         if (c < 0x80) fputc((int)c, f);
         else if (c < 0x800) { fputc((int)(0xC0 | (c >> 6)), f); fputc((int)(0x80 | (c & 0x3F)), f); }
         else if (c < 0x10000) {
@@ -12843,10 +12895,12 @@ static inline ail_obj ail_str_rstrip_view(ail_obj s) {
     return ail_str_view(s.sv.backing, s.sv.off, j);
 }
 static inline ail_st ail_str_index(ail_ctx *cx, ail_obj *out, ail_obj s, int64_t i) {
-    int64_t n = s.sv.len;
+    ail_str t = ail_view_to_str(s);
+    int64_t n = ail__cp_len(t);
     if (i < 0) i += n;
     if (i < 0 || i >= n) return ail_raise_c(cx, AIL_B_INDEXERROR, "string index out of range");
-    *out = ail_str_view(s.sv.backing, s.sv.off + i, 1);
+    int64_t u = ail__cp_unit_at(t, i);
+    *out = ail_str_view(s.sv.backing, s.sv.off + u, ail__cp_next(t, u) - u);
     return AIL_OK;
 }
 
@@ -12940,21 +12994,30 @@ static inline ail_st ail_str_getslice(ail_ctx *cx, ail_obj *out, ail_obj sobj,
     ail_str s = ail_view_to_str(sobj);
     if (!has_step) step = 1;
     if (step == 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "slice step cannot be zero");
+    int64_t cn = ail__cp_len(s);
     int64_t start, stop, len;
     if (step > 0) {
-        if (!has_lo) start = 0; else { start = lo; if (start < 0) { start += s.n; if (start < 0) start = 0; } else if (start > s.n) start = s.n; }
-        if (!has_hi) stop = s.n; else { stop = hi; if (stop < 0) { stop += s.n; if (stop < 0) stop = 0; } else if (stop > s.n) stop = s.n; }
+        if (!has_lo) start = 0; else { start = lo; if (start < 0) { start += cn; if (start < 0) start = 0; } else if (start > cn) start = cn; }
+        if (!has_hi) stop = cn; else { stop = hi; if (stop < 0) { stop += cn; if (stop < 0) stop = 0; } else if (stop > cn) stop = cn; }
         len = (start < stop) ? 1 + (stop - start - 1) / step : 0;
     } else {
-        if (!has_lo) start = s.n - 1; else { start = lo; if (start < 0) { start += s.n; if (start < 0) start = -1; } else if (start >= s.n) start = s.n - 1; }
-        if (!has_hi) stop = -1; else { stop = hi; if (stop < 0) { stop += s.n; if (stop < 0) stop = -1; } else if (stop >= s.n) stop = s.n - 1; }
+        if (!has_lo) start = cn - 1; else { start = lo; if (start < 0) { start += cn; if (start < 0) start = -1; } else if (start >= cn) start = cn - 1; }
+        if (!has_hi) stop = -1; else { stop = hi; if (stop < 0) { stop += cn; if (stop < 0) stop = -1; } else if (stop >= cn) stop = cn - 1; }
         len = (start > stop) ? 1 + (start - stop - 1) / (-step) : 0;
     }
-    if (step == 1) { *out = ail_str_view(sobj.sv.backing, sobj.sv.off + start, len); return AIL_OK; }
-    ail_strbuild bu = ail_str_buf1(cx, len, sobj);
-    int64_t idx = start;
-    for (int64_t k = 0; k < len; k++, idx += step) bu.buf[k] = ail_chr(s, idx);
-    *out = ail_str_buf_done(bu, len);
+    if (step == 1) {
+        int64_t ustart = ail__cp_unit_at(s, start), ustop = ail__cp_unit_at(s, stop);
+        *out = ail_str_view(sobj.sv.backing, sobj.sv.off + ustart, ustop - ustart);
+        return AIL_OK;
+    }
+    ail_strbuild bu = ail_str_buf1(cx, len * 2, sobj);
+    int64_t o = 0, idx = start;
+    for (int64_t k = 0; k < len; k++, idx += step) {
+        int64_t u = ail__cp_unit_at(s, idx);
+        ail__cp_put(bu.buf, &o, ail__cp_at(s, u));
+    }
+    bu.back->n = o;
+    *out = ail_str_view((ail_gcobj *)bu.back, 0, o);
     return AIL_OK;
 }
 
@@ -13690,13 +13753,13 @@ static inline ail_obj ail_str_repr(ail_ctx *cx, ail_obj sobj) {
     ail_str s = ail_view_to_str(sobj);
     int has_sq = 0, has_dq = 0;
     int64_t capacity = 2;
-    for (int64_t i = 0; i < s.n; i++) {
-        int32_t c = ail_chr(s, i);
+    for (int64_t i = 0; i < s.n; i = ail__cp_next(s, i)) {
+        int32_t c = (int32_t)ail__cp_at(s, i);
         if (c < 0 || c > 0x10ffff) ail_die("repr() invalid code point");
         if (c == '\'') has_sq = 1;
         if (c == '"') has_dq = 1;
         int width = c == '\'' || c == '"' || c == '\\' || c == '\n' || c == '\t' || c == '\r'
-            ? 2 : !ail_repr_nonprintable(c) ? 1 : c <= 0xff ? 4 : c <= 0xffff ? 6 : 10;
+            ? 2 : !ail_repr_nonprintable(c) ? (c > 0xffff ? 2 : 1) : c <= 0xff ? 4 : c <= 0xffff ? 6 : 10;
         if (capacity > INT64_MAX - width) ail_die("repr() result too large");
         capacity += width;
     }
@@ -13709,13 +13772,13 @@ static inline ail_obj ail_str_repr(ail_ctx *cx, ail_obj sobj) {
     s = ail_view_to_str(sobj);
     int64_t o = 0;
     bu.buf[o++] = quote;
-    for (int64_t i = 0; i < s.n; i++) {
-        int32_t c = ail_chr(s, i);
+    for (int64_t i = 0; i < s.n; i = ail__cp_next(s, i)) {
+        int32_t c = (int32_t)ail__cp_at(s, i);
         if (c == quote || c == '\\') { bu.buf[o++] = '\\'; bu.buf[o++] = c; }
         else if (c == '\n') { bu.buf[o++] = '\\'; bu.buf[o++] = 'n'; }
         else if (c == '\t') { bu.buf[o++] = '\\'; bu.buf[o++] = 't'; }
         else if (c == '\r') { bu.buf[o++] = '\\'; bu.buf[o++] = 'r'; }
-        else if (!ail_repr_nonprintable(c)) bu.buf[o++] = c;
+        else if (!ail_repr_nonprintable(c)) ail__cp_put(bu.buf, &o, (uint32_t)c);
         else {
             static const char hex[] = "0123456789abcdef";
             int digits = c <= 0xff ? 2 : c <= 0xffff ? 4 : 8;
@@ -15593,7 +15656,7 @@ static inline int64_t ail__range_at(int64_t start, int64_t step, uint64_t ordina
 }
 static inline ail_st ail_op_len(ail_ctx *cx, ail_obj *out, ail_obj x) {
     switch (x.tag) {
-        case AIL_T_STR: *out = ail_box_int(x.sv.len); return AIL_OK;
+        case AIL_T_STR: *out = ail_box_int(ail__cp_len(ail_view_to_str(x))); return AIL_OK;
         case AIL_T_LIST: if (__builtin_expect(((ail_gcobj *)x.o)->flags, 0)) { *out = ail_box_int(((ail_vecobj *)((ail_vecobj *)x.o)->p[0].o)->n); return AIL_OK; } /* a deque */
             /* fall through */
         case AIL_T_TUPLE: *out = ail_box_int(((ail_vecobj *)x.o)->n); return AIL_OK;
@@ -15821,7 +15884,7 @@ static inline ail_st ail_iter_reversed(ail_ctx *cx, ail_obj *out, ail_obj seq) {
         ail_obj res; res.tag = AIL_T_ITER; res.o = (ail_gcobj *)it; *out = res; return AIL_OK;
     }
     if (seq.tag == AIL_T_LIST || seq.tag == AIL_T_TUPLE) n = ((ail_vecobj *)seq.o)->n;
-    else if (seq.tag == AIL_T_STR) n = seq.sv.len;
+    else if (seq.tag == AIL_T_STR) n = ail__cp_len(ail_view_to_str(seq));
     else { char buf[64]; snprintf(buf, sizeof buf, "'%s' object is not reversible", ail_type_name(seq.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
     *out = ail__iter_wrap(cx, AIL_IT_REVERSED, seq, ail_box_none(), n - 1); return AIL_OK;
 }
@@ -15856,9 +15919,11 @@ static inline ail_st ail_next(ail_ctx *cx, ail_obj *out, ail_obj iterobj) {
             *out = v->p[it->idx++]; return AIL_OK;
         }
         case AIL_IT_STR: {
-            if (it->idx >= it->target.sv.len) return AIL_STOP;
-            *out = ail_str_view(it->target.sv.backing, it->target.sv.off + it->idx, 1);
-            it->idx++; return AIL_OK;
+            ail_str t = ail_view_to_str(it->target);
+            if (it->idx >= t.n) return AIL_STOP;
+            int64_t w = ail__cp_next(t, it->idx) - it->idx;
+            *out = ail_str_view(it->target.sv.backing, it->target.sv.off + it->idx, w);
+            it->idx += w; return AIL_OK;
         }
         /* CPython compares the size with the one the iterator started with at every step */
         case AIL_IT_DICT_KEYS: { ail_mapobj *m = (ail_mapobj *)it->target.o; if (m->n != it->idx2) return ail_raise_c(cx, AIL_B_RUNTIMEERROR, "dictionary changed size during iteration"); if (it->idx >= m->n) return AIL_STOP; *out = m->entries[it->idx++].key; return AIL_OK; }
@@ -15890,7 +15955,9 @@ static inline ail_st ail_next(ail_ctx *cx, ail_obj *out, ail_obj iterobj) {
             if (it->idx < 0) return AIL_STOP;
             ail_obj base = it->target;
             if (base.tag == AIL_T_LIST || base.tag == AIL_T_TUPLE) { *out = ((ail_vecobj *)base.o)->p[it->idx--]; return AIL_OK; }
-            *out = ail_str_view(base.sv.backing, base.sv.off + it->idx, 1); it->idx--; return AIL_OK;
+            ail_str t = ail_view_to_str(base);
+            int64_t u = ail__cp_unit_at(t, it->idx);
+            *out = ail_str_view(base.sv.backing, base.sv.off + u, ail__cp_next(t, u) - u); it->idx--; return AIL_OK;
         }
         case AIL_IT_ENUMERATE: {
             ail_obj item; ail_st st = ail_next(cx, &item, it->target); if (st != AIL_OK) return st;
@@ -16156,9 +16223,7 @@ static inline ail_obj ail_bi_str_from_utf8(ail_ctx *cx, const char *p, int64_t n
         }
         if (cp < minimum || (cp >= 0xD800 && cp <= 0xDFFF) || cp > 0x10FFFF)
             ail_die("stdin is not valid UTF-8");
-        if (cp > 0xFFFF && sizeof(back->data[0]) < 4)
-            ail_die("stdin code point above U+FFFF in the 16-bit v2 runtime");
-        back->data[o++] = cp;
+        ail__cp_put(back->data, &o, cp);
     }
     back->n = o;
     return ail_str_view((ail_gcobj *)back, 0, o);
@@ -16305,13 +16370,15 @@ static inline ail_obj ail_to_bool(ail_obj x) { return ail_box_bool(ail_obj_truth
    than v1's choice, and documented as a deliberate improvement in API.md.
    =================================================================================== */
 typedef struct { int fill; char align; int width; int prec; int has_prec; char type; char sign; char group; } ail_fmtspec;
+static inline int ail__align_ch(uint32_t c) { return c == '<' || c == '>' || c == '^'; }
 static inline ail_fmtspec ail__parse_fmtspec(ail_str spec) {
     ail_fmtspec f; f.fill = ' '; f.align = 0; f.width = 0; f.prec = -1; f.has_prec = 0; f.type = 0; f.sign = 0; f.group = 0;
     int64_t i = 0, n = spec.n;
-    int c0 = i < n ? (int)ail_chr(spec, i) : 0;
-    int c1 = i + 1 < n ? (int)ail_chr(spec, i + 1) : 0;
-    if (n >= 2 && (c1 == '<' || c1 == '>' || c1 == '^')) { f.fill = c0; f.align = (char)c1; i += 2; }
-    else if (n >= 1 && (c0 == '<' || c0 == '>' || c0 == '^')) { f.align = (char)c0; i += 1; }
+    uint32_t c0 = i < n ? ail__cp_at(spec, i) : 0;
+    int64_t w0 = i < n ? ail__cp_next(spec, i) - i : 0;
+    uint32_t c1 = i + w0 < n ? (uint32_t)ail_chr(spec, i + w0) : 0;
+    if (i + w0 < n && ail__align_ch(c1)) { f.fill = (int)c0; f.align = (char)c1; i += w0 + 1; }
+    else if (i < n && ail__align_ch(c0)) { f.align = (char)c0; i += w0; }
     if (i < n && (ail_chr(spec, i) == '+' || ail_chr(spec, i) == '-' || ail_chr(spec, i) == ' ')) { if (ail_chr(spec, i) != '-') f.sign = (char)ail_chr(spec, i); i++; }
     if (i < n && ail_chr(spec, i) == '0') { if (!f.align) { f.align = '='; f.fill = '0'; } i++; }
     while (i < n && ail_chr(spec, i) >= '0' && ail_chr(spec, i) <= '9') { f.width = f.width * 10 + (int)(ail_chr(spec, i) - '0'); i++; }
@@ -16323,23 +16390,23 @@ static inline ail_fmtspec ail__parse_fmtspec(ail_str spec) {
 static inline ail_obj ail__pad(ail_ctx *cx, const char *content, int64_t clen, ail_fmtspec f, int numeric) {
     char align = f.align ? f.align : (numeric ? '>' : '<');
     int64_t pad = f.width - clen; if (pad < 0) pad = 0;
-    ail_strbuild bu = ail_str_buf(cx, clen + pad);
+    ail_strbuild bu = ail_str_buf(cx, clen + pad * 2);
     int64_t o = 0;
     if (align == '=' && numeric && clen > 0 && (content[0] == '-' || content[0] == '+')) {
         bu.buf[o++] = content[0];
-        for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (uint16_t)f.fill;
+        for (int64_t k = 0; k < pad; k++) ail__cp_put(bu.buf, &o, (uint32_t)f.fill);
         for (int64_t k = 1; k < clen; k++) bu.buf[o++] = (unsigned char)content[k];
     } else if (align == '>' || align == '=') {
-        for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (uint16_t)f.fill;
+        for (int64_t k = 0; k < pad; k++) ail__cp_put(bu.buf, &o, (uint32_t)f.fill);
         for (int64_t k = 0; k < clen; k++) bu.buf[o++] = (unsigned char)content[k];
     } else if (align == '^') {
         int64_t lp = pad / 2, rp = pad - lp;
-        for (int64_t k = 0; k < lp; k++) bu.buf[o++] = (uint16_t)f.fill;
+        for (int64_t k = 0; k < lp; k++) ail__cp_put(bu.buf, &o, (uint32_t)f.fill);
         for (int64_t k = 0; k < clen; k++) bu.buf[o++] = (unsigned char)content[k];
-        for (int64_t k = 0; k < rp; k++) bu.buf[o++] = (uint16_t)f.fill;
+        for (int64_t k = 0; k < rp; k++) ail__cp_put(bu.buf, &o, (uint32_t)f.fill);
     } else {
         for (int64_t k = 0; k < clen; k++) bu.buf[o++] = (unsigned char)content[k];
-        for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (uint16_t)f.fill;
+        for (int64_t k = 0; k < pad; k++) ail__cp_put(bu.buf, &o, (uint32_t)f.fill);
     }
     return ail_str_buf_done(bu, o);
 }
@@ -16396,18 +16463,29 @@ static inline ail_st ail_obj_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_ob
         ail_obj content = (x.tag == AIL_T_STR) ? x : ail_obj_str(cx, x);
         AIL_ROOT1(cx, fr, content);
         ail_str cs = ail_view_to_str(content);
-        if (f.has_prec && f.prec >= 0 && f.prec < cs.n) cs.n = f.prec;
-        /* code points, not bytes: a non-ASCII character must reach the result whole */
+        int64_t clen = ail__cp_len(cs);
+        if (f.has_prec && f.prec >= 0 && f.prec < clen) {
+            clen = f.prec;
+            cs.n = ail__cp_unit_at(cs, clen);
+        }
+        /* characters, not units: a non-BMP character is one code point */
         char align = f.align ? f.align : '<';
-        int64_t pad = f.width - cs.n; if (pad < 0) pad = 0;
+        int64_t pad = f.width - clen; if (pad < 0) pad = 0;
         int64_t lp = (align == '>' || align == '=') ? pad : (align == '^') ? pad / 2 : 0;
-        ail_strbuild bu = ail_str_buf(cx, cs.n + pad);
+        ail_strbuild bu = ail_str_buf(cx, cs.n + pad * 2);
         AIL_FRAME_LEAVE(cx, fr);
-        cs = ail_view_to_str(content); if (f.has_prec && f.prec >= 0 && f.prec < cs.n) cs.n = f.prec;
+        cs = ail_view_to_str(content);
+        clen = ail__cp_len(cs);
+        if (f.has_prec && f.prec >= 0 && f.prec < clen) {
+            clen = f.prec;
+            cs.n = ail__cp_unit_at(cs, clen);
+        }
+        pad = f.width - clen; if (pad < 0) pad = 0;
+        lp = (align == '>' || align == '=') ? pad : (align == '^') ? pad / 2 : 0;
         int64_t o = 0;
-        for (int64_t k = 0; k < lp; k++) bu.buf[o++] = (uint16_t)f.fill;
+        for (int64_t k = 0; k < lp; k++) ail__cp_put(bu.buf, &o, (uint32_t)f.fill);
         for (int64_t k = 0; k < cs.n; k++) bu.buf[o++] = ail_chr(cs, k);
-        for (int64_t k = 0; k < pad - lp; k++) bu.buf[o++] = (uint16_t)f.fill;
+        for (int64_t k = 0; k < pad - lp; k++) ail__cp_put(bu.buf, &o, (uint32_t)f.fill);
         *out = ail_str_buf_done(bu, o);
         return AIL_OK;
     }
@@ -17528,16 +17606,24 @@ static inline ail_st ail_bi_chr(ail_ctx *cx, ail_obj *out, ail_obj x) {
     if (!ail__is_intlike(x.tag)) { char buf[80]; snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail_type_name(x.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
     if (x.i < 0 || x.i > 0x10FFFF) return ail_raise_c(cx, AIL_B_VALUEERROR, "chr() arg not in range(0x110000)");
     if (x.i >= 0xD800 && x.i <= 0xDFFF) ail_die("chr() surrogate code point is unsupported");
-    if (x.i > 0xFFFF) ail_die("chr() non-BMP code point requires 32-bit strings");
+    if (x.i > 0xFFFF) {
+        uint32_t c = (uint32_t)(x.i - 0x10000);
+        ail_strback *b = ail_strback_alloc(cx, 2);
+        b->data[0] = (uint16_t)(0xD800u + (c >> 10));
+        b->data[1] = (uint16_t)(0xDC00u + (c & 0x3FFu));
+        *out = ail_str_view((ail_gcobj *)b, 0, 2);
+        return AIL_OK;
+    }
     ail_strback *b = ail_strback_alloc(cx, 1); b->data[0] = (uint16_t)x.i;
     *out = ail_str_view((ail_gcobj *)b, 0, 1);
     return AIL_OK;
 }
 static inline ail_st ail_bi_ord(ail_ctx *cx, ail_obj *out, ail_obj x) {
     if (x.tag != AIL_T_STR) { char buf[80]; snprintf(buf, sizeof buf, "ord() expected string of length 1, but %s found", ail_type_name(x.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
-    if (x.sv.len != 1) { char buf[96]; snprintf(buf, sizeof buf, "ord() expected a character, but string of length %lld found", (long long)x.sv.len); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
     ail_str s = ail_view_to_str(x);
-    *out = ail_box_int(ail_chr(s, 0));
+    int64_t n = ail__cp_len(s);
+    if (n != 1) { char buf[96]; snprintf(buf, sizeof buf, "ord() expected a character, but string of length %lld found", (long long)n); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
+    *out = ail_box_int(ail__cp_at(s, 0));
     return AIL_OK;
 }
 
