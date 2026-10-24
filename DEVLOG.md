@@ -8,7 +8,7 @@ no attribute 'p'` instead of returning the property object, and a subclass whose
 shadows a base property still called the base getter (`B().x` printed 1 where CPython prints 2).
 Reading a property from a class value (a class name, or a simple name bound to one) is now
 refused by name (a property object is not modelled; DIFFERENCES C?-job-pre53-10241240-1); the class attribute now shadows the base property.
-Added `AIL_CURRENT/test_ail_pre53.py`, which keeps direct, inherited and aliased class reads refused and
+Added `AIL_CURRENT/test_ail_pre53.py`, which keeps direct, inherited, aliased and data-carried class reads refused and
 compares shadowing through a parameter, list item, attribute, dict value and deep subclass with
 CPython on both builds.
 

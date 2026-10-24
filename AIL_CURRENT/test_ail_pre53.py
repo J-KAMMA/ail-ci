@@ -96,6 +96,70 @@ def main():
 
 main()
 ''',
+    'through_argument': '''
+class C:
+    @property
+    def p(self):
+        return 1
+
+
+def show(o):
+    print(type(o.p).__name__)
+
+
+def main():
+    show(C)
+
+
+main()
+''',
+    'through_list_item': '''
+class C:
+    @property
+    def p(self):
+        return 1
+
+
+def main():
+    xs = [C]
+    print(type(xs[0].p).__name__)
+
+
+main()
+''',
+    'through_dict_value': '''
+class C:
+    @property
+    def p(self):
+        return 1
+
+
+def main():
+    d = {'k': C}
+    print(type(d['k'].p).__name__)
+
+
+main()
+''',
+    'through_attribute': '''
+class C:
+    @property
+    def p(self):
+        return 1
+
+
+class H:
+    pass
+
+
+def main():
+    h = H()
+    h.o = C
+    print(type(h.o.p).__name__)
+
+
+main()
+''',
     'inherited': '''
 class A:
     @property

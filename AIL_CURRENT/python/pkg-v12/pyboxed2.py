@@ -2183,6 +2183,20 @@ class Compiler(boxclosure.ClosureMixin):
                     aliases.add(alias)
                     changed = True
         self.class_aliases = aliases - set(self.classes)
+        # Data that provably carries a class value (a list/dict of classes, or a field assigned one),
+        # used only to refuse a property read from the class instead of looking it up as an attribute.
+        self.class_containers = {}
+        self.class_fields = set()
+        self.param_class = set()
+        for call in ast.walk(tree):
+            if (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+                    and call.func.id in self.functions):
+                info = self.functions[call.func.id]
+                if info.get('is_method'):
+                    continue
+                for pname, arg in zip(info['params'], call.args):
+                    if isinstance(arg, ast.Name) and (arg.id in self.classes or arg.id in self.class_aliases):
+                        self.param_class.add((info['node'].name, pname))
         # classes the program uses as values (`make = Fenwick; make(data)`): a call through a value may construct one
         called = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
         self.class_values = sorted({n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id in self.classes
@@ -3164,6 +3178,10 @@ class Compiler(boxclosure.ClosureMixin):
         for p in info['all_params']:
             if p not in globals_decl:
                 ctx.declare_local(p)
+        if not info.get('is_method'):
+            for p in info['all_params']:
+                if (info['node'].name, p) in self.param_class:
+                    ctx.var_kind[p] = 'class'
         locals_ = (_scan_assigned_names(node.body) - set(info['all_params']) - globals_decl)
         for name in sorted(locals_):
             ctx.declare_local(name)
@@ -3595,6 +3613,52 @@ class Compiler(boxclosure.ClosureMixin):
             return n
         out.sort(key=depth, reverse=True)
         return out
+
+    def _track_class_data(self, value, targets, ctx):
+        """Remember simple data that carries class values, for _is_class_value (a list/dict literal
+        of classes, or a field assigned one).  A later plain assignment drops the container record."""
+        carries = self._is_class_value(value, ctx)
+        for target in targets:
+            if isinstance(target, ast.Name):
+                self.class_containers.pop(target.id, None)
+            elif isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name):
+                c = self._inst_class(target.value, ctx)
+                if c and carries:
+                    self.class_fields.add((c, target.attr))
+        if isinstance(value, (ast.List, ast.Tuple)) and value.elts and \
+                all(self._is_class_value(e, ctx) for e in value.elts):
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    self.class_containers[target.id] = 'seq'
+        elif isinstance(value, ast.Dict) and value.values and \
+                all(self._is_class_value(v, ctx) for v in value.values):
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    self.class_containers[target.id] = 'dict'
+
+    def _is_class_value(self, node, ctx):
+        """True when this expression provably carries a class value (a name, an alias, an item of a
+        container holding only class values, or a field assigned one).  Used to refuse reading a
+        property object from that class."""
+        if isinstance(node, ast.Name):
+            if node.id in self.classes:
+                if node.id not in ctx.slot_of and node.id not in self.module_names:
+                    return True
+            elif node.id in self.class_aliases and node.id not in ctx.slot_of:
+                return True
+            return self.get_kind(node.id, ctx) == 'class'
+        if isinstance(node, ast.Subscript):
+            if isinstance(node.value, ast.Name) and node.value.id in self.class_containers:
+                return True
+            if isinstance(node.value, (ast.List, ast.Tuple)) and node.value.elts:
+                return all(self._is_class_value(e, ctx) for e in node.value.elts)
+            if isinstance(node.value, ast.Dict) and node.value.values:
+                return all(self._is_class_value(v, ctx) for v in node.value.values)
+            return False
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            c = self._inst_class(node.value, ctx)
+            return bool(c and (c, node.attr) in self.class_fields)
+        return False
 
     def _inst_class(self, node, ctx):
         k = self.infer_kind(node, ctx)
@@ -5068,8 +5132,10 @@ class Compiler(boxclosure.ClosureMixin):
             class_recv = (isinstance(node.value, ast.Name) and node.value.id in self.classes
                           and node.value.id not in ctx.slot_of and node.value.id not in self.module_names)
             class_recv = class_recv or (isinstance(node.value, ast.Name)
-                                        and node.value.id in self.class_aliases)
+                                        and node.value.id in self.class_aliases
+                                        and node.value.id not in ctx.slot_of)
             class_recv = class_recv or self.infer_kind(node.value, ctx) == 'class'
+            class_recv = class_recv or self._is_class_value(node.value, ctx)
             if class_recv:
                 # the class value is not a model of the type object here, so reading the
                 # property object it holds (`C.p`, whose type is `property`) cannot be built
@@ -9773,6 +9839,7 @@ class Compiler(boxclosure.ClosureMixin):
             self.set_kind(node.targets[0].id, 'list', ctx)
             self.set_elem_kind(node.targets[0].id, 'str', ctx)
             return
+        self._track_class_data(node.value, node.targets, ctx)
         value_c = self.expr(node.value, ctx)
         kind = self.infer_kind(node.value, ctx)
         if isinstance(node.value, ast.Name) and (node.value.id in self.classes
@@ -9794,6 +9861,7 @@ class Compiler(boxclosure.ClosureMixin):
             self._declare_if_local(node.target.id, ctx)
         if node.value is None:
             return
+        self._track_class_data(node.value, [node.target], ctx)
         value_c = self.expr(node.value, ctx)
         kind = self.infer_kind(node.value, ctx)
         if isinstance(node.value, ast.Name) and (node.value.id in self.classes
