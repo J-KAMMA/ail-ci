@@ -95,6 +95,16 @@ The NUL / non-ASCII unknown-code difference (a NUL spec still formats as if empt
 and not touched by this job. Verified with `test_ail_pre102`, `test_ail_safetynet`,
 `test_ail_files` and `test_ail_corpus_findings3`: 26 tests, all OK.
 
+## 2026-10-24 - pre104: round() of nan/inf raises CPython's exception
+
+The pre54 review recorded the default build's one-argument `round()` of nan/inf as a
+pre-existing difference: it stopped through `ail_die` with `round() of nan` or
+`round() result does not fit in this language's int64`, so a `try` could not catch it and an
+uncaught program printed the trap message instead of CPython's exception line.  `ail_round0`
+now raises `ValueError("cannot convert float NaN to integer")` and
+`OverflowError("cannot convert float infinity to integer")` through the normal exception path
+on both builds.  Finite values, including the int64-boundary trap, are unchanged.  Added
+`AIL_CURRENT/test_ail_pre104.py` and registered it in `ail_check.MODULES`.
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

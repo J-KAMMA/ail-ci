@@ -33,6 +33,16 @@ NaN and infinity keep CPython's ValueError / OverflowError. Probes:
 `/tmp/probes/pre100_float_d*.py`, `pct_dynamic_float.py`; new test
 `AIL_CURRENT/test_ail_pre100.py`.
 
+## 2026-10-24 - pre104: round() of nan/inf raises CPython's exception
+
+The pre54 review recorded the default build's one-argument `round()` of nan/inf as a
+pre-existing difference: it stopped through `ail_die` with `round() of nan` or
+`round() result does not fit in this language's int64`, so a `try` could not catch it and an
+uncaught program printed the trap message instead of CPython's exception line.  `ail_round0`
+now raises `ValueError("cannot convert float NaN to integer")` and
+`OverflowError("cannot convert float infinity to integer")` through the normal exception path
+on both builds.  Finite values, including the int64-boundary trap, are unchanged.  Added
+`AIL_CURRENT/test_ail_pre104.py` and registered it in `ail_check.MODULES`.
 ## 2026-10-23 -- fuzz37: ordering TypeError names the written operator
 
 Fuzzing while loops and counters against CPython on both builds found that an
