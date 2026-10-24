@@ -17213,41 +17213,56 @@ static inline ail_st ail_bi_round_int_ndigits(ail_ctx *cx, ail_obj *out, int64_t
     *out = ail_box_int(result);
     return AIL_OK;
 }
-static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, int64_t n) {
-    if (!has_n) {
-        if (ail__is_intlike(x.tag)) { *out = ail_box_int(x.i); return AIL_OK; }
-        if (x.tag != AIL_T_FLOAT) { char buf[80]; snprintf(buf, sizeof buf, "type %s doesn't define __round__ method", ail_type_name(x.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
+static inline ail_st ail_bi_round_no_method(ail_ctx *cx, ail_obj x) {
+    char buf[80]; snprintf(buf, sizeof buf, "type %s doesn't define __round__ method", ail_type_name(x.tag));
+    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+}
+static inline ail_st ail_bi_round_ndigits(ail_ctx *cx, ail_obj nobj, int64_t *out) {
+    if (ail__is_intlike(nobj.tag)) { *out = nobj.i; return AIL_OK; }
+    { char buf[96]; snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail_type_name(nobj.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
+}
+static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, ail_obj n) {
+    if (x.tag == AIL_T_FLOAT) {
+        if (!has_n || n.tag == AIL_T_NONE) {
+            double v = ail_float_val(x);
+            if (v != v) return ail_raise_c(cx, AIL_B_VALUEERROR, "cannot convert float NaN to integer");
+            if (isinf(v)) return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "cannot convert float infinity to integer");
+            double r = nearbyint(v);
+            if (r >= 9223372036854775808.0 || r < -9223372036854775808.0) return ail_hit_limit(cx, "int_overflow", "round() result exceeds int64");
+            *out = ail_box_int((int64_t)r);
+            return AIL_OK;
+        }
+        int64_t nn;
+        ail_st st = ail_bi_round_ndigits(cx, n, &nn);
+        if (st != AIL_OK) return st;
         double v = ail_float_val(x);
-        if (v != v) return ail_raise_c(cx, AIL_B_VALUEERROR, "cannot convert float NaN to integer");
-        if (isinf(v)) return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "cannot convert float infinity to integer");
-        double r = nearbyint(v);
-        if (r >= 9223372036854775808.0 || r < -9223372036854775808.0) return ail_hit_limit(cx, "int_overflow", "round() result exceeds int64");
-        *out = ail_box_int((int64_t)r);
+        if (v != v || isinf(v)) { *out = ail_box_float(cx, v); return AIL_OK; }
+        double result;
+        if (nn >= 0) {
+            int nd = (int)(nn > 323 ? 323 : nn);
+            char buf[400];
+            snprintf(buf, sizeof buf, "%.*f", nd, v);
+            result = strtod(buf, NULL);
+        } else {
+            int64_t neg = -nn;
+            double scale = 1.0;
+            for (int64_t k = 0; k < neg && k < 400; k++) scale *= 10.0;
+            double scaled = v / scale;
+            double rr = nearbyint(scaled);
+            result = rr * scale;
+        }
+        *out = ail_box_float(cx, result);
         return AIL_OK;
     }
     if (ail__is_intlike(x.tag)) {
-        if (n >= 0) { *out = ail_box_int(x.i); return AIL_OK; }
-        return ail_bi_round_int_ndigits(cx, out, x.i, n);
+        if (!has_n || n.tag == AIL_T_NONE) { *out = ail_box_int(x.i); return AIL_OK; }
+        int64_t nn;
+        ail_st st = ail_bi_round_ndigits(cx, n, &nn);
+        if (st != AIL_OK) return st;
+        if (nn >= 0) { *out = ail_box_int(x.i); return AIL_OK; }
+        return ail_bi_round_int_ndigits(cx, out, x.i, nn);
     }
-    if (x.tag != AIL_T_FLOAT) { char buf[80]; snprintf(buf, sizeof buf, "type %s doesn't define __round__ method", ail_type_name(x.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
-    double v = ail_float_val(x);
-    if (v != v || isinf(v)) { *out = ail_box_float(cx, v); return AIL_OK; }
-    double result;
-    if (n >= 0) {
-        int nd = (int)(n > 323 ? 323 : n);
-        char buf[400];
-        snprintf(buf, sizeof buf, "%.*f", nd, v);
-        result = strtod(buf, NULL);
-    } else {
-        int64_t nn = -n;
-        double scale = 1.0;
-        for (int64_t k = 0; k < nn && k < 400; k++) scale *= 10.0;
-        double scaled = v / scale;
-        double rr = nearbyint(scaled);
-        result = rr * scale;
-    }
-    *out = ail_box_float(cx, result);
-    return AIL_OK;
+    return ail_bi_round_no_method(cx, x);
 }
 
 /* ===================================================================================

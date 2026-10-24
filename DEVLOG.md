@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - round() ndigits conversion (job-pre160-10250349)
+
+CPython checks the number type before converting `round`'s ndigits: an instance with `__round__`
+receives the ndigits object unchanged, an int/float converts it with `__index__` only afterwards,
+and None means no ndigits. The general path read the ndigits value's raw int field, so `__index__`
+was never called, `round(2.5, "2")` and `round(2.5, [1])` silently rounded, an instance without
+`__round__` was named `instance`, and a `__round__` method got a garbage integer. `ail_bi_round` now
+takes the ndigits object, converts it in the int/float branches (int/bool, `__index__`, or a
+TypeError), treats None as omitted there, and the dunder patch passes the object and names the class
+in the no-method error. Both builds match CPython on the ordering, type and route probes. An
+out-of-int64 `__index__` result still cannot be represented, so it now stops with `integer overflow`
+instead of silently wrapping (recorded in DIFFERENCES). Added `test_ail_pre160.py`.
+
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
 
 The general path's native `statistics` helpers kept a heap result in a C local across an

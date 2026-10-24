@@ -1,5 +1,9 @@
 # DIFFERENCES
 
+| id | area | difference | status |
+| --- | --- | --- | --- |
+| C?-job-pre160-10250349-1 | round() ndigits / `__index__` | An out-of-int64 `__index__` result (for example `10**30` computed inside the method) cannot be represented in AIL's int64. It now stops with `integer overflow` instead of silently using a wrapped value; CPython uses its arbitrary-precision result. | refused by name |
+
 Deliberate differences from CPython and open silent differences found by differential jobs.
 
 | id | area | difference | status |
