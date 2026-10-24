@@ -1,5 +1,17 @@
 # DEVLOG
 
+## 2026-10-24 - pre30 review fix: shadowing fields and class attributes
+
+The general build's bound-method refusal checked only `_resolve_method`, so `obj.m` was
+refused even when an instance field or a class attribute of the same name shadows the method.
+`pyboxed2` now records the names each class assigns as `self.<name>` (in any method) and the
+class-body binding order for methods and class attributes.  A read is refused only when the
+class lookup really finds the method (a later class-body assignment wins, as in CPython) and no
+field in the class's own hierarchy can shadow it.  `test_ail_pre30.py` gains the reviewer's three
+probes plus other field/class-attribute shadowing cases (field set outside `__init__`, inherited
+fields, base class attributes, and fields reached through an argument, list item, attribute and
+dict value), and keeps subclass-method-over-base-attribute reads refused.
+
 ## 2026-10-24 - pre30: bound method values refused by name
 
 `f = obj.method` used to compile as an ordinary attribute read and fail at run time with

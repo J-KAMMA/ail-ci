@@ -221,6 +221,39 @@ def main():
 
 main()
 ''',
+    'subclass_method_over_base_attr': '''
+class A:
+    m = 5
+    def __init__(self):
+        self.n = 0
+
+
+class B(A):
+    def m(self):
+        return 1
+
+
+def main():
+    f = B().m
+    print(f())
+
+
+main()
+''',
+    'classattr_then_method': '''
+class C:
+    m = 5
+    def m(self):
+        return 1
+
+
+def main():
+    f = C().m
+    print(f())
+
+
+main()
+''',
 }
 
 ALLOWED = '''
@@ -258,6 +291,134 @@ main()
 '''
 
 
+SHADOWED = {
+    'field_shadow_own': '''
+class C:
+    def __init__(self):
+        self.m = 5
+    def m(self):
+        return 1
+c = C(); print(c.m)
+''',
+    'field_shadow_inherited': '''
+class A:
+    def x(self):
+        return 1
+class B(A):
+    def __init__(self):
+        self.x = 7
+print(B().x)
+''',
+    'classattr_shadows_base_method': '''
+class A:
+    def m(self):
+        return 1
+class B(A):
+    m = 5
+    def __init__(self):
+        self.n = 0
+print(B().m)
+''',
+    'field_set_in_other_method': '''
+class C:
+    def __init__(self):
+        self.n = 0
+    def m(self):
+        return 1
+    def set(self):
+        self.m = -3
+c = C(); c.set(); print(c.m)
+''',
+    'inherited_field_shadows_method': '''
+class A:
+    def __init__(self):
+        self.x = -8
+    def x(self):
+        return 1
+class B(A):
+    pass
+print(B().x)
+''',
+    'same_class_attr_after_method': '''
+class C:
+    def m(self):
+        return 1
+    m = 5
+print(C().m)
+''',
+    'classattr_base_method_subclass': '''
+class A:
+    def m(self):
+        return 1
+class B(A):
+    m = 5
+class C(B):
+    pass
+print(C().m)
+''',
+    'classattr_in_base': '''
+class A:
+    m = 5
+    def __init__(self):
+        self.n = 0
+class B(A):
+    pass
+print(B().m)
+''',
+    'subclass_method_over_base_attr_call': '''
+class A:
+    m = 5
+    def __init__(self):
+        self.n = 0
+class B(A):
+    def m(self):
+        return 1
+print(B().m())
+''',
+    'field_via_argument': '''
+class A:
+    def m(self):
+        return 1
+class B(A):
+    def __init__(self):
+        self.m = 7
+def show(a):
+    print(a.m)
+show(B())
+''',
+    'field_via_list': '''
+class A:
+    def m(self):
+        return 1
+class B(A):
+    def __init__(self):
+        self.m = 7
+print([B()][0].m)
+''',
+    'field_via_attribute': '''
+class A:
+    def m(self):
+        return 1
+class B(A):
+    def __init__(self):
+        self.m = 7
+class H:
+    def __init__(self):
+        self.b = B()
+print(H().b.m)
+''',
+    'field_via_dict': '''
+class A:
+    def m(self):
+        return 1
+class B(A):
+    def __init__(self):
+        self.m = 7
+print({"b": B()}["b"].m)
+''',
+}
+
+
 @unittest.skipUnless(HAVE_CC, 'gcc is required')
 class BoundMethodValueTests(unittest.TestCase):
     def test_bound_method_value_is_refused_by_name(self):
@@ -267,6 +428,10 @@ class BoundMethodValueTests(unittest.TestCase):
 
     def test_calls_properties_and_function_values_still_match_cpython(self):
         check_matches(self, 'allowed', ALLOWED)
+
+    def test_fields_and_class_attributes_shadowing_methods_match_cpython(self):
+        for name, text in sorted(SHADOWED.items()):
+            check_matches(self, name, text)
 
 
 if __name__ == '__main__':

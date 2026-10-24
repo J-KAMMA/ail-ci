@@ -3039,8 +3039,16 @@ class Compiler(boxclosure.ClosureMixin):
         # share the reference with every instance and class read.
         for i, (aname, aval) in enumerate(class_attrs):
             class_attrs[i] = (aname, aval, self._module_global_slot('__ail_ca_%s_%d' % (node.name, i)))
+        fields = set()
+        for item in node.body:
+            if isinstance(item, ast.FunctionDef) and item.args.args:
+                self_name = item.args.args[0].arg
+                for sub in ast.walk(item):
+                    if (isinstance(sub, ast.Attribute) and isinstance(sub.ctx, ast.Store)
+                            and isinstance(sub.value, ast.Name) and sub.value.id == self_name):
+                        fields.add(sub.attr)
         self.classes[node.name] = {'base': base, 'methods': methods, 'class_attrs': class_attrs,
-                                   'dc': dc, 'dc_hide': hide}
+                                   'fields': fields, 'dc': dc, 'dc_hide': hide}
         self.class_order.append(node.name)
 
     def _resolve_method(self, klass, mname):
@@ -3053,6 +3061,44 @@ class Compiler(boxclosure.ClosureMixin):
                 return info['methods'][mname]
             k = info['base']
         return None
+
+    def _class_member(self, klass, name):
+        """The class-body binding the instance lookup finds for `name`: ('method', info) or
+        ('attr', None), and None when the class does not bind it.  A later assignment in the
+        class body replaces an earlier def of the same name (and the reverse)."""
+        info = self.classes[klass]
+        method = info['methods'].get(name)
+        attrs = [v for a, v, _s in info.get('class_attrs', []) if a == name]
+        if method is None and not attrs:
+            return None
+        if method is None:
+            return ('attr', None)
+        if not attrs:
+            return ('method', method)
+        method_line = getattr(method.get('node'), 'lineno', -1)
+        attr_line = getattr(attrs[-1], 'lineno', -1)
+        return ('method', method) if method_line > attr_line else ('attr', None)
+
+    def _lookup_class_member(self, klass, name):
+        seen = set()
+        k = klass
+        while k is not None and k not in seen and k in self.classes:
+            seen.add(k)
+            member = self._class_member(k, name)
+            if member is not None:
+                return member
+            k = self.classes[k]['base']
+        return None
+
+    def _has_instance_field(self, klass, name):
+        seen = set()
+        k = klass
+        while k is not None and k not in seen and k in self.classes:
+            seen.add(k)
+            if name in self.classes[k].get('fields', ()):
+                return True
+            k = self.classes[k]['base']
+        return False
 
     def _virtual_plan(self, cname, lookup):
         """Run-time dispatch plan for a call whose receiver is statically an instance of `cname`
@@ -5050,9 +5096,10 @@ class Compiler(boxclosure.ClosureMixin):
             return self._property_read(node, prop_owners, ctx)
         cname = self._inst_class(node.value, ctx)
         if cname is not None:
-            info = self._resolve_method(cname, node.attr)
-            if info is not None:
-                kind = 'method' if info.get('is_static') else 'bound method'
+            member = self._lookup_class_member(cname, node.attr)
+            if (member is not None and member[0] == 'method'
+                    and not self._has_instance_field(cname, node.attr)):
+                kind = 'method' if member[1].get('is_static') else 'bound method'
                 raise Unsupported('%s %s.%s read as a value is not built; call it (%s.%s(...))'
                                   % (kind, cname, node.attr, cname, node.attr))
         obj = self.expr(node.value, ctx)
