@@ -360,7 +360,7 @@ class _Free(object):
     def _solve(self, fp):
         par = _parents(fp.node)
         stores = {nm: [] for nm in fp.locals}        # name -> ('v', value) | ('e', iterable) | None (not followed)
-        annots = {x.arg: x.annotation for x in fp.node.args.args}
+        annots = {x.arg: x.annotation for x in fp.node.args.posonlyargs + fp.node.args.args}
         for p in fp.params:
             a = annots.get(p)
             if not (isinstance(a, ast.Name) and a.id in _FREE_ANN):
@@ -1007,7 +1007,7 @@ def analyze(comp, tree, demote, nofloat=False):
         # a parameter annotation is a hint, not a proof: it is used only when no analysed call site says more,
         # and the entry guard of the boxed body checks it on every call that comes in boxed
         sp.hints = [OBJ if (plan.nofloat and h == FLOAT) else h
-                    for h in (_ann_type(a.annotation) for a in info['node'].args.args)]
+                    for h in (_ann_type(a.annotation) for a in info['node'].args.posonlyargs + info['node'].args.args)]
         plan.fns[sp.name] = sp
         plan.spec[name] = sp
     plan.generic_sites = set()       # (caller C name, id(call)): calls that go to the boxed body
