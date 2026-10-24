@@ -15,6 +15,29 @@ it refuses a call before the `def` by name and the default build falls back to t
 Calls after the def, recursion, caught `NameError`, and the parameter / assignment / argument /
 list-item / dict-value shapes keep CPython's behaviour. Added `AIL_CURRENT/test_ail_pre165.py`
 with the rebinding cases.
+## 2026-10-24 - `in` shares the saved-genexpr cursor (job-pre166-10250412)
+
+Review of the preceding commit found that `x in g` on a materialised generator expression still
+scanned the whole backing list and ignored `gen_idx`, so it could report already-consumed items
+and did not advance the shared cursor. `ail_op_contains` now searches from `gen_idx` and leaves
+the cursor after a match (or at the end when absent); the dunder-aware runtime patch keeps the
+same semantics when a user `__eq__` raises. `test_ail_pre166` gained plain and dunder membership
+cases. Probes covered matches, misses, duplicate values, equality across int/float/bool, empty
+generators, aliases, list items, slices, attributes, dict values, arguments, `iter()` mixing and
+custom `__eq__` (including an exception), on both builds.
+
+## 2026-10-24 - next() of a saved generator expression (job-pre166-10250412)
+
+Both emitters materialise a generator expression as a list, so `next(g)` worked only when the
+genexpr was written directly in the `next()` call. Stored in a name, an argument, a list item, a
+dict value or an attribute, or returned inside a list, it hit `AIL internal error: iterator:
+unknown kind`. The list now carries a `gen_idx` cursor, shared by `next()` and by iteration over
+that object the way a real generator's cursor is, and `ail_it_next` raises CPython's
+`TypeError: '<type>' object is not an iterator` for a value that is not an iterator (so
+`next([1, 2])` is no longer an internal error). `AIL_CURRENT/test_ail_pre166.py` compares the
+stored-genexpr shapes, aliasing, mixing `next()` with iteration, exhaustion/defaults and
+non-iterator types with CPython on both builds. Existing `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` still pass.
 
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
 

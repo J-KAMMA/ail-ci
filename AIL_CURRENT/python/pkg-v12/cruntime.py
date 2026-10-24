@@ -11101,6 +11101,8 @@ static inline double ail_float_val(ail_obj x) { return ((ail_floatbox *)x.o)->v;
 typedef struct { ail_gcobj hdr; ail_obj *p; int64_t n, cap;
     uint8_t from_generator;     /* a LIST that materialised a generator expression: CPython
                                    generators are not reversible, so ail_iter_reversed refuses it */
+    int64_t gen_idx;            /* next()/iteration cursor of a materialised generator expression
+                                   (one cursor per object, like a real generator's) */
 } ail_vecobj;
 
 static inline ail_st ail_raise_c(ail_ctx *cx, int builtin_id, const char *msg);
@@ -15678,7 +15680,13 @@ static inline ail_st ail_op_contains(ail_ctx *cx, int *out, ail_obj c, ail_obj i
             *out = ail_str_find(ail_view_to_str(c), ail_view_to_str(item)) >= 0; return AIL_OK;
         case AIL_T_LIST: case AIL_T_TUPLE: {
             ail_vecobj *v = (ail_vecobj *)c.o;
-            for (int64_t i = 0; i < v->n; i++) if (ail_member_eq(v->p[i], item)) { *out = 1; return AIL_OK; }
+            /* `x in g` on a materialised generator expression consumes it up to and including the
+               match (or to the end when absent), sharing the same cursor as next() and loops */
+            int gen = c.tag == AIL_T_LIST && v->from_generator;
+            for (int64_t i = gen ? v->gen_idx : 0; i < v->n; i++) {
+                if (ail_member_eq(v->p[i], item)) { if (gen) v->gen_idx = i + 1; *out = 1; return AIL_OK; }
+            }
+            if (gen) v->gen_idx = v->n;
             *out = 0; return AIL_OK;
         }
         case AIL_T_DICT: { ail_obj *v; ail_st st = ail_map_get(cx, &v, (ail_mapobj *)c.o, item); if (st != AIL_OK) return st; *out = v != NULL; return AIL_OK; }
@@ -15903,8 +15911,11 @@ static inline ail_st ail_next(ail_ctx *cx, ail_obj *out, ail_obj iterobj) {
         }
         case AIL_IT_LIST: case AIL_IT_TUPLE: {
             ail_vecobj *v = (ail_vecobj *)it->target.o;
-            if (it->idx >= v->n) return AIL_STOP;
-            *out = v->p[it->idx++]; return AIL_OK;
+            /* a materialised generator expression is its own iterator: next() and every loop over
+               it share one cursor (CPython's generator object), unlike a plain list's iterators */
+            int64_t *idx = it->kind == AIL_IT_LIST && v->from_generator ? &v->gen_idx : &it->idx;
+            if (*idx >= v->n) return AIL_STOP;
+            *out = v->p[(*idx)++]; return AIL_OK;
         }
         case AIL_IT_STR: {
             if (it->idx >= it->target.sv.len) return AIL_STOP;
@@ -20263,6 +20274,16 @@ static inline ail_st ail_it_combinations_wr(ail_ctx *cx, ail_obj *out, ail_obj i
 
 /* ---- the dispatcher itself ----------------------------------------------------------- */
 static inline ail_st ail_it_next(ail_ctx *cx, ail_obj *out, ail_obj itobj) {
+    if (itobj.tag == AIL_T_LIST && ((ail_vecobj *)itobj.o)->from_generator) {
+        ail_vecobj *v = (ail_vecobj *)itobj.o;
+        if (v->gen_idx >= v->n) return AIL_STOP;
+        *out = v->p[v->gen_idx++];
+        return AIL_OK;
+    }
+    if (itobj.tag != AIL_T_ITER && itobj.tag != AIL_T_INST) {
+        char buf[96]; snprintf(buf, sizeof buf, "'%s' object is not an iterator", ail_type_name(itobj.tag));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
     if (itobj.tag == AIL_T_INST) {
         for (ail_obj k = ((ail_instobj *)itobj.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
             ail_classobj *kc = (ail_classobj *)k.o;
