@@ -58,6 +58,18 @@ class Pre36Tests(unittest.TestCase):
                 self.assertNotIn('Traceback', output)
                 self.assertNotIn('AIL internal error', output)
 
+    def test_non_bmp_chr_constant_expressions_are_refused_on_the_general_path(self):
+        for text, code in (('print(chr(+0x1F600))\n', 0x1F600),
+                           ('print(chr(0xFFFF + 1))\n', 0x10000),
+                           ('print(chr(0x8000 * 2))\n', 0x10000)):
+            with tempfile.TemporaryDirectory(prefix='ail-pre36-') as directory:
+                built, exe = build(directory, 'non_bmp_expr_%x' % code, text, True)
+                output = built.stdout + built.stderr
+                self.assertNotEqual(built.returncode, 0, output)
+                self.assertFalse(exe.exists(), output)
+                self.assertIn('non-BMP code point U+%04X' % code, output)
+                self.assertNotIn('AIL internal error', output)
+
     def test_bmp_chr_boundaries_still_match_cpython(self):
         text = 'for n in (0, 1, 0x7f, 0x80, 0xff, 0x3a9, 0xffff):\n    print(n, chr(n))\n'
         with tempfile.TemporaryDirectory(prefix='ail-pre36-') as directory:
