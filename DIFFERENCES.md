@@ -4,6 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-rbfuzz81-10241242-1 | KeyError arguments | Runtime-raised `KeyError` from a missing dict key, `dict.pop`/`del d[k]`, `popitem` and `set.remove`/`set.pop` stored `repr(key)` as its message and argument; CPython keeps the raw key, so `e.args` was `("'x'",)` instead of `('x',)` and `repr(e)` was `KeyError('5')` for the int key `5`. The runtime now raises through `ail_raise_key_arg` and stores the raw key (`str(e)` is still `repr(key)`); empty `popitem`/`set.pop` keep their message argument. `test_ail_fuzz81.py` covers both builds. | fixed |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |
