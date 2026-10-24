@@ -11074,6 +11074,7 @@ static inline double ail_float_val(ail_obj x) { return ((ail_floatbox *)x.o)->v;
 typedef struct { ail_gcobj hdr; ail_obj *p; int64_t n, cap; } ail_vecobj;
 
 static inline ail_st ail_raise_c(ail_ctx *cx, int builtin_id, const char *msg);
+static inline ail_st ail_raise(ail_ctx *cx, ail_obj cls, ail_obj msg);
 static inline ail_st ail_hit_limit(ail_ctx *cx, const char *name, const char *detail);
 static inline ail_obj ail_obj_repr(ail_ctx *cx, ail_obj x); /* forward decl: the dict
    section builds KeyError messages with repr(key) for ANY key tag; defined in the repr section */
@@ -13766,22 +13767,26 @@ static inline ail_st ail_str_to_int(ail_ctx *cx, int64_t *out, ail_obj sobj) {
     return AIL_OK;
 }
 
+/* Raise ValueError with head + repr(value).  Building the message as str + repr keeps
+   every non-ASCII code point intact; narrowing the repr's UTF-16 units into a C char
+   buffer turned U+2469 into "i" (and could split a surrogate pair). */
+static inline ail_st ail__raise_value_repr(ail_ctx *cx, const char *head, ail_obj value) {
+    ail_obj parts[2];
+    parts[0] = ail_str_from_cstr(cx, head);
+    parts[1] = ail_box_none();
+    AIL_ROOT_N(cx, fr, parts, 2);
+    parts[1] = ail_str_repr(cx, value);
+    ail_obj msg = ail_str_cat(cx, parts[0], parts[1]);
+    AIL_FRAME_LEAVE(cx, fr);
+    return ail_raise(cx, cx->builtin_cls[AIL_B_VALUEERROR], msg);
+}
 /* int(x, base) -- base 0 detects a 0x/0o/0b prefix (else 10); an explicit base may
    also consume its own prefix (int('0xff', 16) == 255). '_' between digits, same
    int64 overflow bound and whitespace trim as ail_str_to_int. */
 static inline ail_st ail__int_badlit(ail_ctx *cx, ail_obj sobj, int64_t base) {
-    ail_obj r = ail_str_repr(cx, sobj);
-    ail_str rs = ail_view_to_str(r);
     char head[72];
-    int hl = snprintf(head, sizeof head, "invalid literal for int() with base %lld: ", (long long)base);
-    if (hl < 0) hl = 0;
-    char *msg = (char *)ail_xmalloc((size_t)hl + (size_t)rs.n + 1);
-    memcpy(msg, head, (size_t)hl);
-    for (int64_t k = 0; k < rs.n; k++) msg[hl + k] = (char)ail_chr(rs, k);
-    msg[hl + rs.n] = 0;
-    ail_st st = ail_raise_c(cx, AIL_B_VALUEERROR, msg);
-    free(msg);
-    return st;
+    snprintf(head, sizeof head, "invalid literal for int() with base %lld: ", (long long)base);
+    return ail__raise_value_repr(cx, head, sobj);
 }
 static inline ail_st ail_str_to_int_base(ail_ctx *cx, int64_t *out, ail_obj sobj, int64_t base) {
     if (base != 0 && (base < 2 || base > 36))
@@ -17367,13 +17372,9 @@ static inline ail_st ail_bi_int(ail_ctx *cx, ail_obj *out, ail_obj x, int has_ba
         digits_seen++;
     }
     if (bad || digits_seen == 0) {
-        ail_obj rep = ail_str_repr(cx, x);
-        ail_str rs = ail_view_to_str(rep);
-        char valbuf[220]; int64_t rn = rs.n < 200 ? rs.n : 200;
-        for (int64_t k = 0; k < rn; k++) valbuf[k] = (char)ail_chr(rs, k);
-        valbuf[rn] = 0;
-        char buf[320]; snprintf(buf, sizeof buf, "invalid literal for int() with base %lld: %s", (long long)b, valbuf);
-        return ail_raise_c(cx, AIL_B_VALUEERROR, buf);
+        char head[72];
+        snprintf(head, sizeof head, "invalid literal for int() with base %lld: ", (long long)b);
+        return ail__raise_value_repr(cx, head, x);
     }
     *out = ail_box_int(m == (uint64_t)INT64_MAX + 1u ? INT64_MIN : neg ? -(int64_t)m : (int64_t)m);
     return AIL_OK;
@@ -17419,13 +17420,7 @@ static inline ail_st ail_bi_float(ail_ctx *cx, ail_obj *out, ail_obj x) {
         if (heap) free(heap);
     }
     if (ok) { *out = ail_box_float(cx, v); return AIL_OK; }
-    ail_obj rep = ail_str_repr(cx, x);
-    ail_str rs = ail_view_to_str(rep);
-    char valbuf[220]; int64_t rn = rs.n < 200 ? rs.n : 200;
-    for (int64_t k = 0; k < rn; k++) valbuf[k] = (char)ail_chr(rs, k);
-    valbuf[rn] = 0;
-    char buf[280]; snprintf(buf, sizeof buf, "could not convert string to float: %s", valbuf);
-    return ail_raise_c(cx, AIL_B_VALUEERROR, buf);
+    return ail__raise_value_repr(cx, "could not convert string to float: ", x);
 }
 
 /* B020 (str), B021 (repr), B022 (bool): re-exported as-is -- ail_obj_str / ail_obj_repr /
