@@ -75,10 +75,113 @@ def _module_constant(node):
             and bool(value.elts) and all(map(_literal_number, value.elts)))
 
 
+_INT64_MIN, _INT64_MAX = -(1 << 63), (1 << 63) - 1
+
+
+class _Int64ConstantOverflow(Exception):
+    """A constant expression (or one of its steps) left the int64 range."""
+
+
+def _constant_int(node):
+    """The int a constant arithmetic expression denotes, or None when it is not one. Raises
+    _Int64ConstantOverflow as soon as a step is outside int64: AIL computes such a step in int64
+    and stops with `integer overflow`, where CPython's unbounded int reaches the subscript (or the
+    value) and raises IndexError (or keeps the big value). The checks below refuse the construct
+    instead of letting the two differ."""
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        value = node.value
+    elif isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert)):
+        value = _constant_int(node.operand)
+        if value is None:
+            return None
+        if isinstance(node.op, ast.USub):
+            value = -value
+        elif isinstance(node.op, ast.Invert):
+            value = ~value
+    elif isinstance(node, ast.BinOp):
+        left, right = _constant_int(node.left), _constant_int(node.right)
+        if left is None or right is None:
+            return None
+        if isinstance(node.op, ast.Pow):
+            if not 0 <= right <= 64:
+                return None
+            value = left ** right
+        elif isinstance(node.op, ast.LShift):
+            if not 0 <= right < 64:
+                return None
+            value = left << right
+        elif isinstance(node.op, ast.RShift):
+            if not 0 <= right < 64:
+                return None
+            value = left >> right
+        elif isinstance(node.op, ast.Mult):
+            value = left * right
+        elif isinstance(node.op, ast.Add):
+            value = left + right
+        elif isinstance(node.op, ast.Sub):
+            value = left - right
+        elif isinstance(node.op, ast.FloorDiv):
+            if right == 0:
+                return None
+            value = left // right
+        elif isinstance(node.op, ast.Mod):
+            if right == 0:
+                return None
+            value = left % right
+        elif isinstance(node.op, ast.BitAnd):
+            value = left & right
+        elif isinstance(node.op, ast.BitOr):
+            value = left | right
+        elif isinstance(node.op, ast.BitXor):
+            value = left ^ right
+        else:
+            return None
+    else:
+        return None
+    if not _INT64_MIN <= value <= _INT64_MAX:
+        raise _Int64ConstantOverflow(value)
+    return value
+
+
+def _check_constant_power(node):
+    """Refuse a constant `**` whose value (or an inner step) int64 cannot hold. Literals are
+    refused by _check_int64_literals; this catches `10 ** 20` written as arithmetic, wherever it
+    appears (an argument, a list item, an attribute or a dict value), not only as an index."""
+    try:
+        _constant_int(node)
+    except _Int64ConstantOverflow as overflow:
+        error = ValueError(f'int64 constant out of range: {overflow.args[0]}')
+        error.source_line = node.lineno
+        error.source_column = node.col_offset
+        raise error
+
+
+def _check_index_expression(slice_node):
+    """Refuse a constant subscript index that int64 cannot hold. A literal or signed literal is
+    already refused by _check_int64_literals with its own message, so only compound arithmetic is
+    read here."""
+    literal = (isinstance(slice_node, ast.Constant)
+               or isinstance(slice_node, ast.UnaryOp) and isinstance(slice_node.op, (ast.UAdd, ast.USub))
+               and isinstance(slice_node.operand, ast.Constant))
+    if literal:
+        return
+    try:
+        _constant_int(slice_node)
+    except _Int64ConstantOverflow as overflow:
+        error = ValueError(f'int64 index out of range: {overflow.args[0]}')
+        error.source_line = slice_node.lineno
+        error.source_column = slice_node.col_offset
+        raise error
+
+
 def _check_int64_literals(tree):
     nodes = [tree]
     while nodes:
         node = nodes.pop()
+        if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice):
+            _check_index_expression(node.slice)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+            _check_constant_power(node)
         if (isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub))
                 and isinstance(node.operand, ast.Constant) and type(node.operand.value) is int):
             value = -node.operand.value if isinstance(node.op, ast.USub) else node.operand.value
@@ -87,7 +190,7 @@ def _check_int64_literals(tree):
         else:
             nodes.extend(ast.iter_child_nodes(node))
             continue
-        if not -(1 << 63) <= value < 1 << 63:
+        if not _INT64_MIN <= value <= _INT64_MAX:
             error = ValueError(f'int64 literal out of range: {value}')
             error.source_line = node.lineno
             error.source_column = node.col_offset
