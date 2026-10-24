@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - pre77: a class attribute shadows an inherited @property
+
+On the general path a subclass's plain class attribute of the same name did not shadow a
+base class's `@property`: reads called the base getter (printing `get` and the getter's value)
+and writes called the base setter, where CPython finds the subclass entry first and uses it
+(the value for a read, a new instance attribute for a write). Attribute lookup now follows the
+MRO for both directions: each property owner condition excludes run-time classes at or below it
+whose last binding of the name is a plain class attribute. The class body's last binding also
+decides between an attribute and a property in the same class. Added `test_ail_pre77.py`
+(7 programs, both builds) and registered it in `ail_check.MODULES`.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

@@ -2992,6 +2992,7 @@ class Compiler(boxclosure.ClosureMixin):
         self._class_global_slot(node.name)
         methods = {}
         class_attrs = []
+        last_binding = {}
         for item in node.body:
             if isinstance(item, ast.FunctionDef):
                 mcname = 'pm_%s_%s' % (node.name, item.name)
@@ -2999,13 +3000,16 @@ class Compiler(boxclosure.ClosureMixin):
                 info = self._register_function(item, cname=mcname + ('__set' if setter else ''), is_method=True,
                                                 owner_class=node.name)
                 methods[('__ail_set_' + item.name) if info.get('is_setter') else item.name] = info
+                last_binding[item.name] = 'method'
             elif isinstance(item, ast.Assign) and len(item.targets) == 1 and \
                     isinstance(item.targets[0], ast.Name):
                 class_attrs.append((item.targets[0].id, item.value))
+                last_binding[item.targets[0].id] = 'attr'
             elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
                 # `count: int = 0` is a class attribute; `name: str` alone declares nothing at run time
                 if item.value is not None:
                     class_attrs.append((item.target.id, item.value))
+                    last_binding[item.target.id] = 'attr'
             elif isinstance(item, (ast.Pass, ast.Expr)):
                 continue
             else:
@@ -3041,7 +3045,7 @@ class Compiler(boxclosure.ClosureMixin):
         for i, (aname, aval) in enumerate(class_attrs):
             class_attrs[i] = (aname, aval, self._module_global_slot('__ail_ca_%s_%d' % (node.name, i)))
         self.classes[node.name] = {'base': base, 'methods': methods, 'class_attrs': class_attrs,
-                                   'dc': dc, 'dc_hide': hide}
+                                   'last_binding': last_binding, 'dc': dc, 'dc_hide': hide}
         self.class_order.append(node.name)
 
     def _resolve_method(self, klass, mname):
@@ -5051,7 +5055,9 @@ class Compiler(boxclosure.ClosureMixin):
                 if hits:
                     return self._cached_class_attr(hits[-1][1], hits[-1][0], ctx)
                 k = self.classes[k]['base']
-        prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
+        prop_owners = [c for c in self.class_order
+                       if self.classes[c]['methods'].get(node.attr, {}).get('is_property')
+                       and self.classes[c].get('last_binding', {}).get(node.attr) == 'method']
         if prop_owners:
             return self._property_read(node, prop_owners, ctx)
         obj = self.expr(node.value, ctx)
@@ -5085,6 +5091,29 @@ class Compiler(boxclosure.ClosureMixin):
         return '((%s.tag == AIL_T_INST || %s.tag == AIL_T_EXC) && ail_class_is_or_subclass(((ail_instobj *)%s.o)->cls, ' \
                'g_slots_arr[%d]))' % (obj, obj, obj, self.global_slots['class:' + c])
 
+    def _class_attr_shadowers(self, c, name):
+        """Classes at or below `c` whose last binding of `name` is a plain class attribute: in CPython's
+        MRO that entry is found before `c`'s property, so the property is not used for their instances."""
+        return [d for d in self.class_order
+                if self._is_subclass_of(d, c)
+                and self.classes[d].get('last_binding', {}).get(name) == 'attr'
+                and any(a == name for a, _v, _s in self.classes[d].get('class_attrs', []))]
+
+    def _shadow_cond(self, obj, c, name):
+        """A C condition that is false when the run-time class of `obj` has a class attribute `name` at or
+        below `c` (so `c`'s property getter or setter must not run)."""
+        ds = self._class_attr_shadowers(c, name)
+        if not ds:
+            return None
+        tests = ' || '.join('ail_class_is_or_subclass(((ail_instobj *)%s.o)->cls, g_slots_arr[%d])'
+                            % (obj, self.global_slots['class:' + d]) for d in ds)
+        return '!(%s)' % tests
+
+    def _property_cond(self, obj, c, name):
+        cond = self._property_owner_cond(obj, c)
+        shadow = self._shadow_cond(obj, c, name)
+        return cond if shadow is None else '%s && %s' % (cond, shadow)
+
     def _property_read(self, node, owners, ctx):
         """obj.NAME where a class of the program has a @property NAME: its getter for an instance of such a class
         (the most derived first), the attribute otherwise."""
@@ -5094,7 +5123,7 @@ class Compiler(boxclosure.ClosureMixin):
         first = True
         for c in owners:
             info = self.classes[c]['methods'][node.attr]
-            ctx.emit('%sif (%s) {' % ('' if first else '} else ', self._property_owner_cond(obj, c)))
+            ctx.emit('%sif (%s) {' % ('' if first else '} else ', self._property_cond(obj, c, node.attr)))
             first = False
             ctx.indent += 1
             ctx.emit('st = %s(cx, &%s, %s);' % (info['cname'], t, obj))
@@ -9551,13 +9580,16 @@ class Compiler(boxclosure.ClosureMixin):
                 raise Unsupported('writing %s (exception chaining is not kept here)' % target.attr)
             obj = self.expr(target.value, ctx)
             self.attr_names.add(target.attr)
-            setters = [c for c in self.class_order if '__ail_set_' + target.attr in self.classes[c]['methods']]
+            setters = [c for c in self.class_order
+                       if '__ail_set_' + target.attr in self.classes[c]['methods']
+                       and self.classes[c].get('last_binding', {}).get(target.attr) == 'method']
             if setters:
                 # obj.NAME = v where a class has a property setter for NAME
                 first = True
                 for c in setters:
                     info = self.classes[c]['methods']['__ail_set_' + target.attr]
-                    ctx.emit('%sif (%s) {' % ('' if first else '} else ', self._property_owner_cond(obj, c)))
+                    ctx.emit('%sif (%s) {' % ('' if first else '} else ',
+                             self._property_cond(obj, c, target.attr)))
                     first = False
                     ctx.indent += 1
                     dummy = ctx.tmp()
