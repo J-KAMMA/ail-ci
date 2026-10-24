@@ -1,5 +1,14 @@
 # DEVLOG
 
+## 2026-10-24 - pre134: refuse `del` of a class name by name
+
+`class C: pass; del C` made both builds fail with the compiler's own `KeyError: 'C'`.
+A class name is read from its dedicated class slot, not an ordinary frame/global slot,
+so deleting the binding cannot be cleared the way a local or module variable is. The
+construct is now refused by name at compile time (`del on the class name C`); deleting
+ordinary globals, locals, list/dict items and slices is unchanged and still matches
+CPython on both builds. Added `test_ail_pre134.py`.
+
 ## 2026-10-22
 
 - fuzz20: `int.from_bytes` on the general path converted its argument with the `bytes()` constructor
