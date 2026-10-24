@@ -26,3 +26,6 @@ This export carries the rows found by the jobs run here; the full list is mainta
 | id | area | difference |
 |---|---|---|
 | C?-job-fuzz70-10231500-1 | assert | A typed-only (`--strict` / `AIL_NO_GENERAL=1`) build refuses `assert cond, tuple_message` by name. The default build and the general path keep the message object in `AssertionError.args`, as CPython does. |
+| id | difference |
+| --- | --- |
+| C?-job-fuzz82-10231553-1 | A function that deletes an item of a module-level numeric list (`del xs[i]`) is refused by name on the typed path. Before, deleting the last item printed the unchanged list (the write through the `const` table was dropped) and deleting an earlier item crashed; the default build falls back to the general path and matches CPython. |

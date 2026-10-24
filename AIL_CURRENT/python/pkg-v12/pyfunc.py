@@ -21618,6 +21618,15 @@ def _stmt_inner(node, ctx, ind):
                 and isinstance(node.targets[0].value, ast.Name)
                 and not isinstance(node.targets[0].slice, ast.Slice)):
             name = node.targets[0].value.id
+            if name in ctx.modconsts:
+                # SEMANTICS section 29: a module-level constant is read-only -- `del xs[i]`
+                # reaches `ail_list_pop` on the const table `_emit_module_consts` declares.
+                # Deleting the last element only writes `.n` through const storage (the
+                # optimiser may drop the write, printing the old list) and deleting one before
+                # it also memmoves over the const data, which faults. Refused by name here,
+                # exactly like `.append()` and `xs[i] = v` above.
+                raise Unsupported('%r is a module-level constant; deleting from it would mutate it, '
+                                  'which is not supported' % name)
             t = ctx.type_of(name)
             if t == DICT:
                 c = ctx.cname(name)
