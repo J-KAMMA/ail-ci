@@ -11071,7 +11071,10 @@ static inline double ail_float_val(ail_obj x) { return ((ail_floatbox *)x.o)->v;
    (they only need cx->builtin_cls, already part of ail_ctx, plus ail_str_from_cstr from
    ail_str2.h -- so the body has to come AFTER the include, the prototype BEFORE it).
    =================================================================================== */
-typedef struct { ail_gcobj hdr; ail_obj *p; int64_t n, cap; } ail_vecobj;
+typedef struct { ail_gcobj hdr; ail_obj *p; int64_t n, cap;
+    uint8_t from_generator;     /* a LIST that materialised a generator expression: CPython
+                                   generators are not reversible, so ail_iter_reversed refuses it */
+} ail_vecobj;
 
 static inline ail_st ail_raise_c(ail_ctx *cx, int builtin_id, const char *msg);
 static inline ail_st ail_raise(ail_ctx *cx, ail_obj cls, ail_obj msg);
@@ -15825,6 +15828,8 @@ static inline ail_st ail_iter_reversed(ail_ctx *cx, ail_obj *out, ail_obj seq) {
         it->extra = ail_box_int((int64_t)(UINT64_C(0) - (uint64_t)r->step));
         ail_obj res; res.tag = AIL_T_ITER; res.o = (ail_gcobj *)it; *out = res; return AIL_OK;
     }
+    if (seq.tag == AIL_T_LIST && ((ail_vecobj *)seq.o)->from_generator)
+        return ail_raise_c(cx, AIL_B_TYPEERROR, "'generator' object is not reversible");
     if (seq.tag == AIL_T_LIST || seq.tag == AIL_T_TUPLE) n = ((ail_vecobj *)seq.o)->n;
     else if (seq.tag == AIL_T_STR) n = seq.sv.len;
     else { char buf[64]; snprintf(buf, sizeof buf, "'%s' object is not reversible", ail_type_name(seq.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
