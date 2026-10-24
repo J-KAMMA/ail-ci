@@ -447,6 +447,10 @@ static ail_obj ail_builtin_sorted(ail_obj src, ail_obj (*keyfn)(ail_obj), int re
     ail_obj *tmpv = (ail_obj *)ail_alloc((size_t)m * sizeof(ail_obj));
     ail_obj *tmpk = (ail_obj *)ail_alloc((size_t)m * sizeof(ail_obj));
     for (int64_t i = 0; i < m; i++) keys[i] = keyfn(r.v->p[i]);
+    if (ail__sort_nan_at(keys, m)) {
+        free(keys); free(tmpv); free(tmpk);
+        ail_raise_c(AIL_ERR_VALUE, "sorting NaN: CPython's Timsort order for NaN cannot be reproduced");
+    }
     ail__key_merge_sort(r.v->p, keys, tmpv, tmpk, 0, m, reverse);
     free(keys); free(tmpv); free(tmpk);
     return r;
@@ -458,6 +462,10 @@ static void ail_list_sort_key(ail_obj lst, ail_obj (*keyfn)(ail_obj), int revers
     ail_obj *tmpv = (ail_obj *)ail_alloc((size_t)m * sizeof(ail_obj));
     ail_obj *tmpk = (ail_obj *)ail_alloc((size_t)m * sizeof(ail_obj));
     for (int64_t i = 0; i < m; i++) keys[i] = keyfn ? keyfn(lst.v->p[i]) : lst.v->p[i];
+    if (ail__sort_nan_at(keys, m)) {
+        free(keys); free(tmpv); free(tmpk);
+        ail_raise_c(AIL_ERR_VALUE, "sorting NaN: CPython's Timsort order for NaN cannot be reproduced");
+    }
     ail__key_merge_sort(lst.v->p, keys, tmpv, tmpk, 0, m, reverse);
     free(keys); free(tmpv); free(tmpk);
 }

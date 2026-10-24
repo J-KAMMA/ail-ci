@@ -28,3 +28,4 @@ Rows added by job-fuzz8-10220554 use the placeholder id form requested for this 
 | ID | Area | Status | Description |
 | --- | --- | --- | --- |
 | C?-job-fuzz65-10231438-1 | heapq / list repr | fixed | After a caught `heappush` TypeError on a `list[int]` (CPython appends before comparing), the annotation-specialized list repr printed a string element as `x` instead of `'x'` when a tuple comparison had generated that helper. Scalar elements now use the runtime value's `repr`. |
+| C?-job-fuzz95-10241848-1 | sorting NaN | refused by name | A list sort whose elements, or whose tuple/list key, contain a NaN now raises `ValueError: sorting NaN: CPython's Timsort order for NaN cannot be reproduced` on both boxed builds. CPython's Timsort leaves an input-dependent order that the stable merge sort cannot reproduce, so the construct is refused instead of silently permuted. A key with no NaN is still allowed; `test_ail_fuzz95.py` keeps both cases. |

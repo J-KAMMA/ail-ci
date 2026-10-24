@@ -10446,9 +10446,26 @@ static inline void ail__vec_merge_sort(ail_obj *p, ail_obj *tmp, int64_t lo, int
     while (j < hi) tmp[k++] = p[j++];
     for (int64_t x = lo; x < hi; x++) p[x] = tmp[x];
 }
+/* A NaN has no total order: CPython's Timsort leaves a specific, input-dependent order that
+   this stable merge sort cannot reproduce (silent fuzz95).  Refuse the sort by name instead of
+   returning a silently different permutation.  A tuple/list key is searched recursively because
+   tuple comparison reaches a NaN inside it. */
+static int ail__sort_has_nan(ail_obj x) {
+    if (x.tag == AIL_FLOAT) return x.f != x.f;
+    if (x.tag == AIL_LIST || x.tag == AIL_TUPLE) {
+        for (int64_t i = 0; i < x.v->n; i++) if (ail__sort_has_nan(x.v->p[i])) return 1;
+    }
+    return 0;
+}
+static int ail__sort_nan_at(ail_obj *p, int64_t n) {
+    for (int64_t i = 0; i < n; i++) if (ail__sort_has_nan(p[i])) return 1;
+    return 0;
+}
 static inline void ail_list_sort(ail_obj lst) {
     ail_vec *v = lst.v;
     if (v->n < 2) return;
+    if (ail__sort_nan_at(v->p, v->n))
+        ail_raise_c(AIL_ERR_VALUE, "sorting NaN: CPython's Timsort order for NaN cannot be reproduced");
     /* Arena, not malloc/free: ail_obj_cmp (called inside the merge) can longjmp out on a
        TypeError (case 39's own coverage), which would skip a free() and leak the scratch
        buffer -- exactly what the sanitizer sweep caught here on the first run. Arena
@@ -15014,6 +15031,22 @@ static inline ail_st ail__vec_merge_sort(ail_ctx *cx, ail_obj *p, ail_obj *keys,
     for (int64_t x = lo; x < hi; x++) { p[x] = tmp[x]; keys[x] = ktmp[x]; }
     return AIL_OK;
 }
+/* A NaN has no total order: CPython's Timsort leaves a specific, input-dependent order that
+   this stable merge sort cannot reproduce (silent fuzz95).  Refuse the sort by name instead of
+   returning a silently different permutation.  A tuple/list key is searched recursively because
+   tuple comparison reaches a NaN inside it. */
+static int ail__sort2_has_nan(ail_obj x) {
+    if (x.tag == AIL_T_FLOAT) return ail_float_val(x) != ail_float_val(x);
+    if (x.tag == AIL_T_LIST || x.tag == AIL_T_TUPLE) {
+        ail_vecobj *v = (ail_vecobj *)x.o;
+        for (int64_t i = 0; i < v->n; i++) if (ail__sort2_has_nan(v->p[i])) return 1;
+    }
+    return 0;
+}
+static int ail__sort2_nan_at(ail_obj *p, int64_t n) {
+    for (int64_t i = 0; i < n; i++) if (ail__sort2_has_nan(p[i])) return 1;
+    return 0;
+}
 /* ail_list_sort -- the key function (if not AIL_T_NONE) is called EXACTLY ONCE per
    element, into a scratch `keys` array (decorate), the merge sort above compares only
    those decorations (never re-invoking the key), then the element array is left permuted
@@ -15045,7 +15078,9 @@ static inline ail_st ail_list_sort(ail_ctx *cx, ail_obj lst, ail_obj key_fn_or_n
     } else {
         for (int64_t i = 0; i < n; i++) keys[i] = v->p[i];
     }
-    if (reverse) for (int64_t i = 0, j = n - 1; i < j; i++, j--) {
+    if (st == AIL_OK && n > 1 && ail__sort2_nan_at(keys, n))
+        st = ail_raise_c(cx, AIL_B_VALUEERROR, "sorting NaN: CPython's Timsort order for NaN cannot be reproduced");
+    if (st == AIL_OK && reverse) for (int64_t i = 0, j = n - 1; i < j; i++, j--) {
         ail_obj t = v->p[i]; v->p[i] = v->p[j]; v->p[j] = t;
         t = keys[i]; keys[i] = keys[j]; keys[j] = t;
     }

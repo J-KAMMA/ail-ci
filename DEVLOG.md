@@ -1,5 +1,15 @@
 # DEVLOG
 
+## 2026-10-24 - fuzz95: NaN sorting refused by name
+
+Differential probes for dict/list comprehensions and sorting found that `sorted`/`list.sort`
+with a NaN in the values, or in a tuple/list sort key, silently returned a different order from
+CPython in both boxed builds: CPython's Timsort gives NaN an input-dependent order that the
+stable merge sort does not reproduce. Both boxed sort paths now scan the sort keys (recursively
+through tuples/lists) and raise `ValueError: sorting NaN: CPython's Timsort order for NaN cannot
+be reproduced`. A key with no NaN is still allowed. `test_ail_fuzz95.py` keeps the case. Other
+probes matched CPython; a `10**30` integer overflow and four build refusals were non-silent.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
