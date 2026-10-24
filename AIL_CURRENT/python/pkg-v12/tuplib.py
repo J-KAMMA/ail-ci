@@ -323,6 +323,12 @@ class Lower(Stmts, Calls, Lams, Exprs):
         if t is not None and has_tuple(t):
             self.errors.append((node.lineno, 'a module-level constant holding tuples must be a literal list of '
                                 'number tuples (DIRS = [(0, 1), (1, 0)]); build other tuples inside a function'))
+        elif t is None and any(isinstance(n, ast.Tuple) for n in ast.walk(v)):
+            # The type could not be told and the value mentions a tuple, so another use of that tuple (for
+            # example a frozenset of tuples as a dict key, whose table the pass refuses) may have been lowered
+            # to a tuple class while this constant stayed a plain object. Leave the whole program as written.
+            self.errors.append((node.lineno, 'a module-level constant whose type cannot be told and that holds a '
+                                'tuple is not built; build it inside a function'))
         self.consts[nm] = t
         return [node]
 

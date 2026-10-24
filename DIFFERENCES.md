@@ -4,6 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre112-10242224-1 | dict keyed by a frozenset of tuples | The tuple pass lowered `frozenset({(1, "a"), (2, "b")})` used as a dict *lookup* key to its table class, but a table cannot be keyed by a set, so the dict stayed a plain object: `D[frozenset({(1, "a"), (2, "b")})]` raised `KeyError`, `... in D` printed False and `D.get(...)` returned None. The pass now refuses the set-of-tuples key on a non-table container and bails on an untypable module-level constant mentioning a tuple; the general path keeps both boxed. | fixed |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |
