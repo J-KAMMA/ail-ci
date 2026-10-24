@@ -14059,12 +14059,14 @@ static inline ail_st ail_set_intersection(ail_ctx *cx, ail_obj *out, ail_obj a, 
 static inline ail_st ail_meth_set_difference(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b);
 static inline ail_st ail_meth_set_symmetric_difference(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b);
 
-typedef struct { int64_t name_id; ail_obj val; } ail_attr;
+typedef struct { int64_t name_id; ail_obj val; unsigned char from_class; } ail_attr;
 typedef struct { ail_gcobj hdr; ail_obj cls; ail_attr *attrs; int64_t n, cap; } ail_instobj;
 
 typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or NONE */; int builtin_id;
                  ail_st (*keys_fn)(ail_ctx *, ail_obj *, ail_obj); /* user keys() (self only): the mapping protocol of dict(inst) */
+                 int keys_extra; /* keys() also takes *args (1) and/or **kwargs (2): call with empty ones */
                  ail_st (*getitem_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj); /* user __getitem__ (self, key): dict(inst) values */
+                 ail_st (*call_fn)(ail_ctx *, ail_obj *, ail_obj); /* user __call__ (self only), or 0 */
                  int dc; /* @dataclass: field count + 1 (0 = not a dataclass); repr/str print the first dc-1 attributes */
                  unsigned long long dc_hide; /* bit i set: field i is left out of the repr (field(repr=False)) */
                  ail_st (*iter_iter)(ail_ctx *, ail_obj *, ail_obj); /* user __iter__ (self only), or 0 */
@@ -16417,7 +16419,7 @@ static inline ail_obj ail_class_new(ail_ctx *cx, const char *name, ail_obj base)
     c->builtin_id = -1;
     c->dc = 0; c->dc_hide = 0;
     c->iter_iter = 0; c->iter_next = 0; c->repr_fn = 0; c->str_fn = 0; c->lt_fn = 0;
-    c->keys_fn = 0; c->getitem_fn = 0;
+    c->keys_fn = 0; c->keys_extra = 0; c->getitem_fn = 0; c->call_fn = 0;
     ail_obj r; r.tag = AIL_T_CLASS; r.o = (ail_gcobj *)c;
     AIL_ROOT1(cx, fr, r);
     c->name = ail_str_from_cstr(cx, name);
@@ -16431,7 +16433,8 @@ static inline ail_obj ail_inst_new(ail_ctx *cx, ail_obj cls) {
 }
 static inline void ail_inst_setattr(ail_ctx *cx, ail_obj inst, int64_t name_id, ail_obj val) {
     ail_instobj *o = (ail_instobj *)inst.o;
-    for (int64_t i = 0; i < o->n; i++) if (o->attrs[i].name_id == name_id) { o->attrs[i].val = val; return; }
+    for (int64_t i = 0; i < o->n; i++)
+        if (o->attrs[i].name_id == name_id) { o->attrs[i].val = val; o->attrs[i].from_class = 0; return; }
     if (o->n == o->cap) {
         int64_t nc = o->cap ? o->cap * 2 : 4;
         ail_attr *na = (ail_attr *)ail_xmalloc((size_t)nc * sizeof(ail_attr));
@@ -16445,7 +16448,15 @@ static inline void ail_inst_setattr(ail_ctx *cx, ail_obj inst, int64_t name_id, 
             compute the exact delta and this one does not need to. */
         cx->gc_bytes += (size_t)nc * sizeof(ail_attr);
     }
-    o->attrs[o->n].name_id = name_id; o->attrs[o->n].val = val; o->n++;
+    o->attrs[o->n].name_id = name_id; o->attrs[o->n].val = val; o->attrs[o->n].from_class = 0; o->n++;
+}
+/* A class attribute copied onto a new instance: a function value stored this way is a
+   descriptor, so obj.keys can bind it to the instance (a FUNCTION assigned in __init__ is
+   an ordinary instance-dict value and is NOT bound). */
+static inline void ail_inst_setattr_class(ail_ctx *cx, ail_obj inst, int64_t name_id, ail_obj val) {
+    ail_inst_setattr(cx, inst, name_id, val);
+    ail_instobj *o = (ail_instobj *)inst.o;
+    for (int64_t i = 0; i < o->n; i++) if (o->attrs[i].name_id == name_id) { o->attrs[i].from_class = 1; return; }
 }
 /* A KeyError of one argument: str(e) is repr(arg), while e.args and repr(e) keep the argument
    itself (CPython's KeyError.__str__ quirk).  The dict/set runtime used to pass the already
@@ -18616,12 +18627,26 @@ static inline ail_st ail_dict_update_pairs(ail_ctx *cx, ail_obj d, ail_obj other
         if (st == AIL_STOP) { st = AIL_OK; break; }
         if (st != AIL_OK) break;
         ail_obj e = fr.slots[1];
+        if (e.tag == AIL_T_STR) {
+            /* a str is a pair sequence too: dict(["ab"]) is {'a': 'b'} (one code point each) */
+            ail_str es = ail_view_to_str(e);
+            if (es.n != 2) {
+                char buf[96]; snprintf(buf, sizeof buf, "dictionary update sequence element #%lld has length %lld; 2 is required", (long long)i, (long long)es.n);
+                st = ail_raise_c(cx, AIL_B_VALUEERROR, buf); break;
+            }
+            ail_obj ka = ail_str_view(e.sv.backing, e.sv.off, 1);
+            ail_obj va = ail_str_view(e.sv.backing, e.sv.off + 1, 1);
+            st = ail_dict_set(cx, d, ka, va);
+            i++;
+            continue;
+        }
         if (e.tag != AIL_T_LIST && e.tag != AIL_T_TUPLE) {
-            st = ail_raise_c(cx, AIL_B_TYPEERROR, "cannot convert dictionary update sequence element to a sequence"); break;
+            char buf[144]; snprintf(buf, sizeof buf, "cannot convert dictionary update sequence element #%lld to a sequence", (long long)i);
+            st = ail_raise_c(cx, AIL_B_TYPEERROR, buf); break;
         }
         ail_vecobj *v = (ail_vecobj *)e.o;
         if (v->n != 2) {
-            char buf[80]; snprintf(buf, sizeof buf, "dictionary update sequence element #%lld has length %lld; 2 is required", (long long)i, (long long)v->n);
+            char buf[96]; snprintf(buf, sizeof buf, "dictionary update sequence element #%lld has length %lld; 2 is required", (long long)i, (long long)v->n);
             st = ail_raise_c(cx, AIL_B_VALUEERROR, buf); break;
         }
         st = ail_dict_set(cx, d, v->p[0], v->p[1]);
@@ -18639,8 +18664,10 @@ static inline ail_st ail_dict_update_pairs(ail_ctx *cx, ail_obj d, ail_obj other
    mapping wording rather than the generic iteration error. */
 static inline int ail__dict_iter_supported(ail_obj x) {
     if (x.tag == AIL_T_INST) {
+        /* iter()/CPython's mapping protocol use __iter__, NOT a bare __next__ (an object
+           with only __next__ is not iterable) */
         for (ail_obj k = ((ail_instobj *)x.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base)
-            if (((ail_classobj *)k.o)->iter_iter || ((ail_classobj *)k.o)->iter_next) return 1;
+            if (((ail_classobj *)k.o)->iter_iter) return 1;
         return 0;
     }
     switch (x.tag) {
@@ -18649,35 +18676,97 @@ static inline int ail__dict_iter_supported(ail_obj x) {
         default: return 0;
     }
 }
+/* Call a FUNC value with n arguments, with the same arity check/messages as ail__callv in
+   boxclosure.py (which lives in the generated program, not in this header). */
+static inline ail_st ail__dict_call_checked(ail_ctx *cx, ail_obj *out, ail_obj fv, ail_obj *args, int64_t n) {
+    char msg[200];
+    ail_funcobj *f = (ail_funcobj *)fv.o;
+    int64_t lo = 1, hi = 1;
+    if (f->n_cells > 0 && f->cells[0].tag == AIL_T_INT && (f->cells[0].i >> 32) == 0x41494CLL) {
+        lo = (f->cells[0].i >> 16) & 0xffff; hi = f->cells[0].i & 0xffff;
+    }
+    int nl = 0;
+    while (f->name[nl] && f->name[nl] != 1) nl++;
+    if (n > hi) {
+        if (lo < hi)
+            snprintf(msg, sizeof msg, "%.*s() takes from %lld to %lld positional arguments but %lld %s given",
+                     nl, f->name, (long long)lo, (long long)hi, (long long)n, n == 1 ? "was" : "were");
+        else
+            snprintf(msg, sizeof msg, "%.*s() takes %lld positional argument%s but %lld %s given", nl, f->name,
+                     (long long)hi, hi == 1 ? "" : "s", (long long)n, n == 1 ? "was" : "were");
+        return ail_raise_c(cx, AIL_B_TYPEERROR, msg);
+    }
+    if (n < lo) {
+        const char *p = f->name + nl; int64_t k = 0;
+        int len = snprintf(msg, sizeof msg, "%.*s() missing %lld required positional argument%s: ",
+                           nl, f->name, (long long)(lo - n), lo - n == 1 ? "" : "s");
+        while (*p == 1) {
+            const char *q = ++p; while (*p && *p != 1) p++;
+            if (k >= n && k < lo && len < (int)sizeof msg) {
+                int64_t left = lo - k - 1;
+                len += snprintf(msg + len, sizeof msg - len, "'%.*s'%s", (int)(p - q), q,
+                                left == 0 ? "" : left == 1 ? (lo - n > 2 ? ", and " : " and ") : ", ");
+            }
+            k++;
+        }
+        return ail_raise_c(cx, AIL_B_TYPEERROR, msg);
+    }
+    if (hi == 1) return f->fn(cx, out, n == 1 ? args[0] : ail_box_unbound(), f->cells);
+    return f->fn(cx, out, ail_tuple_new(cx, args, n), f->cells);
+}
 static inline ail_st ail__dict_update_mapping_inst(ail_ctx *cx, ail_obj d, ail_obj other,
                                                     int64_t keys_id, int *handled) {
     *handled = 0;
     if (other.tag != AIL_T_INST) return AIL_OK;
     ail_st (*kf)(ail_ctx *, ail_obj *, ail_obj) = 0;
     ail_st (*gf)(ail_ctx *, ail_obj *, ail_obj, ail_obj) = 0;
+    ail_st (*cf)(ail_ctx *, ail_obj *, ail_obj) = 0;
+    int keys_extra = 0;
     for (ail_obj k = ((ail_instobj *)other.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
         ail_classobj *kc = (ail_classobj *)k.o;
-        if (!kf) kf = kc->keys_fn;
+        if (!kf) { kf = kc->keys_fn; keys_extra = kc->keys_extra; }
         if (!gf) gf = kc->getitem_fn;
+        if (!cf) cf = kc->call_fn;
     }
     ail_obj keysv;
     /* PyObject_GetAttr(inst, "keys") looks in the instance table before the class's methods: a
        value set by __init__ (or a class attribute copied onto the instance) shadows keys() */
     ail_instobj *o = (ail_instobj *)other.o;
-    int found = 0;
+    int found = 0, from_class = 0;
     for (int64_t i = 0; i < o->n; i++)
-        if (o->attrs[i].name_id == keys_id) { keysv = o->attrs[i].val; found = 1; break; }
+        if (o->attrs[i].name_id == keys_id) { keysv = o->attrs[i].val; from_class = o->attrs[i].from_class; found = 1; break; }
     if (found) {
         if (keysv.tag == AIL_T_FUNC) {
-            /* a function in the class body is a descriptor: through the instance it is bound to self */
-            ail_funcobj *fo = (ail_funcobj *)keysv.o;
-            ail_st st = fo->fn(cx, &keysv, other, fo->cells); if (st != AIL_OK) return st;
+            /* Only a function that came from the class body/class attribute is a descriptor and
+               binds self; a function assigned in __init__ is an instance value and is called
+               with no arguments, exactly as CPython does. */
+            ail_obj arg;
+            ail_st st;
+            if (from_class) { arg = other; st = ail__dict_call_checked(cx, &keysv, keysv, &arg, 1); }
+            else st = ail__dict_call_checked(cx, &keysv, keysv, 0, 0);
+            if (st != AIL_OK) return st;
         } else {
-            char nb[96]; snprintf(nb, sizeof nb, "'%s' object is not callable", ail__tname_c(keysv));
-            return ail_raise_c(cx, AIL_B_TYPEERROR, nb);
+            ail_st (*kcf)(ail_ctx *, ail_obj *, ail_obj) = 0;
+            if (keysv.tag == AIL_T_INST || keysv.tag == AIL_T_EXC)
+                for (ail_obj k = ((ail_instobj *)keysv.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base)
+                    if (((ail_classobj *)k.o)->call_fn) { kcf = ((ail_classobj *)k.o)->call_fn; break; }
+            if (kcf) {
+                ail_st st = kcf(cx, &keysv, keysv); if (st != AIL_OK) return st;
+            } else {
+                char nb[96]; snprintf(nb, sizeof nb, "'%s' object is not callable", ail__tname_c(keysv));
+                return ail_raise_c(cx, AIL_B_TYPEERROR, nb);
+            }
         }
     } else if (kf) {
-        ail_st st = kf(cx, &keysv, other); if (st != AIL_OK) return st;
+        ail_obj extra[2];
+        int64_t nextra = 0;
+        if (keys_extra & 1) extra[nextra++] = ail_tuple_new(cx, NULL, 0);
+        if (keys_extra & 2) extra[nextra++] = ail_dict_new(cx);
+        ail_st st;
+        if (nextra == 0) st = kf(cx, &keysv, other);
+        else if (nextra == 1) st = ((ail_st (*)(ail_ctx *, ail_obj *, ail_obj, ail_obj))kf)(cx, &keysv, other, extra[0]);
+        else st = ((ail_st (*)(ail_ctx *, ail_obj *, ail_obj, ail_obj, ail_obj))kf)(cx, &keysv, other, extra[0], extra[1]);
+        if (st != AIL_OK) return st;
     } else {
         return AIL_OK;
     }

@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 -- job-pre38 review: mapping-protocol boundaries
+
+Review probes found four defects in the `dict(<user instance>)` mapping protocol. Instance-table
+`keys` values now remember whether they came from the class (a function there is a descriptor and
+binds `self`) or from `__init__` (an ordinary value, called with no arguments, so arity errors are
+CPython's instead of a segfault). The keys result check requires `__iter__`, not a bare `__next__`.
+`dict(d.keys())` / `dict(d.items())` keep working (and now treat a 2-character string element as a
+pair, e.g. `dict(["ab"])`), with CPython's indexed pair error. `keys` methods with defaults or
+`*args`/`**kwargs`, callable `keys` attributes, and `__getitem__` with extra optional parameters get
+generated adapters. `test_ail_pre38.py` now covers these probes on both builds.
+
 ## 2026-10-24 -- job-pre38: dict(<user instance>) mapping protocol (pre25 q01/q07)
 
 `dict(D())` where `D` has a `keys` method (or a `keys` class / instance attribute) now takes

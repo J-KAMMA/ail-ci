@@ -40,6 +40,18 @@ class Both:
 class Pairs:
     def __iter__(self):
         return iter([("a", 1), ("b", 2)])
+class StarKeys:
+    def keys(self, *args):
+        return ["s"]
+    def __getitem__(self, k):
+        return 5
+class CallableKeys:
+    def __call__(self):
+        return ["c", "d"]
+class CallAttr:
+    keys = CallableKeys()
+    def __getitem__(self, k):
+        return 1
 def make() -> D:
     return D()
 def via(x):
@@ -58,6 +70,8 @@ def main() -> None:
     print(dict(FuncKeys()))
     print(dict(Both()), list(Both()))
     print(dict(Pairs()), list(Pairs()))
+    print(dict(StarKeys()))
+    print(dict(CallAttr()))
 main()
 '''
 
@@ -88,10 +102,50 @@ class RaisesKey:
         return ["x"]
     def __getitem__(self, k):
         raise KeyError(k)
+class InstFunc1:
+    def __init__(self):
+        self.keys = lambda x: [x]
+    def __getitem__(self, k):
+        return 2
+class InstFunc2:
+    def __init__(self):
+        self.keys = lambda x, y: [x, y]
+    def __getitem__(self, k):
+        return 2
+class InstFuncDefault:
+    def __init__(self):
+        self.keys = lambda x=1: [x]
+    def __getitem__(self, k):
+        return 2
+class NextKeys:
+    def __init__(self):
+        self.i = 0
+    def __next__(self):
+        self.i += 1
+        if self.i > 2:
+            raise StopIteration
+        return "k%d" % self.i
+class NextOnly:
+    def keys(self):
+        return NextKeys()
+    def __getitem__(self, k):
+        return 9
+def zero_arg_keys():
+    return ["z"]
+class ClassFunc:
+    keys = zero_arg_keys
+    def __getitem__(self, k):
+        return 3
+class InstShadowsMethod(ClassFunc):
+    def __init__(self):
+        self.keys = lambda x, y: [x, y]
+    def __getitem__(self, k):
+        return 4
 def via(x):
     return dict(x)
 def main() -> None:
-    for src in (BadKeys(), ListKeys(), StrKeys(), InstanceKeys(), NoKeys(), MissingGetitem()):
+    for src in (BadKeys(), ListKeys(), StrKeys(), InstanceKeys(), NoKeys(), MissingGetitem(),
+                InstFunc1(), InstFunc2(), InstFuncDefault(), NextOnly(), ClassFunc(), InstShadowsMethod()):
         try:
             print(dict(src))
         except (TypeError, KeyError) as e:
@@ -126,9 +180,24 @@ def main() -> None:
 main()
 '''
 
+DICT_VIEWS = r'''d = {"ab": 1, "cd": 2}
+print(dict(d.keys()))
+print(dict(d.items()))
+try:
+    print(dict(d.values()))
+except TypeError as e:
+    print(type(e).__name__, e)
+print(dict(["xy", "zw"]))
+try:
+    print(dict(["a"]))
+except ValueError as e:
+    print(type(e).__name__, e)
+'''
+
 PROGRAMS = {
     'mapping_protocol': MAPPING,
     'mapping_failures': FAILURES_CAUGHT,
+    'dict_views_and_strings': DICT_VIEWS,
 }
 
 

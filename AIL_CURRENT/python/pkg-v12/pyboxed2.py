@@ -2247,6 +2247,7 @@ class Compiler(boxclosure.ClosureMixin):
             self.boxed_names = [n for n in self.boxed_names if n != '<module>']
 
         ng = self.next_global_slot
+        dict_adapters = self._generate_dict_adapters()
         parts = [_thread_preamble() if self.threads else PREAMBLE]
         if any(isinstance(n, ast.ExceptHandler) and n.type is not None
                and any(isinstance(m, ast.Name) and m.id == 'NameError' for m in ast.walk(n.type))
@@ -2362,13 +2363,21 @@ class Compiler(boxclosure.ClosureMixin):
                 setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->iter_iter = %s;\n' %
                              (self.global_slots['class:' + cname], itr['cname']))
             kmeth = cls['methods'].get('keys')
-            if kmeth and kmeth['all_params'] == ['self']:
-                setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->keys_fn = %s;\n' %
-                             (self.global_slots['class:' + cname], kmeth['cname']))
+            if kmeth and kmeth['all_params'] and kmeth['all_params'][0] == 'self':
+                kfn = dict_adapters.get(('keys', cname))
+                if kfn:
+                    setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->keys_fn = %s;\n' %
+                                 (self.global_slots['class:' + cname], kfn))
             gmeth = cls['methods'].get('__getitem__')
-            if gmeth and len(gmeth['all_params']) == 2:
-                setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->getitem_fn = %s;\n' %
-                             (self.global_slots['class:' + cname], gmeth['cname']))
+            if gmeth and gmeth['params'] and gmeth['params'][0] == 'self':
+                gfn = dict_adapters.get(('getitem', cname))
+                if gfn:
+                    setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->getitem_fn = %s;\n' %
+                                 (self.global_slots['class:' + cname], gfn))
+            cmeth = cls['methods'].get('__call__')
+            if cmeth and cmeth['all_params'] == ['self']:
+                setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->call_fn = %s;\n' %
+                             (self.global_slots['class:' + cname], cmeth['cname']))
             if self.dunder_ops:
                 setup.extend(dunderrt.install('g_slots_arr[%d]' % self.global_slots['class:' + cname],
                                               cls['methods'], lambda info: info['all_params']))
@@ -2842,6 +2851,60 @@ class Compiler(boxclosure.ClosureMixin):
             self.global_slots[key] = self.next_global_slot
             self.next_global_slot += 1
         return self.global_slots[key]
+
+    def _dict_adapter(self, cname, mname, info, cparams):
+        """A zero/one-key adapter for a mapping-protocol method whose Python signature has
+        optional parameters: it fills the defaults (or empty *args/**kwargs) and calls the
+        user method. Returns the C name, or None when the shape is not supported."""
+        name = 'pdm_%s_%s' % (cname, mname)
+        cctx = Ctx(name)
+        try:
+            args = self._bind_args(mname, info, [_PreC(cp) for cp in cparams], {}, cctx)
+        except Unsupported:
+            return None
+        self.top_decls.append('static ail_st %s(ail_ctx *cx, ail_obj *out, ail_obj self%s);\n' %
+                              (name, ''.join(', ail_obj ' + cp for cp in cparams)))
+        sig = ', '.join(['self'] + args)
+        body = cctx.body_text()
+        self.top_defs.append(
+            'static ail_st %s(ail_ctx *cx, ail_obj *out, ail_obj self%s) {\n'
+            '    AIL_FRAME_ENTER(cx, f, %d);\n'
+            '    ail_st st = AIL_OK; (void)st;\n%s'
+            '    st = %s(cx, out, %s);\n'
+            '    if (st != AIL_OK) goto L_leave;\n'
+            '    AIL_FRAME_LEAVE(cx, f);\n    return AIL_OK;\n'
+            'L_leave:\n    AIL_FRAME_LEAVE(cx, f);\n    return st;\n}\n\n' %
+            (name, ''.join(', ail_obj ' + cp for cp in cparams), max(cctx.next_slot, 1),
+             body, info['cname'], sig))
+        return name
+
+    def _generate_dict_adapters(self):
+        """Mapping-protocol methods with optional arguments (keys(self, x=1), *args/**kwargs,
+        __getitem__(self, k, default=None)) need a no-argument/no-extra-argument adapter that
+        fills the defaults; methods with exactly the protocol's own parameters stay direct."""
+        out = {}
+        for cname in self.class_order:
+            methods = self.classes[cname]['methods']
+            km = methods.get('keys')
+            if km and km['all_params'] and km['all_params'][0] == 'self':
+                if len(km['all_params']) == 1:
+                    out[('keys', cname)] = km['cname']
+                else:
+                    k = self._dict_adapter(cname, 'keys', km, [])
+                    if k:
+                        out[('keys', cname)] = k
+            gm = methods.get('__getitem__')
+            if gm and gm['params'] and gm['params'][0] == 'self':
+                if len(gm['all_params']) == 2:
+                    out[('getitem', cname)] = gm['cname']
+                elif len(gm['params']) >= 2:
+                    g = self._dict_adapter(cname, '__getitem__', gm, ['key'])
+                    if g:
+                        out[('getitem', cname)] = g
+            cm = methods.get('__call__')
+            if cm and cm['all_params'] == ['self']:
+                out[('call', cname)] = cm['cname']
+        return out
 
     def _class_global_slot(self, cname):
         key = 'class:' + cname
@@ -6060,7 +6123,7 @@ class Compiler(boxclosure.ClosureMixin):
             for aname, aval, slot in self.classes[kls].get('class_attrs', []):
                 self.attr_names.add(aname)
                 v = self._class_attr_value(slot, aval, ctx)
-                ctx.emit('ail_inst_setattr(cx, %s, g_attr_%s, %s);' % (t, aname, v))
+                ctx.emit('ail_inst_setattr_class(cx, %s, g_attr_%s, %s);' % (t, aname, v))
         if info:
             argcs = self._bind_args(name, info, args, kwargs, ctx)
             dummy = ctx.tmp()
@@ -6666,7 +6729,11 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.emit('%s = ail_dict_new(cx);' % t)
         if args:
             sv = ctx.tmp()
-            if self._is_sys_stdin(args[0]):
+            # dict views and deques are rewritten to the container ail_iter can walk, and stdin is
+            # materialised; those must keep the old source expression. Everything else may be a
+            # user instance, whose keys()/__getitem__ mapping protocol the runtime helper takes.
+            needs_iter_src = (self._is_sys_stdin(args[0]) or self.infer_kind(args[0], ctx) == 'deque')
+            if needs_iter_src:
                 ctx.emit('%s = %s;' % (sv, self._resolve_iter_src(args[0], ctx)))
                 ctx.emit('if (%s.tag == AIL_T_DICT) { st = ail_meth_dict_update(cx, %s, %s); } '
                          'else { st = ail_dict_update_pairs(cx, %s, %s); } ' %
