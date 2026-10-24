@@ -4,6 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-cov7-10240917-1 | compiler crashes | The general path built a `functools.partial()` closure from `Lambda` nodes without line numbers, so `g17_004` / `g17_024` ended in `AttributeError: 'Lambda' object has no attribute 'lineno'`; the typed dispatcher chose a stubbed abstract base method as its representative and `g13_036` ended in `KeyError: 'Visitor__visit_directory'`. Both now compile and match CPython; `test_ail_silent6.py` and `test_ail_typed_inherit.py` cover them. | fixed |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |
@@ -28,3 +29,8 @@ Rows added by job-fuzz8-10220554 use the placeholder id form requested for this 
 | ID | Area | Status | Description |
 | --- | --- | --- | --- |
 | C?-job-fuzz65-10231438-1 | heapq / list repr | fixed | After a caught `heappush` TypeError on a `list[int]` (CPython appends before comparing), the annotation-specialized list repr printed a string element as `x` instead of `'x'` when a tuple comparison had generated that helper. Scalar elements now use the runtime value's `repr`. |
+Known differences from CPython. New rows use `C?-<branch>-N` until a maintainer assigns an id.
+
+| id | area | difference | status |
+|----|------|------------|--------|
+| C?-job-fuzz89-10231611-1 | bytes.split / bytes.rsplit | With a `None` separator and a reached `maxsplit`, the unsplit remainder lost its outer whitespace (`b" a ".split(None, 0)` gave `[b"a"]`; CPython gives `[b"a "]`, and the mirror case in `rsplit`). | fixed in safetyrt.py |

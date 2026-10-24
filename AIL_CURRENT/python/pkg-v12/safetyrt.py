@@ -493,7 +493,8 @@ static inline ail_st ail2b_split_ws(ail_ctx *cx, ail_obj *out, ail_obj so, ail_o
             while (i < n && ail2b_isspace(ail_chr(s, i))) i++;
             if (i >= n) break;
             int64_t j = i;
-            if (ms >= 0 && cnt >= ms) { j = n; while (j > i && ail2b_isspace(ail_chr(s, j - 1))) j--; }
+            /* CPython's remainder after the last split keeps its trailing whitespace. */
+            if (ms >= 0 && cnt >= ms) j = n;
             else while (j < n && !ail2b_isspace(ail_chr(s, j))) j++;
             ail_list_append(cx, fr.slots[1], ail_str_view(so.sv.backing, so.sv.off + i, j - i));
             cnt++; i = j;
@@ -506,7 +507,8 @@ static inline ail_st ail2b_split_ws(ail_ctx *cx, ail_obj *out, ail_obj so, ail_o
             while (j > 0 && ail2b_isspace(ail_chr(s, j - 1))) j--;
             if (j <= 0) break;
             int64_t i = j;
-            if (ms >= 0 && cnt >= ms) { i = 0; while (i < j && ail2b_isspace(ail_chr(s, i))) i++; }
+            /* CPython's rsplit remainder keeps its leading whitespace too. */
+            if (ms >= 0 && cnt >= ms) i = 0;
             else while (i > 0 && !ail2b_isspace(ail_chr(s, i - 1))) i--;
             ail_list_append(cx, f2.slots[0], ail_str_view(so.sv.backing, so.sv.off + i, j - i));
             cnt++; j = i;
@@ -819,6 +821,7 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
     }
     if (x.tag == AIL_T_STR) {
         if (type && type != 's') { snprintf(msg, sizeof msg, "Unknown format code '%c' for object of type 'str'", type); return ail_raise_c(cx, AIL_B_VALUEERROR, msg); }
+        if (f.sign == ' ') return ail_raise_c(cx, AIL_B_VALUEERROR, "Space not allowed in string format specifier");
         if (f.sign) return ail_raise_c(cx, AIL_B_VALUEERROR, "Sign not allowed in string format specifier");
         if (f.group) { snprintf(msg, sizeof msg, "Cannot specify '%c' with 's'.", f.group); return ail_raise_c(cx, AIL_B_VALUEERROR, msg); }
         if (f.z) return ail_raise_c(cx, AIL_B_VALUEERROR, "Negative zero coercion (z) not allowed in string format specifier");

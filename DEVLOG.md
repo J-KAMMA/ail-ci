@@ -1,5 +1,256 @@
 # DEVLOG
 
+## 2026-10-24 - cov7: the census's internal-crash refusals now build
+
+The gdev census (510 programs, `AIL_NO_CACHE=1`) refused 53 before this job.  Grouped by the
+first line of the build output, the most common group was the 3 internal tracebacks (not
+deliberate refusals): two programs using `functools.partial` crashed in
+`pyboxed2._refuse_lambda_forward_defaults` because the general path's partial rewrite made
+`Lambda` nodes without a line number, and one visitor program crashed in
+`pyfunc._dispatcher` with `KeyError: 'Visitor__visit_directory'` because an abstract base method
+(removed as a stub) was chosen as the dispatcher's representative.  The partial rewrite now
+copies locations onto both lambdas, and the dispatcher falls back to the first concrete
+implementation when the base has no body.  `g17_004`, `g17_024` and `g13_036` now compile and
+print what CPython prints on both builds; the census refused 50 afterwards.  Added the positional
+partial program to `test_ail_silent6.py` and an abstract-visitor hierarchy to
+`test_ail_typed_inherit.py`.
+## 2026-10-23 - binary_cursor_records: runtime traps are noreturn (job-perf3-10240012)
+
+`BinaryCursor__remaining` checks `0 <= position <= len(data)` and then calls `ail_raise_named`, but the
+runtime declared that trap as an ordinary `void` function. GCC therefore had to keep the fall-through
+path alive and could not use the test to prove the subtraction cannot overflow, so `ck_sub` stayed in
+the accessor. `ail_exception_uncaught` has the same property (it ends in `_Exit(1)`), so both now have
+an explicit `__attribute__((noreturn))` declaration in `cruntime.py`. No app source changed.
+
+Profiling: rdtsc instrumentation of the generated C (40M records, 496 MiB) put the per-record loop at
+709,541,927 of 1,193,992,702 cycles (59.5% of the function). The accessor checks are inside that loop;
+hand-edited generated C put the `ck_sub` in `remaining()` alone at ~8% overall and all unchecked reads
+at ~16%, so the 9.1% below is in line with that ceiling.
+
+`python3 bench/compare.py --app binary_cursor_records`:
+
+| | AIL/C | AIL new/base/C/Rust ms | RSS MiB new/base/C/Rust | binary KiB new/base/C/Rust |
+| --- | ---: | ---: | ---: | ---: |
+| before | 5.091 [5.041, 5.253] | 50.8/50.8/10.0/9.6 | 1.7/1.7/2.5/2.7 | 39/39/15/1912 |
+| after | 4.630 [4.607, 4.674] | 46.0/51.0/9.9/9.6 | 1.7/1.7/2.5/2.7 | 35/39/15/1912 |
+
+Ratio improved 9.1%; `compare.py` checked every timed run byte-for-byte against its Python oracle.
+Tests: `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`,
+`test_ail_exception_values_core`, `test_ail_exception_values_app`, `test_ail_excfix`,
+`test_c_api_bridge`, `test_ail_parallel_for`, `test_ail_short_style_traps` all pass. Probes
+`/tmp/probes/perf3_*.py` match CPython on both the general and default builds.
+## 2026-10-23 - method bounds with annotated returns (job-perf3b-10240813)
+
+The earlier method-field analysis did not fire on the real accessors: the AIL front end writes
+`-> int` as the bare name `__ail_checked_int__`, and `inline_candidate` walked the `FunctionDef`
+including its return and argument annotations, so that load made every annotated zero-argument
+method look impure and `remaining()` was never analysed in place. Annotations are not runtime body
+expressions; `rangecheck.py` now collects the id of every annotation node and skips those nodes in
+the candidate walk. Nothing else changes: a method with an assignment, loop, try or non-builtin
+call is still rejected, and a field store, unknown call or alias still forgets its facts.
+
+`python3 bench/compare.py --app binary_cursor_records`, median of nine windows on this runner:
+
+| app | ms ail/base/c/rust | ail/base | ail/c |
+| --- | --- | --- | --- |
+| binary_cursor_records | 40.8/47.2/9.8/9.5 | 0.866 [0.863, 0.871] faster | 4.145 [4.119, 4.170] slower |
+
+Before (HEAD 4ffe276) the AIL/C ratio was `4.728 [4.701, 4.824] slower`; the ranges do not overlap
+(13.4% less AIL time, above the 3% keep threshold). Result:
+`bench/results/2026-10-23-12f2492.json`. The new test checks that generated
+`Cursor__read_u8`/`read_u32_le` contain no `ail_bytes_get`, while the unguarded method keeps its
+check.
+
+Probes (`bash ~/tools/cmp.sh /tmp/probes/<name>.py $PWD`, CPython and both compiler paths agree):
+`cursor_fields.py` and `bcursor_fields.py` (annotated `remaining`/`read_*` analysed in place,
+u8/u16/u32 widths, empty, exact short and long boundaries, negative position, aliasing, values
+through an argument, a list item, an attribute and a dict value), `method_side_effects.py`
+(annotated methods with a store, a loop and a try are not inlined; out-of-range reads still raise),
+`range_guards.py` (plain guarded reads on bytes/list plus unguarded bytes indexing). Tests:
+`test_ail_range_checks.py`, `test_ail_binary_cursor_cli.py`, `test_ail_safetynet.py`,
+`test_ail_files.py`, `test_ail_corpus_findings3.py` all pass.
+
+## 2026-10-23 - range proofs through struct fields and safe method inlining (job-perf3b-10240127)
+
+`binary_cursor_records` was 4.99x slower than C because every `read_*` method rechecked the same
+cursor invariants: `remaining()` validated `position`, each byte read paid `ail_bytes_get`'s bounds
+check, and the index arithmetic paid `ck_add`. The value-range analysis only reasoned about plain
+locals, so it could not connect a guard on a method result to the receiver's fields.
+
+`rangecheck.py` now tracks fields of a single unaliased object parameter (`#fld:o.f`, plus
+`#len:#fld:o.f` for bytes/list fields), and records the identity of a subtraction between two exact
+symbols. A guard on the difference (`available < 4`) therefore refines its operands
+(`position <= len - 4`). Zero-argument methods whose bodies are only guards and a return, with no
+assignment, loop, try or non-builtin call, are analysed in place against the caller's field facts,
+so `remaining()`'s guard proves `position <= len` inside each `read_*`; `prove_le` now follows a
+chain such as `start -> position -> len` that was previously stopped at an already-seen symbol.
+Field facts are forgotten on a field store, an unknown method call, an unanalysed construct, or a
+field passed to other code, and a function with any parameter besides the receiver is not tracked,
+so an aliased argument cannot leave stale facts. `pyfunc.py` wires the class field/method lookups
+into `rangecheck.Info` and marks bytes-field subscripts for the same resolver.
+
+`python3 bench/compare.py --app binary_cursor_records`, median of nine windows on this runner:
+
+| app | ms ail/base/c/rust | ail/base | ail/c |
+| --- | --- | --- | --- |
+| binary_cursor_records | 41.4/51.3/10.5/10.0 | 0.803 [0.801, 0.806] faster | 3.975 [3.943, 4.031] slower |
+
+The base ratio was `4.986 [4.904, 4.997] slower`; the ranges do not overlap (19.3% less AIL time).
+Result: `bench/results/2026-10-23-3b21283-dirty.json`. The generated C for `read_u8`, `read_u16_*`
+and `read_u32_*` has no `ail_bytes_get`/`ck_add`/`ck_sub` left, and every timed run matched the
+Python oracle byte-for-byte.
+
+Probes (`bash ~/tools/cmp.sh /tmp/probes/<name>.py $PWD`, CPython and both compiler paths agree):
+`field_remaining_reads.py` (inlined `remaining`, u8/u16/u32, exact boundary, invalid position),
+`field_mutation_soundness.py` (field store, bytes-field reassignment, unknown method call, aliased
+object argument all keep the out-of-range read checked), `field_guard_bounds.py` (direct
+`len(field) - 1` guard and negative index). Tests: `test_ail_range_checks.py`,
+`test_ail_binary_cursor_cli.py`, `test_ail_safetynet.py`, `test_ail_files.py`,
+`test_ail_corpus_findings3.py` all pass.
+## 2026-10-23 - csv_table: inline small leaf loops (job-perf4-10240813)
+
+`field += ch` was already in place and its slow path is about 1% of calls, so this job took
+the next cost. Profiling a 132 MB three-million-row input (`gprof -pg`) put
+`csv_table_group_scan` at 79% and `parse_int64_decimal` at 2.15% flat. Flat cost understates
+it: replacing the parse with a constant saved 7.3% of wall time, while asking gcc to inline
+that same nine-statement leaf loop saved 20% (1.24 s -> 0.99 s, user 1.08 s -> 0.84 s). The
+extra is the call boundary in the row loop, not the digit loop. The feed/chunk copy was a
+larger upper bound (14.5% if the chunk buffer is reused unsafely) but safe per-chunk ownership
+saved only 1.6%, so it was rejected.
+
+The compiler now asks for `always_inline` on a function whose body is one `for` loop, no
+other loop/try/with/yield, no call to another function or class constructor, a scalar numeric
+return, at most 12 statements and 180 AST nodes; recursion, entry points and the existing
+straight-line rule are unchanged. In `csv_table` this fires on `parse_int64_decimal` and
+`parse_int64_decimal_bytes` only. String/list/object returns are excluded: inlining
+`json_quote` as well measured 1.42 s, slower than 1.25 s.
+
+`python3 bench/compare.py --app csv_table`, before -> after:
+
+| ms ail/base/c/rust | ail/base | ail/c | ail/rust |
+| --- | --- | --- | --- |
+| 14.5/14.5/6.1/6.9 | 0.995 [0.992,1.016] tie | 2.390 [2.341,2.456] slower | 2.093 [2.053,2.252] slower |
+| 12.1/14.6/6.1/6.9 | 0.841 [0.814,0.852] faster | 1.979 [1.972,2.031] slower | 1.770 [1.717,1.800] slower |
+
+RSS 5.5/5.5/3.3/3.8 -> 5.5/5.5/3.3/3.6 MiB, binary 107/107/20/1928 -> 111/107/20/1928 KiB,
+build disk 400/400/44/1952 -> 412/400/44/1952 KiB. The app's boundary controls and Python
+oracle still pass byte-for-byte.
+
+Tests: `test_ail_integer_codec test_csv_group_scan test_ail_csv_rewrite_stream
+test_ail_csv_writer test_ail_utf8_stream_fuzz test_csv_column_stats_stream` (24 tests) and
+`test_ail_safetynet test_ail_files test_ail_corpus_findings3` (25 tests, 1 skipped) pass.
+Probes `/tmp/probes/loop_inline.py` and `/tmp/probes/loop_inline_objects.py`
+(`bash ~/tools/cmp.sh`) cover negative/empty/invalid parse paths, early return, break/continue,
+loops reached through arguments, list items and dict values, and string/list/dict mutations;
+both builds match CPython stdout on every case.
+
+## 2026-10-23 - csv_table: one UTF-8 scan per chunk (job-perf4-10240013)
+
+`field += ch` was already in place. The generated code calls `ail_str_cat`, whose first
+cases return the existing value or a view when the operands are adjacent, and whose
+remaining case appends into the newest arena block with amortized growth
+(`AIL_SARENA_TOPS`). The slow path is about 1% of calls; forcing the builder-local path
+(`ail_bl_append`, which copies `key = field` per row) measured 3.29 s against 2.48 s on a
+263 MB file, so it was rejected.
+
+Profiling the rest (`gprof -O3 -pg`, same file) put `_utf8_complete_length` at 11.2% and
+`ail__utf8_validate` at 9.1%: `utf8_decode_feed` scanned `combined` to find the last
+character boundary and then `decode("utf-8")` scanned it again to validate. A chunk only
+ends mid-character at a chunk boundary, so `_utf8_tail_complete` now checks the final byte
+(and at most three continuation bytes) and sends the whole buffer straight to decode. The
+full `_utf8_complete_length` scan still runs for the rare split chunk, so the pending bytes,
+the feed on which an error is reported, and the decoded text are unchanged. Amdahl bound
+about 11%; measured 7.0% on the app (AIL/base 0.930).
+
+`python3 bench/compare.py --app csv_table`, before -> after:
+
+| ms ail/base/c/rust | ail/base | ail/c | ail/rust |
+| --- | --- | --- | --- |
+| 16.5/16.5/6.9/7.8 | 1.006 tie | 2.387 slower | 2.126 slower |
+| 15.5/16.7/7.0/8.0 | 0.930 faster | 2.200 slower | 1.933 slower |
+
+RSS 5.5/5.5/3.2/3.8 -> 5.5/5.5/3.2/3.6 MiB, binary 107/107/20/1928 KiB unchanged, build
+disk 400/400/44/1952 KiB unchanged. The app's boundary controls and the Python oracle still
+pass byte-for-byte.
+
+Tests: `test_ail_utf8_stream_fuzz test_csv_group_scan test_ail_csv_rewrite_stream
+test_ail_splitlines_utf8 test_csv_column_stats_stream` (18 tests) and `test_ail_safetynet
+test_ail_files test_ail_corpus_findings3` (25 tests, 1 skipped) pass. Probe
+`/tmp/probes/utf8_tail.py` (`bash ~/tools/cmp.sh`) compares the old and new boundary logic
+on 5,232 curated and random byte strings: same stdout, 0 mismatches, in both builds.
+## 2026-10-24 - bytes.count memmem: self-contained declaration (job-perf7-10240917)
+
+Review found the short-needle `bytes.count` path called `memmem` without a declaration in the
+emitted C, so `gcc -std=c11` (a mode AIL uses for `to_c` and C-object builds) assumed an implicit
+`int` return and truncated the pointer (segfault). The `BYTES` block now declares `memmem`
+itself on non-Windows, after `<string.h>`; glibc and musl both export the symbol, and the
+declaration is compatible with the header's when `_GNU_SOURCE`/`_DEFAULT_SOURCE` is set.
+`rp7_count_small.py` now prints `4 2 2` under `-std=c11 -O2` and `-std=gnu17`; all count probes
+match CPython on both builds, and `binary_search` is unchanged at 64.9 ms vs base 92.0 ms
+(`ail/base 0.711 [0.706,0.717]`). Required tests pass.
+
+## 2026-10-24 - bytes.count: memmem for short needles (job-perf7-10240917)
+
+`binary_search` (`count` of a 7-byte needle over a 64 MiB file) spent ~69 ms of its 94 ms in
+`ail_bytes_count_range`, which used the byte-pair Horspool scan. For a short needle glibc
+`memmem` is about twice as fast on the same data (38 ms vs 71 ms), so the non-Windows
+short-needle path now uses the same non-overlapping `memmem` loop as the C reference; Windows
+keeps Horspool. `bench/compare.py --app binary_search`: base 98.2 ms, new 69.2 ms
+(AIL/C 1.414 -> 0.994, ranges non-overlapping). Probes for empty, negative, windowed and
+64-byte needles through arguments, list items, attributes and dict values match CPython on both
+builds.
+## 2026-10-23 - str format spec: a space sign names CPython's ValueError (job-pre18-10240245)
+
+The first pre-existing difference recorded by the fuzz66 reviewer still reproduces on this tree:
+`format('x', ' z')` raised `ValueError: Sign not allowed in string format specifier`, where CPython
+says `Space not allowed in string format specifier`. The same wording bug covered every str spec
+with a space sign.
+
+`AIL_CURRENT/python/pkg-v12/safetyrt.py` now distinguishes the space flag from `+`/`-` in
+`ail2f_format`'s str branch. `AIL_CURRENT/python/pkg-v12/pyboxed2.py` sends a str spec that carries
+any sign to `safetyrt.FMT` instead of the core formatter, which silently ignored the flag (so
+`format('x', '+')` returned `x` and `format('x', ' ')` padded it). Numeric sign flags and str specs
+without a sign are unchanged.
+
+`test_ail_pre18.py` covers the recorded case, all sign spellings, literal and computed specs,
+widths/alignment, empty and non-ASCII values, values from an argument/list item/attribute/dict
+value, and numeric sign formatting on both builds. It and `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass on the final commit.
+## 2026-10-23 - pre19: refuse `del` bounds a constant cannot evaluate in int64 (job-pre19-10240254)
+
+The first still-differing case recorded after pre7 is `maxi`, `del a[2**63 - 1]`: the final value
+fits in an AIL int64, but evaluating `2**63` first trapped `integer overflow` on both builds where
+CPython raises IndexError. `negmin`, `powhuge` and `slicebig` (`del a[2**100:2**101]`, a silent
+exit-1 versus CPython's exit 0) have the same cause. `pyfront.refuse_unrepresentable_delete_bounds`
+evaluates the constant index or slice bounds exactly, including the intermediate values, and
+refuses the `del` by name when any value leaves the 64-bit signed range; it is called from both the
+typed path (`pyfunc.py`) and the general path (`pyboxed2.py`). In-range constants and the same
+expression outside a `del` are unchanged, and the C runtime is untouched.
+
+Tests on this commit: `test_ail_pre19` (new, both builds), `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`; `update_manifest.py --check` rc 0.
+## 2026-10-23 - A constant power outside int64 is refused by name (job-pre2)
+
+The pre-existing `r_aliasing.py` difference was `2 ** 63`: CPython prints
+9223372036854775808, while AIL compiled it and then stopped with `integer overflow`. The value is
+known at compile time and has no int64 answer, so `_check_int64_literals` now evaluates a constant
+integer `**` and raises `int64 constant power out of range: <base> ** <exponent>` before codegen
+(the same place an out-of-range literal is refused). `2 ** 62`, `(-2) ** 63` (INT64_MIN) and the
+float/small-power cases still compile and match CPython. `test_ail_pre2.py` covers both builds and
+both syntaxes.
+## 2026-10-23 - pre22: `with` around `yield` (job-pre22-10240312)
+
+The p12/p23/p24 case still differs on this tree: a generator with `with` around its `yield`
+and then `g.close()` runs no `__exit__` at all, because the general path's generator close finishes
+the fiber without running the suspended frames (CPython raises `GeneratorExit` there and passes it
+to `__exit__`). Building real `GeneratorExit` close semantics is a runtime change outside this job,
+so the construct is refused by name before file-lowering removes the `with`:
+
+* `withlib.refuse_with_yield` (called from `pyboxed2.Compiler.compile`) refuses any `with` whose
+  body yields in the same function, for every manager expression and for `with open(...)` too.
+* `test_ail_pre22.py` covers the refusal on both builds and checks that a `with` beside (not
+  around) a `yield` still runs and matches CPython.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
@@ -141,3 +392,10 @@ Remaining differences found are recorded in `DIFFERENCES.md`; they were not fixe
 - Fixed `tuplegen.lrepr`: scalar list elements use `repr(x)`, so the value's own repr is used; compound elements keep their existing helper.
 - Added `AIL_CURRENT/test_ail_fuzz65.py` and registered it in `ail_check.py`.
 - Other observed, not fixed: `list[tuple]` heaps with a wrong-typed item still fail while printing (`int` not subscriptable) instead of printing CPython's list; `nan`/`inf` literals remain refused by name.
+## 2026-10-23 -- job-fuzz89-10231611
+
+- Fixed the general path's `bytes`/`bytearray` whitespace `split`/`rsplit` when `maxsplit` is
+  reached: the remainder now keeps the outer whitespace, as CPython does
+  (`b" a ".split(None, 0) == [b"a "]`, `b"  a  b  ".rsplit(None, 1) == [b"  a", b"b"]`).
+  The typed-path loops already had CPython's rule.
+- Added `test_ail_fuzz89.py` (both builds against CPython) and registered it in `ail_check.py`.

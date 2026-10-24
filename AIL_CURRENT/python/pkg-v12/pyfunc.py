@@ -66,7 +66,7 @@ import typedinherit
 import shadowing
 import rangecheck
 from pipeline import PipelineError
-from pyfront import BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Unsupported, _use, refuse_complex_pow
+from pyfront import BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Unsupported, _use, refuse_complex_pow, refuse_unrepresentable_delete_bounds
 
 # A capability marker, not a behaviour: lets a SHARED judge (one file imported against many
 # `pkg-*` copies of this module, e.g. `test_floatparam.py`) ask "does THIS copy infer a float
@@ -8345,15 +8345,25 @@ def _build_percent_value(node, ctx):
         if kind not in (INT, FLT, STR):
             raise Unsupported('%%-formatting a value of type %s; only int, float or str is '
                               'built' % kind)
-        if v['type'] == 's' and kind in (INT, FLT) and not v['zero']:
-            # `"%s" % n` is `str(n)` padded as a str (CPython), so a bool shows True/False.
-            argnode = ast.copy_location(ast.Call(func=ast.Name(id='str', ctx=ast.Load()),
-                                                 args=[argnode], keywords=[]), argnode)
+        pre = None
+        if v['type'] == 'r':
+            # `%r` is CPython's repr conversion, not a format-spec type: build the repr first,
+            # then pad/truncate it as a str (`"%r" % 'x'` is "'x'").  The '0' flag has no effect
+            # on a str conversion in CPython (`"%05r" % 42` is "   42").
+            pre = _repr_conv(argnode, kind, ctx)
             kind = STR
-        spec = {'align': '<' if v['leftalign'] else None, 'zero': v['zero'],
-                'width': v['width'], 'precision': v['precision'], 'type': v['type']}
+            spec = {'align': '<' if v['leftalign'] else None, 'zero': False,
+                    'width': v['width'], 'precision': v['precision'], 'type': 's'}
+        else:
+            if v['type'] == 's' and kind in (INT, FLT) and not v['zero']:
+                # `"%s" % n` is `str(n)` padded as a str (CPython), so a bool shows True/False.
+                argnode = ast.copy_location(ast.Call(func=ast.Name(id='str', ctx=ast.Load()),
+                                                     args=[argnode], keywords=[]), argnode)
+                kind = STR
+            spec = {'align': '<' if v['leftalign'] else None, 'zero': v['zero'],
+                    'width': v['width'], 'precision': v['precision'], 'type': v['type']}
         parts_c.append(_fmt_build(argnode, kind, spec, v['src'], ctx, '%%-formatting conversion',
-                                  str_default_align='>'))
+                                  str_default_align='>', pre_c=pre))
     return _concat_chain(parts_c, ctx)
 
 
@@ -10162,7 +10172,7 @@ def _bytes_subscript_value(node, ctx):
                 raise Unsupported('a bytes index must be an integer')
             index = _expr(node.slice, ctx)
             steps.extend(ctx.pre)
-            call = 'ail_bytes_get(%s, %s)' % (receiver, index)
+            call = 'ail_bytes_get(%s%s, %s)' % (_range_mark(node, ctx), receiver, index)
         return '({ %s %s; })' % (' '.join(steps), call)
     finally:
         ctx.pre = saved
@@ -18515,6 +18525,34 @@ def _listcomp_kind(node, ctx):
         ctx.kind.clear(); ctx.kind.update(kinds)
 
 
+def _listcomp_index_store_safe(node):
+    """Whether an element expression can be written by index into a pre-sized list.
+
+    No calls, assignment expressions or lambdas: those are the only ways the element can run
+    code that appends to the list being walked and moves its buffer under the loop. A pure
+    arithmetic/subscript/attribute expression leaves both the source length and its pointer
+    unchanged, so the reservation above stays valid and `p[n++] = value` is equivalent to push.
+    """
+    return not any(isinstance(n, (ast.Call, ast.Await, ast.Yield, ast.YieldFrom,
+                                  ast.NamedExpr, ast.Lambda)) for n in ast.walk(node))
+
+
+def _listcomp_simd_safe(node, ctx):
+    """Whether a float element expression is flat enough to vectorize without changing traps.
+
+    Only names, constants, reads and +, -, * (and unary signs): no call, division, modulo or power,
+    so an iteration cannot run user code or raise part-way through a vector width. The loop is
+    marked `#pragma omp simd`, which the C build enables with `-fopenmp-simd`.
+    """
+    if _etype(node, ctx) != FLT:
+        return False
+    for n in ast.walk(node):
+        if isinstance(n, (ast.Call, ast.Await, ast.Yield, ast.YieldFrom, ast.NamedExpr, ast.Lambda,
+                          ast.Div, ast.FloorDiv, ast.Mod, ast.Pow)):
+            return False
+    return True
+
+
 def _listcomp_into_temp(node, ctx):
     """`[e for v in seq if c]` as a value: one list, built once, freed with the rest."""
     if len(node.generators) != 1 or node.generators[0].is_async:
@@ -18586,10 +18624,14 @@ def _listcomp_into_temp(node, ctx):
     # Unfiltered over a plain counted source: the result has exactly n - lo elements, so size it
     # once. Only for bounds that are a bare name or `name.n`, which can be read twice for free.
     simple = re.compile(r'\(?\*?[A-Za-z_]\w*\)?(\.n)?|-?\d+')
+    indexed = (kind in (FLIST, LIST) and not g.ifs and not struct_source and not string_source
+               and simple.fullmatch(lo) and simple.fullmatch(n)
+               and _listcomp_index_store_safe(node.elt))
     if (kind in (FLIST, LIST) and not g.ifs and not struct_source and not string_source
             and simple.fullmatch(lo) and simple.fullmatch(n)):
-        head = '%s_reserve(&%s, (%s) - (%s)); %s' % (
-            'ail_flist' if kind == FLIST else 'ail_list', c, n, lo, head)
+        head = '%s_reserve(&%s, (%s) - (%s)); %s%s' % (
+            'ail_flist' if kind == FLIST else 'ail_list', c, n, lo,
+            '\n#pragma omp simd\n' if indexed and _listcomp_simd_safe(node.elt, ctx) else '', head)
     if pre:
         head = '%s %s' % (' '.join(pre), head)
     element_ctype = 'ail_str' if elem_is_str else 'double' if elem_is_float else 'int64_t'
@@ -18620,7 +18662,13 @@ def _listcomp_into_temp(node, ctx):
             ctx.kind[g.target.id] = old_kind
     lines.extend(ctx.pre); ctx.pre = []
     helper = 'ail_slist' if kind == SLIST else 'ail_flist' if kind == FLIST else 'ail_list'
-    lines.append('%s_push(&%s, %s);' % (helper, c, val))
+    if indexed:
+        # The result was reserved for exactly the elements this counted loop will produce, so
+        # the push capacity check can be skipped. `n++` still records how far a raising element
+        # got, just as push did, and keeps the elements that were already stored.
+        lines.append('%s.p[%s.n++] = %s;' % (c, c, val))
+    else:
+        lines.append('%s_push(&%s, %s);' % (helper, c, val))
     lines.append('}')
     if struct_source:
         lines.extend([_obj_store(bound, 'NULL', (OBJ, source_kind[1]), ctx) + ';',
@@ -21575,6 +21623,9 @@ def _stmt_inner(node, ctx, ind):
             return _discard_value(node.value, ctx, pad)
         return _discard_value(node.value, ctx, pad)
     if isinstance(node, ast.Delete):
+        for target in node.targets:
+            if isinstance(target, ast.Subscript):
+                refuse_unrepresentable_delete_bounds(target)
         if any(isinstance(target, ast.Subscript) and isinstance(target.value, ast.Attribute) and _field_kind(target.value, ctx) == SLIST for target in node.targets):
             if len(node.targets) != 1:
                 raise Unsupported('string list field deletion requires one target')
@@ -24411,6 +24462,31 @@ def _range_kind(name, ctx):
     return None
 
 
+def _range_class_of(name, ctx):
+    try:
+        t = ctx.type_of(name)
+    except Unsupported:
+        return None
+    if _is_obj_kind(t) and t[1] in ctx.classes:
+        return ctx.classes[t[1]]
+    return None
+
+
+def _range_field(owner, attr, ctx):
+    cls = _range_class_of(owner, ctx)
+    return cls.field_types.get(attr) if cls is not None else None
+
+
+def _range_fields(owner, ctx):
+    cls = _range_class_of(owner, ctx)
+    return dict(cls.field_types) if cls is not None else None
+
+
+def _range_method(owner, attr, ctx):
+    cls = _range_class_of(owner, ctx)
+    return cls.methods.get(attr) if cls is not None else None
+
+
 def _range_proofs(ctx):
     proofs = getattr(ctx, '_range_proofs', None)
     if proofs is None:
@@ -24420,7 +24496,10 @@ def _range_proofs(ctx):
                 return entry[1]
             return None
         info = rangecheck.Info(lambda name: _range_kind(name, ctx), const,
-                               frozenset(ctx.funcs) | frozenset(ctx.classes))
+                               frozenset(ctx.funcs) | frozenset(ctx.classes),
+                               field=lambda owner, attr: _range_field(owner, attr, ctx),
+                               fields=lambda owner: _range_fields(owner, ctx),
+                               method=lambda owner, attr: _range_method(owner, attr, ctx))
         proofs = rangecheck.analyze(ctx.fn_node, info)
         ctx._range_proofs = proofs
     return proofs
@@ -30861,7 +30940,9 @@ def _dispatcher(sname, m, impls, owners, classes, by_name):
     on the run-time class, compiled like any other function. Its parameters are the methods' own."""
     fns = [by_name[classes[o].method_cname(m)] for o in impls]
     own = _resolve_method(classes, sname, m)
-    rep = by_name[classes[own].method_cname(m)] if own is not None else fns[0]
+    rep = by_name.get(classes[own].method_cname(m)) if own is not None else None
+    if rep is None:
+        rep = fns[0]
     def shown(f):
         return f.name.replace('__', '.')
     for f in fns:
@@ -36712,7 +36793,32 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
                   and fn.body[-1].value is not None
                   and not any(isinstance(nd, (ast.For, ast.While, ast.Try, ast.With))
                               for st in fn.body for nd in ast.walk(st)))
-    if (not separate_units and not _is_entry and not recursive and _inlinable
+    # ONE SMALL LEAF LOOP, for the same reason and under a budget. `parse_int64_decimal` is a
+    # nine-statement leaf whose body is one digit loop; gcc will not inline it at -O2, and the
+    # surviving call clobbers caller state in csv_table's row loop. Measured 2026-10-23 on the
+    # 132 MB three-million-row csv_table input: 1.24 s before, 0.99 s with the attribute (user
+    # time 1.08 s -> 0.84 s), output byte-identical. The predicate stays conservative: one
+    # `for`, no other loop/try/with/yield, no call to another function or class constructor,
+    # a SCALAR NUMERIC return, at most 12 statements and 180 AST nodes. String/list/object
+    # returns are excluded because inlining a loop that owns heap storage duplicates cleanup
+    # paths -- inlining `json_quote` as well measured 1.42 s, slower than this 1.25 s. The cap
+    # is on the WHOLE body, not just the loop header, and async/generator forms are refused
+    # because a call gcc cannot inline is a hard compile error rather than a missed
+    # optimisation.
+    _loop_nodes = sum(1 for st in fn.body for _ in ast.walk(st))
+    _calls_user = any(isinstance(nd, ast.Call) and isinstance(nd.func, ast.Name)
+                      and (nd.func.id in sigs or (classes and nd.func.id in classes))
+                      for st in fn.body for nd in ast.walk(st))
+    _single_loop_inlinable = (
+        len(fn.body) <= 12 and _loop_nodes <= 180 and not _calls_user
+        and ret in (INT, FLT)
+        and isinstance(fn.body[-1], ast.Return) and fn.body[-1].value is not None
+        and sum(isinstance(nd, ast.For) for st in fn.body for nd in ast.walk(st)) == 1
+        and not any(isinstance(nd, (ast.While, ast.AsyncFor, ast.Try, ast.With, ast.AsyncWith,
+                                   ast.Yield, ast.YieldFrom, ast.Await))
+                    for st in fn.body for nd in ast.walk(st)))
+    if (not separate_units and not _is_entry and not recursive
+            and (_inlinable or _single_loop_inlinable)
             and ret not in (NORET, LIST, FLIST, GRIDRET, BYTES)
             and not _is_tuple_ret(ret) and not _is_multi_ret(ret)):
         # The attribute and the storage class go on their OWN line, so the signature line

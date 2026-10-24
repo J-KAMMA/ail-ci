@@ -33,7 +33,7 @@ import os
 import re
 import runpy
 
-from pyfront import Unsupported, refuse_complex_pow
+from pyfront import Unsupported, refuse_complex_pow, refuse_unrepresentable_delete_bounds
 import filelib
 import hashlower
 import pyfunc
@@ -1168,6 +1168,23 @@ def _is_literal_default(d):
         return False
 
 
+def _is_mutable_literal_default(d):
+    """A literal default that builds a list, dict or set (also inside a tuple).  A nested def's
+    defaults are filled in at each call site, so such a value would be a fresh object per call;
+    CPython evaluates it once, when the def runs."""
+    try:
+        value = ast.literal_eval(d)
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return False
+
+    def mutable(v):
+        if isinstance(v, (list, dict, set)):
+            return True
+        return isinstance(v, tuple) and any(mutable(x) for x in v)
+
+    return mutable(value)
+
+
 def _module_stmt_binds(stmt):
     """Names a module-level statement binds (def, class, assignment targets, imports)."""
     if isinstance(stmt, (ast.FunctionDef, ast.ClassDef)):
@@ -2120,6 +2137,12 @@ class Compiler(boxclosure.ClosureMixin):
         _untuple_records(tree)                                      # the tuple pass's _AilT_ records are tuples again
         self._add_notimplemented(tree)                              # NotImplemented (safetyrt.patch_notimplemented)
         self._dataclass_methods(tree)                               # a @dataclass's __eq__ (and __hash__ when frozen)
+        import withlib
+        from stdlib4 import Refused as _WithRefused
+        try:
+            withlib.refuse_with_yield(tree)                        # before G7 removes `with open`
+        except _WithRefused as exc:
+            raise Unsupported(exc.text)
         filelib.rewrite_tree(tree, Unsupported, general=True)      # G7: open / with / os -> primitives + prelude
         mix_tree = copy.deepcopy(tree)          # the mixed-mode typed clones see the source as written
         mix_tree.body = [n for n in mix_tree.body if not getattr(n, '_ail_safety', False)]
@@ -3245,7 +3268,11 @@ class Compiler(boxclosure.ClosureMixin):
             except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
                 return False
         # defaults that are constants (CPython evaluates them once, when the def runs: for a constant the value
-        # filled in at each call is the same), *args packed into a tuple at the call, keyword-only parameters
+        # filled in at each call is the same), *args packed into a tuple at the call, keyword-only parameters.
+        # A mutable literal would be a fresh object at each call, so it is refused by name instead.
+        if any(_is_mutable_literal_default(d) for d in node.args.defaults + node.args.kw_defaults):
+            raise Unsupported('a nested def %s with a mutable default (CPython evaluates the '
+                              'default once, when the def runs)' % node.name)
         if node.args.kwarg or node.args.posonlyargs or not all(constant(d) for d in node.args.defaults) \
                 or not all(d is None or constant(d) for d in node.args.kw_defaults):
             raise Unsupported('a nested def %s with *args/**kwargs/keyword-only/default '
@@ -5210,7 +5237,9 @@ class Compiler(boxclosure.ClosureMixin):
         return self._emit_comp(node, ctx, 'ail_list_new(cx)', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        return self.expr_ListComp(node, ctx)
+        t = self.expr_ListComp(node, ctx)
+        ctx.emit('((ail_vecobj *)(%s).o)->from_generator = 1;' % t)
+        return t
 
     def expr_SetComp(self, node, ctx):
         def add(n, c, t):
@@ -5249,6 +5278,7 @@ class Compiler(boxclosure.ClosureMixin):
         return spec
 
     _CORE_SPEC_RE = re.compile(r'^(?:.?[<>^])?[+ ]?0?[0-9]*(?:\.[0-9]+)?[dfs]?$')
+    _CORE_SIGN_RE = re.compile(r'^(?:.?[<>^])?[+ -]')
 
     def _core_fmtspec(self, spec, kind):
         """True for the specs the core's ail_obj_format builds as CPython does (`d`/`.Nf`/`s` with fill, align,
@@ -5256,6 +5286,10 @@ class Compiler(boxclosure.ClosureMixin):
         go to safetyrt.FMT."""
         type_char = spec[-1] if spec and spec[-1].isalpha() else ''
         if not spec or (type_char == '' and kind not in ('str', 'int')):
+            return False
+        if kind == 'str' and self._CORE_SIGN_RE.match(spec):
+            # a sign flag on a str is a ValueError in CPython (Space/Sign not allowed); the core's
+            # str formatting silently ignores it, while safetyrt.FMT raises the exact message
             return False
         return type_char in ('', 'd', 'f', 's') and bool(self._CORE_SPEC_RE.match(spec))
 
@@ -6538,8 +6572,9 @@ class Compiler(boxclosure.ClosureMixin):
         # ail_str2.h). Corrected here at the call site: on exactly that failure, for a STR
         # argument, rebuild the message CPython actually raises and re-raise it.
         if fname in ('int', 'float'):
+            keep_limit = ' && !ail_exc_is_int_limit(cx)' if fname == 'int' else ''
             ctx.emit('if (st == AIL_EXC && (%s).tag == AIL_T_STR && '
-                     'ail_exc_matches_b(cx, AIL_B_VALUEERROR)) {' % v)
+                     'ail_exc_matches_b(cx, AIL_B_VALUEERROR)%s) {' % (v, keep_limit))
             ctx.indent += 1
             ctx.emit('ail_exc_clear(cx);')
             base = ('invalid literal for int() with base 10: ' if fname == 'int'
@@ -10006,6 +10041,9 @@ class Compiler(boxclosure.ClosureMixin):
         pass  # already folded into ctx.ptr_names by _register_nested
 
     def stmt_Delete(self, node, ctx):
+        for target in node.targets:
+            if isinstance(target, ast.Subscript):
+                refuse_unrepresentable_delete_bounds(target)
         for target in node.targets:
             if isinstance(target, ast.Name):
                 if (not self._is_global_name(target.id, ctx) and target.id in ctx.slot_of

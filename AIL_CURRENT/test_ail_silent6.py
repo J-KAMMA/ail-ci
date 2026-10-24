@@ -82,6 +82,8 @@ class Base(unittest.TestCase):
 
 G17_SRC = '# task: Use functools.partial to build a family of power functions and map them over a fixed base value.\nfrom functools import partial\nfrom typing import Callable\n\n\ndef power(base: float, exponent: float) -> float:\n    """Return base raised to exponent."""\n    return base ** exponent\n\n\ndef make_power_family(exponents: list[float]) -> list[Callable[[float], float]]:\n    """Build a family of power functions, one per exponent, using partial.\n\n    Each returned callable takes a base value and raises it to a fixed exponent.\n    """\n    return [partial(power, exponent=e) for e in exponents]\n\n\ndef main() -> None:\n    exponents: list[float] = [0, 1, 2, 3, 0.5, -1]\n    fixed_base: float = 2.0\n\n    family = make_power_family(exponents)\n\n    # Map each partial function over the fixed base value.\n    results: list[float] = list(map(lambda f: f(fixed_base), family))\n\n    print(f"Fixed base: {fixed_base}")\n    for e, r in zip(exponents, results):\n        print(f"  {fixed_base} ** {e} = {r}")\n\n    # Also demonstrate the partial objects directly via map.\n    squares_and_cubes = list(map(partial(power, exponent=2), [1.0, 2.0, 3.0, 4.0]))\n    print(f"Squares of [1, 2, 3, 4]: {squares_and_cubes}")\n\n\nif __name__ == "__main__":\n    main()\n'
 
+G17_004_SRC = '# task: Use functools.partial to create a scaling function and apply it to a list of numbers with map.\nfrom functools import partial\n\n\ndef scale(factor: float, value: float) -> float:\n    return factor * value\n\n\ndef main() -> None:\n    numbers: list[float] = [1, 2, 3, 4.5, -2, 10]\n    double = partial(scale, 2)\n    triple = partial(scale, 3)\n    half = partial(scale, 0.5)\n    print("Doubled: ", list(map(double, numbers)))\n    print("Tripled: ", list(map(triple, numbers)))\n    print("Halved:  ", list(map(half, numbers)))\n\n\nif __name__ == "__main__":\n    main()\n'
+
 SLOTS_SRC = 'def avg(xs: list[float]) -> float:\n    return sum(xs) / len(xs)\n\ndef zero() -> float:\n    return 0\n\ndef main() -> None:\n    xs: list[float] = [1, 2.5]\n    print(xs)\n    xs.append(3)\n    print(xs, avg(xs))\n    z: float = 4\n    print(z, zero())\n    t: tuple[float, float] = (1, 2)\n    print(t)\n\nmain()\n'
 
 DC1_SRC = 'from dataclasses import dataclass, field\n\n@dataclass\nclass P:\n    x: int\n    y: int\n\n@dataclass\nclass Q:\n    x: int\n    y: int\n\n@dataclass\nclass R:\n    a: int\n    note: str = field(default="", compare=False)\n\n@dataclass(eq=False)\nclass N:\n    a: int\n\ndef main() -> None:\n    print(P(1, 2) == P(1, 2))\n    print(P(1, 2) == P(2, 1))\n    print(P(1, 2) != P(1, 2))\n    print(P(1, 2) == Q(1, 2))\n    a = P(3, 4)\n    print(a == a)\n    print(R(1, "a") == R(1, "b"))\n    print(N(1) == N(1))\n    lst = [P(1, 2), P(3, 4)]\n    print(P(3, 4) in lst)\n    print(lst == [P(1, 2), P(3, 4)])\n    print(lst.index(P(3, 4)))\n    print(P(1, 2) == 5)\n    print(P(1, 2) == None)\n\nmain()\n'
@@ -104,6 +106,9 @@ MINMAX_SRC = 'def main() -> None:\n    nan = float("nan")\n    a = nan\n    b = 
 class FloatSlotTests(Base):
     def test_corpus_g17_024(self):
         self.same(G17_SRC)
+
+    def test_corpus_g17_004_positional_partial(self):
+        self.same(G17_004_SRC)
 
     def test_ints_in_float_slots_stay_ints(self):
         out = self.same(SLOTS_SRC)
