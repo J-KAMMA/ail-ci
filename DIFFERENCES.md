@@ -4,7 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
-| C?-job-pre165-10250411-1 | nested def forward call | A direct call of a nested `def` before its own `def` statement printed the function's result on both builds; CPython reads an unbound local and raises `UnboundLocalError: cannot access local variable 'f' where it is not associated with a value`. The general path now checks a def-time binding flag before the call; the typed path refuses the shape by name and the default build falls back. | fixed |
+| C?-job-pre165-10250411-1 | nested def forward call | A direct call of a nested `def` before its own `def` statement printed the function's result on both builds; CPython reads an unbound local and raises `UnboundLocalError: cannot access local variable 'f' where it is not associated with a value`. The general path now checks a def-time binding flag before the call; a name also bound by a parameter, assignment, loop target or `except ... as` reads the frame slot, and every such rebinding clears the flag. The typed path refuses the shape by name and the default build falls back. | fixed |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |

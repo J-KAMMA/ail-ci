@@ -39,6 +39,80 @@ def main():
 
 main()
 ''',
+    'parameter_same_name': '''
+def helper():
+    return 9
+
+
+def main(f):
+    print(f())
+    def f():
+        return 9
+    print(f())
+
+
+main(helper)
+''',
+    'parameter_same_name_with_args': '''
+def helper(x):
+    return x * 2
+
+
+def main(f):
+    print(f(3))
+    def f(x):
+        return x + 1
+    print(f(3))
+
+
+main(helper)
+''',
+    'assignment_before_def': '''
+def helper():
+    return 7
+
+
+def main():
+    f = helper
+    print(f())
+    def f():
+        return 1
+    print(f())
+
+
+main()
+''',
+    'rebind_after_def': '''
+def helper():
+    return 9
+
+
+def main():
+    def f():
+        return 1
+    print(f())
+    f = helper
+    print(f())
+
+
+main()
+''',
+    'except_as_then_def': '''
+def main():
+    try:
+        raise ValueError("x")
+    except ValueError as f:
+        try:
+            print(f())
+        except TypeError as e:
+            print(type(e).__name__)
+    def f():
+        return 1
+    print(f())
+
+
+main()
+''',
     'call_after_def_and_recursion': '''
 def main():
     def f(n):
