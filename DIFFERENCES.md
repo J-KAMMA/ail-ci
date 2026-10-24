@@ -5,6 +5,11 @@ Deliberate differences from CPython and open silent differences found by differe
 | id | area | difference | status |
 | --- | --- | --- | --- |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
+| C?-job-rbfuzz4-10240913-1 | dict methods | `pop`/`setdefault` call `__hash__` once (including the empty-dict `pop` fast path); `update(other_dict)`, `copy`, `popitem` and `dict(d)` reuse stored hashes instead of hashing again. | fixed 2026-10-24 |
+| C?-job-rbfuzz4-10240913-2 | dict/set literals | On the general path every key/value/element expression is evaluated before any key is hashed, as CPython 3.12 `BUILD_MAP`/`BUILD_SET` do; an unhashable early key no longer hides later side effects. The typed path has no user `__hash__` keys. | fixed 2026-10-24 |
+| C?-job-rbfuzz4-10240913-3 | dict iteration | Same-size delete+reinsert during live iteration can stop on the typed path where CPython continues, or continue on the general path where CPython raises "dictionary keys changed during iteration"; the declared rule is in SEMANTICS section 240. | open |
+| C?-job-rbfuzz4-10240913-4 | dict construction | `dict(d)` may call a user `__eq__` a different number of times than CPython when `d`'s key table has a shape CPython can share; the values and order are the same. | open |
+| C?-job-rbfuzz4-10240913-5 | dict operators | `reversed(d)` and `d1 | d2` compile and then stop with a runtime TypeError instead of working or being refused by name. | open |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |
 | C?-job-fuzz39-10230820-1 | `is` / `is not` with a tuple constant | merges equal tuple constants of a code object (`a = (); b = (); a is b` is True; `()` is a singleton) | each tuple display is an object of its own | refused by name; `test_ail_fuzz39.py` |

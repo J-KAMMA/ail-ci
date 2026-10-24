@@ -9957,6 +9957,38 @@ static inline int ail_map_del(ail_map *m, ail_obj key) {
         slot = (slot + 1) & mask;
     }
 }
+/* The same one-hash forms as the object runtime: pop and setdefault must not hash the key
+   twice, and a key taken from another dict's entry already carries its stored hash. */
+static inline int ail_map_take_hashed(ail_map *m, ail_obj *out, ail_obj key, int64_t h) {
+    int64_t mask = m->index_cap - 1, slot = (int64_t)((uint64_t)h & (uint64_t)mask);
+    for (;;) {
+        int64_t e = m->index[slot];
+        if (e == -1) return 0;
+        if (m->entries[e].hash == h && ail_obj_eq_raw(m->entries[e].key, key)) {
+            *out = m->entries[e].val;
+            for (int64_t k = e; k + 1 < m->n; k++) m->entries[k] = m->entries[k + 1];
+            m->n--;
+            ail_map_rehash(m, m->index_cap);
+            return 1;
+        }
+        slot = (slot + 1) & mask;
+    }
+}
+static inline ail_obj ail_map_setdefault_hashed(ail_map *m, ail_obj key, ail_obj dflt, int64_t h) {
+    int64_t mask = m->index_cap - 1, slot = (int64_t)((uint64_t)h & (uint64_t)mask);
+    for (;;) {
+        int64_t e = m->index[slot];
+        if (e == -1) break;
+        if (m->entries[e].hash == h && ail_obj_eq_raw(m->entries[e].key, key)) return m->entries[e].val;
+        slot = (slot + 1) & mask;
+    }
+    if (m->n == m->cap) ail_map_grow_entries(m);
+    int64_t idx = m->n++;
+    m->entries[idx].key = key; m->entries[idx].val = dflt; m->entries[idx].hash = h;
+    if (m->n * 3 >= m->index_cap * 2) ail_map_rehash(m, m->index_cap * 2);
+    else m->index[slot] = idx;
+    return dflt;
+}
 
 /* ===================================================================================
    Arithmetic. int-with-int (BOOL counts as int here, so True+True is the int 2, not a
@@ -10474,16 +10506,17 @@ static inline ail_obj ail_dict_get(ail_obj d, ail_obj key, ail_obj dflt) {
 static inline void ail_dict_set(ail_obj d, ail_obj key, ail_obj val) { ail_map_set(d.m, key, val); }
 static inline int ail_dict_contains(ail_obj d, ail_obj key) { return ail_map_get(d.m, key) != NULL; }
 static inline ail_obj ail_dict_setdefault(ail_obj d, ail_obj key, ail_obj dflt) {
-    ail_obj *v = ail_map_get(d.m, key);
-    if (v) return *v;
-    ail_map_set(d.m, key, dflt);
-    return dflt;
+    return ail_map_setdefault_hashed(d.m, key, dflt, ail_obj_hash(key));
 }
 static inline ail_obj ail_dict_pop(ail_obj d, ail_obj key, int has_default, ail_obj dflt) {
-    ail_obj *v = ail_map_get(d.m, key);
-    if (!v) { if (has_default) return dflt; ail_raise(AIL_ERR_KEY, ail_obj_repr(key)); }
-    ail_obj val = *v;
-    ail_map_del(d.m, key);
+    if (d.m->n == 0) {
+        if (has_default) return dflt;
+        ail_raise(AIL_ERR_KEY, ail_obj_repr(key));
+    }
+    int64_t h = ail_obj_hash(key); ail_obj val;
+    if (!ail_map_take_hashed(d.m, &val, key, h)) {
+        if (has_default) return dflt; ail_raise(AIL_ERR_KEY, ail_obj_repr(key));
+    }
     return val;
 }
 static inline void ail_dict_del(ail_obj d, ail_obj key) {
@@ -15082,6 +15115,25 @@ static inline void ail_map_rehash(ail_mapobj *m, int64_t new_cap) {
     free(m->index);
     m->index = ni; m->index_cap = new_cap;
 }
+/* dict.copy(): CPython clones the table, so it calls neither __hash__ nor __eq__.
+   Copy the dense entries and place their stored hashes in a fresh index. */
+static inline ail_st ail_map_clone(ail_ctx *cx, ail_mapobj *dst, const ail_mapobj *src) {
+    if (src->n == 0) return AIL_OK;
+    while (dst->cap < src->n) ail_map_grow_entries(cx, dst);
+    memcpy(dst->entries, src->entries, (size_t)src->n * sizeof(ail_mapentry));
+    dst->n = src->n;
+    int64_t cap = dst->index_cap;
+    while (dst->n * 3 >= cap * 2) cap *= 2;
+    if (cap != dst->index_cap) { ail_map_rehash(dst, cap); return AIL_OK; }
+    for (int64_t i = 0; i < dst->index_cap; i++) dst->index[i] = -1;
+    int64_t mask = dst->index_cap - 1;
+    for (int64_t e = 0; e < dst->n; e++) {
+        int64_t slot = (int64_t)((uint64_t)dst->entries[e].hash & (uint64_t)mask);
+        while (dst->index[slot] != -1) slot = (slot + 1) & mask;
+        dst->index[slot] = e;
+    }
+    return AIL_OK;
+}
 static inline ail_st ail_map_get(ail_ctx *cx, ail_obj **out, ail_mapobj *m, ail_obj key) {
     int64_t h; ail_st st = ail_obj_hash(cx, &h, key); if (st != AIL_OK) return st;
     int64_t mask = m->index_cap - 1, slot = (int64_t)((uint64_t)h & (uint64_t)mask);
@@ -15094,6 +15146,23 @@ static inline ail_st ail_map_get(ail_ctx *cx, ail_obj **out, ail_mapobj *m, ail_
 }
 static inline ail_st ail_map_set(ail_ctx *cx, ail_mapobj *m, ail_obj key, ail_obj val) {
     int64_t h; ail_st st = ail_obj_hash(cx, &h, key); if (st != AIL_OK) return st;
+    int64_t mask = m->index_cap - 1, slot = (int64_t)((uint64_t)h & (uint64_t)mask);
+    for (;;) {
+        int64_t e = m->index[slot];
+        if (e == -1) break;
+        if (m->entries[e].hash == h && ail_member_eq(m->entries[e].key, key)) { m->entries[e].val = val; return AIL_OK; }
+        slot = (slot + 1) & mask;
+    }
+    if (m->n == m->cap) ail_map_grow_entries(cx, m);
+    int64_t idx = m->n++;
+    m->entries[idx].key = key; m->entries[idx].val = val; m->entries[idx].hash = h;
+    if (m->n * 3 >= m->index_cap * 2) { ail_map_rehash(m, m->index_cap * 2); return AIL_OK; }
+    m->index[slot] = idx;
+    return AIL_OK;
+}
+static inline ail_st ail_map_set_hashed(ail_ctx *cx, ail_mapobj *m, ail_obj key, ail_obj val, int64_t h) {
+    /* A key taken from another dict's entries already carries its hash: CPython's dict.update,
+       dict.copy, dict(d) and popitem never call __hash__ again. Reuse the stored number. */
     int64_t mask = m->index_cap - 1, slot = (int64_t)((uint64_t)h & (uint64_t)mask);
     for (;;) {
         int64_t e = m->index[slot];
@@ -15122,6 +15191,38 @@ static inline ail_st ail_map_del(ail_ctx *cx, int *found, ail_mapobj *m, ail_obj
         }
         slot = (slot + 1) & mask;
     }
+}
+static inline ail_st ail_map_take_hashed(ail_ctx *cx, ail_obj *out, int *found, ail_mapobj *m, ail_obj key, int64_t h) {
+    /* pop(key[, default]): CPython hashes the key once, finds the entry and removes it. */
+    int64_t mask = m->index_cap - 1, slot = (int64_t)((uint64_t)h & (uint64_t)mask);
+    for (;;) {
+        int64_t e = m->index[slot];
+        if (e == -1) { *found = 0; return AIL_OK; }
+        if (m->entries[e].hash == h && ail_member_eq(m->entries[e].key, key)) {
+            *out = m->entries[e].val;
+            for (int64_t k = e; k + 1 < m->n; k++) m->entries[k] = m->entries[k + 1];
+            m->n--;
+            ail_map_rehash(m, m->index_cap);
+            *found = 1; return AIL_OK;
+        }
+        slot = (slot + 1) & mask;
+    }
+}
+static inline ail_st ail_map_setdefault_hashed(ail_ctx *cx, ail_obj *out, ail_mapobj *m, ail_obj key, ail_obj dflt, int64_t h) {
+    /* setdefault(k, d): one hash for both the probe and a possible insertion. */
+    int64_t mask = m->index_cap - 1, slot = (int64_t)((uint64_t)h & (uint64_t)mask);
+    for (;;) {
+        int64_t e = m->index[slot];
+        if (e == -1) break;
+        if (m->entries[e].hash == h && ail_member_eq(m->entries[e].key, key)) { *out = m->entries[e].val; return AIL_OK; }
+        slot = (slot + 1) & mask;
+    }
+    if (m->n == m->cap) ail_map_grow_entries(cx, m);
+    int64_t idx = m->n++;
+    m->entries[idx].key = key; m->entries[idx].val = dflt; m->entries[idx].hash = h;
+    if (m->n * 3 >= m->index_cap * 2) ail_map_rehash(m, m->index_cap * 2);
+    else m->index[slot] = idx;
+    *out = dflt; return AIL_OK;
 }
 static inline ail_obj ail_dict_new(ail_ctx *cx) { ail_obj r; r.tag = AIL_T_DICT; r.o = (ail_gcobj *)ail_map_new(cx); return r; }
 /* collections.defaultdict(int|list|set|str): a dict whose misses insert a fresh default. The
@@ -15152,16 +15253,19 @@ static inline ail_st ail_dict_contains(ail_ctx *cx, int *out, ail_obj d, ail_obj
     *out = v != NULL; return AIL_OK;
 }
 static inline ail_st ail_dict_setdefault(ail_ctx *cx, ail_obj *out, ail_obj d, ail_obj key, ail_obj dflt) {
-    ail_obj *v; ail_st st = ail_map_get(cx, &v, (ail_mapobj *)d.o, key); if (st != AIL_OK) return st;
-    if (v) { *out = *v; return AIL_OK; }
-    st = ail_map_set(cx, (ail_mapobj *)d.o, key, dflt); if (st != AIL_OK) return st;
-    *out = dflt; return AIL_OK;
+    int64_t h; ail_st st = ail_obj_hash(cx, &h, key); if (st != AIL_OK) return st;
+    return ail_map_setdefault_hashed(cx, out, (ail_mapobj *)d.o, key, dflt, h);
 }
 static inline ail_st ail_dict_pop(ail_ctx *cx, ail_obj *out, ail_obj d, ail_obj key, int has_default, ail_obj dflt) {
-    ail_obj *v; ail_st st = ail_map_get(cx, &v, (ail_mapobj *)d.o, key); if (st != AIL_OK) return st;
-    if (!v) { if (has_default) { *out = dflt; return AIL_OK; } return ail_raise_key_arg(cx, key); }
-    ail_obj val = *v;
-    int found; st = ail_map_del(cx, &found, (ail_mapobj *)d.o, key); if (st != AIL_OK) return st;
+    if (((ail_mapobj *)d.o)->n == 0) {
+        /* CPython's dict.pop fast-path never hashes a key against an empty dict. */
+        if (has_default) { *out = dflt; return AIL_OK; }
+        return ail_raise_key_arg(cx, key);
+    }
+    int64_t h; ail_st st = ail_obj_hash(cx, &h, key); if (st != AIL_OK) return st;
+    int found; ail_obj val;
+    st = ail_map_take_hashed(cx, &val, &found, (ail_mapobj *)d.o, key, h); if (st != AIL_OK) return st;
+    if (!found) { if (has_default) { *out = dflt; return AIL_OK; } return ail_raise_key_arg(cx, key); }
     *out = val; return AIL_OK;
 }
 static inline ail_st ail_dict_del(ail_ctx *cx, ail_obj d, ail_obj key) {
@@ -17464,7 +17568,7 @@ static inline ail_st ail_bi_dict_from_iter(ail_ctx *cx, ail_obj *out, int has_ar
     if (arg.tag == AIL_T_DICT) {
         ail_mapobj *m = (ail_mapobj *)arg.o;
         for (int64_t k = 0; k < m->n; k++) {
-            ail_st st = ail_dict_set(cx, fr.slots[0], m->entries[k].key, m->entries[k].val);
+            ail_st st = ail_map_set_hashed(cx, (ail_mapobj *)fr.slots[0].o, m->entries[k].key, m->entries[k].val, m->entries[k].hash);
             if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
         }
         *out = fr.slots[0]; AIL_FRAME_LEAVE(cx, fr); return AIL_OK;
@@ -18593,14 +18697,15 @@ static inline ail_st ail_meth_dict_popitem(ail_ctx *cx, ail_obj *out, ail_obj d)
         return ail_raise_key_arg(cx, msg);
     }
     ail_obj key = m->entries[m->n - 1].key, val = m->entries[m->n - 1].val;
-    int found; ail_st st = ail_map_del(cx, &found, m, key); if (st != AIL_OK) return st;
+    m->n--;
+    ail_map_rehash(m, m->index_cap);   /* drop its index entry; no lookup, hash or eq */
     ail_obj pr[2]; pr[0] = key; pr[1] = val;
     *out = ail_tuple_new(cx, pr, 2);
     return AIL_OK;
 }
 static inline ail_st ail_meth_dict_update(ail_ctx *cx, ail_obj d, ail_obj other) {
     ail_mapobj *mo = (ail_mapobj *)other.o;
-    for (int64_t i = 0; i < mo->n; i++) { ail_st st = ail_dict_set(cx, d, mo->entries[i].key, mo->entries[i].val); if (st != AIL_OK) return st; }
+    for (int64_t i = 0; i < mo->n; i++) { ail_st st = ail_map_set_hashed(cx, (ail_mapobj *)d.o, mo->entries[i].key, mo->entries[i].val, mo->entries[i].hash); if (st != AIL_OK) return st; }
     return AIL_OK;
 }
 static inline ail_st ail_it_next(ail_ctx *cx, ail_obj *out, ail_obj itobj); /* fwd: library section */
@@ -18638,7 +18743,7 @@ static inline ail_st ail_meth_dict_copy(ail_ctx *cx, ail_obj *out, ail_obj d) {
     ((ail_gcobj *)r.o)->flags = m->hdr.flags;     /* Counter.copy() is a Counter */
     if (m->dd_factory >= 1 && m->dd_factory <= 4) ((ail_mapobj *)r.o)->dd_factory = m->dd_factory;   /* defaultdict.copy() keeps the factory */
     /*DD5COPY*/
-    for (int64_t i = 0; i < m->n; i++) { ail_st st = ail_dict_set(cx, r, m->entries[i].key, m->entries[i].val); if (st != AIL_OK) return st; }
+    ail_st cst = ail_map_clone(cx, (ail_mapobj *)r.o, m); if (cst != AIL_OK) return cst;
     *out = r; return AIL_OK;
 }
 /* M044's "dictionary changed size during iteration" check -- see the file banner's "core

@@ -4911,13 +4911,22 @@ class Compiler(boxclosure.ClosureMixin):
     def expr_Set(self, node, ctx):
         t = ctx.tmp()
         ctx.emit('%s = ail_set_new(cx);' % t)
-        for e in node.elts:
-            if isinstance(e, ast.Starred):
-                src = self.expr(e.value, ctx)
-                ctx.emit('st = ail_set_update_any(cx, %s, %s);' % (t, src))
+        if any(isinstance(e, ast.Starred) for e in node.elts):
+            for e in node.elts:
+                if isinstance(e, ast.Starred):
+                    src = self.expr(e.value, ctx)
+                    ctx.emit('st = ail_set_update_any(cx, %s, %s);' % (t, src))
+                    ctx.check()
+                    continue
+                v = self.expr(e, ctx)
+                ctx.emit('st = ail_set_add(cx, %s, %s);' % (t, v))
                 ctx.check()
-                continue
-            v = self.expr(e, ctx)
+            return t
+        # CPython 3.12's BUILD_SET evaluates every element expression before it hashes
+        # any of them (an unhashable first element therefore does not hide the side
+        # effects of the later ones). Keep the same two phases.
+        vals = [self.expr(e, ctx) for e in node.elts]
+        for v in vals:
             ctx.emit('st = ail_set_add(cx, %s, %s);' % (t, v))
             ctx.check()
         return t
@@ -4925,11 +4934,16 @@ class Compiler(boxclosure.ClosureMixin):
     def expr_Dict(self, node, ctx):
         t = ctx.tmp()
         ctx.emit('%s = ail_dict_new(cx);' % t)
+        pairs = []
         for k, v in zip(node.keys, node.values):
             if k is None:
                 raise Unsupported('a ** unpacking inside a dict literal')
             kc = self.expr(k, ctx)
             vc = self.expr(v, ctx)
+            pairs.append((kc, vc))
+        # CPython 3.12's BUILD_MAP hashes/inserts only after every key and value
+        # expression has run; `{bad_key: f(), good: g()}` still runs g().
+        for kc, vc in pairs:
             ctx.emit('st = ail_dict_set(cx, %s, %s, %s);' % (t, kc, vc))
             ctx.check()
         return t
