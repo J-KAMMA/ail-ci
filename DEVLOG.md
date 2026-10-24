@@ -199,6 +199,18 @@ integer `**` and raises `int64 constant power out of range: <base> ** <exponent>
 (the same place an out-of-range literal is refused). `2 ** 62`, `(-2) ** 63` (INT64_MIN) and the
 float/small-power cases still compile and match CPython. `test_ail_pre2.py` covers both builds and
 both syntaxes.
+## 2026-10-23 - pre22: `with` around `yield` (job-pre22-10240312)
+
+The p12/p23/p24 case still differs on this tree: a generator with `with` around its `yield`
+and then `g.close()` runs no `__exit__` at all, because the general path's generator close finishes
+the fiber without running the suspended frames (CPython raises `GeneratorExit` there and passes it
+to `__exit__`). Building real `GeneratorExit` close semantics is a runtime change outside this job,
+so the construct is refused by name before file-lowering removes the `with`:
+
+* `withlib.refuse_with_yield` (called from `pyboxed2.Compiler.compile`) refuses any `with` whose
+  body yields in the same function, for every manager expression and for `with open(...)` too.
+* `test_ail_pre22.py` covers the refusal on both builds and checks that a `with` beside (not
+  around) a `yield` still runs and matches CPython.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
