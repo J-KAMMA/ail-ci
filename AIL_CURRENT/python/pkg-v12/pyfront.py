@@ -83,7 +83,9 @@ HELPERS = {
     # non-negative `a` and |a| <= 2**(63-b) for a negative one. `-(a + 1)` is |a| - 1 and is used
     # instead of `-a` because negating INT64_MIN is itself undefined.
     'ck_shl': ('static int64_t ck_shl(int64_t a, int64_t b) {\n'
-               '    if (b < 0) ail_raise_named(AIL_EXC_VALUE);\n'
+               '    if (b < 0) ail_raise_value(ail_exception_new(AIL_EXC_VALUE,\n'
+               '        (const uint8_t *)"negative shift count",\n'
+               '        (int64_t)sizeof "negative shift count" - 1, 1));\n'
                '    if (b >= 64) { if (a != 0) ail_die("integer overflow"); return 0; }\n'
                '    uint64_t lim = (uint64_t)1 << (63 - b);\n'
                '    uint64_t mag = (a >= 0) ? (uint64_t)a : (uint64_t)(-(a + 1));\n'
@@ -99,7 +101,9 @@ HELPERS = {
                 '    if (__builtin_expect((r >> s) != a, 0)) ail_die("integer overflow");\n'
                 '    return r;\n}\n'),
     'ck_shr': ('static int64_t ck_shr(int64_t a, int64_t b) {\n'
-               '    if (b < 0) ail_raise_named(AIL_EXC_VALUE);\n'
+               '    if (b < 0) ail_raise_value(ail_exception_new(AIL_EXC_VALUE,\n'
+               '        (const uint8_t *)"negative shift count",\n'
+               '        (int64_t)sizeof "negative shift count" - 1, 1));\n'
                '    if (b >= 64) return a < 0 ? -1 : 0;\n'
                '    return a >> b;\n}\n'),
 }

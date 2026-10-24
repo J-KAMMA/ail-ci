@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - pre85: negative shift counts on the typed path
+
+The `tintproof` pre-existing list is empty in this export, so I reproduced the shift difference that
+job's review notes point at. A negative shift count is a `ValueError`; the general path already said
+`negative shift count`, but the typed `ck_shl`/`ck_shr` guards raised it with no message, so `str(e)`
+was `''`. Both guards now carry CPython's message. A second cause was mixed-mode selection:
+`pymix` did not treat `<<`/`>>` as exception-capable, so a typed clone of a shift helper could be
+selected under a boxed `try` and its ValueError escaped to the other handler stack. A shift whose
+count is not a non-negative literal is now a ValueError trap in the selection analysis. Added
+`AIL_CURRENT/test_ail_pre85.py` (3 programs, both builds).
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
