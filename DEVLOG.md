@@ -1,5 +1,21 @@
 # DEVLOG
 
+## 2026-10-24 - pre43: dict construction call counts follow CPython's key-table shape
+
+job-pre43-10241006. The open difference recorded by the rbfuzz4 reviewer (DIFFERENCES #4) was
+still present: `dict(d)`, `copy()` and `update()` called a user `__eq__` a different number of
+times than CPython when the source key table had a shape CPython could clone or had just
+preallocated. Both builds now keep CPython 3.12's key-table state: `dk_nentries` and trailing
+dummies are tracked, `dict_merge` clones a clean source only under CPython's capacity condition,
+otherwise it preallocates `estimate_log2_keysize(used_a+used_b)` and inserts with the stored
+hashes; `copy()` uses `PyDict_Copy`'s fast path only when at most one third of the entry slots
+are dead; `popitem()` drops trailing dummies and `clear()` returns to the empty key table. A
+source that has had a key deleted now propagates that shape through update/copy as CPython does.
+Values and insertion order are unchanged; stored keys still never re-run `__hash__`. Added the
+capacity/update/copy/popitem/clear cases to `AIL_CURRENT/test_ail_pre43.py` (5 programs, both
+builds; 28 s). Probes: `pre43_iso_{clean_dirty,shape,update,dirtyprop,through,copy_pop,capacity}.py`
+all match CPython on both builds with `bash ~/tools/cmp.sh`.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

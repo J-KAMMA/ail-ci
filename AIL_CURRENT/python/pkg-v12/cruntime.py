@@ -14038,7 +14038,10 @@ static inline void ail_fmt_float(char *out, size_t cap, double v) {
    =================================================================================== */
 typedef struct { ail_obj key, val; int64_t hash; } ail_mapentry;
 typedef struct { ail_gcobj hdr; ail_mapentry *entries; int64_t n, cap; int64_t *index; int64_t index_cap;
-                 int8_t dd_factory; /* defaultdict marker: 0 plain dict, 1 int, 2 list, 3 set, 4 str (2026-09-16) */ } ail_mapobj;
+                 int8_t dd_factory; /* defaultdict marker: 0 plain dict, 1 int, 2 list, 3 set, 4 str (2026-09-16) */
+                 int8_t dirty;      /* a deletion left a dummy slot, as CPython's dk_nentries > ma_used */
+                 int64_t nentries;  /* CPython dk_nentries: live entries plus dummies, grown by every new key */
+                 int64_t tail_dead; /* dummies after the last live entry; popitem drops these */ } ail_mapobj;
 /* set / frozenset: insertion-ordered like the typed path's sets (DIFFERENCES.md A2). An entry whose key tag is UNBOUND is a
    hole left by a removal; `n` counts entries used including holes, `used` the live ones. */
 typedef struct { ail_obj key; int64_t hash; } ail_setentry;
@@ -15055,9 +15058,9 @@ static inline ail_st ail_list_sort(ail_ctx *cx, ail_obj lst, ail_obj key_fn_or_n
    =================================================================================== */
 static inline ail_mapobj *ail_map_new(ail_ctx *cx) {
     ail_mapobj *m = (ail_mapobj *)ail_gc_alloc(cx, AIL_K_DICT, sizeof(ail_mapobj));
-    m->index_cap = 8;
-    m->index = (int64_t *)ail_xmalloc((size_t)m->index_cap * sizeof(int64_t));
-    for (int64_t i = 0; i < m->index_cap; i++) m->index[i] = -1;
+    m->index_cap = 1;   /* CPython's empty key table: the first insert allocates size 8 */
+    m->index = (int64_t *)ail_xmalloc(sizeof(int64_t));
+    m->index[0] = -1;
     return m;
 }
 static inline void ail_map_grow_entries(ail_ctx *cx, ail_mapobj *m) {
@@ -15082,6 +15085,23 @@ static inline void ail_map_rehash(ail_mapobj *m, int64_t new_cap) {
     free(m->index);
     m->index = ni; m->index_cap = new_cap;
 }
+static inline int64_t ail_map_usable(int64_t cap) { return (cap * 2) / 3; }
+/* CPython's calculate_log2_keysize/estimate_log2_keysize, in table sizes rather than log2. */
+static inline int64_t ail_map_calc_size(int64_t minsize) {
+    int64_t x = (minsize | 8) - 1;
+    x |= 7;
+    int64_t cap = 8;
+    while (cap <= x) cap <<= 1;
+    return cap;
+}
+static inline int64_t ail_map_estimate_size(int64_t n) { return ail_map_calc_size((n * 3 + 1) / 2); }
+/* A resize compacts the live entries (dropping dummies), as CPython's dictresize does. */
+static inline void ail_map_resize(ail_mapobj *m, int64_t new_cap) {
+    ail_map_rehash(m, new_cap);
+    m->nentries = m->n;
+    m->tail_dead = 0;
+    m->dirty = 0;
+}
 static inline ail_st ail_map_get(ail_ctx *cx, ail_obj **out, ail_mapobj *m, ail_obj key) {
     int64_t h; ail_st st = ail_obj_hash(cx, &h, key); if (st != AIL_OK) return st;
     int64_t mask = m->index_cap - 1, slot = (int64_t)((uint64_t)h & (uint64_t)mask);
@@ -15092,6 +15112,23 @@ static inline ail_st ail_map_get(ail_ctx *cx, ail_obj **out, ail_mapobj *m, ail_
         slot = (slot + 1) & mask;
     }
 }
+/* Append a key that is not present.  CPython appends to dk_entries even when the index reuses a
+   dummy slot, and resizes once dk_usable reaches zero, so the entry count may exceed the live one. */
+static inline void ail_map_insert_new(ail_ctx *cx, ail_mapobj *m, ail_obj key, ail_obj val, int64_t h, int64_t *slotp) {
+    if (m->nentries >= ail_map_usable(m->index_cap)) {
+        ail_map_resize(m, ail_map_calc_size(m->n * 3));
+        int64_t mask = m->index_cap - 1, slot = (int64_t)((uint64_t)h & (uint64_t)mask);
+        while (m->index[slot] != -1) slot = (slot + 1) & mask;
+        *slotp = slot;
+    }
+    if (m->n == m->cap) ail_map_grow_entries(cx, m);
+    int64_t idx = m->n++;
+    m->entries[idx].key = key; m->entries[idx].val = val; m->entries[idx].hash = h;
+    m->nentries++;
+    m->tail_dead = 0;   /* a new key sits after any old dummies */
+    m->index[*slotp] = idx;
+    m->dirty = (m->nentries != m->n);
+}
 static inline ail_st ail_map_set(ail_ctx *cx, ail_mapobj *m, ail_obj key, ail_obj val) {
     int64_t h; ail_st st = ail_obj_hash(cx, &h, key); if (st != AIL_OK) return st;
     int64_t mask = m->index_cap - 1, slot = (int64_t)((uint64_t)h & (uint64_t)mask);
@@ -15101,11 +15138,47 @@ static inline ail_st ail_map_set(ail_ctx *cx, ail_mapobj *m, ail_obj key, ail_ob
         if (m->entries[e].hash == h && ail_member_eq(m->entries[e].key, key)) { m->entries[e].val = val; return AIL_OK; }
         slot = (slot + 1) & mask;
     }
-    if (m->n == m->cap) ail_map_grow_entries(cx, m);
-    int64_t idx = m->n++;
-    m->entries[idx].key = key; m->entries[idx].val = val; m->entries[idx].hash = h;
-    if (m->n * 3 >= m->index_cap * 2) { ail_map_rehash(m, m->index_cap * 2); return AIL_OK; }
-    m->index[slot] = idx;
+    ail_map_insert_new(cx, m, key, val, h, &slot);
+    return AIL_OK;
+}
+/* Insert with a hash taken from another dict's entry: CPython's update/dict(d) never hash
+   such a key again, only __eq__ on a real collision. */
+static inline ail_st ail_map_set_hashed(ail_ctx *cx, ail_mapobj *m, ail_obj key, ail_obj val, int64_t h) {
+    int64_t mask = m->index_cap - 1, slot = (int64_t)((uint64_t)h & (uint64_t)mask);
+    for (;;) {
+        int64_t e = m->index[slot];
+        if (e == -1) break;
+        if (m->entries[e].hash == h && ail_member_eq(m->entries[e].key, key)) { m->entries[e].val = val; return AIL_OK; }
+        slot = (slot + 1) & mask;
+    }
+    ail_map_insert_new(cx, m, key, val, h, &slot);
+    return AIL_OK;
+}
+/* PyDict_Copy's fast path and dict_merge's clone path: share the source's key-table shape,
+   including its dk_nentries and trailing dummies, without calling __hash__ or __eq__. */
+static inline ail_st ail_map_clone_shape(ail_ctx *cx, ail_mapobj *dst, const ail_mapobj *src) {
+    while (dst->cap < src->n) ail_map_grow_entries(cx, dst);
+    memcpy(dst->entries, src->entries, (size_t)src->n * sizeof(ail_mapentry));
+    dst->n = src->n;
+    dst->nentries = src->nentries;
+    dst->tail_dead = src->tail_dead;
+    dst->dirty = src->dirty;
+    ail_map_rehash(dst, src->index_cap);
+    return AIL_OK;
+}
+/* PyDict_Merge for a dict source.  A clean source may be cloned when CPython's capacity
+   condition allows it; otherwise every live entry is inserted in order with its stored hash. */
+static inline ail_st ail_map_merge_dict(ail_ctx *cx, ail_mapobj *dst, ail_mapobj *src) {
+    if (dst == src || src->n == 0) return AIL_OK;
+    if (dst->n == 0 && src->nentries == src->n &&
+        (src->index_cap == 8 || ail_map_usable(src->index_cap / 2) < src->n))
+        return ail_map_clone_shape(cx, dst, src);
+    if (ail_map_usable(dst->index_cap) < src->n)
+        ail_map_resize(dst, ail_map_estimate_size(dst->n + src->n));
+    for (int64_t i = 0; i < src->n; i++) {
+        ail_st st = ail_map_set_hashed(cx, dst, src->entries[i].key, src->entries[i].val, src->entries[i].hash);
+        if (st != AIL_OK) return st;
+    }
     return AIL_OK;
 }
 static inline ail_st ail_map_del(ail_ctx *cx, int *found, ail_mapobj *m, ail_obj key) {
@@ -15115,9 +15188,12 @@ static inline ail_st ail_map_del(ail_ctx *cx, int *found, ail_mapobj *m, ail_obj
         int64_t e = m->index[slot];
         if (e == -1) { *found = 0; return AIL_OK; }
         if (m->entries[e].hash == h && ail_member_eq(m->entries[e].key, key)) {
+            int was_last = (e == m->n - 1);
             for (int64_t k = e; k + 1 < m->n; k++) m->entries[k] = m->entries[k + 1];
             m->n--;
             ail_map_rehash(m, m->index_cap);
+            if (was_last) m->tail_dead++;
+            m->dirty = (m->nentries != m->n);
             *found = 1; return AIL_OK;
         }
         slot = (slot + 1) & mask;
@@ -17462,11 +17538,8 @@ static inline ail_st ail_bi_dict_from_iter(ail_ctx *cx, ail_obj *out, int has_ar
     fr.slots[0] = ail_dict_new(cx);
     if (!has_arg) { *out = fr.slots[0]; AIL_FRAME_LEAVE(cx, fr); return AIL_OK; }
     if (arg.tag == AIL_T_DICT) {
-        ail_mapobj *m = (ail_mapobj *)arg.o;
-        for (int64_t k = 0; k < m->n; k++) {
-            ail_st st = ail_dict_set(cx, fr.slots[0], m->entries[k].key, m->entries[k].val);
-            if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
-        }
+        ail_st st = ail_map_merge_dict(cx, (ail_mapobj *)fr.slots[0].o, (ail_mapobj *)arg.o);
+        if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
         *out = fr.slots[0]; AIL_FRAME_LEAVE(cx, fr); return AIL_OK;
     }
     ail_st st = ail_iter(cx, &fr.slots[1], arg);
@@ -18592,16 +18665,20 @@ static inline ail_st ail_meth_dict_popitem(ail_ctx *cx, ail_obj *out, ail_obj d)
         ail_obj msg = ail_str_from_cstr(cx, "popitem(): dictionary is empty");
         return ail_raise_key_arg(cx, msg);
     }
+    int64_t lastpos = m->nentries - 1 - m->tail_dead;   /* CPython sets dk_nentries to the removed entry's slot */
     ail_obj key = m->entries[m->n - 1].key, val = m->entries[m->n - 1].val;
-    int found; ail_st st = ail_map_del(cx, &found, m, key); if (st != AIL_OK) return st;
+    m->n--;
+    ail_map_rehash(m, m->index_cap);   /* drop its index entry; no lookup, hash or eq */
+    m->nentries = lastpos;
+    m->tail_dead = 0;
+    m->dirty = (m->nentries != m->n);
     ail_obj pr[2]; pr[0] = key; pr[1] = val;
     *out = ail_tuple_new(cx, pr, 2);
     return AIL_OK;
 }
 static inline ail_st ail_meth_dict_update(ail_ctx *cx, ail_obj d, ail_obj other) {
     ail_mapobj *mo = (ail_mapobj *)other.o;
-    for (int64_t i = 0; i < mo->n; i++) { ail_st st = ail_dict_set(cx, d, mo->entries[i].key, mo->entries[i].val); if (st != AIL_OK) return st; }
-    return AIL_OK;
+    return ail_map_merge_dict(cx, (ail_mapobj *)d.o, mo);
 }
 static inline ail_st ail_it_next(ail_ctx *cx, ail_obj *out, ail_obj itobj); /* fwd: library section */
 static inline ail_st ail_dict_update_pairs(ail_ctx *cx, ail_obj d, ail_obj other) {
@@ -18630,7 +18707,11 @@ static inline ail_st ail_dict_update_pairs(ail_ctx *cx, ail_obj d, ail_obj other
 static inline void ail_meth_dict_clear(ail_obj d) {
     ail_mapobj *m = (ail_mapobj *)d.o;
     m->n = 0;
-    for (int64_t i = 0; i < m->index_cap; i++) m->index[i] = -1;
+    m->dirty = 0;   /* CPython clear() resets the key table to the shared empty one */
+    m->nentries = 0;
+    m->tail_dead = 0;
+    m->index_cap = 1;
+    m->index[0] = -1;
 }
 static inline ail_st ail_meth_dict_copy(ail_ctx *cx, ail_obj *out, ail_obj d) {
     ail_mapobj *m = (ail_mapobj *)d.o;
@@ -18638,7 +18719,11 @@ static inline ail_st ail_meth_dict_copy(ail_ctx *cx, ail_obj *out, ail_obj d) {
     ((ail_gcobj *)r.o)->flags = m->hdr.flags;     /* Counter.copy() is a Counter */
     if (m->dd_factory >= 1 && m->dd_factory <= 4) ((ail_mapobj *)r.o)->dd_factory = m->dd_factory;   /* defaultdict.copy() keeps the factory */
     /*DD5COPY*/
-    for (int64_t i = 0; i < m->n; i++) { ail_st st = ail_dict_set(cx, r, m->entries[i].key, m->entries[i].val); if (st != AIL_OK) return st; }
+    ail_st cst = AIL_OK;
+    if (m->n == 0) { /* CPython copies an empty dict to a fresh one */ }
+    else if (m->n >= (m->nentries * 2) / 3) cst = ail_map_clone_shape(cx, (ail_mapobj *)r.o, m);
+    else cst = ail_map_merge_dict(cx, (ail_mapobj *)r.o, m);
+    if (cst != AIL_OK) return cst;
     *out = r; return AIL_OK;
 }
 /* M044's "dictionary changed size during iteration" check -- see the file banner's "core
