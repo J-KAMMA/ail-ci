@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - bytes.count: memmem for short needles (job-perf7-10240917)
+
+`binary_search` (`count` of a 7-byte needle over a 64 MiB file) spent ~69 ms of its 94 ms in
+`ail_bytes_count_range`, which used the byte-pair Horspool scan. For a short needle glibc
+`memmem` is about twice as fast on the same data (38 ms vs 71 ms), so the non-Windows
+short-needle path now uses the same non-overlapping `memmem` loop as the C reference; Windows
+keeps Horspool. `bench/compare.py --app binary_search`: base 98.2 ms, new 69.2 ms
+(AIL/C 1.414 -> 0.994, ranges non-overlapping). Probes for empty, negative, windowed and
+64-byte needles through arguments, list items, attributes and dict values match CPython on both
+builds.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

@@ -6044,11 +6044,26 @@ static int64_t ail_bytes_count_range(ail_bytes h, ail_bytes nd, int64_t start, i
         }
         return count;
     }
+#ifndef _WIN32
+    /* A short needle in a large window: glibc/musl memmem picks its own SIMD-friendly
+       algorithm, while Horspool walks every window and recomputes the shift. The
+       non-overlapping loop is the same one the C reference uses. */
+    {
+        const unsigned char *p = h.p + start, *e = h.p + end;
+        while ((size_t)(e - p) >= (size_t)nd.n &&
+               (p = (const unsigned char *)memmem(p, (size_t)(e - p), nd.p, (size_t)nd.n))) {
+            ++count;
+            p += nd.n;
+        }
+        return count;
+    }
+#else
     ail_pairskip T;
     ail_pairskip_init(&T, nd.p, nd.n);
     for (int64_t i = start, hit; (hit = ail_pairskip_find(&T, h.p + i, end - i, nd.p, nd.n)) >= 0; i += hit + nd.n)
         ++count;
     return count;
+#endif
 }
 static int64_t ail_bytes_startswith_range(ail_bytes h, ail_bytes nd, int64_t start, int64_t end) {
     if (h.n < 0 || (uintmax_t)h.n > (uintmax_t)SIZE_MAX ||
