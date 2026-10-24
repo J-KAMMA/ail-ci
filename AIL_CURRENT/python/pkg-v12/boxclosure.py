@@ -360,6 +360,72 @@ class ClosureMixin:
                                                                      TAG, n, n, t, t))
         return t
 
+    def method_value(self, owner, info, ctx):
+        """A FUNC object for a method read through its class (`C.f`, `C.s`, `C.cm`).
+
+        An ordinary method is unbound, as CPython's is: the caller passes the instance first.
+        A @classmethod is bound to `owner` (the class it was read through), and a
+        @staticmethod has no receiver.  The adapter has the runtime's one-argument calling
+        convention, like function_value / closure_value."""
+        from pyfront import Unsupported
+        a = info['node'].args
+        if a.vararg or a.kwarg or a.kwonlyargs or a.posonlyargs:
+            raise Unsupported('a method value with *args, **kwargs or keyword-only parameters')
+        bind_class = bool(info.get('is_classmethod'))
+        params = [x.arg for x in a.args]
+        if bind_class:
+            if not params:
+                raise Unsupported('@classmethod %s.%s takes no cls parameter' % (owner, info['node'].name))
+            params = params[1:]
+        defaults = info.get('defaults', {})
+        nd = sum(1 for p in params if p in defaults)
+        lo, hi = len(params) - nd, len(params)
+        default_cs = []
+        for p in params:
+            if p not in defaults:
+                continue
+            v = self.expr(defaults[p], ctx)
+            t = ctx.tmp()
+            ctx.emit('%s = %s;' % (t, v))
+            default_cs.append(t)
+        n = len(params)
+        suffix = '__bound_%d' % self.global_slots['class:' + owner] if bind_class else ''
+        adapter = 'pmv_%s%s' % (info['cname'], suffix)
+        if adapter not in getattr(self, 'value_adapters', set()):
+            self.value_adapters = getattr(self, 'value_adapters', set()) | {adapter}
+            prepend = ('g_slots_arr[%d], ' % self.global_slots['class:' + owner]) if bind_class else ''
+            if n == 1:
+                if nd:
+                    pre = 'ail_obj a0 = arg.tag == AIL_T_UNBOUND ? clo[1] : arg; '
+                else:
+                    pre = 'ail_obj a0 = arg; '
+                call = '%s(cx, out, %sa0)' % (info['cname'], prepend)
+            elif n == 0:
+                pre = '(void)arg; '
+                call = '%s(cx, out%s)' % (info['cname'], (', ' + prepend[:-2]) if bind_class else '')
+            else:
+                pre = ('ail_vecobj *v = (ail_vecobj *)arg.o; ail_obj a[%d]; '
+                       'for (int64_t i = 0; i < %d; i++) a[i] = i < v->n ? v->p[i] : clo[1 + i - %d]; '
+                       % (n, n, n - nd))
+                call = '%s(cx, out, %s%s)' % (
+                    info['cname'], prepend,
+                    ''.join('a[%d]%s' % (i, ', ' if i + 1 < n else '') for i in range(n)))
+            self.top_decls.append('static ail_st %s(ail_ctx *cx, ail_obj *out, ail_obj arg, void *closure);\n' % adapter)
+            self.top_defs.append('static ail_st %s(ail_ctx *cx, ail_obj *out, ail_obj arg, void *closure) {\n'
+                                 '    ail_obj *clo = (ail_obj *)closure; (void)clo; %sreturn %s;\n}\n\n'
+                                 % (adapter, pre, call))
+        cells = ['ail_box_int((int64_t)((0x%XLL << 32) | (%dLL << 16) | %dLL))' % (TAG, lo, hi)]
+        cells += default_cs
+        t = ctx.tmp()
+        ctx.emit('{ ail_funcobj *_fo = (ail_funcobj *)ail_gc_alloc(cx, AIL_K_FUNC, sizeof(ail_funcobj)); '
+                 '_fo->fn = %s; _fo->n_cells = 0; _fo->name = "%s"; '
+                 '_fo->cells = (ail_obj *)ail_xmalloc(%d * sizeof(ail_obj)); %s _fo->n_cells = %d; '
+                 '%s.tag = AIL_T_FUNC; %s.o = (ail_gcobj *)_fo; }'
+                 % (adapter, _c_name(owner + '.' + info['node'].name, params), len(cells),
+                    ' '.join('_fo->cells[%d] = %s;' % (i, c) for i, c in enumerate(cells)),
+                    len(cells), t, t))
+        return t
+
     # -- calling a value --------------------------------------------------------------------------------
     def call_value(self, func_c, args, kwargs, ctx):
         from pyfront import Unsupported

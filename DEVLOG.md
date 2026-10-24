@@ -1,5 +1,33 @@
 # DEVLOG
 
+## 2026-10-24 - Method values read through a class (job-pre169-10250442)
+
+`d_methods` was the first remaining pre-existing difference: reading a method through its
+class (`g = C.f; print(g(None, 3))`) raised
+`AttributeError: 'type' object has no attribute 'f'` on both the `g` and `d` builds, while
+CPython returns the plain function value.  The general path now resolves the method after the
+class-attribute lookup and builds a FUNC adapter:
+
+* an ordinary method is unbound, so the caller passes the instance first;
+* a `@staticmethod` has no receiver;
+* a `@classmethod` is bound to the class it was read through (a per-owner adapter, so the same
+  inherited classmethod read through two subclasses binds the right one);
+* defaults are carried in closure cells, and the existing `ail__callv` arity check gives the
+  same `TypeError` for too few/many arguments.
+
+Simple class aliases (`K = C; g = K.f`) work too, for a local alias and for a module-level
+alias with a single assignment.  Class attributes read through the same alias keep working,
+and a local that shadows a class name is still treated as the local.  The changes are in
+`python/pkg-v12/boxclosure.py` (`method_value`) and `python/pkg-v12/pyboxed2.py`
+(`expr_Attribute`, `infer_kind`, the conservative `module_class_aliases` scan).
+
+Added `test_ail_pre169.py` (both builds against CPython) and registered it in `ail_check.py`.
+It covers regular/static/classmethod values, defaults and mutable defaults, arity errors,
+local and module aliases, inherited classmethod binding, values passed through arguments,
+lists, dicts and returns, and class-name shadowing.  The remaining `C.f is C.f` difference is
+the pre-existing identity behaviour of function values (`f is f` also differs on both builds),
+not specific to methods.
+
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
 
 The general path's native `statistics` helpers kept a heap result in a C local across an

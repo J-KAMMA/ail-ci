@@ -2181,6 +2181,16 @@ class Compiler(boxclosure.ClosureMixin):
             elif isinstance(n, ast.ClassDef):
                 self._register_class(n)
 
+        self.module_class_aliases = {}
+        _stores = {}
+        for _n in ast.walk(tree):
+            if isinstance(_n, ast.Name) and isinstance(_n.ctx, ast.Store):
+                _stores[_n.id] = _stores.get(_n.id, 0) + 1
+        for _n in tree.body:
+            if (isinstance(_n, ast.Assign) and len(_n.targets) == 1
+                    and isinstance(_n.targets[0], ast.Name) and isinstance(_n.value, ast.Name)
+                    and _n.value.id in self.classes and _stores.get(_n.targets[0].id) == 1):
+                self.module_class_aliases[_n.targets[0].id] = _n.value.id
         self.user_method_names = frozenset(m for c in self.classes.values() for m in c['methods'])
         # classes the program uses as values (`make = Fenwick; make(data)`): a call through a value may construct one
         called = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
@@ -3072,6 +3082,20 @@ class Compiler(boxclosure.ClosureMixin):
             k = info['base']
         return None
 
+    def _class_value_owner(self, node, ctx):
+        """The class a Name expression denotes as a value, if it is known statically."""
+        if not isinstance(node, ast.Name):
+            return None
+        if node.id in self.classes and node.id not in ctx.slot_of and node.id not in self.module_names:
+            return node.id
+        vk = self.get_kind(node.id, ctx)
+        if vk and vk.startswith('class:') and vk.split(':', 1)[1] in self.classes:
+            return vk.split(':', 1)[1]
+        if (node.id in getattr(self, 'module_class_aliases', {})
+                and self._is_global_name(node.id, ctx)):
+            return self.module_class_aliases[node.id]
+        return None
+
     def _virtual_plan(self, cname, lookup):
         """Run-time dispatch plan for a call whose receiver is statically an instance of `cname`
         (which may really hold an instance of any subclass): `lookup(klass)` resolves the wanted
@@ -3513,6 +3537,8 @@ class Compiler(boxclosure.ClosureMixin):
         if isinstance(node, ast.JoinedStr):
             return 'str'
         if isinstance(node, ast.Name):
+            if node.id in self.classes and node.id not in self.module_names and node.id not in ctx.slot_of:
+                return 'class:' + node.id
             return self.get_kind(node.id, ctx)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             if node.func.id in self.classes:
@@ -5061,17 +5087,22 @@ class Compiler(boxclosure.ClosureMixin):
         if isinstance(node.value, ast.Name) and (node.value.id in self.module_aliases or
                                                   node.value.id == 'sys'):
             return self._module_attr_value(node.value.id, node.attr, ctx)
-        if (isinstance(node.value, ast.Name) and node.value.id in self.classes
-                and node.value.id not in ctx.slot_of and node.value.id not in self.module_names):
-            # `C.K` where K is a constant class attribute of C or of a base of C: the class name as a
-            # value does not reach its attributes (`AttributeError: 'instance' object has no attribute`),
-            # so read the literal the lookup through the bases finds, as CPython does
-            k = node.value.id
-            while k is not None and k in self.classes:
-                hits = [(v, s) for a, v, s in self.classes[k].get('class_attrs', []) if a == node.attr]
-                if hits:
-                    return self._cached_class_attr(hits[-1][1], hits[-1][0], ctx)
-                k = self.classes[k]['base']
+        if isinstance(node.value, ast.Name):
+            owner = self._class_value_owner(node.value, ctx)
+            if owner is not None:
+                # `C.K` where K is a constant class attribute of C or of a base of C: the class name as a
+                # value does not reach its attributes (`AttributeError: 'instance' object has no attribute`),
+                # so read the literal the lookup through the bases finds, as CPython does.  A method read
+                # through the class is a function value (unbound, or bound for @classmethod).
+                k = owner
+                while k is not None and k in self.classes:
+                    hits = [(v, s) for a, v, s in self.classes[k].get('class_attrs', []) if a == node.attr]
+                    if hits:
+                        return self._cached_class_attr(hits[-1][1], hits[-1][0], ctx)
+                    k = self.classes[k]['base']
+                info = self._resolve_method(owner, node.attr)
+                if info is not None and not info.get('is_property') and not info.get('is_setter'):
+                    return self.method_value(owner, info, ctx)
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
         if prop_owners:
             return self._property_read(node, prop_owners, ctx)
@@ -8093,12 +8124,12 @@ class Compiler(boxclosure.ClosureMixin):
             return t
         if isinstance(recv, ast.Name) and recv.id == 'dict' and f.attr == 'fromkeys':
             return self._dict_fromkeys(args, kwargs, ctx)
-        if (isinstance(recv, ast.Name) and recv.id in self.classes and recv.id not in ctx.slot_of
-                and recv.id not in self.module_names):
+        owner = self._class_value_owner(recv, ctx)
+        if owner is not None:
             # `C.f(...)` of a @staticmethod: the function itself, with the arguments as written; of a @classmethod: C first
-            info = self._resolve_method(recv.id, f.attr)
+            info = self._resolve_method(owner, f.attr)
             if info is not None and info.get('is_classmethod'):
-                argcs = ['g_slots_arr[%d]' % self.global_slots['class:' + recv.id]] + \
+                argcs = ['g_slots_arr[%d]' % self.global_slots['class:' + owner]] + \
                     self._bind_args(f.attr, info, args, kwargs, ctx)
                 t = ctx.tmp()
                 ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t, ''.join(', ' + a for a in argcs)))
@@ -8110,10 +8141,9 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t, ''.join(', ' + a for a in argcs)))
                 ctx.check()
                 return t
-        if (isinstance(recv, ast.Name) and recv.id in self.classes and recv.id not in ctx.slot_of
-                and recv.id not in self.module_names and args and not isinstance(args[0], ast.Starred)):
+        if owner is not None and args and not isinstance(args[0], ast.Starred):
             # `Base.m(self, x)`: the method as Base resolves it, called on the object passed first
-            info = self._resolve_method(recv.id, f.attr)
+            info = self._resolve_method(owner, f.attr)
             if info is not None and info.get('is_method') and not info.get('is_static'):
                 first = self.expr(args[0], ctx)
                 argcs = [first] + self._bind_args(f.attr, info, args[1:], kwargs, ctx)
