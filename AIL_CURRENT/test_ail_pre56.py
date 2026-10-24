@@ -78,6 +78,20 @@ main()
 '''
 
 
+SAFE = {
+    'list_mutated': 'xs = [10]\nxs[0] = 1\nprint(xs[0]**40)\n',
+    'dict_mutated': 'd = {0: 10}\nd[0] = 1\nprint(d[0]**40)\n',
+    'list_aliased_mutated': 'xs = [10]\nys = xs\nys[0] = 1\nprint(xs[0]**40)\n',
+    'dict_aliased_mutated': 'd = {0: 10}\ne = d\ne[0] = 1\nprint(d[0]**40)\n',
+    'list_mutated_by_argument': 'xs = [10]\ndef f(y):\n    y[0] = 1\nf(xs)\nprint(xs[0]**40)\n',
+    'param_shadows_class': 'class C:\n    a = 10\ndef f(C):\n    return C.a**40\nprint(1)\n',
+    'enclosing_shadows_module': 'A = 10\ndef outer(A):\n    def inner():\n'
+                                '        return A**40\n    return inner()\nprint(outer(2))\n',
+    'nested_container_mutated': 'xs = [[10]]\nys = xs[0]\nys[0] = 1\n'
+                                'print(xs[0][0]**40)\n',
+}
+
+
 def cpython(directory, name, text):
     src = Path(directory) / (name + '.py')
     src.write_text(text, encoding='utf-8')
@@ -114,6 +128,22 @@ class Pre56Tests(unittest.TestCase):
                         self.assertIn(MESSAGE, done.stderr)
                         self.assertIn('64-bit signed integer', done.stderr)
                         self.assertNotIn('Traceback', done.stderr)
+
+    def test_mutated_or_shadowed_constants_are_not_refused(self):
+        with tempfile.TemporaryDirectory(prefix='ail-pre56-safe-') as directory:
+            for case, text in SAFE.items():
+                want, rc, err = cpython(directory, case, text)
+                self.assertEqual(rc, 0, err.decode('utf-8', 'replace'))
+                for general in (True, False):
+                    with self.subTest(case=case, general=general):
+                        done, exe = build(directory, '%s_%s' % (case, 'g' if general else 'd'),
+                                          text, general=general)
+                        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+                        got = subprocess.run([str(exe)], cwd=directory, capture_output=True,
+                                             timeout=120)
+                        self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want,
+                                         got.stderr.decode('utf-8', 'replace'))
+                        self.assertEqual(got.returncode, 0)
 
     def test_valid_powers_still_match_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre56-') as directory:

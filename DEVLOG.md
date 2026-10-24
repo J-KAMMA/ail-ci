@@ -1,5 +1,21 @@
 # DEVLOG
 
+## 2026-10-24 - pre56: no false power refusals after container mutation or shadowing
+
+The reviewer found four false refusals in the constant-power check: a list or dict item mutated
+after its constant assignment, the same through an alias, and a class attribute reached through a
+parameter that shadows the class name. The collector now tracks alias groups for flat containers,
+drops a container once any name in its alias group is stored through a subscript or used in a way
+that could mutate it, refuses only flat (immutable-leaf) containers, and propagates each scope's
+local/parameter names so class and inherited constants respect shadowing. The four reviewer
+programs now match CPython on both builds, and the original overflowing shapes are still refused.
+`test_ail_pre56.py` gained a seven-program regression test for these shapes. Probes:
+`/tmp/probes/p_{list,dict}_{mut,alias_mut,index_mut,overflow}.py`,
+`p_alias_read_overflow.py`, `p_nested_list_mut.py`, `p_tuple_nested_mut.py`,
+`p_param_shadow_class.py`, `p_enclosing_shadow.py`, `p_list_arg_mut.py`,
+`p_class_attr_{overflow,mut}.py`, `p_class_alias_mut.py`, `p_comp_shadow_class.py`,
+`p_boundary_valid.py`, `p_local_scalar_overflow.py`.
+
 ## 2026-10-24 - pre56: known overflowing integer powers are refused at compile time
 
 CPython computes `10 ** 40` and `pow(10, 40)` exactly, but AIL's `int` is int64, so the compiled

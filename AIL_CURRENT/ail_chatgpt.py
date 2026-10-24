@@ -106,13 +106,29 @@ def _power_overflows(base, exponent):
     return not _fits_int64(pow(base, exponent))
 
 
-def _constant_obj(node, known, classes, pow_shadowed):
+def _immutable_leaf(value):
+    return type(value) in (int, str, bytes)
+
+
+def _flat_container(value):
+    if isinstance(value, list):
+        return all(_immutable_leaf(item) for item in value)
+    if isinstance(value, tuple):
+        return all(_immutable_leaf(item) for item in value)
+    if isinstance(value, dict):
+        return all(_immutable_leaf(key) and _immutable_leaf(item)
+                   for key, item in value.items())
+    return False
+
+
+def _constant_obj(node, known, classes, pow_shadowed, blocked=frozenset()):
     if isinstance(node, ast.Constant):
         return node.value if type(node.value) in (int, str, bytes) else None
     if isinstance(node, ast.Name):
         return known.get(node.id)
     if isinstance(node, (ast.List, ast.Tuple)):
-        values = [_constant_obj(item, known, classes, pow_shadowed) for item in node.elts]
+        values = [_constant_obj(item, known, classes, pow_shadowed, blocked)
+                  for item in node.elts]
         if any(value is None for value in values):
             return None
         return values if isinstance(node, ast.List) else tuple(values)
@@ -121,14 +137,14 @@ def _constant_obj(node, known, classes, pow_shadowed):
         for key_node, value_node in zip(node.keys, node.values):
             if key_node is None:
                 return None
-            key = _constant_obj(key_node, known, classes, pow_shadowed)
-            value = _constant_obj(value_node, known, classes, pow_shadowed)
+            key = _constant_obj(key_node, known, classes, pow_shadowed, blocked)
+            value = _constant_obj(value_node, known, classes, pow_shadowed, blocked)
             if key is None or value is None:
                 return None
             values[key] = value
         return values
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert)):
-        value = _constant_obj(node.operand, known, classes, pow_shadowed)
+        value = _constant_obj(node.operand, known, classes, pow_shadowed, blocked)
         if type(value) is not int:
             return None
         if isinstance(node.op, ast.USub):
@@ -137,8 +153,8 @@ def _constant_obj(node, known, classes, pow_shadowed):
             value = ~value
         return value if _fits_int64(value) else None
     if isinstance(node, ast.BinOp):
-        left = _constant_obj(node.left, known, classes, pow_shadowed)
-        right = _constant_obj(node.right, known, classes, pow_shadowed)
+        left = _constant_obj(node.left, known, classes, pow_shadowed, blocked)
+        right = _constant_obj(node.right, known, classes, pow_shadowed, blocked)
         if type(left) is not int or type(right) is not int:
             return None
         op = type(node.op)
@@ -177,21 +193,22 @@ def _constant_obj(node, known, classes, pow_shadowed):
             return None
         return value if type(value) is int and _fits_int64(value) else None
     if isinstance(node, ast.Subscript):
-        container = _constant_obj(node.value, known, classes, pow_shadowed)
-        index = _constant_obj(node.slice, known, classes, pow_shadowed)
+        container = _constant_obj(node.value, known, classes, pow_shadowed, blocked)
+        index = _constant_obj(node.slice, known, classes, pow_shadowed, blocked)
         if container is None or index is None:
             return None
         try:
             return container[index]
         except (IndexError, KeyError, TypeError):
             return None
-    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+    if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+            and node.value.id not in blocked):
         return classes.get(node.value.id, {}).get(node.attr)
     if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
             and node.func.id == 'pow' and not pow_shadowed and not node.keywords
             and len(node.args) == 2):
-        base = _constant_obj(node.args[0], known, classes, pow_shadowed)
-        exponent = _constant_obj(node.args[1], known, classes, pow_shadowed)
+        base = _constant_obj(node.args[0], known, classes, pow_shadowed, blocked)
+        exponent = _constant_obj(node.args[1], known, classes, pow_shadowed, blocked)
         if type(base) is not int or type(exponent) is not int:
             return None
         if exponent < 0 or _power_overflows(base, exponent):
@@ -201,8 +218,8 @@ def _constant_obj(node, known, classes, pow_shadowed):
     return None
 
 
-def _constant_int(node, known, classes, pow_shadowed):
-    value = _constant_obj(node, known, classes, pow_shadowed)
+def _constant_int(node, known, classes, pow_shadowed, blocked=frozenset()):
+    value = _constant_obj(node, known, classes, pow_shadowed, blocked)
     return value if type(value) is int else None
 
 
@@ -259,18 +276,68 @@ def _single_assignments(body):
     return assignments
 
 
-def _scope_constants(body, params, inherited, classes, pow_shadowed, tainted=()):
+def _unstable_containers(body):
+    nodes = []
+    for statement in body:
+        nodes.extend(ast.walk(statement))
+    allowed = set()
+    parent = {}
+
+    def find(name):
+        parent.setdefault(name, name)
+        while parent[name] != name:
+            parent[name] = parent[parent[name]]
+            name = parent[name]
+        return name
+
+    def union(left, right):
+        left, right = find(left), find(right)
+        if left != right:
+            parent[right] = left
+
+    for node in nodes:
+        if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
+            allowed.add(id(node.value))
+        elif (isinstance(node, ast.Assign) and len(node.targets) == 1
+              and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Name)):
+            allowed.add(id(node.value))
+            union(node.targets[0].id, node.value.id)
+    unstable = set()
+
+    def root(node):
+        while isinstance(node, (ast.Subscript, ast.Attribute, ast.Starred)):
+            node = node.value
+        return node.id if isinstance(node, ast.Name) else None
+
+    for node in nodes:
+        if isinstance(node, ast.Subscript) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            name = root(node.value)
+            if name is not None:
+                unstable.add(name)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            if id(node) not in allowed:
+                unstable.add(node.id)
+    roots = {find(name) for name in unstable}
+    return {name for name in parent if find(name) in roots} | unstable
+
+
+def _scope_constants(body, params, inherited, classes, pow_shadowed, tainted=(),
+                     blocked=frozenset()):
     stores, declared = _scope_stores(body)
     local = set(stores) | set(params) | declared | set(tainted)
     known = {name: value for name, value in inherited.items() if name not in local}
     pending = {name: value for name, value in _single_assignments(body).items()
                if stores.get(name) == 1 and name not in declared and name not in params
                and name not in tainted}
+    unstable = _unstable_containers(body)
     while True:
         progress = False
         for name, expression in list(pending.items()):
-            value = _constant_obj(expression, known, classes, pow_shadowed)
+            value = _constant_obj(expression, known, classes, pow_shadowed, blocked)
             if value is not None:
+                if isinstance(value, (list, dict, tuple)) and (
+                        not _flat_container(value) or name in unstable):
+                    continue
                 known[name] = value
                 del pending[name]
                 progress = True
@@ -289,11 +356,11 @@ def _refuse_integer_power(node, construct):
     raise error
 
 
-def _walk_const_expressions(node, known, classes, pow_shadowed):
-    def walk(current, scope):
+def _walk_const_expressions(node, known, classes, pow_shadowed, blocked=frozenset()):
+    def walk(current, scope, shadowed):
         if isinstance(current, (list, tuple)):
             for item in current:
-                walk(item, scope)
+                walk(item, scope, shadowed)
             return
         if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
             return
@@ -304,35 +371,36 @@ def _walk_const_expressions(node, known, classes, pow_shadowed):
                     if isinstance(item, ast.Name):
                         targets.add(item.id)
             inner = {name: value for name, value in scope.items() if name not in targets}
+            inner_shadowed = shadowed | targets
             if current.generators:
-                walk(current.generators[0].iter, scope)
+                walk(current.generators[0].iter, scope, shadowed)
             for generator in current.generators[1:]:
-                walk(generator.iter, inner)
+                walk(generator.iter, inner, inner_shadowed)
             for generator in current.generators:
                 for condition in generator.ifs:
-                    walk(condition, inner)
+                    walk(condition, inner, inner_shadowed)
             if isinstance(current, ast.DictComp):
-                walk(current.key, inner)
-                walk(current.value, inner)
+                walk(current.key, inner, inner_shadowed)
+                walk(current.value, inner, inner_shadowed)
             else:
-                walk(current.elt, inner)
+                walk(current.elt, inner, inner_shadowed)
             return
         if isinstance(current, ast.BinOp) and isinstance(current.op, ast.Pow):
-            base = _constant_int(current.left, scope, classes, pow_shadowed)
-            exponent = _constant_int(current.right, scope, classes, pow_shadowed)
+            base = _constant_int(current.left, scope, classes, pow_shadowed, shadowed)
+            exponent = _constant_int(current.right, scope, classes, pow_shadowed, shadowed)
             if base is not None and exponent is not None and _power_overflows(base, exponent):
                 _refuse_integer_power(current, '**')
         elif (isinstance(current, ast.Call) and isinstance(current.func, ast.Name)
               and current.func.id == 'pow' and not pow_shadowed and not current.keywords
               and len(current.args) == 2):
-            base = _constant_int(current.args[0], scope, classes, pow_shadowed)
-            exponent = _constant_int(current.args[1], scope, classes, pow_shadowed)
+            base = _constant_int(current.args[0], scope, classes, pow_shadowed, shadowed)
+            exponent = _constant_int(current.args[1], scope, classes, pow_shadowed, shadowed)
             if base is not None and exponent is not None and _power_overflows(base, exponent):
                 _refuse_integer_power(current, 'pow()')
         for child in ast.iter_child_nodes(current):
-            walk(child, scope)
+            walk(child, scope, shadowed)
 
-    walk(node, known)
+    walk(node, known, blocked)
 
 
 def _nested_scopes(body):
@@ -352,30 +420,46 @@ def _nested_scopes(body):
     return found
 
 
-def _check_scope(body, params, module_known, classes, global_pow_bound, tainted=()):
+def _check_scope(body, params, inherited, classes, global_pow_bound, tainted=(),
+                 blocked=frozenset(), module_scope=False):
     stores, declared = _scope_stores(body)
     pow_shadowed = global_pow_bound or 'pow' in stores or 'pow' in params or 'pow' in declared
-    known, local = _scope_constants(body, params, module_known, classes, pow_shadowed,
-                                    tainted=tainted)
-    _walk_const_expressions(body, known, classes, pow_shadowed)
+    local = set(stores) | set(params) | declared | set(tainted)
+    scope_blocked = set(blocked) if module_scope else set(blocked) | local
+    known, _ = _scope_constants(body, params, inherited, classes, pow_shadowed,
+                                tainted=tainted, blocked=scope_blocked)
+    _walk_const_expressions(body, known, classes, pow_shadowed, scope_blocked)
     for scope in _nested_scopes(body):
         if isinstance(scope, ast.ClassDef):
-            _check_scope(scope.body, (), module_known, classes, global_pow_bound)
+            _check_scope(scope.body, (), known, classes, global_pow_bound,
+                         blocked=scope_blocked)
         else:
             names = tuple(arg.arg for arg in
                           (*scope.args.posonlyargs, *scope.args.args, *scope.args.kwonlyargs))
-            _check_scope(scope.body, names, module_known, classes, global_pow_bound)
+            _check_scope(scope.body, names, known, classes, global_pow_bound,
+                         blocked=scope_blocked)
 
 
-def _class_constants(tree, module_known):
+def _class_constants(tree, module_known, module_stores):
     tainted = set()
     for node in ast.walk(tree):
         if (isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del))
                 and isinstance(node.value, ast.Name)):
             tainted.add((node.value.id, node.attr))
-    result = {}
+    definitions = [node for node in tree.body if isinstance(node, ast.ClassDef)]
+    names = {node.name for node in definitions}
+    allowed = set()
     for node in ast.walk(tree):
-        if not isinstance(node, ast.ClassDef):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            allowed.add(id(node.value))
+    unsafe = {name for name in names if module_stores.get(name, 0) > 1}
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Name) and node.id in names
+                and isinstance(node.ctx, ast.Load) and id(node) not in allowed):
+            unsafe.add(node.id)
+    result = {}
+    for node in definitions:
+        if node.name in unsafe:
             continue
         stores, declared = _scope_stores(node.body)
         local = set(stores) | declared
@@ -386,7 +470,7 @@ def _class_constants(tree, module_known):
         while True:
             progress = False
             for name, expression in list(pending.items()):
-                value = _constant_int(expression, {**base, **values}, result, False)
+                value = _constant_int(expression, {**base, **values}, result, False, local)
                 if value is not None:
                     values[name] = value
                     del pending[name]
@@ -405,10 +489,16 @@ def _check_int64_powers(tree):
     for node in ast.walk(tree):
         if isinstance(node, (ast.Global, ast.Nonlocal)):
             global_names.update(node.names)
+    class_names = {node.name for node in tree.body if isinstance(node, ast.ClassDef)}
+    module_blocked = set(module_stores)
+    for name in class_names:
+        if module_stores.get(name) == 1:
+            module_blocked.discard(name)
     module_known, _ = _scope_constants(tree.body, (), {}, {}, global_pow_bound,
-                                       tainted=global_names)
-    classes = _class_constants(tree, module_known)
-    _check_scope(tree.body, (), module_known, classes, global_pow_bound, tainted=global_names)
+                                       tainted=global_names, blocked=module_blocked)
+    classes = _class_constants(tree, module_known, module_stores)
+    _check_scope(tree.body, (), module_known, classes, global_pow_bound,
+                 tainted=global_names, blocked=module_blocked, module_scope=True)
 
 
 def _returns_on_every_path(statements):
