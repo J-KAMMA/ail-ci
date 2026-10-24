@@ -330,6 +330,55 @@ fn main() {
 """
 FIELDS_EXPECTED = "7\nindex 3\n"
 
+# A method's own `remaining()` guard proves its field reads: the byte checks inside read_* are
+# elided, while a method with no guard keeps its check. The return annotation must not stop the
+# analysis from treating the body as a candidate (the AIL front end writes it as a bare Name).
+METHOD_FIELDS = r"""
+struct Cursor { data: bytes; position: int; }
+
+impl Cursor {
+    fn remaining(self) -> int {
+        if self.position < 0 or self.position > len(self.data) { raise ValueError; }
+        return len(self.data) - self.position;
+    }
+
+    fn read_u8(self) -> int {
+        let available = self.remaining();
+        if available < 1 { raise ValueError; }
+        let start = self.position;
+        let value = self.data[start];
+        self.position = start + 1;
+        return value;
+    }
+
+    fn read_u32_le(self) -> int {
+        let available = self.remaining();
+        if available < 4 { raise ValueError; }
+        let start = self.position;
+        let value = self.data[start] + self.data[start + 1] * 256 + self.data[start + 2] * 65536 + self.data[start + 3] * 16777216;
+        self.position = start + 4;
+        return value;
+    }
+
+    fn unsafe_read(self) -> int {
+        return self.data[self.position];
+    }
+}
+
+fn main() {
+    let c = Cursor(b"\x01\x02\x03\x04\x05", 0);
+    print(c.read_u8(), c.read_u32_le(), c.remaining());
+    let empty = Cursor(b"", 0);
+    try { print(empty.read_u8()); } except ValueError { print("short"); }
+    c.position = -1;
+    try { print(c.read_u8()); } except ValueError { print("negative"); }
+    c.position = 0;
+    print(c.unsafe_read(), c.unsafe_read());
+    c.position = len(c.data);
+    try { print(c.unsafe_read()); } except IndexError { print("index"); }
+}
+"""
+
 # Codegen: which checks are gone (proven) and which stay (not provable).
 CODEGEN = r"""
 fn proven(n: int) -> int {
@@ -474,6 +523,20 @@ class RangeCheckTests(unittest.TestCase):
         ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=120)
         self.assertEqual(ran.returncode, 0, ran.stderr)
         self.assertEqual(ran.stdout, FIELDS_EXPECTED)
+
+    def test_method_field_bounds_are_proven(self):
+        built, exe, program = build(self.tmp.name, 'methodfields', METHOD_FIELDS)
+        self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+        ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=120)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertEqual(ran.stdout, cpython_reference(METHOD_FIELDS))
+        c = program.read_text()
+        read8, read32, unsafe = (function_text(c, name) for name in
+                                 ('Cursor__read_u8', 'Cursor__read_u32_le', 'Cursor__unsafe_read'))
+        self.assertTrue(read8 and read32 and unsafe)
+        self.assertNotIn('ail_bytes_get', read8)
+        self.assertNotIn('ail_bytes_get', read32)
+        self.assertIn('ail_bytes_get', unsafe)
 
     def test_codegen_proven_and_kept(self):
         built, exe, program = build(self.tmp.name, 'codegen', CODEGEN)
