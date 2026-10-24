@@ -755,6 +755,19 @@ static inline ail_obj ail2f_pad_str(ail_ctx *cx, ail_str s, int64_t len, ail2f_s
     return ail2f_done(cx, &o);
 }
 static inline const char *ail2f_signstr(int neg, char sign) { return neg ? "-" : sign == '+' ? "+" : sign == ' ' ? " " : ""; }
+/* CPython's '#' on the type-less repr form keeps a decimal point in the mantissa */
+static inline void ail2f_alt_point(char *out, size_t osz) {
+    if (strchr(out, '.')) return;
+    char *e = strpbrk(out, "eE");
+    if (e) {
+        if (strlen(out) + 2 > osz) return;
+        memmove(e + 1, e, strlen(e) + 1);
+        *e = '.';
+    } else if (out[0] >= '0' && out[0] <= '9') {
+        size_t L = strlen(out);
+        if (L + 3 <= osz) { out[L] = '.'; out[L + 1] = '0'; out[L + 2] = 0; }
+    }
+}
 /* the digits of a float in one of e E f F g G % or the repr form (type 0) */
 static inline void ail2f_float_body(char *out, size_t osz, double v, ail2f_spec *f, char type) {
     if (isinf(v) || isnan(v)) {
@@ -769,6 +782,7 @@ static inline void ail2f_float_body(char *out, size_t osz, double v, ail2f_spec 
     char fmt[16];
     if (type == 0 && !f->has_prec) {
         ail_fmt_float(out, osz, v);
+        if (f->alt) ail2f_alt_point(out, osz);
         return;
     }
     if (type == 0) {
@@ -787,6 +801,7 @@ static inline void ail2f_float_body(char *out, size_t osz, double v, ail2f_spec 
             if (L && out[L - 1] == '.') { out[L] = '0'; out[L + 1] = 0; }
             else if (!strchr(out, '.')) strcat(out, ".0");
         }
+        if (f->alt) ail2f_alt_point(out, osz);
         return;
     }
     if (type == 'n') type = 'g';
