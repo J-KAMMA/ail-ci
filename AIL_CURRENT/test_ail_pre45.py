@@ -4,7 +4,9 @@
 then raise `AttributeError: 'str' object has no attribute 'upper'` at run time.
 The general path now refuses the construct by name (DIFFERENCES
 C?-job-pre45-10241007-1) instead of emitting code that fails at run time. Calls
-such as `"ab".upper()` and instance fields named like a str method still work.
+such as `"ab".upper()` and instance fields named like a str method still work. A class
+attribute with such a name (`class C: title = "hi"`, read through a list item, a dict value
+or an argument) is a real attribute, not a str method value, and still builds.
 """
 import os
 import shutil
@@ -84,6 +86,22 @@ VALID = {
     'user_method_upper': ('class C:\n    def __init__(self, s: str) -> None:\n        self.s = s\n\n'
                            '    def upper(self) -> str:\n        return self.s + "!"\n\n\n'
                            'def main():\n    c = C("ab")\n    print(c.upper())\n\n\nmain()\n'),
+    'class_attr_dict': ('class C:\n    title = "hi"\n\n\ndef main():\n'
+                         '    d = {"k": C()}\n    print(d["k"].title)\n\n\nmain()\n'),
+    'class_attr_list': ('class C:\n    title = "hi"\n\n\ndef main():\n'
+                         '    xs = [C()]\n    print(xs[0].title)\n\n\nmain()\n'),
+    'class_attr_argument': ('class C:\n    format = "hi"\n\n\ndef show(c):\n    print(c.format)\n\n\n'
+                             'def main():\n    show(C())\n\n\nmain()\n'),
+    'class_attr_inherited': ('class B:\n    title = "hi"\n\n\nclass C(B):\n    pass\n\n\n'
+                              'def main():\n    d = {"k": C()}\n    xs = [C()]\n'
+                              '    print(d["k"].title, xs[0].title)\n\n\nmain()\n'),
+    'class_attr_annotated': ('class C:\n    title: str = "hi"\n    format: str = "fmt"\n\n\n'
+                              'def show(c):\n    print(c.title, c.format)\n\n\n'
+                              'def main():\n    show(C())\n    print(C.title)\n\n\nmain()\n'),
+    'field_named_upper': ('class C:\n    def __init__(self, upper: str) -> None:\n        self.upper = upper\n\n\n'
+                           'def show(c):\n    print(c.upper)\n\n\n'
+                           'def main():\n    show(C("field"))\n    xs = [C("list")]\n'
+                           '    print(xs[0].upper)\n\n\nmain()\n'),
 }
 
 

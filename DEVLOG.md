@@ -1,5 +1,14 @@
 # DEVLOG
 
+## 2026-10-24 - pre45 review: class attributes named like str methods
+
+The str-method-value refusal above also refused valid class attributes whose name is a
+str-only method when the receiver's kind was unknown (`d["k"].title` where `class C:
+title = "hi"`). A class body defines such attributes without an `obj.name = ...` store,
+so the store set now includes direct class-body assignment and annotation names.
+`test_ail_pre45.py` covers a class attribute read through a list item, a dict value, an
+argument, a base class, an annotated class attribute and a field named `upper`.
+
 ## 2026-10-24 - pre45: a str method used as a value is refused by name
 
 `f = "ab".upper` compiled on both builds and then failed at run time with

@@ -2161,6 +2161,16 @@ class Compiler(boxclosure.ClosureMixin):
 
         self.attr_store_names = {n.attr for n in ast.walk(tree)
                                  if isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Store)}
+        # A class body defines attributes without an `obj.name = ...` store: `class C: title = "hi"`
+        # (or `title: str = "hi"`), read through any instance of C. They are not str method values.
+        for c in ast.walk(tree):
+            if not isinstance(c, ast.ClassDef):
+                continue
+            for item in c.body:
+                if isinstance(item, ast.Assign):
+                    self.attr_store_names.update(t.id for t in item.targets if isinstance(t, ast.Name))
+                elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                    self.attr_store_names.add(item.target.id)
 
         for n in tree.body:
             if isinstance(n, ast.FunctionDef):
