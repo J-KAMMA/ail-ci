@@ -1,5 +1,15 @@
 # DEVLOG
 
+## 2026-10-24 - pre31 review: scope-aware, value-exact int() refusal
+
+The first pre31 change read a module constant through a function parameter or local of the same name,
+and it scanned every child of the argument, so `int(1e300 * 0)`, `int([1e300, 1.5][1])` and
+`int({"a": 1e300, "b": 1.5}["b"])` were refused although the value reaching `int()` fits. The check
+now evaluates only the value that reaches the conversion, with function, lambda, class and
+comprehension bindings shadowing module constants. It follows unary/binary arithmetic, conditional
+expressions, list/tuple/dict literals, constant subscripts, generated tuple fields and simple identity
+functions; unknown expressions are not refused. Added the reviewer cases to `test_ail_pre31.py`.
+
 ## 2026-10-24 - pre31: int() of a float outside int64 is refused by name
 
 `x = 1e300; int(x)` stopped with `integer overflow` on both builds where CPython prints a 301-digit

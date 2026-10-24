@@ -68,6 +68,7 @@ REFUSED = {
     'negative_name': 'x = -1e300\nprint(int(x))\n',
     'through_argument': 'def identity(x):\n    return x\n\n\nprint(int(identity(1e300)))\n',
     'through_wrapper': 'def take(x):\n    return int(x)\n\n\nprint(take(1e300))\n',
+    'global_in_function': 'x = 1e300\n\ndef f():\n    return int(x)\n\n\nprint(f())\n',
     'list_item': 'print(int([1e300][0]))\n',
     'tuple_item': 'print(int((1e300,)[0]))\n',
     'dict_value': 'print(int({"v": 1e300}["v"]))\n',
@@ -94,6 +95,62 @@ print(int(items[0]), int(items[1]))
 print(int(d["v"]))
 print(int(c.v))
 print(take(1.9), take(-1.9))
+''',
+    'shadowed_module_constant': '''
+x = 1e300
+
+
+def f(x):
+    return int(x)
+
+
+def g():
+    x = 1.5
+    return int(x)
+
+
+def outer():
+    x = 1.5
+
+    def inner():
+        return int(x)
+    return inner()
+
+print(f(1.5), g(), outer())
+''',
+    'expressions_that_fit': '''
+x = 1e300
+print(int(1e300 * 0))
+print(int(1e300 - 1e300))
+print(int(0.0 if True else 1e300))
+print(int(x * 0), int(x - x))
+''',
+    'other_container_items': '''
+i = 1
+print(int([1e300, 1.5][1]))
+print(int({"a": 1e300, "b": 1.5}["b"]))
+print(int(("x", 1.5)[1]))
+print(int([1e300, 1.5][i]))
+''',
+    'mutated_and_rebound_constants': '''
+x = 1e300
+x = 1.5
+y = [1e300]
+y[0] = 1.5
+z = 1e300
+
+
+def f():
+    global z
+    z = 1.5
+    return int(z)
+
+
+def take(value):
+    value = 1.5
+    return int(value)
+
+print(int(x), int(y[0]), f(), int(z), take(1e300))
 ''',
 }
 
