@@ -134,6 +134,89 @@ def _number_constant(node):
     return None
 
 
+_CONST_INT_LIMIT = 4096
+
+
+def int_constant(node):
+    """The exact Python value of an all-integer constant expression, else None.
+
+    Python evaluates `(1 << 63) - 1` and `2**65 - 2**65` exactly, even though an intermediate is
+    outside int64.  Folding the whole expression here, with Python's unbounded integers, lets a
+    caller emit the one in-range result instead of trapping on the intermediate.  It also keeps a
+    constant expression from changing width at each operator, which is what C would do.
+
+    None is returned when the node is not made only of int constants, when an operation would not
+    produce an int (`2 ** -1` is a float), when it fails (`1 // 0`), or when the value grows past
+    a safe size.  The last case is deliberately not folded: the runtime's own overflow guard is
+    the right answer for it, and computing `2 ** 1000000000` here would only cost memory.
+    """
+    if isinstance(node, ast.Constant):
+        return node.value if type(node.value) is int else None
+    if isinstance(node, ast.UnaryOp):
+        if not isinstance(node.op, (ast.USub, ast.UAdd)):
+            return None
+        value = int_constant(node.operand)
+        if value is None:
+            return None
+        return -value if isinstance(node.op, ast.USub) else value
+    if not isinstance(node, ast.BinOp):
+        return None
+    left, right = int_constant(node.left), int_constant(node.right)
+    if left is None or right is None:
+        return None
+    op = type(node.op)
+    try:
+        if op is ast.Add:
+            result = left + right
+        elif op is ast.Sub:
+            result = left - right
+        elif op is ast.Mult:
+            if left and right and left.bit_length() + right.bit_length() > _CONST_INT_LIMIT:
+                return None
+            result = left * right
+        elif op is ast.FloorDiv:
+            result = left // right
+        elif op is ast.Mod:
+            result = left % right
+        elif op is ast.Pow:
+            if right < 0:
+                return None
+            if right == 0:
+                result = 1
+            elif left in (0, 1):
+                result = left
+            elif left == -1:
+                result = -1 if right & 1 else 1
+            elif left.bit_length() * right > _CONST_INT_LIMIT:
+                return None
+            else:
+                result = left ** right
+        elif op is ast.LShift:
+            if right < 0:
+                return None
+            if left == 0:
+                result = 0
+            elif left.bit_length() + right > _CONST_INT_LIMIT:
+                return None
+            else:
+                result = left << right
+        elif op is ast.RShift:
+            if right < 0:
+                return None
+            result = left >> right
+        elif op is ast.BitAnd:
+            result = left & right
+        elif op is ast.BitOr:
+            result = left | right
+        elif op is ast.BitXor:
+            result = left ^ right
+        else:
+            return None
+    except (ArithmeticError, ValueError):
+        return None
+    return result if type(result) is int and result.bit_length() <= _CONST_INT_LIMIT else None
+
+
 def refuse_complex_pow(node):
     """`(-4.0) ** 0.5`: a negative base to a fractional power is a complex number in Python, and this
     language has no complex type. Constant operands are refused here, at compile time; any other

@@ -33,7 +33,7 @@ import os
 import re
 import runpy
 
-from pyfront import Unsupported, refuse_complex_pow
+from pyfront import Unsupported, int_constant, refuse_complex_pow
 import filelib
 import hashlower
 import pyfunc
@@ -4408,6 +4408,10 @@ class Compiler(boxclosure.ClosureMixin):
                  ast.Sub: 'ail_meth_set_difference', ast.BitXor: 'ail_meth_set_symmetric_difference'}
 
     def expr_BinOp(self, node, ctx):
+        constant = int_constant(node)
+        if type(constant) is int and -(1 << 63) <= constant < (1 << 63):
+            return 'ail_box_int(%s)' % ('(-9223372036854775807LL - 1LL)' if constant == -(1 << 63)
+                                          else '%dLL' % constant)
         if (isinstance(node.op, ast.Mod) and isinstance(node.left, ast.Constant)
                 and isinstance(node.left.value, str)):
             mark = len(ctx.lines)

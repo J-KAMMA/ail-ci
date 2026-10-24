@@ -21,7 +21,7 @@ same exception the typed path uses) -- never a silent gap, never a bare gcc erro
 import ast
 import re
 
-from pyfront import Unsupported, refuse_complex_pow
+from pyfront import Unsupported, int_constant, refuse_complex_pow
 
 # ---------------------------------------------------------------------------------------------
 # Exception-type-name -> the runtime's AIL_ERR_* id. Only the runtime's own built-in exception
@@ -1323,6 +1323,10 @@ class Compiler:
                ast.Mod: 'ail_obj_mod', ast.Pow: 'ail_obj_pow'}
 
     def expr_BinOp(self, node, ctx):
+        constant = int_constant(node)
+        if type(constant) is int and -(1 << 63) <= constant < (1 << 63):
+            return 'ail_box_int(%s)' % ('(-9223372036854775807LL - 1LL)' if constant == -(1 << 63)
+                                          else '%dLL' % constant)
         if (isinstance(node.op, ast.Mod) and isinstance(node.left, ast.Constant)
                 and isinstance(node.left.value, str)):
             return self._percent_format(node.left.value, node.right, ctx)
