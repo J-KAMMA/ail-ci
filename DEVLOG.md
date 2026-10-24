@@ -1,5 +1,17 @@
 # DEVLOG
 
+## 2026-10-24 - pre33: constant integer `**` beyond int64 is refused by name
+
+CPython's int is unbounded, so `10 ** 40` is an exact integer (including inside a tuple, where
+fuzz59 recorded `(10 ** 40,)` stopping with `integer overflow`). This language's int is int64, so
+the constant is now refused at compile time instead of reaching `ail_ipow`/`ail_obj_pow`:
+`the integer power 10 ** 40 does not fit in a 64-bit signed integer (DIFFERENCES
+C?-job-pre33-10240909-1)`. The check is in `pyfront.refuse_int_pow_overflow` and runs on both
+builds and the IR lowerer. Powers whose result fits still compile and match CPython, including
+`2 ** 62`, `(-2) ** 63` (INT64_MIN), `3 ** 39`, bases -1/0/1 with a huge exponent, a float
+exponent and a negative exponent. Added `test_ail_pre33.py` (8 refused placements, 2 matching
+programs, both builds) and registered it in `ail_check.MODULES`.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

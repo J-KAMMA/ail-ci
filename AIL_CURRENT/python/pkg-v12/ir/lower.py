@@ -32,6 +32,7 @@ from . import ownership
 from . import flowtypes
 from . import ifadd
 from .lower_text import TextLowering, NotS0
+from pyfront import refuse_int_pow_overflow
 from .emit_text import allocates_bytes
 
 BYTES = I.T('bytes')
@@ -2141,6 +2142,8 @@ class Lowering(TextLowering):
         raise NotS0('unary %s' % type(op).__name__)
 
     def binop(self, node):
+        if isinstance(node.op, ast.Pow):
+            refuse_int_pow_overflow(node)
         return self.binop_values(node, self.expr(node.left), self.expr(node.right))
 
     def binop_values(self, node, left, right):

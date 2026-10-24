@@ -147,6 +147,33 @@ def refuse_complex_pow(node):
         raise refusal
 
 
+INT_POW_DIFF = 'C?-job-pre33-10240909-1'
+
+
+def refuse_int_pow_overflow(node):
+    """`10 ** 40`: CPython's int is unbounded, this language's is int64 (DIFFERENCES
+    C?-job-pre33-10240909-1). A constant integer power whose exact result does not fit is refused
+    here, before any emitter sees it, rather than wrapping or stopping at run time. Bases -1, 0 and
+    1 are always in range, so a huge exponent on one of them is not even evaluated."""
+    base, exponent = _number_constant(node.left), _number_constant(node.right)
+    if type(base) is not int or type(exponent) is not int or exponent < 0 or -1 <= base <= 1:
+        return
+    if exponent > 63:
+        overflow = True          # |base| >= 2, so the magnitude is at least 2 ** 64
+    else:
+        value = base ** exponent
+        overflow = not -(1 << 63) <= value < (1 << 63)
+    if not overflow:
+        return
+    refusal = Unsupported(
+        'the integer power %d ** %d does not fit in a 64-bit signed integer '
+        '(DIFFERENCES %s): CPython computes it exactly because its int is unbounded, while this '
+        "language's int is int64; use float() when a float answer is wanted"
+        % (base, exponent, INT_POW_DIFF))
+    refusal.source_line = getattr(node, 'lineno', None)
+    raise refusal
+
+
 def _use(need, *names):
     need.update(names)
     need.add('ail_die')

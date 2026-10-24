@@ -21,7 +21,7 @@ same exception the typed path uses) -- never a silent gap, never a bare gcc erro
 import ast
 import re
 
-from pyfront import Unsupported, refuse_complex_pow
+from pyfront import Unsupported, refuse_complex_pow, refuse_int_pow_overflow
 
 # ---------------------------------------------------------------------------------------------
 # Exception-type-name -> the runtime's AIL_ERR_* id. Only the runtime's own built-in exception
@@ -1330,6 +1330,7 @@ class Compiler:
         if fn is None:
             raise Unsupported('the %s binary operator' % type(node.op).__name__)
         if isinstance(node.op, ast.Pow):
+            refuse_int_pow_overflow(node)
             refuse_complex_pow(node)
         l = self.expr(node.left, ctx)
         r = self.expr(node.right, ctx)
