@@ -18515,6 +18515,34 @@ def _listcomp_kind(node, ctx):
         ctx.kind.clear(); ctx.kind.update(kinds)
 
 
+def _listcomp_index_store_safe(node):
+    """Whether an element expression can be written by index into a pre-sized list.
+
+    No calls, assignment expressions or lambdas: those are the only ways the element can run
+    code that appends to the list being walked and moves its buffer under the loop. A pure
+    arithmetic/subscript/attribute expression leaves both the source length and its pointer
+    unchanged, so the reservation above stays valid and `p[n++] = value` is equivalent to push.
+    """
+    return not any(isinstance(n, (ast.Call, ast.Await, ast.Yield, ast.YieldFrom,
+                                  ast.NamedExpr, ast.Lambda)) for n in ast.walk(node))
+
+
+def _listcomp_simd_safe(node, ctx):
+    """Whether a float element expression is flat enough to vectorize without changing traps.
+
+    Only names, constants, reads and +, -, * (and unary signs): no call, division, modulo or power,
+    so an iteration cannot run user code or raise part-way through a vector width. The loop is
+    marked `#pragma omp simd`, which the C build enables with `-fopenmp-simd`.
+    """
+    if _etype(node, ctx) != FLT:
+        return False
+    for n in ast.walk(node):
+        if isinstance(n, (ast.Call, ast.Await, ast.Yield, ast.YieldFrom, ast.NamedExpr, ast.Lambda,
+                          ast.Div, ast.FloorDiv, ast.Mod, ast.Pow)):
+            return False
+    return True
+
+
 def _listcomp_into_temp(node, ctx):
     """`[e for v in seq if c]` as a value: one list, built once, freed with the rest."""
     if len(node.generators) != 1 or node.generators[0].is_async:
@@ -18586,10 +18614,14 @@ def _listcomp_into_temp(node, ctx):
     # Unfiltered over a plain counted source: the result has exactly n - lo elements, so size it
     # once. Only for bounds that are a bare name or `name.n`, which can be read twice for free.
     simple = re.compile(r'\(?\*?[A-Za-z_]\w*\)?(\.n)?|-?\d+')
+    indexed = (kind in (FLIST, LIST) and not g.ifs and not struct_source and not string_source
+               and simple.fullmatch(lo) and simple.fullmatch(n)
+               and _listcomp_index_store_safe(node.elt))
     if (kind in (FLIST, LIST) and not g.ifs and not struct_source and not string_source
             and simple.fullmatch(lo) and simple.fullmatch(n)):
-        head = '%s_reserve(&%s, (%s) - (%s)); %s' % (
-            'ail_flist' if kind == FLIST else 'ail_list', c, n, lo, head)
+        head = '%s_reserve(&%s, (%s) - (%s)); %s%s' % (
+            'ail_flist' if kind == FLIST else 'ail_list', c, n, lo,
+            '\n#pragma omp simd\n' if indexed and _listcomp_simd_safe(node.elt, ctx) else '', head)
     if pre:
         head = '%s %s' % (' '.join(pre), head)
     element_ctype = 'ail_str' if elem_is_str else 'double' if elem_is_float else 'int64_t'
@@ -18620,7 +18652,13 @@ def _listcomp_into_temp(node, ctx):
             ctx.kind[g.target.id] = old_kind
     lines.extend(ctx.pre); ctx.pre = []
     helper = 'ail_slist' if kind == SLIST else 'ail_flist' if kind == FLIST else 'ail_list'
-    lines.append('%s_push(&%s, %s);' % (helper, c, val))
+    if indexed:
+        # The result was reserved for exactly the elements this counted loop will produce, so
+        # the push capacity check can be skipped. `n++` still records how far a raising element
+        # got, just as push did, and keeps the elements that were already stored.
+        lines.append('%s.p[%s.n++] = %s;' % (c, c, val))
+    else:
+        lines.append('%s_push(&%s, %s);' % (helper, c, val))
     lines.append('}')
     if struct_source:
         lines.extend([_obj_store(bound, 'NULL', (OBJ, source_kind[1]), ctx) + ';',
