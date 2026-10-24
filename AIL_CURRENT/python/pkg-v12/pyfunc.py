@@ -1060,6 +1060,13 @@ def _is_exc_arg_call(node, ctx):
             and '_ail_exc_arg' not in ctx.funcs and not node.keywords and len(node.args) == 2)
 
 
+def _is_exc_argrepr_call(node, ctx):
+    """`_ail_exc_argrepr(e, i)` -- repr(e.args[i]) with the argument's own kind (exctext.py)."""
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == '_ail_exc_argrepr' and '_ail_exc_argrepr' not in ctx.funcs
+            and not node.keywords and len(node.args) == 2)
+
+
 def _exc_intrinsic_arg(node, ctx):
     exc = node.args[0]
     if _etype(exc, ctx) != EXCEPTION:
@@ -1093,6 +1100,17 @@ def _exc_arg_value(node, ctx):
     ctx.has_try = True
     index = _map_inline(lambda: _expr(node.args[1], ctx), ctx)
     return 'ail_exc_argstr(%s, %s, &%s)' % (value, index, ctx.sarena())
+
+
+def _exc_argrepr_value(node, ctx):
+    """`_ail_exc_argrepr(e, i)`: repr(e.args[i]) with the argument's own kind, in the arena."""
+    value = _exc_intrinsic_arg(node, ctx)
+    if _etype(node.args[1], ctx) != INT:
+        raise Unsupported('e.args[...] takes an int index')
+    _exc_text_parts(ctx)
+    ctx.has_try = True
+    index = _map_inline(lambda: _expr(node.args[1], ctx), ctx)
+    return 'ail_exc_argrepr(%s, %s, &%s)' % (value, index, ctx.sarena())
 
 
 def _is_jd_result_call(node, ctx):
@@ -1335,7 +1353,7 @@ def _etype(node, ctx):
         if f == 'pow' and len(a) == 3 and f not in ctx.funcs:
             return INT
         if f in _EXC_INTRINSICS and f not in ctx.funcs:
-            return STR if f == '_ail_exc_arg' else INT
+            return STR if f in ('_ail_exc_arg', '_ail_exc_argrepr') else INT
         if f in exctext.ATTR_INTRINSICS and f not in ctx.funcs:
             return {'s': STR, 'i': INT, 'f': FLT}[f[-1]]
         if f in _AIL_SYSINFO and f not in ctx.funcs:
@@ -7453,6 +7471,8 @@ def _str_value(node, ctx, *, owned_join_return=False):
         return 'ail_bytes_decode_utf8(&%s, %s)' % (ctx.sarena(), _bytes_value(node.func.value, ctx))
     if _is_exc_arg_call(node, ctx):
         return _exc_arg_value(node, ctx)
+    if _is_exc_argrepr_call(node, ctx):
+        return _exc_argrepr_value(node, ctx)
     if _is_exc_attr_call(node, ctx, 's'):
         return _exc_attr_value(node, ctx)
     if _is_jd_result_call(node, ctx):

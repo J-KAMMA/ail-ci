@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - pre48: exception argument `repr`
+
+The typed path rewrote every `e.args[i]` to its text, so `repr(e.args[i])` quoted a number
+(`'3.0'`) and an alias (`s = e.args[0]`, a list item, a dict value, an attribute or a function
+argument) kept that text; `repr(e.args[0])` of an `OSError(2, "gone", "a.txt")` also printed
+`'2'` instead of `2`. Direct `repr(e.args[i])` now has its own intrinsic and runtime helper,
+which reads the argument's own repr for str/int/float/bool/None, negative indices, empty args
+(IndexError) and OSError arguments. Storing an `e.args[i]` value in a name or container, an
+attribute or a user-function argument is refused by name on the typed path, so the default
+build falls back to the general path (already correct) instead of printing the wrong repr.
+Added `test_ail_pre48.py`; direct repr and OSError are compared on the typed path, aliases on
+the default and forced-general builds, and the refusal is asserted by name.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
