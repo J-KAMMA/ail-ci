@@ -46,7 +46,7 @@ def main():
             return 0
         return 1 + f(n - 1)
     print(f(3))
-    print(f())
+    print(f(0))
 
 
 main()
