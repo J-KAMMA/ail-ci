@@ -1,5 +1,21 @@
 # DEVLOG
 
+## 2026-10-24 - pre157: class attributes read through a class value
+
+The first still-differing pre127 item was `r6_local/cell/nonlocal`, `p14_class_value_arg`,
+`p17_class_sources`: reading an attribute on a class value. `C.x` with the class name at the
+read site was already resolved at compile time, but `A = C; A.x`, a class passed as an
+argument, a list/dict item, an instance attribute, a cell or a nonlocal looked in the
+instance table and raised `AttributeError: 'type' object has no attribute 'x'`
+(`getattr()` raised NotImplementedError instead).
+
+The general-path class object now carries its class attributes as (name id, module slot)
+pairs (`ail_class_attr_add`), registered at startup. `ail_inst_getattr` walks the base
+chain and returns the shared slot value, so a later in-place change is still visible.
+`__name__`, `getattr()` and `hasattr()` are handled too, with CPython 3.12's
+`type object 'C' has no attribute 'x'` text. Added `test_ail_pre157.py` (one program, both
+builds) and DIFFERENCES row `C?-job-pre157-10250225-1`; only compiler/tests/docs changed.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

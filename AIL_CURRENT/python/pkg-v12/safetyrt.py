@@ -1333,6 +1333,7 @@ static inline int ail2a_streq(ail_obj s, const char *lit) {
     return 1;
 }
 static inline int ail2a_find(ail_ctx *cx, ail_obj obj, const char *name, ail_obj *out) {
+    if (obj.tag == AIL_T_CLASS) return ail_class_attr_find_name(cx, obj, name, out);
     ail_instobj *o = (ail_instobj *)obj.o;
     for (int64_t i = 0; i < o->n; i++) {
         int64_t nid = o->attrs[i].name_id;
@@ -1348,6 +1349,14 @@ static inline ail_st ail2a_need_inst(ail_ctx *cx, ail_obj obj, const char *fn) {
 /* getattr(obj, name[, default]); is_method: the class of obj has a method of that name */
 static inline ail_st ail2a_getattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_obj name, int has_dflt, ail_obj dflt) {
     char buf[256]; ail_st st = ail2a_cname(cx, name, buf, sizeof buf); if (st != AIL_OK) return st;
+    if (obj.tag == AIL_T_CLASS) {
+        if (strcmp(buf, "__name__") == 0) { *out = ((ail_classobj *)obj.o)->name; return AIL_OK; }
+        if (ail_class_attr_find_name(cx, obj, buf, out)) return AIL_OK;
+        if (has_dflt) { *out = dflt; return AIL_OK; }
+        char nb[100], m[320]; ail_class_name_c(obj, nb, sizeof nb);
+        snprintf(m, sizeof m, "type object '%s' has no attribute '%s'", nb, buf);
+        return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, m);
+    }
     if ((st = ail2a_need_inst(cx, obj, "getattr")) != AIL_OK) return st;
     if (ail2a_find(cx, obj, buf, out)) return AIL_OK;
     if (has_dflt) { *out = dflt; return AIL_OK; }
@@ -1364,6 +1373,11 @@ static inline ail_st ail2a_getattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_o
 static inline ail_st ail2a_hasattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_obj name, int is_method) {
     char buf[256]; ail_st st = ail2a_cname(cx, name, buf, sizeof buf); if (st != AIL_OK) return st;
     if (is_method) { *out = ail_box_bool(1); return AIL_OK; }
+    if (obj.tag == AIL_T_CLASS) {
+        ail_obj v;
+        *out = ail_box_bool(strcmp(buf, "__name__") == 0 || ail_class_attr_find_name(cx, obj, buf, &v));
+        return AIL_OK;
+    }
     if ((st = ail2a_need_inst(cx, obj, "hasattr")) != AIL_OK) return st;
     ail_obj v; *out = ail_box_bool(ail2a_find(cx, obj, buf, &v));
     return AIL_OK;

@@ -2326,6 +2326,7 @@ class Compiler(boxclosure.ClosureMixin):
         parts.append('\n/* ---- module body ---- */\n')
         setup = []
         setup.append('    memset(g_slots_arr, 0, sizeof g_slots_arr);\n')
+        setup.append('    ail__class_attr_slots = g_slots_arr;\n')
         setup.append('    g_frame.slots = g_slots_arr; g_frame.n = %d; '
                      'g_frame.prev = cx->frames; cx->frames = &g_frame;\n' % max(ng, 1))
         for a in sorted(self.attr_names):
@@ -2345,6 +2346,10 @@ class Compiler(boxclosure.ClosureMixin):
                 base_expr = 'ail_box_none()'
             setup.append('    g_slots_arr[%d] = ail_class_new(cx, %s, %s);\n' %
                          (self.global_slots['class:' + cname], c_str_literal(cname), base_expr))
+            for aname, _aval, aslot in cls.get('class_attrs', []):
+                # a class attribute read through a class VALUE (alias/argument/...) looks it up by name
+                setup.append('    ail_class_attr_add(cx, g_slots_arr[%d], ail_intern(cx, %s), %d);\n' %
+                             (self.global_slots['class:' + cname], c_str_literal(aname), aslot))
             nxt = cls['methods'].get('__next__')
             if nxt and nxt['all_params'] == ['self']:
                 setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->iter_next = pit_%s;\n' %
