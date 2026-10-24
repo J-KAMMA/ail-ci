@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - space-sign zero padding on the general path (job-pre83-10241845)
+
+The general path's boxed formatter (`ail__pad`, `python/pkg-v12/cruntime.py`) is sign-aware under
+`=` alignment (what the `0` flag sets) only when the first character is a sign, but it recognised
+just `-` and `+`. A space sign is a sign too, so `f"{1.5: 010.2f}"` printed `00000 1.50` (zero
+fill before the space) where CPython prints ` 000001.50`. `' '` now takes the same branch, and
+the same helper serves `format()` and `.format()`. `test_ail_pre83.py` covers floats and ints
+through a local, a parameter, a list item, a dict value and an attribute on both builds. Left
+unchanged: precision `>= 2**31` still prints instead of raising `ValueError: precision too big`
+(the next pre-existing candidate), and v1 pyboxed still fails to compile (duplicate symbols).
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

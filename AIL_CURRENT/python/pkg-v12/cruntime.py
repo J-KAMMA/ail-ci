@@ -16325,7 +16325,8 @@ static inline ail_obj ail__pad(ail_ctx *cx, const char *content, int64_t clen, a
     int64_t pad = f.width - clen; if (pad < 0) pad = 0;
     ail_strbuild bu = ail_str_buf(cx, clen + pad);
     int64_t o = 0;
-    if (align == '=' && numeric && clen > 0 && (content[0] == '-' || content[0] == '+')) {
+    /* ' ' is a sign too (`f"{x: 010.2f}"` -> " 000001.50"): the fill goes AFTER it. */
+    if (align == '=' && numeric && clen > 0 && (content[0] == '-' || content[0] == '+' || content[0] == ' ')) {
         bu.buf[o++] = content[0];
         for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (uint16_t)f.fill;
         for (int64_t k = 1; k < clen; k++) bu.buf[o++] = (unsigned char)content[k];

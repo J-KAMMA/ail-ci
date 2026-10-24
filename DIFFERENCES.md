@@ -27,4 +27,5 @@ Rows added by job-fuzz8-10220554 use the placeholder id form requested for this 
 
 | ID | Area | Status | Description |
 | --- | --- | --- | --- |
+| C?-job-pre83-10241845-1 | float/int format spec: space sign with the `0` flag | fixed | The general path's boxed `ail__pad` treated only `-`/`+` as signs under `=` alignment (what the `0` flag sets), so `f"{1.5: 010.2f}"` printed `00000 1.50` (fill before the space sign) where CPython prints ` 000001.50`. `' '` now takes the sign-aware branch; `format()` and `.format()` use the same helper. `test_ail_pre83.py`. |
 | C?-job-fuzz65-10231438-1 | heapq / list repr | fixed | After a caught `heappush` TypeError on a `list[int]` (CPython appends before comparing), the annotation-specialized list repr printed a string element as `x` instead of `'x'` when a tuple comparison had generated that helper. Scalar elements now use the runtime value's `repr`. |
