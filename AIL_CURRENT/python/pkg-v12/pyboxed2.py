@@ -2523,7 +2523,7 @@ class Compiler(boxclosure.ClosureMixin):
                     if k.arg == kw:
                         node = k.value
                 if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                    norm = node.value.lower().replace('_', '-').replace(' ', '-')
+                    norm = safetyrt.normalize_encoding_name(node.value)
                     if norm not in allowed:
                         raise Unsupported('%s with the %s %r on the general path (built: utf-8, ascii, latin-1; '
                                           'errors strict, ignore, replace)' % (what, noun, node.value))

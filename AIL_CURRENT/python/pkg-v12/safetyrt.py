@@ -2042,11 +2042,28 @@ BYTES_NAMES = frozenset(('bytes', 'bytearray', 'read_stdin_bytes', 'read_bytes',
 # a program that mentions one of these uses bytes
 BYTES_WORDS = frozenset(('bytes', 'bytearray', 'read_stdin_bytes', 'read_bytes', 'write_stdout_bytes', 'UnicodeError',
                          'UnicodeDecodeError', 'UnicodeEncodeError'))
-ENCODINGS = {'utf-8', 'utf8', 'u8', 'utf', 'cp65001', 'utf8-ucs2', 'utf8-ucs4',
-             'ascii', 'us-ascii', '646', 'us', 'ansi-x3.4-1968', 'ansi-x3.4-1986', 'ansi-x3-4-1968',
-             'cp367', 'csascii', 'ibm367', 'iso646-us', 'iso-646.irv-1991', 'iso-ir-6',
-             'latin-1', 'latin1', 'iso-8859-1', 'iso8859-1', 'iso8859', '8859', 'cp819', 'l1', 'latin',
-             'iso-ir-100', 'csisolatin1', 'ibm819', 'iso-8859-1-1987'}
+def normalize_encoding_name(name):
+    """CPython's encodings.normalize_encoding for the ASCII names the bytes prelude knows."""
+    parts = []
+    punct = False
+    for c in name:
+        o = ord(c)
+        if (o >= 48 and o <= 57) or (o >= 65 and o <= 90) or (o >= 97 and o <= 122) or o == 46:
+            if punct and parts:
+                parts.append('_')
+            if o >= 65 and o <= 90:
+                c = chr(o + 32)
+            parts.append(c)
+            punct = False
+        else:
+            punct = True
+    return ''.join(parts)
+
+
+ENCODINGS = {'utf_8', 'utf8', 'u8', 'utf', 'cp65001', 'utf8_ucs2', 'utf8_ucs4', 'ascii', 'us_ascii', '646', 'us',
+             'ansi_x3.4_1968', 'ansi_x3.4_1986', 'ansi_x3_4_1968', 'cp367', 'csascii', 'ibm367', 'iso646_us',
+             'iso_646.irv_1991', 'iso_ir_6', 'latin_1', 'latin1', 'iso_8859_1', 'iso8859_1', '8859', 'cp819', 'l1',
+             'latin', 'iso_ir_100', 'csisolatin1', 'ibm819', 'iso8859', 'iso_8859_1_1987'}
 ERROR_HANDLERS = {'strict', 'ignore', 'replace'}
 READ_BYTES = '''
 def read_bytes(path):
