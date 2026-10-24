@@ -3669,6 +3669,22 @@ class Compiler(boxclosure.ClosureMixin):
             return True
         return bool(values) and all(self._is_class_value(v, ctx) for v in values)
 
+    def _drop_passed_class_data(self, call, ctx):
+        """A callee can mutate a recorded container, or an instance whose field holds a class, so
+        passing either to a call drops the record (tracking is intraprocedural)."""
+        f = call.func
+        if isinstance(f, ast.Name) and f.id not in self.functions:
+            return                      # builtins and class constructors mutate none of their args
+        if isinstance(f, ast.Attribute) and self._builtin_method_proven(call, ctx):
+            return                      # a builtin method does not call back into user code
+        for arg in list(call.args) + [kw.value for kw in call.keywords]:
+            if isinstance(arg, ast.Name) and arg.id in self.class_containers:
+                self._drop_class_container(arg)
+            c = self._inst_class(arg, ctx)
+            if c:
+                for key in [k for k in self.class_fields if k[0] == c]:
+                    self.class_fields.discard(key)
+
     def _track_class_data(self, value, targets, ctx):
         """Remember simple data that carries class values, for _is_class_value (a list/dict literal
         of classes, or a field assigned one).  A later plain assignment, item write, deletion or
@@ -5538,6 +5554,7 @@ class Compiler(boxclosure.ClosureMixin):
         if isinstance(f, ast.Attribute) and f.attr in self._CLASS_MUTATORS:
             if not self._mutation_keeps_classes(node, ctx):
                 self._drop_class_container(f.value)
+        self._drop_passed_class_data(node, ctx)
         if (isinstance(f, ast.Call) and isinstance(f.func, ast.Name) and f.func.id == 'getattr'
                 and 'getattr' not in self.functions and len(f.args) == 2 and not f.keywords
                 and isinstance(f.args[1], ast.Constant) and isinstance(f.args[1].value, str)

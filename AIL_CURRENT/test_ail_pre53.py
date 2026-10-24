@@ -385,6 +385,68 @@ def main():
 
 main()
 ''',
+    'field_through_argument': '''
+class C:
+    @property
+    def p(self):
+        return 1
+
+
+class H:
+    pass
+
+
+def reset(o):
+    o.o = C()
+
+
+def main():
+    h = H()
+    h.o = C
+    reset(h)
+    print(h.o.p)
+
+
+main()
+''',
+    'list_through_argument': '''
+class C:
+    @property
+    def p(self):
+        return 1
+
+
+def reset(xs):
+    xs[0] = C()
+
+
+def main():
+    xs = [C]
+    reset(xs)
+    print(xs[0].p)
+
+
+main()
+''',
+    'dict_through_argument': '''
+class C:
+    @property
+    def p(self):
+        return 1
+
+
+def reset(d):
+    d['k'] = C()
+
+
+def main():
+    d = {'k': C}
+    reset(d)
+    print(d['k'].p)
+
+
+main()
+''',
     'dict_update': '''
 class C:
     @property
