@@ -2362,6 +2362,15 @@ class Compiler(boxclosure.ClosureMixin):
                 base_expr = 'ail_box_none()'
             setup.append('    g_slots_arr[%d] = ail_class_new(cx, %s, %s);\n' %
                          (self.global_slots['class:' + cname], c_str_literal(cname), base_expr))
+            props = {}
+            for mname, minfo in cls['methods'].items():
+                if minfo.get('is_property'):
+                    props.setdefault(mname, [None, None])[0] = minfo['cname']
+                elif minfo.get('is_setter'):
+                    props.setdefault(mname[len('__ail_set_'):], [None, None])[1] = minfo['cname']
+            for pname, (getter, setter) in sorted(props.items()):
+                setup.append('    ail_class_add_prop(cx, g_slots_arr[%d], g_attr_%s, %s, %s);\n' %
+                             (self.global_slots['class:' + cname], pname, getter or '0', setter or '0'))
             nxt = cls['methods'].get('__next__')
             if nxt and nxt['all_params'] == ['self']:
                 setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->iter_next = pit_%s;\n' %
@@ -3016,6 +3025,8 @@ class Compiler(boxclosure.ClosureMixin):
                 info = self._register_function(item, cname=mcname + ('__set' if setter else ''), is_method=True,
                                                 owner_class=node.name)
                 methods[('__ail_set_' + item.name) if info.get('is_setter') else item.name] = info
+                if info.get('is_property') or info.get('is_setter'):
+                    self.attr_names.add(item.name)
             elif isinstance(item, ast.Assign) and len(item.targets) == 1 and \
                     isinstance(item.targets[0], ast.Name):
                 class_attrs.append((item.targets[0].id, item.value))

@@ -1352,6 +1352,8 @@ static inline ail_st ail2a_need_inst(ail_ctx *cx, ail_obj obj, const char *fn) {
 static inline ail_st ail2a_getattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_obj name, int has_dflt, ail_obj dflt) {
     char buf[256]; ail_st st = ail2a_cname(cx, name, buf, sizeof buf); if (st != AIL_OK) return st;
     if ((st = ail2a_need_inst(cx, obj, "getattr")) != AIL_OK) return st;
+    ail_prop *pr = ail_inst_find_prop_name(cx, obj, buf);
+    if (pr && pr->get) return pr->get(cx, out, obj);
     if (ail2a_find(cx, obj, buf, out)) return AIL_OK;
     if (has_dflt) { *out = dflt; return AIL_OK; }
     char m[320]; snprintf(m, sizeof m, "'%s' object has no attribute '%s'", ail_type_name(obj.tag), buf);
@@ -1377,9 +1379,9 @@ static inline ail_st ail2a_setattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_o
     int64_t id = -1;
     for (int64_t i = 0; i < cx->intern_n; i++) if (strcmp(cx->intern_tab[i], buf) == 0) { id = i; break; }
     if (id < 0) { char *dup = (char *)ail_xmalloc(strlen(buf) + 1); strcpy(dup, buf); id = ail_intern(cx, dup); }
-    ail_inst_setattr(cx, obj, id, v);
+    st = ail_inst_setattr_chk(cx, obj, id, v);
     *out = ail_box_none();
-    return AIL_OK;
+    return st;
 }
 static inline ail_st ail2a_vars(ail_ctx *cx, ail_obj *out, ail_obj obj) {
     ail_st st = ail2a_need_inst(cx, obj, "vars"); if (st != AIL_OK) return st;

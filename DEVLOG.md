@@ -1,5 +1,23 @@
 # DEVLOG
 
+## 2026-10-24 - setattr on a read-only property names CPython's AttributeError (job-pre178-10250448)
+
+The first pre-existing difference recorded by the fuzz57 reviewer still reproduces on this tree:
+`setattr(c, "x", v)` on a `@property` with no setter silently stored the value (`c.x = v` did too),
+where CPython raises `AttributeError: property 'x' of 'C' object has no setter`. A property setter
+was bypassed by the same path.
+
+The general runtime now keeps a per-class `ail_prop` table (`cruntime.py`, installed by `pyboxed2.py`)
+and `ail_inst_setattr_chk` consults it through the base chain: a read-only property raises the
+CPython message using the instance's run-time class name, and a property with a setter calls it.
+`ail2a_setattr` uses that check, so `setattr` with a name computed at run time behaves the same;
+`ail2a_getattr` reads the getter through the table. `dunderrt.py`'s class-struct patch was updated for
+the new field. Direct attribute assignment, inherited/overridden properties, per-class names, and
+values from arguments, list items, attributes and dict values were compared on both builds.
+
+`test_ail_pre178.py` covers the recorded case and those boundaries. It and `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass on the final commit.
+
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
 
 The general path's native `statistics` helpers kept a heap result in a C local across an

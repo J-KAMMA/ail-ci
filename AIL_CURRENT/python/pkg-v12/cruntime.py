@@ -14103,6 +14103,10 @@ static inline ail_st ail_meth_set_symmetric_difference(ail_ctx *cx, ail_obj *out
 typedef struct { int64_t name_id; ail_obj val; } ail_attr;
 typedef struct { ail_gcobj hdr; ail_obj cls; ail_attr *attrs; int64_t n, cap; } ail_instobj;
 
+typedef struct ail_prop { int64_t name_id;
+                 ail_st (*get)(ail_ctx *, ail_obj *, ail_obj); /* @property getter (self only), or 0 */
+                 ail_st (*set)(ail_ctx *, ail_obj *, ail_obj, ail_obj); /* @NAME.setter (self, value), or 0 */
+                 struct ail_prop *next; } ail_prop;
 typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or NONE */; int builtin_id;
                  int dc; /* @dataclass: field count + 1 (0 = not a dataclass); repr/str print the first dc-1 attributes */
                  unsigned long long dc_hide; /* bit i set: field i is left out of the repr (field(repr=False)) */
@@ -14110,7 +14114,8 @@ typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or
                  ail_st (*iter_next)(ail_ctx *, ail_obj *, ail_obj); /* user __next__ wrapped: StopIteration -> AIL_STOP, or 0 */
                  ail_st (*repr_fn)(ail_ctx *, ail_obj *, ail_obj); /* user __repr__ (self only), or 0 */
                  ail_st (*str_fn)(ail_ctx *, ail_obj *, ail_obj); /* user __str__ (self only), or 0 */
-                 ail_st (*lt_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj); /* user __lt__ (self, other), or 0 */ } ail_classobj;
+                 ail_st (*lt_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj); /* user __lt__ (self, other), or 0 */
+                 ail_prop *props; /* @property descriptors of this class, looked up through the base chain */ } ail_classobj;
 
 typedef struct { ail_gcobj hdr; int64_t start, stop, step; } ail_rangeobj;
 
@@ -14200,6 +14205,11 @@ static inline void ail__free_payload(ail_gcobj *o) {
         case AIL_K_DICT: free(((ail_mapobj *)o)->entries); free(((ail_mapobj *)o)->index); break;
         case AIL_K_SET: free(((ail_setobj *)o)->ent); free(((ail_setobj *)o)->index); break;
         case AIL_K_INST: free(((ail_instobj *)o)->attrs); break;
+        case AIL_K_CLASS: {
+            ail_prop *p = ((ail_classobj *)o)->props;
+            while (p) { ail_prop *next = p->next; free(p); p = next; }
+            break;
+        }
         case AIL_K_FUNC: free(((ail_funcobj *)o)->cells); break;
         default: break;
     }
@@ -16478,6 +16488,7 @@ static inline ail_obj ail_class_new(ail_ctx *cx, const char *name, ail_obj base)
     c->builtin_id = -1;
     c->dc = 0; c->dc_hide = 0;
     c->iter_iter = 0; c->iter_next = 0; c->repr_fn = 0; c->str_fn = 0; c->lt_fn = 0;
+    c->props = 0;
     ail_obj r; r.tag = AIL_T_CLASS; r.o = (ail_gcobj *)c;
     AIL_ROOT1(cx, fr, r);
     c->name = ail_str_from_cstr(cx, name);
@@ -16488,6 +16499,32 @@ static inline ail_obj ail_inst_new(ail_ctx *cx, ail_obj cls) {
     ail_instobj *o = (ail_instobj *)ail_gc_alloc(cx, AIL_K_INST, sizeof *o);
     o->cls = cls;
     ail_obj r; r.tag = AIL_T_INST; r.o = (ail_gcobj *)o; return r;
+}
+/* Register one @property (get may be 0 for a setter-only spelling; set is 0 for a read-only one). */
+static inline void ail_class_add_prop(ail_ctx *cx, ail_obj cls, int64_t name_id,
+                                      ail_st (*get)(ail_ctx *, ail_obj *, ail_obj),
+                                      ail_st (*set)(ail_ctx *, ail_obj *, ail_obj, ail_obj)) {
+    (void)cx;
+    ail_classobj *c = (ail_classobj *)cls.o;
+    ail_prop *p = (ail_prop *)ail_xmalloc(sizeof *p);
+    p->name_id = name_id; p->get = get; p->set = set; p->next = c->props;
+    c->props = p;
+}
+/* The @property reached from an instance's run-time class, most derived first, or 0. */
+static inline ail_prop *ail_inst_find_prop(ail_obj inst, int64_t name_id) {
+    for (ail_obj k = ((ail_instobj *)inst.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+        for (ail_prop *p = ((ail_classobj *)k.o)->props; p; p = p->next)
+            if (p->name_id == name_id) return p;
+    }
+    return 0;
+}
+static inline ail_prop *ail_inst_find_prop_name(ail_ctx *cx, ail_obj inst, const char *name) {
+    for (ail_obj k = ((ail_instobj *)inst.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+        for (ail_prop *p = ((ail_classobj *)k.o)->props; p; p = p->next)
+            if (p->name_id >= 0 && p->name_id < cx->intern_n &&
+                strcmp(cx->intern_tab[p->name_id], name) == 0) return p;
+    }
+    return 0;
 }
 static inline void ail_inst_setattr(ail_ctx *cx, ail_obj inst, int64_t name_id, ail_obj val) {
     ail_instobj *o = (ail_instobj *)inst.o;
@@ -16532,6 +16569,20 @@ static __attribute__((noinline, cold)) ail_st ail_attr_not_inst(ail_ctx *cx, ail
 }
 static inline ail_st ail_inst_setattr_chk(ail_ctx *cx, ail_obj inst, int64_t name_id, ail_obj val) {
     if (__builtin_expect((unsigned)(inst.tag - AIL_T_INST) > 1u, 0)) return ail_attr_not_inst(cx, inst, cx->intern_tab[name_id]);   /* INST, EXC are adjacent */
+    ail_prop *pr = ail_inst_find_prop(inst, name_id);
+    if (pr) {
+        if (!pr->set) {
+            /* CPython: `property 'x' of 'C' object has no setter` (the run-time class's name) */
+            ail_str cn = ail_view_to_str(((ail_classobj *)((ail_instobj *)inst.o)->cls.o)->name);
+            char cb[100]; size_t k = 0;
+            for (int64_t i = 0; i < cn.n && k + 1 < sizeof cb; i++) cb[k++] = (char)ail_chr(cn, i);
+            cb[k] = 0;
+            char m[256]; snprintf(m, sizeof m, "property '%s' of '%s' object has no setter",
+                                  cx->intern_tab[name_id], cb);
+            return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, m);
+        }
+        ail_obj dummy; return pr->set(cx, &dummy, inst, val);
+    }
     ail_inst_setattr(cx, inst, name_id, val);
     return AIL_OK;
 }
