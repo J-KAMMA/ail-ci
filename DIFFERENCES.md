@@ -4,6 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre89-10242039-1 | nested `def` mutable literal defaults | A nested `def` directly in its enclosing body copied a mutable literal default at each call site, so `def f(x, acc=[]); f(1); f(2)` printed `[1] [2]` where CPython shares the list built when the `def` ran and prints `[1] [1, 2]`. The general path now refuses the construct by name on both builds; `test_ail_pre89.py` covers list/dict/set/tuple-of-list and keyword-only defaults, while immutable and top-level mutable defaults still match CPython. | fixed |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |

@@ -1,5 +1,15 @@
 # DEVLOG
 
+## 2026-10-24 - pre89: mutable default of a nested def (p13)
+
+The fuzz94 reviewer's p13 case still silently differed on this tree: a nested `def` directly in
+its enclosing body copied a mutable literal default into every call site, so `f(1), f(2)` printed
+`[1] [2]` where CPython shares the list built when the `def` ran and prints `[1] [1, 2]`. The
+general path now refuses that construct by name (`a nested def f with a mutable literal default
+(list/dict/set)`), on both builds. The reviewer's p18 (callable stored in an instance attribute)
+and p23 (keyword arguments through a function value) were reproduced and remain refused by name.
+Added `test_ail_pre89.py`.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
