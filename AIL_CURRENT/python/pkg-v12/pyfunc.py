@@ -7425,6 +7425,10 @@ def _str_value(node, ctx, *, owned_join_return=False):
         if is_chr and (_etype(node.args[0], ctx) != INT
                        or _is_handle_producing(node.args[0], ctx)):
             raise Unsupported('chr() requires an integer')
+        if is_chr and isinstance(node.args[0], ast.Constant) and type(node.args[0].value) is int:
+            cp = node.args[0].value
+            if 0xD800 <= cp <= 0xDFFF:
+                raise Unsupported('chr() with the surrogate code point U+%04X' % cp)
         ctx.parts.add('CHRSTR' if is_chr else 'HEXCODEC')
         ctx.has_try = True
         saved, ctx.pre = ctx.pre, []

@@ -8014,6 +8014,13 @@ class Compiler(boxclosure.ClosureMixin):
     def _b_chr(self, args, kwargs, ctx):
         if len(args) != 1 or kwargs:
             raise Unsupported('chr() with other than exactly one argument')
+        node = args[0]
+        if isinstance(node, ast.Constant) and type(node.value) is int:
+            cp = node.value
+            if 0xD800 <= cp <= 0xDFFF:
+                raise Unsupported('chr() with the surrogate code point U+%04X' % cp)
+            if not WIDE_STRINGS and 0xFFFF < cp <= 0x10FFFF:
+                raise Unsupported('chr() with the non-BMP code point U+%X in the 16-bit v2 runtime' % cp)
         v = self.expr(args[0], ctx)
         t = ctx.tmp()
         ctx.emit('st = ail_bi_chr(cx, &%s, %s);' % (t, v))
