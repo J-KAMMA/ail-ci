@@ -1,5 +1,17 @@
 # DEVLOG
 
+## 2026-10-24 - pre57 follow-up: CPython probing and dk_usable
+
+The review of the first pre57 fix found two regressions against the base tree. The dummy index
+slots were placed by AIL's linear probe, while CPython probes with `perturb >>= 5` and
+`i = i*5 + perturb + 1`; for a user `__hash__` returning 32 the old code also fed the value
+through the private int table mix instead of using it directly. Dict lookup, insertion, delete,
+rehash and resize now use CPython's probe sequence, `find_empty_slot` reuses the first dummy,
+and an instance `__hash__` result is the table hash itself (`-1` becomes `-2`). A separate
+`usable` field now models `dk_usable`: `popitem` lowers `nentries` without restoring it, so the
+next insert still resizes when CPython does. Copies clone the index including dummy slots.
+`test_ail_pre57.py` adds the reviewer's equality-order and popitem/usable probes.
+
 ## 2026-10-24 - pre57: dict key-table shape after delete/reinsert
 
 The pre43 reviewer recorded as pre-existing that `update` / `dict()` after a delete+reinsert

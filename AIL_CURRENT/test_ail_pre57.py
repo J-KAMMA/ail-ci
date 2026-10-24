@@ -247,6 +247,66 @@ main()
 '''
 
 
+REG_EQ_REINSERT_ORDER = r'''class K:
+    def __init__(self, v, h):
+        self.v = v
+        self.h = h
+    def __hash__(self):
+        return self.h
+    def __eq__(self, other):
+        print("E", self.v, other.v)
+        return self.v == other.v
+
+
+def main():
+    d = {}
+    for i in range(6):
+        d[K(i, (i * 32) % 64)] = i
+    for i in (0, 2, 4):
+        del d[K(i, (i * 32) % 64)]
+    for j in range(3):
+        d[K(1000 + j, ((1000 + j) * 32) % 64)] = 1000 + j
+    print("keys", [k.v for k in d])
+    e = dict(d)
+    print("ekeys", [k.v for k in e])
+    print("d==e")
+    print(d == e)
+    print("e==d")
+    print(e == d)
+
+
+main()
+'''
+
+
+REG_POPITEM_USABLE = r'''class K:
+    def __init__(self, v, h):
+        self.v = v
+        self.h = h
+    def __hash__(self):
+        return self.h
+    def __eq__(self, other):
+        print("E", self.v, other.v)
+        return self.v == other.v
+
+
+def main():
+    d = {}
+    for i in range(21):
+        d[K(i, (i * 3) % 64)] = i
+    d.popitem()
+    d.popitem()
+    d[K(2000, (2000 * 3) % 64)] = 2000
+    print("keys", [k.v for k in d])
+    print("-- dict")
+    e = dict(d)
+    print("ekeys", [k.v for k in e])
+
+
+main()
+'''
+
+
 class Pre57Tests(unittest.TestCase):
     def run_cpython(self, directory, text):
         src = Path(directory) / 'cpython_main.py'
@@ -295,6 +355,12 @@ class Pre57Tests(unittest.TestCase):
 
     def test_empty_negative_and_plain_boundaries(self):
         self.check('plain-boundaries', PLAIN_BOUNDARIES)
+
+    def test_equality_order_after_delete_reinsert(self):
+        self.check('reg-eq-reinsert-order', REG_EQ_REINSERT_ORDER)
+
+    def test_popitem_does_not_restore_usable(self):
+        self.check('reg-popitem-usable', REG_POPITEM_USABLE)
 
 
 if __name__ == '__main__':
