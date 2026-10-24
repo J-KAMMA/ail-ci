@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - pre109: negative shift count keeps CPython's ValueError
+
+The typed `ck_shl`/`ck_shr` guards raised `ValueError` with no message, and `pymix` selected
+a typed clone for a helper whose shift count was not a non-negative literal, so the clone's
+`ValueError` could escape the caller's boxed `try` (also for `<<=`/`>>=`).  Both guards now
+raise CPython's `negative shift count` (adopting the new exception, so a caught shift does not
+leak), and `pymix` treats non-literal shift counts in `BinOp` and `AugAssign` as traps, so the
+boxed caller keeps its handler.  `test_ail_pre109.py` covers constants, arguments, list items,
+attributes, dict values, augmented shifts, valid shifts and an uncaught failure on both builds;
+1,000,000 caught shifts keep maxrss at 11,564 KB.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
