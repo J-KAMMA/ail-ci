@@ -1064,6 +1064,7 @@ typedef ail_st (*ail2g_body)(ail_ctx *, ail_obj *, ail_obj);
 enum { AIL2G_NEW, AIL2G_SUSPENDED, AIL2G_RUNNING, AIL2G_DONE };
 typedef struct ail2g {
     int state, scanned;
+    int inject_close;           /* the next yield wakes because close() asks for GeneratorExit */
     ail2g_body body;
     ail_gcobj *inst;            /* the generator object (not owned: the collector decides) */
     ail_obj args;               /* while NEW: the call's arguments (also an attribute of the object) */
@@ -1266,16 +1267,36 @@ static inline ail_st ail2g_yield(ail_ctx *cx, ail_obj *sent, ail_obj value) {
 #endif
     *sent = g->sent;
     g->sent = ail_box_none();
+    if (g->inject_close) {
+        /* close(): the suspension point raises GeneratorExit, so try/finally and except run as in CPython.
+           A generator that yields during that cleanup is left suspended there (the caller gets the
+           RuntimeError below); the next resume simply continues after that yield. */
+        g->inject_close = 0;
+        return ail_raise_c(cx, AIL_B_GENERATOREXIT, "");
+    }
     return AIL_OK;
 }
-/* g.close(): a generator that has not finished is finished (its finally blocks do not run) */
+/* g.close(): a suspended generator is resumed with GeneratorExit at its yield point (so its finally
+   blocks run); a not-yet-started one is just finished (its body never ran); a finished one is a no-op.
+   GeneratorExit and StopIteration count as a normal close; another exception propagates, and a yield
+   during cleanup is CPython's RuntimeError "generator ignored GeneratorExit". */
 static inline ail_st ail2g_close(ail_ctx *cx, ail_obj *out, ail_obj inst) {
     ail2g *g; ail_st st = ail2g_of(cx, inst, &g);
     if (st != AIL_OK) return st;
     if (g->state == AIL2G_RUNNING) return ail_raise_c(cx, AIL_B_VALUEERROR, "generator already executing");
-    if (g->state != AIL2G_DONE) { g->state = AIL2G_DONE; g->top = NULL; ail2g_free_stack(g); }
-    *out = ail_box_none();
-    return AIL_OK;
+    if (g->state == AIL2G_DONE) { *out = ail_box_none(); return AIL_OK; }
+    if (g->state == AIL2G_NEW) { g->state = AIL2G_DONE; g->top = NULL; ail2g_free_stack(g); *out = ail_box_none(); return AIL_OK; }
+    g->inject_close = 1;
+    ail_obj value;
+    st = ail2g_resume(cx, &value, inst, ail_box_none());
+    if (st == AIL_OK) return ail_raise_c(cx, AIL_B_RUNTIMEERROR, "generator ignored GeneratorExit");
+    if (st == AIL_EXC && (ail_exc_matches_b(cx, AIL_B_STOPITERATION) ||
+                          ail_exc_matches_b(cx, AIL_B_GENERATOREXIT))) {
+        ail_exc_clear(cx);
+        *out = ail_box_none();
+        return AIL_OK;
+    }
+    return st;
 }
 static inline ail_st ail2g_name(ail_ctx *cx, ail_obj *out, ail_obj inst) {
     ail2g *g; ail_st st = ail2g_of(cx, inst, &g);
