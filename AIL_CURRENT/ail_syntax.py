@@ -823,6 +823,23 @@ def _fold_powers(tree):
     return edits, folded
 
 
+def _outermost_edits(edits):
+    """Keep only the outermost edit of each overlapping source range. An exact ancestor already
+    accounts for the descendant, and applying both with offsets from the original text would cut
+    the ancestor's replacement."""
+    spans = sorted((((node.lineno, node.col_offset), (node.end_lineno, node.end_col_offset), node, literal)
+                    for node, literal in edits),
+                   key=lambda item: (item[0], -item[1][0], -item[1][1]))
+    kept = []
+    kept_spans = []
+    for start, end, node, literal in spans:
+        if any(start < kept_end and kept_start < end for kept_start, kept_end in kept_spans):
+            continue
+        kept.append((node, literal))
+        kept_spans.append((start, end))
+    return kept
+
+
 def fold_constants(text):
     """Constant integer expressions containing `**` are folded exactly (so a cancellation such as
     `2**63 - 1` sees Python's intermediate); top-level `NAME = <constant arithmetic>` bound once in
@@ -852,6 +869,7 @@ def fold_constants(text):
             edits.append((node.value, _literal_repr(value)))
     if not edits:
         return text
+    edits = _outermost_edits(edits)
     data = text.encode('utf8')
     starts = _byte_offsets(data)
     for node, literal in sorted(edits, key=lambda item: (item[0].lineno, item[0].col_offset), reverse=True):

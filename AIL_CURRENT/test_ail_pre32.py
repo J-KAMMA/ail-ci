@@ -48,6 +48,41 @@ REFUSED = '''def main() -> None:
 main()
 '''
 
+MODULE_ASSIGNMENTS = '''MAX = (2**63 - 1)
+MIN = -(2**63)
+KNOWN = 9223372036854775807
+CANCELLED = KNOWN - 2**63
+TEXT = "x" * (2**63 - 2**63)
+BYTES = b"ab" * (2**63 - 2**63)
+RATIO = (2**63) / 2
+NESTED = (1 + (2**63 - 1)) - 2**63
+
+
+def show(v: int) -> None:
+    print(v)
+
+
+def main() -> None:
+    print(KNOWN, CANCELLED, MIN, MAX)
+    print(repr(TEXT), repr(BYTES), RATIO)
+    print(NESTED)
+    show(CANCELLED)
+
+
+main()
+'''
+
+OVERLAP_REFUSED = '''MAX = 9223372036854775807
+BIG = (MAX + 1) * 2**63
+
+
+def main() -> None:
+    print(BIG)
+
+
+main()
+'''
+
 
 def cpython(directory, text):
     src = Path(directory) / 'probe.py'
@@ -80,11 +115,30 @@ class Pre32(unittest.TestCase):
                     ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=120)
                     self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout), ran.stderr)
 
+    def test_module_assignments_overlapping_a_power_match_cpython(self):
+        with tempfile.TemporaryDirectory(prefix='ail-pre32-') as directory:
+            expected = cpython(directory, MODULE_ASSIGNMENTS)
+            self.assertEqual(expected.returncode, 0, expected.stderr)
+            for unified in (True, False):
+                with self.subTest(build='general' if unified else 'default'):
+                    built, exe = build(directory, MODULE_ASSIGNMENTS, unified)
+                    self.assertEqual(built.returncode, 0, (built.stdout + built.stderr)[-2000:])
+                    ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=120)
+                    self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout), ran.stderr)
+
     def test_an_uncancelled_out_of_range_power_is_refused_by_name(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre32-') as directory:
             for unified in (True, False):
                 with self.subTest(build='general' if unified else 'default'):
                     built, _ = build(directory, REFUSED, unified)
+                    self.assertNotEqual(built.returncode, 0)
+                    self.assertIn('int64 literal out of range', built.stdout + built.stderr)
+
+    def test_a_module_ancestor_that_overflows_is_refused_by_name(self):
+        with tempfile.TemporaryDirectory(prefix='ail-pre32-') as directory:
+            for unified in (True, False):
+                with self.subTest(build='general' if unified else 'default'):
+                    built, _ = build(directory, OVERLAP_REFUSED, unified)
                     self.assertNotEqual(built.returncode, 0)
                     self.assertIn('int64 literal out of range', built.stdout + built.stderr)
 

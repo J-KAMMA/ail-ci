@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-24 - r52_ovf follow-up: overlapping constant edits keep the outermost (job-pre32-10240902)
+
+The module-constant pass could record an edit for a whole assignment value that contained a `**`
+subexpression whose own exact fold was already recorded. Both edits were then applied against the
+original byte offsets, which cut or duplicated source text: `B = A - 2**63` with `A` bound to the
+int64 maximum printed `-172036854775808`, and `A = "x" * (2**63 - 2**63)` failed to parse. Now only
+the outermost edit of an overlapping source range is applied, so its exact value (which already
+accounts for the descendant) wins; a module ancestor whose exact value is outside int64 is still
+written as a literal and refused by name. Added module-level assignment and ancestor-overflow
+regressions to `AIL_CURRENT/test_ail_pre32.py`.
+
 ## 2026-10-24 - r52_ovf: constant powers cancel before the int64 check (job-pre32-10240902)
 
 `fold_constants` refused to fold `2**63 - 1` and `-(2**63)` because it range-checked the
