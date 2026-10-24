@@ -663,8 +663,24 @@ static inline ail_obj ail2f_done(ail_ctx *cx, ail2f_buf *b) {
     return ail_str_buf_done(bu, b->n);
 }
 typedef struct { uint16_t fill; char align, sign; int alt, zero, has_width, has_prec; int64_t width, prec; char group, type; } ail2f_spec;
-/* 0, or -1 with the ValueError text in msg */
-static inline int ail2f_parse(ail_str s, ail2f_spec *f, char *msg, size_t msz) {
+/* CPython's "Invalid format specifier '%U' for object of type '%s'" as a 16-bit string, so a spec
+   outside Latin-1 is still reported as itself. */
+static inline ail_obj ail2f_bad_spec_obj(ail_ctx *cx, ail_str s, const char *tname) {
+    const char *pre = "Invalid format specifier '";
+    const char *mid = "' for object of type '";
+    int64_t pl = (int64_t)strlen(pre), ml = (int64_t)strlen(mid), tl = (int64_t)strlen(tname);
+    ail_strbuild b = ail_str_buf(cx, pl + s.n + ml + tl + 1);
+    int64_t o = 0;
+    for (int64_t i = 0; i < pl; i++) b.buf[o++] = (uint16_t)(unsigned char)pre[i];
+    for (int64_t i = 0; i < s.n; i++) b.buf[o++] = ail_chr(s, i);
+    for (int64_t i = 0; i < ml; i++) b.buf[o++] = (uint16_t)(unsigned char)mid[i];
+    for (int64_t i = 0; i < tl; i++) b.buf[o++] = (uint16_t)(unsigned char)tname[i];
+    b.buf[o++] = '\'';
+    return ail_str_buf_done(b, o);
+}
+/* 0 ok; -1 with the ValueError text in msg; -2 for an invalid specifier, whose full 16-bit
+   message the caller builds because it contains the spec itself. */
+static inline int ail2f_parse(ail_str s, ail2f_spec *f, const char *tname, char *msg, size_t msz) {
     memset(f, 0, sizeof *f); f->fill = ' ';
     int64_t i = 0, n = s.n;
     #define AIL2F_ALIGN(c) ((c) == '<' || (c) == '>' || (c) == '=' || (c) == '^')
@@ -690,10 +706,10 @@ static inline int ail2f_parse(ail_str s, ail2f_spec *f, char *msg, size_t msz) {
             f->prec = f->prec * 10 + (ail_chr(s, i++) - '0');
         }
     }
-    if (n - i > 1) { snprintf(msg, msz, "Invalid format specifier"); return -1; }
+    if (n - i > 1) return -2;
     if (i < n) {
         uint16_t t = ail_chr(s, i);
-        if (t > 127) { snprintf(msg, msz, "Invalid format specifier"); return -1; }
+        if (t > 127) { snprintf(msg, msz, "Unknown format code '\\x%x' for object of type '%s'", (unsigned)t, tname); return -1; }
         f->type = (char)t;
     }
     return 0;
@@ -798,8 +814,27 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
     if (specobj.tag != AIL_T_STR) return ail_raise_c(cx, AIL_B_TYPEERROR, "format() argument 2 must be str");
     ail_str spec = ail_view_to_str(specobj);
     if (spec.n == 0) { *out = ail_obj_str(cx, x); return AIL_OK; }
-    ail2f_spec f; char msg[160];
-    if (ail2f_parse(spec, &f, msg, sizeof msg)) return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
+    if (x.tag != AIL_T_STR && x.tag != AIL_T_INT && x.tag != AIL_T_BOOL && x.tag != AIL_T_FLOAT) {
+        /* object.__format__ accepts only an empty spec (handled above); an instance's own __format__
+           was already tried by the caller.  CPython raises this before it parses the spec. */
+        if (x.tag == AIL_T_NONE) return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported format string passed to NoneType.__format__");
+        const char *tn = ail_type_name(x.tag);
+        char nb[80];
+        if ((x.tag == AIL_T_INST || x.tag == AIL_T_EXC) && ((ail_instobj *)x.o)->cls.tag == AIL_T_CLASS) {   /* the class's own name */
+            ail_str cs = ail_view_to_str(((ail_classobj *)((ail_instobj *)x.o)->cls.o)->name);
+            size_t k = 0;
+            for (int64_t i = 0; i < cs.n && k + 1 < sizeof nb; i++) { uint32_t ch = (uint32_t)ail_chr(cs, i); nb[k++] = ch < 128 ? (char)ch : '?'; }
+            nb[k] = 0; tn = nb;
+        }
+        char m[160];
+        snprintf(m, sizeof m, "unsupported format string passed to %s.__format__", tn);
+        return ail_raise_c(cx, AIL_B_TYPEERROR, m);
+    }
+    const char *tname = x.tag == AIL_T_STR ? "str" : x.tag == AIL_T_BOOL ? "bool" : x.tag == AIL_T_INT ? "int" : "float";
+    ail2f_spec f; char msg[400];
+    int parsed = ail2f_parse(spec, &f, tname, msg, sizeof msg);
+    if (parsed == -2) return ail_raise(cx, cx->builtin_cls[AIL_B_VALUEERROR], ail2f_bad_spec_obj(cx, spec, tname));
+    if (parsed) return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
     char type = f.type;
     if (f.group && type) {
         /* CPython checks the grouping against the type before it looks at the value */
@@ -867,18 +902,6 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
         *out = ail2f_pad_num(cx, ail2f_signstr(neg, f.sign), "", body, &f);
         return AIL_OK;
     }
-    if (x.tag == AIL_T_NONE) return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported format string passed to NoneType.__format__");
-    /* anything else formats its str() as a string would, the way object.__format__ does for an empty spec only */
-    const char *tn = ail_type_name(x.tag);
-    char nb[80];
-    if ((x.tag == AIL_T_INST || x.tag == AIL_T_EXC) && ((ail_instobj *)x.o)->cls.tag == AIL_T_CLASS) {   /* the class's own name */
-        ail_str cs = ail_view_to_str(((ail_classobj *)((ail_instobj *)x.o)->cls.o)->name);
-        size_t k = 0;
-        for (int64_t i = 0; i < cs.n && k + 1 < sizeof nb; i++) { uint32_t ch = (uint32_t)ail_chr(cs, i); nb[k++] = ch < 128 ? (char)ch : '?'; }
-        nb[k] = 0; tn = nb;
-    }
-    snprintf(msg, sizeof msg, "unsupported format string passed to %s.__format__", tn);
-    return ail_raise_c(cx, AIL_B_TYPEERROR, msg);
 }
 /* fmt % args at run time (printf-style formatting, CPython's PyUnicode_Format) */
 static inline ail_st ail2f_percent(ail_ctx *cx, ail_obj *out, ail_obj fmtobj, ail_obj args) {

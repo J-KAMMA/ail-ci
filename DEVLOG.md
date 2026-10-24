@@ -1,5 +1,17 @@
 # DEVLOG
 
+## 2026-10-24 - pre29: invalid format specifier names the spec and the type
+
+The runtime's format-spec parser reported a bare `Invalid format specifier` for
+`format('x', ' +5')`, `format('x', '0+5')` and `format('x', '  .2s')`; CPython appends
+`'<spec>' for object of type '<type>'`. `ail2f_parse` now returns a dedicated invalid-spec
+status and `ail2f_format` builds the full 16-bit message for str, int, bool and float. Object
+types (None, list, tuple, dict, ...) take `object.__format__`'s TypeError before the spec is
+parsed, as CPython does. A single non-ASCII type character now gives CPython's escaped
+`Unknown format code '\x..'`. Added `AIL_CURRENT/test_ail_pre29.py` (5 programs, both builds)
+and registered it in `ail_check.MODULES`; DIFFERENCES row C?-job-pre29-10240900-1. The `z` flag,
+`!s`/`!r` with a sign, `format(1e300, '#')` and `10**30` remain as recorded.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
