@@ -123,6 +123,49 @@ def main():
 main()
 '''
 
+ROUND_REVIEW = r'''class FF:
+    def __index__(self):
+        return 2.0
+class I:
+    def __round__(self, n=1e400):
+        return repr(n)
+class J:
+    def __round__(self, n=-1e400):
+        return repr(n)
+class FI:
+    def __index__(self):
+        return 10**30
+class FN:
+    def __index__(self):
+        return -(10**30)
+class FM:
+    def __index__(self):
+        return 10**20 * 10**20
+class Unused:
+    def __round__(self, n=1e400):
+        return repr(n)
+
+
+def show(tag, fn):
+    try:
+        print(tag, fn())
+    except Exception as e:
+        print(tag, type(e).__name__, e)
+
+
+show('bad', lambda: round(2.5, FF()))
+show('inf', lambda: round(I()))
+show('infnone', lambda: round(I(), None))
+show('ninf', lambda: round(J()))
+show('ninfnone', lambda: round(J(), None))
+show('big', lambda: round(2.5, FI()))
+show('nbig', lambda: round(2.5, FN()))
+show('nbigneg', lambda: round(-2.5, FN()))
+show('mulbig', lambda: round(2.5, FM()))
+show('intbig', lambda: round(12345, FM()))
+print('ok')
+'''
+
 
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
@@ -167,6 +210,9 @@ class Pre136Tests(unittest.TestCase):
 
     def test_round_negdigits(self):
         self.check('round_negdigits', ROUND_NEGDIGITS)
+
+    def test_round_review(self):
+        self.check('round_review', ROUND_REVIEW)
 
 
 if __name__ == '__main__':

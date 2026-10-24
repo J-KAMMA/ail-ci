@@ -13,6 +13,13 @@ scale no longer overflows to infinity: `round(2.5, -10**6)` is `0.0` (and `-0.0`
 Added `AIL_CURRENT/test_ail_pre136.py` (both builds against CPython) and registered it in
 `ail_check.MODULES`.
 
+Review follow-up: `__index__` returning a non-int now raises CPython's `__index__ returned non-int
+(type T)` text; non-finite `__round__` defaults are emitted as `INFINITY`/`-INFINITY`/`NAN` instead
+of silently dropping the wrapper (so `n=1e400` gives `inf` and an unused class still builds); and an
+`__index__` result beyond int64 is saturated (only while `round()` calls `__index__`, via
+`ail__sat_index_mode`) so `round(2.5, FI())` with `FI.__index__` returning `10**30` stays `2.5`
+rather than ending in an int64 overflow. Added `ROUND_REVIEW` to `test_ail_pre136`.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

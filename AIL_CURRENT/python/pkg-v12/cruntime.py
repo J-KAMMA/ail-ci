@@ -14618,11 +14618,16 @@ static inline const char *ail__tname_c(ail_obj x) {
 static inline ail_st ail_deque_concat(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b);
 static inline ail_st ail_counter_binop(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, int op);
 static inline ail_st ail_counter_unary(ail_ctx *cx, ail_obj *out, ail_obj a, int neg);
+static int ail__sat_index_mode = 0;
+static inline int64_t ail__sat_border(int neg) { return neg ? INT64_MIN : INT64_MAX; }
 static inline ail_st ail_op_add(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
     if (ail__is_counter(a) && ail__is_counter(b)) return ail_counter_binop(cx, out, a, b, 0);
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t r;
-        if (__builtin_add_overflow(a.i, b.i, &r)) return ail_hit_limit(cx, "int_overflow", "integer overflow in +");
+        if (__builtin_add_overflow(a.i, b.i, &r)) {
+            if (ail__sat_index_mode) { *out = ail_box_int(ail__sat_border(a.i < 0)); return AIL_OK; }
+            return ail_hit_limit(cx, "int_overflow", "integer overflow in +");
+        }
         *out = ail_box_int(r); return AIL_OK;
     }
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) { *out = ail_box_float(cx, ail__as_double(a) + ail__as_double(b)); return AIL_OK; }
@@ -14692,7 +14697,10 @@ static inline ail_st ail_op_sub(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)
     if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag)) return ail_meth_set_difference(cx, out, a, b);
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t r;
-        if (__builtin_sub_overflow(a.i, b.i, &r)) return ail_hit_limit(cx, "int_overflow", "integer overflow in -");
+        if (__builtin_sub_overflow(a.i, b.i, &r)) {
+            if (ail__sat_index_mode) { *out = ail_box_int(ail__sat_border(a.i < 0)); return AIL_OK; }
+            return ail_hit_limit(cx, "int_overflow", "integer overflow in -");
+        }
         *out = ail_box_int(r); return AIL_OK;
     }
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) { *out = ail_box_float(cx, ail__as_double(a) - ail__as_double(b)); return AIL_OK; }
@@ -14729,7 +14737,10 @@ static inline ail_obj ail_deque_repeat(ail_ctx *cx, ail_obj a, int64_t k) {
 static inline ail_st ail_op_mul(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t r;
-        if (__builtin_mul_overflow(a.i, b.i, &r)) return ail_hit_limit(cx, "int_overflow", "integer overflow in *");
+        if (__builtin_mul_overflow(a.i, b.i, &r)) {
+            if (ail__sat_index_mode) { *out = ail_box_int(ail__sat_border((a.i < 0) != (b.i < 0))); return AIL_OK; }
+            return ail_hit_limit(cx, "int_overflow", "integer overflow in *");
+        }
         *out = ail_box_int(r); return AIL_OK;
     }
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) { *out = ail_box_float(cx, ail__as_double(a) * ail__as_double(b)); return AIL_OK; }
@@ -14771,7 +14782,10 @@ static inline ail_st ail_op_floordiv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_o
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t x = a.i, y = b.i;
         if (y == 0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "integer division or modulo by zero");
-        if (x == INT64_MIN && y == -1) return ail_hit_limit(cx, "int_overflow", "integer overflow in //");
+        if (x == INT64_MIN && y == -1) {
+            if (ail__sat_index_mode) { *out = ail_box_int(INT64_MAX); return AIL_OK; }
+            return ail_hit_limit(cx, "int_overflow", "integer overflow in //");
+        }
         int64_t q = x / y, r = x % y;
         if (r != 0 && ((r < 0) != (y < 0))) q -= 1;
         *out = ail_box_int(q); return AIL_OK;
@@ -14812,7 +14826,10 @@ static inline ail_st ail_op_pow(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)
         int64_t base = a.i, e = b.i, r = 1;
         for (int64_t k = 0; k < e; k++) {
             int64_t nr;
-            if (__builtin_mul_overflow(r, base, &nr)) return ail_hit_limit(cx, "int_overflow", "integer overflow in **");
+            if (__builtin_mul_overflow(r, base, &nr)) {
+                if (ail__sat_index_mode) { *out = ail_box_int(ail__sat_border(base < 0 && (e & 1))); return AIL_OK; }
+                return ail_hit_limit(cx, "int_overflow", "integer overflow in **");
+            }
             r = nr;
         }
         *out = ail_box_int(r); return AIL_OK;
@@ -14854,9 +14871,15 @@ static inline ail_st ail_op_lshift(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj
     if (!ail__is_intlike(a.tag) || !ail__is_intlike(b.tag)) return ail__bit_type_error(cx, "<<", a, b);
     if (b.i < 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "negative shift count");
     if (a.i == 0) { *out = ail_box_int(0); return AIL_OK; }
-    if (b.i >= 63) return ail_hit_limit(cx, "int_overflow", "integer overflow in <<");
+    if (b.i >= 63) {
+        if (ail__sat_index_mode) { *out = ail_box_int(ail__sat_border(a.i < 0)); return AIL_OK; }
+        return ail_hit_limit(cx, "int_overflow", "integer overflow in <<");
+    }
     int64_t r = (int64_t)((uint64_t)a.i << b.i);
-    if ((r >> b.i) != a.i) return ail_hit_limit(cx, "int_overflow", "integer overflow in <<");
+    if ((r >> b.i) != a.i) {
+        if (ail__sat_index_mode) { *out = ail_box_int(ail__sat_border(a.i < 0)); return AIL_OK; }
+        return ail_hit_limit(cx, "int_overflow", "integer overflow in <<");
+    }
     *out = ail_box_int(r); return AIL_OK;
 }
 static inline ail_st ail_op_rshift(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
@@ -14878,7 +14901,10 @@ static inline ail_st ail_op_pos(ail_ctx *cx, ail_obj *out, ail_obj a) {
 static inline ail_st ail_op_neg(ail_ctx *cx, ail_obj *out, ail_obj a) {
     if (ail__is_counter(a)) return ail_counter_unary(cx, out, a, 1);
     if (ail__is_intlike(a.tag)) {
-        if (a.i == INT64_MIN) return ail_hit_limit(cx, "int_overflow", "integer overflow in unary -");
+        if (a.i == INT64_MIN) {
+            if (ail__sat_index_mode) { *out = ail_box_int(INT64_MAX); return AIL_OK; }
+            return ail_hit_limit(cx, "int_overflow", "integer overflow in unary -");
+        }
         *out = ail_box_int(-a.i); return AIL_OK;
     }
     if (a.tag == AIL_T_FLOAT) { *out = ail_box_float(cx, -ail_float_val(a)); return AIL_OK; }

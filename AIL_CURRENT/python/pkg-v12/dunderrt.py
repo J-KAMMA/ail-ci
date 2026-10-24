@@ -485,9 +485,10 @@ def _edits():
               '        else {\n'
               '            if (nd.tag == AIL_T_INST) {\n'
               '                ail_d1_fn xf = ail_dun1(nd, AIL_D1_INDEX);\n'
-              '                if (xf) { ail_obj iv; ail_st xst = xf(cx, &iv, nd); if (xst != AIL_OK) return xst;\n'
+              '                if (xf) { ail_obj iv; int xsv = ail__sat_index_mode; ail__sat_index_mode = 1; ail_st xst = xf(cx, &iv, nd); ail__sat_index_mode = xsv;\n'
+              '                    if (xst != AIL_OK) return xst;\n'
               '                    if (iv.tag == AIL_T_INT || iv.tag == AIL_T_BOOL) n = iv.i;\n'
-              '                    else { char b2[96]; snprintf(b2, sizeof b2, "\'%s\' object cannot be interpreted as an integer", ail__dun_tname_s(iv)); return ail_raise_c(cx, AIL_B_TYPEERROR, b2); } }\n'
+              '                    else { char b2[120]; snprintf(b2, sizeof b2, "__index__ returned non-int (type %s)", ail__dun_tname_s(iv)); return ail_raise_c(cx, AIL_B_TYPEERROR, b2); } }\n'
               '                else { char b2[96]; snprintf(b2, sizeof b2, "\'%s\' object cannot be interpreted as an integer", ail__dun_tname_s(nd)); return ail_raise_c(cx, AIL_B_TYPEERROR, b2); }\n'
               '            } else { char b2[96]; snprintf(b2, sizeof b2, "\'%s\' object cannot be interpreted as an integer", ail__dun_tname_s(nd)); return ail_raise_c(cx, AIL_B_TYPEERROR, b2); }\n'
               '        }\n'))

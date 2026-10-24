@@ -8027,8 +8027,12 @@ class Compiler(boxclosure.ClosureMixin):
                 return None
             return 'ail_box_int(%dLL)' % v
         if isinstance(v, float):
-            if v != v or v in (float('inf'), float('-inf')):
-                return None
+            if v != v:
+                return 'ail_box_float(cx, NAN)'
+            if v == float('inf'):
+                return 'ail_box_float(cx, INFINITY)'
+            if v == float('-inf'):
+                return 'ail_box_float(cx, -INFINITY)'
             return 'ail_box_float(cx, %r)' % v
         if isinstance(v, str):
             if any(0xd800 <= ord(c) <= 0xdfff for c in v):
