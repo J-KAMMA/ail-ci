@@ -4340,7 +4340,8 @@ class Compiler(boxclosure.ClosureMixin):
     def expr_Name(self, node, ctx):
         if node.id in ('True', 'False'):
             return 'ail_box_bool(%d)' % (1 if node.id == 'True' else 0)
-        if node.id in self.classes:
+        if (node.id in self.classes and node.id not in ctx.slot_of and node.id not in ctx.ptr_names
+                and node.id not in ctx.clo_index):
             # A class name is unbound while its own body runs (`class C: x = C` is CPython's NameError).
             ctx.emit('if ((g_slots_arr[%d]).tag == AIL_T_UNBOUND) { st = ail_raise_c(cx, AIL_B_NAMEERROR, '
                      '"name \'%s\' is not defined"); goto %s; }' %
@@ -5191,24 +5192,33 @@ class Compiler(boxclosure.ClosureMixin):
         return t
 
     def _emit_comp_generators(self, generators, i, node, ctx, t, add_stmt_fn, declared, opened=None):
-        if i == len(generators):
-            add_stmt_fn(node, ctx, t)
-            return
-        gen = generators[i]
-        if gen.is_async:
-            raise Unsupported('an async for in a comprehension')
-        val = self._open_iter_loop(gen.iter, ctx, opened)
-        self._declare_comp_target(gen.target, val, ctx, declared)
-        for cond in gen.ifs:
-            cc = self.expr(cond, ctx)
-            ctx.emit('if (ail_obj_truthy(%s)) {' % cc)
-            ctx.indent += 1
-        self._emit_comp_generators(generators, i + 1, node, ctx, t, add_stmt_fn, declared)
-        for cond in gen.ifs:
+        # A comprehension target has its own Python scope. It gets an ordinary frame slot here
+        # (see _declare_comp_target), but a target that shadows a class name must not keep the
+        # class name local after the comprehension (`[C for C in ...]` does not hide class C).
+        restore = {n for n in self.classes if n not in ctx.slot_of} if i == 0 else None
+        try:
+            if i == len(generators):
+                add_stmt_fn(node, ctx, t)
+                return
+            gen = generators[i]
+            if gen.is_async:
+                raise Unsupported('an async for in a comprehension')
+            val = self._open_iter_loop(gen.iter, ctx, opened)
+            self._declare_comp_target(gen.target, val, ctx, declared)
+            for cond in gen.ifs:
+                cc = self.expr(cond, ctx)
+                ctx.emit('if (ail_obj_truthy(%s)) {' % cc)
+                ctx.indent += 1
+            self._emit_comp_generators(generators, i + 1, node, ctx, t, add_stmt_fn, declared)
+            for cond in gen.ifs:
+                ctx.indent -= 1
+                ctx.emit('}')
             ctx.indent -= 1
             ctx.emit('}')
-        ctx.indent -= 1
-        ctx.emit('}')
+        finally:
+            if restore:
+                for n in restore:
+                    ctx.slot_of.pop(n, None)
 
     def expr_ListComp(self, node, ctx):
         def add(n, c, t):
@@ -6293,7 +6303,8 @@ class Compiler(boxclosure.ClosureMixin):
             import safetyrt
             if name in safetyrt.PRIMS:
                 return self._call_safety_prim(name, args, kwargs, ctx)
-        if name in self.classes:
+        if (name in self.classes and name not in ctx.slot_of and name not in ctx.ptr_names
+                and name not in ctx.clo_index):
             return self._call_class(name, args, kwargs, ctx)
         if name in ctx.nested_funcs:
             return self._call_nested_function(name, args, kwargs, ctx)
@@ -7594,7 +7605,8 @@ class Compiler(boxclosure.ClosureMixin):
                                  kw_defaults=[], kwarg=None, defaults=[])
         body = None
         if isinstance(node, ast.Name):
-            if node.id in self.classes:
+            if (node.id in self.classes and node.id not in ctx.slot_of and node.id not in ctx.ptr_names
+                    and node.id not in ctx.clo_index):
                 body = ast.Call(func=node, args=args, keywords=[])
             elif node.id in _BUILTIN_NAMES and node.id not in self.module_names and node.id not in self.functions:
                 body = ast.Call(func=node, args=args, keywords=[])

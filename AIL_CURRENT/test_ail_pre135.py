@@ -2,7 +2,8 @@
 
 CPython evaluates a class body before binding the class name, so `class C: x = (lambda: C)()`
 raises NameError (the general path used to recurse in the compiler).  A lambda that only reads C
-later, after the class statement, still works.
+later, after the class statement, still works.  A parameter, local or comprehension target named C
+shadows the class instead of becoming the unbound self-reference.
 """
 import os
 import subprocess
@@ -47,6 +48,41 @@ f = C.x
 print(f() is C)
 """
 
+LAMBDA_SHADOW = """class C:
+    x = (lambda C: C)(5)
+print(C.x)
+"""
+
+FUNCTION_SHADOW = """def f(C):
+    return C
+
+class C:
+    pass
+print(f(5))
+"""
+
+LOCAL_SHADOW = """class C:
+    pass
+
+def f():
+    C = 9
+    return C
+print(f())
+"""
+
+COMP_SHADOW = """class C:
+    x = [C for C in range(3)]
+print(C.x)
+"""
+
+DICT_SHADOW = """class C:
+    pass
+d = {"f": lambda C: C}
+print(d["f"](4))
+"""
+
+SHADOW_OK = [LAMBDA_SHADOW, FUNCTION_SHADOW, LOCAL_SHADOW, COMP_SHADOW, DICT_SHADOW]
+
 FAIL = [SELF_NAME, LAMBDA_CALL, CLASS_CALL, THROUGH_FUNCTION, COLLECTION]
 
 
@@ -88,6 +124,18 @@ class Pre135(unittest.TestCase):
                     self.assertEqual(expected.returncode, 0, expected.stderr)
                     self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout),
                                      ran.stderr)
+
+    def test_shadowed_class_name_is_not_the_class(self):
+        for ir in (False, True):
+            for i, text in enumerate(SHADOW_OK):
+                with self.subTest(ir=ir, case=i):
+                    with tempfile.TemporaryDirectory() as directory:
+                        built, ran, expected = build_and_run(
+                            directory, text, 'shadow%d' % i + ('_ir' if ir else ''), ir)
+                        self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                        self.assertEqual(expected.returncode, 0, expected.stderr)
+                        self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout),
+                                         ran.stderr)
 
 
 if __name__ == '__main__':

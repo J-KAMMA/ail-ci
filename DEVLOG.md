@@ -1,5 +1,15 @@
 # DEVLOG
 
+## 2026-10-24 - pre135 review: a shadowed class name is not the class
+
+The class-body guard added above treated every occurrence of a class's name as the class itself,
+even when a lambda parameter, a function parameter or a local assignment bound that name first:
+`class C: x = (lambda C: C)(5)` compiled but raised `NameError` (CPython prints 5).  The guard now
+applies only when the class name is not a local of the current activation, and class calls take the
+same check.  Comprehension targets are restored to their enclosing scope after the comprehension
+so `class C: x = [C for C in range(3)]` matches CPython.  Added the shadowing cases to
+`AIL_CURRENT/test_ail_pre135.py`.
+
 ## 2026-10-24 - pre135: a class name is unbound inside its own class body
 
 The general path created every class object before the module body, so `class C: x = C` read the

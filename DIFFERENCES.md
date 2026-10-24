@@ -4,6 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre135-10250030-2 | class name shadowing | A local, parameter or comprehension target using a class's name shadows the class, as in CPython: `class C: x = (lambda C: C)(5)` prints 5, `def f(C): return C` works after `class C`, and `class C: x = [C for C in range(3)]` prints `[0, 1, 2]`. The class-body guard had treated any use of the name as the unbound class. The guard now fires only when the name is not local, and a comprehension target no longer hides the class afterwards. | fixed |
 | C?-job-pre135-10250030-1 | class body self-reference | CPython does not bind `C` until its class body finishes, so `class C: x = C` and `class C: x = (lambda: C)()` raise `NameError: name 'C' is not defined`; the general path read the pre-created class value (and the lambda-call form recursed in the compiler). The class slot is now unbound while its attributes run; both forms match CPython. | fixed |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
