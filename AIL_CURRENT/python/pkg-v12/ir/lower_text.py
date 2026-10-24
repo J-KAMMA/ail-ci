@@ -247,6 +247,11 @@ class TextLowering(object):
         zero = 1 if spec['zero'] else 0
         fill = spec.get('fill', ' ')
         align_char = spec['align']
+        if kind == P.STR and (spec.get('sign') or spec.get('alt') or spec.get('group')
+                              or align_char == '=' or spec['zero']
+                              or spec['type'] not in (None, 's')):
+            raise self.NotS0('a str format spec with a sign, #, grouping, = alignment, the 0 flag or a type '
+                             'other than s')
         if align_char is None:
             align_char = str_default_align if kind == P.STR else '>'
         align = 1 if align_char == '<' else (2 if align_char == '^' else 0)
@@ -262,7 +267,8 @@ class TextLowering(object):
         sv = self.expr(val_node)
         if width <= 0 and prec < 0:
             return sv
-        return self.rt('fmt_str', [sv], {'width': width, 'align': align, 'prec': prec})
+        return self.rt('fmt_str', [sv], {'width': width, 'align': align, 'prec': prec,
+                                         'fill': ord(fill)})
 
     def percent(self, node):
         """`"..." % args`: the declared subset of the legacy `_build_percent_value`."""

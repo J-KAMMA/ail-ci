@@ -2187,6 +2187,8 @@ class Lowering(TextLowering):
             return self.str_compare(op, a, b)
         if not (a.type.is_scalar and b.type.is_scalar):
             raise NotS0('comparison of %s and %s' % (a.type, b.type))
+        if {a.type, b.type} == {I.I64, I.F64}:
+            return self.b.value('cmp.' + pred, [a, b], I.I1)
         if I.F64 in (a.type, b.type):
             a, b = self.coerce(a, I.F64), self.coerce(b, I.F64)
         elif I.I64 in (a.type, b.type):
@@ -2236,10 +2238,6 @@ class Lowering(TextLowering):
 
     def _chain(self, prev, ops, comparators):
         nxt = self.expr(comparators[0])
-        if self.tracked and {prev.type, nxt.type} == {I.I64, I.F64}:
-            # the legacy path compares an int and a float exactly when a tagged cell is involved; plain C
-            # (and this lowering) converts the int to a double
-            raise NotS0('an int compared with a float in a function with int-or-float names')
         result = self.cmp(ops[0], prev, nxt)
         if len(ops) == 1:
             return result

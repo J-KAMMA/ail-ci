@@ -346,6 +346,13 @@ class Accumulate(Src):
         isnone = lambda n: n is None or (isinstance(n, ast.Constant) and n.value is None)
         self.func = None if isnone(got.get('func')) else got['func']
         self.initial = None if isnone(got.get('initial')) else got['initial']
+        if self.initial is not None:
+            initial_kind = st.expr_kind(self.initial)
+            element_kind = st.seq_elem_kind(got['iterable'])
+            if initial_kind is not None and element_kind is not None and initial_kind != element_kind:
+                refuse(call, 'itertools.accumulate: initial= has to have the same type as the iterable '
+                       'elements (%s, not %s); the accumulator is one typed value here'
+                       % (element_kind, initial_kind))
         self.acc, self.started, self.x = st.fresh('acc'), st.fresh('st'), st.fresh('x')
         self.st = st
         self.call = call
@@ -672,9 +679,11 @@ class Groupby(Src):
         self.st = st
         self.call = call
         self.i, self.j, self.k, self.t = (st.fresh(n) for n in ("gi", "gj", "gk", "gt"))
+        self.kj, self.cached, self.have = (st.fresh(n) for n in ("gkj", "gc", "gh"))
+        self.cache = st.element_immutable(self.seq)
 
     def setup(self, st):
-        return self.seq.setup(st, False) + [assign(self.i, const(0))]
+        return self.seq.setup(st, False) + [assign(self.i, const(0)), assign(self.have, const(0))]
 
     def key_of(self, element):
         if self.key is None:
@@ -687,17 +696,30 @@ class Groupby(Src):
     def step(self, st, out, exh):
         holder = self.seq.holder
         at = lambda index: ast.Subscript(value=_name(holder), slice=_name(index), ctx=ast.Load())
-        body = code('''
-            if @I >= len(@H):
-                EXH
-            @J = @I + 1
-        ''', exh, I=self.i, H=holder, J=self.j)
-        body.insert(1, assign(self.k, self.key_of(at(self.i))))
+        body = [ast.If(
+            test=ast.Compare(left=_name(self.i), ops=[ast.GtE()], comparators=[_call(_name('len'), _name(holder))]),
+            body=[copy.deepcopy(s) for s in exh], orelse=[])]
+        # The key of the element that starts a group was already computed by the look-ahead
+        # that ended the previous group; reuse it instead of calling the key twice (CPython
+        # calls it exactly once per element).
+        body.append(ast.If(
+            test=_name(self.have) if self.cache else const(False),
+            body=[assign(self.k, _name(self.cached)), assign(self.have, const(0))],
+            orelse=[assign(self.k, self.key_of(at(self.i)))]))
+        body.append(assign(self.j, ast.BinOp(left=_name(self.i), op=ast.Add(), right=const(1))))
         body.append(ast.While(
-            test=ast.BoolOp(op=ast.And(), values=[
-                ast.Compare(left=_name(self.j), ops=[ast.Lt()], comparators=[_call(_name('len'), _name(holder))]),
-                ast.Compare(left=self.key_of(at(self.j)), ops=[ast.Eq()], comparators=[_name(self.k)])]),
-            body=code('@J += 1', J=self.j), orelse=[]))
+            test=ast.Compare(left=_name(self.j), ops=[ast.Lt()],
+                             comparators=[_call(_name('len'), _name(holder))]),
+            body=[
+                assign(self.kj, self.key_of(at(self.j))),
+                ast.If(
+                    test=ast.Compare(left=_name(self.kj), ops=[ast.NotEq()], comparators=[_name(self.k)]),
+                    body=([assign(self.cached, _name(self.kj)), assign(self.have, const(1))]
+                          if self.cache else [assign(self.have, const(0))]) + [ast.Break()],
+                    orelse=[]),
+                ast.AugAssign(target=_name(self.j, True), op=ast.Add(), value=const(1)),
+            ],
+            orelse=[]))
         body.append(assign(out[0], _name(self.k)))
         body += code('@O = [@H[@T] for @T in range(@I, @J)]', O=out[1], H=holder, T=self.t, I=self.i, J=self.j)
         body.append(assign(self.i, _name(self.j)))
@@ -821,6 +843,484 @@ class Streams:
         if isinstance(r, ast.Constant) and r.value is None:
             r = None
         return PoolStream(self, call, name, got['iterable'], r)
+
+    _SCALAR_TYPES = ('int', 'float', 'str', 'bool', 'bytes')
+    _NUMERIC_TYPES = ('int', 'float')
+
+    def _ann_node(self, ann):
+        if isinstance(ann, ast.Constant) and isinstance(ann.value, str):
+            try:
+                return ast.parse(ann.value, mode='eval').body
+            except SyntaxError:
+                return ann
+        return ann
+
+    def _ann_scalar(self, ann):
+        ann = self._ann_node(ann)
+        if isinstance(ann, ast.Name):
+            name = ann.id.lower()
+            return name if name in self._SCALAR_TYPES else None
+        if isinstance(ann, ast.Attribute):
+            name = ann.attr.lower()
+            return name if name in self._SCALAR_TYPES else None
+        return None
+
+    def _ann_container(self, ann):
+        ann = self._ann_node(ann)
+        head = ann.value if isinstance(ann, ast.Subscript) else ann
+        name = head.id.lower() if isinstance(head, ast.Name) else (
+            head.attr.lower() if isinstance(head, ast.Attribute) else None)
+        if name == 'str':
+            return ('str',)
+        if name == 'bytes':
+            return ('bytes',)
+        if name in ('list', 'set', 'frozenset', 'tuple'):
+            if isinstance(ann, ast.Subscript):
+                inner = ann.slice
+                if isinstance(inner, ast.Tuple):
+                    members = self._same_kind([self._ann_scalar(el) for el in inner.elts])
+                    return (name, members)
+                return (name, self._ann_scalar(inner))
+            return (name, None)
+        if name in ('dict', 'counter', 'defaultdict'):
+            if isinstance(ann, ast.Subscript) and isinstance(ann.slice, ast.Tuple) and len(ann.slice.elts) == 2:
+                return ('dict', self._ann_scalar(ann.slice.elts[0]), self._ann_scalar(ann.slice.elts[1]))
+            return ('dict', None, None)
+        return None
+
+    def _same_kind(self, kinds):
+        if not kinds:
+            return None
+        first = kinds[0]
+        if first is None:
+            return None
+        return first if all(kind == first for kind in kinds) else None
+
+    def _local_nodes(self, root):
+        stack = list(root.body) if isinstance(root, (ast.FunctionDef, ast.AsyncFunctionDef)) else list(root)
+        while stack:
+            node = stack.pop()
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            yield node
+            stack.extend(ast.iter_child_nodes(node))
+
+    def _name_sources(self, name):
+        fn = getattr(self.lib, 'cur_fn', None)
+        out = []
+        if fn is not None:
+            for arg in (*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs):
+                if arg.arg == name:
+                    out.append(('ann', arg.annotation))
+            nodes = self._local_nodes(fn)
+        else:
+            nodes = []
+            for top in self.lib.tree.body:
+                if isinstance(top, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    continue
+                nodes.extend(self._local_nodes([top]))
+        for node in nodes:
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == name:
+                out.append(('ann', node.annotation))
+            elif isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+                out.append(('val', node.value))
+            elif isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name) and node.target.id == name:
+                out.append(('val', node.value))
+            elif isinstance(node, (ast.AugAssign, ast.For, ast.AsyncFor)):
+                targets = node.target if isinstance(node, (ast.AugAssign,)) else node.target
+                if any(isinstance(t, ast.Name) and t.id == name for t in ast.walk(targets)):
+                    out.append(('bad', None))
+            elif isinstance(node, (ast.With, ast.AsyncWith)) and any(
+                    item.optional_vars is not None and any(
+                        isinstance(t, ast.Name) and t.id == name for t in ast.walk(item.optional_vars))
+                    for item in node.items):
+                out.append(('bad', None))
+        return out
+
+    def _kind_of_name(self, name, seen):
+        if name in seen:
+            return None
+        seen = seen | {name}
+        sources = self._name_sources(name)
+        if not sources:
+            return None
+        kinds = []
+        for source, value in sources:
+            if source == 'bad':
+                return None
+            kind = self._ann_scalar(value) if source == 'ann' else self._kind_of_expr(value, seen)
+            if kind is None:
+                return None
+            kinds.append(kind)
+        return self._same_kind(kinds)
+
+    def _seq_elem_of_name(self, name, seen):
+        if name in seen:
+            return None
+        seen = seen | {name}
+        sources = self._name_sources(name)
+        if not sources:
+            return None
+        kinds = []
+        for source, value in sources:
+            if source == 'bad':
+                return None
+            if source == 'ann':
+                info = self._ann_container(value)
+            else:
+                info = self._container_of_expr(value, seen)
+            if info is None:
+                return None
+            if info[0] == 'str':
+                kind = 'str'
+            elif info[0] == 'bytes':
+                kind = 'int'
+            elif info[0] == 'dict':
+                kind = info[1]
+            else:
+                kind = info[1] if len(info) > 1 else None
+            if kind is None:
+                return None
+            kinds.append(kind)
+        return self._same_kind(kinds)
+
+    def _container_of_name(self, name, seen):
+        if name in seen:
+            return None
+        seen = seen | {name}
+        sources = self._name_sources(name)
+        if not sources:
+            return None
+        infos = []
+        for source, value in sources:
+            if source == 'bad':
+                return None
+            info = self._ann_container(value) if source == 'ann' else self._container_of_expr(value, seen)
+            if info is None:
+                return None
+            infos.append(info)
+        if not infos:
+            return None
+        first = infos[0]
+        return first if all(info == first for info in infos) else None
+
+    def _container_of_expr(self, e, seen):
+        if isinstance(e, ast.Name):
+            return self._container_of_name(e.id, seen)
+        if isinstance(e, ast.List):
+            return ('list', self._same_kind([self._kind_of_expr(el, seen) for el in e.elts]))
+        if isinstance(e, ast.Set):
+            return ('set', self._same_kind([self._kind_of_expr(el, seen) for el in e.elts]))
+        if isinstance(e, ast.Dict):
+            return ('dict', self._same_kind([self._kind_of_expr(k, seen) for k in e.keys if k is not None]),
+                    self._same_kind([self._kind_of_expr(v, seen) for v in e.values]))
+        if isinstance(e, ast.Constant):
+            if isinstance(e.value, str):
+                return ('str',)
+            if isinstance(e.value, (bytes, bytearray)):
+                return ('bytes',)
+            return None
+        if isinstance(e, ast.JoinedStr):
+            return ('str',)
+        if isinstance(e, ast.Attribute):
+            return self._attribute_container(e, seen)
+        if isinstance(e, ast.Subscript) and isinstance(e.slice, ast.Slice):
+            return self._container_of_expr(e.value, seen)
+        if isinstance(e, ast.BinOp) and isinstance(e.op, ast.Add):
+            left = self._container_of_expr(e.left, seen)
+            right = self._container_of_expr(e.right, seen)
+            if left is not None and left == right:
+                return left
+            if left is not None and right is not None and left[0] == right[0] == 'list':
+                return ('list', self._same_kind([left[1], right[1]]))
+            return None
+        if isinstance(e, ast.IfExp):
+            left = self._container_of_expr(e.body, seen)
+            right = self._container_of_expr(e.orelse, seen)
+            return left if left is not None and left == right else None
+        if isinstance(e, ast.Call):
+            if isinstance(e.func, ast.Name):
+                name = e.func.id
+                if name in ('list', 'sorted', 'reversed') and e.args and not e.keywords:
+                    return ('list', self._seq_elem_of_expr(e.args[0], seen))
+                if name == 'str':
+                    return ('str',)
+                if name == 'range':
+                    return ('list', 'int')
+                if name == 'dict':
+                    return ('dict', None, None)
+            if isinstance(e.func, ast.Attribute):
+                if e.func.attr in ('split', 'rsplit', 'splitlines'):
+                    return ('list', 'str')
+                if e.func.attr in ('encode',):
+                    return ('bytes',)
+                if e.func.attr in ('keys', 'values', 'items'):
+                    base = self._container_of_expr(e.func.value, seen)
+                    if base is not None and base[0] == 'dict':
+                        if e.func.attr == 'keys':
+                            return ('list', base[1])
+                        if e.func.attr == 'values':
+                            return ('list', base[2])
+                    return None
+        return None
+
+    def _seq_elem_of_expr(self, e, seen):
+        if isinstance(e, ast.Name):
+            return self._seq_elem_of_name(e.id, seen)
+        if isinstance(e, ast.List):
+            return self._same_kind([self._kind_of_expr(el, seen) for el in e.elts])
+        if isinstance(e, ast.Constant):
+            if isinstance(e.value, str):
+                return 'str'
+            if isinstance(e.value, (bytes, bytearray)):
+                return 'int'
+            return None
+        if isinstance(e, ast.JoinedStr):
+            return 'str'
+        if isinstance(e, ast.Attribute):
+            info = self._attribute_container(e, seen)
+            if info is None:
+                return None
+            if info[0] == 'str':
+                return 'str'
+            if info[0] == 'bytes':
+                return 'int'
+            if info[0] == 'dict':
+                return info[1]
+            return info[1] if len(info) > 1 else None
+        if isinstance(e, ast.Subscript):
+            if isinstance(e.slice, ast.Slice):
+                return self._seq_elem_of_expr(e.value, seen)
+            if isinstance(e.value, ast.Dict) and isinstance(e.slice, ast.Constant):
+                for key, value in zip(e.value.keys, e.value.values):
+                    if isinstance(key, ast.Constant) and key.value == e.slice.value:
+                        return self._seq_elem_of_expr(value, seen)
+            info = self._container_of_expr(e.value, seen)
+            if info is None:
+                return None
+            if info[0] == 'dict':
+                return info[2]
+            if info[0] in ('list', 'set', 'tuple'):
+                return info[1] if len(info) > 1 else None
+            return None
+        if isinstance(e, ast.BinOp) and isinstance(e.op, ast.Add):
+            left = self._seq_elem_of_expr(e.left, seen)
+            right = self._seq_elem_of_expr(e.right, seen)
+            return self._same_kind([left, right])
+        if isinstance(e, ast.IfExp):
+            left = self._seq_elem_of_expr(e.body, seen)
+            right = self._seq_elem_of_expr(e.orelse, seen)
+            return self._same_kind([left, right])
+        if isinstance(e, ast.Call):
+            if isinstance(e.func, ast.Name):
+                name = e.func.id
+                if name in ('list', 'sorted', 'reversed') and e.args and not e.keywords:
+                    return self._seq_elem_of_expr(e.args[0], seen)
+                if name == 'range':
+                    return 'int'
+                if name == 'str':
+                    return 'str'
+                if name in ('enumerate', 'zip'):
+                    return None
+            if isinstance(e.func, ast.Attribute):
+                if e.func.attr in ('split', 'rsplit', 'splitlines'):
+                    return 'str'
+        return None
+
+    def _attribute_sources(self, attr):
+        fn = getattr(self.lib, 'cur_fn', None)
+        if fn is not None:
+            nodes = list(self._local_nodes(fn))
+        else:
+            nodes = []
+            for top in self.lib.tree.body:
+                nodes.extend(self._local_nodes([top]))
+        out = []
+        for node in nodes:
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Attribute) and target.attr == attr:
+                        out.append(('val', node.value))
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Attribute) and node.target.attr == attr:
+                out.append(('ann', node.annotation))
+        if not out:
+            for cls in (n for n in ast.walk(self.lib.tree) if isinstance(n, ast.ClassDef)):
+                for node in cls.body:
+                    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == attr:
+                        out.append(('ann', node.annotation))
+                    elif isinstance(node, ast.Assign) and any(
+                            isinstance(t, ast.Name) and t.id == attr for t in node.targets):
+                        out.append(('val', node.value))
+        return out
+
+    def _attribute_kind(self, node, seen):
+        key = ('attr', node.attr)
+        if key in seen:
+            return None
+        seen = seen | {key}
+        sources = self._attribute_sources(node.attr)
+        if not sources:
+            return None
+        kinds = []
+        for source, value in sources:
+            kind = self._ann_scalar(value) if source == 'ann' else self._kind_of_expr(value, seen)
+            if kind is None:
+                return None
+            kinds.append(kind)
+        return self._same_kind(kinds)
+
+    def _attribute_container(self, node, seen):
+        key = ('attr', node.attr)
+        if key in seen:
+            return None
+        seen = seen | {key}
+        sources = self._attribute_sources(node.attr)
+        if not sources:
+            return None
+        infos = []
+        for source, value in sources:
+            info = self._ann_container(value) if source == 'ann' else self._container_of_expr(value, seen)
+            if info is None:
+                return None
+            infos.append(info)
+        if not infos:
+            return None
+        return infos[0] if all(info == infos[0] for info in infos) else None
+
+    def _function_return_kind(self, name, seen):
+        if name in seen:
+            return None
+        seen = seen | {name}
+        for node in ast.walk(self.lib.tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+                if node.returns is not None:
+                    return self._ann_scalar(node.returns)
+                kinds = []
+                for inner in node.body:
+                    for each in ast.walk(inner):
+                        if isinstance(each, ast.Return) and each.value is not None:
+                            kind = self._kind_of_expr(each.value, seen)
+                            if kind is None:
+                                return None
+                            kinds.append(kind)
+                return self._same_kind(kinds)
+        return None
+
+    def _kind_of_expr(self, e, seen=None):
+        seen = set() if seen is None else seen
+        if isinstance(e, ast.Constant):
+            value = e.value
+            if isinstance(value, bool):
+                return 'bool'
+            if isinstance(value, int):
+                return 'int'
+            if isinstance(value, float):
+                return 'float'
+            if isinstance(value, str):
+                return 'str'
+            if isinstance(value, (bytes, bytearray)):
+                return 'bytes'
+            return None
+        if isinstance(e, ast.Name):
+            return self._kind_of_name(e.id, seen)
+        if isinstance(e, ast.NamedExpr):
+            return self._kind_of_expr(e.value, seen)
+        if isinstance(e, ast.UnaryOp):
+            if isinstance(e.op, ast.Not):
+                return 'bool'
+            return self._kind_of_expr(e.operand, seen)
+        if isinstance(e, ast.BoolOp):
+            return 'bool'
+        if isinstance(e, ast.Compare):
+            return 'bool'
+        if isinstance(e, ast.IfExp):
+            return self._same_kind([self._kind_of_expr(e.body, seen), self._kind_of_expr(e.orelse, seen)])
+        if isinstance(e, ast.BinOp):
+            left = self._kind_of_expr(e.left, seen)
+            right = self._kind_of_expr(e.right, seen)
+            if isinstance(e.op, ast.Add) and left == right == 'str':
+                return 'str'
+            if isinstance(e.op, ast.Mod) and left == 'str':
+                return 'str'
+            if isinstance(e.op, ast.Mult) and 'str' in (left, right) and {left, right} <= {'str', 'int'}:
+                return 'str'
+            if left in self._NUMERIC_TYPES and right in self._NUMERIC_TYPES:
+                if isinstance(e.op, ast.Div):
+                    return 'float'
+                return 'float' if 'float' in (left, right) else 'int'
+            return None
+        if isinstance(e, ast.Subscript):
+            if isinstance(e.slice, ast.Slice):
+                return None
+            if isinstance(e.value, ast.Dict) and isinstance(e.slice, ast.Constant):
+                for key, value in zip(e.value.keys, e.value.values):
+                    if isinstance(key, ast.Constant) and key.value == e.slice.value:
+                        return self._kind_of_expr(value, seen)
+            info = self._container_of_expr(e.value, seen)
+            if info is None:
+                return None
+            if info[0] == 'dict':
+                return info[2]
+            if info[0] in ('list', 'set', 'tuple'):
+                return info[1] if len(info) > 1 else None
+            if info[0] == 'str':
+                return 'str'
+            return None
+        if isinstance(e, ast.Attribute):
+            return self._attribute_kind(e, seen)
+        if isinstance(e, ast.Call):
+            if isinstance(e.func, ast.Name):
+                name = e.func.id
+                if name in ('len', 'int', 'ord', 'hash'):
+                    return 'int'
+                if name == 'round':
+                    return 'int' if len(e.args) == 1 else ('float' if e.args else None)
+                if name == 'float':
+                    return 'float'
+                if name == 'abs' and e.args:
+                    return self._kind_of_expr(e.args[0], seen)
+                if name in ('bool', 'isinstance', 'callable', 'any', 'all'):
+                    return 'bool'
+                if name in ('str', 'repr', 'chr', 'input', 'format', 'ascii', 'hex', 'oct', 'bin'):
+                    return 'str'
+                if name == 'bytes':
+                    return 'bytes'
+                if name in ('min', 'max', 'sum') and e.args:
+                    if len(e.args) == 1:
+                        return self._seq_elem_of_expr(e.args[0], seen)
+                    return self._same_kind([self._kind_of_expr(arg, seen) for arg in e.args])
+                return self._function_return_kind(name, seen)
+            if isinstance(e.func, ast.Attribute):
+                attr = e.func.attr
+                if attr in ('lower', 'upper', 'strip', 'lstrip', 'rstrip', 'title', 'capitalize',
+                            'swapcase', 'replace', 'zfill', 'join'):
+                    return 'str'
+                if attr in ('find', 'rfind', 'index', 'count'):
+                    return 'int'
+                if attr in ('startswith', 'endswith', 'isdigit', 'isalpha', 'isalnum', 'isspace',
+                            'isupper', 'islower'):
+                    return 'bool'
+                if attr == 'pop':
+                    info = self._container_of_expr(e.func.value, seen)
+                    if info is not None and info[0] == 'dict':
+                        return info[2]
+                    if info is not None and info[0] in ('list', 'set', 'tuple'):
+                        return info[1] if len(info) > 1 else None
+                if attr == 'get' and e.args:
+                    info = self._container_of_expr(e.func.value, seen)
+                    if info is not None and info[0] == 'dict':
+                        return info[2]
+            return None
+        return None
+
+    def expr_kind(self, expr):
+        return self._kind_of_expr(expr)
+
+    def seq_elem_kind(self, expr):
+        return self._seq_elem_of_expr(expr, set())
+
+    def element_immutable(self, seq):
+        return self.seq_elem_kind(seq.expr) in self._SCALAR_TYPES
 
     def pure_key(self, key):
         for each in ast.walk(key):

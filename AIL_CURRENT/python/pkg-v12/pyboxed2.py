@@ -7880,17 +7880,20 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.emit('%s = ail_box_bool(%sail_str_any_outside(%s, %dLL, %dLL));'
                          % (res, neg, v, lo, hi))
                 return res
-            # fused: still evaluates EVERY element in the same order (the existing path
-            # materialises the genexpr eagerly before scanning), so side effects and
-            # exception positions are identical -- only the LIST object, the per-element
-            # append, the ITER object and the second scan are skipped.
+            # fused: short-circuits at the first deciding element, like CPython's any()/all()
+            # over a generator (the materialising list path cannot, so it must not be used).
+            # The two -> bool is still computed in evaluation order; the `goto` leaves every
+            # enclosing comprehension loop, so later elements (and their side effects) do not run.
+            done = ctx.new_label('any' if name == 'any' else 'all')
+
             def add(n, c, _t):
                 v = self.expr(n.elt, c)
                 if name == 'any':
-                    c.emit('if (ail_obj_truthy(%s)) %s = ail_box_bool(1);' % (v, res))
+                    c.emit('if (ail_obj_truthy(%s)) { %s = ail_box_bool(1); goto %s; }' % (v, res, done))
                 else:
-                    c.emit('if (!ail_obj_truthy(%s)) %s = ail_box_bool(0);' % (v, res))
+                    c.emit('if (!ail_obj_truthy(%s)) { %s = ail_box_bool(0); goto %s; }' % (v, res, done))
             self._emit_comp_generators(arg.generators, 0, arg, ctx, res, add, set())
+            ctx.emit('%s: ;' % done)
             return res
         src = self._resolve_iter_src(arg, ctx)
         it = ctx.tmp(); val = ctx.tmp()
@@ -10070,9 +10073,16 @@ class Compiler(boxclosure.ClosureMixin):
         if node.msg is not None:
             msg = self.expr(node.msg, ctx)
             cname = self._inst_class(node.msg, ctx)
-            msg = self._to_str_slot(msg, cname, ctx)
-            ctx.emit('st = ail_raise(cx, cx->builtin_cls[AIL_B_ASSERTIONERROR], %s); goto %s;' %
-                    (msg, ctx.cur_err_target()))
+            text = self._to_str_slot(msg, cname, ctx)
+            # CPython raises AssertionError(msg): the argument stays an object (e.args is
+            # (msg,), and repr(e) shows its repr), while str(e) is str(msg). Keeping the
+            # object here makes tuple/list/dict messages match too, where the old path
+            # replaced the argument with its string form.
+            args = ctx.new_cvar('aa')
+            ctx.emit('ail_obj %s[1] = { %s };' % (args, msg))
+            self.rt_needs.add('exc')
+            ctx.emit('st = ail2x_raise_builtin(cx, cx->builtin_cls[AIL_B_ASSERTIONERROR], %s, %s, 1); goto %s;' %
+                    (text, args, ctx.cur_err_target()))
         else:
             ctx.emit('st = ail_raise_c(cx, AIL_B_ASSERTIONERROR, ""); goto %s;' %
                     ctx.cur_err_target())

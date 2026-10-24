@@ -10574,14 +10574,14 @@ static inline ail_obj ail_str_join_obj(ail_str sep, ail_obj lst) {
    this subset (',' thousands separators, 'x'/'o'/'b'/'e'/'%' types, nested replacement
    fields) is OUT -- see the file-level note at the bottom.
    =================================================================================== */
-typedef struct { char fill; char align; int width; int prec; int has_prec; char type; } ail_fmtspec;
+typedef struct { int fill; char align; int width; int prec; int has_prec; char type; } ail_fmtspec;
 static inline ail_fmtspec ail__parse_fmtspec(ail_str spec) {
     ail_fmtspec f; f.fill = ' '; f.align = 0; f.width = 0; f.prec = -1; f.has_prec = 0; f.type = 0;
     int64_t i = 0, n = spec.n;
-    char c0 = i < n ? (char)ail_chr(spec, i) : 0;
-    char c1 = i + 1 < n ? (char)ail_chr(spec, i + 1) : 0;
-    if (n >= 2 && (c1 == '<' || c1 == '>' || c1 == '^')) { f.fill = c0; f.align = c1; i += 2; }
-    else if (n >= 1 && (c0 == '<' || c0 == '>' || c0 == '^')) { f.align = c0; i += 1; }
+    int c0 = i < n ? (int)ail_chr(spec, i) : 0;
+    int c1 = i + 1 < n ? (int)ail_chr(spec, i + 1) : 0;
+    if (n >= 2 && (c1 == '<' || c1 == '>' || c1 == '^')) { f.fill = c0; f.align = (char)c1; i += 2; }
+    else if (n >= 1 && (c0 == '<' || c0 == '>' || c0 == '^')) { f.align = (char)c0; i += 1; }
     if (i < n && (ail_chr(spec, i) == '+' || ail_chr(spec, i) == '-' || ail_chr(spec, i) == ' ')) i++;
     if (i < n && ail_chr(spec, i) == '0') { if (!f.align) { f.align = '='; f.fill = '0'; } i++; }
     while (i < n && ail_chr(spec, i) >= '0' && ail_chr(spec, i) <= '9') { f.width = f.width * 10 + (int)(ail_chr(spec, i) - '0'); i++; }
@@ -10599,19 +10599,19 @@ static inline ail_str ail__pad(const char *content, int64_t clen, ail_fmtspec f,
     int64_t o = 0;
     if (align == '=' && numeric && clen > 0 && (content[0] == '-' || content[0] == '+')) {
         q[o++] = content[0];
-        for (int64_t k = 0; k < pad; k++) q[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < pad; k++) q[o++] = (uint16_t)f.fill;
         for (int64_t k = 1; k < clen; k++) q[o++] = (unsigned char)content[k];
     } else if (align == '>' || align == '=') {
-        for (int64_t k = 0; k < pad; k++) q[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < pad; k++) q[o++] = (uint16_t)f.fill;
         for (int64_t k = 0; k < clen; k++) q[o++] = (unsigned char)content[k];
     } else if (align == '^') {
         int64_t lp = pad / 2, rp = pad - lp;
-        for (int64_t k = 0; k < lp; k++) q[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < lp; k++) q[o++] = (uint16_t)f.fill;
         for (int64_t k = 0; k < clen; k++) q[o++] = (unsigned char)content[k];
-        for (int64_t k = 0; k < rp; k++) q[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < rp; k++) q[o++] = (uint16_t)f.fill;
     } else {
         for (int64_t k = 0; k < clen; k++) q[o++] = (unsigned char)content[k];
-        for (int64_t k = 0; k < pad; k++) q[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < pad; k++) q[o++] = (uint16_t)f.fill;
     }
     ail_str r; r.bytes = 0; r.p = q;  r.n = o; return r;
 }
@@ -15020,8 +15020,7 @@ static inline ail_st ail__vec_merge_sort(ail_ctx *cx, ail_obj *p, ail_obj *keys,
    =================================================================================== */
 static inline ail_st ail_list_sort(ail_ctx *cx, ail_obj lst, ail_obj key_fn_or_none, int reverse) {
     ail_vecobj *v = (ail_vecobj *)lst.o;
-    if (v->n < 2) return AIL_OK;
-    if (reverse) for (int64_t i = 0, j = v->n - 1; i < j; i++, j--) { ail_obj t = v->p[i]; v->p[i] = v->p[j]; v->p[j] = t; }
+    if (v->n == 0) return AIL_OK;
     /* the keys a key function made exist only in this array, and a key function or a user __lt__
        may collect: the array (zeroed, so the unfilled tail reads as unbound) is a frame */
     int64_t n = v->n;
@@ -15031,11 +15030,19 @@ static inline ail_st ail_list_sort(ail_ctx *cx, ail_obj lst, ail_obj key_fn_or_n
     AIL_ROOT1(cx, frl, lst); /* the list itself may be fresh (nlargest's, statistics' materialized copy) */
     AIL_ROOT_N(cx, fr, keys, (int32_t)(n < INT32_MAX ? n : INT32_MAX));
     ail_st st = AIL_OK;
+    /* CPython calls the key on the input in its ORIGINAL order even for reverse=True; it then
+       reverses elements and keys together, stable-sorts ascending and reverses the elements
+       back.  Reversing before the key calls used to expose the reversed order to a key with
+       side effects (and to its exception's position). */
     if (key_fn_or_none.tag == AIL_T_FUNC) {
         ail_funcobj *f = (ail_funcobj *)key_fn_or_none.o;
         for (int64_t i = 0; i < n && st == AIL_OK; i++) st = f->fn(cx, &keys[i], v->p[i], f->cells);
     } else {
         for (int64_t i = 0; i < n; i++) keys[i] = v->p[i];
+    }
+    if (reverse) for (int64_t i = 0, j = n - 1; i < j; i++, j--) {
+        ail_obj t = v->p[i]; v->p[i] = v->p[j]; v->p[j] = t;
+        t = keys[i]; keys[i] = keys[j]; keys[j] = t;
     }
     if (st == AIL_OK) st = ail__vec_merge_sort(cx, v->p, keys, tmp, ktmp, 0, n);
     AIL_FRAME_LEAVE(cx, fr);
@@ -16292,14 +16299,14 @@ static inline ail_obj ail_to_bool(ail_obj x) { return ail_box_bool(ail_obj_truth
    not an uncatchable ail_die -- more consistent with this file's own AIL_LIMIT contract
    than v1's choice, and documented as a deliberate improvement in API.md.
    =================================================================================== */
-typedef struct { char fill; char align; int width; int prec; int has_prec; char type; char sign; char group; } ail_fmtspec;
+typedef struct { int fill; char align; int width; int prec; int has_prec; char type; char sign; char group; } ail_fmtspec;
 static inline ail_fmtspec ail__parse_fmtspec(ail_str spec) {
     ail_fmtspec f; f.fill = ' '; f.align = 0; f.width = 0; f.prec = -1; f.has_prec = 0; f.type = 0; f.sign = 0; f.group = 0;
     int64_t i = 0, n = spec.n;
-    char c0 = i < n ? (char)ail_chr(spec, i) : 0;
-    char c1 = i + 1 < n ? (char)ail_chr(spec, i + 1) : 0;
-    if (n >= 2 && (c1 == '<' || c1 == '>' || c1 == '^')) { f.fill = c0; f.align = c1; i += 2; }
-    else if (n >= 1 && (c0 == '<' || c0 == '>' || c0 == '^')) { f.align = c0; i += 1; }
+    int c0 = i < n ? (int)ail_chr(spec, i) : 0;
+    int c1 = i + 1 < n ? (int)ail_chr(spec, i + 1) : 0;
+    if (n >= 2 && (c1 == '<' || c1 == '>' || c1 == '^')) { f.fill = c0; f.align = (char)c1; i += 2; }
+    else if (n >= 1 && (c0 == '<' || c0 == '>' || c0 == '^')) { f.align = (char)c0; i += 1; }
     if (i < n && (ail_chr(spec, i) == '+' || ail_chr(spec, i) == '-' || ail_chr(spec, i) == ' ')) { if (ail_chr(spec, i) != '-') f.sign = (char)ail_chr(spec, i); i++; }
     if (i < n && ail_chr(spec, i) == '0') { if (!f.align) { f.align = '='; f.fill = '0'; } i++; }
     while (i < n && ail_chr(spec, i) >= '0' && ail_chr(spec, i) <= '9') { f.width = f.width * 10 + (int)(ail_chr(spec, i) - '0'); i++; }
@@ -16315,19 +16322,19 @@ static inline ail_obj ail__pad(ail_ctx *cx, const char *content, int64_t clen, a
     int64_t o = 0;
     if (align == '=' && numeric && clen > 0 && (content[0] == '-' || content[0] == '+')) {
         bu.buf[o++] = content[0];
-        for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (uint16_t)f.fill;
         for (int64_t k = 1; k < clen; k++) bu.buf[o++] = (unsigned char)content[k];
     } else if (align == '>' || align == '=') {
-        for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (uint16_t)f.fill;
         for (int64_t k = 0; k < clen; k++) bu.buf[o++] = (unsigned char)content[k];
     } else if (align == '^') {
         int64_t lp = pad / 2, rp = pad - lp;
-        for (int64_t k = 0; k < lp; k++) bu.buf[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < lp; k++) bu.buf[o++] = (uint16_t)f.fill;
         for (int64_t k = 0; k < clen; k++) bu.buf[o++] = (unsigned char)content[k];
-        for (int64_t k = 0; k < rp; k++) bu.buf[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < rp; k++) bu.buf[o++] = (uint16_t)f.fill;
     } else {
         for (int64_t k = 0; k < clen; k++) bu.buf[o++] = (unsigned char)content[k];
-        for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (uint16_t)f.fill;
     }
     return ail_str_buf_done(bu, o);
 }
@@ -16393,9 +16400,9 @@ static inline ail_st ail_obj_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_ob
         AIL_FRAME_LEAVE(cx, fr);
         cs = ail_view_to_str(content); if (f.has_prec && f.prec >= 0 && f.prec < cs.n) cs.n = f.prec;
         int64_t o = 0;
-        for (int64_t k = 0; k < lp; k++) bu.buf[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < lp; k++) bu.buf[o++] = (uint16_t)f.fill;
         for (int64_t k = 0; k < cs.n; k++) bu.buf[o++] = ail_chr(cs, k);
-        for (int64_t k = 0; k < pad - lp; k++) bu.buf[o++] = (unsigned char)f.fill;
+        for (int64_t k = 0; k < pad - lp; k++) bu.buf[o++] = (uint16_t)f.fill;
         *out = ail_str_buf_done(bu, o);
         return AIL_OK;
     }
@@ -19845,6 +19852,10 @@ static inline ail_st ail__repeat_next(ail_ctx *cx, ail_obj *out, ail_iterobj *it
 static inline ail_st ail__default_add(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, void *ud) { (void)ud; return ail_op_add(cx, out, a, b); }
 static inline ail_st ail_it_accumulate(ail_ctx *cx, ail_obj *out, ail_obj iterable,
                                         ail_lib_fn2 func, int has_initial, ail_obj initial) {
+    /* CPython 3.12's signature spells the default as initial=None, and the C implementation
+       treats an actual None as "not given": accumulate([], initial=None) is [], not [None],
+       and accumulate([1, 2], initial=None) is [1, 3]. */
+    if (has_initial && initial.tag == AIL_T_NONE) has_initial = 0;
     ail_obj src; ail_st st = ail_iter(cx, &src, iterable); if (st != AIL_OK) return st;
     int64_t cb = ail__fn2_box(func ? func : ail__default_add);
     ail_obj wrap = ail__iter_wrap(cx, AIL_LIT_ACCUMULATE, src, has_initial ? initial : ail_box_unbound(), cb);
@@ -23173,6 +23184,36 @@ ORDER.insert(ORDER.index('LIST') + 1, 'NUMFIELD')
 ORDER.insert(ORDER.index('FDIV') + 1, 'FFLOORMOD')
 SOURCE['FFLOORMOD'] = FFLOORMOD
 REQUIRES['FFLOORMOD'] = ['DIE']
+CMPIF = r'''
+/* Exact int64-vs-double comparison for the IR's plain scalar compares.  The predicate code is
+   0 eq, 1 ne, 2 lt, 3 le, 4 gt, 5 ge; the integer is the left operand.  Casting the int to
+   double first loses precision past 2**53 (9007199254740993 == 9007199254740992.0). */
+static inline int64_t ail__ir_cmp_int_float(int64_t i, double d, int pred) {
+    int c;
+    if (d != d) return pred == 1;               /* NaN: only != is true */
+    if (d >= 9223372036854775808.0) c = -1;
+    else if (d < -9223372036854775808.0) c = 1;
+    else {
+        int64_t di = (int64_t)d;
+        if (i < di) c = -1;
+        else if (i > di) c = 1;
+        else if (d > (double)di) c = -1;
+        else if (d < (double)di) c = 1;
+        else c = 0;
+    }
+    switch (pred) {
+        case 0: return c == 0;
+        case 1: return c != 0;
+        case 2: return c < 0;
+        case 3: return c <= 0;
+        case 4: return c > 0;
+        default: return c >= 0;
+    }
+}
+'''
+ORDER.insert(ORDER.index('FFLOORMOD') + 1, 'CMPIF')
+SOURCE['CMPIF'] = CMPIF
+REQUIRES['CMPIF'] = []
 SOURCE['NUMFIELD'] = NUMFIELD
 REQUIRES['NUMFIELD'] = ['LIST', 'FLIST', 'DIE']
 ORDER.insert(ORDER.index('NUMFIELD') + 1, 'NUMVIEW')
