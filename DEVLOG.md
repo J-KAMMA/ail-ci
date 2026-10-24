@@ -1,14 +1,5 @@
 # DEVLOG
 
-## 2026-10-24 - pre92: CRLF/LF churn in the SDK test_all.py
-
-The reviewer of pre69 recorded that `AIL_CURRENT/python/pkg-v12/test_all.py` carried 134 lines of
-CRLF/LF churn (the ignore-space diff was only 6+/4-).  The file was 940 CRLF lines and 65 LF lines;
-the 65 LF lines were the churn.  They are rewritten to CRLF, so the file is uniformly CRLF and no
-content changes.  This is cosmetic and not a CPython difference: probes with all-CRLF, all-LF and
-mixed-ending source, including a triple-quoted string spanning a physical CRLF, match CPython on
-both builds.  `test_ail_pre92.py` keeps the uniform-terminator check and those differential cases.
-
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
