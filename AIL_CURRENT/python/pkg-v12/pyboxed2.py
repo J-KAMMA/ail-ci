@@ -8168,7 +8168,7 @@ class Compiler(boxclosure.ClosureMixin):
     def _self_arg(info, recv_c):
         """The first argument of a method called on recv: the object, or for a @classmethod its class."""
         if info.get('is_classmethod'):
-            return '((ail_instobj *)(%s).o)->cls' % recv_c
+            return 'ail_classmethod_receiver(%s)' % recv_c
         return recv_c
 
     # methods that, among the kinds the general path models, only str has (bytes and bytearray are classes
