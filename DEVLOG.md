@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - fuzz49: augmented assignment on an instance calls the in-place method
+
+The general path compiled `a += b` through the plain operator helpers, so `ail_op_iadd` fell straight
+back to `__add__`; `__iadd__` / `__isub__` / `__imul__` / `__iand__` / `__ior__` / `__ixor__` were not
+in the class dispatch tables at all. A class defining both printed the `__add__` result where CPython
+mutates and keeps the object. `dunderrt` now appends the in-place operators to the dispatch enum only
+for a program whose classes define one (other programs keep their runtime text) and emits the
+`__iadd__`-family check before the plain operator; `safetyrt` falls back to `__add__`/`__radd__` when
+the in-place method returns `NotImplemented`. A name that is ever the target of an augmented
+assignment is no longer given a trusted class kind, since the method may return another type and
+earlier code (a loop body, a lambda) would use a stale kind. Ported `test_ail_fuzz49.py`, registered
+it in `ail_check.MODULES` and `tools/ci_shards.json`. Both builds, 13 differential cases.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

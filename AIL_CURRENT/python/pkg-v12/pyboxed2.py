@@ -1483,6 +1483,18 @@ def _scan_assigned_names(stmts):
 _COMP_NODES = (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
 
 
+def _aug_target_names(tree):
+    """Every name that is the target of an augmented assignment anywhere in the program.
+    `a += b` rebinds `a` to whatever `__iadd__` returns, so a statically trusted class kind
+    for such a name can be stale even in code emitted before the assignment (a loop back-edge,
+    a lambda made earlier): never settle one (review p41/p43)."""
+    names = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.AugAssign):
+            names.update(_assign_target_names(n.target))
+    return names
+
+
 def _free_reads(node, bound):
     """Names LOADED inside `node` that are not in `bound` -- used to find a nested function's
     free variables (its closure) and to refuse a lambda that would close over one. A
@@ -2053,6 +2065,7 @@ class Compiler(boxclosure.ClosureMixin):
         self.module_names = set()
         self.global_var_kind = {}
         self.global_elem_kind = {}
+        self.aug_targets = set()   # names a += b / -= / *= / ... rebinds (their class kind is never trusted)
         self.boxed_names = []
         self.top_decls = []
         self.top_defs = []
@@ -2133,6 +2146,7 @@ class Compiler(boxclosure.ClosureMixin):
         _hoist_defaults(tree)
         _unbind_handler_names(tree)                                 # `except E as k` deletes k when the handler ends
         self.module_names = _scan_assigned_names(tree.body)
+        self.aug_targets = _aug_target_names(tree)
         for n in ast.walk(tree):
             if isinstance(n, ast.Global):
                 self.module_names.update(n.names)  # a name reachable only via `global x` inside
@@ -2176,6 +2190,11 @@ class Compiler(boxclosure.ClosureMixin):
         # operator methods, identity ==, hashing, str() through the class chain and AttributeError on a non-instance
         # are dispatched by the run time in every program that has a class (C30-C32: they were silent or fatal)
         self.dunder_ops = bool(self.classes)
+        # a class defining an in-place operator makes the run time ask it (dunderrt.patch(inplace=...))
+        self.dunder_inplace = any(
+            any(name in cls['methods'] for name in ('__iadd__', '__isub__', '__imul__',
+                                                    '__iand__', '__ior__', '__ixor__'))
+            for cls in self.classes.values())
 
         # BRIEF_mixed_mode.md: after every top-level function is registered (`self.functions`,
         # needed to check a candidate for *args/**kwargs/keyword-only parameters) and before any
@@ -3135,7 +3154,8 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.bound_reads = _bound_reads(node, info['all_params'])
         ctx.is_generator = info.get('generator', False)
         if info['is_method'] and not info['is_static'] and info['params']:
-            ctx.var_kind[info['params'][0]] = 'instance:' + info['owner_class']
+            if info['params'][0] not in self.aug_targets:
+                ctx.var_kind[info['params'][0]] = 'instance:' + info['owner_class']
             ctx.owner_class = info['owner_class']
             ctx.self_name = info['params'][0]
         globals_decl = set()
@@ -3441,6 +3461,10 @@ class Compiler(boxclosure.ClosureMixin):
         return None
 
     def set_kind(self, name, kind, ctx):
+        if kind and kind.startswith('instance:') and name in self.aug_targets:
+            # an augmented assignment rebinds the name to whatever its method returns, so no
+            # statement (a loop back-edge, an earlier lambda) may trust this class kind
+            kind = None
         if name in ctx.global_decls:
             self.global_var_kind[name] = kind
         else:
@@ -9808,6 +9832,10 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('st = %s(cx, &%s, %s, %s);' % (fn, new, cur, rhs))
             ctx.check()
             ctx.emit('%s = %s;' % (self.name_ref(t.id, ctx), new))
+            if isinstance(_tk, str) and _tk.startswith('instance:'):
+                # `a += b` is `a = a.__iadd__(b)`: the method may return any type (CPython rebinds the
+                # name), so the class kind settled at the first assignment no longer holds
+                self.set_kind(t.id, None, ctx)
             return
         if isinstance(t, ast.Attribute):
             obj = self.expr(t.value, ctx)
@@ -10428,7 +10456,7 @@ def build(source, report, allow_mix=True):
         raise Unsupported('closures nested too deeply to settle their shared names')
     if compiler.dunder_ops:
         import dunderrt
-        body = dunderrt.patch(body)
+        body = dunderrt.patch(body, inplace=compiler.dunder_inplace)
     if compiler.generators:
         import safetyrt
         body = safetyrt.patch_generators(body)
