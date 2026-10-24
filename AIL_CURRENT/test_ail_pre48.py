@@ -39,6 +39,29 @@ OSERROR = r'''def main() -> None:
 main()
 '''
 
+FILE_OSERROR = r'''def main() -> None:
+    try:
+        open("pre48_missing_file_xyz.txt", "r")
+    except OSError as e:
+        print(repr(e.args[-1]))
+        print(repr(e.args[-2]))
+        print(repr(e.args))
+        print(repr(e))
+        print(str(e))
+        print(type(e).__name__, e.errno, e.filename, e.strerror)
+
+    try:
+        open(".", "w")
+    except OSError as e:
+        print(repr(e.args[-1]))
+        print(repr(e.args))
+        print(repr(e))
+        print(type(e).__name__, e.errno, e.filename)
+
+
+main()
+'''
+
 EMPTY = r'''def main() -> None:
     try:
         raise ValueError()
@@ -97,6 +120,9 @@ class ExceptionArgumentRepr(Base):
 
     def test_oserror_args_repr(self):
         self.compare('pre48_oserror', OSERROR, mode='typed')
+
+    def test_file_oserror_args_on_the_general_build(self):
+        self.compare('pre48_file_oserror', FILE_OSERROR, mode='gonly')
 
     def test_empty_args_is_an_index_error(self):
         self.compare('pre48_empty', EMPTY, mode='typed')

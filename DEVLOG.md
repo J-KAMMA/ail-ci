@@ -1,5 +1,14 @@
 # DEVLOG
 
+## 2026-10-24 - pre48 review: file OSError `args`
+
+The general-path OSError adapter (`filert.py`, `ailo_raise_os`) put the filename in `args` as a
+third element. CPython raises file errors with `args == (errno, strerror)` and keeps the filename
+only as an attribute, so `repr(e.args[-1])` printed the path instead of the strerror, and
+`repr(e.args)` / `repr(e)` included the path. The adapter now always builds two-element args and
+still sets `filename` / `filename2`, `errno` and `strerror`. Added a forced-general comparison to
+`test_ail_pre48.py` (missing file and `open(".", "w")`).
+
 ## 2026-10-24 - pre48: exception argument `repr`
 
 The typed path rewrote every `e.args[i]` to its text, so `repr(e.args[i])` quoted a number
