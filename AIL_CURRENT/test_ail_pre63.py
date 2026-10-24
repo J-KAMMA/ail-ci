@@ -3,9 +3,11 @@
 `f = s.upper` is a bound method in CPython. Both builds used to compile it and
 then raise `AttributeError: 'str' object has no attribute 'upper'` at run time.
 The general path now refuses the construct by name (DIFFERENCES
-C?-job-pre63-10241306-1) instead of emitting code that fails at run time. Calls
-such as `"ab".upper()`, instance fields named like a str method and class
-attributes with such a name (also made by setattr) still work.
+C?-job-pre63-10241306-1) instead of emitting code that fails at run time, but
+only when the receiver is provably a str. Calls such as `"ab".upper()`, instance
+fields named like a str method, dynamically created attributes and class
+attributes with such a name (also made by setattr) still work; an indirect
+non-str call such as `apply(f)` keeps its run-time AttributeError.
 """
 import os
 import shutil
@@ -79,6 +81,19 @@ REFUSED = {
         'upper',
         'class Box:\n    def __init__(self, s):\n        self.s = s\n\n\n'
         'def main():\n    b = Box("ab")\n    f = b.s.upper\n    print(f())\n\n\nmain()\n'),
+    'argument_from_list': (
+        'upper',
+        'def take(s):\n    f = s.upper\n    return f()\n\n\n'
+        'def main():\n    xs = ["ab"]\n    print(take(xs[0]))\n\n\nmain()\n'),
+    'argument_from_dict': (
+        'lower',
+        'def take(s):\n    f = s.lower\n    return f()\n\n\n'
+        'def main():\n    d = {"k": "AB"}\n    print(take(d["k"]))\n\n\nmain()\n'),
+    'argument_from_attribute': (
+        'title',
+        'class Box:\n    def __init__(self, s):\n        self.s = s\n\n\n'
+        'def take(s):\n    f = s.title\n    return f()\n\n\n'
+        'def main():\n    b = Box("ab cd")\n    print(take(b.s))\n\n\nmain()\n'),
 }
 
 VALID = {
@@ -110,6 +125,15 @@ VALID = {
                              'def show(c):\n    print(c.title)\n\n\n'
                              'def main():\n    show(C())\n    d = {"k": C()}\n'
                              '    print(d["k"].title)\n\n\nmain()\n'),
+    'dynamic_field_setattr': (
+        'class Box:\n    pass\n\n\n'
+        'def make(name, value):\n    b = Box()\n    setattr(b, name, value)\n    return b\n\n\n'
+        'def main():\n    b = make("title", "hello")\n    print(b.title)\n'
+        '    print(b.title.upper())\n\n\nmain()\n'),
+    'dynamic_setattr_str_method_name': (
+        'class Box:\n    pass\n\n\n'
+        'def main():\n    b = Box()\n    setattr(b, "upper", "hello")\n'
+        '    print(b.upper)\n    print(b.upper.upper())\n\n\nmain()\n'),
 }
 
 
@@ -119,6 +143,23 @@ class Pre63Tests(unittest.TestCase):
         for name, (method, text) in REFUSED.items():
             with self.subTest(name):
                 check_refused(self, name, text, method)
+
+    def test_indirect_non_str_calls_keep_the_runtime_guard(self):
+        programs = {
+            'callback_argument': (
+                'def f(s):\n    return s.upper()\n\n\n'
+                'def apply(fn):\n    return fn(3)\n\n\n'
+                'def main():\n    print(f("ab"))\n    print(apply(f))\n\n\nmain()\n'),
+            'callback_map': (
+                'def f(s):\n    return s.upper()\n\n\n'
+                'def main():\n    print(f("ab"))\n    print(list(map(f, [3])))\n\n\nmain()\n'),
+            'callback_sorted': (
+                'def f(s):\n    return s.upper()\n\n\n'
+                'def main():\n    print(f("ab"))\n    print(sorted([3, 1], key=f))\n\n\nmain()\n'),
+        }
+        for name, text in programs.items():
+            with self.subTest(name):
+                check_program(self, name, text)
 
     def test_calls_fields_and_class_attributes_still_work(self):
         for name, text in VALID.items():

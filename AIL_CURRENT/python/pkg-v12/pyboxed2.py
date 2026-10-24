@@ -2086,8 +2086,7 @@ class Compiler(boxclosure.ClosureMixin):
         self.prelude_names = set() # functions and methods of the preludes added here (not the program's own)
         self.rt_needs = set()      # safetyrt.py fragments this program uses (none: the C it always had)
         self.lib_tuples = False    # genlib.py pieces are in the program: their tuples meet the tuple pass's records
-        self.attr_store_names = set()  # attribute names stored anywhere (a field, not a str method value)
-        self.param_str_names = set()   # (function qualname, parameter) that only ever receives a str
+        self.has_dynamic_attr = False  # a setattr with a computed name (so no proof about fields)
 
     # ------------------------------------------------------------------------------- entry point
     def compile(self, source):
@@ -2160,24 +2159,14 @@ class Compiler(boxclosure.ClosureMixin):
                     and n.func.id not in self.module_names):
                 self.from_imports[n.func.id] = (_IMPLICIT_LIB[n.func.id], n.func.id)
 
-        self.attr_store_names = {n.attr for n in ast.walk(tree)
-                                 if isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Store)}
-        for c in ast.walk(tree):
-            if not isinstance(c, ast.ClassDef):
-                continue
-            for item in c.body:
-                if isinstance(item, ast.Assign):
-                    self.attr_store_names.update(t.id for t in item.targets if isinstance(t, ast.Name))
-                elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
-                    self.attr_store_names.add(item.target.id)
         for n in ast.walk(tree):
-            if isinstance(n, ast.Call) and len(n.args) >= 2 and isinstance(n.args[1], ast.Constant) \
-                    and isinstance(n.args[1].value, str):
-                fn = n.func
-                if (isinstance(fn, ast.Name) and fn.id == 'setattr') or \
-                        (isinstance(fn, ast.Attribute) and fn.attr in ('setattr', '__setattr__')):
-                    self.attr_store_names.add(n.args[1].value)
-        self._infer_str_parameters(tree)
+            if not (isinstance(n, ast.Call) and len(n.args) >= 2):
+                continue
+            fn = n.func
+            if (isinstance(fn, ast.Name) and fn.id == 'setattr') or \
+                    (isinstance(fn, ast.Attribute) and fn.attr in ('setattr', '__setattr__')):
+                if not (isinstance(n.args[1], ast.Constant) and isinstance(n.args[1].value, str)):
+                    self.has_dynamic_attr = True
 
         for n in tree.body:
             if isinstance(n, ast.FunctionDef):
@@ -3455,7 +3444,6 @@ class Compiler(boxclosure.ClosureMixin):
 
     # ------------------------------------------------------------------------------ kind tracking
     def _static_str_expr(self, node):
-        """Syntactically certain to produce a str (used only to infer which parameters are always str)."""
         if isinstance(node, ast.Constant):
             return isinstance(node.value, str)
         if isinstance(node, ast.JoinedStr):
@@ -3464,21 +3452,266 @@ class Compiler(boxclosure.ClosureMixin):
             return self._static_str_expr(node.left) and self._static_str_expr(node.right)
         return False
 
-    def _infer_str_parameters(self, tree):
-        """A parameter whose every direct call passes a definitely-str value: a string reaching a
-        str-only method read through it is a bound method value, not a user attribute."""
-        funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
-        calls = {}
-        for n in ast.walk(tree):
-            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in funcs \
-                    and not n.keywords and not any(isinstance(a, ast.Starred) for a in n.args):
-                calls.setdefault(n.func.id, []).append(n.args)
-        for name, fn in funcs.items():
-            params = [a.arg for a in fn.args.posonlyargs + fn.args.args]
-            for i, p in enumerate(params):
-                args = [c[i] for c in calls.get(name, []) if i < len(c)]
-                if args and all(self._static_str_expr(a) for a in args):
-                    self.param_str_names.add((name, p))
+    def _scope_nodes(self, scope):
+        cache = self.__dict__.setdefault('_scope_nodes_cache', {})
+        key = id(scope)
+        if key in cache:
+            return cache[key]
+        out = []
+        stack = [scope]
+        while stack:
+            n = stack.pop()
+            out.append(n)
+            for c in ast.iter_child_nodes(n):
+                if isinstance(c, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                    continue
+                stack.append(c)
+        cache[key] = out
+        return out
+
+    def _scope_parents(self, scope):
+        cache = self.__dict__.setdefault('_scope_parents_cache', {})
+        key = id(scope)
+        if key in cache:
+            return cache[key]
+        parents = {}
+        for p in ast.walk(scope):
+            for c in ast.iter_child_nodes(p):
+                parents[c] = p
+        cache[key] = parents
+        return parents
+
+    def _scope_name_assignments(self, scope, name):
+        cache = self.__dict__.setdefault('_scope_assign_cache', {})
+        key = (id(scope), name)
+        if key in cache:
+            return cache[key]
+        parents = self._scope_parents(scope)
+        vals = []
+        for n in self._scope_nodes(scope):
+            if not (isinstance(n, ast.Name) and n.id == name):
+                continue
+            if isinstance(n.ctx, ast.Del):
+                cache[key] = None
+                return None
+            if not isinstance(n.ctx, ast.Store):
+                continue
+            p = parents.get(n)
+            if isinstance(p, ast.Assign) and len(p.targets) == 1 and p.targets[0] is n:
+                vals.append(p.value)
+            elif isinstance(p, ast.AnnAssign) and p.target is n and p.value is not None:
+                vals.append(p.value)
+            elif isinstance(p, ast.NamedExpr) and p.target is n:
+                vals.append(p.value)
+            else:
+                cache[key] = None
+                return None
+        cache[key] = vals
+        return vals
+
+    def _call_scope(self, call):
+        parents = self._scope_parents(self._module_tree)
+        cur = call
+        while cur is not None:
+            p = parents.get(cur)
+            if isinstance(p, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                return p
+            cur = p
+        return self._module_tree
+
+    def _instance_class_in_scope(self, node, scope, seen):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in self.classes:
+            return node.func.id
+        if isinstance(node, ast.Name):
+            key = ('inst', id(scope), node.id)
+            if key in seen:
+                return None
+            vals = self._scope_name_assignments(scope, node.id)
+            if vals and len(vals) == 1:
+                v = vals[0]
+                if isinstance(v, ast.Call) and isinstance(v.func, ast.Name) and v.func.id in self.classes:
+                    return v.func.id
+                if isinstance(v, ast.Name):
+                    return self._instance_class_in_scope(v, scope, seen | {key})
+        return None
+
+    def _container_item_str(self, base, scope, seen):
+        def literal_str(v):
+            if isinstance(v, (ast.List, ast.Tuple)):
+                return bool(v.elts) and all(self._prove_str_in_scope(e, scope, seen) for e in v.elts)
+            if isinstance(v, ast.Dict):
+                return bool(v.values) and all(x is not None and self._prove_str_in_scope(x, scope, seen)
+                                               for x in v.values)
+            return False
+        if literal_str(base):
+            return True
+        if isinstance(base, ast.Name):
+            vals = self._scope_name_assignments(scope, base.id)
+            if vals and len(vals) == 1:
+                return literal_str(vals[0])
+        return False
+
+    def _field_str_in_scope(self, cname, attr, seen):
+        if self.has_dynamic_attr or self._descendants(cname):
+            return False
+        cls = self.classes.get(cname)
+        if not cls:
+            return False
+        key = ('field', cname, attr)
+        if key in seen:
+            return False
+        seen = seen | {key}
+        found = False
+        for info in cls['methods'].values():
+            fn = info['node']
+            params = info['params']
+            if not params:
+                continue
+            selfname = params[0]
+            parents = self._scope_parents(fn)
+            for n in self._scope_nodes(fn):
+                if isinstance(n, ast.Call) and len(n.args) >= 3 and isinstance(n.func, ast.Name) \
+                        and n.func.id == 'setattr' and isinstance(n.args[0], ast.Name) \
+                        and n.args[0].id == selfname and isinstance(n.args[1], ast.Constant) \
+                        and n.args[1].value == attr:
+                    if not self._prove_str_in_scope(n.args[2], fn, seen):
+                        return False
+                    found = True
+                    continue
+                if not (isinstance(n, ast.Attribute) and n.attr == attr
+                        and isinstance(n.ctx, ast.Store)):
+                    continue
+                if not (isinstance(n.value, ast.Name) and n.value.id == selfname):
+                    return False
+                p = parents.get(n)
+                if isinstance(p, ast.Assign) and len(p.targets) == 1 and p.targets[0] is n:
+                    val = p.value
+                elif isinstance(p, ast.AnnAssign) and p.target is n:
+                    val = p.value
+                else:
+                    return False
+                if val is None or not self._prove_str_in_scope(val, fn, seen):
+                    return False
+                found = True
+        return found
+
+    def _class_attr_str(self, cname, attr):
+        k = cname
+        while k is not None and k in self.classes:
+            for a, v, _slot in self.classes[k].get('class_attrs', []):
+                if a == attr:
+                    return self._static_str_expr(v)
+            k = self.classes[k]['base']
+        return False
+
+    def _attr_str_in_scope(self, node, scope, seen):
+        cname = None
+        if isinstance(node.value, ast.Name) and node.value.id in self.classes:
+            if self._scope_name_assignments(scope, node.value.id) == []:
+                cname = node.value.id
+        if cname is None:
+            cname = self._instance_class_in_scope(node.value, scope, seen)
+        if cname is None:
+            return False
+        if self._class_attr_str(cname, node.attr):
+            return True
+        return self._field_str_in_scope(cname, node.attr, seen)
+
+    def _param_str_in_scope(self, fn, pname, seen):
+        params = [a.arg for a in fn.args.posonlyargs + fn.args.args]
+        if pname not in params:
+            return False
+        idx = params.index(pname)
+        key = ('param', id(fn), pname)
+        if key in seen:
+            return False
+        seen = seen | {key}
+        parents = self._scope_parents(self._module_tree)
+        parent = parents.get(fn)
+        if isinstance(parent, ast.ClassDef):
+            if fn.name != '__init__' or idx == 0:
+                return False
+            cname = parent.name
+            calls = [n for n in ast.walk(self._module_tree)
+                     if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == cname]
+            allowed = {id(c.func) for c in calls}
+            for n in ast.walk(self._module_tree):
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) \
+                        and n.func.attr == '__init__':
+                    return False
+                if isinstance(n, ast.Name) and n.id == cname and isinstance(n.ctx, ast.Load) \
+                        and id(n) not in allowed:
+                    return False
+            arg_idx = idx - 1
+        elif parent is self._module_tree or parent is None:
+            if fn.decorator_list:
+                return False
+            name = fn.name
+            defs = [n for n in ast.walk(self._module_tree)
+                    if isinstance(n, ast.FunctionDef) and n.name == name]
+            if len(defs) != 1:
+                return False
+            calls = [n for n in ast.walk(self._module_tree)
+                     if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == name]
+            allowed = {id(c.func) for c in calls}
+            for n in ast.walk(self._module_tree):
+                if isinstance(n, ast.Name) and n.id == name:
+                    if not isinstance(n.ctx, ast.Load) or id(n) not in allowed:
+                        return False
+            arg_idx = idx
+        else:
+            return False
+        if not calls:
+            return False
+        for c in calls:
+            if c.keywords or any(isinstance(a, ast.Starred) for a in c.args):
+                return False
+            if len(c.args) <= arg_idx:
+                return False
+            if not self._prove_str_in_scope(c.args[arg_idx], self._call_scope(c), seen):
+                return False
+        return True
+
+    def _prove_str_in_scope(self, node, scope, seen=None):
+        if seen is None:
+            seen = set()
+        if self._static_str_expr(node):
+            return True
+        if isinstance(node, ast.IfExp):
+            return self._prove_str_in_scope(node.body, scope, seen) \
+                and self._prove_str_in_scope(node.orelse, scope, seen)
+        if isinstance(node, ast.Name):
+            key = ('name', id(scope), node.id)
+            if key in seen:
+                return False
+            seen = seen | {key}
+            vals = self._scope_name_assignments(scope, node.id)
+            if vals is None:
+                return False
+            if vals:
+                return len(vals) == 1 and self._prove_str_in_scope(vals[0], scope, seen)
+            if isinstance(scope, ast.FunctionDef) and node.id in [a.arg for a in
+                                                                 scope.args.posonlyargs + scope.args.args]:
+                return self._param_str_in_scope(scope, node.id, seen)
+            return False
+        if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice):
+            if self._prove_str_in_scope(node.value, scope, seen):
+                return True
+            return self._container_item_str(node.value, scope, seen)
+        if isinstance(node, ast.Attribute):
+            return self._attr_str_in_scope(node, scope, seen)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+                and node.func.attr in self._ELEM_STR_METHODS \
+                and node.func.attr not in self.user_method_names \
+                and not node.keywords and not any(isinstance(a, ast.Starred) for a in node.args):
+            return self._prove_str_in_scope(node.func.value, scope, seen)
+        return False
+
+    def _proven_str(self, node, ctx):
+        if self.infer_kind(node, ctx) == 'str':
+            return True
+        scope = getattr(ctx, 'fn_node', None) or self._module_tree
+        return self._prove_str_in_scope(node, scope)
 
     def get_kind(self, name, ctx):
         if name in ctx.var_kind:
@@ -3538,12 +3771,7 @@ class Compiler(boxclosure.ClosureMixin):
         if isinstance(node, ast.JoinedStr):
             return 'str'
         if isinstance(node, ast.Name):
-            k = self.get_kind(node.id, ctx)
-            if k is not None:
-                return k
-            if node.id not in ctx.var_kind and (getattr(ctx, 'qualname', None), node.id) in self.param_str_names:
-                return 'str'
-            return None
+            return self.get_kind(node.id, ctx)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             if node.func.id in self.classes:
                 return 'instance:' + node.func.id
@@ -5101,10 +5329,8 @@ class Compiler(boxclosure.ClosureMixin):
         if prop_owners:
             return self._property_read(node, prop_owners, ctx)
         if node.attr in self._STR_ONLY_METHODS:
-            recv_kind = self.infer_kind(node.value, ctx)
             own_recv = isinstance(node.value, ast.Name) and node.value.id in ('self', 'cls', ctx.self_name)
-            if not own_recv and (recv_kind == 'str' or
-                                 (recv_kind is None and node.attr not in self.attr_store_names)):
+            if not own_recv and self._proven_str(node.value, ctx):
                 raise Unsupported('the str method %s used as a value (a bound method value is not modelled; '
                                   'call it: x.%s(...), DIFFERENCES C?-job-pre63-10241306-1)' % (node.attr, node.attr))
         obj = self.expr(node.value, ctx)

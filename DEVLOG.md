@@ -1,5 +1,21 @@
 # DEVLOG
 
+## 2026-10-24 - pre63 review fix: only provably-str method values refused
+
+The pre63 review found the parameter inference unsound and too broad. A parameter was marked str from
+its direct calls even when the function was passed as a value (`apply(f)`, `map(f, ...)`,
+`sorted(..., key=f)`), so the global `infer_kind` no longer emitted the run-time
+`ail2_no_attr` guard for `s.upper()`. The inference is gone from `infer_kind`; the debug C for
+`shout("hello")` is again byte-identical to base (609 328 bytes, both guards present).
+
+The refusal now uses a separate proof that runs only at an attribute-value read. It proves a receiver
+str from constants, f-strings, concatenation, aliases, sound parameter calls (the function is never
+used as a value and every direct call passes a proven-str argument), list/tuple items, dict values
+and instance fields assigned from provably-str values. Unknown receivers are no longer refused merely
+because their attribute name was never stored, so `setattr(b, name, value)` with a computed name and
+`setattr(b, "upper", "hello")` work again. `test_ail_pre63.py` now covers the indirect-call guards,
+dynamic fields and argument values that arrive via a list, dict or field.
+
 ## 2026-10-24 - pre63: str method values refused by name
 
 The first pre-existing difference from the pre45 review still on this tree was a str method fetched as
