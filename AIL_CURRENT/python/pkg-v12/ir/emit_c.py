@@ -585,7 +585,8 @@ class Emitter(TextEmitter):
             return self.assign_new(depth, ins.result, 'ail_ipow(%s, %s)' % (o[0], o[1]))
         if op == 'fdiv':
             self.parts.update(('DIE', 'FDIV'))
-            return self.assign_new(depth, ins.result, 'ail_fdiv(%s, %s)' % (o[0], o[1]))
+            helper = 'ail_fdiv_f' if ins.attrs.get('float') else 'ail_fdiv'
+            return self.assign_new(depth, ins.result, '%s(%s, %s)' % (helper, o[0], o[1]))
         if op in ('ffloordiv', 'ffloormod'):
             self.parts.add('FFLOORMOD')
             return self.assign_new(depth, ins.result, 'ail_ffloormod(%s, %s, %d)'
