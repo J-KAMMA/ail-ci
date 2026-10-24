@@ -4624,6 +4624,12 @@ class Compiler(boxclosure.ClosureMixin):
         return acc
 
     def expr_UnaryOp(self, node, ctx):
+        if (isinstance(node.op, ast.USub) and isinstance(node.operand, ast.Constant)
+                and type(node.operand.value) is int and node.operand.value == 1 << 63):
+            # The positive literal is out of int64, but CPython parses `-9223372036854775808` as
+            # unary minus on 2**63; the answer, INT64_MIN, is representable. Read the operand as
+            # the C expression for the magnitude instead of refusing it in expr_Constant.
+            return 'ail_box_int(-9223372036854775807LL - 1)'
         v = self.expr(node.operand, ctx)
         if isinstance(node.op, ast.USub):
             t = ctx.tmp()

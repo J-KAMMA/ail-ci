@@ -1,5 +1,19 @@
 # DEVLOG
 
+## 2026-10-24 - int64-boundary constant expressions fold exactly (job-pre174-10250445)
+
+The module-constant folder evaluated every step of a constant expression as an int64, so
+`-(2**E*2)` with `E = 62` was not folded: `2**62*2` is 2**63, outside int64, even though the
+negated answer is INT64_MIN. It fell through to run time and stopped with `integer overflow`
+where CPython prints `-9223372036854775808`; the following `2**E+2**E-1` (INT64_MAX) was never
+reached. `ail_syntax._fold_exact` now evaluates with Python's unbounded integers and `_fold` checks
+only the final value. `_fold_expressions` folds maximal constant expressions at module scope, so the
+answer is used in place as a call argument, list item, attribute value or dict value; an assignment
+whose target is rebound is still not treated as a constant. The general emitters (`pyboxed.py`,
+`pyboxed2.py`) now read the literal `-9223372036854775808` as INT64_MIN instead of refusing its
+positive operand. Results that do not fit int64 still stop with `integer overflow`. Added
+`test_ail_pre174.py` (7 tests, both builds) and registered it in `ail_check.MODULES`.
+
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
 
 The general path's native `statistics` helpers kept a heap result in a C local across an

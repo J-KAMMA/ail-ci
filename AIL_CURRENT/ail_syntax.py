@@ -675,18 +675,21 @@ _FOLD_BINARY = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator
                 ast.BitAnd: operator.and_, ast.BitOr: operator.or_, ast.BitXor: operator.xor}
 
 
-def _fold(node, known):
+def _fold_exact(node, known):
+    """The exact Python value of a constant expression. Intermediates may leave int64: CPython's
+    integers are unbounded, so `-(2**62*2)` is INT64_MIN even though `2**62*2` itself is 2**63.
+    `_fold` checks the final value; checking every step refused expressions whose ANSWER fits."""
     if isinstance(node, ast.Constant) and type(node.value) in (int, float, str, bytes):
         return node.value
     if isinstance(node, ast.Name) and node.id in known:
         return known[node.id]
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
-        value = _fold(node.operand, known)
+        value = _fold_exact(node.operand, known)
         if type(value) not in (int, float) or isinstance(node.op, ast.Invert) and type(value) is not int:
             raise _NotConstant
         value = {ast.USub: operator.neg, ast.UAdd: operator.pos, ast.Invert: operator.invert}[type(node.op)](value)
     elif isinstance(node, ast.BinOp) and type(node.op) in _FOLD_BINARY:
-        left, right = _fold(node.left, known), _fold(node.right, known)
+        left, right = _fold_exact(node.left, known), _fold_exact(node.right, known)
         numbers = type(left) in (int, float) and type(right) in (int, float)
         if isinstance(node.op, ast.Pow):
             if not numbers or type(right) is int and not 0 <= right <= 64:
@@ -706,6 +709,11 @@ def _fold(node, known):
         value = _FOLD_BINARY[type(node.op)](left, right)
     else:
         raise _NotConstant
+    return value
+
+
+def _fold(node, known):
+    value = _fold_exact(node, known)
     if (type(value) is int and not -(1 << 63) <= value < 1 << 63
             or type(value) is float and not math.isfinite(value)
             or type(value) not in (int, float, str, bytes)):
@@ -766,10 +774,34 @@ def _module_scope_bindings(tree):
     return count
 
 
+def _fold_expressions(node, known, edits, allow_names=True):
+    """Rewrite the maximal constant subexpression of `node` to its literal. A name may only be
+    replaced where the module scope is the scope that is read: inside a def/class/lambda a local of
+    the same spelling would shadow the module constant, so only literal-only expressions fold there."""
+    if isinstance(node, (ast.Name, ast.Constant)):
+        return
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+        allow_names = False
+    if (isinstance(node, (ast.UnaryOp, ast.BinOp))
+            and (allow_names or not any(isinstance(n, ast.Name) for n in ast.walk(node)))):
+        try:
+            value = _fold(node, known)
+        except (_NotConstant, ArithmeticError, ValueError, TypeError, RecursionError):
+            pass
+        else:
+            if not _is_literal(node):
+                edits.append((node, repr(value)))
+            return
+    for child in ast.iter_child_nodes(node):
+        _fold_expressions(child, known, edits, allow_names)
+
+
 def fold_constants(text):
-    """Top-level `NAME = <constant arithmetic>` bound once in module scope, rewritten to its literal
-    value. A name that a nested block, a loop or a `global` function rebinds is not folded: its value
-    at the line that reads it is not the first one."""
+    """`NAME = <constant arithmetic>` bound once in module scope, rewritten to its literal value,
+    and every maximal constant expression at module scope rewritten the same way. A name that a
+    nested block, a loop or a `global` function rebinds is not folded: its value at the line that
+    reads it is not the first one. Intermediates are evaluated exactly, so an answer that fits
+    int64 is folded even when a step on the way to it does not."""
     try:
         tree = ast.parse(text)
     except SyntaxError:
@@ -778,16 +810,18 @@ def fold_constants(text):
     known = {}
     edits = []
     for node in tree.body:
-        if not (isinstance(node, ast.Assign) and len(node.targets) == 1
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
                 and isinstance(node.targets[0], ast.Name) and stored[node.targets[0].id] == 1):
+            try:
+                value = _fold(node.value, known)
+            except (_NotConstant, ArithmeticError, ValueError, TypeError, RecursionError):
+                _fold_expressions(node, known, edits)
+            else:
+                known[node.targets[0].id] = value
+                if not _is_literal(node.value):
+                    edits.append((node.value, repr(value)))
             continue
-        try:
-            value = _fold(node.value, known)
-        except (_NotConstant, ArithmeticError, ValueError, TypeError, RecursionError):
-            continue
-        known[node.targets[0].id] = value
-        if not _is_literal(node.value):
-            edits.append((node.value, repr(value)))
+        _fold_expressions(node, known, edits)
     if not edits:
         return text
     data = text.encode('utf8')
