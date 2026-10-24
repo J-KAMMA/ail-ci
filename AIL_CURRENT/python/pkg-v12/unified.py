@@ -43,6 +43,8 @@ come from unified_lists.py, solved again in every round of the fixed point, and 
 import ast
 import os
 
+from pyfront import int_constant
+
 INT, FLOAT, BOOL, OBJ = 'int', 'float', 'bool', 'obj'
 BOT = None
 SCALAR = (INT, FLOAT, BOOL)
@@ -2469,6 +2471,10 @@ def _draw(comp, node, ctx, t):
 
 
 def _binop(comp, node, ctx, t):
+    if t == INT:
+        constant = int_constant(node)
+        if type(constant) is int and -(1 << 63) <= constant < (1 << 63):
+            return _c_const(constant)
     op = node.op
     lt, rt = ntype(comp, ctx, node.left), ntype(comp, ctx, node.right)
     a = nexpr(comp, node.left, ctx)
