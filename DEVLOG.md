@@ -1,5 +1,23 @@
 # DEVLOG
 
+## 2026-10-24 - pre47: constant integer expressions (job-pre47-10241039)
+
+`-(-2)**63` is exactly 2**63 in CPython; the compiler emitted the fitting inner `(-2)**63` and
+negated it at run time, where the checked arithmetic stopped with `integer overflow`.
+`pyfront.fold_int_constants` now evaluates purely constant integer expressions before either code
+path, replaces an in-range result with one int64 literal, and refuses an out-of-range result by
+name with its source line. The same pass makes `-2**63` and `2**63-1` single literals instead of
+arithmetic that could overflow before the outer expression. The general emitters also accept
+INT64_MIN as the unary spelling `-9223372036854775808` rather than refusing its positive operand.
+The refusal is `a constant integer expression overflows int64: ... 64-bit signed integer ...` on
+the default and general builds.
+
+The mandatory probes covered `-(-2)**63`, `2**63`, `10**40`, `1<<63`, the composite
+`(2**70)//(2**5)`, `2**10000`, and values passed through an argument, a list item, an attribute
+and a dict; every in-range program matched CPython and every out-of-range one was refused by name
+on both builds. The known variable cases still differ: `a=10; a**40` and `pow(10,40)` stop at run
+time with `integer overflow`. `test_ail_pre47.py` adds the first case and the boundaries above.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

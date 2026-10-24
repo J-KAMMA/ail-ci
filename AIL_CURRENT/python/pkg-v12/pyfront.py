@@ -134,6 +134,151 @@ def _number_constant(node):
     return None
 
 
+_INT64_MIN = -(1 << 63)
+_INT64_MAX = (1 << 63) - 1
+_INT_FOLD_BITS = 4096
+
+
+class _IntConstTooLarge(Exception):
+    """A constant expression too large to evaluate safely at compile time."""
+
+
+def _int_const_value(node):
+    """The exact value of a purely integer constant expression, else None.
+
+    Raises _IntConstTooLarge rather than allocating an arbitrarily large integer for `2 ** 10**9`
+    or `1 << 10**9`; every value kept is at most _INT_FOLD_BITS bits.
+    """
+    if isinstance(node, ast.Constant):
+        value = node.value if type(node.value) is int else None
+        if value is not None and value.bit_length() > _INT_FOLD_BITS:
+            raise _IntConstTooLarge
+        return value
+    if isinstance(node, ast.UnaryOp):
+        if isinstance(node.op, ast.UAdd):
+            return _int_const_value(node.operand)
+        value = _int_const_value(node.operand)
+        if value is None:
+            return None
+        if isinstance(node.op, ast.USub):
+            return -value
+        if isinstance(node.op, ast.Invert):
+            return ~value
+        return None
+    if not isinstance(node, ast.BinOp):
+        return None
+    left = _int_const_value(node.left)
+    if left is None:
+        return None
+    right = _int_const_value(node.right)
+    if right is None:
+        return None
+    op = node.op
+    if isinstance(op, ast.Add):
+        value = left + right
+    elif isinstance(op, ast.Sub):
+        value = left - right
+    elif isinstance(op, ast.Mult):
+        value = left * right
+    elif isinstance(op, ast.FloorDiv):
+        if right == 0:
+            return None
+        value = left // right
+    elif isinstance(op, ast.Mod):
+        if right == 0:
+            return None
+        value = left % right
+    elif isinstance(op, ast.Pow):
+        if right < 0:
+            return None
+        if left == 0:
+            value = 1 if right == 0 else 0
+        elif left == 1:
+            value = 1
+        elif left == -1:
+            value = -1 if right & 1 else 1
+        else:
+            if right > _INT_FOLD_BITS:
+                raise _IntConstTooLarge
+            value = left ** right
+    elif isinstance(op, ast.LShift):
+        if right < 0:
+            return None
+        if left == 0:
+            value = 0
+        else:
+            if left.bit_length() + right > _INT_FOLD_BITS:
+                raise _IntConstTooLarge
+            value = left << right
+    elif isinstance(op, ast.RShift):
+        if right < 0:
+            return None
+        value = left >> right
+    elif isinstance(op, ast.BitAnd):
+        value = left & right
+    elif isinstance(op, ast.BitOr):
+        value = left | right
+    elif isinstance(op, ast.BitXor):
+        value = left ^ right
+    else:
+        return None
+    if value.bit_length() > _INT_FOLD_BITS:
+        raise _IntConstTooLarge
+    return value
+
+
+def fold_int_constants(source):
+    """Fold integer constant expressions to int64 literals and refuse out-of-range ones by name.
+
+    A constant expression Python evaluates exactly but whose result does not fit int64 is the one
+    case where a *constant* is still a difference: emitting the arithmetic would stop at run time
+    with `integer overflow` even when the outer expression, as in `-(-2)**63`, is what Python's
+    unbounded int can represent. Folding also keeps `2**63 - 1` and `-2**63` correct by building
+    them as one literal instead of overflowing inside the expression. Non-constant expressions are
+    left exactly as written for the run-time guards.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return source
+    encoded = source.encode('utf-8')
+    starts = [0]
+    for line in encoded.splitlines(keepends=True):
+        starts.append(starts[-1] + len(line))
+    edits = []
+
+    def refuse(node):
+        refusal = Unsupported(
+            'a constant integer expression overflows int64: its exact value does not fit in a '
+            '64-bit signed integer (CPython computes it exactly because its int is unbounded; '
+            "this language's int is int64, SEMANTICS section 1)")
+        refusal.source_line = getattr(node, 'lineno', None)
+        raise refusal
+
+    def visit(node):
+        if isinstance(node, (ast.BinOp, ast.UnaryOp)):
+            try:
+                value = _int_const_value(node)
+            except _IntConstTooLarge:
+                refuse(node)
+            if value is not None:
+                if not _INT64_MIN <= value <= _INT64_MAX:
+                    refuse(node)
+                start = starts[node.lineno - 1] + node.col_offset
+                end = starts[node.end_lineno - 1] + node.end_col_offset
+                edits.append((start, end, str(value).encode('ascii')))
+                return
+        for child in ast.iter_child_nodes(node):
+            visit(child)
+
+    visit(tree)
+    if not edits:
+        return source
+    for start, end, replacement in sorted(edits, reverse=True):
+        encoded = encoded[:start] + replacement + encoded[end:]
+    return encoded.decode('utf-8')
+
+
 def refuse_complex_pow(node):
     """`(-4.0) ** 0.5`: a negative base to a fractional power is a complex number in Python, and this
     language has no complex type. Constant operands are refused here, at compile time; any other
