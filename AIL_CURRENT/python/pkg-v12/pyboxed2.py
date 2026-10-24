@@ -2497,6 +2497,44 @@ class Compiler(boxclosure.ClosureMixin):
         if not used:
             return
 
+        def decoded_literal(call):
+            """The text a bytes-literal receiver's .decode() yields, or None when the receiver or a
+            codec argument is not a compile-time constant. The bytes literal has already been rewritten
+            to _ail_mkb(<latin-1 text>), whose units are exactly the bytes."""
+            recv = call.func.value
+            if not (isinstance(recv, ast.Call) and isinstance(recv.func, ast.Name)
+                    and recv.func.id == '_ail_mkb' and len(recv.args) == 1 and not recv.keywords
+                    and isinstance(recv.args[0], ast.Constant) and isinstance(recv.args[0].value, str)):
+                return None
+            enc, err = 'utf-8', 'strict'
+            for pos, name in ((0, 'encoding'), (1, 'errors')):
+                node = call.args[pos] if len(call.args) > pos else None
+                for k in call.keywords:
+                    if k.arg == name:
+                        node = k.value
+                if pos == 0 and node is None:
+                    continue
+                if node is not None and not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+                    return None
+                if node is not None:
+                    if pos == 0:
+                        enc = node.value
+                    else:
+                        err = node.value
+            try:
+                return recv.args[0].value.encode('latin-1').decode(enc, err)
+            except (LookupError, UnicodeError):
+                return None
+
+        def check_decoded_width(call):
+            """The v2 runtime's string backing is uint16_t: a decode that produces a code point above
+            U+FFFF would die as an internal error at run time. Refuse THAT literal by name at compile
+            time instead; a receiver whose bytes are only known at run time is left to the runtime."""
+            text = decoded_literal(call)
+            if text is not None and any(ord(c) > 0xFFFF for c in text):
+                raise Unsupported('bytes.decode() of a bytes literal that produces a code point above '
+                                  'U+FFFF in the 16-bit v2 runtime')
+
         def check_codec(call, enc_pos, err_pos, what):
             for pos, kw, allowed, noun in ((enc_pos, 'encoding', safetyrt.ENCODINGS, 'encoding'),
                                            (err_pos, 'errors', safetyrt.ERROR_HANDLERS, 'error handler')):
@@ -2537,6 +2575,7 @@ class Compiler(boxclosure.ClosureMixin):
                                                       args=[f.value] + node.args, keywords=node.keywords), node)
                 if isinstance(f, ast.Attribute) and f.attr == 'decode' and 'decode' not in methods:
                     check_codec(node, 0, 1, 'bytes.decode()')
+                    check_decoded_width(node)
                 if isinstance(f, ast.Attribute) and f.attr == 'to_bytes' and 'to_bytes' not in methods:
                     return ast.copy_location(ast.Call(func=ast.Name(id='_ail_to_bytes', ctx=ast.Load()),
                                                       args=[f.value] + node.args, keywords=node.keywords), node)
