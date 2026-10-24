@@ -36,9 +36,12 @@ jobs:
       - name: Key file
         env:
           K: ${{ secrets.OPENCODE_API_KEY }}
+          Q: ${{ secrets.QODER_PERSONAL_ACCESS_TOKEN }}
         run: |
           umask 077
           printf '%s' "$K" > "$RUNNER_TEMP/agent.key"
+          # Qoder CLI token (free DeepSeek V4.1 Flash until 2026-11-01 UTC+8); pipeline.sh reads it, public code only
+          [ -n "$Q" ] && printf '%s' "$Q" > "$RUNNER_TEMP/qoder.key" || true
       - name: OpenCode CLI
         if: inputs.harness == 'oc'
         env:
@@ -82,11 +85,15 @@ jobs:
         if: always()
         env:
           K: ${{ secrets.OPENCODE_API_KEY }}
+          Q: ${{ secrets.QODER_PERSONAL_ACCESS_TOKEN }}
         run: |
-          rm -f "$RUNNER_TEMP/agent.key" "$HOME/.local/share/opencode/auth.json"
-          if grep -rqF -e "$K" --exclude-dir=.git . || git log -p "$(cat "$RUNNER_TEMP/start")..HEAD" | grep -qF -e "$K"; then
-            echo "key found in results: not pushing"; exit 1
-          fi
+          rm -f "$RUNNER_TEMP/agent.key" "$RUNNER_TEMP/qoder.key" "$HOME/.local/share/opencode/auth.json"
+          for s in "$K" "$Q"; do
+            [ -n "$s" ] || continue
+            if grep -rqF -e "$s" --exclude-dir=.git . || git log -p "$(cat "$RUNNER_TEMP/start")..HEAD" | grep -qF -e "$s"; then
+              echo "key found in results: not pushing"; exit 1
+            fi
+          done
       - name: Push results
         if: always() && steps.scan.outcome == 'success'
         env:
