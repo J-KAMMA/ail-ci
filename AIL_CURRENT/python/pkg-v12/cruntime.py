@@ -15197,6 +15197,7 @@ static inline ail_st ail_raise_key_arg(ail_ctx *cx, ail_obj arg);
 static inline ail_st ail_dict_getitem(ail_ctx *cx, ail_obj *out, ail_obj d, ail_obj key) {
     ail_obj *v; ail_st st = ail_map_get(cx, &v, (ail_mapobj *)d.o, key); if (st != AIL_OK) return st;
     if (!v) {
+        if (ail__is_counter(d)) { *out = ail_box_int(0); return AIL_OK; }   /* Counter.__missing__ */
         int fac = ((ail_mapobj *)d.o)->dd_factory;
         if (!fac) return ail_raise_key_arg(cx, key);
         ail_obj dflt = fac == 1 ? ail_box_int(0) : fac == 2 ? ail_list_new(cx) : fac == 3 ? ail_set_new(cx) : ail_str_from_cstr(cx, "");

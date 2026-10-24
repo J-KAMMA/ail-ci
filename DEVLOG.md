@@ -205,6 +205,16 @@ expression is now folded exactly at compile time in the typed emitter and in the
 emitter (before its argument pre-evaluation): a value that fits is emitted as one int64 literal,
 and a value above int64 is refused by name on both builds without evaluating a huge power.
 `test_ail_pre97.py` covers both refusal forms and the in-range boundaries.
+## 2026-10-24 - Counter missing keys through a dict value (job-pre98-10242046)
+
+`table["k"]["y"] += 1` on a missing Counter key reached through a dict value raised `KeyError: 'y'`.
+The general path's generic dict getitem only knew Counter's `__missing__` when the emitter could see
+the static kind; a Counter reached through a dict value, an argument, a list item, an attribute, a
+return value or an alias took the plain dict path. `ail_dict_getitem` now returns 0 without inserting
+for a Counter (flag 1), and `ail2_aug_probe` does the same before the augmented store, so the missing
+key starts at 0 and is inserted by the store. Plain dict misses and a missing outer key still raise
+KeyError. Added `AIL_CURRENT/test_ail_pre98.py` (two programs, both builds) and registered it in
+`ail_check.MODULES`. The separate `Counter({"a": "x"})` constructor difference was not changed.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
