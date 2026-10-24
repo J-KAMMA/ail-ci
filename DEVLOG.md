@@ -141,3 +141,10 @@ Remaining differences found are recorded in `DIFFERENCES.md`; they were not fixe
 - Fixed `tuplegen.lrepr`: scalar list elements use `repr(x)`, so the value's own repr is used; compound elements keep their existing helper.
 - Added `AIL_CURRENT/test_ail_fuzz65.py` and registered it in `ail_check.py`.
 - Other observed, not fixed: `list[tuple]` heaps with a wrong-typed item still fail while printing (`int` not subscriptable) instead of printing CPython's list; `nan`/`inf` literals remain refused by name.
+## 2026-10-23 -- job-fuzz89-10231611
+
+- Fixed the general path's `bytes`/`bytearray` whitespace `split`/`rsplit` when `maxsplit` is
+  reached: the remainder now keeps the outer whitespace, as CPython does
+  (`b" a ".split(None, 0) == [b"a "]`, `b"  a  b  ".rsplit(None, 1) == [b"  a", b"b"]`).
+  The typed-path loops already had CPython's rule.
+- Added `test_ail_fuzz89.py` (both builds against CPython) and registered it in `ail_check.py`.

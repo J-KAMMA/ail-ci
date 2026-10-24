@@ -28,3 +28,8 @@ Rows added by job-fuzz8-10220554 use the placeholder id form requested for this 
 | ID | Area | Status | Description |
 | --- | --- | --- | --- |
 | C?-job-fuzz65-10231438-1 | heapq / list repr | fixed | After a caught `heappush` TypeError on a `list[int]` (CPython appends before comparing), the annotation-specialized list repr printed a string element as `x` instead of `'x'` when a tuple comparison had generated that helper. Scalar elements now use the runtime value's `repr`. |
+Known differences from CPython. New rows use `C?-<branch>-N` until a maintainer assigns an id.
+
+| id | area | difference | status |
+|----|------|------------|--------|
+| C?-job-fuzz89-10231611-1 | bytes.split / bytes.rsplit | With a `None` separator and a reached `maxsplit`, the unsplit remainder lost its outer whitespace (`b" a ".split(None, 0)` gave `[b"a"]`; CPython gives `[b"a "]`, and the mirror case in `rsplit`). | fixed in safetyrt.py |
