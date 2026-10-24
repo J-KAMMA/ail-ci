@@ -4,6 +4,7 @@ Deliberate differences from CPython and open silent differences found by differe
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre93-10242042-1 | bare annotations on attribute/subscript targets | A function-local bare annotation (`box().x: int`, `xs[i()]: int`) dropped the target's subexpressions, so the calls did not run; CPython evaluates them without reading the attribute or performing the final subscript, and never evaluates the annotation. The attribute target used to become `pass`. Module-scope targets are evaluated too; annotations there remain hints. | fixed; `test_ail_pre93.py` |
 | C?-job-fuzz45-10231201-1 | integer/float `//`, `%`, `divmod` | The general path computed float floor division as `floor(a / b)` and float modulo from `fmod` with only a sign fix. `1.0 // 0.1` printed 10.0 (CPython 9.0), `-0.0 % 2.0` printed -0.0 (CPython 0.0), `-5.0 // inf` printed -0.0 (CPython -1.0), `inf // 2.0` printed inf (CPython nan). Fixed on both general emitters with one CPython float_divmod helper. | fixed |
 | id | area | CPython | AIL | disposition |
 | --- | --- | --- | --- | --- |

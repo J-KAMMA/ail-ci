@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-24 - bare annotations evaluate their target subexpressions (job-pre93-10242042)
+
+CPython compiles `box().x: int` in a function to `box(); POP_TOP` (no attribute read, no
+annotation evaluation), and `xs[f()]: int` to `xs; POP_TOP; f(); POP_TOP` (no final
+subscript). The surface replaced every attribute target with `pass`, so the calls vanished;
+a subscript target was dropped later by the typed statement lowering. `ail_syntax` now
+emits the target's subexpressions (the attribute's value expression, or a subscript's value
+and slice parts), never the final attribute/subscript operation. Module-scope targets are
+evaluated too; the annotation itself stays a hint there. Added `test_ail_pre93.py` with
+function, future-annotation and module cases, including arguments, list/dict/attribute
+receivers, nested subscripts, slices, negative and empty indexes, and non-subscriptable
+bases.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
