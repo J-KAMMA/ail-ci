@@ -10833,13 +10833,12 @@ def _olist_copy_value(node, kind, ctx):
     if len(node.args) != 1 or node.func.id == 'list' and node.keywords:
         raise Unsupported('list() requires one positional matching list')
     spec = None
+    reverse = False
     if node.func.id == 'sorted':
         if _is_hlist_kind(kind):
             raise Unsupported('handle lists have no ordering')
         key, reverse = _sort_keywords(node)
         spec = _olist_sort_spec(key, ctx.classes[kind[1]])
-        if reverse:
-            spec[1::2] = [-sign for sign in spec[1::2]]
     source, _ = ctx.temp(kind)
     copy, _ = ctx.temp(kind)
     value = _field_receiver(node.args[0], ctx)
@@ -10848,7 +10847,8 @@ def _olist_copy_value(node, kind, ctx):
         _obj_store(copy, _olist_helper(kind, 'new') + '()', kind, ctx, adopt=True),
         _olist_helper(kind, 'extend'), copy, source)
     if spec is not None:
-        setup += ' %s(%s);' % (_olist_sort_name(ctx.classes[kind[1]], spec), copy)
+        setup += ' %s(%s, %d);' % (_olist_sort_name(ctx.classes[kind[1]], spec), copy,
+                                   1 if reverse else 0)
     return '({ %s %s; })' % (setup, copy)
 
 
@@ -17722,9 +17722,8 @@ def _method(node, ctx, *, as_stmt=False):
                 raise Unsupported('struct list sort takes keyword arguments only')
             key, reverse = _sort_keywords(node)
             spec = _olist_sort_spec(key, ctx.classes[t[1]])
-            if reverse:
-                spec[1::2] = [-sign for sign in spec[1::2]]
-            return '(%s, %s(%s))' % (first, _olist_sort_name(ctx.classes[t[1]], spec), receiver)
+            return '(%s, %s(%s, %d))' % (first, _olist_sort_name(ctx.classes[t[1]], spec), receiver,
+                                          1 if reverse else 0)
         if m == 'extend' and len(a) == 1:
             source, _ = ctx.temp(t)
             try:
@@ -31412,6 +31411,7 @@ static void *ail_olist_pop(ail_olist *v, int64_t i) {
     return element;
 }
 '''))
+    out.append(cruntime.SOURCE['TIMSORTIDX'])
     if any(STR in info.field_types.values() for info in classes.values()):
         out.append('''/* A struct's str field owns a buffer of at least ail__fcap(n) bytes, n its current length: every
    writer below keeps that invariant, so the capacity needs no field of its own. Assigning a shorter
@@ -31555,7 +31555,7 @@ static void ail__field_str_append_slow(ail_str *slot, ail_str value) {
                            % (info.struct_name(), fn, info.struct_name(), fn))
         if _managed_class(info):
             for suffix, spec in info.sort_specs.items():
-                body, nan_loops = [], []
+                body, less_body, nan_loops = [], [], []
                 for k in range(0, len(spec), 2):
                     field = info.field_order[spec[k]]
                     kind = info.field_types[field]
@@ -31564,23 +31564,59 @@ static void ail__field_str_append_slow(ail_str *slot, ail_str value) {
                                   if kind in (STR, BYTES) else '(%s > %s) - (%s < %s)' % (left, right, left, right))
                     flip = '1 : -1' if spec[k + 1] < 0 else '-1 : 1'
                     body.append('order = %s; if (order) return order < 0 ? %s;' % (comparison, flip))
+                    if kind in (STR, BYTES):
+                        less_body.append('order = ail_%s_cmp(%s, %s); if (order) return order %s 0;'
+                                         % ('str' if kind == STR else 'bytes', left, right,
+                                            '<' if spec[k + 1] > 0 else '>'))
+                    else:
+                        less_body.append('if (%s != %s && !(%s != %s && %s != %s)) return %s %s %s;'
+                                         % (left, right, left, left, right, right,
+                                            left, '<' if spec[k + 1] > 0 else '>', right))
                     if kind == FLT:
-                        nan_loops.append('if (%s != %s) ail_raise_named(AIL_EXC_VALUE);' % ('a->f_' + field, 'a->f_' + field))
+                        nan_loops.append('if (%s != %s) { nan = 1; break; }' % (left, left))
+                nan_scan = ('for (int64_t i = 0; i < n; i++) { %s *a = v->p[i]; %s }'
+                            % (info.struct_name(), ' '.join(nan_loops))) if nan_loops else ''
+                if nan_loops:
+                    sort_body = ('''    if (nan) {
+        int64_t *perm = (int64_t *)malloc((size_t)(n > 0 ? n : 1) * sizeof *perm);
+        void **tmp = (void **)malloc((size_t)(n > 0 ? n : 1) * sizeof *tmp);
+        if (!perm || !tmp) ail_die("out of memory");
+        for (int64_t i = 0; i < n; i++) perm[i] = i;
+        ail__timsort_idx(perm, n, ail_olist_lt_%s_%s, v->p);
+        for (int64_t i = 0; i < n; i++) tmp[i] = v->p[perm[i]];
+        memcpy(v->p, tmp, (size_t)n * sizeof *tmp);
+        free(perm); free(tmp);
+    } else {
+        ail_olist_sort(v, ail_olist_cmp_%s_%s);
+    }
+''' % (info.name, suffix, info.name, suffix))
+                else:
+                    sort_body = '    ail_olist_sort(v, ail_olist_cmp_%s_%s);\n' % (info.name, suffix)
                 out.append('''static int ail_olist_cmp_%s_%s(void *left, void *right) {
     %s *a = left, *b = right;
     int order;
     %s
     return 0;
 }
-static inline __attribute__((always_inline)) void ail_olist_sort_%s_%s(ail_olist *v) {
+static int ail_olist_lt_%s_%s(const void *ctx, int64_t ia, int64_t ib) {
+    %s **v = (%s **)ctx;
+    %s *a = v[ia], *b = v[ib];
+    int order;
+    %s
+    return 0;
+}
+static inline __attribute__((always_inline)) void ail_olist_sort_%s_%s(ail_olist *v, int reverse) {
     int64_t n = ail_olist_len(v);
     if ((uint64_t)n > SIZE_MAX / sizeof *v->p) ail_die("struct list capacity overflow");
+    if (reverse) ail_olist_reverse(v);
+    int nan = 0;
+    (void)nan;
     %s
-    ail_olist_sort(v, ail_olist_cmp_%s_%s);
+%s    if (reverse) ail_olist_reverse(v);
 }
-''' % (info.name, suffix, info.struct_name(), ' '.join(body), info.name, suffix,
-       ('for (int64_t i = 0; i < n; i++) { %s *a = v->p[i]; %s }' % (info.struct_name(), ' '.join(nan_loops))) if nan_loops else '',
-       info.name, suffix))
+''' % (info.name, suffix, info.struct_name(), ' '.join(body),
+       info.name, suffix, info.struct_name(), info.struct_name(), info.struct_name(), ' '.join(less_body),
+       info.name, suffix, nan_scan, sort_body))
             out.append(_olist_heap_decls(info))
     for info in classes.values():
         sname = info.struct_name()

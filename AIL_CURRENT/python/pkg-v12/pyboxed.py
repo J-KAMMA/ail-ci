@@ -436,22 +436,36 @@ static void ail__key_merge_sort(ail_obj *vals, ail_obj *keys, ail_obj *tmpv, ail
     while (j < hi) { tmpv[k] = vals[j]; tmpk[k] = keys[j]; j++; k++; }
     for (int64_t x = lo; x < hi; x++) { vals[x] = tmpv[x]; keys[x] = tmpk[x]; }
 }
+static void ail__reverse_objs(ail_obj *p, int64_t n) {
+    for (int64_t i = 0, j = n - 1; i < j; i++, j--) { ail_obj t = p[i]; p[i] = p[j]; p[j] = t; }
+}
 static ail_obj ail_builtin_sorted(ail_obj src, ail_obj (*keyfn)(ail_obj), int reverse) {
     ail_obj r = ail_list_new();
     int64_t n = ail_iter_len(src);
     for (int64_t i = 0; i < n; i++) ail_list_append(r, ail_iter_at(src, i));
     int64_t m = r.v->n;
     if (m < 2) return r;
-    if (!keyfn) { ail_list_sort(r); if (reverse) ail_list_reverse(r); return r; }
+    if (!keyfn) {
+        if (reverse && ail__sort_nan_at(r.v->p, m)) {
+            ail__reverse_objs(r.v->p, m);
+            ail__timsort(r.v->p, NULL, m);
+            ail__reverse_objs(r.v->p, m);
+        } else {
+            ail_list_sort(r); if (reverse) ail_list_reverse(r);
+        }
+        return r;
+    }
     ail_obj *keys = (ail_obj *)ail_alloc((size_t)m * sizeof(ail_obj));
     ail_obj *tmpv = (ail_obj *)ail_alloc((size_t)m * sizeof(ail_obj));
     ail_obj *tmpk = (ail_obj *)ail_alloc((size_t)m * sizeof(ail_obj));
     for (int64_t i = 0; i < m; i++) keys[i] = keyfn(r.v->p[i]);
     if (ail__sort_nan_at(keys, m)) {
-        free(keys); free(tmpv); free(tmpk);
-        ail_raise_c(AIL_ERR_VALUE, "sorting NaN: CPython's Timsort order for NaN cannot be reproduced");
+        if (reverse) { ail__reverse_objs(keys, m); ail__reverse_objs(r.v->p, m); }
+        ail__timsort(keys, r.v->p, m);
+        if (reverse) ail__reverse_objs(r.v->p, m);
+    } else {
+        ail__key_merge_sort(r.v->p, keys, tmpv, tmpk, 0, m, reverse);
     }
-    ail__key_merge_sort(r.v->p, keys, tmpv, tmpk, 0, m, reverse);
     free(keys); free(tmpv); free(tmpk);
     return r;
 }
@@ -463,10 +477,12 @@ static void ail_list_sort_key(ail_obj lst, ail_obj (*keyfn)(ail_obj), int revers
     ail_obj *tmpk = (ail_obj *)ail_alloc((size_t)m * sizeof(ail_obj));
     for (int64_t i = 0; i < m; i++) keys[i] = keyfn ? keyfn(lst.v->p[i]) : lst.v->p[i];
     if (ail__sort_nan_at(keys, m)) {
-        free(keys); free(tmpv); free(tmpk);
-        ail_raise_c(AIL_ERR_VALUE, "sorting NaN: CPython's Timsort order for NaN cannot be reproduced");
+        if (reverse) { ail__reverse_objs(keys, m); ail__reverse_objs(lst.v->p, m); }
+        ail__timsort(keys, lst.v->p, m);
+        if (reverse) ail__reverse_objs(lst.v->p, m);
+    } else {
+        ail__key_merge_sort(lst.v->p, keys, tmpv, tmpk, 0, m, reverse);
     }
-    ail__key_merge_sort(lst.v->p, keys, tmpv, tmpk, 0, m, reverse);
     free(keys); free(tmpv); free(tmpk);
 }
 static void ail_list_remove(ail_obj lst, ail_obj x) {

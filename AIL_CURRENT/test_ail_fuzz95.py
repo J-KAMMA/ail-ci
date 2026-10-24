@@ -3,11 +3,10 @@
 The normal case covers comprehensions over ``dict.items()`` with conditions, nested
 comprehensions building a dict of lists, and sorting the results in both builds.
 
-CPython's Timsort gives NaN a specific, input-dependent order; the boxed runtime's stable
-merge sort gave a different permutation with no error (silent fuzz95).  A NaN in the values
-being sorted, or in a tuple/list sort key, is now refused with a named ``ValueError`` in both
-the v1 and v2 boxed sort paths.  A key that contains no NaN is still allowed: the elements
-are never compared, so CPython's order is reproducible.
+CPython's Timsort gives NaN a specific, input-dependent order; the stable merge sorts used
+by the typed and boxed runtimes gave a different permutation with no error (silent fuzz95).
+The sorts that can see a NaN now run a port of CPython's Timsort, in both builds, so the order
+matches exactly; a key that contains no NaN keeps the cheaper merge sort.
 """
 import os
 import subprocess
@@ -39,16 +38,33 @@ NORMAL = r'''def main() -> None:
 main()
 '''
 
-NAN_SORT = r'''def main() -> None:
+NAN_SORT = r'''def sift(vals: list[float]) -> list[float]:
+    return sorted(vals)
+
+
+def main() -> None:
     nan = float("nan")
-    try:
-        print(sorted([3.0, nan, 1.0]))
-    except ValueError as e:
-        print("direct", type(e).__name__, str(e))
-    try:
-        print(sorted([(0, 3.0), (1, nan)], key=lambda kv: (kv[1], kv[0])))
-    except ValueError as e:
-        print("keyed", type(e).__name__, str(e))
+    print(sorted([3.0, nan, 1.0]))
+    print(sorted([1.0, nan, 3.0]))
+    print(sorted([nan, 3.0, 1.0]))
+    print(sorted([1.0, 3.0, nan]))
+    print(sorted([3.0, 1.0, nan]))
+    print(sorted([1.0, nan, nan, 3.0]))
+    print(sorted([nan, nan]))
+    print(sorted([3.0, nan, 1.0], reverse=True))
+    print(sorted([1.0, nan, 2.0], key=lambda x: 0))
+    print(sorted([nan]))
+    xs = [(1.0, nan), (2.0, 0.0), (1.0, 0.0)]
+    print(sorted(xs))
+    print(sorted([5, 3, 4], key=lambda x: (x, nan)))
+    print(sorted([(0, nan), (1, 2.0)], key=lambda kv: kv[1]))
+    print(sorted([[1.0, nan], [2.0, 0.0], [1.0, 0.0]]))
+    ys = [nan, 1.0, 2.0]
+    ys.sort()
+    print(ys)
+    print(sift([2.0, nan, 1.0]))
+    d = {"a": [1.0, nan], "b": [2.0, 0.0]}
+    print({k: sorted(v) for k, v in d.items()})
 
 
 main()
@@ -96,17 +112,8 @@ class Fuzz95Tests(unittest.TestCase):
     def test_items_comprehensions_and_sorting(self):
         self.check('items_comp', NORMAL)
 
-    def test_nan_sort_refused_by_name(self):
-        with tempfile.TemporaryDirectory(prefix='ail-fuzz95-nan-') as directory:
-            for general in (True, False):
-                got, build_err = _build_and_run(directory, 'nan_sort_%s' % ('g' if general else 'd'),
-                                                NAN_SORT, general)
-                self.assertIsNotNone(got, '%s (general=%s)\n%s' % (NAN_SORT[:2000], general, build_err))
-                out, rc = got
-                self.assertEqual(rc, 0, build_err)
-                text = out.decode('utf-8', 'replace')
-                self.assertIn('direct ValueError sorting NaN', text)
-                self.assertIn('keyed ValueError sorting NaN', text)
+    def test_nan_sort_matches_cpython(self):
+        self.check('nan_sort', NAN_SORT)
 
 
 if __name__ == '__main__':
