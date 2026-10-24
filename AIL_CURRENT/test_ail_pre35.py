@@ -53,6 +53,38 @@ print(round(2.675, 2))
 print(round(-0.4, 0))
 '''
 
+REVIEW_FIXES = r'''big = round(1e300)
+b1 = big + 1
+print(b1 == 1e300, b1 > 1e300, b1 < 1e300)
+print(big == 1e300, big < 1e300, big > 1e300)
+print(big == float('inf'), big < float('inf'))
+huge = big * big
+print(huge == float('inf'), huge < float('inf'))
+def attempt(label, f):
+    try:
+        print(label, f())
+    except OverflowError as e:
+        print(label, type(e).__name__, str(e))
+attempt('float', lambda: float(huge))
+attempt('add', lambda: huge + 1.0)
+attempt('mul', lambda: huge * 1.0)
+print(round(big, 2))
+print(round(big, -3))
+print(round(-big, -3))
+print(big // 2, big % 7, -big // 7, -big % 7)
+print(big // -7, big % -7, -big // -7, -big % -7)
+print(big / 2, big ** 2, big >> 3, -big >> 3, big << 3)
+print(big & (big - 1), big | 1, big ^ (big >> 1), ~big)
+def show(v):
+    print(v + 1 == round(1e300) + 1)
+    print(isinstance(v, int))
+    print(int(v) == v, hash(v) == hash(1e300))
+show(big)
+d = {big: 'v'}
+print(d[round(1e300)], d[1e300])
+print(hash(big), hash(-big))
+'''
+
 DYNAMIC = r'''def show(v):
     print(round(v))
 show(1e300)
@@ -108,6 +140,9 @@ class Pre35RoundTests(unittest.TestCase):
 
     def test_boundaries(self):
         self.check_both('boundaries', BOUNDARIES)
+
+    def test_review_fixes(self):
+        self.check_both('review_fixes', REVIEW_FIXES)
 
     def test_dynamic_general_matches(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre35-') as directory:

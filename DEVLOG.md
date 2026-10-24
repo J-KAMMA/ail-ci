@@ -11,6 +11,15 @@ visible out-of-range constant at compile time and a dynamic value by name at run
 the old int64-overflow message. `test_ail_pre35.py` covers literals, the int64 boundaries, half-even
 rounding, `round(x, n)`, the arithmetic above, and the direct build's named refusal.
 
+Review follow-up: big/float comparisons now compare the exact decimal value instead of a
+`strtod` double (so `big + 1 > 1e300`), and a big value outside the double range raises
+`OverflowError` in `float()`/mixed float arithmetic instead of saturating to infinity.
+`round(big, n)`, `//`, `%`, `/`, `**`, `<<`, `>>`, `&`, `|`, `^` and `~` are implemented;
+the floor-division remainder sign and a divisor-leading-zero bug in decimal long division
+are fixed. The typed emitter no longer types `round(float)`/`int(x)` as int64, and
+`isinstance(big, int)` and the numeric hash (including equal float keys) agree with
+CPython.
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in

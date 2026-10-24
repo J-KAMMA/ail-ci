@@ -1838,15 +1838,22 @@ def _etype(plan, fp, n, env):
         k = len(n.args)
         if f in ('len', 'ord') and k == 1:
             return INT
-        if f == 'int' and k in (1, 2):
+        if f == 'int' and k == 2:
             return INT
+        if f == 'int' and k == 1:
+            a = etype(plan, fp, n.args[0], env)
+            # int(float) can exceed int64 (int(1e300)) and int(bigint) keeps a decimal
+            # big integer, so only an int/bool argument is certainly an int result.
+            return INT if a in (INT, BOOL) else (BOT if a is BOT else OBJ)
         if f == 'float' and k == 1:
             return FLOAT
         if f in ('bool', 'isinstance', 'callable') and k in ((1,) if f != 'isinstance' else (2,)):
             return BOOL
         if f == 'round' and k == 1:
             a = etype(plan, fp, n.args[0], env)
-            return INT if a in (INT, FLOAT) else (BOT if a is BOT else OBJ)
+            # round(float) returns a Python int, which can be a decimal big integer
+            # beyond int64 (round(1e300)); only an int argument keeps an int64 result.
+            return INT if a in (INT, BOOL) else (BOT if a is BOT else OBJ)
         if f == 'abs' and k == 1:
             a = etype(plan, fp, n.args[0], env)
             return a if a in (INT, FLOAT, BOT) else OBJ

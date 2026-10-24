@@ -14499,16 +14499,340 @@ static int ail__big_cmp(ail_obj a, ail_obj b) {
 static int ail__big_is_zero(ail_obj x) {
     int neg; char *m = ail__big_copy(x, &neg); int z = !strcmp(m, "0"); free(m); return z;
 }
-static int64_t ail__big_hash(ail_obj x) {
-    int neg; char *m = ail__big_copy(x, &neg);
+static int64_t ail__decimal_hash(const char *m, int neg) {
     uint64_t h = 0;
-    for (char *p = m; *p; p++) h = (h * 10 + (uint64_t)(*p - '0')) % AIL_BIG_MOD;
-    free(m);
-    if (neg && h) h = AIL_BIG_MOD - h;
+    for (const char *p = m; *p; p++)
+        h = (uint64_t)(((__int128)h * 10 + (uint64_t)(*p - '0')) % AIL_BIG_MOD);
+    if (neg && h) h = (uint64_t)(-(int64_t)h);
     if (h == (uint64_t)-1) h = (uint64_t)-2;
     return (int64_t)h;
 }
+static int64_t ail__big_hash(ail_obj x) {
+    int neg; char *m = ail__big_copy(x, &neg);
+    int64_t h = ail__decimal_hash(m, neg);
+    free(m);
+    return h;
+}
 static inline int ail__is_big(ail_obj x) { return x.tag == AIL_T_BIGINT; }
+
+static void ail__big_strip(char *s) {
+    char *p = s;
+    while (p[0] == '0' && p[1]) p++;
+    if (p != s) memmove(s, p, strlen(p) + 1);
+}
+/* Exact comparison of a big integer and a double.  The old path went through strtod and
+   lost every difference below one double ULP (big+1 == 1e300).  NaN is answered with 2,
+   which no caller reads as an ordering. */
+static int ail__big_cmp_double(ail_obj big, double f) {
+    if (f != f) return 2;
+    int neg; char *m = ail__big_copy(big, &neg);
+    int r;
+    if (isinf(f)) r = f > 0 ? -1 : 1;
+    else if (fabs(f) < 9223372036854775808.0) {
+        double fl = floor(f);
+        ail_obj t; t.tag = AIL_T_INT; t.i = (int64_t)fl;
+        r = ail__big_cmp(big, t);
+        if (r == 0 && f != fl) r = -1;
+    } else {
+        char b[400];
+        snprintf(b, sizeof b, "%.0f", fabs(f));
+        int c = ail__big_cmp_abs(m, b);
+        int fn = f < 0;
+        if (neg != fn) r = neg ? -1 : 1;
+        else r = fn ? -c : c;
+    }
+    free(m);
+    return r;
+}
+/* int->float conversion with CPython's overflow edge: the rounded value must be finite. */
+static ail_st ail__big_to_double(ail_ctx *cx, double *out, ail_obj x) {
+    int neg; char *t = ail__big_copy(x, &neg);
+    double d = strtod(t, NULL);
+    free(t);
+    if (isinf(d))
+        return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "int too large to convert to float");
+    *out = neg ? -d : d;
+    return AIL_OK;
+}
+/* Magnitude long division: q = a / b, r = a % b, with a, b non-negative and b != 0. */
+static void ail__big_divmod_abs(const char *a, const char *b, char **qout, char **rout) {
+    size_t la = strlen(a);
+    char *q = (char *)malloc(la + 1);
+    char *rem = (char *)malloc(la + 2);
+    if (!q || !rem) ail_die("out of memory");
+    rem[0] = '0'; rem[1] = 0;
+    for (size_t i = 0; i < la; i++) {
+        size_t rl = strlen(rem);
+        if (rl == 1 && rem[0] == '0') { rem[0] = a[i]; rem[1] = 0; }
+        else { rem[rl] = a[i]; rem[rl + 1] = 0; }
+        int d = 0;
+        while (ail__big_cmp_abs(rem, b) >= 0) {
+            char *nr = ail__big_sub_abs(rem, b);
+            ail__big_strip(nr);
+            /* sub_abs allocates exactly strlen(nr)+1, but the next digit is appended at
+               rem[rl] and its NUL at rem[rl+1]; keep the la+2 capacity across iterations. */
+            char *wide = (char *)malloc(la + 2);
+            if (!wide) ail_die("out of memory");
+            strcpy(wide, nr);
+            free(nr); free(rem); rem = wide;
+            d++;
+        }
+        q[i] = (char)('0' + d);
+    }
+    q[la] = 0;
+    ail__big_strip(q);
+    ail__big_strip(rem);
+    *qout = q; *rout = rem;
+}
+static ail_st ail__big_divmod_op(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, int want_mod) {
+    int na, nb;
+    char *ma = ail__big_copy(a, &na), *mb = ail__big_copy(b, &nb);
+    if (!strcmp(mb, "0")) {
+        free(ma); free(mb);
+        return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR,
+                           want_mod ? "integer modulo by zero" : "integer division or modulo by zero");
+    }
+    char *q, *r;
+    ail__big_divmod_abs(ma, mb, &q, &r);
+    int rzero = !strcmp(r, "0");
+    int qneg = na != nb;
+    if (!rzero && qneg) {
+        char *q2 = ail__big_add_abs(q, "1"); free(q); q = q2;
+        /* Floor division moves the quotient away from zero, so the remainder becomes
+           |b| - |r|; keeping the truncating remainder gave -big % 7 == 1 instead of 6. */
+        char *r2 = ail__big_sub_abs(mb, r); free(r); r = r2;
+        ail__big_strip(r);
+    }
+    ail_obj qo = ail__big_make(cx, qneg, q);
+    ail_obj ro = ail__big_make(cx, rzero ? 0 : nb, r);
+    free(ma); free(mb); free(q); free(r);
+    *out = want_mod ? ro : qo;
+    return AIL_OK;
+}
+/* round(big, n) with n < 0: round the magnitude to a multiple of 10^(-n), ties to even. */
+static ail_st ail__big_round_ndigits(ail_ctx *cx, ail_obj *out, ail_obj x, int64_t n) {
+    if (n >= 0) { *out = x; return AIL_OK; }
+    if (n == INT64_MIN) { *out = ail_box_int(0); return AIL_OK; }
+    int64_t k = -n;
+    int neg; char *m = ail__big_copy(x, &neg);
+    size_t la = strlen(m);
+    if (k > (int64_t)la) { free(m); *out = ail_box_int(0); return AIL_OK; }
+    size_t hi_len = la - (size_t)k;
+    char *hi = (char *)malloc(hi_len + 2);
+    char *low = (char *)malloc((size_t)k + 2);
+    char *half = (char *)malloc((size_t)k + 1);
+    if (!hi || !low || !half) ail_die("out of memory");
+    memcpy(hi, m, hi_len); hi[hi_len] = 0;
+    if (!hi[0]) { hi[0] = '0'; hi[1] = 0; }
+    memcpy(low, m + hi_len, (size_t)k); low[k] = 0;
+    ail__big_strip(hi);
+    ail__big_strip(low);
+    half[0] = '5';
+    for (int64_t i = 1; i < k; i++) half[i] = '0';
+    half[k] = 0;
+    int c = ail__big_cmp_abs(low, half);
+    int up = c > 0 || (c == 0 && ((hi[strlen(hi) - 1] - '0') & 1));
+    char *res;
+    if (up) {
+        char *inc = ail__big_add_abs(hi, "1");
+        ail__big_strip(inc);
+        size_t l = strlen(inc);
+        res = (char *)malloc(l + (size_t)k + 1);
+        if (!res) ail_die("out of memory");
+        memcpy(res, inc, l);
+        memset(res + l, '0', (size_t)k);
+        res[l + (size_t)k] = 0;
+        free(inc);
+    } else if (!strcmp(hi, "0")) {
+        res = (char *)malloc(2);
+        if (!res) ail_die("out of memory");
+        strcpy(res, "0");
+    } else {
+        size_t l = strlen(hi);
+        res = (char *)malloc(l + (size_t)k + 1);
+        if (!res) ail_die("out of memory");
+        memcpy(res, hi, l);
+        memset(res + l, '0', (size_t)k);
+        res[l + (size_t)k] = 0;
+    }
+    *out = ail__big_make(cx, neg, res);
+    free(res); free(hi); free(low); free(half); free(m);
+    return AIL_OK;
+}
+static ail_st ail__big_truediv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    int na, nb;
+    char *ma = ail__big_copy(a, &na), *mb = ail__big_copy(b, &nb);
+    if (!strcmp(mb, "0")) {
+        free(ma); free(mb);
+        return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "division by zero");
+    }
+    /* Removing common factors of ten keeps both operands inside long double's range for
+       the ordinary huge/huge cases without changing the quotient. */
+    size_t za = strlen(ma), zb = strlen(mb);
+    while (za > 1 && ma[za - 1] == '0' && zb > 1 && mb[zb - 1] == '0') { ma[--za] = 0; mb[--zb] = 0; }
+    long double x = strtold(ma, NULL), y = strtold(mb, NULL);
+    free(ma); free(mb);
+    long double q = x / y;
+    double d = (double)q;
+    if (isinf(d))
+        return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "integer division result too large for a float");
+    *out = ail_box_float(cx, (na != nb) ? -d : d);
+    return AIL_OK;
+}
+static ail_st ail__big_pow(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    int64_t e = b.i;
+    if (e < 0) {
+        double base;
+        ail_st st = ail__big_to_double(cx, &base, a);
+        if (st != AIL_OK) return st;
+        double r = (pow)(base, (double)e);
+        if (isinf(r)) return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "(34, 'Numerical result out of range')");
+        *out = ail_box_float(cx, r);
+        return AIL_OK;
+    }
+    int na; char *base = ail__big_copy(a, &na);
+    char *res = (char *)malloc(2);
+    if (!res) ail_die("out of memory");
+    strcpy(res, "1");
+    while (e > 0) {
+        if (e & 1) { char *t = ail__big_mul_abs(res, base); free(res); res = t; }
+        e >>= 1;
+        if (e) { char *t = ail__big_mul_abs(base, base); free(base); base = t; }
+    }
+    int neg = na && (b.i & 1);
+    *out = ail__big_make(cx, neg, res);
+    free(base); free(res);
+    return AIL_OK;
+}
+static char *ail__big_pow2(int64_t n) {
+    char *s = (char *)malloc(2);
+    if (!s) ail_die("out of memory");
+    strcpy(s, "1");
+    for (int64_t i = 0; i < n; i++) { char *t = ail__big_add_abs(s, s); free(s); s = t; }
+    /* add_abs keeps its carry slot, so "1"+"1" is "02"; divmod compares lengths and
+       subtracts, and cannot take a leading zero in its divisor. */
+    ail__big_strip(s);
+    return s;
+}
+static ail_st ail__big_rshift(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    int64_t sh = b.i;
+    if (sh < 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "negative shift count");
+    int na; char *ma = ail__big_copy(a, &na);
+    size_t la = strlen(ma);
+    if (sh > (int64_t)la * 4 + 64) {
+        free(ma);
+        *out = ail_box_int(na ? -1 : 0);
+        return AIL_OK;
+    }
+    char *p2 = ail__big_pow2(sh);
+    char *q, *r;
+    ail__big_divmod_abs(ma, p2, &q, &r);
+    int rest = strcmp(r, "0") != 0;
+    if (na && rest) { char *q2 = ail__big_add_abs(q, "1"); free(q); q = q2; }
+    *out = ail__big_make(cx, na, q);
+    free(ma); free(p2); free(q); free(r);
+    return AIL_OK;
+}
+typedef struct { uint8_t *p; size_t n; } ail__bits;
+static ail__bits ail__big_to_bits(const char *mag) {
+    size_t cap = strlen(mag) * 4 + 8, n = 0;
+    uint8_t *bits = (uint8_t *)malloc(cap);
+    char *cur = (char *)malloc(strlen(mag) + 1);
+    if (!bits || !cur) ail_die("out of memory");
+    strcpy(cur, mag);
+    while (strcmp(cur, "0") != 0) {
+        size_t l = strlen(cur), j = 0;
+        char *q = (char *)malloc(l + 1);
+        if (!q) ail_die("out of memory");
+        int rem = 0;
+        for (size_t i = 0; i < l; i++) {
+            int d = rem * 10 + (cur[i] - '0');
+            q[j++] = (char)('0' + d / 2);
+            rem = d % 2;
+        }
+        q[j] = 0;
+        ail__big_strip(q);
+        if (n == cap) { cap *= 2; bits = (uint8_t *)realloc(bits, cap); if (!bits) ail_die("out of memory"); }
+        bits[n++] = (uint8_t)rem;
+        free(cur); cur = q;
+    }
+    free(cur);
+    if (n == 0) bits[n++] = 0;
+    ail__bits r; r.p = bits; r.n = n; return r;
+}
+static char *ail__big_from_bits(const uint8_t *bits, size_t n) {
+    char *s = (char *)malloc(2);
+    if (!s) ail_die("out of memory");
+    strcpy(s, "0");
+    for (size_t i = n; i-- > 0;) {
+        char *d = ail__big_add_abs(s, s);
+        free(s);
+        if (bits[i]) { char *e = ail__big_add_abs(d, "1"); free(d); d = e; }
+        s = d;
+    }
+    ail__big_strip(s);
+    return s;
+}
+static uint8_t *ail__big_twos(ail_obj x, size_t nbits) {
+    int neg; char *m = ail__big_copy(x, &neg);
+    ail__bits mag = ail__big_to_bits(m);
+    free(m);
+    uint8_t *r = (uint8_t *)calloc(nbits, 1);
+    if (!r) ail_die("out of memory");
+    for (size_t i = 0; i < mag.n && i < nbits; i++) r[i] = mag.p[i];
+    free(mag.p);
+    if (neg) {
+        for (size_t i = 0; i < nbits; i++) r[i] ^= 1;
+        for (size_t i = 0; i < nbits; i++) { if (r[i]) { r[i] = 0; } else { r[i] = 1; break; } }
+    }
+    return r;
+}
+static ail_obj ail__big_from_twos(ail_ctx *cx, uint8_t *r, size_t nbits) {
+    int neg = r[nbits - 1] != 0;
+    if (neg) {
+        for (size_t i = 0; i < nbits; i++) r[i] ^= 1;
+        for (size_t i = 0; i < nbits; i++) { if (r[i]) { r[i] = 0; } else { r[i] = 1; break; } }
+    }
+    size_t n = nbits;
+    while (n > 1 && r[n - 1] == 0) n--;
+    int zero = 1;
+    for (size_t i = 0; i < n; i++) if (r[i]) { zero = 0; break; }
+    if (zero) return ail_box_int(0);
+    char *dec = ail__big_from_bits(r, n);
+    ail_obj o = ail__big_make(cx, neg, dec);
+    free(dec);
+    return o;
+}
+static ail_st ail__big_bitop(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, char op) {
+    int na, nb;
+    char *ma = ail__big_copy(a, &na), *mb = ail__big_copy(b, &nb);
+    ail__bits ba = ail__big_to_bits(ma), bb = ail__big_to_bits(mb);
+    free(ma); free(mb);
+    size_t nbits = (ba.n > bb.n ? ba.n : bb.n) + 1;
+    if (nbits < 2) nbits = 2;
+    uint8_t *ta = ail__big_twos(a, nbits), *tb = ail__big_twos(b, nbits);
+    for (size_t i = 0; i < nbits; i++)
+        ta[i] = op == '&' ? (ta[i] & tb[i]) : op == '|' ? (ta[i] | tb[i]) : (ta[i] ^ tb[i]);
+    *out = ail__big_from_twos(cx, ta, nbits);
+    free(ba.p); free(bb.p); free(ta); free(tb);
+    return AIL_OK;
+}
+static int ail__big_sign(ail_obj x) {
+    int neg; char *m = ail__big_copy(x, &neg);
+    int s = !strcmp(m, "0") ? 0 : (neg ? -1 : 1);
+    free(m);
+    return s;
+}
+static ail_st ail__big_lshift(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    int64_t sh = b.i;
+    if (sh < 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "negative shift count");
+    int na; char *m = ail__big_copy(a, &na);
+    char *p2 = ail__big_pow2(sh);
+    char *r = ail__big_mul_abs(m, p2);
+    *out = ail__big_make(cx, na, r);
+    free(m); free(p2); free(r);
+    return AIL_OK;
+}
 
 /* ===================================================================================
    Truthiness, identity, equality, ordering, hashing.
@@ -14597,10 +14921,9 @@ static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {
         if ((ail__is_big(a) || ail__is_intlike(a.tag)) && (ail__is_big(b) || ail__is_intlike(b.tag)))
             return ail__big_cmp(a, b) == 0;
         if (a.tag == AIL_T_FLOAT || b.tag == AIL_T_FLOAT) {
-            int n; char *t = ail__big_copy(ail__is_big(a) ? a : b, &n);
-            double d = strtod(t, NULL); free(t);
+            ail_obj big = ail__is_big(a) ? a : b;
             double f = ail__is_big(a) ? ail_float_val(b) : ail_float_val(a);
-            return d == f;
+            return ail__big_cmp_double(big, f) == 0;
         }
     }
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
@@ -14661,6 +14984,14 @@ static inline ail_st ail_obj_hash(ail_ctx *cx, int64_t *out, ail_obj x) {
         case AIL_T_FLOAT: {
             double v = ail_float_val(x); uint64_t h;
             if (v != v) h = (uint64_t)(uintptr_t)x.o; /* NaN: hash by box identity, as CPython does */
+            else if (isfinite(v) && (v <= -9223372036854775808.0 || v >= 9223372036854775808.0)) {
+                /* An integral double outside int64 that equals a decimal big integer must
+                   hash like it, both for CPython and so a dict key reached as big vs float
+                   finds the same slot.  %.0f prints the exact value of such a double. */
+                char b[400]; int neg = v < 0;
+                snprintf(b, sizeof b, "%.0f", neg ? -v : v);
+                *out = ail__decimal_hash(b, neg); return AIL_OK;
+            }
             else if (v == (double)(int64_t)v && v >= -9.2e18 && v <= 9.2e18) h = (uint64_t)(int64_t)v;
             else memcpy(&h, &v, sizeof h);
             h ^= h >> 33; h *= 0xff51afd7ed558ccdULL; h ^= h >> 33;
@@ -14693,11 +15024,11 @@ static inline ail_st ail_obj_cmp_op(ail_ctx *cx, int64_t *out, ail_obj a, ail_ob
             *out = ail__big_cmp(a, b); return AIL_OK;
         }
         if (a.tag == AIL_T_FLOAT || b.tag == AIL_T_FLOAT) {
-            int n; char *t = ail__big_copy(ail__is_big(a) ? a : b, &n);
-            double d = strtod(t, NULL); free(t);
-            double av = a.tag == AIL_T_FLOAT ? ail_float_val(a) : d;
-            double bv = b.tag == AIL_T_FLOAT ? ail_float_val(b) : d;
-            *out = av < bv ? -1 : av > bv ? 1 : 0; return AIL_OK;
+            ail_obj big = ail__is_big(a) ? a : b;
+            double f = ail__is_big(a) ? ail_float_val(b) : ail_float_val(a);
+            int c = ail__big_cmp_double(big, f);
+            *out = c == 2 ? 0 : (ail__is_big(a) ? c : -c);
+            return AIL_OK;
         }
     }
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
@@ -14809,8 +15140,8 @@ static inline ail_st ail_op_add(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)
     if (ail__is_big(a) || ail__is_big(b)) {
         if ((ail__is_big(a) || ail__is_intlike(a.tag)) && (ail__is_big(b) || ail__is_intlike(b.tag)))
             return ail__big_binop(cx, out, a, b, '+');
-        if ((ail__is_big(a) || ail__is_intlike(a.tag)) && b.tag == AIL_T_FLOAT) { int n; char *t = ail__big_copy(a, &n); double d = strtod(t, NULL); free(t); *out = ail_box_float(cx, d + ail_float_val(b)); return AIL_OK; }
-        if (a.tag == AIL_T_FLOAT && (ail__is_big(b) || ail__is_intlike(b.tag))) { int n; char *t = ail__big_copy(b, &n); double d = strtod(t, NULL); free(t); *out = ail_box_float(cx, ail_float_val(a) + d); return AIL_OK; }
+        if ((ail__is_big(a) || ail__is_intlike(a.tag)) && b.tag == AIL_T_FLOAT) { double d; ail_st st = ail__big_to_double(cx, &d, a); if (st != AIL_OK) return st; *out = ail_box_float(cx, d + ail_float_val(b)); return AIL_OK; }
+        if (a.tag == AIL_T_FLOAT && (ail__is_big(b) || ail__is_intlike(b.tag))) { double d; ail_st st = ail__big_to_double(cx, &d, b); if (st != AIL_OK) return st; *out = ail_box_float(cx, ail_float_val(a) + d); return AIL_OK; }
     }
     if (ail__is_counter(a) && ail__is_counter(b)) return ail_counter_binop(cx, out, a, b, 0);
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
@@ -14883,8 +15214,8 @@ static inline ail_st ail_op_sub(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)
     if (ail__is_big(a) || ail__is_big(b)) {
         if ((ail__is_big(a) || ail__is_intlike(a.tag)) && (ail__is_big(b) || ail__is_intlike(b.tag)))
             return ail__big_binop(cx, out, a, b, '-');
-        if ((ail__is_big(a) || ail__is_intlike(a.tag)) && b.tag == AIL_T_FLOAT) { int n; char *t = ail__big_copy(a, &n); *out = ail_box_float(cx, strtod(t, NULL) - ail_float_val(b)); free(t); return AIL_OK; }
-        if (a.tag == AIL_T_FLOAT && (ail__is_big(b) || ail__is_intlike(b.tag))) { int n; char *t = ail__big_copy(b, &n); *out = ail_box_float(cx, ail_float_val(a) - strtod(t, NULL)); free(t); return AIL_OK; }
+        if ((ail__is_big(a) || ail__is_intlike(a.tag)) && b.tag == AIL_T_FLOAT) { double d; ail_st st = ail__big_to_double(cx, &d, a); if (st != AIL_OK) return st; *out = ail_box_float(cx, d - ail_float_val(b)); return AIL_OK; }
+        if (a.tag == AIL_T_FLOAT && (ail__is_big(b) || ail__is_intlike(b.tag))) { double d; ail_st st = ail__big_to_double(cx, &d, b); if (st != AIL_OK) return st; *out = ail_box_float(cx, ail_float_val(a) - d); return AIL_OK; }
     }
     if (__builtin_expect(ail__view_kind(a) || ail__view_kind(b), 0)) return ail__view_setop(cx, out, a, b, '-');
     if (ail__is_counter(a) && ail__is_counter(b)) return ail_counter_binop(cx, out, a, b, 1);
@@ -14929,8 +15260,8 @@ static inline ail_st ail_op_mul(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)
     if (ail__is_big(a) || ail__is_big(b)) {
         if ((ail__is_big(a) || ail__is_intlike(a.tag)) && (ail__is_big(b) || ail__is_intlike(b.tag)))
             return ail__big_binop(cx, out, a, b, '*');
-        if ((ail__is_big(a) || ail__is_intlike(a.tag)) && b.tag == AIL_T_FLOAT) { int n; char *t = ail__big_copy(a, &n); *out = ail_box_float(cx, strtod(t, NULL) * ail_float_val(b)); free(t); return AIL_OK; }
-        if (a.tag == AIL_T_FLOAT && (ail__is_big(b) || ail__is_intlike(b.tag))) { int n; char *t = ail__big_copy(b, &n); *out = ail_box_float(cx, ail_float_val(a) * strtod(t, NULL)); free(t); return AIL_OK; }
+        if ((ail__is_big(a) || ail__is_intlike(a.tag)) && b.tag == AIL_T_FLOAT) { double d; ail_st st = ail__big_to_double(cx, &d, a); if (st != AIL_OK) return st; *out = ail_box_float(cx, d * ail_float_val(b)); return AIL_OK; }
+        if (a.tag == AIL_T_FLOAT && (ail__is_big(b) || ail__is_intlike(b.tag))) { double d; ail_st st = ail__big_to_double(cx, &d, b); if (st != AIL_OK) return st; *out = ail_box_float(cx, ail_float_val(a) * d); return AIL_OK; }
     }
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t r;
@@ -14973,6 +15304,16 @@ static inline double ail_obj2_ffloormod(double a, double b, int remainder) {
     return q - lower > 0.5 ? lower + 1.0 : lower;
 }
 static inline ail_st ail_op_floordiv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    if (ail__is_big(a) || ail__is_big(b)) {
+        if ((ail__is_big(a) || ail__is_intlike(a.tag)) && (ail__is_big(b) || ail__is_intlike(b.tag)))
+            return ail__big_divmod_op(cx, out, a, b, 0);
+        if (a.tag == AIL_T_FLOAT || b.tag == AIL_T_FLOAT) {
+            double d; ail_st st;
+            if (ail__is_big(a)) { st = ail__big_to_double(cx, &d, a); if (st != AIL_OK) return st; a = ail_box_float(cx, d); }
+            if (ail__is_big(b)) { st = ail__big_to_double(cx, &d, b); if (st != AIL_OK) return st; b = ail_box_float(cx, d); }
+            return ail_op_floordiv(cx, out, a, b);
+        }
+    }
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t x = a.i, y = b.i;
         if (y == 0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "integer division or modulo by zero");
@@ -14989,6 +15330,16 @@ static inline ail_st ail_op_floordiv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_o
     return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for //");
 }
 static inline ail_st ail_op_mod(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    if (ail__is_big(a) || ail__is_big(b)) {
+        if ((ail__is_big(a) || ail__is_intlike(a.tag)) && (ail__is_big(b) || ail__is_intlike(b.tag)))
+            return ail__big_divmod_op(cx, out, a, b, 1);
+        if (a.tag == AIL_T_FLOAT || b.tag == AIL_T_FLOAT) {
+            double d; ail_st st;
+            if (ail__is_big(a)) { st = ail__big_to_double(cx, &d, a); if (st != AIL_OK) return st; a = ail_box_float(cx, d); }
+            if (ail__is_big(b)) { st = ail__big_to_double(cx, &d, b); if (st != AIL_OK) return st; b = ail_box_float(cx, d); }
+            return ail_op_mod(cx, out, a, b);
+        }
+    }
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t x = a.i, y = b.i;
         if (y == 0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "integer division or modulo by zero");
@@ -15005,6 +15356,16 @@ static inline ail_st ail_op_mod(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)
     return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %");
 }
 static inline ail_st ail_op_truediv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    if (ail__is_big(a) || ail__is_big(b)) {
+        if ((ail__is_big(a) || ail__is_intlike(a.tag)) && (ail__is_big(b) || ail__is_intlike(b.tag)))
+            return ail__big_truediv(cx, out, a, b);
+        if (a.tag == AIL_T_FLOAT || b.tag == AIL_T_FLOAT) {
+            double d; ail_st st;
+            if (ail__is_big(a)) { st = ail__big_to_double(cx, &d, a); if (st != AIL_OK) return st; a = ail_box_float(cx, d); }
+            if (ail__is_big(b)) { st = ail__big_to_double(cx, &d, b); if (st != AIL_OK) return st; b = ail_box_float(cx, d); }
+            return ail_op_truediv(cx, out, a, b);
+        }
+    }
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         double x = ail__as_double(a), y = ail__as_double(b);
         if (y == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "division by zero");
@@ -15013,6 +15374,43 @@ static inline ail_st ail_op_truediv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_ob
     return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for /");
 }
 static inline ail_st ail_op_pow(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    if (ail__is_big(a) || ail__is_big(b)) {
+        if ((ail__is_big(a) || ail__is_intlike(a.tag)) && (ail__is_big(b) || ail__is_intlike(b.tag))) {
+            if (ail__is_big(b)) {
+                int bsign, babs;
+                if (ail__is_big(a)) {
+                    int neg; char *m = ail__big_copy(a, &neg);
+                    bsign = neg ? -1 : 1;
+                    babs = strcmp(m, "1") == 0 ? 1 : 2;
+                    free(m);
+                } else {
+                    bsign = a.i < 0 ? -1 : a.i > 0 ? 1 : 0;
+                    int64_t mag = a.i < 0 ? (a.i == INT64_MIN ? 2 : -a.i) : a.i;
+                    babs = mag > 1 ? 2 : (int)mag;
+                }
+                if (babs == 0) { *out = ail_box_int(0); return AIL_OK; }
+                if (babs == 1) {
+                    int odd = 1;
+                    if (bsign < 0) {
+                        int neg; char *m = ail__big_copy(b, &neg);
+                        odd = (m[strlen(m) - 1] - '0') & 1;
+                        free(m);
+                    }
+                    *out = ail_box_int(bsign < 0 && odd ? -1 : 1);
+                    return AIL_OK;
+                }
+                return ail_hit_limit(cx, "int_overflow", "integer overflow in **");
+            }
+            if (ail__is_big(a)) return ail__big_pow(cx, out, a, b);
+            /* int base, bigint exponent already handled above; int ** int is the core path */
+        }
+        if (a.tag == AIL_T_FLOAT || b.tag == AIL_T_FLOAT) {
+            double d; ail_st st;
+            if (ail__is_big(a)) { st = ail__big_to_double(cx, &d, a); if (st != AIL_OK) return st; a = ail_box_float(cx, d); }
+            if (ail__is_big(b)) { st = ail__big_to_double(cx, &d, b); if (st != AIL_OK) return st; b = ail_box_float(cx, d); }
+            return ail_op_pow(cx, out, a, b);
+        }
+    }
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag) && b.i >= 0) {
         int64_t base = a.i, e = b.i, r = 1;
         for (int64_t k = 0; k < e; k++) {
@@ -15047,6 +15445,11 @@ static inline ail_st ail__bit_logic(ail_ctx *cx, ail_obj *out, ail_obj a, ail_ob
     if ((op == '&' || op == '|') && ail__is_counter(a) && ail__is_counter(b)) return ail_counter_binop(cx, out, a, b, op == '&' ? 2 : 3);
     if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag))
         return op == '&' ? ail_set_intersection(cx, out, a, b) : op == '|' ? ail_set_union(cx, out, a, b) : ail_meth_set_symmetric_difference(cx, out, a, b);
+    if (ail__is_big(a) || ail__is_big(b)) {
+        if ((ail__is_big(a) || ail__is_intlike(a.tag)) && (ail__is_big(b) || ail__is_intlike(b.tag)))
+            return ail__big_bitop(cx, out, a, b, op);
+        return ail__bit_type_error(cx, op == '&' ? "&" : op == '|' ? "|" : "^", a, b);
+    }
     if (!ail__is_intlike(a.tag) || !ail__is_intlike(b.tag)) return ail__bit_type_error(cx, op == '&' ? "&" : op == '|' ? "|" : "^", a, b);
     int64_t r = op == '&' ? (a.i & b.i) : op == '|' ? (a.i | b.i) : (a.i ^ b.i);
     *out = (a.tag == AIL_T_BOOL && b.tag == AIL_T_BOOL) ? ail_box_bool(r != 0) : ail_box_int(r);
@@ -15056,6 +15459,16 @@ static inline ail_st ail_op_bitand(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj
 static inline ail_st ail_op_bitor(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)  { return ail__bit_logic(cx, out, a, b, '|'); }
 static inline ail_st ail_op_bitxor(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { return ail__bit_logic(cx, out, a, b, '^'); }
 static inline ail_st ail_op_lshift(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    if (ail__is_big(a) || ail__is_big(b)) {
+        if (ail__is_big(b)) {
+            if (ail__big_sign(b) < 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "negative shift count");
+            int z = ail__is_big(a) ? ail__big_is_zero(a) : a.i == 0;
+            if (z) { *out = ail_box_int(0); return AIL_OK; }
+            return ail_hit_limit(cx, "int_overflow", "integer overflow in <<");
+        }
+        if (!(ail__is_big(a) || ail__is_intlike(a.tag))) return ail__bit_type_error(cx, "<<", a, b);
+        return ail__big_lshift(cx, out, a, b);
+    }
     if (!ail__is_intlike(a.tag) || !ail__is_intlike(b.tag)) return ail__bit_type_error(cx, "<<", a, b);
     if (b.i < 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "negative shift count");
     if (a.i == 0) { *out = ail_box_int(0); return AIL_OK; }
@@ -15065,11 +15478,29 @@ static inline ail_st ail_op_lshift(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj
     *out = ail_box_int(r); return AIL_OK;
 }
 static inline ail_st ail_op_rshift(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
+    if (ail__is_big(a) || ail__is_big(b)) {
+        if (ail__is_big(b)) {
+            if (ail__big_sign(b) < 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "negative shift count");
+            int neg = ail__is_big(a) ? ail__big_sign(a) < 0 : a.i < 0;
+            int z = ail__is_big(a) ? ail__big_is_zero(a) : a.i == 0;
+            *out = ail_box_int(z ? 0 : (neg ? -1 : 0));
+            return AIL_OK;
+        }
+        if (!(ail__is_big(a) || ail__is_intlike(a.tag))) return ail__bit_type_error(cx, ">>", a, b);
+        return ail__big_rshift(cx, out, a, b);
+    }
     if (!ail__is_intlike(a.tag) || !ail__is_intlike(b.tag)) return ail__bit_type_error(cx, ">>", a, b);
     if (b.i < 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "negative shift count");
     *out = ail_box_int(b.i >= 63 ? (a.i < 0 ? -1 : 0) : (a.i >> b.i)); return AIL_OK;
 }
 static inline ail_st ail_op_invert(ail_ctx *cx, ail_obj *out, ail_obj a) {
+    if (ail__is_big(a)) {
+        int neg; char *m = ail__big_copy(a, &neg);
+        ail_obj na = ail__big_make(cx, !neg, m);
+        free(m);
+        ail_obj one = ail_box_int(1);
+        return ail__big_binop(cx, out, na, one, '-');
+    }
     if (!ail__is_intlike(a.tag)) { char buf[64]; snprintf(buf, sizeof buf, "bad operand type for unary ~: '%s'", ail_type_name(a.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
     *out = ail_box_int(-a.i - 1); return AIL_OK;
 }
@@ -16496,7 +16927,7 @@ static inline ail_st ail_int_with_base(ail_ctx *cx, ail_obj *out, ail_obj x, ail
 static inline ail_st ail_to_float(ail_ctx *cx, ail_obj *out, ail_obj x) {
     switch (x.tag) {
         case AIL_T_INT: case AIL_T_BOOL: *out = ail_box_float(cx, (double)x.i); return AIL_OK;
-        case AIL_T_BIGINT: { int n; char *t = ail__big_copy(x, &n); *out = ail_box_float(cx, strtod(t, NULL)); free(t); return AIL_OK; }
+        case AIL_T_BIGINT: { double d; ail_st st = ail__big_to_double(cx, &d, x); if (st != AIL_OK) return st; *out = ail_box_float(cx, d); return AIL_OK; }
         case AIL_T_FLOAT: *out = x; return AIL_OK;
         case AIL_T_STR: { double v = 0.0; ail_st st = ail_str_to_float(cx, &v, x); if (st != AIL_OK) return st; *out = ail_box_float(cx, v); return AIL_OK; }
         default: { char buf[80]; snprintf(buf, sizeof buf, "float() argument must be a string or a number, not '%s'", ail_type_name(x.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
@@ -17418,6 +17849,7 @@ static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_
         if (n >= 0) { *out = ail_box_int(x.i); return AIL_OK; }
         return ail_bi_round_int_ndigits(cx, out, x.i, n);
     }
+    if (ail__is_big(x)) return ail__big_round_ndigits(cx, out, x, n);
     if (x.tag != AIL_T_FLOAT) { char buf[80]; snprintf(buf, sizeof buf, "type %s doesn't define __round__ method", ail_type_name(x.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
     double v = ail_float_val(x);
     if (v != v || isinf(v)) { *out = ail_box_float(cx, v); return AIL_OK; }
@@ -17448,28 +17880,37 @@ static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_
    text exactly (verified).
    =================================================================================== */
 static inline ail_st ail_bi_divmod(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
-    if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
-        if (a.tag == AIL_T_FLOAT || b.tag == AIL_T_FLOAT) {
-            double x = ail__as_double(a), y = ail__as_double(b);
-            if (y == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "float divmod()");
-            double r = fmod(x, y);
-            int adjust = r != 0.0 && ((r < 0.0) != (y < 0.0));
-            double q = (x - r) / y;
-            if (adjust) q -= 1.0;
-            double rem = r == 0.0 ? copysign(0.0, y) : adjust ? r + y : r;
-            double quot;
-            if (q == 0.0) quot = copysign(0.0, x / y);
-            else {
-                quot = floor(q);
-                if (q - quot > 0.5) quot += 1.0;
+    if ((ail__is_num(a.tag) && ail__is_num(b.tag)) || ail__is_big(a) || ail__is_big(b)) {
+        if (a.tag == AIL_T_FLOAT || b.tag == AIL_T_FLOAT || ail__is_big(a) || ail__is_big(b)) {
+            if (!(a.tag == AIL_T_FLOAT || b.tag == AIL_T_FLOAT)) {
+                /* integer-shaped: the core's floordiv/mod give CPython's floor semantics */
+            } else {
+                double x, y;
+                ail_st st;
+                if (ail__is_big(a)) { st = ail__big_to_double(cx, &x, a); if (st != AIL_OK) return st; }
+                else x = ail__as_double(a);
+                if (ail__is_big(b)) { st = ail__big_to_double(cx, &y, b); if (st != AIL_OK) return st; }
+                else y = ail__as_double(b);
+                if (y == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "float divmod()");
+                double r = fmod(x, y);
+                int adjust = r != 0.0 && ((r < 0.0) != (y < 0.0));
+                double q = (x - r) / y;
+                if (adjust) q -= 1.0;
+                double rem = r == 0.0 ? copysign(0.0, y) : adjust ? r + y : r;
+                double quot;
+                if (q == 0.0) quot = copysign(0.0, x / y);
+                else {
+                    quot = floor(q);
+                    if (q - quot > 0.5) quot += 1.0;
+                }
+                AIL_FRAME_ENTER(cx, frf, 2);
+                frf.slots[0] = ail_box_float(cx, quot);
+                frf.slots[1] = ail_box_float(cx, rem);
+                ail_obj prf[2]; prf[0] = frf.slots[0]; prf[1] = frf.slots[1];
+                *out = ail_tuple_new(cx, prf, 2);
+                AIL_FRAME_LEAVE(cx, frf);
+                return AIL_OK;
             }
-            AIL_FRAME_ENTER(cx, frf, 2);
-            frf.slots[0] = ail_box_float(cx, quot);
-            frf.slots[1] = ail_box_float(cx, rem);
-            ail_obj prf[2]; prf[0] = frf.slots[0]; prf[1] = frf.slots[1];
-            *out = ail_tuple_new(cx, prf, 2);
-            AIL_FRAME_LEAVE(cx, frf);
-            return AIL_OK;
         }
     } else if (a.tag != AIL_T_INST && b.tag != AIL_T_INST) {
         char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for divmod(): '%s' and '%s'", ail_type_name(a.tag), ail_type_name(b.tag));

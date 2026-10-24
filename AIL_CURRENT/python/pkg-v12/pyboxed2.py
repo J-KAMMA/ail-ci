@@ -6828,7 +6828,7 @@ class Compiler(boxclosure.ClosureMixin):
                 raise Unsupported('isinstance() with a non-name type argument')
             tname = tnode.id
             if tname == 'int':
-                checks.append('(%s.tag==AIL_T_INT||%s.tag==AIL_T_BOOL)' % (v, v))
+                checks.append('(%s.tag==AIL_T_INT||%s.tag==AIL_T_BOOL||%s.tag==AIL_T_BIGINT)' % (v, v, v))
             elif tname in TYPE_TAG:
                 checks.append('%s.tag==%s' % (v, TYPE_TAG[tname]))
             elif tname == 'range':
