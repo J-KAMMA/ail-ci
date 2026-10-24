@@ -1565,6 +1565,8 @@ class Compiler:
         return self._emit_tmp(ctx, 'ail_obj_getitem(%s, %s)' % (c, key))
 
     def expr_Attribute(self, node, ctx):
+        if node.attr in ('__cause__', '__context__', '__suppress_context__', '__traceback__'):
+            raise Unsupported('reading %s (exception chaining is not kept here)' % node.attr)
         if isinstance(node.value, ast.Name) and node.value.id == 'math' and node.attr == 'pi':
             return 'ail_box_float(AIL_MATH_PI)'
         if isinstance(node.value, ast.Name) and node.value.id in (
@@ -2424,6 +2426,8 @@ class Compiler:
             ctx.emit('%s = %s;' % (cid(target.id), value_c))
             return
         if isinstance(target, ast.Attribute):
+            if target.attr in ('__cause__', '__context__', '__suppress_context__', '__traceback__'):
+                raise Unsupported('writing %s (exception chaining is not kept here)' % target.attr)
             obj = self.expr(target.value, ctx)
             self.attr_names.add(target.attr)
             ctx.emit('ail_inst_setattr(%s, pa_%s, %s);' % (obj, target.attr, value_c))
