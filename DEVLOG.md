@@ -51,6 +51,19 @@ without a sign are unchanged.
 widths/alignment, empty and non-ASCII values, values from an argument/list item/attribute/dict
 value, and numeric sign formatting on both builds. It and `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` pass on the final commit.
+## 2026-10-23 - pre19: refuse `del` bounds a constant cannot evaluate in int64 (job-pre19-10240254)
+
+The first still-differing case recorded after pre7 is `maxi`, `del a[2**63 - 1]`: the final value
+fits in an AIL int64, but evaluating `2**63` first trapped `integer overflow` on both builds where
+CPython raises IndexError. `negmin`, `powhuge` and `slicebig` (`del a[2**100:2**101]`, a silent
+exit-1 versus CPython's exit 0) have the same cause. `pyfront.refuse_unrepresentable_delete_bounds`
+evaluates the constant index or slice bounds exactly, including the intermediate values, and
+refuses the `del` by name when any value leaves the 64-bit signed range; it is called from both the
+typed path (`pyfunc.py`) and the general path (`pyboxed2.py`). In-range constants and the same
+expression outside a `del` are unchanged, and the C runtime is untouched.
+
+Tests on this commit: `test_ail_pre19` (new, both builds), `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`; `update_manifest.py --check` rc 0.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
