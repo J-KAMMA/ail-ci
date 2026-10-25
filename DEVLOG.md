@@ -194,6 +194,47 @@ limits, the empty string, intermediates built from powers, shifts, sums and prod
 reaching the call through an argument, a list item, an attribute and a dict value, on both builds.
 `/tmp/probes/p205_direct.py`, `p205_flows.py`, `p205_types.py` and `p205_features.py` match CPython
 on both builds; `p205_out_of_range.py` is refused by name (CPython raises OverflowError at run time).
+## 2026-10-25 - pre206 review fixes: complete and non-ASCII format-spec messages
+
+The review of the pre206 job found three defects in the extra whole-spec message rewrite. The
+whole-spec message is now built as runtime text instead of a 160-byte C buffer: the complete spec
+is included (120/300-character specs, not 159 bytes) and an embedded NUL is kept. Non-ASCII code
+units are copied as code units rather than UTF-8 bytes, so `format(1, '__é')` names `'__é'` (no
+double encoding). CPython's grouping-vs-type check now runs inside the parser before the non-ASCII
+type rejection, so `format(1, ',é')` and `',中'` give `Cannot specify ',' with '\xe9'` /
+`'\x4e2d'`; it also covers the previously pre-existing grouping + space/`q`/`i` cases, with
+`\x20` escaping. The repeated-grouping behaviour from the earlier commit is unchanged.
+
+Probes `/tmp/probes/p_review_fix.py` and `/tmp/probes/p_review_matrix.py` (non-ASCII and long/NUL
+whole specs, grouping with every ASCII/BMP code point, both builds, values through an argument, a
+list item, an attribute, a dict value and an alias) match CPython; the reviewer's `p_uni_long`,
+`p_uni_group`, `p_uni_plain` and `p_cont` match, and `p_fuzz` is down to the two pre-existing
+string `+_`/`+,` sign-vs-grouping differences listed in the review. `test_ail_pre206`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass on both builds.
+
+## 2026-10-25 - format() repeated grouping characters (job-pre206-10252128)
+
+The memsafe2 review listed three pre-existing differences. The first, `int(bytearray(...), base)`
+naming `bytearray(b'...')` in the ValueError, is already fixed on this tree (pre192), and
+`bash ~/tools/cmp.sh` matches CPython. The first still-differing item is the format-spec parser:
+`format(1, '__d')` and `format(1, ',,d')` said `Cannot specify both ',' and '_'.` where CPython
+raises `ValueError: Invalid format specifier '__d' for object of type 'int'`.
+
+CPython consumes one grouping character. A different second grouping character keeps
+`Cannot specify both ',' and '_'.`; the same character at the end of the spec is read as the type
+and gives `Cannot specify 'g' with 'g'.`; the same character followed by anything else rejects the
+whole spec with the full `Invalid format specifier '<spec>' for object of type '<type>'` text. The
+parser in safetyrt.py now follows those three cases, and its other whole-spec rejections use the
+same full text. A single BMP non-ASCII type now reports CPython's
+`Unknown format code '\x..' for object of type '...'` instead of the old bare message; a non-BMP
+type remains a pre-existing 16-bit-unit limitation and was not changed.
+
+`test_ail_pre206.py` covers int/negative/zero/bool/float/-0.0/str, signs, zero padding, widths,
+empty specs, valid grouping, direct literals/f-string/str.format and values through arguments,
+list items, attributes, dict values and aliases, on both builds. Probes
+`/tmp/probes/p_pre206_group.py`, `p_pre206_generic.py`, `p_fmtgroup.py`, `p_fmtgroup2.py` and
+`p_fmtgroup_lit.py` match CPython on both builds.
+
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
