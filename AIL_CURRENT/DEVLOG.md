@@ -1,4 +1,31 @@
+## 2026-10-25 -- pre199: range() with a zero step raises ValueError (job-pre199-10252047)
+
+The first still-differing item left by pre186 was `range(0, 5, 0)`: both builds accepted it and
+printed `range(0, 5, 0)`, where CPython raises `ValueError: range() arg 3 must not be zero` at
+construction.  The general (v2) path's `range()` now evaluates its arguments in Python order,
+converts each as `PyNumber_Index` does (int, bool or an instance's `__index__`, otherwise
+`TypeError: '<type>' object cannot be interpreted as an integer`) and builds through the checking
+`ail_bi_range`, so a zero step is refused before the range exists.  Non-zero ranges (negative,
+empty, wide, bool bounds) are unchanged.  `AIL_CURRENT/test_ail_pre199.py` covers both builds;
+probes are `pre199_range_*` in `/tmp/probes`.  The later reviewer items (the enumerate repr,
+`-MAX - 1` literal and the `AIL_GENERAL=v1` duplicate `ail_exc_top`) were not touched.
+
 # DEVLOG
+
+## 2026-10-25 -- pre183 reapply: builtin/type tuple-member names, bytes membership (job-rbpre183-10252048)
+
+Re-applied the accepted pre183 change on this tree. The bytes/bytearray membership message is
+already fixed here (the current prelude's `_ail_bcontains` keeps the integer-byte path and uses
+the bytes-like text for other operands, as the pre114 row records), so no prelude edit was needed.
+The outstanding part, naming a builtin-function tuple member in `str.startswith`/`endswith` as
+`builtin_function_or_method` (and the type-valued `bool` as `type`) instead of `function`, is now
+applied: the lowerer marks the generated lambda, the FUNC object carries the builtin kind, and
+`ail__tname_c` uses it. User-defined functions still name `function`. Error-only paths.
+
+Probes in `/tmp/probes` covered literals, variables, arguments, list items, dict values and
+attributes, both methods, the scalar form, an early matching member, invalid/negative windows,
+empty tuples, `bool` and `len`, and user-defined functions, on both `cmp.sh` builds; all match
+CPython. `test_ail_pre183.py` keeps the cases.
 
 ## 2026-10-25 - pre125 reapply: module-scope bare attribute/subscript annotations
 

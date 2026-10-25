@@ -1,3 +1,113 @@
+## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
+
+The review found that the traceback rewrite indexed `node.args.args[3]` after a
+`len(node.args.args) >= 3` guard, so any `__exit__(self, et, ev)` (three arguments) crashed the
+compiler with `IndexError` even when the class was never used.  The guard now requires four
+arguments; shorter signatures are left alone.  A short `__exit__` that a `with` actually calls is
+then refused by name by the existing argument check ("not in the subset: __exit__() called with too
+many positional arguments"), and an unused one compiles where CPython does.
+
+Probes `/tmp/probes/pre197_*` cover 3-argument exits (unused, clean body, raising body, reached via
+an attribute/list/dict), 1- and 2-argument unused exits, keyword-only `tb`, `*args`, defaults and the
+normal 4-argument path on both builds.  Added both regression cases to `test_ail_pre197.py`.
+
+## 2026-10-25 - `__exit__` third argument when the body raised (job-pre197-10252029)
+
+The first still-differing item left by the pre181 review was the traceback argument:
+`__exit__` received None even when the `with` body raised, so `tb is None` printed True where
+CPython passes the active traceback object (`C?-job-pre181-10251538-2`).  AIL does not model
+traceback objects, so the general path now passes a non-None `_AilTraceback` stand-in in the
+exception branch and keeps None on every other exit.  Both paths answer `tb is None` /
+`tb is not None` (and `==` / `!=` against None) from whether the body raised; the typed path maps
+the test to its exception code instead of folding it to a constant.  Any other use of the `tb`
+parameter (`type(tb)`, truthiness, attribute access, passing it to a helper, ...) is refused by
+name at compile time on both builds: "__exit__ uses 'tb' other than in `is None` / `is not None`;
+traceback objects are not modelled".
+
+Probes in `/tmp/probes` (`p_tb1`-`p_tb12`, `p_final`, `p_stop1`) covered clean and raising bodies,
+`is`/`is not`/`==`/`!=` against None, suppression, a returning body, `break`/`continue`, nested
+managers, a `@contextmanager` generator (the pre181 StopIteration case still matches), a manager
+reaching the `with` through an argument, a list item, an attribute and a dict value, and the
+refused `type(tb)` / truthiness / helper / `tb.tb_lineno` uses; all match CPython or are refused by
+name on both builds.  Added `test_ail_pre197.py` (2 tests, both builds) and registered it in
+`ail_check.MODULES`.  Final-state tests: test_ail_pre197, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 pass.
+## 2026-10-25 -- pre183 reapply: builtin/type tuple-member names, bytes membership (job-rbpre183-10252048)
+
+Re-applied the accepted pre183 change on this tree. The bytes/bytearray membership message is
+already fixed here (the current prelude's `_ail_bcontains` keeps the integer-byte path and uses
+the bytes-like text for other operands, as the pre114 row records), so no prelude edit was needed.
+The outstanding part, naming a builtin-function tuple member in `str.startswith`/`endswith` as
+`builtin_function_or_method` (and the type-valued `bool` as `type`) instead of `function`, is now
+applied: the lowerer marks the generated lambda, the FUNC object carries the builtin kind, and
+`ail__tname_c` uses it. User-defined functions still name `function`. Error-only paths.
+
+Probes in `/tmp/probes` covered literals, variables, arguments, list items, dict values and
+attributes, both methods, the scalar form, an early matching member, invalid/negative windows,
+empty tuples, `bool` and `len`, and user-defined functions, on both `cmp.sh` builds; all match
+CPython. `test_ail_pre183.py` keeps the cases.
+## 2026-10-25 - pre126 reapply: itertools `r` validation (job-rbrbpre126-10252049)
+
+The first still-differing item in the job-pre101 review was the general path's negative
+`r`: `permutations`, `combinations` and `combinations_with_replacement` returned `[]`
+instead of raising `ValueError: r must be non-negative`; the same code read `r` as a raw
+int64 field, so a float, str, None, list, tuple or bytes was also accepted. Both general
+emitters now pass the `r` object to one runtime converter (`ail_it_r_index`), which checks
+the type and sign; `permutations` keeps treating a None `r` as "not given". The current
+tree already rejected a negative `r` (job-pre137), so that fix is kept inside the new
+converter. Added `AIL_CURRENT/test_ail_pre126.py`; probes in `/tmp/probes/pre126_r_bounds.py`,
+`pre126_r_types.py` and `pre126_r_sources.py` match CPython on both builds.
+## 2026-10-25 - pre141 review follow-up: recursive calls see hoisted defaults (job-rbpre141-10251549)
+
+Review defect: a recursive call that omitted a hoisted default resolved the hidden
+`_ail_nndefault_N` name in the nested function's own frame, where it was never declared. Without a
+module global of that name the general path refused with an internal "name ... is not defined";
+with one, it silently read the global (`local` printed as `global`, shared lists got the global's
+contents). `_register_nested` now includes the hidden default names in the nested function's free
+names, so they are captured by value from the enclosing frame and the recursive call reads the
+def-time object. Regression program `recursive_defaults` in `test_ail_pre141.py` covers the module
+global collision, shared list/dict/bytearray defaults through recursion, and a keyword-only
+recursive default; probes `p9`-`p13` in `/tmp/probes` add scalars/widths, empty/negative values,
+aliasing, loop redefinition, values from arguments/list items/attributes/dict values, and both
+builds. All match CPython.
+
+## 2026-10-25 - pre141 review follow-up: closure-context def flags (job-rbpre141-10251549)
+
+Review defect: a nested `def` with a non-literal or mutable default inside an escaping nested
+function (`outer` returned as a value) reached `boxclosure._emit_closure_function`, whose C
+preamble never declared the `def`-binding flags that `stmt_FunctionDef` emits. The general path
+failed to compile (`'_ndef1' undeclared`) and the default path then refused by name. The preamble
+now declares every `cctx.def_flag_decls` entry, as `_emit_function` and `_register_nested`
+already did. Probes `d1`-`d6` in `/tmp/probes` cover the review case, non-literal defaults built
+from captured names, shared dict/set/bytearray/tuple-with-list defaults, keyword-only (refused by
+name), redefinition, and literal defaults on both builds; all match CPython except the refusal.
+
+## 2026-10-25 - pre141 re-applied: nested-def defaults evaluated once at the def (job-rbpre141-10251549)
+
+The accepted pre141 change (nested `def` defaults evaluated once, when the `def` statement runs)
+was re-applied on top of the current tree. A default that is not a literal scalar/tuple, and a
+mutable literal default such as `[]`, `{}` or `set()`, is now evaluated into a hidden local at
+the `def` statement; the call site reads that local, so reassigning the source name afterwards
+does not change the default and a shared list stays shared between calls. The hidden name avoids
+every name the enclosing function mentions (`ident_names`). Literal scalar/tuple defaults still
+fill in at the call site. `**kwargs` and positional-only parameters remain refused by name.
+Adapted to the tree's later def-binding flags and module-level default hoisting; added
+`AIL_CURRENT/test_ail_pre141.py`, and the earlier pre89/pre117/fuzz94/fuzz87 checks now compare the
+shared default instead of expecting a refusal. The same tree already had `round()` and other fixes,
+which are unchanged.
+## 2026-10-25 - pre171 reapply: indirect typed calls and worker trap (job-rbrbpre171-10252050)
+
+Re-applied the accepted pre171 change on top of the current tree.  The tree already carried the
+pre87/pre109 partial fix: `_value_referenced` marked names used as values and `_protected` marked
+call sites inside a lambda.  Kept those and added the accepted change's transitive walk
+(`_indirect_names`), so a function called by an indirectly invoked function is also rejected to the
+general path, and `_protected` now short-circuits on an indirect caller scope.  The runtime half is
+unchanged from pre171: `ail_raise_value_adopt` on a parallel worker records the exception's code
+and message through `ail_par_trap_value`, releases the worker's reference, and unwinds inside the
+worker; the join re-raises it on the caller, so a negative shift in a `parallel for` is caught on
+both builds instead of longjmp-ing across threads.  Added `AIL_CURRENT/test_ail_pre171.py` and
+registered it in `ail_check`.  The earlier `test_ail_pre87` callback case is kept.
+
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
@@ -122,6 +232,26 @@ the fold boundary, the out-of-int64 refusals, and the value through an argument,
 attribute, a dict value and a local on both builds.  Probes p_regress, p_orig, p_boundary,
 p_neg, p_routes and p_types matched CPython on HEAD; p_over_literal, p_over_reduced and
 p_over_intermediate were refused by name.
+## 2026-10-25 - class repr of a user class value (job-pre196-10252020)
+
+The first pre-existing item recorded by the rbpre170 review was that `repr(C)` for a user
+class printed `<object>` where CPython prints `<class '__main__.C'>`; `str()`, `print()`,
+containers, f-strings and `%r`/`%s` were the same because they share the writer. The v2
+runtime's `ail__write_repr_body` had no `AIL_T_CLASS` case, so class values fell through to
+the `<object>` default. It now writes CPython's class repr for top-level user classes; the
+builtin-class branch is defensive because no tested construct can obtain a builtin class
+value (`type()`, exception constructors and `__class__` are refused). Nested and
+function-local classes are already refused by name at compile time, so no qualname is needed.
+
+Probes in `/tmp/probes/pre196` (`p1`, `p9`, `p10`, `p16`, `p18`) covered direct, alias,
+argument (including a default), list-item, dict-value, attribute, return, nested-container,
+`str`, `print`, f-string and `%` routes on both builds and match CPython; `p6`/`p7`/`p17`
+(nested, local and `if`-block classes) and `p14`/`p15` (builtin `type()`/`Exception`) are
+refused by name. `p8` rebinds `__name__` and hits the separate unsupported `__module__`
+path. A class value passed to the explicit `format()` builtin still hits the older int-default
+formatter (`unsupported format string passed to non-int`); that path fails identically on the
+base and is not part of this item. Added `AIL_CURRENT/test_ail_pre196.py` and registered it in
+`ail_check.MODULES`.
 
 ## 2026-10-25 - int(s, base) message GC rooting (job-pre180-10251520)
 

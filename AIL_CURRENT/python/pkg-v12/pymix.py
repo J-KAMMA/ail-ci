@@ -332,6 +332,44 @@ def _inside_lambda(node, parents):
     return False
 
 
+def _enclosing_function(node, parents):
+    cur = node
+    while cur in parents:
+        par = parents[cur]
+        if isinstance(par, ast.FunctionDef):
+            return par.name
+        cur = par
+    return MODULE_SCOPE
+
+
+def _indirect_names(tree, fn_facts, parents):
+    """Function names whose call sites are not statically tied to one invocation point: a name
+    loaded as a value (stored in a list, passed as a callback), a call inside a `lambda`, or a
+    function called by one of those.  A boxed `try` at the eventual invocation site cannot be seen
+    from such a call site, so an exception-escaping candidate used this way is not safe to type."""
+    names = set(fn_facts)
+    indirect = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in names:
+            par = parents.get(node)
+            if not (isinstance(par, ast.Call) and par.func is node):
+                indirect.add(node.id)
+    edges = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in names:
+            callee = node.func.id
+            if _inside_lambda(node, parents):
+                indirect.add(callee)
+            caller = _enclosing_function(node, parents)
+            if caller != MODULE_SCOPE:
+                edges.append((caller, callee))
+    while True:
+        added = {callee for caller, callee in edges if caller in indirect} - indirect
+        if not added:
+            return indirect
+        indirect |= added
+
+
 def _protected(name, exc, call_sites, parents, indirect=frozenset(), seen=frozenset()):
     """True iff SOME call site reaching `name` (directly, or through a chain of ordinary boxed
     calls) sits inside a `try/except` for `exc` anywhere up that chain -- walked the way CPython's
@@ -354,6 +392,8 @@ def _protected(name, exc, call_sites, parents, indirect=frozenset(), seen=frozen
             return True
         if scope == MODULE_SCOPE:
             continue                                    # this path ends uncaught -- safe on its own
+        if scope in indirect:
+            return True
         if _protected(scope, exc, call_sites, parents, indirect, seen | {name}):
             return True
     return False
@@ -684,6 +724,7 @@ def analyze(source, classes=()):
     parents = _build_parents(tree)
     esc, call_sites = _escapes(fn_facts, parents)
     indirect = _value_referenced(tree, {n for n in fn_facts if n != MODULE_SCOPE})
+    indirect |= _indirect_names(tree, fn_facts, parents)
     report = MixReport()
     rets = {name: f.ret for name, f in fn_facts.items()}
     # One C return ABI cannot preserve distinct Python tags on different branches.

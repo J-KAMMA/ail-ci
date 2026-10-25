@@ -1169,10 +1169,8 @@ def _is_literal_default(d):
         return False
 
 
-def _is_mutable_literal_default(d):
-    """A literal default that builds a list, dict, set or bytearray (also inside a tuple).  A
-    nested def's defaults are filled in at each call site, so such a value would be a fresh
-    object per call; CPython evaluates it once, when the def runs."""
+def _literal_default_is_mutable(d):
+    """True for a literal default that builds a list/dict/set (or a tuple holding one)."""
     try:
         value = ast.literal_eval(d)
     except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
@@ -1181,7 +1179,9 @@ def _is_mutable_literal_default(d):
     def mutable(v):
         if isinstance(v, (list, dict, set, bytearray)):
             return True
-        return isinstance(v, tuple) and any(mutable(x) for x in v)
+        if isinstance(v, tuple):
+            return any(mutable(x) for x in v)
+        return False
 
     return mutable(value)
 
@@ -3209,6 +3209,7 @@ class Compiler(boxclosure.ClosureMixin):
         node = info['node']
         ctx = Ctx(info['cname'])
         ctx.fn_node = node
+        ctx.ident_names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
         ctx.qualname = (info['owner_class'] + '.' + node.name) if info.get('is_method') else node.name
         ctx.fn_params = set(info['all_params'])
         ctx.bound_params, ctx.fixed_params = _stable_params(node, info['all_params'])
@@ -3318,23 +3319,10 @@ class Compiler(boxclosure.ClosureMixin):
                self.global_slots['class:generator'], info['cname'], c_str_literal(info['node'].name)))
 
     def _register_nested(self, node, outer_ctx):
-        def constant(e):
-            try:
-                ast.literal_eval(e)
-                return True
-            except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
-                return False
-        # defaults that are constants (CPython evaluates them once, when the def runs: for a constant the value
-        # filled in at each call is the same), *args packed into a tuple at the call, keyword-only parameters.
-        # A mutable literal would be a fresh object at each call, so it is refused by name instead.
-        if any(_is_mutable_literal_default(d) for d in node.args.defaults + node.args.kw_defaults):
-            raise Unsupported('a nested def %s with a mutable literal default (a mutable default: '
-                              'list/dict/set); CPython shares one default object between calls'
+        # *args is packed into a tuple at the call; **kwargs and positional-only parameters are not modelled
+        if node.args.kwarg or node.args.posonlyargs:
+            raise Unsupported('a nested def %s with **kwargs or positional-only parameters'
                               % node.name)
-        if node.args.kwarg or node.args.posonlyargs or not all(constant(d) for d in node.args.defaults) \
-                or not all(d is None or constant(d) for d in node.args.kw_defaults):
-            raise Unsupported('a nested def %s with *args/**kwargs/keyword-only/default '
-                              'parameters' % node.name)
         if node.decorator_list:
             raise Unsupported('a decorator on nested def %s' % node.name)
         # CPython binds the function when the def statement runs; a call textually before it (or
@@ -3355,10 +3343,30 @@ class Compiler(boxclosure.ClosureMixin):
         kwonly = [a.arg for a in node.args.kwonlyargs]
         defaults = dict(zip(positional[len(positional) - len(node.args.defaults):], node.args.defaults))
         defaults.update({k: d for k, d in zip(kwonly, node.args.kw_defaults) if d is not None})
+        # CPython evaluates every default ONCE, when the def statement runs. A literal scalar/tuple is
+        # safe to rebuild at each call site; anything else is evaluated into a hidden local at the def
+        # statement (mutable literals too, so `acc=[]` is shared between calls as CPython does).
+        default_inits = []
+        for pname, dexpr in list(defaults.items()):
+            if _is_literal_default(dexpr) and not _literal_default_is_mutable(dexpr):
+                continue
+            while True:
+                hidden = '_ail_nndefault_%d' % getattr(self, 'nndefault_n', 0)
+                self.nndefault_n = getattr(self, 'nndefault_n', 0) + 1
+                if hidden not in outer_ctx.slot_of and hidden not in getattr(outer_ctx, 'ident_names', ()):
+                    break
+            outer_ctx.declare_local(hidden)
+            defaults[pname] = ast.copy_location(ast.Name(id=hidden, ctx=ast.Load()), dexpr)
+            default_inits.append((hidden, dexpr))
         params = positional + ([vararg] if vararg else []) + kwonly
         nonlocal_names = _nonlocal_names(node.body)
         own_bound = set(params) | _scan_assigned_names(node.body) | {node.name}
-        free = sorted(_free_reads(node.body, own_bound) & set(outer_ctx.slot_of) |
+        # A call of this function from inside its own body (a recursive call) fills an omitted
+        # default from the hidden local, so the hidden name must be in this frame too. Capture
+        # it by value from the enclosing frame like any other free name; without it the read
+        # would resolve to a module global of the same name, or fail to compile.
+        hidden_defaults = {hidden for hidden, _ in default_inits}
+        free = sorted(((_free_reads(node.body, own_bound) | hidden_defaults) & set(outer_ctx.slot_of)) |
                       (nonlocal_names & set(outer_ctx.slot_of)))
         for nm in nonlocal_names:
             if nm not in outer_ctx.slot_of:
@@ -3369,7 +3377,8 @@ class Compiler(boxclosure.ClosureMixin):
         by_ptr = [nm for nm in free if nm in nonlocal_names]
         by_val = [nm for nm in free if nm not in nonlocal_names]
         info = {'node': node, 'params': params, 'cname': cname, 'by_val': by_val, 'by_ptr': by_ptr,
-                'positional': positional, 'vararg': vararg, 'kwonly': kwonly, 'defaults': defaults}
+                'positional': positional, 'vararg': vararg, 'kwonly': kwonly, 'defaults': defaults,
+                'default_inits': default_inits}
         outer_ctx.nested_funcs[node.name] = info
         # Compile the nested function body now, in its OWN Ctx/frame, with captured names
         # pre-registered: by-value captures get an ordinary local slot (copied in from the
@@ -4509,6 +4518,8 @@ class Compiler(boxclosure.ClosureMixin):
                                  body=ast.Call(func=ast.Name(id=node.id, ctx=ast.Load()),
                                                args=[ast.Name(id=n, ctx=ast.Load()) for n in names], keywords=[]))
                 ast.fix_missing_locations(ast.copy_location(lam, node))
+                lam._ail_builtin_fn = True
+                lam._ail_builtin_type = node.id in self._BUILTIN_TYPE_NAMES
                 return self.expr(lam, ctx)
             raise Unsupported("name '%s' is not defined" % node.id)
         if (not is_global and node.id in ctx.slot_of and node.id not in ctx.ptr_names and node.id not in ctx.clo_index
@@ -4540,6 +4551,8 @@ class Compiler(boxclosure.ClosureMixin):
     _BUILTIN_VALUE_ARITY = {'len': 1, 'abs': 1, 'ord': 1, 'chr': 1, 'bool': 1, 'repr': 1, 'sorted': 1, 'sum': 1,
                             'any': 1, 'all': 1, 'reversed': 1, 'iter': 1, 'hex': 1, 'oct': 1, 'bin': 1,
                             'divmod': 2, 'pow': 2, 'isinstance': 2}
+    # builtins in _BUILTIN_VALUE_ARITY that are classes, so CPython's type name is `type`
+    _BUILTIN_TYPE_NAMES = frozenset({'bool'})
 
     BINOP_FN = {ast.Add: 'ail_op_add', ast.Sub: 'ail_op_sub', ast.Mult: 'ail_op_mul',
                ast.Div: 'ail_op_truediv', ast.FloorDiv: 'ail_op_floordiv',
@@ -6683,23 +6696,49 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.check()
         return t
 
+    def _range_arg(self, b, ctx):
+        """Convert one already-evaluated range() argument as CPython's PyNumber_Index does: an int
+        or a bool, or an instance's __index__; anything else is the TypeError that names its type."""
+        err = ctx.cur_err_target()
+        if self.dunder_ops:
+            fn = ctx.new_cvar('xfn')
+            xv = ctx.new_cvar('xiv')
+            ctx.emit('if (%s.tag == AIL_T_INST) { ail_d1_fn %s = ail_dun1(%s, AIL_D1_INDEX); '
+                     'if (%s) { ail_obj %s; st = %s(cx, &%s, %s); if (st != AIL_OK) goto %s; '
+                     'if (%s.tag != AIL_T_INT && %s.tag != AIL_T_BOOL) { const char *tn = ail__tname_c(%s); '
+                     'size_t n = strlen(tn) + 64; char *buf = (char *)malloc(n); if (!buf) ail_die("out of memory"); '
+                     'snprintf(buf, n, "__index__ returned non-int (type %%s)", tn); '
+                     'st = ail_raise_c(cx, AIL_B_TYPEERROR, buf); free(buf); goto %s; } '
+                     '%s = %s; } }'
+                     % (b, fn, b, fn, xv, fn, xv, b, err, xv, xv, xv, err, b, xv))
+            ctx.uses_st = True
+        out = ctx.new_cvar('ri')
+        ctx.emit('int64_t %s;' % out)
+        ctx.emit('st = ail__range_index(cx, &%s, %s);' % (out, b))
+        ctx.check()
+        return out
+
     def _b_range(self, args, kwargs, ctx):
         if kwargs:
             raise Unsupported('range() with keyword arguments')
-        if len(args) == 1:
-            lo, hi, st_ = '0LL', '(%s).i' % self.expr(args[0], ctx), '1LL'
-        elif len(args) == 2:
-            lo = '(%s).i' % self.expr(args[0], ctx)
-            hi = '(%s).i' % self.expr(args[1], ctx)
-            st_ = '1LL'
-        elif len(args) == 3:
-            lo = '(%s).i' % self.expr(args[0], ctx)
-            hi = '(%s).i' % self.expr(args[1], ctx)
-            st_ = '(%s).i' % self.expr(args[2], ctx)
-        else:
+        if not 1 <= len(args) <= 3:
             raise Unsupported('range() with %d arguments' % len(args))
+        objs = []
+        for a in args:
+            b = ctx.tmp()
+            ctx.emit('%s = %s;' % (b, self.expr(a, ctx)))
+            objs.append(b)
+        vals = [self._range_arg(b, ctx) for b in objs]
+        if len(vals) == 1:
+            lo, hi, st_, has_start, has_step = '0LL', vals[0], '1LL', 0, 0
+        elif len(vals) == 2:
+            lo, hi, st_, has_start, has_step = vals[0], vals[1], '1LL', 1, 0
+        else:
+            lo, hi, st_, has_start, has_step = vals[0], vals[1], vals[2], 1, 1
         t = ctx.tmp()
-        ctx.emit('%s = ail_range_new(cx, %s, %s, %s);' % (t, lo, hi, st_))
+        ctx.emit('st = ail_bi_range(cx, &%s, %d, %s, %s, %d, %s);'
+                 % (t, has_start, lo, hi, has_step, st_))
+        ctx.check()
         return t
 
     def _conv(self, fname, fn, args, kwargs, ctx):
@@ -7281,7 +7320,7 @@ class Compiler(boxclosure.ClosureMixin):
         src = self._resolve_iter_src(args[0], ctx)
         r = self.expr(r_node, ctx)
         t = ctx.tmp()
-        ctx.emit('st = ail_it_combinations(cx, &%s, %s, (%s).i);' % (t, src, r))
+        ctx.emit('st = ail_it_combinations(cx, &%s, %s, %s);' % (t, src, r))
         ctx.check()
         return t
 
@@ -7291,15 +7330,15 @@ class Compiler(boxclosure.ClosureMixin):
         r_node = args[1] if len(args) > 1 else kwargs.get('r')
         src = self._resolve_iter_src(args[0], ctx)
         if r_node is None or (isinstance(r_node, ast.Constant) and r_node.value is None):
-            has_r, r = '0', '0'     # permutations(xs) and permutations(xs, None) alike
+            has_r, r = '0', 'ail_box_none()'     # permutations(xs) and permutations(xs, None) alike
         else:
             mv = self.expr(r_node, ctx)
             if isinstance(r_node, ast.Constant):
-                has_r, r = '1', '(%s).i' % mv
+                has_r, r = '1', mv
             else:                   # a value known only at run time: None means "all of them"
                 mt = ctx.tmp()
                 ctx.emit('%s = %s;' % (mt, mv))
-                has_r, r = '(%s.tag != AIL_T_NONE)' % mt, '(%s.tag == AIL_T_NONE ? 0 : %s.i)' % (mt, mt)
+                has_r, r = '(%s.tag != AIL_T_NONE)' % mt, mt
         t = ctx.tmp()
         ctx.emit('st = ail_it_permutations(cx, &%s, %s, %s, %s);' % (t, src, has_r, r))
         ctx.check()
@@ -7321,7 +7360,7 @@ class Compiler(boxclosure.ClosureMixin):
         r_node = args[1] if len(args) > 1 else kwargs['r']
         src = self._resolve_iter_src(args[0], ctx)
         t = ctx.tmp()
-        ctx.emit('st = ail_it_combinations_wr(cx, &%s, %s, (%s).i);' % (t, src, self.expr(r_node, ctx)))
+        ctx.emit('st = ail_it_combinations_wr(cx, &%s, %s, %s);' % (t, src, self.expr(r_node, ctx)))
         ctx.check()
         return t
 
@@ -10422,6 +10461,11 @@ class Compiler(boxclosure.ClosureMixin):
             value = self.closure_value(node, ctx, node.name)
             ctx.emit('%s = %s;' % (self.name_ref(node.name, ctx), value))
             return
+        info = ctx.nested_funcs.get(node.name)
+        if info is not None:
+            # CPython evaluates a default when the def statement runs, once per execution.
+            for hidden, dexpr in info.get('default_inits', ()):
+                ctx.emit('%s = %s;' % (self.name_ref(hidden, ctx), self.expr(dexpr, ctx)))
         flag = ctx.nested_def_flags.get(node.name)
         if flag:
             ctx.emit('%s = 1;' % flag)
