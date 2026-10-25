@@ -1,3 +1,20 @@
+## 2026-10-25 - reapply: constant abs() outside int64 (job-rbpre215-10260120)
+
+Re-applied the accepted pre215 change on this tree, which did not yet carry it. A constant
+`abs()` argument is now folded exactly; an out-of-int64 result is refused by name
+(`int64 constant expression out of range`) on both builds, instead of compiling and stopping with
+`integer overflow` where CPython prints the bignum. This covers the direct and literal spellings,
+module constants (including through `_known_module_constants`, which now also resolves a shift
+expression), arguments, list items, attributes, dict values and nested calls. In-range values,
+floats, run-time variables and a program that binds its own `abs` are unchanged. Added
+`AIL_CURRENT/test_ail_pre215.py` and registered it in `ail_check.MODULES`.
+
+Probes `/tmp/probes/p1`-`p26` on both builds: 25 match CPython or are refused by name
+(`p19`-`p21` keep the existing signed-64-bit refusal, `p23` refuses `abs()` by name, `p14`
+refuses `-M` for the newly resolved module constant). `p26` (`alias = abs; alias(-(1 << 63))`)
+still stops with `integer overflow`: that route is outside the accepted change and is unchanged
+from the base tree.
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a

@@ -285,12 +285,8 @@ def _maxsplit_constant_nodes(tree):
     return handled
 
 
-def _check_int64_unary_constants(tree):
-    """Refuse a statically known unary integer constant expression outside int64 by name.
-    `-MIN` on a module constant or a nested literal compiles to the fixed-width trap on the
-    default build, while CPython prints a bignum; the runtime trap stays for values that only
-    reach the unary operation as variables."""
-    maxsplit = _maxsplit_constant_nodes(tree)
+def _known_module_constants(tree):
+    """Module names bound once to a statically known int, for the constant-expression checks."""
     stores = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
@@ -304,8 +300,45 @@ def _check_int64_unary_constants(tree):
         if not isinstance(target, ast.Name) or stores.get(target.id) != 1 or target.id in parameters:
             continue
         value = _constant_int(node.value, known)
+        if value is None:
+            try:
+                value = _const_expr_int(node.value, bounded=False)
+            except _Int64ConstantOverflow:
+                value = None
         if value is not None:
             known[target.id] = value
+    return known
+
+
+def _binds_name(tree, name):
+    """Does the program bind `name` anywhere? A user definition of a built-in stops its folding."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == name and isinstance(node.ctx, (ast.Store, ast.Del)):
+            return True
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == name:
+            return True
+        if isinstance(node, ast.arg) and node.arg == name:
+            return True
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if (alias.asname or alias.name.split('.')[0]) == name:
+                    return True
+        if isinstance(node, ast.ExceptHandler) and node.name == name:
+            return True
+        if isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name == name:
+            return True
+        if isinstance(node, ast.MatchMapping) and node.rest == name:
+            return True
+    return False
+
+
+def _check_int64_unary_constants(tree):
+    """Refuse a statically known unary integer constant expression outside int64 by name.
+    `-MIN` on a module constant or a nested literal compiles to the fixed-width trap on the
+    default build, while CPython prints a bignum; the runtime trap stays for values that only
+    reach the unary operation as variables."""
+    maxsplit = _maxsplit_constant_nodes(tree)
+    known = _known_module_constants(tree)
     for node in ast.walk(tree):
         if not isinstance(node, ast.UnaryOp) or not isinstance(node.op, (ast.UAdd, ast.USub)):
             continue
@@ -314,6 +347,37 @@ def _check_int64_unary_constants(tree):
         value = _constant_int(node, known)
         if value is not None and not -(1 << 63) <= value < 1 << 63:
             error = ValueError(f'int64 constant expression out of range: {value}')
+            error.source_line = node.lineno
+            error.source_column = node.col_offset
+            raise error
+
+
+def _check_int64_abs_constants(tree):
+    """Refuse a constant abs() whose exact value int64 cannot hold, by name.
+
+    `abs(-(1 << 63))` and the literal spelling `abs(-9223372036854775808)` used to compile and
+    then stop with `integer overflow` at run time, where CPython prints 9223372036854775808.  The
+    argument is folded exactly here; an in-range result keeps the ordinary abs lowering, and a
+    program that binds its own `abs` is left alone."""
+    if _binds_name(tree, 'abs'):
+        return
+    known = _known_module_constants(tree)
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'abs' and len(node.args) == 1 and not node.keywords):
+            continue
+        argument = node.args[0]
+        try:
+            value = _const_expr_int(argument, bounded=False)
+        except _Int64ConstantOverflow:
+            value = None
+        if value is None:
+            value = _constant_int(argument, known)
+        if value is None:
+            continue
+        result = abs(value)
+        if not _INT64_MIN <= result <= _INT64_MAX:
+            error = ValueError(f'int64 constant expression out of range: {result}')
             error.source_line = node.lineno
             error.source_column = node.col_offset
             raise error
@@ -528,6 +592,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             if not declarations_only:
                 _check_int64_literals(tree)
                 _check_int64_unary_constants(tree)
+                _check_int64_abs_constants(tree)
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)
             if source_map is not None:
