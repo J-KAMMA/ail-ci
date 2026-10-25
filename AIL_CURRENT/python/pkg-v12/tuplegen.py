@@ -269,7 +269,26 @@ MODF = '''def _ail_modf(x: float) -> _AilT_f_f:
     return _AilT_f_f(f, t)
 '''
 DIVMOD_F = '''def _ail_divmod_f(a: float, b: float) -> _AilT_f_f:
-    return _AilT_f_f(a // b, a % b)
+    if b == 0.0:
+        raise ZeroDivisionError("float divmod()")
+    r = _ail_c_fmod(a, b)
+    adjust = r != 0.0 and (r < 0.0) != (b < 0.0)
+    q = (a - r) / b
+    if adjust:
+        q = q - 1.0
+    if r == 0.0:
+        r = _ail_c_copysign(0.0, b)
+    elif adjust:
+        r = r + b
+    if q == 0.0:
+        q = _ail_c_copysign(0.0, a / b)
+    else:
+        f = _ail_c_floor(q)
+        if q - f > 0.5:
+            q = f + 1.0
+        else:
+            q = f
+    return _AilT_f_f(q, r)
 '''
 PARTITION = '''def _ail_partition(s: str, sep: str) -> _AilT_s_s_s:
     if len(sep) == 0:
@@ -340,6 +359,8 @@ class Gen:
         elts = t[1]
         params = ', '.join('%s: %s' % (fld(e, i), ann_text(e)) for i, e in enumerate(elts))
         body = '\n'.join('        self.%s = %s' % (fld(e, i), fld(e, i)) for i, e in enumerate(elts))
+        if not elts:
+            body = '        pass'   # the empty tuple: a class with no fields still needs a body
         self.out[name] = 'class %s:\n    def __init__(self, %s):\n%s\n' % (name, params, body)
         for e in elts:
             if is_tuple(e):
@@ -369,6 +390,9 @@ class Gen:
         self.out[name] = None
         cls = self.tcls(t)
         elts = t[1]
+        if not elts:
+            self.out[name] = 'def %s(t: %s) -> str:\n    return "()"\n' % (name, cls)
+            return name
         parts = ' + ", " + '.join(self.repr_expr(e, 't.' + fld(e, i)) for i, e in enumerate(elts))
         tail = ' + ",)"' if len(elts) == 1 else ' + ")"'
         self.out[name] = 'def %s(t: %s) -> str:\n    return "(" + %s%s\n' % (name, cls, parts, tail)
@@ -391,9 +415,13 @@ class Gen:
             return name
         self.out[name] = None
         elem = ann_text(t[1])
+        # repr(), not a per-annotation spelling: a heap operation may have put a differently
+        # typed value into a list whose annotation says otherwise (CPython appends before the
+        # failed comparison), and list repr always uses the VALUE's repr.
+        shown = 'repr(x)' if t[1] in SCALARS else self.repr_expr(t[1], 'x')
         self.out[name] = ('def %s(xs: list[%s]) -> str:\n    parts: list[str] = []\n    for x in xs:\n'
                           '        parts.append(%s)\n    return "[" + ", ".join(parts) + "]"\n'
-                          % (name, elem, self.repr_expr(t[1], 'x')))
+                          % (name, elem, shown))
         return name
 
     def tcmp(self, t):

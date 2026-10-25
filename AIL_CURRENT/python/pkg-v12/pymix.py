@@ -35,9 +35,10 @@ Design decisions (so the next brief inherits them, not just the code):
   - CONSERVATIVE EXCEPTION RULE (the one deliberate simplification in this pass, flagged for the
     next brief -- see `REASON_EXC_CAPABLE`): a function is never a candidate if it, or any function
     it can reach through the module's own call graph, contains a `try`, a `raise`, or an operation
-    with any of the typed path's five named traps (division/modulo by a divisor not PROVABLY
-    nonzero, subscript, `.pop()`, dict/set key access, `int()`/`input()` at end-of-input) -- unless
-    every such site is statically provable safe (a nonzero integer-literal divisor). The reason is
+    with any of the typed path's named traps (division/modulo by a divisor not PROVABLY
+    nonzero, subscript, `.pop()`, dict/set key access, `int()`/`input()` at end-of-input, a shift
+    whose count is not a non-negative literal) -- unless every such site is statically provable
+    safe. The reason is
     a real runtime fact, not laziness: the typed path's own exception mechanism
     (`cruntime.py`'s global `ail_exc_stack`/`setjmp`/`longjmp`) and the general path's exception
     mechanism (`pyboxed2.py`/`ail_obj2.h`'s `ail_raise_c`/`ail_ctx` ["boxed" report source]) are
@@ -144,10 +145,17 @@ class _FnFacts:
 
 EXC_TYPE_NAMES = frozenset({'ValueError', 'ZeroDivisionError', 'IndexError', 'KeyError', 'EOFError'})
 _TRAP_EXC = {ast.Div: 'ZeroDivisionError', ast.FloorDiv: 'ZeroDivisionError', ast.Mod: 'ZeroDivisionError'}
+# ck_shl/ck_shr raise ValueError for a negative count (CPython's wording), so a shift is a trap
+# unless the count is a non-negative literal.
+_SHIFT_EXC = {ast.LShift: 'ValueError', ast.RShift: 'ValueError'}
 
 
 def _provably_nonzero(node):
     return isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and node.value != 0
+
+
+def _provably_nonnegative(node):
+    return isinstance(node, ast.Constant) and isinstance(node.value, int) and node.value >= 0
 
 
 def _build_parents(tree):
@@ -184,15 +192,19 @@ def _handler_catches(handler, exc_name):
 
 
 def _raise_site_exc(node):
-    """The exception NAME a given AST node could raise as one of the typed path's five named
-    traps, or `None`. Mirrors `to_c`'s own `EXC_NAMES`/`ail_exc_kind_of` (cruntime.py) -- the same
-    five, nothing invented here."""
+    """The exception NAME a given AST node could raise as one of the typed path's named traps,
+    or `None`. Mirrors `to_c`'s own `EXC_NAMES`/`ail_exc_kind_of` (cruntime.py), plus the shift
+    guards' ValueError, nothing invented here."""
     if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call) and isinstance(node.exc.func, ast.Name):
         return node.exc.func.id if node.exc.func.id in EXC_TYPE_NAMES else None
     if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Name):
         return node.exc.id if node.exc.id in EXC_TYPE_NAMES else None
     if isinstance(node, ast.BinOp) and type(node.op) in _TRAP_EXC and not _provably_nonzero(node.right):
         return _TRAP_EXC[type(node.op)]
+    if isinstance(node, ast.BinOp) and type(node.op) in _SHIFT_EXC and not _provably_nonnegative(node.right):
+        return _SHIFT_EXC[type(node.op)]
+    if isinstance(node, ast.AugAssign) and type(node.op) in _SHIFT_EXC and not _provably_nonnegative(node.value):
+        return _SHIFT_EXC[type(node.op)]
     if isinstance(node, ast.Subscript):
         return 'IndexError'                             # list/str; dict subscript is KeyError too,
                                                           # but IndexError is always in play here
@@ -216,10 +228,43 @@ def _walk_own_body(fn_node):
             stack.extend(ast.iter_child_nodes(n))
 
 
+def _handler_names(handler):
+    """The five named exceptions an `except` clause catches (all of them for a bare `except:` / Exception)."""
+    t = handler.type
+    names = ([t.id] if isinstance(t, ast.Name) else
+             [e.id for e in t.elts if isinstance(e, ast.Name)] if isinstance(t, ast.Tuple) else [])
+    if t is None or 'Exception' in names or 'BaseException' in names:
+        return sorted(EXC_TYPE_NAMES)
+    return [name for name in names if name in EXC_TYPE_NAMES]
+
+
+def _reraise_sites(fn_node):
+    """[(node, exc_name), ...] for every `raise` / `raise e` (e the handler's own name) inside an `except` clause
+    of `fn_node`: the exception it caught leaves again, so the handler does not make it stay inside the function
+    (DIFFERENCES C147: a typed clone whose handler re-raised let the exception past the caller's handler)."""
+    found = []
+
+    def visit(node, handlers):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.FunctionDef):
+                continue
+            if isinstance(child, ast.ExceptHandler):
+                visit(child, handlers + [child])
+                continue
+            if isinstance(child, ast.Raise) and handlers and (
+                    child.exc is None
+                    or (isinstance(child.exc, ast.Name) and child.exc.id == handlers[-1].name)):
+                found.extend((child, name) for name in _handler_names(handlers[-1]))
+            visit(child, handlers)
+    visit(fn_node, [])
+    return found
+
+
 def _self_raise_sites(fn_node):
     """[(node, exc_name), ...] for every operation directly inside `fn_node` (not inside a nested
-    `def`) that could raise one of the five named exceptions."""
-    return [(n, exc) for n in _walk_own_body(fn_node) for exc in [_raise_site_exc(n)] if exc]
+    `def`) that could raise one of the named exceptions."""
+    return ([(n, exc) for n in _walk_own_body(fn_node) for exc in [_raise_site_exc(n)] if exc]
+            + _reraise_sites(fn_node))
 
 
 def _escapes(fn_facts, parents):
@@ -471,24 +516,41 @@ def _one_pass(fn_facts, module_calls):
 MODULE_SCOPE = '<module>'
 
 
-def _collect_calls(tree, fn_facts):
+def _scope_owner(fn_facts):
+    """`id(node) -> (node, facts)` for every node inside every function body, resolved exactly the
+    way `_collect_calls`' own scope lookup did: the FIRST function in `fn_facts` order whose walk
+    reaches the node, a function's own `def` node excluded (a nested def's body belongs to the
+    OUTER function, because the outer one is seen first). Built once per fixed point: the walk of a
+    function body cannot change while the fixed point runs, so looking a call site up must not cost
+    a walk of every other function's body (that was quadratic -- calls x functions x body size, and
+    the whole map is rebuilt on each of the fixed point's own rounds)."""
+    owner = {}
+    for name, f in fn_facts.items():
+        if name == MODULE_SCOPE:
+            continue
+        for n in ast.walk(f.node):
+            if n is not f.node:
+                owner.setdefault(id(n), (n, f))
+    return owner
+
+
+def _collect_calls(tree, fn_facts, owner=None):
     """(callee_name, [arg_kind, ...]) for every call in the module to a name this module defines,
     evaluated against EACH caller's OWN current facts (so call-site evidence keeps improving as the
     fixed point runs -- an argument that is itself a parameter only resolves once ITS caller is
     resolved, which is exactly why this whole thing iterates). A call at module top level is
     evaluated against `fn_facts[MODULE_SCOPE]`, the module body's own pseudo-function scope (see
     `_fixed_point`) -- so `v = int(x); f(v)` at top level resolves `v` exactly the way it would
-    inside a real function."""
+    inside a real function. `owner` is `_scope_owner`'s map, shared by every call in one fixed
+    point (see its docstring)."""
     out = []
     module_f = fn_facts[MODULE_SCOPE]
+    if owner is None:
+        owner = _scope_owner(fn_facts)
 
     def scope_facts_for(node):
-        for name, f in fn_facts.items():
-            if name == MODULE_SCOPE:
-                continue
-            if node in ast.walk(f.node) and node is not f.node:
-                return f
-        return module_f
+        entry = owner.get(id(node))
+        return entry[1] if entry is not None and entry[0] is node else module_f
 
     for n in ast.walk(tree):
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in fn_facts:
@@ -522,8 +584,9 @@ def _module_scope_node(tree):
 def _fixed_point(tree):
     fn_facts = {n.name: _FnFacts(n) for n in tree.body if isinstance(n, ast.FunctionDef)}
     fn_facts[MODULE_SCOPE] = _FnFacts(_module_scope_node(tree))
+    owner = _scope_owner(fn_facts)      # walked once per fixed point, not once per round per call
     for _ in range(MAX_ROUNDS):
-        module_calls = _collect_calls(tree, fn_facts)
+        module_calls = _collect_calls(tree, fn_facts, owner)
         if not _one_pass(fn_facts, module_calls):
             break
     return fn_facts
@@ -626,7 +689,7 @@ def analyze(source, classes=()):
                                      ' this function' % '/'.join(blocking))
             continue
         try:
-            info = {}
+            info = {'_mixed_clone': True}
             pyfunc.to_c(defs_src, entry=name, sig=_scalar_sig(f.params), info=info)
         except Unsupported as e:
             report.rejected[name] = (REASON_TO_C_REFUSED, str(e)[:160])
