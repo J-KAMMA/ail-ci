@@ -1537,7 +1537,13 @@ class Streams:
         if (isinstance(e, ast.Call) and isinstance(e.func, ast.Name) and e.func.id in CONSUMERS
                 and e.args and not any(isinstance(a, ast.Starred) for a in e.args)):
             arg = e.args[0]
-            direct = self.stream_of(arg) is not None
+            src = self.stream_of(arg)
+            direct = src is not None
+            if direct and e.func.id == 'list' and len(e.args) == 1 and not e.keywords and not src.scalar():
+                name = self.name_of(arg)
+                refuse(e, 'list(itertools.%s(...)) builds a list of tuples in CPython; the typed path would build '
+                       'a list of lists there and does not support it. Loop over the stream, or let the general '
+                       'path handle it' % (name or 'stream'))
             if direct or (isinstance(arg, (ast.GeneratorExp, ast.ListComp)) and self.has_itertools(arg)):
                 comp = self.as_genexp(arg) if direct else arg
                 if e.func.id in ('any', 'all') and len(e.args) == 1 and not e.keywords:

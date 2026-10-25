@@ -104,6 +104,17 @@ typed path already had the right text.  Added `test_ail_pre167.py` with the call
 lambda case, the value routes and the `//`/divmod/float neighbours.  An uncaught typed
 division trap still prints only its bare text (it reaches `ail_die` directly); that is
 the separate pre-existing item recorded before pre138 and is unchanged here.
+## 2026-10-24 - list(itertools.permutations(...)) on the typed path (job-pre168-10250413)
+
+The default build generated `ail_list_push(int64_t)` with an `ail_list` value for
+`out = list(itertools.permutations(<literal>, r))` and `return list(...)` (also for
+`combinations`, `combinations_with_replacement` and `product` of two scalar pools), so the C
+compiler rejected the program while the general path matched CPython. The typed lowering now
+refuses materialising a tuple-yielding stream with `list(...)` by name, which sends the default
+build to the general path and makes `AIL_NO_GENERAL=1` report the refusal. Added
+`test_ail_pre168.py`: literal and variable `r`, a return, pools and `r` from an argument /
+list item / attribute / dict value, int, float, str, tuple and empty pools, all compared with
+CPython on the general and default builds, plus the typed refusal.
 
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
 
