@@ -10,7 +10,7 @@ text and a ValueError instead of TypeError for None/list specs); `%`-format prin
 character raw instead of `?`; bytearray's repr quote choice and `int(bytearray())` message differed.  All
 are fixed in `safetyrt.py`, `cruntime.py`, `exctext.py`, `prelude_bytes.py`, `pyboxed2.py` and `pyboxed.py`.
 Two known int64/16-bit-unit limits are recorded in DIFFERENCES (a valid non-BMP UTF-8 decode, and an int
-beyond int64).  `test_ail_hostile_input.py` holds the programs, the regression inputs and a seeded fuzz run.
+beyond int64), plus one unrelated source-shape inference gap found by an over-broad mixed-type slice probe.  `test_ail_hostile_input.py` holds the programs, the regression inputs and a seeded fuzz run.
 Probes in `/tmp/probes` (`p_slice_dyn`, `p_slice_dyn2`, `p_slice_none`, `p_repr`, `p_fmt`, `p_convmsg`,
 `p_int2`, plus the gen_* fuzz corpus) match CPython with sanitizers on both builds; explicit `None`
 slice constants are refused by name on the typed path, so the default build falls back to the general path.
