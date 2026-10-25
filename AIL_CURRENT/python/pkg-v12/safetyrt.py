@@ -842,7 +842,7 @@ static inline int ail2f_body_zero(const char *b) {
    control characters and code points above U+007F become \x<hex>, the rest stay as written.
    A NUL byte is a format code of its own (format(1, '\0')), not the end of the spec. */
 static inline void ail2f_code_text(char *out, size_t osz, uint16_t c) {
-    if (c < 0x20 || c > 0x7f) snprintf(out, osz, "\\x%x", (unsigned)c);
+    if (c <= 0x20 || c > 0x7f) snprintf(out, osz, "\\x%x", (unsigned)c);
     else snprintf(out, osz, "%c", (char)c);
 }
 static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {
@@ -869,9 +869,14 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
     if (ail2f_parse(spec, &f, msg, sizeof msg)) return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
     char type = f.type, code[16];
     if (f.group && type) {
-        /* CPython checks the grouping against the type before it looks at the value */
-        if (type == 'n' || type == 's' || type == 'c' || (f.group == ',' && (type == 'b' || type == 'o' || type == 'x' || type == 'X'))) {
-            snprintf(msg, sizeof msg, "Cannot specify '%c' with '%c'.", f.group, type);
+        /* CPython checks the grouping against the type before it looks at the value, and reports an
+           unrecognised type as a grouping conflict before any unknown-code error ('n', 's' and 'c'
+           never group; ',' cannot group b/o/x/X).  A NUL type is no type here. */
+        if (type == 'n' || type == 's' || type == 'c' ||
+            (f.group == ',' && (type == 'b' || type == 'o' || type == 'x' || type == 'X')) ||
+            !strchr("bcdeEfFgGnosxX%", type)) {
+            ail2f_code_text(code, sizeof code, (unsigned char)type);
+            snprintf(msg, sizeof msg, "Cannot specify '%c' with '%s'.", f.group, code);
             return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
         }
     }

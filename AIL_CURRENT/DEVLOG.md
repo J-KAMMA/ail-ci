@@ -1,3 +1,14 @@
+## 2026-10-25 -- pre225: grouping with an unrecognised type code names the conflict (job-pre225-10260117)
+
+The first still-differing item left by pre206 was `format(12, ',q')` / `format(12, ', ')`:
+AIL reported `Unknown format code 'q'` / `' '` where CPython raises
+`ValueError: Cannot specify ',' with 'q'.` / `'\x20'.`  CPython checks the grouping against the
+type before it reports an unknown type code and before any string sign check; a type code outside
+`bcdeEfFgGnosxX%` is now a grouping conflict, and `ail2f_code_text` escapes a space code as
+`\x20` (DEL stays literal).  Supported groupings and the NUL "no type" case are unchanged.  The
+separate `str` sign-plus-grouping difference (`format('x', '+_')`) still differs and was not
+touched.  Both builds match CPython; `test_ail_pre225.py` covers the five value routes.
+
 ## 2026-10-25 -- pre199: range() with a zero step raises ValueError (job-pre199-10252047)
 
 The first still-differing item left by pre186 was `range(0, 5, 0)`: both builds accepted it and

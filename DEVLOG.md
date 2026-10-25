@@ -1,3 +1,21 @@
+## 2026-10-25 - pre225: grouping with an unrecognised type code names the conflict (job-pre225-10260117)
+
+The first still-differing item left by pre206 was `format(12, ',q')` / `format(12, ', ')`:
+AIL reported `Unknown format code 'q'` / `' '` where CPython raises
+`ValueError: Cannot specify ',' with 'q'.` / `'\x20'.`  CPython checks the grouping against the
+type before it reports an unknown type code and before any string sign check; a type code that is
+not one of `bcdeEfFgGnosxX%` is therefore a grouping conflict, and `ail2f_code_text` now escapes a
+space code as `\x20` in both the grouping and unknown-code messages (space is the only printable
+code CPython escapes; DEL stays literal).  The grouping check for `n`, `s`, `c` and `,` with
+`b/o/x/X` is unchanged, as are supported groupings (`d`, `_b/_o/_x/_X`, `e/f/g/%`) and the NUL
+type, which still means "no type" for this check.  The separate `str` sign-plus-grouping
+difference (`format('x', '+_')`) is still present and was not touched.
+
+Both builds match CPython; `AIL_CURRENT/test_ail_pre225.py` covers int/bool/float/str through a
+literal, an argument, a list item, an attribute and a dict value.  Probes: `pre225_group_type`,
+`pre225_routes`, `pre225_loop`, `pre225_nul` in `/tmp/probes`.
+
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a
