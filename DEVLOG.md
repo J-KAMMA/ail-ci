@@ -1,3 +1,23 @@
+## 2026-10-25 - large special exponents before the constant-fold guard (job-pre236-10260352)
+
+The rbpre190 review left two pre-existing items: `test_ail_pre121`'s stale refusal wording and
+the `>2**20` / `>16M`-bit constant refusals.  Both still reproduced here.  The generic constant
+folders (`pyfunc._const_int_expr`, `ail_chatgpt._constant_int_exact`) evaluated both operands
+before their zero/base shortcuts, so `0 * (1 << 2000000)`, `0 ** (1 << 2000000)`,
+`1 ** (1 << 2000000)` and `(-1) ** (1 << 2000000)` were refused although every result fits
+int64.  They now decide an absorbing zero and the power bases 0/1/-1 before the size guard, as
+`pyfront.int_constant` already did, and retry a huge exponent of such a power at the 2**24-bit
+special limit so its sign and parity are known.  An absorbing zero also folds with an operand
+wider than 2**24 bits (`0 * (1 << 16777216)`); a non-special intermediate beyond 2**20 bits and
+a special exponent beyond 2**24 bits are still refused by name.  The two stale `test_ail_pre121`
+expectations now also accept pre177's `int64 constant out of range` wording (same named refusal
+for the same construct).
+
+Probes `/tmp/probes/p236_*` cover the boundaries, types, negative exponents, module/class/default
+positions and argument/list-item/attribute/dict routes on both builds; `/tmp/probes/p236_special_*`,
+`p236_zero_*` and `p236_cap_zero.py` match CPython, while the genuinely wide non-special cases and
+the `2**24`-bit special boundary are refused by name.  Added `AIL_CURRENT/test_ail_pre236.py`.
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a

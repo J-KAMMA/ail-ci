@@ -362,16 +362,18 @@ def _check_int64_unary_constants(tree):
 
 _CONST_INT_TOO_BIG = object()
 _CONST_INT_BITS = 4096
+_CONST_INT_SPECIAL_BITS = 1 << 24
 
 
-def _constant_int_exact(node):
+def _constant_int_exact(node, _limit=_CONST_INT_BITS):
     """The exact int a constant expression denotes, with a guard against huge intermediates.
-    Pow bases 0/1/-1 and a zero left shift are decided before the 4096-bit guard, since their
-    results fit int64 however large the exponent or shift is."""
+    An absorbing zero and the pow bases 0/1/-1 are decided before the size guard, as in
+    pyfront.int_constant; the other operand of such a power is retried at the special-exponent
+    limit, so a huge exponent still yields its sign and parity."""
     if isinstance(node, ast.Constant) and type(node.value) is int:
         return True, node.value
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert)):
-        ok, value = _constant_int_exact(node.operand)
+        ok, value = _constant_int_exact(node.operand, _limit)
         if not ok:
             return False, None
         if value is _CONST_INT_TOO_BIG:
@@ -385,39 +387,54 @@ def _constant_int_exact(node):
             ast.Add, ast.Sub, ast.Mult, ast.Pow, ast.LShift, ast.RShift,
             ast.FloorDiv, ast.Mod, ast.BitAnd, ast.BitOr, ast.BitXor):
         return False, None
-    left_ok, left = _constant_int_exact(node.left)
-    right_ok, right = _constant_int_exact(node.right)
+    left_ok, left = _constant_int_exact(node.left, _limit)
+    right_ok, right = _constant_int_exact(node.right, _limit)
     if not (left_ok and right_ok):
         return False, None
-    if left is _CONST_INT_TOO_BIG or right is _CONST_INT_TOO_BIG:
-        return True, _CONST_INT_TOO_BIG
     try:
         if isinstance(node.op, ast.Pow):
+            if right is _CONST_INT_TOO_BIG:
+                if left not in (0, 1, -1):
+                    return True, _CONST_INT_TOO_BIG
+                right_ok, right = _constant_int_exact(node.right, _CONST_INT_SPECIAL_BITS)
+                if not right_ok:
+                    return False, None
+                if right is _CONST_INT_TOO_BIG:
+                    return True, _CONST_INT_TOO_BIG
             if right < 0:
                 return False, None
-            if left == 0:
-                value = 1 if right == 0 else 0
+            if right == 0:
+                value = 1
+            elif left is _CONST_INT_TOO_BIG:
+                return True, _CONST_INT_TOO_BIG
+            elif left == 0:
+                value = 0
             elif left == 1:
                 value = 1
             elif left == -1:
                 value = 1 if right % 2 == 0 else -1
-            elif right > _CONST_INT_BITS or left.bit_length() * right > _CONST_INT_BITS:
+            elif left.bit_length() * right > _limit:
                 return True, _CONST_INT_TOO_BIG
             else:
                 value = left ** right
+        elif left is _CONST_INT_TOO_BIG or right is _CONST_INT_TOO_BIG:
+            if isinstance(node.op, (ast.Mult, ast.BitAnd)) and (left == 0 or right == 0):
+                value = 0
+            else:
+                return True, _CONST_INT_TOO_BIG
         elif isinstance(node.op, ast.LShift):
             if right < 0:
                 return False, None
             if left == 0:
                 value = 0
-            elif right > _CONST_INT_BITS or left.bit_length() + right > _CONST_INT_BITS:
+            elif right > _limit or left.bit_length() + right > _limit:
                 return True, _CONST_INT_TOO_BIG
             else:
                 value = left << right
         elif isinstance(node.op, ast.RShift):
             if right < 0:
                 return False, None
-            value = (0 if left >= 0 else -1) if right > _CONST_INT_BITS else left >> right
+            value = (0 if left >= 0 else -1) if right > _limit else left >> right
         elif isinstance(node.op, (ast.FloorDiv, ast.Mod)):
             if right == 0:
                 return False, None
@@ -425,7 +442,7 @@ def _constant_int_exact(node):
         elif isinstance(node.op, ast.Mult):
             if left == 0 or right == 0:
                 value = 0
-            elif left.bit_length() + right.bit_length() > _CONST_INT_BITS:
+            elif left.bit_length() + right.bit_length() > _limit:
                 return True, _CONST_INT_TOO_BIG
             else:
                 value = left * right
