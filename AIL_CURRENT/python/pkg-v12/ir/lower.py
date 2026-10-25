@@ -2524,6 +2524,9 @@ class Lowering(TextLowering):
         if not isinstance(node.func, ast.Name):
             raise NotS0('call of a non-name')
         f = node.func.id
+        if f == '_ail_int2' and len(node.args) == 2 and not node.keywords \
+                and os.environ.get('AIL_SURFACE') == 'python':
+            return self.int_text(node.args[0], node.args[1])
         if f in ctx.funcs and f not in self.places and f not in self.params:
             return self.user_call(f, node, statement)
         if not self.is_builtin(f):
@@ -2535,6 +2538,9 @@ class Lowering(TextLowering):
         if f in ('_ail_sort_perm', '_ail_sort_apply') and statement:
             return self.keyed_sort(f, node)
         if node.keywords:
+            if f == 'int' and len(args) == 1 and len(node.keywords) == 1 \
+                    and node.keywords[0].arg == 'base':
+                return self.int_text(args[0], node.keywords[0].value)
             raise NotS0('keywords to %s()' % f)
         if f == 'ord' and len(args) == 1 and isinstance(args[0], ast.Constant) \
                 and isinstance(args[0].value, str) and len(args[0].value) == 1:
@@ -2593,13 +2599,19 @@ class Lowering(TextLowering):
             return self.coerce(v, I.F64)
         if f == 'int' and len(args) == 1:
             v = self.expr(args[0])
+            if v.type in (I.STRV, BYTES) and os.environ.get('AIL_SURFACE') == 'python':
+                return self.rt('tint_from_str' if v.type == I.STRV else 'tint_from_bytes', [v])
             if v.type == I.STRV:
                 return self.rt('str_to_int', [v])
             if v.type == BYTES:
                 return self.rt('bytes_to_int', [v])
             if v.type == I.F64:
                 return self.b.value('fptosi', [v], I.I64, {'mode': 'ck'})
+            if v.type == TINT:
+                return v
             return self.coerce(v, I.I64)
+        if f in ('int', '_ail_int2') and len(args) == 2:
+            return self.int_text(args[0], args[1])
         if f in ('bin', 'oct', 'hex') and len(args) == 1:
             v = self.expr(args[0])
             if v.type == TINT:
@@ -2625,6 +2637,17 @@ class Lowering(TextLowering):
             self.b.emit('ba.write', [v])
             return None
         raise NotS0('builtin %s()' % f)
+
+    def int_text(self, text, base):
+        """`int(text)` / `int(text, base)` with a str or bytes first argument, on the Python
+        surface: a value beyond int64 is a big int, so this is the tagged-int parse."""
+        if os.environ.get('AIL_SURFACE') != 'python':
+            raise NotS0('int() of text and a base')
+        v = self.expr(text)
+        if v.type not in (I.STRV, BYTES):
+            raise NotS0('int() of a value that is not text')
+        b = self.coerce(self.expr(base), I.I64)
+        return self.rt('tint_from_str_base' if v.type == I.STRV else 'tint_from_bytes_base', [v, b])
 
     def keyed_sort(self, f, node):
         """The two statements sortkeys.py leaves for `xs.sort(key=...)` / `sorted(xs, key=...)`: the permutation

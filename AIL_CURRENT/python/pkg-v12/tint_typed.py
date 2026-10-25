@@ -379,4 +379,122 @@ static inline ail_str ail_tint_str(ail_sarena *A, ail_tint x) {
     free(buf);
     return (ail_str){q, n, 0};
 }
+
+/* int(<str or bytes>) and int(text, base): NUMPARSE does the validation (CPython's own rules,
+   including the limit and the digits' translation), then a value outside int64 is built from the
+   same validated text. */
+static ail_str ail_fmt_repr_str(ail_sarena *A, ail_str s);
+static void ail_tint__int_base_error(void) {
+    static const char msg[] = "int() base must be >= 2 and <= 36, or 0";
+    ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE, msg, (int64_t)(sizeof msg - 1), 0));
+}
+static void ail_tint__int_limit_error(int64_t ndigits) {
+    char msg[160];
+    int n = snprintf(msg, sizeof msg,
+                     "Exceeds the limit (4300 digits) for integer string conversion: value has %lld digits; "
+                     "use sys.set_int_max_str_digits() to increase the limit", (long long)ndigits);
+    ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE, msg, (int64_t)n, 0));
+}
+static void ail_tint__int_literal_error(ail_sarena *A, ail_str rep, int64_t base) {
+    char head[80];
+    int hn = snprintf(head, sizeof head, "invalid literal for int() with base %lld: ", (long long)base);
+    char *msg = (char *)malloc((size_t)hn + (size_t)rep.n + 1);
+    if (!msg) ail_die("out of memory");
+    memcpy(msg, head, (size_t)hn);
+    for (int64_t i = 0; i < rep.n; i++) msg[hn + i] = (char)ail_chr(rep, i);
+    ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE, msg, (int64_t)hn + rep.n, 0));
+    free(msg);
+}
+static void ail_tint__int_bytes_error(ail_sarena *A, const uint8_t *p, int64_t n, int64_t base) {
+    int has_sq = 0, has_dq = 0;
+    for (int64_t i = 0; i < n; i++) { if (p[i] == '\'') has_sq = 1; if (p[i] == '"') has_dq = 1; }
+    uint8_t qc = (has_sq && !has_dq) ? '"' : '\'';
+    char *rep = (char *)malloc((size_t)4 * (size_t)n + 3);
+    if (!rep) ail_die("out of memory");
+    int64_t k = 0;
+    rep[k++] = 'b';
+    rep[k++] = (char)qc;
+    for (int64_t i = 0; i < n; i++) {
+        uint8_t c = p[i];
+        if (c == qc || c == '\\') { rep[k++] = '\\'; rep[k++] = (char)c; }
+        else if (c == '\n') { rep[k++] = '\\'; rep[k++] = 'n'; }
+        else if (c == '\t') { rep[k++] = '\\'; rep[k++] = 't'; }
+        else if (c == '\r') { rep[k++] = '\\'; rep[k++] = 'r'; }
+        else if (c < 0x20 || c >= 0x7f) { char hx[5]; snprintf(hx, sizeof hx, "\\x%02x", (unsigned)c); for (int j = 0; hx[j]; j++) rep[k++] = hx[j]; }
+        else rep[k++] = (char)c;
+    }
+    rep[k++] = (char)qc;
+    ail_str s; s.p = (uint8_t *)rep; s.n = k; s.bytes = 1;
+    ail_tint__int_literal_error(A, s, base);
+    free(rep);
+}
+static inline int ail_tint__digit(uint8_t c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    c = (uint8_t)(c | 0x20);
+    if (c >= 'a' && c <= 'z') return c - 'a' + 10;
+    return 99;
+}
+static ail_tint ail_tint__parse_big(const char *t, int64_t n, int64_t base) {
+    int64_t i = 0, neg = 0, eff = base;
+    while (i < n && (t[i] == ' ' || t[i] == '\t' || t[i] == '\n' || t[i] == '\r' || t[i] == '\v' || t[i] == '\f')) i++;
+    if (i < n && (t[i] == '+' || t[i] == '-')) { neg = t[i] == '-'; i++; }
+    if (base == 0) {
+        if (i + 1 < n && t[i] == '0' && ((t[i + 1] | 0x20) == 'x' || (t[i + 1] | 0x20) == 'o' || (t[i + 1] | 0x20) == 'b')) {
+            eff = (t[i + 1] | 0x20) == 'x' ? 16 : (t[i + 1] | 0x20) == 'o' ? 8 : 2;
+            i += 2;
+        } else if (i < n && t[i] == '0') eff = 8;
+        else eff = 10;
+    } else if (i + 1 < n && t[i] == '0' && ((t[i + 1] | 0x20) == 'x' || (t[i + 1] | 0x20) == 'o' || (t[i + 1] | 0x20) == 'b')) {
+        int pb = (t[i + 1] | 0x20) == 'x' ? 16 : (t[i + 1] | 0x20) == 'o' ? 8 : 2;
+        if (pb == eff) i += 2;
+    }
+    if (i < n && t[i] == '_') i++;
+    size_t cap = (size_t)n / 4 + 2;
+    ail_limb *d = (ail_limb *)calloc(cap, sizeof(ail_limb));
+    if (!d) ail_die("out of memory");
+    size_t dn = 1;
+    for (; i < n; i++) {
+        if (t[i] == '_') continue;
+        dn = ail_bn_muladd1(d, dn, (ail_limb)eff, (ail_limb)ail_tint__digit((uint8_t)t[i]));
+    }
+    while (dn > 1 && d[dn - 1] == 0) dn--;
+    ail_tbig *b = ail_tint__new(dn);
+    memcpy(b->d, d, dn * sizeof(ail_limb));
+    b->n = (uint32_t)dn;
+    free(d);
+    return ail_tint_demote(b, neg ? -1 : 1);
+}
+static AIL_BIGFN ail_tint ail_tint__parse_text(ail_sarena *A, ail_str s, int64_t base) {
+    if (base != 0 && (base < 2 || base > 36)) ail_tint__int_base_error();
+    char stackbuf[128];
+    int64_t len = 0, v = 0, ndigits = 0;
+    char *b = ail__str_ascii(s, stackbuf, (int64_t)sizeof stackbuf, &len);
+    int rc = ail__asc_to_int(b, len, base, &v, &ndigits);
+    if (rc == 0) { if (b != stackbuf) free(b); return ail_tint_from_int64(v); }
+    if (rc == 2) { ail_tint r = ail_tint__parse_big(b, len, base); if (b != stackbuf) free(b); return r; }
+    if (rc == 3) { if (b != stackbuf) free(b); ail_tint__int_limit_error(ndigits); }
+    if (b != stackbuf) free(b);
+    ail_tint__int_literal_error(A, ail_fmt_repr_str(A, s), base);
+    return ail_tint_from_int64(0);
+}
+static AIL_BIGFN ail_tint ail_tint__parse_bytes(ail_sarena *A, const uint8_t *p, int64_t n, int64_t base) {
+    if (base != 0 && (base < 2 || base > 36)) ail_tint__int_base_error();
+    char *b = (char *)malloc((size_t)n + 1);
+    if (!b) ail_die("out of memory");
+    for (int64_t i = 0; i < n; i++) b[i] = p[i] < 127 ? (char)p[i] : '?';
+    int64_t v = 0, ndigits = 0;
+    int rc = ail__asc_to_int(b, n, base, &v, &ndigits);
+    if (rc == 0) { free(b); return ail_tint_from_int64(v); }
+    if (rc == 2) { ail_tint r = ail_tint__parse_big(b, n, base); free(b); return r; }
+    if (rc == 3) { free(b); ail_tint__int_limit_error(ndigits); }
+    free(b);
+    ail_tint__int_bytes_error(A, p, n, base);
+    return ail_tint_from_int64(0);
+}
+static inline ail_tint ail_tint_from_str(ail_sarena *A, int64_t base, ail_str s) {
+    return ail_tint__parse_text(A, s, base);
+}
+static inline ail_tint ail_tint_from_bytes(ail_sarena *A, int64_t base, const uint8_t *p, int64_t n) {
+    return ail_tint__parse_bytes(A, p, n, base);
+}
 '''

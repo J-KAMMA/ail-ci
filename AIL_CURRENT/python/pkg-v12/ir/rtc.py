@@ -98,6 +98,14 @@ _entry('fmt_str', (S,), (S,), 'ail_fmt_gen_str({A}, {0}, {fill}, {align}, {width
 # --- numbers from text
 _entry('str_to_int', (S,), (N,), 'ail_str_to_int({0})', Effects(raises=[VALUE]), parts=('STR',))
 _entry('bytes_to_int', (B,), (N,), 'ail_bytes_to_int({0})', Effects(raises=[VALUE]), parts=('BYTES',))
+_entry('tint_from_str', (S,), (I.TINT,), 'ail_tint_from_str({A}, 10, {0})',
+       Effects(allocs=[ARENA], raises=[VALUE, DIE]), parts=('TINTT', 'STR', 'STRREPR'), arena='s')
+_entry('tint_from_str_base', (S, N), (I.TINT,), 'ail_tint_from_str({A}, {1}, {0})',
+       Effects(allocs=[ARENA], raises=[VALUE, DIE]), parts=('TINTT', 'STR', 'STRREPR'), arena='s')
+_entry('tint_from_bytes', (B,), (I.TINT,), 'ail_tint_from_bytes({A}, 10, ({0}).p, ({0}).n)',
+       Effects(allocs=[ARENA], raises=[VALUE, DIE]), parts=('TINTT', 'STR', 'STRREPR', 'BYTES'), arena='s')
+_entry('tint_from_bytes_base', (B, N), (I.TINT,), 'ail_tint_from_bytes({A}, {1}, ({0}).p, ({0}).n)',
+       Effects(allocs=[ARENA], raises=[VALUE, DIE]), parts=('TINTT', 'STR', 'STRREPR', 'BYTES'), arena='s')
 _entry('str_to_float', (S,), (F,), 'ail_str_to_float({0})', Effects(raises=[VALUE]), parts=('STR', 'FREPR'))
 
 # --- text and bytes
