@@ -285,11 +285,8 @@ def _maxsplit_constant_nodes(tree):
     return handled
 
 
-def _check_int64_abs_constants(tree, known):
-    """Refuse a constant ``abs(MIN)`` (2**63) by name.  AIL ints are fixed width, so the value
-    cannot be represented; CPython prints the bignum.  Only a builtin ``abs`` is considered,
-    and the argument must be statically known.  Other in-range constants fold as before, and
-    a value that reaches ``abs`` only at run time keeps the fixed-width trap."""
+def _abs_is_builtin(tree):
+    """True when no binding of ``abs`` anywhere in the tree can shadow the builtin."""
     bound = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -304,25 +301,18 @@ def _check_int64_abs_constants(tree, known):
             bound.add(node.name)
         elif isinstance(node, (ast.Global, ast.Nonlocal)):
             bound.update(node.names)
-    if 'abs' in bound or 'abs' in known:
-        return
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                and node.func.id == 'abs'):
-            continue
-        if len(node.args) != 1 or node.keywords or isinstance(node.args[0], ast.Starred):
-            continue
-        value = _constant_int(node.args[0], known)
-        if value is None:
-            try:
-                value = _const_expr_int(node.args[0], bounded=False)
-            except _Int64ConstantOverflow:
-                value = None
-        if value == _INT64_MIN:
-            error = ValueError(f'int64 constant expression out of range: {-(value)}')
-            error.source_line = node.lineno
-            error.source_column = node.col_offset
-            raise error
+    return 'abs' not in bound
+
+
+def _pattern_names(node):
+    """Names bound by a match pattern."""
+    names = set()
+    for child in ast.walk(node):
+        if isinstance(child, (ast.MatchAs, ast.MatchStar)) and child.name:
+            names.add(child.name)
+        elif isinstance(child, ast.MatchMapping) and child.rest:
+            names.add(child.rest)
+    return names
 
 
 def _scope_bound_names(statements):
@@ -344,12 +334,47 @@ def _scope_bound_names(statements):
             names.add(node.asname or node.name.split('.')[0])
         elif isinstance(node, ast.ExceptHandler) and node.name:
             names.add(node.name)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            names.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            names.add(node.rest)
         for child in ast.iter_child_nodes(node):
             visit(child)
 
     for statement in statements:
         visit(statement)
     return names
+
+
+def _stable_names(tree):
+    """Names with exactly one binding in the whole tree.  A closure or function body may only
+    inherit such a value from an enclosing scope: any other name can be rebound after the
+    nested scope is created but before it runs, so its value there is not statically known."""
+    counts = {}
+
+    def add(name):
+        counts[name] = counts.get(name, 0) + 1
+
+    def visit(node):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            add(node.name)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            add(node.id)
+        elif isinstance(node, ast.arg):
+            add(node.arg)
+        elif isinstance(node, ast.alias):
+            add(node.asname or node.name.split('.')[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            add(node.name)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            add(node.rest)
+        for child in ast.iter_child_nodes(node):
+            visit(child)
+
+    visit(tree)
+    return {name for name, count in counts.items() if count == 1}
 
 
 def _target_names(node):
@@ -379,28 +404,59 @@ def _walrus_names(node):
             if isinstance(child, ast.NamedExpr) and isinstance(child.target, ast.Name)}
 
 
-def _check_unary_expr(node, env, maxsplit):
+def _known_int(node, env):
+    ok, value = _constant_int_exact(node, env)
+    if ok:
+        return None if value is _CONST_INT_TOO_BIG else value
+    try:
+        return _const_expr_int(node, bounded=False)
+    except _Int64ConstantOverflow:
+        return None
+
+
+def _check_unary_expr(node, env, maxsplit, stable, check_abs):
+    if isinstance(node, ast.NamedExpr):
+        _check_unary_expr(node.value, env, maxsplit, stable, check_abs)
+        if isinstance(node.target, ast.Name):
+            ok, value = _constant_int_exact(node.value, env)
+            if ok and value is not _CONST_INT_TOO_BIG:
+                env[node.target.id] = value
+            else:
+                env.pop(node.target.id, None)
+        return
     if isinstance(node, ast.Lambda):
         for default in list(node.args.defaults) + [d for d in node.args.kw_defaults if d is not None]:
-            _check_unary_expr(default, env, maxsplit)
+            _check_unary_expr(default, env, maxsplit, stable, check_abs)
         child = {name: value for name, value in env.items()
-                 if name not in _parameter_names(node.args) and name not in _walrus_names(node.body)}
-        _check_unary_expr(node.body, child, maxsplit)
+                 if name in stable and name not in _parameter_names(node.args)
+                 and name not in _walrus_names(node.body)}
+        _check_unary_expr(node.body, child, maxsplit, stable, check_abs)
         return
     if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
-        scope = dict(env)
+        deferred = isinstance(node, ast.GeneratorExp)
+        scope = {name: value for name, value in env.items() if not deferred or name in stable}
         for index, generator in enumerate(node.generators):
-            _check_unary_expr(generator.iter, env if index == 0 else scope, maxsplit)
+            _check_unary_expr(generator.iter, env if index == 0 else scope,
+                              maxsplit, stable, check_abs)
             for name in _target_names(generator.target):
                 scope.pop(name, None)
             for condition in generator.ifs:
-                _check_unary_expr(condition, scope, maxsplit)
+                _check_unary_expr(condition, scope, maxsplit, stable, check_abs)
         if isinstance(node, ast.DictComp):
-            _check_unary_expr(node.key, scope, maxsplit)
-            _check_unary_expr(node.value, scope, maxsplit)
+            _check_unary_expr(node.key, scope, maxsplit, stable, check_abs)
+            _check_unary_expr(node.value, scope, maxsplit, stable, check_abs)
         else:
-            _check_unary_expr(node.elt, scope, maxsplit)
+            _check_unary_expr(node.elt, scope, maxsplit, stable, check_abs)
         return
+    if (check_abs and isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'abs' and len(node.args) == 1 and not node.keywords
+            and not isinstance(node.args[0], ast.Starred)):
+        value = _known_int(node.args[0], env)
+        if value == _INT64_MIN:
+            error = ValueError(f'int64 constant expression out of range: {-(value)}')
+            error.source_line = node.lineno
+            error.source_column = node.col_offset
+            raise error
     if (isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub))
             and id(node) not in maxsplit):
         ok, value = _constant_int_exact(node, env)
@@ -411,30 +467,30 @@ def _check_unary_expr(node, env, maxsplit):
             raise error
     for child in ast.iter_child_nodes(node):
         if isinstance(child, ast.expr):
-            _check_unary_expr(child, env, maxsplit)
+            _check_unary_expr(child, env, maxsplit, stable, check_abs)
 
 
-def _check_unary_target(node, env, maxsplit):
+def _check_unary_target(node, env, maxsplit, stable, check_abs):
     if isinstance(node, (ast.Tuple, ast.List)):
         for element in node.elts:
-            _check_unary_target(element, env, maxsplit)
+            _check_unary_target(element, env, maxsplit, stable, check_abs)
     elif isinstance(node, ast.Starred):
-        _check_unary_target(node.value, env, maxsplit)
+        _check_unary_target(node.value, env, maxsplit, stable, check_abs)
     elif isinstance(node, ast.Attribute):
-        _check_unary_expr(node.value, env, maxsplit)
+        _check_unary_expr(node.value, env, maxsplit, stable, check_abs)
     elif isinstance(node, ast.Subscript):
-        _check_unary_expr(node.value, env, maxsplit)
-        _check_unary_expr(node.slice, env, maxsplit)
+        _check_unary_expr(node.value, env, maxsplit, stable, check_abs)
+        _check_unary_expr(node.slice, env, maxsplit, stable, check_abs)
     elif isinstance(node, ast.Slice):
         for part in (node.lower, node.upper, node.step):
             if part is not None:
-                _check_unary_expr(part, env, maxsplit)
+                _check_unary_expr(part, env, maxsplit, stable, check_abs)
 
 
-def _check_unary_scope(statements, env, maxsplit):
+def _check_unary_scope(statements, env, maxsplit, stable, check_abs):
     env = dict(env)
     for statement in statements:
-        _check_unary_stmt(statement, env, maxsplit)
+        _check_unary_stmt(statement, env, maxsplit, stable, check_abs)
     return env
 
 
@@ -445,33 +501,34 @@ def _invalidate(env, statements, extra=()):
         env.pop(name, None)
 
 
-def _check_unary_stmt(stmt, env, maxsplit):
+def _check_unary_stmt(stmt, env, maxsplit, stable, check_abs):
     if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
         for node in stmt.decorator_list:
-            _check_unary_expr(node, env, maxsplit)
+            _check_unary_expr(node, env, maxsplit, stable, check_abs)
         for default in list(stmt.args.defaults) + [d for d in stmt.args.kw_defaults if d is not None]:
-            _check_unary_expr(default, env, maxsplit)
+            _check_unary_expr(default, env, maxsplit, stable, check_abs)
         local = _scope_bound_names(stmt.body) | _parameter_names(stmt.args)
-        child = {name: value for name, value in env.items() if name not in local}
-        _check_unary_scope(stmt.body, child, maxsplit)
+        child = {name: value for name, value in env.items()
+                 if name not in local and name in stable}
+        _check_unary_scope(stmt.body, child, maxsplit, stable, check_abs)
         env.pop(stmt.name, None)
         return
     if isinstance(stmt, ast.ClassDef):
         outer = dict(env)
         for node in stmt.decorator_list + stmt.bases + [keyword.value for keyword in stmt.keywords]:
-            _check_unary_expr(node, env, maxsplit)
+            _check_unary_expr(node, env, maxsplit, stable, check_abs)
         class_env = dict(outer)
         for inner in stmt.body:
             if isinstance(inner, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                _check_unary_stmt(inner, outer, maxsplit)
+                _check_unary_stmt(inner, outer, maxsplit, stable, check_abs)
             else:
-                _check_unary_stmt(inner, class_env, maxsplit)
+                _check_unary_stmt(inner, class_env, maxsplit, stable, check_abs)
         env.pop(stmt.name, None)
         return
     if isinstance(stmt, ast.Assign):
-        _check_unary_expr(stmt.value, env, maxsplit)
+        _check_unary_expr(stmt.value, env, maxsplit, stable, check_abs)
         for target in stmt.targets:
-            _check_unary_target(target, env, maxsplit)
+            _check_unary_target(target, env, maxsplit, stable, check_abs)
         if (len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name)):
             ok, value = _constant_int_exact(stmt.value, env)
             if ok and value is not _CONST_INT_TOO_BIG:
@@ -484,10 +541,10 @@ def _check_unary_stmt(stmt, env, maxsplit):
                     env.pop(name, None)
         return
     if isinstance(stmt, ast.AnnAssign):
-        _check_unary_expr(stmt.annotation, env, maxsplit)
-        _check_unary_target(stmt.target, env, maxsplit)
+        _check_unary_expr(stmt.annotation, env, maxsplit, stable, check_abs)
+        _check_unary_target(stmt.target, env, maxsplit, stable, check_abs)
         if stmt.value is not None:
-            _check_unary_expr(stmt.value, env, maxsplit)
+            _check_unary_expr(stmt.value, env, maxsplit, stable, check_abs)
             if isinstance(stmt.target, ast.Name):
                 ok, value = _constant_int_exact(stmt.value, env)
                 if ok and value is not _CONST_INT_TOO_BIG:
@@ -498,80 +555,97 @@ def _check_unary_stmt(stmt, env, maxsplit):
             env.pop(stmt.target.id, None)
         return
     if isinstance(stmt, ast.AugAssign):
-        _check_unary_expr(stmt.value, env, maxsplit)
-        _check_unary_target(stmt.target, env, maxsplit)
+        _check_unary_expr(stmt.value, env, maxsplit, stable, check_abs)
+        _check_unary_target(stmt.target, env, maxsplit, stable, check_abs)
         for name in _target_names(stmt.target):
             env.pop(name, None)
         return
+    if isinstance(stmt, (ast.Import, ast.ImportFrom)):
+        for alias in stmt.names:
+            env.pop(alias.asname or alias.name.split('.')[0], None)
+        return
+    if isinstance(stmt, ast.Delete):
+        for target in stmt.targets:
+            _check_unary_target(target, env, maxsplit, stable, check_abs)
+            for name in _target_names(target):
+                env.pop(name, None)
+        return
     if isinstance(stmt, ast.If):
-        _check_unary_expr(stmt.test, env, maxsplit)
-        _check_unary_scope(stmt.body, env, maxsplit)
-        _check_unary_scope(stmt.orelse, env, maxsplit)
+        _check_unary_expr(stmt.test, env, maxsplit, stable, check_abs)
+        _check_unary_scope(stmt.body, env, maxsplit, stable, check_abs)
+        _check_unary_scope(stmt.orelse, env, maxsplit, stable, check_abs)
         _invalidate(env, stmt.body + stmt.orelse)
         return
     if isinstance(stmt, ast.While):
-        _check_unary_expr(stmt.test, env, maxsplit)
-        _check_unary_scope(stmt.body, env, maxsplit)
-        _check_unary_scope(stmt.orelse, env, maxsplit)
+        _check_unary_expr(stmt.test, env, maxsplit, stable, check_abs)
+        _check_unary_scope(stmt.body, env, maxsplit, stable, check_abs)
+        _check_unary_scope(stmt.orelse, env, maxsplit, stable, check_abs)
         _invalidate(env, stmt.body + stmt.orelse)
         return
     if isinstance(stmt, (ast.For, ast.AsyncFor)):
-        _check_unary_expr(stmt.iter, env, maxsplit)
+        _check_unary_expr(stmt.iter, env, maxsplit, stable, check_abs)
         body_env = dict(env)
         for name in _target_names(stmt.target):
             body_env.pop(name, None)
-        _check_unary_scope(stmt.body, body_env, maxsplit)
-        _check_unary_scope(stmt.orelse, env, maxsplit)
+        _check_unary_scope(stmt.body, body_env, maxsplit, stable, check_abs)
+        _check_unary_scope(stmt.orelse, env, maxsplit, stable, check_abs)
         _invalidate(env, stmt.body + stmt.orelse, _target_names(stmt.target))
         return
     if isinstance(stmt, (ast.With, ast.AsyncWith)):
         for item in stmt.items:
-            _check_unary_expr(item.context_expr, env, maxsplit)
+            _check_unary_expr(item.context_expr, env, maxsplit, stable, check_abs)
             if item.optional_vars is not None:
                 for name in _target_names(item.optional_vars):
                     env.pop(name, None)
-        _check_unary_scope(stmt.body, env, maxsplit)
+        _check_unary_scope(stmt.body, env, maxsplit, stable, check_abs)
         _invalidate(env, stmt.body)
         return
     if isinstance(stmt, (ast.Try, getattr(ast, 'TryStar', ast.Try))):
         for handler in stmt.handlers:
             if handler.type is not None:
-                _check_unary_expr(handler.type, env, maxsplit)
-        _check_unary_scope(stmt.body, env, maxsplit)
+                _check_unary_expr(handler.type, env, maxsplit, stable, check_abs)
+        _check_unary_scope(stmt.body, env, maxsplit, stable, check_abs)
         for handler in stmt.handlers:
             handler_env = dict(env)
             if handler.name:
                 handler_env.pop(handler.name, None)
-            _check_unary_scope(handler.body, handler_env, maxsplit)
-        _check_unary_scope(stmt.orelse, env, maxsplit)
-        _check_unary_scope(stmt.finalbody, env, maxsplit)
+            _check_unary_scope(handler.body, handler_env, maxsplit, stable, check_abs)
+        _check_unary_scope(stmt.orelse, env, maxsplit, stable, check_abs)
+        _check_unary_scope(stmt.finalbody, env, maxsplit, stable, check_abs)
         _invalidate(env, stmt.body + stmt.orelse + stmt.finalbody,
                     {handler.name for handler in stmt.handlers if handler.name})
         for handler in stmt.handlers:
             _invalidate(env, handler.body)
         return
     if isinstance(stmt, ast.Match):
-        _check_unary_expr(stmt.subject, env, maxsplit)
+        _check_unary_expr(stmt.subject, env, maxsplit, stable, check_abs)
         for case in stmt.cases:
-            _check_unary_expr(case.guard, env, maxsplit) if case.guard is not None else None
-            _check_unary_scope(case.body, env, maxsplit)
-            _invalidate(env, case.body)
+            bound = _pattern_names(case.pattern)
+            case_env = {name: value for name, value in env.items() if name not in bound}
+            for pattern in ast.walk(case.pattern):
+                if isinstance(pattern, ast.MatchValue):
+                    _check_unary_expr(pattern.value, case_env, maxsplit, stable, check_abs)
+            if case.guard is not None:
+                _check_unary_expr(case.guard, case_env, maxsplit, stable, check_abs)
+            _check_unary_scope(case.body, case_env, maxsplit, stable, check_abs)
+            _invalidate(env, case.body, bound)
         return
     for child in ast.iter_child_nodes(stmt):
         if isinstance(child, ast.expr):
-            _check_unary_expr(child, env, maxsplit)
+            _check_unary_expr(child, env, maxsplit, stable, check_abs)
 
 
 def _check_int64_unary_constants(tree):
     """Refuse a statically known unary integer constant expression outside int64 by name.
     `-MIN` on a module constant or a nested literal compiles to the fixed-width trap on the
-    default build, while CPython prints a bignum.  Names are followed through simple
-    assignments in module, function and class scopes, so the same value reaching the unary
-    operation through a local variable is refused too; a value that is only known at run time
-    keeps the fixed-width trap."""
+    default build, while CPython prints a bignum.  Names are followed through assignments in
+    the order they run, so the same value reaching the unary operation through a local variable
+    is refused too.  A nested scope inherits only names that are bound exactly once in the
+    whole tree, because anything else may be rebound before the nested scope runs; a value that
+    is only known at run time keeps the fixed-width trap."""
     maxsplit = _maxsplit_constant_nodes(tree)
-    known = _check_unary_scope(tree.body, {}, maxsplit)
-    _check_int64_abs_constants(tree, known)
+    stable = _stable_names(tree)
+    _check_unary_scope(tree.body, {}, maxsplit, stable, _abs_is_builtin(tree))
 
 
 _CONST_INT_TOO_BIG = object()

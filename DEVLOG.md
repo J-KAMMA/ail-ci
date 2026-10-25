@@ -1,3 +1,28 @@
+## 2026-10-25 - review fix: evaluation-order environment for int64 negation/abs (job-pre249-10260400)
+
+The review of the first pre249 commit found three false refusals: builtin `abs` was judged from
+the end-of-module environment, a function body inherited a global that was rebound before the
+call (also a closure whose captured name was rebound after `inner` was defined), and assignment
+expressions did not update the environment.  The unary `-`/`+` and builtin `abs` checks now run
+in evaluation order; a nested function, lambda or generator inherits only names bound exactly
+once in the whole tree; and `NamedExpr` (also in an `if` test), imports, `del`, annotated, tuple
+and augmented assignments and `match` capture patterns clear or update tracked names.  The
+canonical cases (`b = -(1 << 63); print(-b)`, a stable module constant in a function, a stable
+closure and `abs(MIN)`) are still refused by name on both builds, and all rebinding cases now
+match CPython.  Names assigned on only some control-flow paths are still dropped after the
+branch, so those keep the previous run-time trap.
+
+Probes in `/tmp/probes` on both builds: `p_abs_earlier`, `p_abs_inrange`, `p_annassign`,
+`p_augassign_rebind`, `p_closure_rebind`, `p_delete_rebind`, `p_global_decl_mutate`,
+`p_global_rebind`, `p_global_rebind2`, `p_import_rebind`, `p_inrange_chain`,
+`p_local_reassign_inrange`, `p_match_capture`, `p_param_shadow`, `p_reassign_inrange`,
+`p_tuple_rebind`, `p_walrus_abs`, `p_walrus_if` and `p_walrus_stmt` match CPython;
+`p_abs_function`, `p_abs_later`, `p_closure_stable`, `p_module_constant`, `p_module_direct` and
+`p_target` are refused by name (`int64 constant expression out of range`, exit 2).
+`test_ail_pre249.py` covers the refusals plus the rebinding, walrus and `match` cases.  Final-state
+tests: `test_ail_pre249`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3`.
+
 ## 2026-10-25 - pre249: negation of a statically known int64 minimum in a variable (job-pre249-10260400)
 
 The first still-differing item in the rbpre204 review's pre-existing list was the dynamic

@@ -98,6 +98,15 @@ main()
     b = -(1 << 63)
     print(-b)
 ''',
+    'abs_module_constant': '''MIN = -(1 << 63)
+
+
+def f():
+    return abs(MIN)
+
+
+print(f())
+''',
 }
 
 IN_RANGE = '''class Box:
@@ -143,6 +152,119 @@ def main():
 
 main()
 '''
+
+REBINDING = {
+    'abs_before_rebind': '''b = 2
+print(abs(b))
+b = -(1 << 63)
+''',
+    'abs_after_rebind': '''b = -(1 << 63)
+b = 2
+print(abs(b))
+''',
+    'global_rebind': '''MIN = -(1 << 63)
+
+
+def f():
+    return -MIN
+
+
+MIN = 1
+print(f())
+''',
+    'global_rebind_local': '''b = -(1 << 63)
+
+
+def f():
+    return -b
+
+
+b = 3
+print(f())
+''',
+    'closure_rebind': '''def outer():
+    b = -(1 << 63)
+
+    def inner():
+        return -b
+
+    b = 1
+    return inner()
+
+
+print(outer())
+''',
+    'global_declaration_mutates': '''MIN = -(1 << 63)
+
+
+def f():
+    return -MIN
+
+
+def g():
+    global MIN
+    MIN = 1
+
+
+g()
+print(f())
+''',
+    'walrus_statement': '''def main():
+    b = -(1 << 63)
+    (b := 5)
+    print(-b)
+
+
+main()
+''',
+    'walrus_test': '''def main():
+    b = -(1 << 63)
+    if (b := 5):
+        pass
+    print(-b)
+
+
+main()
+''',
+    'walrus_abs': '''def main():
+    b = -(1 << 63)
+    (b := 5)
+    print(abs(b))
+
+
+main()
+''',
+    'import_alias': '''b = -(1 << 63)
+import math as b
+print(b.pi > 3)
+''',
+    'delete_then_rebind': '''b = -(1 << 63)
+del b
+b = 5
+print(-b)
+''',
+    'annotated_rebind': '''b = -(1 << 63)
+b: int = 5
+print(-b)
+''',
+    'tuple_rebind': '''b = -(1 << 63)
+b, c = 5, 6
+print(-b)
+''',
+    'augmented_rebind': '''b = -(1 << 63)
+b += 1
+print(-b)
+''',
+    'match_capture': '''def main():
+    b = -(1 << 63)
+    match 5:
+        case b:
+            print(-b)
+
+
+main()
+''',
+}
 
 
 def _cpython(directory, name, text):
@@ -210,6 +332,10 @@ class Pre249Tests(unittest.TestCase):
 
     def test_parameter_with_the_constant_name_is_not_folded(self):
         self.matches('parameter', PARAMETER)
+
+    def test_rebinding_after_use_matches_cpython(self):
+        for slug, text in REBINDING.items():
+            self.matches(slug, text)
 
 
 if __name__ == '__main__':
