@@ -324,29 +324,60 @@ _GENEXPR_HASH_REFUSAL = (
     'AIL stores it as a list (no generator identity hash or repr)')
 
 
-def _hashed_genexpr(node):
+def _hashed_genexpr(node, shadowed):
     """The generator expression in a value a set or dict must hash, or None.
 
     A tuple is hashed element by element, and a tuple()/frozenset() call hashes the elements of a
     collection argument; a generator-expression argument to either is consumed, not hashed. A list,
-    set or dict nested in a key is itself unhashable in CPython, so nothing beneath it is reached."""
+    set or dict nested in a key is itself unhashable in CPython, so nothing beneath it is reached.
+    `shadowed` names are bound by the program, so a call of that name is not the builtin."""
     if isinstance(node, ast.GeneratorExp):
         return node
     if isinstance(node, ast.Tuple):
         for elt in node.elts:
-            found = _hashed_genexpr(elt)
+            found = _hashed_genexpr(elt, shadowed)
             if found is not None:
                 return found
     if isinstance(node, ast.IfExp):
-        return _hashed_genexpr(node.body) or _hashed_genexpr(node.orelse)
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ('tuple', 'frozenset'):
+        return _hashed_genexpr(node.body, shadowed) or _hashed_genexpr(node.orelse, shadowed)
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id in ('tuple', 'frozenset') and node.func.id not in shadowed):
         for arg in node.args:
             if isinstance(arg, (ast.List, ast.Tuple, ast.Set)):
                 for elt in arg.elts:
-                    found = _hashed_genexpr(elt)
+                    found = _hashed_genexpr(elt, shadowed)
                     if found is not None:
                         return found
     return None
+
+
+def _bound_names(tree):
+    """Every name the program binds anywhere (a conservative over-approximation).
+
+    A name bound in any scope may resolve to that binding where a checked call appears, so the
+    static refusal must not treat such a call as the builtin. Over-approximating only moves a
+    genuinely-builtin case to the run-time refusal, which names the same construct."""
+    bound = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bound.add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.arg):
+            bound.add(node.arg)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if alias.name != '*':
+                    bound.add(alias.asname or alias.name.split('.')[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            bound.update(node.names)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            bound.add(node.rest)
+    return bound
 
 
 def _check_genexpr_hash_keys(tree):
@@ -362,8 +393,10 @@ def _check_genexpr_hash_keys(tree):
         error.source_column = node.col_offset
         raise error
 
+    shadowed = _bound_names(tree) & {'hash', 'set', 'frozenset', 'tuple'}
+
     def check_key(key):
-        found = _hashed_genexpr(key)
+        found = _hashed_genexpr(key, shadowed)
         if found is not None:
             refuse(found)
 
@@ -380,10 +413,10 @@ def _check_genexpr_hash_keys(tree):
         elif isinstance(node, ast.DictComp):
             check_key(node.key)
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            if node.func.id == 'hash':
+            if node.func.id == 'hash' and node.func.id not in shadowed:
                 for arg in node.args:
                     check_key(arg)
-            elif node.func.id in ('set', 'frozenset'):
+            elif node.func.id in ('set', 'frozenset') and node.func.id not in shadowed:
                 for arg in node.args:
                     if isinstance(arg, (ast.List, ast.Tuple, ast.Set)):
                         for elt in arg.elts:

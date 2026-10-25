@@ -49,6 +49,21 @@ EATEN = 'print(sum(x * x for x in [1, 2]))\ng = (x for x in [1, 2])\nprint(next(
 DICT_VALUE = 'd = {"k": (x for x in [1, 2])}\nprint(len(d), d["k"] is d["k"])\n'
 CONSUMER_KEYS = 'print({tuple(x for x in [1, 2]): 1})\nprint({frozenset(x for x in [1, 2]): 2})\n'
 
+# A name the program binds is not the builtin, so the static refusal must not fire; the call runs
+# as CPython's does.
+SHADOWED = {
+    'module_def_hash': 'def hash(x):\n    return 42\n\n\nprint(hash((x for x in [1, 2])))\n',
+    'nested_def_hash': ('def f():\n    def hash(x):\n        return 42\n    return hash((x for x in [1, 2]))\n\n\n'
+                        'print(f())\n'),
+    'assigned_hash': 'def f(x):\n    return 42\n\n\nhash = f\nprint(hash((x for x in [1, 2])))\n',
+    'nested_def_set': ('def f():\n    def set(x):\n        return len(x)\n    return set([(x for x in [1, 2])])\n\n\n'
+                       'print(f())\n'),
+    'nested_def_frozenset': ('def f():\n    def frozenset(x):\n        return 7\n    return {frozenset([(x for x in [1, 2])]): 1}\n\n\n'
+                             'print(f())\n'),
+    'nested_def_tuple': ('def f():\n    def tuple(x):\n        return 5\n    return {tuple([(x for x in [1, 2])]): 1}\n\n\n'
+                         'print(f())\n'),
+}
+
 
 def _runtime_refusal(test, name, text):
     with tempfile.TemporaryDirectory(prefix='ail-pre222-') as directory:
@@ -80,6 +95,11 @@ class Pre222Tests(unittest.TestCase):
         check_program(self, 'eaten', EATEN)
         check_program(self, 'dict_value', DICT_VALUE)
         check_program(self, 'consumer_keys', CONSUMER_KEYS)
+
+    def test_bound_names_are_not_refused(self):
+        for name, text in SHADOWED.items():
+            with self.subTest(name=name):
+                check_program(self, name, text)
 
 
 if __name__ == '__main__':

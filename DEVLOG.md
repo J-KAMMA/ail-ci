@@ -1,3 +1,22 @@
+## 2026-10-25 - review fix: bound names in the generator-expression hash check (job-pre222-10260116)
+
+The review found that `_check_genexpr_hash_keys` treated every `Name` call of `hash`, `set`,
+`frozenset` or `tuple` as the builtin.  A program that defines, assigns or imports one of those
+names was refused at compile time on both builds although CPython and the base tree run it
+(`def hash(x): return 42; print(hash((x for x in [1, 2])))` prints `42`).  `_bound_names` now
+collects every name the program binds anywhere (stores, `def`/`class` names, parameters, imports,
+`for`/`with`/`except`/match targets, walrus, `global`/`nonlocal`) and the check skips a call whose
+name is in that set, in both the literal/`hash()`/`set()` cases and the `tuple()`/`frozenset()`
+recursion; the run-time `ail_obj_hash` refusal still names a dynamic generator expression.
+Over-approximating a scope only moves a genuinely-builtin call to that run-time refusal.
+
+Probes `/tmp/probes/p28*`, `p29*`, `p31*`, `p33*`-`p35*`, `p41*` match CPython on both builds;
+`p38`/`p39`/`p44` (unshadowed builtin calls) are still refused by name, and `p36`/`p37`/`p40`
+(parameter/`for`-target/`global` bindings, already exit 1 with `unhashable type: 'list'` on base)
+now give the named refusal.  Three cases were added to `test_ail_pre222.py`'s new
+`test_bound_names_are_not_refused`; the `C?-job-pre222-10260116-1` row is now also in the main
+`DIFFERENCES.md` table.
+
 ## 2026-10-25 - review fix: generator expression as a hash key refused by name (job-pre222-10260116)
 
 The pre207 review's only defect was in the DEVLOG itself: it claimed `p8a.py` through `p8v.py` all
