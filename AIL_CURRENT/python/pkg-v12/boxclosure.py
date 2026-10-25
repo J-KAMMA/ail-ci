@@ -376,43 +376,84 @@ class ClosureMixin:
         self._need_callv()
         t = ctx.tmp()
         classes = getattr(self, 'class_values', ())
-        if classes:
+        inst_owners = []
+        for cname in reversed(getattr(self, 'class_order', ())):
+            info = getattr(self, 'classes', {}).get(cname, {}).get('methods', {}).get('__call__')
+            if info is not None:
+                inst_owners.append((cname, info))
+
+        def emit_callv():
+            ctx.emit('st = ail__callv(cx, &%s, %s, %s, %d);'
+                     % (t, fv, ('&' + slots[0]) if slots else 'NULL', len(slots)))
+            ctx.check()
+
+        if classes or inst_owners:
             from pyboxed2 import _PreC
             # a class held in a variable: construct it, as calling the class by name does
             ctx.emit('if (%s.tag == AIL_T_CLASS) {' % fv)
             ctx.indent += 1
-            first = True
-            for cname in classes:
-                ctx.emit('%sif (%s.o == g_slots_arr[%d].o) {' % ('' if first else '} else ', fv,
-                                                                  self.global_slots['class:' + cname]))
-                first = False
+            if classes:
+                first = True
+                for cname in classes:
+                    ctx.emit('%sif (%s.o == g_slots_arr[%d].o) {' % ('' if first else '} else ', fv,
+                                                                      self.global_slots['class:' + cname]))
+                    first = False
+                    ctx.indent += 1
+                    mark = len(ctx.lines)
+                    try:
+                        r = self._call_class(cname, [_PreC(x) for x in slots], {}, ctx)
+                        ctx.emit('%s = %s;' % (t, r))
+                    except Unsupported:
+                        del ctx.lines[mark:]
+                        ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "%s() takes other arguments"); goto %s;'
+                                 % (cname, ctx.cur_err_target()))
+                        ctx.uses_st = True
+                    ctx.indent -= 1
+                ctx.emit('} else {')
                 ctx.indent += 1
-                mark = len(ctx.lines)
-                try:
-                    r = self._call_class(cname, [_PreC(x) for x in slots], {}, ctx)
-                    ctx.emit('%s = %s;' % (t, r))
-                except Unsupported:
-                    del ctx.lines[mark:]
-                    ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "%s() takes other arguments"); goto %s;'
-                             % (cname, ctx.cur_err_target()))
-                    ctx.uses_st = True
+                emit_callv()
                 ctx.indent -= 1
-            ctx.emit('} else {')
-            ctx.indent += 1
-            ctx.emit('st = ail__callv(cx, &%s, %s, %s, %d);' % (t, fv, ('&' + slots[0]) if slots else 'NULL', len(slots)))
-            ctx.check()
-            ctx.indent -= 1
-            ctx.emit('}')
+                ctx.emit('}')
+            else:
+                emit_callv()
             ctx.indent -= 1
             ctx.emit('} else {')
             ctx.indent += 1
-            ctx.emit('st = ail__callv(cx, &%s, %s, %s, %d);' % (t, fv, ('&' + slots[0]) if slots else 'NULL', len(slots)))
-            ctx.check()
+            if inst_owners:
+                # an instance whose class defines __call__: dispatch on its run-time class, most
+                # derived first (a subclass may override __call__, or inherit an owner's).
+                first = True
+                for cname, info in inst_owners:
+                    ctx.emit('%sif (%s.tag == AIL_T_INST && ail_class_is_or_subclass(((ail_instobj *)%s.o)->cls, '
+                             'g_slots_arr[%d])) {' % ('' if first else '} else ', fv, fv,
+                                                      self.global_slots['class:' + cname]))
+                    first = False
+                    ctx.indent += 1
+                    mark = len(ctx.lines)
+                    try:
+                        call_args = self._bind_args('__call__', info, [_PreC(x) for x in slots], {}, ctx)
+                        if not info.get('is_static'):
+                            call_args = [self._self_arg(info, fv)] + call_args
+                        ctx.emit('st = %s(cx, &%s%s);'
+                                 % (info['cname'], t, ''.join(', ' + a for a in call_args)))
+                        ctx.check()
+                    except Unsupported:
+                        del ctx.lines[mark:]
+                        ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "%s.__call__() takes other '
+                                 'arguments"); goto %s;' % (cname, ctx.cur_err_target()))
+                        ctx.uses_st = True
+                    ctx.indent -= 1
+                ctx.emit('} else {')
+                ctx.indent += 1
+                emit_callv()
+                ctx.indent -= 1
+                ctx.emit('}')
+            else:
+                emit_callv()
             ctx.indent -= 1
             ctx.emit('}')
             return t
-        ctx.emit('st = ail__callv(cx, &%s, %s, %s, %d);' % (t, fv, ('&' + slots[0]) if slots else 'NULL', len(slots)))
-        ctx.check()
+        emit_callv()
         return t
 
     def _need_callv(self):
@@ -423,7 +464,17 @@ class ClosureMixin:
             'static ail_st ail__callv(ail_ctx *cx, ail_obj *out, ail_obj fv, ail_obj *args, int64_t n) {\n'
             '    char msg[200];\n'
             '    if (fv.tag != AIL_T_FUNC) {\n'
-            '        snprintf(msg, sizeof msg, "\'%%s\' object is not callable", ail_type_name(fv.tag));\n'
+            '        if (fv.tag == AIL_T_INST || fv.tag == AIL_T_EXC) {\n'
+            '            ail_obj co = ((ail_instobj *)fv.o)->cls;\n'
+            '            if (co.tag == AIL_T_CLASS) {\n'
+            '                ail_str cn = ail_view_to_str(((ail_classobj *)co.o)->name);\n'
+            '                int k = 0; msg[k++] = \'\\\'\';\n'
+            '                for (int64_t i = 0; i < cn.n && k + 24 < (int)sizeof msg; i++) {\n'
+            '                    uint32_t ch = (uint32_t)ail_chr(cn, i); msg[k++] = ch < 128 ? (char)ch : \'?\';\n'
+            '                }\n'
+            '                snprintf(msg + k, sizeof msg - k, "\' object is not callable");\n'
+            '            } else snprintf(msg, sizeof msg, "\'%%s\' object is not callable", ail_type_name(fv.tag));\n'
+            '        } else snprintf(msg, sizeof msg, "\'%%s\' object is not callable", ail_type_name(fv.tag));\n'
             '        return ail_raise_c(cx, AIL_B_TYPEERROR, msg);\n'
             '    }\n'
             '    ail_funcobj *f = (ail_funcobj *)fv.o;\n'

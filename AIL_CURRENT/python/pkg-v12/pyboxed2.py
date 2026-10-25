@@ -5175,6 +5175,27 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.check()
         return t
 
+    def _builtin_method_value_read(self, node, ctx):
+        """`x.upper` and the other str methods are not values the general path can hand out:
+        the attribute lookup would reach ail_inst_getattr and raise AttributeError at run time.
+        Refuse the shape by name instead. A class/module receiver (str.upper as a key function)
+        is a different, supported shape; a user method of the same name is left alone."""
+        attr = node.attr
+        if attr not in self._STR_ONLY_METHODS:
+            return False
+        v = node.value
+        if isinstance(v, ast.Name) and (v.id in self.classes or v.id in self.module_aliases
+                                        or v.id == 'sys' or v.id in self.from_imports
+                                        or v.id in ('str', 'bytes', 'bytearray', 'list', 'dict',
+                                                    'set', 'tuple', 'frozenset', 'int', 'float')):
+            return False
+        kind = self.infer_kind(v, ctx)
+        if kind == 'str':
+            return True
+        if attr in getattr(self, 'user_method_names', ()):
+            return False
+        return kind is None and attr not in getattr(self, 'attr_names', ())
+
     def expr_Attribute(self, node, ctx):
         if node.attr in ('__cause__', '__context__', '__suppress_context__', '__traceback__'):
             # Chaining is not modelled: only one exception is ever live, there is no cause and no
@@ -5218,6 +5239,9 @@ class Compiler(boxclosure.ClosureMixin):
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
         if prop_owners:
             return self._property_read(node, prop_owners, ctx)
+        if self._builtin_method_value_read(node, ctx):
+            raise Unsupported('reading the method .%s as a value (call it: x.%s(...))' %
+                              (node.attr, node.attr))
         obj = self.expr(node.value, ctx)
         if node.attr == 'args' and not any('args' in c['methods'] for c in self.classes.values()):
             # e.args of an exception value (the run time's own carry their message)
