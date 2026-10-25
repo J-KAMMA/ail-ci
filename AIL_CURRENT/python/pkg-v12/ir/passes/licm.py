@@ -17,12 +17,23 @@
    The legacy path versions innermost loops only; this pass also versions outer loops (the
    accesses of an outer index inside inner loops). The slow copy is never versioned again, so
    code grows at most linearly with nesting depth.
+   An access whose index is not `i + c` joins the guard through symbolic bounds (symbounds.py):
+   `cur[up + x]`, `cur[mid + xl[x]]` with `up`, `mid` invariant, x the index of an inner loop and
+   xl a list whose stored values all lie in [0, w - 1] give `up >= 0 and up + w - 1 < len(cur)`, etc.
+   A byte store proven in range this way keeps only its value check (mode `vck`).
+
+A bytearray local (a place) is read with `load` inside the loop; that load is invariant when
+nothing in the loop names the place except loads and the place holds a bytearray wherever the loop
+starts, so it moves in front of the loop and the bytearray gets a span like a list.
 """
 from .. import ir as I
 from .. import effects as E
-from . import simplify
+from . import simplify, symbounds
 
 RESIZING = ('list.push', 'list.pop', 'list.clear', 'rec.push', 'rec.pop', 'ba.push', 'ba.clear', 'ba.extend_lit')
+# what can resize a bytearray (whose span a loop may now hold: a bytearray local's load is hoisted)
+BA_RESIZING = ('ba.push', 'ba.clear', 'ba.extend_lit', 'ba.extend')
+U8SPAN = I.T('span', I.T('u8'))
 # S3a: operations that replace or grow the list they name (the first operand; both for a move)
 REPLACING = ('list.reset', 'list.repeat', 'list.lit', 'list.reserve', 'list.move', 'list.call', 'list.copy',
              'list.rt', 'list.sortperm')
@@ -68,6 +79,8 @@ class Cloner(object):
             self.vmap[r] = nv
             new.results.append(nv)
         self.imap[ins] = new
+        if id(ins) in I.SRC:
+            I.SRC[id(new)] = (new, I.SRC[id(ins)][1])
         return new
 
     def region(self, region):
@@ -99,8 +112,14 @@ class LICM(object):
             return any(E._root(r, self.fn, defs) in (root, 'Any') for r in refs)
         return False
 
-    def resizes(self, ins):
-        if ins.op in RESIZING or ins.op in REPLACING:
+    def resizes(self, ins, kind='list'):
+        """Whether `ins` may resize or replace a list (kind 'list': the rule the list spans have always
+        used), or a bytearray (kind 'bytearray': a bytearray operation that grows or clears one, or a
+        call that may)."""
+        if kind == 'bytearray':
+            if ins.op in BA_RESIZING:
+                return True
+        elif ins.op in RESIZING or ins.op in REPLACING:
             return True
         if ins.op == 'call':
             eff = self.summaries.get(ins.attrs.get('callee'))
@@ -141,6 +160,63 @@ class LICM(object):
                 out.add(top.operands[0])
         return set()
 
+    def bytearrays_held(self, loop, defs):
+        """Bytearray places that hold a bytearray wherever `loop` starts and never stop holding one:
+        given a fresh one (`ba.new`) by a top-level instruction before the statement holding `loop`,
+        and otherwise only ever given one by `ba.new` or by `ba.copyref` of the load of another such
+        place (no `ba.drop`, no `ba.call`, no other instruction naming the place). Their loads may be
+        read early, and a span over them taken, in front of the loop."""
+        first = set()
+        for top in self.fn.body.instrs:
+            if top is loop or any(i is loop for r in top.regions for i in I.walk(r)):
+                break
+            if top.op == 'ba.new':
+                first.add(top.operands[0])
+        else:
+            return set()
+        held = set(first)
+        BA = I.T('obj', I.T('bytearray'))
+
+        def places(ins):
+            return [v for v in ins.operands if v.type.is_place and v.type.pointee == BA]
+
+        def scan(region, fresh, bad, loads):
+            """`fresh`: places that certainly hold a bytearray at this point of the region (given one
+            earlier in straight-line code: `tmp = cur; cur = nxt; nxt = tmp`). Adds to `bad` every
+            held place some instruction may leave without one."""
+            fresh = set(fresh)
+            loads = dict(loads)
+            for ins in region.instrs:
+                if ins.op == 'load':
+                    if places(ins):
+                        loads[ins.result] = ins.operands[0] in held or ins.operands[0] in fresh
+                    continue
+                if ins.regions:
+                    inner = set()
+                    for r in ins.regions:
+                        scan(r, fresh, bad, loads)
+                        for i in I.walk(r):
+                            if i.op != 'load':
+                                inner.update(places(i))
+                    fresh -= inner
+                named = places(ins)
+                if not named:
+                    continue
+                if ins.op == 'ba.new' and named == [ins.operands[0]]:
+                    fresh.add(ins.operands[0])
+                    continue
+                if ins.op == 'ba.copyref' and named == [ins.operands[0]] and loads.get(ins.operands[1]):
+                    fresh.add(ins.operands[0])
+                    continue
+                fresh.difference_update(named)
+                bad.update(v for v in named if v in held)
+        while True:
+            bad = set()
+            scan(self.fn.body, set(), bad, {})
+            if not bad:
+                return held
+            held -= bad
+
     def global_unchanged_in(self, loop, name, defs):
         """Whether nothing in `loop` can store the module variable `name`: no `global.store` of it and
         no call whose summary may write it (a call without a summary may write anything)."""
@@ -169,13 +245,29 @@ class LICM(object):
                 if i.op != 'load':
                     named.update(v for v in i.operands if v.type.is_place)
         ready = self.initialised_before(loop)
+        held = None
 
         def invariant_load(ins):
+            nonlocal held
             if ins.op != 'load':
                 return False
             p = ins.operands[0]
             t = p.type.pointee
-            return p in ready and p not in named and t.head == 'obj' and t.args[0].head == 'class'
+            if p in named or t.head != 'obj':
+                return False
+            if t.args[0].head == 'class':
+                return p in ready
+            if t.args[0].head == 'bytearray':
+                # only where the bytearray then gets a span (nothing in the loop can resize one):
+                # elsewhere the early load only holds a register across the loop's calls
+                if held is None:
+                    stable = not any(self.resizes(i, 'bytearray') for r in loop.regions for i in I.walk(r))
+                    held = self.bytearrays_held(loop, defs) if stable else set()
+                return p in held
+            return False
+
+        first_load = {}           # place -> the result of its first invariant load moved out
+        renames = {}
 
         def visit(region):
             keep = []
@@ -183,6 +275,15 @@ class LICM(object):
                 if (not ins.regions and ins.op != 'const' and (simplify.is_pure(ins, defs) or invariant_load(ins) or (
                         ins.op == 'global.load' and self.global_unchanged_in(loop, ins.attrs['name'], defs)))
                         and all(v not in inside for v in ins.operands)):
+                    if ins.op == 'load':
+                        # every load of the place reads the same object or bytearray in this loop: one
+                        # is enough (one span, not one per read)
+                        p = ins.operands[0]
+                        if p in first_load:
+                            renames[ins.result] = first_load[p]
+                            inside.discard(ins.result)
+                            continue
+                        first_load[p] = ins.result
                     moved.append(ins)
                     for r in ins.results:
                         inside.discard(r)
@@ -193,6 +294,9 @@ class LICM(object):
             region.instrs = keep
         for r in loop.regions:
             visit(r)
+        if renames:
+            for ins in list(I.walk(self.fn.body)) + moved:
+                ins.operands = [renames.get(v, v) for v in ins.operands]
         self.hoisted += len(moved)
         return moved
 
@@ -214,7 +318,7 @@ class LICM(object):
         inside = _inside(loop)
         defs = _defs(self.fn)
         body = [i for r in loop.regions for i in I.walk(r)]
-        any_resize = None
+        any_resize = {}
         lists = []
         for ins in body:
             if ins.op in ('list.get', 'list.set', 'list.len', 'ba.get', 'ba.set', 'ba.len'):
@@ -229,9 +333,10 @@ class LICM(object):
                     if any(self.resizes_root(i, root, defs) for i in body):
                         continue
                 else:
-                    if any_resize is None:
-                        any_resize = any(self.resizes(i) for i in body)
-                    if any_resize:
+                    kind = L.type.args[0].head
+                    if kind not in any_resize:
+                        any_resize[kind] = any(self.resizes(i, kind) for i in body)
+                    if any_resize[kind]:
                         continue
                 lists.append(L)
         if not lists:
@@ -306,7 +411,7 @@ class LICM(object):
             d = defs.get(v)
             if d is None or depth > 6:
                 return []
-            if d.op.startswith('cmp.') and d.operands[0].type == I.I64:
+            if d.op.startswith('cmp.') and d.operands[0].type == I.I64 and d.operands[1].type == I.I64:
                 return [(d.op[4:], d.operands[0], d.operands[1])]
             if d.op == 'if' and len(d.results) == 1:
                 ty, oy = d.regions[0].instrs[-1], d.regions[1].instrs[-1]
@@ -393,6 +498,9 @@ class LICM(object):
         absolute = {}         # container -> largest index known from the range pass (index >= 0)
         facts = getattr(self.fn, 'index_facts', {})
         accesses = []
+        sym = {}              # container -> [(lows, highs, conds)] of the accesses with symbolic bounds
+        byte_stores = []      # byte stores among them (their value check stays: mode vck)
+        bounds = None
         for ins in (i for top in scope for i in I.walk(I.Region([], [top]))):
             if ins.op in ('span.get', 'span.set', 'bytes.get'):
                 base, index = ins.operands[0], ins.operands[1]
@@ -408,6 +516,20 @@ class LICM(object):
                                 ins.op == 'span.set' and base.type == I.T('span', I.T('u8'))):
                             accesses.append(ins)
                         continue
+                if c is None and ins.attrs.get('mode') == 'ck':
+                    if bounds is None:
+                        order = symbounds.value_order(self.fn)
+                        elements = symbounds.ElementFacts(self.fn, defs, order).for_loop(loop)
+                        bounds = symbounds.Bounds(self.fn, inside, defs, order, elements)
+                    b = bounds.of(index)
+                    if b is not None and all(f.terms or f.const >= 0 for f in b[0]) \
+                            and all(f.terms or f.const >= 0 for f in b[2]):
+                        sym.setdefault(base, []).append(b)
+                        if ins.op == 'span.set' and base.type == U8SPAN:
+                            byte_stores.append(ins)
+                        else:
+                            accesses.append(ins)
+                        continue
                 if c is None:
                     span = facts.get(ins)
                     if (ins.attrs.get('mode') == 'ck' and span is not None and span[0] >= 0
@@ -421,13 +543,13 @@ class LICM(object):
                 if ins.attrs.get('mode') == 'ck' and not (
                         ins.op == 'span.set' and base.type == I.T('span', I.T('u8'))):
                     accesses.append(ins)       # (a byte store keeps its value check)
-        if not accesses:
+        if not accesses and not byte_stores:
             return None
         # containers whose accesses are already proven join the guard too (as the legacy path's
         # guard does): in the fast copy their bounds then imply the loop's own tests
         ranges = dict((b, r) for b, r in ranges.items()
                       if any(a.operands[0] is b for a in accesses) or len(ranges) <= 4)
-        if not ranges and not absolute and not down:
+        if not ranges and not absolute and not down and not sym:
             return None
         pre = []
 
@@ -461,6 +583,8 @@ class LICM(object):
             n = emit('span.len' if base.type.head == 'span' else 'bytes.len', [base], I.I64)
             limit = emit('sub', [n, emit('const', [], I.I64, {'value': k})], I.I64, {'mode': 'nsw'})
             conds.append(emit('cmp.le', [hi, limit], I.I1))
+        if sym:
+            conds.extend(self.symbolic_guard(sym, emit))
         guard = conds[-1]
         for c in reversed(conds[:-1]):
             # c and guard, as the lowering builds `and` (the range pass reads this shape)
@@ -474,6 +598,8 @@ class LICM(object):
         fast = cl.instr(loop)
         for a in accesses:
             cl.imap[a].attrs['mode'] = 'nck'
+        for a in byte_stores:
+            cl.imap[a].attrs['mode'] = 'vck'
         results = [I.Value(r.type, r.hint) for r in loop.results]
         fast_region = I.Region([], [fast, I.Instr('yield', list(fast.results))])
         slow_region = I.Region([], [loop, I.Instr('yield', list(loop.results))])
@@ -485,6 +611,78 @@ class LICM(object):
                 self.frozen.add(ins)
         self.versioned += 1
         return pre + [choose]
+
+    @staticmethod
+    def symbolic_guard(sym, emit):
+        """The conditions for the accesses with symbolic bounds (symbounds.py): every atom within
+        +-ATOM_MAX (so the forms, computed with wrapping arithmetic, are exact), every side condition
+        and lower form >= 0, every upper form < the container's length. Each distinct condition once,
+        in a deterministic order."""
+        consts = {}
+
+        def const(c):
+            if c not in consts:
+                consts[c] = emit('const', [], I.I64, {'value': c})
+            return consts[c]
+        values = {}
+
+        def value(f):
+            key = (f.sig, f.const)
+            if key in values:
+                return values[key]
+            acc = None
+            for m, k in f.terms:
+                t = m[0]
+                for a in m[1:]:
+                    t = emit('mul', [t, a], I.I64, {'mode': 'wrap'})
+                if k != 1:
+                    t = emit('mul', [t, const(k)], I.I64, {'mode': 'wrap'})
+                acc = t if acc is None else emit('add', [acc, t], I.I64, {'mode': 'wrap'})
+            if acc is None:
+                acc = const(f.const)
+            elif f.const:
+                acc = emit('add', [acc, const(f.const)], I.I64, {'mode': 'wrap'})
+            values[key] = acc
+            return acc
+        atoms, seen_atoms = [], set()
+        nonneg, below = [], []            # forms that must be >= 0; (form, container) that must be < len
+        seen_nonneg, seen_below = set(), set()
+        for base, items in sym.items():
+            for lows, highs, side in items:
+                for f in lows + side:
+                    for a in f.atoms:
+                        if id(a) not in seen_atoms:
+                            seen_atoms.add(id(a))
+                            atoms.append(a)
+                    if f.terms and (f.sig, f.const) not in seen_nonneg:
+                        seen_nonneg.add((f.sig, f.const))
+                        nonneg.append(f)
+                for f in highs:
+                    for a in f.atoms:
+                        if id(a) not in seen_atoms:
+                            seen_atoms.add(id(a))
+                            atoms.append(a)
+                    if (id(base), f.sig, f.const) not in seen_below:
+                        seen_below.add((id(base), f.sig, f.const))
+                        below.append((f, base))
+        squared = set()
+        for f in nonneg + [f for f, _ in below]:
+            for m, _ in f.terms:
+                if len(m) > 1:
+                    squared.update(id(a) for a in m)
+        conds = []
+        for a in atoms:
+            top = symbounds.ATOM2_MAX if id(a) in squared else symbounds.ATOM_MAX
+            conds.append(emit('cmp.le', [a, const(top)], I.I1))
+            conds.append(emit('cmp.ge', [a, const(-top)], I.I1))
+        for f in nonneg:
+            conds.append(emit('cmp.ge', [value(f), const(0)], I.I1))
+        lens = {}
+        for f, base in below:
+            if id(base) not in lens:
+                lens[id(base)] = emit('span.len' if base.type.head == 'span' else 'bytes.len', [base], I.I64)
+            conds.append(emit('cmp.lt', [value(f), lens[id(base)]], I.I1))
+        return conds
 
     def replace_uses(self, loop, results):
         m = dict(zip(loop.results, results))

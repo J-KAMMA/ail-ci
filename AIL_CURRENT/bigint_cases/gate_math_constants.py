@@ -1,0 +1,10 @@
+import math
+print(math.comb(1001, 1))
+print(math.perm(2000, 1))
+print(math.comb(5000, 1))
+print(math.comb(1001, 0))
+print(math.perm(2000, 0))
+print(math.comb(1001, 2))
+print(math.perm(2000, 2))
+print(math.comb(66, 33))
+print(math.perm(20, 20))

@@ -24,6 +24,8 @@ from .emit_text import TextEmitter, allocates_str, allocates_bytes
 def ctype(t):
     if t in (I.I64, I.I1):
         return 'int64_t'
+    if t == I.TINT:
+        return 'ail_tint'
     if t == I.F64:
         return 'double'
     if t == BYTES:
@@ -75,6 +77,8 @@ LINKAGE_PREFIX = {
 }
 
 _CMP = {'eq': '==', 'ne': '!=', 'lt': '<', 'le': '<=', 'gt': '>', 'ge': '>='}
+_CMP_CODE = {'eq': 0, 'ne': 1, 'lt': 2, 'le': 3, 'gt': 4, 'ge': 5}
+_CMP_REVERSE = {'eq': 'eq', 'ne': 'ne', 'lt': 'gt', 'le': 'ge', 'gt': 'lt', 'ge': 'le'}
 _CK_HELPER = {'add': 'ck_add', 'sub': 'ck_sub', 'mul': 'ck_mul'}
 _PLAIN = {'add': '+', 'sub': '-', 'mul': '*', 'and': '&', 'or': '|', 'xor': '^',
           'fadd': '+', 'fsub': '-', 'fmul': '*'}
@@ -148,6 +152,8 @@ def _zero(t):
         return '(ail_str){0}'
     if t == I.BYTES:
         return '(ail_bytes){0}'
+    if t == I.TINT:
+        return '(ail_tint){0}'
     return '0.0' if t == I.F64 else '0'
 
 
@@ -170,6 +176,7 @@ class _Cx(object):
     def __init__(self, kind, loops_start, scopes_start):
         self.kind = kind
         self.lines = []
+        self.where = None                  # --debug: the (file, line) of the statement being written into `lines`
         self.loops_start = loops_start     # loops with a smaller index belong to an outer function
         self.scopes_start = scopes_start
         self.escapes = {}                  # (op, id(loop)) -> (status, op, loop)
@@ -279,6 +286,16 @@ class Emitter(TextEmitter):
         ins = self.defs.get(v)
         return ins.attrs.get('value') if ins is not None and ins.op == 'const' else None
 
+    def tint_const(self, v):
+        """The Python int behind a `tint.from <const>` value, else None."""
+        ins = self.defs.get(v)
+        if ins is not None and ins.op == 'tint.from':
+            v = ins.operands[0]
+            ins = self.defs.get(v)
+        if ins is not None and ins.op == 'const' and v.type == I.I64:
+            return ins.attrs.get('value')
+        return None
+
     def ref(self, v):
         ins = self.defs.get(v)
         if ins is not None and ins.op == 'const':
@@ -297,7 +314,25 @@ class Emitter(TextEmitter):
         return name
 
     def line(self, depth, text):
+        where = self.cx.where
+        if where is not None:
+            # --debug: `#line` numbers the line after it, so each C line carries its statement's line
+            self.cx.lines.append('#line %d "%s"' % (where[1], where[0]))
         self.cx.lines.append('    ' * depth + text)
+
+    def source_line(self, ins, depth):
+        """`ail build --debug`: from an instruction lowered from a different statement than the last one
+        written to this C function on, AIL_DBG_SITE (the uncaught-exception report) and a `#line N "file"`
+        before each C line (`line`: gdb, addr2line, assert) -- the legacy emitter's two lines
+        (pyfunc._debug_site), but one per C line. Nothing in a release build (I.SRC is empty)."""
+        entry = I.SRC.get(id(ins))
+        if entry is None or entry[1] == self.cx.where:
+            return
+        self.cx.where = entry[1]
+        if ins.op not in ('reraise', 'yield'):
+            # (a region's closing yield and a bare re-raise are not statements that begin to run: the site
+            # stays that of the last statement that did, e.g. the raise a `finally` lets through)
+            self.line(depth, 'AIL_DBG_SITE("%s:%d");' % entry[1])
 
     def use(self, *helpers):
         self.need.update(helpers)
@@ -354,6 +389,8 @@ class Emitter(TextEmitter):
                 if not self.frame:
                     if ins.result.type.pointee in _OWNED_LISTS or ins.result.type.pointee in (I.STRV, I.BYTES):
                         self.line(1, '%s %s = {0};' % (storage(ins.result.type.pointee), c))
+                    elif ins.result.type.pointee == I.TINT:
+                        self.line(1, 'ail_tint %s = {0};' % c)
                     else:
                         self.line(1, '%s %s = 0;' % (ctype(ins.result.type.pointee), c))
         self.text_decls(1)
@@ -395,7 +432,8 @@ class Emitter(TextEmitter):
         if self.is_pending or self.frame:
             self.parts.add('IREXC')
         self.region(fn.body, 1, None)
-        text = '%s {\n%s\n}\n' % (ir_sig, '\n'.join(self.cx.lines))
+        close = '' if self.cx.where is None else '#line %d "%s"\n' % (self.cx.where[1], self.cx.where[0])
+        text = '%s {\n%s\n%s}\n' % (ir_sig, '\n'.join(self.cx.lines), close)
         out = ''.join(self.aux) + text
         if self.byval:
             kind = 'flist' if fn.attrs['ret_list'] == 'flist' else 'list'
@@ -411,6 +449,9 @@ class Emitter(TextEmitter):
             else:
                 body = '    %s;\n    if (__builtin_expect(ail_pending, 0)) ail_ir_rethrow();\n' % call
             out += '%s {\n%s}\n' % (sig, body)
+        if self.cx.where is not None:
+            # --debug: what follows (runtime helpers, the next function) is not on the user's last line
+            out += '#line 1 "<ail-generated>"\n'
         return sig, out
 
     # ------------------------------------------------------------------ exits
@@ -512,12 +553,57 @@ class Emitter(TextEmitter):
     def assign_new(self, depth, v, expr):
         self.line(depth, '%s = %s;' % (_decl(ctype(v.type), self.fresh(v)), expr))
 
+    def range_step_check(self, depth, step):
+        """range()'s step-zero ValueError, catchable like the legacy path's."""
+        import exctext
+        self.parts.add('DIE')
+        self.exception_parts([10])
+        if exctext.ACTIVE:
+            self.parts.update(('STR', 'STRRET', 'DIE', 'EXCSTR'))
+            raise_ = 'ail_raise_msg(AIL_EXC_VALUE, "range() arg 3 must not be zero")'
+        else:
+            raise_ = 'ail_raise_named(AIL_EXC_VALUE)'
+        self.line(depth, 'if (ail_tint_is_zero(%s)) { %s; }' % (step, raise_))
+
     # ------------------------------------------------------------------ instructions
     def instr(self, ins, depth, owner):
         op = ins.op
         o = [self.ref(v) for v in ins.operands] if op not in ('local.alloc', 'const') else []
         if op in ('local.alloc', 'const'):
             return
+        if I.SRC:
+            self.source_line(ins, depth)
+        if op.startswith('tint.'):
+            self.parts.add('TINTT')
+            k = op[5:]
+            if k == 'from':
+                return self.assign_new(depth, ins.result, 'ail_tint_from_int64(%s)' % o[0])
+            if k == 'i64':
+                return self.assign_new(depth, ins.result, 'ail_tint_i64(%s)' % o[0])
+            if k == 'i64sat':
+                return self.assign_new(depth, ins.result, 'ail_tint_i64_sat(%s)' % o[0])
+            if k == 'f64':
+                return self.assign_new(depth, ins.result, 'ail_tint_double(%s)' % o[0])
+            if k == 'nonzero':
+                return self.assign_new(depth, ins.result, '(!ail_tint_is_zero(%s))' % o[0])
+            if k == 'neg':
+                return self.assign_new(depth, ins.result, 'ail_tint_neg(%s)' % o[0])
+            if k == 'inv':
+                return self.assign_new(depth, ins.result, 'ail_tint_sub(ail_tint_neg(%s), ail_tint_from_int64(1))' % o[0])
+            if k in ('add', 'sub', 'mul', 'floordiv', 'floormod', 'shl', 'shr'):
+                fn = {'floormod': 'mod', 'shl': 'lshift', 'shr': 'rshift'}.get(k, k)
+                return self.assign_new(depth, ins.result, 'ail_tint_%s(%s, %s)' % (fn, o[0], o[1]))
+            if k in ('floordiv_i64', 'mod_i64', 'add_i64', 'sub_i64', 'mul_i64', 'mod_i64_i64',
+                     'mod_pos_i64', 'mod_pos_i64_i64'):
+                return self.assign_new(depth, ins.result, 'ail_tint_%s(%s, %s)' % (k, o[0], o[1]))
+            if k in ('eq_i64', 'ne_i64', 'lt_i64', 'le_i64'):
+                fn = {'eq_i64': 'eq_i64', 'ne_i64': 'ne_i64', 'lt_i64': 'lt_i64', 'le_i64': 'le_i64'}[k]
+                return self.assign_new(depth, ins.result, 'ail_tint_%s(%s, %s)' % (fn, o[0], o[1]))
+            if k in ('eq', 'ne', 'lt', 'le'):
+                fn = {'ne': 'eq'}.get(k, k)
+                ex = 'ail_tint_%s(%s, %s)' % (fn, o[0], o[1])
+                return self.assign_new(depth, ins.result, ('(!%s)' % ex) if k == 'ne' else ex)
+            raise I.IRError('no C for %s' % op)
         if op in ('add', 'sub', 'mul'):
             if ins.attrs.get('mode') == 'ck':
                 helper = _CK_HELPER[op]
@@ -579,7 +665,16 @@ class Emitter(TextEmitter):
             self.use(helper)
             return self.assign_new(depth, ins.result, '%s(%s, %s)' % (helper, o[0], o[1]))
         if op.startswith('cmp.'):
-            return self.assign_new(depth, ins.result, '(%s %s %s)' % (o[0], _CMP[op[4:]], o[1]))
+            pred = op[4:]
+            a, b = ins.operands
+            if {a.type, b.type} == {I.I64, I.F64}:
+                self.parts.add('CMPIF')
+                if a.type == I.I64:
+                    return self.assign_new(depth, ins.result, 'ail__ir_cmp_int_float(%s, %s, %d)'
+                                           % (o[0], o[1], _CMP_CODE[pred]))
+                return self.assign_new(depth, ins.result, 'ail__ir_cmp_int_float(%s, %s, %d)'
+                                       % (o[1], o[0], _CMP_CODE[_CMP_REVERSE[pred]]))
+            return self.assign_new(depth, ins.result, '(%s %s %s)' % (o[0], _CMP[pred], o[1]))
         if op == 'select':
             if ins.attrs.get('spec') and ins.result.type == I.I64:
                 return self.assign_new(depth, ins.result, self.mask_select(ins, o))
@@ -589,9 +684,19 @@ class Emitter(TextEmitter):
         if op == 'sitofp':
             return self.assign_new(depth, ins.result, '((double)(%s))' % o[0])
         if op == 'fptosi':
+            # as the legacy `_numeric_to_int`: nan is a ValueError; an infinity, and a finite value
+            # that does not fit int64, an OverflowError (the "integer overflow" die)
             self.parts.add('DIE')
-            self.line(depth, 'if (!(%s >= -9223372036854775808.0 && %s < 9223372036854775808.0)) '
-                             'ail_raise_named(AIL_EXC_VALUE);' % (o[0], o[0]))
+            self.exception_parts([10])
+            import exctext
+            if exctext.ACTIVE:
+                self.parts.update(('STR', 'STRRET', 'DIE', 'EXCSTR'))
+                inner = ('if (%(x)s != %(x)s) ail_raise_msg(AIL_EXC_VALUE, "cannot convert float NaN to integer"); '
+                         'if (__builtin_isinf(%(x)s)) ail_die("cannot convert float infinity to integer"); ')
+            else:
+                inner = 'if (%(x)s != %(x)s) ail_raise_named(AIL_EXC_VALUE); '
+            self.line(depth, ('if (!(%(x)s >= -9223372036854775808.0 && %(x)s < 9223372036854775808.0)) { '
+                              + inner + 'ail_die("integer overflow"); }') % {'x': o[0]})
             return self.assign_new(depth, ins.result, '(int64_t)%s' % o[0])
         if op == 'load':
             return self.assign_new(depth, ins.result, o[0])
@@ -655,6 +760,11 @@ class Emitter(TextEmitter):
                                        'ail__bytearray_get_slow(%s, %s))' % (o[1], sn, sp, o[1], B, o[1]))
             if ins.attrs.get('mode') == 'nck':
                 return self.line(depth, '%s[%s] = (unsigned char)(%s);' % (sp, o[1], o[2]))
+            if ins.attrs.get('mode') == 'vck':
+                # the index is proven in range; the value keeps its check (the slow path raises it)
+                return self.line(depth, 'if ((uint64_t)(%s) <= 255) %s[%s] = (unsigned char)(%s); '
+                                        'else ail__bytearray_set_slow(%s, %s, %s);'
+                                 % (o[2], sp, o[1], o[2], B, o[1], o[2]))
             return self.line(depth, 'if ((uint64_t)(%s) < (uint64_t)%s && (uint64_t)(%s) <= 255) %s[%s] = '
                                     '(unsigned char)(%s); else ail__bytearray_set_slow(%s, %s, %s);'
                              % (o[1], sn, o[2], sp, o[1], o[2], B, o[1], o[2]))
@@ -965,7 +1075,8 @@ class Emitter(TextEmitter):
         self.aux.append('\n'.join(
             ['static int %s(void *frv) {' % fname,
              '    struct %s__fr *fr = (struct %s__fr *)frv;' % (sym, sym)]
-            + body.lines + ['    return 0;', '}', '']))
+            + body.lines + ['    return 0;', '}']
+            + (['#line 1 "<ail-generated>"'] if body.where is not None else []) + ['']))
         st = 'st%d' % n
         self.line(depth, 'int %s = ail_ir_try(%s, fr);' % (st, fname))
         if kind == 'catch':
@@ -1466,21 +1577,63 @@ class Emitter(TextEmitter):
         self.enter_loop(ins, depth)
         for a, v in zip(body.args[1:], o[3:]):
             self.line(depth, '%s %s = %s;' % (ctype(a.type), self.fresh(a), v))
-        index = self.fresh(body.args[0])
         tag = self.open_loop_roots(ins, depth)
-        if self.const_of(ins.operands[2]) == 1:
-            self.line(depth, 'for (int64_t %s = %s; %s < %s; %s += 1) {' % (index, lo, index, hi, index))
+        if body.args[0].type == I.TINT:
+            self.parts.add('TINTT')
+            lo_c, step_c = self.tint_const(ins.operands[0]), self.tint_const(ins.operands[2])
+            fast = not tag and lo_c is not None and lo_c >= 0 and step_c is not None and step_c > 0
+            if fast:
+                stop = 'ir%d' % (self.count + 1)
+                ctl = 'ir%d' % (self.count + 2)
+                fst = 'ir%d' % (self.count + 3)
+                self.count += 3
+                self.line(depth, '{ int64_t %s;' % stop)
+                self.line(depth, 'if (ail_tint_to_int64(%s, &%s) && %s >= 0) {' % (hi, stop, stop))
+                self.names[body.args[0]] = fst
+                self.line(depth + 1, 'for (uint64_t %s = (uint64_t)%dLL; %s < (uint64_t)%s; '
+                                     '%s += (uint64_t)%dLL) {' % (ctl, lo_c, ctl, stop, ctl, step_c))
+                self.line(depth + 2, 'ail_tint %s = ail_tint_from_int64((int64_t)%s);' % (fst, ctl))
+                self.region(body, depth + 2, ins)
+                self.line(depth + 1, '}')
+                self.line(depth, '} else {')
+                index = self.fresh(body.args[0])
+                neg = 'ir%d' % (self.count + 1)
+                self.count += 1
+                self.range_step_check(depth + 1, step)
+                self.line(depth + 1, 'int %s = ail_tint_lt(%s, ail_tint_from_int64(0));' % (neg, step))
+                self.line(depth + 1, 'for (ail_tint %s = %s; %s ? ail_tint_lt(%s, %s) : ail_tint_lt(%s, %s); '
+                                     '%s = ail_tint_add(%s, %s)) {' %
+                          (index, lo, neg, hi, index, index, hi, index, index, step))
+                self.region(body, depth + 2, ins)
+                self.line(depth + 1, '}')
+                self.line(depth, '}')
+                self.line(depth, '}')
+            else:
+                index = self.fresh(body.args[0])
+                neg = 'ir%d' % (self.count + 1)
+                self.count += 1
+                self.range_step_check(depth, step)
+                self.line(depth, 'int %s = ail_tint_lt(%s, ail_tint_from_int64(0));' % (neg, step))
+                self.line(depth, 'for (ail_tint %s = %s; %s ? ail_tint_lt(%s, %s) : ail_tint_lt(%s, %s); '
+                                 '%s = ail_tint_add(%s, %s)) {' %
+                          (index, lo, neg, hi, index, index, hi, index, index, step))
+                self.region(body, depth + 1, ins)
+                self.line(depth, '}')
         else:
-            self.parts.add('RANGEITER')
-            count, k = 'ir%d' % (self.count + 1), 'ir%d' % (self.count + 2)
-            self.count += 2
-            self.line(depth, 'int64_t %s = ail_range_count(%s, %s, %s);' % (count, lo, hi, step))
-            self.line(depth, 'for (int64_t %s = 0; %s < %s; %s++) {' % (k, k, count, k))
-            self.line(depth + 1, 'int64_t %s = ail_range_value(%s, %s, %s);' % (index, lo, step, k))
-        if tag:
-            self.reset_roots(tag, depth + 1)
-        self.region(body, depth + 1, ins)
-        self.line(depth, '}')
+            index = self.fresh(body.args[0])
+            if self.const_of(ins.operands[2]) == 1:
+                self.line(depth, 'for (int64_t %s = %s; %s < %s; %s += 1) {' % (index, lo, index, hi, index))
+            else:
+                self.parts.add('RANGEITER')
+                count, k = 'ir%d' % (self.count + 1), 'ir%d' % (self.count + 2)
+                self.count += 2
+                self.line(depth, 'int64_t %s = ail_range_count(%s, %s, %s);' % (count, lo, hi, step))
+                self.line(depth, 'for (int64_t %s = 0; %s < %s; %s++) {' % (k, k, count, k))
+                self.line(depth + 1, 'int64_t %s = ail_range_value(%s, %s, %s);' % (index, lo, step, k))
+            if tag:
+                self.reset_roots(tag, depth + 1)
+            self.region(body, depth + 1, ins)
+            self.line(depth, '}')
         if tag:
             self.line(depth, '}')
         for r, a in zip(ins.results, body.args[1:]):

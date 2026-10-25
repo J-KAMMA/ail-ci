@@ -151,3 +151,36 @@ class Header:
     def __init__(self, iter_node, target, unpacks=(), pre=(), ifs=()):
         self.iter, self.target, self.unpacks, self.pre = iter_node, target, list(unpacks), list(pre)
         self.ifs = list(ifs)       # lowered conditions every item must satisfy (filter(...) fused into the loop)
+
+
+# built-ins that read a list and hand back something new: a module-level number-tuple list rebuilt for them
+# (`_ail_rc_NAME()`) gives them the same answer
+ROWCONST_READERS = frozenset(('len', 'sorted', 'list', 'sum', 'min', 'max', 'any', 'all', 'enumerate', 'zip',
+                              'reversed', 'set', 'frozenset', 'tuple', 'iter', 'map', 'filter'))
+
+
+def rowconst_in_place(tree, nm):
+    """Whether every mention of the module-level list NAME (a list of number tuples) inside a function reads
+    it in place: walked by for / a comprehension, indexed, tested with `in`, or handed to a built-in that
+    reads it (ROWCONST_READERS). Anything else -- an argument of the program's own function, a name bound
+    to it, a method call on it, a return -- would get a rebuilt copy where CPython shares the one list."""
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        parents = {c: p for p in ast.walk(fn) for c in ast.iter_child_nodes(p)}
+        for n in ast.walk(fn):
+            if not (isinstance(n, ast.Name) and n.id == nm):
+                continue
+            p = parents.get(n)
+            if isinstance(p, (ast.For, ast.AsyncFor, ast.comprehension)) and p.iter is n:
+                continue
+            if isinstance(p, ast.Subscript) and p.value is n and isinstance(p.ctx, ast.Load):
+                continue
+            if (isinstance(p, ast.Compare) and n in p.comparators
+                    and isinstance(p.ops[p.comparators.index(n)], (ast.In, ast.NotIn))):
+                continue
+            if (isinstance(p, ast.Call) and n in p.args and isinstance(p.func, ast.Name)
+                    and p.func.id in ROWCONST_READERS):
+                continue
+            return False
+    return True
