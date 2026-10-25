@@ -624,7 +624,9 @@ def _maxsplit_const(node):
             return 1
         if left in (0, 1, -1):
             return left ** right if left != -1 else (-1 if right & 1 else 1)
-        if right >= 64:
+        # A wider intermediate is fine when the final value fits (pre121's rule), so bound the
+        # work by the result's size instead of rejecting every exponent of 64 or more.
+        if right * max(1, left.bit_length()) > _MAXSPLIT_BITS:
             return _MAXSPLIT_TOO_BIG
         value = left ** right
     elif op is ast.LShift:
