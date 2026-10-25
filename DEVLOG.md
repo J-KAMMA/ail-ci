@@ -1,3 +1,24 @@
+## 2026-10-25 - itertools chooser r types (job-pre194-10251915)
+
+The first still-differing pre-existing item from the `rbpre137` review was the `r` argument of
+`permutations`, `combinations` and `combinations_with_replacement`. Both builds read r's raw
+int field, so `permutations(xs, 1.5)` and `permutations(xs, "2")` returned `[]` where CPython
+raises `TypeError: Expected int as r`, and `combinations(xs, 1.5)`, `combinations(xs, "2")`,
+`combinations(xs, None)` and the `combinations_with_replacement` forms returned an empty result
+or `[()]` where CPython raises `TypeError: '<type>' object cannot be interpreted as an integer`
+(or names a bad `__index__` return). The general path now materializes the permutations pool
+before checking r (an int or bool; None still means all of them), and converts the other two
+with the program's `__index__` dispatch before the pool, keeping the negative-r check after it
+so a non-iterable pool still wins there as in CPython. The typed path refuses a statically known
+non-int r by name and the default build falls back to the general path.
+
+Probes in `/tmp/probes` (`r137_1`, `pre194_types`, `pre194_index`, `pre194_order`,
+`pre194_loops`, `pre194_kw`) covered ints, bools, floats, strs, lists, None, the 0/n/n+1/negative
+boundaries, keyword arguments, `__index__` returning an int / a bool / a non-int / raising,
+argument / list-item / attribute / dict routes, generator evaluation order and for loops on both
+`cmp.sh` builds; all match CPython. Added `AIL_CURRENT/test_ail_pre194.py` and registered it in
+`ail_check.MODULES`.
+
 ## 2026-10-25 - int(s, base) message GC rooting (job-pre180-10251520)
 
 Review follow-up. The rewritten general-path `ail__int_badlit` built the message head string,

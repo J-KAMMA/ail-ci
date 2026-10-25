@@ -842,6 +842,11 @@ class Streams:
         r = got.get('r')
         if isinstance(r, ast.Constant) and r.value is None:
             r = None
+        if r is not None:
+            kind = self.expr_kind(r)
+            if kind not in (None, 'int', 'bool'):
+                refuse(call, 'itertools.%s: r must be an int (CPython raises TypeError for %s)'
+                       % (name, kind))
         return PoolStream(self, call, name, got['iterable'], r)
 
     _SCALAR_TYPES = ('int', 'float', 'str', 'bool', 'bytes')

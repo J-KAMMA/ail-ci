@@ -20370,12 +20370,31 @@ static inline ail_st ail_it_product_repeat(ail_ctx *cx, ail_obj *out, ail_obj a,
 static inline ail_st ail__it_reject_negative_r(ail_ctx *cx) {
     return ail_raise_c(cx, AIL_B_VALUEERROR, "r must be non-negative");
 }
-static inline ail_st ail_it_permutations(ail_ctx *cx, ail_obj *out, ail_obj iterable, int has_r, int64_t r) {
+/* permutations() takes only an int or a bool for r (None means "all of them", handled by the
+   caller) and checks it after the pool is materialized; combinations() and
+   combinations_with_replacement() also run __index__, convert r before the pool, and keep the
+   negative-r check after it, as CPython does. */
+static inline ail_st ail__it_perm_r(ail_ctx *cx, ail_obj x, int64_t *out) {
+    if (x.tag == AIL_T_INT || x.tag == AIL_T_BOOL) { *out = x.i; return AIL_OK; }
+    return ail_raise_c(cx, AIL_B_TYPEERROR, "Expected int as r");
+}
+static inline ail_st ail__it_index_r(ail_ctx *cx, ail_obj x, int had_index, int64_t *out) {
+    if (x.tag == AIL_T_INT || x.tag == AIL_T_BOOL) { *out = x.i; return AIL_OK; }
+    char buf[160];
+    if (had_index) snprintf(buf, sizeof buf, "__index__ returned non-int (type %s)", ail__tname_c(x));
+    else snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail__tname_c(x));
+    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+}
+static inline ail_st ail_it_permutations(ail_ctx *cx, ail_obj *out, ail_obj iterable, int has_r, ail_obj r_obj) {
     ail_obj pr_[2]; pr_[1] = ail_box_none();
     ail_st st = ail__materialize(cx, &pr_[0], iterable); if (st != AIL_OK) return st;
     AIL_ROOT_N(cx, fr, pr_, 2); /* 0=pool 1=result */
     ail_vecobj *pool = (ail_vecobj *)pr_[0].o;
-    int64_t n = pool->n; int64_t rr = has_r ? r : n;
+    int64_t n = pool->n; int64_t rr = n;
+    if (has_r) {
+        st = ail__it_perm_r(cx, r_obj, &rr);
+        if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    }
     pr_[1] = ail_list_new(cx); ail_obj res = pr_[1];
     if (rr < 0) { AIL_FRAME_LEAVE(cx, fr); return ail__it_reject_negative_r(cx); }
     if (rr > n) { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }

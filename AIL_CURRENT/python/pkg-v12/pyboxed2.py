@@ -7265,14 +7265,37 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.check()
         return t
 
+    def _it_index_r(self, r_node, ctx):
+        """Evaluate combinations' r, run __index__ when the program has classes, and check the
+        result is an int or a bool (CPython's PyNumber_AsSsize_t path)."""
+        t = ctx.tmp()
+        ctx.emit('%s = %s;' % (t, self.expr(r_node, ctx)))
+        had = '0'
+        if self.dunder_ops:
+            h = ctx.new_cvar('ih')
+            fn = ctx.new_cvar('ifn')
+            xv = ctx.new_cvar('xiv')
+            err = ctx.cur_err_target()
+            ctx.emit('int %s = 0;' % h)
+            ctx.emit('if (%s.tag == AIL_T_INST) { ail_d1_fn %s = ail_dun1(%s, AIL_D1_INDEX); '
+                     'if (%s) { ail_obj %s; %s = 1; st = %s(cx, &%s, %s); if (st != AIL_OK) goto %s; %s = %s; } }'
+                     % (t, fn, t, fn, xv, h, fn, xv, t, err, t, xv))
+            ctx.uses_st = True
+            had = h
+        iv = ctx.new_cvar('ir')
+        ctx.emit('int64_t %s;' % iv)
+        ctx.emit('st = ail__it_index_r(cx, %s, %s, &%s);' % (t, had, iv))
+        ctx.check()
+        return iv
+
     def _lib_combinations(self, args, kwargs, ctx):
         if kwargs and set(kwargs) != {'r'} or len(args) + len(kwargs) != 2:
             raise Unsupported('combinations() with other than (iterable, r)')
         r_node = args[1] if len(args) > 1 else kwargs['r']
         src = self._resolve_iter_src(args[0], ctx)
-        r = self.expr(r_node, ctx)
+        r = self._it_index_r(r_node, ctx)
         t = ctx.tmp()
-        ctx.emit('st = ail_it_combinations(cx, &%s, %s, (%s).i);' % (t, src, r))
+        ctx.emit('st = ail_it_combinations(cx, &%s, %s, %s);' % (t, src, r))
         ctx.check()
         return t
 
@@ -7282,17 +7305,13 @@ class Compiler(boxclosure.ClosureMixin):
         r_node = args[1] if len(args) > 1 else kwargs.get('r')
         src = self._resolve_iter_src(args[0], ctx)
         if r_node is None or (isinstance(r_node, ast.Constant) and r_node.value is None):
-            has_r, r = '0', '0'     # permutations(xs) and permutations(xs, None) alike
+            has_r, robj = '0', 'ail_box_none()'     # permutations(xs) and permutations(xs, None) alike
         else:
-            mv = self.expr(r_node, ctx)
-            if isinstance(r_node, ast.Constant):
-                has_r, r = '1', '(%s).i' % mv
-            else:                   # a value known only at run time: None means "all of them"
-                mt = ctx.tmp()
-                ctx.emit('%s = %s;' % (mt, mv))
-                has_r, r = '(%s.tag != AIL_T_NONE)' % mt, '(%s.tag == AIL_T_NONE ? 0 : %s.i)' % (mt, mt)
+            mt = ctx.tmp()
+            ctx.emit('%s = %s;' % (mt, self.expr(r_node, ctx)))
+            has_r, robj = '(%s.tag != AIL_T_NONE)' % mt, mt
         t = ctx.tmp()
-        ctx.emit('st = ail_it_permutations(cx, &%s, %s, %s, %s);' % (t, src, has_r, r))
+        ctx.emit('st = ail_it_permutations(cx, &%s, %s, %s, %s);' % (t, src, has_r, robj))
         ctx.check()
         return t
 
@@ -7311,8 +7330,9 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('combinations_with_replacement() with other than (iterable, r)')
         r_node = args[1] if len(args) > 1 else kwargs['r']
         src = self._resolve_iter_src(args[0], ctx)
+        r = self._it_index_r(r_node, ctx)
         t = ctx.tmp()
-        ctx.emit('st = ail_it_combinations_wr(cx, &%s, %s, (%s).i);' % (t, src, self.expr(r_node, ctx)))
+        ctx.emit('st = ail_it_combinations_wr(cx, &%s, %s, %s);' % (t, src, r))
         ctx.check()
         return t
 
