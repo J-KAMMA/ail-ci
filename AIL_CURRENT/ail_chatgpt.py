@@ -320,6 +320,46 @@ def _maxsplit_constant_nodes(tree):
     return handled
 
 
+def _check_int64_abs_constants(tree, known):
+    """Refuse a constant ``abs(MIN)`` (2**63) by name.  AIL ints are fixed width, so the value
+    cannot be represented; CPython prints the bignum.  Only a builtin ``abs`` is considered,
+    and the argument must be statically known.  Other in-range constants fold as before, and
+    a value that reaches ``abs`` only at run time keeps the fixed-width trap."""
+    bound = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.arg):
+            bound.add(node.arg)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bound.add(node.id)
+        elif isinstance(node, ast.alias):
+            bound.add(node.asname or node.name.split('.')[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            bound.update(node.names)
+    if 'abs' in bound or 'abs' in known:
+        return
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'abs'):
+            continue
+        if len(node.args) != 1 or node.keywords or isinstance(node.args[0], ast.Starred):
+            continue
+        value = _constant_int(node.args[0], known)
+        if value is None:
+            try:
+                value = _const_expr_int(node.args[0], bounded=False)
+            except _Int64ConstantOverflow:
+                value = None
+        if value == _INT64_MIN:
+            error = ValueError(f'int64 constant expression out of range: {-(value)}')
+            error.source_line = node.lineno
+            error.source_column = node.col_offset
+            raise error
+
+
 def _check_int64_unary_constants(tree):
     """Refuse a statically known unary integer constant expression outside int64 by name.
     `-MIN` on a module constant or a nested literal compiles to the fixed-width trap on the
@@ -352,6 +392,7 @@ def _check_int64_unary_constants(tree):
             error.source_line = node.lineno
             error.source_column = node.col_offset
             raise error
+    _check_int64_abs_constants(tree, known)
 
 
 def _check_int64_constant_positions(tree):
