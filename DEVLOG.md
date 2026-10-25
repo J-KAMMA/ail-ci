@@ -462,6 +462,18 @@ bytes and bytearray membership are unchanged. Added `test_ail_pre114.py`, which 
 items reaching the code through an argument, a list item, an attribute and a dict
 value on both builds. Non-index start/stop bounds for bytes search remain a separate
 open difference and are not changed here.
+## 2026-10-24 - pre115: uncaught zero division in a typed callback
+
+The typed path lowered `//` and `%` to `pydiv`/`pymod` helpers that call `ail_die`. A `try`
+converted the trap into a catchable `ZeroDivisionError`, so caught probes matched CPython, but an
+uncaught `// 0` inside a callback (for example `sorted(xs, key=lambda x: x // 0)`) printed
+`integer division by zero` and exited 1 without the `ZeroDivisionError: ` prefix. The typed
+helpers now raise `AIL_EXC_ZERODIV` directly with CPython's text; the same change covers float
+`//`/`%`/`/` (`float floor division by zero`, `float modulo`, `float division by zero`) and the
+general path's int `%` text (`integer modulo by zero`).  Probes covered values reaching the
+helper through arguments, list items, attributes and dict values, negative and int64-boundary
+numerators, bools, an empty key list (key not called) and a nested `try`/`finally`.  Added
+`test_ail_pre115.py` (12 programs, both builds) and registered it in `ail_check.MODULES`.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
