@@ -682,8 +682,22 @@ static inline ail_obj ail2f_done(ail_ctx *cx, ail2f_buf *b) {
     return ail_str_buf_done(bu, b->n);
 }
 typedef struct { uint16_t fill; char align, sign; int alt, zero, z, has_width, has_prec; int64_t width, prec; char group, type, has_type; } ail2f_spec;
+/* CPython's whole-spec rejection names the spec and the value's type. The spec is a str, so encode
+   its code points as UTF-8; a NUL (an embedded byte, not a terminator) still cuts the C message. */
+static inline int ail2f_invalid_spec(ail_str s, const char *vtype, char *msg, size_t msz) {
+    char text[256]; size_t k = 0;
+    for (int64_t j = 0; j < s.n && k + 4 < sizeof text; j++) {
+        uint32_t c = ail_chr(s, j);
+        if (c < 0x80) text[k++] = (char)c;
+        else if (c < 0x800) { text[k++] = (char)(0xC0 | (c >> 6)); text[k++] = (char)(0x80 | (c & 0x3F)); }
+        else { text[k++] = (char)(0xE0 | (c >> 12)); text[k++] = (char)(0x80 | ((c >> 6) & 0x3F)); text[k++] = (char)(0x80 | (c & 0x3F)); }
+    }
+    text[k] = 0;
+    snprintf(msg, msz, "Invalid format specifier '%s' for object of type '%s'", text, vtype);
+    return -1;
+}
 /* 0, or -1 with the ValueError text in msg */
-static inline int ail2f_parse(ail_str s, ail2f_spec *f, char *msg, size_t msz) {
+static inline int ail2f_parse(ail_str s, ail2f_spec *f, const char *vtype, char *msg, size_t msz) {
     memset(f, 0, sizeof *f); f->fill = ' ';
     int64_t i = 0, n = s.n;
     #define AIL2F_ALIGN(c) ((c) == '<' || (c) == '>' || (c) == '=' || (c) == '^')
@@ -698,8 +712,17 @@ static inline int ail2f_parse(ail_str s, ail2f_spec *f, char *msg, size_t msz) {
         if (f->width > 100000000) { snprintf(msg, msz, "Too many decimal digits in format string"); return -1; }
         f->width = f->width * 10 + (ail_chr(s, i++) - '0');
     }
-    if (i < n && (ail_chr(s, i) == ',' || ail_chr(s, i) == '_')) f->group = (char)ail_chr(s, i++);
-    if (i < n && (ail_chr(s, i) == ',' || ail_chr(s, i) == '_')) { snprintf(msg, msz, "Cannot specify both ',' and '_'."); return -1; }
+    if (i < n && (ail_chr(s, i) == ',' || ail_chr(s, i) == '_')) {
+        f->group = (char)ail_chr(s, i++);
+        if (i < n && (ail_chr(s, i) == ',' || ail_chr(s, i) == '_')) {
+            uint16_t g2 = ail_chr(s, i);
+            if (g2 != (uint16_t)f->group) { snprintf(msg, msz, "Cannot specify both ',' and '_'."); return -1; }
+            /* The second copy is the last character: CPython reads it as the spec's type and names
+               the clash. Anything after it makes the field parser reject the whole spec instead. */
+            if (i == n - 1) { snprintf(msg, msz, "Cannot specify '%c' with '%c'.", f->group, f->group); return -1; }
+            return ail2f_invalid_spec(s, vtype, msg, msz);
+        }
+    }
     if (i < n && ail_chr(s, i) == '.') {
         i++;
         if (!(i < n && ail_chr(s, i) >= '0' && ail_chr(s, i) <= '9')) { snprintf(msg, msz, "Format specifier missing precision"); return -1; }
@@ -709,10 +732,10 @@ static inline int ail2f_parse(ail_str s, ail2f_spec *f, char *msg, size_t msz) {
             f->prec = f->prec * 10 + (ail_chr(s, i++) - '0');
         }
     }
-    if (n - i > 1) { snprintf(msg, msz, "Invalid format specifier"); return -1; }
+    if (n - i > 1) return ail2f_invalid_spec(s, vtype, msg, msz);
     if (i < n) {
         uint16_t t = ail_chr(s, i);
-        if (t > 127) { snprintf(msg, msz, "Invalid format specifier"); return -1; }
+        if (t > 127) { snprintf(msg, msz, "Unknown format code '\\x%x' for object of type '%s'", (unsigned)t, vtype); return -1; }
         f->type = (char)t;
         f->has_type = 1;
     }
@@ -866,7 +889,8 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
         return ail_raise_c(cx, AIL_B_TYPEERROR, msg);
     }
     ail2f_spec f;
-    if (ail2f_parse(spec, &f, msg, sizeof msg)) return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
+    const char *vtype = x.tag == AIL_T_BOOL ? "bool" : x.tag == AIL_T_STR ? "str" : x.tag == AIL_T_FLOAT ? "float" : "int";
+    if (ail2f_parse(spec, &f, vtype, msg, sizeof msg)) return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
     char type = f.type, code[16];
     if (f.group && type) {
         /* CPython checks the grouping against the type before it looks at the value */
