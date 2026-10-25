@@ -1,3 +1,21 @@
+## 2026-10-25 - pre244 review: refuse `del` of a statically known function (job-pre244-10260357)
+
+The review found that the new delete-target scan made a module-level `del` of a function compile,
+but did not unbind the compile-time function value: `def side(x): return x; print(side(1));
+del side; print(side(2))` printed 1 and 2 where CPython raises `NameError`, and
+`del side; print(side)` printed `<object>`. The same hole existed for `global side; del side`
+inside a function (it printed 1). A module/global function name is folded to a static function
+value by `expr_Name`/`_call_name`, not stored in an ordinary global slot, so the delete cannot
+unbind it. `stmt_Delete` now refuses a `del` of a statically known function name by name on both
+builds (`del on the function name side`); a local `del` still goes through the local slot and
+keeps its `UnboundLocalError`, and `del` of a plain module value still matches CPython.
+
+Probes `/tmp/probes/pre244_module_del_func.py`, `pre244_module_del_func_read.py` and
+`pre244_del_global_func.py` are refused by name on both builds; `pre244_module_del_value.py`
+still matches CPython. Added both function cases to `test_ail_pre244.py` with a refusal test.
+Final-state tests: test_ail_pre244, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 pass.
+
 ## 2026-10-25 - pre244: walrus and `del` targets are local bindings (job-pre244-10260357)
 
 The first still-differing item from the pre218 review was the walrus read: with a module

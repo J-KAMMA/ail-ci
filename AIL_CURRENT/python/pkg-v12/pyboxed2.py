@@ -10288,6 +10288,14 @@ class Compiler(boxclosure.ClosureMixin):
                     # name instead of failing later with `KeyError: 'C'` from name_ref (or reading
                     # the class slot again when the name was also rebound at module scope).
                     raise Unsupported('del on the class name %s' % target.id)
+                if (target.id in self.functions and target.id not in ctx.slot_of
+                        and target.id not in ctx.ptr_names and target.id not in ctx.clo_index
+                        and target.id not in ctx.cell_slots and target.id not in ctx.free_names):
+                    # A module-level function binding is a compile-time function value, not an
+                    # ordinary global slot (`expr_Name`/`_call_name` fold it directly), so `del`
+                    # cannot unbind it: deleting would leave later reads/calls resolving to the
+                    # function. Refuse the delete by name instead of silently ignoring it.
+                    raise Unsupported('del on the function name %s' % target.id)
                 if (not self._is_global_name(target.id, ctx) and target.id in ctx.slot_of
                         and target.id not in ctx.ptr_names and target.id not in ctx.clo_index):
                     # `del x` of a local that is unassigned raises UnboundLocalError (DIFFERENCES C76)

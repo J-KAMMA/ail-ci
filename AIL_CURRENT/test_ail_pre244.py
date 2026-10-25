@@ -330,6 +330,31 @@ except Exception as e:
     print(type(e).__name__, e)
 '''
 
+DEL_MODULE_FUNC = r'''def side(x):
+    return x
+
+
+print(side(1))
+del side
+print(side(2))
+'''
+
+DEL_GLOBAL_FUNC = r'''def side(x):
+    return x
+
+
+def f():
+    global side
+    del side
+    print(side(1))
+
+
+try:
+    f()
+except Exception as e:
+    print(type(e).__name__, e)
+'''
+
 PROGRAMS = {
     'walrus_variants': WALRUS_VARIANTS,
     'walrus_module': WALRUS_MODULE,
@@ -338,6 +363,11 @@ PROGRAMS = {
     'del_variants': DEL_VARIANTS,
     'del_global_decl': DEL_GLOBAL_DECL,
     'del_module': DEL_MODULE,
+}
+
+REFUSED = {
+    'del_module_func': DEL_MODULE_FUNC,
+    'del_global_func': DEL_GLOBAL_FUNC,
 }
 
 
@@ -387,6 +417,18 @@ class Pre244Tests(unittest.TestCase):
     def test_walrus_and_delete_targets_are_local_bindings(self):
         for slug, text in PROGRAMS.items():
             self.matches(slug, text)
+
+    def test_delete_of_known_function_is_refused_by_name(self):
+        for slug, text in REFUSED.items():
+            with tempfile.TemporaryDirectory(prefix='ail-pre244-') as directory:
+                _cpython(directory, slug, text)
+                for general in (True, False):
+                    built, _exe = _build(directory, '%s_%s' % (slug, 'g' if general else 'd'),
+                                         text, general)
+                    self.assertNotEqual(built.returncode, 0,
+                                        '%s (general=%s) compiled' % (slug, general))
+                    self.assertIn('del on the function name', built.stdout + built.stderr,
+                                  '%s (general=%s)' % (slug, general))
 
 
 if __name__ == '__main__':
