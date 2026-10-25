@@ -1,3 +1,15 @@
+## 2026-10-25 - pre126 reapply: itertools `r` validation (job-rbrbpre126-10252049)
+
+The first still-differing item in the job-pre101 review was the general path's negative
+`r`: `permutations`, `combinations` and `combinations_with_replacement` returned `[]`
+instead of raising `ValueError: r must be non-negative`; the same code read `r` as a raw
+int64 field, so a float, str, None, list, tuple or bytes was also accepted. Both general
+emitters now pass the `r` object to one runtime converter (`ail_it_r_index`), which checks
+the type and sign; `permutations` keeps treating a None `r` as "not given". The current
+tree already rejected a negative `r` (job-pre137), so that fix is kept inside the new
+converter. Added `AIL_CURRENT/test_ail_pre126.py`; probes in `/tmp/probes/pre126_r_bounds.py`,
+`pre126_r_types.py` and `pre126_r_sources.py` match CPython on both builds.
+
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal

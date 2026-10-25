@@ -20365,19 +20365,28 @@ static inline ail_st ail_it_product_repeat(ail_ctx *cx, ail_obj *out, ail_obj a,
     AIL_FRAME_LEAVE(cx, fr);
     return ail_iter(cx, out, res);
 }
-/* CPython rejects a negative r for these three choosers. The pool is materialized first, so a
-   non-iterable input still raises TypeError before the range check, exactly as CPython does. */
-static inline ail_st ail__it_reject_negative_r(ail_ctx *cx) {
-    return ail_raise_c(cx, AIL_B_VALUEERROR, "r must be non-negative");
+static inline ail_st ail_it_r_index(ail_ctx *cx, ail_obj r, int64_t *out, int permutations) {
+    /* CPython converts a given r to an index BEFORE using it: permutations() reports any
+       non-int as "Expected int as r", the two combinations() use the generic index message,
+       and a negative r is always ValueError "r must be non-negative" (even for an empty pool). */
+    if (r.tag != AIL_T_INT && r.tag != AIL_T_BOOL) {
+        if (permutations) return ail_raise_c(cx, AIL_B_TYPEERROR, "Expected int as r");
+        char buf[96]; snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail__tname_c(r));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
+    if (r.i < 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "r must be non-negative");
+    *out = r.i;
+    return AIL_OK;
 }
-static inline ail_st ail_it_permutations(ail_ctx *cx, ail_obj *out, ail_obj iterable, int has_r, int64_t r) {
+static inline ail_st ail_it_permutations(ail_ctx *cx, ail_obj *out, ail_obj iterable, int has_r, ail_obj r_obj) {
     ail_obj pr_[2]; pr_[1] = ail_box_none();
     ail_st st = ail__materialize(cx, &pr_[0], iterable); if (st != AIL_OK) return st;
     AIL_ROOT_N(cx, fr, pr_, 2); /* 0=pool 1=result */
+    int64_t r = 0;
+    if (has_r) { st = ail_it_r_index(cx, r_obj, &r, 1); if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; } }
     ail_vecobj *pool = (ail_vecobj *)pr_[0].o;
     int64_t n = pool->n; int64_t rr = has_r ? r : n;
     pr_[1] = ail_list_new(cx); ail_obj res = pr_[1];
-    if (rr < 0) { AIL_FRAME_LEAVE(cx, fr); return ail__it_reject_negative_r(cx); }
     if (rr > n) { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
     int64_t *indices = (int64_t *)ail_xmalloc((size_t)(n > 0 ? n : 1) * sizeof(int64_t));
     int64_t *cycles = (int64_t *)ail_xmalloc((size_t)(rr > 0 ? rr : 1) * sizeof(int64_t));
@@ -20409,14 +20418,15 @@ static inline ail_st ail_it_permutations(ail_ctx *cx, ail_obj *out, ail_obj iter
     free(indices); free(cycles);
     { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
 }
-static inline ail_st ail_it_combinations(ail_ctx *cx, ail_obj *out, ail_obj iterable, int64_t r) {
+static inline ail_st ail_it_combinations(ail_ctx *cx, ail_obj *out, ail_obj iterable, ail_obj r_obj) {
     ail_obj pr_[2]; pr_[1] = ail_box_none();
     ail_st st = ail__materialize(cx, &pr_[0], iterable); if (st != AIL_OK) return st;
     AIL_ROOT_N(cx, fr, pr_, 2); /* 0=pool 1=result */
+    int64_t r = 0;
+    st = ail_it_r_index(cx, r_obj, &r, 0); if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
     ail_vecobj *pool = (ail_vecobj *)pr_[0].o;
     int64_t n = pool->n;
     pr_[1] = ail_list_new(cx); ail_obj res = pr_[1];
-    if (r < 0) { AIL_FRAME_LEAVE(cx, fr); return ail__it_reject_negative_r(cx); }
     if (r > n) { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
     int64_t *indices = (int64_t *)ail_xmalloc((size_t)(r > 0 ? r : 1) * sizeof(int64_t));
     for (int64_t i = 0; i < r; i++) indices[i] = i;
@@ -20436,14 +20446,15 @@ static inline ail_st ail_it_combinations(ail_ctx *cx, ail_obj *out, ail_obj iter
     free(indices);
     { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
 }
-static inline ail_st ail_it_combinations_wr(ail_ctx *cx, ail_obj *out, ail_obj iterable, int64_t r) {
+static inline ail_st ail_it_combinations_wr(ail_ctx *cx, ail_obj *out, ail_obj iterable, ail_obj r_obj) {
     ail_obj pr_[2]; pr_[1] = ail_box_none();
     ail_st st = ail__materialize(cx, &pr_[0], iterable); if (st != AIL_OK) return st;
     AIL_ROOT_N(cx, fr, pr_, 2); /* 0=pool 1=result */
+    int64_t r = 0;
+    st = ail_it_r_index(cx, r_obj, &r, 0); if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
     ail_vecobj *pool = (ail_vecobj *)pr_[0].o;
     int64_t n = pool->n;
     pr_[1] = ail_list_new(cx); ail_obj res = pr_[1];
-    if (r < 0) { AIL_FRAME_LEAVE(cx, fr); return ail__it_reject_negative_r(cx); }
     if (n == 0 && r > 0) { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
     int64_t *indices = (int64_t *)ail_xmalloc((size_t)(r > 0 ? r : 1) * sizeof(int64_t));
     for (int64_t i = 0; i < r; i++) indices[i] = 0;
