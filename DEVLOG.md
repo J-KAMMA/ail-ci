@@ -156,6 +156,32 @@ method/property through a directly known class value is refused by name. Added
 `test_ail_pre170.py` (4 tests, both builds); probes `p_dup`, `p_dup2`, `p_sources`, `p_missing`,
 `p_array`, `p_shadow` and `p_attr` match CPython.
 
+## 2026-10-25 - pre87 review: callback exceptions cross back to boxed try
+
+The default build still aborted on `% 0` (and `// 0`) raised through a lambda or a
+helper passed as a value. `pymix.py` selected a typed clone for the helper, and the
+clone's `ail_die` trap only unwinds the typed `try` stack; the boxed caller's `try`
+lives on `ail_ctx` and never saw it. An escape analysis already rejects clones whose
+exceptions reach a boxed `try`, but it only followed direct `Call(Name)` edges, so a
+lambda body or a function passed as a value looked like an uncaught module-level path.
+`_protected` now treats both as possibly-protected: names referenced as values and
+call sites inside a lambda are not mixed, so the call stays boxed and returns its
+error through `cx`. Added `CALLBACK_ZERO` to `test_ail_pre87.py` (lambda, named
+callback, list item, dict value, alias, `//`, `divmod`, negative, INT64_MIN, bool,
+IntEnum, IntFlag).
+
+## 2026-10-25 - pre87: integer modulo by zero names CPython's message
+
+The general path and the default build's fallback reported
+`ZeroDivisionError: integer division or modulo by zero` for integer `% 0`.
+CPython reserves that text for `//` and `divmod`; `%` raises
+`integer modulo by zero`.  Both emitters now pass the shorter text from
+`ail_obj_mod` and `ail_op_mod`, while the floor-division helpers keep
+CPython's wording.  `test_ail_pre87.py` compares both builds with CPython for
+a plain helper, a typed helper, a lambda, a list item, an attribute, a dict
+value, negative and INT64_MIN dividends, bools, an IntEnum and an IntFlag; a
+second program keeps the neighbouring `//`, `divmod` and float zero messages
+unchanged.
 ## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
 
 The first still-differing item from the task's list was the encoding-name normalization: `b"abc".decode("utf\t8")`,
