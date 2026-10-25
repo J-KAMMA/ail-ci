@@ -1,10 +1,6 @@
-**Fix one pre-existing difference from CPython.** A reviewer of job `rbpre184` recorded these as already present before that job:
+**Your own test module test_ail_pre227 fails in the full suite** when your change is combined with the current integration branch and other accepted jobs.
 
-- `2**63 - 1` in a module/class/default still compiles and traps with `integer overflow` (p1), even though the final value fits.
-- A class constant built through a name (`N = 2**62; class C: X = N * 4`) traps at run time (p8).
-- Nested-function default `def f(x=10**30)` keeps the old `int64 constant out of range` refusal (p2).
-
-Reproduce the first one that still differs on this tree (`bash ~/tools/cmp.sh` on both builds). Fix that one cause, or refuse the construct by name at compile time. Add the case to a new `test_ail_pre227.py` and run only that module and `test_ail_safetynet`, then commit. If none of them still differs, change nothing and say so.
+Rebase mentally onto the current tree: run `cd AIL_CURRENT && python3 -m unittest -q test_ail_pre227`, find why it fails here (another change may have altered behaviour or output your test expects), and fix it so it passes while keeping your fix. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
