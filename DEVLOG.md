@@ -1,3 +1,26 @@
+## 2026-10-25 - `abs()` of a local int64 minimum is refused by name (job-pre248-10260359)
+
+The first still-differing item in the pre214 review's pre-existing list was the local variable:
+`x = -(2 ** 63)` is an in-range int64, but both builds stopped in `abs(x)` with `integer overflow`
+where CPython prints the bignum `9223372036854775808`.  The other items in that list (an `abs`
+bound in an unrelated function, an aliased `abs`, `builtins.abs`, and the `complex()` refusal) are
+unchanged and still match the base.
+
+`_check_int64_abs_constants` now also follows a function's own top-level single-assignment int
+constants into `abs`, resolving module constants unless the function shadows them and skipping
+parameters, globals/nonlocals, names stored more than once and nested scopes.  A direct value, a
+shift, a module constant, an alias and an annotated assignment are covered, as are calls used as
+an argument, a list item, an attribute and a dict value.  In-range locals, an overwrite before the
+call, float/bool locals, a local shadowing a module constant and an unused minimum still match
+CPython.  `test_ail_pre248.py` is registered in `ail_check.MODULES` and `tools/ci_shards.py`
+assigned it a shard.
+
+Probes in `/tmp/probes`: `pre248_direct`, `pre248_shift`, `pre248_module`, `pre248_alias`,
+`pre248_annassign`, `pre248_argument`, `pre248_list_item`, `pre248_attribute` and
+`pre248_dict_value` are refused by name on both builds; `pre248_in_range`, `pre248_overwrite` and
+`pre248_float_bool` match CPython on both builds.  The pre214 probes `r6`, `r7` and `r8` still
+behave as before (run-time overflow or a named import refusal).
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a
