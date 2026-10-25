@@ -1,3 +1,22 @@
+## 2026-10-25 - out-of-int64 constant expressions outside function bodies (job-pre184-10251542)
+
+The first still-differing item from the fuzz47 list was `corpus/gdev/g22_012.py`: its class body
+`_MASK: int = (1 << 64) - 1` compiled and stopped at run time with `integer overflow` on both builds,
+while CPython prints the result; `def f(x=10**30)` had the same pre-existing difference. A constant
+integer expression in a module/class assignment or a default argument that does not fit int64 is now
+refused by name at compile time (`int64 constant expression out of range`). Expressions that fit int64
+are unchanged, an out-of-int64 expression inside a function body keeps its old runtime stop (pre160),
+and a class with a base (the enum case) keeps its own refusal. The evaluator handles + - * // % ** << >>
+& ^ and unary + - ~ with a 4096-bit guard. Added `test_ail_pre184.py` with the class, module and
+default refusals plus in-range class/default/module arithmetic.
+
+Probes in `/tmp/probes`: `p3` huge default, `p4`/`p5` class masks, `p6` module mask, `p7` default
+shift, `p8` negative huge default are refused by name on both builds; `p11`/`p14` class arithmetic and
+`p15` default arithmetic match CPython; `p1` nested-def tuple default and `p2` class-scope method
+default (the earlier fuzz47 items) now match or are refused. `corpus/gdev/g22_012.py` is refused by
+name. Tests on the final commit: `test_ail_pre184`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`, `test_ail_pre97`, `test_ail_pre160` all ok.
+
 ## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
 
 The first still-differing item from the task's list was the encoding-name normalization: `b"abc".decode("utf\t8")`,

@@ -94,6 +94,120 @@ def _check_int64_literals(tree):
             raise error
 
 
+_CONST_INT_TOO_BIG = object()
+_CONST_INT_BITS = 4096
+
+
+def _constant_int(node):
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        return True, node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert)):
+        ok, value = _constant_int(node.operand)
+        if not ok:
+            return False, None
+        if value is _CONST_INT_TOO_BIG:
+            return True, _CONST_INT_TOO_BIG
+        if isinstance(node.op, ast.USub):
+            return True, -value
+        if isinstance(node.op, ast.UAdd):
+            return True, value
+        return True, ~value
+    if not isinstance(node, ast.BinOp) or type(node.op) not in (
+            ast.Add, ast.Sub, ast.Mult, ast.Pow, ast.LShift, ast.RShift,
+            ast.FloorDiv, ast.Mod, ast.BitAnd, ast.BitOr, ast.BitXor):
+        return False, None
+    left_ok, left = _constant_int(node.left)
+    right_ok, right = _constant_int(node.right)
+    if not (left_ok and right_ok):
+        return False, None
+    if left is _CONST_INT_TOO_BIG or right is _CONST_INT_TOO_BIG:
+        return True, _CONST_INT_TOO_BIG
+    try:
+        if isinstance(node.op, ast.Pow):
+            if right < 0:
+                return False, None
+            if right > _CONST_INT_BITS or (abs(left) > 1 and abs(left).bit_length() * right > _CONST_INT_BITS):
+                return True, _CONST_INT_TOO_BIG
+            value = left ** right
+        elif isinstance(node.op, ast.LShift):
+            if right < 0:
+                return False, None
+            if right > _CONST_INT_BITS or (left and left.bit_length() + right > _CONST_INT_BITS):
+                return True, _CONST_INT_TOO_BIG
+            value = left << right
+        elif isinstance(node.op, ast.RShift):
+            if right < 0:
+                return False, None
+            value = (0 if left >= 0 else -1) if right > _CONST_INT_BITS else left >> right
+        elif isinstance(node.op, (ast.FloorDiv, ast.Mod)):
+            if right == 0:
+                return False, None
+            value = left // right if isinstance(node.op, ast.FloorDiv) else left % right
+        elif isinstance(node.op, ast.Mult):
+            if left == 0 or right == 0:
+                value = 0
+            elif left.bit_length() + right.bit_length() > _CONST_INT_BITS:
+                return True, _CONST_INT_TOO_BIG
+            else:
+                value = left * right
+        elif isinstance(node.op, ast.Add):
+            value = left + right
+        elif isinstance(node.op, ast.Sub):
+            value = left - right
+        elif isinstance(node.op, ast.BitAnd):
+            value = left & right
+        elif isinstance(node.op, ast.BitOr):
+            value = left | right
+        else:
+            value = left ^ right
+    except (ArithmeticError, ValueError, OverflowError):
+        return True, _CONST_INT_TOO_BIG
+    return True, value
+
+
+def _check_int64_constants(tree):
+    def check_value(node):
+        ok, value = _constant_int(node)
+        if not ok:
+            return
+        if value is not _CONST_INT_TOO_BIG and -(1 << 63) <= value < 1 << 63:
+            return
+        shown = 'too large' if value is _CONST_INT_TOO_BIG else value
+        error = ValueError(f'int64 constant expression out of range: {shown}')
+        error.source_line = getattr(node, 'lineno', None)
+        error.source_column = getattr(node, 'col_offset', None)
+        raise error
+
+    def walk(node):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for default in list(node.args.defaults) + [d for d in node.args.kw_defaults if d is not None]:
+                check_value(default)
+            return
+        if isinstance(node, ast.Lambda):
+            for default in list(node.args.defaults) + [d for d in node.args.kw_defaults if d is not None]:
+                check_value(default)
+            return
+        if isinstance(node, ast.ClassDef):
+            for base in node.bases:
+                walk(base)
+            for keyword in node.keywords:
+                walk(keyword.value)
+            if node.bases:
+                return
+            for statement in node.body:
+                walk(statement)
+            return
+        if isinstance(node, ast.Assign):
+            check_value(node.value)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            check_value(node.value)
+        for child in ast.iter_child_nodes(node):
+            walk(child)
+
+    for statement in tree.body:
+        walk(statement)
+
+
 def _returns_on_every_path(statements):
     def loop_exit(body):
         pending = list(body)
@@ -302,6 +416,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                     _check_importable(tree)
             if not declarations_only:
                 _check_int64_literals(tree)
+                _check_int64_constants(tree)
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)
             if source_map is not None:
