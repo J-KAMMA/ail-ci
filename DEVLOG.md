@@ -120,6 +120,15 @@ integer branch formats the truncated float as decimal digits directly instead of
 NaN and infinity keep CPython's ValueError / OverflowError. Probes:
 `/tmp/probes/pre100_float_d*.py`, `pct_dynamic_float.py`; new test
 `AIL_CURRENT/test_ail_pre100.py`.
+## 2026-10-24 - pre101: `itertools.permutations(xs, None)` (job-pre101-10242138)
+
+CPython treats an explicit `r=None` as "not given" and yields every full-length permutation.
+The general path (`pyboxed2._lib_permutations`) passed the None through as r=0 and returned
+`[()]`. It now treats a literal/keyword None as omitted and, for a value known only at run
+time, passes `has_r = (r.tag != AIL_T_NONE)` so a None argument/attribute/list item/dict value
+is handled the same way. The typed path already handled the literal None; a None-typed
+variable is refused by name there (no null value), so the default build falls back to the
+general path. `AIL_CURRENT/test_ail_pre101.py` covers both builds.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
