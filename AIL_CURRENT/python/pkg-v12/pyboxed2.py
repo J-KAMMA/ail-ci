@@ -8055,7 +8055,7 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('round() with other than (number[, ndigits])')
         v = self.expr(args[0], ctx)
         has_n = len(args) == 2
-        n = '(%s).i' % self.expr(args[1], ctx) if has_n else '0'
+        n = self.expr(args[1], ctx) if has_n else 'ail_box_none()'
         t = ctx.tmp()
         ctx.emit('st = ail_bi_round(cx, &%s, %s, %d, %s);' % (t, v, has_n, n))
         ctx.check()
