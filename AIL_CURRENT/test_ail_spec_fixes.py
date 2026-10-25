@@ -376,7 +376,6 @@ def main() -> None:
 
 main()
 '''
-        # the IR emitter (python/pkg-v12/ir/emit_c.py) still spells the nan / infinity test its own way
         with tempfile.TemporaryDirectory() as directory:
             expected = cpython(directory, text, 'conv')
             for mode in ('default', 'typed', 'general'):
