@@ -1,3 +1,13 @@
+## 2026-10-25 - re-apply pre117: mutable literal defaults of nested defs
+
+Re-applied job `pre117` on top of the current export. The tree already refused a nested `def` with a
+mutable literal default from the fuzz87 fix, so both sides were kept: the one helper now also covers
+a `bytearray` in a literal (as the accepted change did) and its message names a "mutable literal
+default", which keeps the new `test_ail_pre117.py` and the existing `test_ail_fuzz87.py` refusal
+checks satisfied. `test_ail_pre117.py` is registered in `ail_check.MODULES`, the DIFFERENCES row is
+restored, and immutable defaults still match CPython on both builds. Probes and required tests are
+listed in the job report.
+
 ## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
 
 The first still-differing item from the task's list was the encoding-name normalization: `b"abc".decode("utf\t8")`,
@@ -354,6 +364,15 @@ changed for it. The wide builds (`AIL_V2_WIDE_EMBED` / `AIL_V2_INCLUDE_ABS`) sti
 this export (their `out/boxed_rt/v2` headers and fold script are absent), so the width-generic store is
 unverified in those modes; a run-time non-BMP value is still an open 16-bit limitation
 (`DIFFERENCES` C?-job-pre90-10242040-2).
+## 2026-10-24 - pre117: mutable literal defaults of nested defs
+
+A nested `def` with a literal list/dict/set default (or a tuple holding one) rebuilt the default
+at every call site. `def f(x, acc=[]); f(1); f(2)` printed `[1] [2]` where CPython shares the
+object built when the `def` ran and prints `[1] [1, 2]`; an empty default was wrong by identity
+even when one call hid it. The general path now refuses the construct by name on both builds,
+matching the fuzz94 fix. An immutable-default program (negative/int-boundary, empty tuple, tuple,
+values through an argument, a list item, a dict value and an attribute) still matches CPython.
+Added `AIL_CURRENT/test_ail_pre117.py` and registered it in `ail_check.MODULES`.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
