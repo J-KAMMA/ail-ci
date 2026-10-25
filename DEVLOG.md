@@ -1,3 +1,13 @@
+## 2026-10-25 - int(s, base) message GC rooting (job-pre180-10251520)
+
+Review follow-up. The rewritten general-path `ail__int_badlit` built the message head string,
+called `ail_str_repr` (which allocates), and only then rooted the parts array; with the normal
+GC threshold the fresh head survived, but under `-DAIL_GC_STRESS` + ASan it was freed before
+use. All three slots are now zeroed and registered as a frame before the first allocation, and
+the repr view is cut into one of the rooted slots. The ASan GC-stress probe
+(`int("\u2469", 16)`, `int("1_\u2469", 16)`, `int("", 16)`) now prints the three messages and
+exits 0; the normal-build message, cut and route probes still match CPython.
+
 ## 2026-10-25 - int(s, base) error message (job-pre180-10251520)
 
 The first still-differing item from the fuzz58 review was the `int(s, base)` invalid-literal

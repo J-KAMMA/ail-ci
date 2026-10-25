@@ -13812,6 +13812,10 @@ static inline ail_st ail__int_badlit(ail_ctx *cx, ail_obj sobj, int64_t base) {
     int hl = snprintf(head, sizeof head, "invalid literal for int() with base %lld: ", (long long)base);
     if (hl < 0) hl = 0;
     ail_obj parts[3];
+    /* Root all three slots before the first allocation: repr() below allocates, and an
+       unrooted head string (or, later, the repr) would be collected by GC_STRESS. */
+    memset(parts, 0, sizeof parts);
+    AIL_ROOT_N(cx, fr, parts, 3);
     parts[0] = ail_str_from_cstr(cx, head);
     parts[1] = ail_str_repr(cx, sobj);
     ail_str rs = ail_view_to_str(parts[1]);
@@ -13827,7 +13831,6 @@ static inline ail_st ail__int_badlit(ail_ctx *cx, ail_obj sobj, int64_t base) {
         seen++;
     }
     parts[2] = ail_str_view(parts[1].sv.backing, parts[1].sv.off, k);
-    AIL_ROOT_N(cx, fr, parts, 3);
     ail_obj msg = ail_str_cat(cx, parts[0], parts[2]);
     AIL_FRAME_LEAVE(cx, fr);
     return ail_raise(cx, cx->builtin_cls[AIL_B_VALUEERROR], msg);
