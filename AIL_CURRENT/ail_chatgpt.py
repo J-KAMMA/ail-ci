@@ -444,6 +444,222 @@ def _constant_int_exact(node):
     return True, value
 
 
+_TEXT_CONST_LIMIT = 100000
+
+
+def _constant_text(node, known, shadowed=frozenset()):
+    """The str/bytes a constant text expression denotes, or None.  Covers literals, + and *
+    (within a size guard), module constants and the bytes/bytearray constructor over one of
+    those; names are only resolved through the caller's module-constant map."""
+    if isinstance(node, ast.Constant) and type(node.value) in (int, str, bytes):
+        return node.value
+    if isinstance(node, ast.Name):
+        return known.get(node.id)
+    if isinstance(node, ast.BinOp):
+        if isinstance(node.op, ast.Add):
+            left = _constant_text(node.left, known, shadowed)
+            right = _constant_text(node.right, known, shadowed)
+            if (type(left) is type(right) and type(left) in (str, bytes)
+                    and len(left) + len(right) <= _TEXT_CONST_LIMIT):
+                return left + right
+            return None
+        if isinstance(node.op, ast.Mult):
+            left = _constant_text(node.left, known, shadowed)
+            right = _constant_text(node.right, known, shadowed)
+            if type(left) in (str, bytes) and type(right) is int:
+                text, count = left, right
+            elif type(right) in (str, bytes) and type(left) is int:
+                text, count = right, left
+            else:
+                return None
+            if count < 0:
+                return text[:0]
+            if count and len(text) * count > _TEXT_CONST_LIMIT:
+                return None
+            return text * count
+        return None
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id in ('bytes', 'bytearray') and node.func.id not in shadowed
+            and len(node.args) == 1 and not node.keywords
+            and not isinstance(node.args[0], ast.Starred)):
+        value = _constant_text(node.args[0], known, shadowed)
+        if type(value) is bytes:
+            return bytes(value)
+    return None
+
+
+def _int_argument_names(args):
+    names = {arg.arg for arg in list(args.posonlyargs) + list(args.args) + list(args.kwonlyargs)}
+    if args.vararg:
+        names.add(args.vararg.arg)
+    if args.kwarg:
+        names.add(args.kwarg.arg)
+    return names
+
+
+def _check_int_call(call, known_text, known_int, shadowed):
+    if len(call.args) not in (1, 2) or any(isinstance(arg, ast.Starred) for arg in call.args):
+        return
+    text = _constant_text(call.args[0], known_text, shadowed)
+    if type(text) not in (str, bytes):
+        return
+    if len(call.args) == 2:
+        if call.keywords:
+            return
+        base_node = call.args[1]
+    elif call.keywords:
+        if len(call.keywords) != 1 or call.keywords[0].arg != 'base':
+            return
+        base_node = call.keywords[0].value
+    else:
+        base_node = None
+    if base_node is None:
+        base = 10
+    elif isinstance(base_node, ast.Constant) and type(base_node.value) is int:
+        base = base_node.value
+    else:
+        base = _constant_int(base_node, known_int)
+    if base is None:
+        return
+    try:
+        value = int(text, base)
+    except (ValueError, TypeError, OverflowError):
+        return
+    if not -(1 << 63) <= value < 1 << 63:
+        error = ValueError(f'int64 constant expression out of range: {value}')
+        error.source_line = call.lineno
+        error.source_column = call.col_offset
+        raise error
+
+
+def _check_int64_int_constants(tree):
+    """Refuse a statically known ``int(text, base)`` whose value does not fit int64.  AIL ints are
+    fixed width, so ``int("x" * 199, 36)`` (a valid 310-digit base-36 literal) used to compile and
+    stop with ``integer overflow`` while CPython prints the bignum.  Constant text (literals, +,
+    *, bytes/bytearray constructors and single-assignment constants in the same or an enclosing
+    scope) and base are folded; an invalid literal is left to the run-time ValueError, and a
+    shadowed ``int``, ``bytes`` or ``bytearray`` is never folded.  Values that reach the call as
+    variables with no constant binding keep the fixed-width run-time trap."""
+    bound = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.arg):
+            bound.add(node.arg)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bound.add(node.id)
+        elif isinstance(node, ast.alias):
+            bound.add(node.asname or node.name.split('.')[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            bound.update(node.names)
+    if 'int' in bound:
+        return
+
+    def scope(statements, parameters, inherited_text, inherited_int, inherited_shadow,
+              in_class=False):
+        counts, assignments, nested = {}, [], []
+
+        def scan(node):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                counts[node.name] = counts.get(node.name, 0) + 1
+                nested.append(node)
+                for default in list(node.args.defaults) + [
+                        d for d in node.args.kw_defaults if d is not None]:
+                    scan(default)
+                for decorator in node.decorator_list:
+                    scan(decorator)
+                return
+            if isinstance(node, ast.ClassDef):
+                counts[node.name] = counts.get(node.name, 0) + 1
+                nested.append(node)
+                for base in node.bases:
+                    scan(base)
+                for keyword in node.keywords:
+                    scan(keyword.value)
+                for decorator in node.decorator_list:
+                    scan(decorator)
+                return
+            if isinstance(node, ast.Lambda):
+                nested.append(node)
+                for default in list(node.args.defaults) + [
+                        d for d in node.args.kw_defaults if d is not None]:
+                    scan(default)
+                return
+            if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+                counts[node.id] = counts.get(node.id, 0) + 1
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                for alias in node.names:
+                    name = (alias.asname or alias.name).split('.')[0]
+                    counts[name] = counts.get(name, 0) + 1
+            elif isinstance(node, ast.ExceptHandler) and node.name:
+                counts[node.name] = counts.get(node.name, 0) + 1
+            elif isinstance(node, (ast.Global, ast.Nonlocal)):
+                for name in node.names:
+                    counts[name] = counts.get(name, 0) + 1
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name)):
+                assignments.append((node.targets[0].id, node.value))
+            elif (isinstance(node, ast.AnnAssign) and node.value is not None
+                  and isinstance(node.target, ast.Name)):
+                assignments.append((node.target.id, node.value))
+            for child in ast.iter_child_nodes(node):
+                scan(child)
+
+        for statement in statements:
+            scan(statement)
+        for name in parameters:
+            counts[name] = counts.get(name, 0) + 1
+        shadowed = inherited_shadow | set(counts)
+        local_text, local_int = {}, {}
+        for name, value in assignments:
+            if counts.get(name) != 1 or name in parameters:
+                continue
+            text = _constant_text(value, {**inherited_text, **local_text}, shadowed)
+            if type(text) in (str, bytes):
+                local_text[name] = text
+                continue
+            number = _constant_int(value, {**inherited_int, **local_int})
+            if number is not None:
+                local_int[name] = number
+        known_text, known_int = dict(inherited_text), dict(inherited_int)
+        for name in counts:
+            if name not in local_text:
+                known_text.pop(name, None)
+            if name not in local_int:
+                known_int.pop(name, None)
+        known_text.update(local_text)
+        known_int.update(local_int)
+
+        def check(node):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                                 ast.Lambda)):
+                return
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == 'int'):
+                _check_int_call(node, known_text, known_int, shadowed)
+            for child in ast.iter_child_nodes(node):
+                check(child)
+
+        for statement in statements:
+            check(statement)
+        child_text = inherited_text if in_class else known_text
+        child_int = inherited_int if in_class else known_int
+        child_shadow = inherited_shadow if in_class else shadowed
+        for node in nested:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                scope(node.body, _int_argument_names(node.args), child_text, child_int,
+                      child_shadow)
+            elif isinstance(node, ast.ClassDef):
+                scope(node.body, set(), child_text, child_int, child_shadow, in_class=True)
+            else:
+                scope([ast.Expr(value=node.body)], _int_argument_names(node.args), child_text,
+                      child_int, child_shadow)
+
+    scope(tree.body, set(), {}, {}, set())
+
+
 def _check_int64_constants(tree):
     """Refuse a constant integer expression outside int64 in a module/class assignment or a
     default argument, where the construct used to compile and trap at run time. Function and
@@ -704,6 +920,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 _check_int64_constants(tree)
                 _check_int64_literals(tree)
                 _check_int64_unary_constants(tree)
+                _check_int64_int_constants(tree)
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)
             if source_map is not None:

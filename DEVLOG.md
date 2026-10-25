@@ -1,3 +1,26 @@
+## 2026-10-25 - out-of-int64 constant `int(text, base)` refused (job-pre259-10260538)
+
+The first listed pre180-review item (`int(bytes/bytearray, base)` message text and the 200-character
+cut) is already fixed on this tree by pre192/pre212; `bash ~/tools/cmp.sh` matched CPython. The first
+still-differing item was the second: a valid constant literal outside int64, `int("x" * 199, 36)`,
+compiled on both builds and then stopped with `integer overflow`, while CPython prints a 310-digit
+bignum. AIL ints are fixed width, so the construct is now refused by name at compile time with
+`int64 constant expression out of range`.
+
+The new `_check_int64_int_constants` folds constant text (literals, `+`, `*`, a `bytes`/`bytearray`
+constructor and single-assignment constants in the same or an enclosing scope) and a constant base,
+then parses with CPython's own `int(text, base)`. An invalid literal or an in-range value is left
+alone, so the run-time ValueError and matching values are unchanged; a shadowed `int`, `bytes` or
+`bytearray` is not folded. The third listed item (default-build lambda-closure exception) matched
+CPython in the probes run here; the fourth (non-BMP/surrogate literals) is already refused by name.
+
+Probes in `/tmp/probes`: `p_huge2`, `p_huge_routes`, `p_huge_module`, `p_huge_local`,
+`p_huge_local2` are refused by name on both builds; `p_huge_inrange2`, `p_intmsg`, `p_lambda` and
+`p_uni` match CPython or are refused by name. Added `AIL_CURRENT/test_ail_pre259.py` (15 refusal
+cases and an in-range/CPython-parity case, both builds) and registered it in `ail_check.MODULES`;
+`tools/ci_shards.py --update` assigned it a shard. Final-state tests: `test_ail_pre259`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a
