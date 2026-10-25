@@ -397,7 +397,7 @@ static ail_obj ail_builtin_all(ail_obj src) {
 }
 static ail_obj ail_builtin_min(ail_obj src, ail_obj (*keyfn)(ail_obj), int has_default, ail_obj dflt) {
     int64_t n = ail_iter_len(src);
-    if (n == 0) { if (has_default) return dflt; ail_raise_c(AIL_ERR_VALUE, "min() arg is an empty sequence"); }
+    if (n == 0) { if (has_default) return dflt; ail_raise_c(AIL_ERR_VALUE, "min() iterable argument is empty"); }
     ail_obj best = ail_iter_at(src, 0);
     ail_obj bestk = keyfn ? keyfn(best) : best;
     for (int64_t i = 1; i < n; i++) {
@@ -409,7 +409,7 @@ static ail_obj ail_builtin_min(ail_obj src, ail_obj (*keyfn)(ail_obj), int has_d
 }
 static ail_obj ail_builtin_max(ail_obj src, ail_obj (*keyfn)(ail_obj), int has_default, ail_obj dflt) {
     int64_t n = ail_iter_len(src);
-    if (n == 0) { if (has_default) return dflt; ail_raise_c(AIL_ERR_VALUE, "max() arg is an empty sequence"); }
+    if (n == 0) { if (has_default) return dflt; ail_raise_c(AIL_ERR_VALUE, "max() iterable argument is empty"); }
     ail_obj best = ail_iter_at(src, 0);
     ail_obj bestk = keyfn ? keyfn(best) : best;
     for (int64_t i = 1; i < n; i++) {
@@ -1565,6 +1565,8 @@ class Compiler:
         return self._emit_tmp(ctx, 'ail_obj_getitem(%s, %s)' % (c, key))
 
     def expr_Attribute(self, node, ctx):
+        if node.attr in ('__cause__', '__context__', '__suppress_context__', '__traceback__'):
+            raise Unsupported('reading %s (exception chaining is not kept here)' % node.attr)
         if isinstance(node.value, ast.Name) and node.value.id == 'math' and node.attr == 'pi':
             return 'ail_box_float(AIL_MATH_PI)'
         if isinstance(node.value, ast.Name) and node.value.id in (
@@ -1631,7 +1633,9 @@ class Compiler:
         return self._emit_comp(node, ctx, 'ail_list_new()', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        return self.expr_ListComp(node, ctx)
+        t = self.expr_ListComp(node, ctx)
+        ctx.emit('((ail_vecobj *)(%s).o)->from_generator = 1;' % t)
+        return t
 
     def expr_SetComp(self, node, ctx):
         def add(n, c, t):
@@ -2424,6 +2428,8 @@ class Compiler:
             ctx.emit('%s = %s;' % (cid(target.id), value_c))
             return
         if isinstance(target, ast.Attribute):
+            if target.attr in ('__cause__', '__context__', '__suppress_context__', '__traceback__'):
+                raise Unsupported('writing %s (exception chaining is not kept here)' % target.attr)
             obj = self.expr(target.value, ctx)
             self.attr_names.add(target.attr)
             ctx.emit('ail_inst_setattr(%s, pa_%s, %s);' % (obj, target.attr, value_c))
