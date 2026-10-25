@@ -31,6 +31,32 @@ error on both the general path and the default build. In-range constant expressi
 `AIL_CURRENT/test_ail_pre159.py` with the literal, expression, return, `__index__`, argument,
 list-item, attribute, dict-value, alias, negative, shift, multiply and huge-exponent cases, plus the
 in-range boundary check against CPython on both builds.
+## 2026-10-24 - round() negative ndigits boundary (job-pre160-10250349)
+
+Review follow-up. The new `__index__` route made `round(float, ndigits)` reachable with any int64,
+and the negative-scale loop multiplied `1.0` by 10 until it overflowed to `inf`; `inf/inf` then
+produced `nan` for every ndigits at or below -309 (`round(2.5, -309)` was `nan`, CPython `0.0`).
+The float branch now returns a signed zero for `nn <= -309` (10**309 exceeds DBL_MAX, so every
+finite double is nearer zero than the first representable multiple) and raises
+`OverflowError: rounded value too large to represent` when rescaling overflows, matching CPython.
+The int branch's `-n >= 19` test overflowed for `n == INT64_MIN`; it now tests `n <= -19` directly.
+Extended `test_ail_pre160.py` with the boundary program (literals, `__index__`, argument/list item/
+attribute/dict routes, signed zero, INT64_MIN for float, overflow, int ndigits). The DIFFERENCES
+row now says the `integer overflow` stop happens while evaluating the out-of-int64 expression
+inside `__index__`, not on an already-returned index (base did not wrap either).
+
+## 2026-10-24 - round() ndigits conversion (job-pre160-10250349)
+
+CPython checks the number type before converting `round`'s ndigits: an instance with `__round__`
+receives the ndigits object unchanged, an int/float converts it with `__index__` only afterwards,
+and None means no ndigits. The general path read the ndigits value's raw int field, so `__index__`
+was never called, `round(2.5, "2")` and `round(2.5, [1])` silently rounded, an instance without
+`__round__` was named `instance`, and a `__round__` method got a garbage integer. `ail_bi_round` now
+takes the ndigits object, converts it in the int/float branches (int/bool, `__index__`, or a
+TypeError), treats None as omitted there, and the dunder patch passes the object and names the class
+in the no-method error. Both builds match CPython on the ordering, type and route probes. An
+out-of-int64 `__index__` result still cannot be represented, so it now stops with `integer overflow`
+instead of silently wrapping (recorded in DIFFERENCES). Added `test_ail_pre160.py`.
 
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
 
