@@ -7311,7 +7311,7 @@ class Compiler(boxclosure.ClosureMixin):
         src = self._resolve_iter_src(args[0], ctx)
         r = self.expr(r_node, ctx)
         t = ctx.tmp()
-        ctx.emit('st = ail_it_combinations(cx, &%s, %s, (%s).i);' % (t, src, r))
+        ctx.emit('st = ail_it_combinations(cx, &%s, %s, %s);' % (t, src, r))
         ctx.check()
         return t
 
@@ -7321,15 +7321,15 @@ class Compiler(boxclosure.ClosureMixin):
         r_node = args[1] if len(args) > 1 else kwargs.get('r')
         src = self._resolve_iter_src(args[0], ctx)
         if r_node is None or (isinstance(r_node, ast.Constant) and r_node.value is None):
-            has_r, r = '0', '0'     # permutations(xs) and permutations(xs, None) alike
+            has_r, r = '0', 'ail_box_none()'     # permutations(xs) and permutations(xs, None) alike
         else:
             mv = self.expr(r_node, ctx)
             if isinstance(r_node, ast.Constant):
-                has_r, r = '1', '(%s).i' % mv
+                has_r, r = '1', mv
             else:                   # a value known only at run time: None means "all of them"
                 mt = ctx.tmp()
                 ctx.emit('%s = %s;' % (mt, mv))
-                has_r, r = '(%s.tag != AIL_T_NONE)' % mt, '(%s.tag == AIL_T_NONE ? 0 : %s.i)' % (mt, mt)
+                has_r, r = '(%s.tag != AIL_T_NONE)' % mt, mt
         t = ctx.tmp()
         ctx.emit('st = ail_it_permutations(cx, &%s, %s, %s, %s);' % (t, src, has_r, r))
         ctx.check()
@@ -7351,7 +7351,7 @@ class Compiler(boxclosure.ClosureMixin):
         r_node = args[1] if len(args) > 1 else kwargs['r']
         src = self._resolve_iter_src(args[0], ctx)
         t = ctx.tmp()
-        ctx.emit('st = ail_it_combinations_wr(cx, &%s, %s, (%s).i);' % (t, src, self.expr(r_node, ctx)))
+        ctx.emit('st = ail_it_combinations_wr(cx, &%s, %s, %s);' % (t, src, self.expr(r_node, ctx)))
         ctx.check()
         return t
 
