@@ -650,9 +650,6 @@ static void ail_raise_named(int code) {
     if (ail_exc_top >= 0) { ail_exc_unwind(); ail_exc_throw(); }
     ail_exception_uncaught(ail_exc_value);
 }
-static void ail_raise_cstr(int code, const char *msg) {
-    ail_raise_value(ail_exception_new(code, (const uint8_t *)msg, (int64_t)strlen(msg), 1));
-}
 static ail_exception *ail_exception_current(void) {
     /* Mapped legacy traps transport a code alone; materialize their empty payload on demand. */
     if (!ail_exc_value && ail_exc_code)
@@ -4452,7 +4449,7 @@ static int64_t ail_numfield_slice_bound(int64_t n, int64_t x, int negative) {
 static int64_t ail_numfield_slice_plan(int64_t n, int64_t lo, int haslo,
                                       int64_t hi, int hashi, int64_t step,
                                       int64_t *start, uint64_t *stride) {
-    if (!step) ail_raise_cstr(AIL_EXC_VALUE, "slice step cannot be zero");
+    if (!step) ail_raise_value(ail_exception_new(AIL_EXC_VALUE, (const uint8_t *)"slice step cannot be zero", (int64_t)strlen("slice step cannot be zero"), 1));
     int negative = step < 0;
     int64_t a = haslo ? ail_numfield_slice_bound(n, lo, negative) : (negative ? n - 1 : 0);
     int64_t b = hashi ? ail_numfield_slice_bound(n, hi, negative) : (negative ? -1 : n);
@@ -7713,7 +7710,7 @@ static void ail_blist_extend(ail_blist *B, const ail_blist *other) {
 }
 static ail_blist *ail_blist_slice(const ail_blist *B, int64_t lo, int64_t hi, int64_t step) {
     ail_blist_elements(B);
-    if (!step) ail_raise_cstr(AIL_EXC_VALUE, "slice step cannot be zero");
+    if (!step) ail_raise_value(ail_exception_new(AIL_EXC_VALUE, (const uint8_t *)"slice step cannot be zero", (int64_t)strlen("slice step cannot be zero"), 1));
     int64_t n = B->n;
     if (lo < 0) { lo += n; if (lo < 0) lo = step > 0 ? 0 : -1; }
     else if (lo >= n) lo = step > 0 ? n : n - 1;
@@ -25094,7 +25091,7 @@ static ail_bytearray *ail_bytearray_slice(const ail_bytearray *B,
     if ((has_lo != 0 && has_lo != 1) || (has_hi != 0 && has_hi != 1) ||
             (has_step != 0 && has_step != 1)) ail_die("invalid bytearray slice flags");
     if (!has_step) step = 1;
-    if (!step) ail_raise_cstr(AIL_EXC_VALUE, "slice step cannot be zero");
+    if (!step) ail_raise_value(ail_exception_new(AIL_EXC_VALUE, (const uint8_t *)"slice step cannot be zero", (int64_t)strlen("slice step cannot be zero"), 1));
     int negative = step < 0;
     int64_t start = has_lo ? ail_bytearray_bound(B->n, lo, negative) : (negative ? B->n - 1 : 0);
     int64_t stop = has_hi ? ail_bytearray_bound(B->n, hi, negative) : (negative ? -1 : B->n);
@@ -26613,7 +26610,7 @@ static int64_t ail_hlist_ELEMENT_bound(int64_t value, int64_t n, int64_t step) {
 static void ail_hlist_ELEMENT_slice(ail_hlist_ELEMENT *v, ail_hlist_ELEMENT *source,
         int has_lo, int64_t lo, int has_hi, int64_t hi, int64_t step) {
     int64_t n = ail_hlist_ELEMENT_len(source);
-    if (!step) ail_raise_cstr(AIL_EXC_VALUE, "slice step cannot be zero");
+    if (!step) ail_raise_value(ail_exception_new(AIL_EXC_VALUE, (const uint8_t *)"slice step cannot be zero", (int64_t)strlen("slice step cannot be zero"), 1));
     lo = has_lo ? ail_hlist_ELEMENT_bound(lo, n, step) : step < 0 ? n - 1 : 0;
     hi = has_hi ? ail_hlist_ELEMENT_bound(hi, n, step) : step < 0 ? -1 : n;
     uint64_t stride = step < 0 ? UINT64_C(0) - (uint64_t)step : (uint64_t)step;
