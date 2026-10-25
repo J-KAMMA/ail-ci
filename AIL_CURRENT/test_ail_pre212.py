@@ -77,7 +77,7 @@ def main():
         show("baseattr-" + str(b), lambda b=b: int(b"10", base=box.b if b == 2 else b))
         show("bad-bytes-" + str(b), lambda b=b: int(b"x", base=b))
         show("bad-ba-" + str(b), lambda b=b: int(bytearray(b"x"), base=b))
-        show("long-" + str(b), lambda b=b: int(b"x" * 201, base=b))
+        show("long-" + str(b), lambda b=b: int(b"!" * 201, base=b))
     show("bytes-good", lambda: int(b"10", base=10))
     show("ba-good", lambda: int(bytearray(b"10"), base=10))
     show("good-arg", lambda: conv2(b"10"))
