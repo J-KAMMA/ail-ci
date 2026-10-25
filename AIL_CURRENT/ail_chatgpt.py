@@ -3,6 +3,7 @@ import ast
 import argparse
 import hashlib
 import json
+import operator
 import os
 from pathlib import Path
 import platform
@@ -75,20 +76,117 @@ def _module_constant(node):
             and bool(value.elts) and all(map(_literal_number, value.elts)))
 
 
+_PURE_INT_BINARY = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
+                    ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod,
+                    ast.Pow: operator.pow, ast.LShift: operator.lshift, ast.RShift: operator.rshift,
+                    ast.BitAnd: operator.and_, ast.BitOr: operator.or_, ast.BitXor: operator.xor}
+_MAX_CONST_BITS = 1 << 16
+
+
+class _HugeConstant(Exception):
+    pass
+
+
+_HUGE = object()
+
+
+def _pure_constant_int(node):
+    """The value of a pure integer constant expression, or None when `node` is not one.
+
+    `_HugeConstant` means the value is certainly outside int64 (larger than _MAX_CONST_BITS bits),
+    so a 10**100000000 exponent is refused without computing it.  Operators that yield a float
+    (division, a negative exponent) are not constant int expressions here."""
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        return node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert)):
+        value = _pure_constant_int(node.operand)
+        if value is None:
+            return None
+        if isinstance(node.op, ast.Invert):
+            value = ~value
+        elif isinstance(node.op, ast.USub):
+            value = -value
+        if value.bit_length() > _MAX_CONST_BITS:
+            raise _HugeConstant
+        return value
+    if isinstance(node, ast.BinOp) and type(node.op) in _PURE_INT_BINARY:
+        try:
+            left = _pure_constant_int(node.left)
+        except _HugeConstant:
+            left = _HUGE
+        try:
+            right = _pure_constant_int(node.right)
+        except _HugeConstant:
+            right = _HUGE
+        if left is None or right is None:
+            return None
+        if left is _HUGE or right is _HUGE:
+            if isinstance(node.op, (ast.Mult, ast.BitAnd)) and (left == 0 or right == 0):
+                return 0
+            if isinstance(node.op, ast.LShift) and left == 0:
+                return 0
+            if isinstance(node.op, ast.Pow) and (right == 0 or left == 0):
+                return 1 if right == 0 else 0
+            raise _HugeConstant
+        if isinstance(node.op, ast.Pow):
+            if right < 0:
+                return None
+            if abs(left) > 1 and (right > 4096 or abs(left).bit_length() * right > _MAX_CONST_BITS):
+                raise _HugeConstant
+            value = left ** right
+        elif isinstance(node.op, ast.LShift):
+            if right < 0:
+                return None
+            if left and (right > 4096 or left.bit_length() + right > _MAX_CONST_BITS):
+                raise _HugeConstant
+            value = left << right
+        elif isinstance(node.op, ast.RShift):
+            if right < 0:
+                return None
+            value = 0 if left >= 0 else -1
+            if right <= _MAX_CONST_BITS:
+                value = left >> right
+        else:
+            try:
+                value = _PURE_INT_BINARY[type(node.op)](left, right)
+            except (ArithmeticError, ValueError):
+                return None
+        if value.bit_length() > _MAX_CONST_BITS:
+            raise _HugeConstant
+        return value
+    return None
+
+
 def _check_int64_literals(tree):
+    maxsplit = _maxsplit_constant_nodes(tree)
     nodes = [tree]
     while nodes:
         node = nodes.pop()
-        if (isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub))
-                and isinstance(node.operand, ast.Constant) and type(node.operand.value) is int):
-            value = -node.operand.value if isinstance(node.op, ast.USub) else node.operand.value
-        elif isinstance(node, ast.Constant) and type(node.value) is int:
+        if id(node) in maxsplit and not (isinstance(node, ast.Constant) and type(node.value) is int):
+            continue
+        text = None
+        if isinstance(node, ast.Constant) and type(node.value) is int:
             value = node.value
+            text = str(value)
+        elif (isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert))
+              or isinstance(node, ast.BinOp) and type(node.op) in _PURE_INT_BINARY):
+            try:
+                value = _pure_constant_int(node)
+            except _HugeConstant:
+                text = ast.unparse(node)
+                error = ValueError(f'int64 literal out of range: {text}')
+                error.source_line = node.lineno
+                error.source_column = node.col_offset
+                raise error
+            if value is None:
+                nodes.extend(ast.iter_child_nodes(node))
+                continue
+            text = str(value)
         else:
             nodes.extend(ast.iter_child_nodes(node))
             continue
         if not -(1 << 63) <= value < 1 << 63:
-            error = ValueError(f'int64 literal out of range: {value}')
+            error = ValueError(f'int64 literal out of range: {text}')
             error.source_line = node.lineno
             error.source_column = node.col_offset
             raise error
