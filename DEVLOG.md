@@ -1,3 +1,15 @@
+## 2026-10-25 -- pre227 suite fix: the constant check owns the refusal wording (job-pre227-10260534)
+
+The class-constant fix still folds `N = 2**62; class C: X = N * 4` to a literal, but the
+current integration tree's `_check_int64_constants` now sees that folded module/class
+assignment before `_check_int64_literals`, so it refuses it as
+`int64 constant expression out of range` instead of `int64 literal out of range`.
+`test_ail_pre227.py` now accepts either named refusal (and still rejects `integer overflow`
+and a traceback); the in-range, shadowed, rebound and dynamic-route cases are unchanged.
+Probes `pre227_*` in `/tmp/probes` match CPython or are refused by name on both builds, both
+here and on a copy of the current integration branch with this fix applied. Tests: pre227,
+safetynet, files, corpus_findings3.
+
 ## 2026-10-25 - pre227: class constants built from a module name (job-pre227-10260119)
 
 The first still-differing item in the rbpre184 review was the class constant built through a

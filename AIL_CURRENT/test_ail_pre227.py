@@ -7,6 +7,10 @@ before the class into the class-level constant expression (wide intermediate ste
 allowed), so an in-range value is emitted as a literal and a value that cannot fit int64
 is refused by name at compile time on both builds.  Values that only reach the class body
 at run time keep the fixed-width trap, and a nested class definition is refused by name.
+
+The refusal wording depends on which check sees the folded literal: the literal check says
+``int64 literal out of range``, while the later module/class constant check says
+``int64 constant expression out of range``.  Either named refusal is accepted here.
 """
 import os
 import subprocess
@@ -16,6 +20,8 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+
+REFUSALS = ('int64 literal out of range', 'int64 constant expression out of range')
 
 OUT_OF_RANGE = {
     'mult': '''N = 2**62
@@ -132,7 +138,7 @@ class Pre227Tests(unittest.TestCase):
                                           text, general)
                         self.assertNotEqual(built.returncode, 0, label)
                         message = built.stdout + built.stderr
-                        self.assertIn('int64 literal out of range', message, label)
+                        self.assertTrue(any(text in message for text in REFUSALS), message)
                         self.assertNotIn('integer overflow', message, label)
                         self.assertNotIn('Traceback', message, label)
 
