@@ -5,9 +5,11 @@ rebinding such as `next = next`, or a read of `next` before the rebinding it lat
 failed on both builds with `NameError: name 'py_next' is not defined` where CPython uses
 the built-in.  The shadowing pass renames such a binding to `py_next`, and `py_next` has no
 built-in fallback: CPython's module LOAD_NAME checks the built-in when the global is not
-bound, and a `del` of the shadow makes it unbound again.  Those shapes are now refused by
-name at compile time (`shadows the built-in next`), while an ordinary rebinding that is
-only read after it is bound still matches CPython on both builds.
+bound, and a `del` of the shadow makes it unbound again.  A load at such a point is refused
+by name at compile time (`shadows the built-in next`), including a call made there into a
+function whose body reads the name.  A parameter, local or comprehension variable named
+`next`, a read only after the binding, and a `del` that nothing then reads still match
+CPython on both builds.
 """
 import shutil
 import unittest
@@ -44,6 +46,29 @@ del next
 print(saved([1]))
 print(next([1]))
 ''',
+    'lambda_before_binding': '''f = lambda: next(iter([1]))
+print(f())
+next = lambda x: 0
+''',
+    'indirect_call_before_binding': '''def f():
+    return next(iter([1]))
+
+def g():
+    return f()
+
+print(g())
+next = lambda x: 0
+''',
+    'call_after_delete': '''next = lambda x: 5
+
+def f():
+    return next(iter([1]))
+
+del next
+print(f())
+''',
+    'augassign_without_binding': '''next += 1
+''',
 }
 
 MATCHES = {
@@ -69,6 +94,67 @@ print(next([1]))
     print(next(iter([1])))
 
 main()
+''',
+    'parameter_before_binding': '''def f(next):
+    return next + 1
+
+print(f(1))
+next = lambda x: 0
+print(next(1))
+''',
+    'local_before_binding': '''def f():
+    next = 5
+    return next
+
+print(f())
+next = lambda x: 0
+print(next(1))
+''',
+    'comprehension_before_binding': '''def f():
+    return [next for next in range(3)]
+
+print(f())
+next = lambda x: 0
+print(next(1))
+''',
+    'delete_last': '''next = lambda x: 5
+print(next([1]))
+del next
+''',
+    'delete_rebind': '''next = lambda x: 3
+del next
+next = lambda x: 7
+print(next([1]))
+''',
+    'dead_if_false': '''if False:
+    print(next([1]))
+next = lambda x: 0
+print(next(1))
+''',
+    'lambda_read_after_binding': '''f = lambda: next(iter([1]))
+next = lambda x: 0
+print(f())
+''',
+    'augassign_after_binding': '''next = 1
+next += 2
+print(next)
+''',
+    'dead_while_false': '''while False:
+    print(next([1]))
+next = lambda x: 0
+print(next(1))
+''',
+    'dead_if_zero': '''if 0:
+    print(next([1]))
+else:
+    pass
+next = lambda x: 0
+print(next(1))
+''',
+    'dead_delete': '''next = lambda x: 5
+if False:
+    del next
+print(next([1]))
 ''',
 }
 

@@ -1,20 +1,24 @@
 ## 2026-10-25 - module-level built-in shadow fallback (job-pre208-10252257)
 
 The first still-differing item from the pre142 review (`p4_scope`) was a module-level rebinding of the
-built-in `next`: `next = next` (also a read before the later binding, or a `del` of it) printed or raised
-`NameError: name 'py_next' is not defined` on both builds, where CPython's module LOAD_NAME falls back to the
-built-in. `shadowing.rename` gives the definition `py_next`, which has no built-in fallback, so the unsafe
-shapes are now refused by name at compile time: a read of the shadowed name before its first module-level
-binding (including a call of a function defined there), a read in that binding's own right-hand side, or a
-module-scope `del` of it. A def before the binding whose body reads the name is refused only when the module
-calls it before the binding. Ordinary rebinds that are read after they are bound are unchanged and still
-match CPython on both builds.
+built-in `next`: `next = next` printed or raised `NameError: name 'py_next' is not defined` on both builds,
+where CPython's module LOAD_NAME falls back to the built-in. `shadowing.rename` gives the definition
+`py_next`, which has no built-in fallback, so a load that Python still answers from the built-in is now
+refused by name at compile time. The scan follows Python's parameter/local/comprehension scopes, prunes
+constant-false branches (`if False:`, `while False`, `if 0`), and follows the binding/del order of the
+module: a read before the first binding (or in its right-hand side), a read after a `del` and before a
+rebind, a `del` before any binding, and `next += 1` are refused. A function or lambda body is examined
+only when the module actually calls it while the name is unbound, including through another function or
+an alias, so a def/lambda defined before the binding but called after it still matches CPython.
 
-`test_ail_pre208.py` covers the self-rebind, read-before-binding (top level and through a function), the
-three deletion shapes and the safe controls. Probes `p4_self`, `p4_before`, `p4_before_fn`, `p4_del`,
-`p4_delafter`, `p4_del_then` and `p4_alias_del` are refused by name; `p4_const`, `p4_c1`, `p4_def`,
-`p4_globalonly` and the read-after-binding control match CPython on both builds. The recorded `p8_edge`
-set/genexpr difference was not touched.
+`test_ail_pre208.py` covers the refused self-rebind, read-before-binding (top level, through a direct and
+an indirect function call, and an alias), the delete shapes and the `+=` form, plus safe controls:
+parameters, locals and comprehension variables named `next`, reads after the binding, `del` with no later
+read, delete-then-rebind, and dead branches. Probes `fp_param`, `fp_local`, `fp_comp`, `fp_del_last`,
+`fp_del_rebind`, `gap_cond`, `lambda_after`, `b_alias_valid` and `b_aug_valid2` match CPython on both
+builds; `p4_scope`, `p4_del_read`, `gap_lambda`, `gap_indirect`, `after_del_fn`, `gap_aug`, `b_alias_before`,
+`b_ann_self`, `b_rich_reads`, `b_tuple_self` and `b_del_before` are refused by name. The recorded
+`p8_edge` set/genexpr difference was not touched.
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal

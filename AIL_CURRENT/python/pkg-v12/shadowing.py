@@ -56,7 +56,7 @@ SHADOWABLE = (PY_BUILTINS | AIL_BUILTINS | _VALUE_TYPES) - _CORE_TYPES - set(_ST
 
 
 # A cheap pre-filter: module-level `def`/`class` names and `NAME =` / `NAME: T =` heads.
-_HEAD = re.compile(r'^\s*(?:async\s+)?(?:def|class)\s+(\w+)|^(\w+)\s*(?::[^=\n]*)?=', re.M)
+_HEAD = re.compile(r'^\s*(?:async\s+)?(?:def|class)\s+(\w+)|^(\w+)\s*(?::[^=\n]*)?(?:=(?!=)|(?://|\*\*|<<|>>|[-+*/%&|^@])=)', re.M)
 
 
 def _suggest(name):
@@ -247,135 +247,257 @@ class _Collector:
             self.visit(child, chain, class_locals)
 
 
-def _find_load(node, name, function_bodies):
-    """The first Name Load of `name` while `node` executes, or None. `function_bodies` also looks
-    inside a def/lambda body: a def before the module-level binding can be called before it runs."""
-    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id == name:
-        return node
-    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-        for part in getattr(node, 'decorator_list', ()):
-            hit = _find_load(part, name, function_bodies)
-            if hit is not None:
-                return hit
-        args = node.args
-        for part in args.defaults + [d for d in args.kw_defaults if d is not None]:
-            hit = _find_load(part, name, function_bodies)
-            if hit is not None:
-                return hit
-        if function_bodies:
-            body = node.body if isinstance(node, ast.Lambda) else node.body
-            for part in (body if isinstance(body, list) else [body]):
-                hit = _find_load(part, name, function_bodies)
-                if hit is not None:
-                    return hit
+def _const_truth(node):
+    """True/False when the expression's truth value is fixed, else None."""
+    if isinstance(node, ast.Constant):
+        return bool(node.value)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        value = _const_truth(node.operand)
+        return None if value is None else not value
+    if isinstance(node, ast.BoolOp):
+        values = [_const_truth(value) for value in node.values]
+        if isinstance(node.op, ast.And):
+            if False in values:
+                return False
+            return True if all(value is True for value in values) else None
+        if True in values:
+            return True
+        return False if all(value is False for value in values) else None
+    try:
+        return bool(ast.literal_eval(node))
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
         return None
-    if isinstance(node, ast.GeneratorExp) and not function_bodies:
-        return _find_load(node.generators[0].iter, name, function_bodies)
-    for child in ast.iter_child_nodes(node):
-        hit = _find_load(child, name, function_bodies)
-        if hit is not None:
-            return hit
-    return None
 
 
-def _module_delete(tree, name):
-    """The first module-scope `del <name>` (a class or function body is another scope), or None."""
-    def walk(node):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
-            return None
-        if isinstance(node, ast.Delete):
-            for target in node.targets:
-                for leaf in ast.walk(target):
-                    if isinstance(leaf, ast.Name) and leaf.id == name:
-                        return node
+def _scan_immediate(node, name, chain=()):
+    """(loads of `name` that resolve to module scope, called Name functions) when `node` runs.
+
+    A function or lambda body is deferred (only its decorators, defaults and annotations run
+    now); a class body runs now.  Branches with a fixed false/true test are pruned."""
+    loads, calls = [], []
+
+    def visit(node, chain):
+        if isinstance(node, ast.Name):
+            if (name is not None and node.id == name and isinstance(node.ctx, ast.Load)
+                    and not any(name in scope for scope in chain)):
+                loads.append(node)
+            return
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for item in node.decorator_list:
+                visit(item, chain)
+            args = node.args
+            for item in args.defaults + [d for d in args.kw_defaults if d is not None]:
+                visit(item, chain)
+            for arg in (args.posonlyargs + args.args + args.kwonlyargs
+                        + [args.vararg, args.kwarg]):
+                if arg is not None and arg.annotation is not None:
+                    visit(arg.annotation, chain)
+            if node.returns is not None:
+                visit(node.returns, chain)
+            return
+        if isinstance(node, ast.Lambda):
+            for item in node.args.defaults + [d for d in node.args.kw_defaults if d is not None]:
+                visit(item, chain)
+            return
+        if isinstance(node, ast.ClassDef):
+            for item in node.decorator_list + node.bases + [k.value for k in node.keywords]:
+                visit(item, chain)
+            local = _bound_names(node.body)
+            for statement in node.body:
+                visit(statement, chain + (local,))
+            return
+        if isinstance(node, ast.If):
+            visit(node.test, chain)
+            truth = _const_truth(node.test)
+            if truth is not False:
+                for statement in node.body:
+                    visit(statement, chain)
+            if truth is not True:
+                for statement in node.orelse:
+                    visit(statement, chain)
+            return
+        if isinstance(node, ast.While):
+            visit(node.test, chain)
+            if _const_truth(node.test) is not False:
+                for statement in node.body:
+                    visit(statement, chain)
+            for statement in node.orelse:
+                visit(statement, chain)
+            return
+        if isinstance(node, ast.IfExp):
+            visit(node.test, chain)
+            truth = _const_truth(node.test)
+            if truth is not False:
+                visit(node.body, chain)
+            if truth is not True:
+                visit(node.orelse, chain)
+            return
+        if isinstance(node, ast.GeneratorExp):
+            visit(node.generators[0].iter, chain)     # the rest runs when it is iterated
+            return
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp)):
+            visit(node.generators[0].iter, chain)
+            scope = set()
+            for generator in node.generators:
+                scope.update(n.id for n in ast.walk(generator.target) if isinstance(n, ast.Name))
+            inner = chain + (scope,)
+            for index, generator in enumerate(node.generators):
+                visit(generator.target, inner)
+                if index:
+                    visit(generator.iter, inner)
+                for condition in generator.ifs:
+                    visit(condition, inner)
+            for part in ((node.key, node.value)
+                         if isinstance(node, ast.DictComp) else (node.elt,)):
+                visit(part, inner)
+            return
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            calls.append(node)
         for child in ast.iter_child_nodes(node):
-            hit = walk(child)
-            if hit is not None:
-                return hit
-        return None
-    for statement in tree.body:
-        hit = walk(statement)
-        if hit is not None:
-            return hit
-    return None
+            visit(child, chain)
+
+    for item in node if isinstance(node, list) else [node]:
+        visit(item, chain)
+    return loads, calls
 
 
-def _find_call(node, names):
-    """The first module-scope call of a name in `names` (function bodies are other scopes)."""
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in names:
-        return node
-    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+def _callables_for(tree, name):
+    """({function name: [(index, loads, calls)]}, {alias name: [(index, target)]}) for the
+    module-level functions and lambdas whose bodies can read `name`."""
+    entries, aliases = {}, {}
+    for index, statement in enumerate(tree.body):
+        node, value = statement, None
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            scope = _bound_names(statement.body, _params(statement.args))
+            entries.setdefault(statement.name, []).append(
+                (index,) + _scan_immediate(statement.body, name, (scope,)))
+            continue
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            node, value = statement.targets[0], statement.value
+        elif isinstance(statement, ast.AnnAssign):
+            node, value = statement.target, statement.value
+        if not isinstance(node, ast.Name) or value is None:
+            continue
+        if isinstance(value, ast.Lambda):
+            scope = _bound_names([value.body], _params(value.args))
+            entries.setdefault(node.id, []).append(
+                (index,) + _scan_immediate(value.body, name, (scope,)))
+        elif isinstance(value, ast.Name):
+            aliases.setdefault(node.id, []).append((index, value.id))
+    return entries, aliases
+
+
+def _binding_effects(node, name):
+    """Module-scope bind/unbind effects of `node`, pruning constant branches."""
+    if isinstance(node, ast.If):
+        truth = _const_truth(node.test)
+        effects = []
+        if truth is not False:
+            for statement in node.body:
+                effects.extend(_binding_effects(statement, name))
+        if truth is not True:
+            for statement in node.orelse:
+                effects.extend(_binding_effects(statement, name))
+        return effects
+    if isinstance(node, ast.While):
+        effects = []
+        if _const_truth(node.test) is not False:
+            for statement in node.body:
+                effects.extend(_binding_effects(statement, name))
+        for statement in node.orelse:
+            effects.extend(_binding_effects(statement, name))
+        return effects
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return ['bind'] if node.name == name else []
+    if isinstance(node, ast.Delete):
+        return ['unbind'] if any(
+            isinstance(leaf, ast.Name) and leaf.id == name and isinstance(leaf.ctx, ast.Del)
+            for target in node.targets for leaf in ast.walk(target)) else []
+    if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        return ['bind'] if any(
+            isinstance(leaf, ast.Name) and leaf.id == name and isinstance(leaf.ctx, ast.Store)
+            for target in targets for leaf in ast.walk(target)) else []
+    return []
+
+
+def _resolve_call(name, when, entries, aliases, seen=frozenset()):
+    """The first module load reached by calling `name` at statement index `when`, or None."""
+    options = [(index, 'function', (loads, calls))
+               for index, loads, calls in entries.get(name, ()) if index < when]
+    options += [(index, 'alias', target) for index, target in aliases.get(name, ())
+                if index < when]
+    if not options:
         return None
-    for child in ast.iter_child_nodes(node):
-        hit = _find_call(child, names)
+    index, kind, data = max(options, key=lambda option: option[0])
+    key = (name, index, kind)
+    if key in seen:
+        return None
+    seen = seen | {key}
+    if kind == 'alias':
+        return _resolve_call(data, when, entries, aliases, seen)
+    loads, calls = data
+    if loads:
+        return loads[0]
+    for call in calls:
+        hit = _resolve_call(call.func.id, when, entries, aliases, seen)
         if hit is not None:
             return hit
     return None
 
 
 def _check_rebound_builtin_fallback(tree, found, targets, Unsupported):
-    """Refuse a module-level shadow of a built-in whose name Python can still resolve to the
-    built-in: read before the first binding, read by the binding's own right-hand side, or
-    deleted. `rename` gives the binding `py_<name>`, which has no built-in fallback, so such a
-    read was a runtime "NameError: name 'py_<name>' is not defined" (or a compiler KeyError
-    after `del`) where CPython used the built-in -- for example `next = next`, or
-    `print(next(it))` before a later `next = ...`."""
+    """Refuse a module-level shadow of a built-in while Python resolves the name to the built-in.
+
+    `rename` gives the binding `py_<name>`, which has no built-in fallback.  A module load that
+    Python would answer from the built-in (before the first binding, after a `del`, or in the
+    binding's own right-hand side) would therefore be a runtime "NameError: name 'py_<name>' is
+    not defined" (or a compiler KeyError after `del`).  The scan follows function/comprehension
+    scopes and constant-false branches, and follows a call made while the name is unbound into
+    the function it reaches, so a function read only after the binding stays valid."""
     if not targets:
         return
-    statement_index = {id(statement): index for index, statement in enumerate(tree.body)}
-    first = {}
-    for name, _kind, node in found:
-        if name in targets and id(node) in statement_index:
-            index = statement_index[id(node)]
-            first[name] = min(first.get(name, index), index)
-    for name, first_index in first.items():
-        deleted = _module_delete(tree, name)
-        if deleted is not None:
-            error = Unsupported(
-                "the module-level definition %r shadows the built-in %s, but it is deleted; "
-                "Python then falls back to the built-in and this compiler renames the binding "
-                "to %r, which has no fallback.\n"
-                "  write instead: rename it (e.g. %r) or do not delete it"
-                % (name, name, 'py_' + name, _suggest(name)))
-            error.source_line = deleted.lineno
-            raise error
+    names = {name for name, _kind, _node in found if name in targets}
+    for name in sorted(names):
+        entries, aliases = _callables_for(tree, name)
         def refuse(hit):
             error = Unsupported(
                 "the module-level definition %r shadows the built-in %s, but the name is "
-                "read before that binding, where Python uses the built-in; this compiler "
-                "renames the binding to %r, which has no fallback.\n"
+                "read while Python still resolves it to the built-in; this compiler renames "
+                "the binding to %r, which has no fallback.\n"
                 "  write instead: rename it (e.g. %r) or use the built-in under another name"
                 % (name, name, 'py_' + name, _suggest(name)))
             error.source_line = hit.lineno
             raise error
 
-        # A def before the binding runs only when it is called, so a read in its body matters
-        # only if the module calls that function before the binding.  An ordinary statement,
-        # and a class body, runs at once.
-        pending = {}
+        bound = False
         for index, statement in enumerate(tree.body):
-            if index > first_index:
-                break
-            if index < first_index and isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                hit = _find_load(statement, name, False)
-                if hit is not None:
-                    refuse(hit)
-                body_hit = None
-                for part in statement.body:
-                    body_hit = _find_load(part, name, True)
-                    if body_hit is not None:
-                        break
-                if body_hit is not None:
-                    pending[statement.name] = body_hit
-                continue
-            hit = _find_load(statement, name, False)
-            if hit is not None:
-                refuse(hit)
-        if pending:
-            for statement in tree.body[:first_index]:
-                call = _find_call(statement, pending)
-                if call is not None:
-                    refuse(pending[call.func.id])
+            if not bound and isinstance(statement, ast.Delete):
+                if any(isinstance(leaf, ast.Name) and leaf.id == name
+                       and isinstance(leaf.ctx, ast.Del)
+                       for target in statement.targets for leaf in ast.walk(target)):
+                    error = Unsupported(
+                        "the module-level definition %r shadows the built-in %s, but the name "
+                        "is deleted before it is bound; Python raises NameError and this compiler "
+                        "would rename the deletion to %r.\n"
+                        "  write instead: rename it (e.g. %r) or do not delete it"
+                        % (name, name, 'py_' + name, _suggest(name)))
+                    error.source_line = statement.lineno
+                    raise error
+            elif not bound:
+                loads, calls = _scan_immediate(statement, name)
+                if (isinstance(statement, ast.AugAssign)
+                        and isinstance(statement.target, ast.Name)
+                        and statement.target.id == name):
+                    loads.insert(0, statement.target)     # `next += 1` reads before it stores
+                if loads:
+                    refuse(loads[0])
+                for call in calls:
+                    hit = _resolve_call(call.func.id, index, entries, aliases)
+                    if hit is not None:
+                        refuse(hit)
+            for effect in _binding_effects(statement, name):
+                bound = effect == 'bind'
 
 
 def rename(source, Unsupported, extra_names=()):
@@ -385,6 +507,9 @@ def rename(source, Unsupported, extra_names=()):
     A source with no such definition is returned unchanged (the same string object)."""
     watched = SHADOWABLE | _CORE_TYPES | _EXCEPTIONS | set(_STRUCTURAL)
     heads = {a or b for a, b in _HEAD.findall(source)}
+    # A tuple target (`next, x = ...`) has no single NAME= head for _HEAD.
+    for match in re.finditer(r'^\s*([^=\n]+?)\s*=(?!=)', source, re.M):
+        heads.update(re.findall(r'\w+', match.group(1)))
     if not heads & watched and not watched.intersection(extra_names):
         return source, {}
     stripped = source.strip()
