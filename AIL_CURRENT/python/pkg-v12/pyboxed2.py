@@ -6426,6 +6426,19 @@ class Compiler(boxclosure.ClosureMixin):
         return False
 
     def _call_name(self, name, args, kwargs, ctx):
+        if name == '_ail_free_capture' and name not in self.functions and name not in self.classes:
+            # written by nestfn.py around a lifted nested function's leading capture: read it where
+            # CPython does, inside the callee's scope, so an unbound name is NameError ('free
+            # variable'), not the caller's UnboundLocalError. The name is not evaluated as an
+            # ordinary expression; its slot is read with the free-variable check.
+            if kwargs or len(args) != 1 or not isinstance(args[0], ast.Name):
+                raise Unsupported('%s() takes one variable name' % name)
+            t = ctx.tmp()
+            ctx.uses_st = True
+            ctx.emit('st = ail_op_load_free(cx, &%s, %s, %s);' %
+                     (t, self.name_ref(args[0].id, ctx), c_str_literal(args[0].id)))
+            ctx.check()
+            return t
         if name == '_ail_nan_stop' and name not in self.functions:
             # collib.py's typed float deque helpers (DIFFERENCES C119): floats are boxed objects here and the search
             # is identity-then-== (see _cmp_once); the typed path refuses the call (pyfunc.py), so it ends up here

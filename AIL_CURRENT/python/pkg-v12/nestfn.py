@@ -380,9 +380,63 @@ class _Outer:
                         for row in info.values() for c in row['captured'])
         if not needs:
             return False
+        # A leading argument is read at the call site, a LOCAL read there, while CPython reads the
+        # enclosing function's cell inside the callee; when a path can reach the call before the
+        # name is bound, the read must keep the free-variable (NameError) wording.
         self._plan()
+        self.risky = self._unbound_captures(info)
         self._emit()
         return True
+
+    def _unbound_captures(self, info):
+        """Names an outer-scope call reads as leading arguments where a path may leave them unbound.
+
+        Conservative in the safe direction: a name counts as bound only when the outer function's
+        parameter or an unconditional top-level statement before that call binds it, so a wrapper
+        never hides a real unbound read."""
+        a = self.outer.args
+        bound = {x.arg for x in a.args + a.posonlyargs + a.kwonlyargs}
+        if a.vararg:
+            bound.add(a.vararg.arg)
+        if a.kwarg:
+            bound.add(a.kwarg.arg)
+        states = {}
+        for stmt in self.rest:
+            for n in ast.walk(stmt):
+                if isinstance(n, (ast.Call, ast.Name)):
+                    states.setdefault(id(n), frozenset(bound))
+            if isinstance(stmt, ast.Assign):
+                for t in stmt.targets:
+                    bound |= {n.id for n in ast.walk(t)
+                              if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
+            elif isinstance(stmt, (ast.AnnAssign, ast.AugAssign)):
+                if isinstance(stmt.target, ast.Name):
+                    bound.add(stmt.target.id)
+            elif isinstance(stmt, (ast.Import, ast.ImportFrom)):
+                bound |= {(x.asname or x.name).split('.')[0] for x in stmt.names}
+            elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                bound.add(stmt.name)
+            elif isinstance(stmt, ast.With):
+                for item in stmt.items:
+                    if item.optional_vars is not None:
+                        bound |= {n.id for n in ast.walk(item.optional_vars)
+                                  if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
+            elif isinstance(stmt, ast.Delete):
+                bound -= {n.id for t in stmt.targets for n in ast.walk(t)
+                          if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Del)}
+            # if / for / while / try / match: no binding is unconditional afterwards
+        risky = set()
+        for scope, call in self.calls:
+            if scope is not None or call.func.id not in info:
+                continue
+            at_call = states.get(id(call), frozenset())
+            risky.update(c for c in info[call.func.id]['captured'] if c not in at_call)
+        for scope, node, _arity in self.callbacks:
+            if scope is not None or node.id not in info:
+                continue
+            at_ref = states.get(id(node), frozenset())
+            risky.update(c for c in info[node.id]['captured'] if c not in at_ref)
+        return risky
 
     def _check_inner(self, inner):
         a = inner.args
@@ -623,7 +677,12 @@ class _Outer:
         args = []
         if self.has_env and self.info[callee]['env']:
             args.append(ENV)
-        args.extend(self.info[callee]['vals'])
+        vals = self.info[callee]['vals']
+        # The compilers read a leading argument in the CALLER, where the name is a local; a wrapper
+        # keeps CPython's free-variable read (NameError, not UnboundLocalError) for a name a path
+        # may leave unbound. Inside a lifted nested function a capture is a parameter, always bound.
+        args.extend('_ail_free_capture(%s)' % v if scope is None and v in self.risky else v
+                    for v in vals)
         return args
 
     def _emit(self):
