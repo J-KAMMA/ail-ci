@@ -69,6 +69,13 @@ OVER_INT64 = [
 
 NEEDLE = 'maxsplit constant does not fit in a 64-bit signed integer'
 
+GIANT_OUT_OF_INT64 = [
+    ('giant_default', 'def f(x=2**20000):\n    return x\n', ':1:9:'),
+    ('giant_module', 'M = 1 << 20000\n', ':1:5:'),
+    ('giant_class', 'class C:\n    n = 2**20000\n', ':2:9:'),
+    ('giant_negative', 'M = -(2**20000)\n', ':1:5:'),
+]
+
 
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
@@ -133,6 +140,20 @@ class Pre200Tests(unittest.TestCase):
     def test_final_value_outside_int64_refused(self):
         for slug, text, cpython_raises in OVER_INT64:
             self.check_refused(slug, text, cpython_raises)
+
+    def test_wide_final_value_refused_by_name(self):
+        for slug, text, where in GIANT_OUT_OF_INT64:
+            with tempfile.TemporaryDirectory(prefix='ail-pre200-') as directory:
+                for general in (True, False):
+                    got, build_err = _build_and_run(
+                        directory, '%s_%s' % (slug, 'g' if general else 'd'), text, general)
+                    self.assertIsNone(got, 'built and ran instead of refusing (general=%s):\n%s'
+                                      % (general, build_err))
+                    self.assertIn('int64 constant expression out of range: too large', build_err,
+                                  'general=%s\n%s' % (general, build_err))
+                    self.assertIn(where, build_err, 'general=%s\n%s' % (general, build_err))
+                    self.assertNotIn('Exceeds the limit', build_err,
+                                     'general=%s\n%s' % (general, build_err))
 
 
 if __name__ == '__main__':

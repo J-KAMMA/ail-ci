@@ -457,7 +457,13 @@ def _check_int64_constants(tree):
             return
         if value is not _CONST_INT_TOO_BIG and -(1 << 63) <= value < 1 << 63:
             return
-        shown = 'too large' if value is _CONST_INT_TOO_BIG else value
+        if value is _CONST_INT_TOO_BIG:
+            shown = 'too large'
+        else:
+            try:
+                shown = str(value)
+            except ValueError:
+                shown = 'too large'
         error = ValueError(f'int64 constant expression out of range: {shown}')
         error.source_line = getattr(node, 'lineno', None)
         error.source_column = getattr(node, 'col_offset', None)

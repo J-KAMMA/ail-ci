@@ -1,3 +1,18 @@
+## 2026-10-25 - review fix: wide out-of-int64 constants keep the named refusal (job-rbpre200-10260538)
+
+The pre200 cap raise let a final out-of-int64 constant above 4300 decimal digits reach the
+diagnostic f-string, so `str(value)` tripped CPython's integer-string-conversion limit and the
+source-positioned refusal was lost.  The module/class/default constant check in
+`ail_chatgpt._check_int64_constants` now shows `too large` when the exact value cannot be
+formatted, while values below that digit threshold still print their exact value.  Added
+regression cases to `test_ail_pre200.py` for a default, a module shift, a class value and a
+negative expression on both builds.
+
+Probes `/tmp/probes/p200_giant_default.py`, `p200_giant_module.py`, `p200_giant_class.py`,
+`p200_giant_negative.py`, `p200_giant_flow.py`, `p200_digits_under.py` and
+`p200_digits_over.py` are refused by name on both builds with `p.ail:line:col` where CPython
+raises the conversion-limit ValueError or, below the threshold, runs.
+
 ## 2026-10-25 - pre200 reapply: maxsplit intermediates above 4096 bits fold (job-rbpre200-10260538)
 
 Re-applied the accepted pre200 change on top of the current tree.  A maxsplit intermediate above
