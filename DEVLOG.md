@@ -68,6 +68,14 @@ kept: module bare annotations still evaluate the target and a non-static annotat
 order, while function-local targets use the new path; class-body attribute targets stay `pass`.
 `test_ail_pre93.py` is registered in `ail_check.MODULES`, the DIFFERENCES row is restored, and the
 function, future-annotation, imported-name, tuple-slice and module cases run on both builds.
+## 2026-10-25 - re-apply fuzz94: mutable default of a nested def
+
+Re-applied job `rbfuzz94` on top of the current export. The tree already refused a nested `def`
+with a mutable literal default from the fuzz87/pre117 fixes, so both sides were kept: the existing
+helper covers a list/dict/set/bytearray (including inside a tuple) and its message names a
+"mutable literal default". Added `test_ail_fuzz94.py` and registered it in `ail_check.MODULES`;
+immutable defaults, keyword calls, recursion, loop closures with `nonlocal` and early returns
+still match CPython on both builds.
 
 ## 2026-10-25 - int(s, base) message GC rooting (job-pre180-10251520)
 
