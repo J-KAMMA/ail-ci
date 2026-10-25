@@ -437,6 +437,12 @@ class Exprs:
             if vt in (STR, BYTES):
                 return node, vt
             return node, None
+        # A set / frozenset of tuples read out of a container that is not a table dict cannot be lowered:
+        # the table class it would build never matches the plain-key dictionary (or other plain object) it is
+        # read from. Refuse by name so the program is left as written and the general path keeps it boxed.
+        if not is_table_dict(vt) and is_table_set(deep(self.typeof(sl))):
+            self.refuse(node, 'a set / frozenset of tuples used as a dict key is not built here; build the dict '
+                              'and its frozenset key as module-level names, or use a frozenset of int / str')
         wk = vt[1] if isinstance(vt, tuple) and vt[0] == 'dict' else None
         kn, kt = self.exv(sl, wk)
         node.value, node.slice = vn, kn
