@@ -1,3 +1,18 @@
+## 2026-10-25 - pre187 review: exception and iterator operand names (job-pre187-10251544)
+
+Review follow-up. The new `//`/`%` operand naming used the generic tag names for the remaining
+boxed object kinds: a caught `ZeroDivisionError` or a user exception printed `'exception'` where
+CPython prints the exception class, and an iterator printed `'iterator'` where CPython prints its
+concrete type (for example `'list_iterator'`). `ail__tname_c` now resolves an `AIL_T_EXC` through
+its class (like an instance) and routes `AIL_T_ITER` through an iterator-name helper covering
+list, tuple, str (ASCII/wide), dict key/value/item, set/frozenset, range, enumerate, zip,
+`reversed` (list and deque), map, filter, generator expressions, deques and user iterators.
+`reversed(collections.deque(...))` keeps CPython's `collections._deque_reverse_iterator` name.
+`test_ail_pre187.py` now pins exceptions (builtin, index and a user subclass), iterators and
+deque iterators on both sides of both operators and through arguments, list items, attributes
+and dict values. Probes `p1`, `p2`, `q1`-`q5` and `q7`-`q9` match CPython on both `cmp.sh`
+builds; the required tests pass on the final commit.
+
 ## 2026-10-25 - pre187: boxed `//`/`%` type errors name both operand types (job-pre187-10251544)
 
 The fuzz45 reviewer's pre-existing item was still on this tree: a boxed `//` or `%` applied to

@@ -58,6 +58,7 @@ FUNCS = '''
 static ail_ctx *ail__gcx;
 static inline ail_st ail_iter(ail_ctx *cx, ail_obj *out, ail_obj obj);
 static inline ail_st ail_next(ail_ctx *cx, ail_obj *out, ail_obj iterobj);
+static inline const char *ail__tname_c(ail_obj x);
 static inline ail_d1_fn ail_dun1(ail_obj x, int i) {
     if (x.tag != AIL_T_INST) return 0;
     for (ail_obj k = ((ail_instobj *)x.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base)
@@ -101,7 +102,7 @@ static void ail__dun_tname(char *buf, size_t n, ail_obj x) {
                                : ((ail_gcobj *)x.o)->aux == 2 ? "dict_values" : "dict_items");
         return;
     }
-    snprintf(buf, n, "%s", ail_type_name(x.tag));
+    snprintf(buf, n, "%s", ail__tname_c(x));
 }
 static const char *ail__dun_tname_s(ail_obj x) { static char b[80]; ail__dun_tname(b, sizeof b, x); return b; }
 __attribute__((noinline, cold)) static ail_st ail_dun_noattr(ail_ctx *cx, ail_obj inst, const char *name_for_msg) {

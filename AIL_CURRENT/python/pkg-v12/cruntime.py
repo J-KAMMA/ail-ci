@@ -9164,6 +9164,11 @@ static inline const char *ail_type_name(uint8_t tag) {
     }
 }
 
+/* an operand type name: an exception names its class, an instance its class when the
+   generated main registered one, everything else its tag name. Defined below, once the
+   class-name table is visible; the fallbacks use it for // and %. */
+static inline const char *ail__tname_v1(ail_obj x);
+
 /* ===================================================================================
    Exceptions: a setjmp/longjmp frame stack, one slot per open `try`, chosen over an
    error-return convention because it costs NOTHING on the path that does not raise --
@@ -10080,7 +10085,7 @@ static inline ail_obj ail_obj_floordiv(ail_obj a, ail_obj b) {
         return ail_box_float(ail_obj_ffloormod(x, y, 0));
     }
     char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for //: '%s' and '%s'",
-                            ail_type_name(a.tag), ail_type_name(b.tag));
+                            ail__tname_v1(a), ail__tname_v1(b));
     ail_raise_c(AIL_ERR_TYPE, buf);
     return ail_box_none();
 }
@@ -10099,7 +10104,7 @@ static inline ail_obj ail_obj_mod(ail_obj a, ail_obj b) {
         return ail_box_float(ail_obj_ffloormod(x, y, 1));
     }
     char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for %%: '%s' and '%s'",
-                            ail_type_name(a.tag), ail_type_name(b.tag));
+                            ail__tname_v1(a), ail__tname_v1(b));
     ail_raise_c(AIL_ERR_TYPE, buf);
     return ail_box_none();
 }
@@ -10275,6 +10280,12 @@ static inline void ail_obj_delitem(ail_obj c, ail_obj key) {
 static ail_obj (*ail_class_repr_fns[AIL_MAX_CLASSES])(ail_obj);
 static ail_obj (*ail_class_str_fns[AIL_MAX_CLASSES])(ail_obj);
 static const char *ail_class_names[AIL_MAX_CLASSES];
+static inline const char *ail__tname_v1(ail_obj x) {
+    if (x.tag == AIL_EXC) return ail_err_name(x.o->class_id);
+    if (x.tag == AIL_INST && x.o->class_id >= 0 && x.o->class_id < AIL_MAX_CLASSES && ail_class_names[x.o->class_id])
+        return ail_class_names[x.o->class_id];
+    return ail_type_name(x.tag);
+}
 /* snprintf("%lld") byte-identical at a fraction of the cost: '-' + decimal
    digits, no format parsing. INT64_MIN-safe via unsigned negation. */
 static inline int64_t ail__itoa(char *b, int64_t v) {
@@ -14641,8 +14652,56 @@ static int ail__cnt_cmp_desc(const void *pa, const void *pb) {
     else { double x = ail__as_double(va), y = ail__as_double(vb); c = x > y ? -1 : x < y ? 1 : 0; }
     return c ? c : (ia < ib ? -1 : ia > ib);
 }
+static inline const char *ail__tname_c(ail_obj x);
+/* An iterator's CPython type name: the concrete iterator class, not the generic tag name. A
+   materialised generator expression is a LIST (see ail_vecobj), a deque iterator keeps its
+   wrapper in `extra` (ail_iter), and a user class that is its own iterator is named by the
+   instance's class. Library stream iterators keep the generic name (their CPython type is not
+   one the runtime models). */
+static inline const char *ail__itname_c(ail_obj x) {
+    ail_iterobj *it = (ail_iterobj *)x.o;
+    switch (it->kind) {
+        case AIL_IT_LIST:
+            if (it->extra.tag == AIL_T_LIST && ((ail_gcobj *)it->extra.o)->flags) return "collections._deque_iterator";
+            if (it->target.tag == AIL_T_LIST) {
+                ail_vecobj *v = (ail_vecobj *)it->target.o;
+                if (v->from_generator) return "generator";
+                if (v->hdr.aux == 1) return "dict_keyiterator";
+                if (v->hdr.aux == 2) return "dict_valueiterator";
+                if (v->hdr.aux == 3) return "dict_itemiterator";
+            }
+            return "list_iterator";
+        case AIL_IT_TUPLE: return "tuple_iterator";
+        case AIL_IT_STR: {
+            if (it->target.tag == AIL_T_STR) {
+                const uint16_t *p = ail_strback_data(it->target.sv.backing) + it->target.sv.off;
+                int ascii = 1;
+                for (int64_t i = 0; i < it->target.sv.len; i++) if (p[i] >= 128) { ascii = 0; break; }
+                if (ascii) return "str_ascii_iterator";
+            }
+            return "str_iterator";
+        }
+        case AIL_IT_DICT_KEYS: return "dict_keyiterator";
+        case AIL_IT_DICT_VALUES: return "dict_valueiterator";
+        case AIL_IT_DICT_ITEMS: return "dict_itemiterator";
+        case AIL_IT_SET: return "set_iterator";
+        case AIL_IT_RANGE: return "range_iterator";
+        case AIL_IT_ENUMERATE: return "enumerate";
+        case AIL_IT_ZIP: return "zip";
+        case AIL_IT_REVERSED:
+            if (it->target.tag == AIL_T_LIST) {
+                if (((ail_gcobj *)it->target.o)->flags) return "collections._deque_reverse_iterator";
+                return "list_reverseiterator";
+            }
+            return "reversed";
+        case AIL_IT_MAP: return "map";
+        case AIL_IT_FILTER: return "filter";
+        case AIL_IT_USER: return ail__tname_c(it->target);
+        default: return "iterator";
+    }
+}
 static inline const char *ail__tname_c(ail_obj x) {
-    if (x.tag == AIL_T_INST && ((ail_instobj *)x.o)->cls.tag == AIL_T_CLASS) {      /* an instance names its class (bytes, ...) */
+    if ((x.tag == AIL_T_INST || x.tag == AIL_T_EXC) && ((ail_instobj *)x.o)->cls.tag == AIL_T_CLASS) {      /* an instance or exception names its class (bytes, ...) */
         static char *tnb;
         static size_t tnb_cap;
         ail_str cs = ail_view_to_str(((ail_classobj *)((ail_instobj *)x.o)->cls.o)->name);
@@ -14662,6 +14721,8 @@ static inline const char *ail__tname_c(ail_obj x) {
         if (!strncmp(tnb, "_AilDeque_", 10)) return "collections.deque";
         return tnb;
     }
+    if (x.tag == AIL_T_ITER) return ail__itname_c(x);
+    if (x.tag == AIL_T_LIST && ((ail_vecobj *)x.o)->from_generator) return "generator";
     if (x.tag == AIL_T_DICT) {
         if (((ail_gcobj *)x.o)->flags == 1) return "Counter";
         if (((ail_mapobj *)x.o)->dd_factory || ((ail_gcobj *)x.o)->flags == 2) return "collections.defaultdict";
@@ -15829,11 +15890,14 @@ static inline ail_st ail__iter_inst(ail_ctx *cx, ail_obj *out, ail_obj obj) {
 static inline ail_st ail_iter(ail_ctx *cx, ail_obj *out, ail_obj obj) {
     if (obj.tag == AIL_T_ITER) { *out = obj; return AIL_OK; }
     if (obj.tag == AIL_T_INST) return ail__iter_inst(cx, out, obj);
-    if (obj.tag == AIL_T_LIST && __builtin_expect(((ail_gcobj *)obj.o)->flags, 0)) obj = ((ail_vecobj *)obj.o)->p[0];   /* a deque: its data */
+    ail_obj dq = ail_box_none();   /* a deque: its data list iterates, but its type name is _deque_iterator */
+    if (obj.tag == AIL_T_LIST && __builtin_expect(((ail_gcobj *)obj.o)->flags, 0)) { dq = obj; obj = ((ail_vecobj *)obj.o)->p[0]; }
     AIL_ROOT1(cx, fr, obj); /* obj may be fresh (what __iter__ returned) */
+    AIL_ROOT1(cx, frdq, dq);
     ail_iterobj *it = (ail_iterobj *)ail_gc_alloc(cx, AIL_K_ITER, sizeof(ail_iterobj));
+    AIL_FRAME_LEAVE(cx, frdq);
     AIL_FRAME_LEAVE(cx, fr);
-    it->target = obj; it->extra = ail_box_none(); it->idx = 0; it->idx2 = 0;
+    it->target = obj; it->extra = dq; it->idx = 0; it->idx2 = 0;
     switch (obj.tag) {
         case AIL_T_LIST: it->kind = AIL_IT_LIST; break;
         case AIL_T_TUPLE: it->kind = AIL_IT_TUPLE; break;

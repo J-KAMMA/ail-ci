@@ -10,8 +10,10 @@ including a user class name; `divmod()` itself already matched CPython.
 The programs cover both operators with int, float, str, bytes, None, list, dict,
 set, tuple and bool operands, a user class with and without the dunders, and
 values reaching the operator through an argument, a list item, an attribute, a
-dict value and an alias.  Zero-error wording and valid/dunder operations are
-kept as neighbours.
+dict value and an alias.  Exception operands name their exception class and
+iterator operands their concrete CPython iterator type (a deque iterator keeps
+its `collections.` prefix), on either side of the operator.  Zero-error wording
+and valid/dunder operations are kept as neighbours.
 """
 import os
 import subprocess
@@ -133,6 +135,97 @@ main()
 '''
 
 
+EXCEPTION_ITERATOR_MESSAGES = r'''import collections
+
+
+class Hook:
+    def __floordiv__(self, other):
+        return 0
+
+
+class UserError(Exception):
+    pass
+
+
+class It:
+    def __init__(self):
+        self.done = False
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.done:
+            raise StopIteration
+        self.done = True
+        return 1
+
+
+_DQ = collections.deque([1])
+_DQ_ITER = iter(_DQ)
+_DQ_REV = reversed(_DQ)
+
+
+def caught(f):
+    try:
+        f()
+    except Exception as x:
+        return x
+
+
+def op(tag, a, b):
+    for kind in ("//", "%"):
+        try:
+            if kind == "//":
+                print(tag, kind, repr(a // b))
+            else:
+                print(tag, kind, repr(a % b))
+        except Exception as y:
+            print(tag, kind, type(y).__name__, str(y))
+
+
+def main():
+    z = caught(lambda: 1 // 0)
+    op("exc_left", z, 1)
+    op("exc_right", 1, z)
+    i = caught(lambda: [][0])
+    op("index_left", i, 1)
+    op("index_right", 1, i)
+    u = UserError("boom")
+    op("user_left", u, 1)
+    op("user_right", 1, u)
+    def itop(name, v):
+        op(name + "_left", v, 1)
+        op(name + "_right", 1, v)
+
+    d = {"a": 1, "b": 2}
+    itop("list", iter([1]))
+    itop("tuple", iter((1,)))
+    itop("str_ascii", iter("a"))
+    itop("str_wide", iter("\u00e9"))
+    itop("keys", iter(d.keys()))
+    itop("values", iter(d.values()))
+    itop("items", iter(d.items()))
+    itop("set", iter({1}))
+    itop("range", iter(range(3)))
+    itop("enumerate", enumerate([1]))
+    itop("zip", zip([1], [2]))
+    itop("rev_list", reversed([1]))
+    itop("rev_tuple", reversed((1,)))
+    itop("rev_str", reversed("a"))
+    itop("rev_range", reversed(range(3)))
+    itop("map", map(str, [1]))
+    itop("filter", filter(None, [1]))
+    itop("genexpr", (x for x in [1]))
+    itop("user_iter", iter(It()))
+    itop("deque", _DQ_ITER)
+    itop("deque_rev", _DQ_REV)
+
+
+main()
+'''
+
+
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -173,6 +266,9 @@ class Pre187Tests(unittest.TestCase):
 
     def test_unsupported_operand_type_names(self):
         self.check('type_messages', TYPE_MESSAGES)
+
+    def test_exception_and_iterator_type_names(self):
+        self.check('exception_iterator', EXCEPTION_ITERATOR_MESSAGES)
 
     def test_division_neighbours_unchanged(self):
         self.check('neighbours', NEIGHBOURS)
