@@ -350,10 +350,20 @@ def _edits():
               '    char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable", ail_type_name(c.tag));\n'
               '    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n}\n\n/* ===='))
     # hashing
-    e.append(('        default: {\n            char buf[64]; snprintf(buf, sizeof buf, "unhashable type: \'%s\'", ail_type_name(x.tag));\n'
-              '            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n        }\n    }\n}\nstatic inline ail_st ail_obj_cmp_op(',
-              HASH_CASE + '        default: {\n            char buf[64]; snprintf(buf, sizeof buf, "unhashable type: \'%s\'", ail_type_name(x.tag));\n'
-              '            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n        }\n    }\n}\nstatic inline ail_st ail_obj_cmp_op('))
+    default_hash = ('        default: {\n'
+                    '            /* see the v2 ail_obj_hash above: a materialised genexpr hashes by identity */\n'
+                    '            if (x.tag == AIL_T_LIST) {\n'
+                    '                ail_vecobj *v = (ail_vecobj *)x.o;\n'
+                    '                if (v->from_generator) {\n'
+                    '                    uint64_t h = (uint64_t)(uintptr_t)v;\n'
+                    '                    h ^= h >> 33; h *= 0xff51afd7ed558ccdULL; h ^= h >> 33;\n'
+                    '                    *out = (int64_t)h; return AIL_OK;\n'
+                    '                }\n'
+                    '            }\n'
+                    '            char buf[64]; snprintf(buf, sizeof buf, "unhashable type: \'%s\'", ail_type_name(x.tag));\n'
+                    '            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n'
+                    '        }\n    }\n}\nstatic inline ail_st ail_obj_cmp_op(')
+    e.append((default_hash, HASH_CASE + default_hash))
     # hash() of an instance whose class has __hash__ is that method's int (CPython: -1 becomes -2), not the table hash
     e.append(('static inline ail_st ail_pyhash_inst(ail_ctx *cx, int64_t *out, ail_obj x) { return ail_obj_hash(cx, out, x); }\n',
               'static inline ail_st ail_pyhash_inst(ail_ctx *cx, int64_t *out, ail_obj x) {\n'

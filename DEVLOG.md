@@ -1,3 +1,26 @@
+## 2026-10-25 - genexpr in a set / dict key hashes by identity (job-pre207-10252129)
+
+The earlier rbpre142 review recorded two pre-existing items. Its `p4_scope` case (a saved
+generator whose body rebinds `next`) no longer differs on this tree: pre116 refuses it by name
+on both builds, which the task allows. The first still-differing item was `p8_edge`: a set
+literal containing a generator expression stopped with `TypeError: unhashable type: 'list'` on
+both builds because a genexpr is materialised as a list, while CPython's generator object is
+hashable by identity.
+
+Both runtime hash functions now give a list carrying `from_generator` an address-based hash
+instead of the unhashable-list TypeError; the companion `dunderrt.py` patch matches the new
+default case. The list pointer is stable (the GC does not move objects), the hash does not
+change as the shared `next()` cursor advances, and two distinct genexprs with equal contents
+get different buckets, just as CPython's identity hash does. This covers a direct set literal,
+`set([g])`, a saved genexpr and values arriving through an alias, an argument, a list item, an
+attribute and a dict value, plus set/dict membership, add, discard and equality; printing a
+generator itself still shows AIL's list representation and is not claimed to match CPython's
+address-bearing repr.
+
+`test_ail_pre207.py` is registered in `ail_check.MODULES` and `tools/ci_shards.json`. Probes
+`/tmp/probes/p8a.py` through `p8v.py` all match CPython on both `cmp.sh` builds;
+`/tmp/probes/p4scope.py` is refused by name on both build paths.
+
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
