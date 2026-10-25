@@ -69,6 +69,21 @@ three decimals, including negative, zero, non-finite and no-range values. No com
 runtime file is touched. `AIL_CURRENT/test_ail_pre163.py` pins the recorded row, both sides of
 1.0, exact ties, the next floats around 1.0, and values arriving through an argument, a list
 item, an attribute and a dict value.
+## 2026-10-24 - pre165: forward call of a nested def is unbound
+
+The pre141 reviewer recorded that a nested `def` called textually before its own `def` statement
+printed its result on both builds, while CPython reads the still-unbound local and raises
+`UnboundLocalError: cannot access local variable 'f' where it is not associated with a value`.
+The general path's direct-call lowering resolved the function statically; each direct nested def
+now gets a C flag that its `def` statement sets, and `_call_nested_function` checks the flag
+before evaluating the arguments. When the same name can also be bound by a parameter, an
+assignment, a loop target or `except ... as`, a zero flag reads the frame slot instead: an
+unbound slot raises `UnboundLocalError`, any other value is called as CPython does, and every
+such rebinding clears the flag. The typed path lifts nested defs out of the enclosing body, so
+it refuses a call before the `def` by name and the default build falls back to the general path.
+Calls after the def, recursion, caught `NameError`, and the parameter / assignment / argument /
+list-item / dict-value shapes keep CPython's behaviour. Added `AIL_CURRENT/test_ail_pre165.py`
+with the rebinding cases.
 
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
 
