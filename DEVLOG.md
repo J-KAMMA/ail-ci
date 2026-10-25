@@ -1,3 +1,16 @@
+## 2026-10-25 - pre171 reapply: indirect typed calls and worker trap (job-rbrbpre171-10252050)
+
+Re-applied the accepted pre171 change on top of the current tree.  The tree already carried the
+pre87/pre109 partial fix: `_value_referenced` marked names used as values and `_protected` marked
+call sites inside a lambda.  Kept those and added the accepted change's transitive walk
+(`_indirect_names`), so a function called by an indirectly invoked function is also rejected to the
+general path, and `_protected` now short-circuits on an indirect caller scope.  The runtime half is
+unchanged from pre171: `ail_raise_value_adopt` on a parallel worker records the exception's code
+and message through `ail_par_trap_value`, releases the worker's reference, and unwinds inside the
+worker; the join re-raises it on the caller, so a negative shift in a `parallel for` is caught on
+both builds instead of longjmp-ing across threads.  Added `AIL_CURRENT/test_ail_pre171.py` and
+registered it in `ail_check`.  The earlier `test_ail_pre87` callback case is kept.
+
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
