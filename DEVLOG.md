@@ -1,3 +1,15 @@
+## 2026-10-25 - pre247 review fix: container constant tracking bounds (job-pre247-10260359)
+
+The review found four false refusals in the new container tracking.  Dict literals now model
+CPython's last-value-wins rule for duplicate and equal keys (`{0: MIN, 0: 5}` is `5`, and
+`{True: MIN, 1: 5}` is `5`), while `{0: 5, 0: MIN}` is still refused.  A branch or loop body is
+scanned on a copy and the result is merged back, so a mutation through an alias created inside
+the body (`c = b; c.v = 5`) invalidates the outer value instead of leaving the stale minimum; a
+store through an unknown index or a slice clears the affected list/dict.  Function bodies are
+scanned only when their name is reachable from module code or another reachable definition, so a
+dead function or dead helper chain containing `abs(b.v)` no longer rejects the program.  Added
+these regressions to `test_ail_pre247.py` (one last-wins refusal, eleven matching routes).
+
 ## 2026-10-25 - pre215 review follow-up: container-stored constant `abs` (job-pre247-10260359)
 
 The first still-differing item from the rbpre215 review's pre-existing list was the attribute

@@ -4,8 +4,10 @@ The pre-214 check found the int64 minimum only where the ``abs`` call's own argu
 A value first stored in an attribute, list item or dict value reached ``abs`` at run time and
 stopped with ``integer overflow``, while CPython prints the bignum.  The same straight-line
 constant tracking now follows those containers (including an attribute set by ``__init__`` and
-an alias), and both builds refuse the construct by name.  In-range container values and a
-reassignment before the call still match CPython.
+an alias), and both builds refuse the construct by name.  Duplicate dict keys keep the last
+value, mutations through an alias inside a branch or loop and stores through an unknown index
+or a slice invalidate the stored value, and an unreachable function is not scanned.  In-range
+container values and a reassignment before the call still match CPython.
 """
 import os
 import subprocess
@@ -102,6 +104,13 @@ def main():
 
 main()
 ''',
+    'dict_duplicate_last_minimum': '''def main():
+    d = {0: 5, 0: -(1 << 63)}
+    print(abs(d[0]))
+
+
+main()
+''',
 }
 
 MATCHES = {
@@ -156,6 +165,142 @@ def main():
     if int("1"):
         b.v = 5
     print(abs(b.v))
+
+
+main()
+''',
+    'dict_duplicate_key': '''def main():
+    d = {0: -(1 << 63), 0: 5}
+    print(abs(d[0]))
+
+
+main()
+''',
+    'dict_duplicate_bool_key': '''def main():
+    d = {True: -(1 << 63), 1: 5}
+    print(abs(d[True]), abs(d[1]))
+
+
+main()
+''',
+    'branch_alias_reassignment': '''class Box:
+    pass
+
+
+def main():
+    b = Box()
+    b.v = -(1 << 63)
+    if int("1"):
+        c = b
+        c.v = 5
+    print(abs(b.v))
+
+
+main()
+''',
+    'loop_alias_reassignment': '''class Box:
+    pass
+
+
+def main():
+    b = Box()
+    b.v = -(1 << 63)
+    for _ in range(1):
+        c = b
+        c.v = 5
+    print(abs(b.v))
+
+
+main()
+''',
+    'dict_unknown_index': '''def f(i):
+    d = {0: -(1 << 63)}
+    d[i] = 5
+    return abs(d[0])
+
+
+def main():
+    print(f(0))
+
+
+main()
+''',
+    'list_unknown_index': '''def f(i):
+    xs = [-(1 << 63)]
+    xs[i] = 5
+    return abs(xs[0])
+
+
+def main():
+    print(f(0))
+
+
+main()
+''',
+    'conditional_unknown_index': '''def f(i):
+    d = {0: -(1 << 63)}
+    if int("1"):
+        d[i] = 5
+    return abs(d[0])
+
+
+def main():
+    print(f(0))
+
+
+main()
+''',
+    'loop_unknown_index': '''def f(i):
+    xs = [-(1 << 63)]
+    for _ in range(1):
+        xs[i] = 5
+    return abs(xs[0])
+
+
+def main():
+    print(f(0))
+
+
+main()
+''',
+    'slice_reassignment': '''def main():
+    xs = [-(1 << 63), 2]
+    xs[0:1] = [5]
+    print(abs(xs[0]))
+
+
+main()
+''',
+    'unreachable_function': '''class Box:
+    v = -(1 << 63)
+
+
+b = Box()
+
+
+def unused():
+    return abs(b.v)
+
+
+def main():
+    print("ok")
+
+
+main()
+''',
+    'unreachable_chain': '''b = [-(1 << 63)]
+
+
+def helper():
+    return abs(b[0])
+
+
+def unused():
+    return helper()
+
+
+def main():
+    print("ok")
 
 
 main()

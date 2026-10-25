@@ -332,7 +332,17 @@ class _ConstMap:
     __slots__ = ('items',)
 
     def __init__(self, items):
-        self.items = [list(pair) for pair in items]
+        self.items = []
+        for key, item in items:
+            if key is _UNKNOWN:
+                self.items.append([key, item])
+                continue
+            for pair in self.items:
+                if pair[0] is not _UNKNOWN and pair[0] == key:
+                    pair[1] = item
+                    break
+            else:
+                self.items.append([key, item])
 
 
 class _ConstClass:
@@ -488,6 +498,10 @@ def _const_value(node, env):
     return _UNKNOWN
 
 
+def _const_is_slice(node):
+    return any(isinstance(element, ast.Slice) for element in ast.walk(node))
+
+
 def _const_invalidate(target, env):
     if isinstance(target, ast.Name):
         env[target.id] = _UNKNOWN
@@ -497,13 +511,20 @@ def _const_invalidate(target, env):
             value.attrs[target.attr] = _UNKNOWN
     elif isinstance(target, ast.Subscript):
         value = _const_value(target.value, env)
-        index = _const_value(target.slice, env)
-        if isinstance(value, _ConstSeq) and type(index) in (int, bool):
-            index = int(index)
-            if -len(value.items) <= index < len(value.items):
-                value.items[index] = _UNKNOWN
-        elif isinstance(value, _ConstMap):
-            value.items = [pair for pair in value.items if pair[0] != index]
+        if _const_is_slice(target.slice):
+            if isinstance(value, (_ConstSeq, _ConstMap)):
+                _const_forget(value)
+        else:
+            index = _const_value(target.slice, env)
+            if index is _UNKNOWN:
+                if isinstance(value, (_ConstSeq, _ConstMap)):
+                    _const_forget(value)
+            elif isinstance(value, _ConstSeq) and type(index) in (int, bool):
+                index = int(index)
+                if -len(value.items) <= index < len(value.items):
+                    value.items[index] = _UNKNOWN
+            elif isinstance(value, _ConstMap):
+                value.items = [pair for pair in value.items if pair[0] != index]
     elif isinstance(target, (ast.Tuple, ast.List)):
         for element in target.elts:
             _const_invalidate(element, env)
@@ -522,20 +543,27 @@ def _const_store(target, value, env, class_attrs=None):
         owner = _const_value(target.value, env)
         if isinstance(owner, (_ConstObject, _ConstClass)):
             owner.attrs[target.attr] = value
-    elif isinstance(target, ast.Subscript) and not isinstance(target.slice, ast.Slice):
+    elif isinstance(target, ast.Subscript):
         owner = _const_value(target.value, env)
-        index = _const_value(target.slice, env)
-        if isinstance(owner, _ConstSeq) and type(index) in (int, bool):
-            index = int(index)
-            if -len(owner.items) <= index < len(owner.items):
-                owner.items[index] = value
-        elif isinstance(owner, _ConstMap) and index is not _UNKNOWN:
-            for pair in owner.items:
-                if pair[0] == index:
-                    pair[1] = value
-                    break
-            else:
-                owner.items.append([index, value])
+        if _const_is_slice(target.slice):
+            if isinstance(owner, (_ConstSeq, _ConstMap)):
+                _const_forget(owner)
+        else:
+            index = _const_value(target.slice, env)
+            if index is _UNKNOWN:
+                if isinstance(owner, (_ConstSeq, _ConstMap)):
+                    _const_forget(owner)
+            elif isinstance(owner, _ConstSeq) and type(index) in (int, bool):
+                index = int(index)
+                if -len(owner.items) <= index < len(owner.items):
+                    owner.items[index] = value
+            elif isinstance(owner, _ConstMap):
+                for pair in owner.items:
+                    if pair[0] == index:
+                        pair[1] = value
+                        break
+                else:
+                    owner.items.append([index, value])
     elif isinstance(target, (ast.Tuple, ast.List)):
         if isinstance(value, _ConstSeq) and len(value.items) == len(target.elts):
             for element, item in zip(target.elts, value.items):
@@ -593,6 +621,43 @@ def _const_forget(value):
         value.items = [_UNKNOWN] * len(value.items)
     elif isinstance(value, _ConstMap):
         value.items = [[key, _UNKNOWN] for key, unused in value.items]
+
+
+def _const_same(left, right, seen=None):
+    if left is right:
+        return True
+    if type(left) is not type(right):
+        return False
+    if not isinstance(left, (_ConstSeq, _ConstMap, _ConstObject, _ConstClass)):
+        return left == right
+    if seen is None:
+        seen = set()
+    pair = (id(left), id(right))
+    if pair in seen:
+        return True
+    seen.add(pair)
+    if isinstance(left, _ConstSeq):
+        return (len(left.items) == len(right.items)
+                and all(_const_same(a, b, seen) for a, b in zip(left.items, right.items)))
+    if isinstance(left, _ConstMap):
+        return (len(left.items) == len(right.items)
+                and all(_const_same(a[0], b[0], seen) and _const_same(a[1], b[1], seen)
+                        for a, b in zip(left.items, right.items)))
+    if isinstance(left, _ConstObject):
+        if left.klass is not right.klass or set(left.attrs) != set(right.attrs):
+            return False
+        return all(_const_same(item, right.attrs[name], seen)
+                   for name, item in left.attrs.items())
+    if left.init is not right.init or set(left.attrs) != set(right.attrs):
+        return False
+    return all(_const_same(item, right.attrs[name], seen)
+               for name, item in left.attrs.items())
+
+
+def _merge_branch(env, local):
+    for name, value in env.items():
+        if name in local and not _const_same(value, local[name]):
+            env[name] = _UNKNOWN
 
 
 _PURE_CALLS = frozenset({
@@ -720,8 +785,12 @@ def _scan_abs_statements(statements, env, class_attrs=None, def_base=None, defer
         elif isinstance(node, ast.If):
             _scan_abs_expression(node.test, env)
             _const_call_effects(node.test, env)
-            _scan_abs_statements(node.body, _const_env_copy(env), class_attrs, def_base, deferred)
-            _scan_abs_statements(node.orelse, _const_env_copy(env), class_attrs, def_base, deferred)
+            body_local = _const_env_copy(env)
+            orelse_local = _const_env_copy(env)
+            _scan_abs_statements(node.body, body_local, class_attrs, def_base, deferred)
+            _scan_abs_statements(node.orelse, orelse_local, class_attrs, def_base, deferred)
+            _merge_branch(env, body_local)
+            _merge_branch(env, orelse_local)
             _forget_targets(node.body + node.orelse, env)
         elif isinstance(node, ast.For):
             _scan_abs_expression(node.iter, env)
@@ -730,14 +799,21 @@ def _scan_abs_statements(statements, env, class_attrs=None, def_base=None, defer
             for target in _const_binds(node.target):
                 local[target] = _UNKNOWN
             _scan_abs_statements(node.body, local, class_attrs, def_base, deferred)
-            _scan_abs_statements(node.orelse, _const_env_copy(env), class_attrs, def_base, deferred)
+            orelse_local = _const_env_copy(env)
+            _scan_abs_statements(node.orelse, orelse_local, class_attrs, def_base, deferred)
             _const_invalidate(node.target, env)
+            _merge_branch(env, local)
+            _merge_branch(env, orelse_local)
             _forget_targets(node.body + node.orelse + [node.target], env)
         elif isinstance(node, ast.While):
             _scan_abs_expression(node.test, env)
             _const_call_effects(node.test, env)
-            _scan_abs_statements(node.body, _const_env_copy(env), class_attrs, def_base, deferred)
-            _scan_abs_statements(node.orelse, _const_env_copy(env), class_attrs, def_base, deferred)
+            body_local = _const_env_copy(env)
+            orelse_local = _const_env_copy(env)
+            _scan_abs_statements(node.body, body_local, class_attrs, def_base, deferred)
+            _scan_abs_statements(node.orelse, orelse_local, class_attrs, def_base, deferred)
+            _merge_branch(env, body_local)
+            _merge_branch(env, orelse_local)
             _forget_targets(node.body + node.orelse, env)
         elif isinstance(node, ast.With):
             for item in node.items:
@@ -745,10 +821,14 @@ def _scan_abs_statements(statements, env, class_attrs=None, def_base=None, defer
                 _const_call_effects(item.context_expr, env)
                 if item.optional_vars is not None:
                     _const_invalidate(item.optional_vars, env)
-            _scan_abs_statements(node.body, _const_env_copy(env), class_attrs, def_base, deferred)
+            body_local = _const_env_copy(env)
+            _scan_abs_statements(node.body, body_local, class_attrs, def_base, deferred)
+            _merge_branch(env, body_local)
             _forget_targets(node.body, env)
         elif isinstance(node, ast.Try):
-            _scan_abs_statements(node.body, _const_env_copy(env), class_attrs, def_base, deferred)
+            body_local = _const_env_copy(env)
+            handler_locals = []
+            _scan_abs_statements(node.body, body_local, class_attrs, def_base, deferred)
             for handler in node.handlers:
                 local = _const_env_copy(env)
                 if handler.type is not None:
@@ -756,8 +836,16 @@ def _scan_abs_statements(statements, env, class_attrs=None, def_base=None, defer
                 if handler.name:
                     local[handler.name] = _UNKNOWN
                 _scan_abs_statements(handler.body, local, class_attrs, def_base, deferred)
-            _scan_abs_statements(node.orelse, _const_env_copy(env), class_attrs, def_base, deferred)
-            _scan_abs_statements(node.finalbody, _const_env_copy(env), class_attrs, def_base, deferred)
+                handler_locals.append(local)
+            orelse_local = _const_env_copy(env)
+            final_local = _const_env_copy(env)
+            _scan_abs_statements(node.orelse, orelse_local, class_attrs, def_base, deferred)
+            _scan_abs_statements(node.finalbody, final_local, class_attrs, def_base, deferred)
+            _merge_branch(env, body_local)
+            for local in handler_locals:
+                _merge_branch(env, local)
+            _merge_branch(env, orelse_local)
+            _merge_branch(env, final_local)
             _forget_targets(node.body + node.handlers + node.orelse + node.finalbody, env)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             for default in node.args.defaults:
@@ -799,6 +887,7 @@ def _scan_abs_statements(statements, env, class_attrs=None, def_base=None, defer
                     _scan_abs_expression(case.guard, local)
                     _const_call_effects(case.guard, local)
                 _scan_abs_statements(case.body, local, class_attrs, def_base, deferred)
+                _merge_branch(env, local)
                 _forget_targets([case.pattern] + case.body, env)
         else:
             for child in ast.iter_child_nodes(node):
@@ -806,6 +895,8 @@ def _scan_abs_statements(statements, env, class_attrs=None, def_base=None, defer
                     _scan_abs_expression(child, env)
     if own:
         for node, base in deferred:
+            if _ABS_REACHABLE is not None and node.name not in _ABS_REACHABLE:
+                continue
             local = dict(base)
             for argument in node.args.posonlyargs + node.args.args + node.args.kwonlyargs:
                 local[argument.arg] = _UNKNOWN
@@ -814,6 +905,61 @@ def _scan_abs_statements(statements, env, class_attrs=None, def_base=None, defer
             if node.args.kwarg is not None:
                 local[node.args.kwarg.arg] = _UNKNOWN
             _scan_abs_statements(node.body, local, None, local)
+
+
+_ABS_REACHABLE = None
+
+
+def _const_references(nodes):
+    names = set()
+
+    def visit(node):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for child in node.decorator_list:
+                visit(child)
+            for child in node.args.defaults:
+                visit(child)
+            for child in node.args.kw_defaults:
+                if child is not None:
+                    visit(child)
+            return
+        if isinstance(node, ast.ClassDef):
+            for child in node.decorator_list:
+                visit(child)
+            for child in node.bases:
+                visit(child)
+            for keyword in node.keywords:
+                visit(keyword.value)
+            for child in node.body:
+                visit(child)
+            return
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            names.add(node.id)
+        elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
+            names.add(node.attr)
+        for child in ast.iter_child_nodes(node):
+            visit(child)
+
+    for node in nodes:
+        visit(node)
+    return names
+
+
+def _reachable_definitions(tree):
+    definitions = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            definitions.setdefault(node.name, []).append(node)
+    reachable = set()
+    pending = list(_const_references(tree.body))
+    while pending:
+        name = pending.pop()
+        if name in reachable:
+            continue
+        reachable.add(name)
+        for definition in definitions.get(name, ()):
+            pending.extend(_const_references(definition.body))
+    return reachable
 
 
 def _check_int64_abs_constants(tree, known):
@@ -854,7 +1000,13 @@ def _check_int64_abs_constants(tree, known):
             error.source_line = node.lineno
             error.source_column = node.col_offset
             raise error
-    _scan_abs_statements(tree.body, dict(known))
+    global _ABS_REACHABLE
+    previous = _ABS_REACHABLE
+    _ABS_REACHABLE = _reachable_definitions(tree)
+    try:
+        _scan_abs_statements(tree.body, dict(known))
+    finally:
+        _ABS_REACHABLE = previous
 
 
 def _check_int64_unary_constants(tree):
