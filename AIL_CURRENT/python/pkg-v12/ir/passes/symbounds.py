@@ -106,11 +106,16 @@ class Bounds(object):
 
     # ------------------------------------------------------------------ forms
     def const(self, v):
-        d = self.defs.get(v)
-        if d is not None and d.op == 'const':
-            c = d.attrs.get('value')
-            if isinstance(c, int) and not isinstance(c, bool):
-                return c
+        for _ in range(8):
+            d = self.defs.get(v)
+            if d is not None and d.op in ('tint.from', 'tint.i64', 'tint.i64sat'):
+                v = d.operands[0]
+                continue
+            if d is not None and d.op == 'const':
+                c = d.attrs.get('value')
+                if isinstance(c, int) and not isinstance(c, bool):
+                    return c
+            return None
         return None
 
     def atom(self, v):
@@ -175,7 +180,7 @@ class Bounds(object):
         return r
 
     def compute(self, v):
-        if v.type != I.I64:
+        if v.type not in (I.I64, I.TINT):
             return None
         c = self.const(v)
         if c is not None:
@@ -196,8 +201,14 @@ class Bounds(object):
         if d is None:
             return None
         op = d.op
-        if op in ('add', 'sub', 'mul', 'neg', 'floormod') and d.attrs.get('mode') == 'wrap':
+        if op.startswith('tint.'):
+            op = op[5:]
+            if op.endswith('_i64'):
+                op = op[:-4]
+        elif op in ('add', 'sub', 'mul', 'neg', 'floormod') and d.attrs.get('mode') == 'wrap':
             return None
+        if op in ('from', 'i64', 'i64sat'):
+            return self.of(d.operands[0])
         if op in ('add', 'sub'):
             a, b = self.of(d.operands[0]), self.of(d.operands[1])
             if a is None or b is None:
@@ -244,7 +255,7 @@ class Bounds(object):
             if bm is None:
                 return None
             conds = list(bm[2])
-            if d.attrs.get('mode') != 'nonneg':
+            if not d.op.startswith('tint.') and d.attrs.get('mode') != 'nonneg':
                 # m >= 1, checked by the guard (otherwise the result may be negative, or it raised)
                 conds += [Form(f.const - 1, f.terms) for f in bm[0]]
             return [Form(0)], self.norm([Form(f.const - 1, f.terms) for f in bm[1]], False), conds
@@ -285,10 +296,16 @@ class Bounds(object):
         """The bounds of `yv` where the i1 `cond` is `truth` (a direct comparison of yv itself)."""
         base = self.of(yv)
         d = self.defs.get(cond)
-        if base is None or d is None or not d.op.startswith('cmp.') or d.operands[0].type != I.I64 \
-                or d.operands[1].type != I.I64:
+        cop = d.op if d is not None else ''
+        if cop.startswith('tint.'):
+            cop = 'cmp.' + cop[5:]
+        if cop.endswith('_i64'):
+            cop = cop[:-4]
+        kinds = (I.I64, I.TINT)
+        if base is None or d is None or not cop.startswith('cmp.') \
+                or d.operands[0].type not in kinds or d.operands[1].type not in kinds:
             return base
-        pred = d.op[4:]
+        pred = cop[4:]
         if not truth:
             pred = {'eq': 'ne', 'ne': 'eq', 'lt': 'ge', 'ge': 'lt', 'le': 'gt', 'gt': 'le'}[pred]
         a, b = d.operands

@@ -162,17 +162,6 @@ def _apply(P, args, kwargs, result, current):
         and (n.func.id.startswith(('_ail_', '_Ail')) or n.func.id in _io_names
              or n.func.id in getattr(ctx, 'prelude_names', ()))
         for n in ast.walk(fn)) or any(isinstance(n, (ast.With, ast.AsyncWith)) for n in ast.walk(fn))
-    if _py and not _io_like:
-        for _n in ast.walk(fn):
-            if isinstance(_n, ast.Call) and isinstance(_n.func, ast.Name) and (_n.func.id in ('int', '_ail_int2') or _n.func.id.endswith(('str_to_int', 'bytes_to_int'))) and _n.args:
-                try:
-                    _k = P._etype(_n.args[0], ctx)
-                except Exception:
-                    _k = None
-                if _k == P.STR or _k == P.BYTES:
-                    from pyfront import Unsupported
-                    raise Unsupported('%s() parses an int from text, which the tagged-int lowering does not cover'
-                                      % fn.name)
     if _py and not _library_call and (getattr(ctx, 'numeric_tokens', None) or getattr(ctx, 'numeric_assignments', None)):
         from pyfront import Unsupported
         raise Unsupported('%s() mixes int and float bindings, which the tagged-int lowering does not cover'
@@ -210,11 +199,6 @@ def _apply(P, args, kwargs, result, current):
         isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
         and (getattr(P, 'TINT_SIGS', {}).get(n.func.id) or ((), 0))[1]
         for n in ast.walk(fn))
-    if _py and _needs_tint and _no_tint_locals and not _has_tint_call \
-            and not (_proof or '').startswith(('it calls ', 'it contains ')):
-        from pyfront import Unsupported
-        raise Unsupported('%s() has an int operation the local proof cannot bound, but no tagged local (%s)'
-                          % (fn.name, _proof))
     _sig = getattr(P, 'TINT_SIGS', {}).get(fn.name) if _py else None
     if _sig and (any(_sig[0]) or _sig[1]) and not _io_like:
         _needs_tint = True
@@ -248,9 +232,13 @@ def _apply(P, args, kwargs, result, current):
             # a `for line in sys.stdin` loop whose list is only printed afterwards runs in batches with
             # the strings freed per batch (2.5 MB against 150 MB on a million lines); the IR has no such pass
             raise lower.NotS0('stdin line batching belongs to the legacy emitter')
+        if os.environ.get('AIL_IR_DUMP'):
+            open(os.environ['AIL_IR_DUMP'], 'a').write('=== %s\n%s\n' % (fn.name, text.print_function(function)))
         verify.check(function, program)
         checker = (lambda f: verify.check(f, program)) if current == 'verify' else None
         pass_stats = passes.optimize(function, program, facts_for(P, fn, ctx), checker)
+        if os.environ.get('AIL_IR_DUMP_POST'):
+            open(os.environ['AIL_IR_DUMP_POST'], 'a').write('=== %s\n%s\n' % (fn.name, text.print_function(function)))
         verify.check(function, program)
         if current == 'verify':
             printed = text.print_function(function)
@@ -275,7 +263,11 @@ def _apply(P, args, kwargs, result, current):
     except lower.NotS0 as reason:
         _record(fn.name, cname, 'legacy', str(reason), ctx, extra=_legacy_walias(P, fn, ctx))
         _tinted_sig = bool(_sig and (any(_sig[0]) or _sig[1]))
-        if _needs_tint and (_tinted_sig or 'has kind (' not in str(reason)) \
+        _int_reason = any(mark in str(reason) for mark in (
+            'bit operation on an unproven int',
+            'a range loop with a tagged start or step needs a tagged index',
+            'int-or-float bindings'))
+        if _needs_tint and _int_reason \
                 and not fn.name.startswith(('_Ail', '_ail')) \
                 and not os.environ.get('AIL_NO_GENERAL'):
             from pyfront import Unsupported

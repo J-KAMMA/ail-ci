@@ -34926,6 +34926,11 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                      and not (_f.name == entry_name and not library)) else 0
         _tint_sigs[_f.name] = (_params, _ret)
         _tint_sigs[csym[_f.name]] = (_params, _ret)
+    if 'py_main' in _tint_sigs:
+        # the C harness (and the top-level wrapper) calls py_main as an int64-returning entry
+        _tint_sigs['py_main'] = ((), 0)
+        if 'main' in _tint_sigs and not _tint_sigs['main'][0]:
+            _tint_sigs['main'] = ((), 0)
     global TINT_SIGS, TINT_ACTIVE
     TINT_SIGS = _tint_sigs
     TINT_ACTIVE = dict(_tint_sigs)

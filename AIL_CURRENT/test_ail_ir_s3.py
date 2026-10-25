@@ -384,7 +384,7 @@ class ProgramTests(unittest.TestCase):
             built, exe, entries = compile_program(tmp, 'pipe', PIPE, 'ir', {'AIL_IR': 'verify'}, debug=True)
             self.assertEqual(built.returncode, 0, built.stderr)
             c = Path(tmp, 'pipe.ir.d', 'program.c').read_text()
-        body = c[c.index('int64_t steps(void) {'):]
+        body = c[c.index('steps(void) {'):]
         body = body[:body.index('\n}\n')]
         self.assertGreaterEqual(body.count('ail_list_free('), 5)
         self.assertIn('ail_cleanup_frame', body)         # the checked adds in the steps can raise

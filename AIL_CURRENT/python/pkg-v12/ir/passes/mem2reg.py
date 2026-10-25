@@ -110,6 +110,12 @@ def run(fn):
         p = ins.result
         if p in promotable:
             t = p.type.pointee
+            if t == I.TINT:
+                z = I.Instr('const', [], [I.Value(I.I64)], {'value': 0})
+                zf = I.Instr('tint.from', [z.result], [I.Value(I.TINT)], {})
+                zeros.extend((z, zf))
+                env[p] = zf.result
+                continue
             z = I.Instr('const', [], [I.Value(t)], {'value': 0.0 if t.is_float else (False if t == I.I1 else 0)})
             zeros.append(z)
             env[p] = z.result

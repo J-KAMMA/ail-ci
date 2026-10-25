@@ -20,6 +20,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import re
 import unittest
 from pathlib import Path
 
@@ -433,15 +434,17 @@ class ProgramTests(unittest.TestCase):
             compile_program(tmp, 'live2', LIVE, 'ir', {'AIL_IR': 'verify'}, debug=True)
             c = Path(tmp, 'live2.ir.d', 'program.c').read_text()
 
-        def body(fn, nxt):
-            start = c.index('int64_t %s(' % fn + '' if False else fn + '(int64_t v_n) {')
-            return c[start:c.index(nxt, start)]
-        for fn, nxt, resets in (('accumulate', 'int64_t previous(', False), ('previous', 'int64_t after_loop(', False),
-                                ('after_loop', 'int64_t while_after(', False),
-                                ('while_after', 'int64_t local(', False), ('local', 'int64_t read_only(', True),
-                                ('read_only', 'void py_main(', True)):
-            text_ = body('int64_t ' + fn, nxt) if False else c[c.index('int64_t %s(int64_t v_n) {' % fn):]
-            text_ = text_[:text_.index(nxt)] if nxt in text_ else text_
+        def find(fn):
+            m = re.search(r'\b%s\([^;{}]*\) \{' % fn, c)
+            self.assertIsNotNone(m, fn)
+            return m.start()
+        for fn, nxt, resets in (('accumulate', 'previous', False), ('previous', 'after_loop', False),
+                                ('after_loop', 'while_after', False),
+                                ('while_after', 'local', False), ('local', 'read_only', True),
+                                ('read_only', 'py_main', True)):
+            start = find(fn)
+            end = find(nxt) if nxt else len(c)
+            text_ = c[start:end]
             self.assertEqual('ail_sarena_keep_roots(' in text_, resets, fn)
 
     def test_an_iteration_local_list_keeps_the_legacy_peak_memory(self):

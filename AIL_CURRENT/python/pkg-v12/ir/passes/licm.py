@@ -55,11 +55,16 @@ def _inside(loop):
 
 
 def _const(v, defs):
-    d = defs.get(v)
-    if d is not None and d.op == 'const':
-        c = d.attrs.get('value')
-        if isinstance(c, int) and not isinstance(c, bool):
-            return c
+    for _ in range(8):
+        d = defs.get(v)
+        if d is not None and d.op in ('tint.from', 'tint.i64', 'tint.i64sat'):
+            v = d.operands[0]
+            continue
+        if d is not None and d.op == 'const':
+            c = d.attrs.get('value')
+            if isinstance(c, int) and not isinstance(c, bool):
+                return c
+        return None
     return None
 
 
@@ -378,14 +383,23 @@ class LICM(object):
         if v is idx:
             return 0
         d = defs.get(v)
-        if d is None or d.op not in ('add', 'sub'):
+        if d is None:
+            return None
+        if d.op in ('tint.from', 'tint.i64', 'tint.i64sat'):
+            return self.index_offset(d.operands[0], idx, defs)
+        op = d.op
+        if op.startswith('tint.'):
+            op = op[5:]
+            if op.endswith('_i64'):
+                op = op[:-4]
+        if op not in ('add', 'sub'):
             return None
         a, b = d.operands
-        if d.op == 'add' and a is idx and _const(b, defs) is not None:
+        if op == 'add' and a is idx and _const(b, defs) is not None:
             c = _const(b, defs)
-        elif d.op == 'add' and b is idx and _const(a, defs) is not None:
+        elif op == 'add' and b is idx and _const(a, defs) is not None:
             c = _const(a, defs)
-        elif d.op == 'sub' and a is idx and _const(b, defs) is not None:
+        elif op == 'sub' and a is idx and _const(b, defs) is not None:
             c = -_const(b, defs)
         else:
             return None
@@ -578,11 +592,18 @@ class LICM(object):
             lower = need if lower is None else max(lower, need)
             upper[base] = max(upper.get(base, cmax + 1), cmax + 1)
         if lower is not None:
-            conds.append(emit('cmp.ge', [lo, emit('const', [], I.I64, {'value': lower})], I.I1))
+            c = emit('const', [], I.I64, {'value': lower})
+            if lo.type == I.TINT:
+                conds.append(emit('tint.le_i64', [c, lo], I.I1))
+            else:
+                conds.append(emit('cmp.ge', [lo, c], I.I1))
         for base, k in upper.items():
             n = emit('span.len' if base.type.head == 'span' else 'bytes.len', [base], I.I64)
             limit = emit('sub', [n, emit('const', [], I.I64, {'value': k})], I.I64, {'mode': 'nsw'})
-            conds.append(emit('cmp.le', [hi, limit], I.I1))
+            if hi.type == I.TINT:
+                conds.append(emit('tint.le_i64', [hi, limit], I.I1))
+            else:
+                conds.append(emit('cmp.le', [hi, limit], I.I1))
         if sym:
             conds.extend(self.symbolic_guard(sym, emit))
         guard = conds[-1]
@@ -625,6 +646,14 @@ class LICM(object):
                 consts[c] = emit('const', [], I.I64, {'value': c})
             return consts[c]
         values = {}
+        shadows = {}
+
+        def atom_i64(a):
+            if a.type != I.TINT:
+                return a
+            if id(a) not in shadows:
+                shadows[id(a)] = emit('tint.i64sat', [a], I.I64)
+            return shadows[id(a)]
 
         def value(f):
             key = (f.sig, f.const)
@@ -632,9 +661,9 @@ class LICM(object):
                 return values[key]
             acc = None
             for m, k in f.terms:
-                t = m[0]
+                t = atom_i64(m[0])
                 for a in m[1:]:
-                    t = emit('mul', [t, a], I.I64, {'mode': 'wrap'})
+                    t = emit('mul', [t, atom_i64(a)], I.I64, {'mode': 'wrap'})
                 if k != 1:
                     t = emit('mul', [t, const(k)], I.I64, {'mode': 'wrap'})
                 acc = t if acc is None else emit('add', [acc, t], I.I64, {'mode': 'wrap'})
@@ -673,8 +702,9 @@ class LICM(object):
         conds = []
         for a in atoms:
             top = symbounds.ATOM2_MAX if id(a) in squared else symbounds.ATOM_MAX
-            conds.append(emit('cmp.le', [a, const(top)], I.I1))
-            conds.append(emit('cmp.ge', [a, const(-top)], I.I1))
+            ac = atom_i64(a)
+            conds.append(emit('cmp.le', [ac, const(top)], I.I1))
+            conds.append(emit('cmp.ge', [ac, const(-top)], I.I1))
         for f in nonneg:
             conds.append(emit('cmp.ge', [value(f), const(0)], I.I1))
         lens = {}

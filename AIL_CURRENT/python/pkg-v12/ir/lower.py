@@ -250,8 +250,8 @@ class Lowering(TextLowering):
         # bound is an `ail_tint`; the entry keeps its plain int64 result (converted at each return).
         _tint_on = os.environ.get('AIL_SURFACE') == 'python' and not getattr(P, 'TINT_DISABLED', False)
         self.tint_sig = getattr(P, 'TINT_SIGS', {}).get(fn.name, ((), 0)) if _tint_on else ((), 0)
-        if self.cname == 'run':
-            self.tint_sig = ((), 0)      # the C harness prints run()'s result as an int64
+        if self.cname in ('run', 'py_main'):
+            self.tint_sig = ((), 0)      # the C harness prints the entry result as an int64
         self.tint_params = set(n for (n, _), t in zip(ctx.params, self.tint_sig[0]) if t)
         self.tint_result = bool(self.tint_sig[1])
         try:
@@ -344,8 +344,7 @@ class Lowering(TextLowering):
                 _step = _args[2] if len(_args) == 3 else None
                 if _may_tint(_lo) or _may_tint(_hi) or _may_tint(_step):
                     self.tint_names.add(_n.target.id)
-                else:
-                    self.tint_names.discard(_n.target.id)
+                # A name that another loop needs tagged stays tagged: one place has one type.
         if ret_kind == 'bytearray':
             results = [BYTEARRAY]       # the owner's reference is handed to the caller (retained at the return)
         elif ret_kind == P.NORET:
@@ -2365,7 +2364,8 @@ class Lowering(TextLowering):
                     return self.b.value('tint.' + name + '_i64', [right, left], TINT)
             return self.b.value('tint.' + name, [self.coerce(left, TINT), self.coerce(right, TINT)], TINT)
         if tint and isinstance(op, (ast.BitAnd, ast.BitOr, ast.BitXor)):
-            raise NotS0('a bit operation on an unproven int')
+            name = {ast.BitAnd: 'and', ast.BitOr: 'or', ast.BitXor: 'xor'}[type(op)]
+            return self.b.value('tint.' + name, [self.coerce(left, TINT), self.coerce(right, TINT)], TINT)
         floating = I.F64 in (left.type, right.type)
         if isinstance(op, ast.Div):
             return self.b.value('fdiv', [self.coerce(left, I.F64), self.coerce(right, I.F64)], I.F64)

@@ -98,6 +98,46 @@ static AIL_BIGFN ail_tint ail_tint__slow_neg(ail_tint a) {
     r->n = (uint32_t)x.n;
     return ail_tint_demote(r, -x.sign);
 }
+static AIL_BIGFN ail_tint ail_tint__bitop(ail_tint a, ail_tint b, int op) {
+    ail_tbv x, y; ail_tbv_of(&x, a); ail_tbv_of(&y, b);
+    size_t n = (x.n > y.n ? x.n : y.n) + 1;
+    ail_limb *xs = (ail_limb *)malloc(3 * n * sizeof(ail_limb));
+    if (!xs) ail_die("out of memory");
+    ail_limb *ys = xs + n, *rs = ys + n;
+    ail_limb sx = x.sign < 0 ? (ail_limb)~(ail_limb)0 : 0;
+    ail_limb sy = y.sign < 0 ? (ail_limb)~(ail_limb)0 : 0;
+    for (size_t i = 0; i < n; i++) {
+        xs[i] = i < x.n ? x.d[i] : sx;
+        ys[i] = i < y.n ? y.d[i] : sy;
+        rs[i] = op == 0 ? (xs[i] & ys[i]) : op == 1 ? (xs[i] | ys[i]) : (xs[i] ^ ys[i]);
+    }
+    int sign = (rs[n - 1] >> 31) ? -1 : 1;
+    if (sign < 0) {
+        uint64_t carry = 1;
+        for (size_t i = 0; i < n; i++) {
+            uint64_t t = (uint64_t)(ail_limb)~rs[i] + carry;
+            rs[i] = (ail_limb)t; carry = t >> 32;
+        }
+    }
+    size_t nn = ail_bn_norm(rs, n);
+    ail_tbig *r = ail_tint__new(nn ? nn : 1);
+    if (nn) memcpy(r->d, rs, nn * sizeof(ail_limb));
+    r->n = (uint32_t)nn;
+    free(xs);
+    return ail_tint_demote(r, sign);
+}
+static inline ail_tint ail_tint_and(ail_tint a, ail_tint b) {
+    if (!a.b && !b.b) return ail_tint_from_int64(a.i & b.i);
+    return ail_tint__bitop(a, b, 0);
+}
+static inline ail_tint ail_tint_or(ail_tint a, ail_tint b) {
+    if (!a.b && !b.b) return ail_tint_from_int64(a.i | b.i);
+    return ail_tint__bitop(a, b, 1);
+}
+static inline ail_tint ail_tint_xor(ail_tint a, ail_tint b) {
+    if (!a.b && !b.b) return ail_tint_from_int64(a.i ^ b.i);
+    return ail_tint__bitop(a, b, 2);
+}
 static AIL_BIGFN int ail_tint__divmod(ail_tint *qo, ail_tint *ro, ail_tint a, ail_tint b, int mod) {
     if (ail_tint_is_zero(b)) ail_die(mod ? "integer modulo by zero" : "integer division or modulo by zero");
     ail_tbv x, y; ail_tbv_of(&x, a); ail_tbv_of(&y, b);

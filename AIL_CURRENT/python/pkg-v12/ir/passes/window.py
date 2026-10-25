@@ -84,15 +84,31 @@ class _Index(object):
                         inner = ctx | {x}
                 self._walk(r, loops + (ins,) if ins.op in _LOOPS else loops, ins, inner)
 
+    def unwrap(self, v):
+        """The i64 value behind a tagged-int conversion (tint.from / tint.i64), else `v` itself."""
+        for _ in range(64):
+            d = self.defs.get(v)
+            if d is not None and d.op in ('tint.from', 'tint.i64'):
+                v = d.operands[0]
+                continue
+            return v
+        return v
+
     def _nonneg_in(self, cond, branch):
         """The value that `cond` tells is >= 0 in the branch (0: then, 1: else), if it is a test of one against 0/-1."""
         d = self.defs.get(cond)
-        if d is None or not d.op.startswith('cmp.'):
+        if d is None:
             return None
-        pred = d.op[4:]
+        if d.op.startswith('cmp.'):
+            pred = d.op[4:]
+        elif d.op.startswith('tint.') and d.op[5:] in ('lt', 'le', 'eq', 'ne'):
+            pred = d.op[5:]
+        elif d.op.startswith('tint.') and d.op[5:] in ('lt_i64', 'le_i64', 'eq_i64', 'ne_i64'):
+            pred = d.op[5:].split('_')[0]
+        else:
+            return None
         x, k = d.operands
-        if x.type != I.I64 or k.type != I.I64:
-            return None
+        x, k = self.unwrap(x), self.unwrap(k)
         kv = self.const(k)
         if not isinstance(kv, int):
             return None
@@ -104,6 +120,7 @@ class _Index(object):
         return None
 
     def const(self, v):
+        v = self.unwrap(v)
         d = self.defs.get(v)
         if d is not None and d.op == 'const' and not isinstance(d.attrs['value'], bool):
             return d.attrs['value']
@@ -170,14 +187,14 @@ def _bounded_by(info, loop, c, touches, lens):
     finds = set()
     for ins in I.walk(region):
         for r in ins.results:
-            if r.type == I.I64:
+            if r.type in (I.I64, I.TINT):
                 (finds if ins.op == 'rt' and ins.attrs.get('callee') in _FINDS else cand).add(r)
         for sub in ins.regions:
             for a in sub.args:
-                if a.type == I.I64:
+                if a.type in (I.I64, I.TINT):
                     cand.add(a)
     for a in region.args:
-        if a.type == I.I64:
+        if a.type in (I.I64, I.TINT):
             cand.add(a)
     good = set(cand)
     good.add(c)
@@ -185,6 +202,7 @@ def _bounded_by(info, loop, c, touches, lens):
     neg = set()                 # find results whose start is in `good`: -1 or in `good`
 
     def ok(v, ctx=frozenset()):
+        v = info.unwrap(v)
         return v in good or (v in neg and v in ctx)
 
     def nonneg_const(v):
@@ -192,6 +210,7 @@ def _bounded_by(info, loop, c, touches, lens):
         return isinstance(k, int) and k >= 0
 
     def holds(v):
+        v = info.unwrap(v)
         if v is c or v in lens:
             return True
         if v in info.arg:
@@ -212,9 +231,11 @@ def _bounded_by(info, loop, c, touches, lens):
             return False
         ctx = info.ctx[ins]
         k = info.res[v][1]
-        if ins.op == 'add':
+        if ins.op in ('add', 'tint.add', 'tint.add_i64'):
             a, b = ins.operands
             return (ok(a, ctx) and nonneg_const(b)) or (ok(b, ctx) and nonneg_const(a))
+        if ins.op == 'tint.from':
+            return ok(ins.operands[0], ctx)
         if ins.op == 'select':
             return ok(ins.operands[1], ctx) and ok(ins.operands[2], ctx)
         if ins.op == 'if':
@@ -295,7 +316,7 @@ def _plan(info, fn, read):
         region = loop.regions[0]
         cands = [region.args[0]] if loop.op == 'for.range' else list(region.args)
         for c in cands:
-            if c.type != I.I64:
+            if c.type not in (I.I64, I.TINT):
                 continue
             if _bounded_by(info, loop, c, touches, lens):
                 if read.attrs['callee'] == 'read_bytes' and any(i.op == 'call' for i in I.walk(region)):
@@ -319,6 +340,13 @@ def run(fn):
         made += 1
         read.attrs['win'] = made
         read.attrs['callee'] = _READS[read.attrs['callee']]
+        body = loop.regions[0]
+        at = 0
+        if c.type == I.TINT:
+            conv = I.Instr('tint.i64', [c], [I.Value(I.I64)], {})
+            body.instrs.insert(0, conv)
+            c = conv.result
+            at = 1
         rel = I.Instr('rt', [c], [], {'callee': 'win_release', 'win': made})
-        loop.regions[0].instrs.insert(0, rel)
+        body.instrs.insert(at, rel)
     return made

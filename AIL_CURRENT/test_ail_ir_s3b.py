@@ -684,7 +684,7 @@ class SharingTests(unittest.TestCase):
             c = Path(tmp, 'listret.ir.d', 'program.c').read_text()
             self.assertIn('make__irl(', c)
             # the legacy entry point stays, as a wrapper over the by-value one
-            self.assertRegex(c, r'int64_t make\(int64_t v_n, int64_t \*_out, int64_t _cap\)')
+            self.assertRegex(c, r'int64_t make\((?:int64_t|ail_tint) v_n, int64_t \*_out, int64_t _cap\)')
             body = c[c.index('ail_list twice__irl'):]
             body = body[:body.index('\n}\n')]
             self.assertNotIn('adopt_return', body)

@@ -590,7 +590,7 @@ class Emitter(TextEmitter):
                 return self.assign_new(depth, ins.result, 'ail_tint_neg(%s)' % o[0])
             if k == 'inv':
                 return self.assign_new(depth, ins.result, 'ail_tint_sub(ail_tint_neg(%s), ail_tint_from_int64(1))' % o[0])
-            if k in ('add', 'sub', 'mul', 'floordiv', 'floormod', 'shl', 'shr'):
+            if k in ('add', 'sub', 'mul', 'floordiv', 'floormod', 'shl', 'shr', 'and', 'or', 'xor'):
                 fn = {'floormod': 'mod', 'shl': 'lshift', 'shr': 'rshift'}.get(k, k)
                 return self.assign_new(depth, ins.result, 'ail_tint_%s(%s, %s)' % (fn, o[0], o[1]))
             if k in ('floordiv_i64', 'mod_i64', 'add_i64', 'sub_i64', 'mul_i64', 'mod_i64_i64',
@@ -1525,8 +1525,7 @@ class Emitter(TextEmitter):
 
     def declare_results(self, ins, depth):
         for r in ins.results:
-            self.line(depth, '%s %s = %s;' % (ctype(r.type), self.fresh(r),
-                                              '{0}' if r.type in (I.STRV, I.BYTES) else '0'))
+            self.line(depth, '%s %s = %s;' % (ctype(r.type), self.fresh(r), _zero(r.type)))
 
     @staticmethod
     def only_yield(region):
@@ -1593,6 +1592,8 @@ class Emitter(TextEmitter):
                 self.line(depth + 1, 'for (uint64_t %s = (uint64_t)%dLL; %s < (uint64_t)%s; '
                                      '%s += (uint64_t)%dLL) {' % (ctl, lo_c, ctl, stop, ctl, step_c))
                 self.line(depth + 2, 'ail_tint %s = ail_tint_from_int64((int64_t)%s);' % (fst, ctl))
+                if tag:
+                    self.reset_roots(tag, depth + 2)
                 self.region(body, depth + 2, ins)
                 self.line(depth + 1, '}')
                 self.line(depth, '} else {')
@@ -1604,6 +1605,8 @@ class Emitter(TextEmitter):
                 self.line(depth + 1, 'for (ail_tint %s = %s; %s ? ail_tint_lt(%s, %s) : ail_tint_lt(%s, %s); '
                                      '%s = ail_tint_add(%s, %s)) {' %
                           (index, lo, neg, hi, index, index, hi, index, index, step))
+                if tag:
+                    self.reset_roots(tag, depth + 2)
                 self.region(body, depth + 2, ins)
                 self.line(depth + 1, '}')
                 self.line(depth, '}')
@@ -1617,6 +1620,8 @@ class Emitter(TextEmitter):
                 self.line(depth, 'for (ail_tint %s = %s; %s ? ail_tint_lt(%s, %s) : ail_tint_lt(%s, %s); '
                                  '%s = ail_tint_add(%s, %s)) {' %
                           (index, lo, neg, hi, index, index, hi, index, index, step))
+                if tag:
+                    self.reset_roots(tag, depth + 1)
                 self.region(body, depth + 1, ins)
                 self.line(depth, '}')
         else:
