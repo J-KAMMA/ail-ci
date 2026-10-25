@@ -1728,6 +1728,10 @@ class Lowering(TextLowering):
         return v
 
     def _expr(self, node):
+        if isinstance(node, (ast.BinOp, ast.UnaryOp)):
+            folded = self.P.fold_int_constant(node)
+            if folded is not None:
+                return self.const(I.I64, folded)
         tk = self.text_kind(node)
         if tk is not None:
             return self.text_expr(node, tk)
