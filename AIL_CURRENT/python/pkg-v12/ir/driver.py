@@ -216,11 +216,7 @@ def _apply(P, args, kwargs, result, current):
     fn, cname = bound['fn'], bound['cname']
     recursive = bool(bound.get('recursive', False))
     _py = os.environ.get('AIL_SURFACE') == 'python'
-    if _py and (any(isinstance(n, ast.Global) for n in ast.walk(fn)) or getattr(ctx, 'gdecl', None)):
-        from pyfront import Unsupported
-        if not os.environ.get('AIL_NO_GENERAL'):
-            raise Unsupported('%s() writes a module variable, which the tagged-int lowering does not cover'
-                              % fn.name)
+
     _user_methods = set(getattr(ctx, 'user_method_names', ()))
     _attr_calls = [n for n in ast.walk(fn)
                    if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
@@ -260,6 +256,12 @@ def _apply(P, args, kwargs, result, current):
     # B2b: a function whose ints are not locally proven needs the IR's tagged-int lowering. If the
     # IR cannot lower it, the typed path must not fall back to the legacy int64 emitter: raise so
     # pyc.build tries the exact general path.
+    # A module variable is not a local the local proof can type: the proof treats every read of one
+    # as an unknown operand. Its C storage is still the int64 static (checked on every store), so
+    # that failure is not an int operation that needs the tagged lowering.
+    _module_vars = set(getattr(getattr(ctx, 'modconsts', None), 'vars', {}) or ())
+    _uses_module_var = bool(getattr(ctx, 'gdecl', None)) or any(
+        isinstance(n, ast.Name) and n.id in _module_vars for n in ast.walk(fn))
     _needs_tint = False
     _proof = None
     try:
@@ -280,6 +282,8 @@ def _apply(P, args, kwargs, result, current):
         # legacy typed emitter (a no-int program must not take the general path).
         _int_failure = (_proof is not None and 'not proven int or float' not in _proof
                         and any(w in _proof for w in ('int', 'operand', 'shift', 'power', 'overflow')))
+        if _uses_module_var:
+            _int_failure = False
         _needs_tint = bool(_tint_names) or _int_failure
         _no_tint_locals = not _tint_names
         if _io_like or fn.name.startswith(('_Ail', '_ail')):

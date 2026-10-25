@@ -65,7 +65,7 @@ def _const_str_len(node):
     return None
 
 
-def _pow_reason(base, exp):
+def _pow_reason(base, exp, module_values=None):
     e = _const_int(exp)
     if e is None:
         if isinstance(exp, ast.Constant):      # a float or other constant exponent: not an int power
@@ -76,6 +76,12 @@ def _pow_reason(base, exp):
     if e < 2:
         return None
     b = _const_int(base)
+    if b is None and module_values is not None and isinstance(base, ast.Name):
+        # A module variable starts at its one module-level literal. `e = 2` then `e **= 5` is the
+        # same constant power as `2 ** 5`; without the value the rule would mark it for every
+        # exponent >= 4. The variable is still an int64 static (checked on every store), so a value
+        # that does not fit stops loudly instead of needing the big-int runtime.
+        b = module_values.get(base.id)
     if b is not None:
         return ('%d ** %d beyond int64' % (b, e)) if abs(b) > 1 and abs(b) ** e >= _I64 else None
     if isinstance(base, ast.Constant):         # a float base
@@ -83,8 +89,36 @@ def _pow_reason(base, exp):
     return ('a power with the constant exponent %d' % e) if e >= 4 else None
 
 
-def _own_reason(fn_nodes, defined):
+def _own_reason(fn_nodes, defined, module_values=None):
     """The first reason a function's own code (not its callees) can need a big int, or None."""
+    if module_values:
+        # The module literal is only the value at the power when nothing in this function stored the
+        # variable before it. A store later in the function (the other `e |= ...` of an accumulator)
+        # does not change the first power; a store before it makes the literal irrelevant.
+        first_pow = {}
+        for n in fn_nodes:
+            if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Pow):
+                base = n.left
+            elif isinstance(n, ast.AugAssign) and isinstance(n.op, ast.Pow):
+                base = n.target
+            elif isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == 'pow' \
+                    and len(n.args) == 2 and not n.keywords:
+                base = n.args[0]
+            else:
+                continue
+            if isinstance(base, ast.Name):
+                line = getattr(n, 'lineno', 1 << 30)
+                first_pow[base.id] = min(first_pow.get(base.id, line), line)
+        safe = {}
+        for name, value in module_values.items():
+            line = first_pow.get(name)
+            if line is None:
+                continue
+            if any(isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, ast.Store)
+                   and getattr(n, 'lineno', 1 << 30) < line for n in fn_nodes):
+                continue
+            safe[name] = value
+        module_values = safe
     neg = set()
     for n in fn_nodes:
         if isinstance(n, ast.UnaryOp) and isinstance(n.op, (ast.USub, ast.UAdd)) \
@@ -99,14 +133,14 @@ def _own_reason(fn_nodes, defined):
             return 'an int literal beyond int64'
         if isinstance(n, ast.BinOp):
             if isinstance(n.op, ast.Pow):
-                r = _pow_reason(n.left, n.right)
+                r = _pow_reason(n.left, n.right, module_values)
                 if r:
                     return '`**` with ' + r
             elif isinstance(n.op, ast.LShift) and _const_int(n.right) is None and not isinstance(n.right, ast.Constant):
                 return '`<<` by an amount that is not a constant'
         elif isinstance(n, ast.AugAssign):
             if isinstance(n.op, ast.Pow):
-                r = _pow_reason(n.target, n.value)
+                r = _pow_reason(n.target, n.value, module_values)
                 if r:
                     return '`**=` with ' + r
             elif isinstance(n.op, ast.LShift) and _const_int(n.value) is None and not isinstance(n.value, ast.Constant):
@@ -120,7 +154,7 @@ def _own_reason(fn_nodes, defined):
             if isinstance(f, ast.Attribute) and f.attr == 'from_bytes' and isinstance(f.value, ast.Name) and f.value.id == 'int':
                 return 'a call of int.from_bytes'
             if isinstance(f, ast.Name) and f.id == 'pow' and 'pow' not in defined and len(n.args) == 2 and not n.keywords:
-                r = _pow_reason(n.args[0], n.args[1])
+                r = _pow_reason(n.args[0], n.args[1], module_values)
                 if r:
                     return 'pow() with ' + r
             if isinstance(f, ast.Name) and f.id == 'int' and 'int' not in defined and n.args:
@@ -983,6 +1017,17 @@ def marked(tree, local=True):
     let a program that only the typed path can build keep the typed path instead of failing on a rule-4 demotion."""
     if not enabled():
         return {}
+    module_values = {}
+    written = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Global):
+            written.update(node.names)
+    for stmt in getattr(tree, 'body', ()):
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 \
+                and isinstance(stmt.targets[0], ast.Name) and stmt.targets[0].id in written:
+            value = _const_int(stmt.value)
+            if value is not None:
+                module_values[stmt.targets[0].id] = value
     units = {}                     # name -> list of bodies (several defs may share a name: methods)
     parent_of = {}
     defined = set()
@@ -1019,9 +1064,20 @@ def marked(tree, local=True):
     module_body = [s for s in top if not isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))]
     module_nodes = list(_walk_own(module_body))
     units['<module>'] = None
+    store_units = {}
+    for unit, defs in units.items():
+        body = module_nodes if defs is None else [m for d in defs for m in _walk_own(d.body)]
+        for node in body:
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                store_units.setdefault(node.id, set()).add(unit)
     for name, defs in units.items():
         nodes = module_nodes if defs is None else [m for d in defs for m in _walk_own(d.body)]
-        r = _own_reason(nodes, defined)
+        # Another unit storing the variable can make it big before this one's power: then the
+        # module literal says nothing about the value there. Stores in this same unit are filtered
+        # by source line inside _own_reason.
+        values = {g: v for g, v in module_values.items()
+                  if store_units.get(g, set()) - {'<module>'} <= {name}}
+        r = _own_reason(nodes, defined, values)
         if r:
             reason[name] = r
         if local:
