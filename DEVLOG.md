@@ -7,10 +7,13 @@ literal containing a generator expression stopped with `TypeError: unhashable ty
 both builds because a genexpr is materialised as a list, while CPython's generator object is
 hashable by identity.
 
-Both runtime hash functions now give a list carrying `from_generator` an address-based hash
-instead of the unhashable-list TypeError; the companion `dunderrt.py` patch matches the new
-default case. The list pointer is stable (the GC does not move objects), the hash does not
-change as the shared `next()` cursor advances, and two distinct genexprs with equal contents
+The v2 runtime hash function (the one both default builds use) now gives a list carrying
+`from_generator` an address-based hash instead of the unhashable-list TypeError; the companion
+`dunderrt.py` patch matches the new default case. The v1 `OBJ` fragment is left unchanged: its
+general path already fails to compile on this tree, and adding a `from_generator` branch there
+only introduced new compile errors. The list pointer is stable (the GC does not move objects),
+the hash does not change as the shared `next()` cursor advances, and two distinct genexprs with
+equal contents
 get different buckets, just as CPython's identity hash does. This covers a direct set literal,
 `set([g])`, a saved genexpr and values arriving through an alias, an argument, a list item, an
 attribute and a dict value, plus set/dict membership, add, discard and equality; printing a

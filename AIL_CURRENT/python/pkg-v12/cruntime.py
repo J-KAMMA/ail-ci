@@ -9845,15 +9845,6 @@ static inline int64_t ail_obj_hash(ail_obj x) {
             return (int64_t)h;
         }
         default: {
-            /* A materialised generator expression is a generator object in CPython: hash it by
-               identity (the list pointer), never by its eagerly built contents.  Two distinct
-               genexpr objects with equal elements stay distinct, and the same object keeps one
-               bucket as its cursor advances. */
-            if (x.tag == AIL_T_LIST && x.v->from_generator) {
-                uint64_t h = (uint64_t)(uintptr_t)x.v;
-                h ^= h >> 33; h *= 0xff51afd7ed558ccdULL; h ^= h >> 33;
-                return (int64_t)h;
-            }
             char buf[64]; snprintf(buf, sizeof buf, "unhashable type: '%s'", ail_type_name(x.tag));
             ail_raise_c(AIL_ERR_TYPE, buf);
             return 0;
