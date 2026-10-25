@@ -1,3 +1,18 @@
+## 2026-10-25 - pre190 review: zero/base shortcuts require constant ints (job-pre190-10251806)
+
+The review of `278fd01` found that the new zero/power-base shortcuts also fired when the other
+operand was not a constant int. `1.5 ** 0`, `f() ** 0` and `(1 // 0) ** 0` were folded to `1`;
+`0 * "ab"`, `0 * f()` and `0 * (1 // 0)` to int `0`; `0 & 1.5` and `0 & (1 // 0)` to `0`; and
+`"a,b,c".split(",", 2.0 ** 0)` / `0 * f()` skipped the type check or the call. `pyfront.int_constant`
+and `pyfunc._maxsplit_const` now take a zero/base shortcut only when the other operand is itself a
+constant integer expression (it may be above the normal fold limit, but it must still be a constant
+int); otherwise the expression is left to normal evaluation, so floats, strings, calls, side effects
+and errors are preserved. The same rule covers both operand orders of `*`/`&`. Probes
+(`/tmp/rprobes/p_*` from the review plus `/tmp/probes/p_pre190_pow.py`, `p_pre190_mul.py`,
+`p_pre190_bitand.py`, `p_pre190_maxsplit.py`, including argument/list-item/attribute/dict routes)
+match CPython on both `cmp.sh` builds; the original large-intermediate probes still match.
+`test_ail_pre190.py` now includes the non-int/effectful cases (4 tests pass).
+
 ## 2026-10-25 - pre190: large constant intermediates that reduce to int64 (job-pre190-10251806)
 
 The review of pre184 recorded that the 4096-bit constant-folding guard ran before the zero and

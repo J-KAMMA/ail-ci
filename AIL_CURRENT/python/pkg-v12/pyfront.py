@@ -175,7 +175,10 @@ def int_constant(node, _limit=_CONST_INT_LIMIT):
     if op is ast.Pow:
         right = int_constant(node.right, _limit)
         if right == 0:
-            return 1
+            left = int_constant(node.left, _limit)
+            if left is None:
+                left = int_constant(node.left, _SPECIAL_INT_LIMIT)
+            return None if left is None else 1
         left = int_constant(node.left, _limit)
         if left in (0, 1, -1):
             if right is None:
@@ -192,10 +195,14 @@ def int_constant(node, _limit=_CONST_INT_LIMIT):
             return None
     elif op is ast.Mult or op is ast.BitAnd:
         left = int_constant(node.left, _limit)
-        if left == 0:
-            return 0
         right = int_constant(node.right, _limit)
-        if right == 0:
+        if left == 0 or right == 0:
+            if left is None:
+                left = int_constant(node.left, _SPECIAL_INT_LIMIT)
+            if right is None:
+                right = int_constant(node.right, _SPECIAL_INT_LIMIT)
+            if left is None or right is None:
+                return None
             return 0
         if left is None or right is None:
             return None

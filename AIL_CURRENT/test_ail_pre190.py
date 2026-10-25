@@ -87,6 +87,83 @@ def main():
 main()
 '''
 
+NON_INT_ZERO_CASES = r'''class Box:
+    def __init__(self):
+        self.v = 1.5
+        self.n = 1
+
+
+def ident(v):
+    return v
+
+
+def f():
+    print("called")
+    return 2
+
+
+def show(label, fn):
+    try:
+        print(label, fn())
+    except Exception as e:
+        print(label, type(e).__name__)
+
+
+def main():
+    print(1.5 ** 0)
+    print(f() ** 0)
+    show("pow-error", lambda: (1 // 0) ** 0)
+    show("pow-str", lambda: "a" ** 0)
+    print(0 * 1.5)
+    print(1.5 * 0)
+    print(0 * "ab")
+    print("ab" * 0)
+    print(f() * 0)
+    print(0 * f())
+    show("mul-error", lambda: 0 * (1 // 0))
+    show("mul-error2", lambda: (1 // 0) * 0)
+    show("and-float", lambda: 0 & 1.5)
+    show("and-float2", lambda: 1.5 & 0)
+    show("and-error", lambda: 0 & (1 // 0))
+    print(f() & 0)
+    print(0 & f())
+    print(0 * (1 << 5000))
+    print((1 << 5000) ** 0)
+    x = 1.5
+    print(ident(x) ** 0)
+    xs = [2.5]
+    print(xs[0] ** 0)
+    b = Box()
+    print(b.v ** 0)
+    d = {"v": 2.5, "n": 1}
+    ns = [1]
+    print(d["v"] ** 0)
+    print(ident(x) * 0)
+    print(xs[0] * 0)
+    print(b.v * 0)
+    print(d["v"] * 0)
+    show("and-item", lambda: xs[0] & 0)
+    show("and-attr", lambda: b.v & 0)
+    show("and-dict", lambda: d["v"] & 0)
+    s = "a,b,c"
+    print(s.split(",", 0 * f()))
+    print(s.split(",", f() ** 0))
+    show("split-float", lambda: s.split(",", 2.0 ** 0))
+    show("split-error", lambda: s.split(",", 0 * (1 // 0)))
+    print(s.split(",", 0 * (1 << 5000)))
+    print(s.split(",", (1 << 5000) ** 0))
+    print(s.rsplit(",", f() ** 0))
+    n = 1
+    print(s.split(",", ident(n)))
+    print(s.split(",", ns[0]))
+    print(s.split(",", b.n))
+    print(s.split(",", d["n"]))
+    print(s.split(",", maxsplit=f() ** 0))
+
+
+main()
+'''
+
 OUT_OF_RANGE = [
     ('over_intermediate', 'print("a b".split(" ", 1 << 2000000))\n'),
     ('over_int64', 'print("a b".split(" ", 2**63))\n'),
@@ -147,6 +224,9 @@ class Pre190Tests(unittest.TestCase):
 
     def test_large_intermediate_as_maxsplit(self):
         self.check('maxsplit_reductions', MAXSPLIT_REDUCTIONS)
+
+    def test_zero_and_base_shortcuts_require_constant_ints(self):
+        self.check('non_int_zero_cases', NON_INT_ZERO_CASES)
 
     def test_oversized_maxsplit_still_refused(self):
         for slug, text in OUT_OF_RANGE:
