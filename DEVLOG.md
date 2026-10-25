@@ -1,5 +1,17 @@
 # DEVLOG
 
+## 2026-10-25 - int64 constant refusal review fix (job-pre108-10251451)
+
+The 4096-bit evaluation cap silently returned "not a constant", so `2**5000`,
+`(2**5000) >> 4999` and `(10**5000) // (10**4999)` compiled and trapped at run time. A
+constant over the cap is now marked too big and refused by the same
+`int64 constant expression out of range` name. The maxsplit exception is narrowed to the
+constant maxsplit of a literal `str.split`/`rsplit`, where it emits the pre97 maxsplit refusal
+name; a user method named `split` and a non-constant maxsplit (list item, conditional, call)
+stay under the generic check, so their huge constants are refused instead of trapping. Both
+builds and the integration copies of `test_ail_pre97`, `test_ail_pre113` and
+`test_ail_typed_tuples` pass.
+
 ## 2026-10-25 - int64 constant refusal judges the whole expression (job-pre108-10251451)
 
 The pre108 front-end check refused any constant subexpression that left int64, so it broke the

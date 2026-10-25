@@ -94,6 +94,41 @@ main()
 
 main()
 ''',
+    'huge_power': '''def main() -> None:
+    print(2 ** 5000)
+
+
+main()
+''',
+    'huge_shift': '''def main() -> None:
+    print((2 ** 5000) >> 4999)
+
+
+main()
+''',
+    'huge_floor_div': '''def main() -> None:
+    print((10 ** 5000) // (10 ** 4999))
+
+
+main()
+''',
+    'non_str_split': '''class C:
+    def split(self, sep: str, n: int) -> None:
+        print(n)
+
+
+def main() -> None:
+    C().split(" ", 10 ** 30)
+
+
+main()
+''',
+    'split_list_item': '''def main() -> None:
+    print("a b c".split(" ", [10 ** 30][0]))
+
+
+main()
+''',
 }
 
 IN_RANGE = '''MAX = %d

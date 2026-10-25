@@ -95,37 +95,41 @@ def _check_int64_literals(tree):
 
 
 _CONST_INT_BITS = 4096
+_CONST_INT_TOO_BIG = object()
 
 
 def _constant_int(node, known):
-    """The exact int value of a constant expression, or None when it is not statically known.
+    """The exact int value of a constant expression, None when it is not statically known, or
+    ``_CONST_INT_TOO_BIG`` when it is a constant expression too large to evaluate safely.
 
     Python evaluates an all-integer expression exactly, so an intermediate may leave int64 while
     the answer fits (``2**65 - 2**65`` is 0).  The value is therefore computed with Python ints,
-    with a size bound that keeps a hostile exponent or shift from being materialised.  Names
-    resolve only through known module constants; a local of the same name keeps the expression
-    out of ``known``, so a shadowed constant is never folded by mistake."""
+    with a size bound that keeps a hostile exponent or shift from being materialised.  A constant
+    over the bound is still a constant, so the caller refuses it by name instead of letting it
+    reach the runtime trap.  Names resolve only through known module constants; a local of the
+    same name keeps the expression out of ``known``, so a shadowed constant is never folded by
+    mistake."""
     if isinstance(node, ast.Constant) and type(node.value) is int:
         return node.value
     if isinstance(node, ast.Name):
         return known.get(node.id)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert)):
         value = _constant_int(node.operand, known)
-        if value is None:
-            return None
+        if value is None or value is _CONST_INT_TOO_BIG:
+            return value
         if isinstance(node.op, ast.USub):
             value = -value
         elif isinstance(node.op, ast.Invert):
             value = ~value
-        return value if abs(value).bit_length() <= _CONST_INT_BITS else None
+        return value if abs(value).bit_length() <= _CONST_INT_BITS else _CONST_INT_TOO_BIG
     if not isinstance(node, ast.BinOp):
         return None
     left = _constant_int(node.left, known)
-    if left is None:
-        return None
+    if left is None or left is _CONST_INT_TOO_BIG:
+        return left
     right = _constant_int(node.right, known)
-    if right is None:
-        return None
+    if right is None or right is _CONST_INT_TOO_BIG:
+        return right
     operation = type(node.op)
     try:
         if operation is ast.Add:
@@ -134,7 +138,7 @@ def _constant_int(node, known):
             value = left - right
         elif operation is ast.Mult:
             if left and right and left.bit_length() + right.bit_length() > _CONST_INT_BITS:
-                return None
+                return _CONST_INT_TOO_BIG
             value = left * right
         elif operation is ast.FloorDiv:
             if right == 0:
@@ -154,7 +158,7 @@ def _constant_int(node, known):
             elif left == -1:
                 value = -1 if right & 1 else 1
             elif left.bit_length() * right > _CONST_INT_BITS:
-                return None
+                return _CONST_INT_TOO_BIG
             else:
                 value = left ** right
         elif operation is ast.LShift:
@@ -163,7 +167,7 @@ def _constant_int(node, known):
             if left == 0:
                 value = 0
             elif left.bit_length() + right > _CONST_INT_BITS:
-                return None
+                return _CONST_INT_TOO_BIG
             else:
                 value = left << right
         elif operation is ast.RShift:
@@ -180,19 +184,34 @@ def _constant_int(node, known):
             return None
     except (ArithmeticError, ValueError):
         return None
-    return value if abs(value).bit_length() <= _CONST_INT_BITS else None
+    return value if abs(value).bit_length() <= _CONST_INT_BITS else _CONST_INT_TOO_BIG
 
 
-def _deferred_constant(node):
-    """A maxsplit argument owns its own refusal (str.split/rsplit), so the generic int64 check
-    leaves the whole argument to the lowering that knows the CPython error."""
+def _string_constant(node):
+    """Is this expression a string literal (so ``.split``/``.rsplit`` below is ``str``'s own
+    method, not a user method that happens to share the name)?"""
+    if isinstance(node, ast.Constant):
+        return type(node.value) is str
+    if isinstance(node, ast.JoinedStr):
+        return True
+    return (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add)
+            and _string_constant(node.left) and _string_constant(node.right))
+
+
+def _maxsplit_constant_node(node):
+    """The constant maxsplit expression of a literal str.split/rsplit call, or None.
+
+    That argument has its own documented refusal name (pre97); a non-str receiver or a
+    non-constant maxsplit (a list item, a conditional, a call) keeps the generic check."""
     if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-            and node.func.attr in ('split', 'rsplit')):
+            and node.func.attr in ('split', 'rsplit') and _string_constant(node.func.value)):
         return None
     count = node.args[1] if len(node.args) >= 2 else None
     for keyword in node.keywords:
         if keyword.arg == 'maxsplit':
             count = keyword.value
+    if count is None or _constant_int(count, {}) is None:
+        return None
     return count
 
 
@@ -215,20 +234,20 @@ def _check_int64_constants(tree):
         if not isinstance(target, ast.Name) or stores.get(target.id) != 1 or target.id in parameters:
             continue
         value = _constant_int(node.value, known)
-        if value is not None:
+        if value is not None and value is not _CONST_INT_TOO_BIG:
             known[target.id] = value
     parents = {}
     for parent in ast.walk(tree):
         for child in ast.iter_child_nodes(parent):
             parents[child] = parent
-    deferred = set()
+    maxsplit_nodes = set()
     for node in ast.walk(tree):
-        count = _deferred_constant(node)
+        count = _maxsplit_constant_node(node)
         if count is not None:
-            deferred.update(ast.walk(count))
+            maxsplit_nodes.add(count)
     candidates = {}
     for node in ast.walk(tree):
-        if node in deferred or not isinstance(node, (ast.BinOp, ast.UnaryOp)):
+        if not isinstance(node, (ast.BinOp, ast.UnaryOp)):
             continue
         value = _constant_int(node, known)
         if value is not None:
@@ -243,11 +262,20 @@ def _check_int64_constants(tree):
             parent = parents.get(parent)
         if covered:
             continue
-        if not -(1 << 63) <= value < 1 << 63:
-            error = ValueError(f'int64 constant expression out of range: {value}')
-            error.source_line = node.lineno
-            error.source_column = node.col_offset
-            raise error
+        if value is not _CONST_INT_TOO_BIG and -(1 << 63) <= value < 1 << 63:
+            continue
+        if node in maxsplit_nodes:
+            message = ('the str.split()/rsplit() maxsplit constant does not fit in a 64-bit '
+                       'signed integer')
+        elif value is _CONST_INT_TOO_BIG:
+            message = ('int64 constant expression out of range: '
+                       'constant expression too large to evaluate')
+        else:
+            message = f'int64 constant expression out of range: {value}'
+        error = ValueError(message)
+        error.source_line = node.lineno
+        error.source_column = node.col_offset
+        raise error
 
 
 def _returns_on_every_path(statements):
