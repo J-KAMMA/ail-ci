@@ -1124,6 +1124,9 @@ GEN = r'''
    callers waiting for a running one are not on cx->frames, so the collector reaches them through the hook
    below: a suspended generator's frames are marked only when its object is, and a generator nobody can
    reach any more gives its stack back. */
+#ifndef AIL_ATTR_GEN_CAUSE
+#define AIL_ATTR_GEN_CAUSE (-2)   /* hidden: the StopIteration a PEP 479 conversion wrapped */
+#endif
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -1327,8 +1330,19 @@ static inline ail_st ail2g_resume(ail_ctx *cx, ail_obj *out, ail_obj inst, ail_o
     ail2g_free_stack(g);
     if (g->status == AIL_OK) return ail_raise_c(cx, AIL_B_STOPITERATION, "");
     if (g->status == AIL_EXC && ail_exc_matches_b(cx, AIL_B_STOPITERATION)) {
+        /* PEP 479 turns the escaping StopIteration into a RuntimeError whose __cause__ is that object.
+           Keep the cause on the value for contextlib's throw() check; normal attribute reads still
+           refuse the chain (see ail2a_chain_name). */
+        ail_obj cause = ail_exc_as_value(cx);
+        AIL_ROOT1(cx, fr, cause);
         ail_exc_clear(cx);
-        return ail_raise_c(cx, AIL_B_RUNTIMEERROR, "generator raised StopIteration");
+        ail_st st = ail_raise_c(cx, AIL_B_RUNTIMEERROR, "generator raised StopIteration");
+        if (st == AIL_EXC) {
+            ail_obj rt = ail_exc_as_value(cx);
+            ail_inst_setattr(cx, rt, AIL_ATTR_GEN_CAUSE, cause);
+        }
+        AIL_FRAME_LEAVE(cx, fr);
+        return st;
     }
     return g->status;
 }
@@ -1414,6 +1428,7 @@ static inline int ail2a_streq(ail_obj s, const char *lit) {
     return 1;
 }
 static inline int ail2a_find(ail_ctx *cx, ail_obj obj, const char *name, ail_obj *out) {
+    if (obj.tag == AIL_T_CLASS) return ail_class_attr_find_name(cx, obj, name, out);
     ail_instobj *o = (ail_instobj *)obj.o;
     for (int64_t i = 0; i < o->n; i++) {
         int64_t nid = o->attrs[i].name_id;
@@ -1437,6 +1452,20 @@ static inline ail_st ail2a_chain_refused(ail_ctx *cx, const char *name) {
 /* getattr(obj, name[, default]); is_method: the class of obj has a method of that name */
 static inline ail_st ail2a_getattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_obj name, int has_dflt, ail_obj dflt) {
     char buf[256]; ail_st st = ail2a_cname(cx, name, buf, sizeof buf); if (st != AIL_OK) return st;
+    if (obj.tag == AIL_T_CLASS) {
+        if (strcmp(buf, "__name__") == 0) { *out = ((ail_classobj *)obj.o)->name; return AIL_OK; }
+        int ca = ail_class_attr_find_name(cx, obj, buf, out);
+        if (ca == 1) return AIL_OK;
+        char nb[100], m[320]; ail_class_name_c(obj, nb, sizeof nb);
+        if (ca == 2) {
+            snprintf(m, sizeof m, "reading method/property '%s' through the class value %s "
+                     "is not built on the general path", buf, nb);
+            return ail_raise_c(cx, AIL_B_NOTIMPLEMENTEDERROR, m);
+        }
+        if (has_dflt) { *out = dflt; return AIL_OK; }
+        snprintf(m, sizeof m, "type object '%s' has no attribute '%s'", nb, buf);
+        return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, m);
+    }
     if ((st = ail2a_need_inst(cx, obj, "getattr")) != AIL_OK) return st;
     if (ail2a_find(cx, obj, buf, out)) return AIL_OK;
     /* a name computed at run time: refuse it by name on an exception, like the direct attribute form */
@@ -1455,6 +1484,12 @@ static inline ail_st ail2a_getattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_o
 static inline ail_st ail2a_hasattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_obj name, int is_method) {
     char buf[256]; ail_st st = ail2a_cname(cx, name, buf, sizeof buf); if (st != AIL_OK) return st;
     if (is_method) { *out = ail_box_bool(1); return AIL_OK; }
+    if (obj.tag == AIL_T_CLASS) {
+        ail_obj v;
+        int ca = ail_class_attr_find_name(cx, obj, buf, &v);
+        *out = ail_box_bool(strcmp(buf, "__name__") == 0 || ca == 1 || ca == 2);
+        return AIL_OK;
+    }
     if ((st = ail2a_need_inst(cx, obj, "hasattr")) != AIL_OK) return st;
     ail_obj v;
     int found = ail2a_find(cx, obj, buf, &v);
@@ -1605,12 +1640,27 @@ static inline ail_st ail2d_call(ail_ctx *cx, ail_obj *out, ail_mapobj *m) {
 
 MISC = r'''
 /* ---- small primitives (safetyrt.py MISC) ---- */
+#ifndef AIL_ATTR_GEN_CAUSE
+#define AIL_ATTR_GEN_CAUSE (-2)   /* defined by GEN too; this fragment may be used without it */
+#endif
 /* the two values are instances of one class (a dataclass's __eq__ compares only those) */
 static inline ail_st ail2e_same_class(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
     (void)cx;
     int r = (a.tag == AIL_T_INST || a.tag == AIL_T_EXC) && (b.tag == AIL_T_INST || b.tag == AIL_T_EXC)
             && ((ail_instobj *)a.o)->cls.o == ((ail_instobj *)b.o)->cls.o;
     *out = ail_box_bool(r);
+    return AIL_OK;
+}
+/* whether `raised` carries `cause` as the StopIteration a generator converted (PEP 479); the
+   chain exists only for contextlib's internal throw() check, not for a program's attribute reads */
+static inline ail_st ail2e_cause_is(ail_ctx *cx, ail_obj *out, ail_obj raised, ail_obj cause) {
+    *out = ail_box_bool(0);
+    if ((raised.tag == AIL_T_INST || raised.tag == AIL_T_EXC) &&
+        (cause.tag == AIL_T_INST || cause.tag == AIL_T_EXC)) {
+        ail_instobj *o = (ail_instobj *)raised.o;
+        for (int64_t i = 0; i < o->n; i++)
+            if (o->attrs[i].name_id == AIL_ATTR_GEN_CAUSE) { *out = ail_box_bool(o->attrs[i].val.o == cause.o); break; }
+    }
     return AIL_OK;
 }
 /* the class name of an instance or exception (what `type(e).__name__` is) */
@@ -2229,6 +2279,7 @@ PRIMS = {
     '_ail_stderr_write': ('ail2e_write(cx, &{t}, {a0})', 1, 'misc'),
     '_ail_same_class': ('ail2e_same_class(cx, &{t}, {a0}, {a1})', 2, 'misc'),
     '_ail_exc_name': ('ail2e_exc_name(cx, &{t}, {a0})', 1, 'misc'),
+    '_ail_exc_cause_is': ('ail2e_cause_is(cx, &{t}, {a0}, {a1})', 2, 'misc'),
 }
 PRIMS.update({name: (cfn, count, 'rng') for name, (cfn, count) in randrt.PRIMS.items()})   # random.Random (randrt.py)
 PRIMS.update({name: (cfn, count, 'jsn') for name, (cfn, count) in jsonbrt.PRIMS.items()})   # json's loops (jsonbrt.py)

@@ -96,6 +96,65 @@ literals and module-level int constants and refuses an out-of-int64 result by na
 expression out of range: ...`) on both builds. A module constant shadowed by a parameter is not
 folded, and values that only reach the unary operation as variables keep the fixed-width trap.
 Added `test_ail_pre172.py` and registered it in `ail_check.MODULES`.
+## 2026-10-25 - contextlib re-raises a sent StopIteration (job-pre181-10251538)
+
+The first still-differing item from the task list was `p_stopiter`: a `StopIteration` raised
+inside a `with` body reaches the `@contextmanager` generator through `send()`, which re-raises it,
+and the generator runtime's PEP 479 conversion turned it into
+`RuntimeError: generator raised StopIteration` on both builds. CPython also makes that RuntimeError,
+but it sets `__cause__` to the escaping StopIteration and `contextlib.__exit__` recognises the
+cause, returns false, and lets the `with` re-raise the original StopIteration. The conversion in
+`safetyrt.py` now stores that exact object in a private attribute id (`AIL_ATTR_GEN_CAUSE`), and
+`_AilGenCM.__exit__` in `prelude_with.py` checks it through a small internal primitive, matching
+CPython's `isinstance(value, StopIteration) and exc.__cause__ is value` branch. Ordinary
+`getattr(e, "__cause__")`/`__context__` reads still refuse chaining (test_ail_pre179 passes), and a
+generator that catches the sent value and raises a *different* StopIteration still gives
+RuntimeError.
+
+Probes in `/tmp/probes` (`p_si1`-`p_si10`, `p_stopiter_k`, `p_cause_hidden`) covered builtin and
+user-subclass StopIteration, a replacement StopIteration after catching the sent one, replacement
+ValueError, a contextmanager method, nested managers, sources through an argument / list item /
+attribute / dict value, clean and suppressing exits, raw PEP 479, and both builds; all match CPython
+or keep the existing named refusal. `p_tb` still differs (`tb is None`), as recorded in
+DIFFERENCES (`C?-job-pre181-10251538-2`) and not touched here. Added `test_ail_pre181.py` (3
+programs, two builds each, 20s). Required modules on the final commit: test_ail_pre181,
+test_ail_pre179, test_ail_fuzz56, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3
+all pass (6 modules, 371s, `-j 2`).
+## 2026-10-25 - re-apply pre137: negative r in the itertools choosers (job-rbpre137-10251548)
+
+Re-applied the accepted pre137 change on the current tree. `permutations`, `combinations` and
+`combinations_with_replacement` with `r < 0` returned `[]` on the general path; CPython raises
+`ValueError: r must be non-negative`. The shared chooser runtime now raises that catchable error
+after the pool is materialized, so a non-iterable argument still raises TypeError first, as in
+CPython. Coverage: `r` reaching the call as a literal, a local, an argument, a list item, an
+attribute and a dict value, plus r = 0, r > n, an empty pool and booleans. Added
+`AIL_CURRENT/test_ail_pre137.py` and registered it in `ail_check.MODULES`. Other observed, not
+fixed (identical on the base): a float, str or explicit None `r` still disagrees with CPython
+(`permutations(xs, 1.5)` prints `[]` instead of TypeError, `combinations_with_replacement(xs, None)`
+prints `[()]`), and explicit `permutations(xs, None)` is treated as 0 instead of the omitted
+default. The default build also cannot compile a top-level `print(list(itertools.permutations(...)))`
+(a pre-existing typed-list error, the same with a non-negative `r`).
+## 2026-10-25 - pre170 review follow-up: class-name rebinding before the definition (job-rbpre170-10251554)
+
+Review fix. The module slot for a class name was bound in the hoisted `setup`, before any module
+statement, so a module-level assignment before the class definition (`C = None; class C: pass`)
+replayed afterwards and the class never rebound it: `C is None` printed True where CPython says
+False. The binding is now emitted at the class-definition point in the module body (and in the
+array-entry shape's class-init sequence), so assignment order decides the value in both directions.
+`test_ail_pre170.py` gained `test_assignment_before_the_class_definition`.
+
+## 2026-10-25 - pre170 re-applied: last duplicate class-body attribute through a class value (job-rbpre170-10251554)
+
+Re-applied the accepted pre170 change on top of the current tree. A class body with a duplicate
+assignment (`class C: x = 1; x = 2`) read through an alias, an argument, a list/dict item, an
+instance attribute or `getattr()` returned the first value (or raised `AttributeError` for an
+aliased class), where CPython keeps the last. The general path now registers every class-body
+entry in source order on the class object and the runtime lookup scans each class backwards, so
+the last definition wins; a module-level rebinding of the class name is bound at definition time,
+the array-entry shape evaluates the class bodies before the entry call, and reading a
+method/property through a directly known class value is refused by name. Added
+`test_ail_pre170.py` (4 tests, both builds); probes `p_dup`, `p_dup2`, `p_sources`, `p_missing`,
+`p_array`, `p_shadow` and `p_attr` match CPython.
 
 ## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
 
