@@ -1,16 +1,15 @@
-## 2026-10-25 - pre142 re-applied: next() of a saved generator expression is refused by name
+## 2026-10-25 - pre142 withdrawn: saved-genexpr next() already works (job-rbpre142-10251802)
 
-Re-applies the accepted pre142 change on the current tree. A saved non-raising generator
-expression (`g = (x * 2 for x in xs); next(g)`) died with `AIL internal error: iterator:
-unknown kind` on both builds because both emitters materialise a `GeneratorExp` as an eager
-list, so `next()` handed a list to the iterator dispatcher; the direct `next(x for x in xs)`
-shape is lowered to a real iterator and already matched CPython. `ail_chatgpt._check_saved_genexpr_next`
-now refuses the saved shape at compile time on both builds, following the value through
-assignments, aliases, list items, attributes, dict values, returns and parameters (including
-wrappers). Controls are unchanged: direct `next(genexpr)` and saved genexprs consumed by
-`for`/`list`/`sum` match CPython. A second `list(g)` still re-iterates the materialised list
-instead of being empty -- a separate pre-existing difference. Added `test_ail_pre142.py`;
-probes in `/tmp/probes`.
+Review follow-up. The re-applied pre142 compile-time refusal was based on a stale premise: on
+this tree job pre166 already gives a materialised generator expression a shared cursor, so
+`g = (x * 2 for x in xs); next(g)` follows CPython (`2`, `4`, `[6]`) on both builds, and
+`test_ail_pre166` passes on the base tree. The new pass therefore removed working behaviour,
+and its scope-insensitive taint also refused valid reassignments, shadowed parameters,
+branch-returned iterators and user-defined functions named `next`. The refusal, its checker
+registration, `test_ail_pre142.py`, and the contradictory `DIFFERENCES.md` row are withdrawn;
+`_check_saved_genexpr_next` is gone and the tree keeps pre166's cursor fix. Probes for the
+recorded shape, reassignment (local/global/attribute/dict/alias), shadowed parameter, branch
+return, direct `next`, and the user-defined `next` all match CPython on both builds.
 
 ## 2026-10-25 - int(s, base) message GC rooting (job-pre180-10251520)
 
