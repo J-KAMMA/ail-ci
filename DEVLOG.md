@@ -2,11 +2,11 @@
 
 The typed zero-division fix raised `AIL_EXC_ZERODIV` from `pydiv`/`pymod` everywhere, including
 inside a typed parallel worker, where another thread has no exception stack. `test_ail_typed_tuples`
-crashed with SIGSEGV (`100 // (x - 7)` over `executor.map`); the same guard already used for
-`ail_fdiv`/`ail_ffloormod` now sends a zero divisor to `ail_die` when a worker is active, so PAR
-records the trap and re-raises it after the join. Non-worker calls raise normally as before. The
-branch is also merged with the current integration branch so the newer `test_ail_pre166` module is
-present and passes.
+crashed with SIGSEGV (`100 // (x - 7)` over `executor.map`); when `ail_par_cur` is set the helper now
+calls `ail_par_trap` with the message and `AIL_EXC_ZERODIV`, and PAR re-raises that message and code
+on the calling thread after the join. Non-worker calls raise normally as before. The branch is also
+merged with the current integration branch so the newer `test_ail_pre166` module is present and
+passes.
 
 Probes covered int/float `//`, `%` and `/` on the main thread and in `executor.map` bodies, caught
 and uncaught, on both builds; see the report.
