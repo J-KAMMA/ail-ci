@@ -275,10 +275,22 @@ def _escapes(fn_facts, parents):
     names = list(fn_facts)
     esc = {n: set() for n in names}
     call_sites = {n: [] for n in names}                 # callee -> [(call_node, caller_name)]
-    for name, f in fn_facts.items():
-        for n in _walk_own_body(f.node):
-            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in fn_facts:
-                call_sites.setdefault(n.func.id, []).append((n, name))
+    method_bodies = [(node.name, node) for node, parent in parents.items()
+                     if isinstance(node, ast.FunctionDef) and isinstance(parent, ast.ClassDef)]
+    method_names = {name for name, _ in method_bodies}
+    bodies = [(name, f.node) for name, f in fn_facts.items()] + method_bodies
+    for name, body in bodies:
+        for n in _walk_own_body(body):
+            if not isinstance(n, ast.Call):
+                continue
+            if isinstance(n.func, ast.Name):
+                callee = n.func.id
+            elif isinstance(n.func, ast.Attribute) and n.func.attr in method_names:
+                callee = n.func.attr
+            else:
+                continue
+            if callee in fn_facts or callee in method_names:
+                call_sites.setdefault(callee, []).append((n, name))
 
     for _ in range(MAX_ROUNDS):
         changed = False

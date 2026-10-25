@@ -1,3 +1,21 @@
+## 2026-10-25 - method call sites with colliding names stay boxed (job-pre237-10260353)
+
+The first still-differing pre-existing item from the pre211 review was `p4_collide`: a module
+function `run` and a class method `run` share a name, and the method calls the shift helper
+`shl` under a module `try`. `pymix._escapes` walked only module-function bodies, so `shl` was
+selected as a typed clone and its `ValueError: negative shift count` bypassed the boxed handler
+on the default build (exit 1), while the general build matched CPython. The call graph now also
+walks every class-method body and records `obj.method()` call sites, keeping duplicate method
+names and a module-function collision as separate bodies. Only `p4_collide` was reproduced here;
+`p5_dupname` was not, and no claim is made about its exact probe.
+
+Probes `/tmp/probes/p4_collide2.py`, `p5_dupname2.py`, `pre237_forms.py` and
+`pre237_uncaught.py` cover literal, argument, list-item, attribute, dict-value and alias counts,
+zero/large/valid shifts, a method-to-method chain, a method's own `try`, duplicate method names,
+a name collision with a module function, division/subscript traps and an uncaught shift; all
+match CPython on both builds. Added `test_ail_pre237.py` (2 tests) and registered it in
+`ail_check.MODULES`.
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a
