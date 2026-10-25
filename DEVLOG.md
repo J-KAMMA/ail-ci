@@ -311,6 +311,25 @@ empty, positive-step, negative-step, huge-step and int64-boundary ranges; not-fo
 and 2/3-argument arity calls.  Both `-g` and `-d` match CPython on every range method probe (the
 zero-step item is a separate pre-existing difference and was not changed).  `test_ail_pre216.py`
 is registered in `ail_check.MODULES` and `tools/ci_shards.json`.
+## 2026-10-25 - local shadowing a module function, called before assignment (job-pre218-10252343)
+
+The pre141 reviewer recorded `r13_plain_shadow.py`: in a function, `print(side(1)); side = None`
+called the module function `side` on both builds, while CPython makes `side` local for the whole
+activation and raises `UnboundLocalError` at the call. `r11` reaches the same name-resolution bug
+through a default expression (that program is refused by name for its default, so the root cause
+reproduces without it). The general path's `_call_name` now checks the activation's own binding
+(parameter, assignment, loop/with/except target, import, cell or closure) before resolving a call
+to a module function, reading the slot through the ordinary load path; a bound callable is called
+and an unbound slot raises CPython's `UnboundLocalError`. The typed path cannot call an arbitrary
+local value, so it refuses a call whose name is locally bound (and an optional-local retry for a
+same-named module function) by name, and the default build falls back to the general path.
+`AIL_CURRENT/test_ail_pre218.py` covers the plain case, a bound lambda, None, parameters, a loop
+target, a branch-only binding, list-item / attribute / dict-value aliases, an ordinary call and an
+optional local that is not called, plus the default-expression refusal. Probes in `/tmp/probes`
+(`shadow_basic`, `shadow_bound_callable`, `shadow_bound_none`, `shadow_param`, `shadow_param_none`,
+`shadow_for_target`, `shadow_branch_unbound`, `shadow_alias_list_item`, `shadow_alias_attr`,
+`shadow_alias_dict`, `shadow_normal`, `shadow_optional_not_called`, `shadow_default_lambda`) match
+CPython or are refused by name on both builds.
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
