@@ -494,6 +494,110 @@ def _check_int64_constants(tree):
         walk(statement)
 
 
+_GENEXPR_HASH_REFUSAL = (
+    'a generator expression used as a hash key is not supported: '
+    'AIL stores it as a list (no generator identity hash or repr)')
+
+
+def _hashed_genexpr(node, shadowed):
+    """The generator expression in a value a set or dict must hash, or None.
+
+    A tuple is hashed element by element, and a tuple()/frozenset() call hashes the elements of a
+    collection argument; a generator-expression argument to either is consumed, not hashed. A list,
+    set or dict nested in a key is itself unhashable in CPython, so nothing beneath it is reached.
+    `shadowed` names are bound by the program, so a call of that name is not the builtin."""
+    if isinstance(node, ast.GeneratorExp):
+        return node
+    if isinstance(node, ast.Tuple):
+        for elt in node.elts:
+            found = _hashed_genexpr(elt, shadowed)
+            if found is not None:
+                return found
+    if isinstance(node, ast.IfExp):
+        return _hashed_genexpr(node.body, shadowed) or _hashed_genexpr(node.orelse, shadowed)
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id in ('tuple', 'frozenset') and node.func.id not in shadowed):
+        for arg in node.args:
+            if isinstance(arg, (ast.List, ast.Tuple, ast.Set)):
+                for elt in arg.elts:
+                    found = _hashed_genexpr(elt, shadowed)
+                    if found is not None:
+                        return found
+    return None
+
+
+def _bound_names(tree):
+    """Every name the program binds anywhere (a conservative over-approximation).
+
+    A name bound in any scope may resolve to that binding where a checked call appears, so the
+    static refusal must not treat such a call as the builtin. Over-approximating only moves a
+    genuinely-builtin case to the run-time refusal, which names the same construct."""
+    bound = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bound.add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.arg):
+            bound.add(node.arg)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if alias.name != '*':
+                    bound.add(alias.asname or alias.name.split('.')[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            bound.update(node.names)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            bound.add(node.rest)
+    return bound
+
+
+def _check_genexpr_hash_keys(tree):
+    """Refuse a generator expression that a set or dict must hash, by name.
+
+    Both emitters materialise a generator expression as an eager list (pre166), so the object is
+    unhashable where CPython hashes the generator by identity, and showing it prints the list
+    instead of `<generator object <genexpr> at 0x...>`. A static display/`hash` form is refused
+    here on both builds; a value reaching the hash at run time is refused by the runtime."""
+    def refuse(node):
+        error = ValueError(_GENEXPR_HASH_REFUSAL)
+        error.source_line = node.lineno
+        error.source_column = node.col_offset
+        raise error
+
+    shadowed = _bound_names(tree) & {'hash', 'set', 'frozenset', 'tuple'}
+
+    def check_key(key):
+        found = _hashed_genexpr(key, shadowed)
+        if found is not None:
+            refuse(found)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Set):
+            for elt in node.elts:
+                check_key(elt)
+        elif isinstance(node, ast.Dict):
+            for key in node.keys:
+                if key is not None:
+                    check_key(key)
+        elif isinstance(node, ast.SetComp):
+            check_key(node.elt)
+        elif isinstance(node, ast.DictComp):
+            check_key(node.key)
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id == 'hash' and node.func.id not in shadowed:
+                for arg in node.args:
+                    check_key(arg)
+            elif node.func.id in ('set', 'frozenset') and node.func.id not in shadowed:
+                for arg in node.args:
+                    if isinstance(arg, (ast.List, ast.Tuple, ast.Set)):
+                        for elt in arg.elts:
+                            check_key(elt)
+
+
 def _returns_on_every_path(statements):
     def loop_exit(body):
         pending = list(body)
@@ -704,6 +808,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 _check_int64_constants(tree)
                 _check_int64_literals(tree)
                 _check_int64_unary_constants(tree)
+                _check_genexpr_hash_keys(tree)
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)
             if source_map is not None:
