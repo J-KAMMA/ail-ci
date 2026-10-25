@@ -1,3 +1,17 @@
+## 2026-10-25 - pre183 review follow-up: type-valued builtins name `type` (job-pre183-10251542)
+
+The builtin-kind flag added for the startswith/endswith tuple-member message was over-broad: it
+also covered `bool`, which is a class in CPython, so `"abc".startswith((bool,))` printed
+`not builtin_function_or_method` instead of `not type` on both builds. The flag now distinguishes
+builtin functions from type-valued builtins (`bool`), and the error type-name helper returns
+`type` for the latter. Builtin functions (`len`, `abs`, ...) and user-defined functions keep the
+names CPython uses. Error-only branch; no hot-path change.
+
+`pre183_bool_type.py` covered `bool` and `len` through literals, variables, arguments, list
+items, dict values and attributes, the scalar form, both methods, a member after a non-matching
+member, invalid and negative windows, and an empty tuple, on both `cmp.sh` builds; all match
+CPython. `test_ail_pre183.py` keeps the boolean cases.
+
 ## 2026-10-25 - pre183: bytes/bytearray membership wrong-type text (job-pre183-10251542)
 
 The first still-differing item from the fuzz43 pre-existing list was the bytes/bytearray

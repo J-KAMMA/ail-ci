@@ -14638,7 +14638,8 @@ static int ail__cnt_cmp_desc(const void *pa, const void *pb) {
     return c ? c : (ia < ib ? -1 : ia > ib);
 }
 static inline const char *ail__tname_c(ail_obj x) {
-    if (x.tag == AIL_T_FUNC && ((ail_funcobj *)x.o)->builtin_fn) return "builtin_function_or_method";
+    if (x.tag == AIL_T_FUNC && ((ail_funcobj *)x.o)->builtin_fn)
+        return ((ail_funcobj *)x.o)->builtin_fn == 2 ? "type" : "builtin_function_or_method";
     if (x.tag == AIL_T_INST && ((ail_instobj *)x.o)->cls.tag == AIL_T_CLASS) {      /* an instance names its class (bytes, ...) */
         static char *tnb;
         static size_t tnb_cap;

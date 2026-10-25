@@ -250,7 +250,8 @@ class ClosureMixin:
                  '_fo->cells = (ail_obj *)ail_xmalloc(%d * sizeof(ail_obj)); %s _fo->n_cells = %d; '
                  '%s.tag = AIL_T_FUNC; %s.o = (ail_gcobj *)_fo; }'
                  % (cname, _c_name(qual, params),
-                    ' _fo->builtin_fn = 1;' if getattr(node, '_ail_builtin_fn', False) else '',
+                    ' _fo->builtin_fn = %d;' % (2 if getattr(node, '_ail_builtin_type', False) else 1)
+                    if getattr(node, '_ail_builtin_fn', False) else '',
                     len(cells), ' '.join('_fo->cells[%d] = %s;' % (i, c) for i, c in enumerate(cells)),
                     len(cells), t, t))
         return t

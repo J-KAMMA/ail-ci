@@ -14,7 +14,8 @@ value to a small lambda), so the caught TypeError named it "function":
     "abc".endswith((len,))     printed "... not function"
 
 CPython prints "not builtin_function_or_method"; a user-defined function is still "not
-function". The FUNC object now carries a builtin flag, and the error type name uses it.
+function", and a builtin that is a class (`bool`) is "not type". The FUNC object now carries a
+builtin-kind flag, and the error type name uses it.
 The program keeps the literal tuple, a variable, an argument, a list item, a dict value
 and an attribute, the scalar form, short-circuiting before the bad member, and the
 invalid-window validation that still reaches the member.
@@ -71,8 +72,14 @@ def main() -> None:
     probe("attribute", lambda: s.startswith((box.member,)))
     probe("scalar", lambda: s.startswith(len))
     probe("scalar-end", lambda: s.endswith(len))
+    probe("type-start", lambda: s.startswith((bool,)))
+    probe("type-end", lambda: s.endswith((bool,)))
+    probe("type-late", lambda: s.startswith(("x", bool)))
+    probe("type-scalar", lambda: s.startswith(bool))
+    probe("type-scalar-end", lambda: s.endswith(bool))
     probe("user-def", lambda: s.startswith((defined,)))
     from_arg(len)
+    from_arg(bool)
     print("done")
 
 
