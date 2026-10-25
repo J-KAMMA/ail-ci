@@ -1,3 +1,18 @@
+## 2026-10-25 - constant shifts outside int64 (job-pre201-10252052)
+
+The first still-differing item from the pre191 review was the constant bool shift `True << 64`: both
+builds compiled it and then stopped with `integer overflow`, where CPython prints the bignum.  The
+shared constant evaluator now accepts a bool operand as an int and folds shift counts at or above 64
+exactly (with a cheap result for very large right shifts), and a new front-end check refuses an
+outermost constant shift whose final value is outside int64 by name
+(`int64 constant out of range: 18446744073709551616`, exit 2).  A whole expression that folds in
+range still works even when an intermediate leaves int64 (`(1 << 64) >> 64`, `(1 << 63) - 1`), zero
+shifts by any count are unchanged, negative shift counts keep CPython's runtime ValueError, and a
+`**` on the same evaluator keeps its previous rules (including the assignment right-hand-side trap).
+The new `test_ail_pre201.py` covers the direct bool and int forms, an argument, list item, class
+attribute, dict value and assignment, plus in-range boundaries; probes in `/tmp/probes201` match
+CPython or are refused by name on both builds.
+
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
