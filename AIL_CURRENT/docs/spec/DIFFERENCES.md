@@ -2,6 +2,7 @@
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-rbpre172-10251601-1 | integers / unary constants | A statically known unary integer expression outside int64 (`-MIN` on a module constant, or `-(-9223372036854775808)`) used to compile on the default build and trap at run time with `integer overflow`; CPython prints a bignum. Both builds now refuse it by name (`int64 constant expression out of range: ...`); variables that only reach the operation at run time keep the fixed-width trap. Covered by `test_ail_pre172.py`. | fixed |
 | C?-job-rbpre23-10242019-1 | bytes / str codecs | tab- and colon-normalized encoding names such as `utf\t8` and `iso-8859-1:1987` raised LookupError (literal names were also refused at compile time) instead of naming CPython's UTF-8 / Latin-1 | fixed: names are normalized like `encodings.normalize_encoding`; the runtime and both compile-time checks use the same alias table |
 | C?-job-pre173-10250445-1 | bytes/bytearray search bounds | Non-index start/end bounds of `find`, `rfind`, `count`, `index`, `rindex`, `startswith` and `endswith` were read as an index (a str bound raised `'<' not supported between instances of 'str' and 'int'`); they now follow CPython's slice-index conversion, including `__index__` and its non-int TypeError. | fixed; `test_ail_pre173.py` |
 | C?-job-fuzz20-10230625-1 | int.from_bytes | the general path accepted int and None as the bytes source (int 1 became one zero byte, None became empty) | fixed: both now raise TypeError like CPython |
