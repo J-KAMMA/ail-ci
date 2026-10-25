@@ -1,3 +1,24 @@
+## 2026-10-25 - `del` of a top-level function name (job-pre256-10260536)
+
+The first still-differing item left by the pre244 review was `global side; del side; side(1)`:
+both builds printed the function's result (`1`) where CPython raises `NameError`, because a
+top-level function is resolved statically at the call/read site and `del` only cleared the global
+slot. The del fix had introduced the same hole at module scope: `def side; del side; print(side)`
+now compiled but still printed the function (the base build stopped with `KeyError: 'side'`).
+The general path now refuses a `del` on a top-level function name by name (`del on the function
+name side`) unless an ordinary module-level assignment also gives the name a real slot. The typed
+path already refused both shapes; its refusal is no longer hidden by a general-path fallback.
+A local, parameter or nested binding of the same name still deletes normally, and a
+function name rebound by a module-level value (`side = 5; del side`) still compiles and matches
+CPython. Added `test_ail_pre256.py` and registered it in `ail_check.MODULES`.
+
+Probes `/tmp/probes/p3_global_del.py`, `p6_module_del_fn.py`, `p9_module_del_fn_no_use.py`,
+`p8_fn_rebind_del_done.py`, `p10_local_shadow_del.py` and `p11_nested_shadow_del.py` were run
+with `bash ~/tools/cmp.sh` on this tree: the three function-deletion shapes are refused by name
+on both builds, and the rebound-module, local/parameter and nested-shadow controls match CPython
+on both builds. Final-state tests: test_ail_pre256, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 pass.
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a

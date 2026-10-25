@@ -2166,6 +2166,7 @@ class Compiler(boxclosure.ClosureMixin):
         _hoist_defaults(tree)
         _unbind_handler_names(tree)                                 # `except E as k` deletes k when the handler ends
         self.module_names = _scan_assigned_names(tree.body)
+        self.assigned_module_names = set(self.module_names)
         for n in ast.walk(tree):
             if isinstance(n, ast.Global):
                 self.module_names.update(n.names)  # a name reachable only via `global x` inside
@@ -10283,6 +10284,15 @@ class Compiler(boxclosure.ClosureMixin):
                     # name instead of failing later with `KeyError: 'C'` from name_ref (or reading
                     # the class slot again when the name was also rebound at module scope).
                     raise Unsupported('del on the class name %s' % target.id)
+                if (target.id in self.functions and target.id not in ctx.slot_of
+                        and target.id not in ctx.ptr_names and target.id not in ctx.clo_index
+                        and target.id not in ctx.cell_slots and target.id not in ctx.nested_funcs
+                        and target.id not in getattr(self, 'assigned_module_names', ())):
+                    # A top-level function is a compile-time binding, not a frame/global slot: a
+                    # call or read after `del side` still reached the function (and a plain
+                    # module-level `del side` failed with `KeyError: 'side'`). Refuse by name
+                    # unless an ordinary module-level assignment also gives the name a slot.
+                    raise Unsupported('del on the function name %s' % target.id)
                 if (not self._is_global_name(target.id, ctx) and target.id in ctx.slot_of
                         and target.id not in ctx.ptr_names and target.id not in ctx.clo_index):
                     # `del x` of a local that is unassigned raises UnboundLocalError (DIFFERENCES C76)
