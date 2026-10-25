@@ -1,3 +1,18 @@
+## 2026-10-25 - pre188: abs() of negative zero (job-pre188-10251545)
+
+The first still-differing item from the task's list was `abs(-0.0)` printing `-0.0` (CPython `0.0`) on the
+default/typed path. Both typed lowerings wrote `x < 0 ? -x : x`, and that comparison is false for negative
+zero, so the sign survived: the legacy emitter in `pyfunc.py`, and the IR lowering in `ir/lower.py` (which
+emitted `fneg` + `select`). Floats now use a sign-clearing absolute value (`__builtin_fabs`) in both places;
+the new IR `fabs` op is verified, emitted and treated as pure. The integer lowerings are untouched, so the
+declared `abs(-2**63)` integer-overflow stop (`p8`) remains as before.
+
+Probes in `/tmp/probes` (`p_abs`, `p_abs_fn`, `p_abs_typed`, `p_abs_routes`, `p_absfull`) covered literals,
+a float parameter (IR), a plain function argument, an alias, a list item, an attribute, a dict value,
+`-0.0` from arithmetic, subnormals, infinities, NaN, booleans, signed zero comparisons and the int64
+boundary on both `cmp.sh` builds. All matched CPython. `test_ail_pre188.py` runs the same routes on both
+builds.
+
 ## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
 
 The first still-differing item from the task's list was the encoding-name normalization: `b"abc".decode("utf\t8")`,

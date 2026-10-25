@@ -2,6 +2,7 @@
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre188-10251545-1 | `abs()` / negative zero | The default/typed paths lowered `abs(float)` as `x < 0 ? -x : x`, which is false for negative zero, so `abs(-0.0)` printed `-0.0` where CPython prints `0.0`. The legacy typed emitter and the IR now clear the sign for floats (including through arguments, list items, attributes and dict values); integer `abs` is unchanged. | fixed; `test_ail_pre188.py` |
 | C?-job-pre160-10250349-1 | round() ndigits / `__index__` | An `__index__` method that evaluates an out-of-int64 intermediate (for example `10**30` inside the method) cannot run: AIL stops with `integer overflow` while evaluating that expression, before it returns an index. CPython uses arbitrary precision and returns the resulting (possibly small) integer. | refused by name |
 
 Deliberate differences from CPython and open silent differences found by differential jobs.
