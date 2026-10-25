@@ -22,6 +22,19 @@ Probes in `/tmp/probes` covered BMP printable characters in the argument, a list
 attribute and a dict value, bases 0/2/10/16/36, prefix/underscore/quote/control cases, short
 and 300-character literals, and the typed `str`/`int` path; all match CPython on both
 `cmp.sh` builds. `test_ail_pre180.py` keeps the general and typed cases.
+## 2026-10-25 - bytes padding names the fillchar type (job-pre182-10251541)
+
+The fuzz51 review item was documentation-only (the `None` fillchar is already fixed),
+but the same `_ail_b_fill` guard still differed for every other non-bytes fillchar:
+`b"abc".ljust(5, "x")`, `b"abc".rjust(5, 1)` and a user-class value raised the generic
+`a bytes-like object is required, not '<type>'` because `_ail_bs` converted before the
+method-specific check. CPython says `ljust() argument 2 must be a byte string of length
+1, not str` (and likewise for rjust/center, with the value's type name). The guard now
+checks bytes/bytearray membership first; length errors on a bytes/bytearray fillchar
+still name bytes/bytearray, and `None` keeps fuzz51's `not None`. `test_ail_pre182.py`
+covers direct values, arguments, list items, attributes, dict values, valid single-byte
+fills, empty and multi-byte fills, widths around the text length, and both builds.
+`test_ail_fuzz51.py` still passes.
 
 ## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
 
