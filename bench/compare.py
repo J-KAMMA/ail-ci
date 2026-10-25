@@ -10,7 +10,9 @@ of ROUNDS rounds yields a per-window time ratio; the table shows the median and 
 range of the nine windows. A range that crosses 1.0 is a tie. Linux only.
 
 Beside time the table has peak RSS, binary size and build disk: KiB one release build adds under a fresh build
-dir and fresh cache (AIL_CACHE, TMPDIR; see build_disk_kib), measured in a separate pass after the timing. A last line
+dir and fresh cache (AIL_CACHE, TMPDIR; see build_disk_kib), measured in a separate pass after the timing. That
+pass also measures build wall time in seconds, median of three runs: a cold build with fresh caches, and an
+incremental build after appending one harmless comment line to the app's source with the caches warm. A last line
 gives the toolchain install size per language (`du -sk`), once.
 
 App modules (bench/apps/<name>.py) define AIL_SOURCE, AIL_OPTIONS, optional prepare_ail(work, cli),
@@ -34,7 +36,7 @@ def load_app(name):
     return module
 
 
-def build_ail(app, ail_root, work, label, env=None):
+def build_ail(app, ail_root, work, label, env=None, suffix=''):
     work = work / ('build-' + label)
     work.mkdir()
     def cli(*args):
@@ -44,15 +46,19 @@ def build_ail(app, ail_root, work, label, env=None):
             raise SystemExit('%s: ail_chatgpt %s failed:\n%s' % (label, args[0], result.stderr.decode(errors='replace')[-3000:]))
     if hasattr(app, 'prepare_ail'):
         app.prepare_ail(work, cli)
+    source = ail_root / app.AIL_SOURCE
+    if suffix:
+        source = work / source.name
+        source.write_bytes((ail_root / app.AIL_SOURCE).read_bytes() + suffix.encode('utf8'))
     out = work / label
-    cli('compile', ail_root / app.AIL_SOURCE, *(o.replace('{work}', str(work)) for o in app.AIL_OPTIONS), '-o', out)
+    cli('compile', source, *(o.replace('{work}', str(work)) for o in app.AIL_OPTIONS), '-o', out)
     return out
 
 
-def build_reference(app, work, label, env=None):
+def build_reference(app, work, label, env=None, suffix=''):
     gcc, rustc = shutil.which('gcc'), shutil.which('rustc')
     source = work / (label + ('.c' if label == 'c' else '.rs'))
-    source.write_text(app.C_SOURCE if label == 'c' else app.RUST_SOURCE, encoding='utf8')
+    source.write_text((app.C_SOURCE if label == 'c' else app.RUST_SOURCE) + suffix, encoding='utf8')
     out = work / label
     command = [gcc, *C_FLAGS, str(source), '-lm', '-o', str(out)] if label == 'c' else [rustc, *RUST_FLAGS, str(source), '-o', str(out)]
     result = subprocess.run(command, capture_output=True, timeout=300, env=env)
@@ -85,6 +91,40 @@ def build_disk_kib(app, base_root, work):
         else:
             build_ail(app, base_root if label == 'base' else REPO / 'AIL_CURRENT', fresh, label, env)
         result[label] = tree_kib(fresh)
+    return result
+
+
+def build_times_ms(app, work):
+    """Wall-clock build time per arm, in ms, median of three runs each. Cold: a fresh build
+    directory, cache and TMPDIR, as build_disk_kib uses. Incremental: after appending one harmless
+    comment line to the app's source, rebuilt with that run's cache warm (a separate build directory
+    for AIL, whose prepare_ail step writes into its working directory)."""
+    result = {'cold': {}, 'incremental': {}}
+    for label in ('ail', 'c', 'rust'):
+        cold, incremental = [], []
+        for run in range(3):
+            fresh = work / ('time-%s-%d' % (label, run))
+            (fresh / 'cache').mkdir(parents=True)
+            (fresh / 'tmp').mkdir()
+            env = dict(os.environ, AIL_CACHE=str(fresh / 'cache'), TMPDIR=str(fresh / 'tmp'), CARGO_TARGET_DIR=str(fresh / 'target'))
+            env.pop('AIL_NO_CACHE', None)
+            start = time.perf_counter()
+            if label == 'ail':
+                build_ail(app, REPO / 'AIL_CURRENT', fresh, label, env)
+            else:
+                build_reference(app, fresh, label, env)
+            cold.append(time.perf_counter() - start)
+            start = time.perf_counter()
+            suffix = '\n# benchmark incremental build\n' if label == 'ail' else '\n// benchmark incremental build\n'
+            if label == 'ail':
+                incr = fresh / 'incremental'
+                incr.mkdir()
+                build_ail(app, REPO / 'AIL_CURRENT', incr, label, env, suffix=suffix)
+            else:
+                build_reference(app, fresh, label, env, suffix=suffix)
+            incremental.append(time.perf_counter() - start)
+        result['cold'][label] = statistics.median(cold) * 1000
+        result['incremental'][label] = statistics.median(incremental) * 1000
     return result
 
 
@@ -170,10 +210,11 @@ def compare_app(name, base_root, work, rounds, smoke):
                 sums[label] += elapsed
         windows.append(sums)
     disk = build_disk_kib(app, base_root, work)
+    build_times = build_times_ms(app, work)
     result = dict(app=name, case=case['name'], rounds=rounds, windows=windows,
                   median_ms={l: statistics.median(w[l] for w in windows) / rounds / 1e6 for l in labels},
                   peak_rss_kib={l: peak_rss_kib(b, case, work) for l, b in arms.items()},
-                  build_disk_kib=disk,
+                  build_disk_kib=disk, build_time_ms=build_times,
                   binary_bytes={l: Path(b).stat().st_size for l, b in arms.items() if Path(b).exists()},
                   ratios={})
     for num, den in (('ail', 'base'), ('ail', 'c'), ('ail', 'rust')):
@@ -232,14 +273,16 @@ def main():
         print('wrote', out.relative_to(REPO), file=sys.stderr)
     columns = [c for c in ('ail/base', 'ail/c', 'ail/rust') if any(c in r['ratios'] for r in results)]
     # Speed is not the only cost: peak memory and binary size are printed beside it.
-    print('| app | ms ail/base/c/rust | ' + ' | '.join(columns) + ' | RSS MiB ail/base/c/rust | binary KiB ail/base/c/rust | build disk KiB ail/base/c/rust |')
-    print('|---|---|' + '---|' * len(columns) + '---|---|---|')
+    print('| app | ms ail/base/c/rust | ' + ' | '.join(columns) + ' | RSS MiB ail/base/c/rust | binary KiB ail/base/c/rust | build disk KiB ail/base/c/rust | cold build s ail/c/rust | incremental build s ail/c/rust |')
+    print('|---|---|' + '---|' * len(columns) + '---|---|---|---|---|')
     for r in results:
         ms = '/'.join('%.1f' % r['median_ms'][l] if l in r['median_ms'] else '-' for l in ('ail', 'base', 'c', 'rust'))
         rss = '/'.join('%.1f' % (r['peak_rss_kib'][l] / 1024) if r['peak_rss_kib'].get(l) else '-' for l in ('ail', 'base', 'c', 'rust'))
         size = '/'.join('%d' % (r['binary_bytes'][l] // 1024) if l in r.get('binary_bytes', {}) else '-' for l in ('ail', 'base', 'c', 'rust'))
         disk = '/'.join('%d' % r['build_disk_kib'][l] if l in r['build_disk_kib'] else '-' for l in ('ail', 'base', 'c', 'rust'))
-        print('| %s | %s | %s | %s | %s | %s |' % (r['app'], ms, ' | '.join(fmt(r['ratios'][c]) if c in r['ratios'] else '-' for c in columns), rss, size, disk))
+        cold = '/'.join('%.2f' % (r['build_time_ms']['cold'][l] / 1000) if l in r['build_time_ms']['cold'] else '-' for l in ('ail', 'c', 'rust'))
+        incr = '/'.join('%.2f' % (r['build_time_ms']['incremental'][l] / 1000) if l in r['build_time_ms']['incremental'] else '-' for l in ('ail', 'c', 'rust'))
+        print('| %s | %s | %s | %s | %s | %s | %s | %s |' % (r['app'], ms, ' | '.join(fmt(r['ratios'][c]) if c in r['ratios'] else '-' for c in columns), rss, size, disk, cold, incr))
     print('\ntoolchain KiB (du -sk, once per language): ' + ', '.join('%s %s' % (l, '%d' % k if k is not None else 'missing (skipped)') for l, k in toolchain.items()))
 
 
