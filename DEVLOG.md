@@ -1,3 +1,22 @@
+## 2026-10-25 - itertools chooser r review follow-up (job-pre194-10251915)
+
+The review found two gaps in the chooser-r fix. First, `itlib.py` mapped a literal `None` to
+`r_expr=None` for every chooser, but only `permutations` may read that as "all of them"; on the
+typed path `combinations(xs, None)` and `combinations_with_replacement(xs, None)` therefore
+acted like an omitted r (a loop unpacking two names said `ValueError: too many values to unpack`
+instead of CPython's `TypeError: 'NoneType' object cannot be interpreted as an integer`). A
+literal `None` is now refused by name for the two combinations choosers, so the default build
+falls back to the general path, which raises the right TypeError; `permutations` keeps None as
+"all". Second, the new `ail__it_index_r` formatted both TypeErrors into a fixed `char[160]`, so a
+type name longer than the buffer truncated the message; it now allocates `strlen(type name) + 64`,
+the same way `_check_seq_index_bound` builds its `__index__ returned non-int` text.
+
+Probes `/tmp/probes/pre194r_literal_none`, `pre194r_longname` and `pre194r_dyn_none` cover
+positional and keyword-None for all three choosers, list/for-loop/unpacking forms, empty pools,
+a 181-character class name direct and through an argument, a list item, an attribute and a dict
+value, and a bad `__index__` returning that type; all match CPython on both `cmp.sh` builds.
+`test_ail_pre194.py` gained the literal-None and long-type-name programs.
+
 ## 2026-10-25 - itertools chooser r types (job-pre194-10251915)
 
 The first still-differing pre-existing item from the `rbpre137` review was the `r` argument of

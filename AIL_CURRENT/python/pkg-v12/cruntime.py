@@ -20380,10 +20380,16 @@ static inline ail_st ail__it_perm_r(ail_ctx *cx, ail_obj x, int64_t *out) {
 }
 static inline ail_st ail__it_index_r(ail_ctx *cx, ail_obj x, int had_index, int64_t *out) {
     if (x.tag == AIL_T_INT || x.tag == AIL_T_BOOL) { *out = x.i; return AIL_OK; }
-    char buf[160];
-    if (had_index) snprintf(buf, sizeof buf, "__index__ returned non-int (type %s)", ail__tname_c(x));
-    else snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail__tname_c(x));
-    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    const char *tn = ail__tname_c(x);
+    size_t n = strlen(tn) + 64;
+    char *buf = (char *)malloc(n);
+    ail_st st;
+    if (!buf) ail_die("out of memory");
+    if (had_index) snprintf(buf, n, "__index__ returned non-int (type %s)", tn);
+    else snprintf(buf, n, "'%s' object cannot be interpreted as an integer", tn);
+    st = ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    free(buf);
+    return st;
 }
 static inline ail_st ail_it_permutations(ail_ctx *cx, ail_obj *out, ail_obj iterable, int has_r, ail_obj r_obj) {
     ail_obj pr_[2]; pr_[1] = ail_box_none();

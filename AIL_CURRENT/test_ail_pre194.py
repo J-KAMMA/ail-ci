@@ -229,6 +229,102 @@ def run():
 run()
 '''
 
+LITERAL_NONE = r'''import itertools
+
+
+def show(label, fn):
+    try:
+        print(label, fn())
+    except Exception as e:
+        print(label, type(e).__name__, str(e))
+
+
+def p_loop(xs):
+    for a in itertools.permutations(xs, None):
+        pass
+
+
+def c_loop(xs):
+    for a in itertools.combinations(xs, None):
+        pass
+
+
+def w_loop(xs):
+    for a in itertools.combinations_with_replacement(xs, None):
+        pass
+
+
+def c_unpack(xs):
+    for a, b in itertools.combinations(xs, None):
+        pass
+
+
+def w_unpack(xs):
+    for a, b in itertools.combinations_with_replacement(xs, None):
+        pass
+
+
+def run():
+    xs = [1, 2, 3]
+    show("p-pos", lambda: list(itertools.permutations(xs, None)))
+    show("c-pos", lambda: list(itertools.combinations(xs, None)))
+    show("w-pos", lambda: list(itertools.combinations_with_replacement(xs, None)))
+    show("p-kw", lambda: list(itertools.permutations(xs, r=None)))
+    show("c-kw", lambda: list(itertools.combinations(xs, r=None)))
+    show("w-kw", lambda: list(itertools.combinations_with_replacement(xs, r=None)))
+    show("p-loop", lambda: p_loop(xs))
+    show("c-loop", lambda: c_loop(xs))
+    show("w-loop", lambda: w_loop(xs))
+    show("c-unpack", lambda: c_unpack(xs))
+    show("w-unpack", lambda: w_unpack(xs))
+    show("c-empty", lambda: list(itertools.combinations([], None)))
+    show("w-empty", lambda: list(itertools.combinations_with_replacement([], None)))
+
+
+run()
+'''
+
+LONGNAME = r'''import itertools
+
+
+class Cxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx:
+    pass
+
+
+class Box:
+    def __init__(self, r):
+        self.r = r
+
+
+class Bad:
+    def __index__(self):
+        return Cxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx()
+
+
+def show(label, fn):
+    try:
+        print(label, fn())
+    except Exception as e:
+        print(label, type(e).__name__, str(e))
+
+
+def run():
+    xs = [1, 2, 3]
+    inst = Cxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx()
+    box = Box(inst)
+    show("c-direct", lambda: list(itertools.combinations(xs, inst)))
+    show("w-direct", lambda: list(itertools.combinations_with_replacement(xs, inst)))
+    show("c-arg", lambda: (lambda r: list(itertools.combinations(xs, r)))(inst))
+    show("c-list", lambda: list(itertools.combinations(xs, [inst][0])))
+    show("c-attr", lambda: list(itertools.combinations(xs, box.r)))
+    show("c-dict", lambda: list(itertools.combinations(xs, {"r": inst}["r"])))
+    show("c-badindex", lambda: list(itertools.combinations(xs, Bad())))
+    show("w-badindex", lambda: list(itertools.combinations_with_replacement(xs, Bad())))
+
+
+run()
+'''
+
 
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
@@ -280,6 +376,12 @@ class Pre194Tests(unittest.TestCase):
 
     def test_for_loops(self):
         self.check('loops', LOOPS)
+
+    def test_literal_none(self):
+        self.check('literal_none', LITERAL_NONE)
+
+    def test_long_type_name(self):
+        self.check('longname', LONGNAME)
 
 
 if __name__ == '__main__':
