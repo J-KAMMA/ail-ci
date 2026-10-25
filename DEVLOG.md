@@ -1,3 +1,24 @@
+## 2026-10-25 - out-of-int64 constant expressions outside function bodies (job-rbpre184-10252049)
+
+Re-applied the accepted pre184 change on top of this tree. A constant integer expression in a
+module/class assignment or a default argument that does not fit int64 is now refused by name at
+compile time (`int64 constant expression out of range`), instead of compiling and stopping at run
+time with `integer overflow`. `corpus/gdev/g22_012.py` (`_MASK: int = (1 << 64) - 1`) and
+`def f(x=10**30)` are the motivating cases. The evaluator handles + - * // % ** << >> & | ^ and
+unary + - ~ with a 4096-bit guard; Pow bases 0/1/-1 and a zero left shift are decided before the
+guard, so `0 ** 100000`, `1 ** 100000`, `(-1) ** 100000` and `0 << 100000` stay in range. An
+out-of-int64 expression inside a function body keeps its old run-time stop; a class with a base
+(the enum case) keeps its own refusal.
+
+Conflict resolution: this tree already had `_check_int64_literals`, `_check_constant_power`,
+`_check_int64_unary_constants` and a two-argument `_constant_int` from pre172/pre177. The new
+evaluator is `_constant_int_exact`, and its check runs before the older ones so a default argument
+gets the accepted wording; a bare `**` class-body value is left to `_check_constant_power` so
+pre177's flow cases keep their existing `int64 constant out of range` wording. Added
+`test_ail_pre184.py` (class, module and default refusals plus in-range class/default/module
+arithmetic and the power/shift guard boundaries), and registered it in `ail_check.py` and both
+`ci_shards.json` lists.
+
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
