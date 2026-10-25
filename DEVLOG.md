@@ -1,3 +1,23 @@
+## 2026-10-25 - bool operands in constant shifts (job-pre229-10260120)
+
+The review of job pre201 left this pre-existing difference: `(True << 64) >> 64` trapped with
+`integer overflow` on both builds although the whole expression fits int64 and CPython prints `1`;
+`(True << 100000) >> 100000` and `True << 64` trapped too. The codegen constant folder
+(`_const_int_expr` in `python/pkg-v12/pyfunc.py`) did not treat `True`/`False` as ints, so the
+expression was never folded. It now evaluates bool constants as 0/1: an in-range whole expression
+is emitted as one literal on both builds, a final value outside int64 is refused by name like every
+other out-of-int64 constant expression, and a shift past the folder's 4096-bit cap is refused by
+name. The name-bound form (`b = True; (b << 64) >> 64`) still stops with the pre-existing runtime
+`integer overflow`; that is a non-constant name, the next pre-existing item from the same review.
+
+Probes `/tmp/probes/p229_*` covered the in-range folds (bool, int, negative, zero, width and mixed
+arithmetic), an argument, a list item, an attribute, a dict value, a return and an alias,
+out-of-int64 final values and intermediates, negative shift counts (ValueError matches), name-bound
+bool shifts (unchanged trap), and both `cmp.sh` builds; every in-range probe matches CPython and
+every out-of-range one is refused by name. A non-bool `corpus/gdev/g00_000.py` build produces
+byte-identical `program.c` on both builds. Added `AIL_CURRENT/test_ail_pre229.py` and registered it
+in `ail_check.MODULES`.
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a

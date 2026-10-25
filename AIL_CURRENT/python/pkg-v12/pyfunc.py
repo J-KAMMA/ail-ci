@@ -717,8 +717,11 @@ def _const_int_expr(node):
     AIL integers are int64 (SEMANTICS section 1), so a constant expression that leaves that range
     used to compile and then stop with `integer overflow` at run time. Evaluate it here without
     building an unbounded intermediate (`2**100000000` is never computed); an expression that
-    reaches int64 exactly on the way, such as `2**63 - 1`, is kept."""
+    reaches int64 exactly on the way, such as `2**63 - 1`, is kept. A bool is an int in CPython,
+    so `(True << 64) >> 64` folds to 1 instead of trapping on the intermediate."""
     if isinstance(node, ast.Constant):
+        if type(node.value) is bool:
+            return int(node.value)
         return node.value if type(node.value) is int else _CONST_INT_NOT
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
         value = _const_int_expr(node.operand)
