@@ -2,7 +2,7 @@
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
-| C?-job-pre160-10250349-1 | round() ndigits / `__index__` | An `__index__` method that evaluates an out-of-int64 intermediate (for example `10**30` inside the method) cannot run: AIL stops with `integer overflow` while evaluating that expression, before it returns an index. CPython uses arbitrary precision and returns the resulting (possibly small) integer. | refused by name |
+| C?-job-pre160-10250349-1 | round() ndigits / `__index__` | An `__index__` method that evaluates an out-of-int64 intermediate cannot run: an all-constant one (for example `10**30` inside the method) is refused by name at compile time (pre121), and one built from run-time values stops with `integer overflow` while evaluating it, before it returns an index. CPython uses arbitrary precision and returns the resulting (possibly small) integer. | refused by name |
 | C?-job-rbpre121-10251547-1 | constant int expressions | A constant int expression is now evaluated exactly at compile time. Values in int64 (including `2**63 - 1`, `-(2**63)`, `-1 << 63`, `~(-2**63)` and an in-range result reached through a wider intermediate such as `2**100 // 2**80`) match CPython; a value outside int64 (for example `10**30` passed to a user function) is refused by name instead of stopping with `integer overflow` at run time. | fixed in range; out-of-range refused by name |
 
 Deliberate differences from CPython and open silent differences found by differential jobs.

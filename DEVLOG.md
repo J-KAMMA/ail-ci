@@ -10,7 +10,10 @@ runtime.  This is hooked into the typed `_expr`, the general emitter's `expr`, t
 unboxed `nexpr` and the IR lowering, because a module-level statement can be lowered by any of
 them; the existing maxsplit-specific folder is kept alongside it.  Added `test_ail_pre121.py`
 (constant boundaries, dynamic and non-int expressions unchanged, and the recorded p6/p7/p13
-shapes refused).  Not fixed here: run-time `sep=None` (pre-existing p12, a different cause).
+shapes refused).  The pre160 module recorded the old run-time `integer overflow` stop for a
+constant `10**30` inside `__index__`; its test now checks the compile-time refusal and keeps a
+run-time-value variant for the overflow path.  Not fixed here: run-time `sep=None` (pre-existing
+p12, a different cause).
 
 ## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
 
