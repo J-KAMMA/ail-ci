@@ -261,13 +261,13 @@ __attribute__((noinline)) static ail_st ail_dun_hash(ail_ctx *cx, int64_t *out, 
 
 # runtime functions that only some programs carry (the formatter of safetyrt.py)
 OPTIONAL = (
-            '            uint16_t ch;\n            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) {\n',
+            '            uint16_t ch;\n',
             
             '"%%%c format: a real number is required, not %s", (char)t, ail_type_name(arg.tag)',
             '"%%%c format: an integer is required, not %s", (char)t, ail_type_name(arg.tag)',
             '"must be real number, not %s", ail_type_name(arg.tag)',
             'static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {\n',
-            '            int64_t iv;\n            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) iv = arg.i;\n',
+            '            int64_t iv;\n',
             '            double d;\n            if (arg.tag == AIL_T_FLOAT) d = ail_float_val(arg);\n')
 
 
@@ -354,6 +354,7 @@ def _edits():
     # hashing
     import biggate
     big = '            if (x.tag == AIL_T_BIG) { *out = (int64_t)ail_big_hash(x); return AIL_OK; }\n' if biggate.ON else ''   # bigint: a big int in the default arm
+    big_ret = ' || cv.tag == AIL_T_BIG' if biggate.ON else ''   # AIL_T_BIG exists only in a big int build
     e.append(('        default: {\n' + big + '            char buf[64]; snprintf(buf, sizeof buf, "unhashable type: \'%s\'", ail_type_name(x.tag));\n'
               '            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n        }\n    }\n}\nstatic inline ail_st ail_obj_cmp_op(',
               HASH_CASE + '        default: {\n' + big + '            char buf[64]; snprintf(buf, sizeof buf, "unhashable type: \'%s\'", ail_type_name(x.tag));\n'
@@ -426,15 +427,22 @@ def _edits():
               'static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {\n'
               '    if (x.tag == AIL_T_INST) { ail_d2_fn ff = ail_dun2(x, AIL_D2_FORMAT); if (ff) return ff(cx, out, x, specobj); }\n'))
     # `%d` / `%x` / `%f` of an instance (an IntEnum / IntFlag member): int() / index() / float() of it, as PyUnicode_Format does
-    e.append(('            int64_t iv;\n            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) iv = arg.i;\n',
+    # The anchor is `int64_t iv;` alone, not the line after it: the big int build puts its
+    # own AIL_T_BIG/AIL_T_FLOAT arm between the declaration and the plain int arm.  A dunder
+    # that returns something other than an int is ignored (CPython's % formatting then
+    # reports the original object), and d/i/u use __int__ alone when it exists -- __index__
+    # is only the fallback when there is no __int__ (CPython: "%d" of int()!=int class).
+    e.append(('            int64_t iv;\n',
               '            int64_t iv;\n'
               '            if (arg.tag == AIL_T_INST) {\n'
               '                int dec = t == \'d\' || t == \'i\' || t == \'u\';\n'
-              '                ail_d1_fn cf = dec ? ail_dun1(arg, AIL_D1_INT) : 0;\n'
-              '                if (!cf) cf = ail_dun1(arg, AIL_D1_INDEX);\n'
-              '                if (cf) { ail_obj cv; st = cf(cx, &cv, arg); if (st != AIL_OK) goto fail; arg = cv; }\n'
-              '            }\n'
-              '            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) iv = arg.i;\n'))
+              '                ail_d1_fn cf = ail_dun1(arg, dec ? AIL_D1_INT : AIL_D1_INDEX);\n'
+              '                if (!cf && dec) cf = ail_dun1(arg, AIL_D1_INDEX);\n'
+              '                if (cf) {\n'
+              '                    ail_obj cv; st = cf(cx, &cv, arg); if (st != AIL_OK) goto fail;\n'
+              '                    if (cv.tag == AIL_T_INT || cv.tag == AIL_T_BOOL' + big_ret + ') arg = cv;\n'
+              '                }\n'
+              '            }\n'))
     e.append(('            double d;\n            if (arg.tag == AIL_T_FLOAT) d = ail_float_val(arg);\n',
               '            double d;\n'
               '            if (arg.tag == AIL_T_INST) {\n'
@@ -448,8 +456,14 @@ def _edits():
               '"%%%c format: an integer is required, not %s", (char)t, ail__dun_tname_s(arg)'))
     e.append(('"must be real number, not %s", ail_type_name(arg.tag)',
               '"must be real number, not %s", ail__dun_tname_s(arg)'))
-    e.append(('            uint16_t ch;\n            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) {\n',
-              '            uint16_t ch;\n            if (arg.tag == AIL_T_INST) { ail_d1_fn cf = ail_dun1(arg, AIL_D1_INDEX); if (cf) { ail_obj cv; st = cf(cx, &cv, arg); if (st != AIL_OK) goto fail; arg = cv; } }\n            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) {\n'))
+    # Same anchor note as `int64_t iv;`: in the big int build the AIL_T_BIG check sits between
+    # the declaration and the int arm.  __index__ must return an int to be used.
+    e.append(('            uint16_t ch;\n',
+              '            uint16_t ch;\n'
+              '            if (arg.tag == AIL_T_INST) {\n'
+              '                ail_d1_fn cf = ail_dun1(arg, AIL_D1_INDEX);\n'
+              '                if (cf) { ail_obj cv; st = cf(cx, &cv, arg); if (st != AIL_OK) goto fail; if (cv.tag == AIL_T_INT || cv.tag == AIL_T_BOOL' + big_ret + ') arg = cv; }\n'
+              '            }\n'))
     # the add in front of the dispatch helpers: they must be visible before ail_op_add
     e.append(('/* sum(): CPython 3.12 builtin_sum_impl.', '/* sum(): CPython 3.12 builtin_sum_impl.'))
     # unary and builtin conversions
