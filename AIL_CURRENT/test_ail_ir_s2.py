@@ -73,6 +73,20 @@ TRY_CATCH = '''func @guarded(%n: i64) -> (i64) attrs {linkage = "extern", names 
 }
 '''
 
+TINTDIV = '''def quot(a: int, b: int) -> int:
+    try:
+        return a // b
+    except ZeroDivisionError:
+        return -1
+
+
+def main() -> None:
+    print(quot(7, 2), quot(1, 0))
+
+
+main()
+'''
+
 TRY_FINALLY = '''func @cleanup(%n: i64) -> (i64) attrs {linkage = "extern", names = ["n"], sym = "cleanup"} {
   %r = local.alloc {name = "r"} : place<i64>
   %zero = const {value = 0} : i64
@@ -269,6 +283,9 @@ class ProgramTests(unittest.TestCase):
         out = self.check_program('depth', DEPTH, ['dive'])[0]
         self.assertEqual(out[0], 0)
         self.assertTrue(out[1].strip().endswith('done'))
+
+    def test_division_by_zero_in_a_tint_function_is_catchable(self):
+        self.check_program('tintdiv', TINTDIV, ['quot'])
 
     def test_bytearray_parameter_kept_across_calls_and_exceptions(self):
         out = self.check_program('bytes', BYTEARRAY, ['fill', 'check'])[0]

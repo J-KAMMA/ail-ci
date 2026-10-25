@@ -121,6 +121,71 @@ def _legacy_walias(P, fn, ctx):
     return {'walias': notes}
 
 
+def _split_params(text):
+    """The top-level comma-separated C parameter declarations of a legacy signature."""
+    if text.strip() == 'void':
+        return []
+    out, depth, start = [], 0, 0
+    for i, ch in enumerate(text):
+        if ch in '([':
+            depth += 1
+        elif ch in ')]':
+            depth -= 1
+        elif ch == ',' and depth == 0:
+            out.append(text[start:i].strip())
+            start = i + 1
+    tail = text[start:].strip()
+    if tail:
+        out.append(tail)
+    return out
+
+
+def _tint_fallback(P, fn, cname, ctx, result, sig, generated, tint_sig):
+    """Keep a tinted C signature over a legacy int64 body.
+
+    The callers of this function were typed against `TINT_ACTIVE` (they pass and receive
+    `ail_tint`). When the IR cannot lower the function, the legacy body keeps its int64 ABI, so
+    this emits `<sym>__i64` for that body and a `<sym>` wrapper with the tagged signature the
+    callers already use. Internal calls to `<sym>` (recursion) go through the wrapper too, which
+    is what makes a self-recursive fallback agree with itself.
+    """
+    params = tint_sig[0]
+    ret_tint = bool(tint_sig[1])
+    tint_names = {n for (n, _), t in zip(ctx.params, params) if t}
+    match = re.search(r'\b%s\s*\((.*)\)\s*$' % re.escape(cname), sig, re.S)
+    if match is None:
+        getattr(P, 'TINT_ACTIVE', {}).pop(fn.name, None)
+        getattr(P, 'TINT_ACTIVE', {}).pop(cname, None)
+        return result
+    decls = _split_params(match.group(1))
+    wrapper_sig = sig
+    for name in sorted(tint_names):
+        wrapper_sig = re.sub(r'(?<!\w)(?:volatile\s+)?int64_t(\s+)v_%s(?!\w)'
+                             % re.escape(name), r'ail_tint\1v_%s' % name, wrapper_sig, count=1)
+    if ret_tint:
+        wrapper_sig = re.sub(r'\bint64_t(\s+)%s\s*\(' % re.escape(cname),
+                             r'ail_tint\1%s(' % cname, wrapper_sig, count=1)
+    impl_sig = re.sub(r'\b%s\b' % re.escape(cname), cname + '__i64', sig, count=1)
+    impl_body = generated.replace(sig, impl_sig, 1)
+    args = []
+    for decl in decls:
+        name = re.search(r'([A-Za-z_]\w*)\s*$', decl).group(1)
+        if name.startswith('v_') and name[2:] in tint_names:
+            args.append('ail_tint_i64(%s)' % name)
+        else:
+            args.append(name)
+    call = '%s__i64(%s)' % (cname, ', '.join(args))
+    if re.search(r'\bvoid\s+%s\s*\(' % re.escape(cname), sig):
+        body = '    %s;\n' % call
+    elif ret_tint:
+        body = '    return ail_tint_from_int64(%s);\n' % call
+    else:
+        body = '    return %s;\n' % call
+    wrapper = '%s {\n%s}\n' % (wrapper_sig, body)
+    ctx.parts.add('TINTT')
+    return (wrapper_sig, impl_body + wrapper, ctx)
+
+
 def apply(P, args, kwargs, result):
     """`result` is the legacy `(sig, generated, ctx)` of `_one_function(*args, **kwargs)`;
     returns it unchanged or with `generated` replaced by the IR emitter's C."""
@@ -153,14 +218,16 @@ def _apply(P, args, kwargs, result, current):
     _py = os.environ.get('AIL_SURFACE') == 'python'
     if _py and (any(isinstance(n, ast.Global) for n in ast.walk(fn)) or getattr(ctx, 'gdecl', None)):
         from pyfront import Unsupported
-        raise Unsupported('%s() writes a module variable, which the tagged-int lowering does not cover'
-                          % fn.name)
+        if not os.environ.get('AIL_NO_GENERAL'):
+            raise Unsupported('%s() writes a module variable, which the tagged-int lowering does not cover'
+                              % fn.name)
     _user_methods = set(getattr(ctx, 'user_method_names', ()))
     _attr_calls = [n for n in ast.walk(fn)
                    if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
     if _py and any(n.func.attr in _user_methods for n in _attr_calls):
         from pyfront import Unsupported
-        raise Unsupported('%s() calls a user method, which the tagged-int lowering does not type' % fn.name)
+        if not os.environ.get('AIL_NO_GENERAL'):
+            raise Unsupported('%s() calls a user method, which the tagged-int lowering does not type' % fn.name)
     _io_names = {'open', 'write_text', 'write_bytes', 'read_text', 'read_bytes', 'file_chunks'}
     _file_helpers = getattr(P, '_FILE_HELPER_NAMES', ())
     _io_like = any(isinstance(n, (ast.With, ast.AsyncWith)) for n in ast.walk(fn)) or any(
@@ -182,12 +249,14 @@ def _apply(P, args, kwargs, result, current):
                     _k = None
                 if _k == P.STR or _k == P.BYTES:
                     from pyfront import Unsupported
-                    raise Unsupported('%s() parses an int from text, which the tagged-int lowering does not cover'
-                                      % fn.name)
+                    if not os.environ.get('AIL_NO_GENERAL'):
+                        raise Unsupported('%s() parses an int from text, which the tagged-int lowering does not cover'
+                                          % fn.name)
     if _py and not _library_call and (getattr(ctx, 'numeric_tokens', None) or getattr(ctx, 'numeric_assignments', None)):
         from pyfront import Unsupported
-        raise Unsupported('%s() mixes int and float bindings, which the tagged-int lowering does not cover'
-                          % fn.name)
+        if not os.environ.get('AIL_NO_GENERAL'):
+            raise Unsupported('%s() mixes int and float bindings, which the tagged-int lowering does not cover'
+                              % fn.name)
     # B2b: a function whose ints are not locally proven needs the IR's tagged-int lowering. If the
     # IR cannot lower it, the typed path must not fall back to the legacy int64 emitter: raise so
     # pyc.build tries the exact general path.
@@ -234,8 +303,9 @@ def _apply(P, args, kwargs, result, current):
             and not (_call_result_proof and _typed_only) \
             and not (_proof or '').startswith(('it calls ', 'it contains ')):
         from pyfront import Unsupported
-        raise Unsupported('%s() has an int operation the local proof cannot bound, but no tagged local (%s)'
-                          % (fn.name, _proof))
+        if not os.environ.get('AIL_NO_GENERAL'):
+            raise Unsupported('%s() has an int operation the local proof cannot bound, but no tagged local (%s)'
+                              % (fn.name, _proof))
     _sig = getattr(P, 'TINT_SIGS', {}).get(fn.name) if _py else None
     if _sig and (any(_sig[0]) or _sig[1]) and not _io_like:
         _needs_tint = True
@@ -303,12 +373,25 @@ def _apply(P, args, kwargs, result, current):
             from pyfront import Unsupported
             raise Unsupported('%s() needs the tagged-int lowering, which does not cover it: %s'
                               % (fn.name, reason))
+        if _py and _tinted_sig:
+            # The function's callers were typed for the tagged signature. Keep that decision at
+            # the C boundary by wrapping the int64 legacy body, instead of leaving the callers
+            # passing ail_tint to an int64_t prototype.
+            return _tint_fallback(P, fn, cname, ctx, result, sig, generated, _sig)
         _drop_tint(P, fn.name, cname)
         return result
     except Exception as error:
         if current == 'verify':
             raise
         _record(fn.name, cname, 'legacy', 'IR failure: %s: %s' % (type(error).__name__, error), ctx)
+        _tinted_sig = bool(_sig and (any(_sig[0]) or _sig[1]))
+        if _needs_tint and not os.environ.get('AIL_NO_GENERAL') \
+                and not fn.name.startswith(('_Ail', '_ail')):
+            from pyfront import Unsupported
+            raise Unsupported('%s() needs the tagged-int lowering, which does not cover it: %s'
+                              % (fn.name, error))
+        if _py and _tinted_sig:
+            return _tint_fallback(P, fn, cname, ctx, result, sig, generated, _sig)
         _drop_tint(P, fn.name, cname)
         return result
     ctx.parts.update(needs['parts'])

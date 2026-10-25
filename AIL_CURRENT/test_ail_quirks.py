@@ -155,6 +155,45 @@ main()
 '''
         self.same(text, 'early_returns_overlapping_conditions', modes=MODES, allow=('general',))
 
+    def test_elif_chain_that_needs_a_tint_fallback(self):
+        text = '''
+def b(x: int, y: int) -> int:
+    if x > 0 and y > 0:
+        return 10
+    elif x > 0:
+        return 20
+    elif y > 0 or x > -3:
+        return 30
+    elif x == -10:
+        return 40
+    else:
+        return 50
+
+def main() -> None:
+    for x in range(-12, 8):
+        print(x, b(x, x - 2), b(-x, x))
+main()
+'''
+        self.same(text, 'elif_chain_tint_fallback')
+
+    def test_recursive_optional_result_on_the_typed_path(self):
+        text = '''
+def fact(n: int) -> int | None:
+    if n < 0:
+        return None
+    if n <= 1:
+        return 1
+    r = fact(n - 1)
+    if r is None:
+        return None
+    return n * r
+
+def main() -> None:
+    print(fact(5))
+main()
+'''
+        self.same(text, 'recursive_optional_typed')
+
     def test_early_returns_with_side_effects_and_loops(self):
         text = '''
 cnt = 0
