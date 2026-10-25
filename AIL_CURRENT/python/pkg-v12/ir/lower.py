@@ -2365,7 +2365,8 @@ class Lowering(TextLowering):
                     return self.b.value('tint.' + name + '_i64', [right, left], TINT)
             return self.b.value('tint.' + name, [self.coerce(left, TINT), self.coerce(right, TINT)], TINT)
         if tint and isinstance(op, (ast.BitAnd, ast.BitOr, ast.BitXor)):
-            raise NotS0('a bit operation on an unproven int')
+            name = {ast.BitAnd: 'and', ast.BitOr: 'or', ast.BitXor: 'xor'}[type(op)]
+            return self.b.value('tint.' + name, [self.coerce(left, TINT), self.coerce(right, TINT)], TINT)
         floating = I.F64 in (left.type, right.type)
         if isinstance(op, ast.Div):
             return self.b.value('fdiv', [self.coerce(left, I.F64), self.coerce(right, I.F64)], I.F64)
@@ -2393,6 +2394,26 @@ class Lowering(TextLowering):
             return self.b.value(name, [self.as_int(left), self.as_int(right)], I.I64)
         if isinstance(op, (ast.LShift, ast.RShift)):
             name = 'shl' if isinstance(op, ast.LShift) else 'shr'
+            if isinstance(op, ast.LShift) and not floating:
+                try:
+                    count = self.P._int_const(node.right)
+                except Exception:
+                    count = None
+                if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+                    value = None
+                    try:
+                        value = self.P._int_const(node.left)
+                    except Exception:
+                        value = None
+                    beyond = count >= 63
+                    if not beyond and isinstance(value, int) and not isinstance(value, bool):
+                        shifted = value << count
+                        beyond = not (-(1 << 63) <= shifted < (1 << 63))
+                    if beyond:
+                        if not self.tint_result:
+                            raise NotS0('a shift beyond int64')
+                        return self.b.value('tint.shl', [self.coerce(left, TINT),
+                                                         self.coerce(right, TINT)], TINT)
             return self.b.value(name, [self.as_int(left), self.as_int(right)], I.I64,
                                 {'mode': 'ck' if self.strict else 'nsw'})
         raise NotS0('binary %s' % type(op).__name__)

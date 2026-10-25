@@ -590,7 +590,7 @@ class Emitter(TextEmitter):
                 return self.assign_new(depth, ins.result, 'ail_tint_neg(%s)' % o[0])
             if k == 'inv':
                 return self.assign_new(depth, ins.result, 'ail_tint_sub(ail_tint_neg(%s), ail_tint_from_int64(1))' % o[0])
-            if k in ('add', 'sub', 'mul', 'floordiv', 'floormod', 'shl', 'shr'):
+            if k in ('add', 'sub', 'mul', 'floordiv', 'floormod', 'shl', 'shr', 'and', 'or', 'xor'):
                 fn = {'floormod': 'mod', 'shl': 'lshift', 'shr': 'rshift'}.get(k, k)
                 return self.assign_new(depth, ins.result, 'ail_tint_%s(%s, %s)' % (fn, o[0], o[1]))
             if k in ('floordiv_i64', 'mod_i64', 'add_i64', 'sub_i64', 'mul_i64', 'mod_i64_i64',
