@@ -156,6 +156,32 @@ method/property through a directly known class value is refused by name. Added
 `test_ail_pre170.py` (4 tests, both builds); probes `p_dup`, `p_dup2`, `p_sources`, `p_missing`,
 `p_array`, `p_shadow` and `p_attr` match CPython.
 
+## 2026-10-25 - pre87 review: callback exceptions cross back to boxed try
+
+The default build still aborted on `% 0` (and `// 0`) raised through a lambda or a
+helper passed as a value. `pymix.py` selected a typed clone for the helper, and the
+clone's `ail_die` trap only unwinds the typed `try` stack; the boxed caller's `try`
+lives on `ail_ctx` and never saw it. An escape analysis already rejects clones whose
+exceptions reach a boxed `try`, but it only followed direct `Call(Name)` edges, so a
+lambda body or a function passed as a value looked like an uncaught module-level path.
+`_protected` now treats both as possibly-protected: names referenced as values and
+call sites inside a lambda are not mixed, so the call stays boxed and returns its
+error through `cx`. Added `CALLBACK_ZERO` to `test_ail_pre87.py` (lambda, named
+callback, list item, dict value, alias, `//`, `divmod`, negative, INT64_MIN, bool,
+IntEnum, IntFlag).
+
+## 2026-10-25 - pre87: integer modulo by zero names CPython's message
+
+The general path and the default build's fallback reported
+`ZeroDivisionError: integer division or modulo by zero` for integer `% 0`.
+CPython reserves that text for `//` and `divmod`; `%` raises
+`integer modulo by zero`.  Both emitters now pass the shorter text from
+`ail_obj_mod` and `ail_op_mod`, while the floor-division helpers keep
+CPython's wording.  `test_ail_pre87.py` compares both builds with CPython for
+a plain helper, a typed helper, a lambda, a list item, an attribute, a dict
+value, negative and INT64_MIN dividends, bools, an IntEnum and an IntFlag; a
+second program keeps the neighbouring `//`, `divmod` and float zero messages
+unchanged.
 ## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
 
 The first still-differing item from the task's list was the encoding-name normalization: `b"abc".decode("utf\t8")`,
@@ -680,6 +706,51 @@ even when one call hid it. The general path now refuses the construct by name on
 matching the fuzz94 fix. An immutable-default program (negative/int-boundary, empty tuple, tuple,
 values through an argument, a list item, a dict value and an attribute) still matches CPython.
 Added `AIL_CURRENT/test_ail_pre117.py` and registered it in `ail_check.MODULES`.
+## 2026-10-25 - pre116 review fixes: unsafe constructors stay refused
+
+The saved-generator screen no longer trusts a class merely because `__new__`/`__init__` exist.
+A class is kept on the eager lowering only when it is plain (no bases other than `object`, no
+decorators/metaclass, no `__new__`, `__slots__`, `__setattr__`/`__getattr__`/`__getattribute__`/
+`__delattr__`) and its `__init__` only assigns its parameters or constants to `self`; inherited
+constructors, non-division `BinOp` bodies (`1 + "a"`), custom attribute hooks, `__slots__`, free
+names, a rebound or deleted class name and a shadowed/deleted `next` are refused by name.  Defect
+probes (`Bad.__init__` with `1 + "a"`, inherited raising `__init__`, `C = boom`, plus slots,
+custom `__setattr__`, free name, `del C`, arity, alias/attribute rebinding) are refused on both
+builds; safe `next`/parameter-constructor saved generators match CPython on the simulated
+integration tree.  `test_ail_pre116.py` has the new controls.  On the simulated integration tree
+(`origin/integ` ffeb623 + this diff) `test_ail_pre116`, `test_ail_pre166` and
+`test_ail_typed_tuples` pass together (20 tests); on this branch `test_ail_pre116`,
+`test_ail_typed_tuples`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass (`-j 2`).
+
+## 2026-10-25 - pre116: keep pre166's saved-generator shapes compiling
+
+The pre116 refusal was too broad for the integration branch's pre166 cursor-list
+generators: it refused a saved generator whose body called `next(...)` or a class
+constructor, so `test_ail_pre166` failed.  Those two shapes now stay on the existing
+eager lowering when the class's `__new__`/`__init__` cannot raise (`self.v = v`), so
+pre166's `nested` and `membership_dunder` cases pass.  The refusal still fires for a
+user-function call, `int(...)`, a risky method, a subscript and a division/modulo by
+a non-literal divisor, including a class whose constructor body divides.
+`test_ail_pre116.py` gains controls for the safe `next`/constructor shapes and for a
+refused raising constructor.  Simulated on origin/integ (ffeb623), test_ail_pre116,
+test_ail_pre166 and test_ail_typed_tuples pass together (17 tests).
+
+## 2026-10-24 - pre116: a saved generator expression that can raise is refused
+
+The first pre-existing difference the pre87 reviewer recorded was `% 0` through a generator
+expression: `g = (helper(5, 0) for _ in range(1)); next(g)` inside a `try` aborted on both builds.
+The general path materialised every generator expression eagerly, so the error was raised at the
+assignment rather than at `next()`, before the handler was live (the typed path already refused
+the construct by name).  `pyboxed2.Compiler` now refuses a generator expression used as a value
+when its lazy body contains a division/modulo by a non-literal divisor, a subscript, or a call
+that can raise (`int`, `input`, `next`, a method outside the builtin value-type whitelist, or a
+user function).  Immediate consumers
+(`sum`, `any`, `all`, `list`, `tuple`, `sorted`, `for`, `*`, `join`/`extend`/`update`) and tuple
+unpacking keep the existing eager lowering, so the common forms still match CPython.
+`test_ail_pre116.py` covers assignment, argument, list item, attribute and dict value, plus `//`,
+negative, bool, IntEnum and empty sources; it also keeps the immediate-consumer and
+safe-returned-generator controls compared with CPython on both builds.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
