@@ -298,6 +298,9 @@ class _Checker(object):
     def op_fneg(self, ins, scope, stack, where, top):
         self._unary(ins, where, I.F64, I.F64)
 
+    def op_fabs(self, ins, scope, stack, where, top):
+        self._unary(ins, where, I.F64, I.F64)
+
     def op_zext(self, ins, scope, stack, where, top):
         self._unary(ins, where, I.I1, I.I64)
 

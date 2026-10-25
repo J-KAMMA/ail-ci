@@ -35,7 +35,7 @@ arms together may hoist at most LIMIT instructions.
 from .. import ir as I
 
 LIMIT = 24
-_PURE = {'const', 'zext', 'select', 'and', 'or', 'xor', 'inv', 'fadd', 'fsub', 'fmul', 'sitofp',
+_PURE = {'const', 'zext', 'select', 'and', 'or', 'xor', 'inv', 'fabs', 'fadd', 'fsub', 'fmul', 'sitofp',
          'cmp.eq', 'cmp.ne', 'cmp.lt', 'cmp.le', 'cmp.gt', 'cmp.ge'}
 _WRAPPABLE = {'add', 'sub', 'mul', 'neg'}
 _ELEMENT = ('list.get', 'span.get', 'spec.get')
