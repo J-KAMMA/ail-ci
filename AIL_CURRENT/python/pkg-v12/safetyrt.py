@@ -1375,9 +1375,22 @@ static inline int ail2a_find(ail_ctx *cx, ail_obj obj, const char *name, ail_obj
     }
     return 0;
 }
+/* The same lookup with the name still a Python string: a computed getattr() call must let an
+   instance attribute shadow a method of the same name before it considers the method table.
+   ail2a_cname writes the same UTF-8 spelling the interning table keeps. */
+static inline int ail2a_find_name(ail_ctx *cx, ail_obj obj, ail_obj name, ail_obj *out) {
+    char buf[256];
+    if (name.tag != AIL_T_STR) return 0;
+    if (ail2a_cname(cx, name, buf, sizeof buf) != AIL_OK) return 0;
+    return ail2a_find(cx, obj, buf, out);
+}
 static inline ail_st ail2a_need_inst(ail_ctx *cx, ail_obj obj, const char *fn) {
     if (obj.tag == AIL_T_INST || obj.tag == AIL_T_EXC) return AIL_OK;
-    char m[160]; snprintf(m, sizeof m, "%s() on a '%s' value is not built on the general path (only instances of the program's classes)", fn, ail_type_name(obj.tag));
+    char m[200];
+    if (obj.tag == AIL_T_CLASS)
+        snprintf(m, sizeof m, "%s() on a class value is not modelled (a class keeps its attributes outside the instance table)", fn);
+    else
+        snprintf(m, sizeof m, "%s() on a '%s' value is not built on the general path (only instances of the program's classes)", fn, ail_type_name(obj.tag));
     return ail_raise_c(cx, AIL_B_NOTIMPLEMENTEDERROR, m);
 }
 static inline int ail2a_chain_name(const char *name) {
@@ -1416,7 +1429,9 @@ static inline ail_st ail2a_instance_dict(ail_ctx *cx, ail_obj *out, ail_obj obj)
 static inline ail_st ail2a_getattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_obj name, int has_dflt, ail_obj dflt) {
     char buf[256]; ail_st st = ail2a_cname(cx, name, buf, sizeof buf); if (st != AIL_OK) return st;
     if ((st = ail2a_need_inst(cx, obj, "getattr")) != AIL_OK) return st;
-    if (ail2a_dunder_dict(buf)) return ail2a_instance_dict(cx, out, obj);
+    if (ail2a_dunder_dict(buf))
+        return ail_raise_c(cx, AIL_B_NOTIMPLEMENTEDERROR,
+            "getattr() of __dict__ (the live instance mapping is not modelled; use vars())");
     if (strcmp(buf, "__class__") == 0) {
         *out = ((ail_instobj *)obj.o)->cls;
         return AIL_OK;

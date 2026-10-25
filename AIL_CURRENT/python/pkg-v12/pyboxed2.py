@@ -6844,6 +6844,148 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('getattr / hasattr / setattr on the class %s (only instances of the program\'s classes)'
                               % node.id)
 
+    def _class_attr_chain(self, cname):
+        """Class attributes readable through `cname`, MRO first (a subclass value wins)."""
+        seen, names, out = set(), set(), []
+        k = cname
+        while k is not None and k in self.classes and k not in seen:
+            seen.add(k)
+            for aname, aval, slot in self.classes[k].get('class_attrs', []):
+                if aname not in names:
+                    names.add(aname)
+                    out.append((aname, aval, slot))
+            k = self.classes[k]['base']
+        return out
+
+    def _class_method_chain(self, cname):
+        """Methods (and properties) resolve-able through `cname`, MRO first."""
+        seen, names, out = set(), set(), []
+        k = cname
+        while k is not None and k in self.classes and k not in seen:
+            seen.add(k)
+            for mname, info in self.classes[k]['methods'].items():
+                if mname not in names:
+                    names.add(mname)
+                    out.append((mname, info))
+            k = self.classes[k]['base']
+        return out
+
+    def _class_getattr_dispatch(self, o, n, t, has_dflt, d, ctx):
+        """Emit a run-time class-attribute read for a CLASS value (a class reached through a
+        variable, an argument, a list item, an attribute or a dict value).  User class
+        attributes and `__name__` are read; a method/property value, `__dict__` and `__class__`
+        are refused by name rather than fabricated.  Non-user classes fall through to the same
+        named refusal.  The caller's C expression `o` has already been evaluated."""
+        done = ctx.new_cvar('cg')
+        nb = ctx.new_cvar('cn')
+        ctx.emit('{ int %s = 0; char %s[256];' % (done, nb))
+        ctx.indent += 1
+        ctx.emit('st = ail2a_cname(cx, %s, %s, sizeof %s);' % (n, nb, nb))
+        ctx.check()
+        first = True
+        for c in self.class_order:
+            ctx.emit('%sif (%s.o == g_slots_arr[%d].o) {' %
+                     ('' if first else '} else ', o, self.global_slots['class:' + c]))
+            first = False
+            ctx.indent += 1
+            for aname, aval, slot in self._class_attr_chain(c):
+                v = self._class_attr_value(slot, aval, ctx)
+                ctx.emit('if (!%s && strcmp(%s, %s) == 0) { %s = %s; %s = 1; }' %
+                         (done, nb, c_str_literal(aname), t, v, done))
+            ctx.emit('if (!%s && strcmp(%s, "__name__") == 0) { %s = ((ail_classobj *)%s.o)->name; %s = 1; }' %
+                     (done, nb, t, o, done))
+            for mname, info in self._class_method_chain(c):
+                if mname.startswith('__ail_set_'):
+                    continue
+                ctx.emit('if (!%s && strcmp(%s, %s) == 0) {' % (done, nb, c_str_literal(mname)))
+                ctx.indent += 1
+                ctx.uses_st = True
+                ctx.emit('st = ail_raise_c(cx, AIL_B_NOTIMPLEMENTEDERROR, %s);' % c_str_literal(
+                    'getattr() of the %s %s on a class value (only its class attributes are read)'
+                    % ('property' if info.get('is_property') else 'method', mname)))
+                ctx.emit('goto %s;' % ctx.cur_err_target())
+                ctx.indent -= 1
+                ctx.emit('}')
+            for dunder in ('__dict__', '__class__'):
+                ctx.emit('if (!%s && strcmp(%s, %s) == 0) {' % (done, nb, c_str_literal(dunder)))
+                ctx.indent += 1
+                ctx.uses_st = True
+                ctx.emit('st = ail_raise_c(cx, AIL_B_NOTIMPLEMENTEDERROR, %s);' % c_str_literal(
+                    'getattr() of %s on a class value (not modelled)' % dunder))
+                ctx.emit('goto %s;' % ctx.cur_err_target())
+                ctx.indent -= 1
+                ctx.emit('}')
+            ctx.emit('if (!%s) {' % done)
+            ctx.indent += 1
+            if has_dflt:
+                ctx.emit('%s = %s;' % (t, d))
+                ctx.emit('%s = 1;' % done)
+            else:
+                mb = ctx.new_cvar('cm')
+                ctx.emit('char %s[400]; snprintf(%s, sizeof %s, %s, %s);' %
+                         (mb, mb, mb, c_str_literal("type object '%s' has no attribute '%%s'" % c), nb))
+                ctx.uses_st = True
+                ctx.emit('st = ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, %s);' % mb)
+                ctx.emit('goto %s;' % ctx.cur_err_target())
+            ctx.indent -= 1
+            ctx.emit('}')
+            ctx.indent -= 1
+        if not first:
+            ctx.emit('}')
+        ctx.emit('if (!%s) {' % done)
+        ctx.indent += 1
+        if has_dflt:
+            ctx.emit('%s = %s;' % (t, d))
+        else:
+            ctx.uses_st = True
+            ctx.emit('st = ail_raise_c(cx, AIL_B_NOTIMPLEMENTEDERROR, %s);' % c_str_literal(
+                'getattr() on a class value outside the program\'s classes (not modelled)'))
+            ctx.emit('goto %s;' % ctx.cur_err_target())
+        ctx.indent -= 1
+        ctx.emit('}')
+        ctx.indent -= 1
+        ctx.emit('}')
+
+    def _class_hasattr_dispatch(self, o, n, t, ctx):
+        """Emit the hasattr() answer for a CLASS value: its class attributes, methods/properties
+        and the `__name__` / `__class__` / `__dict__` dunders.  A non-user class is refused by
+        name, as `getattr` is."""
+        done = ctx.new_cvar('ch')
+        nb = ctx.new_cvar('cn')
+        ctx.emit('{ int %s = 0; char %s[256];' % (done, nb))
+        ctx.indent += 1
+        ctx.emit('st = ail2a_cname(cx, %s, %s, sizeof %s);' % (n, nb, nb))
+        ctx.check()
+        first = True
+        for c in self.class_order:
+            ctx.emit('%sif (%s.o == g_slots_arr[%d].o) {' %
+                     ('' if first else '} else ', o, self.global_slots['class:' + c]))
+            first = False
+            ctx.indent += 1
+            for aname, _aval, _slot in self._class_attr_chain(c):
+                ctx.emit('if (!%s && strcmp(%s, %s) == 0) %s = 1;' % (done, nb, c_str_literal(aname), done))
+            for mname, _info in self._class_method_chain(c):
+                if mname.startswith('__ail_set_'):
+                    continue
+                ctx.emit('if (!%s && strcmp(%s, %s) == 0) %s = 1;' % (done, nb, c_str_literal(mname), done))
+            for dunder in ('__name__', '__class__', '__dict__'):
+                ctx.emit('if (!%s && strcmp(%s, %s) == 0) %s = 1;' % (done, nb, c_str_literal(dunder), done))
+            ctx.emit('%s = ail_box_bool(%s);' % (t, done))
+            ctx.emit('%s = 1;' % done)
+            ctx.indent -= 1
+        if not first:
+            ctx.emit('}')
+        ctx.emit('if (!%s) {' % done)
+        ctx.indent += 1
+        ctx.uses_st = True
+        ctx.emit('st = ail_raise_c(cx, AIL_B_NOTIMPLEMENTEDERROR, %s);' % c_str_literal(
+            'hasattr() on a class value outside the program\'s classes (not modelled)'))
+        ctx.emit('goto %s;' % ctx.cur_err_target())
+        ctx.indent -= 1
+        ctx.emit('}')
+        ctx.indent -= 1
+        ctx.emit('}')
+
     def _method_arity_error(self, cls, name, info, args, kwargs):
         """CPython 3.12's TypeError text for a positional-argument count this method cannot
         take, or None when this is not the reason the call does not bind."""
@@ -6908,7 +7050,15 @@ class Compiler(boxclosure.ClosureMixin):
         for m in names:
             ctx.emit('if (!%s && ail2a_streq(%s, %s)) {' % (done, name, c_str_literal(m)))
             ctx.indent += 1
-            ctx.emit('if (%s.tag == AIL_T_INST || %s.tag == AIL_T_EXC) {' % (obj, obj))
+            own = ctx.new_cvar('own')
+            ctx.emit('ail_obj %s;' % own)
+            ctx.emit('if ((%s.tag == AIL_T_INST || %s.tag == AIL_T_EXC) '
+                     '&& ail2a_find_name(cx, %s, %s, &%s)) {' % (obj, obj, obj, name, own))
+            ctx.indent += 1
+            ctx.emit('%s = %s;' % (out, self.call_value(own, args, kwargs, ctx)))
+            ctx.emit('%s = 1;' % done)
+            ctx.indent -= 1
+            ctx.emit('} else if (%s.tag == AIL_T_INST || %s.tag == AIL_T_EXC) {' % (obj, obj))
             ctx.indent += 1
             first = True
             for c in owner_order:
@@ -6966,12 +7116,25 @@ class Compiler(boxclosure.ClosureMixin):
                 any(args[1].value in c['methods'] for c in self.classes.values()):
             raise Unsupported('getattr() of the method %s as a value (getattr(obj, "%s")(...) is built)'
                               % (args[1].value, args[1].value))
+        if isinstance(args[1], ast.Constant) and args[1].value == '__dict__':
+            raise Unsupported('getattr() of __dict__ (the live instance mapping is not modelled; use vars())')
         o, n = self.expr(args[0], ctx), self.expr(args[1], ctx)
         d = self.expr(args[2], ctx) if len(args) == 3 else 'ail_box_none()'
         self.rt_needs.add('attr')
         t = ctx.tmp()
+        may_be_class = self.infer_kind(args[0], ctx) is None and bool(self.classes)
+        if may_be_class:
+            ctx.emit('if (%s.tag == AIL_T_CLASS) {' % o)
+            ctx.indent += 1
+            self._class_getattr_dispatch(o, n, t, len(args) == 3, d, ctx)
+            ctx.indent -= 1
+            ctx.emit('} else {')
+            ctx.indent += 1
         ctx.emit('st = ail2a_getattr(cx, &%s, %s, %s, %d, %s);' % (t, o, n, 1 if len(args) == 3 else 0, d))
         ctx.check()
+        if may_be_class:
+            ctx.indent -= 1
+            ctx.emit('}')
         return t
 
     def _b_hasattr(self, args, kwargs, ctx):
@@ -6995,8 +7158,19 @@ class Compiler(boxclosure.ClosureMixin):
             meth = '(%s)' % ' || '.join(conds) if conds else '0'
         self.rt_needs.add('attr')
         t = ctx.tmp()
+        may_be_class = self.infer_kind(args[0], ctx) is None and bool(self.classes)
+        if may_be_class:
+            ctx.emit('if (%s.tag == AIL_T_CLASS) {' % o)
+            ctx.indent += 1
+            self._class_hasattr_dispatch(o, n, t, ctx)
+            ctx.indent -= 1
+            ctx.emit('} else {')
+            ctx.indent += 1
         ctx.emit('st = ail2a_hasattr(cx, &%s, %s, %s, %s);' % (t, o, n, meth))
         ctx.check()
+        if may_be_class:
+            ctx.indent -= 1
+            ctx.emit('}')
         return t
 
     def _b_setattr(self, args, kwargs, ctx):

@@ -2,14 +2,17 @@
 
 A method name computed at run time, `getattr(obj, "me" + "th")(...)`, now reaches the method the
 way the literal spelling already did (including an override, a @staticmethod, a @classmethod and
-the value arriving through an argument, a list item, an attribute and a dict value).  An
-instance's `__class__` and `__dict__` are visible to `hasattr`, and `__dict__` reads the same
-mapping `vars()` returns.
+the value arriving through an argument, a list item, an attribute and a dict value).  An instance
+attribute of the same name still wins over the method, as in CPython.  An instance's `__class__`
+and `__dict__` are visible to `hasattr`; `getattr(obj, "__dict__")` is refused by name because the
+runtime cannot hand out the live mapping that CPython mutates through.
 
-`getattr` / `hasattr` / `setattr` on a class value are refused at compile time by name on both
-builds: a class object here keeps its methods and class attributes outside the instance table, so
-there is no run-time mapping to read or write.  CPython accepts these, so the refusal is recorded
-in DIFFERENCES rather than answered with a NotImplementedError at run time.
+A class value reached through a variable, an argument, a list item, an attribute or a dict value
+now reads its own class attributes (and `__name__`) through `getattr` / `hasattr`.  A method value,
+`__dict__`, `__class__`, a class reached by a direct literal name and `setattr` on a class value
+are still refused by name: a class object here keeps its methods and class attributes outside the
+instance table, so there is no writable run-time mapping.  CPython accepts these, so the refusal
+is recorded in DIFFERENCES.
 """
 import os
 import subprocess
@@ -55,6 +58,19 @@ class Holder:
     pass
 
 
+class Shadow:
+    def __init__(self):
+        self.meth = 5
+
+    def meth(self):
+        return "shadow-method"
+
+
+class BaseShadow(Base):
+    def __init__(self):
+        self.other = 7
+
+
 def call(obj, name, a):
     return getattr(obj, name)(a)
 
@@ -89,6 +105,17 @@ def main():
     except Exception as exc:
         print(type(exc).__name__, exc)
     print(getattr(m, "x", "dflt"))
+    s = Shadow()
+    print(getattr(s, "met" + "h"))
+    try:
+        print(getattr(s, "met" + "h")())
+    except Exception as exc:
+        print(type(exc).__name__, exc)
+    bs = BaseShadow()
+    try:
+        print(getattr(bs, "oth" + "er")())
+    except Exception as exc:
+        print(type(exc).__name__, exc)
 
 
 main()
@@ -109,17 +136,33 @@ def main():
     for name in ("__class__", "__dict__"):
         print(name, hasattr(m, name))
     print(hasattr(m, "__cl" + "ass__"), hasattr(m, "__di" + "ct__"))
-    print(getattr(m, "__dict__"))
-    print(getattr(m, "__dict__") == vars(m))
     print(getattr(m, "__cl" + "ass__") is M)
-    print("__dict__" in getattr(m, "__dict__"), getattr(m, "__dict__")["x"])
+    print("x" in vars(m), vars(m)["x"])
     try:
         raise E("bad")
     except E as exc:
-        print(hasattr(exc, "__class__"), hasattr(exc, "__dict__"), getattr(exc, "__dict__"))
+        print(hasattr(exc, "__class__"), hasattr(exc, "__dict__"))
 
 
 main()
+'''
+
+DICT_GETATTR_LITERAL = r'''class M:
+    def __init__(self):
+        self.x = 1
+
+
+m = M()
+print(getattr(m, "__dict__"))
+'''
+
+DICT_GETATTR_COMPUTED = r'''class M:
+    def __init__(self):
+        self.x = 1
+
+
+m = M()
+print(getattr(m, "__di" + "ct__"))
 '''
 
 CLASS_GETATTR = r'''class C:
@@ -143,6 +186,60 @@ CLASS_HASATTR = r'''class C:
 
 name = "__class__"
 print(hasattr(C, name))
+'''
+CLASS_GETATTR_VALUE = r'''class C:
+    x = 5
+
+    def m(self):
+        return "method"
+
+
+class D(C):
+    pass
+
+
+class H:
+    pass
+
+
+def f(cls, name):
+    return getattr(cls, name)
+
+
+def g(cls, name, default):
+    return getattr(cls, name, default)
+
+
+def has(cls, name):
+    return hasattr(cls, name)
+
+
+h = H()
+h.c = C
+d = {"c": C}
+print(f(C, "x"))
+print(f(D, "x"))
+print(getattr([C][0], "x"))
+print(getattr(h.c, "x"))
+print(getattr(d["c"], "x"))
+print(f(C, "__na" + "me__"))
+print(g(C, "no" + "pe", "dflt"))
+print(has(C, "x"), has(C, "nope"), has(C, "m"), has(C, "__name__"))
+try:
+    print(f(C, "no" + "pe"))
+except Exception as exc:
+    print(type(exc).__name__, exc)
+'''
+CLASS_SETATTR_VALUE = r'''class C:
+    pass
+
+
+def f(cls, name, value):
+    setattr(cls, name, value)
+
+
+f(C, "y", 3)
+print(C.y)
 '''
 CLASS_CASES = (("getattr", CLASS_GETATTR), ("setattr", CLASS_SETATTR), ("hasattr", CLASS_HASATTR))
 
@@ -188,19 +285,47 @@ class Pre189Tests(unittest.TestCase):
     def test_computed_method_name(self):
         self.check_output("dynamic_method", DYNAMIC_METHOD)
 
+    def assert_compile_refused(self, name, text, needle):
+        want = self.cpython(name, text)
+        self.assertEqual(want.returncode, 0, want.stderr)
+        for general in (False, True):
+            built = self.build(name, text, general)
+            shown = built.stdout + built.stderr
+            self.assertNotEqual(built.returncode, 0, "built a program whose output would differ")
+            self.assertIn(needle, shown)
+
+    def assert_run_refused(self, name, text, needle):
+        want = self.cpython(name, text)
+        self.assertEqual(want.returncode, 0, want.stderr)
+        for general in (False, True):
+            built = self.build(name, text, general)
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            got = subprocess.run([str(self.dir / ("exe_" + name + ("_g" if general else "_d")))],
+                                 cwd=self.dir, capture_output=True, timeout=120)
+            shown = (got.stdout + got.stderr).decode("utf-8", "replace")
+            self.assertNotEqual(got.returncode, 0, "ran a program whose output would differ")
+            self.assertIn(needle, shown)
+
     def test_hasattr_class_and_dict(self):
         self.check_output("hasattr", HASATTR)
+
+    def test_getattr_dict_refused_by_name(self):
+        self.assert_compile_refused("dict_literal", DICT_GETATTR_LITERAL,
+                                    "getattr() of __dict__")
+        self.assert_run_refused("dict_computed", DICT_GETATTR_COMPUTED,
+                                "getattr() of __dict__")
 
     def test_class_attribute_builtins_refused_by_name(self):
         for slug, text in CLASS_CASES:
             with self.subTest(slug=slug):
-                want = self.cpython("class_" + slug, text)
-                self.assertEqual(want.returncode, 0, want.stderr)
-                for general in (False, True):
-                    built = self.build("class_" + slug, text, general)
-                    shown = built.stdout + built.stderr
-                    self.assertNotEqual(built.returncode, 0, "built a program whose output would differ")
-                    self.assertIn("on the class C", shown)
+                self.assert_compile_refused("class_" + slug, text, "on the class C")
+
+    def test_class_values_read(self):
+        self.check_output("class_values", CLASS_GETATTR_VALUE)
+
+    def test_class_value_setattr_refused_by_name(self):
+        self.assert_run_refused("class_setattr_value", CLASS_SETATTR_VALUE,
+                                "setattr() on a class value is not modelled")
 
 
 if __name__ == "__main__":

@@ -1,3 +1,19 @@
+## 2026-10-25 - pre189 review fix: instance shadowing, __dict__, class values
+
+Review follow-up. A computed `getattr(obj, name)(...)` now checks the instance attribute table
+before the method table, so an instance field named like a method (own or inherited) is the value
+CPython calls; a non-callable field raises CPython's TypeError. `getattr(obj, "__dict__")` is no
+longer offered as a detached copy: a literal name is refused at compile time and a computed name
+by name at run time, while `hasattr` still answers True as CPython does. `getattr` / `hasattr` on
+a class value reached through a variable, an argument, a list item, an attribute or a dict value
+now read the class attributes (MRO first) and `__name__`; a method or property value, `__dict__`,
+`__class__`, a non-program class and every `setattr` on a class value are refused by name.
+Recorded as C?-job-pre189-10251546-1/-2. Probes `/tmp/probes/p1`-`p7` cover own/inherited and
+static/class method shadowing, the computed and literal `__dict__` refusals, class attributes
+through all four routes, inherited/zero/negative/empty/None values, shared mutable class
+attributes, missing names with and without a default, non-string names, class `hasattr`, class
+`setattr` refusal and both builds.
+
 ## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
 
 The first still-differing item from the task's list was the encoding-name normalization: `b"abc".decode("utf\t8")`,
