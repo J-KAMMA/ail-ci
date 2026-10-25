@@ -1865,6 +1865,45 @@ class Library:
             self.subs.append(text)
         return self.sub_keys[key]
 
+    def sub_callable(self, index, counted=False, literal=False):
+        """Name of the generated function for `P.sub(fn, s, count)` with a callable replacement (a def or a lambda), or,
+        with `literal`, a str replacement without backslashes; `counted` is subn (it returns (text, number of
+        replacements)).  It walks finditer's matches and calls fn with each Match.  The general path builds the
+        callable form (the typed path has no parameter of unknown type and refuses the program, which then falls
+        back)."""
+        key = (index, 'lit' if literal else None, counted)
+        if key not in self.sub_keys:
+            program = self.programs[index]
+            k = len(self.sub_keys)
+            name = '_ail_re_sub%d' % k
+            self.sub_keys[key] = name
+            sfx = 'B' if program.is_bytes else ''
+            kind = 'bytes' if program.is_bytes else 'str'
+            empty = 'b""' if program.is_bytes else '""'
+            self.subs.append("""
+
+def %(name)s(s: %(kind)s, fn%(ann)s, count: int) -> %(ret)s:
+%(check)s    out: list[%(kind)s] = []
+    last = 0
+    cnt = 0
+    for m in _ail_re_finditer%(sfx)s(%(table)s, s):
+        if count > 0 and cnt >= count:
+            break
+        a = m.start(0)
+        out.append(s[last:a])
+%(call)s        out.append(%(piece)s)
+        last = m.end(0)
+        cnt += 1
+    out.append(s[last:])
+    return %(result)s
+""" % {'name': name, 'kind': kind, 'sfx': sfx, 'table': self.table_name(index), 'ann': ': ' + kind if literal else '',
+       'ret': 'tuple[%s, int]' % kind if counted else kind, 'piece': 'fn' if literal else 'r',
+       'call': '' if literal else '        r = fn(m)\n        if r is None:\n            r = %s\n' % empty,
+       'check': ('    if %s"\\\\" in fn:\n        raise ValueError("re.sub: a replacement with a backslash has to be a string literal")\n'
+                 % ('b' if program.is_bytes else '')) if literal else '',
+       'result': '(%s.join(out), cnt)' % empty if counted else '%s.join(out)' % empty})
+        return self.sub_keys[key]
+
     def text(self):
         named = []
         for index, program in enumerate(self.programs):

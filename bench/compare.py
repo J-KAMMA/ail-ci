@@ -9,6 +9,10 @@ byte-for-byte against the app's independent Python oracle. Arms run interleaved 
 of ROUNDS rounds yields a per-window time ratio; the table shows the median and the rank-2..8
 range of the nine windows. A range that crosses 1.0 is a tie. Linux only.
 
+Beside time the table has peak RSS, binary size and build disk: KiB one release build adds under a fresh build
+dir and fresh cache (AIL_CACHE, TMPDIR; see build_disk_kib), measured in a separate pass after the timing. A last line
+gives the toolchain install size per language (`du -sk`), once.
+
 App modules (bench/apps/<name>.py) define AIL_SOURCE, AIL_OPTIONS, optional prepare_ail(work, cli),
 C_SOURCE, RUST_SOURCE, STRATEGY, REFERENCE_SCOPE, controls(work) and generate(work, smoke).
 """
@@ -30,12 +34,12 @@ def load_app(name):
     return module
 
 
-def build_ail(app, ail_root, work, label):
+def build_ail(app, ail_root, work, label, env=None):
     work = work / ('build-' + label)
     work.mkdir()
     def cli(*args):
         result = subprocess.run([sys.executable, '-B', str(ail_root / 'ail_chatgpt.py'), *map(str, args)],
-                                cwd=work, capture_output=True, timeout=900)
+                                cwd=work, capture_output=True, timeout=900, env=env)
         if result.returncode:
             raise SystemExit('%s: ail_chatgpt %s failed:\n%s' % (label, args[0], result.stderr.decode(errors='replace')[-3000:]))
     if hasattr(app, 'prepare_ail'):
@@ -45,16 +49,63 @@ def build_ail(app, ail_root, work, label):
     return out
 
 
-def build_reference(app, work, label):
+def build_reference(app, work, label, env=None):
     gcc, rustc = shutil.which('gcc'), shutil.which('rustc')
     source = work / (label + ('.c' if label == 'c' else '.rs'))
     source.write_text(app.C_SOURCE if label == 'c' else app.RUST_SOURCE, encoding='utf8')
     out = work / label
     command = [gcc, *C_FLAGS, str(source), '-lm', '-o', str(out)] if label == 'c' else [rustc, *RUST_FLAGS, str(source), '-o', str(out)]
-    result = subprocess.run(command, capture_output=True, timeout=300)
+    result = subprocess.run(command, capture_output=True, timeout=300, env=env)
     if result.returncode:
         raise SystemExit('%s reference build failed:\n%s' % (label, result.stderr.decode(errors='replace')[-3000:]))
     return out
+
+
+def tree_kib(path):
+    """Disk allocated under path, in KiB (what `du -sk` reports; hardlinks counted once)."""
+    return int(subprocess.run(['du', '-sk', str(path)], capture_output=True, text=True, check=True).stdout.split()[0])
+
+
+def build_disk_kib(app, base_root, work):
+    """Disk one release build adds, per arm, in KiB. A separate pass after the timing, so it cannot disturb it.
+    Each arm builds into a fresh directory with a fresh cache and TMPDIR, and the whole directory is counted:
+    ail/base = AIL_CACHE + build dir (output binary, files prepare_ail makes); c, rust = build dir (output binary
+    plus whatever gcc/rustc leave in TMPDIR). The harness calls rustc directly, so there is no cargo target/ dir."""
+    result = {}
+    for label in ('base', 'ail', 'c', 'rust'):
+        if label == 'base' and not base_root:
+            continue
+        fresh = work / ('disk-' + label)
+        (fresh / 'cache').mkdir(parents=True)
+        (fresh / 'tmp').mkdir()
+        env = dict(os.environ, AIL_CACHE=str(fresh / 'cache'), TMPDIR=str(fresh / 'tmp'), CARGO_TARGET_DIR=str(fresh / 'target'))
+        env.pop('AIL_NO_CACHE', None)
+        if label == 'c' or label == 'rust':
+            build_reference(app, fresh, label, env)
+        else:
+            build_ail(app, base_root if label == 'base' else REPO / 'AIL_CURRENT', fresh, label, env)
+        result[label] = tree_kib(fresh)
+    return result
+
+
+def toolchain_kib():
+    """Install size once per language, `du -sk` of the toolchain's install dir (None if missing)."""
+    def du(*paths):
+        paths = [p for p in paths if p and Path(p).exists()]
+        return sum(tree_kib(p) for p in dict.fromkeys(map(str, paths))) if paths else None
+    sizes = {}
+    gcc = shutil.which('gcc')
+    if gcc:
+        # system gcc lives in /usr, so count its own parts: driver, compiler proper + its lib dir, as, ld
+        prog = lambda n: subprocess.run([gcc, '-print-prog-name=' + n], capture_output=True, text=True).stdout.strip()
+        cc1 = os.path.realpath(prog('cc1'))
+        sizes['c'] = du(os.path.realpath(gcc), os.path.dirname(cc1), os.path.realpath(prog('as')), os.path.realpath(prog('ld')))
+    rustc = shutil.which('rustc')
+    if rustc:
+        sysroot = subprocess.run([rustc, '--print', 'sysroot'], capture_output=True, text=True).stdout.strip()
+        sizes['rust'] = du(sysroot)   # ~/.rustup/toolchains/<active>
+    sizes['ail'] = du(REPO / 'AIL_CURRENT')   # the compiler itself; it also needs the c toolchain above and python3
+    return sizes
 
 
 def run_case(binary, case, work):
@@ -118,9 +169,11 @@ def compare_app(name, base_root, work, rounds, smoke):
                     raise SystemExit('%s: timed run of %s failed: %s' % (name, label, problems))
                 sums[label] += elapsed
         windows.append(sums)
+    disk = build_disk_kib(app, base_root, work)
     result = dict(app=name, case=case['name'], rounds=rounds, windows=windows,
                   median_ms={l: statistics.median(w[l] for w in windows) / rounds / 1e6 for l in labels},
                   peak_rss_kib={l: peak_rss_kib(b, case, work) for l, b in arms.items()},
+                  build_disk_kib=disk,
                   binary_bytes={l: Path(b).stat().st_size for l, b in arms.items() if Path(b).exists()},
                   ratios={})
     for num, den in (('ail', 'base'), ('ail', 'c'), ('ail', 'rust')):
@@ -131,12 +184,27 @@ def compare_app(name, base_root, work, rounds, smoke):
     return result
 
 
+def _fmt_bound(value):
+    """Format a ratio at 3 decimals, adding digits until its side of 1.0 is preserved.
+
+    Plain '%.3f' turns 0.9996 into 1.000, so a range entirely below 1.0 can print as
+    [0.981, 1.000] and look like a tie although the unrounded bounds make the verdict faster.
+    """
+    digits = 3
+    while True:
+        text = '%.*f' % (digits, value)
+        printed = float(text)
+        if (printed < 1.0) == (value < 1.0) and (printed > 1.0) == (value > 1.0):
+            return text
+        digits += 1
+
+
 def fmt(ratio):
     if ratio['range'] is None:
-        return '%.3f' % ratio['median']
+        return _fmt_bound(ratio['median'])
     lo, hi = ratio['range']
     verdict = 'tie' if lo <= 1 <= hi else ('faster' if hi < 1 else 'slower')
-    return '%.3f [%.3f, %.3f] %s' % (ratio['median'], lo, hi, verdict)
+    return '%s [%s, %s] %s' % (_fmt_bound(ratio['median']), _fmt_bound(lo), _fmt_bound(hi), verdict)
 
 
 def main():
@@ -169,8 +237,9 @@ def main():
         finally:
             if base_tree:
                 subprocess.run(['git', 'worktree', 'remove', '--force', str(base_tree)], cwd=REPO, capture_output=True)
+    toolchain = toolchain_kib()
     report = dict(when=datetime.now(timezone.utc).isoformat(timespec='seconds'), head=head, working_tree_dirty=dirty,
-                  base=args.base, smoke=args.smoke, cpu=args.cpu, c_flags=C_FLAGS, rust_flags=RUST_FLAGS, results=results)
+                  base=args.base, smoke=args.smoke, toolchain_kib=toolchain, cpu=args.cpu, c_flags=C_FLAGS, rust_flags=RUST_FLAGS, results=results)
     if not args.smoke:
         out = REPO / 'bench/results' / ('%s-%s%s.json' % (report['when'][:10], head, '-dirty' if dirty else ''))
         out.parent.mkdir(exist_ok=True)
@@ -178,13 +247,15 @@ def main():
         print('wrote', out.relative_to(REPO), file=sys.stderr)
     columns = [c for c in ('ail/base', 'ail/c', 'ail/rust') if any(c in r['ratios'] for r in results)]
     # Speed is not the only cost: peak memory and binary size are printed beside it.
-    print('| app | ms ail/base/c/rust | ' + ' | '.join(columns) + ' | RSS MiB ail/base/c/rust | binary KiB ail/base/c/rust |')
-    print('|---|---|' + '---|' * len(columns) + '---|---|')
+    print('| app | ms ail/base/c/rust | ' + ' | '.join(columns) + ' | RSS MiB ail/base/c/rust | binary KiB ail/base/c/rust | build disk KiB ail/base/c/rust |')
+    print('|---|---|' + '---|' * len(columns) + '---|---|---|')
     for r in results:
         ms = '/'.join('%.1f' % r['median_ms'][l] if l in r['median_ms'] else '-' for l in ('ail', 'base', 'c', 'rust'))
         rss = '/'.join('%.1f' % (r['peak_rss_kib'][l] / 1024) if r['peak_rss_kib'].get(l) else '-' for l in ('ail', 'base', 'c', 'rust'))
         size = '/'.join('%d' % (r['binary_bytes'][l] // 1024) if l in r.get('binary_bytes', {}) else '-' for l in ('ail', 'base', 'c', 'rust'))
-        print('| %s | %s | %s | %s | %s |' % (r['app'], ms, ' | '.join(fmt(r['ratios'][c]) if c in r['ratios'] else '-' for c in columns), rss, size))
+        disk = '/'.join('%d' % r['build_disk_kib'][l] if l in r['build_disk_kib'] else '-' for l in ('ail', 'base', 'c', 'rust'))
+        print('| %s | %s | %s | %s | %s | %s |' % (r['app'], ms, ' | '.join(fmt(r['ratios'][c]) if c in r['ratios'] else '-' for c in columns), rss, size, disk))
+    print('\ntoolchain KiB (du -sk, once per language): ' + ', '.join('%s %s' % (l, '%d' % k if k is not None else 'missing (skipped)') for l, k in toolchain.items()))
 
 
 if __name__ == '__main__':

@@ -401,17 +401,63 @@ def _match_args(cls):
 
 
 def _substitute(guard, binds):
-    """The guard with the names a pattern binds replaced by the values they would be bound to."""
+    """The guard with the names a pattern binds replaced by the values they would be bound to.
+
+    A name a nested scope rebinds (a lambda parameter, a comprehension target) is left as it is, and
+    the rest of that scope is substituted: `case [x] if all(x == 9 for x in [1, 2])` keeps the
+    comprehension's own x, while `case x if (lambda y: y == x)(v)` substitutes the free x."""
     tree = ast.parse(ast.unparse(guard), mode='eval')
 
+    def targets(node):
+        return {n.id for n in ast.walk(node) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
+
     class Sub(ast.NodeTransformer):
+        def __init__(self):
+            self.shadow = frozenset()
+
         def visit_Name(self, node):
-            if isinstance(node.ctx, ast.Load) and node.id in binds:
+            if isinstance(node.ctx, ast.Load) and node.id in binds and node.id not in self.shadow:
                 return ast.parse(binds[node.id], mode='eval').body
             return node
 
+        def _visit(self, node, shadow):
+            old = self.shadow
+            self.shadow = frozenset(shadow)
+            try:
+                return self.visit(node)
+            finally:
+                self.shadow = old
+
         def visit_Lambda(self, node):
+            node.args.defaults = [self.visit(d) for d in node.args.defaults]
+            node.args.kw_defaults = [self.visit(d) if d is not None else None for d in node.args.kw_defaults]
+            args = node.args
+            params = {a.arg for a in args.posonlyargs + args.args + args.kwonlyargs}
+            if args.vararg:
+                params.add(args.vararg.arg)
+            if args.kwarg:
+                params.add(args.kwarg.arg)
+            node.body = self._visit(node.body, self.shadow | params)
             return node
+
+        def _comprehension(self, node, values):
+            shadow = self.shadow
+            for gen in node.generators:
+                gen.iter = self._visit(gen.iter, shadow)
+                shadow = shadow | targets(gen.target)
+                gen.ifs = [self._visit(cond, shadow) for cond in gen.ifs]
+            for attr in values:
+                setattr(node, attr, self._visit(getattr(node, attr), shadow))
+            return node
+
+        def visit_ListComp(self, node):
+            return self._comprehension(node, ('elt',))
+
+        visit_SetComp = visit_ListComp
+        visit_GeneratorExp = visit_ListComp
+
+        def visit_DictComp(self, node):
+            return self._comprehension(node, ('key', 'value'))
 
     return ast.unparse(Sub().visit(tree).body)
 
