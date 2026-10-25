@@ -510,8 +510,9 @@ class Refusals(ModulesBase):
         self.refused({**files, "main.py": "import lib\nprint(lib._g())\n"}, "private name")
 
     def test_imports_below_the_top_level(self):
-        self.refused({"lib.py": "X = 1\n", "main.py": "def f():\n    import lib\n    return lib.X\n\n\nprint(f())\n"},
-                     "below the top level")
+        self.refused({"lib.py": "print(1)\nX = 1\n", "main.py": "def f():\n    import lib\n    return lib.X\n\n\nprint(f())\n"},
+                     "function-level `import lib`", "lib.py:1")
+        self.assertEqual(self.same_as_cpython({"lib.py": "X = 1\n", "main.py": "def f():\n    import lib\n    return lib.X\n\n\nprint(f())\n"}), "1\n")
         self.refused({"lib.py": "X = 1\n", "main.py": "if True:\n    import lib\nprint(lib.X)\n"}, "below the top level")
 
     def test_module_as_value_and_attribute_assignment(self):
@@ -1251,8 +1252,8 @@ class PackageRefusals(ModulesBase):
                      "a submodule")
 
     def test_import_in_a_function_of_a_package_module(self):
-        self.refused({"pkg/__init__.py": "", "pkg/a.py": "def f():\n    from . import b\n    return b.X\n",
-                      "pkg/b.py": "X = 1\n", "main.py": "import pkg.a\nprint(pkg.a.f())\n"}, "below the top level")
+        self.assertEqual(self.same_as_cpython({"pkg/__init__.py": "", "pkg/a.py": "def f():\n    from . import b\n    return b.X\n",
+                      "pkg/b.py": "X = 1\n", "main.py": "import pkg.a\nprint(pkg.a.f())\n"}), "1\n")
 
     def test_module_file_attributes_and_dynamic_imports(self):
         self.refused({"lib.py": "X = 1\n", "main.py": "import lib\nprint(lib.__file__)\n"}, "not available")

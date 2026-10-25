@@ -820,5 +820,24 @@ fn main() {
                 self.assertIn('_receiver', function_body(program, 'build'))
 
 
+# These tests pin the C text of the legacy emitter, the AIL_IR=0 opt-out (the IR is the default since
+# 2026-10-19 and has its own text, pinned in test_ail_ir_*): the whole module builds with AIL_IR=0
+# unless the caller set AIL_IR.
+_SAVED_AIL_IR = []
+
+
+def setUpModule():
+    import os as _os
+    _SAVED_AIL_IR.append(_os.environ.get('AIL_IR'))
+    if _SAVED_AIL_IR[-1] is None:
+        _os.environ['AIL_IR'] = '0'
+
+
+def tearDownModule():
+    import os as _os
+    if _SAVED_AIL_IR.pop() is None:
+        _os.environ.pop('AIL_IR', None)
+
+
 if __name__ == '__main__':
     unittest.main()
