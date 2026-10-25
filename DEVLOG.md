@@ -1,3 +1,19 @@
+## 2026-10-25 - unbound captured scalar keeps NameError (job-pre213-10252300)
+
+Review regression: a direct nested def whose captured scalar was assigned after the `def` (or
+deleted) raised `UnboundLocalError` from `ail_op_load`, because the captured cell was forwarded
+as a `by_cell` capture but only `by_val` names were put in the nested context's `free_names`.
+Base and CPython raise `NameError: cannot access free variable ...`.  `free_names` now includes
+the `by_cell` names too, so their reads use `ail_op_load_free`; the cell forwarding itself is
+unchanged.
+
+Probes `/tmp/probes/p1_scalar_one_before.py`, `p2_scalar_del.py`, `p3_types_and_sources.py`
+(argument, list item, attribute, dict value; int/negative/zero/bool/None/float/str/list/tuple/dict),
+`p4_deep_unbound.py` (two and three levels, delete, outer binding), `p5_mixed_alias_rebind.py`
+(multiple captures, aliasing, rebinding) match CPython on both builds.  `p6a_r20.py`, `p6b_r22.py`
+and `p6c_deep_nonlocal.py` are still refused by name.  `test_ail_pre213.py` gained
+`UNBOUND_SCALAR`.
+
 ## 2026-10-25 - nested def two levels deep captures the enclosing cell (job-pre213-10252300)
 
 The first still-differing item from the rbpre141 review was r10c: a list mutated inside a def two

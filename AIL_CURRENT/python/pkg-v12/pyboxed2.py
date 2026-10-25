@@ -3393,7 +3393,7 @@ class Compiler(boxclosure.ClosureMixin):
             nctx.declare_local(nm)
         for nm in by_cell:
             nctx.declare_local(nm)
-        nctx.free_names = set(by_val)
+        nctx.free_names = set(by_val) | set(by_cell)
         for nm in by_ptr:
             nctx.ptr_names.add(nm)
         for p in params:

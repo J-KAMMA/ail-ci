@@ -137,6 +137,62 @@ def main():
 main()
 '''
 
+UNBOUND_SCALAR = r"""def before():
+    def inner():
+        return x
+    try:
+        inner()
+    except Exception as e:
+        print(type(e).__name__, str(e))
+    x = 7
+    print(inner())
+
+
+def after_delete():
+    x = 3
+    def inner():
+        return x
+    print(inner())
+    del x
+    try:
+        inner()
+    except Exception as e:
+        print(type(e).__name__, str(e))
+
+
+def mixed():
+    a = 1
+    def inner():
+        return a, b
+    try:
+        inner()
+    except Exception as e:
+        print(type(e).__name__, str(e))
+    b = 2
+    print(inner())
+
+
+def three_level():
+    def a():
+        def b():
+            def c():
+                return x
+            try:
+                c()
+            except Exception as e:
+                print(type(e).__name__, str(e))
+            x = "deep"
+            print(c())
+        b()
+    a()
+
+
+before()
+after_delete()
+mixed()
+three_level()
+"""
+
 NONLOCAL = r'''def outer():
     n = 0
     def middle():
@@ -205,6 +261,9 @@ class Pre213Tests(unittest.TestCase):
 
     def test_two_level_capture(self):
         self.check('deep', DEEP)
+
+    def test_unbound_captured_scalar_is_nameerror(self):
+        self.check('unbound_scalar', UNBOUND_SCALAR)
 
     def test_two_level_nonlocal_still_refused(self):
         self.check_refused('nonlocal', NONLOCAL)
