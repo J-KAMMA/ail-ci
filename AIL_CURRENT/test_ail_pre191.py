@@ -80,6 +80,25 @@ print(A, B, C, D, E, F, G, H, I, J, Box.value, ident())
 '''
 
 
+FUNCTION_BODY_UNARY = {
+    'dead_unary_shift_after_return': '''def f():
+    return 1
+    x = -(1 << 64)
+print(f())
+''',
+    'unreached_unary_shift_return': '''def f(flag):
+    if flag:
+        return 1
+    return -(1 << 64)
+print(f(True))
+''',
+    'live_unary_shift': '''def f():
+    return -(1 << 62)
+print(f())
+''',
+}
+
+
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -125,6 +144,18 @@ class Pre191Tests(unittest.TestCase):
                         self.assertIn('int64 constant expression out of range', message, label)
                         self.assertNotIn('integer overflow', message, label)
                         self.assertNotIn('Traceback', message, label)
+
+    def test_function_body_unary_shifts_still_match_cpython(self):
+        with tempfile.TemporaryDirectory(prefix='ail-pre191-') as directory:
+            for label, text in FUNCTION_BODY_UNARY.items():
+                want, want_rc, err = _cpython(directory, label, text)
+                self.assertEqual(want_rc, 0, err)
+                for general in (True, False):
+                    with self.subTest(label + ('_g' if general else '_d')):
+                        got, build_err = _run(directory, '%s_%s' % (label, 'g' if general else 'd'),
+                                              text, general)
+                        self.assertIsNotNone(got, build_err)
+                        self.assertEqual(got, (want, want_rc), build_err)
 
     def test_in_range_constant_positions_still_match_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre191-') as directory:

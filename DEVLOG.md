@@ -1,3 +1,15 @@
+## 2026-10-25 - pre191 review follow-up: keep shift folding in the constant-position pass (job-pre191-10251807)
+
+Review fix. Adding `LShift`/`RShift` to the shared `_constant_int` made the pre-existing
+whole-tree `_check_int64_unary_constants` start refusing unary shift expressions in function
+bodies, so `def f(): return 1; x = -(1 << 64)` and an unreached `return -(1 << 64)` failed to
+compile where CPython and the base tree printed `1`. Shift folding is now opt-in
+(`_constant_int(..., shifts=True)`) and only `_check_int64_constant_positions` asks for it;
+the unary pass and its function-body reach are unchanged. The `DIFFERENCES` row no longer
+overstates the fix: `X = 2 ** 65 - 2 ** 64` is a pre-existing clamped-power case that still
+runtime-overflows on both builds. `test_ail_pre191.py` now includes the dead/unreached
+function-body unary-shift cases on both builds.
+
 ## 2026-10-25 - pre191: out-of-int64 constants in module/class/default positions (job-pre191-10251807)
 
 The first still-differing item from the pre184 review notes was the out-of-int64 constant in a

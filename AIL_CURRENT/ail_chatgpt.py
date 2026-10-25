@@ -101,25 +101,27 @@ _INT_BINARY = {
 }
 
 
-def _constant_int(node, known):
+def _constant_int(node, known, shifts=False):
     """The int value of a constant expression, or None when it is not statically known.
     Names resolve only through known module constants; a local of the same name keeps the
-    expression out of known, so a shadowed constant is never folded by mistake."""
+    expression out of known, so a shadowed constant is never folded by mistake.  Shift
+    folding is opt-in: only the module/class/default pass asks for it, because the unary
+    pass must not start refusing `-(1 << 64)` in an unreached function body."""
     if isinstance(node, ast.Constant) and type(node.value) is int:
         return node.value
     if isinstance(node, ast.Name):
         return known.get(node.id)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
-        value = _constant_int(node.operand, known)
+        value = _constant_int(node.operand, known, shifts)
         if value is None:
             return None
         return -value if isinstance(node.op, ast.USub) else value
     if isinstance(node, ast.BinOp):
-        left = _constant_int(node.left, known)
+        left = _constant_int(node.left, known, shifts)
         if left is None:
             return None
         if isinstance(node.op, ast.Pow):
-            right = _constant_int(node.right, known)
+            right = _constant_int(node.right, known, shifts)
             if right is None or right < 0:
                 return None
             if abs(left) <= 1:
@@ -127,8 +129,8 @@ def _constant_int(node, known):
             if right > 64:
                 return 1 << 64 if left > 0 else -(1 << 64)
             return left ** right
-        if isinstance(node.op, ast.LShift):
-            right = _constant_int(node.right, known)
+        if shifts and isinstance(node.op, ast.LShift):
+            right = _constant_int(node.right, known, shifts)
             if right is None or right < 0:
                 return None
             if left == 0:
@@ -136,15 +138,15 @@ def _constant_int(node, known):
             if right > 64:
                 return 1 << 64 if left > 0 else -(1 << 64)
             return left << right
-        if isinstance(node.op, ast.RShift):
-            right = _constant_int(node.right, known)
+        if shifts and isinstance(node.op, ast.RShift):
+            right = _constant_int(node.right, known, shifts)
             if right is None or right < 0:
                 return None
             return left >> right
         operation = _INT_BINARY.get(type(node.op))
         if operation is None:
             return None
-        right = _constant_int(node.right, known)
+        right = _constant_int(node.right, known, shifts)
         if right is None:
             return None
         return operation(left, right)
@@ -225,7 +227,7 @@ def _check_int64_constant_positions(tree):
         target = node.targets[0]
         if not isinstance(target, ast.Name) or stores.get(target.id) != 1 or target.id in parameters:
             continue
-        value = _constant_int(node.value, known)
+        value = _constant_int(node.value, known, shifts=True)
         if value is not None:
             known[target.id] = value
 
@@ -285,7 +287,7 @@ def _check_int64_constant_positions(tree):
         for node in roots(value):
             if id(node) in maxsplit:
                 continue
-            number = _constant_int(node, known)
+            number = _constant_int(node, known, shifts=True)
             if number is not None and not -(1 << 63) <= number < 1 << 63:
                 error = ValueError(f'int64 constant expression out of range: {number}')
                 error.source_line = node.lineno
