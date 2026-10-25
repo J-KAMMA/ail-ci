@@ -1,3 +1,16 @@
+## 2026-10-25 - pre201 shifts share the pre190 fold budget (job-pre201-suite)
+
+The suite run on the integration tree reported `test_ail_pre190` failing.  Its reductions
+(`0 ** (1 << 5000)`, `(-1) ** ((1 << 5000) + 1)`, `(1 << 5000) >> 5000`) were refused by the
+pre201 shift check: the climb used the old 4096-bit intermediate cap and `_const_expr_int` could
+not fold a power base 0/1/-1 above exponent 64.  The check now uses a dedicated folder that
+mirrors the pre190 zero/base shortcuts and its 2**20-bit budget (2**24 for such an exponent), so
+those reductions fold and the pre201 refusal still fires for plain out-of-int64 shifts.  Because
+the code generator now shares that budget, `((10 ** 64) ** 64) >> 100001` folds exactly to 0 and
+matches CPython instead of being refused; `test_ail_pre201.py` records it as an in-range case.
+Probes `p201_*` in `/tmp/probes` match CPython or are refused by name on both builds; the
+targeted modules `test_ail_pre190`, `test_ail_pre201` and `test_ail_pre184` pass.
+
 ## 2026-10-25 - constant shift pair (job-pre201-review)
 
 The pre201 shift fix let an in-range shift hide an out-of-range power: a whole-expression fold
@@ -24,6 +37,202 @@ The new `test_ail_pre201.py` covers the direct bool and int forms, an argument, 
 attribute, dict value and assignment, plus in-range boundaries; probes in `/tmp/probes201` match
 CPython or are refused by name on both builds.
 
+## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
+
+The review found that the traceback rewrite indexed `node.args.args[3]` after a
+`len(node.args.args) >= 3` guard, so any `__exit__(self, et, ev)` (three arguments) crashed the
+compiler with `IndexError` even when the class was never used.  The guard now requires four
+arguments; shorter signatures are left alone.  A short `__exit__` that a `with` actually calls is
+then refused by name by the existing argument check ("not in the subset: __exit__() called with too
+many positional arguments"), and an unused one compiles where CPython does.
+
+Probes `/tmp/probes/pre197_*` cover 3-argument exits (unused, clean body, raising body, reached via
+an attribute/list/dict), 1- and 2-argument unused exits, keyword-only `tb`, `*args`, defaults and the
+normal 4-argument path on both builds.  Added both regression cases to `test_ail_pre197.py`.
+
+## 2026-10-25 - `__exit__` third argument when the body raised (job-pre197-10252029)
+
+The first still-differing item left by the pre181 review was the traceback argument:
+`__exit__` received None even when the `with` body raised, so `tb is None` printed True where
+CPython passes the active traceback object (`C?-job-pre181-10251538-2`).  AIL does not model
+traceback objects, so the general path now passes a non-None `_AilTraceback` stand-in in the
+exception branch and keeps None on every other exit.  Both paths answer `tb is None` /
+`tb is not None` (and `==` / `!=` against None) from whether the body raised; the typed path maps
+the test to its exception code instead of folding it to a constant.  Any other use of the `tb`
+parameter (`type(tb)`, truthiness, attribute access, passing it to a helper, ...) is refused by
+name at compile time on both builds: "__exit__ uses 'tb' other than in `is None` / `is not None`;
+traceback objects are not modelled".
+
+Probes in `/tmp/probes` (`p_tb1`-`p_tb12`, `p_final`, `p_stop1`) covered clean and raising bodies,
+`is`/`is not`/`==`/`!=` against None, suppression, a returning body, `break`/`continue`, nested
+managers, a `@contextmanager` generator (the pre181 StopIteration case still matches), a manager
+reaching the `with` through an argument, a list item, an attribute and a dict value, and the
+refused `type(tb)` / truthiness / helper / `tb.tb_lineno` uses; all match CPython or are refused by
+name on both builds.  Added `test_ail_pre197.py` (2 tests, both builds) and registered it in
+`ail_check.MODULES`.  Final-state tests: test_ail_pre197, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 pass.
+## 2026-10-25 -- pre183 reapply: builtin/type tuple-member names, bytes membership (job-rbpre183-10252048)
+
+Re-applied the accepted pre183 change on this tree. The bytes/bytearray membership message is
+already fixed here (the current prelude's `_ail_bcontains` keeps the integer-byte path and uses
+the bytes-like text for other operands, as the pre114 row records), so no prelude edit was needed.
+The outstanding part, naming a builtin-function tuple member in `str.startswith`/`endswith` as
+`builtin_function_or_method` (and the type-valued `bool` as `type`) instead of `function`, is now
+applied: the lowerer marks the generated lambda, the FUNC object carries the builtin kind, and
+`ail__tname_c` uses it. User-defined functions still name `function`. Error-only paths.
+
+Probes in `/tmp/probes` covered literals, variables, arguments, list items, dict values and
+attributes, both methods, the scalar form, an early matching member, invalid/negative windows,
+empty tuples, `bool` and `len`, and user-defined functions, on both `cmp.sh` builds; all match
+CPython. `test_ail_pre183.py` keeps the cases.
+## 2026-10-25 - pre126 reapply: itertools `r` validation (job-rbrbpre126-10252049)
+
+The first still-differing item in the job-pre101 review was the general path's negative
+`r`: `permutations`, `combinations` and `combinations_with_replacement` returned `[]`
+instead of raising `ValueError: r must be non-negative`; the same code read `r` as a raw
+int64 field, so a float, str, None, list, tuple or bytes was also accepted. Both general
+emitters now pass the `r` object to one runtime converter (`ail_it_r_index`), which checks
+the type and sign; `permutations` keeps treating a None `r` as "not given". The current
+tree already rejected a negative `r` (job-pre137), so that fix is kept inside the new
+converter. Added `AIL_CURRENT/test_ail_pre126.py`; probes in `/tmp/probes/pre126_r_bounds.py`,
+`pre126_r_types.py` and `pre126_r_sources.py` match CPython on both builds.
+## 2026-10-25 - pre141 review follow-up: recursive calls see hoisted defaults (job-rbpre141-10251549)
+
+Review defect: a recursive call that omitted a hoisted default resolved the hidden
+`_ail_nndefault_N` name in the nested function's own frame, where it was never declared. Without a
+module global of that name the general path refused with an internal "name ... is not defined";
+with one, it silently read the global (`local` printed as `global`, shared lists got the global's
+contents). `_register_nested` now includes the hidden default names in the nested function's free
+names, so they are captured by value from the enclosing frame and the recursive call reads the
+def-time object. Regression program `recursive_defaults` in `test_ail_pre141.py` covers the module
+global collision, shared list/dict/bytearray defaults through recursion, and a keyword-only
+recursive default; probes `p9`-`p13` in `/tmp/probes` add scalars/widths, empty/negative values,
+aliasing, loop redefinition, values from arguments/list items/attributes/dict values, and both
+builds. All match CPython.
+
+## 2026-10-25 - pre141 review follow-up: closure-context def flags (job-rbpre141-10251549)
+
+Review defect: a nested `def` with a non-literal or mutable default inside an escaping nested
+function (`outer` returned as a value) reached `boxclosure._emit_closure_function`, whose C
+preamble never declared the `def`-binding flags that `stmt_FunctionDef` emits. The general path
+failed to compile (`'_ndef1' undeclared`) and the default path then refused by name. The preamble
+now declares every `cctx.def_flag_decls` entry, as `_emit_function` and `_register_nested`
+already did. Probes `d1`-`d6` in `/tmp/probes` cover the review case, non-literal defaults built
+from captured names, shared dict/set/bytearray/tuple-with-list defaults, keyword-only (refused by
+name), redefinition, and literal defaults on both builds; all match CPython except the refusal.
+
+## 2026-10-25 - pre141 re-applied: nested-def defaults evaluated once at the def (job-rbpre141-10251549)
+
+The accepted pre141 change (nested `def` defaults evaluated once, when the `def` statement runs)
+was re-applied on top of the current tree. A default that is not a literal scalar/tuple, and a
+mutable literal default such as `[]`, `{}` or `set()`, is now evaluated into a hidden local at
+the `def` statement; the call site reads that local, so reassigning the source name afterwards
+does not change the default and a shared list stays shared between calls. The hidden name avoids
+every name the enclosing function mentions (`ident_names`). Literal scalar/tuple defaults still
+fill in at the call site. `**kwargs` and positional-only parameters remain refused by name.
+Adapted to the tree's later def-binding flags and module-level default hoisting; added
+`AIL_CURRENT/test_ail_pre141.py`, and the earlier pre89/pre117/fuzz94/fuzz87 checks now compare the
+shared default instead of expecting a refusal. The same tree already had `round()` and other fixes,
+which are unchanged.
+## 2026-10-25 - pre171 reapply: indirect typed calls and worker trap (job-rbrbpre171-10252050)
+
+Re-applied the accepted pre171 change on top of the current tree.  The tree already carried the
+pre87/pre109 partial fix: `_value_referenced` marked names used as values and `_protected` marked
+call sites inside a lambda.  Kept those and added the accepted change's transitive walk
+(`_indirect_names`), so a function called by an indirectly invoked function is also rejected to the
+general path, and `_protected` now short-circuits on an indirect caller scope.  The runtime half is
+unchanged from pre171: `ail_raise_value_adopt` on a parallel worker records the exception's code
+and message through `ail_par_trap_value`, releases the worker's reference, and unwinds inside the
+worker; the join re-raises it on the caller, so a negative shift in a `parallel for` is caught on
+both builds instead of longjmp-ing across threads.  Added `AIL_CURRENT/test_ail_pre171.py` and
+registered it in `ail_check`.  The earlier `test_ail_pre87` callback case is kept.
+
+## 2026-10-25 - constant abs(INT64_MIN) is refused by name (job-pre214-10252301)
+
+The first still-differing item in the rbpre177 review's pre-existing list was `abs(-(2**63))`:
+both builds compiled it and stopped at run time with `integer overflow`, while CPython prints the
+bignum `9223372036854775808`.  The earlier items in that list no longer differ on this tree:
+`10**100`, `2**65` and `xs[10**100]` are already refused by the general front end, and the local
+`x = -(10**20)` is already refused as an int64 constant expression.
+
+`_check_int64_unary_constants` now also refuses a builtin `abs()` whose single argument is a
+statically known int64 minimum, with the existing `int64 constant expression out of range` wording
+and exit 2.  It sees nested unary forms, shifts and module constants, covers calls used as an
+argument, a list item, an attribute and a dict value, and skips the check when `abs` is shadowed.
+In-range constant absolutes, float/bool arguments and a value that reaches `abs` only through a
+local variable keep their previous behaviour.  `test_ail_pre214.py` is registered in
+`ail_check.MODULES`; `tools/ci_shards.py --update` assigned it a shard.
+
+Probes in `/tmp/probes`: `p214_direct_pow`, `p214_direct_shift`, `p214_literal_min`,
+`p214_module`, `p214_argument`, `p214_list_item`, `p214_attribute`, `p214_dict_value` are all
+refused by name on both builds; `p214_in_range` and `p214_shadow` match CPython on both builds.
+`p214_variable` (a local variable holding the minimum) is unchanged and still traps at run time,
+the same pre-existing limitation as before this job.
+## 2026-10-25 - pre184 review fix: class-body bare `**` with a large exponent (job-rbpre184-10252049)
+
+The reviewer found that the conflict resolution left a hole: a class-body bare `**` value was
+always deferred to `_check_constant_power`, but that check folds with `_const_expr_int`, which
+returns `None` when the exponent is above 64.  So `class C: M = 2 ** 100` and
+`M: int = 2 ** 100` compiled and then stopped at run time with `integer overflow`, where the
+accepted tree refuses them by name.  The class-body deferral now applies only when
+`_const_expr_int` can fold the value; otherwise `_constant_int_exact` checks it, so both cases
+fail at compile time with `int64 constant expression out of range: 1267650600228229401496703205376`.
+`class C: M = 2 ** 64` still gets pre177's `int64 constant out of range` wording, and in-range or
+special-power results (`2 ** 62`, `0 ** 100000`, `1 ** 100000`, `(-1) ** 100000`, `0 << 100000`,
+`(2 ** 100) // (2 ** 99)`) still match CPython on both builds.  Added both class-body cases to
+`test_ail_pre184.py`.
+
+## 2026-10-25 - out-of-int64 constant expressions outside function bodies (job-rbpre184-10252049)
+
+Re-applied the accepted pre184 change on top of this tree. A constant integer expression in a
+module/class assignment or a default argument that does not fit int64 is now refused by name at
+compile time (`int64 constant expression out of range`), instead of compiling and stopping at run
+time with `integer overflow`. `corpus/gdev/g22_012.py` (`_MASK: int = (1 << 64) - 1`) and
+`def f(x=10**30)` are the motivating cases. The evaluator handles + - * // % ** << >> & | ^ and
+unary + - ~ with a 4096-bit guard; Pow bases 0/1/-1 and a zero left shift are decided before the
+guard, so `0 ** 100000`, `1 ** 100000`, `(-1) ** 100000` and `0 << 100000` stay in range. An
+out-of-int64 expression inside a function body keeps its old run-time stop; a class with a base
+(the enum case) keeps its own refusal.
+
+Conflict resolution: this tree already had `_check_int64_literals`, `_check_constant_power`,
+`_check_int64_unary_constants` and a two-argument `_constant_int` from pre172/pre177. The new
+evaluator is `_constant_int_exact`, and its check runs before the older ones so a default argument
+gets the accepted wording; a bare `**` class-body value is left to `_check_constant_power` so
+pre177's flow cases keep their existing `int64 constant out of range` wording. Added
+`test_ail_pre184.py` (class, module and default refusals plus in-range class/default/module
+arithmetic and the power/shift guard boundaries), and registered it in `ail_check.py` and both
+`ci_shards.json` lists.
+## 2026-10-25 - pre190 reapply: large constant intermediates that reduce to int64 (job-rbpre190-10252302)
+
+Re-applied the accepted pre190 change on top of the current tree. The constant folders now decide
+zero absorbing operands and the power bases 0/1/-1 before the size guard, so `0 * (1 << 5000)`,
+`(1 << 5000) & 0`, `0 ** (1 << 5000)`, `1 ** (1 << 5000)`, `(-1) ** (1 << 5000)`,
+`(1 << 5000) ** 0` and `(1 << 5000) >> 5000` fold instead of stopping with `integer overflow`, and
+the same constants used as a `str.split`/`rsplit` maxsplit are not refused. A zero/base shortcut is
+taken only when the other operand is itself a constant int, so `1.5 ** 0`, `f() ** 0`,
+`0 * "ab"`, `0 * f()`, `0 & 1.5` and `2.0 ** 0` keep normal evaluation. The fold limit moved from
+4096 to 2**20 bits (2**24 for a large exponent in such a power), and `_CONST_INT_BITS` now shares
+`_MAXSPLIT_BITS` so the generic all-constant folder added by another accepted job does not pre-empt
+these reductions on the integration tree. The current tree's exact `_pow_within_maxsplit_bits` guard
+is kept alongside the new shortcuts. Added `AIL_CURRENT/test_ail_pre190.py`; probes in `/tmp/probes`
+cover boundaries, non-int operands, effectful calls, and argument/list-item/attribute/dict routes on
+both builds.
+
+## 2026-10-25 - maxsplit constant through a wider intermediate (reapply, job-rbpre205-10252303)
+
+The first still-differing item from the rbpre121 review was the maxsplit folder's `right >= 64`
+power rule: `"a b c".split(" ", 2**100 // 2**80)` was refused by name on both builds although the
+final value 2**20 fits in int64 and CPython splits normally.  This tree already carries rbpre121's
+follow-up, which bounds the power exactly with `_pow_within_maxsplit_bits` and the existing
+`_MAXSPLIT_BITS` (4096) budget, so the accepted pre205 rule is covered by that stronger fix; both
+sides are kept.  A final value outside int64 (for example `2**100`, `10**30`, `(2**64) // 2 * 2`)
+is still refused with the maxsplit wording.
+
+`test_ail_pre205.py` covers split/rsplit, an explicit and a `None` separator, negative and zero
+limits, the empty string, intermediates built from powers, shifts, sums and products, and values
+reaching the call through an argument, a list item, an attribute and a dict value, on both builds.
+`/tmp/probes/p205_direct.py`, `p205_flows.py`, `p205_types.py` and `p205_features.py` match CPython
+on both builds; `p205_out_of_range.py` is refused by name (CPython raises OverflowError at run time).
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
@@ -102,6 +311,72 @@ helper covers a list/dict/set/bytearray (including inside a tuple) and its messa
 "mutable literal default". Added `test_ail_fuzz94.py` and registered it in `ail_check.MODULES`;
 immutable defaults, keyword calls, recursion, loop closures with `nonlocal` and early returns
 still match CPython on both builds.
+## 2026-10-25 - pre142 withdrawn: saved-genexpr next() already works (job-rbpre142-10251802)
+
+Review follow-up. The re-applied pre142 compile-time refusal was based on a stale premise: on
+this tree job pre166 already gives a materialised generator expression a shared cursor, so
+`g = (x * 2 for x in xs); next(g)` follows CPython (`2`, `4`, `[6]`) on both builds, and
+`test_ail_pre166` passes on the base tree. The new pass therefore removed working behaviour,
+and its scope-insensitive taint also refused valid reassignments, shadowed parameters,
+branch-returned iterators and user-defined functions named `next`. The refusal, its checker
+registration, `test_ail_pre142.py`, and the contradictory `DIFFERENCES.md` row are withdrawn;
+`_check_saved_genexpr_next` is gone and the tree keeps pre166's cursor fix. Probes for the
+recorded shape, reassignment (local/global/attribute/dict/alias), shadowed parameter, branch
+return, direct `next`, and the user-defined `next` all match CPython on both builds.
+## 2026-10-25 - pre121: constant int expressions are exact or refused by name
+
+pre97's reviewer recorded that `2**63 - 1` in ordinary arithmetic or a variable, and a user
+function called with `10**30`, still stopped at run time with `integer overflow` where CPython
+keeps an unbounded int.  The compiler now evaluates an all-constant int expression exactly:
+`2**63 - 1`, `-(2**63)`, `-1 << 63`, `~(-2**63)` and an in-range result reached through a wider
+intermediate such as `2**100 // 2**80` are emitted as one literal.  A constant whose value does
+not fit int64 (for example `10**30`) is refused by name at compile time instead of reaching the
+runtime.  This is hooked into the typed `_expr`, the general emitter's `expr`, the unified
+unboxed `nexpr` and the IR lowering, because a module-level statement can be lowered by any of
+them; the existing maxsplit-specific folder is kept alongside it.  Added `test_ail_pre121.py`
+(constant boundaries, dynamic and non-int expressions unchanged, and the recorded p6/p7/p13
+shapes refused).  The pre160 module recorded the old run-time `integer overflow` stop for a
+constant `10**30` inside `__index__`; its test now checks the compile-time refusal and keeps a
+run-time-value variant for the overflow path.  Not fixed here: run-time `sep=None` (pre-existing
+p12, a different cause).
+## 2026-10-25 - maxsplit power folding (job-pre195-10251916)
+
+The pre97 maxsplit folder rejected any power with an exponent of at least 64 before looking at
+the rest of the constant expression, so `"a b c".split(" ", 2**100 // 2**80)` (final value
+2**20) was refused on both builds while CPython runs it.  The power branch now uses the same
+4096-bit limit as the compiler's other constant folder, so an intermediate may be wider than
+int64; the whole expression is folded exactly, and a final value outside int64 is still refused
+by name.  Review follow-up: the first guard also overestimated the width of a power
+(`bit_length(base) * exponent`), which refused `((2**63 * 4)**63) >> 4095` even though the
+4096-bit intermediate reduces to 1 and both CPython and the base tree accept it.  A capped
+square-and-multiply test now measures the actual result width, so that expression, `2**2049 //
+2**2029` and a 4096-bit intermediate are accepted; only a genuinely wider intermediate (for example
+`2**4096 // 2**4050`, final value 2**46) is refused by name, although CPython computes it.
+`test_ail_pre195.py` covers literals, a negative result, reduced powers, shifts, both sides of
+the fold boundary, the out-of-int64 refusals, and the value through an argument, a list item, an
+attribute, a dict value and a local on both builds.  Probes p_regress, p_orig, p_boundary,
+p_neg, p_routes and p_types matched CPython on HEAD; p_over_literal, p_over_reduced and
+p_over_intermediate were refused by name.
+## 2026-10-25 - class repr of a user class value (job-pre196-10252020)
+
+The first pre-existing item recorded by the rbpre170 review was that `repr(C)` for a user
+class printed `<object>` where CPython prints `<class '__main__.C'>`; `str()`, `print()`,
+containers, f-strings and `%r`/`%s` were the same because they share the writer. The v2
+runtime's `ail__write_repr_body` had no `AIL_T_CLASS` case, so class values fell through to
+the `<object>` default. It now writes CPython's class repr for top-level user classes; the
+builtin-class branch is defensive because no tested construct can obtain a builtin class
+value (`type()`, exception constructors and `__class__` are refused). Nested and
+function-local classes are already refused by name at compile time, so no qualname is needed.
+
+Probes in `/tmp/probes/pre196` (`p1`, `p9`, `p10`, `p16`, `p18`) covered direct, alias,
+argument (including a default), list-item, dict-value, attribute, return, nested-container,
+`str`, `print`, f-string and `%` routes on both builds and match CPython; `p6`/`p7`/`p17`
+(nested, local and `if`-block classes) and `p14`/`p15` (builtin `type()`/`Exception`) are
+refused by name. `p8` rebinds `__name__` and hits the separate unsupported `__module__`
+path. A class value passed to the explicit `format()` builtin still hits the older int-default
+formatter (`unsupported format string passed to non-int`); that path fails identically on the
+base and is not part of this item. Added `AIL_CURRENT/test_ail_pre196.py` and registered it in
+`ail_check.MODULES`.
 
 ## 2026-10-25 - int(s, base) message GC rooting (job-pre180-10251520)
 

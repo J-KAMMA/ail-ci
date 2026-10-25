@@ -14157,7 +14157,7 @@ typedef struct { ail_gcobj hdr; ail_obj val; } ail_cellobj;
    ail_obj array precisely so closures over locals participate in GC like everything else). */
 typedef ail_st (*ail_cfunc1)(ail_ctx *cx, ail_obj *out, ail_obj arg, void *closure);
 
-typedef struct { ail_gcobj hdr; ail_cfunc1 fn; ail_obj *cells; uint16_t n_cells; const char *name; } ail_funcobj;
+typedef struct { ail_gcobj hdr; ail_cfunc1 fn; ail_obj *cells; uint16_t n_cells; uint8_t builtin_fn; const char *name; } ail_funcobj;
 typedef struct { ail_gcobj hdr; ail_obj func, self; } ail_boundobj;
 
 /* Iterator kinds -- one shared struct + a `kind` switch in ail_next, rather than a
@@ -14671,6 +14671,8 @@ static int ail__cnt_cmp_desc(const void *pa, const void *pb) {
     return c ? c : (ia < ib ? -1 : ia > ib);
 }
 static inline const char *ail__tname_c(ail_obj x) {
+    if (x.tag == AIL_T_FUNC && ((ail_funcobj *)x.o)->builtin_fn)
+        return ((ail_funcobj *)x.o)->builtin_fn == 2 ? "type" : "builtin_function_or_method";
     if (x.tag == AIL_T_INST && ((ail_instobj *)x.o)->cls.tag == AIL_T_CLASS) {      /* an instance names its class (bytes, ...) */
         static char *tnb;
         static size_t tnb_cap;
@@ -16245,6 +16247,13 @@ static inline void ail__write_repr_body(ail_ctx *cx, ail_obj x, FILE *f) {
             fputc(')', f);
             break;
         }
+        case AIL_T_CLASS: {
+            ail_classobj *c = (ail_classobj *)x.o;
+            fputs(c->builtin_id >= 0 ? "<class '" : "<class '__main__.", f);
+            ail_str_write(ail_view_to_str(c->name), f);
+            fputs("'>", f);
+            break;
+        }
         default: fputs("<object>", f); break;
     }
 }
@@ -17169,6 +17178,11 @@ static inline ail_st ail_bi_input(ail_ctx *cx, ail_obj *out, int has_prompt, ail
 /* ===================================================================================
    B004: range([start,] stop[, step]).
    =================================================================================== */
+static inline ail_st ail__range_index(ail_ctx *cx, int64_t *out, ail_obj x) {
+    if (x.tag == AIL_T_INT || x.tag == AIL_T_BOOL) { *out = x.i; return AIL_OK; }
+    char buf[96]; snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail__tname_c(x));
+    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+}
 static inline ail_st ail_bi_range(ail_ctx *cx, ail_obj *out, int has_start, int64_t start, int64_t stop, int has_step, int64_t step) {
     if (!has_start) start = 0;
     if (!has_step) step = 1;
@@ -19772,7 +19786,7 @@ static inline ail_st ail_counter_most_common(ail_ctx *cx, ail_obj *out, ail_obj 
         ail_obj t = ail_tuple_new(cx, pr, 2);
         ail_list_append(cx, pairs, t);
     }
-    ail_funcobj kf; kf.hdr.kind = AIL_K_FUNC; kf.fn = ail__mc_key; kf.cells = NULL; kf.n_cells = 0; kf.name = "mc_key";
+    ail_funcobj kf; kf.hdr.kind = AIL_K_FUNC; kf.fn = ail__mc_key; kf.cells = NULL; kf.n_cells = 0; kf.builtin_fn = 0; kf.name = "mc_key";
     ail_obj kfo; kfo.tag = AIL_T_FUNC; kfo.o = (ail_gcobj *)&kf; /* stack-allocated FUNC: safe, never
         escapes this call, and ail_list_sort never triggers a GC pass that could see it as a
         dangling root after return (nothing roots it beyond this call's own use) */
@@ -20365,19 +20379,28 @@ static inline ail_st ail_it_product_repeat(ail_ctx *cx, ail_obj *out, ail_obj a,
     AIL_FRAME_LEAVE(cx, fr);
     return ail_iter(cx, out, res);
 }
-/* CPython rejects a negative r for these three choosers. The pool is materialized first, so a
-   non-iterable input still raises TypeError before the range check, exactly as CPython does. */
-static inline ail_st ail__it_reject_negative_r(ail_ctx *cx) {
-    return ail_raise_c(cx, AIL_B_VALUEERROR, "r must be non-negative");
+static inline ail_st ail_it_r_index(ail_ctx *cx, ail_obj r, int64_t *out, int permutations) {
+    /* CPython converts a given r to an index BEFORE using it: permutations() reports any
+       non-int as "Expected int as r", the two combinations() use the generic index message,
+       and a negative r is always ValueError "r must be non-negative" (even for an empty pool). */
+    if (r.tag != AIL_T_INT && r.tag != AIL_T_BOOL) {
+        if (permutations) return ail_raise_c(cx, AIL_B_TYPEERROR, "Expected int as r");
+        char buf[96]; snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail__tname_c(r));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
+    if (r.i < 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "r must be non-negative");
+    *out = r.i;
+    return AIL_OK;
 }
-static inline ail_st ail_it_permutations(ail_ctx *cx, ail_obj *out, ail_obj iterable, int has_r, int64_t r) {
+static inline ail_st ail_it_permutations(ail_ctx *cx, ail_obj *out, ail_obj iterable, int has_r, ail_obj r_obj) {
     ail_obj pr_[2]; pr_[1] = ail_box_none();
     ail_st st = ail__materialize(cx, &pr_[0], iterable); if (st != AIL_OK) return st;
     AIL_ROOT_N(cx, fr, pr_, 2); /* 0=pool 1=result */
+    int64_t r = 0;
+    if (has_r) { st = ail_it_r_index(cx, r_obj, &r, 1); if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; } }
     ail_vecobj *pool = (ail_vecobj *)pr_[0].o;
     int64_t n = pool->n; int64_t rr = has_r ? r : n;
     pr_[1] = ail_list_new(cx); ail_obj res = pr_[1];
-    if (rr < 0) { AIL_FRAME_LEAVE(cx, fr); return ail__it_reject_negative_r(cx); }
     if (rr > n) { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
     int64_t *indices = (int64_t *)ail_xmalloc((size_t)(n > 0 ? n : 1) * sizeof(int64_t));
     int64_t *cycles = (int64_t *)ail_xmalloc((size_t)(rr > 0 ? rr : 1) * sizeof(int64_t));
@@ -20409,14 +20432,15 @@ static inline ail_st ail_it_permutations(ail_ctx *cx, ail_obj *out, ail_obj iter
     free(indices); free(cycles);
     { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
 }
-static inline ail_st ail_it_combinations(ail_ctx *cx, ail_obj *out, ail_obj iterable, int64_t r) {
+static inline ail_st ail_it_combinations(ail_ctx *cx, ail_obj *out, ail_obj iterable, ail_obj r_obj) {
     ail_obj pr_[2]; pr_[1] = ail_box_none();
     ail_st st = ail__materialize(cx, &pr_[0], iterable); if (st != AIL_OK) return st;
     AIL_ROOT_N(cx, fr, pr_, 2); /* 0=pool 1=result */
+    int64_t r = 0;
+    st = ail_it_r_index(cx, r_obj, &r, 0); if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
     ail_vecobj *pool = (ail_vecobj *)pr_[0].o;
     int64_t n = pool->n;
     pr_[1] = ail_list_new(cx); ail_obj res = pr_[1];
-    if (r < 0) { AIL_FRAME_LEAVE(cx, fr); return ail__it_reject_negative_r(cx); }
     if (r > n) { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
     int64_t *indices = (int64_t *)ail_xmalloc((size_t)(r > 0 ? r : 1) * sizeof(int64_t));
     for (int64_t i = 0; i < r; i++) indices[i] = i;
@@ -20436,14 +20460,15 @@ static inline ail_st ail_it_combinations(ail_ctx *cx, ail_obj *out, ail_obj iter
     free(indices);
     { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
 }
-static inline ail_st ail_it_combinations_wr(ail_ctx *cx, ail_obj *out, ail_obj iterable, int64_t r) {
+static inline ail_st ail_it_combinations_wr(ail_ctx *cx, ail_obj *out, ail_obj iterable, ail_obj r_obj) {
     ail_obj pr_[2]; pr_[1] = ail_box_none();
     ail_st st = ail__materialize(cx, &pr_[0], iterable); if (st != AIL_OK) return st;
     AIL_ROOT_N(cx, fr, pr_, 2); /* 0=pool 1=result */
+    int64_t r = 0;
+    st = ail_it_r_index(cx, r_obj, &r, 0); if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
     ail_vecobj *pool = (ail_vecobj *)pr_[0].o;
     int64_t n = pool->n;
     pr_[1] = ail_list_new(cx); ail_obj res = pr_[1];
-    if (r < 0) { AIL_FRAME_LEAVE(cx, fr); return ail__it_reject_negative_r(cx); }
     if (n == 0 && r > 0) { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
     int64_t *indices = (int64_t *)ail_xmalloc((size_t)(r > 0 ? r : 1) * sizeof(int64_t));
     for (int64_t i = 0; i < r; i++) indices[i] = 0;
@@ -28071,9 +28096,13 @@ _PARALLEL_DIE_EDITS = (
     ('static void ail_die(const char *w);\n',
      'AIL_LINK_STATE(_Thread_local void *, ail_par_cur, = NULL);\n'
      'static void ail_par_trap(const char *w, int code) __attribute__((noreturn));\n'
+     'static void ail_par_trap_value(ail_exception *value) __attribute__((noreturn));\n'
      'static void ail_die(const char *w);\n'),
     ('static void ail_die(const char *w) {\n', 'static void ail_die(const char *w) {\n    if (ail_par_cur) ail_par_trap(w, 0);\n'),
     ('static void ail_raise_named(int code) {\n', 'static void ail_raise_named(int code) {\n    if (ail_par_cur) ail_par_trap(NULL, code);\n'),
+    ('__attribute__((unused)) static void ail_raise_value_adopt(ail_exception *value) {\n',
+     '__attribute__((unused)) static void ail_raise_value_adopt(ail_exception *value) {\n'
+     '    if (ail_par_cur) ail_par_trap_value(value);\n'),
 )
 
 
@@ -28413,6 +28442,21 @@ static void ail_par_trap(const char *w, int code) {
     if (w) { strncpy(c->msg, w, sizeof c->msg - 1); c->msg[sizeof c->msg - 1] = 0; }
     longjmp(c->jb, 1);
 }
+/* An adopted exception (ck_shl/ck_shr's ValueError, ail_raise_msg) reaches here on a worker:
+   record its code and message for the caller's re-raise, release the worker's only reference,
+   and unwind to the block runner instead of longjmp-ing across threads. */
+static void ail_par_trap_value(ail_exception *value) {
+    ail_par_ctx *c = (ail_par_ctx *)ail_par_cur;
+    c->code = value ? value->code : AIL_EXC_RUNTIME;
+    c->msg[0] = 0;
+    if (value && value->n > 0) {
+        int64_t n = value->n < (int64_t)sizeof c->msg ? value->n : (int64_t)sizeof c->msg - 1;
+        memcpy(c->msg, value->p, (size_t)n);
+        c->msg[n] = 0;
+    }
+    ail_exception_release(value);
+    longjmp(c->jb, 1);
+}
 static int64_t ail_par_now(void) {
 #ifdef _WIN32
     LARGE_INTEGER f, t; QueryPerformanceFrequency(&f); QueryPerformanceCounter(&t);
@@ -28548,6 +28592,8 @@ static void ail_par_go_wide(ail_par_fn fn, void **args, int64_t lo, int64_t hi) 
         char msg[192];
         int code = J->fail_code;
         memcpy(msg, J->fail_msg, sizeof msg);
+        if (msg[0] && code)
+            ail_raise_value_adopt(ail_exception_new(code, (const uint8_t *)msg, (int64_t)strlen(msg), 1));
         if (msg[0]) ail_die(msg);
         ail_raise_named(code ? code : AIL_EXC_RUNTIME);
     }

@@ -5,9 +5,9 @@ such as ``(1 << 64) >> 64`` prints 1.  AIL integers are fixed width: a constant 
 value leaves int64 used to compile and then stop with ``integer overflow``.  The front end now
 refuses the outermost constant expression by name when its final value does not fit, on both
 builds.  Shifts whose final value fits (even when an intermediate leaves int64) keep their
-CPython behaviour when the code generator can fold that intermediate; a larger one is refused,
-so an in-range shift cannot hide an out-of-range power.  Zero shifts by any count and negative
-counts are unchanged.
+CPython behaviour when the code generator can fold that intermediate; a larger one is refused.
+The fold budget is shared with the pre190 reducer, so `((10 ** 64) ** 64) >> 100001` is now folded
+exactly to 0 instead of being refused.  Zero shifts by any count and negative counts are unchanged.
 """
 import os
 import subprocess
@@ -44,10 +44,6 @@ print(C.x)
     'assignment': '''X = True << 64
 print(X)
 ''',
-    'nested_power_under_shift': '''print(((10 ** 64) ** 64) >> 100001)
-''',
-    'nested_power_under_shift_100000': '''print(((10 ** 64) ** 64) >> 100000)
-''',
 }
 
 IN_RANGE = '''print(True << 0)
@@ -61,6 +57,8 @@ print(False >> 64)
 print((1 << 64) >> 64)
 print(1 << 64 >> 64)
 print((10 ** 64) >> 100000)
+print(((10 ** 64) ** 64) >> 100001)
+print(((10 ** 64) ** 64) >> 100000)
 print((1 << 63) - 1)
 print(2 ** 62 << 1 >> 1)
 try:

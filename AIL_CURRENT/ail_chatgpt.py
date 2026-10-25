@@ -148,10 +148,145 @@ def _const_expr_int(node, bounded=True):
     return value
 
 
+_CONST_FOLD_BITS = 1 << 20
+_CONST_FOLD_SPECIAL_BITS = 1 << 24
+
+
+def _const_fold_int(node, limit=_CONST_FOLD_BITS):
+    """The exact int a constant expression denotes under the code generator's fold budget.
+
+    This mirrors the pre190 folders: zero operands and the power bases 0/1/-1 are decided
+    before the size guard, and an exponent may use the larger special budget, so
+    `0 * (1 << 5000)`, `(-1) ** ((1 << 5000) + 1)` and `(1 << 5000) >> 5000` fold to their
+    in-range int64 results.  None means not constant, not an int, or an intermediate wider
+    than `limit` bits (the construct is then left to the folder's own refusal)."""
+    if isinstance(node, ast.Constant) and type(node.value) in (int, bool):
+        return node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert)):
+        value = _const_fold_int(node.operand, limit)
+        if value is None:
+            return None
+        if isinstance(node.op, ast.USub):
+            value = -value
+        elif isinstance(node.op, ast.Invert):
+            value = ~value
+        return value if value.bit_length() <= limit else None
+    if not isinstance(node, ast.BinOp):
+        return None
+    op = type(node.op)
+    if op is ast.Pow:
+        right = _const_fold_int(node.right, limit)
+        if right == 0:
+            left = _const_fold_int(node.left, limit)
+            if left is None:
+                left = _const_fold_int(node.left, _CONST_FOLD_SPECIAL_BITS)
+            return 1 if left is not None else None
+        left = _const_fold_int(node.left, limit)
+        if left in (0, 1, -1):
+            if right is None:
+                right = _const_fold_int(node.right, _CONST_FOLD_SPECIAL_BITS)
+            if right is not None and right >= 0:
+                if right == 0:
+                    return 1
+                if left == 0:
+                    return 0
+                if left == 1:
+                    return 1
+                return 1 if right % 2 == 0 else -1
+        if left is None or right is None:
+            return None
+    elif op is ast.Mult or op is ast.BitAnd:
+        left = _const_fold_int(node.left, limit)
+        right = _const_fold_int(node.right, limit)
+        if left == 0 or right == 0:
+            if left is None:
+                left = _const_fold_int(node.left, _CONST_FOLD_SPECIAL_BITS)
+            if right is None:
+                right = _const_fold_int(node.right, _CONST_FOLD_SPECIAL_BITS)
+            if left is None or right is None:
+                return None
+            return 0
+        if left is None or right is None:
+            return None
+    elif op is ast.LShift:
+        left = _const_fold_int(node.left, limit)
+        if left == 0:
+            right = _const_fold_int(node.right, limit)
+            if right is None:
+                right = _const_fold_int(node.right, _CONST_FOLD_SPECIAL_BITS)
+            if right is not None and right >= 0:
+                return 0
+        right = _const_fold_int(node.right, limit)
+        if left is None or right is None:
+            return None
+    else:
+        left = _const_fold_int(node.left, limit)
+        right = _const_fold_int(node.right, limit)
+        if left is None or right is None:
+            return None
+    try:
+        if op is ast.Pow:
+            if right < 0:
+                return None
+            if left == 0:
+                value = 1 if right == 0 else 0
+            elif left == 1:
+                value = 1
+            elif left == -1:
+                value = 1 if right % 2 == 0 else -1
+            elif right > limit or left.bit_length() * right > limit:
+                return None
+            else:
+                value = left ** right
+        elif op is ast.LShift:
+            if right < 0:
+                return None
+            if left == 0:
+                value = 0
+            elif right > limit or left.bit_length() + right > limit:
+                return None
+            else:
+                value = left << right
+        elif op is ast.RShift:
+            if right < 0:
+                return None
+            value = (0 if left >= 0 else -1) if right > limit else left >> right
+        elif op is ast.Mult:
+            if left == 0 or right == 0:
+                value = 0
+            elif left.bit_length() + right.bit_length() > limit:
+                return None
+            else:
+                value = left * right
+        elif op is ast.Add:
+            value = left + right
+        elif op is ast.Sub:
+            value = left - right
+        elif op is ast.FloorDiv:
+            if right == 0:
+                return None
+            value = left // right
+        elif op is ast.Mod:
+            if right == 0:
+                return None
+            value = left % right
+        elif op is ast.BitAnd:
+            value = left & right
+        elif op is ast.BitOr:
+            value = left | right
+        elif op is ast.BitXor:
+            value = left ^ right
+        else:
+            return None
+    except (ArithmeticError, ValueError):
+        return None
+    return value if value.bit_length() <= limit else None
+
+
 def _check_constant_out_of_range(node, parents, maxsplit, skip_assignment):
     if id(node) in maxsplit:
         return
-    value = _const_expr_int(node, bounded=False)
+    value = _const_fold_int(node)
     if value is None or _INT64_MIN <= value <= _INT64_MAX:
         return
     root = node
@@ -159,11 +294,11 @@ def _check_constant_out_of_range(node, parents, maxsplit, skip_assignment):
         parent = parents.get(root)
         if parent is None:
             break
-        current = _const_expr_int(parent, bounded=False)
-        if current is None or current.bit_length() > 4096:
+        current = _const_fold_int(parent)
+        if current is None:
             break
         root = parent
-    full = _const_expr_int(root, bounded=False)
+    full = _const_fold_int(root)
     if full is not None and _INT64_MIN <= full <= _INT64_MAX:
         return
     parent = parents.get(root)
@@ -304,6 +439,46 @@ def _maxsplit_constant_nodes(tree):
     return handled
 
 
+def _check_int64_abs_constants(tree, known):
+    """Refuse a constant ``abs(MIN)`` (2**63) by name.  AIL ints are fixed width, so the value
+    cannot be represented; CPython prints the bignum.  Only a builtin ``abs`` is considered,
+    and the argument must be statically known.  Other in-range constants fold as before, and
+    a value that reaches ``abs`` only at run time keeps the fixed-width trap."""
+    bound = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.arg):
+            bound.add(node.arg)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bound.add(node.id)
+        elif isinstance(node, ast.alias):
+            bound.add(node.asname or node.name.split('.')[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            bound.update(node.names)
+    if 'abs' in bound or 'abs' in known:
+        return
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'abs'):
+            continue
+        if len(node.args) != 1 or node.keywords or isinstance(node.args[0], ast.Starred):
+            continue
+        value = _constant_int(node.args[0], known)
+        if value is None:
+            try:
+                value = _const_expr_int(node.args[0], bounded=False)
+            except _Int64ConstantOverflow:
+                value = None
+        if value == _INT64_MIN:
+            error = ValueError(f'int64 constant expression out of range: {-(value)}')
+            error.source_line = node.lineno
+            error.source_column = node.col_offset
+            raise error
+
+
 def _check_int64_unary_constants(tree):
     """Refuse a statically known unary integer constant expression outside int64 by name.
     `-MIN` on a module constant or a nested literal compiles to the fixed-width trap on the
@@ -336,6 +511,141 @@ def _check_int64_unary_constants(tree):
             error.source_line = node.lineno
             error.source_column = node.col_offset
             raise error
+    _check_int64_abs_constants(tree, known)
+
+
+_CONST_INT_TOO_BIG = object()
+_CONST_INT_BITS = 4096
+
+
+def _constant_int_exact(node):
+    """The exact int a constant expression denotes, with a guard against huge intermediates.
+    Pow bases 0/1/-1 and a zero left shift are decided before the 4096-bit guard, since their
+    results fit int64 however large the exponent or shift is."""
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        return True, node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert)):
+        ok, value = _constant_int_exact(node.operand)
+        if not ok:
+            return False, None
+        if value is _CONST_INT_TOO_BIG:
+            return True, _CONST_INT_TOO_BIG
+        if isinstance(node.op, ast.USub):
+            return True, -value
+        if isinstance(node.op, ast.UAdd):
+            return True, value
+        return True, ~value
+    if not isinstance(node, ast.BinOp) or type(node.op) not in (
+            ast.Add, ast.Sub, ast.Mult, ast.Pow, ast.LShift, ast.RShift,
+            ast.FloorDiv, ast.Mod, ast.BitAnd, ast.BitOr, ast.BitXor):
+        return False, None
+    left_ok, left = _constant_int_exact(node.left)
+    right_ok, right = _constant_int_exact(node.right)
+    if not (left_ok and right_ok):
+        return False, None
+    if left is _CONST_INT_TOO_BIG or right is _CONST_INT_TOO_BIG:
+        return True, _CONST_INT_TOO_BIG
+    try:
+        if isinstance(node.op, ast.Pow):
+            if right < 0:
+                return False, None
+            if left == 0:
+                value = 1 if right == 0 else 0
+            elif left == 1:
+                value = 1
+            elif left == -1:
+                value = 1 if right % 2 == 0 else -1
+            elif right > _CONST_INT_BITS or left.bit_length() * right > _CONST_INT_BITS:
+                return True, _CONST_INT_TOO_BIG
+            else:
+                value = left ** right
+        elif isinstance(node.op, ast.LShift):
+            if right < 0:
+                return False, None
+            if left == 0:
+                value = 0
+            elif right > _CONST_INT_BITS or left.bit_length() + right > _CONST_INT_BITS:
+                return True, _CONST_INT_TOO_BIG
+            else:
+                value = left << right
+        elif isinstance(node.op, ast.RShift):
+            if right < 0:
+                return False, None
+            value = (0 if left >= 0 else -1) if right > _CONST_INT_BITS else left >> right
+        elif isinstance(node.op, (ast.FloorDiv, ast.Mod)):
+            if right == 0:
+                return False, None
+            value = left // right if isinstance(node.op, ast.FloorDiv) else left % right
+        elif isinstance(node.op, ast.Mult):
+            if left == 0 or right == 0:
+                value = 0
+            elif left.bit_length() + right.bit_length() > _CONST_INT_BITS:
+                return True, _CONST_INT_TOO_BIG
+            else:
+                value = left * right
+        elif isinstance(node.op, ast.Add):
+            value = left + right
+        elif isinstance(node.op, ast.Sub):
+            value = left - right
+        elif isinstance(node.op, ast.BitAnd):
+            value = left & right
+        elif isinstance(node.op, ast.BitOr):
+            value = left | right
+        else:
+            value = left ^ right
+    except (ArithmeticError, ValueError, OverflowError):
+        return True, _CONST_INT_TOO_BIG
+    return True, value
+
+
+def _check_int64_constants(tree):
+    """Refuse a constant integer expression outside int64 in a module/class assignment or a
+    default argument, where the construct used to compile and trap at run time. Function and
+    lambda bodies are left to the existing run-time stop and to _check_int64_literals, and a
+    class body keeps _check_constant_power's own wording for a bare `**` value it can fold;
+    `_const_expr_int` cannot fold an exponent above 64, so that case is checked here."""
+    def check_value(node):
+        ok, value = _constant_int_exact(node)
+        if not ok:
+            return
+        if value is not _CONST_INT_TOO_BIG and -(1 << 63) <= value < 1 << 63:
+            return
+        shown = 'too large' if value is _CONST_INT_TOO_BIG else value
+        error = ValueError(f'int64 constant expression out of range: {shown}')
+        error.source_line = getattr(node, 'lineno', None)
+        error.source_column = getattr(node, 'col_offset', None)
+        raise error
+
+    def defers_to_power(value, in_class):
+        return (in_class and isinstance(value, ast.BinOp) and isinstance(value.op, ast.Pow)
+                and _const_expr_int(value, bounded=False) is not None)
+
+    def walk(node, in_class=False):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            for default in list(node.args.defaults) + [d for d in node.args.kw_defaults if d is not None]:
+                check_value(default)
+            return
+        if isinstance(node, ast.ClassDef):
+            for base in node.bases:
+                walk(base)
+            for keyword in node.keywords:
+                walk(keyword.value)
+            if node.bases:
+                return
+            for statement in node.body:
+                walk(statement, True)
+            return
+        if isinstance(node, ast.Assign):
+            if not defers_to_power(node.value, in_class):
+                check_value(node.value)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            if not defers_to_power(node.value, in_class):
+                check_value(node.value)
+        for child in ast.iter_child_nodes(node):
+            walk(child, in_class)
+
+    for statement in tree.body:
+        walk(statement)
 
 
 def _returns_on_every_path(statements):
@@ -545,6 +855,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 if local_imports:
                     _check_importable(tree)
             if not declarations_only:
+                _check_int64_constants(tree)
                 _check_int64_literals(tree)
                 _check_int64_unary_constants(tree)
             if merged is not None and merged.positions:

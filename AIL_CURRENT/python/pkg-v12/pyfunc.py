@@ -586,7 +586,33 @@ _I64_MIN = -(1 << 63)
 _I64_MAX = (1 << 63) - 1
 _MAXSPLIT_NOT_CONST = object()
 _MAXSPLIT_TOO_BIG = object()
-_MAXSPLIT_BITS = 4096
+_MAXSPLIT_BITS = 1 << 20
+_MAXSPLIT_SPECIAL_BITS = 1 << 24
+
+
+def _pow_within_maxsplit_bits(base, exponent):
+    """Would `base ** exponent` be at most _MAXSPLIT_BITS wide, without building it?
+
+    `base.bit_length() * exponent` overshoots: `2**65 ** 63` is exactly 4096 bits (the
+    reviewer's `((2**63 * 4)**63) >> 4095` reduces to 1), but the product is 4158.  Square
+    and multiply with a cap so the test is exact and never allocates more than the limit."""
+    if base < 0:
+        base = -base
+    cap = 1 << _MAXSPLIT_BITS
+    result = 1
+    power = base
+    remaining = exponent
+    while remaining:
+        if remaining & 1:
+            result *= power
+            if result >= cap:
+                return False
+        remaining >>= 1
+        if remaining:
+            power *= power
+            if power >= cap:
+                return False
+    return True
 
 
 def _maxsplit_const(node):
@@ -595,7 +621,10 @@ def _maxsplit_const(node):
     `str.split`/`rsplit` take their maxsplit through the same int64 expression emitter as every
     other int, so `2**63 - 1` overflowed at run time on the intermediate power even though the
     final limit fits. Fold the expression here; an exponent that must leave int64 is recognised
-    without evaluating it (`2**100000000` is never built)."""
+    without evaluating it (`2**100000000` is never built).
+
+    A zero operand (or a power with base 0/1/-1 and a large exponent) is decided before the size
+    guard, so a large intermediate that reduces to an int64 maxsplit is not refused by name."""
     if isinstance(node, ast.Constant):
         return node.value if type(node.value) is int else _MAXSPLIT_NOT_CONST
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
@@ -611,56 +640,90 @@ def _maxsplit_const(node):
     if op not in (ast.Add, ast.Sub, ast.Mult, ast.Pow, ast.LShift, ast.RShift,
                   ast.FloorDiv, ast.Mod, ast.BitAnd, ast.BitOr, ast.BitXor):
         return _MAXSPLIT_NOT_CONST
-    left = _maxsplit_const(node.left)
-    right = _maxsplit_const(node.right)
-    if left is _MAXSPLIT_NOT_CONST or right is _MAXSPLIT_NOT_CONST:
-        return _MAXSPLIT_NOT_CONST
-    if left is _MAXSPLIT_TOO_BIG or right is _MAXSPLIT_TOO_BIG:
-        return _MAXSPLIT_TOO_BIG
     if op is ast.Pow:
-        if right < 0:
+        left = _maxsplit_const(node.left)
+        right = _maxsplit_const(node.right)
+        if left is _MAXSPLIT_NOT_CONST:
             return _MAXSPLIT_NOT_CONST
         if right == 0:
             return 1
         if left in (0, 1, -1):
+            if right is _MAXSPLIT_TOO_BIG:
+                right = int_constant(node.right, _MAXSPLIT_SPECIAL_BITS)
+                if right is None:
+                    right = _MAXSPLIT_TOO_BIG
+            if right is not _MAXSPLIT_NOT_CONST and right is not _MAXSPLIT_TOO_BIG \
+                    and right >= 0:
+                if right == 0:
+                    return 1
+                if left == 0:
+                    return 0
+                if left == 1:
+                    return 1
+                return 1 if right % 2 == 0 else -1
+        if right is _MAXSPLIT_NOT_CONST:
+            return _MAXSPLIT_NOT_CONST
+        if left is _MAXSPLIT_TOO_BIG or right is _MAXSPLIT_TOO_BIG:
+            return _MAXSPLIT_TOO_BIG
+        if right < 0:
+            return _MAXSPLIT_NOT_CONST
+        if left in (0, 1, -1):
             return left ** right if left != -1 else (-1 if right & 1 else 1)
-        if right >= 64:
+        if right >= _MAXSPLIT_BITS or abs(left).bit_length() > _MAXSPLIT_BITS:
+            return _MAXSPLIT_TOO_BIG
+        if not _pow_within_maxsplit_bits(left, right):
             return _MAXSPLIT_TOO_BIG
         value = left ** right
-    elif op is ast.LShift:
-        if right < 0:
-            return _MAXSPLIT_NOT_CONST
-        if left == 0:
-            return 0
-        if right >= _MAXSPLIT_BITS or left.bit_length() + right > _MAXSPLIT_BITS:
-            return _MAXSPLIT_TOO_BIG
-        value = left << right
-    elif op is ast.RShift:
-        if right < 0:
-            return _MAXSPLIT_NOT_CONST
-        if right >= _MAXSPLIT_BITS:
-            return 0 if left >= 0 else -1
-        value = left >> right
-    elif op is ast.FloorDiv or op is ast.Mod:
-        if right == 0:
-            return _MAXSPLIT_NOT_CONST
-        value = left // right if op is ast.FloorDiv else left % right
-    elif op is ast.Mult:
+    elif op is ast.Mult or op is ast.BitAnd:
+        left = _maxsplit_const(node.left)
+        right = _maxsplit_const(node.right)
         if left == 0 or right == 0:
+            if left is _MAXSPLIT_NOT_CONST or right is _MAXSPLIT_NOT_CONST:
+                return _MAXSPLIT_NOT_CONST
             return 0
-        if left.bit_length() + right.bit_length() > _MAXSPLIT_BITS:
+        if left is _MAXSPLIT_NOT_CONST or right is _MAXSPLIT_NOT_CONST:
+            return _MAXSPLIT_NOT_CONST
+        if left is _MAXSPLIT_TOO_BIG or right is _MAXSPLIT_TOO_BIG:
             return _MAXSPLIT_TOO_BIG
-        value = left * right
-    elif op is ast.Add:
-        value = left + right
-    elif op is ast.Sub:
-        value = left - right
-    elif op is ast.BitAnd:
-        value = left & right
-    elif op is ast.BitOr:
-        value = left | right
+        if op is ast.Mult:
+            if left.bit_length() + right.bit_length() > _MAXSPLIT_BITS:
+                return _MAXSPLIT_TOO_BIG
+            value = left * right
+        else:
+            value = left & right
     else:
-        value = left ^ right
+        left = _maxsplit_const(node.left)
+        right = _maxsplit_const(node.right)
+        if left is _MAXSPLIT_NOT_CONST or right is _MAXSPLIT_NOT_CONST:
+            return _MAXSPLIT_NOT_CONST
+        if left is _MAXSPLIT_TOO_BIG or right is _MAXSPLIT_TOO_BIG:
+            return _MAXSPLIT_TOO_BIG
+        if op is ast.LShift:
+            if right < 0:
+                return _MAXSPLIT_NOT_CONST
+            if left == 0:
+                return 0
+            if right >= _MAXSPLIT_BITS or left.bit_length() + right > _MAXSPLIT_BITS:
+                return _MAXSPLIT_TOO_BIG
+            value = left << right
+        elif op is ast.RShift:
+            if right < 0:
+                return _MAXSPLIT_NOT_CONST
+            if right >= _MAXSPLIT_BITS:
+                return 0 if left >= 0 else -1
+            value = left >> right
+        elif op is ast.FloorDiv or op is ast.Mod:
+            if right == 0:
+                return _MAXSPLIT_NOT_CONST
+            value = left // right if op is ast.FloorDiv else left % right
+        elif op is ast.Add:
+            value = left + right
+        elif op is ast.Sub:
+            value = left - right
+        elif op is ast.BitOr:
+            value = left | right
+        else:
+            value = left ^ right
     return _MAXSPLIT_TOO_BIG if value.bit_length() > _MAXSPLIT_BITS else value
 
 
@@ -674,6 +737,103 @@ def fold_maxsplit_constant(node):
             'the str.split()/rsplit() maxsplit constant does not fit in a 64-bit signed '
             'integer, and an integer here is one (SEMANTICS section 1); CPython accepts it '
             'exactly and raises OverflowError only at run time')
+        refusal.source_line = getattr(node, 'lineno', None)
+        raise refusal
+    return value
+
+
+_CONST_INT_NOT = object()
+_CONST_INT_BIG = object()
+_CONST_INT_BITS = 4096
+
+
+def _const_int_expr(node):
+    """The exact value of a constant int expression, or a not-constant/too-big sentinel.
+
+    AIL integers are int64 (SEMANTICS section 1), so a constant expression that leaves that range
+    used to compile and then stop with `integer overflow` at run time. Evaluate it here without
+    building an unbounded intermediate (`2**100000000` is never computed); an expression that
+    reaches int64 exactly on the way, such as `2**63 - 1`, is kept."""
+    if isinstance(node, ast.Constant):
+        return node.value if type(node.value) is int else _CONST_INT_NOT
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
+        value = _const_int_expr(node.operand)
+        if value is _CONST_INT_NOT or value is _CONST_INT_BIG:
+            return value
+        if isinstance(node.op, ast.USub):
+            return -value
+        return value if isinstance(node.op, ast.UAdd) else ~value
+    if not isinstance(node, ast.BinOp):
+        return _CONST_INT_NOT
+    op = type(node.op)
+    if op not in (ast.Add, ast.Sub, ast.Mult, ast.Pow, ast.LShift, ast.RShift,
+                  ast.FloorDiv, ast.Mod, ast.BitAnd, ast.BitOr, ast.BitXor):
+        return _CONST_INT_NOT
+    left = _const_int_expr(node.left)
+    right = _const_int_expr(node.right)
+    if left is _CONST_INT_NOT or right is _CONST_INT_NOT:
+        return _CONST_INT_NOT
+    if left is _CONST_INT_BIG or right is _CONST_INT_BIG:
+        return _CONST_INT_BIG
+    if op is ast.Pow:
+        if right < 0:
+            return _CONST_INT_NOT            # CPython's result is a float
+        if right == 0:
+            return 1
+        if left in (0, 1, -1):
+            return left ** right if left != -1 else (-1 if right & 1 else 1)
+        if left.bit_length() * right > _CONST_INT_BITS:
+            return _CONST_INT_BIG
+        value = left ** right
+    elif op is ast.LShift:
+        if right < 0:
+            return _CONST_INT_NOT            # the runtime raises ValueError for a negative count
+        if left == 0:
+            return 0
+        if right >= _CONST_INT_BITS or left.bit_length() + right > _CONST_INT_BITS:
+            return _CONST_INT_BIG
+        value = left << right
+    elif op is ast.RShift:
+        if right < 0:
+            return _CONST_INT_NOT
+        if right >= _CONST_INT_BITS:
+            return 0 if left >= 0 else -1
+        value = left >> right
+    elif op is ast.FloorDiv or op is ast.Mod:
+        if right == 0:
+            return _CONST_INT_NOT            # the runtime raises ZeroDivisionError
+        value = left // right if op is ast.FloorDiv else left % right
+    elif op is ast.Mult:
+        if left == 0 or right == 0:
+            return 0
+        if left.bit_length() + right.bit_length() > _CONST_INT_BITS:
+            return _CONST_INT_BIG
+        value = left * right
+    elif op is ast.Add:
+        value = left + right
+    elif op is ast.Sub:
+        value = left - right
+    elif op is ast.BitAnd:
+        value = left & right
+    elif op is ast.BitOr:
+        value = left | right
+    else:
+        value = left ^ right
+    return _CONST_INT_BIG if value.bit_length() > _CONST_INT_BITS else value
+
+
+def fold_int_constant(node):
+    """The exact int value of a constant expression, or None when it is not one.
+
+    A constant expression outside int64 is refused by name here, at compile time, instead of
+    compiling to arithmetic that stops with `integer overflow` when the program runs."""
+    value = _const_int_expr(node)
+    if value is _CONST_INT_NOT:
+        return None
+    if value is _CONST_INT_BIG or not _I64_MIN <= value <= _I64_MAX:
+        refusal = Unsupported(
+            'an integer constant expression here is outside the signed 64-bit range of an '
+            'AIL int (SEMANTICS section 1); CPython computes it exactly with an unbounded int')
         refusal.source_line = getattr(node, 'lineno', None)
         raise refusal
     return value
@@ -12771,6 +12931,10 @@ def _member_nan_check(node, ctx, ind):
 def _expr(node, ctx):
     if dunders.is_exc_code(node):
         return '((int64_t)ail_handled_code)'   # the code of the exception being handled (dunders.py)
+    if isinstance(node, (ast.BinOp, ast.UnaryOp)):
+        folded = fold_int_constant(node)
+        if folded is not None:
+            return _c_int_literal(folded)
     if isinstance(node,ast.Compare) and all(type(op) in CMPOP for op in node.ops) and _numeric_expression_needed(node,ctx) and all(_etype(value,ctx) in NUM for value in (node.left,*node.comparators)):
         return _numeric_compare(node,ctx)
     if (isinstance(node,ast.BinOp) and isinstance(node.op,(ast.Add,ast.Sub,ast.Mult,ast.Div,ast.FloorDiv,ast.Mod)) or isinstance(node,ast.UnaryOp) and isinstance(node.op,(ast.USub,ast.UAdd))) and _numeric_expression_needed(node,ctx):
@@ -37693,3 +37857,5 @@ if _QC_MODE != '0':
     _fast_ast.__dict__.update(ast.__dict__)
     _fast_ast.walk = _fast_walk
     ast = _fast_ast
+
+_CONST_INT_BITS = _MAXSPLIT_BITS

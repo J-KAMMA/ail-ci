@@ -28,6 +28,12 @@ class _AilExcType:
         return self.__repr__()
 
 
+class _AilTraceback:
+    # the third argument of __exit__ when the body raised: AIL has no traceback object, so it is only a
+    # non-None stand-in; withlib.py refuses any use other than an `is None` / `is not None` test
+    pass
+
+
 class _AilGenCM:
     # @contextmanager: the generator's `yield` statements were rewritten (withlib.py) so that send(exc) raises exc there
     def __init__(self, gen):
