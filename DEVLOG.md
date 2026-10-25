@@ -1,3 +1,16 @@
+## 2026-10-25 - maxsplit power folding (job-pre195-10251916)
+
+The pre97 maxsplit folder rejected any power with an exponent of at least 64 before looking at
+the rest of the constant expression, so `"a b c".split(" ", 2**100 // 2**80)` (final value
+2**20) was refused on both builds while CPython runs it.  The power branch now uses the same
+4096-bit limit as the compiler's other constant folder, so an intermediate may be wider than
+int64; the whole expression is folded exactly, and a final value outside int64 is still refused
+by name.  `test_ail_pre195.py` covers literals, a negative result, reduced powers, shifts, the
+fold-boundary exponent, the out-of-int64 refusals, and the value through an argument, a list
+item, an attribute, a dict value and a local on both builds.  Probes p1-p7 in `/tmp/probes`
+matched CPython or were refused by name; an intermediate above the fold limit
+(`2**2049 // 2**2029`) is refused by name where CPython computes it.
+
 ## 2026-10-25 - int(s, base) message GC rooting (job-pre180-10251520)
 
 Review follow-up. The rewritten general-path `ail__int_badlit` built the message head string,

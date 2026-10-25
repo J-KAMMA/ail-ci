@@ -624,7 +624,7 @@ def _maxsplit_const(node):
             return 1
         if left in (0, 1, -1):
             return left ** right if left != -1 else (-1 if right & 1 else 1)
-        if right >= 64:
+        if left.bit_length() * right > _MAXSPLIT_BITS:
             return _MAXSPLIT_TOO_BIG
         value = left ** right
     elif op is ast.LShift:
