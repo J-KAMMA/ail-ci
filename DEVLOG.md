@@ -1,3 +1,17 @@
+## 2026-10-25 - review fix: float() message sized from the class name (job-pre240-10260355)
+
+The review of `34dbbf7` found that the fixed 128-byte buffer still cut a legal class name from 69
+characters on (`rB_min.py`, a 70-character class).  Both `ail_to_float` sites now build the
+message from the class-aware type name (the v2 runtime used by both tested builds) or the type
+name (the v1 runtime) with a dynamically sized buffer, and apply CPython's own `%.200s` cut: names
+of 69, 70 and 200 characters print in full, and 201/300 match CPython's truncation.  The dunderrt
+anchors follow the new v2 text.  Probes in `/tmp/probes`: `longname.py`, `pre240_long.py` (names of
+1, 63, 64, 69, 70, 127, 128, 129, 200 and 300 characters) and `pre240_types.py` cover direct calls,
+arguments, list items, attributes, dict values, aliases, empty/negative values, int64 bounds,
+valid and invalid strings, callables and classes on both builds; all match CPython.  The boundary
+cases were added to `test_ail_pre240.py` (3 tests, both builds).  Required tests were run on the
+final commit; the report has the results.
+
 ## 2026-10-25 - float() wrong-type message (job-pre240-10260355)
 
 The first still-differing item from the rbrbrbmemsafe2 review's pre-existing list was `float()` on a

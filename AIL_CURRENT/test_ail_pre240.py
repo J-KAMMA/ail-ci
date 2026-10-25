@@ -6,12 +6,14 @@ CPython 3.12 says `... a string or a real number, ...`.  A user-class instance w
 `instance` instead of its class, and the 80-byte message buffer cut a long type name such as
 `builtin_function_or_method`.
 
-Both builds now use CPython's wording and class-aware type name for the wrong-type branch; the
-buffer is large enough for the longest builtin type name.  Valid int/bool/float/str conversions
-are unchanged.  The cases below are direct calls and values reaching the conversion through an
-argument, a list item, an attribute, a dict value, an alias, a function/class value and classes
-that define `__float__`, `__index__`, `__int__` or an operator hook (which turns on the dunder
-dispatch), on both builds.
+Both builds now use CPython's wording and class-aware type name for the wrong-type branch.  The
+message is sized from the name and capped at the 200 characters CPython itself keeps (its
+`%.200s`), so a name up to 200 characters prints in full and a longer one is truncated exactly
+as CPython does.  Valid int/bool/float/str conversions are unchanged.  The cases below are
+direct calls and values reaching the conversion through an argument, a list item, an attribute,
+a dict value, an alias, a function/class value, class names from 1 to 300 characters, and
+classes that define `__float__`, `__index__`, `__int__` or an operator hook (which turns on the
+dunder dispatch), on both builds.
 """
 import os
 import subprocess
@@ -143,6 +145,50 @@ def main():
 main()
 '''
 
+LONG = r'''class CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC:
+    pass
+class CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC:
+    pass
+class CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC:
+    pass
+class CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC:
+    pass
+class CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC:
+    pass
+
+def show(label, fn):
+    try:
+        print(label, repr(fn()))
+    except Exception as e:
+        print(label, type(e).__name__, str(e))
+
+
+def conv(v):
+    return float(v)
+
+
+class Holder:
+    def __init__(self, v):
+        self.v = v
+
+
+def main():
+    values = [CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC(), CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC(), CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC(), CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC(), CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC()]
+    labels = ['69', '70', '200', '201', '300']
+    for label, v in zip(labels, values):
+        show(label + "-direct", lambda v=v: float(v))
+        show(label + "-arg", lambda v=v: conv(v))
+        show(label + "-list", lambda v=v: float([v][0]))
+        show(label + "-dict", lambda v=v: float({"k": v}["k"]))
+        show(label + "-attr", lambda v=v: float(Holder(v).v))
+        alias = [v]
+        alias2 = alias
+        show(label + "-alias", lambda a=alias2: float(a[0]))
+
+
+main()
+'''
+
 
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
@@ -186,6 +232,9 @@ class Pre240Tests(unittest.TestCase):
 
     def test_float_wrong_type_with_dunder_dispatch(self):
         self.check('hooks', HOOKS)
+
+    def test_float_wrong_type_long_class_names(self):
+        self.check('longnames', LONG)
 
 
 if __name__ == '__main__':
