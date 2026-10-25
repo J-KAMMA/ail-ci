@@ -129,6 +129,16 @@ build to the general path and makes `AIL_NO_GENERAL=1` report the refusal. Added
 `test_ail_pre168.py`: literal and variable `r`, a return, pools and `r` from an argument /
 list item / attribute / dict value, int, float, str, tuple and empty pools, all compared with
 CPython on the general and default builds, plus the typed refusal.
+## 2026-10-24 -- pre173: bytes start/end bounds use CPython's slice-index rules
+
+The general path's bytes/bytearray `find`, `rfind`, `count`, `index`, `rindex`, `startswith` and
+`endswith` read the optional start/end bounds straight from the boxed value, so `b"abc".find(b"a",
+"x")` raised `'<' not supported between instances of 'str' and 'int'` instead of CPython's
+`slice indices must be integers or None or have an __index__ method`.  One C primitive
+(`ail2b_index` in safetyrt.py) now converts a bound exactly as `_PyEval_SliceIndex` does: an int, a
+bool or an instance's `__index__` (with CPython's `__index__ returned non-int (type ...)` when the
+result is not an int); `None` keeps its default.  `_ail_b_rng` keeps the clamping, and all seven
+methods share it.  `test_ail_pre173.py` covers both builds and keeps the case.
 
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
 

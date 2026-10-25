@@ -207,6 +207,23 @@ static inline ail_st ail2b_need(ail_ctx *cx, ail_obj s) {
     if (s.tag != AIL_T_STR) return ail_raise_c(cx, AIL_B_TYPEERROR, "a bytes-like object is required");
     return AIL_OK;
 }
+/* a start/end bound of find/rfind/count/index/...: CPython's _PyEval_SliceIndex (an int, a bool,
+   or an instance's __index__); None is handled by the caller */
+static inline ail_st ail2b_index(ail_ctx *cx, ail_obj *out, ail_obj x) {
+    if (x.tag == AIL_T_INT || x.tag == AIL_T_BOOL) { *out = ail_box_int(x.i); return AIL_OK; }
+    if (x.tag == AIL_T_INST) {
+        ail_d1_fn f = ail_dun1(x, AIL_D1_INDEX);
+        if (f) {
+            ail_obj r; ail_st st = f(cx, &r, x);
+            if (st != AIL_OK) return st;
+            if (r.tag == AIL_T_INT || r.tag == AIL_T_BOOL) { *out = ail_box_int(r.i); return AIL_OK; }
+            char buf[160];
+            snprintf(buf, sizeof buf, "__index__ returned non-int (type %s)", ail__tname_c(r));
+            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+        }
+    }
+    return ail_raise_c(cx, AIL_B_TYPEERROR, "slice indices must be integers or None or have an __index__ method");
+}
 /* sys.stdin.buffer.read(n): n < 0 reads to the end */
 static inline ail_st ail2b_stdin(ail_ctx *cx, ail_obj *out, ail_obj n) {
     ail_st st = ail2_stdin_flush(cx);
@@ -2155,6 +2172,7 @@ PRIMS = {
     '_ail_b_decode': ('ail2b_decode(cx, &{t}, {a0}, {a1}, {a2})', 3, 'bytes'),
     '_ail_b_from_ints': ('ail2b_from_ints(cx, &{t}, {a0})', 1, 'bytes'),
     '_ail_b_ints': ('ail2b_ints(cx, &{t}, {a0})', 1, 'bytes'),
+    '_ail_b_index': ('ail2b_index(cx, &{t}, {a0})', 1, 'bytes'),
     '_ail_b_repr': ('ail2b_repr(cx, &{t}, {a0})', 1, 'bytes'),
     '_ail_b_case': ('ail2b_case(cx, &{t}, {a0}, {a1})', 2, 'bytes'),
     '_ail_b_pred': ('ail2b_pred(cx, &{t}, {a0}, {a1})', 2, 'bytes'),
