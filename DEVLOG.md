@@ -1,3 +1,23 @@
+## 2026-10-25 - local constant expression outside int64 is refused by name (job-pre235-10260331)
+
+The first still-differing item in the pre216 review was the reviewer's own `r3_neg` probe: with
+`lo = -9223372036854775807 - 1` and `hi = 9223372036854775807` bound in a function, `lo - 1` and
+`hi + 1` compiled on both builds and stopped at run time with an uncatchable `integer overflow`,
+while CPython prints the bignums `-9223372036854775809` and `9223372036854775808`.  A new
+front-end check folds a local name bound exactly once from an in-range constant expression (and a
+module constant) and refuses a unary or binary expression using it that leaves int64, with the
+existing `int64 constant expression out of range` wording and exit 2.  A parameter or a rebound
+local is not folded, and in-range arithmetic keeps working.  The construct is caught wherever it
+appears in the scope: as an argument, a list item, an attribute assignment or a dict value.
+Values that only reach the arithmetic through a parameter or a container read keep the old
+fixed-width run-time trap (the AIL int64 limit).
+
+Probes in `/tmp/probes`: `p235_local_min`, `p235_local_max`, `p235_module`, `p235_alias`,
+`p235_delivery` (argument), `p235_list_item`, `p235_attribute`, `p235_dict_value`, `p235_unary`
+and `p235_multiply` are refused by name on both builds; `p235_inrange` and `p235_shadow` match
+CPython on both builds.  Added `AIL_CURRENT/test_ail_pre235.py` and registered it in
+`ail_check.MODULES` and the ci shards.
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a

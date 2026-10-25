@@ -325,6 +325,92 @@ def _check_int64_abs_constants(tree, known):
             raise error
 
 
+def _check_int64_constant_uses(tree, module_known):
+    """Refuse a statically known local constant expression outside int64 by name.
+
+    A local assigned once from a constant expression is a constant; using it in arithmetic that
+    leaves int64 stops at run time with `integer overflow`, while CPython keeps the bignum.  The
+    construct (`lo - 1`, `hi + 1`, `-lo`, ...) is refused wherever it appears in the scope.  Only
+    names bound exactly once and not parameters are folded, so a rebound or shadowed name keeps
+    its old behaviour."""
+    def bindings(body):
+        stores, parameters, declared_global = {}, set(), set()
+        stack = list(body)
+        while stack:
+            node = stack.pop()
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                stores[node.name] = stores.get(node.name, 0) + 1
+                continue
+            if isinstance(node, ast.ClassDef):
+                stores[node.name] = stores.get(node.name, 0) + 1
+                continue
+            if isinstance(node, ast.Lambda):
+                continue
+            if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+                stores[node.id] = stores.get(node.id, 0) + 1
+            elif isinstance(node, ast.arg):
+                parameters.add(node.arg)
+            elif isinstance(node, (ast.Global, ast.Nonlocal)):
+                declared_global.update(node.names)
+            stack.extend(ast.iter_child_nodes(node))
+        return stores, parameters, declared_global
+
+    def refuse(node, value):
+        error = ValueError(f'int64 constant expression out of range: {value}')
+        error.source_line = node.lineno
+        error.source_column = node.col_offset
+        raise error
+
+    def check_expression(node, known):
+        if not isinstance(node, (ast.BinOp, ast.UnaryOp)):
+            return
+        if not any(isinstance(inner, ast.Name) and known.get(inner.id) is not None
+                   for inner in ast.walk(node)):
+            return
+        value = _constant_int(node, known)
+        if value is not None and not _INT64_MIN <= value <= _INT64_MAX:
+            refuse(node, value)
+
+    def scan_statement(statement, known):
+        stack = [statement]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda,
+                                 ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+                continue
+            check_expression(node, known)
+            stack.extend(ast.iter_child_nodes(node))
+
+    def scan_scope(body, base, shadow):
+        stores, parameters, declared_global = bindings(body)
+        known = dict(base)
+        if shadow:
+            for name in stores:
+                if name not in declared_global:
+                    known[name] = None
+            for name in parameters:
+                known[name] = None
+        for statement in body:
+            scan_statement(statement, known)
+            if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+                continue
+            target = statement.targets[0]
+            if not isinstance(target, ast.Name):
+                continue
+            name = target.id
+            if (stores.get(name) != 1 or name in parameters
+                    or name in declared_global):
+                continue
+            value = _constant_int(statement.value, known)
+            if value is not None and _INT64_MIN <= value <= _INT64_MAX:
+                known[name] = value
+
+    scan_scope(tree.body, module_known, False)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            scan_scope(node.body, module_known, True)
+
+
 def _check_int64_unary_constants(tree):
     """Refuse a statically known unary integer constant expression outside int64 by name.
     `-MIN` on a module constant or a nested literal compiles to the fixed-width trap on the
@@ -358,6 +444,7 @@ def _check_int64_unary_constants(tree):
             error.source_column = node.col_offset
             raise error
     _check_int64_abs_constants(tree, known)
+    _check_int64_constant_uses(tree, known)
 
 
 _CONST_INT_TOO_BIG = object()
