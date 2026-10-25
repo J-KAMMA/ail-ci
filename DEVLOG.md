@@ -1,3 +1,18 @@
+## 2026-10-25 -- pre183 reapply: builtin/type tuple-member names, bytes membership (job-rbpre183-10252048)
+
+Re-applied the accepted pre183 change on this tree. The bytes/bytearray membership message is
+already fixed here (the current prelude's `_ail_bcontains` keeps the integer-byte path and uses
+the bytes-like text for other operands, as the pre114 row records), so no prelude edit was needed.
+The outstanding part, naming a builtin-function tuple member in `str.startswith`/`endswith` as
+`builtin_function_or_method` (and the type-valued `bool` as `type`) instead of `function`, is now
+applied: the lowerer marks the generated lambda, the FUNC object carries the builtin kind, and
+`ail__tname_c` uses it. User-defined functions still name `function`. Error-only paths.
+
+Probes in `/tmp/probes` covered literals, variables, arguments, list items, dict values and
+attributes, both methods, the scalar form, an early matching member, invalid/negative windows,
+empty tuples, `bool` and `len`, and user-defined functions, on both `cmp.sh` builds; all match
+CPython. `test_ail_pre183.py` keeps the cases.
+
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
