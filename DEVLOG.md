@@ -1,3 +1,19 @@
+## 2026-10-25 - computed `%` format string formats at run time (job-pre220-10252345)
+
+The first still-differing item from the `rbrbmemsafe2` review was runtime `%` with a non-literal
+format: `fmt % value` through a name, argument, list item, attribute or dict value raised
+`TypeError: unsupported operand type(s) for %` on both builds, where CPython formats it. The
+general path only routed a str of unknown kind to the run-time formatter when the right operand
+was a tuple/dict (or an enum-like value in a program with classes), so a scalar right operand fell
+through to `ail_op_mod`. `pyboxed2.expr_BinOp` now routes every str-or-unknown left operand
+through the run-time tag check: a str formats with `ail2f_percent`, anything else keeps
+`ail_op_mod` (int/float/bool modulo, zero division and a user `__mod__`/`__rmod__` are unchanged).
+
+`test_ail_pre220.py` covers scalar and tuple right operands, every common directive, values through
+an argument, list item, attribute, dict value and alias, the int/float/bool/None boundaries and a
+user `__mod__`, on both builds. The probes `p_pct_nonliteral`, `p_pct_more` and `p_mod_regress`
+match CPython on g and d; the pre-existing user-object repr address and the `None % int` message
+text were kept out of the regression probe.
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
