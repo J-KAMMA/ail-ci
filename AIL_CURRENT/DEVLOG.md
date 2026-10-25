@@ -1,3 +1,22 @@
+## 2026-10-25 - pre255: class constant routes through a list item, attribute or dict value (job-pre255-10260535)
+
+The first item the pre227 review listed as already present before that job was the class-level
+constant built through a list item, attribute or dict value: `N = 2**62; xs = [N]; class C: X =
+xs[0] * 4` (and the `d["n"]` / `box.n` forms) kept checked int64 arithmetic in the class body,
+so it stopped with `integer overflow` where CPython prints the bignum.  `fold_constants` now
+refuses such a class-level constant expression by name at compile time on both builds
+(`not in the subset: a class-level constant built through a list item, attribute or dict value`);
+the class body statements are scanned without descending into methods, nested classes or
+lambdas.  Arithmetic outside a class body, a method body, and class-level arithmetic without
+such a route are unchanged.  The route is refused for in-range values and empty containers too.
+
+Probes `/tmp/probes/pre255_*` (list/dict/attribute out-of-range, in-range list, empty list,
+nested class reached through a function argument, string route, non-route class arithmetic,
+route arithmetic outside a class, a direct module name and a method body) are refused by name or
+match CPython on both builds.  Added `test_ail_pre255.py` (2 tests, both builds) and registered
+it in `ail_check.MODULES`.  Final-state tests: test_ail_pre255, test_ail_safetynet, test_ail_files
+and test_ail_corpus_findings3 pass.
+
 ## 2026-10-25 -- pre199: range() with a zero step raises ValueError (job-pre199-10252047)
 
 The first still-differing item left by pre186 was `range(0, 5, 0)`: both builds accepted it and
