@@ -1,5 +1,22 @@
 # DEVLOG
 
+## 2026-10-25 - pre116 review fixes: unsafe constructors stay refused
+
+The saved-generator screen no longer trusts a class merely because `__new__`/`__init__` exist.
+A class is kept on the eager lowering only when it is plain (no bases other than `object`, no
+decorators/metaclass, no `__new__`, `__slots__`, `__setattr__`/`__getattr__`/`__getattribute__`/
+`__delattr__`) and its `__init__` only assigns its parameters or constants to `self`; inherited
+constructors, non-division `BinOp` bodies (`1 + "a"`), custom attribute hooks, `__slots__`, free
+names, a rebound or deleted class name and a shadowed/deleted `next` are refused by name.  Defect
+probes (`Bad.__init__` with `1 + "a"`, inherited raising `__init__`, `C = boom`, plus slots,
+custom `__setattr__`, free name, `del C`, arity, alias/attribute rebinding) are refused on both
+builds; safe `next`/parameter-constructor saved generators match CPython on the simulated
+integration tree.  `test_ail_pre116.py` has the new controls.  On the simulated integration tree
+(`origin/integ` ffeb623 + this diff) `test_ail_pre116`, `test_ail_pre166` and
+`test_ail_typed_tuples` pass together (20 tests); on this branch `test_ail_pre116`,
+`test_ail_typed_tuples`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass (`-j 2`).
+
 ## 2026-10-25 - pre116: keep pre166's saved-generator shapes compiling
 
 The pre116 refusal was too broad for the integration branch's pre166 cursor-list

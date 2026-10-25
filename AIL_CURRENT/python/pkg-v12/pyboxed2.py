@@ -10446,31 +10446,157 @@ def _genexp_consumed_in_place(node, parents):
     return False
 
 
-def _class_ctor_is_safe(node):
-    """True iff constructing `node` cannot raise one of the catchable traps: __new__/__init__
-    are absent or their bodies only bind values/attributes.  A saved generator that calls such
-    a class can keep the existing eager lowering (pre166 covers the cursor semantics)."""
-    for name in ('__new__', '__init__'):
-        method = next((n for n in node.body
-                       if isinstance(n, ast.FunctionDef) and n.name == name), None)
-        if method is None:
+def _bound_names(tree):
+    """Every name bound anywhere in the module, with a count.  The screen is deliberately
+    module-wide and conservative: a class or `next` that is also bound elsewhere is not trusted."""
+    counts = {}
+    def bind(name):
+        counts[name] = counts.get(name, 0) + 1
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
+            bind(n.id)
+        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bind(n.name)
+        elif isinstance(n, ast.arg):
+            bind(n.arg)
+        elif isinstance(n, ast.ExceptHandler) and n.name:
+            bind(n.name)
+        elif isinstance(n, ast.MatchAs) and n.name:
+            bind(n.name)
+        elif isinstance(n, (ast.MatchStar,)) and n.name:
+            bind(n.name)
+        elif isinstance(n, (ast.Import, ast.ImportFrom)):
+            for a in n.names:
+                bind(a.asname or a.name.split('.')[0])
+    return counts
+
+
+def _ctor_value_is_safe(expr, params):
+    """An initializer value that cannot raise while the constructor binds it: a parameter, a
+    constant, or a literal list/tuple of those.  Any operator, call, subscript, attribute read or
+    other name is refused: `1 + "a"` raises, and a free name can be unbound at run time."""
+    if isinstance(expr, ast.Constant):
+        return True
+    if isinstance(expr, ast.Name):
+        return expr.id in params
+    if isinstance(expr, (ast.List, ast.Tuple)):
+        return all(_ctor_value_is_safe(e, params) for e in expr.elts)
+    return False
+
+
+_CTOR_CLASS_RISKS = frozenset({
+    '__new__', '__setattr__', '__getattribute__', '__getattr__', '__delattr__', '__slots__',
+})
+
+
+def _class_ctor_arity(node):
+    """The number of positional arguments constructing `node` safely takes, or None when the
+    constructor cannot be shown to be free of a catchable trap.  Only a plain, undecorated
+    class without bases and with a body of `self.<name> = <simple value>` assignments (or no
+    `__init__` at all) qualifies.  Inherited constructors, `__new__`, `__slots__`, metaclasses
+    and decorators are refused because their work is outside this screen."""
+    if node.decorator_list or node.keywords:
+        return None
+    if any(not (isinstance(b, ast.Name) and b.id == 'object') for b in node.bases):
+        return None
+    methods = {}
+    for stmt in node.body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if stmt.name in ('__init__', '__new__'):
+                methods[stmt.name] = stmt
+    for n in ast.walk(node):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if n.name in ('__init__', '__new__'):
+                if methods.get(n.name) is not n:
+                    return None
+            elif n.name in _CTOR_CLASS_RISKS:
+                return None
+        if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)) \
+                and (n.id == '__init__' or n.id in _CTOR_CLASS_RISKS):
+            return None
+    if '__new__' in methods:
+        return None
+    init = methods.get('__init__')
+    if init is None:
+        return 0
+    if not isinstance(init, ast.FunctionDef) or init.decorator_list:
+        return None
+    args = init.args
+    if args.posonlyargs or args.kwonlyargs or args.vararg or args.kwarg or args.defaults \
+            or any(d is not None for d in args.kw_defaults):
+        return None
+    params = args.args
+    if not params:
+        return None
+    receiver = params[0].arg
+    param_names = {a.arg for a in params}
+    assigned = set()
+    for stmt in init.body:
+        if isinstance(stmt, ast.Pass):
             continue
-        for n in ast.walk(method):
-            if isinstance(n, (ast.Call, ast.Subscript)):
-                return False
-            if isinstance(n, ast.BinOp) and isinstance(n.op, (ast.Div, ast.FloorDiv, ast.Mod)):
-                return False
-    return True
+        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
+            continue
+        if isinstance(stmt, ast.Return) and stmt.value is None:
+            continue
+        target = None
+        value = None
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
+            target, value = stmt.targets[0], stmt.value
+        elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+            target, value = stmt.target, stmt.value
+        if not (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
+                and target.value.id == receiver):
+            return None
+        if target.attr.startswith('__') and target.attr.endswith('__'):
+            return None
+        if not _ctor_value_is_safe(value, param_names):
+            return None
+        assigned.add(target.attr)
+    for stmt in node.body:
+        names = []
+        if isinstance(stmt, ast.Assign):
+            for t in stmt.targets:
+                if isinstance(t, ast.Name):
+                    names.append(t.id)
+        elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+            names.append(stmt.target.id)
+        elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)) and stmt.decorator_list:
+            names.append(stmt.name)
+        if any(name in assigned for name in names):
+            return None
+    return len(params) - 1
 
 
-def _genexp_can_raise(node, user_functions, class_names):
+def _mutated_class_names(tree):
+    """Class names whose attributes are assigned/deleted anywhere (a rebound `__init__`): through
+    `C.x = ...`/`del C.x`, through `C.__dict__[...] = ...`, or via `setattr`/`delattr`."""
+    names = set()
+    def target_name(t):
+        if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name):
+            names.add(t.value.id)
+        elif isinstance(t, ast.Subscript) and isinstance(t.value, ast.Attribute) \
+                and t.value.attr == '__dict__' and isinstance(t.value.value, ast.Name):
+            names.add(t.value.value.id)
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Delete)):
+            targets = n.targets if isinstance(n, (ast.Assign, ast.Delete)) else [getattr(n, 'target', None)]
+            for t in targets:
+                target_name(t)
+        elif isinstance(n, ast.Call) and isinstance(n.func, ast.Name) \
+                and n.func.id in ('setattr', 'delattr') and n.args \
+                and isinstance(n.args[0], ast.Name):
+            names.add(n.args[0].id)
+    return names
+
+
+def _genexp_can_raise(node, user_functions, safe_classes, real_next):
     """True iff evaluating the generator's body can raise one of the catchable traps (directly,
     or through a call the body makes).  The outermost iterable is excluded: CPython evaluates
     it when the generator object is made, so the existing eager lowering already has the same
     point for it.  Targets are excluded too; only the element and the lazy clauses matter.
-    A `next(...)` call and a class constructor whose body cannot raise are kept eager: the
-    saved-generator cursor lowering (pre166) relies on them, and their own failures are
-    pre-existing differences."""
+    The builtin `next` and a constructor the screen above accepts keep the eager lowering:
+    the saved-generator cursor lowering (pre166) relies on them, and their own failures are
+    pre-existing differences.  A rebound `next` or an unsafe constructor is not trusted."""
     roots = [node.elt]
     for i, gen in enumerate(node.generators):
         if i:
@@ -10490,8 +10616,13 @@ def _genexp_can_raise(node, user_functions, class_names):
                 if isinstance(f, ast.Name):
                     if f.id in user_functions:
                         return True
-                    if f.id in class_names or f.id == 'next':
+                    if f.id == 'next' and real_next:
                         continue
+                    if f.id in safe_classes:
+                        if not n.keywords and not any(isinstance(a, ast.Starred) for a in n.args) \
+                                and len(n.args) == safe_classes[f.id]:
+                            continue
+                        return True
                     if f.id not in _GENEXP_SAFE_CALLS:
                         return True
                 elif isinstance(f, ast.Attribute):
@@ -10512,11 +10643,18 @@ def _lazy_raising_genexp(tree):
         for child in ast.iter_child_nodes(par):
             parents[child] = par
     user_functions = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
-    class_names = {n.name for n in ast.walk(tree)
-                   if isinstance(n, ast.ClassDef) and _class_ctor_is_safe(n)}
+    counts = _bound_names(tree)
+    mutated = _mutated_class_names(tree)
+    safe_classes = {}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ClassDef) and counts.get(n.name) == 1 and n.name not in mutated:
+            arity = _class_ctor_arity(n)
+            if arity is not None:
+                safe_classes[n.name] = arity
+    real_next = counts.get('next', 0) == 0
     for node in ast.walk(tree):
         if isinstance(node, ast.GeneratorExp) and not _genexp_consumed_in_place(node, parents) \
-                and _genexp_can_raise(node, user_functions, class_names):
+                and _genexp_can_raise(node, user_functions, safe_classes, real_next):
             return node
     return None
 

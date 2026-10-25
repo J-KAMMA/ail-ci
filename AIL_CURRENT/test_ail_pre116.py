@@ -179,6 +179,161 @@ def main():
 main()
 '''
 
+UNSAFE_BINOP_CTOR = r'''class Bad:
+    def __init__(self):
+        self.v = 1 + "a"
+
+
+def main():
+    g = (Bad() for _ in range(1))
+    try:
+        print(next(g).v)
+    except TypeError as e:
+        print("caught", str(e))
+    print("after")
+
+
+main()
+'''
+
+INHERITED_RAISING_CTOR = r'''class Base:
+    def __init__(self):
+        raise ValueError("base")
+
+
+class Child(Base):
+    pass
+
+
+def main():
+    g = (Child() for _ in range(1))
+    try:
+        print(next(g))
+    except ValueError as e:
+        print("caught", str(e))
+    print("after")
+
+
+main()
+'''
+
+REBOUND_CLASS = r'''class C:
+    def __init__(self):
+        self.v = 1
+
+
+def boom():
+    raise ValueError("shadow")
+
+
+C = boom
+
+
+def main():
+    g = (C() for _ in range(1))
+    try:
+        print(next(g))
+    except ValueError as e:
+        print("caught", str(e))
+    print("after")
+
+
+main()
+'''
+
+SHADOWED_NEXT = r'''def next(value):
+    raise ValueError("shadow next")
+
+
+def main():
+    g = (next([1, 2]) for _ in range(1))
+    try:
+        print(next(g))
+    except ValueError as e:
+        print("caught", str(e))
+    print("after")
+
+
+main()
+'''
+
+
+DELETED_CLASS = r'''class C:
+    def __init__(self):
+        self.v = 1
+
+
+del C
+
+
+def main():
+    g = (C() for _ in range(1))
+    try:
+        print(next(g))
+    except NameError as e:
+        print("caught", str(e))
+    print("after")
+
+
+main()
+'''
+
+SLOTTED_CTOR = r'''class C:
+    __slots__ = ()
+
+    def __init__(self):
+        self.v = 1
+
+
+def main():
+    g = (C() for _ in range(1))
+    try:
+        print(next(g))
+    except AttributeError as e:
+        print("caught", str(e))
+    print("after")
+
+
+main()
+'''
+
+CUSTOM_SETATTR_CTOR = r'''class C:
+    def __setattr__(self, name, value):
+        raise ValueError("setattr")
+
+    def __init__(self):
+        self.v = 1
+
+
+def main():
+    g = (C() for _ in range(1))
+    try:
+        print(next(g))
+    except ValueError as e:
+        print("caught", str(e))
+    print("after")
+
+
+main()
+'''
+
+FREE_NAME_CTOR = r'''class C:
+    def __init__(self):
+        self.v = missing
+
+
+def main():
+    g = (C() for _ in range(1))
+    try:
+        print(next(g))
+    except NameError as e:
+        print("caught", str(e))
+    print("after")
+
+
+main()
+'''
+
 RETURN_SAFE = r'''def long_words(text):
     return ((position, word) for position, word in enumerate(text.split()) if len(word) > 4)
 
@@ -255,6 +410,20 @@ class Pre116Tests(unittest.TestCase):
 
     def test_raising_constructor_is_refused(self):
         self.refused('raising_ctor', RAISING_CTOR)
+
+    def test_unsafe_constructor_body_is_refused(self):
+        self.refused('unsafe_binop_ctor', UNSAFE_BINOP_CTOR)
+        self.refused('inherited_raising_ctor', INHERITED_RAISING_CTOR)
+
+    def test_rebound_constructor_and_next_are_refused(self):
+        self.refused('rebound_class', REBOUND_CLASS)
+        self.refused('shadowed_next', SHADOWED_NEXT)
+        self.refused('deleted_class', DELETED_CLASS)
+
+    def test_other_unsafe_constructor_shapes_are_refused(self):
+        self.refused('slotted_ctor', SLOTTED_CTOR)
+        self.refused('custom_setattr_ctor', CUSTOM_SETATTR_CTOR)
+        self.refused('free_name_ctor', FREE_NAME_CTOR)
 
 
 if __name__ == '__main__':
