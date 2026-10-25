@@ -1,3 +1,18 @@
+## 2026-10-25 - int(s, base) error message (job-pre180-10251520)
+
+The first still-differing item from the fuzz58 review was the `int(s, base)` invalid-literal
+message. `int("\u2469", 10)` printed `invalid literal for int() with base 10: 'i'` (the low
+byte of U+2469) on both builds, where CPython prints `'\u2469'`; long literals also lacked
+CPython's 200-character repr cut (`%.200R`). The live general-path helper copied each UTF-16
+unit of `repr(s)` into a `char`, so it now composes the message from the repr string itself
+and views only its first 200 code points. The typed path's `ail__int_base_fail` already kept
+the full characters but printed the whole repr, so it now applies the same 200-code-point
+cut. Valid Unicode decimal digits and the existing quote/escape handling are unchanged.
+Probes in `/tmp/probes` covered BMP printable characters in the argument, a list item, an
+attribute and a dict value, bases 0/2/10/16/36, prefix/underscore/quote/control cases, short
+and 300-character literals, and the typed `str`/`int` path; all match CPython on both
+`cmp.sh` builds. `test_ail_pre180.py` keeps the general and typed cases.
+
 ## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
 
 The first still-differing item from the task's list was the encoding-name normalization: `b"abc".decode("utf\t8")`,
