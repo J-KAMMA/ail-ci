@@ -137,11 +137,33 @@ def _constant_int(node, known):
     return None
 
 
+def _maxsplit_constant_nodes(tree):
+    """Nodes under a name-free str.split/rsplit maxsplit argument, whose own front end folds a
+    constant and reports an out-of-int64 value with the maxsplit wording."""
+    handled = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (isinstance(func, ast.Attribute) and func.attr in ('split', 'rsplit')):
+            continue
+        roots = []
+        if len(node.args) > 1:
+            roots.append(node.args[1])
+        roots.extend(kw.value for kw in node.keywords if kw.arg == 'maxsplit')
+        for root in roots:
+            if any(isinstance(inner, ast.Name) for inner in ast.walk(root)):
+                continue
+            handled.update(id(inner) for inner in ast.walk(root))
+    return handled
+
+
 def _check_int64_unary_constants(tree):
     """Refuse a statically known unary integer constant expression outside int64 by name.
     `-MIN` on a module constant or a nested literal compiles to the fixed-width trap on the
     default build, while CPython prints a bignum; the runtime trap stays for values that only
     reach the unary operation as variables."""
+    maxsplit = _maxsplit_constant_nodes(tree)
     stores = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
@@ -159,6 +181,8 @@ def _check_int64_unary_constants(tree):
             known[target.id] = value
     for node in ast.walk(tree):
         if not isinstance(node, ast.UnaryOp) or not isinstance(node.op, (ast.UAdd, ast.USub)):
+            continue
+        if id(node) in maxsplit:
             continue
         value = _constant_int(node, known)
         if value is not None and not -(1 << 63) <= value < 1 << 63:
