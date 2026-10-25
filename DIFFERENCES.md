@@ -2,6 +2,7 @@
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-rbpre103-10251545-1 | `format()` spec parser / NUL | A spec that was a single NUL byte was read as "no type", so `format(1, '\x00')`, `format('a', '\x00')` and a NUL after width/sign/grouping returned the value; CPython raises `ValueError: Unknown format code '\x0' for object of type 'int'` (or `'str'`). The general formatter now tracks whether a type code was present; a float still accepts the NUL, as CPython does. | fixed |
 | C?-job-pre160-10250349-1 | round() ndigits / `__index__` | An `__index__` method that evaluates an out-of-int64 intermediate (for example `10**30` inside the method) cannot run: AIL stops with `integer overflow` while evaluating that expression, before it returns an index. CPython uses arbitrary precision and returns the resulting (possibly small) integer. | refused by name |
 
 Deliberate differences from CPython and open silent differences found by differential jobs.
