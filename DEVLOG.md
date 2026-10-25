@@ -17,7 +17,8 @@ binding, `next = next`, a read after `del`, reads through an argument, a list it
 and a dict value (all refused by name on both builds), and function-read-after-binding, `for`/
 `try`/`with`/`match` bindings, an `if` binding before its read, parameter/local/comprehension
 names, a constant-false branch, `del` last, delete-then-rebind, an augmented assignment after the
-binding and a plain program (all match CPython on both builds).  Added `test_ail_pre250.py`
+binding and a plain program (all match CPython on both builds); `next += 1` before any binding is
+refused by name.  Added `test_ail_pre250.py`
 (registered in `ail_check.MODULES`) and the DIFFERENCES row.  Final-state tests: `test_ail_pre250`
 53s and `test_ail_builtin_shadowing` 13s pass; `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` were run on the final commit.

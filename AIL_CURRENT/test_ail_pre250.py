@@ -51,6 +51,9 @@ print(next)
 del next
 print(next(iter([1])))
 ''',
+    'augassign_before_binding': '''next += 1
+print(next)
+''',
 }
 
 MATCHES = {

@@ -56,7 +56,7 @@ SHADOWABLE = (PY_BUILTINS | AIL_BUILTINS | _VALUE_TYPES) - _CORE_TYPES - set(_ST
 
 
 # A cheap pre-filter: module-level `def`/`class` names and `NAME =` / `NAME: T =` heads.
-_HEAD = re.compile(r'^\s*(?:async\s+)?(?:def|class)\s+(\w+)|^(\w+)\s*(?::[^=\n]*)?=', re.M)
+_HEAD = re.compile(r'^\s*(?:async\s+)?(?:def|class)\s+(\w+)|^(\w+)\s*(?::[^=\n]*)?(?:=(?!=)|(?://|\*\*|<<|>>|[-+*/%&|^@])=)', re.M)
 
 
 def _suggest(name):
