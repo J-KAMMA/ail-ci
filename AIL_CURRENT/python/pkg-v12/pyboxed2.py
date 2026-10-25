@@ -586,6 +586,35 @@ __attribute__((noinline, cold)) static ail_st ail2_bisect_bound(ail_ctx *cx, ail
 }
 '''
 
+ITRINDEX_C = r"""
+/* itertools.combinations()/combinations_with_replacement() convert r before the pool is
+   materialized, as CPython does. The old lowering read (.i) only after the pool, so a bad r on a
+   non-iterable named the iterable instead of the r argument. */
+static inline ail_st ail2_it_r(ail_ctx *cx, ail_obj *out, ail_obj x) {
+    if (x.tag == AIL_T_INT || x.tag == AIL_T_BOOL) { *out = ail_box_int(x.i); return AIL_OK; }
+    { char buf[128]; snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail__tname_c(x)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
+}
+"""
+
+ITRINDEX_DUNDER_C = r"""
+/* itertools.combinations()/combinations_with_replacement() convert r before the pool is
+   materialized, as CPython does. An int, a bool or an instance's __index__ is an index; a bad
+   __index__ return and any other type are CPython's TypeErrors. */
+static inline ail_st ail2_it_r(ail_ctx *cx, ail_obj *out, ail_obj x) {
+    if (x.tag == AIL_T_INT || x.tag == AIL_T_BOOL) { *out = ail_box_int(x.i); return AIL_OK; }
+    if (x.tag == AIL_T_INST) {
+        ail_d1_fn f = ail_dun1(x, AIL_D1_INDEX);
+        if (f) {
+            ail_obj r; ail_st st = f(cx, &r, x);
+            if (st != AIL_OK) return st;
+            if (r.tag == AIL_T_INT || r.tag == AIL_T_BOOL) { *out = ail_box_int(r.i); return AIL_OK; }
+            { char buf[160]; snprintf(buf, sizeof buf, "__index__ returned non-int (type %s)", ail__tname_c(r)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
+        }
+    }
+    { char buf[128]; snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail__tname_c(x)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
+}
+"""
+
 TYPE_NAME_C = '''
 static inline ail_st ail_type_name_of(ail_ctx *cx, ail_obj *out, ail_obj x) {
     if (x.tag == AIL_T_INST || x.tag == AIL_T_EXC) {
@@ -2320,6 +2349,8 @@ class Compiler(boxclosure.ClosureMixin):
             parts.append(ARGCHK_C)
         if getattr(self, 'needs_bisect_bound', False):
             parts.append(BISECTBOUND_C)
+        if getattr(self, 'needs_it_index', False):
+            parts.append(ITRINDEX_DUNDER_C if self.dunder_ops else ITRINDEX_C)
         if getattr(self, 'needs_stararity', False):
             parts.append(stararity.C)
         if self.rt_needs:
@@ -7279,11 +7310,21 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('combinations() with other than (iterable, r)')
         r_node = args[1] if len(args) > 1 else kwargs['r']
         src = self._resolve_iter_src(args[0], ctx)
-        r = self.expr(r_node, ctx)
+        r = self._it_r_int(r_node, ctx)
         t = ctx.tmp()
-        ctx.emit('st = ail_it_combinations(cx, &%s, %s, (%s).i);' % (t, src, r))
+        ctx.emit('st = ail_it_combinations(cx, &%s, %s, %s);' % (t, src, r))
         ctx.check()
         return t
+
+    def _it_r_int(self, r_node, ctx):
+        """CPython converts combinations()/cwr()'s r before the pool is materialized, so a bad r
+        wins over a non-iterable argument; __index__ is part of that conversion."""
+        v = ctx.tmp()
+        ctx.emit('%s = %s;' % (v, self.expr(r_node, ctx)))
+        ctx.emit('st = ail2_it_r(cx, &%s, %s);' % (v, v))
+        ctx.check()
+        self.needs_it_index = True
+        return '(%s).i' % v
 
     def _lib_permutations(self, args, kwargs, ctx):
         if (kwargs and set(kwargs) != {'r'}) or not 1 <= len(args) + len(kwargs) <= 2 or not args:
@@ -7320,8 +7361,9 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('combinations_with_replacement() with other than (iterable, r)')
         r_node = args[1] if len(args) > 1 else kwargs['r']
         src = self._resolve_iter_src(args[0], ctx)
+        r = self._it_r_int(r_node, ctx)
         t = ctx.tmp()
-        ctx.emit('st = ail_it_combinations_wr(cx, &%s, %s, (%s).i);' % (t, src, self.expr(r_node, ctx)))
+        ctx.emit('st = ail_it_combinations_wr(cx, &%s, %s, %s);' % (t, src, r))
         ctx.check()
         return t
 

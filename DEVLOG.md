@@ -1,3 +1,23 @@
+## 2026-10-25 - itertools combinations r conversion before the pool (job-pre219-10252344)
+
+The first still-differing pre126 item was `combinations(x, 1.0/'x'/None)` on a non-iterable `x`:
+the general path materialized the pool first and raised `'int' object is not iterable`, where
+CPython converts `r` and raises `'<type>' object cannot be interpreted as an integer`.  The
+second item was `r` with `__index__`: it was rejected by `combinations` / `cwr` (base crashed with
+OOM for cwr).  Both builds now convert `r` with CPython's index rules (int, bool, or `__index__`,
+including `__index__ returned non-int (type ...)`) before the runtime materializes the pool, so a
+good negative `r` still raises the pool's TypeError first and then `ValueError: r must be
+non-negative`, as CPython does.  `product(repeat=...)` and `permutations(r=...)` were not touched
+(their CPython argument rules differ).
+
+Added `test_ail_pre219.py` (3 programs, two builds each) and registered it in
+`ail_check.MODULES`; it covers the non-iterable order, `__index__`, bad `__index__` returns, a
+plain class as `r`, literal/local/argument/list-item/attribute/dict values, empty pools, bools and
+negative/zero/out-of-range `r`.  `/tmp/probes/pre219_r.py` matches CPython on both builds.
+Required modules on the final tree: test_ail_pre219, test_ail_pre137, test_ail_pre168,
+test_ail_pre101, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 all pass
+(8 + 4 + 5 + 1 + 4 + 18 + 4 tests, 1 skip).
+
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
