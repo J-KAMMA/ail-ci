@@ -1,3 +1,28 @@
+## 2026-10-25 - pre200 reapply: maxsplit intermediates above 4096 bits fold (job-rbpre200-10260538)
+
+Re-applied the accepted pre200 change on top of the current tree.  A maxsplit intermediate above
+the old 4096-bit cap now folds when the whole expression reduces to an int64 value, so
+`"a b c".split(" ", 2**4096 // 2**4050)` (final 2**46), `2**4096 >> 4096` (final 1) and the same
+value through an argument, a list item, an attribute, a dict value, a local, a module/class
+constant and a default argument match CPython on both builds.  The accepted change raised the
+maxsplit and int-constant limits from 4096 to 8192 bits; this tree's rbpre190 reapply already uses
+2**20 bits (2**24 for a large exponent), so the larger limit is kept and the 8192 request is
+subsumed.
+
+One integration conflict was that `ail_chatgpt._constant_int_exact`, used by pre184's
+module/class/default constant check, still had its own 4096-bit cap and refused
+`class Box: n = 2**4096 // 2**4050`; that cap now uses the same 2**20-bit width, so values that
+reduce to int64 fold while an out-of-int64 result or an intermediate above 2**20 bits is still
+refused by name.  Added `test_ail_pre200.py` (folded direct/argument/list/attribute/dict/local
+cases, over-limit and out-of-int64 refusals) and registered it in `ail_check.MODULES` and both
+`tools/ci_shards.json` lists.
+
+Probes `/tmp/probes/p200_direct.py`, `p200_flows.py`, `p200_module.py` and `p200_types.py` match
+CPython on both builds; `p200_over_pow.py`, `p200_over_shift.py` and `p200_over_int64.py` are
+refused by name on both builds (CPython runs the first two and raises OverflowError for the
+third).  Final-state tests: test_ail_pre200, test_ail_pre184, test_ail_pre214, test_ail_pre190,
+test_ail_pre205, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 pass.
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a

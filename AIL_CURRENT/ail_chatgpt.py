@@ -361,13 +361,14 @@ def _check_int64_unary_constants(tree):
 
 
 _CONST_INT_TOO_BIG = object()
-_CONST_INT_BITS = 4096
+_CONST_INT_BITS = 1 << 20
 
 
 def _constant_int_exact(node):
     """The exact int a constant expression denotes, with a guard against huge intermediates.
-    Pow bases 0/1/-1 and a zero left shift are decided before the 4096-bit guard, since their
-    results fit int64 however large the exponent or shift is."""
+    Pow bases 0/1/-1 and a zero left shift are decided before the fold-limit guard (the same
+    2**20-bit width as the shared int and maxsplit folders), since their results fit int64
+    however large the exponent or shift is."""
     if isinstance(node, ast.Constant) and type(node.value) is int:
         return True, node.value
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert)):
