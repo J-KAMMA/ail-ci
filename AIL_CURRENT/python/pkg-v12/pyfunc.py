@@ -66,7 +66,7 @@ import typedinherit
 import shadowing
 import rangecheck
 from pipeline import PipelineError
-from pyfront import BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Unsupported, _use, refuse_complex_pow
+from pyfront import BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Unsupported, _use, int_constant, refuse_complex_pow
 
 # A capability marker, not a behaviour: lets a SHARED judge (one file imported against many
 # `pkg-*` copies of this module, e.g. `test_floatparam.py`) ask "does THIS copy infer a float
@@ -12932,6 +12932,10 @@ def _expr(node, ctx):
         return _blist_value(node, ctx)
     rec = lambda n: _expr(n, ctx)
     need = ctx.need
+    if isinstance(node, ast.BinOp):
+        constant = int_constant(node)
+        if type(constant) is int and -(1 << 63) <= constant < (1 << 63):
+            return _c_int_literal(constant)
     if isinstance(node, ast.Name):
         if node.id in ctx.gridrow:
             raise Unsupported('%r is a row of the grid %r, not a number; index it or iterate it'
