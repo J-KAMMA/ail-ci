@@ -34918,7 +34918,11 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         _proof = _bigcap._lp_reason([_f], None, _defined)
         # A method's `self` is a non-int value, so an attribute operation (`self.x * self.x`) has no
         # unproven local to name; its proof failure still means the method needs the tagged lowering.
-        _needs_tint = bool(_unproven) or (_proof is not None and _f.name in method_names)
+        # An int result that comes straight from an unbounded call (`return d.get(k, 0)`,
+        # `return self.items.pop()`) has no local to tag either: the function's own result is tagged,
+        # so the call result is converted (checked) at the return instead of staying an int64.
+        _call_result = _proof is not None and 'call result not proven to fit int64' in _proof
+        _needs_tint = bool(_unproven) or (_proof is not None and (_f.name in method_names or _call_result))
         _params = tuple(1 if (k == INT and n in _unproven
                               and (sigs[_f.name][1] == INT or _param_arith(_f, n))) else 0
                         for n, k in sigs[_f.name][0])
