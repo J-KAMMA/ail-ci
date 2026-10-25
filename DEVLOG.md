@@ -52,6 +52,24 @@ Probes `/tmp/probes/p236_*` cover the boundaries, types, negative exponents, mod
 positions and argument/list-item/attribute/dict routes on both builds; `/tmp/probes/p236_special_*`,
 `p236_zero_*` and `p236_cap_zero.py` match CPython, while the genuinely wide non-special cases and
 the `2**24`-bit special boundary are refused by name.  Added `AIL_CURRENT/test_ail_pre236.py`.
+## 2026-10-25 - huge constant power diagnostics (job-pre238-10260354)
+
+The first pre-existing difference from the pre159 review was the compiler printing CPython's
+int-to-str limit text instead of a named refusal. On this tree the reviewer's
+`print(10 ** 4000 * 10 ** 300)` is already refused by name by the front end, and
+`tools/ci_shards.py --check` is clean. A related case still failed the same way: a constant `**`
+whose exact value has more than 4300 digits (for example a 3000-digit base to the 64th) reached
+`str(value)` while `_check_constant_power` built its `int64 constant out of range` message, so both
+builds stopped with `Exceeds the limit (4300 digits) for integer string conversion`. The new
+`_constant_diagnostic` prints `too large` when the conversion is forbidden, and the index, literal
+and unary diagnostics use it too, so those constructs are refused by name at compile time.
+
+Probes `/tmp/probes/p238_*` and `/tmp/probes/p238b_*` cover the reviewer expression, huge bases in
+an argument, list item, attribute, dict value, module/class assignment, default and local, unary
+and nested powers, index expressions and a huge literal on both `cmp.sh` builds; every one is
+refused by name. Added `test_ail_pre238.py` (2 tests, both builds) and registered it in
+`ail_check.MODULES` and `ci_shards.json`. Final-state tests: test_ail_pre238, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 pass.
 
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
