@@ -13,6 +13,18 @@ alias, bases 0/2/8/10/16/36, empty, packed bytes (0, 255, quotes, controls), non
 whitespace, underscores, prefixes, lengths 199/200/201/300, valid values and the bytes baseline, on both
 builds.  `/tmp/probes/p_intba*.py` match CPython on both builds (keyword `base` is a separate pre-existing
 limitation and was not part of this fix).
+## 2026-10-25 - pre125 reapply: module-scope bare attribute/subscript annotations
+
+The accepted pre125 change proposed refusing `obj.attr: note()` / `xs[i]: note()` by name because
+the old surface evaluated neither the target nor the annotation. This tree already contains the
+pre124 fix, which evaluates the target's base object and index expressions and then the annotation
+in CPython order on both builds. Refusing here would regress that fix, so both changes are kept:
+pre124's evaluation stands, and `test_ail_pre125.py` re-applies pre125's cases as CPython-parity
+regressions (also a bare annotation on a plain name, `count: int`, unchanged). Probes:
+`ann_attr_module.py`, `ann_sub_module.py`, `ann_attr_nested.py`, `ann_sub_empty_negative.py`,
+`ann_sub_slice.py`, `ann_attr_alias.py`, `ann_sub_dict_str.py`, `ann_sub_arg_item_attr.py`,
+`ann_attr_static.py`, `ann_sub_future.py`, and `ann_name_type.py`; all matched CPython on both
+builds.
 
 ## 2026-10-25 - int(s, base) message GC rooting (job-pre180-10251520)
 
