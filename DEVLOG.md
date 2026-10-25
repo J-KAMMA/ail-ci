@@ -1,3 +1,24 @@
+## 2026-10-25 - class-method call sites keep boxed try handlers (job-pre211-10252259)
+
+The reviewer of rbpre171 recorded two pre-existing differences.  The generator-expression case
+(`gen = (shl(1, -1) for _ in range(1))`) is already refused by name on both builds ("a generator
+expression used as a value"), so nothing changed there.  The method case still differed on the
+default build: `C.run` called `shl(1, -1)` and `c.run()` sat under a module `try`, but pymix's
+`_escapes` built its call graph only from module-level `FunctionDef`s and direct `Name` callees.
+It therefore saw no protected call site for `shl`, selected a typed clone, and the ValueError
+escaped the boxed handler (exit 1, no output).  `_escapes` now includes class method bodies and
+attribute call sites (`obj.method()`), so the chain `c.run()` -> `run` -> `shl` reaches the
+module `try`, `shl` is rejected as exception-capable, and both builds catch the ValueError.
+
+The new `test_ail_pre211.py` covers literal, argument, list-item, attribute, dict-value and alias
+shift counts, zero/large valid shifts, method-to-method and helper chains, and the division,
+subscript and dict-key traps on both builds, plus the genexp by-name refusal.  Probes:
+`r11_method.py`, `r11_forms.py`, `r11_chain.py`, `r11_uncaught.py`, `r11_traps.py` (all match
+CPython on both builds); `r9_genexp.py` is refused by name on both.  `test_ail_pre211.py`,
+`test_ail_pre109.py`, `test_ail_safetynet.py`, `test_ail_files.py`,
+`test_ail_corpus_findings3.py`, `test_ail_mixed_bounds.py`, `test_ail_flush_exit.py` and
+`test_ail_bugs7.py` pass.
+
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal

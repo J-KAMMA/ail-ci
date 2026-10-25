@@ -275,10 +275,29 @@ def _escapes(fn_facts, parents):
     names = list(fn_facts)
     esc = {n: set() for n in names}
     call_sites = {n: [] for n in names}                 # callee -> [(call_node, caller_name)]
-    for name, f in fn_facts.items():
-        for n in _walk_own_body(f.node):
-            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in fn_facts:
-                call_sites.setdefault(n.func.id, []).append((n, name))
+    # Class methods are not `fn_facts` entries (this pass never selects them), but their bodies
+    # still call module functions and can sit under a module-level `try` when invoked as
+    # `obj.method()`.  Include their bodies (and attribute call sites naming them) in the call
+    # graph so such a call is visible to `_protected`, instead of leaving the callee selected as
+    # a typed clone that would bypass the boxed handler.
+    method_bodies = {node.name: node for node, parent in parents.items()
+                     if isinstance(node, ast.FunctionDef) and isinstance(parent, ast.ClassDef)}
+    bodies = {name: f.node for name, f in fn_facts.items()}
+    for name, node in method_bodies.items():
+        bodies.setdefault(name, node)
+        call_sites.setdefault(name, [])
+    for name, body in bodies.items():
+        for n in _walk_own_body(body):
+            if not isinstance(n, ast.Call):
+                continue
+            if isinstance(n.func, ast.Name):
+                callee = n.func.id
+            elif isinstance(n.func, ast.Attribute) and n.func.attr in method_bodies:
+                callee = n.func.attr
+            else:
+                continue
+            if callee in bodies:
+                call_sites.setdefault(callee, []).append((n, name))
 
     for _ in range(MAX_ROUNDS):
         changed = False
