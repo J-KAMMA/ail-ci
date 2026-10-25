@@ -55,9 +55,22 @@ def main():
     copy = alias
     print(copy)
     print(-((1 << 5000) >> 4937) + 1)
+    print(f"{-(1 << 63)=}")
+    print(f"{+(1 << 62)=}")
+
+
+return5 = 99
+not5 = 42
+
+
+def adjacent():
+    return+5
 
 
 main()
+print(adjacent())
+print(not+5)
+print(1 and+(1 << 62))
 '''
 
 MODES = (

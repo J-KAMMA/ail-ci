@@ -584,6 +584,7 @@ def _int_const(node):
 
 _I64_MIN = -(1 << 63)
 _I64_MAX = (1 << 63) - 1
+_UNARY_FOLD_BITS = 1 << 20
 _MAXSPLIT_NOT_CONST = object()
 _MAXSPLIT_TOO_BIG = object()
 _MAXSPLIT_BITS = 4096
@@ -13356,9 +13357,9 @@ def _expr(node, ctx):
         if not isinstance(node.op, ast.Not) and _is_ref_kind(_etype(node.operand, ctx)):
             raise Unsupported('a unary numeric operation on a struct is unsupported')
         if isinstance(node.op, ast.USub):
-            if (isinstance(node.operand, ast.Constant)
-                    and type(node.operand.value) is int and node.operand.value == 1 << 63):
-                return _c_int_literal(-(1 << 63))
+            folded = int_constant(node, _UNARY_FOLD_BITS)
+            if folded == _I64_MIN:
+                return _c_int_literal(_I64_MIN)
             if need is not None and not _neg_is_float(node.operand, ctx):
                 _use(need, 'ck_neg')
                 return 'ck_neg(%s)' % rec(node.operand)

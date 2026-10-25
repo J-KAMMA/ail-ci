@@ -51,6 +51,7 @@ SCALAR = (INT, FLOAT, BOOL)
 CTYPE = {INT: 'int64_t', FLOAT: 'double', BOOL: 'int'}
 KIND = {INT: 'int', FLOAT: 'float', BOOL: 'bool'}       # pyboxed2's own kind names
 _I64_MIN, _I64_MAX = -(1 << 63), (1 << 63) - 1
+_UNARY_FOLD_BITS = 1 << 20
 _EXACT = 1 << 53
 
 
@@ -2169,6 +2170,8 @@ def nexpr(comp, node, ctx):
                 ctx.emit('%s = !%s;' % (r, ntest(comp, node.operand, ctx)))
                 return r
             return unbox(ctx, comp._expr_plain(node, ctx), BOOL)
+        if isinstance(node.op, ast.USub) and int_constant(node, _UNARY_FOLD_BITS) == _I64_MIN:
+            return _c_const(_I64_MIN)
         a = nexpr(comp, node.operand, ctx)
         if isinstance(node.op, ast.UAdd):
             return a

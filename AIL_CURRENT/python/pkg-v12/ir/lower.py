@@ -2121,6 +2121,9 @@ class Lowering(TextLowering):
     def unary(self, node):
         op = node.op
         if isinstance(op, ast.USub):
+            folded = int_constant(node, 1 << 20)
+            if folded == -(1 << 63):
+                return self.const(I.I64, folded)
             operand = node.operand
             if isinstance(operand, ast.Constant) and type(operand.value) in (int, float):
                 value = -operand.value
