@@ -154,6 +154,14 @@ def ordered_dict_object(tree, peek):
 def run(tree, text):
     peek = stdlib5.peek_imports(tree, 'collections')
     od_class = bool(peek) and ordered_dict_object(tree, peek)
+    if od_class:
+        import dictviews
+        shown = dictviews.escape(tree)           # `print(o.keys())`: CPython shows `odict_keys([...])`, the class holds a list
+        if shown is not None:
+            refuse(shown, 'OrderedDict: a view of an OrderedDict (`o.keys()`, `o.values()`, `o.items()`) used as a value (line %d) '
+                   'is not built (CPython shows `odict_keys([...])`, `odict_items([...])`, and the view follows the dict); '
+                   'walk it (`for k in o.keys()`, `list(o.items())`, `sorted(o)`, `len(o.keys())`) or keep `list(...)` of it'
+                   % getattr(shown, 'lineno', 0))
     handled = {'namedtuple', 'ChainMap'} | ({'OrderedDict'} if od_class else set())
     cb = stdlib5.take_imports(tree, 'collections', handled, whole=False)
     tb = stdlib5.take_imports(tree, 'typing', {'NamedTuple'}, whole=False)
