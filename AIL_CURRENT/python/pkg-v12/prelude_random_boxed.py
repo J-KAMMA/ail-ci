@@ -54,7 +54,7 @@ class Random:
     def gauss(self, mu=0.0, sigma=1.0):
         return _ail_rg_gauss(self.mt, mu, sigma)
 
-    def expovariate(self, lambd):
+    def expovariate(self, lambd=1.0):
         return _ail_rg_expo(self.mt, lambd)
 
     def triangular(self, low=0.0, high=1.0, mode=None):
