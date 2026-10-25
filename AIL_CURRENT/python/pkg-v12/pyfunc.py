@@ -80,6 +80,10 @@ FLOAT_FLOOR_MOD = True
 # B2b: {function name / C symbol: (per-parameter tint flags, tint result)} for this compile.
 TINT_SIGS = {}
 TINT_ACTIVE = {}
+# True when the program calls a typed-only runtime primitive (monotonic_ms, tcp_*, ...) that the
+# general path cannot build. Such a program must stay on the typed path even if that means keeping
+# an unproven call result on the legacy emitter; trying the general path would fail outright.
+GENERAL_BLOCKED = False
 TINT_DISABLED = False
 
 INT, FLT, LIST, SET, DICT, RANGE, BYTES = 'int', 'float', 'list', 'set', 'dict', 'range', 'bytes'
@@ -34878,6 +34882,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     _defined.classes = frozenset(classes)
     _defined.containers = _bigcap.nonint_containers(tree)
     _tint_sigs = {}
+    _call_result_names = set()
     _python_surface = os.environ.get('AIL_SURFACE') == 'python'
     _ir_on = os.environ.get('AIL_IR', '1').strip().lower() not in ('0', 'off', 'no', 'false')
     global TINT_DISABLED
@@ -34922,6 +34927,8 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         # `return self.items.pop()`) has no local to tag either: the function's own result is tagged,
         # so the call result is converted (checked) at the return instead of staying an int64.
         _call_result = _proof is not None and 'call result not proven to fit int64' in _proof
+        if _call_result:
+            _call_result_names.add(_f.name)
         _needs_tint = bool(_unproven) or (_proof is not None and (_f.name in method_names or _call_result))
         _params = tuple(1 if (k == INT and n in _unproven
                               and (sigs[_f.name][1] == INT or _param_arith(_f, n))) else 0
@@ -34930,10 +34937,41 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                      and not (_f.name == entry_name and not library)) else 0
         _tint_sigs[_f.name] = (_params, _ret)
         _tint_sigs[csym[_f.name]] = (_params, _ret)
-    global TINT_SIGS, TINT_ACTIVE
+    global TINT_SIGS, TINT_ACTIVE, GENERAL_BLOCKED
     TINT_SIGS = _tint_sigs
     TINT_ACTIVE = dict(_tint_sigs)
-    for f in fns:
+    GENERAL_BLOCKED = any(
+        isinstance(_n, ast.Call) and isinstance(_n.func, ast.Name)
+        and (_n.func.id in shadowing.AIL_BUILTINS or _n.func.id.startswith(('_ail_', '_Ail')))
+        for _f in fns for _n in ast.walk(_f))
+    # A tagged function may fall back to the legacy emitter when the IR cannot lower it (see
+    # ir/driver.py). Its callers must then see the plain int64 signature, so a caller compiled
+    # earlier would still have emitted the tagged call. Put every tagged function before the rest,
+    # callees first: by the time any caller is compiled, each tagged callee has either stayed on
+    # the IR (tagged ABI) or been untagged by the fallback.
+    _compile_fns = fns
+    if _call_result_names:
+        _tagged_names = {n for n, _ts in _tint_sigs.items()
+                         if n in names and (any(_ts[0]) or _ts[1])}
+        if _tagged_names:
+            _by_name = {f.name: f for f in fns}
+            _ordered, _seen = [], set()
+
+            def _visit(_name):
+                if _name in _seen:
+                    return
+                _seen.add(_name)
+                for _dep in sorted(reach.get(_name, ())):
+                    if _dep in _tagged_names:
+                        _visit(_dep)
+                _ordered.append(_name)
+
+            for _f in fns:
+                if _f.name in _tagged_names:
+                    _visit(_f.name)
+            _compile_fns = ([_by_name[_n] for _n in _ordered]
+                            + [f for f in fns if f.name not in _seen])
+    for f in _compile_fns:
         cname = csym[f.name]
         # `base_ctx` is THIS function's OWN fully-typed, UNSPECIALISED ctx (`_caller_ctx`) -- the
         # same one `_plan_clones` used when it decided which clones to build. Every compile of `f`

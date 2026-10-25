@@ -134,6 +134,17 @@ def apply(P, args, kwargs, result):
         I.SRC.clear()
 
 
+def _drop_tint(P, *names):
+    """A function that stays on the legacy int64 emitter must not advertise a tagged ABI.
+    TINT_ACTIVE is what call sites read; TINT_SIGS is what the IR's own call lowering reads.
+    Both must forget the function, or a caller lowered earlier or later emits an `ail_tint` call
+    to a function that actually returns plain int64 (an invalid initializer in the C)."""
+    for _map in (getattr(P, 'TINT_ACTIVE', None), getattr(P, 'TINT_SIGS', None)):
+        if _map is not None:
+            for _name in names:
+                _map.pop(_name, None)
+
+
 def _apply(P, args, kwargs, result, current):
     sig, generated, ctx = result
     bound = inspect.signature(P._one_function_numeric_impl).bind(*args, **kwargs).arguments
@@ -212,11 +223,15 @@ def _apply(P, args, kwargs, result, current):
         and (getattr(P, 'TINT_SIGS', {}).get(n.func.id) or ((), 0))[1]
         for n in ast.walk(fn))
     # A call result the proof cannot bound has no named local to tag. When the IR can lower the
-    # function, TINT_SIGS gives its result the tagged type and the return checks the conversion;
-    # when the IR cannot, a typed-only build has no exact alternative and keeps the legacy emitter.
+    # function, TINT_SIGS gives its result the tagged type and the return checks the conversion.
+    # A build with the general path available still uses it: the typed path cannot hold a result
+    # above int64 in a list/dict/field, and dropping to the general path is what keeps such a
+    # program exact. Only a typed-only build (AIL_NO_GENERAL) has no exact alternative, and there
+    # the function keeps the legacy emitter if the IR cannot lower it.
     _call_result_proof = (_proof or '').startswith('a call result not proven to fit int64')
+    _typed_only = bool(os.environ.get('AIL_NO_GENERAL')) or getattr(P, 'GENERAL_BLOCKED', False)
     if _py and _needs_tint and _no_tint_locals and not _has_tint_call \
-            and not _call_result_proof \
+            and not (_call_result_proof and _typed_only) \
             and not (_proof or '').startswith(('it calls ', 'it contains ')):
         from pyfront import Unsupported
         raise Unsupported('%s() has an int operation the local proof cannot bound, but no tagged local (%s)'
@@ -288,16 +303,13 @@ def _apply(P, args, kwargs, result, current):
             from pyfront import Unsupported
             raise Unsupported('%s() needs the tagged-int lowering, which does not cover it: %s'
                               % (fn.name, reason))
-        if _py and _tinted_sig:
-            # this function stays on the legacy int64 emitter (the typed-only build): its callers
-            # must not wrap arguments/results as ail_tint
-            getattr(P, 'TINT_ACTIVE', {}).pop(fn.name, None)
-            getattr(P, 'TINT_ACTIVE', {}).pop(cname, None)
+        _drop_tint(P, fn.name, cname)
         return result
     except Exception as error:
         if current == 'verify':
             raise
         _record(fn.name, cname, 'legacy', 'IR failure: %s: %s' % (type(error).__name__, error), ctx)
+        _drop_tint(P, fn.name, cname)
         return result
     ctx.parts.update(needs['parts'])
     ctx.floor.update(needs['floor'])
