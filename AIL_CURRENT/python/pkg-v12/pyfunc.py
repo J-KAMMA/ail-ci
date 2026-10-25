@@ -711,6 +711,17 @@ _CONST_INT_BIG = object()
 _CONST_INT_BITS = 4096
 
 
+def _const_expr_is_bool(node):
+    """Whether a constant expression CPython evaluates to a bool rather than an int.
+
+    Bool constants fold as 0/1 for arithmetic and shifts, but `&`, `|` and `^` of two bools
+    return a bool, so folding those would emit an int literal and print 0/1 (and type() `int`)."""
+    if isinstance(node, ast.Constant):
+        return type(node.value) is bool
+    return (isinstance(node, ast.BinOp) and isinstance(node.op, (ast.BitAnd, ast.BitOr, ast.BitXor))
+            and _const_expr_is_bool(node.left) and _const_expr_is_bool(node.right))
+
+
 def _const_int_expr(node):
     """The exact value of a constant int expression, or a not-constant/too-big sentinel.
 
@@ -781,10 +792,16 @@ def _const_int_expr(node):
     elif op is ast.Sub:
         value = left - right
     elif op is ast.BitAnd:
+        if _const_expr_is_bool(node.left) and _const_expr_is_bool(node.right):
+            return _CONST_INT_NOT            # CPython's result is a bool, not an int
         value = left & right
     elif op is ast.BitOr:
+        if _const_expr_is_bool(node.left) and _const_expr_is_bool(node.right):
+            return _CONST_INT_NOT
         value = left | right
     else:
+        if _const_expr_is_bool(node.left) and _const_expr_is_bool(node.right):
+            return _CONST_INT_NOT
         value = left ^ right
     return _CONST_INT_BIG if value.bit_length() > _CONST_INT_BITS else value
 

@@ -9,6 +9,11 @@ is).  A shift whose intermediate needs more than the folder's 4096-bit cap is re
 
 The remaining name-bound form (``b = True; (b << 64) >> 64``) keeps the pre-existing runtime trap;
 it is a separate, non-constant cause.
+
+A later review found that folding bool constants as 0/1 also folded ``&``, ``|`` and ``^`` of two
+bools, which CPython evaluates to a bool (``True ^ False`` printed ``1`` and ``type`` ``int``).
+Those three operators are now left unfolded when both operands are bool constants, so the runtime
+keeps the bool result.
 """
 import os
 import subprocess
@@ -57,6 +62,39 @@ print("return", make())
 x = (True << 64) >> 64
 y = x
 print("alias", x, y)
+'''
+
+BOOL_BITS = r'''class Box:
+    pass
+
+
+def show(label, v):
+    print(label, v)
+
+
+def make(flag):
+    if flag:
+        return True ^ False
+    return True & False
+
+
+print(True ^ False)
+print(True | False)
+print(True & True)
+print(True & False)
+print(False | False)
+print(type(True ^ False).__name__, type(True | False).__name__, type(True & True).__name__)
+print(True ^ 1, 1 ^ True, True | 0, 0 & False, False | 0)
+print((True & False) | True, (True ^ True) ^ True)
+print((True & False) + 1, (True & False) << 3)
+show("arg", True ^ False)
+print("list", [(True ^ False), (True | True)][-1])
+box = Box()
+box.x = True | False
+show("attr", box.x)
+print("dict", {"k": True & True}["k"])
+show("call", make(True))
+show("call2", make(False))
 '''
 
 NEGATIVE = r'''def out(label, fn):
@@ -136,6 +174,13 @@ class Pre229Tests(unittest.TestCase):
         self._same_as_cpython('containers', CONTAINERS)
         want = _cpython(self.dir, 'containers_want', CONTAINERS)
         self.assertIn('arg 1\nlist 1\nattr 1\ndict 1\nreturn 1\nalias 1 1\n', want.stdout)
+
+    def test_bool_bitwise_constants_stay_bool(self):
+        self._same_as_cpython('boolbits', BOOL_BITS)
+        want = _cpython(self.dir, 'boolbits_want', BOOL_BITS)
+        self.assertIn('True\nTrue\nTrue\nFalse\nFalse\nbool bool bool\n', want.stdout)
+        self.assertIn('arg True\nlist True\nattr True\ndict True\ncall True\ncall2 False\n',
+                      want.stdout)
 
     def test_bool_negative_shift_count(self):
         self._same_as_cpython('negative', NEGATIVE)

@@ -1,3 +1,15 @@
+## 2026-10-25 - review fix: bool constants keep bool bitwise results (job-pre229-10260120)
+
+The review found that treating the bool constants as 0/1 in the constant folder also folded
+`&`, `|` and `^` of two bools, so `print(True ^ False)` printed `1` and `type(...).__name__`
+printed `int` on both builds, where CPython (and base) give `True`/`bool`. The folder now leaves
+those three operators unfolded when both operands are bool-typed constants, so the runtime
+computes the bool result; arithmetic, unary `+ - ~` and shifts are still folded as before.
+Probes `/tmp/probes/p229r_boolbits.py`, `p229r_scope.py` (argument, list item, attribute, dict
+value, return, alias) and `p229r_shift.py` (the earlier shift folds) match CPython on both builds;
+`p229r_refuse1/2` are still refused by name. Added the bool-bitwise case to
+`test_ail_pre229.py`.
+
 ## 2026-10-25 - bool operands in constant shifts (job-pre229-10260120)
 
 The review of job pre201 left this pre-existing difference: `(True << 64) >> 64` trapped with
