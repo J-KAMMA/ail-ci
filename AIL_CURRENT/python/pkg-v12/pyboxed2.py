@@ -628,6 +628,8 @@ static const char *ail__iter_type_name(ail_iterobj *it) {
 static inline ail_st ail_type_name_of(ail_ctx *cx, ail_obj *out, ail_obj x) {
     if (x.tag == AIL_T_ITER) {
         ail_iterobj *it = (ail_iterobj *)x.o;
+        if (it->name_kind == 1) { *out = ail_str_from_cstr(cx, "bytes_iterator"); return AIL_OK; }
+        if (it->name_kind == 2) { *out = ail_str_from_cstr(cx, "bytearray_iterator"); return AIL_OK; }
         if (it->kind == AIL_IT_STR) {
             ail_str s = ail_view_to_str(it->target);
             int ascii = 1;

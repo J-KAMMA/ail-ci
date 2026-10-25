@@ -517,7 +517,7 @@ class bytes:
         return ord(self._s[_ail_b_idx(len(self._s), i, "byte")])
 
     def __iter__(self):
-        return iter(_ail_b_ints(self._s))
+        return _ail_b_iter(_ail_b_ints(self._s), 1)
 
     def __contains__(self, x):
         return _ail_bcontains(x) in self._s
@@ -648,7 +648,7 @@ class bytearray:
         del self._a[_ail_b_idx(len(self._a), i, "bytearray")]
 
     def __iter__(self):
-        return iter(self._a)
+        return _ail_b_iter(self._a, 2)
 
     def __contains__(self, x):
         return _ail_bcontains(x) in _ail_b_from_ints(self._a)

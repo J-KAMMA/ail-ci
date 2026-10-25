@@ -14168,7 +14168,7 @@ enum {
     AIL_IT_DICT_ITEMS, AIL_IT_SET, AIL_IT_RANGE, AIL_IT_ENUMERATE, AIL_IT_ZIP,
     AIL_IT_REVERSED, AIL_IT_MAP, AIL_IT_FILTER, AIL_IT_STREAM, AIL_IT_USER
 };
-typedef struct { ail_gcobj hdr; int kind; ail_obj target; ail_obj extra; int64_t idx, idx2; ail_st (*read_next)(ail_ctx *, ail_obj *); } ail_iterobj;
+typedef struct { ail_gcobj hdr; int kind; uint8_t name_kind; ail_obj target; ail_obj extra; int64_t idx, idx2; ail_st (*read_next)(ail_ctx *, ail_obj *); } ail_iterobj;
 
 /* ===================================================================================
    ail_gc_mark_value -- defined now that every payload struct is visible. Recursion depth
