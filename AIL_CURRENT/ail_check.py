@@ -21,6 +21,7 @@ MODULES = (
     'test_ail_nested_functions', 'test_ail_match', 'test_ail_raise_from', 'test_ail_optional_locals',
     'test_ail_pre165',
     'test_ail_safetynet',
+    'test_ail_pre100',
     'test_ail_strict', 'test_ail_cratebridge', 'test_ail_typed_parallel', 'test_ail_freestanding', 'test_ail_freestanding2',
     'test_ail_flush_exit', 'test_ail_mixed_bounds', 'test_ail_typed_submit', 'test_ail_typed_tuples',
     'test_ail_lsp', 'test_ail_project', 'test_ail_debug', 'test_ail_debug_lines', 'test_ail_debug_flush',
