@@ -26895,10 +26895,19 @@ static ail_str ail_fmt_gen(ail_sarena *A, int kind, int64_t iv, double dv, int f
                 snprintf(body, cap, f, p, a);
             }
             blen = n;
-            if (type == 0 && prec >= 0) {
-                int dot = 0;
-                for (int64_t i = 0; i < blen; i++) if (body[i] == '.' || body[i] == 'e') dot = 1;
-                if (!dot) { body[blen++] = '.'; body[blen++] = '0'; }
+            if (type == 0) {
+                int dot = 0; int64_t ep = -1;
+                for (int64_t i = 0; i < blen; i++) {
+                    if (body[i] == '.') dot = 1;
+                    else if ((body[i] == 'e' || body[i] == 'E') && ep < 0) ep = i;
+                }
+                if (!dot) {
+                    if (ep >= 0) {
+                        if (alt) { memmove(body + ep + 1, body + ep, (size_t)(blen - ep + 1)); body[ep] = '.'; blen++; }
+                    } else if ((prec >= 0 || alt) && body[0] >= '0' && body[0] <= '9') {
+                        body[blen++] = '.'; body[blen++] = '0';
+                    }
+                }
             }
             if (type == '%') body[blen++] = '%';
             if (group) {

@@ -340,6 +340,14 @@ the wrong side of 1.0; the recorded row reads `0.990 [0.981, 0.9996] faster` and
 keep three decimals. No compiler or runtime file is touched. `AIL_CURRENT/test_ail_pre130.py` pins
 the recorded row, both sides of 1.0, exact ties, the no-range median, the next float below 1.0 and
 values arriving through an argument, a list item, an attribute and a dict value.
+## 2026-10-24 - pre132: alternate-form repr for a type-less float field
+
+`format(1e300, '#')` and `format(1e300, '#\x00')` printed `1e+300` where CPython prints
+`1.e+300`; the compile-time literal f-string path (`ail_fmt_gen`) had the same gap. Both
+formatters now keep a decimal point in the mantissa when the alternate form is requested,
+including `#.0`, widths, zero padding and grouping. Added `test_ail_pre132.py` (dynamic
+specs, literal f-strings, values through arguments, lists, attributes and dicts, and
+empty/int/str specs) on both builds.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
