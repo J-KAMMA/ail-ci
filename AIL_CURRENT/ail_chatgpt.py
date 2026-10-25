@@ -91,7 +91,10 @@ def _const_expr_int(node, bounded=True):
     if isinstance(node, ast.Constant) and type(node.value) is int:
         value = node.value
     elif isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert)):
-        value = _const_expr_int(node.operand, bounded)
+        # A unary sign can bring an out-of-int64 operand back into range, as `-(1 << 63)` does
+        # (the negative INT64_MIN spelling), so evaluate the operand exactly and range-check the
+        # signed result rather than rejecting the intermediate.
+        value = _const_expr_int(node.operand, False)
         if value is None:
             return None
         if isinstance(node.op, ast.USub):
@@ -254,6 +257,17 @@ def _constant_int(node, known):
             if right > 64:
                 return 1 << 64 if left > 0 else -(1 << 64)
             return left ** right
+        if isinstance(node.op, (ast.LShift, ast.RShift)):
+            right = _constant_int(node.right, known)
+            if right is None or right < 0:
+                return None
+            if isinstance(node.op, ast.LShift):
+                if right > 64:
+                    return 1 << 64 if left >= 0 else -(1 << 64)
+                return left << right
+            if right > 64:
+                return 0 if left >= 0 else -1
+            return left >> right
         operation = _INT_BINARY.get(type(node.op))
         if operation is None:
             return None

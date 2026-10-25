@@ -46,6 +46,46 @@ local.  A final value outside int64, or an intermediate above 8192 bits, is stil
 name.  Added `test_ail_pre200.py` and registered it in `ail_check.MODULES` and
 `tools/ci_shards.json`; probes `p_pre200_*` in `/tmp/probes` match CPython on both builds, and
 the over-limit cases are named refusals.
+## 2026-10-25 - unary INT64_MIN fold without rewriting source text (job-pre203-10252053 review)
+
+The review found two regressions in the previous text-splicing fix.  Replacing every unary constant
+expression removed the `+` token (`return+5` became `return5`, `not+5` became `not5`) and rewrote the
+user-visible expression in an f-string `=` debug field.  The source rewrite is gone.  The value is now
+folded where it is emitted: the legacy typed emitter (`pyfunc`), the IR (`ir/lower.py`), and both
+general-path emitters (`pyboxed`, `pyboxed2`) recognise a unary minus whose exact value is INT64_MIN
+and emit the in-range literal `(-9223372036854775807LL - 1LL)`.  `unified.py` does the same.  Only
+that one value is folded, so programs not using it keep their previous C text, unary plus is never
+touched, and f-string debug fields keep their original spelling.  The constant-index and nested-unary
+checks now evaluate unary signs exactly and understand shifts, so `xs[-(1 << 63)]` matches CPython
+while `-(-(1 << 63))` is still refused by name.
+
+`test_ail_pre203.py` now also covers f-string `=` text (`-(1 << 63)`, `+(1 << 62)`), token-adjacent
+unary plus (`return+5`, `not+5`, `1 and+(1 << 62)`) and the MIN routes.  Probes in `/tmp/probes`:
+`pre203_negmin`, `pre203_negminlit`, `pre203_routes`, `pre203_routes2`, `pre203_fstring_min`,
+`pre203_fstring_more`, `pre203_adjacent`, `pre203_adjacent2`, `pre203_dictkey`, `pre203_boolfloat`
+match CPython on both builds; `pre203_nested_refuse` is refused by name on both.  Required modules
+`test_ail_pre203`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` passed on the
+final code (4 modules, 166 s, 0 failed).
+
+## 2026-10-25 - unary INT64_MIN constant expression (job-pre203-10252053)
+
+The first still-differing item recorded by the pre190 review was the unary spelling of INT64_MIN:
+`print(-(1 << 63))` and `print(-((1 << 5000) >> 4937))` stopped with `integer overflow` on both builds,
+where CPython prints `-9223372036854775808`.  Python parses these as a unary minus over a shift, and the
+emitters fold binary constant expressions but not that shape, so the shift reached 2**63 and the negate
+trapped.  `ail_chatgpt.py` now rewrites an all-int unary constant expression whose value fits int64 as a
+literal before the backends parse the text again; MIN is spelled `(-9223372036854775807 - 1)` because no
+single Python token denotes it.  `int_constant` in `pyfront.py` takes an optional fold limit (default
+unchanged) and passes it through recursive calls, so `(1 << 5000) >> 4937` can reduce to 2**63 at the
+2**20-bit limit used only by this pass.  Nested unary values outside int64 (for example `-(-MIN)`) are
+still refused by name, and float unary expressions are unchanged.
+
+`test_ail_pre203.py` covers both examples, in-range boundaries, `+`, `-0`, `-(-5)`, `-True`, module
+constants, tuple assignment, arguments, list items, attributes, dict values and an alias on both builds.
+`/tmp/probes/pre203_{negshift,negshift2,negmin,negminlit,negminmod,boundary,routes,shiftops,float}.py`
+match CPython on both builds; `/tmp/probes/pre203_negneg.py` is refused by name.  The other pre190
+pre-existing items (`0 >> (1 << 5000)`, `2 ** ((1<<2000000)-(1<<2000000))`, `(1<<2000000)>>2000000`,
+`int("1"*5000, 2)`) still differ and were not touched.
 
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
