@@ -119,6 +119,19 @@ rounding would put a value on the wrong side of 1.0, so this row reads
 `0.990 [0.981, 0.9996] faster`; ordinary ratios keep three decimals and the verdict rule is
 unchanged.  No compiler or runtime file is touched.  `AIL_CURRENT/test_ail_pre110.py` pins the
 below/above/tie/exact-one cases and the no-range median.
+## 2026-10-24 -- pre128: %-format no longer uses __trunc__
+
+A class that defines only `__trunc__` printed 5 for `%d` / `%i` / `%u` (and for
+every width and sign spelling) on both builds, while CPython asks `__int__` then
+`__index__` and raises `TypeError`. The general path's percent formatter
+(`dunderrt.py`) no longer falls back to `__trunc__` for the decimal directives;
+`int()` keeps its own valid `__trunc__` fallback, and `__int__` / `__index__`
+still format. Added `test_ail_pre128.py`: literal directives, widths, signs, a
+tuple argument, and values reaching the format through a function argument, a
+list item, an attribute and a dict value, on both builds. Still open: a computed
+format string (`spec % v` with `spec` held in a variable) is lowered as the `%`
+operator and raises TypeError; this is the general dynamic-format limitation
+recorded as DIFFERENCES `C?-job-pre128-10242352-2`.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 

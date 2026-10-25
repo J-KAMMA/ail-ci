@@ -422,7 +422,6 @@ def _edits():
               '                int dec = t == \'d\' || t == \'i\' || t == \'u\';\n'
               '                ail_d1_fn cf = dec ? ail_dun1(arg, AIL_D1_INT) : 0;\n'
               '                if (!cf) cf = ail_dun1(arg, AIL_D1_INDEX);\n'
-              '                if (!cf && dec) cf = ail_dun1(arg, AIL_D1_TRUNC);\n'
               '                if (cf) { ail_obj cv; st = cf(cx, &cv, arg); if (st != AIL_OK) goto fail; arg = cv; }\n'
               '            }\n'
               '            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) iv = arg.i;\n'))
