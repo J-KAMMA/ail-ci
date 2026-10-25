@@ -1,3 +1,18 @@
+## 2026-10-25 - maxsplit intermediates above 4096 bits fold (job-pre200-10252051)
+
+The first still-differing pre-existing item from the pre195 review was `2**4096 // 2**4050`
+(final value 2**46) as a maxsplit constant: both builds refused it by name, while
+`2**4096 >> 4096` (final value 1) remained refused as well.  The maxsplit folder's power branch
+used the old blanket `right >= 64` rule and the intermediate width cap was 4096 bits, so a
+4097-bit intermediate was too big even when the expression reduces to an int64 value.  Powers
+are now measured by their exact width with capped square-and-multiply under an 8192-bit limit,
+and the shared int constant folder's limit is 8192 bits too, so the same expression also folds
+when it reaches split/rsplit through an argument, a list item, an attribute, a dict value or a
+local.  A final value outside int64, or an intermediate above 8192 bits, is still refused by
+name.  Added `test_ail_pre200.py` and registered it in `ail_check.MODULES` and
+`tools/ci_shards.json`; probes `p_pre200_*` in `/tmp/probes` match CPython on both builds, and
+the over-limit cases are named refusals.
+
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal

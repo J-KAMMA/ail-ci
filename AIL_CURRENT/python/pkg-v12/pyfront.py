@@ -138,7 +138,7 @@ def _number_constant(node):
     return None
 
 
-_CONST_INT_LIMIT = 4096
+_CONST_INT_LIMIT = 8192
 
 
 def int_constant(node):

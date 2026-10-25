@@ -586,7 +586,32 @@ _I64_MIN = -(1 << 63)
 _I64_MAX = (1 << 63) - 1
 _MAXSPLIT_NOT_CONST = object()
 _MAXSPLIT_TOO_BIG = object()
-_MAXSPLIT_BITS = 4096
+_MAXSPLIT_BITS = 8192
+
+
+def _pow_within_maxsplit_bits(base, exponent):
+    """Would `base ** exponent` be at most _MAXSPLIT_BITS wide, without building it?
+
+    `base.bit_length() * exponent` overshoots: `2**65 ** 63` is exactly 4096 bits, but the
+    product is 4158.  Square and multiply with a cap so the test is exact and never allocates
+    more than the limit."""
+    if base < 0:
+        base = -base
+    cap = 1 << _MAXSPLIT_BITS
+    result = 1
+    power = base
+    remaining = exponent
+    while remaining:
+        if remaining & 1:
+            result *= power
+            if result >= cap:
+                return False
+        remaining >>= 1
+        if remaining:
+            power *= power
+            if power >= cap:
+                return False
+    return True
 
 
 def _maxsplit_const(node):
@@ -624,7 +649,9 @@ def _maxsplit_const(node):
             return 1
         if left in (0, 1, -1):
             return left ** right if left != -1 else (-1 if right & 1 else 1)
-        if right >= 64:
+        if right >= _MAXSPLIT_BITS or abs(left).bit_length() > _MAXSPLIT_BITS:
+            return _MAXSPLIT_TOO_BIG
+        if not _pow_within_maxsplit_bits(left, right):
             return _MAXSPLIT_TOO_BIG
         value = left ** right
     elif op is ast.LShift:
