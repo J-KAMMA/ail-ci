@@ -1,3 +1,14 @@
+## 2026-10-25 - pre200 suite fix: shared constant folder uses the 8192-bit width (job-pre200-10252345)
+
+On the integration branch, both `test_ail_pre200` and `test_ail_pre203` failed even though each
+job's own branch passed.  The pre200 maxsplit folder and `pyfront.int_constant` use an 8192-bit
+intermediate limit, but the shared `pyfunc.fold_int_constant` added by rbrbpre121 kept its older
+4096-bit cap and ran first on the general path: it refused pre200's 8191-bit maxsplit
+expression and pre203's `-((1 << 5000) >> 4937)` before those folders saw them.  The shared cap
+now uses the same 8192-bit width, so a 4097-bit intermediate folds while values that leave
+int64, or exceed 8192 bits, stay refused by name.  Both modules pass together on the
+integration tree (5 tests); the pre200 probes are unchanged and match CPython on both builds.
+
 ## 2026-10-25 - maxsplit intermediates above 4096 bits fold (job-pre200-10252051)
 
 The first still-differing pre-existing item from the pre195 review was `2**4096 // 2**4050`

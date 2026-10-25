@@ -37720,3 +37720,9 @@ if _QC_MODE != '0':
     _fast_ast.__dict__.update(ast.__dict__)
     _fast_ast.walk = _fast_walk
     ast = _fast_ast
+
+# pre200 accepts intermediate constant expressions up to 8192 bits (the maxsplit folder and
+# pyfront.int_constant use that width); the shared int fold introduced by rbrbpre121 still
+# measured its intermediates by its old 4096-bit cap, which refused pre200's 8191-bit maxsplit
+# values and pre203's -(1 << 5000) >> 4937.  Keep the two widths equal.
+_CONST_INT_BITS = 8192
