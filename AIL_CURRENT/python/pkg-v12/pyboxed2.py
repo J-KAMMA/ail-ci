@@ -7091,13 +7091,13 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('enumerate() with both a positional start and start=')
         src = self._resolve_iter_src(args[0], ctx)
         if len(args) == 2:
-            start = '(%s).i' % self.expr(args[1], ctx)
+            start = '1, %s' % self.expr(args[1], ctx)
         elif 'start' in kwargs:
-            start = '(%s).i' % self.expr(kwargs['start'], ctx)
+            start = '1, %s' % self.expr(kwargs['start'], ctx)
         else:
-            start = '0LL'
+            start = '0, ail_box_none()'
         t = ctx.tmp()
-        ctx.emit('st = ail_iter_enumerate(cx, &%s, %s, %s);' % (t, src, start))
+        ctx.emit('st = ail_bi_enumerate(cx, &%s, %s, %s);' % (t, src, start))
         ctx.check()
         return t
 

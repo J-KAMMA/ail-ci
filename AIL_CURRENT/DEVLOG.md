@@ -1,3 +1,22 @@
+## 2026-10-25 -- pre233: enumerate() start converted as an index (job-pre233-10260124)
+
+The task's pre-existing item list was empty, so the documented open differences in DIFFERENCES.md
+were reproduced on both builds with `bash ~/tools/cmp.sh`.  The first fixable one,
+`C?-job-fuzz8-10220554-2`, still differed: the general path read `enumerate(xs, start)`'s start
+straight out of the value union, so `None` gave 0 and a float, str, list, tuple, bytes, dict or set
+gave a pointer-sized integer.  The v2 runtime builtin now takes the start object and converts it as
+CPython's `PyNumber_Index` does (int or bool, else `TypeError: '<type>' object cannot be interpreted
+as an integer`) before the iterable is opened, and the emitter passes the object for the positional
+and `start=` forms.  `__index__` instances stay unconverted (that protocol is not implemented in
+this runtime).  The range-slice int64 limit (pre185) and the runtime non-BMP `chr()` row still
+differ and were left as recorded.
+
+Probes `/tmp/probes/pre233_enum_*` cover the start through an argument, a list item, an attribute,
+a dict value and literals; None/float/str/bytes/list/tuple/dict/set; bool, negative, int64-boundary
+and empty iterables; keyword `start=`; for loops and comprehensions; evaluation order; and the
+both-invalid precedence; all match CPython on both builds.  Added `test_ail_pre233.py` (2 tests,
+both builds) and registered it in `ail_check.MODULES`.
+
 ## 2026-10-25 -- pre199: range() with a zero step raises ValueError (job-pre199-10252047)
 
 The first still-differing item left by pre186 was `range(0, 5, 0)`: both builds accepted it and

@@ -17191,9 +17191,15 @@ static inline ail_st ail_bi_range(ail_ctx *cx, ail_obj *out, int has_start, int6
     return AIL_OK;
 }
 
-/* B005: enumerate(iterable, start=0). */
-static inline ail_st ail_bi_enumerate(ail_ctx *cx, ail_obj *out, ail_obj iterable, int has_start, int64_t start) {
-    return ail_iter_enumerate(cx, out, iterable, has_start ? start : 0);
+/* B005: enumerate(iterable, start=0). The start is converted as PyNumber_Index does
+   (int, bool, else TypeError naming the type), never read straight out of the union. */
+static inline ail_st ail_bi_enumerate(ail_ctx *cx, ail_obj *out, ail_obj iterable, int has_start, ail_obj start) {
+    int64_t s = 0;
+    if (has_start) {
+        ail_st st = ail__range_index(cx, &s, start);
+        if (st != AIL_OK) return st;
+    }
+    return ail_iter_enumerate(cx, out, iterable, s);
 }
 
 /* B006 (zip, 2-iterable form) / B007 (map, 1-iterable form): re-exported as-is --
