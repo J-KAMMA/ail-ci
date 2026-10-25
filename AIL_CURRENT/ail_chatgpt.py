@@ -360,6 +360,140 @@ def _check_int64_unary_constants(tree):
     _check_int64_abs_constants(tree, known)
 
 
+_CONST_INT_TOO_BIG = object()
+_CONST_INT_BITS = 4096
+
+
+def _constant_int_exact(node):
+    """The exact int a constant expression denotes, with a guard against huge intermediates.
+    Pow bases 0/1/-1 and a zero left shift are decided before the 4096-bit guard, since their
+    results fit int64 however large the exponent or shift is."""
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        return True, node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert)):
+        ok, value = _constant_int_exact(node.operand)
+        if not ok:
+            return False, None
+        if value is _CONST_INT_TOO_BIG:
+            return True, _CONST_INT_TOO_BIG
+        if isinstance(node.op, ast.USub):
+            return True, -value
+        if isinstance(node.op, ast.UAdd):
+            return True, value
+        return True, ~value
+    if not isinstance(node, ast.BinOp) or type(node.op) not in (
+            ast.Add, ast.Sub, ast.Mult, ast.Pow, ast.LShift, ast.RShift,
+            ast.FloorDiv, ast.Mod, ast.BitAnd, ast.BitOr, ast.BitXor):
+        return False, None
+    left_ok, left = _constant_int_exact(node.left)
+    right_ok, right = _constant_int_exact(node.right)
+    if not (left_ok and right_ok):
+        return False, None
+    if left is _CONST_INT_TOO_BIG or right is _CONST_INT_TOO_BIG:
+        return True, _CONST_INT_TOO_BIG
+    try:
+        if isinstance(node.op, ast.Pow):
+            if right < 0:
+                return False, None
+            if left == 0:
+                value = 1 if right == 0 else 0
+            elif left == 1:
+                value = 1
+            elif left == -1:
+                value = 1 if right % 2 == 0 else -1
+            elif right > _CONST_INT_BITS or left.bit_length() * right > _CONST_INT_BITS:
+                return True, _CONST_INT_TOO_BIG
+            else:
+                value = left ** right
+        elif isinstance(node.op, ast.LShift):
+            if right < 0:
+                return False, None
+            if left == 0:
+                value = 0
+            elif right > _CONST_INT_BITS or left.bit_length() + right > _CONST_INT_BITS:
+                return True, _CONST_INT_TOO_BIG
+            else:
+                value = left << right
+        elif isinstance(node.op, ast.RShift):
+            if right < 0:
+                return False, None
+            value = (0 if left >= 0 else -1) if right > _CONST_INT_BITS else left >> right
+        elif isinstance(node.op, (ast.FloorDiv, ast.Mod)):
+            if right == 0:
+                return False, None
+            value = left // right if isinstance(node.op, ast.FloorDiv) else left % right
+        elif isinstance(node.op, ast.Mult):
+            if left == 0 or right == 0:
+                value = 0
+            elif left.bit_length() + right.bit_length() > _CONST_INT_BITS:
+                return True, _CONST_INT_TOO_BIG
+            else:
+                value = left * right
+        elif isinstance(node.op, ast.Add):
+            value = left + right
+        elif isinstance(node.op, ast.Sub):
+            value = left - right
+        elif isinstance(node.op, ast.BitAnd):
+            value = left & right
+        elif isinstance(node.op, ast.BitOr):
+            value = left | right
+        else:
+            value = left ^ right
+    except (ArithmeticError, ValueError, OverflowError):
+        return True, _CONST_INT_TOO_BIG
+    return True, value
+
+
+def _check_int64_constants(tree):
+    """Refuse a constant integer expression outside int64 in a module/class assignment or a
+    default argument, where the construct used to compile and trap at run time. Function and
+    lambda bodies are left to the existing run-time stop and to _check_int64_literals, and a
+    class body keeps _check_constant_power's own wording for a bare `**` value it can fold;
+    `_const_expr_int` cannot fold an exponent above 64, so that case is checked here."""
+    def check_value(node):
+        ok, value = _constant_int_exact(node)
+        if not ok:
+            return
+        if value is not _CONST_INT_TOO_BIG and -(1 << 63) <= value < 1 << 63:
+            return
+        shown = 'too large' if value is _CONST_INT_TOO_BIG else value
+        error = ValueError(f'int64 constant expression out of range: {shown}')
+        error.source_line = getattr(node, 'lineno', None)
+        error.source_column = getattr(node, 'col_offset', None)
+        raise error
+
+    def defers_to_power(value, in_class):
+        return (in_class and isinstance(value, ast.BinOp) and isinstance(value.op, ast.Pow)
+                and _const_expr_int(value, bounded=False) is not None)
+
+    def walk(node, in_class=False):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            for default in list(node.args.defaults) + [d for d in node.args.kw_defaults if d is not None]:
+                check_value(default)
+            return
+        if isinstance(node, ast.ClassDef):
+            for base in node.bases:
+                walk(base)
+            for keyword in node.keywords:
+                walk(keyword.value)
+            if node.bases:
+                return
+            for statement in node.body:
+                walk(statement, True)
+            return
+        if isinstance(node, ast.Assign):
+            if not defers_to_power(node.value, in_class):
+                check_value(node.value)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            if not defers_to_power(node.value, in_class):
+                check_value(node.value)
+        for child in ast.iter_child_nodes(node):
+            walk(child, in_class)
+
+    for statement in tree.body:
+        walk(statement)
+
+
 def _returns_on_every_path(statements):
     def loop_exit(body):
         pending = list(body)
@@ -567,6 +701,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 if local_imports:
                     _check_importable(tree)
             if not declarations_only:
+                _check_int64_constants(tree)
                 _check_int64_literals(tree)
                 _check_int64_unary_constants(tree)
             if merged is not None and merged.positions:

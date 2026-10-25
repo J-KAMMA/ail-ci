@@ -129,6 +129,41 @@ Probes in `/tmp/probes`: `p214_direct_pow`, `p214_direct_shift`, `p214_literal_m
 refused by name on both builds; `p214_in_range` and `p214_shadow` match CPython on both builds.
 `p214_variable` (a local variable holding the minimum) is unchanged and still traps at run time,
 the same pre-existing limitation as before this job.
+## 2026-10-25 - pre184 review fix: class-body bare `**` with a large exponent (job-rbpre184-10252049)
+
+The reviewer found that the conflict resolution left a hole: a class-body bare `**` value was
+always deferred to `_check_constant_power`, but that check folds with `_const_expr_int`, which
+returns `None` when the exponent is above 64.  So `class C: M = 2 ** 100` and
+`M: int = 2 ** 100` compiled and then stopped at run time with `integer overflow`, where the
+accepted tree refuses them by name.  The class-body deferral now applies only when
+`_const_expr_int` can fold the value; otherwise `_constant_int_exact` checks it, so both cases
+fail at compile time with `int64 constant expression out of range: 1267650600228229401496703205376`.
+`class C: M = 2 ** 64` still gets pre177's `int64 constant out of range` wording, and in-range or
+special-power results (`2 ** 62`, `0 ** 100000`, `1 ** 100000`, `(-1) ** 100000`, `0 << 100000`,
+`(2 ** 100) // (2 ** 99)`) still match CPython on both builds.  Added both class-body cases to
+`test_ail_pre184.py`.
+
+## 2026-10-25 - out-of-int64 constant expressions outside function bodies (job-rbpre184-10252049)
+
+Re-applied the accepted pre184 change on top of this tree. A constant integer expression in a
+module/class assignment or a default argument that does not fit int64 is now refused by name at
+compile time (`int64 constant expression out of range`), instead of compiling and stopping at run
+time with `integer overflow`. `corpus/gdev/g22_012.py` (`_MASK: int = (1 << 64) - 1`) and
+`def f(x=10**30)` are the motivating cases. The evaluator handles + - * // % ** << >> & | ^ and
+unary + - ~ with a 4096-bit guard; Pow bases 0/1/-1 and a zero left shift are decided before the
+guard, so `0 ** 100000`, `1 ** 100000`, `(-1) ** 100000` and `0 << 100000` stay in range. An
+out-of-int64 expression inside a function body keeps its old run-time stop; a class with a base
+(the enum case) keeps its own refusal.
+
+Conflict resolution: this tree already had `_check_int64_literals`, `_check_constant_power`,
+`_check_int64_unary_constants` and a two-argument `_constant_int` from pre172/pre177. The new
+evaluator is `_constant_int_exact`, and its check runs before the older ones so a default argument
+gets the accepted wording; a bare `**` class-body value is left to `_check_constant_power` so
+pre177's flow cases keep their existing `int64 constant out of range` wording. Added
+`test_ail_pre184.py` (class, module and default refusals plus in-range class/default/module
+arithmetic and the power/shift guard boundaries), and registered it in `ail_check.py` and both
+`ci_shards.json` lists.
+
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
