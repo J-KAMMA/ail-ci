@@ -8,9 +8,10 @@ list ndigits was silently accepted, an instance without `__round__` was named `i
 `__round__` method received a garbage integer instead of the object.  These programs compare with
 CPython on both builds.  The negative-ndigits boundary is included: an ndigits at or below -309
 rounds every finite float to a signed zero, and a rounded magnitude above DBL_MAX raises
-OverflowError.  An out-of-int64 intermediate inside `__index__` (for example `10**30`) cannot be
-evaluated at all (AIL integers are int64), so that program stops by name ("integer overflow") while
-running `__index__`; CPython uses its arbitrary-precision result.
+OverflowError.  An out-of-int64 intermediate inside `__index__` (AIL integers are int64) cannot be
+evaluated: an all-constant one such as `10**30` is refused by name at compile time, and one built
+from run-time values stops by name ("integer overflow") while running `__index__`; CPython uses its
+arbitrary-precision result.
 """
 import os
 import shutil
@@ -162,6 +163,28 @@ print(round(2.5, A()))
 print(round(2.5, B()))
 '''
 
+SATURATE_DYNAMIC = r'''def huge(n):
+    return 10 ** n
+
+
+class A:
+    def __index__(self):
+        a = huge(30)
+        b = huge(30) + 5
+        return a - b
+
+
+class B:
+    def __index__(self):
+        a = huge(30)
+        b = huge(30) + 5
+        return a + b - b - a
+
+
+print(round(2.5, A()))
+print(round(2.5, B()))
+'''
+
 NEGATIVE = r'''class Idx:
     def __init__(self, v):
         self.v = v
@@ -239,6 +262,13 @@ class RoundNDigits(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='ail-pre160-') as tmp:
             for mode in ('general', 'default'):
                 got, error = _build_run(tmp, 'saturate', SATURATE, mode)
+                self.assertIsNone(got, mode + ': built and ran')
+                self.assertIn('outside the signed 64-bit range', error, mode)
+
+    def test_out_of_int64_index_at_runtime_is_refused(self):
+        with tempfile.TemporaryDirectory(prefix='ail-pre160-') as tmp:
+            for mode in ('general', 'default'):
+                got, error = _build_run(tmp, 'saturate_runtime', SATURATE_DYNAMIC, mode)
                 self.assertIsNone(error, mode + ': ' + str(error))
                 stdout, code, stderr = got
                 self.assertNotEqual(code, 0, mode + ': ' + stdout.decode('utf-8', 'replace'))

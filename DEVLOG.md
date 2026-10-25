@@ -1,3 +1,20 @@
+## 2026-10-25 - pre121: constant int expressions are exact or refused by name
+
+pre97's reviewer recorded that `2**63 - 1` in ordinary arithmetic or a variable, and a user
+function called with `10**30`, still stopped at run time with `integer overflow` where CPython
+keeps an unbounded int.  The compiler now evaluates an all-constant int expression exactly:
+`2**63 - 1`, `-(2**63)`, `-1 << 63`, `~(-2**63)` and an in-range result reached through a wider
+intermediate such as `2**100 // 2**80` are emitted as one literal.  A constant whose value does
+not fit int64 (for example `10**30`) is refused by name at compile time instead of reaching the
+runtime.  This is hooked into the typed `_expr`, the general emitter's `expr`, the unified
+unboxed `nexpr` and the IR lowering, because a module-level statement can be lowered by any of
+them; the existing maxsplit-specific folder is kept alongside it.  Added `test_ail_pre121.py`
+(constant boundaries, dynamic and non-int expressions unchanged, and the recorded p6/p7/p13
+shapes refused).  The pre160 module recorded the old run-time `integer overflow` stop for a
+constant `10**30` inside `__index__`; its test now checks the compile-time refusal and keeps a
+run-time-value variant for the overflow path.  Not fixed here: run-time `sep=None` (pre-existing
+p12, a different cause).
+
 ## 2026-10-25 - int(s, base) message GC rooting (job-pre180-10251520)
 
 Review follow-up. The rewritten general-path `ail__int_badlit` built the message head string,
