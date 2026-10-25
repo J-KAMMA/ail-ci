@@ -29,6 +29,8 @@ with open(os.path.join(HERE, 'ailhttp_core.h'), 'r', encoding='utf-8') as _f:   
     HTTPCORE = _f.read()
 with open(os.path.join(HERE, 'ailsql_core.h'), 'r', encoding='utf-8') as _f:       # stage G11
     SQLCORE = _f.read()
+with open(os.path.join(HERE, 'ailhash_core.h'), 'r', encoding='utf-8') as _f:      # crypto: hashlib, hmac, secrets, base64
+    HASHCORE = _f.read()
 
 # ---------------------------------------------------------------------------------------------
 # Typed runtime: exception codes 11..16 (FileNotFoundError, PermissionError, IsADirectoryError,
@@ -54,8 +56,8 @@ EXC_EDITS = (
 # at interpreter shutdown); the hook is only spliced in when the core is present
 FLUSH_EDITS = (
     ('static void ail_die(const char *w);\n', 'static void ail_die(const char *w);\nstatic void ailf_flush_all(void);\n'),
-    ('    fflush(stdout); fputs(w, stderr); fputc(10, stderr); _Exit(1);\n',
-     '    ailf_flush_all();\n    fflush(stdout); fputs(w, stderr); fputc(10, stderr); _Exit(1);\n'),
+    ('    fflush(stdout); fputs(w, stderr); AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);\n',
+     '    ailf_flush_all();\n    fflush(stdout); fputs(w, stderr); AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);\n'),
     ('static void ail_exception_uncaught(ail_exception *value) {\n    fflush(stdout);\n',
      'static void ail_exception_uncaught(ail_exception *value) {\n    ailf_flush_all();\n    fflush(stdout);\n'),
 )
@@ -457,7 +459,77 @@ static int64_t ailt_sq_blen(int64_t h, int64_t n) { AILT_SCHECK(ails_blen(h, n))
 static ail_str ailt_sq_reprb(ail_sarena *A, ail_bytes d) { ailf_buf b; AILT_SCHECK(ails_repr_bytes(d.p, d.n, &b)); return ailt_adopt_str(A, &b); }
 '''
 
-_TYPED_BY_KIND = {'file': TYPED, 'proc': TYPED_PROC, 'path': TYPED_PATH, 'sql': TYPED_SQL, 'http': TYPED_HTTP, 'url': TYPED_URL}
+TYPED_HASH = r'''
+/* ---- crypto typed adapters: the hashlib / hmac / secrets / base64 primitives of hashlower.HASHP over ailhash_core.h ----
+   A state is a bytes value; nothing here raises: the prelude checks every argument first. */
+static unsigned char *ailt_hs_buf(ail_barena *A, int64_t n) {
+    unsigned char *q = (unsigned char *)ail_alloc_raw((size_t)(n > 0 ? n : 1));
+    ail_barena_push(A, q);
+    return q;
+}
+static int64_t ailt_hs_algo(ail_str s) { return ailhs_algo_of(s.p, s.n); }
+static ail_bytes ailt_hs_new(ail_barena *A, int64_t algo, int64_t size, ail_bytes key, ail_bytes salt, ail_bytes person) {
+    unsigned char *q = ailt_hs_buf(A, AILHS_BLOB1);
+    ailhs_new(q, (int)algo, size, key.p, key.n, salt.p, salt.n, person.p, person.n);
+    return (ail_bytes){q, AILHS_BLOB1};
+}
+static ail_bytes ailt_hs_hmac(ail_barena *A, int64_t algo, ail_bytes key) {
+    unsigned char *q = ailt_hs_buf(A, AILHS_BLOB2);
+    ailhs_hmac_new(q, (int)algo, key.p, key.n);
+    return (ail_bytes){q, AILHS_BLOB2};
+}
+static ail_bytes ailt_hs_update(ail_barena *A, ail_bytes st, ail_bytes d) {
+    unsigned char *q = ailt_hs_buf(A, st.n);
+    if (ailhs_feed(q, st.p, st.n, d.p, d.n) < 0) ail_die("not a hash state");
+    return (ail_bytes){q, st.n};
+}
+static ail_bytes ailt_hs_digest(ail_barena *A, ail_bytes st) {
+    int64_t n = ailhs_info(st.p, st.n, 0);
+    if (n < 0) ail_die("not a hash state");
+    unsigned char *q = ailt_hs_buf(A, n);
+    ailhs_digest_of(q, st.p, st.n);
+    return (ail_bytes){q, n};
+}
+static int64_t ailt_hs_info(ail_bytes st, int64_t which) {
+    int64_t r = ailhs_info(st.p, st.n, which);
+    if (r < 0) ail_die("not a hash state");
+    return r;
+}
+static ail_bytes ailt_hs_pbkdf2(ail_barena *A, int64_t algo, ail_bytes pw, ail_bytes salt, int64_t iters, int64_t dklen) {
+    unsigned char *q = ailt_hs_buf(A, dklen);
+    ailhs_pbkdf2(q, dklen, (int)algo, pw.p, pw.n, salt.p, salt.n, iters);
+    return (ail_bytes){q, dklen};
+}
+static int64_t ailt_hs_cmp(ail_bytes a, ail_bytes b) { return ailhs_cmp(a.p, a.n, b.p, b.n); }
+static ail_bytes ailt_hs_rand(ail_barena *A, int64_t n) {
+    if (n <= 0) return (ail_bytes){NULL, 0};
+    unsigned char *q = ailt_hs_buf(A, n);
+    if (ailhs_random(q, (size_t)n) < 0) ail_die("cannot read random bytes from the operating system");
+    return (ail_bytes){q, n};
+}
+static int64_t ailt_hs_bits(int64_t k) {
+    int64_t r = ailhs_randbits(k);
+    if (r < 0) ail_die("cannot read random bytes from the operating system");
+    return r;
+}
+static ail_bytes ailt_hs_b64e(ail_barena *A, ail_bytes d, int64_t urlsafe) {
+    int64_t n = ailhs_b64e_len(d.n);
+    if (n == 0) return (ail_bytes){NULL, 0};
+    unsigned char *q = ailt_hs_buf(A, n);
+    ailhs_b64e(q, d.p, d.n, (int)urlsafe);
+    return (ail_bytes){q, n};
+}
+static ail_bytes ailt_hs_b64d(ail_barena *A, ail_bytes d, int64_t mode) {
+    unsigned char *q = ailt_hs_buf(A, 3 * ((d.n + 3) / 4) + 3);
+    int64_t n = ailhs_b64d(q, d.p, d.n, (int)mode);
+    return (ail_bytes){n > 0 ? q : NULL, n > 0 ? n : 0};
+}
+static int64_t ailt_hs_b64err(void) { return ailhs_b64_err; }
+static int64_t ailt_hs_b64n(void) { return ailhs_b64_n; }
+'''
+
+_TYPED_BY_KIND = {'file': TYPED, 'proc': TYPED_PROC, 'path': TYPED_PATH, 'sql': TYPED_SQL, 'http': TYPED_HTTP, 'url': TYPED_URL,
+                  'hash': TYPED_HASH}
 for _name in filelib.PRIMS:
     if _name == '_ail_sq_bind':       # resolved to _ail_sq_bi / bf / bs / bb by pyfunc._fileprim_value
         continue
@@ -477,6 +549,8 @@ def register(ORDER, SOURCE, REQUIRES):
             ('URLIO', TYPED_URL, ['URLCORE', 'FILEIO']),
             ('HTTPCORE', HTTPCORE, ['FILECORE']),
             ('HTTPIO', TYPED_HTTP, ['HTTPCORE', 'FILEIO', 'HTTPEXC']),
+            ('HASHCORE', HASHCORE, ['TYPES', 'DIE']),
+            ('HASHIO', TYPED_HASH, ['HASHCORE', 'STR', 'BYTES', 'DIE']),
             ('SQLCORE', SQLCORE, ['FILECORE']),
             ('SQLIO', TYPED_SQL, ['SQLCORE', 'FILEIO', 'SQLEXC'])):
         ORDER.append(name)
