@@ -1,3 +1,16 @@
+## 2026-10-25 - re-apply memsafe2 hostile-input fixes (job-rbmemsafe2-10251805)
+
+Re-applied accepted job `memsafe2` on the current export. The slice, `%`-format, bytearray-repr and
+non-BMP/int64 DIFFERENCES rows came in cleanly. Two overlaps needed both fixes kept: the `int(s, base)`
+message keeps the pre180 UTF-16/200-code-point implementation (the memsafe2 helpers are present for the
+other `int()`/`float()` paths), and the `format()` spec struct now tracks an ASCII type (including NUL,
+from pre103) as well as a whole non-ASCII `wide_type` (memsafe2), so NUL unknown-code text, non-ASCII
+grouping text and the TypeError for unsupported types all still hold. `test_ail_hostile_input.py` is
+registered in `ail_check.MODULES`. `tools/diff_ids.py` is not present in this export (nor in the fetched
+branch), so it could not run; `tools/update_manifest.py` plus `--check`, the targeted modules and
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` ran on the final commit, and the
+probes are listed in the job report.
+
 ## 2026-10-25 - int(s, base) message GC rooting (job-pre180-10251520)
 
 Review follow-up. The rewritten general-path `ail__int_badlit` built the message head string,
@@ -96,6 +109,23 @@ literals and module-level int constants and refuses an out-of-int64 result by na
 expression out of range: ...`) on both builds. A module constant shadowed by a parameter is not
 folded, and values that only reach the unary operation as variables keep the fixed-width trap.
 Added `test_ail_pre172.py` and registered it in `ail_check.MODULES`.
+
+## 2026-10-25 - memsafe2: hostile stdin through parsing and text (job-memsafe2-10251519)
+
+A seeded mutation fuzzer (`tools/input_fuzz.py`) fed empty, 1 MB, NUL, invalid-UTF-8, non-ASCII-digit and
+extreme-number inputs to four programs (numbers, text, binary, slices) built with ASan+UBSan on the general
+and default builds.  The first sweep found: signed-int64 overflow in slice length/increment at the int64
+boundary (UBSan, wrong length, or hang) and `None` bounds held in variables/lists/attributes/dict values
+read as 0; `int()`/`float()` error text mangled every non-ASCII unit (the low byte was copied) and ignored
+`%.200R`; `format()` treated a non-ASCII (or control) type character as a `char` (wrong unknown-code/grouping
+text and a ValueError instead of TypeError for None/list specs); `%`-format printed a non-ASCII/control conversion
+character raw instead of `?`; bytearray's repr quote choice and `int(bytearray())` message differed.  All
+are fixed in `safetyrt.py`, `cruntime.py`, `exctext.py`, `prelude_bytes.py`, `pyboxed2.py` and `pyboxed.py`.
+Two known int64/16-bit-unit limits are recorded in DIFFERENCES (a valid non-BMP UTF-8 decode, and an int
+beyond int64), plus one unrelated source-shape inference gap found by an over-broad mixed-type slice probe.  `test_ail_hostile_input.py` holds the programs, the regression inputs and a seeded fuzz run.
+Probes in `/tmp/probes` (`p_slice_dyn`, `p_slice_dyn2`, `p_slice_none`, `p_repr`, `p_fmt`, `p_convmsg`,
+`p_int2`, plus the gen_* fuzz corpus) match CPython with sanitizers on both builds; explicit `None`
+slice constants are refused by name on the typed path, so the default build falls back to the general path.
 
 ## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
 

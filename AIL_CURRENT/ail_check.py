@@ -21,6 +21,7 @@ MODULES = (
     'test_ail_nested_functions', 'test_ail_match', 'test_ail_raise_from', 'test_ail_optional_locals',
     'test_ail_pre165',
     'test_ail_pre105',
+    'test_ail_hostile_input',
     'test_ail_safetynet',
     'test_ail_pre100',
     'test_ail_pre114',

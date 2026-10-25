@@ -5063,8 +5063,24 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.indent -= 1
                 ctx.emit('}')
                 return t
+            def int_literal(e):
+                if isinstance(e, ast.Constant):
+                    return type(e.value) is int
+                return (isinstance(e, ast.UnaryOp) and isinstance(e.op, ast.USub)
+                        and isinstance(e.operand, ast.Constant) and type(e.operand.value) is int)
+            if not all(e is None or (isinstance(e, ast.Constant) and e.value is None) or int_literal(e)
+                       for e in (node.slice.lower, node.slice.upper, node.slice.step)):
+                # A bound that is not an int literal may be None at run time (a variable, an
+                # argument, a list item ...). ail2s_getslice reads boxed bounds and treats None
+                # as omitted, exactly as Python's slice.indices does.
+                lo, hi, step = self._slice_bounds(node.slice, ctx)
+                self.rt_needs.add('slice')
+                t = ctx.tmp()
+                ctx.emit('st = ail2s_getslice(cx, &%s, %s, %s, %s, %s);' % (t, c, lo, hi, step))
+                ctx.check()
+                return t
             def bound(e, default):
-                if e is None:
+                if e is None or (isinstance(e, ast.Constant) and e.value is None):
                     return '0', str(default)
                 v = self.expr(e, ctx)
                 return '1', '(%s).i' % v
@@ -6660,7 +6676,10 @@ class Compiler(boxclosure.ClosureMixin):
                    else 'could not convert string to float: ')
             base_slot = self._str_lit_slot(base, ctx)
             repr_slot = ctx.tmp()
-            ctx.emit('%s = ail_str_repr(cx, %s);' % (repr_slot, v))
+            if fname == 'int':
+                ctx.emit('%s = ail__repr_limited(cx, %s, 200);' % (repr_slot, v))
+            else:
+                ctx.emit('%s = ail_str_repr(cx, %s);' % (repr_slot, v))
             msg_slot = ctx.tmp()
             ctx.emit('%s = ail_str_cat(cx, %s, %s);' % (msg_slot, base_slot, repr_slot))
             ctx.emit('st = ail_raise(cx, cx->builtin_cls[AIL_B_VALUEERROR], %s);' % msg_slot)
