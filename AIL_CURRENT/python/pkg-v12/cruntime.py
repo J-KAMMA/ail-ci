@@ -11009,7 +11009,7 @@ enum {
     AIL_B_NAMEERROR, AIL_B_OVERFLOWERROR, AIL_B_UNBOUNDLOCALERROR,
     AIL_B_RUNTIMEERROR, AIL_B_ASSERTIONERROR, AIL_B_NOTIMPLEMENTEDERROR, AIL_B_EOFERROR, AIL_B_OSERROR,
     AIL_B_CONNECTIONERROR, AIL_B_BLOCKINGIOERROR, AIL_B_CHILDPROCESSERROR, AIL_B_BROKENPIPEERROR, AIL_B_CONNECTIONABORTEDERROR, AIL_B_CONNECTIONREFUSEDERROR, AIL_B_CONNECTIONRESETERROR, AIL_B_FILEEXISTSERROR, AIL_B_FILENOTFOUNDERROR, AIL_B_INTERRUPTEDERROR, AIL_B_ISADIRECTORYERROR, AIL_B_NOTADIRECTORYERROR, AIL_B_PERMISSIONERROR, AIL_B_PROCESSLOOKUPERROR, AIL_B_TIMEOUTERROR,
-    AIL_B_GENERATOREXIT,
+    AIL_B_GENERATOREXIT, AIL_B_MEMORYERROR,
     AIL_B_COUNT
 };
 
@@ -14337,6 +14337,7 @@ static inline const char *ail_builtin_name(int id) {
         case AIL_B_PROCESSLOOKUPERROR: return "ProcessLookupError";
         case AIL_B_TIMEOUTERROR: return "TimeoutError";
         case AIL_B_GENERATOREXIT: return "GeneratorExit";
+        case AIL_B_MEMORYERROR: return "MemoryError";
         default: return "Exception";
     }
 }
@@ -20432,6 +20433,21 @@ static inline ail_st ail_it_permutations(ail_ctx *cx, ail_obj *out, ail_obj iter
     free(indices); free(cycles);
     { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
 }
+/* CPython allocates the r-entry index array (and the r-tuple) BEFORE combinations()'s
+   r > n test and combinations_with_replacement()'s empty-pool test, so those calls raise
+   MemoryError for a huge r even when no item would be produced. Emulate that up-front
+   index allocation: an unrepresentable or unsatisfiable request is MemoryError, not an
+   empty result and not the runtime's uncatchable OOM stop. */
+static inline ail_st ail__it_indices(ail_ctx *cx, int64_t r, int64_t **out) {
+    *out = NULL;
+    if (r <= 0) return AIL_OK;
+    if ((uint64_t)r > SIZE_MAX / sizeof(int64_t))
+        return ail_raise_c(cx, AIL_B_MEMORYERROR, "");
+    int64_t *p = (int64_t *)malloc((size_t)r * sizeof(int64_t));
+    if (!p) return ail_raise_c(cx, AIL_B_MEMORYERROR, "");
+    *out = p;
+    return AIL_OK;
+}
 static inline ail_st ail_it_combinations(ail_ctx *cx, ail_obj *out, ail_obj iterable, ail_obj r_obj) {
     ail_obj pr_[2]; pr_[1] = ail_box_none();
     ail_st st = ail__materialize(cx, &pr_[0], iterable); if (st != AIL_OK) return st;
@@ -20441,8 +20457,10 @@ static inline ail_st ail_it_combinations(ail_ctx *cx, ail_obj *out, ail_obj iter
     ail_vecobj *pool = (ail_vecobj *)pr_[0].o;
     int64_t n = pool->n;
     pr_[1] = ail_list_new(cx); ail_obj res = pr_[1];
-    if (r > n) { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
-    int64_t *indices = (int64_t *)ail_xmalloc((size_t)(r > 0 ? r : 1) * sizeof(int64_t));
+    int64_t *indices = NULL;
+    st = ail__it_indices(cx, r, &indices);
+    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    if (r > n) { free(indices); AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
     for (int64_t i = 0; i < r; i++) indices[i] = i;
     { ail_obj *row = (ail_obj *)ail_xmalloc((size_t)(r > 0 ? r : 1) * sizeof(ail_obj));
       for (int64_t i = 0; i < r; i++) row[i] = pool->p[indices[i]];
@@ -20469,8 +20487,10 @@ static inline ail_st ail_it_combinations_wr(ail_ctx *cx, ail_obj *out, ail_obj i
     ail_vecobj *pool = (ail_vecobj *)pr_[0].o;
     int64_t n = pool->n;
     pr_[1] = ail_list_new(cx); ail_obj res = pr_[1];
-    if (n == 0 && r > 0) { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
-    int64_t *indices = (int64_t *)ail_xmalloc((size_t)(r > 0 ? r : 1) * sizeof(int64_t));
+    int64_t *indices = NULL;
+    st = ail__it_indices(cx, r, &indices);
+    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    if (n == 0 && r > 0) { free(indices); AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
     for (int64_t i = 0; i < r; i++) indices[i] = 0;
     { ail_obj *row = (ail_obj *)ail_xmalloc((size_t)(r > 0 ? r : 1) * sizeof(ail_obj));
       for (int64_t i = 0; i < r; i++) row[i] = n > 0 ? pool->p[indices[i]] : ail_box_none();

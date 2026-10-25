@@ -229,6 +229,7 @@ EXC_IDS = {
     'PermissionError': 'AIL_B_PERMISSIONERROR',
     'ProcessLookupError': 'AIL_B_PROCESSLOOKUPERROR',
     'TimeoutError': 'AIL_B_TIMEOUTERROR',
+    'MemoryError': 'AIL_B_MEMORYERROR',
 }
 TYPE_TAG = {
     'int': 'AIL_T_INT', 'float': 'AIL_T_FLOAT', 'str': 'AIL_T_STR', 'bool': 'AIL_T_BOOL',

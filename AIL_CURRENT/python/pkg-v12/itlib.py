@@ -95,6 +95,62 @@ def int_value(node):
     return None
 
 
+# CPython allocates combinations()/combinations_with_replacement()'s r-entry index array
+# (and the r-tuple) before its empty-result checks, so a huge r is a MemoryError rather than
+# an empty result. The typed path cannot raise MemoryError and would die on its own eager
+# `list(range(r))`; refuse a constant r no machine could allocate, which sends the default
+# build to the general path (whose allocation check matches CPython). A run-time r stays on
+# the typed path for the values it already supports (test_ail_stdlib_batch3's `k`).
+_MAX_CONST_R = 1 << 46
+
+
+def const_int(node, depth=0):
+    """The exact int a constant-only expression stands for, or None (names and calls give None)."""
+    if depth > 20:
+        return None
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        return node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        value = const_int(node.operand, depth + 1)
+        if value is None:
+            return None
+        return -value if isinstance(node.op, ast.USub) else value
+    if not isinstance(node, ast.BinOp):
+        return None
+    left, right = const_int(node.left, depth + 1), const_int(node.right, depth + 1)
+    if left is None or right is None:
+        return None
+    try:
+        if isinstance(node.op, ast.Add):
+            return left + right
+        if isinstance(node.op, ast.Sub):
+            return left - right
+        if isinstance(node.op, ast.Mult):
+            return left * right
+        if isinstance(node.op, ast.FloorDiv):
+            return left // right
+        if isinstance(node.op, ast.Mod):
+            return left % right
+        if isinstance(node.op, ast.LShift):
+            return left << right if 0 <= right <= 256 else None
+        if isinstance(node.op, ast.RShift):
+            return left >> right if right >= 0 else None
+        if isinstance(node.op, ast.BitOr):
+            return left | right
+        if isinstance(node.op, ast.BitAnd):
+            return left & right
+        if isinstance(node.op, ast.BitXor):
+            return left ^ right
+        if isinstance(node.op, ast.Pow):
+            # only the small exponents this check needs: do not build an astronomically wide int
+            if right < 0 or right > 256 or (left not in (0, 1, -1) and abs(left).bit_length() * right > 256):
+                return None
+            return left ** right
+    except (ArithmeticError, ValueError):
+        return None
+    return None
+
+
 def stored_names(nodes):
     """Names written anywhere in `nodes` (assignment, loop target, augmented assignment, del...)."""
     out = set()
@@ -842,6 +898,11 @@ class Streams:
         r = got.get('r')
         if isinstance(r, ast.Constant) and r.value is None:
             r = None
+        if name in ('combinations', 'combinations_with_replacement') and r is not None:
+            r_const = const_int(r)
+            if r_const is not None and r_const > _MAX_CONST_R:
+                refuse(call, 'itertools.%s: r=%d is too large to allocate (CPython raises MemoryError); '
+                             'not built on the typed path' % (name, r_const))
         return PoolStream(self, call, name, got['iterable'], r)
 
     _SCALAR_TYPES = ('int', 'float', 'str', 'bool', 'bytes')

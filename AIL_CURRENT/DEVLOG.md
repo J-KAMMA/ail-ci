@@ -1,3 +1,23 @@
+## 2026-10-25 -- pre232: huge r for combinations()/combinations_with_replacement() is MemoryError (job-pre232-10260124)
+
+The first still-differing item recorded by the pre219 reviewer was `combinations([1, 2], 10**18)` and
+`combinations_with_replacement([1, 2], 10**18)`: CPython allocates the r-entry index array (and the
+r-tuple) before the `r > n` and empty-pool checks, so both raise MemoryError, while AIL printed `ok 0`
+for one call and stopped with the runtime's uncatchable out-of-memory output for the other.  The general
+(v2) runtime now has a catchable `AIL_B_MEMORYERROR` (`except MemoryError` compiles), and both stream
+builders run a new up-front index allocation check before their empty-result returns, so a huge r is a
+MemoryError for `list(...)`, the constructor and a for loop, including an empty pool.  The typed path
+cannot raise MemoryError and lowered the stream to an eager `list(range(r))`; it now refuses a
+*constant* r above `1 << 46` by name, which sends the default build to the general path.  A run-time r
+is not refused because `test_ail_stdlib_batch3` compiles `for p in combinations(xs, k)` on the typed path
+for the values it supports.  `AIL_CURRENT/test_ail_pre232.py` covers both builds, small/zero/negative r,
+r > n, empty pools with a huge r, the r reaching the call through an argument, a list item, an attribute
+and a dict value, the constructor, `list(...)`, a for loop, and the typed-only refusal; probes are
+`pre232_*` in `/tmp/probes`.  Still open in this family: `permutations(pool, 10**18)` returns 0
+(`pre232_perm_huge`), `product(pool, repeat=10**18)` still stops with the internal out-of-memory output
+(`pre232_prod_huge`), and a for loop over combinations with a huge *run-time* r still stops that way on
+the typed build (`pre232_for_runtime_r2`); none of those is the recorded construct.
+
 ## 2026-10-25 -- pre199: range() with a zero step raises ValueError (job-pre199-10252047)
 
 The first still-differing item left by pre186 was `range(0, 5, 0)`: both builds accepted it and
