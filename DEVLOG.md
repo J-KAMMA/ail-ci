@@ -1,3 +1,25 @@
+## 2026-10-25 - constant int64 index overflow is refused by name (job-rbpre177-10251802)
+
+Re-applied the accepted job-pre177 change on top of the current tree. `AIL_CURRENT/ail_chatgpt.py`
+now evaluates constant integer arithmetic in the existing `_check_int64_literals` pass. A constant
+subscript index whose value or an intermediate step leaves int64 is refused with
+`int64 index out of range: <value>`; a constant `**` outside int64 is refused with
+`int64 constant out of range: <value>` where it reaches an argument, a list item, an attribute or
+a dict value. Both refusals exit 2 and build no executable. In-range constant index expressions
+(`xs[2**1]`, `xs[1<<1]`, `xs[(2**62)//(2**61)]`, ...) are unchanged and match CPython on both builds.
+
+The re-application had to reconcile later fixes that the accepted change predates: the whole
+enclosing constant expression is folded exactly first, so `2**63 - 1`, `2**64 // 2 - 1` and
+`2**65 - 2**65` still work (pre113); a simple assignment right-hand side keeps its run-time
+overflow trap (pre160 and the multifile big-pow case); and a str.split/rsplit maxsplit keeps its
+own `maxsplit constant does not fit` refusal (pre97). The new helpers live beside the existing
+`_constant_int(node, known)` without changing it.
+
+Probes in `/tmp/probes` cover list/str/bytes/tuple indexes, negative and shifted huge indexes,
+an intermediate overflow whose final value is in range, the four value flows, the in-range
+boundary, and the pre113/pre160 conflicts; every probe matches CPython or is refused by name.
+`test_ail_pre177.py` is registered in `ail_check.MODULES` and `tools/ci_shards.json`.
+
 ## 2026-10-25 - int(s, base) message GC rooting (job-pre180-10251520)
 
 Review follow-up. The rewritten general-path `ail__int_badlit` built the message head string,
