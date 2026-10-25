@@ -1,3 +1,20 @@
+## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
+
+The first still-differing item from the task's list was the encoding-name normalization: `b"abc".decode("utf\t8")`,
+`"abc".encode("iso-8859-1:1987")`, `bytes("abc", "iso-8859-1:1987")` and `str(b"\xe9", "ISO\t8859-1")` failed
+with LookupError (or a compile-time refusal) while CPython accepts them. The bytes prelude now normalizes a
+name the way `encodings.normalize_encoding` does (punctuation runs become one underscore, leading/trailing
+punctuation is dropped) and matches the normal form against CPython's aliases for UTF-8, ASCII and Latin-1.
+The general path's literal-codec check and the typed path's UTF-8 literal check use the same normalization, so
+a literal name and a dynamic name agree. Unsupported names still raise LookupError (a literal one is refused
+by name at compile time).
+
+Probes in `/tmp/probes` (`p1`-`p5`) covered literal and dynamic names through an argument, list item,
+attribute and dict value, encode/decode, `bytes()`/`str()`/`bytearray`, empty input, non-str types, aliases,
+normalized punctuation, unknown names and codec width boundaries on both `cmp.sh` builds; `p3`/`p5` are
+refused by name. `p4` also matches CPython on the typed path (`AIL_NO_GENERAL=1`) and both IR builds.
+`test_ail_pre23.py` runs the literal and dynamic cases on both IR builds.
+
 # DEVLOG
 
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
@@ -51,6 +68,37 @@ without a sign are unchanged.
 widths/alignment, empty and non-ASCII values, values from an argument/list item/attribute/dict
 value, and numeric sign formatting on both builds. It and `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` pass on the final commit.
+## 2026-10-24 - pre96: a parameter shadows a class name (job-pre96-10242044)
+
+The general emitter's `expr_Name` returned the module-lifetime class value for every name
+that matched a class definition, even when the current function had a local slot for that
+name.  In `class U: ...; def f(U): return U.m()` the argument was ignored: both builds read
+the class object and raised `AttributeError: 'type' object has no attribute 'm'`, where
+CPython returns 42 from the instance's class attribute or method.  A class name now becomes
+a class value only when the activation has no parameter, local, cell or closure binding for
+it; a shadowing binding is loaded from its own slot.  This also covers a nested function's
+parameter, a method parameter, and values arriving through a list item, an attribute and a
+dict value.  `test_ail_pre96.py` keeps the probes; no emitted C changes for a program that
+does not shadow a class name.
+## 2026-10-24 - pre97: constant str.split/rsplit maxsplit
+
+pre70's reviewer left qtest2's second item alone: a maxsplit constant above int64 compiled and
+then stopped with `integer overflow` where CPython raises `OverflowError`, and `2**63 - 1` also
+overflowed on the intermediate power although the final limit fits.  A constant maxsplit
+expression is now folded exactly at compile time in the typed emitter and in the general
+emitter (before its argument pre-evaluation): a value that fits is emitted as one int64 literal,
+and a value above int64 is refused by name on both builds without evaluating a huge power.
+`test_ail_pre97.py` covers both refusal forms and the in-range boundaries.
+## 2026-10-24 - Counter missing keys through a dict value (job-pre98-10242046)
+
+`table["k"]["y"] += 1` on a missing Counter key reached through a dict value raised `KeyError: 'y'`.
+The general path's generic dict getitem only knew Counter's `__missing__` when the emitter could see
+the static kind; a Counter reached through a dict value, an argument, a list item, an attribute, a
+return value or an alias took the plain dict path. `ail_dict_getitem` now returns 0 without inserting
+for a Counter (flag 1), and `ail2_aug_probe` does the same before the augmented store, so the missing
+key starts at 0 and is inserted by the store. Plain dict misses and a missing outer key still raise
+KeyError. Added `AIL_CURRENT/test_ail_pre98.py` (two programs, both builds) and registered it in
+`ail_check.MODULES`. The separate `Counter({"a": "x"})` constructor difference was not changed.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 

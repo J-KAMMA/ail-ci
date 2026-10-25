@@ -805,6 +805,7 @@ static inline ail_st ail2_aug_probe(ail_ctx *cx, ail_obj *cur, ail_obj **slot,
         ail_obj *v; ail_st st = ail_map_get(cx, &v, m, key);
         if (st != AIL_OK) return st;
         if (!v) {
+            if (ail__is_counter(c)) { *cur = ail_box_int(0); return AIL_OK; }   /* Counter.__missing__: no insert */
             int fac = m->dd_factory;
             if (!fac) return ail_raise_key_arg(cx, key);
             ail_obj dflt = fac == 1 ? ail_box_int(0) : fac == 2 ? ail_list_new(cx)
@@ -2522,7 +2523,7 @@ class Compiler(boxclosure.ClosureMixin):
                     if k.arg == kw:
                         node = k.value
                 if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                    norm = node.value.lower().replace('_', '-').replace(' ', '-')
+                    norm = safetyrt.normalize_encoding_name(node.value)
                     if norm not in allowed:
                         raise Unsupported('%s with the %s %r on the general path (built: utf-8, ascii, latin-1; '
                                           'errors strict, ignore, replace)' % (what, noun, node.value))
@@ -4359,7 +4360,9 @@ class Compiler(boxclosure.ClosureMixin):
     def expr_Name(self, node, ctx):
         if node.id in ('True', 'False'):
             return 'ail_box_bool(%d)' % (1 if node.id == 'True' else 0)
-        if node.id in self.classes:
+        if (node.id in self.classes and node.id not in ctx.slot_of and node.id not in ctx.ptr_names
+                and node.id not in ctx.clo_index and node.id not in ctx.free_names
+                and node.id not in ctx.cell_slots):
             # A class is already a real ail_obj CLASS value, permanently rooted in the
             # module-lifetime frame (g_slots_arr) -- returning that reference directly lets a
             # class be stored in a variable, passed as an argument, or compared/isinstance'd,
@@ -8246,6 +8249,11 @@ class Compiler(boxclosure.ClosureMixin):
         spec = self._STR_ARGS.get(name)
         if not spec or any(isinstance(a, _StarC) for a in args):
             return args
+        if name in ('split', 'rsplit') and len(args) > 1 and not isinstance(args[1], _PreC):
+            folded = pyfunc.fold_maxsplit_constant(args[1])
+            if folded is not None:
+                args = list(args)
+                args[1] = ast.copy_location(ast.Constant(value=folded), args[1])
         need = []
         for pos, chk, style in spec:
             if pos < len(args) and (force or not isinstance(args[pos], _PreC)) \
@@ -9129,12 +9137,18 @@ class Compiler(boxclosure.ClosureMixin):
             a.append(kwargs['maxsplit'])
         return a
 
+    def _maxsplit_expr(self, node, ctx):
+        folded = pyfunc.fold_maxsplit_constant(node)
+        if folded is not None:
+            node = ast.copy_location(ast.Constant(value=folded), node)
+        return '(%s).i' % self.expr(node, ctx)
+
     def _m_split(self, recv, kind, args, kwargs, ctx):
         args = self._sep_maxsplit(args, kwargs, ctx, 'split')
         has_sep = args and not (isinstance(args[0], ast.Constant) and args[0].value is None)
         sep = self.expr(args[0], ctx) if has_sep else 'ail_box_none()'
         has_max = len(args) > 1
-        maxs = '(%s).i' % self.expr(args[1], ctx) if has_max else '0'
+        maxs = self._maxsplit_expr(args[1], ctx) if has_max else '0'
         t = ctx.tmp()
         ctx.emit('st = ail_meth_str_split(cx, &%s, %s, %d, %s, %d, %s);' %
                 (t, recv, 0 if has_sep else 1, sep, 1 if has_max else 0, maxs))
@@ -9395,7 +9409,7 @@ class Compiler(boxclosure.ClosureMixin):
         has_sep = args and not (isinstance(args[0], ast.Constant) and args[0].value is None)
         sep = self.expr(args[0], ctx) if has_sep else 'ail_box_none()'
         has_max = len(args) > 1
-        maxs = '(%s).i' % self.expr(args[1], ctx) if has_max else '0'
+        maxs = self._maxsplit_expr(args[1], ctx) if has_max else '0'
         t = ctx.tmp()
         ctx.emit('st = ail_meth_str_rsplit(cx, &%s, %s, %d, %s, %d, %s);' %
                 (t, recv, 0 if has_sep else 1, sep, 1 if has_max else 0, maxs))
