@@ -384,6 +384,19 @@ time, passes `has_r = (r.tag != AIL_T_NONE)` so a None argument/attribute/list i
 is handled the same way. The typed path already handled the literal None; a None-typed
 variable is refused by name there (no null value), so the default build falls back to the
 general path. `AIL_CURRENT/test_ail_pre101.py` covers both builds.
+## 2026-10-24 - pre102: format() of None / an instance without __format__
+
+The general runtime parsed the format spec before it dispatched on the value, so `format(None, ' +8')`
+and `format(Box(1), ' +8')` raised `ValueError: Invalid format specifier` where CPython's
+`object.__format__` rejects any non-empty spec with
+`TypeError: unsupported format string passed to NoneType.__format__` (resp. `Box.__format__`).
+`safetyrt.py` now does that rejection before `ail2f_parse`; str/int/bool/float keep parsing, and an
+instance that defines `__format__` is still dispatched first by dunderrt. Added
+`test_ail_pre102.py` (one program, both builds, values through an argument, list item, dict value,
+attribute, f-string and str.format, plus an empty spec and a custom `__format__`).
+The NUL / non-ASCII unknown-code difference (a NUL spec still formats as if empty) is pre-existing
+and not touched by this job. Verified with `test_ail_pre102`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3`: 26 tests, all OK.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
