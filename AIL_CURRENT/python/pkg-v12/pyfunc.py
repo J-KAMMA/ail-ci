@@ -708,7 +708,7 @@ def fold_maxsplit_constant(node):
 
 _CONST_INT_NOT = object()
 _CONST_INT_BIG = object()
-_CONST_INT_BITS = 4096
+_CONST_INT_BITS = 1 << 22
 
 
 def _const_int_expr(node):
