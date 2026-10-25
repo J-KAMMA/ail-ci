@@ -2600,15 +2600,113 @@ class _Surface:
                     self.edits[index] = (start, end, marker + extra, flag)
 
     def ann_assign(self, node, function, owner):
+        module = function is None and owner is None
+        if module and node.value is None:
+            self.module_bare_annotation(node)
+            return
         if isinstance(node.target, ast.Attribute) and node.value is None:
             self.replace(node, 'pass', True)
             return
-        if function is None and owner is None and isinstance(node.target, ast.Name) and node.value is not None:
+        if module and node.value is not None and not self._future_annotations() \
+                and self._annotation_runs(node.annotation):
+            self.module_annotated_assignment(node)
+            return
+        if module and isinstance(node.target, ast.Name) and node.value is not None:
             value, _ = self.rewritten(node.value)
             self.replace(node, f'{node.target.id} = {ast.unparse(value)}', True)
             return
         self.annotation(node.annotation)
         self.expression(node.value)
+
+    def _future_annotations(self):
+        if not hasattr(self, '_future_ann'):
+            self._future_ann = any(
+                isinstance(n, ast.ImportFrom) and not n.level and n.module == '__future__'
+                and any(a.name == 'annotations' for a in n.names) for n in self.tree.body)
+        return self._future_ann
+
+    def _annotation_runs(self, node):
+        """Whether evaluating the annotation can do more than read a name or a type expression: it
+        contains a call, a lambda or an assignment expression."""
+        if isinstance(node, (ast.Call, ast.NamedExpr, ast.Lambda, ast.Await, ast.Yield, ast.YieldFrom)):
+            return True
+        return any(self._annotation_runs(child) for child in ast.iter_child_nodes(node))
+
+    def module_annotated_assignment(self, node):
+        """`target: annotation = value` at module scope evaluates the assignment and then the
+        annotation in CPython; the paths dropped the annotation. Keep both in one line (or two
+        statements) so positions do not move."""
+        annotation = ast.unparse(ast.Tuple(elts=[self.rewritten(node.annotation)[0]], ctx=ast.Load()))
+        value, _ = self.rewritten(node.value)
+        if isinstance(node.target, ast.Name):
+            self.replace(node, f'{node.target.id} = {ast.unparse(value)}; {annotation}', True)
+            return
+        target = ast.unparse(node.target)
+        self.replace(node, f'{target} = {ast.unparse(value)}; {annotation}', True)
+
+    def _static_annotation(self, node):
+        """Whether `node` is a type expression whose evaluation has no effect AIL can carry (a builtin
+        or imported type, `list[int]`, `A | None`, a constant). Builtin classes are not values on the
+        typed path, so these stay as unevaluated annotations."""
+        if isinstance(node, ast.Constant):
+            return True
+        if isinstance(node, ast.Name):
+            return (node.id in _ALIAS_TYPE_NAMES or node.id in _RESULT_NAMES
+                    or node.id in _TYPING or node.id in self.classes)
+        if isinstance(node, ast.Attribute):
+            return isinstance(node.value, ast.Name) and (
+                node.value.id in self.modules or node.value.id in _ALIAS_TYPE_NAMES)
+        if isinstance(node, ast.Subscript):
+            inner = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
+            return self._static_annotation(node.value) and all(self._static_annotation(x) for x in inner)
+        if isinstance(node, (ast.Tuple, ast.List)):
+            return all(self._static_annotation(x) for x in node.elts)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+            return self._static_annotation(node.left) and self._static_annotation(node.right)
+        return False
+
+    def _annotation_slice_parts(self, node):
+        """The expressions CPython evaluates for a subscript target's slice, or None for a Starred form
+        (which the lowerers refuse by name)."""
+        if isinstance(node, ast.Starred):
+            return None
+        if isinstance(node, ast.Slice):
+            return [each for each in (node.lower, node.upper, node.step) if each is not None]
+        if isinstance(node, ast.Tuple):
+            parts = []
+            for each in node.elts:
+                if isinstance(each, ast.Starred):
+                    return None
+                found = ([each] if not isinstance(each, ast.Slice)
+                         else [x for x in (each.lower, each.upper, each.step) if x is not None])
+                parts.extend(found)
+            return parts
+        return [node]
+
+    def module_bare_annotation(self, node):
+        """A module-level `target: annotation` without a value evaluates the target parts and then the
+        annotation in CPython; both paths used to drop the statement. One tuple expression statement
+        keeps that order and leaves the line count alone. Under `from __future__ import annotations`
+        only the target is evaluated. A plain-name target with a type expression stays untouched (the
+        lowerers drop it, as before)."""
+        parts = []
+        target = node.target
+        if isinstance(target, ast.Attribute):
+            parts.append(target.value)
+        elif isinstance(target, ast.Subscript):
+            slice_parts = self._annotation_slice_parts(target.slice)
+            if slice_parts is None:
+                return
+            parts.append(target.value)
+            parts.extend(slice_parts)
+        elif not isinstance(target, ast.Name):
+            return
+        if not self._future_annotations() and not self._static_annotation(node.annotation):
+            parts.append(node.annotation)
+        if not parts:
+            return
+        values = ast.Tuple(elts=[self.rewritten(each)[0] for each in parts], ctx=ast.Load())
+        self.replace(node, ast.unparse(values), True)
 
     def starts_processes(self):
         if not hasattr(self, '_starts_processes'):
