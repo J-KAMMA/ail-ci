@@ -33,6 +33,24 @@ except the dynamic routes, which keep the documented int64 runtime trap. Added
 tests: test_ail_pre227, test_ail_safetynet, test_ail_files, test_ail_corpus_findings3, plus
 test_ail_nested_functions, test_ail_modconst, test_ail_pre113/172/177 pass; test_ail_pre121 keeps
 its two pre-existing general-build failures (identical on HEAD).
+## 2026-10-25 -- pre246: v1 boxed runtime builds; INT64_MIN is a legal index (job-pre246-10260358)
+
+Two pre-existing differences from the rbrbpre204 review were fixed.  The v1 emitter
+(`AIL_GENERAL=v1`, reached only when the typed path falls back) pulled in the DIE block and then
+redefined its `ail_exc_top`/`ail_exc_stack`/`ail_die`/`ail_alloc`, so every v1 program failed to
+compile (`redefinition of 'ail_exc_top'`).  The v1 frame stack and current-exception slot now use
+`ail_v1_*` names (with the v1 emitter updated) and rely on the DIE `ail_die`/`ail_alloc`, so v1 C
+builds and runs; probes cover mixed-type values, `try`/`except` with an exception variable,
+nested `try`/`finally`/re-raise, an uncaught `ValueError` and an uncaught `IndexError`.
+
+The pre177 constant-index check folded unary minus per step, so `d[-(1 << 63)]` was refused with
+`int64 index out of range: 9223372036854775808` although -9223372036854775808 is representable.
+Unary `-`/`~` now fold their operand exactly and range-check only the result, so INT64_MIN (and
+`~INT64_MIN` = INT64_MAX) work as list/tuple/str/bytes/dict indexes, including through a parameter,
+a list item, an attribute, a dict value and an alias; a positive `1 << 63`, `-(1 << 63) - 1` and
+other out-of-int64 results keep the by-name refusal.  Added `AIL_CURRENT/test_ail_pre246.py` (5 v1
+programs and the index boundaries) and registered it in `ail_check.MODULES`.  Probes are
+`/tmp/probes/pre246_*`; both cmp.sh builds match CPython or refuse by name.
 
 ## 2026-10-25 -- pre199: range() with a zero step raises ValueError (job-pre199-10252047)
 
