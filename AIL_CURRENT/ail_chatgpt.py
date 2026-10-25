@@ -91,7 +91,15 @@ def _const_expr_int(node, bounded=True):
     if isinstance(node, ast.Constant) and type(node.value) is int:
         value = node.value
     elif isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert)):
-        value = _const_expr_int(node.operand, bounded)
+        # `-(1 << 63)` and `~(-(1 << 63))` pass through an out-of-int64 POSITIVE operand and
+        # come back in range, so the operand is folded unbounded for USub/Invert and only the
+        # result is range-checked (pre246: `d[-(1 << 63)]` is a legal index).  UAdd cannot
+        # change the sign, so it keeps the per-step bound.  A result that still leaves int64 is
+        # refused below, so `-(10 ** 20)` and `~((1 << 63))` keep their refusal.
+        if isinstance(node.op, ast.UAdd):
+            value = _const_expr_int(node.operand, bounded)
+        else:
+            value = _const_expr_int(node.operand, False)
         if value is None:
             return None
         if isinstance(node.op, ast.USub):

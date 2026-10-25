@@ -8993,17 +8993,10 @@ OBJ = r'''
    method, try-nesting past AIL_EXC_MAX_DEPTH): the same "trap by name, not silent" rule
    pkg-v12/cruntime.py uses for its own ASCII-only .lower()/.upper()/.isdigit().
    =================================================================================== */
-static inline void ail_die(const char *w) {
-    fflush(stdout);
-    fputs(w, stderr);
-    fputc('\n', stderr);
-    _Exit(1);
-}
-static inline void *ail_alloc(size_t n) {
-    void *p = calloc(n ? n : 1, 1);
-    if (!p) ail_die("out of memory");
-    return p;
-}
+/* ail_die / ail_alloc come from the DIE block, which every OBJ build already pulls in (via
+   STDIO) and which now has the same two names; a second definition here was a C redefinition
+   (pre246). Their DIE versions are the v1 fatal-stop behaviour plus the debug-site hint, and
+   they never longjmp into the v1 stack because that stack keeps v1's own ail_v1_exc_top. */
 
 /* Windows' C library has no open_memstream. Keep the POSIX path and use a
    standard temporary stream on Windows, closing it before reading the text. */
@@ -9208,16 +9201,20 @@ static inline const char *ail_err_name(int64_t t) {
     }
 }
 
+/* The v1 boxed runtime keeps its own frame stack: the names carry a `v1_` prefix because the
+   DIE block above now owns `ail_exc_top`/`ail_exc_stack` for the typed and v2 emitters (the v1
+   emitter still pulls DIE in for ail_die and friends, so an unprefixed stack here was a C
+   redefinition -- pre246). */
 #define AIL_EXC_MAX_DEPTH 64
-static jmp_buf ail_exc_stack[AIL_EXC_MAX_DEPTH];
-static int ail_exc_top = -1;
-static ail_obj ail_exc_current;
+static jmp_buf ail_v1_exc_stack[AIL_EXC_MAX_DEPTH];
+static int ail_v1_exc_top = -1;
+static ail_obj ail_v1_exc_current;
 
 static inline int ail_exc_enter(void) {
-    if (ail_exc_top + 1 >= AIL_EXC_MAX_DEPTH) ail_die("try nesting too deep");
-    return ++ail_exc_top;
+    if (ail_v1_exc_top + 1 >= AIL_EXC_MAX_DEPTH) ail_die("try nesting too deep");
+    return ++ail_v1_exc_top;
 }
-static inline void ail_exc_leave(void) { ail_exc_top--; }
+static inline void ail_exc_leave(void) { ail_v1_exc_top--; }
 
 /* The internal "message" attribute lives at name_id -1, a value ail_intern() (below) never
    hands out (it starts counting at 0) -- so it can never collide with a user attribute. */
@@ -9231,8 +9228,8 @@ static inline ail_obj ail_make_exc(int64_t type_id, ail_str msg) {
     ail_obj r; r.tag = AIL_EXC; r.o = o; return r;
 }
 static inline void ail_raise(int64_t type_id, ail_str msg) {
-    ail_exc_current = ail_make_exc(type_id, msg);
-    if (ail_exc_top >= 0) longjmp(ail_exc_stack[ail_exc_top], 1);
+    ail_v1_exc_current = ail_make_exc(type_id, msg);
+    if (ail_v1_exc_top >= 0) longjmp(ail_v1_exc_stack[ail_v1_exc_top], 1);
     fflush(stdout);
     fprintf(stderr, "%s: ", ail_err_name(type_id));
     for (int64_t i = 0; i < msg.n; i++) fputc((int)ail_chr(msg, i), stderr); /* ASCII messages only */
@@ -9240,9 +9237,9 @@ static inline void ail_raise(int64_t type_id, ail_str msg) {
     _Exit(1);
 }
 static inline void ail_raise_c(int64_t type_id, const char *msg) { ail_raise(type_id, ail_cstr(msg)); }
-static inline void ail_exc_reraise(void) { ail_raise(ail_exc_current.o->class_id, ail_exc_current.o->attrs[0].val.s); }
-static inline int64_t ail_exc_type(void) { return ail_exc_current.o->class_id; }
-static inline ail_str ail_exc_message(void) { return ail_exc_current.o->attrs[0].val.s; }
+static inline void ail_exc_reraise(void) { ail_raise(ail_v1_exc_current.o->class_id, ail_v1_exc_current.o->attrs[0].val.s); }
+static inline int64_t ail_exc_type(void) { return ail_v1_exc_current.o->class_id; }
+static inline ail_str ail_exc_message(void) { return ail_v1_exc_current.o->attrs[0].val.s; }
 
 /* try/except convention for the hand-written twins. Expands to balanced braces --
    AIL_TRY opens 2, AIL_CATCH closes 1 / opens 2, AIL_CATCH_END closes 4 / opens 1: 5 open,
@@ -9256,7 +9253,7 @@ static inline ail_str ail_exc_message(void) { return ail_exc_current.o->attrs[0]
    yourself inside, call ail_exc_reraise() for anything you do not handle. */
 #define AIL_TRY \
     { int ail__d = ail_exc_enter(); \
-      if (setjmp(ail_exc_stack[ail__d]) == 0) {
+      if (setjmp(ail_v1_exc_stack[ail__d]) == 0) {
 
 #define AIL_CATCH(TYPEID) \
         ail_exc_leave(); \
