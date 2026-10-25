@@ -184,12 +184,27 @@ def compare_app(name, base_root, work, rounds, smoke):
     return result
 
 
+def _fmt_bound(value):
+    """Format a ratio at 3 decimals, adding digits until its side of 1.0 is preserved.
+
+    Plain '%.3f' turns 0.9996 into 1.000, so a range entirely below 1.0 can print as
+    [0.981, 1.000] and look like a tie although the unrounded bounds make the verdict faster.
+    """
+    digits = 3
+    while True:
+        text = '%.*f' % (digits, value)
+        printed = float(text)
+        if (printed < 1.0) == (value < 1.0) and (printed > 1.0) == (value > 1.0):
+            return text
+        digits += 1
+
+
 def fmt(ratio):
     if ratio['range'] is None:
-        return '%.3f' % ratio['median']
+        return _fmt_bound(ratio['median'])
     lo, hi = ratio['range']
     verdict = 'tie' if lo <= 1 <= hi else ('faster' if hi < 1 else 'slower')
-    return '%.3f [%.3f, %.3f] %s' % (ratio['median'], lo, hi, verdict)
+    return '%s [%s, %s] %s' % (_fmt_bound(ratio['median']), _fmt_bound(lo), _fmt_bound(hi), verdict)
 
 
 def main():
