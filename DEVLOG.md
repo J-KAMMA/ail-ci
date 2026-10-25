@@ -218,6 +218,15 @@ left as written and the general path keeps the dict and the key boxed. Added `te
 two builds each). Verified with 15 differential probes (`cmp.sh`, both builds) plus `test_ail_tuples`,
 `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`, `test_ail_collections`,
 `test_ail_sets_general` and `test_ail_modconst`.
+## 2026-10-24 - pre113: fold all-int constant expressions exactly
+
+`(1 << 63) - 1` and `2**65 - 2**65` are exact in Python even though an intermediate is outside
+int64; both builds used to emit checked operations for the intermediate and stopped with
+`integer overflow`.  `pyfront.int_constant` now evaluates an all-int constant expression with
+Python ints (with a size limit for giant intermediates), and the typed IR, legacy typed emitter,
+unified general path and boxed emitters emit the one int64 result.  Added `test_ail_pre113.py`
+(one program, four build modes); the second listed case, a module constant exponent, is still a
+separate difference.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
