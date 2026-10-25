@@ -242,6 +242,21 @@ class Pre197Tests(unittest.TestCase):
         for slug, text in REFUSED:
             self.check_refused(slug, text, REFUSAL)
 
+    def test_short_exit_unused(self):
+        self.check('short_exit_unused',
+                   _program('def __exit__(self, et, ev, tb):\n'
+                            '        print("ok", tb is None)\n'
+                            '        return True\n',
+                            before='class Unused:\n'
+                                   '    def __exit__(self, et, ev):\n'
+                                   '        return False\n\n\n'))
+
+    def test_short_exit_called_refused(self):
+        self.check_refused('short_exit_called',
+                           _program('def __exit__(self, et, ev):\n'
+                                    '        return True\n'),
+                           'too many positional arguments')
+
 
 if __name__ == '__main__':
     unittest.main()

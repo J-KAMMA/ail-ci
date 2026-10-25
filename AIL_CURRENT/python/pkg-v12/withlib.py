@@ -396,7 +396,7 @@ def rewrite(tree):
     tree.body = new_body
     classes = lower.classes
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == '__exit__' and len(node.args.args) >= 3:
+        if isinstance(node, ast.FunctionDef) and node.name == '__exit__' and len(node.args.args) >= 4:
             ty, ex, tb = node.args.args[1].arg, node.args.args[2].arg, node.args.args[3].arg
             node.body = [ExitArgs(ty, ex, tb, classes).visit(s) for s in node.body]
     stdlib5.leftover(tree, binder, 'contextmanager, suppress, closing and nullcontext are built')

@@ -1,3 +1,16 @@
+## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
+
+The review found that the traceback rewrite indexed `node.args.args[3]` after a
+`len(node.args.args) >= 3` guard, so any `__exit__(self, et, ev)` (three arguments) crashed the
+compiler with `IndexError` even when the class was never used.  The guard now requires four
+arguments; shorter signatures are left alone.  A short `__exit__` that a `with` actually calls is
+then refused by name by the existing argument check ("not in the subset: __exit__() called with too
+many positional arguments"), and an unused one compiles where CPython does.
+
+Probes `/tmp/probes/pre197_*` cover 3-argument exits (unused, clean body, raising body, reached via
+an attribute/list/dict), 1- and 2-argument unused exits, keyword-only `tb`, `*args`, defaults and the
+normal 4-argument path on both builds.  Added both regression cases to `test_ail_pre197.py`.
+
 ## 2026-10-25 - `__exit__` third argument when the body raised (job-pre197-10252029)
 
 The first still-differing item left by the pre181 review was the traceback argument:
