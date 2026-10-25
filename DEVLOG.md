@@ -1,3 +1,26 @@
+## 2026-10-25 - int(bytes-like, base=...) (job-pre212-10252300)
+
+The pre192 review recorded that a keyword `base=` with a bytes-like first argument raised
+`TypeError: int() can't convert non-string with explicit base` on both builds, where CPython
+parses the bytes: `int(b"10", base=10)` is 10 and `int(bytearray(b"x"), base=10)` raises the
+bytes-repr ValueError.  The general-path rewrite into `_ail_int2` only matched the positional
+`int(x, base)` form, so the keyword form fell through to the str-only boxed runtime.
+
+The rewrite now also accepts `int(x, base=...)` (exactly one positional argument and one `base`
+keyword, no starred argument).  Because that path shares `int(x, base)`, the bytes parser now
+validates the base before the literal (CPython checks the base type/range first), and the boxed
+runtime checks the base range before the argument type, so `int(b"10", base=1)` and
+`int(1.5, base=1)` both raise CPython's `int() base must be >= 2 and <= 36, or 0` instead of a
+literal or type error.  The positional bytes form uses the same code and is fixed with it.
+
+`test_ail_pre212.py` covers valid bases 0/2/8/10/16/36, both bytes forms, the direct/argument/
+list-item/attribute/dict-value/alias routes for the value and the base, invalid literals and
+their b-repr text, empty/signed/whitespace/underscore/prefix/non-ASCII/quote/control inputs,
+the 200-character repr cut, invalid base types and ranges, the positional and str baselines, and
+evaluation order, on both builds.  Probes: `/tmp/probes/p_intbase_kw.py`,
+`p_intbase_kw_routes.py`, `p_intbase_kw_edge.py`, `p_intbase_range.py`; all match CPython on both
+builds.
+
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal

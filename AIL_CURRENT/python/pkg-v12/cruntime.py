@@ -16415,6 +16415,8 @@ static inline ail_st ail_int_with_base(ail_ctx *cx, ail_obj *out, ail_obj x, ail
         char buf[96]; snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail_type_name(base_obj.tag));
         return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
     }
+    if (base_obj.i != 0 && (base_obj.i < 2 || base_obj.i > 36))
+        return ail_raise_c(cx, AIL_B_VALUEERROR, "int() base must be >= 2 and <= 36, or 0");
     if (x.tag != AIL_T_STR)
         return ail_raise_c(cx, AIL_B_TYPEERROR, "int() can't convert non-string with explicit base");
     int64_t v = 0;
