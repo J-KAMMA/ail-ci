@@ -201,6 +201,27 @@ call bases, an empty star, and load-position/value forms on both builds; all are
 or match CPython.  Added `test_ail_pre254.py` (2 tests, both builds) and registered it in
 `ail_check.MODULES`.  Final-state tests: test_ail_pre254, test_ail_safetynet, test_ail_files,
 test_ail_corpus_findings3, test_ail_pre124 and test_ail_pre125 pass.
+## 2026-10-25 -- closure over an outer local callable (job-pre257-10260536)
+
+The first still-differing item in the pre244 review's pre-existing list was a closure over an
+outer local callable: `def f(): return 1; def outer(): def inner(): return f(); f = lambda: 101;
+return inner()` printed `1` on both builds where CPython prints `101`.  Two causes met here.  The
+Python surface's `--syntax python` tuple pass treats `f = lambda: ...` as an alias and removes the
+statement, but `stmt_FunctionDef` never enters a nested scope, so a call inside `inner` was left
+behind and read the module-level `f`; the assignment is now left as written when its name is loaded
+in a nested def or lambda.  The general path's `_call_name` also chose a module function or builtin
+before a name captured by value (`ctx.free_names`) or by nonlocal pointer (`ctx.ptr_names`); the
+captured value now wins, consistent with `expr_Name`.
+
+Probes in `/tmp/probes` covered the local assigned after and before the nested def, a parameter,
+a builtin (`len`), two lambdas closing over each other, a callable with arguments, a local def
+replaced by a lambda, the module-function control, the ordinary alias control, and values reaching
+the local through an argument, a list item, an attribute and a dict value; all match CPython on both
+builds.  A `nonlocal` callable is refused by name ("the method .f() ...").  Added
+`AIL_CURRENT/test_ail_pre257.py` and registered it in `ail_check.MODULES`.  Final-state tests:
+test_ail_pre257, test_ail_pre165, test_ail_pre127, test_ail_builtin_shadowing, test_ail_tuples,
+test_ail_nested_functions, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 pass.
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a

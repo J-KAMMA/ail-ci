@@ -80,6 +80,22 @@ class Subst(ast.NodeTransformer):
 
 class Lams:
     # ------------------------------------------------------------------------------------------
+    def nested_scope_reads(self, fn):
+        """Names loaded inside a nested def or lambda of `fn`.  A lambda assigned to one of them
+        is left as written: the alias lowering below removes the assignment, but it does not enter
+        nested scopes, so their call would otherwise read a module-level name of the same spelling."""
+        out = set()
+
+        def walk(node):
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                    out.update(n.id for n in ast.walk(child)
+                               if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load))
+                else:
+                    walk(child)
+        walk(fn)
+        return out
+
     def scan_binds(self, fn):
         """name -> [(line, loops)] of every place a function binds it (parameters: line 0)."""
         binds = {}

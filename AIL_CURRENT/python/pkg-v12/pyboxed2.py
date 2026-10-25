@@ -6467,7 +6467,8 @@ class Compiler(boxclosure.ClosureMixin):
             return self._call_class(name, args, kwargs, ctx)
         if name in ctx.nested_funcs:
             return self._call_nested_function(name, args, kwargs, ctx)
-        if name in ctx.closure_defs or name in ctx.clo_index or name in ctx.cell_slots:
+        if (name in ctx.closure_defs or name in ctx.clo_index or name in ctx.cell_slots
+                or name in ctx.free_names or name in ctx.ptr_names):
             return self.call_value(self.expr(ast.Name(id=name, ctx=ast.Load()), ctx), args, kwargs, ctx)
         if (name in self.rebound_functions and name not in ctx.slot_of
                 and name not in ctx.ptr_names and name not in ctx.clo_index):

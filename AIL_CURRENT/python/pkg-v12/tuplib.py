@@ -189,6 +189,7 @@ class Lower(Stmts, Calls, Lams, Exprs):
         self.env = {}
         self.alias = {}
         self.lam_alias = {}
+        self.closure_reads = self.nested_scope_reads(fn)
         self.scan_binds(fn)
         self.rets = []
         self.pending = []
