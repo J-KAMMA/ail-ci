@@ -134,6 +134,27 @@ fixed (identical on the base): a float, str or explicit None `r` still disagrees
 prints `[()]`), and explicit `permutations(xs, None)` is treated as 0 instead of the omitted
 default. The default build also cannot compile a top-level `print(list(itertools.permutations(...)))`
 (a pre-existing typed-list error, the same with a non-negative `r`).
+## 2026-10-25 - pre170 review follow-up: class-name rebinding before the definition (job-rbpre170-10251554)
+
+Review fix. The module slot for a class name was bound in the hoisted `setup`, before any module
+statement, so a module-level assignment before the class definition (`C = None; class C: pass`)
+replayed afterwards and the class never rebound it: `C is None` printed True where CPython says
+False. The binding is now emitted at the class-definition point in the module body (and in the
+array-entry shape's class-init sequence), so assignment order decides the value in both directions.
+`test_ail_pre170.py` gained `test_assignment_before_the_class_definition`.
+
+## 2026-10-25 - pre170 re-applied: last duplicate class-body attribute through a class value (job-rbpre170-10251554)
+
+Re-applied the accepted pre170 change on top of the current tree. A class body with a duplicate
+assignment (`class C: x = 1; x = 2`) read through an alias, an argument, a list/dict item, an
+instance attribute or `getattr()` returned the first value (or raised `AttributeError` for an
+aliased class), where CPython keeps the last. The general path now registers every class-body
+entry in source order on the class object and the runtime lookup scans each class backwards, so
+the last definition wins; a module-level rebinding of the class name is bound at definition time,
+the array-entry shape evaluates the class bodies before the entry call, and reading a
+method/property through a directly known class value is refused by name. Added
+`test_ail_pre170.py` (4 tests, both builds); probes `p_dup`, `p_dup2`, `p_sources`, `p_missing`,
+`p_array`, `p_shadow` and `p_attr` match CPython.
 
 ## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
 
