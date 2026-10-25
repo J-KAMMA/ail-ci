@@ -16245,6 +16245,13 @@ static inline void ail__write_repr_body(ail_ctx *cx, ail_obj x, FILE *f) {
             fputc(')', f);
             break;
         }
+        case AIL_T_CLASS: {
+            ail_classobj *c = (ail_classobj *)x.o;
+            fputs(c->builtin_id >= 0 ? "<class '" : "<class '__main__.", f);
+            ail_str_write(ail_view_to_str(c->name), f);
+            fputs("'>", f);
+            break;
+        }
         default: fputs("<object>", f); break;
     }
 }
