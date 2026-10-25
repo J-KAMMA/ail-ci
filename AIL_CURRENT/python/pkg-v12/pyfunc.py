@@ -7528,6 +7528,10 @@ def _str_value(node, ctx, *, owned_join_return=False):
         if is_chr and (_etype(node.args[0], ctx) != INT
                        or _is_handle_producing(node.args[0], ctx)):
             raise Unsupported('chr() requires an integer')
+        if is_chr and isinstance(node.args[0], ast.Constant) and type(node.args[0].value) is int:
+            cp = node.args[0].value
+            if 0xD800 <= cp <= 0xDFFF:
+                raise Unsupported('chr() with the surrogate code point U+%04X' % cp)
         ctx.parts.add('CHRSTR' if is_chr else 'HEXCODEC')
         ctx.has_try = True
         saved, ctx.pre = ctx.pre, []
@@ -32110,9 +32114,19 @@ def _lift_in_function(outer, counter, nested_captures):
 
     # Every occurrence of a nested function's own name, anywhere in `outer`, must be exactly the
     # function position of a call -- otherwise it is a closure escaping as a value (scope, above).
+    # A call textually before the `def` reads an unbound local in CPython; this lowering removes
+    # the def statement and calls the lifted function directly, so leave that shape to the general
+    # path (which keeps the def-time binding) by refusing it by name here.
+    first_def_pos = {}
+    for inner in inners:
+        first_def_pos.setdefault(inner.name, (inner.lineno, inner.col_offset))
     for node, parent in _walk_with_parent(outer):
         if isinstance(node, ast.Name) and node.id in direct_names:
             if isinstance(parent, ast.Call) and parent.func is node:
+                if (node.lineno, node.col_offset) < first_def_pos[node.id]:
+                    raise Unsupported(
+                        'a call to the nested function (%r) before its def statement is not '
+                        'available: CPython reads an unbound local there' % node.id)
                 continue
             raise Unsupported(_closure_value_message(node.id, parent))
 

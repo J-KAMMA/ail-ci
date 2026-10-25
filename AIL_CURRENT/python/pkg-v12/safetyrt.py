@@ -207,6 +207,23 @@ static inline ail_st ail2b_need(ail_ctx *cx, ail_obj s) {
     if (s.tag != AIL_T_STR) return ail_raise_c(cx, AIL_B_TYPEERROR, "a bytes-like object is required");
     return AIL_OK;
 }
+/* a start/end bound of find/rfind/count/index/...: CPython's _PyEval_SliceIndex (an int, a bool,
+   or an instance's __index__); None is handled by the caller */
+static inline ail_st ail2b_index(ail_ctx *cx, ail_obj *out, ail_obj x) {
+    if (x.tag == AIL_T_INT || x.tag == AIL_T_BOOL) { *out = ail_box_int(x.i); return AIL_OK; }
+    if (x.tag == AIL_T_INST) {
+        ail_d1_fn f = ail_dun1(x, AIL_D1_INDEX);
+        if (f) {
+            ail_obj r; ail_st st = f(cx, &r, x);
+            if (st != AIL_OK) return st;
+            if (r.tag == AIL_T_INT || r.tag == AIL_T_BOOL) { *out = ail_box_int(r.i); return AIL_OK; }
+            char buf[160];
+            snprintf(buf, sizeof buf, "__index__ returned non-int (type %s)", ail__tname_c(r));
+            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+        }
+    }
+    return ail_raise_c(cx, AIL_B_TYPEERROR, "slice indices must be integers or None or have an __index__ method");
+}
 /* sys.stdin.buffer.read(n): n < 0 reads to the end */
 static inline ail_st ail2b_stdin(ail_ctx *cx, ail_obj *out, ail_obj n) {
     ail_st st = ail2_stdin_flush(cx);
@@ -757,6 +774,19 @@ static inline ail_obj ail2f_pad_str(ail_ctx *cx, ail_str s, int64_t len, ail2f_s
     return ail2f_done(cx, &o);
 }
 static inline const char *ail2f_signstr(int neg, char sign) { return neg ? "-" : sign == '+' ? "+" : sign == ' ' ? " " : ""; }
+/* CPython's '#' on the type-less repr form keeps a decimal point in the mantissa */
+static inline void ail2f_alt_point(char *out, size_t osz) {
+    if (strchr(out, '.')) return;
+    char *e = strpbrk(out, "eE");
+    if (e) {
+        if (strlen(out) + 2 > osz) return;
+        memmove(e + 1, e, strlen(e) + 1);
+        *e = '.';
+    } else if (out[0] >= '0' && out[0] <= '9') {
+        size_t L = strlen(out);
+        if (L + 3 <= osz) { out[L] = '.'; out[L + 1] = '0'; out[L + 2] = 0; }
+    }
+}
 /* the digits of a float in one of e E f F g G % or the repr form (type 0) */
 static inline void ail2f_float_body(char *out, size_t osz, double v, ail2f_spec *f, char type) {
     if (isinf(v) || isnan(v)) {
@@ -771,6 +801,7 @@ static inline void ail2f_float_body(char *out, size_t osz, double v, ail2f_spec 
     char fmt[16];
     if (type == 0 && !f->has_prec) {
         ail_fmt_float(out, osz, v);
+        if (f->alt) ail2f_alt_point(out, osz);
         return;
     }
     if (type == 0) {
@@ -789,6 +820,7 @@ static inline void ail2f_float_body(char *out, size_t osz, double v, ail2f_spec 
             if (L && out[L - 1] == '.') { out[L] = '0'; out[L + 1] = 0; }
             else if (!strchr(out, '.')) strcat(out, ".0");
         }
+        if (f->alt) ail2f_alt_point(out, osz);
         return;
     }
     if (type == 'n') type = 'g';
@@ -1348,11 +1380,21 @@ static inline ail_st ail2a_need_inst(ail_ctx *cx, ail_obj obj, const char *fn) {
     char m[160]; snprintf(m, sizeof m, "%s() on a '%s' value is not built on the general path (only instances of the program's classes)", fn, ail_type_name(obj.tag));
     return ail_raise_c(cx, AIL_B_NOTIMPLEMENTEDERROR, m);
 }
+static inline int ail2a_chain_name(const char *name) {
+    return strcmp(name, "__cause__") == 0 || strcmp(name, "__context__") == 0 ||
+           strcmp(name, "__suppress_context__") == 0 || strcmp(name, "__traceback__") == 0;
+}
+static inline ail_st ail2a_chain_refused(ail_ctx *cx, const char *name) {
+    char m[320]; snprintf(m, sizeof m, "reading %s (exception chaining is not kept here)", name);
+    return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, m);
+}
 /* getattr(obj, name[, default]); is_method: the class of obj has a method of that name */
 static inline ail_st ail2a_getattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_obj name, int has_dflt, ail_obj dflt) {
     char buf[256]; ail_st st = ail2a_cname(cx, name, buf, sizeof buf); if (st != AIL_OK) return st;
     if ((st = ail2a_need_inst(cx, obj, "getattr")) != AIL_OK) return st;
     if (ail2a_find(cx, obj, buf, out)) return AIL_OK;
+    /* a name computed at run time: refuse it by name on an exception, like the direct attribute form */
+    if (obj.tag == AIL_T_EXC && ail2a_chain_name(buf)) return ail2a_chain_refused(cx, buf);
     if (has_dflt) { *out = dflt; return AIL_OK; }
     char m[320]; snprintf(m, sizeof m, "'%s' object has no attribute '%s'", ail_type_name(obj.tag), buf);
     if (obj.tag == AIL_T_INST && ((ail_instobj *)obj.o)->cls.tag == AIL_T_CLASS) {
@@ -1368,7 +1410,10 @@ static inline ail_st ail2a_hasattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_o
     char buf[256]; ail_st st = ail2a_cname(cx, name, buf, sizeof buf); if (st != AIL_OK) return st;
     if (is_method) { *out = ail_box_bool(1); return AIL_OK; }
     if ((st = ail2a_need_inst(cx, obj, "hasattr")) != AIL_OK) return st;
-    ail_obj v; *out = ail_box_bool(ail2a_find(cx, obj, buf, &v));
+    ail_obj v;
+    int found = ail2a_find(cx, obj, buf, &v);
+    if (!found && obj.tag == AIL_T_EXC && ail2a_chain_name(buf)) return ail2a_chain_refused(cx, buf);
+    *out = ail_box_bool(found);
     return AIL_OK;
 }
 static inline ail_st ail2a_setattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_obj name, ail_obj v) {
@@ -2105,6 +2150,7 @@ PRIMS = {
     '_ail_b_decode': ('ail2b_decode(cx, &{t}, {a0}, {a1}, {a2})', 3, 'bytes'),
     '_ail_b_from_ints': ('ail2b_from_ints(cx, &{t}, {a0})', 1, 'bytes'),
     '_ail_b_ints': ('ail2b_ints(cx, &{t}, {a0})', 1, 'bytes'),
+    '_ail_b_index': ('ail2b_index(cx, &{t}, {a0})', 1, 'bytes'),
     '_ail_b_repr': ('ail2b_repr(cx, &{t}, {a0})', 1, 'bytes'),
     '_ail_b_case': ('ail2b_case(cx, &{t}, {a0}, {a1})', 2, 'bytes'),
     '_ail_b_pred': ('ail2b_pred(cx, &{t}, {a0}, {a1})', 2, 'bytes'),

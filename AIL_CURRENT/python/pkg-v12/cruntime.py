@@ -10085,7 +10085,7 @@ static inline ail_obj ail_obj_floordiv(ail_obj a, ail_obj b) {
 static inline ail_obj ail_obj_mod(ail_obj a, ail_obj b) {
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t x = a.i, y = b.i;
-        if (y == 0) ail_raise_c(AIL_ERR_ZERODIV, "integer division or modulo by zero");
+        if (y == 0) ail_raise_c(AIL_ERR_ZERODIV, "integer modulo by zero");
         if (x == INT64_MIN && y == -1) return ail_box_int(0);
         int64_t r = x % y;
         if (r != 0 && ((r < 0) != (y < 0))) r += y;
@@ -11101,6 +11101,8 @@ static inline double ail_float_val(ail_obj x) { return ((ail_floatbox *)x.o)->v;
 typedef struct { ail_gcobj hdr; ail_obj *p; int64_t n, cap;
     uint8_t from_generator;     /* a LIST that materialised a generator expression: CPython
                                    generators are not reversible, so ail_iter_reversed refuses it */
+    int64_t gen_idx;            /* next()/iteration cursor of a materialised generator expression
+                                   (one cursor per object, like a real generator's) */
 } ail_vecobj;
 
 static inline ail_st ail_raise_c(ail_ctx *cx, int builtin_id, const char *msg);
@@ -14835,7 +14837,7 @@ static inline ail_st ail_op_floordiv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_o
 static inline ail_st ail_op_mod(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t x = a.i, y = b.i;
-        if (y == 0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "integer division or modulo by zero");
+        if (y == 0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "integer modulo by zero");
         if (x == INT64_MIN && y == -1) { *out = ail_box_int(0); return AIL_OK; }
         int64_t r = x % y;
         if (r != 0 && ((r < 0) != (y < 0))) r += y;
@@ -15679,7 +15681,13 @@ static inline ail_st ail_op_contains(ail_ctx *cx, int *out, ail_obj c, ail_obj i
             *out = ail_str_find(ail_view_to_str(c), ail_view_to_str(item)) >= 0; return AIL_OK;
         case AIL_T_LIST: case AIL_T_TUPLE: {
             ail_vecobj *v = (ail_vecobj *)c.o;
-            for (int64_t i = 0; i < v->n; i++) if (ail_member_eq(v->p[i], item)) { *out = 1; return AIL_OK; }
+            /* `x in g` on a materialised generator expression consumes it up to and including the
+               match (or to the end when absent), sharing the same cursor as next() and loops */
+            int gen = c.tag == AIL_T_LIST && v->from_generator;
+            for (int64_t i = gen ? v->gen_idx : 0; i < v->n; i++) {
+                if (ail_member_eq(v->p[i], item)) { if (gen) v->gen_idx = i + 1; *out = 1; return AIL_OK; }
+            }
+            if (gen) v->gen_idx = v->n;
             *out = 0; return AIL_OK;
         }
         case AIL_T_DICT: { ail_obj *v; ail_st st = ail_map_get(cx, &v, (ail_mapobj *)c.o, item); if (st != AIL_OK) return st; *out = v != NULL; return AIL_OK; }
@@ -15904,8 +15912,11 @@ static inline ail_st ail_next(ail_ctx *cx, ail_obj *out, ail_obj iterobj) {
         }
         case AIL_IT_LIST: case AIL_IT_TUPLE: {
             ail_vecobj *v = (ail_vecobj *)it->target.o;
-            if (it->idx >= v->n) return AIL_STOP;
-            *out = v->p[it->idx++]; return AIL_OK;
+            /* a materialised generator expression is its own iterator: next() and every loop over
+               it share one cursor (CPython's generator object), unlike a plain list's iterators */
+            int64_t *idx = it->kind == AIL_IT_LIST && v->from_generator ? &v->gen_idx : &it->idx;
+            if (*idx >= v->n) return AIL_STOP;
+            *out = v->p[(*idx)++]; return AIL_OK;
         }
         case AIL_IT_STR: {
             if (it->idx >= it->target.sv.len) return AIL_STOP;
@@ -17218,9 +17229,9 @@ static inline ail_st ail_bi_abs(ail_ctx *cx, ail_obj *out, ail_obj x) {
    CPython's own _Py_dg_dtoa-based algorithm on every value checked while building this).
    =================================================================================== */
 static inline ail_st ail_bi_round_int_ndigits(ail_ctx *cx, ail_obj *out, int64_t v, int64_t n) {
-    if (-n >= 19) { *out = ail_box_int(0); return AIL_OK; } /* 10^19 exceeds int64 range: any
-        int64 value rounds to 0 at this scale -- documented simplification, never exercised
-        by a case here (no test uses ndigits this extreme) */
+    if (n <= -19) { *out = ail_box_int(0); return AIL_OK; } /* 10^19 exceeds int64 range: any
+        int64 value rounds to 0 at this scale -- documented simplification.  The comparison is
+        on n itself because -INT64_MIN is not representable. */
     int64_t p = 1;
     for (int64_t k = 0; k < -n; k++) p *= 10;
     int64_t q = v / p, r = v % p;
@@ -17235,41 +17246,61 @@ static inline ail_st ail_bi_round_int_ndigits(ail_ctx *cx, ail_obj *out, int64_t
     *out = ail_box_int(result);
     return AIL_OK;
 }
-static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, int64_t n) {
-    if (!has_n) {
-        if (ail__is_intlike(x.tag)) { *out = ail_box_int(x.i); return AIL_OK; }
-        if (x.tag != AIL_T_FLOAT) { char buf[80]; snprintf(buf, sizeof buf, "type %s doesn't define __round__ method", ail_type_name(x.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
+static inline ail_st ail_bi_round_no_method(ail_ctx *cx, ail_obj x) {
+    char buf[80]; snprintf(buf, sizeof buf, "type %s doesn't define __round__ method", ail_type_name(x.tag));
+    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+}
+static inline ail_st ail_bi_round_ndigits(ail_ctx *cx, ail_obj nobj, int64_t *out) {
+    if (ail__is_intlike(nobj.tag)) { *out = nobj.i; return AIL_OK; }
+    { char buf[96]; snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail_type_name(nobj.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
+}
+static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, ail_obj n) {
+    if (x.tag == AIL_T_FLOAT) {
+        if (!has_n || n.tag == AIL_T_NONE) {
+            double v = ail_float_val(x);
+            if (v != v) return ail_raise_c(cx, AIL_B_VALUEERROR, "cannot convert float NaN to integer");
+            if (isinf(v)) return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "cannot convert float infinity to integer");
+            double r = nearbyint(v);
+            if (r >= 9223372036854775808.0 || r < -9223372036854775808.0) return ail_hit_limit(cx, "int_overflow", "round() result exceeds int64");
+            *out = ail_box_int((int64_t)r);
+            return AIL_OK;
+        }
+        int64_t nn;
+        ail_st st = ail_bi_round_ndigits(cx, n, &nn);
+        if (st != AIL_OK) return st;
         double v = ail_float_val(x);
-        if (v != v) return ail_raise_c(cx, AIL_B_VALUEERROR, "cannot convert float NaN to integer");
-        if (isinf(v)) return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "cannot convert float infinity to integer");
-        double r = nearbyint(v);
-        if (r >= 9223372036854775808.0 || r < -9223372036854775808.0) return ail_hit_limit(cx, "int_overflow", "round() result exceeds int64");
-        *out = ail_box_int((int64_t)r);
+        if (v != v || isinf(v)) { *out = ail_box_float(cx, v); return AIL_OK; }
+        double result;
+        if (nn >= 0) {
+            int nd = (int)(nn > 323 ? 323 : nn);
+            char buf[400];
+            snprintf(buf, sizeof buf, "%.*f", nd, v);
+            result = strtod(buf, NULL);
+        } else if (nn <= -309) {
+            /* 10**309 exceeds DBL_MAX, so every finite double is nearer to zero than to the
+               first representable multiple of the scale.  CPython returns a signed zero. */
+            result = copysign(0.0, v);
+        } else {
+            int64_t neg = -nn;
+            double scale = 1.0;
+            for (int64_t k = 0; k < neg; k++) scale *= 10.0;
+            double scaled = v / scale;
+            double rr = nearbyint(scaled);
+            result = rr * scale;
+            if (isinf(result)) return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "rounded value too large to represent");
+        }
+        *out = ail_box_float(cx, result);
         return AIL_OK;
     }
     if (ail__is_intlike(x.tag)) {
-        if (n >= 0) { *out = ail_box_int(x.i); return AIL_OK; }
-        return ail_bi_round_int_ndigits(cx, out, x.i, n);
+        if (!has_n || n.tag == AIL_T_NONE) { *out = ail_box_int(x.i); return AIL_OK; }
+        int64_t nn;
+        ail_st st = ail_bi_round_ndigits(cx, n, &nn);
+        if (st != AIL_OK) return st;
+        if (nn >= 0) { *out = ail_box_int(x.i); return AIL_OK; }
+        return ail_bi_round_int_ndigits(cx, out, x.i, nn);
     }
-    if (x.tag != AIL_T_FLOAT) { char buf[80]; snprintf(buf, sizeof buf, "type %s doesn't define __round__ method", ail_type_name(x.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
-    double v = ail_float_val(x);
-    if (v != v || isinf(v)) { *out = ail_box_float(cx, v); return AIL_OK; }
-    double result;
-    if (n >= 0) {
-        int nd = (int)(n > 323 ? 323 : n);
-        char buf[400];
-        snprintf(buf, sizeof buf, "%.*f", nd, v);
-        result = strtod(buf, NULL);
-    } else {
-        int64_t nn = -n;
-        double scale = 1.0;
-        for (int64_t k = 0; k < nn && k < 400; k++) scale *= 10.0;
-        double scaled = v / scale;
-        double rr = nearbyint(scaled);
-        result = rr * scale;
-    }
-    *out = ail_box_float(cx, result);
-    return AIL_OK;
+    return ail_bi_round_no_method(cx, x);
 }
 
 /* ===================================================================================
@@ -17574,14 +17605,16 @@ static inline ail_st ail_bi_dict_fromkeys(ail_ctx *cx, ail_obj *out, ail_obj ite
     AIL_FRAME_LEAVE(cx, fr);
     return AIL_OK;
 }
-/* B028/B029: chr()/ord(). The folded runtime stores 16-bit code points.
-   Refuse values it cannot represent instead of truncating them. */
+/* B028/B029: chr()/ord(). Refuse values the backing unit cannot represent
+   instead of truncating them; the unit is 16 bits unless the folded host
+   headers (AIL_V2_WIDE_EMBED / AIL_V2_INCLUDE_ABS) use a 32-bit one. */
 static inline ail_st ail_bi_chr(ail_ctx *cx, ail_obj *out, ail_obj x) {
     if (!ail__is_intlike(x.tag)) { char buf[80]; snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail_type_name(x.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
     if (x.i < 0 || x.i > 0x10FFFF) return ail_raise_c(cx, AIL_B_VALUEERROR, "chr() arg not in range(0x110000)");
     if (x.i >= 0xD800 && x.i <= 0xDFFF) ail_die("chr() surrogate code point is unsupported");
-    if (x.i > 0xFFFF) ail_die("chr() non-BMP code point requires 32-bit strings");
-    ail_strback *b = ail_strback_alloc(cx, 1); b->data[0] = (uint16_t)x.i;
+    if (x.i > 0xFFFF && sizeof(((ail_strback *)0)->data[0]) < 4)
+        ail_die("chr() non-BMP code point requires 32-bit strings");
+    ail_strback *b = ail_strback_alloc(cx, 1); b->data[0] = x.i;
     *out = ail_str_view((ail_gcobj *)b, 0, 1);
     return AIL_OK;
 }
@@ -20264,6 +20297,16 @@ static inline ail_st ail_it_combinations_wr(ail_ctx *cx, ail_obj *out, ail_obj i
 
 /* ---- the dispatcher itself ----------------------------------------------------------- */
 static inline ail_st ail_it_next(ail_ctx *cx, ail_obj *out, ail_obj itobj) {
+    if (itobj.tag == AIL_T_LIST && ((ail_vecobj *)itobj.o)->from_generator) {
+        ail_vecobj *v = (ail_vecobj *)itobj.o;
+        if (v->gen_idx >= v->n) return AIL_STOP;
+        *out = v->p[v->gen_idx++];
+        return AIL_OK;
+    }
+    if (itobj.tag != AIL_T_ITER && itobj.tag != AIL_T_INST) {
+        char buf[96]; snprintf(buf, sizeof buf, "'%s' object is not an iterator", ail_type_name(itobj.tag));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
     if (itobj.tag == AIL_T_INST) {
         for (ail_obj k = ((ail_instobj *)itobj.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
             ail_classobj *kc = (ail_classobj *)k.o;
@@ -26861,10 +26904,19 @@ static ail_str ail_fmt_gen(ail_sarena *A, int kind, int64_t iv, double dv, int f
                 snprintf(body, cap, f, p, a);
             }
             blen = n;
-            if (type == 0 && prec >= 0) {
-                int dot = 0;
-                for (int64_t i = 0; i < blen; i++) if (body[i] == '.' || body[i] == 'e') dot = 1;
-                if (!dot) { body[blen++] = '.'; body[blen++] = '0'; }
+            if (type == 0) {
+                int dot = 0; int64_t ep = -1;
+                for (int64_t i = 0; i < blen; i++) {
+                    if (body[i] == '.') dot = 1;
+                    else if ((body[i] == 'e' || body[i] == 'E') && ep < 0) ep = i;
+                }
+                if (!dot) {
+                    if (ep >= 0) {
+                        if (alt) { memmove(body + ep + 1, body + ep, (size_t)(blen - ep + 1)); body[ep] = '.'; blen++; }
+                    } else if ((prec >= 0 || alt) && body[0] >= '0' && body[0] <= '9') {
+                        body[blen++] = '.'; body[blen++] = '0';
+                    }
+                }
             }
             if (type == '%') body[blen++] = '%';
             if (group) {
