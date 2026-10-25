@@ -3,8 +3,9 @@
 A mutable literal default of a nested `def` directly in its enclosing body was copied at each
 call site, so every call got a fresh list/dict/set where CPython shares the object built when the
 `def` ran: `def f(x, acc=[]); f(1); f(2)` printed `[1] [2]` instead of `[1] [1, 2]`. Such a nested
-default is now refused by name on both builds. Immutable defaults, keyword arguments, `nonlocal`
-counters changed in loops, self recursion and early returns were compared and agree.
+default is now evaluated once at the `def` into a hidden local, so the object is shared between calls
+as in CPython. Immutable defaults, keyword arguments, `nonlocal` counters changed in loops, self
+recursion and early returns were compared and agree.
 """
 import os
 import subprocess
@@ -144,7 +145,7 @@ class Fuzz94Tests(unittest.TestCase):
                 self.assertIsNotNone(got, '%s (general=%s)\n%s' % (text[:2000], general, build_err))
                 self.assertEqual(got, (want, want_rc), '%s (general=%s)\n%s' % (text[:2000], general, build_err))
 
-    def test_mutable_default_of_a_nested_def_is_refused_by_name(self):
+    def test_mutable_default_of_a_nested_def_is_shared(self):
         with tempfile.TemporaryDirectory(prefix='ail-fuzz94-') as directory:
             want, want_rc, err = _cpython(directory, 'mutable_default', MUTABLE_NESTED_DEFAULT)
             self.assertEqual(want_rc, 0, err)
@@ -152,8 +153,8 @@ class Fuzz94Tests(unittest.TestCase):
             for general in (True, False):
                 got, build_err = _build_and_run(directory, 'mutable_default_%s' % ('g' if general else 'd'),
                                                 MUTABLE_NESTED_DEFAULT, general)
-                self.assertIsNone(got, 'general=%s built a mutable nested default\n%s' % (general, build_err))
-                self.assertIn('mutable literal default', build_err)
+                self.assertIsNotNone(got, 'general=%s\n%s' % (general, build_err))
+                self.assertEqual(got, (want, want_rc), 'general=%s\n%s' % (general, build_err))
 
     def test_loop_closures_and_nonlocal_counters(self):
         self.check('loop_closures', LOOP_CLOSURES)

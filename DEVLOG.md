@@ -111,6 +111,44 @@ the type and sign; `permutations` keeps treating a None `r` as "not given". The 
 tree already rejected a negative `r` (job-pre137), so that fix is kept inside the new
 converter. Added `AIL_CURRENT/test_ail_pre126.py`; probes in `/tmp/probes/pre126_r_bounds.py`,
 `pre126_r_types.py` and `pre126_r_sources.py` match CPython on both builds.
+## 2026-10-25 - pre141 review follow-up: recursive calls see hoisted defaults (job-rbpre141-10251549)
+
+Review defect: a recursive call that omitted a hoisted default resolved the hidden
+`_ail_nndefault_N` name in the nested function's own frame, where it was never declared. Without a
+module global of that name the general path refused with an internal "name ... is not defined";
+with one, it silently read the global (`local` printed as `global`, shared lists got the global's
+contents). `_register_nested` now includes the hidden default names in the nested function's free
+names, so they are captured by value from the enclosing frame and the recursive call reads the
+def-time object. Regression program `recursive_defaults` in `test_ail_pre141.py` covers the module
+global collision, shared list/dict/bytearray defaults through recursion, and a keyword-only
+recursive default; probes `p9`-`p13` in `/tmp/probes` add scalars/widths, empty/negative values,
+aliasing, loop redefinition, values from arguments/list items/attributes/dict values, and both
+builds. All match CPython.
+
+## 2026-10-25 - pre141 review follow-up: closure-context def flags (job-rbpre141-10251549)
+
+Review defect: a nested `def` with a non-literal or mutable default inside an escaping nested
+function (`outer` returned as a value) reached `boxclosure._emit_closure_function`, whose C
+preamble never declared the `def`-binding flags that `stmt_FunctionDef` emits. The general path
+failed to compile (`'_ndef1' undeclared`) and the default path then refused by name. The preamble
+now declares every `cctx.def_flag_decls` entry, as `_emit_function` and `_register_nested`
+already did. Probes `d1`-`d6` in `/tmp/probes` cover the review case, non-literal defaults built
+from captured names, shared dict/set/bytearray/tuple-with-list defaults, keyword-only (refused by
+name), redefinition, and literal defaults on both builds; all match CPython except the refusal.
+
+## 2026-10-25 - pre141 re-applied: nested-def defaults evaluated once at the def (job-rbpre141-10251549)
+
+The accepted pre141 change (nested `def` defaults evaluated once, when the `def` statement runs)
+was re-applied on top of the current tree. A default that is not a literal scalar/tuple, and a
+mutable literal default such as `[]`, `{}` or `set()`, is now evaluated into a hidden local at
+the `def` statement; the call site reads that local, so reassigning the source name afterwards
+does not change the default and a shared list stays shared between calls. The hidden name avoids
+every name the enclosing function mentions (`ident_names`). Literal scalar/tuple defaults still
+fill in at the call site. `**kwargs` and positional-only parameters remain refused by name.
+Adapted to the tree's later def-binding flags and module-level default hoisting; added
+`AIL_CURRENT/test_ail_pre141.py`, and the earlier pre89/pre117/fuzz94/fuzz87 checks now compare the
+shared default instead of expecting a refusal. The same tree already had `round()` and other fixes,
+which are unchanged.
 
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 

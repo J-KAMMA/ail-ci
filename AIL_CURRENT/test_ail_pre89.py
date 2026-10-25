@@ -2,8 +2,9 @@
 
 p13: a nested `def` with a mutable literal default copied the literal at every call, so
 `f(1), f(2)` printed `[1] [2]` where CPython shares the list built when the `def` ran and prints
-`[1] [1, 2]`. It is now refused by name on both builds. p18 (a callable stored in an instance
-attribute) and p23 (keyword arguments through a function value) stay refused by name.
+`[1] [1, 2]`. It is now evaluated once at the `def` into a hidden local, so the object is shared
+between calls as in CPython. p18 (a callable stored in an instance attribute) and p23 (keyword
+arguments through a function value) stay refused by name.
 """
 import os
 import subprocess
@@ -139,7 +140,7 @@ def _build_and_run(directory, name, text, general, run=True):
 
 
 class Pre89Tests(unittest.TestCase):
-    def test_p13_mutable_literal_defaults_are_refused_by_name(self):
+    def test_p13_mutable_literal_defaults_are_shared(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre89-') as directory:
             for slug, text in MUTABLE_DEFAULTS.items():
                 want, want_rc, err = _cpython(directory, 'p13_' + slug, text)
@@ -147,8 +148,9 @@ class Pre89Tests(unittest.TestCase):
                 for general in (True, False):
                     got, build_err = _build_and_run(directory, 'p13_%s_%s' % (slug, 'g' if general else 'd'),
                                                     text, general)
-                    self.assertIsNone(got, 'p13 %s built (general=%s)\n%s' % (slug, general, build_err))
-                    self.assertIn('mutable literal default', build_err, 'p13 %s (general=%s)' % (slug, general))
+                    self.assertIsNotNone(got, 'p13 %s (general=%s)\n%s' % (slug, general, build_err))
+                    self.assertEqual(got, (want, want_rc), 'p13 %s (general=%s)\n%s'
+                                     % (slug, general, build_err))
 
     def test_p13_immutable_and_top_level_mutable_defaults_match(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre89-') as directory:
