@@ -1425,6 +1425,25 @@ class _SurfaceExpr(ast.NodeTransformer):
         return node
 
 
+def _annotation_target_parts(target):
+    def extend(parts, node):
+        if isinstance(node, ast.Slice):
+            parts.extend(part for part in (node.lower, node.upper, node.step) if part is not None)
+        elif isinstance(node, ast.Tuple):
+            for element in node.elts:
+                extend(parts, element)
+        else:
+            parts.append(node)
+
+    if isinstance(target, ast.Attribute):
+        return [target.value]
+    if isinstance(target, ast.Subscript):
+        parts = [target.value]
+        extend(parts, target.slice)
+        return parts
+    return []
+
+
 class _Surface:
     def __init__(self, source):
         self.data = source.encode('utf8')
@@ -2604,9 +2623,14 @@ class _Surface:
         if module and node.value is None:
             self.module_bare_annotation(node)
             return
-        if isinstance(node.target, ast.Attribute) and node.value is None:
-            self.replace(node, 'pass', True)
-            return
+        if node.value is None and isinstance(node.target, (ast.Attribute, ast.Subscript)):
+            if function is not None or owner is None:
+                parts = _annotation_target_parts(node.target)
+                self.replace(node, '; '.join(ast.unparse(self.rewritten(part)[0]) for part in parts) or 'pass', True)
+                return
+            if isinstance(node.target, ast.Attribute):
+                self.replace(node, 'pass', True)
+                return
         if module and node.value is not None and not self._future_annotations() \
                 and self._annotation_runs(node.annotation):
             self.module_annotated_assignment(node)

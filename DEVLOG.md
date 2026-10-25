@@ -56,6 +56,18 @@ job's `test_ail_pre89.py` is added and registered in `ail_check.MODULES`; it cov
 set, tuple-of-list and keyword-only defaults, immutable/top-level mutable defaults, and the p18
 (instance-attribute callable) and p23 (keyword arguments through a function value) refusals. The
 DIFFERENCES row is recorded with this branch's placeholder id.
+## 2026-10-25 - re-apply pre93: bare annotation target subexpressions (job-rbpre93-10251804)
+
+Re-applied job `pre93` on top of the current export. A function-local bare annotation such as
+`box().x: int` or `xs[i()]: int` dropped the target's subexpressions, so the calls did not run.
+The surface now emits the target's value and slice parts (recursively flattening a `Slice` or
+`Tuple` inside a subscript, through the normal rewriter so imported names work) without reading
+the attribute or performing the final subscript, and never evaluates the annotation, matching
+CPython. The tree already had the later module-scope fix (`module_bare_annotation`), so both were
+kept: module bare annotations still evaluate the target and a non-static annotation in CPython
+order, while function-local targets use the new path; class-body attribute targets stay `pass`.
+`test_ail_pre93.py` is registered in `ail_check.MODULES`, the DIFFERENCES row is restored, and the
+function, future-annotation, imported-name, tuple-slice and module cases run on both builds.
 
 ## 2026-10-25 - int(s, base) message GC rooting (job-pre180-10251520)
 
