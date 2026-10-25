@@ -1,3 +1,16 @@
+## 2026-10-25 - pre141 re-applied: nested-def defaults evaluated once at the def (job-rbpre141-10251549)
+
+The accepted pre141 change (nested `def` defaults evaluated once, when the `def` statement runs)
+was re-applied on top of the current tree. A default that is not a literal scalar/tuple, and a
+mutable literal default such as `[]`, `{}` or `set()`, is now evaluated into a hidden local at
+the `def` statement; the call site reads that local, so reassigning the source name afterwards
+does not change the default and a shared list stays shared between calls. The hidden name avoids
+every name the enclosing function mentions (`ident_names`). Literal scalar/tuple defaults still
+fill in at the call site. `**kwargs` and positional-only parameters remain refused by name.
+Adapted to the tree's later def-binding flags and module-level default hoisting; added
+`AIL_CURRENT/test_ail_pre141.py`. The same tree already had `round()` and other fixes, which are
+unchanged.
+
 ## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
 
 The first still-differing item from the task's list was the encoding-name normalization: `b"abc".decode("utf\t8")`,

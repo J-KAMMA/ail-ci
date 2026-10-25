@@ -259,6 +259,7 @@ class ClosureMixin:
         cid = pyboxed2.cid
         cctx = pyboxed2.Ctx(cname)
         cctx.qualname = qual
+        cctx.ident_names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
         cctx.clo_index = {nm: i + 1 for i, nm in enumerate(captured)}
         nonlocal_names = set()
         for n in ast.walk(node):
