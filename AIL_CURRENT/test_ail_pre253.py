@@ -131,6 +131,12 @@ main()
 
 main()
 ''',
+    'duplicate_dict_key_last': '''def main():
+    print(int({"digits": "1" * 10, "digits": "1" * 5000}["digits"], 2))
+
+
+main()
+''',
 }
 
 IN_RANGE = r'''def main():
@@ -148,6 +154,34 @@ main()
 
 MUTATED = r'''DIGITS = ["1" * 5000]
 DIGITS[0] = "0"
+
+
+def main():
+    print(int(DIGITS[0], 2))
+
+
+main()
+'''
+
+DUPLICATE_DICT_KEY = r'''DIGITS = {"digits": "1" * 5000, "digits": "1" * 10}
+
+
+def main():
+    print(int(DIGITS["digits"], 2))
+
+
+main()
+'''
+
+LOCAL_ALIAS_MUTATED = r'''DIGITS = ["1" * 5000]
+
+
+def change():
+    alias = DIGITS
+    alias[0] = "1" * 10
+
+
+change()
 
 
 def main():
@@ -241,6 +275,12 @@ class Pre253Tests(unittest.TestCase):
 
     def test_mutated_container_is_not_folded(self):
         self.matches('mutated', MUTATED)
+
+    def test_duplicate_dict_key_keeps_last_value(self):
+        self.matches('duplicate_dict_key', DUPLICATE_DICT_KEY)
+
+    def test_mutation_through_function_local_alias_is_not_folded(self):
+        self.matches('local_alias_mutated', LOCAL_ALIAS_MUTATED)
 
     def test_invalid_literal_and_base_still_match_cpython(self):
         self.matches('invalid', INVALID)

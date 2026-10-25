@@ -417,7 +417,7 @@ def _constant_text(node, known_text, known_int, known_containers=None):
         key = _constant_text(node.slice, known_text, known_int, known_containers)
         if key is None:
             key = _constant_int(node.slice, known_int)
-        for found, text in values:
+        for found, text in reversed(values):
             if type(found) is type(key) and found == key:
                 return text
         return None
@@ -488,24 +488,22 @@ def _check_int64_int_base_constants(tree):
             continue
         escaped.add(node.id)
     aliases = {}
-    for node in tree.body:
+    for node in ast.walk(tree):
         if not (isinstance(node, ast.Assign) and len(node.targets) == 1
                 and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Name)):
             continue
-        target, source = node.targets[0].id, node.value.id
-        if (stores.get(target) == 1 and stores.get(source) == 1
-                and target not in parameters and source not in parameters):
-            aliases[target] = source
+        aliases.setdefault(node.targets[0].id, set()).add(node.value.id)
     changed = bool(aliases)
     while changed:
         changed = False
-        for target, source in aliases.items():
-            if target in escaped and source not in escaped:
-                escaped.add(source)
-                changed = True
-            if source in escaped and target not in escaped:
-                escaped.add(target)
-                changed = True
+        for target, sources in aliases.items():
+            for source in sources:
+                if target in escaped and source not in escaped:
+                    escaped.add(source)
+                    changed = True
+                if source in escaped and target not in escaped:
+                    escaped.add(target)
+                    changed = True
     known_text, known_int, known_containers = {}, {}, {}
     for node in tree.body:
         if not isinstance(node, ast.Assign) or len(node.targets) != 1:

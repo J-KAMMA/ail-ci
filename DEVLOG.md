@@ -1,3 +1,18 @@
+## 2026-10-25 - review fix: constant `int(<text>, base)` container folding (job-pre253-10260534)
+
+The review found two false refusals introduced by folding text read from literal containers.
+A dict literal with a duplicate key now yields the last value, matching Python, instead of the
+first.  Escape analysis now records simple `name = name` aliases at every scope rather than only
+at module level, so a mutation through a function-local (or nested) alias marks the original
+container as escaped and leaves it unfolded.  Both cases keep the in-range run-time parse; an
+out-of-range value reached through the last duplicate key is still refused by name.
+
+Probes in `/tmp/probes` (`pre253_dup_*`, `pre253_alias_*`, 12 programs, both builds via
+`cmp.sh`): duplicate string/int/three-key dicts and a duplicate-key alias print `1023`; a
+function-local, nested, method and module-alias mutation prints `1023`; an unchanged container
+still folds and a last duplicate out-of-range value is refused by name.  Added both regressions
+to `test_ail_pre253.py`.
+
 ## 2026-10-25 - constant `int(<text>, base)` beyond int64 (job-pre253-10260534)
 
 The first listed difference that still differed on this tree was `int("1"*5000, 2)`: both
