@@ -472,13 +472,40 @@ def _check_int64_int_base_constants(tree):
     parameters = {node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)}
     parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
     escaped = set()
+    pure_calls = {'len', 'print', 'str', 'repr'}
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)):
             continue
         parent = parents.get(node)
-        if not (isinstance(parent, ast.Subscript) and parent.value is node
-                and isinstance(parent.ctx, ast.Load)):
-            escaped.add(node.id)
+        if isinstance(parent, ast.Subscript) and parent.value is node and isinstance(parent.ctx, ast.Load):
+            continue
+        if (isinstance(parent, ast.Call) and node in parent.args
+                and isinstance(parent.func, ast.Name) and parent.func.id in pure_calls
+                and parent.func.id not in bound):
+            continue
+        if (isinstance(parent, ast.Assign) and parent.value is node and len(parent.targets) == 1
+                and isinstance(parent.targets[0], ast.Name)):
+            continue
+        escaped.add(node.id)
+    aliases = {}
+    for node in tree.body:
+        if not (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Name)):
+            continue
+        target, source = node.targets[0].id, node.value.id
+        if (stores.get(target) == 1 and stores.get(source) == 1
+                and target not in parameters and source not in parameters):
+            aliases[target] = source
+    changed = bool(aliases)
+    while changed:
+        changed = False
+        for target, source in aliases.items():
+            if target in escaped and source not in escaped:
+                escaped.add(source)
+                changed = True
+            if source in escaped and target not in escaped:
+                escaped.add(target)
+                changed = True
     known_text, known_int, known_containers = {}, {}, {}
     for node in tree.body:
         if not isinstance(node, ast.Assign) or len(node.targets) != 1:
@@ -487,6 +514,8 @@ def _check_int64_int_base_constants(tree):
         if not isinstance(target, ast.Name) or stores.get(target.id) != 1 or target.id in parameters:
             continue
         container = _constant_container(node.value, known_text, known_int, known_containers)
+        if container is None and isinstance(node.value, ast.Name):
+            container = known_containers.get(node.value.id)
         if container is not None and target.id not in escaped:
             known_containers[target.id] = container
         text = _constant_text(node.value, known_text, known_int, known_containers)

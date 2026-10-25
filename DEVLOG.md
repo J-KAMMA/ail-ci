@@ -11,12 +11,12 @@ in-range constants, invalid literals/bases and dynamic strings keep their previo
 behaviour; a text read from a literal list/tuple/dict is folded too, while a container that is
 mutated or escapes is left alone.
 
-Probes in `/tmp/probes` (`p1`-`p6`, `v1`-`v7`, `ib1`-`ib28`, `ib32`-`ib35`) compare both
-builds with CPython.  The five already-fixed items and `ib1`-`ib12`, `ib17`, `ib20`,
-`ib22`-`ib28`, `ib32`-`ib33`, `ib35` are refused by name; `ib13`-`ib16`, `ib18`-`ib19`,
-`ib21`, `ib26`, `ib34` match CPython or keep their named compiler refusal.  `ib29` (a list
-mutated before the call) is left unfolded and matches CPython.  Added
-`test_ail_pre253.py`.
+Probes in `/tmp/probes` (`p1`-`p6`, `v1`-`v7`, `ib1`-`ib37`) compare both builds with
+CPython.  The five already-fixed items and `ib1`-`ib12`, `ib17`, `ib20`, `ib22`-`ib28`,
+`ib30`-`ib33`, `ib35`, `ib37` are refused by name; `ib13`-`ib16`, `ib18`-`ib19`, `ib21`,
+`ib26`, `ib29`, `ib34`, `ib36` match CPython or keep their named compiler refusal.  A list
+that is mutated (`ib29`, `ib36`) is left unfolded, while a plain alias or a read through
+`len`/`print` is folded (`ib30`-`ib31`, `ib37`).  Added `test_ail_pre253.py`.
 
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 

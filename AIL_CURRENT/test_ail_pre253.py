@@ -87,6 +87,26 @@ main()
 
 main()
 ''',
+    'alias': '''DIGITS = ["1" * 5000]
+ALIAS = DIGITS
+
+
+def main():
+    print(int(ALIAS[0], 2))
+
+
+main()
+''',
+    'read_through_pure_call': '''DIGITS = ["1" * 5000]
+print(len(DIGITS), DIGITS)
+
+
+def main():
+    print(int(DIGITS[0], 2))
+
+
+main()
+''',
     'dict_source': '''def main():
     print(int({"digits": "1" * 5000}["digits"], 2))
 
@@ -121,6 +141,17 @@ IN_RANGE = r'''def main():
     print(int(["1" * 18][0], 2), int({"digits": "f" * 15}["digits"], 16))
     for base in [0, 2, 8, 10, 16, 36]:
         print(base, int("10", base))
+
+
+main()
+'''
+
+MUTATED = r'''DIGITS = ["1" * 5000]
+DIGITS[0] = "0"
+
+
+def main():
+    print(int(DIGITS[0], 2))
 
 
 main()
@@ -207,6 +238,9 @@ class Pre253Tests(unittest.TestCase):
 
     def test_in_range_constant_int_base_matches_cpython(self):
         self.matches('in_range', IN_RANGE)
+
+    def test_mutated_container_is_not_folded(self):
+        self.matches('mutated', MUTATED)
 
     def test_invalid_literal_and_base_still_match_cpython(self):
         self.matches('invalid', INVALID)
