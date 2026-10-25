@@ -1,3 +1,16 @@
+## 2026-10-25 - pre191: accept the integration tree's function-body constant refusal (job-pre191-10252231)
+
+Rebase follow-up. The integration branch now carries the general constant-expression rule that
+refuses an out-of-int64 integer constant anywhere, including an unreached function body, with
+`not in the subset: ... outside the signed 64-bit range`. `test_ail_pre191` still expected the
+two dead unary-shift cases to print CPython's value, which passed on its older base but failed
+once merged with that tree. The test now accepts either that CPython match or the integration
+refusal, and still requires the refusal not to be this pass's own `int64 constant expression out
+of range` message, so shift folding stays scoped to module/class/default positions. The source
+is unchanged; module/class/default out-of-int64 constants remain refused by this pass on both
+builds. Re-ran `test_ail_pre191` against a worktree of the current `integ` with this branch's
+source applied (3 tests, OK), and against the local tree (3 tests, OK).
+
 ## 2026-10-25 - pre191 review follow-up: keep shift folding in the constant-position pass (job-pre191-10251807)
 
 Review fix. Adding `LShift`/`RShift` to the shared `_constant_int` made the pre-existing

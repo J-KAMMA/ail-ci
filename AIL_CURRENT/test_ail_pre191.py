@@ -146,6 +146,11 @@ class Pre191Tests(unittest.TestCase):
                         self.assertNotIn('Traceback', message, label)
 
     def test_function_body_unary_shifts_still_match_cpython(self):
+        # The integration tree's general constant-expression rule now refuses an out-of-int64
+        # constant anywhere in a function body, even unreached (``not in the subset: ... outside
+        # the signed 64-bit range``); the base tree still prints CPython's value for these dead
+        # cases.  This pass must not be the one refusing them, so accept either a CPython match or
+        # that other named refusal, and reject this pass's own message in a function body.
         with tempfile.TemporaryDirectory(prefix='ail-pre191-') as directory:
             for label, text in FUNCTION_BODY_UNARY.items():
                 want, want_rc, err = _cpython(directory, label, text)
@@ -154,8 +159,14 @@ class Pre191Tests(unittest.TestCase):
                     with self.subTest(label + ('_g' if general else '_d')):
                         got, build_err = _run(directory, '%s_%s' % (label, 'g' if general else 'd'),
                                               text, general)
-                        self.assertIsNotNone(got, build_err)
-                        self.assertEqual(got, (want, want_rc), build_err)
+                        if got is None:
+                            self.assertIn('outside the signed 64-bit range', build_err, label)
+                            self.assertNotIn('int64 constant expression out of range', build_err,
+                                             label)
+                            self.assertNotIn('integer overflow', build_err, label)
+                            self.assertNotIn('Traceback', build_err, label)
+                        else:
+                            self.assertEqual(got, (want, want_rc), build_err)
 
     def test_in_range_constant_positions_still_match_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre191-') as directory:
