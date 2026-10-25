@@ -481,7 +481,7 @@ class Num:
         return self.v / k
 
     def __pow__(self, k: int) -> int:
-        return self.v ** k
+        return self.v ** 2
 
     def __repr__(self) -> str:
         return "Num(" + str(self.v) + ")"
@@ -894,6 +894,21 @@ class Refusals(Base):
         for source, needle in REFUSALS:
             with self.subTest(needle=needle):
                 self.refused(source, needle)
+
+    def test_a_non_constant_power_is_refused_as_a_big_int(self):
+        self.refused('''class Num:
+    def __init__(self, v: int) -> None:
+        self.v = v
+    def __pow__(self, k: int) -> int:
+        return self.v ** k
+
+def main() -> None:
+    n = Num(5)
+    k = 2
+    print(n ** k)
+
+main()
+''', 'can need an int beyond int64', 'exponent that is not a constant')
 
 
 # -- D3: random class programs ---------------------------------------------------------------------------

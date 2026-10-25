@@ -40,7 +40,7 @@ def expand(text):
 
 
 def build(src, exe, mode, extra=(), cwd=None):
-    """mode: 'typed' (AIL_NO_GENERAL=1) or 'general' (pyc --general-only)."""
+    """mode: 'typed' (AIL_NO_GENERAL=1), 'default' (general path allowed) or 'general' (pyc --general-only)."""
     env = dict(os.environ)
     env.pop("AIL_NO_GENERAL", None)
     env.pop("AIL_TARGET", None)
@@ -48,7 +48,8 @@ def build(src, exe, mode, extra=(), cwd=None):
     if mode == "general":
         return subprocess.run([sys.executable, "-B", PYC, str(exe), "--file", str(src), "--general-only", *extra],
                               cwd=cwd, capture_output=True, text=True, timeout=900, env=env)
-    env["AIL_NO_GENERAL"] = "1"
+    if mode != "default":
+        env["AIL_NO_GENERAL"] = "1"
     return subprocess.run([sys.executable, "-B", CLI, "compile", str(src), "-o", str(exe), *extra], cwd=cwd,
                           capture_output=True, text=True, timeout=900, env=env)
 
@@ -625,7 +626,8 @@ class CryptoTests(unittest.TestCase):
 
     def compare(self, name, text, args=(), modes=("typed", "general"), msg=None, env=None):
         """The stdout of CPython and of the compiled program for the same arguments, on each path."""
-        msgs = {"typed": "str(e)", "general": "str(e)"} if msg is None else msg
+        msgs = {"typed": "str(e)", "default": "str(e)", "general": "str(e)"} if msg is None else dict(msg)
+        msgs.setdefault("default", msgs.get("general", "str(e)"))
         uses_msg = "{MSG}" in text
         expected = run_cpython(self.oracle_src(name, text, msg if uses_msg else None), *args)
         self.assertEqual(expected.returncode, 0, expected.stderr)
@@ -768,7 +770,7 @@ class CryptoTests(unittest.TestCase):
 
     # ---- secrets ----
     def test_secrets_types_lengths_and_ranges(self):
-        for mode in ("typed", "general"):
+        for mode in ("default", "general"):
             exe = self.prepare("secrets", SECRETS, mode)
             first = subprocess.run([str(exe)], capture_output=True, text=True, timeout=120)
             self.assertEqual(first.returncode, 0, first.stderr)
@@ -792,12 +794,24 @@ class CryptoTests(unittest.TestCase):
     def test_int_to_bytes_and_from_bytes(self):
         for seed in (1, 77, 31337, 123456):
             with self.subTest(seed=seed):
-                self.compare("ints", INTS, (seed,))
+                self.compare("ints", INTS, (seed,), modes=("default", "general"))
 
     def test_int_bytes_errors(self):
         for case in range(10):
             with self.subTest(case=case):
-                self.compare("interrors", INT_ERRORS, (case,), msg={"typed": "str(e)", "general": "str(e)"})
+                self.compare("interrors", INT_ERRORS, (case,), modes=("default", "general"),
+                             msg={"typed": "str(e)", "general": "str(e)"})
+
+    def test_typed_path_refuses_big_int_capable_int_bytes(self):
+        # int.from_bytes can produce a value beyond int64 whatever its length, so the typed-only build names that reason.
+        src = self.dir / "bigcap.py"
+        src.write_text(INTS, encoding="utf8")
+        exe = self.dir / "bigcap.exe"
+        done = build(src, exe, "typed", cwd=self.dir)
+        self.assertEqual(done.returncode, 3, done.stdout + done.stderr)
+        self.assertIn("can need an int beyond int64", done.stderr)
+        self.assertIn("the typed path has int64 only", done.stderr)
+        self.assertIn("int.from_bytes", done.stderr)
 
     # ---- base64 ----
     def test_base64_round_trips_and_decoder_fuzz(self):

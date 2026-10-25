@@ -154,13 +154,8 @@ from math import sin, pi, hypot
 def main() -> int:
     print(sin(1), math.exp(1), math.log(10), math.log(8, 2), math.log2(8), math.log10(1000), math.log(2.0, 10))
     print(math.pow(2, 10), math.hypot(3, 4), hypot(5, 12), math.fmod(7.5, 2), math.fmod(-7.5, 2))
-    print(math.trunc(-2.7), math.trunc(7), math.trunc(2.5), math.factorial(10), math.factorial(0))
     print(math.fabs(-0.0), math.copysign(3, -0.0), math.atan2(-0.0, -1.0), math.cbrt(-8))
     print(math.degrees(pi), math.radians(180), math.isnan(math.nan), math.isinf(-math.inf), math.isfinite(1))
-    try:
-        print(math.factorial(-1))
-    except ValueError:
-        print("neg")
     try:
         print(math.log(8.0, 1.0))
     except ZeroDivisionError:
@@ -171,6 +166,22 @@ def main() -> int:
 main()
 '''
 
+
+MATH_FACTORIAL = '''import math
+
+
+def main() -> int:
+    print(math.trunc(-2.7), math.trunc(7), math.trunc(2.5))
+    print(math.factorial(10), math.factorial(0), math.factorial(1))
+    try:
+        print(math.factorial(-1))
+    except ValueError:
+        print("neg")
+    return 0
+
+
+main()
+'''
 
 ITERATORS = r'''def double(x: int) -> int:
     return x * 2
@@ -441,19 +452,24 @@ def int_pow_input():
     return ("\n".join(lines) + "\n").encode()
 
 
-def compile_python(directory, text, name):
+def compile_python(directory, text, name, typed=True):
     source, exe = Path(directory, name + ".ail"), Path(directory, name)
     source.write_text(text, encoding="utf-8")
+    env = dict(os.environ)
+    if typed:
+        env["AIL_NO_GENERAL"] = "1"
+    else:
+        env.pop("AIL_NO_GENERAL", None)
     built = subprocess.run([sys.executable, "-B", str(ROOT / "ail_chatgpt.py"), "compile", source.name,
                             "--syntax", "python", "-o", exe.name], cwd=directory, capture_output=True,
-                           text=True, timeout=600, env=dict(os.environ, AIL_NO_GENERAL="1"))
+                           text=True, timeout=600, env=env)
     return built, source, exe
 
 
 class Batch1Tests(unittest.TestCase):
-    def same_as_cpython(self, text, name, stdin=b"", args=(), stderr=False):
+    def same_as_cpython(self, text, name, stdin=b"", args=(), stderr=False, typed=True):
         with tempfile.TemporaryDirectory() as directory:
-            built, source, exe = compile_python(directory, text, name)
+            built, source, exe = compile_python(directory, text, name, typed=typed)
             self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
             argv = [str(Path(directory, arg[1:])) if arg.startswith("@") else arg for arg in args]
             ran = subprocess.run([str(exe), *argv], input=stdin, capture_output=True, timeout=120)
@@ -496,8 +512,21 @@ class Batch1Tests(unittest.TestCase):
         self.same_as_cpython(ITERATORS, "iterators")
 
     def test_int_with_base_and_three_argument_pow(self):
-        self.same_as_cpython(INT_POW_EDGES, "int_pow_edges")
-        self.same_as_cpython(INT_POW_FUZZ, "int_pow_fuzz", int_pow_input())
+        self.same_as_cpython(INT_POW_EDGES, "int_pow_edges", typed=False)
+        self.same_as_cpython(INT_POW_FUZZ, "int_pow_fuzz", int_pow_input(), typed=False)
+
+    def test_math_factorial_on_the_default_build(self):
+        self.same_as_cpython(MATH_FACTORIAL, "math_factorial", typed=False)
+
+    def test_typed_path_refuses_big_int_capable_programs(self):
+        text = "import math\n\n\ndef main():\n    print(math.factorial(10))\n\n\nmain()\n"
+        with tempfile.TemporaryDirectory() as directory:
+            built, _, exe = compile_python(directory, text, "bigcap")
+            self.assertEqual(built.returncode, 3, built.stdout + built.stderr)
+            self.assertIn("can need an int beyond int64", built.stderr)
+            self.assertIn("the typed path has int64 only", built.stderr)
+            self.assertIn("math.factorial", built.stderr)
+            self.assertFalse(exe.exists())
 
     def test_unlowered_iterator_shapes_are_still_refused(self):
         # an iterable that is not known to be a sequence is not indexed (a dict's keys are not 0..n-1)

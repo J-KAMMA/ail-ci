@@ -270,7 +270,7 @@ def go():
     c = c * 3 - 0.5
     d %= 5
     d <<= 3
-    e **= 5
+    e **= 2
     e |= 3
     e ^= 1
     e &= 0xff
@@ -586,6 +586,16 @@ main()
 
 
 class Refusals(Base):
+    def test_a_power_that_can_exceed_int64_is_refused_by_name(self):
+        self.refused('''def main():
+    x = 2
+    x **= 5
+    print(x)
+
+
+main()
+''', "can need an int beyond int64", "the typed path has int64 only", hint=False)
+
     def test_a_variable_that_changes_kind(self):
         self.refused('''x = 1.5
 

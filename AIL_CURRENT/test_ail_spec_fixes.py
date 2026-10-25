@@ -153,7 +153,7 @@ def main() -> None:
 
 main()
 '''
-        self.same(text, 'fpow')
+        self.same(text, 'fpow', modes=('default', 'ir', 'general'))
 
     def test_complex_power_is_refused_by_name(self):
         constant = 'def main() -> None:\n    print((-4.0) ** 0.5)\n\n\nmain()\n'
@@ -167,7 +167,7 @@ main()
                     message = built.stdout + built.stderr
                     self.assertIn('complex number', message)
                     self.assertRegex(message, r'cpow_const\.ail:2:\d+:')
-            for mode in MODES:
+            for mode in ('default', 'ir', 'general'):
                 with self.subTest(mode=mode, case='runtime'):
                     built, exe = build(directory, runtime, 'cpow_run', mode)
                     self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
@@ -175,6 +175,11 @@ main()
                     self.assertNotEqual(ran.returncode, 0)
                     self.assertIn('complex', ran.stderr)
                     self.assertNotIn('nan', ran.stdout)
+            with self.subTest(mode='typed', case='runtime_big_int'):
+                built, _ = build(directory, runtime, 'cpow_run_typed', 'typed')
+                self.assertEqual(built.returncode, 3, built.stdout + built.stderr)
+                self.assertIn('can need an int beyond int64', built.stdout + built.stderr)
+                self.assertIn('exponent that is not a constant', built.stdout + built.stderr)
 
     # ---- C7 ----
     def test_splitlines_line_boundaries(self):
