@@ -364,6 +364,15 @@ Added `AIL_CURRENT/test_ail_pre133.py` (container class attributes, Fraction tup
 the refusal note) and registered it in `ail_check.MODULES`.  Probes in `/tmp/probes/`:
 `classattr.py`, `classattr2.py`, `classattr4.py`, `classattr6.py`, `frac_divmod.py`,
 `frac_misc.py`, `fr_note.py`.
+## 2026-10-24 - pre134: refuse `del` of a class name by name
+
+`class C: pass; del C` made both builds fail with the compiler's own `KeyError: 'C'`.
+A class name is read from its dedicated class slot, not an ordinary frame/global slot,
+so deleting the binding cannot be cleared the way a local or module variable is. This
+also covers a class name that is rebound at module scope. The construct is now refused
+by name at compile time (`del on the class name C`); deleting
+ordinary globals, locals, list/dict items and slices is unchanged and still matches
+CPython on both builds. Added `test_ail_pre134.py`.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
