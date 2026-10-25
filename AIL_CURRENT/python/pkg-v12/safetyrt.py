@@ -841,7 +841,23 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
     if (specobj.tag != AIL_T_STR) return ail_raise_c(cx, AIL_B_TYPEERROR, "format() argument 2 must be str");
     ail_str spec = ail_view_to_str(specobj);
     if (spec.n == 0) { *out = ail_obj_str(cx, x); return AIL_OK; }
-    ail2f_spec f; char msg[160];
+    char msg[160];
+    /* object.__format__ rejects a non-empty spec before a type's parser ever sees it: None and any
+       type without its own __format__ (an instance is dispatched by dunderrt before this body) */
+    if (x.tag != AIL_T_STR && x.tag != AIL_T_INT && x.tag != AIL_T_BOOL && x.tag != AIL_T_FLOAT) {
+        if (x.tag == AIL_T_NONE) return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported format string passed to NoneType.__format__");
+        const char *tn = ail_type_name(x.tag);
+        char nb[80];
+        if ((x.tag == AIL_T_INST || x.tag == AIL_T_EXC) && ((ail_instobj *)x.o)->cls.tag == AIL_T_CLASS) {
+            ail_str cs = ail_view_to_str(((ail_classobj *)((ail_instobj *)x.o)->cls.o)->name);
+            size_t k = 0;
+            for (int64_t i = 0; i < cs.n && k + 1 < sizeof nb; i++) { uint32_t ch = (uint32_t)ail_chr(cs, i); nb[k++] = ch < 128 ? (char)ch : '?'; }
+            nb[k] = 0; tn = nb;
+        }
+        snprintf(msg, sizeof msg, "unsupported format string passed to %s.__format__", tn);
+        return ail_raise_c(cx, AIL_B_TYPEERROR, msg);
+    }
+    ail2f_spec f;
     if (ail2f_parse(spec, &f, msg, sizeof msg)) return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
     char type = f.type;
     if (f.group && type) {
@@ -1007,29 +1023,48 @@ static inline ail_st ail2f_percent(ail_ctx *cx, ail_obj *out, ail_obj fmtobj, ai
         } else if (t == 'd' || t == 'i' || t == 'u' || t == 'o' || t == 'x' || t == 'X') {
             int64_t iv;
             if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) iv = arg.i;
-            else if (arg.tag == AIL_T_FLOAT && (t == 'd' || t == 'i' || t == 'u')) {
+            char *fdigits = NULL;
+            int fneg = 0;
+            if (arg.tag == AIL_T_FLOAT && (t == 'd' || t == 'i' || t == 'u')) {
                 double d = ail_float_val(arg);
                 if (isnan(d)) { st = ail_raise_c(cx, AIL_B_VALUEERROR, "cannot convert float NaN to integer"); goto fail; }
                 if (isinf(d)) { st = ail_raise_c(cx, AIL_B_OVERFLOWERROR, "cannot convert float infinity to integer"); goto fail; }
-                if (d >= 9223372036854775808.0 || d < -9223372036854775808.0) { st = ail_hit_limit(cx, "integer overflow", "int64"); goto fail; }
-                iv = (int64_t)d;
-            } else {
+                double it = trunc(fabs(d));
+                fneg = it != 0.0 && d < 0.0;
+                int need = snprintf(NULL, 0, "%.0f", it);
+                if (need < 0) { st = ail_hit_limit(cx, "format_int", "formatting a float as an integer failed"); goto fail; }
+                fdigits = (char *)malloc((size_t)need + 1);
+                if (!fdigits) { st = ail_hit_limit(cx, "format_int", "out of memory"); goto fail; }
+                snprintf(fdigits, (size_t)need + 1, "%.0f", it);
+            } else if (!(arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL)) {
                 if (t == 'd' || t == 'i' || t == 'u') snprintf(msg, sizeof msg, "%%%c format: a real number is required, not %s", (char)t, ail_type_name(arg.tag));
                 else snprintf(msg, sizeof msg, "%%%c format: an integer is required, not %s", (char)t, ail_type_name(arg.tag));
                 st = ail_raise_c(cx, AIL_B_TYPEERROR, msg); goto fail;
             }
-            uint64_t m = iv < 0 ? (uint64_t)0 - (uint64_t)iv : (uint64_t)iv;
-            int base = t == 'o' ? 8 : (t == 'x' || t == 'X') ? 16 : 10;
-            const char *dig = t == 'X' ? "0123456789ABCDEF" : "0123456789abcdef";
-            char tmp[80], body[200]; int k = 0;
-            do { tmp[k++] = dig[m % (uint64_t)base]; m /= (uint64_t)base; } while (m);
-            int z = 0;
-            if (f.has_prec) while (k + z < f.prec && k + z < 150) body[z++] = '0';
-            for (int q = 0; q < k; q++) body[z + q] = tmp[k - 1 - q];
-            body[z + k] = 0;
-            const char *prefix = !f.alt ? "" : base == 8 ? "0o" : t == 'X' ? "0X" : base == 16 ? "0x" : "";
-            f.type = 'd'; f.has_prec = 0;
-            piece = ail2f_pad_num(cx, ail2f_signstr(iv < 0, f.sign), prefix, body, &f);
+            if (fdigits) {
+                int64_t k = (int64_t)strlen(fdigits), z = 0;
+                if (f.has_prec && f.prec > k) z = f.prec - k;
+                char *body = (char *)malloc((size_t)(z + k) + 1);
+                if (!body) { free(fdigits); st = ail_hit_limit(cx, "format_int", "out of memory"); goto fail; }
+                memset(body, '0', (size_t)z);
+                memcpy(body + z, fdigits, (size_t)k + 1);
+                f.type = 'd'; f.has_prec = 0;
+                piece = ail2f_pad_num(cx, ail2f_signstr(fneg, f.sign), "", body, &f);
+                free(body); free(fdigits);
+            } else {
+                uint64_t m = iv < 0 ? (uint64_t)0 - (uint64_t)iv : (uint64_t)iv;
+                int base = t == 'o' ? 8 : (t == 'x' || t == 'X') ? 16 : 10;
+                const char *dig = t == 'X' ? "0123456789ABCDEF" : "0123456789abcdef";
+                char tmp[80], body[200]; int k = 0;
+                do { tmp[k++] = dig[m % (uint64_t)base]; m /= (uint64_t)base; } while (m);
+                int z = 0;
+                if (f.has_prec) while (k + z < f.prec && k + z < 150) body[z++] = '0';
+                for (int q = 0; q < k; q++) body[z + q] = tmp[k - 1 - q];
+                body[z + k] = 0;
+                const char *prefix = !f.alt ? "" : base == 8 ? "0o" : t == 'X' ? "0X" : base == 16 ? "0x" : "";
+                f.type = 'd'; f.has_prec = 0;
+                piece = ail2f_pad_num(cx, ail2f_signstr(iv < 0, f.sign), prefix, body, &f);
+            }
         } else if (t == 'e' || t == 'E' || t == 'f' || t == 'F' || t == 'g' || t == 'G') {
             double d;
             if (arg.tag == AIL_T_FLOAT) d = ail_float_val(arg);

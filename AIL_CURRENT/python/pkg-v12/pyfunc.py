@@ -66,7 +66,7 @@ import typedinherit
 import shadowing
 import rangecheck
 from pipeline import PipelineError
-from pyfront import BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Unsupported, _use, refuse_complex_pow
+from pyfront import BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Unsupported, _use, int_constant, refuse_complex_pow
 
 # A capability marker, not a behaviour: lets a SHARED judge (one file imported against many
 # `pkg-*` copies of this module, e.g. `test_floatparam.py`) ask "does THIS copy infer a float
@@ -1796,6 +1796,11 @@ def _scan_module_consts(tree):
             # is not one: there is no regular-expression engine here, and no subset of one. Saying
             # that plainly is the whole value of the message.
             named = [a.name for a in node.names] if isinstance(node, ast.Import) else [mod]
+            # Name the module that is actually outside the modelled set, not the whole
+            # comma-joined import list: `import math, html` used to say "import of
+            # 'math, html' is not available", which wrongly denies the supported `math`.
+            modelled = {'math', 'sys', 'collections', 'itertools', 'functools', 'heapq', 'bisect', 're', 'json'}
+            unavailable = next((name for name in named if name.split('.')[0] not in modelled), None)
             regex = next((name for name in named if name in ('re', 'regex')), None)
             builtin = next((name for name in named if name in ('heapq', 'bisect')), None)
             if regex == 're':
@@ -1838,7 +1843,7 @@ def _scan_module_consts(tree):
                                     "modules it models (math, sys, collections, itertools, functools, "
                                     "heapq, bisect, re, json).\n"
                                     "  write instead: drop the import and write what you need by hand "
-                                    "with plain lists, dicts and loops" % mod)
+                                    "with plain lists, dicts and loops" % (unavailable or mod))
             error.source_line = node.lineno    # the import itself, not a later use of the name
             raise error
         if not isinstance(node, ast.Assign):
@@ -12936,6 +12941,10 @@ def _expr(node, ctx):
         return _blist_value(node, ctx)
     rec = lambda n: _expr(n, ctx)
     need = ctx.need
+    if isinstance(node, ast.BinOp):
+        constant = int_constant(node)
+        if type(constant) is int and -(1 << 63) <= constant < (1 << 63):
+            return _c_int_literal(constant)
     if isinstance(node, ast.Name):
         if node.id in ctx.gridrow:
             raise Unsupported('%r is a row of the grid %r, not a number; index it or iterate it'

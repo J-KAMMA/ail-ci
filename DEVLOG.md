@@ -354,6 +354,165 @@ changed for it. The wide builds (`AIL_V2_WIDE_EMBED` / `AIL_V2_INCLUDE_ABS`) sti
 this export (their `out/boxed_rt/v2` headers and fold script are absent), so the width-generic store is
 unverified in those modes; a run-time non-BMP value is still an open 16-bit limitation
 (`DIFFERENCES` C?-job-pre90-10242040-2).
+## 2026-10-24 - build time in the AIL/C/Rust comparison (job-bench2-10241946)
+
+`bench/compare.py` now records build wall time in the existing post-timing build-disk pass: the median
+of three cold builds (fresh build directory, `AIL_CACHE` and TMPDIR) and three incremental builds after
+appending one harmless comment line to the app's AIL, C or Rust source with the caches warm. The JSON
+has `build_time_ms` and the table has `cold build s ail/c/rust` and `incremental build s ail/c/rust`
+beside the unchanged columns. The full run is in `bench/results/2026-10-24-buildtime.md`: AIL cold
+builds took 2.02-7.12 s versus C 0.07-0.34 s and Rust 2.40-2.61 s; AIL incremental builds took
+0.17-0.40 s. Timestamped cold compiles (LD_PRELOAD exec/exit log) spend 55-65% in the AIL front end,
+31-44% in the C compiler and 2-3% linking. No language behaviour changed, so no DIFFERENCES row.
+## 2026-10-24 -- pre100: `%d` of a float on the general path
+
+CPython truncates a float for `%d` and prints the whole integer even past int64 (`"%d" % 1e20`
+prints `100000000000000000000`). The literal-format path rejected a float with
+`TypeError: unsupported format string passed to non-int`, and the run-time formatter stopped at
+the int64 boundary with `AIL limit: integer overflow`. Literal `%d` conversions now go through
+the run-time formatter (`pyboxed2._percent_format` -> `safetyrt.FMT`), and that formatter's
+integer branch formats the truncated float as decimal digits directly instead of as an int64.
+NaN and infinity keep CPython's ValueError / OverflowError. Probes:
+`/tmp/probes/pre100_float_d*.py`, `pct_dynamic_float.py`; new test
+`AIL_CURRENT/test_ail_pre100.py`.
+## 2026-10-24 - pre101: `itertools.permutations(xs, None)` (job-pre101-10242138)
+
+CPython treats an explicit `r=None` as "not given" and yields every full-length permutation.
+The general path (`pyboxed2._lib_permutations`) passed the None through as r=0 and returned
+`[()]`. It now treats a literal/keyword None as omitted and, for a value known only at run
+time, passes `has_r = (r.tag != AIL_T_NONE)` so a None argument/attribute/list item/dict value
+is handled the same way. The typed path already handled the literal None; a None-typed
+variable is refused by name there (no null value), so the default build falls back to the
+general path. `AIL_CURRENT/test_ail_pre101.py` covers both builds.
+## 2026-10-24 - pre102: format() of None / an instance without __format__
+
+The general runtime parsed the format spec before it dispatched on the value, so `format(None, ' +8')`
+and `format(Box(1), ' +8')` raised `ValueError: Invalid format specifier` where CPython's
+`object.__format__` rejects any non-empty spec with
+`TypeError: unsupported format string passed to NoneType.__format__` (resp. `Box.__format__`).
+`safetyrt.py` now does that rejection before `ail2f_parse`; str/int/bool/float keep parsing, and an
+instance that defines `__format__` is still dispatched first by dunderrt. Added
+`test_ail_pre102.py` (one program, both builds, values through an argument, list item, dict value,
+attribute, f-string and str.format, plus an empty spec and a custom `__format__`).
+The NUL / non-ASCII unknown-code difference (a NUL spec still formats as if empty) is pre-existing
+and not touched by this job. Verified with `test_ail_pre102`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3`: 26 tests, all OK.
+
+## 2026-10-24 - pre104: round() of nan/inf raises CPython's exception
+
+The pre54 review recorded the default build's one-argument `round()` of nan/inf as a
+pre-existing difference: it stopped through `ail_die` with `round() of nan` or
+`round() result does not fit in this language's int64`, so a `try` could not catch it and an
+uncaught program printed the trap message instead of CPython's exception line.  `ail_round0`
+now raises `ValueError("cannot convert float NaN to integer")` and
+`OverflowError("cannot convert float infinity to integer")` through the normal exception path
+on both builds.  Finite values, including the int64-boundary trap, are unchanged.  Added
+`AIL_CURRENT/test_ail_pre104.py` and registered it in `ail_check.MODULES`.
+## 2026-10-24 - pre105: a multi-name import refusal names the unmodelled module
+
+The exact errmsg3 case `import math, html` (with `html` used, so the general path refuses too)
+reached the typed path's module scan, which joined every alias into one name and printed
+`import of 'math, html' is not available` at the import's line.  That denied the supported
+`math` and did not say which module was missing.  The scan now picks the first name outside the
+modelled set (`html`, or `html.parser`) and names it alone; an unused `html` import still builds
+on both paths.  Added `AIL_CURRENT/test_ail_pre105.py` (eight refusals, both builds, plus the
+accepted unused case).
+## 2026-10-24 - pre107: random.expovariate's default rate
+
+Job cov8 recorded `gauss(mu)` / `expovariate()` without defaults as pre-existing. On this
+tree `random.gauss(2.5)` already matches CPython on both builds; `random.expovariate()` and
+`Random.expovariate()` were still refused because the two Random preludes declared
+`expovariate(lambd)` without CPython 3.12's `lambd=1.0`. Both now default to 1.0.
+The module-level function and a `Random` object match CPython after `random.seed(<int>)`,
+including explicit int/float/negative/infinite rates, keyword calls, a zero rate's
+`ZeroDivisionError`, and rates passed through an argument, a list item, an attribute and a
+dict value. On this tree the default build reaches the general path for these programs:
+the typed path still refuses `Random` for its plain-positional `randrange` requirement (an
+unrelated pre-existing gap). Added `AIL_CURRENT/test_ail_pre107.py`.
+## 2026-10-24 - pre112: a frozenset of tuples as a dict key (job-pre112-10242224)
+
+The tuple pass (`tuplib.py`) lowers `frozenset({(1, 'a'), (2, 'b')})` to its `_AilS_Pi_sQ` table class. The
+table refuses a set as a key, so a dict keyed by that frozenset stays a plain object, but the same expression
+used as the *lookup* key was still lowered: `D[frozenset({(1, 'a'), (2, 'b')})]` raised `KeyError`,
+`frozenset(...) in D` was False and `D.get(...)` was None, while the dictionary itself printed correctly (the
+reviewer's `t4h`, also on base). The pass now refuses a set / frozenset of tuples used as the key of a
+container that is not a table dict (`tupexpr.ex_Subscript`, `tupstmt.assign_one`) and bails on a module-level
+constant whose type cannot be told and that mentions a tuple (`tuplib.module_assign`), so the whole program is
+left as written and the general path keeps the dict and the key boxed. Added `test_ail_pre112.py` (4 programs,
+two builds each). Verified with 15 differential probes (`cmp.sh`, both builds) plus `test_ail_tuples`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`, `test_ail_collections`,
+`test_ail_sets_general` and `test_ail_modconst`.
+## 2026-10-24 - pre113: fold all-int constant expressions exactly
+
+`(1 << 63) - 1` and `2**65 - 2**65` are exact in Python even though an intermediate is outside
+int64; both builds used to emit checked operations for the intermediate and stopped with
+`integer overflow`.  `pyfront.int_constant` now evaluates an all-int constant expression with
+Python ints (with a size limit for giant intermediates), and the typed IR, legacy typed emitter,
+unified general path and boxed emitters emit the one int64 result.  Added `test_ail_pre113.py`
+(one program, four build modes); the second listed case, a module constant exponent, is still a
+separate difference.
+## 2026-10-24 - pre114: bytes/bytearray membership type-error text
+
+`x in b`, `b.__contains__(x)` and the bytearray forms now raise CPython 3.12's
+`TypeError: a bytes-like object is required, not 'T'` for a non-index, non-bytes-like
+item (str, float, None, list, user class). Both builds used the shared substring
+helper, whose wording belongs to find/index/count/replace ("argument should be integer
+or bytes-like object"); membership now has its own conversion. Ints 0..255, bools,
+bytes and bytearray membership are unchanged. Added `test_ail_pre114.py`, which covers
+items reaching the code through an argument, a list item, an attribute and a dict
+value on both builds. Non-index start/stop bounds for bytes search remain a separate
+open difference and are not changed here.
+## 2026-10-24 - Counter(mapping) keeps its values (job-pre120-10242313)
+
+CPython 3.12's `Counter.update(mapping)` uses `dict.update` when the counter is empty and only
+adds `count + self.get(elem, 0)` when it is not. Every constructor starts empty, so
+`Counter({"a": "x"})` keeps `"x"`; the general path added `0 + "x"` for each entry and raised
+`TypeError`, and `Counter().update({"a": "x"})` did the same. `ail_counter_update_map` now takes
+CPython's empty-counter branch (copy the values), while a non-empty update still adds counts and
+keeps CPython's operand order in the TypeError it can raise. The same change sorts string counts in
+Counter's `repr` in most_common order and makes the operators' comparison with 0 name the operator
+CPython names. Added `AIL_CURRENT/test_ail_pre120.py` (five programs, both builds) and registered it
+in `ail_check.MODULES`.
+## 2026-10-24 - pre124: module-scope annotations are evaluated
+
+A module-level `target: annotation` without a value dropped the whole statement on both builds:
+`touch(b).x: ann()` never called `ann` and `xs[touch(i)]: ann()` never evaluated `xs` or `i`
+(CPython evaluates the target parts and then the annotation). An annotated assignment with a value
+also never evaluated its annotation. `ail_syntax` now keeps those evaluations in one expression or
+semicolon statement, in CPython order, for every target form (name, attribute, subscript, slice and
+extended slice). Under `from __future__ import annotations` only the target is evaluated, as in
+CPython, and static type expressions (`int`, `list[int]`, `A | None`) stay unevaluated. Added
+`AIL_CURRENT/test_ail_pre124.py`.
+## 2026-10-24 - pre127 review fix: a shadowing binding also wins at a call site (job-pre127-10242351)
+
+The review found two defects in the r6 fix.  `expr_Name` read a parameter, local, cell or
+closure binding instead of the class, but `_call_name` still checked `self.classes` first, so
+`U()` in the same activation called the class constructor regardless.  A self-referential
+`U = U()` in a function therefore constructed the class and silently succeeded instead of
+raising `UnboundLocalError` (also for `U: object = U()` and `U, x = U(), 5`), and a loop target
+`for U in items:` left `U()` after the loop calling the class instead of raising `TypeError` on
+the instance.  `_call_name` now applies the same shadowing test as `expr_Name` before taking
+the class-constructor path.  `test_ail_pre127.py` gains both shapes; the probes also cover an
+unshadowed constructor, `global U`, a parameter holding the class itself, local/cell bindings
+of an instance, list/attribute/dict sources of a class value, an empty loop and a use before
+the assignment.  Module-level `U = U()` (already different on the base tree) is unchanged.
+
+## 2026-10-24 - pre127: a parameter or local shadows a class name (job-pre127-10242351)
+
+The first still-differing item from the pre96 list is `r6`: the general emitter's
+`expr_Name` returned the module-lifetime class value for every name that matched a class
+definition, even when the current function had a local slot for that name.  In
+`class U: ...; def f(U): return U.m()` the argument was ignored: both builds read the class
+object and raised `AttributeError: 'type' object has no attribute 'm'` where CPython returns
+42 from the instance's class attribute or method.  A class name now becomes a class value
+only when the activation has no parameter, local, cell or closure binding for it; a
+shadowing binding is loaded from its own slot.  The probes cover a nested parameter, a method
+parameter, a local, a cell, a `nonlocal` closure, an annotated parameter, and values arriving
+through a list item, an attribute and a dict value.  `r7` (`cls.__name__`), `r8`
+(`K = "abc"; f = K.upper`) and `r9` (class through a list item, `[U][0].m`) still differ on
+this tree and were not changed.  `test_ail_pre127.py` keeps the r6 probes; emitted C is
+unchanged for a program that does not shadow a class name.
+
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 

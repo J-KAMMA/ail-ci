@@ -31,7 +31,28 @@ The general path's bytes/bytearray `find`, `rfind`, `count`, `index`, `rindex`, 
 bool or an instance's `__index__` (with CPython's `__index__ returned non-int (type ...)` when the
 result is not an int); `None` keeps its default.  `_ail_b_rng` keeps the clamping, and all seven
 methods share it.  `test_ail_pre173.py` covers both builds and keeps the case.
+## 2026-10-24 -- pre100: `%d` of a float on the general path
 
+CPython truncates a float for `%d` and prints the whole integer even past int64 (`"%d" % 1e20`
+prints `100000000000000000000`). The literal-format path rejected a float with
+`TypeError: unsupported format string passed to non-int`, and the run-time formatter stopped at
+the int64 boundary with `AIL limit: integer overflow`. Literal `%d` conversions now go through
+the run-time formatter (`pyboxed2._percent_format` -> `safetyrt.FMT`), and that formatter's
+integer branch formats the truncated float as decimal digits directly instead of as an int64.
+NaN and infinity keep CPython's ValueError / OverflowError. Probes:
+`/tmp/probes/pre100_float_d*.py`, `pct_dynamic_float.py`; new test
+`AIL_CURRENT/test_ail_pre100.py`.
+
+## 2026-10-24 - pre104: round() of nan/inf raises CPython's exception
+
+The pre54 review recorded the default build's one-argument `round()` of nan/inf as a
+pre-existing difference: it stopped through `ail_die` with `round() of nan` or
+`round() result does not fit in this language's int64`, so a `try` could not catch it and an
+uncaught program printed the trap message instead of CPython's exception line.  `ail_round0`
+now raises `ValueError("cannot convert float NaN to integer")` and
+`OverflowError("cannot convert float infinity to integer")` through the normal exception path
+on both builds.  Finite values, including the int64-boundary trap, are unchanged.  Added
+`AIL_CURRENT/test_ail_pre104.py` and registered it in `ail_check.MODULES`.
 ## 2026-10-23 -- fuzz37: ordering TypeError names the written operator
 
 Fuzzing while loops and counters against CPython on both builds found that an

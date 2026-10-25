@@ -33,7 +33,7 @@ import os
 import re
 import runpy
 
-from pyfront import Unsupported, refuse_complex_pow
+from pyfront import Unsupported, int_constant, refuse_complex_pow
 import filelib
 import hashlower
 import pyfunc
@@ -4493,6 +4493,10 @@ class Compiler(boxclosure.ClosureMixin):
                  ast.Sub: 'ail_meth_set_difference', ast.BitXor: 'ail_meth_set_symmetric_difference'}
 
     def expr_BinOp(self, node, ctx):
+        constant = int_constant(node)
+        if type(constant) is int and -(1 << 63) <= constant < (1 << 63):
+            return 'ail_box_int(%s)' % ('(-9223372036854775807LL - 1LL)' if constant == -(1 << 63)
+                                          else '%dLL' % constant)
         if (isinstance(node.op, ast.Mod) and isinstance(node.left, ast.Constant)
                 and isinstance(node.left.value, str)):
             mark = len(ctx.lines)
@@ -4616,6 +4620,15 @@ class Compiler(boxclosure.ClosureMixin):
                 raise Unsupported('%% formatting with too few arguments')
             val = argcs[argi]
             argi += 1
+            if typ == 'd':
+                self.rt_needs.add('fmt')
+                dirslot = self._str_lit_slot(m.group(0), ctx)
+                t = ctx.tmp()
+                ctx.emit('st = ail2f_percent(cx, &%s, %s, %s);' % (t, dirslot, val))
+                ctx.check()
+                pieces.append(t)
+                i = m.end()
+                continue
             if typ == 'r':
                 if width or prec:
                     raise Unsupported('%r with a width or precision')
@@ -6346,7 +6359,13 @@ class Compiler(boxclosure.ClosureMixin):
             import safetyrt
             if name in safetyrt.PRIMS:
                 return self._call_safety_prim(name, args, kwargs, ctx)
-        if name in self.classes:
+        if (name in self.classes and name not in ctx.slot_of and name not in ctx.ptr_names
+                and name not in ctx.clo_index and name not in ctx.free_names
+                and name not in ctx.cell_slots):
+            # a parameter, local, cell or closure binding of the same name shadows the class in
+            # CPython for the WHOLE activation: U() then calls that value, not the class (an
+            # unbound local is UnboundLocalError, an instance is TypeError), exactly as expr_Name
+            # already reads it. Without this the constructor-call path silently called the class.
             return self._call_class(name, args, kwargs, ctx)
         if name in ctx.nested_funcs:
             return self._call_nested_function(name, args, kwargs, ctx)
@@ -7201,9 +7220,18 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('permutations() with other than (iterable[, r])')
         r_node = args[1] if len(args) > 1 else kwargs.get('r')
         src = self._resolve_iter_src(args[0], ctx)
-        r = '0' if r_node is None else '(%s).i' % self.expr(r_node, ctx)
+        if r_node is None or (isinstance(r_node, ast.Constant) and r_node.value is None):
+            has_r, r = '0', '0'     # permutations(xs) and permutations(xs, None) alike
+        else:
+            mv = self.expr(r_node, ctx)
+            if isinstance(r_node, ast.Constant):
+                has_r, r = '1', '(%s).i' % mv
+            else:                   # a value known only at run time: None means "all of them"
+                mt = ctx.tmp()
+                ctx.emit('%s = %s;' % (mt, mv))
+                has_r, r = '(%s.tag != AIL_T_NONE)' % mt, '(%s.tag == AIL_T_NONE ? 0 : %s.i)' % (mt, mt)
         t = ctx.tmp()
-        ctx.emit('st = ail_it_permutations(cx, &%s, %s, %d, %s);' % (t, src, 0 if r_node is None else 1, r))
+        ctx.emit('st = ail_it_permutations(cx, &%s, %s, %s, %s);' % (t, src, has_r, r))
         ctx.check()
         return t
 
