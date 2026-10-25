@@ -1552,7 +1552,7 @@ class Compiler:
         c = self.expr(node.value, ctx)
         if isinstance(node.slice, ast.Slice):
             def bound(e, default):
-                if e is None:
+                if e is None or (isinstance(e, ast.Constant) and e.value is None):
                     return '0', str(default)
                 v = self.expr(e, ctx)
                 return '1', '(%s).i' % v
