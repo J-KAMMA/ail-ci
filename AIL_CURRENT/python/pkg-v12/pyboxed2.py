@@ -2118,6 +2118,50 @@ class _StarC(ast.AST):
         self.n = n
 
 
+def _mix_wrap_integer_clone(mangled, inner, inner_sig, params, overflow):
+    """The int64-ABI wrapper around an int-returning clone.
+
+    `inner_sig` is the typed emitter's own prototype for `inner`. Its parameters are already the
+    boxed caller's int64/list forms; its result is `int64_t`, or `ail_tint` when the local proof
+    could not bound the ints. The wrapper keeps the caller's int64 result ABI and, for a tagged
+    result, signals a value that does not fit int64 instead of wrapping or stopping: the call site
+    then runs the boxed body, which has exact ints. Returns (the wrapper C, its prototype).
+    """
+    inside = inner_sig[inner_sig.index('(') + 1:inner_sig.rindex(')')]
+    tinted_params = set(re.findall(r'\bail_tint\s+(v_\w+)', inside))
+    proto_args = []
+    args = []
+    for pname, kind in params:
+        cn = 'v_' + pname
+        if kind in (pymix.INT, pymix.BOOL):
+            proto_args.append('int64_t ' + cn)
+            args.append('ail_tint_from_int64(%s)' % cn if cn in tinted_params else cn)
+        elif kind == pymix.FLOAT:
+            proto_args.append('double ' + cn)
+            args.append(cn)
+        elif kind == pymix.STR:
+            proto_args.append('ail_str ' + cn)
+            args.append(cn)
+        elif kind in (pymix.LIST_INT, pymix.LIST_FLOAT):
+            elem = 'int64_t' if kind == pymix.LIST_INT else 'double'
+            proto_args.extend(('const %s *%s' % (elem, cn), 'int64_t %s_len' % cn))
+            args.extend((cn, cn + '_len'))
+        else:
+            return None, None
+    tagged = 'ail_tint ' in inner_sig[:inner_sig.index(inner)]
+    proto = 'int64_t %s(%s)' % (mangled, ', '.join(proto_args))
+    body = ['int %s = 0;\n' % overflow, proto + ' {\n']
+    if tagged:
+        body.append('    ail_tint r = %s(%s);\n' % (inner, ', '.join(args)))
+        body.append('    int64_t v;\n')
+        body.append('    if (!ail_tint_to_int64(r, &v)) { %s = 1; return 0; }\n' % overflow)
+        body.append('    return v;\n')
+    else:
+        body.append('    return %s(%s);\n' % (inner, ', '.join(args)))
+    body.append('}\n')
+    return ''.join(body), proto
+
+
 class Compiler(boxclosure.ClosureMixin):
     def __init__(self, allow_mix=True):
         self.allow_mix = allow_mix
@@ -2431,6 +2475,8 @@ class Compiler(boxclosure.ClosureMixin):
             for mname, mix in sorted(self.mix_typed.items()):
                 parts.append('/* AIL_MIXED_TYPED: %s */\n' % mname)
                 parts.append('extern %s;\n' % mix['sig'])
+                if mix.get('overflow'):
+                    parts.append('extern int %s;\n' % mix['overflow'])
         parts.append('\n/* ---- interned attribute-name ids ---- */\n')
         for a in sorted(self.attr_names):
             parts.append('static int64_t g_attr_%s;\n' % a)
@@ -6130,7 +6176,7 @@ class Compiler(boxclosure.ClosureMixin):
             # A clone's ABI is int64 in and out (the boxed caller unboxes the result), so an
             # annotated function whose own local proof can leave int64 cannot be a clone either:
             # `build` returning 2**70 would overflow before its caller ever saw the shift count.
-            if name in big_hard or name in big_local:
+            if name in big_hard:
                 continue
             facts = getattr(report, 'function_ir', {}).get(name)
             if facts is None or not facts.matches(source, name):
@@ -6149,11 +6195,55 @@ class Compiler(boxclosure.ClosureMixin):
             if ret not in _MIX_SCALAR_KINDS:
                 continue                                     # a list-returning candidate -- ditto
             mangled = pyfunc._mangle_csym(name) + '__typed'
-            try:
-                info2 = {'_checked_arrays': True, '_mixed_clone': True}   # a clone gets its lists from boxed code: every index is checked
-                csrc = pyfunc.to_c(defs_src, entry=name, sig=pymix._scalar_sig(cand['params']),
-                                   name=mangled, info=info2)
-            except Exception:
+            # An int-returning clone is emitted under an INNER name and wrapped in an int64 ABI
+            # function below. The wrapper gives the boxed call site an overflow signal: the inner
+            # clone computes with ail_tint (exact on overflow), and when its exact result does not
+            # fit int64 the wrapper sets the flag and `_call_mix_guarded` calls the boxed body
+            # instead. Every other result kind already has an ABI both sides agree on.
+            integer_ret = ret in (pymix.INT, pymix.BOOL)
+            inner = mangled + '__mix' if integer_ret else mangled
+            info2 = {'_checked_arrays': True, '_mixed_clone': True}   # a clone gets its lists from boxed code: every index is checked
+            # A clone whose local proof cannot bound its ints uses the tagged-int lowering when the
+            # IR can lower it (BIGINT.md rules 2-4). In an AIL_IR=0 build the rest of the program
+            # stays legacy, but this one clone still needs the IR so its int64-overflowing
+            # arithmetic takes the exact (tagged) arm instead of the loud int64 stop. When the IR
+            # cannot lower the function at all, retry without tagging: a checked-int64 clone still
+            # covers everything the old clone did, and a value that overflows there stops loudly.
+            tagged = name in big_local
+            attempts = []
+            if tagged:
+                attempts.append((dict(info2, _mixed_tagged=True), True))
+            attempts.append((info2, False))
+            csrc = None
+            _tag_error = ''
+            for attempt_info, _tag in attempts:
+                _ir_forced = _tag and os.environ.get('AIL_IR', '1').strip().lower() in (
+                    '0', 'off', 'no', 'false')
+                if _ir_forced:
+                    _old_ir = os.environ.get('AIL_IR')
+                    os.environ['AIL_IR'] = '1'
+                try:
+                    csrc = pyfunc.to_c(defs_src, entry=name, sig=pymix._scalar_sig(cand['params']),
+                                       name=inner, info=attempt_info)
+                    break
+                except Exception as exc:
+                    csrc = None
+                    if _tag:
+                        _tag_error = str(exc)
+                finally:
+                    if _ir_forced:
+                        if _old_ir is None:
+                            os.environ.pop('AIL_IR', None)
+                        else:
+                            os.environ['AIL_IR'] = _old_ir
+            if csrc is None:
+                continue
+            if tagged and _tag_error and 'call of' not in big_local.get(name, ''):
+                # The IR cannot make this clone's local arithmetic exact and the legacy emitter
+                # would stop on int64 overflow rather than return a value the boxed body can
+                # reproduce. Leave it on the exact general path. A bound that comes from a call
+                # (int() parsing text, ...) is the one case where the checked-int64 clone still
+                # preserves the function's behavior for every value it can handle.
                 continue
             # `_one_function`'s own inlining heuristic (pyfunc.py, "NEVER the entry point" --
             # its check is literally `cname == 'run'`, hardcoded to `to_c`'s usual caller) has
@@ -6166,7 +6256,7 @@ class Compiler(boxclosure.ClosureMixin):
             # immediately in front of THIS mangled name's own two appearances (prototype and
             # definition) -- never touches any other function's inlining in the same unit.
             csrc = re.sub(r'__attribute__\(\(always_inline\)\) static inline\r?\n'
-                          r'(?=\S[^\n]*\b' + re.escape(mangled) + r'\s*\()', '', csrc)
+                          r'(?=\S[^\n]*\b' + re.escape(inner) + r'\s*\()', '', csrc)
             if info2.get('io'):
                 # A clone that prints writes through the typed unit's own stdio while the boxed
                 # program buffers its output separately, so the two interleave out of order; and
@@ -6174,8 +6264,24 @@ class Compiler(boxclosure.ClosureMixin):
                 # `_call_mix_guarded`), which would say a message twice. A function that can
                 # print()/assert stays boxed.
                 continue
-            sig_text = _mix_extract_signature(csrc, mangled)
-            if sig_text is None or not _mix_validate_signature(sig_text, mangled, params, ret):
+            inner_sig = _mix_extract_signature(csrc, inner)
+            if inner_sig is None:
+                continue
+            if tagged and not _tag_error and 'ail_tint' not in inner_sig:
+                # The tagged attempt reported success but still emitted an int64-only clone: its
+                # local arithmetic (a local the proof cannot bound) would stop on overflow rather
+                # than reach the exact boxed body. Keep this function general.
+                continue
+            overflow = None
+            if integer_ret:
+                overflow = mangled + '__mix_overflow'
+                wrapper, sig_text = _mix_wrap_integer_clone(mangled, inner, inner_sig, params, overflow)
+                if wrapper is None:
+                    continue
+                csrc += wrapper
+            else:
+                sig_text = inner_sig
+            if not _mix_validate_signature(sig_text, mangled, params, ret):
                 continue
             csrc = _mix_drain_before_exit(csrc)
             if csrc is None:
@@ -6184,6 +6290,8 @@ class Compiler(boxclosure.ClosureMixin):
                 'mangled': mangled, 'params': params, 'ret': ret,
                 'is_bool_ret': bool(cand.get('is_bool_ret')), 'sig': sig_text,
             }
+            if overflow is not None:
+                self.mix_typed[name]['overflow'] = overflow
             self.mix_units.append((mangled, name, '/* AIL_MIXED_TYPED: %s */\n' % name + csrc))
 
     def _call_mix_guarded(self, name, mix, argcs, ctx):
@@ -6257,7 +6365,17 @@ class Compiler(boxclosure.ClosureMixin):
         else:
             r = ctx.new_cvar('mixr')
             rtype = 'double' if mix['ret'] == pymix.FLOAT else 'int64_t'
+            if mix.get('overflow'):
+                # The exact (tagged) clone result did not fit int64: the wrapper sets this flag
+                # instead of wrapping or stopping, and the boxed body below produces the exact
+                # big-int answer (or any other value the clone's hypothesis cannot represent).
+                ctx.emit('%s = 0;' % mix['overflow'])
             ctx.emit('%s %s = %s(%s);' % (rtype, r, mix['mangled'], call_args))
+            fallback = mix.get('overflow') and mix['ret'] in (pymix.INT, pymix.BOOL)
+            if fallback:
+                ctx.emit('if (%s) %s = 0;' % (mix['overflow'], ok))
+                ctx.emit('if (%s) {' % ok)
+                ctx.indent += 1
             if mix['ret'] == pymix.FLOAT:
                 # C118/C119: a NaN is found in a container by its identity, and a result boxed afresh is never
                 # the object the boxed body would have handed back (`def ident(p): return p`): a NaN result
@@ -6276,6 +6394,14 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.emit('%s = ail_mix_box_bool((int)%s);' % (t, r))
             else:
                 ctx.emit('%s = ail_mix_box_int(%s);' % (t, r))
+            if fallback:
+                ctx.indent -= 1
+                ctx.emit('} else {')
+                ctx.indent += 1
+                ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t, ''.join(', ' + a for a in argcs)))
+                ctx.check()
+                ctx.indent -= 1
+                ctx.emit('}')
         ctx.indent -= 1
         ctx.emit('} else {')
         ctx.indent += 1

@@ -34914,7 +34914,8 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         return True
     GLOBAL_INT_TINT = _global_int_tint_ok()
     global TINT_DISABLED
-    TINT_DISABLED = bool(info is not None and info.get('_mixed_clone'))
+    TINT_DISABLED = bool(info is not None and info.get('_mixed_clone')
+                         and not info.get('_mixed_tagged'))
     _io_names = {'open', 'write_text', 'write_bytes', 'read_text', 'read_bytes', 'file_chunks'}
 
     def _param_arith(fn, name):
