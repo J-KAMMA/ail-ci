@@ -157,7 +157,10 @@ def _check_constant_out_of_range(node, parents, maxsplit, skip_assignment):
     root = node
     while True:
         parent = parents.get(root)
-        if parent is None or _const_expr_int(parent, bounded=False) is None:
+        if parent is None:
+            break
+        current = _const_expr_int(parent, bounded=False)
+        if current is None or current.bit_length() > 4096:
             break
         root = parent
     full = _const_expr_int(root, bounded=False)

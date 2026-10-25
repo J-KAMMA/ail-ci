@@ -1,3 +1,14 @@
+## 2026-10-25 - constant shift pair (job-pre201-review)
+
+The pre201 shift fix let an in-range shift hide an out-of-range power: a whole-expression fold
+through `>>` suppressed the refusal of `((10 ** 64) ** 64) >> 100001`, which then compiled and
+stopped at run time with `integer overflow`.  The constant-check climb now stops at a parent whose
+value is larger than the code generator's 4096-bit constant-fold limit, so the inner `10 ** 64`
+power is refused by name (exit 2, both builds), as it was before the shift folding.  A power whose
+intermediate the code generator can fold (`10 ** 64 >> 100000`, `(1 << 64) >> 64`) still folds to
+its in-range result, and the pre113 boundaries are unchanged.  `test_ail_pre201.py` covers both
+`>> 100001` and `>> 100000`.
+
 ## 2026-10-25 - constant shifts outside int64 (job-pre201-10252052)
 
 The first still-differing item from the pre191 review was the constant bool shift `True << 64`: both

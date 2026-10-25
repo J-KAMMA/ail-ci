@@ -4,8 +4,10 @@ CPython's ints are unbounded, so ``True << 64`` prints a bignum and an in-range 
 such as ``(1 << 64) >> 64`` prints 1.  AIL integers are fixed width: a constant shift whose
 value leaves int64 used to compile and then stop with ``integer overflow``.  The front end now
 refuses the outermost constant expression by name when its final value does not fit, on both
-builds.  Shifts whose final value fits (even when an intermediate leaves int64), zero shifts
-by any count, and negative counts keep their CPython behaviour.
+builds.  Shifts whose final value fits (even when an intermediate leaves int64) keep their
+CPython behaviour when the code generator can fold that intermediate; a larger one is refused,
+so an in-range shift cannot hide an out-of-range power.  Zero shifts by any count and negative
+counts are unchanged.
 """
 import os
 import subprocess
@@ -42,6 +44,10 @@ print(C.x)
     'assignment': '''X = True << 64
 print(X)
 ''',
+    'nested_power_under_shift': '''print(((10 ** 64) ** 64) >> 100001)
+''',
+    'nested_power_under_shift_100000': '''print(((10 ** 64) ** 64) >> 100000)
+''',
 }
 
 IN_RANGE = '''print(True << 0)
@@ -54,6 +60,7 @@ print(True >> 64)
 print(False >> 64)
 print((1 << 64) >> 64)
 print(1 << 64 >> 64)
+print((10 ** 64) >> 100000)
 print((1 << 63) - 1)
 print(2 ** 62 << 1 >> 1)
 try:
