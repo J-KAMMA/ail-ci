@@ -1170,9 +1170,18 @@ def _is_literal_default(d):
 
 
 def _is_mutable_literal_default(d):
-    """A literal default that builds a list, dict, set or bytearray (also inside a tuple).  A
-    nested def's defaults are filled in at each call site, so such a value would be a fresh
-    object per call; CPython evaluates it once, when the def runs."""
+    """A default expression that builds a list, dict, set or bytearray (also inside a tuple).
+    A nested def's defaults are filled in at each call site, so such a value would be a fresh
+    object per call; CPython evaluates it once, when the def runs.  A bytearray has no literal
+    form, so its construction call is recognised directly."""
+    if isinstance(d, ast.Call) and isinstance(d.func, ast.Name) and d.func.id == 'bytearray':
+        return True
+    if isinstance(d, (ast.Tuple, ast.List, ast.Set)):
+        if any(_is_mutable_literal_default(x) for x in d.elts):
+            return True
+    if isinstance(d, ast.Dict):
+        if any(_is_mutable_literal_default(v) for v in d.values if v is not None):
+            return True
     try:
         value = ast.literal_eval(d)
     except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
@@ -3329,7 +3338,7 @@ class Compiler(boxclosure.ClosureMixin):
         # A mutable literal would be a fresh object at each call, so it is refused by name instead.
         if any(_is_mutable_literal_default(d) for d in node.args.defaults + node.args.kw_defaults):
             raise Unsupported('a nested def %s with a mutable literal default (a mutable default: '
-                              'list/dict/set); CPython shares one default object between calls'
+                              'list/dict/set/bytearray); CPython shares one default object between calls'
                               % node.name)
         if node.args.kwarg or node.args.posonlyargs or not all(constant(d) for d in node.args.defaults) \
                 or not all(d is None or constant(d) for d in node.args.kw_defaults):

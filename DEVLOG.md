@@ -1,3 +1,18 @@
+## 2026-10-25 - bytearray default of a nested def is named (job-pre209-10252258)
+
+The first still-differing item from the rbrbfuzz94 review was the generic refusal for a nested
+`def` with a `bytearray(...)` default.  `_is_mutable_literal_default` used `ast.literal_eval`,
+which cannot see a construction call, so the helper's bytearray branch was dead and the review's
+`bytearray()` case fell through to "a nested def f with *args/**kwargs/keyword-only/default
+parameters".  The helper now also recognises a `bytearray(...)` call, including inside a
+tuple/list/set/dict display, and the refusal names `list/dict/set/bytearray`.  This is a
+compile-time named refusal on both builds, not a new runtime path.
+
+`test_ail_pre209.py` covers empty/bytes-arg/size/negative-size/list-arg bytearray defaults, a
+tuple/list/dict holding one, an outer value and a keyword-only default, plus the deeper-nested
+keyword-call refusal and matching module-level, returned, doubly-nested, loop-built, lambda and
+immutable defaults.  Probes in `/tmp/probes/pre209` match CPython or are refused by name on both
+builds.
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
