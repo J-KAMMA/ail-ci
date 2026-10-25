@@ -1,3 +1,19 @@
+## 2026-10-25 - pre183: builtin-function tuple members name their class (job-pre183-10251542)
+
+The pre-existing fuzz43 finding still left on this tree was the startswith/endswith tuple-member
+type name for a builtin function: `"abc".startswith((len,))` caught
+`tuple for startswith must only contain str, not function` on both builds, where CPython prints
+`not builtin_function_or_method` (a user-defined function still prints `not function`). The
+general path lowers a builtin used as a value to a small generated lambda, so it looked like an
+ordinary function at run time. That synthetic lambda now marks its FUNC object as a builtin, and
+the runtime type-name helper uses the mark. Error-only branch; no hot-path change.
+
+Probes in `/tmp/probes` (`pre183_*`) covered the literal tuple, startswith and endswith, a
+variable, an argument, a list item, a dict value, an attribute, the scalar form, short-circuiting
+before the bad member, an invalid window, empty tuples, a user-defined function, lambdas and
+other builtins (`abs`, `ord`, `repr`), on both `cmp.sh` builds; all match CPython.
+`test_ail_pre183.py` keeps the cases.
+
 ## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
 
 The first still-differing item from the task's list was the encoding-name normalization: `b"abc".decode("utf\t8")`,

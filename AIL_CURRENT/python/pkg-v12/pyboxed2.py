@@ -4450,6 +4450,7 @@ class Compiler(boxclosure.ClosureMixin):
                                  body=ast.Call(func=ast.Name(id=node.id, ctx=ast.Load()),
                                                args=[ast.Name(id=n, ctx=ast.Load()) for n in names], keywords=[]))
                 ast.fix_missing_locations(ast.copy_location(lam, node))
+                lam._ail_builtin_fn = True
                 return self.expr(lam, ctx)
             raise Unsupported("name '%s' is not defined" % node.id)
         if (not is_global and node.id in ctx.slot_of and node.id not in ctx.ptr_names and node.id not in ctx.clo_index

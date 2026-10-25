@@ -1,3 +1,11 @@
+## 2026-10-25 -- pre183: builtin-function tuple members name their class (job-pre183-10251542)
+
+A builtin function value in a tuple passed to `str.startswith`/`str.endswith` was named
+`function` in the caught TypeError, where CPython names `builtin_function_or_method` (a
+user-defined function stays `function`). The general path lowers a builtin used as a value to a
+generated lambda, so the lambda's FUNC object now carries a `builtin_fn` flag and `ail__tname_c`
+uses it.  `test_ail_pre183.py` keeps the literal, indirect and scalar cases on both builds.
+
 # DEVLOG
 
 ## 2026-10-24 -- bytes.count memmem: self-contained declaration (job-perf7-10240917)

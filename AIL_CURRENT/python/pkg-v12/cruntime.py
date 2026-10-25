@@ -14126,7 +14126,7 @@ typedef struct { ail_gcobj hdr; ail_obj val; } ail_cellobj;
    ail_obj array precisely so closures over locals participate in GC like everything else). */
 typedef ail_st (*ail_cfunc1)(ail_ctx *cx, ail_obj *out, ail_obj arg, void *closure);
 
-typedef struct { ail_gcobj hdr; ail_cfunc1 fn; ail_obj *cells; uint16_t n_cells; const char *name; } ail_funcobj;
+typedef struct { ail_gcobj hdr; ail_cfunc1 fn; ail_obj *cells; uint16_t n_cells; uint8_t builtin_fn; const char *name; } ail_funcobj;
 typedef struct { ail_gcobj hdr; ail_obj func, self; } ail_boundobj;
 
 /* Iterator kinds -- one shared struct + a `kind` switch in ail_next, rather than a
@@ -14638,6 +14638,7 @@ static int ail__cnt_cmp_desc(const void *pa, const void *pb) {
     return c ? c : (ia < ib ? -1 : ia > ib);
 }
 static inline const char *ail__tname_c(ail_obj x) {
+    if (x.tag == AIL_T_FUNC && ((ail_funcobj *)x.o)->builtin_fn) return "builtin_function_or_method";
     if (x.tag == AIL_T_INST && ((ail_instobj *)x.o)->cls.tag == AIL_T_CLASS) {      /* an instance names its class (bytes, ...) */
         static char *tnb;
         static size_t tnb_cap;
