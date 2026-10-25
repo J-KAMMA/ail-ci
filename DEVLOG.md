@@ -120,6 +120,20 @@ DIFFERENCES (`C?-job-pre181-10251538-2`) and not touched here. Added `test_ail_p
 programs, two builds each, 20s). Required modules on the final commit: test_ail_pre181,
 test_ail_pre179, test_ail_fuzz56, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3
 all pass (6 modules, 371s, `-j 2`).
+## 2026-10-25 - re-apply pre137: negative r in the itertools choosers (job-rbpre137-10251548)
+
+Re-applied the accepted pre137 change on the current tree. `permutations`, `combinations` and
+`combinations_with_replacement` with `r < 0` returned `[]` on the general path; CPython raises
+`ValueError: r must be non-negative`. The shared chooser runtime now raises that catchable error
+after the pool is materialized, so a non-iterable argument still raises TypeError first, as in
+CPython. Coverage: `r` reaching the call as a literal, a local, an argument, a list item, an
+attribute and a dict value, plus r = 0, r > n, an empty pool and booleans. Added
+`AIL_CURRENT/test_ail_pre137.py` and registered it in `ail_check.MODULES`. Other observed, not
+fixed (identical on the base): a float, str or explicit None `r` still disagrees with CPython
+(`permutations(xs, 1.5)` prints `[]` instead of TypeError, `combinations_with_replacement(xs, None)`
+prints `[()]`), and explicit `permutations(xs, None)` is treated as 0 instead of the omitted
+default. The default build also cannot compile a top-level `print(list(itertools.permutations(...)))`
+(a pre-existing typed-list error, the same with a non-negative `r`).
 
 ## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
 

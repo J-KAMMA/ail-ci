@@ -20275,6 +20275,11 @@ static inline ail_st ail_it_product_repeat(ail_ctx *cx, ail_obj *out, ail_obj a,
     AIL_FRAME_LEAVE(cx, fr);
     return ail_iter(cx, out, res);
 }
+/* CPython rejects a negative r for these three choosers. The pool is materialized first, so a
+   non-iterable input still raises TypeError before the range check, exactly as CPython does. */
+static inline ail_st ail__it_reject_negative_r(ail_ctx *cx) {
+    return ail_raise_c(cx, AIL_B_VALUEERROR, "r must be non-negative");
+}
 static inline ail_st ail_it_permutations(ail_ctx *cx, ail_obj *out, ail_obj iterable, int has_r, int64_t r) {
     ail_obj pr_[2]; pr_[1] = ail_box_none();
     ail_st st = ail__materialize(cx, &pr_[0], iterable); if (st != AIL_OK) return st;
@@ -20282,7 +20287,8 @@ static inline ail_st ail_it_permutations(ail_ctx *cx, ail_obj *out, ail_obj iter
     ail_vecobj *pool = (ail_vecobj *)pr_[0].o;
     int64_t n = pool->n; int64_t rr = has_r ? r : n;
     pr_[1] = ail_list_new(cx); ail_obj res = pr_[1];
-    if (rr < 0 || rr > n) { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
+    if (rr < 0) { AIL_FRAME_LEAVE(cx, fr); return ail__it_reject_negative_r(cx); }
+    if (rr > n) { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
     int64_t *indices = (int64_t *)ail_xmalloc((size_t)(n > 0 ? n : 1) * sizeof(int64_t));
     int64_t *cycles = (int64_t *)ail_xmalloc((size_t)(rr > 0 ? rr : 1) * sizeof(int64_t));
     for (int64_t i = 0; i < n; i++) indices[i] = i;
@@ -20320,7 +20326,8 @@ static inline ail_st ail_it_combinations(ail_ctx *cx, ail_obj *out, ail_obj iter
     ail_vecobj *pool = (ail_vecobj *)pr_[0].o;
     int64_t n = pool->n;
     pr_[1] = ail_list_new(cx); ail_obj res = pr_[1];
-    if (r < 0 || r > n) { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
+    if (r < 0) { AIL_FRAME_LEAVE(cx, fr); return ail__it_reject_negative_r(cx); }
+    if (r > n) { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
     int64_t *indices = (int64_t *)ail_xmalloc((size_t)(r > 0 ? r : 1) * sizeof(int64_t));
     for (int64_t i = 0; i < r; i++) indices[i] = i;
     { ail_obj *row = (ail_obj *)ail_xmalloc((size_t)(r > 0 ? r : 1) * sizeof(ail_obj));
@@ -20346,8 +20353,8 @@ static inline ail_st ail_it_combinations_wr(ail_ctx *cx, ail_obj *out, ail_obj i
     ail_vecobj *pool = (ail_vecobj *)pr_[0].o;
     int64_t n = pool->n;
     pr_[1] = ail_list_new(cx); ail_obj res = pr_[1];
+    if (r < 0) { AIL_FRAME_LEAVE(cx, fr); return ail__it_reject_negative_r(cx); }
     if (n == 0 && r > 0) { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
-    if (r < 0) { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
     int64_t *indices = (int64_t *)ail_xmalloc((size_t)(r > 0 ? r : 1) * sizeof(int64_t));
     for (int64_t i = 0; i < r; i++) indices[i] = 0;
     { ail_obj *row = (ail_obj *)ail_xmalloc((size_t)(r > 0 ? r : 1) * sizeof(ail_obj));
