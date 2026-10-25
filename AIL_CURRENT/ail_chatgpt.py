@@ -1001,6 +1001,8 @@ def _source_check(args):
         if position is not None:
             path, line, column = position
             location_kind = 'source_statement'
+        if line is not None:
+            location_kind = getattr(error, 'source_location_kind', location_kind)
         code = getattr(error, 'diagnostic_code', code)
         report.update(stage=stage, diagnostics=[dict(code=code, message=message,
                                                     path=path, line=line, column=column, function=function,

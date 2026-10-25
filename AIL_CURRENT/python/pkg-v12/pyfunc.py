@@ -13068,13 +13068,16 @@ def _expr(node, ctx):
         #   * refusing at COMPILE time is the honest outcome here rather than a run-time trap: the
         #     value is known now, so there is nothing to wait for.
         if not (-(1 << 63) <= node.value <= (1 << 63) - 1):
-            raise Unsupported(
+            refusal = Unsupported(
                 'the integer literal %d does not fit in a 64-bit signed integer, and an integer '
                 'here is one (SEMANTICS section 1). CPython computes it exactly, because its int '
                 'is unbounded; this compiler would have to wrap it, which is a different answer. '
                 'A negative INT64_MIN spelling is handled by the unary branch; a positive '
                 '9223372036854775808 remains out of range'
                 % node.value)
+            if os.environ.get('AIL_SURFACE') != 'python':
+                refusal.source_location_kind = 'source'
+            raise refusal
         return _c_int_literal(node.value)
     if isinstance(node, ast.Subscript):
         if (not isinstance(node.slice, ast.Slice) and not isinstance(node.value, ast.Name)
