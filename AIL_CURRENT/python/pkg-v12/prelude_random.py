@@ -229,7 +229,7 @@ class Random:
             self.has_gauss = True
         return mu + z * sigma
 
-    def expovariate(self, lambd: float) -> float:
+    def expovariate(self, lambd: float = 1.0) -> float:
         return -math.log(1.0 - self.random()) / lambd
 
     def triangular(self, low: float = 0.0, high: float = 1.0, mode=None) -> float:
