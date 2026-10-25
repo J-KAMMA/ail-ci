@@ -780,12 +780,26 @@ def _class_body_expressions(statement):
 
 
 def _class_route_arithmetic(value):
-    for node in ast.walk(value):
-        if isinstance(node, (ast.BinOp, ast.UnaryOp)):
-            if any(isinstance(inner, (ast.Subscript, ast.Attribute))
-                   and isinstance(inner.ctx, ast.Load) for inner in ast.walk(node)):
-                return True
-    return False
+    def routed(node):
+        if isinstance(node, ast.Lambda):
+            return False
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            # The callee (including its receiver) is not a data operand: the
+            # arithmetic applies to the call's result, not to the attribute.
+            return (any(routed(arg) for arg in node.args)
+                    or any(routed(keyword.value) for keyword in node.keywords))
+        if isinstance(node, (ast.Subscript, ast.Attribute)) and isinstance(node.ctx, ast.Load):
+            return True
+        return any(routed(child) for child in ast.iter_child_nodes(node))
+
+    def scan(node):
+        if isinstance(node, ast.Lambda):
+            return False
+        if isinstance(node, (ast.BinOp, ast.UnaryOp)) and routed(node):
+            return True
+        return any(scan(child) for child in ast.iter_child_nodes(node))
+
+    return scan(value)
 
 
 def fold_constants(text):

@@ -1,3 +1,16 @@
+## 2026-10-25 - pre255 fix: prune deferred lambdas and call attributes from the class-route scan (job-pre255-10260535)
+
+The review found the class-route scan over-broad: a deferred lambda body (`handlers = [lambda xs:
+xs[0] * 4]`, also as a dict value) and a method attribute (`X = "abc".upper() * 2`) were refused
+although both builds and CPython accept them.  `_class_route_arithmetic` now walks the expression
+itself, prunes `Lambda` subtrees, and treats a call's `Attribute` callee (including its receiver)
+as the callee rather than a data operand, while still scanning the call's arguments.  The
+list/dict/attribute route refusals are unchanged.  Probes `/tmp/probes/pre255_lambda_list.py`,
+`pre255_lambda_dict.py`, `pre255_str_method.py`, `pre255_call_attr_receiver.py` and
+`pre255_list_receiver_method.py` match CPython on both builds; the route, in-range, negative,
+empty, nested-class and builtin-call-argument probes are still refused by name.
+`test_ail_pre255.py` now covers the deferred-lambda and method-attribute forms.
+
 ## 2026-10-25 - pre255: class constant routes through a list item, attribute or dict value (job-pre255-10260535)
 
 The first item the pre227 review listed as already present before that job was the class-level

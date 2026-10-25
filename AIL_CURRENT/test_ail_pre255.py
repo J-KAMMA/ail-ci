@@ -70,9 +70,19 @@ class Method:
         return values[0] * 4
 
 
+class Deferred:
+    handlers = [lambda values: values[0] * 4]
+    table = {"f": lambda values: values[0] * 4}
+    doubled = "abc".upper() * 2
+    list_method = ["xyz"][0].upper() * 2
+
+
 print(Plain.X, Plain.Y)
 print(xs[0] * 2 - 1)
 print(Method().read([1]))
+print(Deferred.handlers[0]([2]))
+print(Deferred.table["f"]([2]))
+print(Deferred.doubled, Deferred.list_method)
 '''
 
 MESSAGE = 'class-level constant built through a list item, attribute or dict value'
