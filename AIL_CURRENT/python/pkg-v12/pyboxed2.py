@@ -594,8 +594,23 @@ static int ail__str_is_cstr(ail_str s, const char *c) {
     return 1;
 }
 static const char *ail__iter_type_name(ail_iterobj *it) {
+    if (it->name_kind == 1) return "bytes_iterator";
+    if (it->name_kind == 2) return "bytearray_iterator";
+    if (it->name_kind == 3) return "_deque_iterator";
+    if (it->name_kind == 4) return "_deque_reverse_iterator";
     switch (it->kind) {
-        case AIL_IT_LIST: return "list_iterator";
+        case AIL_IT_STR: {
+            ail_str s = ail_view_to_str(it->target);
+            for (int64_t i = 0; i < s.n; i++) if (ail_chr(s, i) & 0x80) return "str_iterator";
+            return "str_ascii_iterator";
+        }
+        case AIL_IT_LIST: {
+            if (it->target.tag == AIL_T_LIST && ((ail_gcobj *)it->target.o)->aux) {
+                uint8_t aux = ((ail_gcobj *)it->target.o)->aux;
+                return aux == 1 ? "dict_keyiterator" : aux == 2 ? "dict_valueiterator" : "dict_itemiterator";
+            }
+            return "list_iterator";
+        }
         case AIL_IT_TUPLE: return "tuple_iterator";
         case AIL_IT_DICT_KEYS: return "dict_keyiterator";
         case AIL_IT_DICT_VALUES: return "dict_valueiterator";
@@ -625,19 +640,40 @@ static const char *ail__iter_type_name(ail_iterobj *it) {
         default: return "iterator";
     }
 }
+/* CPython's tp_name, which its error texts use: C types carry their module prefix
+   (`itertools.accumulate`, `collections._deque_iterator`) while Python-level classes do not. */
+static const char *ail__iter_tp_name(ail_iterobj *it) {
+    switch (it->kind) {
+        case AIL_LIT_CHAIN: return "itertools.chain";
+        case AIL_LIT_ISLICE: return "itertools.islice";
+        case AIL_LIT_COUNT: return "itertools.count";
+        case AIL_LIT_CYCLE: return "itertools.cycle";
+        case AIL_LIT_REPEAT: return "itertools.repeat";
+        case AIL_LIT_ACCUMULATE: return "itertools.accumulate";
+        case AIL_LIT_ZIP_LONGEST: return "itertools.zip_longest";
+        case AIL_LIT_TAKEWHILE: return "itertools.takewhile";
+        case AIL_LIT_DROPWHILE: return "itertools.dropwhile";
+        case AIL_LIT_PAIRWISE: return "itertools.pairwise";
+        case AIL_LIT_STARMAP: return "itertools.starmap";
+        case AIL_LIT_GROUPBY: return "itertools.groupby";
+        case AIL_LIT_GROUPBY_INNER: return "itertools._grouper";
+        default: break;
+    }
+    if (it->name_kind == 3) return "collections._deque_iterator";
+    if (it->name_kind == 4) return "collections._deque_reverse_iterator";
+    return ail__iter_type_name(it);
+}
+static const char *ail__tpname_c(ail_obj x) {
+    if (x.tag == AIL_T_ITER) return ail__iter_tp_name((ail_iterobj *)x.o);
+    if (x.tag == AIL_T_INST && ((ail_instobj *)x.o)->cls.tag == AIL_T_CLASS) {
+        ail_obj nm = ((ail_classobj *)((ail_instobj *)x.o)->cls.o)->name;
+        if (ail__str_is_cstr(ail_view_to_str(nm), "_AilNotImplementedType")) return "NotImplementedType";
+    }
+    return ail__tname_c(x);
+}
 static inline ail_st ail_type_name_of(ail_ctx *cx, ail_obj *out, ail_obj x) {
     if (x.tag == AIL_T_ITER) {
-        ail_iterobj *it = (ail_iterobj *)x.o;
-        if (it->name_kind == 1) { *out = ail_str_from_cstr(cx, "bytes_iterator"); return AIL_OK; }
-        if (it->name_kind == 2) { *out = ail_str_from_cstr(cx, "bytearray_iterator"); return AIL_OK; }
-        if (it->kind == AIL_IT_STR) {
-            ail_str s = ail_view_to_str(it->target);
-            int ascii = 1;
-            for (int64_t i = 0; i < s.n; i++) if (ail_chr(s, i) & 0x80) { ascii = 0; break; }
-            *out = ail_str_from_cstr(cx, ascii ? "str_ascii_iterator" : "str_iterator");
-            return AIL_OK;
-        }
-        *out = ail_str_from_cstr(cx, ail__iter_type_name(it));
+        *out = ail_str_from_cstr(cx, ail__iter_type_name((ail_iterobj *)x.o));
         return AIL_OK;
     }
     if (x.tag == AIL_T_INST || x.tag == AIL_T_EXC) {
@@ -3790,13 +3826,6 @@ class Compiler(boxclosure.ClosureMixin):
             t = ctx.tmp()
             ctx.emit('%s = ail2_stdin_lines(cx);' % t)
             return t
-        if self.infer_kind(node, ctx) == 'deque':
-            # a deque's runtime tag is AIL_T_LIST for its 2-element WRAPPER, not its data --
-            # ail_deque_data(d) unwraps to the actual element list before ail_iter sees it.
-            v = self.expr(node, ctx)
-            t = ctx.tmp()
-            ctx.emit('%s = ail_deque_data(%s);' % (t, v))
-            return t
         if self._is_dict_view_call(node, ctx):
             # CPython's `d.items()` / `.keys()` / `.values()` are live views: a loop over one raises
             # RuntimeError when the dict changes size. The method call below returns a snapshot list,
@@ -6408,6 +6437,8 @@ class Compiler(boxclosure.ClosureMixin):
         if kwargs or (count is not None and len(args) != count):
             raise Unsupported('%s takes %d positional arguments' % (name, count))
         self.rt_needs.add(frag)
+        if name == '_ail_b_tpname':
+            self.needs_type_name = True
         argcs = [self.expr(a, ctx) for a in args]
         t = ctx.tmp()
         fields = {'t': t, 'arr': '(ail_obj[]){%s}' % ', '.join(argcs) if argcs else 'NULL', 'n': len(argcs)}

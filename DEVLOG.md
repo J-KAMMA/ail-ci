@@ -1,3 +1,23 @@
+## 2026-10-25 - iterator type names: deque views and tp_name errors (job-pre198-10252040)
+
+The pre182 review found two defects in the first fillchar-name fix.  Deque and dict-view
+iterators had been given the names of the list they wrap: `iter(deque(...))` and
+`reversed(deque(...))` said `list_iterator`/`list_reverseiterator`, and `iter(d.keys())`
+and the loop routes said `list_iterator` (CPython: `_deque_iterator`,
+`_deque_reverse_iterator`, `dict_keyiterator`/`dict_valueiterator`/`dict_itemiterator`).
+`ail_iter` now marks a deque iterator and `ail_iter_reversed` walks the deque's data (its
+values were also reversed wrong before), the compiler no longer unwraps a deque before
+`ail_iter`, and the list case reads a dict view's `aux`.  The fillchar error text also used
+`type().__name__`; CPython uses the type's tp_name, so C types keep their module prefix
+(`itertools.accumulate`, `itertools.zip_longest`, `itertools.starmap`, `collections.deque`,
+`collections._deque_iterator`).  A new `_ail_b_tpname` primitive supplies that name while
+`type(x).__name__` stays unqualified.
+
+`test_ail_pre198.py` now also covers deque and dict-view iterators (direct, argument, list
+item, attribute, dict value, empty, reversed) and the qualified itertools fillchar errors.
+Probes in `/tmp/probes` (`p198_deque.py`, `p198_views.py`, `p198_it5.py`,
+`p198_groupby.py`, `p198_tpmore.py`, `p198_dequeops.py`, `p198_testprog.py`, plus the
+earlier `p_pre198_*`) match CPython on both builds.
 ## 2026-10-25 - iterator and NotImplemented fillchar type names (job-pre198-10252040)
 
 The first still-differing pre-existing item from the pre182 review was the fillchar type name.

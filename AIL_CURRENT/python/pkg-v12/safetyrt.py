@@ -420,6 +420,12 @@ static inline ail_st ail2b_iter(ail_ctx *cx, ail_obj *out, ail_obj so, ail_obj n
         ((ail_iterobj *)out->o)->name_kind = (uint8_t)name_kind.i;
     return st;
 }
+/* CPython's tp_name for error texts (bytes.ljust's fillchar check): module-qualified for
+   extension types, unlike type(x).__name__ */
+static inline ail_st ail2b_tpname(ail_ctx *cx, ail_obj *out, ail_obj x) {
+    *out = ail_str_from_cstr(cx, ail__tpname_c(x));
+    return AIL_OK;
+}
 /* repr(b) without the leading b: CPython's quoting */
 static inline ail_st ail2b_repr(ail_ctx *cx, ail_obj *out, ail_obj so) {
     ail_st st = ail2b_need(cx, so); if (st != AIL_OK) return st;
@@ -2253,6 +2259,7 @@ PRIMS = {
     '_ail_b_from_ints': ('ail2b_from_ints(cx, &{t}, {a0})', 1, 'bytes'),
     '_ail_b_ints': ('ail2b_ints(cx, &{t}, {a0})', 1, 'bytes'),
     '_ail_b_iter': ('ail2b_iter(cx, &{t}, {a0}, {a1})', 2, 'bytes'),
+    '_ail_b_tpname': ('ail2b_tpname(cx, &{t}, {a0})', 1, 'bytes'),
     '_ail_b_index': ('ail2b_index(cx, &{t}, {a0})', 1, 'bytes'),
     '_ail_b_repr': ('ail2b_repr(cx, &{t}, {a0})', 1, 'bytes'),
     '_ail_b_case': ('ail2b_case(cx, &{t}, {a0}, {a1})', 2, 'bytes'),

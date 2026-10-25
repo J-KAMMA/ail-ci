@@ -15886,11 +15886,13 @@ static inline ail_st ail__iter_inst(ail_ctx *cx, ail_obj *out, ail_obj obj) {
 static inline ail_st ail_iter(ail_ctx *cx, ail_obj *out, ail_obj obj) {
     if (obj.tag == AIL_T_ITER) { *out = obj; return AIL_OK; }
     if (obj.tag == AIL_T_INST) return ail__iter_inst(cx, out, obj);
-    if (obj.tag == AIL_T_LIST && __builtin_expect(((ail_gcobj *)obj.o)->flags, 0)) obj = ((ail_vecobj *)obj.o)->p[0];   /* a deque: its data */
+    int is_deque = obj.tag == AIL_T_LIST && __builtin_expect(((ail_gcobj *)obj.o)->flags, 0);
+    if (is_deque) obj = ((ail_vecobj *)obj.o)->p[0];   /* a deque: its data */
     AIL_ROOT1(cx, fr, obj); /* obj may be fresh (what __iter__ returned) */
     ail_iterobj *it = (ail_iterobj *)ail_gc_alloc(cx, AIL_K_ITER, sizeof(ail_iterobj));
     AIL_FRAME_LEAVE(cx, fr);
     it->target = obj; it->extra = ail_box_none(); it->idx = 0; it->idx2 = 0;
+    if (is_deque) it->name_kind = 3;
     switch (obj.tag) {
         case AIL_T_LIST: it->kind = AIL_IT_LIST; break;
         case AIL_T_TUPLE: it->kind = AIL_IT_TUPLE; break;
@@ -15942,6 +15944,13 @@ static inline ail_st ail_iter_reversed(ail_ctx *cx, ail_obj *out, ail_obj seq) {
         it->idx = cnt ? ail__range_at(r->start, r->step, cnt - UINT64_C(1)) : 0;
         it->extra = ail_box_int((int64_t)(UINT64_C(0) - (uint64_t)r->step));
         ail_obj res; res.tag = AIL_T_ITER; res.o = (ail_gcobj *)it; *out = res; return AIL_OK;
+    }
+    if (seq.tag == AIL_T_LIST && __builtin_expect(((ail_gcobj *)seq.o)->flags, 0)) {   /* a deque: its data */
+        ail_obj data = ((ail_vecobj *)seq.o)->p[0];
+        n = ((ail_vecobj *)data.o)->n;
+        *out = ail__iter_wrap(cx, AIL_IT_REVERSED, data, ail_box_none(), n - 1);
+        ((ail_iterobj *)out->o)->name_kind = 4;
+        return AIL_OK;
     }
     if (seq.tag == AIL_T_LIST && ((ail_vecobj *)seq.o)->from_generator)
         return ail_raise_c(cx, AIL_B_TYPEERROR, "'generator' object is not reversible");

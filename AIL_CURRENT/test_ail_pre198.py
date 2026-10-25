@@ -1,11 +1,13 @@
 """Pre-198: iterator and NotImplemented fillchar type names.
 
 `bytes.ljust`/`rjust`/`center` name the failing fillchar's type in their TypeError.
-The prelude reads it through `type(fillchar).__name__`, which lowered every iterator
-to `iterator` and the hidden NotImplemented class to `_AilNotImplementedType`.
-CPython names the concrete iterator class (`list_iterator`, `enumerate`, `zip`, ...)
-and `NotImplementedType`.  The program exercises the values directly, through an
-argument, a list item, an attribute and a dict value, on both builds.
+The prelude used `type(fillchar).__name__`, which lowered every iterator to `iterator`
+and the hidden NotImplemented class to `_AilNotImplementedType`.  CPython's message uses
+the type's tp_name: the concrete iterator class (`list_iterator`, `enumerate`, `zip`, ...),
+`NotImplementedType`, and a module-qualified name for C types (`itertools.accumulate`,
+`collections._deque_iterator`).  The program exercises the values directly, through an
+argument, a list item, an attribute and a dict value, on both builds, including deque and
+dict-view iterators.
 """
 import os
 import subprocess
@@ -17,7 +19,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 CLI = str(ROOT / "ail_chatgpt.py")
 
-PROGRAM = r'''class Box:
+PROGRAM = r'''import itertools
+from collections import deque
+
+
+class Box:
     pass
 
 
@@ -38,6 +44,7 @@ def name(value):
 
 def main() -> None:
     h = {1: 2}
+    dq = deque([1, 2])
     items = [
         iter([]),
         iter((1,)),
@@ -47,6 +54,9 @@ def main() -> None:
         iter(h),
         iter(h.values()),
         iter(h.items()),
+        iter(h.keys()),
+        iter(dq),
+        reversed(dq),
         iter({1}),
         iter(range(2)),
         iter(b"abc"),
@@ -66,11 +76,31 @@ def main() -> None:
     for value in items:
         show("name_" + name(value), lambda value=value: name(value))
         show("fill_" + name(value), lambda value=value: fill(value))
+    show("keys_name", lambda: name(iter(h.keys())))
+    show("keys_fill", lambda: fill(iter(h.keys())))
+    show("vals_name", lambda: name(iter(h.values())))
+    show("items_fill", lambda: fill(iter(h.items())))
+    show("dq_arg_name", lambda: name(iter(dq)))
+    show("dq_arg_fill", lambda: fill(iter(dq)))
+    show("dq_rev_name", lambda: name(reversed(dq)))
+    show("dq_rev_fill", lambda: fill(reversed(dq)))
+    show("acc_name", lambda: name(itertools.accumulate([1, 2])))
+    show("acc_fill", lambda: fill(itertools.accumulate([1, 2])))
+    show("zl_name", lambda: name(itertools.zip_longest([1], [2])))
+    show("zl_fill", lambda: fill(itertools.zip_longest([1], [2])))
+    show("sm_name", lambda: name(itertools.starmap(pow, [(1, 2)])))
+    show("sm_fill", lambda: fill(itertools.starmap(pow, [(1, 2)])))
+    for key, grp in itertools.groupby([1, 1, 2]):
+        show("grp_name", lambda grp=grp: name(grp))
+        show("grp_fill", lambda grp=grp: fill(grp))
+        break
     box = Box()
     box.fill = iter([])
+    box.dq = iter(dq)
     d = {}
     d["iter"] = iter([1])
     d["ni"] = NotImplemented
+    d["dq"] = reversed(dq)
     show("arg_iter", lambda: fill(iter([])))
     show("arg_ni", lambda: fill(NotImplemented))
     show("list_iter", lambda: fill(items[0]))
@@ -78,6 +108,10 @@ def main() -> None:
     show("attr_iter", lambda: fill(box.fill))
     show("dict_iter", lambda: fill(d["iter"]))
     show("dict_ni", lambda: fill(d["ni"]))
+    show("attr_dq_name", lambda: name(box.dq))
+    show("attr_dq_fill", lambda: fill(box.dq))
+    show("dict_dq_name", lambda: name(d["dq"]))
+    show("dict_dq_fill", lambda: fill(d["dq"]))
     print("done")
 
 
