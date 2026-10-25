@@ -7210,9 +7210,18 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('permutations() with other than (iterable[, r])')
         r_node = args[1] if len(args) > 1 else kwargs.get('r')
         src = self._resolve_iter_src(args[0], ctx)
-        r = '0' if r_node is None else '(%s).i' % self.expr(r_node, ctx)
+        if r_node is None or (isinstance(r_node, ast.Constant) and r_node.value is None):
+            has_r, r = '0', '0'     # permutations(xs) and permutations(xs, None) alike
+        else:
+            mv = self.expr(r_node, ctx)
+            if isinstance(r_node, ast.Constant):
+                has_r, r = '1', '(%s).i' % mv
+            else:                   # a value known only at run time: None means "all of them"
+                mt = ctx.tmp()
+                ctx.emit('%s = %s;' % (mt, mv))
+                has_r, r = '(%s.tag != AIL_T_NONE)' % mt, '(%s.tag == AIL_T_NONE ? 0 : %s.i)' % (mt, mt)
         t = ctx.tmp()
-        ctx.emit('st = ail_it_permutations(cx, &%s, %s, %d, %s);' % (t, src, 0 if r_node is None else 1, r))
+        ctx.emit('st = ail_it_permutations(cx, &%s, %s, %s, %s);' % (t, src, has_r, r))
         ctx.check()
         return t
 
