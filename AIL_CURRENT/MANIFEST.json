@@ -517,6 +517,7 @@
     "python/pkg-v12/numidentity.py",
     "python/pkg-v12/bigint_core.py",
     "python/pkg-v12/bigint_obj.py",
+    "python/pkg-v12/biggate.py",
     "python/pkg-v12/tint.py",
     "python/pkg-v12/tint_typed.py",
     "python/pkg-v12/bigcap.py",
