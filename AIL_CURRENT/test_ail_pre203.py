@@ -125,6 +125,14 @@ class Pre203Tests(unittest.TestCase):
                     self.assertIn('int64 constant expression out of range', build_err)
                     self.assertNotIn('integer overflow', build_err)
 
+    def test_generic_fold_limit_covers_wide_unary(self):
+        sys.path.insert(0, str(ROOT / 'python/pkg-v12'))
+        try:
+            import pyfunc
+        finally:
+            sys.path.pop(0)
+        self.assertGreaterEqual(pyfunc._CONST_INT_BITS, 8192)
+
 
 if __name__ == '__main__':
     unittest.main()

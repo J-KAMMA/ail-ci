@@ -37694,3 +37694,8 @@ if _QC_MODE != '0':
     _fast_ast.__dict__.update(ast.__dict__)
     _fast_ast.walk = _fast_walk
     ast = _fast_ast
+
+# The integration tree's generic all-constant folder caps intermediates at 4096 bits.  That is
+# below the 5000-bit shift that folds to INT64_MIN here and below pre200's 8192-bit maxsplit
+# limit, so share the larger limit; a value beyond it is still refused by name.
+_CONST_INT_BITS = max(_MAXSPLIT_BITS, 8192)

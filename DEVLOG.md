@@ -1,3 +1,15 @@
+## 2026-10-25 - pre203 suite fix: share the generic constant-fold limit (job-pre203-10252345)
+
+The full-suite gate merged this change onto the current integration tree, which already carries
+the generic all-constant int folder in `python/pkg-v12/pyfunc.py` with a 4096-bit intermediate
+cap.  That cap refused the module/list-item forms and the 5000-bit shift in `test_ail_pre203`
+(`-(1 << 63)`, `-((1 << 5000) >> 4937)`), and it also refused pre200's 4096-bit maxsplit
+intermediates, so `test_ail_pre200` failed too.  `pyfunc.py` now ends with
+`_CONST_INT_BITS = max(_MAXSPLIT_BITS, 8192)`, sharing pre200's 8192-bit limit; values above the
+limit keep their named refusal.  On a temporary copy of the integration tree (`origin/integ`
+59275f1 plus pre200 and this change) `test_ail_pre200` and `test_ail_pre203` pass (5 tests); the
+new invariant test covers the assignment on this branch, where the generic folder is absent.
+
 ## 2026-10-25 - unary INT64_MIN fold without rewriting source text (job-pre203-10252053 review)
 
 The review found two regressions in the previous text-splicing fix.  Replacing every unary constant
