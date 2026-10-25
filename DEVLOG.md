@@ -286,6 +286,21 @@ is kept alongside the new shortcuts. Added `AIL_CURRENT/test_ail_pre190.py`; pro
 cover boundaries, non-int operands, effectful calls, and argument/list-item/attribute/dict routes on
 both builds.
 
+## 2026-10-25 - maxsplit constant through a wider intermediate (reapply, job-rbpre205-10252303)
+
+The first still-differing item from the rbpre121 review was the maxsplit folder's `right >= 64`
+power rule: `"a b c".split(" ", 2**100 // 2**80)` was refused by name on both builds although the
+final value 2**20 fits in int64 and CPython splits normally.  This tree already carries rbpre121's
+follow-up, which bounds the power exactly with `_pow_within_maxsplit_bits` and the existing
+`_MAXSPLIT_BITS` (4096) budget, so the accepted pre205 rule is covered by that stronger fix; both
+sides are kept.  A final value outside int64 (for example `2**100`, `10**30`, `(2**64) // 2 * 2`)
+is still refused with the maxsplit wording.
+
+`test_ail_pre205.py` covers split/rsplit, an explicit and a `None` separator, negative and zero
+limits, the empty string, intermediates built from powers, shifts, sums and products, and values
+reaching the call through an argument, a list item, an attribute and a dict value, on both builds.
+`/tmp/probes/p205_direct.py`, `p205_flows.py`, `p205_types.py` and `p205_features.py` match CPython
+on both builds; `p205_out_of_range.py` is refused by name (CPython raises OverflowError at run time).
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
