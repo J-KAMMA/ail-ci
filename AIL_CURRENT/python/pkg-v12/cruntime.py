@@ -15957,7 +15957,11 @@ static inline ail_st ail_next(ail_ctx *cx, ail_obj *out, ail_obj iterobj) {
         }
         case AIL_IT_ENUMERATE: {
             ail_obj item; ail_st st = ail_next(cx, &item, it->target); if (st != AIL_OK) return st;
-            ail_obj pr[2]; pr[0] = ail_box_int(it->idx++); pr[1] = item;
+            /* AIL ints are 64-bit: the next counter value after INT64_MAX has no representation, so
+               stop by name instead of wrapping to INT64_MIN (CPython uses an arbitrary-precision int). */
+            if (it->idx2) return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "enumerate() index integer overflow");
+            ail_obj pr[2]; pr[0] = ail_box_int(it->idx); pr[1] = item;
+            if (it->idx == INT64_MAX) it->idx2 = 1; else it->idx++;
             *out = ail_tuple_new(cx, pr, 2); return AIL_OK;
         }
         case AIL_IT_ZIP: {
