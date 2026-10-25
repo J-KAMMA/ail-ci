@@ -1,16 +1,6 @@
-**Fix one pre-existing difference from CPython.** A reviewer of job `perf6` recorded these as already present before that job:
+**Your change breaks other tests in the full suite.** On top of the current integration branch, these test modules fail with your change and pass without it: test_ail_pre113 test_ail_pre97 test_ail_typed_tuples.
 
-**No-feature check**: `nofeat.py` compiled to byte-identical `program.c` on HEAD vs base; output identical when linked with the new flag.
-
-**Speed** (`bench/compare.py --app numeric_scale_binary --rounds 16 --base 2ecb2ae`): `ail/c 1.249 [1.242, 1.253] slower`, `ail/base 0.901 [0.892, 0.906] faster`; before was `1.371 [1.360, 1.382]`. ≥3% gain, non-overlapping ranges. Disassembly of `scale` confirms correct 2-wide vectorization with `c.n` induction preserved (no FMA, separate mul).
-
-**Tests** on HEAD: `test_ail_float64_codec`, `test_ail_list_ops`, `test_ail_scalar_list_mutations`, `test_ail_ir_s3`, `test_ail_numeric_bindings`, `test_ail_builtin_syntax_forms`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` — 9 modules, 0 failed. `tools/update_manifest.py --check` passes.
-
-**Claim check**: allocation/store change, codec `ail_alloc_raw`, `-fopenmp-simd`, before/after numbers, byte-identical output, probes and test list — all verified. Only nit: HEAD does now track `bench/results/*` (harness commit `561ac5c`), so the "left uncommitted" sentence no longer matches; harmless.
-
-**Unverified**: wider suite (not allowed); non-x86/big-endian hardware (byteorder only simulated); gdev icount not run — the target app was measured directly instead, and no-feature C is unchanged.
-
-Reproduce the first one that still differs on this tree (`bash ~/tools/cmp.sh` on both builds). Fix that one cause, or refuse the construct by name at compile time. Add the case to a new `test_ail_pre108.py` and run only that module and `test_ail_safetynet`, then commit. If none of them still differs, change nothing and say so.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find what your change broke, and fix it so they pass again while keeping your own fix and its test. If your fix cannot coexist with them, revert it and say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
