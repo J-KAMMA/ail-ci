@@ -50,6 +50,13 @@ class _AilGenCM:
             self.gen.send(exc)
         except StopIteration:
             return True
+        except RuntimeError as e2:
+            # CPython's contextlib re-raises the original value when throw() wrapped a sent
+            # StopIteration in PEP 479's RuntimeError (the runtime keeps that cause identity);
+            # it does not suppress a RuntimeError raised for any other reason.
+            if e2 is exc or (isinstance(exc, StopIteration) and _ail_exc_cause_is(e2, exc)):
+                return False
+            raise
         except Exception as e2:
             if e2 is exc:
                 return False

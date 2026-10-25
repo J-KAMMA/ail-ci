@@ -1078,6 +1078,9 @@ GEN = r'''
    callers waiting for a running one are not on cx->frames, so the collector reaches them through the hook
    below: a suspended generator's frames are marked only when its object is, and a generator nobody can
    reach any more gives its stack back. */
+#ifndef AIL_ATTR_GEN_CAUSE
+#define AIL_ATTR_GEN_CAUSE (-2)   /* hidden: the StopIteration a PEP 479 conversion wrapped */
+#endif
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -1281,8 +1284,19 @@ static inline ail_st ail2g_resume(ail_ctx *cx, ail_obj *out, ail_obj inst, ail_o
     ail2g_free_stack(g);
     if (g->status == AIL_OK) return ail_raise_c(cx, AIL_B_STOPITERATION, "");
     if (g->status == AIL_EXC && ail_exc_matches_b(cx, AIL_B_STOPITERATION)) {
+        /* PEP 479 turns the escaping StopIteration into a RuntimeError whose __cause__ is that object.
+           Keep the cause on the value for contextlib's throw() check; normal attribute reads still
+           refuse the chain (see ail2a_chain_name). */
+        ail_obj cause = ail_exc_as_value(cx);
+        AIL_ROOT1(cx, fr, cause);
         ail_exc_clear(cx);
-        return ail_raise_c(cx, AIL_B_RUNTIMEERROR, "generator raised StopIteration");
+        ail_st st = ail_raise_c(cx, AIL_B_RUNTIMEERROR, "generator raised StopIteration");
+        if (st == AIL_EXC) {
+            ail_obj rt = ail_exc_as_value(cx);
+            ail_inst_setattr(cx, rt, AIL_ATTR_GEN_CAUSE, cause);
+        }
+        AIL_FRAME_LEAVE(cx, fr);
+        return st;
     }
     return g->status;
 }
@@ -1559,12 +1573,27 @@ static inline ail_st ail2d_call(ail_ctx *cx, ail_obj *out, ail_mapobj *m) {
 
 MISC = r'''
 /* ---- small primitives (safetyrt.py MISC) ---- */
+#ifndef AIL_ATTR_GEN_CAUSE
+#define AIL_ATTR_GEN_CAUSE (-2)   /* defined by GEN too; this fragment may be used without it */
+#endif
 /* the two values are instances of one class (a dataclass's __eq__ compares only those) */
 static inline ail_st ail2e_same_class(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
     (void)cx;
     int r = (a.tag == AIL_T_INST || a.tag == AIL_T_EXC) && (b.tag == AIL_T_INST || b.tag == AIL_T_EXC)
             && ((ail_instobj *)a.o)->cls.o == ((ail_instobj *)b.o)->cls.o;
     *out = ail_box_bool(r);
+    return AIL_OK;
+}
+/* whether `raised` carries `cause` as the StopIteration a generator converted (PEP 479); the
+   chain exists only for contextlib's internal throw() check, not for a program's attribute reads */
+static inline ail_st ail2e_cause_is(ail_ctx *cx, ail_obj *out, ail_obj raised, ail_obj cause) {
+    *out = ail_box_bool(0);
+    if ((raised.tag == AIL_T_INST || raised.tag == AIL_T_EXC) &&
+        (cause.tag == AIL_T_INST || cause.tag == AIL_T_EXC)) {
+        ail_instobj *o = (ail_instobj *)raised.o;
+        for (int64_t i = 0; i < o->n; i++)
+            if (o->attrs[i].name_id == AIL_ATTR_GEN_CAUSE) { *out = ail_box_bool(o->attrs[i].val.o == cause.o); break; }
+    }
     return AIL_OK;
 }
 /* the class name of an instance or exception (what `type(e).__name__` is) */
@@ -2183,6 +2212,7 @@ PRIMS = {
     '_ail_stderr_write': ('ail2e_write(cx, &{t}, {a0})', 1, 'misc'),
     '_ail_same_class': ('ail2e_same_class(cx, &{t}, {a0}, {a1})', 2, 'misc'),
     '_ail_exc_name': ('ail2e_exc_name(cx, &{t}, {a0})', 1, 'misc'),
+    '_ail_exc_cause_is': ('ail2e_cause_is(cx, &{t}, {a0}, {a1})', 2, 'misc'),
 }
 PRIMS.update({name: (cfn, count, 'rng') for name, (cfn, count) in randrt.PRIMS.items()})   # random.Random (randrt.py)
 PRIMS.update({name: (cfn, count, 'jsn') for name, (cfn, count) in jsonbrt.PRIMS.items()})   # json's loops (jsonbrt.py)
