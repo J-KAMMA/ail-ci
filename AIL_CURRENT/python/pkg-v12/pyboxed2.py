@@ -233,7 +233,7 @@ EXC_IDS = {
 TYPE_TAG = {
     'int': 'AIL_T_INT', 'float': 'AIL_T_FLOAT', 'str': 'AIL_T_STR', 'bool': 'AIL_T_BOOL',
     'list': 'AIL_T_LIST', 'dict': 'AIL_T_DICT', 'set': 'AIL_T_SET', 'tuple': 'AIL_T_TUPLE',
-    'frozenset': 'AIL_T_FROZENSET',
+    'frozenset': 'AIL_T_FROZENSET', 'range': 'AIL_T_RANGE',
 }
 
 # Methods whose _m_ handlers actually consume keyword arguments. Everything else
@@ -8977,10 +8977,26 @@ class Compiler(boxclosure.ClosureMixin):
                 c.emit('%s = ail_box_int(%s);' % (t, ix))
             return do
 
+        def do_range(c):
+            if len(args) != 1:
+                for a in args[1:]:
+                    c.emit('(void)%s;' % self.expr(a, c))
+                c.uses_st = True
+                c.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "range.index() takes exactly '
+                       'one argument (%d given)"); goto %s;' % (len(args), c.cur_err_target()))
+                return
+            ix = c.new_cvar('ix')
+            c.emit('int64_t %s;' % ix)
+            c.emit('st = ail_meth_range_index(cx, &%s, %s, %s); if (st != AIL_OK) goto %s;' %
+                   (ix, recv, v, c.cur_err_target()))
+            c.uses_st = True
+            c.emit('%s = ail_box_int(%s);' % (t, ix))
+
         self._tag_branch(ctx, recv, kind, {
             'str': mk('ail_meth_str_index', True),
             'list': mk('ail_meth_list_index', False),
             'tuple': mk('ail_meth_tuple_index', False),
+            'range': do_range,
         }, "object has no attribute 'index'", nargs=len(args))
         return t
 
@@ -9000,10 +9016,26 @@ class Compiler(boxclosure.ClosureMixin):
                 c.emit('%s = ail_box_int(%s(%s, %s));' % (t, fn, recv, v))
             return do
 
+        def do_range(c):
+            if len(args) != 1:
+                for a in args[1:]:
+                    c.emit('(void)%s;' % self.expr(a, c))
+                c.uses_st = True
+                c.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "range.count() takes exactly '
+                       'one argument (%d given)"); goto %s;' % (len(args), c.cur_err_target()))
+                return
+            ix = c.new_cvar('ix')
+            c.emit('int64_t %s;' % ix)
+            c.emit('st = ail_meth_range_count(cx, &%s, %s, %s); if (st != AIL_OK) goto %s;' %
+                   (ix, recv, v, c.cur_err_target()))
+            c.uses_st = True
+            c.emit('%s = ail_box_int(%s);' % (t, ix))
+
         self._tag_branch(ctx, recv, kind, {
             'str': do_str,
             'list': mk_vec('ail_meth_list_count'),
             'tuple': mk_vec('ail_meth_tuple_count'),
+            'range': do_range,
         }, "object has no attribute 'count'", nargs=len(args))
         return t
 
