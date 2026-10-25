@@ -277,6 +277,40 @@ evaluation order, on both builds.  Probes: `/tmp/probes/p_intbase_kw.py`,
 `p_intbase_kw_routes.py`, `p_intbase_kw_edge.py`, `p_intbase_range.py`; all match CPython on both
 builds.
 
+## 2026-10-25 - range.index/count equality and int64 result (job-pre216-10252305)
+
+Review of the pre216 feature found two defects.  `range.index`/`range.count` only consulted
+integer arithmetic, so a non-int/float value that compares equal to an element (a user
+`__eq__`, Decimal, Fraction) either raised the generic not-found text or counted 0 where
+CPython searches the range with `==`; the range branches now walk the range and compare with
+`ail_member_eq` for any value that is not int/bool/float, counting every match as CPython's
+generic sequence search does.  An index (or count) above `INT64_MAX` used the uncatchable
+`ail_hit_limit` stop; it now raises a named, catchable `OverflowError`
+(`range.index() index exceeds int64` / `range.count() result exceeds int64`) because AIL ints
+are 64-bit.  Probes `/tmp/probes/p6_eq.py`, `/tmp/probes/p6b_listeq.py`,
+`/tmp/probes/p7_huge.py` and the boundary probes for types, widths, empty, negative-step and
+argument/list/attribute/dict delivery match CPython on both builds except the documented
+above-int64 index, which is the named refusal.  `test_ail_pre216.py` covers the equality walk
+and checks the above-int64 case is caught, not a hard exit.
+## 2026-10-25 - range.index/count (job-pre216-10252305)
+
+The first still-differing item from the memsafe2 review was `range.index()`: the general path's
+method dispatch had branches for str/list/tuple only, so `range(2, 20, 3).index(8)` fell through
+to `AttributeError: 'range' object has no attribute 'index'` on both builds (CPython: 2).  The
+same gap covered `range.count()`.  `pyboxed2` now has a range branch for both methods (and a
+range entry in the method type tags); `cruntime` locates an int/bool or an integral float
+arithmetically without walking a possibly huge range, raises `<repr> is not in range` for a
+missing int and CPython's `sequence.index(x): x not in sequence` for another value, and reports
+range's one-argument arity TypeError.  The typed path still names both methods as unsupported, so
+the default build falls back to the general path, which matches CPython.
+
+Probes `/tmp/probes/p_range_index.py`, `/tmp/probes/p_range_methods.py` and
+`/tmp/probes/p_range_zero_runtime.py` cover values as a literal, loop variable, argument, list
+item, attribute, dict value and alias; int/bool/integral-float/non-integral-float/str values;
+empty, positive-step, negative-step, huge-step and int64-boundary ranges; not-found messages;
+and 2/3-argument arity calls.  Both `-g` and `-d` match CPython on every range method probe (the
+zero-step item is a separate pre-existing difference and was not changed).  `test_ail_pre216.py`
+is registered in `ail_check.MODULES` and `tools/ci_shards.json`.
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
