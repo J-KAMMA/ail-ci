@@ -1,3 +1,17 @@
+## 2026-10-25 - pre142 re-applied: next() of a saved generator expression is refused by name
+
+Re-applies the accepted pre142 change on the current tree. A saved non-raising generator
+expression (`g = (x * 2 for x in xs); next(g)`) died with `AIL internal error: iterator:
+unknown kind` on both builds because both emitters materialise a `GeneratorExp` as an eager
+list, so `next()` handed a list to the iterator dispatcher; the direct `next(x for x in xs)`
+shape is lowered to a real iterator and already matched CPython. `ail_chatgpt._check_saved_genexpr_next`
+now refuses the saved shape at compile time on both builds, following the value through
+assignments, aliases, list items, attributes, dict values, returns and parameters (including
+wrappers). Controls are unchanged: direct `next(genexpr)` and saved genexprs consumed by
+`for`/`list`/`sum` match CPython. A second `list(g)` still re-iterates the materialised list
+instead of being empty -- a separate pre-existing difference. Added `test_ail_pre142.py`;
+probes in `/tmp/probes`.
+
 ## 2026-10-25 - int(s, base) message GC rooting (job-pre180-10251520)
 
 Review follow-up. The rewritten general-path `ail__int_badlit` built the message head string,
