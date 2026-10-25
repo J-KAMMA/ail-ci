@@ -6442,6 +6442,14 @@ class Compiler(boxclosure.ClosureMixin):
         if name in ctx.closure_defs or name in ctx.clo_index or name in ctx.cell_slots:
             return self.call_value(self.expr(ast.Name(id=name, ctx=ast.Load()), ctx), args, kwargs, ctx)
         if name in self.functions:
+            if (name in ctx.slot_of or name in ctx.ptr_names or name in ctx.clo_index
+                    or name in ctx.free_names or name in ctx.cell_slots):
+                # A parameter, local, cell or closure binding of the same name shadows the
+                # module function in CPython for the WHOLE activation, so a call before the
+                # binding runs reads an unbound local (UnboundLocalError), and a call after it
+                # calls that value, never the module function. The direct-call path resolved
+                # the function statically; read the slot instead, exactly as expr_Name does.
+                return self.call_value(self.expr(ast.Name(id=name, ctx=ast.Load()), ctx), args, kwargs, ctx)
             return self._call_user_function(name, args, kwargs, ctx)
         if name in filelib.PRIMS:
             return self._call_fileprim(name, args, kwargs, ctx)

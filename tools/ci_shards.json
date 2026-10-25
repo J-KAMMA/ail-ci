@@ -323,7 +323,8 @@
   "test_json_pointer_batch": 3.4,
   "test_json_pointer_scan": 10.9,
   "test_json_query_cli": 27.4,
-  "test_json_query_file": 17.7
+  "test_json_query_file": 17.7,
+  "test_ail_pre218": 13.5
  },
  "assignment": [
   [
@@ -478,6 +479,7 @@
    "test_ail_pre175",
    "test_ail_pre179",
    "test_ail_pre18",
+   "test_ail_pre218",
    "test_ail_pre97",
    "test_ail_python_syntax",
    "test_ail_sort_keys",
