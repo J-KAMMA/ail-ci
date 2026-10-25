@@ -8684,8 +8684,15 @@ ROUND = r'''
    round(x, n) exactly -- verified against the four boundary cases the task brief itself names
    (0.125 -> 0.12, 2.675 -> 2.67, 0.5 -> 0.0, 1.5 -> 2.0, 2.5 -> 2.0, and round(-0.4, 0) printing
    as "-0.0", matching CPython's own float repr of negative zero) rather than assumed. */
+static void ail_round_raise(int code, const char *text) {
+    ail_raise_value_adopt(ail_exception_new(code, (const uint8_t *)text, (int64_t)strlen(text), 1));
+}
 static int64_t ail_round0(double x) {
-    if (x != x) ail_die("round() of nan");                 /* CPython raises ValueError here too */
+    /* CPython raises these two before it ever looks at the integer result: a program that catches
+       them must see ValueError / OverflowError, and an uncaught one must print CPython's line
+       rather than a trap message. A finite value outside int64 stays the int64 contract's trap. */
+    if (x != x) ail_round_raise(AIL_EXC_VALUE, "cannot convert float NaN to integer");
+    if (isinf(x)) ail_round_raise(AIL_EXC_OVERFLOW, "cannot convert float infinity to integer");
     int save = fegetround();
     fesetround(FE_TONEAREST);
     double r = nearbyint(x);
@@ -23238,7 +23245,7 @@ static ail_slist ail_str_rsplit_n(ail_str s, int sep_none, ail_str sep, int64_t 
 
 ORDER = ['TYPES', 'FPOW', 'DIE', 'ELEM_BOUNDS', 'STDIO', 'FREPR', 'ROUND', 'STR', 'ARGV', 'STRRET', 'SLIST', 'SROW', 'FLIST', 'FROWS', 'FROWSKEY', 'FLISTRET', 'RECDEPTH', 'FDIV', 'JSDIV', 'IPOW', 'LIST', 'LISTRET', 'MULTIRET', 'SORT', 'POOL', 'GRIDRET', 'TAB', 'BYTES', 'BTAB', 'STAB', 'BPOOL', 'BSPLIT', 'BLISTSORT', 'BYTESRET', 'SLOT', 'TUPRET', 'ROWS', 'MROWS', 'ROWSKEYB', 'ROWSKEYTAB', 'ROWSKEY', 'GRID', 'FMT', 'OBJ', 'OBJ2']
 SOURCE = {'TYPES': TYPES, 'FPOW': FPOW, 'DIE': DIE, 'STDIO': STDIO, 'FREPR': FREPR, 'ROUND': ROUND, 'STR': STR, 'ARGV': ARGV, 'STRRET': STRRET, 'SLIST': SLIST, 'SROW': SROW, 'FLIST': FLIST, 'FROWS': FROWS, 'FROWSKEY': FROWSKEY, 'FLISTRET': FLISTRET, 'RECDEPTH': RECDEPTH, 'FDIV': FDIV, 'JSDIV': JSDIV, 'IPOW': IPOW, 'LIST': LIST, 'LISTRET': LISTRET, 'MULTIRET': MULTIRET, 'SORT': SORT, 'POOL': POOL, 'GRIDRET': GRIDRET, 'TAB': TAB, 'BYTES': BYTES, 'BTAB': BTAB, 'STAB': STAB, 'BPOOL': BPOOL, 'BSPLIT': BSPLIT, 'BLISTSORT': BLISTSORT, 'BYTESRET': BYTESRET, 'SLOT': SLOT, 'TUPRET': TUPRET, 'ROWS': ROWS, 'MROWS': MROWS, 'ROWSKEYB': ROWSKEYB, 'ROWSKEYTAB': ROWSKEYTAB, 'ROWSKEY': ROWSKEY, 'GRID': GRID, 'FMT': FMT, 'OBJ': OBJ, 'OBJ2': OBJ2}
-REQUIRES = {'FREPR': ['TYPES', 'STDIO'], 'ROUND': ['DIE'], 'LIST': ['TYPES', 'DIE'], 'LISTRET': ['TYPES', 'LIST'], 'SORT': ['TYPES', 'LIST'], 'TAB': ['TYPES', 'DIE'], 'FDIV': ['DIE'], 'IPOW': ['DIE'], 'BYTES': ['DIE'], 'BYTESRET': ['BYTES'], 'POOL': ['TYPES', 'DIE', 'LIST', 'LISTRET'], 'TUPRET': ['SLOT'], 'ROWS': ['TYPES', 'DIE', 'LIST'], 'RECDEPTH': ['DIE'], 'GRID': ['TYPES', 'DIE'], 'GRIDRET': ['TYPES', 'DIE', 'LIST', 'POOL'], 'MULTIRET': ['TYPES', 'LIST', 'LISTRET'], 'FLIST': ['DIE'], 'FLISTRET': ['FLIST'], 'ROWSKEY': ['TYPES', 'DIE', 'LIST', 'ROWS'], 'BPOOL': ['TYPES', 'DIE', 'BYTES'], 'BSPLIT': ['LIST', 'BPOOL', 'BYTES'], 'BTAB': ['TYPES', 'DIE', 'BYTES'], 'STAB': ['TYPES', 'DIE', 'STR'], 'ROWSKEYTAB': ['TYPES', 'DIE', 'LIST', 'ROWS', 'TAB'], 'BLISTSORT': ['TYPES', 'DIE', 'LIST', 'BYTES', 'BPOOL'], 'ROWSKEYB': ['TYPES', 'DIE', 'LIST', 'ROWS', 'BYTES', 'BPOOL'], 'FROWS': ['TYPES', 'DIE', 'FLIST'], 'FROWSKEY': ['TYPES', 'DIE', 'FLIST', 'FROWS'], 'MROWS': ['TYPES', 'DIE', 'LIST', 'ROWS', 'BYTES'], 'STR': ['TYPES', 'DIE', 'ELEM_BOUNDS', 'STDIO'], 'STRRET': ['STR'], 'SLIST': ['TYPES', 'DIE', 'STR'], 'SROW': ['TYPES', 'DIE', 'STR'], 'ARGV': ['STR'], 'FMT': ['STR', 'FREPR'], 'OBJ': ['STDIO']}
+REQUIRES = {'FREPR': ['TYPES', 'STDIO'], 'ROUND': ['DIE', 'OVERFLOWEXC'], 'LIST': ['TYPES', 'DIE'], 'LISTRET': ['TYPES', 'LIST'], 'SORT': ['TYPES', 'LIST'], 'TAB': ['TYPES', 'DIE'], 'FDIV': ['DIE'], 'IPOW': ['DIE'], 'BYTES': ['DIE'], 'BYTESRET': ['BYTES'], 'POOL': ['TYPES', 'DIE', 'LIST', 'LISTRET'], 'TUPRET': ['SLOT'], 'ROWS': ['TYPES', 'DIE', 'LIST'], 'RECDEPTH': ['DIE'], 'GRID': ['TYPES', 'DIE'], 'GRIDRET': ['TYPES', 'DIE', 'LIST', 'POOL'], 'MULTIRET': ['TYPES', 'LIST', 'LISTRET'], 'FLIST': ['DIE'], 'FLISTRET': ['FLIST'], 'ROWSKEY': ['TYPES', 'DIE', 'LIST', 'ROWS'], 'BPOOL': ['TYPES', 'DIE', 'BYTES'], 'BSPLIT': ['LIST', 'BPOOL', 'BYTES'], 'BTAB': ['TYPES', 'DIE', 'BYTES'], 'STAB': ['TYPES', 'DIE', 'STR'], 'ROWSKEYTAB': ['TYPES', 'DIE', 'LIST', 'ROWS', 'TAB'], 'BLISTSORT': ['TYPES', 'DIE', 'LIST', 'BYTES', 'BPOOL'], 'ROWSKEYB': ['TYPES', 'DIE', 'LIST', 'ROWS', 'BYTES', 'BPOOL'], 'FROWS': ['TYPES', 'DIE', 'FLIST'], 'FROWSKEY': ['TYPES', 'DIE', 'FLIST', 'FROWS'], 'MROWS': ['TYPES', 'DIE', 'LIST', 'ROWS', 'BYTES'], 'STR': ['TYPES', 'DIE', 'ELEM_BOUNDS', 'STDIO'], 'STRRET': ['STR'], 'SLIST': ['TYPES', 'DIE', 'STR'], 'SROW': ['TYPES', 'DIE', 'STR'], 'ARGV': ['STR'], 'FMT': ['STR', 'FREPR'], 'OBJ': ['STDIO']}
 SOURCE['ELEM_BOUNDS'] = ELEM_BOUNDS
 REQUIRES['ELEM_BOUNDS'] = ['TYPES', 'DIE']
 for _bounded_part in ('STR', 'LIST', 'FLIST'):
