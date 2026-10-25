@@ -4,9 +4,12 @@ pre97's maxsplit folder refused every power whose exponent was at least 64 befor
 the rest of the expression, so ``"a b c".split(" ", 2**100 // 2**80)`` (final value 2**20) was
 refused although the value fits int64.  The power is now bounded by the folder's own 4096-bit
 size limit, the same rule the compiler's other constant folder uses, so an intermediate may be
-wider than int64 as long as the whole expression folds exactly.  A final value outside int64 is
-still refused by name on both builds.  The value reaches split/rsplit as a literal expression,
-an argument, a list item, an attribute, a dict value and a local.
+wider than int64 as long as the whole expression folds exactly.  The power guard measures the
+actual result width, not `bit_length(base) * exponent`, so `((2**63 * 4)**63) >> 4095` (a
+4096-bit intermediate that reduces to 1) is accepted.  A final value outside int64, or an
+intermediate wider than 4096 bits, is still refused by name on both builds.  The value reaches
+split/rsplit as a literal expression, an argument, a list item, an attribute, a dict value and a
+local.
 """
 import os
 import subprocess
@@ -36,6 +39,11 @@ def main():
     print("a b c".split(" ", (-2)**101 // (-2)**81))
     print("a b c".split(" ", (-2)**101 // (-2)**80))
     print("a b c".split(" ", 2**2048 // 2**2028))
+    print("a b c".split(" ", 2**2049 // 2**2029))
+    print("a b c".split(" ", 2**4095 // 2**4050))
+    print("a b c".split(" ", 2**4095 >> 4050))
+    print("a b c".split(" ", ((2**63 * 4)**63) >> 4095))
+    print("a b c".split(" ", (2**63)**65 >> 4095))
     print("a b c".split(" ", 2**100 // 2**100))
     xs = [2**100 // 2**80]
     d = {"n": 2**100 // 2**80}
@@ -54,7 +62,7 @@ OUT_OF_RANGE = [
     ('direct_over', 'print("a b c".split(" ", 2**100))\n'),
     ('reduced_over', 'print("a b c".split(" ", 2**100 // 2**80 * 2**70))\n'),
 ]
-OVER_FOLD_LIMIT = 'print("a b c".split(" ", 2**2049 // 2**2029))\n'
+OVER_FOLD_LIMIT = 'print("a b c".split(" ", 2**4096 // 2**4050))\n'
 NEEDLE = 'maxsplit constant does not fit in a 64-bit signed integer'
 
 
