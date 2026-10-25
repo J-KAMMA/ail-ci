@@ -626,7 +626,7 @@ def _maxsplit_const(node):
     A zero operand (or a power with base 0/1/-1 and a large exponent) is decided before the size
     guard, so a large intermediate that reduces to an int64 maxsplit is not refused by name."""
     if isinstance(node, ast.Constant):
-        return node.value if type(node.value) is int else _MAXSPLIT_NOT_CONST
+        return node.value if type(node.value) in (int, bool) else _MAXSPLIT_NOT_CONST
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
         value = _maxsplit_const(node.operand)
         if value is _MAXSPLIT_NOT_CONST or value is _MAXSPLIT_TOO_BIG:
@@ -755,7 +755,7 @@ def _const_int_expr(node):
     building an unbounded intermediate (`2**100000000` is never computed); an expression that
     reaches int64 exactly on the way, such as `2**63 - 1`, is kept."""
     if isinstance(node, ast.Constant):
-        return node.value if type(node.value) is int else _CONST_INT_NOT
+        return node.value if type(node.value) in (int, bool) else _CONST_INT_NOT
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
         value = _const_int_expr(node.operand)
         if value is _CONST_INT_NOT or value is _CONST_INT_BIG:
@@ -828,7 +828,7 @@ def fold_int_constant(node):
     A constant expression outside int64 is refused by name here, at compile time, instead of
     compiling to arithmetic that stops with `integer overflow` when the program runs."""
     value = _const_int_expr(node)
-    if value is _CONST_INT_NOT:
+    if value is _CONST_INT_NOT or isinstance(value, bool):
         return None
     if value is _CONST_INT_BIG or not _I64_MIN <= value <= _I64_MAX:
         refusal = Unsupported(

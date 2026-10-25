@@ -1,3 +1,20 @@
+## 2026-10-25 - bool constants in constant integer shifts (job-pre251-10260446)
+
+The review of pre201 left `(True << 64) >> 64` (and the wide variant) stopping with
+`integer overflow` on both builds, although the final value 1 fits int64 and CPython prints it.
+The constant int folders took only `type(value) is int`, so a bool constant was not folded;
+`fold_int_constant` now accepts bools as CPython's 0/1, but still leaves a bool-only result
+(`True & True`) to the run time so its type is unchanged.  The same acceptance was added to the
+`str.split`/`rsplit` maxsplit folder.  An out-of-range bool expression (`True << 64`) is now
+refused by name, like the same int expression.
+
+Probes `/tmp/probes/pre251_accept.py`, `pre251_contexts.py`, `pre251_boolops.py`,
+`pre251_module_const.py`, `pre251_maxsplit.py` match CPython on both builds; the
+`pre251_refuse_true.py` and `pre251_refuse_pow.py` probes are refused by name (or, for
+`True ** 64`, fold to the in-range 1) on both builds.  Added `test_ail_pre251.py` (6 tests) and
+registered it in `ail_check.MODULES`.  Final-state tests: test_ail_pre251, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 pass; `tools/update_manifest.py --check` passes.
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a
