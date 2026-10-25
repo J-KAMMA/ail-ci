@@ -2594,10 +2594,14 @@ class Compiler(boxclosure.ClosureMixin):
                     check_codec(node, 1, 2, 'str()')
                     return ast.copy_location(ast.Call(func=ast.Name(id='_ail_str_decode', ctx=ast.Load()),
                                                       args=node.args, keywords=node.keywords), node)
-                if (isinstance(f, ast.Name) and f.id == 'int' and 'int' not in own and len(node.args) == 2
-                        and not node.keywords):
+                if (isinstance(f, ast.Name) and f.id == 'int' and 'int' not in own
+                        and ((len(node.args) == 2 and not node.keywords)
+                             or (len(node.args) == 1 and len(node.keywords) == 1
+                                 and node.keywords[0].arg == 'base'
+                                 and not isinstance(node.args[0], ast.Starred)))):
+                    base = node.args[1] if len(node.args) == 2 else node.keywords[0].value
                     return ast.copy_location(ast.Call(func=ast.Name(id='_ail_int2', ctx=ast.Load()),
-                                                      args=node.args, keywords=[]), node)
+                                                      args=[node.args[0], base], keywords=[]), node)
                 return node
 
         tree.body = [Rewrite().visit(n) for n in tree.body]
