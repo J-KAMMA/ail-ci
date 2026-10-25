@@ -147,6 +147,40 @@ Probes in `/tmp/probes`: `pre248_direct`, `pre248_shift`, `pre248_module`, `pre2
 `pre248_dict_value` are refused by name on both builds; `pre248_in_range`, `pre248_overwrite` and
 `pre248_float_bool` match CPython on both builds.  The pre214 probes `r6`, `r7` and `r8` still
 behave as before (run-time overflow or a named import refusal).
+## 2026-10-25 - review fix: constant `int(<text>, base)` container folding (job-pre253-10260534)
+
+The review found two false refusals introduced by folding text read from literal containers.
+A dict literal with a duplicate key now yields the last value, matching Python, instead of the
+first.  Escape analysis now records simple `name = name` aliases at every scope rather than only
+at module level, so a mutation through a function-local (or nested) alias marks the original
+container as escaped and leaves it unfolded.  Both cases keep the in-range run-time parse; an
+out-of-range value reached through the last duplicate key is still refused by name.
+
+Probes in `/tmp/probes` (`pre253_dup_*`, `pre253_alias_*`, 12 programs, both builds via
+`cmp.sh`): duplicate string/int/three-key dicts and a duplicate-key alias print `1023`; a
+function-local, nested, method and module-alias mutation prints `1023`; an unchanged container
+still folds and a last duplicate out-of-range value is refused by name.  Added both regressions
+to `test_ail_pre253.py`.
+
+## 2026-10-25 - constant `int(<text>, base)` beyond int64 (job-pre253-10260534)
+
+The first listed difference that still differed on this tree was `int("1"*5000, 2)`: both
+builds compiled it and then stopped with `integer overflow`, while CPython keeps the bignum.
+The earlier out-of-int64 items (`-(1<<63)-1`, `-(1<<64)`, `-(1<<5000)`, `z = 1<<63; z-z`,
+`0 ** (-(1<<5000))`) are already refused by name here, so no change was needed for them.
+
+A call whose text and base are both constant is now evaluated during the front-end checks.  A
+value outside int64 is refused on both builds as `int64 constant expression out of range`;
+in-range constants, invalid literals/bases and dynamic strings keep their previous run-time
+behaviour; a text read from a literal list/tuple/dict is folded too, while a container that is
+mutated or escapes is left alone.
+
+Probes in `/tmp/probes` (`p1`-`p6`, `v1`-`v7`, `ib1`-`ib37`) compare both builds with
+CPython.  The five already-fixed items and `ib1`-`ib12`, `ib17`, `ib20`, `ib22`-`ib28`,
+`ib30`-`ib33`, `ib35`, `ib37` are refused by name; `ib13`-`ib16`, `ib18`-`ib19`, `ib21`,
+`ib26`, `ib29`, `ib34`, `ib36` match CPython or keep their named compiler refusal.  A list
+that is mutated (`ib29`, `ib36`) is left unfolded, while a plain alias or a read through
+`len`/`print` is folded (`ib30`-`ib31`, `ib37`).  Added `test_ail_pre253.py`.
 
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
