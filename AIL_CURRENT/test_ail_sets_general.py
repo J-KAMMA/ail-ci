@@ -1,7 +1,7 @@
 """Sets, frozensets and dicts on the general (boxed) path.
 
 A set keeps its elements in insertion order on both paths (DIFFERENCES.md A2): iteration, repr, print, list(),
-`pop()` (the newest element) and the result of `| & - ^`, their in-place forms and the named methods
+`pop()` (the first element in iteration order) and the result of `| & - ^`, their in-place forms and the named methods
 (`a | b` is a's elements then b's new ones; `a & b` and `a - b` keep a's order; `a ^ b` is a's elements not in b
 then b's elements not in a; a result has the type of the left operand). The output of a program must not depend
 on which path built it, so the order is compared between paths, not with CPython. Where the order cannot show
@@ -473,8 +473,8 @@ print()
 
 A2_EXPECTED = '''{3, 1, 2, 100, 33} [3, 1, 2, 100, 33]
 {8, 7, 9}
-9
-{8, 7}
+8
+{7, 9}
 {3, 1, 2, 100, 33, 5} {3, 33} {3, 2, 100, 33} {3, 1, 100, 33, 7}
 {3, 1, 2, 100, 33, 8, 4} {1, 33} {3, 2, 33} {3, 1, 100, 33, 50, 60}
 {3, 100, 33, 7, 6}
@@ -485,7 +485,7 @@ frozenset({3, 1, 2}) frozenset() set() frozenset({5, 4, 1}) {1, 5, 4}
 [9, 2, 5] {2, 3, 1} [40, 30, 20] (1, 0)
 {'k', 'j'} {'k', 'j'} {1, 2} {'h', 'e', 'l', 'o'}
 {1, 3, 2} [1, 2, 3]
-2 3 1 
+1 3 2 
 '''
 
 
@@ -564,7 +564,7 @@ class SetsGeneral(unittest.TestCase):
     def test_s1_typed_default_and_general_print_the_same_order(self):
         out = self.identical(PROG_TYPED_ORDER, 'typed_order')
         lines = out.split('\n')
-        # insertion order: a is 0, 7, 14, ... ; a | b appends b's new elements; pop takes the newest
+        # insertion order: a is 0, 7, 14, ... ; a | b appends b's new elements; pop takes the first
         self.assertEqual(lines[1], '0 7 14 21 28 35 42 49 56 ')
         self.assertIn('or 12', out)
 
@@ -610,7 +610,7 @@ print({"b", "a", "c"}, frozenset(["z", "y"]))
         out = self.identical(text, 'strwalk', modes=GENERAL_MODES)
         self.assertEqual(out.split('\n')[0], "{'pear', 'apple', 'fig', 'kiwi'}")
         self.assertEqual(out.split('\n')[1], 'pear apple fig kiwi ')
-        self.assertIn("kiwi {'pear', 'apple', 'fig'}", out)
+        self.assertIn("pear {'apple', 'fig', 'kiwi'}", out)
         self.assertEqual(out.split('\n')[-2], "{'b', 'a', 'c'} frozenset({'z', 'y'})")
 
     def test_s5_the_old_refusal_is_gone(self):

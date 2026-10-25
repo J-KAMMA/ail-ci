@@ -173,7 +173,10 @@ class TextLowering(object):
         return self.concat(vals)
 
     def str_from_int(self, arg, buf):
-        v = self.as_int(self.expr(arg))
+        v = self.expr(arg)
+        if v.type == I.TINT:
+            return self.rt('tint_str', [v])
+        v = self.as_int(v)
         return self.rt('str_from_int_buf' if buf else 'str_from_int', [v])
 
     def fstring_pieces(self, node, buf_always):
@@ -227,17 +230,34 @@ class TextLowering(object):
         if kind == P.INT:
             if P._is_bool_expr(node, self.ctx):
                 raise self.NotS0('a bool converted to str')
-            return self.rt('str_from_int', [self.as_int(self.expr(node))])
+            v = self.expr(node)
+            if v.type == I.TINT:
+                return self.rt('tint_str', [v])
+            return self.rt('str_from_int', [self.as_int(v)])
         return self.rt('str_from_float', [self.coerce(self.expr(node), I.F64)])
 
     def fmt_value(self, val_node, kind, spec, orig_text, str_default_align):
-        """The runtime formatter call for a parsed spec (legacy `_fmt_build`)."""
+        """The runtime formatter call for a parsed spec (legacy `_fmt_build`).
+
+        The three small formatters only cover [[fill]align][0][width][.precision] and a
+        negative sign. Everything the legacy emitter sends to `ail_fmt_gen` (a sign, '#',
+        grouping, '=' alignment, a type-less float, or a type other than f/d) has no IR
+        instruction: refuse the whole function so the legacy emitter builds it, rather than
+        silently dropping the flag from the format spec.
+        """
         P = self.P
+        if P._fmt_general_needed(spec, kind):
+            raise self.NotS0('a format spec needing the general formatter: %r' % (orig_text,))
         P._resolve_fmt_type(spec, kind, orig_text, 'an f-string field with spec')
         width = spec['width'] or 0
         zero = 1 if spec['zero'] else 0
         fill = spec.get('fill', ' ')
         align_char = spec['align']
+        if kind == P.STR and (spec.get('sign') or spec.get('alt') or spec.get('group')
+                              or align_char == '=' or spec['zero']
+                              or spec['type'] not in (None, 's')):
+            raise self.NotS0('a str format spec with a sign, #, grouping, = alignment, the 0 flag or a type '
+                             'other than s')
         if align_char is None:
             align_char = str_default_align if kind == P.STR else '>'
         align = 1 if align_char == '<' else (2 if align_char == '^' else 0)
@@ -253,7 +273,8 @@ class TextLowering(object):
         sv = self.expr(val_node)
         if width <= 0 and prec < 0:
             return sv
-        return self.rt('fmt_str', [sv], {'width': width, 'align': align, 'prec': prec})
+        return self.rt('fmt_str', [sv], {'width': width, 'align': align, 'prec': prec,
+                                         'fill': ord(fill)})
 
     def percent(self, node):
         """`"..." % args`: the declared subset of the legacy `_build_percent_value`."""
@@ -389,6 +410,9 @@ class TextLowering(object):
                 if at == P.INT and not P._is_bool_expr(arg, self.ctx):
                     return self.str_from_int(arg, buf=False)
                 raise self.NotS0('str() of kind %r' % (at,))
+            if self.is_builtin(name) and name in ('bin', 'oct', 'hex') and len(node.args) == 1:
+                v = self.coerce(self.expr(node.args[0]), I.TINT)
+                return self.rt('tint_' + name, [v])
             raise self.NotS0('str call of %r' % name)
         if isinstance(f, ast.Attribute):
             return self.str_method(node)
@@ -670,8 +694,13 @@ class TextLowering(object):
                 kinds.append('flt')
                 vals.append(self.expr(a0))
             elif t == P.INT:
-                kinds.append('int')
-                vals.append(self.as_int(self.expr(a0)))
+                v = self.expr(a0)
+                if v.type == I.TINT:
+                    kinds.append('str')
+                    vals.append(self.rt('tint_str', [v]))
+                else:
+                    kinds.append('int')
+                    vals.append(self.as_int(v))
             else:
                 raise self.NotS0('print of kind %r' % (t,))
         extra = {}
