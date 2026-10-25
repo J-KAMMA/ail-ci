@@ -4493,7 +4493,9 @@ class Compiler(boxclosure.ClosureMixin):
             return 'g_slots_arr[%d]' % self.global_slots['class:' + node.id]
         if node.id in ctx.nested_funcs:
             raise Unsupported('using function %s as a first-class value' % node.id)
-        if node.id in self.functions and node.id not in ctx.slot_of and node.id not in ctx.clo_index:
+        if (node.id in self.functions and node.id not in ctx.slot_of
+                and node.id not in ctx.ptr_names and node.id not in ctx.clo_index
+                and node.id not in ctx.free_names and node.id not in ctx.cell_slots):
             return self.function_value(node.id, ctx)
         if node.id in self.module_aliases or node.id in ('sys',):
             raise Unsupported('the module %s used as a plain value' % node.id)
@@ -6440,6 +6442,14 @@ class Compiler(boxclosure.ClosureMixin):
         if name in ctx.nested_funcs:
             return self._call_nested_function(name, args, kwargs, ctx)
         if name in ctx.closure_defs or name in ctx.clo_index or name in ctx.cell_slots:
+            return self.call_value(self.expr(ast.Name(id=name, ctx=ast.Load()), ctx), args, kwargs, ctx)
+        if (name in self.functions
+                and (name in ctx.slot_of or name in ctx.ptr_names or name in ctx.clo_index
+                     or name in ctx.free_names or name in ctx.cell_slots)):
+            # a parameter, local, cell or closure binding of the same name shadows the module
+            # function in CPython for the WHOLE activation: read the activation's binding, as
+            # expr_Name does (an unbound local raises UnboundLocalError; any other value is
+            # called, so an assignment before the call is TypeError, not the module function).
             return self.call_value(self.expr(ast.Name(id=name, ctx=ast.Load()), ctx), args, kwargs, ctx)
         if name in self.functions:
             return self._call_user_function(name, args, kwargs, ctx)

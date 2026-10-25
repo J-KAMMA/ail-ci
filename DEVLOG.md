@@ -1,3 +1,22 @@
+## 2026-10-25 - local shadow of a module function (job-pre217-10252305)
+
+The first still-differing item from the pre141 review was a local shadowing a module-level
+function. `expr_Name` already preferred the activation's parameter/local/cell/closure binding, but
+a direct call still resolved to the module function for the whole function, so
+`print(side(1)); side = None` printed `1` where CPython raises `UnboundLocalError`, and
+`side = None; print(side(1))` printed `1` where CPython raises `TypeError`. `_call_name` now takes
+the same binding test and calls the activation's value through `call_value`; `expr_Name`'s
+function-value path also excludes nonlocal/closure bindings, like its class-value path. The typed
+path refuses such a call by name, so the default build falls back to the general path; it also
+stops lowering a shadowing `name = None` as an optional int when `name` is a called module
+function.
+
+`test_ail_pre217.py` covers direct calls before/after the local binding, a parameter, an
+assignment alias, a list item, an attribute, a dict value, a loop target, an `except ... as`
+target, int64 bounds, float, empty str and zero arguments on both builds. `/tmp/probes/p_shadow_*`
+match CPython on both builds or are refused by name (nested-def defaults, function defaults used
+as values, the unsupported nonlocal-closure shape, and the method-call shape in the values probe).
+
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal

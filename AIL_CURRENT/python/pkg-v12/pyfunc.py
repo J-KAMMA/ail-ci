@@ -15615,6 +15615,12 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
     building a VALUE) still refuses it by name, AIL_TASK_callconv_20260915.md's own two-door
     pattern (`print`/`.pop()` already have one; CPython would hand back `None` here and this
     language has no `None`)."""
+    if dynamic is None and fname in ctx.funcs and (
+            fname in ctx.kind or fname in getattr(ctx, 'rebound', ())
+            or fname in (_loop_target_names(ctx) or ())):
+        raise Unsupported('call to %s() where %s is also bound as a local name; the local '
+                          'shadows the module function, and this path cannot call the local '
+                          'value here' % (fname, fname))
     params, ret = ctx.funcs[fname] if dynamic is None else dynamic[:2]
     if _is_tuple_ret(ret):
         raise Unsupported('calling %s(), which returns a tuple, as a value' % fname)
@@ -36430,10 +36436,13 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     if any(k == STR for _, k in ctx.params):
         ctx.parts.add('STR')              # unused typed parameters still appear in the signature
     struct_names = _struct_valued_names(fn, ctx) if _NULLABLE else {}
+    _called_names = {x.id for n in ast.walk(fn) if isinstance(n, ast.Call)
+                     for x in ast.walk(n.func) if isinstance(x, ast.Name)}
     for n in ast.walk(fn):
         if isinstance(n, ast.Assign) and isinstance(n.value, ast.Constant) and n.value.value is None:
             for t in n.targets:
-                if isinstance(t, ast.Name) and t.id not in struct_names:
+                if (isinstance(t, ast.Name) and t.id not in struct_names
+                        and not (t.id in sigs and t.id in _called_names)):
                     ctx.optional.add(t.id)
     if ctx.optional:
         # a local that is only ever None: `print(x)` has to say None, so it is an Optional local too
