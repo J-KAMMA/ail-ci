@@ -13,7 +13,10 @@ non-negative`, as CPython does.  `product(repeat=...)` and `permutations(r=...)`
 Added `test_ail_pre219.py` (3 programs, two builds each) and registered it in
 `ail_check.MODULES`; it covers the non-iterable order, `__index__`, bad `__index__` returns, a
 plain class as `r`, literal/local/argument/list-item/attribute/dict values, empty pools, bools and
-negative/zero/out-of-range `r`.  `/tmp/probes/pre219_r.py` matches CPython on both builds.
+negative/zero/out-of-range `r`.  The two new TypeError messages are built in `malloc(strlen(name) + 64)`
+buffers, so class names longer than the old fixed buffers are not truncated (covered by 80/93/100/127/128/160/200-character
+class names and a long-named bad `__index__` return).  `/tmp/probes/pre219_r.py` and
+`/tmp/probes/pre219_longname.py` match CPython on both builds.
 Required modules on the final tree: test_ail_pre219, test_ail_pre137, test_ail_pre168,
 test_ail_pre101, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 all pass
 (8 + 4 + 5 + 1 + 4 + 18 + 4 tests, 1 skip).

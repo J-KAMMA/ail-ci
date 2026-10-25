@@ -84,6 +84,19 @@ class Plain:
     pass
 
 
+class KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK:
+    pass
+
+
+class LongReturn:
+    pass
+
+
+class BadLong:
+    def __index__(self):
+        return LongReturn()
+
+
 class Box:
     def __init__(self, r):
         self.r = r
@@ -109,7 +122,8 @@ def run():
     b = Box(Ix(2))
     for which in (0, 1):
         for label, r in (("I0", Ix(0)), ("I2", Ix(2)), ("I3", Ix(3)),
-                         ("Ineg", Ix(-1)), ("bad", Bad()), ("plain", Plain())):
+                         ("Ineg", Ix(-1)), ("bad", Bad()), ("plain", Plain()),
+                         ("longplain", KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK()), ("longbad", BadLong())):
             call("literal-" + label, which, [1, 2, 3], r)
         call("local-I2", which, [1, 2, 3], Ix(2))
         call("arg-Ineg", which, [1, 2, 3], from_arg(Ix(-1)))

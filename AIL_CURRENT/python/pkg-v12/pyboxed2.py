@@ -592,7 +592,10 @@ ITRINDEX_C = r"""
    non-iterable named the iterable instead of the r argument. */
 static inline ail_st ail2_it_r(ail_ctx *cx, ail_obj *out, ail_obj x) {
     if (x.tag == AIL_T_INT || x.tag == AIL_T_BOOL) { *out = ail_box_int(x.i); return AIL_OK; }
-    { char buf[128]; snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail__tname_c(x)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
+    { const char *tn = ail__tname_c(x); size_t n = strlen(tn) + 64; char *buf = (char *)malloc(n);
+      if (!buf) ail_die("out of memory");
+      snprintf(buf, n, "'%s' object cannot be interpreted as an integer", tn);
+      ail_st st = ail_raise_c(cx, AIL_B_TYPEERROR, buf); free(buf); return st; }
 }
 """
 
@@ -608,10 +611,16 @@ static inline ail_st ail2_it_r(ail_ctx *cx, ail_obj *out, ail_obj x) {
             ail_obj r; ail_st st = f(cx, &r, x);
             if (st != AIL_OK) return st;
             if (r.tag == AIL_T_INT || r.tag == AIL_T_BOOL) { *out = ail_box_int(r.i); return AIL_OK; }
-            { char buf[160]; snprintf(buf, sizeof buf, "__index__ returned non-int (type %s)", ail__tname_c(r)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
+            { const char *tn = ail__tname_c(r); size_t n = strlen(tn) + 64; char *buf = (char *)malloc(n);
+              if (!buf) ail_die("out of memory");
+              snprintf(buf, n, "__index__ returned non-int (type %s)", tn);
+              st = ail_raise_c(cx, AIL_B_TYPEERROR, buf); free(buf); return st; }
         }
     }
-    { char buf[128]; snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail__tname_c(x)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
+    { const char *tn = ail__tname_c(x); size_t n = strlen(tn) + 64; char *buf = (char *)malloc(n);
+      if (!buf) ail_die("out of memory");
+      snprintf(buf, n, "'%s' object cannot be interpreted as an integer", tn);
+      ail_st st = ail_raise_c(cx, AIL_B_TYPEERROR, buf); free(buf); return st; }
 }
 """
 
