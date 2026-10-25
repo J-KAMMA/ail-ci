@@ -1,3 +1,13 @@
+## 2026-10-25 - review fix: special constant bases before the size guard (job-pre184-10251542)
+
+Review follow-up. The 4096-bit guard in `_constant_int` fired before the special power/shift cases, so
+`0 ** 100000`, `1 ** 100000`, `(-1) ** 100000`, `-1 ** 100000`, `0 << 4097` and `0 << 100000` (also as
+class attributes and default arguments) were refused although their results fit int64 and both CPython
+and the base build print them. Pow bases 0/1/-1 and a zero left shift are now handled before the guard;
+genuinely out-of-int64 expressions are still refused. Extended `test_ail_pre184.py` with the power and
+shift boundaries (`0 ** 0`, `0 ** 1`, both parities of `-1`, `0 << 0`, `0 << 4097`, `0 << 100000`) in
+module, class and default positions.
+
 ## 2026-10-25 - out-of-int64 constant expressions outside function bodies (job-pre184-10251542)
 
 The first still-differing item from the fuzz47 list was `corpus/gdev/g22_012.py`: its class body

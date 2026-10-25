@@ -126,15 +126,25 @@ def _constant_int(node):
         if isinstance(node.op, ast.Pow):
             if right < 0:
                 return False, None
-            if right > _CONST_INT_BITS or (abs(left) > 1 and abs(left).bit_length() * right > _CONST_INT_BITS):
+            if left == 0:
+                value = 1 if right == 0 else 0
+            elif left == 1:
+                value = 1
+            elif left == -1:
+                value = 1 if right % 2 == 0 else -1
+            elif right > _CONST_INT_BITS or left.bit_length() * right > _CONST_INT_BITS:
                 return True, _CONST_INT_TOO_BIG
-            value = left ** right
+            else:
+                value = left ** right
         elif isinstance(node.op, ast.LShift):
             if right < 0:
                 return False, None
-            if right > _CONST_INT_BITS or (left and left.bit_length() + right > _CONST_INT_BITS):
+            if left == 0:
+                value = 0
+            elif right > _CONST_INT_BITS or left.bit_length() + right > _CONST_INT_BITS:
                 return True, _CONST_INT_TOO_BIG
-            value = left << right
+            else:
+                value = left << right
         elif isinstance(node.op, ast.RShift):
             if right < 0:
                 return False, None
