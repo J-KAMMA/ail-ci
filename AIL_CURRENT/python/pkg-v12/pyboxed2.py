@@ -6679,23 +6679,49 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.check()
         return t
 
+    def _range_arg(self, b, ctx):
+        """Convert one already-evaluated range() argument as CPython's PyNumber_Index does: an int
+        or a bool, or an instance's __index__; anything else is the TypeError that names its type."""
+        err = ctx.cur_err_target()
+        if self.dunder_ops:
+            fn = ctx.new_cvar('xfn')
+            xv = ctx.new_cvar('xiv')
+            ctx.emit('if (%s.tag == AIL_T_INST) { ail_d1_fn %s = ail_dun1(%s, AIL_D1_INDEX); '
+                     'if (%s) { ail_obj %s; st = %s(cx, &%s, %s); if (st != AIL_OK) goto %s; '
+                     'if (%s.tag != AIL_T_INT && %s.tag != AIL_T_BOOL) { const char *tn = ail__tname_c(%s); '
+                     'size_t n = strlen(tn) + 64; char *buf = (char *)malloc(n); if (!buf) ail_die("out of memory"); '
+                     'snprintf(buf, n, "__index__ returned non-int (type %%s)", tn); '
+                     'st = ail_raise_c(cx, AIL_B_TYPEERROR, buf); free(buf); goto %s; } '
+                     '%s = %s; } }'
+                     % (b, fn, b, fn, xv, fn, xv, b, err, xv, xv, xv, err, b, xv))
+            ctx.uses_st = True
+        out = ctx.new_cvar('ri')
+        ctx.emit('int64_t %s;' % out)
+        ctx.emit('st = ail__range_index(cx, &%s, %s);' % (out, b))
+        ctx.check()
+        return out
+
     def _b_range(self, args, kwargs, ctx):
         if kwargs:
             raise Unsupported('range() with keyword arguments')
-        if len(args) == 1:
-            lo, hi, st_ = '0LL', '(%s).i' % self.expr(args[0], ctx), '1LL'
-        elif len(args) == 2:
-            lo = '(%s).i' % self.expr(args[0], ctx)
-            hi = '(%s).i' % self.expr(args[1], ctx)
-            st_ = '1LL'
-        elif len(args) == 3:
-            lo = '(%s).i' % self.expr(args[0], ctx)
-            hi = '(%s).i' % self.expr(args[1], ctx)
-            st_ = '(%s).i' % self.expr(args[2], ctx)
-        else:
+        if not 1 <= len(args) <= 3:
             raise Unsupported('range() with %d arguments' % len(args))
+        objs = []
+        for a in args:
+            b = ctx.tmp()
+            ctx.emit('%s = %s;' % (b, self.expr(a, ctx)))
+            objs.append(b)
+        vals = [self._range_arg(b, ctx) for b in objs]
+        if len(vals) == 1:
+            lo, hi, st_, has_start, has_step = '0LL', vals[0], '1LL', 0, 0
+        elif len(vals) == 2:
+            lo, hi, st_, has_start, has_step = vals[0], vals[1], '1LL', 1, 0
+        else:
+            lo, hi, st_, has_start, has_step = vals[0], vals[1], vals[2], 1, 1
         t = ctx.tmp()
-        ctx.emit('%s = ail_range_new(cx, %s, %s, %s);' % (t, lo, hi, st_))
+        ctx.emit('st = ail_bi_range(cx, &%s, %d, %s, %s, %d, %s);'
+                 % (t, has_start, lo, hi, has_step, st_))
+        ctx.check()
         return t
 
     def _conv(self, fname, fn, args, kwargs, ctx):

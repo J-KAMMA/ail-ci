@@ -1,3 +1,15 @@
+## 2026-10-25 -- pre199: range() with a zero step raises ValueError (job-pre199-10252047)
+
+The first still-differing item left by pre186 was `range(0, 5, 0)`: both builds accepted it and
+printed `range(0, 5, 0)`, where CPython raises `ValueError: range() arg 3 must not be zero` at
+construction.  The general (v2) path's `range()` now evaluates its arguments in Python order,
+converts each as `PyNumber_Index` does (int, bool or an instance's `__index__`, otherwise
+`TypeError: '<type>' object cannot be interpreted as an integer`) and builds through the checking
+`ail_bi_range`, so a zero step is refused before the range exists.  Non-zero ranges (negative,
+empty, wide, bool bounds) are unchanged.  `AIL_CURRENT/test_ail_pre199.py` covers both builds;
+probes are `pre199_range_*` in `/tmp/probes`.  The later reviewer items (the enumerate repr,
+`-MAX - 1` literal and the `AIL_GENERAL=v1` duplicate `ail_exc_top`) were not touched.
+
 # DEVLOG
 
 ## 2026-10-25 - pre125 reapply: module-scope bare attribute/subscript annotations
