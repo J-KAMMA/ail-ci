@@ -1007,7 +1007,8 @@ class _Checker(object):
 
 for _name in I.INT_BINARY:
     setattr(_Checker, 'op_' + _name, _Checker.op_int_binary)
-for _name in ('tint.add', 'tint.sub', 'tint.mul', 'tint.floordiv', 'tint.floormod', 'tint.shl', 'tint.shr', 'tint.pow'):
+for _name in ('tint.add', 'tint.sub', 'tint.mul', 'tint.floordiv', 'tint.floormod', 'tint.shl', 'tint.shr',
+              'tint.pow', 'tint.and', 'tint.or', 'tint.xor'):
     setattr(_Checker, 'op_' + _name.replace('.', '_'), _Checker.op_tint_binary)
 for _name in ('tint.eq', 'tint.ne', 'tint.lt', 'tint.le'):
     setattr(_Checker, 'op_' + _name.replace('.', '_'), _Checker.op_tint_cmp)

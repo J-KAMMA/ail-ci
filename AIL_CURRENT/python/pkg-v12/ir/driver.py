@@ -317,6 +317,21 @@ def _apply(P, args, kwargs, result, current):
     _sig = getattr(P, 'TINT_SIGS', {}).get(fn.name) if _py else None
     if _sig and (any(_sig[0]) or _sig[1]) and not _io_like:
         _needs_tint = True
+    _big_shift = False
+    for _n in ast.walk(fn):
+        if isinstance(_n, ast.BinOp) and isinstance(_n.op, ast.LShift):
+            _rhs = _n.right
+        elif isinstance(_n, ast.AugAssign) and isinstance(_n.op, ast.LShift):
+            _rhs = _n.value
+        else:
+            continue
+        if isinstance(_rhs, ast.Constant) and type(_rhs.value) is int and _rhs.value >= 63:
+            _big_shift = True
+            break
+    if _py and _big_shift and not _io_like and not (_sig and (any(_sig[0]) or _sig[1])) \
+            and not os.environ.get('AIL_NO_GENERAL'):
+        from pyfront import Unsupported
+        raise Unsupported('%s() shifts beyond int64 without a tagged result' % fn.name)
     try:
         if bound.get('is_method'):
             raise lower.NotS0('a method')

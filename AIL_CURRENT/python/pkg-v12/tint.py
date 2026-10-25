@@ -100,6 +100,29 @@ static AIL_BIGFN ail_tint ail_tint__slow_neg(ail_ctx *cx, ail_tint a) {
     AIL_FRAME_LEAVE(cx, fr);
     return out;
 }
+/*P:bits<*/
+static AIL_BIGFN ail_tint ail_tint__slow_bitop(ail_ctx *cx, ail_tint a, ail_tint b, char op) {
+    ail_obj k[2]; k[0] = ail_tint_to_obj(a); k[1] = ail_tint_to_obj(b);
+    AIL_ROOT_N(cx, fr, k, 2);
+    ail_obj r = ail_big_bitop(cx, k[0], k[1], op);
+    ail_tint out; ail_tint_from_obj(r, &out);
+    AIL_FRAME_LEAVE(cx, fr);
+    return out;
+}
+static inline ail_tint ail_tint_and(ail_ctx *cx, ail_tint a, ail_tint b) {
+    if (__builtin_expect(a.b == NULL && b.b == NULL, 1)) return ail_tint_from_int64(a.i & b.i);
+    return ail_tint__slow_bitop(cx, a, b, '&');
+}
+static inline ail_tint ail_tint_or(ail_ctx *cx, ail_tint a, ail_tint b) {
+    if (__builtin_expect(a.b == NULL && b.b == NULL, 1)) return ail_tint_from_int64(a.i | b.i);
+    return ail_tint__slow_bitop(cx, a, b, '|');
+}
+static inline ail_tint ail_tint_xor(ail_ctx *cx, ail_tint a, ail_tint b) {
+    if (__builtin_expect(a.b == NULL && b.b == NULL, 1)) return ail_tint_from_int64(a.i ^ b.i);
+    return ail_tint__slow_bitop(cx, a, b, '^');
+}
+/*P|*/
+/*P>*/
 /*P:div<*/
 static AIL_BIGFN ail_st ail_tint__slow_divmod(ail_ctx *cx, ail_tint *out, ail_tint a, ail_tint b, int mod) {
     if (ail_tint_is_zero(b))
