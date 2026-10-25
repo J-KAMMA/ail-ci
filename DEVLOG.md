@@ -1,3 +1,18 @@
+## 2026-10-25 - pre187: boxed `//`/`%` type errors name both operand types (job-pre187-10251544)
+
+The fuzz45 reviewer's pre-existing item was still on this tree: a boxed `//` or `%` applied to
+operands of the wrong type raised `TypeError: unsupported operand type(s) for //` (or `%`) with
+both operand type names missing, where CPython prints for example
+`unsupported operand type(s) for //: 'int' and 'str'`. The v1 and v2 boxed fallbacks in
+`python/pkg-v12/cruntime.py` and the fallback that `dunderrt.py` patches into the general-path
+runtime now fill the message from the operand types (using the user class name for an instance).
+`divmod()` itself already matched, as did zero-error wording and valid/dunder operations.
+Added `AIL_CURRENT/test_ail_pre187.py` with both operators over int, float, str, bytes, None,
+list, dict, set, tuple and bool operands, user classes with and without the dunders, and values
+reaching the operator through an argument, a list item, an attribute, a dict value and an alias.
+Probes `f9.py`, `z2b.py`, `z2d.py` and `z2e.py` match CPython on both `cmp.sh` builds; `z1.py`
+keeps the zero-error neighbours. Required tests pass on the final commit.
+
 ## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
 
 The first still-differing item from the task's list was the encoding-name normalization: `b"abc".decode("utf\t8")`,

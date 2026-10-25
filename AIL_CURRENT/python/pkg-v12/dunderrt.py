@@ -387,8 +387,15 @@ def _edits():
               '    ' + _binop_guard('MUL', 'RMUL', '*') + 'char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for *: \'%s\' and \'%s\'"'))
     for sym, fwd, rev in (('//', 'FLOORDIV', 'RFLOORDIV'), ('%', 'MOD', 'RMOD'), ('/', 'TRUEDIV', 'RTRUEDIV'),
                           ('**', 'POW', 'RPOW')):
-        e.append(('    return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %s");' % sym,
-                  '    ' + _binop_guard(fwd, rev, sym) + 'return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %s");' % sym))
+        if sym in ('//', '%'):
+            fmt = sym.replace('%', '%%')
+            fallback = ('char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for ' + fmt +
+                        ": '%s' and '%s'\",\n                           ail__tname_c(a), ail__tname_c(b));\n"
+                        '    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);')
+            e.append(('    ' + fallback, '    ' + _binop_guard(fwd, rev, sym) + fallback))
+        else:
+            old = ('    return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %s");' % sym)
+            e.append((old, '    ' + _binop_guard(fwd, rev, sym) + old[4:]))
     # divmod(): CPython asks __divmod__, then the reflected method; __floordiv__/__mod__
     # alone do not make divmod work on a user class (Fraction/IntEnum define __divmod__).
     e.append(('''    } else if (a.tag != AIL_T_INST && b.tag != AIL_T_INST) {
