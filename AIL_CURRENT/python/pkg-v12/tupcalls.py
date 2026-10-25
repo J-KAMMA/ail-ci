@@ -10,6 +10,11 @@ class Calls:
     def fill(self, hole, t):
         """Settle an unknown element type once something of that type goes in."""
         t = deep(t)
+        cur = deep(hole)
+        if (cur is not None and t is not None and t != 'none' and cur != t
+                and (is_tuple(cur) or is_tuple(t))):
+            raise Refused((1, 'a container holding tuples of different shapes is not built; keep one '
+                              'tuple shape in the container'))
         if isinstance(hole, Hole) and R(hole) is None and t is not None and t != 'none':
             hole.t = t
 
@@ -300,7 +305,7 @@ class Calls:
             self.refuse(node, 'divmod of values whose type is not known to be int or float')
         self.force()
         if FLT in ts:
-            args = [self.coerce(a, t, FLT)[0] for a, t in zip(args, ts)]
+            args = [self.coerce(a, t, FLT, math=True)[0] for a, t in zip(args, ts)]
             return call(self.gen.divmod(True), *args), ('tuple', (FLT, FLT))
         return call(self.gen.divmod(False), *args), ('tuple', (INT, INT))
 
@@ -494,7 +499,10 @@ class Calls:
             if t not in NUMERIC:
                 self.refuse(node, 'math.modf of a value whose type is not known to be int or float')
             self.force()
-            return call(self.gen.modf(), self.coerce(args[0], t, FLT)[0]), ('tuple', (FLT, FLT))
+            return call(self.gen.modf(), self.coerce(args[0], t, FLT, math=True)[0]), ('tuple', (FLT, FLT))
+        if mod == 'bisect' and fn in ('bisect_left', 'bisect_right', 'bisect'):
+            args, ts, kws = self.args_ex(node)
+            return self.done(node, args, kws, INT)        # an index
         if mod == 'math':
             args, ts, kws = self.args_ex(node)
             if fn in MATH_FLOAT:
