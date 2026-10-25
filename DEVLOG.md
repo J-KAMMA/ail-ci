@@ -462,6 +462,17 @@ bytes and bytearray membership are unchanged. Added `test_ail_pre114.py`, which 
 items reaching the code through an argument, a list item, an attribute and a dict
 value on both builds. Non-index start/stop bounds for bytes search remain a separate
 open difference and are not changed here.
+## 2026-10-24 - Counter(mapping) keeps its values (job-pre120-10242313)
+
+CPython 3.12's `Counter.update(mapping)` uses `dict.update` when the counter is empty and only
+adds `count + self.get(elem, 0)` when it is not. Every constructor starts empty, so
+`Counter({"a": "x"})` keeps `"x"`; the general path added `0 + "x"` for each entry and raised
+`TypeError`, and `Counter().update({"a": "x"})` did the same. `ail_counter_update_map` now takes
+CPython's empty-counter branch (copy the values), while a non-empty update still adds counts and
+keeps CPython's operand order in the TypeError it can raise. The same change sorts string counts in
+Counter's `repr` in most_common order and makes the operators' comparison with 0 name the operator
+CPython names. Added `AIL_CURRENT/test_ail_pre120.py` (five programs, both builds) and registered it
+in `ail_check.MODULES`.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
