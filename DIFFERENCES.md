@@ -2,6 +2,7 @@
 
 | id | area | difference | status |
 | --- | --- | --- | --- |
+| C?-job-pre185-10251543-1 | range slicing | Range slicing is implemented, but a slice whose own start/stop/step falls outside int64 stops with `integer overflow`. CPython 3.12 ranges are arbitrary precision, so reversing a range that begins at INT64_MIN gives a stop of INT64_MIN-2 there. Slices whose result fits int64 (including ranges that touch either int64 bound) match CPython on both builds. | open (int64 limit); `test_ail_pre185.py` |
 | C?-job-pre160-10250349-1 | round() ndigits / `__index__` | An `__index__` method that evaluates an out-of-int64 intermediate (for example `10**30` inside the method) cannot run: AIL stops with `integer overflow` while evaluating that expression, before it returns an index. CPython uses arbitrary precision and returns the resulting (possibly small) integer. | refused by name |
 
 Deliberate differences from CPython and open silent differences found by differential jobs.
