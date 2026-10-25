@@ -3,8 +3,9 @@
 A nested `def` whose literal default is a list, dict, set or a tuple holding one was rebuilt at
 every call site, so each call got a fresh object where CPython shares the object built when the
 `def` statement ran: `def f(x, acc=[]); f(1); f(2)` printed `[1] [2]` instead of `[1] [1, 2]`.
-Such a nested default is now refused by name on both builds. Immutable defaults, including values
-that reach the call through an argument, a list item, a dict value and an attribute, still agree.
+Such a nested default is now evaluated once at the `def` into a hidden local, so the object is
+shared between calls as in CPython. Immutable defaults, including values that reach the call through
+an argument, a list item, a dict value and an attribute, still agree.
 """
 import os
 import subprocess
@@ -129,7 +130,7 @@ def _build_and_run(directory, name, text, general):
 
 
 class Pre117Tests(unittest.TestCase):
-    def test_mutable_literal_defaults_of_nested_defs_are_refused_by_name(self):
+    def test_mutable_literal_defaults_of_nested_defs_are_shared(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre117-') as directory:
             for slug, text in MUTABLE_DEFAULTS.items():
                 want, want_rc, err = _cpython(directory, slug, text)
@@ -137,9 +138,9 @@ class Pre117Tests(unittest.TestCase):
                 for general in (True, False):
                     got, build_err = _build_and_run(directory, '%s_%s' % (slug, 'g' if general else 'd'),
                                                     text, general)
-                    self.assertIsNone(got, '%s (general=%s) built a mutable nested default\n%s'
-                                      % (slug, general, build_err))
-                    self.assertIn('mutable literal default', build_err)
+                    self.assertIsNotNone(got, '%s (general=%s)\n%s' % (slug, general, build_err))
+                    self.assertEqual(got, (want, want_rc), '%s (general=%s)\n%s'
+                                     % (slug, general, build_err))
 
     def test_immutable_defaults_still_match_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre117-') as directory:

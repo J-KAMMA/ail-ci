@@ -11,9 +11,9 @@ a fresh list/dict at every call, while CPython evaluates it once when the `def` 
         print(make(1), make(2), make(3))
 
 printed `[1] [2] [3]` instead of `[1, 2, 3] [1, 2, 3] [1, 2, 3]` (both builds; the typed path
-falls back to the general path for this shape).  Such a default is now refused by name on the
-general path, so the default build refuses it too.  Immutable nested defaults and late binding
-over a loop variable still match CPython.
+falls back to the general path for this shape).  Mutable literal defaults are now evaluated once
+at the `def` statement into a hidden local, so the object is shared between calls as in CPython.
+Immutable nested defaults and late binding over a loop variable still match CPython.
 """
 import os
 import subprocess
@@ -99,16 +99,6 @@ def _build_and_run(directory, name, text, general):
 
 
 class Fuzz87Tests(unittest.TestCase):
-    def check_refused(self, name, text):
-        with tempfile.TemporaryDirectory(prefix='ail-fuzz87-') as directory:
-            _, rc = _cpython(directory, name, text)
-            self.assertEqual(rc, 0)
-            for general in (True, False):
-                got, build_err = _build_and_run(directory, '%s_%s' % (name, 'g' if general else 'd'),
-                                                text, general)
-                self.assertIsNone(got, build_err)
-                self.assertIn('mutable default', build_err)
-
     def check_same(self, name, text):
         with tempfile.TemporaryDirectory(prefix='ail-fuzz87-') as directory:
             want, rc = _cpython(directory, name, text)
@@ -119,14 +109,14 @@ class Fuzz87Tests(unittest.TestCase):
                 self.assertIsNotNone(got, '%s (general=%s)\n%s' % (text, general, build_err))
                 self.assertEqual(got, (want, rc), '%s (general=%s)\n%s' % (text, general, build_err))
 
-    def test_nested_mutable_list_default_is_refused(self):
-        self.check_refused('mutable_list', MUTABLE_LIST)
+    def test_nested_mutable_list_default_is_shared(self):
+        self.check_same('mutable_list', MUTABLE_LIST)
 
-    def test_nested_mutable_dict_default_is_refused(self):
-        self.check_refused('mutable_dict', MUTABLE_DICT)
+    def test_nested_mutable_dict_default_is_shared(self):
+        self.check_same('mutable_dict', MUTABLE_DICT)
 
-    def test_nested_mutable_keyword_only_default_is_refused(self):
-        self.check_refused('mutable_kwonly', MUTABLE_KEYWORD_ONLY)
+    def test_nested_mutable_keyword_only_default_is_shared(self):
+        self.check_same('mutable_kwonly', MUTABLE_KEYWORD_ONLY)
 
     def test_immutable_defaults_and_late_binding_still_match(self):
         self.check_same('safe', SAFE)

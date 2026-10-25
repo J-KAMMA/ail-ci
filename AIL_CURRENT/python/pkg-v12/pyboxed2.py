@@ -1169,10 +1169,8 @@ def _is_literal_default(d):
         return False
 
 
-def _is_mutable_literal_default(d):
-    """A literal default that builds a list, dict, set or bytearray (also inside a tuple).  A
-    nested def's defaults are filled in at each call site, so such a value would be a fresh
-    object per call; CPython evaluates it once, when the def runs."""
+def _literal_default_is_mutable(d):
+    """True for a literal default that builds a list/dict/set (or a tuple holding one)."""
     try:
         value = ast.literal_eval(d)
     except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
@@ -1181,7 +1179,9 @@ def _is_mutable_literal_default(d):
     def mutable(v):
         if isinstance(v, (list, dict, set, bytearray)):
             return True
-        return isinstance(v, tuple) and any(mutable(x) for x in v)
+        if isinstance(v, tuple):
+            return any(mutable(x) for x in v)
+        return False
 
     return mutable(value)
 
@@ -3209,6 +3209,7 @@ class Compiler(boxclosure.ClosureMixin):
         node = info['node']
         ctx = Ctx(info['cname'])
         ctx.fn_node = node
+        ctx.ident_names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
         ctx.qualname = (info['owner_class'] + '.' + node.name) if info.get('is_method') else node.name
         ctx.fn_params = set(info['all_params'])
         ctx.bound_params, ctx.fixed_params = _stable_params(node, info['all_params'])
@@ -3318,23 +3319,10 @@ class Compiler(boxclosure.ClosureMixin):
                self.global_slots['class:generator'], info['cname'], c_str_literal(info['node'].name)))
 
     def _register_nested(self, node, outer_ctx):
-        def constant(e):
-            try:
-                ast.literal_eval(e)
-                return True
-            except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
-                return False
-        # defaults that are constants (CPython evaluates them once, when the def runs: for a constant the value
-        # filled in at each call is the same), *args packed into a tuple at the call, keyword-only parameters.
-        # A mutable literal would be a fresh object at each call, so it is refused by name instead.
-        if any(_is_mutable_literal_default(d) for d in node.args.defaults + node.args.kw_defaults):
-            raise Unsupported('a nested def %s with a mutable literal default (a mutable default: '
-                              'list/dict/set); CPython shares one default object between calls'
+        # *args is packed into a tuple at the call; **kwargs and positional-only parameters are not modelled
+        if node.args.kwarg or node.args.posonlyargs:
+            raise Unsupported('a nested def %s with **kwargs or positional-only parameters'
                               % node.name)
-        if node.args.kwarg or node.args.posonlyargs or not all(constant(d) for d in node.args.defaults) \
-                or not all(d is None or constant(d) for d in node.args.kw_defaults):
-            raise Unsupported('a nested def %s with *args/**kwargs/keyword-only/default '
-                              'parameters' % node.name)
         if node.decorator_list:
             raise Unsupported('a decorator on nested def %s' % node.name)
         # CPython binds the function when the def statement runs; a call textually before it (or
@@ -3355,6 +3343,21 @@ class Compiler(boxclosure.ClosureMixin):
         kwonly = [a.arg for a in node.args.kwonlyargs]
         defaults = dict(zip(positional[len(positional) - len(node.args.defaults):], node.args.defaults))
         defaults.update({k: d for k, d in zip(kwonly, node.args.kw_defaults) if d is not None})
+        # CPython evaluates every default ONCE, when the def statement runs. A literal scalar/tuple is
+        # safe to rebuild at each call site; anything else is evaluated into a hidden local at the def
+        # statement (mutable literals too, so `acc=[]` is shared between calls as CPython does).
+        default_inits = []
+        for pname, dexpr in list(defaults.items()):
+            if _is_literal_default(dexpr) and not _literal_default_is_mutable(dexpr):
+                continue
+            while True:
+                hidden = '_ail_nndefault_%d' % getattr(self, 'nndefault_n', 0)
+                self.nndefault_n = getattr(self, 'nndefault_n', 0) + 1
+                if hidden not in outer_ctx.slot_of and hidden not in getattr(outer_ctx, 'ident_names', ()):
+                    break
+            outer_ctx.declare_local(hidden)
+            defaults[pname] = ast.copy_location(ast.Name(id=hidden, ctx=ast.Load()), dexpr)
+            default_inits.append((hidden, dexpr))
         params = positional + ([vararg] if vararg else []) + kwonly
         nonlocal_names = _nonlocal_names(node.body)
         own_bound = set(params) | _scan_assigned_names(node.body) | {node.name}
@@ -3369,7 +3372,8 @@ class Compiler(boxclosure.ClosureMixin):
         by_ptr = [nm for nm in free if nm in nonlocal_names]
         by_val = [nm for nm in free if nm not in nonlocal_names]
         info = {'node': node, 'params': params, 'cname': cname, 'by_val': by_val, 'by_ptr': by_ptr,
-                'positional': positional, 'vararg': vararg, 'kwonly': kwonly, 'defaults': defaults}
+                'positional': positional, 'vararg': vararg, 'kwonly': kwonly, 'defaults': defaults,
+                'default_inits': default_inits}
         outer_ctx.nested_funcs[node.name] = info
         # Compile the nested function body now, in its OWN Ctx/frame, with captured names
         # pre-registered: by-value captures get an ordinary local slot (copied in from the
@@ -10418,6 +10422,11 @@ class Compiler(boxclosure.ClosureMixin):
             value = self.closure_value(node, ctx, node.name)
             ctx.emit('%s = %s;' % (self.name_ref(node.name, ctx), value))
             return
+        info = ctx.nested_funcs.get(node.name)
+        if info is not None:
+            # CPython evaluates a default when the def statement runs, once per execution.
+            for hidden, dexpr in info.get('default_inits', ()):
+                ctx.emit('%s = %s;' % (self.name_ref(hidden, ctx), self.expr(dexpr, ctx)))
         flag = ctx.nested_def_flags.get(node.name)
         if flag:
             ctx.emit('%s = 1;' % flag)
