@@ -194,6 +194,89 @@ limits, the empty string, intermediates built from powers, shifts, sums and prod
 reaching the call through an argument, a list item, an attribute and a dict value, on both builds.
 `/tmp/probes/p205_direct.py`, `p205_flows.py`, `p205_types.py` and `p205_features.py` match CPython
 on both builds; `p205_out_of_range.py` is refused by name (CPython raises OverflowError at run time).
+## 2026-10-25 - pre206 review fixes: complete and non-ASCII format-spec messages
+
+The review of the pre206 job found three defects in the extra whole-spec message rewrite. The
+whole-spec message is now built as runtime text instead of a 160-byte C buffer: the complete spec
+is included (120/300-character specs, not 159 bytes) and an embedded NUL is kept. Non-ASCII code
+units are copied as code units rather than UTF-8 bytes, so `format(1, '__é')` names `'__é'` (no
+double encoding). CPython's grouping-vs-type check now runs inside the parser before the non-ASCII
+type rejection, so `format(1, ',é')` and `',中'` give `Cannot specify ',' with '\xe9'` /
+`'\x4e2d'`; it also covers the previously pre-existing grouping + space/`q`/`i` cases, with
+`\x20` escaping. The repeated-grouping behaviour from the earlier commit is unchanged.
+
+Probes `/tmp/probes/p_review_fix.py` and `/tmp/probes/p_review_matrix.py` (non-ASCII and long/NUL
+whole specs, grouping with every ASCII/BMP code point, both builds, values through an argument, a
+list item, an attribute, a dict value and an alias) match CPython; the reviewer's `p_uni_long`,
+`p_uni_group`, `p_uni_plain` and `p_cont` match, and `p_fuzz` is down to the two pre-existing
+string `+_`/`+,` sign-vs-grouping differences listed in the review. `test_ail_pre206`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass on both builds.
+
+## 2026-10-25 - format() repeated grouping characters (job-pre206-10252128)
+
+The memsafe2 review listed three pre-existing differences. The first, `int(bytearray(...), base)`
+naming `bytearray(b'...')` in the ValueError, is already fixed on this tree (pre192), and
+`bash ~/tools/cmp.sh` matches CPython. The first still-differing item is the format-spec parser:
+`format(1, '__d')` and `format(1, ',,d')` said `Cannot specify both ',' and '_'.` where CPython
+raises `ValueError: Invalid format specifier '__d' for object of type 'int'`.
+
+CPython consumes one grouping character. A different second grouping character keeps
+`Cannot specify both ',' and '_'.`; the same character at the end of the spec is read as the type
+and gives `Cannot specify 'g' with 'g'.`; the same character followed by anything else rejects the
+whole spec with the full `Invalid format specifier '<spec>' for object of type '<type>'` text. The
+parser in safetyrt.py now follows those three cases, and its other whole-spec rejections use the
+same full text. A single BMP non-ASCII type now reports CPython's
+`Unknown format code '\x..' for object of type '...'` instead of the old bare message; a non-BMP
+type remains a pre-existing 16-bit-unit limitation and was not changed.
+
+`test_ail_pre206.py` covers int/negative/zero/bool/float/-0.0/str, signs, zero padding, widths,
+empty specs, valid grouping, direct literals/f-string/str.format and values through arguments,
+list items, attributes, dict values and aliases, on both builds. Probes
+`/tmp/probes/p_pre206_group.py`, `p_pre206_generic.py`, `p_fmtgroup.py`, `p_fmtgroup2.py` and
+`p_fmtgroup_lit.py` match CPython on both builds.
+## 2026-10-25 - class-method call sites keep boxed try handlers (job-pre211-10252259)
+
+The reviewer of rbpre171 recorded two pre-existing differences.  The generator-expression case
+(`gen = (shl(1, -1) for _ in range(1))`) is already refused by name on both builds ("a generator
+expression used as a value"), so nothing changed there.  The method case still differed on the
+default build: `C.run` called `shl(1, -1)` and `c.run()` sat under a module `try`, but pymix's
+`_escapes` built its call graph only from module-level `FunctionDef`s and direct `Name` callees.
+It therefore saw no protected call site for `shl`, selected a typed clone, and the ValueError
+escaped the boxed handler (exit 1, no output).  `_escapes` now includes class method bodies and
+attribute call sites (`obj.method()`), so the chain `c.run()` -> `run` -> `shl` reaches the
+module `try`, `shl` is rejected as exception-capable, and both builds catch the ValueError.
+
+The new `test_ail_pre211.py` covers literal, argument, list-item, attribute, dict-value and alias
+shift counts, zero/large valid shifts, method-to-method and helper chains, and the division,
+subscript and dict-key traps on both builds, plus the genexp by-name refusal.  Probes:
+`r11_method.py`, `r11_forms.py`, `r11_chain.py`, `r11_uncaught.py`, `r11_traps.py` (all match
+CPython on both builds); `r9_genexp.py` is refused by name on both.  `test_ail_pre211.py`,
+`test_ail_pre109.py`, `test_ail_safetynet.py`, `test_ail_files.py`,
+`test_ail_corpus_findings3.py`, `test_ail_mixed_bounds.py`, `test_ail_flush_exit.py` and
+`test_ail_bugs7.py` pass.
+## 2026-10-25 - int(bytes-like, base=...) (job-pre212-10252300)
+
+The pre192 review recorded that a keyword `base=` with a bytes-like first argument raised
+`TypeError: int() can't convert non-string with explicit base` on both builds, where CPython
+parses the bytes: `int(b"10", base=10)` is 10 and `int(bytearray(b"x"), base=10)` raises the
+bytes-repr ValueError.  The general-path rewrite into `_ail_int2` only matched the positional
+`int(x, base)` form, so the keyword form fell through to the str-only boxed runtime.
+
+The rewrite now also accepts `int(x, base=...)` (exactly one positional argument and one `base`
+keyword, no starred argument).  Because that path shares `int(x, base)`, the bytes parser now
+validates the base before the literal (CPython checks the base type/range first), and the boxed
+runtime checks the base range before the argument type, so `int(b"10", base=1)` and
+`int(1.5, base=1)` both raise CPython's `int() base must be >= 2 and <= 36, or 0` instead of a
+literal or type error.  The positional bytes form uses the same code and is fixed with it.
+
+`test_ail_pre212.py` covers valid bases 0/2/8/10/16/36, both bytes forms, the direct/argument/
+list-item/attribute/dict-value/alias routes for the value and the base, invalid literals and
+their b-repr text, empty/signed/whitespace/underscore/prefix/non-ASCII/quote/control inputs,
+the 200-character repr cut, invalid base types and ranges, the positional and str baselines, and
+evaluation order, on both builds.  Probes: `/tmp/probes/p_intbase_kw.py`,
+`p_intbase_kw_routes.py`, `p_intbase_kw_edge.py`, `p_intbase_range.py`; all match CPython on both
+builds.
+
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
