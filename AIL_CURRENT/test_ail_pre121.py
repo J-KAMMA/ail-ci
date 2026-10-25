@@ -135,7 +135,8 @@ OUT_OF_RANGE = [
 ]
 
 REFUSALS = ('outside the signed 64-bit range',
-            'int64 constant expression out of range')
+            'int64 constant expression out of range',
+            'int64 literal out of range')
 
 
 def _cpython(directory, name, text):

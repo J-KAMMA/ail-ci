@@ -5,9 +5,9 @@ CPython's ints are unbounded: `xs[10**20]` reaches the list and raises
 `10**20` in int64 and used to stop with `integer overflow` (exit 1) before the
 subscript, a pre-existing difference.  The compiler now refuses a constant
 subscript index whose value (or an intermediate step) leaves int64, and a
-constant `**` outside int64 wherever it appears (an argument, a list item, an
-attribute and a dict value), with `int64 index out of range` /
-`int64 constant out of range` and exit 2.  In-range constant index expressions
+constant expression outside int64 wherever it appears (an argument, a list item,
+an attribute and a dict value), with `int64 index out of range` /
+`int64 literal out of range` and exit 2.  In-range constant index expressions
 still match CPython on both builds.
 """
 import os
@@ -142,7 +142,7 @@ class Pre177Tests(unittest.TestCase):
     def test_huge_constant_power_through_values_is_refused(self):
         for slug, text in (('argument', FLOW_ARGUMENT), ('list_item', FLOW_LIST_ITEM),
                            ('attribute', FLOW_ATTRIBUTE), ('dict_value', FLOW_DICT_VALUE)):
-            self.refused('flow_' + slug, text, 'int64 constant out of range', '100000000000000000000')
+            self.refused('flow_' + slug, text, 'int64 literal out of range', '100000000000000000000')
 
     def test_huge_literal_index_keeps_the_literal_message(self):
         text = 'def main():\n    xs = [10, 20, 30]\n    print(xs[100000000000000000000])\n\n\nmain()\n'

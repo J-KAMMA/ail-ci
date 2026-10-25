@@ -3,6 +3,7 @@ import ast
 import argparse
 import hashlib
 import json
+import operator
 import os
 from pathlib import Path
 import platform
@@ -75,6 +76,110 @@ def _module_constant(node):
             and bool(value.elts) and all(map(_literal_number, value.elts)))
 
 
+_PURE_INT_BINARY = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
+                    ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod,
+                    ast.Pow: operator.pow, ast.LShift: operator.lshift, ast.RShift: operator.rshift,
+                    ast.BitAnd: operator.and_, ast.BitOr: operator.or_, ast.BitXor: operator.xor}
+_MAX_CONST_BITS = 1 << 16
+
+
+class _HugeConstant(Exception):
+    pass
+
+
+_HUGE = object()
+
+
+def _pure_constant_int(node):
+    """The value of a pure integer constant expression, or None when `node` is not one.
+
+    `_HugeConstant` means the value is certainly outside int64 (larger than _MAX_CONST_BITS bits),
+    so a 10**100000000 exponent is refused without computing it.  Operators that yield a float
+    (division, a negative exponent) are not constant int expressions here."""
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        return node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert)):
+        value = _pure_constant_int(node.operand)
+        if value is None:
+            return None
+        if isinstance(node.op, ast.Invert):
+            value = ~value
+        elif isinstance(node.op, ast.USub):
+            value = -value
+        if value.bit_length() > _MAX_CONST_BITS:
+            raise _HugeConstant
+        return value
+    if isinstance(node, ast.BinOp) and type(node.op) in _PURE_INT_BINARY:
+        try:
+            left = _pure_constant_int(node.left)
+        except _HugeConstant:
+            left = _HUGE
+        try:
+            right = _pure_constant_int(node.right)
+        except _HugeConstant:
+            right = _HUGE
+        if left is None or right is None:
+            return None
+        if left is _HUGE or right is _HUGE:
+            if isinstance(node.op, (ast.Mult, ast.BitAnd)) and (left == 0 or right == 0):
+                return 0
+            if isinstance(node.op, ast.LShift) and left == 0:
+                return 0
+            if isinstance(node.op, ast.Pow) and (right == 0 or left == 0):
+                return 1 if right == 0 else 0
+            raise _HugeConstant
+        if isinstance(node.op, ast.Pow):
+            if right < 0:
+                return None
+            if abs(left) > 1 and (right > 4096 or abs(left).bit_length() * right > _MAX_CONST_BITS):
+                raise _HugeConstant
+            value = left ** right
+        elif isinstance(node.op, ast.LShift):
+            if right < 0:
+                return None
+            if left and (right > 4096 or left.bit_length() + right > _MAX_CONST_BITS):
+                raise _HugeConstant
+            value = left << right
+        elif isinstance(node.op, ast.RShift):
+            if right < 0:
+                return None
+            value = 0 if left >= 0 else -1
+            if right <= _MAX_CONST_BITS:
+                value = left >> right
+        else:
+            try:
+                value = _PURE_INT_BINARY[type(node.op)](left, right)
+            except (ArithmeticError, ValueError):
+                return None
+        if value.bit_length() > _MAX_CONST_BITS:
+            raise _HugeConstant
+        return value
+    return None
+
+
+def _local_composite_assignments(tree):
+    """Value nodes of composite int expressions assigned to a local name.
+
+    A local name is a mutable variable, not a constant, so an expression assigned to it keeps
+    its runtime meaning (`a = 10**30` still traps with `integer overflow` when it runs); a module
+    constant or a direct value is folded.  A bare literal keeps the literal check everywhere."""
+    handled = set()
+
+    def visit(node, in_function):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for child in ast.iter_child_nodes(node):
+                visit(child, True)
+            return
+        if (in_function and isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.BinOp)):
+            handled.add(id(node.value))
+        for child in ast.iter_child_nodes(node):
+            visit(child, in_function)
+
+    visit(tree, False)
+    return handled
+
+
 _INT64_MIN, _INT64_MAX = -(1 << 63), (1 << 63) - 1
 
 
@@ -143,41 +248,6 @@ def _const_expr_int(node, bounded=True):
     return value
 
 
-def _check_constant_power(node, parents, maxsplit):
-    """Refuse a constant `**` whose value int64 cannot hold, unless the whole enclosing constant
-    expression folds to an in-range value (pre113 keeps `2**63 - 1` and `2**64 // 2 - 1`), the
-    node is a str.split/rsplit maxsplit constant (pre97 names that), or the expression is the
-    whole right-hand side of an assignment (a local or module value keeps its run-time overflow
-    trap). Literals are refused by _check_int64_literals; this catches `10 ** 20` written as
-    arithmetic, wherever it appears (an argument, a list item, an attribute or a dict value),
-    not only as an index."""
-    if id(node) in maxsplit:
-        return
-    try:
-        value = _const_expr_int(node, bounded=False)
-    except _Int64ConstantOverflow:
-        value = None
-    if value is None or _INT64_MIN <= value <= _INT64_MAX:
-        return
-    root = node
-    while True:
-        parent = parents.get(root)
-        if parent is None or _const_expr_int(parent, bounded=False) is None:
-            break
-        root = parent
-    full = _const_expr_int(root, bounded=False)
-    if full is not None and _INT64_MIN <= full <= _INT64_MAX:
-        return
-    parent = parents.get(root)
-    if (isinstance(parent, ast.Assign) and parent.value is root
-            and not isinstance(parents.get(parent), ast.ClassDef)):
-        return
-    error = ValueError(f'int64 constant out of range: {value}')
-    error.source_line = node.lineno
-    error.source_column = node.col_offset
-    raise error
-
-
 def _check_index_expression(slice_node):
     """Refuse a constant subscript index that int64 cannot hold. A literal or signed literal is
     already refused by _check_int64_literals with its own message, so only compound arithmetic is
@@ -197,25 +267,40 @@ def _check_index_expression(slice_node):
 
 
 def _check_int64_literals(tree):
-    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
     maxsplit = _maxsplit_constant_nodes(tree)
+    local_assignments = _local_composite_assignments(tree)
     nodes = [tree]
     while nodes:
         node = nodes.pop()
+        if id(node) in local_assignments:
+            continue
         if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice):
             _check_index_expression(node.slice)
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
-            _check_constant_power(node, parents, maxsplit)
-        if (isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub))
-                and isinstance(node.operand, ast.Constant) and type(node.operand.value) is int):
-            value = -node.operand.value if isinstance(node.op, ast.USub) else node.operand.value
-        elif isinstance(node, ast.Constant) and type(node.value) is int:
+        if id(node) in maxsplit and not (isinstance(node, ast.Constant) and type(node.value) is int):
+            continue
+        text = None
+        if isinstance(node, ast.Constant) and type(node.value) is int:
             value = node.value
+            text = str(value)
+        elif (isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert))
+              or isinstance(node, ast.BinOp) and type(node.op) in _PURE_INT_BINARY):
+            try:
+                value = _pure_constant_int(node)
+            except _HugeConstant:
+                text = ast.unparse(node)
+                error = ValueError(f'int64 literal out of range: {text}')
+                error.source_line = node.lineno
+                error.source_column = node.col_offset
+                raise error
+            if value is None:
+                nodes.extend(ast.iter_child_nodes(node))
+                continue
+            text = str(value)
         else:
             nodes.extend(ast.iter_child_nodes(node))
             continue
         if not _INT64_MIN <= value <= _INT64_MAX:
-            error = ValueError(f'int64 literal out of range: {value}')
+            error = ValueError(f'int64 literal out of range: {text}')
             error.source_line = node.lineno
             error.source_column = node.col_offset
             raise error
@@ -311,7 +396,10 @@ def _check_int64_unary_constants(tree):
             continue
         if id(node) in maxsplit:
             continue
+        operand = _constant_int(node.operand, known)
         value = _constant_int(node, known)
+        if operand is not None and not -(1 << 63) <= operand < 1 << 63:
+            continue
         if value is not None and not -(1 << 63) <= value < 1 << 63:
             error = ValueError(f'int64 constant expression out of range: {value}')
             error.source_line = node.lineno
@@ -526,8 +614,8 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 if local_imports:
                     _check_importable(tree)
             if not declarations_only:
-                _check_int64_literals(tree)
                 _check_int64_unary_constants(tree)
+                _check_int64_literals(tree)
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)
             if source_map is not None:

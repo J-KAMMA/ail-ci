@@ -1,3 +1,21 @@
+## 2026-10-25 -- pre159 reapply: out-of-range int64 constant expressions are refused by name (job-rbrbrbpre159-10260122)
+
+Re-applied the accepted pre159 change on this tree; the code applied without conflict.
+
+Only a bare integer literal was checked against int64. A pure integer constant expression that left
+the range (`10 ** 30` in a return, argument, list item, attribute, dict value or module constant)
+was lowered and stopped at run time with `integer overflow`, and `__index__` returning `10 ** 30`
+printed a misleading sequence `TypeError`. `_check_int64_literals` now evaluates pure integer
+constant expressions (with guards for huge exponents and shifts) and refuses an out-of-range value
+at compile time with `int64 literal out of range`, on both builds. In-range expressions such as
+`2 ** 62`, `(1 << 62) - 1`, `-(2 ** 62)` and `2 ** (63 - 1)` are unchanged, and constant
+`split`/`rsplit` maxsplit keeps its own wording. A composite expression assigned to a mutable
+local name is skipped by the new check and left to the existing constant folder, which still
+refuses it by name; a unary overflow of
+an in-range constant keeps the existing `int64 constant expression out of range` wording, while
+one whose operand is already out of range reports the literal. `test_ail_pre159.py` holds the
+literal, expression, `__index__` and value-path cases and the in-range CPython check.
+
 ## 2026-10-25 -- pre199: range() with a zero step raises ValueError (job-pre199-10252047)
 
 The first still-differing item left by pre186 was `range(0, 5, 0)`: both builds accepted it and
