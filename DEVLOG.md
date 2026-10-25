@@ -57,6 +57,18 @@ TypeError), treats None as omitted there, and the dunder patch passes the object
 in the no-method error. Both builds match CPython on the ordering, type and route probes. An
 out-of-int64 `__index__` result still cannot be represented, so it now stops with `integer overflow`
 instead of silently wrapping (recorded in DIFFERENCES). Added `test_ail_pre160.py`.
+## 2026-10-24 - bench table ratio bounds near 1.0 (job-pre163-10250352)
+
+The pre130 review left the bench2 display quirk pre-existing on this tree: the
+`numeric_scale_binary` ail/base row printed `0.990 [0.981, 1.000] faster` although the real
+upper bound was 0.9996. Plain `%.3f` rounded 0.9996 to 1.000, so the row looked like a tie
+while the verdict (computed from the unrounded bounds) said faster. `fmt` now uses
+`_fmt_bound`, which adds decimals only when 3-decimal rounding would put a value on the wrong
+side of 1.0; the recorded row reads `0.990 [0.981, 0.9996] faster` and ordinary ratios keep
+three decimals, including negative, zero, non-finite and no-range values. No compiler or
+runtime file is touched. `AIL_CURRENT/test_ail_pre163.py` pins the recorded row, both sides of
+1.0, exact ties, the next floats around 1.0, and values arriving through an argument, a list
+item, an attribute and a dict value.
 
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
 
