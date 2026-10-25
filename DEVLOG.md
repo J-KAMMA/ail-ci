@@ -1,3 +1,21 @@
+## 2026-10-25 - register test_ail_pre121 and accept pre177 refusal wording (job-pre121reg-10260115)
+
+`test_ail_pre121.py` existed on this branch but was not listed in `ail_check.MODULES`, so the suite
+never ran it.  Two of its six tests failed because pre177 refuses a `**` constant outside int64 with
+"int64 constant out of range", which the test did not accept.  Added that third wording to
+`REFUSALS` (the existing two are unchanged) and registered the module.  Comparing
+`AIL_CURRENT/test_ail_*.py` with MODULES found 51 modules on disk but unregistered; all are now
+registered.  `tools/update_manifest.py` refreshed the pins and the shard entries were added to
+`tools/ci_shards.json`.
+
+Probes `/tmp/probes/p1_arg.py`-`p8_values.py`: `10**30` as a call argument, a list item, a class
+attribute, a dict value and a return value is refused "int64 constant out of range" on both builds
+where CPython runs; module-level and shift/module forms keep the existing "outside the signed 64-bit
+range" refusal; in-range boundaries (`-(2**63)`, `2**63-1`, `2**100//2**80`, `~(-2**63)`) and values
+reaching the code through a list, a dict and an attribute match CPython on both builds.
+`test_ail_callable_values`, also newly registered, fails 2/10 on this commit; the same two tests fail
+identically on the base commit ea69df3, so its expectations were left unchanged as the job requires.
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a

@@ -138,6 +138,21 @@ MODULES = (
     'test_ail_pre172',
     'test_ail_pre116',
     'test_ail_pre199',
+    'test_ail_ascii_char_compare', 'test_ail_binary_cursor_cli', 'test_ail_borrowed_element_fields',
+    'test_ail_bytearray_adjacent', 'test_ail_bytearray_receiver', 'test_ail_c_objects',
+    'test_ail_callable_owned_results', 'test_ail_callable_values', 'test_ail_chunk_loop_release',
+    'test_ail_contracts', 'test_ail_corpus_findings3', 'test_ail_cov2', 'test_ail_cross_target',
+    'test_ail_ctor_list_args', 'test_ail_exception_resources', 'test_ail_fastlib2', 'test_ail_finally',
+    'test_ail_float64_codec', 'test_ail_fuzz29', 'test_ail_fuzz35', 'test_ail_fuzz43', 'test_ail_fuzz45',
+    'test_ail_fuzz50', 'test_ail_fuzz53', 'test_ail_last_use_free', 'test_ail_left1',
+    'test_ail_link_mode', 'test_ail_map_field_moves', 'test_ail_map_fields',
+    'test_ail_method_object_contracts', 'test_ail_multifile', 'test_ail_nan_arith', 'test_ail_nest',
+    'test_ail_object_json_query', 'test_ail_pre121', 'test_ail_pre195', 'test_ail_pre23',
+    'test_ail_pre87', 'test_ail_reraise', 'test_ail_sexpr', 'test_ail_splitlines_utf8',
+    'test_ail_str_adjacent_cat', 'test_ail_str_case', 'test_ail_str_cursor',
+    'test_ail_struct_lifetimes', 'test_ail_struct_list_objects', 'test_ail_tcp_json_lines',
+    'test_ail_tcp_json_lines_poll', 'test_ail_tcp_listener', 'test_ail_text_find_search',
+    'test_ail_utf8_stream_fuzz',
 )
 
 
