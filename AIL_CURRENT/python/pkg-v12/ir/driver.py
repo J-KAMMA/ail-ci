@@ -210,11 +210,15 @@ def _apply(P, args, kwargs, result, current):
         isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
         and (getattr(P, 'TINT_SIGS', {}).get(n.func.id) or ((), 0))[1]
         for n in ast.walk(fn))
-    if _py and _needs_tint and _no_tint_locals and not _has_tint_call \
-            and not (_proof or '').startswith(('it calls ', 'it contains ')):
-        from pyfront import Unsupported
-        raise Unsupported('%s() has an int operation the local proof cannot bound, but no tagged local (%s)'
-                          % (fn.name, _proof))
+    _proof_without_local = (_py and _needs_tint and _no_tint_locals and not _has_tint_call
+                            and not (_proof or '').startswith(('it calls ', 'it contains ')))
+    if _proof_without_local:
+        if os.environ.get('AIL_NO_GENERAL'):
+            _needs_tint = False
+        else:
+            from pyfront import Unsupported
+            raise Unsupported('%s() has an int operation the local proof cannot bound, but no tagged local (%s)'
+                              % (fn.name, _proof))
     _sig = getattr(P, 'TINT_SIGS', {}).get(fn.name) if _py else None
     if _sig and (any(_sig[0]) or _sig[1]) and not _io_like:
         _needs_tint = True

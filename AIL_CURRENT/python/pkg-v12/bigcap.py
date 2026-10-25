@@ -172,6 +172,7 @@ _LP_OTHER_CALLS = frozenset((
     'list', 'dict', 'set', 'frozenset', 'tuple', 'bytes', 'bytearray', 'memoryview', 'complex', 'open', 'iter',
     'sorted', 'reversed', 'zip', 'map', 'filter', 'type', 'range', 'super', 'object', 'slice'))
 _LP_BOOL_CALLS = frozenset(('isinstance', 'issubclass', 'hasattr', 'callable'))
+_LP_COLLECTION_CALLS = frozenset(('Counter', 'defaultdict', 'OrderedDict', 'deque', 'ChainMap'))
 _LP_NONE_CALLS = frozenset(('print', 'setattr', 'delattr'))
 _LP_EXC_CALLS = frozenset((
     'BaseException', 'Exception', 'ArithmeticError', 'AssertionError', 'AttributeError', 'BufferError',
@@ -247,6 +248,12 @@ def _lp_eval(node, env, defined, bad):
     if isinstance(node, ast.Name):
         return env.get(node.id) or _LP_UNKNOWN
     if isinstance(node, ast.UnaryOp):
+        if isinstance(node.op, (ast.USub, ast.UAdd)):
+            c = _const_int(node)
+            if c is not None:
+                if not _LP_I64_MIN <= c <= _LP_I64_MAX:
+                    _lp_bad(bad, 'an int operation beyond int64')
+                return _lp_int(c, c)
         v = _lp_eval(node.operand, env, defined, bad)
         if isinstance(node.op, ast.Not):
             return _LP_BOOL
@@ -277,6 +284,12 @@ def _lp_eval(node, env, defined, bad):
             return _lp_int()
         return _LP_UNKNOWN
     if isinstance(node, ast.BinOp):
+        if isinstance(node.op, (ast.Add, ast.Sub, ast.Mult)):
+            c = _const_int(node)
+            if c is not None:
+                if not _LP_I64_MIN <= c <= _LP_I64_MAX:
+                    _lp_bad(bad, 'an int operation beyond int64')
+                return _lp_int(c, c)
         lv = _lp_eval(node.left, env, defined, bad)
         rv = _lp_eval(node.right, env, defined, bad)
         op = node.op
@@ -473,6 +486,8 @@ def _lp_eval(node, env, defined, bad):
                 return _LP_OTHER
             if name in defined:
                 return _LP_UNKNOWN
+            if name in _LP_COLLECTION_CALLS:
+                return _LP_OTHER
             if name in _LP_STR_CALLS:
                 return _LP_STR
             if name in _LP_OTHER_CALLS:
