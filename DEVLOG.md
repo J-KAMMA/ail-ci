@@ -122,6 +122,26 @@ the fold boundary, the out-of-int64 refusals, and the value through an argument,
 attribute, a dict value and a local on both builds.  Probes p_regress, p_orig, p_boundary,
 p_neg, p_routes and p_types matched CPython on HEAD; p_over_literal, p_over_reduced and
 p_over_intermediate were refused by name.
+## 2026-10-25 - class repr of a user class value (job-pre196-10252020)
+
+The first pre-existing item recorded by the rbpre170 review was that `repr(C)` for a user
+class printed `<object>` where CPython prints `<class '__main__.C'>`; `str()`, `print()`,
+containers, f-strings and `%r`/`%s` were the same because they share the writer. The v2
+runtime's `ail__write_repr_body` had no `AIL_T_CLASS` case, so class values fell through to
+the `<object>` default. It now writes CPython's class repr for top-level user classes; the
+builtin-class branch is defensive because no tested construct can obtain a builtin class
+value (`type()`, exception constructors and `__class__` are refused). Nested and
+function-local classes are already refused by name at compile time, so no qualname is needed.
+
+Probes in `/tmp/probes/pre196` (`p1`, `p9`, `p10`, `p16`, `p18`) covered direct, alias,
+argument (including a default), list-item, dict-value, attribute, return, nested-container,
+`str`, `print`, f-string and `%` routes on both builds and match CPython; `p6`/`p7`/`p17`
+(nested, local and `if`-block classes) and `p14`/`p15` (builtin `type()`/`Exception`) are
+refused by name. `p8` rebinds `__name__` and hits the separate unsupported `__module__`
+path. A class value passed to the explicit `format()` builtin still hits the older int-default
+formatter (`unsupported format string passed to non-int`); that path fails identically on the
+base and is not part of this item. Added `AIL_CURRENT/test_ail_pre196.py` and registered it in
+`ail_check.MODULES`.
 
 ## 2026-10-25 - int(s, base) message GC rooting (job-pre180-10251520)
 
