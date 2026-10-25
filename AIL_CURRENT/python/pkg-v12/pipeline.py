@@ -55,6 +55,12 @@ def compiler():
     raise PipelineError('no C compiler found on PATH; set $PIPE_CC')
 
 
+def opt_flags():
+    """The optimisation flags of a build: -O2, or -g -O0 under AIL_DEBUG=1 (`ail build --debug`, so gdb steps
+    through the source lines the `#line` directives point at)."""
+    return ['-g', '-O0', '-DAIL_DEBUG_SITE=1', '-DAIL_DBG_SITE(s)=((void)0)'] if os.environ.get('AIL_DEBUG') == '1' else ['-O2']
+
+
 def ffi_link_args():
     """Extra link arguments for C libraries named by @extern stubs (G4); empty unless AIL_FFI_LINK is set."""
     import shlex
