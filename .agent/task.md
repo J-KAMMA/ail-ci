@@ -1,10 +1,6 @@
-**Fix one pre-existing difference from CPython.** A reviewer of job `pre184` recorded these as already present before that job:
+**Your own test module test_ail_pre191 fails in the full suite** when your change is combined with the current integration branch and other accepted jobs.
 
-**New but permitted:** out-of-int64 constants in unreachable module/class/default positions are refused (`if False: X = 1 << 64`, `if False: def f(x=1<<64)`), where base prints `ok`. This is a named compile-time refusal of the target construct, which the task allows.
-
-**Unverified:** full suite, `test_ail_files`/`test_ail_corpus_findings3`/`pre97`/`pre160` on this commit, and the original fuzz47 item ordering.
-
-Reproduce the first one that still differs on this tree (`bash ~/tools/cmp.sh` on both builds). Fix that one cause, or refuse the construct by name at compile time. Add the case to a new `test_ail_pre191.py` and run only that module and `test_ail_safetynet`, then commit. If none of them still differs, change nothing and say so.
+Rebase mentally onto the current tree: run `cd AIL_CURRENT && python3 -m unittest -q test_ail_pre191`, find why it fails here (another change may have altered behaviour or output your test expects), and fix it so it passes while keeping your fix. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
