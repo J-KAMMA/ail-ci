@@ -1,3 +1,19 @@
+## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
+
+The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
+message: `int(bytearray(b"x"), 10)` printed `invalid literal for int() with base 10: bytearray(b'x')`
+on both builds, where CPython prints `...: b'x'`.  CPython parses the bytearray as bytes and formats the
+message with the bytes repr.  The prelude's `_ail_int2` now uses `"b" + _ail_b_repr(s)` for a bytearray,
+and `bytearray.__int__` does the same for the no-base form.  Both `int` message paths also apply
+CPython's 200-character `%.200R` cut; that was already missing for a long `bytes` argument as well.
+`float(bytearray(...))` still names the bytearray repr, as CPython does, and bytes inputs are unchanged.
+
+The new `test_ail_pre192.py` covers direct calls and an argument, list item, attribute, dict value and
+alias, bases 0/2/8/10/16/36, empty, packed bytes (0, 255, quotes, controls), non-ASCII, signs,
+whitespace, underscores, prefixes, lengths 199/200/201/300, valid values and the bytes baseline, on both
+builds.  `/tmp/probes/p_intba*.py` match CPython on both builds (keyword `base` is a separate pre-existing
+limitation and was not part of this fix).
+
 ## 2026-10-25 - int(s, base) message GC rooting (job-pre180-10251520)
 
 Review follow-up. The rewritten general-path `ail__int_badlit` built the message head string,
