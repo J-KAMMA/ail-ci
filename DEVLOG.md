@@ -1,3 +1,82 @@
+## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
+
+The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
+message: `int(bytearray(b"x"), 10)` printed `invalid literal for int() with base 10: bytearray(b'x')`
+on both builds, where CPython prints `...: b'x'`.  CPython parses the bytearray as bytes and formats the
+message with the bytes repr.  The prelude's `_ail_int2` now uses `"b" + _ail_b_repr(s)` for a bytearray,
+and `bytearray.__int__` does the same for the no-base form.  Both `int` message paths also apply
+CPython's 200-character `%.200R` cut; that was already missing for a long `bytes` argument as well.
+`float(bytearray(...))` still names the bytearray repr, as CPython does, and bytes inputs are unchanged.
+
+The new `test_ail_pre192.py` covers direct calls and an argument, list item, attribute, dict value and
+alias, bases 0/2/8/10/16/36, empty, packed bytes (0, 255, quotes, controls), non-ASCII, signs,
+whitespace, underscores, prefixes, lengths 199/200/201/300, valid values and the bytes baseline, on both
+builds.  `/tmp/probes/p_intba*.py` match CPython on both builds (keyword `base` is a separate pre-existing
+limitation and was not part of this fix).
+## 2026-10-25 - pre125 reapply: module-scope bare attribute/subscript annotations
+
+The accepted pre125 change proposed refusing `obj.attr: note()` / `xs[i]: note()` by name because
+the old surface evaluated neither the target nor the annotation. This tree already contains the
+pre124 fix, which evaluates the target's base object and index expressions and then the annotation
+in CPython order on both builds. Refusing here would regress that fix, so both changes are kept:
+pre124's evaluation stands, and `test_ail_pre125.py` re-applies pre125's cases as CPython-parity
+regressions (also a bare annotation on a plain name, `count: int`, unchanged). Probes:
+`ann_attr_module.py`, `ann_sub_module.py`, `ann_attr_nested.py`, `ann_sub_empty_negative.py`,
+`ann_sub_slice.py`, `ann_attr_alias.py`, `ann_sub_dict_str.py`, `ann_sub_arg_item_attr.py`,
+`ann_attr_static.py`, `ann_sub_future.py`, and `ann_name_type.py`; all matched CPython on both
+builds.
+## 2026-10-25 - constant int64 index overflow is refused by name (job-rbpre177-10251802)
+
+Re-applied the accepted job-pre177 change on top of the current tree. `AIL_CURRENT/ail_chatgpt.py`
+now evaluates constant integer arithmetic in the existing `_check_int64_literals` pass. A constant
+subscript index whose value or an intermediate step leaves int64 is refused with
+`int64 index out of range: <value>`; a constant `**` outside int64 is refused with
+`int64 constant out of range: <value>` where it reaches an argument, a list item, an attribute or
+a dict value. Both refusals exit 2 and build no executable. In-range constant index expressions
+(`xs[2**1]`, `xs[1<<1]`, `xs[(2**62)//(2**61)]`, ...) are unchanged and match CPython on both builds.
+
+The re-application had to reconcile later fixes that the accepted change predates: the whole
+enclosing constant expression is folded exactly first, so `2**63 - 1`, `2**64 // 2 - 1` and
+`2**65 - 2**65` still work (pre113); a simple assignment right-hand side keeps its run-time
+overflow trap (pre160 and the multifile big-pow case); and a str.split/rsplit maxsplit keeps its
+own `maxsplit constant does not fit` refusal (pre97). The new helpers live beside the existing
+`_constant_int(node, known)` without changing it.
+
+Probes in `/tmp/probes` cover list/str/bytes/tuple indexes, negative and shifted huge indexes,
+an intermediate overflow whose final value is in range, the four value flows, the in-range
+boundary, and the pre113/pre160 conflicts; every probe matches CPython or is refused by name.
+`test_ail_pre177.py` is registered in `ail_check.MODULES` and `tools/ci_shards.json`.
+## 2026-10-25 - re-apply pre89: mutable default of a nested def
+
+Re-applied accepted job `pre89` on the current tree. The behavioural fix is already present from
+the pre117 export: a nested `def` with a literal list/dict/set (or a tuple holding one, including a
+`bytearray`) default is refused by name (`a nested def f with a mutable literal default ...`) on
+both builds, instead of rebuilding the default per call, so the two fixes were kept together. The
+job's `test_ail_pre89.py` is added and registered in `ail_check.MODULES`; it covers list, dict,
+set, tuple-of-list and keyword-only defaults, immutable/top-level mutable defaults, and the p18
+(instance-attribute callable) and p23 (keyword arguments through a function value) refusals. The
+DIFFERENCES row is recorded with this branch's placeholder id.
+## 2026-10-25 - re-apply pre93: bare annotation target subexpressions (job-rbpre93-10251804)
+
+Re-applied job `pre93` on top of the current export. A function-local bare annotation such as
+`box().x: int` or `xs[i()]: int` dropped the target's subexpressions, so the calls did not run.
+The surface now emits the target's value and slice parts (recursively flattening a `Slice` or
+`Tuple` inside a subscript, through the normal rewriter so imported names work) without reading
+the attribute or performing the final subscript, and never evaluates the annotation, matching
+CPython. The tree already had the later module-scope fix (`module_bare_annotation`), so both were
+kept: module bare annotations still evaluate the target and a non-static annotation in CPython
+order, while function-local targets use the new path; class-body attribute targets stay `pass`.
+`test_ail_pre93.py` is registered in `ail_check.MODULES`, the DIFFERENCES row is restored, and the
+function, future-annotation, imported-name, tuple-slice and module cases run on both builds.
+## 2026-10-25 - re-apply fuzz94: mutable default of a nested def
+
+Re-applied job `rbfuzz94` on top of the current export. The tree already refused a nested `def`
+with a mutable literal default from the fuzz87/pre117 fixes, so both sides were kept: the existing
+helper covers a list/dict/set/bytearray (including inside a tuple) and its message names a
+"mutable literal default". Added `test_ail_fuzz94.py` and registered it in `ail_check.MODULES`;
+immutable defaults, keyword calls, recursion, loop closures with `nonlocal` and early returns
+still match CPython on both builds.
+
 ## 2026-10-25 - int(s, base) message GC rooting (job-pre180-10251520)
 
 Review follow-up. The rewritten general-path `ail__int_badlit` built the message head string,
