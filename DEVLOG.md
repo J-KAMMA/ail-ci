@@ -1,3 +1,24 @@
+## 2026-10-25 - float() wrong-type message (job-pre240-10260355)
+
+The first still-differing item from the rbrbrbmemsafe2 review's pre-existing list was `float()` on a
+non-number: `float(None)` / `float([1])` printed `float() argument must be a string or a number, not
+'NoneType'` / `'list'`, where CPython 3.12 prints `a string or a real number`.  Both general
+runtimes now use CPython's wording; the v2 runtime used by both tested builds also uses its
+class-aware type name, so a user instance names `Box` instead of `instance` and a builtin function
+names `builtin_function_or_method`.  The message buffer grew from 80 to 128 bytes so that name is
+not cut, and the dunderrt anchors were updated to the new text.  Valid int/bool/float/str
+conversions are unchanged.
+
+Probes in `/tmp/probes`: `pre240_simple.py`, `pre240_basic.py`, `pre240_flows.py`,
+`pre240_types.py`, `pre240_instance.py`, `pre240_dunder.py` and `pre240_callables.py` cover
+None/empty/nested containers, list/tuple/dict/set/frozenset/bytes/bytearray, int64 bounds, negative
+and -0.0, valid and invalid strings, aliasing, values through an argument, a list item, an attribute
+and a dict value, a user instance, a user function, a class value, a builtin function, and classes
+with `__float__`/`__index__`/`__int__`/`__add__` (dunder dispatch); all match CPython on both
+builds.  Added `test_ail_pre240.py` (2 tests, both builds) and registered it in
+`ail_check.MODULES`; `tools/ci_shards.py --update` assigned it a shard.  Final-state tests:
+test_ail_pre240, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 pass.
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a

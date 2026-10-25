@@ -479,13 +479,13 @@ def _edits():
               "        }\n"
               "        /* fall through */\n"
               "        default: { char buf[80]; snprintf(buf, sizeof buf, \"int() argument must be a string or a number, not '%s'\", ail_type_name(x.tag));"))
-    e.append(("        default: { char buf[80]; snprintf(buf, sizeof buf, \"float() argument must be a string or a number, not '%s'\", ail_type_name(x.tag));",
+    e.append(("        default: { char buf[128]; snprintf(buf, sizeof buf, \"float() argument must be a string or a real number, not '%s'\", ail__tname_c(x));",
               "        case AIL_T_INST: {\n"
               "            ail_d1_fn f = ail_dun1(x, AIL_D1_FLOAT); if (!f) f = ail_dun1(x, AIL_D1_INDEX);\n"
               "            if (f) { ail_obj r; ail_st st = f(cx, &r, x); if (st != AIL_OK) return st; if (r.tag == AIL_T_INT) r = ail_box_float(cx, (double)r.i); *out = r; return AIL_OK; }\n"
               "        }\n"
               "        /* fall through */\n"
-              "        default: { char buf[80]; snprintf(buf, sizeof buf, \"float() argument must be a string or a number, not '%s'\", ail_type_name(x.tag));"))
+              "        default: { char buf[128]; snprintf(buf, sizeof buf, \"float() argument must be a string or a real number, not '%s'\", ail__tname_c(x));"))
     e.append(('static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, ail_obj n) {\n',
               'static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, ail_obj n) {\n'
               '    if (x.tag == AIL_T_INST) { ail_d2_fn f = ail_dun2(x, AIL_D2_ROUND); if (f) return f(cx, out, x, has_n ? n : ail_box_none()); }\n'))

@@ -10412,7 +10412,7 @@ static inline ail_obj ail_to_float(ail_obj x) {
         case AIL_FLOAT: return x;
         case AIL_STR: return ail_box_float(ail_str_to_float(x.s));
         default: {
-            char buf[80]; snprintf(buf, sizeof buf, "float() argument must be a string or a number, not '%s'", ail_type_name(x.tag));
+            char buf[128]; snprintf(buf, sizeof buf, "float() argument must be a string or a real number, not '%s'", ail_type_name(x.tag));
             ail_raise_c(AIL_ERR_TYPE, buf);
             return ail_box_none();
         }
@@ -16437,7 +16437,7 @@ static inline ail_st ail_to_float(ail_ctx *cx, ail_obj *out, ail_obj x) {
         case AIL_T_INT: case AIL_T_BOOL: *out = ail_box_float(cx, (double)x.i); return AIL_OK;
         case AIL_T_FLOAT: *out = x; return AIL_OK;
         case AIL_T_STR: { double v = 0.0; ail_st st = ail_str_to_float(cx, &v, x); if (st != AIL_OK) return st; *out = ail_box_float(cx, v); return AIL_OK; }
-        default: { char buf[80]; snprintf(buf, sizeof buf, "float() argument must be a string or a number, not '%s'", ail_type_name(x.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
+        default: { char buf[128]; snprintf(buf, sizeof buf, "float() argument must be a string or a real number, not '%s'", ail__tname_c(x)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
     }
 }
 static inline ail_obj ail_to_bool(ail_obj x) { return ail_box_bool(ail_obj_truthy(x)); }
