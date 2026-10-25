@@ -247,6 +247,270 @@ class _Collector:
             self.visit(child, chain, class_locals)
 
 
+def _const_truth(node):
+    """True/False when the expression's truth value is fixed, else None."""
+    if isinstance(node, ast.Constant):
+        return bool(node.value)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        value = _const_truth(node.operand)
+        return None if value is None else not value
+    if isinstance(node, ast.BoolOp):
+        values = [_const_truth(value) for value in node.values]
+        if isinstance(node.op, ast.And):
+            if False in values:
+                return False
+            return True if all(value is True for value in values) else None
+        if True in values:
+            return True
+        return False if all(value is False for value in values) else None
+    try:
+        return bool(ast.literal_eval(node))
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return None
+
+
+def _scan_immediate(node, name, chain=()):
+    """Module-scope loads of `name` when `node` runs; a function/lambda body is deferred."""
+    loads = []
+
+    def sequence(statements, chain):
+        local = chain
+        for statement in statements:
+            visit(statement, local)
+            if 'bind' in _binding_effects(statement, name):
+                local = chain + ({name},)
+
+    def visit(node, chain):
+        if isinstance(node, ast.Name):
+            if (node.id == name and isinstance(node.ctx, ast.Load)
+                    and not any(name in scope for scope in chain)):
+                loads.append(node)
+            return
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for item in node.decorator_list:
+                visit(item, chain)
+            args = node.args
+            for item in args.defaults + [d for d in args.kw_defaults if d is not None]:
+                visit(item, chain)
+            for arg in (args.posonlyargs + args.args + args.kwonlyargs
+                        + [args.vararg, args.kwarg]):
+                if arg is not None and arg.annotation is not None:
+                    visit(arg.annotation, chain)
+            if node.returns is not None:
+                visit(node.returns, chain)
+            return
+        if isinstance(node, ast.Lambda):
+            for item in node.args.defaults + [d for d in node.args.kw_defaults if d is not None]:
+                visit(item, chain)
+            return
+        if isinstance(node, ast.ClassDef):
+            for item in node.decorator_list + node.bases + [k.value for k in node.keywords]:
+                visit(item, chain)
+            local = _bound_names(node.body)
+            sequence(node.body, chain + (local,))
+            return
+        if isinstance(node, ast.If):
+            visit(node.test, chain)
+            truth = _const_truth(node.test)
+            if truth is not False:
+                sequence(node.body, chain)
+            if truth is not True:
+                sequence(node.orelse, chain)
+            return
+        if isinstance(node, ast.While):
+            visit(node.test, chain)
+            if _const_truth(node.test) is not False:
+                sequence(node.body, chain)
+            sequence(node.orelse, chain)
+            return
+        if isinstance(node, ast.IfExp):
+            visit(node.test, chain)
+            truth = _const_truth(node.test)
+            if truth is not False:
+                visit(node.body, chain)
+            if truth is not True:
+                visit(node.orelse, chain)
+            return
+        if isinstance(node, (ast.For, ast.AsyncFor)):
+            visit(node.iter, chain)
+            body = chain + ({name},) if _target_binds(node.target, name) else chain
+            sequence(node.body, body)
+            sequence(node.orelse, body)
+            return
+        if isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                visit(item.context_expr, chain)
+            body = chain + ({name},) if any(
+                item.optional_vars is not None and _target_binds(item.optional_vars, name)
+                for item in node.items) else chain
+            sequence(node.body, body)
+            return
+        if isinstance(node, ast.Try):
+            sequence(node.body, chain)
+            body_bound = any('bind' in _binding_effects(statement, name)
+                             for statement in node.body)
+            handler_bound = body_bound
+            for handler in node.handlers:
+                here = chain + ({name},) if handler_bound or handler.name == name else chain
+                sequence(handler.body, here)
+                handler_bound = handler_bound or handler.name == name or any(
+                    'bind' in _binding_effects(statement, name) for statement in handler.body)
+            sequence(node.orelse, chain + ({name},) if handler_bound else chain)
+            sequence(node.finalbody, chain + ({name},) if handler_bound else chain)
+            return
+        if isinstance(node, ast.Match):
+            visit(node.subject, chain)
+            for case in node.cases:
+                visit(case.pattern, chain)
+                here = chain + ({name},) if _pattern_binds(case.pattern, name) else chain
+                if case.guard is not None:
+                    visit(case.guard, here)
+                sequence(case.body, here)
+            return
+        if isinstance(node, ast.GeneratorExp):
+            visit(node.generators[0].iter, chain)     # the rest runs when it is iterated
+            return
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp)):
+            visit(node.generators[0].iter, chain)
+            scope = set()
+            for generator in node.generators:
+                scope.update(n.id for n in ast.walk(generator.target) if isinstance(n, ast.Name))
+            inner = chain + (scope,)
+            for index, generator in enumerate(node.generators):
+                visit(generator.target, inner)
+                if index:
+                    visit(generator.iter, inner)
+                for condition in generator.ifs:
+                    visit(condition, inner)
+            for part in ((node.key, node.value)
+                         if isinstance(node, ast.DictComp) else (node.elt,)):
+                visit(part, inner)
+            return
+        for child in ast.iter_child_nodes(node):
+            visit(child, chain)
+
+    for item in node if isinstance(node, list) else [node]:
+        visit(item, chain)
+    return loads
+
+
+def _target_binds(target, name):
+    return any(isinstance(leaf, ast.Name) and leaf.id == name and isinstance(leaf.ctx, ast.Store)
+               for leaf in ast.walk(target))
+
+
+def _pattern_binds(pattern, name):
+    for leaf in ast.walk(pattern):
+        if isinstance(leaf, (ast.MatchAs, ast.MatchStar)) and leaf.name == name:
+            return True
+        if isinstance(leaf, ast.MatchMapping) and leaf.rest == name:
+            return True
+    return False
+
+
+def _binding_effects(node, name):
+    """Module-scope bind/unbind effects of `node`, pruning constant branches."""
+    if isinstance(node, ast.If):
+        truth = _const_truth(node.test)
+        effects = []
+        if truth is not False:
+            for statement in node.body:
+                effects.extend(_binding_effects(statement, name))
+        if truth is not True:
+            for statement in node.orelse:
+                effects.extend(_binding_effects(statement, name))
+        return effects
+    if isinstance(node, ast.While):
+        effects = []
+        if _const_truth(node.test) is not False:
+            for statement in node.body:
+                effects.extend(_binding_effects(statement, name))
+        for statement in node.orelse:
+            effects.extend(_binding_effects(statement, name))
+        return effects
+    if isinstance(node, (ast.For, ast.AsyncFor)):
+        effects = ['bind'] if _target_binds(node.target, name) else []
+        for statement in node.body + node.orelse:
+            effects.extend(_binding_effects(statement, name))
+        return effects
+    if isinstance(node, (ast.With, ast.AsyncWith)):
+        effects = ['bind'] if any(
+            item.optional_vars is not None and _target_binds(item.optional_vars, name)
+            for item in node.items) else []
+        for statement in node.body:
+            effects.extend(_binding_effects(statement, name))
+        return effects
+    if isinstance(node, ast.Try):
+        effects = []
+        for statement in node.body + node.orelse + node.finalbody:
+            effects.extend(_binding_effects(statement, name))
+        for handler in node.handlers:
+            if handler.name == name:
+                effects.append('bind')
+            for statement in handler.body:
+                effects.extend(_binding_effects(statement, name))
+        return effects
+    if isinstance(node, ast.Match):
+        effects = []
+        for case in node.cases:
+            if _pattern_binds(case.pattern, name):
+                effects.append('bind')
+            for statement in case.body:
+                effects.extend(_binding_effects(statement, name))
+        return effects
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return ['bind'] if node.name == name else []
+    if isinstance(node, ast.Delete):
+        return ['unbind'] if any(
+            isinstance(leaf, ast.Name) and leaf.id == name and isinstance(leaf.ctx, ast.Del)
+            for target in node.targets for leaf in ast.walk(target)) else []
+    if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        return ['bind'] if any(_target_binds(target, name) for target in targets) else []
+    return []
+
+
+def _check_rebound_builtin_fallback(tree, found, targets, Unsupported):
+    """Refuse a module-level shadow of a built-in while Python still resolves the name to it.
+
+    `rename` gives the binding `py_<name>`, which has no built-in fallback. A module-level load
+    that Python would answer from the built-in before the first binding (or after a `del`) would
+    become a NameError against `py_<name>`, so such a program is refused by name. Function and
+    lambda bodies are deferred, and constant-false branches are pruned, so a read that only runs
+    after the binding still matches CPython.
+    """
+    if not targets:
+        return
+    names = {name for name, _kind, _node in found if name in targets}
+    for name in sorted(names):
+        def refuse(hit, why='read while Python still resolves it to the built-in'):
+            error = Unsupported(
+                "the module-level definition %r shadows the built-in %s, but the name is %s; "
+                "this compiler renames the binding to %r, which has no fallback.\n"
+                "  write instead: rename it (e.g. %r) or use the built-in under another name"
+                % (name, name, why, 'py_' + name, _suggest(name)))
+            error.source_line = hit.lineno
+            raise error
+
+        bound = False
+        for statement in tree.body:
+            if not bound and isinstance(statement, ast.Delete):
+                if any(isinstance(leaf, ast.Name) and leaf.id == name
+                       and isinstance(leaf.ctx, ast.Del)
+                       for target in statement.targets for leaf in ast.walk(target)):
+                    refuse(statement, 'deleted before it is bound')
+            elif not bound:
+                loads = _scan_immediate(statement, name)
+                if (isinstance(statement, ast.AugAssign)
+                        and isinstance(statement.target, ast.Name)
+                        and statement.target.id == name):
+                    loads.insert(0, statement.target)     # `next += 1` reads before it stores
+                if loads:
+                    refuse(loads[0])
+            for effect in _binding_effects(statement, name):
+                bound = effect == 'bind'
+
+
 def rename(source, Unsupported, extra_names=()):
     """(source, {new: old}): `source` with every module-level definition that shadows a built-in
     (and every reference Python resolves to it) renamed to a fresh identifier. `extra_names` are
@@ -267,6 +531,7 @@ def rename(source, Unsupported, extra_names=()):
     targets.update(name for name in extra_names if name in SHADOWABLE)
     if not targets:
         return source, {}
+    _check_rebound_builtin_fallback(tree, found, targets, Unsupported)
     used = set(re.findall(r'\w+', source))
     fresh = {}
     for name in sorted(targets):

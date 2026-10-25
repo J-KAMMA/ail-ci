@@ -1,3 +1,27 @@
+## 2026-10-25 - module-level builtin shadow before its binding is refused (job-pre250-10260445)
+
+The pre-existing difference recorded by the pre208 reviewer was the first one to re-check:
+`for x in [1]: print(next)` before `next = 5` printed nothing on the general path and only `5` on
+the default build, where CPython prints `<built-in function next>` and then `5`.  The shadowing
+pass renames the module-level definition to `py_next`, which has no fallback to the built-in, so
+the earlier read became `NameError: name 'py_next' is not defined`.  `shadowing.py` now refuses
+such a read by name at compile time ("the module-level definition 'next' shadows the built-in
+next, but the name is read while Python still resolves it to the built-in ... write instead:
+rename it").  The scan follows Python's execution order: function and lambda bodies are deferred,
+constant-false branches are pruned, and bindings made by `for`/`try`/`with`/`match`, parameters,
+locals and comprehension variables are recognised, so a later or local use still matches CPython
+(including a `del` that nothing reads afterwards and delete-then-rebind).
+
+Probes `/tmp/probes/p250_*` covered the recorded `for` case, a direct read and a call before the
+binding, `next = next`, a read after `del`, reads through an argument, a list item, an attribute
+and a dict value (all refused by name on both builds), and function-read-after-binding, `for`/
+`try`/`with`/`match` bindings, an `if` binding before its read, parameter/local/comprehension
+names, a constant-false branch, `del` last, delete-then-rebind, an augmented assignment after the
+binding and a plain program (all match CPython on both builds).  Added `test_ail_pre250.py`
+(registered in `ail_check.MODULES`) and the DIFFERENCES row.  Final-state tests: `test_ail_pre250`
+53s and `test_ail_builtin_shadowing` 13s pass; `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` were run on the final commit.
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a
