@@ -1,3 +1,20 @@
+## 2026-10-25 - iterator and NotImplemented fillchar type names (job-pre198-10252040)
+
+The first still-differing pre-existing item from the pre182 review was the fillchar type name.
+`b"abc".ljust(5, iter([]))` printed `... not iterator` and `... not _AilNotImplementedType`,
+where CPython prints `... not list_iterator` and `... not NotImplementedType` (the same for
+rjust/center, enumerate, zip, map, filter, reversed and the other core iterator kinds).
+`bytes`/`bytearray` padding obtains the name through `type(fillchar).__name__`, which the
+general path lowers to `ail_type_name_of`.  That helper now switches on the iterator kind and
+maps list/tuple/str/dict/set/range/enumerate/zip/map/filter/reversed and the built itertools
+iterators to their CPython class names; an ASCII str iterator is `str_ascii_iterator`, a
+non-ASCII one `str_iterator`.  The hidden prelude class `_AilNotImplementedType` keeps its
+internal name but is displayed as `NotImplementedType`.
+
+`test_ail_pre198.py` covers direct type names and fillchar errors for those values, including
+empty and non-ASCII str iterators, reversed list/tuple/str/range, and the same values through
+an argument, a list item, an attribute and a dict value on both builds.  Probes in
+`/tmp/probes` (`p_pre198_all.py`) match CPython on both builds.
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal

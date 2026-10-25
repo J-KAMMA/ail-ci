@@ -587,10 +587,67 @@ __attribute__((noinline, cold)) static ail_st ail2_bisect_bound(ail_ctx *cx, ail
 '''
 
 TYPE_NAME_C = '''
+static int ail__str_is_cstr(ail_str s, const char *c) {
+    int64_t n = (int64_t)strlen(c);
+    if (s.n != n) return 0;
+    for (int64_t i = 0; i < n; i++) if (ail_chr(s, i) != (unsigned char)c[i]) return 0;
+    return 1;
+}
+static const char *ail__iter_type_name(ail_iterobj *it) {
+    switch (it->kind) {
+        case AIL_IT_LIST: return "list_iterator";
+        case AIL_IT_TUPLE: return "tuple_iterator";
+        case AIL_IT_DICT_KEYS: return "dict_keyiterator";
+        case AIL_IT_DICT_VALUES: return "dict_valueiterator";
+        case AIL_IT_DICT_ITEMS: return "dict_itemiterator";
+        case AIL_IT_SET: return "set_iterator";
+        case AIL_IT_RANGE: return "range_iterator";
+        case AIL_IT_ENUMERATE: return "enumerate";
+        case AIL_IT_ZIP: return "zip";
+        case AIL_IT_REVERSED:
+            return it->target.tag == AIL_T_LIST && !((ail_vecobj *)it->target.o)->from_generator
+                   ? "list_reverseiterator" : "reversed";
+        case AIL_IT_MAP: return "map";
+        case AIL_IT_FILTER: return "filter";
+        case AIL_LIT_CHAIN: return "chain";
+        case AIL_LIT_ISLICE: return "islice";
+        case AIL_LIT_COUNT: return "count";
+        case AIL_LIT_CYCLE: return "cycle";
+        case AIL_LIT_REPEAT: return "repeat";
+        case AIL_LIT_ACCUMULATE: return "accumulate";
+        case AIL_LIT_ZIP_LONGEST: return "zip_longest";
+        case AIL_LIT_TAKEWHILE: return "takewhile";
+        case AIL_LIT_DROPWHILE: return "dropwhile";
+        case AIL_LIT_PAIRWISE: return "pairwise";
+        case AIL_LIT_STARMAP: return "starmap";
+        case AIL_LIT_GROUPBY: return "groupby";
+        case AIL_LIT_GROUPBY_INNER: return "_grouper";
+        default: return "iterator";
+    }
+}
 static inline ail_st ail_type_name_of(ail_ctx *cx, ail_obj *out, ail_obj x) {
+    if (x.tag == AIL_T_ITER) {
+        ail_iterobj *it = (ail_iterobj *)x.o;
+        if (it->kind == AIL_IT_STR) {
+            ail_str s = ail_view_to_str(it->target);
+            int ascii = 1;
+            for (int64_t i = 0; i < s.n; i++) if (ail_chr(s, i) & 0x80) { ascii = 0; break; }
+            *out = ail_str_from_cstr(cx, ascii ? "str_ascii_iterator" : "str_iterator");
+            return AIL_OK;
+        }
+        *out = ail_str_from_cstr(cx, ail__iter_type_name(it));
+        return AIL_OK;
+    }
     if (x.tag == AIL_T_INST || x.tag == AIL_T_EXC) {
         ail_obj c = ((ail_instobj *)x.o)->cls;
-        if (c.tag == AIL_T_CLASS) { *out = ((ail_classobj *)c.o)->name; return AIL_OK; }
+        if (c.tag == AIL_T_CLASS) {
+            ail_obj nm = ((ail_classobj *)c.o)->name;
+            if (ail__str_is_cstr(ail_view_to_str(nm), "_AilNotImplementedType")) {
+                *out = ail_str_from_cstr(cx, "NotImplementedType");
+                return AIL_OK;
+            }
+            *out = nm; return AIL_OK;
+        }
     }
     if (x.tag == AIL_T_DICT) {   /* CPython's __name__, not the module-qualified display name */
         if (((ail_gcobj *)x.o)->flags == 1) { *out = ail_str_from_cstr(cx, "Counter"); return AIL_OK; }
