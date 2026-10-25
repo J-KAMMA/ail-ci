@@ -125,6 +125,20 @@ The general path's bytes/bytearray `find`, `rfind`, `count`, `index`, `rindex`, 
 bool or an instance's `__index__` (with CPython's `__index__ returned non-int (type ...)` when the
 result is not an int); `None` keeps its default.  `_ail_b_rng` keeps the clamping, and all seven
 methods share it.  `test_ail_pre173.py` covers both builds and keeps the case.
+## 2026-10-24 - pre175: a frozenset of tuples as a dict key (job-pre175-10250446)
+
+The pre-existing `t4h` defect was still on this tree: the tuple pass lowers `frozenset({(1, 'a')})` to its
+`_AilS_Pi_sQ` table class, but a table cannot be keyed by a set, so a dict keyed by that frozenset stays a
+plain object while the same expression used as the *lookup* key is lowered. The one-element module constant
+`D = {frozenset({(1, 'a')}): 'v'}` then made `D[frozenset({(1, 'a')})]` raise `KeyError`, `... in D` print
+False and `D.get(...)` return None; the two-element literal happened to fall back already. The pass now
+refuses a set / frozenset of tuples used as the key of a container that is not a table dict
+(`tupexpr.ex_Subscript`, `tupstmt.assign_one`) and bails on a module-level constant whose type cannot be told
+and that mentions a tuple (`tuplib.module_assign`), so the whole program is left as written and the general
+path keeps the dict and the key boxed. Added `test_ail_pre175.py` (5 programs, two builds each). The
+frozenset's own repr order remains the separate, documented insertion-order difference (A2); the test compares
+lookup / membership / length results, not a raw set print.
+
 
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
 
