@@ -21,6 +21,17 @@ keeps Horspool. `bench/compare.py --app binary_search`: base 98.2 ms, new 69.2 m
 (AIL/C 1.414 -> 0.994, ranges non-overlapping). Probes for empty, negative, windowed and
 64-byte needles through arguments, list items, attributes and dict values match CPython on both
 builds.
+## 2026-10-24 -- pre100: `%d` of a float on the general path
+
+CPython truncates a float for `%d` and prints the whole integer even past int64 (`"%d" % 1e20`
+prints `100000000000000000000`). The literal-format path rejected a float with
+`TypeError: unsupported format string passed to non-int`, and the run-time formatter stopped at
+the int64 boundary with `AIL limit: integer overflow`. Literal `%d` conversions now go through
+the run-time formatter (`pyboxed2._percent_format` -> `safetyrt.FMT`), and that formatter's
+integer branch formats the truncated float as decimal digits directly instead of as an int64.
+NaN and infinity keep CPython's ValueError / OverflowError. Probes:
+`/tmp/probes/pre100_float_d*.py`, `pct_dynamic_float.py`; new test
+`AIL_CURRENT/test_ail_pre100.py`.
 
 ## 2026-10-23 -- fuzz37: ordering TypeError names the written operator
 
