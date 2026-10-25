@@ -1,3 +1,12 @@
+## 2026-10-25 - pre170 review follow-up: class-name rebinding before the definition (job-rbpre170-10251554)
+
+Review fix. The module slot for a class name was bound in the hoisted `setup`, before any module
+statement, so a module-level assignment before the class definition (`C = None; class C: pass`)
+replayed afterwards and the class never rebound it: `C is None` printed True where CPython says
+False. The binding is now emitted at the class-definition point in the module body (and in the
+array-entry shape's class-init sequence), so assignment order decides the value in both directions.
+`test_ail_pre170.py` gained `test_assignment_before_the_class_definition`.
+
 ## 2026-10-25 - pre170 re-applied: last duplicate class-body attribute through a class value (job-rbpre170-10251554)
 
 Re-applied the accepted pre170 change on top of the current tree. A class body with a duplicate

@@ -131,6 +131,42 @@ def global_rebind():
 print(global_rebind(), P.x)
 '''
 
+REBIND_BEFORE = r'''C = None
+class C:
+    x = 1
+    x = 2
+
+
+print(C is None, bool(C), C.x, getattr(C, "x"))
+A = C
+C = 7
+print(C == 7, bool(C), A.x, A is C)
+
+
+D = 0
+class D:
+    pass
+
+
+def get():
+    return D
+
+
+print(get() == 0, bool(get()), get() is D)
+
+
+E = -5
+class E:
+    def __init__(self, n):
+        self.n = n
+
+    def value(self):
+        return self.n
+
+
+print(E(-5).value(), isinstance(E(3), E), bool(E))
+'''
+
 ARRAY = r'''class B:
     x = 1
     y = 2
@@ -194,6 +230,9 @@ class Pre170Tests(unittest.TestCase):
 
     def test_shadowed_or_rebound_class_name(self):
         self.check('shadow', SHADOW)
+
+    def test_assignment_before_the_class_definition(self):
+        self.check('rebind_before', REBIND_BEFORE)
 
     def test_array_entry_initialises_class_attributes(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre170-') as directory:

@@ -2374,12 +2374,6 @@ class Compiler(boxclosure.ClosureMixin):
                 base_expr = 'ail_box_none()'
             setup.append('    g_slots_arr[%d] = ail_class_new(cx, %s, %s);\n' %
                          (self.global_slots['class:' + cname], c_str_literal(cname), base_expr))
-            if cname in self.module_names:
-                # The class name is also rebound by a module-level assignment (or a `global`
-                # declaration): bind its module slot at definition time, then the ordinary
-                # module-global assignment order decides what later reads see.
-                setup.append('    g_slots_arr[%d] = g_slots_arr[%d];\n' %
-                             (self._module_global_slot(cname), self.global_slots['class:' + cname]))
             for entry in cls.get('class_body', []):
                 # A class attribute read through a class VALUE (alias/argument/...) looks it up by
                 # name.  A method or property in the class body is a sentinel (slot -1): it hides a
@@ -6171,6 +6165,13 @@ class Compiler(boxclosure.ClosureMixin):
         for _aname, aval, slot in self.classes[name].get('class_attrs', []):
             v = self.expr(aval, ctx)
             ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
+        if name in self.module_names:
+            # A module-level assignment to the class name (before or after the definition, or a
+            # `global` declaration) rebinds the module slot: do that binding HERE, at the
+            # definition statement (after the class body, as CPython binds it), so an assignment
+            # before the class does not win over it and a later assignment still does.
+            ctx.emit('g_slots_arr[%d] = g_slots_arr[%d];' %
+                     (self._module_global_slot(name), self.global_slots['class:' + name]))
 
     def _class_attr_value(self, slot, value, ctx):
         """The one shared value of a class attribute, filling the slot lazily only when the module
