@@ -1,3 +1,25 @@
+## 2026-10-25 - pre249: negation of a statically known int64 minimum in a variable (job-pre249-10260400)
+
+The first still-differing item in the rbpre204 review's pre-existing list was the dynamic
+negation `b = -(1 << 63); print(-b)`: both builds compiled it and stopped at run time with
+`integer overflow`, while CPython prints the bignum `9223372036854775808`.  The compile-time
+unary check now follows simple assignments in module, function and class scopes, including
+aliases and a reassignment (`b = -b`), so the out-of-int64 unary result is refused by name
+(`int64 constant expression out of range: 9223372036854775808`, exit 2) on both builds.
+In-range values, a parameter that shadows a module constant, and a value that is only known at
+run time keep their previous behaviour.
+
+Probes in `/tmp/probes`: `p249_local`, `p249_module`, `p249_alias`, `p249_aug`,
+`p249_placement_argument`, `p249_placement_list_item`, `p249_placement_attribute`,
+`p249_placement_dict_value` and `p249_direct_const` are refused by name or match CPython on both
+builds; `p249_in_range` and `p249_placement_in_range` match CPython on both builds.  A minimum
+that reaches the negation only through a container element or a helper parameter still keeps the
+old run-time trap, as on the base tree.  `test_ail_pre249.py` covers the refusals, in-range
+flows, a shadowing parameter and a class-body case.  Final-state tests: `test_ail_pre249`,
+`test_ail_pre172`, `test_ail_pre214`, `test_ail_pre184`, `test_ail_pre190`, `test_ail_pre177`,
+`test_ail_pre113`, `test_ail_pre97`, `test_ail_bugs7`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3`.
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a
