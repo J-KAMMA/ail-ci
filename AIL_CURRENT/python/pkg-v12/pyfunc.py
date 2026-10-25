@@ -15891,6 +15891,7 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
                           else '%s = %s' % (value, out[0]))
             out = [value]
         if kind == INT and index < len(_tint_params) and _tint_params[index] and len(out) == 1:
+            ctx.parts.add('TINTT')
             out = ['ail_tint_from_int64((int64_t)(%s))' % out[0]]
         groups[index] = out
     out = [value for group in groups for value in group]
@@ -15923,6 +15924,7 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
         return ordered('%s(%s)' % (symbol, ', '.join(out)))
     call = ordered('%s(%s)' % (symbol, ', '.join(out)))
     if ret == INT and _tint_ret:
+        ctx.parts.add('TINTT')
         call = 'ail_tint_i64(%s)' % call
     if ret in MAPS:
         temporary, _ = ctx.temp(ret)
@@ -34926,6 +34928,28 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                      and not (_f.name == entry_name and not library)) else 0
         _tint_sigs[_f.name] = (_params, _ret)
         _tint_sigs[csym[_f.name]] = (_params, _ret)
+    # A hierarchy dispatcher and the methods it switches over share one C result type. If any
+    # method of a hierarchy method name needs the tagged result, all of them (and every `__vt`
+    # switch for that name) do, or the switch hands back a mix of int64 and ail_tint.
+    _method_groups = {}
+    for _name, _flags in _tint_sigs.items():
+        if _name in method_names or _name.endswith('__vt'):
+            _base = _name.split('__', 1)[1] if '__' in _name else _name
+            if _base.endswith('__vt'):
+                _base = _base[:-4]
+            _method_groups.setdefault(_base, []).append(_name)
+    for _names in _method_groups.values():
+        _vt = [_n for _n in _names if _n.endswith('__vt')]
+        if _vt:
+            _width = max(len(_tint_sigs[_n][0]) for _n in _vt)
+            _params = tuple(1 if any(len(_tint_sigs[_n][0]) > _i and _tint_sigs[_n][0][_i]
+                                     for _n in _names) else 0 for _i in range(_width))
+            for _n in _names:
+                _old = _tint_sigs[_n][0]
+                _tint_sigs[_n] = (_params + _old[_width:], _tint_sigs[_n][1])
+        if any(_tint_sigs[_n][1] for _n in _names):
+            for _n in _names:
+                _tint_sigs[_n] = (_tint_sigs[_n][0], 1)
     global TINT_SIGS, TINT_ACTIVE
     TINT_SIGS = _tint_sigs
     TINT_ACTIVE = dict(_tint_sigs)
@@ -34966,6 +34990,8 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         symbol_contexts[cname] = ctx
         if getattr(f, '_ail_dispatcher', False) and not clones.get(f.name):
             b = _dispatcher_c(b, f, csym)
+            from ir import driver as _driver
+            h, b, ctx = _driver.wrap_legacy_tint(_sys_modules()[__name__], (h, b, ctx))
         heads.append(h)
         bodies.append(b)
         body_names.append(f.name)
@@ -36061,6 +36087,10 @@ def _one_function(*args, **kwargs):
         # still the legacy emitter's C (value semantics): refuse what CPython would share
         import aliasrefuse
         aliasrefuse.check(_sys_modules()[__name__], args[0], result[2])
+        from ir import driver as _driver
+        if not getattr(args[0], '_ail_dispatcher', False):
+            # a dispatcher's body is replaced afterwards (`_dispatcher_c`); pyfunc wraps it there
+            final = _driver.wrap_legacy_tint(_sys_modules()[__name__], result)
     else:
         import aliasrefuse
         aliasrefuse.check_ir(_sys_modules()[__name__], args[0], result[2])

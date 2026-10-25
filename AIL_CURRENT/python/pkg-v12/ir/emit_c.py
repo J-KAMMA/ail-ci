@@ -371,6 +371,10 @@ class Emitter(TextEmitter):
         ir_sig = signature(fn, sym + '__ir', 'static') if self.is_pending else sig
         if self.byval:
             ir_sig = signature(fn, sym + '__irl', 'static', byval=True)
+        if any(t == I.TINT for t in [p.type for p in fn.params] + list(fn.results)) \
+                or any(i.op == 'local.alloc' and i.result.type.pointee == I.TINT
+                       for i in I.walk(fn.body)):
+            self.parts.add('TINTT')
         abi = fn.attrs.get('abi') or ['value'] * len(fn.params)
         if self.frame:
             self.aux.append(self.frame_struct())

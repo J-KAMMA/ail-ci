@@ -121,6 +121,123 @@ def _legacy_walias(P, fn, ctx):
     return {'walias': notes}
 
 
+def _split_c_params(text):
+    """Comma-separated C parameter declarations, split at the top level only."""
+    out, depth, start = [], 0, 0
+    for i, ch in enumerate(text):
+        if ch in '([{':
+            depth += 1
+        elif ch in ')]}':
+            depth -= 1
+        elif ch == ',' and depth == 0:
+            out.append(text[start:i].strip())
+            start = i + 1
+    tail = text[start:].strip()
+    if tail:
+        out.append(tail)
+    return out
+
+
+def _decl_name(text):
+    """The variable a C parameter declaration declares."""
+    m = re.search(r'\(\s*\*\s*([A-Za-z_]\w*)\s*\)', text)
+    if m:
+        return m.group(1)
+    text = re.sub(r'\[[^\]]*\]\s*$', '', text)
+    m = re.search(r'([A-Za-z_]\w*)\s*$', text)
+    return m.group(1) if m else None
+
+
+def _tint_legacy(P, fn, cname, ctx, sig, generated, flags):
+    """Locate a legacy int64 signature and the parameters `flags` says must become tagged.
+
+    Returns ``(lp, rp, segs, tinted)``: the parentheses positions in `sig`, the C parameter
+    declarations, and the C names whose type has to change to ``ail_tint``; None when the legacy
+    text does not have the expected shape."""
+    at = sig.find(cname + '(')
+    if at < 0:
+        return None
+    lp = at + len(cname)
+    depth, rp = 0, None
+    for i in range(lp, len(sig)):
+        if sig[i] == '(':
+            depth += 1
+        elif sig[i] == ')':
+            depth -= 1
+            if depth == 0:
+                rp = i
+                break
+    if rp is None:
+        return None
+    raw = sig[lp + 1:rp].strip()
+    segs = [] if raw == 'void' else _split_c_params(raw)
+    tinted = set()
+    for (name, _), flag in zip(getattr(ctx, 'params', ()), flags):
+        if flag:
+            tinted.add(ctx.cname(name))
+    return (lp, rp, segs, tinted)
+
+
+def _wrap_legacy_tint(P, fn, cname, ctx, sig, generated, params, ret):
+    """Wrap the legacy definition of `fn` in the tagged ABI (see `_tint_legacy`)."""
+    parsed = _tint_legacy(P, fn, cname, ctx, sig, generated, params)
+    if parsed is None:
+        return None
+    lp, rp, segs, tinted = parsed
+    if not tinted and not ret:
+        return None
+    names = [_decl_name(seg) for seg in segs]
+    if any(n is None for n in names):
+        return None
+    new_segs = []
+    for seg, name in zip(segs, names):
+        if name in tinted and 'int64_t' in seg:
+            seg = seg.replace('int64_t', 'ail_tint', 1)
+        new_segs.append(seg)
+    prefix = sig[:lp]
+    if ret:
+        at = prefix.rfind('int64_t')
+        if at < 0:
+            return None
+        prefix = prefix[:at] + 'ail_tint' + prefix[at + len('int64_t'):]
+    new_sig = prefix + '(' + ', '.join(new_segs) + ')'
+    marker = sig + ' {\n'
+    pos = generated.find(marker)
+    if pos < 0:
+        return None
+    if getattr(fn, '_ail_dispatcher', False):
+        # A hierarchy dispatcher hands the receiver straight to the method of its class. Once
+        # every method in the hierarchy shares the tagged parameters and result (TINT_SIGS below),
+        # the switch itself is already correct: only its C signature has to name the tagged types.
+        return new_sig, generated[:pos] + new_sig + ' {\n' + generated[pos + len(marker):]
+    inner = '_ail_i64_' + cname
+    inner_sig = sig[:lp - len(cname)] + inner + sig[lp:]
+    inner_body = generated[:pos] + inner_sig + ' {\n' + generated[pos + len(marker):]
+    args = ['ail_tint_i64(%s)' % n if n in tinted else n for n in names]
+    call = '%s(%s)' % (inner, ', '.join(args))
+    noret = getattr(ctx, 'ret', None) == getattr(P, 'NORET', object())
+    if ret:
+        body = '    return ail_tint_from_int64(%s);\n' % call
+    elif noret:
+        body = '    %s;\n' % call
+    else:
+        body = '    return %s;\n' % call
+    return new_sig, inner_sig + ';\n' + new_sig + ' {\n' + body + '}\n' + inner_body
+
+
+def wrap_legacy_tint(P, result):
+    """Apply the wrapper `_apply` recorded on the context, if any (after the legacy aliasing check)."""
+    sig, generated, ctx = result
+    info = getattr(ctx, '_tint_legacy_wrap', None)
+    if not info:
+        return result
+    fn, cname, params, ret = info
+    wrapped = _wrap_legacy_tint(P, fn, cname, ctx, sig, generated, params, ret)
+    if wrapped is None:
+        return result
+    return wrapped[0], wrapped[1], ctx
+
+
 def apply(P, args, kwargs, result):
     """`result` is the legacy `(sig, generated, ctx)` of `_one_function(*args, **kwargs)`;
     returns it unchanged or with `generated` replaced by the IR emitter's C."""
@@ -210,7 +327,12 @@ def _apply(P, args, kwargs, result, current):
         isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
         and (getattr(P, 'TINT_SIGS', {}).get(n.func.id) or ((), 0))[1]
         for n in ast.walk(fn))
+    # A module-table reader keeps the legacy emitter (the IR has no set/dict parameter), exactly
+    # as it does with AIL_IR=0; refusing it here would lose a supported typed-path shape.
+    _map_param = any(k in getattr(P, 'MAPS', ()) or k == getattr(P, 'SLIST', None)
+                     for _, k in getattr(ctx, 'params', ()))
     if _py and _needs_tint and _no_tint_locals and not _has_tint_call \
+            and not _map_param \
             and not (_proof or '').startswith(('it calls ', 'it contains ')):
         from pyfront import Unsupported
         raise Unsupported('%s() has an int operation the local proof cannot bound, but no tagged local (%s)'
@@ -282,10 +404,20 @@ def _apply(P, args, kwargs, result, current):
             raise Unsupported('%s() needs the tagged-int lowering, which does not cover it: %s'
                               % (fn.name, reason))
         if _py and _tinted_sig:
-            # this function stays on the legacy int64 emitter (the typed-only build): its callers
-            # must not wrap arguments/results as ail_tint
-            getattr(P, 'TINT_ACTIVE', {}).pop(fn.name, None)
-            getattr(P, 'TINT_ACTIVE', {}).pop(cname, None)
+            # A function with no C result has nothing to tag (the synthesized NORET entry point in a
+            # script-shaped program is one such case).
+            if _sig[1] and getattr(ctx, 'ret', None) == getattr(P, 'NORET', object()):
+                _sig = (_sig[0], 0)
+                getattr(P, 'TINT_SIGS', {})[fn.name] = _sig
+                getattr(P, 'TINT_ACTIVE', {})[fn.name] = _sig
+            if any(_sig[0]) or _sig[1]:
+                # The legacy body keeps int64 arithmetic, but the signature (and every call) stays
+                # the tagged one `TINT_SIGS` announced: the wrapper is added once the legacy
+                # aliasing check has run (wrap_legacy_tint). Callers compiled earlier and the
+                # recursive self-call inside this body already use that signature, so dropping it
+                # here made the two disagree.
+                ctx._tint_legacy_wrap = (fn, cname, _sig[0], bool(_sig[1]))
+                ctx.parts.add('TINTT')
         return result
     except Exception as error:
         if current == 'verify':
