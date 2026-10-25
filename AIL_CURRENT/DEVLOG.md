@@ -1,3 +1,17 @@
+## 2026-10-25 -- pre243: full "Invalid format specifier" text (job-pre243-10260357)
+
+The first still-differing item in the pre225 review's pre-existing list was the bare
+`ValueError: Invalid format specifier`: CPython 3.12 inserts the whole spec as text and names the
+value's type, e.g. `Invalid format specifier '=_8,q' for object of type 'int'`.  The general
+parser now returns a distinct code when more than one type code is left, and `ail2f_format`
+builds the message from the original spec string (quotes, control characters, a NUL, non-ASCII
+text and long specs stay as written, not repr-escaped), for int, bool, float and str through a
+literal, an argument, a list item, an attribute and a dict value.  The second recorded item
+(`format('x', '+_')`, str sign-vs-grouping ordering) still differs and was not touched; a single
+non-ASCII type code above 127 keeps its old bare refusal, identical to the base.  Probes
+`p243_invalid_spec` and `p243_extra` in `/tmp/probes` match CPython on both builds; added
+`test_ail_pre243.py`.
+
 ## 2026-10-25 -- pre199: range() with a zero step raises ValueError (job-pre199-10252047)
 
 The first still-differing item left by pre186 was `range(0, 5, 0)`: both builds accepted it and

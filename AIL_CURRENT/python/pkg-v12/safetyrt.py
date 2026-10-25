@@ -709,7 +709,7 @@ static inline int ail2f_parse(ail_str s, ail2f_spec *f, char *msg, size_t msz) {
             f->prec = f->prec * 10 + (ail_chr(s, i++) - '0');
         }
     }
-    if (n - i > 1) { snprintf(msg, msz, "Invalid format specifier"); return -1; }
+    if (n - i > 1) return -2;   /* the caller adds the quoted spec and the object type */
     if (i < n) {
         uint16_t t = ail_chr(s, i);
         if (t > 127) { snprintf(msg, msz, "Invalid format specifier"); return -1; }
@@ -845,6 +845,23 @@ static inline void ail2f_code_text(char *out, size_t osz, uint16_t c) {
     if (c < 0x20 || c > 0x7f) snprintf(out, osz, "\\x%x", (unsigned)c);
     else snprintf(out, osz, "%c", (char)c);
 }
+/* CPython's "Invalid format specifier '%U' for object of type '%s'": the spec is inserted as
+   text (not repr'ed), so quotes, control characters and non-ASCII code points stay as written. */
+static inline ail_st ail2f_invalid_spec(ail_ctx *cx, ail_obj specobj, const char *tn) {
+    AIL_FRAME_ENTER(cx, fr, 6);
+    fr.slots[0] = ail_str_from_cstr(cx, "Invalid format specifier '");
+    fr.slots[1] = specobj;
+    fr.slots[2] = ail_str_from_cstr(cx, "' for object of type '");
+    fr.slots[3] = ail_str_from_cstr(cx, tn);
+    fr.slots[4] = ail_str_from_cstr(cx, "'");
+    fr.slots[5] = ail_str_cat(cx, fr.slots[0], fr.slots[1]);
+    fr.slots[5] = ail_str_cat(cx, fr.slots[5], fr.slots[2]);
+    fr.slots[5] = ail_str_cat(cx, fr.slots[5], fr.slots[3]);
+    fr.slots[5] = ail_str_cat(cx, fr.slots[5], fr.slots[4]);
+    ail_st st = ail_raise(cx, cx->builtin_cls[AIL_B_VALUEERROR], fr.slots[5]);
+    AIL_FRAME_LEAVE(cx, fr);
+    return st;
+}
 static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {
     if (specobj.tag != AIL_T_STR) return ail_raise_c(cx, AIL_B_TYPEERROR, "format() argument 2 must be str");
     ail_str spec = ail_view_to_str(specobj);
@@ -866,7 +883,12 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
         return ail_raise_c(cx, AIL_B_TYPEERROR, msg);
     }
     ail2f_spec f;
-    if (ail2f_parse(spec, &f, msg, sizeof msg)) return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
+    int parsed = ail2f_parse(spec, &f, msg, sizeof msg);
+    if (parsed == -2) {
+        const char *tn = x.tag == AIL_T_STR ? "str" : x.tag == AIL_T_FLOAT ? "float" : x.tag == AIL_T_BOOL ? "bool" : "int";
+        return ail2f_invalid_spec(cx, specobj, tn);
+    }
+    if (parsed) return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
     char type = f.type, code[16];
     if (f.group && type) {
         /* CPython checks the grouping against the type before it looks at the value */
