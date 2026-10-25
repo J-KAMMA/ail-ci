@@ -4586,13 +4586,10 @@ class Compiler(boxclosure.ClosureMixin):
             return self._percent_runtime(node, ctx)
         if isinstance(node.op, ast.Mod) and (
                 self.infer_kind(node.left, ctx) == 'str'
-                or (self.infer_kind(node.left, ctx) is None and (isinstance(node.right, (ast.Tuple, ast.Dict))
-                                                                 or self.infer_kind(node.right, ctx) in ('tuple', 'dict')
-                                                                 # a program with classes: the operand may be an enum member
-                                                                 or (self.dunder_ops and self.infer_kind(node.right, ctx) not in ('int', 'float', 'bool'))))):
+                or self.infer_kind(node.left, ctx) is None):
             if self.infer_kind(node.left, ctx) == 'str':
                 return self._percent_runtime(node, ctx)
-            # a value of unknown kind % a tuple / dict: a str formats, anything else takes the operator
+            # a value of unknown kind: a str formats (whatever the right operand), anything else takes the operator
             l = self.expr(node.left, ctx)
             rr = self.expr(node.right, ctx)
             self.rt_needs.add('fmt')
