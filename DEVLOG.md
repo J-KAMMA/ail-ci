@@ -86,6 +86,16 @@ default", which keeps the new `test_ail_pre117.py` and the existing `test_ail_fu
 checks satisfied. `test_ail_pre117.py` is registered in `ail_check.MODULES`, the DIFFERENCES row is
 restored, and immutable defaults still match CPython on both builds. Probes and required tests are
 listed in the job report.
+## 2026-10-25 -- statically known unary int64 overflow (job-rbpre172-10251601)
+
+The first pre-existing difference left by job-pre108 was pure unary overflow: `-MIN`, both on a
+module constant and as `-(-9223372036854775808)`, compiled on the default build and then stopped at
+run time with `integer overflow`, while CPython printed a bignum; the general path refused the
+`MIN` literal with a different message. A new front-end check evaluates unary `+`/`-` over integer
+literals and module-level int constants and refuses an out-of-int64 result by name (`int64 constant
+expression out of range: ...`) on both builds. A module constant shadowed by a parameter is not
+folded, and values that only reach the unary operation as variables keep the fixed-width trap.
+Added `test_ail_pre172.py` and registered it in `ail_check.MODULES`.
 
 ## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
 
