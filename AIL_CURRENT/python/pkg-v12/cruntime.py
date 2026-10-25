@@ -14643,6 +14643,15 @@ static inline ail_st ail_op_ne(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) 
     if (__builtin_expect(ail__view_kind(a) || ail__view_kind(b), 0)) { int r = 0; ail_st st = ail__view_eq(cx, &r, a, b); if (st != AIL_OK) return st; *out = ail_box_bool(!r); return AIL_OK; }
     *out = ail_box_bool(!ail_obj_eq_raw(a, b)); return AIL_OK;
 }
+/* CPython's PyObject_RichCompareBool, as list/tuple index/count use it: identity first, then
+   `==` (a user __eq__ is dispatched and an exception it raises is propagated). */
+static inline ail_st ail__member_eq_st(ail_ctx *cx, int *out, ail_obj a, ail_obj b) {
+    if (ail_identical(a, b)) { *out = 1; return AIL_OK; }
+    ail_obj r; ail_st st = ail_op_eq(cx, &r, a, b);
+    if (st != AIL_OK) return st;
+    *out = ail_obj_truthy(r);
+    return AIL_OK;
+}
 /* ail_obj_cmp answers 0 (neither smaller nor larger) for a NaN operand; `<=` and `>=` must not read that as equal (silent6) */
 static inline int ail__nan_operand(ail_obj a, ail_obj b) {
     return (a.tag == AIL_T_FLOAT && ail_float_val(a) != ail_float_val(a)) || (b.tag == AIL_T_FLOAT && ail_float_val(b) != ail_float_val(b));
@@ -18788,6 +18797,14 @@ static inline void ail_meth_append_any(ail_ctx *cx, ail_obj lst, ail_obj x) {
    receiver reaches them as an argument, a list item, an attribute or a dict value, so the kind is a run-time fact. */
 #define AIL_DQ_DATA(lst) (__builtin_expect(((ail_gcobj *)(lst).o)->flags, 0) ? ((ail_vecobj *)(lst).o)->p[0] : (lst))
 static inline int64_t ail_meth_list_count(ail_obj lst, ail_obj x) { return ail_vec_count(AIL_DQ_DATA(lst), x); }
+static inline ail_st ail_meth_list_count_st(ail_ctx *cx, int64_t *out, ail_obj lst, ail_obj x) {
+    ail_vecobj *v = (ail_vecobj *)AIL_DQ_DATA(lst).o; int64_t cnt = 0;
+    for (int64_t i = 0; i < v->n; i++) {
+        int eq; ail_st st = ail__member_eq_st(cx, &eq, v->p[i], x); if (st != AIL_OK) return st;
+        if (eq) cnt++;
+    }
+    *out = cnt; return AIL_OK;
+}
 static inline ail_st ail_meth_list_insert2(ail_ctx *cx, ail_obj lst, int64_t idx, ail_obj x) {
     if (__builtin_expect(((ail_gcobj *)lst.o)->flags, 0)) {
         ail_obj d = ((ail_vecobj *)lst.o)->p[0];
@@ -18822,7 +18839,10 @@ static inline ail_st ail_meth_list_index(ail_ctx *cx, int64_t *out, ail_obj lst,
     int is_dq = ((ail_gcobj *)lst.o)->flags != 0;
     ail_vecobj *v = (ail_vecobj *)AIL_DQ_DATA(lst).o;
     int64_t a, b; if (!ail__win(v->n, has_lo, lo, has_hi, hi, &a, &b)) { a = 0; b = 0; }
-    for (int64_t i = a; i < b; i++) if (ail_member_eq(v->p[i], x)) { *out = i; return AIL_OK; }
+    for (int64_t i = a; i < b; i++) {
+        int eq; ail_st st = ail__member_eq_st(cx, &eq, v->p[i], x); if (st != AIL_OK) return st;
+        if (eq) { *out = i; return AIL_OK; }
+    }
     ail_obj rs[2]; rs[0] = ail_obj_repr(cx, x); rs[1] = ail_box_none();
     AIL_ROOT_N(cx, fr, rs, 2);
     rs[1] = ail_str_from_cstr(cx, is_dq ? " is not in deque" : " is not in list");
@@ -19287,10 +19307,21 @@ static inline ail_st ail_op_isub(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b
    it does not include the missing value's repr).
    =================================================================================== */
 #define ail_meth_tuple_count ail_vec_count
+static inline ail_st ail_meth_tuple_count_st(ail_ctx *cx, int64_t *out, ail_obj tup, ail_obj x) {
+    ail_vecobj *v = (ail_vecobj *)tup.o; int64_t cnt = 0;
+    for (int64_t i = 0; i < v->n; i++) {
+        int eq; ail_st st = ail__member_eq_st(cx, &eq, v->p[i], x); if (st != AIL_OK) return st;
+        if (eq) cnt++;
+    }
+    *out = cnt; return AIL_OK;
+}
 static inline ail_st ail_meth_tuple_index(ail_ctx *cx, int64_t *out, ail_obj tup, ail_obj x, int has_lo, int64_t lo, int has_hi, int64_t hi) {
     ail_vecobj *v = (ail_vecobj *)tup.o;
     int64_t a, b; if (!ail__win(v->n, has_lo, lo, has_hi, hi, &a, &b)) { a = 0; b = 0; }
-    for (int64_t i = a; i < b; i++) if (ail_member_eq(v->p[i], x)) { *out = i; return AIL_OK; }
+    for (int64_t i = a; i < b; i++) {
+        int eq; ail_st st = ail__member_eq_st(cx, &eq, v->p[i], x); if (st != AIL_OK) return st;
+        if (eq) { *out = i; return AIL_OK; }
+    }
     return ail_raise_c(cx, AIL_B_VALUEERROR, "tuple.index(x): x not in tuple");
 }
 

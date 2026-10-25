@@ -8993,13 +8993,18 @@ class Compiler(boxclosure.ClosureMixin):
             def do(c):
                 if len(args) > 1:
                     raise Unsupported('.count() with start/end on a non-str sequence')
-                c.emit('%s = ail_box_int(%s(%s, %s));' % (t, fn, recv, v))
+                n = c.new_cvar('cnt')
+                c.emit('int64_t %s;' % n)
+                c.emit('st = %s(cx, &%s, %s, %s); if (st != AIL_OK) goto %s;' %
+                       (fn, n, recv, v, c.cur_err_target()))
+                c.uses_st = True
+                c.emit('%s = ail_box_int(%s);' % (t, n))
             return do
 
         self._tag_branch(ctx, recv, kind, {
             'str': do_str,
-            'list': mk_vec('ail_meth_list_count'),
-            'tuple': mk_vec('ail_meth_tuple_count'),
+            'list': mk_vec('ail_meth_list_count_st'),
+            'tuple': mk_vec('ail_meth_tuple_count_st'),
         }, "object has no attribute 'count'", nargs=len(args))
         return t
 

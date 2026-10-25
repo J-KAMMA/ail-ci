@@ -1,3 +1,19 @@
+## 2026-10-25 - list/tuple index and count keep a `__eq__` error (job-pre234-10260207)
+
+The first still-differing item recorded by the pre216 review was the sequence search: a `__eq__`
+that raises was swallowed by `list.index`/`list.count` (and the tuple forms), so the program got
+`ValueError: <value> is not in list` or `0` where CPython propagates the original exception.  The
+search now uses one helper with CPython's `PyObject_RichCompareBool` order -- identity first, then
+`==` through `ail_op_eq`, so a user method is dispatched and its error is returned.  `count` goes
+through a new status-returning entry point in both emitters; `index` already had one.
+
+Probes `/tmp/probes/p_listmsgs4.py`, `p_listeq.py`, `p_pre234.py` and `p_pre234_noclass.py` cover
+an error on the first and a later element, bounded and negative windows, identity short-circuiting
+the call, equality/reflection returning True or False, empty lists and int/str/None lists, values
+through an argument, a list item, an attribute and a dict value, tuples, and a program without
+classes; all match CPython on both builds.  Added `test_ail_pre234.py` (2 tests, both builds) and
+registered it in `ail_check.MODULES`.
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a
