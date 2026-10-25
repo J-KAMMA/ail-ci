@@ -1,3 +1,18 @@
+## 2026-10-25 - range.index/count equality and int64 result (job-pre216-10252305)
+
+Review of the pre216 feature found two defects.  `range.index`/`range.count` only consulted
+integer arithmetic, so a non-int/float value that compares equal to an element (a user
+`__eq__`, Decimal, Fraction) either raised the generic not-found text or counted 0 where
+CPython searches the range with `==`; the range branches now walk the range and compare with
+`ail_member_eq` for any value that is not int/bool/float, counting every match as CPython's
+generic sequence search does.  An index (or count) above `INT64_MAX` used the uncatchable
+`ail_hit_limit` stop; it now raises a named, catchable `OverflowError`
+(`range.index() index exceeds int64` / `range.count() result exceeds int64`) because AIL ints
+are 64-bit.  Probes `/tmp/probes/p6_eq.py`, `/tmp/probes/p6b_listeq.py`,
+`/tmp/probes/p7_huge.py` and the boundary probes for types, widths, empty, negative-step and
+argument/list/attribute/dict delivery match CPython on both builds except the documented
+above-int64 index, which is the named refusal.  `test_ail_pre216.py` covers the equality walk
+and checks the above-int64 case is caught, not a hard exit.
 ## 2026-10-25 - range.index/count (job-pre216-10252305)
 
 The first still-differing item from the memsafe2 review was `range.index()`: the general path's

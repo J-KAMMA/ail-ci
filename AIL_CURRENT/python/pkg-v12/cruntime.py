@@ -19281,9 +19281,13 @@ static inline ail_st ail_meth_tuple_index(ail_ctx *cx, int64_t *out, ail_obj tup
 }
 
 /* ===================================================================================
-   range.index/count.  CPython's range has both, with a one-argument signature; its
-   index uses integer arithmetic for an int/bool (and an integral float), and the
-   generic sequence text for any other value that is not found.
+   range.index/count.  CPython's range has both, with a one-argument signature.  An
+   int/bool (and an integral float) is located with integer arithmetic, so a range far
+   too long to walk is still answered; every other value is located by walking the
+   range and comparing with ==, exactly as CPython's generic sequence search does (and
+   a range can have more than int64 items, so the ordinal is uint64).  An ordinal or
+   count that does not fit int64 is this runtime's own int limit: a named, catchable
+   OverflowError rather than an uncatchable AIL_LIMIT stop.
    =================================================================================== */
 static inline int ail__range_ordinal(const ail_rangeobj *r, ail_obj x, uint64_t *ord, int *is_int) {
     int64_t v;
@@ -19309,25 +19313,51 @@ static inline int ail__range_ordinal(const ail_rangeobj *r, ail_obj x, uint64_t 
     }
     return 0;
 }
+static inline int ail__range_walk_index(const ail_rangeobj *r, ail_obj x, uint64_t *ord) {
+    uint64_t n = ail__range_count(r);
+    for (uint64_t i = 0; i < n; i++)
+        if (ail_member_eq(ail_box_int(ail__range_at(r->start, r->step, i)), x)) { *ord = i; return 1; }
+    return 0;
+}
+static inline uint64_t ail__range_walk_count(const ail_rangeobj *r, ail_obj x) {
+    uint64_t n = ail__range_count(r), count = 0;
+    for (uint64_t i = 0; i < n; i++)
+        if (ail_member_eq(ail_box_int(ail__range_at(r->start, r->step, i)), x)) count++;
+    return count;
+}
 static inline ail_st ail_meth_range_index(ail_ctx *cx, int64_t *out, ail_obj rng, ail_obj x) {
+    const ail_rangeobj *r = (ail_rangeobj *)rng.o;
     uint64_t ord = 0; int is_int = 0;
-    if (ail__range_ordinal((ail_rangeobj *)rng.o, x, &ord, &is_int)) {
-        if (ord > (uint64_t)INT64_MAX) return ail_hit_limit(cx, "int_overflow", "range index exceeds int64");
-        *out = (int64_t)ord; return AIL_OK;
-    }
-    if (is_int) {
+    int numeric = x.tag == AIL_T_INT || x.tag == AIL_T_BOOL || x.tag == AIL_T_FLOAT;
+    if (ail__range_ordinal(r, x, &ord, &is_int)) {
+        /* found with integer arithmetic */
+    } else if (!numeric && ail__range_walk_index(r, x, &ord)) {
+        /* found by ==: a non-numeric value may compare equal to a range element */
+    } else if (is_int) {
         ail_obj rs[2]; rs[0] = ail_obj_repr(cx, x); rs[1] = ail_box_none();
         AIL_ROOT_N(cx, fr, rs, 2);
         rs[1] = ail_str_from_cstr(cx, " is not in range");
         ail_obj msg = ail_str_cat(cx, rs[0], rs[1]);
         AIL_FRAME_LEAVE(cx, fr);
         return ail_raise(cx, cx->builtin_cls[AIL_B_VALUEERROR], msg);
+    } else {
+        return ail_raise_c(cx, AIL_B_VALUEERROR, "sequence.index(x): x not in sequence");
     }
-    return ail_raise_c(cx, AIL_B_VALUEERROR, "sequence.index(x): x not in sequence");
+    if (ord > (uint64_t)INT64_MAX)
+        return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "range.index() index exceeds int64");
+    *out = (int64_t)ord; return AIL_OK;
 }
-static inline int64_t ail_meth_range_count(ail_obj rng, ail_obj x) {
+static inline ail_st ail_meth_range_count(ail_ctx *cx, int64_t *out, ail_obj rng, ail_obj x) {
+    const ail_rangeobj *r = (ail_rangeobj *)rng.o;
     uint64_t ord = 0; int is_int = 0;
-    return ail__range_ordinal((ail_rangeobj *)rng.o, x, &ord, &is_int) ? 1 : 0;
+    uint64_t count;
+    if (x.tag == AIL_T_INT || x.tag == AIL_T_BOOL || x.tag == AIL_T_FLOAT)
+        count = ail__range_ordinal(r, x, &ord, &is_int) ? 1 : 0;
+    else
+        count = ail__range_walk_count(r, x);
+    if (count > (uint64_t)INT64_MAX)
+        return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "range.count() result exceeds int64");
+    *out = (int64_t)count; return AIL_OK;
 }
 
 /* ===================================================================================

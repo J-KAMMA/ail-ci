@@ -8981,7 +8981,12 @@ class Compiler(boxclosure.ClosureMixin):
                 c.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "range.count() takes exactly '
                        'one argument (%d given)"); goto %s;' % (len(args), c.cur_err_target()))
                 return
-            c.emit('%s = ail_box_int(ail_meth_range_count(%s, %s));' % (t, recv, v))
+            ix = c.new_cvar('ix')
+            c.emit('int64_t %s;' % ix)
+            c.emit('st = ail_meth_range_count(cx, &%s, %s, %s); if (st != AIL_OK) goto %s;' %
+                   (ix, recv, v, c.cur_err_target()))
+            c.uses_st = True
+            c.emit('%s = ail_box_int(%s);' % (t, ix))
 
         self._tag_branch(ctx, recv, kind, {
             'str': do_str,
