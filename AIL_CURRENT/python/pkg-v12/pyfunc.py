@@ -747,7 +747,7 @@ _CONST_INT_BIG = object()
 _CONST_INT_BITS = 4096
 
 
-def _const_int_expr(node, _limit=None):
+def _const_int_expr(node, _limit=_CONST_INT_BITS):
     """The exact value of a constant int expression, or a not-constant/too-big sentinel.
 
     AIL integers are int64 (SEMANTICS section 1), so a constant expression that leaves that range
@@ -759,8 +759,6 @@ def _const_int_expr(node, _limit=None):
     pyfront.int_constant, so a large but valid operand cannot turn a small result into a
     refusal.  The other operand of such a power is retried at the special-exponent limit so a
     huge exponent beyond the ordinary fold limit still yields its sign and parity."""
-    if _limit is None:
-        _limit = _CONST_INT_BITS
     if isinstance(node, ast.Constant):
         return node.value if type(node.value) is int else _CONST_INT_NOT
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
