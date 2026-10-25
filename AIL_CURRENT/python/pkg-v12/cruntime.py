@@ -19281,6 +19281,56 @@ static inline ail_st ail_meth_tuple_index(ail_ctx *cx, int64_t *out, ail_obj tup
 }
 
 /* ===================================================================================
+   range.index/count.  CPython's range has both, with a one-argument signature; its
+   index uses integer arithmetic for an int/bool (and an integral float), and the
+   generic sequence text for any other value that is not found.
+   =================================================================================== */
+static inline int ail__range_ordinal(const ail_rangeobj *r, ail_obj x, uint64_t *ord, int *is_int) {
+    int64_t v;
+    *is_int = x.tag == AIL_T_INT || x.tag == AIL_T_BOOL;
+    if (*is_int) v = x.i;
+    else if (x.tag == AIL_T_FLOAT) {
+        double fv = ail_float_val(x);
+        if (!(fv >= -9223372036854775808.0 && fv < 9223372036854775808.0) || (double)(int64_t)fv != fv) return 0;
+        v = (int64_t)fv;
+    } else return 0;
+    if (r->step > 0) {
+        if (v < r->start || v >= r->stop) return 0;
+        uint64_t dist = (uint64_t)v - (uint64_t)r->start;
+        if (dist % (uint64_t)r->step) return 0;
+        *ord = dist / (uint64_t)r->step; return 1;
+    }
+    if (r->step < 0) {
+        if (v > r->start || v <= r->stop) return 0;
+        uint64_t dist = (uint64_t)r->start - (uint64_t)v;
+        uint64_t mag = UINT64_C(0) - (uint64_t)r->step;
+        if (dist % mag) return 0;
+        *ord = dist / mag; return 1;
+    }
+    return 0;
+}
+static inline ail_st ail_meth_range_index(ail_ctx *cx, int64_t *out, ail_obj rng, ail_obj x) {
+    uint64_t ord = 0; int is_int = 0;
+    if (ail__range_ordinal((ail_rangeobj *)rng.o, x, &ord, &is_int)) {
+        if (ord > (uint64_t)INT64_MAX) return ail_hit_limit(cx, "int_overflow", "range index exceeds int64");
+        *out = (int64_t)ord; return AIL_OK;
+    }
+    if (is_int) {
+        ail_obj rs[2]; rs[0] = ail_obj_repr(cx, x); rs[1] = ail_box_none();
+        AIL_ROOT_N(cx, fr, rs, 2);
+        rs[1] = ail_str_from_cstr(cx, " is not in range");
+        ail_obj msg = ail_str_cat(cx, rs[0], rs[1]);
+        AIL_FRAME_LEAVE(cx, fr);
+        return ail_raise(cx, cx->builtin_cls[AIL_B_VALUEERROR], msg);
+    }
+    return ail_raise_c(cx, AIL_B_VALUEERROR, "sequence.index(x): x not in sequence");
+}
+static inline int64_t ail_meth_range_count(ail_obj rng, ail_obj x) {
+    uint64_t ord = 0; int is_int = 0;
+    return ail__range_ordinal((ail_rangeobj *)rng.o, x, &ord, &is_int) ? 1 : 0;
+}
+
+/* ===================================================================================
    M055/M056 -- int.bit_length() / float.is_integer().
    =================================================================================== */
 static inline int64_t ail_meth_int_bit_length(int64_t x) {

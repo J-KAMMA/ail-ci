@@ -1,3 +1,22 @@
+## 2026-10-25 - range.index/count (job-pre216-10252305)
+
+The first still-differing item from the memsafe2 review was `range.index()`: the general path's
+method dispatch had branches for str/list/tuple only, so `range(2, 20, 3).index(8)` fell through
+to `AttributeError: 'range' object has no attribute 'index'` on both builds (CPython: 2).  The
+same gap covered `range.count()`.  `pyboxed2` now has a range branch for both methods (and a
+range entry in the method type tags); `cruntime` locates an int/bool or an integral float
+arithmetically without walking a possibly huge range, raises `<repr> is not in range` for a
+missing int and CPython's `sequence.index(x): x not in sequence` for another value, and reports
+range's one-argument arity TypeError.  The typed path still names both methods as unsupported, so
+the default build falls back to the general path, which matches CPython.
+
+Probes `/tmp/probes/p_range_index.py`, `/tmp/probes/p_range_methods.py` and
+`/tmp/probes/p_range_zero_runtime.py` cover values as a literal, loop variable, argument, list
+item, attribute, dict value and alias; int/bool/integral-float/non-integral-float/str values;
+empty, positive-step, negative-step, huge-step and int64-boundary ranges; not-found messages;
+and 2/3-argument arity calls.  Both `-g` and `-d` match CPython on every range method probe (the
+zero-step item is a separate pre-existing difference and was not changed).  `test_ail_pre216.py`
+is registered in `ail_check.MODULES` and `tools/ci_shards.json`.
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
