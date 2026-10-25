@@ -252,7 +252,9 @@ class Fraction:
         return _ail_fr_to_float(self.numerator, self.denominator)
 
     def as_integer_ratio(self):
-        return (self.numerator, self.denominator)
+        n: int = self.numerator
+        d: int = self.denominator
+        return (n, d)
 
     def is_integer(self) -> bool:
         return self.denominator == 1
@@ -441,6 +443,16 @@ class Fraction:
             db = self.denominator
             return Fraction((other * db) % (self.numerator * da), da * db)
         raise TypeError("unsupported operand type(s) for %%: '%s' and 'Fraction'" % _ail_fr_tname(other))
+
+    def __divmod__(self, other):
+        q: Fraction = self // other
+        r: Fraction = self % other
+        return (q, r)
+
+    def __rdivmod__(self, other):
+        q: Fraction = other // self
+        r: Fraction = other % self
+        return (q, r)
 
     def __pow__(self, other):
         if isinstance(other, Fraction) and other.denominator == 1:

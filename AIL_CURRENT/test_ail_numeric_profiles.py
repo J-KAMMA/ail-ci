@@ -23,7 +23,10 @@ class ProfileCandidateTests(unittest.TestCase):
                 code = generate('fn probe(n:int)->str {let r:str=hex(' + expression + ');return r;}')
                 self.assertIn('ail_int_hex', code)
                 self.assertIn('UINT64_C(0) - magnitude', code)
-                self.assertIn('uint16_t reversed[16]', code)
+                # bin / oct / hex share one radix routine: a fixed on-stack digit buffer, no heap scratch
+                self.assertIn('uint16_t reversed[64]', code)
+                self.assertIn("ail_int_radix(A, value, 4, 'x')", code)
+                self.assertNotIn('malloc', code[code.index('ail_int_radix'):code.index('ail_int_oct')])
         self.assertTrue(generate('fn hex(n:int)->int {return n;} fn probe(n:int)->int {return hex(n);}'))
 
     def test_callable_parameter_and_local_hex_shadow(self):
