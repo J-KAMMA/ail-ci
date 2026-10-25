@@ -13,8 +13,9 @@ name. The name-bound form (`b = True; (b << 64) >> 64`) still stops with the pre
 Probes `/tmp/probes/p229_*` covered the in-range folds (bool, int, negative, zero, width and mixed
 arithmetic), an argument, a list item, an attribute, a dict value, a return and an alias,
 out-of-int64 final values and intermediates, negative shift counts (ValueError matches), name-bound
-bool shifts (unchanged trap), and both `cmp.sh` builds; every in-range probe matches CPython and
-every out-of-range one is refused by name. A non-bool `corpus/gdev/g00_000.py` build produces
+bool shifts (unchanged trap), and both `cmp.sh` builds; every in-range constant probe matches
+CPython, every out-of-range constant one is refused by name, and the name-bound case keeps its
+runtime trap. A non-bool `corpus/gdev/g00_000.py` build produces
 byte-identical `program.c` on both builds. Added `AIL_CURRENT/test_ail_pre229.py` and registered it
 in `ail_check.MODULES`.
 
