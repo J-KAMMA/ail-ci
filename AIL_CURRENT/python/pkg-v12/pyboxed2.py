@@ -586,6 +586,59 @@ __attribute__((noinline, cold)) static ail_st ail2_bisect_bound(ail_ctx *cx, ail
 }
 '''
 
+MEMBEREQ_C = r'''
+/* CPython's PyObject_RichCompareBool, as list/tuple index/count use it: identity first, then
+   `==` (a user __eq__ is dispatched and an exception it raises is propagated).  Kept out of the
+   always-included preamble so a program that never uses .index/.count keeps the C it had. */
+static inline ail_st ail__member_eq_st(ail_ctx *cx, int *out, ail_obj a, ail_obj b) {
+    if (ail_identical(a, b)) { *out = 1; return AIL_OK; }
+    ail_obj r; ail_st st = ail_op_eq(cx, &r, a, b);
+    if (st != AIL_OK) return st;
+    *out = ail_obj_truthy(r);
+    return AIL_OK;
+}
+static inline ail_st ail_meth_list_count_st(ail_ctx *cx, int64_t *out, ail_obj lst, ail_obj x) {
+    ail_vecobj *v = (ail_vecobj *)AIL_DQ_DATA(lst).o; int64_t cnt = 0;
+    for (int64_t i = 0; i < v->n; i++) {
+        int eq; ail_st st = ail__member_eq_st(cx, &eq, v->p[i], x); if (st != AIL_OK) return st;
+        if (eq) cnt++;
+    }
+    *out = cnt; return AIL_OK;
+}
+static inline ail_st ail_meth_tuple_count_st(ail_ctx *cx, int64_t *out, ail_obj tup, ail_obj x) {
+    ail_vecobj *v = (ail_vecobj *)tup.o; int64_t cnt = 0;
+    for (int64_t i = 0; i < v->n; i++) {
+        int eq; ail_st st = ail__member_eq_st(cx, &eq, v->p[i], x); if (st != AIL_OK) return st;
+        if (eq) cnt++;
+    }
+    *out = cnt; return AIL_OK;
+}
+static inline ail_st ail_meth_list_index_st(ail_ctx *cx, int64_t *out, ail_obj lst, ail_obj x, int has_lo, int64_t lo, int has_hi, int64_t hi) {
+    int is_dq = ((ail_gcobj *)lst.o)->flags != 0;
+    ail_vecobj *v = (ail_vecobj *)AIL_DQ_DATA(lst).o;
+    int64_t a, b; if (!ail__win(v->n, has_lo, lo, has_hi, hi, &a, &b)) { a = 0; b = 0; }
+    for (int64_t i = a; i < b; i++) {
+        int eq; ail_st st = ail__member_eq_st(cx, &eq, v->p[i], x); if (st != AIL_OK) return st;
+        if (eq) { *out = i; return AIL_OK; }
+    }
+    ail_obj rs[2]; rs[0] = ail_obj_repr(cx, x); rs[1] = ail_box_none();
+    AIL_ROOT_N(cx, fr, rs, 2);
+    rs[1] = ail_str_from_cstr(cx, is_dq ? " is not in deque" : " is not in list");
+    ail_obj msg = ail_str_cat(cx, rs[0], rs[1]);
+    AIL_FRAME_LEAVE(cx, fr);
+    return ail_raise(cx, cx->builtin_cls[AIL_B_VALUEERROR], msg);
+}
+static inline ail_st ail_meth_tuple_index_st(ail_ctx *cx, int64_t *out, ail_obj tup, ail_obj x, int has_lo, int64_t lo, int has_hi, int64_t hi) {
+    ail_vecobj *v = (ail_vecobj *)tup.o;
+    int64_t a, b; if (!ail__win(v->n, has_lo, lo, has_hi, hi, &a, &b)) { a = 0; b = 0; }
+    for (int64_t i = a; i < b; i++) {
+        int eq; ail_st st = ail__member_eq_st(cx, &eq, v->p[i], x); if (st != AIL_OK) return st;
+        if (eq) { *out = i; return AIL_OK; }
+    }
+    return ail_raise_c(cx, AIL_B_VALUEERROR, "tuple.index(x): x not in tuple");
+}
+'''
+
 TYPE_NAME_C = '''
 static inline ail_st ail_type_name_of(ail_ctx *cx, ail_obj *out, ail_obj x) {
     if (x.tag == AIL_T_INST || x.tag == AIL_T_EXC) {
@@ -2320,6 +2373,8 @@ class Compiler(boxclosure.ClosureMixin):
             parts.append(ARGCHK_C)
         if getattr(self, 'needs_bisect_bound', False):
             parts.append(BISECTBOUND_C)
+        if getattr(self, 'needs_member_eq', False):
+            parts.append(MEMBEREQ_C)
         if getattr(self, 'needs_stararity', False):
             parts.append(stararity.C)
         if self.rt_needs:
@@ -8950,8 +9005,10 @@ class Compiler(boxclosure.ClosureMixin):
         v = self.expr(args[0], ctx)
         t = ctx.tmp()
 
-        def mk(fn, none_is_default):
+        def mk(fn, none_is_default, member_eq=False):
             def do(c):
+                if member_eq:
+                    c.needs_member_eq = True
                 if none_is_default:
                     has_lo, lo, has_hi, hi = self._str_window_bounds(args, c)
                 else:
@@ -8975,8 +9032,8 @@ class Compiler(boxclosure.ClosureMixin):
 
         self._tag_branch(ctx, recv, kind, {
             'str': mk('ail_meth_str_index', True),
-            'list': mk('ail_meth_list_index', False),
-            'tuple': mk('ail_meth_tuple_index', False),
+            'list': mk('ail_meth_list_index_st', False, True),
+            'tuple': mk('ail_meth_tuple_index_st', False, True),
         }, "object has no attribute 'index'", nargs=len(args))
         return t
 
@@ -8993,6 +9050,7 @@ class Compiler(boxclosure.ClosureMixin):
             def do(c):
                 if len(args) > 1:
                     raise Unsupported('.count() with start/end on a non-str sequence')
+                c.needs_member_eq = True
                 n = c.new_cvar('cnt')
                 c.emit('int64_t %s;' % n)
                 c.emit('st = %s(cx, &%s, %s, %s); if (st != AIL_OK) goto %s;' %

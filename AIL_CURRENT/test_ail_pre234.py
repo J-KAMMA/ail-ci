@@ -174,6 +174,27 @@ class Pre234Tests(unittest.TestCase):
     def test_program_without_classes_still_builds(self):
         self.check('no_class', NO_CLASS)
 
+    def test_program_without_index_count_keeps_its_c(self):
+        text = 'def main():\n    xs = [1, 2, 3]\n    print(len(xs), xs[1], sum(xs))\n\nmain()\n'
+        with tempfile.TemporaryDirectory(prefix='ail-pre234-c-') as directory:
+            src = Path(directory) / 'nofeature.py'
+            src.write_text(text, encoding='utf-8')
+            for general in (True, False):
+                debug = Path(directory) / ('debug_' + ('g' if general else 'd'))
+                env = dict(os.environ, AIL_NO_CACHE='1', AIL_QUIET_FALLBACK='1')
+                env.pop('AIL_UNIFIED_FORCE', None)
+                if general:
+                    env['AIL_UNIFIED_FORCE'] = '1'
+                built = subprocess.run(
+                    [sys.executable, '-B', CLI, 'compile', src.name, '--syntax', 'python',
+                     '-o', 'exe', '--debug-dir', str(debug)],
+                    cwd=directory, capture_output=True, text=True, timeout=900, env=env)
+                self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                program_c = (debug / 'program.c').read_text(encoding='utf-8')
+                self.assertNotIn('ail__member_eq_st', program_c, 'general=%s' % general)
+                self.assertNotIn('ail_meth_list_index_st', program_c, 'general=%s' % general)
+
+
 
 if __name__ == '__main__':
     unittest.main()
