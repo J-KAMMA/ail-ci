@@ -317,6 +317,74 @@ def _maxsplit_constant_nodes(tree):
     return handled
 
 
+def _function_scope_stores(function):
+    """Names stored in a function's own scope, ignoring nested functions, classes and lambdas."""
+    stores = {}
+
+    def visit(node):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                continue
+            if isinstance(child, ast.Name) and isinstance(child.ctx, (ast.Store, ast.Del)):
+                stores[child.id] = stores.get(child.id, 0) + 1
+            visit(child)
+
+    visit(function)
+    return stores
+
+
+def _function_local_int_constants(function, module_known):
+    """The int constants a function's own top-level assignments bind, with module constants
+    visible unless the function shadows them.  A name stored more than once, a parameter, or a
+    global/nonlocal declaration keeps the name out of the map."""
+    arguments = function.args
+    parameters = {argument.arg for argument in arguments.posonlyargs + arguments.args + arguments.kwonlyargs}
+    if arguments.vararg is not None:
+        parameters.add(arguments.vararg.arg)
+    if arguments.kwarg is not None:
+        parameters.add(arguments.kwarg.arg)
+    stores = _function_scope_stores(function)
+    declared = set()
+    for node in ast.walk(function):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            declared.update(node.names)
+    local = {name: value for name, value in module_known.items()
+             if name not in stores and name not in parameters and name not in declared}
+
+    def bind(target, value_node):
+        if not isinstance(target, ast.Name):
+            return
+        name = target.id
+        if stores.get(name) != 1 or name in parameters or name in declared:
+            return
+        value = _constant_int(value_node, local)
+        if value is None:
+            try:
+                value = _const_expr_int(value_node, bounded=False)
+            except _Int64ConstantOverflow:
+                value = None
+        if value is not None:
+            local[name] = value
+
+    for statement in function.body:
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            bind(statement.targets[0], statement.value)
+        elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+            bind(statement.target, statement.value)
+    return local
+
+
+def _walk_own_scope(function):
+    """Nodes in a function's body, not descending into nested functions, classes or lambdas."""
+    stack = list(function.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        yield node
+        stack.extend(ast.iter_child_nodes(node))
+
+
 def _check_int64_abs_constants(tree, known):
     """Refuse a constant ``abs(MIN)`` (2**63) by name.  AIL ints are fixed width, so the value
     cannot be represented; CPython prints the bignum.  Only a builtin ``abs`` is considered,
@@ -338,13 +406,14 @@ def _check_int64_abs_constants(tree, known):
             bound.update(node.names)
     if 'abs' in bound or 'abs' in known:
         return
-    for node in ast.walk(tree):
+
+    def check(node, scope_known):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id == 'abs'):
-            continue
+            return
         if len(node.args) != 1 or node.keywords or isinstance(node.args[0], ast.Starred):
-            continue
-        value = _constant_int(node.args[0], known)
+            return
+        value = _constant_int(node.args[0], scope_known)
         if value is None:
             try:
                 value = _const_expr_int(node.args[0], bounded=False)
@@ -355,6 +424,15 @@ def _check_int64_abs_constants(tree, known):
             error.source_line = node.lineno
             error.source_column = node.col_offset
             raise error
+
+    for node in ast.walk(tree):
+        check(node, known)
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        local = _function_local_int_constants(function, known)
+        for node in _walk_own_scope(function):
+            check(node, local)
 
 
 def _check_int64_unary_constants(tree):
