@@ -1,3 +1,23 @@
+## 2026-10-25 - module-level rebinding of a module function (job-pre242-10260356)
+
+The first still-differing item from the pre217 review was `r3_module_shadow.py` /
+`p09_module_rebind.py`: a module-level `f = lambda: 102` after `def f` was ignored and `f()`
+printed the old `2` on both builds. The general path's `_call_name` always preferred
+`self.functions[name]`, and the module body never wrote a top-level function into its module slot.
+A module-scope assignment to a top-level function name now marks that name as rebound, the `def`
+stores its function value in the module slot, and direct calls/reads of the name go through the
+slot. Rebinding a function whose value the general path cannot build (defaults or a keyword call
+through the value) is refused by name; a `global f` write inside a function (the separate p32
+item) is unchanged.
+
+Probes in `/tmp/probes`: `pre242_basic`, `pre242_order` (before/after), `pre242_signatures`
+(0/1/2 params, str/list), `pre242_sources` (another function, list item, attribute, dict value,
+function argument), `pre242_conditional`, `pre242_value_read`, `pre242_noncallable` (TypeError),
+and `pre242_defaults` / `pre242_kwargs` (refused by name); all match CPython or are refused on both
+builds. Added `test_ail_pre242.py` (2 tests, both builds) and registered it in
+`ail_check.MODULES`; final-state tests: test_ail_pre242, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a
