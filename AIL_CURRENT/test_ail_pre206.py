@@ -6,7 +6,9 @@ The review of job memsafe2 recorded a pre-existing difference: `format(1, '__d')
 grouping character, then treats the second copy as the spec's type when it is the last
 character (`format(1, ',,' )` -> `Cannot specify ',' with ','.`) and rejects the whole spec
 when anything follows it.  Two different grouping characters keep the `both` message.
-Other malformed specs now name the spec and the value's type too.
+Other malformed specs now name the spec and the value's type, including non-ASCII,
+long and NUL-bearing specs; a grouping character combined with a non-ASCII type gives
+`Cannot specify '<group>' with '\\x..'`, as CPython does.
 
 The cases below are direct calls and values reaching `format` through an argument, a list
 item, an attribute, a dict value and an alias, over int, negative int, zero, bool, float,
@@ -79,6 +81,20 @@ def main():
                  ",e", "_e", ",g", "_g", ",%", "_%"]:
         show("valid:" + repr(spec) + ":int", lambda spec=spec: format(1234567, spec))
         show("valid:" + repr(spec) + ":float", lambda spec=spec: format(1234.5, spec))
+
+    for spec in ["__é", ",é", ",中", ",q", ", ", "_q", "_i", ",\x01", ",\x7f",
+                 ",\x80", ",\x00"]:
+        for value in [0, -7, True, 1.5, "x"]:
+            show("group-code:" + repr(spec) + ":" + type(value).__name__,
+                 lambda spec=spec, value=value: format(value, spec))
+        show("group-code-arg:" + repr(spec), lambda spec=spec: via(7, spec))
+        show("group-code-attr:" + repr(spec), lambda spec=spec: format(box.value, spec))
+        show("group-code-dict:" + repr(spec), lambda spec=spec: format(d["value"], spec))
+
+    for spec in ["d" * 120, "d" * 300, "d\x00", "d中", ",d中", "é" * 100]:
+        for value in [0, -7, True, 1.5, "x"]:
+            show("whole:" + repr(spec) + ":" + type(value).__name__,
+                 lambda spec=spec, value=value: format(value, spec))
 
     show("generic-trail", lambda: format(1, "d "))
     show("generic-long", lambda: format(1, "10q"))

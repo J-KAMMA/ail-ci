@@ -1,3 +1,21 @@
+## 2026-10-25 - pre206 review fixes: complete and non-ASCII format-spec messages
+
+The review of the pre206 job found three defects in the extra whole-spec message rewrite. The
+whole-spec message is now built as runtime text instead of a 160-byte C buffer: the complete spec
+is included (120/300-character specs, not 159 bytes) and an embedded NUL is kept. Non-ASCII code
+units are copied as code units rather than UTF-8 bytes, so `format(1, '__é')` names `'__é'` (no
+double encoding). CPython's grouping-vs-type check now runs inside the parser before the non-ASCII
+type rejection, so `format(1, ',é')` and `',中'` give `Cannot specify ',' with '\xe9'` /
+`'\x4e2d'`; it also covers the previously pre-existing grouping + space/`q`/`i` cases, with
+`\x20` escaping. The repeated-grouping behaviour from the earlier commit is unchanged.
+
+Probes `/tmp/probes/p_review_fix.py` and `/tmp/probes/p_review_matrix.py` (non-ASCII and long/NUL
+whole specs, grouping with every ASCII/BMP code point, both builds, values through an argument, a
+list item, an attribute, a dict value and an alias) match CPython; the reviewer's `p_uni_long`,
+`p_uni_group`, `p_uni_plain` and `p_cont` match, and `p_fuzz` is down to the two pre-existing
+string `+_`/`+,` sign-vs-grouping differences listed in the review. `test_ail_pre206`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass on both builds.
+
 ## 2026-10-25 - format() repeated grouping characters (job-pre206-10252128)
 
 The memsafe2 review listed three pre-existing differences. The first, `int(bytearray(...), base)`

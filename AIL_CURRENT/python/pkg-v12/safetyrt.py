@@ -682,21 +682,26 @@ static inline ail_obj ail2f_done(ail_ctx *cx, ail2f_buf *b) {
     return ail_str_buf_done(bu, b->n);
 }
 typedef struct { uint16_t fill; char align, sign; int alt, zero, z, has_width, has_prec; int64_t width, prec; char group, type, has_type; } ail2f_spec;
-/* CPython's whole-spec rejection names the spec and the value's type. The spec is a str, so encode
-   its code points as UTF-8; a NUL (an embedded byte, not a terminator) still cuts the C message. */
-static inline int ail2f_invalid_spec(ail_str s, const char *vtype, char *msg, size_t msz) {
-    char text[256]; size_t k = 0;
-    for (int64_t j = 0; j < s.n && k + 4 < sizeof text; j++) {
-        uint32_t c = ail_chr(s, j);
-        if (c < 0x80) text[k++] = (char)c;
-        else if (c < 0x800) { text[k++] = (char)(0xC0 | (c >> 6)); text[k++] = (char)(0x80 | (c & 0x3F)); }
-        else { text[k++] = (char)(0xE0 | (c >> 12)); text[k++] = (char)(0x80 | ((c >> 6) & 0x3F)); text[k++] = (char)(0x80 | (c & 0x3F)); }
-    }
-    text[k] = 0;
-    snprintf(msg, msz, "Invalid format specifier '%s' for object of type '%s'", text, vtype);
-    return -1;
+static inline void ail2f_code_text(char *out, size_t osz, uint16_t c);
+/* CPython's whole-spec rejection names the spec and the value's type. Build the message as
+   runtime text, so every code unit (including an embedded NUL) and the whole spec survive;
+   a C buffer would both truncate it and re-encode non-ASCII code units as UTF-8 bytes. */
+static inline ail_st ail2f_raise_invalid(ail_ctx *cx, ail_obj specobj, const char *vtype) {
+    static const char pre[] = "Invalid format specifier '";
+    static const char mid[] = "' for object of type '";
+    ail_str s = ail_view_to_str(specobj);
+    size_t vn = strlen(vtype);
+    int64_t total = (int64_t)(sizeof pre - 1) + s.n + (int64_t)(sizeof mid - 1) + (int64_t)vn + 1;
+    ail_strbuild bu = ail_str_buf1(cx, total, specobj);
+    int64_t k = 0;
+    for (const char *p = pre; *p; p++) bu.buf[k++] = (unsigned char)*p;
+    for (int64_t j = 0; j < s.n; j++) bu.buf[k++] = ail_chr(s, j);
+    for (const char *p = mid; *p; p++) bu.buf[k++] = (unsigned char)*p;
+    for (size_t j = 0; j < vn; j++) bu.buf[k++] = (unsigned char)vtype[j];
+    bu.buf[k++] = '\'';
+    return ail_raise(cx, cx->builtin_cls[AIL_B_VALUEERROR], ail_str_buf_done(bu, k));
 }
-/* 0, or -1 with the ValueError text in msg */
+/* 0, or -1 with the ValueError text in msg; -2 means the whole spec is invalid */
 static inline int ail2f_parse(ail_str s, ail2f_spec *f, const char *vtype, char *msg, size_t msz) {
     memset(f, 0, sizeof *f); f->fill = ' ';
     int64_t i = 0, n = s.n;
@@ -720,7 +725,7 @@ static inline int ail2f_parse(ail_str s, ail2f_spec *f, const char *vtype, char 
             /* The second copy is the last character: CPython reads it as the spec's type and names
                the clash. Anything after it makes the field parser reject the whole spec instead. */
             if (i == n - 1) { snprintf(msg, msz, "Cannot specify '%c' with '%c'.", f->group, f->group); return -1; }
-            return ail2f_invalid_spec(s, vtype, msg, msz);
+            return -2;
         }
     }
     if (i < n && ail_chr(s, i) == '.') {
@@ -732,9 +737,16 @@ static inline int ail2f_parse(ail_str s, ail2f_spec *f, const char *vtype, char 
             f->prec = f->prec * 10 + (ail_chr(s, i++) - '0');
         }
     }
-    if (n - i > 1) return ail2f_invalid_spec(s, vtype, msg, msz);
+    if (n - i > 1) return -2;
     if (i < n) {
         uint16_t t = ail_chr(s, i);
+        /* CPython checks the grouping against the type before it looks at the value. */
+        if (f->group && t != 0 && t != 'd' && t != 'e' && t != 'E' && t != 'f' && t != 'F' && t != 'g' && t != 'G'
+            && t != '%' && !(f->group == '_' && (t == 'b' || t == 'o' || t == 'x' || t == 'X'))) {
+            char code[16]; ail2f_code_text(code, sizeof code, t);
+            snprintf(msg, msz, "Cannot specify '%c' with '%s'.", f->group, code);
+            return -1;
+        }
         if (t > 127) { snprintf(msg, msz, "Unknown format code '\\x%x' for object of type '%s'", (unsigned)t, vtype); return -1; }
         f->type = (char)t;
         f->has_type = 1;
@@ -865,7 +877,7 @@ static inline int ail2f_body_zero(const char *b) {
    control characters and code points above U+007F become \x<hex>, the rest stay as written.
    A NUL byte is a format code of its own (format(1, '\0')), not the end of the spec. */
 static inline void ail2f_code_text(char *out, size_t osz, uint16_t c) {
-    if (c < 0x20 || c > 0x7f) snprintf(out, osz, "\\x%x", (unsigned)c);
+    if (c <= 0x20 || c > 0x7f) snprintf(out, osz, "\\x%x", (unsigned)c);
     else snprintf(out, osz, "%c", (char)c);
 }
 static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {
@@ -890,15 +902,10 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
     }
     ail2f_spec f;
     const char *vtype = x.tag == AIL_T_BOOL ? "bool" : x.tag == AIL_T_STR ? "str" : x.tag == AIL_T_FLOAT ? "float" : "int";
-    if (ail2f_parse(spec, &f, vtype, msg, sizeof msg)) return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
+    int pr = ail2f_parse(spec, &f, vtype, msg, sizeof msg);
+    if (pr == -2) return ail2f_raise_invalid(cx, specobj, vtype);
+    if (pr) return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
     char type = f.type, code[16];
-    if (f.group && type) {
-        /* CPython checks the grouping against the type before it looks at the value */
-        if (type == 'n' || type == 's' || type == 'c' || (f.group == ',' && (type == 'b' || type == 'o' || type == 'x' || type == 'X'))) {
-            snprintf(msg, sizeof msg, "Cannot specify '%c' with '%c'.", f.group, type);
-            return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
-        }
-    }
     if (x.tag == AIL_T_STR) {
         if (f.has_type && type != 's') { ail2f_code_text(code, sizeof code, (unsigned char)type); snprintf(msg, sizeof msg, "Unknown format code '%s' for object of type 'str'", code); return ail_raise_c(cx, AIL_B_VALUEERROR, msg); }
         if (f.sign == ' ') return ail_raise_c(cx, AIL_B_VALUEERROR, "Space not allowed in string format specifier");
