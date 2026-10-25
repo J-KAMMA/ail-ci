@@ -82,6 +82,14 @@ class _Int64ConstantOverflow(Exception):
     """A constant expression (or one of its steps) left the int64 range."""
 
 
+def _constant_diagnostic(value):
+    """Format a constant for a diagnostic without tripping CPython's int-to-str digit limit."""
+    try:
+        return str(value)
+    except ValueError:
+        return 'too large'
+
+
 def _const_expr_int(node, bounded=True):
     """The int a constant arithmetic expression denotes, or None when it is not one. With
     `bounded`, raises _Int64ConstantOverflow as soon as a step is outside int64: AIL computes such
@@ -172,7 +180,7 @@ def _check_constant_power(node, parents, maxsplit):
     if (isinstance(parent, ast.Assign) and parent.value is root
             and not isinstance(parents.get(parent), ast.ClassDef)):
         return
-    error = ValueError(f'int64 constant out of range: {value}')
+    error = ValueError(f'int64 constant out of range: {_constant_diagnostic(value)}')
     error.source_line = node.lineno
     error.source_column = node.col_offset
     raise error
@@ -190,7 +198,7 @@ def _check_index_expression(slice_node):
     try:
         _const_expr_int(slice_node)
     except _Int64ConstantOverflow as overflow:
-        error = ValueError(f'int64 index out of range: {overflow.args[0]}')
+        error = ValueError(f'int64 index out of range: {_constant_diagnostic(overflow.args[0])}')
         error.source_line = slice_node.lineno
         error.source_column = slice_node.col_offset
         raise error
@@ -215,7 +223,7 @@ def _check_int64_literals(tree):
             nodes.extend(ast.iter_child_nodes(node))
             continue
         if not _INT64_MIN <= value <= _INT64_MAX:
-            error = ValueError(f'int64 literal out of range: {value}')
+            error = ValueError(f'int64 literal out of range: {_constant_diagnostic(value)}')
             error.source_line = node.lineno
             error.source_column = node.col_offset
             raise error
@@ -353,7 +361,7 @@ def _check_int64_unary_constants(tree):
             continue
         value = _constant_int(node, known)
         if value is not None and not -(1 << 63) <= value < 1 << 63:
-            error = ValueError(f'int64 constant expression out of range: {value}')
+            error = ValueError(f'int64 constant expression out of range: {_constant_diagnostic(value)}')
             error.source_line = node.lineno
             error.source_column = node.col_offset
             raise error
