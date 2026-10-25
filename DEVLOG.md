@@ -429,6 +429,19 @@ including explicit int/float/negative/infinite rates, keyword calls, a zero rate
 dict value. On this tree the default build reaches the general path for these programs:
 the typed path still refuses `Random` for its plain-positional `randrange` requirement (an
 unrelated pre-existing gap). Added `AIL_CURRENT/test_ail_pre107.py`.
+## 2026-10-24 - pre112: a frozenset of tuples as a dict key (job-pre112-10242224)
+
+The tuple pass (`tuplib.py`) lowers `frozenset({(1, 'a'), (2, 'b')})` to its `_AilS_Pi_sQ` table class. The
+table refuses a set as a key, so a dict keyed by that frozenset stays a plain object, but the same expression
+used as the *lookup* key was still lowered: `D[frozenset({(1, 'a'), (2, 'b')})]` raised `KeyError`,
+`frozenset(...) in D` was False and `D.get(...)` was None, while the dictionary itself printed correctly (the
+reviewer's `t4h`, also on base). The pass now refuses a set / frozenset of tuples used as the key of a
+container that is not a table dict (`tupexpr.ex_Subscript`, `tupstmt.assign_one`) and bails on a module-level
+constant whose type cannot be told and that mentions a tuple (`tuplib.module_assign`), so the whole program is
+left as written and the general path keeps the dict and the key boxed. Added `test_ail_pre112.py` (4 programs,
+two builds each). Verified with 15 differential probes (`cmp.sh`, both builds) plus `test_ail_tuples`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`, `test_ail_collections`,
+`test_ail_sets_general` and `test_ail_modconst`.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
