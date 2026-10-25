@@ -88,7 +88,7 @@ def _const_expr_int(node, bounded=True):
     a step in int64 and stops with `integer overflow`, where CPython's unbounded int reaches the
     subscript (or the value) and raises IndexError (or keeps the big value). The checks below
     refuse the construct instead of letting the two differ."""
-    if isinstance(node, ast.Constant) and type(node.value) is int:
+    if isinstance(node, ast.Constant) and type(node.value) in (int, bool):
         value = node.value
     elif isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert)):
         value = _const_expr_int(node.operand, bounded)
@@ -107,13 +107,18 @@ def _const_expr_int(node, bounded=True):
                 return None
             value = left ** right
         elif isinstance(node.op, ast.LShift):
-            if not 0 <= right < 64:
+            if right < 0:
                 return None
+            if right > 100000:
+                return 0 if left == 0 else None
             value = left << right
         elif isinstance(node.op, ast.RShift):
-            if not 0 <= right < 64:
+            if right < 0:
                 return None
-            value = left >> right
+            if right > 100000:
+                value = 0 if left >= 0 else -1
+            else:
+                value = left >> right
         elif isinstance(node.op, ast.Mult):
             value = left * right
         elif isinstance(node.op, ast.Add):
@@ -143,6 +148,34 @@ def _const_expr_int(node, bounded=True):
     return value
 
 
+def _check_constant_out_of_range(node, parents, maxsplit, skip_assignment):
+    if id(node) in maxsplit:
+        return
+    value = _const_expr_int(node, bounded=False)
+    if value is None or _INT64_MIN <= value <= _INT64_MAX:
+        return
+    root = node
+    while True:
+        parent = parents.get(root)
+        if parent is None:
+            break
+        current = _const_expr_int(parent, bounded=False)
+        if current is None or current.bit_length() > 4096:
+            break
+        root = parent
+    full = _const_expr_int(root, bounded=False)
+    if full is not None and _INT64_MIN <= full <= _INT64_MAX:
+        return
+    parent = parents.get(root)
+    if (skip_assignment and isinstance(parent, ast.Assign) and parent.value is root
+            and not isinstance(parents.get(parent), ast.ClassDef)):
+        return
+    error = ValueError(f'int64 constant out of range: {value}')
+    error.source_line = node.lineno
+    error.source_column = node.col_offset
+    raise error
+
+
 def _check_constant_power(node, parents, maxsplit):
     """Refuse a constant `**` whose value int64 cannot hold, unless the whole enclosing constant
     expression folds to an in-range value (pre113 keeps `2**63 - 1` and `2**64 // 2 - 1`), the
@@ -151,31 +184,15 @@ def _check_constant_power(node, parents, maxsplit):
     trap). Literals are refused by _check_int64_literals; this catches `10 ** 20` written as
     arithmetic, wherever it appears (an argument, a list item, an attribute or a dict value),
     not only as an index."""
-    if id(node) in maxsplit:
-        return
-    try:
-        value = _const_expr_int(node, bounded=False)
-    except _Int64ConstantOverflow:
-        value = None
-    if value is None or _INT64_MIN <= value <= _INT64_MAX:
-        return
-    root = node
-    while True:
-        parent = parents.get(root)
-        if parent is None or _const_expr_int(parent, bounded=False) is None:
-            break
-        root = parent
-    full = _const_expr_int(root, bounded=False)
-    if full is not None and _INT64_MIN <= full <= _INT64_MAX:
-        return
-    parent = parents.get(root)
-    if (isinstance(parent, ast.Assign) and parent.value is root
-            and not isinstance(parents.get(parent), ast.ClassDef)):
-        return
-    error = ValueError(f'int64 constant out of range: {value}')
-    error.source_line = node.lineno
-    error.source_column = node.col_offset
-    raise error
+    _check_constant_out_of_range(node, parents, maxsplit, skip_assignment=True)
+
+
+def _check_constant_shift(node, parents, maxsplit):
+    """Refuse a constant shift whose value int64 cannot hold, unless the whole enclosing constant
+    expression folds to an in-range value (`(1 << 64) >> 64` is 1) or the node is a
+    str.split/rsplit maxsplit constant (pre97 names that). A bool operand is an int, as in
+    CPython."""
+    _check_constant_out_of_range(node, parents, maxsplit, skip_assignment=False)
 
 
 def _check_index_expression(slice_node):
@@ -206,6 +223,8 @@ def _check_int64_literals(tree):
             _check_index_expression(node.slice)
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
             _check_constant_power(node, parents, maxsplit)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.LShift, ast.RShift)):
+            _check_constant_shift(node, parents, maxsplit)
         if (isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub))
                 and isinstance(node.operand, ast.Constant) and type(node.operand.value) is int):
             value = -node.operand.value if isinstance(node.op, ast.USub) else node.operand.value
