@@ -6293,7 +6293,13 @@ class Compiler(boxclosure.ClosureMixin):
             import safetyrt
             if name in safetyrt.PRIMS:
                 return self._call_safety_prim(name, args, kwargs, ctx)
-        if name in self.classes:
+        if (name in self.classes and name not in ctx.slot_of and name not in ctx.ptr_names
+                and name not in ctx.clo_index and name not in ctx.free_names
+                and name not in ctx.cell_slots):
+            # a parameter, local, cell or closure binding of the same name shadows the class in
+            # CPython for the WHOLE activation: U() then calls that value, not the class (an
+            # unbound local is UnboundLocalError, an instance is TypeError), exactly as expr_Name
+            # already reads it. Without this the constructor-call path silently called the class.
             return self._call_class(name, args, kwargs, ctx)
         if name in ctx.nested_funcs:
             return self._call_nested_function(name, args, kwargs, ctx)

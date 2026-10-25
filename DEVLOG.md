@@ -180,6 +180,36 @@ semicolon statement, in CPython order, for every target form (name, attribute, s
 extended slice). Under `from __future__ import annotations` only the target is evaluated, as in
 CPython, and static type expressions (`int`, `list[int]`, `A | None`) stay unevaluated. Added
 `AIL_CURRENT/test_ail_pre124.py`.
+## 2026-10-24 - pre127 review fix: a shadowing binding also wins at a call site (job-pre127-10242351)
+
+The review found two defects in the r6 fix.  `expr_Name` read a parameter, local, cell or
+closure binding instead of the class, but `_call_name` still checked `self.classes` first, so
+`U()` in the same activation called the class constructor regardless.  A self-referential
+`U = U()` in a function therefore constructed the class and silently succeeded instead of
+raising `UnboundLocalError` (also for `U: object = U()` and `U, x = U(), 5`), and a loop target
+`for U in items:` left `U()` after the loop calling the class instead of raising `TypeError` on
+the instance.  `_call_name` now applies the same shadowing test as `expr_Name` before taking
+the class-constructor path.  `test_ail_pre127.py` gains both shapes; the probes also cover an
+unshadowed constructor, `global U`, a parameter holding the class itself, local/cell bindings
+of an instance, list/attribute/dict sources of a class value, an empty loop and a use before
+the assignment.  Module-level `U = U()` (already different on the base tree) is unchanged.
+
+## 2026-10-24 - pre127: a parameter or local shadows a class name (job-pre127-10242351)
+
+The first still-differing item from the pre96 list is `r6`: the general emitter's
+`expr_Name` returned the module-lifetime class value for every name that matched a class
+definition, even when the current function had a local slot for that name.  In
+`class U: ...; def f(U): return U.m()` the argument was ignored: both builds read the class
+object and raised `AttributeError: 'type' object has no attribute 'm'` where CPython returns
+42 from the instance's class attribute or method.  A class name now becomes a class value
+only when the activation has no parameter, local, cell or closure binding for it; a
+shadowing binding is loaded from its own slot.  The probes cover a nested parameter, a method
+parameter, a local, a cell, a `nonlocal` closure, an annotated parameter, and values arriving
+through a list item, an attribute and a dict value.  `r7` (`cls.__name__`), `r8`
+(`K = "abc"; f = K.upper`) and `r9` (class through a list item, `[U][0].m`) still differ on
+this tree and were not changed.  `test_ail_pre127.py` keeps the r6 probes; emitted C is
+unchanged for a program that does not shadow a class name.
+
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
