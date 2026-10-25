@@ -1,3 +1,38 @@
+## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
+
+The review found that the traceback rewrite indexed `node.args.args[3]` after a
+`len(node.args.args) >= 3` guard, so any `__exit__(self, et, ev)` (three arguments) crashed the
+compiler with `IndexError` even when the class was never used.  The guard now requires four
+arguments; shorter signatures are left alone.  A short `__exit__` that a `with` actually calls is
+then refused by name by the existing argument check ("not in the subset: __exit__() called with too
+many positional arguments"), and an unused one compiles where CPython does.
+
+Probes `/tmp/probes/pre197_*` cover 3-argument exits (unused, clean body, raising body, reached via
+an attribute/list/dict), 1- and 2-argument unused exits, keyword-only `tb`, `*args`, defaults and the
+normal 4-argument path on both builds.  Added both regression cases to `test_ail_pre197.py`.
+
+## 2026-10-25 - `__exit__` third argument when the body raised (job-pre197-10252029)
+
+The first still-differing item left by the pre181 review was the traceback argument:
+`__exit__` received None even when the `with` body raised, so `tb is None` printed True where
+CPython passes the active traceback object (`C?-job-pre181-10251538-2`).  AIL does not model
+traceback objects, so the general path now passes a non-None `_AilTraceback` stand-in in the
+exception branch and keeps None on every other exit.  Both paths answer `tb is None` /
+`tb is not None` (and `==` / `!=` against None) from whether the body raised; the typed path maps
+the test to its exception code instead of folding it to a constant.  Any other use of the `tb`
+parameter (`type(tb)`, truthiness, attribute access, passing it to a helper, ...) is refused by
+name at compile time on both builds: "__exit__ uses 'tb' other than in `is None` / `is not None`;
+traceback objects are not modelled".
+
+Probes in `/tmp/probes` (`p_tb1`-`p_tb12`, `p_final`, `p_stop1`) covered clean and raising bodies,
+`is`/`is not`/`==`/`!=` against None, suppression, a returning body, `break`/`continue`, nested
+managers, a `@contextmanager` generator (the pre181 StopIteration case still matches), a manager
+reaching the `with` through an argument, a list item, an attribute and a dict value, and the
+refused `type(tb)` / truthiness / helper / `tb.tb_lineno` uses; all match CPython or are refused by
+name on both builds.  Added `test_ail_pre197.py` (2 tests, both builds) and registered it in
+`ail_check.MODULES`.  Final-state tests: test_ail_pre197, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 pass.
+
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal

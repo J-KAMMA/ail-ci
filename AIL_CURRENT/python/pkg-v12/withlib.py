@@ -8,7 +8,7 @@ A `with` is lowered to the statements PEP 343 describes, on the program's own cl
                                      BODY
                                  except Exception as e:
                                      done = True
-                                     if not m.__exit__(_AilExcType("ValueError"), e, None): raise
+                                     if not m.__exit__(_AilExcType("ValueError"), e, _AilTraceback()): raise
                                  finally:
                                      if not done: m.__exit__(None, None, None)
 
@@ -16,6 +16,8 @@ so `return` / `break` / `continue` out of BODY call __exit__ once, an exception 
 unless __exit__ returns true, and several items nest left to right.
 
 * `with open(...)` and `with f:` on a file variable are left to filelower.py (it runs first and keeps the other items).
+* the third `__exit__` argument is a stand-in `_AilTraceback` when the body raised (and None otherwise); AIL has no
+  traceback objects, so `tb` may only be tested against None (other uses are refused by name).
 * `with suppress(A, B):` (contextlib) is `try: BODY / except (A, B): pass`; `suppress` with something that is not a
   plain list of exception names, or with `as`, is refused by name.
 * `@contextmanager` on a def or a method: the generator is renamed `_ail_cm_<name>` and its `yield` statements become
@@ -127,7 +129,7 @@ class Lower(ast.NodeTransformer):
         handler = ast.ExceptHandler(
             type=N('Exception'), name=e,
             body=[ast.Assign(targets=[N(done, True)], value=ast.Constant(value=True)),
-                  ast.If(test=ast.UnaryOp(op=ast.Not(), operand=method(N(m), '__exit__', [exc_type, N(e), ast.Constant(value=None)])),
+                  ast.If(test=ast.UnaryOp(op=ast.Not(), operand=method(N(m), '__exit__', [exc_type, N(e), call(N('_AilTraceback'))])),
                          body=[ast.Raise(exc=None, cause=None)], orelse=[])])
         final = [ast.If(test=ast.UnaryOp(op=ast.Not(), operand=N(done)),
                         body=[ast.Expr(value=method(N(m), '__exit__', [ast.Constant(value=None)] * 3))], orelse=[])]
@@ -303,10 +305,11 @@ def expression_parts(stmt):
 
 class ExitArgs(ast.NodeTransformer):
     """Inside `def __exit__(self, exc_type, exc, tb)`: `issubclass(exc_type, X)`, `exc_type is X`, `exc_type == X`,
-    `exc_type in (A, B)` compare the exception instance's class name (there are no class values here)."""
+    `exc_type in (A, B)` compare the exception instance's class name (there are no class values here); `tb` may
+    only be tested against None, since AIL has no traceback objects."""
 
-    def __init__(self, ty, ex, classes):
-        self.ty, self.ex, self.classes = ty, ex, classes
+    def __init__(self, ty, ex, tb, classes):
+        self.ty, self.ex, self.tb, self.classes = ty, ex, tb, classes
 
     def isclass(self, node):
         return isinstance(node, ast.Name) and (node.id in BUILTIN_EXC or node.id in self.classes)
@@ -322,6 +325,12 @@ class ExitArgs(ast.NodeTransformer):
         return ast.BoolOp(op=ast.And(), values=[
             ast.Compare(left=N(self.ex), ops=[ast.IsNot()], comparators=[ast.Constant(value=None)]), test])
 
+    def visit_Name(self, node):
+        if node.id == self.tb and isinstance(node.ctx, ast.Load):
+            refuse(node, "__exit__ uses %r other than in `is None` / `is not None`; traceback objects are not "
+                          'modelled' % node.id)
+        return node
+
     def visit_Call(self, node):
         self.generic_visit(node)
         if isinstance(node.func, ast.Name) and node.func.id == 'issubclass' and len(node.args) == 2 \
@@ -332,6 +341,11 @@ class ExitArgs(ast.NodeTransformer):
         return node
 
     def visit_Compare(self, node):
+        if len(node.ops) == 1 and isinstance(node.left, ast.Name) and node.left.id == self.tb:
+            op, right = node.ops[0], node.comparators[0]
+            if isinstance(op, (ast.Is, ast.IsNot, ast.Eq, ast.NotEq)) \
+                    and isinstance(right, ast.Constant) and right.value is None:
+                return node
         self.generic_visit(node)
         if len(node.ops) == 1 and self.is_ty(node.left):
             op, right = node.ops[0], node.comparators[0]
@@ -382,15 +396,16 @@ def rewrite(tree):
     tree.body = new_body
     classes = lower.classes
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == '__exit__' and len(node.args.args) >= 3:
-            ty, ex = node.args.args[1].arg, node.args.args[2].arg
-            node.body = [ExitArgs(ty, ex, classes).visit(s) for s in node.body]
+        if isinstance(node, ast.FunctionDef) and node.name == '__exit__' and len(node.args.args) >= 4:
+            ty, ex, tb = node.args.args[1].arg, node.args.args[2].arg, node.args.args[3].arg
+            node.body = [ExitArgs(ty, ex, tb, classes).visit(s) for s in node.body]
     stdlib5.leftover(tree, binder, 'contextmanager, suppress, closing and nullcontext are built')
     if not (lower.used or need):
         return ''
     roots = set(need)
     if lower.used:
         roots.add('_AilExcType')
+        roots.add('_AilTraceback')
     if lower.cm:
         roots.add('_AilGenCM')
     source = open(os.path.join(HERE, 'prelude_with.py'), encoding='utf-8').read()
