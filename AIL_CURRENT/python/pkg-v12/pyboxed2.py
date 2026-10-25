@@ -588,6 +588,12 @@ __attribute__((noinline, cold)) static ail_st ail2_bisect_bound(ail_ctx *cx, ail
 
 TYPE_NAME_C = '''
 static inline ail_st ail_type_name_of(ail_ctx *cx, ail_obj *out, ail_obj x) {
+    if (x.tag == AIL_T_FUNC && ((ail_funcobj *)x.o)->builtin_fn) {
+        /* a builtin used as a value: CPython's type name is builtin_function_or_method
+           (type for a class builtin such as bool), not the generated FUNC's "function" */
+        *out = ail_str_from_cstr(cx, ail__tname_c(x));
+        return AIL_OK;
+    }
     if (x.tag == AIL_T_INST || x.tag == AIL_T_EXC) {
         ail_obj c = ((ail_instobj *)x.o)->cls;
         if (c.tag == AIL_T_CLASS) { *out = ((ail_classobj *)c.o)->name; return AIL_OK; }
@@ -4513,6 +4519,8 @@ class Compiler(boxclosure.ClosureMixin):
         is_global = self._is_global_name(node.id, ctx)
         if not is_global and node.id not in ctx.slot_of and node.id not in ctx.ptr_names \
                 and node.id not in ctx.clo_index:
+            if node.id in self._BUILTIN_VARIADIC_VALUES and node.id not in self.from_imports:
+                return self._builtin_variadic_value(node.id, ctx)
             arity = self._BUILTIN_VALUE_ARITY.get(node.id)
             if arity is not None and node.id not in self.from_imports:
                 # a builtin function as a value (`f = len`, `callable(abs)`, `{"len": len}`): the lambda that calls it
@@ -4554,9 +4562,36 @@ class Compiler(boxclosure.ClosureMixin):
     # builtins usable as function values, with the one arity they are called with through the value
     _BUILTIN_VALUE_ARITY = {'len': 1, 'abs': 1, 'ord': 1, 'chr': 1, 'bool': 1, 'repr': 1, 'sorted': 1, 'sum': 1,
                             'any': 1, 'all': 1, 'reversed': 1, 'iter': 1, 'hex': 1, 'oct': 1, 'bin': 1,
-                            'divmod': 2, 'pow': 2, 'isinstance': 2}
+                            'divmod': 2, 'pow': 2, 'isinstance': 2, 'callable': 1, 'hash': 1}
     # builtins in _BUILTIN_VALUE_ARITY that are classes, so CPython's type name is `type`
     _BUILTIN_TYPE_NAMES = frozenset({'bool'})
+    _BUILTIN_VARIADIC_VALUES = frozenset({'max', 'min'})
+
+    def _builtin_variadic_value(self, name, ctx):
+        adapter = 'pvb_%s' % name
+        if adapter not in getattr(self, 'value_adapters', set()):
+            self.value_adapters = getattr(self, 'value_adapters', set()) | {adapter}
+            impl = 'ail_bi_max' if name == 'max' else 'ail_bi_min'
+            self.top_decls.append('static ail_st %s(ail_ctx *cx, ail_obj *out, ail_obj arg, '
+                                  'void *closure);\n' % adapter)
+            self.top_defs.append(
+                'static ail_st %s(ail_ctx *cx, ail_obj *out, ail_obj arg, void *closure) {\n'
+                '    (void)closure;\n'
+                '    ail_vecobj *v = (ail_vecobj *)arg.o;\n'
+                '    if (v->n == 0) return ail_raise_c(cx, AIL_B_TYPEERROR, "%s expected at least '
+                '1 argument, got 0");\n'
+                '    if (v->n == 1) return %s_iter(cx, out, v->p[0], 0, ail_box_none(), 0, '
+                'ail_box_none());\n'
+                '    return %s_args(cx, out, v->p, v->n, 0, ail_box_none());\n'
+                '}\n\n' % (adapter, name, impl, impl))
+        t = ctx.tmp()
+        ctx.emit('{ ail_funcobj *_fo = (ail_funcobj *)ail_gc_alloc(cx, AIL_K_FUNC, '
+                 'sizeof(ail_funcobj)); _fo->fn = %s; _fo->n_cells = 0; _fo->name = "%s"; '
+                 '_fo->cells = (ail_obj *)ail_xmalloc(sizeof(ail_obj)); '
+                 '_fo->cells[0] = ail_box_int((int64_t)((0x%XLL << 32) | (%dLL << 16) | %dLL)); '
+                 '_fo->n_cells = 1; _fo->builtin_fn = 1; %s.tag = AIL_T_FUNC; %s.o = (ail_gcobj *)_fo; }'
+                 % (adapter, name, boxclosure.TAG, 0, 0xffff, t, t))
+        return t
 
     BINOP_FN = {ast.Add: 'ail_op_add', ast.Sub: 'ail_op_sub', ast.Mult: 'ail_op_mul',
                ast.Div: 'ail_op_truediv', ast.FloorDiv: 'ail_op_floordiv',

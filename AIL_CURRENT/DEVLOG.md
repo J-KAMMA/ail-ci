@@ -1,3 +1,25 @@
+## 2026-10-25 -- pre252: builtins used as values (job-pre252-10260447)
+
+The first still-differing item from the rbpre183 review was a builtin outside
+`_BUILTIN_VALUE_ARITY` used as a value: `f = max`, `[min, max]`, `{"m": max}`, and a value
+reaching a call through an argument/default/closure/return were refused by name, as were
+`callable` and `hash`. `max`/`min` now share a variadic value adapter (one iterable, or two or
+more arguments) and `callable`/`hash` are in the fixed-arity map. The generated FUNC keeps the
+builtin-kind flag, so `type(max).__name__` is `builtin_function_or_method` (a type-valued
+builtin such as `bool` still says `type`), and the max/min comparison error uses the source
+direction (`'>' not supported ...` for `max`). The other two rbpre183 items (tuple members
+through an untyped wrapper parameter and module-level rebinding of a builtin name) already
+matched and were not changed; an attribute-held builtin call is still refused by name.
+
+Probes `/tmp/probes/pre252_*`: `maxmin`, `direct_badcmp`, `fixed_values`, `maxmin_shapes`,
+`module_rebind`, `rebind_max`, `tuple_wrapper`, `tuple_wrapper2`, `nan`, `setargs`,
+`test_candidate` and `test_fixed` match CPython on both `cmp.sh` builds; `maxmin_attr` and
+`builtin_values` are refused by name on both builds. The `ail_obj_cmp` set-operand limit no
+longer names min()/max(): their value adapter and the direct call now compare sets with `<`/`>`,
+so those results match CPython too. `test_ail_pre252.py` (2 tests, both builds) passes;
+`test_ail_safetynet` passes. `test_ail_files` and `test_ail_corpus_findings3` are run on the
+final commit.
+
 ## 2026-10-25 -- pre199: range() with a zero step raises ValueError (job-pre199-10252047)
 
 The first still-differing item left by pre186 was `range(0, 5, 0)`: both builds accepted it and

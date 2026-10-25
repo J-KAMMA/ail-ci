@@ -14618,7 +14618,7 @@ static inline ail_st ail_obj_cmp_op(ail_ctx *cx, int64_t *out, ail_obj a, ail_ob
         *out = va->n == vb->n ? 0 : (va->n < vb->n ? -1 : 1); return AIL_OK;
     }
     if (AIL_IS_ANYSET(a.tag) && AIL_IS_ANYSET(b.tag))
-        return ail_hit_limit(cx, "sorting or min()/max() of sets: < on sets is the subset test, a partial order whose result depends on the sort algorithm; sort a key such as sorted(x) or len(x) instead", "");
+        return ail_hit_limit(cx, "sorting sets: < on sets is the subset test, a partial order whose result depends on the sort algorithm; sort a key such as sorted(x) or len(x) instead", "");
     if (a.tag == AIL_T_INST) {   /* a user __lt__ (found through the base classes) orders instances, as CPython does */
         for (ail_obj k = ((ail_instobj *)a.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
             ail_classobj *kc = (ail_classobj *)k.o;
@@ -17271,9 +17271,9 @@ static inline ail_st ail_bi_min_iter(ail_ctx *cx, ail_obj *out, ail_obj iterable
         } else fr.slots[4] = fr.slots[3];
         if (!have) { fr.slots[1] = fr.slots[3]; fr.slots[2] = fr.slots[4]; have = 1; }
         else {
-            int64_t c; st = ail_obj_cmp(cx, &c, fr.slots[4], fr.slots[2]);
+            ail_obj c; st = ail_op_lt(cx, &c, fr.slots[4], fr.slots[2]);
             if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
-            if (c < 0) { fr.slots[1] = fr.slots[3]; fr.slots[2] = fr.slots[4]; }
+            if (ail_obj_truthy(c)) { fr.slots[1] = fr.slots[3]; fr.slots[2] = fr.slots[4]; }
         }
     }
     if (!have) {
@@ -17301,9 +17301,9 @@ static inline ail_st ail_bi_max_iter(ail_ctx *cx, ail_obj *out, ail_obj iterable
         } else fr.slots[4] = fr.slots[3];
         if (!have) { fr.slots[1] = fr.slots[3]; fr.slots[2] = fr.slots[4]; have = 1; }
         else {
-            int64_t c; st = ail_obj_cmp(cx, &c, fr.slots[4], fr.slots[2]);
+            ail_obj c; st = ail_op_gt(cx, &c, fr.slots[4], fr.slots[2]);
             if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
-            if (c > 0) { fr.slots[1] = fr.slots[3]; fr.slots[2] = fr.slots[4]; }
+            if (ail_obj_truthy(c)) { fr.slots[1] = fr.slots[3]; fr.slots[2] = fr.slots[4]; }
         }
     }
     if (!have) {
@@ -17325,9 +17325,9 @@ static inline ail_st ail_bi_min_args(ail_ctx *cx, ail_obj *out, ail_obj *args, i
         ail_obj k;
         if (has_key) { ail_funcobj *f = (ail_funcobj *)key_fn.o; st = f->fn(cx, &fr.slots[2], args[i], f->cells); if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; } k = fr.slots[2]; }
         else k = args[i];
-        int64_t c; st = ail_obj_cmp(cx, &c, k, fr.slots[1]);
+        ail_obj c; st = ail_op_lt(cx, &c, k, fr.slots[1]);
         if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
-        if (c < 0) { fr.slots[0] = args[i]; fr.slots[1] = k; }
+        if (ail_obj_truthy(c)) { fr.slots[0] = args[i]; fr.slots[1] = k; }
     }
     *out = fr.slots[0];
     AIL_FRAME_LEAVE(cx, fr);
@@ -17343,9 +17343,9 @@ static inline ail_st ail_bi_max_args(ail_ctx *cx, ail_obj *out, ail_obj *args, i
         ail_obj k;
         if (has_key) { ail_funcobj *f = (ail_funcobj *)key_fn.o; st = f->fn(cx, &fr.slots[2], args[i], f->cells); if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; } k = fr.slots[2]; }
         else k = args[i];
-        int64_t c; st = ail_obj_cmp(cx, &c, k, fr.slots[1]);
+        ail_obj c; st = ail_op_gt(cx, &c, k, fr.slots[1]);
         if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
-        if (c > 0) { fr.slots[0] = args[i]; fr.slots[1] = k; }
+        if (ail_obj_truthy(c)) { fr.slots[0] = args[i]; fr.slots[1] = k; }
     }
     *out = fr.slots[0];
     AIL_FRAME_LEAVE(cx, fr);
