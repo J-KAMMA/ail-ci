@@ -1,3 +1,19 @@
+## 2026-10-25 - pre190 reapply: large constant intermediates that reduce to int64 (job-rbpre190-10252302)
+
+Re-applied the accepted pre190 change on top of the current tree. The constant folders now decide
+zero absorbing operands and the power bases 0/1/-1 before the size guard, so `0 * (1 << 5000)`,
+`(1 << 5000) & 0`, `0 ** (1 << 5000)`, `1 ** (1 << 5000)`, `(-1) ** (1 << 5000)`,
+`(1 << 5000) ** 0` and `(1 << 5000) >> 5000` fold instead of stopping with `integer overflow`, and
+the same constants used as a `str.split`/`rsplit` maxsplit are not refused. A zero/base shortcut is
+taken only when the other operand is itself a constant int, so `1.5 ** 0`, `f() ** 0`,
+`0 * "ab"`, `0 * f()`, `0 & 1.5` and `2.0 ** 0` keep normal evaluation. The fold limit moved from
+4096 to 2**20 bits (2**24 for a large exponent in such a power), and `_CONST_INT_BITS` now shares
+`_MAXSPLIT_BITS` so the generic all-constant folder added by another accepted job does not pre-empt
+these reductions on the integration tree. The current tree's exact `_pow_within_maxsplit_bits` guard
+is kept alongside the new shortcuts. Added `AIL_CURRENT/test_ail_pre190.py`; probes in `/tmp/probes`
+cover boundaries, non-int operands, effectful calls, and argument/list-item/attribute/dict routes on
+both builds.
+
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
