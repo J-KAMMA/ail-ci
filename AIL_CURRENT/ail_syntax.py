@@ -2774,7 +2774,8 @@ class _Surface:
 
     def _annotation_slice_parts(self, node):
         """The expressions CPython evaluates for a subscript target's slice, or None for a Starred form
-        (which the lowerers refuse by name)."""
+        (which CPython rejects as a bare annotated assignment target; module_bare_annotation refuses it).
+        A Starred inside a nested tuple is still part of that tuple display, so it is refused too."""
         if isinstance(node, ast.Starred):
             return None
         if isinstance(node, ast.Slice):
@@ -2782,10 +2783,9 @@ class _Surface:
         if isinstance(node, ast.Tuple):
             parts = []
             for each in node.elts:
-                if isinstance(each, ast.Starred):
+                found = self._annotation_slice_parts(each)
+                if found is None:
                     return None
-                found = ([each] if not isinstance(each, ast.Slice)
-                         else [x for x in (each.lower, each.upper, each.step) if x is not None])
                 parts.extend(found)
             return parts
         return [node]
@@ -2803,7 +2803,10 @@ class _Surface:
         elif isinstance(target, ast.Subscript):
             slice_parts = self._annotation_slice_parts(target.slice)
             if slice_parts is None:
-                return
+                raise SyntaxErrorAIL(
+                    'a starred expression in an annotated assignment target is not valid Python syntax.\n'
+                    '  write instead: build the key first (`key = a[0]`) and annotate `xs[key]`',
+                    lineno=node.lineno, offset=node.col_offset + 1)
             parts.append(target.value)
             parts.extend(slice_parts)
         elif not isinstance(target, ast.Name):
