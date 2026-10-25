@@ -257,6 +257,10 @@ class _Checker(object):
                 self.want(where, -(1 << 63) <= value < (1 << 63), 'constant out of i64 range')
         elif t.is_float:
             self.want(where, isinstance(value, float), 'float constant expected, found %r' % (value,))
+        elif t == I.TINT:
+            ok = isinstance(value, int) and not isinstance(value, bool)
+            if self.want(where, ok, 'integer constant expected, found %r' % (value,)):
+                self.want(where, -(1 << 63) <= value < (1 << 63), 'constant out of i64 range')
         else:
             self.err(where, 'constants are scalars in S0')
 

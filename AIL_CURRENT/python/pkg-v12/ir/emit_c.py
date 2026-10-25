@@ -292,7 +292,7 @@ class Emitter(TextEmitter):
         if ins is not None and ins.op == 'tint.from':
             v = ins.operands[0]
             ins = self.defs.get(v)
-        if ins is not None and ins.op == 'const' and v.type == I.I64:
+        if ins is not None and ins.op == 'const' and v.type in (I.I64, I.TINT):
             return ins.attrs.get('value')
         return None
 
@@ -304,6 +304,8 @@ class Emitter(TextEmitter):
                 return c_float(value)
             if v.type == I.I1:
                 return '1' if value else '0'
+            if v.type == I.TINT:
+                return 'ail_tint_from_int64(%s)' % c_int(value)
             return c_int(value)
         try:
             name = self.names[v]
@@ -397,6 +399,10 @@ class Emitter(TextEmitter):
         self.text_parts()
         if fn.attrs.get('recursive'):
             self.parts.add('RECDEPTH')
+        if any(t == I.TINT for t in fn.params) or any(t == I.TINT for t in fn.results) \
+                or any(ins.op == 'local.alloc' and ins.result.type.pointee == I.TINT
+                       for ins in fn.body.instrs):
+            self.parts.add('TINTT')
         if any(kind == 'slist' for _, kind in self.owned):
             self.parts.update(('STR', 'SLIST'))
         if any(kind in ('list', 'flist') for _, kind in self.owned):

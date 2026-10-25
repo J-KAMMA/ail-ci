@@ -99,7 +99,7 @@ static AIL_BIGFN ail_tint ail_tint__slow_neg(ail_tint a) {
     return ail_tint_demote(r, -x.sign);
 }
 static AIL_BIGFN int ail_tint__divmod(ail_tint *qo, ail_tint *ro, ail_tint a, ail_tint b, int mod) {
-    if (ail_tint_is_zero(b)) ail_die(mod ? "integer modulo by zero" : "integer division or modulo by zero");
+    if (ail_tint_is_zero(b)) ail_die(mod ? "integer modulo by zero" : "integer division by zero");
     ail_tbv x, y; ail_tbv_of(&x, a); ail_tbv_of(&y, b);
     size_t qcap = (x.n >= y.n ? x.n - y.n : 0) + 2, rcap = y.n + 1;
     ail_limb *qs = (ail_limb *)malloc((qcap + rcap) * sizeof(ail_limb));
@@ -182,7 +182,7 @@ static inline ail_tint ail_tint_neg(ail_tint a) {
 }
 static inline ail_tint ail_tint_floordiv(ail_tint a, ail_tint b) {
     if (__builtin_expect(!a.b && !b.b, 1)) {
-        if (__builtin_expect(b.i == 0, 0)) ail_die("integer division or modulo by zero");
+        if (__builtin_expect(b.i == 0, 0)) ail_die("integer division by zero");
         if (!(a.i == INT64_MIN && b.i == -1)) {
             int64_t x = a.i, y = b.i, q = x / y, r = x % y;
             if (r != 0 && ((r < 0) != (y < 0))) q -= 1;
@@ -255,7 +255,7 @@ static inline ail_tint ail_tint_mul_i64(ail_tint a, int64_t b) {
 }
 static inline ail_tint ail_tint_floordiv_i64(ail_tint a, int64_t b) {
     if (__builtin_expect(!a.b, 1)) {
-        if (__builtin_expect(b == 0, 0)) ail_die("integer division or modulo by zero");
+        if (__builtin_expect(b == 0, 0)) ail_die("integer division by zero");
         if (b > 0) {
             int64_t q = a.i / b;
             if (a.i % b < 0) q -= 1;
