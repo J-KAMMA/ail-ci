@@ -407,7 +407,8 @@ def _check_int64_constants(tree):
     """Refuse a constant integer expression outside int64 in a module/class assignment or a
     default argument, where the construct used to compile and trap at run time. Function and
     lambda bodies are left to the existing run-time stop and to _check_int64_literals, and a
-    class body keeps _check_constant_power's own wording for a bare `**` value."""
+    class body keeps _check_constant_power's own wording for a bare `**` value it can fold;
+    `_const_expr_int` cannot fold an exponent above 64, so that case is checked here."""
     def check_value(node):
         ok, value = _constant_int_exact(node)
         if not ok:
@@ -419,6 +420,10 @@ def _check_int64_constants(tree):
         error.source_line = getattr(node, 'lineno', None)
         error.source_column = getattr(node, 'col_offset', None)
         raise error
+
+    def defers_to_power(value, in_class):
+        return (in_class and isinstance(value, ast.BinOp) and isinstance(value.op, ast.Pow)
+                and _const_expr_int(value, bounded=False) is not None)
 
     def walk(node, in_class=False):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
@@ -436,10 +441,10 @@ def _check_int64_constants(tree):
                 walk(statement, True)
             return
         if isinstance(node, ast.Assign):
-            if not (in_class and isinstance(node.value, ast.BinOp) and isinstance(node.value.op, ast.Pow)):
+            if not defers_to_power(node.value, in_class):
                 check_value(node.value)
         elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            if not (in_class and isinstance(node.value, ast.BinOp) and isinstance(node.value.op, ast.Pow)):
+            if not defers_to_power(node.value, in_class):
                 check_value(node.value)
         for child in ast.iter_child_nodes(node):
             walk(child, in_class)

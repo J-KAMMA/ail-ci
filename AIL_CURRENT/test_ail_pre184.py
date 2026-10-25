@@ -29,6 +29,16 @@ print(C.MASK)
 
 print(C.MASK)
 """,
+    "class_pow": """class C:
+    M = 2 ** 100
+
+print(C.M)
+""",
+    "class_annassign_pow": """class C:
+    M: int = 2 ** 100
+
+print(C.M)
+""",
     "module_assign": """MASK = (1 << 64) - 1
 print(MASK)
 """,
