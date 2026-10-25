@@ -153,6 +153,30 @@ path keeps the dict and the key boxed. Added `test_ail_pre175.py` (5 programs, t
 frozenset's own repr order remains the separate, documented insertion-order difference (A2); the test compares
 lookup / membership / length results, not a raw set print.
 
+## 2026-10-24 - getattr chain reads: refuse computed names too (job-pre179-10250449 review fix)
+
+The first pre-179 change made computed chain names return hardcoded values, which was silently
+wrong for a real chain (`raise ... from`, nested `except`), and made `hasattr` report
+`__traceback__` true while the following `getattr` still failed.  The runtime helpers no longer
+invent values: a chain name that is not an ordinary field and reaches an exception is refused by
+name ("reading __context__ (exception chaining is not kept here)") from both `getattr` and
+`hasattr`, with or without a default, so `hasattr` and `getattr` agree.  Literal chain names keep
+their compile-time refusal.  Ordinary fields, including a computed `setattr` of a chain-named field
+followed by a read, are unchanged.  `test_ail_pre179.py` now covers the run-time refusals through
+an argument, a list item, an attribute and a dict value on both builds.
+
+## 2026-10-24 - getattr chain reads refused by name (job-pre179-10250449)
+
+The fuzz60 reviewer's r02 was still a silent difference on this tree: `getattr(e, "__context__")`
+(and the same read through `hasattr`, with a default, or through `setattr`) built and then raised
+`AttributeError` or returned the default where CPython returns None/False.  The general path's
+builtin attribute helpers now refuse a literal chain name by name on both builds, matching the
+existing direct `e.__context__` refusal.  The first attempt also made a computed name return
+None/False (and hasattr true for `__traceback__`); that was still wrong for a real chain and is
+corrected by the entry above.  r04 (`continue` out of try/finally) and r09 (`del e.__context__`)
+were already named refusals on both builds.  `test_ail_pre179.py` covers the literal refusals,
+run-time names through an argument, a list item, an attribute and a dict value, and ordinary
+fields.
 
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
 
