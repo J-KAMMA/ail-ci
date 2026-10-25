@@ -1,3 +1,20 @@
+## 2026-10-25 - bytes membership: `__index__` operand (job-pre258-10260537)
+
+The first still-differing item in the job-pre183 review's pre-existing list was an object with
+`__index__` used as the left operand of `in` on bytes/bytearray: both builds raised the
+bytes-like TypeError, while CPython converts through `__index__` (97 selects the byte, while -1
+and 256 raise `ValueError: byte must be in range(0, 256)`) and falls back to the buffer path when
+the conversion fails. `_ail_bcontains` now tries `_ail_b_index` first for non-int operands and
+keeps the existing bytes-like path as the fallback, so a non-int `__index__` result or a raising
+`__index__` gives CPython's bytes-like TypeError rather than the helper's own error.
+
+Probes `/tmp/probes/p1_index_bytes.py` and `p1b_index_edges.py` (values 0/97/255/256/-1, a bool
+result, non-int and raising `__index__`, a plain object, through an argument, a list item, a dict
+value, an attribute and `__contains__`, both receivers and both builds) match CPython; `p1c` is
+refused by name for an out-of-int64 constant. Added `test_ail_pre258.py`. The other three
+pre-existing pre183 items (the `type(len).__name__` text, builtin-function names in bytes
+errors, and builtin classes in a startswith tuple) are unchanged and not addressed here.
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a
