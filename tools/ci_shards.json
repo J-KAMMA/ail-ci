@@ -234,6 +234,7 @@
   "test_ail_pre186": 13.5,
   "test_ail_pre188": 13.5,
   "test_ail_pre192": 13.5,
+  "test_ail_pre213": 10.0,
   "test_ail_pre89": 13.5,
   "test_ail_pre90": 8.7,
   "test_ail_pre93": 13.5,
@@ -357,6 +358,7 @@
    "test_ail_fuzz_findings"
   ],
   [
+   "test_ail_pre213",
    "test_ail_quirks"
   ],
   [

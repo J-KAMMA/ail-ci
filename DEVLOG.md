@@ -1,3 +1,26 @@
+## 2026-10-25 - nested def two levels deep captures the enclosing cell (job-pre213-10252300)
+
+The first still-differing item from the rbpre141 review was r10c: a list mutated inside a def two
+levels down.  `def outer(): xs = []; def middle(): def inner(): xs.append(1)` was refused as
+`name 'xs' is not defined` on both builds because the in-place nested def captured only the names
+its own body read; the intermediate def had no binding for `xs`, so the inner def could not use it.
+The sibling-def case (r20) with direct calls already matched, its returned-function form is still
+refused by name, and the undefined-name default (r22) is still refused by name.
+
+`_register_nested` now also takes the free names of deeper defs (`boxclosure.free_names`).  When a
+name is used by such a deeper scope, its enclosing binding is made a cell (`NeedCells`), and the
+intermediate def receives that cell rather than a copy, so the deeper def sees the same object and
+any later rebinding.  The cell is forwarded through further nested defs, `cell_preamble` leaves
+an external cell alone, and a closure function now declares the def flags of its own nested defs
+(the flag was missing when a closure function contained a direct nested def).
+
+`test_ail_pre213.py` covers appends through an argument (empty and non-empty), aliasing, a dict
+value/list item/attribute, int and str reads (positive, zero, negative), a default referring to
+the captured list, sibling inner defs, a returned inner def called twice, rebinding the outer name
+after the intermediate call, and three levels.  A deep `nonlocal` write stays refused by name.
+Probes `/tmp/probes/p_deep_capture_*.py` and `/tmp/probes/r10c_nested_capture.py` match CPython or
+are refused by name on both builds.  Absolute instruction counts were not measured.
+
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal

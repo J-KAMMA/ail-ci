@@ -185,7 +185,7 @@ class ClosureMixin:
         """C lines that put each cell variable of `ctx` into a fresh cell (its current slot value,
         a parameter or UNBOUND, becomes the cell's value)."""
         lines = []
-        for name in sorted(ctx.cell_slots):
+        for name in sorted(ctx.cell_slots - getattr(ctx, 'external_cells', set())):
             if name not in ctx.slot_of:
                 ctx.declare_local(name)
             slot = ctx.slot_expr(ctx.slot_of[name])
@@ -289,6 +289,7 @@ class ClosureMixin:
             cctx.emit('*out = %s;' % v)
         pre = ['    f.slots[%d] = %s;' % (cctx.slot_of[p], cid(p)) for p in params]
         pre += self.cell_preamble(cctx)
+        pre += ['    int %s = 0;' % flag for flag in cctx.def_flag_decls]
         n_slots = max(cctx.next_slot, 1)
         sig = ''.join(', ail_obj %s' % cid(p) for p in params)
         self.top_decls.append('static ail_st %s(ail_ctx *cx, ail_obj *out, ail_obj *clo%s);\n' % (cname, sig))
