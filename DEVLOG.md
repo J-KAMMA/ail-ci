@@ -1,3 +1,20 @@
+## 2026-10-25 - module-level built-in shadow fallback (job-pre208-10252257)
+
+The first still-differing item from the pre142 review (`p4_scope`) was a module-level rebinding of the
+built-in `next`: `next = next` (also a read before the later binding, or a `del` of it) printed or raised
+`NameError: name 'py_next' is not defined` on both builds, where CPython's module LOAD_NAME falls back to the
+built-in. `shadowing.rename` gives the definition `py_next`, which has no built-in fallback, so the unsafe
+shapes are now refused by name at compile time: a read of the shadowed name before its first module-level
+binding (including a call of a function defined there), a read in that binding's own right-hand side, or a
+module-scope `del` of it. A def before the binding whose body reads the name is refused only when the module
+calls it before the binding. Ordinary rebinds that are read after they are bound are unchanged and still
+match CPython on both builds.
+
+`test_ail_pre208.py` covers the self-rebind, read-before-binding (top level and through a function), the
+three deletion shapes and the safe controls. Probes `p4_self`, `p4_before`, `p4_before_fn`, `p4_del`,
+`p4_delafter`, `p4_del_then` and `p4_alias_del` are refused by name; `p4_const`, `p4_c1`, `p4_def`,
+`p4_globalonly` and the read-after-binding control match CPython on both builds. The recorded `p8_edge`
+set/genexpr difference was not touched.
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal

@@ -247,6 +247,137 @@ class _Collector:
             self.visit(child, chain, class_locals)
 
 
+def _find_load(node, name, function_bodies):
+    """The first Name Load of `name` while `node` executes, or None. `function_bodies` also looks
+    inside a def/lambda body: a def before the module-level binding can be called before it runs."""
+    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id == name:
+        return node
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+        for part in getattr(node, 'decorator_list', ()):
+            hit = _find_load(part, name, function_bodies)
+            if hit is not None:
+                return hit
+        args = node.args
+        for part in args.defaults + [d for d in args.kw_defaults if d is not None]:
+            hit = _find_load(part, name, function_bodies)
+            if hit is not None:
+                return hit
+        if function_bodies:
+            body = node.body if isinstance(node, ast.Lambda) else node.body
+            for part in (body if isinstance(body, list) else [body]):
+                hit = _find_load(part, name, function_bodies)
+                if hit is not None:
+                    return hit
+        return None
+    if isinstance(node, ast.GeneratorExp) and not function_bodies:
+        return _find_load(node.generators[0].iter, name, function_bodies)
+    for child in ast.iter_child_nodes(node):
+        hit = _find_load(child, name, function_bodies)
+        if hit is not None:
+            return hit
+    return None
+
+
+def _module_delete(tree, name):
+    """The first module-scope `del <name>` (a class or function body is another scope), or None."""
+    def walk(node):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            return None
+        if isinstance(node, ast.Delete):
+            for target in node.targets:
+                for leaf in ast.walk(target):
+                    if isinstance(leaf, ast.Name) and leaf.id == name:
+                        return node
+        for child in ast.iter_child_nodes(node):
+            hit = walk(child)
+            if hit is not None:
+                return hit
+        return None
+    for statement in tree.body:
+        hit = walk(statement)
+        if hit is not None:
+            return hit
+    return None
+
+
+def _find_call(node, names):
+    """The first module-scope call of a name in `names` (function bodies are other scopes)."""
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in names:
+        return node
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+        return None
+    for child in ast.iter_child_nodes(node):
+        hit = _find_call(child, names)
+        if hit is not None:
+            return hit
+    return None
+
+
+def _check_rebound_builtin_fallback(tree, found, targets, Unsupported):
+    """Refuse a module-level shadow of a built-in whose name Python can still resolve to the
+    built-in: read before the first binding, read by the binding's own right-hand side, or
+    deleted. `rename` gives the binding `py_<name>`, which has no built-in fallback, so such a
+    read was a runtime "NameError: name 'py_<name>' is not defined" (or a compiler KeyError
+    after `del`) where CPython used the built-in -- for example `next = next`, or
+    `print(next(it))` before a later `next = ...`."""
+    if not targets:
+        return
+    statement_index = {id(statement): index for index, statement in enumerate(tree.body)}
+    first = {}
+    for name, _kind, node in found:
+        if name in targets and id(node) in statement_index:
+            index = statement_index[id(node)]
+            first[name] = min(first.get(name, index), index)
+    for name, first_index in first.items():
+        deleted = _module_delete(tree, name)
+        if deleted is not None:
+            error = Unsupported(
+                "the module-level definition %r shadows the built-in %s, but it is deleted; "
+                "Python then falls back to the built-in and this compiler renames the binding "
+                "to %r, which has no fallback.\n"
+                "  write instead: rename it (e.g. %r) or do not delete it"
+                % (name, name, 'py_' + name, _suggest(name)))
+            error.source_line = deleted.lineno
+            raise error
+        def refuse(hit):
+            error = Unsupported(
+                "the module-level definition %r shadows the built-in %s, but the name is "
+                "read before that binding, where Python uses the built-in; this compiler "
+                "renames the binding to %r, which has no fallback.\n"
+                "  write instead: rename it (e.g. %r) or use the built-in under another name"
+                % (name, name, 'py_' + name, _suggest(name)))
+            error.source_line = hit.lineno
+            raise error
+
+        # A def before the binding runs only when it is called, so a read in its body matters
+        # only if the module calls that function before the binding.  An ordinary statement,
+        # and a class body, runs at once.
+        pending = {}
+        for index, statement in enumerate(tree.body):
+            if index > first_index:
+                break
+            if index < first_index and isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                hit = _find_load(statement, name, False)
+                if hit is not None:
+                    refuse(hit)
+                body_hit = None
+                for part in statement.body:
+                    body_hit = _find_load(part, name, True)
+                    if body_hit is not None:
+                        break
+                if body_hit is not None:
+                    pending[statement.name] = body_hit
+                continue
+            hit = _find_load(statement, name, False)
+            if hit is not None:
+                refuse(hit)
+        if pending:
+            for statement in tree.body[:first_index]:
+                call = _find_call(statement, pending)
+                if call is not None:
+                    refuse(pending[call.func.id])
+
+
 def rename(source, Unsupported, extra_names=()):
     """(source, {new: old}): `source` with every module-level definition that shadows a built-in
     (and every reference Python resolves to it) renamed to a fresh identifier. `extra_names` are
@@ -267,6 +398,7 @@ def rename(source, Unsupported, extra_names=()):
     targets.update(name for name in extra_names if name in SHADOWABLE)
     if not targets:
         return source, {}
+    _check_rebound_builtin_fallback(tree, found, targets, Unsupported)
     used = set(re.findall(r'\w+', source))
     fresh = {}
     for name in sorted(targets):
