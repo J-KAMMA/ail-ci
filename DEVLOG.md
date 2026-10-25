@@ -1,3 +1,21 @@
+## 2026-10-25 - space-sign zero padding in a general-path f-string (job-pre226-10260118)
+
+The first still-differing item in the pre206 review's pre-existing list was `format(42, ' 05d')`
+giving `00 42` where CPython gives ` 0042`.  On this tree builtin `format()` and `str.format()`
+already match; the difference reproduces through a general-path f-string field,
+`f'{v: 05d}'` (also `f'{0: 05d}'` -> `000 0`, and the float `f'{2.5: 09.3f}'` -> `000 2.500`).
+The core formatter's `ail__pad` puts `=` padding after a leading sign, but recognized only `-`
+and `+` as signs, so the space sign was treated as content and the zeros went before it.  The
+sign check now includes `' '`; the fix is one condition in `cruntime.py` (the typed path's
+`ail_fmt_gen` already handled the space sign).
+
+Probes in `/tmp/probes` (`pre226_min`, `pre226_core`, `pre226_flow`, `pre226_space0`,
+`pre226_space0_flows`, `pre226_fstr_only`) cover int/bool/float, positive/negative/zero/-0.0,
+widths 0-10 around the sign, the `+`/`-` controls, a type-less int, dynamic nested specs, direct
+`format()`/`str.format()`/`%` controls, and values through an argument, a list item, an
+attribute, a dict value and an alias, on both builds; all match CPython.  Added
+`test_ail_pre226.py` and registered it in `ail_check.MODULES`.
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a
