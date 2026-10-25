@@ -138,10 +138,11 @@ def _number_constant(node):
     return None
 
 
-_CONST_INT_LIMIT = 4096
+_CONST_INT_LIMIT = 1 << 20
+_SPECIAL_INT_LIMIT = 1 << 24
 
 
-def int_constant(node):
+def int_constant(node, _limit=_CONST_INT_LIMIT):
     """The exact Python value of an all-integer constant expression, else None.
 
     Python evaluates `(1 << 63) - 1` and `2**65 - 2**65` exactly, even though an intermediate is
@@ -153,29 +154,74 @@ def int_constant(node):
     produce an int (`2 ** -1` is a float), when it fails (`1 // 0`), or when the value grows past
     a safe size.  The last case is deliberately not folded: the runtime's own overflow guard is
     the right answer for it, and computing `2 ** 1000000000` here would only cost memory.
+
+    Zero and the base 0/1/-1 of a power are decided before the other operand has to fit the size
+    limit: `0 * (1 << 5000)` and `0 ** (1 << 5000)` have int64 results even though the left/right
+    operand is large.  The exponent of such a power is retried at a much larger limit so its sign
+    and parity are still known.
     """
     if isinstance(node, ast.Constant):
         return node.value if type(node.value) is int else None
     if isinstance(node, ast.UnaryOp):
         if not isinstance(node.op, (ast.USub, ast.UAdd)):
             return None
-        value = int_constant(node.operand)
+        value = int_constant(node.operand, _limit)
         if value is None:
             return None
         return -value if isinstance(node.op, ast.USub) else value
     if not isinstance(node, ast.BinOp):
         return None
-    left, right = int_constant(node.left), int_constant(node.right)
-    if left is None or right is None:
-        return None
     op = type(node.op)
+    if op is ast.Pow:
+        right = int_constant(node.right, _limit)
+        if right == 0:
+            return 1
+        left = int_constant(node.left, _limit)
+        if left in (0, 1, -1):
+            if right is None:
+                right = int_constant(node.right, _SPECIAL_INT_LIMIT)
+            if right is not None and right >= 0:
+                if right == 0:
+                    return 1
+                if left == 0:
+                    return 0
+                if left == 1:
+                    return 1
+                return 1 if right % 2 == 0 else -1
+        if left is None or right is None:
+            return None
+    elif op is ast.Mult or op is ast.BitAnd:
+        left = int_constant(node.left, _limit)
+        if left == 0:
+            return 0
+        right = int_constant(node.right, _limit)
+        if right == 0:
+            return 0
+        if left is None or right is None:
+            return None
+    elif op is ast.LShift:
+        left = int_constant(node.left, _limit)
+        if left == 0:
+            right = int_constant(node.right, _limit)
+            if right is None:
+                right = int_constant(node.right, _SPECIAL_INT_LIMIT)
+            if right is not None and right >= 0:
+                return 0
+        right = int_constant(node.right, _limit)
+        if left is None or right is None:
+            return None
+    else:
+        left = int_constant(node.left, _limit)
+        right = int_constant(node.right, _limit)
+        if left is None or right is None:
+            return None
     try:
         if op is ast.Add:
             result = left + right
         elif op is ast.Sub:
             result = left - right
         elif op is ast.Mult:
-            if left and right and left.bit_length() + right.bit_length() > _CONST_INT_LIMIT:
+            if left and right and left.bit_length() + right.bit_length() > _limit:
                 return None
             result = left * right
         elif op is ast.FloorDiv:
@@ -191,7 +237,7 @@ def int_constant(node):
                 result = left
             elif left == -1:
                 result = -1 if right & 1 else 1
-            elif left.bit_length() * right > _CONST_INT_LIMIT:
+            elif left.bit_length() * right > _limit:
                 return None
             else:
                 result = left ** right
@@ -200,7 +246,7 @@ def int_constant(node):
                 return None
             if left == 0:
                 result = 0
-            elif left.bit_length() + right > _CONST_INT_LIMIT:
+            elif left.bit_length() + right > _limit:
                 return None
             else:
                 result = left << right
@@ -218,8 +264,7 @@ def int_constant(node):
             return None
     except (ArithmeticError, ValueError):
         return None
-    return result if type(result) is int and result.bit_length() <= _CONST_INT_LIMIT else None
-
+    return result if type(result) is int and result.bit_length() <= _limit else None
 
 def refuse_complex_pow(node):
     """`(-4.0) ** 0.5`: a negative base to a fractional power is a complex number in Python, and this

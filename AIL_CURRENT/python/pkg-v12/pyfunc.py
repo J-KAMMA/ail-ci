@@ -586,7 +586,8 @@ _I64_MIN = -(1 << 63)
 _I64_MAX = (1 << 63) - 1
 _MAXSPLIT_NOT_CONST = object()
 _MAXSPLIT_TOO_BIG = object()
-_MAXSPLIT_BITS = 4096
+_MAXSPLIT_BITS = 1 << 20
+_MAXSPLIT_SPECIAL_BITS = 1 << 24
 
 
 def _maxsplit_const(node):
@@ -595,7 +596,10 @@ def _maxsplit_const(node):
     `str.split`/`rsplit` take their maxsplit through the same int64 expression emitter as every
     other int, so `2**63 - 1` overflowed at run time on the intermediate power even though the
     final limit fits. Fold the expression here; an exponent that must leave int64 is recognised
-    without evaluating it (`2**100000000` is never built)."""
+    without evaluating it (`2**100000000` is never built).
+
+    A zero operand (or a power with base 0/1/-1 and a large exponent) is decided before the size
+    guard, so a large intermediate that reduces to an int64 maxsplit is not refused by name."""
     if isinstance(node, ast.Constant):
         return node.value if type(node.value) is int else _MAXSPLIT_NOT_CONST
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
@@ -611,56 +615,88 @@ def _maxsplit_const(node):
     if op not in (ast.Add, ast.Sub, ast.Mult, ast.Pow, ast.LShift, ast.RShift,
                   ast.FloorDiv, ast.Mod, ast.BitAnd, ast.BitOr, ast.BitXor):
         return _MAXSPLIT_NOT_CONST
-    left = _maxsplit_const(node.left)
-    right = _maxsplit_const(node.right)
-    if left is _MAXSPLIT_NOT_CONST or right is _MAXSPLIT_NOT_CONST:
-        return _MAXSPLIT_NOT_CONST
-    if left is _MAXSPLIT_TOO_BIG or right is _MAXSPLIT_TOO_BIG:
-        return _MAXSPLIT_TOO_BIG
     if op is ast.Pow:
+        right = _maxsplit_const(node.right)
+        if right == 0:
+            return 1
+        left = _maxsplit_const(node.left)
+        if left in (0, 1, -1):
+            if right is _MAXSPLIT_TOO_BIG:
+                right = int_constant(node.right, _MAXSPLIT_SPECIAL_BITS)
+                if right is None:
+                    right = _MAXSPLIT_TOO_BIG
+            if right is not _MAXSPLIT_NOT_CONST and right is not _MAXSPLIT_TOO_BIG \
+                    and right >= 0:
+                if right == 0:
+                    return 1
+                if left == 0:
+                    return 0
+                if left == 1:
+                    return 1
+                return 1 if right % 2 == 0 else -1
+        if left is _MAXSPLIT_NOT_CONST or right is _MAXSPLIT_NOT_CONST:
+            return _MAXSPLIT_NOT_CONST
+        if left is _MAXSPLIT_TOO_BIG or right is _MAXSPLIT_TOO_BIG:
+            return _MAXSPLIT_TOO_BIG
         if right < 0:
             return _MAXSPLIT_NOT_CONST
         if right == 0:
             return 1
         if left in (0, 1, -1):
             return left ** right if left != -1 else (-1 if right & 1 else 1)
-        if right >= 64:
+        if left.bit_length() * right > _MAXSPLIT_BITS:
             return _MAXSPLIT_TOO_BIG
         value = left ** right
-    elif op is ast.LShift:
-        if right < 0:
-            return _MAXSPLIT_NOT_CONST
+    elif op is ast.Mult or op is ast.BitAnd:
+        left = _maxsplit_const(node.left)
         if left == 0:
             return 0
-        if right >= _MAXSPLIT_BITS or left.bit_length() + right > _MAXSPLIT_BITS:
-            return _MAXSPLIT_TOO_BIG
-        value = left << right
-    elif op is ast.RShift:
-        if right < 0:
-            return _MAXSPLIT_NOT_CONST
-        if right >= _MAXSPLIT_BITS:
-            return 0 if left >= 0 else -1
-        value = left >> right
-    elif op is ast.FloorDiv or op is ast.Mod:
+        right = _maxsplit_const(node.right)
         if right == 0:
-            return _MAXSPLIT_NOT_CONST
-        value = left // right if op is ast.FloorDiv else left % right
-    elif op is ast.Mult:
-        if left == 0 or right == 0:
             return 0
-        if left.bit_length() + right.bit_length() > _MAXSPLIT_BITS:
+        if left is _MAXSPLIT_NOT_CONST or right is _MAXSPLIT_NOT_CONST:
+            return _MAXSPLIT_NOT_CONST
+        if left is _MAXSPLIT_TOO_BIG or right is _MAXSPLIT_TOO_BIG:
             return _MAXSPLIT_TOO_BIG
-        value = left * right
-    elif op is ast.Add:
-        value = left + right
-    elif op is ast.Sub:
-        value = left - right
-    elif op is ast.BitAnd:
-        value = left & right
-    elif op is ast.BitOr:
-        value = left | right
+        if op is ast.Mult:
+            if left.bit_length() + right.bit_length() > _MAXSPLIT_BITS:
+                return _MAXSPLIT_TOO_BIG
+            value = left * right
+        else:
+            value = left & right
     else:
-        value = left ^ right
+        left = _maxsplit_const(node.left)
+        right = _maxsplit_const(node.right)
+        if left is _MAXSPLIT_NOT_CONST or right is _MAXSPLIT_NOT_CONST:
+            return _MAXSPLIT_NOT_CONST
+        if left is _MAXSPLIT_TOO_BIG or right is _MAXSPLIT_TOO_BIG:
+            return _MAXSPLIT_TOO_BIG
+        if op is ast.LShift:
+            if right < 0:
+                return _MAXSPLIT_NOT_CONST
+            if left == 0:
+                return 0
+            if right >= _MAXSPLIT_BITS or left.bit_length() + right > _MAXSPLIT_BITS:
+                return _MAXSPLIT_TOO_BIG
+            value = left << right
+        elif op is ast.RShift:
+            if right < 0:
+                return _MAXSPLIT_NOT_CONST
+            if right >= _MAXSPLIT_BITS:
+                return 0 if left >= 0 else -1
+            value = left >> right
+        elif op is ast.FloorDiv or op is ast.Mod:
+            if right == 0:
+                return _MAXSPLIT_NOT_CONST
+            value = left // right if op is ast.FloorDiv else left % right
+        elif op is ast.Add:
+            value = left + right
+        elif op is ast.Sub:
+            value = left - right
+        elif op is ast.BitOr:
+            value = left | right
+        else:
+            value = left ^ right
     return _MAXSPLIT_TOO_BIG if value.bit_length() > _MAXSPLIT_BITS else value
 
 
