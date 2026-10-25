@@ -1,4 +1,22 @@
-## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
+## 2026-10-25 - named module/class constants outside int64 are refused by name (job-pre228-10260119)
+
+The first still-differing pre-existing item recorded by the rbpre184 review was the class
+constant built through a name: `N = 2**62; class C: X = N * 4` compiled to int64 arithmetic and
+stopped with `integer overflow`, where CPython keeps an unbounded int (the module assignment and
+annotated forms behave the same). A name cannot be folded into one literal, so
+`_check_named_int64_constants` now collects names bound exactly once to an exact int (module and
+class bodies) and refuses with `int64 constant expression out of range: <value>` a constant
+expression that names one of them and leaves int64 at an operation the program performs at run
+time. Literal-only subexpressions are still folded exactly first (so `M = 2**63 - 1` still works
+and `(2**63 - 1) // N` is 1), while an out-of-int64 intermediate is refused even when the final
+value would fit (`(N * 4) // 4`), matching the run-time trap the compiled program had. A name
+with any other binding (parameter, local, import, re-assignment) is not treated as a constant, so
+shadowed cases still match CPython. Probes in `/tmp/probes/p228_*` covered class, module,
+annotated, default, argument, list item and dict value forms, the negative and 2**63 boundaries,
+shifts, powers, intermediate overflow and shadowed parameters/locals on both builds; every probe
+matches CPython or is refused by name. Added `test_ail_pre228.py` and registered it.
+
+
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a
 `len(node.args.args) >= 3` guard, so any `__exit__(self, et, ev)` (three arguments) crashed the

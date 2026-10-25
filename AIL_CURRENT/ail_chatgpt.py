@@ -319,6 +319,238 @@ def _check_int64_unary_constants(tree):
             raise error
 
 
+_CONST_FOLD_BITS = 4096
+_FOLD_TOO_WIDE = object()
+
+
+def _literal_constant_int(node):
+    """The exact int a literal-only arithmetic expression denotes, or None when it is not one.
+    The compiler folds such a subtree into one literal, so an intermediate wider than int64 is
+    allowed here; a result above the compiler's 4096-bit folding bound is _FOLD_TOO_WIDE."""
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        return node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert)):
+        operand = _literal_constant_int(node.operand)
+        if operand is None or operand is _FOLD_TOO_WIDE:
+            return operand
+        if isinstance(node.op, ast.USub):
+            return -operand
+        return operand if isinstance(node.op, ast.UAdd) else ~operand
+    if not isinstance(node, ast.BinOp):
+        return None
+    op = type(node.op)
+    if op not in (ast.Add, ast.Sub, ast.Mult, ast.Pow, ast.LShift, ast.RShift,
+                  ast.FloorDiv, ast.Mod, ast.BitAnd, ast.BitOr, ast.BitXor):
+        return None
+    left = _literal_constant_int(node.left)
+    if left is None or left is _FOLD_TOO_WIDE:
+        return left
+    right = _literal_constant_int(node.right)
+    if right is None or right is _FOLD_TOO_WIDE:
+        return right
+    if op is ast.Pow:
+        if right < 0:
+            return None
+        if left == 0:
+            return 0 if right else 1
+        if left == 1:
+            return 1
+        if left == -1:
+            return 1 if right % 2 == 0 else -1
+        if right > _CONST_FOLD_BITS or left.bit_length() * right > _CONST_FOLD_BITS:
+            return _FOLD_TOO_WIDE
+        value = left ** right
+    elif op is ast.LShift:
+        if right < 0:
+            return None
+        if left == 0:
+            return 0
+        if right > _CONST_FOLD_BITS or left.bit_length() + right > _CONST_FOLD_BITS:
+            return _FOLD_TOO_WIDE
+        value = left << right
+    elif op is ast.RShift:
+        if right < 0:
+            return None
+        value = (0 if left >= 0 else -1) if right > _CONST_FOLD_BITS else left >> right
+    elif op is ast.FloorDiv or op is ast.Mod:
+        if right == 0:
+            return None
+        value = left // right if op is ast.FloorDiv else left % right
+    elif op is ast.Mult:
+        if left == 0 or right == 0:
+            return 0
+        if left.bit_length() + right.bit_length() > _CONST_FOLD_BITS:
+            return _FOLD_TOO_WIDE
+        value = left * right
+    elif op is ast.Add:
+        value = left + right
+    elif op is ast.Sub:
+        value = left - right
+    elif op is ast.BitAnd:
+        value = left & right
+    elif op is ast.BitOr:
+        value = left | right
+    else:
+        value = left ^ right
+    return value if value.bit_length() <= _CONST_FOLD_BITS else _FOLD_TOO_WIDE
+
+
+def _mentions_known_constant(node, known):
+    return any(isinstance(child, ast.Name) and child.id in known for child in ast.walk(node))
+
+
+def _runtime_constant_int(node, known):
+    """The value an expression evaluates to when every operation naming a known module or class
+    constant runs in int64. A literal-only subtree is folded exactly first (the compiler does
+    that), so only the operations around a name are checked; the first result outside int64
+    raises _Int64ConstantOverflow. None means the value is not statically known."""
+    if isinstance(node, ast.Name):
+        return known.get(node.id)
+    if not _mentions_known_constant(node, known):
+        value = _literal_constant_int(node)
+        return None if value is None or value is _FOLD_TOO_WIDE else value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert)):
+        operand = _runtime_constant_int(node.operand, known)
+        if operand is None:
+            return None
+        if isinstance(node.op, ast.USub):
+            value = -operand
+        elif isinstance(node.op, ast.UAdd):
+            value = operand
+        else:
+            value = ~operand
+    elif isinstance(node, ast.BinOp):
+        left = _runtime_constant_int(node.left, known)
+        if left is None:
+            return None
+        right = _runtime_constant_int(node.right, known)
+        if right is None:
+            return None
+        op = type(node.op)
+        if op is ast.Pow:
+            if right < 0:
+                return None
+            if left == 0:
+                value = 0 if right else 1
+            elif left == 1:
+                value = 1
+            elif left == -1:
+                value = 1 if right % 2 == 0 else -1
+            elif right > 64:
+                raise _Int64ConstantOverflow('too large')
+            else:
+                value = left ** right
+        elif op is ast.LShift:
+            if right < 0:
+                return None
+            if left == 0:
+                value = 0
+            elif right >= 64:
+                raise _Int64ConstantOverflow('too large')
+            else:
+                value = left << right
+        elif op is ast.RShift:
+            if right < 0:
+                return None
+            value = (0 if left >= 0 else -1) if right >= 64 else left >> right
+        elif op is ast.FloorDiv or op is ast.Mod:
+            if right == 0:
+                return None
+            value = left // right if op is ast.FloorDiv else left % right
+        elif op is ast.Mult:
+            value = left * right
+        elif op is ast.Add:
+            value = left + right
+        elif op is ast.Sub:
+            value = left - right
+        elif op is ast.BitAnd:
+            value = left & right
+        elif op is ast.BitOr:
+            value = left | right
+        elif op is ast.BitXor:
+            value = left ^ right
+        else:
+            return None
+    else:
+        return None
+    if not _INT64_MIN <= value <= _INT64_MAX:
+        raise _Int64ConstantOverflow(value)
+    return value
+
+
+def _binding_counts(tree):
+    """How often each name is bound anywhere in the program, so a value is called a module or
+    class constant only when no other binding (parameter, local, import, ...) can shadow it."""
+    counts = {}
+    def add(name):
+        if name:
+            counts[name] = counts.get(name, 0) + 1
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            add(node.id)
+        elif isinstance(node, ast.arg):
+            add(node.arg)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            add(node.name)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                add(alias.asname or alias.name.split('.')[0])
+        elif isinstance(node, ast.ExceptHandler):
+            add(node.name)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)):
+            add(node.name)
+        elif isinstance(node, ast.MatchMapping):
+            add(node.rest)
+    return counts
+
+
+def _collect_constant_bindings(statements, known, counts):
+    for statement in statements:
+        if isinstance(statement, ast.ClassDef):
+            _collect_constant_bindings(statement.body, known, counts)
+            continue
+        target = value = None
+        if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                and isinstance(statement.targets[0], ast.Name)):
+            target, value = statement.targets[0].id, statement.value
+        elif (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
+              and statement.value is not None):
+            target, value = statement.target.id, statement.value
+        if target is None or counts.get(target) != 1:
+            continue
+        try:
+            folded = _runtime_constant_int(value, known)
+        except _Int64ConstantOverflow:
+            continue
+        if folded is not None and _INT64_MIN <= folded <= _INT64_MAX:
+            known[target] = folded
+
+
+def _check_named_int64_constants(tree):
+    """Refuse a constant int expression that names a module or class constant and leaves int64 at
+    an operation the compiled program performs at run time. Such a construct (`N = 2**62`, then
+    `class C: X = N * 4`) used to compile to int64 arithmetic and stop with `integer overflow`,
+    where CPython keeps an unbounded int. A name cannot be folded into one literal, so the value
+    is refused by name instead."""
+    counts = _binding_counts(tree)
+    known = {}
+    _collect_constant_bindings(tree.body, known, counts)
+    if not known:
+        return
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.BinOp, ast.UnaryOp)):
+            continue
+        if not _mentions_known_constant(node, known):
+            continue
+        try:
+            _runtime_constant_int(node, known)
+        except _Int64ConstantOverflow as overflow:
+            error = ValueError(f'int64 constant expression out of range: {overflow.args[0]}')
+            error.source_line = getattr(node, 'lineno', None)
+            error.source_column = getattr(node, 'col_offset', None)
+            raise error
+
+
 def _returns_on_every_path(statements):
     def loop_exit(body):
         pending = list(body)
@@ -528,6 +760,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             if not declarations_only:
                 _check_int64_literals(tree)
                 _check_int64_unary_constants(tree)
+                _check_named_int64_constants(tree)
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)
             if source_map is not None:
