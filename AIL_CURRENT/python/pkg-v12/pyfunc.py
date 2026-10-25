@@ -679,6 +679,103 @@ def fold_maxsplit_constant(node):
     return value
 
 
+_CONST_INT_NOT = object()
+_CONST_INT_BIG = object()
+_CONST_INT_BITS = 4096
+
+
+def _const_int_expr(node):
+    """The exact value of a constant int expression, or a not-constant/too-big sentinel.
+
+    AIL integers are int64 (SEMANTICS section 1), so a constant expression that leaves that range
+    used to compile and then stop with `integer overflow` at run time. Evaluate it here without
+    building an unbounded intermediate (`2**100000000` is never computed); an expression that
+    reaches int64 exactly on the way, such as `2**63 - 1`, is kept."""
+    if isinstance(node, ast.Constant):
+        return node.value if type(node.value) is int else _CONST_INT_NOT
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
+        value = _const_int_expr(node.operand)
+        if value is _CONST_INT_NOT or value is _CONST_INT_BIG:
+            return value
+        if isinstance(node.op, ast.USub):
+            return -value
+        return value if isinstance(node.op, ast.UAdd) else ~value
+    if not isinstance(node, ast.BinOp):
+        return _CONST_INT_NOT
+    op = type(node.op)
+    if op not in (ast.Add, ast.Sub, ast.Mult, ast.Pow, ast.LShift, ast.RShift,
+                  ast.FloorDiv, ast.Mod, ast.BitAnd, ast.BitOr, ast.BitXor):
+        return _CONST_INT_NOT
+    left = _const_int_expr(node.left)
+    right = _const_int_expr(node.right)
+    if left is _CONST_INT_NOT or right is _CONST_INT_NOT:
+        return _CONST_INT_NOT
+    if left is _CONST_INT_BIG or right is _CONST_INT_BIG:
+        return _CONST_INT_BIG
+    if op is ast.Pow:
+        if right < 0:
+            return _CONST_INT_NOT            # CPython's result is a float
+        if right == 0:
+            return 1
+        if left in (0, 1, -1):
+            return left ** right if left != -1 else (-1 if right & 1 else 1)
+        if left.bit_length() * right > _CONST_INT_BITS:
+            return _CONST_INT_BIG
+        value = left ** right
+    elif op is ast.LShift:
+        if right < 0:
+            return _CONST_INT_NOT            # the runtime raises ValueError for a negative count
+        if left == 0:
+            return 0
+        if right >= _CONST_INT_BITS or left.bit_length() + right > _CONST_INT_BITS:
+            return _CONST_INT_BIG
+        value = left << right
+    elif op is ast.RShift:
+        if right < 0:
+            return _CONST_INT_NOT
+        if right >= _CONST_INT_BITS:
+            return 0 if left >= 0 else -1
+        value = left >> right
+    elif op is ast.FloorDiv or op is ast.Mod:
+        if right == 0:
+            return _CONST_INT_NOT            # the runtime raises ZeroDivisionError
+        value = left // right if op is ast.FloorDiv else left % right
+    elif op is ast.Mult:
+        if left == 0 or right == 0:
+            return 0
+        if left.bit_length() + right.bit_length() > _CONST_INT_BITS:
+            return _CONST_INT_BIG
+        value = left * right
+    elif op is ast.Add:
+        value = left + right
+    elif op is ast.Sub:
+        value = left - right
+    elif op is ast.BitAnd:
+        value = left & right
+    elif op is ast.BitOr:
+        value = left | right
+    else:
+        value = left ^ right
+    return _CONST_INT_BIG if value.bit_length() > _CONST_INT_BITS else value
+
+
+def fold_int_constant(node):
+    """The exact int value of a constant expression, or None when it is not one.
+
+    A constant expression outside int64 is refused by name here, at compile time, instead of
+    compiling to arithmetic that stops with `integer overflow` when the program runs."""
+    value = _const_int_expr(node)
+    if value is _CONST_INT_NOT:
+        return None
+    if value is _CONST_INT_BIG or not _I64_MIN <= value <= _I64_MAX:
+        refusal = Unsupported(
+            'an integer constant expression here is outside the signed 64-bit range of an '
+            'AIL int (SEMANTICS section 1); CPython computes it exactly with an unbounded int')
+        refusal.source_line = getattr(node, 'lineno', None)
+        raise refusal
+    return value
+
+
 def _neg_is_float(node, ctx):
     """Is the thing being negated (or abs()'d) a float?
 
@@ -12771,6 +12868,10 @@ def _member_nan_check(node, ctx, ind):
 def _expr(node, ctx):
     if dunders.is_exc_code(node):
         return '((int64_t)ail_handled_code)'   # the code of the exception being handled (dunders.py)
+    if isinstance(node, (ast.BinOp, ast.UnaryOp)):
+        folded = fold_int_constant(node)
+        if folded is not None:
+            return _c_int_literal(folded)
     if isinstance(node,ast.Compare) and all(type(op) in CMPOP for op in node.ops) and _numeric_expression_needed(node,ctx) and all(_etype(value,ctx) in NUM for value in (node.left,*node.comparators)):
         return _numeric_compare(node,ctx)
     if (isinstance(node,ast.BinOp) and isinstance(node.op,(ast.Add,ast.Sub,ast.Mult,ast.Div,ast.FloorDiv,ast.Mod)) or isinstance(node,ast.UnaryOp) and isinstance(node.op,(ast.USub,ast.UAdd))) and _numeric_expression_needed(node,ctx):

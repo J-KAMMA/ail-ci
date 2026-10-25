@@ -4419,6 +4419,10 @@ class Compiler(boxclosure.ClosureMixin):
         return node.c
 
     def expr(self, node, ctx):
+        if isinstance(node, (ast.BinOp, ast.UnaryOp)):
+            folded = pyfunc.fold_int_constant(node)
+            if folded is not None:
+                return self.expr(ast.copy_location(ast.Constant(value=folded), node), ctx)
         if self.uplan is not None:
             boxed = unified.expr_hook(self, node, ctx)
             if boxed is not None:
