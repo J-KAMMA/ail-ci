@@ -95,6 +95,7 @@ MODULES = (
     'test_ail_pre107',
     'test_ail_pre108',
     'test_ail_pre112',
+    'test_ail_pre115',
 )
 
 
