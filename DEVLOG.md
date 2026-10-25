@@ -109,6 +109,18 @@ built. Added `AIL_CURRENT/test_ail_pre190.py` (literal and argument/list-item/at
 both builds and the legacy emitters). Probes in `/tmp/probes` (`p_basecase`, `p_bigshift`,
 `p_bigsplit`, `p_powbig`) matched CPython on both `cmp.sh` builds; `p_intbase` matched except for
 `int("1"*5000, 2)`, which still stops at the int64 value limit (pre-existing, out of this task).
+## 2026-10-25 - pre142 withdrawn: saved-genexpr next() already works (job-rbpre142-10251802)
+
+Review follow-up. The re-applied pre142 compile-time refusal was based on a stale premise: on
+this tree job pre166 already gives a materialised generator expression a shared cursor, so
+`g = (x * 2 for x in xs); next(g)` follows CPython (`2`, `4`, `[6]`) on both builds, and
+`test_ail_pre166` passes on the base tree. The new pass therefore removed working behaviour,
+and its scope-insensitive taint also refused valid reassignments, shadowed parameters,
+branch-returned iterators and user-defined functions named `next`. The refusal, its checker
+registration, `test_ail_pre142.py`, and the contradictory `DIFFERENCES.md` row are withdrawn;
+`_check_saved_genexpr_next` is gone and the tree keeps pre166's cursor fix. Probes for the
+recorded shape, reassignment (local/global/attribute/dict/alias), shadowed parameter, branch
+return, direct `next`, and the user-defined `next` all match CPython on both builds.
 
 ## 2026-10-25 - int(s, base) message GC rooting (job-pre180-10251520)
 
