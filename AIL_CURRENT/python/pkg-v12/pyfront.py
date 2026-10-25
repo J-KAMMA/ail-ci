@@ -141,7 +141,7 @@ def _number_constant(node):
 _CONST_INT_LIMIT = 4096
 
 
-def int_constant(node):
+def int_constant(node, limit=_CONST_INT_LIMIT):
     """The exact Python value of an all-integer constant expression, else None.
 
     Python evaluates `(1 << 63) - 1` and `2**65 - 2**65` exactly, even though an intermediate is
@@ -159,13 +159,13 @@ def int_constant(node):
     if isinstance(node, ast.UnaryOp):
         if not isinstance(node.op, (ast.USub, ast.UAdd)):
             return None
-        value = int_constant(node.operand)
+        value = int_constant(node.operand, limit)
         if value is None:
             return None
         return -value if isinstance(node.op, ast.USub) else value
     if not isinstance(node, ast.BinOp):
         return None
-    left, right = int_constant(node.left), int_constant(node.right)
+    left, right = int_constant(node.left, limit), int_constant(node.right, limit)
     if left is None or right is None:
         return None
     op = type(node.op)
@@ -175,7 +175,7 @@ def int_constant(node):
         elif op is ast.Sub:
             result = left - right
         elif op is ast.Mult:
-            if left and right and left.bit_length() + right.bit_length() > _CONST_INT_LIMIT:
+            if left and right and left.bit_length() + right.bit_length() > limit:
                 return None
             result = left * right
         elif op is ast.FloorDiv:
@@ -191,7 +191,7 @@ def int_constant(node):
                 result = left
             elif left == -1:
                 result = -1 if right & 1 else 1
-            elif left.bit_length() * right > _CONST_INT_LIMIT:
+            elif left.bit_length() * right > limit:
                 return None
             else:
                 result = left ** right
@@ -200,7 +200,7 @@ def int_constant(node):
                 return None
             if left == 0:
                 result = 0
-            elif left.bit_length() + right > _CONST_INT_LIMIT:
+            elif left.bit_length() + right > limit:
                 return None
             else:
                 result = left << right
@@ -218,7 +218,7 @@ def int_constant(node):
             return None
     except (ArithmeticError, ValueError):
         return None
-    return result if type(result) is int and result.bit_length() <= _CONST_INT_LIMIT else None
+    return result if type(result) is int and result.bit_length() <= limit else None
 
 
 def refuse_complex_pow(node):

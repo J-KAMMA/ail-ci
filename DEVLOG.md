@@ -1,3 +1,23 @@
+## 2026-10-25 - unary INT64_MIN constant expression (job-pre203-10252053)
+
+The first still-differing item recorded by the pre190 review was the unary spelling of INT64_MIN:
+`print(-(1 << 63))` and `print(-((1 << 5000) >> 4937))` stopped with `integer overflow` on both builds,
+where CPython prints `-9223372036854775808`.  Python parses these as a unary minus over a shift, and the
+emitters fold binary constant expressions but not that shape, so the shift reached 2**63 and the negate
+trapped.  `ail_chatgpt.py` now rewrites an all-int unary constant expression whose value fits int64 as a
+literal before the backends parse the text again; MIN is spelled `(-9223372036854775807 - 1)` because no
+single Python token denotes it.  `int_constant` in `pyfront.py` takes an optional fold limit (default
+unchanged) and passes it through recursive calls, so `(1 << 5000) >> 4937` can reduce to 2**63 at the
+2**20-bit limit used only by this pass.  Nested unary values outside int64 (for example `-(-MIN)`) are
+still refused by name, and float unary expressions are unchanged.
+
+`test_ail_pre203.py` covers both examples, in-range boundaries, `+`, `-0`, `-(-5)`, `-True`, module
+constants, tuple assignment, arguments, list items, attributes, dict values and an alias on both builds.
+`/tmp/probes/pre203_{negshift,negshift2,negmin,negminlit,negminmod,boundary,routes,shiftops,float}.py`
+match CPython on both builds; `/tmp/probes/pre203_negneg.py` is refused by name.  The other pre190
+pre-existing items (`0 >> (1 << 5000)`, `2 ** ((1<<2000000)-(1<<2000000))`, `(1<<2000000)>>2000000`,
+`int("1"*5000, 2)`) still differ and were not touched.
+
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal

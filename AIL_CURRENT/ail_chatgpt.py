@@ -78,6 +78,57 @@ def _module_constant(node):
 _INT64_MIN, _INT64_MAX = -(1 << 63), (1 << 63) - 1
 
 
+_UNARY_FOLD_BITS = 1 << 20
+
+
+def _fold_unary_int_constants(text):
+    """Rewrite an all-int unary constant expression whose value fits int64 as a literal.
+
+    Python parses `-(1 << 63)` as a unary minus over a shift.  The emitters fold binary
+    expressions but not this shape, so both builds shifted to 2**63 and then trapped in the
+    negate, where CPython prints INT64_MIN.  A larger limit than int_constant's default lets
+    `(1 << 5000) >> 4937` reduce to the same value without building an unbounded intermediate.
+    The replacement is source text because every backend parses the returned text again.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return text
+    unary = [node for node in ast.walk(tree)
+             if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub))]
+    if not unary:
+        return text
+    from pyfront import int_constant
+    data = text.encode('utf8')
+    starts = [0]
+    starts.extend(index + 1 for index, byte in enumerate(data) if byte == 10)
+    spans = []
+    for node in unary:
+        value = int_constant(node, _UNARY_FOLD_BITS)
+        if type(value) is not int or not _INT64_MIN <= value <= _INT64_MAX:
+            continue
+        begin = starts[node.lineno - 1] + node.col_offset
+        finish = starts[node.end_lineno - 1] + node.end_col_offset
+        spans.append((begin, finish, node, value))
+    kept = []
+    for begin, finish, node, value in sorted(spans, key=lambda item: (item[0], -item[1])):
+        if any(outer <= begin and finish <= outer_end for outer, outer_end, _, _ in kept):
+            continue
+        kept.append((begin, finish, node, value))
+    edits = []
+    for begin, finish, node, value in kept:
+        literal = '(-9223372036854775807 - 1)' if value == _INT64_MIN else repr(value)
+        original = data[begin:finish]
+        if original == literal.encode('utf8'):
+            continue
+        padding = original.count(b'\n')
+        replacement = ('(' + literal + '\n' * padding + ')') if padding else literal
+        edits.append((begin, finish, replacement))
+    for begin, finish, replacement in reversed(edits):
+        data = data[:begin] + replacement.encode('utf8') + data[finish:]
+    return data.decode('utf8')
+
+
 class _Int64ConstantOverflow(Exception):
     """A constant expression (or one of its steps) left the int64 range."""
 
@@ -520,6 +571,8 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 text = python_surface(text, None if notes is None else notes.setdefault(str(path), []),
                                      library=module_only)
             text = fold_constants(text)
+            if not declarations_only:
+                text = _fold_unary_int_constants(text)
             tree = ast.parse(text, filename=str(path))
             if syntax == 'python' and entry and not module_only and not declarations_only:
                 _check_main_called(tree)
