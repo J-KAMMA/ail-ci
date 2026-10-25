@@ -1,3 +1,23 @@
+## 2026-10-25 - constant `int(<text>, base)` beyond int64 (job-pre253-10260534)
+
+The first listed difference that still differed on this tree was `int("1"*5000, 2)`: both
+builds compiled it and then stopped with `integer overflow`, while CPython keeps the bignum.
+The earlier out-of-int64 items (`-(1<<63)-1`, `-(1<<64)`, `-(1<<5000)`, `z = 1<<63; z-z`,
+`0 ** (-(1<<5000))`) are already refused by name here, so no change was needed for them.
+
+A call whose text and base are both constant is now evaluated during the front-end checks.  A
+value outside int64 is refused on both builds as `int64 constant expression out of range`;
+in-range constants, invalid literals/bases and dynamic strings keep their previous run-time
+behaviour; a text read from a literal list/tuple/dict is folded too, while a container that is
+mutated or escapes is left alone.
+
+Probes in `/tmp/probes` (`p1`-`p6`, `v1`-`v7`, `ib1`-`ib28`, `ib32`-`ib35`) compare both
+builds with CPython.  The five already-fixed items and `ib1`-`ib12`, `ib17`, `ib20`,
+`ib22`-`ib28`, `ib32`-`ib33`, `ib35` are refused by name; `ib13`-`ib16`, `ib18`-`ib19`,
+`ib21`, `ib26`, `ib34` match CPython or keep their named compiler refusal.  `ib29` (a list
+mutated before the call) is left unfolded and matches CPython.  Added
+`test_ail_pre253.py`.
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a

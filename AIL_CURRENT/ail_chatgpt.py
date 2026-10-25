@@ -360,6 +360,173 @@ def _check_int64_unary_constants(tree):
     _check_int64_abs_constants(tree, known)
 
 
+_CONST_TEXT_LIMIT = 1 << 20
+
+
+def _constant_container(node, known_text, known_int, known_containers=None):
+    """The text values of a literal list/tuple/dict of constant strings, or None."""
+    if isinstance(node, (ast.List, ast.Tuple)):
+        values = []
+        for item in node.elts:
+            if isinstance(item, ast.Starred):
+                return None
+            text = _constant_text(item, known_text, known_int, known_containers)
+            if text is None:
+                return None
+            values.append(text)
+        return 'seq', tuple(values)
+    if isinstance(node, ast.Dict):
+        pairs = []
+        for key_node, value_node in zip(node.keys, node.values):
+            if key_node is None:
+                return None
+            key = _constant_text(key_node, known_text, known_int, known_containers)
+            if key is None:
+                key = _constant_int(key_node, known_int)
+            if key is None or not isinstance(key, (str, bytes, int)):
+                return None
+            text = _constant_text(value_node, known_text, known_int, known_containers)
+            if text is None or len(text) > _CONST_TEXT_LIMIT:
+                return None
+            pairs.append((key, text))
+        return 'dict', tuple(pairs)
+    return None
+
+
+def _constant_text(node, known_text, known_int, known_containers=None):
+    """The str/bytes a constant expression builds, or None when it is not statically known.
+    Only the shapes that cannot have a side effect are folded, and a result above the size
+    limit is left to the run-time parser."""
+    if isinstance(node, ast.Constant) and type(node.value) in (str, bytes):
+        return node.value
+    if isinstance(node, ast.Name) and node.id in known_text:
+        return known_text[node.id]
+    if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice):
+        if isinstance(node.value, ast.Name):
+            container = (known_containers or {}).get(node.value.id)
+        else:
+            container = _constant_container(node.value, known_text, known_int, known_containers)
+        if container is None:
+            return None
+        kind, values = container
+        if kind == 'seq':
+            index = _constant_int(node.slice, known_int)
+            if index is None or not -len(values) <= index < len(values):
+                return None
+            return values[index]
+        key = _constant_text(node.slice, known_text, known_int, known_containers)
+        if key is None:
+            key = _constant_int(node.slice, known_int)
+        for found, text in values:
+            if type(found) is type(key) and found == key:
+                return text
+        return None
+    if not isinstance(node, ast.BinOp):
+        return None
+    if isinstance(node.op, ast.Add):
+        left = _constant_text(node.left, known_text, known_int, known_containers)
+        right = _constant_text(node.right, known_text, known_int, known_containers)
+        if type(left) is not type(right) or type(left) not in (str, bytes):
+            return None
+        if len(left) + len(right) > _CONST_TEXT_LIMIT:
+            return None
+        return left + right
+    if isinstance(node.op, ast.Mult):
+        text = _constant_text(node.left, known_text, known_int, known_containers)
+        count = _constant_int(node.right, known_int) if text is not None else None
+        if text is None:
+            text = _constant_text(node.right, known_text, known_int, known_containers)
+            count = _constant_int(node.left, known_int)
+        if text is None or count is None or count < 0:
+            return None
+        if len(text) * count > _CONST_TEXT_LIMIT:
+            return None
+        return text * count
+    return None
+
+
+def _check_int64_int_base_constants(tree):
+    """Refuse `int(<constant str>, <constant base>)` when the parsed value leaves int64.
+    AIL ints are fixed width, so the conversion would stop with `integer overflow` where
+    CPython keeps the bignum; a value that fits keeps its run-time parse."""
+    bound = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.arg):
+            bound.add(node.arg)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bound.add(node.id)
+        elif isinstance(node, ast.alias):
+            bound.add(node.asname or node.name.split('.')[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            bound.update(node.names)
+    if 'int' in bound:
+        return
+    stores = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            stores[node.id] = stores.get(node.id, 0) + 1
+    parameters = {node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)}
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    escaped = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)):
+            continue
+        parent = parents.get(node)
+        if not (isinstance(parent, ast.Subscript) and parent.value is node
+                and isinstance(parent.ctx, ast.Load)):
+            escaped.add(node.id)
+    known_text, known_int, known_containers = {}, {}, {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Name) or stores.get(target.id) != 1 or target.id in parameters:
+            continue
+        container = _constant_container(node.value, known_text, known_int, known_containers)
+        if container is not None and target.id not in escaped:
+            known_containers[target.id] = container
+        text = _constant_text(node.value, known_text, known_int, known_containers)
+        if text is not None:
+            known_text[target.id] = text
+        value = _constant_int(node.value, known_int)
+        if value is not None:
+            known_int[target.id] = value
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'int'):
+            continue
+        if len(node.args) == 2 and not node.keywords:
+            text_node, base_node = node.args
+        elif (len(node.args) == 1 and len(node.keywords) == 1
+              and node.keywords[0].arg == 'base'):
+            text_node, base_node = node.args[0], node.keywords[0].value
+        else:
+            continue
+        if isinstance(text_node, ast.Starred):
+            continue
+        base = _constant_int(base_node, known_int)
+        if base is None or base != 0 and not 2 <= base <= 36:
+            continue
+        text = _constant_text(text_node, known_text, known_int, known_containers)
+        if text is None:
+            continue
+        try:
+            value = int(text, base)
+        except (ValueError, TypeError, OverflowError, MemoryError):
+            continue
+        if _INT64_MIN <= value <= _INT64_MAX:
+            continue
+        shown = value if -10 ** 99 < value < 10 ** 99 else 'too large'
+        error = ValueError(f'int64 constant expression out of range: {shown}')
+        error.source_line = node.lineno
+        error.source_column = node.col_offset
+        raise error
+
+
 _CONST_INT_TOO_BIG = object()
 _CONST_INT_BITS = 4096
 
@@ -704,6 +871,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 _check_int64_constants(tree)
                 _check_int64_literals(tree)
                 _check_int64_unary_constants(tree)
+                _check_int64_int_base_constants(tree)
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)
             if source_map is not None:
