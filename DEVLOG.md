@@ -1,3 +1,14 @@
+## 2026-10-25 - pre141 review follow-up: closure-context def flags (job-rbpre141-10251549)
+
+Review defect: a nested `def` with a non-literal or mutable default inside an escaping nested
+function (`outer` returned as a value) reached `boxclosure._emit_closure_function`, whose C
+preamble never declared the `def`-binding flags that `stmt_FunctionDef` emits. The general path
+failed to compile (`'_ndef1' undeclared`) and the default path then refused by name. The preamble
+now declares every `cctx.def_flag_decls` entry, as `_emit_function` and `_register_nested`
+already did. Probes `d1`-`d6` in `/tmp/probes` cover the review case, non-literal defaults built
+from captured names, shared dict/set/bytearray/tuple-with-list defaults, keyword-only (refused by
+name), redefinition, and literal defaults on both builds; all match CPython except the refusal.
+
 ## 2026-10-25 - pre141 re-applied: nested-def defaults evaluated once at the def (job-rbpre141-10251549)
 
 The accepted pre141 change (nested `def` defaults evaluated once, when the `def` statement runs)
