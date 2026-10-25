@@ -1,3 +1,22 @@
+## 2026-10-25 - constant abs() outside int64 (job-pre215-10252304)
+
+The first still-differing item from the pre203 review was `abs(-(1 << 63))` (and the literal
+spelling `abs(-9223372036854775808)`): both builds compiled it and then stopped with `integer
+overflow`, where CPython prints 9223372036854775808.  The compiler now evaluates a constant
+`abs()` argument exactly and refuses an out-of-int64 result by name
+(`int64 constant expression out of range`), matching the existing treatment of the other
+constant expressions from that review (`-(1<<63) * -1`, `// -1`, `-(1<<63) - 1`).  Module
+constants built with a shift are resolved by the same check.  In-range `abs()` values, floats,
+run-time variables and a program that binds its own `abs` are unchanged.
+
+`AIL_CURRENT/test_ail_pre215.py` covers the direct and literal forms, a module constant, and the
+expression as an argument, a list item, an attribute, a dict value and a nested call, on both
+builds.  Probes: `/tmp/probes/neg_abs.py`, `lit_abs.py`, `abs_list_const.py`,
+`abs_attr_const.py`, `abs_dict_const.py`, `abs_module_const.py`, `abs_func_arg_const.py`,
+`abs_nested.py`, `abs_via_name.py`, `abs_name_arg.py`, `abs_name_list.py`, `abs_name_attr.py`,
+`abs_name_dict.py`, `abs_shift64.py`, `abs_inrange.py`, `abs_float.py`,
+`abs_runtime_routes.py`, `abs_shadow_module.py`, `boundary_ok.py`.
+
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
