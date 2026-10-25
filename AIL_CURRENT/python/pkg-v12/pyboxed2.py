@@ -1447,6 +1447,8 @@ def _scan_assigned_names(stmts):
     def walk_expr(e):
         if isinstance(e, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp, ast.Lambda)):
             return
+        if isinstance(e, ast.NamedExpr) and isinstance(e.target, ast.Name):
+            names.add(e.target.id)
         for child in ast.iter_child_nodes(e):
             if isinstance(child, ast.expr):
                 walk_expr(child)
@@ -1489,7 +1491,11 @@ def _scan_assigned_names(stmts):
                 walk(n.finalbody)
             elif isinstance(n, ast.Expr):
                 walk_expr(n.value)
-            elif isinstance(n, (ast.Return, ast.Raise, ast.Assert, ast.Delete)):
+            elif isinstance(n, ast.Delete):
+                for t in n.targets:
+                    names.update(_assign_target_names(t))
+                    walk_expr(t)
+            elif isinstance(n, (ast.Return, ast.Raise, ast.Assert)):
                 for child in ast.iter_child_nodes(n):
                     if isinstance(child, ast.expr):
                         walk_expr(child)
@@ -6455,6 +6461,9 @@ class Compiler(boxclosure.ClosureMixin):
         if name in ctx.closure_defs or name in ctx.clo_index or name in ctx.cell_slots:
             return self.call_value(self.expr(ast.Name(id=name, ctx=ast.Load()), ctx), args, kwargs, ctx)
         if name in self.functions:
+            if (name in ctx.slot_of or name in ctx.ptr_names or name in ctx.clo_index
+                    or name in ctx.cell_slots or name in ctx.free_names):
+                return self.call_value(self.expr(ast.Name(id=name, ctx=ast.Load()), ctx), args, kwargs, ctx)
             return self._call_user_function(name, args, kwargs, ctx)
         if name in filelib.PRIMS:
             return self._call_fileprim(name, args, kwargs, ctx)

@@ -1,3 +1,23 @@
+## 2026-10-25 - pre244: walrus and `del` targets are local bindings (job-pre244-10260357)
+
+The first still-differing item from the pre218 review was the walrus read: with a module
+`side`, `def f(): print(side(1)); (side := None)` printed 1 on both builds where CPython
+raises `UnboundLocalError`. The same scope scanner missed delete targets, so
+`def f(): del side` crashed the compiler with `KeyError: 'side'`. `_scan_assigned_names`
+now records walrus and `del` targets, and a call to a name shadowed by a local/closure
+binding goes through that binding instead of the statically known module function. The
+other review items already matched on this tree: the closure-over-outer-local case printed
+101, the `nonlocal` case printed 101, and `import math as side` called the module function.
+
+Probes `/tmp/probes/pre244_p08.py`, `pre244_p08_variants.py`, `pre244_p08_module.py`,
+`pre244_p08_global.py`, `pre244_p08_nested.py`, `pre244_p09.py`, `pre244_del_variants.py`,
+`pre244_del_global_decl.py`, `pre244_del_module.py`, `pre244_p11.py`, `pre244_p19.py` and
+`pre244_import.py` cover reads before the binding in expression/assignment/test/return/
+list/dict/attribute/argument positions, values from arguments/list items/attributes/dict
+values, module scope, `global`, nested defs, and delete of locals, parameters, tuple
+targets, globals and list items; all match CPython on both builds. Added
+`test_ail_pre244.py` and registered it in `ail_check.MODULES`.
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a
