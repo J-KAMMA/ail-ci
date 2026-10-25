@@ -277,6 +277,75 @@ evaluation order, on both builds.  Probes: `/tmp/probes/p_intbase_kw.py`,
 `p_intbase_kw_routes.py`, `p_intbase_kw_edge.py`, `p_intbase_range.py`; all match CPython on both
 builds.
 
+## 2026-10-25 - range.index/count equality and int64 result (job-pre216-10252305)
+
+Review of the pre216 feature found two defects.  `range.index`/`range.count` only consulted
+integer arithmetic, so a non-int/float value that compares equal to an element (a user
+`__eq__`, Decimal, Fraction) either raised the generic not-found text or counted 0 where
+CPython searches the range with `==`; the range branches now walk the range and compare with
+`ail_member_eq` for any value that is not int/bool/float, counting every match as CPython's
+generic sequence search does.  An index (or count) above `INT64_MAX` used the uncatchable
+`ail_hit_limit` stop; it now raises a named, catchable `OverflowError`
+(`range.index() index exceeds int64` / `range.count() result exceeds int64`) because AIL ints
+are 64-bit.  Probes `/tmp/probes/p6_eq.py`, `/tmp/probes/p6b_listeq.py`,
+`/tmp/probes/p7_huge.py` and the boundary probes for types, widths, empty, negative-step and
+argument/list/attribute/dict delivery match CPython on both builds except the documented
+above-int64 index, which is the named refusal.  `test_ail_pre216.py` covers the equality walk
+and checks the above-int64 case is caught, not a hard exit.
+## 2026-10-25 - range.index/count (job-pre216-10252305)
+
+The first still-differing item from the memsafe2 review was `range.index()`: the general path's
+method dispatch had branches for str/list/tuple only, so `range(2, 20, 3).index(8)` fell through
+to `AttributeError: 'range' object has no attribute 'index'` on both builds (CPython: 2).  The
+same gap covered `range.count()`.  `pyboxed2` now has a range branch for both methods (and a
+range entry in the method type tags); `cruntime` locates an int/bool or an integral float
+arithmetically without walking a possibly huge range, raises `<repr> is not in range` for a
+missing int and CPython's `sequence.index(x): x not in sequence` for another value, and reports
+range's one-argument arity TypeError.  The typed path still names both methods as unsupported, so
+the default build falls back to the general path, which matches CPython.
+
+Probes `/tmp/probes/p_range_index.py`, `/tmp/probes/p_range_methods.py` and
+`/tmp/probes/p_range_zero_runtime.py` cover values as a literal, loop variable, argument, list
+item, attribute, dict value and alias; int/bool/integral-float/non-integral-float/str values;
+empty, positive-step, negative-step, huge-step and int64-boundary ranges; not-found messages;
+and 2/3-argument arity calls.  Both `-g` and `-d` match CPython on every range method probe (the
+zero-step item is a separate pre-existing difference and was not changed).  `test_ail_pre216.py`
+is registered in `ail_check.MODULES` and `tools/ci_shards.json`.
+## 2026-10-25 - local shadowing a module function, called before assignment (job-pre218-10252343)
+
+The pre141 reviewer recorded `r13_plain_shadow.py`: in a function, `print(side(1)); side = None`
+called the module function `side` on both builds, while CPython makes `side` local for the whole
+activation and raises `UnboundLocalError` at the call. `r11` reaches the same name-resolution bug
+through a default expression (that program is refused by name for its default, so the root cause
+reproduces without it). The general path's `_call_name` now checks the activation's own binding
+(parameter, assignment, loop/with/except target, import, cell or closure) before resolving a call
+to a module function, reading the slot through the ordinary load path; a bound callable is called
+and an unbound slot raises CPython's `UnboundLocalError`. The typed path cannot call an arbitrary
+local value, so it refuses a call whose name is locally bound (and an optional-local retry for a
+same-named module function) by name, and the default build falls back to the general path.
+`AIL_CURRENT/test_ail_pre218.py` covers the plain case, a bound lambda, None, parameters, a loop
+target, a branch-only binding, list-item / attribute / dict-value aliases, an ordinary call and an
+optional local that is not called, plus the default-expression refusal. Probes in `/tmp/probes`
+(`shadow_basic`, `shadow_bound_callable`, `shadow_bound_none`, `shadow_param`, `shadow_param_none`,
+`shadow_for_target`, `shadow_branch_unbound`, `shadow_alias_list_item`, `shadow_alias_attr`,
+`shadow_alias_dict`, `shadow_normal`, `shadow_optional_not_called`, `shadow_default_lambda`) match
+CPython or are refused by name on both builds.
+## 2026-10-25 - computed `%` format string formats at run time (job-pre220-10252345)
+
+The first still-differing item from the `rbrbmemsafe2` review was runtime `%` with a non-literal
+format: `fmt % value` through a name, argument, list item, attribute or dict value raised
+`TypeError: unsupported operand type(s) for %` on both builds, where CPython formats it. The
+general path only routed a str of unknown kind to the run-time formatter when the right operand
+was a tuple/dict (or an enum-like value in a program with classes), so a scalar right operand fell
+through to `ail_op_mod`. `pyboxed2.expr_BinOp` now routes every str-or-unknown left operand
+through the run-time tag check: a str formats with `ail2f_percent`, anything else keeps
+`ail_op_mod` (int/float/bool modulo, zero division and a user `__mod__`/`__rmod__` are unchanged).
+
+`test_ail_pre220.py` covers scalar and tuple right operands, every common directive, values through
+an argument, list item, attribute, dict value and alias, the int/float/bool/None boundaries and a
+user `__mod__`, on both builds. The probes `p_pct_nonliteral`, `p_pct_more` and `p_mod_regress`
+match CPython on g and d; the pre-existing user-object repr address and the `None % int` message
+text were kept out of the regression probe.
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
@@ -421,6 +490,62 @@ path. A class value passed to the explicit `format()` builtin still hits the old
 formatter (`unsupported format string passed to non-int`); that path fails identically on the
 base and is not part of this item. Added `AIL_CURRENT/test_ail_pre196.py` and registered it in
 `ail_check.MODULES`.
+## 2026-10-25 - pre191: accept the integrated rule for list/dict/default-tuple constants (job-pre191-10260206)
+
+`test_ail_pre191` failed in the merged suite on `X = [1 << 64]`, `X = {"k": 1 << 64}` and
+`def f(x=(1 << 64,))`: the integration tree's front-end constant-expression rule refuses those
+positions first with `not in the subset: an integer constant expression here is outside the
+signed 64-bit range`, while the test demanded this pass's own `int64 constant expression out of
+range` wording.  The test now accepts either named refusal for every out-of-range position,
+matching the tolerance already added for dead function-body unary shifts, and still rejects a
+compiled program, `integer overflow`, or a `Traceback`.  Compiler behaviour is unchanged: this
+pass still refuses all ten positions by name when its check runs.  Verified with the test on the
+branch, on the current integration candidate, and on that candidate without this pass's source
+change (the general refusal only).
+
+## 2026-10-25 - pre191: accept the integration tree's function-body constant refusal (job-pre191-10252231)
+
+Rebase follow-up. The integration branch now carries the general constant-expression rule that
+refuses an out-of-int64 integer constant anywhere, including an unreached function body, with
+`not in the subset: ... outside the signed 64-bit range`. `test_ail_pre191` still expected the
+two dead unary-shift cases to print CPython's value, which passed on its older base but failed
+once merged with that tree. The test now accepts either that CPython match or the integration
+refusal, and still requires the refusal not to be this pass's own `int64 constant expression out
+of range` message, so shift folding stays scoped to module/class/default positions. The source
+is unchanged; module/class/default out-of-int64 constants remain refused by this pass on both
+builds. Re-ran `test_ail_pre191` against a worktree of the current `integ` with this branch's
+source applied (3 tests, OK), and against the local tree (3 tests, OK).
+
+## 2026-10-25 - pre191 review follow-up: keep shift folding in the constant-position pass (job-pre191-10251807)
+
+Review fix. Adding `LShift`/`RShift` to the shared `_constant_int` made the pre-existing
+whole-tree `_check_int64_unary_constants` start refusing unary shift expressions in function
+bodies, so `def f(): return 1; x = -(1 << 64)` and an unreached `return -(1 << 64)` failed to
+compile where CPython and the base tree printed `1`. Shift folding is now opt-in
+(`_constant_int(..., shifts=True)`) and only `_check_int64_constant_positions` asks for it;
+the unary pass and its function-body reach are unchanged. The `DIFFERENCES` row no longer
+overstates the fix: `X = 2 ** 65 - 2 ** 64` is a pre-existing clamped-power case that still
+runtime-overflows on both builds. `test_ail_pre191.py` now includes the dead/unreached
+function-body unary-shift cases on both builds.
+
+## 2026-10-25 - pre191: out-of-int64 constants in module/class/default positions (job-pre191-10251807)
+
+The first still-differing item from the pre184 review notes was the out-of-int64 constant in a
+module, class or default position. On this tree the unreachable examples already printed `ok`,
+but the reachable forms still compiled and then stopped at run time with `integer overflow`:
+`X = 1 << 64`, `class C: X = 1 << 64`, `def f(x=1 << 64)` and `def f(x=2**63)`, where CPython
+keeps a bignum. A new front-end pass evaluates only the outermost constant expression of each
+module/class value and each function default (including tuple/list/dict values, defaults wrapped
+by the mutable-default surface, and the bodies of module/class `if` blocks). An out-of-int64
+result is refused on both builds as `int64 constant expression out of range: <value>`, matching
+the pre172 wording. Because only whole roots are checked, expressions whose intermediate leaves
+int64 but whose answer fits still work (`(1 << 63) - 1`, `2 ** 65 - 2 ** 65`, `0 << 1000`,
+`(1 << 64) >> 64`); function-body constants keep the runtime trap, so pre160's `10**30` in an
+`__index__` still stops with `integer overflow`. The general path's pre-existing refusal of
+`N = -9223372036854775807 - 1` ("not in the subset: an integer literal outside int64 range")
+is unchanged; the default build matches CPython for it. Added `test_ail_pre191.py` and registered
+it in `ail_check.MODULES`. Probes r1-r15 in `/tmp/probes` cover the boundaries and both builds;
+r2's general build keeps the named refusal above.
 
 ## 2026-10-25 - int(s, base) message GC rooting (job-pre180-10251520)
 

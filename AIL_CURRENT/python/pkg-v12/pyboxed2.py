@@ -233,7 +233,7 @@ EXC_IDS = {
 TYPE_TAG = {
     'int': 'AIL_T_INT', 'float': 'AIL_T_FLOAT', 'str': 'AIL_T_STR', 'bool': 'AIL_T_BOOL',
     'list': 'AIL_T_LIST', 'dict': 'AIL_T_DICT', 'set': 'AIL_T_SET', 'tuple': 'AIL_T_TUPLE',
-    'frozenset': 'AIL_T_FROZENSET',
+    'frozenset': 'AIL_T_FROZENSET', 'range': 'AIL_T_RANGE',
 }
 
 # Methods whose _m_ handlers actually consume keyword arguments. Everything else
@@ -4586,13 +4586,10 @@ class Compiler(boxclosure.ClosureMixin):
             return self._percent_runtime(node, ctx)
         if isinstance(node.op, ast.Mod) and (
                 self.infer_kind(node.left, ctx) == 'str'
-                or (self.infer_kind(node.left, ctx) is None and (isinstance(node.right, (ast.Tuple, ast.Dict))
-                                                                 or self.infer_kind(node.right, ctx) in ('tuple', 'dict')
-                                                                 # a program with classes: the operand may be an enum member
-                                                                 or (self.dunder_ops and self.infer_kind(node.right, ctx) not in ('int', 'float', 'bool'))))):
+                or self.infer_kind(node.left, ctx) is None):
             if self.infer_kind(node.left, ctx) == 'str':
                 return self._percent_runtime(node, ctx)
-            # a value of unknown kind % a tuple / dict: a str formats, anything else takes the operator
+            # a value of unknown kind: a str formats (whatever the right operand), anything else takes the operator
             l = self.expr(node.left, ctx)
             rr = self.expr(node.right, ctx)
             self.rt_needs.add('fmt')
@@ -6459,6 +6456,14 @@ class Compiler(boxclosure.ClosureMixin):
         if name in ctx.closure_defs or name in ctx.clo_index or name in ctx.cell_slots:
             return self.call_value(self.expr(ast.Name(id=name, ctx=ast.Load()), ctx), args, kwargs, ctx)
         if name in self.functions:
+            if (name in ctx.slot_of or name in ctx.ptr_names or name in ctx.clo_index
+                    or name in ctx.free_names or name in ctx.cell_slots):
+                # A parameter, local, cell or closure binding of the same name shadows the
+                # module function in CPython for the WHOLE activation, so a call before the
+                # binding runs reads an unbound local (UnboundLocalError), and a call after it
+                # calls that value, never the module function. The direct-call path resolved
+                # the function statically; read the slot instead, exactly as expr_Name does.
+                return self.call_value(self.expr(ast.Name(id=name, ctx=ast.Load()), ctx), args, kwargs, ctx)
             return self._call_user_function(name, args, kwargs, ctx)
         if name in filelib.PRIMS:
             return self._call_fileprim(name, args, kwargs, ctx)
@@ -8977,10 +8982,26 @@ class Compiler(boxclosure.ClosureMixin):
                 c.emit('%s = ail_box_int(%s);' % (t, ix))
             return do
 
+        def do_range(c):
+            if len(args) != 1:
+                for a in args[1:]:
+                    c.emit('(void)%s;' % self.expr(a, c))
+                c.uses_st = True
+                c.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "range.index() takes exactly '
+                       'one argument (%d given)"); goto %s;' % (len(args), c.cur_err_target()))
+                return
+            ix = c.new_cvar('ix')
+            c.emit('int64_t %s;' % ix)
+            c.emit('st = ail_meth_range_index(cx, &%s, %s, %s); if (st != AIL_OK) goto %s;' %
+                   (ix, recv, v, c.cur_err_target()))
+            c.uses_st = True
+            c.emit('%s = ail_box_int(%s);' % (t, ix))
+
         self._tag_branch(ctx, recv, kind, {
             'str': mk('ail_meth_str_index', True),
             'list': mk('ail_meth_list_index', False),
             'tuple': mk('ail_meth_tuple_index', False),
+            'range': do_range,
         }, "object has no attribute 'index'", nargs=len(args))
         return t
 
@@ -9000,10 +9021,26 @@ class Compiler(boxclosure.ClosureMixin):
                 c.emit('%s = ail_box_int(%s(%s, %s));' % (t, fn, recv, v))
             return do
 
+        def do_range(c):
+            if len(args) != 1:
+                for a in args[1:]:
+                    c.emit('(void)%s;' % self.expr(a, c))
+                c.uses_st = True
+                c.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "range.count() takes exactly '
+                       'one argument (%d given)"); goto %s;' % (len(args), c.cur_err_target()))
+                return
+            ix = c.new_cvar('ix')
+            c.emit('int64_t %s;' % ix)
+            c.emit('st = ail_meth_range_count(cx, &%s, %s, %s); if (st != AIL_OK) goto %s;' %
+                   (ix, recv, v, c.cur_err_target()))
+            c.uses_st = True
+            c.emit('%s = ail_box_int(%s);' % (t, ix))
+
         self._tag_branch(ctx, recv, kind, {
             'str': do_str,
             'list': mk_vec('ail_meth_list_count'),
             'tuple': mk_vec('ail_meth_tuple_count'),
+            'range': do_range,
         }, "object has no attribute 'count'", nargs=len(args))
         return t
 

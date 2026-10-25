@@ -19297,6 +19297,98 @@ static inline ail_st ail_meth_tuple_index(ail_ctx *cx, int64_t *out, ail_obj tup
 }
 
 /* ===================================================================================
+   range.index/count.  CPython's range has both, with a one-argument signature.  An
+   int/bool (and an integral float) is located with integer arithmetic, so a range far
+   too long to walk is still answered; every other value is located by walking the
+   range and comparing with ==, exactly as CPython's generic sequence search does (and
+   a range can have more than int64 items, so the ordinal is uint64).  An ordinal or
+   count that does not fit int64 is this runtime's own int limit: a named, catchable
+   OverflowError rather than an uncatchable AIL_LIMIT stop.
+   =================================================================================== */
+static inline int ail__range_ordinal(const ail_rangeobj *r, ail_obj x, uint64_t *ord, int *is_int) {
+    int64_t v;
+    *is_int = x.tag == AIL_T_INT || x.tag == AIL_T_BOOL;
+    if (*is_int) v = x.i;
+    else if (x.tag == AIL_T_FLOAT) {
+        double fv = ail_float_val(x);
+        if (!(fv >= -9223372036854775808.0 && fv < 9223372036854775808.0) || (double)(int64_t)fv != fv) return 0;
+        v = (int64_t)fv;
+    } else return 0;
+    if (r->step > 0) {
+        if (v < r->start || v >= r->stop) return 0;
+        uint64_t dist = (uint64_t)v - (uint64_t)r->start;
+        if (dist % (uint64_t)r->step) return 0;
+        *ord = dist / (uint64_t)r->step; return 1;
+    }
+    if (r->step < 0) {
+        if (v > r->start || v <= r->stop) return 0;
+        uint64_t dist = (uint64_t)r->start - (uint64_t)v;
+        uint64_t mag = UINT64_C(0) - (uint64_t)r->step;
+        if (dist % mag) return 0;
+        *ord = dist / mag; return 1;
+    }
+    return 0;
+}
+static inline ail_st ail__range_walk_index(ail_ctx *cx, const ail_rangeobj *r, ail_obj x, uint64_t *ord, int *found) {
+    uint64_t n = ail__range_count(r);
+    *found = 0;
+    for (uint64_t i = 0; i < n; i++) {
+        ail_obj eq; ail_st st = ail_op_eq(cx, &eq, ail_box_int(ail__range_at(r->start, r->step, i)), x);
+        if (st != AIL_OK) return st;
+        if (ail_obj_truthy(eq)) { *ord = i; *found = 1; return AIL_OK; }
+    }
+    return AIL_OK;
+}
+static inline ail_st ail__range_walk_count(ail_ctx *cx, const ail_rangeobj *r, ail_obj x, uint64_t *out) {
+    uint64_t n = ail__range_count(r), count = 0;
+    for (uint64_t i = 0; i < n; i++) {
+        ail_obj eq; ail_st st = ail_op_eq(cx, &eq, ail_box_int(ail__range_at(r->start, r->step, i)), x);
+        if (st != AIL_OK) return st;
+        if (ail_obj_truthy(eq)) count++;
+    }
+    *out = count; return AIL_OK;
+}
+static inline ail_st ail_meth_range_index(ail_ctx *cx, int64_t *out, ail_obj rng, ail_obj x) {
+    const ail_rangeobj *r = (ail_rangeobj *)rng.o;
+    uint64_t ord = 0; int is_int = 0, found;
+    int numeric = x.tag == AIL_T_INT || x.tag == AIL_T_BOOL || x.tag == AIL_T_FLOAT;
+    found = ail__range_ordinal(r, x, &ord, &is_int);
+    if (!found && !numeric) {
+        /* a non-numeric value may compare equal to an element: use == and propagate its errors */
+        ail_st st = ail__range_walk_index(cx, r, x, &ord, &found);
+        if (st != AIL_OK) return st;
+    }
+    if (!found) {
+        if (is_int) {
+            ail_obj rs[2]; rs[0] = ail_obj_repr(cx, x); rs[1] = ail_box_none();
+            AIL_ROOT_N(cx, fr, rs, 2);
+            rs[1] = ail_str_from_cstr(cx, " is not in range");
+            ail_obj msg = ail_str_cat(cx, rs[0], rs[1]);
+            AIL_FRAME_LEAVE(cx, fr);
+            return ail_raise(cx, cx->builtin_cls[AIL_B_VALUEERROR], msg);
+        }
+        return ail_raise_c(cx, AIL_B_VALUEERROR, "sequence.index(x): x not in sequence");
+    }
+    if (ord > (uint64_t)INT64_MAX)
+        return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "range.index() index exceeds int64");
+    *out = (int64_t)ord; return AIL_OK;
+}
+static inline ail_st ail_meth_range_count(ail_ctx *cx, int64_t *out, ail_obj rng, ail_obj x) {
+    const ail_rangeobj *r = (ail_rangeobj *)rng.o;
+    uint64_t ord = 0; int is_int = 0;
+    uint64_t count;
+    if (x.tag == AIL_T_INT || x.tag == AIL_T_BOOL || x.tag == AIL_T_FLOAT)
+        count = ail__range_ordinal(r, x, &ord, &is_int) ? 1 : 0;
+    else {
+        ail_st st = ail__range_walk_count(cx, r, x, &count);
+        if (st != AIL_OK) return st;
+    }
+    if (count > (uint64_t)INT64_MAX)
+        return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "range.count() result exceeds int64");
+    *out = (int64_t)count; return AIL_OK;
+}
+
+/* ===================================================================================
    M055/M056 -- int.bit_length() / float.is_integer().
    =================================================================================== */
 static inline int64_t ail_meth_int_bit_length(int64_t x) {

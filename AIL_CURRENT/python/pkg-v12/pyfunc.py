@@ -5709,6 +5709,94 @@ def _onecp_bindable_names(fn):
     return good - bad
 
 
+def _local_binding_names(fn):
+    """Names `fn` binds as its own locals: parameters, stores, loop/with/except targets, imports,
+    class definitions and nested def names that are also bound another way. `global` names are
+    excluded. A nested def's own name is not included on its own (the typed path lifts it), so a
+    plain call to a nested def still takes the direct path."""
+    names = set()
+    a = fn.args
+    names.update(x.arg for x in a.posonlyargs + a.args + a.kwonlyargs)
+    if a.vararg:
+        names.add(a.vararg.arg)
+    if a.kwarg:
+        names.add(a.kwarg.arg)
+    globals_ = set()
+
+    class _Scan(ast.NodeVisitor):
+        def visit_Global(self, node):
+            globals_.update(node.names)
+
+        def visit_Nonlocal(self, node):
+            pass
+
+        def _def_like(self, node):
+            if node is not fn:
+                for d in node.decorator_list:
+                    self.visit(d)
+                for d in node.args.defaults:
+                    self.visit(d)
+                for d in node.args.kw_defaults:
+                    if d is not None:
+                        self.visit(d)
+                return
+            self.generic_visit(node)
+
+        def visit_FunctionDef(self, node):
+            self._def_like(node)
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_ClassDef(self, node):
+            names.add(node.name)
+            for d in node.decorator_list:
+                self.visit(d)
+            for b in node.bases:
+                self.visit(b)
+            for k in node.keywords:
+                self.visit(k.value)
+
+        def visit_Lambda(self, node):
+            for d in node.args.defaults:
+                self.visit(d)
+            for d in node.args.kw_defaults:
+                if d is not None:
+                    self.visit(d)
+
+        def visit_Name(self, node):
+            if isinstance(node.ctx, (ast.Store, ast.Del)):
+                names.add(node.id)
+
+        def visit_ExceptHandler(self, node):
+            if node.name:
+                names.add(node.name)
+            self.generic_visit(node)
+
+        def visit_Import(self, node):
+            names.update((x.asname or x.name).split('.')[0] for x in node.names)
+
+        def visit_ImportFrom(self, node):
+            names.update((x.asname or x.name).split('.')[0] for x in node.names)
+
+        def visit_MatchAs(self, node):
+            if node.name:
+                names.add(node.name)
+            self.generic_visit(node)
+
+        def visit_MatchStar(self, node):
+            if node.name:
+                names.add(node.name)
+
+        def visit_MatchMapping(self, node):
+            if node.rest:
+                names.add(node.rest)
+            self.generic_visit(node)
+
+    _Scan().visit(fn)
+    names -= globals_
+    return names
+
+
 def _rebound_names(fn):
     """Every name bound anywhere in `fn` by a NON-For binder -- assignment, with-as,
     walrus, except-as, def/class, import, del -- plus every name declared `global` or
@@ -17153,6 +17241,14 @@ def _call(node, ctx):
             call = '(' + ', '.join([*staged, call]) + ')' if staged else call
         return _obj_temp(call, (OBJ, f), ctx) if _managed_class(cls) else call
     if f in ctx.funcs:
+        if f in getattr(ctx, 'local_bindings', ()):
+            # A parameter, assignment, loop/with/except target or import of this name shadows
+            # the function for the whole activation in CPython. The direct path resolved the
+            # function statically; this path cannot call an arbitrary local value, so name the
+            # shape and let the general path handle it (an unbound local is UnboundLocalError).
+            raise Unsupported('%r is a local that shadows the function %s(); a call through a '
+                              'local value is not supported here (the general path builds it)'
+                              % (f, f))
         # an array argument is two C arguments, a pointer and a length, so the call site expands --
         # see `_call_user_func`, which also resolves a whole-program clone (section 26) if one
         # applies to this call site. `_bind_call_args` resolves keyword arguments and defaults
@@ -34483,6 +34579,14 @@ def _optional_local_source(source, hint):
     if not fns:
         return None, str(hint)
     fn = min(fns, key=lambda f: f.end_lineno - f.lineno)
+    module_fns = {n.name for n in tree.body
+                  if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    if hint.name in module_fns and any(
+            isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == hint.name
+            for n in ast.walk(fn)):
+        return None, ('%r is a local that shadows the module function %s() and is called; '
+                      'a call through a local value is not supported here (the general path '
+                      'builds it)' % (hint.name, hint.name))
     first = None
     for n in ast.walk(fn):
         if (isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name)
@@ -36324,6 +36428,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     ctx.ephemeral_numeric_temps = set()
     ctx.numeric_allowed_names = _numeric_allowed.get(id(fn))
     ctx.source_names = {node.id for node in ast.walk(fn) if isinstance(node, ast.Name)} | {name for name, _ in ctx.params}
+    ctx.local_bindings = frozenset(_local_binding_names(fn))
     ctx.fn_node = fn
     ctx.free_points = _last_use_free_points(fn)
     ctx.loop_local_points = _loop_local_release_points(fn)
