@@ -181,6 +181,7 @@ def _apply(P, args, kwargs, result, current):
     # IR cannot lower it, the typed path must not fall back to the legacy int64 emitter: raise so
     # pyc.build tries the exact general path.
     _needs_tint = False
+    _proof = None
     try:
         import bigcap
         if not _py:
@@ -210,7 +211,12 @@ def _apply(P, args, kwargs, result, current):
         isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
         and (getattr(P, 'TINT_SIGS', {}).get(n.func.id) or ((), 0))[1]
         for n in ast.walk(fn))
+    # A call result the proof cannot bound has no named local to tag. When the IR can lower the
+    # function, TINT_SIGS gives its result the tagged type and the return checks the conversion;
+    # when the IR cannot, a typed-only build has no exact alternative and keeps the legacy emitter.
+    _call_result_proof = (_proof or '').startswith('a call result not proven to fit int64')
     if _py and _needs_tint and _no_tint_locals and not _has_tint_call \
+            and not _call_result_proof \
             and not (_proof or '').startswith(('it calls ', 'it contains ')):
         from pyfront import Unsupported
         raise Unsupported('%s() has an int operation the local proof cannot bound, but no tagged local (%s)'
@@ -276,6 +282,7 @@ def _apply(P, args, kwargs, result, current):
         _record(fn.name, cname, 'legacy', str(reason), ctx, extra=_legacy_walias(P, fn, ctx))
         _tinted_sig = bool(_sig and (any(_sig[0]) or _sig[1]))
         if _needs_tint and (_tinted_sig or 'has kind (' not in str(reason)) \
+                and not _call_result_proof \
                 and not fn.name.startswith(('_Ail', '_ail')) \
                 and not os.environ.get('AIL_NO_GENERAL'):
             from pyfront import Unsupported
