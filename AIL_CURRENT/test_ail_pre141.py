@@ -5,8 +5,10 @@ list item, a dict value, a call) was refused by both builds; CPython evaluates s
 once, when the `def` statement runs, and keeps that object between calls. The default is now
 evaluated into a hidden local at the `def` statement, so reassigning the source name afterwards
 does not change the default, a shared list stays shared, and an argument/list-item/dict-value/
-attribute value keeps the value it had at the `def`. Literal scalar and tuple defaults are still
-filled in at the call site. `**kwargs` and positional-only parameters remain refused by name.
+attribute value keeps the value it had at the `def`. A recursive call inside the nested function
+reads the hidden local from that function's own frame, so it sees the def-time value too. Literal
+scalar and tuple defaults are still filled in at the call site. `**kwargs` and positional-only
+parameters remain refused by name.
 """
 import os
 import subprocess
@@ -134,6 +136,40 @@ def main():
     def f(a=-5, b=9223372036854775807, c=(), d=(1, 2), e="", g=-0.5, h=0):
         return (a, b, c, d, e, g, h)
     print(f())
+
+
+main()
+''',
+    'recursive_defaults': '''
+_ail_nndefault_0 = "global"
+
+
+def main():
+    base = "local"
+    def f(n, a=base):
+        if n:
+            return f(n - 1)
+        return a
+    print(f(2))
+
+    def g(n, acc=[], seen={}, d=bytearray()):
+        acc.append(n)
+        seen[n] = seen.get(n, 0) + 1
+        d.extend(b"x")
+        if n:
+            return g(n - 1)
+        return (list(acc), dict(seen), bytes(d))
+    print(g(2))
+
+    x = 5
+    def h(n, *, k=x, a=[]):
+        a.append(n)
+        if n:
+            return h(n - 1)
+        return (k, list(a))
+    print(h(2))
+    x = 50
+    print(h(1, k=7))
 
 
 main()

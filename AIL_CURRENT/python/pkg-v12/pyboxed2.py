@@ -3361,7 +3361,12 @@ class Compiler(boxclosure.ClosureMixin):
         params = positional + ([vararg] if vararg else []) + kwonly
         nonlocal_names = _nonlocal_names(node.body)
         own_bound = set(params) | _scan_assigned_names(node.body) | {node.name}
-        free = sorted(_free_reads(node.body, own_bound) & set(outer_ctx.slot_of) |
+        # A call of this function from inside its own body (a recursive call) fills an omitted
+        # default from the hidden local, so the hidden name must be in this frame too. Capture
+        # it by value from the enclosing frame like any other free name; without it the read
+        # would resolve to a module global of the same name, or fail to compile.
+        hidden_defaults = {hidden for hidden, _ in default_inits}
+        free = sorted(((_free_reads(node.body, own_bound) | hidden_defaults) & set(outer_ctx.slot_of)) |
                       (nonlocal_names & set(outer_ctx.slot_of)))
         for nm in nonlocal_names:
             if nm not in outer_ctx.slot_of:

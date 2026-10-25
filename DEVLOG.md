@@ -1,3 +1,17 @@
+## 2026-10-25 - pre141 review follow-up: recursive calls see hoisted defaults (job-rbpre141-10251549)
+
+Review defect: a recursive call that omitted a hoisted default resolved the hidden
+`_ail_nndefault_N` name in the nested function's own frame, where it was never declared. Without a
+module global of that name the general path refused with an internal "name ... is not defined";
+with one, it silently read the global (`local` printed as `global`, shared lists got the global's
+contents). `_register_nested` now includes the hidden default names in the nested function's free
+names, so they are captured by value from the enclosing frame and the recursive call reads the
+def-time object. Regression program `recursive_defaults` in `test_ail_pre141.py` covers the module
+global collision, shared list/dict/bytearray defaults through recursion, and a keyword-only
+recursive default; probes `p9`-`p13` in `/tmp/probes` add scalars/widths, empty/negative values,
+aliasing, loop redefinition, values from arguments/list items/attributes/dict values, and both
+builds. All match CPython.
+
 ## 2026-10-25 - pre141 review follow-up: closure-context def flags (job-rbpre141-10251549)
 
 Review defect: a nested `def` with a non-literal or mutable default inside an escaping nested
