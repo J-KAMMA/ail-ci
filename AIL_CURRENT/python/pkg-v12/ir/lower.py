@@ -2120,6 +2120,10 @@ class Lowering(TextLowering):
 
     def unary(self, node):
         op = node.op
+        if isinstance(op, (ast.USub, ast.UAdd)):
+            constant = int_constant(node)
+            if type(constant) is int and -(1 << 63) <= constant < (1 << 63):
+                return self.const(I.I64, constant)
         if isinstance(op, ast.USub):
             operand = node.operand
             if isinstance(operand, ast.Constant) and type(operand.value) in (int, float):

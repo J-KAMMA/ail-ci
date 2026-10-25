@@ -1,3 +1,23 @@
+## 2026-10-25 - negative INT64_MIN unary constants (job-pre204-10252054)
+
+The first still-differing item from the pre190 review was `print(-(1 << 63))` and its larger
+spelling `print(-((1 << 5000) >> 4937))`: both denote INT64_MIN, but the unary emitters only folded
+a literal operand. They emitted checked operations over the out-of-int64 intermediate (2**63, or
+2**5000 before the right shift), so both builds stopped with `integer overflow` where CPython prints
+-9223372036854775808. Each emitter (typed IR, legacy typed, both general paths) now folds the whole
+unary constant expression with Python ints and emits the in-range result. The exact constant-folding
+size limit is raised so the 5000-bit intermediate folds; the same change also fixes the whole-result
+reductions `0 >> (1 << 5000)`, `2 ** ((1 << 2000000) - (1 << 2000000))` and
+`(1 << 2000000) >> 2000000`. Values that reach a negation as variables keep the run-time trap.
+
+The new `test_ail_pre204.py` covers negative INT64_MIN spellings (shift, power, invert, unary plus,
+nested expressions), the four value flows (argument, list item, attribute, dict value) plus alias
+and return, in-range boundaries, the large-intermediate reductions, and dynamic operands, on all
+four emitter modes. Probes `/tmp/probes/p204_negmin.py`, `p204_boundary.py`, `p204_flows.py`,
+`p204_reductions.py`, `p204_dynamic.py` match CPython on both builds; `p1`-`p4` and `p6` also match.
+`p5` (`0 ** (-(1 << 5000))`) and `p7` (`int("1"*5000, 2)`) still differ as recorded by pre190 and
+were not part of this fix.
+
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal

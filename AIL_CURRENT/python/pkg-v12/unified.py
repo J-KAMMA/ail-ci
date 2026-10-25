@@ -2169,6 +2169,10 @@ def nexpr(comp, node, ctx):
                 ctx.emit('%s = !%s;' % (r, ntest(comp, node.operand, ctx)))
                 return r
             return unbox(ctx, comp._expr_plain(node, ctx), BOOL)
+        if isinstance(node.op, (ast.USub, ast.UAdd)):
+            constant = int_constant(node)
+            if type(constant) is int and _I64_MIN <= constant <= _I64_MAX:
+                return _c_const(constant)
         a = nexpr(comp, node.operand, ctx)
         if isinstance(node.op, ast.UAdd):
             return a

@@ -13356,9 +13356,9 @@ def _expr(node, ctx):
         if not isinstance(node.op, ast.Not) and _is_ref_kind(_etype(node.operand, ctx)):
             raise Unsupported('a unary numeric operation on a struct is unsupported')
         if isinstance(node.op, ast.USub):
-            if (isinstance(node.operand, ast.Constant)
-                    and type(node.operand.value) is int and node.operand.value == 1 << 63):
-                return _c_int_literal(-(1 << 63))
+            constant = int_constant(node)
+            if type(constant) is int and _I64_MIN <= constant <= _I64_MAX:
+                return _c_int_literal(constant)
             if need is not None and not _neg_is_float(node.operand, ctx):
                 _use(need, 'ck_neg')
                 return 'ck_neg(%s)' % rec(node.operand)
