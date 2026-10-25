@@ -246,10 +246,13 @@ class ClosureMixin:
         cells += default_cs
         t = ctx.tmp()
         ctx.emit('{ ail_funcobj *_fo = (ail_funcobj *)ail_gc_alloc(cx, AIL_K_FUNC, sizeof(ail_funcobj)); '
-                 '_fo->fn = %s_v; _fo->n_cells = 0; _fo->name = "%s"; '
+                 '_fo->fn = %s_v; _fo->n_cells = 0; _fo->name = "%s";%s '
                  '_fo->cells = (ail_obj *)ail_xmalloc(%d * sizeof(ail_obj)); %s _fo->n_cells = %d; '
                  '%s.tag = AIL_T_FUNC; %s.o = (ail_gcobj *)_fo; }'
-                 % (cname, _c_name(qual, params), len(cells), ' '.join('_fo->cells[%d] = %s;' % (i, c) for i, c in enumerate(cells)),
+                 % (cname, _c_name(qual, params),
+                    ' _fo->builtin_fn = %d;' % (2 if getattr(node, '_ail_builtin_type', False) else 1)
+                    if getattr(node, '_ail_builtin_fn', False) else '',
+                    len(cells), ' '.join('_fo->cells[%d] = %s;' % (i, c) for i, c in enumerate(cells)),
                     len(cells), t, t))
         return t
 

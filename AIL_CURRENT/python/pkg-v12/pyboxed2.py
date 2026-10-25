@@ -4509,6 +4509,8 @@ class Compiler(boxclosure.ClosureMixin):
                                  body=ast.Call(func=ast.Name(id=node.id, ctx=ast.Load()),
                                                args=[ast.Name(id=n, ctx=ast.Load()) for n in names], keywords=[]))
                 ast.fix_missing_locations(ast.copy_location(lam, node))
+                lam._ail_builtin_fn = True
+                lam._ail_builtin_type = node.id in self._BUILTIN_TYPE_NAMES
                 return self.expr(lam, ctx)
             raise Unsupported("name '%s' is not defined" % node.id)
         if (not is_global and node.id in ctx.slot_of and node.id not in ctx.ptr_names and node.id not in ctx.clo_index
@@ -4540,6 +4542,8 @@ class Compiler(boxclosure.ClosureMixin):
     _BUILTIN_VALUE_ARITY = {'len': 1, 'abs': 1, 'ord': 1, 'chr': 1, 'bool': 1, 'repr': 1, 'sorted': 1, 'sum': 1,
                             'any': 1, 'all': 1, 'reversed': 1, 'iter': 1, 'hex': 1, 'oct': 1, 'bin': 1,
                             'divmod': 2, 'pow': 2, 'isinstance': 2}
+    # builtins in _BUILTIN_VALUE_ARITY that are classes, so CPython's type name is `type`
+    _BUILTIN_TYPE_NAMES = frozenset({'bool'})
 
     BINOP_FN = {ast.Add: 'ail_op_add', ast.Sub: 'ail_op_sub', ast.Mult: 'ail_op_mul',
                ast.Div: 'ail_op_truediv', ast.FloorDiv: 'ail_op_floordiv',
