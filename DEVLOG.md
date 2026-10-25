@@ -96,6 +96,30 @@ literals and module-level int constants and refuses an out-of-int64 result by na
 expression out of range: ...`) on both builds. A module constant shadowed by a parameter is not
 folded, and values that only reach the unary operation as variables keep the fixed-width trap.
 Added `test_ail_pre172.py` and registered it in `ail_check.MODULES`.
+## 2026-10-25 - contextlib re-raises a sent StopIteration (job-pre181-10251538)
+
+The first still-differing item from the task list was `p_stopiter`: a `StopIteration` raised
+inside a `with` body reaches the `@contextmanager` generator through `send()`, which re-raises it,
+and the generator runtime's PEP 479 conversion turned it into
+`RuntimeError: generator raised StopIteration` on both builds. CPython also makes that RuntimeError,
+but it sets `__cause__` to the escaping StopIteration and `contextlib.__exit__` recognises the
+cause, returns false, and lets the `with` re-raise the original StopIteration. The conversion in
+`safetyrt.py` now stores that exact object in a private attribute id (`AIL_ATTR_GEN_CAUSE`), and
+`_AilGenCM.__exit__` in `prelude_with.py` checks it through a small internal primitive, matching
+CPython's `isinstance(value, StopIteration) and exc.__cause__ is value` branch. Ordinary
+`getattr(e, "__cause__")`/`__context__` reads still refuse chaining (test_ail_pre179 passes), and a
+generator that catches the sent value and raises a *different* StopIteration still gives
+RuntimeError.
+
+Probes in `/tmp/probes` (`p_si1`-`p_si10`, `p_stopiter_k`, `p_cause_hidden`) covered builtin and
+user-subclass StopIteration, a replacement StopIteration after catching the sent one, replacement
+ValueError, a contextmanager method, nested managers, sources through an argument / list item /
+attribute / dict value, clean and suppressing exits, raw PEP 479, and both builds; all match CPython
+or keep the existing named refusal. `p_tb` still differs (`tb is None`), as recorded in
+DIFFERENCES (`C?-job-pre181-10251538-2`) and not touched here. Added `test_ail_pre181.py` (3
+programs, two builds each, 20s). Required modules on the final commit: test_ail_pre181,
+test_ail_pre179, test_ail_fuzz56, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3
+all pass (6 modules, 371s, `-j 2`).
 
 ## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
 
