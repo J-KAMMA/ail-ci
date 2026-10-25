@@ -8,6 +8,9 @@ module-level read before the first binding (or after a `del`) is refused by name
 compile time.  Function and lambda bodies are deferred, constant-false branches are
 pruned, and bindings made by `for`, `try`, `with`, `match`, parameters, locals and
 comprehension variables keep their own meaning, so those programs still match CPython.
+Walrus bindings are recognised, a short-circuited `and`/`or`/comparison operand and code
+after `break`/`continue`/`raise` are not treated as reads, so those programs also match
+CPython instead of being refused.
 """
 import shutil
 import unittest
@@ -57,6 +60,65 @@ print(next)
 }
 
 MATCHES = {
+    'walrus_bind': """(next := 5)
+print(next)
+next = 6
+print(next)
+""",
+    'walrus_if': """if (next := 5):
+    print(next)
+next = 6
+print(next)
+""",
+    'walrus_delete_rebind': """next = 5
+del next
+(next := 7)
+print(next)
+next = 8
+print(next)
+""",
+    'walrus_comprehension': """[(next := i) for i in range(3)]
+print(next)
+next = 9
+print(next)
+""",
+    'walrus_in_call': """print((next := 4))
+next = 6
+print(next)
+""",
+    'shortcircuit_or': """x = True or next
+next = 5
+print(x, next)
+""",
+    'shortcircuit_and': """x = False and next
+next = 6
+print(x, next)
+""",
+    'shortcircuit_chain_compare': """x = 1 == 2 < next
+next = 5
+print(x, next)
+""",
+    'dead_after_break': """while True:
+    break
+    print(next)
+next = 5
+print(next)
+""",
+    'dead_after_raise': """try:
+    if True:
+        raise ValueError("stop")
+        print(next)
+except ValueError:
+    pass
+next = 5
+print(next)
+""",
+    'dead_after_continue': """for i in [1]:
+    continue
+    print(next)
+next = 5
+print(next)
+""",
     'function_read_after_binding': '''def first():
     return next(iter([1]))
 next = lambda x: 7

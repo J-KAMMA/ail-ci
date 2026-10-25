@@ -1,3 +1,22 @@
+## 2026-10-25 - review fix: shadow-refusal scan follows evaluation order (job-pre250-10260445)
+
+The reviewer found three change-caused false refusals in `shadowing.py`: walrus bindings were not
+recognised, operands that a constant short-circuits (`True or next`, `False and next`,
+`1 == 2 < next`) were treated as reads, and code after `break`/`continue`/`raise` was still
+scanned.  Walrus targets now bind at module scope (including comprehension walrus), `and`/`or`
+and chained comparisons are folded over literal operands and stop at the short circuit, and a
+statement list stops at a terminal statement.  Reads that Python really answers from the built-in
+before the binding (`for x in [1]: print(next)` before `next = 5`, `next = next`, after `del`) are
+still refused by name on both builds.
+
+Probes `/tmp/probes/p250r_*` (the reviewer's r11-r20), `p250_walrus_{bind,if,del_rebind,comp,
+call,arg,list,attr,dict}`, `p250_sc_{or,and,chain,chain_true,nested}` and
+`p250_dead_{break,continue,raise}` all match CPython on both builds; `p250_live_after_if_read`
+(a real read before the binding) is refused by name.  Added the same cases to
+`test_ail_pre250.py`.  Final-state tests: `test_ail_pre250 test_ail_safetynet test_ail_files
+test_ail_corpus_findings3 test_ail_builtin_shadowing` pass (`-j 2`); `update_manifest.py --check`
+and `ci_shards.py --check` pass.
+
 ## 2026-10-25 - module-level builtin shadow before its binding is refused (job-pre250-10260445)
 
 The pre-existing difference recorded by the pre208 reviewer was the first one to re-check:

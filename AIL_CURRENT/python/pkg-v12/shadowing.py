@@ -247,6 +247,30 @@ class _Collector:
             self.visit(child, chain, class_locals)
 
 
+_CONST_COMPARE = {
+    ast.Eq: lambda a, b: a == b,
+    ast.NotEq: lambda a, b: a != b,
+    ast.Lt: lambda a, b: a < b,
+    ast.LtE: lambda a, b: a <= b,
+    ast.Gt: lambda a, b: a > b,
+    ast.GtE: lambda a, b: a >= b,
+    ast.Is: lambda a, b: a is b,
+    ast.IsNot: lambda a, b: a is not b,
+    ast.In: lambda a, b: a in b,
+    ast.NotIn: lambda a, b: a not in b,
+}
+
+
+def _const_compare(left, op, right):
+    """True/False when both operands are literals and the comparison is safe, else None."""
+    try:
+        left = ast.literal_eval(left)
+        right = ast.literal_eval(right)
+        return bool(_CONST_COMPARE[type(op)](left, right))
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError, KeyError):
+        return None
+
+
 def _const_truth(node):
     """True/False when the expression's truth value is fixed, else None."""
     if isinstance(node, ast.Constant):
@@ -263,6 +287,16 @@ def _const_truth(node):
         if True in values:
             return True
         return False if all(value is False for value in values) else None
+    if isinstance(node, ast.Compare):
+        left = node.left
+        for op, right in zip(node.ops, node.comparators):
+            result = _const_compare(left, op, right)
+            if result is None:
+                return None
+            if not result:
+                return False
+            left = right
+        return True
     try:
         return bool(ast.literal_eval(node))
     except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
@@ -277,6 +311,8 @@ def _scan_immediate(node, name, chain=()):
         local = chain
         for statement in statements:
             visit(statement, local)
+            if _terminates(statement):
+                break
             if 'bind' in _binding_effects(statement, name):
                 local = chain + ({name},)
 
@@ -330,6 +366,30 @@ def _scan_immediate(node, name, chain=()):
                 visit(node.body, chain)
             if truth is not True:
                 visit(node.orelse, chain)
+            return
+        if isinstance(node, ast.BoolOp):
+            for index, value in enumerate(node.values):
+                visit(value, chain)
+                if index == len(node.values) - 1:
+                    break
+                truth = _const_truth(value)
+                if isinstance(node.op, ast.And):
+                    if truth is False:
+                        break
+                elif truth is True:
+                    break
+            return
+        if isinstance(node, ast.Compare):
+            visit(node.left, chain)
+            left = node.left
+            for op, right in zip(node.ops, node.comparators):
+                visit(right, chain)
+                result = _const_compare(left, op, right)
+                if result is not True:
+                    # A false result short-circuits the rest; an unknown one may or may not
+                    # evaluate them, so do not report a read that might never happen.
+                    break
+                left = right
             return
         if isinstance(node, (ast.For, ast.AsyncFor)):
             visit(node.iter, chain)
@@ -408,8 +468,34 @@ def _pattern_binds(pattern, name):
     return False
 
 
+def _terminates(node):
+    """True when `node` stops the enclosing statement list before its next statement."""
+    if isinstance(node, (ast.Return, ast.Raise, ast.Break, ast.Continue)):
+        return True
+    if isinstance(node, ast.If) and node.orelse:
+        return (all(_terminates(statement) for statement in node.body)
+                and all(_terminates(statement) for statement in node.orelse))
+    return False
+
+
+def _walrus_binds(node, name):
+    """True when `node` binds `name` with a walrus at module scope (nested scopes excluded)."""
+    if isinstance(node, ast.NamedExpr):
+        return _target_binds(node.target, name) or _walrus_binds(node.value, name)
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+        return False
+    return any(_walrus_binds(child, name) for child in ast.iter_child_nodes(node))
+
+
 def _binding_effects(node, name):
     """Module-scope bind/unbind effects of `node`, pruning constant branches."""
+    effects = _binding_effects_shallow(node, name)
+    if 'bind' not in effects and _walrus_binds(node, name):
+        effects.append('bind')
+    return effects
+
+
+def _binding_effects_shallow(node, name):
     if isinstance(node, ast.If):
         truth = _const_truth(node.test)
         effects = []
@@ -499,7 +585,7 @@ def _check_rebound_builtin_fallback(tree, found, targets, Unsupported):
                        and isinstance(leaf.ctx, ast.Del)
                        for target in statement.targets for leaf in ast.walk(target)):
                     refuse(statement, 'deleted before it is bound')
-            elif not bound:
+            elif not bound and not _walrus_binds(statement, name):
                 loads = _scan_immediate(statement, name)
                 if (isinstance(statement, ast.AugAssign)
                         and isinstance(statement.target, ast.Name)
