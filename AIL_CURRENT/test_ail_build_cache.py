@@ -25,6 +25,8 @@ SPEC.loader.exec_module(buildcache)
 
 TYPED = 'fn main()->int {\n    print("cache ok");\n    return 0;\n}\n'
 TYPED2 = 'fn main()->int {\n    print("cache changed");\n    return 0;\n}\n'
+# Two source texts that name one typed local differently; the generated C is identical.
+RENAMED_LOCAL = 'fn main()->int {\n    let %s: int = 1;\n    print(%s);\n    return 0;\n}\n'
 SCRIPT = 'print(40 + 2)\n'
 REAL_CC = shutil.which(os.environ.get('PIPE_CC') or 'gcc') or shutil.which('cc')
 
@@ -122,6 +124,16 @@ class CompileCacheTests(CacheBase):
         self.assertEqual(self.run_exe(changed), b'cache changed\n')
         again, _ = self.compile(TYPED, 'prog')            # the first version is still cached
         self.assertEqual(self.run_exe(again), b'cache ok\n')
+
+    def test_changed_source_with_the_same_generated_c_hits_the_cc_cache(self):
+        """A new source text (so a new whole-build key) whose C is unchanged reuses the binary."""
+        first, _ = self.compile(RENAMED_LOCAL % ('value', 'value'), 'prog')
+        finished, before = self.finished(), self.compiles()
+        renamed, _ = self.compile(RENAMED_LOCAL % ('other', 'other'), 'prog')
+        self.assertEqual(self.finished(), finished + 1)   # the merged source is a new front-end entry
+        self.assertEqual(self.compiles(), before)         # ... but the C compiler step is reused
+        self.assertEqual(sha(first), sha(renamed))
+        self.assertEqual(self.run_exe(renamed), b'1\n')
 
     def test_flag_change_misses(self):
         dynamic, _ = self.compile(TYPED, 'prog')
