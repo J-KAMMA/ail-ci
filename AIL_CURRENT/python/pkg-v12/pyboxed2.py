@@ -1498,6 +1498,13 @@ def _scan_assigned_names(stmts):
     return names
 
 
+def _rebound_function_names(tree, functions):
+    """Top-level functions whose module binding an assignment at module scope changes
+    (`f = lambda: ...`).  A `global f` write inside a function is a separate storage path and
+    is not included here."""
+    return _scan_assigned_names(tree.body) & set(functions)
+
+
 _COMP_NODES = (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
 
 
@@ -2196,6 +2203,7 @@ class Compiler(boxclosure.ClosureMixin):
                 self._register_function(n)
             elif isinstance(n, ast.ClassDef):
                 self._register_class(n)
+        self.rebound_functions = _rebound_function_names(tree, self.functions)
 
         self.user_method_names = frozenset(m for c in self.classes.values() for m in c['methods'])
         # classes the program uses as values (`make = Fenwick; make(data)`): a call through a value may construct one
@@ -2273,7 +2281,12 @@ class Compiler(boxclosure.ClosureMixin):
             if isinstance(n, ast.ClassDef):
                 self._init_class_attrs(n.name, main_ctx)
                 continue
-            if isinstance(n, (ast.FunctionDef, ast.Import, ast.ImportFrom)):
+            if isinstance(n, ast.FunctionDef):
+                if n.name in self.rebound_functions:
+                    main_ctx.emit('g_slots_arr[%d] = %s;' % (
+                        self._module_global_slot(n.name), self.function_value(n.name, main_ctx)))
+                continue
+            if isinstance(n, (ast.Import, ast.ImportFrom)):
                 continue
             self._module_stmt(n, main_ctx)
         if not has_toplevel_exec:
@@ -4506,7 +4519,8 @@ class Compiler(boxclosure.ClosureMixin):
             return 'g_slots_arr[%d]' % self.global_slots['class:' + node.id]
         if node.id in ctx.nested_funcs:
             raise Unsupported('using function %s as a first-class value' % node.id)
-        if node.id in self.functions and node.id not in ctx.slot_of and node.id not in ctx.clo_index:
+        if (node.id in self.functions and node.id not in self.rebound_functions
+                and node.id not in ctx.slot_of and node.id not in ctx.clo_index):
             return self.function_value(node.id, ctx)
         if node.id in self.module_aliases or node.id in ('sys',):
             raise Unsupported('the module %s used as a plain value' % node.id)
@@ -6454,6 +6468,9 @@ class Compiler(boxclosure.ClosureMixin):
         if name in ctx.nested_funcs:
             return self._call_nested_function(name, args, kwargs, ctx)
         if name in ctx.closure_defs or name in ctx.clo_index or name in ctx.cell_slots:
+            return self.call_value(self.expr(ast.Name(id=name, ctx=ast.Load()), ctx), args, kwargs, ctx)
+        if (name in self.rebound_functions and name not in ctx.slot_of
+                and name not in ctx.ptr_names and name not in ctx.clo_index):
             return self.call_value(self.expr(ast.Name(id=name, ctx=ast.Load()), ctx), args, kwargs, ctx)
         if name in self.functions:
             if (name in ctx.slot_of or name in ctx.ptr_names or name in ctx.clo_index
