@@ -1,3 +1,29 @@
+## 2026-10-25 - review fix: generator expression as a hash key refused by name (job-pre222-10260116)
+
+The pre207 review's only defect was in the DEVLOG itself: it claimed `p8a.py` through `p8v.py` all
+match CPython, while `p8c` (`print({(x for x in [1, 2])})`) and the same paragraph's repr caveat
+say otherwise.  Re-run on this tree, `p8c` is the first item that still differs: both builds exited
+1 with `TypeError: unhashable type: 'list'` where CPython stores the generator and prints
+`{<generator object <genexpr> at 0x...>}`.  The cause is the pre166 representation: a generator
+expression is materialised eagerly as a list carrying `from_generator`, so it has neither the
+identity hash nor the generator repr CPython gives the object.
+
+The construct is now refused by name on both builds.  `_check_genexpr_hash_keys` in
+`ail_chatgpt.py` refuses a generator expression that a set literal or comprehension, a dict literal
+key or comprehension, `hash()`, or `set()`/`frozenset()` over a collection must hash, including
+one reached through a tuple or a `tuple()`/`frozenset()` call over a collection; the v2
+`ail_obj_hash` (with the matching `dunderrt.py` text edit) raises the same message at run time for a
+materialised generator expression reaching a hash bucket, so a saved name, alias, argument, list
+item, attribute, dict value, `.add`, membership test, subscript or `hash(name)` is a named
+`TypeError` rather than "unhashable list".  A consumed generator expression (`sum`, `next`, `list`,
+`frozenset(genexpr)`, a genexpr passed to `tuple()`/`frozenset()` as a dict key) and one kept as a
+dict value are untouched.
+
+Probes `/tmp/probes/p8c*.py` cover the literal forms, every dynamic route above, a plain list key,
+`frozenset(genexpr)` and consumption; each matches CPython or is refused by name on both builds.
+Added `test_ail_pre222.py` (4 tests, both builds).  The plain display repr (`print(g)`, r12) is a
+separate later item and still differs.
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a

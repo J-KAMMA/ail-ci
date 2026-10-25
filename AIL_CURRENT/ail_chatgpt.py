@@ -319,6 +319,77 @@ def _check_int64_unary_constants(tree):
             raise error
 
 
+_GENEXPR_HASH_REFUSAL = (
+    'a generator expression used as a hash key is not supported: '
+    'AIL stores it as a list (no generator identity hash or repr)')
+
+
+def _hashed_genexpr(node):
+    """The generator expression in a value a set or dict must hash, or None.
+
+    A tuple is hashed element by element, and a tuple()/frozenset() call hashes the elements of a
+    collection argument; a generator-expression argument to either is consumed, not hashed. A list,
+    set or dict nested in a key is itself unhashable in CPython, so nothing beneath it is reached."""
+    if isinstance(node, ast.GeneratorExp):
+        return node
+    if isinstance(node, ast.Tuple):
+        for elt in node.elts:
+            found = _hashed_genexpr(elt)
+            if found is not None:
+                return found
+    if isinstance(node, ast.IfExp):
+        return _hashed_genexpr(node.body) or _hashed_genexpr(node.orelse)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ('tuple', 'frozenset'):
+        for arg in node.args:
+            if isinstance(arg, (ast.List, ast.Tuple, ast.Set)):
+                for elt in arg.elts:
+                    found = _hashed_genexpr(elt)
+                    if found is not None:
+                        return found
+    return None
+
+
+def _check_genexpr_hash_keys(tree):
+    """Refuse a generator expression that a set or dict must hash, by name.
+
+    Both emitters materialise a generator expression as an eager list (pre166), so the object is
+    unhashable where CPython hashes the generator by identity, and showing it prints the list
+    instead of `<generator object <genexpr> at 0x...>`. A static display/`hash` form is refused
+    here on both builds; a value reaching the hash at run time is refused by the runtime."""
+    def refuse(node):
+        error = ValueError(_GENEXPR_HASH_REFUSAL)
+        error.source_line = node.lineno
+        error.source_column = node.col_offset
+        raise error
+
+    def check_key(key):
+        found = _hashed_genexpr(key)
+        if found is not None:
+            refuse(found)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Set):
+            for elt in node.elts:
+                check_key(elt)
+        elif isinstance(node, ast.Dict):
+            for key in node.keys:
+                if key is not None:
+                    check_key(key)
+        elif isinstance(node, ast.SetComp):
+            check_key(node.elt)
+        elif isinstance(node, ast.DictComp):
+            check_key(node.key)
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id == 'hash':
+                for arg in node.args:
+                    check_key(arg)
+            elif node.func.id in ('set', 'frozenset'):
+                for arg in node.args:
+                    if isinstance(arg, (ast.List, ast.Tuple, ast.Set)):
+                        for elt in arg.elts:
+                            check_key(elt)
+
+
 def _returns_on_every_path(statements):
     def loop_exit(body):
         pending = list(body)
@@ -528,6 +599,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             if not declarations_only:
                 _check_int64_literals(tree)
                 _check_int64_unary_constants(tree)
+                _check_genexpr_hash_keys(tree)
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)
             if source_map is not None:
