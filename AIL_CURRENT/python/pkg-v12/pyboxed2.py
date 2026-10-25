@@ -1536,6 +1536,13 @@ def _free_reads(node, bound):
 
 
 _BUILTIN_NAMES = frozenset(dir(builtins))
+_CHAIN_ATTRS = ('__cause__', '__context__', '__suppress_context__', '__traceback__')
+
+
+def _literal_chain_attr(node):
+    return isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in _CHAIN_ATTRS
+
+
 # names ail_syntax.py lowers as if they were builtins (the import line is dropped): name -> its module
 _IMPLICIT_LIB = {**{n: 'heapq' for n in ('heappush', 'heappop', 'heapify', 'heappushpop', 'heapreplace')},
                  **{n: 'bisect' for n in ('bisect_left', 'bisect_right', 'bisect', 'insort', 'insort_left',
@@ -6852,6 +6859,8 @@ class Compiler(boxclosure.ClosureMixin):
         if len(args) not in (2, 3) or kwargs:
             raise Unsupported('getattr() with other than (object, name[, default])')
         self._attr_builtin_target(args[0])
+        if _literal_chain_attr(args[1]):
+            raise Unsupported('reading %s (exception chaining is not kept here)' % args[1].value)
         if isinstance(args[1], ast.Constant) and isinstance(args[1].value, str) and \
                 any(args[1].value in c['methods'] for c in self.classes.values()):
             raise Unsupported('getattr() of the method %s as a value (getattr(obj, "%s")(...) is built)'
@@ -6868,6 +6877,8 @@ class Compiler(boxclosure.ClosureMixin):
         if len(args) != 2 or kwargs:
             raise Unsupported('hasattr() with other than (object, name)')
         self._attr_builtin_target(args[0])
+        if _literal_chain_attr(args[1]):
+            raise Unsupported('reading %s (exception chaining is not kept here)' % args[1].value)
         o, n = self.expr(args[0], ctx), self.expr(args[1], ctx)
         meth = '0'
         if isinstance(args[1], ast.Constant) and isinstance(args[1].value, str):
@@ -6891,6 +6902,8 @@ class Compiler(boxclosure.ClosureMixin):
         if len(args) != 3 or kwargs:
             raise Unsupported('setattr() with other than (object, name, value)')
         self._attr_builtin_target(args[0])
+        if _literal_chain_attr(args[1]):
+            raise Unsupported('writing %s (exception chaining is not kept here)' % args[1].value)
         o, n, v = (self.expr(a, ctx) for a in args)
         self.rt_needs.add('attr')
         t = ctx.tmp()
