@@ -1,7 +1,8 @@
 """The per-function switch between the IR path and the legacy emitter (design §4.1).
 
-    AIL_IR unset or 0   legacy emitter only (the IR is never imported; C is byte-identical)
-    AIL_IR=1            every function in the S0 subset is lowered, verified and emitted from the
+    AIL_IR=0 (off/no)   legacy emitter only (the IR is never imported; C is byte-identical to the
+                        pre-IR-default build); the opt-out
+    AIL_IR unset or 1   (the default since 2026-10-19) every function in the S0 subset is lowered, verified and emitted from the
                         IR; anything else, and any IR failure, falls back to the legacy emitter
     AIL_IR=verify       as 1, plus a print/parse/print round trip of every IR function, and an IR
                         failure (verifier error, emitter error, signature mismatch) raises instead
@@ -13,6 +14,7 @@ The legacy emitter always runs first and stays the source of the C boundary: the
 keeps its symbol, linkage and signature (checked textually), and its runtime needs are merged
 into the legacy context, so the rest of the program is compiled exactly as before.
 """
+import ast
 import inspect
 import json
 import os
@@ -58,8 +60,10 @@ def checked_exceptions():
 
 
 def mode():
-    value = os.environ.get('AIL_IR', '0').strip().lower()
-    return '' if value in ('', '0', 'off', 'no') else value
+    value = os.environ.get('AIL_IR', '1').strip().lower()
+    if value == '':
+        value = '1'                  # unset or empty: the default, the IR
+    return '' if value in ('0', 'off', 'no', 'false') else value
 
 
 def _record(fn_name, sym, path, reason, ctx, stats=None, extra=None):
@@ -123,10 +127,97 @@ def apply(P, args, kwargs, result):
     current = mode()
     if not current:
         return result
+    I.SRC.clear()                    # --debug source positions of the previous function
+    try:
+        return _apply(P, args, kwargs, result, current)
+    finally:
+        I.SRC.clear()
+
+
+def _apply(P, args, kwargs, result, current):
     sig, generated, ctx = result
     bound = inspect.signature(P._one_function_numeric_impl).bind(*args, **kwargs).arguments
     fn, cname = bound['fn'], bound['cname']
     recursive = bool(bound.get('recursive', False))
+    _py = os.environ.get('AIL_SURFACE') == 'python'
+    if _py and (any(isinstance(n, ast.Global) for n in ast.walk(fn)) or getattr(ctx, 'gdecl', None)):
+        from pyfront import Unsupported
+        raise Unsupported('%s() writes a module variable, which the tagged-int lowering does not cover'
+                          % fn.name)
+    _user_methods = set(getattr(ctx, 'user_method_names', ()))
+    _attr_calls = [n for n in ast.walk(fn)
+                   if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
+    if _py and any(n.func.attr in _user_methods for n in _attr_calls):
+        from pyfront import Unsupported
+        raise Unsupported('%s() calls a user method, which the tagged-int lowering does not type' % fn.name)
+    _io_names = {'open', 'write_text', 'write_bytes', 'read_text', 'read_bytes', 'file_chunks'}
+    _file_helpers = getattr(P, '_FILE_HELPER_NAMES', ())
+    _io_like = any(isinstance(n, (ast.With, ast.AsyncWith)) for n in ast.walk(fn)) or any(
+        isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        and (n.func.id in _io_names or n.func.id in _file_helpers
+             or n.func.id.startswith('_ail_nt_'))
+        for n in ast.walk(fn))
+    _library_call = any(n.func.attr not in _user_methods for n in _attr_calls) or any(
+        isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        and (n.func.id.startswith(('_ail_', '_Ail')) or n.func.id in _io_names
+             or n.func.id in getattr(ctx, 'prelude_names', ()))
+        for n in ast.walk(fn)) or any(isinstance(n, (ast.With, ast.AsyncWith)) for n in ast.walk(fn))
+    if _py and not _io_like:
+        for _n in ast.walk(fn):
+            if isinstance(_n, ast.Call) and isinstance(_n.func, ast.Name) and (_n.func.id in ('int', '_ail_int2') or _n.func.id.endswith(('str_to_int', 'bytes_to_int'))) and _n.args:
+                try:
+                    _k = P._etype(_n.args[0], ctx)
+                except Exception:
+                    _k = None
+                if _k == P.STR or _k == P.BYTES:
+                    from pyfront import Unsupported
+                    raise Unsupported('%s() parses an int from text, which the tagged-int lowering does not cover'
+                                      % fn.name)
+    if _py and not _library_call and (getattr(ctx, 'numeric_tokens', None) or getattr(ctx, 'numeric_assignments', None)):
+        from pyfront import Unsupported
+        raise Unsupported('%s() mixes int and float bindings, which the tagged-int lowering does not cover'
+                          % fn.name)
+    # B2b: a function whose ints are not locally proven needs the IR's tagged-int lowering. If the
+    # IR cannot lower it, the typed path must not fall back to the legacy int64 emitter: raise so
+    # pyc.build tries the exact general path.
+    _needs_tint = False
+    try:
+        import bigcap
+        if not _py:
+            raise RuntimeError
+        _d = bigcap._Defined(set(getattr(ctx, 'funcs', {})) | set(getattr(ctx, 'classes', {})))
+        _d.classes = frozenset(getattr(ctx, 'classes', {}))
+        _proven = bigcap.proven_int_names(fn, _d)
+        _bounds = bigcap.local_int_bounds(fn, _d)
+        _names = set(bigcap._lp_params(fn)) | set(bigcap._lp_locals(fn.body))
+        _params = dict(getattr(ctx, 'params', ()))
+        _tint_names = {n for n in _names if n not in _proven and
+                       (getattr(ctx, 'types', {}).get(n) == P.INT or _params.get(n) == P.INT)}
+        _proof = bigcap._lp_reason([fn], None, _d)
+        # "an operand not proven int or float" is what an untyped GLOBAL (a module-level float the
+        # function only reads) produces; it is not an int operation. Let that shape keep the
+        # legacy typed emitter (a no-int program must not take the general path).
+        _int_failure = (_proof is not None and 'not proven int or float' not in _proof
+                        and any(w in _proof for w in ('int', 'operand', 'shift', 'power', 'overflow')))
+        _needs_tint = bool(_tint_names) or _int_failure
+        _no_tint_locals = not _tint_names
+        if _io_like or fn.name.startswith(('_Ail', '_ail')):
+            _needs_tint = False
+    except Exception:
+        _needs_tint = False
+        _no_tint_locals = False
+    _has_tint_call = any(
+        isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        and (getattr(P, 'TINT_SIGS', {}).get(n.func.id) or ((), 0))[1]
+        for n in ast.walk(fn))
+    if _py and _needs_tint and _no_tint_locals and not _has_tint_call \
+            and not (_proof or '').startswith(('it calls ', 'it contains ')):
+        from pyfront import Unsupported
+        raise Unsupported('%s() has an int operation the local proof cannot bound, but no tagged local (%s)'
+                          % (fn.name, _proof))
+    _sig = getattr(P, 'TINT_SIGS', {}).get(fn.name) if _py else None
+    if _sig and (any(_sig[0]) or _sig[1]) and not _io_like:
+        _needs_tint = True
     try:
         if bound.get('is_method'):
             raise lower.NotS0('a method')
@@ -145,7 +236,7 @@ def apply(P, args, kwargs, result):
             raise lower.NotS0('not in AIL_IR_FUNCS')
         _summaries(ctx)
         if os.environ.get("AIL_IR_AST") == fn.name:
-            import ast, sys
+            import sys
             with open(os.environ.get("AIL_IR_AST_FILE", "/dev/stderr"), "a") as out:
                 print(ast.unparse(fn), file=out)
                 print("---- types:", dict(ctx.types), file=out)
@@ -153,6 +244,10 @@ def apply(P, args, kwargs, result):
                                         not bound.get('local_methods', True), _summaries(ctx))
         if not _only_cleanup_before(generated, sig):
             raise lower.NotS0('the legacy path emits helpers around this function')
+        if '_stdin_broots' in generated:
+            # a `for line in sys.stdin` loop whose list is only printed afterwards runs in batches with
+            # the strings freed per batch (2.5 MB against 150 MB on a million lines); the IR has no such pass
+            raise lower.NotS0('stdin line batching belongs to the legacy emitter')
         verify.check(function, program)
         checker = (lambda f: verify.check(f, program)) if current == 'verify' else None
         pass_stats = passes.optimize(function, program, facts_for(P, fn, ctx), checker)
@@ -168,14 +263,29 @@ def apply(P, args, kwargs, result):
         new_sig, body, needs = emit_c.emit_function(function, PENDING, checked_exceptions(), _summaries(ctx),
                                                     named.group(1) if named else None,
                                                     None if link_units else LISTVAL)
+        if bound.get('static_helpers') and not new_sig.startswith(('static', '__attribute__')):
+            new_sig = 'static' + chr(10) + new_sig
         # (a function with a try has its parameters `volatile` in the legacy signature, for the
         # setjmp rule; a qualifier on a parameter does not change the type of the function)
-        if new_sig != sig and ''.join(new_sig.split()) != ''.join(re.sub(r'\bvolatile\b', '', sig).split()):
+        if new_sig != sig and ''.join(new_sig.split()) != ''.join(re.sub(r'\bvolatile\b', '', sig).split()) \
+                and not _needs_tint:
             raise I.IRError('IR signature %r differs from the legacy %r' % (new_sig, sig))
         if needs['need'] and ctx.need is None:
             raise lower.NotS0('checked helpers in a non-strict build')
     except lower.NotS0 as reason:
         _record(fn.name, cname, 'legacy', str(reason), ctx, extra=_legacy_walias(P, fn, ctx))
+        _tinted_sig = bool(_sig and (any(_sig[0]) or _sig[1]))
+        if _needs_tint and (_tinted_sig or 'has kind (' not in str(reason)) \
+                and not fn.name.startswith(('_Ail', '_ail')) \
+                and not os.environ.get('AIL_NO_GENERAL'):
+            from pyfront import Unsupported
+            raise Unsupported('%s() needs the tagged-int lowering, which does not cover it: %s'
+                              % (fn.name, reason))
+        if _py and _tinted_sig:
+            # this function stays on the legacy int64 emitter (the typed-only build): its callers
+            # must not wrap arguments/results as ail_tint
+            getattr(P, 'TINT_ACTIVE', {}).pop(fn.name, None)
+            getattr(P, 'TINT_ACTIVE', {}).pop(cname, None)
         return result
     except Exception as error:
         if current == 'verify':
@@ -201,4 +311,4 @@ def apply(P, args, kwargs, result):
         PENDING.add(cname)
     if needs.get('byval'):
         LISTVAL.add(cname)
-    return sig, body, ctx
+    return (new_sig if _needs_tint else sig), body, ctx
