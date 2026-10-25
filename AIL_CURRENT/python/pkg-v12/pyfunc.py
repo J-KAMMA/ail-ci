@@ -81,6 +81,10 @@ FLOAT_FLOOR_MOD = True
 TINT_SIGS = {}
 TINT_ACTIVE = {}
 TINT_DISABLED = False
+# Whole-program switch: int module variables are `ail_tint` statics, so a function that rebinds
+# one keeps exact Python ints (the IR lowers global.load/global.store as tint). Off when a class
+# method touches a module variable: methods stay on the legacy emitter, which has int64 globals.
+GLOBAL_INT_TINT = False
 
 INT, FLT, LIST, SET, DICT, RANGE, BYTES = 'int', 'float', 'list', 'set', 'dict', 'range', 'bytes'
 # SEMANTICS.md section 31. A SECOND string type, beside BYTES and never mixed with it: a
@@ -2184,7 +2188,10 @@ def _emit_module_consts(modconsts):
         # (the module body runs before any function, so the initial value is all a function sees
         # first); every function that reads or `global`-rebinds it names `v_<name>` directly
         if kind == INT:
-            out.append('static int64_t v_%s = %s;\n' % (name, _c_int_literal(value)))
+            if GLOBAL_INT_TINT:
+                out.append('static ail_tint v_%s = {%s, NULL};\n' % (name, _c_int_literal(value)))
+            else:
+                out.append('static int64_t v_%s = %s;\n' % (name, _c_int_literal(value)))
         elif kind == FLT:
             out.append('static double v_%s = (%r);\n' % (name, value))
         elif kind == STR:
@@ -34563,6 +34570,8 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     # -- and reset on every call so a `Ctx` built later in THIS compile never sees a stale table
     # left over from a previous, unrelated `to_c()` call (see `_MODCONSTS`'s own docstring).
     _MODCONSTS = _scan_module_consts(tree)
+    global GLOBAL_INT_TINT
+    GLOBAL_INT_TINT = False
     if _MODCONSTS.vars:
         boolkind.check_numeric_vars(_BOOLS, _MODCONSTS.vars, _MODCONSTS.bools, Unsupported)
     if _MODCONSTS.vars and (library or any(external.values())):
@@ -34880,6 +34889,25 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     _tint_sigs = {}
     _python_surface = os.environ.get('AIL_SURFACE') == 'python'
     _ir_on = os.environ.get('AIL_IR', '1').strip().lower() not in ('0', 'off', 'no', 'false')
+    # A module int variable can be an `ail_tint` static (exact Python ints) only when every function
+    # that touches it can be lowered by the IR. A class method or constructor stays on the legacy
+    # emitter (which types module variables as int64), so such a program keeps the int64 statics.
+    def _global_int_tint_ok():
+        if not (_python_surface and _ir_on and not TINT_DISABLED) or not _MODCONSTS.vars:
+            return False
+        if _MODCONSTS.bools:
+            return False
+        if any(kind not in (INT, FLT) for kind, _ in _MODCONSTS.vars.values()):
+            return False
+        if not any(kind == INT for kind, _ in _MODCONSTS.vars.values()):
+            return False
+        names = set(_MODCONSTS.vars)
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and any(
+                    isinstance(n, ast.Name) and n.id in names for n in ast.walk(node)):
+                return False
+        return True
+    GLOBAL_INT_TINT = _global_int_tint_ok()
     global TINT_DISABLED
     TINT_DISABLED = bool(info is not None and info.get('_mixed_clone'))
     _io_names = {'open', 'write_text', 'write_bytes', 'read_text', 'read_bytes', 'file_chunks'}
@@ -35066,6 +35094,8 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                 runtime_parts.add('DIE')
             if value_kind in (STR, BYTES, LIST, FLIST, SLIST, BLIST, BYTEARRAY, BINARYFILE, TCPSOCKET):
                 runtime_parts.add(value_kind.upper())
+    if GLOBAL_INT_TINT:
+        runtime_parts.add('TINTT')
     if {'TCPSOCKET', 'TCPHEAD'} & runtime_parts:
         head = cruntime.TCPHEAD + head
     head += cruntime.emit(runtime_parts)

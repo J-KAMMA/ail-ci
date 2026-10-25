@@ -281,7 +281,7 @@ _op('const', 0, 0)
 for _name in ('tint.from', 'tint.i64', 'tint.i64sat', 'tint.f64', 'tint.nonzero', 'tint.neg', 'tint.inv'):
     _op(_name, 1, 1)
 for _name in ('tint.add', 'tint.sub', 'tint.mul', 'tint.floordiv', 'tint.floormod', 'tint.shl', 'tint.shr',
-              'tint.eq', 'tint.ne', 'tint.lt', 'tint.le'):
+              'tint.pow', 'tint.eq', 'tint.ne', 'tint.lt', 'tint.le'):
     _op(_name, 2, 2)
 for _name in ('tint.eq_i64', 'tint.ne_i64', 'tint.lt_i64', 'tint.le_i64', 'tint.floordiv_i64', 'tint.mod_i64',
               'tint.add_i64', 'tint.sub_i64', 'tint.mul_i64', 'tint.mod_i64_i64',

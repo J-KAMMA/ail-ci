@@ -278,6 +278,13 @@ def _apply(P, args, kwargs, result, current):
             raise lower.NotS0('checked helpers in a non-strict build')
     except lower.NotS0 as reason:
         _record(fn.name, cname, 'legacy', str(reason), ctx, extra=_legacy_walias(P, fn, ctx))
+        if _uses_module_var and getattr(P, 'GLOBAL_INT_TINT', False):
+            # The module ints are `ail_tint` statics this pass; the legacy int64 emitter cannot
+            # share them. The whole program takes the exact general path instead of mixing two
+            # representations of one variable.
+            from pyfront import Unsupported
+            raise Unsupported('%s() needs the tagged-int lowering for its module variables: %s'
+                              % (fn.name, reason))
         _tinted_sig = bool(_sig and (any(_sig[0]) or _sig[1]))
         if _needs_tint and (_tinted_sig or 'has kind (' not in str(reason)) \
                 and not fn.name.startswith(('_Ail', '_ail')) \
