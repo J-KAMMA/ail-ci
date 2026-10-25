@@ -59,6 +59,11 @@ class Eq:
         return other == self.n
 
 
+class Boom:
+    def __eq__(self, other):
+        raise RuntimeError("boom")
+
+
 def main():
     r = range(2, 20, 3)
     for v in (2, 5, 8, 11, 14, 17, 19, 20, -1, 0, True, False, 8.0, 8.5, 0.0, "8"):
@@ -99,6 +104,8 @@ def main():
     print(r.index(eqs[0]), r.count(eqs[0]))
     print(r.index(dq["v"]), r.count(dq["v"]))
     print(bq.r.index(bq.v), bq.r.count(bq.v))
+    show_index(r, Boom())
+    show_count(r, Boom())
     try:
         print(lookup(r, 9))
     except Exception as e:

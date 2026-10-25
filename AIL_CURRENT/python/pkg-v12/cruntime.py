@@ -19313,34 +19313,44 @@ static inline int ail__range_ordinal(const ail_rangeobj *r, ail_obj x, uint64_t 
     }
     return 0;
 }
-static inline int ail__range_walk_index(const ail_rangeobj *r, ail_obj x, uint64_t *ord) {
+static inline ail_st ail__range_walk_index(ail_ctx *cx, const ail_rangeobj *r, ail_obj x, uint64_t *ord, int *found) {
     uint64_t n = ail__range_count(r);
-    for (uint64_t i = 0; i < n; i++)
-        if (ail_member_eq(ail_box_int(ail__range_at(r->start, r->step, i)), x)) { *ord = i; return 1; }
-    return 0;
+    *found = 0;
+    for (uint64_t i = 0; i < n; i++) {
+        ail_obj eq; ail_st st = ail_op_eq(cx, &eq, ail_box_int(ail__range_at(r->start, r->step, i)), x);
+        if (st != AIL_OK) return st;
+        if (ail_obj_truthy(eq)) { *ord = i; *found = 1; return AIL_OK; }
+    }
+    return AIL_OK;
 }
-static inline uint64_t ail__range_walk_count(const ail_rangeobj *r, ail_obj x) {
+static inline ail_st ail__range_walk_count(ail_ctx *cx, const ail_rangeobj *r, ail_obj x, uint64_t *out) {
     uint64_t n = ail__range_count(r), count = 0;
-    for (uint64_t i = 0; i < n; i++)
-        if (ail_member_eq(ail_box_int(ail__range_at(r->start, r->step, i)), x)) count++;
-    return count;
+    for (uint64_t i = 0; i < n; i++) {
+        ail_obj eq; ail_st st = ail_op_eq(cx, &eq, ail_box_int(ail__range_at(r->start, r->step, i)), x);
+        if (st != AIL_OK) return st;
+        if (ail_obj_truthy(eq)) count++;
+    }
+    *out = count; return AIL_OK;
 }
 static inline ail_st ail_meth_range_index(ail_ctx *cx, int64_t *out, ail_obj rng, ail_obj x) {
     const ail_rangeobj *r = (ail_rangeobj *)rng.o;
-    uint64_t ord = 0; int is_int = 0;
+    uint64_t ord = 0; int is_int = 0, found;
     int numeric = x.tag == AIL_T_INT || x.tag == AIL_T_BOOL || x.tag == AIL_T_FLOAT;
-    if (ail__range_ordinal(r, x, &ord, &is_int)) {
-        /* found with integer arithmetic */
-    } else if (!numeric && ail__range_walk_index(r, x, &ord)) {
-        /* found by ==: a non-numeric value may compare equal to a range element */
-    } else if (is_int) {
-        ail_obj rs[2]; rs[0] = ail_obj_repr(cx, x); rs[1] = ail_box_none();
-        AIL_ROOT_N(cx, fr, rs, 2);
-        rs[1] = ail_str_from_cstr(cx, " is not in range");
-        ail_obj msg = ail_str_cat(cx, rs[0], rs[1]);
-        AIL_FRAME_LEAVE(cx, fr);
-        return ail_raise(cx, cx->builtin_cls[AIL_B_VALUEERROR], msg);
-    } else {
+    found = ail__range_ordinal(r, x, &ord, &is_int);
+    if (!found && !numeric) {
+        /* a non-numeric value may compare equal to an element: use == and propagate its errors */
+        ail_st st = ail__range_walk_index(cx, r, x, &ord, &found);
+        if (st != AIL_OK) return st;
+    }
+    if (!found) {
+        if (is_int) {
+            ail_obj rs[2]; rs[0] = ail_obj_repr(cx, x); rs[1] = ail_box_none();
+            AIL_ROOT_N(cx, fr, rs, 2);
+            rs[1] = ail_str_from_cstr(cx, " is not in range");
+            ail_obj msg = ail_str_cat(cx, rs[0], rs[1]);
+            AIL_FRAME_LEAVE(cx, fr);
+            return ail_raise(cx, cx->builtin_cls[AIL_B_VALUEERROR], msg);
+        }
         return ail_raise_c(cx, AIL_B_VALUEERROR, "sequence.index(x): x not in sequence");
     }
     if (ord > (uint64_t)INT64_MAX)
@@ -19353,8 +19363,10 @@ static inline ail_st ail_meth_range_count(ail_ctx *cx, int64_t *out, ail_obj rng
     uint64_t count;
     if (x.tag == AIL_T_INT || x.tag == AIL_T_BOOL || x.tag == AIL_T_FLOAT)
         count = ail__range_ordinal(r, x, &ord, &is_int) ? 1 : 0;
-    else
-        count = ail__range_walk_count(r, x);
+    else {
+        ail_st st = ail__range_walk_count(cx, r, x, &count);
+        if (st != AIL_OK) return st;
+    }
     if (count > (uint64_t)INT64_MAX)
         return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "range.count() result exceeds int64");
     *out = (int64_t)count; return AIL_OK;
