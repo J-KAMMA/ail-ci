@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-25 -- int64 constant refusal judges the whole expression (job-pre108-10251451)
+
+The pre108 front-end check refused any constant subexpression that left int64, so it broke the
+whole-expression folds added by pre113 (`2**65 - 2**65`, `(1 << 63) - 1`) and the maxsplit
+refusal that pre97 owns (`str.split(..., 10**30)` printed the generic message instead). The check
+now evaluates the outermost all-int expression exactly with Python's unbounded integers (bounded
+to 4096 bits) and refuses only when the result is outside int64; `str.split`/`rsplit` maxsplit
+arguments are left to the lowering that names the CPython OverflowError. `test_ail_pre108` and
+the rebuilt integration copies of `test_ail_pre97`, `test_ail_pre113` and
+`test_ail_typed_tuples` pass.
+
 ## 2026-10-24 -- statically known int64 constant overflow (job-pre108-10242222)
 
 The pre-existing `ttypes.py` difference used `[9223372036854775807 * 2, ...]`: CPython prints

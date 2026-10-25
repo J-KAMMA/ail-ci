@@ -94,53 +94,114 @@ def _check_int64_literals(tree):
             raise error
 
 
-_INT_BINARY = {
-    ast.Add: lambda a, b: a + b,
-    ast.Sub: lambda a, b: a - b,
-    ast.Mult: lambda a, b: a * b,
-}
+_CONST_INT_BITS = 4096
 
 
 def _constant_int(node, known):
-    """The int value of a constant expression, or None when it is not statically known.
-    Names resolve only through known module constants; a local of the same name keeps the
-    expression out of known, so a shadowed constant is never folded by mistake."""
+    """The exact int value of a constant expression, or None when it is not statically known.
+
+    Python evaluates an all-integer expression exactly, so an intermediate may leave int64 while
+    the answer fits (``2**65 - 2**65`` is 0).  The value is therefore computed with Python ints,
+    with a size bound that keeps a hostile exponent or shift from being materialised.  Names
+    resolve only through known module constants; a local of the same name keeps the expression
+    out of ``known``, so a shadowed constant is never folded by mistake."""
     if isinstance(node, ast.Constant) and type(node.value) is int:
         return node.value
     if isinstance(node, ast.Name):
         return known.get(node.id)
-    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert)):
         value = _constant_int(node.operand, known)
         if value is None:
             return None
-        return -value if isinstance(node.op, ast.USub) else value
-    if isinstance(node, ast.BinOp):
-        left = _constant_int(node.left, known)
-        if left is None:
-            return None
-        if isinstance(node.op, ast.Pow):
-            right = _constant_int(node.right, known)
-            if right is None or right < 0:
+        if isinstance(node.op, ast.USub):
+            value = -value
+        elif isinstance(node.op, ast.Invert):
+            value = ~value
+        return value if abs(value).bit_length() <= _CONST_INT_BITS else None
+    if not isinstance(node, ast.BinOp):
+        return None
+    left = _constant_int(node.left, known)
+    if left is None:
+        return None
+    right = _constant_int(node.right, known)
+    if right is None:
+        return None
+    operation = type(node.op)
+    try:
+        if operation is ast.Add:
+            value = left + right
+        elif operation is ast.Sub:
+            value = left - right
+        elif operation is ast.Mult:
+            if left and right and left.bit_length() + right.bit_length() > _CONST_INT_BITS:
                 return None
-            if abs(left) <= 1:
-                return left ** right
-            if right > 64:
-                return 1 << 64 if left > 0 else -(1 << 64)
-            return left ** right
-        operation = _INT_BINARY.get(type(node.op))
-        if operation is None:
+            value = left * right
+        elif operation is ast.FloorDiv:
+            if right == 0:
+                return None
+            value = left // right
+        elif operation is ast.Mod:
+            if right == 0:
+                return None
+            value = left % right
+        elif operation is ast.Pow:
+            if right < 0:
+                return None
+            if right == 0:
+                value = 1
+            elif left in (0, 1):
+                value = left
+            elif left == -1:
+                value = -1 if right & 1 else 1
+            elif left.bit_length() * right > _CONST_INT_BITS:
+                return None
+            else:
+                value = left ** right
+        elif operation is ast.LShift:
+            if right < 0:
+                return None
+            if left == 0:
+                value = 0
+            elif left.bit_length() + right > _CONST_INT_BITS:
+                return None
+            else:
+                value = left << right
+        elif operation is ast.RShift:
+            if right < 0:
+                return None
+            value = (0 if left >= 0 else -1) if right >= _CONST_INT_BITS else left >> right
+        elif operation is ast.BitAnd:
+            value = left & right
+        elif operation is ast.BitOr:
+            value = left | right
+        elif operation is ast.BitXor:
+            value = left ^ right
+        else:
             return None
-        right = _constant_int(node.right, known)
-        if right is None:
-            return None
-        return operation(left, right)
-    return None
+    except (ArithmeticError, ValueError):
+        return None
+    return value if abs(value).bit_length() <= _CONST_INT_BITS else None
+
+
+def _deferred_constant(node):
+    """A maxsplit argument owns its own refusal (str.split/rsplit), so the generic int64 check
+    leaves the whole argument to the lowering that knows the CPython error."""
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr in ('split', 'rsplit')):
+        return None
+    count = node.args[1] if len(node.args) >= 2 else None
+    for keyword in node.keywords:
+        if keyword.arg == 'maxsplit':
+            count = keyword.value
+    return count
 
 
 def _check_int64_constants(tree):
     """Refuse a statically known integer constant expression outside int64 by name.
     The runtime fixed-width trap stays the documented behaviour for values that only reach
-    the operation as variables, but a folded constant must not compile and then trap."""
+    the operation as variables, but a folded constant must not compile and then trap.
+    Only the outermost constant expression is judged: Python evaluates the whole expression
+    exactly, so an intermediate outside int64 is fine when the result fits (pre113)."""
     stores = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
@@ -156,11 +217,33 @@ def _check_int64_constants(tree):
         value = _constant_int(node.value, known)
         if value is not None:
             known[target.id] = value
+    parents = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[child] = parent
+    deferred = set()
     for node in ast.walk(tree):
-        if not isinstance(node, ast.BinOp):
+        count = _deferred_constant(node)
+        if count is not None:
+            deferred.update(ast.walk(count))
+    candidates = {}
+    for node in ast.walk(tree):
+        if node in deferred or not isinstance(node, (ast.BinOp, ast.UnaryOp)):
             continue
         value = _constant_int(node, known)
-        if value is not None and not -(1 << 63) <= value < 1 << 63:
+        if value is not None:
+            candidates[node] = value
+    for node, value in candidates.items():
+        parent = parents.get(node)
+        covered = False
+        while parent is not None:
+            if parent in candidates:
+                covered = True
+                break
+            parent = parents.get(parent)
+        if covered:
+            continue
+        if not -(1 << 63) <= value < 1 << 63:
             error = ValueError(f'int64 constant expression out of range: {value}')
             error.source_line = node.lineno
             error.source_column = node.col_offset
