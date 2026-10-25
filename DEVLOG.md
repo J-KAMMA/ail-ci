@@ -121,6 +121,17 @@ Python ints (with a size limit for giant intermediates), and the typed IR, legac
 unified general path and boxed emitters emit the one int64 result.  Added `test_ail_pre113.py`
 (one program, four build modes); the second listed case, a module constant exponent, is still a
 separate difference.
+## 2026-10-24 - pre114: bytes/bytearray membership type-error text
+
+`x in b`, `b.__contains__(x)` and the bytearray forms now raise CPython 3.12's
+`TypeError: a bytes-like object is required, not 'T'` for a non-index, non-bytes-like
+item (str, float, None, list, user class). Both builds used the shared substring
+helper, whose wording belongs to find/index/count/replace ("argument should be integer
+or bytes-like object"); membership now has its own conversion. Ints 0..255, bools,
+bytes and bytearray membership are unchanged. Added `test_ail_pre114.py`, which covers
+items reaching the code through an argument, a list item, an attribute and a dict
+value on both builds. Non-index start/stop bounds for bytes search remain a separate
+open difference and are not changed here.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
