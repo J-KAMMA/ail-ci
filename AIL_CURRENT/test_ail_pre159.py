@@ -6,7 +6,8 @@ value or a module constant was built and then stopped at run time with `integer 
 `__index__` returning that value reached the boxed dispatcher and printed a misleading
 `TypeError`.  Every pure integer constant expression whose value leaves int64 is now refused at
 compile time with `int64 literal out of range: ...`, on both the general path and the default
-build.  In-range constant expressions still compile and match CPython.
+build.  A composite expression assigned to a mutable local name keeps its runtime meaning.
+In-range constant expressions still compile and match CPython.
 """
 import os
 import shutil

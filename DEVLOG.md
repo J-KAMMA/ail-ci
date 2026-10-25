@@ -10,7 +10,10 @@ refused without computing it) and emits the existing `int64 literal out of range
 error on both the general path and the default build. In-range constant expressions, including
 `2 ** 62`, `(1 << 62) - 1`, `-(2 ** 62)` and `2 ** (63 - 1)`, are unchanged, and a constant
 `str.split`/`rsplit` maxsplit keeps its own `maxsplit constant does not fit in a 64-bit signed
-integer` wording. Added `AIL_CURRENT/test_ail_pre159.py` with the literal, expression, return,
+integer` wording. A composite expression assigned to a mutable local name keeps its runtime
+meaning (`a = 10**30` still traps when it runs); a unary overflow of an in-range constant keeps
+the existing `int64 constant expression out of range` wording, while one whose operand is
+already out of range reports the literal. Added `AIL_CURRENT/test_ail_pre159.py` with the literal, expression, return,
 `__index__`, argument, list-item, attribute, dict-value, alias, negative, shift, multiply and
 huge-exponent cases, plus the in-range boundary check against CPython on both builds.
 

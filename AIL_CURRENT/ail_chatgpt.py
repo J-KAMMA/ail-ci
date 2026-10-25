@@ -157,11 +157,37 @@ def _pure_constant_int(node):
     return None
 
 
+def _local_composite_assignments(tree):
+    """Value nodes of composite int expressions assigned to a local name.
+
+    A local name is a mutable variable, not a constant, so an expression assigned to it keeps
+    its runtime meaning (`a = 10**30` still traps with `integer overflow` when it runs); a module
+    constant or a direct value is folded.  A bare literal keeps the literal check everywhere."""
+    handled = set()
+
+    def visit(node, in_function):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for child in ast.iter_child_nodes(node):
+                visit(child, True)
+            return
+        if (in_function and isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.BinOp)):
+            handled.add(id(node.value))
+        for child in ast.iter_child_nodes(node):
+            visit(child, in_function)
+
+    visit(tree, False)
+    return handled
+
+
 def _check_int64_literals(tree):
     maxsplit = _maxsplit_constant_nodes(tree)
+    local_assignments = _local_composite_assignments(tree)
     nodes = [tree]
     while nodes:
         node = nodes.pop()
+        if id(node) in local_assignments:
+            continue
         if id(node) in maxsplit and not (isinstance(node, ast.Constant) and type(node.value) is int):
             continue
         text = None
@@ -282,7 +308,10 @@ def _check_int64_unary_constants(tree):
             continue
         if id(node) in maxsplit:
             continue
+        operand = _constant_int(node.operand, known)
         value = _constant_int(node, known)
+        if operand is not None and not -(1 << 63) <= operand < 1 << 63:
+            continue
         if value is not None and not -(1 << 63) <= value < 1 << 63:
             error = ValueError(f'int64 constant expression out of range: {value}')
             error.source_line = node.lineno
@@ -497,8 +526,8 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 if local_imports:
                     _check_importable(tree)
             if not declarations_only:
-                _check_int64_literals(tree)
                 _check_int64_unary_constants(tree)
+                _check_int64_literals(tree)
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)
             if source_map is not None:

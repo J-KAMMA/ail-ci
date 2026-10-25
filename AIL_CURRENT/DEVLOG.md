@@ -9,8 +9,11 @@ printed a misleading sequence `TypeError`. `_check_int64_literals` now evaluates
 constant expressions (with guards for huge exponents and shifts) and refuses an out-of-range value
 at compile time with `int64 literal out of range`, on both builds. In-range expressions such as
 `2 ** 62`, `(1 << 62) - 1`, `-(2 ** 62)` and `2 ** (63 - 1)` are unchanged, and constant
-`split`/`rsplit` maxsplit keeps its own wording. `test_ail_pre159.py` holds the literal, expression,
-`__index__` and value-path cases and the in-range CPython check.
+`split`/`rsplit` maxsplit keeps its own wording. A composite expression assigned to a mutable
+local name keeps its runtime meaning (`a = 10**30` still traps when it runs); a unary overflow of
+an in-range constant keeps the existing `int64 constant expression out of range` wording, while
+one whose operand is already out of range reports the literal. `test_ail_pre159.py` holds the
+literal, expression, `__index__` and value-path cases and the in-range CPython check.
 
 ## 2026-10-25 -- pre186: enumerate counter past INT64_MAX stops by name (job-pre186-10251543)
 
