@@ -127,6 +127,20 @@ def _constant_int(node, known):
             if right > 64:
                 return 1 << 64 if left > 0 else -(1 << 64)
             return left ** right
+        if isinstance(node.op, ast.LShift):
+            right = _constant_int(node.right, known)
+            if right is None or right < 0:
+                return None
+            if left == 0:
+                return 0
+            if right > 64:
+                return 1 << 64 if left > 0 else -(1 << 64)
+            return left << right
+        if isinstance(node.op, ast.RShift):
+            right = _constant_int(node.right, known)
+            if right is None or right < 0:
+                return None
+            return left >> right
         operation = _INT_BINARY.get(type(node.op))
         if operation is None:
             return None
@@ -190,6 +204,93 @@ def _check_int64_unary_constants(tree):
             error.source_line = node.lineno
             error.source_column = node.col_offset
             raise error
+
+
+def _check_int64_constant_positions(tree):
+    """Refuse an out-of-int64 integer constant written in a module, class or default position.
+    A module constant, a class attribute or a default is evaluated when the module is built, so
+    `X = 1 << 64` leaves the fixed-width run with `integer overflow` while CPython keeps a bignum.
+    Only the outermost constant expression of each such value is checked, so an expression whose
+    intermediate leaves int64 but whose result fits (for example `(1 << 63) - 1`) is unchanged."""
+    maxsplit = _maxsplit_constant_nodes(tree)
+    stores = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            stores[node.id] = stores.get(node.id, 0) + 1
+    parameters = {node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)}
+    known = {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Name) or stores.get(target.id) != 1 or target.id in parameters:
+            continue
+        value = _constant_int(node.value, known)
+        if value is not None:
+            known[target.id] = value
+
+    def roots(node):
+        if isinstance(node, (ast.BinOp, ast.UnaryOp)):
+            yield node
+            return
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            for item in node.elts:
+                yield from roots(item)
+            return
+        if isinstance(node, ast.Dict):
+            for key, value in zip(node.keys, node.values):
+                if key is not None:
+                    yield from roots(key)
+                yield from roots(value)
+            return
+        if isinstance(node, ast.IfExp):
+            yield from roots(node.body)
+            yield from roots(node.orelse)
+            return
+        if isinstance(node, ast.Call):
+            for item in node.args:
+                yield from roots(item)
+            for keyword in node.keywords:
+                yield from roots(keyword.value)
+            return
+        if isinstance(node, ast.Starred):
+            yield from roots(node.value)
+
+    def scope(body):
+        for stmt in body:
+            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                continue
+            if isinstance(stmt, ast.ClassDef):
+                yield from scope(stmt.body)
+                continue
+            if isinstance(stmt, (ast.Assign, ast.AnnAssign)):
+                if stmt.value is not None:
+                    yield stmt.value
+            elif isinstance(stmt, ast.Expr):
+                yield stmt.value
+            for field in ('body', 'orelse', 'finalbody'):
+                block = getattr(stmt, field, None)
+                if isinstance(block, list) and block and all(isinstance(item, ast.stmt) for item in block):
+                    yield from scope(block)
+            if isinstance(stmt, ast.Try):
+                for handler in stmt.handlers:
+                    yield from scope(handler.body)
+
+    values = list(scope(tree.body))
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            values.extend(node.args.defaults)
+            values.extend(item for item in node.args.kw_defaults if item is not None)
+    for value in values:
+        for node in roots(value):
+            if id(node) in maxsplit:
+                continue
+            number = _constant_int(node, known)
+            if number is not None and not -(1 << 63) <= number < 1 << 63:
+                error = ValueError(f'int64 constant expression out of range: {number}')
+                error.source_line = node.lineno
+                error.source_column = node.col_offset
+                raise error
 
 
 def _returns_on_every_path(statements):
@@ -400,6 +501,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                     _check_importable(tree)
             if not declarations_only:
                 _check_int64_literals(tree)
+                _check_int64_constant_positions(tree)
                 _check_int64_unary_constants(tree)
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)

@@ -1,3 +1,22 @@
+## 2026-10-25 - pre191: out-of-int64 constants in module/class/default positions (job-pre191-10251807)
+
+The first still-differing item from the pre184 review notes was the out-of-int64 constant in a
+module, class or default position. On this tree the unreachable examples already printed `ok`,
+but the reachable forms still compiled and then stopped at run time with `integer overflow`:
+`X = 1 << 64`, `class C: X = 1 << 64`, `def f(x=1 << 64)` and `def f(x=2**63)`, where CPython
+keeps a bignum. A new front-end pass evaluates only the outermost constant expression of each
+module/class value and each function default (including tuple/list/dict values, defaults wrapped
+by the mutable-default surface, and the bodies of module/class `if` blocks). An out-of-int64
+result is refused on both builds as `int64 constant expression out of range: <value>`, matching
+the pre172 wording. Because only whole roots are checked, expressions whose intermediate leaves
+int64 but whose answer fits still work (`(1 << 63) - 1`, `2 ** 65 - 2 ** 65`, `0 << 1000`,
+`(1 << 64) >> 64`); function-body constants keep the runtime trap, so pre160's `10**30` in an
+`__index__` still stops with `integer overflow`. The general path's pre-existing refusal of
+`N = -9223372036854775807 - 1` ("not in the subset: an integer literal outside int64 range")
+is unchanged; the default build matches CPython for it. Added `test_ail_pre191.py` and registered
+it in `ail_check.MODULES`. Probes r1-r15 in `/tmp/probes` cover the boundaries and both builds;
+r2's general build keeps the named refusal above.
+
 ## 2026-10-25 - int(s, base) message GC rooting (job-pre180-10251520)
 
 Review follow-up. The rewritten general-path `ail__int_badlit` built the message head string,
