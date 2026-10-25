@@ -825,6 +825,10 @@ def _ail_int2(x, base):
         s = _ail_bs(x)
         text = ("b" + _ail_b_repr(s)) if isinstance(x, bytearray) else repr(x)
         text = text[:200]
+        if not isinstance(base, int):
+            int("0", base)
+        elif base != 0 and (base < 2 or base > 36):
+            raise ValueError("int() base must be >= 2 and <= 36, or 0")
         if not _ail_b_numsafe(s):
             raise ValueError("invalid literal for int() with base " + str(base) + ": " + text)
         try:
