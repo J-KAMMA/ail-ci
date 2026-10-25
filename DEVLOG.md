@@ -70,6 +70,24 @@ and nested powers, index expressions and a huge literal on both `cmp.sh` builds;
 refused by name. Added `test_ail_pre238.py` (2 tests, both builds) and registered it in
 `ail_check.MODULES` and `ci_shards.json`. Final-state tests: test_ail_pre238, test_ail_safetynet,
 test_ail_files and test_ail_corpus_findings3 pass.
+## 2026-10-25 - bool constant shifts fold like ints (job-pre241-10260355)
+
+The pre229 review recorded that a bool shift was still compiled with the fixed-width runtime:
+`True << 64`, `True << 4096`, `(True << 100000) >> 100000`, `if False: print(True << 64)` and the
+target `(True << 64) >> 64` stopped with `integer overflow` on both builds, where CPython evaluates
+the bool as an int subclass and prints the bignum (or 1 for the target).  The general constant
+folders only accepted `type(x) is int`, so `True` and `False` never reached exact folding.
+
+Bool constants now fold exactly like int constants in `pyfunc` (the general shift/arithmetic
+folder and the maxsplit folder).  `(True << 64) >> 64`, `(True << 100000) >> 100000`, `(True << 63)
+>> 63` and `(False | True) << 62` print what CPython prints; a value outside int64 (`True << 64`,
+`True << 4096`, `True << 63`, a bool maxsplit) is refused by name with the existing int-constant
+wording.  `&`, `|`, `^` of two bools still returns a bool and is left to the runtime, so
+`True & False` keeps printing `False`, and a negative shift still raises `ValueError`.  Probes in
+`/tmp/probes/pre241/` cover the shift widths 0/1/62/63/64/4096/100000, false operands, negative
+counts, bool arithmetic and bitwise, dead code, arguments, list items, attributes, dict values and
+module constants on both builds; all match CPython or are refused by name.  Added
+`test_ail_pre241.py` and registered it in `ail_check.MODULES`.
 
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
