@@ -460,6 +460,7 @@ def _ail_b_cmp_other(other, op, me):
 
 
 def _ail_b_int(s, text):
+    text = text[:200]
     if not _ail_b_numsafe(s):
         raise ValueError("invalid literal for int() with base 10: " + text)
     try:
@@ -708,18 +709,18 @@ class bytearray:
         return len(self._a) > 0
 
     def __repr__(self):
-        return "bytearray(b" + _ail_b_repr(_ail_b_from_ints(self._a)) + ")"
+        return "bytearray(b" + _ail_ba_repr(_ail_b_from_ints(self._a)) + ")"
 
     def __str__(self):
-        return "bytearray(b" + _ail_b_repr(_ail_b_from_ints(self._a)) + ")"
+        return "bytearray(b" + _ail_ba_repr(_ail_b_from_ints(self._a)) + ")"
 
     def __int__(self):
         s = _ail_b_from_ints(self._a)
-        return _ail_b_int(s, "bytearray(b" + _ail_b_repr(s) + ")")
+        return _ail_b_int(s, "b" + _ail_b_repr(s))
 
     def __float__(self):
         s = _ail_b_from_ints(self._a)
-        return _ail_b_float(s, "bytearray(b" + _ail_b_repr(s) + ")")
+        return _ail_b_float(s, "bytearray(b" + _ail_ba_repr(s) + ")")
 
     def append(self, x):
         if not isinstance(x, int):
@@ -808,7 +809,7 @@ def _ail_str_decode(x, encoding="utf-8", errors="strict"):
 def _ail_int2(x, base):
     if isinstance(x, bytes) or isinstance(x, bytearray):
         s = _ail_bs(x)
-        text = repr(x)
+        text = repr(x)[:200]
         if not _ail_b_numsafe(s):
             raise ValueError("invalid literal for int() with base " + str(base) + ": " + text)
         try:

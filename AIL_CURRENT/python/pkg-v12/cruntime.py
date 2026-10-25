@@ -650,6 +650,9 @@ static void ail_raise_named(int code) {
     if (ail_exc_top >= 0) { ail_exc_unwind(); ail_exc_throw(); }
     ail_exception_uncaught(ail_exc_value);
 }
+static void ail_raise_cstr(int code, const char *msg) {
+    ail_raise_value(ail_exception_new(code, (const uint8_t *)msg, (int64_t)strlen(msg), 1));
+}
 static ail_exception *ail_exception_current(void) {
     /* Mapped legacy traps transport a code alone; materialize their empty payload on demand. */
     if (!ail_exc_value && ail_exc_code)
@@ -735,6 +738,14 @@ static int64_t ail__str_len_points_slow(ail_str s) {
 }
 static inline int64_t ail_str_len_points(ail_str s) {
     return s.bytes ? s.n : ail__str_len_points_slow(s);
+}
+static inline ail_str ail__str_points_head(ail_str s, int64_t cap) {
+    if (cap < 0) cap = 0;
+    if (s.n <= cap) return s;
+    int64_t i = 0, k = 0;
+    while (i < s.n && k < cap) { i = ail_str_next_unit(s, i); k++; }
+    s.n = i;
+    return s;
 }
 /* UTF-8 of scalar value `c` (never a surrogate) into `q`; returns its length. */
 static inline int ail_utf8_put(uint8_t *q, uint32_t c) {
@@ -4441,7 +4452,7 @@ static int64_t ail_numfield_slice_bound(int64_t n, int64_t x, int negative) {
 static int64_t ail_numfield_slice_plan(int64_t n, int64_t lo, int haslo,
                                       int64_t hi, int hashi, int64_t step,
                                       int64_t *start, uint64_t *stride) {
-    if (!step) ail_raise_named(AIL_EXC_VALUE);
+    if (!step) ail_raise_cstr(AIL_EXC_VALUE, "slice step cannot be zero");
     int negative = step < 0;
     int64_t a = haslo ? ail_numfield_slice_bound(n, lo, negative) : (negative ? n - 1 : 0);
     int64_t b = hashi ? ail_numfield_slice_bound(n, hi, negative) : (negative ? -1 : n);
@@ -7702,7 +7713,7 @@ static void ail_blist_extend(ail_blist *B, const ail_blist *other) {
 }
 static ail_blist *ail_blist_slice(const ail_blist *B, int64_t lo, int64_t hi, int64_t step) {
     ail_blist_elements(B);
-    if (!step) ail_raise_named(AIL_EXC_VALUE);
+    if (!step) ail_raise_cstr(AIL_EXC_VALUE, "slice step cannot be zero");
     int64_t n = B->n;
     if (lo < 0) { lo += n; if (lo < 0) lo = step > 0 ? 0 : -1; }
     else if (lo >= n) lo = step > 0 ? n : n - 1;
@@ -9727,11 +9738,12 @@ static inline ail_slice_idx ail__slice_resolve(int64_t n, int has_lo, int64_t lo
     if (step > 0) {
         if (!has_lo) start = 0; else { start = lo; if (start < 0) { start += n; if (start < 0) start = 0; } else if (start > n) start = n; }
         if (!has_hi) stop = n; else { stop = hi; if (stop < 0) { stop += n; if (stop < 0) stop = 0; } else if (stop > n) stop = n; }
-        len = (start < stop) ? 1 + (stop - start - 1) / step : 0;
+        len = (start < stop) ? 1 + (int64_t)(((uint64_t)(stop - start) - 1) / (uint64_t)step) : 0;
     } else {
         if (!has_lo) start = n - 1; else { start = lo; if (start < 0) { start += n; if (start < 0) start = -1; } else if (start >= n) start = n - 1; }
         if (!has_hi) stop = -1; else { stop = hi; if (stop < 0) { stop += n; if (stop < 0) stop = -1; } else if (stop >= n) stop = n - 1; }
-        len = (start > stop) ? 1 + (start - stop - 1) / (-step) : 0;
+        /* unsigned step magnitude: -INT64_MIN is not representable */
+        len = (start > stop) ? 1 + (int64_t)(((uint64_t)(start - stop) - 1) / ((uint64_t)0 - (uint64_t)step)) : 0;
     }
     ail_slice_idx r; r.start = start; r.stop = stop; r.step = step; r.len = len; return r;
 }
@@ -9740,7 +9752,10 @@ static inline ail_str ail_str_getslice(ail_str s, int has_lo, int64_t lo, int ha
     ail_slice_idx sl = ail__slice_resolve(s.n, has_lo, lo, has_hi, hi, has_step, step);
     uint16_t *q = ail_str_alloc_buf(sl.len);
     int64_t idx = sl.start;
-    for (int64_t k = 0; k < sl.len; k++, idx += sl.step) q[k] = ail_chr(s, idx);
+    for (int64_t k = 0; k < sl.len; k++) {
+        q[k] = ail_chr(s, idx);
+        if (k + 1 < sl.len) idx += sl.step;
+    }
     ail_str r; r.bytes = 0; r.p = q;  r.n = sl.len; return r;
 }
 
@@ -9788,7 +9803,10 @@ static inline ail_obj ail_vec_getslice(ail_obj c, int has_lo, int64_t lo, int ha
     ail_slice_idx sl = ail__slice_resolve(v->n, has_lo, lo, has_hi, hi, has_step, step);
     ail_vec *nv = ail_vec_new();
     int64_t idx = sl.start;
-    for (int64_t k = 0; k < sl.len; k++, idx += sl.step) ail_vec_push(nv, v->p[idx]);
+    for (int64_t k = 0; k < sl.len; k++) {
+        ail_vec_push(nv, v->p[idx]);
+        if (k + 1 < sl.len) idx += sl.step;
+    }
     ail_obj r; r.tag = c.tag; r.v = nv; return r;
 }
 
@@ -11106,6 +11124,7 @@ typedef struct { ail_gcobj hdr; ail_obj *p; int64_t n, cap;
 } ail_vecobj;
 
 static inline ail_st ail_raise_c(ail_ctx *cx, int builtin_id, const char *msg);
+static inline ail_st ail_raise(ail_ctx *cx, ail_obj cls, ail_obj msg);
 static inline ail_st ail_hit_limit(ail_ctx *cx, const char *name, const char *detail);
 static inline ail_obj ail_obj_repr(ail_ctx *cx, ail_obj x); /* forward decl: the dict
    section builds KeyError messages with repr(key) for ANY key tag; defined in the repr section */
@@ -12976,16 +12995,20 @@ static inline ail_st ail_str_getslice(ail_ctx *cx, ail_obj *out, ail_obj sobj,
     if (step > 0) {
         if (!has_lo) start = 0; else { start = lo; if (start < 0) { start += s.n; if (start < 0) start = 0; } else if (start > s.n) start = s.n; }
         if (!has_hi) stop = s.n; else { stop = hi; if (stop < 0) { stop += s.n; if (stop < 0) stop = 0; } else if (stop > s.n) stop = s.n; }
-        len = (start < stop) ? 1 + (stop - start - 1) / step : 0;
+        len = (start < stop) ? 1 + (int64_t)(((uint64_t)(stop - start) - 1) / (uint64_t)step) : 0;
     } else {
         if (!has_lo) start = s.n - 1; else { start = lo; if (start < 0) { start += s.n; if (start < 0) start = -1; } else if (start >= s.n) start = s.n - 1; }
         if (!has_hi) stop = -1; else { stop = hi; if (stop < 0) { stop += s.n; if (stop < 0) stop = -1; } else if (stop >= s.n) stop = s.n - 1; }
-        len = (start > stop) ? 1 + (start - stop - 1) / (-step) : 0;
+        /* unsigned step magnitude: -INT64_MIN is not representable */
+        len = (start > stop) ? 1 + (int64_t)(((uint64_t)(start - stop) - 1) / ((uint64_t)0 - (uint64_t)step)) : 0;
     }
     if (step == 1) { *out = ail_str_view(sobj.sv.backing, sobj.sv.off + start, len); return AIL_OK; }
     ail_strbuild bu = ail_str_buf1(cx, len, sobj);
     int64_t idx = start;
-    for (int64_t k = 0; k < len; k++, idx += step) bu.buf[k] = ail_chr(s, idx);
+    for (int64_t k = 0; k < len; k++) {
+        bu.buf[k] = ail_chr(s, idx);
+        if (k + 1 < len) idx += step; /* no increment past the last element (can overflow) */
+    }
     *out = ail_str_buf_done(bu, len);
     return AIL_OK;
 }
@@ -13761,6 +13784,14 @@ static inline ail_obj ail_str_repr(ail_ctx *cx, ail_obj sobj) {
     return ail_str_buf_done(bu, o);
 }
 
+/* repr() truncated to `cap` code units: CPython builds int() errors with %.200R */
+static inline ail_obj ail__repr_limited(ail_ctx *cx, ail_obj sobj, int64_t cap) {
+    ail_obj r = ail_str_repr(cx, sobj);
+    ail_str rs = ail_view_to_str(r);
+    if (rs.n <= cap) return r;
+    return ail_str_view(r.sv.backing, r.sv.off, cap);
+}
+
 /*@NUMPARSE@*/
 /* The ASCII text int()/float() parse for a str (see NUMPARSE): the buffer is `stack` or a malloc'd block.
    A str is UTF-16 here, so a surrogate pair is one code point (the mathematical digits are Nd). */
@@ -13803,22 +13834,26 @@ static inline ail_st ail_str_to_int(ail_ctx *cx, int64_t *out, ail_obj sobj) {
     return AIL_OK;
 }
 
+/* Raise a builtin exception whose message is an ASCII head plus an ail_str tail (usually
+   repr() of the offending argument). The tail stays in the runtime's UTF-16 units; passing
+   its UTF-8 bytes through ail_raise_c would double-encode every non-ASCII code point. */
+static inline ail_st ail__raise_head_str(ail_ctx *cx, int builtin_id, const char *head, ail_obj tail) {
+    ail_str ts = ail_view_to_str(tail);
+    int64_t hn = (int64_t)strlen(head);
+    ail_strbuild bu = ail_str_buf1(cx, hn + ts.n, tail);
+    for (int64_t i = 0; i < hn; i++) bu.buf[i] = (unsigned char)head[i];
+    if (ts.n) ail_str_put(bu.buf + hn, ts);
+    return ail_raise(cx, cx->builtin_cls[builtin_id], ail_str_buf_done(bu, hn + ts.n));
+}
 /* int(x, base) -- base 0 detects a 0x/0o/0b prefix (else 10); an explicit base may
    also consume its own prefix (int('0xff', 16) == 255). '_' between digits, same
    int64 overflow bound and whitespace trim as ail_str_to_int. */
 static inline ail_st ail__int_badlit(ail_ctx *cx, ail_obj sobj, int64_t base) {
-    ail_obj r = ail_str_repr(cx, sobj);
-    ail_str rs = ail_view_to_str(r);
+    ail_obj r = ail__repr_limited(cx, sobj, 200);
     char head[72];
     int hl = snprintf(head, sizeof head, "invalid literal for int() with base %lld: ", (long long)base);
     if (hl < 0) hl = 0;
-    char *msg = (char *)ail_xmalloc((size_t)hl + (size_t)rs.n + 1);
-    memcpy(msg, head, (size_t)hl);
-    for (int64_t k = 0; k < rs.n; k++) msg[hl + k] = (char)ail_chr(rs, k);
-    msg[hl + rs.n] = 0;
-    ail_st st = ail_raise_c(cx, AIL_B_VALUEERROR, msg);
-    free(msg);
-    return st;
+    return ail__raise_head_str(cx, AIL_B_VALUEERROR, head, r);
 }
 static inline ail_st ail_str_to_int_base(ail_ctx *cx, int64_t *out, ail_obj sobj, int64_t base) {
     if (base != 0 && (base < 2 || base > 36))
@@ -14952,11 +14987,12 @@ static inline ail_st ail__slice_resolve(ail_ctx *cx, ail_slice_idx *out, int64_t
     if (step > 0) {
         if (!has_lo) start = 0; else { start = lo; if (start < 0) { start += n; if (start < 0) start = 0; } else if (start > n) start = n; }
         if (!has_hi) stop = n; else { stop = hi; if (stop < 0) { stop += n; if (stop < 0) stop = 0; } else if (stop > n) stop = n; }
-        len = (start < stop) ? 1 + (stop - start - 1) / step : 0;
+        len = (start < stop) ? 1 + (int64_t)(((uint64_t)(stop - start) - 1) / (uint64_t)step) : 0;
     } else {
         if (!has_lo) start = n - 1; else { start = lo; if (start < 0) { start += n; if (start < 0) start = -1; } else if (start >= n) start = n - 1; }
         if (!has_hi) stop = -1; else { stop = hi; if (stop < 0) { stop += n; if (stop < 0) stop = -1; } else if (stop >= n) stop = n - 1; }
-        len = (start > stop) ? 1 + (start - stop - 1) / (-step) : 0;
+        /* unsigned step magnitude: -INT64_MIN is not representable */
+        len = (start > stop) ? 1 + (int64_t)(((uint64_t)(start - stop) - 1) / ((uint64_t)0 - (uint64_t)step)) : 0;
     }
     out->start = start; out->stop = stop; out->step = step; out->len = len;
     return AIL_OK;
@@ -14993,7 +15029,10 @@ static inline ail_st ail_vec_getslice(ail_ctx *cx, ail_obj *out, ail_obj c, int 
     ail_vecobj *nv = ail_vec_new(cx);
     ail_vec_reserve(cx, nv, sl.len);
     int64_t idx = sl.start;
-    for (int64_t k = 0; k < sl.len; k++, idx += sl.step) nv->p[nv->n++] = v->p[idx];
+    for (int64_t k = 0; k < sl.len; k++) {
+        nv->p[nv->n++] = v->p[idx];
+        if (k + 1 < sl.len) idx += sl.step;
+    }
     ail_obj r; r.tag = c.tag; r.o = (ail_gcobj *)nv; *out = r; return AIL_OK;
 }
 static inline void ail_list_append(ail_ctx *cx, ail_obj lst, ail_obj x) {
@@ -17460,13 +17499,10 @@ static inline ail_st ail_bi_int(ail_ctx *cx, ail_obj *out, ail_obj x, int has_ba
         digits_seen++;
     }
     if (bad || digits_seen == 0) {
-        ail_obj rep = ail_str_repr(cx, x);
-        ail_str rs = ail_view_to_str(rep);
-        char valbuf[220]; int64_t rn = rs.n < 200 ? rs.n : 200;
-        for (int64_t k = 0; k < rn; k++) valbuf[k] = (char)ail_chr(rs, k);
-        valbuf[rn] = 0;
-        char buf[320]; snprintf(buf, sizeof buf, "invalid literal for int() with base %lld: %s", (long long)b, valbuf);
-        return ail_raise_c(cx, AIL_B_VALUEERROR, buf);
+        ail_obj rep = ail__repr_limited(cx, x, 200);
+        char head[96]; int hl = snprintf(head, sizeof head, "invalid literal for int() with base %lld: ", (long long)b);
+        if (hl < 0) hl = 0;
+        return ail__raise_head_str(cx, AIL_B_VALUEERROR, head, rep);
     }
     *out = ail_box_int(m == (uint64_t)INT64_MAX + 1u ? INT64_MIN : neg ? -(int64_t)m : (int64_t)m);
     return AIL_OK;
@@ -17513,12 +17549,7 @@ static inline ail_st ail_bi_float(ail_ctx *cx, ail_obj *out, ail_obj x) {
     }
     if (ok) { *out = ail_box_float(cx, v); return AIL_OK; }
     ail_obj rep = ail_str_repr(cx, x);
-    ail_str rs = ail_view_to_str(rep);
-    char valbuf[220]; int64_t rn = rs.n < 200 ? rs.n : 200;
-    for (int64_t k = 0; k < rn; k++) valbuf[k] = (char)ail_chr(rs, k);
-    valbuf[rn] = 0;
-    char buf[280]; snprintf(buf, sizeof buf, "could not convert string to float: %s", valbuf);
-    return ail_raise_c(cx, AIL_B_VALUEERROR, buf);
+    return ail__raise_head_str(cx, AIL_B_VALUEERROR, "could not convert string to float: ", rep);
 }
 
 /* B020 (str), B021 (repr), B022 (bool): re-exported as-is -- ail_obj_str / ail_obj_repr /
@@ -25063,7 +25094,7 @@ static ail_bytearray *ail_bytearray_slice(const ail_bytearray *B,
     if ((has_lo != 0 && has_lo != 1) || (has_hi != 0 && has_hi != 1) ||
             (has_step != 0 && has_step != 1)) ail_die("invalid bytearray slice flags");
     if (!has_step) step = 1;
-    if (!step) ail_raise_named(AIL_EXC_VALUE);
+    if (!step) ail_raise_cstr(AIL_EXC_VALUE, "slice step cannot be zero");
     int negative = step < 0;
     int64_t start = has_lo ? ail_bytearray_bound(B->n, lo, negative) : (negative ? B->n - 1 : 0);
     int64_t stop = has_hi ? ail_bytearray_bound(B->n, hi, negative) : (negative ? -1 : B->n);
@@ -26582,7 +26613,7 @@ static int64_t ail_hlist_ELEMENT_bound(int64_t value, int64_t n, int64_t step) {
 static void ail_hlist_ELEMENT_slice(ail_hlist_ELEMENT *v, ail_hlist_ELEMENT *source,
         int has_lo, int64_t lo, int has_hi, int64_t hi, int64_t step) {
     int64_t n = ail_hlist_ELEMENT_len(source);
-    if (!step) ail_raise_named(AIL_EXC_VALUE);
+    if (!step) ail_raise_cstr(AIL_EXC_VALUE, "slice step cannot be zero");
     lo = has_lo ? ail_hlist_ELEMENT_bound(lo, n, step) : step < 0 ? n - 1 : 0;
     hi = has_hi ? ail_hlist_ELEMENT_bound(hi, n, step) : step < 0 ? -1 : n;
     uint64_t stride = step < 0 ? UINT64_C(0) - (uint64_t)step : (uint64_t)step;
@@ -27068,7 +27099,8 @@ static void ail__int_base_fail(ail_str s, int64_t base) {
     if (!msg) ail_die("out of memory");
     memcpy(msg, head, (size_t)hl);
     ail__repr_str_run(s, msg + hl, quote);
-    ail_exception *value = ail_exception_new(AIL_EXC_VALUE, msg, hl + rn, 0);
+    ail_str shown = ail__str_points_head((ail_str){msg + hl, rn, 0}, 200);
+    ail_exception *value = ail_exception_new(AIL_EXC_VALUE, msg, hl + shown.n, 0);
     free(msg);
     ail_raise_value_adopt(value);
 }

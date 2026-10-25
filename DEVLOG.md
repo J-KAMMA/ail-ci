@@ -1,3 +1,20 @@
+## 2026-10-25 - memsafe2: hostile stdin through parsing and text (job-memsafe2-10251519)
+
+A seeded mutation fuzzer (`tools/input_fuzz.py`) fed empty, 1 MB, NUL, invalid-UTF-8, non-ASCII-digit and
+extreme-number inputs to four programs (numbers, text, binary, slices) built with ASan+UBSan on the general
+and default builds.  The first sweep found: signed-int64 overflow in slice length/increment at the int64
+boundary (UBSan, wrong length, or hang) and `None` bounds held in variables/lists/attributes/dict values
+read as 0; `int()`/`float()` error text mangled every non-ASCII unit (the low byte was copied) and ignored
+`%.200R`; `format()` treated a non-ASCII (or control) type character as a `char` (wrong unknown-code/grouping
+text and a ValueError instead of TypeError for None/list specs); `%`-format printed a non-ASCII/control conversion
+character raw instead of `?`; bytearray's repr quote choice and `int(bytearray())` message differed.  All
+are fixed in `safetyrt.py`, `cruntime.py`, `exctext.py`, `prelude_bytes.py`, `pyboxed2.py` and `pyboxed.py`.
+Two known int64/16-bit-unit limits are recorded in DIFFERENCES (a valid non-BMP UTF-8 decode, and an int
+beyond int64).  `test_ail_hostile_input.py` holds the programs, the regression inputs and a seeded fuzz run.
+Probes in `/tmp/probes` (`p_slice_dyn`, `p_slice_dyn2`, `p_slice_none`, `p_repr`, `p_fmt`, `p_convmsg`,
+`p_int2`, plus the gen_* fuzz corpus) match CPython with sanitizers on both builds; explicit `None`
+slice constants are refused by name on the typed path, so the default build falls back to the general path.
+
 ## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
 
 The first still-differing item from the task's list was the encoding-name normalization: `b"abc".decode("utf\t8")`,
