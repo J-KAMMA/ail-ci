@@ -533,6 +533,24 @@ The two notes recorded by the pre21 reviewer no longer differ on this tree: `too
 --check` is clean (both fuzz modules and this one are mapped), and the float-`%` area that job
 touched matches CPython on both builds. `perf_event_paranoid` is 4 here, so instruction counts
 remain unmeasurable.
+## 2026-10-24 - chr() non-BMP refusal (job-pre90-10242040)
+
+The first difference from the reviewer's pre66 note that still reproduces is the general path's 16-bit v2
+string unit. `chr(0x10000)`, `chr(0x1F600)` and `chr(0x10FFFF)` built and then died with
+`AIL internal error: chr() non-BMP code point requires 32-bit strings`, while the same text as a string
+literal was already refused by name at compile time. `chr(0xD800)`/`chr(0xDFFF)` similarly died with the
+surrogate message. Constant surrogate and non-BMP `chr()` calls are now refused by name by both the
+general emitter (`pyboxed2._b_chr`) and the typed emitter (`pyfunc`), which matches the existing literal
+refusal; the runtime store now uses the host unit width (`sizeof(data[0])`) instead of an unconditional
+16-bit cast, so the wide headers can store non-BMP values. BMP values through 0xFFFF, bool, range and
+type errors are unchanged and compared with CPython on both builds in `test_ail_pre90.py`.
+
+The second reviewer item, `len(str)` being O(n), no longer reproduces: 20000 `len()` calls on a
+4000-character ASCII string took 0.00 s on both the forced-general and default builds, so nothing was
+changed for it. The wide builds (`AIL_V2_WIDE_EMBED` / `AIL_V2_INCLUDE_ABS`) still cannot be built in
+this export (their `out/boxed_rt/v2` headers and fold script are absent), so the width-generic store is
+unverified in those modes; a run-time non-BMP value is still an open 16-bit limitation
+(`DIFFERENCES` C?-job-pre90-10242040-2).
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
