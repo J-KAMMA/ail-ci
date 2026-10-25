@@ -1,3 +1,102 @@
+## 2026-10-25 - int(s, base) message GC rooting (job-pre180-10251520)
+
+Review follow-up. The rewritten general-path `ail__int_badlit` built the message head string,
+called `ail_str_repr` (which allocates), and only then rooted the parts array; with the normal
+GC threshold the fresh head survived, but under `-DAIL_GC_STRESS` + ASan it was freed before
+use. All three slots are now zeroed and registered as a frame before the first allocation, and
+the repr view is cut into one of the rooted slots. The ASan GC-stress probe
+(`int("\u2469", 16)`, `int("1_\u2469", 16)`, `int("", 16)`) now prints the three messages and
+exits 0; the normal-build message, cut and route probes still match CPython.
+
+## 2026-10-25 - int(s, base) error message (job-pre180-10251520)
+
+The first still-differing item from the fuzz58 review was the `int(s, base)` invalid-literal
+message. `int("\u2469", 10)` printed `invalid literal for int() with base 10: 'i'` (the low
+byte of U+2469) on both builds, where CPython prints `'\u2469'`; long literals also lacked
+CPython's 200-character repr cut (`%.200R`). The live general-path helper copied each UTF-16
+unit of `repr(s)` into a `char`, so it now composes the message from the repr string itself
+and views only its first 200 code points. The typed path's `ail__int_base_fail` already kept
+the full characters but printed the whole repr, so it now applies the same 200-code-point
+cut. Valid Unicode decimal digits and the existing quote/escape handling are unchanged.
+Probes in `/tmp/probes` covered BMP printable characters in the argument, a list item, an
+attribute and a dict value, bases 0/2/10/16/36, prefix/underscore/quote/control cases, short
+and 300-character literals, and the typed `str`/`int` path; all match CPython on both
+`cmp.sh` builds. `test_ail_pre180.py` keeps the general and typed cases.
+## 2026-10-25 - bytes padding names the fillchar type (job-pre182-10251541)
+
+The fuzz51 review item was documentation-only (the `None` fillchar is already fixed),
+but the same `_ail_b_fill` guard still differed for every other non-bytes fillchar:
+`b"abc".ljust(5, "x")`, `b"abc".rjust(5, 1)` and a user-class value raised the generic
+`a bytes-like object is required, not '<type>'` because `_ail_bs` converted before the
+method-specific check. CPython says `ljust() argument 2 must be a byte string of length
+1, not str` (and likewise for rjust/center, with the value's type name). The guard now
+checks bytes/bytearray membership first; length errors on a bytes/bytearray fillchar
+still name bytes/bytearray, and `None` keeps fuzz51's `not None`. `test_ail_pre182.py`
+covers direct values, arguments, list items, attributes, dict values, valid single-byte
+fills, empty and multi-byte fills, widths around the text length, and both builds.
+`test_ail_fuzz51.py` still passes.
+## 2026-10-25 - range slicing (job-pre185-10251543)
+
+The first still-differing item from the fuzz48 review was range slicing: `range(10)[2:5]`,
+`range(10)[::-1]` and every other slice of a range raised `TypeError: 'range' object is not
+subscriptable` on both builds. `ail_op_getslice` now handles `AIL_T_RANGE`: it adjusts the
+slice against the range's count (CPython's PySlice_AdjustIndices rules, including negative
+steps and empty results), maps the adjusted ordinals back through the range's own start/step,
+and returns a new range. The arithmetic is done in 128 bits because a range's count can exceed
+INT64_MAX; a result whose start/stop/step would fall outside int64 is the AIL int limit and is
+recorded in DIFFERENCES. Added `test_ail_pre185.py` (literal, empty, negative, bool-index,
+int64-boundary and argument/list-item/attribute/dict routes on both builds). Probes p8 in
+`/tmp/probes` matched CPython on both builds; an earlier probe showed the out-of-int64 reverse
+case stops with `integer overflow`.
+## 2026-10-25 - pre188: abs() of negative zero (job-pre188-10251545)
+
+The first still-differing item from the task's list was `abs(-0.0)` printing `-0.0` (CPython `0.0`) on the
+default/typed path. Both typed lowerings wrote `x < 0 ? -x : x`, and that comparison is false for negative
+zero, so the sign survived: the legacy emitter in `pyfunc.py`, and the IR lowering in `ir/lower.py` (which
+emitted `fneg` + `select`). Floats now use a sign-clearing absolute value (`__builtin_fabs`) in both places;
+the new IR `fabs` op is verified, emitted and treated as pure. The integer lowerings are untouched, so the
+declared `abs(-2**63)` integer-overflow stop (`p8`) remains as before.
+
+Probes in `/tmp/probes` (`p_abs`, `p_abs_fn`, `p_abs_typed`, `p_abs_routes`, `p_absfull`) covered literals,
+a float parameter (IR), a plain function argument, an alias, a list item, an attribute, a dict value,
+`-0.0` from arithmetic, subnormals, infinities, NaN, booleans, signed zero comparisons and the int64
+boundary on both `cmp.sh` builds. All matched CPython. `test_ail_pre188.py` runs the same routes on both
+builds.
+## 2026-10-25 - pre103 re-apply: a single NUL byte is a format code
+
+`format(1, '\x00')`, `format('a', '\x00')` and the same spec after a width, sign
+or grouping flag returned the value on both builds; CPython raises `ValueError:
+Unknown format code '\x0' for object of type 'int'` (or `'str'`).  The general
+formatter's spec parser recorded the NUL only as `type == 0`, which is also how
+it spells "no type"; it now tracks the presence of a type separately, so a NUL
+reaches the unknown-code error.  A float keeps CPython's quirk of accepting the
+NUL as no type, and None/instance keep the TypeError naming the class.  Unknown
+control codes now use CPython's `\x<hex>` spelling in the message.
+`test_ail_pre103.py` covers int/bool/str/float/None/instance values, width and
+flag boundaries, and a spec arriving through an argument, a list item, an
+attribute and a dict value on both builds.  NUL followed by another character
+still uses the pre-existing generic `Invalid format specifier` text.
+
+## 2026-10-25 - re-apply pre117: mutable literal defaults of nested defs
+
+Re-applied job `pre117` on top of the current export. The tree already refused a nested `def` with a
+mutable literal default from the fuzz87 fix, so both sides were kept: the one helper now also covers
+a `bytearray` in a literal (as the accepted change did) and its message names a "mutable literal
+default", which keeps the new `test_ail_pre117.py` and the existing `test_ail_fuzz87.py` refusal
+checks satisfied. `test_ail_pre117.py` is registered in `ail_check.MODULES`, the DIFFERENCES row is
+restored, and immutable defaults still match CPython on both builds. Probes and required tests are
+listed in the job report.
+## 2026-10-25 -- statically known unary int64 overflow (job-rbpre172-10251601)
+
+The first pre-existing difference left by job-pre108 was pure unary overflow: `-MIN`, both on a
+module constant and as `-(-9223372036854775808)`, compiled on the default build and then stopped at
+run time with `integer overflow`, while CPython printed a bignum; the general path refused the
+`MIN` literal with a different message. A new front-end check evaluates unary `+`/`-` over integer
+literals and module-level int constants and refuses an out-of-int64 result by name (`int64 constant
+expression out of range: ...`) on both builds. A module constant shadowed by a parameter is not
+folded, and values that only reach the unary operation as variables keep the fixed-width trap.
+Added `test_ail_pre172.py` and registered it in `ail_check.MODULES`.
+
 ## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
 
 The first still-differing item from the task's list was the encoding-name normalization: `b"abc".decode("utf\t8")`,
@@ -513,6 +612,15 @@ through a list item, an attribute and a dict value.  `r7` (`cls.__name__`), `r8`
 this tree and were not changed.  `test_ail_pre127.py` keeps the r6 probes; emitted C is
 unchanged for a program that does not shadow a class name.
 
+## 2026-10-24 - pre117: mutable literal defaults of nested defs
+
+A nested `def` with a literal list/dict/set default (or a tuple holding one) rebuilt the default
+at every call site. `def f(x, acc=[]); f(1); f(2)` printed `[1] [2]` where CPython shares the
+object built when the `def` ran and prints `[1] [1, 2]`; an empty default was wrong by identity
+even when one call hid it. The general path now refuses the construct by name on both builds,
+matching the fuzz94 fix. An immutable-default program (negative/int-boundary, empty tuple, tuple,
+values through an argument, a list item, a dict value and an attribute) still matches CPython.
+Added `AIL_CURRENT/test_ail_pre117.py` and registered it in `ail_check.MODULES`.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 

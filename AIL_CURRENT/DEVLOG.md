@@ -1,5 +1,29 @@
 # DEVLOG
 
+## 2026-10-25 -- pre186: enumerate counter past INT64_MAX stops by name (job-pre186-10251543)
+
+The first still-differing pre-existing item from `fuzz48` was the `enumerate` counter: starting at
+`9223372036854775806`, the general iterator wrapped through `INT64_MAX` and printed
+`-9223372036854775808`, where CPython prints `9223372036854775808`.  AIL ints are 64-bit, so the
+next value after `INT64_MAX` has no representation.  The shared `AIL_IT_ENUMERATE` step now keeps
+the last representable index and, if another item exists, raises
+`OverflowError: enumerate() index integer overflow`; the old materialised
+`ail_builtin_enumerate` gets the same guard.  Every counter that fits still matches CPython
+(including an empty iterable at `INT64_MAX`, one item at `INT64_MAX`, negative starts, and starts
+reaching the call through an argument, list item, attribute, dict value, a for loop and `next()`).
+`AIL_CURRENT/test_ail_pre186.py` covers both builds; probes are `pre186_enum_*` in `/tmp/probes`.
+The second reviewer item, `range(0, 5, 0)` being accepted, was reproduced but left open.
+## 2026-10-25 -- statically known unary int64 overflow (job-rbpre172-10251601)
+
+The first pre-existing difference left by job-pre108 was pure unary overflow: `-MIN`, both on a
+module constant and as `-(-9223372036854775808)`, compiled on the default build and then stopped at
+run time with `integer overflow`, while CPython printed a bignum; the general path refused the
+`MIN` literal with a different message. A new front-end check evaluates unary `+`/`-` over integer
+literals and module-level int constants and refuses an out-of-int64 result by name (`int64 constant
+expression out of range: ...`) on both builds. A module constant shadowed by a parameter is not
+folded, and values that only reach the unary operation as variables keep the fixed-width trap.
+Added `test_ail_pre172.py` and registered it in `ail_check.MODULES`.
+
 ## 2026-10-24 -- bytes.count memmem: self-contained declaration (job-perf7-10240917)
 
 Review found the short-needle `bytes.count` path called `memmem` without a declaration in the

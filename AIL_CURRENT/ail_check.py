@@ -93,6 +93,8 @@ MODULES = (
     'test_ail_pre98',
     'test_ail_pre109',
     'test_ail_pre110',
+    'test_ail_pre103',
+    'test_ail_pre117',
     'test_ail_pre128',
     'test_ail_pre130',
     'test_ail_pre132',
@@ -105,6 +107,11 @@ MODULES = (
     'test_ail_pre167',
     'test_ail_pre175',
     'test_ail_pre179',
+    'test_ail_pre180',
+    'test_ail_pre182',
+    'test_ail_pre185',
+    'test_ail_pre186',
+    'test_ail_pre188',
     'test_ail_pre90',
     'test_ail_pre102',
     'test_ail_pre104',
@@ -113,6 +120,7 @@ MODULES = (
     'test_ail_pre120',
     'test_ail_pre124',
     'test_ail_pre127',
+    'test_ail_pre172',
 )
 
 

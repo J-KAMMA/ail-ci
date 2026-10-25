@@ -16609,6 +16609,18 @@ def _call(node, ctx):
         return '((%s) %s (%s) ? (%s) : (%s))' % (x, '<' if f == 'min' else '>', y, x, y)
     if f == 'abs' and len(a) == 1:
         inner = rec(a[0])
+        try:
+            is_float = _etype(a[0], ctx) == FLT
+        except Exception:
+            is_float = False
+        if is_float:
+            # `x < 0 ? -x : x` keeps a negative zero: abs(-0.0) would print -0.0 where
+            # CPython prints 0.0. fabs clears the sign bit (and handles infinities/NaN).
+            if _calls(a[0]):
+                ctx.tmp += 1
+                p = '_ab%d' % ctx.tmp
+                return '({ double %s = %s; __builtin_fabs(%s); })' % (p, inner, p)
+            return '__builtin_fabs(%s)' % inner
         strict_int = ctx.need is not None and not _neg_is_float(a[0], ctx)
         if strict_int:
             _use(ctx.need, 'ck_neg')
@@ -16616,9 +16628,8 @@ def _call(node, ctx):
         if _calls(a[0]) and _etype(a[0], ctx) in NUM:
             ctx.tmp += 1
             p = '_ab%d' % ctx.tmp
-            return ('({ %s %s = %s; ((%s) < 0 ? %s : (%s)); })'
-                    % ('double' if _etype(a[0], ctx) == FLT else 'int64_t',
-                       p, inner, p, neg % p, p))
+            return ('({ int64_t %s = %s; ((%s) < 0 ? %s : (%s)); })'
+                    % (p, inner, p, neg % p, p))
         return '((%s) < 0 ? %s : (%s))' % (inner, neg % inner, inner)
     if _is_fileprim_call(node, ctx, 'int') or _is_fileprim_call(node, ctx, 'float'):
         return _fileprim_value(node, ctx)

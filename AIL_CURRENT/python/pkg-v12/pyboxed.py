@@ -345,6 +345,7 @@ static ail_obj ail_builtin_enumerate(ail_obj src, int64_t start) {
     ail_obj r = ail_list_new();
     int64_t n = ail_iter_len(src);
     for (int64_t i = 0; i < n; i++) {
+        if (start > INT64_MAX - i) ail_raise_c(AIL_ERR_OVERFLOW, "enumerate() index integer overflow");
         ail_obj items[2] = { ail_box_int(start + i), ail_iter_at(src, i) };
         ail_list_append(r, ail_tuple_new(items, 2));
     }

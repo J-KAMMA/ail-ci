@@ -11113,6 +11113,7 @@ typedef struct { ail_gcobj hdr; ail_obj *p; int64_t n, cap;
 } ail_vecobj;
 
 static inline ail_st ail_raise_c(ail_ctx *cx, int builtin_id, const char *msg);
+static inline ail_st ail_raise(ail_ctx *cx, ail_obj cls, ail_obj msg);
 static inline ail_st ail_hit_limit(ail_ctx *cx, const char *name, const char *detail);
 static inline ail_obj ail_obj_repr(ail_ctx *cx, ail_obj x); /* forward decl: the dict
    section builds KeyError messages with repr(key) for ANY key tag; defined in the repr section */
@@ -13814,18 +13815,32 @@ static inline ail_st ail_str_to_int(ail_ctx *cx, int64_t *out, ail_obj sobj) {
    also consume its own prefix (int('0xff', 16) == 255). '_' between digits, same
    int64 overflow bound and whitespace trim as ail_str_to_int. */
 static inline ail_st ail__int_badlit(ail_ctx *cx, ail_obj sobj, int64_t base) {
-    ail_obj r = ail_str_repr(cx, sobj);
-    ail_str rs = ail_view_to_str(r);
     char head[72];
     int hl = snprintf(head, sizeof head, "invalid literal for int() with base %lld: ", (long long)base);
     if (hl < 0) hl = 0;
-    char *msg = (char *)ail_xmalloc((size_t)hl + (size_t)rs.n + 1);
-    memcpy(msg, head, (size_t)hl);
-    for (int64_t k = 0; k < rs.n; k++) msg[hl + k] = (char)ail_chr(rs, k);
-    msg[hl + rs.n] = 0;
-    ail_st st = ail_raise_c(cx, AIL_B_VALUEERROR, msg);
-    free(msg);
-    return st;
+    ail_obj parts[3];
+    /* Root all three slots before the first allocation: repr() below allocates, and an
+       unrooted head string (or, later, the repr) would be collected by GC_STRESS. */
+    memset(parts, 0, sizeof parts);
+    AIL_ROOT_N(cx, fr, parts, 3);
+    parts[0] = ail_str_from_cstr(cx, head);
+    parts[1] = ail_str_repr(cx, sobj);
+    ail_str rs = ail_view_to_str(parts[1]);
+    /* CPython formats the offending literal with "%.200R": the repr is cut after 200
+       code points, which can leave the closing quote off and may split an escape. */
+    int64_t k = 0, seen = 0;
+    while (k < rs.n && seen < 200) {
+        uint32_t c = (uint32_t)ail_chr(rs, k);
+        if (c >= 0xD800u && c < 0xDC00u && k + 1 < rs.n) {
+            uint32_t d = (uint32_t)ail_chr(rs, k + 1);
+            k += (d >= 0xDC00u && d < 0xE000u) ? 2 : 1;
+        } else k++;
+        seen++;
+    }
+    parts[2] = ail_str_view(parts[1].sv.backing, parts[1].sv.off, k);
+    ail_obj msg = ail_str_cat(cx, parts[0], parts[2]);
+    AIL_FRAME_LEAVE(cx, fr);
+    return ail_raise(cx, cx->builtin_cls[AIL_B_VALUEERROR], msg);
 }
 static inline ail_st ail_str_to_int_base(ail_ctx *cx, int64_t *out, ail_obj sobj, int64_t base) {
     if (base != 0 && (base < 2 || base > 36))
@@ -15772,6 +15787,7 @@ static inline ail_st ail_op_delitem(ail_ctx *cx, ail_obj c, ail_obj key) {
     char buf[64]; snprintf(buf, sizeof buf, "'%s' object doesn't support item deletion", ail_type_name(c.tag));
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
 }
+static inline ail_obj ail_range_new(ail_ctx *cx, int64_t start, int64_t stop, int64_t step); /* defined below */
 static inline ail_st ail_op_getslice(ail_ctx *cx, ail_obj *out, ail_obj c, int has_lo, int64_t lo, int has_hi, int64_t hi, int has_step, int64_t step) {
     if (c.tag == AIL_T_STR) return ail_str_getslice(cx, out, c, has_lo, lo, has_hi, hi, has_step, step);
     if (c.tag == AIL_T_LIST && __builtin_expect(((ail_gcobj *)c.o)->aux, 0)) {   /* a dict view */
@@ -15779,6 +15795,37 @@ static inline ail_st ail_op_getslice(ail_ctx *cx, ail_obj *out, ail_obj c, int h
         return ail_raise_c(cx, AIL_B_TYPEERROR, vb);
     }
     if (c.tag == AIL_T_LIST || c.tag == AIL_T_TUPLE) return ail_vec_getslice(cx, out, c, has_lo, lo, has_hi, hi, has_step, step);
+    if (c.tag == AIL_T_RANGE) {
+        /* CPython slices a range as a sequence: adjust the slice against the range's count,
+           then map the two adjusted ordinals back through the range's own start/step. The
+           count can exceed INT64_MAX (range(INT64_MIN, INT64_MAX)), so the arithmetic is
+           done in 128 bits; a result field outside int64 is the AIL int limit. */
+        ail_rangeobj *r = (ail_rangeobj *)c.o;
+        uint64_t n = ail__range_count(r);
+        int64_t st = has_step ? step : 1;
+        if (st == 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "slice step cannot be zero");
+        __int128 nn = (__int128)n;
+        __int128 a, b;
+        if (st > 0) {
+            if (!has_lo) a = 0;
+            else { a = lo; if (a < 0) { a += nn; if (a < 0) a = 0; } else if (a > nn) a = nn; }
+            if (!has_hi) b = nn;
+            else { b = hi; if (b < 0) { b += nn; if (b < 0) b = 0; } else if (b > nn) b = nn; }
+        } else {
+            if (!has_lo) a = nn - 1;
+            else { a = lo; if (a < 0) { a += nn; if (a < 0) a = -1; } else if (a >= nn) a = nn - 1; }
+            if (!has_hi) b = -1;
+            else { b = hi; if (b < 0) { b += nn; if (b < 0) b = -1; } else if (b >= nn) b = nn - 1; }
+        }
+        __int128 ns = (__int128)r->start + a * (__int128)r->step;
+        __int128 ne = (__int128)r->start + b * (__int128)r->step;
+        __int128 nd = (__int128)r->step * (__int128)st;
+        if (ns < INT64_MIN || ns > INT64_MAX || ne < INT64_MIN || ne > INT64_MAX
+            || nd < INT64_MIN || nd > INT64_MAX)
+            return ail_hit_limit(cx, "int_overflow", "range slice result exceeds int64");
+        *out = ail_range_new(cx, (int64_t)ns, (int64_t)ne, (int64_t)nd);
+        return AIL_OK;
+    }
     char buf[64]; snprintf(buf, sizeof buf, "'%s' object is not subscriptable", ail_type_name(c.tag));
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
 }
@@ -15965,7 +16012,11 @@ static inline ail_st ail_next(ail_ctx *cx, ail_obj *out, ail_obj iterobj) {
         }
         case AIL_IT_ENUMERATE: {
             ail_obj item; ail_st st = ail_next(cx, &item, it->target); if (st != AIL_OK) return st;
-            ail_obj pr[2]; pr[0] = ail_box_int(it->idx++); pr[1] = item;
+            /* AIL ints are 64-bit: the next counter value after INT64_MAX has no representation, so
+               stop by name instead of wrapping to INT64_MIN (CPython uses an arbitrary-precision int). */
+            if (it->idx2) return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "enumerate() index integer overflow");
+            ail_obj pr[2]; pr[0] = ail_box_int(it->idx); pr[1] = item;
+            if (it->idx == INT64_MAX) it->idx2 = 1; else it->idx++;
             *out = ail_tuple_new(cx, pr, 2); return AIL_OK;
         }
         case AIL_IT_ZIP: {
@@ -27089,6 +27140,16 @@ static void ail__int_base_fail(ail_str s, int64_t base) {
     if (!msg) ail_die("out of memory");
     memcpy(msg, head, (size_t)hl);
     ail__repr_str_run(s, msg + hl, quote);
+    /* CPython's "%.200R": cut the repr after 200 characters (not bytes); an escape
+       sequence or a multi-byte character may end exactly at the cut. */
+    int64_t cut = 0, chars = 0;
+    while (cut < rn && chars < 200) {
+        uint8_t c = msg[hl + cut];
+        int w = c < 0x80 ? 1 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
+        cut += w > rn - cut ? rn - cut : w;
+        chars++;
+    }
+    rn = cut;
     ail_exception *value = ail_exception_new(AIL_EXC_VALUE, msg, hl + rn, 0);
     free(msg);
     ail_raise_value_adopt(value);
