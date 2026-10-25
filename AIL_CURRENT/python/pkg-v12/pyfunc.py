@@ -36392,7 +36392,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     ctx.ephemeral_numeric_temps = set()
     ctx.numeric_allowed_names = _numeric_allowed.get(id(fn))
     ctx.source_names = {node.id for node in ast.walk(fn) if isinstance(node, ast.Name)} | {name for name, _ in ctx.params}
-    ctx.local_bindings = _local_binding_names(fn)
+    ctx.local_bindings = frozenset(_local_binding_names(fn))
     ctx.fn_node = fn
     ctx.free_points = _last_use_free_points(fn)
     ctx.loop_local_points = _loop_local_release_points(fn)
