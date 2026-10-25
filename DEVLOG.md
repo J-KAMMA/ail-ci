@@ -1,3 +1,24 @@
+## 2026-10-25 - constant abs(INT64_MIN) is refused by name (job-pre214-10252301)
+
+The first still-differing item in the rbpre177 review's pre-existing list was `abs(-(2**63))`:
+both builds compiled it and stopped at run time with `integer overflow`, while CPython prints the
+bignum `9223372036854775808`.  The earlier items in that list no longer differ on this tree:
+`10**100`, `2**65` and `xs[10**100]` are already refused by the general front end, and the local
+`x = -(10**20)` is already refused as an int64 constant expression.
+
+`_check_int64_unary_constants` now also refuses a builtin `abs()` whose single argument is a
+statically known int64 minimum, with the existing `int64 constant expression out of range` wording
+and exit 2.  It sees nested unary forms, shifts and module constants, covers calls used as an
+argument, a list item, an attribute and a dict value, and skips the check when `abs` is shadowed.
+In-range constant absolutes, float/bool arguments and a value that reaches `abs` only through a
+local variable keep their previous behaviour.  `test_ail_pre214.py` is registered in
+`ail_check.MODULES`; `tools/ci_shards.py --update` assigned it a shard.
+
+Probes in `/tmp/probes`: `p214_direct_pow`, `p214_direct_shift`, `p214_literal_min`,
+`p214_module`, `p214_argument`, `p214_list_item`, `p214_attribute`, `p214_dict_value` are all
+refused by name on both builds; `p214_in_range` and `p214_shadow` match CPython on both builds.
+`p214_variable` (a local variable holding the minimum) is unchanged and still traps at run time,
+the same pre-existing limitation as before this job.
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
