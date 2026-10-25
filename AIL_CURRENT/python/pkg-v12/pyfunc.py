@@ -34881,7 +34881,8 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     _python_surface = os.environ.get('AIL_SURFACE') == 'python'
     _ir_on = os.environ.get('AIL_IR', '1').strip().lower() not in ('0', 'off', 'no', 'false')
     global TINT_DISABLED
-    TINT_DISABLED = bool(info is not None and info.get('_mixed_clone'))
+    TINT_DISABLED = bool(info is not None and info.get('_mixed_clone')
+                         and not info.get('_mixed_tagged'))
     _io_names = {'open', 'write_text', 'write_bytes', 'read_text', 'read_bytes', 'file_chunks'}
 
     def _param_arith(fn, name):
