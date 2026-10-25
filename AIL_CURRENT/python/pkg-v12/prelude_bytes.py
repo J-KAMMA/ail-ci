@@ -474,6 +474,7 @@ def _ail_b_cmp_other(other, op, me):
 
 
 def _ail_b_int(s, text):
+    text = text[:200]
     if not _ail_b_numsafe(s):
         raise ValueError("invalid literal for int() with base 10: " + text)
     try:
@@ -729,7 +730,7 @@ class bytearray:
 
     def __int__(self):
         s = _ail_b_from_ints(self._a)
-        return _ail_b_int(s, "bytearray(b" + _ail_b_repr(s) + ")")
+        return _ail_b_int(s, "b" + _ail_b_repr(s))
 
     def __float__(self):
         s = _ail_b_from_ints(self._a)
@@ -822,7 +823,8 @@ def _ail_str_decode(x, encoding="utf-8", errors="strict"):
 def _ail_int2(x, base):
     if isinstance(x, bytes) or isinstance(x, bytearray):
         s = _ail_bs(x)
-        text = repr(x)
+        text = ("b" + _ail_b_repr(s)) if isinstance(x, bytearray) else repr(x)
+        text = text[:200]
         if not _ail_b_numsafe(s):
             raise ValueError("invalid literal for int() with base " + str(base) + ": " + text)
         try:
