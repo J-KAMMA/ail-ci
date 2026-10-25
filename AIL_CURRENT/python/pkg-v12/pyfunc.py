@@ -2383,6 +2383,7 @@ class Ctx:
         self.len1_names = set()     # names proved length 1 in the loop they are in
         self.stdin_root_bound = {}
         self.funcs = {}                         # the other functions: name -> (params, ret)
+        self.shadowed_functions = set()         # locals assigned in this scope that shadow a function name
         self.readonly_scalar_helpers = ()
         self.experimental_borrow_numeric_names = False
         self.file_iters = []
@@ -16422,6 +16423,90 @@ def _isinstance_value(node, ctx):
         pointer, '_ail_io && ' if nullable else '', ' || '.join(tests))
 
 
+def _assign_target_names(t):
+    if isinstance(t, ast.Name):
+        return {t.id}
+    if isinstance(t, (ast.Tuple, ast.List)):
+        out = set()
+        for e in t.elts:
+            out |= _assign_target_names(e)
+        return out
+    if isinstance(t, ast.Starred):
+        return _assign_target_names(t.value)
+    return set()
+
+
+def _scan_assigned_names(stmts):
+    """Names assigned in this function/module scope, including a walrus target inside a
+    comprehension (Python binds it in the nearest enclosing function/module scope)."""
+    names = set()
+
+    def leak_walrus(node):
+        if isinstance(node, ast.Lambda):
+            return
+        if isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+        for child in ast.iter_child_nodes(node):
+            leak_walrus(child)
+
+    def walk_expr(e):
+        if isinstance(e, ast.Lambda):
+            return
+        if isinstance(e, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            leak_walrus(e)
+            return
+        for child in ast.iter_child_nodes(e):
+            if isinstance(child, ast.expr):
+                walk_expr(child)
+
+    def walk(stmts_):
+        for n in stmts_:
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            if isinstance(n, ast.Assign):
+                for t in n.targets:
+                    names.update(_assign_target_names(t))
+                walk_expr(n.value)
+            elif isinstance(n, ast.AugAssign):
+                names.update(_assign_target_names(n.target))
+                walk_expr(n.value)
+            elif isinstance(n, ast.AnnAssign):
+                names.update(_assign_target_names(n.target))
+                if n.value is not None:
+                    walk_expr(n.value)
+            elif isinstance(n, (ast.For, ast.AsyncFor)):
+                names.update(_assign_target_names(n.target))
+                walk_expr(n.iter)
+                walk(n.body)
+                walk(n.orelse)
+            elif isinstance(n, (ast.While, ast.If)):
+                walk_expr(n.test)
+                walk(n.body)
+                walk(n.orelse)
+            elif isinstance(n, (ast.Try, ast.TryStar)):
+                walk(n.body)
+                for h in n.handlers:
+                    if h.name:
+                        names.add(h.name)
+                    walk(h.body)
+                walk(n.orelse)
+                walk(n.finalbody)
+            elif isinstance(n, (ast.With, ast.AsyncWith)):
+                for item in n.items:
+                    walk_expr(item.context_expr)
+                    if item.optional_vars is not None:
+                        names.update(_assign_target_names(item.optional_vars))
+                walk(n.body)
+            elif isinstance(n, ast.Expr):
+                walk_expr(n.value)
+            elif isinstance(n, (ast.Return, ast.Raise, ast.Assert, ast.Delete)):
+                for child in ast.iter_child_nodes(n):
+                    if isinstance(child, ast.expr):
+                        walk_expr(child)
+    walk(stmts)
+    return names
+
+
 def _call(node, ctx):
     if _is_monotonic_call(node, ctx):
         _monotonic_arguments(node)
@@ -17152,6 +17237,9 @@ def _call(node, ctx):
         else:
             call = '(' + ', '.join([*staged, call]) + ')' if staged else call
         return _obj_temp(call, (OBJ, f), ctx) if _managed_class(cls) else call
+    if (f in getattr(ctx, 'shadowed_functions', ()) and f not in ctx.types
+            and f not in ctx.kind):
+        raise Unsupported('%r is read before it is assigned' % f)
     if f in ctx.funcs:
         # an array argument is two C arguments, a pointer and a length, so the call site expands --
         # see `_call_user_func`, which also resolves a whole-program clone (section 26) if one
@@ -36337,6 +36425,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     ctx.stdin_unbound = _stdin_only_bindings(fn)
     ctx.stdin_root_bound = _stdin_root_bindings(fn)
     ctx.funcs = sigs
+    ctx.shadowed_functions = _scan_assigned_names(fn.body) & set(sigs)
     ctx.owned_str_fns = owned_str_fns or set()
     ctx.owned_bytes_fns = owned_bytes_fns or set()
     ctx.internal_exact_bytes_fns = internal_exact_bytes_fns

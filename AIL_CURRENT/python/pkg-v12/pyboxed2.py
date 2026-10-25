@@ -1441,11 +1441,25 @@ def _hoist_defaults(tree):
 def _scan_assigned_names(stmts):
     """Names assigned anywhere in `stmts` (a function or module body), stopping at nested
     FunctionDef/ClassDef (a different scope) and NOT descending into comprehension/generator/
-    lambda bodies (their own scope in Python 3 -- see _declare_comp_target)."""
+    lambda bodies (their own scope in Python 3 -- see _declare_comp_target). A walrus target
+    inside a comprehension is the exception: Python binds it in the nearest enclosing
+    function/module scope, so `[x := i for i in ...]` makes x a local of that scope (and a
+    read before it is UnboundLocalError, not a static function/global read)."""
     names = set()
 
+    def leak_walrus(node):
+        if isinstance(node, ast.Lambda):
+            return
+        if isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+        for child in ast.iter_child_nodes(node):
+            leak_walrus(child)
+
     def walk_expr(e):
-        if isinstance(e, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp, ast.Lambda)):
+        if isinstance(e, ast.Lambda):
+            return
+        if isinstance(e, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            leak_walrus(e)
             return
         for child in ast.iter_child_nodes(e):
             if isinstance(child, ast.expr):
@@ -6457,7 +6471,13 @@ class Compiler(boxclosure.ClosureMixin):
             return self._call_class(name, args, kwargs, ctx)
         if name in ctx.nested_funcs:
             return self._call_nested_function(name, args, kwargs, ctx)
-        if name in ctx.closure_defs or name in ctx.clo_index or name in ctx.cell_slots:
+        if (name in ctx.closure_defs or name in ctx.clo_index or name in ctx.cell_slots
+                or name in ctx.slot_of or name in ctx.ptr_names or name in ctx.free_names):
+            # A parameter, local, cell or closure binding of the same name shadows a top-level
+            # function in CPython for the WHOLE activation: `side(1)` before `side := ...` (a
+            # walrus target that leaks out of a comprehension) or before `side = lambda ...`
+            # reads the unbound local (UnboundLocalError), and a closure's captured value is
+            # called instead of the module-level function of the same name.
             return self.call_value(self.expr(ast.Name(id=name, ctx=ast.Load()), ctx), args, kwargs, ctx)
         if name in self.functions:
             return self._call_user_function(name, args, kwargs, ctx)

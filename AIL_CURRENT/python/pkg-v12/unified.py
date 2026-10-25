@@ -1718,6 +1718,15 @@ def _draw_of(plan, n):
     return n.func.attr, t
 
 
+def _call_shadowed(comp, fp, name, ctx):
+    """True when `name` is a local/cell/closure binding at this call site, so it shadows a
+    module-level function of the same name (Python decides this for the whole activation)."""
+    if fp is not None and name in fp.locals:
+        return True
+    return (name in ctx.slot_of or name in ctx.ptr_names or name in ctx.clo_index
+            or name in ctx.cell_slots or name in ctx.free_names)
+
+
 def site_matches(plan, fp, call):
     """Whether the call `call` (to a specialised function) in function plan `fp` goes to the unboxed body."""
     sp = plan.spec[call.func.id]
@@ -1725,7 +1734,7 @@ def site_matches(plan, fp, call):
         return False
     if fp is None:
         return not any(t in SCALAR for t in sp.ptypes)
-    if (fp.name, id(call)) in plan.generic_sites:
+    if call.func.id in fp.locals or (fp.name, id(call)) in plan.generic_sites:
         return False
     env = lambda nm: _name_type(plan, fp, nm)
     return all(t not in SCALAR or etype(plan, fp, a, env) == t for a, t in zip(call.args, sp.ptypes))
@@ -1834,7 +1843,8 @@ def _etype(plan, fp, n, env):
         f = n.func.id
         if f in plan.spec:
             sp = plan.spec[f]
-            if (fp is None or (fp.name, id(n)) in plan.generic_sites or len(n.args) != len(sp.params)):
+            if (fp is None or f in fp.locals or (fp.name, id(n)) in plan.generic_sites
+                    or len(n.args) != len(sp.params)):
                 return OBJ
             return sp.ret
         if not _builtin(plan, fp, f):
@@ -2045,7 +2055,7 @@ def expr_hook(comp, node, ctx):
         return None
     plan = comp.uplan
     if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in plan.spec
-            and site_matches(plan, fp, node)):
+            and not _call_shadowed(comp, fp, node.func.id, ctx) and site_matches(plan, fp, node)):
         v, t = call_spec(comp, node.func.id, node.args, ctx)
         return box(comp, ctx, v, t) if t in SCALAR else v
     if list_read(comp, ctx, node):
@@ -2247,7 +2257,7 @@ def nexpr(comp, node, ctx):
         return r
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
         f = node.func.id
-        if f in comp.uplan.spec:
+        if f in comp.uplan.spec and not _call_shadowed(comp, fp, f, ctx):
             v, vt = call_spec(comp, f, node.args, ctx)
             return v
         if f in ('min', 'max') and _builtin(comp.uplan, fp, f):
