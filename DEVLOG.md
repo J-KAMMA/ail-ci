@@ -104,6 +104,24 @@ shapes refused).  The pre160 module recorded the old run-time `integer overflow`
 constant `10**30` inside `__index__`; its test now checks the compile-time refusal and keeps a
 run-time-value variant for the overflow path.  Not fixed here: run-time `sep=None` (pre-existing
 p12, a different cause).
+## 2026-10-25 - maxsplit power folding (job-pre195-10251916)
+
+The pre97 maxsplit folder rejected any power with an exponent of at least 64 before looking at
+the rest of the constant expression, so `"a b c".split(" ", 2**100 // 2**80)` (final value
+2**20) was refused on both builds while CPython runs it.  The power branch now uses the same
+4096-bit limit as the compiler's other constant folder, so an intermediate may be wider than
+int64; the whole expression is folded exactly, and a final value outside int64 is still refused
+by name.  Review follow-up: the first guard also overestimated the width of a power
+(`bit_length(base) * exponent`), which refused `((2**63 * 4)**63) >> 4095` even though the
+4096-bit intermediate reduces to 1 and both CPython and the base tree accept it.  A capped
+square-and-multiply test now measures the actual result width, so that expression, `2**2049 //
+2**2029` and a 4096-bit intermediate are accepted; only a genuinely wider intermediate (for example
+`2**4096 // 2**4050`, final value 2**46) is refused by name, although CPython computes it.
+`test_ail_pre195.py` covers literals, a negative result, reduced powers, shifts, both sides of
+the fold boundary, the out-of-int64 refusals, and the value through an argument, a list item, an
+attribute, a dict value and a local on both builds.  Probes p_regress, p_orig, p_boundary,
+p_neg, p_routes and p_types matched CPython on HEAD; p_over_literal, p_over_reduced and
+p_over_intermediate were refused by name.
 
 ## 2026-10-25 - int(s, base) message GC rooting (job-pre180-10251520)
 
