@@ -173,6 +173,16 @@ now raises `ValueError("cannot convert float NaN to integer")` and
 `OverflowError("cannot convert float infinity to integer")` through the normal exception path
 on both builds.  Finite values, including the int64-boundary trap, are unchanged.  Added
 `AIL_CURRENT/test_ail_pre104.py` and registered it in `ail_check.MODULES`.
+## 2026-10-24 - pre105: a multi-name import refusal names the unmodelled module
+
+The exact errmsg3 case `import math, html` (with `html` used, so the general path refuses too)
+reached the typed path's module scan, which joined every alias into one name and printed
+`import of 'math, html' is not available` at the import's line.  That denied the supported
+`math` and did not say which module was missing.  The scan now picks the first name outside the
+modelled set (`html`, or `html.parser`) and names it alone; an unused `html` import still builds
+on both paths.  Added `AIL_CURRENT/test_ail_pre105.py` (eight refusals, both builds, plus the
+accepted unused case).
+
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
