@@ -141,7 +141,12 @@ class Pre191Tests(unittest.TestCase):
                                           text, general)
                         self.assertNotEqual(built.returncode, 0, label)
                         message = built.stdout + built.stderr
-                        self.assertIn('int64 constant expression out of range', message, label)
+                        # The integration tree's general constant-expression rule may refuse a
+                        # list/dict element or a default tuple before this pass sees it, with its
+                        # own named message; accept that as well as this pass's wording.
+                        named = ('int64 constant expression out of range',
+                                 'outside the signed 64-bit range')
+                        self.assertTrue(any(item in message for item in named), label)
                         self.assertNotIn('integer overflow', message, label)
                         self.assertNotIn('Traceback', message, label)
 

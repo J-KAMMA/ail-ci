@@ -1,3 +1,16 @@
+## 2026-10-25 - pre191: accept the integrated rule for list/dict/default-tuple constants (job-pre191-10260206)
+
+`test_ail_pre191` failed in the merged suite on `X = [1 << 64]`, `X = {"k": 1 << 64}` and
+`def f(x=(1 << 64,))`: the integration tree's front-end constant-expression rule refuses those
+positions first with `not in the subset: an integer constant expression here is outside the
+signed 64-bit range`, while the test demanded this pass's own `int64 constant expression out of
+range` wording.  The test now accepts either named refusal for every out-of-range position,
+matching the tolerance already added for dead function-body unary shifts, and still rejects a
+compiled program, `integer overflow`, or a `Traceback`.  Compiler behaviour is unchanged: this
+pass still refuses all ten positions by name when its check runs.  Verified with the test on the
+branch, on the current integration candidate, and on that candidate without this pass's source
+change (the general refusal only).
+
 ## 2026-10-25 - pre191: accept the integration tree's function-body constant refusal (job-pre191-10252231)
 
 Rebase follow-up. The integration branch now carries the general constant-expression rule that
