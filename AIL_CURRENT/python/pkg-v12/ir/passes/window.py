@@ -91,6 +91,8 @@ class _Index(object):
             return None
         pred = d.op[4:]
         x, k = d.operands
+        if x.type != I.I64 or k.type != I.I64:
+            return None
         kv = self.const(k)
         if not isinstance(kv, int):
             return None

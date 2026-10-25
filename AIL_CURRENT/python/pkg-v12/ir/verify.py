@@ -35,7 +35,7 @@ class _Listy(object):
 
 
 _LISTY = _Listy()
-S0_TYPES = frozenset([I.I1, I.I64, I.F64])
+S0_TYPES = frozenset([I.I1, I.I64, I.F64, I.TINT])
 # S1 adds read-only bytes views and numeric lists / struct objects reached through borrows
 S1_TYPES = S0_TYPES | frozenset([I.T('bytes'), I.T('obj', I.T('list', I.I64)),
                                  I.T('obj', I.T('list', I.F64)), I.T('span', I.I64), I.T('span', I.F64),
@@ -315,8 +315,64 @@ class _Checker(object):
                   % (src, ins.operands[0].type))
         self.want(where, ins.result.type == dst, 'result must be %s, found %s' % (dst, ins.result.type))
 
+    def op_tint_from(self, ins, scope, stack, where, top):
+        self._unary(ins, where, I.I64, I.TINT)
+
+    def op_tint_i64(self, ins, scope, stack, where, top):
+        self._unary(ins, where, I.TINT, I.I64)
+
+    def op_tint_i64sat(self, ins, scope, stack, where, top):
+        self._unary(ins, where, I.TINT, I.I64)
+
+    def op_tint_f64(self, ins, scope, stack, where, top):
+        self._unary(ins, where, I.TINT, I.F64)
+
+    def op_tint_nonzero(self, ins, scope, stack, where, top):
+        self._unary(ins, where, I.TINT, I.I1)
+
+    def op_tint_neg(self, ins, scope, stack, where, top):
+        self._unary(ins, where, I.TINT, I.TINT)
+
+    def op_tint_inv(self, ins, scope, stack, where, top):
+        self._unary(ins, where, I.TINT, I.TINT)
+
+    def op_tint_binary(self, ins, scope, stack, where, top):
+        self._binary(ins, where, (I.TINT,), I.TINT)
+
+    def op_tint_op_i64(self, ins, scope, stack, where, top):
+        if not self.nresults(ins, where, 1):
+            return
+        self.want(where, ins.operands[0].type == I.TINT and ins.operands[1].type == I.I64,
+                  'tint operation against an int64 constant')
+        self.want(where, ins.result.type == I.TINT, 'result must be tint')
+
+    def op_tint_op_i64_value(self, ins, scope, stack, where, top):
+        if not self.nresults(ins, where, 1):
+            return
+        self.want(where, ins.operands[0].type == I.TINT and ins.operands[1].type == I.I64,
+                  'tint operation against an int64 constant')
+        self.want(where, ins.result.type == I.I64, 'result must be i64')
+
+    def op_tint_cmp(self, ins, scope, stack, where, top):
+        self._binary(ins, where, (I.TINT,), I.I1)
+    def op_tint_cmp_i64(self, ins, scope, stack, where, top):
+        if not self.nresults(ins, where, 1):
+            return
+        self.want(where, ins.operands[0].type == I.TINT and ins.operands[1].type == I.I64,
+                  'tint comparison against an int64 constant')
+        self.want(where, ins.result.type == I.I1, 'result must be i1')
+
+
     def op_cmp(self, ins, scope, stack, where, top):
-        self._binary(ins, where, (I.I64, I.F64, I.I1), I.I1)
+        if not self.nresults(ins, where, 1):
+            return
+        a, b = ins.operands
+        same = a.type == b.type and a.type in (I.I64, I.F64, I.I1)
+        mixed = {a.type, b.type} == {I.I64, I.F64}
+        self.want(where, same or mixed,
+                  'operands must have the same scalar type, or be i64 and f64, found %s, %s'
+                  % (a.type, b.type))
+        self.want(where, ins.result.type == I.I1, 'result must be i1, found %s' % ins.result.type)
 
     def op_select(self, ins, scope, stack, where, top):
         if not self.nresults(ins, where, 1):
@@ -784,7 +840,12 @@ class _Checker(object):
                       'spec.get takes (int or float list or span, i64, i1) and yields the element')
 
     def op_span_set(self, ins, scope, stack, where, top):
-        self._index_mode(ins, where)
+        if ins.attrs.get('mode') == 'vck':
+            # a byte store whose index is proven, its value still checked (licm.py)
+            self.want(where, ins.operands[0].type == I.T('span', I.T('u8')),
+                      'mode vck is for a byte store through a span<u8>')
+        else:
+            self._index_mode(ins, where)
         self.nresults(ins, where, 0)
         elem = self._span_elem(ins.operands[0])
         self.want(where, elem is not None and ins.operands[1].type == I.I64 and ins.operands[2].type == elem,
@@ -851,11 +912,12 @@ class _Checker(object):
 
     def op_for_range(self, ins, scope, stack, where, top):
         lo, hi, step = ins.operands[:3]
-        self.want(where, lo.type == hi.type == step.type == I.I64, 'for.range bounds must be i64')
+        self.want(where, lo.type == hi.type == step.type and lo.type in (I.I64, I.TINT),
+                  'for.range bounds must be all i64 or all tint')
         carried = self.types(ins.operands[3:])
         body = ins.regions[0]
-        self.want(where, self.types(body.args) == [I.I64] + carried,
-                  'for.range body arguments must be (i64, carried values...)')
+        self.want(where, self.types(body.args) == [lo.type] + carried,
+                  'for.range body arguments must be (index, carried values...)')
         self.region(body, scope, stack + [('for.range', ins)])
 
     def _innermost_loop(self, stack):
@@ -941,6 +1003,17 @@ class _Checker(object):
 
 for _name in I.INT_BINARY:
     setattr(_Checker, 'op_' + _name, _Checker.op_int_binary)
+for _name in ('tint.add', 'tint.sub', 'tint.mul', 'tint.floordiv', 'tint.floormod', 'tint.shl', 'tint.shr'):
+    setattr(_Checker, 'op_' + _name.replace('.', '_'), _Checker.op_tint_binary)
+for _name in ('tint.eq', 'tint.ne', 'tint.lt', 'tint.le'):
+    setattr(_Checker, 'op_' + _name.replace('.', '_'), _Checker.op_tint_cmp)
+for _name in ('tint.eq_i64', 'tint.ne_i64', 'tint.lt_i64', 'tint.le_i64'):
+    setattr(_Checker, 'op_' + _name.replace('.', '_'), _Checker.op_tint_cmp_i64)
+for _name in ('tint.floordiv_i64', 'tint.mod_i64', 'tint.add_i64', 'tint.sub_i64', 'tint.mul_i64',
+              'tint.mod_pos_i64'):
+    setattr(_Checker, 'op_' + _name.replace('.', '_'), _Checker.op_tint_op_i64)
+for _name in ('tint.mod_i64_i64', 'tint.mod_pos_i64_i64'):
+    setattr(_Checker, 'op_' + _name.replace('.', '_'), _Checker.op_tint_op_i64_value)
 for _name in I.FLOAT_BINARY:
     setattr(_Checker, 'op_' + _name, _Checker.op_float_binary)
 for _pred in I.CMP_PREDICATES:
