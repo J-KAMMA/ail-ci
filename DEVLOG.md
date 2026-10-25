@@ -1,3 +1,25 @@
+## 2026-10-25 - pre215 review follow-up: container-stored constant `abs` (job-pre247-10260359)
+
+The first still-differing item from the rbpre215 review's pre-existing list was the attribute
+route: `b.v = -(1 << 63)` (or a class attribute, a list item or a dict value) followed by
+`abs(b.v)` compiled and stopped with `integer overflow` on both builds, where CPython prints
+9223372036854775808.  The pre214 check only folded the `abs` call's own argument.  `ail_chatgpt.py`
+now walks straight-line module, function and class bodies with a small constant-value environment
+covering ints, list/tuple items, dict values, class and instance attributes (including an
+`__init__` reached with positional or keyword arguments), aliases, and reassignment before the
+call.  Only an `abs` argument that reads an attribute or subscript is checked this way, so a local
+scalar keeps its documented run-time trap.  A call on a known object and assignments in a
+conditional, loop or `try` branch invalidate the affected value, so a later `b.v = 5`, `b.reset()`
+or conditional reassignment still matches CPython instead of being refused.
+
+Added `test_ail_pre247.py` (8 refusal routes and 4 matching routes) and registered it in
+`ail_check.MODULES`.  Probes in `/tmp/probes/p247*` cover class and instance attributes, an
+`__init__` with and without an argument, list items, dict values, aliases in both directions,
+nested arithmetic, in-range values, module and function scope, reassignment, a mutating method,
+and a conditional reassignment on both builds; all match CPython or are refused by name.  The
+review's other pre-existing items (a class method or parameter named `abs`, a local scalar, the
+local-rebinding `UnboundLocalError` case) are unchanged.
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a
