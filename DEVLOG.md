@@ -108,6 +108,92 @@ worker; the join re-raises it on the caller, so a negative shift in a `parallel 
 both builds instead of longjmp-ing across threads.  Added `AIL_CURRENT/test_ail_pre171.py` and
 registered it in `ail_check`.  The earlier `test_ail_pre87` callback case is kept.
 
+## 2026-10-25 - constant abs(INT64_MIN) is refused by name (job-pre214-10252301)
+
+The first still-differing item in the rbpre177 review's pre-existing list was `abs(-(2**63))`:
+both builds compiled it and stopped at run time with `integer overflow`, while CPython prints the
+bignum `9223372036854775808`.  The earlier items in that list no longer differ on this tree:
+`10**100`, `2**65` and `xs[10**100]` are already refused by the general front end, and the local
+`x = -(10**20)` is already refused as an int64 constant expression.
+
+`_check_int64_unary_constants` now also refuses a builtin `abs()` whose single argument is a
+statically known int64 minimum, with the existing `int64 constant expression out of range` wording
+and exit 2.  It sees nested unary forms, shifts and module constants, covers calls used as an
+argument, a list item, an attribute and a dict value, and skips the check when `abs` is shadowed.
+In-range constant absolutes, float/bool arguments and a value that reaches `abs` only through a
+local variable keep their previous behaviour.  `test_ail_pre214.py` is registered in
+`ail_check.MODULES`; `tools/ci_shards.py --update` assigned it a shard.
+
+Probes in `/tmp/probes`: `p214_direct_pow`, `p214_direct_shift`, `p214_literal_min`,
+`p214_module`, `p214_argument`, `p214_list_item`, `p214_attribute`, `p214_dict_value` are all
+refused by name on both builds; `p214_in_range` and `p214_shadow` match CPython on both builds.
+`p214_variable` (a local variable holding the minimum) is unchanged and still traps at run time,
+the same pre-existing limitation as before this job.
+## 2026-10-25 - pre184 review fix: class-body bare `**` with a large exponent (job-rbpre184-10252049)
+
+The reviewer found that the conflict resolution left a hole: a class-body bare `**` value was
+always deferred to `_check_constant_power`, but that check folds with `_const_expr_int`, which
+returns `None` when the exponent is above 64.  So `class C: M = 2 ** 100` and
+`M: int = 2 ** 100` compiled and then stopped at run time with `integer overflow`, where the
+accepted tree refuses them by name.  The class-body deferral now applies only when
+`_const_expr_int` can fold the value; otherwise `_constant_int_exact` checks it, so both cases
+fail at compile time with `int64 constant expression out of range: 1267650600228229401496703205376`.
+`class C: M = 2 ** 64` still gets pre177's `int64 constant out of range` wording, and in-range or
+special-power results (`2 ** 62`, `0 ** 100000`, `1 ** 100000`, `(-1) ** 100000`, `0 << 100000`,
+`(2 ** 100) // (2 ** 99)`) still match CPython on both builds.  Added both class-body cases to
+`test_ail_pre184.py`.
+
+## 2026-10-25 - out-of-int64 constant expressions outside function bodies (job-rbpre184-10252049)
+
+Re-applied the accepted pre184 change on top of this tree. A constant integer expression in a
+module/class assignment or a default argument that does not fit int64 is now refused by name at
+compile time (`int64 constant expression out of range`), instead of compiling and stopping at run
+time with `integer overflow`. `corpus/gdev/g22_012.py` (`_MASK: int = (1 << 64) - 1`) and
+`def f(x=10**30)` are the motivating cases. The evaluator handles + - * // % ** << >> & | ^ and
+unary + - ~ with a 4096-bit guard; Pow bases 0/1/-1 and a zero left shift are decided before the
+guard, so `0 ** 100000`, `1 ** 100000`, `(-1) ** 100000` and `0 << 100000` stay in range. An
+out-of-int64 expression inside a function body keeps its old run-time stop; a class with a base
+(the enum case) keeps its own refusal.
+
+Conflict resolution: this tree already had `_check_int64_literals`, `_check_constant_power`,
+`_check_int64_unary_constants` and a two-argument `_constant_int` from pre172/pre177. The new
+evaluator is `_constant_int_exact`, and its check runs before the older ones so a default argument
+gets the accepted wording; a bare `**` class-body value is left to `_check_constant_power` so
+pre177's flow cases keep their existing `int64 constant out of range` wording. Added
+`test_ail_pre184.py` (class, module and default refusals plus in-range class/default/module
+arithmetic and the power/shift guard boundaries), and registered it in `ail_check.py` and both
+`ci_shards.json` lists.
+## 2026-10-25 - pre190 reapply: large constant intermediates that reduce to int64 (job-rbpre190-10252302)
+
+Re-applied the accepted pre190 change on top of the current tree. The constant folders now decide
+zero absorbing operands and the power bases 0/1/-1 before the size guard, so `0 * (1 << 5000)`,
+`(1 << 5000) & 0`, `0 ** (1 << 5000)`, `1 ** (1 << 5000)`, `(-1) ** (1 << 5000)`,
+`(1 << 5000) ** 0` and `(1 << 5000) >> 5000` fold instead of stopping with `integer overflow`, and
+the same constants used as a `str.split`/`rsplit` maxsplit are not refused. A zero/base shortcut is
+taken only when the other operand is itself a constant int, so `1.5 ** 0`, `f() ** 0`,
+`0 * "ab"`, `0 * f()`, `0 & 1.5` and `2.0 ** 0` keep normal evaluation. The fold limit moved from
+4096 to 2**20 bits (2**24 for a large exponent in such a power), and `_CONST_INT_BITS` now shares
+`_MAXSPLIT_BITS` so the generic all-constant folder added by another accepted job does not pre-empt
+these reductions on the integration tree. The current tree's exact `_pow_within_maxsplit_bits` guard
+is kept alongside the new shortcuts. Added `AIL_CURRENT/test_ail_pre190.py`; probes in `/tmp/probes`
+cover boundaries, non-int operands, effectful calls, and argument/list-item/attribute/dict routes on
+both builds.
+
+## 2026-10-25 - maxsplit constant through a wider intermediate (reapply, job-rbpre205-10252303)
+
+The first still-differing item from the rbpre121 review was the maxsplit folder's `right >= 64`
+power rule: `"a b c".split(" ", 2**100 // 2**80)` was refused by name on both builds although the
+final value 2**20 fits in int64 and CPython splits normally.  This tree already carries rbpre121's
+follow-up, which bounds the power exactly with `_pow_within_maxsplit_bits` and the existing
+`_MAXSPLIT_BITS` (4096) budget, so the accepted pre205 rule is covered by that stronger fix; both
+sides are kept.  A final value outside int64 (for example `2**100`, `10**30`, `(2**64) // 2 * 2`)
+is still refused with the maxsplit wording.
+
+`test_ail_pre205.py` covers split/rsplit, an explicit and a `None` separator, negative and zero
+limits, the empty string, intermediates built from powers, shifts, sums and products, and values
+reaching the call through an argument, a list item, an attribute and a dict value, on both builds.
+`/tmp/probes/p205_direct.py`, `p205_flows.py`, `p205_types.py` and `p205_features.py` match CPython
+on both builds; `p205_out_of_range.py` is refused by name (CPython raises OverflowError at run time).
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
