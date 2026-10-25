@@ -1,3 +1,22 @@
+## 2026-10-25 - module bare annotation with a starred subscript target (job-pre254-10260535)
+
+The remaining pre-existing difference from the `rbpre125` review was the module-level bare
+annotation `xs[*a]: ann()`: CPython rejects it with `SyntaxError: can't use starred expression
+here`, while AIL built and ran it on both paths.  The cause was `module_bare_annotation` in
+`ail_syntax.py`: `_annotation_slice_parts` returned None for a Starred slice and the rewrite
+returned without touching the statement, which the lowerers then dropped because it had no value.
+The rewrite now raises a named compile-time refusal (exit 2 on the general and default builds)
+and recursively detects a Starred inside nested tuple displays as well.  Starred load positions
+(`xs[[*a]]`, `xs[ys[*a]]`, `xs[f(*a)]`, `xs[(*a,) if c else 0]`, `xs[(*a,)+tail]`) and the
+annotated assignment with a value keep their old behaviour.
+
+Probes `/tmp/probes/pre254_direct.py`, `pre254_tuple_form.py`, `pre254_mixed.py`,
+`pre254_nested.py`, `pre254_future.py` and `/tmp/probes/pre254/valid_*.py` cover direct,
+trailing-comma, mixed, double-star, nested-tuple, `__future__`, attribute/list-item/dict-value/
+call bases, an empty star, and load-position/value forms on both builds; all are refused by name
+or match CPython.  Added `test_ail_pre254.py` (2 tests, both builds) and registered it in
+`ail_check.MODULES`.  Final-state tests: test_ail_pre254, test_ail_safetynet, test_ail_files,
+test_ail_corpus_findings3, test_ail_pre124 and test_ail_pre125 pass.
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a
