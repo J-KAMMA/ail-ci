@@ -5534,6 +5534,15 @@ class Compiler(boxclosure.ClosureMixin):
                               'defaults are modelled)')
         args = node.args
         kwargs = {kw.arg: kw.value for kw in node.keywords}
+        if (isinstance(f, ast.Call) and isinstance(f.func, ast.Name) and f.func.id == 'getattr'
+                and f.func.id not in self.functions and len(f.args) in (2, 3) and not f.keywords
+                and (len(f.args) == 3 or not (isinstance(f.args[1], ast.Constant)
+                        and isinstance(f.args[1].value, str) and f.args[1].value.isidentifier()))):
+            # getattr(obj, <computed name>[, default])(...): the name may reach a method, which
+            # is not a value the run time keeps in the instance's attribute table.  Try every
+            # user method name at run time before falling back to the ordinary attribute lookup.
+            return self._call_computed_getattr(f.args[0], f.args[1], args, kwargs, ctx,
+                                               f.args[2] if len(f.args) == 3 else None)
         if isinstance(f, ast.Name):
             return self._call_name(f.id, args, kwargs, ctx)
         if isinstance(f, ast.Attribute):
@@ -6826,15 +6835,131 @@ class Compiler(boxclosure.ClosureMixin):
             'ail_class_is_or_subclass(((ail_instobj *)%s.o)->cls, g_slots_arr[%d])' % (obj_c, self.global_slots['class:' + c])
             for c in owners))
 
-    def _attr_builtin_target(self, node):
+    def _attr_builtin_target(self, node, ctx):
         if isinstance(node, ast.Name) and (node.id in self.module_aliases or node.id == 'sys'):
             raise Unsupported('getattr / hasattr / setattr on the module %s (only instances of the program\'s classes)'
                               % node.id)
+        if (isinstance(node, ast.Name) and node.id in self.classes and node.id not in ctx.slot_of
+                and node.id not in self.module_names):
+            raise Unsupported('getattr / hasattr / setattr on the class %s (only instances of the program\'s classes)'
+                              % node.id)
+
+    def _method_arity_error(self, cls, name, info, args, kwargs):
+        """CPython 3.12's TypeError text for a positional-argument count this method cannot
+        take, or None when this is not the reason the call does not bind."""
+        if kwargs or any(isinstance(a, ast.Starred) for a in args):
+            return None
+        strip_self = info.get('is_method') and not info.get('is_static')
+        params = info['params'][1:] if strip_self else list(info['params'])
+        defaults = info.get('defaults', {})
+        nreq = len([p for p in params if p not in defaults])
+        base = 0 if info.get('is_static') else 1
+        given = len(args) + base
+        qn = cls + '.' + name
+        if len(args) < nreq:
+            miss = ["'%s'" % p for p in params[len(args):nreq]]
+            if len(miss) == 1:
+                names = miss[0]
+            elif len(miss) == 2:
+                names = '%s and %s' % (miss[0], miss[1])
+            else:
+                names = '%s, and %s' % (', '.join(miss[:-1]), miss[-1])
+            return ('%s() missing %d required positional argument%s: %s' %
+                    (qn, len(miss), '' if len(miss) == 1 else 's', names))
+        if not info.get('vararg'):
+            top = len(params) + base
+            low = nreq + base
+            if given > top:
+                if low != top:
+                    return ('%s() takes from %d to %d positional arguments but %d were given' %
+                            (qn, low, top, given))
+                return ('%s() takes %d positional argument%s but %d were given' %
+                        (qn, top, '' if top == 1 else 's', given))
+        return None
+
+    def _call_computed_getattr(self, objnode, namenode, args, kwargs, ctx, dfltnode=None):
+        """`getattr(obj, name[, default])(...)` with `name` computed at run time: the receiver's
+        class and the name are both known only at run time, so test each user method name (and,
+        for a match, each class that defines it) before taking the ordinary attribute route.
+        obj, name and default are evaluated once, in CPython's order; the call's arguments only
+        in the chosen branch."""
+        self._attr_builtin_target(objnode, ctx)
+        obj = ctx.tmp()
+        ctx.emit('%s = %s;' % (obj, self.expr(objnode, ctx)))
+        name = ctx.tmp()
+        ctx.emit('%s = %s;' % (name, self.expr(namenode, ctx)))
+        dflt = None
+        if dfltnode is not None:
+            dflt = ctx.tmp()
+            ctx.emit('%s = %s;' % (dflt, self.expr(dfltnode, ctx)))
+        out = ctx.tmp()
+        done = ctx.new_cvar('dm')
+        ctx.emit('{ int %s = 0;' % done)
+        ctx.indent += 1
+        names = sorted({m for c in self.class_order for m, info in self.classes[c]['methods'].items()
+                        if not info.get('is_property') and not (m.startswith('__') and m.endswith('__'))})
+        def depth(c):
+            n = 0
+            while self.classes[c]['base'] in self.classes:
+                c = self.classes[c]['base']
+                n += 1
+            return n
+        owner_order = sorted(self.class_order, key=depth, reverse=True)
+        for m in names:
+            ctx.emit('if (!%s && ail2a_streq(%s, %s)) {' % (done, name, c_str_literal(m)))
+            ctx.indent += 1
+            ctx.emit('if (%s.tag == AIL_T_INST || %s.tag == AIL_T_EXC) {' % (obj, obj))
+            ctx.indent += 1
+            first = True
+            for c in owner_order:
+                info = self.classes[c]['methods'].get(m)
+                if info is None or info.get('is_property'):
+                    continue
+                ctx.emit('%sif (ail_class_is_or_subclass(((ail_instobj *)%s.o)->cls, g_slots_arr[%d])) {' %
+                         ('' if first else 'else ', obj, self.global_slots['class:' + c]))
+                first = False
+                ctx.indent += 1
+                mark = len(ctx.lines)
+                try:
+                    argcs = self._bind_args(m, info, args, kwargs, ctx)
+                except Unsupported:
+                    del ctx.lines[mark:]
+                    argcs = None
+                if argcs is not None:
+                    if not info.get('is_static'):
+                        argcs = [self._self_arg(info, obj)] + argcs
+                    ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], out,
+                             ''.join(', ' + a for a in argcs)))
+                    ctx.check()
+                    ctx.emit('%s = 1;' % done)
+                else:
+                    msg = self._method_arity_error(c, m, info, args, kwargs)
+                    if msg is not None:
+                        ctx.uses_st = True
+                        ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, %s);' % c_str_literal(msg))
+                        ctx.emit('goto %s;' % ctx.cur_err_target())
+                ctx.indent -= 1
+                ctx.emit('}')
+            ctx.indent -= 1
+            ctx.emit('}')
+            ctx.indent -= 1
+            ctx.emit('}')
+        ctx.emit('if (!%s) {' % done)
+        ctx.indent += 1
+        gargs = [_PreC(obj), _PreC(name)] + ([_PreC(dflt)] if dflt is not None else [])
+        got = self._b_getattr(gargs, {}, ctx)
+        r = self.call_value(got, args, kwargs, ctx)
+        ctx.emit('%s = %s;' % (out, r))
+        ctx.indent -= 1
+        ctx.emit('}')
+        ctx.indent -= 1
+        ctx.emit('}')
+        return out
 
     def _b_getattr(self, args, kwargs, ctx):
         if len(args) not in (2, 3) or kwargs:
             raise Unsupported('getattr() with other than (object, name[, default])')
-        self._attr_builtin_target(args[0])
+        self._attr_builtin_target(args[0], ctx)
         if _literal_chain_attr(args[1]):
             raise Unsupported('reading %s (exception chaining is not kept here)' % args[1].value)
         if isinstance(args[1], ast.Constant) and isinstance(args[1].value, str) and \
@@ -6852,7 +6977,7 @@ class Compiler(boxclosure.ClosureMixin):
     def _b_hasattr(self, args, kwargs, ctx):
         if len(args) != 2 or kwargs:
             raise Unsupported('hasattr() with other than (object, name)')
-        self._attr_builtin_target(args[0])
+        self._attr_builtin_target(args[0], ctx)
         if _literal_chain_attr(args[1]):
             raise Unsupported('reading %s (exception chaining is not kept here)' % args[1].value)
         o, n = self.expr(args[0], ctx), self.expr(args[1], ctx)
@@ -6877,7 +7002,7 @@ class Compiler(boxclosure.ClosureMixin):
     def _b_setattr(self, args, kwargs, ctx):
         if len(args) != 3 or kwargs:
             raise Unsupported('setattr() with other than (object, name, value)')
-        self._attr_builtin_target(args[0])
+        self._attr_builtin_target(args[0], ctx)
         if _literal_chain_attr(args[1]):
             raise Unsupported('writing %s (exception chaining is not kept here)' % args[1].value)
         o, n, v = (self.expr(a, ctx) for a in args)
@@ -6890,7 +7015,7 @@ class Compiler(boxclosure.ClosureMixin):
     def _b_vars(self, args, kwargs, ctx):
         if len(args) != 1 or kwargs:
             raise Unsupported('vars() with other than one argument')
-        self._attr_builtin_target(args[0])
+        self._attr_builtin_target(args[0], ctx)
         o = self.expr(args[0], ctx)
         self.rt_needs.add('attr')
         t = ctx.tmp()

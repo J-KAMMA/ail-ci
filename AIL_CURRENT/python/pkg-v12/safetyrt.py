@@ -1388,10 +1388,39 @@ static inline ail_st ail2a_chain_refused(ail_ctx *cx, const char *name) {
     char m[320]; snprintf(m, sizeof m, "reading %s (exception chaining is not kept here)", name);
     return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, m);
 }
+static inline int ail2a_dunder_dict(const char *name) {
+    return strcmp(name, "__dict__") == 0;
+}
+/* The instance's own attributes as a dict, as vars(obj) and obj.__dict__ show them: a method
+   is not an attribute, and neither CPython nor the run time stores a dunder in __dict__. */
+static inline ail_st ail2a_instance_dict(ail_ctx *cx, ail_obj *out, ail_obj obj) {
+    AIL_FRAME_ENTER(cx, fr, 2);
+    fr.slots[0] = ail_dict_new(cx);
+    ail_instobj *o = (ail_instobj *)obj.o;
+    for (int64_t i = 0; i < o->n; i++) {
+        int64_t nid = o->attrs[i].name_id;
+        if (nid < 0 || nid >= cx->intern_n) continue;
+        const char *nm = cx->intern_tab[nid];
+        if (nm[0] == '_' && nm[1] == '_') continue;
+        if (obj.tag == AIL_T_EXC && strcmp(nm, "args") == 0) continue;   /* a slot on an exception, not a __dict__ entry */
+        fr.slots[1] = ail_bi_str_from_utf8(cx, nm, (int64_t)strlen(nm));
+        ail_st st = ail_dict_set(cx, fr.slots[0], fr.slots[1], o->attrs[i].val);
+        if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+        o = (ail_instobj *)obj.o;
+    }
+    *out = fr.slots[0];
+    AIL_FRAME_LEAVE(cx, fr);
+    return AIL_OK;
+}
 /* getattr(obj, name[, default]); is_method: the class of obj has a method of that name */
 static inline ail_st ail2a_getattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_obj name, int has_dflt, ail_obj dflt) {
     char buf[256]; ail_st st = ail2a_cname(cx, name, buf, sizeof buf); if (st != AIL_OK) return st;
     if ((st = ail2a_need_inst(cx, obj, "getattr")) != AIL_OK) return st;
+    if (ail2a_dunder_dict(buf)) return ail2a_instance_dict(cx, out, obj);
+    if (strcmp(buf, "__class__") == 0) {
+        *out = ((ail_instobj *)obj.o)->cls;
+        return AIL_OK;
+    }
     if (ail2a_find(cx, obj, buf, out)) return AIL_OK;
     /* a name computed at run time: refuse it by name on an exception, like the direct attribute form */
     if (obj.tag == AIL_T_EXC && ail2a_chain_name(buf)) return ail2a_chain_refused(cx, buf);
@@ -1410,6 +1439,7 @@ static inline ail_st ail2a_hasattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_o
     char buf[256]; ail_st st = ail2a_cname(cx, name, buf, sizeof buf); if (st != AIL_OK) return st;
     if (is_method) { *out = ail_box_bool(1); return AIL_OK; }
     if ((st = ail2a_need_inst(cx, obj, "hasattr")) != AIL_OK) return st;
+    if (ail2a_dunder_dict(buf) || strcmp(buf, "__class__") == 0) { *out = ail_box_bool(1); return AIL_OK; }
     ail_obj v;
     int found = ail2a_find(cx, obj, buf, &v);
     if (!found && obj.tag == AIL_T_EXC && ail2a_chain_name(buf)) return ail2a_chain_refused(cx, buf);
@@ -1428,22 +1458,7 @@ static inline ail_st ail2a_setattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_o
 }
 static inline ail_st ail2a_vars(ail_ctx *cx, ail_obj *out, ail_obj obj) {
     ail_st st = ail2a_need_inst(cx, obj, "vars"); if (st != AIL_OK) return st;
-    AIL_FRAME_ENTER(cx, fr, 2);
-    fr.slots[0] = ail_dict_new(cx);
-    ail_instobj *o = (ail_instobj *)obj.o;
-    for (int64_t i = 0; i < o->n; i++) {
-        int64_t nid = o->attrs[i].name_id;
-        if (nid < 0 || nid >= cx->intern_n) continue;
-        const char *nm = cx->intern_tab[nid];
-        if (nm[0] == '_' && nm[1] == '_' ) continue;
-        fr.slots[1] = ail_bi_str_from_utf8(cx, nm, (int64_t)strlen(nm));
-        st = ail_dict_set(cx, fr.slots[0], fr.slots[1], o->attrs[i].val);
-        if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
-        o = (ail_instobj *)obj.o;
-    }
-    *out = fr.slots[0];
-    AIL_FRAME_LEAVE(cx, fr);
-    return AIL_OK;
+    return ail2a_instance_dict(cx, out, obj);
 }
 '''
 

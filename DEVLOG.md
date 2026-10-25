@@ -17,6 +17,32 @@ refused by name. `p4` also matches CPython on the typed path (`AIL_NO_GENERAL=1`
 
 # DEVLOG
 
+## 2026-10-25 - pre189: computed method calls, instance dunders, class-attribute builtins
+
+`getattr(obj, name)(...)` with a computed `name` now reaches a user method on both builds, not
+only the literal spelling: the general path evaluates `obj`, `name` and an optional default once,
+tests every user method name against the run-time string (most derived class first), and calls
+the matching method with the call's arguments evaluated only in the chosen branch. An override,
+a @staticmethod, a @classmethod, a default argument and the value arriving through an argument, a
+list item, an attribute or a dict value all match CPython; a positional-argument mismatch raises
+CPython's TypeError text instead of falling through to AttributeError. A name that is not a method
+still takes the ordinary attribute route, including `getattr(obj, name, default)(...)`.
+
+An instance now answers `hasattr(obj, "__class__")` and `hasattr(obj, "__dict__")` with True, and
+`getattr(obj, "__dict__")` returns the same mapping as `vars(obj)` (dunders and an exception's
+`args` slot excluded); `getattr(obj, "__class__")` is the run-time class object.
+
+`getattr` / `hasattr` / `setattr` on a class value (including `vars`) are refused by name at
+compile time on both builds. A class here keeps its methods and class attributes outside the
+instance attribute table, so there is no run-time mapping to read or write; CPython accepts these
+calls, so the refusal is recorded in DIFFERENCES (C?-job-pre189-10251546-1).
+
+Added `AIL_CURRENT/test_ail_pre189.py` (computed method routes, instance dunders, and the class
+refusal on the default and general builds). Probes `/tmp/probes/p1`-`p5` covered literal and
+computed names, overrides, static/class methods, defaults, aliases, empty/non-string names,
+argument / list-item / attribute / dict routes, instance and exception `__dict__`, and both
+class refusal forms; all match CPython or are refused by name.
+
 ## 2026-10-24 - round() negative ndigits boundary (job-pre160-10250349)
 
 Review follow-up. The new `__index__` route made `round(float, ndigits)` reachable with any int64,
