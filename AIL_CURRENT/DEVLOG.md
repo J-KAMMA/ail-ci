@@ -1,3 +1,12 @@
+## 2026-10-25 -- pre183: bytes/bytearray membership wrong-type text (job-pre183-10251542)
+
+A non-integer, non-bytes left operand of `in` on bytes/bytearray raised
+`argument should be integer or bytes-like object, not '<type>'`; CPython uses
+`a bytes-like object is required, not '<type>'`. Both receivers now share
+`_ail_b_contains`, which keeps the integer-byte path and uses the bytes-like path for every
+other operand. `test_ail_pre183.py` covers values through arguments, list items, dict values,
+attributes, both receivers, valid bytes/bytearray members and the integer boundaries.
+
 ## 2026-10-25 -- pre183: builtin-function tuple members name their class (job-pre183-10251542)
 
 A builtin function value in a tuple passed to `str.startswith`/`str.endswith` was named

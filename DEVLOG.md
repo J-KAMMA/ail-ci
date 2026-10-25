@@ -1,3 +1,18 @@
+## 2026-10-25 - pre183: bytes/bytearray membership wrong-type text (job-pre183-10251542)
+
+The first still-differing item from the fuzz43 pre-existing list was the bytes/bytearray
+containment message: a str, float, None, list or tuple left operand raised
+`argument should be integer or bytes-like object, not '<type>'` on both builds, where CPython
+uses `a bytes-like object is required, not '<type>'`. `bytes.__contains__` and
+`bytearray.__contains__` now share `_ail_b_contains`, which keeps the integer-byte path
+(including the 0..255 ValueError) and sends every other operand through the bytes-like
+coercion that already carries CPython's message. Error-only branch; no hot-path change.
+
+Probes in `/tmp/probes` (`pre183_in_full.py`, `pre183_in_types.py`) covered str/float/None/
+list/tuple through a name, argument, list item, dict value and attribute, bytes and bytearray
+receivers, bytes/bytearray members, int hits and misses, bool, out-of-range and negative ints,
+on both `cmp.sh` builds; all match CPython. `test_ail_pre183.py` keeps the case.
+
 ## 2026-10-25 - pre183: builtin-function tuple members name their class (job-pre183-10251542)
 
 The pre-existing fuzz43 finding still left on this tree was the startswith/endswith tuple-member

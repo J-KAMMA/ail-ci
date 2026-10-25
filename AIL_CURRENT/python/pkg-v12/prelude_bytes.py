@@ -120,6 +120,12 @@ def _ail_bsub(x):
     raise TypeError("argument should be integer or bytes-like object, not '" + type(x).__name__ + "'")
 
 
+def _ail_b_contains(x):
+    if isinstance(x, int):
+        return _ail_bsub(x)
+    return _ail_bs(x)
+
+
 def _ail_b_source(source, encoding, errors):
     if source is None:
         if encoding is not None or errors is not None:
@@ -505,7 +511,7 @@ class bytes:
         return iter(_ail_b_ints(self._s))
 
     def __contains__(self, x):
-        return _ail_bsub(x) in self._s
+        return _ail_b_contains(x) in self._s
 
     def __eq__(self, other):
         if isinstance(other, bytes):
@@ -636,7 +642,7 @@ class bytearray:
         return iter(self._a)
 
     def __contains__(self, x):
-        return _ail_bsub(x) in _ail_b_from_ints(self._a)
+        return _ail_b_contains(x) in _ail_b_from_ints(self._a)
 
     def __eq__(self, other):
         if isinstance(other, bytearray):

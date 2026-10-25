@@ -1,4 +1,10 @@
-"""Builtin-function members of startswith/endswith tuples against CPython 3.12 (job pre183).
+"""Bytes/bytearray membership and startswith/endswith tuple members against CPython 3.12 (job pre183).
+
+A bytes/bytearray `in` test with a non-integer, non-bytes left operand reported the
+bytes-method message ("argument should be integer or bytes-like object") instead of
+CPython's containment message ("a bytes-like object is required"). The receiver classes
+now use a dedicated coercion that keeps the integer-byte path and names the left operand
+through the bytes-like path.
 
 A tuple passed to str.startswith/endswith may contain only str. A builtin function value
 reaches the runtime as a generated FUNC object (the general path lowers `len` used as a
@@ -74,6 +80,49 @@ main()
 '''
 
 
+BYTES_IN_WRONG_TYPE = r'''class Box:
+    pass
+
+
+def probe(tag: str, f) -> None:
+    try:
+        print(tag, f())
+    except Exception as e:
+        print(tag, type(e).__name__, str(e))
+
+
+def from_arg(tag: str, x, receiver) -> None:
+    probe(tag + "-arg", lambda: x in receiver)
+
+
+def main() -> None:
+    b: bytes = b"abc"
+    ba: bytearray = bytearray(b"abc")
+    box = Box()
+    box.bad = "a"
+    xs = ["a"]
+    d = {"bad": "a"}
+    for recv_name, recv in (("b", b), ("ba", ba)):
+        for tag, x in (("str", "a"), ("float", 1.5), ("none", None), ("list", [1]), ("tuple", (1,))):
+            probe(recv_name + "-" + tag, lambda x=x, recv=recv: x in recv)
+        probe(recv_name + "-bytes", lambda recv=recv: b"a" in recv)
+        probe(recv_name + "-bytearray", lambda recv=recv: bytearray(b"a") in recv)
+        probe(recv_name + "-int", lambda recv=recv: 97 in recv)
+        probe(recv_name + "-int-miss", lambda recv=recv: 5 in recv)
+        probe(recv_name + "-bool", lambda recv=recv: True in recv)
+        probe(recv_name + "-int-big", lambda recv=recv: 1000 in recv)
+        probe(recv_name + "-int-neg", lambda recv=recv: -1 in recv)
+        from_arg(recv_name + "-str", "a", recv)
+        probe(recv_name + "-list-item", lambda recv=recv: xs[0] in recv)
+        probe(recv_name + "-dict-value", lambda recv=recv: d["bad"] in recv)
+        probe(recv_name + "-attribute", lambda recv=recv: box.bad in recv)
+    print("done")
+
+
+main()
+'''
+
+
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -113,6 +162,9 @@ class Pre183Tests(unittest.TestCase):
 
     def test_builtin_function_member_type_name(self):
         self.check('builtin_member', BUILTIN_MEMBER)
+
+    def test_bytes_contains_wrong_type_name(self):
+        self.check('bytes_in_wrong_type', BYTES_IN_WRONG_TYPE)
 
 
 if __name__ == '__main__':
