@@ -446,14 +446,15 @@ PART_EDITS = {
          '        ail_exc_utf8_fail(b, nb, bad, error_code);\n        if (error_code && ail_exc_top >= 0) ail_raise_named(error_code);\n        ail_die(bad);\n'),
         ('static int64_t ail__str_to_int_full(ail_str s);\n',
          'static void ail_exc_int_fail(ail_str s) __attribute__((noreturn));\n'
+         'static void ail_exc_int_limit_fail(int64_t ndigits) __attribute__((noreturn));\n'
          'static void ail_exc_float_fail(ail_str s) __attribute__((noreturn));\n'
          'static int64_t ail__str_to_int_full(ail_str s);\n'),
         # an OSError raised for a path says which (legacy whole-file reads and writes)
         ('static void ail_file_fail(int err) {\n', 'static void ail_exc_os_fail(int err, ail_str path);\nstatic void ail_file_fail(int err) {\n'),
         ('    if (!f) ail_file_fail(open_errno);\n    return f;', '    if (!f) ail_exc_os_fail(open_errno, path);\n    return f;'),
         ('free(buf); ail_file_fail(read_errno); }', 'free(buf); ail_exc_os_fail(read_errno, path); }'),
-        ('    if (rc == 1) ail_raise_named(AIL_EXC_VALUE);\n    if (rc == 2) ail_die("integer overflow");\n    return v;\n}\n/* `float(<str>)`',
-         '    if (rc == 1) ail_exc_int_fail(s);\n    if (rc == 2) ail_die("integer overflow");\n    return v;\n}\n/* `float(<str>)`'),
+        ('    if (rc == 1) ail_raise_named(AIL_EXC_VALUE);\n    if (rc == 2) ail_die("integer overflow");\n    if (rc == 3) ail_raise_named(AIL_EXC_VALUE);\n    return v;\n}\n/* `float(<str>)`',
+         '    if (rc == 1) ail_exc_int_fail(s);\n    if (rc == 2) ail_die("integer overflow");\n    if (rc == 3) ail_exc_int_limit_fail(ndigits);\n    return v;\n}\n/* `float(<str>)`'),
         ('    int rc = ail__asc_to_float(b, len, &v);\n    if (b != stackbuf) free(b);\n    if (rc) ail_raise_named(AIL_EXC_VALUE);\n    return v;\n}\n/* AIL_TASK_strops_20260915.md Part A',
          '    int rc = ail__asc_to_float(b, len, &v);\n    if (b != stackbuf) free(b);\n    if (rc) ail_exc_float_fail(s);\n    return v;\n}\n/* AIL_TASK_strops_20260915.md Part A'),
     ),
@@ -971,5 +972,11 @@ static void ail_exc_os_fail(int err, ail_str path) {
     __builtin_unreachable();
 }
 static void ail_exc_int_fail(ail_str s) { ail__exc_value_error("invalid literal for int() with base 10: ", s); }
+static void ail_exc_int_limit_fail(int64_t ndigits) {
+    char text[192];
+    int n = snprintf(text, sizeof text, "Exceeds the limit (4300 digits) for integer string conversion: value has %lld digits; use sys.set_int_max_str_digits() to increase the limit", (long long)ndigits);
+    ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE, (const uint8_t *)text, n, 1));
+    __builtin_unreachable();
+}
 static void ail_exc_float_fail(ail_str s) { ail__exc_value_error("could not convert string to float: ", s); }
 '''

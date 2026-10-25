@@ -1598,12 +1598,13 @@ static int64_t ail__str_to_int_full(ail_str s) {
         }
     }
     char stackbuf[128];
-    int64_t len, v = 0;
+    int64_t len, v = 0, ndigits = 0;
     char *b = ail__str_ascii(s, stackbuf, (int64_t)sizeof stackbuf, &len);
-    int rc = ail__asc_to_int(b, len, 10, &v);
+    int rc = ail__asc_to_int(b, len, 10, &v, &ndigits);
     if (b != stackbuf) free(b);
     if (rc == 1) ail_raise_named(AIL_EXC_VALUE);
     if (rc == 2) ail_die("integer overflow");
+    if (rc == 3) ail_raise_named(AIL_EXC_VALUE);
     return v;
 }
 /* `float(<str>)` -- AIL_TASK_p3shapes_20260916.md mechanism 3, the one str-to-number conversion
@@ -5654,6 +5655,12 @@ BYTES = r"""
    and stdlib, so this block brings its own header. It is emitted only when a program
    reaches bytes, so a program that does not is unchanged byte for byte. */
 #include <string.h>
+#ifndef _WIN32
+/* <string.h> declares memmem only under _GNU_SOURCE/_DEFAULT_SOURCE, and AIL also compiles
+   the emitted C with -std=c11, which defines neither. Declare it here so the runtime is
+   self-contained in every build mode; glibc and musl both export the symbol. */
+void *memmem(const void *haystack, size_t haystacklen, const void *needle, size_t needlelen);
+#endif
 
 /* The type is Python's `bytes`, not its `str`, and that is the whole design decision.
    `bytes` is an immutable sequence of integers 0..255: `b[i]` is an int, iterating yields ints,
@@ -6055,11 +6062,26 @@ static int64_t ail_bytes_count_range(ail_bytes h, ail_bytes nd, int64_t start, i
         }
         return count;
     }
+#ifndef _WIN32
+    /* A short needle in a large window: glibc/musl memmem picks its own SIMD-friendly
+       algorithm, while Horspool walks every window and recomputes the shift. The
+       non-overlapping loop is the same one the C reference uses. */
+    {
+        const unsigned char *p = h.p + start, *e = h.p + end;
+        while ((size_t)(e - p) >= (size_t)nd.n &&
+               (p = (const unsigned char *)memmem(p, (size_t)(e - p), nd.p, (size_t)nd.n))) {
+            ++count;
+            p += nd.n;
+        }
+        return count;
+    }
+#else
     ail_pairskip T;
     ail_pairskip_init(&T, nd.p, nd.n);
     for (int64_t i = start, hit; (hit = ail_pairskip_find(&T, h.p + i, end - i, nd.p, nd.n)) >= 0; i += hit + nd.n)
         ++count;
     return count;
+#endif
 }
 static int64_t ail_bytes_startswith_range(ail_bytes h, ail_bytes nd, int64_t start, int64_t end) {
     if (h.n < 0 || (uintmax_t)h.n > (uintmax_t)SIZE_MAX ||
@@ -9366,12 +9388,17 @@ static char *ail__units_ascii(ail_str s, char *stack, int64_t cap, int64_t *len)
 
 static inline int64_t ail_str_to_int(ail_str s) {
     char stackbuf[128];
-    int64_t len, v = 0;
+    int64_t len, v = 0, ndigits = 0;
     char *b = ail__units_ascii(s, stackbuf, (int64_t)sizeof stackbuf, &len);
-    int rc = ail__asc_to_int(b, len, 10, &v);
+    int rc = ail__asc_to_int(b, len, 10, &v, &ndigits);
     if (b != stackbuf) free(b);
     if (rc == 1) ail_raise_c(AIL_ERR_VALUE, "invalid literal for int() with base 10");
     if (rc == 2) ail_die("OverflowError: integer overflow (this runtime's int64 boundary, not catchable)");
+    if (rc == 3) {
+        char msg[192];
+        snprintf(msg, sizeof msg, "Exceeds the limit (4300 digits) for integer string conversion: value has %lld digits; use sys.set_int_max_str_digits() to increase the limit", (long long)ndigits);
+        ail_raise_c(AIL_ERR_VALUE, msg);
+    }
     return v;
 }
 static inline double ail_str_to_float(ail_str s) {
@@ -11083,7 +11110,12 @@ static inline double ail_float_val(ail_obj x) { return ((ail_floatbox *)x.o)->v;
    (they only need cx->builtin_cls, already part of ail_ctx, plus ail_str_from_cstr from
    ail_str2.h -- so the body has to come AFTER the include, the prototype BEFORE it).
    =================================================================================== */
-typedef struct { ail_gcobj hdr; ail_obj *p; int64_t n, cap; } ail_vecobj;
+typedef struct { ail_gcobj hdr; ail_obj *p; int64_t n, cap;
+    uint8_t from_generator;     /* a LIST that materialised a generator expression: CPython
+                                   generators are not reversible, so ail_iter_reversed refuses it */
+    int64_t gen_idx;            /* next()/iteration cursor of a materialised generator expression
+                                   (one cursor per object, like a real generator's) */
+} ail_vecobj;
 
 static inline ail_st ail_raise_c(ail_ctx *cx, int builtin_id, const char *msg);
 static inline ail_st ail_hit_limit(ail_ctx *cx, const char *name, const char *detail);
@@ -13768,12 +13800,17 @@ static inline int ail__is_int_ws(uint16_t c) { return ail__is_ws(c) && !(c >= 0x
 static inline ail_st ail_str_to_int(ail_ctx *cx, int64_t *out, ail_obj sobj) {
     ail_str s = ail_view_to_str(sobj);
     char stackbuf[128];
-    int64_t len, v = 0;
+    int64_t len, v = 0, ndigits = 0;
     char *b = ail__units_ascii(s, stackbuf, (int64_t)sizeof stackbuf, &len);
-    int rc = ail__asc_to_int(b, len, 10, &v);
+    int rc = ail__asc_to_int(b, len, 10, &v, &ndigits);
     if (b != stackbuf) free(b);
     if (rc == 1) return ail_raise_c(cx, AIL_B_VALUEERROR, "invalid literal for int() with base 10");
     if (rc == 2) return ail_hit_limit(cx, "int_overflow", "int() literal exceeds int64");
+    if (rc == 3) {
+        char msg[192];
+        snprintf(msg, sizeof msg, "Exceeds the limit (4300 digits) for integer string conversion: value has %lld digits; use sys.set_int_max_str_digits() to increase the limit", (long long)ndigits);
+        return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
+    }
     *out = v;
     return AIL_OK;
 }
@@ -13800,12 +13837,17 @@ static inline ail_st ail_str_to_int_base(ail_ctx *cx, int64_t *out, ail_obj sobj
         return ail_raise_c(cx, AIL_B_VALUEERROR, "int() base must be >= 2 and <= 36, or 0");
     ail_str s = ail_view_to_str(sobj);
     char stackbuf[128];
-    int64_t len, v = 0;
+    int64_t len, v = 0, ndigits = 0;
     char *b = ail__units_ascii(s, stackbuf, (int64_t)sizeof stackbuf, &len);
-    int rc = ail__asc_to_int(b, len, base, &v);
+    int rc = ail__asc_to_int(b, len, base, &v, &ndigits);
     if (b != stackbuf) free(b);
     if (rc == 1) return ail__int_badlit(cx, sobj, base);
     if (rc == 2) return ail_hit_limit(cx, "int_overflow", "int() literal exceeds int64");
+    if (rc == 3) {
+        char msg[192];
+        snprintf(msg, sizeof msg, "Exceeds the limit (4300 digits) for integer string conversion: value has %lld digits; use sys.set_int_max_str_digits() to increase the limit", (long long)ndigits);
+        return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
+    }
     *out = v;
     return AIL_OK;
 }
@@ -14345,6 +14387,15 @@ static inline int ail_exc_matches_b(ail_ctx *cx, int builtin_id) {
 static inline void ail_exc_clear(ail_ctx *cx) { cx->exc_pending = 0; }
 static inline ail_obj ail_exc_class(ail_ctx *cx) { return cx->exc.cls; }
 static inline ail_obj ail_exc_msg(ail_ctx *cx) { return cx->exc.msg; }
+/* True for the ValueError int(<str>) raises past CPython's 4300-digit conversion limit. The
+   generated int()/float() ValueError message fix-up must leave that one alone. */
+static inline int ail_exc_is_int_limit(ail_ctx *cx) {
+    static const char prefix[] = "Exceeds the limit";
+    ail_str m = ail_view_to_str(cx->exc.msg);
+    for (int64_t i = 0; prefix[i]; i++)
+        if (i >= m.n || ail_chr(m, i) != (uint16_t)(unsigned char)prefix[i]) return 0;
+    return 1;
+}
 static inline ail_obj ail_exc_as_value(ail_ctx *cx); /* defined after ail_inst_new, in the classes
                                                   section: builds (once) the INST bound by
                                                   `except E as e`. */
@@ -15159,6 +15210,7 @@ static inline ail_st ail_raise_key_arg(ail_ctx *cx, ail_obj arg);
 static inline ail_st ail_dict_getitem(ail_ctx *cx, ail_obj *out, ail_obj d, ail_obj key) {
     ail_obj *v; ail_st st = ail_map_get(cx, &v, (ail_mapobj *)d.o, key); if (st != AIL_OK) return st;
     if (!v) {
+        if (ail__is_counter(d)) { *out = ail_box_int(0); return AIL_OK; }   /* Counter.__missing__ */
         int fac = ((ail_mapobj *)d.o)->dd_factory;
         if (!fac) return ail_raise_key_arg(cx, key);
         ail_obj dflt = fac == 1 ? ail_box_int(0) : fac == 2 ? ail_list_new(cx) : fac == 3 ? ail_set_new(cx) : ail_str_from_cstr(cx, "");
@@ -15642,7 +15694,13 @@ static inline ail_st ail_op_contains(ail_ctx *cx, int *out, ail_obj c, ail_obj i
             *out = ail_str_find(ail_view_to_str(c), ail_view_to_str(item)) >= 0; return AIL_OK;
         case AIL_T_LIST: case AIL_T_TUPLE: {
             ail_vecobj *v = (ail_vecobj *)c.o;
-            for (int64_t i = 0; i < v->n; i++) if (ail_member_eq(v->p[i], item)) { *out = 1; return AIL_OK; }
+            /* `x in g` on a materialised generator expression consumes it up to and including the
+               match (or to the end when absent), sharing the same cursor as next() and loops */
+            int gen = c.tag == AIL_T_LIST && v->from_generator;
+            for (int64_t i = gen ? v->gen_idx : 0; i < v->n; i++) {
+                if (ail_member_eq(v->p[i], item)) { if (gen) v->gen_idx = i + 1; *out = 1; return AIL_OK; }
+            }
+            if (gen) v->gen_idx = v->n;
             *out = 0; return AIL_OK;
         }
         case AIL_T_DICT: { ail_obj *v; ail_st st = ail_map_get(cx, &v, (ail_mapobj *)c.o, item); if (st != AIL_OK) return st; *out = v != NULL; return AIL_OK; }
@@ -15833,6 +15891,8 @@ static inline ail_st ail_iter_reversed(ail_ctx *cx, ail_obj *out, ail_obj seq) {
         it->extra = ail_box_int((int64_t)(UINT64_C(0) - (uint64_t)r->step));
         ail_obj res; res.tag = AIL_T_ITER; res.o = (ail_gcobj *)it; *out = res; return AIL_OK;
     }
+    if (seq.tag == AIL_T_LIST && ((ail_vecobj *)seq.o)->from_generator)
+        return ail_raise_c(cx, AIL_B_TYPEERROR, "'generator' object is not reversible");
     if (seq.tag == AIL_T_LIST || seq.tag == AIL_T_TUPLE) n = ((ail_vecobj *)seq.o)->n;
     else if (seq.tag == AIL_T_STR) n = seq.sv.len;
     else { char buf[64]; snprintf(buf, sizeof buf, "'%s' object is not reversible", ail_type_name(seq.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
@@ -15865,8 +15925,11 @@ static inline ail_st ail_next(ail_ctx *cx, ail_obj *out, ail_obj iterobj) {
         }
         case AIL_IT_LIST: case AIL_IT_TUPLE: {
             ail_vecobj *v = (ail_vecobj *)it->target.o;
-            if (it->idx >= v->n) return AIL_STOP;
-            *out = v->p[it->idx++]; return AIL_OK;
+            /* a materialised generator expression is its own iterator: next() and every loop over
+               it share one cursor (CPython's generator object), unlike a plain list's iterators */
+            int64_t *idx = it->kind == AIL_IT_LIST && v->from_generator ? &v->gen_idx : &it->idx;
+            if (*idx >= v->n) return AIL_STOP;
+            *out = v->p[(*idx)++]; return AIL_OK;
         }
         case AIL_IT_STR: {
             if (it->idx >= it->target.sv.len) return AIL_STOP;
@@ -17179,9 +17242,9 @@ static inline ail_st ail_bi_abs(ail_ctx *cx, ail_obj *out, ail_obj x) {
    CPython's own _Py_dg_dtoa-based algorithm on every value checked while building this).
    =================================================================================== */
 static inline ail_st ail_bi_round_int_ndigits(ail_ctx *cx, ail_obj *out, int64_t v, int64_t n) {
-    if (-n >= 19) { *out = ail_box_int(0); return AIL_OK; } /* 10^19 exceeds int64 range: any
-        int64 value rounds to 0 at this scale -- documented simplification, never exercised
-        by a case here (no test uses ndigits this extreme) */
+    if (n <= -19) { *out = ail_box_int(0); return AIL_OK; } /* 10^19 exceeds int64 range: any
+        int64 value rounds to 0 at this scale -- documented simplification.  The comparison is
+        on n itself because -INT64_MIN is not representable. */
     int64_t p = 1;
     for (int64_t k = 0; k < -n; k++) p *= 10;
     int64_t q = v / p, r = v % p;
@@ -17196,41 +17259,61 @@ static inline ail_st ail_bi_round_int_ndigits(ail_ctx *cx, ail_obj *out, int64_t
     *out = ail_box_int(result);
     return AIL_OK;
 }
-static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, int64_t n) {
-    if (!has_n) {
-        if (ail__is_intlike(x.tag)) { *out = ail_box_int(x.i); return AIL_OK; }
-        if (x.tag != AIL_T_FLOAT) { char buf[80]; snprintf(buf, sizeof buf, "type %s doesn't define __round__ method", ail_type_name(x.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
+static inline ail_st ail_bi_round_no_method(ail_ctx *cx, ail_obj x) {
+    char buf[80]; snprintf(buf, sizeof buf, "type %s doesn't define __round__ method", ail_type_name(x.tag));
+    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+}
+static inline ail_st ail_bi_round_ndigits(ail_ctx *cx, ail_obj nobj, int64_t *out) {
+    if (ail__is_intlike(nobj.tag)) { *out = nobj.i; return AIL_OK; }
+    { char buf[96]; snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail_type_name(nobj.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
+}
+static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, ail_obj n) {
+    if (x.tag == AIL_T_FLOAT) {
+        if (!has_n || n.tag == AIL_T_NONE) {
+            double v = ail_float_val(x);
+            if (v != v) return ail_raise_c(cx, AIL_B_VALUEERROR, "cannot convert float NaN to integer");
+            if (isinf(v)) return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "cannot convert float infinity to integer");
+            double r = nearbyint(v);
+            if (r >= 9223372036854775808.0 || r < -9223372036854775808.0) return ail_hit_limit(cx, "int_overflow", "round() result exceeds int64");
+            *out = ail_box_int((int64_t)r);
+            return AIL_OK;
+        }
+        int64_t nn;
+        ail_st st = ail_bi_round_ndigits(cx, n, &nn);
+        if (st != AIL_OK) return st;
         double v = ail_float_val(x);
-        if (v != v) return ail_raise_c(cx, AIL_B_VALUEERROR, "cannot convert float NaN to integer");
-        if (isinf(v)) return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "cannot convert float infinity to integer");
-        double r = nearbyint(v);
-        if (r >= 9223372036854775808.0 || r < -9223372036854775808.0) return ail_hit_limit(cx, "int_overflow", "round() result exceeds int64");
-        *out = ail_box_int((int64_t)r);
+        if (v != v || isinf(v)) { *out = ail_box_float(cx, v); return AIL_OK; }
+        double result;
+        if (nn >= 0) {
+            int nd = (int)(nn > 323 ? 323 : nn);
+            char buf[400];
+            snprintf(buf, sizeof buf, "%.*f", nd, v);
+            result = strtod(buf, NULL);
+        } else if (nn <= -309) {
+            /* 10**309 exceeds DBL_MAX, so every finite double is nearer to zero than to the
+               first representable multiple of the scale.  CPython returns a signed zero. */
+            result = copysign(0.0, v);
+        } else {
+            int64_t neg = -nn;
+            double scale = 1.0;
+            for (int64_t k = 0; k < neg; k++) scale *= 10.0;
+            double scaled = v / scale;
+            double rr = nearbyint(scaled);
+            result = rr * scale;
+            if (isinf(result)) return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "rounded value too large to represent");
+        }
+        *out = ail_box_float(cx, result);
         return AIL_OK;
     }
     if (ail__is_intlike(x.tag)) {
-        if (n >= 0) { *out = ail_box_int(x.i); return AIL_OK; }
-        return ail_bi_round_int_ndigits(cx, out, x.i, n);
+        if (!has_n || n.tag == AIL_T_NONE) { *out = ail_box_int(x.i); return AIL_OK; }
+        int64_t nn;
+        ail_st st = ail_bi_round_ndigits(cx, n, &nn);
+        if (st != AIL_OK) return st;
+        if (nn >= 0) { *out = ail_box_int(x.i); return AIL_OK; }
+        return ail_bi_round_int_ndigits(cx, out, x.i, nn);
     }
-    if (x.tag != AIL_T_FLOAT) { char buf[80]; snprintf(buf, sizeof buf, "type %s doesn't define __round__ method", ail_type_name(x.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
-    double v = ail_float_val(x);
-    if (v != v || isinf(v)) { *out = ail_box_float(cx, v); return AIL_OK; }
-    double result;
-    if (n >= 0) {
-        int nd = (int)(n > 323 ? 323 : n);
-        char buf[400];
-        snprintf(buf, sizeof buf, "%.*f", nd, v);
-        result = strtod(buf, NULL);
-    } else {
-        int64_t nn = -n;
-        double scale = 1.0;
-        for (int64_t k = 0; k < nn && k < 400; k++) scale *= 10.0;
-        double scaled = v / scale;
-        double rr = nearbyint(scaled);
-        result = rr * scale;
-    }
-    *out = ail_box_float(cx, result);
-    return AIL_OK;
+    return ail_bi_round_no_method(cx, x);
 }
 
 /* ===================================================================================
@@ -17535,14 +17618,16 @@ static inline ail_st ail_bi_dict_fromkeys(ail_ctx *cx, ail_obj *out, ail_obj ite
     AIL_FRAME_LEAVE(cx, fr);
     return AIL_OK;
 }
-/* B028/B029: chr()/ord(). The folded runtime stores 16-bit code points.
-   Refuse values it cannot represent instead of truncating them. */
+/* B028/B029: chr()/ord(). Refuse values the backing unit cannot represent
+   instead of truncating them; the unit is 16 bits unless the folded host
+   headers (AIL_V2_WIDE_EMBED / AIL_V2_INCLUDE_ABS) use a 32-bit one. */
 static inline ail_st ail_bi_chr(ail_ctx *cx, ail_obj *out, ail_obj x) {
     if (!ail__is_intlike(x.tag)) { char buf[80]; snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail_type_name(x.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
     if (x.i < 0 || x.i > 0x10FFFF) return ail_raise_c(cx, AIL_B_VALUEERROR, "chr() arg not in range(0x110000)");
     if (x.i >= 0xD800 && x.i <= 0xDFFF) ail_die("chr() surrogate code point is unsupported");
-    if (x.i > 0xFFFF) ail_die("chr() non-BMP code point requires 32-bit strings");
-    ail_strback *b = ail_strback_alloc(cx, 1); b->data[0] = (uint16_t)x.i;
+    if (x.i > 0xFFFF && sizeof(((ail_strback *)0)->data[0]) < 4)
+        ail_die("chr() non-BMP code point requires 32-bit strings");
+    ail_strback *b = ail_strback_alloc(cx, 1); b->data[0] = x.i;
     *out = ail_str_view((ail_gcobj *)b, 0, 1);
     return AIL_OK;
 }
@@ -20225,6 +20310,16 @@ static inline ail_st ail_it_combinations_wr(ail_ctx *cx, ail_obj *out, ail_obj i
 
 /* ---- the dispatcher itself ----------------------------------------------------------- */
 static inline ail_st ail_it_next(ail_ctx *cx, ail_obj *out, ail_obj itobj) {
+    if (itobj.tag == AIL_T_LIST && ((ail_vecobj *)itobj.o)->from_generator) {
+        ail_vecobj *v = (ail_vecobj *)itobj.o;
+        if (v->gen_idx >= v->n) return AIL_STOP;
+        *out = v->p[v->gen_idx++];
+        return AIL_OK;
+    }
+    if (itobj.tag != AIL_T_ITER && itobj.tag != AIL_T_INST) {
+        char buf[96]; snprintf(buf, sizeof buf, "'%s' object is not an iterator", ail_type_name(itobj.tag));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
     if (itobj.tag == AIL_T_INST) {
         for (ail_obj k = ((ail_instobj *)itobj.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
             ail_classobj *kc = (ail_classobj *)k.o;
@@ -20868,8 +20963,11 @@ static inline int ail__asc_xform(uint32_t c) {
 /* PyLong_FromString on the ASCII text t[0..n), base 0 or 2..36: optional white space, sign, a 0x/0o/0b
    prefix that matches the base (or picks it, for base 0), single underscores between digits (also right
    after a prefix), no leading zeros in base 0 unless the number is all zeros. 0 = ok, 1 = invalid
-   literal, 2 = valid but outside int64. A literal that is both too long and malformed is invalid. */
-static int ail__asc_to_int(const char *t, int64_t n, int64_t base, int64_t *out) {
+   literal, 2 = valid but outside int64, 3 = more than CPython's 4300 digits for a non-power-of-two
+   base (ValueError "Exceeds the limit...", checked before overflow so a long all-zero literal is
+   refused even though its value would fit). A literal that is both too long and malformed is invalid. */
+static int ail__asc_to_int(const char *t, int64_t n, int64_t base, int64_t *out, int64_t *ndigits) {
+    if (ndigits) *ndigits = 0;
     int64_t i = 0, j = n;
     while (i < j && AIL__ASC_SPACE((unsigned char)t[i])) i++;
     while (j > i && AIL__ASC_SPACE((unsigned char)t[j - 1])) j--;
@@ -20882,22 +20980,14 @@ static int ail__asc_to_int(const char *t, int64_t n, int64_t base, int64_t *out)
         int pb = c == 'x' ? 16 : c == 'o' ? 8 : c == 'b' ? 2 : 0;
         if (pb && (base == 0 || base == pb)) { base = pb; i += 2; prefixed = 1; }
     }
-    if (base == 0) {
+    int zero_base = base == 0, leading_zero = 0;
+    if (zero_base) {
         base = 10;
-        if (t[i] == '0') {                       /* "0", "00", "0_0": only zeros, no leading zero before a digit */
-            int64_t k = i;
-            while (k < j) {
-                if (t[k] == '0') k++;
-                else if (t[k] == '_' && k + 1 < j && t[k + 1] == '0' && k > i) k++;
-                else return 1;
-            }
-            *out = 0;
-            return 0;
-        }
+        leading_zero = i < j && t[i] == '0';
     }
     if (prefixed && i < j && t[i] == '_') i++;
     uint64_t m = 0, limit = (uint64_t)INT64_MAX + (uint64_t)neg;
-    int ovf = 0, digits = 0, last_us = 0;
+    int ovf = 0, digits = 0, last_us = 0, any_nonzero = 0;
     for (; i < j; i++) {
         int c = (unsigned char)t[i], d;
         if (c == '_') {
@@ -20907,6 +20997,7 @@ static int ail__asc_to_int(const char *t, int64_t n, int64_t base, int64_t *out)
         }
         d = c >= '0' && c <= '9' ? c - '0' : (c | 0x20) >= 'a' && (c | 0x20) <= 'z' ? (c | 0x20) - 'a' + 10 : 99;
         if (d >= base) return 1;
+        if (d) any_nonzero = 1;
         if (!ovf) {
             if (m > (limit - (uint64_t)d) / (uint64_t)base) ovf = 1;
             else m = m * (uint64_t)base + (uint64_t)d;
@@ -20915,6 +21006,13 @@ static int ail__asc_to_int(const char *t, int64_t n, int64_t base, int64_t *out)
         last_us = 0;
     }
     if (!digits || last_us) return 1;
+    if (ndigits) *ndigits = digits;
+    /* CPython 3.12's int_max_str_digits: 4300 for base 10 and every other non-power-of-two base;
+       base 2/4/8/16/32 is exempt (its conversion is linear). The check comes before overflow and
+       before base 0's "no leading zero before a digit" rule, so a long all-but-zero literal is a
+       limit ValueError where CPython raises one; an invalid digit still wins over both. */
+    if (digits > 4300 && !(base == 2 || base == 4 || base == 8 || base == 16 || base == 32)) return 3;
+    if (zero_base && leading_zero && any_nonzero) return 1;
     if (ovf) return 2;
     *out = m == (uint64_t)INT64_MAX + 1u ? INT64_MIN : neg ? -(int64_t)m : (int64_t)m;
     return 0;
@@ -26819,10 +26917,19 @@ static ail_str ail_fmt_gen(ail_sarena *A, int kind, int64_t iv, double dv, int f
                 snprintf(body, cap, f, p, a);
             }
             blen = n;
-            if (type == 0 && prec >= 0) {
-                int dot = 0;
-                for (int64_t i = 0; i < blen; i++) if (body[i] == '.' || body[i] == 'e') dot = 1;
-                if (!dot) { body[blen++] = '.'; body[blen++] = '0'; }
+            if (type == 0) {
+                int dot = 0; int64_t ep = -1;
+                for (int64_t i = 0; i < blen; i++) {
+                    if (body[i] == '.') dot = 1;
+                    else if ((body[i] == 'e' || body[i] == 'E') && ep < 0) ep = i;
+                }
+                if (!dot) {
+                    if (ep >= 0) {
+                        if (alt) { memmove(body + ep + 1, body + ep, (size_t)(blen - ep + 1)); body[ep] = '.'; blen++; }
+                    } else if ((prec >= 0 || alt) && body[0] >= '0' && body[0] <= '9') {
+                        body[blen++] = '.'; body[blen++] = '0';
+                    }
+                }
             }
             if (type == '%') body[blen++] = '%';
             if (group) {
@@ -26978,18 +27085,24 @@ static void ail__int_base_fail(ail_str s, int64_t base) {
     free(msg);
     ail_raise_value_adopt(value);
 }
+static void ail__int_base_limit_fail(int64_t ndigits) {
+    char text[192];
+    int n = snprintf(text, sizeof text, "Exceeds the limit (4300 digits) for integer string conversion: value has %lld digits; use sys.set_int_max_str_digits() to increase the limit", (long long)ndigits);
+    ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE, (const uint8_t *)text, n, 1));
+}
 static int64_t ail_str_to_int_base(ail_str s, int64_t base) {
     if (base != 0 && (base < 2 || base > 36)) {
         static const char text[] = "int() base must be >= 2 and <= 36, or 0";
         ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE, (const uint8_t *)text, (int64_t)sizeof text - 1, 1));
     }
     char stackbuf[128];
-    int64_t len, v = 0;
+    int64_t len, v = 0, ndigits = 0;
     char *b = ail__str_ascii(s, stackbuf, (int64_t)sizeof stackbuf, &len);
-    int rc = ail__asc_to_int(b, len, base, &v);
+    int rc = ail__asc_to_int(b, len, base, &v, &ndigits);
     if (b != stackbuf) free(b);
     if (rc == 1) ail__int_base_fail(s, base);
     if (rc == 2) ail_die("integer overflow");
+    if (rc == 3) ail__int_base_limit_fail(ndigits);
     return v;
 }
 '''
@@ -28306,6 +28419,8 @@ static void ail_par_go_wide(ail_par_fn fn, void **args, int64_t lo, int64_t hi) 
         char msg[192];
         int code = J->fail_code;
         memcpy(msg, J->fail_msg, sizeof msg);
+        if (msg[0] && code) ail_raise_value_adopt(ail_exception_new(code, (const uint8_t *)msg,
+                                                                  (int64_t)strlen(msg), 1));
         if (msg[0]) ail_die(msg);
         ail_raise_named(code ? code : AIL_EXC_RUNTIME);
     }

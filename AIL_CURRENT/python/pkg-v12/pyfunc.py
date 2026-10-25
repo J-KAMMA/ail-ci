@@ -571,6 +571,13 @@ TYPED_ZERODIV_HELPER = (
     'static void ail_raise_zerodiv(const char *w) {\n'
     '    ail_raise_value_adopt(ail_exception_new(AIL_EXC_ZERODIV, (const uint8_t *)w,\n'
     '                                            (int64_t)strlen(w), 1));\n}\n')
+# With PAR in the program a worker thread must not touch the exception stack: let PAR record the
+# message and exception code and re-raise them on the calling thread after the join.
+TYPED_ZERODIV_HELPER_PAR = (
+    'static void ail_raise_zerodiv(const char *w) {\n'
+    '    if (ail_par_cur) ail_par_trap(w, AIL_EXC_ZERODIV);\n'
+    '    ail_raise_value_adopt(ail_exception_new(AIL_EXC_ZERODIV, (const uint8_t *)w,\n'
+    '                                            (int64_t)strlen(w), 1));\n}\n')
 TYPED_FLOOR_HELPERS = {
     'pymod': HELPERS['pymod'].replace('ail_die("integer modulo by zero")',
                                       'ail_raise_zerodiv("integer modulo by zero")'),
@@ -596,6 +603,103 @@ def _int_const(node):
             return -v
     return None
 
+
+
+_I64_MIN = -(1 << 63)
+_I64_MAX = (1 << 63) - 1
+_MAXSPLIT_NOT_CONST = object()
+_MAXSPLIT_TOO_BIG = object()
+_MAXSPLIT_BITS = 4096
+
+
+def _maxsplit_const(node):
+    """The exact value of a constant int expression, a not-constant sentinel, or a too-big one.
+
+    `str.split`/`rsplit` take their maxsplit through the same int64 expression emitter as every
+    other int, so `2**63 - 1` overflowed at run time on the intermediate power even though the
+    final limit fits. Fold the expression here; an exponent that must leave int64 is recognised
+    without evaluating it (`2**100000000` is never built)."""
+    if isinstance(node, ast.Constant):
+        return node.value if type(node.value) is int else _MAXSPLIT_NOT_CONST
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
+        value = _maxsplit_const(node.operand)
+        if value is _MAXSPLIT_NOT_CONST or value is _MAXSPLIT_TOO_BIG:
+            return value
+        if isinstance(node.op, ast.USub):
+            return -value
+        return value if isinstance(node.op, ast.UAdd) else ~value
+    if not isinstance(node, ast.BinOp):
+        return _MAXSPLIT_NOT_CONST
+    op = type(node.op)
+    if op not in (ast.Add, ast.Sub, ast.Mult, ast.Pow, ast.LShift, ast.RShift,
+                  ast.FloorDiv, ast.Mod, ast.BitAnd, ast.BitOr, ast.BitXor):
+        return _MAXSPLIT_NOT_CONST
+    left = _maxsplit_const(node.left)
+    right = _maxsplit_const(node.right)
+    if left is _MAXSPLIT_NOT_CONST or right is _MAXSPLIT_NOT_CONST:
+        return _MAXSPLIT_NOT_CONST
+    if left is _MAXSPLIT_TOO_BIG or right is _MAXSPLIT_TOO_BIG:
+        return _MAXSPLIT_TOO_BIG
+    if op is ast.Pow:
+        if right < 0:
+            return _MAXSPLIT_NOT_CONST
+        if right == 0:
+            return 1
+        if left in (0, 1, -1):
+            return left ** right if left != -1 else (-1 if right & 1 else 1)
+        if right >= 64:
+            return _MAXSPLIT_TOO_BIG
+        value = left ** right
+    elif op is ast.LShift:
+        if right < 0:
+            return _MAXSPLIT_NOT_CONST
+        if left == 0:
+            return 0
+        if right >= _MAXSPLIT_BITS or left.bit_length() + right > _MAXSPLIT_BITS:
+            return _MAXSPLIT_TOO_BIG
+        value = left << right
+    elif op is ast.RShift:
+        if right < 0:
+            return _MAXSPLIT_NOT_CONST
+        if right >= _MAXSPLIT_BITS:
+            return 0 if left >= 0 else -1
+        value = left >> right
+    elif op is ast.FloorDiv or op is ast.Mod:
+        if right == 0:
+            return _MAXSPLIT_NOT_CONST
+        value = left // right if op is ast.FloorDiv else left % right
+    elif op is ast.Mult:
+        if left == 0 or right == 0:
+            return 0
+        if left.bit_length() + right.bit_length() > _MAXSPLIT_BITS:
+            return _MAXSPLIT_TOO_BIG
+        value = left * right
+    elif op is ast.Add:
+        value = left + right
+    elif op is ast.Sub:
+        value = left - right
+    elif op is ast.BitAnd:
+        value = left & right
+    elif op is ast.BitOr:
+        value = left | right
+    else:
+        value = left ^ right
+    return _MAXSPLIT_TOO_BIG if value.bit_length() > _MAXSPLIT_BITS else value
+
+
+def fold_maxsplit_constant(node):
+    """The exact maxsplit value, or None when it is not a constant; out of int64 is refused."""
+    value = _maxsplit_const(node)
+    if value is _MAXSPLIT_NOT_CONST:
+        return None
+    if value is _MAXSPLIT_TOO_BIG or not _I64_MIN <= value <= _I64_MAX:
+        refusal = Unsupported(
+            'the str.split()/rsplit() maxsplit constant does not fit in a 64-bit signed '
+            'integer, and an integer here is one (SEMANTICS section 1); CPython accepts it '
+            'exactly and raises OverflowError only at run time')
+        refusal.source_line = getattr(node, 'lineno', None)
+        raise refusal
+    return value
 
 
 def _neg_is_float(node, ctx):
@@ -6360,8 +6464,12 @@ def _slist_value(node, ctx):
     if count is not None or attr == 'rsplit':
         # `split(sep, maxsplit)` / any `rsplit`: CPython's own split/rsplit loops (SPLITN). The
         # receiver, separator and limit are evaluated once, in that order.
-        if count is not None and _etype(count, ctx) != INT:
-            raise Unsupported('str.%s() maxsplit must be an integer' % attr)
+        if count is not None:
+            folded = fold_maxsplit_constant(count)
+            if folded is not None:
+                count = ast.copy_location(ast.Constant(value=folded), count)
+            if _etype(count, ctx) != INT:
+                raise Unsupported('str.%s() maxsplit must be an integer' % attr)
         ctx.parts.update(('SLIST', 'SPLITN'))
         if sep is not None:
             ctx.has_try = True
@@ -7176,10 +7284,12 @@ def _check_utf8_codec_args(node):
         if keyword.arg not in ('encoding', 'errors') or keyword.arg in values:
             raise Unsupported('invalid or duplicate UTF-8 conversion argument')
         values[keyword.arg] = keyword.value
+    import safetyrt
     for name, value in values.items():
         if not _is_strlit(value):
             raise Unsupported('UTF-8 encoding and errors must be string literals')
-        if (name == 'encoding' and value.value.lower().replace('_', '-') not in ('utf-8', 'utf8')
+        norm = safetyrt.normalize_encoding_name(value.value)
+        if (name == 'encoding' and norm not in ('utf_8', 'utf8', 'u8', 'utf', 'cp65001', 'utf8_ucs2', 'utf8_ucs4')
                 or name == 'errors' and value.value != 'strict'):
             raise Unsupported('only UTF-8 with strict errors is supported')
 
@@ -7441,6 +7551,10 @@ def _str_value(node, ctx, *, owned_join_return=False):
         if is_chr and (_etype(node.args[0], ctx) != INT
                        or _is_handle_producing(node.args[0], ctx)):
             raise Unsupported('chr() requires an integer')
+        if is_chr and isinstance(node.args[0], ast.Constant) and type(node.args[0].value) is int:
+            cp = node.args[0].value
+            if 0xD800 <= cp <= 0xDFFF:
+                raise Unsupported('chr() with the surrogate code point U+%04X' % cp)
         ctx.parts.add('CHRSTR' if is_chr else 'HEXCODEC')
         ctx.has_try = True
         saved, ctx.pre = ctx.pre, []
@@ -32021,9 +32135,19 @@ def _lift_in_function(outer, counter, nested_captures):
 
     # Every occurrence of a nested function's own name, anywhere in `outer`, must be exactly the
     # function position of a call -- otherwise it is a closure escaping as a value (scope, above).
+    # A call textually before the `def` reads an unbound local in CPython; this lowering removes
+    # the def statement and calls the lifted function directly, so leave that shape to the general
+    # path (which keeps the def-time binding) by refusing it by name here.
+    first_def_pos = {}
+    for inner in inners:
+        first_def_pos.setdefault(inner.name, (inner.lineno, inner.col_offset))
     for node, parent in _walk_with_parent(outer):
         if isinstance(node, ast.Name) and node.id in direct_names:
             if isinstance(parent, ast.Call) and parent.func is node:
+                if (node.lineno, node.col_offset) < first_def_pos[node.id]:
+                    raise Unsupported(
+                        'a call to the nested function (%r) before its def statement is not '
+                        'available: CPython reads an unbound local there' % node.id)
                 continue
             raise Unsupported(_closure_value_message(node.id, parent))
 
@@ -34900,7 +35024,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     # not a --strict-only cost, so it is emitted whenever the program uses `%` or `//` regardless
     # of `strict`.
     if floor:
-        head += TYPED_ZERODIV_HELPER
+        head += TYPED_ZERODIV_HELPER_PAR if 'PAR' in parts else TYPED_ZERODIV_HELPER
         head += ''.join(TYPED_FLOOR_HELPERS.get(h, HELPERS[h])
                         for h in HELPER_ORDER if h in floor)
     if strict and need:
