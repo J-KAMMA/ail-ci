@@ -37729,3 +37729,5 @@ if _QC_MODE != '0':
     _fast_ast.__dict__.update(ast.__dict__)
     _fast_ast.walk = _fast_walk
     ast = _fast_ast
+
+_CONST_INT_BITS = _MAXSPLIT_BITS

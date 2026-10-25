@@ -1,3 +1,19 @@
+## 2026-10-25 - pre190 suite fix: share the int-constant fold limit (job-pre190-10252047)
+
+The full-suite gate after the pre190 review ran the module on the integration tree, where another
+accepted job had added a generic all-constant int folder (`_const_int_expr` / `fold_int_constant` in
+`python/pkg-v12/pyfunc.py`) with its own 4096-bit intermediate cap.  That cap pre-empted the pre190
+zero/base shortcuts on the first expression: `0 * (1 << 5000)`, `0 ** (1 << 5000)`, `1 ** (1 <<
+5000)`, `(-1) ** (1 << 5000)` and `(1 << 5000) >> 5000` were refused with "an integer constant
+expression here is outside the signed 64-bit range" before the reduction ran; the maxsplit folder
+itself still folded them.  The module now sets the generic folder's cap to the same 2**20-bit limit
+as the maxsplit folder (`_CONST_INT_BITS = _MAXSPLIT_BITS` at the end of `pyfunc.py`, after the
+other folder's assignment).  On a temporary merge of this branch onto the current candidate
+(`afa63a4`, which contains the generic folder) `test_ail_pre190` passes (5 tests); on this branch,
+where the generic folder is not present, the new `test_fold_limit_is_shared_with_maxsplit` checks
+the invariant and the four original tests still pass.  Boundary probes (shift 4095/4096, pow/div/mod
+and argument/list/attribute/dict routes) are `p190_*` in `/tmp/probes`.
+
 ## 2026-10-25 - pre190 review: zero/base shortcuts require constant ints (job-pre190-10251806)
 
 The review of `278fd01` found that the new zero/power-base shortcuts also fired when the other

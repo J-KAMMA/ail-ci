@@ -228,6 +228,14 @@ class Pre190Tests(unittest.TestCase):
     def test_zero_and_base_shortcuts_require_constant_ints(self):
         self.check('non_int_zero_cases', NON_INT_ZERO_CASES)
 
+    def test_fold_limit_is_shared_with_maxsplit(self):
+        sys.path.insert(0, str(ROOT / 'python/pkg-v12'))
+        try:
+            import pyfunc
+        finally:
+            sys.path.pop(0)
+        self.assertEqual(pyfunc._CONST_INT_BITS, pyfunc._MAXSPLIT_BITS)
+
     def test_oversized_maxsplit_still_refused(self):
         for slug, text in OUT_OF_RANGE:
             self.check_refused(slug, text, 'maxsplit constant does not fit in a 64-bit signed integer')
