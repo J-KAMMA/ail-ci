@@ -1331,10 +1331,13 @@ class Lowering(TextLowering):
             self.b.region = saved
 
     def global_type(self, name):
-        """The IR type of a module variable (an int or a float, as the legacy path typed it)."""
+        """The IR type of a module variable: `ail_tint` for an int when the whole program keeps
+        module ints in tint storage, otherwise the legacy int64 static (or a float)."""
         kind = self.ctx.modconsts.vars[name][0]
         if kind not in (self.P.INT, self.P.FLT):
             raise NotS0('the module variable %r is a %s' % (name, kind))
+        if kind == self.P.INT and getattr(self.P, 'GLOBAL_INT_TINT', False):
+            return TINT
         return I.I64 if kind == self.P.INT else I.F64
 
     def store(self, name, v):
@@ -2374,6 +2377,12 @@ class Lowering(TextLowering):
                 kind = self.P._etype(node, self.ctx)
             except Exception as error:
                 raise NotS0('no legacy type for **: %s' % error)
+            if (left.type == TINT or right.type == TINT) and not floating:
+                e = self._const_int_value(right)
+                if kind == self.P.INT and e is not None and e >= 0:
+                    return self.b.value('tint.pow', [self.coerce(left, TINT), self.coerce(right, TINT)], TINT)
+                if kind == self.P.INT and e is None:
+                    raise NotS0('a power with an unproven exponent')
             if kind == self.P.INT and not floating:
                 return self.b.value('pow', [self.as_int(left), self.as_int(right)], I.I64, {'mode': 'ck'})
             return self.b.value('fpow', [self.coerce(left, I.F64), self.coerce(right, I.F64)], I.F64)

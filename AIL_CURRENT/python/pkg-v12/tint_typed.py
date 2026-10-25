@@ -306,6 +306,22 @@ static inline ail_tint ail_tint_mod2(ail_tint a) {
     return ail_tint_from_int64(a.b ? (int64_t)(a.b->d[0] & 1u) : (a.i & 1));
 }
 
+/* `a ** n` for a non-negative int exponent. Exponentiation by squaring through ail_tint_mul, so
+   a module variable in tint storage can grow past int64 (the IR's `tint.pow`). A negative
+   exponent is not an int power (Python returns a float); the typed path's caller only emits this
+   for a non-negative constant exponent. */
+static AIL_BIGFN ail_tint ail_tint_pow(ail_tint a, ail_tint n) {
+    int64_t e;
+    if (!ail_tint_to_int64(n, &e) || e < 0) ail_die("integer overflow");
+    ail_tint r = ail_tint_from_int64(1), b = a;
+    while (e) {
+        if (e & 1) r = ail_tint_mul(r, b);
+        e >>= 1;
+        if (e) b = ail_tint_mul(b, b);
+    }
+    return r;
+}
+
 static inline int ail_tint_cmp(ail_tint a, ail_tint b) {
     if (__builtin_expect(!a.b && !b.b, 1)) return a.i < b.i ? -1 : a.i > b.i ? 1 : 0;
     ail_tbv x, y; ail_tbv_of(&x, a); ail_tbv_of(&y, b);

@@ -410,13 +410,13 @@ class _Checker(object):
         self.want(where, isinstance(ins.attrs.get('name'), str) and ins.attrs['name'].isidentifier(),
                   'global.load needs a variable name')
         if self.nresults(ins, where, 1):
-            self.want(where, ins.result.type in (I.I64, I.F64), 'a module variable is an i64 or an f64')
+            self.want(where, ins.result.type in (I.I64, I.F64, I.TINT), 'a module variable is an i64, an f64 or a tint')
 
     def op_global_store(self, ins, scope, stack, where, top):
         self.nresults(ins, where, 0)
         self.want(where, isinstance(ins.attrs.get('name'), str) and ins.attrs['name'].isidentifier(),
                   'global.store needs a variable name')
-        self.want(where, ins.operands[0].type in (I.I64, I.F64), 'a module variable is an i64 or an f64')
+        self.want(where, ins.operands[0].type in (I.I64, I.F64, I.TINT), 'a module variable is an i64, an f64 or a tint')
 
     def op_call(self, ins, scope, stack, where, top):
         sym = ins.attrs.get('callee')
@@ -1007,7 +1007,7 @@ class _Checker(object):
 
 for _name in I.INT_BINARY:
     setattr(_Checker, 'op_' + _name, _Checker.op_int_binary)
-for _name in ('tint.add', 'tint.sub', 'tint.mul', 'tint.floordiv', 'tint.floormod', 'tint.shl', 'tint.shr'):
+for _name in ('tint.add', 'tint.sub', 'tint.mul', 'tint.floordiv', 'tint.floormod', 'tint.shl', 'tint.shr', 'tint.pow'):
     setattr(_Checker, 'op_' + _name.replace('.', '_'), _Checker.op_tint_binary)
 for _name in ('tint.eq', 'tint.ne', 'tint.lt', 'tint.le'):
     setattr(_Checker, 'op_' + _name.replace('.', '_'), _Checker.op_tint_cmp)
