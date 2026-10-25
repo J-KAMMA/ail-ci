@@ -532,6 +532,16 @@ def _check_int_call(call, known_text, known_int, shadowed):
         raise error
 
 
+def _count_nested_rebindings(node, counts):
+    """A ``global`` or ``nonlocal`` declared anywhere in a nested function or class can rebind the
+    name in this scope whenever that body runs, so it is not a single-assignment constant (as
+    ``ail_syntax._module_scope_bindings`` already treats a nested ``global``)."""
+    for sub in ast.walk(node):
+        if isinstance(sub, (ast.Global, ast.Nonlocal)):
+            for name in sub.names:
+                counts[name] = counts.get(name, 0) + 2
+
+
 def _check_int64_int_constants(tree):
     """Refuse a statically known ``int(text, base)`` whose value does not fit int64.  AIL ints are
     fixed width, so ``int("x" * 199, 36)`` (a valid 310-digit base-36 literal) used to compile and
@@ -565,6 +575,7 @@ def _check_int64_int_constants(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 counts[node.name] = counts.get(node.name, 0) + 1
                 nested.append(node)
+                _count_nested_rebindings(node, counts)
                 for default in list(node.args.defaults) + [
                         d for d in node.args.kw_defaults if d is not None]:
                     scan(default)
@@ -574,6 +585,7 @@ def _check_int64_int_constants(tree):
             if isinstance(node, ast.ClassDef):
                 counts[node.name] = counts.get(node.name, 0) + 1
                 nested.append(node)
+                _count_nested_rebindings(node, counts)
                 for base in node.bases:
                     scan(base)
                 for keyword in node.keywords:

@@ -1,3 +1,18 @@
+## 2026-10-25 - review fix: do not fold names a nested global/nonlocal rebinds (job-pre259-10260538)
+
+The reviewer found that `_check_int64_int_constants` folded a module constant even when a nested
+function declared `global` and rebound it, so `V = "x" * 199; def reset(): global V; V = "1";
+reset(); print(int(V, 36))` was refused as out of range on both builds while CPython and the base
+build print `1`. The scope scan now counts a `global`/`nonlocal` declared anywhere in a nested
+function or class as an extra binding, matching `ail_syntax.fold_constants`, so such a name is not
+treated as a single-assignment constant and the call is left to the run-time value. Added
+`GLOBAL_REBOUND` cases (module-level call and call inside `main`) to `test_ail_pre259.py`.
+
+Probes in `/tmp/probes`: `p_globmut`, `p_globmut2`, `p_globmut_routes`, `p_nonlocal` and
+`p_boundary_after_fix` match CPython on both builds; `p_direct_still_refused` and `p_global_class`
+are refused by name. Final-state tests: `test_ail_pre259`, `test_ail_safetynet`, `test_ail_files`
+and `test_ail_corpus_findings3` pass.
+
 ## 2026-10-25 - out-of-int64 constant `int(text, base)` refused (job-pre259-10260538)
 
 The first listed pre180-review item (`int(bytes/bytearray, base)` message text and the 200-character

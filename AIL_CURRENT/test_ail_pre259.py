@@ -129,6 +129,35 @@ main()
 ''',
 }
 
+GLOBAL_REBOUND = {
+    'module_call': '''V = "x" * 199
+
+
+def reset():
+    global V
+    V = "1"
+
+
+reset()
+print(int(V, 36))
+''',
+    'main_call': '''V = "x" * 199
+
+
+def reset():
+    global V
+    V = "1"
+
+
+def main():
+    reset()
+    print(int(V, 36))
+
+
+main()
+''',
+}
+
 IN_RANGE = r'''def show(label, fn):
     try:
         value = fn()
@@ -228,6 +257,10 @@ class Pre259Tests(unittest.TestCase):
 
     def test_in_range_constant_int_matches_cpython(self):
         self.matches('in_range', IN_RANGE)
+
+    def test_global_rebound_module_constant_matches_cpython(self):
+        for slug, text in GLOBAL_REBOUND.items():
+            self.matches(slug, text)
 
 
 if __name__ == '__main__':
