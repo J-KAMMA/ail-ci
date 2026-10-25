@@ -15764,6 +15764,7 @@ static inline ail_st ail_op_delitem(ail_ctx *cx, ail_obj c, ail_obj key) {
     char buf[64]; snprintf(buf, sizeof buf, "'%s' object doesn't support item deletion", ail_type_name(c.tag));
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
 }
+static inline ail_obj ail_range_new(ail_ctx *cx, int64_t start, int64_t stop, int64_t step); /* defined below */
 static inline ail_st ail_op_getslice(ail_ctx *cx, ail_obj *out, ail_obj c, int has_lo, int64_t lo, int has_hi, int64_t hi, int has_step, int64_t step) {
     if (c.tag == AIL_T_STR) return ail_str_getslice(cx, out, c, has_lo, lo, has_hi, hi, has_step, step);
     if (c.tag == AIL_T_LIST && __builtin_expect(((ail_gcobj *)c.o)->aux, 0)) {   /* a dict view */
@@ -15771,6 +15772,37 @@ static inline ail_st ail_op_getslice(ail_ctx *cx, ail_obj *out, ail_obj c, int h
         return ail_raise_c(cx, AIL_B_TYPEERROR, vb);
     }
     if (c.tag == AIL_T_LIST || c.tag == AIL_T_TUPLE) return ail_vec_getslice(cx, out, c, has_lo, lo, has_hi, hi, has_step, step);
+    if (c.tag == AIL_T_RANGE) {
+        /* CPython slices a range as a sequence: adjust the slice against the range's count,
+           then map the two adjusted ordinals back through the range's own start/step. The
+           count can exceed INT64_MAX (range(INT64_MIN, INT64_MAX)), so the arithmetic is
+           done in 128 bits; a result field outside int64 is the AIL int limit. */
+        ail_rangeobj *r = (ail_rangeobj *)c.o;
+        uint64_t n = ail__range_count(r);
+        int64_t st = has_step ? step : 1;
+        if (st == 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "slice step cannot be zero");
+        __int128 nn = (__int128)n;
+        __int128 a, b;
+        if (st > 0) {
+            if (!has_lo) a = 0;
+            else { a = lo; if (a < 0) { a += nn; if (a < 0) a = 0; } else if (a > nn) a = nn; }
+            if (!has_hi) b = nn;
+            else { b = hi; if (b < 0) { b += nn; if (b < 0) b = 0; } else if (b > nn) b = nn; }
+        } else {
+            if (!has_lo) a = nn - 1;
+            else { a = lo; if (a < 0) { a += nn; if (a < 0) a = -1; } else if (a >= nn) a = nn - 1; }
+            if (!has_hi) b = -1;
+            else { b = hi; if (b < 0) { b += nn; if (b < 0) b = -1; } else if (b >= nn) b = nn - 1; }
+        }
+        __int128 ns = (__int128)r->start + a * (__int128)r->step;
+        __int128 ne = (__int128)r->start + b * (__int128)r->step;
+        __int128 nd = (__int128)r->step * (__int128)st;
+        if (ns < INT64_MIN || ns > INT64_MAX || ne < INT64_MIN || ne > INT64_MAX
+            || nd < INT64_MIN || nd > INT64_MAX)
+            return ail_hit_limit(cx, "int_overflow", "range slice result exceeds int64");
+        *out = ail_range_new(cx, (int64_t)ns, (int64_t)ne, (int64_t)nd);
+        return AIL_OK;
+    }
     char buf[64]; snprintf(buf, sizeof buf, "'%s' object is not subscriptable", ail_type_name(c.tag));
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
 }

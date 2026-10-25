@@ -1,3 +1,17 @@
+## 2026-10-25 - range slicing (job-pre185-10251543)
+
+The first still-differing item from the fuzz48 review was range slicing: `range(10)[2:5]`,
+`range(10)[::-1]` and every other slice of a range raised `TypeError: 'range' object is not
+subscriptable` on both builds. `ail_op_getslice` now handles `AIL_T_RANGE`: it adjusts the
+slice against the range's count (CPython's PySlice_AdjustIndices rules, including negative
+steps and empty results), maps the adjusted ordinals back through the range's own start/step,
+and returns a new range. The arithmetic is done in 128 bits because a range's count can exceed
+INT64_MAX; a result whose start/stop/step would fall outside int64 is the AIL int limit and is
+recorded in DIFFERENCES. Added `test_ail_pre185.py` (literal, empty, negative, bool-index,
+int64-boundary and argument/list-item/attribute/dict routes on both builds). Probes p8 in
+`/tmp/probes` matched CPython on both builds; an earlier probe showed the out-of-int64 reverse
+case stops with `integer overflow`.
+
 ## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
 
 The first still-differing item from the task's list was the encoding-name normalization: `b"abc".decode("utf\t8")`,
