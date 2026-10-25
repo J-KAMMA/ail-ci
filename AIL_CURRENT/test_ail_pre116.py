@@ -143,6 +143,42 @@ def main():
 main()
 '''
 
+SAVED_SAFE_CALLS = r'''class Box:
+    def __init__(self, v):
+        self.v = v
+
+
+def main():
+    inner = iter([1, 2, 3])
+    g = (next(inner) for _ in range(2))
+    print(sum(g))
+    h = (Box(i) for i in [1, 2, 3])
+    print(sum(x.v for x in h))
+    k = (Box(i).v for i in [4, 5])
+    print(list(k))
+    print("after")
+
+
+main()
+'''
+
+RAISING_CTOR = r'''class Bad:
+    def __init__(self):
+        self.v = 1 // 0
+
+
+def main():
+    g = (Bad() for _ in range(1))
+    try:
+        print(next(g).v)
+    except ZeroDivisionError as e:
+        print("caught", str(e))
+    print("after")
+
+
+main()
+'''
+
 RETURN_SAFE = r'''def long_words(text):
     return ((position, word) for position, word in enumerate(text.split()) if len(word) > 4)
 
@@ -213,6 +249,12 @@ class Pre116Tests(unittest.TestCase):
 
     def test_safe_returned_generator_matches(self):
         self.same('return_safe', RETURN_SAFE)
+
+    def test_safe_class_and_next_match(self):
+        self.same('safe_calls', SAVED_SAFE_CALLS)
+
+    def test_raising_constructor_is_refused(self):
+        self.refused('raising_ctor', RAISING_CTOR)
 
 
 if __name__ == '__main__':

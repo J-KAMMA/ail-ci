@@ -10446,11 +10446,31 @@ def _genexp_consumed_in_place(node, parents):
     return False
 
 
-def _genexp_can_raise(node, user_functions):
+def _class_ctor_is_safe(node):
+    """True iff constructing `node` cannot raise one of the catchable traps: __new__/__init__
+    are absent or their bodies only bind values/attributes.  A saved generator that calls such
+    a class can keep the existing eager lowering (pre166 covers the cursor semantics)."""
+    for name in ('__new__', '__init__'):
+        method = next((n for n in node.body
+                       if isinstance(n, ast.FunctionDef) and n.name == name), None)
+        if method is None:
+            continue
+        for n in ast.walk(method):
+            if isinstance(n, (ast.Call, ast.Subscript)):
+                return False
+            if isinstance(n, ast.BinOp) and isinstance(n.op, (ast.Div, ast.FloorDiv, ast.Mod)):
+                return False
+    return True
+
+
+def _genexp_can_raise(node, user_functions, class_names):
     """True iff evaluating the generator's body can raise one of the catchable traps (directly,
     or through a call the body makes).  The outermost iterable is excluded: CPython evaluates
     it when the generator object is made, so the existing eager lowering already has the same
-    point for it.  Targets are excluded too; only the element and the lazy clauses matter."""
+    point for it.  Targets are excluded too; only the element and the lazy clauses matter.
+    A `next(...)` call and a class constructor whose body cannot raise are kept eager: the
+    saved-generator cursor lowering (pre166) relies on them, and their own failures are
+    pre-existing differences."""
     roots = [node.elt]
     for i, gen in enumerate(node.generators):
         if i:
@@ -10468,7 +10488,11 @@ def _genexp_can_raise(node, user_functions):
             elif isinstance(n, ast.Call):
                 f = n.func
                 if isinstance(f, ast.Name):
-                    if f.id in user_functions or f.id not in _GENEXP_SAFE_CALLS:
+                    if f.id in user_functions:
+                        return True
+                    if f.id in class_names or f.id == 'next':
+                        continue
+                    if f.id not in _GENEXP_SAFE_CALLS:
                         return True
                 elif isinstance(f, ast.Attribute):
                     if f.attr not in _GENEXP_SAFE_METHODS:
@@ -10488,9 +10512,11 @@ def _lazy_raising_genexp(tree):
         for child in ast.iter_child_nodes(par):
             parents[child] = par
     user_functions = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    class_names = {n.name for n in ast.walk(tree)
+                   if isinstance(n, ast.ClassDef) and _class_ctor_is_safe(n)}
     for node in ast.walk(tree):
         if isinstance(node, ast.GeneratorExp) and not _genexp_consumed_in_place(node, parents) \
-                and _genexp_can_raise(node, user_functions):
+                and _genexp_can_raise(node, user_functions, class_names):
             return node
     return None
 

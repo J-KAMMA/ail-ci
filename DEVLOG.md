@@ -1,5 +1,18 @@
 # DEVLOG
 
+## 2026-10-25 - pre116: keep pre166's saved-generator shapes compiling
+
+The pre116 refusal was too broad for the integration branch's pre166 cursor-list
+generators: it refused a saved generator whose body called `next(...)` or a class
+constructor, so `test_ail_pre166` failed.  Those two shapes now stay on the existing
+eager lowering when the class's `__new__`/`__init__` cannot raise (`self.v = v`), so
+pre166's `nested` and `membership_dunder` cases pass.  The refusal still fires for a
+user-function call, `int(...)`, a risky method, a subscript and a division/modulo by
+a non-literal divisor, including a class whose constructor body divides.
+`test_ail_pre116.py` gains controls for the safe `next`/constructor shapes and for a
+refused raising constructor.  Simulated on origin/integ (ffeb623), test_ail_pre116,
+test_ail_pre166 and test_ail_typed_tuples pass together (17 tests).
+
 ## 2026-10-24 - pre116: a saved generator expression that can raise is refused
 
 The first pre-existing difference the pre87 reviewer recorded was `% 0` through a generator
