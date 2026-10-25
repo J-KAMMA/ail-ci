@@ -76,6 +76,39 @@ helper covers a list/dict/set/bytearray (including inside a tuple) and its messa
 "mutable literal default". Added `test_ail_fuzz94.py` and registered it in `ail_check.MODULES`;
 immutable defaults, keyword calls, recursion, loop closures with `nonlocal` and early returns
 still match CPython on both builds.
+## 2026-10-25 - pre190 review: zero/base shortcuts require constant ints (job-pre190-10251806)
+
+The review of `278fd01` found that the new zero/power-base shortcuts also fired when the other
+operand was not a constant int. `1.5 ** 0`, `f() ** 0` and `(1 // 0) ** 0` were folded to `1`;
+`0 * "ab"`, `0 * f()` and `0 * (1 // 0)` to int `0`; `0 & 1.5` and `0 & (1 // 0)` to `0`; and
+`"a,b,c".split(",", 2.0 ** 0)` / `0 * f()` skipped the type check or the call. `pyfront.int_constant`
+and `pyfunc._maxsplit_const` now take a zero/base shortcut only when the other operand is itself a
+constant integer expression (it may be above the normal fold limit, but it must still be a constant
+int); otherwise the expression is left to normal evaluation, so floats, strings, calls, side effects
+and errors are preserved. The same rule covers both operand orders of `*`/`&`. Probes
+(`/tmp/rprobes/p_*` from the review plus `/tmp/probes/p_pre190_pow.py`, `p_pre190_mul.py`,
+`p_pre190_bitand.py`, `p_pre190_maxsplit.py`, including argument/list-item/attribute/dict routes)
+match CPython on both `cmp.sh` builds; the original large-intermediate probes still match.
+`test_ail_pre190.py` now includes the non-int/effectful cases (4 tests pass).
+
+## 2026-10-25 - pre190: large constant intermediates that reduce to int64 (job-pre190-10251806)
+
+The review of pre184 recorded that the 4096-bit constant-folding guard ran before the zero and
+power-base special cases. `0 * (1 << 5000)`, `(1 << 5000) * 0`, `(1 << 5000) & 0`, `0 ** (1 <<
+5000)`, `1 ** (1 << 5000)`, `(-1) ** (1 << 5000)`, `(1 << 5000) ** 0` and `(1 << 5000) >> 5000`
+all have int64 results, but both builds stopped with `integer overflow` because the inner large
+operand failed to fold; the same constants as a `str.split`/`rsplit` maxsplit were refused by name
+as "does not fit in a 64-bit signed integer". `pyfront.int_constant` now evaluates zero absorbing
+operands and the power bases 0/1/-1 before requiring the other operand to fit, and retries a large
+exponent at a 2**24-bit limit so its sign/parity is known. The fold limit itself moved from 4096 to
+2**20 bits (a bounded 128 KiB intermediate) so `(1 << 5000) >> 5000`, `(2 ** 5000) // (2 ** 4999)`
+and `(2 ** 5000) % (2 ** 5000)` fold to their in-range results. `pyfunc._maxsplit_const` applies the
+same zero/base rules and now uses that bit-size limit for `pow` instead of refusing an exponent of
+64; a genuinely out-of-int64 maxsplit is still refused by name, and `2**100000000` is still not
+built. Added `AIL_CURRENT/test_ail_pre190.py` (literal and argument/list-item/attribute/dict routes,
+both builds and the legacy emitters). Probes in `/tmp/probes` (`p_basecase`, `p_bigshift`,
+`p_bigsplit`, `p_powbig`) matched CPython on both `cmp.sh` builds; `p_intbase` matched except for
+`int("1"*5000, 2)`, which still stops at the int64 value limit (pre-existing, out of this task).
 
 ## 2026-10-25 - int(s, base) message GC rooting (job-pre180-10251520)
 
