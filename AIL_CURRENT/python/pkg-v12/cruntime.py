@@ -17176,6 +17176,11 @@ static inline ail_st ail_bi_input(ail_ctx *cx, ail_obj *out, int has_prompt, ail
 /* ===================================================================================
    B004: range([start,] stop[, step]).
    =================================================================================== */
+static inline ail_st ail__range_index(ail_ctx *cx, int64_t *out, ail_obj x) {
+    if (x.tag == AIL_T_INT || x.tag == AIL_T_BOOL) { *out = x.i; return AIL_OK; }
+    char buf[96]; snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail__tname_c(x));
+    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+}
 static inline ail_st ail_bi_range(ail_ctx *cx, ail_obj *out, int has_start, int64_t start, int64_t stop, int has_step, int64_t step) {
     if (!has_start) start = 0;
     if (!has_step) step = 1;
