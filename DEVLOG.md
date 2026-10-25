@@ -17,6 +17,21 @@ refused by name. `p4` also matches CPython on the typed path (`AIL_NO_GENERAL=1`
 
 # DEVLOG
 
+## 2026-10-24 - out-of-range int64 constant expressions are refused by name (job-pre159-10250322)
+
+The compiler checked bare integer literals against int64, but a pure integer expression whose value
+left the range was lowered and then stopped at run time with `integer overflow`. That covered
+`p_intbigdef` (`return 10 ** 30`) and made `p_indexonly` (`__index__` returning `10 ** 30`) print a
+misleading `TypeError` from the boxed sequence dispatcher instead of CPython's `OverflowError`.
+`ail_chatgpt._check_int64_literals` now evaluates pure integer constant expressions (unary +, -,
+~; binary arithmetic, shifts, bitwise operations; exponent/shift guards so a huge exponent is
+refused without computing it) and emits the existing `int64 literal out of range: <value>` compile
+error on both the general path and the default build. In-range constant expressions, including
+`2 ** 62`, `(1 << 62) - 1`, `-(2 ** 62)` and `2 ** (63 - 1)`, are unchanged. Added
+`AIL_CURRENT/test_ail_pre159.py` with the literal, expression, return, `__index__`, argument,
+list-item, attribute, dict-value, alias, negative, shift, multiply and huge-exponent cases, plus the
+in-range boundary check against CPython on both builds.
+
 ## 2026-10-24 - GC rooting in the statistics helpers (job-gcroot-10241807)
 
 The general path's native `statistics` helpers kept a heap result in a C local across an
