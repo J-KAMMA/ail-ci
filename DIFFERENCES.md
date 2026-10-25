@@ -4,6 +4,8 @@
 | --- | --- | --- | --- |
 | C?-job-pre185-10251543-1 | range slicing | Range slicing is implemented, but a slice whose own start/stop/step falls outside int64 stops with `integer overflow`. CPython 3.12 ranges are arbitrary precision, so reversing a range that begins at INT64_MIN gives a stop of INT64_MIN-2 there. Slices whose result fits int64 (including ranges that touch either int64 bound) match CPython on both builds. | open (int64 limit); `test_ail_pre185.py` |
 | C?-job-pre160-10250349-1 | round() ndigits / `__index__` | An `__index__` method that evaluates an out-of-int64 intermediate (for example `10**30` inside the method) cannot run: AIL stops with `integer overflow` while evaluating that expression, before it returns an index. CPython uses arbitrary precision and returns the resulting (possibly small) integer. | refused by name |
+| C?-job-pre186-10251543-1 | enumerate / int64 counter | An `enumerate` start close to `INT64_MAX`: values past `INT64_MAX` cannot be represented (AIL ints are 64-bit), so the counter now stops with `OverflowError: enumerate() index integer overflow` instead of silently wrapping to `INT64_MIN`; CPython prints the arbitrary-precision value. All representable counters still match CPython. | fixed / refused by name; `test_ail_pre186.py` |
+| C?-job-pre186-10251543-2 | `range()` step zero | `range(0, 5, 0)` is accepted and prints `range(0, 5, 0)` on both builds, where CPython raises `ValueError: range() arg 3 must not be zero` at construction. | open |
 
 Deliberate differences from CPython and open silent differences found by differential jobs.
 
