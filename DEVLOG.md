@@ -1,3 +1,14 @@
+## 2026-10-25 - re-apply pre89: mutable default of a nested def
+
+Re-applied accepted job `pre89` on the current tree. The behavioural fix is already present from
+the pre117 export: a nested `def` with a literal list/dict/set (or a tuple holding one, including a
+`bytearray`) default is refused by name (`a nested def f with a mutable literal default ...`) on
+both builds, instead of rebuilding the default per call, so the two fixes were kept together. The
+job's `test_ail_pre89.py` is added and registered in `ail_check.MODULES`; it covers list, dict,
+set, tuple-of-list and keyword-only defaults, immutable/top-level mutable defaults, and the p18
+(instance-attribute callable) and p23 (keyword arguments through a function value) refusals. The
+DIFFERENCES row is recorded with this branch's placeholder id.
+
 ## 2026-10-25 - int(s, base) message GC rooting (job-pre180-10251520)
 
 Review follow-up. The rewritten general-path `ail__int_badlit` built the message head string,
