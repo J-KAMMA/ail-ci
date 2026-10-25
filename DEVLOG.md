@@ -1,3 +1,22 @@
+## 2026-10-25 - out-of-range int64 constant expressions are refused by name (job-rbpre159-10251805)
+
+The compiler checked bare integer literals against int64, but a pure integer expression whose value
+left the range was lowered and then stopped at run time with `integer overflow`. That covered
+`p_intbigdef` (`return 10 ** 30`) and made `p_indexonly` (`__index__` returning `10 ** 30`) print a
+misleading `TypeError` from the boxed sequence dispatcher instead of CPython's `OverflowError`.
+`ail_chatgpt._check_int64_literals` now evaluates pure integer constant expressions (unary +, -,
+~; binary arithmetic, shifts, bitwise operations; exponent/shift guards so a huge exponent is
+refused without computing it) and emits the existing `int64 literal out of range: <value>` compile
+error on both the general path and the default build. In-range constant expressions, including
+`2 ** 62`, `(1 << 62) - 1`, `-(2 ** 62)` and `2 ** (63 - 1)`, are unchanged, and a constant
+`str.split`/`rsplit` maxsplit keeps its own `maxsplit constant does not fit in a 64-bit signed
+integer` wording. A composite expression assigned to a mutable local name is skipped by the new
+check and left to the existing constant folder, which still refuses it by name; a unary overflow of an in-range constant keeps
+the existing `int64 constant expression out of range` wording, while one whose operand is
+already out of range reports the literal. Added `AIL_CURRENT/test_ail_pre159.py` with the literal, expression, return,
+`__index__`, argument, list-item, attribute, dict-value, alias, negative, shift, multiply and
+huge-exponent cases, plus the in-range boundary check against CPython on both builds.
+
 ## 2026-10-25 - int(bytearray, base) error text (job-pre192-10251808)
 
 The first still-differing item from the memsafe2 review was the `int(bytearray, base)` invalid-literal
