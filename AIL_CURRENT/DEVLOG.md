@@ -1,3 +1,39 @@
+## 2026-10-25 -- pre227 suite fix: the constant check owns the refusal wording (job-pre227-10260534)
+
+The class-constant fix still folds `N = 2**62; class C: X = N * 4` to a literal, but the
+current integration tree's `_check_int64_constants` now sees that folded module/class
+assignment before `_check_int64_literals`, so it refuses it as
+`int64 constant expression out of range` instead of `int64 literal out of range`.
+`test_ail_pre227.py` now accepts either named refusal (and still rejects `integer overflow`
+and a traceback); the in-range, shadowed, rebound and dynamic-route cases are unchanged.
+Probes `pre227_*` in `/tmp/probes` match CPython or are refused by name on both builds, both
+here and on a copy of the current integration branch with this fix applied. Tests: pre227,
+safetynet, files, corpus_findings3.
+
+## 2026-10-25 -- pre227: class constants built from a module name (job-pre227-10260119)
+
+The first still-differing item in the rbpre184 review was the class constant built through a
+name: `N = 2**62; class C: X = N * 4` compiled and then stopped with `integer overflow`, while
+CPython keeps an unbounded int. `2**63 - 1` in a module/class/default already matched (folded)
+and the nested default `def f(x=10**30)` was already refused by name, so only this item was left.
+`fold_constants` now carries the module constants it already knows into class-level assignment
+expressions and folds them exactly (`_fold_int_exact`, wide intermediate steps allowed, 4096-bit
+cap): `N = 2**61; class C: X = N * 2 - 1` emits 2**63-1, `(N * 4) // 4` emits 2**62, and a value
+that cannot fit int64 is rewritten to its literal and refused by name (`int64 literal out of
+range`) on both builds. A name the class body itself bound earlier, a module name rebound later,
+non-int constants (str/float/bool) and a plain `X = N` are left untouched; a value that only
+reaches the class body at run time keeps the fixed-width trap, and a nested class definition is
+refused by name.
+
+Probes `/tmp/probes/pre227_*` (out mult/shift/power/negative/alias/annotated, in-range widths and
+wide steps, non-int constants, plain name, rebound/shadowed name, class before the assignment,
+dynamic list/dict/attribute/argument routes) match CPython or are refused by name on both builds,
+except the dynamic routes, which keep the documented int64 runtime trap. Added
+`test_ail_pre227.py` (2 tests, both builds) and registered it in `ail_check.MODULES`. Final-state
+tests: test_ail_pre227, test_ail_safetynet, test_ail_files, test_ail_corpus_findings3, plus
+test_ail_nested_functions, test_ail_modconst, test_ail_pre113/172/177 pass; test_ail_pre121 keeps
+its two pre-existing general-build failures (identical on HEAD).
+
 ## 2026-10-25 -- pre199: range() with a zero step raises ValueError (job-pre199-10252047)
 
 The first still-differing item left by pre186 was `range(0, 5, 0)`: both builds accepted it and
