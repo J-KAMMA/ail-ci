@@ -11113,6 +11113,7 @@ typedef struct { ail_gcobj hdr; ail_obj *p; int64_t n, cap;
 } ail_vecobj;
 
 static inline ail_st ail_raise_c(ail_ctx *cx, int builtin_id, const char *msg);
+static inline ail_st ail_raise(ail_ctx *cx, ail_obj cls, ail_obj msg);
 static inline ail_st ail_hit_limit(ail_ctx *cx, const char *name, const char *detail);
 static inline ail_obj ail_obj_repr(ail_ctx *cx, ail_obj x); /* forward decl: the dict
    section builds KeyError messages with repr(key) for ANY key tag; defined in the repr section */
@@ -13814,18 +13815,32 @@ static inline ail_st ail_str_to_int(ail_ctx *cx, int64_t *out, ail_obj sobj) {
    also consume its own prefix (int('0xff', 16) == 255). '_' between digits, same
    int64 overflow bound and whitespace trim as ail_str_to_int. */
 static inline ail_st ail__int_badlit(ail_ctx *cx, ail_obj sobj, int64_t base) {
-    ail_obj r = ail_str_repr(cx, sobj);
-    ail_str rs = ail_view_to_str(r);
     char head[72];
     int hl = snprintf(head, sizeof head, "invalid literal for int() with base %lld: ", (long long)base);
     if (hl < 0) hl = 0;
-    char *msg = (char *)ail_xmalloc((size_t)hl + (size_t)rs.n + 1);
-    memcpy(msg, head, (size_t)hl);
-    for (int64_t k = 0; k < rs.n; k++) msg[hl + k] = (char)ail_chr(rs, k);
-    msg[hl + rs.n] = 0;
-    ail_st st = ail_raise_c(cx, AIL_B_VALUEERROR, msg);
-    free(msg);
-    return st;
+    ail_obj parts[3];
+    /* Root all three slots before the first allocation: repr() below allocates, and an
+       unrooted head string (or, later, the repr) would be collected by GC_STRESS. */
+    memset(parts, 0, sizeof parts);
+    AIL_ROOT_N(cx, fr, parts, 3);
+    parts[0] = ail_str_from_cstr(cx, head);
+    parts[1] = ail_str_repr(cx, sobj);
+    ail_str rs = ail_view_to_str(parts[1]);
+    /* CPython formats the offending literal with "%.200R": the repr is cut after 200
+       code points, which can leave the closing quote off and may split an escape. */
+    int64_t k = 0, seen = 0;
+    while (k < rs.n && seen < 200) {
+        uint32_t c = (uint32_t)ail_chr(rs, k);
+        if (c >= 0xD800u && c < 0xDC00u && k + 1 < rs.n) {
+            uint32_t d = (uint32_t)ail_chr(rs, k + 1);
+            k += (d >= 0xDC00u && d < 0xE000u) ? 2 : 1;
+        } else k++;
+        seen++;
+    }
+    parts[2] = ail_str_view(parts[1].sv.backing, parts[1].sv.off, k);
+    ail_obj msg = ail_str_cat(cx, parts[0], parts[2]);
+    AIL_FRAME_LEAVE(cx, fr);
+    return ail_raise(cx, cx->builtin_cls[AIL_B_VALUEERROR], msg);
 }
 static inline ail_st ail_str_to_int_base(ail_ctx *cx, int64_t *out, ail_obj sobj, int64_t base) {
     if (base != 0 && (base < 2 || base > 36))
@@ -27089,6 +27104,16 @@ static void ail__int_base_fail(ail_str s, int64_t base) {
     if (!msg) ail_die("out of memory");
     memcpy(msg, head, (size_t)hl);
     ail__repr_str_run(s, msg + hl, quote);
+    /* CPython's "%.200R": cut the repr after 200 characters (not bytes); an escape
+       sequence or a multi-byte character may end exactly at the cut. */
+    int64_t cut = 0, chars = 0;
+    while (cut < rn && chars < 200) {
+        uint8_t c = msg[hl + cut];
+        int w = c < 0x80 ? 1 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
+        cut += w > rn - cut ? rn - cut : w;
+        chars++;
+    }
+    rn = cut;
     ail_exception *value = ail_exception_new(AIL_EXC_VALUE, msg, hl + rn, 0);
     free(msg);
     ail_raise_value_adopt(value);
