@@ -1,63 +1,12 @@
-You continue on the current branch, where your earlier work is committed. **Fix only these findings from the last review, nothing else:**
+# Continue: fix the reviewer's findings
 
-## review 1
-[model opencode-go/deepseek-v4.1-flash]
-## Review report
+You continue a job on its own branch: your earlier commits are already here. The reviewer returned FIX. Its last
+review is the last "## review" section of `.agent/pipeline.md` in this checkout (read the whole file: the original task,
+your reports and the reviews are there).
 
-**Time:** started 00:24, finished 00:40 (within 35 min).
-
-**What the change really does:** it lowers `& | ^` on tagged ints into new inline `tint.and/or/xor` runtime routines (GC path `tint.py`, typed path as a separate `TINTBITS` piece), routes constant left shifts of >=63 to `tint.shl`, and adds a `driver.py` compile refusal for such shifts. This differs from the worker report, whose "Fix" section only describes the `TINTBITS` splitting/gating commit `412de56` and never mentions the main lowering commit `c3231c2` or the new shift/refusal behaviour.
-
-**Report claims**
-- `bit1` is `path: ir`, prints `4142726` — **verified**.
-- Bit-free program C byte-identical to base — **verified** (`p8_plain`, `tintonly`, d and g, 0 diff).
-- tint-but-no-bitops drops the bit routines — **verified** (`ail_tint_and` count 0, C same as base).
-- "25 probes match CPython or raise by name in both builds" — **false/overbroad** (see defect below; base passes, HEAD does not).
-- s0: only pre-existing `test_overflow...` — **verified**; base had 2 s0 failures incl. seed=23, HEAD 1 (seed=23 fixed).
-- s3: 6F+1E strict subset of base 15F+1E — **verified** against worker's `/tmp/s3_head.log` vs `/tmp/s3_base.log`.
-
-**Tests run on HEAD (`-j 2`):** `test_ail_safetynet` ok; `test_ail_ir_s0` 1 pre-existing failure; `test_ail_ir_s3` 6F+1E, names all present in base. Did not re-run bigint/tint/unified (not required by review step 3).
-
-**Probes (`/tmp/rprobes/p*.py`, `~/tools/cmp.sh` both builds):** `p1_mix`, `p2_bigneg`, `p3_sources`, `p4_shiftvar`, `p7_invert`, `p8_plain`, `p10_shift32`, `p11_smallshift`, `p12_shiftret`, `p13_bigcount`, `p14_shiftneg`, `p15_mixsrc`, `p17/p18_augret`, `p19_lit100`, `p22_ok`, `p23_alias`, plus worker's `boundary`, `big_lit`, `shift_expr`, `shift_chain`, `aug63`, `promote`, `boolbit` — all match CPython in both builds. Operator semantics (&,|,^,<<,>>,~ over negative/large, variable counts, huge counts, aug-assign, list/attr/dict/arg sources) are correct.
-
-**Pre-existing (fail on base identically at the same statement):** `p5_shiftconst`, `p6_shift200`, `p9_aug`, `p16_augbig` fail at module-level big literal shifts (e.g. `1 << 80` as a call argument) with `integer overflow` on both base and HEAD; HEAD additionally loses buffered partial stdout when it reroutes the program. Not counted as blocking.
-
-**Defect (caused by this change)**
-
-1. `AIL_CURRENT/python/pkg-v12/ir/lower.py:2394-2414` (new shift block) treats *any* constant left shift with count >= 63 as "a shift beyond int64", even when the value is 0 and the result fits. It raises `NotS0`, pushing the enclosing `None`-returning function/module body to the legacy emitter; the legacy emitter then converts a callee's big `tint` result to int64 and aborts. Base keeps that body on IR and is exact.
-
-Probe `/tmp/rprobes/p20_regress.py`:
-```python
-def f(a: int) -> int:
-    return a << 64
-print(f(1))
-print(0 << 63)
-print(f(-1))
-```
-Expected (CPython and base, both builds):
-```
-18446744073709551616
-0
--18446744073709551616
-```
-Actual (HEAD, default `d` build): empty stdout, stderr `integer overflow`, exit 1. (`g` build is correct.)
-
-Same defect through a helper that returns `None`, `/tmp/rprobes/p21_regress2.py`:
-```python
-def f(a: int) -> int:
-    return a << 64
-def show() -> None:
-    print(f(1))
-    print(0 << 100)
-show()
-```
-Expected `18446744073709551616` then `0`; HEAD `d` prints nothing and exits 1 with `integer overflow`; base passes.
-
-Fix direction: do not classify `value << count` as beyond int64 when the value is zero (or when the shifted result actually fits), and do not send the whole enclosing body to the legacy emitter for shifts the base handled on IR.
-
-**Unverified:** bigint/tint/unified modules (not re-run); instruction-count speed check (not a speed task); worker's individual 25 probes' reported results beyond those I re-ran.
-
-Probe both builds with `bash ~/tools/cmp.sh`, add each fixed case to the tests, then commit. If a finding cannot be fixed safely, refuse the construct by name at compile time instead of leaving a silent wrong answer.
+Fix every defect the last review lists, re-run the probes and the test modules the original task names, and commit.
+Do not undo the earlier work unless a finding requires it. If a finding is wrong, say so in your report with the
+evidence (program, CPython output, AIL output).
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
