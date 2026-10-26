@@ -108,6 +108,21 @@ DEVLOG entry is placed before the 2026-10-24 codec-name entry. Overlapping fixes
 kept on both sides: pre192's `int(bytearray)` text and pre103's NUL format type still hold while the
 int()/float() error path now uses the UTF-16 repr helpers and `%.200R`, and the format parser
 distinguishes an ASCII type (including NUL) from a whole non-ASCII `wide_type`.
+## 2026-10-26 - re-apply pre237: method call sites with colliding names stay boxed (job-rbpre237-10261405)
+
+Re-applied accepted job `job-pre237-10260353` on this tree. The current export already carried
+an equivalent `pymix._escapes` fix, but it keyed method bodies by name in a dict and skipped a
+method whose name collided with a module function (`bodies.setdefault`), so duplicate method
+names across classes collapsed to one body. The re-applied change keeps every method body as a
+separate entry (`method_bodies` list) and walks both module functions and methods, recording
+`obj.method()` call sites when the attribute names a method. A module function `run` and class
+methods `run` (including duplicates) are therefore all visible, so the shift helper `shl`
+stays boxed under a caller's `try` on both builds.
+
+Added `test_ail_pre237.py` (2 tests: colliding method call sites with literal/argument/
+list-item/attribute/dict-value/alias counts and valid/zero shifts, plus an uncaught method shift
+naming `ValueError: negative shift count`) and registered it in `ail_check.MODULES`. Probes
+`/tmp/probes/pre237_*` cover the same forms on both builds; results are in the job report.
 
 ## 2026-10-25 -- pre227 suite fix: the constant check owns the refusal wording (job-pre227-10260534)
 
