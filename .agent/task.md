@@ -1,10 +1,6 @@
-**Widen what compiles: the top refusal in the census.**
-1. Compile every program in `~/corpus/gdev` with `AIL_NO_CACHE=1`.
-2. Group the refused programs by the first line of the refusal message.
-3. Take the single most common reason that is not a deliberate refusal listed in `docs/spec/DIFFERENCES.md`.
-4. Make those programs compile and match CPython on both builds, checked with `bash ~/tools/cmp.sh`.
+**Your change breaks other tests in the full suite.** On top of the current integration branch, these test modules fail with your change and pass without it: test_ail_fuzz59 test_ail_grid_return test_ail_numeric_bindings test_ail_numeric_profiles test_ail_numeric_profiles_native test_ail_record_initializers test_ail_sdk test_ail_sdk_environment test_ail_tcp_json_deadlines test_ail_tcp_json_lines_poll_resources.
 
-Report the census count before and after, add tests, and commit.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find what your change broke, and fix it so they pass again while keeping your own fix and its test. If your fix cannot coexist with them, revert it and say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
