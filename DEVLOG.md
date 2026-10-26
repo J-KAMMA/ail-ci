@@ -1,3 +1,21 @@
+## 2026-10-26 -- pre275: a statically known int(<float>) outside int64 is refused by name (job-pre275-10262319)
+
+The first still-differing item was `def take(x=1e300): print(int(x)); take()`: both builds compiled
+it and then exited 1 with `integer overflow`, where CPython prints the bignum.  A new front-end
+check folds constant numeric expressions (literals, arithmetic, module/local constants and aliases,
+defaulted parameters whose direct calls omit them, list/dict literal items and class-level
+attributes) and refuses a finite float at or above 2**63 or below -2**63 before C is emitted, with
+the existing `int64 constant expression out of range` wording.  In-range floats, NaN/infinity,
+non-float arguments, an overridden default and a default the body does not convert are unchanged;
+compiling programs keep their C because the check only raises or falls through.
+
+Probes `/tmp/probes/p275_*` (18 programs: the default, keyword default, boundary +/- (in and out),
+negative, expression, module/local/alias, argument, list, dict incl. duplicate key, attribute, NaN,
+infinity, in-range, override, unused default, non-float, shadowed int) match CPython or are refused
+by name on both builds.  Added `test_ail_pre275.py` (8 tests, both builds) and registered it in
+`ail_check.MODULES`.  Final-state tests: test_ail_pre275, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3; `tools/update_manifest.py --check` passes.
+
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is

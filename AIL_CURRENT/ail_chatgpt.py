@@ -927,6 +927,303 @@ def _constant_int_exact(node, _limit=_CONST_INT_BITS):
     return True, value
 
 
+_INT64_FLOAT_LIMIT = 9223372036854775808.0
+
+
+def _constant_number(node, known, classes=None):
+    """The int/float a constant numeric expression denotes, or None when it is not one.
+
+    Values inside a list/tuple/dict literal are read at a constant index/key, and a bare
+    attribute of a class-level constant is read from `classes`; a name resolves only through
+    `known`, so a local or parameter which shadows it is never folded by mistake."""
+    if isinstance(node, ast.Constant) and type(node.value) in (int, float, bool, str, bytes):
+        return int(node.value) if type(node.value) is bool else node.value
+    if isinstance(node, ast.Name):
+        return known.get(node.id)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert)):
+        value = _constant_number(node.operand, known, classes)
+        if type(value) not in (int, float):
+            return None
+        if isinstance(node.op, ast.Invert):
+            return ~value if type(value) is int else None
+        return -value if isinstance(node.op, ast.USub) else value
+    if (isinstance(node, ast.Attribute) and classes is not None
+            and isinstance(node.value, ast.Name)):
+        return classes.get(node.value.id, {}).get(node.attr)
+    if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice):
+        if isinstance(node.value, (ast.List, ast.Tuple)):
+            index = _constant_number(node.slice, known, classes)
+            items = node.value.elts
+            if type(index) is not int or not -len(items) <= index < len(items):
+                return None
+            return _constant_number(items[index], known, classes)
+        if isinstance(node.value, ast.Dict):
+            key = _constant_number(node.slice, known, classes)
+            if key is None:
+                return None
+            found = None
+            for key_node, value_node in zip(node.value.keys, node.value.values):
+                if key_node is None:
+                    continue
+                candidate = _constant_number(key_node, known, classes)
+                if type(candidate) is type(key) and candidate == key:
+                    found = value_node
+            if found is None:
+                return None
+            return _constant_number(found, known, classes)
+        return None
+    if not isinstance(node, ast.BinOp):
+        return None
+    left = _constant_number(node.left, known, classes)
+    right = _constant_number(node.right, known, classes)
+    if left is None or right is None:
+        return None
+    if type(left) is int and type(right) is int and not isinstance(node.op, ast.Div):
+        ok, value = _constant_int_exact(node)
+        return value if ok and value is not _CONST_INT_TOO_BIG else None
+    try:
+        if isinstance(node.op, ast.Add):
+            return left + right
+        if isinstance(node.op, ast.Sub):
+            return left - right
+        if isinstance(node.op, ast.Mult):
+            return left * right
+        if isinstance(node.op, ast.Div):
+            return left / right
+        if isinstance(node.op, ast.FloorDiv):
+            return left // right
+        if isinstance(node.op, ast.Mod):
+            return left % right
+        if isinstance(node.op, ast.Pow):
+            if type(right) is int and not -400 <= right <= 400:
+                return None
+            if (type(right) is int and right > 0 and abs(left) > 1
+                    and type(left) is int and left.bit_length() * right > _CONST_INT_BITS):
+                return None
+            return left ** right
+        if isinstance(node.op, (ast.LShift, ast.RShift)):
+            if type(left) is not int or type(right) is not int or not 0 <= right <= 64:
+                return None
+            return left << right if isinstance(node.op, ast.LShift) else left >> right
+    except (ArithmeticError, ValueError, OverflowError, TypeError):
+        return None
+    return None
+
+
+def _known_module_numbers(tree):
+    """Module names bound once to a statically known int/float, for the float-to-int check."""
+    stores = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            stores[node.id] = stores.get(node.id, 0) + 1
+    parameters = {node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)}
+    known = {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Name) or stores.get(target.id) != 1 or target.id in parameters:
+            continue
+        value = _constant_number(node.value, known)
+        if value is not None:
+            known[target.id] = value
+    return known
+
+
+def _known_class_numbers(tree, module_known):
+    """Class names bound once whose body assigns constants, for `int(ClassName.attr)`."""
+    stores = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            stores[node.id] = stores.get(node.id, 0) + 1
+    classes = {}
+    for node in tree.body:
+        if (not isinstance(node, ast.ClassDef) or node.bases or node.keywords
+                or node.decorator_list or stores.get(node.name, 0)):
+            continue
+        scope = {}
+        for statement in node.body:
+            if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+                target, expression = statement.targets[0], statement.value
+            elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+                target, expression = statement.target, statement.value
+            else:
+                continue
+            if not isinstance(target, ast.Name):
+                continue
+            value = _constant_number(expression, {**module_known, **scope})
+            if value is not None:
+                scope[target.id] = value
+        if scope:
+            classes[node.name] = scope
+    return classes
+
+
+def _defaults_never_overridden(tree):
+    """For each module-level function, the parameters whose default every direct call omits.
+
+    A name used any other way (an alias, a value passed on) makes its function unknown, and a
+    call with `*args`/`**kwargs` makes every parameter unknown, so the default is only trusted
+    when the calls provably leave it in place."""
+    definitions = {}
+    for statement in tree.body:
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            definitions.setdefault(statement.name, []).append(statement)
+    if not definitions:
+        return {}
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    calls = {name: [] for name in definitions}
+    aliased = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id in definitions:
+            parent = parents.get(node)
+            if isinstance(parent, ast.Call) and parent.func is node:
+                calls[node.id].append(parent)
+            else:
+                aliased.add(node.id)
+    result = {}
+    for name, functions in definitions.items():
+        if len(functions) != 1 or name in aliased:
+            continue
+        function = functions[0]
+        positional = list(function.args.posonlyargs) + list(function.args.args)
+        defaults = [None] * (len(positional) - len(function.args.defaults)) + list(function.args.defaults)
+        pairs = list(zip(positional, defaults)) + list(zip(function.args.kwonlyargs,
+                                                          function.args.kw_defaults))
+        direct = calls[name]
+        if any(isinstance(argument, ast.Starred) for call in direct for argument in call.args):
+            continue
+        if any(keyword.arg is None for call in direct for keyword in call.keywords):
+            continue
+        safe = set()
+        for parameter, default in pairs:
+            if default is None:
+                continue
+            supplied = False
+            for call in direct:
+                if any(keyword.arg == parameter.arg for keyword in call.keywords):
+                    supplied = True
+                    break
+                if parameter in positional and positional.index(parameter) < len(call.args):
+                    supplied = True
+                    break
+            if not supplied:
+                safe.add(parameter.arg)
+        result[id(function)] = safe
+    return result
+
+
+def _function_local_numbers(function, module_known, classes, safe_defaults):
+    """The int/float constants a function's own assignments bind, plus defaulted parameters
+    whose every direct call omits them.  Mirrors _function_local_int_constants."""
+    arguments = function.args
+    parameters = {argument.arg for argument in arguments.posonlyargs + arguments.args + arguments.kwonlyargs}
+    if arguments.vararg is not None:
+        parameters.add(arguments.vararg.arg)
+    if arguments.kwarg is not None:
+        parameters.add(arguments.kwarg.arg)
+    stores = _function_scope_stores(function)
+    declared = set()
+    for node in ast.walk(function):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            declared.update(node.names)
+    local = {name: value for name, value in module_known.items()
+             if name not in stores and name not in parameters and name not in declared}
+
+    positional = list(arguments.posonlyargs) + list(arguments.args)
+    defaults = [None] * (len(positional) - len(arguments.defaults)) + list(arguments.defaults)
+    for parameter, default in zip(positional, defaults):
+        if parameter.arg in safe_defaults and stores.get(parameter.arg, 0) == 0:
+            value = _constant_number(default, module_known, classes)
+            if value is not None:
+                local[parameter.arg] = value
+    for parameter, default in zip(arguments.kwonlyargs, arguments.kw_defaults):
+        if parameter.arg in safe_defaults and stores.get(parameter.arg, 0) == 0 and default is not None:
+            value = _constant_number(default, module_known, classes)
+            if value is not None:
+                local[parameter.arg] = value
+
+    def bind(target, value_node):
+        if not isinstance(target, ast.Name):
+            return
+        name = target.id
+        if stores.get(name) != 1 or name in parameters or name in declared:
+            return
+        value = _constant_number(value_node, local, classes)
+        if value is not None:
+            local[name] = value
+
+    for statement in function.body:
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            bind(statement.targets[0], statement.value)
+        elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+            bind(statement.target, statement.value)
+    return local
+
+
+def _check_int64_int_float_constants(tree):
+    """Refuse a statically known `int(<float>)` outside int64 before C is emitted.
+
+    A finite float at or above 2**63 (or below -2**63) cannot become an AIL int: both builds
+    used to compile the program and then stop at run time with `integer overflow`, where
+    CPython prints the bignum.  The value is folded through literals, unary/binary arithmetic,
+    module and local constants, defaulted parameters whose calls omit them, list/tuple/dict
+    literal items and class-level attributes; an in-range float, an infinity/NaN (which keep
+    their CPython exception), a non-float argument and a program that binds its own `int` are
+    left alone."""
+    if _binds_name(tree, 'int'):
+        return
+    module_known = _known_module_numbers(tree)
+    classes = _known_class_numbers(tree, module_known)
+    safe_defaults = _defaults_never_overridden(tree)
+
+    def check(node, known):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'int'):
+            return
+        if len(node.args) != 1 or node.keywords or isinstance(node.args[0], ast.Starred):
+            return
+        value = _constant_number(node.args[0], known, classes)
+        if type(value) is not float or value != value or value in (float('inf'), float('-inf')):
+            return
+        if -_INT64_FLOAT_LIMIT <= value < _INT64_FLOAT_LIMIT:
+            return
+        exact = int(value)
+        shown = exact if -10 ** 99 < exact < 10 ** 99 else 'too large'
+        error = ValueError(f'int64 constant expression out of range: {shown}')
+        error.source_line = node.lineno
+        error.source_column = node.col_offset
+        raise error
+
+    def walk(node, known):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for default in list(node.args.defaults) + [item for item in node.args.kw_defaults
+                                                       if item is not None]:
+                walk(default, known)
+            local = _function_local_numbers(node, module_known, classes,
+                                            safe_defaults.get(id(node), set()))
+            for statement in node.body:
+                walk(statement, local)
+            return
+        if isinstance(node, ast.ClassDef):
+            stores = {child.id for child in ast.walk(node)
+                      if isinstance(child, ast.Name) and isinstance(child.ctx, (ast.Store, ast.Del))}
+            scope = {name: value for name, value in known.items() if name not in stores}
+            for statement in node.body:
+                walk(statement, scope)
+            return
+        if isinstance(node, ast.Lambda):
+            for child in ast.walk(node.body):
+                check(child, known)
+            return
+        check(node, known)
+        for child in ast.iter_child_nodes(node):
+            walk(child, known)
+
+    for statement in tree.body:
+        walk(statement, module_known)
+
+
 def _check_int64_constants(tree):
     """Refuse a constant integer expression outside int64 in a module/class assignment or a
     default argument, where the construct used to compile and trap at run time. Function and
@@ -1276,6 +1573,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 _check_int64_constant_positions(tree)
                 _check_int64_unary_constants(tree)
                 _check_int64_int_base_constants(tree)
+                _check_int64_int_float_constants(tree)
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)
             if source_map is not None:
