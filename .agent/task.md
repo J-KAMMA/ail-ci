@@ -1,11 +1,6 @@
-**Speed: binary_cursor_records is 4.5x slower than C.** The measurement says each of the five field reads per record calls a `BinaryCursor` accessor, which calls `remaining()` and does its own bounds check. Make small methods like these cheap in compiled code, for example by inlining small typed methods at their call sites or by hoisting the bounds checks, so this app gets closer to C.
+**Your change breaks other tests in the full suite.** On top of the current integration branch, these test modules fail with your change and pass without it: test_ail_fuzz59 test_ail_grid_return test_ail_numeric_bindings test_ail_numeric_profiles test_ail_numeric_profiles_native test_ail_record_initializers test_ail_sdk test_ail_sdk_environment test_ail_tcp_json_deadlines test_ail_tcp_json_lines_poll_resources.
 
-**How to work (speed rules).**
-1. Before building anything, measure. Profile the app with `tools/icount.c`, or perf if available, and state the share of run time spent in the part you will change. Give the best possible gain that follows (Amdahl).
-2. Change the compiler or runtime, not the app source in `bench/apps`. The point is that idiomatic AIL code gets fast.
-3. Output must stay identical. `compare.py` checks it against the Python oracle, and the full suite must keep passing, which the integration gate checks.
-4. Report `python3 bench/compare.py --app binary_cursor_records` before and after (time ratio vs C, RSS, binary size). If the gain is under 5%, revert and report what you measured. Commit.
-
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find what your change broke, and fix it so they pass again while keeping your own fix and its test. If your fix cannot coexist with them, revert it and say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
@@ -26,5 +21,11 @@
 - **Budget:** stop at the budget note, leaving a committed, consistent state.
 - **Report:** keep it brief, with numbers.
 - Test data: email addresses only on example.com / example.org (the public export audit rejects any other domain).
+
+**Work in few steps** (each step costs model time):
+- Write all probe programs first, then run them together with one command, for example a loop over `bash ~/tools/cmp.sh`, instead of one command per program.
+- Search only inside the repository (`grep -rn ... AIL_CURRENT tools`), never across `/home` or `/tmp`.
+- Read a file once, using a range that is large enough, instead of many small reads.
+- Do not re-run a test that already passed unless you changed code since.
 
 **Where you run:** a GitHub Actions runner (4 cores). Commit your work on the current branch; do not push.
