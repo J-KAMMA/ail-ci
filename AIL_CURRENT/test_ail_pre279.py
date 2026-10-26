@@ -7,6 +7,8 @@ the field.  Both general paths now test the instance table before the static met
 the field wins when present, and the method still applies when the field was never assigned or
 has been deleted.  The field value reaches the call as a literal, through an argument, a list
 item, a dict value, an attribute, an alias, an inherited method and an external assignment.
+A callable field value is called through its own ``__call__`` (including an override in a
+subclass), and a non-callable field raises CPython's TypeError naming the value's class.
 A call with keyword or starred arguments is refused by name when a field may shadow it.
 """
 import os
@@ -87,6 +89,96 @@ try:
     print(C().f(1))
 except TypeError as e:
     print("TypeError", e)
+''',
+    'callable_instance': '''class F:
+    def __init__(self, k):
+        self.k = k
+    def __call__(self, x):
+        return self.k + x
+class G(F):
+    def __call__(self, x):
+        return self.k - x
+class C:
+    def __init__(self, v):
+        self.f = v
+    def f(self, x):
+        return x + 100
+print(C(F(10)).f(1), C(G(10)).f(1), C(F(-10)).f(-1))
+print(C(F(9223372036854775807)).f(0), C(F(-9223372036854775808)).f(0))
+''',
+    'callable_routes': '''class F:
+    def __init__(self, k):
+        self.k = k
+    def __call__(self, x):
+        return self.k + x
+class C:
+    def __init__(self, v):
+        self.f = v
+    def f(self, x):
+        return x + 100
+class Box:
+    def __init__(self, o):
+        self.o = o
+
+def make(v):
+    return v
+
+f = F(10)
+c = C(f)
+alias = c
+xs = [c]
+d = {"c": c}
+b = Box(c)
+print(c.f(1), alias.f(2), xs[0].f(3), d["c"].f(4), b.o.f(5), C(make(f)).f(6))
+e = C(None)
+e.f = F(-5)
+print(e.f(2))
+class D:
+    def __init__(self, flag):
+        if flag:
+            self.f = F(4)
+    def f(self, x):
+        return x + 101
+print(D(True).f(1), D(False).f(1))
+''',
+    'callable_values': '''class Echo:
+    def __call__(self, x):
+        return x
+class C:
+    def __init__(self):
+        self.f = Echo()
+    def f(self, x):
+        return "method"
+for v in (0, -1, 9223372036854775807, -9223372036854775808, True, "", [1, 2],
+          (3,), {"a": 1}, None):
+    print(C().f(v))
+''',
+    'noncallable_names': '''class Plain:
+    pass
+class Other:
+    pass
+class F:
+    def __call__(self, x):
+        return x + 10
+class C:
+    def __init__(self, v):
+        self.f = v
+    def f(self, x):
+        return x + 100
+for v in (None, True, 5, -3, 2.5, "x", b"x", bytearray(b"x"), [1], (1,), {"a": 1}):
+    try:
+        C(v).f(1)
+    except TypeError as e:
+        print(e)
+try:
+    C(Plain()).f(1)
+except TypeError as e:
+    print(e)
+try:
+    C(Other()).f(1)
+except TypeError as e:
+    print(e)
+print(C(F()).f(1))
 ''',
     'inherit': '''class B:
     def f(self, x):
@@ -187,6 +279,13 @@ class Pre279Tests(unittest.TestCase):
     def test_field_types_and_errors(self):
         for slug in ('types', 'noncallable'):
             self.check(slug, PROGRAMS[slug])
+
+    def test_callable_instance_field(self):
+        for slug in ('callable_instance', 'callable_routes', 'callable_values'):
+            self.check(slug, PROGRAMS[slug])
+
+    def test_noncallable_field_type_names(self):
+        self.check('noncallable_names', PROGRAMS['noncallable_names'])
 
     def test_control_method_call_without_collision(self):
         self.check('control', PROGRAMS['control'])

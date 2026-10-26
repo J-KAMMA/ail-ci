@@ -1,3 +1,25 @@
+## 2026-10-26 - pre279 review: callable instance fields and TypeError type names (job-pre279-10262332)
+
+The review of `665f894` found two defects in the new field-call path.  A field holding an
+instance with `__call__` went to `call_value`, which accepts only `AIL_T_FUNC`, so
+`class F: def __call__(self, x): ...; class C: def f(...); self.f = F()` stopped with
+`TypeError: 'instance' object is not callable` where CPython prints `11`.  The field path now
+dispatches `__call__` on the field's run-time class (deepest override first, static and class
+methods included) and keeps the ordinary function/class-value call otherwise.  The caller's
+not-callable message also used `ail_type_name`, which maps every instance (including `bytes`
+and `bytearray`) to `instance`; it now uses `ail__tname_c`, so CPython's `'F' object is not
+callable` / `'bytes' object is not callable` match.
+
+Probes in `/tmp/probes/pre279` on both builds: `call_basic`, `call_types`, `call_routes`,
+`call_conditional`, `call_inherit`, `call_external`, `call_noargs`, `callv_noclass`,
+`t_callable_names` and the existing `shadow_*`/`p02*` match CPython; `type_names` and
+`type_instances` match for None/bool/int/float/str/bytes/bytearray/list/tuple/dict and plain
+instances.  `call_alias_field` (bound-method value) and `call_instance` (calling a plain
+instance) keep their pre-existing unsupported behaviour, unchanged by this job.  Final-state
+tests: `test_ail_pre279`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`,
+`test_ail_virtual_dispatch`, `test_ail_typed_inherit` (6 modules, 323 s, 0 failed).
+`python3 tools/update_manifest.py --check` passes.
+
 ## 2026-10-26 - pre279: an instance field shadows a same-named class method (job-pre279-10262332)
 
 The first still-differing pre-existing item from the pre260 review was its p02 method/field

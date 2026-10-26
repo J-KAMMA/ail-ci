@@ -8431,7 +8431,7 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.emit('if (ail_inst_findattr(%s, g_attr_%s, &%s)) {' %
                          (recv_c, f.attr, fld))
                 ctx.indent += 1
-                r = self.call_value(fld, args, {}, ctx)
+                r = self._call_field_value(fld, args, ctx)
                 ctx.emit('%s = %s;' % (res, r))
                 ctx.indent -= 1
                 ctx.emit('} else {')
@@ -8674,6 +8674,47 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.uses_st = True
         return False
 
+    def _call_field_value(self, fld, args, ctx):
+        """Call an instance field found by `ail_inst_findattr`: a function or class value the
+        usual way, or an instance whose class defines `__call__` (CPython looks the callable
+        up on the value's type; a plain instance is not callable and names its class)."""
+        owners = [c for c in self.class_order if '__call__' in self.classes[c]['methods']]
+        if not owners:
+            return self.call_value(fld, args, {}, ctx)
+        res = ctx.tmp()
+        ctx.emit('if (%s) {' % self._method_owners_check(fld, '__call__'))
+        ctx.indent += 1
+
+        def depth(c):
+            n = 0
+            while self.classes[c]['base'] in self.classes:
+                c = self.classes[c]['base']
+                n += 1
+            return n
+
+        first = True
+        for c in sorted(owners, key=depth, reverse=True):
+            info = self.classes[c]['methods']['__call__']
+            ctx.emit('%sif (ail_class_is_or_subclass(((ail_instobj *)%s.o)->cls, g_slots_arr[%d])) {' %
+                     ('' if first else 'else ', fld, self.global_slots['class:' + c]))
+            first = False
+            ctx.indent += 1
+            argcs = self._bind_args('__call__', info, args, {}, ctx)
+            if not info.get('is_static'):
+                argcs = [self._self_arg(info, fld)] + argcs
+            ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], res, ''.join(', ' + a for a in argcs)))
+            ctx.check()
+            ctx.indent -= 1
+            ctx.emit('}')
+        ctx.indent -= 1
+        ctx.emit('} else {')
+        ctx.indent += 1
+        r = self.call_value(fld, args, {}, ctx)
+        ctx.emit('%s = %s;' % (res, r))
+        ctx.indent -= 1
+        ctx.emit('}')
+        return res
+
     def _need_inst_findattr(self):
         """Emit the instance-field lookup helper once, only for a program that needs it (so a
         program without an attribute/method name collision keeps byte-identical C)."""
@@ -8706,7 +8747,7 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('if (ail_inst_findattr(%s, g_attr_%s, &%s)) {' %
                      (recv_c, f.attr, fld))
             ctx.indent += 1
-            r = self.call_value(fld, args, {}, ctx)
+            r = self._call_field_value(fld, args, ctx)
             ctx.emit('%s = %s;' % (res, r))
             ctx.indent -= 1
             ctx.emit('} else {')
