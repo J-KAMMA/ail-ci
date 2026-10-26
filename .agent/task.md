@@ -1,37 +1,12 @@
-# bigint-fix01: the SDK/wheel file lists miss python/pkg-v12/biggate.py (C, packaging)
+# Continue: fix the reviewer's findings
 
-Branch `bigint` (head b13dd0d) added `python/pkg-v12/biggate.py` and `cruntime.py` now does `import biggate as _biggate`
-(cruntime.py:21907). Every place that copies or lists the compiler files was not told about the new module, so an
-exported SDK / wheel / extracted package crashes at start: `ModuleNotFoundError: No module named 'biggate'`.
+You continue a job on its own branch: your earlier commits are already here. The reviewer returned FIX. Its last
+review is the last "## review" section of `.agent/pipeline.md` in this checkout (read the whole file: the original task,
+your reports and the reviews are there).
 
-## Modules (about 25 failing tests, found by the triage)
-test_ail_sdk (25), test_ail_packaging (1), test_ail_grid_return (2), test_ail_sdk_environment (1).
-
-## What fails
-- test_ail_packaging.WheelContents.test_every_compiler_file_is_selected:
-  `Lists differ: ['python/pkg-v12/biggate.py'] != []` (the file is not selected for the wheel).
-- test_ail_sdk: the exported SDK copy (`export-sdk`) runs `python/pkg-v12/pyc.py` and dies in `import cruntime` -> `import biggate`.
-- test_ail_grid_return: same traceback from an exported copy.
-- test_ail_sdk_environment: `export-sdk` / doctor in a fresh environment returns 2 (probably the same cause; confirm).
-
-## Reproducer (CPython has no equivalent; this is a packaging failure)
-```
-cd the repository checkout/AIL_CURRENT
-python3 -m unittest -q test_ail_packaging           # 1 failure, names biggate.py
-python3 -m unittest -q test_ail_sdk 2>&1 | grep -m1 -B3 "No module named"
-```
-Likely places: MANIFEST.json (the file list near line 25203 names unified.py but not biggate.py; run the repo's
-update_manifest tool, then `--check`), the wheel/SDK file selection in the packaging code (grep the code that
-`test_ail_packaging.py` reads for "every compiler file"), and `export-sdk` in ail_chatgpt.py. Check bigint_obj.py and any
-other file added by the bigint commits (`git diff --stat <merge-base>..HEAD -- python/pkg-v12`) the same way.
-
-## Category
-C (a real defect: a new compiler module is not shipped).
-
-## Fixed means
-All four modules pass; `export-sdk` output runs a compile; MANIFEST.json is regenerated and `--check` passes.
-
-run the listed modules and test_ail_bigint test_ail_tint test_ail_unified before committing.
+Fix every defect the last review lists, re-run the probes and the test modules the original task names, and commit.
+Do not undo the earlier work unless a finding requires it. If a finding is wrong, say so in your report with the
+evidence (program, CPython output, AIL output).
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
