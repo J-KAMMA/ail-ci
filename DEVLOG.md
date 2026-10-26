@@ -1,3 +1,24 @@
+## 2026-10-26 - pre279: an instance field shadows a same-named class method (job-pre279-10262332)
+
+The first still-differing pre-existing item from the pre260 review was its p02 method/field
+collision: with `self.f = lambda x: x + 100` in `__init__` and `def f(self, x): return x + 101`,
+both builds printed `102 103`, where CPython prints `101 102`.  `_call_attribute` dispatched the
+static method before reading the instance table, although a function is a non-data descriptor.
+Both general paths now remember every `obj.attr = ...` name in the program and test the instance
+table first (`ail_inst_findattr`, emitted only for a program that needs it), for a statically
+known receiver and for the dynamic user-method dispatch; the method still applies when the field
+is absent or deleted, and a non-callable field raises CPython's TypeError.  A call with keyword
+or starred arguments is refused by name when a field may shadow the method.  The full quirks
+module (the first unverified item in the task) already passes on this tree.
+
+Probes in `/tmp/probes/pre279`: `shadow_basic`, `shadow_routes`, `shadow_external_nodelete`,
+`shadow_conditional`, `shadow_types`, `shadow_noncallable`, `shadow_inherit`, `shadow_static`,
+`shadow_alias_value` and `shadow_nofeature` match CPython on both builds; `shadow_kwargs` and
+`shadow_external` (`del c.f`) are refused by name.  Added `AIL_CURRENT/test_ail_pre279.py` and
+registered it in `ail_check.MODULES` and `tools/ci_shards.json`.  Final-state tests:
+`test_ail_pre279`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+`python3 tools/update_manifest.py --check` passes.
+
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is
