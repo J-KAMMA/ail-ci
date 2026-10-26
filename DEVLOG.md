@@ -1768,6 +1768,28 @@ implementation when the base has no body.  `g17_004`, `g17_024` and `g13_036` no
 print what CPython prints on both builds; the census refused 50 afterwards.  Added the positional
 partial program to `test_ail_silent6.py` and an abstract-visitor hierarchy to
 `test_ail_typed_inherit.py`.
+## 2026-10-24 - fuzz95: reproduce CPython's Timsort order for NaN
+
+The reviewer rejected the earlier runtime refusal: it rejected valid sorts (a NaN that is never
+reached cannot change the order) and failed after valid output. The typed, v1 boxed and v2 boxed
+sort engines now all carry a port of CPython 3.12's Timsort and use it only when the sort keys
+can contain a NaN; NaN-free keys keep the existing merge/introsort. `reverse=True` follows
+CPython's own reverse-input / ascending-sort / reverse-output sequence, and tuple/list key
+comparison checks identity first so a shared NaN object compares like CPython's. The typed
+keyed/struct sorts carry their reverse flag at runtime instead of negating the key fields.
+`test_ail_fuzz95.py` now asserts CPython's NaN order (direct, keyed, nested, reverse, through an
+argument, a list item, an attribute and a dict value) in both builds. Six fresh probes
+(`/tmp/probes/p200`-`p205`) and the ten reviewer probes match CPython on both builds.
+
+## 2026-10-24 - fuzz95: NaN sorting refused by name
+
+Differential probes for dict/list comprehensions and sorting found that `sorted`/`list.sort`
+with a NaN in the values, or in a tuple/list sort key, silently returned a different order from
+CPython in both boxed builds: CPython's Timsort gives NaN an input-dependent order that the
+stable merge sort does not reproduce. Both boxed sort paths now scan the sort keys (recursively
+through tuples/lists) and raise `ValueError: sorting NaN: CPython's Timsort order for NaN cannot
+be reproduced`. A key with no NaN is still allowed. `test_ail_fuzz95.py` keeps the case. Other
+probes matched CPython; a `10**30` integer overflow and four build refusals were non-silent.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
