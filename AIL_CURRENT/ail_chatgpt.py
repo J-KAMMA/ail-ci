@@ -641,6 +641,12 @@ def _names_a_known_constant(node, known):
     return any(isinstance(inner, ast.Name) and inner.id in known for inner in ast.walk(node))
 
 
+def _known_names_fit_int64(node, known):
+    """Whether every statically known name read by the expression is itself within int64."""
+    return all(_int64_holds(known[inner.id]) for inner in ast.walk(node)
+               if isinstance(inner, ast.Name) and inner.id in known)
+
+
 class _ReplaceKnownNames(ast.NodeTransformer):
     """Copy an expression with every load of a statically known int replaced by its value."""
 
@@ -663,16 +669,18 @@ def _constant_int_exact_with_known(node, known):
 def _check_int64_local_cancellation(node, known):
     """Refuse a function-local constant expression whose final value fits int64 but a step
     does not.  `a = 2**62; b = a * 2 - 1` computes `a * 2` in int64 and stops with
-    `integer overflow` at run time, where CPython's unbounded int prints INT64_MAX.  Only a
-    step that actually reads a statically known local or module constant is considered, so
-    the ordinary literal fold (`2**63 - 1`) and run-time arithmetic are unchanged."""
-    if not _names_a_known_constant(node, known):
+    `integer overflow` at run time, where CPython's unbounded int prints INT64_MAX.  Only an
+    operation step that actually reads a statically known local or module constant is
+    considered, so the ordinary literal fold (`2**63 - 1`) and run-time arithmetic are
+    unchanged.  A leaf name that is itself out of int64 is left to the ordinary constant
+    check, which keeps its existing wording."""
+    if not _names_a_known_constant(node, known) or not _known_names_fit_int64(node, known):
         return
     ok, value = _constant_int_exact_with_known(node, known)
     if not ok or not _int64_holds(value):
         return
     for child in ast.iter_child_nodes(node):
-        if not isinstance(child, ast.expr) or not _names_a_known_constant(child, known):
+        if not isinstance(child, (ast.BinOp, ast.UnaryOp)) or not _names_a_known_constant(child, known):
             continue
         child_ok, child_value = _constant_int_exact_with_known(child, known)
         if child_ok and not _int64_holds(child_value):
