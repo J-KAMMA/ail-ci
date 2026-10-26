@@ -273,6 +273,28 @@ representable, but its magnitude is not; the value is known at compile time, so 
 `pyc.build` on both builds rather than compiled into a program that stops later.  Values just
 inside the boundary, two-argument `round()` (a float result) and a user-defined `round` are
 unchanged.  Added `AIL_CURRENT/test_ail_pre54.py` and registered it in `ail_check.MODULES`.
+## 2026-10-24 - qtest1: __index__ returning None is not a default bound
+
+Review found that the str search window accepted any converted bound whose tag was
+None. A class whose `__index__` returns None (`N()` in
+`"abcabc".startswith(("bc",), N())`) was silently treated as "no bound" and returned
+True/1/2/1 where CPython raises `TypeError: __index__ returned non-int (type NoneType)`.
+The window's tag test now allows None only when the dunder lookup did not run (its
+`had` flag is 0); test_ail_qtest1 covers startswith/endswith/find/count/index plus
+values through a list item and a dict.
+
+## 2026-10-24 - qtest1: str search start/end bounds use __index__
+
+`str.startswith`/`endswith` (and `find`/`count`/`index`) read an instance start/end
+as its pointer payload after the general path's tag check rejected `AIL_T_INST`.
+`"abcabc".startswith(("bc",), Idx(1))` with an `__index__` class printed a caught
+TypeError where CPython returns True. The shared str window now converts an
+instance bound through `__index__` with CPython's slice-index messages (None still
+means the default bound), and the static check admits instances so the runtime
+conversion is reachable. Added `AIL_CURRENT/test_ail_qtest1.py`; tuple prefixes,
+empty prefixes, None, negative/huge bounds and wrong types stay compared on both
+builds.
+
 ## 2026-10-23 -- fuzz37: ordering TypeError names the written operator
 
 Fuzzing while loops and counters against CPython on both builds found that an
