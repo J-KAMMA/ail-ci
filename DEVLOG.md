@@ -180,6 +180,32 @@ is a separate pre-existing gap). Tests on the final tree: `test_ail_pre296`,
 `test_ail_builtin_shadowing` and `test_ail_pre218`. A lambda assigned after a call in the same
 function is still dropped by a separate scanning pass, so that unbound-local edge remains
 pre-existing on both builds.
+## 2026-10-26 -- repr(e.args[i]) keeps the argument's kind (job-pre298-10270442)
+
+This tree still lacked the accepted pre26 fix, so the first CPython difference left by the rbpre26
+review was behavioural: on the typed path `e.args[i]` reads as text, making `repr(e.args[i])` repr
+that text (`ValueError(3.0)` printed `'3.0'` where CPython prints `3.0`; ints, bools and None were
+quoted too) and `f"{e.args[i]!r}"` / `%r` of one argument were refused by name. Re-applied the
+accepted pre26 change: `exctext.py` gains `arg_repr()` and the `ail_exc_argrepr` runtime accessor
+(`ail__exc_piece(&a, 1, A)`), `pyfunc.py` lowers `repr(e.args[i])`, `!r` and `%r` through it, and the
+existing `_ail_exc_arg` text path is unchanged for `str()`, `print()` and concatenation. The rbpre26
+review's first pre-existing item (multi-argument `raise` on the forced general path) remains the
+same named refusal, and `"%r %s %r"` of exception arguments now works on the typed path.
+Added `test_ail_pre298.py` (numeric multi-argument repr, single-argument types/formats, index routes
+through a call/list item/dict value and formatting) and registered it in `ail_check.MODULES` and
+`ci_shards.json`; DIFFERENCES row `C?-job-pre298-10270442-1`. `tools/update_manifest.py --check`
+passes.
+
+Probes in `/tmp/probes/pre298` on both builds: `types`, `index_kinds`, `formats`, `escapes`,
+`pre26test` and `nonrepr` match CPython on `d` (the `g` build keeps the pre-existing named
+multi-argument refusal); `single` matches on both builds. `after` (storing `x = e.args[i]` and then
+`repr(x)`) still quotes a numeric argument; that is a pre-existing limitation identical on the base
+(`523c597`) and is not caused by this change. Final-state tests: test_ail_pre298,
+test_ail_exception_values_core, test_ail_exception_values_app,
+test_ail_exception_aggregate_objects, test_ail_exception_context, test_ail_exc_str,
+test_ail_excfix, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3
+(10 modules, 488 s, 0 failed).
+
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is
