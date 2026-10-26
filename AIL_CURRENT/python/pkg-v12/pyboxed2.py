@@ -10320,6 +10320,29 @@ class Compiler(boxclosure.ClosureMixin):
         if flag:
             ctx.emit('%s = 0;' % flag)
 
+    def _static_class_base(self, node, ctx):
+        """The class name a store target's base denotes statically, or None.  Same shadowing rules
+        as expr_Name: a local, parameter, closure cell or module-level rebinding is not the class."""
+        if (isinstance(node, ast.Name) and node.id in self.classes
+                and node.id not in self.module_names and node.id not in ctx.slot_of
+                and node.id not in ctx.ptr_names and node.id not in ctx.clo_index
+                and node.id not in ctx.free_names and node.id not in ctx.cell_slots):
+            return node.id
+        kind = self.infer_kind(node, ctx)
+        if kind is not None and kind.startswith('class:'):
+            return kind[6:]
+        return None
+
+    def _refuse_class_attr_store(self, base, attr, ctx):
+        """A store through a class value updates the class object, but the general path keeps each
+        class attribute in a slot it only reads (and copies onto instances), so the store would
+        raise AttributeError where CPython updates the class.  Refuse by name instead."""
+        owner = self._static_class_base(base, ctx)
+        if owner is not None:
+            raise Unsupported('assigning the class attribute %s.%s; the general path keeps class '
+                              'attributes on instances and cannot update one through the class'
+                              % (owner, attr))
+
     def _assign_target(self, target, value_c, ctx, value_kind=None):
         if isinstance(target, ast.Name):
             self._declare_if_local(target.id, ctx)
@@ -10329,6 +10352,7 @@ class Compiler(boxclosure.ClosureMixin):
         if isinstance(target, ast.Attribute):
             if target.attr in ('__cause__', '__context__', '__suppress_context__', '__traceback__'):
                 raise Unsupported('writing %s (exception chaining is not kept here)' % target.attr)
+            self._refuse_class_attr_store(target.value, target.attr, ctx)
             obj = self.expr(target.value, ctx)
             self.attr_names.add(target.attr)
             setters = [c for c in self.class_order if '__ail_set_' + target.attr in self.classes[c]['methods']]
@@ -10602,6 +10626,7 @@ class Compiler(boxclosure.ClosureMixin):
             self._mark_rebound(t.id, ctx)
             return
         if isinstance(t, ast.Attribute):
+            self._refuse_class_attr_store(t.value, t.attr, ctx)
             obj = self.expr(t.value, ctx)
             self.attr_names.add(t.attr)
             cur = ctx.tmp()
