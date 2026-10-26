@@ -333,9 +333,12 @@ def _check_constant_power(node, parents, maxsplit):
     _check_constant_out_of_range(node, parents, maxsplit, skip_assignment=True)
 
 def _check_index_expression(slice_node):
-    """Refuse a constant subscript index that int64 cannot hold. A literal or signed literal is
-    already refused by _check_int64_literals with its own message, so only compound arithmetic is
-    read here."""
+    """Refuse a constant subscript index whose exact value int64 cannot hold. A literal or signed
+    literal is already refused by _check_int64_literals with its own message, so only compound
+    arithmetic is read here. An intermediate step may leave int64 while the RESULT comes back in
+    range (`xs[2 ** 63 - 2 ** 63]` is `xs[0]`), so such a result is folded exactly and kept, as
+    pre246 does for unary minus; an expression whose exact fold is inconclusive keeps the per-step
+    refusal, and a result outside int64 is still refused by name."""
     literal = (isinstance(slice_node, ast.Constant)
                or isinstance(slice_node, ast.UnaryOp) and isinstance(slice_node.op, (ast.UAdd, ast.USub))
                and isinstance(slice_node.operand, ast.Constant))
@@ -344,6 +347,9 @@ def _check_index_expression(slice_node):
     try:
         _const_expr_int(slice_node)
     except _Int64ConstantOverflow as overflow:
+        ok, value = _constant_int_exact(slice_node)
+        if ok and value is not _CONST_INT_TOO_BIG and _INT64_MIN <= value <= _INT64_MAX:
+            return
         error = ValueError(f'int64 index out of range: {_constant_diagnostic(overflow.args[0])}')
         error.source_line = slice_node.lineno
         error.source_column = slice_node.col_offset

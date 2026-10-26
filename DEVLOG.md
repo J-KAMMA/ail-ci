@@ -1,3 +1,31 @@
+## 2026-10-26 -- in-range wide-intermediate constant index (job-pre280-10270155)
+
+The pre276 review's first pre-existing difference was an in-range wide-intermediate index:
+`xs[2 ** 63 - 2 ** 63]` was refused as `int64 index out of range: 9223372036854775808` on both
+builds while CPython evaluates 0 and prints the first item.  The same happened for
+`xs[(1 << 63) - (1 << 63)]`, `xs[(10 ** 20) // (10 ** 19)]`, `xs[(2 ** 63) % 7]`,
+`xs[(2 ** 63) & 3]`, `xs[~(2 ** 63) + 2 ** 63]` and `xs[-(2 ** 63) + 2 ** 63]`.
+
+`_check_index_expression` range-checked every step through `_const_expr_int`; on its overflow it
+now folds the whole constant exactly with `_constant_int_exact` (the 4096-bit-guarded fold
+pre246 uses for a unary operand) and keeps the expression when the exact result is in int64.  An
+inconclusive exact fold or an out-of-int64 result keeps the old per-step refusal, so
+`xs[2 ** 63]`, `xs[-(10 ** 20)]`, `xs[(2 ** 62) * 4]`, `xs[(10 ** 20) // (10 ** 19) + 10 ** 20]`
+and `xs[10 ** 100000]` are unchanged.  The typed and general builds fold the constant to the
+in-range index on their own.
+
+Probes `/tmp/probes/pre280/a_*`-`x_slice` on both builds: a_pow_sub, b_shift_sub, c_div_inrange,
+d_neg_result, e_containers (list/tuple/str/bytes/named list), f_dict_key, j_empty (IndexError),
+k_arg, l_attr, m_dict_value, n_list_item, o_alias, p_toobig, q_sign_boundary, s_mod, t_mixed,
+u_unary, w_bool_named and x_slice match CPython; g_out_pow, h_out_mul, i_out_div, r_big_out and
+v_wide_result are refused by name identically to the base.  `test_ail_pre177.py`'s `intermediate`
+refusal case became an out-of-range result (its in-range form is now in the matching test), and
+`test_ail_pre280.py` is added and registered in `ail_check.MODULES` and `tools/ci_shards.json`.
+Final-state tests: test_ail_pre280, test_ail_pre177, test_ail_pre246, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 (6 modules, 363 s, 0 failed).  `tools/diff_ids.py` is
+not present on this tree; `tools/update_manifest.py` was run and `--check` passes.  Note: pre276's
+unmerged `test_ail_pre276.py` pins the same refusal for `(-2 ** 63) // (2 ** 63)`, which now
+matches CPython as well.
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is
