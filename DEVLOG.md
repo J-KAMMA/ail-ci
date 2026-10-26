@@ -138,6 +138,27 @@ updated `tools/ci_shards.json`.  Probes `p285_*` in `/tmp/probes`: `p285_direct`
 `test_ail_pre285`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` and 13
 related `pre*` modules (17 modules, 361 s, 0 failed).  `tools/update_manifest.py --check`
 passes.
+## 2026-10-26 -- wrapper-chain int() of an out-of-int64 float refused (job-pre290-10270339)
+
+Fixed the first still-differing pre-existing item from the rbrbrbpre39 review, `r23`: a value
+outside int64 passed through a chain of wrapper calls (`outer(1e300)` -> `take(y)` -> `int(x)`)
+compiled and stopped at run time with `integer overflow`, while CPython prints the bignum.  This
+tree had no version of the accepted pre39 static-float checker, so its pass is added to
+`ail_chatgpt._check_int64_literals` (module constants, literal containers, identity/keyword
+wrappers, `_UNKNOWN` for unresolved names), and `_wrapper_int_params` now propagates a wrapper
+parameter through further module-level wrapper calls to a fixpoint, unwrapping identity calls.
+The call site is refused by name instead.  In-range conversions, non-finite floats, run-time-only
+values and a locally shadowed wrapper keep their previous behaviour.  Added
+`AIL_CURRENT/test_ail_pre290.py` (12 refused, 6 CPython-parity programs, both builds) and
+registered it in `ail_check.MODULES` and `ci_shards.json`.  The next recorded pre-existing items
+(r26 alias-list, r27 attribute-held value, r28 tuple multi-assign, r33 dict via variable dict)
+still stop at run time and are left open.
+
+Probes in `/tmp/probes` on both builds: `p290_refuse_{direct,one_pos,one_kw,identity,chain2,
+chain3_kw,chain_id,chain_list,chain_dict,chain_tuple,chain_neg,chain_const,chain_ifexp,
+chain_boundary}` are refused by name; `p290_match_{direct,routes,nonfinite,shadow}` match CPython.
+Final tests: `test_ail_pre290`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`.
 
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
