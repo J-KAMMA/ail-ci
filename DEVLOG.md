@@ -276,6 +276,25 @@ present on this tree; `tools/update_manifest.py --check` passes.  Probes `/tmp/p
 no-import, other type, handler/else/finally, `except Exception`, ZeroDivisionError, plain
 imports) match CPython or are refused by name on both builds.  Tests on the final tree:
 `test_ail_pre52`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
+## 2026-10-26 -- re-apply pre55: oversized list/tuple repeats (job-rbpre55-10261858)
+
+Re-applied the accepted pre55 change on the current tree. Constant list/tuple repeats whose element
+count exceeds 2**60 are refused by name in the general path (`pyboxed2.expr_BinOp`, before the
+existing `int_constant` fold). Dynamic repeats are guarded in the boxed `ail_op_mul` (the empty
+sequence is skipped and the multiplication is checked), in the typed `_list_repeat_value` (now
+reserving `_count * len(elements)` for every element count, including str lists), and in the
+one-element `list.repeat` IR; they stop with CPython's `MemoryError`. Empty and negative counts
+are unchanged, so `[] * 2**62` is empty as before. Added `AIL_CURRENT/test_ail_pre55.py` and
+registered it in `ail_check.MODULES`. The accepted `_constant_int` helper is kept, including its
+unary `~` handling.
+
+Probes in `/tmp/probes` match CPython or are refused by name on both builds: `pre55_refuse_pow`,
+`pre55_refuse_lit`, `pre55_refuse_tuple`, `pre55_refuse_rev`, `pre55_refuse_invert`,
+`pre55_refuse_boundary` (refused on the unified build, `MemoryError` on the default), `pre55_empty`,
+`pre55_runtime_arg`, `pre55_runtime_tuple`, `pre55_runtime_routes`, `pre55_runtime_attr`,
+`pre55_runtime_dict`, `pre55_small`, `pre55_small_widths`. Tests on the final tree:
+`test_ail_pre55`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`
+(4 modules, 229 s, 0 failed).
 
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
