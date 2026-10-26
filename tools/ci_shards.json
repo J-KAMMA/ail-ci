@@ -93,6 +93,7 @@
   "test_ail_fuzz38": 2.9,
   "test_ail_fuzz39": 40.6,
   "test_ail_fuzz3n": 25.9,
+  "test_ail_fuzz4": 10.4,
   "test_ail_fuzz41": 42.0,
   "test_ail_fuzz46": 6.7,
   "test_ail_fuzz47": 49.4,
@@ -391,7 +392,8 @@
    "test_ail_fuzz_findings"
   ],
   [
-   "test_ail_pathlib"
+   "test_ail_pathlib",
+   "test_ail_fuzz4"
   ],
   [
    "test_ail_api_profiles",
