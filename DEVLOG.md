@@ -1,3 +1,16 @@
+## 2026-10-26 - re-apply qtest4: bytes/bytearray fillchar wrong-type message (job-rbqtest4-10262127)
+
+Re-applied the accepted qtest4 change on this tree.  The `_ail_b_fill` type guard is already
+present from the pre182 fix (`bytes`/`bytearray` membership is checked before `_ail_bs`), so no
+prelude edit was needed and the conflict resolution keeps that fix.  Added the accepted
+`AIL_CURRENT/test_ail_qtest4.py` (the wrong-type bytes/bytearray cases at normal, narrow,
+negative and zero widths, plus a str control) and registered it in `ail_check.MODULES` after
+`test_ail_fuzz51`.  `tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py`
+was run and `--check` passes.  Probes `/tmp/probes/q4_direct.py`, `q4_routes.py`,
+`q4_str_control.py` and `q4_valid.py` (direct, argument/list/attribute/dict routes, valid and
+empty/multi-byte fills, bytearray receivers, str control) match CPython on both builds.  Tests:
+test_ail_qtest4, test_ail_pre182, test_ail_safetynet, test_ail_files, test_ail_corpus_findings3.
+
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is
