@@ -2179,6 +2179,15 @@ stored hashes for dict-to-dict merge/copy, and dict equality skips `-2` slots (t
 `index[-2]` there). `test_ail_pre57.py` covers p10/p14-style update/dict/copy/popitem shapes,
 dict equality with tombstones, source order, arguments/list items/attributes/dict values, and
 empty/negative/plain boundaries on both builds.
+## 2026-10-24 - pre68: literal `%d`/`%i`/`%u` with a float
+
+A literal format string such as `"%d" % 3.7` was lowered to `ail_obj_format`'s `d` spec, which
+rejects a float (`TypeError: unsupported format string passed to non-int`) on both the forced
+general build and the default build. CPython truncates the float toward zero for `d`, `i` and `u`
+and raises `OverflowError` / `ValueError` for infinity / NaN. Those three conversions now fall
+back to the run-time formatter (`safetyrt.FMT`) unless the argument is provably an `int` or
+`bool`; widths, signs, `%%`, ints/bools, and values through an argument, list item, attribute and
+dict value are covered by `AIL_CURRENT/test_ail_pre68.py` (2 programs, both builds).
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
