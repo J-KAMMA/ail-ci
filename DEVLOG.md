@@ -1,3 +1,18 @@
+## 2026-10-26 -- pre268 review fixes: parameter ownership and ignored cleanup exception (job-pre268-10262135)
+
+The review of the earlier any()/all() generator-cleanup commit found two defects, now fixed.
+`_generator_cleanup_source` no longer treats a parameter as an owned temporary: CPython keeps
+the generator resumable after any()/all() returns, so only a fresh `g()`/`obj.gen()` result or
+a fused generator-expression source is closed. `ail2g_close_value` now clears and ignores an
+exception raised by the generator's `finally` during this implicit cleanup, as CPython ignores
+it while deallocating a generator; previously the error returned to `ctx.check()` and aborted
+the program. `test_ail_pre268.py` now has `take()` resume its parameter after any(), keeps
+local/item/attribute/dict generators suspended before resuming them, and adds a
+`FINALLY_RAISES` case for direct, fused and filtered sources. Probes `p268_param`,
+`p268_fresh`, `p268_finally_raise` and `p268_routes` in `/tmp/probes` match CPython on both
+builds; a started generator abandoned at callee return still lacks deallocation cleanup, which
+is pre-existing and outside this change.
+
 ## 2026-10-26 -- any()/all() close a generator iterable at the deciding element (job-pre268-10262135)
 
 Fixed the pre-existing r89 difference from the pre42 lineage: the non-fused `any()`/`all()`

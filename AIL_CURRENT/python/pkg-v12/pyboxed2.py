@@ -8183,12 +8183,11 @@ class Compiler(boxclosure.ClosureMixin):
     def _generator_cleanup_source(self, node, ctx):
         """The iterable expressions whose generator cleanup an early any()/all() must run.
 
-        A fresh `g()` result is owned by the call, so dropping it closes it in CPython.  A
-        parameter is owned by the current activation; closing it when the activation returns
-        is CPython's behaviour for the usual `take(g())` shape.  A Name local, attribute,
-        subscript or other expression can keep an external reference (an alias, a list item,
-        an attribute or a dict value), so it is left alone: CPython does not close it either
-        while that reference lives."""
+        Only a fresh `g()`/`obj.gen()` result is owned by the call, so dropping it closes it in
+        CPython.  Any other expression -- a parameter, a Name local, an attribute, a subscript
+        or a dict value -- can keep a reference outside the any()/all() call; CPython leaves the
+        generator open there (a parameter stays resumable until the callee returns), so it is
+        not closed early."""
         if isinstance(node, ast.Call):
             f = node.func
             if isinstance(f, ast.Name):
@@ -8196,8 +8195,7 @@ class Compiler(boxclosure.ClosureMixin):
             if isinstance(f, ast.Attribute):
                 return any((c['methods'].get(f.attr) or {}).get('generator')
                            for c in self.classes.values())
-            return False
-        return isinstance(node, ast.Name) and node.id in getattr(ctx, 'fn_params', ())
+        return False
 
     def _any_all(self, name, args, kwargs, ctx):
         if len(args) != 1 or kwargs:

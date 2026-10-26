@@ -3,15 +3,32 @@
 The pre-existing difference recorded from job rbpre42's lineage (r89): the non-fused
 any()/all() path stopped at the first deciding element but dropped only the iterator, so
 CPython's generator deallocation -- which runs the generator's finally block -- never
-happened.  A generator passed directly, as a fresh call through an argument, or as the
-iterable of a fused generator expression now runs that cleanup before the call returns.
-The same object reached through a Name local, a list item, an attribute or a dict value
-is not closed early, because that reference keeps it alive in CPython too; consuming it
-fully still prints the cleanup exactly once.
+happened.  A fresh generator call, directly or as the iterable of a fused generator
+expression, now runs that cleanup before the call returns.  An object reached through a
+parameter, a Name local, a list item, an attribute or a dict value is not closed early,
+because that reference keeps it alive in CPython too; a parameter stays resumable after
+any()/all() returns, and consuming the generator fully still prints the cleanup once.  An
+exception raised by the finally block during this implicit cleanup is ignored, as CPython
+ignores it during generator deallocation.
 """
+import tempfile
 import unittest
 
-from test_ail_silent1 import check_program
+from test_ail_silent1 import _build_run, _cpython, check_program
+
+
+def check_stdout(test, name, text, modes=(True, False), rc=0):
+    """Like check_program, but stderr is not compared: CPython writes its
+    "Exception ignored in:" notice while deallocating the generator, which is not
+    part of the program's output; stdout and the exit status must still match."""
+    with tempfile.TemporaryDirectory(prefix='ail-pre268-') as directory:
+        want = _cpython(directory, name, text)
+        test.assertEqual(want[1], rc, text)
+        for general in modes:
+            got, err = _build_run(directory, name, text, general)
+            test.assertIsNotNone(got, '%s (general=%s)\n%s' % (text[:3000], general, err))
+            test.assertEqual(got[0], want[0], '%s (general=%s)\n%s' % (text[:3000], general, err))
+            test.assertEqual(got[1], want[1], '%s (general=%s)\n%s' % (text[:3000], general, err))
 
 
 CLEANUP = r'''def g(tag):
@@ -36,7 +53,10 @@ def h(tag):
 
 
 def take(it):
-    return any(it)
+    r = any(it)
+    rest = list(it)
+    print("arg-rest", rest)
+    return r
 
 
 def main() -> None:
@@ -61,30 +81,35 @@ KEPT_REFERENCES = r'''def one_two(tag):
         print("cleanup", tag)
 
 
-def all_false(tag):
-    try:
-        yield 0
-        yield 0
-    finally:
-        print("cleanup", tag)
-
-
 class Box:
     def __init__(self, it):
         self.it = it
 
 
+def take(it):
+    r = any(it)
+    print("after-any")
+    rest = list(it)
+    print("rest", rest)
+    return r
+
+
 def main() -> None:
     it = one_two("local")
-    print("early", any(it))
-    print("mid")
-    print("rest", all(it))
-    xs = [all_false("item")]
-    print("item", any(xs[0]))
-    box = Box(all_false("attr"))
-    print("attr", any(box.it))
-    d = {"k": all_false("dict")}
-    print("dict", any(d["k"]))
+    print("local-any", any(it))
+    print("local-rest", list(it))
+    xs = [one_two("item")]
+    print("item-any", any(xs[0]))
+    print("item-rest", list(xs[0]))
+    box = Box(one_two("attr"))
+    print("attr-any", any(box.it))
+    print("attr-rest", list(box.it))
+    d = {"k": one_two("dict")}
+    print("dict-any", any(d["k"]))
+    print("dict-rest", list(d["k"]))
+    alias = one_two("alias")
+    print("alias-result", take(alias))
+    print("caller-rest", list(alias))
     print("done")
 
 
@@ -125,6 +150,37 @@ def main() -> None:
 main()
 '''
 
+FINALLY_RAISES = r'''def g(tag):
+    try:
+        print("start", tag)
+        yield 1
+        yield 2
+    finally:
+        print("cleanup", tag)
+        raise ValueError("boom " + tag)
+
+
+def h(tag):
+    try:
+        print("start", tag)
+        yield 0
+        yield 1
+    finally:
+        print("cleanup", tag)
+        raise ValueError("boom " + tag)
+
+
+def main() -> None:
+    print("direct-any", any(g("d")))
+    print("direct-all", all(h("a")))
+    print("genexpr-any", any(x for x in g("e")))
+    print("filter-all", all(x for x in h("f") if x >= 0))
+    print("done")
+
+
+main()
+'''
+
 CONTROL = r'''def f(x):
     return x
 
@@ -150,6 +206,9 @@ class GeneratorIterableCleanup(unittest.TestCase):
 
     def test_empty_raising_and_nested_filter(self):
         check_program(self, 'pre268_edges', EDGES)
+
+    def test_finally_exception_during_cleanup_is_ignored(self):
+        check_stdout(self, 'pre268_finally', FINALLY_RAISES)
 
     def test_non_generator_iterables_unchanged(self):
         check_program(self, 'pre268_control', CONTROL)
