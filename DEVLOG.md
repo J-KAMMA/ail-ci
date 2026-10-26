@@ -1,3 +1,24 @@
+## 2026-10-26 -- re-apply pre280: in-range wide-intermediate constant index (job-rbpre280-10270754)
+
+Re-applying the accepted pre280 change.  The current tree already folds an in-range constant
+index through an out-of-int64 intermediate with `_const_fold_int` (pre269), so the pre280 cases
+(`xs[2 ** 63 - 2 ** 63]`, `xs[(1 << 63) - (1 << 63)]`, `xs[(10 ** 20) // (10 ** 19) - 10]`,
+`xs[(2 ** 63) % 7]`, `xs[~(2 ** 63) + 2 ** 63]`, `xs[-(2 ** 63) + 2 ** 63]`) already match
+CPython on both builds.  `_check_index_expression` now also tries pre280's 4096-bit guarded
+`_constant_int_exact` fold after `_const_fold_int`, keeping pre269's wider fold and adding the
+pre280 exact fallback; an inconclusive fold or a result still outside int64 keeps the by-name
+`int64 index out of range` refusal.  `test_ail_pre280.py` is added and registered in
+`ail_check.MODULES` and `tools/ci_shards.json`; `test_ail_pre177.py` gains its
+`WIDE_INTERMEDIATE` program (list, tuple and str receivers, a negative result) and keeps the
+current boundary case.  Probes in `/tmp/probes`: a_pow_sub, b_shift_sub, c_div_inrange,
+d_neg_result, e_containers, f_dict_key, j_empty, k_arg, l_attr, m_dict_value, n_list_item,
+o_alias, s_mod, t_mixed, u_unary and x_slice match CPython on both builds; g_out_pow, h_out_mul,
+i_out_div, p_toobig, q_sign_boundary, r_big_out and v_wide_result are refused by name identically
+on both builds.  Final-state tests: test_ail_pre280, test_ail_pre177, test_ail_pre269,
+test_ail_pre246, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (7 modules,
+36 tests, 0 failed).  `tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py`
+was run and `--check` passes.
+
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
