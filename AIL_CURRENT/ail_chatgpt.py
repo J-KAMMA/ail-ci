@@ -718,9 +718,10 @@ def _constant_text(node, known_text, known_int, known_containers=None):
 
 
 def _check_int64_int_base_constants(tree):
-    """Refuse `int(<constant str>, <constant base>)` when the parsed value leaves int64.
+    """Refuse `int(<constant text>[, <constant base>])` when the parsed value leaves int64.
     AIL ints are fixed width, so the conversion would stop with `integer overflow` where
-    CPython keeps the bignum; a value that fits keeps its run-time parse."""
+    CPython keeps the bignum; a value that fits keeps its run-time parse.  A call with no
+    explicit base uses CPython's base 10."""
     bound = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -803,13 +804,18 @@ def _check_int64_int_base_constants(tree):
         elif (len(node.args) == 1 and len(node.keywords) == 1
               and node.keywords[0].arg == 'base'):
             text_node, base_node = node.args[0], node.keywords[0].value
+        elif len(node.args) == 1 and not node.keywords:
+            text_node, base_node = node.args[0], None
         else:
             continue
         if isinstance(text_node, ast.Starred):
             continue
-        base = _constant_int(base_node, known_int)
-        if base is None or base != 0 and not 2 <= base <= 36:
-            continue
+        if base_node is None:
+            base = 10
+        else:
+            base = _constant_int(base_node, known_int)
+            if base is None or base != 0 and not 2 <= base <= 36:
+                continue
         text = _constant_text(text_node, known_text, known_int, known_containers)
         if text is None:
             continue
