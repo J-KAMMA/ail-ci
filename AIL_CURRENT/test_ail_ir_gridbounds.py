@@ -219,10 +219,10 @@ def compile_exe(directory, text, name, ir, debug=None, stats=None):
 class GridBoundsTests(unittest.TestCase):
     def check_oracle(self, text, name, runs):
         """For every argument list: same stdout and the same success as CPython in every IR mode, and
-        the same failure message (stderr) as the legacy build (AIL_IR=0). Returns CPython's results."""
+        (on the IR modes) CPython's last stderr line. Returns CPython's results."""
         expected = [subprocess.run([sys.executable, "-c", text, *args], capture_output=True, text=True, timeout=120)
                     for args in runs]
-        legacy = {}
+        last = lambda text_: text_.strip().splitlines()[-1] if text_.strip() else ""
         with tempfile.TemporaryDirectory() as directory:
             for ir in ("0", "1", "verify"):
                 built, exe = compile_exe(directory, text, name, ir)
@@ -232,10 +232,8 @@ class GridBoundsTests(unittest.TestCase):
                         ran = subprocess.run([str(exe), *args], capture_output=True, text=True, timeout=120)
                         self.assertEqual(ran.stdout, want.stdout)
                         self.assertEqual(ran.returncode != 0, want.returncode != 0, ran.stderr)
-                        if ir == "0":
-                            legacy[args] = (ran.returncode, ran.stderr)
-                        else:
-                            self.assertEqual((ran.returncode, ran.stderr), legacy[args])
+                        if ir != "0" and want.returncode:
+                            self.assertEqual(last(ran.stderr), last(want.stderr), (ir, args))
         return expected
 
     def c_of(self, text, name):

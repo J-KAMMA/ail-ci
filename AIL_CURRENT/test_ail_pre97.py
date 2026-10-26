@@ -123,7 +123,7 @@ class Pre97Tests(unittest.TestCase):
 
     def test_maxsplit_literal_above_int64_refused(self):
         self.check_refused('literal_over', 'print("a b c".split(" ", 9223372036854775808))\n',
-                           'int64 literal out of range')
+                           'maxsplit constant does not fit in a 64-bit signed integer')
 
 
 if __name__ == '__main__':

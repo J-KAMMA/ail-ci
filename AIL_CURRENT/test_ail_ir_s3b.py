@@ -310,8 +310,8 @@ def main():
 
 main()
 '''
-REFUSED_FUNCS = ['called_after', 'alias_in_branch', 'rebind_while_live', 'loop_resize_alias', 'double_buffer',
-                 'two_fields', 'lend_while_growing', 'take_then_raise', 'take_self_copy']
+REFUSED_FUNCS = ['called_after', 'alias_in_branch', 'rebind_while_live', 'loop_resize_alias', 'double_buffer']
+# (two_fields, lend_while_growing, take_then_raise and take_self_copy are now taken by the IR and agree with CPython)
 
 COPIES = HEAD + '''
 
@@ -401,7 +401,8 @@ def fsum(f: list[float]) -> int:
     t = 0.0
     for x in f:
         t += x
-    return int(t * 4)
+    r: int = int(t * 4)         # (tagged local: the int() of an unbounded float keeps this on the IR)
+    return r
 
 
 def arg_temp(n: int) -> int:
@@ -657,15 +658,13 @@ class SharingTests(unittest.TestCase):
                     if fn == 'helper':
                         continue
                     self.assertNotIn(fn, built.ir[tag], fn)
-                for fn in ('called_after', 'alias_in_branch', 'rebind_while_live', 'loop_resize_alias',
-                           'two_fields', 'lend_while_growing', 'take_then_raise', 'take_self_copy'):
+                for fn in REFUSED_FUNCS:
                     self.assertIn('Rule X', built.fallback[tag][fn], (fn, built.fallback[tag][fn]))
             runs = {tag: run(built.exe[tag]) for tag in built.exe}
-            self.assertEqual(runs['ir'], runs['legacy'])
-            self.assertEqual(runs['ir-checked'], runs['legacy'])
             expected = cpython_run(tmp, 'refused', REFUSED)
-            # where CPython and the legacy build differ the box would have made the IR equal CPython
-            # (stage S3e); these are the sites W-ALIAS must name
+            # the IR follows CPython (sharing); the legacy build's value semantics still differ
+            self.assertEqual(runs['ir'], runs['ir-checked'])
+            self.assertEqual((runs['ir'][0], runs['ir'][1]), (expected[0], expected[1]))
             self.assertNotEqual(runs['legacy'][1], expected[1])
 
     def test_explicit_copies_are_copies_and_a_dead_source_is_a_move(self):
@@ -684,7 +683,7 @@ class SharingTests(unittest.TestCase):
             c = Path(tmp, 'listret.ir.d', 'program.c').read_text()
             self.assertIn('make__irl(', c)
             # the legacy entry point stays, as a wrapper over the by-value one
-            self.assertRegex(c, r'int64_t make\(int64_t v_n, int64_t \*_out, int64_t _cap\)')
+            self.assertRegex(c, r'int64_t make\(ail_tint v_n, int64_t \*_out, int64_t _cap\)')
             body = c[c.index('ail_list twice__irl'):]
             body = body[:body.index('\n}\n')]
             self.assertNotIn('adopt_return', body)
@@ -703,8 +702,9 @@ class SharingTests(unittest.TestCase):
         self.assertEqual((w['dst'], w['src'], w['rule']), ('ys', 'xs', 'rename'))
 
     def test_walias_covers_functions_that_stay_on_the_legacy_emitter(self):
-        # a double buffer written for value semantics (design section 1.5: grid_life-ail-2's `ga = gb`)
-        src = HEAD + '''
+        # (life and tidy are compiled separately: a Rule X function makes the whole program take the tagged-int
+        # lowerer, so the stats of a later function in the same program can be missing)
+        life_src = HEAD + '''
 
 def life(n: int) -> int:
     ga = [1, 2, 3, 4]
@@ -717,6 +717,14 @@ def life(n: int) -> int:
     return ga[3]
 
 
+def main():
+    life(3)
+
+
+main()
+'''
+        tidy_src = HEAD + '''
+
 def tidy(n: int) -> int:
     ga = [1, 2, 3, 4]
     gb = ga[:]
@@ -726,17 +734,17 @@ def tidy(n: int) -> int:
 
 
 def main():
-    life(3)
     tidy(2)
 
 
 main()
 '''
         with tempfile.TemporaryDirectory() as tmp:
-            exe, entries = self.entries(tmp, 'life', src)
-        self.assertEqual(entries['life']['path'], 'legacy')
-        notes = entries['life']['walias']
-        self.assertEqual([(w['dst'], w['src'], w['line']) for w in notes if w['differs']][0][:2], ('ga', 'gb'))
+            exe, entries = self.entries(tmp, 'life', life_src)
+            self.assertEqual(entries['life']['path'], 'legacy')
+            notes = entries['life']['walias']
+            self.assertEqual([(w['dst'], w['src'], w['line']) for w in notes if w['differs']][0][:2], ('ga', 'gb'))
+            exe, entries = self.entries(tmp, 'tidy', tidy_src)
         self.assertNotIn('walias', entries['tidy'])
 
     def test_sharing_counters(self):
@@ -794,7 +802,11 @@ main()
                         self.assertNotIn('LeakSanitizer', stderr.replace('LeakSanitizer is disabled', ''),
                                          (name, tag, k, stderr[-800:]))
                 self.assertEqual(runs['ir'][0][:2], runs['ir-checked'][0][:2])
-                if name in ('listret', 'refused'):
+                if name == 'refused':
+                    with tempfile.TemporaryDirectory() as tmp:
+                        expected = cpython_run(tmp, name, source)
+                    self.assertEqual(runs['ir'][0][:2], expected[:2])
+                elif name == 'listret':
                     self.assertEqual(runs['ir'][0][:2], runs['legacy'][0][:2])
 
 
@@ -807,29 +819,30 @@ class GeneratedSharingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             for seed in self.SEEDS:
                 with self.subTest(seed=seed):
-                    source, workers = _ShareGen(seed).program()
-                    built = Built(tmp, 'g%d' % seed, source)
+                    gen = _ShareGen(seed)
+                    _source, workers = gen.program()
+                    workers = set(workers)
+                    boxed = set()
+                    # A Rule X worker makes the program general, and the stats then stop at it; remove the
+                    # recorded refusals and rebuild until every remaining worker is on the IR.
+                    for attempt in range(1, len(workers) + 2):
+                        source, _ = gen.program(keep=workers - boxed)
+                        built = Built(tmp, 'g%d_%d' % (seed, attempt), source)
+                        missing = workers - boxed - built.ir['ir']
+                        if not missing:
+                            break
+                        out = built.fallback['ir']
+                        new = {w for w in missing if 'Rule X' in out.get(w, '')}
+                        self.assertTrue(new, (seed, missing, out, source))
+                        boxed |= new
+                    else:
+                        self.fail((seed, workers, boxed))
                     expected = cpython_run(tmp, 'g%d' % seed, source)
                     self.assertEqual(expected[0], 0, expected[2] + source)
                     runs = {tag: run(built.exe[tag]) for tag in built.exe}
                     self.assertEqual(runs['ir'], runs['ir-checked'], source)
-                    out = built.fallback['ir']
-                    boxed = [w for w in workers if w in out and 'Rule X' in out[w]]
-                    other = [w for w in workers if w in out and 'Rule X' not in out[w]]
-                    self.assertEqual(other, [], (out, source))
                     refused += len(boxed)
                     taken += len(workers) - len(boxed)
-                    if boxed:
-                        # a refused worker runs as legacy (value semantics) and the program may then
-                        # differ from CPython, even fail: that is what Rule X reports. The same seed
-                        # without the refused workers is compared instead.
-                        source, _ = _ShareGen(seed).program(keep=set(workers) - set(boxed))
-                        built = Built(tmp, 'k%d' % seed, source)
-                        expected = cpython_run(tmp, 'k%d' % seed, source)
-                        runs = {tag: run(built.exe[tag]) for tag in built.exe}
-                        self.assertEqual(expected[0], 0, expected[2] + source)
-                        self.assertEqual(runs['ir'], runs['ir-checked'], source)
-                        self.assertEqual(set(workers) - set(boxed) - built.ir['ir'], set(), (built.fallback['ir'], source))
                     self.assertEqual(runs['ir'], (0, expected[1], ''), source)
         self.assertGreater(taken, 0)
 

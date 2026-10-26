@@ -8,9 +8,8 @@ list ndigits was silently accepted, an instance without `__round__` was named `i
 `__round__` method received a garbage integer instead of the object.  These programs compare with
 CPython on both builds.  The negative-ndigits boundary is included: an ndigits at or below -309
 rounds every finite float to a signed zero, and a rounded magnitude above DBL_MAX raises
-OverflowError.  An out-of-int64 intermediate inside `__index__` (for example `10**30`) cannot be
-evaluated at all (AIL integers are int64), so that program stops by name ("integer overflow") while
-running `__index__`; CPython uses its arbitrary-precision result.
+OverflowError.  An out-of-int64 intermediate inside `__index__` (for example `10**30`) is an exact
+big int now, so that program returns CPython's ndigits and rounds like CPython.
 """
 import os
 import shutil
@@ -237,9 +236,8 @@ class RoundNDigits(unittest.TestCase):
 
     def test_out_of_int64_index_is_refused(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre160-') as tmp:
+            want = _cpython(tmp, 'saturate', SATURATE)
             for mode in ('general', 'default'):
                 got, error = _build_run(tmp, 'saturate', SATURATE, mode)
                 self.assertIsNone(error, mode + ': ' + str(error))
-                stdout, code, stderr = got
-                self.assertNotEqual(code, 0, mode + ': ' + stdout.decode('utf-8', 'replace'))
-                self.assertIn('integer overflow', stderr, mode)
+                self.assertEqual(got, want, mode)

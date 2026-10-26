@@ -295,8 +295,10 @@ class ProgramTests(unittest.TestCase):
 
     # ------------------------------------------------------------------ creation, access, drops
     def test_owned_lists_creation_access_growth_and_iteration(self):
+        # (`mixed` and `neg` take a range whose start/step is tagged now, so they stay on the legacy emitter;
+        # the whole-program output still has to match CPython)
         results, built = self.check_program('lists', LISTS, ['fill', 'evens', 'ramp', 'weights', 'pipeline', 'stack',
-                                                              'mixed', 'neg', 'fibs'])
+                                                              'fibs'])
         self.assertEqual(results[0][0], 0)
 
     def test_list_returning_functions_chain_through_the_return_buffer(self):
@@ -330,7 +332,7 @@ class ProgramTests(unittest.TestCase):
         self.assertEqual(lines[0], expected[0])               # share 9
         self.assertEqual(lines[1], expected[1])               # slice 100 ...
         self.assertEqual(lines[3], 'clean 15')
-        self.assertNotEqual(lines[2], expected[2])            # swap_in_place: Rule X, legacy value semantics
+        self.assertEqual(lines[2], expected[2])               # swap_in_place: still Rule X, but now CPython's value
 
     def test_a_list_moved_into_a_struct_field_where_a_copy_cannot_be_told_apart(self):
         results, built = self.check_program('fieldmove', FIELDMOVE, ['dead_after', 'read_after', 'fresh_fields'])
@@ -347,17 +349,10 @@ class ProgramTests(unittest.TestCase):
         self.assertTrue(out[0][1].strip())
 
     def test_uncaught_exception_out_of_an_owner_ends_like_the_legacy_build(self):
+        # The IR build now uses CPython's exact big ints for the last case, so the legacy build (int64) is
+        # no longer the oracle; compare every case with CPython (stdout, status and the last stderr line).
         cases = list(range(UNCAUGHT_CASES))
-        results, _ = self.check_program('uncaught', UNCAUGHT, ['boom'], args_list=[(k,) for k in cases],
-                                        cpython=False)
-        for k, (status, stdout, stderr) in zip(cases, results):
-            self.assertEqual(status, 1, (k, stderr))
-            self.assertTrue(stdout.startswith('start %d\n' % k), (k, stdout))
-            self.assertTrue(stderr.strip(), k)
-        with tempfile.TemporaryDirectory() as tmp:
-            for k in cases[:-1]:          # (the last one overflows int64, where Python has big integers)
-                expected = cpython_run(tmp, 'uncaught', UNCAUGHT, (k,))
-                self.assertEqual(results[k][:2], expected[:2], k)
+        self.check_program('uncaught', UNCAUGHT, ['boom'], args_list=[(k,) for k in cases], legacy_equal=False)
 
     # ------------------------------------------------------------------ bytearrays
     def test_owned_bytearrays_in_calls_returns_and_fields(self):
@@ -384,7 +379,7 @@ class ProgramTests(unittest.TestCase):
             built, exe, entries = compile_program(tmp, 'pipe', PIPE, 'ir', {'AIL_IR': 'verify'}, debug=True)
             self.assertEqual(built.returncode, 0, built.stderr)
             c = Path(tmp, 'pipe.ir.d', 'program.c').read_text()
-        body = c[c.index('int64_t steps(void) {'):]
+        body = c[c.index('ail_tint steps(void) {'):]
         body = body[:body.index('\n}\n')]
         self.assertGreaterEqual(body.count('ail_list_free('), 5)
         self.assertIn('ail_cleanup_frame', body)         # the checked adds in the steps can raise
@@ -421,9 +416,10 @@ class ProgramTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             sources = {}
             for tag, mode in (('off', '0'), ('on', 'verify')):
-                built, exe, _ = compile_program(tmp, 'lists', LISTS, tag, {'AIL_IR': mode}, debug=True)
+                # (CHAIN is all-IR; LISTS asks for the tagged-int lowering in mixed/neg and is built generally)
+                built, exe, _ = compile_program(tmp, 'chain', CHAIN, tag, {'AIL_IR': mode}, debug=True)
                 self.assertEqual(built.returncode, 0, built.stderr)
-                sources[tag] = Path(tmp, 'lists.%s.d' % tag, 'program.c').read_text()
+                sources[tag] = Path(tmp, 'chain.%s.d' % tag, 'program.c').read_text()
         for marker in ('ail_ir_list_get', 'ail_ir_view_get', 'ail_ir_list_fail'):
             self.assertNotIn(marker, sources['off'], marker)
             self.assertIn(marker, sources['on'], marker)
@@ -467,7 +463,11 @@ class ProgramTests(unittest.TestCase):
                         self.assertNotIn('AddressSanitizer', stderr, (name, tag, k))
                         self.assertNotIn('LeakSanitizer', stderr.replace('LeakSanitizer is disabled', ''),
                                          (name, tag, k, stderr[-600:]))
-                        if name != 'fieldshare':           # (sharing: the legacy build copies; S3b's tests cover it)
+                        if name == 'uncaught':             # the last case is a big int: CPython, not the legacy build
+                            with tempfile.TemporaryDirectory() as tmp:
+                                expected = cpython_run(tmp, name, source, args_list[k])
+                            self.assertEqual((status, stdout), expected[:2], (name, tag, k))
+                        elif name != 'fieldshare':         # (sharing: the legacy build copies; S3b's tests cover it)
                             self.assertEqual((status, stdout), runs['legacy'][k][:2], (name, tag, k))
 
 
@@ -787,18 +787,6 @@ def written_after(t: T, n: int) -> int:
     return order[0]
 
 
-def helper(t: T) -> int:
-    t.order = [9, 9]
-    return 0
-
-
-def called_after(t: T, n: int) -> int:
-    order = [1, 2, 3]
-    t.order = order
-    helper(t)
-    return order[0]
-
-
 def element_after(t: T, n: int) -> int:
     order = [1, 2, 3]
     t.order = order
@@ -813,6 +801,18 @@ def alias_in_loop(t: T, n: int) -> int:
         t.order = order
         s += order[0]
     return s
+
+
+def helper(t: T) -> int:
+    t.order = [9, 9]
+    return 0
+
+
+def called_after(t: T, n: int) -> int:
+    order = [1, 2, 3]
+    t.order = order
+    helper(t)
+    return order[0]
 
 
 def csum(xs: list[int]) -> int:
@@ -962,10 +962,10 @@ main()
 
 BYTES = '''
 def put32(out: bytearray, v: int) -> None:
-    out.append(v & 255)
-    out.append((v >> 8) & 255)
-    out.append((v >> 16) & 255)
-    out.append((v >> 24) & 255)
+    out.append(v % 256)
+    out.append((v // 256) % 256)
+    out.append((v // 65536) % 256)
+    out.append((v // 16777216) % 256)
 
 
 def pack(d: bytes) -> int:
@@ -1127,7 +1127,7 @@ class _Gen(object):
         if choice == 7:
             return ['f[t % len(f)] = f[t % len(f)] * 1.5 + 0.25', 't = (t + int(f[0] * 4)) % 1000003']
         if choice == 8:
-            return ['out.append((t + %d) & 255)' % c, 't = (t + len(out)) % 1000003']
+            return ['out.append((t + %d) %% 256)' % c, 't = (t + len(out)) % 1000003']
         if choice == 9:
             return ['put(out, t)']
         if choice == 10:
@@ -1155,7 +1155,7 @@ class _Gen(object):
                  '        self.cnt = 0', '', '',
                  'def total(xs: list[int]) -> int:', '    r = len(xs)', '    for i in range(len(xs)):',
                  '        r = (r * 31 + xs[i]) % 1000003', '    return r', '', '',
-                 'def put(out: bytearray, v: int) -> None:', '    out.append(v & 255)', '    out.append((v >> 8) & 255)',
+                 'def put(out: bytearray, v: int) -> None:', '    out.append(v % 256)', '    out.append((v // 256) % 256)',
                  '', '']
         helpers = ['h%d' % i for i in range(3)]
         for h in helpers:

@@ -554,9 +554,13 @@ class GeneratedProgramTests(unittest.TestCase):
                     self.assertEqual(built.returncode, 0, built.stdout + built.stderr + source)
                     self.assertEqual(ran.returncode, 0, ran.stderr)
                     self.assertEqual(ran.stdout, expected, source)
-                    on_ir = {e['fn'] for e in entries if e['path'] == 'ir'}
-                    self.assertEqual(set(functions) - on_ir, set(),
-                                     [e for e in entries if e['path'] != 'ir'])
+                    # (fix17: a bit operation on an unproven int stays on the legacy emitter -- tagged ints have
+                    # no bitwise C op -- so the program can mix IR and legacy functions and still match CPython)
+                    for entry in entries:
+                        if entry['path'] != 'ir':
+                            self.assertTrue('tint' in entry['reason'] or 'bit operation' in entry['reason'],
+                                            entry)
+                            self.assertIn(entry['fn'], functions, entry)
                     built, legacy, entries = build_and_run(tmp, 'gen%d' % seed, source, ir=False)
                     self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
                     self.assertEqual(legacy.stdout, expected)
@@ -568,12 +572,9 @@ class GeneratedProgramTests(unittest.TestCase):
                   'def main():\n    print(div(7, 2))\n    print(grow(5))\n\n\nmain()\n')
         with tempfile.TemporaryDirectory() as tmp:
             on = build_and_run(tmp, 'ovf', source, ir=True)
-            off = build_and_run(tmp, 'ovf', source, ir=False)
         self.assertLessEqual({'grow', 'div'}, {e['fn'] for e in on[2] if e['path'] == 'ir'})
-        self.assertEqual((on[1].returncode, on[1].stdout, on[1].stderr),
-                         (off[1].returncode, off[1].stdout, off[1].stderr))
-        self.assertNotEqual(on[1].returncode, 0)
-        self.assertIn('overflow', on[1].stderr)
+        expected = '3\n739044147071729616580416051031916488005\n'
+        self.assertEqual((on[1].returncode, on[1].stdout, on[1].stderr), (0, expected, ''))
 
 
 class SwitchTests(unittest.TestCase):
