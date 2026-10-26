@@ -489,7 +489,9 @@ class DefaultBuild(unittest.TestCase):
 
     def test_mix_clone_overflow_falls_back(self):
         """An int64-overflowing value inside a mixed clone runs the boxed body (the clone's checked
-        helpers longjmp to the wrapper), not the typed loud stop: CPython's exact big int on both builds."""
+        helpers longjmp to the wrapper), not the typed loud stop: CPython's exact big int on both builds.
+        A repeated fallback inside a recursive clone also restores the recursion depth, so it does not
+        exhaust AIL_MAX_RECURSION_DEPTH after a few hundred abandoned frames."""
         made, exe, src, c = self.build_c("mix_clone_overflow")
         self.assertEqual(made.returncode, 0, made.stdout[-500:] + made.stderr[-1500:])
         units = sorted(c.parent.glob("*_mix*.c"))

@@ -2126,23 +2126,70 @@ def _mix_overflow_fallback(csrc, mangled, overflow):
     whose `ail_die("integer overflow")` would exit instead of letting the boxed body answer.
     Replace that stop with a longjmp to the wrapper, which then signals the call site to run the
     boxed body. Only the clone's own typed unit is changed; other trap messages stay as they are.
-    Returns None when the unit has no place to declare the jump buffer.
+    The jump abandons the clone's C frames, so `hit` first releases every cleanup frame linked
+    since the wrapper was entered and restores whichever of the unit's own `ail_depth`,
+    `ail_cleanup_top` and `ail_exc_top` it declares. Otherwise repeated fallbacks leak recursion
+    depth and leave a dangling cleanup stack. Returns (the patched source, the set of state names
+    restored), or None when the unit has no place to declare the jump buffer.
     """
     marker = '#include <stdint.h>\n'
     if marker not in csrc:
         return None
     jmp = mangled + '__mix_jmp'
     hit = mangled + '__mix_overflow_hit'
+    save = mangled + '__mix_save'
+    savep = mangled + '__mix_savep'
+    state = {}
+    for name in ('ail_depth', 'ail_cleanup_top', 'ail_exc_top'):
+        state[name] = bool(re.search(r'^AIL_LINK_STATE\([^;\n]*\b' + name + r'\b', csrc, re.M))
+    fields = []
+    inits = []
+    restores = []
+    if state['ail_depth']:
+        fields.append('int64_t depth;')
+        inits.append('ail_depth')
+        restores.append('        ail_depth = s->depth;')
+    if state['ail_cleanup_top']:
+        fields.append('ail_cleanup_frame *cleanup;')
+        inits.append('ail_cleanup_top')
+        restores.extend((
+            '        while (ail_cleanup_top && ail_cleanup_top != s->cleanup) {',
+            '            ail_cleanup_frame *f = ail_cleanup_top;',
+            '            ail_cleanup_top = f->previous;',
+            '            f->release(f->resources);',
+            '        }',
+            '        ail_cleanup_top = s->cleanup;'))
+    if state['ail_exc_top']:
+        fields.append('int exc_top;')
+        inits.append('ail_exc_top')
+        restores.append('        ail_exc_top = s->exc_top;')
     decl = ('\n#include <setjmp.h>\n'
             'static jmp_buf %s;\n'
             'extern int %s;\n'
-            'static inline void %s(void) { %s = 1; longjmp(%s, 1); }\n'
-            % (jmp, overflow, hit, overflow, jmp))
+            'static inline void %s(void);\n'
+            % (jmp, overflow, hit))
+    if fields:
+        helper = ('\ntypedef struct { %s } %s;\n'
+                  'static %s *%s;\n'
+                  'static inline void %s(void) {\n'
+                  '    %s *s = %s;\n'
+                  '    if (s) {\n'
+                  '%s\n'
+                  '    }\n'
+                  '    %s = 1;\n'
+                  '    longjmp(%s, 1);\n'
+                  '}\n'
+                  % (' '.join(fields), save, save, savep, hit, save, savep,
+                     '\n'.join(restores), overflow, jmp))
+    else:
+        helper = ('\nstatic inline void %s(void) { %s = 1; longjmp(%s, 1); }\n'
+                  % (hit, overflow, jmp))
     csrc = csrc.replace(marker, marker + decl, 1)
-    return csrc.replace('ail_die("integer overflow")', hit + '()')
+    csrc = csrc.replace('ail_die("integer overflow")', hit + '()')
+    return csrc + helper, state
 
 
-def _mix_wrap_integer_clone(mangled, inner, inner_sig, params, overflow):
+def _mix_wrap_integer_clone(mangled, inner, inner_sig, params, overflow, state=None):
     """The int64-ABI wrapper around an int-returning clone.
 
     `inner_sig` is the typed emitter's own prototype for `inner`. Its parameters are already the
@@ -2176,17 +2223,35 @@ def _mix_wrap_integer_clone(mangled, inner, inner_sig, params, overflow):
             return None, None
     tagged = 'ail_tint ' in inner_sig[:inner_sig.index(inner)]
     jmp = mangled + '__mix_jmp'
+    save = mangled + '__mix_save'
+    savep = mangled + '__mix_savep'
+    state = state or {}
+    inits = [name for name in ('ail_depth', 'ail_cleanup_top', 'ail_exc_top') if state.get(name)]
     proto = 'int64_t %s(%s)' % (mangled, ', '.join(proto_args))
     body = ['int %s = 0;\n' % overflow, proto + ' {\n',
-            '    %s = 0;\n' % overflow,
-            '    if (setjmp(%s) != 0) return 0;\n' % jmp]
+            '    %s = 0;\n' % overflow]
+    if inits:
+        body.extend((
+            '    %s saved = {%s};\n' % (save, ', '.join(inits)),
+            '    %s *previous = %s;\n' % (save, savep),
+            '    %s = &saved;\n' % savep,
+            '    if (setjmp(%s) != 0) { %s = previous; return 0; }\n' % (jmp, savep)))
+        restore = ' %s = previous;' % savep
+    else:
+        body.append('    if (setjmp(%s) != 0) return 0;\n' % jmp)
+        restore = ''
     if tagged:
         body.append('    ail_tint r = %s(%s);\n' % (inner, ', '.join(args)))
         body.append('    int64_t v;\n')
-        body.append('    if (!ail_tint_to_int64(r, &v)) { %s = 1; return 0; }\n' % overflow)
+        body.append('    if (!ail_tint_to_int64(r, &v)) { %s = 1;%s return 0; }\n'
+                    % (overflow, restore))
+        body.append('%s\n' % ('    %s = previous;\n' % savep if inits else ''))
         body.append('    return v;\n')
     else:
-        body.append('    return %s(%s);\n' % (inner, ', '.join(args)))
+        body.append('    int64_t result = %s(%s);\n' % (inner, ', '.join(args)))
+        if inits:
+            body.append('    %s = previous;\n' % savep)
+        body.append('    return result;\n')
     body.append('}\n')
     return ''.join(body), proto
 
@@ -6301,7 +6366,7 @@ class Compiler(boxclosure.ClosureMixin):
                 patched = _mix_overflow_fallback(csrc, mangled, overflow)
                 if patched is None:
                     continue
-                csrc = patched
+                csrc, mix_state = patched
             inner_sig = _mix_extract_signature(csrc, inner)
             if inner_sig is None:
                 continue
@@ -6311,7 +6376,8 @@ class Compiler(boxclosure.ClosureMixin):
                 # than reach the exact boxed body. Keep this function general.
                 continue
             if integer_ret:
-                wrapper, sig_text = _mix_wrap_integer_clone(mangled, inner, inner_sig, params, overflow)
+                wrapper, sig_text = _mix_wrap_integer_clone(mangled, inner, inner_sig, params, overflow,
+                                                               mix_state)
                 if wrapper is None:
                     continue
                 csrc += wrapper
