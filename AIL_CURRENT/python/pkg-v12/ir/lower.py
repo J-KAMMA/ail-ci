@@ -2407,12 +2407,16 @@ class Lowering(TextLowering):
                         value = None
                     known = isinstance(value, int) and not isinstance(value, bool)
                     if known and count >= 63:
-                        # A constant shift whose result fits int64 is not a shift beyond it: zero
-                        # shifted any number of places stays zero, and -1 << 63 is INT64_MIN.
+                        # Zero shifted any number of places stays zero: it fits int64 and is not a
+                        # shift beyond it, so the enclosing body can stay on the IR.
                         if value == 0:
                             return self.const(I.I64, 0)
                         if count == 63 and value == -1:
-                            return self.const(I.I64, -(1 << 63))
+                            # INT64_MIN, kept as a tagged value so that later arithmetic that
+                            # legitimately exceeds int64 still promotes (a plain int64 constant
+                            # would stop at the overflow check).
+                            return self.b.value(
+                                'tint.from', [self.const(I.I64, -(1 << 63))], TINT)
                     beyond = count >= 63
                     if not beyond and known:
                         shifted = value << count

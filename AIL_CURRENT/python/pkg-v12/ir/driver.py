@@ -233,7 +233,8 @@ def _apply(P, args, kwargs, result, current):
                 _lv = None
             if isinstance(_lv, int) and not isinstance(_lv, bool) \
                     and (_lv == 0 or (_rhs.value == 63 and _lv == -1)):
-                continue        # the constant result fits int64
+                # zero fits int64; -1 << 63 stays on the IR as a promotable tagged value
+                continue
             _big_shift = True
             break
     if _py and _big_shift and not _io_like and not (_sig and (any(_sig[0]) or _sig[1])) \
