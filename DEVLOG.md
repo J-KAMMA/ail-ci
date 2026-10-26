@@ -55,6 +55,24 @@ the bases 0/1/-1, negative constant exponents and a variable base with a constan
 `test_ail_pre160`, `test_ail_crypto`, `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3`.
 
+## 2026-10-26 -- constant index with a wide operand is already refused by name (job-pre276-10262320)
+
+The first still-differing item from the rbpre47 review was
+`[1, 2, 3][(-2 ** 63) // (2 ** 63)]`: CPython computes -1 and prints the last item, while both
+builds stop at compile time with `int64 index out of range: 9223372036854775808` because the
+positive operand `2 ** 63` leaves int64.  The task accepts a named compile-time refusal, and the
+current tree already gives one on the general and the default build, so no compiler change was
+made.  Added `test_ail_pre276.py`, which pins that refusal for list, tuple, str, bytes and dict
+receivers and for a named list, on both builds, and registered it in `ail_check.MODULES` and
+`ci_shards.json`.
+
+Probes in `/tmp/probes` (both builds): `idx1_exact` is refused by name; the wider per-route probes
+`pre276_routes`, `pre276_containers`, `pre276_boundaries`, `pre276_negatives`, `pre276_widths`,
+`pre276_assign_alias` and `pre276_empty` are also refused by name or, where the per-step folder
+already leaves them alone, match CPython.  `runtime_var` (the second rbpre47 item) is likewise
+already refused by name; `divs3` (the third) still prints `1.0` on the default build and was not
+the first item.  Tests on the final tree: test_ail_pre276, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is
