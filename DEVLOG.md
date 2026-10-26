@@ -1,3 +1,17 @@
+## 2026-10-26 - nested generator expressions (job-rbpre42-10261853)
+
+Re-applied the accepted pre42 change on top of this tree.  The general path still materialises a
+generator expression like a list comprehension, so a generator expression nested inside another
+one was evaluated when the outer object was built (CPython creates it only when its element is
+reached); the side-effect order differed and consuming the outer could end in
+`AIL internal error: ail_it_next: unknown library iterator kind`.  Both general emitters now
+refuse the nested construct by name, and the `next()` / `any()` / `all()` fused paths check the
+outer argument too.  This tree's pre116/pre166 saved-generator screen (`a generator expression
+used as a value`) would otherwise claim a nested one first, so the nested check runs before it;
+that screen is kept unchanged for non-nested saved generators.  A generator expression with no
+generator expression inside it, including one holding a list/set/dict comprehension, still builds
+and matches CPython.  Added `AIL_CURRENT/test_ail_pre42.py` and registered it in `ail_check.MODULES`.
+
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is
