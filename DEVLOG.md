@@ -7,13 +7,13 @@ dead-code out-of-range powers) is already refused by name on this tree, so this 
 first item that was still an uncaught run-time difference.
 
 `ail_chatgpt.py` now follows a function's single-assignment int constants (direct, aliased,
-annotated, and visible module constants) when it folds an expression, and refuses by name
+annotated, and visible module constants) when it checks an expression, and refuses by name
 (`int64 constant expression out of range`) a step that leaves int64 while the whole expression
-fits.  The evidence comes from the existing `_function_local_int_constants` +
+fits.  The check reuses the existing `_function_local_int_constants` +
 `_constant_int_exact` machinery.  A literal cancellation such as `2**63 - 1`, in-range local
 steps and values that only arrive at run time are unchanged; an expression whose own final
 value leaves int64 keeps its previous run-time stop.  Added `AIL_CURRENT/test_ail_pre285.py`
-(11 refusal cases, 6 matching cases, both builds), registered it in `ail_check.MODULES` and
+(12 refusal cases, 6 matching cases, both builds), registered it in `ail_check.MODULES` and
 updated `tools/ci_shards.json`.  Probes `p285_*` in `/tmp/probes`: `p285_direct`,
 `p285_routes`, `p285_alias` and `p285_ops` are refused by name on both builds; `p285_small`,
 `p285_literal` and `p285_runtime` match CPython on both builds.  Tests on the final tree:
