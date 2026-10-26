@@ -578,6 +578,203 @@ def _binds_name(tree, name):
     return False
 
 
+def _scope_nodes_with_parents(scope):
+    """Nodes of one scope (module, function, method) with their parent, stopping at nested
+    functions, classes and lambdas (a different scope)."""
+    stack = [(node, scope) for node in reversed(scope.body)]
+    while stack:
+        node, parent = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        yield node, parent
+        for child in reversed(list(ast.iter_child_nodes(node))):
+            stack.append((child, node))
+
+
+def _scope_parameters(function):
+    arguments = function.args
+    parameters = {argument.arg for argument in arguments.posonlyargs + arguments.args + arguments.kwonlyargs}
+    if arguments.vararg is not None:
+        parameters.add(arguments.vararg.arg)
+    if arguments.kwarg is not None:
+        parameters.add(arguments.kwarg.arg)
+    return parameters
+
+
+def _scope_declared(function):
+    declared = set()
+    for node in ast.walk(function):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            declared.update(node.names)
+    return declared
+
+
+def _scope_class_aliases(scope, classes, stores, parameters, declared):
+    """name -> class for a name this scope's own top-level statements bind once to a class name."""
+    aliases = {}
+    for statement in scope.body:
+        if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+            continue
+        target = statement.targets[0]
+        if not (isinstance(target, ast.Name) and isinstance(statement.value, ast.Name)):
+            continue
+        name, value = target.id, statement.value.id
+        if name in classes or name in parameters or name in declared or stores.get(name) != 1:
+            continue
+        if value in stores or value in parameters or value in declared:
+            continue
+        if value in classes:
+            aliases[name] = value
+    return aliases
+
+
+def _literal_container_classes(value, classes):
+    """The class name held at each position of a literal list/tuple or string-keyed dict."""
+    if isinstance(value, (ast.List, ast.Tuple)):
+        return [item.id if isinstance(item, ast.Name) and item.id in classes else None
+                for item in value.elts]
+    if isinstance(value, ast.Dict):
+        entries = {}
+        for key, item in zip(value.keys, value.values):
+            if (isinstance(key, ast.Constant) and isinstance(key.value, (str, int))
+                    and not isinstance(key.value, bool)
+                    and isinstance(item, ast.Name) and item.id in classes):
+                entries[key.value] = item.id
+        return entries
+    return None
+
+
+def _scope_class_containers(scope, nodes, classes, stores, parameters, declared):
+    """name -> literal class container, for a name bound once and only ever read by indexing (a
+    mutation through the name, a call that could mutate it, or another use stops the record)."""
+    containers = {}
+    assigned = {}
+    for statement in scope.body:
+        if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+            continue
+        target = statement.targets[0]
+        if not isinstance(target, ast.Name):
+            continue
+        entries = _literal_container_classes(statement.value, classes)
+        if not entries or target.id in parameters or target.id in declared or stores.get(target.id) != 1:
+            continue
+        assigned[target.id] = (target, entries)
+    for name, (target, entries) in assigned.items():
+        touched = False
+        for node, parent in nodes:
+            if not (isinstance(node, ast.Name) and node.id == name):
+                continue
+            if node is target:
+                continue
+            if (isinstance(parent, ast.Subscript) and parent.value is node
+                    and isinstance(parent.ctx, ast.Load)):
+                continue
+            touched = True
+            break
+        if not touched:
+            containers[name] = entries
+    return containers
+
+
+def _constant_index(node):
+    if isinstance(node, ast.Constant) and isinstance(node.value, int) and not isinstance(node.value, bool):
+        return node.value
+    if (isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub)
+            and isinstance(node.operand, ast.Constant) and isinstance(node.operand.value, int)
+            and not isinstance(node.operand.value, bool)):
+        return -node.operand.value
+    return None
+
+
+def _container_class(entries, slice_node):
+    if isinstance(entries, list):
+        index = _constant_index(slice_node)
+        if index is not None and -len(entries) <= index < len(entries):
+            return entries[index]
+    elif isinstance(entries, dict):
+        if isinstance(slice_node, ast.Constant) and isinstance(slice_node.value, (str, int)) \
+                and not isinstance(slice_node.value, bool):
+            return entries.get(slice_node.value)
+    return None
+
+
+def _attribute_store_targets(node):
+    """The ast.Attribute targets of one statement: plain, tuple/list, for, with and comprehension."""
+    targets = []
+    if isinstance(node, ast.Assign):
+        targets.extend(node.targets)
+    elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+        targets.append(node.target)
+    elif isinstance(node, (ast.For, ast.AsyncFor)):
+        targets.append(node.target)
+    elif isinstance(node, (ast.With, ast.AsyncWith)):
+        targets.extend(item.optional_vars for item in node.items if item.optional_vars is not None)
+    elif isinstance(node, ast.comprehension):
+        targets.append(node.target)
+    stack = list(targets)
+    while stack:
+        current = stack.pop()
+        if isinstance(current, (ast.Tuple, ast.List)):
+            stack.extend(current.elts)
+        elif isinstance(current, ast.Starred):
+            stack.append(current.value)
+        elif isinstance(current, ast.Attribute):
+            yield current
+
+
+def _refuse_class_attr_target(target, aliases, containers):
+    base = target.value
+    if isinstance(base, ast.Name) and base.id in aliases:
+        rendered = base.id
+    elif isinstance(base, ast.Subscript) and isinstance(base.value, ast.Name) \
+            and _container_class(containers.get(base.value.id), base.slice) is not None:
+        rendered = ast.unparse(base)
+    else:
+        return
+    error = ValueError('assigning the class attribute %s.%s; a class attribute here is a constant'
+                       % (rendered, target.attr))
+    error.source_line = target.lineno
+    error.source_column = target.col_offset
+    raise error
+
+
+def _check_class_attribute_assignment(tree):
+    """Refuse a class-attribute store whose base is statically a class, by name.
+
+    The general path keeps a class attribute in a slot it only reads (an instance gets a copy at
+    construction), so ``alias.attr = v`` raised AttributeError where CPython updates the class
+    object.  A direct class name is refused by the emitters themselves, which leaves the typed
+    path's class-attribute support untouched; here an alias of a class, or a class read out of a
+    literal list/tuple/dict, is refused at compile time on both builds.  A base that only holds a
+    class at run time (a parameter, an attribute, a non-literal container) is refused by the
+    runtime under the same name."""
+    classes = {node.name for node in tree.body if isinstance(node, ast.ClassDef)}
+    if not classes:
+        return
+    module_stores = _function_scope_stores(tree)
+    module_aliases = _scope_class_aliases(tree, classes, module_stores, set(), set())
+    module_nodes = list(_scope_nodes_with_parents(tree))
+    module_containers = _scope_class_containers(tree, module_nodes, classes, module_stores, set(), set())
+    for node, _parent in module_nodes:
+        for target in _attribute_store_targets(node):
+            _refuse_class_attr_target(target, module_aliases, module_containers)
+    for function in (node for node in ast.walk(tree)
+                     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))):
+        parameters = _scope_parameters(function)
+        declared = _scope_declared(function)
+        stores = _function_scope_stores(function)
+        shadowed = set(stores) | parameters | declared
+        aliases = {name: owner for name, owner in module_aliases.items() if name not in shadowed}
+        aliases.update(_scope_class_aliases(function, classes, stores, parameters, declared))
+        nodes = list(_scope_nodes_with_parents(function))
+        containers = {name: entries for name, entries in module_containers.items()
+                      if name not in shadowed}
+        containers.update(_scope_class_containers(function, nodes, classes, stores, parameters, declared))
+        for node, _parent in nodes:
+            for target in _attribute_store_targets(node):
+                _refuse_class_attr_target(target, aliases, containers)
+
+
 def _check_int64_abs_constants(tree, known):
     """Refuse a constant ``abs`` whose exact value int64 cannot hold, by name.
 
@@ -1312,6 +1509,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 _check_int64_constant_positions(tree)
                 _check_int64_unary_constants(tree)
                 _check_int64_int_base_constants(tree)
+                _check_class_attribute_assignment(tree)
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)
             if source_map is not None:
