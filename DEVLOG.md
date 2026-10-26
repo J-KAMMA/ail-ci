@@ -1,3 +1,27 @@
+## 2026-10-26 - pre267: refuse a statically known non-BMP bytes.decode() by name (job-pre267-10262133)
+
+The first still-differing item in the rbpre51 review was the general path's non-BMP
+`bytes.decode()`: `b"\xf0\x9f\x98\x80".decode()` built and then stopped with `AIL internal
+error: decode: a code point above U+FFFF in the 16-bit v2 runtime`, while CPython prints the
+astral character and the default build already matched.  The general runtime keeps UTF-16 units,
+so pyboxed2 now statically resolves the bytes value and refuses a decode (or `str(bytes, enc)`)
+whose UTF-8 text contains a code point above U+FFFF, by name at compile time.  It follows a
+literal, module constant/alias, list/tuple/dict literal item, class attribute, simple identity
+return, `bytes([...])` / `bytearray(...)`, keyword encoding/errors, and a function parameter
+called with such a constant; BMP text (through U+FFFF) and invalid UTF-8 still match CPython.
+Bytes whose content is only known at run time (stdin/file/unknown value) keep the open 16-bit
+limitation already recorded at `C?-job-rbrbrbrbmemsafe2-10261346-6`.
+
+Added `AIL_CURRENT/test_ail_pre267.py` (2 tests, both builds) and registered it in
+`ail_check.MODULES`.  Probes in `/tmp/probes`: `p267_decode.py` (direct non-BMP),
+`p267_decode_const.py`, `p267_decode_container.py`, `p267_decode_arg.py`,
+`p267_decode_attr.py`, `p267_decode_attr2.py`, `p267_decode_str.py`, `p267_decode_dyn.py`,
+`p267_decode_alias.py` and `p267_decode_bounds_nonbmp.py` are refused by name on the general
+path; `p267_decode_bmp.py`, `p267_decode_invalid.py`, `p267_decode_bounds_bmp.py`,
+`p267_decode_encoding_bmp.py`, and the three mutated bytearray/list/dict probes
+(`p267_mutate_bytearray.py`, `p267_mutate_list.py`, `p267_mutate_dict.py`) match CPython on both
+builds.
+
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is
