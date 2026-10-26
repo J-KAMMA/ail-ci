@@ -46,6 +46,43 @@ Probes in `/tmp/probes/pre29`: `pre29_invalid`, `pre29_sources`, `pre29_objects`
 negative/zero, NUL/control/quote, long and non-ASCII specs, alias/argument/list/attribute/dict
 routes, bool/int/float/str and None/list/tuple/dict/instance values) match CPython on both builds.
 Final-state tests: pre29, safetynet, files and corpus_findings3.
+## 2026-10-26 -- pre263 follow-up: inline tuple source (job-pre263-10261654)
+
+The reviewer found the new row claimed a literal tuple source was covered, while
+`int(("9999999999999999999",)[0])` still compiled and stopped with `integer overflow`.
+`python_surface` rewrites that tuple to `_AilT_s(...).f0`, which `_constant_text` did not read.
+It now follows the generated `_AilT_*` constructor and field chain, so the one-argument parse
+sees the same constant text and refuses the out-of-range value by name; nested tuple sources
+and `[-1]` work as well, and an unselected out-of-range sibling is not refused.  Added
+`tuple_source` and `tuple_source_negative_index` to `test_ail_pre263.py`.  Probes
+`/tmp/probes/pre263fix/t01`-`t20` cover direct/multi/negative/bytes/nested/whitespace, both
+int64 boundaries, two-argument and explicit-base forms, argument/list-item/dict-value/class
+attribute/module-alias routes, in-range values, invalid and empty text; every one matches
+CPython or is refused by name on both builds.
+
+## 2026-10-26 -- pre263: constant single-argument int(text) beyond int64 (job-pre263-10261654)
+
+The task named a pre-existing difference from the bigint-fix05 review, but its list was empty in
+the task text.  The first still-differing bignum item I could reproduce from the records was
+`int("9999999999999999999")`: both builds compiled it and then stopped with `integer overflow`,
+while CPython prints the bignum.  The two-argument `int(<text>, <base>)` form was already refused
+by pre253, but a call with no explicit base (CPython's base 10) was not folded.
+
+`_check_int64_int_base_constants` now also reads the one-argument form: when the text is a
+constant str or bytes, it is parsed with CPython's default base and a value outside int64 is
+refused by name at compile time (`int64 constant expression out of range`).  Constant module
+names and aliases, literal list/tuple/dict sources, arguments, list items, class attributes and
+dict values are covered; in-range constants, invalid literals, dynamic text and a rebound `int`
+keep their previous behaviour.  Dynamic text above int64 still stops with `integer overflow`
+(the existing open row `C?-job-rbrbrbrbmemsafe2-10261346-7`).
+
+Added `AIL_CURRENT/test_ail_pre263.py` and registered it in `ail_check.MODULES` and
+`tools/ci_shards.json`.  Probes `/tmp/probes/pre263/p01`-`p12` cover direct/negative/bytes,
+int64 boundaries, 19/100/4300-digit widths, module constants and aliases, argument/list item/
+class attribute/dict value routes, list/tuple/dict sources, in-range values, invalid literals,
+an explicit base and a dynamic helper; every probe matches CPython or is refused by name on both
+builds.  Final-state tests: test_ail_pre263, test_ail_safetynet, test_ail_files,
+test_ail_corpus_findings3.
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is
