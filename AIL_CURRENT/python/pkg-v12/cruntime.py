@@ -17124,15 +17124,28 @@ static inline void ail_class_setattr(ail_ctx *cx, ail_obj cls, int64_t name_id, 
     }
     c->attrs[c->n].name_id = name_id; c->attrs[c->n].val = val; c->n++;
 }
-/* the class chain's own attribute tables, most derived first (CPython's MRO for one base) */
-static inline ail_st ail_class_getattr(ail_ctx *cx, ail_obj *out, ail_obj cls, int64_t name_id, const char *name_for_msg) {
+/* the class chain's own attribute tables, most derived first (CPython's MRO for one base).
+   `as_instance` says the lookup started at an instance (a failed INST lookup falls through to its
+   class): CPython then names the class in the same "'K' object ..." shape as any other value, while
+   a lookup on the class itself is its "type object 'K' ..." message. */
+static inline ail_st ail_class_getattr(ail_ctx *cx, ail_obj *out, ail_obj cls, int64_t name_id, const char *name_for_msg, int as_instance) {
     for (ail_obj k = cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
         ail_classobj *c = (ail_classobj *)k.o;
         for (int64_t i = 0; i < c->n; i++)
             if (c->attrs[i].name_id == name_id) { *out = c->attrs[i].val; return AIL_OK; }
     }
-    char buf[160]; snprintf(buf, sizeof buf, "'%s' object has no attribute '%s'",
-                            cls.tag == AIL_T_CLASS ? "type" : "instance", name_for_msg);
+    char cname[120]; size_t ck = 0;
+    if (cls.tag == AIL_T_CLASS) {
+        ail_str cn = ail_view_to_str(((ail_classobj *)cls.o)->name);
+        for (int64_t i = 0; i < cn.n && ck + 1 < sizeof cname; i++) {
+            uint32_t ch = (uint32_t)ail_chr(cn, i);
+            cname[ck++] = ch < 128 ? (char)ch : '?';
+        }
+    }
+    cname[ck] = 0;
+    char buf[192];
+    if (as_instance) snprintf(buf, sizeof buf, "'%s' object has no attribute '%s'", cname, name_for_msg);
+    else snprintf(buf, sizeof buf, "type object '%s' has no attribute '%s'", cname, name_for_msg);
     return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, buf);
 }
 static inline void ail_inst_setattr(ail_ctx *cx, ail_obj inst, int64_t name_id, ail_obj val) {
@@ -17184,12 +17197,12 @@ static inline ail_st ail_inst_setattr_chk(ail_ctx *cx, ail_obj inst, int64_t nam
     return AIL_OK;
 }
 static inline ail_st ail_inst_getattr(ail_ctx *cx, ail_obj *out, ail_obj inst, int64_t name_id, const char *name_for_msg) {
-    if (inst.tag == AIL_T_CLASS) return ail_class_getattr(cx, out, inst, name_id, name_for_msg);
+    if (inst.tag == AIL_T_CLASS) return ail_class_getattr(cx, out, inst, name_id, name_for_msg, 0);
     if (__builtin_expect((unsigned)(inst.tag - AIL_T_INST) > 1u, 0)) return ail_attr_not_inst(cx, inst, name_for_msg);
     ail_instobj *o = (ail_instobj *)inst.o;
     for (int64_t i = 0; i < o->n; i++) if (o->attrs[i].name_id == name_id) { *out = o->attrs[i].val; return AIL_OK; }
-    if (o->cls.tag == AIL_T_CLASS) return ail_class_getattr(cx, out, o->cls, name_id, name_for_msg);
-    char buf[160]; snprintf(buf, sizeof buf, "'%s' object has no attribute '%s'", inst.tag == AIL_T_INST ? ail__tname_c(inst) : "instance", name_for_msg);
+    if (o->cls.tag == AIL_T_CLASS) return ail_class_getattr(cx, out, o->cls, name_id, name_for_msg, 1);
+    char buf[160]; snprintf(buf, sizeof buf, "'%s' object has no attribute '%s'", ail__tname_c(inst), name_for_msg);
     return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, buf);
 }
 static inline ail_obj ail_exc_as_value(ail_ctx *cx) {

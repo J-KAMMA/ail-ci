@@ -273,9 +273,9 @@ class Excfix(Base):
     def test_oserror_with_errno_typed(self):
         self.compare("userr", USER_OSERROR, mode="typed", irs=("0", "1"))
 
-    def test_oserror_with_errno_general_is_refused_by_name(self):
-        # the general path has no errno on its exceptions yet; it says so rather than print another text
-        self.refused(USER_OSERROR, "raising OSError with more than one argument", mode="gonly")
+    def test_oserror_with_errno_general(self):
+        # the general path builds OSError(errno, strerror) with CPython's subclass, text and attributes
+        self.compare("userr_g", USER_OSERROR, mode="gonly", irs=("1",))
 
     def test_errno_of_other_classes_is_refused_on_the_typed_path(self):
         body = ("def main():\n    try:\n        raise ValueError('x')\n    except ValueError as e:\n"

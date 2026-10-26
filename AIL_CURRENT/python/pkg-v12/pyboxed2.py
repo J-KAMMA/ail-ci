@@ -231,6 +231,12 @@ EXC_IDS = {
     'ProcessLookupError': 'AIL_B_PROCESSLOOKUPERROR',
     'TimeoutError': 'AIL_B_TIMEOUTERROR',
 }
+OS_ERROR_NAMES = frozenset((
+    'OSError', 'ConnectionError', 'BlockingIOError', 'ChildProcessError', 'BrokenPipeError',
+    'ConnectionAbortedError', 'ConnectionRefusedError', 'ConnectionResetError', 'FileExistsError',
+    'FileNotFoundError', 'InterruptedError', 'IsADirectoryError', 'NotADirectoryError',
+    'PermissionError', 'ProcessLookupError', 'TimeoutError',
+))
 TYPE_TAG = {
     'int': 'AIL_T_INT', 'float': 'AIL_T_FLOAT', 'str': 'AIL_T_STR', 'bool': 'AIL_T_BOOL',
     'list': 'AIL_T_LIST', 'dict': 'AIL_T_DICT', 'set': 'AIL_T_SET', 'tuple': 'AIL_T_TUPLE',
@@ -5330,7 +5336,7 @@ class Compiler(boxclosure.ClosureMixin):
             obj = self.expr(node.value, ctx)
             self.attr_names.add(node.attr)
             t = ctx.tmp()
-            ctx.emit('st = ail_class_getattr(cx, &%s, %s, g_attr_%s, %s);' %
+            ctx.emit('st = ail_class_getattr(cx, &%s, %s, g_attr_%s, %s, 0);' %
                      (t, obj, node.attr, c_str_literal(node.attr)))
             ctx.check()
             return t
@@ -10242,7 +10248,7 @@ class Compiler(boxclosure.ClosureMixin):
                 obj = self.expr(t.value, ctx)
                 self.attr_names.add(t.attr)
                 cur = ctx.tmp()
-                ctx.emit('st = ail_class_getattr(cx, &%s, %s, g_attr_%s, %s);' %
+                ctx.emit('st = ail_class_getattr(cx, &%s, %s, g_attr_%s, %s, 0);' %
                         (cur, obj, t.attr, c_str_literal(t.attr)))
                 ctx.check()
                 rhs = self.expr(node.value, ctx)
@@ -10599,6 +10605,13 @@ class Compiler(boxclosure.ClosureMixin):
                     ctx.emit('%s = %s;' % (slot, self.expr(a, ctx)))
                     slots.append(slot)
                 ctx.emit('ail_obj %s[%d] = { %s };' % (arr, len(slots), ', '.join(slots)))
+                if tname in OS_ERROR_NAMES and 2 <= len(exc.args) <= 5:
+                    # OSError(errno, strerror[, filename[, winerror[, filename2]]]): the run time
+                    # picks the errno's subclass and builds the "[Errno N] text" message and attrs
+                    ctx.emit('st = ail2x_raise_oserror(cx, cx->builtin_cls[%s], %s, %d); goto %s;' %
+                             (EXC_IDS[tname], arr, len(slots), ctx.cur_err_target()))
+                    ctx.uses_st = True
+                    return
                 # str(Several(...)) is repr of the tuple of arguments in CPython, whether or not
                 # the program reads e.args (KeyError is not special here for more than one arg)
                 tt = ctx.tmp()

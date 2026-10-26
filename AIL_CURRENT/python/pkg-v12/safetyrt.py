@@ -1720,6 +1720,54 @@ static inline ail_st ail2x_raise_builtin(ail_ctx *cx, ail_obj cls, ail_obj msg, 
     AIL_FRAME_LEAVE(cx, fr);
     return AIL_EXC;
 }
+/* OSError(errno, strerror[, filename[, winerror[, filename2]]]): CPython's structured form.  The
+   class CPython's constructor picks for the errno when the call named OSError itself (ENOENT
+   FileNotFoundError, EACCES/EPERM PermissionError, EISDIR, EEXIST, ENOTDIR, ...); str(e) is
+   "[Errno N] text" (with ": 'filename'" and " -> 'filename2'"), e.args is (errno, strerror), and
+   .errno/.strerror/.filename/.filename2 are the parts.  More than five arguments are CPython's
+   generic "all arguments" form and stay on ail2x_raise_builtin. */
+static inline ail_st ail2x_raise_oserror(ail_ctx *cx, ail_obj cls, ail_obj *args, int64_t n) {
+    if (!ail2x_args_id) ail2x_args_id = ail_intern(cx, "args");
+    ail_obj real_cls = cls;
+    if (cls.o == cx->builtin_cls[AIL_B_OSERROR].o && ail__is_intlike(args[0].tag) &&
+        args[0].i >= INT_MIN && args[0].i <= INT_MAX)
+        real_cls = cx->builtin_cls[ail_bi_oserror_id((int)args[0].i)];
+    AIL_FRAME_ENTER(cx, fr, 9);
+    fr.slots[0] = ail_str_from_cstr(cx, "[Errno ");
+    fr.slots[1] = ail_obj_str(cx, args[0]);
+    fr.slots[2] = ail_str_cat(cx, fr.slots[0], fr.slots[1]);
+    fr.slots[0] = ail_str_from_cstr(cx, "] ");
+    fr.slots[1] = ail_str_cat(cx, fr.slots[2], fr.slots[0]);
+    fr.slots[2] = ail_obj_str(cx, args[1]);
+    fr.slots[3] = ail_str_cat(cx, fr.slots[1], fr.slots[2]);
+    if (n >= 3) {
+        fr.slots[0] = ail_str_from_cstr(cx, ": ");
+        fr.slots[1] = ail_obj_repr(cx, args[2]);
+        fr.slots[2] = ail_str_cat(cx, fr.slots[0], fr.slots[1]);
+        fr.slots[1] = ail_str_cat(cx, fr.slots[3], fr.slots[2]);
+        fr.slots[3] = fr.slots[1];
+    }
+    if (n >= 5) {
+        fr.slots[0] = ail_str_from_cstr(cx, " -> ");
+        fr.slots[1] = ail_obj_repr(cx, args[4]);
+        fr.slots[2] = ail_str_cat(cx, fr.slots[0], fr.slots[1]);
+        fr.slots[1] = ail_str_cat(cx, fr.slots[3], fr.slots[2]);
+        fr.slots[3] = fr.slots[1];
+    }
+    fr.slots[4] = ail_tuple_new(cx, args, 2);
+    fr.slots[5] = ail_inst_new(cx, real_cls);
+    fr.slots[5].tag = AIL_T_EXC;
+    ail_inst_setattr(cx, fr.slots[5], AIL_ATTR_MESSAGE, fr.slots[3]);
+    ail_inst_setattr(cx, fr.slots[5], ail2x_args_id, fr.slots[4]);
+    ail_inst_setattr(cx, fr.slots[5], ail_intern(cx, "errno"), args[0]);
+    ail_inst_setattr(cx, fr.slots[5], ail_intern(cx, "strerror"), args[1]);
+    ail_inst_setattr(cx, fr.slots[5], ail_intern(cx, "filename"), n >= 3 ? args[2] : ail_box_none());
+    ail_inst_setattr(cx, fr.slots[5], ail_intern(cx, "filename2"), n >= 5 ? args[4] : ail_box_none());
+    ail_raise(cx, real_cls, fr.slots[3]);
+    cx->exc.value = fr.slots[5];
+    AIL_FRAME_LEAVE(cx, fr);
+    return AIL_EXC;
+}
 /* a missing dict key: CPython's KeyError holds the key itself as its one argument, and str(e) is its repr */
 static inline ail_st ail2x_raise_key(ail_ctx *cx, ail_obj key) {
     ail_obj msg = ail_obj_repr(cx, key);
