@@ -473,6 +473,48 @@ def c_str_literal(s):
     return ''.join(out)
 
 
+def _const_int(node):
+    """The integer value of a constant expression, or None. Only the ordinary integer operators
+    are folded, so `chr(0xFFFF + 1)` is checked like the literal it denotes; a name, call or
+    other shape stays unknown (its value is only known at run time)."""
+    if isinstance(node, ast.Constant):
+        return node.value if type(node.value) is int else None
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert)):
+        v = _const_int(node.operand)
+        if v is None:
+            return None
+        return v if isinstance(node.op, ast.UAdd) else -v if isinstance(node.op, ast.USub) else ~v
+    if isinstance(node, ast.BinOp):
+        a = _const_int(node.left)
+        b = _const_int(node.right)
+        if a is None or b is None:
+            return None
+        try:
+            if isinstance(node.op, ast.Add):
+                return a + b
+            if isinstance(node.op, ast.Sub):
+                return a - b
+            if isinstance(node.op, ast.Mult):
+                return a * b
+            if isinstance(node.op, ast.FloorDiv):
+                return a // b
+            if isinstance(node.op, ast.Mod):
+                return a % b
+            if isinstance(node.op, ast.LShift) and 0 <= b <= 64:
+                return a << b
+            if isinstance(node.op, ast.RShift) and 0 <= b <= 64:
+                return a >> b
+            if isinstance(node.op, ast.BitOr):
+                return a | b
+            if isinstance(node.op, ast.BitAnd):
+                return a & b
+            if isinstance(node.op, ast.BitXor):
+                return a ^ b
+        except (ArithmeticError, ValueError):
+            return None
+    return None
+
+
 def cid(name):
     return 'pv_' + name
 
@@ -8548,8 +8590,9 @@ class Compiler(boxclosure.ClosureMixin):
             cp = node.value
             if 0xD800 <= cp <= 0xDFFF:
                 raise Unsupported('chr() with the surrogate code point U+%04X' % cp)
-            if not WIDE_STRINGS and 0xFFFF < cp <= 0x10FFFF:
-                raise Unsupported('chr() with the non-BMP code point U+%X in the 16-bit v2 runtime' % cp)
+        cp = _const_int(node)
+        if cp is not None and not WIDE_STRINGS and 0x10000 <= cp <= 0x10FFFF:
+            raise Unsupported('chr() with the non-BMP code point U+%04X in the 16-bit v2 runtime' % cp)
         v = self.expr(args[0], ctx)
         t = ctx.tmp()
         ctx.emit('st = ail_bi_chr(cx, &%s, %s);' % (t, v))
