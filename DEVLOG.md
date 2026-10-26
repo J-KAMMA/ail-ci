@@ -1,3 +1,31 @@
+## 2026-10-26 -- pre272 follow-up: refresh full-C output pins (job-pre272-10262304)
+
+The accepted base-runtime mapping for `list assignment index out of range` changes the emitted C
+for every program that pulls the exception runtime, so the full-C SHA-256 pins in
+`test_ail_numeric_bindings` and `test_ail_record_initializers` were stale, so they were
+regenerated on this tree.  Both modules and `test_ail_pre272` pass;
+`tools/update_manifest.py --check` passes.
+
+## 2026-10-26 -- pre272: `del` out-of-range says CPython's list assignment text (job-pre272-10262304)
+
+The rbpre19 pre-existing constant `del` bounds (`2**63-1`, `2**100000`, `2**100:2**101`, and the
+argument/list-item/attribute/dict routes) are already refused by name on both builds, so they no
+longer differ.  The first remaining pre-existing CPython difference in that family was the
+uncaught message for deleting an out-of-range list item: the general path said
+`list index out of range` and the typed int-list path said `pop from empty list` /
+`pop index out of range`, where CPython says `list assignment index out of range`.  General
+`ail_list_delitem` (both runtimes) now uses the assignment text, and the typed local int list,
+string field, and int/float numeric field delete paths check with the same text before removing
+the item.  `list.pop()` keeps its own messages, and in-range deletes are unchanged.
+Added `test_ail_pre272.py` (3 tests, both builds) and registered it in `ail_check.MODULES`.
+
+Probes `/tmp/probes/p272_*.py` (8 programs) cover empty, positive/negative out of range,
+`INT64_MIN`, bool, int/str/float/nested lists, an argument, a list item, an attribute and a dict
+value, plus caught `str(e)`/`e.args`, caught without reading the text, `pop()` messages and
+in-range deletes; every probe matches CPython on both builds.  Final-state tests:
+test_ail_pre272, test_ail_numeric_bindings, test_ail_record_initializers, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 pass; `tools/update_manifest.py --check` passes.
+
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
@@ -14,6 +42,7 @@ CPython on both builds.
 Final-state tests: test_ail_pre271, test_ail_local_count_repeat, test_ail_list_ops,
 test_ail_safetynet, test_ail_files, test_ail_corpus_findings3 (6 modules, 271 s, 0 failed).
 `tools/update_manifest.py --check` passes.
+
 ## 2026-10-26 -- preludes avoid the refused variable-exponent power (job-pre273-10262306 review)
 
 The review found that `refuse_variable_int_pow` also saw compiler-injected library source:
@@ -604,6 +633,7 @@ Probes `/tmp/probes/pre251_accept.py`, `pre251_contexts.py`, `pre251_boolops.py`
 `pre251_refuse_shift.py` and `pre251_refuse_wide.py` are refused by name on both builds.
 Final-state tests: test_ail_pre251, test_ail_safetynet, test_ail_files and
 test_ail_corpus_findings3; `tools/update_manifest.py --check` passes.
+
 ## 2026-10-26 - reapply negative INT64_MIN unary constants (job-rbrbrbpre204-10261336)
 
 Re-applied the accepted job-pre204 fix on the current tree. The tree's pre177/pre190/pre236 work

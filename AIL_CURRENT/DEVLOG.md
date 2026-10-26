@@ -1,3 +1,41 @@
+## 2026-10-26 -- pre272 follow-up: refresh full-C output pins (job-pre272-10262304)
+
+The accepted base-runtime mapping for `list assignment index out of range` changes the emitted C
+for every program that pulls the exception runtime, so the full-C SHA-256 pins in
+`test_ail_numeric_bindings` and `test_ail_record_initializers` were stale, so they were
+regenerated on this tree.  Both modules and `test_ail_pre272` pass;
+`tools/update_manifest.py --check` passes.
+
+## 2026-10-26 -- pre272 review fix: keep out-of-range `del` catchable without reading text
+
+The review found that the new `list assignment index out of range` trap was only mapped to
+`AIL_EXC_INDEX` by the `exctext` patch, so on the default build a `try/except IndexError` around
+an out-of-range `del` that did not read `str(e)`/`e.args` aborted uncatchably.  Added the message
+to the base `ail_exc_kind_of()` index mapping (the now-redundant `exctext` edit was removed) and
+added a catch-without-text case to `test_ail_pre272.py` covering an empty list, int/float/str
+list fields, an argument, a list item, a dict value and an attribute.  Probe
+`/tmp/probes/p272_caught_no_text.py` matches CPython on both builds.
+
+## 2026-10-26 -- pre272: `del` out-of-range says CPython's list assignment text (job-pre272-10262304)
+
+The rbpre19 pre-existing constant `del` bounds (`2**63-1`, `2**100000`, `2**100:2**101`, and the
+argument/list-item/attribute/dict routes) are already refused by name on both builds, so they no
+longer differ.  The first remaining pre-existing CPython difference in that family was the
+uncaught message for deleting an out-of-range list item: the general path said
+`list index out of range` and the typed int-list path said `pop from empty list` /
+`pop index out of range`, where CPython says `list assignment index out of range`.  General
+`ail_list_delitem` (both runtimes) now uses the assignment text, and the typed local int list,
+string field, and int/float numeric field delete paths check with the same text before removing
+the item.  `list.pop()` keeps its own messages, and in-range deletes are unchanged.
+Added `test_ail_pre272.py` (3 tests, both builds) and registered it in `ail_check.MODULES`.
+
+Probes `/tmp/probes/p272_*.py` (8 programs) cover empty, positive/negative out of range,
+`INT64_MIN`, bool, int/str/float/nested lists, an argument, a list item, an attribute and a dict
+value, plus caught `str(e)`/`e.args`, caught without reading the text, `pop()` messages and
+in-range deletes; every probe matches CPython on both builds.  Final-state tests:
+test_ail_pre272, test_ail_numeric_bindings, test_ail_record_initializers, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 pass; `tools/update_manifest.py --check` passes.
+
 ## 2026-10-26 - pre267: refuse a statically known non-BMP bytes.decode() by name (job-pre267-10262133)
 
 The first still-differing item in the rbpre51 review was the general path's non-BMP
