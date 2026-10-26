@@ -617,6 +617,34 @@ target of an augmented assignment is no longer given a trusted class kind, since
 return another type and earlier code (a loop body, a lambda) would use a stale kind. Ported
 `test_ail_fuzz49.py`, registered it in `ail_check.MODULES` and `tools/ci_shards.json`. Both
 builds, 13 differential cases.
+## 2026-10-26 -- pre200 reapply: maxsplit intermediates above 4096 bits fold (job-rbrbpre200-10261625)
+
+Re-applied the accepted pre200 change on this tree.  A maxsplit intermediate above the old
+4096-bit cap now folds when the whole expression reduces to an int64 value, so
+`"a b c".split(" ", 2**4096 // 2**4050)` (final 2**46), `2**4096 >> 4096` (final 1) and the same
+value through an argument, a list item, an attribute, a dict value, a local, a module/class
+constant and a default argument match CPython on both builds.  This tree's rbpre190 reapply
+already gives the maxsplit folder and `pyfunc` the 2**20-bit width (2**24 for a large exponent)
+with exact power sizing, so that larger limit is kept and the accepted 8192-bit raise is
+subsumed.
+
+The integration conflict was `ail_chatgpt._constant_int_exact`, used by the module/class/default
+constant check, which still had its own 4096-bit cap and refused
+`class Box: n = 2**4096 // 2**4050`; its cap now uses the same 2**20-bit width while the
+pre190 zero/base shortcuts and special-exponent handling are kept.  The pre200 review fix is
+also applied: an exact value that CPython's int-to-str digit limit cannot format now shows
+`too large` in the source-positioned refusal instead of escaping as a conversion error.  Added
+`test_ail_pre200.py` (folded direct/argument/list/attribute/dict/local cases, over-limit and
+out-of-int64 refusals) and registered it in `ail_check.MODULES` and both `tools/ci_shards.json`
+lists.
+
+Probes `/tmp/probes/p200_direct.py`, `p200_flows.py`, `p200_boundaries.py`, `p200_types.py` and
+`p200_aliasing.py` match CPython on both builds; `p200_giant.py` is refused by name on both with
+`int64 constant expression out of range: too large`.  Final-state modules: test_ail_pre200,
+test_ail_pre184, test_ail_pre190, test_ail_pre203, test_ail_pre214, test_ail_pre205,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (44 tests, 1 skipped, 0 failed,
+274 s).  `tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run and
+`--check` passed.
 
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
