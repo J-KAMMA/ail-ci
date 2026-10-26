@@ -1,3 +1,30 @@
+## 2026-10-26 - rbpre278 review: bound-method fields and scoped name resolution (job-rbpre278-10270752)
+
+The review found two defects in the re-applied pre278 refusal.  First, the general emitter's
+`allow_owners` exemption let through a colliding field that holds a *bound method*
+(`self.f = self.g`, another object's method, `[1, 2].append`, a classmethod/staticmethod, also
+when the value reaches the field through an argument, a list item, a dict value, an attribute or
+an alias).  pre279's instance-table route only calls plain functions, classes and `__call__`
+instances, so those receivers compiled the class method instead of the field.  The exemption now
+also requires the stored values to be values that route handles; bound-method values are refused
+by pre278's name on both builds.
+
+Second, `_classes_of` resolved a local name against every assignment to that name in the whole
+tree, so `x = C()` in one function made an unrelated local `x = D()` in another function look like
+a possible collision owner.  Name lookups now follow Python's scopes (nearest function, then
+enclosing scopes, then module), so the unrelated receiver keeps CPython's result.  The accepted
+`test_ail_pre278.py` gains the bound-method and shadowed-local regressions.
+
+Probes in `/tmp/probes`: `rbpre278_alias_bound`, `rbpre278_arg_bound`, `rbpre278_arg_lambda`,
+`rbpre278_base_bound`, `rbpre278_classattr_bound`, `rbpre278_dict_bound`,
+`rbpre278_dict_lambda`, `rbpre278_list_bound`, `rbpre278_nested_shadow_local`,
+`rbpre278_shadow_branch`, `rbpre278_shadow_closure`, `rbpre278_shadow_global`,
+`rbpre278_shadow_module`, `rbpre278_shadow_nested`; the reviewer's `v_bound`, `z1`-`z4`,
+`ac`, `ad` and `i_shadow` also pass or are refused by name.  `rbpre278_shadow_branch` is refused
+by name because its local `x` can really be either class on the two branches; the unrelated
+single-class scopes match CPython.  `tools/diff_ids.py` is absent; `tools/update_manifest.py` was
+run and `--check` passes.
+
 ## 2026-10-26 - re-apply pre278: instance field/method name collision (job-rbpre278-10270752)
 
 Re-applying the accepted pre278 change on the current integration tree.  The current tree already

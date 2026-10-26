@@ -288,7 +288,12 @@ def refuse_field_method_call(tree, allow_owners=False):
     ``allow_owners`` is for the general emitter, which now looks in the instance table before a
     method of the receiver's own class: a receiver that can only be a colliding class is handled
     there, so only a receiver whose static class is a base of the colliding class (``self.f()`` in
-    a base method, with the field stored by a subclass) is still refused.
+    a base method, with the field stored by a subclass) is still refused.  A field holding a
+    bound method (``self.f = self.g``, another object's method, a builtin method, a
+    classmethod/staticmethod, or such a value reaching the field through an argument, list item,
+    dict value, attribute or alias) is refused too: the instance-table route only calls plain
+    functions, classes and ``__call__`` instances, so letting that receiver through compiled the
+    class method instead.
     """
     def _own_nodes(node):
         stack = list(ast.iter_child_nodes(node))
@@ -334,6 +339,47 @@ def refuse_field_method_call(tree, allow_owners=False):
         classes[node.name] = {'methods': methods, 'fields': set(field_values),
                               'field_values': field_values, 'bases': bases}
 
+    # Name resolution follows Python's scopes: an assignment to a local name in b() must not make
+    # an unrelated local x in a() look like a possible class for b's x.
+    scope_of, scope_parent, func_owner = {}, {}, {}
+
+    def _mark_scope(node, scope):
+        scope_of[id(node)] = scope
+        inner = None
+        if isinstance(node, ast.ClassDef):
+            for child in node.body:
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    func_owner[id(child)] = node.name
+            inner = node
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            inner = node
+        if inner is not None:
+            scope_parent[inner] = scope
+            scope = inner
+        for child in ast.iter_child_nodes(node):
+            _mark_scope(child, scope)
+
+    _mark_scope(tree, tree)
+
+    assignments = {}
+
+    def _add_assign(targets, value, scope):
+        if len(targets) == 1 and isinstance(targets[0], (ast.Tuple, ast.List)) \
+                and isinstance(value, (ast.Tuple, ast.List)) \
+                and len(targets[0].elts) == len(value.elts):
+            for target, val in zip(targets[0].elts, value.elts):
+                _add_assign([target], val, scope)
+            return
+        for target in targets:
+            if isinstance(target, ast.Name):
+                assignments.setdefault(scope, []).append((target.id, value))
+
+    for item in ast.walk(tree):
+        if isinstance(item, ast.Assign):
+            _add_assign(item.targets, item.value, scope_of.get(id(item), tree))
+        elif isinstance(item, ast.AnnAssign) and item.value is not None:
+            _add_assign([item.target], item.value, scope_of.get(id(item), tree))
+
     def _inherited(name, key, seen):
         info = classes.get(name)
         if info is None or name in seen:
@@ -365,10 +411,13 @@ def refuse_field_method_call(tree, allow_owners=False):
         return
     all_names = set().union(*collisions.values())
 
-    calls_by_name = {}
+    calls_by_name, calls_by_attr = {}, {}
     for item in ast.walk(tree):
-        if isinstance(item, ast.Call) and isinstance(item.func, ast.Name):
-            calls_by_name.setdefault(item.func.id, []).append(item)
+        if isinstance(item, ast.Call):
+            if isinstance(item.func, ast.Name):
+                calls_by_name.setdefault(item.func.id, []).append(item)
+            elif isinstance(item.func, ast.Attribute):
+                calls_by_attr.setdefault(item.func.attr, []).append(item)
 
     def _param_names(func):
         args = func.args
@@ -420,28 +469,37 @@ def refuse_field_method_call(tree, allow_owners=False):
                         if value is not None:
                             found |= _classes_of(value, call_ctx.get(id(call), (None, None)),
                                                  seen | {key})
-                    if found:
-                        return found
-            if node.id in seen:
+                    return found
+            scope = scope_of.get(id(node), tree)
+            key = ('name', id(scope), node.id)
+            if key in seen:
                 return set()
-            seen = set(seen) | {node.id}
+            seen = set(seen) | {key}
             found = set()
-            for item in ast.walk(tree):
-                value = None
-                if isinstance(item, ast.Assign):
-                    if any(isinstance(t, ast.Name) and t.id == node.id for t in item.targets):
-                        value = item.value
-                elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name) \
-                        and item.target.id == node.id and item.value is not None:
-                    value = item.value
-                if value is not None:
+            lookup = scope
+            while lookup is not tree:
+                values = [value for name, value in assignments.get(lookup, ())
+                          if name == node.id]
+                if values:
+                    for value in values:
+                        found |= _classes_of(value, ctx, seen)
+                    return found
+                parent = scope_parent.get(lookup)
+                if parent is None:
+                    break
+                lookup = parent
+            for name, value in assignments.get(tree, ()):
+                if name == node.id:
                     found |= _classes_of(value, ctx, seen)
+            for item in ast.walk(tree):
                 if isinstance(item, ast.arg) and item.arg == node.id \
-                        and isinstance(item.annotation, ast.Name) and item.annotation.id in classes:
+                        and isinstance(item.annotation, ast.Name) and item.annotation.id in classes \
+                        and scope_of.get(id(item)) is scope:
                     found.add(item.annotation.id)
                 if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name) \
                         and item.target.id == node.id and isinstance(item.annotation, ast.Name) \
-                        and item.annotation.id in classes:
+                        and item.annotation.id in classes \
+                        and scope_of.get(id(item)) is scope:
                     found.add(item.annotation.id)
             return found
         if isinstance(node, ast.Attribute):
@@ -473,6 +531,126 @@ def refuse_field_method_call(tree, allow_owners=False):
             return found
         return set()
 
+    def _field_values(name, attr, seen=frozenset()):
+        info = classes.get(name)
+        if info is None or name in seen:
+            return []
+        values = list(info['field_values'].get(attr, ()))
+        for base in info['bases']:
+            values.extend(_field_values(base, attr, seen | {name}))
+        return values
+
+    def _may_be_bound(node, seen=frozenset()):
+        """Whether a value stored in the colliding field can be a bound method.
+
+        pre279's instance-table route calls a function/class/instance value it finds there, but a
+        bound method (`self.g`, `d.g`, `[1, 2].append`, a classmethod/staticmethod) has no route
+        and used to fall through to the class method.  Such a field still needs pre278's refusal;
+        only the values the instance-table route handles (lambdas, plain function/class names,
+        builtins, `__call__` instances, list/dict items holding those) are let through.
+        """
+        if isinstance(node, ast.Attribute):
+            return True
+        if isinstance(node, (ast.Lambda, ast.Constant)):
+            return False
+        if isinstance(node, ast.Name):
+            if node.id in classes:
+                return False
+            key = ('bound-name', id(node))
+            if key in seen:
+                return False
+            seen = seen | {key}
+            scope = scope_of.get(id(node), tree)
+            if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                params = _param_names(scope)
+                if node.id in params:
+                    index = params.index(node.id)
+                    if index == 0:
+                        return False
+                    if id(scope) in func_owner:
+                        calls = calls_by_name.get(func_owner[id(scope)], ())
+                        offset = 0 if any(
+                            isinstance(decorator, ast.Name) and decorator.id == 'staticmethod'
+                            for decorator in scope.decorator_list) else 1
+                    else:
+                        calls = list(calls_by_name.get(scope.name, ())) + \
+                            list(calls_by_attr.get(scope.name, ()))
+                        offset = 0
+                    index -= offset
+                    if index < 0:
+                        return False
+                    for call in calls:
+                        value = None
+                        if index < len(call.args):
+                            value = call.args[index]
+                        else:
+                            for keyword in call.keywords:
+                                if keyword.arg == node.id:
+                                    value = keyword.value
+                        if value is not None and _may_be_bound(value, seen):
+                            return True
+                    return False
+            if any(isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                   and item.name == node.id for item in ast.walk(tree)):
+                return False
+            lookup = scope
+            while True:
+                values = [value for name, value in assignments.get(lookup, ())
+                          if name == node.id]
+                if values:
+                    return any(_may_be_bound(value, seen) for value in values)
+                if lookup is tree:
+                    return False
+                parent = scope_parent.get(lookup)
+                if parent is None:
+                    return False
+                lookup = parent
+        if isinstance(node, ast.Subscript):
+            key = ('bound-sub', id(node))
+            if key in seen:
+                return False
+            seen = seen | {key}
+            if not isinstance(node.value, ast.Name):
+                return True
+            lookup = scope_of.get(id(node), tree)
+            while True:
+                for name, value in assignments.get(lookup, ()):
+                    if name != node.value.id:
+                        continue
+                    if isinstance(value, (ast.List, ast.Tuple)):
+                        for elt in value.elts:
+                            if _may_be_bound(elt, seen):
+                                return True
+                    elif isinstance(value, ast.Dict) and isinstance(node.slice, ast.Constant):
+                        for key_node, item in zip(value.keys, value.values):
+                            if isinstance(key_node, ast.Constant) \
+                                    and key_node.value == node.slice.value \
+                                    and _may_be_bound(item, seen):
+                                return True
+                if lookup is tree:
+                    return False
+                parent = scope_parent.get(lookup)
+                if parent is None:
+                    return False
+                lookup = parent
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id not in classes:
+                key = ('bound-call', id(node))
+                if key not in seen:
+                    seen = seen | {key}
+                    functions = [item for item in ast.walk(tree)
+                                 if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                                 and item.name == node.func.id]
+                    for func in functions:
+                        for item in _own_nodes(func):
+                            if isinstance(item, ast.Return) and item.value is not None \
+                                    and _may_be_bound(item.value, seen):
+                                return True
+            return False
+        if isinstance(node, (ast.List, ast.Tuple, ast.Dict)):
+            return False
+        return True
+
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
             continue
@@ -489,7 +667,9 @@ def refuse_field_method_call(tree, allow_owners=False):
         if not (possible & owners):
             continue
         if allow_owners and possible <= owners:
-            continue
+            if not any(_may_be_bound(value) for cls_name in possible
+                       for value in _field_values(cls_name, attr)):
+                continue
         raise Unsupported('the method .%s() on an instance whose class also stores an instance '
                           'field named %s (CPython calls the field)' % (attr, attr))
 

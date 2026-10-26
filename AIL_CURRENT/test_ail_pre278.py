@@ -212,6 +212,102 @@ class C(B):
 print(C().run())
 '''
 
+BOUND_SELF = r'''class C:
+    def __init__(self):
+        self.f = self.g
+    def g(self):
+        return 55
+    def f(self):
+        return 102
+print(C().f())
+'''
+
+BOUND_OTHER = r'''class D:
+    def g(self):
+        return 77
+class C:
+    def __init__(self):
+        self.f = D().g
+    def f(self):
+        return 102
+print(C().f())
+'''
+
+BOUND_ARGUMENT = r'''class D:
+    def g(self):
+        return 78
+class C:
+    def __init__(self, fn):
+        self.f = fn
+    def f(self):
+        return 102
+print(C(D().g).f())
+'''
+
+BOUND_LIST_ITEM = r'''class D:
+    def g(self):
+        return 79
+fs = [D().g]
+class C:
+    def __init__(self):
+        self.f = fs[0]
+    def f(self):
+        return 102
+print(C().f())
+'''
+
+BOUND_ATTRIBUTE = r'''class H:
+    def __init__(self):
+        self.c = C()
+class C:
+    def __init__(self):
+        self.f = self.g
+    def g(self):
+        return 80
+    def f(self):
+        return 102
+print(H().c.f())
+'''
+
+BOUND_CLASSMETHOD = r'''class C:
+    @classmethod
+    def g(cls):
+        return 66
+    def __init__(self):
+        self.f = self.g
+    def f(self):
+        return 102
+print(C().f())
+'''
+
+BOUND_STATICMETHOD = r'''class C:
+    @staticmethod
+    def g():
+        return 67
+    def __init__(self):
+        self.f = self.g
+    def f(self):
+        return 102
+print(C().f())
+'''
+
+SHADOWED_LOCAL = r'''class C:
+    def __init__(self):
+        self.f = lambda: 101
+    def f(self):
+        return 102
+class D:
+    def f(self):
+        return 7
+def a():
+    x = C()
+    return x
+def b():
+    x = D()
+    return x.f()
+print(b())
+'''
+
 
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
@@ -271,6 +367,19 @@ class Pre278Tests(unittest.TestCase):
 
     def test_base_method_on_colliding_subclass_is_refused(self):
         self.refused('self_subclass', SELF_SUBCLASS)
+
+    def test_bound_method_field_is_refused(self):
+        for slug, text in (('bound_self', BOUND_SELF), ('bound_other', BOUND_OTHER),
+                           ('bound_argument', BOUND_ARGUMENT),
+                           ('bound_list_item', BOUND_LIST_ITEM),
+                           ('bound_attribute', BOUND_ATTRIBUTE),
+                           ('bound_classmethod', BOUND_CLASSMETHOD),
+                           ('bound_staticmethod', BOUND_STATICMETHOD)):
+            with self.subTest(slug=slug):
+                self.refused(slug, text)
+
+    def test_shadowed_local_is_not_caught(self):
+        self.check('shadowed_local', SHADOWED_LOCAL)
 
     def test_class_call_and_read_keep_their_behaviour(self):
         self.check('class_call', CLASS_CALL)
