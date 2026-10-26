@@ -133,6 +133,22 @@ Re-applied the accepted pre31 change on the current tree. The same scope-aware, 
 is now part of `_check_int64_literals`, alongside the later int64 constant checks that this tree
 already had; both sides' fixes are kept. Added `test_ail_pre31.py` and registered it in
 `ail_check.MODULES`.
+## 2026-10-26 -- re-apply pre36: fold constant chr() arguments before the non-BMP refusal (job-rbpre36-10261703)
+
+Re-applied the accepted pre36 change on this integration tree.  The current general emitter already
+refused a literal non-BMP `chr()` argument by name (pre90, with the 16-bit v2 runtime gate and a
+separate surrogate literal check), so the conflict resolution keeps those refusals and adds pre36's
+integer constant-expression folder (`_const_int`) ahead of them: `chr(+0x1F600)`, `chr(0xFFFF + 1)`,
+`chr(0x8000 * 2)` and the shift/floor-div/mod/bitwise spellings fold to their value, and a non-BMP
+result in U+10000..U+10FFFF is refused by name on the 16-bit general path instead of reaching
+`ail_bi_chr`'s runtime fatal.  BMP results (including 0xFFFF), negative/out-of-range arguments,
+bool/type errors, non-constant values and the typed/default build keep their behaviour; a non-BMP
+value that is not a compile-time constant still reaches the old runtime fatal (pre-existing,
+recorded in DIFFERENCES).  Added `AIL_CURRENT/test_ail_pre36.py`, registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.  Probes in `/tmp/probes` (`pre36_literal`,
+`pre36_expr_nonbmp`, `pre36_expr_bmp`, `pre36_routes`, `pre36_alias_bmp`) show the general path
+refusing the non-BMP constants by name and both builds matching CPython for the BMP, boundary,
+route, bool and error cases.
 
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
