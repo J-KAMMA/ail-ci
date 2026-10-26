@@ -1,3 +1,27 @@
+## 2026-10-26 -- pre297: round() of a constant int64-boundary float is refused (job-pre297-10270441)
+
+The rbpre54 review recorded that one-argument `round()` still stops with `integer overflow` for
+boundary values (`round(v)`, `round(2.0**63)`), where CPython prints an unbounded int.  The
+front-end checks now fold a statically known float argument exactly (`_constant_number` follows
+literals, unary signs, arithmetic, module constants and single-assignment locals) and refuse a
+result outside int64 by name (`int64 constant expression out of range`) on both builds.  The
+same fold reaches `abs(round(-(2.0 ** 63)))` as the pre214 INT64_MIN case.  Calls in argument,
+list-item, attribute and dict-value positions are covered; in-range constants (including
+`round(-(2.0 ** 63))`), two-argument `round()`, NaN/infinity, run-time variables and a program
+that binds its own `round` still match CPython.  A value that only reaches `round` at run time
+(a parameter or a container read) keeps the existing fixed-width trap.  The second pre-existing
+item in the review (`r_shadow_param`, an unannotated parameter named `round`) was not touched.
+Added `AIL_CURRENT/test_ail_pre297.py`, registered it in `ail_check.MODULES`, and added the
+DIFFERENCES row.  Probes in `/tmp/probes`: `p297_round_const`, `p297_round_var`,
+`p297_round_local`, `p297_round_module`, `p297_round_peeled`, `p297_round_min`,
+`p297_round_neg`, `p297_round_abs`, `p297_round_abs2`, `p297_round_hi`, `p297_round_huge`,
+`p297_round_arg`, `p297_round_list`, `p297_round_attr`, `p297_round_dict`, `p297_round_default`,
+`p297_round_class`, `p297_round_routes2` are refused by name on both builds; `p297_round_inrange`, `p297_round_inbound`,
+`p297_round_lo`, `p297_round_twoarg`, `p297_round_shadow` and `p297_shadow` match CPython on
+both.  `tools/update_manifest.py` was run and `--check` passes.  Tests on the final tree:
+`test_ail_pre297`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`
+(4 modules, 267 s, 0 failed).
+
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is

@@ -294,6 +294,96 @@ def _const_fold_int(node, limit=_CONST_FOLD_BITS):
     return value if value.bit_length() <= limit else None
 
 
+def _constant_number(node, known):
+    """The int or float a constant numeric expression denotes, or None.
+
+    Mirrors CPython's arithmetic for the shapes the round() boundary check needs: literals,
+    names bound once to a number, unary +/-, the arithmetic operators, and one-argument
+    round().  Operators that Python rejects on these values, division by zero and non-finite
+    round() arguments leave the construct to its run-time behaviour."""
+    if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+        return node.value
+    if isinstance(node, ast.Name):
+        value = known.get(node.id)
+        return value if type(value) in (int, float) else None
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        value = _constant_number(node.operand, known)
+        if value is None:
+            return None
+        return -value if isinstance(node.op, ast.USub) else +value
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'round'):
+        if len(node.args) != 1 or node.keywords or isinstance(node.args[0], ast.Starred):
+            return None
+        value = _constant_number(node.args[0], known)
+        if type(value) not in (int, float):
+            return None
+        try:
+            return round(value)
+        except (OverflowError, ValueError):
+            return None
+    if not isinstance(node, ast.BinOp):
+        return None
+    left = _constant_number(node.left, known)
+    right = _constant_number(node.right, known)
+    if left is None or right is None:
+        return None
+    op = type(node.op)
+    try:
+        if op is ast.Pow:
+            if type(left) is int and type(right) is int:
+                if right < 0:
+                    return None
+                if right > 4096:
+                    return None
+                if left not in (0, 1, -1) and left.bit_length() * right > (1 << 20):
+                    return None
+            value = left ** right
+        elif op is ast.LShift:
+            if type(left) is not int or type(right) is not int or right < 0:
+                return None
+            if right > 4096 or (left and left.bit_length() + right > (1 << 20)):
+                return None
+            value = left << right
+        elif op is ast.RShift:
+            if type(left) is not int or type(right) is not int or right < 0:
+                return None
+            value = (0 if left >= 0 else -1) if right > 4096 else left >> right
+        elif op in (ast.BitAnd, ast.BitOr, ast.BitXor):
+            if type(left) is not int or type(right) is not int:
+                return None
+            value = {ast.BitAnd: left & right, ast.BitOr: left | right,
+                     ast.BitXor: left ^ right}[op]
+        elif op is ast.Add:
+            value = left + right
+        elif op is ast.Sub:
+            value = left - right
+        elif op is ast.Mult:
+            if (type(left) is int and type(right) is int
+                    and left.bit_length() + right.bit_length() > (1 << 20)):
+                return None
+            value = left * right
+        elif op is ast.Div:
+            if right == 0:
+                return None
+            value = left / right
+        elif op is ast.FloorDiv:
+            if right == 0:
+                return None
+            value = left // right
+        elif op is ast.Mod:
+            if right == 0:
+                return None
+            value = left % right
+        else:
+            return None
+    except (ArithmeticError, ValueError, OverflowError):
+        return None
+    if type(value) is int and value.bit_length() > (1 << 20):
+        return None
+    return value
+
+
 def _check_constant_out_of_range(node, parents, maxsplit, skip_assignment):
     if id(node) in maxsplit:
         return
@@ -523,6 +613,17 @@ def _walk_own_scope(function):
         stack.extend(ast.iter_child_nodes(node))
 
 
+def _walk_module_scope(tree):
+    """Module-level nodes, not descending into functions, classes or lambdas."""
+    stack = list(tree.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        yield node
+        stack.extend(ast.iter_child_nodes(node))
+
+
 def _known_module_constants(tree):
     """Module names bound once to a statically known int, for the constant-expression checks."""
     stores = {}
@@ -548,6 +649,69 @@ def _known_module_constants(tree):
     return known
 
 
+def _known_module_numbers(tree, module_scope=False):
+    """Module names bound once to a statically known int or float, for the round() check.
+
+    With module_scope, only module-level bindings count and a name reused inside a function
+    does not hide the module value from module-level code."""
+    stores = {}
+    if not module_scope:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                stores[node.id] = stores.get(node.id, 0) + 1
+    parameters = {node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)}
+    known = {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Name):
+            continue
+        if not module_scope and (stores.get(target.id) != 1 or target.id in parameters):
+            continue
+        value = _constant_number(node.value, known)
+        if value is not None:
+            known[target.id] = value
+    return known
+
+
+def _function_local_numbers(function, module_known):
+    """The numeric constants a function's own top-level assignments bind.
+
+    Names stored more than once, parameters and global/nonlocal declarations stay out of the
+    map, exactly as in _function_local_int_constants."""
+    arguments = function.args
+    parameters = {argument.arg for argument in arguments.posonlyargs + arguments.args + arguments.kwonlyargs}
+    if arguments.vararg is not None:
+        parameters.add(arguments.vararg.arg)
+    if arguments.kwarg is not None:
+        parameters.add(arguments.kwarg.arg)
+    stores = _function_scope_stores(function)
+    declared = set()
+    for node in ast.walk(function):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            declared.update(node.names)
+    local = {name: value for name, value in module_known.items()
+             if name not in stores and name not in parameters and name not in declared}
+
+    def bind(target, value_node):
+        if not isinstance(target, ast.Name):
+            return
+        name = target.id
+        if stores.get(name) != 1 or name in parameters or name in declared:
+            return
+        value = _constant_number(value_node, local)
+        if value is not None:
+            local[name] = value
+
+    for statement in function.body:
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            bind(statement.targets[0], statement.value)
+        elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+            bind(statement.target, statement.value)
+    return local
+
+
 def _binds_name(tree, name):
     """Does the program bind `name` anywhere? A user definition of a built-in stops its folding."""
     for node in ast.walk(tree):
@@ -570,17 +734,18 @@ def _binds_name(tree, name):
     return False
 
 
-def _check_int64_abs_constants(tree, known):
+def _check_int64_abs_constants(tree, known, numbers, module_numbers):
     """Refuse a constant ``abs`` whose exact value int64 cannot hold, by name.
 
     ``abs(-(1 << 63))`` and the literal spelling ``abs(-9223372036854775808)`` used to compile
     and then stop with ``integer overflow`` at run time, where CPython prints the bignum.  The
     argument is folded exactly here; an in-range result keeps the ordinary abs lowering, and a
-    program that binds its own ``abs`` is left alone."""
+    program that binds its own ``abs`` is left alone.  A round() of a constant float is folded
+    too when it reaches abs(), so abs(round(-(2.0 ** 63))) is the same INT64_MIN case."""
     if _binds_name(tree, 'abs') or 'abs' in known:
         return
 
-    def check(node, scope_known):
+    def check(node, scope_known, scope_numbers):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id == 'abs'):
             return
@@ -593,6 +758,9 @@ def _check_int64_abs_constants(tree, known):
             except _Int64ConstantOverflow:
                 value = None
         if value is None:
+            number = _constant_number(node.args[0], scope_numbers)
+            value = number if type(number) is int else None
+        if value is None:
             return
         result = abs(value)
         if not _INT64_MIN <= result <= _INT64_MAX:
@@ -602,13 +770,58 @@ def _check_int64_abs_constants(tree, known):
             raise error
 
     for node in ast.walk(tree):
-        check(node, known)
+        check(node, known, numbers)
+    for node in _walk_module_scope(tree):
+        check(node, known, module_numbers)
     for function in ast.walk(tree):
         if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         local = _function_local_int_constants(function, known)
+        local_numbers = _function_local_numbers(function, numbers)
         for node in _walk_own_scope(function):
-            check(node, local)
+            check(node, local, local_numbers)
+
+
+def _check_int64_round_constants(tree, numbers, module_numbers):
+    """Refuse one-argument round() of a constant float whose result int64 cannot hold.
+
+    CPython's round(float) is an unbounded int.  AIL ints are int64, so
+    round(2.0 ** 63) used to compile and stop with ``integer overflow`` where CPython prints
+    9223372036854775808.  A statically known argument is rounded here, through a module or
+    local constant as well as directly, and an out-of-int64 result is refused by name before
+    either build emits C.  In-range constants keep the ordinary round lowering; NaN, infinity,
+    round(x, n) and a program that binds its own ``round`` are unchanged."""
+    if _binds_name(tree, 'round') or 'round' in numbers:
+        return
+
+    def check(node, scope_numbers):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'round'):
+            return
+        if len(node.args) != 1 or node.keywords or isinstance(node.args[0], ast.Starred):
+            return
+        value = _constant_number(node.args[0], scope_numbers)
+        if type(value) is not float:
+            return
+        if value != value or value == float('inf') or value == float('-inf'):
+            return
+        result = round(value)
+        if not _INT64_MIN <= result <= _INT64_MAX:
+            error = ValueError(f'int64 constant expression out of range: {_constant_diagnostic(result)}')
+            error.source_line = node.lineno
+            error.source_column = node.col_offset
+            raise error
+
+    for node in ast.walk(tree):
+        check(node, numbers)
+    for node in _walk_module_scope(tree):
+        check(node, module_numbers)
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        local_numbers = _function_local_numbers(function, numbers)
+        for node in _walk_own_scope(function):
+            check(node, local_numbers)
 
 
 def _check_int64_unary_constants(tree):
@@ -618,6 +831,8 @@ def _check_int64_unary_constants(tree):
     reach the unary operation as variables."""
     maxsplit = _maxsplit_constant_nodes(tree)
     known = _known_module_constants(tree)
+    numbers = _known_module_numbers(tree)
+    module_numbers = _known_module_numbers(tree, module_scope=True)
     for node in ast.walk(tree):
         if not isinstance(node, ast.UnaryOp) or not isinstance(node.op, (ast.UAdd, ast.USub)):
             continue
@@ -629,7 +844,8 @@ def _check_int64_unary_constants(tree):
             error.source_line = node.lineno
             error.source_column = node.col_offset
             raise error
-    _check_int64_abs_constants(tree, known)
+    _check_int64_abs_constants(tree, known, numbers, module_numbers)
+    _check_int64_round_constants(tree, numbers, module_numbers)
 
 
 _CONST_TEXT_LIMIT = 1 << 20
