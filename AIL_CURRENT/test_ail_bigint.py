@@ -439,19 +439,21 @@ class DefaultBuild(unittest.TestCase):
         self.check("star_required")
         self.check("class_only_last")
 
-    def check_both(self, name):
+    def check_both(self, name, expect_zero=True, stderr_equal=True):
         text = (CASES / (name + ".py")).read_text(encoding="utf-8")
         src = Path(self.tmp.name) / (name + ".py")
         src.write_text(text, encoding="utf-8")
         want = subprocess.run([sys.executable, str(src)], capture_output=True, text=True, timeout=300)
-        self.assertEqual(want.returncode, 0, want.stderr[-1500:])
+        if expect_zero:
+            self.assertEqual(want.returncode, 0, want.stderr[-1500:])
         for tag, extra in (("general", {"AIL_UNIFIED_FORCE": "1"}), ("default", {})):
             made, exe, _ = self.build(name, extra)
             self.assertEqual(made.returncode, 0, (name, tag, made.stdout[-500:] + made.stderr[-1500:]))
             got = subprocess.run([str(exe)], capture_output=True, text=True, timeout=300)
             self.assertEqual(got.stdout, want.stdout, (name, tag))
             self.assertEqual(got.returncode, want.returncode, (name, tag))
-            self.assertEqual(got.stderr, want.stderr, (name, tag))
+            if stderr_equal:
+                self.assertEqual(got.stderr, want.stderr, (name, tag))
 
     def test_b1_review_probes_on_both_builds(self):
         """Every probe of the earlier reviews, on the forced-general and the default build: starred calls in methods,
@@ -529,6 +531,43 @@ class DefaultBuild(unittest.TestCase):
                 got = subprocess.run([str(binary)], capture_output=True, text=True, timeout=300)
                 self.assertEqual(got.stdout, want.stdout, name)
                 self.assertEqual(got.returncode, want.returncode, name)
+
+
+    def test_b6_fix06_forms_on_both_builds(self):
+        """The B6 review: Counter/defaultdict item updates, a module-level int used in a module expression,
+        `%d` formatting in __str__, int(float)/bool fields, and the INT64_MIN idiom reached literally, through
+        an argument, a list item and an attribute, all match CPython on the forced-general and default builds."""
+        for name in ("b6_counter", "b6_money", "b6_intfloat", "b6_min", "b6_min_sources"):
+            self.check_both(name)
+        self.check_both("b6_modzero", expect_zero=False, stderr_equal=False)
+
+    def test_b6_fix06_forms_typed_only(self):
+        """The same in-range forms print CPython's answer with AIL_NO_GENERAL=1; the module-level zero keeps the
+        typed path's own "integer division by zero" trap."""
+        for name in ("b6_counter", "b6_money", "b6_intfloat", "b6_min", "b6_min_sources", "b6_modzero"):
+            made, exe, src = self.build(name, {"AIL_NO_GENERAL": "1"})
+            self.assertEqual(made.returncode, 0,
+                             (name, made.stdout[-500:] + made.stderr[-1500:]))
+            want = subprocess.run([sys.executable, str(src)], capture_output=True, text=True, timeout=300)
+            got = subprocess.run([str(exe)], capture_output=True, text=True, timeout=300)
+            self.assertEqual(got.stdout, want.stdout, name)
+            self.assertEqual(got.returncode, want.returncode, name)
+            if want.returncode == 0:
+                self.assertEqual(got.stderr, want.stderr, name)
+            else:
+                self.assertIn("integer division by zero", got.stderr, name)
+
+    def test_b6_fix06_values_beyond_int64_stop_loudly_on_the_typed_path(self):
+        """The typed path starts the field/item/module/int(float) forms and the INT64_MIN edges, then stops with
+        the loud "integer overflow" instead of printing a wrapped value; the general and default builds are exact."""
+        self.check_both("b6_overflow")
+        made, exe, src = self.build("b6_overflow", {"AIL_NO_GENERAL": "1"})
+        self.assertEqual(made.returncode, 0,
+                         made.stdout[-500:] + made.stderr[-1500:])
+        got = subprocess.run([str(exe)], capture_output=True, text=True, timeout=300)
+        self.assertNotEqual(got.returncode, 0)
+        self.assertEqual(got.stdout, "")
+        self.assertIn("integer overflow", got.stderr)
 
 
 class B3SecondReview(unittest.TestCase):
