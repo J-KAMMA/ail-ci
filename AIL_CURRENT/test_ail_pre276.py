@@ -1,11 +1,13 @@
-"""The constant index ``(-2 ** 63) // (2 ** 63)`` is refused by name (job pre276).
+"""Constant index ``(-2 ** 63) // (2 ** 63)``: CPython parity or a named refusal (job pre276).
 
 The reviewer of job rbpre47 recorded this as a pre-existing difference: CPython
-evaluates the expression to -1 and indexes the last item, while AIL refuses it at
-compile time as ``int64 index out of range`` because the positive operand
-``2 ** 63`` leaves int64.  The task accepts a named compile-time refusal, and both
-builds already give one, so no compiler change is needed; this module pins that
-refusal for a list and the other indexable receivers.
+evaluates the expression to -1 and indexes the last item, while the base tree
+refuses it at compile time as ``int64 index out of range`` because the positive
+operand ``2 ** 63`` leaves int64.  The task accepts a named compile-time refusal,
+and the base tree gives one, so the test also accepts it.  The integrated tree's
+pre269 change folds the whole constant index expression before the range check,
+so the same program now builds and prints CPython's result; the test accepts that
+too, provided both builds agree and the output matches CPython.
 """
 import os
 import subprocess
@@ -16,13 +18,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-INDEX_REFUSED = {
-    'list': 'print([1, 2, 3][(-2 ** 63) // (2 ** 63)])\n',
-    'tuple': 'print((1, 2, 3)[(-2 ** 63) // (2 ** 63)])\n',
-    'str': 'print("abc"[(-2 ** 63) // (2 ** 63)])\n',
-    'bytes': 'print(b"abc"[(-2 ** 63) // (2 ** 63)])\n',
-    'dict': 'print({-1: "minus"}[(-2 ** 63) // (2 ** 63)])\n',
-    'name': 'xs = [1, 2, 3]\nprint(xs[(-2 ** 63) // (2 ** 63)])\n',
+INDEX_CASES = {
+    'list': ('print([1, 2, 3][(-2 ** 63) // (2 ** 63)])\n', '3\n'),
+    'tuple': ('print((1, 2, 3)[(-2 ** 63) // (2 ** 63)])\n', '3\n'),
+    'str': ('print("abc"[(-2 ** 63) // (2 ** 63)])\n', 'c\n'),
+    'bytes': ('print(b"abc"[(-2 ** 63) // (2 ** 63)])\n', '99\n'),
+    'dict': ('print({-1: "minus"}[(-2 ** 63) // (2 ** 63)])\n', 'minus\n'),
+    'name': ('xs = [1, 2, 3]\nprint(xs[(-2 ** 63) // (2 ** 63)])\n', '3\n'),
 }
 
 
@@ -43,17 +45,28 @@ def _build(directory, name, text, general):
 
 
 class Pre276Tests(unittest.TestCase):
-    def test_constant_index_with_wide_operand_is_refused_by_name(self):
+    def test_constant_index_with_wide_operand(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre276-') as directory:
-            for slug, text in INDEX_REFUSED.items():
+            for slug, (text, expected) in INDEX_CASES.items():
+                modes = set()
                 for general in (True, False):
                     with self.subTest(slug=slug, general=general):
                         built, exe = _build(directory, '%s_%s' % (slug, 'g' if general else 'd'),
                                             text, general)
                         output = built.stdout + built.stderr
-                        self.assertEqual(built.returncode, 2, '%s\n%s' % (slug, output[-4000:]))
-                        self.assertFalse(exe.exists(), '%s built an executable' % slug)
-                        self.assertIn('int64 index out of range', output, output[-4000:])
+                        if built.returncode == 2:
+                            self.assertFalse(exe.exists(), '%s built an executable' % slug)
+                            self.assertIn('int64 index out of range', output, output[-4000:])
+                            modes.add('refused')
+                        else:
+                            self.assertEqual(built.returncode, 0, '%s\n%s' % (slug, output[-4000:]))
+                            self.assertTrue(exe.exists(), '%s did not build' % slug)
+                            run = subprocess.run([str(exe)], cwd=directory, capture_output=True,
+                                                 text=True, timeout=120)
+                            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+                            self.assertEqual(run.stdout, expected, run.stdout + run.stderr)
+                            modes.add('ran')
+                self.assertEqual(len(modes), 1, '%s builds disagree: %s' % (slug, sorted(modes)))
 
 
 if __name__ == '__main__':

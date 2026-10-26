@@ -1,3 +1,16 @@
+## 2026-10-26 -- pre276 suite fix: a wide constant index folds to a CPython index (job-pre276-10270718)
+
+The integration candidate at job start includes pre269, which folds the whole constant index
+expression before the int64 check.  `(-2 ** 63) // (2 ** 63)` therefore now compiles to -1 and
+prints the last list/tuple/str/bytes item or the -1 dict value on both builds, where the pre276
+branch base still refused it by name.  `test_ail_pre276.py` now accepts either outcome for each
+receiver and requires both builds to agree: a named refusal (`int64 index out of range`), or a
+successful build whose stdout equals CPython's.  No compiler change was made.
+
+Probes in `/tmp/probes`: `pre276_wide`, `pre276_routes` and `pre276_boundaries` match CPython on
+the integrated tree and are refused by name on this branch base; `pre276_out_of_range` is
+refused by name on both (CPython raises IndexError); `pre276_unchanged` matches CPython on both.
+Tests: test_ail_pre276, test_ail_safetynet, test_ail_files, test_ail_corpus_findings3.
 ## 2026-10-26 -- constant index with a wide operand is already refused by name (job-pre276-10262320)
 
 The first still-differing item from the rbpre47 review was
