@@ -187,13 +187,14 @@ def _apply(P, args, kwargs, result, current):
             raise RuntimeError
         _d = bigcap._Defined(set(getattr(ctx, 'funcs', {})) | set(getattr(ctx, 'classes', {})))
         _d.classes = frozenset(getattr(ctx, 'classes', {}))
-        _proven = bigcap.proven_int_names(fn, _d)
-        _bounds = bigcap.local_int_bounds(fn, _d)
+        _consts = bigcap.int_constants(getattr(ctx, 'modconsts', None))
+        _proven = bigcap.proven_int_names(fn, _d, _consts)
+        _bounds = bigcap.local_int_bounds(fn, _d, _consts)
         _names = set(bigcap._lp_params(fn)) | set(bigcap._lp_locals(fn.body))
         _params = dict(getattr(ctx, 'params', ()))
         _tint_names = {n for n in _names if n not in _proven and
                        (getattr(ctx, 'types', {}).get(n) == P.INT or _params.get(n) == P.INT)}
-        _proof = bigcap._lp_reason([fn], None, _d)
+        _proof = bigcap._lp_reason([fn], None, _d, _consts)
         # "an operand not proven int or float" is what an untyped GLOBAL (a module-level float the
         # function only reads) produces; it is not an int operation. Let that shape keep the
         # legacy typed emitter (a no-int program must not take the general path).

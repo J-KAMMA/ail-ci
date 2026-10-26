@@ -258,8 +258,9 @@ class Lowering(TextLowering):
             import bigcap as _bigcap
             _d = _bigcap._Defined(set(getattr(ctx, 'funcs', {})) | set(getattr(ctx, 'classes', {})))
             _d.classes = frozenset(getattr(ctx, 'classes', {}))
-            _proven = _bigcap.proven_int_names(fn, _d)
-            _bounds = _bigcap.local_int_bounds(fn, _d)
+            _consts = _bigcap.int_constants(getattr(ctx, 'modconsts', None))
+            _proven = _bigcap.proven_int_names(fn, _d, _consts)
+            _bounds = _bigcap.local_int_bounds(fn, _d, _consts)
             self.nonneg = {n for n, v in _bounds.items()
                            if v is not None and v[0] in _bigcap._LP_INTS
                            and v[1] is not None and v[1] >= 0}
@@ -2511,7 +2512,11 @@ class Lowering(TextLowering):
         if types[0] == types[1] and types[0] in (I.STRV, BYTES):
             t = types[0]
         else:
-            t = I.F64 if I.F64 in types else I.I64 if I.I64 in types else I.I1
+            # A conditional whose branches are both tagged ints keeps the tagged representation (the
+            # unbound-local guard is `name if (flag or _ail_unbound_name()) else name`, so both arms are
+            # a tint); folding it to i1 has no conversion and would leave the typed path.
+            t = I.F64 if I.F64 in types else I.I64 if I.I64 in types \
+                else TINT if TINT in types else I.I1
         self.in_region(then, fill=lambda: self.b.emit('yield', [self.coerce(values['then'], t)]))
         self.in_region(other, fill=lambda: self.b.emit('yield', [self.coerce(values['else'], t)]))
         return self.b.value('if', [c], t, None, [then, other])

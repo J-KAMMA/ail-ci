@@ -34877,6 +34877,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     _defined = _bigcap._Defined(f.name for f in fns)
     _defined.classes = frozenset(classes)
     _defined.containers = _bigcap.nonint_containers(tree)
+    _consts = _bigcap.int_constants(_MODCONSTS)
     _tint_sigs = {}
     _python_surface = os.environ.get('AIL_SURFACE') == 'python'
     _ir_on = os.environ.get('AIL_IR', '1').strip().lower() not in ('0', 'off', 'no', 'false')
@@ -34910,12 +34911,12 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
             _tint_sigs[_f.name] = ((), 0)
             _tint_sigs[csym[_f.name]] = ((), 0)
             continue
-        _bounds = _bigcap.local_int_bounds(_f, _defined)
-        _proven = _bigcap.proven_int_names(_f, _defined)
+        _bounds = _bigcap.local_int_bounds(_f, _defined, _consts)
+        _proven = _bigcap.proven_int_names(_f, _defined, _consts)
         _unproven = {n for n, v in _bounds.items() if v is not None
                      and (v[0] in _bigcap._LP_INTS or v[0] == 'unknown') and n not in _proven}
         _unproven -= getattr(_defined, 'containers', set())
-        _proof = _bigcap._lp_reason([_f], None, _defined)
+        _proof = _bigcap._lp_reason([_f], None, _defined, _consts)
         # A method's `self` is a non-int value, so an attribute operation (`self.x * self.x`) has no
         # unproven local to name; its proof failure still means the method needs the tagged lowering.
         _needs_tint = bool(_unproven) or (_proof is not None and _f.name in method_names)

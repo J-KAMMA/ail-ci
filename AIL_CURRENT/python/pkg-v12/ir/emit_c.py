@@ -1525,8 +1525,7 @@ class Emitter(TextEmitter):
 
     def declare_results(self, ins, depth):
         for r in ins.results:
-            self.line(depth, '%s %s = %s;' % (ctype(r.type), self.fresh(r),
-                                              '{0}' if r.type in (I.STRV, I.BYTES) else '0'))
+            self.line(depth, '%s %s = %s;' % (ctype(r.type), self.fresh(r), _zero(r.type)))
 
     @staticmethod
     def only_yield(region):

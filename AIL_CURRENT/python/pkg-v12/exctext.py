@@ -354,8 +354,9 @@ DIE_EDITS = (
      '        if (k) { ail_exception_store(&ail_exc_value, ail_die_value(k, w), 1); ail_exc_code = k; ail_exc_unwind(); ail_exc_throw(); }'),
     ('    if (!strcmp(w, "list index out of range") || !strcmp(w, "pop index out of range")\n',
      '    if (!strcmp(w, "list index out of range") || !strcmp(w, "list assignment index out of range")\n        || !strcmp(w, "pop index out of range")\n'),
-    ('    if (!strcmp(w, "division by zero") || !strcmp(w, "integer division by zero")\n        || !strcmp(w, "integer modulo by zero")) return AIL_EXC_ZERODIV;',
-     '    if (!strcmp(w, "division by zero") || !strcmp(w, "integer division by zero")\n        || !strcmp(w, "integer modulo by zero") || !strcmp(w, "float division by zero")\n'
+    ('    if (!strcmp(w, "division by zero") || !strcmp(w, "integer division by zero")\n        || !strcmp(w, "integer modulo by zero") || !strcmp(w, "integer division or modulo by zero")) return AIL_EXC_ZERODIV;',
+     '    if (!strcmp(w, "division by zero") || !strcmp(w, "integer division by zero")\n        || !strcmp(w, "integer modulo by zero") || !strcmp(w, "integer division or modulo by zero")\n'
+     '        || !strcmp(w, "float division by zero")\n'
      '        || !strcmp(w, "float floor division by zero") || !strcmp(w, "float modulo")) return AIL_EXC_ZERODIV;'),
     # a runtime-raised exception that names only its class gets the text CPython gives that class's usual cause
     ('    ail_exception_store(&ail_exc_value, ail_exception_new(code, NULL, 0, 1), 1);\n    ail_exc_code = code;\n',

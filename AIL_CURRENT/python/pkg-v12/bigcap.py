@@ -880,7 +880,7 @@ def _lp_run(stmts, env, defined, fixed=None, seqmap=None):
                     _lp_eval(c, env, defined, None)
 
 
-def _lp_reason(defs, module_stmts, defined):
+def _lp_reason(defs, module_stmts, defined, constants=None):
     """The first local-proof failure among these defs (or the module code when `defs` is None), or None."""
     for fn in (defs if defs is not None else [None]):
         if fn is None:
@@ -891,6 +891,7 @@ def _lp_reason(defs, module_stmts, defined):
             params = _lp_params(fn)
         names = (set(params) | _lp_locals(stmts)) - _lp_globals(stmts)
         env = {n: None for n in names}
+        _seed_constants(env, names, constants)
         fixed = _lp_fixed(fn, defined) if fn is not None else {}
         for p in params:
             env[p] = fixed.get(p, _LP_UNKNOWN)
@@ -1053,7 +1054,28 @@ def marked(tree, local=True):
     return reason
 
 
-def local_int_bounds(fn, defined):
+def int_constants(modconsts):
+    """The module-level int constants (`name -> value`) of one compile, for the local proof: a function that
+    only reads one is bound by its value, exactly as the constant is folded into the C.  Mutable module
+    variables (`.vars`) are not constants and are not included."""
+    out = {}
+    if modconsts is None:
+        return out
+    for name, (kind, value) in modconsts.items():
+        if kind in _LP_INTS and isinstance(value, int):
+            out[name] = int(value)
+    return out
+
+
+def _seed_constants(env, names, constants):
+    """Seed the module constants a function does not shadow with their own value."""
+    if constants:
+        for name, value in constants.items():
+            if name not in names:
+                env[name] = _lp_int(value, value)
+
+
+def local_int_bounds(fn, defined, constants=None):
     """The fixed-point local value of every name of `fn` (the same environment `_lp_reason` checks), or an
     empty dict when this is not a function.  A name with an int value whose bounds are complete and fit
     int64 is proven; every other int local is the caller's tint candidate."""
@@ -1061,6 +1083,7 @@ def local_int_bounds(fn, defined):
     params = _lp_params(fn) if fn is not None else ()
     names = (set(params) | _lp_locals(stmts)) - _lp_globals(stmts)
     env = {n: None for n in names}
+    _seed_constants(env, names, constants)
     fixed = _lp_fixed(fn, defined)
     for p in params:
         env[p] = fixed.get(p, _LP_UNKNOWN)
@@ -1082,10 +1105,10 @@ def local_int_bounds(fn, defined):
     return env
 
 
-def proven_int_names(fn, defined):
+def proven_int_names(fn, defined, constants=None):
     """The int locals of `fn` the local rules prove fit int64 (complete bounds inside the int64 range)."""
     out = set()
-    for n, v in local_int_bounds(fn, defined).items():
+    for n, v in local_int_bounds(fn, defined, constants).items():
         if v is not None and v[0] in _LP_INTS and v[1] is not None and v[2] is not None \
                 and v[1] >= _LP_I64_MIN and v[2] <= _LP_I64_MAX:
             out.add(n)
