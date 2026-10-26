@@ -1,4 +1,18 @@
-## 2026-10-26 -- reapply pre225: grouping with an unrecognised type code (job-rbpre225-10261321)
+## 2026-10-26 -- re-apply pre54: round() at the int64 boundary is refused by name (job-rbpre54-10270147)
+
+Re-applied the accepted pre54 change on this tree.  `pyc.build` now calls
+`_refuse_round_at_int64_boundary` before either build path: a one-argument `round()` of a
+constant float at or beyond the signed 64-bit boundary (`round(-9223372036854775808.0)` is
+INT64_MIN) is refused by name, because `abs()`, unary `-` and `* -1` need 2**63 and AIL's int is
+int64.  The accepted change's workflow half (OpenCode v1.19.4 with its sha256, the qoder.key /
+cc.key secret files and the three-key scan) is already present on this tree, so no edit was
+needed; pre104's catchable ValueError / OverflowError for nan/inf is kept, and finite
+out-of-range values that are not compile-time constants still take the runtime trap.  Added
+`AIL_CURRENT/test_ail_pre54.py`, registered it in `ail_check.MODULES`, and added DIFFERENCES row
+C?-job-rbpre54-10270147-1.  Probes in `/tmp/probes`: `p54_near`, `p54_two_arg`, `p54_shadow` and
+`p54_nonconstant` match CPython on both builds; `p54_refuse_direct`, `p54_refuse_argument`,
+`p54_refuse_container`, `p54_refuse_positive` and `p54_refuse_beyond` are refused by name on both
+builds (exit 3, no executable).  `python3 tools/diff_ids.py` is not present in this tree.
 
 Re-applied the accepted pre225 change. Its safetyrt.py fix is already present on this tree from
 the pre206 review: `ail2f_parse` checks the grouping against the type before an unknown code (its
