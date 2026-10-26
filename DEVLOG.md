@@ -1,3 +1,15 @@
+## 2026-10-26 -- pre278 pre-existing: field/method collision through a function return (job-pre288-10270335)
+
+The pre278 review recorded that ``make(4).f()``, where ``make`` returns a class whose instance
+stores a callable field ``f`` and also defines a method ``f``, printed the method (-1) where
+CPython calls the field (40) on both builds.  ``pyfront.refuse_field_method_call`` now recognises
+such calls and refuses them by name at compile time; its receiver resolution follows a function
+return (including a local alias, a branch, a pass-through parameter and a method return), a
+constructor, an attribute, a list item and a dict value.  Unrelated classes, other method names,
+non-colliding classes and ``C.f(c)`` keep their behaviour.  Added ``test_ail_pre288.py`` and
+registered it in ``ail_check.MODULES``.  Probes in /tmp/probes (both builds) are listed in the
+job report.  Drafted by job pre288; see DIFFERENCES ``C?-job-pre288-10270335-1``.
+
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is
