@@ -1,3 +1,26 @@
+## 2026-10-26 -- re-apply pre69: an overflowing constant integer power is refused by name (job-rbpre69-10261902)
+
+Re-applying the accepted pre69 change on the current integration tree.  The behaviour is already
+present here: `ail_chatgpt.py`'s constant scan and the generic `pyfunc.fold_int_constant` folder
+refuse a constant integer power whose exact value leaves int64 before it can compile and stop at
+run time (`int64 constant out of range` / `int64 constant expression out of range` / `outside the
+signed 64-bit range`).  No compiler code change was needed and no second refusal path was added.
+This reapply adds the accepted `test_ail_pre69.py` (five refused constructs -- top-level,
+argument, list item, attribute, huge exponent -- and one accepted program mixing fitting, negative,
+bool-exponent and float powers), adapted to this tree's established refusal wording, updates
+`pkg-v12/test_all.py` so its constant-exponent case expects the compile-time refusal while a
+variable exponent still traps, and records the row.  SEMANTICS.md section 8 now says the constant
+case is refused at compile time rather than trapped at run time.
+
+Probes in `/tmp/probes`: `pre69_accept_fit`, `pre69_accept_module` match CPython on both builds;
+`pre69_refuse_top`, `pre69_refuse_argument`, `pre69_refuse_list`, `pre69_refuse_attribute`,
+`pre69_refuse_dict`, `pre69_refuse_huge`, `pre69_refuse_neg_over`, `pre69_refuse_nested`,
+`pre69_refuse_module`, `pre69_trap_var` are refused by name on both builds.  Tests on the final
+tree: `test_ail_pre69`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` and
+the `integer_power` part of `pkg-v12/test_all`; manifest `--check` passes.  (The full
+`pkg-v12/test_all` module stops earlier, in the unrelated pre-existing `floor_and_width`
+`INT64_MIN // -1` case, which this change does not touch.)
+
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is

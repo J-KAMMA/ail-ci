@@ -606,8 +606,9 @@ Two more findings from the same audit were recorded here and have since been fix
   unchanged, when either operand is a float. Two exactness boundaries follow directly from routing
   through `ail_ipow`, and both are traps rather than silent wrong answers, matching how this
   document already treats every other integer edge:
-  - an exact integer power that overflows int64 traps, exactly as the constant-exponent case
-    already did (`2 ** 63` and `x ** n` with `n` a variable both stop the program the same way);
+  - an exact integer power that overflows int64 traps at run time (`x ** n` with `n` a variable);
+    when the exponent is a constant the value is known at compile time, so `2 ** 63` is refused
+    by name there instead of running and trapping;
   - a variable exponent that turns out negative at runtime also traps, where Python would return a
     float (`2 ** -1` is `0.5`). A *constant* negative exponent still takes the `pow()` path and
     still answers correctly -- only a variable one, whose sign cannot be settled in advance, is
