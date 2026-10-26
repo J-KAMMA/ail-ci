@@ -1,3 +1,13 @@
+## 2026-10-26 -- pre54 review fix: MANIFEST pin and DIFFERENCES row order (job-rbpre54-10270147)
+
+The reviewer found the committed tree was missing the `test_ail_pre54.py` pin, so
+`tools/update_manifest.py --check` exited 1 and `ail_check.preflight` aborted every module with
+`hash mismatch`; re-ran `tools/update_manifest.py` and committed the pin (`--check` now exits 0).
+The DIFFERENCES row also had its cells in the wrong columns (`refused | round | <text>`); it is
+now `round | <text> | refused` under the `| id | area | difference | status |` header.
+Re-ran the `/tmp/probes/p54_*` probes: the four match probes match CPython on both builds, the
+five boundary probes are refused by name on both (exit 3, no executable).
+
 ## 2026-10-26 -- re-apply pre54: round() at the int64 boundary is refused by name (job-rbpre54-10270147)
 
 Re-applied the accepted pre54 change on this tree.  `pyc.build` now calls
