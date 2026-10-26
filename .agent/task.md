@@ -1,8 +1,6 @@
-**Fix one pre-existing difference from CPython.** A reviewer of job `rbpre47` recorded these as already present before that job:
+**Your own test module test_ail_pre276 fails in the full suite** when your change is combined with the current integration branch and other accepted jobs.
 
-**Unverified:** full suite; worker's 14-module run (not repeated). Speed: `icount` unusable here (`perf_event_open: Permission denied`), but `.c` is identical to base for 3 gdev programs, so no runtime regression expected.
-
-Reproduce the first one that still differs on this tree (`bash ~/tools/cmp.sh` on both builds). Fix that one cause, or refuse the construct by name at compile time. Add the case to a new `test_ail_pre276.py` and run only that module and `test_ail_safetynet`, then commit. If none of them still differs, change nothing and say so.
+Rebase mentally onto the current tree: run `cd AIL_CURRENT && python3 -m unittest -q test_ail_pre276`, find why it fails here (another change may have altered behaviour or output your test expects), and fix it so it passes while keeping your fix. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
