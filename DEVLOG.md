@@ -144,6 +144,22 @@ Probes in `/tmp/probes` on both builds: `del_bound`, `index_exact`, `index_route
 `index_boundary` match CPython; `index_refuse1`-`index_refuse5` are refused by name.  Tests on
 the final tree: pre269, pre177, pre246, pre201, pre204, pre238, pre121, safetynet, files and
 corpus_findings3 (48 tests, 596 s, 0 failed, 1 skipped).
+## 2026-10-26 -- pre-270: relative import below the top level is refused by name (job-pre270-10262216)
+
+The reviewer of job rbpre52 left two pre-existing items: the relative/local import refusal and a
+user class shadowing `ImportError`.  Both are named compile-time refusals on this tree.  The first
+still reproduced with the wrong message: `try: from . import thing except ImportError` hit
+`lift_lazy`'s generic "import of a local module or package below the top level (inside a condition
+or loop at module level)" instead of the entry-file relative-import refusal, which names
+`from . import ...` and points at the import.  `lift_lazy` now runs the entry-file relative-import
+check first and describes a local import in a module-level `try` as "inside a try block"; a user
+class named `ImportError` keeps its existing named refusal.  Added `AIL_CURRENT/test_ail_pre270.py`
+(three cases, both builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.
+
+Probes `/tmp/probes/pre270_*` (relative import in `try`, `if`, class body and function, `from
+.thing`, `from ..`, an alias, `ImportError`/`ModuleNotFoundError` shadowing, and a non-feature
+control) match CPython or are refused by name on both builds.  The required modules are run on the
+final commit.
 
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
