@@ -1,43 +1,9 @@
-# bigint-fix10: no typed clone is made for mixed (typed + general) programs ("no typed clone") (B, coverage)
+# Continue: finish the task and verify it
 
-In a default build, a program that the typed path cannot take whole is compiled on the general path, and each function
-that is typed-eligible is also emitted as a typed "mix" clone (`<exe>_mix*.c`, see AIL_NO_MIX). With `bigint` the
-clones of int functions with unbounded values are no longer made, so the program runs fully general.
-
-## Modules
-test_ail_mixed_bounds (10 failures: list_len_boundary, str_slice, ... each for ir=0 and ir=1; `[] is not true : no typed clone`),
-test_ail_flush_exit (3: mixed_int_value_error_in_clone, mixed_output_beyond_one_buffer, mixed_zero_division_in_clone; ir1: no typed clone).
-
-## Reproducer
-`x1.py`:
-```
-def risky(xs: list[int], i: int) -> int:
-    return xs[i] + xs[i - 1]
-
-def main():
-    d = {"k": [1, 2, 3]}
-    print("start", d)
-    print(risky([5, 6, 7], 2))
-    print(risky([5, 6, 7], 3))
-main()
-```
-```
-cd the repository checkout/AIL_CURRENT
-AIL_SURFACE=python python3 -B python/pkg-v12/pyc.py x1.exe --file x1.py   # the test's command
-ls x1*     # expected: x1.c and a mixed clone file (the test globs exe_<name>_<ir>_mix*.c next to the exe); there is none
-```
-CPython: `start {'k': [1, 2, 3]}`, `13`, then `IndexError: list index out of range` (exit 1). The output is right today;
-what is lost is the typed clone of `risky` (`AIL_NO_GENERAL=1` compiles `risky` alone fine, so the clone builder
-rejects it: probably the same driver check as fix03/fix06, an int `+` of two list elements needs a tagged local).
-
-## Category
-B. Let the clone builder use the tagged-int lowering (or the checked int64 arm with fallback) so these functions get a
-clone again; the clone must still stop correctly: an int64-overflowing sum goes to the exact path, never wraps.
-
-## Fixed means
-x1 produces a mix clone; both modules pass for ir=0 and ir=1 (including the ASan/UBSan runs in test_ail_mixed_bounds).
-
-run the listed modules and test_ail_bigint test_ail_tint test_ail_unified before committing.
+You continue a job on its own branch: your earlier commits are already here. The previous run was cut off by its time
+limit before the review could judge it. Read `.agent/pipeline.md` in this checkout (the original task and your earlier
+report), check what of the original task is still missing, finish it, run the probes and every test module the
+original task names, and commit. Do not undo the earlier work unless it is wrong; if it is, say why in your report.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
