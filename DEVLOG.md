@@ -205,6 +205,33 @@ test_ail_exception_values_core, test_ail_exception_values_app,
 test_ail_exception_aggregate_objects, test_ail_exception_context, test_ail_exc_str,
 test_ail_excfix, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3
 (10 modules, 488 s, 0 failed).
+## 2026-10-26 -- re-apply cov7: partial lambda locations and abstract-base dispatcher (job-rbcov7-10270118)
+
+Re-applying the accepted cov7 change on the current integration tree.  The diff applied cleanly
+to `genlib.py`, `pyfunc.py`, `test_ail_silent6.py` and `test_ail_typed_inherit.py`; the
+`DEVLOG.md` / `DIFFERENCES.md` conflicts kept both sides (cov7's entries plus this tree's newer
+ones), and the re-applied DIFFERENCES row uses this job's placeholder id.  The workflow part of
+the diff (OpenCode v1.19.4 and the extra key scan) was already present here, so no change.  In
+`genlib._partial` both rewritten `Lambda` nodes now copy the `partial()` call's location, so
+`pyboxed2._refuse_lambda_forward_defaults` no longer raises `AttributeError: 'Lambda' object
+has no attribute 'lineno'` for a positional or keyword partial (g17_004 / g17_024).  In
+`pyfunc._dispatcher` the representative is looked up with `by_name.get()` and falls back to the
+first concrete implementation when the base's method is a stub that was dropped, so an abstract
+visitor hierarchy builds instead of raising `KeyError: 'Visitor__visit_directory'` (g13_036).
+The positional-partial program was added to `test_ail_silent6.py` and the abstract visitor to
+`test_ail_typed_inherit.py`.
+
+Probes in `/tmp/probes`: `cov7_partial_basic`, `cov7_partial_routes`, `cov7_visitor_abstract`,
+`cov7_visitor_mixed`, `cov7_visitor_noret` and `cov7_visitor_dict` all match CPython on the
+general and default builds; the abstract/mixed/noret visitor programs also build typed-only
+(`AIL_NO_GENERAL=1`) and match, exercising the dispatcher.  `cov7_visitor_dict` is refused by
+name on the typed path (`'table' is annotated dict ... no rule for`) and matches on the general
+path.  `tools/diff_ids.py` is not present in this tree; `tools/update_manifest.py` updated the
+four touched pins and `--check` passes.
+
+Tests on this tree: `test_ail_silent6`, `test_ail_typed_inherit`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass (44 tests, 731 s, 1 skipped: no zig for
+`--target windows`).
 
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
@@ -2262,6 +2289,21 @@ emitters now pass the `r` object to one runtime converter (`ail_it_r_index`), wh
 the type and sign; `permutations` keeps treating a None `r` as "not given".  Added
 `AIL_CURRENT/test_ail_pre126.py`; probes in `/tmp/probes/pre126_r_bounds.py`,
 `pre126_r_types.py` and `pre126_r_sources.py` match CPython on both builds.
+
+## 2026-10-24 - cov7: the census's internal-crash refusals now build
+
+The gdev census (510 programs, `AIL_NO_CACHE=1`) refused 53 before this job.  Grouped by the
+first line of the build output, the most common group was the 3 internal tracebacks (not
+deliberate refusals): two programs using `functools.partial` crashed in
+`pyboxed2._refuse_lambda_forward_defaults` because the general path's partial rewrite made
+`Lambda` nodes without a line number, and one visitor program crashed in
+`pyfunc._dispatcher` with `KeyError: 'Visitor__visit_directory'` because an abstract base method
+(removed as a stub) was chosen as the dispatcher's representative.  The partial rewrite now
+copies locations onto both lambdas, and the dispatcher falls back to the first concrete
+implementation when the base has no body.  `g17_004`, `g17_024` and `g13_036` now compile and
+print what CPython prints on both builds; the census refused 50 afterwards.  Added the positional
+partial program to `test_ail_silent6.py` and an abstract-visitor hierarchy to
+`test_ail_typed_inherit.py`.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
