@@ -520,6 +520,7 @@
     "python/pkg-v12/tint.py",
     "python/pkg-v12/tint_typed.py",
     "python/pkg-v12/bigcap.py",
+    "python/pkg-v12/biggate.py",
     "python/pkg-v12/csvgen.py",
     "python/pkg-v12/fmtlib.py",
     "python/pkg-v12/prelude_csv.py",
