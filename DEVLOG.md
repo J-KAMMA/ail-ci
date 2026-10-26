@@ -2248,6 +2248,28 @@ so the existing separator type check raises the right error; the empty-separator
 is still checked before the not-found branch.  Bytes, list, str-subclass and multi-character /
 repeated separators, argument/list/attribute/dict channels and a 100000-character input match
 CPython on both builds.  `test_ail_qtest3.py` keeps the probes.  No other differences were seen.
+## 2026-10-24 - qtest5: zfill/expandtabs receiver evaluated twice (job-qtest5-10241814)
+
+Ten small zfill/expandtabs programs (signs, empty strings, widths below the length, tab sizes
+0/1/8, tabs after newlines, dynamic/list/attribute/dict values, wrong types) matched CPython on
+both builds, with one exception:
+
+    i = [0]
+    def nxt():
+        i[0] += 1
+        return i[0]
+    print(repr(("-" + str(nxt())).zfill(nxt())))   # CPython '-1' 2, both AIL builds '-02' 3
+
+The receiver `("-" + str(nxt()))` ran its side effect twice: `_str_concat_flatten`
+(pyboxed2.py) evaluated the concat's leaves while deciding whether to flatten, then returned
+None for a two-leaf `a + str(b)` it could not prove (the `str(nxt())` argument's kind is not
+static), leaving the emitted code behind while the normal `+` path evaluated the leaves again.
+The flatten plan (per-leaf format and operand) is now computed before any emission, so the
+decision cannot leave side effects behind. `test_ail_qtest5.py` keeps the case and the area
+comparison. Other differences seen (not fixed): a str method accessed as a value
+(`f = "a\tb".expandtabs`) raises AttributeError, `str.zfill(s, w)` is refused as "name 'str' is
+not defined", `zfill(width=...)` / `expandtabs(tabsize=..., positional)` are refused by name,
+and a non-BMP literal is still a 16-bit-runtime refusal.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
