@@ -772,8 +772,13 @@ def _fold_float_int_text(text):
             continue
         if not math.isfinite(converted):
             continue
+        replacement = repr(converted)
+        if replacement.startswith('-'):
+            # The call is a primary expression, so a bare negative literal would let a
+            # following ``**`` bind tighter than the unary minus (``float(-(10**40)) ** 2``).
+            replacement = '(' + replacement + ')'
         spans.append((offset(node.lineno, node.col_offset),
-                      offset(node.end_lineno, node.end_col_offset), repr(converted)))
+                      offset(node.end_lineno, node.end_col_offset), replacement))
     for begin, finish, replacement in sorted(spans, reverse=True):
         text = text[:begin] + replacement + text[finish:]
     return text

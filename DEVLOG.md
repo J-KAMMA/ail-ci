@@ -1,3 +1,23 @@
+## 2026-10-26 -- pre302 review: parenthesize a folded negative float literal (job-pre302-10270745)
+
+The review found that the replacement produced by `_fold_float_int_text` was an
+unparenthesized literal, so a folded negative value lost the call's primary-expression
+binding: `float(-(10**40)) ** 2` printed `-1e+80` on both builds where CPython prints
+`1e+80`, and `float(-(2**70)) ** 2`, `float(-(10**40)) ** 0`, `float(-(10**40)) ** -1`
+were wrong the same way.  A negative replacement is now wrapped in parentheses, which
+restores the binding for `**`, a following unary operator and every other context; positive
+replacements are unchanged.  `test_ail_pre302.py` now covers the negative constant raised to
+integer exponents on both builds, and a negative constant raised to a fractional power is
+asserted to be refused by name (AIL has no complex type) instead of silently compiling to a
+wrong real value.
+
+Probes in `/tmp/probes` on both builds: `p_pow_neg`, `p_pow_mix`, `p_pow_pos`, `p_pow_frac`,
+`p_edge`, `p_forms` and `p_shadow` match CPython or are refused by name (the fractional negative
+powers are refused as complex); `p_refuse_arg` keeps the named int64 refusal.  Final-state
+tests: `test_ail_pre302` (16 s, 0 failed), plus `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` (0 failed).  `tools/update_manifest.py` was run and `--check`
+passes.
+
 ## 2026-10-26 -- float() of an out-of-int64 int constant folds to a float literal (job-pre302-10270745)
 
 The rbrbpre33 reviewer's first pre-existing difference was `float(10 ** 40)`: both builds

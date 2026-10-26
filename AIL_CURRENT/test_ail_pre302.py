@@ -3,7 +3,9 @@
 The reviewer of job rbrbpre33 recorded that ``float(10 ** 40)`` was refused, although
 CPython converts the unbounded int to the nearest double and prints 1e+40.  The source
 rewrite now folds a direct, unshadowed ``float(<exact int constant outside int64>)``
-whose conversion is finite to a float literal, so both builds match CPython.  A value
+whose conversion is finite to a float literal, so both builds match CPython.  A folded
+negative value is parenthesized, so a following ``**`` still applies to the call result
+rather than binding tighter than the unary minus.  A value
 that reaches ``float()`` through an argument, a list item, an attribute, a dict value,
 a local or a module constant is still refused by name (the int itself does not fit
 int64), as is a conversion that overflows a double.  The second recorded item,
@@ -37,6 +39,12 @@ FLOAT_MATCH = '''def main() -> None:
     print(float(10**18), float(10**19), float(0))
     print(float(10**40) / 2.0)
     print(float(2.5), float(-0.0))
+    print(float(-(10**40)) ** 2)
+    print(float(-(2**70)) ** 2)
+    print(float(-(10**40)) ** 0)
+    print(float(-(10**40)) ** -1)
+    print(float(-(2**100)) ** -1)
+    print(float(10**40) ** 2)
 
 
 main()
@@ -159,6 +167,20 @@ class Pre302Tests(unittest.TestCase):
 
     def test_reducing_intermediates_match_cpython(self):
         self.check_match('intermediate_fit', INTERMEDIATE_MATCH)
+
+    def test_negative_fractional_power_is_refused_by_name(self):
+        text = '''def main() -> None:
+    print(float(-(10**40)) ** 1.5)
+
+
+main()
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-pre302-') as directory:
+            for mode in ('g', 'd'):
+                with self.subTest(mode=mode):
+                    _, built = build(directory, 'negative_fractional_' + mode, text, mode)
+                    self.assertNotEqual(built.returncode, 0, mode)
+                    self.assertIn('complex number', built.stdout + built.stderr, mode)
 
     def test_values_that_cannot_be_an_int64_are_refused_by_name(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre302-') as directory:
