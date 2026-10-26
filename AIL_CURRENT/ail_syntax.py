@@ -690,6 +690,11 @@ def _fold_int_exact(node, known):
         if type(value) is not int:
             raise _NotConstant
         return value
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+        value = known.get(node.value.id + '.' + node.attr)
+        if type(value) is not int:
+            raise _NotConstant
+        return value
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
         value = _fold_int_exact(node.operand, known)
         return {ast.USub: operator.neg, ast.UAdd: operator.pos,
@@ -731,6 +736,10 @@ def _fold(node, known):
         return node.value
     if isinstance(node, ast.Name) and node.id in known:
         return known[node.id]
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+        key = node.value.id + '.' + node.attr
+        if key in known:
+            return known[key]
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
         value = _fold(node.operand, known)
         if type(value) not in (int, float) or isinstance(node.op, ast.Invert) and type(value) is not int:
@@ -825,52 +834,164 @@ def _class_statement_names(statement):
             if isinstance(inner, ast.Name) and isinstance(inner.ctx, (ast.Store, ast.Del))}
 
 
+def _constant_load_keys(expression):
+    """The plain names and `Name.attr` reads a constant expression may resolve through."""
+    keys = set()
+    for inner in ast.walk(expression):
+        if isinstance(inner, ast.Name) and isinstance(inner.ctx, ast.Load):
+            keys.add(inner.id)
+        elif (isinstance(inner, ast.Attribute) and isinstance(inner.ctx, ast.Load)
+              and isinstance(inner.value, ast.Name)):
+            keys.add(inner.value.id + '.' + inner.attr)
+    return keys
+
+
+def _mutated_class_names(tree):
+    """Names whose attributes this program stores or deletes, so their class dict can differ."""
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            if isinstance(node.ctx, (ast.Store, ast.Del)):
+                names.add(node.value.id)
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+              and node.func.id in ('setattr', 'delattr', 'vars') and node.args
+              and isinstance(node.args[0], ast.Name)):
+            names.add(node.args[0].id)
+    return names
+
+
+def _comprehension_targets(node):
+    return {inner.id for gen in node.generators for inner in ast.walk(gen.target)
+            if isinstance(inner, ast.Name) and isinstance(inner.ctx, ast.Store)}
+
+
+def _fold_statement_comprehensions(statement, known):
+    """Edits for the eager comprehensions in a module-level statement's expressions. A nested
+    function, lambda, class or another comprehension keeps its own scope and is not entered."""
+    edits = []
+    stack = list(ast.iter_child_nodes(statement))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp)):
+            edits.extend(_fold_comprehension_elements(node, known))
+            continue
+        stack.extend(ast.iter_child_nodes(node))
+    return edits
+
+
+def _fold_comprehension_elements(expression, known):
+    """Edits replacing an eager comprehension's constant element with its exact value. A name the
+    comprehension targets shadows, and a nested scope, keep the element as written."""
+    if not isinstance(expression, (ast.ListComp, ast.SetComp, ast.DictComp)):
+        return []
+    targets = _comprehension_targets(expression)
+    elements = ([expression.key, expression.value] if isinstance(expression, ast.DictComp)
+                else [expression.elt])
+    edits = []
+    for element in elements:
+        if isinstance(element, ast.Constant):
+            continue
+        if not isinstance(element, (ast.Name, ast.Attribute, ast.UnaryOp, ast.BinOp)):
+            continue
+        if _constant_load_keys(element) & targets:
+            continue
+        if any(isinstance(inner, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp))
+               for inner in ast.walk(element)):
+            continue
+        try:
+            value = _fold_int_exact(element, known)
+        except (_NotConstant, ArithmeticError, ValueError, TypeError, RecursionError):
+            continue
+        edits.append((element, repr(value)))
+    return edits
+
+
 def fold_constants(text):
     """Top-level `NAME = <constant arithmetic>` bound once in module scope, rewritten to its literal
     value. A name that a nested block, a loop or a `global` function rebinds is not folded: its value
     at the line that reads it is not the first one. A class-level assignment may read such a name:
-    its arithmetic runs in the class body, so it is folded here too (exactly, wide steps allowed)."""
+    its arithmetic runs in the class body, so it is folded here too (exactly, wide steps allowed).
+    A top-level class whose attributes are single constant assignments is recorded as `Class.attr`,
+    and a single-assignment `Alias = Class` makes the same attributes visible under the alias, so a
+    class body or an eager comprehension that reads one is folded rather than left to trap."""
     try:
         tree = ast.parse(text)
     except SyntaxError:
         return text
     stored = _module_scope_bindings(tree)
+    mutated = _mutated_class_names(tree)
     known = {}
+    classes = {}
+    class_names = {}
     edits = []
     for node in tree.body:
         if isinstance(node, ast.ClassDef):
             scope = {name: value for name, value in known.items() if type(value) is int}
-            shadowed = set()
+            class_scope = dict(scope)
+            binds = {}
+            attr_values = {}
             for statement in node.body:
+                bound = _class_statement_names(statement)
+                for name in bound:
+                    binds[name] = binds.get(name, 0) + 1
                 if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
                     target, expression = statement.targets[0], statement.value
                 elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
                     target, expression = statement.target, statement.value
                 else:
                     expression = None
-                if (expression is not None and isinstance(target, ast.Name)
-                        and not isinstance(expression, ast.Name) and not _is_literal(expression)):
-                    loads = {inner.id for inner in ast.walk(expression)
-                             if isinstance(inner, ast.Name) and isinstance(inner.ctx, ast.Load)}
-                    if loads & scope.keys() and not loads & shadowed:
+                value = None
+                if expression is not None and isinstance(target, ast.Name):
+                    if isinstance(expression, (ast.ListComp, ast.SetComp, ast.DictComp)):
+                        # A comprehension does not see the class scope, only module names.
+                        edits.extend(_fold_comprehension_elements(expression, scope))
+                    else:
                         try:
-                            value = _fold_int_exact(expression, scope)
+                            value = _fold_int_exact(expression, class_scope)
                         except (_NotConstant, ArithmeticError, ValueError, TypeError, RecursionError):
-                            pass
+                            value = None
                         else:
-                            edits.append((expression, repr(value)))
-                shadowed |= _class_statement_names(statement)
+                            attr_values[target.id] = value
+                            loads = _constant_load_keys(expression)
+                            if loads & class_scope.keys() and not _is_literal(expression):
+                                edits.append((expression, repr(value)))
+                for name in bound:
+                    class_scope.pop(name, None)
+                if value is not None and expression is not None and isinstance(target, ast.Name):
+                    class_scope[target.id] = value
+            if (not node.bases and not node.decorator_list and not node.keywords
+                    and stored.get(node.name) == 1 and node.name not in mutated
+                    and '__slots__' not in binds):
+                attrs = {name: value for name, value in attr_values.items()
+                         if binds.get(name) == 1 and name != '__slots__'
+                         and -(1 << 63) <= value < 1 << 63}
+                if attrs:
+                    classes[node.name] = attrs
+                    class_names[node.name] = node.name
+                    for attr, value in attrs.items():
+                        known[node.name + '.' + attr] = value
             continue
+        edits.extend(_fold_statement_comprehensions(node, known))
         if not (isinstance(node, ast.Assign) and len(node.targets) == 1
                 and isinstance(node.targets[0], ast.Name) and stored[node.targets[0].id] == 1):
             continue
+        target = node.targets[0].id
         try:
             value = _fold(node.value, known)
         except (_NotConstant, ArithmeticError, ValueError, TypeError, RecursionError):
-            continue
-        known[node.targets[0].id] = value
-        if not _is_literal(node.value):
-            edits.append((node.value, repr(value)))
+            value = None
+        if value is not None:
+            known[target] = value
+            if not _is_literal(node.value):
+                edits.append((node.value, repr(value)))
+        elif isinstance(node.value, ast.Name) and target not in mutated:
+            origin = class_names.get(node.value.id)
+            if origin is not None:
+                class_names[target] = origin
+                for attr, item in classes[origin].items():
+                    known[target + '.' + attr] = item
     if not edits:
         return text
     data = text.encode('utf8')

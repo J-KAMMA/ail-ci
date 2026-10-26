@@ -392,6 +392,8 @@ def _constant_int(node, known, shifts=False):
         return node.value
     if isinstance(node, ast.Name):
         return known.get(node.id)
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+        return known.get(node.value.id + '.' + node.attr)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
         value = _constant_int(node.operand, known, shifts)
         if value is None:
@@ -548,6 +550,120 @@ def _known_module_constants(tree):
     return known
 
 
+def _module_scope_stores(tree):
+    """How many times each name is bound at module scope (a class or function definition once)."""
+    count = {}
+
+    def walk(node):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            count[node.name] = count.get(node.name, 0) + 1
+            return
+        if isinstance(node, ast.Lambda):
+            return
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.NamedExpr) and isinstance(sub.target, ast.Name):
+                    count[sub.target.id] = count.get(sub.target.id, 0) + 1
+            return
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            count[node.id] = count.get(node.id, 0) + 1
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                name = (alias.asname or alias.name).split('.')[0]
+                count[name] = count.get(name, 0) + 1
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            count[node.name] = count.get(node.name, 0) + 1
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            count[node.name] = count.get(node.name, 0) + 1
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            count[node.rest] = count.get(node.rest, 0) + 1
+        for child in ast.iter_child_nodes(node):
+            walk(child)
+
+    for statement in tree.body:
+        walk(statement)
+    return count
+
+
+def _class_attr_mutated(tree):
+    """Names whose attributes the program stores or deletes, so their class dict can differ."""
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            if isinstance(node.ctx, (ast.Store, ast.Del)):
+                names.add(node.value.id)
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+              and node.func.id in ('setattr', 'delattr', 'vars') and node.args
+              and isinstance(node.args[0], ast.Name)):
+            names.add(node.args[0].id)
+    return names
+
+
+def _class_statement_binds(statement):
+    if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return {statement.name}
+    return {inner.id for inner in ast.walk(statement)
+            if isinstance(inner, ast.Name) and isinstance(inner.ctx, (ast.Store, ast.Del))}
+
+
+def _known_class_attributes(tree):
+    """`Class.attr` -> constant int for a top-level, base-less class whose attribute is one
+    constant assignment and is never rebound, plus a single-assignment `Alias = Class`."""
+    stores = _module_scope_stores(tree)
+    mutated = _class_attr_mutated(tree)
+    scope = _known_module_constants(tree)
+    classes = {}
+    aliases = {}
+    known = {}
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            if (node.bases or node.decorator_list or node.keywords
+                    or node.name in mutated or stores.get(node.name) != 1):
+                continue
+            binds = {}
+            for statement in node.body:
+                for name in _class_statement_binds(statement):
+                    binds[name] = binds.get(name, 0) + 1
+            if '__slots__' in binds:
+                continue
+            attrs = {}
+            class_scope = dict(scope)
+            for statement in node.body:
+                bound = _class_statement_binds(statement)
+                if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+                    target, expression = statement.targets[0], statement.value
+                elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+                    target, expression = statement.target, statement.value
+                else:
+                    target, expression = None, None
+                value = None
+                if isinstance(target, ast.Name):
+                    value = _constant_int(expression, class_scope)
+                    if value is not None and _INT64_MIN <= value <= _INT64_MAX:
+                        attrs[target.id] = value
+                for name in bound:
+                    class_scope.pop(name, None)
+                if value is not None:
+                    class_scope[target.id] = value
+            attrs = {name: value for name, value in attrs.items() if binds.get(name) == 1}
+            if attrs:
+                classes[node.name] = attrs
+                for attr, value in attrs.items():
+                    scope[node.name + '.' + attr] = value
+                    known[node.name + '.' + attr] = value
+        elif (isinstance(node, ast.Assign) and len(node.targets) == 1
+              and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Name)):
+            target, source = node.targets[0].id, node.value.id
+            if target not in mutated and stores.get(target) == 1:
+                origin = aliases.get(source) or (source if source in classes else None)
+                if origin is not None:
+                    aliases[target] = origin
+                    for attr, value in classes[origin].items():
+                        scope[target + '.' + attr] = value
+                        known[target + '.' + attr] = value
+    return known
+
+
 def _binds_name(tree, name):
     """Does the program bind `name` anywhere? A user definition of a built-in stops its folding."""
     for node in ast.walk(tree):
@@ -618,6 +734,7 @@ def _check_int64_unary_constants(tree):
     reach the unary operation as variables."""
     maxsplit = _maxsplit_constant_nodes(tree)
     known = _known_module_constants(tree)
+    known.update(_known_class_attributes(tree))
     for node in ast.walk(tree):
         if not isinstance(node, ast.UnaryOp) or not isinstance(node.op, (ast.UAdd, ast.USub)):
             continue
@@ -794,6 +911,7 @@ def _check_int64_int_base_constants(tree):
         value = _constant_int(node.value, known_int)
         if value is not None:
             known_int[target.id] = value
+    known_int.update(_known_class_attributes(tree))
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id == 'int'):
@@ -831,15 +949,18 @@ _CONST_INT_BITS = 4096
 _CONST_INT_SPECIAL_BITS = 1 << 24
 
 
-def _constant_int_exact(node, _limit=_CONST_INT_BITS):
+def _constant_int_exact(node, _limit=_CONST_INT_BITS, known=None):
     """The exact int a constant expression denotes, with a guard against huge intermediates.
     An absorbing zero and the pow bases 0/1/-1 are decided before the size guard, as in
     pyfront.int_constant; the other operand of such a power is retried at the special-exponent
-    limit, so a huge exponent still yields its sign and parity."""
+    limit, so a huge exponent still yields its sign and parity. `known` may hold `Class.attr`."""
     if isinstance(node, ast.Constant) and type(node.value) is int:
         return True, node.value
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+        value = (known or {}).get(node.value.id + '.' + node.attr)
+        return (True, value) if type(value) is int else (False, None)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert)):
-        ok, value = _constant_int_exact(node.operand, _limit)
+        ok, value = _constant_int_exact(node.operand, _limit, known)
         if not ok:
             return False, None
         if value is _CONST_INT_TOO_BIG:
@@ -853,8 +974,8 @@ def _constant_int_exact(node, _limit=_CONST_INT_BITS):
             ast.Add, ast.Sub, ast.Mult, ast.Pow, ast.LShift, ast.RShift,
             ast.FloorDiv, ast.Mod, ast.BitAnd, ast.BitOr, ast.BitXor):
         return False, None
-    left_ok, left = _constant_int_exact(node.left, _limit)
-    right_ok, right = _constant_int_exact(node.right, _limit)
+    left_ok, left = _constant_int_exact(node.left, _limit, known)
+    right_ok, right = _constant_int_exact(node.right, _limit, known)
     if not (left_ok and right_ok):
         return False, None
     try:
@@ -862,7 +983,7 @@ def _constant_int_exact(node, _limit=_CONST_INT_BITS):
             if right is _CONST_INT_TOO_BIG:
                 if left not in (0, 1, -1):
                     return True, _CONST_INT_TOO_BIG
-                right_ok, right = _constant_int_exact(node.right, _CONST_INT_SPECIAL_BITS)
+                right_ok, right = _constant_int_exact(node.right, _CONST_INT_SPECIAL_BITS, known)
                 if not right_ok:
                     return False, None
                 if right is _CONST_INT_TOO_BIG:
@@ -933,8 +1054,10 @@ def _check_int64_constants(tree):
     lambda bodies are left to the existing run-time stop and to _check_int64_literals, and a
     class body keeps _check_constant_power's own wording for a bare `**` value it can fold;
     `_const_expr_int` cannot fold an exponent above 64, so that case is checked here."""
+    attrs = _known_class_attributes(tree)
+
     def check_value(node):
-        ok, value = _constant_int_exact(node)
+        ok, value = _constant_int_exact(node, known=attrs)
         if not ok:
             return
         if value is not _CONST_INT_TOO_BIG and -(1 << 63) <= value < 1 << 63:
@@ -999,6 +1122,7 @@ def _check_int64_constant_positions(tree):
         value = _constant_int(node.value, known, shifts=True)
         if value is not None:
             known[target.id] = value
+    known.update(_known_class_attributes(tree))
 
     def roots(node):
         if isinstance(node, (ast.BinOp, ast.UnaryOp)):

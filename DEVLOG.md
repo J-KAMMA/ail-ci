@@ -1,3 +1,36 @@
+## 2026-10-26 -- class-attribute int constants: fold, or refuse by name (job-pre284-10270220)
+
+Reproduced the pre275 difference on this tree: `class K: N = 2 ** 61` followed by
+`K.N * 4` (in the class body or in an assigned list comprehension) compiled to checked
+int64 arithmetic and stopped with `integer overflow`, where CPython prints the bignum.
+Reads of a class attribute constant were unseen by both `ail_syntax.fold_constants` and
+the int64 constant checks in `ail_chatgpt.py`.  `fold_constants` now resolves
+`Class.attr` (and a single-assignment module alias `Alias = Class`) in class bodies,
+module assignments and eager comprehensions, including a comprehension nested in a call,
+folding an in-range result exactly with wider intermediates allowed; the constant
+evaluators in `ail_chatgpt.py` resolve `Class.attr` too, so an out-of-int64 value is
+refused by name (`int64 literal out of range` / `int64 constant expression out of range`)
+through a class body, comprehension, module assignment, argument, list item, attribute
+target, dict value and default.  Tracking stays conservative: only a top-level base-less,
+undecorated class bound once, with no attribute mutation and no `__slots__`, contributes
+constants; an attribute bound more than once is skipped and the class-body scope order is
+respected.  Added `AIL_CURRENT/test_ail_pre284.py` (2 tests, both builds) and registered
+it in `ail_check.MODULES` and `tools/ci_shards.json`.  Probes `p284_*` in `/tmp/probes`
+on both builds: 14 match CPython (in-range class/module/comprehension values, shadowing,
+class-local names, float/bool types) and 19 are refused by name (class body,
+comprehension, nested call, alias, argument, list item, attribute target, dict value,
+default, negative, if-expression, method, module assignment, class-local).  Still
+diverging, unchanged by this job and reported here: an instance attribute
+(`k = K(); k.N * 4`) and a plain module name through a wider intermediate in a module
+assignment or argument keep their pre-existing fixed-width runtime trap
+(`integer overflow`).  Tests on the final tree: batch A `test_ail_pre227`,
+`test_ail_pre113`, `test_ail_pre177`, `test_ail_pre191`, `test_ail_pre121`,
+`test_ail_pre2`, `test_ail_pre100`, `test_ail_pre201`, `test_ail_pre236` (26 tests, OK),
+batch B `test_ail_pre248`, `test_ail_pre214`, `test_ail_pre253`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3` (36 tests, OK, 1 skipped) and
+`test_ail_pre284` (2 tests, OK).  `python3 tools/update_manifest.py` was run and
+`--check` passes.
+
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is
