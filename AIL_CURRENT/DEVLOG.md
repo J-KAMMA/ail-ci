@@ -1,3 +1,17 @@
+## 2026-10-26 -- pre251 reapply: bool constants in constant integer shifts (job-rbpre251-10261432)
+
+Re-applied the accepted pre251 change on this tree. The three `pyfunc.py` edits are already
+present here: `_maxsplit_const` and `_const_int_expr` accept a bool constant as CPython's 0/1,
+and `fold_int_constant` still leaves a bool-only result (`True & True`) to the run time so its
+type stays bool. The current tree's later wider-intermediate and unary-plus fixes are kept.
+Added `test_ail_pre251.py` (6 tests, both builds) and registered it in `ail_check.MODULES`.
+
+Probes `/tmp/probes/pre251_accept.py`, `pre251_contexts.py`, `pre251_boolops.py`,
+`pre251_module_const.py`, `pre251_maxsplit.py` and `pre251_pow.py` match CPython on both builds;
+`pre251_refuse_shift.py` and `pre251_refuse_wide.py` are refused by name on both builds.
+Final-state tests: test_ail_pre251, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3; `tools/update_manifest.py --check` passes.
+
 ## 2026-10-25 -- pre227 suite fix: the constant check owns the refusal wording (job-pre227-10260534)
 
 The class-constant fix still folds `N = 2**62; class C: X = N * 4` to a literal, but the
