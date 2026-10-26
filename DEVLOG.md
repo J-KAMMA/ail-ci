@@ -1,3 +1,21 @@
+## 2026-10-26 - nested def two levels deep shares the enclosing cell (job-rbpre213-10261303)
+
+Re-applied the accepted pre213 change on top of the current tree.  `_register_nested` now also
+takes the free names of deeper defs (`boxclosure.free_names`); when a name is used by such a
+deeper scope its enclosing binding is made a cell (`NeedCells`), and the intermediate def
+receives that cell rather than a copy, so the deeper def sees the same object and any later
+rebinding.  The cell is forwarded through further nested defs and `cell_preamble` leaves an
+external cell alone; a closure function declares the def flags of its own nested defs.  The
+`by_cell` names are also in the nested context's `free_names`, so an unbound captured scalar
+read through the cell raises `NameError` (not `UnboundLocalError`), matching CPython.
+
+`test_ail_pre213.py` covers appends through an argument (empty and non-empty), aliasing, a dict
+value/list item/attribute, int and str reads (positive, zero, negative), a default referring to
+the captured list, sibling inner defs, a returned inner def called twice, rebinding the outer
+name after the intermediate call, three levels, an unbound scalar read before assignment and
+after deletion, and a deep `nonlocal` write stays refused by name.  Probes in `/tmp/probes`
+match CPython or are refused by name on both builds.
+
 ## 2026-10-25 -- pre227 suite fix: the constant check owns the refusal wording (job-pre227-10260534)
 
 The class-constant fix still folds `N = 2**62; class C: X = N * 4` to a literal, but the

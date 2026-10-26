@@ -185,7 +185,7 @@ class ClosureMixin:
         """C lines that put each cell variable of `ctx` into a fresh cell (its current slot value,
         a parameter or UNBOUND, becomes the cell's value)."""
         lines = []
-        for name in sorted(ctx.cell_slots):
+        for name in sorted(ctx.cell_slots - getattr(ctx, 'external_cells', set())):
             if name not in ctx.slot_of:
                 ctx.declare_local(name)
             slot = ctx.slot_expr(ctx.slot_of[name])
