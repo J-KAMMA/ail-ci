@@ -291,17 +291,17 @@ DIVMOD_F = '''def _ail_divmod_f(a: float, b: float) -> _AilT_f_f:
     return _AilT_f_f(q, r)
 '''
 PARTITION = '''def _ail_partition(s: str, sep: str) -> _AilT_s_s_s:
+    i = s.find(sep)
     if len(sep) == 0:
         raise ValueError("empty separator")
-    i = s.find(sep)
     if i < 0:
         return _AilT_s_s_s(s, "", "")
     return _AilT_s_s_s(s[:i], sep, s[i + len(sep):])
 '''
 RPARTITION = '''def _ail_rpartition(s: str, sep: str) -> _AilT_s_s_s:
+    i = s.rfind(sep)
     if len(sep) == 0:
         raise ValueError("empty separator")
-    i = s.rfind(sep)
     if i < 0:
         return _AilT_s_s_s("", "", s)
     return _AilT_s_s_s(s[:i], sep, s[i + len(sep):])
