@@ -1,12 +1,6 @@
-**Fix one pre-existing difference from CPython.** A reviewer of job `pre15` recorded these as already present before that job:
+**Your change breaks other tests in the full suite.** On top of the current integration branch, these test modules fail with your change and pass without it: test_ail_fuzz59 test_ail_grid_return test_ail_numeric_bindings test_ail_numeric_profiles test_ail_numeric_profiles_native test_ail_record_initializers test_ail_sdk test_ail_sdk_environment test_ail_tcp_json_deadlines test_ail_tcp_json_lines_poll_resources.
 
-- `repr(e.args[0])` / typed `e.args[i]` remains textual (e.g. `'3.0'`); `getattr(e, "args")` is still unsupported.
-- Eager exception text: after mutating a list message, `str(e)` still shows the old contents (base same).
-- General-path `repr(e)` of a numeric exception when `.args` is not read still quotes the value (base same).
-
-**Claim check:** fix and no-regression claims verified; typed-path wording is slightly loose (it keys on any exception-text read, not only `.args`) — not a defect. Exact “28 tests, 1 skipped” count not independently reproduced, but all four modules pass. `tools/icount.c` is absent here, so instruction counts were not measured; codegen for the checked gdev programs is identical.
-
-Reproduce the first one that still differs on this tree (`bash ~/tools/cmp.sh` on both builds). Fix that one cause, or refuse the construct by name at compile time. Add the case to a new `test_ail_pre26.py` and run only that module and `test_ail_safetynet`, then commit. If none of them still differs, change nothing and say so.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find what your change broke, and fix it so they pass again while keeping your own fix and its test. If your fix cannot coexist with them, revert it and say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
