@@ -1,33 +1,12 @@
-# bigint-fix13: check-stage diagnostic for an out-of-range literal lost its precise location kind (C, small)
+# Continue: fix the reviewer's findings
 
-`ail check` on the native `.ail` surface reports an int literal above int64 as a type error. The test pins the location
-kind `source` (exact column) and now gets `source_statement`. The line/column assertions before it pass, so only the
-kind label changed (or the diagnostic is now made at a later stage with statement-level provenance).
+You continue a job on its own branch: your earlier commits are already here. The reviewer returned FIX. Its last
+review is the last "## review" section of `.agent/pipeline.md` in this checkout (read the whole file: the original task,
+your reports and the reviews are there).
 
-## Modules
-test_ail_source_check (3 subtests of test_int64_literal_limits_and_original_positions: values 9223372036854775808,
--9223372036854775809, +9223372036854775808). The other 3 failures of this module are fix03 (`ail check --syntax python
---interface` on `def read(box:Box)->int: return box.get()` returns "has an int operation the local proof cannot bound").
-
-## Reproducer
-`s1.ail` (note the non-ASCII comment in the real test; keep it):
-```
-# x
-fn main()->int {let label="a"; return 9223372036854775808;}
-```
-`python3 -B ail_chatgpt.py check s1.ail` ->  `... "line": 2, "column": 32, "function": "main", "location_kind": "source_statement"`;
-the test expects `"source"`. The message text also still says "a 64-bit signed integer ... CPython computes it exactly ...
-this compiler would have to wrap it": decide with the SEMANTICS owner text whether the native `.ail` surface keeps int64
-literals (then keep the error, fix the location kind) or the message needs the new wording; do not change semantics,
-only restore the location kind and keep the message accurate for this surface.
-
-## Category
-C (diagnostic regression). If the new `source_statement` is deliberate, it is A: update the test and say why.
-
-## Fixed means
-test_int64_literal_limits_and_original_positions passes with the exact column; the `.ail` surface still rejects the literal.
-
-run the listed modules and test_ail_bigint test_ail_tint test_ail_unified before committing.
+Fix every defect the last review lists, re-run the probes and the test modules the original task names, and commit.
+Do not undo the earlier work unless a finding requires it. If a finding is wrong, say so in your report with the
+evidence (program, CPython output, AIL output).
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
