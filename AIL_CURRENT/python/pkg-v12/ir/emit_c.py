@@ -1007,13 +1007,24 @@ class Emitter(TextEmitter):
         code, form = ins.attrs['code'], ins.attrs['form']
         self.parts.add('IREXC')
         self.exception_parts([code])
+        explicit = False
         if form == 'msg':
             body, n, ascii_ = _c_literal(ins.attrs['msg'])
             new = 'ail_exception_new(%d, (const uint8_t *)(%s), %d, %d)' % (code, body, n, ascii_)
         elif form == 'val':
+            # An explicit message is an argument even when it is empty (`raise E(m)` has e.args == (m,)).
+            # Only a program that reads exception text can see the arguments; that is also the program
+            # whose runtime has EXCSTR, where the arg-aware constructor lives.
+            import exctext
             value = operands[0]
-            new = 'ail_exception_new(%d, (const uint8_t *)(%s).p, (%s).n, (%s).bytes)' % (
-                code, value, value, value)
+            explicit = True
+            if exctext.ACTIVE:
+                self.parts.add('EXCSTR')
+                new = 'ail_exception_new_msg(%d, (const uint8_t *)(%s).p, (%s).n, (%s).bytes)' % (
+                    code, value, value, value)
+            else:
+                new = 'ail_exception_new(%d, (const uint8_t *)(%s).p, (%s).n, (%s).bytes)' % (
+                    code, value, value, value)
         else:
             new = 'ail_exception_new(%d, NULL, 0, 0)' % code
         if not self.checked:
@@ -1026,13 +1037,10 @@ class Emitter(TextEmitter):
             return self.line(depth, '__builtin_unreachable();')
         if form == 'name':
             self.line(depth, 'ail_ir_raise_named(%d);' % code)
-        elif form in ('new', 'val'):
-            if form == 'new':
-                self.line(depth, 'ail_ir_raise_new(%d, NULL, 0, 0);' % code)
-            else:
-                value = operands[0]
-                self.line(depth, 'ail_ir_raise_new(%d, (const uint8_t *)(%s).p, (%s).n, (%s).bytes);'
-                          % (code, value, value, value))
+        elif explicit:
+            self.line(depth, 'ail_ir_raise_value(%s);' % new)
+        elif form == 'new':
+            self.line(depth, 'ail_ir_raise_new(%d, NULL, 0, 0);' % code)
         else:
             body, n, ascii_ = _c_literal(ins.attrs['msg'])
             self.line(depth, 'ail_ir_raise_new(%d, (const uint8_t *)(%s), %d, %d);' % (code, body, n, ascii_))

@@ -814,6 +814,12 @@ static ail_exception *ail_exception_new_args(int code, int nargs, const ail_exar
     ail__exc_set_message(v);
     return v;
 }
+/* an exception raised with one explicit str message, even an empty one: `raise E(m)` has e.args == (m,),
+   while `raise E()` (no argument) has none */
+static ail_exception *ail_exception_new_msg(int code, const uint8_t *p, int64_t n, _Bool ascii) {
+    ail_exarg a = ail_exarg_s((ail_str){p, n, ascii});
+    return ail_exception_new_args(code, 1, &a);
+}
 /* OSError(errno, strerror[, filename]) and its subclasses: "[Errno N] strerror" and ": 'filename'" in str(e), and
    (errno, strerror) as e.args.  OSError(...) itself becomes the subclass CPython picks for the errno. */
 static ail_exception *ail_exception_new_oserr(int code, int64_t err, ail_str text, int has_fn, ail_str fn) {
