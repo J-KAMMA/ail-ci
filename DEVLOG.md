@@ -603,6 +603,20 @@ not be run.  `python3 tools/update_manifest.py` updated the manifest for the tou
 
 Tests on the final commit: `test_ail_fuzz4`, `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` (4 modules, 354 s, 0 failed).
+## 2026-10-26 -- re-apply fuzz49: augmented assignment on an instance calls the in-place method
+
+Re-applied the accepted fuzz49 change on the current integration tree. The general path
+compiled `a += b` through the plain operator helpers, so `ail_op_iadd` fell straight back to
+`__add__`; `__iadd__` / `__isub__` / `__imul__` / `__iand__` / `__ior__` / `__ixor__` were not
+in the class dispatch tables at all. A class defining both printed the `__add__` result where
+CPython mutates and keeps the object. `dunderrt` now appends the in-place operators to the
+dispatch enum only for a program whose classes define one (other programs keep their runtime
+text) and emits the `__iadd__`-family check before the plain operator; `safetyrt` falls back to
+`__add__`/`__radd__` when the in-place method returns `NotImplemented`. A name that is ever the
+target of an augmented assignment is no longer given a trusted class kind, since the method may
+return another type and earlier code (a loop body, a lambda) would use a stale kind. Ported
+`test_ail_fuzz49.py`, registered it in `ail_check.MODULES` and `tools/ci_shards.json`. Both
+builds, 13 differential cases.
 
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
