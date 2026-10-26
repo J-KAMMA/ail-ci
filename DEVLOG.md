@@ -1,3 +1,27 @@
+## 2026-10-26 -- abs() of INT64_MIN through a container or attribute (job-pre261-10261652)
+
+The bigint-fix13 review left one pre-existing difference: an isolated `abs` of a negative big
+value reached through a list item, attribute or dict value still built and stopped with
+`integer overflow` on both builds while CPython prints 9223372036854775808.  The pre214/pre215/
+pre248 fold only knew direct, literal and local-name arguments.  `_check_int64_abs_constants`
+now also folds a constant int from a literal list/tuple/dict element (including negative
+indices, aliases and a duplicate dict key's last value) and from a simple class or instance
+attribute (`self.v` in a class body/method, or `obj.v = ...` in the same scope), refusing the
+call by name with `int64 constant expression out of range` on both builds.  In-range elements,
+empty containers, float/bool values, a shadowed `abs` and an in-range value passed as an
+argument still match CPython; INT64_MIN passed only as a function parameter remains a separate
+pre-existing runtime trap.  Added `AIL_CURRENT/test_ail_pre261.py`, registered it in
+`ail_check.MODULES` and `ci_shards.json`, and added the DIFFERENCES row.
+
+Probes in `/tmp/probes`: `pr261_list`, `pr261_attr`, `pr261_dict`, `pr261_refuse_list`,
+`pr261_refuse_dict`, `pr261_refuse_attr`, `pr261_refuse_module` and `pr261_alias` are refused by
+name on both builds; `pr261_inrange`, `pr261_match_edges`, `pr261_match_arg` and
+`pr261_match_shadow` match CPython on both builds.  `pr261_arg` (MIN passed as a parameter)
+still stops with `integer overflow` on both builds, as before this job.  Tests on the final
+tree: `test_ail_pre261`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`;
+the related `test_ail_pre214`, `test_ail_pre215`, `test_ail_pre248`, `test_ail_pre188`,
+`test_ail_pre172`, `test_ail_pre177` and `test_ail_fuzz41` also pass.
+
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is

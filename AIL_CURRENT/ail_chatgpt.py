@@ -570,17 +570,242 @@ def _binds_name(tree, name):
     return False
 
 
+_UNKNOWN_STATIC = object()
+
+
+def _static_env_int(known):
+    return {name: value for name, value in known.items() if type(value) is int}
+
+
+def _static_lookup(base, key):
+    if not isinstance(base, tuple) or not base:
+        return _UNKNOWN_STATIC
+    if base[0] in ('list', 'tuple'):
+        if type(key) is not int:
+            return _UNKNOWN_STATIC
+        items = base[1]
+        index = key if key >= 0 else len(items) + key
+        if 0 <= index < len(items):
+            return items[index]
+        return _UNKNOWN_STATIC
+    if base[0] == 'dict':
+        found = _UNKNOWN_STATIC
+        for name, value in base[1]:
+            if name is _UNKNOWN_STATIC:
+                continue
+            try:
+                same = name == key
+            except Exception:
+                same = False
+            if same:
+                found = value
+        return found
+    return _UNKNOWN_STATIC
+
+
+def _static_attr(base, name, class_attrs, instance_attrs):
+    if not isinstance(base, tuple) or len(base) != 2:
+        return _UNKNOWN_STATIC
+    kind, owner = base
+    if kind == 'class':
+        return class_attrs.get(owner, {}).get(name, _UNKNOWN_STATIC)
+    if kind == 'instance':
+        if name in instance_attrs.get(owner, {}):
+            return instance_attrs[owner][name]
+        return class_attrs.get(owner, {}).get(name, _UNKNOWN_STATIC)
+    return _UNKNOWN_STATIC
+
+
+def _static_value(node, env, classes, class_attrs, instance_attrs, attrs, depth=0):
+    if depth > 24:
+        return _UNKNOWN_STATIC
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, (int, str, bytes, bool)) or node.value is None:
+            return node.value
+        return _UNKNOWN_STATIC
+    if isinstance(node, ast.Name):
+        if node.id in env:
+            return env[node.id]
+        if node.id in classes:
+            return ('class', node.id)
+        return _UNKNOWN_STATIC
+    if isinstance(node, ast.List):
+        return ('list', [_static_value(item, env, classes, class_attrs, instance_attrs, attrs,
+                                       depth + 1) for item in node.elts])
+    if isinstance(node, ast.Tuple):
+        return ('tuple', [_static_value(item, env, classes, class_attrs, instance_attrs, attrs,
+                                        depth + 1) for item in node.elts])
+    if isinstance(node, ast.Dict):
+        pairs = []
+        for key, value in zip(node.keys, node.values):
+            item = (_UNKNOWN_STATIC if key is None else
+                    _static_value(key, env, classes, class_attrs, instance_attrs, attrs, depth + 1))
+            pairs.append((item, _static_value(value, env, classes, class_attrs, instance_attrs,
+                                              attrs, depth + 1)))
+        return ('dict', pairs)
+    if isinstance(node, ast.Subscript):
+        if isinstance(node.slice, ast.Slice):
+            return _UNKNOWN_STATIC
+        base = _static_value(node.value, env, classes, class_attrs, instance_attrs, attrs, depth + 1)
+        key = _static_value(node.slice, env, classes, class_attrs, instance_attrs, attrs, depth + 1)
+        return _static_lookup(base, key)
+    if isinstance(node, ast.Attribute):
+        if isinstance(node.value, ast.Name):
+            key = (node.value.id, node.attr)
+            if attrs.get(key, _UNKNOWN_STATIC) is not _UNKNOWN_STATIC:
+                return attrs[key]
+        base = _static_value(node.value, env, classes, class_attrs, instance_attrs, attrs, depth + 1)
+        return _static_attr(base, node.attr, class_attrs, instance_attrs)
+    if isinstance(node, ast.Call):
+        if (isinstance(node.func, ast.Name) and node.func.id in classes
+                and not node.args and not node.keywords):
+            return ('instance', node.func.id)
+        return _UNKNOWN_STATIC
+    value = _constant_int(node, _static_env_int(env))
+    if value is not None:
+        return value
+    try:
+        value = _const_expr_int(node, bounded=False)
+    except _Int64ConstantOverflow:
+        value = None
+    return value if value is not None else _UNKNOWN_STATIC
+
+
+def _static_scope_stores(body):
+    names = {}
+    attrs = {}
+
+    def visit(node):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                continue
+            if isinstance(child, ast.Name) and isinstance(child.ctx, (ast.Store, ast.Del)):
+                names[child.id] = names.get(child.id, 0) + 1
+            if (isinstance(child, ast.Attribute) and isinstance(child.ctx, (ast.Store, ast.Del))
+                    and isinstance(child.value, ast.Name)):
+                key = (child.value.id, child.attr)
+                attrs[key] = attrs.get(key, 0) + 1
+            visit(child)
+
+    for statement in body:
+        visit(statement)
+    return names, attrs
+
+
+def _static_scope_env(body, known, classes, class_attrs, instance_attrs):
+    names, attr_stores = _static_scope_stores(body)
+    env = dict(known)
+    attrs = {}
+    for statement in body:
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            target, value_node = statement.targets[0], statement.value
+        elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+            target, value_node = statement.target, statement.value
+        else:
+            continue
+        if isinstance(target, ast.Name):
+            if names.get(target.id) != 1:
+                continue
+            value = _static_value(value_node, env, classes, class_attrs, instance_attrs, attrs)
+            if value is not _UNKNOWN_STATIC:
+                env[target.id] = value
+        elif (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
+                and attr_stores.get((target.value.id, target.attr)) == 1):
+            key = (target.value.id, target.attr)
+            value = _static_value(value_node, env, classes, class_attrs, instance_attrs, attrs)
+            if value is not _UNKNOWN_STATIC:
+                attrs[key] = value
+    return env, attrs
+
+
+def _static_class_values(classes, known):
+    class_attrs = {}
+    instance_attrs = {}
+    empty = {}
+    for name, cls in classes.items():
+        counts = {}
+        for statement in cls.body:
+            if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+                target = statement.targets[0]
+            elif isinstance(statement, ast.AnnAssign):
+                target = statement.target
+            else:
+                continue
+            if isinstance(target, ast.Name):
+                counts[target.id] = counts.get(target.id, 0) + 1
+        attrs = {}
+        for statement in cls.body:
+            if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+                target, value_node = statement.targets[0], statement.value
+            elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+                target, value_node = statement.target, statement.value
+            else:
+                continue
+            if isinstance(target, ast.Name) and counts.get(target.id) == 1:
+                value = _static_value(value_node, known, classes, class_attrs, instance_attrs,
+                                      empty)
+                if value is not _UNKNOWN_STATIC:
+                    attrs[target.id] = value
+        class_attrs[name] = attrs
+    for name, cls in classes.items():
+        stores = {}
+        for method in cls.body:
+            if not isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for node in ast.walk(method):
+                if isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if (isinstance(target, ast.Attribute)
+                                and isinstance(target.value, ast.Name)
+                                and target.value.id == 'self'):
+                            stores.setdefault(target.attr, []).append((method, node.value))
+                elif (isinstance(node, ast.AnnAssign) and node.value is not None
+                        and isinstance(node.target, ast.Attribute)
+                        and isinstance(node.target.value, ast.Name)
+                        and node.target.value.id == 'self'):
+                    stores.setdefault(node.target.attr, []).append((method, node.value))
+        attrs = {}
+        for attr, entries in stores.items():
+            if len(entries) != 1:
+                continue
+            method, value_node = entries[0]
+            local = _function_local_int_constants(method, known)
+            value = _static_value(value_node, local, classes, class_attrs, instance_attrs, empty)
+            if value is not _UNKNOWN_STATIC:
+                attrs[attr] = value
+        instance_attrs[name] = attrs
+    return class_attrs, instance_attrs
+
+
+def _inside_function(node, parents):
+    parent = parents.get(node)
+    while parent is not None:
+        if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            return True
+        parent = parents.get(parent)
+    return False
+
+
 def _check_int64_abs_constants(tree, known):
     """Refuse a constant ``abs`` whose exact value int64 cannot hold, by name.
 
     ``abs(-(1 << 63))`` and the literal spelling ``abs(-9223372036854775808)`` used to compile
     and then stop with ``integer overflow`` at run time, where CPython prints the bignum.  The
     argument is folded exactly here; an in-range result keeps the ordinary abs lowering, and a
-    program that binds its own ``abs`` is left alone."""
+    program that binds its own ``abs`` is left alone.  A constant int reached through a literal
+    list/tuple/dict or a simple class/instance attribute is folded the same way."""
     if _binds_name(tree, 'abs') or 'abs' in known:
         return
 
-    def check(node, scope_known):
+    classes = {node.name: node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)}
+    class_attrs, instance_attrs = _static_class_values(classes, known)
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+
+    def check(node, scope_known, env, attrs):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id == 'abs'):
             return
@@ -593,6 +818,10 @@ def _check_int64_abs_constants(tree, known):
             except _Int64ConstantOverflow:
                 value = None
         if value is None:
+            value = _static_value(node.args[0], env, classes, class_attrs, instance_attrs, attrs)
+            if type(value) is not int:
+                value = None
+        if value is None:
             return
         result = abs(value)
         if not _INT64_MIN <= result <= _INT64_MAX:
@@ -601,14 +830,18 @@ def _check_int64_abs_constants(tree, known):
             error.source_column = node.col_offset
             raise error
 
+    module_env, module_attrs = _static_scope_env(tree.body, known, classes, class_attrs,
+                                                 instance_attrs)
     for node in ast.walk(tree):
-        check(node, known)
+        if not _inside_function(node, parents):
+            check(node, known, module_env, module_attrs)
     for function in ast.walk(tree):
         if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         local = _function_local_int_constants(function, known)
+        env, attrs = _static_scope_env(function.body, local, classes, class_attrs, instance_attrs)
         for node in _walk_own_scope(function):
-            check(node, local)
+            check(node, local, env, attrs)
 
 
 def _check_int64_unary_constants(tree):
