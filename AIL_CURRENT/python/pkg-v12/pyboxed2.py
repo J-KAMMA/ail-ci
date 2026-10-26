@@ -5661,11 +5661,15 @@ class Compiler(boxclosure.ClosureMixin):
         direct = (isinstance(node.value, ast.Name) and node.value.id in self.classes
                   and node.value.id not in ctx.slot_of and node.value.id not in self.module_names
                   and node.value.id not in getattr(ctx, 'class_attr_shadow', {}))
+        shadow_cname = (self._shadow_class_name(node.value.id, ctx)
+                        if isinstance(node.value, ast.Name) else None)
         value_kind = self.infer_kind(node.value, ctx)
-        cname = node.value.id if direct else (value_kind[6:] if value_kind and value_kind.startswith('class:') else None)
+        cname = (shadow_cname if shadow_cname is not None else
+                 (node.value.id if direct else
+                  (value_kind[6:] if value_kind and value_kind.startswith('class:') else None)))
         if cname is not None:
             owner, hit = self._class_chain_definition(cname, node.attr)
-            if hit is not None and (direct or hit[0] in ('m', 'p')):
+            if hit is not None and (direct or shadow_cname is not None or hit[0] in ('m', 'p')):
                 if hit[0] == 'a':
                     return self._cached_class_attr(hit[3], hit[2], ctx, owner)
                 raise Unsupported("reading %s %s.%s through a class value" %
@@ -5803,13 +5807,18 @@ class Compiler(boxclosure.ClosureMixin):
         # NOT see the class namespace it is written in (Python 3), so a class-body local name
         # must resolve through the module/builtin scopes here.
         previous = getattr(ctx, 'class_attr_shadow', None)
+        previous_classes = getattr(ctx, 'class_attr_shadow_classes', None)
         if previous is not None:
             del ctx.class_attr_shadow
+        if previous_classes is not None:
+            del ctx.class_attr_shadow_classes
         try:
             self._emit_comp_generators(node.generators, 0, node, ctx, t, add_stmt_fn, set())
         finally:
             if previous is not None:
                 ctx.class_attr_shadow = previous
+            if previous_classes is not None:
+                ctx.class_attr_shadow_classes = previous_classes
         return t
 
     def _emit_comp_generators(self, generators, i, node, ctx, t, add_stmt_fn, declared, opened=None):
@@ -6650,11 +6659,241 @@ class Compiler(boxclosure.ClosureMixin):
             seen += 1
         return name in EXC_IDS
 
+    def _shadow_class_name(self, name, ctx):
+        """The class a class-body local NAME holds, when an earlier assignment made it one."""
+        return getattr(ctx, 'class_attr_shadow_classes', {}).get(name)
+
+    def _module_bindings(self):
+        """Top-level simple assignments (name -> [(line, value)]) and the names that are mutated,
+        used only to prove which expressions definitely hold a class (not to fold values)."""
+        cached = getattr(self, '_module_bindings_cache', None)
+        if cached is not None:
+            return cached
+        tree = getattr(self, '_module_tree', None)
+        values, aliases, mutated = {}, {}, set()
+        if tree is not None:
+            for stmt in tree.body:
+                if isinstance(stmt, (ast.FunctionDef, ast.ClassDef)):
+                    continue
+                targets, value = [], None
+                if isinstance(stmt, ast.Assign):
+                    targets, value = stmt.targets, stmt.value
+                elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+                    targets, value = [stmt.target], stmt.value
+                if value is None:
+                    continue
+                for target in targets:
+                    if isinstance(target, ast.Name):
+                        values.setdefault(target.id, []).append((stmt.lineno, value))
+                        if isinstance(value, ast.Name):
+                            aliases.setdefault(target.id, set()).add(value.id)
+                            aliases.setdefault(value.id, set()).add(target.id)
+            for n in ast.walk(tree):
+                if isinstance(n, ast.Subscript) and isinstance(n.value, ast.Name) \
+                        and isinstance(n.ctx, (ast.Store, ast.Del)):
+                    mutated.add(n.value.id)
+                elif isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) \
+                        and isinstance(n.ctx, (ast.Store, ast.Del)):
+                    mutated.add(n.value.id)
+                elif isinstance(n, ast.Call):
+                    if isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name) \
+                            and n.func.attr in ('append', 'extend', 'insert', 'remove', 'pop',
+                                                'clear', 'update', 'setdefault', 'popitem', 'sort',
+                                                'reverse', 'add', 'discard', 'difference_update',
+                                                'intersection_update', 'symmetric_difference_update'):
+                        mutated.add(n.func.value.id)
+                    if isinstance(n.func, ast.Name) and n.func.id in ('setattr', 'delattr') \
+                            and n.args and isinstance(n.args[0], ast.Name):
+                        mutated.add(n.args[0].id)
+                elif isinstance(n, ast.AugAssign) and isinstance(n.target, ast.Name):
+                    mutated.add(n.target.id)
+            changed = True
+            while changed:
+                changed = False
+                for target, sources in aliases.items():
+                    if target in mutated:
+                        for source in sources:
+                            if source not in mutated:
+                                mutated.add(source)
+                                changed = True
+        self._module_bindings_cache = (values, mutated)
+        return values, mutated
+
+    def _static_index(self, node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, str)) \
+                and not isinstance(node.value, bool):
+            return node.value
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub) \
+                and isinstance(node.operand, ast.Constant) \
+                and isinstance(node.operand.value, int) \
+                and not isinstance(node.operand.value, bool):
+            return -node.operand.value
+        return None
+
+    def _static_attr_value(self, cname, attr):
+        for entry in reversed(self.classes.get(cname, {}).get('class_body', [])):
+            if entry[1] == attr:
+                return entry[2] if entry[0] == 'a' else None
+        values = []
+        for info in self.classes.get(cname, {}).get('methods', {}).values():
+            node = info.get('node')
+            params = info.get('params') or []
+            if node is None or not params:
+                continue
+            selfname = params[0]
+            for stmt in ast.walk(node):
+                targets, val = [], None
+                if isinstance(stmt, ast.Assign):
+                    targets, val = stmt.targets, stmt.value
+                elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+                    targets, val = [stmt.target], stmt.value
+                for target in targets:
+                    if (isinstance(target, ast.Attribute) and target.attr == attr
+                            and isinstance(target.value, ast.Name)
+                            and target.value.id == selfname):
+                        values.append(val)
+        return values[0] if len(values) == 1 else None
+
+    def _static_instance_class(self, node, ctx, shadow_classes, local_map=None, seen=None):
+        """The program class an expression definitely constructs (a class attribute route only)."""
+        if local_map is None:
+            local_map = {}
+        if seen is None:
+            seen = set()
+        if id(node) in seen:
+            return None
+        seen = set(seen)
+        seen.add(id(node))
+        if isinstance(node, ast.Name):
+            if node.id in local_map:
+                return self._static_instance_class(local_map[node.id], ctx, shadow_classes,
+                                                   local_map, seen)
+            if node.id in ctx.slot_of:
+                return None
+            values, mutated = self._module_bindings()
+            if node.id not in mutated and len(values.get(node.id, ())) == 1:
+                line, value = values[node.id][0]
+                if line < getattr(node, 'lineno', 1 << 30):
+                    return self._static_instance_class(value, ctx, shadow_classes, local_map, seen)
+            kind = self.get_kind(node.id, ctx)
+            return kind[9:] if kind and kind.startswith('instance:') else None
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                and node.func.id in self.classes and node.func.id not in self.functions \
+                and not any(isinstance(a, ast.Starred) for a in node.args):
+            return node.func.id
+        return None
+
+    def _static_value(self, node, ctx, shadow_classes, local_map=None, seen=None):
+        """Class value (`('class', name)`), list/tuple contents (`('seq', items)`) or constant-key
+        dict contents (`('map', values)`) for an expression whose value is statically definite.
+        Nothing is guessed: an unknown name, call or mutation returns None."""
+        if local_map is None:
+            local_map = {}
+        if seen is None:
+            seen = set()
+        if id(node) in seen:
+            return None
+        seen = set(seen)
+        seen.add(id(node))
+        if isinstance(node, ast.Name):
+            if node.id in local_map:
+                return self._static_value(local_map[node.id], ctx, shadow_classes, local_map, seen)
+            if node.id in shadow_classes:
+                return ('class', shadow_classes[node.id])
+            if node.id in ctx.slot_of:
+                return None
+            if node.id in self.classes and node.id not in self.module_names:
+                return ('class', node.id)
+            values, mutated = self._module_bindings()
+            if node.id not in mutated and len(values.get(node.id, ())) == 1:
+                line, value = values[node.id][0]
+                if line < getattr(node, 'lineno', 1 << 30):
+                    return self._static_value(value, ctx, shadow_classes, local_map, seen)
+            return None
+        if isinstance(node, ast.List):
+            return ('seq', list(node.elts))
+        if isinstance(node, ast.Tuple):
+            return ('seq', list(node.elts))
+        if isinstance(node, ast.Dict):
+            values = {}
+            for key, value in zip(node.keys, node.values):
+                index = self._static_index(key) if key is not None else None
+                if index is None:
+                    return None
+                values[index] = value
+            return ('map', values)
+        if isinstance(node, ast.Subscript):
+            base = self._static_value(node.value, ctx, shadow_classes, local_map, seen)
+            index = self._static_index(node.slice)
+            if base is None or index is None:
+                return None
+            if base[0] == 'seq' and isinstance(index, int) and -len(base[1]) <= index < len(base[1]):
+                return self._static_value(base[1][index], ctx, shadow_classes, local_map, seen)
+            if base[0] == 'map' and index in base[1]:
+                return self._static_value(base[1][index], ctx, shadow_classes, local_map, seen)
+            return None
+        if isinstance(node, ast.Attribute):
+            cname = None
+            value = self._static_value(node.value, ctx, shadow_classes, local_map, seen)
+            if value is not None and value[0] == 'class':
+                cname = value[1]
+            else:
+                cname = self._static_instance_class(node.value, ctx, shadow_classes,
+                                                   local_map, seen)
+            if cname is None:
+                return None
+            aval = self._static_attr_value(cname, node.attr)
+            if aval is None:
+                return None
+            return self._static_value(aval, ctx, shadow_classes, local_map, seen)
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in self.classes \
+                    and node.func.id not in self.functions:
+                return None
+            if (isinstance(node.func, ast.Name) and not node.keywords
+                    and not any(isinstance(a, ast.Starred) for a in node.args)
+                    and node.func.id in self.functions):
+                info = self.functions[node.func.id]
+                fn = info['node']
+                params = [a.arg for a in fn.args.args]
+                if len(fn.body) == 1 and isinstance(fn.body[0], ast.Return) \
+                        and fn.body[0].value is not None \
+                        and len(node.args) <= len(params):
+                    inner = dict(local_map)
+                    for param, arg in zip(params, node.args):
+                        inner[param] = arg
+                    for param in params:
+                        if param not in inner and param in info.get('defaults', {}):
+                            inner[param] = info['defaults'][param]
+                    if all(param in inner for param in params):
+                        return self._static_value(fn.body[0].value, ctx, shadow_classes,
+                                                  inner, seen)
+            return None
+        if isinstance(node, ast.IfExp):
+            if isinstance(node.test, ast.Constant) and isinstance(node.test.value, bool):
+                chosen = node.body if node.test.value else node.orelse
+                return self._static_value(chosen, ctx, shadow_classes, local_map, seen)
+            left = self._static_value(node.body, ctx, shadow_classes, local_map, seen)
+            right = self._static_value(node.orelse, ctx, shadow_classes, local_map, seen)
+            if left is not None and right == left and left[0] == 'class':
+                return left
+            return None
+        return None
+
+    def _class_value_name(self, node, ctx, shadow_classes):
+        """The class NAME resolves to at this point in a class body, or None when it is not a
+        class value the general path treats as one (a module/function binding of that name wins)."""
+        value = self._static_value(node, ctx, shadow_classes)
+        return value[1] if value is not None and value[0] == 'class' else None
+
     def _init_class_attrs(self, name, ctx):
         """Evaluate a class body's attributes once, at its class-definition statement."""
         shadow = {}
+        shadow_classes = {}
         previous = getattr(ctx, 'class_attr_shadow', None)
+        previous_classes = getattr(ctx, 'class_attr_shadow_classes', None)
         ctx.class_attr_shadow = shadow
+        ctx.class_attr_shadow_classes = shadow_classes
         try:
             for _aname, aval, slot in self.classes[name].get('class_attrs', []):
                 v = self.expr(aval, ctx)
@@ -6662,11 +6901,20 @@ class Compiler(boxclosure.ClosureMixin):
                 # The class namespace keeps the last assignment, so a later read in the same
                 # body must use this slot (not the module class of the same name).
                 shadow[_aname] = slot
+                cval = self._class_value_name(aval, ctx, shadow_classes)
+                if cval is None:
+                    shadow_classes.pop(_aname, None)
+                else:
+                    shadow_classes[_aname] = cval
         finally:
             if previous is None:
                 del ctx.class_attr_shadow
             else:
                 ctx.class_attr_shadow = previous
+            if previous_classes is None:
+                del ctx.class_attr_shadow_classes
+            else:
+                ctx.class_attr_shadow_classes = previous_classes
         if name in self.module_names:
             # A module-level assignment to the class name (before or after the definition, or a
             # `global` declaration) rebinds the module slot: do that binding HERE, at the
@@ -6675,22 +6923,31 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('g_slots_arr[%d] = g_slots_arr[%d];' %
                      (self._module_global_slot(name), self.global_slots['class:' + name]))
 
-    def _class_attr_shadow_before(self, cname, slot):
+    def _class_attr_shadow_before(self, cname, slot, ctx):
         """The class body's own earlier assignments for a lazy fill of this attribute."""
         shadow = {}
-        for _aname, _aval, aslot in self.classes.get(cname, {}).get('class_attrs', []):
+        shadow_classes = {}
+        for _aname, aval, aslot in self.classes.get(cname, {}).get('class_attrs', []):
             if aslot == slot:
                 break
             shadow[_aname] = aslot
-        return shadow
+            cval = self._class_value_name(aval, ctx, shadow_classes)
+            if cval is None:
+                shadow_classes.pop(_aname, None)
+            else:
+                shadow_classes[_aname] = cval
+        return shadow, shadow_classes
 
-    def _class_attr_value(self, slot, value, ctx, shadow=None):
+    def _class_attr_value(self, slot, value, ctx, shadow=None, shadow_classes=None):
         """The one shared value of a class attribute, filling the slot lazily only when the module
         body did not run (the array-entry shape, where there is no executable module statement)."""
         if value is not None:
             previous = getattr(ctx, 'class_attr_shadow', None)
+            previous_classes = getattr(ctx, 'class_attr_shadow_classes', None)
             if shadow is not None:
                 ctx.class_attr_shadow = shadow
+            if shadow_classes is not None:
+                ctx.class_attr_shadow_classes = shadow_classes
             try:
                 ctx.emit('if (g_slots_arr[%d].tag == AIL_T_UNBOUND) {' % slot)
                 ctx.indent += 1
@@ -6704,12 +6961,19 @@ class Compiler(boxclosure.ClosureMixin):
                         del ctx.class_attr_shadow
                     else:
                         ctx.class_attr_shadow = previous
+                if shadow_classes is not None:
+                    if previous_classes is None:
+                        del ctx.class_attr_shadow_classes
+                    else:
+                        ctx.class_attr_shadow_classes = previous_classes
         return 'g_slots_arr[%d]' % slot
 
     def _cached_class_attr(self, slot, value, ctx, owner=None):
         """Read a class attribute through the class object, not through an instance."""
-        shadow = self._class_attr_shadow_before(owner, slot) if owner is not None else None
-        v = self._class_attr_value(slot, value, ctx, shadow)
+        shadow = shadow_classes = None
+        if owner is not None:
+            shadow, shadow_classes = self._class_attr_shadow_before(owner, slot, ctx)
+        v = self._class_attr_value(slot, value, ctx, shadow, shadow_classes)
         t = ctx.tmp()
         ctx.emit('%s = %s;' % (t, v))
         return t
@@ -8828,6 +9092,35 @@ class Compiler(boxclosure.ClosureMixin):
             return t
         if isinstance(recv, ast.Name) and recv.id == 'dict' and f.attr == 'fromkeys':
             return self._dict_fromkeys(args, kwargs, ctx)
+        shadow_cname = (self._shadow_class_name(recv.id, ctx)
+                        if isinstance(recv, ast.Name) else None)
+        if shadow_cname is not None:
+            info = self._resolve_method(shadow_cname, f.attr)
+            if info is not None:
+                if info.get('is_classmethod'):
+                    argcs = ['g_slots_arr[%d]' % self.global_slots['class:' + shadow_cname]] + \
+                        self._bind_args(f.attr, info, args, kwargs, ctx)
+                    t = ctx.tmp()
+                    ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t, ''.join(', ' + a for a in argcs)))
+                    ctx.check()
+                    return t
+                if info.get('is_static'):
+                    argcs = self._bind_args(f.attr, info, args, kwargs, ctx)
+                    t = ctx.tmp()
+                    ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t, ''.join(', ' + a for a in argcs)))
+                    ctx.check()
+                    return t
+                if (info.get('is_method') and not info.get('is_property') and not info.get('is_setter')
+                        and args and not isinstance(args[0], ast.Starred)):
+                    first = self.expr(args[0], ctx)
+                    argcs = [first] + self._bind_args(f.attr, info, args[1:], kwargs, ctx)
+                    t = ctx.tmp()
+                    ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t, ''.join(', ' + a for a in argcs)))
+                    ctx.check()
+                    return t
+                raise Unsupported("calling %s %s.%s through a class value" %
+                                  ('property' if info.get('is_property') else 'method',
+                                   shadow_cname, f.attr))
         if (isinstance(recv, ast.Name) and recv.id in self.classes and recv.id not in ctx.slot_of
                 and recv.id not in self.module_names):
             # `C.f(...)` of a @staticmethod: the function itself, with the arguments as written; of a @classmethod: C first

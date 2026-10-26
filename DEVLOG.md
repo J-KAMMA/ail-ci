@@ -1,3 +1,34 @@
+## 2026-10-26 -- pre300 review: class-value methods/properties through a class-local shadow (job-pre300-10270742)
+
+The review found that once a class body's local name resolves to a class (`class B: A = C; y = A.p`),
+the read bypassed the direct class-value rule: a property read died at run time with
+`NotImplementedError` and a static/classmethod call passed the wrong number of arguments, where
+CPython returns the property object (an accepted named refusal) or calls the method. The emitter now
+records which class-body locals statically hold a class, through the same assignments that shadow
+module classes (also alias chains and a repeated assignment's last value). Attribute reads and calls
+through such a local use the direct class-value path: class attributes read normally, static,
+class and instance methods called with the object match CPython, and a method/property read is
+refused at compile time by name (`reading property C.p through a class value`, likewise `method`).
+The class identity is proved statically through aliases, repeated assignments, literal and
+module-level list/dict items (constant indexes), a class/instance attribute, a constant `if`
+expression, and a single-return wrapper function (so an argument route works too); a value whose
+class identity is genuinely dynamic keeps the old runtime method/property limit. A local that
+holds an instance (not a class) is not affected, so property reads through containers still run.
+`AIL_CURRENT/test_ail_pre300.py` adds the three method-call cases, the property/method refusals,
+and route cases for a module list, an argument, a dict value, an instance field and a plain
+instance property. Review probes `r28_prop_shadow`, `r29_classmethod_shadow`, `r31_static_shadow`,
+`r37_method_call_shadow` and `r38_property_shadow` match CPython or are refused by name; plain
+class-body values and the earlier pre300 probes are unchanged.
+Route probes in `/tmp/probes/pre300b`: `prop_direct`, `prop_alias_chain`, `prop_reassign`,
+`prop_list_literal`, `prop_list_var`, `prop_dict_literal`, `prop_dict_var`, `prop_attr`,
+`prop_argument`, `method_value_direct`, `method_value_list_var`, `prop_ifexp` are refused by name
+on both builds; `static_direct`, `static_list_var`, `static_dict_var`, `static_argument`,
+`static_attr`, `classmethod_direct`, `classmethod_list_var`, `instance_method_direct`,
+`instance_method_list_var`, `classattr_direct`, `prop_instance_list`, `prop_instance_var`,
+`prop_instance_attr` match CPython on both builds. The lazy array-entry class-attribute fill
+(`lazy_array_entry`, input empty) prints `8` on both builds. Final-state tests: test_ail_pre300,
+test_ail_safetynet, test_ail_files, test_ail_corpus_findings3, 4 modules, 0 failed.
+
 ## 2026-10-26 -- class-body class-local shadow (job-pre300-10270742)
 
 The first still-differing item from the pre284 review was the class-body class-local shadow:

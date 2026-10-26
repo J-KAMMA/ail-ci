@@ -6,7 +6,10 @@ instead of raising AttributeError.  The general path now keeps the class namespa
 being evaluated, so an earlier assignment shadows the module class for the rest of that body
 (including values reaching the read through an argument, a list item, an attribute and a dict
 value, and a repeated assignment's last value).  A method default that would need the same class
-scope is refused by name, because method defaults are built at the call site here.
+scope is refused by name, because method defaults are built at the call site here.  A class local
+that holds a class is treated like the direct class value it names: static, class and instance
+methods called through it match CPython, while reading a method/property off it stays a named
+refusal instead of falling through to the run time's method/property error.
 """
 import os
 import subprocess
@@ -185,10 +188,139 @@ class B:
 
 print(B.y)
 ''',
+    'class_value_static_method': '''class C:
+    @staticmethod
+    def get():
+        return 42
+
+
+class B:
+    A = C
+    y = A.get()
+
+
+print(B.y)
+''',
+    'class_value_classmethod': '''class C:
+    x = 7
+
+    @classmethod
+    def get(cls):
+        return cls.x
+
+
+class B:
+    A = C
+    y = A.get()
+
+
+print(B.y)
+''',
+    'class_value_instance_method': '''class C:
+    def m(self):
+        return 7
+
+
+class B:
+    A = C
+    y = A.m(C())
+
+
+print(B.y)
+''',
+    'class_value_method_alias': '''class C:
+    def m(self):
+        return 7
+
+
+class B:
+    A = C
+    D = A
+    y = D.m(C())
+
+
+print(B.y)
+''',
+    'class_value_static_list': '''class C:
+    @staticmethod
+    def get():
+        return 42
+
+
+lst = [C]
+
+
+class B:
+    A = lst[0]
+    y = A.get()
+
+
+print(B.y)
+''',
+    'class_value_classmethod_argument': '''class C:
+    x = 7
+
+    @classmethod
+    def get(cls):
+        return cls.x
+
+
+def take(value):
+    return value
+
+
+class B:
+    A = take(C)
+    y = A.get()
+
+
+print(B.y)
+''',
+    'class_value_instance_method_dict': '''class C:
+    def m(self):
+        return 7
+
+
+mapping = {"k": C}
+
+
+class B:
+    A = mapping["k"]
+    y = A.m(C())
+
+
+print(B.y)
+''',
+    'instance_property_routes': '''class C:
+    x = 7
+
+    @property
+    def p(self):
+        return self.x
+
+
+class Holder:
+    def __init__(self):
+        self.c = C()
+
+
+items = [C()]
+holder = Holder()
+
+
+class B:
+    A = items[0]
+    D = holder.c
+    y = A.p
+    z = D.p
+
+
+print(B.y, B.z)
+''',
 }
 
 REFUSED = {
-    'method_default': '''class A:
+    'method_default': ('''class A:
     x = 12
 
 
@@ -204,10 +336,92 @@ class B:
 
 
 print(B().f())
-''',
-}
+''', 'a method default that reads the class-body local'),
+    'property_read': ('''class C:
+    x = 7
 
-DEFAULT_REFUSAL = 'a method default that reads the class-body local'
+    @property
+    def p(self):
+        return self.x
+
+
+class B:
+    A = C
+    y = A.p
+
+
+print(B.y)
+''', 'reading property C.p through a class value'),
+    'method_read': ('''class C:
+    def m(self):
+        return 7
+
+
+class B:
+    A = C
+    y = A.m
+
+
+print(type(B.y).__name__)
+''', 'reading method C.m through a class value'),
+    'property_read_list': ('''class C:
+    x = 7
+
+    @property
+    def p(self):
+        return self.x
+
+
+items = [C]
+
+
+class B:
+    A = items[0]
+    y = A.p
+
+
+print(B.y)
+''', 'reading property C.p through a class value'),
+    'property_read_attribute': ('''class C:
+    x = 7
+
+    @property
+    def p(self):
+        return self.x
+
+
+class Holder:
+    def __init__(self):
+        self.c = C
+
+
+holder = Holder()
+
+
+class B:
+    A = holder.c
+    y = A.p
+
+
+print(B.y)
+''', 'reading property C.p through a class value'),
+    'method_read_argument': ('''class C:
+    def m(self):
+        return 7
+
+
+def get():
+    return C
+
+
+class B:
+    A = get()
+    y = A.m
+
+
+print(type(B.y).__name__)
+''', 'reading method C.m through a class value'),
+}
 
 
 def _cpython(directory, name, text):
@@ -262,10 +476,10 @@ class Pre300Tests(unittest.TestCase):
             with self.subTest(case=slug):
                 self.matches(slug, text)
 
-    def test_method_default_is_refused_by_name(self):
-        for slug, text in REFUSED.items():
+    def test_refused_by_name(self):
+        for slug, (text, needle) in REFUSED.items():
             with self.subTest(case=slug):
-                self.refused(slug, text, DEFAULT_REFUSAL)
+                self.refused(slug, text, needle)
 
 
 if __name__ == '__main__':
