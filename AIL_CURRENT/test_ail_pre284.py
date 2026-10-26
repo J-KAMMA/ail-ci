@@ -7,7 +7,10 @@ top-level class whose attributes are single constant assignments (and a single-a
 `Alias = Class`), and the compile-time int64 checks resolve `Class.attr` as well, so an
 in-range value is emitted as a literal and an out-of-range one is refused by name at compile
 time.  A class whose name or attribute is rebound, a derived or decorated class, a float/bool
-attribute and a comprehension target that shadows the class stay as written.
+attribute and a comprehension target that shadows the class stay as written.  A function body
+keeps its own scope: a parameter or local that shadows a module name is never folded, and a
+module name a function declares `global` leaves the class attribute unresolved; only a
+function's default arguments and decorators run in module scope.
 
 The refusal wording depends on which check sees the folded value: the literal check says
 ``int64 literal out of range``, the expression checks say ``int64 constant expression out of
@@ -99,6 +102,67 @@ print(C.X)
     M = N * 2
 print(K.M)
 ''',
+    'default_comprehension': '''class K:
+    N = 2 ** 62
+def show(v=[K.N * 4 for _ in range(1)]):
+    print(v)
+show()
+''',
+}
+
+SHADOWED = {
+    'parameter_shadows_module_constant': '''N = 2
+def f(N):
+    return [N * 4 for _ in range(1)]
+print(f(3), [N * 4 for _ in range(1)])
+''',
+    'parameter_shadows_class': '''class K:
+    N = 2 ** 61
+class Other:
+    N = 3
+def f(K):
+    return [K.N // 4 for _ in range(1)]
+print(f(Other))
+''',
+    'local_shadows_class': '''class K:
+    N = 2 ** 61
+class Other:
+    N = 3
+def f():
+    K = Other
+    return [K.N // 4 for _ in range(1)]
+print(f())
+''',
+    'parameter_shadows_class_abs': '''class K:
+    N = 2 ** 61
+class Other:
+    N = 1
+def f(K):
+    return abs(K.N * 4)
+print(f(Other))
+''',
+    'global_rebinding': '''class K:
+    N = 2 ** 61
+class Other:
+    N = 1
+def f():
+    global K
+    K = Other
+f()
+class C:
+    X = K.N * 4
+print(C.X)
+''',
+    'closure_shadow': '''class K:
+    N = 2 ** 62
+class Other:
+    N = 1
+def outer(K):
+    def inner(x=K.N * 4):
+        return abs(K.N * 4) + -x + [K.N // 4 for _ in range(1)][0]
+    return inner()
+print(outer(Other))
+''',
 }
 
 IN_RANGE = '''class K:
@@ -185,6 +249,18 @@ class Pre284Tests(unittest.TestCase):
                                           IN_RANGE, general)
                     self.assertIsNotNone(got, build_err)
                     self.assertEqual(got, (want, want_rc), build_err)
+
+    def test_shadowed_names_keep_their_runtime_value(self):
+        with tempfile.TemporaryDirectory(prefix='ail-pre284-') as directory:
+            for label, text in SHADOWED.items():
+                want, want_rc, err = _cpython(directory, label, text)
+                self.assertEqual(want_rc, 0, err)
+                for general in (True, False):
+                    with self.subTest(label + ('_g' if general else '_d')):
+                        got, build_err = _run(directory, '%s_%s' % (label, 'g' if general else 'd'),
+                                              text, general)
+                        self.assertIsNotNone(got, build_err)
+                        self.assertEqual(got, (want, want_rc), build_err)
 
 
 if __name__ == '__main__':

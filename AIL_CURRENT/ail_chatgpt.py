@@ -473,23 +473,54 @@ def _function_scope_stores(function):
     return stores
 
 
-def _function_local_int_constants(function, module_known):
-    """The int constants a function's own top-level assignments bind, with module constants
-    visible unless the function shadows them.  A name stored more than once, a parameter, or a
-    global/nonlocal declaration keeps the name out of the map."""
-    arguments = function.args
-    parameters = {argument.arg for argument in arguments.posonlyargs + arguments.args + arguments.kwonlyargs}
+def _argument_names(arguments):
+    names = {argument.arg for argument in arguments.posonlyargs + arguments.args + arguments.kwonlyargs}
     if arguments.vararg is not None:
-        parameters.add(arguments.vararg.arg)
+        names.add(arguments.vararg.arg)
     if arguments.kwarg is not None:
-        parameters.add(arguments.kwarg.arg)
+        names.add(arguments.kwarg.arg)
+    return names
+
+
+def _shadowed_known(known, shadowed):
+    """`known` without the entries a shadowed name hides. A `Class.attr` key is hidden by a
+    binding of `Class`."""
+    if not shadowed:
+        return dict(known)
+    return {name: value for name, value in known.items()
+            if name.split('.', 1)[0] not in shadowed}
+
+
+def _enclosing_function_shadows(node, parents):
+    """Names bound by the function scopes that enclose `node`; a closure's parameter or local
+    hides a module name from it just as its own binding does."""
+    shadowed = set()
+    current = parents.get(node)
+    while current is not None:
+        if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            shadowed.update(_argument_names(current.args))
+            shadowed.update(_function_scope_stores(current))
+            for inner in ast.walk(current):
+                if isinstance(inner, (ast.Global, ast.Nonlocal)):
+                    shadowed.update(inner.names)
+        elif isinstance(current, ast.Lambda):
+            shadowed.update(_argument_names(current.args))
+        current = parents.get(current)
+    return shadowed
+
+
+def _function_local_int_constants(function, module_known, outer_shadowed=()):
+    """The int constants a function's own top-level assignments bind, with module constants
+    visible unless the function or an enclosing one shadows them.  A name stored more than once,
+    a parameter, or a global/nonlocal declaration keeps the name out of the map."""
+    parameters = _argument_names(function.args)
     stores = _function_scope_stores(function)
     declared = set()
     for node in ast.walk(function):
         if isinstance(node, (ast.Global, ast.Nonlocal)):
             declared.update(node.names)
-    local = {name: value for name, value in module_known.items()
-             if name not in stores and name not in parameters and name not in declared}
+    shadowed = set(stores) | parameters | declared | set(outer_shadowed)
+    local = _shadowed_known(module_known, shadowed)
 
     def bind(target, value_node):
         if not isinstance(target, ast.Name):
@@ -525,6 +556,22 @@ def _walk_own_scope(function):
         stack.extend(ast.iter_child_nodes(node))
 
 
+def _walk_own_module_scope(tree):
+    """Nodes evaluated while the module is built: its own and class bodies, not a function or
+    lambda body, whose parameters and locals may shadow a module-level name."""
+    stack = list(tree.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            continue
+        yield node
+        stack.extend(ast.iter_child_nodes(node))
+
+
+def _parent_map(tree):
+    return {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+
+
 def _known_module_constants(tree):
     """Module names bound once to a statically known int, for the constant-expression checks."""
     stores = {}
@@ -551,12 +598,18 @@ def _known_module_constants(tree):
 
 
 def _module_scope_stores(tree):
-    """How many times each name is bound at module scope (a class or function definition once)."""
+    """How many times each name is bound at module scope (a class or function definition once),
+    counting a name a function declares `global` twice: it can change whenever that function
+    runs, so a class attribute read through it is not a constant."""
     count = {}
 
     def walk(node):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             count[node.name] = count.get(node.name, 0) + 1
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Global):
+                    for name in sub.names:
+                        count[name] = count.get(name, 0) + 2
             return
         if isinstance(node, ast.Lambda):
             return
@@ -696,6 +749,8 @@ def _check_int64_abs_constants(tree, known):
     if _binds_name(tree, 'abs') or 'abs' in known:
         return
 
+    parents = _parent_map(tree)
+
     def check(node, scope_known):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id == 'abs'):
@@ -717,12 +772,13 @@ def _check_int64_abs_constants(tree, known):
             error.source_column = node.col_offset
             raise error
 
-    for node in ast.walk(tree):
+    for node in _walk_own_module_scope(tree):
         check(node, known)
     for function in ast.walk(tree):
         if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        local = _function_local_int_constants(function, known)
+        local = _function_local_int_constants(function, known,
+                                              _enclosing_function_shadows(function, parents))
         for node in _walk_own_scope(function):
             check(node, local)
 
@@ -735,17 +791,29 @@ def _check_int64_unary_constants(tree):
     maxsplit = _maxsplit_constant_nodes(tree)
     known = _known_module_constants(tree)
     known.update(_known_class_attributes(tree))
-    for node in ast.walk(tree):
+    parents = _parent_map(tree)
+
+    def check(node, scope_known):
         if not isinstance(node, ast.UnaryOp) or not isinstance(node.op, (ast.UAdd, ast.USub)):
-            continue
+            return
         if id(node) in maxsplit:
-            continue
-        value = _constant_int(node, known)
+            return
+        value = _constant_int(node, scope_known)
         if value is not None and not -(1 << 63) <= value < 1 << 63:
             error = ValueError(f'int64 constant expression out of range: {_constant_diagnostic(value)}')
             error.source_line = node.lineno
             error.source_column = node.col_offset
             raise error
+
+    for node in _walk_own_module_scope(tree):
+        check(node, known)
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        local = _function_local_int_constants(function, known,
+                                              _enclosing_function_shadows(function, parents))
+        for node in _walk_own_scope(function):
+            check(node, local)
     _check_int64_abs_constants(tree, known)
 
 
@@ -911,7 +979,8 @@ def _check_int64_int_base_constants(tree):
         value = _constant_int(node.value, known_int)
         if value is not None:
             known_int[target.id] = value
-    known_int.update(_known_class_attributes(tree))
+    class_attrs = _known_class_attributes(tree)
+    known_int.update(class_attrs)
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id == 'int'):
@@ -925,10 +994,15 @@ def _check_int64_int_base_constants(tree):
             continue
         if isinstance(text_node, ast.Starred):
             continue
-        base = _constant_int(base_node, known_int)
+        scope_int = known_int
+        shadowed = _enclosing_function_shadows(node, parents) if class_attrs else set()
+        if shadowed:
+            scope_int = {name: value for name, value in known_int.items()
+                         if name not in class_attrs or name.split('.', 1)[0] not in shadowed}
+        base = _constant_int(base_node, scope_int)
         if base is None or base != 0 and not 2 <= base <= 36:
             continue
-        text = _constant_text(text_node, known_text, known_int, known_containers)
+        text = _constant_text(text_node, known_text, scope_int, known_containers)
         if text is None:
             continue
         try:
@@ -1122,7 +1196,9 @@ def _check_int64_constant_positions(tree):
         value = _constant_int(node.value, known, shifts=True)
         if value is not None:
             known[target.id] = value
-    known.update(_known_class_attributes(tree))
+    class_attrs = _known_class_attributes(tree)
+    known.update(class_attrs)
+    parents = _parent_map(tree)
 
     def roots(node):
         if isinstance(node, (ast.BinOp, ast.UnaryOp)):
@@ -1180,7 +1256,13 @@ def _check_int64_constant_positions(tree):
         for node in roots(value):
             if id(node) in maxsplit:
                 continue
-            number = _constant_int(node, known, shifts=True)
+            scope_known = known
+            shadowed = _enclosing_function_shadows(node, parents) if class_attrs else set()
+            if shadowed:
+                scope_known = {name: item for name, item in known.items()
+                               if name not in class_attrs
+                               or name.split('.', 1)[0] not in shadowed}
+            number = _constant_int(node, scope_known, shifts=True)
             if number is not None and not -(1 << 63) <= number < 1 << 63:
                 error = ValueError(f'int64 constant expression out of range: {number}')
                 error.source_line = node.lineno

@@ -866,10 +866,18 @@ def _comprehension_targets(node):
 
 
 def _fold_statement_comprehensions(statement, known):
-    """Edits for the eager comprehensions in a module-level statement's expressions. A nested
-    function, lambda, class or another comprehension keeps its own scope and is not entered."""
+    """Edits for the eager comprehensions in a module-level statement's expressions. A function
+    statement contributes only its decorators and defaults, which run in module scope; its body
+    has parameters and locals that shadow the module names. A nested function, lambda, class or
+    another comprehension keeps its own scope and is not entered."""
     edits = []
-    stack = list(ast.iter_child_nodes(statement))
+    if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+        stack = list(statement.args.defaults)
+        stack.extend(item for item in statement.args.kw_defaults if item is not None)
+        if not isinstance(statement, ast.Lambda):
+            stack.extend(statement.decorator_list)
+    else:
+        stack = list(ast.iter_child_nodes(statement))
     while stack:
         node = stack.pop()
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
