@@ -15,6 +15,16 @@ defined` on both. Tests on the final tree: `test_ail_fuzz28`, `test_ail_fuzz29`,
 `test_ail_pre227`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` (7 modules,
 40 tests, 0 failed, 1 skipped for no zig).
 
+Follow-up after the full suite: the new refusal must not hide a value-specific refusal. Both catch
+sites now re-raise an `Unsupported` that already carries a `source_line` -- the int64 constant-range
+refusal that `fold_int_constant` raises -- so `class C: x = True << 64; print(C.x)` keeps
+`outside the signed 64-bit range` on both builds instead of being reported as a non-literal class
+attribute (the `test_ail_pre201` / `test_ail_pre241` attribute cases). A plain undefined-name
+failure inside a comprehension carries no source line and is still turned into the class-attribute
+refusal. Tests: `test_ail_fuzz28`, `test_ail_fuzz29`, `test_ail_pre170`, `test_ail_pre201`,
+`test_ail_pre227`, `test_ail_pre241`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` (9 modules, 45 tests, 0 failed, 1 skipped for no zig).
+
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is

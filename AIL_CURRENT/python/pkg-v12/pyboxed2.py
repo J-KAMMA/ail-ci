@@ -5279,7 +5279,9 @@ class Compiler(boxclosure.ClosureMixin):
                         return self._cached_class_attr(slot, value, ctx)
                     try:
                         return self._cached_class_attr(slot, value, ctx)
-                    except Unsupported:
+                    except Unsupported as exc:
+                        if getattr(exc, 'source_line', None) is not None:
+                            raise
                         raise self._class_attr_through_class_refusal(cname, node.attr)
                 raise Unsupported("reading %s %s.%s through a class value" %
                                   ('property' if hit[0] == 'p' else 'method', owner, node.attr))
@@ -6266,11 +6268,12 @@ class Compiler(boxclosure.ClosureMixin):
         for _aname, aval, slot in self.classes[name].get('class_attrs', []):
             try:
                 v = self.expr(aval, ctx)
-            except Unsupported:
-                if not (isinstance(aval, ast.Constant) or (isinstance(aval, ast.UnaryOp)
-                                                            and isinstance(aval.operand, ast.Constant))):
-                    raise self._class_attr_through_class_refusal(name, _aname)
-                raise
+            except Unsupported as exc:
+                if (isinstance(aval, ast.Constant) or (isinstance(aval, ast.UnaryOp)
+                                                        and isinstance(aval.operand, ast.Constant))
+                        or getattr(exc, 'source_line', None) is not None):
+                    raise
+                raise self._class_attr_through_class_refusal(name, _aname)
             ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
         if name in self.module_names:
             # A module-level assignment to the class name (before or after the definition, or a
