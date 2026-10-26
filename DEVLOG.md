@@ -1,3 +1,28 @@
+## 2026-10-26 -- builtin pow() outside int64 is refused by name (job-pre299-10270444)
+
+Reproduced the first still-differing item from the pre273 review: `pow(2, 63)` and `pow(2, n)`
+with a constant `n` compiled and then stopped with `integer overflow` on both builds, while
+CPython prints 9223372036854775808.  Added `_check_int64_pow_constants` to the front-end checks:
+a two-argument builtin `pow()` with statically known int arguments (module and function-local
+constants, expressions and aliases included) is folded exactly and a result outside int64 is
+refused with `int64 constant expression out of range`; when the base is a constant int with
+|base| >= 2 and the exponent is not statically known, the construct is refused at compile time,
+following pre273's accepted rule for `**`.  Bases 0/1/-1 with computed exponents, constant
+in-range powers, float and bool powers, `pow(base, exp, mod)`, and a program that binds its own
+`pow` are unchanged.
+
+Probes in `/tmp/probes` on both builds: `p299_bounds_safe`, `p299_local_alias_safe`,
+`p299_module_alias_safe`, `p299_neg_safe`, `p299_zero_neg`, `p299_safe`, `p299_three`,
+`p299_shadow` and `p299_base_routes_safe` match CPython; `p299_const`, `p299_const_local`,
+`p299_const_module`, `p299_bounds_refuse`, `p299_local_alias_refuse` are refused as constant
+out-of-int64 values; `p299_dyn`, `p299_dyn_small`, `p299_dyn_alias` and the separate
+`p299_route_arg`/`list`/`attr`/`dict` probes are refused as computed-exponent constructs.
+Pre-existing, not changed here: a constant exponent with base 2 reaching `pow` as a variable
+(`p299_base_routes_refuse`, `p299_base_list_refuse`) still traps at run time, as does `**` with
+a variable base.  Final-state tests: `test_ail_pre299`, `test_ail_safetynet`, `test_ail_files`
+and `test_ail_corpus_findings3` (4 modules, 336 s, 0 failed); `update_manifest.py --check` and
+`ci_shards.py --check` pass.
+
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is
