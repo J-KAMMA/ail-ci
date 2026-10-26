@@ -273,6 +273,125 @@ def int_constant(node, _limit=_CONST_INT_LIMIT):
         return None
     return result if type(result) is int and result.bit_length() <= _limit else None
 
+def refuse_field_method_call(tree):
+    """Refuse a call through a name that a class defines BOTH as a method and as an instance field.
+
+    CPython resolves an instance attribute before the class, so ``self.f = lambda: 101`` makes
+    ``c.f()`` call the stored lambda even when the class also has ``def f``.  This compiler has no
+    route for a callable held in an instance field, and its method dispatch silently picked the
+    method instead (``102 102`` where CPython prints ``101 102``).  Such a call is refused by name
+    rather than mis-compiled; a class that defines only one of the two keeps its old behaviour.
+    """
+    classes = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        methods, fields, bases = set(), set(), []
+        for base in node.bases:
+            if isinstance(base, ast.Name):
+                bases.append(base.id)
+        for item in node.body:
+            if not isinstance(item, ast.FunctionDef):
+                continue
+            methods.add(item.name)
+            args = item.args.posonlyargs + item.args.args
+            if not args:
+                continue
+            self_name = args[0].arg
+            for sub in ast.walk(item):
+                if isinstance(sub, ast.Assign):
+                    targets = sub.targets
+                elif isinstance(sub, (ast.AnnAssign, ast.AugAssign)):
+                    targets = [sub.target]
+                else:
+                    continue
+                for target in targets:
+                    if (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
+                            and target.value.id == self_name):
+                        fields.add(target.attr)
+        classes[node.name] = {'methods': methods, 'fields': fields, 'bases': bases}
+
+    def _inherited(name, key, seen):
+        info = classes.get(name)
+        if info is None or name in seen:
+            return set()
+        found = set(info[key])
+        for base in info['bases']:
+            found |= _inherited(base, key, seen | {name})
+        return found
+
+    collisions = {}
+    for name in classes:
+        both = _inherited(name, 'methods', frozenset()) & _inherited(name, 'fields', frozenset())
+        if both:
+            collisions[name] = both
+    if not collisions:
+        return
+    all_names = set().union(*collisions.values())
+
+    def _classes_of(node, seen=()):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in classes:
+            return {node.func.id}
+        if isinstance(node, ast.Name):
+            if node.id in seen:
+                return set()
+            seen = set(seen) | {node.id}
+            found = set()
+            for item in ast.walk(tree):
+                value = None
+                if isinstance(item, ast.Assign):
+                    if any(isinstance(t, ast.Name) and t.id == node.id for t in item.targets):
+                        value = item.value
+                elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name) \
+                        and item.target.id == node.id and item.value is not None:
+                    value = item.value
+                if value is not None:
+                    found |= _classes_of(value, seen)
+                if isinstance(item, ast.arg) and item.arg == node.id \
+                        and isinstance(item.annotation, ast.Name) and item.annotation.id in classes:
+                    found.add(item.annotation.id)
+                if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name) \
+                        and item.target.id == node.id and isinstance(item.annotation, ast.Name) \
+                        and item.annotation.id in classes:
+                    found.add(item.annotation.id)
+            return found
+        if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
+            found = set()
+            for item in ast.walk(tree):
+                if not isinstance(item, ast.Assign):
+                    continue
+                if not any(isinstance(t, ast.Name) and t.id == node.value.id for t in item.targets):
+                    continue
+                if isinstance(item.value, (ast.List, ast.Tuple)):
+                    for elt in item.value.elts:
+                        found |= _classes_of(elt, seen)
+                elif isinstance(item.value, ast.Dict) and isinstance(node.slice, ast.Constant):
+                    for key, value in zip(item.value.keys, item.value.values):
+                        if isinstance(key, ast.Constant) and key.value == node.slice.value:
+                            found |= _classes_of(value, seen)
+            return found
+        return set()
+
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        attr = node.func.attr
+        if attr not in all_names:
+            continue
+        recv = node.func.value
+        if isinstance(recv, ast.Name) and recv.id in classes:
+            continue
+        if isinstance(recv, ast.Call) and isinstance(recv.func, ast.Name) and recv.func.id == 'super':
+            continue
+        possible = _classes_of(recv)
+        owners = {name for name, names in collisions.items() if attr in names}
+        if possible:
+            if not (possible & owners):
+                continue
+        raise Unsupported('the method .%s() on an instance whose class also stores an instance '
+                          'field named %s (CPython calls the field)' % (attr, attr))
+
+
 def refuse_complex_pow(node):
     """`(-4.0) ** 0.5`: a negative base to a fractional power is a complex number in Python, and this
     language has no complex type. Constant operands are refused here, at compile time; any other

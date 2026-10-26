@@ -33,7 +33,7 @@ import os
 import re
 import runpy
 
-from pyfront import Unsupported, int_constant, refuse_complex_pow
+from pyfront import Unsupported, int_constant, refuse_complex_pow, refuse_field_method_call
 import filelib
 import hashlower
 import pyfunc
@@ -11040,6 +11040,7 @@ def build(source, report, allow_mix=True):
     step, per the brief), and `report['boxed']` filled with every function name plus '<module>'
     that went through this path (whole-program: pyc.py only calls this when the typed path
     refused something and the source is whole-program shaped)."""
+    refuse_field_method_call(ast.parse(source))
     if '_ail_par_range' in source:
         import typedpar                          # a typed-parallel loop runs as the plain loop here
         source = typedpar.general_text(source)

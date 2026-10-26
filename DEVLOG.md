@@ -1,3 +1,22 @@
+## 2026-10-26 - instance field/method name collision (job-pre278-10262329)
+
+The first still-differing item in the pre260 review's pre-existing list was a class that stores an
+instance field and defines a method of the same name.  With `self.f = lambda: 101` and `def f`,
+CPython's instance attribute wins and `c.f()` prints 101, while both builds silently dispatched to
+the method and printed 102.  A callable held in an instance field has no route on either emitter,
+so a call through such a name is now refused by name at compile time
+(`the method .f() on an instance whose class also stores an instance field named f (CPython calls
+the field)`).  Detection walks the class body and its bases, accepts `self.<name> = ...` and a bare
+`self.<name>: T` annotation, and only refuses a call, so the class-level spelling `C.f(c)`, a plain
+field read, a class with only the method or only the field, and an unrelated class with the same
+method name keep their old behaviour.
+
+Probes `/tmp/probes/p02a`-`p02j` and `/tmp/probes/p278_*.py` (direct, argument, list item, dict
+value, attribute, alias, non-callable field, inherited method, `self.f()`, empty/negative values,
+class-level call, read, only-method/only-field classes, unrelated classes, both builds) are either
+refused by the same name or match CPython.  Added `AIL_CURRENT/test_ail_pre278.py` and registered it
+in `ail_check.MODULES`.
+
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is
