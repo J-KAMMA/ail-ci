@@ -2008,6 +2008,16 @@ list also still contained a managed-struct Callable field, which R594 supports a
 for the direct, annotation-only, container/argument and control-flow cases. No language
 behaviour changed.
 
+## 2026-10-24 - pre54: round() at the int64 boundary is refused by name
+
+The pre35 review recorded `z_intmin` (`round(-9223372036854775808.0)` then `abs`, unary `-`, `* -1`)
+as a pre-existing difference: CPython's unbounded int answers 2**63, while both builds compiled the
+program and stopped later with `integer overflow`.  The rounded value is INT64_MIN, which is
+representable, but its magnitude is not; the value is known at compile time, so a one-argument
+`round()` of a constant float at or beyond the int64 boundary is now refused by name in
+`pyc.build` on both builds rather than compiled into a program that stops later.  Values just
+inside the boundary, two-argument `round()` (a float result) and a user-defined `round` are
+unchanged.  Added `AIL_CURRENT/test_ail_pre54.py` and registered it in `ail_check.MODULES`.
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
 The base export already contains the content-addressed `cc` layer in
