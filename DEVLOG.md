@@ -1,5 +1,21 @@
 # DEVLOG
 
+## 2026-10-26 - utf8_stream: refresh the standard source API pins (job-perf4-10270016)
+
+The UTF-8 tail-check change added `_utf8_tail_complete` to `utf8_stream.ail`, but
+`STANDARD_SOURCE_API.json` still pinned the old bytes (`e1625b22...`), so `export_sdk`
+refused every SDK export with `stale or missing standard API dependency`. This broke the
+SDK, grid-return and environment tests (and cascaded into the other modules listed by the
+integrator). The catalog's module row and `dependency_pins` entry now carry the actual
+SHA-256 (`24bc7059...`); the declared API is unchanged. No compiler or runtime behaviour
+changed. The perf4 UTF-8 and loop-inlining changes stay as they were.
+
+Tests on the final commit: the ten modules named in the task that exist here (minus the
+later `test_ail_pre110`, which is not in this branch) plus `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass. On a current `origin/integ`
+worktree with the two perf4 code changes applied, all ten named modules, including
+`test_ail_pre110`, pass (10/10, 231 s).
+
 ## 2026-10-23 - csv_table: inline small leaf loops (job-perf4-10240813)
 
 `field += ch` was already in place and its slow path is about 1% of calls, so this job took
