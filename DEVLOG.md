@@ -244,6 +244,21 @@ multi-argument `raise ValueError(...)` probes. Final-state modules: test_ail_pre
 test_ail_exception_context, test_ail_exception_values_core, test_ail_exception_values_app,
 test_ail_exception_aggregate_objects, test_ail_exc_str, test_ail_excfix, test_ail_raise_from,
 test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (11 modules, 522 s, 0 failed).
+## 2026-10-26 - re-apply pre51: format-spec diagnostics and the float z flag (job-rbpre51-10261856)
+
+Re-applied accepted job `job-pre51-10241239` on the current tree. The space-sign-on-str
+wording, the whole-spec `Invalid format specifier '<spec>' for object of type '<type>'` text
+and the `\xNN` escaping of an unknown format code are already present here from the pre206
+parser fix, which also keeps NUL and grouping handling; those newer fixes are kept. From the
+accepted change, the parser now decodes a non-BMP type code from a surrogate pair (the spec's
+`wide_type` is 32-bit), so a non-BMP code is named as CPython's `\x1f600` instead of being
+rejected as a longer spec. Non-BMP and surrogate string literals are still refused by name by
+the compiler, so that path is not reachable from source. The float `z` flag already matched.
+Added `AIL_CURRENT/test_ail_pre51.py` (2 tests, both builds) and registered it in
+`ail_check.MODULES`. `tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py`
+was run and `--check` passes. Probes `/tmp/probes/pre51_errors.py`, `pre51_codes.py` and
+`pre51_z.py` match CPython on both builds; the non-BMP/surrogate literal probes are refused by
+name. Tests: pre51, pre206, pre225, pre243, pre103, safetynet, files, corpus_findings3 (0 failed).
 
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
