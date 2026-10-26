@@ -7133,8 +7133,12 @@ def _list_repeat_value(node, kind, ctx):
         steps.append(counted())
     pushes = ' '.join('ail_%s_push(&%s, _e%d);' % (kind, temporary, i) for i in range(len(elements)))
     steps.append('ail_%s_clear(&%s);' % (kind, temporary))
-    if kind != SLIST and len(elements) == 1:
-        steps.append('if (_count > 0) ail_%s_reserve(&%s, _count);' % (kind, temporary))
+    if kind != SLIST:
+        steps.append('if (_count > 0) { if (_count > (1LL << 60) / %d) ail_die("MemoryError"); '
+                     'ail_%s_reserve(&%s, _count * %d); }'
+                     % (len(elements), kind, temporary, len(elements)))
+    else:
+        steps.append('if (_count > 0 && _count > (1LL << 60) / %d) ail_die("MemoryError");' % len(elements))
     steps.append('for (int64_t _r = 0; _r < _count; _r++) { %s }' % pushes)
     return temporary, '({ %s %s; })' % (' '.join(steps), temporary)
 
