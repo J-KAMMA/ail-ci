@@ -1,41 +1,12 @@
-# bigint-fix15: attribute errors on instances name the class as 'type' ("'type' object has no attribute 'zz'") (C)
+# Continue: fix the reviewer's findings
 
-After the bigint commits "store class attributes on the class object" / "fall back to class attributes in by-name
-lookups" (c079267, b13dd0d), a missing attribute on an INSTANCE reports the class-object message. CPython says
-`'K' object has no attribute 'zz'`. The same confusion makes a raised `OSError(n, text)` instance in user code fail with
-`AttributeError: 'type' object has no attribute 'errno'`.
+You continue a job on its own branch: your earlier commits are already here. The reviewer returned FIX. Its last
+review is the last "## review" section of `.agent/pipeline.md` in this checkout (read the whole file: the original task,
+your reports and the reviews are there).
 
-## Modules
-- test_ail_nonecrash (test_instance_message) -- exists only in the merge tree (/home/bluec/code/ail-wt/bigint-merge); the
-  reproducer below fails on `bigint` too.
-- test_ail_excfix (test_oserror_with_errno_general_is_refused_by_name): expects the general-only build of
-  `raise OSError(n, text)` in a user function (USER_OSERROR in that test) to be refused by name. It now BUILDS
-  (`gonly` returns 0) and then dies at run time with `'type' object has no attribute 'errno'`. Fix the bug first; then
-  if the program now runs and matches CPython (printing `PermissionError 1 text 1 [Errno 1] text 1` ...), the refusal test
-  is outdated (A: change it to compare with CPython), otherwise keep the refusal.
-
-## Reproducer
-`oe3.py`:
-```
-class K:
-    pass
-
-def ident(x):
-    return x
-
-try:
-    ident(K()).zz
-except AttributeError as e:
-    print(e)
-```
-CPython: `'K' object has no attribute 'zz'`. AIL (default / general): `'type' object has no attribute 'zz'`.
-Also check `K.zz` (class access: CPython says `type object 'K' has no attribute 'zz'`), a bound-method miss, `del obj.zz`,
-`setattr`/`getattr(obj, "zz")`/`hasattr`, and an exception instance (`e.errno` on OSError subclasses).
-
-## Category
-C. Fixed means: message equals CPython for instance and class misses; the two modules pass (test_ail_excfix per the note above).
-
-run the listed modules and test_ail_bigint test_ail_tint test_ail_unified before committing. For test_ail_nonecrash, re-run it in the merge tree after the integrator merges.
+Fix every defect the last review lists, re-run the probes and the test modules the original task names, and commit.
+Do not undo the earlier work unless a finding requires it. If a finding is wrong, say so in your report with the
+evidence (program, CPython output, AIL output).
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
