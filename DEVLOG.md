@@ -12,9 +12,9 @@ pre280 exact fallback; an inconclusive fold or a result still outside int64 keep
 `WIDE_INTERMEDIATE` program (list, tuple and str receivers, a negative result) and keeps the
 current boundary case.  Probes in `/tmp/probes`: a_pow_sub, b_shift_sub, c_div_inrange,
 d_neg_result, e_containers, f_dict_key, j_empty, k_arg, l_attr, m_dict_value, n_list_item,
-o_alias, s_mod, t_mixed, u_unary and x_slice match CPython on both builds; g_out_pow, h_out_mul,
-i_out_div, p_toobig, q_sign_boundary, r_big_out and v_wide_result are refused by name identically
-on both builds.  Final-state tests: test_ail_pre280, test_ail_pre177, test_ail_pre269,
+o_alias, q_sign_boundary, s_mod, t_mixed, u_unary and x_slice match CPython on both builds;
+g_out_pow, h_out_mul, i_out_div, p_toobig, r_big_out and v_wide_result are refused by name
+identically on both builds.  Final-state tests: test_ail_pre280, test_ail_pre177, test_ail_pre269,
 test_ail_pre246, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (7 modules,
 36 tests, 0 failed).  `tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py`
 was run and `--check` passes.
