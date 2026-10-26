@@ -1,3 +1,40 @@
+## 2026-10-26 -- flush open files on the zero-division trap tail (review of job-pre282-10270157)
+
+Review defect: a program that wrote to an unclosed file and then died on a typed zero-division
+trap lost the buffered bytes. `filert.FLUSH_EDITS` patched the `ail_die` and
+`ail_exception_uncaught` tails, but `ZDIV`'s `ail_zdie` is a third terminal path and was never
+patched. `filert.ZDIV_FLUSH_EDITS` now inserts `ailf_flush_all()` before that tail, applied in
+`cruntime._piece_text` only when `FILECORE` is present in the program; a program that divides
+without opening files keeps its C byte for byte. Reproduced with `bash ~/tools/cmp.sh` and a file
+probe (`open("out.txt", "w")`, two writes, `print(1 / 0)`): stderr and exit status matched on the
+base tree, but `out.txt` was empty on the default build before the fix; after the fix it is
+`one\ntwo\n` on both builds.
+
+Corrected two claims in the previous entry. The first pre274 item still differing on the base tree
+was not literal `print(0 ** -1)` (both builds already wrote `ZeroDivisionError: 0.0 cannot be
+raised to a negative power` there): it was uncaught `1 / 0` and the variable form
+`b = 0; n = -1; print(b ** n)`, both of which printed the bare `division by zero`. Both match
+CPython now. And `print(2 ** -1)` was not refused: it prints `0.5` on both builds and on base;
+only the variable `2 ** n` with a non-zero base keeps the pre-existing named refusal
+(`negative exponent on an integer ...`), identical on base. `test_ail_pre282.py` now also covers
+the uncaught variable pow and the file-then-trap case.
+
+Probes (34 programs in `/tmp/probes`, each run with `bash ~/tools/cmp.sh <probe> $PWD`): every
+trap kind with an open file (`/`, `//`, `%`, `divmod`, int/float power, float variants including
+`-0.0`), routes through an argument, list item, attribute and dict value, bool and big-int
+divisors, binary-mode writes, a closed file, an empty file, a `finally` write, a caught trap and a
+no-division program. All 34 match CPython's stdout on both builds; the default build's stderr
+matches on all 34; the general build's stderr differs only on the known pre-existing float-`/`
+text (`division by zero` vs `float division by zero`, row -2), and the default build refuses the
+variable `2 ** n` on a non-zero base by name as on base. 52 file-content comparisons (23 file
+probes on both builds, plus the mixed-operand/`divmod` file probes) all match CPython. Generated
+C: `print(1 + 2)` is byte-identical to base on both builds (no `ail_zdie`); a divide-without-file
+program has zero `ailf_flush_all()` calls; the general build's file+division C is identical to
+base; the default file+division C has the expected third `ailf_flush_all()` in `ail_zdie`.
+
+Tests on the final tree: `test_ail_pre282`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` (`-j 2`).
+
 ## 2026-10-26 -- fix typed zero-division trap text and class prefix (job-pre282-10270157)
 
 The reviewer of pre274 recorded that the default typed build printed a zero-division trap's bare

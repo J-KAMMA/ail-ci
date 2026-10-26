@@ -33,6 +33,22 @@ UNCAUGHT_POW = r'''def main():
 main()
 '''
 
+UNCAUGHT_POW_VAR = r'''def main():
+    b = 0
+    n = -1
+    print(b ** n)
+main()
+'''
+
+FILE_THEN_TRAP = r'''def main():
+    f = open("out.txt", "w")
+    f.write("one\n")
+    f.write("two\n")
+    print("before")
+    print(1 / 0)
+main()
+'''
+
 UNCAUGHT_POW_FLOAT = r'''def main():
     print(0.0 ** -1.0)
 main()
@@ -251,7 +267,29 @@ class Pre282Tests(unittest.TestCase):
 
     def test_uncaught_pow_trap_prefix(self):
         self.check('uncaught_pow', UNCAUGHT_POW)
+        self.check('uncaught_pow_var', UNCAUGHT_POW_VAR)
         self.check('uncaught_pow_float', UNCAUGHT_POW_FLOAT)
+
+    def test_trap_flushes_file_written_before_it(self):
+        with tempfile.TemporaryDirectory(prefix='ail-pre282-file-') as directory:
+            src = Path(directory) / 'file_then_trap_cpython.py'
+            src.write_text(FILE_THEN_TRAP, encoding='utf-8')
+            done = subprocess.run([sys.executable, '-B', str(src)], capture_output=True, timeout=120,
+                                  cwd=directory, env=dict(os.environ, PYTHONUTF8='1'))
+            want = done.stdout.replace(b'\r\n', b'\n')
+            want_file = (Path(directory) / 'out.txt').read_bytes()
+            (Path(directory) / 'out.txt').unlink()
+            last = done.stderr.decode('utf-8', 'replace').strip().splitlines()[-1]
+            for general in (True, False):
+                label = 'file_then_trap_%s' % ('g' if general else 'd')
+                got, err = _build_and_run(directory, label, FILE_THEN_TRAP, general)
+                self.assertIsNotNone(got, '%s\n%s' % (label, err))
+                self.assertEqual(got, (want, done.returncode), '%s\n%s' % (label, err))
+                self.assertEqual(err.strip(), last, '%s' % label)
+                path = Path(directory) / 'out.txt'
+                self.assertTrue(path.exists(), '%s did not create out.txt' % label)
+                self.assertEqual(path.read_bytes(), want_file, '%s lost buffered file writes' % label)
+                path.unlink()
 
     def test_uncaught_float_division_text(self):
         self.check('uncaught_float_div', UNCAUGHT_FLOAT_DIV, stderr_general=False)

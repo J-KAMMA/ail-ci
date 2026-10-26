@@ -61,6 +61,14 @@ FLUSH_EDITS = (
     ('static void ail_exception_uncaught(ail_exception *value) {\n    fflush(stdout);\n',
      'static void ail_exception_uncaught(ail_exception *value) {\n    ailf_flush_all();\n    fflush(stdout);\n'),
 )
+# ZDIV is a separate runtime part (cruntime.ZDIV): its uncaught tail is a third terminal path, so it
+# needs the same flush when the file core is present -- a program that writes to an unclosed file
+# and then divides by zero must keep the written bytes, as CPython does at shutdown.
+ZDIV_FLUSH_EDITS = (
+    ('    char msg[256];\n    snprintf(msg, sizeof msg, "ZeroDivisionError: %s", t);\n    const char *w = msg;\n    fflush(stdout);',
+     '    char msg[256];\n    snprintf(msg, sizeof msg, "ZeroDivisionError: %s", t);\n    const char *w = msg;\n'
+     '    ailf_flush_all();\n    fflush(stdout);'),
+)
 
 
 # Stage G8: CalledProcessError (17) and TimeoutExpired (18) extend the same table; spliced in after the
@@ -211,6 +219,15 @@ def file_exception(text, with_flush):
             if text.count(old) != 1:
                 raise AssertionError('DIE block changed; update filert.FLUSH_EDITS: ' + old)
             text = text.replace(old, new)
+    return text
+
+
+def zdiv_flush(text):
+    """The ZDIV part with the file-flush hook in its uncaught tail (only when FILECORE is present)."""
+    for old, new in ZDIV_FLUSH_EDITS:
+        if text.count(old) != 1:
+            raise AssertionError('ZDIV block changed; update filert.ZDIV_FLUSH_EDITS: ' + old)
+        text = text.replace(old, new)
     return text
 
 

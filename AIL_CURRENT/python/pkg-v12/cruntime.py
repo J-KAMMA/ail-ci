@@ -28236,6 +28236,8 @@ def _piece_text(p, want):
         text = _exctext.apply(text, (('static void ail_raise_msg(int code, const char *t) {\n',
                                       'static void ail_raise_msg(int code, const char *t) {\n'
                                       '    if (ail_par_cur) ail_par_trap(t, code);\n'),), 'the DIE block (PARN)')
+    if p == 'ZDIV' and 'FILECORE' in want:
+        text = _filert.zdiv_flush(text)
     return _parallel_die(text) if p == 'DIE' and 'PAR' in want else text
 
 
