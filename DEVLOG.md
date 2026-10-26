@@ -1,3 +1,20 @@
+## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
+
+The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
+`ail_op_imul` stopped with an uncatchable `integer overflow` where CPython raises MemoryError,
+and an empty list spun over the huge count. The oversize guard now stops through a bare
+`MemoryError` before the element product leaves int64, and an empty list skips the repeat loop.
+No compile-time refusal was added: small, zero, negative and bool counts still match, and a huge
+count arriving through an argument, a list item, an attribute, a dict value or an alias matches
+CPython on both builds.
+`AIL_CURRENT/test_ail_pre271.py` covers both builds. Probes in `/tmp/probes`: `pre271_aug_huge`,
+`pre271_aug_boundary`, `pre271_aug_one`, `pre271_aug_typed_huge`, `pre271_aug_dynamic_routes`,
+`pre271_aug_empty`, `pre271_aug_alias`, `pre271_aug_zero_one`, `pre271_aug_neg`,
+`pre271_aug_bool`, `pre271_aug_small`, `pre271_aug_routes`, all matching CPython on both builds.
+Final-state tests: test_ail_pre271, test_ail_local_count_repeat, test_ail_list_ops,
+test_ail_safetynet, test_ail_files, test_ail_corpus_findings3 (6 modules, 271 s, 0 failed).
+`tools/update_manifest.py --check` passes.
+
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is
