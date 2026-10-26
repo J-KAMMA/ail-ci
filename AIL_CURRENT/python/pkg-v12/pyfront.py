@@ -138,6 +138,110 @@ def _number_constant(node):
     return None
 
 
+_INT64_MIN = -(1 << 63)
+_INT64_MAX = (1 << 63) - 1
+
+
+class _IntConstTooLarge(Exception):
+    """A constant expression too large to evaluate safely at compile time."""
+
+
+def _int_const_value(node):
+    """The exact value of a purely integer constant expression, else None.
+
+    Uses the generic folder's own exact evaluation, including its zero/base shortcuts and its
+    wide shift budget, so this pass keeps the later constant-folding fixes rather than imposing a
+    narrower limit.  Raises _IntConstTooLarge rather than allocating an arbitrarily large integer
+    for `2 ** 10**9` or `1 << 10**9`.  A bool result (`True & True`) is left to the run time so
+    it still prints as True.
+    """
+    import pyfunc as _pyfunc
+    value = _pyfunc._const_int_expr(node)
+    if value is _pyfunc._CONST_INT_NOT or isinstance(value, bool):
+        return None
+    if value is _pyfunc._CONST_INT_BIG:
+        raise _IntConstTooLarge
+    return int(value)
+
+
+def fold_int_constants(source):
+    """Fold integer constant expressions to int64 literals and refuse out-of-range ones by name.
+
+    A constant expression Python evaluates exactly but whose result does not fit int64 is the one
+    case where a *constant* is still a difference: emitting the arithmetic would stop at run time
+    with `integer overflow` even when the outer expression, as in `-(-2)**63`, is what Python's
+    unbounded int can represent. Folding also keeps `2**63 - 1` and `-2**63` correct by building
+    them as one literal instead of overflowing inside the expression. Non-constant expressions are
+    left exactly as written for the run-time guards.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return source
+    encoded = source.encode('utf-8')
+    starts = [0]
+    for line in encoded.splitlines(keepends=True):
+        starts.append(starts[-1] + len(line))
+    edits = []
+
+    def refuse(node):
+        refusal = Unsupported(
+            'a constant integer expression overflows int64: its exact value is outside the '
+            'signed 64-bit range and does not fit in a 64-bit signed integer (an int64 constant '
+            'expression out of range; CPython computes it exactly because its int is unbounded, '
+            "while this language's int is int64, SEMANTICS section 1)")
+        refusal.source_line = getattr(node, 'lineno', None)
+        raise refusal
+
+    def is_maxsplit_argument(node, parent):
+        # The str.split/rsplit folder has its own, more specific refusal; leave that expression
+        # to it so the existing maxsplit diagnostics are unchanged.
+        return (isinstance(parent, ast.Call) and isinstance(parent.func, ast.Attribute)
+                and parent.func.attr in ('split', 'rsplit')
+                and (node in parent.args[1:2]
+                     or any(k.arg == 'maxsplit' and k.value is node for k in parent.keywords)))
+
+    def visit(node, parent=None):
+        if isinstance(node, ast.JoinedStr):
+            # An f-string's source text is observable in a debug field (`f"{expr=}"`), so leave
+            # its expressions exactly as written; the emitters' own constant folders still run.
+            return
+        if isinstance(node, (ast.BinOp, ast.UnaryOp)):
+            if is_maxsplit_argument(node, parent):
+                return
+            try:
+                value = _int_const_value(node)
+            except _IntConstTooLarge:
+                refuse(node)
+            if value is not None:
+                if not _INT64_MIN <= value <= _INT64_MAX:
+                    refuse(node)
+                start = starts[node.lineno - 1] + node.col_offset
+                end = starts[node.end_lineno - 1] + node.end_col_offset
+                edits.append((start, end, str(value).encode('ascii')))
+                return
+        for child in ast.iter_child_nodes(node):
+            visit(child, node)
+
+    def identifier_byte(byte):
+        return (48 <= byte <= 57 or 65 <= byte <= 90 or 97 <= byte <= 122
+                or byte == 95 or byte >= 128)
+
+    visit(tree)
+    if not edits:
+        return source
+    for start, end, replacement in sorted(edits, reverse=True):
+        # `1 and+(1 << 62)` becomes `1 and 461...`, not `1 and461...`: a rewritten expression
+        # that starts or ends with a digit must not fuse with an adjacent name or keyword.
+        if (start and 48 <= replacement[0] <= 57 and identifier_byte(encoded[start - 1])):
+            replacement = b' ' + replacement
+        if (end < len(encoded) and 48 <= replacement[-1] <= 57
+                and identifier_byte(encoded[end])):
+            replacement = replacement + b' '
+        encoded = encoded[:start] + replacement + encoded[end:]
+    return encoded.decode('utf-8')
+
+
 _CONST_INT_LIMIT = 1 << 22
 _SPECIAL_INT_LIMIT = 1 << 24
 
@@ -307,9 +411,20 @@ def _c_expr(node, var, need=None):
             return '1' if node.value else '0'
         if not isinstance(node.value, int):
             raise Unsupported('non-integer constant %r' % (node.value,))
+        if not _INT64_MIN <= node.value <= _INT64_MAX:
+            raise Unsupported('an integer literal outside int64: %d' % node.value)
         return str(node.value)
     if isinstance(node, ast.UnaryOp):
         if isinstance(node.op, ast.USub):
+            # Python parses the literal -9223372036854775808 as a unary minus over the positive
+            # literal 9223372036854775808, which does not fit any signed C type. The folded source
+            # for INT64_MIN therefore reaches here as that spelling, and `ck_neg` would trap on the
+            # very value the constant is meant to denote. Build it as INT64_MIN's two's-complement
+            # definition instead; pyboxed, pyboxed2 and pyfunc already accept the same spelling.
+            if (isinstance(node.operand, ast.Constant)
+                    and type(node.operand.value) is int
+                    and node.operand.value == 1 << 63):
+                return '(-9223372036854775807LL - 1)'
             if need is not None:
                 _use(need, 'ck_neg')
                 return 'ck_neg(%s)' % rec(node.operand)
