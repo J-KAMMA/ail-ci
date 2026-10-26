@@ -611,6 +611,119 @@ def _check_int64_abs_constants(tree, known):
             check(node, local)
 
 
+def _pow_aliases(body, initial, stores, parameters):
+    """Add names bound once in ``body`` to the builtin ``pow`` (or to an existing alias)."""
+    names = set(initial)
+    changed = True
+    while changed:
+        changed = False
+        for statement in body:
+            if not (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                    and isinstance(statement.targets[0], ast.Name)
+                    and isinstance(statement.value, ast.Name)):
+                continue
+            target, source = statement.targets[0].id, statement.value.id
+            if (source in names and target not in names and stores.get(target) == 1
+                    and target not in parameters):
+                names.add(target)
+                changed = True
+    return names
+
+
+def _pow_alias_names(tree):
+    """The builtin ``pow`` and names bound once to it in the module scope (``p = pow``)."""
+    if _binds_name(tree, 'pow'):
+        return set()
+    stores = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            stores[node.id] = stores.get(node.id, 0) + 1
+    parameters = {node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)}
+    return _pow_aliases(tree.body, {'pow'}, stores, parameters)
+
+
+def _walk_module_scope(tree):
+    """Nodes at module scope, not descending into functions, classes or lambdas."""
+    stack = list(tree.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        yield node
+        stack.extend(ast.iter_child_nodes(node))
+
+
+def _check_int64_pow_constants(tree, known):
+    """Refuse ``pow(base, exp)`` on constant ints whose exact result leaves int64, by name.
+
+    AIL ints are fixed width, so ``pow(2, 63)`` compiled and then stopped with ``integer
+    overflow`` where CPython keeps the bignum.  The two-argument form is folded here (the
+    three-argument form reduces modulo its modulus and stays in range); an in-range result,
+    a negative exponent (CPython's float answer) and a program that binds its own ``pow``
+    are left alone."""
+    names = _pow_alias_names(tree)
+    if not names:
+        return
+
+    def check(node, scope_known, scope_names):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in scope_names):
+            return
+        if len(node.args) != 2 or node.keywords or any(
+                isinstance(argument, ast.Starred) for argument in node.args):
+            return
+        base = _constant_int(node.args[0], scope_known)
+        exponent = _constant_int(node.args[1], scope_known)
+        if base is None:
+            try:
+                base = _const_expr_int(node.args[0], bounded=False)
+            except _Int64ConstantOverflow:
+                base = None
+        if exponent is None:
+            try:
+                exponent = _const_expr_int(node.args[1], bounded=False)
+            except _Int64ConstantOverflow:
+                exponent = None
+        if base is None or exponent is None or exponent < 0:
+            return
+        if exponent == 0:
+            result = 1
+        elif base == 0:
+            result = 0
+        elif base == 1:
+            result = 1
+        elif base == -1:
+            result = 1 if exponent % 2 == 0 else -1
+        elif exponent > 64:
+            result = None
+        else:
+            result = base ** exponent
+        if result is not None and _INT64_MIN <= result <= _INT64_MAX:
+            return
+        shown = 'too large' if result is None else _constant_diagnostic(result)
+        error = ValueError(f'int64 constant expression out of range: {shown}')
+        error.source_line = node.lineno
+        error.source_column = node.col_offset
+        raise error
+
+    for node in _walk_module_scope(tree):
+        check(node, known, names)
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        local = _function_local_int_constants(function, known)
+        parameters = {argument.arg for argument in
+                      function.args.posonlyargs + function.args.args + function.args.kwonlyargs}
+        if function.args.vararg is not None:
+            parameters.add(function.args.vararg.arg)
+        if function.args.kwarg is not None:
+            parameters.add(function.args.kwarg.arg)
+        scope_names = _pow_aliases(function.body, names,
+                                   _function_scope_stores(function), parameters)
+        for node in _walk_own_scope(function):
+            check(node, local, scope_names)
+
+
 def _check_int64_unary_constants(tree):
     """Refuse a statically known unary integer constant expression outside int64 by name.
     `-MIN` on a module constant or a nested literal compiles to the fixed-width trap on the
@@ -1276,6 +1389,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 _check_int64_constant_positions(tree)
                 _check_int64_unary_constants(tree)
                 _check_int64_int_base_constants(tree)
+                _check_int64_pow_constants(tree, _known_module_constants(tree))
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)
             if source_map is not None:

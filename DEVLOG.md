@@ -1,3 +1,25 @@
+## 2026-10-26 - constant pow() outside int64 is refused by name (job-pre294-10270438)
+
+The reviewer of job pre273 recorded the first still-differing pre-existing item: `pow(2, 63)`
+compiled on both builds and then stopped with `integer overflow`, while CPython prints the
+bignum `9223372036854775808`; `pow(10, 100)` behaved the same way.  The two-argument builtin is
+now folded at compile time.  An exact result outside int64 is refused by name with `int64
+constant expression out of range`; an in-range result keeps the ordinary lowering, a negative
+exponent keeps CPython's float answer, and the three-argument modular form is untouched.  The
+check follows module and function-local constants and a module/function alias of `pow`, and skips
+a program that binds its own `pow`.  It does not touch `**`, so the prelude `Fraction` sources
+are unaffected.
+
+Probes in `/tmp/probes` (both g/d builds): refused by name - `pre294_direct`, `pre294_ten`,
+`pre294_negative_base`, `pre294_argument`, `pre294_list_item`, `pre294_attribute`,
+`pre294_dict_value`, `pre294_alias`, `pre294_alias_local`, `pre294_module_constants`,
+`pre294_local_constants`, `pre294_expressions`; matched CPython - `pre294_bounds`,
+`pre294_safe_bases`, `pre294_types`, `pre294_float`, `pre294_negative_exp`, `pre294_mod`,
+`pre294_shadow`.
+
+Tests on the final tree: `test_ail_pre294`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` (4 modules, 200 s, 0 failed).
+
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is
