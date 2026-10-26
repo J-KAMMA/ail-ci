@@ -187,9 +187,9 @@ def fold_int_constants(source):
     def refuse(node):
         refusal = Unsupported(
             'a constant integer expression overflows int64: its exact value is outside the '
-            'signed 64-bit range and does not fit in a 64-bit signed integer (an int64 constant '
-            'expression out of range; CPython computes it exactly because its int is unbounded, '
-            "while this language's int is int64, SEMANTICS section 1)")
+            'signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes '
+            "it exactly because its int is unbounded, while this language's int is int64, "
+            'SEMANTICS section 1)')
         refusal.source_line = getattr(node, 'lineno', None)
         raise refusal
 
