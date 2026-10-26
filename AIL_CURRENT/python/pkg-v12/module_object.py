@@ -18,7 +18,7 @@ import native_diagnostics
 from pyfront import Unsupported
 import callable_types
 
-FLAGS = ['-O2', '-fno-asynchronous-unwind-tables', '-ffp-contract=off']   # no FMA: see pyc.CFLAGS_TUNE
+FLAGS = ['-O2', '-fno-asynchronous-unwind-tables', '-ffp-contract=off', '-fopenmp-simd']   # no FMA: see pyc.CFLAGS_TUNE
 ABI_VERSION = 11
 KINDS = {'int', 'float', 'str', 'bytes', 'bytearray', 'binaryfile', 'tcpsocket', 'exception'}
 HANDLE_LIST_KINDS = {'handle_list:' + element for element in ('bytearray', 'binaryfile', 'tcpsocket', 'exception')}
