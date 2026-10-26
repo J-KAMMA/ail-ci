@@ -1,3 +1,20 @@
+## 2026-10-26 -- re-apply pre39: keyword-wrapper int() refusal (job-rbrbrbpre39-10270115)
+
+Re-applied the accepted pre39 change on this tree. The `int()`-of-a-float-outside-int64 check
+was absent here, so the whole pre31-style machinery is added to
+`ail_chatgpt._check_int64_literals`: constant float/int expressions are folded, and call
+arguments are bound by parameter name as well as by position, so keyword calls to positional
+wrappers, identity functions and keyword-only wrappers are refused by name, including
+out-of-range literals and module constants, list/tuple items and dict values reached that way.
+In-range conversions, non-finite floats, shadowed names and run-time-only values are unchanged.
+An unresolved name maps to `_UNKNOWN` rather than the literal `None`, so an unresolved
+subscript key no longer selects a dict's `None` entry; genuinely known numeric keys still fold
+and are refused. Added the accepted `test_ail_pre39.py` (13 refused, 12 matching programs, both
+builds) and registered it in `ail_check.MODULES`. Probes in `/tmp/probes`: 6 matching
+(`p39_match_{values,alias,nonfinite,shadow,unknown,attribute}`) and 18 refused by name
+(`p39_refuse_{literal,negative,upper,boundary_pos,boundary_neg,keyword,positional,kwonly,identity_kw,identity_pos,constant,constant_alias,constant_keyword,list,tuple,dict,numeric_key,expression}`),
+all against CPython on both builds. `python3 tools/diff_ids.py` is not present in this tree.
+
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is
