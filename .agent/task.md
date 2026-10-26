@@ -1,46 +1,12 @@
-# bigint-fix16: `'%d' % obj` (and `%x`) with a class that defines only `__int__` / `__index__` raises TypeError (C, merge-tree test)
+# Continue: fix the reviewer's findings
 
-The main line fixed `%d` formatting of objects that define `__int__` or `__index__` (test_ail_pre128, which exists only in
-the merge tree /home/bluec/code/ail-wt/bigint-merge). `bigint`'s format path replaced that code, so the fix is lost: the
-merged compiler raises TypeError where CPython formats the number. (On plain `bigint` the same program also fails,
-with `unsupported format string passed to non-int`.)
+You continue a job on its own branch: your earlier commits are already here. The reviewer returned FIX. Its last
+review is the last "## review" section of `.agent/pipeline.md` in this checkout (read the whole file: the original task,
+your reports and the reviews are there).
 
-## Modules
-test_ail_pre128 (test_trunc_only_percent).
-
-## Reproducer (default build)
-`pc.py`:
-```
-class IntOnly:
-    def __int__(self):
-        return 6
-
-class IndexOnly:
-    def __index__(self):
-        return 7
-
-def main():
-    print('%d' % IntOnly())
-    print('%d' % IndexOnly())
-    print('%x' % IndexOnly())
-    print(int(IntOnly()), int(IndexOnly()))
-
-main()
-```
-CPython 3.12: `6`, `7`, `7`, `6 7`. AIL (merge tree): `TypeError: %d format: a real number is required, not IntOnly`
-(bigint tree: `TypeError: unsupported format string passed to non-int`).
-The full program is `test_ail_pre128.TRUNC_PERCENT` (a `__trunc__`-only class must give TypeError for `%d`; classes with
-`__int__` give '6', `__index__` gives '7' for d/i/u/x/X/o/c/f-style codes exactly as CPython: see the expected
-lines in the test's output with `python3`).
-
-## Category
-C. Fix in the bigint format routine (it must accept `__index__` for `%d %i %u %x %X %o %c`, `__int__` for `%d %i %u`,
-and `__float__`/int for `%f %e %g`), keeping big ints exact (`'%d' % 10**30`, `'%x' % -2**70`).
-
-## Fixed means
-pc.py matches CPython; test_ail_pre128 passes in the merge tree; test_ail_bigint still passes.
-
-Work on branch `bigint` in the repository checkout (reproduce there); run the listed modules and test_ail_bigint test_ail_tint test_ail_unified before committing. test_ail_pre128 exists only in the merge tree: copy it from /home/bluec/code/ail-wt/bigint-merge/AIL_CURRENT/ to run it, without committing the copy.
+Fix every defect the last review lists, re-run the probes and the test modules the original task names, and commit.
+Do not undo the earlier work unless a finding requires it. If a finding is wrong, say so in your report with the
+evidence (program, CPython output, AIL output).
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
