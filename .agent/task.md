@@ -1,8 +1,6 @@
-**Fix one pre-existing difference from CPython.** A reviewer of job `pre39` recorded these as already present before that job:
+**Your change fails tests on top of the current integration branch.** Applied alone on today's integ, one or more of these test modules fail: test_ail_pre61 test_ail_safetynet.
 
-**Unverified:** the worker’s `test_ail_files` / `test_ail_corpus_findings3` claims; the admitted unrelated `range`/`partial`/attribute cases.
-
-Reproduce the first one that still differs on this tree (`bash ~/tools/cmp.sh` on both builds). Fix that one cause, or refuse the construct by name at compile time. Add the case to a new `test_ail_pre61.py` and run only that module and `test_ail_safetynet`, then commit. If none of them still differs, change nothing and say so.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find why it fails here (another change may have altered behaviour or output your test expects), and fix it so they pass while keeping your fix and its test. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
