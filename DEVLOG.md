@@ -1,3 +1,17 @@
+## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
+
+Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is
+already present here: `ail__raise_head_str` builds the ValueError text from an ASCII head plus
+the repr's UTF-16 units, so `int("\u2469", 10)` keeps the circled digit (and `ail__repr_limited`
+keeps CPython's `%.200R` cut for int()), while `float()` keeps the full repr as CPython does.
+No cruntime change was needed; this reapply adds the accepted `AIL_CURRENT/test_ail_fuzz58.py`
+and registers it in `ail_check.MODULES`.  Probes in `/tmp/probes`: `f58_int`, `f58_float`
+(bases 0/2/8/10/16/36, empty, signs, long input, astral literals refused by name on both builds,
+and values through an argument, list item, attribute, dict value and aliases) match CPython on
+both builds.  Tests on the final tree: `test_ail_fuzz58`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` (4 modules, 320 s, 0 failed; 1 skipped, no zig for Windows).
+`python3 tools/diff_ids.py` is not present in this tree.
+
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is
