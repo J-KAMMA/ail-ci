@@ -8,7 +8,8 @@ literal is refused by name at compile time on both builds, while a non-literal n
 `r` (argument, list item, attribute, dict value) raises the ValueError on both. Added
 `AIL_CURRENT/test_ail_pre75.py`; probes are in `/tmp/probes/pre75_*.py`. The pre137 catch/order
 program now passes its direct negative `r` through a computed value, because that literal is
-refused at compile time; its runtime and pool-order checks are unchanged.
+refused at compile time; its runtime and pool-order checks are unchanged. The pre126 bounds
+program does the same for its empty-pool negative-`r` cases.
 
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
