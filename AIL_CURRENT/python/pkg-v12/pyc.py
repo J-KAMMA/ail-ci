@@ -33,6 +33,9 @@ CFLAGS_TUNE = ['-fno-tree-slp-vectorize']
 # by default (Apple clang and GCC on arm64, where FMA is baseline) would round once instead. x86-64
 # without -march has no FMA, so the generated code there does not change.
 CFLAGS_TUNE += ['-ffp-contract=off']
+# `#pragma omp simd` (emitted only for a flat float list comprehension whose elements cannot call
+# code or raise) is otherwise ignored: enable the loop hint without pulling in the OpenMP runtime.
+CFLAGS_TUNE += ['-fopenmp-simd']
 # Extra flags for the C compiler, for development: AIL_EXTRA_CFLAGS='-Werror=incompatible-pointer-types' turns the one
 # warning GCC 13 gives for a call of a runtime helper on the wrong struct type into an error (a packed list[str] field passed
 # to an ail_slist_* function compiled and misbehaved before the tests of that stage were run this way).
