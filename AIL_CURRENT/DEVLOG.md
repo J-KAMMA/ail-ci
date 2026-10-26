@@ -62,6 +62,15 @@ builds; `pre255_outside`, `pre255_method`, `pre255_lambda_list`, `pre255_lambda_
 `pre255_str_method`, `pre255_list_receiver_method` and `pre255_plain` match CPython on both
 builds.  `tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run
 and `--check` passes.
+## 2026-10-26 -- re-apply pre26: repr(e.args[i]) keeps the argument's kind (job-rbpre26-10270138)
+
+Re-applied the accepted pre26 change on this tree. On the typed path `e.args[i]` reads as text, so
+`repr(e.args[i])` repr'd that text: a `ValueError(3.0)` handler printed `'3.0'` where CPython prints
+`3.0`, and int, bool and None arguments were quoted the same way. The handler rewrite now lowers
+`repr(e.args[i])`, `f"{e.args[i]!r}"` and `%r` of one argument to a new `_ail_exc_arg_repr` accessor
+that formats the stored argument (a str keeps its quotes, a number does not). Both builds agree with
+CPython; the accepted `test_ail_pre26.py` keeps the probe, including negative and out-of-range
+indexes, and is registered in `ail_check.MODULES`.
 
 ## 2026-10-26 -- reapply pre225: grouping with an unrecognised type code (job-rbpre225-10261321)
 

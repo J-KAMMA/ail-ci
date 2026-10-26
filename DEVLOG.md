@@ -232,6 +232,15 @@ four touched pins and `--check` passes.
 Tests on this tree: `test_ail_silent6`, `test_ail_typed_inherit`, `test_ail_safetynet`,
 `test_ail_files` and `test_ail_corpus_findings3` pass (44 tests, 731 s, 1 skipped: no zig for
 `--target windows`).
+## 2026-10-26 -- re-apply pre26: repr(e.args[i]) keeps the argument's kind (job-rbpre26-10270138)
+
+Re-applied the accepted pre26 change on this tree. On the typed path `e.args[i]` reads as text, so
+`repr(e.args[i])` repr'd that text: a `ValueError(3.0)` handler printed `'3.0'` where CPython prints
+`3.0`, and int, bool and None arguments were quoted the same way. The handler rewrite now lowers
+`repr(e.args[i])`, `f"{e.args[i]!r}"` and `%r` of one argument to a new `_ail_exc_arg_repr` accessor
+that formats the stored argument (a str keeps its quotes, a number does not). Both builds agree with
+CPython; the accepted `test_ail_pre26.py` keeps the probe, including negative and out-of-range
+indexes, and is registered in `ail_check.MODULES`.
 
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
