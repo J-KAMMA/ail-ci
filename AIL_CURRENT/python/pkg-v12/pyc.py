@@ -21,7 +21,7 @@ input; Windows reads the same raw file into an owned buffer before calling the g
 """
 import argparse, ast, json, os, pathlib, subprocess, sys
 
-from pipeline import PipelineError, compiler, ffi_link_args, link_flags, sqlite_link_args, extra_libs
+from pipeline import PipelineError, compiler, ffi_link_args, link_flags, sqlite_link_args, extra_libs, opt_flags
 
 # Extra optimizer flags for the generated C. SLP vectorization is off: on a struct of doubles it packs
 # neighbouring fields (vx,vy / vz,m) into 16-byte vectors whose loads straddle the preceding scalar or
@@ -41,10 +41,14 @@ CFLAGS_TUNE += _os_flags.environ.get('AIL_EXTRA_CFLAGS', '').split()
 import native_diagnostics
 import buildcache
 import shadowing
+import fastwalk
+fastwalk.install()      # the same ast.walk in half the time, for every pass of this run
 from pyfront import Unsupported, to_pipeline_c
+import pyfunc
 from pyfunc import to_c as func_to_c
 from pyfunc import _module_const_scalar, module_table_refusal, _written_globals
 import modtables
+import unbound
 from pyfunc import NORET
 try:
     # BRIEF_mixed_mode.md's own capability probe (test_mixed.py): "pymix.py present in the
@@ -423,6 +427,8 @@ def _rewrite_script(source, force):
     at the `class` check below for what was tested before this paragraph was written.
     """
     tree = ast.parse(source.strip())
+    if os.environ.get('AIL_DEBUG') == '1':
+        ast.increment_lineno(tree, source[:len(source) - len(source.lstrip())].count('\n'))     # `.strip()` above ate leading blank lines
     expanded = []
     for node in tree.body:
         expanded.extend(_unwrap_main_guard(node))
@@ -496,11 +502,23 @@ def _rewrite_script(source, force):
                            kw_defaults=[], kwarg=None, defaults=[]),
         body=body, decorator_list=[], returns=None)
     new_tree = ast.Module(body=kept + [main_def], type_ignores=[])
+    snapshot = pyfunc.debug_snapshot_lines(new_tree)      # --debug: the unparse renumbers the lines
     ast.fix_missing_locations(new_tree)
-    return ast.unparse(new_tree)
+    unbound.SCRIPT.add(main_def.name)        # module-scope code: an unassigned read is a NameError (unbound.py)
+    text = ast.unparse(new_tree)
+    pyfunc.debug_remember_lines(snapshot, text)
+    return text
 
 
 def to_c(source, strict=True, name='run', info=None, external=None):
+    unbound.SCRIPT.clear()
+    try:
+        return _to_c(source, strict, name, info, external)
+    finally:
+        unbound.SCRIPT.clear()
+
+
+def _to_c(source, strict=True, name='run', info=None, external=None):
     """The C for any of three shapes, under one name, so the same `main` serves all of them: one
     expression over `xs` (pipeline mode, unchanged), one or more `def`s (function mode, unchanged
     except that a dangling top-level statement after them no longer compiles to nothing and never
@@ -685,13 +703,17 @@ def _source_line_marker(line):
 def fallback_note(reason, location=None):
     """The one-line stderr notice for a program the typed path refused but the general path built.
     `reason` is the typed refusal text (it carries its own "write instead" hint when it has one)."""
-    return 'note: %sbuilt on the general path (several times slower) because %s' % (
-        location + ': ' if location else '', ' '.join(str(reason).split()))
+    return 'note: %sbuilt on the general path (about 20x slower) because %s; run with --strict to see why' % (
+        location + ': ' if location else '', ' '.join(str(reason).split()).rstrip(';'))
 
 
 def build(source, out, strict=True, report=None, force_general=False):
     global last_fallback_reason, last_fallback_line
     last_fallback_reason = last_fallback_line = None
+    if os.environ.get('AIL_UNIFIED_FORCE') == '1':
+        # measurement only (docs/design/UNIFIED_IR.md): every program through the general path (with
+        # AIL_UNIFIED=1, through the unified inference too), typed-path programs included
+        force_general = True
     if not strict:
         # UPGRADE, do not refuse. The unchecked mode emits plain C `+ - *` with no overflow guard,
         # which SEMANTICS section 8 says this language does not do, and whose C is UNDEFINED rather
@@ -727,13 +749,56 @@ def build(source, out, strict=True, report=None, force_general=False):
                     report[key] = [shadowing.restore_text(item, shadow) for item in report[key]]
 
 
+class _BigCapable(Unsupported):
+    """The typed path was skipped because a rule-2/3/4 local proof failed; `build` first tries the exact general path."""
+
+
+def _refuse_big_capable(source, local=True):
+    """docs/design/BIGINT.md section 5 and rules 2-4: a whole program with a function that can need a big int (an int literal
+    beyond int64, `**`/`<<`/math calls, or rule 4's unproven int local) is not built on the typed path, which has int64 only.
+    The general path has exact ints. `local=False` keeps only the hard constructs, for the fallback when only the typed path
+    can build the program (a binary file or a socket)."""
+    import bigcap
+    try:
+        tree = ast.parse(source.strip())
+    except SyntaxError:
+        return
+    prelude = {n for n in os.environ.get('AIL_PRELUDE_UNITS', '').split('\n') if n}
+    if prelude:                       # library prelude units are not the program's own code (BIGINT.md rules 2-4)
+        tree.body = [n for n in tree.body if getattr(n, 'name', None) not in prelude]
+    marks = bigcap.marked(tree, local=local)
+    if marks:
+        name = sorted(marks, key=lambda k: (k != '<module>', k))[0]
+        raise _BigCapable('%s can need an int beyond int64 (%s); the typed path has int64 only and the general path has exact big ints'
+                          % ('the module code' if name == '<module>' else 'function %s()' % name, marks[name]))
+
+
 def _build_unshadowed(source, out, strict, report, force_general):
+    """Try the typed path; a big-capable refusal first tries the exact general path and, when only the typed path can build
+    the program (a binary file, a socket), falls back to the typed path with only the hard big-int constructs refused."""
+    try:
+        return _build_unshadowed_inner(source, out, strict, report, force_general, local_proof=True)
+    except _BigCapable:
+        try:
+            return _build_unshadowed_inner(source, out, strict, report, True, local_proof=False)
+        except _BigCapable:
+            raise
+        except Unsupported:
+            return _build_unshadowed_inner(source, out, strict, report, force_general, local_proof=False)
+
+
+def _build_unshadowed_inner(source, out, strict, report, force_general, local_proof=True):
     out = pathlib.Path(out)
     c = out.with_suffix('.c')
     info = {'_checked_arrays': True}
     if native_diagnostics.enabled():
         info['_want_source_regions'] = True
     try:
+        if not force_general and _is_whole_program(source):
+            # B2b: an unproven int local is an `ail_tint` on the typed path, so only the hard
+            # big-int constructs (a literal beyond int64, `**`, a variable shift, factorial/comb/perm)
+            # stay off it.
+            _refuse_big_capable(source, local=False)
         body = to_c(source, strict=strict, info=info)
         if force_general:
             raise Unsupported('general path explicitly requested')
@@ -757,8 +822,11 @@ def _build_unshadowed(source, out, strict, report, force_general):
         # either, so trying it would only trade the typed path's specific, correct reason for a
         # generic "not a defined function" one. Judged on the message text because the typed path
         # raises one exception class for both kinds of refusal (coordinator review, 2026-09-16).
-        if any(m in str(_typed_e) for m in _BOUNDARY_REFUSAL_MARKERS) or not _is_whole_program(source):
+        if not _is_whole_program(source):
             raise
+        # a DECLARED-BOUNDARY refusal of the typed path (sys.argv, sys.stdout, a file ...) is final only when
+        # the general path cannot build the program either; it is then reported as the typed path wrote it
+        boundary = any(m in str(_typed_e) for m in _BOUNDARY_REFUSAL_MARKERS)
         # AIL_GENERAL=v2: use pyboxed2 (the v2-runtime emitter, status-code error edges, no
         # setjmp/longjmp) instead of pyboxed (v1, setjmp-based, against the v1 runtime). v1 stays
         # the DEFAULT until v2 is complete -- this is purely an environment-selected swap, never
@@ -776,6 +844,8 @@ def _build_unshadowed(source, out, strict, report, force_general):
             boxed_c = (_boxed_impl.build(source, boxed_report, allow_mix=False) if force_general
                        else _boxed_impl.build(source, boxed_report))
         except Unsupported as boxed_refusal:
+            if boundary:
+                raise _typed_e
             raise _general_failure(_typed_e, typed_main, boxed_refusal)
         mix_units = boxed_report.get('mix_units') or []
         if not mix_units:
@@ -790,7 +860,12 @@ def _build_unshadowed(source, out, strict, report, force_general):
             # expressions inside a single statement); the CRT longjmp
             # walks it via RtlUnwindEx and faulted intermittently.
             # Prologue-level unwind info stays and is sufficient.
-            r = _cc([compiler(), '-O2', *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c), '-lm']
+            # The big-int runtime is much larger than the program's own code and most of it is unused (a program that
+            # adds only never calls divmod/text/range/...): drop the unused functions at link time for those builds.
+            # A program without the big runtime keeps exactly the old command line and binary (the no-int guarantee).
+            bigc = ['-ffunction-sections', '-fdata-sections'] if boxed_report.get('bigint') else []
+            bigl = ['-Wl,--gc-sections'] if boxed_report.get('bigint') else []
+            r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *bigc, *link_flags(), *bigl, '-o', str(out), str(c), '-lm']
                     + (['-pthread'] if boxed_report.get('threads') else []),     # G12: threads (threadrt.py)
                                capture_output=True, text=True, phase='compile_link')
             if r.returncode:
@@ -823,7 +898,9 @@ def _build_unshadowed(source, out, strict, report, force_general):
                 to = out.parent / ('%s_mix%d.o' % (out.name, i))
                 tc.write_text(csrc, encoding='utf-8')
                 native_diagnostics.generated(tc, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
-                r = _cc([compiler(), '-O2', *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', '-c', '-o', str(to), str(tc)],
+                r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables',
+                         *(['-ffunction-sections', '-fdata-sections'] if boxed_report.get('bigint') else []),
+                         '-c', '-o', str(to), str(tc)],
                                    capture_output=True, text=True, phase='compile')
                 if r.returncode:
                     raise _general_failure(_typed_e, typed_main, PipelineError('the C compiler rejected this (general path, typed clone of %r):\n%s' %
@@ -832,12 +909,15 @@ def _build_unshadowed(source, out, strict, report, force_general):
             c.write_text(boxed_c, encoding='utf-8')
             native_diagnostics.generated(c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
             obj_boxed = out.parent / ('%s_boxed.o' % out.name)
-            r = _cc([compiler(), '-O2', *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', '-c', '-o', str(obj_boxed), str(c)],
+            r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables',
+                     *(['-ffunction-sections', '-fdata-sections'] if boxed_report.get('bigint') else []),
+                     '-c', '-o', str(obj_boxed), str(c)],
                                capture_output=True, text=True, phase='compile')
             if r.returncode:
                 raise _general_failure(_typed_e, typed_main, PipelineError('the C compiler rejected this (general path):\n%s' %
                                     r.stderr[-800:]))
-            r = _cc([compiler(), '-O2', *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(obj_boxed)]
+            r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(),
+                     *(['-Wl,--gc-sections'] if boxed_report.get('bigint') else []), '-o', str(out), str(obj_boxed)]
                                + objs + ['-lm'], capture_output=True, text=True, phase='link')
             if r.returncode:
                 raise _general_failure(_typed_e, typed_main, PipelineError('the C compiler rejected this (general path, link step):\n%s' %
@@ -860,13 +940,14 @@ def _build_unshadowed(source, out, strict, report, force_general):
     main = _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info)
     c.write_text(body + main, encoding='utf-8')
     native_diagnostics.generated(c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
-    r = _cc([compiler(), '-O2', *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c)]
+    r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c)]
                        + (['-fno-strict-aliasing'] if info.get('inherit') else [])   # TYPED_INHERITANCE.md section 2
                        + (['-lm'] if info.get('libm') else [])
                        + (['-pthread'] if info.get('pthread') else [])
                        + (sqlite_link_args() if info.get('sqlite') else [])
                        + (['-lws2_32'] if os.name == 'nt' and {'TCPSOCKET', 'TCPHEAD'}.intersection(info.get('runtime_parts', [])) else [])
-                       + extra_libs(),
+                       + extra_libs()
+                       + ffi_link_args(),
                        capture_output=True, text=True, phase='compile_link')
     if r.returncode:
         raise PipelineError('the C compiler rejected this:\n%s' % r.stderr[-800:])
@@ -906,7 +987,7 @@ def build_link_units(source, out, unit_map, external=None):
                           + declarations + '\n'.join(functions)
                           + (references + main if unit == 0 else ''), encoding='utf-8')
         native_diagnostics.generated(c_path, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
-        result = native_diagnostics.run([compiler(), '-O2', *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables',
+        result = native_diagnostics.run([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables',
                                  *(['-fno-strict-aliasing'] if info.get('inherit') else []),
                                  '-c', '-o', str(o_path), str(c_path)],
                                 capture_output=True, text=True, phase='compile')
