@@ -263,6 +263,16 @@ arguments were quoted the same way.  The handler rewrite now lowers `repr(e.args
 the stored argument (a str keeps its quotes, a number does not).  Both builds agree with
 CPython; `test_ail_pre26.py` keeps the probe, including negative and out-of-range indexes.
 
+## 2026-10-24 - pre54: round() at the int64 boundary is refused by name
+
+The pre35 review recorded `z_intmin` (`round(-9223372036854775808.0)` then `abs`, unary `-`, `* -1`)
+as a pre-existing difference: CPython's unbounded int answers 2**63, while both builds compiled the
+program and stopped later with `integer overflow`.  The rounded value is INT64_MIN, which is
+representable, but its magnitude is not; the value is known at compile time, so a one-argument
+`round()` of a constant float at or beyond the int64 boundary is now refused by name in
+`pyc.build` on both builds rather than compiled into a program that stops later.  Values just
+inside the boundary, two-argument `round()` (a float result) and a user-defined `round` are
+unchanged.  Added `AIL_CURRENT/test_ail_pre54.py` and registered it in `ail_check.MODULES`.
 ## 2026-10-23 -- fuzz37: ordering TypeError names the written operator
 
 Fuzzing while loops and counters against CPython on both builds found that an
