@@ -1,3 +1,18 @@
+## 2026-10-26 -- re-apply pre32: exact constant powers and outermost edits (job-rbpre32-10261701)
+
+Re-applied the accepted pre32 change on the current tree.  The exact power fold is merged with
+this tree's class-level constant fold: a maximal constant `**` expression is evaluated with Python
+integers (4096-bit guard) only when the ordinary int64 fold failed, so `2**63 - 1`, `-(2**63)`
+and `2**63 - 2**63` reach the final in-range value; an uncancelled result outside int64 is written
+as a literal and refused by name.  Class-level expressions keep using `_fold_int_exact` and now
+spell the minimum with `(-9223372036854775807 - 1)`.  The overlapping-edit fix keeps only the
+outermost source range, so a module or class ancestor's exact value is not cut by a descendant
+power edit (`B = A - 2**63` with `A` at int64 max is -1; `"x" * (2**63 - 2**63)` parses).  The
+accepted `test_ail_pre32.py` is added and registered; its ancestor-overflow check accepts either
+named int64 refusal on this tree.  Probes in `/tmp/probes` (`pre32_routes`, `pre32_module`,
+`pre32_class`, `pre32_refuse_power`, `pre32_refuse_overlap`, `pre32_refuse_class`) match CPython
+on both builds or are refused by name.  `tools/diff_ids.py` is not present in this tree, so the
+DIFFERENCES ids stay as `C?-job-rbpre32-10261701-N`.
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is

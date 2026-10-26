@@ -726,21 +726,24 @@ def _fold_int_exact(node, known):
     return value
 
 
-def _fold(node, known):
+def _fold(node, known, exact=False):
     if isinstance(node, ast.Constant) and type(node.value) in (int, float, str, bytes):
         return node.value
     if isinstance(node, ast.Name) and node.id in known:
         return known[node.id]
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
-        value = _fold(node.operand, known)
+        value = _fold(node.operand, known, exact)
         if type(value) not in (int, float) or isinstance(node.op, ast.Invert) and type(value) is not int:
             raise _NotConstant
         value = {ast.USub: operator.neg, ast.UAdd: operator.pos, ast.Invert: operator.invert}[type(node.op)](value)
     elif isinstance(node, ast.BinOp) and type(node.op) in _FOLD_BINARY:
-        left, right = _fold(node.left, known), _fold(node.right, known)
+        left, right = _fold(node.left, known, exact), _fold(node.right, known, exact)
         numbers = type(left) in (int, float) and type(right) in (int, float)
         if isinstance(node.op, ast.Pow):
             if not numbers or type(right) is int and not 0 <= right <= 64:
+                raise _NotConstant
+            if (type(left) is int and type(right) is int and right > 0 and left not in (0, 1, -1)
+                    and abs(left).bit_length() * right > 4096):
                 raise _NotConstant
         elif isinstance(node.op, (ast.LShift, ast.RShift)):
             if type(left) is not int or type(right) is not int or not 0 <= right < 64:
@@ -757,9 +760,9 @@ def _fold(node, known):
         value = _FOLD_BINARY[type(node.op)](left, right)
     else:
         raise _NotConstant
-    if (type(value) is int and not -(1 << 63) <= value < 1 << 63
-            or type(value) is float and not math.isfinite(value)
-            or type(value) not in (int, float, str, bytes)):
+    if type(value) not in (int, float, str, bytes) or type(value) is float and not math.isfinite(value):
+        raise _NotConstant
+    if not exact and type(value) is int and not -(1 << 63) <= value < 1 << 63:
         raise _NotConstant
     return value
 
@@ -767,6 +770,14 @@ def _fold(node, known):
 def _is_literal(node):
     return (isinstance(node, ast.Constant) or isinstance(node, ast.UnaryOp)
             and isinstance(node.op, (ast.USub, ast.UAdd)) and isinstance(node.operand, ast.Constant))
+
+
+def _literal_repr(value):
+    """`-9223372036854775808` as arithmetic: both literals stay in int64 and the subtraction ends
+    on the minimum exactly."""
+    if type(value) is int and value == -(1 << 63):
+        return '(-9223372036854775807 - 1)'
+    return repr(value)
 
 
 def _byte_offsets(data):
@@ -825,18 +836,83 @@ def _class_statement_names(statement):
             if isinstance(inner, ast.Name) and isinstance(inner.ctx, (ast.Store, ast.Del))}
 
 
+def _contains_pow(tree):
+    """Id -> whether that node contains a `**`; computed once so the walk below is linear."""
+    found = {}
+
+    def mark(node):
+        has = isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow)
+        for child in ast.iter_child_nodes(node):
+            has = mark(child) or has
+        found[id(node)] = has
+        return has
+    mark(tree)
+    return found
+
+
+def _fold_powers(tree):
+    """Every maximal constant integer expression that contains `**`, exactly: `2**63 - 1` is
+    computed as Python does, so a final value in int64 need not abort at the intermediate 2**63.
+    A final value outside int64 becomes a literal that `_check_int64_literals` refuses by name."""
+    has_pow = _contains_pow(tree)
+    edits = []
+    folded = set()
+
+    def walk(node, inside):
+        candidate = False
+        if isinstance(node, ast.expr) and not inside and has_pow.get(id(node)):
+            needs_fold = False
+            try:
+                _fold(node, {})
+            except (_NotConstant, ArithmeticError, ValueError, TypeError, RecursionError):
+                needs_fold = True
+            if needs_fold:
+                try:
+                    value = _fold(node, {}, exact=True)
+                except (_NotConstant, ArithmeticError, ValueError, TypeError, RecursionError):
+                    pass
+                else:
+                    if type(value) is int and value.bit_length() <= 4096:
+                        edits.append((node, _literal_repr(value)))
+                        folded.add(id(node))
+                        candidate = True
+        for child in ast.iter_child_nodes(node):
+            walk(child, inside or candidate)
+    walk(tree, False)
+    return edits, folded
+
+
+def _outermost_edits(edits):
+    """Keep only the outermost edit of each overlapping source range. An exact ancestor already
+    accounts for the descendant, and applying both with offsets from the original text would cut
+    the ancestor's replacement."""
+    spans = sorted((((node.lineno, node.col_offset), (node.end_lineno, node.end_col_offset), node, literal)
+                    for node, literal in edits),
+                   key=lambda item: (item[0], -item[1][0], -item[1][1]))
+    kept = []
+    kept_spans = []
+    for start, end, node, literal in spans:
+        if any(start < kept_end and kept_start < end for kept_start, kept_end in kept_spans):
+            continue
+        kept.append((node, literal))
+        kept_spans.append((start, end))
+    return kept
+
+
 def fold_constants(text):
-    """Top-level `NAME = <constant arithmetic>` bound once in module scope, rewritten to its literal
-    value. A name that a nested block, a loop or a `global` function rebinds is not folded: its value
-    at the line that reads it is not the first one. A class-level assignment may read such a name:
-    its arithmetic runs in the class body, so it is folded here too (exactly, wide steps allowed)."""
+    """Constant integer expressions containing `**` are folded exactly (so a cancellation such as
+    `2**63 - 1` sees Python's intermediate); top-level `NAME = <constant arithmetic>` bound once in
+    module scope is rewritten to its literal as well. A name that a nested block, a loop or a
+    `global` function rebinds is not folded: its value at the line that reads it is not the first
+    one. A class-level assignment may read such a name: its arithmetic runs in the class body, so it
+    is folded here too (exactly, wide steps allowed)."""
     try:
         tree = ast.parse(text)
     except SyntaxError:
         return text
+    edits, folded = _fold_powers(tree)
     stored = _module_scope_bindings(tree)
     known = {}
-    edits = []
     for node in tree.body:
         if isinstance(node, ast.ClassDef):
             scope = {name: value for name, value in known.items() if type(value) is int}
@@ -858,24 +934,29 @@ def fold_constants(text):
                         except (_NotConstant, ArithmeticError, ValueError, TypeError, RecursionError):
                             pass
                         else:
-                            edits.append((expression, repr(value)))
+                            edits.append((expression, _literal_repr(value)))
                 shadowed |= _class_statement_names(statement)
             continue
         if not (isinstance(node, ast.Assign) and len(node.targets) == 1
                 and isinstance(node.targets[0], ast.Name) and stored[node.targets[0].id] == 1):
             continue
         try:
-            value = _fold(node.value, known)
+            value = _fold(node.value, known, exact=True)
         except (_NotConstant, ArithmeticError, ValueError, TypeError, RecursionError):
             continue
+        if type(value) is int and not -(1 << 63) <= value < 1 << 63:
+            if id(node.value) not in folded and value.bit_length() <= 4096:
+                edits.append((node.value, _literal_repr(value)))
+            continue
         known[node.targets[0].id] = value
-        if not _is_literal(node.value):
-            edits.append((node.value, repr(value)))
+        if not _is_literal(node.value) and id(node.value) not in folded:
+            edits.append((node.value, _literal_repr(value)))
     if not edits:
         return text
+    edits = _outermost_edits(edits)
     data = text.encode('utf8')
     starts = _byte_offsets(data)
-    for node, literal in reversed(edits):
+    for node, literal in sorted(edits, key=lambda item: (item[0].lineno, item[0].col_offset), reverse=True):
         start = starts[node.lineno - 1] + node.col_offset
         end = starts[node.end_lineno - 1] + node.end_col_offset
         padding = data[start:end].count(b'\n')
