@@ -2114,8 +2114,16 @@ def patch_defaultdict(c_text):
         if text.count(old) != 1:
             raise AssertionError('safetyrt: no place for the defaultdict factory: %r' % old[:60])
         return text.replace(old, new)
-    c_text = one(c_text, 'int8_t dd_factory; /* defaultdict marker: 0 plain dict, 1 int, 2 list, 3 set, 4 str (2026-09-16) */ } ail_mapobj;',
+    c_text = one(c_text, 'int8_t dd_factory; /* defaultdict marker: 0 plain dict, 1 int, 2 list, 3 set, 4 str (2026-09-16) */\n'
+                 '                 int8_t dirty;      /* a deletion left a dummy slot, as CPython\'s dk_nentries > ma_used */\n'
+                 '                 int64_t nentries;  /* CPython dk_nentries: live entries plus dummies, grown by every new key */\n'
+                 '                 int64_t tail_dead; /* dummies after the last live entry; popitem drops these */\n'
+                 '                 int64_t usable;    /* CPython dk_usable: appended-entry budget, not restored by delete/popitem */ } ail_mapobj;',
                  'int8_t dd_factory; /* defaultdict marker: 0 plain dict, 1 int, 2 list, 3 set, 4 str (2026-09-16) */\n'
+                 '                 int8_t dirty;      /* a deletion left a dummy slot, as CPython\'s dk_nentries > ma_used */\n'
+                 '                 int64_t nentries;  /* CPython dk_nentries: live entries plus dummies, grown by every new key */\n'
+                 '                 int64_t tail_dead; /* dummies after the last live entry; popitem drops these */\n'
+                 '                 int64_t usable;    /* CPython dk_usable: appended-entry budget, not restored by delete/popitem */\n'
                  '                 ail_obj dd_fn; /* dd_factory 5: the factory function (safetyrt.patch_defaultdict) */ } ail_mapobj;\n'
                  'static inline ail_st ail2d_call(ail_ctx *cx, ail_obj *out, ail_mapobj *m);')
     c_text = one(c_text, '            ail_mapobj *m = (ail_mapobj *)o;\n'
