@@ -15894,7 +15894,6 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
                           else '%s = %s' % (value, out[0]))
             out = [value]
         if kind == INT and index < len(_tint_params) and _tint_params[index] and len(out) == 1:
-            ctx.parts.add('TINTT')
             out = ['ail_tint_from_int64((int64_t)(%s))' % out[0]]
         groups[index] = out
     out = [value for group in groups for value in group]
@@ -15927,7 +15926,6 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
         return ordered('%s(%s)' % (symbol, ', '.join(out)))
     call = ordered('%s(%s)' % (symbol, ', '.join(out)))
     if ret == INT and _tint_ret:
-        ctx.parts.add('TINTT')
         call = 'ail_tint_i64(%s)' % call
     if ret in MAPS:
         temporary, _ = ctx.temp(ret)

@@ -920,12 +920,10 @@ def _source_check(args):
                 dependency = False
             stage = 'type'
             saved_surface = os.environ.get('AIL_SURFACE')
-            saved_ir = os.environ.get('AIL_IR')
             if _python_source(args, original):
                 os.environ['AIL_SURFACE'] = 'python'
             else:
                 os.environ.pop('AIL_SURFACE', None)
-            os.environ['AIL_IR'] = '0'
             try:
                 to_c(text, strict=True, info={'_want_units': True, '_checked_arrays': True},
                      library=args.library, external=external)
@@ -934,10 +932,6 @@ def _source_check(args):
                     os.environ.pop('AIL_SURFACE', None)
                 else:
                     os.environ['AIL_SURFACE'] = saved_surface
-                if saved_ir is None:
-                    os.environ.pop('AIL_IR', None)
-                else:
-                    os.environ['AIL_IR'] = saved_ir
         finally:
             sys.path[:] = previous_path
             sys.dont_write_bytecode = previous_bytecode
@@ -997,20 +991,6 @@ def _source_check(args):
                 if getattr(current, 'source_position', None) is not None:
                     path, line, column = current.source_position
                 current = current.__cause__ or current.__context__
-        if stage == 'type' and line is None:
-            literal = re.search(r'integer literal out of signed 64-bit range: (-?\d+)', message)
-            if literal is not None:
-                value = int(literal.group(1))
-                try:
-                    for node in ast.walk(ast.parse(text)):
-                        if isinstance(node, ast.Constant) and type(node.value) is int and node.value == value:
-                            position = source_map.get(node.lineno)
-                            if position is not None:
-                                path, line, column = position
-                                error.source_location_kind = 'source_statement'
-                            break
-                except SyntaxError:
-                    pass
         function = getattr(error, 'source_function', None)
         location_kind = 'source' if line is not None else None
         origin = origins.get(function)
