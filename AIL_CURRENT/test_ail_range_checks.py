@@ -379,6 +379,34 @@ fn main() {
 }
 """
 
+# A guard on a difference whose operands are themselves differences (`(a - b) - (c - d)`) must not
+# crash the analysis and must not leave a stale fact after a field store. The marker for the outer
+# subtraction is deliberately not created (its operands are markers, which cannot be parsed or
+# dropped), so the checks stay in place.
+NESTED_DIFF = r"""
+struct Delta { a: int; b: int; c: int; d: int; data: bytes; }
+
+impl Delta {
+    fn small(self) -> int {
+        if (self.a - self.b) - (self.c - self.d) < 1 { return 1; }
+        return 0;
+    }
+
+    fn peek(self) -> int {
+        return self.data[self.a - self.b - (self.c - self.d)];
+    }
+}
+
+fn main() {
+    let p = Delta(5, 2, 1, 1, b"abcd");
+    print(p.small(), p.peek());
+    let q = Delta(1, 1, 1, 1, b"");
+    print(q.small());
+    q.d = 5;
+    try { print(q.peek()); } except IndexError { print("oob"); }
+}
+"""
+
 # Codegen: which checks are gone (proven) and which stay (not provable).
 CODEGEN = r"""
 fn proven(n: int) -> int {
@@ -537,6 +565,13 @@ class RangeCheckTests(unittest.TestCase):
         self.assertNotIn('ail_bytes_get', read8)
         self.assertNotIn('ail_bytes_get', read32)
         self.assertIn('ail_bytes_get', unsafe)
+
+    def test_nested_difference_guard_compiles_and_matches(self):
+        built, exe, _ = build(self.tmp.name, 'nesteddiff', NESTED_DIFF)
+        self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+        ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=120)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertEqual(ran.stdout, cpython_reference(NESTED_DIFF))
 
     def test_codegen_proven_and_kept(self):
         built, exe, program = build(self.tmp.name, 'codegen', CODEGEN)

@@ -1088,9 +1088,12 @@ class _Analyzer:
                 if s in blb:
                     hi = min(hi, d - blb[s])
             ea, eb = self.exact_syms(a), self.exact_syms(b)
-            if len(ea) == 1 and len(eb) == 1:
+            if len(ea) == 1 and len(eb) == 1 and '|' not in ea[0][0] and '|' not in eb[0][0]:
                 # Keep the identity `result == (sa + oa) - (sb + ob)` so a guard on the result
                 # (`available < n`) can refine the operands themselves (`position <= len - n`).
+                # An operand that is itself such a marker (`(a - b) - (c - d)`) would put a `|`
+                # inside the fields: the marker could no longer be parsed, and the drop/assign
+                # paths only understand flat ones, so keep the ordinary bounds instead.
                 marker = '#sub|%s|%s|%d|%d' % (ea[0][0], eb[0][0], ea[0][1], eb[0][1])
                 ub[marker] = 0
                 lb[marker] = 0
