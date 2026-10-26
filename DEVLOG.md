@@ -12,6 +12,22 @@ records the already-fixed rows.  Probes in `/tmp/probes`: `pre203_min`, `pre203_
 (`-(-9223372036854775808)`) is refused by name on both.  Tests on the final tree:
 `test_ail_pre203`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`
 (4 modules, 346 s, 0 failed).
+## 2026-10-26 -- reapply pre201 constant-shift fold budget (job-rbpre201-10261355)
+
+Re-applied the accepted pre201 change on this tree.  The out-of-range shift refusal is already
+present here: pre236/pre241's generic constant-expression rule refuses `True << 64`, `1 << 64`
+and their argument/list/attribute/dict/assignment routes by name with the `outside the signed
+64-bit range` wording, so the conflict resolution keeps that rule and does not add pre201's
+second refusal path.  The pre201 fold-budget piece is added to `_check_constant_power`: a
+dedicated `_const_fold_int` mirrors the pre190 zero/base shortcuts and its 2**20-bit budget
+(2**24 for a 0/1/-1 exponent), so `((10 ** 64) ** 64) >> 100001` folds to 0 like CPython instead
+of being refused, while `(1 << 1048576) >> 1048576` and wider intermediates stay refused by name.
+`test_ail_pre201.py` covers bool/int shifts, a negative result, argument, list item, class
+attribute, dict value and assignment, plus the in-range boundaries; its out-of-range check
+accepts either named refusal.  Probes `p201_*` in `/tmp/probes` match CPython or are refused by
+name on both builds.  Final-state modules: test_ail_pre201, test_ail_pre190, test_ail_pre195,
+test_ail_pre205, test_ail_pre191, test_ail_pre236, test_ail_pre241, test_ail_pre121,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
 
 ## 2026-10-25 -- pre227 suite fix: the constant check owns the refusal wording (job-pre227-10260534)
 
