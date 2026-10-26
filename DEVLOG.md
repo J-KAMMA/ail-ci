@@ -1,3 +1,21 @@
+## 2026-10-26 -- re-apply pre9: `int(<float literal>)` outside int64 refused (job-rbpre9-10262125)
+
+Re-applied the accepted pre9 change on this tree. CPython's int is unbounded, so `int(1e300)`
+returns an exact big integer; AIL's int is 64-bit (SEMANTICS section 1), and the conversion used
+to compile and then stop with `integer overflow` on both the typed/default and general builds.
+The value is known at compile time, so `int(<float literal>)` outside [-2**63, 2**63) is now
+refused by name in all three emitters (`pyfunc.py`, `pyboxed2.py`, `pyboxed.py`, through
+`pyfront.refuse_int_float_literal`), the same way an out-of-range integer literal already was.
+In-range float literals, including `-9223372036854775808.0`, and values arriving through
+arguments, lists, attributes, dicts, aliases or variables keep the ordinary conversion.
+
+`test_ail_pre9.py` covers the refused literals (1e300, -1e300, 2**63 as a float, an infinity
+literal) in default/general builds on AIL_IR=0/1, and compares in-range literal and flow results
+with CPython. Probes in `/tmp/probes` (`pre9_inrange`, `pre9_flows`, `pre9_empty`,
+`pre9_refuse_pos/neg/two63/inf/unary`) match CPython or are refused by name on both builds.
+Final-state modules: `test_ail_pre9`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` (4 modules, 292 s, 0 failed).
+
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is

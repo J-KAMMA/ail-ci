@@ -66,7 +66,7 @@ import typedinherit
 import shadowing
 import rangecheck
 from pipeline import PipelineError
-from pyfront import BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Unsupported, _use, int_constant, refuse_complex_pow
+from pyfront import BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Unsupported, _use, int_constant, refuse_complex_pow, refuse_int_float_literal
 
 # A capability marker, not a behaviour: lets a SHARED judge (one file imported against many
 # `pkg-*` copies of this module, e.g. `test_floatparam.py`) ask "does THIS copy infer a float
@@ -17046,6 +17046,7 @@ def _call(node, ctx):
         ctx.has_try = True
         return 'ail_str_to_int_base(%s, %s)' % (v, rec(base_node))
     if f == 'int' and len(a) == 1:
+        refuse_int_float_literal(a[0])
         # AIL_TASK_stdio_20260915.md scope item 4: `int(<str>)` -- CPython's own rule (optional
         # whitespace, optional sign, decimal digits; anything else ValueError), via the new
         # `ail_str_to_int` (cruntime.py's STR block) and the SAME catchable-raise correctness fix
