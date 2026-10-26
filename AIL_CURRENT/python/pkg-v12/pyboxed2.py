@@ -6518,6 +6518,13 @@ class Compiler(boxclosure.ClosureMixin):
                 # the function statically; read the slot instead, exactly as expr_Name does.
                 return self.call_value(self.expr(ast.Name(id=name, ctx=ast.Load()), ctx), args, kwargs, ctx)
             return self._call_user_function(name, args, kwargs, ctx)
+        if (name in ctx.slot_of or name in ctx.ptr_names or name in ctx.clo_index
+                or name in ctx.free_names or name in ctx.cell_slots):
+            # A parameter, local, cell or closure binding of a built-in name shadows the built-in
+            # for the WHOLE activation in CPython, exactly as it shadows a module function above.
+            # The built-in dispatch below is by name only, so read the binding instead (an unbound
+            # local is UnboundLocalError, a non-callable is TypeError).
+            return self.call_value(self.expr(ast.Name(id=name, ctx=ast.Load()), ctx), args, kwargs, ctx)
         if name in filelib.PRIMS:
             return self._call_fileprim(name, args, kwargs, ctx)
         m = getattr(self, '_b_' + name, None)

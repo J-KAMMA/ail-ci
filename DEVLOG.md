@@ -1,3 +1,23 @@
+## 2026-10-26 - pre296: a local binding of a built-in name wins over the built-in call (job-pre296-10270440)
+
+The pre54 reviewer's first pre-existing difference was a parameter named `round` that was not
+honoured: `def apply(round, x): return round(x)` called the built-in when the argument was a
+callable, so the probe printed `-6` / `int` where CPython prints `-16.5` / `float`. The general
+path now reads a parameter, local, cell or closure binding named like a built-in instead of
+dispatching to the built-in by name, and the typed path refuses that call by name so the default
+build falls back to it. This covers the exact parameter case plus a local lambda, a closure cell,
+and values arriving through a list item, an attribute and a dict value; a non-callable binding
+keeps CPython's TypeError and an unshadowed `round` is unchanged. Added
+`AIL_CURRENT/test_ail_pre296.py`, registered in `ail_check.MODULES`; `tools/update_manifest.py`
+was run and `--check` exits 0. Probes in `/tmp/probes` on both builds: `p296_param`,
+`p296_local`, `p296_closure`, `p296_routes`, `p296_callable_param`, `p296_noncallable`,
+`p296_unshadowed`, `p296_len_local`, `p296_len_param`, `p296_abs_local` and `p296_no_feature`
+match CPython; `p296_builtin_value` is refused by name (passing the built-in `round` as a value
+is a separate pre-existing gap). Tests on the final tree: `test_ail_pre296`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`, plus the related
+`test_ail_builtin_shadowing` and `test_ail_pre218`. A lambda assigned after a call in the same
+function is still dropped by a separate scanning pass, so that unbound-local edge remains
+pre-existing on both builds.
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is

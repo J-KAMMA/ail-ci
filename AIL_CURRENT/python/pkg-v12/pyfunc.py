@@ -16576,6 +16576,13 @@ def _call(node, ctx):
     if not isinstance(node.func, ast.Name):
         raise Unsupported('an indirect call')
     f, a = node.func.id, node.args
+    if (f in getattr(ctx, 'local_bindings', ()) and f in shadowing.PY_BUILTINS
+            and f not in ctx.funcs and f not in ctx.classes):
+        # A parameter, local, loop target or import of a built-in name shadows the built-in for
+        # the whole activation in CPython; the typed path dispatches built-ins by name, so name
+        # the shape and let the general path read the local value (or its UnboundLocalError).
+        raise Unsupported('%r is a local that shadows the builtin %s(); a call through a local '
+                          'value is not supported here (the general path builds it)' % (f, f))
     if f in ('list', 'sorted') and f not in ctx.funcs and f not in ctx.classes and a:
         kind = _etype(a[0], ctx)
         if _is_olist_kind(kind):
