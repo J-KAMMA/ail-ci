@@ -1,3 +1,26 @@
+## 2026-10-26 -- pre293: a call of an instance field that shadows a method is refused by name (job-pre293-10270436)
+
+The pre279 review recorded that `C().f(1)` with an instance field `f` beside a method `f` was
+wrong on both builds.  Reproduced here: the general path dispatched statically to the method and
+printed `101` where CPython reads the instance dict, calls the field's callable instance and
+prints `11`; a non-callable field printed the method's result instead of raising the class-named
+TypeError (`'F'`, `'bytes'`, `'int'`), and the pre279 route reported `'instance'`.  `pyboxed2.py`
+now records each class's instance fields (`self.x = ...`, tuple unpacking, `setattr(self, ...)`)
+and refuses `obj.x(...)` by name at compile time when a field of that name shadows a method of the
+receiver's class (or of a descendant), naming the field and class; the dynamic-receiver path does
+the same for every class that defines the method.  `super().x(...)`, `C.x(obj, ...)` and the typed
+path's `Callable` field keep their CPython-matching behaviour.
+
+Probes in /tmp/probes, each on both builds with `tools/cmp.sh`: `p1_callable_instance`,
+`p2_noncallable_instance`, `p3_bytes_field`, `p4_int_field`, `p5_lambda_field`, `p6_argument`,
+`p7_list_item`, `p8_attribute`, `p9_dict_value`, `p11_inherit`, `p12_annotated`, `p16_setattr`,
+`p17_unpack`, `p18_descendant`, `callable_field`, `callable_field_attr`, `callable_field_var`,
+`bytes_field` and `noncall_field` are refused by name (the field and class named); `p14_super`
+and `p15_unbound` match CPython on both builds; `callable_typed_field` matches CPython on the
+default build and is refused by name on the forced-general build.  `p10_plain_field`, `p13_getattr`
+and the `field_only_*` probes keep their pre-existing named refusals (no method of the same name).
+Tests on the final tree: `test_ail_pre293`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` (4 modules, 331 s, 0 failed).
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is

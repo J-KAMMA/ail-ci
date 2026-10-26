@@ -3112,11 +3112,32 @@ class Compiler(boxclosure.ClosureMixin):
         # share the reference with every instance and class read.
         for i, (aname, aval) in enumerate(class_attrs):
             class_attrs[i] = (aname, aval, self._module_global_slot('__ail_ca_%s_%d' % (node.name, i)))
+        # Instance fields assigned by the class's own methods (`self.x = ...`).  CPython keeps
+        # them in the instance dict, which shadows a method of the same name on every read; a
+        # call of `obj.x()` then goes through the FIELD's value, not the method.
+        inst_fields = set()
+        for item in node.body:
+            if not isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            decs = {getattr(d, 'id', getattr(d, 'attr', None)) for d in item.decorator_list}
+            if 'staticmethod' in decs or 'classmethod' in decs or not item.args.args:
+                continue
+            recv = item.args.args[0].arg
+            for n in ast.walk(item):
+                if (isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Store)
+                        and isinstance(n.value, ast.Name) and n.value.id == recv):
+                    inst_fields.add(n.attr)
+                elif (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                      and n.func.id == 'setattr' and len(n.args) >= 2
+                      and isinstance(n.args[0], ast.Name) and n.args[0].id == recv
+                      and isinstance(n.args[1], ast.Constant) and isinstance(n.args[1].value, str)):
+                    inst_fields.add(n.args[1].value)
         class_body = []
         for kind, what in body_order:
             class_body.append((kind,) + (class_attrs[what] if kind == 'a' else (what,)))
         self.classes[node.name] = {'base': base, 'methods': methods, 'class_attrs': class_attrs,
-                                   'class_body': class_body, 'dc': dc, 'dc_hide': hide}
+                                   'class_body': class_body, 'dc': dc, 'dc_hide': hide,
+                                   'inst_fields': frozenset(inst_fields)}
         self.class_order.append(node.name)
 
     def _class_definition(self, cname, attr):
@@ -3140,6 +3161,28 @@ class Compiler(boxclosure.ClosureMixin):
                 return cname, hit
             cname = self.classes[cname]['base']
         return None, None
+
+    def _shadowing_field_owners(self, klass, attr):
+        """The classes whose instance field `attr` shadows a method of the same name.
+
+        A class's own methods assign `self.attr`; CPython reads that instance-dict entry before
+        the class dict, so `obj.attr(...)` calls the field's value (a function, a callable
+        instance, or a TypeError), never the method.  The general path cannot model a call
+        through such a value, so the call is refused by name at compile time.  The classes
+        considered are `klass`, its bases and its descendants: the run-time object may be any of
+        them."""
+        if klass not in self.classes:
+            return []
+        chain = []
+        k = klass
+        while k in self.classes and k not in chain:
+            chain.append(k)
+            k = self.classes[k]['base']
+        chain.extend(self._descendants(klass))
+        if self._resolve_method(klass, attr) is None:
+            return []
+        return [c for c in dict.fromkeys(chain)
+                if attr in self.classes[c].get('inst_fields', ())]
 
     def _resolve_method(self, klass, mname):
         seen = set()
@@ -8406,8 +8449,14 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t, ''.join(', ' + a for a in argcs)))
                 ctx.check()
                 return t
-        recv_c = self.expr(recv, ctx)
         cname = self._inst_class(recv, ctx)
+        if cname:
+            shadow = self._shadowing_field_owners(cname, f.attr)
+            if shadow:
+                raise Unsupported("calling the instance field '%s' of %s (a field with the same "
+                                  "name shadows the method, and a call through the field's value "
+                                  "is not modelled)" % (f.attr, shadow[0]))
+        recv_c = self.expr(recv, ctx)
         if cname:
             plan = self._virtual_plan(cname, lambda c: self._resolve_method(c, f.attr))
             if plan[1]:
@@ -8649,6 +8698,11 @@ class Compiler(boxclosure.ClosureMixin):
         if not owners:
             return None
         owners.sort(key=depth, reverse=True)
+        shadow = [c for c in owners if self._shadowing_field_owners(c, f.attr)]
+        if shadow:
+            raise Unsupported("calling the instance field '%s' of %s (a field with the same "
+                              "name shadows the method, and a call through the field's value "
+                              "is not modelled)" % (f.attr, shadow[0]))
         t = ctx.tmp()
         if any(self._is_exc_class(c) for c in owners):
             # an exception object is an exception value (safetyrt.EXC) and has its class's methods too
