@@ -1,20 +1,6 @@
-**Finish this job.** Your earlier commits are on this branch, but the last review ran out of time before giving a verdict. Check that the work meets the original task below, measure as it asks, and fix anything missing. If the change does not reach the keep threshold, revert it and say so. Commit.
+**Your change breaks other tests in the full suite.** On top of the current integration branch, these test modules fail with your change and pass without it: test_ail_fuzz59 test_ail_grid_return test_ail_numeric_bindings test_ail_numeric_profiles test_ail_numeric_profiles_native test_ail_record_initializers test_ail_sdk test_ail_sdk_environment test_ail_tcp_json_deadlines test_ail_tcp_json_lines_poll_resources.
 
---- ORIGINAL TASK ---
-**Speed: binary_cursor_records, second step.** It is still 4.7x slower than C. The earlier measurement found:
-- the per-record loop is 59.5% of the run;
-- unchecked reads alone would be worth about 16%;
-- the accessor calls (`BinaryCursor.read_*`, each calling `remaining()`) remain.
-
-Make small typed methods inline at their call sites, or let the compiler prove the bounds once per record and drop the repeated checks. Change only the compiler and runtime.
-
-**How to work (speed rules).**
-1. Measure the share first, with icount or rdtsc.
-2. Output must stay identical, which `compare.py` checks against the oracle.
-3. Report `python3 bench/compare.py --app binary_cursor_records` before and after.
-4. Keep the change only if the gain is at least 3% and the ranges do not overlap; otherwise revert.
-
-Commit.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find what your change broke, and fix it so they pass again while keeping your own fix and its test. If your fix cannot coexist with them, revert it and say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
