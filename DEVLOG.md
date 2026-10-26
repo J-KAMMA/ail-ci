@@ -1,3 +1,24 @@
+## 2026-10-26 -- pre283: class-attribute store through a class value is refused by name (job-pre283-10270202)
+
+The pre275 reviewer recorded a class-attribute assignment (`r_class_mutate*`) that already failed
+before that job: `class Box: v = 1.0` + `Box.v = 2.5` prints 2.5 on CPython, but both builds
+raised `AttributeError: 'type' object has no attribute 'v'`.  The general path keeps each class
+attribute in a module slot it only reads and copies onto instances, so it cannot store through a
+class object; instead of changing that model, the construct is refused by name at compile time:
+pyboxed2 refuses a statically class-valued base (a direct unshadowed class name; exit 3, leaving
+the typed path's own class-attribute support on the default build untouched), the front end
+refuses an alias of a class and a class read out of a literal list/tuple/dict (constant index,
+negative or not; exit 2), and `ail_inst_setattr_chk` raises a named NotImplementedError for a base
+that only holds a class at run time (a parameter, an instance attribute, a mutated container).
+Instance stores and names shadowed by a local, parameter, loop target or closure cell are
+unchanged.  Probes in `/tmp/probes` (`c*`, `m*`, `n*`, `t*`): direct/new/aug/annotated/alias/
+literal-container stores are refused by name on both builds; `c6/c7/c8/c11/c13`, `n3/n7/n8/n9/
+n13`, `t9/t10` match CPython on both; `t1/t2/t3/t5` and the class-level program match on the
+default build and are refused on the general build; `n1/n2` are refused at run time by name.
+Tests on the final tree: `test_ail_pre283`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`, `test_ail_dunders`, `test_ail_typed_inherit` (6 modules, 320 s,
+0 failed).  `tools/update_manifest.py` run and `--check` passes.
+
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is

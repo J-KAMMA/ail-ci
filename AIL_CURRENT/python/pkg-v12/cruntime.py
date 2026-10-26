@@ -16729,6 +16729,17 @@ static __attribute__((noinline, cold)) ail_st ail_attr_not_inst(ail_ctx *cx, ail
     return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, buf);
 }
 static inline ail_st ail_inst_setattr_chk(ail_ctx *cx, ail_obj inst, int64_t name_id, ail_obj val) {
+    if (__builtin_expect(inst.tag == AIL_T_CLASS, 0)) {
+        /* A store through a class value reaches here only when the base could not be proven to be
+           an instance at compile time (a parameter, an attribute, a container item, ...).  The
+           general path keeps class attributes in slots it only reads, so name the construct
+           instead of the misleading AttributeError this used to raise. */
+        char cbuf[240];
+        snprintf(cbuf, sizeof cbuf, "assigning the class attribute '%s' through a class value is "
+                 "not in the subset (the general path cannot update a class attribute)",
+                 cx->intern_tab[name_id]);
+        return ail_raise_c(cx, AIL_B_NOTIMPLEMENTEDERROR, cbuf);
+    }
     if (__builtin_expect((unsigned)(inst.tag - AIL_T_INST) > 1u, 0)) return ail_attr_not_inst(cx, inst, cx->intern_tab[name_id]);   /* INST, EXC are adjacent */
     ail_inst_setattr(cx, inst, name_id, val);
     return AIL_OK;
