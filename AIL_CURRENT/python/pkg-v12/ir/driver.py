@@ -221,10 +221,11 @@ def _apply(P, args, kwargs, result, current):
     # the IR cannot lower): the checks below are conditions for *tagged* lowering, not for the
     # legacy result, so they must not turn into a refusal here.
     _tagged = not getattr(P, 'TINT_DISABLED', False)
+    _general_ok = not os.environ.get('AIL_NO_GENERAL')
     _user_methods = set(getattr(ctx, 'user_method_names', ()))
     _attr_calls = [n for n in ast.walk(fn)
                    if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
-    if _py and _tagged and any(n.func.attr in _user_methods for n in _attr_calls):
+    if _general_ok and _py and _tagged and any(n.func.attr in _user_methods for n in _attr_calls):
         from pyfront import Unsupported
         if not os.environ.get('AIL_NO_GENERAL'):
             raise Unsupported('%s() calls a user method, which the tagged-int lowering does not type' % fn.name)
@@ -240,7 +241,7 @@ def _apply(P, args, kwargs, result, current):
         and (n.func.id.startswith(('_ail_', '_Ail')) or n.func.id in _io_names
              or n.func.id in getattr(ctx, 'prelude_names', ()))
         for n in ast.walk(fn)) or any(isinstance(n, (ast.With, ast.AsyncWith)) for n in ast.walk(fn))
-    if _py and _tagged and not _io_like:
+    if _general_ok and _py and _tagged and not _io_like:
         for _n in ast.walk(fn):
             if isinstance(_n, ast.Call) and isinstance(_n.func, ast.Name) and (_n.func.id in ('int', '_ail_int2') or _n.func.id.endswith(('str_to_int', 'bytes_to_int'))) and _n.args:
                 try:
@@ -249,10 +250,9 @@ def _apply(P, args, kwargs, result, current):
                     _k = None
                 if _k == P.STR or _k == P.BYTES:
                     from pyfront import Unsupported
-                    if not os.environ.get('AIL_NO_GENERAL'):
-                        raise Unsupported('%s() parses an int from text, which the tagged-int lowering does not cover'
-                                          % fn.name)
-    if _py and _tagged and not _library_call and (getattr(ctx, 'numeric_tokens', None) or getattr(ctx, 'numeric_assignments', None)):
+                    raise Unsupported('%s() parses an int from text, which the tagged-int lowering does not cover'
+                                      % fn.name)
+    if _general_ok and _py and _tagged and not _library_call and (getattr(ctx, 'numeric_tokens', None) or getattr(ctx, 'numeric_assignments', None)):
         from pyfront import Unsupported
         if not os.environ.get('AIL_NO_GENERAL'):
             raise Unsupported('%s() mixes int and float bindings, which the tagged-int lowering does not cover'
@@ -299,21 +299,10 @@ def _apply(P, args, kwargs, result, current):
         isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
         and (getattr(P, 'TINT_SIGS', {}).get(n.func.id) or ((), 0))[1]
         for n in ast.walk(fn))
-    # A call result the proof cannot bound has no named local to tag. When the IR can lower the
+    # A call result the proof cannot bound has no named local to tag: when the IR can lower the
     # function, TINT_SIGS gives its result the tagged type and the return checks the conversion.
-    # A build with the general path available still uses it: the typed path cannot hold a result
-    # above int64 in a list/dict/field, and dropping to the general path is what keeps such a
-    # program exact. Only a typed-only build (AIL_NO_GENERAL) has no exact alternative, and there
-    # the function keeps the legacy emitter if the IR cannot lower it.
+    # A typed-only build has no exact alternative, so the fallback below keeps the legacy emitter.
     _call_result_proof = (_proof or '').startswith('a call result not proven to fit int64')
-    _typed_only = bool(os.environ.get('AIL_NO_GENERAL')) or getattr(P, 'GENERAL_BLOCKED', False)
-    if _py and _tagged and _needs_tint and _no_tint_locals and not _has_tint_call \
-            and not (_call_result_proof and _typed_only) \
-            and not (_proof or '').startswith(('it calls ', 'it contains ')):
-        from pyfront import Unsupported
-        if not os.environ.get('AIL_NO_GENERAL'):
-            raise Unsupported('%s() has an int operation the local proof cannot bound, but no tagged local (%s)'
-                              % (fn.name, _proof))
     _sig = getattr(P, 'TINT_SIGS', {}).get(fn.name) if _py else None
     if _sig and (any(_sig[0]) or _sig[1]) and not _io_like:
         _needs_tint = True
