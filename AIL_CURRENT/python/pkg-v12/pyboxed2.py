@@ -2086,6 +2086,7 @@ class Compiler(boxclosure.ClosureMixin):
         self.class_order = []
         self.functions = {}        # top-level name -> info
         self.attr_names = set()
+        self.assigned_attrs = frozenset()  # every `obj.attr = ...` name in the program (see compile)
         self.module_names = set()
         self.global_var_kind = {}
         self.global_elem_kind = {}
@@ -2126,6 +2127,13 @@ class Compiler(boxclosure.ClosureMixin):
     # ------------------------------------------------------------------------------- entry point
     def compile(self, source):
         tree = ast.parse(source)
+        # An instance attribute assignment shadows a class method of the same name (a method is a
+        # non-data descriptor), wherever the assignment is written: in a method, at module scope,
+        # through an alias, a loop target or a `with ... as`.  Remember the names so a call through
+        # an instance can check the instance table first (p02 of the pre260 review).
+        self.assigned_attrs = frozenset(
+            n.attr for n in ast.walk(tree)
+            if isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Store))
         lazy_genexp = _lazy_raising_genexp(tree)
         if lazy_genexp is not None:
             refusal = Unsupported(_GENEXP_VALUE_REFUSAL)
@@ -8705,25 +8713,33 @@ class Compiler(boxclosure.ClosureMixin):
         recv_c = self.expr(recv, ctx)
         cname = self._inst_class(recv, ctx)
         if cname:
-            plan = self._virtual_plan(cname, lambda c: self._resolve_method(c, f.attr))
-            if plan[1]:
-                # a subclass overrides this method: dispatch on the run-time class (C27)
-                pargs, pkw = self._precompute_args(args, kwargs, ctx)
-
-                def mkargs(info, recv_c=recv_c, pargs=pargs, pkw=pkw):
-                    a = self._bind_args(f.attr, info, pargs, pkw, ctx)
-                    return a if info.get('is_static') else [self._self_arg(info, recv_c)] + a
-                return self._emit_virtual(plan, recv_c, mkargs, ctx, f.attr)
-            info = self._resolve_method(cname, f.attr)
-            if info:
-                argcs = self._bind_args(f.attr, info, args, kwargs, ctx)
-                if not info.get('is_static'):
-                    argcs = [self._self_arg(info, recv_c)] + argcs
-                t = ctx.tmp()
-                ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t,
-                         ''.join(', ' + a for a in argcs)))
-                ctx.check()
-                return t
+            info0 = self._resolve_method(cname, f.attr)
+            if (info0 is not None and f.attr in self.assigned_attrs
+                    and not info0.get('is_property') and not info0.get('is_setter')):
+                # CPython looks the instance table up before the class's non-data method
+                # descriptor: `class C: def f(...)` plus `self.f = lambda ...` calls the field.
+                if kwargs or any(isinstance(a, ast.Starred) for a in args):
+                    raise Unsupported('calling .%s() with keyword or starred arguments when an '
+                                      'instance attribute of the same name may shadow it' % f.attr)
+                self.attr_names.add(f.attr)
+                self._need_inst_findattr()
+                res, fld = ctx.tmp(), ctx.tmp()
+                ctx.emit('if (ail_inst_findattr(%s, g_attr_%s, &%s)) {' %
+                         (recv_c, f.attr, fld))
+                ctx.indent += 1
+                r = self._call_field_value(fld, args, ctx)
+                ctx.emit('%s = %s;' % (res, r))
+                ctx.indent -= 1
+                ctx.emit('} else {')
+                ctx.indent += 1
+                r = self._emit_inst_method(cname, recv_c, f, args, kwargs, ctx)
+                ctx.emit('%s = %s;' % (res, r))
+                ctx.indent -= 1
+                ctx.emit('}')
+                return res
+            r = self._emit_inst_method(cname, recv_c, f, args, kwargs, ctx)
+            if r is not None:
+                return r
         m = getattr(self, '_m_' + f.attr, None)
         kind = self.infer_kind(recv, ctx)
         if not cname and kind is None:
@@ -8771,6 +8787,30 @@ class Compiler(boxclosure.ClosureMixin):
             return t
         raise Unsupported('the method .%s() (on a %s)' % (f.attr, kind or 'value of unknown '
                                                           'static kind'))
+
+    def _emit_inst_method(self, cname, recv_c, f, args, kwargs, ctx):
+        """The static / virtual dispatch for `obj.<method>(...)` on an instance of `cname`; None
+        when no user method of that name exists (the builtin method handlers run next)."""
+        plan = self._virtual_plan(cname, lambda c: self._resolve_method(c, f.attr))
+        if plan[1]:
+            # a subclass overrides this method: dispatch on the run-time class (C27)
+            pargs, pkw = self._precompute_args(args, kwargs, ctx)
+
+            def mkargs(info, recv_c=recv_c, pargs=pargs, pkw=pkw):
+                a = self._bind_args(f.attr, info, pargs, pkw, ctx)
+                return a if info.get('is_static') else [self._self_arg(info, recv_c)] + a
+            return self._emit_virtual(plan, recv_c, mkargs, ctx, f.attr)
+        info = self._resolve_method(cname, f.attr)
+        if info:
+            argcs = self._bind_args(f.attr, info, args, kwargs, ctx)
+            if not info.get('is_static'):
+                argcs = [self._self_arg(info, recv_c)] + argcs
+            t = ctx.tmp()
+            ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t,
+                     ''.join(', ' + a for a in argcs)))
+            ctx.check()
+            return t
+        return None
 
     @staticmethod
     def _self_arg(info, recv_c):
@@ -8930,7 +8970,92 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.uses_st = True
         return False
 
+    def _call_field_value(self, fld, args, ctx):
+        """Call an instance field found by `ail_inst_findattr`: a function or class value the
+        usual way, or an instance whose class defines `__call__` (CPython looks the callable
+        up on the value's type; a plain instance is not callable and names its class)."""
+        owners = [c for c in self.class_order if '__call__' in self.classes[c]['methods']]
+        if not owners:
+            return self.call_value(fld, args, {}, ctx)
+        res = ctx.tmp()
+        ctx.emit('if (%s) {' % self._method_owners_check(fld, '__call__'))
+        ctx.indent += 1
+
+        def depth(c):
+            n = 0
+            while self.classes[c]['base'] in self.classes:
+                c = self.classes[c]['base']
+                n += 1
+            return n
+
+        first = True
+        for c in sorted(owners, key=depth, reverse=True):
+            info = self.classes[c]['methods']['__call__']
+            ctx.emit('%sif (ail_class_is_or_subclass(((ail_instobj *)%s.o)->cls, g_slots_arr[%d])) {' %
+                     ('' if first else 'else ', fld, self.global_slots['class:' + c]))
+            first = False
+            ctx.indent += 1
+            argcs = self._bind_args('__call__', info, args, {}, ctx)
+            if not info.get('is_static'):
+                argcs = [self._self_arg(info, fld)] + argcs
+            ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], res, ''.join(', ' + a for a in argcs)))
+            ctx.check()
+            ctx.indent -= 1
+            ctx.emit('}')
+        ctx.indent -= 1
+        ctx.emit('} else {')
+        ctx.indent += 1
+        r = self.call_value(fld, args, {}, ctx)
+        ctx.emit('%s = %s;' % (res, r))
+        ctx.indent -= 1
+        ctx.emit('}')
+        return res
+
+    def _need_inst_findattr(self):
+        """Emit the instance-field lookup helper once, only for a program that needs it (so a
+        program without an attribute/method name collision keeps byte-identical C)."""
+        if getattr(self, 'has_inst_findattr', False):
+            return
+        self.has_inst_findattr = True
+        self.top_decls.append('static inline int ail_inst_findattr(ail_obj inst, int64_t name_id, '
+                              'ail_obj *out);\n')
+        self.top_defs.append(
+            'static inline int ail_inst_findattr(ail_obj inst, int64_t name_id, ail_obj *out) {\n'
+            '    if (__builtin_expect((unsigned)(inst.tag - AIL_T_INST) > 1u, 0)) return 0;\n'
+            '    ail_instobj *o = (ail_instobj *)inst.o;\n'
+            '    for (int64_t i = 0; i < o->n; i++)\n'
+            '        if (o->attrs[i].name_id == name_id) { *out = o->attrs[i].val; return 1; }\n'
+            '    return 0;\n'
+            '}\n\n')
+
     def _dynamic_user_method(self, recv_c, f, args, kwargs, ctx, builtin):
+        """`x.meth(...)` with an unknown static receiver: an instance attribute of that name wins
+        over every class method (non-data descriptor), otherwise the run-time class dispatch below
+        decides."""
+        owners = [c for c in self.class_order if f.attr in self.classes[c]['methods']]
+        if owners and f.attr in self.assigned_attrs:
+            if kwargs or any(isinstance(a, ast.Starred) for a in args):
+                raise Unsupported('calling .%s() with keyword or starred arguments when an '
+                                  'instance attribute of the same name may shadow it' % f.attr)
+            self.attr_names.add(f.attr)
+            self._need_inst_findattr()
+            res, fld = ctx.tmp(), ctx.tmp()
+            ctx.emit('if (ail_inst_findattr(%s, g_attr_%s, &%s)) {' %
+                     (recv_c, f.attr, fld))
+            ctx.indent += 1
+            r = self._call_field_value(fld, args, ctx)
+            ctx.emit('%s = %s;' % (res, r))
+            ctx.indent -= 1
+            ctx.emit('} else {')
+            ctx.indent += 1
+            r = self._dynamic_user_method_dispatch(recv_c, f, args, kwargs, ctx, builtin)
+            ctx.emit('%s = %s;' % (res, r))
+            ctx.indent -= 1
+            ctx.emit('}')
+            return res
+        return self._dynamic_user_method_dispatch(recv_c, f, args, kwargs, ctx, builtin)
+
+    def _dynamic_user_method_dispatch(self, recv_c, f, args, kwargs, ctx, builtin):
         """`x.meth(...)` where the receiver's class is not known statically but some user class
         defines `meth`: test the run-time class (most derived first) and call that method; any
         other receiver takes the built-in handler of the same name (a list's `.append`, a
