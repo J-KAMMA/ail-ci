@@ -66,6 +66,13 @@ Probes in `/tmp/probes/pre29`: `pre29_invalid`, `pre29_sources`, `pre29_objects`
 negative/zero, NUL/control/quote, long and non-ASCII specs, alias/argument/list/attribute/dict
 routes, bool/int/float/str and None/list/tuple/dict/instance values) match CPython on both builds.
 Final-state tests: pre29, safetynet, files and corpus_findings3.
+## 2026-10-26 - re-apply pre31: int() of a float outside int64 (job-rbpre31-10261700)
+
+Re-applied the accepted pre31 change on the current tree. The same scope-aware, value-exact refusal
+is now part of `_check_int64_literals`, alongside the later int64 constant checks that this tree
+already had; both sides' fixes are kept. Added `test_ail_pre31.py` and registered it in
+`ail_check.MODULES`.
+
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is
@@ -1833,6 +1840,25 @@ list also still contained a managed-struct Callable field, which R594 supports a
 `test_ail_exception_values_core` covers. Added `test_ail_pre44.py` with CPython comparisons
 for the direct, annotation-only, container/argument and control-flow cases. No language
 behaviour changed.
+## 2026-10-24 - pre31 review: scope-aware, value-exact int() refusal
+
+The first pre31 change read a module constant through a function parameter or local of the same name,
+and it scanned every child of the argument, so `int(1e300 * 0)`, `int([1e300, 1.5][1])` and
+`int({"a": 1e300, "b": 1.5}["b"])` were refused although the value reaching `int()` fits. The check
+now evaluates only the value that reaches the conversion, with function, lambda, class and
+comprehension bindings shadowing module constants. It follows unary/binary arithmetic, conditional
+expressions, list/tuple/dict literals, constant subscripts, generated tuple fields and simple identity
+functions; unknown expressions are not refused. Added the reviewer cases to `test_ail_pre31.py`.
+
+## 2026-10-24 - pre31: int() of a float outside int64 is refused by name
+
+`x = 1e300; int(x)` stopped with `integer overflow` on both builds where CPython prints a 301-digit
+integer. This language's ints are int64, so the front end now refuses a conversion the compiler can
+see is outside int64 when the float is a literal, a single-binding module constant, or a literal
+reached through an argument, a list item, a tuple item or a dict value; the message names
+`int() of a float outside int64` and the value. The conversion is unchanged when the result fits
+(including the -2**63 edge). Run-time float values still stop at the documented int64 limit.
+Added `test_ail_pre31.py` (9 refused programs, 1 matching program, both builds).
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
