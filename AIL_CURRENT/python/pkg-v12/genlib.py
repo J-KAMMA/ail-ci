@@ -295,16 +295,16 @@ class _Renamer(ast.NodeTransformer):
                             keywords=[ast.keyword(arg=n, value=(ast.Name(id=bnames[len(bound) + i], ctx=ast.Load())
                                                                  if free else v))
                                       for i, (n, v) in enumerate(kws)])
-            return ast.Lambda(args=ast.arguments(posonlyargs=[], args=[ast.arg(arg=n) for n in pnames], kwonlyargs=[],
-                                                 kw_defaults=[], defaults=[]), body=call)
+            return ast.copy_location(ast.Lambda(args=ast.arguments(posonlyargs=[], args=[ast.arg(arg=n) for n in pnames], kwonlyargs=[],
+                                                 kw_defaults=[], defaults=[]), body=call), node)
         values = bound + [v for _, v in kws]
         if not values:
             out = build([], False)
             out._ail_inline = out
             return ast.copy_location(out, node)
         inner = build(bnames, True)
-        outer = ast.Lambda(args=ast.arguments(posonlyargs=[], args=[ast.arg(arg=n) for n in bnames], kwonlyargs=[],
-                                              kw_defaults=[], defaults=[]), body=inner)
+        outer = ast.copy_location(ast.Lambda(args=ast.arguments(posonlyargs=[], args=[ast.arg(arg=n) for n in bnames], kwonlyargs=[],
+                                              kw_defaults=[], defaults=[]), body=inner), node)
         out = ast.Call(func=outer, args=values, keywords=[])
         if all(_simple(v) for v in values):
             out._ail_inline = build(values, False)
