@@ -825,6 +825,42 @@ def _class_statement_names(statement):
             if isinstance(inner, ast.Name) and isinstance(inner.ctx, (ast.Store, ast.Del))}
 
 
+def _class_body_expressions(statement):
+    if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+        return
+    if isinstance(statement, ast.Assign):
+        yield statement.value
+    elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+        yield statement.value
+    elif isinstance(statement, ast.AugAssign):
+        yield statement.value
+    for child in ast.iter_child_nodes(statement):
+        yield from _class_body_expressions(child)
+
+
+def _class_route_arithmetic(value):
+    def routed(node):
+        if isinstance(node, ast.Lambda):
+            return False
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            # The callee (including its receiver) is not a data operand: the
+            # arithmetic applies to the call's result, not to the attribute.
+            return (any(routed(arg) for arg in node.args)
+                    or any(routed(keyword.value) for keyword in node.keywords))
+        if isinstance(node, (ast.Subscript, ast.Attribute)) and isinstance(node.ctx, ast.Load):
+            return True
+        return any(routed(child) for child in ast.iter_child_nodes(node))
+
+    def scan(node):
+        if isinstance(node, ast.Lambda):
+            return False
+        if isinstance(node, (ast.BinOp, ast.UnaryOp)) and routed(node):
+            return True
+        return any(scan(child) for child in ast.iter_child_nodes(node))
+
+    return scan(value)
+
+
 def fold_constants(text):
     """Top-level `NAME = <constant arithmetic>` bound once in module scope, rewritten to its literal
     value. A name that a nested block, a loop or a `global` function rebinds is not folded: its value
@@ -834,6 +870,17 @@ def fold_constants(text):
         tree = ast.parse(text)
     except SyntaxError:
         return text
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        for statement in node.body:
+            for value in _class_body_expressions(statement):
+                if _class_route_arithmetic(value):
+                    raise SyntaxErrorAIL(
+                        'not in the subset: a class-level constant built through a list item, '
+                        'attribute or dict value; write instead: bind the number as a module '
+                        'constant before the class',
+                        lineno=value.lineno, offset=value.col_offset + 1)
     stored = _module_scope_bindings(tree)
     known = {}
     edits = []
