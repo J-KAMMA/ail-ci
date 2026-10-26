@@ -10592,9 +10592,23 @@ class Compiler(boxclosure.ClosureMixin):
             types = h.type.elts if isinstance(h.type, ast.Tuple) else [h.type]
             for t in types:
                 if not (isinstance(t, ast.Name) and (t.id in EXC_IDS or t.id in self.classes)):
-                    raise Unsupported("a caught exception type %s (only builtin or user "
-                                      "Exception subclasses are supported)" %
-                                      getattr(t, 'id', type(t).__name__))
+                    if isinstance(t, ast.Name) and t.id in ('ImportError', 'ModuleNotFoundError'):
+                        imports = [n for n in ast.walk(node) if isinstance(n, (ast.Import, ast.ImportFrom))]
+                        if imports:
+                            names = [(a.name if isinstance(n, ast.Import) else n.module or '')
+                                     for n in imports for a in (n.names if isinstance(n, ast.Import) else [n])]
+                            refusal = Unsupported(
+                                "import of %s guarded by `except %s`: this compiler resolves imports at build "
+                                "time, so a module that may be missing cannot be tested with try/except.\n"
+                                "  write instead: move the import to the top of the file"
+                                % (', '.join(repr(name) for name in names), t.id))
+                            refusal.source_line = imports[0].lineno
+                            raise refusal
+                    refusal = Unsupported("a caught exception type %s (only builtin or user "
+                                          "Exception subclasses are supported)" %
+                                          getattr(t, 'id', type(t).__name__))
+                    refusal.source_line = node.lineno
+                    raise refusal
 
         has_finally = bool(node.finalbody)
         catch = ctx.new_label('catch')

@@ -1225,6 +1225,17 @@ refused by name. `p4` also matches CPython on the typed path (`AIL_NO_GENERAL=1`
 
 # DEVLOG
 
+## 2026-10-26 - pre27: an optional import is refused by name at its own line
+
+Re-applied the accepted pre27 change on the current integration tree. `try: import html ...
+except ImportError:` reached the general emitter's try check, which refused `ImportError` as an
+unsupported caught exception type without a position. The check now names the guarded import
+(`import of 'html' guarded by except ImportError`), points at the import line and column, and says
+to move it to the top of the file; `ModuleNotFoundError` gets the same message. Other unsupported
+caught types are located at their `try` instead of printing no location. `except Exception` is
+unchanged. Added `AIL_CURRENT/test_ail_pre27.py` (nine refusals, both builds, plus the accepted
+`except Exception` program).
+
 ## 2026-10-24 - round() negative ndigits boundary (job-pre160-10250349)
 
 Review follow-up. The new `__index__` route made `round(float, ndigits)` reachable with any int64,
