@@ -5273,9 +5273,13 @@ class Compiler(boxclosure.ClosureMixin):
             owner, hit = self._class_chain_definition(cname, node.attr)
             if hit is not None and (direct or hit[0] in ('m', 'p')):
                 if hit[0] == 'a':
-                    return self._cached_class_attr(hit[3], hit[2], ctx)
-                raise Unsupported("reading %s %s.%s through a class value" %
-                                  ('property' if hit[0] == 'p' else 'method', owner, node.attr))
+                    if direct and owner == cname:
+                        return self._cached_class_attr(hit[3], hit[2], ctx)
+                    # an inherited attribute is read through the run-time class, so a later
+                    # `Sub.attr = v` (a dynamic entry on the subclass) is seen here too.
+                else:
+                    raise Unsupported("reading %s %s.%s through a class value" %
+                                      ('property' if hit[0] == 'p' else 'method', owner, node.attr))
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
         if prop_owners:
             return self._property_read(node, prop_owners, ctx)
@@ -6286,18 +6290,9 @@ class Compiler(boxclosure.ClosureMixin):
                 (t, self.global_slots['class:' + name]))
         if self._is_exc_class(name):
             return self._call_exc_class(name, info, t, args, kwargs, ctx)
-        # class attributes are copied onto the instance, base class first so a subclass value wins
-        # (a class attribute the subclass does not redefine is read through the base, as CPython does)
-        chain = []
-        k = name
-        while k is not None and k in self.classes and k not in chain:
-            chain.append(k)
-            k = self.classes[k]['base']
-        for kls in reversed(chain):
-            for aname, aval, slot in self.classes[kls].get('class_attrs', []):
-                self.attr_names.add(aname)
-                v = self._class_attr_value(slot, aval, ctx)
-                ctx.emit('ail_inst_setattr(cx, %s, g_attr_%s, %s);' % (t, aname, v))
+        # class attributes are NOT copied onto the instance: the run-time instance lookup falls
+        # back to the class chain, so `C.x = v` is seen by instances that do not shadow `x` and
+        # `vars(instance)` keeps only the fields the instance itself set, as CPython does.
         if info:
             argcs = self._bind_args(name, info, args, kwargs, ctx)
             dummy = ctx.tmp()

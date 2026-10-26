@@ -1500,7 +1500,7 @@ static inline int ail2a_find(ail_ctx *cx, ail_obj obj, const char *name, ail_obj
         int64_t nid = o->attrs[i].name_id;
         if (nid >= 0 && nid < cx->intern_n && strcmp(cx->intern_tab[nid], name) == 0) { *out = o->attrs[i].val; return 1; }
     }
-    return 0;
+    return o->cls.tag == AIL_T_CLASS && ail_class_attr_find_name(cx, o->cls, name, out) == 1;
 }
 static inline ail_st ail2a_need_inst(ail_ctx *cx, ail_obj obj, const char *fn) {
     if (obj.tag == AIL_T_INST || obj.tag == AIL_T_EXC) return AIL_OK;
@@ -1565,11 +1565,12 @@ static inline ail_st ail2a_hasattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_o
 }
 static inline ail_st ail2a_setattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_obj name, ail_obj v) {
     char buf[256]; ail_st st = ail2a_cname(cx, name, buf, sizeof buf); if (st != AIL_OK) return st;
-    if ((st = ail2a_need_inst(cx, obj, "setattr")) != AIL_OK) return st;
+    if (obj.tag != AIL_T_CLASS && (st = ail2a_need_inst(cx, obj, "setattr")) != AIL_OK) return st;
     int64_t id = -1;
     for (int64_t i = 0; i < cx->intern_n; i++) if (strcmp(cx->intern_tab[i], buf) == 0) { id = i; break; }
     if (id < 0) { char *dup = (char *)ail_xmalloc(strlen(buf) + 1); strcpy(dup, buf); id = ail_intern(cx, dup); }
-    ail_inst_setattr(cx, obj, id, v);
+    if (obj.tag == AIL_T_CLASS) ail_class_setattr(cx, obj, id, v);
+    else ail_inst_setattr(cx, obj, id, v);
     *out = ail_box_none();
     return AIL_OK;
 }

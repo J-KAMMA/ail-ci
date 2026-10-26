@@ -1,3 +1,25 @@
+## 2026-10-26 - class attribute stores through a class value (job-pre295-10270439)
+
+The pre283 review's first still-differing item reproduces here: `Box.v = 2` and every route to the
+class value (a computed index, a function return, an instance attribute, a parameter, a
+conditional alias, a local/plain alias and a `global`-declared class name) compiled and then
+stopped with `AttributeError: 'type' object has no attribute 'v'` on both builds, where CPython
+prints the new value.  The general runtime's `ail_inst_setattr_chk` now routes a CLASS receiver
+to a new `ail_class_setattr`: an attribute the class body defines updates its shared module slot,
+while a new name (or one the body defines only as a method/property) becomes a dynamic entry on
+that class.  Reads through the class, through `getattr`/`hasattr` and through instances consult
+the dynamic entries first, and an instance that does not shadow the name falls back to its class
+chain (class-body attributes are no longer copied onto each instance), so existing instances see
+a later `C.x = v` and `vars(instance)` keeps only the instance's own fields.  `setattr(C, ...)`
+takes the same path.  Inheritance stays per class (`Sub.v = v` hides `Base.v`), and a direct
+inherited class read uses the run-time lookup so that shadowing entry is seen.  `del Box.v` is
+unchanged and still refused by name.  Probes in `/tmp/probes`: `p_direct`, `p_alias`,
+`p_index`, `p_return`, `p_attr`, `p_param`, `p_cond`, `p_global`, `p_local`, `p_inst`,
+`p_new`, `p_inherit`, `p_aug`, `p_setattr`, `p_types`, `p_empty`, `p_inst_read`,
+`p_inst_attrs`, `p_new_inst` all match CPython on both builds.  Added
+`AIL_CURRENT/test_ail_pre295.py` and registered it in `ail_check.MODULES`; the runtime/test
+modules pass on both builds.
+
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is
