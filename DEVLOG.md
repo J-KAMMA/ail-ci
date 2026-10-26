@@ -1,3 +1,20 @@
+## 2026-10-26 -- re-apply pre29: invalid format specifier names spec and type (job-rbpre29-10261659)
+
+Re-applied the accepted pre29 change on the current tree. Its `safetyrt.py` behaviour is already
+present from the pre206/pre243 format work: `ail2f_bad_spec` builds the full 16-bit
+`Invalid format specifier '<spec>' for object of type '<type>'` text (spec, controls, NUL and
+non-ASCII units intact) for str, int, bool and float, `ail2f_unsupported` rejects object types
+before the spec is parsed, and a lone non-ASCII type gives `Unknown format code '\x..'`.
+No runtime edit was needed, keeping both sides' fixes. Added the accepted
+`AIL_CURRENT/test_ail_pre29.py` (5 tests, both builds) and registered it in `ail_check.MODULES`;
+DIFFERENCES row `C?-job-rbpre29-10261659-1`. `tools/diff_ids.py` is not present on this tree;
+`tools/update_manifest.py` was run and `--check` passes.
+
+Probes in `/tmp/probes/pre29`: `pre29_invalid`, `pre29_sources`, `pre29_objects`,
+`pre29_valid`, `pre29_unicode`, and `pre29_boundaries` (empty, sign/width/precision edges,
+negative/zero, NUL/control/quote, long and non-ASCII specs, alias/argument/list/attribute/dict
+routes, bool/int/float/str and None/list/tuple/dict/instance values) match CPython on both builds.
+Final-state tests: pre29, safetynet, files and corpus_findings3.
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is
