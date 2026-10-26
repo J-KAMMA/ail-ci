@@ -1,3 +1,17 @@
+## 2026-10-26 -- re-apply pre40: int() of an out-of-range module float read through a global
+
+Re-applied the accepted pre40 change on this tree. `x = 1e300` followed by
+`def f(): global x; return int(x)` compiled and then stopped with `integer overflow`, where
+CPython prints a 301-digit integer. The front end now refuses the conversion by name
+(`int() of a float outside int64: ... (CPython makes a big integer)`), using the accepted
+scope-aware constant evaluator: a module name written anywhere in a function (or otherwise
+rebound) is not treated as a constant, and `global x` does not hide the module value, so
+`global x; x = 1.5; int(x)` and reads after another function mutates it still match CPython.
+In-range, non-finite, fitting-expression, argument, identity-wrapper and literal-container
+conversions are unchanged. Added `AIL_CURRENT/test_ail_pre40.py` and registered it in
+`ail_check.MODULES`; the code was inserted around the existing `_check_int64_literals` so the
+tree's later constant checks stay intact.
+
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is
