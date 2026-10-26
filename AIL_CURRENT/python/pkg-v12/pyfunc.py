@@ -34933,14 +34933,25 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         _tint_sigs[csym[_f.name]] = (_params, _ret)
     # A hierarchy dispatcher and the methods it switches over share one C result type. If any
     # method of a hierarchy method name needs the tagged result, all of them (and every `__vt`
-    # switch for that name) do, or the switch hands back a mix of int64 and ail_tint.
+    # switch for that name) do, or the switch hands back a mix of int64 and ail_tint. Only the
+    # classes below the dispatcher's root belong to that group: an unrelated class with a method
+    # of the same name has its own signature and must not be dragged into the hierarchy's ABI.
     _method_groups = {}
-    for _name, _flags in _tint_sigs.items():
-        if _name in method_names or _name.endswith('__vt'):
-            _base = _name.split('__', 1)[1] if '__' in _name else _name
-            if _base.endswith('__vt'):
-                _base = _base[:-4]
-            _method_groups.setdefault(_base, []).append(_name)
+    for _name in _tint_sigs:
+        if not _name.endswith('__vt'):
+            continue
+        _root, _sep, _rest = _name.partition('__')
+        _base = _rest[:-4] if _rest.endswith('__vt') else _rest
+        try:
+            _family = _hier_subtree(classes, _root)
+        except Exception:
+            _family = [_root]
+        _names = [_name]
+        for _cls in _family:
+            _member = '%s__%s' % (_cls, _base)
+            if _member in _tint_sigs and _member not in _names:
+                _names.append(_member)
+        _method_groups[(_root, _base)] = _names
     for _names in _method_groups.values():
         _vt = [_n for _n in _names if _n.endswith('__vt')]
         if _vt:

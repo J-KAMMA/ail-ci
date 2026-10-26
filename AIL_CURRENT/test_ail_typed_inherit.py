@@ -869,6 +869,24 @@ class TestShape(Base):
         self.assertNotIn('incompatible-pointer-types', c)
         self.assertNotIn('a subclass begins with its base', c)
 
+    def test_unrelated_same_named_methods_keep_their_own_signature(self):
+        text = ('class A:\n    def __init__(self, v: int) -> None:\n        self.v = v\n\n'
+                '    def calc(self, x: int) -> int:\n        return x * 2 + self.v\n\n\n'
+                'class B(A):\n    def calc(self, x: int) -> int:\n        return x * 3 - self.v\n\n\n'
+                'class C:\n    def __init__(self, v: int) -> None:\n        self.v = v\n\n'
+                '    def calc(self, x: int) -> str:\n        return "c%d" % (x + self.v)\n\n\n'
+                'class D:\n    def __init__(self, v: int) -> None:\n        self.v = v\n\n'
+                '    def calc(self, x: int, y: int) -> int:\n        return x + y + self.v\n\n\n'
+                'def main() -> None:\n    print(A(1).calc(5), B(2).calc(5), C(3).calc(5), D(4).calc(5, 6))\n'
+                '    print(A(1).calc(-2), B(2).calc(-2), C(3).calc(-2), D(4).calc(-2, -3))\n\n\nmain()\n')
+        with tempfile.TemporaryDirectory(prefix='ail-tinh-') as d:
+            ref = run_cpython(d, text, 't5_names')
+            self.assertEqual(ref.returncode, 0, ref.stderr)
+            res, exe, _ = build_typed(d, text, 't5_names', {'AIL_IR': '1'})
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            out = run_exe(exe)
+            self.assertEqual((out.returncode, out.stdout), (0, ref.stdout), out.stderr[-2000:])
+
 
 if __name__ == '__main__':
     unittest.main()
