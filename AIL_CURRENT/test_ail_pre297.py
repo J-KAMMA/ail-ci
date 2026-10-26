@@ -148,6 +148,35 @@ def main():
 
 main()
 ''',
+    'rebind_after_call': '''v = 2.5
+print(round(v))
+v = 2.0 ** 63
+''',
+    'rebind_in_if': '''v = 2.0 ** 63
+if True:
+    v = 2.5
+print(round(v))
+''',
+    'rebind_in_for': '''v = 2.0 ** 63
+for _ in range(1):
+    v = 2.5
+print(round(v))
+''',
+    'rebind_augassign': '''v = 2.0 ** 63
+v //= 2.0
+print(round(v))
+''',
+    'rebind_global': '''v = 2.0 ** 63
+
+
+def reset():
+    global v
+    v = 2.5
+
+
+reset()
+print(round(v))
+''',
 }
 
 

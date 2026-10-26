@@ -653,13 +653,26 @@ def _known_module_numbers(tree, module_scope=False):
     """Module names bound once to a statically known int or float, for the round() check.
 
     With module_scope, only module-level bindings count and a name reused inside a function
-    does not hide the module value from module-level code."""
-    stores = {}
+    does not hide the module value from module-level code.  A module-level name is accepted
+    only when it has a single module-scope store, that store is the top-level assignment, and
+    no function declares it ``global``: rebinding through ``if``/``for``/``AugAssign`` or from
+    a function can change the value before the call, so it must not be folded."""
     if not module_scope:
+        stores = {}
         for node in ast.walk(tree):
             if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
                 stores[node.id] = stores.get(node.id, 0) + 1
+    else:
+        stores = {}
+        for node in _walk_module_scope(tree):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                stores[node.id] = stores.get(node.id, 0) + 1
     parameters = {node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)}
+    globals_declared = set()
+    if module_scope:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Global):
+                globals_declared.update(node.names)
     known = {}
     for node in tree.body:
         if not isinstance(node, ast.Assign) or len(node.targets) != 1:
@@ -667,7 +680,7 @@ def _known_module_numbers(tree, module_scope=False):
         target = node.targets[0]
         if not isinstance(target, ast.Name):
             continue
-        if not module_scope and (stores.get(target.id) != 1 or target.id in parameters):
+        if stores.get(target.id) != 1 or target.id in parameters or target.id in globals_declared:
             continue
         value = _constant_number(node.value, known)
         if value is not None:

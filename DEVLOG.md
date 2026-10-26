@@ -1,3 +1,19 @@
+## 2026-10-26 -- pre297 review fix: do not fold a rebound module constant (job-pre297-10270441)
+
+The review of the pre297 change found its module constant map used the final binding, so valid
+in-range programs were refused: a call made before a later module rebind, rebinding through
+`if`/`for`/`AugAssign`, and a `global` write performed by a called function.  The module-scope
+map now accepts a name only when it has one module-scope store, that store is the top-level
+assignment, and no function declares the name `global`; otherwise the name is not folded and
+the ordinary round lowering keeps CPython's output.  Out-of-int64 single-binding constants are
+still refused by name.  Added the five rebinding cases to `test_ail_pre297.py` and clarified
+the DIFFERENCES row.  Probes in `/tmp/probes`: `p297r9_order`, `p297r1_rebind_if`,
+`p297r2_rebind_for`, `p297r3_rebind_aug`, `p297r4_rebind_global` match CPython on both builds;
+`p297_round_module`, `p297_round_local`, `p297_round_const` and `p297r11_abs` are still refused
+by name on both.  Tests on the final tree: `test_ail_pre297`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3` (0 failed).  `tools/update_manifest.py` was run
+and `--check` passes.
+
 ## 2026-10-26 -- pre297: round() of a constant int64-boundary float is refused (job-pre297-10270441)
 
 The rbpre54 review recorded that one-argument `round()` still stops with `integer overflow` for
