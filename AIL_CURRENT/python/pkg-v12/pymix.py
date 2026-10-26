@@ -35,9 +35,10 @@ Design decisions (so the next brief inherits them, not just the code):
   - CONSERVATIVE EXCEPTION RULE (the one deliberate simplification in this pass, flagged for the
     next brief -- see `REASON_EXC_CAPABLE`): a function is never a candidate if it, or any function
     it can reach through the module's own call graph, contains a `try`, a `raise`, or an operation
-    with any of the typed path's five named traps (division/modulo by a divisor not PROVABLY
-    nonzero, subscript, `.pop()`, dict/set key access, `int()`/`input()` at end-of-input) -- unless
-    every such site is statically provable safe (a nonzero integer-literal divisor). The reason is
+    with any of the typed path's named traps (division/modulo by a divisor not PROVABLY
+    nonzero, subscript, `.pop()`, dict/set key access, `int()`/`input()` at end-of-input, a shift
+    whose count is not a non-negative literal) -- unless every such site is statically provable
+    safe. The reason is
     a real runtime fact, not laziness: the typed path's own exception mechanism
     (`cruntime.py`'s global `ail_exc_stack`/`setjmp`/`longjmp`) and the general path's exception
     mechanism (`pyboxed2.py`/`ail_obj2.h`'s `ail_raise_c`/`ail_ctx` ["boxed" report source]) are
@@ -144,10 +145,17 @@ class _FnFacts:
 
 EXC_TYPE_NAMES = frozenset({'ValueError', 'ZeroDivisionError', 'IndexError', 'KeyError', 'EOFError'})
 _TRAP_EXC = {ast.Div: 'ZeroDivisionError', ast.FloorDiv: 'ZeroDivisionError', ast.Mod: 'ZeroDivisionError'}
+# ck_shl/ck_shr raise ValueError for a negative count (CPython's wording), so a shift is a trap
+# unless the count is a non-negative literal.
+_SHIFT_EXC = {ast.LShift: 'ValueError', ast.RShift: 'ValueError'}
 
 
 def _provably_nonzero(node):
     return isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and node.value != 0
+
+
+def _provably_nonnegative(node):
+    return isinstance(node, ast.Constant) and isinstance(node.value, int) and node.value >= 0
 
 
 def _build_parents(tree):
@@ -184,15 +192,19 @@ def _handler_catches(handler, exc_name):
 
 
 def _raise_site_exc(node):
-    """The exception NAME a given AST node could raise as one of the typed path's five named
-    traps, or `None`. Mirrors `to_c`'s own `EXC_NAMES`/`ail_exc_kind_of` (cruntime.py) -- the same
-    five, nothing invented here."""
+    """The exception NAME a given AST node could raise as one of the typed path's named traps,
+    or `None`. Mirrors `to_c`'s own `EXC_NAMES`/`ail_exc_kind_of` (cruntime.py), plus the shift
+    guards' ValueError, nothing invented here."""
     if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call) and isinstance(node.exc.func, ast.Name):
         return node.exc.func.id if node.exc.func.id in EXC_TYPE_NAMES else None
     if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Name):
         return node.exc.id if node.exc.id in EXC_TYPE_NAMES else None
     if isinstance(node, ast.BinOp) and type(node.op) in _TRAP_EXC and not _provably_nonzero(node.right):
         return _TRAP_EXC[type(node.op)]
+    if isinstance(node, ast.BinOp) and type(node.op) in _SHIFT_EXC and not _provably_nonnegative(node.right):
+        return _SHIFT_EXC[type(node.op)]
+    if isinstance(node, ast.AugAssign) and type(node.op) in _SHIFT_EXC and not _provably_nonnegative(node.value):
+        return _SHIFT_EXC[type(node.op)]
     if isinstance(node, ast.Subscript):
         return 'IndexError'                             # list/str; dict subscript is KeyError too,
                                                           # but IndexError is always in play here
@@ -250,7 +262,7 @@ def _reraise_sites(fn_node):
 
 def _self_raise_sites(fn_node):
     """[(node, exc_name), ...] for every operation directly inside `fn_node` (not inside a nested
-    `def`) that could raise one of the five named exceptions."""
+    `def`) that could raise one of the named exceptions."""
     return ([(n, exc) for n in _walk_own_body(fn_node) for exc in [_raise_site_exc(n)] if exc]
             + _reraise_sites(fn_node))
 
@@ -263,10 +275,27 @@ def _escapes(fn_facts, parents):
     names = list(fn_facts)
     esc = {n: set() for n in names}
     call_sites = {n: [] for n in names}                 # callee -> [(call_node, caller_name)]
-    for name, f in fn_facts.items():
-        for n in _walk_own_body(f.node):
-            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in fn_facts:
-                call_sites.setdefault(n.func.id, []).append((n, name))
+    # Class methods are not `fn_facts` entries (this pass never selects them), but their bodies
+    # still call module functions and can sit under a module-level `try` when invoked as
+    # `obj.method()`.  Include their bodies (and attribute call sites naming them) in the call
+    # graph so such a call is visible to `_protected`, instead of leaving the callee selected as
+    # a typed clone that would bypass the boxed handler.
+    method_bodies = [(node.name, node) for node, parent in parents.items()
+                     if isinstance(node, ast.FunctionDef) and isinstance(parent, ast.ClassDef)]
+    method_names = {name for name, _ in method_bodies}
+    bodies = [(name, f.node) for name, f in fn_facts.items()] + method_bodies
+    for name, body in bodies:
+        for n in _walk_own_body(body):
+            if not isinstance(n, ast.Call):
+                continue
+            if isinstance(n.func, ast.Name):
+                callee = n.func.id
+            elif isinstance(n.func, ast.Attribute) and n.func.attr in method_names:
+                callee = n.func.attr
+            else:
+                continue
+            if callee in fn_facts or callee in method_names:
+                call_sites.setdefault(callee, []).append((n, name))
 
     for _ in range(MAX_ROUNDS):
         changed = False
@@ -293,21 +322,96 @@ def _escapes(fn_facts, parents):
     return esc, call_sites
 
 
-def _protected(name, exc, call_sites, parents, seen=frozenset()):
+def _value_referenced(tree, function_names):
+    """Module functions that appear as a value rather than as the direct callee of a `Call` --
+    passed to another function, stored in a container, returned, and so on.  Such a function can
+    be invoked from boxed code the module's own call graph cannot see, possibly under a `try`."""
+    parents = _build_parents(tree)
+    found = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+                and node.id in function_names):
+            parent = parents.get(node)
+            if not (isinstance(parent, ast.Call) and parent.func is node):
+                found.add(node.id)
+    return found
+
+
+def _inside_lambda(node, parents):
+    """True iff `node` is lexically inside an `ast.Lambda` body.  A lambda is a function value
+    whose call sites are not `ast.Call(Name)` nodes, so it can be invoked from anywhere -- the
+    same blind spot as a function passed as a value."""
+    cur = node
+    while cur in parents:
+        cur = parents[cur]
+        if isinstance(cur, ast.Lambda):
+            return True
+    return False
+
+
+def _enclosing_function(node, parents):
+    cur = node
+    while cur in parents:
+        par = parents[cur]
+        if isinstance(par, ast.FunctionDef):
+            return par.name
+        cur = par
+    return MODULE_SCOPE
+
+
+def _indirect_names(tree, fn_facts, parents):
+    """Function names whose call sites are not statically tied to one invocation point: a name
+    loaded as a value (stored in a list, passed as a callback), a call inside a `lambda`, or a
+    function called by one of those.  A boxed `try` at the eventual invocation site cannot be seen
+    from such a call site, so an exception-escaping candidate used this way is not safe to type."""
+    names = set(fn_facts)
+    indirect = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in names:
+            par = parents.get(node)
+            if not (isinstance(par, ast.Call) and par.func is node):
+                indirect.add(node.id)
+    edges = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in names:
+            callee = node.func.id
+            if _inside_lambda(node, parents):
+                indirect.add(callee)
+            caller = _enclosing_function(node, parents)
+            if caller != MODULE_SCOPE:
+                edges.append((caller, callee))
+    while True:
+        added = {callee for caller, callee in edges if caller in indirect} - indirect
+        if not added:
+            return indirect
+        indirect |= added
+
+
+def _protected(name, exc, call_sites, parents, indirect=frozenset(), seen=frozenset()):
     """True iff SOME call site reaching `name` (directly, or through a chain of ordinary boxed
     calls) sits inside a `try/except` for `exc` anywhere up that chain -- walked the way CPython's
     own frame unwinding would, since that is exactly the behaviour a rejected candidate is standing
     in for (see module docstring: crossing the typed/boxed boundary loses every handler that is not
-    lexically inside the SAME typed closure)."""
+    lexically inside the SAME typed closure).
+
+    A function that is passed as a value, or called from inside a lambda, can also be invoked by
+    boxed code the call graph never records; a `try` there is just as invisible, so such a path is
+    treated as protected (conservatively) rather than as ending uncaught."""
     if name in seen:
         return False
+    if name in indirect:
+        return True
     for call_node, caller_name in call_sites.get(name, ()):
+        if _inside_lambda(call_node, parents):
+            return True
         scope, trys = _enclosing_scope_and_trys(call_node, parents)
         if any(_handler_catches(h, exc) for t in trys for h in t.handlers):
             return True
         if scope == MODULE_SCOPE:
             continue                                    # this path ends uncaught -- safe on its own
-        if _protected(scope, exc, call_sites, parents, seen | {name}):
+        if scope in indirect:
+            return True
+        if _protected(scope, exc, call_sites, parents, indirect, seen | {name}):
             return True
     return False
 
@@ -636,6 +740,8 @@ def analyze(source, classes=()):
     defs_src = _defs_only_source(tree)
     parents = _build_parents(tree)
     esc, call_sites = _escapes(fn_facts, parents)
+    indirect = _value_referenced(tree, {n for n in fn_facts if n != MODULE_SCOPE})
+    indirect |= _indirect_names(tree, fn_facts, parents)
     report = MixReport()
     rets = {name: f.ret for name, f in fn_facts.items()}
     # One C return ABI cannot preserve distinct Python tags on different branches.
@@ -670,7 +776,8 @@ def analyze(source, classes=()):
         if name in unsafe_returns:
             report.rejected[name] = (REASON_UNRESOLVED_RET, 'return branches require distinct tags')
             continue
-        blocking = sorted(exc for exc in esc.get(name, ()) if _protected(name, exc, call_sites, parents))
+        blocking = sorted(exc for exc in esc.get(name, ())
+                          if _protected(name, exc, call_sites, parents, indirect))
         if blocking:
             report.rejected[name] = (REASON_EXC_CAPABLE,
                                      '%s can escape to a boxed try/except reachable from a call to'

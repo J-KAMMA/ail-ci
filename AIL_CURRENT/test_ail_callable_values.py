@@ -288,7 +288,9 @@ fn main()->int {
                 resources.ExceptionResourceTests.check_resources(
                     self, oracle_source(source), sizes=(0, 1, 2, 101), native_source=source)
 
-    def test_uninitialized_callback_raises_runtime_error(self):
+    def test_uninitialized_callback_raises_unbound_local_error(self):
+        # An unassigned local is an UnboundLocalError in CPython; the R570
+        # RuntimeError expectation predates the definite-assignment pass.
         source = '''
 def target(x: int) -> int:
     return x
@@ -298,7 +300,7 @@ def main() -> int:
         cb: Callable[[int], int] = target
     try:
         cb(1)
-    except RuntimeError:
+    except UnboundLocalError:
         print(71)
         return 0
     return 9
@@ -376,10 +378,12 @@ def main() -> int:
                 self.assertFalse(output.exists())
                 self.assertFalse(Path(str(output) + '.exe').exists())
 
+        # A Callable field in a managed struct is supported since R594
+        # (test_ail_exception_values_core covers it); only the two constructs
+        # above remain refused.
         extra = (
             'fn mutate(cb:Callable[[int],int])->int {cb=target;return cb(1);}',
             'fn closure(n:int)->Callable[[int],int] {fn inner(x:int)->int {return n+x;}return inner;}',
-            'struct Holder {cb:Callable[[int],int];}',
         )
         for index, body in enumerate(extra):
             with self.subTest(body=body):

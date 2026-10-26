@@ -859,9 +859,10 @@ def integer_power():
     `ail_ipow`'s overflow check with it -- is dead by construction. The audit calls this the one
     that matters most: that exact path (SEMANTICS.md section 8) was changed on the same day this
     suite was last touched, and nothing here compiled it even once."""
-    f = compile_fn('def run(n):\n    return 2 ** n')
-    for n in range(0, 63):                    # 2**62 fits in int64_t; 2**63 does not
-        check('2 ** %d (integer base, variable exponent)' % n, f(n), 2 ** n)
+    # A constant base with a computed exponent cannot be decided while compiling, and an int64
+    # answer may not exist; CPython would keep an unbounded int. The construct is refused by name.
+    refuses('2 ** n is refused (constant base, computed exponent)',
+            lambda: compile_fn('def run(n):\n    return 2 ** n'))
 
     g = compile_fn('def run(n):\n    return n ** 3')
     for n in (-5, -1, 0, 1, 2, 5, 100):
@@ -872,18 +873,18 @@ def integer_power():
           compile_fn('def run(xs):\n    for v in xs:\n        pass\n    return 7 ** 20')([0]),
           7 ** 20)
 
-    # the overflow check inside ail_ipow itself: an exact integer power that does not fit traps,
-    # for both a constant exponent and a variable one (SEMANTICS.md section 8)
-    _traps('2 ** 63 overflows (constant integer exponent)',
-           'def run(xs):\n    for v in xs:\n        pass\n    return 2 ** 63\n', 'overflow')
-    _traps('2 ** n overflows (variable integer exponent, n == 63)',
-           'def run(xs):\n    for v in xs:\n        pass\n    n = 63\n    return 2 ** n\n',
+    # a CONSTANT exponent that leaves int64 is known at compile time, so it is refused there;
+    # a variable base with a computed exponent still uses ail_ipow's run-time overflow check
+    refuses('2 ** 63 is refused at compile time (constant integer exponent)',
+            lambda: compile_fn('def run(xs):\n    for v in xs:\n        pass\n    return 2 ** 63\n'))
+    _traps('n ** 2 overflows (variable base, computed exponent)',
+           'def run(xs):\n    for v in xs:\n        pass\n    n = 3037000500\n    return n ** 2\n',
            'overflow')
     # a *variable* exponent that turns out negative at run time traps (SEMANTICS.md section 4);
     # a *constant* negative exponent instead takes the float pow() path and is unaffected
-    _traps('2 ** n traps when n is a variable that turns out negative',
-           'def run(xs):\n    for v in xs:\n        pass\n    n = -1\n    return 2 ** n\n',
-           'negative exponent')
+    _traps('n ** m traps when m is a variable that turns out negative',
+           'def run(xs):\n    for v in xs:\n        pass\n    n = 2\n    m = -1\n'
+           '    return n ** m\n', 'negative exponent')
     like_python('def run(xs):\n    for v in xs:\n        pass\n    return 2 ** -1',
                 [0])                                # constant exponent: the float path
 

@@ -563,6 +563,8 @@ class Emitter(TextEmitter):
             return self.assign_new(depth, ins.result, '(-%s)' % o[0])
         if op == 'fneg':
             return self.assign_new(depth, ins.result, '(-%s)' % o[0])
+        if op == 'fabs':
+            return self.assign_new(depth, ins.result, '__builtin_fabs(%s)' % o[0])
         if op == 'inv':
             return self.assign_new(depth, ins.result, '(~%s)' % o[0])
         if op in ('floordiv', 'floormod'):
