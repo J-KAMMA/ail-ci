@@ -10551,7 +10551,7 @@ def _bytes_subscript_value(node, ctx):
                 raise Unsupported('a bytes index must be an integer')
             index = _expr(node.slice, ctx)
             steps.extend(ctx.pre)
-            call = 'ail_bytes_get(%s, %s)' % (receiver, index)
+            call = 'ail_bytes_get(%s%s, %s)' % (_range_mark(node, ctx), receiver, index)
         return '({ %s %s; })' % (' '.join(steps), call)
     finally:
         ctx.pre = saved
@@ -24826,6 +24826,31 @@ def _range_kind(name, ctx):
     return None
 
 
+def _range_class_of(name, ctx):
+    try:
+        t = ctx.type_of(name)
+    except Unsupported:
+        return None
+    if _is_obj_kind(t) and t[1] in ctx.classes:
+        return ctx.classes[t[1]]
+    return None
+
+
+def _range_field(owner, attr, ctx):
+    cls = _range_class_of(owner, ctx)
+    return cls.field_types.get(attr) if cls is not None else None
+
+
+def _range_fields(owner, ctx):
+    cls = _range_class_of(owner, ctx)
+    return dict(cls.field_types) if cls is not None else None
+
+
+def _range_method(owner, attr, ctx):
+    cls = _range_class_of(owner, ctx)
+    return cls.methods.get(attr) if cls is not None else None
+
+
 def _range_proofs(ctx):
     proofs = getattr(ctx, '_range_proofs', None)
     if proofs is None:
@@ -24835,7 +24860,10 @@ def _range_proofs(ctx):
                 return entry[1]
             return None
         info = rangecheck.Info(lambda name: _range_kind(name, ctx), const,
-                               frozenset(ctx.funcs) | frozenset(ctx.classes))
+                               frozenset(ctx.funcs) | frozenset(ctx.classes),
+                               field=lambda owner, attr: _range_field(owner, attr, ctx),
+                               fields=lambda owner: _range_fields(owner, ctx),
+                               method=lambda owner, attr: _range_method(owner, attr, ctx))
         proofs = rangecheck.analyze(ctx.fn_node, info)
         ctx._range_proofs = proofs
     return proofs
