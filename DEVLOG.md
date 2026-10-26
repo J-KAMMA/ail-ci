@@ -1,3 +1,18 @@
+## 2026-10-26 -- re-apply pre39: keyword-wrapper int() refusal (job-rbpre39-10261704)
+
+Re-applied the accepted pre39 change on this tree. The `int()`-of-a-float-outside-int64 check
+(the pre31 machinery was absent here) is added to `ail_chatgpt._check_int64_literals`: call
+arguments are now bound by parameter name as well as by position, so keyword calls to positional
+wrappers, identity functions and keyword-only wrappers are refused by name, including out-of-range
+literals and module constants, list/tuple items and dict values reached that way. In-range
+conversions, non-finite floats and run-time-only values are unchanged. The constant collector maps
+an unresolved name to `_UNKNOWN` rather than the literal `None`, so an unresolved subscript key no
+longer selects a dict's `None` entry; genuinely known numeric keys still fold and are refused.
+Added `test_ail_pre39.py` (13 refused, 12 matching programs, both builds) and registered it in
+`ail_check.MODULES`. Probes in `/tmp/probes`: 5 matching (`p39_match_values`, `p39_match_alias`,
+`p39_match_nonfinite`, `p39_match_shadow`, `p39_match_unknown`) and 13 refused by name
+(`p39_refuse_{literal,negative,keyword,positional,constant,constant_keyword,list,tuple,dict,identity,kwonly,upper,numeric_key}`),
+all against CPython on both builds. `tools/diff_ids.py` is not present in this tree.
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is
