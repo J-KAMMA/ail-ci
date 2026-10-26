@@ -365,6 +365,53 @@ class ExitArgs(ast.NodeTransformer):
         return node
 
 
+def refuse_with_yield(tree):
+    """Refuse a `with` whose body yields in the same function: `g.close()` cannot run the suspended body,
+    so __exit__ is never called with GeneratorExit as CPython does."""
+    has_with = has_yield = False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.With):
+            has_with = True
+        elif isinstance(node, (ast.Yield, ast.YieldFrom)):
+            has_yield = True
+        if has_with and has_yield:
+            break
+    if not (has_with and has_yield):
+        return
+
+    def own(fn):
+        found = []
+        def walk(node):
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                    continue
+                if isinstance(child, (ast.Yield, ast.YieldFrom)):
+                    found.append(child)
+                walk(child)
+        for stmt in fn.body:
+            if not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                walk(stmt)
+        return found
+
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        yields = {id(y) for y in own(fn)}
+        if not yields:
+            continue
+        def scan(node):
+            if isinstance(node, ast.With) and any(id(y) in yields for y in ast.walk(node)):
+                refuse(node, '`with` around a `yield`: closing the generator does not pass GeneratorExit to '
+                             '__exit__ (not built)')
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                    continue
+                scan(child)
+        for stmt in fn.body:
+            if not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                scan(stmt)
+
+
 def rewrite(tree):
     """Lower the `with` statements and contextlib names of `tree` (in place); returns the prelude source to add, or ''.
     Raises stdlib4.Refused for a use that is not built."""
