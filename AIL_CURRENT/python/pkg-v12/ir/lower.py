@@ -2405,8 +2405,16 @@ class Lowering(TextLowering):
                         value = self.P._int_const(node.left)
                     except Exception:
                         value = None
+                    known = isinstance(value, int) and not isinstance(value, bool)
+                    if known and count >= 63:
+                        # A constant shift whose result fits int64 is not a shift beyond it: zero
+                        # shifted any number of places stays zero, and -1 << 63 is INT64_MIN.
+                        if value == 0:
+                            return self.const(I.I64, 0)
+                        if count == 63 and value == -1:
+                            return self.const(I.I64, -(1 << 63))
                     beyond = count >= 63
-                    if not beyond and isinstance(value, int) and not isinstance(value, bool):
+                    if not beyond and known:
                         shifted = value << count
                         beyond = not (-(1 << 63) <= shifted < (1 << 63))
                     if beyond:

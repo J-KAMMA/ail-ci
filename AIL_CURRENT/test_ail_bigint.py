@@ -501,6 +501,12 @@ class DefaultBuild(unittest.TestCase):
         self.check("general_unboxed_loud_stop")
         self.check("typed_overflow_stops")
 
+    def test_constant_shift_that_fits_int64(self):
+        """A constant left shift of zero (any count) and -1 << 63 fit int64 and stay on the IR:
+        CPython's value, through a helper argument, a list item, an attribute and a dict value,
+        on the general and the default build."""
+        self.check_both("big_shift_zero")
+
     def test_b2_review_probes_on_both_builds(self):
         """The B2b review: a huge range stop is not saturated (step 1, explicit 1, empty, step 2, negative
         step, and a stop read through an argument/list item/attribute/dict value), a missing dict key keeps

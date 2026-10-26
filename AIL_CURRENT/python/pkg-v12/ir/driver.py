@@ -221,12 +221,19 @@ def _apply(P, args, kwargs, result, current):
     _big_shift = False
     for _n in ast.walk(fn):
         if isinstance(_n, ast.BinOp) and isinstance(_n.op, ast.LShift):
-            _rhs = _n.right
+            _rhs, _lhs = _n.right, _n.left
         elif isinstance(_n, ast.AugAssign) and isinstance(_n.op, ast.LShift):
-            _rhs = _n.value
+            _rhs, _lhs = _n.value, _n.target
         else:
             continue
         if isinstance(_rhs, ast.Constant) and type(_rhs.value) is int and _rhs.value >= 63:
+            try:
+                _lv = P._int_const(_lhs)
+            except Exception:
+                _lv = None
+            if isinstance(_lv, int) and not isinstance(_lv, bool) \
+                    and (_lv == 0 or (_rhs.value == 63 and _lv == -1)):
+                continue        # the constant result fits int64
             _big_shift = True
             break
     if _py and _big_shift and not _io_like and not (_sig and (any(_sig[0]) or _sig[1])) \
