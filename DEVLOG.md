@@ -1,3 +1,24 @@
+## 2026-10-26 -- pre261 review: make the abs container/attribute fold mutation-aware (job-pre261-10261652)
+
+Fixed the review defects on `77fadbb`.  The static fold now trusts a container only in a scope
+that never mutates a container (element/slice assignment, alias mutation, in-place assignment,
+or `append`/`extend`/`clear`/`update`/... calls), and trusts a class/instance attribute only when
+no method, external assignment or dynamic `setattr` can override it.  A class name shadowed by a
+parameter, local or module binding is no longer treated as the class.  `abs()` in module-level
+and nested function defaults is checked again in its enclosing scope, restoring the named
+refusal that `77fadbb` had dropped.  Added the review cases to `test_ail_pre261.py`.
+
+Probes in `/tmp/probes` (both builds): `pr261_mut_list`, `pr261_mut_alias`, `pr261_mut_dict`,
+`pr261_mut_methods`, `pr261_mut_slice`, `pr261_mut_loop`, `pr261_attr_alias`, `pr261_attr_called`,
+`pr261_attr_uncalled`, `pr261_attr_conditional`, `pr261_attr_init_override`,
+`pr261_attr_multi`, `pr261_attr_setattr`, `pr261_attr_via_function`, `pr261_shadow_param`,
+`pr261_shadow_assign`, `pr261_inrange` and `pr261_match_arg`/`pr261_match_edges`/
+`pr261_match_shadow` match CPython; `pr261_default`/`pr261_nested_default` and
+`pr261_refuse_list`/`pr261_refuse_dict`/`pr261_refuse_attr`/`pr261_refuse_instance`/
+`pr261_refuse_module` are refused by name.  `pr261_arg` (INT64_MIN only as a parameter) remains
+the pre-existing run-time `integer overflow`.  Tests on the final tree: `test_ail_pre261`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` 4 modules, 247 s, 0 failed.
+
 ## 2026-10-26 -- abs() of INT64_MIN through a container or attribute (job-pre261-10261652)
 
 The bigint-fix13 review left one pre-existing difference: an isolated `abs` of a negative big

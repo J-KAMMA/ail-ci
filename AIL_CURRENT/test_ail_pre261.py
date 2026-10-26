@@ -5,8 +5,10 @@ name.  A value that only reaches ``abs`` as a list item, a dict value or an attr
 built and then stopped with ``integer overflow`` at run time, where CPython prints the bignum.
 The same exact fold now follows a literal list/tuple/dict element, a class attribute and a simple
 instance attribute (``self.v`` in a class body or ``obj.v = ...`` in the same scope), so the call
-is refused by name at compile time.  In-range container elements, float/bool elements, a
-parameter or a shadowed ``abs`` keep their previous behaviour.
+is refused by name at compile time.  A mutated container, an overridden instance/class
+attribute, a class name shadowed by a parameter or binding, and an ``abs`` in a default argument
+keep CPython's result or the named refusal; in-range elements, float/bool elements, a parameter
+or a shadowed ``abs`` keep their previous behaviour.
 """
 import os
 import subprocess
@@ -69,6 +71,15 @@ main()
 ''' % MIN,
     'module_level': 'print(abs([%s][0]))\n' % MIN,
     'module_attribute': 'class Box:\n    v = %s\n\n\nprint(abs(Box.v))\n' % MIN,
+    'default_argument': 'def f(x=abs(%s)):\n    print(x)\n\n\ndef main():\n    f()\n\n\nmain()\n' % MIN,
+    'nested_default_argument': '''def main():
+    def f(x=abs(%s)):
+        print(x)
+    f()
+
+
+main()
+''' % MIN,
 }
 
 MATCHING = {
@@ -107,6 +118,140 @@ main()
 
 def main():
     print(abs([%s][0]))
+
+
+main()
+''' % MIN,
+    'list_mutation': _local('    xs = [%s]\n    xs[0] = 5\n    print(abs(xs[0]))' % MIN),
+    'list_alias_mutation': _local('    xs = [%s]\n    ys = xs\n    ys[0] = 5\n'
+                                  '    print(abs(xs[0]))' % MIN),
+    'list_append_clear': _local('    xs = []\n    xs.append(%s)\n    xs.clear()\n'
+                                '    xs.append(5)\n    print(abs(xs[0]))' % MIN),
+    'dict_mutation': _local('    d = {"v": %s}\n    d["v"] = 5\n'
+                            '    print(abs(d["v"]))' % MIN),
+    'loop_mutation': _local('    xs = [%s]\n    for _ in range(1):\n'
+                            '        xs[0] = 5\n    print(abs(xs[0]))' % MIN),
+    'instance_alias_override': '''class Box:
+    v = %s
+
+
+def main():
+    b = Box()
+    b2 = b
+    b2.v = 5
+    print(abs(b.v))
+
+
+main()
+''' % MIN,
+    'instance_method_never_called': '''class Box:
+    v = 5
+
+    def set(self):
+        self.v = %s
+
+
+def main():
+    b = Box()
+    print(abs(b.v))
+
+
+main()
+''' % MIN,
+    'instance_method_called': '''class Box:
+    v = %s
+
+    def set(self):
+        self.v = 5
+
+
+def main():
+    b = Box()
+    b.set()
+    print(abs(b.v))
+
+
+main()
+''' % MIN,
+    'instance_init_override': '''class Box:
+    def __init__(self):
+        self.v = %s
+
+
+def main():
+    b = Box()
+    b.v = 5
+    print(abs(b.v))
+
+
+main()
+''' % MIN,
+    'instance_conditional_override': '''class Box:
+    v = %s
+
+    def __init__(self, flag):
+        if flag:
+            self.v = 5
+
+
+def main():
+    b = Box(True)
+    print(abs(b.v))
+
+
+main()
+''' % MIN,
+    'instance_override_via_function': '''class Box:
+    v = %s
+
+
+def override(box):
+    box.v = 5
+
+
+def main():
+    b = Box()
+    override(b)
+    print(abs(b.v))
+
+
+main()
+''' % MIN,
+    'shadowed_class_parameter': '''class C:
+    v = %s
+
+
+class D:
+    v = 5
+
+
+def show(C):
+    print(abs(C.v))
+
+
+def main():
+    show(D())
+
+
+main()
+''' % MIN,
+    'shadowed_class_assignment': '''class C:
+    v = %s
+
+
+class D:
+    v = 5
+
+
+def make():
+    return D()
+
+
+C = make()
+
+
+def main():
+    print(abs(C.v))
 
 
 main()

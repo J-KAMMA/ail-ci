@@ -603,20 +603,69 @@ def _static_lookup(base, key):
     return _UNKNOWN_STATIC
 
 
-def _static_attr(base, name, class_attrs, instance_attrs):
+_STATIC_MUTATING_METHODS = frozenset({
+    'append', 'extend', 'insert', 'pop', 'remove', 'clear', 'sort', 'reverse',
+    'update', 'setdefault', 'popitem', '__setitem__', '__delitem__', 'add',
+    'discard', 'difference_update', 'intersection_update',
+    'symmetric_difference_update',
+})
+
+
+def _static_scope_mutates_containers(body):
+    """Whether a scope can change a container after it was built.
+
+    A mutation may reach the same object through an alias, so a static container value is
+    not trusted anywhere in a scope that mutates a subscript or calls a mutating method."""
+    for statement in body:
+        for node in ast.walk(statement):
+            if isinstance(node, ast.Subscript) and isinstance(node.ctx, (ast.Store, ast.Del)):
+                return True
+            if (isinstance(node, ast.AugAssign)
+                    and isinstance(node.target, (ast.Subscript, ast.Name))):
+                return True
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in _STATIC_MUTATING_METHODS):
+                return True
+    return False
+
+
+def _static_scope_dynamic_attrs(body):
+    for statement in body:
+        for node in ast.walk(statement):
+            if not isinstance(node, ast.Call):
+                continue
+            if isinstance(node.func, ast.Name) and node.func.id in ('setattr', 'delattr'):
+                return True
+            if (isinstance(node.func, ast.Attribute)
+                    and node.func.attr in ('__setattr__', '__delattr__')):
+                return True
+    return False
+
+
+def _static_gate_container(value, containers_ok):
+    if (not containers_ok and isinstance(value, tuple) and value
+            and value[0] in ('list', 'tuple', 'dict')):
+        return _UNKNOWN_STATIC
+    return value
+
+
+def _static_attr(base, name, class_attrs, instance_attrs, instance_unsafe):
     if not isinstance(base, tuple) or len(base) != 2:
         return _UNKNOWN_STATIC
     kind, owner = base
     if kind == 'class':
         return class_attrs.get(owner, {}).get(name, _UNKNOWN_STATIC)
     if kind == 'instance':
+        if name in instance_unsafe.get(owner, ()):
+            return _UNKNOWN_STATIC
         if name in instance_attrs.get(owner, {}):
             return instance_attrs[owner][name]
         return class_attrs.get(owner, {}).get(name, _UNKNOWN_STATIC)
     return _UNKNOWN_STATIC
 
 
-def _static_value(node, env, classes, class_attrs, instance_attrs, attrs, depth=0):
+def _static_value(node, env, classes, class_attrs, instance_attrs, instance_unsafe, attrs,
+                  store_attrs, containers_ok, depth=0):
     if depth > 24:
         return _UNKNOWN_STATIC
     if isinstance(node, ast.Constant):
@@ -625,40 +674,51 @@ def _static_value(node, env, classes, class_attrs, instance_attrs, attrs, depth=
         return _UNKNOWN_STATIC
     if isinstance(node, ast.Name):
         if node.id in env:
-            return env[node.id]
+            return _static_gate_container(env[node.id], containers_ok)
         if node.id in classes:
             return ('class', node.id)
         return _UNKNOWN_STATIC
     if isinstance(node, ast.List):
-        return ('list', [_static_value(item, env, classes, class_attrs, instance_attrs, attrs,
+        return ('list', [_static_value(item, env, classes, class_attrs, instance_attrs,
+                                       instance_unsafe, attrs, store_attrs, containers_ok,
                                        depth + 1) for item in node.elts])
     if isinstance(node, ast.Tuple):
-        return ('tuple', [_static_value(item, env, classes, class_attrs, instance_attrs, attrs,
+        return ('tuple', [_static_value(item, env, classes, class_attrs, instance_attrs,
+                                        instance_unsafe, attrs, store_attrs, containers_ok,
                                         depth + 1) for item in node.elts])
     if isinstance(node, ast.Dict):
         pairs = []
         for key, value in zip(node.keys, node.values):
             item = (_UNKNOWN_STATIC if key is None else
-                    _static_value(key, env, classes, class_attrs, instance_attrs, attrs, depth + 1))
+                    _static_value(key, env, classes, class_attrs, instance_attrs,
+                                  instance_unsafe, attrs, store_attrs, containers_ok, depth + 1))
             pairs.append((item, _static_value(value, env, classes, class_attrs, instance_attrs,
-                                              attrs, depth + 1)))
+                                              instance_unsafe, attrs, store_attrs, containers_ok,
+                                              depth + 1)))
         return ('dict', pairs)
     if isinstance(node, ast.Subscript):
         if isinstance(node.slice, ast.Slice):
             return _UNKNOWN_STATIC
-        base = _static_value(node.value, env, classes, class_attrs, instance_attrs, attrs, depth + 1)
-        key = _static_value(node.slice, env, classes, class_attrs, instance_attrs, attrs, depth + 1)
+        base = _static_value(node.value, env, classes, class_attrs, instance_attrs,
+                             instance_unsafe, attrs, store_attrs, containers_ok, depth + 1)
+        key = _static_value(node.slice, env, classes, class_attrs, instance_attrs,
+                            instance_unsafe, attrs, store_attrs, containers_ok, depth + 1)
         return _static_lookup(base, key)
     if isinstance(node, ast.Attribute):
         if isinstance(node.value, ast.Name):
             key = (node.value.id, node.attr)
-            if attrs.get(key, _UNKNOWN_STATIC) is not _UNKNOWN_STATIC:
-                return attrs[key]
-        base = _static_value(node.value, env, classes, class_attrs, instance_attrs, attrs, depth + 1)
-        return _static_attr(base, node.attr, class_attrs, instance_attrs)
+            if key in attrs:
+                return _static_gate_container(attrs[key], containers_ok)
+            if store_attrs is None or node.attr in store_attrs:
+                return _UNKNOWN_STATIC
+        base = _static_value(node.value, env, classes, class_attrs, instance_attrs,
+                             instance_unsafe, attrs, store_attrs, containers_ok, depth + 1)
+        return _static_gate_container(
+            _static_attr(base, node.attr, class_attrs, instance_attrs, instance_unsafe),
+            containers_ok)
     if isinstance(node, ast.Call):
-        if (isinstance(node.func, ast.Name) and node.func.id in classes
-                and not node.args and not node.keywords):
+        if (isinstance(node.func, ast.Name) and node.func.id not in env
+                and node.func.id in classes and not node.args and not node.keywords):
             return ('instance', node.func.id)
         return _UNKNOWN_STATIC
     value = _constant_int(node, _static_env_int(env))
@@ -692,10 +752,49 @@ def _static_scope_stores(body):
     return names, attrs
 
 
-def _static_scope_env(body, known, classes, class_attrs, instance_attrs):
+def _static_bound_names(body, parameters=()):
+    """Names bound in a scope, including parameters and nested def names.
+
+    They shadow a class of the same name, so the class object is not used for them."""
+    names = set(parameters)
+
+    def visit(node):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            names.add(node.name)
+            return
+        if isinstance(node, (ast.ClassDef, ast.Lambda)):
+            return
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            names.add(node.id)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                names.add(alias.asname or alias.name.split('.')[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            names.add(node.name)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            names.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            names.add(node.rest)
+        for child in ast.iter_child_nodes(node):
+            visit(child)
+
+    for statement in body:
+        visit(statement)
+    return names
+
+
+def _static_scope_env(body, known, classes, class_attrs, instance_attrs, instance_unsafe,
+                      parameters=()):
     names, attr_stores = _static_scope_stores(body)
     env = dict(known)
+    for name in _static_bound_names(body, parameters):
+        env[name] = _UNKNOWN_STATIC
     attrs = {}
+    containers_ok = not _static_scope_mutates_containers(body)
+    if _static_scope_dynamic_attrs(body):
+        store_attrs = None
+    else:
+        store_attrs = {attr for (_, attr) in attr_stores}
     for statement in body:
         if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
             target, value_node = statement.targets[0], statement.value
@@ -706,21 +805,50 @@ def _static_scope_env(body, known, classes, class_attrs, instance_attrs):
         if isinstance(target, ast.Name):
             if names.get(target.id) != 1:
                 continue
-            value = _static_value(value_node, env, classes, class_attrs, instance_attrs, attrs)
+            value = _static_value(value_node, env, classes, class_attrs, instance_attrs,
+                                  instance_unsafe, attrs, store_attrs, containers_ok)
             if value is not _UNKNOWN_STATIC:
                 env[target.id] = value
         elif (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
                 and attr_stores.get((target.value.id, target.attr)) == 1):
             key = (target.value.id, target.attr)
-            value = _static_value(value_node, env, classes, class_attrs, instance_attrs, attrs)
+            value = _static_value(value_node, env, classes, class_attrs, instance_attrs,
+                                  instance_unsafe, attrs, store_attrs, containers_ok)
             if value is not _UNKNOWN_STATIC:
                 attrs[key] = value
-    return env, attrs
+    return env, attrs, store_attrs, containers_ok
+
+
+def _static_self_attr_targets(node):
+    if isinstance(node, ast.Assign):
+        targets = node.targets
+    elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+        targets = [node.target]
+    elif isinstance(node, ast.Delete):
+        targets = node.targets
+    else:
+        return []
+    found = []
+    for target in targets:
+        if (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
+                and target.value.id == 'self'):
+            found.append(target.attr)
+    return found
+
+
+def _static_global_instance_overrides(tree):
+    overrides = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del))
+                and not (isinstance(node.value, ast.Name) and node.value.id == 'self')):
+            overrides.add(node.attr)
+    return overrides
 
 
 def _static_class_values(classes, known):
     class_attrs = {}
     instance_attrs = {}
+    instance_unsafe = {}
     empty = {}
     for name, cls in classes.items():
         counts = {}
@@ -747,7 +875,7 @@ def _static_class_values(classes, known):
                 continue
             if isinstance(target, ast.Name) and counts.get(target.id) == 1:
                 value = _static_value(value_node, known, classes, class_attrs, instance_attrs,
-                                      empty)
+                                      instance_unsafe, empty, set(), True)
                 if value is not _UNKNOWN_STATIC:
                     attrs[target.id] = value
         class_attrs[name] = attrs
@@ -756,29 +884,39 @@ def _static_class_values(classes, known):
         for method in cls.body:
             if not isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
+            direct = set()
+            for statement in method.body:
+                if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+                    if _static_self_attr_targets(statement):
+                        direct.add(id(statement))
+                elif isinstance(statement, ast.AnnAssign):
+                    if _static_self_attr_targets(statement):
+                        direct.add(id(statement))
             for node in ast.walk(method):
-                if isinstance(node, ast.Assign):
-                    for target in node.targets:
-                        if (isinstance(target, ast.Attribute)
-                                and isinstance(target.value, ast.Name)
-                                and target.value.id == 'self'):
-                            stores.setdefault(target.attr, []).append((method, node.value))
-                elif (isinstance(node, ast.AnnAssign) and node.value is not None
-                        and isinstance(node.target, ast.Attribute)
-                        and isinstance(node.target.value, ast.Name)
-                        and node.target.value.id == 'self'):
-                    stores.setdefault(node.target.attr, []).append((method, node.value))
+                targets = _static_self_attr_targets(node)
+                if not targets:
+                    continue
+                value_node = (node.value if isinstance(node, (ast.Assign, ast.AnnAssign))
+                              else None)
+                for attr in targets:
+                    stores.setdefault(attr, []).append(
+                        (method, value_node, id(node) in direct))
         attrs = {}
+        unsafe = set()
         for attr, entries in stores.items():
-            if len(entries) != 1:
+            if (len(entries) != 1 or entries[0][0].name != '__init__'
+                    or not entries[0][2] or entries[0][1] is None):
+                unsafe.add(attr)
                 continue
-            method, value_node = entries[0]
+            method, value_node, is_direct = entries[0]
             local = _function_local_int_constants(method, known)
-            value = _static_value(value_node, local, classes, class_attrs, instance_attrs, empty)
+            value = _static_value(value_node, local, classes, class_attrs, instance_attrs,
+                                  instance_unsafe, empty, set(), True)
             if value is not _UNKNOWN_STATIC:
                 attrs[attr] = value
         instance_attrs[name] = attrs
-    return class_attrs, instance_attrs
+        instance_unsafe[name] = unsafe
+    return class_attrs, instance_attrs, instance_unsafe
 
 
 def _inside_function(node, parents):
@@ -790,6 +928,17 @@ def _inside_function(node, parents):
     return False
 
 
+def _static_function_parameters(function):
+    arguments = function.args
+    names = {argument.arg for argument in
+             arguments.posonlyargs + arguments.args + arguments.kwonlyargs}
+    if arguments.vararg is not None:
+        names.add(arguments.vararg.arg)
+    if arguments.kwarg is not None:
+        names.add(arguments.kwarg.arg)
+    return names
+
+
 def _check_int64_abs_constants(tree, known):
     """Refuse a constant ``abs`` whose exact value int64 cannot hold, by name.
 
@@ -797,15 +946,20 @@ def _check_int64_abs_constants(tree, known):
     and then stop with ``integer overflow`` at run time, where CPython prints the bignum.  The
     argument is folded exactly here; an in-range result keeps the ordinary abs lowering, and a
     program that binds its own ``abs`` is left alone.  A constant int reached through a literal
-    list/tuple/dict or a simple class/instance attribute is folded the same way."""
+    list/tuple/dict or a simple class/instance attribute is folded the same way, unless the
+    scope mutates that container or can override that attribute."""
     if _binds_name(tree, 'abs') or 'abs' in known:
         return
 
     classes = {node.name: node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)}
-    class_attrs, instance_attrs = _static_class_values(classes, known)
+    class_attrs, instance_attrs, instance_unsafe = _static_class_values(classes, known)
+    overrides = _static_global_instance_overrides(tree)
+    if overrides:
+        for attrs in instance_unsafe.values():
+            attrs.update(overrides)
     parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
 
-    def check(node, scope_known, env, attrs):
+    def check(node, scope_known, env, attrs, store_attrs, containers_ok):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id == 'abs'):
             return
@@ -818,7 +972,8 @@ def _check_int64_abs_constants(tree, known):
             except _Int64ConstantOverflow:
                 value = None
         if value is None:
-            value = _static_value(node.args[0], env, classes, class_attrs, instance_attrs, attrs)
+            value = _static_value(node.args[0], env, classes, class_attrs, instance_attrs,
+                                  instance_unsafe, attrs, store_attrs, containers_ok)
             if type(value) is not int:
                 value = None
         if value is None:
@@ -830,18 +985,41 @@ def _check_int64_abs_constants(tree, known):
             error.source_column = node.col_offset
             raise error
 
-    module_env, module_attrs = _static_scope_env(tree.body, known, classes, class_attrs,
-                                                 instance_attrs)
+    module_env, module_attrs, module_store_attrs, module_containers_ok = _static_scope_env(
+        tree.body, known, classes, class_attrs, instance_attrs, instance_unsafe)
+    global_shadowed = _static_bound_names(tree.body).intersection(classes)
+    module_scope = (known, module_env, module_attrs, module_store_attrs, module_containers_ok)
     for node in ast.walk(tree):
         if not _inside_function(node, parents):
-            check(node, known, module_env, module_attrs)
-    for function in ast.walk(tree):
-        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
+            check(node, *module_scope)
+    functions = [node for node in ast.walk(tree)
+                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    scopes = {}
+    for function in functions:
         local = _function_local_int_constants(function, known)
-        env, attrs = _static_scope_env(function.body, local, classes, class_attrs, instance_attrs)
+        parameters = _static_function_parameters(function)
+        env, attrs, store_attrs, containers_ok = _static_scope_env(
+            function.body, local, classes, class_attrs, instance_attrs, instance_unsafe,
+            parameters)
+        local_bound = _static_bound_names(function.body, parameters)
+        for name in global_shadowed:
+            if name not in local_bound:
+                env[name] = _UNKNOWN_STATIC
+        scopes[function] = (local, env, attrs, store_attrs, containers_ok)
+    for function in functions:
+        scope = scopes[function]
         for node in _walk_own_scope(function):
-            check(node, local, env, attrs)
+            check(node, *scope)
+        parent = parents.get(function)
+        while parent is not None and not isinstance(parent, (ast.FunctionDef,
+                                                             ast.AsyncFunctionDef)):
+            parent = parents.get(parent)
+        default_scope = scopes.get(parent, module_scope)
+        defaults = list(function.args.defaults)
+        defaults.extend(item for item in function.args.kw_defaults if item is not None)
+        for default in defaults:
+            for node in ast.walk(default):
+                check(node, *default_scope)
 
 
 def _check_int64_unary_constants(tree):
