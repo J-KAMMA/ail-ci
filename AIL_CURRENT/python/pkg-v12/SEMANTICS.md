@@ -293,7 +293,7 @@ expression for it. Positive `9223372036854775808` is still refused at compile ti
 ```
 overflow in + - * and unary -      traps: the program stops and says "integer overflow"
 abs(INT64_MIN)                     traps; there is no int64 answer
-2 ** 63                            traps
+2 ** 63                            refused at compile time as a constant; the same value reached through a variable traps
 INT64_MIN // -1                    traps; the exact answer is 2**63, which has no int64 answer
 ```
 
@@ -606,8 +606,8 @@ Two more findings from the same audit were recorded here and have since been fix
   unchanged, when either operand is a float. Two exactness boundaries follow directly from routing
   through `ail_ipow`, and both are traps rather than silent wrong answers, matching how this
   document already treats every other integer edge:
-  - an exact integer power that overflows int64 traps, exactly as the constant-exponent case
-    already did (`2 ** 63` and `x ** n` with `n` a variable both stop the program the same way);
+  - an exact integer power that overflows int64 traps (`x ** n` with a variable operand), while
+    a constant integer expression such as `2 ** 63` is refused at compile time before emission;
   - a variable exponent that turns out negative at runtime also traps, where Python would return a
     float (`2 ** -1` is `0.5`). A *constant* negative exponent still takes the `pow()` path and
     still answers correctly -- only a variable one, whose sign cannot be settled in advance, is
