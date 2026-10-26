@@ -1408,6 +1408,11 @@ class Compiler:
         return acc
 
     def expr_UnaryOp(self, node, ctx):
+        if isinstance(node.op, (ast.USub, ast.UAdd)):
+            constant = int_constant(node)
+            if type(constant) is int and -(1 << 63) <= constant < (1 << 63):
+                return 'ail_box_int(%s)' % ('(-9223372036854775807LL - 1LL)' if constant == -(1 << 63)
+                                              else '%dLL' % constant)
         v = self.expr(node.operand, ctx)
         if isinstance(node.op, ast.USub):
             return self._emit_tmp(ctx, 'ail_obj_neg(%s)' % v)
