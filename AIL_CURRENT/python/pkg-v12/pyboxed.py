@@ -1408,6 +1408,9 @@ class Compiler:
         return acc
 
     def expr_UnaryOp(self, node, ctx):
+        if (isinstance(node.op, ast.USub) and isinstance(node.operand, ast.Constant)
+                and type(node.operand.value) is int and node.operand.value == 1 << 63):
+            return 'ail_box_int(-9223372036854775807LL - 1)'
         if isinstance(node.op, (ast.USub, ast.UAdd)):
             constant = int_constant(node)
             if type(constant) is int and -(1 << 63) <= constant < (1 << 63):
