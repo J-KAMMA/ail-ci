@@ -1,3 +1,20 @@
+## 2026-10-26 - re-apply fuzz28: class-body comprehension read through the class (job-rbrbfuzz28-10262128)
+
+Re-applied the accepted fuzz28 change on the current tree. A class-body list/set/dict comprehension
+is a class attribute; CPython reads it as `C.ys`, but a comprehension that uses a class-scope name
+cannot be built here. `_init_class_attrs` now refuses that evaluation by name (`reading the class
+attribute C.ys through the class`) instead of failing with an unrelated name error, and the class
+attribute read through a class does the same when the shared slot was not filled, but only when the
+value is not a literal. The current tree's module-lifetime slots and computed values (including
+comprehensions over module-level names) are unchanged, so `test_ail_fuzz29`'s definition-time,
+shared and inherited class attributes still work. Added `test_ail_fuzz28.py` and registered it in
+`ail_check.MODULES`. Probes in `/tmp/probes`: `f28_literal`, `f28_computed`, `f28_inherit_alias`,
+`f28_shadow`, `f28_routes` and `f28_bounds` match CPython on both builds; `f28_read` is refused by
+name on both. `f28_read_method` (a read inside a method) is refused by name with `name 'x' is not
+defined` on both. Tests on the final tree: `test_ail_fuzz28`, `test_ail_fuzz29`, `test_ail_pre170`,
+`test_ail_pre227`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` (7 modules,
+40 tests, 0 failed, 1 skipped for no zig).
+
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is
