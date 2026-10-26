@@ -305,6 +305,18 @@ def _escapes(fn_facts, parents):
     return esc, call_sites
 
 
+def _inside_lambda(node, parents):
+    """Whether `node` is lexically inside a `lambda` (which is not a typed function of its own)."""
+    cur = node
+    while cur in parents:
+        cur = parents[cur]
+        if isinstance(cur, ast.Lambda):
+            return True
+        if isinstance(cur, ast.FunctionDef):
+            return False
+    return False
+
+
 def _protected(name, exc, call_sites, parents, seen=frozenset()):
     """True iff SOME call site reaching `name` (directly, or through a chain of ordinary boxed
     calls) sits inside a `try/except` for `exc` anywhere up that chain -- walked the way CPython's
@@ -314,6 +326,10 @@ def _protected(name, exc, call_sites, parents, seen=frozenset()):
     if name in seen:
         return False
     for call_node, caller_name in call_sites.get(name, ()):
+        # A `lambda` body is not lexically inside the try that calls the lambda, so its call sites
+        # cannot prove where it runs: be conservative and keep the callee boxed.
+        if _inside_lambda(call_node, parents):
+            return True
         scope, trys = _enclosing_scope_and_trys(call_node, parents)
         if any(_handler_catches(h, exc) for t in trys for h in t.handlers):
             return True
