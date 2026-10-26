@@ -1,3 +1,27 @@
+## 2026-10-26 -- computed exponent on a constant integer base is refused (job-pre273-10262306)
+
+The first still-differing item in the rbpre69 review was the variable-exponent power: `2 ** n`
+compiled and then stopped with `integer overflow`, where CPython keeps an unbounded int. The
+constant-exponent form is already folded and refused when it leaves int64, so the remaining case
+is an exponent known only at run time. `pyfront.refuse_variable_int_pow` now refuses a power
+whose base is a compile-time int64 constant with |base| >= 2 and whose exponent is not a constant
+expression, naming the base and the int64 boundary on the typed path and both general emitters.
+Constant exponents (including bool leaves), the safe bases 0/1/-1, float bases with a
+constant float exponent and a variable base with a constant exponent are unchanged. The three existing tests that used the old trap
+(`test_all.integer_power`, `test_ail_pre160`, `test_ail_crypto`) now exercise the new boundary.
+Added `test_ail_pre273.py` (2 tests, both builds) and registered it in `ail_check.MODULES`;
+DIFFERENCES row `C?-job-pre273-10262306-1`. `tools/diff_ids.py` is not present on this tree;
+`tools/update_manifest.py` was run and `--check` passes.
+
+Probes in `/tmp/probes`: `pre273_arg`, `pre273_list`, `pre273_attr`, `pre273_dict`,
+`pre273_alias` and `pre273_float_dynamic` are refused by name on both builds; `pre273_bounds`,
+`pre273_safe` and `pre273_zero_neg` match CPython on both builds (constant/float/bool exponents,
+the bases 0/1/-1, negative constant exponents and a variable base with a constant exponent).
+`pre273_expr_pow` keeps the older named refusal for a constant exponent outside int64;
+`pre273_neg_literal` matches CPython. Tests on the final tree: `test_ail_pre273`,
+`test_ail_pre160`, `test_ail_crypto`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3`.
+
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is

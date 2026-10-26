@@ -286,6 +286,49 @@ def refuse_complex_pow(node):
         raise refusal
 
 
+_POW_CONSTANT_OPS = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod,
+                      ast.Pow, ast.LShift, ast.RShift, ast.BitAnd, ast.BitOr, ast.BitXor)
+
+
+def _pow_exponent_is_constant(node):
+    """Whether the exponent is a constant expression, so the existing constant folders decide it.
+
+    Bool leaves count: CPython uses them as 0/1. The check is syntactic on purpose: it must not
+    evaluate a huge constant here, only tell a fixed expression from a value computed later."""
+    if isinstance(node, ast.Constant):
+        return type(node.value) in (int, float, bool)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert, ast.Not)):
+        return _pow_exponent_is_constant(node.operand)
+    if isinstance(node, ast.BinOp) and type(node.op) in _POW_CONSTANT_OPS:
+        return _pow_exponent_is_constant(node.left) and _pow_exponent_is_constant(node.right)
+    return False
+
+
+def refuse_variable_int_pow(node):
+    """A constant integer base raised to a computed exponent is refused by name here.
+
+    CPython's int is unbounded, so `2 ** n` answers exactly even when n is 63 or more; this
+    compiler's int is int64, and `ail_ipow` could only stop the program at run time with
+    `integer overflow` (or spin for a huge exponent). The value cannot be known while compiling,
+    so the construct is refused at compile time instead. A constant exponent is still folded (and
+    refused only when its exact result leaves int64), and the safe bases 0, 1 and -1 are admitted
+    because every int64 exponent keeps their result in range."""
+    if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow)):
+        return
+    base = int_constant(node.left)
+    if base is None or abs(base) < 2 or not -(1 << 63) <= base < (1 << 63):
+        return
+    if _pow_exponent_is_constant(node.right):
+        return
+    refusal = Unsupported(
+        'a power with the integer constant base %d and an exponent computed at run time can leave '
+        'the signed 64-bit range of an AIL int (SEMANTICS section 1), so it is refused by name at '
+        'compile time; CPython computes it exactly with an unbounded int. Write the exponent as a '
+        "constant, or use float(%d) ** exponent for CPython's float answer" % (base, base))
+    refusal.source_line = getattr(node, 'lineno', None)
+    raise refusal
+
+
 def _use(need, *names):
     need.update(names)
     need.add('ail_die')

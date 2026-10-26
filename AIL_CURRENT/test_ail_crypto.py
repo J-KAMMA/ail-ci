@@ -423,7 +423,7 @@ def main():
         for i in range(40):
             r = secrets.randbits(k)
             if k < 63:
-                ok = ok and 0 <= r < 2 ** k
+                ok = ok and 0 <= r < 1 << k
             else:
                 ok = ok and r >= 0
             if k == 1:
