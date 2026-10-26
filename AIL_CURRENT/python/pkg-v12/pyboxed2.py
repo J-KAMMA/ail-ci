@@ -4872,8 +4872,13 @@ class Compiler(boxclosure.ClosureMixin):
             # A class body's own earlier binding wins over a module global of the same name
             # (CPython runs the class body in its own namespace); this map is only active for
             # the class-scope parts of a class attribute expression -- see _init_class_attrs.
+            slot = ctx.class_locals[node.id]
+            if slot is None:
+                # An earlier method/property (or other def-like binding) rebound this name; its
+                # function value is not in a module slot, so this name cannot be read here.
+                raise Unsupported("name '%s' is not defined" % node.id)
             t = ctx.tmp()
-            ctx.emit('%s = g_slots_arr[%d];' % (t, ctx.class_locals[node.id]))
+            ctx.emit('%s = g_slots_arr[%d];' % (t, slot))
             return t
         if (node.id in self.classes and node.id not in self.module_names
                 and node.id not in ctx.slot_of and node.id not in ctx.ptr_names
@@ -6609,12 +6614,22 @@ class Compiler(boxclosure.ClosureMixin):
         return name in EXC_IDS
 
     def _class_attr_locals(self, cname, slot):
-        """The names an earlier class-body assignment bound before attribute `slot` of `cname`."""
+        """The names bound by earlier class-body statements before attribute `slot` of `cname`.
+
+        A class body runs sequentially in its own namespace, so a later attribute sees the last
+        binding made before it.  An attribute binds its module slot; a method or property rebinds
+        its name to a function, which this name map cannot hold, so the name is marked as
+        refused (None) and a later read of it is refused by name instead of silently reading the
+        stale attribute slot or a module global of the same name.
+        """
         out = {}
-        for aname, _aval, aslot in self.classes.get(cname, {}).get('class_attrs', []):
-            if aslot == slot:
-                break
-            out[aname] = aslot
+        for entry in self.classes.get(cname, {}).get('class_body', []):
+            if entry[0] == 'a':
+                if entry[3] == slot:
+                    break
+                out[entry[1]] = entry[3]
+            else:
+                out[entry[1]] = None
         return out
 
     def _init_class_attrs(self, name, ctx):

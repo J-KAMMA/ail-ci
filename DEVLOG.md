@@ -1,3 +1,21 @@
+## 2026-10-26 -- pre304 review: method/property rebinding is refused by name (job-pre304-10270748)
+
+The review of the pre304 change found that it introduced a wrong answer: when a method or
+property rebinds an earlier class attribute (`class C: x = 3; def x(self): ...; y = x + 1`),
+the name map still held the old attribute slot, so `y` printed `4` (and a comprehension printed
+`[0, 1, 2]`) where CPython raises TypeError.  The map is now built from the class body's
+statement order instead of only its attributes, and a method/property binding marks its name as
+refused, so a later attribute read of that name is refused by name at compile time on both builds
+(the base behaviour).  The same applies when a module global has the same name, where the base
+printed the global's value instead of CPython's TypeError.  A method before the attribute, a
+method after the use, a later re-assignment after the method, inherited methods, and unrelated
+methods keep matching CPython.
+
+Probes in `/tmp/probes`: `pre304rev_method_plain`, `pre304rev_method_comp`,
+`pre304rev_property`, `pre304rev_static_class`, `pre304rev_global_same_name` are refused by name
+on both builds (CPython raises TypeError); `pre304rev_method_before_attr`,
+`pre304rev_rebind_after_method`, `pre304rev_method_after_use`, `pre304rev_unrelated_method` and
+`pre304rev_inherited_method` match CPython on both builds.  `test_ail_pre304.py` now has 3 tests.
 ## 2026-10-26 -- pre304: class-body names are visible to later attributes (job-pre304-10270748)
 
 The first pre-existing difference in the rbrbfuzz28 review was a class-body comprehension that

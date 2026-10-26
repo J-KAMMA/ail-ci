@@ -172,6 +172,63 @@ o = C()
 print(C.x, C.ys)
 print(o.total(), o.ys)
 ''',
+    'method_then_attribute': '''
+class C:
+    def x(self):
+        return 9
+    x = 3
+    y = x + 1
+print(C().x, C().y)
+''',
+    'attribute_then_method_then_attribute': '''
+class C:
+    x = 3
+    def x(self):
+        return 9
+    x = 5
+    y = x + 1
+print(C().x, C().y)
+''',
+}
+
+# A method or property rebinds an earlier class attribute to a function in the class namespace.
+# The name map cannot hold a function value, so a later attribute that reads the name must be
+# refused by name at compile time (the base behaviour) rather than reading the stale attribute.
+METHOD_SHADOWS = {
+    'method_shadows_attribute': '''
+class C:
+    x = 3
+    def x(self):
+        return 9
+    y = x + 1
+print(C().y)
+''',
+    'method_shadows_attribute_comprehension': '''
+class C:
+    x = 3
+    def x(self):
+        return 9
+    ys = [i for i in range(x)]
+print(C().ys)
+''',
+    'property_shadows_attribute': '''
+class C:
+    x = 3
+    @property
+    def x(self):
+        return 9
+    y = x + 1
+print(C().y)
+''',
+    'method_shadows_attribute_over_global': '''
+x = 100
+class C:
+    x = 3
+    def x(self):
+        return 9
+    y = x + 1
+print(C().y)
+''',
 }
 
 COMPREHENSION_BODY = '''
@@ -234,6 +291,16 @@ class Pre304Tests(unittest.TestCase):
                                   COMPREHENSION_BODY, general)
                 self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
                 self.assertIn("name 'x' is not defined", built.stdout + built.stderr)
+
+    def test_method_rebinding_an_earlier_attribute_is_refused_by_name(self):
+        with tempfile.TemporaryDirectory(prefix='ail-pre304-') as directory:
+            for slug, text in METHOD_SHADOWS.items():
+                self.assertNotEqual(_run_cpython(directory, slug, text)[1], 0, slug)
+                for general in (True, False):
+                    _, built = _build(directory, '%s_%s' % (slug, 'g' if general else 'd'),
+                                      text, general)
+                    self.assertNotEqual(built.returncode, 0, slug + '\n' + built.stdout + built.stderr)
+                    self.assertIn("name 'x' is not defined", built.stdout + built.stderr)
 
 
 if __name__ == '__main__':
