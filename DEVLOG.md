@@ -11,11 +11,24 @@ the field)`).  Detection walks the class body and its bases, accepts `self.<name
 field read, a class with only the method or only the field, and an unrelated class with the same
 method name keep their old behaviour.
 
-Probes `/tmp/probes/p02a`-`p02j` and `/tmp/probes/p278_*.py` (direct, argument, list item, dict
-value, attribute, alias, non-callable field, inherited method, `self.f()`, empty/negative values,
-class-level call, read, only-method/only-field classes, unrelated classes, both builds) are either
-refused by the same name or match CPython.  Added `AIL_CURRENT/test_ail_pre278.py` and registered it
-in `ail_check.MODULES`.
+The pre278 review found the first version refused every call through an unknown receiver once any
+class had such a collision (`d.f()` on an unrelated parameter, `self.f()` in an unrelated class,
+`xs.append(2)` on a list).  The receiver check now resolves self through the enclosing class (and
+its subclasses), parameters through their call sites and annotations, attributes through field
+initialisers, and list/dict items through their literals; a receiver that cannot be resolved is
+treated as unknown and keeps its old behaviour, and only a resolved receiver that can be a
+colliding class is refused.  Field collection also stays inside the class's own methods, so a
+nested class's `self.f = ...` no longer makes the outer class a collision owner.  The reviewer's
+`r1_unrelated_param`, `r2_self_unrelated` and `r3_list_append` shapes are added to
+`test_ail_pre278.py`.
+
+Probes `/tmp/probes/p02a`-`p02j`, `/tmp/probes/p278_*.py` and `/tmp/rprobes/r1`-`r8` (direct,
+argument, annotated argument, list item, dict value, attribute, alias, non-callable field,
+inherited method, `self.f()`, self in a subclass, empty/negative values, class-level call, read,
+only-method/only-field classes, unrelated parameter/`self`/list/dict/attribute receivers, both
+builds) are either refused by the same name or match CPython; `r6` (`setattr`) is the recorded
+pre-existing difference and `r8` is refused for its nested class definition.  Added
+`AIL_CURRENT/test_ail_pre278.py` and registered it in `ail_check.MODULES`.
 
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 

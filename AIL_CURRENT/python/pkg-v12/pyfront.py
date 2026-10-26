@@ -280,36 +280,54 @@ def refuse_field_method_call(tree):
     ``c.f()`` call the stored lambda even when the class also has ``def f``.  This compiler has no
     route for a callable held in an instance field, and its method dispatch silently picked the
     method instead (``102 102`` where CPython prints ``101 102``).  Such a call is refused by name
-    rather than mis-compiled; a class that defines only one of the two keeps its old behaviour.
+    rather than mis-compiled.  The refusal is only raised when the receiver can actually be the
+    colliding class: a receiver that resolves to an unrelated class (or to a list/dict, or to an
+    unknown value) keeps its old behaviour, so an unrelated type with a same-named method is not
+    caught by a collision elsewhere in the program.
     """
+    def _own_nodes(node):
+        stack = list(ast.iter_child_nodes(node))
+        while stack:
+            child = stack.pop()
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                  ast.ClassDef, ast.Lambda)):
+                continue
+            yield child
+            stack.extend(ast.iter_child_nodes(child))
+
     classes = {}
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef):
             continue
-        methods, fields, bases = set(), set(), []
+        methods, field_values, bases = set(), {}, []
         for base in node.bases:
             if isinstance(base, ast.Name):
                 bases.append(base.id)
         for item in node.body:
-            if not isinstance(item, ast.FunctionDef):
+            if not isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             methods.add(item.name)
             args = item.args.posonlyargs + item.args.args
             if not args:
                 continue
             self_name = args[0].arg
-            for sub in ast.walk(item):
+            for sub in _own_nodes(item):
                 if isinstance(sub, ast.Assign):
-                    targets = sub.targets
-                elif isinstance(sub, (ast.AnnAssign, ast.AugAssign)):
-                    targets = [sub.target]
+                    targets, value = sub.targets, sub.value
+                elif isinstance(sub, ast.AnnAssign):
+                    targets, value = [sub.target], sub.value
+                elif isinstance(sub, ast.AugAssign):
+                    targets, value = [sub.target], None
                 else:
                     continue
                 for target in targets:
                     if (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
                             and target.value.id == self_name):
-                        fields.add(target.attr)
-        classes[node.name] = {'methods': methods, 'fields': fields, 'bases': bases}
+                        values = field_values.setdefault(target.attr, [])
+                        if value is not None:
+                            values.append(value)
+        classes[node.name] = {'methods': methods, 'fields': set(field_values),
+                              'field_values': field_values, 'bases': bases}
 
     def _inherited(name, key, seen):
         info = classes.get(name)
@@ -320,6 +338,19 @@ def refuse_field_method_call(tree):
             found |= _inherited(base, key, seen | {name})
         return found
 
+    def _bases_of(name, seen=frozenset()):
+        info = classes.get(name)
+        if info is None or name in seen:
+            return set()
+        found = set(info['bases'])
+        for base in info['bases']:
+            found |= _bases_of(base, seen | {name})
+        return found
+
+    def _descendants(name):
+        return {other for other in classes
+                if other == name or name in _bases_of(other)}
+
     collisions = {}
     for name in classes:
         both = _inherited(name, 'methods', frozenset()) & _inherited(name, 'fields', frozenset())
@@ -329,10 +360,63 @@ def refuse_field_method_call(tree):
         return
     all_names = set().union(*collisions.values())
 
-    def _classes_of(node, seen=()):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in classes:
-            return {node.func.id}
+    calls_by_name = {}
+    for item in ast.walk(tree):
+        if isinstance(item, ast.Call) and isinstance(item.func, ast.Name):
+            calls_by_name.setdefault(item.func.id, []).append(item)
+
+    def _param_names(func):
+        args = func.args
+        return [arg.arg for arg in args.posonlyargs + args.args]
+
+    call_ctx = {}
+
+    def _visit(node, cls_name, func):
+        if isinstance(node, ast.ClassDef):
+            for child in node.body:
+                _visit(child, node.name, None)
+            return
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for child in node.body:
+                _visit(child, cls_name, node)
+            return
+        if isinstance(node, ast.Call):
+            call_ctx[id(node)] = (cls_name, func)
+        for child in ast.iter_child_nodes(node):
+            _visit(child, cls_name, func)
+
+    _visit(tree, None, None)
+
+    def _classes_of(node, ctx=(None, None), seen=frozenset()):
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in classes:
+                return {node.func.id}
+            return set()
         if isinstance(node, ast.Name):
+            cls_name, func = ctx
+            if func is not None:
+                params = _param_names(func)
+                if node.id in params:
+                    index = params.index(node.id)
+                    if index == 0 and cls_name is not None:
+                        return _descendants(cls_name)
+                    key = ('param', id(func), node.id)
+                    if key in seen:
+                        return set()
+                    found = set()
+                    for call in calls_by_name.get(func.name, ()):
+                        value = None
+                        if index < len(call.args):
+                            value = call.args[index]
+                        else:
+                            for keyword in call.keywords:
+                                if keyword.arg == node.id:
+                                    value = keyword.value
+                        if value is not None:
+                            found |= _classes_of(value, call_ctx.get(id(call), (None, None)),
+                                                 seen | {key})
+                    if found:
+                        return found
             if node.id in seen:
                 return set()
             seen = set(seen) | {node.id}
@@ -346,7 +430,7 @@ def refuse_field_method_call(tree):
                         and item.target.id == node.id and item.value is not None:
                     value = item.value
                 if value is not None:
-                    found |= _classes_of(value, seen)
+                    found |= _classes_of(value, ctx, seen)
                 if isinstance(item, ast.arg) and item.arg == node.id \
                         and isinstance(item.annotation, ast.Name) and item.annotation.id in classes:
                     found.add(item.annotation.id)
@@ -354,6 +438,18 @@ def refuse_field_method_call(tree):
                         and item.target.id == node.id and isinstance(item.annotation, ast.Name) \
                         and item.annotation.id in classes:
                     found.add(item.annotation.id)
+            return found
+        if isinstance(node, ast.Attribute):
+            key = ('attr', id(node))
+            if key in seen:
+                return set()
+            found = set()
+            for cls_name in _classes_of(node.value, ctx, seen | {key}):
+                info = classes.get(cls_name)
+                if info is None:
+                    continue
+                for value in info['field_values'].get(node.attr, ()):
+                    found |= _classes_of(value, ctx, seen | {key})
             return found
         if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
             found = set()
@@ -364,11 +460,11 @@ def refuse_field_method_call(tree):
                     continue
                 if isinstance(item.value, (ast.List, ast.Tuple)):
                     for elt in item.value.elts:
-                        found |= _classes_of(elt, seen)
+                        found |= _classes_of(elt, ctx, seen)
                 elif isinstance(item.value, ast.Dict) and isinstance(node.slice, ast.Constant):
                     for key, value in zip(item.value.keys, item.value.values):
                         if isinstance(key, ast.Constant) and key.value == node.slice.value:
-                            found |= _classes_of(value, seen)
+                            found |= _classes_of(value, ctx, seen)
             return found
         return set()
 
@@ -383,11 +479,10 @@ def refuse_field_method_call(tree):
             continue
         if isinstance(recv, ast.Call) and isinstance(recv.func, ast.Name) and recv.func.id == 'super':
             continue
-        possible = _classes_of(recv)
         owners = {name for name, names in collisions.items() if attr in names}
-        if possible:
-            if not (possible & owners):
-                continue
+        possible = _classes_of(recv, call_ctx.get(id(node), (None, None)))
+        if not (possible & owners):
+            continue
         raise Unsupported('the method .%s() on an instance whose class also stores an instance '
                           'field named %s (CPython calls the field)' % (attr, attr))
 

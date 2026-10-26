@@ -5,7 +5,10 @@ The pre260 review recorded a pre-existing difference: with ``self.f = lambda: 10
 both builds silently dispatched to the method and returned 102.  A callable held in an instance
 field has no route on either emitter, so such a call is now refused by name at compile time;
 the class-level spelling ``C.f(c)``, a plain field read, a class that defines only the method or
-only the field, and an unrelated class with the same method name keep their old behaviour.
+only the field, and an unrelated class with the same method name keep their old behaviour.  The
+refusal is restricted to receivers that can actually be the colliding class: an unrelated
+parameter, ``self`` in an unrelated class and a list/dict receiver are not caught by a collision
+elsewhere in the program.
 """
 import os
 import subprocess
@@ -160,6 +163,56 @@ class D:
 print(D().f())
 '''
 
+UNRELATED_PARAM = r'''class C:
+    def __init__(self):
+        self.f = lambda: 1
+    def f(self):
+        return 2
+class D:
+    def f(self):
+        return 7
+def call(d):
+    return d.f()
+print(call(D()))
+print(D().f())
+'''
+
+UNRELATED_SELF = r'''class C:
+    def __init__(self):
+        self.f = lambda: 1
+    def f(self):
+        return 2
+class D:
+    def f(self):
+        return 3
+    def run(self):
+        return self.f()
+print(D().run())
+'''
+
+LIST_METHOD = r'''class C:
+    def __init__(self):
+        self.append = lambda x: None
+    def f(self):
+        return 2
+    def append(self, x):
+        pass
+xs = [1]
+xs.append(2)
+print(xs)
+'''
+
+SELF_SUBCLASS = r'''class B:
+    def run(self):
+        return self.f()
+class C(B):
+    def __init__(self):
+        self.f = lambda: 101
+    def f(self):
+        return 102
+print(C().run())
+'''
+
 
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
@@ -211,7 +264,8 @@ class Pre278Tests(unittest.TestCase):
     def test_routes_are_refused(self):
         for slug, text in (('arg', ARGUMENT), ('list', LIST_ITEM), ('dict', DICT_VALUE),
                            ('attr', ATTRIBUTE), ('alias', ALIAS), ('noncallable', NON_CALLABLE),
-                           ('inherited', INHERITED_METHOD), ('self', SELF_RECEIVER)):
+                           ('inherited', INHERITED_METHOD), ('self', SELF_RECEIVER),
+                           ('self_subclass', SELF_SUBCLASS)):
             with self.subTest(slug=slug):
                 self.refused(slug, text)
 
@@ -224,6 +278,11 @@ class Pre278Tests(unittest.TestCase):
         self.check('other_field', OTHER_FIELD)
         self.check('unrelated', UNRELATED)
         self.check('unrelated_call', UNRELATED_CALL)
+
+    def test_unrelated_receivers_match_cpython(self):
+        self.check('unrelated_param', UNRELATED_PARAM)
+        self.check('unrelated_self', UNRELATED_SELF)
+        self.check('list_method', LIST_METHOD)
 
 
 if __name__ == '__main__':
