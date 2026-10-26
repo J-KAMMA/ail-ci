@@ -577,6 +577,32 @@ failure inside a comprehension carries no source line and is still turned into t
 refusal. Tests: `test_ail_fuzz28`, `test_ail_fuzz29`, `test_ail_pre170`, `test_ail_pre201`,
 `test_ail_pre227`, `test_ail_pre241`, `test_ail_safetynet`, `test_ail_files`,
 `test_ail_corpus_findings3` (9 modules, 45 tests, 0 failed, 1 skipped for no zig).
+## 2026-10-26 - re-apply fuzz4: dict hashing and literal order (job-rbrbfuzz4-10262129)
+
+Re-applied the accepted fuzz4 change on top of this tree.  Both sides' fixes are kept: the
+accepted object-runtime hashing work and literal-order lowering were applied cleanly; the
+conflicts were only the module registry, shard list, DEVLOG and DIFFERENCES rows, where this
+tree's newer entries are kept alongside the fuzz4 rows (renamed to this branch's ids).
+
+The change makes `dict.pop`/`setdefault` hash a key once (and skip hashing on the empty-dict
+`pop` fast path), makes `copy`, `update(other_dict)`, `popitem` and `dict(d)` reuse stored
+hashes, and makes the general path's dict/set literals evaluate every key/value/element before
+hashing any of them.  `test_ail_fuzz4.py` is registered in `ail_check.MODULES` and
+`ci_shards.json`.
+
+Probes in `/tmp/probes` (`f4_hash_once`, `f4_copy_update`, `f4_literal_order`,
+`f4_collisions`, `f4_nested_containers`) cover hit/miss `pop`/`setdefault`, the empty-dict
+fast path, copy/update/dict/popitem, colliding `__hash__`, unhashable early literal keys with
+later side effects, starred set literals, and values reaching a call through an argument, a
+list item, an attribute, a dict value and an alias; all match CPython on both builds.
+A colliding `dict(d)` variant exposed the already-recorded open `__eq__`-count difference
+(`C?-job-rbrbfuzz4-10262129-4`); the retained probes avoid that known table-shape case.
+
+`python3 tools/diff_ids.py` is not present in this tree (or in the accepted job), so it could
+not be run.  `python3 tools/update_manifest.py` updated the manifest for the touched files.
+
+Tests on the final commit: `test_ail_fuzz4`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` (4 modules, 354 s, 0 failed).
 
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
@@ -2497,6 +2523,34 @@ implementation when the base has no body.  `g17_004`, `g17_024` and `g13_036` no
 print what CPython prints on both builds; the census refused 50 afterwards.  Added the positional
 partial program to `test_ail_silent6.py` and an abstract-visitor hierarchy to
 `test_ail_typed_inherit.py`.
+
+## 2026-10-24 - job-rbfuzz4-10240913 (dicts, sets, comprehensions)
+
+Re-applied the accepted fuzz4 change on top of this tree, keeping both sides' fixes.
+
+Ran 240 generated programs (dict order churn, set algebra/subset churn, set range churn,
+comprehension and update/delete templates) plus ~60 hand-written edge programs and 8 probes in
+`/tmp/probes`, each with `bash ~/tools/cmp.sh` on the general path and the default build.
+
+Fixed two silent-difference causes:
+
+1. Dict operations on stored keys re-ran `__hash__`: `pop`/`setdefault` hashed twice, and
+   `update(other_dict)`, `copy`, `popitem`, `dict(d)` re-hashed.  The object runtime now uses one
+   hash for pop/setdefault, clones the entry table for `copy`, removes the last entry directly
+   for `popitem`, and reuses stored hashes for update/dict.  `dict.pop` on an empty dict also
+   takes CPython's no-hash fast path.
+2. Dict and set literals on the general path hashed each element as it was evaluated.  CPython
+   3.12's `BUILD_MAP`/`BUILD_SET` evaluate every key/value/element first, then hash/insert; the
+   general lowering now does the two phases.  The typed literal emitter still inserts per pair,
+   but its keys are scalar int/str/bytes/float values with no user `__hash__`, so no silent
+   stdout difference was observed on that path.
+
+Remaining (not fixed): same-size dict mutation during iteration still differs by path/declared
+structural-mutation rule; `reversed(dict)` and `dict | dict` are accepted then stop at run time;
+and `dict(d)` may call a user `__eq__` a different number of times than CPython when the source
+table has a particular internal shape (CPython's own count depends on key-table sharing).
+`test_ail_fuzz1` could not run locally because `difffuzz` is not in this snapshot; the required
+and targeted modules were run on the final commit.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
