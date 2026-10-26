@@ -277,6 +277,33 @@ and both `tools/ci_shards.json` lists. Conflict resolution with the later pre190
 pre190 now requires the generic fold limit to cover (not equal) the maxsplit limit and asserts the
 new 2**22 value, and pre236's non-special wide-shift refusal moved from the old 2**20 boundary to
 the new 2**22 one; both keep their original intent.
+## 2026-10-26 - generator expression as a hash key refused by name (job-rbpre245-10261431)
+
+Re-applying pre245 on this tree.  The pre222 review recorded p8c as still differing here:
+`print({(x for x in [1, 2])})` exits 1 with `TypeError: unhashable type: 'list'` on both builds,
+while CPython stores the generator object and hashes it by identity (its display carries the
+address).  The cause is the pre166 representation: a generator expression is materialised
+eagerly as a list carrying `from_generator`, so it has neither CPython's identity hash nor its
+generator repr.
+
+The construct is now refused by name on both builds.  `_check_genexpr_hash_keys` in
+`ail_chatgpt.py` refuses a generator expression that a set literal or comprehension, a dict literal
+key or comprehension, `hash()`, or `set()`/`frozenset()` over a collection must hash, including one
+reached through a tuple, an `if` expression or a `tuple()`/`frozenset()` call over a collection.
+`_bound_names` keeps a program that binds `hash`/`set`/`frozenset`/`tuple` (def, assignment,
+parameter, import, `global`/`nonlocal`, match name) on CPython's result; an over-approximated
+scope only moves a genuinely builtin call to the run-time refusal.  The v2 `ail_obj_hash` (with
+the matching `dunderrt.py` text edit) raises the same named `TypeError` when a saved, aliased,
+passed, stored or otherwise dynamic generator expression reaches a hash bucket, so `dict.get`,
+membership, `.add`, a subscript and `hash(name)` name the construct instead of the list.  A
+consumed generator expression (`sum`, `next`, `list`, `frozenset(genexpr)`, a genexpr passed to
+`tuple()`/`frozenset()` as a key) and one kept as a dict value are unchanged.  `print(g)` still
+shows the list repr, the separate later item.
+
+Probes `/tmp/probes/p245_*` cover the static forms, every dynamic route above, bound-name
+shadowing, a plain list key, `frozenset(genexpr)` and consumption; each matches CPython or is
+refused by name on both builds.  Added `test_ail_pre245.py` and registered it in `ail_check` and
+the CI shards.
 
 ## 2026-10-25 -- pre227 suite fix: the constant check owns the refusal wording (job-pre227-10260534)
 

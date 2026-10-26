@@ -14625,6 +14625,12 @@ static inline ail_st ail_obj_hash(ail_ctx *cx, int64_t *out, ail_obj x) {
             *out = (int64_t)h; return AIL_OK;
         }
         default: {
+            /* A materialised generator expression is a LIST here; CPython hashes the generator
+               object by identity and shows its address-bearing repr, so no hash bucket or repr
+               can agree. Refuse it by name instead of calling it an unhashable list. */
+            if (x.tag == AIL_T_LIST && ((ail_vecobj *)x.o)->from_generator)
+                return ail_raise_c(cx, AIL_B_TYPEERROR,
+                    "a generator expression used as a hash key is not supported: AIL stores it as a list (no generator identity hash or repr)");
             char buf[64]; snprintf(buf, sizeof buf, "unhashable type: '%s'", ail_type_name(x.tag));
             return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
         }
