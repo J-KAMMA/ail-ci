@@ -1,3 +1,33 @@
+## 2026-10-26 - re-apply pre278: instance field/method name collision (job-rbpre278-10270752)
+
+Re-applying the accepted pre278 change on the current integration tree.  The current tree already
+contains pre279, which made the general path check the instance table before a method of the
+receiver's own class; that fix is kept, so the pre278 probes for a direct receiver, an argument, a
+list item, a dict value, an attribute, an alias, an inherited method, a non-callable field and
+`self.f()` in the colliding class now match CPython on both builds instead of being refused.
+
+The one pre278 shape that still mis-compiled is `self.f()` in a base method whose subclass stores
+the field: the static receiver is the base, so the general path did not know to check the instance
+table.  The front end's field/method collision check is now called by both typed entry points
+(where it sends the program to the general emitter for the routes pre279 handles) and by the
+general emitter, which refuses only a receiver whose possible classes are not all collision
+owners.  The refusal keeps pre278's wording: `the method .f() on an instance whose class also
+stores an instance field named f (CPython calls the field)`.  Detection walks each class's own
+methods (not nested classes), follows bases, resolves `self` through the enclosing class and its
+subclasses, parameters through call sites and annotations, attributes through field initialisers,
+and list/dict items through their literals; an unrelated receiver is left alone.  Added
+`AIL_CURRENT/test_ail_pre278.py` and registered it in `ail_check.MODULES`.
+
+Probes `/tmp/probes/p278_*` (the accepted module's 19 shapes) and `/tmp/probes/p278x_*`
+(boundaries 0/-1/int64 min/max/bool/str/list/dict/None, empty and negative values, base field with
+subclass method, multi-level `self`, argument/list/attribute/dict routes, external assignment,
+and a nested-class owner) match CPython or are refused by the same name on both builds.  The probe
+using `del a.f` and the one with a nested class body are refused by name for those unrelated
+constructs on this tree.
+
+`tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run and `--check`
+passes.
+
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
