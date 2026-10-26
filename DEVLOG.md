@@ -1,3 +1,21 @@
+## 2026-10-26 -- re-apply pre2: out-of-int64 constant power is refused by name (job-rbpre2-10261658)
+
+Re-applying the accepted pre2 change on the current integration tree.  The refusal is already
+present here: pre121/pre177's generic constant-expression rule refuses `2 ** 63`, `(-2) ** 64`,
+`2 ** 100000000` and the assignment/argument/list-item/attribute/dict routes by name, while
+pre113's exact fold keeps `2 ** 63 - 1`, `(2 ** 63) >> 1` and `2 ** 63 - 2 ** 63` in range and
+matching CPython.  The conflict resolution keeps that newer rule and does not add pre2's second,
+power-specific refusal path.  Added the accepted `AIL_CURRENT/test_ail_pre2.py`, adapted to
+accept the current tree's named wording and to check the now-in-range subtraction against
+CPython, and registered it in `ail_check.MODULES` and `ci_shards.json`.
+`tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run and `--check`
+passes.  Probes `pre2_*` in `/tmp/probes` on both builds: `pre2_inrange`, `pre2_bounds`,
+`pre2_float` and `pre2_after` match CPython; `pre2_direct`, `pre2_assign`, `pre2_neg`,
+`pre2_huge`, `pre2_arg`, `pre2_list`, `pre2_attr`, `pre2_dict`, `pre2_local` and `pre2_ail` are
+refused by name.  Tests on the final tree: `test_ail_pre2`, `test_ail_pre113`,
+`test_ail_pre121`, `test_ail_pre177`, `test_ail_pre97`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3` (8 modules, 379 s, 0 failed).
+
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is
