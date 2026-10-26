@@ -1,3 +1,18 @@
+## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
+
+Re-applying the accepted pre203 change on the current integration tree.  The behaviour is
+already present: the generic all-constant folder (`pyfunc.fold_int_constant`) folds a unary
+minus whose exact value is INT64_MIN before the backends parse it, the pre246 unary/index fold
+keeps `-(1 << 63)` and `~(-(1 << 63))` in range, and `_CONST_INT_BITS = _MAXSPLIT_BITS`
+(2**20 bits) already shares the wide limit, so `-((1 << 5000) >> 4937)` folds rather than being
+refused.  No compiler code change was needed; this reapply adds the accepted
+`AIL_CURRENT/test_ail_pre203.py`, registers it in `ail_check.MODULES` and `ci_shards.json`, and
+records the already-fixed rows.  Probes in `/tmp/probes`: `pre203_min`, `pre203_routes`,
+`pre203_adjacent`, `pre203_bounds` match CPython on both builds; `pre203_refuse`
+(`-(-9223372036854775808)`) is refused by name on both.  Tests on the final tree:
+`test_ail_pre203`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`
+(4 modules, 346 s, 0 failed).
+
 ## 2026-10-25 -- pre227 suite fix: the constant check owns the refusal wording (job-pre227-10260534)
 
 The class-constant fix still folds `N = 2**62; class C: X = N * 4` to a literal, but the
