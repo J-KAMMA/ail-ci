@@ -396,9 +396,13 @@ class Gen:
             return name
         self.out[name] = None
         elem = ann_text(t[1])
+        # `repr()` as a name is shadowable (a program may define its own `repr`); `%r` is the
+        # built-in conversion and still uses the VALUE's repr if a slice store put another
+        # scalar type into a slot whose annotation says otherwise.
+        shown = '("%r" % (x,))' if t[1] in SCALARS else self.repr_expr(t[1], 'x')
         self.out[name] = ('def %s(xs: list[%s]) -> str:\n    parts: list[str] = []\n    for x in xs:\n'
                           '        parts.append(%s)\n    return "[" + ", ".join(parts) + "]"\n'
-                          % (name, elem, self.repr_expr(t[1], 'x')))
+                          % (name, elem, shown))
         return name
 
     def tcmp(self, t):

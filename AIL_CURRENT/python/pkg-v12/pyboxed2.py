@@ -33,7 +33,7 @@ import os
 import re
 import runpy
 
-from pyfront import Unsupported, refuse_complex_pow
+from pyfront import Unsupported, refuse_complex_pow, refuse_unrepresentable_delete_bounds
 import filelib
 import hashlower
 import pyfunc
@@ -7763,6 +7763,10 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.emit('%s = ail_box_bool(%sail_str_any_outside(%s, %dLL, %dLL));'
                          % (res, neg, v, lo, hi))
                 return res
+            if any(isinstance(g.iter, ast.GeneratorExp) for g in arg.generators):
+                raise Unsupported('%s() over a generator expression whose iterable is itself a '
+                                  'generator expression (the inner generator would be materialised '
+                                  'eagerly)' % name)
             # fused: still evaluates EVERY element in the same order (the existing path
             # materialises the genexpr eagerly before scanning), so side effects and
             # exception positions are identical -- only the LIST object, the per-element
@@ -9836,6 +9840,9 @@ class Compiler(boxclosure.ClosureMixin):
         pass  # already folded into ctx.ptr_names by _register_nested
 
     def stmt_Delete(self, node, ctx):
+        for target in node.targets:
+            if isinstance(target, ast.Subscript):
+                refuse_unrepresentable_delete_bounds(target)
         for target in node.targets:
             if isinstance(target, ast.Name):
                 if (not self._is_global_name(target.id, ctx) and target.id in ctx.slot_of
