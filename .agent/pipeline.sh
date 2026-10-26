@@ -69,6 +69,40 @@ PY
   [ $rc = 124 ] && echo "(cut off after $3 minutes)"
   return 0
 }
+wait_offpeak() {  # paid DeepSeek costs double Mon-Fri 01-04 and 06-10 UTC (OpenCode Go and Command Code alike):
+  # before a paid model, wait for the window to end (owner, 2026-10-26: GitHub too, not only the local runner)
+  local h d
+  while :; do
+    h=$(date -u +%-H); d=$(date -u +%u)
+    if [ "$d" -le 5 ] && { [ "$h" -ge 1 ] && [ "$h" -lt 4 ] || [ "$h" -ge 6 ] && [ "$h" -lt 10 ]; }; then
+      echo "(peak hours: waiting before the paid model)" >&2; sleep 600
+    else return 0; fi
+  done
+}
+run_cc() {  # $1 prompt file, $2 tag, $3 minutes -> final text on stdout; returns 1 if Command Code could not run
+  wait_offpeak
+  # Command Code CLI (GOAT plan, owner 2026-10-26), pinned; the key lives only in this process's environment
+  [ -x "$RUNNER_TEMP/cc/node_modules/.bin/cmd" ] || npm install --prefix "$RUNNER_TEMP/cc" --no-fund --no-audit command-code@1.88.0 >/dev/null 2>&1 || return 1
+  COMMAND_CODE_API_KEY=$(cat "$RUNNER_TEMP/cc.key") timeout "${3}m" "$RUNNER_TEMP/cc/node_modules/.bin/cmd" -p --model deepseek-v4.1-flash \
+    --yolo -t --max-turns 250 --output-format json \
+    < <(printf 'Do the task described below, in this directory. When finished, reply with a short final report.\n\n'; cat "$1") \
+    > "$RUNNER_TEMP/$2.cc.json" 2> "$RUNNER_TEMP/$2.cc.err"
+  echo "[model commandcode/deepseek-v4.1-flash]"
+  python3 - "$RUNNER_TEMP/$2.cc.json" <<'PY'
+import json, sys
+final = None
+for line in open(sys.argv[1], encoding='utf-8', errors='replace'):
+    try:
+        e = json.loads(line)
+    except ValueError:
+        continue
+    if isinstance(e, dict) and (e.get('type') == 'result' or 'result' in e):
+        # the last line is {"type": "result", ..., "finalText": "..."} (command-code 1.88.0)
+        final = e.get('finalText') or final
+print(final or '(no final text)')
+PY
+  grep -qs '"result"' "$RUNNER_TEMP/$2.cc.json"
+}
 run_oc() {  # $1 prompt file, $2 tag, $3 minutes -> final text on stdout
   # The free Zen build of the model first (zero retention, not used for training); the paid Go model when it fails.
   # When the free quota is used up OpenCode does not exit, it retries silently (2026-10-24), so a watchdog reads
@@ -77,6 +111,7 @@ run_oc() {  # $1 prompt file, $2 tag, $3 minutes -> final text on stdout
   run_qoder "$1" "$2" "$3" && return 0
   for model in opencode/deepseek-v4.1-flash-free opencode-go/deepseek-v4.1-flash; do
     [ "$model" = opencode/deepseek-v4.1-flash-free ] && [ -f "$RUNNER_TEMP/free_out" ] && continue
+    [ "$model" = opencode-go/deepseek-v4.1-flash ] && wait_offpeak
     mins=$3; quota=0
     rm -rf "$HOME/.local/share/opencode/log"
     timeout "${mins}m" "$OC" run --format json --dir "$PWD" -m "$model" "Do the task described in the attached file, in this directory. When finished, reply with a short final report." -f "$1" > "$RUNNER_TEMP/$2.jsonl" 2> "$RUNNER_TEMP/$2.err" &
@@ -92,6 +127,10 @@ run_oc() {  # $1 prompt file, $2 tag, $3 minutes -> final text on stdout
     [ "$model" != opencode/deepseek-v4.1-flash-free ] && break
     grep -qiE '"type": ?"error".*(rate|limit|quota|429|503|free)' "$RUNNER_TEMP/$2.jsonl" || break
   done
+  # OpenCode gave nothing (its week used up, 2026-10-26): the same model through the Command Code GOAT plan
+  if [ -s "$RUNNER_TEMP/cc.key" ] && ! grep -qs '"type": *"text"' "$RUNNER_TEMP/$2.jsonl"; then
+    run_cc "$1" "$2" "$3" && return 0
+  fi
   echo "[model $model]"
   python3 .agent/oc_report.py "$RUNNER_TEMP/$2.jsonl"
   python3 .agent/oc_steps.py "$RUNNER_TEMP/$2.jsonl" 2>/dev/null | sed "s/^/    /"
@@ -104,8 +143,15 @@ commit_leftovers() {  # an agent's uncommitted edits still count as its work
 }
 
 rules=$(cat .agent/rules.txt 2>/dev/null)
+# time boxes (minutes) for the worker, each review and the fix round. The bigint fix jobs are large: with 100/60/60
+# nearly all of them were cut off mid-work and judged FIX (2026-10-26), so they get a longer first pass and the time
+# left decides whether a second review still fits. They also skip the full suite here: their base (the bigint export)
+# fails ~70 modules until all fixes are in, and the merged result runs the full suite in the private repo.
+W0=100; RV=60; W1=60; SUITE=1; T_END=$(( $(date +%s) + 320 * 60 ))
+case "$(git rev-parse --abbrev-ref HEAD)" in job-bigint-*) W0=170; RV=50; W1=70; SUITE=0;; esac
+left() { echo $(( (T_END - $(date +%s)) / 60 )); }
 cat .agent/task.md > "$RUNNER_TEMP/work0.md"
-report=$(run_oc "$RUNNER_TEMP/work0.md" work0 100)
+report=$(run_oc "$RUNNER_TEMP/work0.md" work0 $W0)
 printf '\n## worker report 0\n%s\n' "$report" >> "$log"
 commit_leftovers worker
 if [ "$(git rev-list --count work..HEAD)" = 0 ]; then
@@ -115,10 +161,11 @@ fi
 verdict=NONE
 for i in 0 1; do
   { cat .agent/review.md; cat .agent/task.md; printf '\n--- WORKER REPORT ---\n%s\n' "$report"; } > "$RUNNER_TEMP/review$i.md"
-  rv=$(run_oc "$RUNNER_TEMP/review$i.md" "review$i" 60)
+  [ "$(left)" -lt $(( RV + 5 )) ] && { printf '\n## review %s skipped: only %s minutes left\n' "$i" "$(left)" >> "$log"; [ $i = 0 ] && verdict=ERROR; break; }
+  rv=$(run_oc "$RUNNER_TEMP/review$i.md" "review$i" $RV)
   if ! grep -q 'VERDICT:' <<< "$rv"; then   # no verdict: an infrastructure failure, try once more
     printf '\n## review %s failed to run: %s\n' "$i" "$(tail -3 <<< "$rv" | tr '\n' ' ')" >> "$log"
-    sleep 120; rv=$(run_oc "$RUNNER_TEMP/review$i.md" "review$i" 60)
+    sleep 120; rv=$(run_oc "$RUNNER_TEMP/review$i.md" "review$i" $RV)
   fi
   printf '\n## review %s\n%s\n' "$i" "$rv" >> "$log"
   git reset -q --hard HEAD; git clean -qfd -e .agent -e corpus   # the reviewer only judges; drop anything it left
@@ -129,7 +176,9 @@ for i in 0 1; do
   [ $i = 1 ] && break
   { printf 'You work in this directory on the current branch (your earlier commits). The reviewer found defects. Fix every one of them, re-run the probes and the required tests, and commit.\n\n--- ORIGINAL TASK ---\n'
     cat .agent/task.md; printf '\n--- REVIEW ---\n%s\n%s\n' "$rv" "$rules"; } > "$RUNNER_TEMP/work1.md"
-  report=$(run_oc "$RUNNER_TEMP/work1.md" work1 60)
+  w=$(( $(left) - RV - 10 )); [ $w -gt $W1 ] && w=$W1
+  [ $w -lt 15 ] && { printf '\n## fix round skipped: only %s minutes left\n' "$(left)" >> "$log"; break; }
+  report=$(run_oc "$RUNNER_TEMP/work1.md" work1 $w)
   printf '\n## worker report 1\n%s\n' "$report" >> "$log"
   commit_leftovers fix
 done
@@ -138,7 +187,7 @@ suite_new() {  # prints the test modules that fail now and are not in the known-
   (cd AIL_CURRENT && timeout 75m python3 ../tools/par_check.py -j 4 > "$RUNNER_TEMP/suite.log" 2>&1)
   grep -oE 'FAIL test_ail_[a-z0-9_]+' "$RUNNER_TEMP/suite.log" | awk '{print $2}' | sort -u | grep -vxF -f .agent/integ_base_fail.txt 2>/dev/null
 }
-if [ "$verdict" = ACCEPT ]; then
+if [ "$verdict" = ACCEPT ] && [ $SUITE = 1 ]; then
   bad=$(suite_new)
   printf '\n## full suite\n%s\n' "${bad:-no new failures}" >> "$log"
   if [ -n "$bad" ]; then

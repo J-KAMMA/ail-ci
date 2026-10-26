@@ -1,63 +1,9 @@
-# bigint-fix04: C build error "incompatible type for argument N of 'f'" (tagged value passed to an int64 parameter) (C)
+# Continue: finish the task and verify it
 
-The IR emitter passes `ail_tint` (tagged int) arguments to a callee whose C prototype still takes `int64_t`. gcc rejects
-the program: `incompatible type for argument 2 of 'quot'` / `expected 'int64_t' but argument is of type 'ail_tint'`
-(and the opposite, `incompatible type for argument 1 of 'ail_tint_i64'`). The caller and the callee disagree about
-which functions take tagged parameters. Every test below failed with return code 4 (the C compiler rejected this).
-
-## Modules
-test_ail_quirks (4 tests), test_ail_try_hoist, test_ail_tuples (lambdas, grid), test_ail_nested_functions (cached,
-callbacks, grid, dfs), test_ail_ir_s2 (about 8 tests: traps, safe, ordering, exceptions across the boundary),
-test_ail_cratebridge (struct by pointer under the IR; error is in `ail_tint_i64` argument), test_ail_ffi
-(object entry: `t_i64(ail_tint x)`; the zlib.h failures in that module are the sandbox lacking zlib, ignore), test_ail_typed_blockers (2).
-
-## Reproducers
-`q3.py` (default build and `AIL_NO_GENERAL=1` both fail):
-```
-def b(x: int, y: int) -> int:
-    if x > 0 and y > 0:
-        return 10
-    elif x > 0:
-        return 20
-    elif y > 0 or x > -3:
-        return 30
-    elif x == -10:
-        return 40
-    else:
-        return 50
-
-def main() -> None:
-    for x in range(-12, 8):
-        print(x, b(x, x - 2), b(-x, x))
-main()
-```
-CPython prints 20 lines `-12 50 30` ... ; AIL: `incompatible type for argument 2 of 'b'` (call `b(ail_tint_from_int64(...), ail_tint_from_int64(...))` vs `int64_t b(int64_t v_x, int64_t v_y)`).
-Note the version without the `elif x == -10` branch builds, so the callee's signature choice depends on its body.
-
-`ir2.py`:
-```
-def quot(a: int, b: int) -> int:
-    try:
-        return a // b
-    except ZeroDivisionError:
-        return -1
-def main() -> None:
-    print(quot(7, 2), quot(1, 0))
-main()
-```
-CPython `3 -1`. AIL: `incompatible type for argument 2 of 'quot'`. With `AIL_IR=verify` the same file instead crashes in
-`ir/verify.py`: `IRError: quot: const #5: constants are scalars in S0` (fix this too; test_ail_ir_s2 runs in verify mode).
-
-## Category
-C. Fix the call-site / prototype agreement: one decision per function (taking tagged parameters or not) used by the
-prototype, the definition, every direct call, function pointers/lambdas/nested closures (`main__weight`, `pass_on_l4`,
-`count_paths__ways__body`) and the FFI/object-entry wrappers. Add a regression with each shape above.
-
-## Fixed means
-q3.py and ir2.py build and match CPython in default, `AIL_NO_GENERAL=1`, `AIL_IR=1` and `AIL_IR=verify`; the listed
-modules no longer produce "incompatible type" (report any that still fail for another cause).
-
-run the listed modules and test_ail_bigint test_ail_tint test_ail_unified before committing.
+You continue a job on its own branch: your earlier commits are already here. The previous run was cut off by its time
+limit before the review could judge it. Read `.agent/pipeline.md` in this checkout (the original task and your earlier
+report), check what of the original task is still missing, finish it, run the probes and every test module the
+original task names, and commit. Do not undo the earlier work unless it is wrong; if it is, say why in your report.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
