@@ -1,8 +1,12 @@
-You continue on the current branch, where your earlier work is committed. **Fix only these findings from the last review, nothing else:**
+# Continue: fix the reviewer's findings
 
-1. Typed-only big-int semantics: `/tmp/rprobes/p10_dict_runtime.py` and `/tmp/rprobes/p11_stack_runtime.py` must print `1180591620717411303424` (and `1` for the missing key) under `AIL_NO_GENERAL=1`; HEAD instead emits `integer overflow`, prints nothing and exits 1. Base refused these programs by name, so the change turned an acceptable refusal into a wrong runtime result.
+You continue a job on its own branch: your earlier commits are already here. The reviewer returned FIX. Its last
+review is the last "## review" section of `.agent/pipeline.md` in this checkout (read the whole file: the original task,
+your reports and the reviews are there).
 
-Probe both builds with `bash ~/tools/cmp.sh`, add each fixed case to the tests, then commit. If a finding cannot be fixed safely, refuse the construct by name at compile time instead of leaving a silent wrong answer.
+Fix every defect the last review lists, re-run the probes and the test modules the original task names, and commit.
+Do not undo the earlier work unless a finding requires it. If a finding is wrong, say so in your report with the
+evidence (program, CPython output, AIL output).
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
