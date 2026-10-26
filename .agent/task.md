@@ -1,4 +1,4 @@
-**Your change breaks other tests in the full suite.** On top of the current integration branch, these test modules fail with your change and pass without it: test_ail_grid_return test_ail_numeric_bindings test_ail_numeric_profiles test_ail_numeric_profiles_native test_ail_record_initializers test_ail_sdk test_ail_sdk_environment test_ail_tcp_json_deadlines test_ail_tcp_json_lines_poll_resources.
+**Your change breaks other tests in the full suite.** On top of the current integration branch, these test modules fail with your change and pass without it: test_ail_grid_return test_ail_numeric_bindings test_ail_numeric_profiles test_ail_numeric_profiles_native test_ail_pre110 test_ail_record_initializers test_ail_sdk test_ail_sdk_environment test_ail_tcp_json_deadlines test_ail_tcp_json_lines_poll_resources.
 
 Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find what your change broke, and fix it so they pass again while keeping your own fix and its test. If your fix cannot coexist with them, revert it and say so. Commit.
 
