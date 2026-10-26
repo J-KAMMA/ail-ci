@@ -773,6 +773,154 @@ def _refuse_big_capable(source, local=True):
                           % ('the module code' if name == '<module>' else 'function %s()' % name, marks[name]))
 
 
+def _refuse_typed_big_store(source, force_general=False):
+    """A typed-only build has int64 containers and parameters.  A function whose own proof cannot
+    bound its int (a growing local, a literal, a power, ...) can return an exact ail_tint, but
+    storing that result in a dict/list/set item, a subscript, an attribute or an int64 argument
+    converts it to int64 and stops on overflow at run time.  On the typed attempt this asks for
+    the exact general path; when that path is blocked (AIL builtins/typed-only prelude) name the
+    construct instead."""
+    import bigcap
+    try:
+        tree = ast.parse(source.strip())
+    except SyntaxError:
+        return
+    if not os.environ.get('AIL_NO_GENERAL'):
+        blocked = ('_ail_' in source or '_Ail' in source or any(
+            isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+            and (n.func.id in shadowing.AIL_BUILTINS or n.func.id.startswith(('_ail_', '_Ail')))
+            for fn in ast.walk(tree) if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
+            for n in ast.walk(fn)))
+        if not blocked and force_general:
+            return
+    prelude = {n for n in os.environ.get('AIL_PRELUDE_UNITS', '').split('\n') if n}
+    if prelude:
+        tree.body = [n for n in tree.body if getattr(n, 'name', None) not in prelude]
+    marks = bigcap.marked(tree, local=True)
+    if not marks:
+        return
+    producers = {}
+    for name, why in marks.items():
+        if name == '<module>' or name.startswith(('_Ail', '_ail')):
+            continue
+        if why.startswith(('it calls ', 'it contains ')):
+            continue
+        if 'call result not proven' in why:
+            continue
+        producers[name] = why
+    if not producers:
+        return
+    defs = {}
+    classes = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            classes.add(node.name)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            defs.setdefault(node.name, []).append(node)
+    defined = bigcap._Defined(defs)
+    defined.classes = frozenset(classes)
+    defined.containers = bigcap.nonint_containers(tree)
+    parents = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+
+    def target_name(func):
+        if isinstance(func, ast.Name):
+            return func.id
+        if isinstance(func, ast.Attribute):
+            return func.attr
+        return None
+
+    def param_arith(fn, name):
+        for n in ast.walk(fn):
+            if isinstance(n, ast.BinOp) and any(
+                    isinstance(x, ast.Name) and x.id == name for x in (n.left, n.right)):
+                return True
+            if isinstance(n, ast.AugAssign) and isinstance(n.target, ast.Name) and n.target.id == name:
+                return True
+        return False
+
+    def tinted_param(fn, name):
+        bounds = bigcap.local_int_bounds(fn, defined)
+        proven = bigcap.proven_int_names(fn, defined)
+        unproven = {n for n, v in bounds.items() if v is not None
+                    and (v[0] in bigcap._LP_INTS or v[0] == 'unknown') and n not in proven}
+        unproven -= getattr(defined, 'containers', set())
+        if name not in unproven:
+            return False
+        if param_arith(fn, name):
+            return True
+        ann = fn.returns
+        if isinstance(ann, ast.Name) and ann.id == 'int':
+            return True
+        return any(isinstance(n, ast.Return) and n.value is not None
+                   and any(isinstance(x, ast.Name) and x.id == name for x in ast.walk(n.value))
+                   for n in ast.walk(fn))
+
+    def argument_accepts_tint(call, arg):
+        called = target_name(call.func)
+        fns = defs.get(called)
+        if not fns:
+            return None
+        for fn in fns:
+            params = list(getattr(fn.args, 'posonlyargs', ())) + list(fn.args.args)
+            if isinstance(parents.get(fn), ast.ClassDef):
+                params = params[1:]
+            if arg in call.args:
+                index = call.args.index(arg)
+            else:
+                kw = next((k for k in call.keywords if k.value is arg), None)
+                if kw is None or kw.arg is None:
+                    continue
+                index = next((i for i, p in enumerate(params) if p.arg == kw.arg), -1)
+            if 0 <= index < len(params) and tinted_param(fn, params[index].arg):
+                return True
+        return False
+
+    int64_arg_methods = frozenset((
+        'append', 'appendleft', 'insert', 'extend', 'extendleft', 'add', 'update', 'setdefault',
+        'heappush', 'heappushpop', 'heapreplace', 'insort', 'insort_left', 'insort_right'))
+
+    def stored_as(node):
+        while isinstance(node, (ast.BinOp, ast.UnaryOp, ast.BoolOp, ast.Compare, ast.IfExp,
+                                ast.JoinedStr, ast.FormattedValue)):
+            node = parents.get(node)
+            if node is None:
+                return None
+        parent = parents.get(node)
+        if isinstance(parent, ast.Dict) and node in list(parent.keys) + list(parent.values):
+            return 'a dict item'
+        if isinstance(parent, (ast.List, ast.Tuple, ast.Set)):
+            return 'a list/tuple/set item'
+        if isinstance(parent, ast.Call) and node in list(parent.args) + [k.value for k in parent.keywords]:
+            called = target_name(parent.func)
+            if called in int64_arg_methods:
+                return 'an argument of %s()' % called
+            if called in defs and not argument_accepts_tint(parent, node):
+                return 'an argument of %s()' % called
+        if isinstance(parent, (ast.Assign, ast.AnnAssign)) and parent.value is node:
+            targets = parent.targets if isinstance(parent, ast.Assign) else [parent.target]
+            if any(isinstance(t, (ast.Subscript, ast.Attribute)) for t in targets):
+                return 'a subscript or attribute'
+        if isinstance(parent, ast.AugAssign) and parent.value is node \
+                and isinstance(parent.target, (ast.Subscript, ast.Attribute)):
+            return 'a subscript or attribute'
+        return None
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = target_name(node.func)
+        if name not in producers:
+            continue
+        store = stored_as(node)
+        if store:
+            raise _BigCapable(
+                'function %s() can need an int beyond int64 (%s); the typed path has int64 only and its result is stored in %s'
+                % (name, producers[name], store))
+
+
 def _build_unshadowed(source, out, strict, report, force_general):
     """Try the typed path; a big-capable refusal first tries the exact general path and, when only the typed path can build
     the program (a binary file, a socket), falls back to the typed path with only the hard big-int constructs refused."""
@@ -799,6 +947,7 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
             # big-int constructs (a literal beyond int64, `**`, a variable shift, factorial/comb/perm)
             # stay off it.
             _refuse_big_capable(source, local=False)
+        _refuse_typed_big_store(source, force_general)
         body = to_c(source, strict=strict, info=info)
         if force_general:
             raise Unsupported('general path explicitly requested')

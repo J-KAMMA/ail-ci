@@ -433,6 +433,16 @@ class DefaultBuild(unittest.TestCase):
         self.assertNotEqual(made.returncode, 0)
         self.assertIn("beyond int64", made.stdout + made.stderr)
 
+    def test_typed_only_refuses_big_call_results_into_int64_slots(self):
+        """A call result the proof cannot bound is tagged, but a typed-only build has int64-only
+        containers and parameters.  Storing a local that can grow beyond int64 in one must be a
+        named refusal, not a run-time overflow (the third review's p10/p11)."""
+        for name in ("typed_big_call_dict", "typed_big_call_stack"):
+            self.check(name)
+            made, _, _ = self.build(name, {"AIL_NO_GENERAL": "1"})
+            self.assertNotEqual(made.returncode, 0, name)
+            self.assertIn("beyond int64", made.stdout + made.stderr, name)
+
     def test_gate_starred_required_and_class_only_last(self):
         """A starred argument in a method, class-only attributes and a class-only last store with __init__: exact on
         both builds (the follow-up review)."""
