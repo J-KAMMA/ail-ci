@@ -24878,7 +24878,7 @@ static ail_flist ail_float64_decode(ail_bytes data, int64_t byteorder) {
     if (data.n % 8) ail_raise_named(AIL_EXC_VALUE);
     ail_flist result = {0};
     if (!data.n) return result;
-    result.p = (double *)ail_alloc((size_t)data.n);
+    result.p = (double *)ail_alloc_raw((size_t)data.n);
     result.n = result.cap = data.n / 8;
     if (byteorder == ail_float64_host_order()) {
         memcpy(result.p, data.p, (size_t)data.n);
@@ -24917,7 +24917,7 @@ static ail_bytes ail_float64_encode(ail_barena *A, ail_flist values, int64_t byt
     int64_t slot = A->n;
     ail_barena_push(A, NULL);
     int64_t length = values.n * 8;
-    unsigned char *out = (unsigned char *)ail_alloc((size_t)length);
+    unsigned char *out = (unsigned char *)ail_alloc_raw((size_t)length);
     A->blk[slot] = out;
     if (byteorder == ail_float64_host_order()) {
         memcpy(out, values.p, (size_t)length);
