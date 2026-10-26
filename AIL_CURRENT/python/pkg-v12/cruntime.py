@@ -545,6 +545,7 @@ static int ail_exc_kind_of(const char *w) {
         || !strcmp(w, "C float32 argument out of range") || !strcmp(w, "C float32 result is not finite")
         || !strcmp(w, "bytes must be in range(0, 256)"))
         return AIL_EXC_VALUE;
+    if (!strcmp(w, "integer division or modulo by zero")) return AIL_EXC_ZERODIV;  /* tint_typed.py's // */
     if (!strcmp(w, "division by zero") || !strcmp(w, "integer division by zero")
         || !strcmp(w, "integer modulo by zero")) return AIL_EXC_ZERODIV;
     if (!strcmp(w, "list index out of range") || !strcmp(w, "pop index out of range")

@@ -169,7 +169,11 @@ def _apply(P, args, kwargs, result, current):
                     _k = P._etype(_n.args[0], ctx)
                 except Exception:
                     _k = None
-                if _k == P.STR or _k == P.BYTES:
+                if (_k == P.STR or _k == P.BYTES) and not os.environ.get('AIL_NO_GENERAL'):
+                    # With no general-path fallback the typed path alone still has to accept the common
+                    # `int(sys.argv[i])`: the IR's str_to_int parses to int64 and stops loudly on a value
+                    # beyond it, like every other typed int64 operation.  When the general path is
+                    # available, keep refusing so an exact big int parsed from text takes it instead.
                     from pyfront import Unsupported
                     raise Unsupported('%s() parses an int from text, which the tagged-int lowering does not cover'
                                       % fn.name)

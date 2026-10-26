@@ -24700,13 +24700,23 @@ _PAR_REGION = re.compile(r'^[ ]*/\*@par:begin:(\d+)\*/\n(.*?)^[ ]*/\*@par:end:\1
 _PAR_CAPTURE_TYPES = ('int64_t', 'double', 'ail_flist', 'ail_list', 'ail_bytes', 'ail_bytearray *',
                       'const int64_t *', 'const double *')
 # Runtime helpers a parallel body may reach: pure arithmetic, bounds-checked element access (their
-# traps are intercepted, see cruntime._PARALLEL_DIE_EDITS) and nothing that allocates, counts
-# references or touches an arena.
+# traps are intercepted, see cruntime._PARALLEL_DIE_EDITS), and the tagged-int (tint_typed.py)
+# arithmetic.  The tint small-value arms are pure; a result that needs a big int allocates its own
+# `ail_tbig` with malloc (thread-safe, never shared or freed) and a result that cannot be extracted
+# back to int64 stops through ail_die, which PAR turns into a trap on that worker.  Nothing here
+# counts references or touches an arena.
 _PAR_HELPERS = frozenset((
     'ail_die', 'ail_raise_named', 'ail_fdiv', 'ck_add', 'ck_sub', 'ck_mul', 'ck_neg', 'ck_shl', 'ck_shlk', 'ck_shr',
     'ail_list_get', 'ail_list_set', 'ail_flist_get', 'ail_flist_set', 'ail_bytearray_get',
     'ail_bytearray_set', 'ail_bytearray_len', 'ail_bytearray_index', 'ail_bytearray_meta', 'ail_bytes_get',
     'ail_ffloormod', 'ail_fsqrt', 'ail_ipow', 'ail_round0',
+    'ail_tint_from_int64', 'ail_tint_i64', 'ail_tint_i64_sat', 'ail_tint_double', 'ail_tint_is_small',
+    'ail_tint_is_zero', 'ail_tint_sign', 'ail_tint_to_int64', 'ail_tint_neg', 'ail_tint_add', 'ail_tint_sub',
+    'ail_tint_mul', 'ail_tint_floordiv', 'ail_tint_mod', 'ail_tint_lshift', 'ail_tint_rshift',
+    'ail_tint_add_i64', 'ail_tint_sub_i64', 'ail_tint_mul_i64', 'ail_tint_floordiv_i64', 'ail_tint_mod_i64',
+    'ail_tint_mod_i64_i64', 'ail_tint_mod_pos_i64', 'ail_tint_mod_pos_i64_i64', 'ail_tint_mod2',
+    'ail_tint_cmp', 'ail_tint_eq', 'ail_tint_lt', 'ail_tint_le', 'ail_tint_eq_i64', 'ail_tint_ne_i64',
+    'ail_tint_lt_i64', 'ail_tint_le_i64',
 ))
 
 
