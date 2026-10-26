@@ -315,7 +315,7 @@ _op('unreachable', 0, 0, terminator=True)
 # is `raise E()`) and `reraise` (the exception being handled) end a region like `return`. `try`
 # (attrs: kind = "catch" | "finally") has a body region and then one region per handler (catch;
 # attrs codes lists the exception codes of each) or the finally region (finally); none has results.
-_op('raise', 0, 0, terminator=True)
+_op('raise', 0, 1, terminator=True)
 _op('reraise', 0, 0, terminator=True)
 _op('try', 0, 0, regions=-1)
 # S1: read-only bytes views, numeric lists (obj<list<i64|f64>> through a place or a borrow),

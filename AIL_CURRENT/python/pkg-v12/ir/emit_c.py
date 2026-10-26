@@ -988,7 +988,7 @@ class Emitter(TextEmitter):
                 return self.line(depth, 'return %s;' % o[0] if o else 'return;')
             return self.exit_return(depth, o[0] if o else None)
         if op == 'raise':
-            return self.raise_op(ins, depth)
+            return self.raise_op(ins, depth, o)
         if op == 'reraise':
             self.parts.add('IREXC')
             if not self.checked:
@@ -1003,13 +1003,17 @@ class Emitter(TextEmitter):
         raise I.IRError('no C for op %s' % op)
 
     # ------------------------------------------------------------------ exceptions (S2)
-    def raise_op(self, ins, depth):
+    def raise_op(self, ins, depth, operands):
         code, form = ins.attrs['code'], ins.attrs['form']
         self.parts.add('IREXC')
         self.exception_parts([code])
         if form == 'msg':
             body, n, ascii_ = _c_literal(ins.attrs['msg'])
             new = 'ail_exception_new(%d, (const uint8_t *)(%s), %d, %d)' % (code, body, n, ascii_)
+        elif form == 'val':
+            value = operands[0]
+            new = 'ail_exception_new(%d, (const uint8_t *)(%s).p, (%s).n, (%s).bytes)' % (
+                code, value, value, value)
         else:
             new = 'ail_exception_new(%d, NULL, 0, 0)' % code
         if not self.checked:
@@ -1022,8 +1026,13 @@ class Emitter(TextEmitter):
             return self.line(depth, '__builtin_unreachable();')
         if form == 'name':
             self.line(depth, 'ail_ir_raise_named(%d);' % code)
-        elif form == 'new':
-            self.line(depth, 'ail_ir_raise_new(%d, NULL, 0, 0);' % code)
+        elif form in ('new', 'val'):
+            if form == 'new':
+                self.line(depth, 'ail_ir_raise_new(%d, NULL, 0, 0);' % code)
+            else:
+                value = operands[0]
+                self.line(depth, 'ail_ir_raise_new(%d, (const uint8_t *)(%s).p, (%s).n, (%s).bytes);'
+                          % (code, value, value, value))
         else:
             body, n, ascii_ = _c_literal(ins.attrs['msg'])
             self.line(depth, 'ail_ir_raise_new(%d, (const uint8_t *)(%s), %d, %d);' % (code, body, n, ascii_))

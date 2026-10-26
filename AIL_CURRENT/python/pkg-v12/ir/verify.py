@@ -970,10 +970,15 @@ class _Checker(object):
         self.want(where, isinstance(code, int) and not isinstance(code, bool) and 1 <= code <= 10,
                   'raise needs an exception code 1..10')
         self.want(where, isinstance(name, str) and name.isidentifier(), 'raise needs an exception name')
-        self.want(where, form in ('name', 'new', 'msg'),
-                  'raise form is name (raise E), new (raise E()) or msg (raise E("..."))')
+        self.want(where, form in ('name', 'new', 'msg', 'val'),
+                  'raise form is name (raise E), new (raise E()), msg (raise E("...")) or val')
         self.want(where, (form == 'msg') == isinstance(ins.attrs.get('msg'), str),
                   'raise msg is a string exactly for the msg form')
+        if form == 'val':
+            self.want(where, len(ins.operands) == 1 and ins.operands[0].type == I.STRV,
+                      'raise val takes one str operand')
+        else:
+            self.want(where, not ins.operands, 'raise %s takes no operands' % form)
 
     def op_reraise(self, ins, scope, stack, where, top):
         self.want(where, any(kind == 'handler' for kind, _ in stack),

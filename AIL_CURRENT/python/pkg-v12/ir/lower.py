@@ -1558,6 +1558,11 @@ class Lowering(TextLowering):
                 self.b.emit('raise', [], [], {'code': code, 'name': e.func.id, 'form': 'msg',
                                               'msg': e.args[0].value})
                 return
+            if len(e.args) == 1 and not e.keywords and self.text_kind(e.args[0]) == 'str' \
+                    and e.func.id != 'KeyError':
+                self.b.emit('raise', [self.expr(e.args[0])], [],
+                            {'code': code, 'name': e.func.id, 'form': 'val'})
+                return
             raise NotS0('an exception message that is not a str literal')
         raise NotS0('raise of %s' % type(e).__name__)
 
