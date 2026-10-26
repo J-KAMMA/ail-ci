@@ -395,15 +395,17 @@ static void ail_tint__int_limit_error(int64_t ndigits) {
                      "use sys.set_int_max_str_digits() to increase the limit", (long long)ndigits);
     ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE, msg, (int64_t)n, 0));
 }
-static void ail_tint__int_literal_error(ail_sarena *A, ail_str rep, int64_t base) {
+static void ail_tint__int_literal_error(ail_sarena *A, ail_str rep, int64_t base, int owned) {
     char head[80];
     int hn = snprintf(head, sizeof head, "invalid literal for int() with base %lld: ", (long long)base);
     char *msg = (char *)malloc((size_t)hn + (size_t)rep.n + 1);
     if (!msg) ail_die("out of memory");
     memcpy(msg, head, (size_t)hn);
     for (int64_t i = 0; i < rep.n; i++) msg[hn + i] = (char)ail_chr(rep, i);
-    ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE, msg, (int64_t)hn + rep.n, 0));
+    ail_exception *value = ail_exception_new(AIL_EXC_VALUE, msg, (int64_t)hn + rep.n, 0);
+    if (owned) free((void *)rep.p);
     free(msg);
+    ail_raise_value_adopt(value);
 }
 static void ail_tint__int_bytes_error(ail_sarena *A, const uint8_t *p, int64_t n, int64_t base) {
     int has_sq = 0, has_dq = 0;
@@ -425,8 +427,7 @@ static void ail_tint__int_bytes_error(ail_sarena *A, const uint8_t *p, int64_t n
     }
     rep[k++] = (char)qc;
     ail_str s; s.p = (uint8_t *)rep; s.n = k; s.bytes = 1;
-    ail_tint__int_literal_error(A, s, base);
-    free(rep);
+    ail_tint__int_literal_error(A, s, base, 1);
 }
 static inline int ail_tint__digit(uint8_t c) {
     if (c >= '0' && c <= '9') return c - '0';
@@ -475,7 +476,7 @@ static AIL_BIGFN ail_tint ail_tint__parse_text(ail_sarena *A, ail_str s, int64_t
     if (rc == 2) { ail_tint r = ail_tint__parse_big(b, len, base); if (b != stackbuf) free(b); return r; }
     if (rc == 3) { if (b != stackbuf) free(b); ail_tint__int_limit_error(ndigits); }
     if (b != stackbuf) free(b);
-    ail_tint__int_literal_error(A, ail_fmt_repr_str(A, s), base);
+    ail_tint__int_literal_error(A, ail_fmt_repr_str(A, s), base, 0);
     return ail_tint_from_int64(0);
 }
 static AIL_BIGFN ail_tint ail_tint__parse_bytes(ail_sarena *A, const uint8_t *p, int64_t n, int64_t base) {

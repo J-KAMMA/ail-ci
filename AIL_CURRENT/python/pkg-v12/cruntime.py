@@ -1606,8 +1606,9 @@ static void ail__str_to_int_fail(ail_str s) {
         else o += ail_utf8_put((uint8_t *)msg + o, c);
     }
     msg[o++] = (char)quote;
-    ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE, (const uint8_t *)msg, o, 0));
+    ail_exception *value = ail_exception_new(AIL_EXC_VALUE, (const uint8_t *)msg, o, 0);
     free(msg);
+    ail_raise_value_adopt(value);
 }
 static int64_t ail__str_to_int_full(ail_str s) {
     {

@@ -328,6 +328,12 @@ class Lowering(TextLowering):
                 return _e.id in self.tint_names
             if isinstance(_e, ast.Call):
                 if isinstance(_e.func, ast.Name):
+                    if _e.func.id in ('int', '_ail_int2') and _e.args:
+                        try:
+                            if self.P._etype(_e.args[0], self.ctx) in (self.P.STR, self.P.BYTES):
+                                return True
+                        except Exception:
+                            pass
                     _sig = getattr(self.P, 'TINT_SIGS', {}).get(_e.func.id)
                     if _sig is not None:
                         return bool(_sig[1])
@@ -580,9 +586,7 @@ class Lowering(TextLowering):
             if is_list(t) or t == BYTEARRAY or t in (I.STRV, BYTES):
                 raise NotS0('a function returning a container or text that can fall off its end')
             if t == TINT:
-                zero = self.b.value('tint.from', [self.const(I.I64, 0)], TINT)
-                self.b.emit('return', [zero])
-                return
+                raise NotS0('a function returning a tagged int can fall off its end')
             self.b.emit('return', [self.const(t, 0.0 if t == I.F64 else 0)])
         else:
             self.b.emit('return', [])

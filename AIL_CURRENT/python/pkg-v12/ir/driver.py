@@ -203,10 +203,24 @@ def _apply(P, args, kwargs, result, current):
             return P._etype(n.args[0], ctx) in (P.STR, P.BYTES)
         except Exception:
             return False
+    _text_int_nodes = [n for n in ast.walk(fn) if _text_int(n)]
+    _text_int_call = bool(_text_int_nodes)
+    def _safe_text_int(n):
+        arg = n.args[0]
+        if not (isinstance(arg, ast.Constant) and isinstance(arg.value, str)):
+            return False
+        try:
+            v = int(arg.value, 10)
+        except ValueError:
+            return True
+        return -(1 << 63) <= v < (1 << 63)
+    _unsafe_text_int = any(not _safe_text_int(n) for n in _text_int_nodes)
+    if _unsafe_text_int and not _io_like and not fn.name.startswith(('_Ail', '_ail')):
+        _needs_tint = True
     _has_tint_call = any(
         isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
         and (getattr(P, 'TINT_SIGS', {}).get(n.func.id) or ((), 0))[1]
-        for n in ast.walk(fn)) or any(_text_int(n) for n in ast.walk(fn))
+        for n in ast.walk(fn)) or _text_int_call
     if _py and _needs_tint and _no_tint_locals and not _has_tint_call \
             and not (_proof or '').startswith(('it calls ', 'it contains ')):
         from pyfront import Unsupported
@@ -272,6 +286,12 @@ def _apply(P, args, kwargs, result, current):
     except lower.NotS0 as reason:
         _record(fn.name, cname, 'legacy', str(reason), ctx, extra=_legacy_walias(P, fn, ctx))
         _tinted_sig = bool(_sig and (any(_sig[0]) or _sig[1]))
+        if os.environ.get('AIL_NO_GENERAL') \
+                and not fn.name.startswith(('_Ail', '_ail')) \
+                and (_unsafe_text_int or (_text_int_call and 'fall off its end' in str(reason))):
+            from pyfront import Unsupported
+            raise Unsupported('%s() needs the tagged-int lowering, which does not cover it: %s'
+                              % (fn.name, reason))
         if _needs_tint and (_tinted_sig or 'has kind (' not in str(reason)) \
                 and not fn.name.startswith(('_Ail', '_ail')) \
                 and not os.environ.get('AIL_NO_GENERAL'):

@@ -1617,6 +1617,8 @@ class Emitter(TextEmitter):
                 self.line(depth, 'for (ail_tint %s = %s; %s ? ail_tint_lt(%s, %s) : ail_tint_lt(%s, %s); '
                                  '%s = ail_tint_add(%s, %s)) {' %
                           (index, lo, neg, hi, index, index, hi, index, index, step))
+                if tag:
+                    self.reset_roots(tag, depth + 1)
                 self.region(body, depth + 1, ins)
                 self.line(depth, '}')
         else:

@@ -34923,7 +34923,8 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                               and (sigs[_f.name][1] == INT or _param_arith(_f, n))) else 0
                         for n, k in sigs[_f.name][0])
         _ret = 1 if (sigs[_f.name][1] == INT and _needs_tint
-                     and not (_f.name == entry_name and not library)) else 0
+                     and not (_f.name == entry_name and not library)
+                     and _f.name != 'main') else 0
         _tint_sigs[_f.name] = (_params, _ret)
         _tint_sigs[csym[_f.name]] = (_params, _ret)
     global TINT_SIGS, TINT_ACTIVE
