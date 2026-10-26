@@ -744,7 +744,7 @@ def fold_maxsplit_constant(node):
 
 _CONST_INT_NOT = object()
 _CONST_INT_BIG = object()
-_CONST_INT_BITS = 4096
+_CONST_INT_BITS = 1 << 22
 
 
 def _const_int_expr(node, _limit=None):
@@ -37982,4 +37982,4 @@ if _QC_MODE != '0':
     _fast_ast.walk = _fast_walk
     ast = _fast_ast
 
-_CONST_INT_BITS = _MAXSPLIT_BITS
+_CONST_INT_BITS = 1 << 22

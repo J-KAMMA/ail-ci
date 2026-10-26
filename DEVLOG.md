@@ -146,6 +146,27 @@ Probes `/tmp/probes/pre251_accept.py`, `pre251_contexts.py`, `pre251_boolops.py`
 `pre251_refuse_shift.py` and `pre251_refuse_wide.py` are refused by name on both builds.
 Final-state tests: test_ail_pre251, test_ail_safetynet, test_ail_files and
 test_ail_corpus_findings3; `tools/update_manifest.py --check` passes.
+## 2026-10-26 - reapply negative INT64_MIN unary constants (job-rbrbrbpre204-10261336)
+
+Re-applied the accepted job-pre204 fix on the current tree. The tree's pre177/pre190/pre236 work
+already folds whole constant expressions exactly through `pyfront.int_constant` and
+`pyfunc.fold_int_constant`, so the accepted per-emitter unary checks were already covered on the
+typed, typed-legacy and general paths; the one uncovered path was the general legacy
+`expr_UnaryOp` in `pyboxed.py`, which now folds the whole unary constant expression too. The exact
+constant-folding size limit is raised to `1 << 22` bits in `pyfront._CONST_INT_LIMIT` and in
+`pyfunc._CONST_INT_BITS` (including its late assignment that previously shared the 2**20
+`_MAXSPLIT_BITS`), so `-(1 << 63)`, `-((1 << 5000) >> 4937)` and the large intermediate
+reductions (`0 >> (1 << 5000)`, `2 ** ((1 << 2000000) - (1 << 2000000))`,
+`(1 << 2000000) >> 2000000`) fold to their in-range result instead of trapping on the
+intermediate. Values that reach a negation as variables keep the fixed-width run-time trap.
+
+The new `test_ail_pre204.py` covers negative INT64_MIN spellings, the four value flows (argument,
+list item, attribute, dict value), aliases and returns, in-range boundaries, the large-intermediate
+reductions, and dynamic operands, on all four emitter modes. Registered it in `ail_check.MODULES`
+and both `tools/ci_shards.json` lists. Conflict resolution with the later pre190/pre236 tests:
+pre190 now requires the generic fold limit to cover (not equal) the maxsplit limit and asserts the
+new 2**22 value, and pre236's non-special wide-shift refusal moved from the old 2**20 boundary to
+the new 2**22 one; both keep their original intent.
 
 ## 2026-10-25 -- pre227 suite fix: the constant check owns the refusal wording (job-pre227-10260534)
 
