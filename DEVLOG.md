@@ -1,3 +1,20 @@
+## 2026-10-26 -- pre288 review: scope-aware field/method receiver resolution (job-pre288-10270335)
+
+The pre288 review found two over-refusals introduced by the field/method collision pass.  A bare
+``make()`` was matched against every function of that name in the tree, so ``F.make`` returning
+``C`` was wrongly attributed to the module-level ``make`` (``r14_samename``).  ``_classes_of`` for
+an ``ast.Name`` scanned assignments and annotations in the whole tree, so an unrelated function's
+``x = C()`` or ``def a(x: C)`` marked a receiver in another function (``r13_scope_min``,
+``r11_ann``).  Function-return resolution now walks lexical scopes (the current function, its
+enclosing functions, then the module), while name resolution uses only the receiver's own scope and
+stops at the first binding; a call made inside a function still follows that function's return.
+Added the four regressions plus a local-shadow case to ``test_ail_pre288.py``.  Probes in
+``/tmp/probes`` (both builds): ``pre288r_ret_{module,kw,branch,list,dict,attr,arg,alias,method,inherited,ctor,inner_call,nested_local}``
+are refused by name, and ``pre288r_ok_{samename,local_scope,ann_scope,local_shadow,unrelated_arg,list_append,class_call,unknown_shadow,module_var}``
+match CPython.  Tests on the final tree: ``test_ail_pre288``, ``test_ail_safetynet``,
+``test_ail_files``, ``test_ail_corpus_findings3`` (4 modules, 215 s, 0 failed).
+``update_manifest --check`` and ``ci_shards --check`` clean.
+
 ## 2026-10-26 -- pre278 pre-existing: field/method collision through a function return (job-pre288-10270335)
 
 The pre278 review recorded that ``make(4).f()``, where ``make`` returns a class whose instance

@@ -329,7 +329,7 @@ def refuse_field_method_call(tree):
                             values.append(value)
         classes[node.name] = {'methods': methods, 'fields': set(field_values),
                               'field_values': field_values, 'method_nodes': method_nodes,
-                              'bases': bases}
+                              'bases': bases, 'node': node}
 
     def _inherited(name, key, seen):
         info = classes.get(name)
@@ -385,6 +385,8 @@ def refuse_field_method_call(tree):
         return [arg.arg for arg in args.posonlyargs + args.args]
 
     call_ctx = {}
+    parent_func = {}
+    func_class = {}
 
     def _visit(node, cls_name, func):
         if isinstance(node, ast.ClassDef):
@@ -392,6 +394,8 @@ def refuse_field_method_call(tree):
                 _visit(child, node.name, None)
             return
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            parent_func[id(node)] = func
+            func_class[id(node)] = cls_name
             for child in node.body:
                 _visit(child, cls_name, node)
             return
@@ -401,6 +405,32 @@ def refuse_field_method_call(tree):
             _visit(child, cls_name, func)
 
     _visit(tree, None, None)
+
+    def _scope_nodes(scope, with_defs=False):
+        roots = ast.iter_child_nodes(tree) if scope is None else ast.iter_child_nodes(scope)
+        stack = list(roots)
+        while stack:
+            child = stack.pop()
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                  ast.ClassDef, ast.Lambda)):
+                if with_defs and isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    yield child
+                continue
+            yield child
+            stack.extend(ast.iter_child_nodes(child))
+
+    def _lexical_scopes(ctx):
+        cls_name, func = ctx
+        if func is not None:
+            node = func
+            while node is not None:
+                yield node, (func_class.get(id(node)), node)
+                node = parent_func.get(id(node))
+            yield None, (None, None)
+        else:
+            if cls_name is not None and cls_name in classes:
+                yield classes[cls_name]['node'], (cls_name, None)
+            yield None, (None, None)
 
     def _function_returns(func, cls_name, seen):
         key = ('returns', id(func))
@@ -422,10 +452,14 @@ def refuse_field_method_call(tree):
                 if key in seen:
                     return set()
                 found = set()
-                for item in ast.walk(tree):
-                    if (isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
-                            and item.name == node.func.id):
-                        found |= _function_returns(item, None, seen | {key})
+                for scope, _ in _lexical_scopes(ctx):
+                    defs = [item for item in _scope_nodes(scope, with_defs=True)
+                            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                            and item.name == node.func.id]
+                    if defs:
+                        for item in defs:
+                            found |= _function_returns(item, None, seen | {key})
+                        break
                 return found
             if isinstance(node.func, ast.Attribute):
                 key = ('method', id(node))
@@ -468,29 +502,42 @@ def refuse_field_method_call(tree):
                         if value is not None:
                             found |= _classes_of(value, call_ctx.get(id(call), (None, None)),
                                                  seen | {key})
-                    if found:
-                        return found
+                    return found
             if node.id in seen:
                 return set()
             seen = set(seen) | {node.id}
             found = set()
-            for item in ast.walk(tree):
-                value = None
-                if isinstance(item, ast.Assign):
-                    if any(isinstance(t, ast.Name) and t.id == node.id for t in item.targets):
+            for scope, scope_ctx in _lexical_scopes(ctx):
+                bound = False
+                scope_found = set()
+                for item in _scope_nodes(scope):
+                    value = None
+                    if isinstance(item, ast.Assign):
+                        if any(isinstance(t, ast.Name) and t.id == node.id
+                               for t in item.targets):
+                            bound = True
+                            value = item.value
+                    elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name) \
+                            and item.target.id == node.id:
+                        bound = True
                         value = item.value
-                elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name) \
-                        and item.target.id == node.id and item.value is not None:
-                    value = item.value
-                if value is not None:
-                    found |= _classes_of(value, ctx, seen)
-                if isinstance(item, ast.arg) and item.arg == node.id \
-                        and isinstance(item.annotation, ast.Name) and item.annotation.id in classes:
-                    found.add(item.annotation.id)
-                if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name) \
-                        and item.target.id == node.id and isinstance(item.annotation, ast.Name) \
-                        and item.annotation.id in classes:
-                    found.add(item.annotation.id)
+                    elif isinstance(item, ast.AugAssign) and isinstance(item.target, ast.Name) \
+                            and item.target.id == node.id:
+                        bound = True
+                    if value is not None:
+                        scope_found |= _classes_of(value, scope_ctx, seen)
+                    if isinstance(item, ast.arg) and item.arg == node.id \
+                            and isinstance(item.annotation, ast.Name) \
+                            and item.annotation.id in classes:
+                        scope_found.add(item.annotation.id)
+                    if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name) \
+                            and item.target.id == node.id \
+                            and isinstance(item.annotation, ast.Name) \
+                            and item.annotation.id in classes:
+                        scope_found.add(item.annotation.id)
+                if bound:
+                    found |= scope_found
+                    break
             return found
         if isinstance(node, ast.Attribute):
             key = ('attr', id(node))

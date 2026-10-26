@@ -6,7 +6,9 @@ method) where CPython prints ``40`` (the stored field).  The collision refusal n
 function-return (and constructor) receiver, so this route is refused by name on both builds; the
 direct constructor, an alias, a branch, a pass-through argument, an inherited method and a method
 return are covered too.  Calls on unrelated classes, other method names, non-colliding classes and
-the class-level spelling ``C.f(c)`` keep their old behaviour.
+the class-level spelling ``C.f(c)`` keep their old behaviour.  Function and name resolution stays in
+the receiver's lexical scope, so a same-named method or a local/annotation in another function is
+not attributed to it, while a call made inside a function still follows that function's return.
 """
 import os
 import subprocess
@@ -114,6 +116,74 @@ CLASS_CALL = COLLISION + r'''c = C(4)
 print(C.f(c))
 '''
 
+SAME_NAME_METHOD = r'''class C:
+    def __init__(self):
+        self.f = lambda: 1
+    def f(self):
+        return 2
+class D:
+    def f(self):
+        return 3
+class F:
+    def make(self):
+        return C()
+def make():
+    return D()
+print(make().f())
+'''
+
+LOCAL_SCOPE = r'''class C:
+    def __init__(self):
+        self.f = lambda: 1
+    def f(self):
+        return 2
+class D:
+    def f(self):
+        return 3
+def b():
+    x = C()
+    return 0
+def a():
+    x = D()
+    return x.f()
+print(a())
+'''
+
+ANNOTATION_SCOPE = r'''class C:
+    def __init__(self):
+        self.f = lambda: 1
+    def f(self):
+        return 2
+class D:
+    def f(self):
+        return 3
+def a(x: C):
+    return 0
+def b():
+    x = D()
+    return x.f()
+print(b())
+'''
+
+CALL_INSIDE_FUNCTION = COLLISION + r'''def make(k):
+    return C(k)
+def a():
+    return make(4).f()
+print(a())
+'''
+
+LOCAL_SHADOW = COLLISION + r'''class D:
+    def f(self):
+        return 5
+def make():
+    return C(4)
+def a():
+    def make():
+        return D()
+    return make().f()
+print(a())
+'''
+
 
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
@@ -176,6 +246,15 @@ class Pre288Tests(unittest.TestCase):
         self.check('other_method', OTHER_METHOD)
         self.check('no_collision', NO_COLLISION)
         self.check('class_call', CLASS_CALL)
+
+    def test_name_resolution_stays_in_scope(self):
+        self.check('samename', SAME_NAME_METHOD)
+        self.check('local_scope', LOCAL_SCOPE)
+        self.check('annotation_scope', ANNOTATION_SCOPE)
+        self.check('local_shadow', LOCAL_SHADOW)
+
+    def test_call_inside_function_still_refused(self):
+        self.refused('call_inside', CALL_INSIDE_FUNCTION)
 
 
 if __name__ == '__main__':
