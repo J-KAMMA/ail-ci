@@ -10828,6 +10828,17 @@ OBJ2 = r'''
 #include <math.h>
 #include <stdarg.h>
 
+/* `ail build --debug` on the general path: record the last statement's file:line and name it after
+   an uncaught exception, as the legacy runtime's DIE block does. */
+#ifdef AIL_DEBUG_SITE
+static const char *ail_obj_dbg_site = NULL;
+#define AIL_DBG_SITE(s) (ail_obj_dbg_site = (s))
+#define AIL_DBG_UNCAUGHT() do { if (ail_obj_dbg_site) { fputs("\n  raised near ", stderr); fputs(ail_obj_dbg_site, stderr); } } while (0)
+#else
+#define AIL_DBG_UNCAUGHT() ((void)0)
+#define AIL_DBG_SITE(s) ((void)0)
+#endif
+
 #if defined(__linux__) || defined(__APPLE__)
 #include <sys/resource.h>
 #define AIL_HAVE_GETRUSAGE 1
@@ -17268,8 +17279,11 @@ static inline int ail_main_finish(ail_ctx *cx, ail_st st) {
     if (st == AIL_EXC) {
         ail_classobj *c = (ail_classobj *)cx->exc.cls.o;
         ail_str_write(ail_view_to_str(c->name), stderr);
-        fputs(": ", stderr);
-        ail_str_write(ail_view_to_str(cx->exc.msg), stderr);
+        if (cx->exc.msg.sv.len) {
+            fputs(": ", stderr);
+            ail_str_write(ail_view_to_str(cx->exc.msg), stderr);
+        }
+        AIL_DBG_UNCAUGHT();
         fputc('\n', stderr);
         return 1;
     }

@@ -4517,7 +4517,10 @@ class Compiler(boxclosure.ClosureMixin):
 
     def stmt(self, node, ctx):
         where = pyfunc._debug_where(node)       # `ail build --debug` only: the C of the statement maps to its line
-        if where is None or where == ctx.where:
+        if where is None:
+            return self._stmt(node, ctx)
+        ctx.lines.append('    ' * ctx.indent + 'AIL_DBG_SITE("%s:%d");' % where)
+        if where == ctx.where:
             return self._stmt(node, ctx)
         outer, ctx.where, ctx.where_used = ctx.where, where, True
         try:

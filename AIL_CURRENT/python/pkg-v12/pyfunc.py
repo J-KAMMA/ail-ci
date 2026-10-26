@@ -80,6 +80,7 @@ FLOAT_FLOOR_MOD = True
 # B2b: {function name / C symbol: (per-parameter tint flags, tint result)} for this compile.
 TINT_SIGS = {}
 TINT_ACTIVE = {}
+TINT_EXCLUDED = set()
 TINT_DISABLED = False
 
 INT, FLT, LIST, SET, DICT, RANGE, BYTES = 'int', 'float', 'list', 'set', 'dict', 'range', 'bytes'
@@ -34429,7 +34430,7 @@ def _to_c_sorted(source, name=None, strict=True, info=None, entry=None, sig=None
     raise report if related else first
 
 
-def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, library=False, external=None, _sort_stage=0):
+def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, library=False, external=None, _sort_stage=0, _tint_exclude=(), _tint_retry=0):
     """C for every `def` in the source, with the last one as the entry point.
 
     Functions may call each other, including themselves, directly or in a cycle. Recursion shares
@@ -34926,7 +34927,17 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                      and not (_f.name == entry_name and not library)) else 0
         _tint_sigs[_f.name] = (_params, _ret)
         _tint_sigs[csym[_f.name]] = (_params, _ret)
-    global TINT_SIGS, TINT_ACTIVE
+    global TINT_SIGS, TINT_ACTIVE, TINT_EXCLUDED
+    _tint_exclude = set(_tint_exclude)
+    if _tint_exclude:
+        for _name in list(_tint_sigs):
+            if _name in _tint_exclude:
+                _tint_sigs.pop(_name, None)
+        for _f in fns:
+            if csym[_f.name] in _tint_exclude:
+                _tint_sigs.pop(_f.name, None)
+                _tint_sigs.pop(csym[_f.name], None)
+    TINT_EXCLUDED = set(_tint_exclude)
     TINT_SIGS = _tint_sigs
     TINT_ACTIVE = dict(_tint_sigs)
     for f in fns:
@@ -35187,6 +35198,15 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
             list(zip(body_names, unit_bodies)))
     if info is not None and info.get('_want_source_regions'):
         info['c_source_regions'] = list(zip(body_names, bodies))
+    # A function whose tint signature made it into a caller before the function itself fell back to
+    # the legacy int64 ABI leaves that caller wrapping arguments the callee no longer takes. Rebuild
+    # once with every such signature disabled, so callers and callees agree.
+    _tint_fell = set(TINT_SIGS) - set(TINT_ACTIVE)
+    if _tint_fell and _tint_retry < 4:
+        retry_info = dict(info) if info is not None else None
+        return _to_c_once(source, name, strict, retry_info, entry, sig, library, external,
+                          _sort_stage=_sort_stage, _tint_exclude=_tint_exclude | _tint_fell,
+                          _tint_retry=_tint_retry + 1)
     return declarations + '\n'.join(bodies)
 
 

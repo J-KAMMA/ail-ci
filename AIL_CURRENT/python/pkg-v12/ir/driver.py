@@ -277,6 +277,8 @@ def _apply(P, args, kwargs, result, current):
         _tinted_sig = bool(_sig and (any(_sig[0]) or _sig[1]))
         if _needs_tint and (_tinted_sig or 'has kind (' not in str(reason)) \
                 and not fn.name.startswith(('_Ail', '_ail')) \
+                and fn.name not in getattr(P, 'TINT_EXCLUDED', ()) \
+                and cname not in getattr(P, 'TINT_EXCLUDED', ()) \
                 and not os.environ.get('AIL_NO_GENERAL'):
             from pyfront import Unsupported
             raise Unsupported('%s() needs the tagged-int lowering, which does not cover it: %s'
