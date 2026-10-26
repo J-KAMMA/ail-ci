@@ -754,12 +754,12 @@ static inline ail_obj ail2f_pad_str(ail_ctx *cx, ail_str s, int64_t len, ail2f_s
     for (int64_t k = 0; k < pad - left; k++) ail2f_put(&o, fill);
     return ail2f_done(cx, &o);
 }
-static inline const char *ail2f_signstr(int neg, char sign) { return neg ? "-" : sign == '+' ? "+" : sign == ' ' ? " " : ""; }
 static inline size_t ail2f_body_need(ail2f_spec *f) {
     int64_t prec = f->has_prec ? f->prec : 6;
     if (prec < 0) prec = 6;
     return (size_t)prec + 400;
 }
+static inline const char *ail2f_signstr(int neg, char sign) { return neg ? "-" : sign == '+' ? "+" : sign == ' ' ? " " : ""; }
 /* the digits of a float in one of e E f F g G % or the repr form (type 0) */
 static inline void ail2f_float_body(char *out, size_t osz, double v, ail2f_spec *f, char type) {
     if (isinf(v) || isnan(v)) {
@@ -788,14 +788,15 @@ static inline void ail2f_float_body(char *out, size_t osz, double v, ail2f_spec 
             *ep = 0;
             if (!f->alt && strchr(e, '.')) { size_t L = strlen(e); while (L && e[L - 1] == '0') e[--L] = 0; if (L && e[L - 1] == '.') e[--L] = 0; }
             snprintf(out, osz, "%se%c%02d", e, x < 0 ? '-' : '+', x < 0 ? -x : x);
+            if (e != estack) free(e);
         } else {
             snprintf(out, osz, "%.*f", p - 1 - x < 0 ? 0 : p - 1 - x, v);
             if (!f->alt && strchr(out, '.')) { size_t L = strlen(out); while (L && out[L - 1] == '0') out[--L] = 0; }
             size_t L = strlen(out);
             if (L && out[L - 1] == '.') { out[L] = '0'; out[L + 1] = 0; }
             else if (!strchr(out, '.')) strcat(out, ".0");
+            if (e != estack) free(e);
         }
-        if (e != estack) free(e);
         return;
     }
     if (type == 'n') type = 'g';

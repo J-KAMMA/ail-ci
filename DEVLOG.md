@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-26 - fuzz71 rebase: keep the fix clear of the integer/repr `#` hunk
+
+Today's integ added `ail2f_alt_point` (alternate `#` on the type-less float repr form) next to
+the v2 float body.  Re-applying fuzz71's buffer fix as-is conflicted there, so the conflict left
+either the old 400-byte `%e` buffer or dropped the new `#` handling.  The fix now defines
+`ail2f_body_need` above `ail2f_signstr` and frees the heap `%e` body inside each of the two
+branches instead of at the shared `return`, so the fuzz71 hunks no longer touch the lines the
+`#` change added; the new test registration is likewise away from the newer module names.
+`test_ail_fuzz71` and `test_ail_safetynet` pass on a clean 3-way apply of this branch onto
+integ 8346862.
+
 ## 2026-10-24 - fuzz71 review fix: v1 ail_obj_format and manifest pin
 
 Applies the remaining v1 `ail_obj_format` hunk: its fixed-point float path formatted into
