@@ -279,7 +279,7 @@ def _op(name, nmin, nmax, regions=0, terminator=False):
 _op('const', 0, 0)
 for _name in INT_BINARY + FLOAT_BINARY:
     _op(_name, 2, 2)
-for _name in ('neg', 'inv', 'fneg', 'zext', 'sitofp', 'fptosi'):
+for _name in ('neg', 'inv', 'fneg', 'fabs', 'zext', 'sitofp', 'fptosi'):
     _op(_name, 1, 1)
 for _pred in CMP_PREDICATES:
     _op('cmp.' + _pred, 2, 2)

@@ -218,7 +218,7 @@
     {
       "module": "utf8_stream",
       "source": "language_examples/utf8_stream.ail",
-      "sha256": "e1625b222e5bc8d6275155be68d2e0f1b0be42e0450d582b5b08cb5faee5cad9",
+      "sha256": "24bc70595616ff825e7a5de2787d5ac5cec1dce7263b5f1598a63738d533cef7",
       "imports": [],
       "declared_api": {
         "scope": "loaded_sources",
@@ -2508,7 +2508,7 @@
   "dependency_pins": {
     "language_examples/text_search.ail": "5d22ade25ae3c96068a760494542923a43587c6a19f111a6fba203d1aaeb39ea",
     "language_examples/binary_search.ail": "c5cbdbda90910c98a130060c0830d6ad0e70ce1a3464446e03993b18574d32ec",
-    "language_examples/utf8_stream.ail": "e1625b222e5bc8d6275155be68d2e0f1b0be42e0450d582b5b08cb5faee5cad9",
+    "language_examples/utf8_stream.ail": "24bc70595616ff825e7a5de2787d5ac5cec1dce7263b5f1598a63738d533cef7",
     "language_examples/binary_numbers.ail": "c50fa2995ffeaa7fac6d9c39f9cf4cb1e321c8424430f334dca99f470822ea84",
     "language_examples/binary_float64.ail": "a7ac4e48a1896db30057e179da1989421c093aa868404d02f58e7b6220977ad4",
     "language_examples/base64_codec.ail": "ee2c6a863b9afd7bc0b296bc25fcc9f044c8998977ee722140cac700eeefe171",

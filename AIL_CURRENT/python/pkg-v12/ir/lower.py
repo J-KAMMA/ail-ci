@@ -26,6 +26,7 @@ the legacy path's locals). A parameter that is never assigned stays an SSA value
 import ast
 import os
 
+from pyfront import int_constant
 from . import ir as I
 from . import effects as E
 from . import ownership
@@ -1727,6 +1728,10 @@ class Lowering(TextLowering):
         return v
 
     def _expr(self, node):
+        if isinstance(node, (ast.BinOp, ast.UnaryOp)):
+            folded = self.P.fold_int_constant(node)
+            if folded is not None:
+                return self.const(I.I64, folded)
         tk = self.text_kind(node)
         if tk is not None:
             return self.text_expr(node, tk)
@@ -1762,10 +1767,13 @@ class Lowering(TextLowering):
                 if entry[0] == self.P.FLT and isinstance(value, float):
                     return self.const(I.F64, value)
             raise NotS0('name %r' % node.id)
+        if isinstance(node, ast.BinOp):
+            constant = int_constant(node)
+            if type(constant) is int and -(1 << 63) <= constant < (1 << 63):
+                return self.const(I.I64, constant)
+            return self.binop(node)
         if isinstance(node, ast.UnaryOp):
             return self.unary(node)
-        if isinstance(node, ast.BinOp):
-            return self.binop(node)
         if isinstance(node, ast.BoolOp):
             if os.environ.get('AIL_SURFACE') == 'python' and not all(self.P._is_bool_expr(v, self.ctx)
                                                                     for v in node.values):
@@ -2298,11 +2306,10 @@ class Lowering(TextLowering):
         if f == 'abs' and len(args) == 1:
             v = self.expr(args[0])
             if v.type == I.F64:
-                neg = self.b.value('fneg', [v], I.F64)
-            else:
-                v = self.coerce(v, I.I64)
-                neg = self.b.value('neg', [v], I.I64, {'mode': 'ck' if self.strict else 'nsw'})
-            zero = self.const(v.type, 0.0 if v.type == I.F64 else 0)
+                return self.b.value('fabs', [v], I.F64)
+            v = self.coerce(v, I.I64)
+            neg = self.b.value('neg', [v], I.I64, {'mode': 'ck' if self.strict else 'nsw'})
+            zero = self.const(v.type, 0)
             c = self.b.value('cmp.lt', [v, zero], I.I1)
             return self.b.value('select', [c, neg, v], v.type)
         if f in ('min', 'max') and len(args) == 2:

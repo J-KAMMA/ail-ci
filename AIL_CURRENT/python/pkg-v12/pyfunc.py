@@ -66,7 +66,7 @@ import typedinherit
 import shadowing
 import rangecheck
 from pipeline import PipelineError
-from pyfront import BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Unsupported, _use, refuse_complex_pow
+from pyfront import BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Unsupported, _use, int_constant, refuse_complex_pow, refuse_variable_int_pow
 
 # A capability marker, not a behaviour: lets a SHARED judge (one file imported against many
 # `pkg-*` copies of this module, e.g. `test_floatparam.py`) ask "does THIS copy infer a float
@@ -582,6 +582,282 @@ def _int_const(node):
 
 
 
+_I64_MIN = -(1 << 63)
+_I64_MAX = (1 << 63) - 1
+_MAXSPLIT_NOT_CONST = object()
+_MAXSPLIT_TOO_BIG = object()
+_MAXSPLIT_BITS = 1 << 20
+_MAXSPLIT_SPECIAL_BITS = 1 << 24
+
+
+def _pow_within_maxsplit_bits(base, exponent):
+    """Would `base ** exponent` be at most _MAXSPLIT_BITS wide, without building it?
+
+    `base.bit_length() * exponent` overshoots: `2**65 ** 63` is exactly 4096 bits (the
+    reviewer's `((2**63 * 4)**63) >> 4095` reduces to 1), but the product is 4158.  Square
+    and multiply with a cap so the test is exact and never allocates more than the limit."""
+    if base < 0:
+        base = -base
+    cap = 1 << _MAXSPLIT_BITS
+    result = 1
+    power = base
+    remaining = exponent
+    while remaining:
+        if remaining & 1:
+            result *= power
+            if result >= cap:
+                return False
+        remaining >>= 1
+        if remaining:
+            power *= power
+            if power >= cap:
+                return False
+    return True
+
+
+def _maxsplit_const(node):
+    """The exact value of a constant int expression, a not-constant sentinel, or a too-big one.
+
+    `str.split`/`rsplit` take their maxsplit through the same int64 expression emitter as every
+    other int, so `2**63 - 1` overflowed at run time on the intermediate power even though the
+    final limit fits. Fold the expression here; an exponent that must leave int64 is recognised
+    without evaluating it (`2**100000000` is never built).
+
+    A zero operand (or a power with base 0/1/-1 and a large exponent) is decided before the size
+    guard, so a large intermediate that reduces to an int64 maxsplit is not refused by name."""
+    if isinstance(node, ast.Constant):
+        return node.value if type(node.value) in (int, bool) else _MAXSPLIT_NOT_CONST
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
+        value = _maxsplit_const(node.operand)
+        if value is _MAXSPLIT_NOT_CONST or value is _MAXSPLIT_TOO_BIG:
+            return value
+        if isinstance(node.op, ast.USub):
+            return -value
+        return value if isinstance(node.op, ast.UAdd) else ~value
+    if not isinstance(node, ast.BinOp):
+        return _MAXSPLIT_NOT_CONST
+    op = type(node.op)
+    if op not in (ast.Add, ast.Sub, ast.Mult, ast.Pow, ast.LShift, ast.RShift,
+                  ast.FloorDiv, ast.Mod, ast.BitAnd, ast.BitOr, ast.BitXor):
+        return _MAXSPLIT_NOT_CONST
+    if op is ast.Pow:
+        left = _maxsplit_const(node.left)
+        right = _maxsplit_const(node.right)
+        if left is _MAXSPLIT_NOT_CONST:
+            return _MAXSPLIT_NOT_CONST
+        if right == 0:
+            return 1
+        if left in (0, 1, -1):
+            if right is _MAXSPLIT_TOO_BIG:
+                right = int_constant(node.right, _MAXSPLIT_SPECIAL_BITS)
+                if right is None:
+                    right = _MAXSPLIT_TOO_BIG
+            if right is not _MAXSPLIT_NOT_CONST and right is not _MAXSPLIT_TOO_BIG \
+                    and right >= 0:
+                if right == 0:
+                    return 1
+                if left == 0:
+                    return 0
+                if left == 1:
+                    return 1
+                return 1 if right % 2 == 0 else -1
+        if right is _MAXSPLIT_NOT_CONST:
+            return _MAXSPLIT_NOT_CONST
+        if left is _MAXSPLIT_TOO_BIG or right is _MAXSPLIT_TOO_BIG:
+            return _MAXSPLIT_TOO_BIG
+        if right < 0:
+            return _MAXSPLIT_NOT_CONST
+        if left in (0, 1, -1):
+            return left ** right if left != -1 else (-1 if right & 1 else 1)
+        if right >= _MAXSPLIT_BITS or abs(left).bit_length() > _MAXSPLIT_BITS:
+            return _MAXSPLIT_TOO_BIG
+        if not _pow_within_maxsplit_bits(left, right):
+            return _MAXSPLIT_TOO_BIG
+        value = left ** right
+    elif op is ast.Mult or op is ast.BitAnd:
+        left = _maxsplit_const(node.left)
+        right = _maxsplit_const(node.right)
+        if left == 0 or right == 0:
+            if left is _MAXSPLIT_NOT_CONST or right is _MAXSPLIT_NOT_CONST:
+                return _MAXSPLIT_NOT_CONST
+            return 0
+        if left is _MAXSPLIT_NOT_CONST or right is _MAXSPLIT_NOT_CONST:
+            return _MAXSPLIT_NOT_CONST
+        if left is _MAXSPLIT_TOO_BIG or right is _MAXSPLIT_TOO_BIG:
+            return _MAXSPLIT_TOO_BIG
+        if op is ast.Mult:
+            if left.bit_length() + right.bit_length() > _MAXSPLIT_BITS:
+                return _MAXSPLIT_TOO_BIG
+            value = left * right
+        else:
+            value = left & right
+    else:
+        left = _maxsplit_const(node.left)
+        right = _maxsplit_const(node.right)
+        if left is _MAXSPLIT_NOT_CONST or right is _MAXSPLIT_NOT_CONST:
+            return _MAXSPLIT_NOT_CONST
+        if left is _MAXSPLIT_TOO_BIG or right is _MAXSPLIT_TOO_BIG:
+            return _MAXSPLIT_TOO_BIG
+        if op is ast.LShift:
+            if right < 0:
+                return _MAXSPLIT_NOT_CONST
+            if left == 0:
+                return 0
+            if right >= _MAXSPLIT_BITS or left.bit_length() + right > _MAXSPLIT_BITS:
+                return _MAXSPLIT_TOO_BIG
+            value = left << right
+        elif op is ast.RShift:
+            if right < 0:
+                return _MAXSPLIT_NOT_CONST
+            if right >= _MAXSPLIT_BITS:
+                return 0 if left >= 0 else -1
+            value = left >> right
+        elif op is ast.FloorDiv or op is ast.Mod:
+            if right == 0:
+                return _MAXSPLIT_NOT_CONST
+            value = left // right if op is ast.FloorDiv else left % right
+        elif op is ast.Add:
+            value = left + right
+        elif op is ast.Sub:
+            value = left - right
+        elif op is ast.BitOr:
+            value = left | right
+        else:
+            value = left ^ right
+    return _MAXSPLIT_TOO_BIG if value.bit_length() > _MAXSPLIT_BITS else value
+
+
+def fold_maxsplit_constant(node):
+    """The exact maxsplit value, or None when it is not a constant; out of int64 is refused."""
+    value = _maxsplit_const(node)
+    if value is _MAXSPLIT_NOT_CONST:
+        return None
+    if value is _MAXSPLIT_TOO_BIG or not _I64_MIN <= value <= _I64_MAX:
+        refusal = Unsupported(
+            'the str.split()/rsplit() maxsplit constant does not fit in a 64-bit signed '
+            'integer, and an integer here is one (SEMANTICS section 1); CPython accepts it '
+            'exactly and raises OverflowError only at run time')
+        refusal.source_line = getattr(node, 'lineno', None)
+        raise refusal
+    return value
+
+
+_CONST_INT_NOT = object()
+_CONST_INT_BIG = object()
+_CONST_INT_BITS = 1 << 22
+
+
+def _const_int_expr(node, _limit=None):
+    """The exact value of a constant int expression, or a not-constant/too-big sentinel.
+
+    AIL integers are int64 (SEMANTICS section 1), so a constant expression that leaves that range
+    used to compile and then stop with `integer overflow` at run time. Evaluate it here without
+    building an unbounded intermediate (`2**100000000` is never computed); an expression that
+    reaches int64 exactly on the way, such as `2**63 - 1`, is kept.
+
+    An absorbing zero and the power bases 0/1/-1 are decided before the size guard, as in
+    pyfront.int_constant, so a large but valid operand cannot turn a small result into a
+    refusal.  The other operand of such a power is retried at the special-exponent limit so a
+    huge exponent beyond the ordinary fold limit still yields its sign and parity."""
+    if _limit is None:
+        _limit = _CONST_INT_BITS
+    if isinstance(node, ast.Constant):
+        return node.value if type(node.value) in (int, bool) else _CONST_INT_NOT
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
+        value = _const_int_expr(node.operand, _limit)
+        if value is _CONST_INT_NOT or value is _CONST_INT_BIG:
+            return value
+        if isinstance(node.op, ast.USub):
+            return -value
+        if isinstance(node.op, ast.UAdd):
+            return int(value)               # CPython's unary plus on a bool is an int
+        return ~value
+    if not isinstance(node, ast.BinOp):
+        return _CONST_INT_NOT
+    op = type(node.op)
+    if op not in (ast.Add, ast.Sub, ast.Mult, ast.Pow, ast.LShift, ast.RShift,
+                  ast.FloorDiv, ast.Mod, ast.BitAnd, ast.BitOr, ast.BitXor):
+        return _CONST_INT_NOT
+    left = _const_int_expr(node.left, _limit)
+    right = _const_int_expr(node.right, _limit)
+    if left is _CONST_INT_NOT or right is _CONST_INT_NOT:
+        return _CONST_INT_NOT
+    if op is ast.Pow:
+        if right is _CONST_INT_BIG:
+            if left not in (0, 1, -1):
+                return _CONST_INT_BIG
+            right = _const_int_expr(node.right, _MAXSPLIT_SPECIAL_BITS)
+            if right is _CONST_INT_NOT or right is _CONST_INT_BIG:
+                return right
+        if right < 0:
+            return _CONST_INT_NOT            # CPython's result is a float
+        if right == 0:
+            return 1
+        if left is _CONST_INT_BIG:
+            return _CONST_INT_BIG
+        if left in (0, 1, -1):
+            return left ** right if left != -1 else (-1 if right & 1 else 1)
+        if left.bit_length() * right > _limit:
+            return _CONST_INT_BIG
+        value = left ** right
+    elif left is _CONST_INT_BIG or right is _CONST_INT_BIG:
+        if op in (ast.Mult, ast.BitAnd) and (left == 0 or right == 0):
+            return 0
+        return _CONST_INT_BIG
+    elif op is ast.LShift:
+        if right < 0:
+            return _CONST_INT_NOT            # the runtime raises ValueError for a negative count
+        if left == 0:
+            return 0
+        if right >= _limit or left.bit_length() + right > _limit:
+            return _CONST_INT_BIG
+        value = left << right
+    elif op is ast.RShift:
+        if right < 0:
+            return _CONST_INT_NOT
+        if right >= _limit:
+            return 0 if left >= 0 else -1
+        value = left >> right
+    elif op is ast.FloorDiv or op is ast.Mod:
+        if right == 0:
+            return _CONST_INT_NOT            # the runtime raises ZeroDivisionError
+        value = left // right if op is ast.FloorDiv else left % right
+    elif op is ast.Mult:
+        if left == 0 or right == 0:
+            return 0
+        if left.bit_length() + right.bit_length() > _limit:
+            return _CONST_INT_BIG
+        value = left * right
+    elif op is ast.Add:
+        value = left + right
+    elif op is ast.Sub:
+        value = left - right
+    elif op is ast.BitAnd:
+        value = left & right
+    elif op is ast.BitOr:
+        value = left | right
+    else:
+        value = left ^ right
+    return _CONST_INT_BIG if value.bit_length() > _limit else value
+
+
+def fold_int_constant(node):
+    """The exact int value of a constant expression, or None when it is not one.
+
+    A constant expression outside int64 is refused by name here, at compile time, instead of
+    compiling to arithmetic that stops with `integer overflow` when the program runs."""
+    value = _const_int_expr(node)
+    if value is _CONST_INT_NOT or isinstance(value, bool):
+        return None                      # a bool result keeps its own printing (True/False)
+    if value is _CONST_INT_BIG or not _I64_MIN <= value <= _I64_MAX:
+        refusal = Unsupported(
+            'an integer constant expression here is outside the signed 64-bit range of an '
+            'AIL int (SEMANTICS section 1); CPython computes it exactly with an unbounded int')
+        refusal.source_line = getattr(node, 'lineno', None)
+        raise refusal
+    return value
+
+
 def _neg_is_float(node, ctx):
     """Is the thing being negated (or abs()'d) a float?
 
@@ -1055,16 +1331,10 @@ def _exc_attr_value(node, ctx):
 
 
 def _is_exc_arg_call(node, ctx):
-    """`_ail_exc_arg(e, i)` -- e.args[i] as a str (exctext.py)."""
-    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == '_ail_exc_arg'
-            and '_ail_exc_arg' not in ctx.funcs and not node.keywords and len(node.args) == 2)
-
-
-def _is_exc_argrepr_call(node, ctx):
-    """`_ail_exc_argrepr(e, i)` -- repr(e.args[i]) with the argument's own kind (exctext.py)."""
+    """`_ail_exc_arg(e, i)` / `_ail_exc_arg_repr(e, i)` -- e.args[i] as a str (exctext.py)."""
     return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-            and node.func.id == '_ail_exc_argrepr' and '_ail_exc_argrepr' not in ctx.funcs
-            and not node.keywords and len(node.args) == 2)
+            and node.func.id in ('_ail_exc_arg', '_ail_exc_arg_repr')
+            and node.func.id not in ctx.funcs and not node.keywords and len(node.args) == 2)
 
 
 def _exc_intrinsic_arg(node, ctx):
@@ -1092,25 +1362,15 @@ def _exc_intrinsic_value(node, ctx):
 
 
 def _exc_arg_value(node, ctx):
-    """`_ail_exc_arg(e, i)`: the i-th argument of the exception as a str, in the arena."""
+    """`_ail_exc_arg(e, i)` / `_ail_exc_arg_repr(e, i)`: the i-th argument as a str, in the arena."""
     value = _exc_intrinsic_arg(node, ctx)
     if _etype(node.args[1], ctx) != INT:
         raise Unsupported('e.args[...] takes an int index')
     _exc_text_parts(ctx)
     ctx.has_try = True
     index = _map_inline(lambda: _expr(node.args[1], ctx), ctx)
-    return 'ail_exc_argstr(%s, %s, &%s)' % (value, index, ctx.sarena())
-
-
-def _exc_argrepr_value(node, ctx):
-    """`_ail_exc_argrepr(e, i)`: repr(e.args[i]) with the argument's own kind, in the arena."""
-    value = _exc_intrinsic_arg(node, ctx)
-    if _etype(node.args[1], ctx) != INT:
-        raise Unsupported('e.args[...] takes an int index')
-    _exc_text_parts(ctx)
-    ctx.has_try = True
-    index = _map_inline(lambda: _expr(node.args[1], ctx), ctx)
-    return 'ail_exc_argrepr(%s, %s, &%s)' % (value, index, ctx.sarena())
+    fname = 'ail_exc_argrepr' if node.func.id == '_ail_exc_arg_repr' else 'ail_exc_argstr'
+    return '%s(%s, %s, &%s)' % (fname, value, index, ctx.sarena())
 
 
 def _is_jd_result_call(node, ctx):
@@ -1353,7 +1613,7 @@ def _etype(node, ctx):
         if f == 'pow' and len(a) == 3 and f not in ctx.funcs:
             return INT
         if f in _EXC_INTRINSICS and f not in ctx.funcs:
-            return STR if f in ('_ail_exc_arg', '_ail_exc_argrepr') else INT
+            return STR if f in ('_ail_exc_arg', '_ail_exc_arg_repr') else INT
         if f in exctext.ATTR_INTRINSICS and f not in ctx.funcs:
             return {'s': STR, 'i': INT, 'f': FLT}[f[-1]]
         if f in _AIL_SYSINFO and f not in ctx.funcs:
@@ -1717,6 +1977,11 @@ def _scan_module_consts(tree):
             # is not one: there is no regular-expression engine here, and no subset of one. Saying
             # that plainly is the whole value of the message.
             named = [a.name for a in node.names] if isinstance(node, ast.Import) else [mod]
+            # Name the module that is actually outside the modelled set, not the whole
+            # comma-joined import list: `import math, html` used to say "import of
+            # 'math, html' is not available", which wrongly denies the supported `math`.
+            modelled = {'math', 'sys', 'collections', 'itertools', 'functools', 'heapq', 'bisect', 're', 'json'}
+            unavailable = next((name for name in named if name.split('.')[0] not in modelled), None)
             regex = next((name for name in named if name in ('re', 'regex')), None)
             builtin = next((name for name in named if name in ('heapq', 'bisect')), None)
             if regex == 're':
@@ -1759,7 +2024,7 @@ def _scan_module_consts(tree):
                                     "modules it models (math, sys, collections, itertools, functools, "
                                     "heapq, bisect, re, json).\n"
                                     "  write instead: drop the import and write what you need by hand "
-                                    "with plain lists, dicts and loops" % mod)
+                                    "with plain lists, dicts and loops" % (unavailable or mod))
             error.source_line = node.lineno    # the import itself, not a later use of the name
             raise error
         if not isinstance(node, ast.Assign):
@@ -5465,6 +5730,94 @@ def _onecp_bindable_names(fn):
     return good - bad
 
 
+def _local_binding_names(fn):
+    """Names `fn` binds as its own locals: parameters, stores, loop/with/except targets, imports,
+    class definitions and nested def names that are also bound another way. `global` names are
+    excluded. A nested def's own name is not included on its own (the typed path lifts it), so a
+    plain call to a nested def still takes the direct path."""
+    names = set()
+    a = fn.args
+    names.update(x.arg for x in a.posonlyargs + a.args + a.kwonlyargs)
+    if a.vararg:
+        names.add(a.vararg.arg)
+    if a.kwarg:
+        names.add(a.kwarg.arg)
+    globals_ = set()
+
+    class _Scan(ast.NodeVisitor):
+        def visit_Global(self, node):
+            globals_.update(node.names)
+
+        def visit_Nonlocal(self, node):
+            pass
+
+        def _def_like(self, node):
+            if node is not fn:
+                for d in node.decorator_list:
+                    self.visit(d)
+                for d in node.args.defaults:
+                    self.visit(d)
+                for d in node.args.kw_defaults:
+                    if d is not None:
+                        self.visit(d)
+                return
+            self.generic_visit(node)
+
+        def visit_FunctionDef(self, node):
+            self._def_like(node)
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_ClassDef(self, node):
+            names.add(node.name)
+            for d in node.decorator_list:
+                self.visit(d)
+            for b in node.bases:
+                self.visit(b)
+            for k in node.keywords:
+                self.visit(k.value)
+
+        def visit_Lambda(self, node):
+            for d in node.args.defaults:
+                self.visit(d)
+            for d in node.args.kw_defaults:
+                if d is not None:
+                    self.visit(d)
+
+        def visit_Name(self, node):
+            if isinstance(node.ctx, (ast.Store, ast.Del)):
+                names.add(node.id)
+
+        def visit_ExceptHandler(self, node):
+            if node.name:
+                names.add(node.name)
+            self.generic_visit(node)
+
+        def visit_Import(self, node):
+            names.update((x.asname or x.name).split('.')[0] for x in node.names)
+
+        def visit_ImportFrom(self, node):
+            names.update((x.asname or x.name).split('.')[0] for x in node.names)
+
+        def visit_MatchAs(self, node):
+            if node.name:
+                names.add(node.name)
+            self.generic_visit(node)
+
+        def visit_MatchStar(self, node):
+            if node.name:
+                names.add(node.name)
+
+        def visit_MatchMapping(self, node):
+            if node.rest:
+                names.add(node.rest)
+            self.generic_visit(node)
+
+    _Scan().visit(fn)
+    names -= globals_
+    return names
+
+
 def _rebound_names(fn):
     """Every name bound anywhere in `fn` by a NON-For binder -- assignment, with-as,
     walrus, except-as, def/class, import, del -- plus every name declared `global` or
@@ -6362,8 +6715,12 @@ def _slist_value(node, ctx):
     if count is not None or attr == 'rsplit':
         # `split(sep, maxsplit)` / any `rsplit`: CPython's own split/rsplit loops (SPLITN). The
         # receiver, separator and limit are evaluated once, in that order.
-        if count is not None and _etype(count, ctx) != INT:
-            raise Unsupported('str.%s() maxsplit must be an integer' % attr)
+        if count is not None:
+            folded = fold_maxsplit_constant(count)
+            if folded is not None:
+                count = ast.copy_location(ast.Constant(value=folded), count)
+            if _etype(count, ctx) != INT:
+                raise Unsupported('str.%s() maxsplit must be an integer' % attr)
         ctx.parts.update(('SLIST', 'SPLITN'))
         if sep is not None:
             ctx.has_try = True
@@ -7178,10 +7535,12 @@ def _check_utf8_codec_args(node):
         if keyword.arg not in ('encoding', 'errors') or keyword.arg in values:
             raise Unsupported('invalid or duplicate UTF-8 conversion argument')
         values[keyword.arg] = keyword.value
+    import safetyrt
     for name, value in values.items():
         if not _is_strlit(value):
             raise Unsupported('UTF-8 encoding and errors must be string literals')
-        if (name == 'encoding' and value.value.lower().replace('_', '-') not in ('utf-8', 'utf8')
+        norm = safetyrt.normalize_encoding_name(value.value)
+        if (name == 'encoding' and norm not in ('utf_8', 'utf8', 'u8', 'utf', 'cp65001', 'utf8_ucs2', 'utf8_ucs4')
                 or name == 'errors' and value.value != 'strict'):
             raise Unsupported('only UTF-8 with strict errors is supported')
 
@@ -7443,6 +7802,10 @@ def _str_value(node, ctx, *, owned_join_return=False):
         if is_chr and (_etype(node.args[0], ctx) != INT
                        or _is_handle_producing(node.args[0], ctx)):
             raise Unsupported('chr() requires an integer')
+        if is_chr and isinstance(node.args[0], ast.Constant) and type(node.args[0].value) is int:
+            cp = node.args[0].value
+            if 0xD800 <= cp <= 0xDFFF:
+                raise Unsupported('chr() with the surrogate code point U+%04X' % cp)
         ctx.parts.add('CHRSTR' if is_chr else 'HEXCODEC')
         ctx.has_try = True
         saved, ctx.pre = ctx.pre, []
@@ -7471,8 +7834,6 @@ def _str_value(node, ctx, *, owned_join_return=False):
         return 'ail_bytes_decode_utf8(&%s, %s)' % (ctx.sarena(), _bytes_value(node.func.value, ctx))
     if _is_exc_arg_call(node, ctx):
         return _exc_arg_value(node, ctx)
-    if _is_exc_argrepr_call(node, ctx):
-        return _exc_argrepr_value(node, ctx)
     if _is_exc_attr_call(node, ctx, 's'):
         return _exc_attr_value(node, ctx)
     if _is_jd_result_call(node, ctx):
@@ -12679,6 +13040,10 @@ def _member_nan_check(node, ctx, ind):
 def _expr(node, ctx):
     if dunders.is_exc_code(node):
         return '((int64_t)ail_handled_code)'   # the code of the exception being handled (dunders.py)
+    if isinstance(node, (ast.BinOp, ast.UnaryOp)):
+        folded = fold_int_constant(node)
+        if folded is not None:
+            return _c_int_literal(folded)
     if isinstance(node,ast.Compare) and all(type(op) in CMPOP for op in node.ops) and _numeric_expression_needed(node,ctx) and all(_etype(value,ctx) in NUM for value in (node.left,*node.comparators)):
         return _numeric_compare(node,ctx)
     if (isinstance(node,ast.BinOp) and isinstance(node.op,(ast.Add,ast.Sub,ast.Mult,ast.Div,ast.FloorDiv,ast.Mod)) or isinstance(node,ast.UnaryOp) and isinstance(node.op,(ast.USub,ast.UAdd))) and _numeric_expression_needed(node,ctx):
@@ -12849,6 +13214,10 @@ def _expr(node, ctx):
         return _blist_value(node, ctx)
     rec = lambda n: _expr(n, ctx)
     need = ctx.need
+    if isinstance(node, ast.BinOp):
+        constant = int_constant(node)
+        if type(constant) is int and -(1 << 63) <= constant < (1 << 63):
+            return _c_int_literal(constant)
     if isinstance(node, ast.Name):
         if node.id in ctx.gridrow:
             raise Unsupported('%r is a row of the grid %r, not a number; index it or iterate it'
@@ -13301,6 +13670,7 @@ def _expr(node, ctx):
                                      int(isinstance(node.op, ast.Mod)))
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
         refuse_complex_pow(node)
+        refuse_variable_int_pow(node)
         if _etype(node, ctx) == INT:
             ctx.parts.update(('DIE', 'IPOW'))
             return _ordered_numeric_pair(node.left, node.right, ctx, 'ail_ipow({}, {})')
@@ -16209,6 +16579,13 @@ def _call(node, ctx):
     if not isinstance(node.func, ast.Name):
         raise Unsupported('an indirect call')
     f, a = node.func.id, node.args
+    if (f in getattr(ctx, 'local_bindings', ()) and f in shadowing.PY_BUILTINS
+            and f not in ctx.funcs and f not in ctx.classes):
+        # A parameter, local, loop target or import of a built-in name shadows the built-in for
+        # the whole activation in CPython; the typed path dispatches built-ins by name, so name
+        # the shape and let the general path read the local value (or its UnboundLocalError).
+        raise Unsupported('%r is a local that shadows the builtin %s(); a call through a local '
+                          'value is not supported here (the general path builds it)' % (f, f))
     if f in ('list', 'sorted') and f not in ctx.funcs and f not in ctx.classes and a:
         kind = _etype(a[0], ctx)
         if _is_olist_kind(kind):
@@ -16513,6 +16890,18 @@ def _call(node, ctx):
         return '((%s) %s (%s) ? (%s) : (%s))' % (x, '<' if f == 'min' else '>', y, x, y)
     if f == 'abs' and len(a) == 1:
         inner = rec(a[0])
+        try:
+            is_float = _etype(a[0], ctx) == FLT
+        except Exception:
+            is_float = False
+        if is_float:
+            # `x < 0 ? -x : x` keeps a negative zero: abs(-0.0) would print -0.0 where
+            # CPython prints 0.0. fabs clears the sign bit (and handles infinities/NaN).
+            if _calls(a[0]):
+                ctx.tmp += 1
+                p = '_ab%d' % ctx.tmp
+                return '({ double %s = %s; __builtin_fabs(%s); })' % (p, inner, p)
+            return '__builtin_fabs(%s)' % inner
         strict_int = ctx.need is not None and not _neg_is_float(a[0], ctx)
         if strict_int:
             _use(ctx.need, 'ck_neg')
@@ -16520,9 +16909,8 @@ def _call(node, ctx):
         if _calls(a[0]) and _etype(a[0], ctx) in NUM:
             ctx.tmp += 1
             p = '_ab%d' % ctx.tmp
-            return ('({ %s %s = %s; ((%s) < 0 ? %s : (%s)); })'
-                    % ('double' if _etype(a[0], ctx) == FLT else 'int64_t',
-                       p, inner, p, neg % p, p))
+            return ('({ int64_t %s = %s; ((%s) < 0 ? %s : (%s)); })'
+                    % (p, inner, p, neg % p, p))
         return '((%s) < 0 ? %s : (%s))' % (inner, neg % inner, inner)
     if _is_fileprim_call(node, ctx, 'int') or _is_fileprim_call(node, ctx, 'float'):
         return _fileprim_value(node, ctx)
@@ -16882,6 +17270,14 @@ def _call(node, ctx):
             call = '(' + ', '.join([*staged, call]) + ')' if staged else call
         return _obj_temp(call, (OBJ, f), ctx) if _managed_class(cls) else call
     if f in ctx.funcs:
+        if f in getattr(ctx, 'local_bindings', ()):
+            # A parameter, assignment, loop/with/except target or import of this name shadows
+            # the function for the whole activation in CPython. The direct path resolved the
+            # function statically; this path cannot call an arbitrary local value, so name the
+            # shape and let the general path handle it (an unbound local is UnboundLocalError).
+            raise Unsupported('%r is a local that shadows the function %s(); a call through a '
+                              'local value is not supported here (the general path builds it)'
+                              % (f, f))
         # an array argument is two C arguments, a pointer and a length, so the call site expands --
         # see `_call_user_func`, which also resolves a whole-program clone (section 26) if one
         # applies to this call site. `_bind_call_args` resolves keyword arguments and defaults
@@ -30881,7 +31277,9 @@ def _dispatcher(sname, m, impls, owners, classes, by_name):
     on the run-time class, compiled like any other function. Its parameters are the methods' own."""
     fns = [by_name[classes[o].method_cname(m)] for o in impls]
     own = _resolve_method(classes, sname, m)
-    rep = by_name[classes[own].method_cname(m)] if own is not None else fns[0]
+    rep = by_name.get(classes[own].method_cname(m)) if own is not None else None
+    if rep is None:
+        rep = fns[0]
     def shown(f):
         return f.name.replace('__', '.')
     for f in fns:
@@ -32027,9 +32425,19 @@ def _lift_in_function(outer, counter, nested_captures):
 
     # Every occurrence of a nested function's own name, anywhere in `outer`, must be exactly the
     # function position of a call -- otherwise it is a closure escaping as a value (scope, above).
+    # A call textually before the `def` reads an unbound local in CPython; this lowering removes
+    # the def statement and calls the lifted function directly, so leave that shape to the general
+    # path (which keeps the def-time binding) by refusing it by name here.
+    first_def_pos = {}
+    for inner in inners:
+        first_def_pos.setdefault(inner.name, (inner.lineno, inner.col_offset))
     for node, parent in _walk_with_parent(outer):
         if isinstance(node, ast.Name) and node.id in direct_names:
             if isinstance(parent, ast.Call) and parent.func is node:
+                if (node.lineno, node.col_offset) < first_def_pos[node.id]:
+                    raise Unsupported(
+                        'a call to the nested function (%r) before its def statement is not '
+                        'available: CPython reads an unbound local there' % node.id)
                 continue
             raise Unsupported(_closure_value_message(node.id, parent))
 
@@ -34202,6 +34610,14 @@ def _optional_local_source(source, hint):
     if not fns:
         return None, str(hint)
     fn = min(fns, key=lambda f: f.end_lineno - f.lineno)
+    module_fns = {n.name for n in tree.body
+                  if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    if hint.name in module_fns and any(
+            isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == hint.name
+            for n in ast.walk(fn)):
+        return None, ('%r is a local that shadows the module function %s() and is called; '
+                      'a call through a local value is not supported here (the general path '
+                      'builds it)' % (hint.name, hint.name))
     first = None
     for n in ast.walk(fn):
         if (isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name)
@@ -36043,6 +36459,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     ctx.ephemeral_numeric_temps = set()
     ctx.numeric_allowed_names = _numeric_allowed.get(id(fn))
     ctx.source_names = {node.id for node in ast.walk(fn) if isinstance(node, ast.Name)} | {name for name, _ in ctx.params}
+    ctx.local_bindings = frozenset(_local_binding_names(fn))
     ctx.fn_node = fn
     ctx.free_points = _last_use_free_points(fn)
     ctx.loop_local_points = _loop_local_release_points(fn)
@@ -36732,7 +37149,32 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
                   and fn.body[-1].value is not None
                   and not any(isinstance(nd, (ast.For, ast.While, ast.Try, ast.With))
                               for st in fn.body for nd in ast.walk(st)))
-    if (not separate_units and not _is_entry and not recursive and _inlinable
+    # ONE SMALL LEAF LOOP, for the same reason and under a budget. `parse_int64_decimal` is a
+    # nine-statement leaf whose body is one digit loop; gcc will not inline it at -O2, and the
+    # surviving call clobbers caller state in csv_table's row loop. Measured 2026-10-23 on the
+    # 132 MB three-million-row csv_table input: 1.24 s before, 0.99 s with the attribute (user
+    # time 1.08 s -> 0.84 s), output byte-identical. The predicate stays conservative: one
+    # `for`, no other loop/try/with/yield, no call to another function or class constructor,
+    # a SCALAR NUMERIC return, at most 12 statements and 180 AST nodes. String/list/object
+    # returns are excluded because inlining a loop that owns heap storage duplicates cleanup
+    # paths -- inlining `json_quote` as well measured 1.42 s, slower than this 1.25 s. The cap
+    # is on the WHOLE body, not just the loop header, and async/generator forms are refused
+    # because a call gcc cannot inline is a hard compile error rather than a missed
+    # optimisation.
+    _loop_nodes = sum(1 for st in fn.body for _ in ast.walk(st))
+    _calls_user = any(isinstance(nd, ast.Call) and isinstance(nd.func, ast.Name)
+                      and (nd.func.id in sigs or (classes and nd.func.id in classes))
+                      for st in fn.body for nd in ast.walk(st))
+    _single_loop_inlinable = (
+        len(fn.body) <= 12 and _loop_nodes <= 180 and not _calls_user
+        and ret in (INT, FLT)
+        and isinstance(fn.body[-1], ast.Return) and fn.body[-1].value is not None
+        and sum(isinstance(nd, ast.For) for st in fn.body for nd in ast.walk(st)) == 1
+        and not any(isinstance(nd, (ast.While, ast.AsyncFor, ast.Try, ast.With, ast.AsyncWith,
+                                   ast.Yield, ast.YieldFrom, ast.Await))
+                    for st in fn.body for nd in ast.walk(st)))
+    if (not separate_units and not _is_entry and not recursive
+            and (_inlinable or _single_loop_inlinable)
             and ret not in (NORET, LIST, FLIST, GRIDRET, BYTES)
             and not _is_tuple_ret(ret) and not _is_multi_ret(ret)):
         # The attribute and the storage class go on their OWN line, so the signature line
@@ -37576,3 +38018,5 @@ if _QC_MODE != '0':
     _fast_ast.__dict__.update(ast.__dict__)
     _fast_ast.walk = _fast_walk
     ast = _fast_ast
+
+_CONST_INT_BITS = 1 << 22

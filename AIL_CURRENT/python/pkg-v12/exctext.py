@@ -31,7 +31,7 @@ TEXT, REPR, TYPE, QUAL, ARGSREPR = '__ail_text__', '__ail_repr__', '__ail_type__
 FILENAME = '__ail_filename__'
 VIRTUAL_FIELDS = (TEXT, REPR, TYPE, QUAL, ARGSREPR, FILENAME)
 OS_CLASS_NAMES = ('OSError', 'FileNotFoundError', 'PermissionError', 'IsADirectoryError', 'FileExistsError', 'NotADirectoryError')
-INTRINSICS = ('_ail_exc_arg', '_ail_exc_argrepr', '_ail_exc_nargs', '_ail_exc_isa', '_ail_exc_is')
+INTRINSICS = ('_ail_exc_arg', '_ail_exc_arg_repr', '_ail_exc_nargs', '_ail_exc_isa', '_ail_exc_is')
 ATTR_INTRINSICS = ('_ail_exc_attr_s', '_ail_exc_attr_i', '_ail_exc_attr_f')
 
 
@@ -196,17 +196,16 @@ class _Handler(ast.NodeTransformer):
         return False
 
     # -- text contexts
+    def arg_repr(self, node):
+        """`repr(e.args[i])` keeps the argument's kind: a numeric argument is not its textual form."""
+        if isinstance(node, ast.Subscript) and self.is_args(node.value) and not isinstance(node.slice, ast.Slice):
+            return self.call('_ail_exc_arg_repr', [ast.Name(self.name, ast.Load()), self.visit(node.slice)], node)
+        return None
+
     def visit_FormattedValue(self, node):
-        if (node.conversion == 114 and isinstance(node.value, ast.Subscript)
-                and self.is_args(node.value.value) and not isinstance(node.value.slice, ast.Slice)):
-            # repr(e.args[i]) keeps the argument's own repr: a float stays 3.0, not the text '3.0'
-            index = self.visit(node.value.slice)
-            node.value = self.call('_ail_exc_argrepr', [ast.Name(self.name, ast.Load()), index], node.value)
-            node.conversion = -1
-            node.format_spec = self.visit(node.format_spec) if node.format_spec is not None else None
-            return node
         if node.conversion in (115, 114) or node.conversion == -1 and node.format_spec is None:
-            text = self.text_of(node.value, want_repr=node.conversion == 114)
+            text = (self.arg_repr(node.value) if node.conversion == 114 else None) \
+                or self.text_of(node.value, want_repr=node.conversion == 114)
             if text is not None:
                 spec = self.visit(node.format_spec) if node.format_spec is not None else None
                 return ast.copy_location(ast.FormattedValue(value=text, conversion=-1, format_spec=spec), node)
@@ -222,10 +221,14 @@ class _Handler(ast.NodeTransformer):
                 return self.generic_visit(node)
             if not node.keywords:
                 if func.id in ('str', 'repr') and len(node.args) == 1:
-                    text = self.text_of(node.args[0], want_repr=func.id == 'repr')
+                    arg = node.args[0]
+                    if func.id == 'repr':
+                        text = self.arg_repr(arg)
+                        if text is not None:
+                            return text
+                    text = self.text_of(arg, want_repr=func.id == 'repr')
                     if text is not None:
                         return text
-                    arg = node.args[0]
                     if (func.id == 'str' and isinstance(arg, ast.Subscript) and self.is_args(arg.value)
                             and not isinstance(arg.slice, ast.Slice)):
                         return self.visit(arg)           # e.args[i] already reads as its text
@@ -272,7 +275,8 @@ class _Handler(ast.NodeTransformer):
             if len(specs) == len(operands):
                 new, as_s = [], []
                 for index, (spec, operand) in enumerate(zip(specs, operands)):
-                    got = self.text_of(operand, want_repr=spec == 'r') if spec in ('s', 'r') else None
+                    got = (self.arg_repr(operand) if spec == 'r' else None) \
+                        or (self.text_of(operand, want_repr=spec == 'r') if spec in ('s', 'r') else None)
                     new.append(got or operand)
                     if got is not None:
                         as_s.append(index)
@@ -513,14 +517,15 @@ PART_EDITS = {
          '        ail_exc_utf8_fail(b, nb, bad, error_code);\n        if (error_code && ail_exc_top >= 0) ail_raise_named(error_code);\n        ail_die(bad);\n'),
         ('static int64_t ail__str_to_int_full(ail_str s);\n',
          'static void ail_exc_int_fail(ail_str s) __attribute__((noreturn));\n'
+         'static void ail_exc_int_limit_fail(int64_t ndigits) __attribute__((noreturn));\n'
          'static void ail_exc_float_fail(ail_str s) __attribute__((noreturn));\n'
          'static int64_t ail__str_to_int_full(ail_str s);\n'),
         # an OSError raised for a path says which (legacy whole-file reads and writes)
         ('static void ail_file_fail(int err) {\n', 'static void ail_exc_os_fail(int err, ail_str path);\nstatic void ail_file_fail(int err) {\n'),
         ('    if (!f) ail_file_fail(open_errno);\n    return f;', '    if (!f) ail_exc_os_fail(open_errno, path);\n    return f;'),
         ('free(buf); ail_file_fail(read_errno); }', 'free(buf); ail_exc_os_fail(read_errno, path); }'),
-        ('    if (rc == 1) ail_raise_named(AIL_EXC_VALUE);\n    if (rc == 2) ail_die("integer overflow");\n    return v;\n}\n/* `float(<str>)`',
-         '    if (rc == 1) ail_exc_int_fail(s);\n    if (rc == 2) ail_die("integer overflow");\n    return v;\n}\n/* `float(<str>)`'),
+        ('    if (rc == 1) ail_raise_named(AIL_EXC_VALUE);\n    if (rc == 2) ail_die("integer overflow");\n    if (rc == 3) ail_raise_named(AIL_EXC_VALUE);\n    return v;\n}\n/* `float(<str>)`',
+         '    if (rc == 1) ail_exc_int_fail(s);\n    if (rc == 2) ail_die("integer overflow");\n    if (rc == 3) ail_exc_int_limit_fail(ndigits);\n    return v;\n}\n/* `float(<str>)`'),
         ('    int rc = ail__asc_to_float(b, len, &v);\n    if (b != stackbuf) free(b);\n    if (rc) ail_raise_named(AIL_EXC_VALUE);\n    return v;\n}\n/* AIL_TASK_strops_20260915.md Part A',
          '    int rc = ail__asc_to_float(b, len, &v);\n    if (b != stackbuf) free(b);\n    if (rc) ail_exc_float_fail(s);\n    return v;\n}\n/* AIL_TASK_strops_20260915.md Part A'),
     ),
@@ -845,7 +850,7 @@ static ail_str ail_exc_argstr(const ail_exception *e, int64_t i, ail_sarena *A) 
     ail_str s = ail__exc_piece(&a, 0, A);
     return a.kind == 0 ? ail_exception_string_copy(s, A) : s;
 }
-/* repr(e.args[i]): the argument's own repr (a str is quoted, a float stays 3.0) */
+/* repr(e.args[i]): a str argument keeps its quotes, a numeric one stays numeric ("3.0", not "'3.0'"). */
 static ail_str ail_exc_argrepr(const ail_exception *e, int64_t i, ail_sarena *A) {
     int64_t n = ail_exc_nargs(e);
     if (i < 0) i += n;
@@ -971,16 +976,20 @@ static void ail__key_error(ail_exarg a) {
 static void ail_key_error_i(int64_t k) { ail__key_error(ail_exarg_i(k)); }
 static void ail_key_error_s(const uint8_t *p, int64_t n) { ail__key_error(ail_exarg_s((ail_str){p, n, 0})); }
 static void ail_key_error_b(const uint8_t *p, int64_t n) { ail_exarg a = ail_exarg_s((ail_str){p, n, 0}); a.kind = 5; ail__key_error(a); }
-/* int(<str>) and float(<str>) on text that is not a number: CPython's ValueError and its wording */
-static void ail__exc_value_error(const char *head, ail_str s) {
+/* int(<str>) and float(<str>) on text that is not a number: CPython's ValueError and its wording.
+   `cap` is the %.200R precision int() uses (0 = the whole repr, as float() does). */
+static void ail__exc_value_error_cap(const char *head, ail_str s, int64_t cap) {
     ail_sarena A; memset(&A, 0, sizeof A);
-    ail_str parts[2] = {ail__exc_lit(head), ail_fmt_repr_str(&A, s)};
+    ail_str r = ail_fmt_repr_str(&A, s);
+    if (cap > 0) r = ail__str_points_head(r, cap);
+    ail_str parts[2] = {ail__exc_lit(head), r};
     ail_str m = ail_str_catn(&A, parts, 2);
     ail_exception *v = ail_exception_new(AIL_EXC_VALUE, m.p, m.n, m.bytes);
     ail_sarena_free(&A);
     ail_raise_value_adopt(v);
     __builtin_unreachable();
 }
+static void ail__exc_value_error(const char *head, ail_str s) { ail__exc_value_error_cap(head, s, 0); }
 /* CPython's strict UTF-8 decoder: where the first error is (start, end) and why */
 #define AIL__CONT(x) (((x) & 0xC0) == 0x80)
 static int ail__utf8_error(const unsigned char *b, int64_t nb, int64_t *start, int64_t *end, const char **reason) {
@@ -1060,6 +1069,12 @@ static void ail_exc_os_fail(int err, ail_str path) {
     ail_raise_value_adopt(ail_exception_new_oserr(AIL_EXC_OS, err, ail__exc_lit(why ? why : "Unknown error"), 1, path));
     __builtin_unreachable();
 }
-static void ail_exc_int_fail(ail_str s) { ail__exc_value_error("invalid literal for int() with base 10: ", s); }
+static void ail_exc_int_fail(ail_str s) { ail__exc_value_error_cap("invalid literal for int() with base 10: ", s, 200); }
+static void ail_exc_int_limit_fail(int64_t ndigits) {
+    char text[192];
+    int n = snprintf(text, sizeof text, "Exceeds the limit (4300 digits) for integer string conversion: value has %lld digits; use sys.set_int_max_str_digits() to increase the limit", (long long)ndigits);
+    ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE, (const uint8_t *)text, n, 1));
+    __builtin_unreachable();
+}
 static void ail_exc_float_fail(ail_str s) { ail__exc_value_error("could not convert string to float: ", s); }
 '''

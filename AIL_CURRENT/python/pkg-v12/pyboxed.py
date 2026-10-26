@@ -21,7 +21,7 @@ same exception the typed path uses) -- never a silent gap, never a bare gcc erro
 import ast
 import re
 
-from pyfront import Unsupported, refuse_complex_pow
+from pyfront import Unsupported, int_constant, refuse_complex_pow, refuse_variable_int_pow
 
 # ---------------------------------------------------------------------------------------------
 # Exception-type-name -> the runtime's AIL_ERR_* id. Only the runtime's own built-in exception
@@ -345,6 +345,7 @@ static ail_obj ail_builtin_enumerate(ail_obj src, int64_t start) {
     ail_obj r = ail_list_new();
     int64_t n = ail_iter_len(src);
     for (int64_t i = 0; i < n; i++) {
+        if (start > INT64_MAX - i) ail_raise_c(AIL_ERR_OVERFLOW, "enumerate() index integer overflow");
         ail_obj items[2] = { ail_box_int(start + i), ail_iter_at(src, i) };
         ail_list_append(r, ail_tuple_new(items, 2));
     }
@@ -1323,6 +1324,10 @@ class Compiler:
                ast.Mod: 'ail_obj_mod', ast.Pow: 'ail_obj_pow'}
 
     def expr_BinOp(self, node, ctx):
+        constant = int_constant(node)
+        if type(constant) is int and -(1 << 63) <= constant < (1 << 63):
+            return 'ail_box_int(%s)' % ('(-9223372036854775807LL - 1LL)' if constant == -(1 << 63)
+                                          else '%dLL' % constant)
         if (isinstance(node.op, ast.Mod) and isinstance(node.left, ast.Constant)
                 and isinstance(node.left.value, str)):
             return self._percent_format(node.left.value, node.right, ctx)
@@ -1331,6 +1336,7 @@ class Compiler:
             raise Unsupported('the %s binary operator' % type(node.op).__name__)
         if isinstance(node.op, ast.Pow):
             refuse_complex_pow(node)
+            refuse_variable_int_pow(node)
         l = self.expr(node.left, ctx)
         r = self.expr(node.right, ctx)
         return self._emit_tmp(ctx, '%s(%s, %s)' % (fn, l, r))
@@ -1403,6 +1409,11 @@ class Compiler:
         return acc
 
     def expr_UnaryOp(self, node, ctx):
+        if isinstance(node.op, (ast.USub, ast.UAdd)):
+            constant = int_constant(node)
+            if type(constant) is int and -(1 << 63) <= constant < (1 << 63):
+                return 'ail_box_int(%s)' % ('(-9223372036854775807LL - 1LL)' if constant == -(1 << 63)
+                                              else '%dLL' % constant)
         v = self.expr(node.operand, ctx)
         if isinstance(node.op, ast.USub):
             return self._emit_tmp(ctx, 'ail_obj_neg(%s)' % v)
@@ -1547,7 +1558,7 @@ class Compiler:
         c = self.expr(node.value, ctx)
         if isinstance(node.slice, ast.Slice):
             def bound(e, default):
-                if e is None:
+                if e is None or (isinstance(e, ast.Constant) and e.value is None):
                     return '0', str(default)
                 v = self.expr(e, ctx)
                 return '1', '(%s).i' % v
@@ -1565,6 +1576,8 @@ class Compiler:
         return self._emit_tmp(ctx, 'ail_obj_getitem(%s, %s)' % (c, key))
 
     def expr_Attribute(self, node, ctx):
+        if node.attr in ('__cause__', '__context__', '__suppress_context__', '__traceback__'):
+            raise Unsupported('reading %s (exception chaining is not kept here)' % node.attr)
         if isinstance(node.value, ast.Name) and node.value.id == 'math' and node.attr == 'pi':
             return 'ail_box_float(AIL_MATH_PI)'
         if isinstance(node.value, ast.Name) and node.value.id in (
@@ -1631,7 +1644,9 @@ class Compiler:
         return self._emit_comp(node, ctx, 'ail_list_new()', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        return self.expr_ListComp(node, ctx)
+        t = self.expr_ListComp(node, ctx)
+        ctx.emit('((ail_vecobj *)(%s).o)->from_generator = 1;' % t)
+        return t
 
     def expr_SetComp(self, node, ctx):
         def add(n, c, t):
@@ -2424,6 +2439,8 @@ class Compiler:
             ctx.emit('%s = %s;' % (cid(target.id), value_c))
             return
         if isinstance(target, ast.Attribute):
+            if target.attr in ('__cause__', '__context__', '__suppress_context__', '__traceback__'):
+                raise Unsupported('writing %s (exception chaining is not kept here)' % target.attr)
             obj = self.expr(target.value, ctx)
             self.attr_names.add(target.attr)
             ctx.emit('ail_inst_setattr(%s, pa_%s, %s);' % (obj, target.attr, value_c))
@@ -2845,7 +2862,7 @@ class Compiler:
                 ctx.emit('%s (%s) {' % (kw, cond))
                 ctx.indent += 1
                 if h.name:
-                    ctx.emit('ail_obj %s = ail_exc_current;' % cid(h.name))
+                    ctx.emit('ail_obj %s = ail_v1_exc_current;' % cid(h.name))
                     ctx.exc_vars[h.name] = True
                 self.block(h.body, ctx)
                 if h.name:
