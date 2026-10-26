@@ -1,32 +1,12 @@
-# bigint-fix18: typed-only (`AIL_NO_GENERAL=1`) builds now refuse programs whose ints can exceed int64 (A, update the tests)
+# Continue: fix the reviewer's findings
 
-The typed path has int64 only; the compiler now proves a program cannot need a big int, otherwise the typed-only
-build is refused with `the module code can need an int beyond int64 (it calls main(), which can need a big int
-(<reason>)); the typed path has int64 only and the general path has exact big ints`, and the default build runs it on the
-general path with exact results. That is intended. These tests build programs of that kind with the typed path alone and
-expect success.
+You continue a job on its own branch: your earlier commits are already here. The reviewer returned FIX. Its last
+review is the last "## review" section of `.agent/pipeline.md` in this checkout (read the whole file: the original task,
+your reports and the reviews are there).
 
-## Cases (reason in brackets)
-- test_ail_crypto: ~30 failures, `typed build of ints/interrors: ... int.from_bytes` [a call of int.from_bytes can be any size]
-  (the others in that module are fix02).
-- test_ail_stdlib_batch1: `math.factorial` [a call of math.factorial]; `pow(x, y, m)`/int-with-base programs [an int
-  operation beyond int64].
-- test_ail_spec_fixes: `f()` with `**` and a non-constant exponent [`**` with an exponent that is not a constant].
-- test_ail_dunders: `function __pow__() can need an int beyond int64 (** with an exponent that is not a constant)` (AIL_IR=0 run).
-- test_ail_globals / test_ail_crypto "ints": module code that calls main() which can need a big int.
-
-## What to do
-For each failing subtest: the program is fine on the default build. Change the test to build it in the default mode
-(general path allowed) and require CPython's output, and, where the test wanted the typed path (speed or a typed-only
-feature), shrink the program so a proof bounds it (constant small exponent, `int.from_bytes` of at most 7 bytes) or assert
-that the refusal text is the new named reason. Verify every output with `python3`. Do not remove coverage of the typed
-path for programs that are bounded.
-
-## Category
-A. Fixed means: each listed subtest passes; `git diff` touches only tests; add one new assertion per module that the
-refusal names the big-int reason, so the intended behaviour is pinned.
-
-run the listed modules and test_ail_bigint test_ail_tint test_ail_unified before committing.
+Fix every defect the last review lists, re-run the probes and the test modules the original task names, and commit.
+Do not undo the earlier work unless a finding requires it. If a finding is wrong, say so in your report with the
+evidence (program, CPython output, AIL output).
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
