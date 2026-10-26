@@ -2132,6 +2132,19 @@ column, and says to move it to the top of the file; `ModuleNotFoundError` gets t
 Other unsupported caught types are located at their `try` instead of printing no location.
 `except Exception` is unchanged. Added `AIL_CURRENT/test_ail_pre27.py` (nine refusals, both builds,
 plus the accepted `except Exception` program).
+## 2026-10-24 - pre34: literal `%d` accepts a float (profile percentages)
+
+CPython's `%d` converts a real operand with `int()` rules, so a profile line such as
+`print("%d%%" % (100.0 * part / total))` prints `60%`; a non-number raises
+`TypeError: %d format: a real number is required, not str`. The general path handled only
+int/bool in its literal-`%d` fast path (`pyboxed2._percent_format`), so a float percentage
+stopped with `TypeError: unsupported format string passed to non-int`. `%i`, `%u` and a computed
+template already used `safetyrt.ail2f_percent` and matched CPython. The literal `%d` path now
+keeps `ail_obj_format` for int/bool and sends other operands to `ail2f_percent`, which truncates
+finite floats toward zero, raises `ValueError` for NaN and `OverflowError` for infinity, and
+produces CPython's type-error message. Out-of-int64 finite floats remain the documented int64
+limit. Added `test_ail_pre34.py` (4 programs, both builds) and registered it in
+`ail_check.MODULES`; DIFFERENCES `C?-job-pre34-10240952-1`.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
