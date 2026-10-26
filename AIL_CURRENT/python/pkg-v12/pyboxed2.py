@@ -1907,6 +1907,12 @@ def _unwiden(tree):
     tree.body = [Back().visit(st) for st in tree.body]
 
 
+def _is_callable_annotation(node):
+    """A `Callable[...]` annotation (including `Callable` itself)."""
+    return (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name)
+            and node.value.id == 'Callable') or (isinstance(node, ast.Name) and node.id == 'Callable')
+
+
 _HEAP_FUNCS = frozenset(('heappush', 'heappop', 'heapify', 'heappushpop', 'heapreplace'))
 
 
@@ -2207,6 +2213,8 @@ class Compiler(boxclosure.ClosureMixin):
         self.rebound_functions = _rebound_function_names(tree, self.functions)
 
         self.user_method_names = frozenset(m for c in self.classes.values() for m in c['methods'])
+        self.callable_field_names = frozenset(
+            name for c in self.classes.values() for name in c.get('callable_fields', ()))
         # classes the program uses as values (`make = Fenwick; make(data)`): a call through a value may construct one
         called = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
         self.class_values = sorted({n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id in self.classes
@@ -3060,6 +3068,7 @@ class Compiler(boxclosure.ClosureMixin):
         self._class_global_slot(node.name)
         methods = {}
         class_attrs = []
+        callable_fields = set()
         body_order = []          # class dict order: ('p'/'m', name) or ('a', class_attrs index)
         for item in node.body:
             if isinstance(item, ast.FunctionDef):
@@ -3075,6 +3084,8 @@ class Compiler(boxclosure.ClosureMixin):
                 body_order.append(('a', len(class_attrs) - 1))
             elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
                 # `count: int = 0` is a class attribute; `name: str` alone declares nothing at run time
+                if _is_callable_annotation(item.annotation) and item.value is None:
+                    callable_fields.add(item.target.id)
                 if item.value is not None:
                     class_attrs.append((item.target.id, item.value))
                     body_order.append(('a', len(class_attrs) - 1))
@@ -3083,6 +3094,13 @@ class Compiler(boxclosure.ClosureMixin):
             else:
                 raise Unsupported('a class body statement other than def/assignment/pass/'
                                   'docstring in %s' % node.name)
+        for member in node.body:
+            if isinstance(member, ast.FunctionDef):
+                for sub in ast.walk(member):
+                    if (isinstance(sub, ast.AnnAssign) and isinstance(sub.target, ast.Attribute)
+                            and isinstance(sub.target.value, ast.Name) and sub.target.value.id == 'self'
+                            and _is_callable_annotation(sub.annotation)):
+                        callable_fields.add(sub.target.attr)
         dc = 0
         marker = getattr(self, 'source_lines', None)
         hide = 0
@@ -3116,7 +3134,8 @@ class Compiler(boxclosure.ClosureMixin):
         for kind, what in body_order:
             class_body.append((kind,) + (class_attrs[what] if kind == 'a' else (what,)))
         self.classes[node.name] = {'base': base, 'methods': methods, 'class_attrs': class_attrs,
-                                   'class_body': class_body, 'dc': dc, 'dc_hide': hide}
+                                   'class_body': class_body, 'dc': dc, 'dc_hide': hide,
+                                   'callable_fields': callable_fields}
         self.class_order.append(node.name)
 
     def _class_definition(self, cname, attr):
@@ -3151,6 +3170,15 @@ class Compiler(boxclosure.ClosureMixin):
                 return info['methods'][mname]
             k = info['base']
         return None
+
+    def _is_callable_field(self, cname, attr):
+        seen = set()
+        while cname is not None and cname not in seen and cname in self.classes:
+            seen.add(cname)
+            if attr in self.classes[cname].get('callable_fields', ()):
+                return True
+            cname = self.classes[cname]['base']
+        return False
 
     def _virtual_plan(self, cname, lookup):
         """Run-time dispatch plan for a call whose receiver is statically an instance of `cname`
@@ -8473,6 +8501,9 @@ class Compiler(boxclosure.ClosureMixin):
                      ''.join(', ' + a for a in argcs)))
             ctx.check()
             return t
+        if (self._is_callable_field(cname, f.attr) if cname else f.attr in self.callable_field_names):
+            field = ast.copy_location(ast.Attribute(value=recv, attr=f.attr, ctx=ast.Load()), f)
+            return self.call_value(self.expr(field, ctx), args, kwargs, ctx)
         raise Unsupported('the method .%s() (on a %s)' % (f.attr, kind or 'value of unknown '
                                                           'static kind'))
 

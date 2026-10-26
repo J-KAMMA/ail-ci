@@ -1,3 +1,16 @@
+## 2026-10-26 -- Callable values stored in instance fields (job-pre260-10261651)
+
+The reviewer of job `bigint-fix04` recorded that the general path refused a `Callable` held in
+a class field (`self.cb(x)` / `obj.cb(x)`) while the default build matched CPython.  The general
+path now records `Callable[...]` class annotations and `self.<field>: Callable[...]` annotations,
+and the `_call_attribute` fallback reads such a field and calls it through the ordinary
+function-value path.  An annotation that also has a class-level value is deliberately left out,
+so a class-attribute function descriptor keeps its previous refusal rather than being called
+unbound.  Missing fields and non-callable values raise CPython's `AttributeError` / `TypeError`.
+Probes cover direct calls, methods, aliases, arguments, list/dict elements, nested instances,
+int64 edges, and float/str/list/None signatures.  `test_ail_pre260.py` adds the accepted case;
+`test_ail_pre260`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
+
 ## 2026-10-26 -- reapply pre225: grouping with an unrecognised type code (job-rbpre225-10261321)
 
 Re-applied the accepted pre225 change. Its safetyrt.py fix is already present on this tree from
