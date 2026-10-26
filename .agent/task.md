@@ -1,13 +1,6 @@
-**Speed: numeric_scale_binary is 1.37x slower than C (and than Rust).** Find the hottest part of the generated code for this app and make it cheaper in the compiler or runtime.
+**Your change breaks other tests in the full suite.** On top of the current integration branch, these test modules fail with your change and pass without it: test_ail_fuzz59 test_ail_grid_return test_ail_numeric_bindings test_ail_numeric_profiles test_ail_numeric_profiles_native test_ail_record_initializers test_ail_sdk test_ail_sdk_environment test_ail_tcp_json_deadlines test_ail_tcp_json_lines_poll_resources.
 
-**How to work (speed rules).**
-1. Measure the share first, using icount, rdtsc or perf.
-2. Change only the compiler or runtime, not `bench/apps`.
-3. Output must stay identical; `compare.py` checks it.
-4. Report `python3 bench/compare.py --app numeric_scale_binary` before and after.
-5. Keep the change only if the gain is at least 3% and the ranges do not overlap; otherwise revert.
-
-Commit.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find what your change broke, and fix it so they pass again while keeping your own fix and its test. If your fix cannot coexist with them, revert it and say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
