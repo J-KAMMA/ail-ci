@@ -273,6 +273,51 @@ def int_constant(node, _limit=_CONST_INT_LIMIT):
         return None
     return result if type(result) is int and result.bit_length() <= _limit else None
 
+_I64_MIN = -(1 << 63)
+_I64_MAX = (1 << 63) - 1
+
+
+def _int_pow_constant(node):
+    """The exact value of an all-integer constant expression, else None (a bool is not one)."""
+    value = int_constant(node)
+    return value if type(value) is int else None
+
+
+def _pow_fits_int64(base, exponent):
+    """Whether the exact integer power `base ** exponent` (exponent >= 0) has an int64 answer.
+
+    Never evaluates a huge power: a base outside int64 with a positive exponent, or any exponent
+    of 64 or more over a base of magnitude two or more, is already out."""
+    if exponent == 0 or base in (0, 1, -1):
+        return True
+    if exponent == 1:
+        return _I64_MIN <= base <= _I64_MAX
+    if exponent >= 64 or not (_I64_MIN <= base <= _I64_MAX):
+        return False
+    return _I64_MIN <= base ** exponent <= _I64_MAX
+
+
+def refuse_int_pow_overflow(node):
+    """A constant integer `**` whose exact result leaves int64 is refused by name here.
+
+    CPython answers it exactly because its int is unbounded; this compiler's int is 64-bit, so the
+    generated code would stop at run time with `integer overflow`. The value is known at compile
+    time, so the refusal is too. Float operands and a negative exponent take the float path and
+    are untouched."""
+    if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow)):
+        return
+    base, exponent = _int_pow_constant(node.left), _int_pow_constant(node.right)
+    if base is None or exponent is None or exponent < 0 or _pow_fits_int64(base, exponent):
+        return
+    refusal = Unsupported(
+        'the integer constant (%d) ** (%d) does not fit in a 64-bit signed integer, and an '
+        'integer here is one (SEMANTICS section 1). CPython computes it exactly, because its '
+        'int is unbounded; this compiler would have to wrap it, which is a different answer'
+        % (base, exponent))
+    refusal.source_line = getattr(node, 'lineno', None)
+    raise refusal
+
+
 def refuse_complex_pow(node):
     """`(-4.0) ** 0.5`: a negative base to a fractional power is a complex number in Python, and this
     language has no complex type. Constant operands are refused here, at compile time; any other

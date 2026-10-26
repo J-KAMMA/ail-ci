@@ -5,9 +5,10 @@ expression used to compile and then stop the program at run time with `integer o
 value is known while compiling, so both builds now refuse the construct by name instead.  A float
 operand, a negative constant exponent and every power that fits are untouched.
 
-The current tree's generic constant folder already makes that refusal (``int64 constant out of
-range`` / ``int64 constant expression out of range`` / ``outside the signed 64-bit range``), so
-this file re-applies the accepted cases against that wording rather than adding a second path.
+The current tree's generic constant folder makes that refusal on the default and general-v2
+paths (``int64 constant out of range`` / ``int64 constant expression out of range`` / ``outside
+the signed 64-bit range``); the older v1 general emitter now shares the accepted
+``does not fit in a 64-bit signed integer`` refusal, so an assignment there is refused too.
 """
 import os
 import subprocess
@@ -25,12 +26,26 @@ REFUSED = (
     ('attribute', 'class C:\n    def __init__(self):\n        self.v = 10 ** 100\n\n\ndef main():\n'
                   '    c = C()\n    print(c.v)\n\n\nmain()\n'),
     ('huge_exponent', 'print(2 ** 100000000)\n'),
+    ('assignment', 'def main():\n    x = 10 ** 100\n    print(x)\n\n\nmain()\n'),
+    ('nested', 'def main():\n    x = (2 ** 32) ** 2\n    print(x)\n\n\nmain()\n'),
+)
+
+# The v1 general emitter (AIL_GENERAL=v1) used to let an assignment through where the default and
+# general-v2 paths refused it, then stopped at run time with `integer overflow`.
+V1_REFUSED = (
+    ('v1_assignment', 'def main():\n    x = 10 ** 100\n    print(x)\n\n\nmain()\n'),
+    ('v1_assignment_expr', 'def main():\n    x = (10 ** 100) + 1\n    print(x)\n\n\nmain()\n'),
+    ('v1_assignment_63', 'def main():\n    x = 2 ** 63\n    print(x)\n\n\nmain()\n'),
+    ('v1_nested', 'def main():\n    x = (2 ** 32) ** 2\n    print(x)\n\n\nmain()\n'),
+    ('v1_attribute', 'class C:\n    def __init__(self):\n        self.v = 10 ** 100\n\n\ndef main():\n'
+                     '    c = C()\n    print(c.v)\n\n\nmain()\n'),
 )
 
 # Every wording a compile-time out-of-int64 constant currently uses on this tree.
 NAMED = ('int64 constant out of range',
          'int64 constant expression out of range',
-         'outside the signed 64-bit range')
+         'outside the signed 64-bit range',
+         'does not fit in a 64-bit signed integer')
 
 ACCEPTED = r'''def main():
     print(2 ** 62)
@@ -60,16 +75,18 @@ main()
 '''
 
 
-def build_run(directory, text, name, general):
+def build_run(directory, text, name, general, v1=False):
     src = Path(directory) / ('%s.py' % name)
-    exe = Path(directory) / ('%s_%s' % (name, 'g' if general else 'd'))
+    exe = Path(directory) / ('%s_%s%s' % (name, 'g' if general else 'd', '_v1' if v1 else ''))
     src.write_text(text, encoding='utf-8')
     env = dict(os.environ, AIL_NO_CACHE='1', AIL_QUIET_FALLBACK='1')
     env.pop('AIL_NO_GENERAL', None)
+    env.pop('AIL_UNIFIED_FORCE', None)
+    env.pop('AIL_GENERAL', None)
     if general:
         env['AIL_UNIFIED_FORCE'] = '1'
-    else:
-        env.pop('AIL_UNIFIED_FORCE', None)
+    elif v1:
+        env['AIL_GENERAL'] = 'v1'
     built = subprocess.run([sys.executable, '-B', str(ROOT / 'ail_chatgpt.py'), 'compile', src.name,
                             '--syntax', 'python', '-o', exe.name], cwd=directory,
                            capture_output=True, text=True, timeout=900, env=env)
@@ -90,6 +107,16 @@ class Pre69(unittest.TestCase):
                         self.assertTrue(any(marker in output for marker in NAMED), output)
                         self.assertNotIn('integer overflow', output)
                         self.assertNotIn('Traceback', output)
+
+    def test_v1_assignment_is_refused_by_name(self):
+        with tempfile.TemporaryDirectory(prefix='ail-pre69-') as directory:
+            for name, text in V1_REFUSED:
+                with self.subTest(case=name):
+                    status, _, output = build_run(directory, text, name, False, v1=True)
+                    self.assertNotEqual(status, 0, output)
+                    self.assertTrue(any(marker in output for marker in NAMED), output)
+                    self.assertNotIn('integer overflow', output)
+                    self.assertNotIn('Traceback', output)
 
     def test_powers_that_fit_and_float_powers_still_match_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre69-') as directory:

@@ -1,3 +1,20 @@
+## 2026-10-26 -- review fix: the v1 general emitter refuses an overflowing constant power (job-rbpre69-10261902)
+
+The accepted pre69 refusal was missing from the v1 general emitter.  With `AIL_GENERAL=v1`,
+`def main(): x = 10 ** 100; print(x)` built successfully and stopped at run time with
+`OverflowError: integer overflow`, where the default and general-v2 paths refuse by name.
+`pyfront.refuse_int_pow_overflow` now applies the accepted exact-int64 test to constant integer
+operands (without evaluating a huge power) and `pyboxed.py` (v1), `pyboxed2.py` and `pyfunc.py`
+call it beside `refuse_complex_pow` at the `**` codegen point.  `test_ail_pre69.py` gains the
+assignment and nested cases on the default/general builds plus a dedicated v1 test for
+`x = 10 ** 100`, `x = (10 ** 100) + 1`, `x = 2 ** 63`, `(2 ** 32) ** 2` and a class attribute.
+Probes in `/tmp/probes`: `v1_accept_fit`, `v1_accept_bounds` match CPython on both cmp.sh builds
+and on v1; `v1_assign_top`, `v1_assign_expr`, `v1_assign_63`, `v1_assign_neg`, `v1_nested`,
+`v1_argument`, `v1_list`, `v1_attribute`, `v1_dict`, `v1_alias`, `v1_huge` are refused by name on
+both cmp.sh builds and on v1.  Final-state modules: `test_ail_pre69`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`, plus `pkg-v12/test_all.integer_power`; manifest
+`--check` passes.
+
 ## 2026-10-26 -- re-apply pre69: an overflowing constant integer power is refused by name (job-rbpre69-10261902)
 
 Re-applying the accepted pre69 change on the current integration tree.  The behaviour is already
