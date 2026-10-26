@@ -1,3 +1,25 @@
+## 2026-10-26 -- float() of an out-of-int64 int constant folds to a float literal (job-pre302-10270745)
+
+The rbrbpre33 reviewer's first pre-existing difference was `float(10 ** 40)`: both builds
+refused it (`int64 constant out of range: ...`), while CPython converts the unbounded int to
+the nearest double and prints `1e+40`.  `ail_chatgpt._fold_float_int_text` now rewrites a
+direct, unshadowed `float(<exact int constant outside int64>)` to the corresponding float
+literal when CPython's conversion is finite, before the int64 checks and before the text is
+handed to the backends.  In-range constants, a rebound `float`, `float(10**400)` (CPython
+raises OverflowError), and values that reach `float()` through an argument, a list item, an
+attribute, a dict value, a local or a module constant keep their named compile-time refusal.
+The reviewer's second item, an out-of-range intermediate that reduces to an in-range value,
+already matches CPython, including `(1 << 1048576) >> 1048576` and `(1 << 2000000) >> 2000000`.
+Added `AIL_CURRENT/test_ail_pre302.py` and registered it in `ail_check.MODULES` and
+`tools/ci_shards.json`.
+
+Probes in `/tmp/probes/pre302` on both builds: `item1_fit`, `item1_float2`,
+`item2_intermediate`, `wide` and `wide2` match CPython; `item1_over`, `r_arg`, `r_list`,
+`r_attr`, `r_dict`, `r_local` and `r_module` are refused by name.  Final-state tests:
+`test_ail_pre302` (12 s, 0 failed), plus `test_ail_safetynet` (124 s), `test_ail_files`
+(131 s) and `test_ail_corpus_findings3` (210 s), all 0 failed.  `tools/update_manifest.py`
+was run and `--check` passes.
+
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
