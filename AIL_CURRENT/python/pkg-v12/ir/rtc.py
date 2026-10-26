@@ -83,12 +83,17 @@ _entry('str_from_int', (N,), (S,), 'ail_str_from_int({A}, {0})', _ALLOC, parts=(
 # digits in a 24-byte buffer of the calling block: only for a piece consumed in the same block
 _entry('str_from_int_buf', (N,), (S,), 'ail_str_from_int_buf((uint8_t[24]){{0}}, {0})', _PURE, parts=('STR',))
 _entry('str_from_float', (F,), (S,), 'ail_str_from_float({A}, {0})', _ALLOC, parts=('STR', 'FREPR', 'FMT'), arena='s')
+_entry('tint_str', (I.TINT,), (S,), 'ail_tint_str({A}, {0})', _ALLOC, parts=('TINTT', 'STR'), arena='s')
+_entry('tint_mod2', (I.TINT,), (I.TINT,), 'ail_tint_mod2({0})', _PURE, parts=('TINTT',), pure=True)
+_entry('tint_bin', (I.TINT,), (S,), 'ail_tint_bin({A}, {0})', _ALLOC, parts=('TINTT', 'STR'), arena='s')
+_entry('tint_oct', (I.TINT,), (S,), 'ail_tint_oct({A}, {0})', _ALLOC, parts=('TINTT', 'STR'), arena='s')
+_entry('tint_hex', (I.TINT,), (S,), 'ail_tint_hex({A}, {0})', _ALLOC, parts=('TINTT', 'STR'), arena='s')
 _entry('fmt_int', (N,), (S,), 'ail_fmt_spec_int({A}, {0}, {width}, {align}, {zero}, {fill})', _ALLOC,
        parts=('STR', 'FMT'), arena='s', attrs=('width', 'align', 'zero', 'fill'))
 _entry('fmt_float', (F,), (S,), 'ail_fmt_spec_float({A}, {0}, {width}, {align}, {zero}, {prec}, {fill})', _ALLOC,
        parts=('STR', 'FREPR', 'FMT'), arena='s', attrs=('width', 'align', 'zero', 'prec', 'fill'))
-_entry('fmt_str', (S,), (S,), 'ail_fmt_spec_str({A}, {0}, {width}, {align}, {prec})', _ALLOC,
-       parts=('STR', 'FMT'), arena='s', attrs=('width', 'align', 'prec'))
+_entry('fmt_str', (S,), (S,), 'ail_fmt_gen_str({A}, {0}, {fill}, {align}, {width}, {prec})', _ALLOC,
+       parts=('STR', 'FMT', 'FMTGEN'), arena='s', attrs=('width', 'align', 'fill', 'prec'))
 
 # --- numbers from text
 _entry('str_to_int', (S,), (N,), 'ail_str_to_int({0})', Effects(raises=[VALUE]), parts=('STR',))

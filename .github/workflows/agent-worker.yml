@@ -1,0 +1,108 @@
+name: agent-worker
+# One AIL coding-agent worker run (DeepSeek V4.1 Flash through OpenCode Go, a $10/month flat plan with no extra charges)
+# on a job-* branch prepared by the maintainer's ci_job script. Owner-approved 2026-10-21.
+# - Dispatch only (repo writers). Runs only on job-* branches.
+# - Only the OpenCode key is used. harness=oc (default): the pinned OpenCode CLI (v1.19.4, sha256-checked; 1.19.3 bundled a Bun with CVE-2026-111497) reads it from
+#   its auth file in $HOME, outside the checkout, removed after the run. harness=agentpy: agent.py reads a key file and
+#   deletes it before any tool runs. The OpenCode run is cut off after 120 minutes. Before the push, the results are scanned for the key and the push is refused if found. The checkout keeps no credentials; results are pushed in a separate step after the agent
+#   has exited. With .agent/pipeline.sh present the reviewer and one fix round run here too (OpenCode CLI); the
+#   maintainer still spot-checks before merging.
+on:
+  workflow_dispatch:
+    inputs:
+      max_turns:
+        default: '250'
+      harness:
+        default: 'oc'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  worker:
+    if: startsWith(github.ref_name, 'job-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: python3 --version && gcc --version | head -1
+      - name: Key file
+        env:
+          K: ${{ secrets.OPENCODE_API_KEY }}
+          Q: ${{ secrets.QODER_PERSONAL_ACCESS_TOKEN }}
+          C: ${{ secrets.COMMAND_CODE_API_KEY }}
+        run: |
+          umask 077
+          printf '%s' "$K" > "$RUNNER_TEMP/agent.key"
+          # Qoder CLI token (free DeepSeek V4.1 Flash until 2026-11-01 UTC+8); pipeline.sh reads it, public code only
+          [ -n "$Q" ] && printf '%s' "$Q" > "$RUNNER_TEMP/qoder.key" || true
+          # Command Code key (GOAT plan, owner 2026-10-26): pipeline.sh uses it when OpenCode gives no output
+          [ -n "$C" ] && printf '%s' "$C" > "$RUNNER_TEMP/cc.key" || true
+      - name: OpenCode CLI
+        if: inputs.harness == 'oc'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$HOME/opt/opencode" "$RUNNER_TEMP/oc"
+          gh release download v1.19.4 --repo sst/opencode -p opencode-linux-x64.tar.gz -D "$RUNNER_TEMP/oc"
+          tar -xzf "$RUNNER_TEMP/oc/opencode-linux-x64.tar.gz" -C "$HOME/opt/opencode"
+          echo "538fcb1b6408c8d4608822acee19f7ff5b3a3eb3383c0633c4f06170857312a7  $HOME/opt/opencode/opencode" | sha256sum -c -
+          mkdir -p "$HOME/.config/opencode"
+          cp .agent/opencode.json "$HOME/.config/opencode/opencode.json"
+      - name: Worker
+        run: |
+          git rev-parse HEAD > "$RUNNER_TEMP/start"
+          git config user.name "AIL agent"
+          git config user.email "agent@example.com"
+          mkdir -p "$HOME/tools" "$HOME/corpus"
+          cp .agent/cmp.sh .agent/cmpu.sh "$HOME/tools/" 2>/dev/null || true
+          [ -d corpus/gdev ] && ln -sfn "$PWD/corpus/gdev" "$HOME/corpus/gdev"
+          if [ "${{ inputs.harness }}" = oc ]; then
+            mkdir -p "$HOME/.local/share/opencode"
+            ( umask 077; printf '{"opencode-go":{"type":"api","key":"%s"}}' "$(cat "$RUNNER_TEMP/agent.key")" > "$HOME/.local/share/opencode/auth.json" )
+            rm -f "$RUNNER_TEMP/agent.key"
+            if [ -f .agent/pipeline.sh ]; then
+              # worker, reviewer and one fix round here, so the maintainer's machine only merges
+              bash .agent/pipeline.sh || true
+              rm -f "$HOME/.local/share/opencode/auth.json"
+              cp .agent/pipeline.md .agent/report.md
+            else
+              timeout 120m "$HOME/opt/opencode/opencode" run --format json --dir "$PWD" "Do the task described in the attached file, in this directory. When finished, reply with a short final report." -f .agent/task.md > "$RUNNER_TEMP/oc.jsonl" 2> "$RUNNER_TEMP/oc.err" || true
+              rm -f "$HOME/.local/share/opencode/auth.json"
+              python3 .agent/oc_report.py "$RUNNER_TEMP/oc.jsonl" > .agent/report.md 2>&1 || true
+              tail -5 "$RUNNER_TEMP/oc.err" >> .agent/report.md
+            fi
+          else
+            python3 .agent/agent.py --provider openai --base-url https://opencode.ai/inference/go/openai/v1               --model deepseek-v4.1-flash --price-in 0.15 --price-out 0.60               --dir "$PWD" --prompt-file .agent/task.md --log .agent/work0.jsonl               --budget-usd 6 --max-turns "${{ inputs.max_turns }}" --key-file "$RUNNER_TEMP/agent.key"               > .agent/report.md 2>&1 || true
+          fi
+          tail -40 .agent/report.md
+      - name: Key scan
+        id: scan
+        if: always()
+        env:
+          K: ${{ secrets.OPENCODE_API_KEY }}
+          Q: ${{ secrets.QODER_PERSONAL_ACCESS_TOKEN }}
+          C: ${{ secrets.COMMAND_CODE_API_KEY }}
+        run: |
+          rm -f "$RUNNER_TEMP/agent.key" "$RUNNER_TEMP/qoder.key" "$RUNNER_TEMP/cc.key" "$HOME/.local/share/opencode/auth.json"
+          for s in "$K" "$Q" "$C"; do
+            [ -n "$s" ] || continue
+            if grep -rqF -e "$s" --exclude-dir=.git . || git log -p "$(cat "$RUNNER_TEMP/start")..HEAD" | grep -qF -e "$s"; then
+              echo "key found in results: not pushing"; exit 1
+            fi
+          done
+      - name: Push results
+        if: always() && steps.scan.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git add .agent/report.md $(ls .agent/pipeline.md 2>/dev/null)
+          git commit -q -m "agent worker report" || true
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}" "HEAD:${{ github.ref_name }}"

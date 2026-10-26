@@ -1,7 +1,7 @@
 """The compile-time note for a program the typed path refused and the general (boxed) path built, and the
 refusal wording around it.
 
-- `note: file:line:col: built on the general path (several times slower) because <typed reason>` goes to
+- `note: file:line:col: built on the general path (about 20x slower) because <typed reason>` goes to
   stderr at compile time; stdout (the JSON) and the exit status are unchanged; AIL_QUIET_FALLBACK=1 and
   --json silence it
 - `sorted(range(n), key=lambda i: ...)` (an index sort) builds on the typed path and orders like CPython;
@@ -109,7 +109,7 @@ class FallbackNote(unittest.TestCase):
         lines = result.stderr.splitlines()
         self.assertEqual(len(lines), 1, result.stderr)
         # line 3; the column points at the refused annotation
-        self.assertRegex(lines[0], r'^note: prog\.ail:3:\d+: built on the general path \(several times slower\) because ')
+        self.assertRegex(lines[0], r'^note: prog\.ail:3:\d+: built on the general path \(about 20x slower\) because ')
         self.assertIn('only a class type can be None', lines[0])
         self.assertIn('write instead:', lines[0])
         self.assertNotIn('ail-source-line', result.stderr)
@@ -152,10 +152,14 @@ class FallbackNote(unittest.TestCase):
         self.assertEqual(ran.stdout, expected_index_sort())
 
     def test_refusal_after_index_sort_names_the_real_cause(self):
-        result, _ = self.compile(PRINT_SORTED)
-        self.assertEqual(result.returncode, 3)
-        self.assertIn('print() given a list', result.stderr)
+        # the general path builds it since branch safetynet (str.encode); the note still names the typed path's reason
+        result, exe = self.compile(PRINT_SORTED)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # print(idx) is built on the typed path since branch typed2; str() of the list is the cause now
+        self.assertIn('str() of a list is not built', result.stderr)
         self.assertNotIn('is an int', result.stderr)
+        ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)
+        self.assertEqual(ran.stdout, '[1, 3, 0, 2, 4]\n15\n')
 
 
 if __name__ == '__main__':

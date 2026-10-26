@@ -16,6 +16,10 @@ from ail_syntax import SyntaxErrorAIL, detect, fold_constants, python_surface, p
 import ail_sexpr
 import ail_modules
 
+sys.path.append(str(Path(__file__).resolve().parent / 'python/pkg-v12'))
+import fastwalk
+fastwalk.install()      # the same ast.walk in half the time, for every walk this process makes
+
 ROOT = Path(__file__).resolve().parent
 _BUILDCACHE = []
 
@@ -54,6 +58,7 @@ def _build_cache(args=None):
 
 
 _MERGED_ENTRIES = {}         # entry file -> ail_modules.Merged, for entries whose text merges several modules
+_PRELUDE_UNITS = {}          # entry file -> names of definitions the library preludes added (size gate / unified)
 
 
 def _literal_number(node):
@@ -69,25 +74,6 @@ def _module_constant(node):
     return (isinstance(value, ast.Constant) and type(value.value) in (str, bytes)
             or _literal_number(value) or isinstance(value, (ast.List, ast.Tuple))
             and bool(value.elts) and all(map(_literal_number, value.elts)))
-
-
-def _check_int64_literals(tree):
-    nodes = [tree]
-    while nodes:
-        node = nodes.pop()
-        if (isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub))
-                and isinstance(node.operand, ast.Constant) and type(node.operand.value) is int):
-            value = -node.operand.value if isinstance(node.op, ast.USub) else node.operand.value
-        elif isinstance(node, ast.Constant) and type(node.value) is int:
-            value = node.value
-        else:
-            nodes.extend(ast.iter_child_nodes(node))
-            continue
-        if not -(1 << 63) <= value < 1 << 63:
-            error = ValueError(f'int64 literal out of range: {value}')
-            error.source_line = node.lineno
-            error.source_column = node.col_offset
-            raise error
 
 
 def _returns_on_every_path(statements):
@@ -221,8 +207,11 @@ def _refuse_load(error):
 
 def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only=False,
                   separate=False, module_paths=(), origins=None, source_map=None, declarations_only=False, source_bytes=None,
-                  notes=None, local_imports=False, ffi=None):
+                  notes=None, local_imports=False, ffi=None, prelower=None):
     """Resolve source imports once and validate their shared declaration scope.
+
+    `prelower` rewrites the entry's text right after it is read (ail_export.lower for `--lib`); the
+    classes it leaves behind are then allowed in a module-only Python source.
 
     `local_imports` lets a Python-syntax entry import sibling modules (ail_modules, stage G1): their
     bodies are merged into the entry's text before everything below sees it."""
@@ -242,6 +231,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
 
     def load(path, *, entry=False):
         path = path.resolve()
+        entry_defs = None
         if path in active:
             raise ValueError('AIL module cycle: ' + ' -> '.join(p.name for p in [*active, path]))
         if path in seen:
@@ -256,6 +246,8 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             else:
                 data=path.read_bytes();source_bytes[path]=data
                 text=data.decode('utf-8-sig').replace('\r\n','\n').replace('\r','\n')
+            if prelower is not None and entry:
+                text = prelower(text)
             if source_syntax in ('auto', 'ail') and ail_sexpr.detect(text):
                 # The S-expression surface is converted to block syntax and then checked exactly
                 # like it; positions in diagnostics refer to that block text.
@@ -268,6 +260,12 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 # G4: `@extern` stubs become ordinary functions over a generated C object (ail_ffi_lower.py);
                 # a file that does not mention ail_ffi is returned untouched
                 text = ffi.lower(path, text)
+            if entry and path.suffix.lower() == '.py':
+                try:
+                    entry_defs = {n.name for n in ast.walk(ast.parse(text))
+                                  if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+                except (SyntaxError, ValueError):
+                    entry_defs = None
             if local_imports and entry and syntax == 'python' and not module_only:
                 merged = ail_modules.merge_program(path, text, **({} if ffi is None else {'read': ffi.read}))
                 if merged is not None:
@@ -287,12 +285,16 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                                      library=module_only)
             text = fold_constants(text)
             tree = ast.parse(text, filename=str(path))
+            if entry and entry_defs is not None and merged is None:
+                _PRELUDE_UNITS[str(path)] = sorted(
+                    {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+                    - entry_defs)
             if syntax == 'python' and entry and not module_only and not declarations_only:
                 _check_main_called(tree)
                 if local_imports:
                     _check_importable(tree)
-            if not declarations_only:
-                _check_int64_literals(tree)
+            # an int literal beyond int64 is no longer refused here (bigint): the typed path names it
+            # (pyfunc: 'does not fit in a 64-bit signed integer') and the general path builds it exactly
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)
             if source_map is not None:
@@ -386,7 +388,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                                                   for arg in fn.args.args):
                     contracts.append(path)
         if (module_only or not entry) and ((not tree.body and not imports) or any(not (isinstance(node, ast.FunctionDef)
-                or syntax == 'ail' and isinstance(node, ast.ClassDef))
+                or (syntax == 'ail' or prelower is not None) and isinstance(node, ast.ClassDef))
                 and not _module_constant(node) for node in tree.body)):
             raise ValueError(f'AIL module needs functions, structs, or literal constants only: {path}')
         if separate and not entry and any(
@@ -684,6 +686,7 @@ def _slow_patterns(text, source_map):
 
 
 _FALLBACK_NOTE = 'note: built on the general path'
+_FALLBACK_HINT = '; run with --strict to see why'
 _LINE_MARKER = re.compile(r'^ail-source-line: (\d+)\r?\n?', re.M)
 
 
@@ -704,8 +707,8 @@ def _marker_where(source_map, line):
 
 
 def _fallback_notes(args, source, stderr, locate=True, source_map=None):
-    """The compile-time `note: file:line:col: built on the general path (several times slower)
-    because <typed refusal>` lines the compiler printed, positioned like a refusal. Advisory only:
+    """The compile-time `note: file:line:col: built on the general path (about 20x slower)
+    because <typed refusal>; run with --strict ...` lines the compiler printed, positioned like a refusal. Advisory only:
     stdout and the exit status are never affected; AIL_QUIET_FALLBACK=1 silences it."""
     if os.environ.get('AIL_QUIET_FALLBACK') or not stderr or _FALLBACK_NOTE not in stderr:
         return []
@@ -716,6 +719,8 @@ def _fallback_notes(args, source, stderr, locate=True, source_map=None):
         for line in stderr.splitlines():
             if not line.startswith(_FALLBACK_NOTE):
                 continue
+            hint = _FALLBACK_HINT if line.endswith(_FALLBACK_HINT) else ''
+            line = line[:len(line) - len(hint)]       # the position lookup reads the refusal text alone
             if python:
                 line = python_wording(line)
             if str(source) in _MERGED_ENTRIES:
@@ -729,10 +734,124 @@ def _fallback_notes(args, source, stderr, locate=True, source_map=None):
                     where = _marker_where(source_map or {}, marked)
                 if where:
                     line = 'note: %s: built on the general path%s' % (where, line[len(_FALLBACK_NOTE):])
-            notes.append(line)
+            notes.append(line + hint)
     except Exception:
         return notes
     return notes
+
+
+def _strict_requested(args):
+    """`--strict` or AIL_STRICT=1: build on the typed path or refuse (never the general path)."""
+    return bool(getattr(args, 'strict', False)) or str(os.environ.get('AIL_STRICT', '')).strip().lower() not in (
+        '', '0', 'off', 'no', 'false')
+
+
+def _strict_blockers(args, source, objects, python):
+    """(blockers, incomplete): every typed-path blocker of the program, with file:line:col, ranked."""
+    origins, source_map = {}, {}
+    text, _, _ = _load_sources(source, args.module, args.syntax, module_paths=args.module_path,
+                               origins=origins, source_map=source_map, local_imports=True)
+    names = _MERGED_ENTRIES[str(source)].names if str(source) in _MERGED_ENTRIES else None
+
+    def reword(message):
+        if names:
+            message = ail_modules.unmangle(message, names)
+        return python_wording(message) if python else message
+
+    compiler_path = str(ROOT / 'python/pkg-v12')
+    previous_path, previous_bytecode = sys.path[:], sys.dont_write_bytecode
+    saved_surface = os.environ.get('AIL_SURFACE')
+    try:
+        sys.dont_write_bytecode = True
+        sys.path.insert(0, compiler_path)
+        from pyfunc import Unsupported, to_c
+        import strictmode
+        external = None
+        if objects:
+            from module_object import load_objects
+            external = load_objects(list(objects))
+        if python:
+            os.environ['AIL_SURFACE'] = 'python'
+        else:
+            os.environ.pop('AIL_SURFACE', None)
+        blockers, incomplete = strictmode.collect(text, to_c, Unsupported, external=external, reword=reword)
+    finally:
+        if saved_surface is None:
+            os.environ.pop('AIL_SURFACE', None)
+        else:
+            os.environ['AIL_SURFACE'] = saved_surface
+        sys.path[:] = previous_path
+        sys.dont_write_bytecode = previous_bytecode
+    for blocker in blockers:
+        position = source_map.get(blocker.get('line'))
+        origin = origins.get(blocker.get('function'))
+        path = line = column = None
+        if position is not None:
+            path, line = position[0], position[1]
+            column = position[2] if len(position) > 2 and position[2] is not None else blocker.get('column')
+        elif origin is not None:
+            path, line, column = origin[0], origin[1], origin[2]
+        else:
+            path, line, column = str(source), blocker.get('line'), blocker.get('column')
+        shown = _relpath(path)
+        blocker['path'] = path if shown.startswith('..') else shown
+        blocker['line'], blocker['column'] = line, column
+        if names:
+            for key in ('function', 'statement', 'construct', 'why', 'write_instead'):
+                if isinstance(blocker.get(key), str):
+                    blocker[key] = ail_modules.unmangle(blocker[key], names)
+            blocker['blocks_functions'] = [ail_modules.unmangle(name, names) for name in blocker['blocks_functions']]
+    return blockers, incomplete
+
+
+def _strict_text(blockers, incomplete):
+    count = len(blockers)
+    lines = ['strict: %d typed-path blocker%s; nothing was built (ranked by the code each one keeps off the typed path)'
+             % (count, '' if count == 1 else 's')]
+    for blocker in blockers:
+        where = blocker['path'] + (':%s' % blocker['line'] if blocker.get('line') else '') + (
+            ':%s' % blocker['column'] if blocker.get('line') and blocker.get('column') else '')
+        lines.append('')
+        lines.append('%d. %s  blocks %d line%s%s' % (
+            blocker['rank'], where, blocker['blocks_lines'], '' if blocker['blocks_lines'] == 1 else 's',
+            ' (' + ', '.join(blocker['blocks_functions']) + ')' if blocker['blocks_functions'] else ''))
+        if blocker.get('statement'):
+            lines.append('   code:          ' + blocker['statement'])
+        lines.append('   construct:     ' + blocker['construct'])
+        lines.append('   why not typed: ' + blocker['why'])
+        lines.append('   write instead: ' + blocker['write_instead'])
+    if incomplete:
+        lines += ['', 'strict: the list may be incomplete (%s)' % incomplete]
+    return '\n'.join(lines) + '\n'
+
+
+def _strict_json(args, source, blockers, incomplete):
+    return json.dumps(dict(
+        schema='ail.strict/1', status='refused', strict=True, command=args.command, source=str(source),
+        exit_code=3, blocker_count=len(blockers), incomplete=incomplete,
+        blockers=[{key: blocker.get(key) for key in (
+            'rank', 'path', 'line', 'column', 'function', 'statement', 'construct', 'why', 'write_instead',
+            'blocks_lines', 'blocks_functions', 'message')} for blocker in blockers]), ensure_ascii=False)
+
+
+def _strict_refusal(args, source, objects, first_message):
+    """Print every blocker (text on stderr, or `ail.strict/1` JSON on stdout with --json); the exit status
+    is the refusal's, 3. None when the blockers cannot be collected (the caller prints the first refusal)."""
+    try:
+        python = _python_source(args, source.read_bytes())
+        blockers, incomplete = _strict_blockers(args, source, objects, python)
+    except Exception:
+        if os.environ.get('AIL_STRICT_DEBUG'):
+            import traceback
+            traceback.print_exc()
+        return None
+    if not blockers:
+        return None
+    if getattr(args, 'json', False):
+        print(_strict_json(args, source, blockers, incomplete))
+    else:
+        sys.stderr.write(_strict_text(blockers, incomplete))
+    return 3
 
 
 def _source_check(args):
@@ -1091,6 +1210,35 @@ def _locate_refusal(args, source, message):
     return '%s:%d:%d: %s' % (where, position[0], position[1], message)
 
 
+def _compile_freestanding(args, parser, native_build):
+    """`compile --freestanding`: one module to C or an object with no runtime and no libc (python/pkg-v12/freestanding.py)."""
+    if args.module or args.object or args.separate or args.static or args.target or args.module_path:
+        parser.error('--freestanding builds one module alone; drop --module, --object, --separate, --static, --target and -I')
+    source = args.source.resolve()
+    output = Path(os.path.abspath(args.output))
+    if source.suffix.lower() != '.py' or not source.is_file():
+        parser.error('--freestanding takes an existing Python-syntax .py module')
+    if output.suffix not in ('.c', '.o'):
+        parser.error('--freestanding output must end in .c (C source) or .o (object)')
+    header = output.with_suffix('.h')
+    for path in (output, header):
+        if path.exists() or path.is_symlink():
+            parser.error('output already exists: %s' % path)
+    if source in (output, header) or not output.parent.is_dir():
+        parser.error('output must differ from source, in an existing directory')
+    sys.path.insert(0, str(ROOT / 'python/pkg-v12'))
+    import freestanding
+    try:
+        report = freestanding.build(source, output, target='i386' if args.m32 else 'x86_64')
+    except freestanding.Refusal as error:
+        return native_build.emit(args, {}, 3, 'type', error.text(_relpath(source)))
+    except SyntaxError as error:
+        return native_build.emit(args, {}, 3, 'syntax', 'AIL freestanding: %s:%s: %s' % (_relpath(source), error.lineno, error.msg))
+    except (RuntimeError, OSError, subprocess.SubprocessError) as error:
+        return native_build.emit(args, {}, 2, 'backend', 'AIL freestanding: %s' % error)
+    return native_build.emit(args, report)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -1163,16 +1311,31 @@ def main(argv=None):
     compile_cmd.add_argument('--module', action='append', type=Path, default=[],
         help='additional .ail file containing functions and literal numeric constants')
     compile_cmd.add_argument('--no-ffi', action='store_true', help='refuse a program that declares C FFI functions (@extern)')
+    compile_cmd.add_argument('--debug', action='store_true',
+                             help='build for gdb: -g -O0, #line directives back to the .py/.ail source (same code generator as a release build), and an uncaught exception names the last statement run (stderr is then not CPython-compatible)')
+    compile_cmd.add_argument('--link', action='append', default=[], metavar='LIB',
+                             help='link this library as well, like link("LIB") in the source (a name, or a path to a shared library); repeatable')
     compile_cmd.add_argument('--separate', action='store_true',
         help='compile each typed source into a C object, then link the objects')
     compile_cmd.add_argument('--object', action='append', type=Path, default=[],
         help='link an existing typed .o and its adjacent .o.json without its source')
     compile_cmd.add_argument('--syntax', choices=('auto', 'python', 'ail'), default='auto',
         help='source syntax; auto detects fn/const/use/struct declarations, ail uses brace-delimited blocks')
+    compile_cmd.add_argument('--strict', action='store_true',
+        help='build on the typed path or refuse, listing every blocker with a rewrite (also AIL_STRICT=1); '
+             'with --json the blockers are printed as ail.strict/1 JSON')
     compile_cmd.add_argument('--static', action='store_true',
         help='link the C library statically (larger binary that runs on any Linux); default is dynamic')
+    compile_cmd.add_argument('--lib', metavar='NAME',
+        help='build the @export functions of the source as a C library: -o DIR receives lib<NAME>.so, '
+             'lib<NAME>.a and <NAME>.h (error codes, NAME_last_error(), NAME_free(); see NATIVE_LIBRARIES.md)')
     compile_cmd.add_argument('--target', choices=sorted(ZIG_TARGETS),
         help='cross-compile with zig cc for another OS/CPU (needs zig: $AIL_ZIG, PATH, or ~/tools/zig/zig)')
+    compile_cmd.add_argument('--freestanding', action='store_true',
+        help='compile one Python-syntax module to C (-o x.c) or an object (-o x.o) that needs no runtime and no libc, '
+             'plus a header x.h; see docs/design/FREESTANDING.md')
+    compile_cmd.add_argument('--m32', action='store_true',
+        help='with --freestanding: target 32-bit x86 (usize is 32 bits, gcc -m32); see docs/design/FREESTANDING.md')
     object_cmd = sub.add_parser('compile-module', help='compile typed functions, scalar structs and scalar constants to a reusable object')
     object_cmd.add_argument('source', type=Path)
     object_cmd.add_argument('-o', '--output', required=True, type=Path)
@@ -1405,8 +1568,14 @@ def main(argv=None):
                 raise
         return native_build.emit(args, {'output': str(output), 'metadata': str(metadata),
                           'sha256': hashlib.sha256(output.read_bytes()).hexdigest()})
+    if args.command == 'compile' and args.m32 and not args.freestanding:
+        parser.error('--m32 is part of --freestanding (a 32-bit x86 kernel target)')
+    if args.command == 'compile' and args.freestanding:
+        return _compile_freestanding(args, parser, native_build)
     if args.command in ('compile', 'compile-library'):
-        library = args.command == 'compile-library'
+        export_lib = args.command == 'compile' and getattr(args, 'lib', None)
+        library = args.command == 'compile-library' or bool(export_lib)
+        lowered = {}
         objects = getattr(args, 'object', [])
         separate = getattr(args, 'separate', False)
         source = args.source.resolve()
@@ -1418,13 +1587,41 @@ def main(argv=None):
         notes = {}
         loading = native_build.loading(args) or {'source_map': {}}
         ffi = None if library else _ffi_session(args)
+        if export_lib and (separate or args.target):
+            parser.error('--lib cannot be combined with --separate or --target')
+
+        def lower_exports(text):
+            import ail_export
+            lowered_text, lowered['manifest'] = ail_export.lower(text)
+            return lowered_text
         try:
             source_text, contracts, unit_map = _load_sources(
                 source, args.module, args.syntax, module_only=library, separate=separate,
-                module_paths=args.module_path, notes=notes, local_imports=not library, ffi=ffi, **loading)
+                module_paths=args.module_path, notes=notes, local_imports=not library, ffi=ffi,
+                prelower=lower_exports if export_lib else None, **loading)
         except (OSError, UnicodeError, SyntaxError, ValueError) as error:
             _refuse_load(error)
+        prelude_units = _PRELUDE_UNITS.get(str(source), ())
+        if export_lib:
+            if not output.is_dir():
+                parser.error('--lib output must be an existing directory (-o DIR)')
+            with tempfile.TemporaryDirectory(prefix='ail-export-source-') as temporary:
+                prepared, manifest = Path(temporary) / 'library.py', Path(temporary) / 'exports.json'
+                prepared.write_text(source_text, encoding='utf8')
+                manifest.write_text(json.dumps(lowered['manifest']), encoding='utf8')
+                result = native_build.invoke(args, [sys.executable, '-B', str(ROOT/'python/pkg-v12/c_export.py'),
+                                       str(prepared), '--manifest', str(manifest), '--name', args.lib, '-o', str(output)],
+                                      temporary, timeout=240)
+                if not native_build.enabled(args):
+                    return result.returncode
+                if result.returncode:
+                    return native_build.emit(args, {}, result.returncode, message=result.stderr or result.stdout)
+                return native_build.emit(args, json.loads(result.stdout))
         ffi_objects, ffi_env = [], {}
+        if ffi is not None:
+            ffi.extra_libs = list(getattr(args, 'link', None) or [])      # --link LIB is link("LIB") for the whole program
+        if ffi is not None and not ffi.decls and ffi.extra_libs:
+            ffi_env = {'AIL_FFI_LINK': shlex.join(ffi._link_args())}
         if ffi is not None and ffi.decls:
             try:
                 ffi_objects = [ffi.build(ROOT / 'ail_chatgpt.py')]
@@ -1460,6 +1657,7 @@ def main(argv=None):
             target = Path(tmp) / 'program'
             build_source = Path(tmp) / 'combined.ail'
             build_source.write_text(source_text, encoding='utf-8')
+            strict = _strict_requested(args)
             command = [sys.executable, '-B', str(ROOT/'python/pkg-v12/pyc.py'),
                        '--file', str(build_source), str(target), '--strict']
             for object_path in [*objects, *ffi_objects]:
@@ -1468,8 +1666,18 @@ def main(argv=None):
                 unit_map_path = Path(tmp) / 'units.json'
                 unit_map_path.write_text(json.dumps(unit_map), encoding='utf-8')
                 command += ['--link-units', str(unit_map_path)]
+            debug = bool(getattr(args, 'debug', False))
+            link = bool(getattr(args, 'link', None)) and ffi is not None
+            debug_env = {}
+            if debug:
+                line_map = Path(tmp) / 'lines.json'
+                line_map.write_text(json.dumps({str(key): [value[0], value[1]]
+                                                for key, value in loading['source_map'].items()}), encoding='utf-8')
+                debug_env = {'AIL_DEBUG': '1', 'AIL_LINE_MAP': str(line_map)}
             environment = _surface_env(args, source, {**os.environ, 'AIL_REPORT_SOURCE_LINE': '1',
-                                                **({'AIL_NO_GENERAL': '1'} if contracts else {}), **ffi_env})
+                                                **({'AIL_NO_GENERAL': '1'} if contracts or strict else {}), **ffi_env, **debug_env})
+            if prelude_units:
+                environment['AIL_PRELUDE_UNITS'] = '\n'.join(prelude_units)
             cache = None if separate or getattr(args, 'target', None) else _build_cache(args)
             frontend = None
             if cache is not None and not native_build.enabled(args):
@@ -1482,7 +1690,9 @@ def main(argv=None):
                         hashlib.sha256(Path(str(object_path) + '.json').read_bytes()).hexdigest()
                         if Path(str(object_path) + '.json').is_file() else '-')],
                     environment.get('AIL_SURFACE', ''), environment.get('AIL_NO_GENERAL', ''),
-                    *[hashlib.sha256(Path(a).read_bytes()).hexdigest() for a in shlex.split(ffi_env.get('AIL_FFI_LINK', '')) if Path(a).is_file()])
+                    *[hashlib.sha256(Path(a).read_bytes()).hexdigest() for a in shlex.split(ffi_env.get('AIL_FFI_LINK', '')) if Path(a).is_file()],
+                    *(['link', ffi_env['AIL_FFI_LINK']] if link else []),
+                    *(['debug', hashlib.sha256(line_map.read_bytes()).hexdigest()] if debug else []))
             _hand_over_toolchain(cache, environment)
             result = None
             payload = cache.get('fe', frontend) if frontend else None
@@ -1500,6 +1710,10 @@ def main(argv=None):
                     timeout=660, env=environment)
                 if frontend and result.returncode == 0 and target.is_file():
                     cache.put('fe', frontend, cache.pack({'stderr': result.stderr or ''}, target.read_bytes()))
+            if result.returncode == 3 and strict and not separate and not ffi_objects:
+                refused = _strict_refusal(args, source, objects, result.stderr or result.stdout)
+                if refused is not None:
+                    return refused
             if result.returncode:
                 message, marked = _split_line_marker(result.stderr or result.stdout)
                 python = result.returncode == 3 and _python_source(args, source.read_bytes())
@@ -1535,6 +1749,12 @@ def main(argv=None):
                 for line in _fallback_notes(args, source, result.stderr, locate=not objects and not separate,
                                              source_map=loading['source_map']):
                     print(line, file=sys.stderr)
+                # typedpar.py: why a thread / executor / pool use runs under the general path's lock
+                for path, entries in notes.items():
+                    for line, text in entries:
+                        if text.startswith('not run in parallel'):
+                            print('note: %s:%d: %s' % (_relpath(Path(path)) if Path(path) == source else path,
+                                                       line, text), file=sys.stderr)
             return native_build.emit(args, {'output': str(output), 'bytes': output.stat().st_size,
                 'sha256': hashlib.sha256(output.read_bytes()).hexdigest()})
     project = ROOT/'example' if args.command == 'selftest' else Path(args.project).resolve()

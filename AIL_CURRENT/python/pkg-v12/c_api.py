@@ -62,14 +62,14 @@ typedef struct {{ int code; char message[160]; }} {name}_error;
     return header + '\n#ifdef __cplusplus\n}\n#endif\n#endif\n', signatures
 
 
-def generate(source, name, public=None, external=None):
+def generate(source, name, public=None, external=None, internal=()):
     if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]{0,47}', name) or name.startswith('ail_'):
         raise Unsupported('library name must be an ASCII identifier (1..48 characters), not ail_*')
     tree = ast.parse(source)
     if any(isinstance(n, ast.Name) and n.id == 'sys' or isinstance(n, ast.Call)
            and isinstance(n.func, ast.Name) and n.func.id == 'input' for n in ast.walk(tree)):
         raise Unsupported('C libraries receive input through parameters; input() and sys are unsupported')
-    renamed, exports, constants = typed_module(source, integer_lists=True)
+    renamed, exports, constants = typed_module(source, integer_lists=True, internal=internal)
     if external:
         _check_external_names(source, {**external['exports'], **external['constants']})
     if not exports:
@@ -110,18 +110,23 @@ def generate(source, name, public=None, external=None):
     # every implementation (including specialized clones) local to this object.
     for _, unit in info['c_units'][1]:
         definitions = [line for line in unit.splitlines() if line.endswith(' {') and not line[0].isspace()]
-        if len(definitions) != 1:
+        if not definitions:
             raise Unsupported('C library function boundary marker changed')
-        first = definitions[0]
-        signature = first[:-2]
-        for ending in (';', ' {'):
-            body, count = re.subn('^' + re.escape(signature + ending) + '$',
-                                 'static ' + signature + ending, body, flags=re.MULTILINE)
-            if count != 1:
-                raise Unsupported('C library function boundary marker changed')
-    exports = {fn: spec for fn, spec in exports.items() if fn in selected}
+        # a unit is the function and, for a list result, its IR clone (name__irl): each one becomes local
+        for first in definitions:
+            signature = first[:-2]
+            if '__irl(' in signature:         # the clone is emitted `static` already
+                if not re.search('^static\n' + re.escape(first) + '$', body, flags=re.MULTILINE):
+                    raise Unsupported('C library function boundary marker changed')
+                continue
+            for ending in (';', ' {'):
+                body, count = re.subn('^' + re.escape(signature + ending) + '$',
+                                     'static ' + signature + ending, body, flags=re.MULTILINE)
+                if count != 1:
+                    raise Unsupported('C library function boundary marker changed')
+    exports ={fn: spec for fn, spec in exports.items() if fn in selected}
     replacements = {
-        'fflush(stdout); fputs(w, stderr); fputc(10, stderr); _Exit(1);':
+        'fflush(stdout); fputs(w, stderr); AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);':
             'ail_api_trap(ail_exc_kind_of(w) ? ail_exc_kind_of(w) : 8, w);',
     }
     for old, new in replacements.items():
@@ -238,7 +243,7 @@ ail_api_detach(data);
     return header, code, exports, info
 
 
-def build(source, output, name, public=None, objects=()):
+def build(source, output, name, public=None, objects=(), internal=(), pic=False):
     output = Path(output)
     if output.exists() or output.is_symlink() or not output.parent.is_dir():
         raise Unsupported('library output requires a new directory in an existing parent')
@@ -247,14 +252,14 @@ def build(source, output, name, public=None, objects=()):
     external = load_objects(objects, c_api_namespace=name) if objects else None
     if external:
         pins['c_api_bridge.py'] = digest(Path(__file__).with_name('c_api_bridge.py'))
-    header, code, exports, info = generate(source, name, public, external)
+    header, code, exports, info = generate(source, name, public, external, internal)
     tool_report = None
     with tempfile.TemporaryDirectory(prefix='ail-c-api-') as temporary:
         root = Path(temporary)
         cfile, obj = root / 'library.c', root / (name + '.o')
         cfile.write_text(code, encoding='utf8')
         native_diagnostics.generated(cfile, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
-        command = [compiler(), *FLAGS, '-std=gnu11', '-c', str(cfile), '-o', str(obj)]
+        command = [compiler(), *FLAGS, *(['-fPIC', '-fvisibility=hidden'] if pic else []), '-std=gnu11', '-c', str(cfile), '-o', str(obj)]
         result = native_diagnostics.run(command, phase='compile', capture_output=True, timeout=180)
         if result.returncode:
             raise PipelineError('C library compile failed: ' + result.stderr.decode(errors='replace')[-4000:])
