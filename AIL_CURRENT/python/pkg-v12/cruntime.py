@@ -17134,10 +17134,11 @@ static inline ail_st ail_class_getattr(ail_ctx *cx, ail_obj *out, ail_obj cls, i
         for (int64_t i = 0; i < c->n; i++)
             if (c->attrs[i].name_id == name_id) { *out = c->attrs[i].val; return AIL_OK; }
     }
-    char cname[120]; size_t ck = 0;
+    /* CPython truncates the class name in AttributeError to 100 characters ("%.100s"). */
+    char cname[101]; size_t ck = 0;
     if (cls.tag == AIL_T_CLASS) {
         ail_str cn = ail_view_to_str(((ail_classobj *)cls.o)->name);
-        for (int64_t i = 0; i < cn.n && ck + 1 < sizeof cname; i++) {
+        for (int64_t i = 0; i < cn.n && ck < 100; i++) {
             uint32_t ch = (uint32_t)ail_chr(cn, i);
             cname[ck++] = ch < 128 ? (char)ch : '?';
         }
