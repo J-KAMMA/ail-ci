@@ -1,3 +1,20 @@
+## 2026-10-26 -- pre289: a collision call through a function-return receiver (job-pre289-10270338)
+
+The pre278 review's first pre-existing difference was `v1_return_route`: with a class whose
+``__init__`` stores ``self.f = lambda: self.k * 10`` and whose body also defines ``def f`` (which
+returns -1), ``make(4).f()`` printed -1 on both builds while CPython calls the stored field and
+prints 40.  The pre278 collision refusal is present here, and its receiver resolution now also
+follows the classes a user function returns: a ``-> C`` annotation, a constructor in a ``return``,
+a value assigned before the return, a chain through another function, and the same value through
+an argument, a list item, a dict value, an attribute or an alias.  Such a call is refused by name
+on both builds (``the method .f() on an instance whose class also stores an instance field named
+f (CPython calls the field)``); a function that returns an unrelated class or a non-class value
+keeps its old behaviour.  Added ``AIL_CURRENT/test_ail_pre289.py`` (4 tests, both builds) and
+registered it in ``ail_check.MODULES``.  Probes ``/tmp/probes/p289_*`` (direct, v1, annotation,
+chain, assigned, argument, list, dict, attribute, alias, subclass, conditional, two unrelated
+returns and a non-class return) match CPython or are refused by name on both builds.  Base at
+``HEAD`` was reproduced as ``40`` vs ``-1`` on both builds.  Final-state tests:
+test_ail_pre289, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is
