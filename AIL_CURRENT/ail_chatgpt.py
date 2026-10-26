@@ -1,6 +1,7 @@
 """Portable entry for the AIL source snapshot; no implicit model calls."""
 import ast
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -630,6 +631,70 @@ def _check_int64_unary_constants(tree):
             error.source_column = node.col_offset
             raise error
     _check_int64_abs_constants(tree, known)
+
+
+def _int64_holds(value):
+    return value is not _CONST_INT_TOO_BIG and _INT64_MIN <= value <= _INT64_MAX
+
+
+def _names_a_known_constant(node, known):
+    return any(isinstance(inner, ast.Name) and inner.id in known for inner in ast.walk(node))
+
+
+class _ReplaceKnownNames(ast.NodeTransformer):
+    """Copy an expression with every load of a statically known int replaced by its value."""
+
+    def __init__(self, known):
+        self.known = known
+
+    def visit_Name(self, node):
+        if isinstance(node.ctx, ast.Load) and node.id in self.known:
+            return ast.copy_location(ast.Constant(self.known[node.id]), node)
+        return node
+
+
+def _constant_int_exact_with_known(node, known):
+    """The exact int a constant expression denotes once known names are substituted, or the
+    (False, None) / (True, _CONST_INT_TOO_BIG) answers of _constant_int_exact."""
+    expression = _ReplaceKnownNames(known).visit(copy.deepcopy(node))
+    return _constant_int_exact(ast.fix_missing_locations(expression))
+
+
+def _check_int64_local_cancellation(node, known):
+    """Refuse a function-local constant expression whose final value fits int64 but a step
+    does not.  `a = 2**62; b = a * 2 - 1` computes `a * 2` in int64 and stops with
+    `integer overflow` at run time, where CPython's unbounded int prints INT64_MAX.  Only a
+    step that actually reads a statically known local or module constant is considered, so
+    the ordinary literal fold (`2**63 - 1`) and run-time arithmetic are unchanged."""
+    if not _names_a_known_constant(node, known):
+        return
+    ok, value = _constant_int_exact_with_known(node, known)
+    if not ok or not _int64_holds(value):
+        return
+    for child in ast.iter_child_nodes(node):
+        if not isinstance(child, ast.expr) or not _names_a_known_constant(child, known):
+            continue
+        child_ok, child_value = _constant_int_exact_with_known(child, known)
+        if child_ok and not _int64_holds(child_value):
+            shown = 'too large' if child_value is _CONST_INT_TOO_BIG else child_value
+            error = ValueError(f'int64 constant expression out of range: {shown}')
+            error.source_line = child.lineno
+            error.source_column = child.col_offset
+            raise error
+
+
+def _check_int64_local_cancellations(tree):
+    """Refuse the local-constant cancellation that used to trap at run time, in every function
+    body.  Module constants visible from the function count as known; a name the function
+    stores more than once, a parameter, or a global/nonlocal declaration does not."""
+    module_known = _known_module_constants(tree)
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        local = _function_local_int_constants(function, module_known)
+        for node in _walk_own_scope(function):
+            if isinstance(node, (ast.BinOp, ast.UnaryOp)):
+                _check_int64_local_cancellation(node, local)
 
 
 _CONST_TEXT_LIMIT = 1 << 20
@@ -1275,6 +1340,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 _check_int64_literals(tree)
                 _check_int64_constant_positions(tree)
                 _check_int64_unary_constants(tree)
+                _check_int64_local_cancellations(tree)
                 _check_int64_int_base_constants(tree)
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)
