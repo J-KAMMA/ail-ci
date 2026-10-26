@@ -205,6 +205,18 @@ now raises `ValueError("cannot convert float NaN to integer")` and
 `OverflowError("cannot convert float infinity to integer")` through the normal exception path
 on both builds.  Finite values, including the int64-boundary trap, are unchanged.  Added
 `AIL_CURRENT/test_ail_pre104.py` and registered it in `ail_check.MODULES`.
+## 2026-10-24 - pre44: unassigned Callable locals are UnboundLocalError
+
+The `test_ail_callable_values` failure recorded by the `regmods` review was a stale
+expectation, not a compiler difference: a Callable local that the definite-assignment pass
+has not assigned already raises CPython's `UnboundLocalError` (directly, through a list item,
+a dict value or an argument, and after `if`/`for`/`del`) on both builds. The R570 test still
+expected `RuntimeError`; it now catches `UnboundLocalError`. The same test module's refusal
+list also still contained a managed-struct Callable field, which R594 supports and
+`test_ail_exception_values_core` covers. Added `test_ail_pre44.py` with CPython comparisons
+for the direct, annotation-only, container/argument and control-flow cases. No language
+behaviour changed.
+
 ## 2026-10-23 -- fuzz37: ordering TypeError names the written operator
 
 Fuzzing while loops and counters against CPython on both builds found that an
