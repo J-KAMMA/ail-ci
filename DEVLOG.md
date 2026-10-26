@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-26 - pre61 suite continuation (job-pre61-10270754)
+
+Continued job `pre61` on today's integration tree.  The integration tree independently gained
+the same `functools.partial` location fix in cov7 (`genlib._partial` copies the `partial()` call's
+location onto both synthetic lambdas and then runs `ast.fix_missing_locations`), so the retried
+`test_ail_pre61` and `test_ail_safetynet` pass there; applying the older pre61 diff would have
+rewritten those lines without `fix_missing_locations` and conflicted with cov7.  `genlib._partial`
+is now byte-identical to the integration version, so the fix and its test apply without a
+conflict and keep both sides' behaviour.  Verified `test_ail_pre61`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` on this commit.
+
 ## 2026-10-24 - pre61: functools.partial with bound values (job-pre61-10241247)
 
 The first pre39 case, keyword `range(x=1e300)`, is already refused by name on this tree
