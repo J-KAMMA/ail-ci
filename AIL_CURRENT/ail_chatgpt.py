@@ -523,26 +523,61 @@ def _walk_own_scope(function):
         stack.extend(ast.iter_child_nodes(node))
 
 
-def _check_int64_abs_constants(tree, known):
-    """Refuse a constant ``abs(MIN)`` (2**63) by name.  AIL ints are fixed width, so the value
-    cannot be represented; CPython prints the bignum.  Only a builtin ``abs`` is considered,
-    and the argument must be statically known.  Other in-range constants fold as before, and
-    a value that reaches ``abs`` only at run time keeps the fixed-width trap."""
-    bound = set()
+def _known_module_constants(tree):
+    """Module names bound once to a statically known int, for the constant-expression checks."""
+    stores = {}
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            bound.add(node.name)
-        elif isinstance(node, ast.arg):
-            bound.add(node.arg)
-        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
-            bound.add(node.id)
-        elif isinstance(node, ast.alias):
-            bound.add(node.asname or node.name.split('.')[0])
-        elif isinstance(node, ast.ExceptHandler) and node.name:
-            bound.add(node.name)
-        elif isinstance(node, (ast.Global, ast.Nonlocal)):
-            bound.update(node.names)
-    if 'abs' in bound or 'abs' in known:
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            stores[node.id] = stores.get(node.id, 0) + 1
+    parameters = {node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)}
+    known = {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Name) or stores.get(target.id) != 1 or target.id in parameters:
+            continue
+        value = _constant_int(node.value, known)
+        if value is None:
+            try:
+                value = _const_expr_int(node.value, bounded=False)
+            except _Int64ConstantOverflow:
+                value = None
+        if value is not None:
+            known[target.id] = value
+    return known
+
+
+def _binds_name(tree, name):
+    """Does the program bind `name` anywhere? A user definition of a built-in stops its folding."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == name and isinstance(node.ctx, (ast.Store, ast.Del)):
+            return True
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == name:
+            return True
+        if isinstance(node, ast.arg) and node.arg == name:
+            return True
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if (alias.asname or alias.name.split('.')[0]) == name:
+                    return True
+        if isinstance(node, ast.ExceptHandler) and node.name == name:
+            return True
+        if isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name == name:
+            return True
+        if isinstance(node, ast.MatchMapping) and node.rest == name:
+            return True
+    return False
+
+
+def _check_int64_abs_constants(tree, known):
+    """Refuse a constant ``abs`` whose exact value int64 cannot hold, by name.
+
+    ``abs(-(1 << 63))`` and the literal spelling ``abs(-9223372036854775808)`` used to compile
+    and then stop with ``integer overflow`` at run time, where CPython prints the bignum.  The
+    argument is folded exactly here; an in-range result keeps the ordinary abs lowering, and a
+    program that binds its own ``abs`` is left alone."""
+    if _binds_name(tree, 'abs') or 'abs' in known:
         return
 
     def check(node, scope_known):
@@ -557,8 +592,11 @@ def _check_int64_abs_constants(tree, known):
                 value = _const_expr_int(node.args[0], bounded=False)
             except _Int64ConstantOverflow:
                 value = None
-        if value == _INT64_MIN:
-            error = ValueError(f'int64 constant expression out of range: {-(value)}')
+        if value is None:
+            return
+        result = abs(value)
+        if not _INT64_MIN <= result <= _INT64_MAX:
+            error = ValueError(f'int64 constant expression out of range: {_constant_diagnostic(result)}')
             error.source_line = node.lineno
             error.source_column = node.col_offset
             raise error
@@ -579,21 +617,7 @@ def _check_int64_unary_constants(tree):
     default build, while CPython prints a bignum; the runtime trap stays for values that only
     reach the unary operation as variables."""
     maxsplit = _maxsplit_constant_nodes(tree)
-    stores = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-            stores[node.id] = stores.get(node.id, 0) + 1
-    parameters = {node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)}
-    known = {}
-    for node in tree.body:
-        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
-            continue
-        target = node.targets[0]
-        if not isinstance(target, ast.Name) or stores.get(target.id) != 1 or target.id in parameters:
-            continue
-        value = _constant_int(node.value, known)
-        if value is not None:
-            known[target.id] = value
+    known = _known_module_constants(tree)
     for node in ast.walk(tree):
         if not isinstance(node, ast.UnaryOp) or not isinstance(node.op, (ast.UAdd, ast.USub)):
             continue

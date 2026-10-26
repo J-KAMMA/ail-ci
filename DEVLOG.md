@@ -71,6 +71,22 @@ whitelist gives the same result as pre225's `bcdeEfFgGnosxX%` once the `n`/`s`/`
 `AIL_CURRENT/test_ail_pre225.py` (1 test, both builds) and registered it in
 `ail_check.MODULES`. Probes `/tmp/probes/pre225_*` (group matrix, value routes, NUL/code points,
 boundaries) match CPython on both builds. Tests: pre225, safetynet, files, corpus_findings3.
+## 2026-10-26 - reapply pre215: constant abs() outside int64 (job-rbrbpre215-10261331)
+
+Re-applied the accepted pre215 change on this tree. The tree already carried the pre214/pre248
+`abs()` work, so the reapply keeps its function-local constant support and adds the accepted
+`_known_module_constants` / `_binds_name` helpers: a module constant written as a shift expression
+(`M = -(1 << 63)`, including an alias `N = M`) now resolves into `abs()`, and the argument is
+folded exactly so a result below `INT64_MIN` or above `INT64_MAX` is refused by name
+(`int64 constant expression out of range`) on both builds. The fetched test expected the older
+`outside the signed 64-bit range` wording for the three other review cases; the test now accepts
+the current tree's named refusal as well, keeping both sides' fix. Added
+`AIL_CURRENT/test_ail_pre215.py` and registered it in `ail_check.MODULES`.
+`tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run and `--check`
+passes. Probes `p1`-`p16` in `/tmp/probes` on both builds: 14 are refused by name (direct,
+literal, module shift/alias, below-min, above-max, argument, list, attribute, dict, nested, local,
+local alias, power) and `p12`/`p13` match CPython. Tests: pre215, pre214, pre248, pre246, pre253,
+pre227, pre236, safetynet, files, corpus_findings3.
 
 ## 2026-10-25 -- pre227 suite fix: the constant check owns the refusal wording (job-pre227-10260534)
 
