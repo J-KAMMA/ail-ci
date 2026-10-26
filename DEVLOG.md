@@ -1,3 +1,247 @@
+## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
+
+The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
+`ail_op_imul` stopped with an uncatchable `integer overflow` where CPython raises MemoryError,
+and an empty list spun over the huge count. The oversize guard now stops through a bare
+`MemoryError` before the element product leaves int64, and an empty list skips the repeat loop.
+No compile-time refusal was added: small, zero, negative and bool counts still match, and a huge
+count arriving through an argument, a list item, an attribute, a dict value or an alias matches
+CPython on both builds.
+`AIL_CURRENT/test_ail_pre271.py` covers both builds. Probes in `/tmp/probes`: `pre271_aug_huge`,
+`pre271_aug_boundary`, `pre271_aug_one`, `pre271_aug_typed_huge`, `pre271_aug_dynamic_routes`,
+`pre271_aug_empty`, `pre271_aug_alias`, `pre271_aug_zero_one`, `pre271_aug_neg`,
+`pre271_aug_bool`, `pre271_aug_small`, `pre271_aug_routes`, all matching CPython on both builds.
+Final-state tests: test_ail_pre271, test_ail_local_count_repeat, test_ail_list_ops,
+test_ail_safetynet, test_ail_files, test_ail_corpus_findings3 (6 modules, 271 s, 0 failed).
+`tools/update_manifest.py --check` passes.
+## 2026-10-26 -- preludes avoid the refused variable-exponent power (job-pre273-10262306 review)
+
+The review found that `refuse_variable_int_pow` also saw compiler-injected library source:
+`prelude_fraction.py`'s `10 ** len(frac)` / `10 ** exp` / `10 ** abs(ndigits)` made every
+`from fractions import Fraction` program fail at compile time, and `test_ail_pre133` failed 2/3.
+The preludes now stay inside the subset the refusal describes: `prelude_fraction.py` scales
+through a new `_ail_fr_pow10` multiplication loop, and `prelude_random.py`'s `sample` adds the
+already-computed `p` instead of recomputing `4 ** m`. No refusal or runtime rule changed; a user
+program that writes `2 ** n` is still refused by name on both builds. Added a Fraction prelude
+case to `test_ail_pre273.py`; `test_ail_pre133` is back to 3/3.
+
+Probes in `/tmp/probes`: `pow_fraction_modern.py` (constructor from an int pair, decimal and
+exponent strings, arithmetic and `round` through the prelude's powers of ten) matches CPython on
+both builds; `pow_random_prelude.py` (the prelude's own `Random` class plus `sample` with k > 5)
+matches CPython on both builds. The earlier `pre273_*` probes still behave as recorded: the
+refused forms are refused by name and `bounds`/`safe`/`zero_neg` match CPython.
+
+## 2026-10-26 -- computed exponent on a constant integer base is refused (job-pre273-10262306)
+
+The first still-differing item in the rbpre69 review was the variable-exponent power: `2 ** n`
+compiled and then stopped with `integer overflow`, where CPython keeps an unbounded int. The
+constant-exponent form is already folded and refused when it leaves int64, so the remaining case
+is an exponent known only at run time. `pyfront.refuse_variable_int_pow` now refuses a power
+whose base is a compile-time int64 constant with |base| >= 2 and whose exponent is not a constant
+expression, naming the base and the int64 boundary on the typed path and both general emitters.
+Constant exponents (including bool leaves), the safe bases 0/1/-1, float bases with a
+constant float exponent and a variable base with a constant exponent are unchanged. The three existing tests that used the old trap
+(`test_all.integer_power`, `test_ail_pre160`, `test_ail_crypto`) now exercise the new boundary.
+Added `test_ail_pre273.py` (2 tests, both builds) and registered it in `ail_check.MODULES`;
+DIFFERENCES row `C?-job-pre273-10262306-1`. `tools/diff_ids.py` is not present on this tree;
+`tools/update_manifest.py` was run and `--check` passes.
+
+Probes in `/tmp/probes`: `pre273_arg`, `pre273_list`, `pre273_attr`, `pre273_dict`,
+`pre273_alias` and `pre273_float_dynamic` are refused by name on both builds; `pre273_bounds`,
+`pre273_safe` and `pre273_zero_neg` match CPython on both builds (constant/float/bool exponents,
+the bases 0/1/-1, negative constant exponents and a variable base with a constant exponent).
+`pre273_expr_pow` keeps the older named refusal for a constant exponent outside int64;
+`pre273_neg_literal` matches CPython. Tests on the final tree: `test_ail_pre273`,
+`test_ail_pre160`, `test_ail_crypto`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3`.
+## 2026-10-26 - pre279 review: callable instance fields and TypeError type names (job-pre279-10262332)
+
+The review of `665f894` found two defects in the new field-call path.  A field holding an
+instance with `__call__` went to `call_value`, which accepts only `AIL_T_FUNC`, so
+`class F: def __call__(self, x): ...; class C: def f(...); self.f = F()` stopped with
+`TypeError: 'instance' object is not callable` where CPython prints `11`.  The field path now
+dispatches `__call__` on the field's run-time class (deepest override first, static and class
+methods included) and keeps the ordinary function/class-value call otherwise.  The caller's
+not-callable message also used `ail_type_name`, which maps every instance (including `bytes`
+and `bytearray`) to `instance`; it now uses `ail__tname_c`, so CPython's `'F' object is not
+callable` / `'bytes' object is not callable` match.
+
+Probes in `/tmp/probes/pre279` on both builds: `call_basic`, `call_types`, `call_routes`,
+`call_conditional`, `call_inherit`, `call_external`, `call_noargs`, `callv_noclass`,
+`t_callable_names` and the existing `shadow_*`/`p02*` match CPython; `type_names` and
+`type_instances` match for None/bool/int/float/str/bytes/bytearray/list/tuple/dict and plain
+instances.  `call_alias_field` (bound-method value) and `call_instance` (calling a plain
+instance) keep their pre-existing unsupported behaviour, unchanged by this job.  Final-state
+tests: `test_ail_pre279`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`,
+`test_ail_virtual_dispatch`, `test_ail_typed_inherit` (6 modules, 323 s, 0 failed).
+`python3 tools/update_manifest.py --check` passes.
+
+## 2026-10-26 - pre279: an instance field shadows a same-named class method (job-pre279-10262332)
+
+The first still-differing pre-existing item from the pre260 review was its p02 method/field
+collision: with `self.f = lambda x: x + 100` in `__init__` and `def f(self, x): return x + 101`,
+both builds printed `102 103`, where CPython prints `101 102`.  `_call_attribute` dispatched the
+static method before reading the instance table, although a function is a non-data descriptor.
+Both general paths now remember every `obj.attr = ...` name in the program and test the instance
+table first (`ail_inst_findattr`, emitted only for a program that needs it), for a statically
+known receiver and for the dynamic user-method dispatch; the method still applies when the field
+is absent or deleted, and a non-callable field raises CPython's TypeError.  A call with keyword
+or starred arguments is refused by name when a field may shadow the method.  The full quirks
+module (the first unverified item in the task) already passes on this tree.
+
+Probes in `/tmp/probes/pre279`: `shadow_basic`, `shadow_routes`, `shadow_external_nodelete`,
+`shadow_conditional`, `shadow_types`, `shadow_noncallable`, `shadow_inherit`, `shadow_static`,
+`shadow_alias_value` and `shadow_nofeature` match CPython on both builds; `shadow_kwargs` and
+`shadow_external` (`del c.f`) are refused by name.  Added `AIL_CURRENT/test_ail_pre279.py` and
+registered it in `ail_check.MODULES` and `tools/ci_shards.json`.  Final-state tests:
+`test_ail_pre279`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+`python3 tools/update_manifest.py --check` passes.
+## 2026-10-26 -- pre283: class-attribute store through a class value is refused by name (job-pre283-10270202)
+
+The pre275 reviewer recorded a class-attribute assignment (`r_class_mutate*`) that already failed
+before that job: `class Box: v = 1.0` + `Box.v = 2.5` prints 2.5 on CPython, but both builds
+raised `AttributeError: 'type' object has no attribute 'v'`.  The general path keeps each class
+attribute in a module slot it only reads and copies onto instances, so it cannot store through a
+class object; instead of changing that model, the construct is refused by name at compile time:
+pyboxed2 refuses a statically class-valued base (a direct unshadowed class name; exit 3, leaving
+the typed path's own class-attribute support on the default build untouched), the front end
+refuses an alias of a class and a class read out of a literal list/tuple/dict (constant index,
+negative or not; exit 2), and `ail_inst_setattr_chk` raises a named NotImplementedError for a base
+that only holds a class at run time (a parameter, an instance attribute, a mutated container).
+Instance stores and names shadowed by a local, parameter, loop target or closure cell are
+unchanged.  Probes in `/tmp/probes` (`c*`, `m*`, `n*`, `t*`): direct/new/aug/annotated/alias/
+literal-container stores are refused by name on both builds; `c6/c7/c8/c11/c13`, `n3/n7/n8/n9/
+n13`, `t9/t10` match CPython on both; `t1/t2/t3/t5` and the class-level program match on the
+default build and are refused on the general build; `n1/n2` are refused at run time by name.
+Tests on the final tree: `test_ail_pre283`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`, `test_ail_dunders`, `test_ail_typed_inherit` (6 modules, 320 s,
+0 failed).  `tools/update_manifest.py` run and `--check` passes.
+## 2026-10-26 -- local constant cancellation refused by name (job-pre285-10270302)
+
+The reviewer of job `rbrbpre32` recorded `a = 2**62; b = a * 2 - 1` as a pre-existing
+difference: both builds computed `a * 2` in int64 and stopped with `integer overflow` at run
+time, while CPython's unbounded int prints INT64_MAX.  The first recorded item (index/slice/
+dead-code out-of-range powers) is already refused by name on this tree, so this job fixes the
+first item that was still an uncaught run-time difference.
+
+`ail_chatgpt.py` now follows a function's single-assignment int constants (direct, aliased,
+annotated, and visible module constants) when it checks an expression, and refuses by name
+(`int64 constant expression out of range`) a step that leaves int64 while the whole expression
+fits.  The check reuses the existing `_function_local_int_constants` +
+`_constant_int_exact` machinery.  A literal cancellation such as `2**63 - 1`, in-range local
+steps and values that only arrive at run time are unchanged; an expression whose own final
+value leaves int64 keeps its previous run-time stop.  Added `AIL_CURRENT/test_ail_pre285.py`
+(12 refusal cases, 6 matching cases, both builds), registered it in `ail_check.MODULES` and
+updated `tools/ci_shards.json`.  Probes `p285_*` in `/tmp/probes`: `p285_direct`,
+`p285_routes`, `p285_alias` and `p285_ops` are refused by name on both builds; `p285_small`,
+`p285_literal` and `p285_runtime` match CPython on both builds.  Tests on the final tree:
+`test_ail_pre285`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` and 13
+related `pre*` modules (17 modules, 361 s, 0 failed).  `tools/update_manifest.py --check`
+passes.
+## 2026-10-26 -- wrapper-chain int() of an out-of-int64 float refused (job-pre290-10270339)
+
+Fixed the first still-differing pre-existing item from the rbrbrbpre39 review, `r23`: a value
+outside int64 passed through a chain of wrapper calls (`outer(1e300)` -> `take(y)` -> `int(x)`)
+compiled and stopped at run time with `integer overflow`, while CPython prints the bignum.  This
+tree had no version of the accepted pre39 static-float checker, so its pass is added to
+`ail_chatgpt._check_int64_literals` (module constants, literal containers, identity/keyword
+wrappers, `_UNKNOWN` for unresolved names), and `_wrapper_int_params` now propagates a wrapper
+parameter through further module-level wrapper calls to a fixpoint, unwrapping identity calls.
+The call site is refused by name instead.  In-range conversions, non-finite floats, run-time-only
+values and a locally shadowed wrapper keep their previous behaviour.  Added
+`AIL_CURRENT/test_ail_pre290.py` (12 refused, 6 CPython-parity programs, both builds) and
+registered it in `ail_check.MODULES` and `ci_shards.json`.  The next recorded pre-existing items
+(r26 alias-list, r27 attribute-held value, r28 tuple multi-assign, r33 dict via variable dict)
+still stop at run time and are left open.
+
+Probes in `/tmp/probes` on both builds: `p290_refuse_{direct,one_pos,one_kw,identity,chain2,
+chain3_kw,chain_id,chain_list,chain_dict,chain_tuple,chain_neg,chain_const,chain_ifexp,
+chain_boundary}` are refused by name; `p290_match_{direct,routes,nonfinite,shadow}` match CPython.
+Final tests: `test_ail_pre290`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`.
+
+## 2026-10-26 - pre296: a local binding of a built-in name wins over the built-in call (job-pre296-10270440)
+
+The pre54 reviewer's first pre-existing difference was a parameter named `round` that was not
+honoured: `def apply(round, x): return round(x)` called the built-in when the argument was a
+callable, so the probe printed `-6` / `int` where CPython prints `-16.5` / `float`. The general
+path now reads a parameter, local, cell or closure binding named like a built-in instead of
+dispatching to the built-in by name, and the typed path refuses that call by name so the default
+build falls back to it. This covers the exact parameter case plus a local lambda, a closure cell,
+and values arriving through a list item, an attribute and a dict value; a non-callable binding
+keeps CPython's TypeError and an unshadowed `round` is unchanged. Added
+`AIL_CURRENT/test_ail_pre296.py`, registered in `ail_check.MODULES`; `tools/update_manifest.py`
+was run and `--check` exits 0. Probes in `/tmp/probes` on both builds: `p296_param`,
+`p296_local`, `p296_closure`, `p296_routes`, `p296_callable_param`, `p296_noncallable`,
+`p296_unshadowed`, `p296_len_local`, `p296_len_param`, `p296_abs_local` and `p296_no_feature`
+match CPython; `p296_builtin_value` is refused by name (passing the built-in `round` as a value
+is a separate pre-existing gap). Tests on the final tree: `test_ail_pre296`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`, plus the related
+`test_ail_builtin_shadowing` and `test_ail_pre218`. A lambda assigned after a call in the same
+function is still dropped by a separate scanning pass, so that unbound-local edge remains
+pre-existing on both builds.
+## 2026-10-26 -- repr(e.args[i]) keeps the argument's kind (job-pre298-10270442)
+
+This tree still lacked the accepted pre26 fix, so the first CPython difference left by the rbpre26
+review was behavioural: on the typed path `e.args[i]` reads as text, making `repr(e.args[i])` repr
+that text (`ValueError(3.0)` printed `'3.0'` where CPython prints `3.0`; ints, bools and None were
+quoted too) and `f"{e.args[i]!r}"` / `%r` of one argument were refused by name. Re-applied the
+accepted pre26 change: `exctext.py` gains `arg_repr()` and the `ail_exc_argrepr` runtime accessor
+(`ail__exc_piece(&a, 1, A)`), `pyfunc.py` lowers `repr(e.args[i])`, `!r` and `%r` through it, and the
+existing `_ail_exc_arg` text path is unchanged for `str()`, `print()` and concatenation. The rbpre26
+review's first pre-existing item (multi-argument `raise` on the forced general path) remains the
+same named refusal, and `"%r %s %r"` of exception arguments now works on the typed path.
+Added `test_ail_pre298.py` (numeric multi-argument repr, single-argument types/formats, index routes
+through a call/list item/dict value and formatting) and registered it in `ail_check.MODULES` and
+`ci_shards.json`; DIFFERENCES row `C?-job-pre298-10270442-1`. `tools/update_manifest.py --check`
+passes.
+
+Probes in `/tmp/probes/pre298` on both builds: `types`, `index_kinds`, `formats`, `escapes`,
+`pre26test` and `nonrepr` match CPython on `d` (the `g` build keeps the pre-existing named
+multi-argument refusal); `single` matches on both builds. `after` (storing `x = e.args[i]` and then
+`repr(x)`) still quotes a numeric argument; that is a pre-existing limitation identical on the base
+(`523c597`) and is not caused by this change. Final-state tests: test_ail_pre298,
+test_ail_exception_values_core, test_ail_exception_values_app,
+test_ail_exception_aggregate_objects, test_ail_exception_context, test_ail_exc_str,
+test_ail_excfix, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3
+(10 modules, 488 s, 0 failed).
+## 2026-10-26 -- re-apply cov7: partial lambda locations and abstract-base dispatcher (job-rbcov7-10270118)
+
+Re-applying the accepted cov7 change on the current integration tree.  The diff applied cleanly
+to `genlib.py`, `pyfunc.py`, `test_ail_silent6.py` and `test_ail_typed_inherit.py`; the
+`DEVLOG.md` / `DIFFERENCES.md` conflicts kept both sides (cov7's entries plus this tree's newer
+ones), and the re-applied DIFFERENCES row uses this job's placeholder id.  The workflow part of
+the diff (OpenCode v1.19.4 and the extra key scan) was already present here, so no change.  In
+`genlib._partial` both rewritten `Lambda` nodes now copy the `partial()` call's location, so
+`pyboxed2._refuse_lambda_forward_defaults` no longer raises `AttributeError: 'Lambda' object
+has no attribute 'lineno'` for a positional or keyword partial (g17_004 / g17_024).  In
+`pyfunc._dispatcher` the representative is looked up with `by_name.get()` and falls back to the
+first concrete implementation when the base's method is a stub that was dropped, so an abstract
+visitor hierarchy builds instead of raising `KeyError: 'Visitor__visit_directory'` (g13_036).
+The positional-partial program was added to `test_ail_silent6.py` and the abstract visitor to
+`test_ail_typed_inherit.py`.
+
+Probes in `/tmp/probes`: `cov7_partial_basic`, `cov7_partial_routes`, `cov7_visitor_abstract`,
+`cov7_visitor_mixed`, `cov7_visitor_noret` and `cov7_visitor_dict` all match CPython on the
+general and default builds; the abstract/mixed/noret visitor programs also build typed-only
+(`AIL_NO_GENERAL=1`) and match, exercising the dispatcher.  `cov7_visitor_dict` is refused by
+name on the typed path (`'table' is annotated dict ... no rule for`) and matches on the general
+path.  `tools/diff_ids.py` is not present in this tree; `tools/update_manifest.py` updated the
+four touched pins and `--check` passes.
+
+Tests on this tree: `test_ail_silent6`, `test_ail_typed_inherit`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass (44 tests, 731 s, 1 skipped: no zig for
+`--target windows`).
+## 2026-10-26 -- re-apply pre26: repr(e.args[i]) keeps the argument's kind (job-rbpre26-10270138)
+
+Re-applied the accepted pre26 change on this tree. On the typed path `e.args[i]` reads as text, so
+`repr(e.args[i])` repr'd that text: a `ValueError(3.0)` handler printed `'3.0'` where CPython prints
+`3.0`, and int, bool and None arguments were quoted the same way. The handler rewrite now lowers
+`repr(e.args[i])`, `f"{e.args[i]!r}"` and `%r` of one argument to a new `_ail_exc_arg_repr` accessor
+that formats the stored argument (a str keeps its quotes, a number does not). Both builds agree with
+CPython; the accepted `test_ail_pre26.py` keeps the probe, including negative and out-of-range
+indexes, and is registered in `ail_check.MODULES`.
+
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is
@@ -46,6 +290,172 @@ Probes in `/tmp/probes/pre29`: `pre29_invalid`, `pre29_sources`, `pre29_objects`
 negative/zero, NUL/control/quote, long and non-ASCII specs, alias/argument/list/attribute/dict
 routes, bool/int/float/str and None/list/tuple/dict/instance values) match CPython on both builds.
 Final-state tests: pre29, safetynet, files and corpus_findings3.
+## 2026-10-26 -- pre263 follow-up: inline tuple source (job-pre263-10261654)
+
+The reviewer found the new row claimed a literal tuple source was covered, while
+`int(("9999999999999999999",)[0])` still compiled and stopped with `integer overflow`.
+`python_surface` rewrites that tuple to `_AilT_s(...).f0`, which `_constant_text` did not read.
+It now follows the generated `_AilT_*` constructor and field chain, so the one-argument parse
+sees the same constant text and refuses the out-of-range value by name; nested tuple sources
+and `[-1]` work as well, and an unselected out-of-range sibling is not refused.  Added
+`tuple_source` and `tuple_source_negative_index` to `test_ail_pre263.py`.  Probes
+`/tmp/probes/pre263fix/t01`-`t20` cover direct/multi/negative/bytes/nested/whitespace, both
+int64 boundaries, two-argument and explicit-base forms, argument/list-item/dict-value/class
+attribute/module-alias routes, in-range values, invalid and empty text; every one matches
+CPython or is refused by name on both builds.
+
+## 2026-10-26 -- pre263: constant single-argument int(text) beyond int64 (job-pre263-10261654)
+
+The task named a pre-existing difference from the bigint-fix05 review, but its list was empty in
+the task text.  The first still-differing bignum item I could reproduce from the records was
+`int("9999999999999999999")`: both builds compiled it and then stopped with `integer overflow`,
+while CPython prints the bignum.  The two-argument `int(<text>, <base>)` form was already refused
+by pre253, but a call with no explicit base (CPython's base 10) was not folded.
+
+`_check_int64_int_base_constants` now also reads the one-argument form: when the text is a
+constant str or bytes, it is parsed with CPython's default base and a value outside int64 is
+refused by name at compile time (`int64 constant expression out of range`).  Constant module
+names and aliases, literal list/tuple/dict sources, arguments, list items, class attributes and
+dict values are covered; in-range constants, invalid literals, dynamic text and a rebound `int`
+keep their previous behaviour.  Dynamic text above int64 still stops with `integer overflow`
+(the existing open row `C?-job-rbrbrbrbmemsafe2-10261346-7`).
+
+Added `AIL_CURRENT/test_ail_pre263.py` and registered it in `ail_check.MODULES` and
+`tools/ci_shards.json`.  Probes `/tmp/probes/pre263/p01`-`p12` cover direct/negative/bytes,
+int64 boundaries, 19/100/4300-digit widths, module constants and aliases, argument/list item/
+class attribute/dict value routes, list/tuple/dict sources, in-range values, invalid literals,
+an explicit base and a dynamic helper; every probe matches CPython or is refused by name on both
+builds.  Final-state tests: test_ail_pre263, test_ail_safetynet, test_ail_files,
+test_ail_corpus_findings3.
+## 2026-10-26 -- zero to a negative power names CPython's ZeroDivisionError (job-pre265-10262131)
+
+The first still-differing item recorded by the rbpre33 reviewer was the default build's message
+for a constant `0 ** -1`: it raised `ZeroDivisionError: division by zero` where CPython says
+`0.0 cannot be raised to a negative power`. A constant negative exponent takes the float `pow()`
+path, whose shared typed helper `ail__fpow_slow` still used the older division text. The helper
+now raises a catchable `AIL_EXC_ZERODIV` with CPython's text, so both the caught `str(e)` and an
+uncaught stop agree; the general path already had the message. The same fix covers `0.0 ** -1`,
+`(-0.0) ** -1`, `False ** -1`, `0 ** -1.0`, `0.0 ** -0.5`, and a zero base arriving through an
+argument, a list item, an attribute, a dict value, an alias or a local. Non-zero negative
+exponents keep their float results, and a *variable* negative exponent keeps the deliberate
+exact-integer trap documented in SEMANTICS.md. The other two recorded pre-existing items were
+checked and needed no change: an out-of-int64 intermediate/result such as `2**64 // 2` or
+`(-3)**40` is already refused by name, and the v1 dict-literal case now matches CPython.
+
+Added `AIL_CURRENT/test_ail_pre265.py` and registered it in `ail_check.MODULES` and
+`ci_shards.json`. Probes in `/tmp/probes` (`pre265_item1`, `pre265_zero_direct`,
+`pre265_zero_values`, `pre265_arg_int`, `pre265_arg_float`, `pre265_arg_pair`,
+`pre265_fit_args`, `pre265_pow_regression`, `pre265_pow_neg`) match CPython on both builds;
+`pre265_item2a/b/c` are refused by name on both. Tests on the final tree: `test_ail_pre265`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+## 2026-10-26 - pre267: refuse a statically known non-BMP bytes.decode() by name (job-pre267-10262133)
+
+The first still-differing item in the rbpre51 review was the general path's non-BMP
+`bytes.decode()`: `b"\xf0\x9f\x98\x80".decode()` built and then stopped with `AIL internal
+error: decode: a code point above U+FFFF in the 16-bit v2 runtime`, while CPython prints the
+astral character and the default build already matched.  The general runtime keeps UTF-16 units,
+so pyboxed2 now statically resolves the bytes value and refuses a decode (or `str(bytes, enc)`)
+whose UTF-8 text contains a code point above U+FFFF, by name at compile time.  It follows a
+literal, module constant/alias, list/tuple/dict literal item, class attribute, simple identity
+return, `bytes([...])` / `bytearray(...)`, keyword encoding/errors, and a function parameter
+called with such a constant; BMP text (through U+FFFF) and invalid UTF-8 still match CPython.
+Bytes whose content is only known at run time (stdin/file/unknown value) keep the open 16-bit
+limitation already recorded at `C?-job-rbrbrbrbmemsafe2-10261346-6`.
+
+Added `AIL_CURRENT/test_ail_pre267.py` (2 tests, both builds) and registered it in
+`ail_check.MODULES`.  Probes in `/tmp/probes`: `p267_decode.py` (direct non-BMP),
+`p267_decode_const.py`, `p267_decode_container.py`, `p267_decode_arg.py`,
+`p267_decode_attr.py`, `p267_decode_attr2.py`, `p267_decode_str.py`, `p267_decode_dyn.py`,
+`p267_decode_alias.py` and `p267_decode_bounds_nonbmp.py` are refused by name on the general
+path; `p267_decode_bmp.py`, `p267_decode_invalid.py`, `p267_decode_bounds_bmp.py`,
+`p267_decode_encoding_bmp.py`, and the three mutated bytearray/list/dict probes
+(`p267_mutate_bytearray.py`, `p267_mutate_list.py`, `p267_mutate_dict.py`) match CPython on both
+builds.
+## 2026-10-26 -- constant index through an out-of-int64 intermediate (job-pre269-10262136)
+
+`del a[2**63 * 0]` and `del a[(1 << 63) >> 62]` were refused by the front-end with
+`int64 index out of range: 9223372036854775808` although CPython deletes an element: the
+intermediate `2**63` leaves int64, but the exact final index is 0 or 2.  `_check_index_expression`
+now retries a bounded-fold overflow by folding the whole index with the shared `_const_fold_int`
+budget (2**20 bits, the same budget as the other constant checks) and accepts an exact final value
+inside int64; only a final value outside int64 keeps the named refusal (now naming that exact
+value).  This root-cause fix also accepts `(10 ** 20) // (10 ** 19)` (final 10) and
+`((1 << 64) - 1) >> 1` (INT64_MAX), so the stale intermediate case is removed from
+`test_ail_pre177`'s refusal table and its docstring is updated.  A genuinely wider intermediate,
+a literal, and a final value outside int64 keep their existing refusals.
+
+Probes in `/tmp/probes` on both builds: `del_bound`, `index_exact`, `index_routes` and
+`index_boundary` match CPython; `index_refuse1`-`index_refuse5` are refused by name.  Tests on
+the final tree: pre269, pre177, pre246, pre201, pre204, pre238, pre121, safetynet, files and
+corpus_findings3 (48 tests, 596 s, 0 failed, 1 skipped).
+## 2026-10-26 -- pre-270: relative import below the top level is refused by name (job-pre270-10262216)
+
+The reviewer of job rbpre52 left two pre-existing items: the relative/local import refusal and a
+user class shadowing `ImportError`.  Both are named compile-time refusals on this tree.  The first
+still reproduced with the wrong message: `try: from . import thing except ImportError` hit
+`lift_lazy`'s generic "import of a local module or package below the top level (inside a condition
+or loop at module level)" instead of the entry-file relative-import refusal, which names
+`from . import ...` and points at the import.  `lift_lazy` now runs the entry-file relative-import
+check first and describes a local import in a module-level `try` as "inside a try block"; a user
+class named `ImportError` keeps its existing named refusal.  Added `AIL_CURRENT/test_ail_pre270.py`
+(three cases, both builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.
+
+Probes `/tmp/probes/pre270_*` (relative import in `try`, `if`, class body and function, `from
+.thing`, `from ..`, an alias, `ImportError`/`ModuleNotFoundError` shadowing, and a non-feature
+control) match CPython or are refused by name on both builds.  The required modules are run on the
+final commit.
+## 2026-10-26 - re-apply pre255: class constant routes through a list item, attribute or dict value (job-rbpre255-10261620)
+
+Re-applied the accepted pre255 change on this tree, keeping the current tree's exact class-level
+folding from pre227/pre246.  A class constant built through a list item, attribute or dict value
+(`N = 2**62; xs = [N]; class C: X = xs[0] * 4`) still kept checked int64 arithmetic and stopped
+with `integer overflow` where CPython prints the bignum.  `fold_constants` now refuses the route
+by name at compile time on both builds (`class-level constant built through a list item, attribute
+or dict value`); the scan walks each class body but prunes methods, nested classes and deferred
+lambda bodies, and treats a call's `Attribute` callee (including its receiver) as the callee while
+still scanning the call's arguments.  In-range routes and empty containers are refused too;
+arithmetic outside a class body, a method body and class-level arithmetic without such a route
+are unchanged.  Added `AIL_CURRENT/test_ail_pre255.py` and registered it in `ail_check.MODULES`.
+
+Probes in `/tmp/probes`: `pre255_list_out`, `pre255_dict_out`, `pre255_attr_out`,
+`pre255_list_in`, `pre255_neg_out`, `pre255_empty`, `pre255_nested_arg`, `pre255_call_arg`,
+`pre255_unary`, `pre255_tuple_route` and `pre255_nested_class` are refused by name on both
+builds; `pre255_outside`, `pre255_method`, `pre255_lambda_list`, `pre255_lambda_dict`,
+`pre255_str_method`, `pre255_list_receiver_method` and `pre255_plain` match CPython on both
+builds.  `tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run
+and `--check` passes.
+## 2026-10-26 -- re-apply pre36: fold constant chr() arguments before the non-BMP refusal (job-rbpre36-10261703)
+
+Re-applied the accepted pre36 change on this integration tree.  The current general emitter already
+refused a literal non-BMP `chr()` argument by name (pre90, with the 16-bit v2 runtime gate and a
+separate surrogate literal check), so the conflict resolution keeps those refusals and adds pre36's
+integer constant-expression folder (`_const_int`) ahead of them: `chr(+0x1F600)`, `chr(0xFFFF + 1)`,
+`chr(0x8000 * 2)` and the shift/floor-div/mod/bitwise spellings fold to their value, and a non-BMP
+result in U+10000..U+10FFFF is refused by name on the 16-bit general path instead of reaching
+`ail_bi_chr`'s runtime fatal.  BMP results (including 0xFFFF), negative/out-of-range arguments,
+bool/type errors, non-constant values and the typed/default build keep their behaviour; a non-BMP
+value that is not a compile-time constant still reaches the old runtime fatal (pre-existing,
+recorded in DIFFERENCES).  Added `AIL_CURRENT/test_ail_pre36.py`, registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.  Probes in `/tmp/probes` (`pre36_literal`,
+`pre36_expr_nonbmp`, `pre36_expr_bmp`, `pre36_routes`, `pre36_alias_bmp`) show the general path
+refusing the non-BMP constants by name and both builds matching CPython for the BMP, boundary,
+route, bool and error cases.
+## 2026-10-26 -- re-apply pre41: nested generator expression as an any()/all() iterable (job-rbpre41-10261713)
+
+Re-applied the accepted pre41 change on this tree. The current fused `any()`/`all()` path
+short-circuits the outer generator, but an inner `GeneratorExp` used as that generator's
+iterable still goes through `_open_iter_loop` -> `expr_GeneratorExp`, which materialises it as
+an eager list. So `any(x for x in (mark(i) for i in [0, 1, 2]))` still ran the side effects
+after the deciding element (`inner 0`, `inner 1`, `inner 2` where CPython stops after
+`inner 1`). The named refusal is therefore kept, placed just before the fused path, and covers
+the iterable reached directly, through an argument, a list item, an attribute, a dict value and
+a second `for` clause on both builds. Eager iterables (list, tuple, str, dict, set, range, an
+argument, a list comprehension) still build unchanged. Added the accepted
+`AIL_CURRENT/test_ail_pre41.py` (8 refused shapes, one CPython-compared eager program) and
+registered it in `ail_check.MODULES`. Probes `/tmp/probes/pre41_nested.py`,
+`pre41_routes.py` and `pre41_eager.py`: the first two are refused by name on both builds; the
+last matches CPython on both.
+
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is
@@ -1225,6 +1635,17 @@ refused by name. `p4` also matches CPython on the typed path (`AIL_NO_GENERAL=1`
 
 # DEVLOG
 
+## 2026-10-26 - pre27: an optional import is refused by name at its own line
+
+Re-applied the accepted pre27 change on the current integration tree. `try: import html ...
+except ImportError:` reached the general emitter's try check, which refused `ImportError` as an
+unsupported caught exception type without a position. The check now names the guarded import
+(`import of 'html' guarded by except ImportError`), points at the import line and column, and says
+to move it to the top of the file; `ModuleNotFoundError` gets the same message. Other unsupported
+caught types are located at their `try` instead of printing no location. `except Exception` is
+unchanged. Added `AIL_CURRENT/test_ail_pre27.py` (nine refusals, both builds, plus the accepted
+`except Exception` program).
+
 ## 2026-10-24 - round() negative ndigits boundary (job-pre160-10250349)
 
 Review follow-up. The new `__index__` route made `round(float, ndigits)` reachable with any int64,
@@ -1806,6 +2227,154 @@ general and default builds.
   `False` and `abs(True)` printed `True` where CPython prints `0` and `1`. The plain call and the
   builtin-as-`key=`/`map()` wrapper now use `ail_bi_abs`, which boxes an intlike argument as an
   int. Added `test_ail_fuzz42.py` and registered it in `ail_check.MODULES`.
+## 2026-10-26 - suite fix: refresh C pins for noreturn traps (job-perf3-10270015)
+
+The accepted perf3 change adds two `__attribute__((noreturn))` forward declarations to the
+emitted runtime, so the full generated C for every program now differs from the old baseline.
+`test_ail_numeric_bindings` and `test_ail_record_initializers` pinned the pre-change bytes and
+failed even though the programs' behaviour is unchanged. Refreshed their five scalar hashes; the
+only C difference from the old pins is the two intended declarations. Also carried the upstream
+`bench/compare.py` `fmt` fix (already on integration, this branch predated it) so
+`test_ail_pre110` passes. Probes `/tmp/probes/p_*.py` (no trap, sources, nested, return, uncaught)
+match CPython in both builds.
+
+## 2026-10-23 - binary_cursor_records: runtime traps are noreturn (job-perf3-10240012)
+
+`BinaryCursor__remaining` checks `0 <= position <= len(data)` and then calls `ail_raise_named`, but the
+runtime declared that trap as an ordinary `void` function. GCC therefore had to keep the fall-through
+path alive and could not use the test to prove the subtraction cannot overflow, so `ck_sub` stayed in
+the accessor. `ail_exception_uncaught` has the same property (it ends in `_Exit(1)`), so both now have
+an explicit `__attribute__((noreturn))` declaration in `cruntime.py`. No app source changed.
+
+Profiling: rdtsc instrumentation of the generated C (40M records, 496 MiB) put the per-record loop at
+709,541,927 of 1,193,992,702 cycles (59.5% of the function). The accessor checks are inside that loop;
+hand-edited generated C put the `ck_sub` in `remaining()` alone at ~8% overall and all unchecked reads
+at ~16%, so the 9.1% below is in line with that ceiling.
+
+`python3 bench/compare.py --app binary_cursor_records`:
+
+| | AIL/C | AIL new/base/C/Rust ms | RSS MiB new/base/C/Rust | binary KiB new/base/C/Rust |
+| --- | ---: | ---: | ---: | ---: |
+| before | 5.091 [5.041, 5.253] | 50.8/50.8/10.0/9.6 | 1.7/1.7/2.5/2.7 | 39/39/15/1912 |
+| after | 4.630 [4.607, 4.674] | 46.0/51.0/9.9/9.6 | 1.7/1.7/2.5/2.7 | 35/39/15/1912 |
+
+Ratio improved 9.1%; `compare.py` checked every timed run byte-for-byte against its Python oracle.
+Tests: `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`,
+`test_ail_exception_values_core`, `test_ail_exception_values_app`, `test_ail_excfix`,
+`test_c_api_bridge`, `test_ail_parallel_for`, `test_ail_short_style_traps` all pass. Probes
+`/tmp/probes/perf3_*.py` match CPython on both the general and default builds.
+## 2026-10-26 - utf8_stream: refresh the standard source API pins (job-perf4-10270016)
+
+The UTF-8 tail-check change added `_utf8_tail_complete` to `utf8_stream.ail`, but
+`STANDARD_SOURCE_API.json` still pinned the old bytes (`e1625b22...`), so `export_sdk`
+refused every SDK export with `stale or missing standard API dependency`. This broke the
+SDK, grid-return and environment tests (and cascaded into the other modules listed by the
+integrator). The catalog's module row and `dependency_pins` entry now carry the actual
+SHA-256 (`24bc7059...`); the declared API is unchanged. No compiler or runtime behaviour
+changed. The perf4 UTF-8 and loop-inlining changes stay as they were.
+
+Tests on the final commit: the ten modules named in the task that exist here (minus the
+later `test_ail_pre110`, which is not in this branch) plus `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass. On a current `origin/integ`
+worktree with the two perf4 code changes applied, all ten named modules, including
+`test_ail_pre110`, pass (10/10, 231 s).
+
+## 2026-10-23 - csv_table: inline small leaf loops (job-perf4-10240813)
+
+`field += ch` was already in place and its slow path is about 1% of calls, so this job took
+the next cost. Profiling a 132 MB three-million-row input (`gprof -pg`) put
+`csv_table_group_scan` at 79% and `parse_int64_decimal` at 2.15% flat. Flat cost understates
+it: replacing the parse with a constant saved 7.3% of wall time, while asking gcc to inline
+that same nine-statement leaf loop saved 20% (1.24 s -> 0.99 s, user 1.08 s -> 0.84 s). The
+extra is the call boundary in the row loop, not the digit loop. The feed/chunk copy was a
+larger upper bound (14.5% if the chunk buffer is reused unsafely) but safe per-chunk ownership
+saved only 1.6%, so it was rejected.
+
+The compiler now asks for `always_inline` on a function whose body is one `for` loop, no
+other loop/try/with/yield, no call to another function or class constructor, a scalar numeric
+return, at most 12 statements and 180 AST nodes; recursion, entry points and the existing
+straight-line rule are unchanged. In `csv_table` this fires on `parse_int64_decimal` and
+`parse_int64_decimal_bytes` only. String/list/object returns are excluded: inlining
+`json_quote` as well measured 1.42 s, slower than 1.25 s.
+
+`python3 bench/compare.py --app csv_table`, before -> after:
+
+| ms ail/base/c/rust | ail/base | ail/c | ail/rust |
+| --- | --- | --- | --- |
+| 14.5/14.5/6.1/6.9 | 0.995 [0.992,1.016] tie | 2.390 [2.341,2.456] slower | 2.093 [2.053,2.252] slower |
+| 12.1/14.6/6.1/6.9 | 0.841 [0.814,0.852] faster | 1.979 [1.972,2.031] slower | 1.770 [1.717,1.800] slower |
+
+RSS 5.5/5.5/3.3/3.8 -> 5.5/5.5/3.3/3.6 MiB, binary 107/107/20/1928 -> 111/107/20/1928 KiB,
+build disk 400/400/44/1952 -> 412/400/44/1952 KiB. The app's boundary controls and Python
+oracle still pass byte-for-byte.
+
+Tests: `test_ail_integer_codec test_csv_group_scan test_ail_csv_rewrite_stream
+test_ail_csv_writer test_ail_utf8_stream_fuzz test_csv_column_stats_stream` (24 tests) and
+`test_ail_safetynet test_ail_files test_ail_corpus_findings3` (25 tests, 1 skipped) pass.
+Probes `/tmp/probes/loop_inline.py` and `/tmp/probes/loop_inline_objects.py`
+(`bash ~/tools/cmp.sh`) cover negative/empty/invalid parse paths, early return, break/continue,
+loops reached through arguments, list items and dict values, and string/list/dict mutations;
+both builds match CPython stdout on every case.
+
+## 2026-10-23 - csv_table: one UTF-8 scan per chunk (job-perf4-10240013)
+
+`field += ch` was already in place. The generated code calls `ail_str_cat`, whose first
+cases return the existing value or a view when the operands are adjacent, and whose
+remaining case appends into the newest arena block with amortized growth
+(`AIL_SARENA_TOPS`). The slow path is about 1% of calls; forcing the builder-local path
+(`ail_bl_append`, which copies `key = field` per row) measured 3.29 s against 2.48 s on a
+263 MB file, so it was rejected.
+
+Profiling the rest (`gprof -O3 -pg`, same file) put `_utf8_complete_length` at 11.2% and
+`ail__utf8_validate` at 9.1%: `utf8_decode_feed` scanned `combined` to find the last
+character boundary and then `decode("utf-8")` scanned it again to validate. A chunk only
+ends mid-character at a chunk boundary, so `_utf8_tail_complete` now checks the final byte
+(and at most three continuation bytes) and sends the whole buffer straight to decode. The
+full `_utf8_complete_length` scan still runs for the rare split chunk, so the pending bytes,
+the feed on which an error is reported, and the decoded text are unchanged. Amdahl bound
+about 11%; measured 7.0% on the app (AIL/base 0.930).
+
+`python3 bench/compare.py --app csv_table`, before -> after:
+
+| ms ail/base/c/rust | ail/base | ail/c | ail/rust |
+| --- | --- | --- | --- |
+| 16.5/16.5/6.9/7.8 | 1.006 tie | 2.387 slower | 2.126 slower |
+| 15.5/16.7/7.0/8.0 | 0.930 faster | 2.200 slower | 1.933 slower |
+
+RSS 5.5/5.5/3.2/3.8 -> 5.5/5.5/3.2/3.6 MiB, binary 107/107/20/1928 KiB unchanged, build
+disk 400/400/44/1952 KiB unchanged. The app's boundary controls and the Python oracle still
+pass byte-for-byte.
+
+Tests: `test_ail_utf8_stream_fuzz test_csv_group_scan test_ail_csv_rewrite_stream
+test_ail_splitlines_utf8 test_csv_column_stats_stream` (18 tests) and `test_ail_safetynet
+test_ail_files test_ail_corpus_findings3` (25 tests, 1 skipped) pass. Probe
+`/tmp/probes/utf8_tail.py` (`bash ~/tools/cmp.sh`) compares the old and new boundary logic
+on 5,232 curated and random byte strings: same stdout, 0 mismatches, in both builds.
+## 2026-10-24 - pre126: itertools `r` validation (job-pre126-10242351)
+
+The first still-differing item in the job-pre101 review was the general path's negative
+`r`: `permutations`, `combinations` and `combinations_with_replacement` returned `[]`
+instead of raising `ValueError: r must be non-negative`; the same code read `r` as a raw
+int64 field, so a float, str, None, list, tuple or bytes was also accepted.  Both general
+emitters now pass the `r` object to one runtime converter (`ail_it_r_index`), which checks
+the type and sign; `permutations` keeps treating a None `r` as "not given".  Added
+`AIL_CURRENT/test_ail_pre126.py`; probes in `/tmp/probes/pre126_r_bounds.py`,
+`pre126_r_types.py` and `pre126_r_sources.py` match CPython on both builds.
+
+## 2026-10-24 - cov7: the census's internal-crash refusals now build
+
+The gdev census (510 programs, `AIL_NO_CACHE=1`) refused 53 before this job.  Grouped by the
+first line of the build output, the most common group was the 3 internal tracebacks (not
+deliberate refusals): two programs using `functools.partial` crashed in
+`pyboxed2._refuse_lambda_forward_defaults` because the general path's partial rewrite made
+`Lambda` nodes without a line number, and one visitor program crashed in
+`pyfunc._dispatcher` with `KeyError: 'Visitor__visit_directory'` because an abstract base method
+(removed as a stub) was chosen as the dispatcher's representative.  The partial rewrite now
+copies locations onto both lambdas, and the dispatcher falls back to the first concrete
+implementation when the base has no body.  `g17_004`, `g17_024` and `g13_036` now compile and
+print what CPython prints on both builds; the census refused 50 afterwards.  Added the positional
+partial program to `test_ail_silent6.py` and an abstract-visitor hierarchy to
+`test_ail_typed_inherit.py`.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 

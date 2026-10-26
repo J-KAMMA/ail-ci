@@ -4,11 +4,12 @@ CPython's ints are unbounded: `xs[10**20]` reaches the list and raises
 `IndexError: cannot fit 'int' into an index-sized integer`.  AIL computes
 `10**20` in int64 and used to stop with `integer overflow` (exit 1) before the
 subscript, a pre-existing difference.  The compiler now refuses a constant
-subscript index whose value (or an intermediate step) leaves int64, and a
-constant `**` outside int64 wherever it appears (an argument, a list item, an
-attribute and a dict value), with `int64 index out of range` /
-`int64 constant out of range` and exit 2.  In-range constant index expressions
-still match CPython on both builds.
+subscript index whose exact value leaves int64, and a constant `**` outside
+int64 wherever it appears (an argument, a list item, an attribute and a dict
+value), with `int64 index out of range` / `int64 constant out of range` and
+exit 2.  An intermediate step may leave int64 when the final index fits
+(pre269), and in-range constant index expressions match CPython on both
+builds.
 """
 import os
 import subprocess
@@ -73,7 +74,6 @@ HUGE_INDEXES = {
     'negative_pow': ('xs[-(10 ** 20)]', '100000000000000000000'),
     'pow_63': ('xs[2 ** 63]', '9223372036854775808'),
     'shift_63': ('xs[1 << 63]', '9223372036854775808'),
-    'intermediate': ('xs[(10 ** 20) // (10 ** 19)]', '100000000000000000000'),
     'str': ('"abc"[10 ** 20]', '100000000000000000000'),
     'bytes': ('b"abc"[10 ** 20]', '100000000000000000000'),
     'tuple': ('(1, 2, 3)[10 ** 20]', '100000000000000000000'),

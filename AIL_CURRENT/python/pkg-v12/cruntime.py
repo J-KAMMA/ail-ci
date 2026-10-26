@@ -616,6 +616,7 @@ static const char *ail_exception_name(int code) {
          "RuntimeError", "UnicodeDecodeError"};
     return code >= 1 && code <= 8 ? names[code] : "RuntimeError";
 }
+static void ail_exception_uncaught(ail_exception *value) __attribute__((noreturn));
 static void ail_exception_uncaught(ail_exception *value) {
     fflush(stdout);
     fputs(ail_exception_name(value->code), stderr);
@@ -643,6 +644,7 @@ __attribute__((unused)) static void ail_raise_value_adopt(ail_exception *value) 
     if (ail_exc_top >= 0) { ail_exc_unwind(); ail_exc_throw(); }
     ail_exception_uncaught(value);
 }
+static void ail_raise_named(int code) __attribute__((noreturn));
 static void ail_raise_named(int code) {
     if (code < 1 || code > 8) code = AIL_EXC_RUNTIME;
     ail_exception_store(&ail_exc_value, ail_exception_new(code, NULL, 0, 1), 1);
@@ -10872,6 +10874,15 @@ static inline void ail_die(const char *w) {
     fputc('\n', stderr);
     _Exit(1);
 }
+static inline void ail_die_bare(const char *w) {
+    if (ail_die_out_buf && *ail_die_out_buf && ail_die_out_len && *ail_die_out_len) {
+        fwrite(*ail_die_out_buf, 1, *ail_die_out_len, stdout); *ail_die_out_len = 0;
+    }
+    fflush(stdout);
+    fputs(w, stderr);
+    fputc('\n', stderr);
+    _Exit(1);
+}
 static inline void *ail_xmalloc(size_t n) {
     void *p = malloc(n ? n : 1);
     if (!p) ail_die("out of memory");
@@ -16729,6 +16740,17 @@ static __attribute__((noinline, cold)) ail_st ail_attr_not_inst(ail_ctx *cx, ail
     return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, buf);
 }
 static inline ail_st ail_inst_setattr_chk(ail_ctx *cx, ail_obj inst, int64_t name_id, ail_obj val) {
+    if (__builtin_expect(inst.tag == AIL_T_CLASS, 0)) {
+        /* A store through a class value reaches here only when the base could not be proven to be
+           an instance at compile time (a parameter, an attribute, a container item, ...).  The
+           general path keeps class attributes in slots it only reads, so name the construct
+           instead of the misleading AttributeError this used to raise. */
+        char cbuf[240];
+        snprintf(cbuf, sizeof cbuf, "assigning the class attribute '%s' through a class value is "
+                 "not in the subset (the general path cannot update a class attribute)",
+                 cx->intern_tab[name_id]);
+        return ail_raise_c(cx, AIL_B_NOTIMPLEMENTEDERROR, cbuf);
+    }
     if (__builtin_expect((unsigned)(inst.tag - AIL_T_INST) > 1u, 0)) return ail_attr_not_inst(cx, inst, cx->intern_tab[name_id]);   /* INST, EXC are adjacent */
     ail_inst_setattr(cx, inst, name_id, val);
     return AIL_OK;
@@ -19255,8 +19277,8 @@ static inline ail_st ail_op_imul(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b
     if (a.tag == AIL_T_LIST && ail__is_intlike(b.tag)) {
         ail_vecobj *v = (ail_vecobj *)a.o; int64_t k = b.i, n = v->n;
         if (k <= 0) { v->n = 0; }
-        else if (k > 1) {
-            if (n > 0 && k > (INT64_MAX / 16) / n) return ail_hit_limit(cx, "int_overflow", "list repeat too large");
+        else if (k > 1 && n > 0) {
+            if (k > (INT64_MAX / (int64_t)sizeof(ail_obj)) / n) ail_die_bare("MemoryError");
             ail_vec_reserve(cx, v, n * k);
             for (int64_t r = 1; r < k; r++) for (int64_t j = 0; j < n; j++) v->p[v->n++] = v->p[j];
         }
@@ -27708,7 +27730,12 @@ static double ail__fpow_slow(double iv, double iw, double r) {
         ail_die("a negative number raised to a fractional power is a complex number in Python; AIL has no complex type");
     }
     if (isinf(iv) || isinf(iw)) return r;
-    if (iv == 0.0) ail_die("division by zero");
+    if (iv == 0.0) {
+        static const char zero_negative[] = "0.0 cannot be raised to a negative power";
+        ail_raise_value_adopt(ail_exception_new(AIL_EXC_ZERODIV,
+            (const uint8_t *)zero_negative,
+            (int64_t)(sizeof zero_negative - 1), 1));
+    }
     ail_die("(34, 'Numerical result out of range')");
     return r;
 }

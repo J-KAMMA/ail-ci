@@ -603,15 +603,23 @@ Two more findings from the same audit were recorded here and have since been fix
   constant-exponent case, `ail_ipow`, whenever both operands are integers.** It used to route
   unconditionally through `pow()` and lose exactness above 2^53, because a variable exponent's sign
   cannot be checked at compile time the way a constant's can. `pow()` is still exactly right, and
-  unchanged, when either operand is a float. Two exactness boundaries follow directly from routing
-  through `ail_ipow`, and both are traps rather than silent wrong answers, matching how this
-  document already treats every other integer edge:
-  - an exact integer power that overflows int64 traps, exactly as the constant-exponent case
-    already did (`2 ** 63` and `x ** n` with `n` a variable both stop the program the same way);
-  - a variable exponent that turns out negative at runtime also traps, where Python would return a
-    float (`2 ** -1` is `0.5`). A *constant* negative exponent still takes the `pow()` path and
-    still answers correctly -- only a variable one, whose sign cannot be settled in advance, is
-    committed to the integer reading and enforces it.
+  unchanged, when the base is a float or the exponent is a float constant. Two exactness boundaries
+  follow directly from routing through `ail_ipow`, and both are traps rather than silent wrong
+  answers, matching how this document already treats every other integer edge:
+  - a constant integer base raised to a computed exponent (`2 ** n`, `(-2) ** n`, `10 ** n`) is
+    refused by name at compile time: the exponent is unknown then, and an int64 answer may not
+    exist, so the construct is outside the subset instead of stopping mid-run (this includes an
+    exponent whose run-time value turns out to be a float). A constant exponent is still folded,
+    and refused by name only when its exact result leaves int64;
+  - a variable base with a computed exponent still uses `ail_ipow`: an exact integer power that
+    overflows int64 traps, and a variable exponent that turns out negative also traps, where
+    Python would return a float (`2 ** -1` is `0.5`). A *constant* negative exponent still takes
+    the `pow()` path and still answers correctly -- only a variable one, whose sign cannot be
+    settled in advance, is committed to the integer reading and enforces it.
+
+  The compiler-injected library preludes stay inside this subset too: `prelude_fraction.py`
+  scales with a multiplication loop and `prelude_random.py` reuses its computed `p`, so importing
+  `fractions` or `random` never meets the refusal above.
 
 They are written down here, with what was found and what changed, so that the next person can see
 the reasoning rather than rediscover the bug.

@@ -1,8 +1,10 @@
 """Portable entry for the AIL source snapshot; no implicit model calls."""
 import ast
 import argparse
+import copy
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import platform
@@ -335,7 +337,9 @@ def _check_constant_power(node, parents, maxsplit):
 def _check_index_expression(slice_node):
     """Refuse a constant subscript index that int64 cannot hold. A literal or signed literal is
     already refused by _check_int64_literals with its own message, so only compound arithmetic is
-    read here."""
+    read here. A step may leave int64 while the exact final index fits (`2**63 * 0`,
+    `(1 << 63) >> 62`); the whole expression is folded with the same size budget as the other
+    constant checks before the result is refused."""
     literal = (isinstance(slice_node, ast.Constant)
                or isinstance(slice_node, ast.UnaryOp) and isinstance(slice_node.op, (ast.UAdd, ast.USub))
                and isinstance(slice_node.operand, ast.Constant))
@@ -343,14 +347,405 @@ def _check_index_expression(slice_node):
         return
     try:
         _const_expr_int(slice_node)
+        return
     except _Int64ConstantOverflow as overflow:
-        error = ValueError(f'int64 index out of range: {_constant_diagnostic(overflow.args[0])}')
-        error.source_line = slice_node.lineno
-        error.source_column = slice_node.col_offset
+        value = _const_fold_int(slice_node)
+        if value is not None and _INT64_MIN <= value <= _INT64_MAX:
+            return
+        if value is None:
+            value = overflow.args[0]
+    error = ValueError(f'int64 index out of range: {_constant_diagnostic(value)}')
+    error.source_line = slice_node.lineno
+    error.source_column = slice_node.col_offset
+    raise error
+
+
+_UNKNOWN = object()
+
+
+def _shallow_walk(nodes):
+    stack = list(nodes)
+    while stack:
+        node = stack.pop()
+        yield node
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        stack.extend(ast.iter_child_nodes(node))
+
+
+def _binding_counts(nodes):
+    counts = {}
+
+    def add(name):
+        counts[name] = counts.get(name, 0) + 1
+
+    for node in _shallow_walk(nodes):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            add(node.name)
+        elif isinstance(node, ast.arg):
+            add(node.arg)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            add(node.id)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                add((alias.asname or alias.name).split('.')[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            for name in node.names:
+                add(name)
+    return counts
+
+
+def _function_bindings(fn):
+    args = fn.args
+    names = [arg.arg for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs)]
+    if args.vararg is not None:
+        names.append(args.vararg.arg)
+    if args.kwarg is not None:
+        names.append(args.kwarg.arg)
+    return set(names) | set(_binding_counts(fn.body))
+
+
+def _constant_value(node, lookup, global_name, passthrough):
+    if isinstance(node, ast.Constant):
+        if type(node.value) in (bool, int, float, str, bytes, type(None)):
+            return node.value
+        return _UNKNOWN
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        value = _constant_value(node.operand, lookup, global_name, passthrough)
+        if type(value) in (int, float):
+            return -value if isinstance(node.op, ast.USub) else value
+        return _UNKNOWN
+    if (isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div))):
+        left = _constant_value(node.left, lookup, global_name, passthrough)
+        right = _constant_value(node.right, lookup, global_name, passthrough)
+        if (type(left) in (int, float) and type(right) in (int, float)
+                and (type(left) is float or type(right) is float)):
+            try:
+                if isinstance(node.op, ast.Add):
+                    return left + right
+                if isinstance(node.op, ast.Sub):
+                    return left - right
+                if isinstance(node.op, ast.Mult):
+                    return left * right
+                return left / right
+            except (ArithmeticError, ValueError):
+                return _UNKNOWN
+        return _UNKNOWN
+    if isinstance(node, ast.IfExp):
+        test = _constant_value(node.test, lookup, global_name, passthrough)
+        if type(test) is bool:
+            branch = node.body if test else node.orelse
+            return _constant_value(branch, lookup, global_name, passthrough)
+        return _UNKNOWN
+    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+        return lookup(node.id)
+    if isinstance(node, ast.List):
+        values = []
+        for element in node.elts:
+            value = _constant_value(element, lookup, global_name, passthrough)
+            if value is _UNKNOWN:
+                return _UNKNOWN
+            values.append(value)
+        return values
+    if isinstance(node, ast.Tuple):
+        values = []
+        for element in node.elts:
+            value = _constant_value(element, lookup, global_name, passthrough)
+            if value is _UNKNOWN:
+                return _UNKNOWN
+            values.append(value)
+        return tuple(values)
+    if isinstance(node, ast.Dict):
+        values = {}
+        for key_node, value_node in zip(node.keys, node.values):
+            if key_node is None:
+                return _UNKNOWN
+            key = _constant_value(key_node, lookup, global_name, passthrough)
+            value = _constant_value(value_node, lookup, global_name, passthrough)
+            if key is _UNKNOWN or value is _UNKNOWN:
+                return _UNKNOWN
+            try:
+                values[key] = value
+            except TypeError:
+                return _UNKNOWN
+        return values
+    if (isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load)
+            and node.attr.startswith('f') and node.attr[1:].isdigit()):
+        base = _constant_value(node.value, lookup, global_name, passthrough)
+        if isinstance(base, tuple):
+            index = int(node.attr[1:])
+            if index < len(base):
+                return base[index]
+        return _UNKNOWN
+    if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load):
+        base = _constant_value(node.value, lookup, global_name, passthrough)
+        if base is _UNKNOWN:
+            return _UNKNOWN
+        key = _constant_value(node.slice, lookup, global_name, passthrough)
+        if key is _UNKNOWN:
+            return _UNKNOWN
+        try:
+            if isinstance(base, (list, tuple, dict, str, bytes)):
+                return base[key]
+        except (IndexError, KeyError, TypeError):
+            return _UNKNOWN
+        return _UNKNOWN
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and isinstance(node.func.ctx, ast.Load) and not node.keywords
+            and node.func.id.startswith('_AilT_')):
+        values = []
+        for argument in node.args:
+            value = _constant_value(argument, lookup, global_name, passthrough)
+            if value is _UNKNOWN:
+                return _UNKNOWN
+            values.append(value)
+        return tuple(values)
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and isinstance(node.func.ctx, ast.Load) and global_name(node.func.id)
+            and node.func.id in passthrough):
+        name, index = passthrough[node.func.id]
+        argument = _bound_argument(node, name, index)
+        if argument is not None:
+            return _constant_value(argument, lookup, global_name, passthrough)
+        return _UNKNOWN
+    return _UNKNOWN
+
+
+def _outside_int64_float(value):
+    return (type(value) is float and math.isfinite(value)
+            and not -(1 << 63) <= int(value) < 1 << 63)
+
+
+def _bound_argument(node, name, index):
+    if index is not None and index < len(node.args):
+        return node.args[index]
+    for keyword in node.keywords:
+        if keyword.arg == name:
+            return keyword.value
+    return None
+
+
+def _passthrough_functions(tree, module_counts):
+    functions = {}
+    for fn in tree.body:
+        if (not isinstance(fn, ast.FunctionDef) or fn.decorator_list
+                or module_counts.get(fn.name) != 1
+                or len(fn.body) != 1 or not isinstance(fn.body[0], ast.Return)
+                or fn.body[0].value is None):
+            continue
+        value = fn.body[0].value
+        if not isinstance(value, ast.Name) or not isinstance(value.ctx, ast.Load):
+            continue
+        positional = [arg.arg for arg in (*fn.args.posonlyargs, *fn.args.args)]
+        keyword_only = [arg.arg for arg in fn.args.kwonlyargs]
+        if value.id in positional:
+            functions[fn.name] = (value.id, positional.index(value.id))
+        elif value.id in keyword_only:
+            functions[fn.name] = (value.id, None)
+    return functions
+
+
+def _parameter_source(node, mapped, passthrough, local):
+    if isinstance(node, ast.Name) and node.id in mapped:
+        return node.id
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and isinstance(node.func.ctx, ast.Load) and node.func.id in passthrough
+            and node.func.id not in local):
+        name, index = passthrough[node.func.id]
+        argument = _bound_argument(node, name, index)
+        if argument is not None:
+            return _parameter_source(argument, mapped, passthrough, local)
+    return None
+
+
+def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough):
+    candidates = {}
+    for fn in tree.body:
+        if (not isinstance(fn, ast.FunctionDef) or fn.decorator_list
+                or module_counts.get(fn.name) != 1):
+            continue
+        positional = [arg.arg for arg in (*fn.args.posonlyargs, *fn.args.args)]
+        keyword_only = [arg.arg for arg in fn.args.kwonlyargs]
+        mapped = {name: index for index, name in enumerate(positional)}
+        mapped.update((name, None) for name in keyword_only)
+        if not mapped:
+            continue
+        rebound = {name for name in mapped if _binding_counts(fn.body).get(name, 0)}
+        candidates[fn.name] = (fn, mapped, rebound)
+
+    functions = {}
+    for name, (fn, mapped, rebound) in candidates.items():
+        used = {}
+        local = _binding_counts(fn.body)
+        for sub in _shallow_walk(fn.body):
+            if (not int_shadowed and isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name)
+                    and sub.func.id == 'int' and len(sub.args) == 1 and not sub.keywords):
+                source = _parameter_source(sub.args[0], mapped, passthrough, local)
+                if source is not None and source not in rebound:
+                    used[source] = mapped[source]
+        if used:
+            functions[name] = used
+
+    changed = True
+    while changed:
+        changed = False
+        for name, (fn, mapped, rebound) in candidates.items():
+            used = dict(functions.get(name, {}))
+            local = _binding_counts(fn.body)
+            for sub in _shallow_walk(fn.body):
+                if not isinstance(sub, ast.Call) or not isinstance(sub.func, ast.Name):
+                    continue
+                callee = sub.func.id
+                if callee in mapped or callee in local or callee not in functions:
+                    continue
+                for parameter, index in functions[callee].items():
+                    argument = _bound_argument(sub, parameter, index)
+                    if argument is None:
+                        continue
+                    source = _parameter_source(argument, mapped, passthrough, local)
+                    if source is not None and source not in rebound:
+                        used[source] = mapped[source]
+            if used != functions.get(name, {}):
+                functions[name] = used
+                changed = True
+    return functions
+
+
+class _Int64CallChecker(ast.NodeVisitor):
+    def __init__(self, known, passthrough, int_params, int_shadowed):
+        self.known = known
+        self.passthrough = passthrough
+        self.int_params = int_params
+        self.int_shadowed = int_shadowed
+        self.shadow = []
+
+    def _global_name(self, name):
+        return not any(name in scope for scope in self.shadow)
+
+    def _lookup(self, name):
+        if not self._global_name(name):
+            return _UNKNOWN
+        return self.known.get(name, _UNKNOWN)
+
+    def _value(self, node):
+        return _constant_value(node, self._lookup, self._global_name, self.passthrough)
+
+    def _refuse(self, node, value):
+        error = ValueError(f'int() of a float outside int64: {value!r} (CPython makes a big integer)')
+        error.source_line = node.lineno
+        error.source_column = node.col_offset
         raise error
+
+    def visit_Call(self, node):
+        if (not self.int_shadowed and isinstance(node.func, ast.Name) and node.func.id == 'int'
+                and self._global_name('int') and len(node.args) == 1 and not node.keywords):
+            value = self._value(node.args[0])
+            if _outside_int64_float(value):
+                self._refuse(node, value)
+        if (isinstance(node.func, ast.Name) and node.func.id in self.int_params
+                and self._global_name(node.func.id)):
+            for name, index in self.int_params[node.func.id].items():
+                argument = _bound_argument(node, name, index)
+                if argument is not None:
+                    value = self._value(argument)
+                    if _outside_int64_float(value):
+                        self._refuse(node, value)
+        self.generic_visit(node)
+
+    def _visit_outer_arguments(self, args):
+        for default in (*args.defaults, *[d for d in args.kw_defaults if d is not None]):
+            self.visit(default)
+        for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg):
+            if arg is not None and arg.annotation is not None:
+                self.visit(arg.annotation)
+
+    def _visit_function(self, node):
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        self._visit_outer_arguments(node.args)
+        if node.returns is not None:
+            self.visit(node.returns)
+        self.shadow.append(_function_bindings(node))
+        for statement in node.body:
+            self.visit(statement)
+        self.shadow.pop()
+
+    def visit_FunctionDef(self, node):
+        self._visit_function(node)
+
+    def visit_AsyncFunctionDef(self, node):
+        self._visit_function(node)
+
+    def visit_Lambda(self, node):
+        self._visit_outer_arguments(node.args)
+        names = [arg.arg for arg in (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs)]
+        if node.args.vararg is not None:
+            names.append(node.args.vararg.arg)
+        if node.args.kwarg is not None:
+            names.append(node.args.kwarg.arg)
+        self.shadow.append(set(names) | set(_binding_counts([node.body])))
+        self.visit(node.body)
+        self.shadow.pop()
+
+    def visit_ClassDef(self, node):
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        for base in node.bases:
+            self.visit(base)
+        for keyword in node.keywords:
+            self.visit(keyword)
+        self.shadow.append(set(_binding_counts(node.body)))
+        for statement in node.body:
+            self.visit(statement)
+        self.shadow.pop()
+
+    def _visit_comprehension(self, node):
+        names = set()
+        for generator in node.generators:
+            names |= set(_binding_counts([generator.target]))
+        self.shadow.append(names)
+        self.generic_visit(node)
+        self.shadow.pop()
+
+    def visit_ListComp(self, node):
+        self._visit_comprehension(node)
+
+    def visit_SetComp(self, node):
+        self._visit_comprehension(node)
+
+    def visit_GeneratorExp(self, node):
+        self._visit_comprehension(node)
+
+    def visit_DictComp(self, node):
+        self._visit_comprehension(node)
 
 
 def _check_int64_literals(tree):
+    global_names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            global_names.update(node.names)
+    module_counts = _binding_counts(tree.body)
+    known = {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)):
+            name = node.targets[0].id
+            if module_counts.get(name) != 1 or name in global_names:
+                continue
+            value = _constant_value(node.value, lambda name: known.get(name, _UNKNOWN),
+                                    lambda unused: True, {})
+            if type(value) in (int, float):
+                known[name] = value
+    int_shadowed = any((isinstance(node, ast.FunctionDef) and node.name == 'int')
+                       or (isinstance(node, ast.arg) and node.arg == 'int')
+                       or (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == 'int')
+                       for node in ast.walk(tree))
+    passthrough = _passthrough_functions(tree, module_counts)
+    int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough)
+    _Int64CallChecker(known, passthrough, int_params, int_shadowed).visit(tree)
     parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
     maxsplit = _maxsplit_constant_nodes(tree)
     nodes = [tree]
@@ -570,6 +965,203 @@ def _binds_name(tree, name):
     return False
 
 
+def _scope_nodes_with_parents(scope):
+    """Nodes of one scope (module, function, method) with their parent, stopping at nested
+    functions, classes and lambdas (a different scope)."""
+    stack = [(node, scope) for node in reversed(scope.body)]
+    while stack:
+        node, parent = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        yield node, parent
+        for child in reversed(list(ast.iter_child_nodes(node))):
+            stack.append((child, node))
+
+
+def _scope_parameters(function):
+    arguments = function.args
+    parameters = {argument.arg for argument in arguments.posonlyargs + arguments.args + arguments.kwonlyargs}
+    if arguments.vararg is not None:
+        parameters.add(arguments.vararg.arg)
+    if arguments.kwarg is not None:
+        parameters.add(arguments.kwarg.arg)
+    return parameters
+
+
+def _scope_declared(function):
+    declared = set()
+    for node in ast.walk(function):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            declared.update(node.names)
+    return declared
+
+
+def _scope_class_aliases(scope, classes, stores, parameters, declared):
+    """name -> class for a name this scope's own top-level statements bind once to a class name."""
+    aliases = {}
+    for statement in scope.body:
+        if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+            continue
+        target = statement.targets[0]
+        if not (isinstance(target, ast.Name) and isinstance(statement.value, ast.Name)):
+            continue
+        name, value = target.id, statement.value.id
+        if name in classes or name in parameters or name in declared or stores.get(name) != 1:
+            continue
+        if value in stores or value in parameters or value in declared:
+            continue
+        if value in classes:
+            aliases[name] = value
+    return aliases
+
+
+def _literal_container_classes(value, classes):
+    """The class name held at each position of a literal list/tuple or string-keyed dict."""
+    if isinstance(value, (ast.List, ast.Tuple)):
+        return [item.id if isinstance(item, ast.Name) and item.id in classes else None
+                for item in value.elts]
+    if isinstance(value, ast.Dict):
+        entries = {}
+        for key, item in zip(value.keys, value.values):
+            if (isinstance(key, ast.Constant) and isinstance(key.value, (str, int))
+                    and not isinstance(key.value, bool)
+                    and isinstance(item, ast.Name) and item.id in classes):
+                entries[key.value] = item.id
+        return entries
+    return None
+
+
+def _scope_class_containers(scope, nodes, classes, stores, parameters, declared):
+    """name -> literal class container, for a name bound once and only ever read by indexing (a
+    mutation through the name, a call that could mutate it, or another use stops the record)."""
+    containers = {}
+    assigned = {}
+    for statement in scope.body:
+        if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+            continue
+        target = statement.targets[0]
+        if not isinstance(target, ast.Name):
+            continue
+        entries = _literal_container_classes(statement.value, classes)
+        if not entries or target.id in parameters or target.id in declared or stores.get(target.id) != 1:
+            continue
+        assigned[target.id] = (target, entries)
+    for name, (target, entries) in assigned.items():
+        touched = False
+        for node, parent in nodes:
+            if not (isinstance(node, ast.Name) and node.id == name):
+                continue
+            if node is target:
+                continue
+            if (isinstance(parent, ast.Subscript) and parent.value is node
+                    and isinstance(parent.ctx, ast.Load)):
+                continue
+            touched = True
+            break
+        if not touched:
+            containers[name] = entries
+    return containers
+
+
+def _constant_index(node):
+    if isinstance(node, ast.Constant) and isinstance(node.value, int) and not isinstance(node.value, bool):
+        return node.value
+    if (isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub)
+            and isinstance(node.operand, ast.Constant) and isinstance(node.operand.value, int)
+            and not isinstance(node.operand.value, bool)):
+        return -node.operand.value
+    return None
+
+
+def _container_class(entries, slice_node):
+    if isinstance(entries, list):
+        index = _constant_index(slice_node)
+        if index is not None and -len(entries) <= index < len(entries):
+            return entries[index]
+    elif isinstance(entries, dict):
+        if isinstance(slice_node, ast.Constant) and isinstance(slice_node.value, (str, int)) \
+                and not isinstance(slice_node.value, bool):
+            return entries.get(slice_node.value)
+    return None
+
+
+def _attribute_store_targets(node):
+    """The ast.Attribute targets of one statement: plain, tuple/list, for, with and comprehension."""
+    targets = []
+    if isinstance(node, ast.Assign):
+        targets.extend(node.targets)
+    elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+        targets.append(node.target)
+    elif isinstance(node, (ast.For, ast.AsyncFor)):
+        targets.append(node.target)
+    elif isinstance(node, (ast.With, ast.AsyncWith)):
+        targets.extend(item.optional_vars for item in node.items if item.optional_vars is not None)
+    elif isinstance(node, ast.comprehension):
+        targets.append(node.target)
+    stack = list(targets)
+    while stack:
+        current = stack.pop()
+        if isinstance(current, (ast.Tuple, ast.List)):
+            stack.extend(current.elts)
+        elif isinstance(current, ast.Starred):
+            stack.append(current.value)
+        elif isinstance(current, ast.Attribute):
+            yield current
+
+
+def _refuse_class_attr_target(target, aliases, containers):
+    base = target.value
+    if isinstance(base, ast.Name) and base.id in aliases:
+        rendered = base.id
+    elif isinstance(base, ast.Subscript) and isinstance(base.value, ast.Name) \
+            and _container_class(containers.get(base.value.id), base.slice) is not None:
+        rendered = ast.unparse(base)
+    else:
+        return
+    error = ValueError('assigning the class attribute %s.%s; a class attribute here is a constant'
+                       % (rendered, target.attr))
+    error.source_line = target.lineno
+    error.source_column = target.col_offset
+    raise error
+
+
+def _check_class_attribute_assignment(tree):
+    """Refuse a class-attribute store whose base is statically a class, by name.
+
+    The general path keeps a class attribute in a slot it only reads (an instance gets a copy at
+    construction), so ``alias.attr = v`` raised AttributeError where CPython updates the class
+    object.  A direct class name is refused by the emitters themselves, which leaves the typed
+    path's class-attribute support untouched; here an alias of a class, or a class read out of a
+    literal list/tuple/dict, is refused at compile time on both builds.  A base that only holds a
+    class at run time (a parameter, an attribute, a non-literal container) is refused by the
+    runtime under the same name."""
+    classes = {node.name for node in tree.body if isinstance(node, ast.ClassDef)}
+    if not classes:
+        return
+    module_stores = _function_scope_stores(tree)
+    module_aliases = _scope_class_aliases(tree, classes, module_stores, set(), set())
+    module_nodes = list(_scope_nodes_with_parents(tree))
+    module_containers = _scope_class_containers(tree, module_nodes, classes, module_stores, set(), set())
+    for node, _parent in module_nodes:
+        for target in _attribute_store_targets(node):
+            _refuse_class_attr_target(target, module_aliases, module_containers)
+    for function in (node for node in ast.walk(tree)
+                     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))):
+        parameters = _scope_parameters(function)
+        declared = _scope_declared(function)
+        stores = _function_scope_stores(function)
+        shadowed = set(stores) | parameters | declared
+        aliases = {name: owner for name, owner in module_aliases.items() if name not in shadowed}
+        aliases.update(_scope_class_aliases(function, classes, stores, parameters, declared))
+        nodes = list(_scope_nodes_with_parents(function))
+        containers = {name: entries for name, entries in module_containers.items()
+                      if name not in shadowed}
+        containers.update(_scope_class_containers(function, nodes, classes, stores, parameters, declared))
+        for node, _parent in nodes:
+            for target in _attribute_store_targets(node):
+                _refuse_class_attr_target(target, aliases, containers)
+
+
 def _check_int64_abs_constants(tree, known):
     """Refuse a constant ``abs`` whose exact value int64 cannot hold, by name.
 
@@ -632,6 +1224,78 @@ def _check_int64_unary_constants(tree):
     _check_int64_abs_constants(tree, known)
 
 
+def _int64_holds(value):
+    return value is not _CONST_INT_TOO_BIG and _INT64_MIN <= value <= _INT64_MAX
+
+
+def _names_a_known_constant(node, known):
+    return any(isinstance(inner, ast.Name) and inner.id in known for inner in ast.walk(node))
+
+
+def _known_names_fit_int64(node, known):
+    """Whether every statically known name read by the expression is itself within int64."""
+    return all(_int64_holds(known[inner.id]) for inner in ast.walk(node)
+               if isinstance(inner, ast.Name) and inner.id in known)
+
+
+class _ReplaceKnownNames(ast.NodeTransformer):
+    """Copy an expression with every load of a statically known int replaced by its value."""
+
+    def __init__(self, known):
+        self.known = known
+
+    def visit_Name(self, node):
+        if isinstance(node.ctx, ast.Load) and node.id in self.known:
+            return ast.copy_location(ast.Constant(self.known[node.id]), node)
+        return node
+
+
+def _constant_int_exact_with_known(node, known):
+    """The exact int a constant expression denotes once known names are substituted, or the
+    (False, None) / (True, _CONST_INT_TOO_BIG) answers of _constant_int_exact."""
+    expression = _ReplaceKnownNames(known).visit(copy.deepcopy(node))
+    return _constant_int_exact(ast.fix_missing_locations(expression))
+
+
+def _check_int64_local_cancellation(node, known):
+    """Refuse a function-local constant expression whose final value fits int64 but a step
+    does not.  `a = 2**62; b = a * 2 - 1` computes `a * 2` in int64 and stops with
+    `integer overflow` at run time, where CPython's unbounded int prints INT64_MAX.  Only an
+    operation step that actually reads a statically known local or module constant is
+    considered, so the ordinary literal fold (`2**63 - 1`) and run-time arithmetic are
+    unchanged.  A leaf name that is itself out of int64 is left to the ordinary constant
+    check, which keeps its existing wording."""
+    if not _names_a_known_constant(node, known) or not _known_names_fit_int64(node, known):
+        return
+    ok, value = _constant_int_exact_with_known(node, known)
+    if not ok or not _int64_holds(value):
+        return
+    for child in ast.iter_child_nodes(node):
+        if not isinstance(child, (ast.BinOp, ast.UnaryOp)) or not _names_a_known_constant(child, known):
+            continue
+        child_ok, child_value = _constant_int_exact_with_known(child, known)
+        if child_ok and not _int64_holds(child_value):
+            shown = 'too large' if child_value is _CONST_INT_TOO_BIG else child_value
+            error = ValueError(f'int64 constant expression out of range: {shown}')
+            error.source_line = child.lineno
+            error.source_column = child.col_offset
+            raise error
+
+
+def _check_int64_local_cancellations(tree):
+    """Refuse the local-constant cancellation that used to trap at run time, in every function
+    body.  Module constants visible from the function count as known; a name the function
+    stores more than once, a parameter, or a global/nonlocal declaration does not."""
+    module_known = _known_module_constants(tree)
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        local = _function_local_int_constants(function, module_known)
+        for node in _walk_own_scope(function):
+            if isinstance(node, (ast.BinOp, ast.UnaryOp)):
+                _check_int64_local_cancellation(node, local)
+
+
 _CONST_TEXT_LIMIT = 1 << 20
 
 
@@ -673,6 +1337,28 @@ def _constant_text(node, known_text, known_int, known_containers=None):
         return node.value
     if isinstance(node, ast.Name) and node.id in known_text:
         return known_text[node.id]
+    if isinstance(node, ast.Attribute):
+        fields = []
+        base = node
+        while isinstance(base, ast.Attribute):
+            field = re.fullmatch(r'f(\d+)', base.attr)
+            if field is None:
+                break
+            fields.append(int(field.group(1)))
+            base = base.value
+        if (fields and isinstance(base, ast.Call) and isinstance(base.func, ast.Name)
+                and base.func.id.startswith('_AilT_') and not base.keywords):
+            value_node = base
+            for index in reversed(fields):
+                if (not isinstance(value_node, ast.Call) or not isinstance(value_node.func, ast.Name)
+                        or not value_node.func.id.startswith('_AilT_') or value_node.keywords
+                        or index >= len(value_node.args)
+                        or any(isinstance(arg, ast.Starred) for arg in value_node.args)):
+                    value_node = None
+                    break
+                value_node = value_node.args[index]
+            if value_node is not None:
+                return _constant_text(value_node, known_text, known_int, known_containers)
     if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice):
         if isinstance(node.value, ast.Name):
             container = (known_containers or {}).get(node.value.id)
@@ -718,9 +1404,10 @@ def _constant_text(node, known_text, known_int, known_containers=None):
 
 
 def _check_int64_int_base_constants(tree):
-    """Refuse `int(<constant str>, <constant base>)` when the parsed value leaves int64.
+    """Refuse `int(<constant text>[, <constant base>])` when the parsed value leaves int64.
     AIL ints are fixed width, so the conversion would stop with `integer overflow` where
-    CPython keeps the bignum; a value that fits keeps its run-time parse."""
+    CPython keeps the bignum; a value that fits keeps its run-time parse.  A call with no
+    explicit base uses CPython's base 10."""
     bound = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -803,13 +1490,18 @@ def _check_int64_int_base_constants(tree):
         elif (len(node.args) == 1 and len(node.keywords) == 1
               and node.keywords[0].arg == 'base'):
             text_node, base_node = node.args[0], node.keywords[0].value
+        elif len(node.args) == 1 and not node.keywords:
+            text_node, base_node = node.args[0], None
         else:
             continue
         if isinstance(text_node, ast.Starred):
             continue
-        base = _constant_int(base_node, known_int)
-        if base is None or base != 0 and not 2 <= base <= 36:
-            continue
+        if base_node is None:
+            base = 10
+        else:
+            base = _constant_int(base_node, known_int)
+            if base is None or base != 0 and not 2 <= base <= 36:
+                continue
         text = _constant_text(text_node, known_text, known_int, known_containers)
         if text is None:
             continue
@@ -1275,7 +1967,9 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 _check_int64_literals(tree)
                 _check_int64_constant_positions(tree)
                 _check_int64_unary_constants(tree)
+                _check_int64_local_cancellations(tree)
                 _check_int64_int_base_constants(tree)
+                _check_class_attribute_assignment(tree)
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)
             if source_map is not None:

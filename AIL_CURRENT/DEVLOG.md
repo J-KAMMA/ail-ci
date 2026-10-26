@@ -1,3 +1,92 @@
+## 2026-10-26 - pre267: refuse a statically known non-BMP bytes.decode() by name (job-pre267-10262133)
+
+The first still-differing item in the rbpre51 review was the general path's non-BMP
+`bytes.decode()`: `b"\xf0\x9f\x98\x80".decode()` built and then stopped with `AIL internal
+error: decode: a code point above U+FFFF in the 16-bit v2 runtime`, while CPython prints the
+astral character and the default build already matched.  The general runtime keeps UTF-16 units,
+so pyboxed2 now statically resolves the bytes value and refuses a decode (or `str(bytes, enc)`)
+whose UTF-8 text contains a code point above U+FFFF, by name at compile time.  It follows a
+literal, module constant/alias, list/tuple/dict literal item, class attribute, simple identity
+return, `bytes([...])` / `bytearray(...)`, keyword encoding/errors, and a function parameter
+called with such a constant; BMP text (through U+FFFF) and invalid UTF-8 still match CPython.
+Bytes whose content is only known at run time (stdin/file/unknown value) keep the open 16-bit
+limitation already recorded at `C?-job-rbrbrbrbmemsafe2-10261346-6`.
+
+Added `AIL_CURRENT/test_ail_pre267.py` (2 tests, both builds) and registered it in
+`ail_check.MODULES`.  Probes in `/tmp/probes`: `p267_decode.py` (direct non-BMP),
+`p267_decode_const.py`, `p267_decode_container.py`, `p267_decode_arg.py`,
+`p267_decode_attr.py`, `p267_decode_attr2.py`, `p267_decode_str.py`, `p267_decode_dyn.py`,
+`p267_decode_alias.py` and `p267_decode_bounds_nonbmp.py` are refused by name on the general
+path; `p267_decode_bmp.py`, `p267_decode_invalid.py`, `p267_decode_bounds_bmp.py`,
+`p267_decode_encoding_bmp.py`, and the three mutated bytearray/list/dict probes
+(`p267_mutate_bytearray.py`, `p267_mutate_list.py`, `p267_mutate_dict.py`) match CPython on both
+builds.
+
+## 2026-10-26 - pre296: a local binding of a built-in name wins over the built-in call (job-pre296-10270440)
+
+The pre54 reviewer's first pre-existing difference was a parameter named `round` that was not
+honoured: `def apply(round, x): return round(x)` called the built-in when the argument was a
+callable, so the probe printed `-6` / `int` where CPython prints `-16.5` / `float`. The general
+path now reads a parameter, local, cell or closure binding named like a built-in instead of
+dispatching to the built-in by name, and the typed path refuses that call by name so the default
+build falls back to it. This covers the exact parameter case plus a local lambda, a closure cell,
+and values arriving through a list item, an attribute and a dict value; a non-callable binding
+keeps CPython's TypeError and an unshadowed `round` is unchanged. Added
+`AIL_CURRENT/test_ail_pre296.py`, registered in `ail_check.MODULES`; `tools/update_manifest.py`
+was run and `--check` exits 0. Probes in `/tmp/probes` on both builds: `p296_param`,
+`p296_local`, `p296_closure`, `p296_routes`, `p296_callable_param`, `p296_noncallable`,
+`p296_unshadowed`, `p296_len_local`, `p296_len_param`, `p296_abs_local` and `p296_no_feature`
+match CPython; `p296_builtin_value` is refused by name (passing the built-in `round` as a value
+is a separate pre-existing gap). Tests on the final tree: `test_ail_pre296`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`, plus the related
+`test_ail_builtin_shadowing` and `test_ail_pre218`. A lambda assigned after a call in the same
+function is still dropped by a separate scanning pass, so that unbound-local edge remains
+pre-existing on both builds.
+## 2026-10-26 - re-apply pre255: class constant routes through a list item, attribute or dict value (job-rbpre255-10261620)
+
+Re-applied the accepted pre255 change on this tree, keeping the current tree's exact class-level
+folding from pre227/pre246.  A class constant built through a list item, attribute or dict value
+(`N = 2**62; xs = [N]; class C: X = xs[0] * 4`) still kept checked int64 arithmetic and stopped
+with `integer overflow` where CPython prints the bignum.  `fold_constants` now refuses the route
+by name at compile time on both builds (`class-level constant built through a list item, attribute
+or dict value`); the scan walks each class body but prunes methods, nested classes and deferred
+lambda bodies, and treats a call's `Attribute` callee (including its receiver) as the callee while
+still scanning the call's arguments.  In-range routes and empty containers are refused too;
+arithmetic outside a class body, a method body and class-level arithmetic without such a route
+are unchanged.  Added `AIL_CURRENT/test_ail_pre255.py` and registered it in `ail_check.MODULES`.
+
+Probes in `/tmp/probes`: `pre255_list_out`, `pre255_dict_out`, `pre255_attr_out`,
+`pre255_list_in`, `pre255_neg_out`, `pre255_empty`, `pre255_nested_arg`, `pre255_call_arg`,
+`pre255_unary`, `pre255_tuple_route` and `pre255_nested_class` are refused by name on both
+builds; `pre255_outside`, `pre255_method`, `pre255_lambda_list`, `pre255_lambda_dict`,
+`pre255_str_method`, `pre255_list_receiver_method` and `pre255_plain` match CPython on both
+builds.  `tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run
+and `--check` passes.
+## 2026-10-26 -- re-apply pre26: repr(e.args[i]) keeps the argument's kind (job-rbpre26-10270138)
+
+Re-applied the accepted pre26 change on this tree. On the typed path `e.args[i]` reads as text, so
+`repr(e.args[i])` repr'd that text: a `ValueError(3.0)` handler printed `'3.0'` where CPython prints
+`3.0`, and int, bool and None arguments were quoted the same way. The handler rewrite now lowers
+`repr(e.args[i])`, `f"{e.args[i]!r}"` and `%r` of one argument to a new `_ail_exc_arg_repr` accessor
+that formats the stored argument (a str keeps its quotes, a number does not). Both builds agree with
+CPython; the accepted `test_ail_pre26.py` keeps the probe, including negative and out-of-range
+indexes, and is registered in `ail_check.MODULES`.
+## 2026-10-26 -- re-apply pre41: nested generator expression as an any()/all() iterable (job-rbpre41-10261713)
+
+Re-applied the accepted pre41 change on this tree. The current fused `any()`/`all()` path
+short-circuits the outer generator, but an inner `GeneratorExp` used as that generator's
+iterable still goes through `_open_iter_loop` -> `expr_GeneratorExp`, which materialises it as
+an eager list. So `any(x for x in (mark(i) for i in [0, 1, 2]))` still ran the side effects
+after the deciding element (`inner 0`, `inner 1`, `inner 2` where CPython stops after
+`inner 1`). The named refusal is therefore kept, placed just before the fused path, and covers
+the iterable reached directly, through an argument, a list item, an attribute, a dict value and
+a second `for` clause on both builds. Eager iterables (list, tuple, str, dict, set, range, an
+argument, a list comprehension) still build unchanged. Added the accepted
+`AIL_CURRENT/test_ail_pre41.py` (8 refused shapes, one CPython-compared eager program) and
+registered it in `ail_check.MODULES`. Probes `/tmp/probes/pre41_nested.py`,
+`pre41_routes.py` and `pre41_eager.py`: the first two are refused by name on both builds; the
+last matches CPython on both.
+
 ## 2026-10-26 -- reapply pre225: grouping with an unrecognised type code (job-rbpre225-10261321)
 
 Re-applied the accepted pre225 change. Its safetyrt.py fix is already present on this tree from

@@ -66,7 +66,7 @@ import typedinherit
 import shadowing
 import rangecheck
 from pipeline import PipelineError
-from pyfront import BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Unsupported, _use, int_constant, refuse_complex_pow
+from pyfront import BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Unsupported, _use, int_constant, refuse_complex_pow, refuse_variable_int_pow
 
 # A capability marker, not a behaviour: lets a SHARED judge (one file imported against many
 # `pkg-*` copies of this module, e.g. `test_floatparam.py`) ask "does THIS copy infer a float
@@ -1331,9 +1331,10 @@ def _exc_attr_value(node, ctx):
 
 
 def _is_exc_arg_call(node, ctx):
-    """`_ail_exc_arg(e, i)` -- e.args[i] as a str (exctext.py)."""
-    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == '_ail_exc_arg'
-            and '_ail_exc_arg' not in ctx.funcs and not node.keywords and len(node.args) == 2)
+    """`_ail_exc_arg(e, i)` / `_ail_exc_arg_repr(e, i)` -- e.args[i] as a str (exctext.py)."""
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id in ('_ail_exc_arg', '_ail_exc_arg_repr')
+            and node.func.id not in ctx.funcs and not node.keywords and len(node.args) == 2)
 
 
 def _exc_intrinsic_arg(node, ctx):
@@ -1361,14 +1362,15 @@ def _exc_intrinsic_value(node, ctx):
 
 
 def _exc_arg_value(node, ctx):
-    """`_ail_exc_arg(e, i)`: the i-th argument of the exception as a str, in the arena."""
+    """`_ail_exc_arg(e, i)` / `_ail_exc_arg_repr(e, i)`: the i-th argument as a str, in the arena."""
     value = _exc_intrinsic_arg(node, ctx)
     if _etype(node.args[1], ctx) != INT:
         raise Unsupported('e.args[...] takes an int index')
     _exc_text_parts(ctx)
     ctx.has_try = True
     index = _map_inline(lambda: _expr(node.args[1], ctx), ctx)
-    return 'ail_exc_argstr(%s, %s, &%s)' % (value, index, ctx.sarena())
+    fname = 'ail_exc_argrepr' if node.func.id == '_ail_exc_arg_repr' else 'ail_exc_argstr'
+    return '%s(%s, %s, &%s)' % (fname, value, index, ctx.sarena())
 
 
 def _is_jd_result_call(node, ctx):
@@ -1611,7 +1613,7 @@ def _etype(node, ctx):
         if f == 'pow' and len(a) == 3 and f not in ctx.funcs:
             return INT
         if f in _EXC_INTRINSICS and f not in ctx.funcs:
-            return STR if f == '_ail_exc_arg' else INT
+            return STR if f in ('_ail_exc_arg', '_ail_exc_arg_repr') else INT
         if f in exctext.ATTR_INTRINSICS and f not in ctx.funcs:
             return {'s': STR, 'i': INT, 'f': FLT}[f[-1]]
         if f in _AIL_SYSINFO and f not in ctx.funcs:
@@ -13668,6 +13670,7 @@ def _expr(node, ctx):
                                      int(isinstance(node.op, ast.Mod)))
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
         refuse_complex_pow(node)
+        refuse_variable_int_pow(node)
         if _etype(node, ctx) == INT:
             ctx.parts.update(('DIE', 'IPOW'))
             return _ordered_numeric_pair(node.left, node.right, ctx, 'ail_ipow({}, {})')
@@ -16576,6 +16579,13 @@ def _call(node, ctx):
     if not isinstance(node.func, ast.Name):
         raise Unsupported('an indirect call')
     f, a = node.func.id, node.args
+    if (f in getattr(ctx, 'local_bindings', ()) and f in shadowing.PY_BUILTINS
+            and f not in ctx.funcs and f not in ctx.classes):
+        # A parameter, local, loop target or import of a built-in name shadows the built-in for
+        # the whole activation in CPython; the typed path dispatches built-ins by name, so name
+        # the shape and let the general path read the local value (or its UnboundLocalError).
+        raise Unsupported('%r is a local that shadows the builtin %s(); a call through a local '
+                          'value is not supported here (the general path builds it)' % (f, f))
     if f in ('list', 'sorted') and f not in ctx.funcs and f not in ctx.classes and a:
         kind = _etype(a[0], ctx)
         if _is_olist_kind(kind):
@@ -31267,7 +31277,9 @@ def _dispatcher(sname, m, impls, owners, classes, by_name):
     on the run-time class, compiled like any other function. Its parameters are the methods' own."""
     fns = [by_name[classes[o].method_cname(m)] for o in impls]
     own = _resolve_method(classes, sname, m)
-    rep = by_name[classes[own].method_cname(m)] if own is not None else fns[0]
+    rep = by_name.get(classes[own].method_cname(m)) if own is not None else None
+    if rep is None:
+        rep = fns[0]
     def shown(f):
         return f.name.replace('__', '.')
     for f in fns:
@@ -37137,7 +37149,32 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
                   and fn.body[-1].value is not None
                   and not any(isinstance(nd, (ast.For, ast.While, ast.Try, ast.With))
                               for st in fn.body for nd in ast.walk(st)))
-    if (not separate_units and not _is_entry and not recursive and _inlinable
+    # ONE SMALL LEAF LOOP, for the same reason and under a budget. `parse_int64_decimal` is a
+    # nine-statement leaf whose body is one digit loop; gcc will not inline it at -O2, and the
+    # surviving call clobbers caller state in csv_table's row loop. Measured 2026-10-23 on the
+    # 132 MB three-million-row csv_table input: 1.24 s before, 0.99 s with the attribute (user
+    # time 1.08 s -> 0.84 s), output byte-identical. The predicate stays conservative: one
+    # `for`, no other loop/try/with/yield, no call to another function or class constructor,
+    # a SCALAR NUMERIC return, at most 12 statements and 180 AST nodes. String/list/object
+    # returns are excluded because inlining a loop that owns heap storage duplicates cleanup
+    # paths -- inlining `json_quote` as well measured 1.42 s, slower than this 1.25 s. The cap
+    # is on the WHOLE body, not just the loop header, and async/generator forms are refused
+    # because a call gcc cannot inline is a hard compile error rather than a missed
+    # optimisation.
+    _loop_nodes = sum(1 for st in fn.body for _ in ast.walk(st))
+    _calls_user = any(isinstance(nd, ast.Call) and isinstance(nd.func, ast.Name)
+                      and (nd.func.id in sigs or (classes and nd.func.id in classes))
+                      for st in fn.body for nd in ast.walk(st))
+    _single_loop_inlinable = (
+        len(fn.body) <= 12 and _loop_nodes <= 180 and not _calls_user
+        and ret in (INT, FLT)
+        and isinstance(fn.body[-1], ast.Return) and fn.body[-1].value is not None
+        and sum(isinstance(nd, ast.For) for st in fn.body for nd in ast.walk(st)) == 1
+        and not any(isinstance(nd, (ast.While, ast.AsyncFor, ast.Try, ast.With, ast.AsyncWith,
+                                   ast.Yield, ast.YieldFrom, ast.Await))
+                    for st in fn.body for nd in ast.walk(st)))
+    if (not separate_units and not _is_entry and not recursive
+            and (_inlinable or _single_loop_inlinable)
             and ret not in (NORET, LIST, FLIST, GRIDRET, BYTES)
             and not _is_tuple_ret(ret) and not _is_multi_ret(ret)):
         # The attribute and the storage class go on their OWN line, so the signature line

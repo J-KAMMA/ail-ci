@@ -193,7 +193,7 @@ class Random:
             while p < k * 3:
                 p = p * 4
                 m = m + 1
-            setsize = setsize + 4 ** m
+            setsize = setsize + p
         if n <= setsize:
             pool = list(population)
             i = 0
