@@ -87,6 +87,27 @@ passes. Probes `p1`-`p16` in `/tmp/probes` on both builds: 14 are refused by nam
 literal, module shift/alias, below-min, above-max, argument, list, attribute, dict, nested, local,
 local alias, power) and `p12`/`p13` match CPython. Tests: pre215, pre214, pre248, pre246, pre253,
 pre227, pre236, safetynet, files, corpus_findings3.
+## 2026-10-26 - re-apply memsafe2 hostile-input fixes, merged with current format fixes (job-rbrbrbrbmemsafe2-10261346)
+
+Re-applied accepted job `memsafe2` on the current export, keeping the overlapping format()
+fixes already on this tree. `safetyrt.py` combined the new whole-unit `wide_type` handling,
+group-check-before-value and helper messages with the current tree's duplicate-grouping
+"cannot specify ',' with ','" wording and space-as-`\x20` escaping; the remaining files
+applied as-is. DIFFERENCES rows use this branch's placeholder ids, and the hostile-input
+module is registered before `test_ail_safetynet`.
+
+## 2026-10-25 - re-apply memsafe2 hostile-input fixes on current tree (job-rbrbrbmemsafe2-10260121)
+
+Re-applied accepted job `memsafe2` (branch `job-rbrbmemsafe2-10252051`) on the current export. The
+`cruntime.py`, `safetyrt.py`, `exctext.py`, `prelude_bytes.py`, `pyboxed.py` and `pyboxed2.py` edits plus
+the new `tools/input_fuzz.py` and `AIL_CURRENT/test_ail_hostile_input.py` applied as-is. Three files
+conflicted: `ail_check.MODULES` already had `test_ail_pre141`, so the hostile-input module is registered
+just before `test_ail_safetynet`; the DIFFERENCES rows were renumbered to this branch
+(`C?-job-rbrbrbmemsafe2-10260121-1..8`) and kept alongside the newer records; and the original memsafe2
+DEVLOG entry is placed before the 2026-10-24 codec-name entry. Overlapping fixes already on this tree are
+kept on both sides: pre192's `int(bytearray)` text and pre103's NUL format type still hold while the
+int()/float() error path now uses the UTF-16 repr helpers and `%.200R`, and the format parser
+distinguishes an ASCII type (including NUL) from a whole non-ASCII `wide_type`.
 
 ## 2026-10-25 -- pre227 suite fix: the constant check owns the refusal wording (job-pre227-10260534)
 
@@ -1061,6 +1082,23 @@ a plain helper, a typed helper, a lambda, a list item, an attribute, a dict
 value, negative and INT64_MIN dividends, bools, an IntEnum and an IntFlag; a
 second program keeps the neighbouring `//`, `divmod` and float zero messages
 unchanged.
+## 2026-10-25 - memsafe2: hostile stdin through parsing and text (job-memsafe2-10251519)
+
+A seeded mutation fuzzer (`tools/input_fuzz.py`) fed empty, 1 MB, NUL, invalid-UTF-8, non-ASCII-digit and
+extreme-number inputs to four programs (numbers, text, binary, slices) built with ASan+UBSan on the general
+and default builds.  The first sweep found: signed-int64 overflow in slice length/increment at the int64
+boundary (UBSan, wrong length, or hang) and `None` bounds held in variables/lists/attributes/dict values
+read as 0; `int()`/`float()` error text mangled every non-ASCII unit (the low byte was copied) and ignored
+`%.200R`; `format()` treated a non-ASCII (or control) type character as a `char` (wrong unknown-code/grouping
+text and a ValueError instead of TypeError for None/list specs); `%`-format printed a non-ASCII/control conversion
+character raw instead of `?`; bytearray's repr quote choice and `int(bytearray())` message differed.  All
+are fixed in `safetyrt.py`, `cruntime.py`, `exctext.py`, `prelude_bytes.py`, `pyboxed2.py` and `pyboxed.py`.
+Two known int64/16-bit-unit limits are recorded in DIFFERENCES (a valid non-BMP UTF-8 decode, and an int
+beyond int64), plus one unrelated source-shape inference gap found by an over-broad mixed-type slice probe. `test_ail_hostile_input.py` holds the programs, the regression inputs and a seeded fuzz run.
+Probes in `/tmp/probes` (`p_slice_dyn`, `p_slice_dyn2`, `p_slice_none`, `p_repr`, `p_fmt`, `p_convmsg`,
+`p_int2`, plus the gen_* fuzz corpus) match CPython with sanitizers on both builds; explicit `None`
+slice constants are refused by name on the typed path, so the default build falls back to the general path.
+
 ## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
 
 The first still-differing item from the task's list was the encoding-name normalization: `b"abc".decode("utf\t8")`,

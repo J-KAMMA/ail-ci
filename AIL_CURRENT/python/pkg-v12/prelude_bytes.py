@@ -728,10 +728,10 @@ class bytearray:
         return len(self._a) > 0
 
     def __repr__(self):
-        return "bytearray(b" + _ail_b_repr(_ail_b_from_ints(self._a)) + ")"
+        return "bytearray(b" + _ail_ba_repr(_ail_b_from_ints(self._a)) + ")"
 
     def __str__(self):
-        return "bytearray(b" + _ail_b_repr(_ail_b_from_ints(self._a)) + ")"
+        return "bytearray(b" + _ail_ba_repr(_ail_b_from_ints(self._a)) + ")"
 
     def __int__(self):
         s = _ail_b_from_ints(self._a)
@@ -739,7 +739,7 @@ class bytearray:
 
     def __float__(self):
         s = _ail_b_from_ints(self._a)
-        return _ail_b_float(s, "bytearray(b" + _ail_b_repr(s) + ")")
+        return _ail_b_float(s, "bytearray(b" + _ail_ba_repr(s) + ")")
 
     def append(self, x):
         if not isinstance(x, int):
