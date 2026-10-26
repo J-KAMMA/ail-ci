@@ -16659,22 +16659,62 @@ static inline void ail_class_dyn_set(ail_ctx *cx, ail_obj cls, int64_t name_id, 
     c->dyn[c->dyn_n].val = val;
     c->dyn_n++;
 }
-static inline void ail_class_setattr(ail_ctx *cx, ail_obj cls, int64_t name_id, ail_obj val) {
+static inline void ail_class_name_c(ail_obj cls, char *buf, size_t cap);
+static inline ail_st ail_class_setattr(ail_ctx *cx, ail_obj cls, int64_t name_id, ail_obj val) {
     /* `C.x = v`: an own class-body attribute updates its shared module slot; a new name, or one
-       the class body defines only as a method/property, becomes a dynamic entry on this class
-       (so a subclass assignment hides an inherited value instead of changing the base). */
+       the class body defines only as a property, becomes a dynamic entry on this class (so a
+       subclass assignment hides an inherited value instead of changing the base).  A method is
+       refused by name: the general path calls methods directly, so a stored value would not be
+       seen by `obj.m(...)` (CPython replaces the method and the call then raises TypeError). */
     ail_classobj *c = (ail_classobj *)cls.o;
-    if (ail__class_attr_slots)
-        for (int64_t i = c->ca_n - 1; i >= 0; i--)
-            if (c->ca[i].name_id == name_id && c->ca[i].slot >= 0) {
-                ail__class_attr_slots[c->ca[i].slot] = val;
-                return;
-            }
+    for (int64_t i = c->ca_n - 1; i >= 0; i--) {
+        if (c->ca[i].name_id != name_id) continue;
+        if (c->ca[i].slot == -1) goto method_refused;
+        if (c->ca[i].slot >= 0) {
+            if (ail__class_attr_slots) ail__class_attr_slots[c->ca[i].slot] = val;
+            return AIL_OK;
+        }
+        ail_class_dyn_set(cx, cls, name_id, val);
+        return AIL_OK;
+    }
+    /* no own definition: an inherited method would still be called directly, while an inherited
+       property/attribute is legitimately hidden by this assignment */
+    for (ail_obj k = c->base; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+        ail_classobj *kc = (ail_classobj *)k.o;
+        for (int64_t j = kc->ca_n - 1; j >= 0; j--) {
+            if (kc->ca[j].name_id != name_id) continue;
+            if (kc->ca[j].slot == -1) goto method_refused;
+            ail_class_dyn_set(cx, cls, name_id, val);
+            return AIL_OK;
+        }
+    }
     ail_class_dyn_set(cx, cls, name_id, val);
+    return AIL_OK;
+method_refused:
+    {
+        char b[100], m[448];
+        ail_class_name_c(cls, b, sizeof b);
+        snprintf(m, sizeof m, "assigning method '%s' on class %s is not built on the general path",
+                 cx->intern_tab[name_id], b);
+        return ail_raise_c(cx, AIL_B_NOTIMPLEMENTEDERROR, m);
+    }
+}
+static inline int ail_class_dyn_find_upto(ail_obj cls, ail_obj stop, int64_t name_id, ail_obj *out) {
+    /* A dynamic entry from `cls` up to and including `stop` (a property's owner): an assignment
+       on the owner or a subclass replaces that property for those instances, while an entry
+       above the owner must not override a property the owner itself defines. */
+    for (ail_obj k = cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+        ail_classobj *kc = (ail_classobj *)k.o;
+        for (int64_t i = kc->dyn_n - 1; i >= 0; i--)
+            if (kc->dyn[i].name_id == name_id) { *out = kc->dyn[i].val; return 1; }
+        if (k.o == stop.o) break;
+    }
+    return 0;
 }
 static inline int ail_class_attr_find_id(ail_obj cls, int64_t name_id, ail_obj *out) {
-    /* 1 = found, 2 = defined as a method/property in the class body (slot -1: it hides a base
-       class attribute, but the general path cannot hand out the function/property value). */
+    /* 1 = found, 2 = defined as a method/property in the class body (slot -1 method, -2
+       property: either hides a base class attribute, but the general path cannot hand out the
+       function/property value). */
     for (ail_obj k = cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
         ail_classobj *kc = (ail_classobj *)k.o;
         for (int64_t i = kc->dyn_n - 1; i >= 0; i--)
@@ -16728,6 +16768,27 @@ static inline int ail_class_attr_find_name(ail_ctx *cx, ail_obj cls, const char 
     }
     return 0;
 }
+static inline int ail_attr_shadow_find(ail_obj inst, int64_t name_id, ail_obj *out) {
+    /* An instance attribute, or a class-chain dynamic entry / class attribute, that replaces a
+       method or property for `recv.name(...)`: 0 means the class's own method/property is the
+       nearest definition, so the static call is right. */
+    if (!(inst.tag == AIL_T_INST || inst.tag == AIL_T_EXC)) return 0;
+    ail_instobj *o = (ail_instobj *)inst.o;
+    for (int64_t i = o->n - 1; i >= 0; i--)
+        if (o->attrs[i].name_id == name_id) { *out = o->attrs[i].val; return 1; }
+    for (ail_obj k = o->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+        ail_classobj *kc = (ail_classobj *)k.o;
+        for (int64_t i = kc->dyn_n - 1; i >= 0; i--)
+            if (kc->dyn[i].name_id == name_id) { *out = kc->dyn[i].val; return 1; }
+        for (int64_t i = kc->ca_n - 1; i >= 0; i--)
+            if (kc->ca[i].name_id == name_id) {
+                if (kc->ca[i].slot < 0) return 0;
+                if (ail__class_attr_slots) *out = ail__class_attr_slots[kc->ca[i].slot];
+                return 1;
+            }
+    }
+    return 0;
+}
 static inline ail_obj ail_inst_new(ail_ctx *cx, ail_obj cls) {
     ail_instobj *o = (ail_instobj *)ail_gc_alloc(cx, AIL_K_INST, sizeof *o);
     o->cls = cls;
@@ -16775,7 +16836,7 @@ static __attribute__((noinline, cold)) ail_st ail_attr_not_inst(ail_ctx *cx, ail
     return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, buf);
 }
 static inline ail_st ail_inst_setattr_chk(ail_ctx *cx, ail_obj inst, int64_t name_id, ail_obj val) {
-    if (inst.tag == AIL_T_CLASS) { ail_class_setattr(cx, inst, name_id, val); return AIL_OK; }
+    if (inst.tag == AIL_T_CLASS) return ail_class_setattr(cx, inst, name_id, val);
     if (__builtin_expect((unsigned)(inst.tag - AIL_T_INST) > 1u, 0)) return ail_attr_not_inst(cx, inst, cx->intern_tab[name_id]);   /* INST, EXC are adjacent */
     ail_inst_setattr(cx, inst, name_id, val);
     return AIL_OK;
@@ -16803,7 +16864,15 @@ static inline ail_st ail_inst_getattr(ail_ctx *cx, ail_obj *out, ail_obj inst, i
     for (int64_t i = 0; i < o->n; i++) if (o->attrs[i].name_id == name_id) { *out = o->attrs[i].val; return AIL_OK; }
     /* an attribute the instance does not shadow is looked up on its class (C.x = v changes it
        for existing instances too, as CPython's instance lookup does) */
-    if (ail_class_attr_find_id(o->cls, name_id, out) == 1) return AIL_OK;
+    int ca = ail_class_attr_find_id(o->cls, name_id, out);
+    if (ca == 1) return AIL_OK;
+    if (ca == 2) {
+        char nb[100], cbuf[260];
+        ail_class_name_c(o->cls, nb, sizeof nb);
+        snprintf(cbuf, sizeof cbuf, "reading method/property '%s' through an instance of %s "
+                 "is not built on the general path", name_for_msg, nb);
+        return ail_raise_c(cx, AIL_B_NOTIMPLEMENTEDERROR, cbuf);
+    }
     char buf[160]; snprintf(buf, sizeof buf, "'%s' object has no attribute '%s'", inst.tag == AIL_T_INST ? ail__tname_c(inst) : "instance", name_for_msg);
     return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, buf);
 }

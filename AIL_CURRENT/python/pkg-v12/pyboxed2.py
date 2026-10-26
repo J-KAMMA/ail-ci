@@ -2086,6 +2086,7 @@ class Compiler(boxclosure.ClosureMixin):
         self.class_order = []
         self.functions = {}        # top-level name -> info
         self.attr_names = set()
+        self.assigned_attrs = set()   # names stored through an attribute / class body / setattr
         self.module_names = set()
         self.global_var_kind = {}
         self.global_elem_kind = {}
@@ -2126,6 +2127,19 @@ class Compiler(boxclosure.ClosureMixin):
     # ------------------------------------------------------------------------------- entry point
     def compile(self, source):
         tree = ast.parse(source)
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Attribute) and isinstance(n.ctx, (ast.Store, ast.Del)):
+                self.assigned_attrs.add(n.attr)
+            if isinstance(n, ast.ClassDef):
+                for stmt in n.body:
+                    target = (stmt.targets[0] if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1
+                              else stmt.target if isinstance(stmt, ast.AnnAssign) else None)
+                    if isinstance(target, ast.Name):
+                        self.assigned_attrs.add(target.id)
+            if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == 'setattr'
+                    and len(n.args) >= 2 and isinstance(n.args[1], ast.Constant)
+                    and isinstance(n.args[1].value, str)):
+                self.assigned_attrs.add(n.args[1].value)
         lazy_genexp = _lazy_raising_genexp(tree)
         if lazy_genexp is not None:
             refusal = Unsupported(_GENEXP_VALUE_REFUSAL)
@@ -2399,6 +2413,8 @@ class Compiler(boxclosure.ClosureMixin):
                 # base class's attribute of the same name, but cannot be returned as a value here.
                 if entry[0] == 'a':
                     aname, aslot = entry[1], entry[3]
+                elif entry[0] == 'p':
+                    aname, aslot = entry[1], -2
                 else:
                     aname, aslot = entry[1], -1
                 setup.append('    ail_class_attr_add(cx, g_slots_arr[%d], ail_intern(cx, %s), %d);\n' %
@@ -3068,7 +3084,8 @@ class Compiler(boxclosure.ClosureMixin):
                 info = self._register_function(item, cname=mcname + ('__set' if setter else ''), is_method=True,
                                                 owner_class=node.name)
                 methods[('__ail_set_' + item.name) if info.get('is_setter') else item.name] = info
-                body_order.append(('p' if info.get('is_property') else 'm', item.name))
+                # a @v.setter also defines the property v (the getter's entry may come first)
+                body_order.append(('p' if info.get('is_property') or info.get('is_setter') else 'm', item.name))
             elif isinstance(item, ast.Assign) and len(item.targets) == 1 and \
                     isinstance(item.targets[0], ast.Name):
                 class_attrs.append((item.targets[0].id, item.value))
@@ -5262,9 +5279,9 @@ class Compiler(boxclosure.ClosureMixin):
                                                   node.value.id == 'sys'):
             return self._module_attr_value(node.value.id, node.attr, ctx)
         # `C.K` / `A.K` where A aliases a class: read the last definition the class body's own
-        # base chain finds.  A method or property of the same name shadows a base class attribute,
-        # but is not a value the general path can hand out, so refuse it by name (it used to fall
-        # through to the base attribute).
+        # base chain finds.  An own class attribute keeps the shared-slot shortcut; everything
+        # else is read through the run-time class, so a dynamic override is seen and a bare
+        # method/property is refused by name instead of falling through to a base attribute.
         direct = (isinstance(node.value, ast.Name) and node.value.id in self.classes
                   and node.value.id not in ctx.slot_of and node.value.id not in self.module_names)
         value_kind = self.infer_kind(node.value, ctx)
@@ -5272,14 +5289,11 @@ class Compiler(boxclosure.ClosureMixin):
         if cname is not None:
             owner, hit = self._class_chain_definition(cname, node.attr)
             if hit is not None and (direct or hit[0] in ('m', 'p')):
-                if hit[0] == 'a':
-                    if direct and owner == cname:
-                        return self._cached_class_attr(hit[3], hit[2], ctx)
-                    # an inherited attribute is read through the run-time class, so a later
-                    # `Sub.attr = v` (a dynamic entry on the subclass) is seen here too.
-                else:
-                    raise Unsupported("reading %s %s.%s through a class value" %
-                                      ('property' if hit[0] == 'p' else 'method', owner, node.attr))
+                if hit[0] == 'a' and direct and owner == cname:
+                    return self._cached_class_attr(hit[3], hit[2], ctx)
+                # Any other class read goes through the run-time class: a later `C.attr = v`
+                # (a dynamic entry) is seen here too, and a method/property with no override
+                # is refused by name at run time.
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
         if prop_owners:
             return self._property_read(node, prop_owners, ctx)
@@ -5326,8 +5340,21 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('%sif (%s) {' % ('' if first else '} else ', self._property_owner_cond(obj, c)))
             first = False
             ctx.indent += 1
+            slot = self.global_slots['class:' + c]
+            ctx.emit('if (ail_class_dyn_find_upto(((ail_instobj *)%s.o)->cls, g_slots_arr[%d], '
+                     'g_attr_%s, &%s)) { /* a later %s.%s = value replaces this property */'
+                     % (obj, slot, node.attr, t, c, node.attr))
+            ctx.indent += 1
+            ctx.emit('st = ail_inst_getattr(cx, &%s, %s, g_attr_%s, %s);'
+                     % (t, obj, node.attr, c_str_literal(node.attr)))
+            ctx.check()
+            ctx.indent -= 1
+            ctx.emit('} else {')
+            ctx.indent += 1
             ctx.emit('st = %s(cx, &%s, %s);' % (info['cname'], t, obj))
             ctx.check()
+            ctx.indent -= 1
+            ctx.emit('}')
             ctx.indent -= 1
         ctx.emit('} else {')
         ctx.indent += 1
@@ -8415,13 +8442,32 @@ class Compiler(boxclosure.ClosureMixin):
                 return self._emit_virtual(plan, recv_c, mkargs, ctx, f.attr)
             info = self._resolve_method(cname, f.attr)
             if info:
-                argcs = self._bind_args(f.attr, info, args, kwargs, ctx)
+                shadow = (f.attr in self.assigned_attrs and not info.get('is_static')
+                          and not info.get('is_classmethod') and not kwargs
+                          and not any(isinstance(a, ast.Starred) for a in args))
+                pargs = self._precompute_args(args, {}, ctx)[0] if shadow else args
+                argcs = self._bind_args(f.attr, info, pargs, kwargs, ctx)
                 if not info.get('is_static'):
                     argcs = [self._self_arg(info, recv_c)] + argcs
                 t = ctx.tmp()
+                if shadow:
+                    # the method/property may have been replaced by a class store (`C.name = v`)
+                    # or an instance attribute; call the value as CPython's attribute lookup would
+                    self.attr_names.add(f.attr)
+                    sv = ctx.tmp()
+                    ctx.emit('if (ail_attr_shadow_find(%s, g_attr_%s, &%s)) {' % (recv_c, f.attr, sv))
+                    ctx.indent += 1
+                    dyn = self.call_value(sv, pargs, {}, ctx)
+                    ctx.emit('%s = %s;' % (t, dyn))
+                    ctx.indent -= 1
+                    ctx.emit('} else {')
+                    ctx.indent += 1
                 ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t,
                          ''.join(', ' + a for a in argcs)))
                 ctx.check()
+                if shadow:
+                    ctx.indent -= 1
+                    ctx.emit('}')
                 return t
         m = getattr(self, '_m_' + f.attr, None)
         kind = self.infer_kind(recv, ctx)
@@ -9915,8 +9961,21 @@ class Compiler(boxclosure.ClosureMixin):
                     first = False
                     ctx.indent += 1
                     dummy = ctx.tmp()
+                    slot = self.global_slots['class:' + c]
+                    ctx.emit('if (ail_class_dyn_find_upto(((ail_instobj *)%s.o)->cls, g_slots_arr[%d], '
+                             'g_attr_%s, &%s)) { /* the property was replaced by a class assignment */'
+                             % (obj, slot, target.attr, dummy))
+                    ctx.indent += 1
+                    ctx.emit('st = ail_inst_setattr_chk(cx, %s, g_attr_%s, %s);'
+                             % (obj, target.attr, value_c))
+                    ctx.check()
+                    ctx.indent -= 1
+                    ctx.emit('} else {')
+                    ctx.indent += 1
                     ctx.emit('st = %s(cx, &%s, %s, %s);' % (info['cname'], dummy, obj, value_c))
                     ctx.check()
+                    ctx.indent -= 1
+                    ctx.emit('}')
                     ctx.indent -= 1
                 ctx.emit('} else {')
                 ctx.emit('    st = ail_inst_setattr_chk(cx, %s, g_attr_%s, %s);' % (obj, target.attr, value_c))

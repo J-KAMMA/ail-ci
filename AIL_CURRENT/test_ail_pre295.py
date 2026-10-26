@@ -152,6 +152,184 @@ def main():
 main()
 '''
 
+PROPERTY_STORE = r'''class Box:
+    @property
+    def v(self):
+        return 1
+
+
+class Holder:
+    def __init__(self, c):
+        self.c = c
+
+
+def get():
+    return Box
+
+
+def set_param(c, x):
+    c.v = x
+
+
+def set_global(x):
+    global Box
+    Box.v = x
+
+
+def main():
+    b = Box()
+    print(b.v, Box().v)
+    alias = Box
+    local = Box
+    boxes = [Box, Box]
+    holder = Holder(Box)
+    boxes[0].v = 2
+    print(Box.v, b.v)
+    get().v = 3
+    print(Box.v, b.v)
+    holder.c.v = 4
+    print(Box.v, b.v)
+    set_param(Box, 5)
+    print(Box.v, b.v)
+    alias.v = 6
+    print(Box.v, b.v)
+    local.v = 7
+    print(Box.v, b.v)
+    chosen = Box if get() is Box else holder.c
+    chosen.v = 8
+    print(Box.v, b.v)
+    set_global(9)
+    print(Box.v, b.v)
+    d = {"k": Box}
+    d["k"].v = 10
+    name = "v"
+    print(Box.v, b.v, getattr(b, name), hasattr(b, name), vars(b))
+    setattr(Box, "v", 11)
+    print(Box.v, b.v, getattr(b, name))
+    for value in [12, -1.5, "hi", [1, 2], {"k": 1}, True]:
+        Box.v = value
+        print(Box.v, b.v)
+    Box.v = None
+    print(Box.v, b.v)
+
+
+main()
+'''
+
+PROPERTY_INHERITANCE = r'''class Base:
+    @property
+    def v(self):
+        return self._v
+
+    @v.setter
+    def v(self, x):
+        self._v = x
+
+
+class Sub(Base):
+    pass
+
+
+def main():
+    b = Base()
+    b.v = 4
+    s = Sub()
+    s.v = 8
+    print(b.v, s.v, vars(b), vars(s))
+    Sub.v = 2
+    print(b.v, s.v)
+    Base.v = 3
+    print(b.v, s.v, Base.v, Sub.v)
+    b2 = Base()
+    s2 = Sub()
+    print(b2.v, s2.v)
+    b2.v = 4
+    s2.v = 5
+    print(b2.v, b.v, s2.v, s.v)
+    Sub.v = 5
+    Base.v = 6
+    print(b.v, s.v, Base.v, Sub.v)
+    name = "v"
+    print(getattr(b, name), getattr(s, name), hasattr(b, name), hasattr(s, name))
+
+
+main()
+'''
+PROPERTY_THEN_CALL = r'''class Box:
+    @property
+    def v(self):
+        return 1
+
+
+def main():
+    Box.v = 5
+    b = Box()
+    print(b.v)
+    print(b.v())
+
+
+main()
+'''
+
+INSTANCE_SHADOW_CALL = r'''class Box:
+    def v(self):
+        return 1
+
+
+def main():
+    b = Box()
+    b.v = 5
+    print(b.v)
+    print(b.v())
+
+
+main()
+'''
+
+
+METHOD_STORE_REFUSED = r'''class Box:
+    def v(self):
+        return 1
+
+
+def main():
+    Box.v = 5
+    b = Box()
+    print(b.v)
+
+
+main()
+'''
+
+METHOD_SHADOW_READ_REFUSED = r'''class Base:
+    x = 1
+
+
+class Sub(Base):
+    def x(self):
+        return 7
+
+
+def main():
+    print(Sub().x)
+
+
+main()
+'''
+
+PROPERTY_VALUE_READ_REFUSED = r'''class Box:
+    @property
+    def v(self):
+        return 1
+
+
+def main():
+    print(Box.v)
+
+
+main()
+'''
+
 
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
@@ -203,6 +381,53 @@ class Pre295Tests(unittest.TestCase):
 
     def test_new_names(self):
         self.check('new_names', NEW_NAMES)
+
+    def test_property_store(self):
+        self.check('property_store', PROPERTY_STORE)
+
+    def test_property_inheritance(self):
+        self.check('property_inheritance', PROPERTY_INHERITANCE)
+
+    def check_raising(self, slug, text):
+        with tempfile.TemporaryDirectory(prefix='ail-pre295-') as directory:
+            want, want_rc = _cpython(directory, slug, text)
+            self.assertNotEqual(want_rc, 0)
+            for general in (True, False):
+                got, build_err = _build_and_run(directory, '%s_%s' % (slug, 'g' if general else 'd'),
+                                                text, general)
+                self.assertIsNotNone(got, '%s (general=%s)\n%s' % (slug, general, build_err))
+                self.assertEqual(got, (want, want_rc), '%s (general=%s)\n%s'
+                                 % (slug, general, build_err))
+
+    def refuse(self, slug, text, message):
+        with tempfile.TemporaryDirectory(prefix='ail-pre295-') as directory:
+            for general in (True, False):
+                got, build_err = _build_and_run(directory, '%s_%s' % (slug, 'g' if general else 'd'),
+                                                text, general)
+                self.assertIsNotNone(got, '%s (general=%s)\n%s' % (slug, general, build_err))
+                stdout, rc = got
+                self.assertNotEqual(rc, 0, '%s (general=%s) did not refuse: %r'
+                                    % (slug, general, stdout))
+                self.assertIn(message, build_err, '%s (general=%s)\n%s'
+                              % (slug, general, build_err))
+
+    def test_property_then_call(self):
+        self.check_raising('property_then_call', PROPERTY_THEN_CALL)
+
+    def test_instance_shadow_call(self):
+        self.check_raising('instance_shadow_call', INSTANCE_SHADOW_CALL)
+
+    def test_method_store_refused(self):
+        self.refuse('method_store', METHOD_STORE_REFUSED,
+                    "assigning method 'v' on class Box")
+
+    def test_method_shadow_read_refused(self):
+        self.refuse('method_shadow', METHOD_SHADOW_READ_REFUSED,
+                    "reading method/property 'x' through an instance of Sub")
+
+    def test_property_value_read_refused(self):
+        self.refuse('property_value', PROPERTY_VALUE_READ_REFUSED,
+                    "reading method/property 'v' through the class value Box")
 
 
 if __name__ == '__main__':

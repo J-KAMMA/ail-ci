@@ -432,6 +432,14 @@ def lower_class_attributes(tree, Unsupported):
             cls = bases[cls]
         return None
     for c in classdefs:
+        for name in names:
+            if resolve(bases[c.name], name) is None:
+                continue
+            if any(isinstance(m, ast.FunctionDef) and m.name in (name, getter_name(name)) for m in c.body):
+                raise _refusal(Unsupported, c,
+                               '%s.%s is a method and hides the inherited class attribute %s; reading it '
+                               'as a value is not built on this path' % (c.name, name, name))
+    for c in classdefs:
         for name, (kind, value, stmt) in attrs.get(c.name, {}).items():
             above = resolve(bases[c.name], name)
             if above is not None and above[0] != kind:

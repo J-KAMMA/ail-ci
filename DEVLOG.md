@@ -1,3 +1,27 @@
+## 2026-10-26 - pre295 review fixes: property/method-named class stores (job-pre295-10270439)
+
+The review's three defects are fixed.  A property-named class store (`Box.v = 5` over
+`@property v`) now replaces the property for class and instance reads, including `getattr`,
+`hasattr`, inherited properties, subclass stores and a later instance assignment: the general
+path checks the class chain's dynamic entries before invoking a getter or a property setter,
+and a call through a name that may be replaced (`b.v()`) looks the value up first, so a stored
+non-callable raises CPython's `TypeError` instead of running the old getter (this also fixes an
+instance attribute shadowing a method).  A method-named class store is refused by name at run
+time (`NotImplementedError: assigning method 'v' on class Box ...`) instead of being accepted
+and then ignored by the direct method call path; an inherited method is refused too, while
+assigning a new name or hiding a property/attribute still works.  An instance read of a method/property value is now refused by
+name on the general path instead of crashing with `AttributeError` after the class-attribute
+copy was removed, and the typed path refuses the inherited-attribute/method-shadow case by
+name.  `del C.attr` is unchanged.  Probes in `/tmp/probes`: `p_prop`, `p_prop_main`,
+`p_prop_routes`, `p_prop_inherit`, `p_prop_setter`, `p_prop_exc`, `p_prop_then_call`,
+`p_prop_inherited_method`, `p_meth`, `p_meth_main`, `p_meth_direct`, `p_meth_routes`,
+`p_meth_inherit`, `p_meth_setattr`, `p_new_after_method`, `p_inst_shadow_meth`,
+`p_inst_shadow_meth_call`, `p_shadow` and `p_shadow_call` match CPython or are refused by name
+as described.  Tests on the final tree: `test_ail_pre295` (11 tests), `test_ail_typed_inherit`,
+`test_ail_dunders`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` (6 modules, 0 failed).
+`tools/update_manifest.py --check` rc 0.
+
 ## 2026-10-26 - class attribute stores through a class value (job-pre295-10270439)
 
 The pre283 review's first still-differing item reproduces here: `Box.v = 2` and every route to the
