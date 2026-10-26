@@ -1,11 +1,6 @@
-**Modules: one gap.** Write 8 small multi-file programs, using the way `test_ail_multifile.py` builds them. Cover:
-- `from pkg import sub` where sub is a module;
-- `import pkg.sub as s`;
-- a module-level constant used as a default argument in another module;
-- a class imported from another module and subclassed;
-- circular imports that CPython allows.
+**Your change breaks other tests in the full suite.** On top of the current integration branch, these test modules fail with your change and pass without it: test_ail_fuzz59 test_ail_grid_return test_ail_numeric_bindings test_ail_numeric_profiles test_ail_numeric_profiles_native test_ail_record_initializers test_ail_sdk test_ail_sdk_environment test_ail_tcp_json_deadlines test_ail_tcp_json_lines_poll_resources.
 
-Find the first one that is refused or differs from CPython. Make it work like CPython, or give a clear refusal naming the user's file and line. Add it to a new `test_ail_modules3.py`, then commit.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find what your change broke, and fix it so they pass again while keeping your own fix and its test. If your fix cannot coexist with them, revert it and say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
@@ -26,5 +21,11 @@ Find the first one that is refused or differs from CPython. Make it work like CP
 - **Budget:** stop at the budget note, leaving a committed, consistent state.
 - **Report:** keep it brief, with numbers.
 - Test data: email addresses only on example.com / example.org (the public export audit rejects any other domain).
+
+**Work in few steps** (each step costs model time):
+- Write all probe programs first, then run them together with one command, for example a loop over `bash ~/tools/cmp.sh`, instead of one command per program.
+- Search only inside the repository (`grep -rn ... AIL_CURRENT tools`), never across `/home` or `/tmp`.
+- Read a file once, using a range that is large enough, instead of many small reads.
+- Do not re-run a test that already passed unless you changed code since.
 
 **Where you run:** a GitHub Actions runner (4 cores). Commit your work on the current branch; do not push.
