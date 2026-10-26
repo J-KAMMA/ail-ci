@@ -481,6 +481,12 @@ class DefaultBuild(unittest.TestCase):
         source both directly and through a dict value, so its keys print exact big ints on both builds."""
         self.check_both("b1_nestedlower")
 
+    def test_b1c_percent_float_dunder_errors(self):
+        """%f/%e/%g of an instance: __float__ must return a float (CPython names the class and the returning type),
+        __index__ must return an int (no class name), and a non-int __index__ is an error even when it is a float;
+        reached directly and through an argument, a list item, an attribute and a dict value on both builds."""
+        self.check_both("b1c_format_float_dunders")
+
     def test_b1b_bool_probes_on_both_builds(self):
         """Bools are ints (B1b): a bool sum that grows by squaring at module level, in a function, through a class
         attribute, and as a `**` base print CPython's int on both builds (65536 for the power probe)."""
