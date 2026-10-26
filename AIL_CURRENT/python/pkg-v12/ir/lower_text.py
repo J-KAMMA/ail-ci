@@ -413,6 +413,9 @@ class TextLowering(object):
             if self.is_builtin(name) and name in ('bin', 'oct', 'hex') and len(node.args) == 1:
                 v = self.coerce(self.expr(node.args[0]), I.TINT)
                 return self.rt('tint_' + name, [v])
+            if self.is_builtin(name) and name == 'chr' and len(node.args) == 1 and not node.keywords:
+                v = self.coerce(self.expr(node.args[0]), I.TINT)
+                return self.rt('tint_chr', [v])
             raise self.NotS0('str call of %r' % name)
         if isinstance(f, ast.Attribute):
             return self.str_method(node)

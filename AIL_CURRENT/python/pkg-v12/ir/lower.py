@@ -579,6 +579,10 @@ class Lowering(TextLowering):
             t = self.function.results[0]
             if is_list(t) or t == BYTEARRAY or t in (I.STRV, BYTES):
                 raise NotS0('a function returning a container or text that can fall off its end')
+            if t == TINT:
+                zero = self.b.value('tint.from', [self.const(I.I64, 0)], TINT)
+                self.b.emit('return', [zero])
+                return
             self.b.emit('return', [self.const(t, 0.0 if t == I.F64 else 0)])
         else:
             self.b.emit('return', [])
@@ -2590,7 +2594,9 @@ class Lowering(TextLowering):
             return self.b.value(f.split('_')[1], [a, b], I.I64, {'mode': 'wrap'})
         if f == 'ord' and len(args) == 1 and self.text_kind(args[0]) == 'str' \
                 and (isinstance(args[0], ast.Subscript)
-                     or (isinstance(args[0], ast.Name) and args[0].id in self.onecp)):
+                     or (isinstance(args[0], ast.Name) and args[0].id in self.onecp)
+                     or (isinstance(args[0], ast.Call) and isinstance(args[0].func, ast.Name)
+                         and args[0].func.id == 'chr')):
             return self.rt('str_point', [self.expr(args[0])])
         if f == 'float' and len(args) == 1:
             v = self.expr(args[0])

@@ -88,6 +88,8 @@ _entry('tint_mod2', (I.TINT,), (I.TINT,), 'ail_tint_mod2({0})', _PURE, parts=('T
 _entry('tint_bin', (I.TINT,), (S,), 'ail_tint_bin({A}, {0})', _ALLOC, parts=('TINTT', 'STR'), arena='s')
 _entry('tint_oct', (I.TINT,), (S,), 'ail_tint_oct({A}, {0})', _ALLOC, parts=('TINTT', 'STR'), arena='s')
 _entry('tint_hex', (I.TINT,), (S,), 'ail_tint_hex({A}, {0})', _ALLOC, parts=('TINTT', 'STR'), arena='s')
+_entry('tint_chr', (I.TINT,), (S,), 'ail_tint_chr({A}, {0})',
+       Effects(allocs=[ARENA], raises=[VALUE, DIE]), parts=('TINTT', 'STR'), arena='s')
 _entry('fmt_int', (N,), (S,), 'ail_fmt_spec_int({A}, {0}, {width}, {align}, {zero}, {fill})', _ALLOC,
        parts=('STR', 'FMT'), arena='s', attrs=('width', 'align', 'zero', 'fill'))
 _entry('fmt_float', (F,), (S,), 'ail_fmt_spec_float({A}, {0}, {width}, {align}, {zero}, {prec}, {fill})', _ALLOC,

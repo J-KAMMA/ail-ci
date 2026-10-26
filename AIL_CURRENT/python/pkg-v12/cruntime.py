@@ -1582,6 +1582,33 @@ static inline int64_t ail_str_to_int(ail_str s) {
     if (s.n == 1 && (uint32_t)s.p[0] - 48u < 10u) return (int64_t)s.p[0] - 48;
     return ail__str_to_int_full(s);
 }
+static void ail__str_to_int_fail(ail_str s) {
+    static const char head[] = "invalid literal for int() with base 10: ";
+    int has_sq = 0, has_dq = 0;
+    for (int64_t i = 0; i < s.n; i++) {
+        uint32_t c = ail_str_point(s, i);
+        if (c == '\'') has_sq = 1; else if (c == '"') has_dq = 1;
+        i = ail_str_next_unit(s, i) - 1;
+    }
+    int quote = (has_sq && !has_dq) ? '"' : '\'';
+    char *msg = (char *)malloc((size_t)sizeof head + (size_t)s.n * 10 + 3);
+    if (!msg) ail_die("out of memory");
+    int64_t o = 0;
+    memcpy(msg, head, sizeof head - 1); o += (int64_t)sizeof head - 1;
+    msg[o++] = (char)quote;
+    for (int64_t i = 0; i < s.n; i = ail_str_next_unit(s, i)) {
+        uint32_t c = ail_str_point(s, i);
+        if ((int)c == quote || c == '\\') { msg[o++] = '\\'; msg[o++] = (char)c; }
+        else if (c == '\n') { msg[o++] = '\\'; msg[o++] = 'n'; }
+        else if (c == '\r') { msg[o++] = '\\'; msg[o++] = 'r'; }
+        else if (c == '\t') { msg[o++] = '\\'; msg[o++] = 't'; }
+        else if (c < 0x20 || c == 0x7f) { char hx[5]; snprintf(hx, sizeof hx, "\\x%02x", (unsigned)c); memcpy(msg + o, hx, 4); o += 4; }
+        else o += ail_utf8_put((uint8_t *)msg + o, c);
+    }
+    msg[o++] = (char)quote;
+    ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE, (const uint8_t *)msg, o, 0));
+    free(msg);
+}
 static int64_t ail__str_to_int_full(ail_str s) {
     {
         /* The plain case -- an optional '-' and 1..18 ASCII digits, nothing else (no whitespace to trim,
@@ -1602,9 +1629,13 @@ static int64_t ail__str_to_int_full(ail_str s) {
     char *b = ail__str_ascii(s, stackbuf, (int64_t)sizeof stackbuf, &len);
     int rc = ail__asc_to_int(b, len, 10, &v, &ndigits);
     if (b != stackbuf) free(b);
-    if (rc == 1) ail_raise_named(AIL_EXC_VALUE);
+    if (rc == 1) ail__str_to_int_fail(s);
     if (rc == 2) ail_die("integer overflow");
-    if (rc == 3) ail_raise_named(AIL_EXC_VALUE);
+    if (rc == 3) {
+        char text[192];
+        int n = snprintf(text, sizeof text, "Exceeds the limit (4300 digits) for integer string conversion: value has %lld digits; use sys.set_int_max_str_digits() to increase the limit", (long long)ndigits);
+        ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE, (const uint8_t *)text, n, 1));
+    }
     return v;
 }
 /* `float(<str>)` -- AIL_TASK_p3shapes_20260916.md mechanism 3, the one str-to-number conversion

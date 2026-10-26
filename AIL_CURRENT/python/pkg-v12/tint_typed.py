@@ -437,6 +437,7 @@ static inline int ail_tint__digit(uint8_t c) {
 static ail_tint ail_tint__parse_big(const char *t, int64_t n, int64_t base) {
     int64_t i = 0, neg = 0, eff = base;
     while (i < n && (t[i] == ' ' || t[i] == '\t' || t[i] == '\n' || t[i] == '\r' || t[i] == '\v' || t[i] == '\f')) i++;
+    while (n > i && (t[n - 1] == ' ' || t[n - 1] == '\t' || t[n - 1] == '\n' || t[n - 1] == '\r' || t[n - 1] == '\v' || t[n - 1] == '\f')) n--;
     if (i < n && (t[i] == '+' || t[i] == '-')) { neg = t[i] == '-'; i++; }
     if (base == 0) {
         if (i + 1 < n && t[i] == '0' && ((t[i + 1] | 0x20) == 'x' || (t[i + 1] | 0x20) == 'o' || (t[i + 1] | 0x20) == 'b')) {
@@ -490,6 +491,17 @@ static AIL_BIGFN ail_tint ail_tint__parse_bytes(ail_sarena *A, const uint8_t *p,
     free(b);
     ail_tint__int_bytes_error(A, p, n, base);
     return ail_tint_from_int64(0);
+}
+static AIL_BIGFN ail_str ail_tint_chr(ail_sarena *A, ail_tint x) {
+    int64_t v;
+    if (!ail_tint_to_int64(x, &v) || v < 0 || v > 0x10FFFF || (v >= 0xD800 && v <= 0xDFFF)) {
+        static const char msg[] = "chr() arg not in range(0x110000)";
+        ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE, (const uint8_t *)msg,
+                                                (int64_t)(sizeof msg - 1), 1));
+    }
+    uint8_t *q = ail_sarena_alloc(A, 4);
+    int n = ail_utf8_put(q, (uint32_t)v);
+    return (ail_str){q, n, n == 1};
 }
 static inline ail_tint ail_tint_from_str(ail_sarena *A, int64_t base, ail_str s) {
     return ail_tint__parse_text(A, s, base);
