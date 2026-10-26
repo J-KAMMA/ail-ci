@@ -1,5 +1,16 @@
 # DEVLOG
 
+## 2026-10-26 - suite fix: refresh C pins for noreturn traps (job-perf3-10270015)
+
+The accepted perf3 change adds two `__attribute__((noreturn))` forward declarations to the
+emitted runtime, so the full generated C for every program now differs from the old baseline.
+`test_ail_numeric_bindings` and `test_ail_record_initializers` pinned the pre-change bytes and
+failed even though the programs' behaviour is unchanged. Refreshed their five scalar hashes; the
+only C difference from the old pins is the two intended declarations. Also carried the upstream
+`bench/compare.py` `fmt` fix (already on integration, this branch predated it) so
+`test_ail_pre110` passes. Probes `/tmp/probes/p_*.py` (no trap, sources, nested, return, uncaught)
+match CPython in both builds.
+
 ## 2026-10-23 - binary_cursor_records: runtime traps are noreturn (job-perf3-10240012)
 
 `BinaryCursor__remaining` checks `0 <= position <= len(data)` and then calls `ail_raise_named`, but the
