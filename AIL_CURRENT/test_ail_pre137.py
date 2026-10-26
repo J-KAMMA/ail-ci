@@ -122,8 +122,9 @@ def inner():
 
 def run():
     log = []
+    neg = 0 - 1
     try:
-        list(itertools.permutations(gen(log), -1))
+        list(itertools.permutations(gen(log), neg))
     except ValueError as e:
         print("gen", type(e).__name__, str(e), e.args, log)
     try:
