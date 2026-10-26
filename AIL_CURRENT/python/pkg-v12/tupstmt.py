@@ -273,6 +273,12 @@ class Stmts:
                 self.fill(ct[2], vt)
                 value, _ = self.coerce(value, vt, ct[2])
                 return [ast.Expr(value=call(self.table(ct).fn('set'), c, k, value))]
+            # A set / frozenset of tuples stored into a container that is not a table dict cannot be
+            # lowered: the table class it would build never matches the plain-key dict it is stored in.
+            if is_table_set(deep(self.typeof(tgt.slice))):
+                self.refuse(st, 'a set / frozenset of tuples used as a dict key is not built here; build the '
+                                'dict and its frozenset key as module-level names, or use a frozenset of '
+                                'int / str')
             k, kt = self.exv(tgt.slice, ct[1] if isinstance(ct, tuple) and ct[0] == 'dict' else None)
             if isinstance(ct, tuple) and ct[0] == 'dict':
                 self.fill(ct[1], kt)
@@ -292,6 +298,8 @@ class Stmts:
         tgts = st.targets
         key = (self.fnkey, getattr(st, "lineno", 0), getattr(st, "col_offset", 0))
         if len(tgts) == 1 and isinstance(tgts[0], ast.Name) and isinstance(st.value, ast.Lambda):
+            if tgts[0].id in getattr(self, 'closure_reads', ()):
+                return [st]
             return self.lam_assign(st)
         # a, b = x, y  (parallel assignment with a literal tuple on the right)
         if len(tgts) == 1 and isinstance(tgts[0], (ast.Tuple, ast.List)) and isinstance(st.value, ast.Tuple) \

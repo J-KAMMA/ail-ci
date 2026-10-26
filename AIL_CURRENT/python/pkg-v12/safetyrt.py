@@ -207,6 +207,23 @@ static inline ail_st ail2b_need(ail_ctx *cx, ail_obj s) {
     if (s.tag != AIL_T_STR) return ail_raise_c(cx, AIL_B_TYPEERROR, "a bytes-like object is required");
     return AIL_OK;
 }
+/* a start/end bound of find/rfind/count/index/...: CPython's _PyEval_SliceIndex (an int, a bool,
+   or an instance's __index__); None is handled by the caller */
+static inline ail_st ail2b_index(ail_ctx *cx, ail_obj *out, ail_obj x) {
+    if (x.tag == AIL_T_INT || x.tag == AIL_T_BOOL) { *out = ail_box_int(x.i); return AIL_OK; }
+    if (x.tag == AIL_T_INST) {
+        ail_d1_fn f = ail_dun1(x, AIL_D1_INDEX);
+        if (f) {
+            ail_obj r; ail_st st = f(cx, &r, x);
+            if (st != AIL_OK) return st;
+            if (r.tag == AIL_T_INT || r.tag == AIL_T_BOOL) { *out = ail_box_int(r.i); return AIL_OK; }
+            char buf[160];
+            snprintf(buf, sizeof buf, "__index__ returned non-int (type %s)", ail__tname_c(r));
+            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+        }
+    }
+    return ail_raise_c(cx, AIL_B_TYPEERROR, "slice indices must be integers or None or have an __index__ method");
+}
 /* sys.stdin.buffer.read(n): n < 0 reads to the end */
 static inline ail_st ail2b_stdin(ail_ctx *cx, ail_obj *out, ail_obj n) {
     ail_st st = ail2_stdin_flush(cx);
@@ -422,6 +439,32 @@ static inline ail_st ail2b_repr(ail_ctx *cx, ail_obj *out, ail_obj so) {
     *out = ail_str_buf_done(bu, o);
     return AIL_OK;
 }
+/* bytearray repr: CPython escapes a single quote even when the outer quote is double (unlike
+   bytes), so `bytearray(b"'")` is bytearray(b"\'"). */
+static inline ail_st ail2ba_repr(ail_ctx *cx, ail_obj *out, ail_obj so) {
+    ail_st st = ail2b_need(cx, so); if (st != AIL_OK) return st;
+    ail_str s = ail_view_to_str(so);
+    int sq = 0, dq = 0;
+    for (int64_t i = 0; i < s.n; i++) { uint16_t c = ail_chr(s, i); if (c == '\'') sq = 1; else if (c == '"') dq = 1; }
+    uint16_t q = (sq && !dq) ? '"' : '\'';
+    ail_strbuild bu = ail_str_buf1(cx, s.n * 4 + 2, so);
+    int64_t o = 0;
+    bu.buf[o++] = q;
+    for (int64_t i = 0; i < s.n; i++) {
+        uint16_t c = ail_chr(s, i);
+        if (c == '\'' || c == '\\') { bu.buf[o++] = '\\'; bu.buf[o++] = c; }
+        else if (c == '\t') { bu.buf[o++] = '\\'; bu.buf[o++] = 't'; }
+        else if (c == '\n') { bu.buf[o++] = '\\'; bu.buf[o++] = 'n'; }
+        else if (c == '\r') { bu.buf[o++] = '\\'; bu.buf[o++] = 'r'; }
+        else if (c < 0x20 || c >= 0x7f) {
+            static const char hx[] = "0123456789abcdef";
+            bu.buf[o++] = '\\'; bu.buf[o++] = 'x'; bu.buf[o++] = hx[(c >> 4) & 15]; bu.buf[o++] = hx[c & 15];
+        } else bu.buf[o++] = c;
+    }
+    bu.buf[o++] = q;
+    *out = ail_str_buf_done(bu, o);
+    return AIL_OK;
+}
 static inline int ail2b_isspace(uint16_t c) { return c == ' ' || (c >= 9 && c <= 13); }
 static inline int ail2b_isupper(uint16_t c) { return c >= 'A' && c <= 'Z'; }
 static inline int ail2b_islower(uint16_t c) { return c >= 'a' && c <= 'z'; }
@@ -493,7 +536,8 @@ static inline ail_st ail2b_split_ws(ail_ctx *cx, ail_obj *out, ail_obj so, ail_o
             while (i < n && ail2b_isspace(ail_chr(s, i))) i++;
             if (i >= n) break;
             int64_t j = i;
-            if (ms >= 0 && cnt >= ms) { j = n; while (j > i && ail2b_isspace(ail_chr(s, j - 1))) j--; }
+            /* CPython's remainder after the last split keeps its trailing whitespace. */
+            if (ms >= 0 && cnt >= ms) j = n;
             else while (j < n && !ail2b_isspace(ail_chr(s, j))) j++;
             ail_list_append(cx, fr.slots[1], ail_str_view(so.sv.backing, so.sv.off + i, j - i));
             cnt++; i = j;
@@ -506,7 +550,8 @@ static inline ail_st ail2b_split_ws(ail_ctx *cx, ail_obj *out, ail_obj so, ail_o
             while (j > 0 && ail2b_isspace(ail_chr(s, j - 1))) j--;
             if (j <= 0) break;
             int64_t i = j;
-            if (ms >= 0 && cnt >= ms) { i = 0; while (i < j && ail2b_isspace(ail_chr(s, i))) i++; }
+            /* CPython's rsplit remainder keeps its leading whitespace too. */
+            if (ms >= 0 && cnt >= ms) i = 0;
             else while (i > 0 && !ail2b_isspace(ail_chr(s, i - 1))) i--;
             ail_list_append(cx, f2.slots[0], ail_str_view(so.sv.backing, so.sv.off + i, j - i));
             cnt++; j = i;
@@ -662,8 +707,9 @@ static inline ail_obj ail2f_done(ail_ctx *cx, ail2f_buf *b) {
     free(b->p); b->p = NULL;
     return ail_str_buf_done(bu, b->n);
 }
-typedef struct { uint16_t fill; char align, sign; int alt, zero, z, has_width, has_prec; int64_t width, prec; char group, type; } ail2f_spec;
-/* 0, or -1 with the ValueError text in msg */
+typedef struct { uint16_t fill; char align, sign; int alt, zero, z, has_width, has_prec; int64_t width, prec; char group, type, has_type; uint16_t wide_type; int has_wide_type; } ail2f_spec;
+/* 0, or -1 with the ValueError text in msg; a whole unparseable spec says
+   "Invalid format specifier" so the caller can build the full CPython message. */
 static inline int ail2f_parse(ail_str s, ail2f_spec *f, char *msg, size_t msz) {
     memset(f, 0, sizeof *f); f->fill = ' ';
     int64_t i = 0, n = s.n;
@@ -679,8 +725,17 @@ static inline int ail2f_parse(ail_str s, ail2f_spec *f, char *msg, size_t msz) {
         if (f->width > 100000000) { snprintf(msg, msz, "Too many decimal digits in format string"); return -1; }
         f->width = f->width * 10 + (ail_chr(s, i++) - '0');
     }
-    if (i < n && (ail_chr(s, i) == ',' || ail_chr(s, i) == '_')) f->group = (char)ail_chr(s, i++);
-    if (i < n && (ail_chr(s, i) == ',' || ail_chr(s, i) == '_')) { snprintf(msg, msz, "Cannot specify both ',' and '_'."); return -1; }
+    if (i < n && (ail_chr(s, i) == ',' || ail_chr(s, i) == '_')) {
+        f->group = (char)ail_chr(s, i++);
+        if (i < n && (ail_chr(s, i) == ',' || ail_chr(s, i) == '_')) {
+            uint16_t g2 = ail_chr(s, i);
+            if (g2 != (uint16_t)f->group) { snprintf(msg, msz, "Cannot specify both ',' and '_'."); return -1; }
+            /* The second copy is the last character: CPython reads it as the spec's type and names
+               the clash. Anything after it makes the field parser reject the whole spec instead. */
+            if (i == n - 1) { snprintf(msg, msz, "Cannot specify '%c' with '%c'.", f->group, f->group); return -1; }
+            snprintf(msg, msz, "Invalid format specifier"); return -1;
+        }
+    }
     if (i < n && ail_chr(s, i) == '.') {
         i++;
         if (!(i < n && ail_chr(s, i) >= '0' && ail_chr(s, i) <= '9')) { snprintf(msg, msz, "Format specifier missing precision"); return -1; }
@@ -693,10 +748,57 @@ static inline int ail2f_parse(ail_str s, ail2f_spec *f, char *msg, size_t msz) {
     if (n - i > 1) { snprintf(msg, msz, "Invalid format specifier"); return -1; }
     if (i < n) {
         uint16_t t = ail_chr(s, i);
-        if (t > 127) { snprintf(msg, msz, "Invalid format specifier"); return -1; }
-        f->type = (char)t;
+        if (t > 127) { f->wide_type = t; f->has_wide_type = 1; }
+        else { f->type = (char)t; f->has_type = 1; }
     }
     return 0;
+}
+/* CPython's wording for a conversion/type character it does not know: controls up to and
+   including space, or a non-ASCII code point, are shown as \x%x; the rest through DEL literally. */
+static inline ail_st ail2f_unknown_code(ail_ctx *cx, uint16_t t, const char *tn) {
+    char msg[128];
+    if (t <= 0x20 || t > 0x7f)
+        snprintf(msg, sizeof msg, "Unknown format code '\\x%x' for object of type '%s'", (unsigned)t, tn);
+    else
+        snprintf(msg, sizeof msg, "Unknown format code '%c' for object of type '%s'", (char)t, tn);
+    return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
+}
+/* CPython validates a grouping option against the conversion character before it checks the
+   value, so a non-ASCII type is reported as a grouping conflict, not an unknown code. */
+static inline ail_st ail2f_group_code(ail_ctx *cx, char group, uint16_t t) {
+    char msg[128];
+    if (t <= 0x20 || t > 0x7f)
+        snprintf(msg, sizeof msg, "Cannot specify '%c' with '\\x%x'.", group, (unsigned)t);
+    else
+        snprintf(msg, sizeof msg, "Cannot specify '%c' with '%c'.", group, (char)t);
+    return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
+}
+static inline ail_st ail2f_unsupported(ail_ctx *cx, ail_obj x) {
+    char msg[160], nb[80];
+    const char *tn = ail_type_name(x.tag);
+    if ((x.tag == AIL_T_INST || x.tag == AIL_T_EXC) && ((ail_instobj *)x.o)->cls.tag == AIL_T_CLASS) {
+        ail_str cs = ail_view_to_str(((ail_classobj *)((ail_instobj *)x.o)->cls.o)->name);
+        size_t k = 0;
+        for (int64_t i = 0; i < cs.n && k + 1 < sizeof nb; i++) { uint32_t ch = (uint32_t)ail_chr(cs, i); nb[k++] = ch < 128 ? (char)ch : '?'; }
+        nb[k] = 0; tn = nb;
+    }
+    snprintf(msg, sizeof msg, "unsupported format string passed to %s.__format__", tn);
+    return ail_raise_c(cx, AIL_B_TYPEERROR, msg);
+}
+/* The full CPython text for an over-long/otherwise unparseable format spec, keeping the
+   spec itself (which may be non-ASCII) in the runtime's own 16-bit units. */
+static inline ail_st ail2f_bad_spec(ail_ctx *cx, ail_obj specobj, ail_obj x) {
+    static const char head[] = "Invalid format specifier '";
+    char tail[96];
+    int tl = snprintf(tail, sizeof tail, "' for object of type '%s'", ail_type_name(x.tag));
+    if (tl < 0) tl = 0;
+    ail_str sp = ail_view_to_str(specobj);
+    int64_t hn = (int64_t)sizeof head - 1;
+    ail_strbuild bu = ail_str_buf2(cx, hn + sp.n + tl, specobj, x);
+    for (int64_t i = 0; i < hn; i++) bu.buf[i] = (unsigned char)head[i];
+    if (sp.n) ail_str_put(bu.buf + hn, sp);
+    for (int64_t i = 0; i < tl; i++) bu.buf[hn + sp.n + i] = (unsigned char)tail[i];
+    return ail_raise(cx, cx->builtin_cls[AIL_B_VALUEERROR], ail_str_buf_done(bu, hn + sp.n + tl));
 }
 /* body is the digits (and point / exponent) without sign; prefix is "0x" etc. Numbers: default align '>' */
 static inline ail_obj ail2f_pad_num(ail_ctx *cx, const char *sign, const char *prefix, const char *body, ail2f_spec *f) {
@@ -755,6 +857,19 @@ static inline ail_obj ail2f_pad_str(ail_ctx *cx, ail_str s, int64_t len, ail2f_s
     return ail2f_done(cx, &o);
 }
 static inline const char *ail2f_signstr(int neg, char sign) { return neg ? "-" : sign == '+' ? "+" : sign == ' ' ? " " : ""; }
+/* CPython's '#' on the type-less repr form keeps a decimal point in the mantissa */
+static inline void ail2f_alt_point(char *out, size_t osz) {
+    if (strchr(out, '.')) return;
+    char *e = strpbrk(out, "eE");
+    if (e) {
+        if (strlen(out) + 2 > osz) return;
+        memmove(e + 1, e, strlen(e) + 1);
+        *e = '.';
+    } else if (out[0] >= '0' && out[0] <= '9') {
+        size_t L = strlen(out);
+        if (L + 3 <= osz) { out[L] = '.'; out[L + 1] = '0'; out[L + 2] = 0; }
+    }
+}
 /* the digits of a float in one of e E f F g G % or the repr form (type 0) */
 static inline void ail2f_float_body(char *out, size_t osz, double v, ail2f_spec *f, char type) {
     if (isinf(v) || isnan(v)) {
@@ -769,6 +884,7 @@ static inline void ail2f_float_body(char *out, size_t osz, double v, ail2f_spec 
     char fmt[16];
     if (type == 0 && !f->has_prec) {
         ail_fmt_float(out, osz, v);
+        if (f->alt) ail2f_alt_point(out, osz);
         return;
     }
     if (type == 0) {
@@ -787,6 +903,7 @@ static inline void ail2f_float_body(char *out, size_t osz, double v, ail2f_spec 
             if (L && out[L - 1] == '.') { out[L] = '0'; out[L + 1] = 0; }
             else if (!strchr(out, '.')) strcat(out, ".0");
         }
+        if (f->alt) ail2f_alt_point(out, osz);
         return;
     }
     if (type == 'n') type = 'g';
@@ -803,22 +920,42 @@ static inline int ail2f_body_zero(const char *b) {
     }
     return digits;
 }
+/* CPython prints an unknown format code with PyUnicode_FromFormat's %c escaping:
+   control characters and code points above U+007F become \x<hex>, the rest stay as written.
+   A NUL byte is a format code of its own (format(1, '\0')), not the end of the spec. */
+static inline void ail2f_code_text(char *out, size_t osz, uint16_t c) {
+    if (c <= 0x20 || c > 0x7f) snprintf(out, osz, "\\x%x", (unsigned)c);
+    else snprintf(out, osz, "%c", (char)c);
+}
 static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {
     if (specobj.tag != AIL_T_STR) return ail_raise_c(cx, AIL_B_TYPEERROR, "format() argument 2 must be str");
     ail_str spec = ail_view_to_str(specobj);
     if (spec.n == 0) { *out = ail_obj_str(cx, x); return AIL_OK; }
+    /* object.__format__ accepts only an empty spec for every type without a formatter of its
+       own (None, list, dict, bytes, a user instance without __format__ ...). */
+    if (x.tag != AIL_T_STR && x.tag != AIL_T_INT && x.tag != AIL_T_BOOL && x.tag != AIL_T_FLOAT)
+        return ail2f_unsupported(cx, x);
     ail2f_spec f; char msg[160];
-    if (ail2f_parse(spec, &f, msg, sizeof msg)) return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
+    if (ail2f_parse(spec, &f, msg, sizeof msg)) {
+        if (!strcmp(msg, "Invalid format specifier")) return ail2f_bad_spec(cx, specobj, x);
+        return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
+    }
     char type = f.type;
-    if (f.group && type) {
-        /* CPython checks the grouping against the type before it looks at the value */
-        if (type == 'n' || type == 's' || type == 'c' || (f.group == ',' && (type == 'b' || type == 'o' || type == 'x' || type == 'X'))) {
-            snprintf(msg, sizeof msg, "Cannot specify '%c' with '%c'.", f.group, type);
-            return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
-        }
+    if (f.group) {
+        /* CPython checks the grouping against the type before it looks at the value: ',' is
+           allowed for d/e/E/f/F/g/G/%, '_' also for b/o/x/X, and every other type character
+           (s, c, an unknown ASCII one, a control or a non-ASCII code point) conflicts.  A NUL
+           is "no type" here (the int/str paths still report it as an unknown code). */
+        int ok = !f.has_wide_type && (!type || type == 'd' || type == 'e' || type == 'E'
+                 || type == 'f' || type == 'F' || type == 'g' || type == 'G' || type == '%'
+                 || (f.group == '_'
+                    && (type == 'b' || type == 'o' || type == 'x' || type == 'X')));
+        if (!ok) return ail2f_group_code(cx, f.group, f.has_wide_type ? f.wide_type : (unsigned char)type);
     }
     if (x.tag == AIL_T_STR) {
-        if (type && type != 's') { snprintf(msg, sizeof msg, "Unknown format code '%c' for object of type 'str'", type); return ail_raise_c(cx, AIL_B_VALUEERROR, msg); }
+        if (f.has_wide_type) return ail2f_unknown_code(cx, f.wide_type, "str");
+        if (f.has_type && type != 's') return ail2f_unknown_code(cx, (unsigned char)type, "str");
+        if (f.sign == ' ') return ail_raise_c(cx, AIL_B_VALUEERROR, "Space not allowed in string format specifier");
         if (f.sign) return ail_raise_c(cx, AIL_B_VALUEERROR, "Sign not allowed in string format specifier");
         if (f.group) { snprintf(msg, sizeof msg, "Cannot specify '%c' with 's'.", f.group); return ail_raise_c(cx, AIL_B_VALUEERROR, msg); }
         if (f.z) return ail_raise_c(cx, AIL_B_VALUEERROR, "Negative zero coercion (z) not allowed in string format specifier");
@@ -831,15 +968,14 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
         return AIL_OK;
     }
     if (x.tag == AIL_T_INT || x.tag == AIL_T_BOOL) {
+        if (f.has_wide_type) return ail2f_unknown_code(cx, f.wide_type, x.tag == AIL_T_BOOL ? "bool" : "int");
         if (type == 'e' || type == 'E' || type == 'f' || type == 'F' || type == 'g' || type == 'G' || type == '%') {
             char body[400]; double d = (double)x.i;
             ail2f_float_body(body, sizeof body, fabs(d), &f, type);
             *out = ail2f_pad_num(cx, ail2f_signstr(d < 0, f.sign), "", body, &f); return AIL_OK;
         }
-        if (type && type != 'd' && type != 'n' && type != 'b' && type != 'o' && type != 'x' && type != 'X' && type != 'c') {
-            snprintf(msg, sizeof msg, "Unknown format code '%c' for object of type '%s'", type, x.tag == AIL_T_BOOL ? "bool" : "int");
-            return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
-        }
+        if (f.has_type && type != 'd' && type != 'n' && type != 'b' && type != 'o' && type != 'x' && type != 'X' && type != 'c')
+            return ail2f_unknown_code(cx, (unsigned char)type, x.tag == AIL_T_BOOL ? "bool" : "int");
         if (f.has_prec) return ail_raise_c(cx, AIL_B_VALUEERROR, "Precision not allowed in integer format specifier");
         if (f.z) return ail_raise_c(cx, AIL_B_VALUEERROR, "Negative zero coercion (z) not allowed in integer format specifier");
         if (type == 'c') {
@@ -866,10 +1002,10 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
         return AIL_OK;
     }
     if (x.tag == AIL_T_FLOAT) {
-        if (type && type != 'e' && type != 'E' && type != 'f' && type != 'F' && type != 'g' && type != 'G' && type != '%' && type != 'n') {
-            snprintf(msg, sizeof msg, "Unknown format code '%c' for object of type 'float'", type);
-            return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
-        }
+        /* A NUL type is accepted for a float (CPython stops its float parser at the NUL). */
+        if (f.has_wide_type) return ail2f_unknown_code(cx, f.wide_type, "float");
+        if (type && type != 'e' && type != 'E' && type != 'f' && type != 'F' && type != 'g' && type != 'G' && type != '%' && type != 'n')
+            return ail2f_unknown_code(cx, (unsigned char)type, "float");
         if (f.group && type == 'n') { snprintf(msg, sizeof msg, "Cannot specify '%c' with 'n'.", f.group); return ail_raise_c(cx, AIL_B_VALUEERROR, msg); }
         double d = ail_float_val(x);
         char body[400];
@@ -879,18 +1015,7 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
         *out = ail2f_pad_num(cx, ail2f_signstr(neg, f.sign), "", body, &f);
         return AIL_OK;
     }
-    if (x.tag == AIL_T_NONE) return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported format string passed to NoneType.__format__");
-    /* anything else formats its str() as a string would, the way object.__format__ does for an empty spec only */
-    const char *tn = ail_type_name(x.tag);
-    char nb[80];
-    if ((x.tag == AIL_T_INST || x.tag == AIL_T_EXC) && ((ail_instobj *)x.o)->cls.tag == AIL_T_CLASS) {   /* the class's own name */
-        ail_str cs = ail_view_to_str(((ail_classobj *)((ail_instobj *)x.o)->cls.o)->name);
-        size_t k = 0;
-        for (int64_t i = 0; i < cs.n && k + 1 < sizeof nb; i++) { uint32_t ch = (uint32_t)ail_chr(cs, i); nb[k++] = ch < 128 ? (char)ch : '?'; }
-        nb[k] = 0; tn = nb;
-    }
-    snprintf(msg, sizeof msg, "unsupported format string passed to %s.__format__", tn);
-    return ail_raise_c(cx, AIL_B_TYPEERROR, msg);
+    return ail2f_unsupported(cx, x);
 }
 /* fmt % args at run time (printf-style formatting, CPython's PyUnicode_Format) */
 static inline ail_st ail2f_percent(ail_ctx *cx, ail_obj *out, ail_obj fmtobj, ail_obj args) {
@@ -972,29 +1097,48 @@ static inline ail_st ail2f_percent(ail_ctx *cx, ail_obj *out, ail_obj fmtobj, ai
         } else if (t == 'd' || t == 'i' || t == 'u' || t == 'o' || t == 'x' || t == 'X') {
             int64_t iv;
             if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) iv = arg.i;
-            else if (arg.tag == AIL_T_FLOAT && (t == 'd' || t == 'i' || t == 'u')) {
+            char *fdigits = NULL;
+            int fneg = 0;
+            if (arg.tag == AIL_T_FLOAT && (t == 'd' || t == 'i' || t == 'u')) {
                 double d = ail_float_val(arg);
                 if (isnan(d)) { st = ail_raise_c(cx, AIL_B_VALUEERROR, "cannot convert float NaN to integer"); goto fail; }
                 if (isinf(d)) { st = ail_raise_c(cx, AIL_B_OVERFLOWERROR, "cannot convert float infinity to integer"); goto fail; }
-                if (d >= 9223372036854775808.0 || d < -9223372036854775808.0) { st = ail_hit_limit(cx, "integer overflow", "int64"); goto fail; }
-                iv = (int64_t)d;
-            } else {
+                double it = trunc(fabs(d));
+                fneg = it != 0.0 && d < 0.0;
+                int need = snprintf(NULL, 0, "%.0f", it);
+                if (need < 0) { st = ail_hit_limit(cx, "format_int", "formatting a float as an integer failed"); goto fail; }
+                fdigits = (char *)malloc((size_t)need + 1);
+                if (!fdigits) { st = ail_hit_limit(cx, "format_int", "out of memory"); goto fail; }
+                snprintf(fdigits, (size_t)need + 1, "%.0f", it);
+            } else if (!(arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL)) {
                 if (t == 'd' || t == 'i' || t == 'u') snprintf(msg, sizeof msg, "%%%c format: a real number is required, not %s", (char)t, ail_type_name(arg.tag));
                 else snprintf(msg, sizeof msg, "%%%c format: an integer is required, not %s", (char)t, ail_type_name(arg.tag));
                 st = ail_raise_c(cx, AIL_B_TYPEERROR, msg); goto fail;
             }
-            uint64_t m = iv < 0 ? (uint64_t)0 - (uint64_t)iv : (uint64_t)iv;
-            int base = t == 'o' ? 8 : (t == 'x' || t == 'X') ? 16 : 10;
-            const char *dig = t == 'X' ? "0123456789ABCDEF" : "0123456789abcdef";
-            char tmp[80], body[200]; int k = 0;
-            do { tmp[k++] = dig[m % (uint64_t)base]; m /= (uint64_t)base; } while (m);
-            int z = 0;
-            if (f.has_prec) while (k + z < f.prec && k + z < 150) body[z++] = '0';
-            for (int q = 0; q < k; q++) body[z + q] = tmp[k - 1 - q];
-            body[z + k] = 0;
-            const char *prefix = !f.alt ? "" : base == 8 ? "0o" : t == 'X' ? "0X" : base == 16 ? "0x" : "";
-            f.type = 'd'; f.has_prec = 0;
-            piece = ail2f_pad_num(cx, ail2f_signstr(iv < 0, f.sign), prefix, body, &f);
+            if (fdigits) {
+                int64_t k = (int64_t)strlen(fdigits), z = 0;
+                if (f.has_prec && f.prec > k) z = f.prec - k;
+                char *body = (char *)malloc((size_t)(z + k) + 1);
+                if (!body) { free(fdigits); st = ail_hit_limit(cx, "format_int", "out of memory"); goto fail; }
+                memset(body, '0', (size_t)z);
+                memcpy(body + z, fdigits, (size_t)k + 1);
+                f.type = 'd'; f.has_prec = 0;
+                piece = ail2f_pad_num(cx, ail2f_signstr(fneg, f.sign), "", body, &f);
+                free(body); free(fdigits);
+            } else {
+                uint64_t m = iv < 0 ? (uint64_t)0 - (uint64_t)iv : (uint64_t)iv;
+                int base = t == 'o' ? 8 : (t == 'x' || t == 'X') ? 16 : 10;
+                const char *dig = t == 'X' ? "0123456789ABCDEF" : "0123456789abcdef";
+                char tmp[80], body[200]; int k = 0;
+                do { tmp[k++] = dig[m % (uint64_t)base]; m /= (uint64_t)base; } while (m);
+                int z = 0;
+                if (f.has_prec) while (k + z < f.prec && k + z < 150) body[z++] = '0';
+                for (int q = 0; q < k; q++) body[z + q] = tmp[k - 1 - q];
+                body[z + k] = 0;
+                const char *prefix = !f.alt ? "" : base == 8 ? "0o" : t == 'X' ? "0X" : base == 16 ? "0x" : "";
+                f.type = 'd'; f.has_prec = 0;
+                piece = ail2f_pad_num(cx, ail2f_signstr(iv < 0, f.sign), prefix, body, &f);
+            }
         } else if (t == 'e' || t == 'E' || t == 'f' || t == 'F' || t == 'g' || t == 'G') {
             double d;
             if (arg.tag == AIL_T_FLOAT) d = ail_float_val(arg);
@@ -1017,8 +1161,11 @@ static inline ail_st ail2f_percent(ail_ctx *cx, ail_obj *out, ail_obj fmtobj, ai
             f.zero = 0; if (!f.align) f.align = '>';
             piece = ail2f_pad_str(cx, v, 1, &f, '>');
         } else {
-            if (t >= 32 && t < 127) snprintf(msg, sizeof msg, "unsupported format character '%c' (0x%x) at index %lld", (char)t, (unsigned)t, (long long)i);
-            else snprintf(msg, sizeof msg, "unsupported format character '\\x%x' (0x%x) at index %lld", (unsigned)t, (unsigned)t, (long long)i);
+            /* CPython shows an ASCII graphic as itself, and every other code point as '?'.
+               U+001F is the one exception: its own message still carries the raw character
+               (verified against CPython 3.12.3). */
+            if ((t >= 32 && t < 127) || t == 31) snprintf(msg, sizeof msg, "unsupported format character '%c' (0x%x) at index %lld", (char)t, (unsigned)t, (long long)i);
+            else snprintf(msg, sizeof msg, "unsupported format character '?' (0x%x) at index %lld", (unsigned)t, (long long)i);
             st = ail_raise_c(cx, AIL_B_VALUEERROR, msg); goto fail;
         }
         (void)start;
@@ -1043,6 +1190,9 @@ GEN = r'''
    callers waiting for a running one are not on cx->frames, so the collector reaches them through the hook
    below: a suspended generator's frames are marked only when its object is, and a generator nobody can
    reach any more gives its stack back. */
+#ifndef AIL_ATTR_GEN_CAUSE
+#define AIL_ATTR_GEN_CAUSE (-2)   /* hidden: the StopIteration a PEP 479 conversion wrapped */
+#endif
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -1246,8 +1396,19 @@ static inline ail_st ail2g_resume(ail_ctx *cx, ail_obj *out, ail_obj inst, ail_o
     ail2g_free_stack(g);
     if (g->status == AIL_OK) return ail_raise_c(cx, AIL_B_STOPITERATION, "");
     if (g->status == AIL_EXC && ail_exc_matches_b(cx, AIL_B_STOPITERATION)) {
+        /* PEP 479 turns the escaping StopIteration into a RuntimeError whose __cause__ is that object.
+           Keep the cause on the value for contextlib's throw() check; normal attribute reads still
+           refuse the chain (see ail2a_chain_name). */
+        ail_obj cause = ail_exc_as_value(cx);
+        AIL_ROOT1(cx, fr, cause);
         ail_exc_clear(cx);
-        return ail_raise_c(cx, AIL_B_RUNTIMEERROR, "generator raised StopIteration");
+        ail_st st = ail_raise_c(cx, AIL_B_RUNTIMEERROR, "generator raised StopIteration");
+        if (st == AIL_EXC) {
+            ail_obj rt = ail_exc_as_value(cx);
+            ail_inst_setattr(cx, rt, AIL_ATTR_GEN_CAUSE, cause);
+        }
+        AIL_FRAME_LEAVE(cx, fr);
+        return st;
     }
     return g->status;
 }
@@ -1333,6 +1494,7 @@ static inline int ail2a_streq(ail_obj s, const char *lit) {
     return 1;
 }
 static inline int ail2a_find(ail_ctx *cx, ail_obj obj, const char *name, ail_obj *out) {
+    if (obj.tag == AIL_T_CLASS) return ail_class_attr_find_name(cx, obj, name, out);
     ail_instobj *o = (ail_instobj *)obj.o;
     for (int64_t i = 0; i < o->n; i++) {
         int64_t nid = o->attrs[i].name_id;
@@ -1345,11 +1507,35 @@ static inline ail_st ail2a_need_inst(ail_ctx *cx, ail_obj obj, const char *fn) {
     char m[160]; snprintf(m, sizeof m, "%s() on a '%s' value is not built on the general path (only instances of the program's classes)", fn, ail_type_name(obj.tag));
     return ail_raise_c(cx, AIL_B_NOTIMPLEMENTEDERROR, m);
 }
+static inline int ail2a_chain_name(const char *name) {
+    return strcmp(name, "__cause__") == 0 || strcmp(name, "__context__") == 0 ||
+           strcmp(name, "__suppress_context__") == 0 || strcmp(name, "__traceback__") == 0;
+}
+static inline ail_st ail2a_chain_refused(ail_ctx *cx, const char *name) {
+    char m[320]; snprintf(m, sizeof m, "reading %s (exception chaining is not kept here)", name);
+    return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, m);
+}
 /* getattr(obj, name[, default]); is_method: the class of obj has a method of that name */
 static inline ail_st ail2a_getattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_obj name, int has_dflt, ail_obj dflt) {
     char buf[256]; ail_st st = ail2a_cname(cx, name, buf, sizeof buf); if (st != AIL_OK) return st;
+    if (obj.tag == AIL_T_CLASS) {
+        if (strcmp(buf, "__name__") == 0) { *out = ((ail_classobj *)obj.o)->name; return AIL_OK; }
+        int ca = ail_class_attr_find_name(cx, obj, buf, out);
+        if (ca == 1) return AIL_OK;
+        char nb[100], m[320]; ail_class_name_c(obj, nb, sizeof nb);
+        if (ca == 2) {
+            snprintf(m, sizeof m, "reading method/property '%s' through the class value %s "
+                     "is not built on the general path", buf, nb);
+            return ail_raise_c(cx, AIL_B_NOTIMPLEMENTEDERROR, m);
+        }
+        if (has_dflt) { *out = dflt; return AIL_OK; }
+        snprintf(m, sizeof m, "type object '%s' has no attribute '%s'", nb, buf);
+        return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, m);
+    }
     if ((st = ail2a_need_inst(cx, obj, "getattr")) != AIL_OK) return st;
     if (ail2a_find(cx, obj, buf, out)) return AIL_OK;
+    /* a name computed at run time: refuse it by name on an exception, like the direct attribute form */
+    if (obj.tag == AIL_T_EXC && ail2a_chain_name(buf)) return ail2a_chain_refused(cx, buf);
     if (has_dflt) { *out = dflt; return AIL_OK; }
     char m[320]; snprintf(m, sizeof m, "'%s' object has no attribute '%s'", ail_type_name(obj.tag), buf);
     if (obj.tag == AIL_T_INST && ((ail_instobj *)obj.o)->cls.tag == AIL_T_CLASS) {
@@ -1364,8 +1550,17 @@ static inline ail_st ail2a_getattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_o
 static inline ail_st ail2a_hasattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_obj name, int is_method) {
     char buf[256]; ail_st st = ail2a_cname(cx, name, buf, sizeof buf); if (st != AIL_OK) return st;
     if (is_method) { *out = ail_box_bool(1); return AIL_OK; }
+    if (obj.tag == AIL_T_CLASS) {
+        ail_obj v;
+        int ca = ail_class_attr_find_name(cx, obj, buf, &v);
+        *out = ail_box_bool(strcmp(buf, "__name__") == 0 || ca == 1 || ca == 2);
+        return AIL_OK;
+    }
     if ((st = ail2a_need_inst(cx, obj, "hasattr")) != AIL_OK) return st;
-    ail_obj v; *out = ail_box_bool(ail2a_find(cx, obj, buf, &v));
+    ail_obj v;
+    int found = ail2a_find(cx, obj, buf, &v);
+    if (!found && obj.tag == AIL_T_EXC && ail2a_chain_name(buf)) return ail2a_chain_refused(cx, buf);
+    *out = ail_box_bool(found);
     return AIL_OK;
 }
 static inline ail_st ail2a_setattr(ail_ctx *cx, ail_obj *out, ail_obj obj, ail_obj name, ail_obj v) {
@@ -1511,12 +1706,27 @@ static inline ail_st ail2d_call(ail_ctx *cx, ail_obj *out, ail_mapobj *m) {
 
 MISC = r'''
 /* ---- small primitives (safetyrt.py MISC) ---- */
+#ifndef AIL_ATTR_GEN_CAUSE
+#define AIL_ATTR_GEN_CAUSE (-2)   /* defined by GEN too; this fragment may be used without it */
+#endif
 /* the two values are instances of one class (a dataclass's __eq__ compares only those) */
 static inline ail_st ail2e_same_class(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
     (void)cx;
     int r = (a.tag == AIL_T_INST || a.tag == AIL_T_EXC) && (b.tag == AIL_T_INST || b.tag == AIL_T_EXC)
             && ((ail_instobj *)a.o)->cls.o == ((ail_instobj *)b.o)->cls.o;
     *out = ail_box_bool(r);
+    return AIL_OK;
+}
+/* whether `raised` carries `cause` as the StopIteration a generator converted (PEP 479); the
+   chain exists only for contextlib's internal throw() check, not for a program's attribute reads */
+static inline ail_st ail2e_cause_is(ail_ctx *cx, ail_obj *out, ail_obj raised, ail_obj cause) {
+    *out = ail_box_bool(0);
+    if ((raised.tag == AIL_T_INST || raised.tag == AIL_T_EXC) &&
+        (cause.tag == AIL_T_INST || cause.tag == AIL_T_EXC)) {
+        ail_instobj *o = (ail_instobj *)raised.o;
+        for (int64_t i = 0; i < o->n; i++)
+            if (o->attrs[i].name_id == AIL_ATTR_GEN_CAUSE) { *out = ail_box_bool(o->attrs[i].val.o == cause.o); break; }
+    }
     return AIL_OK;
 }
 /* the class name of an instance or exception (what `type(e).__name__` is) */
@@ -2039,11 +2249,28 @@ BYTES_NAMES = frozenset(('bytes', 'bytearray', 'read_stdin_bytes', 'read_bytes',
 # a program that mentions one of these uses bytes
 BYTES_WORDS = frozenset(('bytes', 'bytearray', 'read_stdin_bytes', 'read_bytes', 'write_stdout_bytes', 'UnicodeError',
                          'UnicodeDecodeError', 'UnicodeEncodeError'))
-ENCODINGS = {'utf-8', 'utf8', 'u8', 'utf', 'cp65001', 'utf8-ucs2', 'utf8-ucs4',
-             'ascii', 'us-ascii', '646', 'us', 'ansi-x3.4-1968', 'ansi-x3.4-1986', 'ansi-x3-4-1968',
-             'cp367', 'csascii', 'ibm367', 'iso646-us', 'iso-646.irv-1991', 'iso-ir-6',
-             'latin-1', 'latin1', 'iso-8859-1', 'iso8859-1', 'iso8859', '8859', 'cp819', 'l1', 'latin',
-             'iso-ir-100', 'csisolatin1', 'ibm819', 'iso-8859-1-1987'}
+def normalize_encoding_name(name):
+    """CPython's encodings.normalize_encoding for the ASCII names the bytes prelude knows."""
+    parts = []
+    punct = False
+    for c in name:
+        o = ord(c)
+        if (o >= 48 and o <= 57) or (o >= 65 and o <= 90) or (o >= 97 and o <= 122) or o == 46:
+            if punct and parts:
+                parts.append('_')
+            if o >= 65 and o <= 90:
+                c = chr(o + 32)
+            parts.append(c)
+            punct = False
+        else:
+            punct = True
+    return ''.join(parts)
+
+
+ENCODINGS = {'utf_8', 'utf8', 'u8', 'utf', 'cp65001', 'utf8_ucs2', 'utf8_ucs4', 'ascii', 'us_ascii', '646', 'us',
+             'ansi_x3.4_1968', 'ansi_x3.4_1986', 'ansi_x3_4_1968', 'cp367', 'csascii', 'ibm367', 'iso646_us',
+             'iso_646.irv_1991', 'iso_ir_6', 'latin_1', 'latin1', 'iso_8859_1', 'iso8859_1', '8859', 'cp819', 'l1',
+             'latin', 'iso_ir_100', 'csisolatin1', 'ibm819', 'iso8859', 'iso_8859_1_1987'}
 ERROR_HANDLERS = {'strict', 'ignore', 'replace'}
 READ_BYTES = '''
 def read_bytes(path):
@@ -2085,7 +2312,9 @@ PRIMS = {
     '_ail_b_decode': ('ail2b_decode(cx, &{t}, {a0}, {a1}, {a2})', 3, 'bytes'),
     '_ail_b_from_ints': ('ail2b_from_ints(cx, &{t}, {a0})', 1, 'bytes'),
     '_ail_b_ints': ('ail2b_ints(cx, &{t}, {a0})', 1, 'bytes'),
+    '_ail_b_index': ('ail2b_index(cx, &{t}, {a0})', 1, 'bytes'),
     '_ail_b_repr': ('ail2b_repr(cx, &{t}, {a0})', 1, 'bytes'),
+    '_ail_ba_repr': ('ail2ba_repr(cx, &{t}, {a0})', 1, 'bytes'),
     '_ail_b_case': ('ail2b_case(cx, &{t}, {a0}, {a1})', 2, 'bytes'),
     '_ail_b_pred': ('ail2b_pred(cx, &{t}, {a0}, {a1})', 2, 'bytes'),
     '_ail_b_split_ws': ('ail2b_split_ws(cx, &{t}, {a0}, {a1}, {a2})', 3, 'bytes'),
@@ -2117,6 +2346,7 @@ PRIMS = {
     '_ail_stderr_write': ('ail2e_write(cx, &{t}, {a0})', 1, 'misc'),
     '_ail_same_class': ('ail2e_same_class(cx, &{t}, {a0}, {a1})', 2, 'misc'),
     '_ail_exc_name': ('ail2e_exc_name(cx, &{t}, {a0})', 1, 'misc'),
+    '_ail_exc_cause_is': ('ail2e_cause_is(cx, &{t}, {a0}, {a1})', 2, 'misc'),
 }
 PRIMS.update({name: (cfn, count, 'rng') for name, (cfn, count) in randrt.PRIMS.items()})   # random.Random (randrt.py)
 PRIMS.update({name: (cfn, count, 'jsn') for name, (cfn, count) in jsonbrt.PRIMS.items()})   # json's loops (jsonbrt.py)

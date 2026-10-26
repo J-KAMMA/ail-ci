@@ -185,7 +185,7 @@ class ClosureMixin:
         """C lines that put each cell variable of `ctx` into a fresh cell (its current slot value,
         a parameter or UNBOUND, becomes the cell's value)."""
         lines = []
-        for name in sorted(ctx.cell_slots):
+        for name in sorted(ctx.cell_slots - getattr(ctx, 'external_cells', set())):
             if name not in ctx.slot_of:
                 ctx.declare_local(name)
             slot = ctx.slot_expr(ctx.slot_of[name])
@@ -246,10 +246,13 @@ class ClosureMixin:
         cells += default_cs
         t = ctx.tmp()
         ctx.emit('{ ail_funcobj *_fo = (ail_funcobj *)ail_gc_alloc(cx, AIL_K_FUNC, sizeof(ail_funcobj)); '
-                 '_fo->fn = %s_v; _fo->n_cells = 0; _fo->name = "%s"; '
+                 '_fo->fn = %s_v; _fo->n_cells = 0; _fo->name = "%s";%s '
                  '_fo->cells = (ail_obj *)ail_xmalloc(%d * sizeof(ail_obj)); %s _fo->n_cells = %d; '
                  '%s.tag = AIL_T_FUNC; %s.o = (ail_gcobj *)_fo; }'
-                 % (cname, _c_name(qual, params), len(cells), ' '.join('_fo->cells[%d] = %s;' % (i, c) for i, c in enumerate(cells)),
+                 % (cname, _c_name(qual, params),
+                    ' _fo->builtin_fn = %d;' % (2 if getattr(node, '_ail_builtin_type', False) else 1)
+                    if getattr(node, '_ail_builtin_fn', False) else '',
+                    len(cells), ' '.join('_fo->cells[%d] = %s;' % (i, c) for i, c in enumerate(cells)),
                     len(cells), t, t))
         return t
 
@@ -259,6 +262,7 @@ class ClosureMixin:
         cid = pyboxed2.cid
         cctx = pyboxed2.Ctx(cname)
         cctx.qualname = qual
+        cctx.ident_names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
         cctx.clo_index = {nm: i + 1 for i, nm in enumerate(captured)}
         nonlocal_names = set()
         for n in ast.walk(node):
@@ -289,6 +293,7 @@ class ClosureMixin:
             cctx.emit('*out = %s;' % v)
         pre = ['    f.slots[%d] = %s;' % (cctx.slot_of[p], cid(p)) for p in params]
         pre += self.cell_preamble(cctx)
+        pre += ['    int %s = 0;' % flag for flag in cctx.def_flag_decls]
         n_slots = max(cctx.next_slot, 1)
         sig = ''.join(', ail_obj %s' % cid(p) for p in params)
         self.top_decls.append('static ail_st %s(ail_ctx *cx, ail_obj *out, ail_obj *clo%s);\n' % (cname, sig))
@@ -423,7 +428,7 @@ class ClosureMixin:
             'static ail_st ail__callv(ail_ctx *cx, ail_obj *out, ail_obj fv, ail_obj *args, int64_t n) {\n'
             '    char msg[200];\n'
             '    if (fv.tag != AIL_T_FUNC) {\n'
-            '        snprintf(msg, sizeof msg, "\'%%s\' object is not callable", ail_type_name(fv.tag));\n'
+            '        snprintf(msg, sizeof msg, "\'%%s\' object is not callable", ail__tname_c(fv));\n'
             '        return ail_raise_c(cx, AIL_B_TYPEERROR, msg);\n'
             '    }\n'
             '    ail_funcobj *f = (ail_funcobj *)fv.o;\n'
