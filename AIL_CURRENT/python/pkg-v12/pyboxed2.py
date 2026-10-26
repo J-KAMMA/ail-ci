@@ -2568,6 +2568,284 @@ class Compiler(boxclosure.ClosureMixin):
                         raise Unsupported('%s with the %s %r on the general path (built: utf-8, ascii, latin-1; '
                                           'errors strict, ignore, replace)' % (what, noun, node.value))
 
+        _MISSING = object()
+
+        def _assign_targets(stmt):
+            if isinstance(stmt, ast.Assign):
+                return stmt.targets
+            if isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+                return [stmt.target]
+            return []
+
+        counts = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                counts[node.id] = counts.get(node.id, 0) + 1
+            elif isinstance(node, ast.arg):
+                counts[node.arg] = counts.get(node.arg, 0) + 1
+
+        consts = {}
+        class_attrs = {}
+        identity_funcs = {}
+        for fn in (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)):
+            params = [a.arg for a in fn.args.args]
+            if counts.get(fn.name, 0) == 0 and len(fn.body) == 1 \
+                    and isinstance(fn.body[0], ast.Return) \
+                    and isinstance(fn.body[0].value, ast.Name) and fn.body[0].value.id in params:
+                identity_funcs[fn.name] = params.index(fn.body[0].value.id)
+
+        def _static_value(node):
+            if isinstance(node, ast.Constant):
+                return node.value
+            if isinstance(node, ast.Name):
+                return consts.get(node.id, _MISSING)
+            if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load) \
+                    and isinstance(node.value, ast.Name):
+                attrs = class_attrs.get(node.value.id)
+                return attrs.get(node.attr, _MISSING) if attrs is not None else _MISSING
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+                left = _static_value(node.left)
+                right = _static_value(node.right)
+                if left is not _MISSING and right is not _MISSING and type(left) is type(right) \
+                        and isinstance(left, (bytes, str)):
+                    return left + right
+                return _MISSING
+            if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+                values = [_static_value(each) for each in node.elts]
+                if any(each is _MISSING for each in values):
+                    return _MISSING
+                if isinstance(node, ast.List):
+                    return values
+                if isinstance(node, ast.Tuple):
+                    return tuple(values)
+                try:
+                    return set(values)
+                except TypeError:
+                    return _MISSING
+            if isinstance(node, ast.Dict):
+                result = {}
+                for key_node, value_node in zip(node.keys, node.values):
+                    if key_node is None:
+                        return _MISSING
+                    key = _static_value(key_node)
+                    value = _static_value(value_node)
+                    if key is _MISSING or value is _MISSING:
+                        return _MISSING
+                    try:
+                        result[key] = value
+                    except TypeError:
+                        return _MISSING
+                return result
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                    and node.func.id in identity_funcs and not node.keywords:
+                index = identity_funcs[node.func.id]
+                if len(node.args) > index and not any(isinstance(a, ast.Starred) for a in node.args):
+                    return _static_value(node.args[index])
+                return _MISSING
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                    and node.func.id in ('bytes', 'bytearray') and node.func.id not in own \
+                    and not node.keywords and len(node.args) <= 1 \
+                    and not any(isinstance(a, ast.Starred) for a in node.args):
+                value = _static_value(node.args[0]) if node.args else b''
+                if value is _MISSING:
+                    return _MISSING
+                try:
+                    return bytes(value) if node.func.id == 'bytes' else bytearray(value)
+                except (TypeError, ValueError):
+                    return _MISSING
+            if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load):
+                base = _static_value(node.value)
+                index = _static_value(node.slice)
+                if base is _MISSING or index is _MISSING:
+                    return _MISSING
+                try:
+                    return base[index]
+                except (IndexError, KeyError, TypeError):
+                    return _MISSING
+            return _MISSING
+
+        _MUTATING = {
+            'append', 'extend', 'insert', 'remove', 'pop', 'clear', 'update', 'setdefault',
+            'popitem', 'sort', 'reverse', 'add', 'discard', 'difference_update',
+            'intersection_update', 'symmetric_difference_update', '__setitem__', '__delitem__',
+            '__iadd__', '__imul__',
+        }
+        mutated = set()
+        mutated_attrs = set()
+        aliases = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) \
+                    and isinstance(node.ctx, (ast.Store, ast.Del)):
+                mutated_attrs.add((node.value.id, node.attr))
+            if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) \
+                    and isinstance(node.ctx, (ast.Store, ast.Del)):
+                mutated.add(node.value.id)
+            elif isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) \
+                        and node.func.attr in _MUTATING:
+                    mutated.add(node.func.value.id)
+                for each in node.args:
+                    if isinstance(each, ast.Name):
+                        mutated.add(each.id)
+                for keyword in node.keywords:
+                    if isinstance(keyword.value, ast.Name):
+                        mutated.add(keyword.value.id)
+                if isinstance(node.func, ast.Name) and node.func.id == 'setattr' \
+                        and len(node.args) >= 2 and isinstance(node.args[0], ast.Name) \
+                        and isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str):
+                    mutated_attrs.add((node.args[0].id, node.args[1].value))
+            elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+                mutated.add(node.target.id)
+        for node in ast.walk(tree):
+            target = value = None
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                target, value = node.targets[0], node.value
+            elif isinstance(node, ast.AnnAssign):
+                target, value = node.target, node.value
+            if isinstance(target, ast.Name) and isinstance(value, ast.Name):
+                aliases.setdefault(target.id, set()).add(value.id)
+                aliases.setdefault(value.id, set()).add(target.id)
+        changed = True
+        while changed:
+            changed = False
+            for target, sources in aliases.items():
+                if target in mutated:
+                    for source in sources:
+                        if source not in mutated:
+                            mutated.add(source)
+                            changed = True
+
+        def immutable_value(value):
+            if isinstance(value, (bytes, str, int, float, bool, type(None))):
+                return True
+            if isinstance(value, tuple):
+                return all(immutable_value(each) for each in value)
+            if isinstance(value, frozenset):
+                return all(immutable_value(each) for each in value)
+            return False
+
+        assignments = [n for n in ast.walk(tree) if isinstance(n, (ast.Assign, ast.AnnAssign))]
+        for _ in range(3):
+            for stmt in assignments:
+                value_node = getattr(stmt, 'value', None)
+                if value_node is None:
+                    continue
+                for target in _assign_targets(stmt):
+                    if isinstance(target, ast.Name) and counts.get(target.id) == 1:
+                        value = _static_value(value_node)
+                        if value is not _MISSING and (immutable_value(value) or target.id not in mutated):
+                            consts[target.id] = value
+
+        for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
+            attrs = {}
+            for stmt in cls.body:
+                value_node = getattr(stmt, 'value', None)
+                if value_node is None:
+                    continue
+                for target in _assign_targets(stmt):
+                    if isinstance(target, ast.Name) and counts.get(cls.name, 0) == 0 \
+                            and (cls.name, target.id) not in mutated_attrs:
+                        value = _static_value(value_node)
+                        if value is not _MISSING and (immutable_value(value) or target.id not in mutated):
+                            attrs[target.id] = value
+            class_attrs[cls.name] = attrs
+
+        def const_bytes(node):
+            if node is None:
+                return None
+            value = _static_value(node)
+            return value if isinstance(value, (bytes, bytearray)) else None
+
+        def arg_node(call, pos, name):
+            node = call.args[pos] if len(call.args) > pos else None
+            for keyword in call.keywords:
+                if keyword.arg == name:
+                    node = keyword.value
+            return node
+
+        utf8_names = ('utf_8', 'utf8', 'u8', 'utf', 'cp65001', 'utf8_ucs2', 'utf8_ucs4')
+
+        def non_bmp_point(data, encoding, errors):
+            if encoding not in utf8_names or errors not in safetyrt.ERROR_HANDLERS:
+                return None
+            try:
+                text = bytes(data).decode('utf-8', errors)
+            except (UnicodeDecodeError, LookupError):
+                return None
+            for char in text:
+                if ord(char) > 0xFFFF:
+                    return ord(char)
+            return None
+
+        def check_non_bmp_decode(data, enc_node, err_node, what):
+            encoding = 'utf_8'
+            if enc_node is not None:
+                if not (isinstance(enc_node, ast.Constant) and isinstance(enc_node.value, str)):
+                    return
+                encoding = safetyrt.normalize_encoding_name(enc_node.value)
+            errors = 'strict'
+            if err_node is not None:
+                if not (isinstance(err_node, ast.Constant) and isinstance(err_node.value, str)):
+                    return
+                errors = safetyrt.normalize_encoding_name(err_node.value)
+            point = non_bmp_point(data, encoding, errors)
+            if point is not None:
+                raise Unsupported('%s with the non-BMP code point U+%X in the 16-bit v2 runtime'
+                                  % (what, point))
+
+        def own_body_nodes(fn):
+            nodes = []
+            stack = list(fn.body)
+            while stack:
+                node = stack.pop()
+                nodes.append(node)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                    continue
+                stack.extend(ast.iter_child_nodes(node))
+            return nodes
+
+        decoded_params = {}
+        for fn in (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)):
+            if counts.get(fn.name, 0) != 0:
+                continue
+            params = [a.arg for a in fn.args.args]
+            for call in own_body_nodes(fn):
+                if not isinstance(call, ast.Call):
+                    continue
+                if isinstance(call.func, ast.Attribute) and call.func.attr == 'decode' \
+                        and isinstance(call.func.value, ast.Name) and call.func.value.id in params:
+                    name = call.func.value.id
+                    decoded_params.setdefault(fn.name, []).append(
+                        (params.index(name), name, arg_node(call, 0, 'encoding'), arg_node(call, 1, 'errors')))
+                elif isinstance(call.func, ast.Name) and call.func.id == 'str' and 'str' not in own \
+                        and call.args and isinstance(call.args[0], ast.Name) and call.args[0].id in params \
+                        and (len(call.args) >= 2 or call.keywords):
+                    name = call.args[0].id
+                    decoded_params.setdefault(fn.name, []).append(
+                        (params.index(name), name, arg_node(call, 1, 'encoding'), arg_node(call, 2, 'errors')))
+
+        for call in (n for n in ast.walk(tree) if isinstance(n, ast.Call)):
+            if not (isinstance(call.func, ast.Name) and call.func.id in decoded_params):
+                continue
+            for index, name, enc_node, err_node in decoded_params[call.func.id]:
+                data = const_bytes(arg_node(call, index, name))
+                if data is None:
+                    continue
+                encoding = 'utf_8'
+                if enc_node is not None:
+                    if not (isinstance(enc_node, ast.Constant) and isinstance(enc_node.value, str)):
+                        continue
+                    encoding = safetyrt.normalize_encoding_name(enc_node.value)
+                errors = 'strict'
+                if err_node is not None:
+                    if not (isinstance(err_node, ast.Constant) and isinstance(err_node.value, str)):
+                        continue
+                    errors = safetyrt.normalize_encoding_name(err_node.value)
+                point = non_bmp_point(data, encoding, errors)
+                if point is not None:
+                    raise Unsupported('%s() with the non-BMP code point U+%X in the 16-bit v2 runtime'
+                                      % (call.func.id, point))
+
         compiler = self
 
         class Rewrite(ast.NodeTransformer):
@@ -2587,6 +2865,19 @@ class Compiler(boxclosure.ClosureMixin):
                 return node
 
             def visit_Call(self, node):
+                const_decode = None
+                original = node.func
+                if isinstance(original, ast.Attribute) and original.attr == 'decode' and 'decode' not in methods:
+                    data = const_bytes(original.value)
+                    if data is not None:
+                        const_decode = (data, arg_node(node, 0, 'encoding'), arg_node(node, 1, 'errors'),
+                                        'bytes.decode()')
+                elif (isinstance(original, ast.Name) and original.id == 'str' and 'str' not in own
+                      and (len(node.args) >= 2 or node.keywords)):
+                    data = const_bytes(arg_node(node, 0, 'object'))
+                    if data is not None:
+                        const_decode = (data, arg_node(node, 1, 'encoding'), arg_node(node, 2, 'errors'),
+                                        'str()')
                 self.generic_visit(node)
                 f = node.func
                 if isinstance(f, ast.Attribute) and f.attr == 'encode' and 'encode' not in methods:
@@ -2595,6 +2886,8 @@ class Compiler(boxclosure.ClosureMixin):
                                                       args=[f.value] + node.args, keywords=node.keywords), node)
                 if isinstance(f, ast.Attribute) and f.attr == 'decode' and 'decode' not in methods:
                     check_codec(node, 0, 1, 'bytes.decode()')
+                    if const_decode is not None:
+                        check_non_bmp_decode(*const_decode)
                 if isinstance(f, ast.Attribute) and f.attr == 'to_bytes' and 'to_bytes' not in methods:
                     return ast.copy_location(ast.Call(func=ast.Name(id='_ail_to_bytes', ctx=ast.Load()),
                                                       args=[f.value] + node.args, keywords=node.keywords), node)
@@ -2606,6 +2899,8 @@ class Compiler(boxclosure.ClosureMixin):
                     check_codec(node, 1, 2, '%s()' % f.id)
                 if isinstance(f, ast.Name) and f.id == 'str' and 'str' not in own and (len(node.args) >= 2 or node.keywords):
                     check_codec(node, 1, 2, 'str()')
+                    if const_decode is not None:
+                        check_non_bmp_decode(*const_decode)
                     return ast.copy_location(ast.Call(func=ast.Name(id='_ail_str_decode', ctx=ast.Load()),
                                                       args=node.args, keywords=node.keywords), node)
                 if (isinstance(f, ast.Name) and f.id == 'int' and 'int' not in own
