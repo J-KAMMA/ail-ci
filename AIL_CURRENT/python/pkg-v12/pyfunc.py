@@ -24709,6 +24709,9 @@ _PAR_HELPERS = frozenset((
     'ail_list_get', 'ail_list_set', 'ail_flist_get', 'ail_flist_set', 'ail_bytearray_get',
     'ail_bytearray_set', 'ail_bytearray_len', 'ail_bytearray_index', 'ail_bytearray_meta', 'ail_bytes_get',
     'ail_ffloormod', 'ail_fsqrt', 'ail_ipow', 'ail_round0',
+    # tagged-int boundary conversions: inline, no allocation, no shared state (a big value is read
+    # only, and the overflow trap goes through ail_die like the other helpers above)
+    'ail_tint_from_int64', 'ail_tint_i64',
 ))
 
 

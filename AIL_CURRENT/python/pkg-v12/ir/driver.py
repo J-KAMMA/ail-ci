@@ -238,6 +238,26 @@ def wrap_legacy_tint(P, result):
     return wrapped[0], wrapped[1], ctx
 
 
+def _keep_legacy_tint(P, fn, cname, ctx, _sig):
+    """Keep a legacy-fallback function on the tagged ABI `TINT_SIGS` announced for it."""
+    if not (_sig and (any(_sig[0]) or _sig[1])):
+        return
+    # A function with no C result has nothing to tag (the synthesized NORET entry point in a
+    # script-shaped program is one such case).
+    if _sig[1] and getattr(ctx, 'ret', None) == getattr(P, 'NORET', object()):
+        _sig = (_sig[0], 0)
+        getattr(P, 'TINT_SIGS', {})[fn.name] = _sig
+        getattr(P, 'TINT_ACTIVE', {})[fn.name] = _sig
+    if any(_sig[0]) or _sig[1]:
+        # The legacy body keeps int64 arithmetic, but the signature (and every call) stays
+        # the tagged one `TINT_SIGS` announced: the wrapper is added once the legacy
+        # aliasing check has run (wrap_legacy_tint). Callers compiled earlier and the
+        # recursive self-call inside this body already use that signature, so dropping it
+        # here made the two disagree.
+        ctx._tint_legacy_wrap = (fn, cname, _sig[0], bool(_sig[1]))
+        ctx.parts.add('TINTT')
+
+
 def apply(P, args, kwargs, result):
     """`result` is the legacy `(sig, generated, ctx)` of `_one_function(*args, **kwargs)`;
     returns it unchanged or with `generated` replaced by the IR emitter's C."""
@@ -404,25 +424,14 @@ def _apply(P, args, kwargs, result, current):
             raise Unsupported('%s() needs the tagged-int lowering, which does not cover it: %s'
                               % (fn.name, reason))
         if _py and _tinted_sig:
-            # A function with no C result has nothing to tag (the synthesized NORET entry point in a
-            # script-shaped program is one such case).
-            if _sig[1] and getattr(ctx, 'ret', None) == getattr(P, 'NORET', object()):
-                _sig = (_sig[0], 0)
-                getattr(P, 'TINT_SIGS', {})[fn.name] = _sig
-                getattr(P, 'TINT_ACTIVE', {})[fn.name] = _sig
-            if any(_sig[0]) or _sig[1]:
-                # The legacy body keeps int64 arithmetic, but the signature (and every call) stays
-                # the tagged one `TINT_SIGS` announced: the wrapper is added once the legacy
-                # aliasing check has run (wrap_legacy_tint). Callers compiled earlier and the
-                # recursive self-call inside this body already use that signature, so dropping it
-                # here made the two disagree.
-                ctx._tint_legacy_wrap = (fn, cname, _sig[0], bool(_sig[1]))
-                ctx.parts.add('TINTT')
+            _keep_legacy_tint(P, fn, cname, ctx, _sig)
         return result
     except Exception as error:
         if current == 'verify':
             raise
         _record(fn.name, cname, 'legacy', 'IR failure: %s: %s' % (type(error).__name__, error), ctx)
+        if _py:
+            _keep_legacy_tint(P, fn, cname, ctx, _sig)
         return result
     ctx.parts.update(needs['parts'])
     ctx.floor.update(needs['floor'])
