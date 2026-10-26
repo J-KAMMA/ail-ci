@@ -1,3 +1,27 @@
+## 2026-10-26 -- zero base to a negative power names CPython's ZeroDivisionError (job-pre274-10262317)
+
+Fixing the first pre-existing difference recorded by the rbpre69 review: `0 ** -1` stopped with
+`division by zero` on the default build (and the v1 emitter printed the same text) where CPython
+raises `ZeroDivisionError: 0.0 cannot be raised to a negative power`.  The typed float helper
+(`ail__fpow_slow`) mapped every non-finite zero-base result to a division by zero, and the exact
+integer helper (`ail_ipow`) used its generic negative-exponent trap before looking at the base.
+Both now name CPython's message: a finite negative exponent with a zero base (including `-0.0`)
+raises it, and the message is mapped to `ZeroDivisionError` in both the plain and exception-enabled
+DIE blocks, so `try`/`except` sees the same text.  A zero base with `-inf`, `inf`, `nan`, `-0.0`
+exponent, `0` or a positive exponent keeps its CPython result, and a non-zero variable negative
+exponent keeps the documented `negative exponent on an integer` trap.
+
+Probes in `/tmp/probes`: `p274_lit`, `p274_floatbase`, `p274_floatexp`, `p274_var`,
+`p274_varfloat`, `p274_negzero`, `p274_neghalf`, `p274_arg`, `p274_list`, `p274_attr`,
+`p274_dict`, `p274_try`, `p274_caught_lit`, `p274_caught_list`, `p274_caught_attr`,
+`p274_caught_dict`, `p274_try_routes`, `p274_negzero_routes`, `p274_edges` match CPython on both
+cmp.sh builds; `p274_neginf`, `p274_nan` and `p274_posinf` match too; the v1 literal names the
+same message.  The pre-existing mixed-clone catch gap and the documented non-zero variable
+negative-exponent trap are unchanged (`p274_nonzero_var` still traps as before).  Tests on the
+final tree: `test_ail_pre274`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` (4 modules, 357 s, 0 failed).  `tools/update_manifest.py --check` passes;
+`test_ail_pre274` is registered in `ail_check.MODULES` and `ci_shards.json`.
+
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is

@@ -546,7 +546,8 @@ static int ail_exc_kind_of(const char *w) {
         || !strcmp(w, "bytes must be in range(0, 256)"))
         return AIL_EXC_VALUE;
     if (!strcmp(w, "division by zero") || !strcmp(w, "integer division by zero")
-        || !strcmp(w, "integer modulo by zero")) return AIL_EXC_ZERODIV;
+        || !strcmp(w, "integer modulo by zero")
+        || !strcmp(w, "0.0 cannot be raised to a negative power")) return AIL_EXC_ZERODIV;
     if (!strcmp(w, "list index out of range") || !strcmp(w, "pop index out of range")
         || !strcmp(w, "pop from empty list") || !strcmp(w, "grid row index out of range")
         || !strcmp(w, "grid column index out of range") || !strcmp(w, "bytes index out of range")
@@ -3736,6 +3737,7 @@ IPOW = r'''
 /* `2 ** 10` is an int in Python, and `pow()` would route it through a double and lose the last
    bits above 2^53. A non-negative integer exponent is done in integers. */
 static int64_t ail_ipow(int64_t b, int64_t e) {
+    if (b == 0 && e < 0) ail_die("0.0 cannot be raised to a negative power");
     if (e < 0) ail_die("negative exponent on an integer; write float(x) ** n for Python's float answer");
     int64_t r = 1;
     while (e) {
@@ -27708,7 +27710,10 @@ static double ail__fpow_slow(double iv, double iw, double r) {
         ail_die("a negative number raised to a fractional power is a complex number in Python; AIL has no complex type");
     }
     if (isinf(iv) || isinf(iw)) return r;
-    if (iv == 0.0) ail_die("division by zero");
+    if (iv == 0.0) {
+        if (iw < 0.0) ail_die("0.0 cannot be raised to a negative power");
+        return r;
+    }
     ail_die("(34, 'Numerical result out of range')");
     return r;
 }
