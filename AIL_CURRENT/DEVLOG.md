@@ -1,3 +1,12 @@
+## 2026-10-26 -- pre272 follow-up: refresh full-C output pins (job-pre272-10262304)
+
+The accepted base-runtime mapping for `list assignment index out of range` changes the emitted C
+for every program that pulls the exception runtime, so the full-C SHA-256 pins in
+`test_ail_numeric_bindings` and `test_ail_record_initializers` were stale.  Regenerated the pins;
+the only difference from the previous output is the intended one-line `AIL_EXC_INDEX` mapping
+(confirmed by diffing generated C against the parent commit).  Both modules and
+`test_ail_pre272` pass; `tools/update_manifest.py --check` and `tools/ci_shards.py --check` pass.
+
 ## 2026-10-26 -- pre272 review fix: keep out-of-range `del` catchable without reading text
 
 The review found that the new `list assignment index out of range` trap was only mapped to
