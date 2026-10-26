@@ -29746,3 +29746,6 @@ REQUIRES['BIGCORET'] = ['TYPES', 'DIE']
 ORDER.insert(ORDER.index('STR') + 1, 'TINTT')
 SOURCE['TINTT'] = _tint_typed.TINT
 REQUIRES['TINTT'] = ['BIGCORET', 'STR', 'DIE']
+ORDER.insert(ORDER.index('TINTT') + 1, 'TINTBITS')
+SOURCE['TINTBITS'] = _tint_typed.BITS
+REQUIRES['TINTBITS'] = ['TINTT']

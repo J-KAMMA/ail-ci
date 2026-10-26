@@ -97,7 +97,9 @@ static AIL_BIGFN ail_tint ail_tint__slow_neg(ail_tint a) {
     memcpy(r->d, x.d, x.n * sizeof(ail_limb));
     r->n = (uint32_t)x.n;
     return ail_tint_demote(r, -x.sign);
-}
+}'''
+
+BITS = r'''
 static AIL_BIGFN ail_tint ail_tint__slow_bitop(ail_tint a, ail_tint b, char op) {
     ail_tbv x, y; ail_tbv_of(&x, a); ail_tbv_of(&y, b);
     size_t L = (x.n > y.n ? x.n : y.n) + 1;
@@ -124,7 +126,9 @@ static inline ail_tint ail_tint_or(ail_tint a, ail_tint b) {
 static inline ail_tint ail_tint_xor(ail_tint a, ail_tint b) {
     if (__builtin_expect(!a.b && !b.b, 1)) return ail_tint_from_int64(a.i ^ b.i);
     return ail_tint__slow_bitop(a, b, '^');
-}
+}'''
+
+TINT += r'''
 static AIL_BIGFN int ail_tint__divmod(ail_tint *qo, ail_tint *ro, ail_tint a, ail_tint b, int mod) {
     if (ail_tint_is_zero(b)) ail_die(mod ? "integer modulo by zero" : "integer division by zero");
     ail_tbv x, y; ail_tbv_of(&x, a); ail_tbv_of(&y, b);
