@@ -242,6 +242,31 @@ that formats the stored argument (a str keeps its quotes, a number does not). Bo
 CPython; the accepted `test_ail_pre26.py` keeps the probe, including negative and out-of-range
 indexes, and is registered in `ail_check.MODULES`.
 
+## 2026-10-26 -- pre54 review fix: MANIFEST pin and DIFFERENCES row order (job-rbpre54-10270147)
+
+The reviewer found the committed tree was missing the `test_ail_pre54.py` pin, so
+`tools/update_manifest.py --check` exited 1 and `ail_check.preflight` aborted every module with
+`hash mismatch`; re-ran `tools/update_manifest.py` and committed the pin (`--check` now exits 0).
+The DIFFERENCES row also had its cells in the wrong columns (`refused | round | <text>`); it is
+now `round | <text> | refused` under the `| id | area | difference | status |` header.
+Re-ran the `/tmp/probes/p54_*` probes: the four match probes match CPython on both builds, the
+five boundary probes are refused by name on both (exit 3, no executable).
+
+## 2026-10-26 -- re-apply pre54: round() at the int64 boundary is refused by name (job-rbpre54-10270147)
+
+Re-applied the accepted pre54 change on this tree.  `pyc.build` now calls
+`_refuse_round_at_int64_boundary` before either build path: a one-argument `round()` of a
+constant float at or beyond the signed 64-bit boundary (`round(-9223372036854775808.0)` is
+INT64_MIN) is refused by name, because `abs()`, unary `-` and `* -1` need 2**63 and AIL's int is
+int64.  The accepted change's workflow half (OpenCode v1.19.4 with its sha256, the qoder.key /
+cc.key secret files and the three-key scan) is already present on this tree, so no edit was
+needed; pre104's catchable ValueError / OverflowError for nan/inf is kept, and finite
+out-of-range values that are not compile-time constants still take the runtime trap.  Added
+`AIL_CURRENT/test_ail_pre54.py`, registered it in `ail_check.MODULES`, and added DIFFERENCES row
+C?-job-rbpre54-10270147-1.  Probes in `/tmp/probes`: `p54_near`, `p54_two_arg`, `p54_shadow` and
+`p54_nonconstant` match CPython on both builds; `p54_refuse_direct`, `p54_refuse_argument`,
+`p54_refuse_container`, `p54_refuse_positive` and `p54_refuse_beyond` are refused by name on both
+builds (exit 3, no executable).  `python3 tools/diff_ids.py` is not present in this tree.
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is
