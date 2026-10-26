@@ -30,6 +30,74 @@ MAX_COMPONENTS = 4
 DONE = object()
 
 
+def _key_shared(expr, param, lists=None):
+    """True when every evaluation of this key expression returns the SAME object.
+
+    CPython's tuple/list comparison tests identity before equality, so two NaN key components
+    compare as equal (and the next component decides) only when they are the same float object.
+    A key column holds raw doubles, not boxes, so this is the one case the typed sort can still
+    reproduce exactly: a name/constant/stable attribute yields one object for every element,
+    while a call, arithmetic or an element-derived read makes a new (or unknown) object.
+    `lists` maps a local list name to whether all of its (float) elements are one shared
+    expression, which lets `ss[i]` keep CPython's identity when `ss = [nan, nan, ...]`."""
+    if isinstance(expr, ast.Constant):
+        return True
+    if isinstance(expr, ast.Name):
+        return expr.id != param
+    if isinstance(expr, ast.Attribute):
+        return _key_shared(expr.value, param, lists)
+    if isinstance(expr, ast.Subscript):
+        if _key_shared(expr.value, param, lists) and _key_shared(expr.slice, param, lists):
+            return True                      # a fixed slot: the same object every time
+        if lists is not None and isinstance(expr.value, ast.Name):
+            return lists.get(expr.value.id, False)
+        return False
+    if isinstance(expr, ast.IfExp):
+        return (_key_shared(expr.body, param, lists) and _key_shared(expr.orelse, param, lists)
+                and ast.dump(expr.body) == ast.dump(expr.orelse))
+    return False
+
+
+def _list_literal_shared(fn):
+    """Names bound exactly once to a list literal whose non-constant elements are one shared
+    expression (for example `ss = [nan, nan, 1.0]`), and never mutated afterwards.  A slot read
+    from such a list is the same object every time; an unknown or changing list is not marked."""
+    bindings, stores, mutated = {}, {}, set()
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+                and isinstance(node.func.value, ast.Name) \
+                and node.func.attr in ('append', 'extend', 'insert', 'pop', 'remove', 'clear',
+                                       'reverse', 'sort'):
+            mutated.add(node.func.value.id)
+        if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store) \
+                and isinstance(node.value, ast.Name):
+            mutated.add(node.value.id)
+        if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+            mutated.add(node.target.id)
+        if isinstance(node, ast.arg):
+            stores[node.arg] = stores.get(node.arg, 0) + 1
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            stores[node.id] = stores.get(node.id, 0) + 1
+        targets = []
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+        for target in targets:
+            if isinstance(target, ast.Name):
+                bindings.setdefault(target.id, []).append(node.value)
+    shared = {}
+    for name, values in bindings.items():
+        if len(values) != 1 or stores.get(name) != 1 or name in mutated \
+                or not isinstance(values[0], ast.List):
+            continue
+        exprs = [e for e in values[0].elts if not isinstance(e, ast.Constant)]
+        if exprs and all(_key_shared(e, None) for e in exprs) \
+                and len({ast.dump(e) for e in exprs}) == 1:
+            shared[name] = True
+    return shared
+
+
 def _is_dict_annotation(node):
     return (isinstance(node, ast.Name) and node.id == 'dict'
             or isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name)
@@ -202,6 +270,7 @@ class _Rewriter:
         self.struct_names = set()
         self.dicts = set()
         self.range_sources = set()
+        self.lists = {}
 
     # -- site pieces ---------------------------------------------------------------------------
     def options(self, call, what):
@@ -253,13 +322,15 @@ class _Rewriter:
         self.serial += 1
         return self.serial
 
-    def perm_statements(self, n, reverse, columns):
+    def perm_statements(self, n, reverse, columns, shared):
         perm = '_ail_sk%d_p' % n
         annotation = ast.Subscript(value=_name('list'), slice=_name('int'), ctx=ast.Load())
+        flags = ast.List(elts=[ast.Constant(value=1 if flag else 0) for flag in shared],
+                         ctx=ast.Load())
         return perm, [
             ast.AnnAssign(target=_name(perm, True), annotation=annotation,
                           value=ast.List(elts=[], ctx=ast.Load()), simple=1),
-            ast.Expr(value=_call(PERM, _name(perm), ast.Constant(value=reverse),
+            ast.Expr(value=_call(PERM, _name(perm), ast.Constant(value=reverse), flags,
                                  *[_name(c) for c in columns]))]
 
     @staticmethod
@@ -308,10 +379,12 @@ class _Rewriter:
             pre.append(ast.Assign(targets=[_name(source, True)], value=source_expr))
         param, body = self.key_parts(key)
         columns = []
+        shared = []
         structs = False
         for j, comp in enumerate(self.components(body)):
             if isinstance(comp, ast.Name) and comp.id == param:
                 columns.append(source)
+                shared.append(0)
                 continue
             name = '_ail_sk%d_c%d' % (n, j)
             if _field_style(comp, param):
@@ -328,8 +401,9 @@ class _Rewriter:
                     name, element, _Substitute(param, _name(element)).visit(copy.deepcopy(comp)),
                     source))
             columns.append(name)
+            shared.append(1 if _key_shared(comp, param, self.lists) else 0)
         self.mark_columns(n, pre)
-        perm, statements = self.perm_statements(n, reverse, columns)
+        perm, statements = self.perm_statements(n, reverse, columns, shared)
         pre.extend(statements)
         self.count += 1
         self.structs = structs or source in self.struct_names
@@ -418,9 +492,11 @@ class _Rewriter:
         pre = [ast.Assign(targets=[_name(keys, True)], value=_method(receiver, 'keys')),
                ast.Assign(targets=[_name(values, True)], value=_method(receiver, 'values'))]
         columns = []
+        shared = []
         if key is None:
             # tuples compare by (k, v); keys are unique, so the key alone decides
             columns.append(keys)
+            shared.append(0)
         else:
             param, body = self.key_parts(key)
             for j, comp in enumerate(self.components(body)):
@@ -428,6 +504,7 @@ class _Rewriter:
                 if (isinstance(comp, ast.Subscript) and isinstance(comp.value, ast.Name)
                         and comp.value.id == param and len(reads) == 1):
                     columns.append(keys if 0 in reads else values)
+                    shared.append(0)
                     continue
                 name = '_ail_sk%d_c%d' % (n, j)
                 if reads == {1}:
@@ -448,8 +525,9 @@ class _Rewriter:
                                            self.Unsupported).visit(copy.deepcopy(comp))
                     pre.append(self.index_column(name, index, expr, keys))
                 columns.append(name)
+                shared.append(1 if _key_shared(comp, param, self.lists) else 0)
         self.mark_columns(n, pre)
-        perm, statements = self.perm_statements(n, reverse, columns)
+        perm, statements = self.perm_statements(n, reverse, columns, shared)
         pre.extend(statements)
         step = '_ail_sk%d_t' % n
         k, v = st.target.elts
@@ -559,6 +637,7 @@ def rewrite(tree, stage, old_shape, Unsupported):
         rewriter.serial = serial        # names are unique across the whole program, not per function
         rewriter.dicts = _dict_names(fn)
         rewriter.struct_names = _struct_list_names(fn, classes)
+        rewriter.lists = _list_literal_shared(fn)
         fn.body = rewriter.block(fn.body)
         total += rewriter.count
         serial = rewriter.serial

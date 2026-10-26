@@ -2388,13 +2388,16 @@ class Lowering(TextLowering):
         if node.keywords:
             raise NotS0('keywords to %s()' % f)
         if f == '_ail_sort_perm':
-            if len(node.args) < 3 or not isinstance(node.args[1], ast.Constant) \
-                    or not isinstance(node.args[1].value, bool):
+            # sortkeys.py passes the key columns after a literal list of per-column "shared
+            # object" flags (see its _key_shared); the IR sort does not model NaN identity.
+            if len(node.args) < 4 or not isinstance(node.args[1], ast.Constant) \
+                    or not isinstance(node.args[1].value, bool) \
+                    or not isinstance(node.args[2], ast.List):
                 raise NotS0('a malformed sort permutation call')
             perm = owned(node.args[0], 'the sort permutation')
             if self.places[perm.id].type.pointee != LIST_I64:
                 raise NotS0('the sort permutation is not a list of int')
-            cols = [owned(a, 'a sort key column') for a in node.args[2:]]
+            cols = [owned(a, 'a sort key column') for a in node.args[3:]]
             refs = [self.container(perm)] + [self.container(c) for c in cols]
             self.b.emit('list.sortperm', refs, [], {'rev': 1 if node.args[1].value else 0})
             return None

@@ -11344,18 +11344,27 @@ def _sort_column(node, ctx):
 
 
 def _sort_perm_call(v, ctx):
-    """`_ail_sort_perm(perm, reverse, col...)` -> fill the int list `perm` with the stable ordering
-    permutation of the key columns (KEYSORT in cruntime.py)."""
-    if v.keywords or len(v.args) < 3 or not isinstance(v.args[1], ast.Constant):
+    """`_ail_sort_perm(perm, reverse, [shared...], col...)` -> fill the int list `perm` with the
+    stable ordering permutation of the key columns (KEYSORT in cruntime.py). `shared[k]` says the
+    k-th key expression always yields the same object, so a repeated NaN there is CPython's
+    same-object case (see sortkeys._key_shared)."""
+    if (v.keywords or len(v.args) < 4 or not isinstance(v.args[1], ast.Constant)
+            or not isinstance(v.args[2], ast.List)):
         raise Unsupported('internal: malformed sort permutation call')
     perm = _sort_list_name(v.args[0], ctx, 'the permutation')
     if ctx.type_of(perm) != LIST or perm in ctx.kind:
         raise Unsupported('internal: the sort permutation is not a local int list')
-    columns = [_sort_column(node, ctx) for node in v.args[2:]]
+    flags = v.args[2].elts
+    if (not all(isinstance(flag, ast.Constant) and type(flag.value) is int for flag in flags)
+            or len(flags) != len(v.args) - 3):
+        raise Unsupported('internal: malformed sort key flags')
+    columns = [_sort_column(node, ctx) for node in v.args[3:]]
     ctx.parts.update(('LIST', 'KEYSORT'))
     ctx.has_try = True
     return ('{ ail_keycol _kc[%d] = {%s}; ail_keysort_perm(&%s, _kc, %d, %d); }'
-            % (len(columns), ', '.join('{%s, (const void *)%s, %s}' % column for column in columns),
+            % (len(columns), ', '.join('{%s, (const void *)%s, %s, 0, %d}'
+                                       % (column + (1 if flag.value else 0,))
+                                       for column, flag in zip(columns, flags)),
                ctx.cname(perm), len(columns), 1 if v.args[1].value else 0))
 
 
@@ -31995,9 +32004,14 @@ static void ail__field_str_append_slow(ail_str *slot, ail_str value) {
                                          % ('str' if kind == STR else 'bytes', left, right,
                                             '<' if spec[k + 1] > 0 else '>'))
                     else:
-                        less_body.append('if (%s != %s && !(%s != %s && %s != %s)) return %s %s %s;'
-                                         % (left, right, left, left, right, right,
-                                            left, '<' if spec[k + 1] > 0 else '>', right))
+                        # A NaN field is unequal to everything, including another NaN field.
+                        # CPython's tuple comparison would only carry on past two NaNs when they
+                        # are the same object; a struct field holds a raw double, so treat the
+                        # pair as distinct and stop here (`<` is false) rather than reading the
+                        # next field (r14_struct).
+                        less_body.append('if (%s != %s) return %s %s %s;'
+                                         % (left, right, left,
+                                            '<' if spec[k + 1] > 0 else '>', right))
                     if kind == FLT:
                         nan_loops.append('if (%s != %s) { nan = 1; break; }' % (left, left))
                 nan_scan = ('for (int64_t i = 0; i < n; i++) { %s *a = v->p[i]; %s }'

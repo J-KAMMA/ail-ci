@@ -59,6 +59,15 @@ def main() -> None:
     print(sorted([5, 3, 4], key=lambda x: (x, nan)))
     print(sorted([(0, nan), (1, 2.0)], key=lambda kv: kv[1]))
     print(sorted([[1.0, nan], [2.0, 0.0], [1.0, 0.0]]))
+    # The first tuple component is a NaN: distinct objects stop the tuple comparison, while
+    # the same shared object carries on to the next component (CPython checks identity first).
+    print(sorted([5, 3, 4, 1, 2], key=lambda x: (float("nan"), x)))
+    print(sorted([5, 3, 4, 1, 2], key=lambda x: (nan, x)))
+    print(sorted([5, 3, 4, 1, 2], key=lambda x: (float("nan"), x), reverse=True))
+    ns = [float("nan") for _ in range(5)]
+    print(sorted([2, 0, 1, 4, 3], key=lambda i: (ns[i], i)))
+    shared_ns = [nan, nan, nan, 1.0, 2.0]
+    print(sorted([2, 0, 1, 4, 3], key=lambda i: (shared_ns[i], i)))
     ys = [nan, 1.0, 2.0]
     ys.sort()
     print(ys)
@@ -68,6 +77,34 @@ def main() -> None:
 
 
 main()
+'''
+
+CYCLE = r'''def attempt(tag, a):
+    try:
+        a.sort()
+        print(tag, "ok")
+    except Exception as e:
+        print(tag, type(e).__name__)
+
+
+a = [1.0, 2.0]
+a.append(a)
+attempt("selfref", a)
+
+b = [float("nan")]
+b.append(b)
+attempt("selfref_nan", b)
+
+inner = []
+outer = [inner]
+inner.append(outer)
+attempt("nested", outer)
+
+single = []
+single.append(single)
+attempt("single", single)
+
+
 '''
 
 
@@ -114,6 +151,9 @@ class Fuzz95Tests(unittest.TestCase):
 
     def test_nan_sort_matches_cpython(self):
         self.check('nan_sort', NAN_SORT)
+
+    def test_self_referential_list_sort_raises(self):
+        self.check('cycle_sort', CYCLE)
 
 
 if __name__ == '__main__':

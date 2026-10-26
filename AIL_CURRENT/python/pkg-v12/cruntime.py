@@ -10851,16 +10851,35 @@ static void ail__timsort(ail_obj *keys, ail_obj *values, int64_t n) {
 }
 /* A NaN has no total order: when the keys contain one, ail__timsort above reproduces
    CPython's own permutation.  A NaN-free list still takes the cheaper merge sort. */
-static int ail__sort_has_nan(ail_obj x) {
+static int ail__sort_has_nan(ail_obj x, ail_obj **seen, int64_t *depth, int64_t *cap) {
     if (x.tag == AIL_FLOAT) return x.f != x.f;
     if (x.tag == AIL_LIST || x.tag == AIL_TUPLE) {
-        for (int64_t i = 0; i < x.v->n; i++) if (ail__sort_has_nan(x.v->p[i])) return 1;
+        /* A self-referential list has no base case here; without this check the scan recursed
+           until the stack ran out (r10_selfref).  Treat a container already on the current
+           path as containing no key: the sort itself then raises CPython's TypeError when it
+           compares the cycle's elements. */
+        for (int64_t i = 0; i < *depth; i++) if ((*seen)[i].v == x.v) return 0;
+        if (*depth == *cap) {
+            int64_t want = *cap ? *cap * 2 : 16;
+            ail_obj *grown = (ail_obj *)realloc(*seen, (size_t)want * sizeof *grown);
+            if (!grown) ail_die("out of memory");
+            *seen = grown; *cap = want;
+        }
+        (*seen)[(*depth)++] = x;
+        int found = 0;
+        for (int64_t i = 0; i < x.v->n && !found; i++)
+            found = ail__sort_has_nan(x.v->p[i], seen, depth, cap);
+        --*depth;
+        return found;
     }
     return 0;
 }
 static int ail__sort_nan_at(ail_obj *p, int64_t n) {
-    for (int64_t i = 0; i < n; i++) if (ail__sort_has_nan(p[i])) return 1;
-    return 0;
+    ail_obj *seen = NULL;
+    int64_t depth = 0, cap = 0, found = 0;
+    for (int64_t i = 0; i < n && !found; i++) found = ail__sort_has_nan(p[i], &seen, &depth, &cap);
+    free(seen);
+    return found;
 }
 static inline void ail_list_sort(ail_obj lst) {
     ail_vec *v = lst.v;
@@ -15927,17 +15946,33 @@ static ail_st ail__timsort(ail_ctx *cx, ail_obj *keys, ail_obj *values, int64_t 
 }
 /* A NaN has no total order: when the keys contain one, ail__timsort above reproduces
    CPython's own permutation.  A NaN-free list still takes the cheaper merge sort. */
-static int ail__sort2_has_nan(ail_obj x) {
+static int ail__sort2_has_nan(ail_obj x, ail_obj **seen, int64_t *depth, int64_t *cap) {
     if (x.tag == AIL_T_FLOAT) return ail_float_val(x) != ail_float_val(x);
     if (x.tag == AIL_T_LIST || x.tag == AIL_T_TUPLE) {
+        /* A self-referential list has no base case here; see ail__sort_has_nan (r10_selfref). */
+        for (int64_t i = 0; i < *depth; i++) if ((*seen)[i].o == x.o) return 0;
+        if (*depth == *cap) {
+            int64_t want = *cap ? *cap * 2 : 16;
+            ail_obj *grown = (ail_obj *)realloc(*seen, (size_t)want * sizeof *grown);
+            if (!grown) ail_die("out of memory");
+            *seen = grown; *cap = want;
+        }
+        (*seen)[(*depth)++] = x;
         ail_vecobj *v = (ail_vecobj *)x.o;
-        for (int64_t i = 0; i < v->n; i++) if (ail__sort2_has_nan(v->p[i])) return 1;
+        int found = 0;
+        for (int64_t i = 0; i < v->n && !found; i++)
+            found = ail__sort2_has_nan(v->p[i], seen, depth, cap);
+        --*depth;
+        return found;
     }
     return 0;
 }
 static int ail__sort2_nan_at(ail_obj *p, int64_t n) {
-    for (int64_t i = 0; i < n; i++) if (ail__sort2_has_nan(p[i])) return 1;
-    return 0;
+    ail_obj *seen = NULL;
+    int64_t depth = 0, cap = 0, found = 0;
+    for (int64_t i = 0; i < n && !found; i++) found = ail__sort2_has_nan(p[i], &seen, &depth, &cap);
+    free(seen);
+    return found;
 }
 /* ail_list_sort -- the key function (if not AIL_T_NONE) is called EXACTLY ONCE per
    element, into a scratch `keys` array (decorate), the merge sort above compares only
@@ -29501,7 +29536,7 @@ KEYSORT = r"""
 #include <math.h>
 /* kind 0 int64_t, 1 double, 2 ail_str; `pre` (filled by ail_keysort_perm for a str column) holds
    each string's first eight bytes, big-endian, so most comparisons never touch the text. */
-typedef struct { int kind; const void *p; int64_t n; const uint64_t *pre; } ail_keycol;
+typedef struct { int kind; const void *p; int64_t n; const uint64_t *pre; int nan_shared; } ail_keycol;
 #define AIL_KEYSORT_MAX 16
 static inline int ail_keycol_cmp(const ail_keycol *c, int nc, int64_t a, int64_t b) {
     for (int k = 0; k < nc; k++) {
@@ -29544,7 +29579,16 @@ static int ail_keysort_ts_less(const void *ctxp, int64_t b, int64_t a) {
         } else if (c[k].kind == 1) {
             const double *p = (const double *)c[k].p;
             double x = p[b], y = p[a];
-            if (x != y && !(x != x && y != y)) return x < y;
+            if (x != x && y != y) {
+                /* CPython's tuple comparison checks identity before ==: a shared NaN object
+                   (same key expression result) carries on to the next component, two distinct
+                   NaN objects stop here with `<` false.  A raw key column cannot hold a box,
+                   so sortkeys.py marks a column whose expression always yields the same object
+                   (a name, not a call); every other NaN pair is treated as distinct. */
+                if (c[k].nan_shared) continue;
+                return 0;
+            }
+            if (x != y) return x < y;
         } else {
 #ifdef AIL_KEYSORT_STR
             const ail_str *p = (const ail_str *)c[k].p;

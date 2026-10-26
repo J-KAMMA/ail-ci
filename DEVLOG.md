@@ -1,3 +1,21 @@
+## 2026-10-26 -- review fixes for fuzz95: NaN key identity and cyclic sort keys
+
+Fixed the two reviewer defects. The typed keyed sort's `ail_keysort_ts_less` now applies CPython's
+identity-before-equality rule: two NaN key components carry on to the next column only when both
+came from one shared object (`sortkeys.py` marks a column whose expression is a name/stable
+attribute, including a subscript into a list literal built from one shared expression); distinct
+NaN calls stop there. The struct sort's Timsort comparator likewise stops on two NaN fields instead
+of falling through. The NaN pre-scan in both boxed runtimes now keeps a visited stack, so a
+self-referential list no longer overflows the C stack; it reaches the ordinary comparison and
+raises CPython's TypeError. Added the distinct/shared tuple, list-item and cyclic-list cases to
+`test_ail_fuzz95.py`. Probes (both builds): reviewer `r1`-`r13` plus `/tmp/probes/rbf95_identity`,
+`rbf95_cycle`, `rbf95_routes`, `fz95_*` all match CPython; distinct struct NaN probe prints
+`distinct: 3 1 0` (the shared-field form is still refused by the AIL constructor, as on base).
+Required modules on the final tree: `test_ail_fuzz95`, `test_ail_numeric_profiles_native`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`, `test_ail_sort_keys`,
+`test_ail_ir_s3c2`, 0 failed with `-j 2`. `tools/diff_ids.py` is absent; `update_manifest.py
+--check` exits 0.
+
 ## 2026-10-26 -- re-apply fuzz95: CPython's NaN sort order (job-rbfuzz95-10270750)
 
 Re-applied the accepted fuzz95 change on the current integration tree. The typed, v1 boxed and
