@@ -193,7 +193,7 @@ class Random:
             while p < k * 3:
                 p = p * 4
                 m = m + 1
-            setsize = setsize + 4 ** m
+            setsize = setsize + p
         if n <= setsize:
             pool = list(population)
             i = 0
@@ -229,7 +229,7 @@ class Random:
             self.has_gauss = True
         return mu + z * sigma
 
-    def expovariate(self, lambd: float) -> float:
+    def expovariate(self, lambd: float = 1.0) -> float:
         return -math.log(1.0 - self.random()) / lambd
 
     def triangular(self, low: float = 0.0, high: float = 1.0, mode=None) -> float:

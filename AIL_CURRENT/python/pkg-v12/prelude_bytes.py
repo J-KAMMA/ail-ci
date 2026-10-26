@@ -29,16 +29,37 @@ def _ail_b_raise():
     raise ValueError(m)
 
 
+def _ail_b_codec_name(encoding):
+    parts = []
+    punct = False
+    for c in encoding:
+        o = ord(c)
+        if (o >= 48 and o <= 57) or (o >= 65 and o <= 90) or (o >= 97 and o <= 122) or o == 46:
+            if punct and parts:
+                parts.append("_")
+            if o >= 65 and o <= 90:
+                c = chr(o + 32)
+            parts.append(c)
+            punct = False
+        else:
+            punct = True
+    return "".join(parts)
+
+
 def _ail_b_codec(encoding):
     if not isinstance(encoding, str):
         raise TypeError("encode() argument 'encoding' must be str, not " + type(encoding).__name__)
-    e = encoding.lower().replace("_", "-").replace(" ", "-")
-    if e == "utf-8" or e == "utf8" or e == "u8" or e == "utf" or e == "cp65001":
+    e = _ail_b_codec_name(encoding)
+    if (e == "utf_8" or e == "utf8" or e == "u8" or e == "utf" or e == "cp65001" or e == "utf8_ucs2"
+            or e == "utf8_ucs4"):
         return 0
-    if e == "ascii" or e == "us-ascii" or e == "646" or e == "us" or e == "ansi-x3.4-1968" or e == "iso646-us":
+    if (e == "ascii" or e == "us_ascii" or e == "646" or e == "us" or e == "ansi_x3.4_1968"
+            or e == "ansi_x3.4_1986" or e == "ansi_x3_4_1968" or e == "cp367" or e == "csascii" or e == "ibm367"
+            or e == "iso646_us" or e == "iso_646.irv_1991" or e == "iso_ir_6"):
         return 1
-    if (e == "latin-1" or e == "latin1" or e == "iso-8859-1" or e == "iso8859-1" or e == "8859" or e == "cp819"
-            or e == "l1" or e == "latin" or e == "iso-ir-100"):
+    if (e == "latin_1" or e == "latin1" or e == "iso_8859_1" or e == "iso8859_1" or e == "8859" or e == "cp819"
+            or e == "l1" or e == "latin" or e == "iso_ir_100" or e == "csisolatin1" or e == "ibm819"
+            or e == "iso8859" or e == "iso_8859_1_1987"):
         return 2
     raise LookupError("unknown encoding: " + encoding)
 
@@ -99,6 +120,23 @@ def _ail_bsub(x):
     raise TypeError("argument should be integer or bytes-like object, not '" + type(x).__name__ + "'")
 
 
+def _ail_bcontains(x):
+    if not isinstance(x, int):
+        try:
+            x = _ail_b_index(x)
+        except Exception:
+            pass
+    if isinstance(x, int):
+        if x < 0 or x > 255:
+            raise ValueError("byte must be in range(0, 256)")
+        return chr(x)
+    if isinstance(x, bytes):
+        return x._s
+    if isinstance(x, bytearray):
+        return _ail_b_from_ints(x._a)
+    raise TypeError("a bytes-like object is required, not '" + type(x).__name__ + "'")
+
+
 def _ail_b_source(source, encoding, errors):
     if source is None:
         if encoding is not None or errors is not None:
@@ -121,23 +159,33 @@ def _ail_b_source(source, encoding, errors):
     return _ail_b_from_ints(source)
 
 
+def _ail_b_bound(x):
+    if x is None:
+        return None
+    return _ail_b_index(x)
+
+
 def _ail_b_rng(n, start, end):
     st = 0
     en = n
     if start is not None:
-        st = start
-        if st < 0:
-            st = st + n
-            if st < 0:
-                st = 0
+        st = _ail_b_bound(start)
     if end is not None:
-        en = end
+        en = _ail_b_bound(end)
+    if start is not None:
+        if st < 0:
+            if st < -n:
+                st = 0
+            else:
+                st = st + n
+    if end is not None:
         if en > n:
             en = n
         elif en < 0:
-            en = en + n
-            if en < 0:
+            if en < -n:
                 en = 0
+            else:
+                en = en + n
     return (st, en)
 
 
@@ -309,9 +357,16 @@ def _ail_bm_removesuffix(s, suffix):
     return s
 
 
+_AIL_B_DEFAULT_FILL = []
+
+
 def _ail_b_fill(fillchar, name):
-    if fillchar is None:
+    if fillchar is _AIL_B_DEFAULT_FILL:
         return " "
+    if fillchar is None:
+        raise TypeError(name + "() argument 2 must be a byte string of length 1, not None")
+    if not (isinstance(fillchar, bytes) or isinstance(fillchar, bytearray)):
+        raise TypeError(name + "() argument 2 must be a byte string of length 1, not " + type(fillchar).__name__)
     f = _ail_bs(fillchar)
     if len(f) != 1:
         raise TypeError(name + "() argument 2 must be a byte string of length 1, not " + type(fillchar).__name__)
@@ -424,6 +479,7 @@ def _ail_b_cmp_other(other, op, me):
 
 
 def _ail_b_int(s, text):
+    text = text[:200]
     if not _ail_b_numsafe(s):
         raise ValueError("invalid literal for int() with base 10: " + text)
     try:
@@ -469,7 +525,7 @@ class bytes:
         return iter(_ail_b_ints(self._s))
 
     def __contains__(self, x):
-        return _ail_bsub(x) in self._s
+        return _ail_bcontains(x) in self._s
 
     def __eq__(self, other):
         if isinstance(other, bytes):
@@ -600,7 +656,7 @@ class bytearray:
         return iter(self._a)
 
     def __contains__(self, x):
-        return _ail_bsub(x) in _ail_b_from_ints(self._a)
+        return _ail_bcontains(x) in _ail_b_from_ints(self._a)
 
     def __eq__(self, other):
         if isinstance(other, bytearray):
@@ -672,18 +728,18 @@ class bytearray:
         return len(self._a) > 0
 
     def __repr__(self):
-        return "bytearray(b" + _ail_b_repr(_ail_b_from_ints(self._a)) + ")"
+        return "bytearray(b" + _ail_ba_repr(_ail_b_from_ints(self._a)) + ")"
 
     def __str__(self):
-        return "bytearray(b" + _ail_b_repr(_ail_b_from_ints(self._a)) + ")"
+        return "bytearray(b" + _ail_ba_repr(_ail_b_from_ints(self._a)) + ")"
 
     def __int__(self):
         s = _ail_b_from_ints(self._a)
-        return _ail_b_int(s, "bytearray(b" + _ail_b_repr(s) + ")")
+        return _ail_b_int(s, "b" + _ail_b_repr(s))
 
     def __float__(self):
         s = _ail_b_from_ints(self._a)
-        return _ail_b_float(s, "bytearray(b" + _ail_b_repr(s) + ")")
+        return _ail_b_float(s, "bytearray(b" + _ail_ba_repr(s) + ")")
 
     def append(self, x):
         if not isinstance(x, int):
@@ -772,7 +828,12 @@ def _ail_str_decode(x, encoding="utf-8", errors="strict"):
 def _ail_int2(x, base):
     if isinstance(x, bytes) or isinstance(x, bytearray):
         s = _ail_bs(x)
-        text = repr(x)
+        text = ("b" + _ail_b_repr(s)) if isinstance(x, bytearray) else repr(x)
+        text = text[:200]
+        if not isinstance(base, int):
+            int("0", base)
+        elif base != 0 and (base < 2 or base > 36):
+            raise ValueError("int() base must be >= 2 and <= 36, or 0")
         if not _ail_b_numsafe(s):
             raise ValueError("invalid literal for int() with base " + str(base) + ": " + text)
         try:
@@ -814,6 +875,8 @@ def _ail_to_bytes(n, length=1, byteorder="big", signed=False):
 def _ail_from_bytes(data, byteorder="big", signed=False):
     if byteorder != "big" and byteorder != "little":
         raise ValueError("byteorder must be either 'little' or 'big'")
+    if data is None or isinstance(data, int) or isinstance(data, str):
+        raise TypeError("cannot convert '" + type(data).__name__ + "' object to bytes")
     s = _ail_b_source(data, None, None)
     vals = _ail_b_ints(s)
     if byteorder == "little":

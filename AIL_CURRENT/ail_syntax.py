@@ -674,6 +674,57 @@ _FOLD_BINARY = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator
                 ast.Pow: operator.pow, ast.LShift: operator.lshift, ast.RShift: operator.rshift,
                 ast.BitAnd: operator.and_, ast.BitOr: operator.or_, ast.BitXor: operator.xor}
 
+_FOLD_INT_BITS = 4096
+
+
+def _fold_int_exact(node, known):
+    """The exact int value of a class-level constant expression, with wider intermediate steps
+    allowed. `_fold` stops as soon as a step leaves int64, which is right for a module value
+    (the emitted arithmetic traps there) but wrong for a class body, whose constant the compiler
+    must resolve: `N = 2**62; class C: X = N * 2 - 1` reaches an in-range 2**63-1 through a
+    2**63 step. Raises _NotConstant when the expression is not an integer constant."""
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        return node.value
+    if isinstance(node, ast.Name):
+        value = known.get(node.id)
+        if type(value) is not int:
+            raise _NotConstant
+        return value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
+        value = _fold_int_exact(node.operand, known)
+        return {ast.USub: operator.neg, ast.UAdd: operator.pos,
+                ast.Invert: operator.invert}[type(node.op)](value)
+    if not isinstance(node, ast.BinOp) or type(node.op) not in _FOLD_BINARY or isinstance(node.op, ast.Div):
+        raise _NotConstant
+    left, right = _fold_int_exact(node.left, known), _fold_int_exact(node.right, known)
+    if isinstance(node.op, ast.Pow):
+        if right < 0:
+            raise _NotConstant
+        if right == 0:
+            value = 1
+        elif left in (0, 1, -1):
+            value = left ** right if left != -1 else (-1 if right & 1 else 1)
+        elif left.bit_length() * right > _FOLD_INT_BITS:
+            raise _NotConstant
+        else:
+            value = left ** right
+    elif isinstance(node.op, (ast.LShift, ast.RShift)):
+        if right < 0:
+            raise _NotConstant
+        if right >= _FOLD_INT_BITS:
+            if isinstance(node.op, ast.LShift):
+                raise _NotConstant
+            value = 0 if left >= 0 else -1
+        else:
+            value = left << right if isinstance(node.op, ast.LShift) else left >> right
+    elif isinstance(node.op, (ast.FloorDiv, ast.Mod)) and right == 0:
+        raise _NotConstant
+    else:
+        value = _FOLD_BINARY[type(node.op)](left, right)
+    if value.bit_length() > _FOLD_INT_BITS:
+        raise _NotConstant
+    return value
+
 
 def _fold(node, known):
     if isinstance(node, ast.Constant) and type(node.value) in (int, float, str, bytes):
@@ -766,18 +817,97 @@ def _module_scope_bindings(tree):
     return count
 
 
+def _class_statement_names(statement):
+    """Names a class-level statement binds for the statements after it."""
+    if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return {statement.name}
+    return {inner.id for inner in ast.walk(statement)
+            if isinstance(inner, ast.Name) and isinstance(inner.ctx, (ast.Store, ast.Del))}
+
+
+def _class_body_expressions(statement):
+    if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+        return
+    if isinstance(statement, ast.Assign):
+        yield statement.value
+    elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+        yield statement.value
+    elif isinstance(statement, ast.AugAssign):
+        yield statement.value
+    for child in ast.iter_child_nodes(statement):
+        yield from _class_body_expressions(child)
+
+
+def _class_route_arithmetic(value):
+    def routed(node):
+        if isinstance(node, ast.Lambda):
+            return False
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            # The callee (including its receiver) is not a data operand: the
+            # arithmetic applies to the call's result, not to the attribute.
+            return (any(routed(arg) for arg in node.args)
+                    or any(routed(keyword.value) for keyword in node.keywords))
+        if isinstance(node, (ast.Subscript, ast.Attribute)) and isinstance(node.ctx, ast.Load):
+            return True
+        return any(routed(child) for child in ast.iter_child_nodes(node))
+
+    def scan(node):
+        if isinstance(node, ast.Lambda):
+            return False
+        if isinstance(node, (ast.BinOp, ast.UnaryOp)) and routed(node):
+            return True
+        return any(scan(child) for child in ast.iter_child_nodes(node))
+
+    return scan(value)
+
+
 def fold_constants(text):
     """Top-level `NAME = <constant arithmetic>` bound once in module scope, rewritten to its literal
     value. A name that a nested block, a loop or a `global` function rebinds is not folded: its value
-    at the line that reads it is not the first one."""
+    at the line that reads it is not the first one. A class-level assignment may read such a name:
+    its arithmetic runs in the class body, so it is folded here too (exactly, wide steps allowed)."""
     try:
         tree = ast.parse(text)
     except SyntaxError:
         return text
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        for statement in node.body:
+            for value in _class_body_expressions(statement):
+                if _class_route_arithmetic(value):
+                    raise SyntaxErrorAIL(
+                        'not in the subset: a class-level constant built through a list item, '
+                        'attribute or dict value; write instead: bind the number as a module '
+                        'constant before the class',
+                        lineno=value.lineno, offset=value.col_offset + 1)
     stored = _module_scope_bindings(tree)
     known = {}
     edits = []
     for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            scope = {name: value for name, value in known.items() if type(value) is int}
+            shadowed = set()
+            for statement in node.body:
+                if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+                    target, expression = statement.targets[0], statement.value
+                elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+                    target, expression = statement.target, statement.value
+                else:
+                    expression = None
+                if (expression is not None and isinstance(target, ast.Name)
+                        and not isinstance(expression, ast.Name) and not _is_literal(expression)):
+                    loads = {inner.id for inner in ast.walk(expression)
+                             if isinstance(inner, ast.Name) and isinstance(inner.ctx, ast.Load)}
+                    if loads & scope.keys() and not loads & shadowed:
+                        try:
+                            value = _fold_int_exact(expression, scope)
+                        except (_NotConstant, ArithmeticError, ValueError, TypeError, RecursionError):
+                            pass
+                        else:
+                            edits.append((expression, repr(value)))
+                shadowed |= _class_statement_names(statement)
+            continue
         if not (isinstance(node, ast.Assign) and len(node.targets) == 1
                 and isinstance(node.targets[0], ast.Name) and stored[node.targets[0].id] == 1):
             continue
@@ -1013,23 +1143,18 @@ _MATH_HELPERS['lcm'] = (
     '        return 0\n'
     '    return abs(a // _ail_math_gcd(a, b) * b)\n')
 
-# math.fsum (CPython's Shewchuk partials and its final rounding step; a non-finite input is summed plainly),
+# math.fsum (CPython's Shewchuk partials, its non-finite bookkeeping and its final rounding step),
 # math.prod of ints, and textwrap.wrap / fill / dedent for the default options. Text with a hyphen or a tab is a
 # loud RuntimeError: CPython may break a line after a hyphen and expands tabs, neither of which is built.
 _MATH_HELPERS['fsum'] = (
     'def _ail_math_fsum(xs: list[float]) -> float:\n'
-    '    plain = 0.0\n'
-    '    finite = True\n'
-    '    for v in xs:\n'
-    '        plain += v\n'
-    '        if v - v != 0.0:\n'
-    '            finite = False\n'
-    '    if not finite:\n'
-    '        return plain\n'
     '    partials = [0.0] * (len(xs) + 1)\n'
     '    m = 0\n'
+    '    special_sum = 0.0\n'
+    '    inf_sum = 0.0\n'
     '    for v in xs:\n'
     '        x = v\n'
+    '        xsave = x\n'
     '        i = 0\n'
     '        j = 0\n'
     '        while j < m:\n'
@@ -1045,10 +1170,22 @@ _MATH_HELPERS['fsum'] = (
     '                i += 1\n'
     '            x = hi\n'
     '            j += 1\n'
-    '        if x != 0.0:\n'
-    '            partials[i] = x\n'
-    '            i += 1\n'
     '        m = i\n'
+    '        if x != 0.0:\n'
+    '            if x - x != 0.0:\n'
+    '                if xsave - xsave == 0.0:\n'
+    '                    raise OverflowError("intermediate overflow in fsum")\n'
+    '                if xsave == xsave:\n'
+    '                    inf_sum += xsave\n'
+    '                special_sum += xsave\n'
+    '                m = 0\n'
+    '            else:\n'
+    '                partials[m] = x\n'
+    '                m += 1\n'
+    '    if special_sum != 0.0:\n'
+    '        if inf_sum != inf_sum:\n'
+    '            raise ValueError("-inf + inf in fsum")\n'
+    '        return special_sum\n'
     '    n = m\n'
     '    hi = 0.0\n'
     '    if n > 0:\n'
@@ -1416,6 +1553,25 @@ class _SurfaceExpr(ast.NodeTransformer):
             if new is not None:
                 return self.replaced(new, node)
         return node
+
+
+def _annotation_target_parts(target):
+    def extend(parts, node):
+        if isinstance(node, ast.Slice):
+            parts.extend(part for part in (node.lower, node.upper, node.step) if part is not None)
+        elif isinstance(node, ast.Tuple):
+            for element in node.elts:
+                extend(parts, element)
+        else:
+            parts.append(node)
+
+    if isinstance(target, ast.Attribute):
+        return [target.value]
+    if isinstance(target, ast.Subscript):
+        parts = [target.value]
+        extend(parts, target.slice)
+        return parts
+    return []
 
 
 class _Surface:
@@ -2368,7 +2524,7 @@ class _Surface:
 
     def object_setattr(self, node):
         """`object.__setattr__(self, "name", value)` (how a frozen dataclass's __post_init__ sets a field) as the
-        assignment `self.name = value`; a frozen instance is not write-protected on either path."""
+        assignment `self.name = value`; check_frozen_stores refuses the writes a frozen instance would reject."""
         call = node.value
         func = call.func
         if not (isinstance(func, ast.Attribute) and func.attr == '__setattr__' and isinstance(func.value, ast.Name)
@@ -2593,15 +2749,121 @@ class _Surface:
                     self.edits[index] = (start, end, marker + extra, flag)
 
     def ann_assign(self, node, function, owner):
-        if isinstance(node.target, ast.Attribute) and node.value is None:
-            self.replace(node, 'pass', True)
+        module = function is None and owner is None
+        if module and node.value is None:
+            self.module_bare_annotation(node)
             return
-        if function is None and owner is None and isinstance(node.target, ast.Name) and node.value is not None:
+        if node.value is None and isinstance(node.target, (ast.Attribute, ast.Subscript)):
+            if function is not None or owner is None:
+                parts = _annotation_target_parts(node.target)
+                self.replace(node, '; '.join(ast.unparse(self.rewritten(part)[0]) for part in parts) or 'pass', True)
+                return
+            if isinstance(node.target, ast.Attribute):
+                self.replace(node, 'pass', True)
+                return
+        if module and node.value is not None and not self._future_annotations() \
+                and self._annotation_runs(node.annotation):
+            self.module_annotated_assignment(node)
+            return
+        if module and isinstance(node.target, ast.Name) and node.value is not None:
             value, _ = self.rewritten(node.value)
             self.replace(node, f'{node.target.id} = {ast.unparse(value)}', True)
             return
         self.annotation(node.annotation)
         self.expression(node.value)
+
+    def _future_annotations(self):
+        if not hasattr(self, '_future_ann'):
+            self._future_ann = any(
+                isinstance(n, ast.ImportFrom) and not n.level and n.module == '__future__'
+                and any(a.name == 'annotations' for a in n.names) for n in self.tree.body)
+        return self._future_ann
+
+    def _annotation_runs(self, node):
+        """Whether evaluating the annotation can do more than read a name or a type expression: it
+        contains a call, a lambda or an assignment expression."""
+        if isinstance(node, (ast.Call, ast.NamedExpr, ast.Lambda, ast.Await, ast.Yield, ast.YieldFrom)):
+            return True
+        return any(self._annotation_runs(child) for child in ast.iter_child_nodes(node))
+
+    def module_annotated_assignment(self, node):
+        """`target: annotation = value` at module scope evaluates the assignment and then the
+        annotation in CPython; the paths dropped the annotation. Keep both in one line (or two
+        statements) so positions do not move."""
+        annotation = ast.unparse(ast.Tuple(elts=[self.rewritten(node.annotation)[0]], ctx=ast.Load()))
+        value, _ = self.rewritten(node.value)
+        if isinstance(node.target, ast.Name):
+            self.replace(node, f'{node.target.id} = {ast.unparse(value)}; {annotation}', True)
+            return
+        target = ast.unparse(node.target)
+        self.replace(node, f'{target} = {ast.unparse(value)}; {annotation}', True)
+
+    def _static_annotation(self, node):
+        """Whether `node` is a type expression whose evaluation has no effect AIL can carry (a builtin
+        or imported type, `list[int]`, `A | None`, a constant). Builtin classes are not values on the
+        typed path, so these stay as unevaluated annotations."""
+        if isinstance(node, ast.Constant):
+            return True
+        if isinstance(node, ast.Name):
+            return (node.id in _ALIAS_TYPE_NAMES or node.id in _RESULT_NAMES
+                    or node.id in _TYPING or node.id in self.classes)
+        if isinstance(node, ast.Attribute):
+            return isinstance(node.value, ast.Name) and (
+                node.value.id in self.modules or node.value.id in _ALIAS_TYPE_NAMES)
+        if isinstance(node, ast.Subscript):
+            inner = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
+            return self._static_annotation(node.value) and all(self._static_annotation(x) for x in inner)
+        if isinstance(node, (ast.Tuple, ast.List)):
+            return all(self._static_annotation(x) for x in node.elts)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+            return self._static_annotation(node.left) and self._static_annotation(node.right)
+        return False
+
+    def _annotation_slice_parts(self, node):
+        """The expressions CPython evaluates for a subscript target's slice, or None for a Starred form
+        (which CPython rejects as a bare annotated assignment target; module_bare_annotation refuses it).
+        A Starred inside a nested tuple is still part of that tuple display, so it is refused too."""
+        if isinstance(node, ast.Starred):
+            return None
+        if isinstance(node, ast.Slice):
+            return [each for each in (node.lower, node.upper, node.step) if each is not None]
+        if isinstance(node, ast.Tuple):
+            parts = []
+            for each in node.elts:
+                found = self._annotation_slice_parts(each)
+                if found is None:
+                    return None
+                parts.extend(found)
+            return parts
+        return [node]
+
+    def module_bare_annotation(self, node):
+        """A module-level `target: annotation` without a value evaluates the target parts and then the
+        annotation in CPython; both paths used to drop the statement. One tuple expression statement
+        keeps that order and leaves the line count alone. Under `from __future__ import annotations`
+        only the target is evaluated. A plain-name target with a type expression stays untouched (the
+        lowerers drop it, as before)."""
+        parts = []
+        target = node.target
+        if isinstance(target, ast.Attribute):
+            parts.append(target.value)
+        elif isinstance(target, ast.Subscript):
+            slice_parts = self._annotation_slice_parts(target.slice)
+            if slice_parts is None:
+                raise SyntaxErrorAIL(
+                    'a starred expression in an annotated assignment target is not valid Python syntax.\n'
+                    '  write instead: build the key first (`key = a[0]`) and annotate `xs[key]`',
+                    lineno=node.lineno, offset=node.col_offset + 1)
+            parts.append(target.value)
+            parts.extend(slice_parts)
+        elif not isinstance(target, ast.Name):
+            return
+        if not self._future_annotations() and not self._static_annotation(node.annotation):
+            parts.append(node.annotation)
+        if not parts:
+            return
+        values = ast.Tuple(elts=[self.rewritten(each)[0] for each in parts], ctx=ast.Load())
+        self.replace(node, ast.unparse(values), True)
 
     def starts_processes(self):
         if not hasattr(self, '_starts_processes'):
@@ -2817,9 +3079,63 @@ class _Surface:
 
     def run(self):
         self.collect()
+        self.check_frozen_stores()
         self.block(self.tree.body, None, None)
         self.finish_imports()
         return self.apply()
+
+    def frozen_classes(self):
+        """{class name: its field names} for `@dataclass(frozen=True)` classes in this source."""
+        found = {}
+        for node in ast.walk(self.tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            for decorator in node.decorator_list:
+                target = decorator.func if isinstance(decorator, ast.Call) else decorator
+                if (self.path(target) == 'dataclasses.dataclass' and isinstance(decorator, ast.Call)
+                        and any(keyword.arg == 'frozen' and isinstance(keyword.value, ast.Constant)
+                                and keyword.value.value for keyword in decorator.keywords)):
+                    found[node.name] = {statement.target.id for statement in node.body
+                                        if isinstance(statement, ast.AnnAssign)
+                                        and isinstance(statement.target, ast.Name)}
+        return found
+
+    def check_frozen_stores(self):
+        """Refuse a field write a frozen dataclass would answer with FrozenInstanceError. The field name
+        is what the write names, so this covers every receiver (a local, a parameter, a list item, a
+        dict value, a nested field); `self.f` inside another class is that class's own field."""
+        frozen = self.frozen_classes()
+        owners = {}
+        for name, fields in frozen.items():
+            for field in fields:
+                owners.setdefault(field, name)
+        if not owners:
+            return
+
+        def refuse(node, field, owner):
+            where = 'self.' + field if owner is not None else field
+            raise SyntaxErrorAIL(
+                'assignment to %s, a field of the frozen dataclass %s: a frozen instance raises '
+                'FrozenInstanceError instead\n'
+                '  write instead: construct a new instance, or use dataclasses.replace(...)'
+                % (where, owners[field]), lineno=node.lineno, offset=node.col_offset + 1)
+
+        def walk(node, owner):
+            for child in ast.iter_child_nodes(node):
+                current = child if isinstance(child, ast.ClassDef) else owner
+                if isinstance(child, ast.Attribute) and child.attr in owners and isinstance(
+                        child.ctx, (ast.Store, ast.Del)):
+                    if not (isinstance(child.value, ast.Name) and child.value.id == 'self'
+                            and owner is not None and owner.name not in frozen):
+                        refuse(child, child.attr, owner)
+                elif (isinstance(child, ast.Call) and isinstance(child.func, ast.Name)
+                      and child.func.id in ('setattr', 'delattr') and len(child.args) >= 2
+                      and isinstance(child.args[1], ast.Constant)
+                      and isinstance(child.args[1].value, str) and child.args[1].value in owners):
+                    refuse(child, child.args[1].value, None)
+                walk(child, current)
+
+        walk(self.tree, None)
 
 
 def _sqllower():

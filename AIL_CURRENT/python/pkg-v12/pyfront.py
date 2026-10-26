@@ -83,7 +83,9 @@ HELPERS = {
     # non-negative `a` and |a| <= 2**(63-b) for a negative one. `-(a + 1)` is |a| - 1 and is used
     # instead of `-a` because negating INT64_MIN is itself undefined.
     'ck_shl': ('static int64_t ck_shl(int64_t a, int64_t b) {\n'
-               '    if (b < 0) ail_raise_named(AIL_EXC_VALUE);\n'
+               '    if (b < 0) ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE,\n'
+               '        (const uint8_t *)"negative shift count",\n'
+               '        (int64_t)sizeof "negative shift count" - 1, 1));\n'
                '    if (b >= 64) { if (a != 0) ail_die("integer overflow"); return 0; }\n'
                '    uint64_t lim = (uint64_t)1 << (63 - b);\n'
                '    uint64_t mag = (a >= 0) ? (uint64_t)a : (uint64_t)(-(a + 1));\n'
@@ -99,7 +101,9 @@ HELPERS = {
                 '    if (__builtin_expect((r >> s) != a, 0)) ail_die("integer overflow");\n'
                 '    return r;\n}\n'),
     'ck_shr': ('static int64_t ck_shr(int64_t a, int64_t b) {\n'
-               '    if (b < 0) ail_raise_named(AIL_EXC_VALUE);\n'
+               '    if (b < 0) ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE,\n'
+               '        (const uint8_t *)"negative shift count",\n'
+               '        (int64_t)sizeof "negative shift count" - 1, 1));\n'
                '    if (b >= 64) return a < 0 ? -1 : 0;\n'
                '    return a >> b;\n}\n'),
 }
@@ -133,6 +137,141 @@ def _number_constant(node):
         return sign * node.value
     return None
 
+
+_CONST_INT_LIMIT = 1 << 22
+_SPECIAL_INT_LIMIT = 1 << 24
+
+
+def int_constant(node, _limit=_CONST_INT_LIMIT):
+    """The exact Python value of an all-integer constant expression, else None.
+
+    Python evaluates `(1 << 63) - 1` and `2**65 - 2**65` exactly, even though an intermediate is
+    outside int64.  Folding the whole expression here, with Python's unbounded integers, lets a
+    caller emit the one in-range result instead of trapping on the intermediate.  It also keeps a
+    constant expression from changing width at each operator, which is what C would do.
+
+    None is returned when the node is not made only of int constants, when an operation would not
+    produce an int (`2 ** -1` is a float), when it fails (`1 // 0`), or when the value grows past
+    a safe size.  The last case is deliberately not folded: the runtime's own overflow guard is
+    the right answer for it, and computing `2 ** 1000000000` here would only cost memory.
+
+    Zero and the base 0/1/-1 of a power are decided before the other operand has to fit the size
+    limit: `0 * (1 << 5000)` and `0 ** (1 << 5000)` have int64 results even though the left/right
+    operand is large.  The exponent of such a power is retried at a much larger limit so its sign
+    and parity are still known.
+    """
+    if isinstance(node, ast.Constant):
+        return node.value if type(node.value) is int else None
+    if isinstance(node, ast.UnaryOp):
+        if not isinstance(node.op, (ast.USub, ast.UAdd)):
+            return None
+        value = int_constant(node.operand, _limit)
+        if value is None:
+            return None
+        return -value if isinstance(node.op, ast.USub) else value
+    if not isinstance(node, ast.BinOp):
+        return None
+    op = type(node.op)
+    if op is ast.Pow:
+        right = int_constant(node.right, _limit)
+        if right == 0:
+            left = int_constant(node.left, _limit)
+            if left is None:
+                left = int_constant(node.left, _SPECIAL_INT_LIMIT)
+            return None if left is None else 1
+        left = int_constant(node.left, _limit)
+        if left in (0, 1, -1):
+            if right is None:
+                right = int_constant(node.right, _SPECIAL_INT_LIMIT)
+            if right is not None and right >= 0:
+                if right == 0:
+                    return 1
+                if left == 0:
+                    return 0
+                if left == 1:
+                    return 1
+                return 1 if right % 2 == 0 else -1
+        if left is None or right is None:
+            return None
+    elif op is ast.Mult or op is ast.BitAnd:
+        left = int_constant(node.left, _limit)
+        right = int_constant(node.right, _limit)
+        if left == 0 or right == 0:
+            if left is None:
+                left = int_constant(node.left, _SPECIAL_INT_LIMIT)
+            if right is None:
+                right = int_constant(node.right, _SPECIAL_INT_LIMIT)
+            if left is None or right is None:
+                return None
+            return 0
+        if left is None or right is None:
+            return None
+    elif op is ast.LShift:
+        left = int_constant(node.left, _limit)
+        if left == 0:
+            right = int_constant(node.right, _limit)
+            if right is None:
+                right = int_constant(node.right, _SPECIAL_INT_LIMIT)
+            if right is not None and right >= 0:
+                return 0
+        right = int_constant(node.right, _limit)
+        if left is None or right is None:
+            return None
+    else:
+        left = int_constant(node.left, _limit)
+        right = int_constant(node.right, _limit)
+        if left is None or right is None:
+            return None
+    try:
+        if op is ast.Add:
+            result = left + right
+        elif op is ast.Sub:
+            result = left - right
+        elif op is ast.Mult:
+            if left and right and left.bit_length() + right.bit_length() > _limit:
+                return None
+            result = left * right
+        elif op is ast.FloorDiv:
+            result = left // right
+        elif op is ast.Mod:
+            result = left % right
+        elif op is ast.Pow:
+            if right < 0:
+                return None
+            if right == 0:
+                result = 1
+            elif left in (0, 1):
+                result = left
+            elif left == -1:
+                result = -1 if right & 1 else 1
+            elif left.bit_length() * right > _limit:
+                return None
+            else:
+                result = left ** right
+        elif op is ast.LShift:
+            if right < 0:
+                return None
+            if left == 0:
+                result = 0
+            elif left.bit_length() + right > _limit:
+                return None
+            else:
+                result = left << right
+        elif op is ast.RShift:
+            if right < 0:
+                return None
+            result = left >> right
+        elif op is ast.BitAnd:
+            result = left & right
+        elif op is ast.BitOr:
+            result = left | right
+        elif op is ast.BitXor:
+            result = left ^ right
+        else:
+            return None
+    except (ArithmeticError, ValueError):
+        return None
+    return result if type(result) is int and result.bit_length() <= _limit else None
 
 _I64_MIN = -(1 << 63)
 _I64_MAX = (1 << 63) - 1
@@ -228,6 +367,49 @@ def refuse_complex_pow(node):
                               'and AIL has no complex type; take the absolute value first or use an integer exponent')
         refusal.source_line = getattr(node, 'lineno', None)
         raise refusal
+
+
+_POW_CONSTANT_OPS = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod,
+                      ast.Pow, ast.LShift, ast.RShift, ast.BitAnd, ast.BitOr, ast.BitXor)
+
+
+def _pow_exponent_is_constant(node):
+    """Whether the exponent is a constant expression, so the existing constant folders decide it.
+
+    Bool leaves count: CPython uses them as 0/1. The check is syntactic on purpose: it must not
+    evaluate a huge constant here, only tell a fixed expression from a value computed later."""
+    if isinstance(node, ast.Constant):
+        return type(node.value) in (int, float, bool)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert, ast.Not)):
+        return _pow_exponent_is_constant(node.operand)
+    if isinstance(node, ast.BinOp) and type(node.op) in _POW_CONSTANT_OPS:
+        return _pow_exponent_is_constant(node.left) and _pow_exponent_is_constant(node.right)
+    return False
+
+
+def refuse_variable_int_pow(node):
+    """A constant integer base raised to a computed exponent is refused by name here.
+
+    CPython's int is unbounded, so `2 ** n` answers exactly even when n is 63 or more; this
+    compiler's int is int64, and `ail_ipow` could only stop the program at run time with
+    `integer overflow` (or spin for a huge exponent). The value cannot be known while compiling,
+    so the construct is refused at compile time instead. A constant exponent is still folded (and
+    refused only when its exact result leaves int64), and the safe bases 0, 1 and -1 are admitted
+    because every int64 exponent keeps their result in range."""
+    if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow)):
+        return
+    base = int_constant(node.left)
+    if base is None or abs(base) < 2 or not -(1 << 63) <= base < (1 << 63):
+        return
+    if _pow_exponent_is_constant(node.right):
+        return
+    refusal = Unsupported(
+        'a power with the integer constant base %d and an exponent computed at run time can leave '
+        'the signed 64-bit range of an AIL int (SEMANTICS section 1), so it is refused by name at '
+        'compile time; CPython computes it exactly with an unbounded int. Write the exponent as a '
+        "constant, or use float(%d) ** exponent for CPython's float answer" % (base, base))
+    refusal.source_line = getattr(node, 'lineno', None)
+    raise refusal
 
 
 def _use(need, *names):

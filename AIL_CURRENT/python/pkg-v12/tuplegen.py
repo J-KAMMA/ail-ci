@@ -269,7 +269,26 @@ MODF = '''def _ail_modf(x: float) -> _AilT_f_f:
     return _AilT_f_f(f, t)
 '''
 DIVMOD_F = '''def _ail_divmod_f(a: float, b: float) -> _AilT_f_f:
-    return _AilT_f_f(a // b, a % b)
+    if b == 0.0:
+        raise ZeroDivisionError("float divmod()")
+    r = _ail_c_fmod(a, b)
+    adjust = r != 0.0 and (r < 0.0) != (b < 0.0)
+    q = (a - r) / b
+    if adjust:
+        q = q - 1.0
+    if r == 0.0:
+        r = _ail_c_copysign(0.0, b)
+    elif adjust:
+        r = r + b
+    if q == 0.0:
+        q = _ail_c_copysign(0.0, a / b)
+    else:
+        f = _ail_c_floor(q)
+        if q - f > 0.5:
+            q = f + 1.0
+        else:
+            q = f
+    return _AilT_f_f(q, r)
 '''
 PARTITION = '''def _ail_partition(s: str, sep: str) -> _AilT_s_s_s:
     if len(sep) == 0:
@@ -351,7 +370,7 @@ class Gen:
     def repr_expr(self, t, x):
         t = deep(t)
         if t in (INT, FLT, BOOL):
-            return '("%%r" %% (%s,))' % x
+            return 'str(%s)' % x
         if t == STR:
             return '%s(%s)' % (self.srepr(), x)
         if is_tuple(t):

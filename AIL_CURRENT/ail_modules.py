@@ -475,7 +475,11 @@ class Program:
             if isinstance(child, (ast.Import, ast.ImportFrom)):
                 if id(child) in top or not self.is_local_import(child):
                     return
+                if isinstance(child, ast.ImportFrom) and child.level and mod.entry:
+                    self.absolute(mod, child)       # the entry-file relative-import refusal is specific
                 if scope != 'func':
+                    if tried:
+                        refuse(child, "inside a try block, whose ImportError handler the compiler cannot model")
                     refuse(child, "inside a condition or loop at module level" if scope == 'module'
                            else "inside a class body")
                 if tried:

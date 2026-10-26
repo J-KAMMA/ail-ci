@@ -298,6 +298,9 @@ class _Checker(object):
     def op_fneg(self, ins, scope, stack, where, top):
         self._unary(ins, where, I.F64, I.F64)
 
+    def op_fabs(self, ins, scope, stack, where, top):
+        self._unary(ins, where, I.F64, I.F64)
+
     def op_zext(self, ins, scope, stack, where, top):
         self._unary(ins, where, I.I1, I.I64)
 
@@ -316,7 +319,15 @@ class _Checker(object):
         self.want(where, ins.result.type == dst, 'result must be %s, found %s' % (dst, ins.result.type))
 
     def op_cmp(self, ins, scope, stack, where, top):
-        self._binary(ins, where, (I.I64, I.F64, I.I1), I.I1)
+        if not self.nresults(ins, where, 1):
+            return
+        a, b = ins.operands
+        same = a.type == b.type and a.type in (I.I64, I.F64, I.I1)
+        mixed = {a.type, b.type} == {I.I64, I.F64}
+        self.want(where, same or mixed,
+                  'operands must have the same scalar type, or be i64 and f64, found %s, %s'
+                  % (a.type, b.type))
+        self.want(where, ins.result.type == I.I1, 'result must be i1, found %s' % ins.result.type)
 
     def op_select(self, ins, scope, stack, where, top):
         if not self.nresults(ins, where, 1):

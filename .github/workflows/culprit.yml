@@ -1,0 +1,56 @@
+name: culprit
+
+# Dispatched by the integration gate (agents/ci/ci_integ.sh) when a batch candidate fails a few test modules: each
+# accepted job is applied alone on top of integ and only the failing modules run, one runner per job, so the job(s)
+# that break them are found in minutes instead of by halving the batch (a full-suite run per level).
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: integ commit to apply each job on
+        required: true
+      jobs:
+        description: 'JSON list of {"job": name, "branch": job branch, "base": the commit the job branched from}'
+        required: true
+      modules:
+        description: space-separated test modules to run
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  one:
+    name: culprit ${{ matrix.j.job }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        j: ${{ fromJSON(inputs.jobs) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.base }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Apply the job alone and run the modules
+        env:
+          BR: ${{ matrix.j.branch }}
+          JB: ${{ matrix.j.base }}
+          MODS: ${{ inputs.modules }}
+        run: |
+          git fetch -q origin "+refs/heads/$BR:refs/remotes/origin/$BR"
+          git diff "$JB" "origin/$BR" -- . ':!.agent' ':!corpus' ':!AIL_CURRENT/MANIFEST.json' > /tmp/job.diff
+          git apply --3way --whitespace=nowarn /tmp/job.diff || echo "some hunks did not apply"
+          cd AIL_CURRENT
+          rc=0
+          for m in $MODS; do
+            [ -f "$m.py" ] || continue
+            echo "::group::$m"; timeout 900 python3 -m unittest -q "$m" || rc=1; echo "::endgroup::"
+          done
+          exit $rc

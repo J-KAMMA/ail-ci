@@ -19,7 +19,7 @@ from .. import ir as I
 from .. import rtc
 
 _MASK = (1 << 64) - 1
-_PURE = {'const', 'str.lit', 'bytes.lit', 'and', 'or', 'xor', 'inv', 'fneg', 'zext', 'sitofp', 'select', 'fadd', 'fsub', 'fmul',
+_PURE = {'const', 'str.lit', 'bytes.lit', 'and', 'or', 'xor', 'inv', 'fneg', 'fabs', 'zext', 'sitofp', 'select', 'fadd', 'fsub', 'fmul',
          'cmp.eq', 'cmp.ne', 'cmp.lt', 'cmp.le', 'cmp.gt', 'cmp.ge'}
 _MODE_PURE = {'add', 'sub', 'mul', 'neg', 'shl', 'shr'}     # pure unless mode == 'ck'
 

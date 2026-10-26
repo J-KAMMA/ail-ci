@@ -26,6 +26,7 @@ the legacy path's locals). A parameter that is never assigned stays an SSA value
 import ast
 import os
 
+from pyfront import int_constant
 from . import ir as I
 from . import effects as E
 from . import ownership
@@ -1727,6 +1728,10 @@ class Lowering(TextLowering):
         return v
 
     def _expr(self, node):
+        if isinstance(node, (ast.BinOp, ast.UnaryOp)):
+            folded = self.P.fold_int_constant(node)
+            if folded is not None:
+                return self.const(I.I64, folded)
         tk = self.text_kind(node)
         if tk is not None:
             return self.text_expr(node, tk)
@@ -1762,10 +1767,13 @@ class Lowering(TextLowering):
                 if entry[0] == self.P.FLT and isinstance(value, float):
                     return self.const(I.F64, value)
             raise NotS0('name %r' % node.id)
+        if isinstance(node, ast.BinOp):
+            constant = int_constant(node)
+            if type(constant) is int and -(1 << 63) <= constant < (1 << 63):
+                return self.const(I.I64, constant)
+            return self.binop(node)
         if isinstance(node, ast.UnaryOp):
             return self.unary(node)
-        if isinstance(node, ast.BinOp):
-            return self.binop(node)
         if isinstance(node, ast.BoolOp):
             if os.environ.get('AIL_SURFACE') == 'python' and not all(self.P._is_bool_expr(v, self.ctx)
                                                                     for v in node.values):
@@ -2187,6 +2195,8 @@ class Lowering(TextLowering):
             return self.str_compare(op, a, b)
         if not (a.type.is_scalar and b.type.is_scalar):
             raise NotS0('comparison of %s and %s' % (a.type, b.type))
+        if {a.type, b.type} == {I.I64, I.F64}:
+            return self.b.value('cmp.' + pred, [a, b], I.I1)
         if I.F64 in (a.type, b.type):
             a, b = self.coerce(a, I.F64), self.coerce(b, I.F64)
         elif I.I64 in (a.type, b.type):
@@ -2236,10 +2246,6 @@ class Lowering(TextLowering):
 
     def _chain(self, prev, ops, comparators):
         nxt = self.expr(comparators[0])
-        if self.tracked and {prev.type, nxt.type} == {I.I64, I.F64}:
-            # the legacy path compares an int and a float exactly when a tagged cell is involved; plain C
-            # (and this lowering) converts the int to a double
-            raise NotS0('an int compared with a float in a function with int-or-float names')
         result = self.cmp(ops[0], prev, nxt)
         if len(ops) == 1:
             return result
@@ -2300,11 +2306,10 @@ class Lowering(TextLowering):
         if f == 'abs' and len(args) == 1:
             v = self.expr(args[0])
             if v.type == I.F64:
-                neg = self.b.value('fneg', [v], I.F64)
-            else:
-                v = self.coerce(v, I.I64)
-                neg = self.b.value('neg', [v], I.I64, {'mode': 'ck' if self.strict else 'nsw'})
-            zero = self.const(v.type, 0.0 if v.type == I.F64 else 0)
+                return self.b.value('fabs', [v], I.F64)
+            v = self.coerce(v, I.I64)
+            neg = self.b.value('neg', [v], I.I64, {'mode': 'ck' if self.strict else 'nsw'})
+            zero = self.const(v.type, 0)
             c = self.b.value('cmp.lt', [v, zero], I.I1)
             return self.b.value('select', [c, neg, v], v.type)
         if f in ('min', 'max') and len(args) == 2:

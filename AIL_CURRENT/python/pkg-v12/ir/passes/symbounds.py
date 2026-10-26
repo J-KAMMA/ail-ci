@@ -285,7 +285,8 @@ class Bounds(object):
         """The bounds of `yv` where the i1 `cond` is `truth` (a direct comparison of yv itself)."""
         base = self.of(yv)
         d = self.defs.get(cond)
-        if base is None or d is None or not d.op.startswith('cmp.') or d.operands[0].type != I.I64:
+        if base is None or d is None or not d.op.startswith('cmp.') or d.operands[0].type != I.I64 \
+                or d.operands[1].type != I.I64:
             return base
         pred = d.op[4:]
         if not truth:

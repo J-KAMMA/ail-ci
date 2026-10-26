@@ -31,7 +31,7 @@ D2 = {'__add__': 'ADD', '__radd__': 'RADD', '__sub__': 'SUB', '__rsub__': 'RSUB'
       '__eq__': 'EQ', '__gt__': 'GT', '__round__': 'ROUND', '__getitem__': 'GETITEM', '__contains__': 'CONTAINS',
       '__delitem__': 'DELITEM', '__ne__': 'NE', '__and__': 'AND', '__rand__': 'RAND', '__or__': 'OR', '__ror__': 'ROR',
       '__xor__': 'XOR', '__rxor__': 'RXOR', '__lshift__': 'LSHIFT', '__rlshift__': 'RLSHIFT', '__rshift__': 'RSHIFT',
-      '__rrshift__': 'RRSHIFT', '__format__': 'FORMAT'}
+      '__rrshift__': 'RRSHIFT', '__format__': 'FORMAT', '__divmod__': 'DIVMOD', '__rdivmod__': 'RDIVMOD'}
 D3 = {'__setitem__': 'SETITEM'}
 # an operator method that is a hook here; a program defining one of these turns the patch on
 HOOKED = frozenset(D1) | frozenset(D2) | frozenset(D3)
@@ -45,7 +45,8 @@ enum { AIL_D1_NEG, AIL_D1_POS, AIL_D1_ABS, AIL_D1_HASH, AIL_D1_BOOL, AIL_D1_INT,
 enum { AIL_D2_ADD, AIL_D2_RADD, AIL_D2_SUB, AIL_D2_RSUB, AIL_D2_MUL, AIL_D2_RMUL, AIL_D2_TRUEDIV, AIL_D2_RTRUEDIV,
        AIL_D2_FLOORDIV, AIL_D2_RFLOORDIV, AIL_D2_MOD, AIL_D2_RMOD, AIL_D2_POW, AIL_D2_RPOW, AIL_D2_EQ, AIL_D2_GT,
        AIL_D2_ROUND, AIL_D2_GETITEM, AIL_D2_CONTAINS, AIL_D2_DELITEM, AIL_D2_NE, AIL_D2_AND, AIL_D2_RAND, AIL_D2_OR,
-       AIL_D2_ROR, AIL_D2_XOR, AIL_D2_RXOR, AIL_D2_LSHIFT, AIL_D2_RLSHIFT, AIL_D2_RSHIFT, AIL_D2_RRSHIFT, AIL_D2_FORMAT, AIL_ND2 };
+       AIL_D2_ROR, AIL_D2_XOR, AIL_D2_RXOR, AIL_D2_LSHIFT, AIL_D2_RLSHIFT, AIL_D2_RSHIFT, AIL_D2_RRSHIFT, AIL_D2_FORMAT,
+       AIL_D2_DIVMOD, AIL_D2_RDIVMOD, AIL_ND2 };
 enum { AIL_D3_SETITEM, AIL_ND3 };
 typedef ail_st (*ail_d3_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj, ail_obj);
 typedef ail_st (*ail_d1_fn)(ail_ctx *, ail_obj *, ail_obj);
@@ -325,11 +326,20 @@ def _edits():
               '    int eq = ail_obj_eq_raw(a, b);\n'
               '    ail_st e = ail__eq_err; ail__eq_scope = sv_scope; ail__eq_err = sv_err; if (e) return e;\n'
               '    *out = ail_box_bool(!eq); return AIL_OK;\n}'))
-    e.append(('            for (int64_t i = 0; i < v->n; i++) if (ail_member_eq(v->p[i], item)) { *out = 1; return AIL_OK; }\n'
+    e.append(('            /* `x in g` on a materialised generator expression consumes it up to and including the\n'
+              '               match (or to the end when absent), sharing the same cursor as next() and loops */\n'
+              '            int gen = c.tag == AIL_T_LIST && v->from_generator;\n'
+              '            for (int64_t i = gen ? v->gen_idx : 0; i < v->n; i++) {\n'
+              '                if (ail_member_eq(v->p[i], item)) { if (gen) v->gen_idx = i + 1; *out = 1; return AIL_OK; }\n'
+              '            }\n'
+              '            if (gen) v->gen_idx = v->n;\n'
               '            *out = 0; return AIL_OK;\n',
+              '            int gen = c.tag == AIL_T_LIST && v->from_generator;\n'
               '            int sv_scope = ail__eq_scope; ail_st sv_err = ail__eq_err; ail__eq_scope = 1; ail__eq_err = 0;\n'
               '            int found = 0;\n'
-              '            for (int64_t i = 0; i < v->n && !ail__eq_err; i++) if (ail_member_eq(v->p[i], item)) { found = 1; break; }\n'
+              '            int64_t i = gen ? v->gen_idx : 0;\n'
+              '            for (; i < v->n && !ail__eq_err; i++) if (ail_member_eq(v->p[i], item)) { found = 1; break; }\n'
+              '            if (gen) v->gen_idx = found ? i + 1 : i;\n'
               '            ail_st e = ail__eq_err; ail__eq_scope = sv_scope; ail__eq_err = sv_err; if (e) return e;\n'
               '            *out = found; return AIL_OK;\n'))
     # a slice of an instance: there are no slice objects, so __getitem__ cannot be given one (named, not "not subscriptable")
@@ -341,9 +351,9 @@ def _edits():
               '    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n}\n\n/* ===='))
     # hashing
     e.append(('        default: {\n            char buf[64]; snprintf(buf, sizeof buf, "unhashable type: \'%s\'", ail_type_name(x.tag));\n'
-              '            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n        }\n    }\n}\nstatic inline ail_st ail_obj_cmp(',
+              '            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n        }\n    }\n}\nstatic inline ail_st ail_obj_cmp_op(',
               HASH_CASE + '        default: {\n            char buf[64]; snprintf(buf, sizeof buf, "unhashable type: \'%s\'", ail_type_name(x.tag));\n'
-              '            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n        }\n    }\n}\nstatic inline ail_st ail_obj_cmp('))
+              '            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n        }\n    }\n}\nstatic inline ail_st ail_obj_cmp_op('))
     # hash() of an instance whose class has __hash__ is that method's int (CPython: -1 becomes -2), not the table hash
     e.append(('static inline ail_st ail_pyhash_inst(ail_ctx *cx, int64_t *out, ail_obj x) { return ail_obj_hash(cx, out, x); }\n',
               'static inline ail_st ail_pyhash_inst(ail_ctx *cx, int64_t *out, ail_obj x) {\n'
@@ -379,6 +389,20 @@ def _edits():
                           ('**', 'POW', 'RPOW')):
         e.append(('    return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %s");' % sym,
                   '    ' + _binop_guard(fwd, rev, sym) + 'return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %s");' % sym))
+    # divmod(): CPython asks __divmod__, then the reflected method; __floordiv__/__mod__
+    # alone do not make divmod work on a user class (Fraction/IntEnum define __divmod__).
+    e.append(('''    } else if (a.tag != AIL_T_INST && b.tag != AIL_T_INST) {
+        char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for divmod(): '%s' and '%s'", ail_type_name(a.tag), ail_type_name(b.tag));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
+    /* an instance operand falls through to ail_op_floordiv/ail_op_mod, whose dunderrt
+       dispatch serves classes (Fraction, IntEnum) that define __floordiv__/__mod__ */''',
+              '''    } else if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) {
+        return ail_dun_binop(cx, out, a, b, AIL_D2_DIVMOD, AIL_D2_RDIVMOD, "divmod()");
+    } else {
+        char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for divmod(): '%s' and '%s'", ail_type_name(a.tag), ail_type_name(b.tag));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }'''))
     # bitwise operators and ~ on an instance (Flag / IntFlag classes, user __or__ ...)
     e.append(('static inline ail_st ail__bit_logic(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, char op) {\n',
               'static inline ail_st ail__bit_logic(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, char op) {\n'
@@ -407,7 +431,6 @@ def _edits():
               '                int dec = t == \'d\' || t == \'i\' || t == \'u\';\n'
               '                ail_d1_fn cf = dec ? ail_dun1(arg, AIL_D1_INT) : 0;\n'
               '                if (!cf) cf = ail_dun1(arg, AIL_D1_INDEX);\n'
-              '                if (!cf && dec) cf = ail_dun1(arg, AIL_D1_TRUNC);\n'
               '                if (cf) { ail_obj cv; st = cf(cx, &cv, arg); if (st != AIL_OK) goto fail; arg = cv; }\n'
               '            }\n'
               '            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) iv = arg.i;\n'))
@@ -463,9 +486,26 @@ def _edits():
               "        }\n"
               "        /* fall through */\n"
               "        default: { char buf[80]; snprintf(buf, sizeof buf, \"float() argument must be a string or a number, not '%s'\", ail_type_name(x.tag));"))
-    e.append(('static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, int64_t n) {\n',
-              'static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, int64_t n) {\n'
-              '    if (x.tag == AIL_T_INST) { ail_d2_fn f = ail_dun2(x, AIL_D2_ROUND); if (f) return f(cx, out, x, has_n ? ail_box_int(n) : ail_box_none()); }\n'))
+    e.append(('static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, ail_obj n) {\n',
+              'static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_n, ail_obj n) {\n'
+              '    if (x.tag == AIL_T_INST) { ail_d2_fn f = ail_dun2(x, AIL_D2_ROUND); if (f) return f(cx, out, x, has_n ? n : ail_box_none()); }\n'))
+    # round() of an instance without __round__ names the class, as CPython does
+    e.append(('static inline ail_st ail_bi_round_no_method(ail_ctx *cx, ail_obj x) {\n'
+              '    char buf[80]; snprintf(buf, sizeof buf, "type %s doesn\'t define __round__ method", ail_type_name(x.tag));\n',
+              'static inline ail_st ail_bi_round_no_method(ail_ctx *cx, ail_obj x) {\n'
+              '    char buf[80]; snprintf(buf, sizeof buf, "type %s doesn\'t define __round__ method", ail__dun_tname_s(x));\n'))
+    # round(x, ndigits): the ndigits __index__ conversion belongs to the int/float paths only
+    e.append(('    { char buf[96]; snprintf(buf, sizeof buf, "\'%s\' object cannot be interpreted as an integer", ail_type_name(nobj.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }\n',
+              '    if (nobj.tag == AIL_T_INST) {\n'
+              '        ail_d1_fn f = ail_dun1(nobj, AIL_D1_INDEX);\n'
+              '        if (f) {\n'
+              '            ail_obj r; ail_st st = f(cx, &r, nobj);\n'
+              '            if (st != AIL_OK) return st;\n'
+              '            if (r.tag == AIL_T_INT || r.tag == AIL_T_BOOL) { *out = r.i; return AIL_OK; }\n'
+              '            { char buf[96]; snprintf(buf, sizeof buf, "__index__ returned non-int (type %s)", ail__dun_tname_s(r)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }\n'
+              '        }\n'
+              '    }\n'
+              '    { char buf[96]; snprintf(buf, sizeof buf, "\'%s\' object cannot be interpreted as an integer", ail__dun_tname_s(nobj)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }\n'))
     for fn, key in (('floor', 'FLOOR'), ('ceil', 'CEIL'), ('trunc', 'TRUNC')):
         e.append(('static inline ail_st ail_math_%s(ail_ctx *cx, ail_obj *out, ail_obj x) {\n' % fn,
                   'static inline ail_st ail_math_%s(ail_ctx *cx, ail_obj *out, ail_obj x) {\n'

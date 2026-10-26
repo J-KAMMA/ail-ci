@@ -120,9 +120,11 @@ static ail_st ail2q_partials(ail_ctx *cx, ail_obj *out, ail_obj xs) {
     }
     AIL2Z_PAUSE(cx);
     ail_obj lst = ail_list_new(cx);
+    AIL_ROOT1(cx, fr, lst);
     ail_vecobj *r = (ail_vecobj *)lst.o;
     ail_vec_reserve(cx, r, np ? np : 1);
     for (int64_t i = 0; i < np; i++) r->p[r->n++] = ail_box_float(cx, pt[i]);
+    AIL_FRAME_LEAVE(cx, fr);
     AIL2Z_RESUME(cx);
     free(pt);
     *out = lst;
@@ -171,8 +173,12 @@ static ail_st ail2q_ssd(ail_ctx *cx, ail_obj *out, ail_obj xs, ail_obj cho, ail_
         ah = z0; al = z1;
     }
     AIL2Z_PAUSE(cx);
-    ail_obj it[2]; it[0] = ail_box_float(cx, ah); it[1] = ail_box_float(cx, al);
+    ail_obj it[2] = { ail_box_none(), ail_box_none() };
+    AIL_ROOT_N(cx, fr, it, 2);
+    it[0] = ail_box_float(cx, ah);
+    it[1] = ail_box_float(cx, al);
     *out = ail_tuple_new(cx, it, 2);
+    AIL_FRAME_LEAVE(cx, fr);
     AIL2Z_RESUME(cx);
     return AIL_OK;
 }

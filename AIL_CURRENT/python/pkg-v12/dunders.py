@@ -1131,7 +1131,8 @@ class _ClassScope(ast.NodeTransformer):
 class _ExitBody(ast.NodeTransformer):
     """`exc_type is None` -> `exc_type == 0`, `exc_type is ValueError` -> `exc_type == 1`,
     `issubclass(exc_type, ValueError)` -> one of its codes, `if exc_type:`; the exception value and the
-    traceback may only be tested against None. A bare `return` / `return None` is `return False`."""
+    traceback may only be tested against None (`tb is None` follows the exception code). A bare
+    `return` / `return None` is `return False`."""
 
     def __init__(self, p, tname, vname, bname):
         self.p, self.t, self.v, self.b = p, tname, vname, bname
@@ -1152,8 +1153,8 @@ class _ExitBody(ast.NodeTransformer):
             neg = isinstance(op, (ast.IsNot, ast.NotEq))
             if isinstance(op, (ast.Is, ast.IsNot, ast.Eq, ast.NotEq)):
                 if isinstance(right, ast.Constant) and right.value is None:
-                    if node.left.id == self.b:
-                        return ast.copy_location(_const(not neg), node)     # no traceback object here
+                    # there is no traceback object, but a body that raised reaches __exit__ with a
+                    # non-None code (0 means no exception), so `tb is None` follows the code
                     test = ast.Compare(left=_name(self.t, synth=False), ops=[ast.NotEq() if neg else ast.Eq()],
                                        comparators=[_const(0)])
                     return ast.copy_location(test, node)

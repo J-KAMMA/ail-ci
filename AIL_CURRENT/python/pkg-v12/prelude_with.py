@@ -28,6 +28,12 @@ class _AilExcType:
         return self.__repr__()
 
 
+class _AilTraceback:
+    # the third argument of __exit__ when the body raised: AIL has no traceback object, so it is only a
+    # non-None stand-in; withlib.py refuses any use other than an `is None` / `is not None` test
+    pass
+
+
 class _AilGenCM:
     # @contextmanager: the generator's `yield` statements were rewritten (withlib.py) so that send(exc) raises exc there
     def __init__(self, gen):
@@ -50,8 +56,15 @@ class _AilGenCM:
             self.gen.send(exc)
         except StopIteration:
             return True
+        except RuntimeError as e2:
+            # CPython's contextlib re-raises the original value when throw() wrapped a sent
+            # StopIteration in PEP 479's RuntimeError (the runtime keeps that cause identity);
+            # it does not suppress a RuntimeError raised for any other reason.
+            if e2 is exc or (isinstance(exc, StopIteration) and _ail_exc_cause_is(e2, exc)):
+                return False
+            raise
         except Exception as e2:
-            if _ail_exc_name(e2) == _ail_exc_name(exc) and str(e2) == str(exc):
+            if e2 is exc:
                 return False
             raise
         raise RuntimeError("generator didn't stop after throw()")
