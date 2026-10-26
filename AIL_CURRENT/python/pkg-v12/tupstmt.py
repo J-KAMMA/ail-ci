@@ -298,6 +298,8 @@ class Stmts:
         tgts = st.targets
         key = (self.fnkey, getattr(st, "lineno", 0), getattr(st, "col_offset", 0))
         if len(tgts) == 1 and isinstance(tgts[0], ast.Name) and isinstance(st.value, ast.Lambda):
+            if tgts[0].id in getattr(self, 'closure_reads', ()):
+                return [st]
             return self.lam_assign(st)
         # a, b = x, y  (parallel assignment with a literal tuple on the right)
         if len(tgts) == 1 and isinstance(tgts[0], (ast.Tuple, ast.List)) and isinstance(st.value, ast.Tuple) \

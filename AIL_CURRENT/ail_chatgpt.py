@@ -82,6 +82,14 @@ class _Int64ConstantOverflow(Exception):
     """A constant expression (or one of its steps) left the int64 range."""
 
 
+def _constant_diagnostic(value):
+    """Format a constant for a diagnostic without tripping CPython's int-to-str digit limit."""
+    try:
+        return str(value)
+    except ValueError:
+        return 'too large'
+
+
 def _const_expr_int(node, bounded=True):
     """The int a constant arithmetic expression denotes, or None when it is not one. With
     `bounded`, raises _Int64ConstantOverflow as soon as a step is outside int64: AIL computes such
@@ -91,7 +99,15 @@ def _const_expr_int(node, bounded=True):
     if isinstance(node, ast.Constant) and type(node.value) is int:
         value = node.value
     elif isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert)):
-        value = _const_expr_int(node.operand, bounded)
+        # `-(1 << 63)` and `~(-(1 << 63))` pass through an out-of-int64 POSITIVE operand and
+        # come back in range, so the operand is folded unbounded for USub/Invert and only the
+        # result is range-checked (pre246: `d[-(1 << 63)]` is a legal index).  UAdd cannot
+        # change the sign, so it keeps the per-step bound.  A result that still leaves int64 is
+        # refused below, so `-(10 ** 20)` and `~((1 << 63))` keep their refusal.
+        if isinstance(node.op, ast.UAdd):
+            value = _const_expr_int(node.operand, bounded)
+        else:
+            value = _const_expr_int(node.operand, False)
         if value is None:
             return None
         if isinstance(node.op, ast.USub):
@@ -172,7 +188,7 @@ def _check_constant_power(node, parents, maxsplit):
     if (isinstance(parent, ast.Assign) and parent.value is root
             and not isinstance(parents.get(parent), ast.ClassDef)):
         return
-    error = ValueError(f'int64 constant out of range: {value}')
+    error = ValueError(f'int64 constant out of range: {_constant_diagnostic(value)}')
     error.source_line = node.lineno
     error.source_column = node.col_offset
     raise error
@@ -190,7 +206,7 @@ def _check_index_expression(slice_node):
     try:
         _const_expr_int(slice_node)
     except _Int64ConstantOverflow as overflow:
-        error = ValueError(f'int64 index out of range: {overflow.args[0]}')
+        error = ValueError(f'int64 index out of range: {_constant_diagnostic(overflow.args[0])}')
         error.source_line = slice_node.lineno
         error.source_column = slice_node.col_offset
         raise error
@@ -215,7 +231,7 @@ def _check_int64_literals(tree):
             nodes.extend(ast.iter_child_nodes(node))
             continue
         if not _INT64_MIN <= value <= _INT64_MAX:
-            error = ValueError(f'int64 literal out of range: {value}')
+            error = ValueError(f'int64 literal out of range: {_constant_diagnostic(value)}')
             error.source_line = node.lineno
             error.source_column = node.col_offset
             raise error
@@ -301,6 +317,74 @@ def _maxsplit_constant_nodes(tree):
     return handled
 
 
+def _function_scope_stores(function):
+    """Names stored in a function's own scope, ignoring nested functions, classes and lambdas."""
+    stores = {}
+
+    def visit(node):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                continue
+            if isinstance(child, ast.Name) and isinstance(child.ctx, (ast.Store, ast.Del)):
+                stores[child.id] = stores.get(child.id, 0) + 1
+            visit(child)
+
+    visit(function)
+    return stores
+
+
+def _function_local_int_constants(function, module_known):
+    """The int constants a function's own top-level assignments bind, with module constants
+    visible unless the function shadows them.  A name stored more than once, a parameter, or a
+    global/nonlocal declaration keeps the name out of the map."""
+    arguments = function.args
+    parameters = {argument.arg for argument in arguments.posonlyargs + arguments.args + arguments.kwonlyargs}
+    if arguments.vararg is not None:
+        parameters.add(arguments.vararg.arg)
+    if arguments.kwarg is not None:
+        parameters.add(arguments.kwarg.arg)
+    stores = _function_scope_stores(function)
+    declared = set()
+    for node in ast.walk(function):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            declared.update(node.names)
+    local = {name: value for name, value in module_known.items()
+             if name not in stores and name not in parameters and name not in declared}
+
+    def bind(target, value_node):
+        if not isinstance(target, ast.Name):
+            return
+        name = target.id
+        if stores.get(name) != 1 or name in parameters or name in declared:
+            return
+        value = _constant_int(value_node, local)
+        if value is None:
+            try:
+                value = _const_expr_int(value_node, bounded=False)
+            except _Int64ConstantOverflow:
+                value = None
+        if value is not None:
+            local[name] = value
+
+    for statement in function.body:
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            bind(statement.targets[0], statement.value)
+        elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+            bind(statement.target, statement.value)
+    return local
+
+
+def _walk_own_scope(function):
+    """Nodes in a function's body, not descending into nested functions, classes or lambdas."""
+    stack = list(function.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        yield node
+        stack.extend(ast.iter_child_nodes(node))
+
+
 def _check_int64_abs_constants(tree, known):
     """Refuse a constant ``abs(MIN)`` (2**63) by name.  AIL ints are fixed width, so the value
     cannot be represented; CPython prints the bignum.  Only a builtin ``abs`` is considered,
@@ -322,13 +406,14 @@ def _check_int64_abs_constants(tree, known):
             bound.update(node.names)
     if 'abs' in bound or 'abs' in known:
         return
-    for node in ast.walk(tree):
+
+    def check(node, scope_known):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id == 'abs'):
-            continue
+            return
         if len(node.args) != 1 or node.keywords or isinstance(node.args[0], ast.Starred):
-            continue
-        value = _constant_int(node.args[0], known)
+            return
+        value = _constant_int(node.args[0], scope_known)
         if value is None:
             try:
                 value = _const_expr_int(node.args[0], bounded=False)
@@ -339,6 +424,15 @@ def _check_int64_abs_constants(tree, known):
             error.source_line = node.lineno
             error.source_column = node.col_offset
             raise error
+
+    for node in ast.walk(tree):
+        check(node, known)
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        local = _function_local_int_constants(function, known)
+        for node in _walk_own_scope(function):
+            check(node, local)
 
 
 def _check_int64_unary_constants(tree):
@@ -369,25 +463,221 @@ def _check_int64_unary_constants(tree):
             continue
         value = _constant_int(node, known)
         if value is not None and not -(1 << 63) <= value < 1 << 63:
-            error = ValueError(f'int64 constant expression out of range: {value}')
+            error = ValueError(f'int64 constant expression out of range: {_constant_diagnostic(value)}')
             error.source_line = node.lineno
             error.source_column = node.col_offset
             raise error
     _check_int64_abs_constants(tree, known)
 
 
+_CONST_TEXT_LIMIT = 1 << 20
+
+
+def _constant_container(node, known_text, known_int, known_containers=None):
+    """The text values of a literal list/tuple/dict of constant strings, or None."""
+    if isinstance(node, (ast.List, ast.Tuple)):
+        values = []
+        for item in node.elts:
+            if isinstance(item, ast.Starred):
+                return None
+            text = _constant_text(item, known_text, known_int, known_containers)
+            if text is None:
+                return None
+            values.append(text)
+        return 'seq', tuple(values)
+    if isinstance(node, ast.Dict):
+        pairs = []
+        for key_node, value_node in zip(node.keys, node.values):
+            if key_node is None:
+                return None
+            key = _constant_text(key_node, known_text, known_int, known_containers)
+            if key is None:
+                key = _constant_int(key_node, known_int)
+            if key is None or not isinstance(key, (str, bytes, int)):
+                return None
+            text = _constant_text(value_node, known_text, known_int, known_containers)
+            if text is None or len(text) > _CONST_TEXT_LIMIT:
+                return None
+            pairs.append((key, text))
+        return 'dict', tuple(pairs)
+    return None
+
+
+def _constant_text(node, known_text, known_int, known_containers=None):
+    """The str/bytes a constant expression builds, or None when it is not statically known.
+    Only the shapes that cannot have a side effect are folded, and a result above the size
+    limit is left to the run-time parser."""
+    if isinstance(node, ast.Constant) and type(node.value) in (str, bytes):
+        return node.value
+    if isinstance(node, ast.Name) and node.id in known_text:
+        return known_text[node.id]
+    if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice):
+        if isinstance(node.value, ast.Name):
+            container = (known_containers or {}).get(node.value.id)
+        else:
+            container = _constant_container(node.value, known_text, known_int, known_containers)
+        if container is None:
+            return None
+        kind, values = container
+        if kind == 'seq':
+            index = _constant_int(node.slice, known_int)
+            if index is None or not -len(values) <= index < len(values):
+                return None
+            return values[index]
+        key = _constant_text(node.slice, known_text, known_int, known_containers)
+        if key is None:
+            key = _constant_int(node.slice, known_int)
+        for found, text in reversed(values):
+            if type(found) is type(key) and found == key:
+                return text
+        return None
+    if not isinstance(node, ast.BinOp):
+        return None
+    if isinstance(node.op, ast.Add):
+        left = _constant_text(node.left, known_text, known_int, known_containers)
+        right = _constant_text(node.right, known_text, known_int, known_containers)
+        if type(left) is not type(right) or type(left) not in (str, bytes):
+            return None
+        if len(left) + len(right) > _CONST_TEXT_LIMIT:
+            return None
+        return left + right
+    if isinstance(node.op, ast.Mult):
+        text = _constant_text(node.left, known_text, known_int, known_containers)
+        count = _constant_int(node.right, known_int) if text is not None else None
+        if text is None:
+            text = _constant_text(node.right, known_text, known_int, known_containers)
+            count = _constant_int(node.left, known_int)
+        if text is None or count is None or count < 0:
+            return None
+        if len(text) * count > _CONST_TEXT_LIMIT:
+            return None
+        return text * count
+    return None
+
+
+def _check_int64_int_base_constants(tree):
+    """Refuse `int(<constant str>, <constant base>)` when the parsed value leaves int64.
+    AIL ints are fixed width, so the conversion would stop with `integer overflow` where
+    CPython keeps the bignum; a value that fits keeps its run-time parse."""
+    bound = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.arg):
+            bound.add(node.arg)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bound.add(node.id)
+        elif isinstance(node, ast.alias):
+            bound.add(node.asname or node.name.split('.')[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            bound.update(node.names)
+    if 'int' in bound:
+        return
+    stores = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            stores[node.id] = stores.get(node.id, 0) + 1
+    parameters = {node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)}
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    escaped = set()
+    pure_calls = {'len', 'print', 'str', 'repr'}
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)):
+            continue
+        parent = parents.get(node)
+        if isinstance(parent, ast.Subscript) and parent.value is node and isinstance(parent.ctx, ast.Load):
+            continue
+        if (isinstance(parent, ast.Call) and node in parent.args
+                and isinstance(parent.func, ast.Name) and parent.func.id in pure_calls
+                and parent.func.id not in bound):
+            continue
+        if (isinstance(parent, ast.Assign) and parent.value is node and len(parent.targets) == 1
+                and isinstance(parent.targets[0], ast.Name)):
+            continue
+        escaped.add(node.id)
+    aliases = {}
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Name)):
+            continue
+        aliases.setdefault(node.targets[0].id, set()).add(node.value.id)
+    changed = bool(aliases)
+    while changed:
+        changed = False
+        for target, sources in aliases.items():
+            for source in sources:
+                if target in escaped and source not in escaped:
+                    escaped.add(source)
+                    changed = True
+                if source in escaped and target not in escaped:
+                    escaped.add(target)
+                    changed = True
+    known_text, known_int, known_containers = {}, {}, {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Name) or stores.get(target.id) != 1 or target.id in parameters:
+            continue
+        container = _constant_container(node.value, known_text, known_int, known_containers)
+        if container is None and isinstance(node.value, ast.Name):
+            container = known_containers.get(node.value.id)
+        if container is not None and target.id not in escaped:
+            known_containers[target.id] = container
+        text = _constant_text(node.value, known_text, known_int, known_containers)
+        if text is not None:
+            known_text[target.id] = text
+        value = _constant_int(node.value, known_int)
+        if value is not None:
+            known_int[target.id] = value
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'int'):
+            continue
+        if len(node.args) == 2 and not node.keywords:
+            text_node, base_node = node.args
+        elif (len(node.args) == 1 and len(node.keywords) == 1
+              and node.keywords[0].arg == 'base'):
+            text_node, base_node = node.args[0], node.keywords[0].value
+        else:
+            continue
+        if isinstance(text_node, ast.Starred):
+            continue
+        base = _constant_int(base_node, known_int)
+        if base is None or base != 0 and not 2 <= base <= 36:
+            continue
+        text = _constant_text(text_node, known_text, known_int, known_containers)
+        if text is None:
+            continue
+        try:
+            value = int(text, base)
+        except (ValueError, TypeError, OverflowError, MemoryError):
+            continue
+        if _INT64_MIN <= value <= _INT64_MAX:
+            continue
+        shown = value if -10 ** 99 < value < 10 ** 99 else 'too large'
+        error = ValueError(f'int64 constant expression out of range: {shown}')
+        error.source_line = node.lineno
+        error.source_column = node.col_offset
+        raise error
+
+
 _CONST_INT_TOO_BIG = object()
 _CONST_INT_BITS = 4096
+_CONST_INT_SPECIAL_BITS = 1 << 24
 
 
-def _constant_int_exact(node):
+def _constant_int_exact(node, _limit=_CONST_INT_BITS):
     """The exact int a constant expression denotes, with a guard against huge intermediates.
-    Pow bases 0/1/-1 and a zero left shift are decided before the 4096-bit guard, since their
-    results fit int64 however large the exponent or shift is."""
+    An absorbing zero and the pow bases 0/1/-1 are decided before the size guard, as in
+    pyfront.int_constant; the other operand of such a power is retried at the special-exponent
+    limit, so a huge exponent still yields its sign and parity."""
     if isinstance(node, ast.Constant) and type(node.value) is int:
         return True, node.value
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert)):
-        ok, value = _constant_int_exact(node.operand)
+        ok, value = _constant_int_exact(node.operand, _limit)
         if not ok:
             return False, None
         if value is _CONST_INT_TOO_BIG:
@@ -401,39 +691,54 @@ def _constant_int_exact(node):
             ast.Add, ast.Sub, ast.Mult, ast.Pow, ast.LShift, ast.RShift,
             ast.FloorDiv, ast.Mod, ast.BitAnd, ast.BitOr, ast.BitXor):
         return False, None
-    left_ok, left = _constant_int_exact(node.left)
-    right_ok, right = _constant_int_exact(node.right)
+    left_ok, left = _constant_int_exact(node.left, _limit)
+    right_ok, right = _constant_int_exact(node.right, _limit)
     if not (left_ok and right_ok):
         return False, None
-    if left is _CONST_INT_TOO_BIG or right is _CONST_INT_TOO_BIG:
-        return True, _CONST_INT_TOO_BIG
     try:
         if isinstance(node.op, ast.Pow):
+            if right is _CONST_INT_TOO_BIG:
+                if left not in (0, 1, -1):
+                    return True, _CONST_INT_TOO_BIG
+                right_ok, right = _constant_int_exact(node.right, _CONST_INT_SPECIAL_BITS)
+                if not right_ok:
+                    return False, None
+                if right is _CONST_INT_TOO_BIG:
+                    return True, _CONST_INT_TOO_BIG
             if right < 0:
                 return False, None
-            if left == 0:
-                value = 1 if right == 0 else 0
+            if right == 0:
+                value = 1
+            elif left is _CONST_INT_TOO_BIG:
+                return True, _CONST_INT_TOO_BIG
+            elif left == 0:
+                value = 0
             elif left == 1:
                 value = 1
             elif left == -1:
                 value = 1 if right % 2 == 0 else -1
-            elif right > _CONST_INT_BITS or left.bit_length() * right > _CONST_INT_BITS:
+            elif left.bit_length() * right > _limit:
                 return True, _CONST_INT_TOO_BIG
             else:
                 value = left ** right
+        elif left is _CONST_INT_TOO_BIG or right is _CONST_INT_TOO_BIG:
+            if isinstance(node.op, (ast.Mult, ast.BitAnd)) and (left == 0 or right == 0):
+                value = 0
+            else:
+                return True, _CONST_INT_TOO_BIG
         elif isinstance(node.op, ast.LShift):
             if right < 0:
                 return False, None
             if left == 0:
                 value = 0
-            elif right > _CONST_INT_BITS or left.bit_length() + right > _CONST_INT_BITS:
+            elif right > _limit or left.bit_length() + right > _limit:
                 return True, _CONST_INT_TOO_BIG
             else:
                 value = left << right
         elif isinstance(node.op, ast.RShift):
             if right < 0:
                 return False, None
-            value = (0 if left >= 0 else -1) if right > _CONST_INT_BITS else left >> right
+            value = (0 if left >= 0 else -1) if right > _limit else left >> right
         elif isinstance(node.op, (ast.FloorDiv, ast.Mod)):
             if right == 0:
                 return False, None
@@ -441,7 +746,7 @@ def _constant_int_exact(node):
         elif isinstance(node.op, ast.Mult):
             if left == 0 or right == 0:
                 value = 0
-            elif left.bit_length() + right.bit_length() > _CONST_INT_BITS:
+            elif left.bit_length() + right.bit_length() > _limit:
                 return True, _CONST_INT_TOO_BIG
             else:
                 value = left * right
@@ -808,6 +1113,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 _check_int64_literals(tree)
                 _check_int64_constant_positions(tree)
                 _check_int64_unary_constants(tree)
+                _check_int64_int_base_constants(tree)
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)
             if source_map is not None:

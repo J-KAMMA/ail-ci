@@ -129,6 +129,12 @@ MODULES = (
     'test_ail_pre192',
     'test_ail_pre197',
     'test_ail_pre214',
+    'test_ail_pre238',
+    'test_ail_pre241',
+    'test_ail_pre242',
+    'test_ail_pre253',
+    'test_ail_pre257',
+    'test_ail_pre258',
     'test_ail_pre205',
     'test_ail_pre206',
     'test_ail_pre212',
@@ -136,6 +142,8 @@ MODULES = (
     'test_ail_pre216',
     'test_ail_pre218',
     'test_ail_pre220',
+    'test_ail_pre236',
+    'test_ail_pre248',
     'test_ail_pre90',
     'test_ail_pre102',
     'test_ail_pre104',
@@ -148,6 +156,9 @@ MODULES = (
     'test_ail_pre172',
     'test_ail_pre116',
     'test_ail_pre199',
+    'test_ail_pre227',
+    'test_ail_pre246',
+    'test_ail_pre254',
 )
 
 

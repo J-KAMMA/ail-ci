@@ -121,6 +121,11 @@ def _ail_bsub(x):
 
 
 def _ail_bcontains(x):
+    if not isinstance(x, int):
+        try:
+            x = _ail_b_index(x)
+        except Exception:
+            pass
     if isinstance(x, int):
         if x < 0 or x > 255:
             raise ValueError("byte must be in range(0, 256)")

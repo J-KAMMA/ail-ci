@@ -674,6 +674,57 @@ _FOLD_BINARY = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator
                 ast.Pow: operator.pow, ast.LShift: operator.lshift, ast.RShift: operator.rshift,
                 ast.BitAnd: operator.and_, ast.BitOr: operator.or_, ast.BitXor: operator.xor}
 
+_FOLD_INT_BITS = 4096
+
+
+def _fold_int_exact(node, known):
+    """The exact int value of a class-level constant expression, with wider intermediate steps
+    allowed. `_fold` stops as soon as a step leaves int64, which is right for a module value
+    (the emitted arithmetic traps there) but wrong for a class body, whose constant the compiler
+    must resolve: `N = 2**62; class C: X = N * 2 - 1` reaches an in-range 2**63-1 through a
+    2**63 step. Raises _NotConstant when the expression is not an integer constant."""
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        return node.value
+    if isinstance(node, ast.Name):
+        value = known.get(node.id)
+        if type(value) is not int:
+            raise _NotConstant
+        return value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
+        value = _fold_int_exact(node.operand, known)
+        return {ast.USub: operator.neg, ast.UAdd: operator.pos,
+                ast.Invert: operator.invert}[type(node.op)](value)
+    if not isinstance(node, ast.BinOp) or type(node.op) not in _FOLD_BINARY or isinstance(node.op, ast.Div):
+        raise _NotConstant
+    left, right = _fold_int_exact(node.left, known), _fold_int_exact(node.right, known)
+    if isinstance(node.op, ast.Pow):
+        if right < 0:
+            raise _NotConstant
+        if right == 0:
+            value = 1
+        elif left in (0, 1, -1):
+            value = left ** right if left != -1 else (-1 if right & 1 else 1)
+        elif left.bit_length() * right > _FOLD_INT_BITS:
+            raise _NotConstant
+        else:
+            value = left ** right
+    elif isinstance(node.op, (ast.LShift, ast.RShift)):
+        if right < 0:
+            raise _NotConstant
+        if right >= _FOLD_INT_BITS:
+            if isinstance(node.op, ast.LShift):
+                raise _NotConstant
+            value = 0 if left >= 0 else -1
+        else:
+            value = left << right if isinstance(node.op, ast.LShift) else left >> right
+    elif isinstance(node.op, (ast.FloorDiv, ast.Mod)) and right == 0:
+        raise _NotConstant
+    else:
+        value = _FOLD_BINARY[type(node.op)](left, right)
+    if value.bit_length() > _FOLD_INT_BITS:
+        raise _NotConstant
+    return value
+
 
 def _fold(node, known):
     if isinstance(node, ast.Constant) and type(node.value) in (int, float, str, bytes):
@@ -766,10 +817,19 @@ def _module_scope_bindings(tree):
     return count
 
 
+def _class_statement_names(statement):
+    """Names a class-level statement binds for the statements after it."""
+    if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return {statement.name}
+    return {inner.id for inner in ast.walk(statement)
+            if isinstance(inner, ast.Name) and isinstance(inner.ctx, (ast.Store, ast.Del))}
+
+
 def fold_constants(text):
     """Top-level `NAME = <constant arithmetic>` bound once in module scope, rewritten to its literal
     value. A name that a nested block, a loop or a `global` function rebinds is not folded: its value
-    at the line that reads it is not the first one."""
+    at the line that reads it is not the first one. A class-level assignment may read such a name:
+    its arithmetic runs in the class body, so it is folded here too (exactly, wide steps allowed)."""
     try:
         tree = ast.parse(text)
     except SyntaxError:
@@ -778,6 +838,29 @@ def fold_constants(text):
     known = {}
     edits = []
     for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            scope = {name: value for name, value in known.items() if type(value) is int}
+            shadowed = set()
+            for statement in node.body:
+                if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+                    target, expression = statement.targets[0], statement.value
+                elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+                    target, expression = statement.target, statement.value
+                else:
+                    expression = None
+                if (expression is not None and isinstance(target, ast.Name)
+                        and not isinstance(expression, ast.Name) and not _is_literal(expression)):
+                    loads = {inner.id for inner in ast.walk(expression)
+                             if isinstance(inner, ast.Name) and isinstance(inner.ctx, ast.Load)}
+                    if loads & scope.keys() and not loads & shadowed:
+                        try:
+                            value = _fold_int_exact(expression, scope)
+                        except (_NotConstant, ArithmeticError, ValueError, TypeError, RecursionError):
+                            pass
+                        else:
+                            edits.append((expression, repr(value)))
+                shadowed |= _class_statement_names(statement)
+            continue
         if not (isinstance(node, ast.Assign) and len(node.targets) == 1
                 and isinstance(node.targets[0], ast.Name) and stored[node.targets[0].id] == 1):
             continue
@@ -2691,7 +2774,8 @@ class _Surface:
 
     def _annotation_slice_parts(self, node):
         """The expressions CPython evaluates for a subscript target's slice, or None for a Starred form
-        (which the lowerers refuse by name)."""
+        (which CPython rejects as a bare annotated assignment target; module_bare_annotation refuses it).
+        A Starred inside a nested tuple is still part of that tuple display, so it is refused too."""
         if isinstance(node, ast.Starred):
             return None
         if isinstance(node, ast.Slice):
@@ -2699,10 +2783,9 @@ class _Surface:
         if isinstance(node, ast.Tuple):
             parts = []
             for each in node.elts:
-                if isinstance(each, ast.Starred):
+                found = self._annotation_slice_parts(each)
+                if found is None:
                     return None
-                found = ([each] if not isinstance(each, ast.Slice)
-                         else [x for x in (each.lower, each.upper, each.step) if x is not None])
                 parts.extend(found)
             return parts
         return [node]
@@ -2720,7 +2803,10 @@ class _Surface:
         elif isinstance(target, ast.Subscript):
             slice_parts = self._annotation_slice_parts(target.slice)
             if slice_parts is None:
-                return
+                raise SyntaxErrorAIL(
+                    'a starred expression in an annotated assignment target is not valid Python syntax.\n'
+                    '  write instead: build the key first (`key = a[0]`) and annotate `xs[key]`',
+                    lineno=node.lineno, offset=node.col_offset + 1)
             parts.append(target.value)
             parts.extend(slice_parts)
         elif not isinstance(target, ast.Name):

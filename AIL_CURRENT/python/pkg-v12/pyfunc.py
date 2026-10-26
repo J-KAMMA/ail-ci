@@ -626,7 +626,7 @@ def _maxsplit_const(node):
     A zero operand (or a power with base 0/1/-1 and a large exponent) is decided before the size
     guard, so a large intermediate that reduces to an int64 maxsplit is not refused by name."""
     if isinstance(node, ast.Constant):
-        return node.value if type(node.value) is int else _MAXSPLIT_NOT_CONST
+        return node.value if type(node.value) in (int, bool) else _MAXSPLIT_NOT_CONST
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
         value = _maxsplit_const(node.operand)
         if value is _MAXSPLIT_NOT_CONST or value is _MAXSPLIT_TOO_BIG:
@@ -747,56 +747,75 @@ _CONST_INT_BIG = object()
 _CONST_INT_BITS = 4096
 
 
-def _const_int_expr(node):
+def _const_int_expr(node, _limit=None):
     """The exact value of a constant int expression, or a not-constant/too-big sentinel.
 
     AIL integers are int64 (SEMANTICS section 1), so a constant expression that leaves that range
     used to compile and then stop with `integer overflow` at run time. Evaluate it here without
     building an unbounded intermediate (`2**100000000` is never computed); an expression that
-    reaches int64 exactly on the way, such as `2**63 - 1`, is kept."""
+    reaches int64 exactly on the way, such as `2**63 - 1`, is kept.
+
+    An absorbing zero and the power bases 0/1/-1 are decided before the size guard, as in
+    pyfront.int_constant, so a large but valid operand cannot turn a small result into a
+    refusal.  The other operand of such a power is retried at the special-exponent limit so a
+    huge exponent beyond the ordinary fold limit still yields its sign and parity."""
+    if _limit is None:
+        _limit = _CONST_INT_BITS
     if isinstance(node, ast.Constant):
-        return node.value if type(node.value) is int else _CONST_INT_NOT
+        return node.value if type(node.value) in (int, bool) else _CONST_INT_NOT
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
-        value = _const_int_expr(node.operand)
+        value = _const_int_expr(node.operand, _limit)
         if value is _CONST_INT_NOT or value is _CONST_INT_BIG:
             return value
         if isinstance(node.op, ast.USub):
             return -value
-        return value if isinstance(node.op, ast.UAdd) else ~value
+        if isinstance(node.op, ast.UAdd):
+            return int(value)               # CPython's unary plus on a bool is an int
+        return ~value
     if not isinstance(node, ast.BinOp):
         return _CONST_INT_NOT
     op = type(node.op)
     if op not in (ast.Add, ast.Sub, ast.Mult, ast.Pow, ast.LShift, ast.RShift,
                   ast.FloorDiv, ast.Mod, ast.BitAnd, ast.BitOr, ast.BitXor):
         return _CONST_INT_NOT
-    left = _const_int_expr(node.left)
-    right = _const_int_expr(node.right)
+    left = _const_int_expr(node.left, _limit)
+    right = _const_int_expr(node.right, _limit)
     if left is _CONST_INT_NOT or right is _CONST_INT_NOT:
         return _CONST_INT_NOT
-    if left is _CONST_INT_BIG or right is _CONST_INT_BIG:
-        return _CONST_INT_BIG
     if op is ast.Pow:
+        if right is _CONST_INT_BIG:
+            if left not in (0, 1, -1):
+                return _CONST_INT_BIG
+            right = _const_int_expr(node.right, _MAXSPLIT_SPECIAL_BITS)
+            if right is _CONST_INT_NOT or right is _CONST_INT_BIG:
+                return right
         if right < 0:
             return _CONST_INT_NOT            # CPython's result is a float
         if right == 0:
             return 1
+        if left is _CONST_INT_BIG:
+            return _CONST_INT_BIG
         if left in (0, 1, -1):
             return left ** right if left != -1 else (-1 if right & 1 else 1)
-        if left.bit_length() * right > _CONST_INT_BITS:
+        if left.bit_length() * right > _limit:
             return _CONST_INT_BIG
         value = left ** right
+    elif left is _CONST_INT_BIG or right is _CONST_INT_BIG:
+        if op in (ast.Mult, ast.BitAnd) and (left == 0 or right == 0):
+            return 0
+        return _CONST_INT_BIG
     elif op is ast.LShift:
         if right < 0:
             return _CONST_INT_NOT            # the runtime raises ValueError for a negative count
         if left == 0:
             return 0
-        if right >= _CONST_INT_BITS or left.bit_length() + right > _CONST_INT_BITS:
+        if right >= _limit or left.bit_length() + right > _limit:
             return _CONST_INT_BIG
         value = left << right
     elif op is ast.RShift:
         if right < 0:
             return _CONST_INT_NOT
-        if right >= _CONST_INT_BITS:
+        if right >= _limit:
             return 0 if left >= 0 else -1
         value = left >> right
     elif op is ast.FloorDiv or op is ast.Mod:
@@ -806,7 +825,7 @@ def _const_int_expr(node):
     elif op is ast.Mult:
         if left == 0 or right == 0:
             return 0
-        if left.bit_length() + right.bit_length() > _CONST_INT_BITS:
+        if left.bit_length() + right.bit_length() > _limit:
             return _CONST_INT_BIG
         value = left * right
     elif op is ast.Add:
@@ -819,7 +838,7 @@ def _const_int_expr(node):
         value = left | right
     else:
         value = left ^ right
-    return _CONST_INT_BIG if value.bit_length() > _CONST_INT_BITS else value
+    return _CONST_INT_BIG if value.bit_length() > _limit else value
 
 
 def fold_int_constant(node):
@@ -828,8 +847,8 @@ def fold_int_constant(node):
     A constant expression outside int64 is refused by name here, at compile time, instead of
     compiling to arithmetic that stops with `integer overflow` when the program runs."""
     value = _const_int_expr(node)
-    if value is _CONST_INT_NOT:
-        return None
+    if value is _CONST_INT_NOT or isinstance(value, bool):
+        return None                      # a bool result keeps its own printing (True/False)
     if value is _CONST_INT_BIG or not _I64_MIN <= value <= _I64_MAX:
         refusal = Unsupported(
             'an integer constant expression here is outside the signed 64-bit range of an '

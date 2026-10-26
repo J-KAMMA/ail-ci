@@ -2856,7 +2856,7 @@ class Compiler:
                 ctx.emit('%s (%s) {' % (kw, cond))
                 ctx.indent += 1
                 if h.name:
-                    ctx.emit('ail_obj %s = ail_exc_current;' % cid(h.name))
+                    ctx.emit('ail_obj %s = ail_v1_exc_current;' % cid(h.name))
                     ctx.exc_vars[h.name] = True
                 self.block(h.body, ctx)
                 if h.name:

@@ -1,3 +1,243 @@
+## 2026-10-25 -- pre227 suite fix: the constant check owns the refusal wording (job-pre227-10260534)
+
+The class-constant fix still folds `N = 2**62; class C: X = N * 4` to a literal, but the
+current integration tree's `_check_int64_constants` now sees that folded module/class
+assignment before `_check_int64_literals`, so it refuses it as
+`int64 constant expression out of range` instead of `int64 literal out of range`.
+`test_ail_pre227.py` now accepts either named refusal (and still rejects `integer overflow`
+and a traceback); the in-range, shadowed, rebound and dynamic-route cases are unchanged.
+Probes `pre227_*` in `/tmp/probes` match CPython or are refused by name on both builds, both
+here and on a copy of the current integration branch with this fix applied. Tests: pre227,
+safetynet, files, corpus_findings3.
+
+## 2026-10-25 - pre227: class constants built from a module name (job-pre227-10260119)
+
+The first still-differing item in the rbpre184 review was the class constant built through a
+name: `N = 2**62; class C: X = N * 4` compiled and then stopped with `integer overflow`, while
+CPython keeps an unbounded int. `2**63 - 1` in a module/class/default already matched (folded)
+and the nested default `def f(x=10**30)` was already refused by name, so only this item was left.
+`fold_constants` now carries the module constants it already knows into class-level assignment
+expressions and folds them exactly (`_fold_int_exact`, wide intermediate steps allowed, 4096-bit
+cap): `N = 2**61; class C: X = N * 2 - 1` emits 2**63-1, `(N * 4) // 4` emits 2**62, and a value
+that cannot fit int64 is rewritten to its literal and refused by name (`int64 literal out of
+range`) on both builds. A name the class body itself bound earlier, a module name rebound later,
+non-int constants (str/float/bool) and a plain `X = N` are left untouched; a value that only
+reaches the class body at run time keeps the fixed-width trap, and a nested class definition is
+refused by name.
+
+Probes `/tmp/probes/pre227_*` (out mult/shift/power/negative/alias/annotated, in-range widths and
+wide steps, non-int constants, plain name, rebound/shadowed name, class before the assignment,
+dynamic list/dict/attribute/argument routes) match CPython or are refused by name on both builds,
+except the dynamic routes, which keep the documented int64 runtime trap. Added
+`test_ail_pre227.py` (2 tests, both builds) and registered it in `ail_check.MODULES`. Final-state
+tests: test_ail_pre227, test_ail_safetynet, test_ail_files, test_ail_corpus_findings3, plus
+test_ail_nested_functions, test_ail_modconst, test_ail_pre113/172/177 pass; test_ail_pre121 keeps
+its two pre-existing general-build failures (identical on HEAD).
+## 2026-10-25 - large special exponents before the constant-fold guard (job-pre236-10260352)
+
+The rbpre190 review left two pre-existing items: `test_ail_pre121`'s stale refusal wording and
+the `>2**20` / `>16M`-bit constant refusals.  Both still reproduced here.  The generic constant
+folders (`pyfunc._const_int_expr`, `ail_chatgpt._constant_int_exact`) evaluated both operands
+before their zero/base shortcuts, so `0 * (1 << 2000000)`, `0 ** (1 << 2000000)`,
+`1 ** (1 << 2000000)` and `(-1) ** (1 << 2000000)` were refused although every result fits
+int64.  They now decide an absorbing zero and the power bases 0/1/-1 before the size guard, as
+`pyfront.int_constant` already did, and retry a huge exponent of such a power at the 2**24-bit
+special limit so its sign and parity are known.  An absorbing zero also folds with an operand
+wider than 2**24 bits (`0 * (1 << 16777216)`); a non-special intermediate beyond 2**20 bits and
+a special exponent beyond 2**24 bits are still refused by name.  The two stale `test_ail_pre121`
+expectations now also accept pre177's `int64 constant out of range` wording (same named refusal
+for the same construct).
+
+Probes `/tmp/probes/p236_*` cover the boundaries, types, negative exponents, module/class/default
+positions and argument/list-item/attribute/dict routes on both builds; `/tmp/probes/p236_special_*`,
+`p236_zero_*` and `p236_cap_zero.py` match CPython, while the genuinely wide non-special cases and
+the `2**24`-bit special boundary are refused by name.  Added `AIL_CURRENT/test_ail_pre236.py`.
+## 2026-10-25 - huge constant power diagnostics (job-pre238-10260354)
+
+The first pre-existing difference from the pre159 review was the compiler printing CPython's
+int-to-str limit text instead of a named refusal. On this tree the reviewer's
+`print(10 ** 4000 * 10 ** 300)` is already refused by name by the front end, and
+`tools/ci_shards.py --check` is clean. A related case still failed the same way: a constant `**`
+whose exact value has more than 4300 digits (for example a 3000-digit base to the 64th) reached
+`str(value)` while `_check_constant_power` built its `int64 constant out of range` message, so both
+builds stopped with `Exceeds the limit (4300 digits) for integer string conversion`. The new
+`_constant_diagnostic` prints `too large` when the conversion is forbidden, and the index, literal
+and unary diagnostics use it too, so those constructs are refused by name at compile time.
+
+Probes `/tmp/probes/p238_*` and `/tmp/probes/p238b_*` cover the reviewer expression, huge bases in
+an argument, list item, attribute, dict value, module/class assignment, default and local, unary
+and nested powers, index expressions and a huge literal on both `cmp.sh` builds; every one is
+refused by name. Added `test_ail_pre238.py` (2 tests, both builds) and registered it in
+`ail_check.MODULES` and `ci_shards.json`. Final-state tests: test_ail_pre238, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 pass.
+## 2026-10-25 - bool constant shifts fold like ints (job-pre241-10260355)
+
+The pre229 review recorded that a bool shift was still compiled with the fixed-width runtime:
+`True << 64`, `True << 4096`, `(True << 100000) >> 100000`, `if False: print(True << 64)` and the
+target `(True << 64) >> 64` stopped with `integer overflow` on both builds, where CPython evaluates
+the bool as an int subclass and prints the bignum (or 1 for the target).  The general constant
+folders only accepted `type(x) is int`, so `True` and `False` never reached exact folding.
+
+Bool constants now fold exactly like int constants in `pyfunc` (the general shift/arithmetic
+folder and the maxsplit folder).  `(True << 64) >> 64`, `(True << 100000) >> 100000`, `(True << 63)
+>> 63` and `(False | True) << 62` print what CPython prints; a value outside int64 (`True << 64`,
+`True << 4096`, `True << 63`, a bool maxsplit) is refused by name with the existing int-constant
+wording.  `&`, `|`, `^` of two bools still returns a bool and is left to the runtime, so
+`True & False` keeps printing `False`, and a negative shift still raises `ValueError`.  Probes in
+`/tmp/probes/pre241/` cover the shift widths 0/1/62/63/64/4096/100000, false operands, negative
+counts, bool arithmetic and bitwise, dead code, arguments, list items, attributes, dict values and
+module constants on both builds; all match CPython or are refused by name.  Added
+`test_ail_pre241.py` and registered it in `ail_check.MODULES`.
+## 2026-10-25 - module-level rebinding of a module function (job-pre242-10260356)
+
+The first still-differing item from the pre217 review was `r3_module_shadow.py` /
+`p09_module_rebind.py`: a module-level `f = lambda: 102` after `def f` was ignored and `f()`
+printed the old `2` on both builds. The general path's `_call_name` always preferred
+`self.functions[name]`, and the module body never wrote a top-level function into its module slot.
+A module-scope assignment to a top-level function name now marks that name as rebound, the `def`
+stores its function value in the module slot, and direct calls/reads of the name go through the
+slot. Rebinding a function whose value the general path cannot build (defaults or a keyword call
+through the value) is refused by name; a `global f` write inside a function (the separate p32
+item) is unchanged.
+
+Probes in `/tmp/probes`: `pre242_basic`, `pre242_order` (before/after), `pre242_signatures`
+(0/1/2 params, str/list), `pre242_sources` (another function, list item, attribute, dict value,
+function argument), `pre242_conditional`, `pre242_value_read`, `pre242_noncallable` (TypeError),
+and `pre242_defaults` / `pre242_kwargs` (refused by name); all match CPython or are refused on both
+builds. Added `test_ail_pre242.py` (2 tests, both builds) and registered it in
+`ail_check.MODULES`; final-state tests: test_ail_pre242, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
+## 2026-10-25 -- pre246: v1 boxed runtime builds; INT64_MIN is a legal index (job-pre246-10260358)
+
+Two pre-existing differences from the rbrbpre204 review were fixed.  The v1 emitter
+(`AIL_GENERAL=v1`, reached only when the typed path falls back) pulled in the DIE block and then
+redefined its `ail_exc_top`/`ail_exc_stack`/`ail_die`/`ail_alloc`, so every v1 program failed to
+compile (`redefinition of 'ail_exc_top'`).  The v1 frame stack and current-exception slot now use
+`ail_v1_*` names (with the v1 emitter updated) and rely on the DIE `ail_die`/`ail_alloc`, so v1 C
+builds and runs; probes cover mixed-type values, `try`/`except` with an exception variable,
+nested `try`/`finally`/re-raise, an uncaught `ValueError` and an uncaught `IndexError`.
+
+The pre177 constant-index check folded unary minus per step, so `d[-(1 << 63)]` was refused with
+`int64 index out of range: 9223372036854775808` although -9223372036854775808 is representable.
+Unary `-`/`~` now fold their operand exactly and range-check only the result, so INT64_MIN (and
+`~INT64_MIN` = INT64_MAX) work as list/tuple/str/bytes/dict indexes, including through a parameter,
+a list item, an attribute, a dict value and an alias; a positive `1 << 63`, `-(1 << 63) - 1` and
+other out-of-int64 results keep the by-name refusal.  Added `AIL_CURRENT/test_ail_pre246.py` (5 v1
+programs and the index boundaries) and registered it in `ail_check.MODULES`.  Probes are
+`/tmp/probes/pre246_*`; both cmp.sh builds match CPython or refuse by name.
+## 2026-10-25 - `abs()` of a local int64 minimum is refused by name (job-pre248-10260359)
+
+The first still-differing item in the pre214 review's pre-existing list was the local variable:
+`x = -(2 ** 63)` is an in-range int64, but both builds stopped in `abs(x)` with `integer overflow`
+where CPython prints the bignum `9223372036854775808`.  The other items in that list (an `abs`
+bound in an unrelated function, an aliased `abs`, `builtins.abs`, and the `complex()` refusal) are
+unchanged and still match the base.
+
+`_check_int64_abs_constants` now also follows a function's own top-level single-assignment int
+constants into `abs`, resolving module constants unless the function shadows them and skipping
+parameters, globals/nonlocals, names stored more than once and nested scopes.  A direct value, a
+shift, a module constant, an alias and an annotated assignment are covered, as are calls used as
+an argument, a list item, an attribute and a dict value.  In-range locals, an overwrite before the
+call, float/bool locals, a local shadowing a module constant and an unused minimum still match
+CPython.  `test_ail_pre248.py` is registered in `ail_check.MODULES` and `tools/ci_shards.py`
+assigned it a shard.
+
+Probes in `/tmp/probes`: `pre248_direct`, `pre248_shift`, `pre248_module`, `pre248_alias`,
+`pre248_annassign`, `pre248_argument`, `pre248_list_item`, `pre248_attribute` and
+`pre248_dict_value` are refused by name on both builds; `pre248_in_range`, `pre248_overwrite` and
+`pre248_float_bool` match CPython on both builds.  The pre214 probes `r6`, `r7` and `r8` still
+behave as before (run-time overflow or a named import refusal).
+## 2026-10-25 - review fix: constant `int(<text>, base)` container folding (job-pre253-10260534)
+
+The review found two false refusals introduced by folding text read from literal containers.
+A dict literal with a duplicate key now yields the last value, matching Python, instead of the
+first.  Escape analysis now records simple `name = name` aliases at every scope rather than only
+at module level, so a mutation through a function-local (or nested) alias marks the original
+container as escaped and leaves it unfolded.  Both cases keep the in-range run-time parse; an
+out-of-range value reached through the last duplicate key is still refused by name.
+
+Probes in `/tmp/probes` (`pre253_dup_*`, `pre253_alias_*`, 12 programs, both builds via
+`cmp.sh`): duplicate string/int/three-key dicts and a duplicate-key alias print `1023`; a
+function-local, nested, method and module-alias mutation prints `1023`; an unchanged container
+still folds and a last duplicate out-of-range value is refused by name.  Added both regressions
+to `test_ail_pre253.py`.
+
+## 2026-10-25 - constant `int(<text>, base)` beyond int64 (job-pre253-10260534)
+
+The first listed difference that still differed on this tree was `int("1"*5000, 2)`: both
+builds compiled it and then stopped with `integer overflow`, while CPython keeps the bignum.
+The earlier out-of-int64 items (`-(1<<63)-1`, `-(1<<64)`, `-(1<<5000)`, `z = 1<<63; z-z`,
+`0 ** (-(1<<5000))`) are already refused by name here, so no change was needed for them.
+
+A call whose text and base are both constant is now evaluated during the front-end checks.  A
+value outside int64 is refused on both builds as `int64 constant expression out of range`;
+in-range constants, invalid literals/bases and dynamic strings keep their previous run-time
+behaviour; a text read from a literal list/tuple/dict is folded too, while a container that is
+mutated or escapes is left alone.
+
+Probes in `/tmp/probes` (`p1`-`p6`, `v1`-`v7`, `ib1`-`ib37`) compare both builds with
+CPython.  The five already-fixed items and `ib1`-`ib12`, `ib17`, `ib20`, `ib22`-`ib28`,
+`ib30`-`ib33`, `ib35`, `ib37` are refused by name; `ib13`-`ib16`, `ib18`-`ib19`, `ib21`,
+`ib26`, `ib29`, `ib34`, `ib36` match CPython or keep their named compiler refusal.  A list
+that is mutated (`ib29`, `ib36`) is left unfolded, while a plain alias or a read through
+`len`/`print` is folded (`ib30`-`ib31`, `ib37`).  Added `test_ail_pre253.py`.
+
+## 2026-10-25 - module bare annotation with a starred subscript target (job-pre254-10260535)
+
+The remaining pre-existing difference from the `rbpre125` review was the module-level bare
+annotation `xs[*a]: ann()`: CPython rejects it with `SyntaxError: can't use starred expression
+here`, while AIL built and ran it on both paths.  The cause was `module_bare_annotation` in
+`ail_syntax.py`: `_annotation_slice_parts` returned None for a Starred slice and the rewrite
+returned without touching the statement, which the lowerers then dropped because it had no value.
+The rewrite now raises a named compile-time refusal (exit 2 on the general and default builds)
+and recursively detects a Starred inside nested tuple displays as well.  Starred load positions
+(`xs[[*a]]`, `xs[ys[*a]]`, `xs[f(*a)]`, `xs[(*a,) if c else 0]`, `xs[(*a,)+tail]`) and the
+annotated assignment with a value keep their old behaviour.
+
+Probes `/tmp/probes/pre254_direct.py`, `pre254_tuple_form.py`, `pre254_mixed.py`,
+`pre254_nested.py`, `pre254_future.py` and `/tmp/probes/pre254/valid_*.py` cover direct,
+trailing-comma, mixed, double-star, nested-tuple, `__future__`, attribute/list-item/dict-value/
+call bases, an empty star, and load-position/value forms on both builds; all are refused by name
+or match CPython.  Added `test_ail_pre254.py` (2 tests, both builds) and registered it in
+`ail_check.MODULES`.  Final-state tests: test_ail_pre254, test_ail_safetynet, test_ail_files,
+test_ail_corpus_findings3, test_ail_pre124 and test_ail_pre125 pass.
+## 2026-10-25 -- closure over an outer local callable (job-pre257-10260536)
+
+The first still-differing item in the pre244 review's pre-existing list was a closure over an
+outer local callable: `def f(): return 1; def outer(): def inner(): return f(); f = lambda: 101;
+return inner()` printed `1` on both builds where CPython prints `101`.  Two causes met here.  The
+Python surface's `--syntax python` tuple pass treats `f = lambda: ...` as an alias and removes the
+statement, but `stmt_FunctionDef` never enters a nested scope, so a call inside `inner` was left
+behind and read the module-level `f`; the assignment is now left as written when its name is loaded
+in a nested def or lambda.  The general path's `_call_name` also chose a module function or builtin
+before a name captured by value (`ctx.free_names`) or by nonlocal pointer (`ctx.ptr_names`); the
+captured value now wins, consistent with `expr_Name`.
+
+Probes in `/tmp/probes` covered the local assigned after and before the nested def, a parameter,
+a builtin (`len`), two lambdas closing over each other, a callable with arguments, a local def
+replaced by a lambda, the module-function control, the ordinary alias control, and values reaching
+the local through an argument, a list item, an attribute and a dict value; all match CPython on both
+builds.  A `nonlocal` callable is refused by name ("the method .f() ...").  Added
+`AIL_CURRENT/test_ail_pre257.py` and registered it in `ail_check.MODULES`.  Final-state tests:
+test_ail_pre257, test_ail_pre165, test_ail_pre127, test_ail_builtin_shadowing, test_ail_tuples,
+test_ail_nested_functions, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 pass.
+## 2026-10-25 - bytes membership: `__index__` operand (job-pre258-10260537)
+
+The first still-differing item in the job-pre183 review's pre-existing list was an object with
+`__index__` used as the left operand of `in` on bytes/bytearray: both builds raised the
+bytes-like TypeError, while CPython converts through `__index__` (97 selects the byte, while -1
+and 256 raise `ValueError: byte must be in range(0, 256)`) and falls back to the buffer path when
+the conversion fails. `_ail_bcontains` now tries `_ail_b_index` first for non-int operands and
+keeps the existing bytes-like path as the fallback, so a non-int `__index__` result or a raising
+`__index__` gives CPython's bytes-like TypeError rather than the helper's own error.
+
+Probes `/tmp/probes/p1_index_bytes.py` and `p1b_index_edges.py` (values 0/97/255/256/-1, a bool
+result, non-int and raising `__index__`, a plain object, through an argument, a list item, a dict
+value, an attribute and `__contains__`, both receivers and both builds) match CPython; `p1c` is
+refused by name for an out-of-int64 constant. Added `test_ail_pre258.py`. The other three
+pre-existing pre183 items (the `type(len).__name__` text, builtin-function names in bytes
+errors, and builtin classes in a startswith tuple) are unchanged and not addressed here.
+
 ## 2026-10-25 - review fix: short `__exit__` signatures (job-pre197-10252029)
 
 The review found that the traceback rewrite indexed `node.args.args[3]` after a
