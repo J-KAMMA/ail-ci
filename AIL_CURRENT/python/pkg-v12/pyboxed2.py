@@ -33,7 +33,7 @@ import os
 import re
 import runpy
 
-from pyfront import Unsupported, int_constant, refuse_complex_pow
+from pyfront import Unsupported, int_constant, refuse_complex_pow, refuse_unrepresentable_delete_bounds
 import filelib
 import hashlower
 import pyfunc
@@ -10367,6 +10367,9 @@ class Compiler(boxclosure.ClosureMixin):
         pass  # already folded into ctx.ptr_names by _register_nested
 
     def stmt_Delete(self, node, ctx):
+        for target in node.targets:
+            if isinstance(target, ast.Subscript):
+                refuse_unrepresentable_delete_bounds(target)
         for target in node.targets:
             if isinstance(target, ast.Name):
                 if (target.id in self.classes and target.id not in ctx.slot_of
