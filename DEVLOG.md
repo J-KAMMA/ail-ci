@@ -15,7 +15,10 @@ intermediate. Values that reach a negation as variables keep the fixed-width run
 The new `test_ail_pre204.py` covers negative INT64_MIN spellings, the four value flows (argument,
 list item, attribute, dict value), aliases and returns, in-range boundaries, the large-intermediate
 reductions, and dynamic operands, on all four emitter modes. Registered it in `ail_check.MODULES`
-and both `tools/ci_shards.json` lists.
+and both `tools/ci_shards.json` lists. Conflict resolution with the later pre190/pre236 tests:
+pre190 now requires the generic fold limit to cover (not equal) the maxsplit limit and asserts the
+new 2**22 value, and pre236's non-special wide-shift refusal moved from the old 2**20 boundary to
+the new 2**22 one; both keep their original intent.
 
 ## 2026-10-25 -- pre227 suite fix: the constant check owns the refusal wording (job-pre227-10260534)
 

@@ -68,7 +68,7 @@ print((1 << 16777216) & 0)
 REFUSALS = [
     ('wide_special', 'print(1 ** (1 << 16777216))\n',
      'outside the signed 64-bit range'),
-    ('wide_shift', 'print((1 << 1048576) >> 1048576)\n',
+    ('wide_shift', 'print((1 << 4194304) >> 4194304)\n',
      'outside the signed 64-bit range'),
     ('wide_maxsplit', 'print("a b".split(" ", (1 << 1048576) >> 1048576))\n',
      'maxsplit constant does not fit'),
