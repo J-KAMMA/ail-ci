@@ -24,6 +24,7 @@ MODULES = (
     'test_ail_pre105',
     'test_ail_pre93',
     'test_ail_hostile_input',
+    'test_ail_pre29',
     'test_ail_safetynet',
     'test_ail_pre100',
     'test_ail_pre114',
@@ -50,6 +51,7 @@ MODULES = (
     'test_ail_fuzz22',
     'test_ail_fuzz3',
     'test_ail_fuzz3n',
+    'test_ail_fuzz58',
     'test_ail_fuzz20',
     'test_ail_c169',
     'test_ail_pre168',
@@ -131,6 +133,7 @@ MODULES = (
     'test_ail_pre192',
     'test_ail_pre213',
     'test_ail_pre197',
+    'test_ail_pre2',
     'test_ail_pre203',
     'test_ail_pre215',
     'test_ail_pre214',
@@ -171,6 +174,7 @@ MODULES = (
     'test_ail_pre227',
     'test_ail_pre246',
     'test_ail_pre254',
+    'test_ail_fuzz42',
 )
 
 

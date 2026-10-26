@@ -1,3 +1,51 @@
+## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
+
+Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is
+already present here: `ail__raise_head_str` builds the ValueError text from an ASCII head plus
+the repr's UTF-16 units, so `int("\u2469", 10)` keeps the circled digit (and `ail__repr_limited`
+keeps CPython's `%.200R` cut for int()), while `float()` keeps the full repr as CPython does.
+No cruntime change was needed; this reapply adds the accepted `AIL_CURRENT/test_ail_fuzz58.py`
+and registers it in `ail_check.MODULES`.  Probes in `/tmp/probes`: `f58_int`, `f58_float`
+(bases 0/2/8/10/16/36, empty, signs, long input, astral literals refused by name on both builds,
+and values through an argument, list item, attribute, dict value and aliases) match CPython on
+both builds.  Tests on the final tree: `test_ail_fuzz58`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` (4 modules, 320 s, 0 failed; 1 skipped, no zig for Windows).
+`python3 tools/diff_ids.py` is not present in this tree.
+## 2026-10-26 -- re-apply pre2: out-of-int64 constant power is refused by name (job-rbpre2-10261658)
+
+Re-applying the accepted pre2 change on the current integration tree.  The refusal is already
+present here: pre121/pre177's generic constant-expression rule refuses `2 ** 63`, `(-2) ** 64`,
+`2 ** 100000000` and the assignment/argument/list-item/attribute/dict routes by name, while
+pre113's exact fold keeps `2 ** 63 - 1`, `(2 ** 63) >> 1` and `2 ** 63 - 2 ** 63` in range and
+matching CPython.  The conflict resolution keeps that newer rule and does not add pre2's second,
+power-specific refusal path.  Added the accepted `AIL_CURRENT/test_ail_pre2.py`, adapted to
+accept the current tree's named wording and to check the now-in-range subtraction against
+CPython, and registered it in `ail_check.MODULES` and `ci_shards.json`.
+`tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run and `--check`
+passes.  Probes `pre2_*` in `/tmp/probes` on both builds: `pre2_inrange`, `pre2_bounds`,
+`pre2_float` and `pre2_after` match CPython; `pre2_direct`, `pre2_assign`, `pre2_neg`,
+`pre2_huge`, `pre2_arg`, `pre2_list`, `pre2_attr`, `pre2_dict`, `pre2_local` and `pre2_ail` are
+refused by name.  Tests on the final tree: `test_ail_pre2`, `test_ail_pre113`,
+`test_ail_pre121`, `test_ail_pre177`, `test_ail_pre97`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3` (8 modules, 379 s, 0 failed).
+
+## 2026-10-26 -- re-apply pre29: invalid format specifier names spec and type (job-rbpre29-10261659)
+
+Re-applied the accepted pre29 change on the current tree. Its `safetyrt.py` behaviour is already
+present from the pre206/pre243 format work: `ail2f_bad_spec` builds the full 16-bit
+`Invalid format specifier '<spec>' for object of type '<type>'` text (spec, controls, NUL and
+non-ASCII units intact) for str, int, bool and float, `ail2f_unsupported` rejects object types
+before the spec is parsed, and a lone non-ASCII type gives `Unknown format code '\x..'`.
+No runtime edit was needed, keeping both sides' fixes. Added the accepted
+`AIL_CURRENT/test_ail_pre29.py` (5 tests, both builds) and registered it in `ail_check.MODULES`;
+DIFFERENCES row `C?-job-rbpre29-10261659-1`. `tools/diff_ids.py` is not present on this tree;
+`tools/update_manifest.py` was run and `--check` passes.
+
+Probes in `/tmp/probes/pre29`: `pre29_invalid`, `pre29_sources`, `pre29_objects`,
+`pre29_valid`, `pre29_unicode`, and `pre29_boundaries` (empty, sign/width/precision edges,
+negative/zero, NUL/control/quote, long and non-ASCII specs, alias/argument/list/attribute/dict
+routes, bool/int/float/str and None/list/tuple/dict/instance values) match CPython on both builds.
+Final-state tests: pre29, safetynet, files and corpus_findings3.
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is
@@ -1738,6 +1786,26 @@ list also still contained a managed-struct Callable field, which R594 supports a
 `test_ail_exception_values_core` covers. Added `test_ail_pre44.py` with CPython comparisons
 for the direct, annotation-only, container/argument and control-flow cases. No language
 behaviour changed.
+## 2026-10-24 - re-apply fuzz3n: str search None bounds (C168)
+
+Re-applied job-fuzz3n-10220658 on this tree. The change itself was already in the export:
+`_str_window_bounds` in `AIL_CURRENT/python/pkg-v12/pyboxed2.py` tests each supplied start/end
+tag and passes `has_lo = 0` / `has_hi = 0` for a `None`, and `AIL_CURRENT/test_ail_fuzz3n.py`
+(registered in `ail_check.MODULES`) covers the literal, variable, argument, list-item, dict-value
+and attribute forms on both builds. The job's diff also listed `list.index` / `tuple.index` with
+a `None` bound as an open difference, but this tree already closes that case with C169
+(`_seq_index_bound` / `_check_seq_index_bound`), so no open row was added.
+
+Tests on this commit: `test_ail_fuzz3n`, `test_ail_c169`, `test_ail_safetynet`, `test_ail_files`
+and `test_ail_corpus_findings3` all pass (43 tests, 1 skipped for missing zig). Probes
+`/tmp/probes/p_basic.py`, `p_sources.py`, `p_windows.py` and `p_types.py` match CPython on the
+general and default builds.
+## 2026-10-24 - fuzz42: bool abs()
+
+- fuzz42: the general path's `abs()` kept a bool argument's BOOL tag, so `abs(False)` printed
+  `False` and `abs(True)` printed `True` where CPython prints `0` and `1`. The plain call and the
+  builtin-as-`key=`/`map()` wrapper now use `ail_bi_abs`, which boxes an intlike argument as an
+  int. Added `test_ail_fuzz42.py` and registered it in `ail_check.MODULES`.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
