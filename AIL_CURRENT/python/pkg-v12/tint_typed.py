@@ -104,13 +104,26 @@ static AIL_BIGFN ail_tint ail_tint__bitop(ail_tint a, ail_tint b, int op) {
     ail_limb *xs = (ail_limb *)malloc(3 * n * sizeof(ail_limb));
     if (!xs) ail_die("out of memory");
     ail_limb *ys = xs + n, *rs = ys + n;
-    ail_limb sx = x.sign < 0 ? (ail_limb)~(ail_limb)0 : 0;
-    ail_limb sy = y.sign < 0 ? (ail_limb)~(ail_limb)0 : 0;
     for (size_t i = 0; i < n; i++) {
-        xs[i] = i < x.n ? x.d[i] : sx;
-        ys[i] = i < y.n ? y.d[i] : sy;
-        rs[i] = op == 0 ? (xs[i] & ys[i]) : op == 1 ? (xs[i] | ys[i]) : (xs[i] ^ ys[i]);
+        xs[i] = i < x.n ? x.d[i] : 0;
+        ys[i] = i < y.n ? y.d[i] : 0;
     }
+    if (x.sign < 0) {
+        uint64_t carry = 1;
+        for (size_t i = 0; i < n; i++) {
+            uint64_t t = (uint64_t)(ail_limb)~xs[i] + carry;
+            xs[i] = (ail_limb)t; carry = t >> 32;
+        }
+    }
+    if (y.sign < 0) {
+        uint64_t carry = 1;
+        for (size_t i = 0; i < n; i++) {
+            uint64_t t = (uint64_t)(ail_limb)~ys[i] + carry;
+            ys[i] = (ail_limb)t; carry = t >> 32;
+        }
+    }
+    for (size_t i = 0; i < n; i++)
+        rs[i] = op == 0 ? (xs[i] & ys[i]) : op == 1 ? (xs[i] | ys[i]) : (xs[i] ^ ys[i]);
     int sign = (rs[n - 1] >> 31) ? -1 : 1;
     if (sign < 0) {
         uint64_t carry = 1;
@@ -378,6 +391,41 @@ static inline double ail_tint_double(ail_tint x) {
     if (!x.b) return (double)x.i;
     int ovf;
     return ail_bn_to_double(x.b->d, x.b->n, x.b->sign < 0, &ovf);
+}
+/* `int(<str>)` with an arbitrary-precision result: the same text rules and errors as the typed runtime's
+   `ail_str_to_int` (NUMPARSE: ASCII whitespace, a sign, single underscores between digits, the 4300-digit
+   limit), but the magnitude is accumulated in the bigint core so a value beyond int64 is exact. */
+static AIL_BIGFN ail_tint ail_str_to_tint(ail_str s) {
+    char stackbuf[128];
+    int64_t len = 0, nd = 0, v = 0;
+    char *b = ail__str_ascii(s, stackbuf, (int64_t)sizeof stackbuf, &len);
+    int rc = ail__asc_to_int(b, len, 10, &v, &nd);
+    if (rc == 1 || rc == 3) {
+        if (b != stackbuf) free(b);
+        ail_raise_named(AIL_EXC_VALUE);
+    }
+    if (rc == 0) {
+        if (b != stackbuf) free(b);
+        return ail_tint_from_int64(v);
+    }
+    int64_t i = 0, j = len;
+    while (i < j && AIL__ASC_SPACE((unsigned char)b[i])) i++;
+    while (j > i && AIL__ASC_SPACE((unsigned char)b[j - 1])) j--;
+    int neg = i < j && b[i] == '-';
+    if (i < j && (b[i] == '+' || b[i] == '-')) i++;
+    char *d = (char *)malloc((size_t)(j - i) + 1);
+    ail_limb *o = (ail_limb *)malloc(((size_t)nd / 9 + 2) * sizeof(ail_limb));
+    if (!d || !o) ail_die("out of memory");
+    size_t k = 0;
+    for (; i < j; i++)
+        if (b[i] != '_') d[k++] = b[i];
+    size_t n = ail_bn_from_dec(o, d, k);
+    ail_tbig *r = ail_tint__new(n ? n : 1);
+    if (n) memcpy(r->d, o, n * sizeof(ail_limb));
+    r->n = (uint32_t)n;
+    free(d); free(o);
+    if (b != stackbuf) free(b);
+    return ail_tint_demote(r, n ? (neg ? -1 : 1) : 0);
 }
 static AIL_BIGFN ail_str ail_tint_base_str(ail_sarena *A, ail_tint x, int sh, const char *pfx) {
     ail_tbv v; ail_tbv_of(&v, x);

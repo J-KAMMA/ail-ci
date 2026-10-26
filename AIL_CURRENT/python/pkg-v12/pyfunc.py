@@ -34924,13 +34924,17 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                         for n, k in sigs[_f.name][0])
         _ret = 1 if (sigs[_f.name][1] == INT and _needs_tint
                      and not (_f.name == entry_name and not library)) else 0
+        # A builder local keeps the function on the legacy int64 emitter whatever its callers do:
+        # settle that before any caller is compiled, so it is never handed an `ail_tint`.
+        try:
+            _bctx = _caller_ctx(_f, sigs, arity_seeds.get(_f.name), classes, owned_str_fns, owned_bytes_fns)
+            _builders, _ = _builder_locals(_f, _bctx)
+        except Exception:
+            _builders = set()
+        if _builders:
+            _params, _ret = (), 0
         _tint_sigs[_f.name] = (_params, _ret)
         _tint_sigs[csym[_f.name]] = (_params, _ret)
-    if 'py_main' in _tint_sigs:
-        # the C harness (and the top-level wrapper) calls py_main as an int64-returning entry
-        _tint_sigs['py_main'] = ((), 0)
-        if 'main' in _tint_sigs and not _tint_sigs['main'][0]:
-            _tint_sigs['main'] = ((), 0)
     global TINT_SIGS, TINT_ACTIVE
     TINT_SIGS = _tint_sigs
     TINT_ACTIVE = dict(_tint_sigs)

@@ -846,7 +846,7 @@ class ProgramTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             built, exe, entries = compile_program(tmp, 'loops', LOOPS, 'ir', {'AIL_IR': 'verify'}, debug=True)
             c = Path(tmp, 'loops.ir.d', 'program.c').read_text()
-            self.assertIn('ail_sarena_keep_roots', c.split("int64_t py_main(void) {")[1])
+            self.assertIn('ail_sarena_keep_roots', c.split("py_main(void) {")[1])
             # memory stays flat: a million iterations hold what a thousand do
             small = subprocess.run(['/usr/bin/time', '-f', '%M', str(exe), '2000'], capture_output=True, text=True)
             big = subprocess.run(['/usr/bin/time', '-f', '%M', str(exe), "200000"], capture_output=True, text=True)

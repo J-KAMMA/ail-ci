@@ -162,10 +162,6 @@ def _apply(P, args, kwargs, result, current):
         and (n.func.id.startswith(('_ail_', '_Ail')) or n.func.id in _io_names
              or n.func.id in getattr(ctx, 'prelude_names', ()))
         for n in ast.walk(fn)) or any(isinstance(n, (ast.With, ast.AsyncWith)) for n in ast.walk(fn))
-    if _py and not _library_call and (getattr(ctx, 'numeric_tokens', None) or getattr(ctx, 'numeric_assignments', None)):
-        from pyfront import Unsupported
-        raise Unsupported('%s() mixes int and float bindings, which the tagged-int lowering does not cover'
-                          % fn.name)
     # B2b: a function whose ints are not locally proven needs the IR's tagged-int lowering. If the
     # IR cannot lower it, the typed path must not fall back to the legacy int64 emitter: raise so
     # pyc.build tries the exact general path.
@@ -199,6 +195,11 @@ def _apply(P, args, kwargs, result, current):
         isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
         and (getattr(P, 'TINT_SIGS', {}).get(n.func.id) or ((), 0))[1]
         for n in ast.walk(fn))
+    if _py and _needs_tint and _no_tint_locals and not _has_tint_call \
+            and not (_proof or '').startswith(('it calls ', 'it contains ', 'a call of int()', 'a call of float()')):
+        from pyfront import Unsupported
+        raise Unsupported('%s() has an int operation the local proof cannot bound, but no tagged local (%s)'
+                          % (fn.name, _proof))
     _sig = getattr(P, 'TINT_SIGS', {}).get(fn.name) if _py else None
     if _sig and (any(_sig[0]) or _sig[1]) and not _io_like:
         _needs_tint = True
@@ -263,10 +264,17 @@ def _apply(P, args, kwargs, result, current):
     except lower.NotS0 as reason:
         _record(fn.name, cname, 'legacy', str(reason), ctx, extra=_legacy_walias(P, fn, ctx))
         _tinted_sig = bool(_sig and (any(_sig[0]) or _sig[1]))
+        # Only an int-precision refusal needs the exact general path (int64 is not enough). A
+        # structural refusal (ownership, a try in a loop, a list parameter) leaves THIS function on
+        # the legacy emitter and lets the rest of the program stay IR.
         _int_reason = any(mark in str(reason) for mark in (
+            'a method',
             'bit operation on an unproven int',
             'a range loop with a tagged start or step needs a tagged index',
-            'int-or-float bindings'))
+            'integer literal out of range',
+            'overflow',
+            'a power',
+        ))
         if _needs_tint and _int_reason \
                 and not fn.name.startswith(('_Ail', '_ail')) \
                 and not os.environ.get('AIL_NO_GENERAL'):

@@ -250,8 +250,8 @@ class Lowering(TextLowering):
         # bound is an `ail_tint`; the entry keeps its plain int64 result (converted at each return).
         _tint_on = os.environ.get('AIL_SURFACE') == 'python' and not getattr(P, 'TINT_DISABLED', False)
         self.tint_sig = getattr(P, 'TINT_SIGS', {}).get(fn.name, ((), 0)) if _tint_on else ((), 0)
-        if self.cname in ('run', 'py_main'):
-            self.tint_sig = ((), 0)      # the C harness prints the entry result as an int64
+        if self.cname == 'run':
+            self.tint_sig = ((), 0)      # the C harness prints run()'s result as an int64
         self.tint_params = set(n for (n, _), t in zip(ctx.params, self.tint_sig[0]) if t)
         self.tint_result = bool(self.tint_sig[1])
         try:
@@ -334,6 +334,7 @@ class Lowering(TextLowering):
                     return False
                 return False
             return True
+        _range_tint_targets = set()
         for _n in ast.walk(fn):
             if isinstance(_n, ast.For) and isinstance(_n.target, ast.Name) \
                     and isinstance(_n.iter, ast.Call) and isinstance(_n.iter.func, ast.Name) \
@@ -344,7 +345,19 @@ class Lowering(TextLowering):
                 _step = _args[2] if len(_args) == 3 else None
                 if _may_tint(_lo) or _may_tint(_hi) or _may_tint(_step):
                     self.tint_names.add(_n.target.id)
+                    _range_tint_targets.add(_n.target.id)
                 # A name that another loop needs tagged stays tagged: one place has one type.
+        for _n in ast.walk(fn):
+            # `for v in [0, 5, -5]` is an int64 counted loop over literals; the element place is int64
+            # unless the same name is also the index of a tagged range loop.
+            if isinstance(_n, ast.For) and isinstance(_n.target, ast.Name) \
+                    and isinstance(_n.iter, ast.List) and _n.iter.elts \
+                    and all((isinstance(e, ast.Constant) and type(e.value) is int)
+                            or (isinstance(e, ast.UnaryOp) and isinstance(e.op, ast.USub)
+                                and isinstance(e.operand, ast.Constant) and type(e.operand.value) is int)
+                            for e in _n.iter.elts) \
+                    and _n.target.id not in _range_tint_targets:
+                self.tint_names.discard(_n.target.id)
         if ret_kind == 'bytearray':
             results = [BYTEARRAY]       # the owner's reference is handed to the caller (retained at the return)
         elif ret_kind == P.NORET:
@@ -578,7 +591,10 @@ class Lowering(TextLowering):
             t = self.function.results[0]
             if is_list(t) or t == BYTEARRAY or t in (I.STRV, BYTES):
                 raise NotS0('a function returning a container or text that can fall off its end')
-            self.b.emit('return', [self.const(t, 0.0 if t == I.F64 else 0)])
+            if t == TINT:
+                self.b.emit('return', [self.b.value('tint.from', [self.const(I.I64, 0)], TINT)])
+            else:
+                self.b.emit('return', [self.const(t, 0.0 if t == I.F64 else 0)])
         else:
             self.b.emit('return', [])
 
@@ -2366,6 +2382,16 @@ class Lowering(TextLowering):
         if tint and isinstance(op, (ast.BitAnd, ast.BitOr, ast.BitXor)):
             name = {ast.BitAnd: 'and', ast.BitOr: 'or', ast.BitXor: 'xor'}[type(op)]
             return self.b.value('tint.' + name, [self.coerce(left, TINT), self.coerce(right, TINT)], TINT)
+        if not tint and isinstance(op, (ast.LShift, ast.RShift)):
+            # A constant shift whose result leaves int64 is exact only as a tagged int (`1 << 100`).
+            _lv = self._const_int_value(left)
+            _rv = self._const_int_value(right)
+            if _lv is not None and _rv is not None and 0 <= _rv < (1 << 20):
+                _cv = _lv << _rv if isinstance(op, ast.LShift) else _lv >> _rv
+                if not -(1 << 63) <= _cv < (1 << 63):
+                    _name = 'shl' if isinstance(op, ast.LShift) else 'shr'
+                    return self.b.value('tint.' + _name,
+                                        [self.coerce(left, TINT), self.coerce(right, TINT)], TINT)
         floating = I.F64 in (left.type, right.type)
         if isinstance(op, ast.Div):
             return self.b.value('fdiv', [self.coerce(left, I.F64), self.coerce(right, I.F64)], I.F64)
@@ -2594,7 +2620,7 @@ class Lowering(TextLowering):
         if f == 'int' and len(args) == 1:
             v = self.expr(args[0])
             if v.type == I.STRV:
-                return self.rt('str_to_int', [v])
+                return self.rt('str_to_tint', [v])
             if v.type == BYTES:
                 return self.rt('bytes_to_int', [v])
             if v.type == I.F64:

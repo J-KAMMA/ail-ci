@@ -594,7 +594,8 @@ class LICM(object):
         if lower is not None:
             c = emit('const', [], I.I64, {'value': lower})
             if lo.type == I.TINT:
-                conds.append(emit('tint.le_i64', [c, lo], I.I1))
+                # lo >= lower, as a tint comparison (`tint.le` takes two tints)
+                conds.append(emit('tint.le', [emit('tint.from', [c], I.TINT), lo], I.I1))
             else:
                 conds.append(emit('cmp.ge', [lo, c], I.I1))
         for base, k in upper.items():
