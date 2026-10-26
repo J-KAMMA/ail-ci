@@ -2188,6 +2188,20 @@ and raises `OverflowError` / `ValueError` for infinity / NaN. Those three conver
 back to the run-time formatter (`safetyrt.FMT`) unless the argument is provably an `int` or
 `bool`; widths, signs, `%%`, ints/bools, and values through an argument, list item, attribute and
 dict value are covered by `AIL_CURRENT/test_ail_pre68.py` (2 programs, both builds).
+## 2026-10-24 - pre70: a run-time None separator splits on whitespace
+
+`str.split`/`str.rsplit` only recognised a `None` separator that was a source literal.
+A None reaching the call through a variable, a list item, a dict value, an attribute or
+a function argument was read as an empty string separator, so both builds raised
+`ValueError: empty separator` where CPython splits on whitespace (`.split(sep)` with
+`sep = None` is `.split()`). The object-level helpers in
+`python/pkg-v12/cruntime.py` (`ail_meth_str_split`, `ail_meth_str_rsplit`,
+`ail_str_split_sep`, `ail_str_split_sep_into`) now switch to the whitespace mode when
+the separator is the None object; this also covers the pooled `x = recv.split(sep)`
+assignment path. Non-str separators still raise CPython's TypeError and `sep=""` still
+raises ValueError. `test_ail_pre70.py` keeps the variable/list/dict/attribute/argument
+cases and maxsplit 0/1/-1/-2/100, empty and whitespace receivers compared with CPython
+on both builds.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
