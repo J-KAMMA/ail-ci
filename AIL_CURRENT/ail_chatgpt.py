@@ -673,6 +673,28 @@ def _constant_text(node, known_text, known_int, known_containers=None):
         return node.value
     if isinstance(node, ast.Name) and node.id in known_text:
         return known_text[node.id]
+    if isinstance(node, ast.Attribute):
+        fields = []
+        base = node
+        while isinstance(base, ast.Attribute):
+            field = re.fullmatch(r'f(\d+)', base.attr)
+            if field is None:
+                break
+            fields.append(int(field.group(1)))
+            base = base.value
+        if (fields and isinstance(base, ast.Call) and isinstance(base.func, ast.Name)
+                and base.func.id.startswith('_AilT_') and not base.keywords):
+            value_node = base
+            for index in reversed(fields):
+                if (not isinstance(value_node, ast.Call) or not isinstance(value_node.func, ast.Name)
+                        or not value_node.func.id.startswith('_AilT_') or value_node.keywords
+                        or index >= len(value_node.args)
+                        or any(isinstance(arg, ast.Starred) for arg in value_node.args)):
+                    value_node = None
+                    break
+                value_node = value_node.args[index]
+            if value_node is not None:
+                return _constant_text(value_node, known_text, known_int, known_containers)
     if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice):
         if isinstance(node.value, ast.Name):
             container = (known_containers or {}).get(node.value.id)
@@ -718,9 +740,10 @@ def _constant_text(node, known_text, known_int, known_containers=None):
 
 
 def _check_int64_int_base_constants(tree):
-    """Refuse `int(<constant str>, <constant base>)` when the parsed value leaves int64.
+    """Refuse `int(<constant text>[, <constant base>])` when the parsed value leaves int64.
     AIL ints are fixed width, so the conversion would stop with `integer overflow` where
-    CPython keeps the bignum; a value that fits keeps its run-time parse."""
+    CPython keeps the bignum; a value that fits keeps its run-time parse.  A call with no
+    explicit base uses CPython's base 10."""
     bound = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -803,13 +826,18 @@ def _check_int64_int_base_constants(tree):
         elif (len(node.args) == 1 and len(node.keywords) == 1
               and node.keywords[0].arg == 'base'):
             text_node, base_node = node.args[0], node.keywords[0].value
+        elif len(node.args) == 1 and not node.keywords:
+            text_node, base_node = node.args[0], None
         else:
             continue
         if isinstance(text_node, ast.Starred):
             continue
-        base = _constant_int(base_node, known_int)
-        if base is None or base != 0 and not 2 <= base <= 36:
-            continue
+        if base_node is None:
+            base = 10
+        else:
+            base = _constant_int(base_node, known_int)
+            if base is None or base != 0 and not 2 <= base <= 36:
+                continue
         text = _constant_text(text_node, known_text, known_int, known_containers)
         if text is None:
             continue
