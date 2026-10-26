@@ -1459,6 +1459,24 @@ static inline ail_st ail2g_close(ail_ctx *cx, ail_obj *out, ail_obj inst) {
     }
     return st;
 }
+/* Close value when it is a suspended generator; any other value is left alone.  an
+   any()/all() that stops at a deciding element drops its iterator, and CPython's
+   generator deallocation then runs the generator's finally cleanup; this is the
+   general path's equivalent for a generator-function iterable.  The hidden handle
+   names the generator entry, so an unrelated instance is never closed. */
+static inline ail_st ail2g_close_value(ail_ctx *cx, ail_obj value) {
+    if ((value.tag != AIL_T_INST && value.tag != AIL_T_EXC) || !ail2g_id_h) return AIL_OK;
+    ail_instobj *o = (ail_instobj *)value.o;
+    for (int64_t i = 0; i < o->n; i++) if (o->attrs[i].name_id == ail2g_id_h) {
+        ail_obj h = o->attrs[i].val;
+        if (h.tag != AIL_T_INT || h.i < 0 || h.i >= ail2g_n || !ail2g_tab[h.i]) return AIL_OK;
+        ail2g *g = ail2g_tab[h.i];
+        if (g->inst != value.o || g->state == AIL2G_DONE || g->state == AIL2G_RUNNING) return AIL_OK;
+        ail_obj ignored;
+        return ail2g_close(cx, &ignored, value);
+    }
+    return AIL_OK;
+}
 static inline ail_st ail2g_name(ail_ctx *cx, ail_obj *out, ail_obj inst) {
     ail2g *g; ail_st st = ail2g_of(cx, inst, &g);
     if (st != AIL_OK) return st;

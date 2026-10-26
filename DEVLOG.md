@@ -1,3 +1,21 @@
+## 2026-10-26 -- any()/all() close a generator iterable at the deciding element (job-pre268-10262135)
+
+Fixed the pre-existing r89 difference from the pre42 lineage: the non-fused `any()`/`all()`
+path stopped at the deciding element but only dropped its iterator, so a generator-function
+iterable's `finally` block never ran, while CPython closes the generator when the consumer
+drops its reference.  `pyboxed2._any_all` now records the generic-path iterable source and
+emits `ail2g_close_value` after the loop for a fresh generator call, a parameter (the
+`take(g())` shape) or a fused generator-expression iterable; the helper in `safetyrt.GEN`
+looks the object up by its hidden generator handle and closes only a suspended generator, so
+a Name local, list item, attribute or dict value that keeps an external reference is not
+closed early (CPython keeps it open too), and an exhausted generator is a no-op.  The fused
+path collects each clause's source through `_emit_comp_generators`/`_open_iter_loop`.
+`test_ail_pre268.py` (4 tests, both builds) covers direct, fused, filtered and argument
+routes, empty/raising generators, kept local/list/attribute/dict references and a
+non-generator control; `p268_*` probes in `/tmp/probes` match CPython on both builds.
+Added one DIFFERENCES row; a generator abandoned without being consumed still has no
+interpreter-exit cleanup, which is outside this change.
+
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is

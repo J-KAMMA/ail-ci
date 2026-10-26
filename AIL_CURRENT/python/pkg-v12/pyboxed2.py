@@ -3815,13 +3815,15 @@ class Compiler(boxclosure.ClosureMixin):
         if self.threads and not ctx.fname.lower().startswith(('pf__ail', 'pm__ail')):
             ctx.emit('AIL_GIL_CHECK(cx);')
 
-    def _open_iter_loop(self, iter_node, ctx, opened=None):
+    def _open_iter_loop(self, iter_node, ctx, opened=None, closers=None):
         """Emit the iterable evaluation + `for (;;) {` head of an iteration loop.
         Returns the tmp holding each element. Uses an indexed loop for
         containers whose kind is proven (no 112B iterator object and no
         per-element call); everything else takes the generic
         ail_iter/ail_it_next path unchanged. `opened` is an already-created
-        iterator (next() opens the outermost one before its default runs)."""
+        iterator (next() opens the outermost one before its default runs).
+        `closers`, when given, collects the source expression of the generic
+        path so an early-exit any()/all() can close a generator iterable."""
         if opened is not None:
             val = ctx.tmp()
             ctx.emit('for (;;) {')
@@ -3891,6 +3893,8 @@ class Compiler(boxclosure.ClosureMixin):
                      ' %s = ail_str_view(_s.sv.backing, _s.sv.off + %s, 1); %s++; }'
                      % (it, idx, val, idx, idx))
             return val
+        if closers is not None:
+            closers.append(src)
         ctx.emit('st = ail_iter(cx, &%s, %s);' % (it, src))
         ctx.check()
         ctx.emit('for (;;) {')
@@ -5408,20 +5412,23 @@ class Compiler(boxclosure.ClosureMixin):
         self._emit_comp_generators(node.generators, 0, node, ctx, t, add_stmt_fn, set())
         return t
 
-    def _emit_comp_generators(self, generators, i, node, ctx, t, add_stmt_fn, declared, opened=None):
+    def _emit_comp_generators(self, generators, i, node, ctx, t, add_stmt_fn, declared, opened=None,
+                              closers=None):
         if i == len(generators):
             add_stmt_fn(node, ctx, t)
             return
         gen = generators[i]
         if gen.is_async:
             raise Unsupported('an async for in a comprehension')
-        val = self._open_iter_loop(gen.iter, ctx, opened)
+        close_here = closers if self._generator_cleanup_source(gen.iter, ctx) else None
+        val = self._open_iter_loop(gen.iter, ctx, opened, close_here)
         self._declare_comp_target(gen.target, val, ctx, declared)
         for cond in gen.ifs:
             cc = self.expr(cond, ctx)
             ctx.emit('if (ail_obj_truthy(%s)) {' % cc)
             ctx.indent += 1
-        self._emit_comp_generators(generators, i + 1, node, ctx, t, add_stmt_fn, declared)
+        self._emit_comp_generators(generators, i + 1, node, ctx, t, add_stmt_fn, declared,
+                                   closers=closers)
         for cond in gen.ifs:
             ctx.indent -= 1
             ctx.emit('}')
@@ -8173,6 +8180,25 @@ class Compiler(boxclosure.ClosureMixin):
             return None
         return (g.iter, lo, hi)
 
+    def _generator_cleanup_source(self, node, ctx):
+        """The iterable expressions whose generator cleanup an early any()/all() must run.
+
+        A fresh `g()` result is owned by the call, so dropping it closes it in CPython.  A
+        parameter is owned by the current activation; closing it when the activation returns
+        is CPython's behaviour for the usual `take(g())` shape.  A Name local, attribute,
+        subscript or other expression can keep an external reference (an alias, a list item,
+        an attribute or a dict value), so it is left alone: CPython does not close it either
+        while that reference lives."""
+        if isinstance(node, ast.Call):
+            f = node.func
+            if isinstance(f, ast.Name):
+                return bool((self.functions.get(f.id) or {}).get('generator'))
+            if isinstance(f, ast.Attribute):
+                return any((c['methods'].get(f.attr) or {}).get('generator')
+                           for c in self.classes.values())
+            return False
+        return isinstance(node, ast.Name) and node.id in getattr(ctx, 'fn_params', ())
+
     def _any_all(self, name, args, kwargs, ctx):
         if len(args) != 1 or kwargs:
             raise Unsupported('%s() with other than exactly one argument' % name)
@@ -8193,6 +8219,7 @@ class Compiler(boxclosure.ClosureMixin):
             # The two -> bool is still computed in evaluation order; the `goto` leaves every
             # enclosing comprehension loop, so later elements (and their side effects) do not run.
             done = ctx.new_label('any' if name == 'any' else 'all')
+            closers = []
 
             def add(n, c, _t):
                 v = self.expr(n.elt, c)
@@ -8200,8 +8227,12 @@ class Compiler(boxclosure.ClosureMixin):
                     c.emit('if (ail_obj_truthy(%s)) { %s = ail_box_bool(1); goto %s; }' % (v, res, done))
                 else:
                     c.emit('if (!ail_obj_truthy(%s)) { %s = ail_box_bool(0); goto %s; }' % (v, res, done))
-            self._emit_comp_generators(arg.generators, 0, arg, ctx, res, add, set())
+            self._emit_comp_generators(arg.generators, 0, arg, ctx, res, add, set(), closers=closers)
             ctx.emit('%s: ;' % done)
+            if self.generators:
+                for src in closers:
+                    ctx.emit('st = ail2g_close_value(cx, %s);' % src)
+                    ctx.check()
             return res
         src = self._resolve_iter_src(arg, ctx)
         it = ctx.tmp(); val = ctx.tmp()
@@ -8218,6 +8249,9 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('if (!ail_obj_truthy(%s)) { %s = ail_box_bool(0); break; }' % (val, res))
         ctx.indent -= 1
         ctx.emit('}')
+        if self.generators and self._generator_cleanup_source(arg, ctx):
+            ctx.emit('st = ail2g_close_value(cx, %s);' % src)
+            ctx.check()
         return res
 
     def _b_abs(self, args, kwargs, ctx):
