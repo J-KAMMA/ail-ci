@@ -66,6 +66,29 @@ for name in ('xs', 'ys', 'zs'):
 print(box.xs, box.ys, box.zs)
 '''
 
+CAUGHT_NO_TEXT = '''def attempt(xs, i):
+    try:
+        del xs[i]
+    except IndexError:
+        print("caught", xs)
+
+attempt([], 0)
+attempt([1, 2, 3], 9)
+attempt([1, 2, 3], -9)
+
+class C:
+    def __init__(self):
+        self.i = [1, 2, 3]
+        self.f = [1.5, 2.5]
+        self.s = ['a', 'b']
+
+c = C()
+attempt(c.i, 9)
+attempt(c.f, 9)
+attempt(c.s, 9)
+print(c.i, c.f, c.s)
+'''
+
 IN_RANGE = '''a = list(range(6))
 del a[1]
 del a[-1]
@@ -159,6 +182,11 @@ class DeleteIndexMessage(unittest.TestCase):
 
     def test_caught_delete_text_and_routes_match(self):
         for where, expected, ran in self.run_both(CAUGHT):
+            self.assertEqual(ran.returncode, expected.returncode, where + ':\n' + ran.stderr)
+            self.assertEqual(ran.stdout, expected.stdout, where)
+
+    def test_caught_delete_without_reading_text(self):
+        for where, expected, ran in self.run_both(CAUGHT_NO_TEXT):
             self.assertEqual(ran.returncode, expected.returncode, where + ':\n' + ran.stderr)
             self.assertEqual(ran.stdout, expected.stdout, where)
 

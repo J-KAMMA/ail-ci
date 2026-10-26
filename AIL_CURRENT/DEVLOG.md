@@ -1,3 +1,13 @@
+## 2026-10-26 -- pre272 review fix: keep out-of-range `del` catchable without reading text
+
+The review found that the new `list assignment index out of range` trap was only mapped to
+`AIL_EXC_INDEX` by the `exctext` patch, so on the default build a `try/except IndexError` around
+an out-of-range `del` that did not read `str(e)`/`e.args` aborted uncatchably.  Added the message
+to the base `ail_exc_kind_of()` index mapping (the now-redundant `exctext` edit was removed) and
+added a catch-without-text case to `test_ail_pre272.py` covering an empty list, int/float/str
+list fields, an argument, a list item, a dict value and an attribute.  Probes
+`/tmp/probes/fix_*.py` (5 programs) all match CPython on both builds.
+
 ## 2026-10-26 -- pre272: `del` out-of-range says CPython's list assignment text (job-pre272-10262304)
 
 The rbpre19 pre-existing constant `del` bounds (`2**63-1`, `2**100000`, `2**100:2**101`, and the

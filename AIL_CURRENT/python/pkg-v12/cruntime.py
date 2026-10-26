@@ -547,7 +547,8 @@ static int ail_exc_kind_of(const char *w) {
         return AIL_EXC_VALUE;
     if (!strcmp(w, "division by zero") || !strcmp(w, "integer division by zero")
         || !strcmp(w, "integer modulo by zero")) return AIL_EXC_ZERODIV;
-    if (!strcmp(w, "list index out of range") || !strcmp(w, "pop index out of range")
+    if (!strcmp(w, "list index out of range") || !strcmp(w, "list assignment index out of range")
+        || !strcmp(w, "pop index out of range")
         || !strcmp(w, "pop from empty list") || !strcmp(w, "grid row index out of range")
         || !strcmp(w, "grid column index out of range") || !strcmp(w, "bytes index out of range")
         || !strcmp(w, "string index out of range"))
