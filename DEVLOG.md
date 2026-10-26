@@ -1,3 +1,15 @@
+## 2026-10-26 - pre75: itertools negative r (job-pre75-10241832)
+
+`itertools.permutations` / `combinations` / `combinations_with_replacement` on the general
+path returned `[]` for a negative `r`; CPython consumes the iterable and then raises
+`ValueError: r must be non-negative`. The runtime helpers now raise it, and the default
+build's `list(...)` collection of the same shape no longer emits invalid C: a negative `r`
+literal is refused by name at compile time on both builds, while a non-literal negative
+`r` (argument, list item, attribute, dict value) raises the ValueError on both. Added
+`AIL_CURRENT/test_ail_pre75.py`; probes are in `/tmp/probes/pre75_*.py`. The pre137 catch/order
+program now passes its direct negative `r` through a computed value, because that literal is
+refused at compile time; its runtime and pool-order checks are unchanged.
+
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is
