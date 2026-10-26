@@ -2275,6 +2275,12 @@ class Compiler(boxclosure.ClosureMixin):
         _untuple_records(tree)                                      # the tuple pass's _AilT_ records are tuples again
         self._add_notimplemented(tree)                              # NotImplemented (safetyrt.patch_notimplemented)
         self._dataclass_methods(tree)                               # a @dataclass's __eq__ (and __hash__ when frozen)
+        import withlib
+        from stdlib4 import Refused as _WithRefused
+        try:
+            withlib.refuse_with_yield(tree)                        # before G7 removes `with open`
+        except _WithRefused as exc:
+            raise Unsupported(exc.text)
         filelib.rewrite_tree(tree, Unsupported, general=True)      # G7: open / with / os -> primitives + prelude
         mix_tree = copy.deepcopy(tree)          # the mixed-mode typed clones see the source as written
         mix_tree.body = [n for n in mix_tree.body if not getattr(n, '_ail_safety', False)]
