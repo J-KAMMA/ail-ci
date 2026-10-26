@@ -1,3 +1,30 @@
+## 2026-10-26 -- pre304: class-body names are visible to later attributes (job-pre304-10270748)
+
+The first pre-existing difference in the rbrbfuzz28 review was a class-body comprehension that
+reads an earlier class attribute: `class C: x = 3; ys = [i for i in range(x)]` stopped with
+`name 'x' is not defined` when `ys` was read through an instance or through `C()`, and the
+inherited and empty-comprehension cases refused too.  pyboxed2 now keeps the class body's earlier
+assignments in a temporary name map (name -> the attribute's module slot) while it compiles each
+attribute value, including the lazy `_class_attr_value` fallback and the `C.attr` read.  Only a
+comprehension's outermost iterable sees the map, as in CPython: the comprehension body runs in
+its own scope, so a class name there still reads a module global of the same name, or is refused
+by name when there is none.  Duplicate assignments, a later class definition that uses the outer
+global first, aliases and arithmetic, sources through a list item, a dict value and an instance
+attribute, inheritance and overriding, and class/instance/method reads all match CPython.
+
+Added `AIL_CURRENT/test_ail_pre304.py` (2 tests, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`; DIFFERENCES row
+`C?-job-pre304-10270748-1`.  Probes in `/tmp/probes`: `pre304_inst`, `pre304_call`,
+`pre304_instance_read`, `pre304_inherit`, `pre304_inherit_call`, `pre304_empty`, `pre304_comps`,
+`pre304_shadow_global`, `pre304_comp_body_global`, `pre304_arith`, `pre304_dup`,
+`pre304_later`, `pre304_routes`, `pre304_args`, `pre304_negative_bool`, `pre304_nested`,
+`pre304_class_read`, `pre304_alias`, `pre304_method`, `pre304_override` and `pre304_plain` match
+CPython on both builds; `pre304_comp_body_noglobal` is refused by name on both builds.
+Final-state tests: `test_ail_pre304`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` (4 modules, 275 s, 0 failed), plus `test_ail_pre279`,
+`test_ail_pre283`, `test_ail_fuzz29`, `test_ail_dunders`, `test_ail_typed_inherit` and
+`test_ail_virtual_dispatch` (6 modules, 191 s, 0 failed).  `tools/update_manifest.py --check`
+passes.
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's

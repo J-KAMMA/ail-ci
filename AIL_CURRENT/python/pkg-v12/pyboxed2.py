@@ -1812,6 +1812,7 @@ class Ctx:
         self.closure_defs = set()  # nested defs of this body that are function values
         self.qualname = ''         # CPython's __qualname__ of the function being compiled
         self.self_name = None      # set for a method: its own first parameter's name
+        self.class_locals = None   # class body name -> module slot, while a class attribute expression is compiled
 
     def emit(self, line):
         if self.where is not None:
@@ -4867,6 +4868,13 @@ class Compiler(boxclosure.ClosureMixin):
     def expr_Name(self, node, ctx):
         if node.id in ('True', 'False'):
             return 'ail_box_bool(%d)' % (1 if node.id == 'True' else 0)
+        if ctx.class_locals and node.id in ctx.class_locals:
+            # A class body's own earlier binding wins over a module global of the same name
+            # (CPython runs the class body in its own namespace); this map is only active for
+            # the class-scope parts of a class attribute expression -- see _init_class_attrs.
+            t = ctx.tmp()
+            ctx.emit('%s = g_slots_arr[%d];' % (t, ctx.class_locals[node.id]))
+            return t
         if (node.id in self.classes and node.id not in self.module_names
                 and node.id not in ctx.slot_of and node.id not in ctx.ptr_names
                 and node.id not in ctx.clo_index and node.id not in ctx.free_names
@@ -5619,7 +5627,7 @@ class Compiler(boxclosure.ClosureMixin):
             owner, hit = self._class_chain_definition(cname, node.attr)
             if hit is not None and (direct or hit[0] in ('m', 'p')):
                 if hit[0] == 'a':
-                    return self._cached_class_attr(hit[3], hit[2], ctx)
+                    return self._cached_class_attr(hit[3], hit[2], ctx, owner)
                 raise Unsupported("reading %s %s.%s through a class value" %
                                   ('property' if hit[0] == 'p' else 'method', owner, node.attr))
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
@@ -5751,7 +5759,11 @@ class Compiler(boxclosure.ClosureMixin):
     def _emit_comp(self, node, ctx, init_c, add_stmt_fn):
         t = ctx.tmp()
         ctx.emit('%s = %s;' % (t, init_c))
-        self._emit_comp_generators(node.generators, 0, node, ctx, t, add_stmt_fn, set())
+        saved = ctx.class_locals
+        try:
+            self._emit_comp_generators(node.generators, 0, node, ctx, t, add_stmt_fn, set())
+        finally:
+            ctx.class_locals = saved
         return t
 
     def _emit_comp_generators(self, generators, i, node, ctx, t, add_stmt_fn, declared, opened=None):
@@ -5762,6 +5774,10 @@ class Compiler(boxclosure.ClosureMixin):
         if gen.is_async:
             raise Unsupported('an async for in a comprehension')
         val = self._open_iter_loop(gen.iter, ctx, opened)
+        if i == 0:
+            # CPython evaluates a comprehension's outermost iterable in the enclosing scope but
+            # runs the rest in a function of its own, which cannot see the class body's names.
+            ctx.class_locals = None
         self._declare_comp_target(gen.target, val, ctx, declared)
         for cond in gen.ifs:
             cc = self.expr(cond, ctx)
@@ -6592,11 +6608,28 @@ class Compiler(boxclosure.ClosureMixin):
             seen += 1
         return name in EXC_IDS
 
+    def _class_attr_locals(self, cname, slot):
+        """The names an earlier class-body assignment bound before attribute `slot` of `cname`."""
+        out = {}
+        for aname, _aval, aslot in self.classes.get(cname, {}).get('class_attrs', []):
+            if aslot == slot:
+                break
+            out[aname] = aslot
+        return out
+
     def _init_class_attrs(self, name, ctx):
         """Evaluate a class body's attributes once, at its class-definition statement."""
-        for _aname, aval, slot in self.classes[name].get('class_attrs', []):
-            v = self.expr(aval, ctx)
-            ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
+        saved = ctx.class_locals
+        try:
+            for _aname, aval, slot in self.classes[name].get('class_attrs', []):
+                # The class body runs in its own namespace: an earlier attribute is visible to a
+                # later one (and, for a comprehension, to its outermost iterable only).  Bind the
+                # name after evaluating the value, as CPython does, so `x = x + 1` reads the outer x.
+                ctx.class_locals = self._class_attr_locals(name, slot)
+                v = self.expr(aval, ctx)
+                ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
+        finally:
+            ctx.class_locals = saved
         if name in self.module_names:
             # A module-level assignment to the class name (before or after the definition, or a
             # `global` declaration) rebinds the module slot: do that binding HERE, at the
@@ -6605,21 +6638,27 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('g_slots_arr[%d] = g_slots_arr[%d];' %
                      (self._module_global_slot(name), self.global_slots['class:' + name]))
 
-    def _class_attr_value(self, slot, value, ctx):
+    def _class_attr_value(self, slot, value, ctx, cname=None):
         """The one shared value of a class attribute, filling the slot lazily only when the module
         body did not run (the array-entry shape, where there is no executable module statement)."""
         if value is not None:
             ctx.emit('if (g_slots_arr[%d].tag == AIL_T_UNBOUND) {' % slot)
             ctx.indent += 1
-            v = self.expr(value, ctx)
+            saved = ctx.class_locals
+            if cname is not None:
+                ctx.class_locals = self._class_attr_locals(cname, slot)
+            try:
+                v = self.expr(value, ctx)
+            finally:
+                ctx.class_locals = saved
             ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
             ctx.indent -= 1
             ctx.emit('}')
         return 'g_slots_arr[%d]' % slot
 
-    def _cached_class_attr(self, slot, value, ctx):
+    def _cached_class_attr(self, slot, value, ctx, cname=None):
         """Read a class attribute through the class object, not through an instance."""
-        v = self._class_attr_value(slot, value, ctx)
+        v = self._class_attr_value(slot, value, ctx, cname)
         t = ctx.tmp()
         ctx.emit('%s = %s;' % (t, v))
         return t
@@ -6642,7 +6681,7 @@ class Compiler(boxclosure.ClosureMixin):
         for kls in reversed(chain):
             for aname, aval, slot in self.classes[kls].get('class_attrs', []):
                 self.attr_names.add(aname)
-                v = self._class_attr_value(slot, aval, ctx)
+                v = self._class_attr_value(slot, aval, ctx, kls)
                 ctx.emit('ail_inst_setattr(cx, %s, g_attr_%s, %s);' % (t, aname, v))
         if info:
             argcs = self._bind_args(name, info, args, kwargs, ctx)
