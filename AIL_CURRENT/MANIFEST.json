@@ -1001,7 +1001,7 @@
     "ail_chatgpt.py": "30d9d4f7a0b8ab268df19fd50447d5965fc5ed5f17eec1350091ad9bd76abe90",
     "ail_sdk.py": "a83730d50ef012c406d66156891e8ae70266bf386e11eed7b0b1f2dab3e5d19b",
     "python/pkg-v12/pyfunc.py": "dad40a647a43692eb6d5432fe4b987c11696ebfb1c600eff354bf92b41404700",
-    "python/pkg-v12/SEMANTICS.md": "a309ecb9724201ddb6677fb61eb1235ac01649019d03f140ac89cdb6df513835",
+    "python/pkg-v12/SEMANTICS.md": "47b0b2d1c33bff7fa43e4dc2e76d245907ae7052db43c8423d1827cf3923acee",
     "test_ail_str_find_alias.py": "2dd4e33b572c730b22c452951de0afb632942917681dd8a4768a712eb54d3553",
     "ail_builtin_api.py": "1ec0d7b3092af502f0195cdee6d8cb11f82c078732cbb75d5c5c5f96721d5425",
     "test_ail_builtin_api.py": "f4ed0186a304be917c36526a5818b1d2b6561c7529698f79ce62cc9ac83b5686",
@@ -1233,10 +1233,10 @@
     "python/pkg-v12/prelude_calendar.py": "e29da6b48061dc44f1aa4e90c00af08d75d7cfcff32e385bded43b1ac52f32d8",
     "python/pkg-v12/prelude_chainmap.py": "eabcb0670c8f02aba4bb9d5d4c6adbb676e00cce2e54b7f4be5636cd4b45a848",
     "python/pkg-v12/prelude_enum.py": "7d3ab22f902a8e9ea252a24ee3ccc37efde3c0b6d94d3eac656909d0f86f8251",
-    "python/pkg-v12/prelude_fraction.py": "abbded518b2d6710c9dcf3c5f9c8160d43699ae33be47b5693a1938820bec6b5",
+    "python/pkg-v12/prelude_fraction.py": "eae9b7705182235d2a3c3179e1a0ddf67b9414466e00bc7068cc0c10c290b325",
     "python/pkg-v12/prelude_nt.py": "7df2a175e300106bf1bb32e79dbb167d17822a2458e98edb45e018d916032e40",
     "python/pkg-v12/prelude_ordereddict.py": "af3526dfc2cefc2dcfe6fa850dfe6004c4b76c5333c98de75ac66c7929be7347",
-    "python/pkg-v12/prelude_random.py": "ed677057fdbb091507b9d397c6a03835f9bd8b5bb092036dc13530e198b5ac7e",
+    "python/pkg-v12/prelude_random.py": "a183c3bd2da7ebb36eb82357af7d7cb027af9794494a469c09f6c1f5bbde4f20",
     "python/pkg-v12/prelude_stringio.py": "5fe6b8a6b54fa53898db2feebb5cbbcb27205ec84045730bd65ed9da70f815fb",
     "python/pkg-v12/randlib.py": "d6ef373dc68f0373f6f51286a29616819abe0f3a79165565d9e21089c4806161",
     "python/pkg-v12/smalllib5.py": "5c0f03f8ab0ee7e1acf560b2daccf6502e50500ccfd424bda334246d01cc5c0e",
@@ -1463,7 +1463,7 @@
     "test_ail_fuzz58.py": "88f96a903b4dec95610e02ebf1046ce3f9753d8cdbb1475d8215dae767ed8994",
     "test_ail_pre2.py": "c52e12219a6b0c42fc3f92863042e738215e35bd4903a8c3e1fe53af38fffbb4",
     "test_ail_pre29.py": "9ec5cdd27bdb568822b4f1bd3476171c6b7c83b4d5619d1934e84e53b07549cd",
-    "test_ail_pre273.py": "668d45b332d1a0700332d7cee78e91ba7b7bbfe259cb4aef4f139302acf9b0b2"
+    "test_ail_pre273.py": "a63216e853ad872f2bab0ce008cb826f7cff1fc75516940ef246c8bbf3f412ff"
   },
   "files": {
     "python/pkg-v12/pipeline.py": "d185d3cd067d1ca503f1fda8e2d8f415e93a0db26fbef6d4b919dd4c0b9a1251",
@@ -1535,7 +1535,7 @@
     "ail_chatgpt.py": "30d9d4f7a0b8ab268df19fd50447d5965fc5ed5f17eec1350091ad9bd76abe90",
     "ail_sdk.py": "a83730d50ef012c406d66156891e8ae70266bf386e11eed7b0b1f2dab3e5d19b",
     "python/pkg-v12/pyfunc.py": "dad40a647a43692eb6d5432fe4b987c11696ebfb1c600eff354bf92b41404700",
-    "python/pkg-v12/SEMANTICS.md": "a309ecb9724201ddb6677fb61eb1235ac01649019d03f140ac89cdb6df513835",
+    "python/pkg-v12/SEMANTICS.md": "47b0b2d1c33bff7fa43e4dc2e76d245907ae7052db43c8423d1827cf3923acee",
     "test_ail_str_find_alias.py": "2dd4e33b572c730b22c452951de0afb632942917681dd8a4768a712eb54d3553",
     "ail_builtin_api.py": "1ec0d7b3092af502f0195cdee6d8cb11f82c078732cbb75d5c5c5f96721d5425",
     "test_ail_builtin_api.py": "f4ed0186a304be917c36526a5818b1d2b6561c7529698f79ce62cc9ac83b5686",
@@ -1763,10 +1763,10 @@
     "python/pkg-v12/prelude_calendar.py": "e29da6b48061dc44f1aa4e90c00af08d75d7cfcff32e385bded43b1ac52f32d8",
     "python/pkg-v12/prelude_chainmap.py": "eabcb0670c8f02aba4bb9d5d4c6adbb676e00cce2e54b7f4be5636cd4b45a848",
     "python/pkg-v12/prelude_enum.py": "7d3ab22f902a8e9ea252a24ee3ccc37efde3c0b6d94d3eac656909d0f86f8251",
-    "python/pkg-v12/prelude_fraction.py": "abbded518b2d6710c9dcf3c5f9c8160d43699ae33be47b5693a1938820bec6b5",
+    "python/pkg-v12/prelude_fraction.py": "eae9b7705182235d2a3c3179e1a0ddf67b9414466e00bc7068cc0c10c290b325",
     "python/pkg-v12/prelude_nt.py": "7df2a175e300106bf1bb32e79dbb167d17822a2458e98edb45e018d916032e40",
     "python/pkg-v12/prelude_ordereddict.py": "af3526dfc2cefc2dcfe6fa850dfe6004c4b76c5333c98de75ac66c7929be7347",
-    "python/pkg-v12/prelude_random.py": "ed677057fdbb091507b9d397c6a03835f9bd8b5bb092036dc13530e198b5ac7e",
+    "python/pkg-v12/prelude_random.py": "a183c3bd2da7ebb36eb82357af7d7cb027af9794494a469c09f6c1f5bbde4f20",
     "python/pkg-v12/prelude_stringio.py": "5fe6b8a6b54fa53898db2feebb5cbbcb27205ec84045730bd65ed9da70f815fb",
     "python/pkg-v12/randlib.py": "d6ef373dc68f0373f6f51286a29616819abe0f3a79165565d9e21089c4806161",
     "python/pkg-v12/smalllib5.py": "5c0f03f8ab0ee7e1acf560b2daccf6502e50500ccfd424bda334246d01cc5c0e",
@@ -1993,6 +1993,6 @@
     "test_ail_fuzz58.py": "88f96a903b4dec95610e02ebf1046ce3f9753d8cdbb1475d8215dae767ed8994",
     "test_ail_pre2.py": "c52e12219a6b0c42fc3f92863042e738215e35bd4903a8c3e1fe53af38fffbb4",
     "test_ail_pre29.py": "9ec5cdd27bdb568822b4f1bd3476171c6b7c83b4d5619d1934e84e53b07549cd",
-    "test_ail_pre273.py": "668d45b332d1a0700332d7cee78e91ba7b7bbfe259cb4aef4f139302acf9b0b2"
+    "test_ail_pre273.py": "a63216e853ad872f2bab0ce008cb826f7cff1fc75516940ef246c8bbf3f412ff"
   }
 }

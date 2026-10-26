@@ -617,6 +617,10 @@ Two more findings from the same audit were recorded here and have since been fix
     the `pow()` path and still answers correctly -- only a variable one, whose sign cannot be
     settled in advance, is committed to the integer reading and enforces it.
 
+  The compiler-injected library preludes stay inside this subset too: `prelude_fraction.py`
+  scales with a multiplication loop and `prelude_random.py` reuses its computed `p`, so importing
+  `fractions` or `random` never meets the refusal above.
+
 They are written down here, with what was found and what changed, so that the next person can see
 the reasoning rather than rediscover the bug.
 

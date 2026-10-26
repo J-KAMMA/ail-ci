@@ -32,6 +32,22 @@ REFUSED = (
     ('base_ten', 'def main():\n    n = 30\n    print(10 ** n)\n\n\nmain()\n', 'constant base 10'),
 )
 
+FRACTION = r'''from fractions import Fraction
+
+
+def main():
+    print(Fraction(1, 2))
+    print(Fraction("1.25"))
+    print(Fraction("1e3"))
+    print(Fraction("1.25e-3"))
+    print(Fraction(3, 4) + Fraction(1, 8))
+    print(round(Fraction(1, 3), 2))
+
+
+main()
+'''
+
+
 SAFE = r'''def main():
     n = 5
     print(2 ** 10)
@@ -87,6 +103,15 @@ class Pre273(unittest.TestCase):
             for general in (False, True):
                 with self.subTest(general=general):
                     status, got, output = build_run(directory, SAFE, 'safe', general)
+                    self.assertEqual(status, 0, output)
+                    self.assertEqual(got, want.stdout.replace(b'\r\n', b'\n'), output)
+
+    def test_library_prelude_power_still_builds(self):
+        with tempfile.TemporaryDirectory(prefix='ail-pre273-') as directory:
+            want = subprocess.run([sys.executable, '-B', '-c', FRACTION], capture_output=True, timeout=120)
+            for general in (False, True):
+                with self.subTest(general=general):
+                    status, got, output = build_run(directory, FRACTION, 'fraction', general)
                     self.assertEqual(status, 0, output)
                     self.assertEqual(got, want.stdout.replace(b'\r\n', b'\n'), output)
 

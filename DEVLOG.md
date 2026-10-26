@@ -1,3 +1,20 @@
+## 2026-10-26 -- preludes avoid the refused variable-exponent power (job-pre273-10262306 review)
+
+The review found that `refuse_variable_int_pow` also saw compiler-injected library source:
+`prelude_fraction.py`'s `10 ** len(frac)` / `10 ** exp` / `10 ** abs(ndigits)` made every
+`from fractions import Fraction` program fail at compile time, and `test_ail_pre133` failed 2/3.
+The preludes now stay inside the subset the refusal describes: `prelude_fraction.py` scales
+through a new `_ail_fr_pow10` multiplication loop, and `prelude_random.py`'s `sample` adds the
+already-computed `p` instead of recomputing `4 ** m`. No refusal or runtime rule changed; a user
+program that writes `2 ** n` is still refused by name on both builds. Added a Fraction prelude
+case to `test_ail_pre273.py`; `test_ail_pre133` is back to 3/3.
+
+Probes in `/tmp/probes`: `pow_fraction_modern.py` (constructor from an int pair, decimal and
+exponent strings, arithmetic and `round` through the prelude's powers of ten) matches CPython on
+both builds; `pow_random_prelude.py` (the prelude's own `Random` class plus `sample` with k > 5)
+matches CPython on both builds. The earlier `pre273_*` probes still behave as recorded: the
+refused forms are refused by name and `bounds`/`safe`/`zero_neg` match CPython.
+
 ## 2026-10-26 -- computed exponent on a constant integer base is refused (job-pre273-10262306)
 
 The first still-differing item in the rbpre69 review was the variable-exponent power: `2 ** n`
