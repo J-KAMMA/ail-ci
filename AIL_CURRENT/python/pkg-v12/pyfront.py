@@ -171,8 +171,10 @@ def fold_int_constants(source):
     case where a *constant* is still a difference: emitting the arithmetic would stop at run time
     with `integer overflow` even when the outer expression, as in `-(-2)**63`, is what Python's
     unbounded int can represent. Folding also keeps `2**63 - 1` and `-2**63` correct by building
-    them as one literal instead of overflowing inside the expression. Non-constant expressions are
-    left exactly as written for the run-time guards.
+    them as one literal instead of overflowing inside the expression. INT64_MIN is always folded
+    as well, because the pipeline emitter cannot spell that one value as a unary minus safely.
+    Plain in-range arithmetic and non-constant expressions are left exactly as written, so the
+    typed/general path choice and the context-specific diagnostics still see them.
     """
     try:
         tree = ast.parse(source)
@@ -183,6 +185,40 @@ def fold_int_constants(source):
     for line in encoded.splitlines(keepends=True):
         starts.append(starts[-1] + len(line))
     edits = []
+    _too_large = object()
+    values = {}
+    inside = {}
+
+    def const_value(node):
+        key = id(node)
+        if key not in values:
+            try:
+                values[key] = _int_const_value(node)
+            except _IntConstTooLarge:
+                values[key] = _too_large
+        value = values[key]
+        if value is _too_large:
+            raise _IntConstTooLarge
+        return value
+
+    def overflows_inside(node):
+        """True when a nested constant expression is outside int64 while `node` itself may fit."""
+        key = id(node)
+        if key not in inside:
+            found = False
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.BinOp, ast.UnaryOp)):
+                    try:
+                        value = const_value(child)
+                    except _IntConstTooLarge:
+                        found = True
+                    else:
+                        if value is not None and not _INT64_MIN <= value <= _INT64_MAX:
+                            found = True
+                if not found and overflows_inside(child):
+                    found = True
+            inside[key] = found
+        return inside[key]
 
     def refuse(node):
         refusal = Unsupported(
@@ -193,35 +229,48 @@ def fold_int_constants(source):
         refusal.source_line = getattr(node, 'lineno', None)
         raise refusal
 
-    def is_maxsplit_argument(node, parent):
+    def is_maxsplit_argument(node, parent, grandparent):
         # The str.split/rsplit folder has its own, more specific refusal; leave that expression
         # to it so the existing maxsplit diagnostics are unchanged.
-        return (isinstance(parent, ast.Call) and isinstance(parent.func, ast.Attribute)
-                and parent.func.attr in ('split', 'rsplit')
-                and (node in parent.args[1:2]
-                     or any(k.arg == 'maxsplit' and k.value is node for k in parent.keywords)))
+        if isinstance(parent, ast.keyword) and isinstance(grandparent, ast.Call):
+            call, keyword = grandparent, parent
+        elif isinstance(parent, ast.Call):
+            call, keyword = parent, None
+        else:
+            return False
+        if not (isinstance(call.func, ast.Attribute) and call.func.attr in ('split', 'rsplit')):
+            return False
+        if keyword is not None:
+            return keyword.arg == 'maxsplit'
+        return node in call.args[1:2]
 
-    def visit(node, parent=None):
+    def visit(node, parent=None, grandparent=None):
         if isinstance(node, ast.JoinedStr):
             # An f-string's source text is observable in a debug field (`f"{expr=}"`), so leave
             # its expressions exactly as written; the emitters' own constant folders still run.
             return
         if isinstance(node, (ast.BinOp, ast.UnaryOp)):
-            if is_maxsplit_argument(node, parent):
+            if is_maxsplit_argument(node, parent, grandparent):
                 return
             try:
-                value = _int_const_value(node)
+                value = const_value(node)
             except _IntConstTooLarge:
                 refuse(node)
             if value is not None:
                 if not _INT64_MIN <= value <= _INT64_MAX:
                     refuse(node)
+                # Fold only when the arithmetic would overflow an int64 intermediate (as in
+                # `2**63 - 1`) or when the value itself does not fit (refused above). Ordinary
+                # in-range constants are left as written so the typed/general path choice and
+                # context-specific diagnostics that read the expression tree are unchanged.
+                if value != _INT64_MIN and not overflows_inside(node):
+                    return
                 start = starts[node.lineno - 1] + node.col_offset
                 end = starts[node.end_lineno - 1] + node.end_col_offset
                 edits.append((start, end, str(value).encode('ascii')))
                 return
         for child in ast.iter_child_nodes(node):
-            visit(child, node)
+            visit(child, node, parent)
 
     def identifier_byte(byte):
         return (48 <= byte <= 57 or 65 <= byte <= 90 or 97 <= byte <= 122
