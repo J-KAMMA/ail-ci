@@ -894,16 +894,20 @@ static void ail__key_error(ail_exarg a) {
 static void ail_key_error_i(int64_t k) { ail__key_error(ail_exarg_i(k)); }
 static void ail_key_error_s(const uint8_t *p, int64_t n) { ail__key_error(ail_exarg_s((ail_str){p, n, 0})); }
 static void ail_key_error_b(const uint8_t *p, int64_t n) { ail_exarg a = ail_exarg_s((ail_str){p, n, 0}); a.kind = 5; ail__key_error(a); }
-/* int(<str>) and float(<str>) on text that is not a number: CPython's ValueError and its wording */
-static void ail__exc_value_error(const char *head, ail_str s) {
+/* int(<str>) and float(<str>) on text that is not a number: CPython's ValueError and its wording.
+   `cap` is the %.200R precision int() uses (0 = the whole repr, as float() does). */
+static void ail__exc_value_error_cap(const char *head, ail_str s, int64_t cap) {
     ail_sarena A; memset(&A, 0, sizeof A);
-    ail_str parts[2] = {ail__exc_lit(head), ail_fmt_repr_str(&A, s)};
+    ail_str r = ail_fmt_repr_str(&A, s);
+    if (cap > 0) r = ail__str_points_head(r, cap);
+    ail_str parts[2] = {ail__exc_lit(head), r};
     ail_str m = ail_str_catn(&A, parts, 2);
     ail_exception *v = ail_exception_new(AIL_EXC_VALUE, m.p, m.n, m.bytes);
     ail_sarena_free(&A);
     ail_raise_value_adopt(v);
     __builtin_unreachable();
 }
+static void ail__exc_value_error(const char *head, ail_str s) { ail__exc_value_error_cap(head, s, 0); }
 /* CPython's strict UTF-8 decoder: where the first error is (start, end) and why */
 #define AIL__CONT(x) (((x) & 0xC0) == 0x80)
 static int ail__utf8_error(const unsigned char *b, int64_t nb, int64_t *start, int64_t *end, const char **reason) {
@@ -983,7 +987,7 @@ static void ail_exc_os_fail(int err, ail_str path) {
     ail_raise_value_adopt(ail_exception_new_oserr(AIL_EXC_OS, err, ail__exc_lit(why ? why : "Unknown error"), 1, path));
     __builtin_unreachable();
 }
-static void ail_exc_int_fail(ail_str s) { ail__exc_value_error("invalid literal for int() with base 10: ", s); }
+static void ail_exc_int_fail(ail_str s) { ail__exc_value_error_cap("invalid literal for int() with base 10: ", s, 200); }
 static void ail_exc_int_limit_fail(int64_t ndigits) {
     char text[192];
     int n = snprintf(text, sizeof text, "Exceeds the limit (4300 digits) for integer string conversion: value has %lld digits; use sys.set_int_max_str_digits() to increase the limit", (long long)ndigits);

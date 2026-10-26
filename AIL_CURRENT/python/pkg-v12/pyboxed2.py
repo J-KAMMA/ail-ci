@@ -1764,6 +1764,7 @@ class Ctx:
         self.global_decls = set()
         self.owner_class = None    # set for a method: the class it is defined on (for super())
         self.cell_slots = set()    # names whose frame slot holds a CELL (shared with a closure)
+        self.external_cells = set() # names whose slot holds a CELL owned by the enclosing activation
         self.clo_index = {}        # in a closure: captured name -> index of its CELL in `clo`
         self.free_names = set()    # in a nested def: the enclosing function's names it reads (copied in as locals)
         self.closure_defs = set()  # nested defs of this body that are function values
@@ -3383,19 +3384,29 @@ class Compiler(boxclosure.ClosureMixin):
         # it by value from the enclosing frame like any other free name; without it the read
         # would resolve to a module global of the same name, or fail to compile.
         hidden_defaults = {hidden for hidden, _ in default_inits}
-        free = sorted(((_free_reads(node.body, own_bound) | hidden_defaults) & set(outer_ctx.slot_of)) |
+        deep_free = set(boxclosure.free_names(node))
+        outer_names = set(outer_ctx.slot_of) | set(outer_ctx.clo_index)
+        free = sorted(((_free_reads(node.body, own_bound) | hidden_defaults | deep_free) &
+                       outer_names) |
                       (nonlocal_names & set(outer_ctx.slot_of)))
+        outer_cells = (set(outer_ctx.cell_slots) | set(outer_ctx.clo_index) |
+                       set(self.cell_hints.get(outer_ctx.fname, ())))
+        shared = (deep_free - nonlocal_names) & outer_names
+        need_cells = shared - outer_cells
+        if need_cells:
+            raise boxclosure.NeedCells(outer_ctx.fname, need_cells)
         for nm in nonlocal_names:
             if nm not in outer_ctx.slot_of:
                 raise Unsupported('nonlocal %s in nested def %s: no enclosing local of that '
                                   'name' % (nm, node.name))
         self.nested_n += 1
         cname = 'pn_%d_%s' % (self.nested_n, node.name)
-        by_ptr = [nm for nm in free if nm in nonlocal_names]
-        by_val = [nm for nm in free if nm not in nonlocal_names]
+        by_cell = [nm for nm in free if nm in outer_cells]
+        by_ptr = [nm for nm in free if nm in nonlocal_names and nm not in by_cell]
+        by_val = [nm for nm in free if nm not in by_cell and nm not in by_ptr]
         info = {'node': node, 'params': params, 'cname': cname, 'by_val': by_val, 'by_ptr': by_ptr,
-                'positional': positional, 'vararg': vararg, 'kwonly': kwonly, 'defaults': defaults,
-                'default_inits': default_inits}
+                'by_cell': by_cell, 'positional': positional, 'vararg': vararg, 'kwonly': kwonly,
+                'defaults': defaults, 'default_inits': default_inits}
         outer_ctx.nested_funcs[node.name] = info
         # Compile the nested function body now, in its OWN Ctx/frame, with captured names
         # pre-registered: by-value captures get an ordinary local slot (copied in from the
@@ -3406,7 +3417,9 @@ class Compiler(boxclosure.ClosureMixin):
         nctx.qualname = (outer_ctx.qualname + '.<locals>.' if outer_ctx.qualname else '') + node.name
         for nm in by_val:
             nctx.declare_local(nm)
-        nctx.free_names = set(by_val)
+        for nm in by_cell:
+            nctx.declare_local(nm)
+        nctx.free_names = set(by_val) | set(by_cell)
         for nm in by_ptr:
             nctx.ptr_names.add(nm)
         for p in params:
@@ -3426,16 +3439,21 @@ class Compiler(boxclosure.ClosureMixin):
         for name in sorted(nctx.closure_defs):
             nctx.declare_local(name)
         self.init_cells(nctx)
+        nctx.external_cells = set(by_cell)
+        nctx.cell_slots |= nctx.external_cells
         preamble_lines = []
         for p in params:
             preamble_lines.append('    f.slots[%d] = %s;' % (nctx.slot_of[p], cid(p)))
         for nm in by_val:
             preamble_lines.append('    f.slots[%d] = %s;' % (nctx.slot_of[nm], cid('cap_' + nm)))
+        for nm in by_cell:
+            preamble_lines.append('    f.slots[%d] = %s;' % (nctx.slot_of[nm], cid('cell_' + nm)))
         self.block(node.body, nctx)
         preamble_lines += self.cell_preamble(nctx)
         preamble_lines += ['    int %s = 0;' % flag for flag in nctx.def_flag_decls]
         n_slots = max(nctx.next_slot, 1)
         sig = (''.join(', ail_obj *%s' % cid('ptr_' + nm) for nm in by_ptr) +
+              ''.join(', ail_obj %s' % cid('cell_' + nm) for nm in by_cell) +
               ''.join(', ail_obj %s' % cid('cap_' + nm) for nm in by_val) +
               ''.join(', ail_obj %s' % cid(p) for p in params))
         body = '\n'.join(preamble_lines) + ('\n' if preamble_lines else '')
@@ -3533,6 +3551,7 @@ class Compiler(boxclosure.ClosureMixin):
                 argcs.append(tup)
             else:
                 argcs.append(done[id(n)] if id(n) in done else self.expr(n, ctx))
+        cellexprs = [self.cell_object(nm, ctx) for nm in info.get('by_cell', [])]
         capexprs = [self.name_ref(nm, ctx) for nm in info['by_val']]
         ptrexprs = ['&' + self.name_ref(nm, ctx) if nm not in ctx.ptr_names else cid('ptr_' + nm)
                    for nm in info['by_ptr']]
@@ -3543,8 +3562,8 @@ class Compiler(boxclosure.ClosureMixin):
         t = ctx.tmp()
         ctx.emit('st = %s(cx, &%s%s);' % (
             info['cname'], t,
-            ''.join(', ' + p for p in ptrexprs) + ''.join(', ' + c for c in capexprs) +
-            ''.join(', ' + a for a in argcs)))
+            ''.join(', ' + p for p in ptrexprs) + ''.join(', ' + c for c in cellexprs) +
+            ''.join(', ' + c for c in capexprs) + ''.join(', ' + a for a in argcs)))
         ctx.check()
         return t
 
@@ -5149,8 +5168,24 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.indent -= 1
                 ctx.emit('}')
                 return t
+            def int_literal(e):
+                if isinstance(e, ast.Constant):
+                    return type(e.value) is int
+                return (isinstance(e, ast.UnaryOp) and isinstance(e.op, ast.USub)
+                        and isinstance(e.operand, ast.Constant) and type(e.operand.value) is int)
+            if not all(e is None or (isinstance(e, ast.Constant) and e.value is None) or int_literal(e)
+                       for e in (node.slice.lower, node.slice.upper, node.slice.step)):
+                # A bound that is not an int literal may be None at run time (a variable, an
+                # argument, a list item ...). ail2s_getslice reads boxed bounds and treats None
+                # as omitted, exactly as Python's slice.indices does.
+                lo, hi, step = self._slice_bounds(node.slice, ctx)
+                self.rt_needs.add('slice')
+                t = ctx.tmp()
+                ctx.emit('st = ail2s_getslice(cx, &%s, %s, %s, %s, %s);' % (t, c, lo, hi, step))
+                ctx.check()
+                return t
             def bound(e, default):
-                if e is None:
+                if e is None or (isinstance(e, ast.Constant) and e.value is None):
                     return '0', str(default)
                 v = self.expr(e, ctx)
                 return '1', '(%s).i' % v
@@ -6795,7 +6830,10 @@ class Compiler(boxclosure.ClosureMixin):
                    else 'could not convert string to float: ')
             base_slot = self._str_lit_slot(base, ctx)
             repr_slot = ctx.tmp()
-            ctx.emit('%s = ail_str_repr(cx, %s);' % (repr_slot, v))
+            if fname == 'int':
+                ctx.emit('%s = ail__repr_limited(cx, %s, 200);' % (repr_slot, v))
+            else:
+                ctx.emit('%s = ail_str_repr(cx, %s);' % (repr_slot, v))
             msg_slot = ctx.tmp()
             ctx.emit('%s = ail_str_cat(cx, %s, %s);' % (msg_slot, base_slot, repr_slot))
             ctx.emit('st = ail_raise(cx, cx->builtin_cls[AIL_B_VALUEERROR], %s);' % msg_slot)

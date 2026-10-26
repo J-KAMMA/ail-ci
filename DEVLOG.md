@@ -12,6 +12,102 @@ records the already-fixed rows.  Probes in `/tmp/probes`: `pre203_min`, `pre203_
 (`-(-9223372036854775808)`) is refused by name on both.  Tests on the final tree:
 `test_ail_pre203`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`
 (4 modules, 346 s, 0 failed).
+## 2026-10-26 -- reapply pre201 constant-shift fold budget (job-rbpre201-10261355)
+
+Re-applied the accepted pre201 change on this tree.  The out-of-range shift refusal is already
+present here: pre236/pre241's generic constant-expression rule refuses `True << 64`, `1 << 64`
+and their argument/list/attribute/dict/assignment routes by name with the `outside the signed
+64-bit range` wording, so the conflict resolution keeps that rule and does not add pre201's
+second refusal path.  The pre201 fold-budget piece is added to `_check_constant_power`: a
+dedicated `_const_fold_int` mirrors the pre190 zero/base shortcuts and its 2**20-bit budget
+(2**24 for a 0/1/-1 exponent), so `((10 ** 64) ** 64) >> 100001` folds to 0 like CPython instead
+of being refused, while `(1 << 1048576) >> 1048576` and wider intermediates stay refused by name.
+`test_ail_pre201.py` covers bool/int shifts, a negative result, argument, list item, class
+attribute, dict value and assignment, plus the in-range boundaries; its out-of-range check
+accepts either named refusal.  Probes `p201_*` in `/tmp/probes` match CPython or are refused by
+name on both builds.  Final-state modules: test_ail_pre201, test_ail_pre190, test_ail_pre195,
+test_ail_pre205, test_ail_pre191, test_ail_pre236, test_ail_pre241, test_ail_pre121,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+## 2026-10-26 - pre209 reapply: bytearray defaults of nested defs
+
+The accepted pre209 change proposed naming a nested `def`'s `bytearray(...)` default as a mutable
+literal and refusing it by name, because the old surface only matched the generic "nested def with
+default parameters" refusal. This tree contains the pre141 fix, which evaluates every non-literal
+default once at the `def` statement into a hidden local, including a `bytearray(...)` call and one
+inside a tuple/list/set/dict display. That matches CPython (the object is shared between calls, and
+a negative count raises at def time), so a refusal would regress it. Both changes are kept: pre141's
+evaluation stands, and `test_ail_pre209.py` re-applies pre209's cases as CPython-parity regressions
+(empty/bytes/size/list-arg bytearray defaults, tuple/list/dict/nested-tuple containers, an outer
+value, keyword-only, class-object and source-keyword defaults, alias bindings through an argument,
+a list item, an attribute and a dict value, module-level/returned/doubly-nested/loop-built/lambda/
+recursive/immutable defaults, the negative count, and the deeper-nested keyword call still refused
+by name). No compiler code change was needed. Probes `p01`-`p24` in `/tmp/probes/pre209` match
+CPython or are refused by name on both builds. Tests: pre209, pre141, safetynet, files,
+corpus_findings3.
+## 2026-10-26 - nested def two levels deep shares the enclosing cell (job-rbpre213-10261303)
+
+Re-applied the accepted pre213 change on top of the current tree.  `_register_nested` now also
+takes the free names of deeper defs (`boxclosure.free_names`); when a name is used by such a
+deeper scope its enclosing binding is made a cell (`NeedCells`), and the intermediate def
+receives that cell rather than a copy, so the deeper def sees the same object and any later
+rebinding.  The cell is forwarded through further nested defs and `cell_preamble` leaves an
+external cell alone; a closure function declares the def flags of its own nested defs.  The
+`by_cell` names are also in the nested context's `free_names`, so an unbound captured scalar
+read through the cell raises `NameError` (not `UnboundLocalError`), matching CPython.
+
+`test_ail_pre213.py` covers appends through an argument (empty and non-empty), aliasing, a dict
+value/list item/attribute, int and str reads (positive, zero, negative), a default referring to
+the captured list, sibling inner defs, a returned inner def called twice, rebinding the outer
+name after the intermediate call, three levels, an unbound scalar read before assignment and
+after deletion, and a deep `nonlocal` write stays refused by name.  Probes in `/tmp/probes`
+match CPython or are refused by name on both builds.
+## 2026-10-26 -- reapply pre225: grouping with an unrecognised type code (job-rbpre225-10261321)
+
+Re-applied the accepted pre225 change. Its safetyrt.py fix is already present on this tree from
+the pre206 review: `ail2f_parse` checks the grouping against the type before an unknown code (its
+whitelist gives the same result as pre225's `bcdeEfFgGnosxX%` once the `n`/`s`/`c` and
+`,`+`b/o/x/X` conflicts are applied), and `ail2f_code_text` already escapes a space code as
+`\x20` (`c <= 0x20`). The code therefore needed no further edit, keeping both sides' fixes. Added
+`AIL_CURRENT/test_ail_pre225.py` (1 test, both builds) and registered it in
+`ail_check.MODULES`. Probes `/tmp/probes/pre225_*` (group matrix, value routes, NUL/code points,
+boundaries) match CPython on both builds. Tests: pre225, safetynet, files, corpus_findings3.
+## 2026-10-26 - reapply pre215: constant abs() outside int64 (job-rbrbpre215-10261331)
+
+Re-applied the accepted pre215 change on this tree. The tree already carried the pre214/pre248
+`abs()` work, so the reapply keeps its function-local constant support and adds the accepted
+`_known_module_constants` / `_binds_name` helpers: a module constant written as a shift expression
+(`M = -(1 << 63)`, including an alias `N = M`) now resolves into `abs()`, and the argument is
+folded exactly so a result below `INT64_MIN` or above `INT64_MAX` is refused by name
+(`int64 constant expression out of range`) on both builds. The fetched test expected the older
+`outside the signed 64-bit range` wording for the three other review cases; the test now accepts
+the current tree's named refusal as well, keeping both sides' fix. Added
+`AIL_CURRENT/test_ail_pre215.py` and registered it in `ail_check.MODULES`.
+`tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run and `--check`
+passes. Probes `p1`-`p16` in `/tmp/probes` on both builds: 14 are refused by name (direct,
+literal, module shift/alias, below-min, above-max, argument, list, attribute, dict, nested, local,
+local alias, power) and `p12`/`p13` match CPython. Tests: pre215, pre214, pre248, pre246, pre253,
+pre227, pre236, safetynet, files, corpus_findings3.
+## 2026-10-26 - re-apply memsafe2 hostile-input fixes, merged with current format fixes (job-rbrbrbrbmemsafe2-10261346)
+
+Re-applied accepted job `memsafe2` on the current export, keeping the overlapping format()
+fixes already on this tree. `safetyrt.py` combined the new whole-unit `wide_type` handling,
+group-check-before-value and helper messages with the current tree's duplicate-grouping
+"cannot specify ',' with ','" wording and space-as-`\x20` escaping; the remaining files
+applied as-is. DIFFERENCES rows use this branch's placeholder ids, and the hostile-input
+module is registered before `test_ail_safetynet`.
+
+## 2026-10-25 - re-apply memsafe2 hostile-input fixes on current tree (job-rbrbrbmemsafe2-10260121)
+
+Re-applied accepted job `memsafe2` (branch `job-rbrbmemsafe2-10252051`) on the current export. The
+`cruntime.py`, `safetyrt.py`, `exctext.py`, `prelude_bytes.py`, `pyboxed.py` and `pyboxed2.py` edits plus
+the new `tools/input_fuzz.py` and `AIL_CURRENT/test_ail_hostile_input.py` applied as-is. Three files
+conflicted: `ail_check.MODULES` already had `test_ail_pre141`, so the hostile-input module is registered
+just before `test_ail_safetynet`; the DIFFERENCES rows were renumbered to this branch
+(`C?-job-rbrbrbmemsafe2-10260121-1..8`) and kept alongside the newer records; and the original memsafe2
+DEVLOG entry is placed before the 2026-10-24 codec-name entry. Overlapping fixes already on this tree are
+kept on both sides: pre192's `int(bytearray)` text and pre103's NUL format type still hold while the
+int()/float() error path now uses the UTF-16 repr helpers and `%.200R`, and the format parser
+distinguishes an ASCII type (including NUL) from a whole non-ASCII `wide_type`.
 
 ## 2026-10-25 -- pre227 suite fix: the constant check owns the refusal wording (job-pre227-10260534)
 
@@ -986,6 +1082,23 @@ a plain helper, a typed helper, a lambda, a list item, an attribute, a dict
 value, negative and INT64_MIN dividends, bools, an IntEnum and an IntFlag; a
 second program keeps the neighbouring `//`, `divmod` and float zero messages
 unchanged.
+## 2026-10-25 - memsafe2: hostile stdin through parsing and text (job-memsafe2-10251519)
+
+A seeded mutation fuzzer (`tools/input_fuzz.py`) fed empty, 1 MB, NUL, invalid-UTF-8, non-ASCII-digit and
+extreme-number inputs to four programs (numbers, text, binary, slices) built with ASan+UBSan on the general
+and default builds.  The first sweep found: signed-int64 overflow in slice length/increment at the int64
+boundary (UBSan, wrong length, or hang) and `None` bounds held in variables/lists/attributes/dict values
+read as 0; `int()`/`float()` error text mangled every non-ASCII unit (the low byte was copied) and ignored
+`%.200R`; `format()` treated a non-ASCII (or control) type character as a `char` (wrong unknown-code/grouping
+text and a ValueError instead of TypeError for None/list specs); `%`-format printed a non-ASCII/control conversion
+character raw instead of `?`; bytearray's repr quote choice and `int(bytearray())` message differed.  All
+are fixed in `safetyrt.py`, `cruntime.py`, `exctext.py`, `prelude_bytes.py`, `pyboxed2.py` and `pyboxed.py`.
+Two known int64/16-bit-unit limits are recorded in DIFFERENCES (a valid non-BMP UTF-8 decode, and an int
+beyond int64), plus one unrelated source-shape inference gap found by an over-broad mixed-type slice probe. `test_ail_hostile_input.py` holds the programs, the regression inputs and a seeded fuzz run.
+Probes in `/tmp/probes` (`p_slice_dyn`, `p_slice_dyn2`, `p_slice_none`, `p_repr`, `p_fmt`, `p_convmsg`,
+`p_int2`, plus the gen_* fuzz corpus) match CPython with sanitizers on both builds; explicit `None`
+slice constants are refused by name on the typed path, so the default build falls back to the general path.
+
 ## 2026-10-24 - CPython codec-name normalization (job-rbpre23-10242019)
 
 The first still-differing item from the task's list was the encoding-name normalization: `b"abc".decode("utf\t8")`,
