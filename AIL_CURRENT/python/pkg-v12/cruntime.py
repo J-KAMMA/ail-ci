@@ -3495,6 +3495,25 @@ static void ail_flist_clear(ail_flist *L) { L->n = 0; }
 static void ail_flist_free(ail_flist *L) { free(L->p); L->p = 0; L->n = L->cap = 0; }
 '''
 
+ZDIV = r'''
+/* A zero-division trap. CPython writes the class name before the text, and a `try` gets a
+   catchable ZeroDivisionError carrying the same text. Only a program that can divide emits this
+   part, so the C of a program that never divides is unchanged. */
+static void ail_zdie(const char *t) {
+    if (ail_exc_top >= 0) {
+        ail_exception *v = ail_exception_new(AIL_EXC_ZERODIV, (const uint8_t *)t, (int64_t)strlen(t), 1);
+        ail_exception_store(&ail_exc_value, v, 1);
+        ail_exc_code = AIL_EXC_ZERODIV;
+        ail_exc_unwind();
+        ail_exc_throw();
+    }
+    char msg[256];
+    snprintf(msg, sizeof msg, "ZeroDivisionError: %s", t);
+    const char *w = msg;
+    fflush(stdout); fputs(w, stderr); AIL_DBG_UNCAUGHT(); fputc(10, stderr); _Exit(1);
+}
+'''
+
 FROWS = r"""
 #include <string.h>
 /* A list whose elements are fixed-arity tuples of FLOATS -- the float-tuple counterpart of ROWS
@@ -3695,7 +3714,15 @@ FDIV = r'''
 /* Python's `/` raises on a zero divisor; C's returns an infinity. An answer that is not a number
    must not be handed back as if it were one. */
 static double ail_fdiv(double a, double b) {
-    if (b == 0) ail_die("division by zero");
+    if (b == 0) ail_zdie("division by zero");
+    return a / b;
+}
+'''
+
+FDIVF = r'''
+/* `/` with a float operand: CPython words this ZeroDivisionError differently from int / int. */
+static double ail_fdiv_f(double a, double b) {
+    if (b == 0) ail_zdie("float division by zero");
     return a / b;
 }
 '''
@@ -3705,7 +3732,7 @@ FFLOORMOD = r'''
 /* Correct the remainder's sign and snap the quotient after removing it.
    Direct floor(a / b) loses the quotient/remainder relationship near rounding boundaries. */
 static double ail_ffloormod(double a, double b, int remainder) {
-    if (b == 0.0) ail_die("division by zero");
+    if (b == 0.0) ail_zdie(remainder ? "float modulo" : "float floor division by zero");
     double r = fmod(a, b);
     int adjust = r != 0.0 && (r < 0.0) != (b < 0.0);
     if (remainder) return r == 0.0 ? copysign(0.0, b) : adjust ? r + b : r;
@@ -3736,7 +3763,10 @@ IPOW = r'''
 /* `2 ** 10` is an int in Python, and `pow()` would route it through a double and lose the last
    bits above 2^53. A non-negative integer exponent is done in integers. */
 static int64_t ail_ipow(int64_t b, int64_t e) {
-    if (e < 0) ail_die("negative exponent on an integer; write float(x) ** n for Python's float answer");
+    if (e < 0) {
+        if (b == 0) ail_zdie("0.0 cannot be raised to a negative power");
+        ail_die("negative exponent on an integer; write float(x) ** n for Python's float answer");
+    }
     int64_t r = 1;
     while (e) {
         /* strict mode promises that integer overflow stops the program; this multiplied without
@@ -23555,9 +23585,9 @@ static ail_slist ail_str_rsplit_n(ail_str s, int sep_none, ail_str sep, int64_t 
 }
 '''
 
-ORDER = ['TYPES', 'FPOW', 'DIE', 'ELEM_BOUNDS', 'STDIO', 'FREPR', 'ROUND', 'STR', 'ARGV', 'STRRET', 'SLIST', 'SROW', 'FLIST', 'FROWS', 'FROWSKEY', 'FLISTRET', 'RECDEPTH', 'FDIV', 'JSDIV', 'IPOW', 'LIST', 'LISTRET', 'MULTIRET', 'SORT', 'POOL', 'GRIDRET', 'TAB', 'BYTES', 'BTAB', 'STAB', 'BPOOL', 'BSPLIT', 'BLISTSORT', 'BYTESRET', 'SLOT', 'TUPRET', 'ROWS', 'MROWS', 'ROWSKEYB', 'ROWSKEYTAB', 'ROWSKEY', 'GRID', 'FMT', 'OBJ', 'OBJ2']
-SOURCE = {'TYPES': TYPES, 'FPOW': FPOW, 'DIE': DIE, 'STDIO': STDIO, 'FREPR': FREPR, 'ROUND': ROUND, 'STR': STR, 'ARGV': ARGV, 'STRRET': STRRET, 'SLIST': SLIST, 'SROW': SROW, 'FLIST': FLIST, 'FROWS': FROWS, 'FROWSKEY': FROWSKEY, 'FLISTRET': FLISTRET, 'RECDEPTH': RECDEPTH, 'FDIV': FDIV, 'JSDIV': JSDIV, 'IPOW': IPOW, 'LIST': LIST, 'LISTRET': LISTRET, 'MULTIRET': MULTIRET, 'SORT': SORT, 'POOL': POOL, 'GRIDRET': GRIDRET, 'TAB': TAB, 'BYTES': BYTES, 'BTAB': BTAB, 'STAB': STAB, 'BPOOL': BPOOL, 'BSPLIT': BSPLIT, 'BLISTSORT': BLISTSORT, 'BYTESRET': BYTESRET, 'SLOT': SLOT, 'TUPRET': TUPRET, 'ROWS': ROWS, 'MROWS': MROWS, 'ROWSKEYB': ROWSKEYB, 'ROWSKEYTAB': ROWSKEYTAB, 'ROWSKEY': ROWSKEY, 'GRID': GRID, 'FMT': FMT, 'OBJ': OBJ, 'OBJ2': OBJ2}
-REQUIRES = {'FREPR': ['TYPES', 'STDIO'], 'ROUND': ['DIE', 'OVERFLOWEXC'], 'LIST': ['TYPES', 'DIE'], 'LISTRET': ['TYPES', 'LIST'], 'SORT': ['TYPES', 'LIST'], 'TAB': ['TYPES', 'DIE'], 'FDIV': ['DIE'], 'IPOW': ['DIE'], 'BYTES': ['DIE'], 'BYTESRET': ['BYTES'], 'POOL': ['TYPES', 'DIE', 'LIST', 'LISTRET'], 'TUPRET': ['SLOT'], 'ROWS': ['TYPES', 'DIE', 'LIST'], 'RECDEPTH': ['DIE'], 'GRID': ['TYPES', 'DIE'], 'GRIDRET': ['TYPES', 'DIE', 'LIST', 'POOL'], 'MULTIRET': ['TYPES', 'LIST', 'LISTRET'], 'FLIST': ['DIE'], 'FLISTRET': ['FLIST'], 'ROWSKEY': ['TYPES', 'DIE', 'LIST', 'ROWS'], 'BPOOL': ['TYPES', 'DIE', 'BYTES'], 'BSPLIT': ['LIST', 'BPOOL', 'BYTES'], 'BTAB': ['TYPES', 'DIE', 'BYTES'], 'STAB': ['TYPES', 'DIE', 'STR'], 'ROWSKEYTAB': ['TYPES', 'DIE', 'LIST', 'ROWS', 'TAB'], 'BLISTSORT': ['TYPES', 'DIE', 'LIST', 'BYTES', 'BPOOL'], 'ROWSKEYB': ['TYPES', 'DIE', 'LIST', 'ROWS', 'BYTES', 'BPOOL'], 'FROWS': ['TYPES', 'DIE', 'FLIST'], 'FROWSKEY': ['TYPES', 'DIE', 'FLIST', 'FROWS'], 'MROWS': ['TYPES', 'DIE', 'LIST', 'ROWS', 'BYTES'], 'STR': ['TYPES', 'DIE', 'ELEM_BOUNDS', 'STDIO'], 'STRRET': ['STR'], 'SLIST': ['TYPES', 'DIE', 'STR'], 'SROW': ['TYPES', 'DIE', 'STR'], 'ARGV': ['STR'], 'FMT': ['STR', 'FREPR'], 'OBJ': ['STDIO']}
+ORDER = ['TYPES', 'FPOW', 'DIE', 'ZDIV', 'ELEM_BOUNDS', 'STDIO', 'FREPR', 'ROUND', 'STR', 'ARGV', 'STRRET', 'SLIST', 'SROW', 'FLIST', 'FROWS', 'FROWSKEY', 'FLISTRET', 'RECDEPTH', 'FDIV', 'FDIVF', 'JSDIV', 'IPOW', 'LIST', 'LISTRET', 'MULTIRET', 'SORT', 'POOL', 'GRIDRET', 'TAB', 'BYTES', 'BTAB', 'STAB', 'BPOOL', 'BSPLIT', 'BLISTSORT', 'BYTESRET', 'SLOT', 'TUPRET', 'ROWS', 'MROWS', 'ROWSKEYB', 'ROWSKEYTAB', 'ROWSKEY', 'GRID', 'FMT', 'OBJ', 'OBJ2']
+SOURCE = {'TYPES': TYPES, 'FPOW': FPOW, 'DIE': DIE, 'ZDIV': ZDIV, 'STDIO': STDIO, 'FREPR': FREPR, 'ROUND': ROUND, 'STR': STR, 'ARGV': ARGV, 'STRRET': STRRET, 'SLIST': SLIST, 'SROW': SROW, 'FLIST': FLIST, 'FROWS': FROWS, 'FROWSKEY': FROWSKEY, 'FLISTRET': FLISTRET, 'RECDEPTH': RECDEPTH, 'FDIV': FDIV, 'FDIVF': FDIVF, 'JSDIV': JSDIV, 'IPOW': IPOW, 'LIST': LIST, 'LISTRET': LISTRET, 'MULTIRET': MULTIRET, 'SORT': SORT, 'POOL': POOL, 'GRIDRET': GRIDRET, 'TAB': TAB, 'BYTES': BYTES, 'BTAB': BTAB, 'STAB': STAB, 'BPOOL': BPOOL, 'BSPLIT': BSPLIT, 'BLISTSORT': BLISTSORT, 'BYTESRET': BYTESRET, 'SLOT': SLOT, 'TUPRET': TUPRET, 'ROWS': ROWS, 'MROWS': MROWS, 'ROWSKEYB': ROWSKEYB, 'ROWSKEYTAB': ROWSKEYTAB, 'ROWSKEY': ROWSKEY, 'GRID': GRID, 'FMT': FMT, 'OBJ': OBJ, 'OBJ2': OBJ2}
+REQUIRES = {'FREPR': ['TYPES', 'STDIO'], 'ROUND': ['DIE', 'OVERFLOWEXC'], 'LIST': ['TYPES', 'DIE'], 'LISTRET': ['TYPES', 'LIST'], 'SORT': ['TYPES', 'LIST'], 'TAB': ['TYPES', 'DIE'], 'ZDIV': ['DIE'], 'FDIV': ['DIE', 'ZDIV'], 'FDIVF': ['DIE', 'ZDIV'], 'IPOW': ['DIE', 'ZDIV'], 'BYTES': ['DIE'], 'BYTESRET': ['BYTES'], 'POOL': ['TYPES', 'DIE', 'LIST', 'LISTRET'], 'TUPRET': ['SLOT'], 'ROWS': ['TYPES', 'DIE', 'LIST'], 'RECDEPTH': ['DIE'], 'GRID': ['TYPES', 'DIE'], 'GRIDRET': ['TYPES', 'DIE', 'LIST', 'POOL'], 'MULTIRET': ['TYPES', 'LIST', 'LISTRET'], 'FLIST': ['DIE'], 'FLISTRET': ['FLIST'], 'ROWSKEY': ['TYPES', 'DIE', 'LIST', 'ROWS'], 'BPOOL': ['TYPES', 'DIE', 'BYTES'], 'BSPLIT': ['LIST', 'BPOOL', 'BYTES'], 'BTAB': ['TYPES', 'DIE', 'BYTES'], 'STAB': ['TYPES', 'DIE', 'STR'], 'ROWSKEYTAB': ['TYPES', 'DIE', 'LIST', 'ROWS', 'TAB'], 'BLISTSORT': ['TYPES', 'DIE', 'LIST', 'BYTES', 'BPOOL'], 'ROWSKEYB': ['TYPES', 'DIE', 'LIST', 'ROWS', 'BYTES', 'BPOOL'], 'FROWS': ['TYPES', 'DIE', 'FLIST'], 'FROWSKEY': ['TYPES', 'DIE', 'FLIST', 'FROWS'], 'MROWS': ['TYPES', 'DIE', 'LIST', 'ROWS', 'BYTES'], 'STR': ['TYPES', 'DIE', 'ELEM_BOUNDS', 'STDIO'], 'STRRET': ['STR'], 'SLIST': ['TYPES', 'DIE', 'STR'], 'SROW': ['TYPES', 'DIE', 'STR'], 'ARGV': ['STR'], 'FMT': ['STR', 'FREPR'], 'OBJ': ['STDIO']}
 SOURCE['ELEM_BOUNDS'] = ELEM_BOUNDS
 REQUIRES['ELEM_BOUNDS'] = ['TYPES', 'DIE']
 for _bounded_part in ('STR', 'LIST', 'FLIST'):
@@ -23607,7 +23637,7 @@ REQUIRES['STRJOINRETURN'] = ['SLIST', 'STRRET']
 ORDER.insert(ORDER.index('LIST') + 1, 'NUMFIELD')
 ORDER.insert(ORDER.index('FDIV') + 1, 'FFLOORMOD')
 SOURCE['FFLOORMOD'] = FFLOORMOD
-REQUIRES['FFLOORMOD'] = ['DIE']
+REQUIRES['FFLOORMOD'] = ['DIE', 'ZDIV']
 CMPIF = r'''
 /* Exact int64-vs-double comparison for the IR's plain scalar compares.  The predicate code is
    0 eq, 1 ne, 2 lt, 3 le, 4 gt, 5 ge; the integer is the left operand.  Casting the int to
@@ -27708,7 +27738,7 @@ static double ail__fpow_slow(double iv, double iw, double r) {
         ail_die("a negative number raised to a fractional power is a complex number in Python; AIL has no complex type");
     }
     if (isinf(iv) || isinf(iw)) return r;
-    if (iv == 0.0) ail_die("division by zero");
+    if (iv == 0.0) ail_zdie("0.0 cannot be raised to a negative power");
     ail_die("(34, 'Numerical result out of range')");
     return r;
 }
@@ -27719,8 +27749,8 @@ static inline double ail_fpow(double iv, double iw) {
 }
 '''
 SOURCE['FPOWCK'] = FPOWCK
-REQUIRES['FPOWCK'] = ['DIE']
-ORDER.insert(ORDER.index('DIE') + 1, 'FPOWCK')
+REQUIRES['FPOWCK'] = ['DIE', 'ZDIV']
+ORDER.insert(ORDER.index('ZDIV') + 1, 'FPOWCK')
 REQUIRES['FPOW'] = ['FPOWCK']
 
 FSUM = r'''
@@ -28111,9 +28141,6 @@ REQUIRES['EXCFLOAT'] = ['FREPR', 'EXCSTR']
 ORDER.insert(ORDER.index('EXCFLOAT') + 1, 'EXCSTR')
 SOURCE['EXCSTR'] = _exctext.CPART
 REQUIRES['EXCSTR'] = ['STR', 'STRRET', 'STRREPR', 'DIE', 'OSEXC']
-ORDER.insert(ORDER.index('EXCSTR') + 1, 'FDIVF')
-SOURCE['FDIVF'] = _exctext.CFDIVF
-REQUIRES['FDIVF'] = ['DIE', 'EXCSTR']
 
 # set.pop() takes the first element of an int / str set (SETOPS / SSETOPS), which needs a position kept in the table
 # (`ofin`, `fin`). The fields and what keeps them true are spliced in only for a program that pops a set, so the C of every other

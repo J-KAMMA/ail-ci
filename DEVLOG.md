@@ -1,3 +1,45 @@
+## 2026-10-26 -- fix typed zero-division trap text and class prefix (job-pre282-10270157)
+
+The reviewer of pre274 recorded that the default typed build printed a zero-division trap's bare
+text with no class name: `print(0 ** -1)` ended in `0.0 cannot be raised to a negative power`
+where CPython writes `ZeroDivisionError: 0.0 cannot be raised to a negative power`. Reproduced
+with `bash ~/tools/cmp.sh` on both builds; pre274's lambda textless-catch item is already fixed on
+this tree, and the non-zero integer negative-exponent item is still the documented refusal
+(`negative exponent on an integer ...`), so the prefix line was the first item still differing.
+
+Added a `ZDIV` runtime part: `ail_zdie(t)` writes CPython's whole `ZeroDivisionError: <text>`
+line when uncaught, and raises a catchable `ZeroDivisionError` carrying that same text when a
+handler is active. It is emitted only by a program that can divide, so a program with no division
+keeps byte-identical generated C (a test compiles `print(1 + 2)` and asserts no `ail_zdie`).
+The typed `/`, float `//`/`%`, `divmod` and zero-base negative powers now use CPython's distinct
+wordings; the IR carries an int-vs-float flag for `/` so the default build picks the float
+`ail_fdiv_f`. `pymod`/`pydiv` and the typed float floor/mod helpers route through `ail_zdie`, and
+the stale exctext rewrite of `FFLOORMOD` was removed because the helper now always names CPython's
+message. The mixed-unit postprocessor (`pyboxed2._mix_drain_before_exit`) now drains the boxed
+stdout buffer for every trap path before `_Exit`, not just the first one, so a `print` from an
+earlier caught block survives a later clone trap. Added and registered `test_ail_pre282.py`
+(10 tests, both builds; float-`/` stderr on the default build only because the general path's
+boxed op keeps its pre-existing `division by zero` text).
+
+Probes in `/tmp/probes`, all run with `bash ~/tools/cmp.sh <probe> $PWD`: uncaught `1 / 0`,
+`1 // 0`, `1 % 0`, `1.0 / 0.0`, `1.0 // 0.0`, `1.0 % 0.0`, `divmod(1, 0)`, `0 ** -1`,
+`0.0 ** -1.0`, `1.0 / -0.0`, a print before the trap, and a list/attribute route all match
+CPython's stdout and stderr on both builds for the int cases and on the default build for float
+`/`; `pre282_matrix_textless`, `pre282_textless`, `pre282_routes`, `pre282_expr_routes_text`,
+`pre282_t_int_caught`, `pre282_t_float_caught`, `pre282_t_routes2`, `pre282_t_arg_int`,
+`pre282_t_arg_float`, `pre282_t_lambda`, `pre282_lambda_*`, `pre282_negzero`, and
+`pre282_caught_lit_text` (default build) match CPython. Remaining pre-existing differences found
+by probes: caught/uncaught float `/` on the general path keeps `division by zero`; mixed
+int-and-float calls of one function still trap in the clone unit (both builds failed before this
+job too); `2 ** -1` with a non-zero base keeps the named refusal; a caught float `/` through the
+boxed `ail_op_truediv` says `division by zero`. `python3 tools/update_manifest.py` was run and
+`--check` passes.
+
+Tests on the final tree: `test_ail_pre282`, `test_ail_exc_str`, `test_ail_pre167`,
+`test_ail_pre138`, `test_ail_record_initializers`, `test_ail_numeric_bindings`,
+`test_ail_ir_s0`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`
+(10 modules with `-j 2`, 0 failed).
+
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is

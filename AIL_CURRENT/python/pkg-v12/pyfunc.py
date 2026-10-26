@@ -1773,6 +1773,21 @@ FOLD_HELPERS = {
             ' return a; }\n'),
 }
 
+# The pipeline compiler (pyfront.to_pipeline_c) shares pyfront.HELPERS and has no ZDIV/exceptions
+# runtime, so only this typed emitter swaps pymod/pydiv for the class-prefixed, catchable trap.
+_ZDIV_HELPERS = {
+    'pymod': ('static int64_t pymod(int64_t a, int64_t b) {\n'
+              '    if (b == 0) ail_zdie("integer modulo by zero");\n'
+              '    if (b == -1) return 0;                      /* INT64_MIN % -1 would overflow */\n'
+              '    int64_t r = a % b;\n'
+              '    return (r != 0 && ((r < 0) != (b < 0))) ? r + b : r;\n}\n'),
+    'pydiv': ('static int64_t pydiv(int64_t a, int64_t b) {\n'
+              '    if (b == 0) ail_zdie("integer division or modulo by zero");\n'
+              '    if (b == -1) { if (a == INT64_MIN) ail_die("integer overflow"); return -a; }\n'
+              '    int64_t q = a / b, r = a % b;\n'
+              '    return (r != 0 && ((r < 0) != (b < 0))) ? q - 1 : q;\n}\n'),
+}
+
 # Module-level constants -- SEMANTICS.md section 29. `to_c` fills this in once, at the very start
 # of a compile, from a single upfront scan of the source's OWN top-level statements (never a fixed
 # point the way whole-program parameter-kind propagation is, section 26: a constant's kind and
@@ -13653,7 +13668,7 @@ def _expr(node, ctx):
         # Python's `/` is always true division. C's `/` between integers is not, which is the one
         # difference that silently turns a mean into the floor of a mean.
         ctx.parts.add('DIE')
-        if exctext.ACTIVE and FLT in (_etype(node.left, ctx), _etype(node.right, ctx)):
+        if FLT in (_etype(node.left, ctx), _etype(node.right, ctx)):
             ctx.parts.add('FDIVF')           # CPython words a float division by zero differently from int / int
             return _ordered_numeric_pair(node.left, node.right, ctx,
                                          'ail_fdiv_f((double)({}), (double)({}))')
@@ -35257,6 +35272,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     head = '#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n'
     runtime_parts = (parts - {'SEQHAS', 'SEQEQ', 'DIE'}
                      | ({'DIE'} if parts or folds or strict or floor else set())
+                     | ({'ZDIV'} if floor else set())
                      | ({'RECDEPTH'} if recursive else set()))
     if any(SLIST in info.field_types.values() for info in classes.values()):
         runtime_parts.update(('SLIST', 'PSLIST'))
@@ -35310,7 +35326,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     # not a --strict-only cost, so it is emitted whenever the program uses `%` or `//` regardless
     # of `strict`.
     if floor:
-        head += ''.join(HELPERS[h] for h in HELPER_ORDER if h in floor)
+        head += ''.join(_ZDIV_HELPERS.get(h, HELPERS[h]) for h in HELPER_ORDER if h in floor)
     if strict and need:
         head += ''.join(HELPERS[h] for h in HELPER_ORDER if h in need and h != 'ail_die')
     if classes:

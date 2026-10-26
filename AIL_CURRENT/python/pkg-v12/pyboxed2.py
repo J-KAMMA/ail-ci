@@ -89,9 +89,9 @@ _MIX_DRAIN_DEF = (
 
 
 def _mix_drain_before_exit(csrc):
-    """The clone's C with both trap paths draining the boxed stdout buffer, or None when a path is not there."""
+    """The clone's C with every trap path draining the boxed stdout buffer, or None when a path is not there."""
     for old, new in _MIX_DRAIN_SITES:
-        if csrc.count(old) != 1:
+        if csrc.count(old) < 1:
             return None
         csrc = csrc.replace(old, new)
     marker = '#include <string.h>\n'

@@ -2155,7 +2155,8 @@ class Lowering(TextLowering):
         op = node.op
         floating = I.F64 in (left.type, right.type)
         if isinstance(op, ast.Div):
-            return self.b.value('fdiv', [self.coerce(left, I.F64), self.coerce(right, I.F64)], I.F64)
+            return self.b.value('fdiv', [self.coerce(left, I.F64), self.coerce(right, I.F64)], I.F64,
+                                {'float': 1} if floating else None)
         if isinstance(op, ast.Pow):
             try:
                 kind = self.P._etype(node, self.ctx)
