@@ -42,6 +42,27 @@ is a separate pre-existing gap). Tests on the final tree: `test_ail_pre296`,
 `test_ail_builtin_shadowing` and `test_ail_pre218`. A lambda assigned after a call in the same
 function is still dropped by a separate scanning pass, so that unbound-local edge remains
 pre-existing on both builds.
+## 2026-10-26 - re-apply pre255: class constant routes through a list item, attribute or dict value (job-rbpre255-10261620)
+
+Re-applied the accepted pre255 change on this tree, keeping the current tree's exact class-level
+folding from pre227/pre246.  A class constant built through a list item, attribute or dict value
+(`N = 2**62; xs = [N]; class C: X = xs[0] * 4`) still kept checked int64 arithmetic and stopped
+with `integer overflow` where CPython prints the bignum.  `fold_constants` now refuses the route
+by name at compile time on both builds (`class-level constant built through a list item, attribute
+or dict value`); the scan walks each class body but prunes methods, nested classes and deferred
+lambda bodies, and treats a call's `Attribute` callee (including its receiver) as the callee while
+still scanning the call's arguments.  In-range routes and empty containers are refused too;
+arithmetic outside a class body, a method body and class-level arithmetic without such a route
+are unchanged.  Added `AIL_CURRENT/test_ail_pre255.py` and registered it in `ail_check.MODULES`.
+
+Probes in `/tmp/probes`: `pre255_list_out`, `pre255_dict_out`, `pre255_attr_out`,
+`pre255_list_in`, `pre255_neg_out`, `pre255_empty`, `pre255_nested_arg`, `pre255_call_arg`,
+`pre255_unary`, `pre255_tuple_route` and `pre255_nested_class` are refused by name on both
+builds; `pre255_outside`, `pre255_method`, `pre255_lambda_list`, `pre255_lambda_dict`,
+`pre255_str_method`, `pre255_list_receiver_method` and `pre255_plain` match CPython on both
+builds.  `tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run
+and `--check` passes.
+
 ## 2026-10-26 -- reapply pre225: grouping with an unrecognised type code (job-rbpre225-10261321)
 
 Re-applied the accepted pre225 change. Its safetyrt.py fix is already present on this tree from
