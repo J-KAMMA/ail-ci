@@ -24,7 +24,7 @@ DIRECT = r'''class C:
     def f(self):
         return 102
 c = C()
-print(c.f())
+print(c.f(), C.f(c))
 '''
 
 ARGUMENT = r'''class C:
