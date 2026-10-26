@@ -2118,6 +2118,30 @@ class _StarC(ast.AST):
         self.n = n
 
 
+def _mix_overflow_fallback(csrc, mangled, overflow):
+    """Route a clone's own int64 overflow stops to its int64-ABI wrapper.
+
+    The tagged lowering does not turn every int64 operand into `ail_tint` (a list element, for
+    one, stays an int64), so a big-int clone can still reach the typed path's checked helpers,
+    whose `ail_die("integer overflow")` would exit instead of letting the boxed body answer.
+    Replace that stop with a longjmp to the wrapper, which then signals the call site to run the
+    boxed body. Only the clone's own typed unit is changed; other trap messages stay as they are.
+    Returns None when the unit has no place to declare the jump buffer.
+    """
+    marker = '#include <stdint.h>\n'
+    if marker not in csrc:
+        return None
+    jmp = mangled + '__mix_jmp'
+    hit = mangled + '__mix_overflow_hit'
+    decl = ('\n#include <setjmp.h>\n'
+            'static jmp_buf %s;\n'
+            'extern int %s;\n'
+            'static inline void %s(void) { %s = 1; longjmp(%s, 1); }\n'
+            % (jmp, overflow, hit, overflow, jmp))
+    csrc = csrc.replace(marker, marker + decl, 1)
+    return csrc.replace('ail_die("integer overflow")', hit + '()')
+
+
 def _mix_wrap_integer_clone(mangled, inner, inner_sig, params, overflow):
     """The int64-ABI wrapper around an int-returning clone.
 
@@ -2125,7 +2149,9 @@ def _mix_wrap_integer_clone(mangled, inner, inner_sig, params, overflow):
     boxed caller's int64/list forms; its result is `int64_t`, or `ail_tint` when the local proof
     could not bound the ints. The wrapper keeps the caller's int64 result ABI and, for a tagged
     result, signals a value that does not fit int64 instead of wrapping or stopping: the call site
-    then runs the boxed body, which has exact ints. Returns (the wrapper C, its prototype).
+    then runs the boxed body, which has exact ints. An int64 overflow inside the inner clone
+    longjmps to the same signal (see `_mix_overflow_fallback`). Returns (the wrapper C, its
+    prototype).
     """
     inside = inner_sig[inner_sig.index('(') + 1:inner_sig.rindex(')')]
     tinted_params = set(re.findall(r'\bail_tint\s+(v_\w+)', inside))
@@ -2149,8 +2175,11 @@ def _mix_wrap_integer_clone(mangled, inner, inner_sig, params, overflow):
         else:
             return None, None
     tagged = 'ail_tint ' in inner_sig[:inner_sig.index(inner)]
+    jmp = mangled + '__mix_jmp'
     proto = 'int64_t %s(%s)' % (mangled, ', '.join(proto_args))
-    body = ['int %s = 0;\n' % overflow, proto + ' {\n']
+    body = ['int %s = 0;\n' % overflow, proto + ' {\n',
+            '    %s = 0;\n' % overflow,
+            '    if (setjmp(%s) != 0) return 0;\n' % jmp]
     if tagged:
         body.append('    ail_tint r = %s(%s);\n' % (inner, ', '.join(args)))
         body.append('    int64_t v;\n')
@@ -6216,6 +6245,7 @@ class Compiler(boxclosure.ClosureMixin):
             attempts.append((info2, False))
             csrc = None
             _tag_error = ''
+            chosen_info = None
             for attempt_info, _tag in attempts:
                 _ir_forced = _tag and os.environ.get('AIL_IR', '1').strip().lower() in (
                     '0', 'off', 'no', 'false')
@@ -6225,6 +6255,7 @@ class Compiler(boxclosure.ClosureMixin):
                 try:
                     csrc = pyfunc.to_c(defs_src, entry=name, sig=pymix._scalar_sig(cand['params']),
                                        name=inner, info=attempt_info)
+                    chosen_info = attempt_info
                     break
                 except Exception as exc:
                     csrc = None
@@ -6257,13 +6288,20 @@ class Compiler(boxclosure.ClosureMixin):
             # definition) -- never touches any other function's inlining in the same unit.
             csrc = re.sub(r'__attribute__\(\(always_inline\)\) static inline\r?\n'
                           r'(?=\S[^\n]*\b' + re.escape(inner) + r'\s*\()', '', csrc)
-            if info2.get('io'):
+            if chosen_info is not None and chosen_info.get('io'):
                 # A clone that prints writes through the typed unit's own stdio while the boxed
                 # program buffers its output separately, so the two interleave out of order; and
                 # the str-return convention calls the clone TWICE (length-then-fill probe, see
                 # `_call_mix_guarded`), which would say a message twice. A function that can
                 # print()/assert stays boxed.
                 continue
+            overflow = None
+            if integer_ret:
+                overflow = mangled + '__mix_overflow'
+                patched = _mix_overflow_fallback(csrc, mangled, overflow)
+                if patched is None:
+                    continue
+                csrc = patched
             inner_sig = _mix_extract_signature(csrc, inner)
             if inner_sig is None:
                 continue
@@ -6272,9 +6310,7 @@ class Compiler(boxclosure.ClosureMixin):
                 # local arithmetic (a local the proof cannot bound) would stop on overflow rather
                 # than reach the exact boxed body. Keep this function general.
                 continue
-            overflow = None
             if integer_ret:
-                overflow = mangled + '__mix_overflow'
                 wrapper, sig_text = _mix_wrap_integer_clone(mangled, inner, inner_sig, params, overflow)
                 if wrapper is None:
                     continue

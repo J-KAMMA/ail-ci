@@ -218,10 +218,11 @@ main()
             clone_exact = _cpython(directory, 'overflow_clone', clone_overflows, '')[0]
             boxed_exact = _cpython(directory, 'overflow_boxed', boxed_overflows, '')[0]
             try_exact = _cpython(directory, 'overflow_in_try', in_try, '')[0]
-        # the default (tint) and the general build both promote: CPython's exact big int, exit 0, no typed clone
-        self.check('overflow_clone', clone_overflows, want={'': (clone_exact, 0)}, mixed=False)
-        self.check('overflow_boxed', boxed_overflows, want={'': (boxed_exact, 0)}, mixed=False)
-        self.check('overflow_in_try', in_try, want={'': (try_exact, 0)}, mixed=False)
+        # the default build's clone promotes through the boxed body (fix10 restores the clone); the general
+        # build promotes directly: CPython's exact big int and exit 0 in both
+        self.check('overflow_clone', clone_overflows, want={'': (clone_exact, 0)}, mixed=True)
+        self.check('overflow_boxed', boxed_overflows, want={'': (boxed_exact, 0)}, mixed=True)
+        self.check('overflow_in_try', in_try, want={'': (try_exact, 0)}, mixed=True)
 
     def test_overflow_text(self):
         """The tint/default build promotes a value beyond int64: CPython's exact text and exit 0, never `integer overflow`.

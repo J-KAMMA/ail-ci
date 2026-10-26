@@ -487,6 +487,23 @@ class DefaultBuild(unittest.TestCase):
         for name in ("b1b_boolgrow", "b1b_boolfn", "b1b_boolpow", "b1b_attrbool"):
             self.check_both(name)
 
+    def test_mix_clone_overflow_falls_back(self):
+        """An int64-overflowing value inside a mixed clone runs the boxed body (the clone's checked
+        helpers longjmp to the wrapper), not the typed loud stop: CPython's exact big int on both builds."""
+        made, exe, src, c = self.build_c("mix_clone_overflow")
+        self.assertEqual(made.returncode, 0, made.stdout[-500:] + made.stderr[-1500:])
+        units = sorted(c.parent.glob("*_mix*.c"))
+        self.assertTrue(units, "no typed clone")
+        text = "".join(u.read_text(encoding="utf-8") for u in units)
+        self.assertIn("longjmp", text)
+        self.assertIn("__mix_overflow", text)
+        want = subprocess.run([sys.executable, str(src)], capture_output=True, text=True, timeout=300)
+        got = subprocess.run([str(exe)], capture_output=True, text=True, timeout=300)
+        self.assertEqual(got.stdout, want.stdout)
+        self.assertEqual(got.returncode, want.returncode)
+        self.assertEqual(got.stderr, want.stderr)
+        self.check_both("mix_clone_overflow")
+
     def test_marked_transitively_and_in_containers(self):
         """The unmarked caller of a marked function, a method, values read back through a list, a dict, an attribute and an
         argument: exact (the o1 / o2 probes of the review)."""
