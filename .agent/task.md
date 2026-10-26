@@ -1,14 +1,6 @@
-**Finish this job.** Your earlier commits are on this branch, but the last review ran out of time before giving a verdict. Check that the work meets the original task below, measure as it asks, and fix anything missing. If the change does not reach the keep threshold, revert it and say so. Commit.
+**Your change breaks other tests in the full suite.** On top of the current integration branch, these test modules fail with your change and pass without it: test_ail_fuzz59 test_ail_grid_return test_ail_numeric_bindings test_ail_numeric_profiles test_ail_numeric_profiles_native test_ail_record_initializers test_ail_sdk test_ail_sdk_environment test_ail_tcp_json_deadlines test_ail_tcp_json_lines_poll_resources.
 
---- ORIGINAL TASK ---
-**Speed: csv_table is 2.5x slower than C.** It builds fields with repeated `field += ch` and does a `dict.get` plus list updates per row. Make `s += x` on a str that nothing else references append in place (amortized growth) instead of copying. Then measure again and pick the next biggest cost.
-
-**How to work (speed rules).**
-1. Before building anything, measure. Profile the app with `tools/icount.c`, or perf if available, and state the share of run time spent in the part you will change. Give the best possible gain that follows (Amdahl).
-2. Change the compiler or runtime, not the app source in `bench/apps`. The point is that idiomatic AIL code gets fast.
-3. Output must stay identical. `compare.py` checks it against the Python oracle, and the full suite must keep passing, which the integration gate checks.
-4. Report `python3 bench/compare.py --app csv_table` before and after (time ratio vs C, RSS, binary size). If the gain is under 3%, or its range overlaps the range before the change, revert and report what you measured. Commit.
-
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find what your change broke, and fix it so they pass again while keeping your own fix and its test. If your fix cannot coexist with them, revert it and say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
