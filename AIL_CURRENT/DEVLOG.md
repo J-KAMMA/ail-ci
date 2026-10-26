@@ -8,6 +8,16 @@ whitelist gives the same result as pre225's `bcdeEfFgGnosxX%` once the `n`/`s`/`
 `AIL_CURRENT/test_ail_pre225.py` (1 test, both builds) and registered it in
 `ail_check.MODULES`. Probes `/tmp/probes/pre225_*` (group matrix, value routes, NUL/code points,
 boundaries) match CPython on both builds. Tests: pre225, safetynet, files, corpus_findings3.
+## 2026-10-26 -- re-apply pre243: full "Invalid format specifier" text (job-rbpre243-10261424)
+
+Re-applying pre243 on this tree: the runtime change it proposed is already present from the
+pre206 parser fix (`ail2f_raise_invalid`, the parser's `-2` whole-spec code and the value-type
+name), so no `safetyrt.py` edit was needed; pre243's base-only note about a single non-ASCII type
+code is superseded by pre206's CPython `Unknown format code '\x..'` text.  Added the accepted
+`test_ail_pre243.py` and registered it in `ail_check.MODULES`; it passes on both builds.
+Probes `/tmp/probes/p243_invalid_spec.py` and `p243_extra.py` (multi-character, empty, control,
+NUL, quote, long and non-ASCII specs; int/bool/float/str values, negative/zero/empty; literal,
+argument, list item, attribute, dict value and alias routes) match CPython on both builds.
 
 ## 2026-10-25 -- pre227 suite fix: the constant check owns the refusal wording (job-pre227-10260534)
 
