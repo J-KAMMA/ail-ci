@@ -1458,7 +1458,8 @@
     "test_ail_pre237.py": "933f0644f60622df9ab0c91a0356115406179cb59355676178a82ef06c11a144",
     "test_ail_pre243.py": "f3eda5b507f238dbcbd93e461130572be9889c600312a8a8385e1453e7e035e8",
     "test_ail_pre251.py": "a096eb5bcd7fe554011a158fc7fb67b90c5aac58863bac2357baa14cee2938a1",
-    "test_ail_pre44.py": "2e289e69d195eaec51bb992be8209d09b1efe5668202c232eb664910a70865db"
+    "test_ail_pre44.py": "2e289e69d195eaec51bb992be8209d09b1efe5668202c232eb664910a70865db",
+    "test_ail_pre39.py": "4d70db9f25b22fb1ac303e7d1fd431d7bffc61575d0753ae05fab8d2c5d55d90"
   },
   "files": {
     "python/pkg-v12/pipeline.py": "d185d3cd067d1ca503f1fda8e2d8f415e93a0db26fbef6d4b919dd4c0b9a1251",
@@ -1983,6 +1984,7 @@
     "test_ail_pre237.py": "933f0644f60622df9ab0c91a0356115406179cb59355676178a82ef06c11a144",
     "test_ail_pre243.py": "f3eda5b507f238dbcbd93e461130572be9889c600312a8a8385e1453e7e035e8",
     "test_ail_pre251.py": "a096eb5bcd7fe554011a158fc7fb67b90c5aac58863bac2357baa14cee2938a1",
-    "test_ail_pre44.py": "2e289e69d195eaec51bb992be8209d09b1efe5668202c232eb664910a70865db"
+    "test_ail_pre44.py": "2e289e69d195eaec51bb992be8209d09b1efe5668202c232eb664910a70865db",
+    "test_ail_pre39.py": "4d70db9f25b22fb1ac303e7d1fd431d7bffc61575d0753ae05fab8d2c5d55d90"
   }
 }
