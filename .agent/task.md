@@ -1,14 +1,6 @@
-**Fix one pre-existing difference from CPython.** A reviewer of job `pre27` recorded these as already present before that job:
+**Your change fails tests on top of the current integration branch.** Applied alone on today's integ, one or more of these test modules fail: test_ail_pre52 test_ail_safetynet.
 
-**Tests on HEAD:** `test_ail_pre27`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` — 4 modules, 0 failed (244 s). `update_manifest.py --check` exit 0. Commit trailer correct.
-
-**Report claims:** first case fixed and located — verified; `ModuleNotFoundError` same — verified; generic caught type located — verified; "second case already matched" — only partly: the exact recorded `import of 'math, html'` message could not be reproduced, but `import math, html` (unused) matches and html-retained variants are identical on base. Not a regression.
-
-**Not applicable:** speed (compile-time-only check; no emitted C changed).
-
-Unverified: full suite (not run by design); exact original errmsg3 program for the second case.
-
-Reproduce the first one that still differs on this tree (`bash ~/tools/cmp.sh` on both builds). Fix that one cause, or refuse the construct by name at compile time. Add the case to a new `test_ail_pre52.py` and run only that module and `test_ail_safetynet`, then commit. If none of them still differs, change nothing and say so.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find why it fails here (another change may have altered behaviour or output your test expects), and fix it so they pass while keeping your fix and its test. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
