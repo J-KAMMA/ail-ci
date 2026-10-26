@@ -140,14 +140,15 @@ def _apply(P, args, kwargs, result, current):
     fn, cname = bound['fn'], bound['cname']
     recursive = bool(bound.get('recursive', False))
     _py = os.environ.get('AIL_SURFACE') == 'python'
-    if _py and (any(isinstance(n, ast.Global) for n in ast.walk(fn)) or getattr(ctx, 'gdecl', None)):
+    _general_ok = not os.environ.get('AIL_NO_GENERAL')
+    if _general_ok and _py and (any(isinstance(n, ast.Global) for n in ast.walk(fn)) or getattr(ctx, 'gdecl', None)):
         from pyfront import Unsupported
         raise Unsupported('%s() writes a module variable, which the tagged-int lowering does not cover'
                           % fn.name)
     _user_methods = set(getattr(ctx, 'user_method_names', ()))
     _attr_calls = [n for n in ast.walk(fn)
                    if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
-    if _py and any(n.func.attr in _user_methods for n in _attr_calls):
+    if _general_ok and _py and any(n.func.attr in _user_methods for n in _attr_calls):
         from pyfront import Unsupported
         raise Unsupported('%s() calls a user method, which the tagged-int lowering does not type' % fn.name)
     _io_names = {'open', 'write_text', 'write_bytes', 'read_text', 'read_bytes', 'file_chunks'}
@@ -162,7 +163,7 @@ def _apply(P, args, kwargs, result, current):
         and (n.func.id.startswith(('_ail_', '_Ail')) or n.func.id in _io_names
              or n.func.id in getattr(ctx, 'prelude_names', ()))
         for n in ast.walk(fn)) or any(isinstance(n, (ast.With, ast.AsyncWith)) for n in ast.walk(fn))
-    if _py and not _io_like:
+    if _general_ok and _py and not _io_like:
         for _n in ast.walk(fn):
             if isinstance(_n, ast.Call) and isinstance(_n.func, ast.Name) and (_n.func.id in ('int', '_ail_int2') or _n.func.id.endswith(('str_to_int', 'bytes_to_int'))) and _n.args:
                 try:
@@ -173,7 +174,7 @@ def _apply(P, args, kwargs, result, current):
                     from pyfront import Unsupported
                     raise Unsupported('%s() parses an int from text, which the tagged-int lowering does not cover'
                                       % fn.name)
-    if _py and not _library_call and (getattr(ctx, 'numeric_tokens', None) or getattr(ctx, 'numeric_assignments', None)):
+    if _general_ok and _py and not _library_call and (getattr(ctx, 'numeric_tokens', None) or getattr(ctx, 'numeric_assignments', None)):
         from pyfront import Unsupported
         raise Unsupported('%s() mixes int and float bindings, which the tagged-int lowering does not cover'
                           % fn.name)
@@ -210,11 +211,6 @@ def _apply(P, args, kwargs, result, current):
         isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
         and (getattr(P, 'TINT_SIGS', {}).get(n.func.id) or ((), 0))[1]
         for n in ast.walk(fn))
-    if _py and _needs_tint and _no_tint_locals and not _has_tint_call \
-            and not (_proof or '').startswith(('it calls ', 'it contains ')):
-        from pyfront import Unsupported
-        raise Unsupported('%s() has an int operation the local proof cannot bound, but no tagged local (%s)'
-                          % (fn.name, _proof))
     _sig = getattr(P, 'TINT_SIGS', {}).get(fn.name) if _py else None
     if _sig and (any(_sig[0]) or _sig[1]) and not _io_like:
         _needs_tint = True
