@@ -177,6 +177,53 @@ used as a value`) would otherwise claim a nested one first, so the nested check 
 that screen is kept unchanged for non-nested saved generators.  A generator expression with no
 generator expression inside it, including one holding a list/set/dict comprehension, still builds
 and matches CPython.  Added `AIL_CURRENT/test_ail_pre42.py` and registered it in `ail_check.MODULES`.
+## 2026-10-26 -- review fix: pre47 refusal wording (job-rbpre47-10261854)
+
+The pre47 reapply's refusal message carried the tree's older `int64 constant expression out of
+range` phrase in its parenthetical, so `test_ail_pre191` failed on both builds: it requires a
+function-body constant to be refused with `outside the signed 64-bit range` but not that older
+phrase. Dropped the parenthetical phrase from `pyfront.fold_int_constants`'s refusal; the pass
+still says `a constant integer expression overflows int64`, `outside the signed 64-bit range`
+and `64-bit signed integer`, so `test_ail_pre47` and the integration-tree checks keep their
+wording. No other behaviour changed.
+
+Probes `/tmp/probes/review_*.py` on both builds: `review_dead_shift` and `review_unreached_shift`
+are refused with the new wording (no older phrase), `review_refuse_argument` is refused by name,
+and `review_live_shift`, `review_live_negative`, `review_inrange`, `pre47_inrange` and
+`pre47_contexts` match CPython. Tests on the final tree: 12 modules (pre47, pre191, pre172,
+pre203, pre214, pre248, pre253, pre215, pre184, safetynet, files, corpus_findings3), 0 failed;
+`tools/update_manifest.py --check` passes.
+
+## 2026-10-26 -- re-apply pre47: constant integer expressions (job-rbpre47-10261854)
+
+Re-applied the accepted pre47 change on this tree. The generic exact folder
+(`pyfunc._const_int_expr` / `fold_int_constant`) was already present for the general path, so the
+conflict resolution keeps its zero/base shortcuts, bool-result handling and 2**22-bit budget
+instead of pre47's narrower 4096-bit evaluator. `pyfront.fold_int_constants` now runs before both
+builds (from `pyc.to_c` and `_build_unshadowed`): an in-range constant expression becomes one
+int64 literal (`-2**63`, `2**63 - 1`, `-(-2)**63` is out of range) and an out-of-range one is
+refused by name with the pre47 wording plus the tree's older `outside the signed 64-bit range`
+phrase (the review fix above dropped the older `int64 constant expression out of range` phrase).
+The pass
+skips `str.split`/`rsplit` maxsplit arguments so their specific diagnostics survive, and skips
+f-strings so a debug field such as `f"{-(1 << 63)=}"` keeps its source text. A digit starting a
+rewritten expression is separated from an adjacent keyword, so `1 and+(1 << 62)` stays valid.
+`pyfront._c_expr` now refuses an out-of-int64 literal and emits a folded INT64_MIN as
+`(-9223372036854775807LL - 1)` rather than `ck_neg(9223372036854775808)`; `pyboxed` and
+`pyboxed2` accept the same unary spelling. Added `AIL_CURRENT/test_ail_pre47.py` and registered it
+in `ail_check.MODULES`. `tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py`
+was run and `--check` passes.
+
+Probes in `/tmp/probes` on both builds: `pre47_inrange` and `pre47_contexts` match CPython
+(boundaries INT64_MIN/MAX, negative and zero, power/shift/floor-div, bool shifts, argument, list
+item, attribute, dict value, assignment alias, absorbing zero, f-string debug, keyword adjacency,
+maxsplit in range); `pre47_refuse_pow`, `_negated`, `_decimal`, `_shift`, `_cancel`, `_huge`,
+`_argument`, `_list`, `_attribute`, `_dict`, `_alias` and `_maxsplit` are refused by name on both
+builds. Pipeline probes built with `pyc`: `sum((-2**63) ...)`, `x + (-2**63)`, `-1 << 63`, `max`,
+guarded `min`, `(2**63 - 1)`, an empty input and the out-of-range refusal all answer CPython or
+refuse by name. Tests on the final tree: 14 modules (pre47, pre203, pre204, pre236, pre241,
+pre251, pre121, pre184, pre201, pre190, pre246, safetynet, files, corpus_findings3), 66 tests,
+0 failed.
 
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
