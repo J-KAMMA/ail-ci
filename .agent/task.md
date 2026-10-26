@@ -1,6 +1,6 @@
-**Re-apply an accepted change on top of the current tree.** Job `pre245` was accepted, but its diff no longer applies here. Fetch it anonymously: `git fetch https://github.com/J-KAMMA/ail-ci.git job-pre245-10260358`. Its change is `git diff ba0795520f473b6cc9d062a5a4455ab80b35b3f4 FETCH_HEAD -- . ':!.agent' ':!corpus' ':!AIL_CURRENT/MANIFEST.json'`.
+**Your change breaks other tests in the full suite.** On top of the current integration branch, these test modules fail with your change and pass without it: test_ail_fuzz59 test_ail_grid_return test_ail_numeric_bindings test_ail_numeric_profiles test_ail_numeric_profiles_native test_ail_record_initializers test_ail_sdk test_ail_sdk_environment test_ail_tcp_json_deadlines test_ail_tcp_json_lines_poll_resources.
 
-Apply the same change to this tree, resolving conflicts by keeping both sides' fixes. Then run `python3 tools/diff_ids.py` and `python3 tools/update_manifest.py`, run the test modules the change touches plus `test_ail_safetynet`, and commit. Change nothing else.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find what your change broke, and fix it so they pass again while keeping your own fix and its test. If your fix cannot coexist with them, revert it and say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
