@@ -249,6 +249,7 @@ class Lowering(TextLowering):
         # B2b: the tagged-small-int view of this function.  A parameter or result the local proof cannot
         # bound is an `ail_tint`; the entry keeps its plain int64 result (converted at each return).
         _tint_on = os.environ.get('AIL_SURFACE') == 'python' and not getattr(P, 'TINT_DISABLED', False)
+        self.tint_on = _tint_on
         self.tint_sig = getattr(P, 'TINT_SIGS', {}).get(fn.name, ((), 0)) if _tint_on else ((), 0)
         if self.cname == 'run':
             self.tint_sig = ((), 0)      # the C harness prints run()'s result as an int64
@@ -2412,6 +2413,8 @@ class Lowering(TextLowering):
                         if value == 0:
                             return self.const(I.I64, 0)
                         if count == 63 and value == -1:
+                            if not self.tint_on:
+                                return self.const(I.I64, -(1 << 63))
                             # INT64_MIN, kept as a tagged value so that later arithmetic that
                             # legitimately exceeds int64 still promotes (a plain int64 constant
                             # would stop at the overflow check).
