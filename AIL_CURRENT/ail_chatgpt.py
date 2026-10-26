@@ -570,6 +570,429 @@ def _binds_name(tree, name):
     return False
 
 
+def _scope_nodes(body):
+    stack = list(body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        yield node
+        stack.extend(ast.iter_child_nodes(node))
+
+
+def _abs_all_params(function):
+    args = function.args
+    names = [argument.arg for argument in args.posonlyargs + args.args]
+    names.extend(argument.arg for argument in args.kwonlyargs)
+    if args.vararg is not None:
+        names.append(args.vararg.arg)
+    if args.kwarg is not None:
+        names.append(args.kwarg.arg)
+    return names
+
+
+def _abs_key_value(node, env, classes, depth=0):
+    if isinstance(node, ast.Constant) and type(node.value) in (str, bytes, int):
+        return node.value
+    value = _abs_int_value(node, env, classes, depth + 1)
+    if value is not None and value[0] == 'int':
+        return value[1]
+    return None
+
+
+def _abs_call_bindings(function, call, env, classes, skip=0):
+    if any(isinstance(argument, ast.Starred) for argument in call.args):
+        return None
+    if any(keyword.arg is None for keyword in call.keywords):
+        return None
+    arguments = function.args
+    positional = list(arguments.posonlyargs) + list(arguments.args)
+    known = {argument.arg for argument in positional + arguments.kwonlyargs}
+    values = {}
+
+    def evaluate(expression):
+        return _abs_int_value(expression, env, classes)
+
+    for index, parameter in enumerate(positional):
+        if index < skip:
+            continue
+        argument_index = index - skip
+        if argument_index < len(call.args):
+            values[parameter.arg] = evaluate(call.args[argument_index])
+    for keyword in call.keywords:
+        if keyword.arg in known:
+            values[keyword.arg] = evaluate(keyword.value)
+    default_count = len(arguments.defaults)
+    for index, parameter in enumerate(positional):
+        if parameter.arg in values:
+            continue
+        default_index = index - (len(positional) - default_count)
+        if default_index >= 0:
+            values[parameter.arg] = evaluate(arguments.defaults[default_index])
+    for parameter, default in zip(arguments.kwonlyargs, arguments.kw_defaults):
+        if parameter.arg not in values and default is not None:
+            values[parameter.arg] = evaluate(default)
+    return values
+
+
+def _abs_construct(name, call, env, classes, depth=0):
+    info = classes.get(name)
+    if info is None or depth > 8:
+        return None
+    attrs = dict(info.get('attrs') or {})
+    init = info.get('init')
+    if init is None:
+        return ('obj', attrs)
+    bindings = _abs_call_bindings(init, call, env, classes, skip=1)
+    if bindings is None:
+        return ('obj', attrs)
+    local = dict(env)
+    for parameter in _abs_all_params(init):
+        local.pop(parameter, None)
+    local.update(bindings)
+    stores = _function_scope_stores(init)
+    for statement in init.body:
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            target = statement.targets[0]
+            if (isinstance(target, ast.Name) and stores.get(target.id) == 1):
+                value = _abs_int_value(statement.value, local, classes, depth + 1)
+                if value is not None:
+                    local[target.id] = value
+            elif (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
+                  and target.value.id == 'self'):
+                attrs[target.attr] = _abs_int_value(statement.value, local, classes, depth + 1)
+        elif (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
+              and statement.value is not None and stores.get(statement.target.id) == 1):
+            value = _abs_int_value(statement.value, local, classes, depth + 1)
+            if value is not None:
+                local[statement.target.id] = value
+    return ('obj', attrs)
+
+
+def _abs_int_value(node, env, classes, depth=0):
+    if depth > 10:
+        return None
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        return ('int', node.value)
+    if isinstance(node, ast.Name):
+        return env.get(node.id)
+    if isinstance(node, (ast.UnaryOp, ast.BinOp)):
+        ints = {name: value[1] for name, value in env.items()
+                if value is not None and value[0] == 'int'}
+        value = _constant_int(node, ints, shifts=True)
+        if value is not None:
+            return ('int', value)
+        return None
+    if isinstance(node, (ast.List, ast.Tuple)):
+        values = []
+        for item in node.elts:
+            if isinstance(item, ast.Starred):
+                return None
+            values.append(_abs_int_value(item, env, classes, depth + 1))
+        return ('seq', tuple(values))
+    if isinstance(node, ast.Dict):
+        pairs = []
+        for key_node, value_node in zip(node.keys, node.values):
+            if key_node is None:
+                return None
+            key = _abs_key_value(key_node, env, classes, depth + 1)
+            if key is None:
+                return None
+            value = None
+            if value_node is not None:
+                value = _abs_int_value(value_node, env, classes, depth + 1)
+            pairs.append((key, value))
+        return ('dict', tuple(pairs))
+    if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice):
+        base = _abs_int_value(node.value, env, classes, depth + 1)
+        if base is None:
+            return None
+        if base[0] == 'seq':
+            index = _abs_key_value(node.slice, env, classes, depth + 1)
+            if type(index) is not int:
+                return None
+            values = base[1]
+            if not -len(values) <= index < len(values):
+                return None
+            return values[index]
+        if base[0] == 'dict':
+            key = _abs_key_value(node.slice, env, classes, depth + 1)
+            if key is None:
+                return None
+            found = None
+            for stored, value in base[1]:
+                if type(stored) is type(key) and stored == key:
+                    found = value
+            return found
+        return None
+    if isinstance(node, ast.Attribute):
+        base = _abs_int_value(node.value, env, classes, depth + 1)
+        if base is not None and base[0] == 'obj':
+            return base[1].get(node.attr)
+        return None
+    if isinstance(node, ast.IfExp):
+        left = _abs_int_value(node.body, env, classes, depth + 1)
+        right = _abs_int_value(node.orelse, env, classes, depth + 1)
+        return left if left == right else None
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id in classes):
+        return _abs_construct(node.func.id, node, env, classes, depth + 1)
+    return None
+
+
+def _abs_classes(tree, env):
+    classes = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name not in classes:
+            init = None
+            for item in node.body:
+                if (isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                        and item.name == '__init__'):
+                    init = item
+            classes[node.name] = {'node': node, 'attrs': {}, 'init': init}
+    for info in classes.values():
+        node = info['node']
+        attrs = info['attrs']
+        local = dict(env)
+        stores = {}
+        for item in node.body:
+            if (isinstance(item, ast.Assign) and len(item.targets) == 1
+                    and isinstance(item.targets[0], ast.Name)):
+                name = item.targets[0].id
+                stores[name] = stores.get(name, 0) + 1
+        for item in node.body:
+            if (isinstance(item, ast.Assign) and len(item.targets) == 1
+                    and isinstance(item.targets[0], ast.Name)
+                    and stores.get(item.targets[0].id) == 1):
+                target = item.targets[0]
+                value = _abs_int_value(item.value, local, classes)
+                if value is not None:
+                    attrs[target.id] = value
+                    local[target.id] = value
+            elif (isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)
+                  and item.value is not None and stores.get(item.target.id) == 1):
+                value = _abs_int_value(item.value, local, classes)
+                if value is not None:
+                    attrs[item.target.id] = value
+                    local[item.target.id] = value
+        init = info['init']
+        if init is not None:
+            local = dict(local)
+            for parameter in _abs_all_params(init):
+                local.pop(parameter, None)
+            stores = _function_scope_stores(init)
+            for statement in init.body:
+                if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+                    target = statement.targets[0]
+                    if isinstance(target, ast.Name) and stores.get(target.id) == 1:
+                        value = _abs_int_value(statement.value, local, classes)
+                        if value is not None:
+                            local[target.id] = value
+                    elif (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
+                          and target.value.id == 'self'):
+                        attrs[target.attr] = _abs_int_value(statement.value, local, classes)
+                elif (isinstance(statement, ast.AnnAssign)
+                      and isinstance(statement.target, ast.Name) and statement.value is not None
+                      and stores.get(statement.target.id) == 1):
+                    value = _abs_int_value(statement.value, local, classes)
+                    if value is not None:
+                        local[statement.target.id] = value
+    return classes
+
+
+def _abs_invalidate_method_call(statement, env):
+    if not (isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call)):
+        return
+    func = statement.value.func
+    if not (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)):
+        return
+    base = env.get(func.value.id)
+    if base is not None and base[0] == 'obj':
+        base[1].clear()
+
+
+def _abs_module_env(tree, known, classes):
+    env = {name: ('int', value) for name, value in known.items()}
+    stores = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            stores[node.id] = stores.get(node.id, 0) + 1
+    for statement in tree.body:
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            target = statement.targets[0]
+            if isinstance(target, ast.Name):
+                if stores.get(target.id) == 1:
+                    value = _abs_int_value(statement.value, env, classes)
+                    if value is not None:
+                        env[target.id] = value
+            elif isinstance(target, ast.Attribute):
+                base = _abs_int_value(target.value, env, classes)
+                if base is not None and base[0] == 'obj':
+                    base[1][target.attr] = _abs_int_value(statement.value, env, classes)
+        elif (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
+              and statement.value is not None and stores.get(statement.target.id) == 1):
+            value = _abs_int_value(statement.value, env, classes)
+            if value is not None:
+                env[statement.target.id] = value
+        _abs_invalidate_method_call(statement, env)
+    return env
+
+
+def _abs_function_env(function, module_env, classes):
+    env = dict(module_env)
+    parameters = set(_abs_all_params(function))
+    stores = _function_scope_stores(function)
+    declared = set()
+    for node in ast.walk(function):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            declared.update(node.names)
+    for name in stores:
+        env.pop(name, None)
+    for name in parameters | declared:
+        env.pop(name, None)
+    for statement in function.body:
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            target = statement.targets[0]
+            if (isinstance(target, ast.Name) and stores.get(target.id) == 1
+                    and target.id not in parameters and target.id not in declared):
+                value = _abs_int_value(statement.value, env, classes)
+                if value is not None:
+                    env[target.id] = value
+            elif isinstance(target, ast.Attribute):
+                base = _abs_int_value(target.value, env, classes)
+                if base is not None and base[0] == 'obj':
+                    base[1][target.attr] = _abs_int_value(statement.value, env, classes)
+        elif (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
+              and statement.value is not None and stores.get(statement.target.id) == 1
+              and statement.target.id not in parameters and statement.target.id not in declared):
+            value = _abs_int_value(statement.value, env, classes)
+            if value is not None:
+                env[statement.target.id] = value
+        _abs_invalidate_method_call(statement, env)
+    return env
+
+
+def _abs_iter_variants(value):
+    if value is None:
+        return None
+    if value[0] == 'seq':
+        return list(value[1])
+    if value[0] == 'dict':
+        return [('int', key) if type(key) is int else None for key, _ in value[1]]
+    return None
+
+
+def _abs_bind_target(target, value, env):
+    if isinstance(target, ast.Name):
+        env[target.id] = value
+    elif isinstance(target, ast.Tuple):
+        for item in target.elts:
+            if isinstance(item, ast.Name):
+                env.pop(item.id, None)
+
+
+def _abs_flow(nodes, env, classes):
+    for node in nodes:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        yield node, env
+        if isinstance(node, ast.For):
+            for child in ast.iter_child_nodes(node):
+                if child is node.target:
+                    continue
+                if child is node.iter or child in node.orelse:
+                    yield from _abs_flow([child], env, classes)
+                    continue
+                variants = _abs_iter_variants(_abs_int_value(node.iter, env, classes))
+                if variants is None:
+                    loop_env = dict(env)
+                    _abs_bind_target(node.target, None, loop_env)
+                    yield from _abs_flow([child], loop_env, classes)
+                elif len(variants) > 64:
+                    chosen = next((variant for variant in variants
+                                   if variant is not None and variant[0] == 'int'
+                                   and variant[1] == _INT64_MIN), None)
+                    loop_env = dict(env)
+                    _abs_bind_target(node.target, chosen, loop_env)
+                    yield from _abs_flow([child], loop_env, classes)
+                else:
+                    for variant in variants:
+                        loop_env = dict(env)
+                        _abs_bind_target(node.target, variant, loop_env)
+                        yield from _abs_flow([child], loop_env, classes)
+        else:
+            for child in ast.iter_child_nodes(node):
+                yield from _abs_flow([child], env, classes)
+
+
+def _abs_check_call(node, env, classes):
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'abs'):
+        return
+    if len(node.args) != 1 or node.keywords or isinstance(node.args[0], ast.Starred):
+        return
+    value = _abs_int_value(node.args[0], env, classes)
+    if value is None or value[0] != 'int':
+        return
+    result = abs(value[1])
+    if not _INT64_MIN <= result <= _INT64_MAX:
+        error = ValueError(f'int64 constant expression out of range: {_constant_diagnostic(result)}')
+        error.source_line = node.lineno
+        error.source_column = node.col_offset
+        raise error
+
+
+def _check_int64_abs_flows(tree, known):
+    """Follow a constant int64 minimum through containers, attributes and call arguments into
+    ``abs``.  The exact value is needed: an unknown operand keeps its run-time behaviour."""
+    base_env = {name: ('int', value) for name, value in known.items()}
+    classes = _abs_classes(tree, base_env)
+    module_env = _abs_module_env(tree, known, classes)
+    functions = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            functions.setdefault(node.name, []).append(node)
+    function_by_id = {id(node): node for nodes in functions.values() for node in nodes}
+    base = {fid: _abs_function_env(function, module_env, classes)
+            for fid, function in function_by_id.items()}
+    queue = []
+
+    def collect(pairs):
+        for node, env in pairs:
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                for function in functions.get(node.func.id, ()):
+                    bindings = _abs_call_bindings(function, node, env, classes)
+                    if bindings is not None:
+                        queue.append((id(function), bindings))
+
+    def check(pairs):
+        for node, env in pairs:
+            _abs_check_call(node, env, classes)
+
+    module_nodes = list(_abs_flow(tree.body, module_env, classes))
+    check(module_nodes)
+    collect(module_nodes)
+    for fid, function in function_by_id.items():
+        nodes = list(_abs_flow(function.body, base[fid], classes))
+        check(nodes)
+        collect(nodes)
+    seen = set()
+    index = 0
+    while index < len(queue) and index < 4000:
+        fid, bindings = queue[index]
+        index += 1
+        key = (fid, tuple(sorted((name, repr(value)) for name, value in bindings.items())))
+        if key in seen:
+            continue
+        seen.add(key)
+        function = function_by_id[fid]
+        env = dict(base[fid])
+        env.update(bindings)
+        nodes = list(_abs_flow(function.body, env, classes))
+        check(nodes)
+        collect(nodes)
+
+
 def _check_int64_abs_constants(tree, known):
     """Refuse a constant ``abs`` whose exact value int64 cannot hold, by name.
 
@@ -609,6 +1032,7 @@ def _check_int64_abs_constants(tree, known):
         local = _function_local_int_constants(function, known)
         for node in _walk_own_scope(function):
             check(node, local)
+    _check_int64_abs_flows(tree, known)
 
 
 def _check_int64_unary_constants(tree):

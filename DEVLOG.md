@@ -1,3 +1,17 @@
+## 2026-10-26 -- refuse abs() of an int64 minimum reached through a container (job-pre262-10261653)
+
+The bigint-fix13 review recorded a pre-existing CPython difference: `abs(xs[0])`, `abs(box.value)`,
+`abs(d["v"])`, `abs(x)` for a call argument and a literal loop target holding `-(2 ** 63)` still
+stopped with `integer overflow` on both builds, where CPython prints 9223372036854775808.  A new
+constant-flow check follows the exact value through module/local list/tuple/dict literals and
+aliases, instance attributes (including `__init__`), literal loop targets and direct call
+arguments; the `abs` call is refused at compile time with the pre214 wording.  In-range values,
+unused minima, unknown run-time operands, method-mutated attributes and a shadowed `abs` keep
+matching CPython.  Added `AIL_CURRENT/test_ail_pre262.py` (2 tests, both builds) and registered it
+in `ail_check.MODULES` and `ci_shards.json`.  Probes `/tmp/probes/pre262/*` (15 programs): 11
+refused by name on both builds, 4 match CPython on both.  Final-state tests: test_ail_pre262,
+test_ail_pre214, test_ail_pre215, test_ail_pre248, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is
