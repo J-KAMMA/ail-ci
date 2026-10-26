@@ -1,3 +1,24 @@
+## 2026-10-26 -- pre281: empty sequence repeated by a huge count (job-pre281-10270156)
+
+The pre271 review's list mentioned only an unverified speed note, so I probed the `*=` list-repeat
+area it described.  A real difference is present on this tree: repeating an empty sequence by a
+huge count ran the repeat loop `count` times.  `x = []; x *= 10**18` hung (both builds, observed
+for over nine minutes in the general-path executable), while CPython returns `[]` immediately;
+`[] * 10**18`, `"" *= 10**18`, `() *= 10**18` and the same count through an argument, list item,
+attribute and dict value behave the same way.  The repeat loops in `ail_op_imul` (in-place list),
+`ail_op_mul` (list/tuple), `ail_str_repeat` (string) and the v1 `ail__repeat_str`/`ail__repeat_vec`
+helpers now skip the loop when the sequence has no elements.  The non-empty path is unchanged: the
+in-place guard already required `n > 0`, so the added check only takes the empty branch; negative,
+zero, bool and aliased lists still match CPython.
+
+Probes in `/tmp/probes/pre281` on both builds: `p1_basic`, `p2_types`, `p3_alias`, `p4_routes`,
+`p5_negative_empty`, `p6_otherseq`, `p7_growth`, `p8_nested`, `p9_empty_big`, `p10_empty_routes`
+and `p11_nonempty_sanity` match CPython; `p6b_bytearray` still shows a pre-existing bytearray
+`*=` aliasing difference (both builds, untouched by this change), recorded as
+`C?-job-pre281-10270156-2`.  Added `AIL_CURRENT/test_ail_pre281.py` (4 tests) and registered it in
+`ail_check.MODULES` and `ci_shards.json`.  `python3 tools/update_manifest.py --check` passes.
+Tests on the final tree: `test_ail_pre281` (51.8 s), `test_ail_safetynet` (123.6 s),
+`test_ail_files` (130.3 s), `test_ail_corpus_findings3` (210.1 s): 4 modules, 0 failed.
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is

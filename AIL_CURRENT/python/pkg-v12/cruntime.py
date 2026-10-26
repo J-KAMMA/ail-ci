@@ -10045,15 +10045,15 @@ static inline ail_obj ail_obj_sub(ail_obj a, ail_obj b) {
     return ail_box_none();
 }
 static inline ail_obj ail__repeat_str(ail_str s, int64_t k) {
-    if (k <= 0) { ail_str r; r.bytes = 0; r.p = NULL;  r.n = 0; return ail_box_str(r); }
+    if (k <= 0 || s.n == 0) { ail_str r; r.bytes = 0; r.p = NULL;  r.n = 0; return ail_box_str(r); }
     int64_t total = s.n * k;
     uint16_t *q = ail_str_alloc_buf(total > 0 ? total : 1);
-    for (int64_t i = 0; i < k; i++) if (s.n) ail_str_put(q + i * s.n, s);
+    for (int64_t i = 0; i < k; i++) ail_str_put(q + i * s.n, s);
     ail_str r; r.bytes = 0; r.p = q;  r.n = total; return ail_box_str(r);
 }
 static inline ail_obj ail__repeat_vec(ail_obj c, int64_t k) {
     ail_vec *nv = ail_vec_new();
-    if (k > 0) for (int64_t i = 0; i < k; i++) for (int64_t j = 0; j < c.v->n; j++) ail_vec_push(nv, c.v->p[j]);
+    if (k > 0 && c.v->n > 0) for (int64_t i = 0; i < k; i++) for (int64_t j = 0; j < c.v->n; j++) ail_vec_push(nv, c.v->p[j]);
     ail_obj r; r.tag = c.tag; r.v = nv; return r;
 }
 static inline ail_obj ail_obj_mul(ail_obj a, ail_obj b) {
@@ -12926,10 +12926,10 @@ static inline ail_obj ail_str_of_int(ail_ctx *cx, int64_t v) {
 }
 static inline ail_obj ail_str_repeat(ail_ctx *cx, ail_obj s, int64_t k) {
     ail_str t = ail_view_to_str(s);
-    if (k <= 0) return ail_str_to_view(cx, (ail_str){0, 0});
+    if (k <= 0 || t.n == 0) return ail_str_to_view(cx, (ail_str){0, 0});
     int64_t total = t.n * k;
     ail_strbuild bu = ail_str_buf1(cx, total, s);
-    for (int64_t i = 0; i < k; i++) if (t.n) ail_str_put(bu.buf + i * t.n, t);
+    for (int64_t i = 0; i < k; i++) ail_str_put(bu.buf + i * t.n, t);
     return ail_str_buf_done(bu, total);
 }
 static inline ail_obj ail_str_lower(ail_ctx *cx, ail_obj s) {
@@ -14862,7 +14862,7 @@ static inline ail_st ail_op_mul(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)
     if ((a.tag == AIL_T_LIST || a.tag == AIL_T_TUPLE) && ail__is_intlike(b.tag)) {
         ail_vecobj *va = (ail_vecobj *)a.o; int64_t k = b.i;
         ail_vecobj *nv = ail_vec_new(cx);
-        if (k > 0) { ail_vec_reserve(cx, nv, va->n * k); for (int64_t i = 0; i < k; i++) for (int64_t j = 0; j < va->n; j++) nv->p[nv->n++] = va->p[j]; }
+        if (k > 0 && va->n > 0) { ail_vec_reserve(cx, nv, va->n * k); for (int64_t i = 0; i < k; i++) for (int64_t j = 0; j < va->n; j++) nv->p[nv->n++] = va->p[j]; }
         ail_obj r; r.tag = a.tag; r.o = (ail_gcobj *)nv; *out = r; return AIL_OK;
     }
     if ((b.tag == AIL_T_LIST || b.tag == AIL_T_TUPLE) && ail__is_intlike(a.tag)) return ail_op_mul(cx, out, b, a);
@@ -19255,8 +19255,8 @@ static inline ail_st ail_op_imul(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b
     if (a.tag == AIL_T_LIST && ail__is_intlike(b.tag)) {
         ail_vecobj *v = (ail_vecobj *)a.o; int64_t k = b.i, n = v->n;
         if (k <= 0) { v->n = 0; }
-        else if (k > 1) {
-            if (n > 0 && k > (INT64_MAX / 16) / n) return ail_hit_limit(cx, "int_overflow", "list repeat too large");
+        else if (k > 1 && n > 0) {
+            if (k > (INT64_MAX / 16) / n) return ail_hit_limit(cx, "int_overflow", "list repeat too large");
             ail_vec_reserve(cx, v, n * k);
             for (int64_t r = 1; r < k; r++) for (int64_t j = 0; j < n; j++) v->p[v->n++] = v->p[j];
         }
