@@ -1,56 +1,12 @@
-# bigint-fix05: tint runtime helpers missing from the C ("undefined reference to ail_tint_from_int64 / ail_tint_i64") (C)
+# Continue: fix the reviewer's findings
 
-Some typed+IR programs call `ail_tint_from_int64` / `ail_tint_i64` (and the callee prototype) but the tagged-int
-runtime fragment is not emitted, or the call is emitted before its prototype. gcc warns `implicit declaration of function
-'ail_tint_from_int64'` and the link fails with `undefined reference`. (Distinct from fix04, where the types disagree.)
+You continue a job on its own branch: your earlier commits are already here. The reviewer returned FIX. Its last
+review is the last "## review" section of `.agent/pipeline.md` in this checkout (read the whole file: the original task,
+your reports and the reviews are there).
 
-## Modules
-test_ail_modconst (2 tests: recursive entry reading a module table; str-set methods recursion), test_ail_silent2
-(test_singleton_identity_typed_path_builds), test_ail_typed_inherit (test_ir_leaves_hierarchies_to_the_legacy_emitter),
-test_ail_nested_functions (grid: undefined reference in `grid`/`dfs` programs; may be fix04 as well), test_ail_typed_blockers (1).
-
-## Reproducers (typed path, `AIL_NO_GENERAL=1 AIL_IR=1`)
-`m1.py`:
-```
-STOP = {"a", "the"}
-
-def solve(n: int) -> int:
-    if n <= 0:
-        return 0
-    return (1 if "a" in STOP else 0) + solve(n - 1)
-
-def main() -> None:
-    print(solve(4))
-    print(solve(0))
-
-main()
-```
-CPython `4` `0`. AIL: `undefined reference to 'ail_tint_from_int64'` / `'ail_tint_i64'` in `solve`. With `AIL_IR=0` it works.
-
-`is1.py`:
-```
-def p(v: int) -> int:
-    return v
-
-def q(x: int) -> int:
-    return 1 if p(1) is None else 2
-
-def main() -> None:
-    print(q(3))
-main()
-```
-CPython `2`. AIL: `implicit declaration of function 'p'` and `'ail_tint_from_int64'` at the `p(...)` call (the call sits in a
-statement context emitted before the prototype, and the helper fragment is not included).
-
-## Category
-C. Fix the fragment selection (the tint helpers must be included whenever any emitted code references them, including
-discarded-result calls, `is` comparisons, recursive functions and module-table readers) and the prototype order.
-
-## Fixed means
-m1.py and is1.py build and print the CPython output on the typed path alone, with `AIL_IR=1` and `AIL_IR=verify`.
-test_ail_silent2.NumberIs and test_ail_modconst pass. (test_ail_silent2.NanIdentity is a different cause, fix14.)
-
-run the listed modules and test_ail_bigint test_ail_tint test_ail_unified before committing.
+Fix every defect the last review lists, re-run the probes and the test modules the original task names, and commit.
+Do not undo the earlier work unless a finding requires it. If a finding is wrong, say so in your report with the
+evidence (program, CPython output, AIL output).
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.

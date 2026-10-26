@@ -69,6 +69,40 @@ PY
   [ $rc = 124 ] && echo "(cut off after $3 minutes)"
   return 0
 }
+wait_offpeak() {  # paid DeepSeek costs double Mon-Fri 01-04 and 06-10 UTC (OpenCode Go and Command Code alike):
+  # before a paid model, wait for the window to end (owner, 2026-10-26: GitHub too, not only the local runner)
+  local h d
+  while :; do
+    h=$(date -u +%-H); d=$(date -u +%u)
+    if [ "$d" -le 5 ] && { [ "$h" -ge 1 ] && [ "$h" -lt 4 ] || [ "$h" -ge 6 ] && [ "$h" -lt 10 ]; }; then
+      echo "(peak hours: waiting before the paid model)" >&2; sleep 600
+    else return 0; fi
+  done
+}
+run_cc() {  # $1 prompt file, $2 tag, $3 minutes -> final text on stdout; returns 1 if Command Code could not run
+  wait_offpeak
+  # Command Code CLI (GOAT plan, owner 2026-10-26), pinned; the key lives only in this process's environment
+  [ -x "$RUNNER_TEMP/cc/node_modules/.bin/cmd" ] || npm install --prefix "$RUNNER_TEMP/cc" --no-fund --no-audit command-code@1.88.0 >/dev/null 2>&1 || return 1
+  COMMAND_CODE_API_KEY=$(cat "$RUNNER_TEMP/cc.key") timeout "${3}m" "$RUNNER_TEMP/cc/node_modules/.bin/cmd" -p --model deepseek-v4.1-flash \
+    --yolo -t --max-turns 250 --output-format json \
+    < <(printf 'Do the task described below, in this directory. When finished, reply with a short final report.\n\n'; cat "$1") \
+    > "$RUNNER_TEMP/$2.cc.json" 2> "$RUNNER_TEMP/$2.cc.err"
+  echo "[model commandcode/deepseek-v4.1-flash]"
+  python3 - "$RUNNER_TEMP/$2.cc.json" <<'PY'
+import json, sys
+final = None
+for line in open(sys.argv[1], encoding='utf-8', errors='replace'):
+    try:
+        e = json.loads(line)
+    except ValueError:
+        continue
+    if isinstance(e, dict) and (e.get('type') == 'result' or 'result' in e):
+        # the last line is {"type": "result", ..., "finalText": "..."} (command-code 1.88.0)
+        final = e.get('finalText') or final
+print(final or '(no final text)')
+PY
+  grep -qs '"result"' "$RUNNER_TEMP/$2.cc.json"
+}
 run_oc() {  # $1 prompt file, $2 tag, $3 minutes -> final text on stdout
   # The free Zen build of the model first (zero retention, not used for training); the paid Go model when it fails.
   # When the free quota is used up OpenCode does not exit, it retries silently (2026-10-24), so a watchdog reads
@@ -77,6 +111,7 @@ run_oc() {  # $1 prompt file, $2 tag, $3 minutes -> final text on stdout
   run_qoder "$1" "$2" "$3" && return 0
   for model in opencode/deepseek-v4.1-flash-free opencode-go/deepseek-v4.1-flash; do
     [ "$model" = opencode/deepseek-v4.1-flash-free ] && [ -f "$RUNNER_TEMP/free_out" ] && continue
+    [ "$model" = opencode-go/deepseek-v4.1-flash ] && wait_offpeak
     mins=$3; quota=0
     rm -rf "$HOME/.local/share/opencode/log"
     timeout "${mins}m" "$OC" run --format json --dir "$PWD" -m "$model" "Do the task described in the attached file, in this directory. When finished, reply with a short final report." -f "$1" > "$RUNNER_TEMP/$2.jsonl" 2> "$RUNNER_TEMP/$2.err" &
@@ -92,6 +127,10 @@ run_oc() {  # $1 prompt file, $2 tag, $3 minutes -> final text on stdout
     [ "$model" != opencode/deepseek-v4.1-flash-free ] && break
     grep -qiE '"type": ?"error".*(rate|limit|quota|429|503|free)' "$RUNNER_TEMP/$2.jsonl" || break
   done
+  # OpenCode gave nothing (its week used up, 2026-10-26): the same model through the Command Code GOAT plan
+  if [ -s "$RUNNER_TEMP/cc.key" ] && ! grep -qs '"type": *"text"' "$RUNNER_TEMP/$2.jsonl"; then
+    run_cc "$1" "$2" "$3" && return 0
+  fi
   echo "[model $model]"
   python3 .agent/oc_report.py "$RUNNER_TEMP/$2.jsonl"
   python3 .agent/oc_steps.py "$RUNNER_TEMP/$2.jsonl" 2>/dev/null | sed "s/^/    /"
