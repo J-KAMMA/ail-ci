@@ -1,3 +1,24 @@
+## 2026-10-26 -- class-body class-local shadow (job-pre300-10270742)
+
+The first still-differing item from the pre284 review was the class-body class-local shadow:
+`class B: A = C; y = A.x` printed the module class `A`'s 12 where CPython reads the class-local
+`C` and prints 7, and a class-local class without `N` printed the module class's 2**59 instead of
+raising AttributeError (d1/e1, d2/d4/d5). The general emitter (`pyboxed2`) now records the class
+body's own assignments while it evaluates them, so a later read in that body uses the class
+namespace first: a direct read, a value reaching it through an argument, a list item, an attribute
+or a dict value, a repeated assignment's last value, a plain non-class value, and `K = K` (which
+still reads the module class) all match CPython on both builds. A comprehension stays a function
+scope (module lookup), and a method default that would read the class namespace is refused by name,
+since method defaults are built at the call site here. `AIL_CURRENT/test_ail_pre300.py` covers both
+builds. Probes in `/tmp/probes/pre300`: `d1_alias_val`, `d2_alias_bignum`, `d4_alias_missing`,
+`d5_alias_dynamic`, `e1_alias_val2`, `class_plain_value`, `class_nonclass`, `module_alias`,
+`module_alias_missing`, `p_duplicate`, `p_selfref`, `p_routes`, `p_plain_shadow`, `p_comprehension`,
+`p_argument`, `p_types`, `p_attr_route_container` match CPython; `p_default` is refused by name on
+both builds. Final-state tests: test_ail_pre300 + test_ail_safetynet (2 modules, 101 s, 0 failed);
+test_ail_files, test_ail_corpus_findings3, test_ail_pre170, test_ail_pre227, test_ail_pre255,
+test_ail_fuzz29 (6 modules, 166 s, 0 failed); test_ail_fuzz47, test_ail_pre141, test_ail_pre89,
+test_ail_pre209, test_ail_fuzz94, test_ail_typed_inherit (6 modules, 289 s, 0 failed).
+`tools/update_manifest.py --check` passes.
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's

@@ -1308,6 +1308,21 @@ def _lambda_load_names(node):
     return {n.id for n in ast.walk(node) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
 
 
+def _class_scope_load_names(node):
+    """Name loads an expression evaluates in the class body's own scope (not in a lambda or a
+    comprehension body, which are function scopes in Python 3 and cannot see class locals)."""
+    names = set()
+    stack = [node]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, ast.Name) and isinstance(cur.ctx, ast.Load):
+            names.add(cur.id)
+        if isinstance(cur, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            continue
+        stack.extend(ast.iter_child_nodes(cur))
+    return names
+
+
 def _refuse_lambda_forward_defaults(tree, bound_at):
     """A lambda has no `def` statement: `boxclosure.closure_value` evaluates its defaults where the
     lambda is made, in the order CPython does, but a default that reads a name bound only LATER
@@ -1450,15 +1465,32 @@ def _hoist_defaults(tree):
     _refuse_lambda_forward_defaults(tree, bound_at)
     for si, stmt in enumerate(tree.body):
         funcs = []
+        class_seen = {}
         if isinstance(stmt, ast.FunctionDef):
             funcs = [stmt]
         elif isinstance(stmt, ast.ClassDef):
             funcs = [m for m in stmt.body if isinstance(m, ast.FunctionDef)]
+            seen = set()
+            for member in stmt.body:
+                if isinstance(member, ast.FunctionDef):
+                    class_seen[id(member)] = set(seen)
+                elif isinstance(member, ast.Assign) and len(member.targets) == 1 \
+                        and isinstance(member.targets[0], ast.Name):
+                    seen.add(member.targets[0].id)
+                elif isinstance(member, ast.AnnAssign) and isinstance(member.target, ast.Name) \
+                        and member.value is not None:
+                    seen.add(member.target.id)
         for f in funcs:
             for defaults in (f.args.defaults, f.args.kw_defaults):
                 for i, d in enumerate(defaults):
                     if d is None or not (isinstance(d, _HOISTED_DEFAULTS) or not _is_literal_default(d)):
                         continue
+                    local = _class_scope_load_names(d) & class_seen.get(id(f), set())
+                    if local:
+                        raise Unsupported(
+                            'a method default that reads the class-body local %s: CPython evaluates '
+                            'the default in the class body (once, when the def runs), which this '
+                            'path resolves outside it' % sorted(local)[0])
                     before = set().union(*bound_at[:si]) if si else set()
                     for nm in ast.walk(d):
                         if (isinstance(nm, ast.Name) and isinstance(nm.ctx, ast.Load) and nm.id not in before
@@ -3406,8 +3438,16 @@ class Compiler(boxclosure.ClosureMixin):
         methods = {}
         class_attrs = []
         body_order = []          # class dict order: ('p'/'m', name) or ('a', class_attrs index)
+        seen_class_attrs = set()
         for item in node.body:
             if isinstance(item, ast.FunctionDef):
+                for dexpr in list(item.args.defaults) + [d for d in item.args.kw_defaults if d is not None]:
+                    local = _class_scope_load_names(dexpr) & seen_class_attrs
+                    if local:
+                        raise Unsupported(
+                            'a method default that reads the class-body local %s: CPython evaluates '
+                            'the default in the class body (once, when the def runs), which this '
+                            'path resolves at the call site instead' % sorted(local)[0])
                 mcname = 'pm_%s_%s' % (node.name, item.name)
                 setter = any(isinstance(d, ast.Attribute) and d.attr == 'setter' for d in item.decorator_list)
                 info = self._register_function(item, cname=mcname + ('__set' if setter else ''), is_method=True,
@@ -3417,11 +3457,13 @@ class Compiler(boxclosure.ClosureMixin):
             elif isinstance(item, ast.Assign) and len(item.targets) == 1 and \
                     isinstance(item.targets[0], ast.Name):
                 class_attrs.append((item.targets[0].id, item.value))
+                seen_class_attrs.add(item.targets[0].id)
                 body_order.append(('a', len(class_attrs) - 1))
             elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
                 # `count: int = 0` is a class attribute; `name: str` alone declares nothing at run time
                 if item.value is not None:
                     class_attrs.append((item.target.id, item.value))
+                    seen_class_attrs.add(item.target.id)
                     body_order.append(('a', len(class_attrs) - 1))
             elif isinstance(item, (ast.Pass, ast.Expr)):
                 continue
@@ -4867,6 +4909,11 @@ class Compiler(boxclosure.ClosureMixin):
     def expr_Name(self, node, ctx):
         if node.id in ('True', 'False'):
             return 'ail_box_bool(%d)' % (1 if node.id == 'True' else 0)
+        shadow = getattr(ctx, 'class_attr_shadow', None)
+        if shadow is not None and node.id in shadow:
+            # A class body reads its own namespace first (LOAD_NAME): an attribute assigned earlier
+            # in the same body shadows a module class/value of that name.
+            return 'g_slots_arr[%d]' % shadow[node.id]
         if (node.id in self.classes and node.id not in self.module_names
                 and node.id not in ctx.slot_of and node.id not in ctx.ptr_names
                 and node.id not in ctx.clo_index and node.id not in ctx.free_names
@@ -5612,14 +5659,15 @@ class Compiler(boxclosure.ClosureMixin):
         # but is not a value the general path can hand out, so refuse it by name (it used to fall
         # through to the base attribute).
         direct = (isinstance(node.value, ast.Name) and node.value.id in self.classes
-                  and node.value.id not in ctx.slot_of and node.value.id not in self.module_names)
+                  and node.value.id not in ctx.slot_of and node.value.id not in self.module_names
+                  and node.value.id not in getattr(ctx, 'class_attr_shadow', {}))
         value_kind = self.infer_kind(node.value, ctx)
         cname = node.value.id if direct else (value_kind[6:] if value_kind and value_kind.startswith('class:') else None)
         if cname is not None:
             owner, hit = self._class_chain_definition(cname, node.attr)
             if hit is not None and (direct or hit[0] in ('m', 'p')):
                 if hit[0] == 'a':
-                    return self._cached_class_attr(hit[3], hit[2], ctx)
+                    return self._cached_class_attr(hit[3], hit[2], ctx, owner)
                 raise Unsupported("reading %s %s.%s through a class value" %
                                   ('property' if hit[0] == 'p' else 'method', owner, node.attr))
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
@@ -5751,7 +5799,17 @@ class Compiler(boxclosure.ClosureMixin):
     def _emit_comp(self, node, ctx, init_c, add_stmt_fn):
         t = ctx.tmp()
         ctx.emit('%s = %s;' % (t, init_c))
-        self._emit_comp_generators(node.generators, 0, node, ctx, t, add_stmt_fn, set())
+        # A comprehension is a function scope of its own: unlike a default expression, it does
+        # NOT see the class namespace it is written in (Python 3), so a class-body local name
+        # must resolve through the module/builtin scopes here.
+        previous = getattr(ctx, 'class_attr_shadow', None)
+        if previous is not None:
+            del ctx.class_attr_shadow
+        try:
+            self._emit_comp_generators(node.generators, 0, node, ctx, t, add_stmt_fn, set())
+        finally:
+            if previous is not None:
+                ctx.class_attr_shadow = previous
         return t
 
     def _emit_comp_generators(self, generators, i, node, ctx, t, add_stmt_fn, declared, opened=None):
@@ -6594,9 +6652,21 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _init_class_attrs(self, name, ctx):
         """Evaluate a class body's attributes once, at its class-definition statement."""
-        for _aname, aval, slot in self.classes[name].get('class_attrs', []):
-            v = self.expr(aval, ctx)
-            ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
+        shadow = {}
+        previous = getattr(ctx, 'class_attr_shadow', None)
+        ctx.class_attr_shadow = shadow
+        try:
+            for _aname, aval, slot in self.classes[name].get('class_attrs', []):
+                v = self.expr(aval, ctx)
+                ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
+                # The class namespace keeps the last assignment, so a later read in the same
+                # body must use this slot (not the module class of the same name).
+                shadow[_aname] = slot
+        finally:
+            if previous is None:
+                del ctx.class_attr_shadow
+            else:
+                ctx.class_attr_shadow = previous
         if name in self.module_names:
             # A module-level assignment to the class name (before or after the definition, or a
             # `global` declaration) rebinds the module slot: do that binding HERE, at the
@@ -6605,21 +6675,41 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('g_slots_arr[%d] = g_slots_arr[%d];' %
                      (self._module_global_slot(name), self.global_slots['class:' + name]))
 
-    def _class_attr_value(self, slot, value, ctx):
+    def _class_attr_shadow_before(self, cname, slot):
+        """The class body's own earlier assignments for a lazy fill of this attribute."""
+        shadow = {}
+        for _aname, _aval, aslot in self.classes.get(cname, {}).get('class_attrs', []):
+            if aslot == slot:
+                break
+            shadow[_aname] = aslot
+        return shadow
+
+    def _class_attr_value(self, slot, value, ctx, shadow=None):
         """The one shared value of a class attribute, filling the slot lazily only when the module
         body did not run (the array-entry shape, where there is no executable module statement)."""
         if value is not None:
-            ctx.emit('if (g_slots_arr[%d].tag == AIL_T_UNBOUND) {' % slot)
-            ctx.indent += 1
-            v = self.expr(value, ctx)
-            ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
-            ctx.indent -= 1
-            ctx.emit('}')
+            previous = getattr(ctx, 'class_attr_shadow', None)
+            if shadow is not None:
+                ctx.class_attr_shadow = shadow
+            try:
+                ctx.emit('if (g_slots_arr[%d].tag == AIL_T_UNBOUND) {' % slot)
+                ctx.indent += 1
+                v = self.expr(value, ctx)
+                ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
+                ctx.indent -= 1
+                ctx.emit('}')
+            finally:
+                if shadow is not None:
+                    if previous is None:
+                        del ctx.class_attr_shadow
+                    else:
+                        ctx.class_attr_shadow = previous
         return 'g_slots_arr[%d]' % slot
 
-    def _cached_class_attr(self, slot, value, ctx):
+    def _cached_class_attr(self, slot, value, ctx, owner=None):
         """Read a class attribute through the class object, not through an instance."""
-        v = self._class_attr_value(slot, value, ctx)
+        shadow = self._class_attr_shadow_before(owner, slot) if owner is not None else None
+        v = self._class_attr_value(slot, value, ctx, shadow)
         t = ctx.tmp()
         ctx.emit('%s = %s;' % (t, v))
         return t
@@ -6640,10 +6730,12 @@ class Compiler(boxclosure.ClosureMixin):
             chain.append(k)
             k = self.classes[k]['base']
         for kls in reversed(chain):
+            shadow = {}
             for aname, aval, slot in self.classes[kls].get('class_attrs', []):
                 self.attr_names.add(aname)
-                v = self._class_attr_value(slot, aval, ctx)
+                v = self._class_attr_value(slot, aval, ctx, shadow)
                 ctx.emit('ail_inst_setattr(cx, %s, g_attr_%s, %s);' % (t, aname, v))
+                shadow[aname] = slot
         if info:
             argcs = self._bind_args(name, info, args, kwargs, ctx)
             dummy = ctx.tmp()
