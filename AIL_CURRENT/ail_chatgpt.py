@@ -930,52 +930,56 @@ def _constant_int_exact(node, _limit=_CONST_INT_BITS):
 _INT64_FLOAT_LIMIT = 9223372036854775808.0
 
 
-def _constant_number(node, known, classes=None):
+def _constant_number(node, known, classes=None, shadowed=None):
     """The int/float a constant numeric expression denotes, or None when it is not one.
 
     Values inside a list/tuple/dict literal are read at a constant index/key, and a bare
     attribute of a class-level constant is read from `classes`; a name resolves only through
-    `known`, so a local or parameter which shadows it is never folded by mistake."""
+    `known`, so a local or parameter which shadows it is never folded by mistake, and a class
+    name in `shadowed` is not read from `classes` either."""
     if isinstance(node, ast.Constant) and type(node.value) in (int, float, bool, str, bytes):
         return int(node.value) if type(node.value) is bool else node.value
     if isinstance(node, ast.Name):
         return known.get(node.id)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert)):
-        value = _constant_number(node.operand, known, classes)
+        value = _constant_number(node.operand, known, classes, shadowed)
         if type(value) not in (int, float):
             return None
         if isinstance(node.op, ast.Invert):
             return ~value if type(value) is int else None
         return -value if isinstance(node.op, ast.USub) else value
     if (isinstance(node, ast.Attribute) and classes is not None
-            and isinstance(node.value, ast.Name)):
+            and isinstance(node.value, ast.Name)
+            and (shadowed is None or node.value.id not in shadowed)):
         return classes.get(node.value.id, {}).get(node.attr)
     if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice):
         if isinstance(node.value, (ast.List, ast.Tuple)):
-            index = _constant_number(node.slice, known, classes)
+            index = _constant_number(node.slice, known, classes, shadowed)
             items = node.value.elts
             if type(index) is not int or not -len(items) <= index < len(items):
                 return None
-            return _constant_number(items[index], known, classes)
+            return _constant_number(items[index], known, classes, shadowed)
         if isinstance(node.value, ast.Dict):
-            key = _constant_number(node.slice, known, classes)
+            key = _constant_number(node.slice, known, classes, shadowed)
             if key is None:
                 return None
             found = None
             for key_node, value_node in zip(node.value.keys, node.value.values):
                 if key_node is None:
-                    continue
-                candidate = _constant_number(key_node, known, classes)
-                if type(candidate) is type(key) and candidate == key:
+                    return None
+                candidate = _constant_number(key_node, known, classes, shadowed)
+                if candidate is None:
+                    return None
+                if candidate == key:
                     found = value_node
             if found is None:
                 return None
-            return _constant_number(found, known, classes)
+            return _constant_number(found, known, classes, shadowed)
         return None
     if not isinstance(node, ast.BinOp):
         return None
-    left = _constant_number(node.left, known, classes)
-    right = _constant_number(node.right, known, classes)
+    left = _constant_number(node.left, known, classes, shadowed)
+    right = _constant_number(node.right, known, classes, shadowed)
     if left is None or right is None:
         return None
     if type(left) is int and type(right) is int and not isinstance(node.op, ast.Div):
@@ -1113,7 +1117,22 @@ def _defaults_never_overridden(tree):
     return result
 
 
-def _function_local_numbers(function, module_known, classes, safe_defaults):
+def _function_shadowed_names(function):
+    """Names a function's own scope binds, so a class name they hide is not folded."""
+    arguments = function.args
+    names = {argument.arg for argument in arguments.posonlyargs + arguments.args + arguments.kwonlyargs}
+    if arguments.vararg is not None:
+        names.add(arguments.vararg.arg)
+    if arguments.kwarg is not None:
+        names.add(arguments.kwarg.arg)
+    names.update(_function_scope_stores(function))
+    for node in ast.walk(function):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            names.update(node.names)
+    return names
+
+
+def _function_local_numbers(function, module_known, classes, safe_defaults, shadowed=None):
     """The int/float constants a function's own assignments bind, plus defaulted parameters
     whose every direct call omits them.  Mirrors _function_local_int_constants."""
     arguments = function.args
@@ -1134,12 +1153,12 @@ def _function_local_numbers(function, module_known, classes, safe_defaults):
     defaults = [None] * (len(positional) - len(arguments.defaults)) + list(arguments.defaults)
     for parameter, default in zip(positional, defaults):
         if parameter.arg in safe_defaults and stores.get(parameter.arg, 0) == 0:
-            value = _constant_number(default, module_known, classes)
+            value = _constant_number(default, module_known, classes, shadowed)
             if value is not None:
                 local[parameter.arg] = value
     for parameter, default in zip(arguments.kwonlyargs, arguments.kw_defaults):
         if parameter.arg in safe_defaults and stores.get(parameter.arg, 0) == 0 and default is not None:
-            value = _constant_number(default, module_known, classes)
+            value = _constant_number(default, module_known, classes, shadowed)
             if value is not None:
                 local[parameter.arg] = value
 
@@ -1149,7 +1168,7 @@ def _function_local_numbers(function, module_known, classes, safe_defaults):
         name = target.id
         if stores.get(name) != 1 or name in parameters or name in declared:
             return
-        value = _constant_number(value_node, local, classes)
+        value = _constant_number(value_node, local, classes, shadowed)
         if value is not None:
             local[name] = value
 
@@ -1177,13 +1196,13 @@ def _check_int64_int_float_constants(tree):
     classes = _known_class_numbers(tree, module_known)
     safe_defaults = _defaults_never_overridden(tree)
 
-    def check(node, known):
+    def check(node, known, shadowed):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id == 'int'):
             return
         if len(node.args) != 1 or node.keywords or isinstance(node.args[0], ast.Starred):
             return
-        value = _constant_number(node.args[0], known, classes)
+        value = _constant_number(node.args[0], known, classes, shadowed)
         if type(value) is not float or value != value or value in (float('inf'), float('-inf')):
             return
         if -_INT64_FLOAT_LIMIT <= value < _INT64_FLOAT_LIMIT:
@@ -1195,33 +1214,55 @@ def _check_int64_int_float_constants(tree):
         error.source_column = node.col_offset
         raise error
 
-    def walk(node, known):
+    def walk(node, known, shadowed):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             for default in list(node.args.defaults) + [item for item in node.args.kw_defaults
                                                        if item is not None]:
-                walk(default, known)
+                walk(default, known, shadowed)
+            local_shadowed = shadowed | _function_shadowed_names(node)
             local = _function_local_numbers(node, module_known, classes,
-                                            safe_defaults.get(id(node), set()))
+                                            safe_defaults.get(id(node), set()), local_shadowed)
             for statement in node.body:
-                walk(statement, local)
+                walk(statement, local, local_shadowed)
             return
         if isinstance(node, ast.ClassDef):
             stores = {child.id for child in ast.walk(node)
                       if isinstance(child, ast.Name) and isinstance(child.ctx, (ast.Store, ast.Del))}
             scope = {name: value for name, value in known.items() if name not in stores}
+            class_shadowed = shadowed | stores
             for statement in node.body:
-                walk(statement, scope)
+                walk(statement, scope, class_shadowed)
             return
         if isinstance(node, ast.Lambda):
+            arguments = node.args
+            lambda_shadowed = set(shadowed)
+            lambda_shadowed.update(argument.arg for argument in
+                                   arguments.posonlyargs + arguments.args + arguments.kwonlyargs)
+            if arguments.vararg is not None:
+                lambda_shadowed.add(arguments.vararg.arg)
+            if arguments.kwarg is not None:
+                lambda_shadowed.add(arguments.kwarg.arg)
             for child in ast.walk(node.body):
-                check(child, known)
+                if isinstance(child, ast.Name) and isinstance(child.ctx, (ast.Store, ast.Del)):
+                    lambda_shadowed.add(child.id)
+            for child in ast.walk(node.body):
+                check(child, known, lambda_shadowed)
             return
-        check(node, known)
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            comp_shadowed = set(shadowed)
+            for generator in node.generators:
+                for child in ast.walk(generator.target):
+                    if isinstance(child, ast.Name) and isinstance(child.ctx, (ast.Store, ast.Del)):
+                        comp_shadowed.add(child.id)
+            for child in ast.iter_child_nodes(node):
+                walk(child, known, comp_shadowed)
+            return
+        check(node, known, shadowed)
         for child in ast.iter_child_nodes(node):
-            walk(child, known)
+            walk(child, known, shadowed)
 
     for statement in tree.body:
-        walk(statement, module_known)
+        walk(statement, module_known, set())
 
 
 def _check_int64_constants(tree):

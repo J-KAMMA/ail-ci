@@ -138,6 +138,61 @@ INFINITY = '''print(int(float("inf")))
 DICT_LAST_VALUE = '''print(int({"v": 1e300, "v": 1.0}["v"]))
 '''
 
+DICT_MIXED_KEYS = '''print(int({1: 1e300, 1.0: 2.0}[1]))
+print(int({1.0: 1e300, 1: 2.0}[1.0]))
+print(int({True: 1e300, 1.0: 2.0}[True]))
+K = 1.0
+print(int({1: 1e300, K: 2.0}[1]))
+V = 1e300
+print(int({1: V, 1.0: 2.0}[1]))
+print(int({0: 1e300, False: 2.0}[0]))
+'''
+
+DICT_DYNAMIC_KEY = '''def f(K):
+    print(int({1: 1e300, K: 2.0}[1]))
+
+
+f(1.0)
+
+extra = {1.0: 1e300}
+print(int({**extra, 1: 2.0}[1]))
+'''
+
+SHADOWED_ATTRIBUTE = '''class Box:
+    v = 1e300
+
+
+class Other:
+    v = 1.0
+
+
+def by_parameter(Box):
+    print(int(Box.v))
+
+
+def by_local():
+    Box = Other
+    print(int(Box.v))
+
+
+def by_lambda():
+    f = lambda Box: int(Box.v)
+    print(f(Other))
+
+
+def outer(Box):
+    def inner():
+        print(int(Box.v))
+
+    inner()
+
+
+by_parameter(Other)
+by_local()
+by_lambda()
+outer(Other)
+'''
+
 
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
@@ -222,6 +277,15 @@ class Pre275Tests(unittest.TestCase):
 
     def test_duplicate_dict_key_keeps_the_last_value(self):
         self.matches('dict_last_value', DICT_LAST_VALUE)
+
+    def test_equal_dict_keys_of_different_numeric_types_keep_the_last_value(self):
+        self.matches('dict_mixed_keys', DICT_MIXED_KEYS)
+
+    def test_dict_with_a_dynamic_key_is_not_folded(self):
+        self.matches('dict_dynamic_key', DICT_DYNAMIC_KEY)
+
+    def test_shadowed_class_attribute_is_not_folded(self):
+        self.matches('shadowed_attribute', SHADOWED_ATTRIBUTE)
 
 
 if __name__ == '__main__':

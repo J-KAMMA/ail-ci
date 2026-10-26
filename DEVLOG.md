@@ -1,3 +1,26 @@
+## 2026-10-26 -- pre275 review: fix dict-key and shadowed-attribute folding (job-pre275-10262319)
+
+The review found three unsound folds introduced by the int(<float>) refusal, all now fixed.
+Dict-literal lookup compared key types as well as values, so `int({1: 1e300, 1.0: 2.0}[1])`
+kept the earlier out-of-range value and was refused where CPython prints 2; keys now use Python
+equality (`1 == 1.0 == True`), so the last equal key wins.  A dict literal with any dynamic,
+`**` or otherwise unknown key is no longer folded, because that key can replace the subscript
+key (`f(K)` in `def f(K): int({1: 1e300, K: 2.0}[1])`).  Attribute folding read `classes`
+without noticing a shadowing parameter, local, lambda argument or class-body name; the current
+scope's bound names are now threaded through `_constant_number` and an attribute is not folded
+when its base is shadowed.  Legitimate out-of-range dict values and `Box.v` attributes are still
+refused by name on both builds.
+
+Probes `/tmp/probes/p275r_*` (15 programs: mixed int/float/bool dict keys, dynamic and `**`
+keys, in-range and still-refused dict/attribute routes, parameter/local/lambda/nested/
+comprehension/class-body attribute shadowing) match CPython or are refused by name on both
+builds; the reviewer's `/tmp/rprobes/r_*` set was re-run with the same result.  The two
+remaining class-body and comprehension-target differences (`Box = Other` inside a class, or a
+comprehension target named `Box` hiding the class from the whole module) are identical on the
+pre-change base.  Tests on the final tree: test_ail_pre275, test_ail_safetynet, test_ail_files,
+test_ail_corpus_findings3 (4 modules, 158 s, 0 failed); `tools/update_manifest.py --check`
+passes.
+
 ## 2026-10-26 -- pre275: a statically known int(<float>) outside int64 is refused by name (job-pre275-10262319)
 
 The first still-differing item was `def take(x=1e300): print(int(x)); take()`: both builds compiled
