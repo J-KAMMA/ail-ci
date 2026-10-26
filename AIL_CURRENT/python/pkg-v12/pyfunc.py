@@ -786,6 +786,66 @@ def _fn_kind(node, ctx):
     return None
 
 
+def _tint_callback_adapter(node, ctx, symbol):
+    """A plain-int64 trampoline for a tagged function passed where an `int` Callable is expected.
+
+    The typed-only build keeps a tagged signature on a function whose IR lowering falls back
+    (ir/driver.py's `_tint_fallback`). A Callable parameter still names the legacy int64 ABI, so
+    handing it the tagged symbol directly calls through a mismatched function-pointer type. The
+    trampoline converts the scalar int parameters in and the int result out; every other kind is
+    passed through unchanged (only scalar `int` parameters and an `int` result can be tagged).
+    """
+    if not os.environ.get('AIL_NO_GENERAL') or not hasattr(ctx, 'borrowed_callback_helpers'):
+        return None
+    tsig = TINT_ACTIVE.get(node.id) or TINT_ACTIVE.get(symbol)
+    if not tsig or not (any(tsig[0]) or tsig[1]):
+        return None
+    kind = _fn_kind(node, ctx)
+    if not callable_types.valid(kind):
+        return None
+    params, result = callable_types.unpack(kind)
+    name = '_ail_tint_adapter_%s_%s' % (getattr(ctx, 'private_callback_prefix', 'module'), symbol)
+    if name in ctx.borrowed_callback_helpers:
+        return name
+    decls, call = [], []
+    for index, item in enumerate(params):
+        if index < len(tsig[0]) and tsig[0][index]:
+            if item != 'int':
+                return None
+            decls.append('int64_t p%d' % index)
+            call.append('ail_tint_from_int64(p%d)' % index)
+        elif item == 'array':
+            decls.extend(('const int64_t *p%d' % index, 'int64_t p%d_n' % index))
+            call.extend(('p%d' % index, 'p%d_n' % index))
+        elif item in callable_types._C and ',' not in callable_types._C[item]:
+            decls.append('%s p%d' % (callable_types._C[item], index))
+            call.append('p%d' % index)
+        else:
+            return None
+    if result in ('list', 'flist'):
+        decls.extend(('int64_t *p_out' if result == 'list' else 'double *p_out', 'int64_t p_out_n'))
+        call.extend(('p_out', 'p_out_n'))
+        ret = 'int64_t'
+        body = 'return %s(%s);' % (symbol, ', '.join(call))
+    elif result == 'noret':
+        ret = 'void'
+        body = '%s(%s);' % (symbol, ', '.join(call))
+    elif result in callable_types._C and ',' not in callable_types._C[result]:
+        ret = callable_types._C[result]
+        body = 'return %s(%s);' % (symbol, ', '.join(call))
+    else:
+        return None
+    if tsig[1]:
+        if result != 'int':
+            return None
+        ret = 'int64_t'
+        body = 'return ail_tint_i64(%s(%s));' % (symbol, ', '.join(call))
+    ctx.borrowed_callback_helpers[name] = 'static %s %s(%s) { %s }\n' % (
+        ret, name, ', '.join(decls) or 'void', body)
+    ctx.parts.add('TINTT')
+    return name
+
+
 def _fn_value(node, ctx):
     if not callable_types.valid(_fn_kind(node, ctx)):
         raise Unsupported('a function value requires a matching Callable signature')
@@ -802,7 +862,15 @@ def _fn_value(node, ctx):
             raise Unsupported('function values require an owned str/bytes return ABI')
         if result == LIST:
             ctx.list_calls.add(node.id)
-        return ctx.csym.get(node.id, node.id)
+        symbol = ctx.csym.get(node.id, node.id)
+        adapter = _tint_callback_adapter(node, ctx, symbol)
+        if adapter is not None:
+            return adapter
+        tsig = TINT_ACTIVE.get(node.id) or TINT_ACTIVE.get(symbol)
+        if os.environ.get('AIL_NO_GENERAL') and tsig and (any(tsig[0]) or tsig[1]):
+            raise Unsupported('passing %s(), which uses the tagged-int signature, as a function value '
+                              'is not supported' % node.id)
+        return symbol
     if isinstance(node, ast.IfExp):
         return '(%s ? %s : %s)' % (_expr(node.test, ctx), _fn_value(node.body, ctx), _fn_value(node.orelse, ctx))
     if isinstance(node, ast.Call):

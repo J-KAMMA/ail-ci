@@ -194,6 +194,32 @@ main()
 '''
         self.same(text, 'recursive_optional_typed')
 
+    def test_tinted_function_as_a_callable_argument(self):
+        text = '''
+from typing import Callable
+
+def b(x: int, y: int) -> int:
+    if x > 0 and y > 0:
+        return 10
+    elif x > 0:
+        return 20
+    elif y > 0 or x > -3:
+        return 30
+    elif x == -10:
+        return 40
+    else:
+        return 50
+
+def pick(f: Callable[[int, int], int], x: int) -> int:
+    return f(x, -10) + f(x, x - 2)
+
+def main() -> None:
+    for x in range(-12, 8):
+        print(x, pick(b, x))
+main()
+'''
+        self.same(text, 'tinted_callable_argument')
+
     def test_early_returns_with_side_effects_and_loops(self):
         text = '''
 cnt = 0
