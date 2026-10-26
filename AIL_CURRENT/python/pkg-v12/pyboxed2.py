@@ -9519,6 +9519,10 @@ class Compiler(boxclosure.ClosureMixin):
             while len(a) < 1:
                 a.append(ast.Constant(value=None))
             a.append(kwargs['maxsplit'])
+        if len(a) > 1 and isinstance(a[1], ast.Constant) and a[1].value is None:
+            # CPython raises TypeError for maxsplit=None; reading the None object's int slot
+            # used to answer as maxsplit=0, splitting (or keeping) the wrong number of pieces.
+            raise Unsupported(".%s() maxsplit cannot be None (CPython raises TypeError)" % name)
         return a
 
     def _maxsplit_expr(self, node, ctx):
