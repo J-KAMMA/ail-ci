@@ -54,6 +54,48 @@ the bases 0/1/-1, negative constant exponents and a variable base with a constan
 `pre273_neg_literal` matches CPython. Tests on the final tree: `test_ail_pre273`,
 `test_ail_pre160`, `test_ail_crypto`, `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3`.
+## 2026-10-26 - pre279 review: callable instance fields and TypeError type names (job-pre279-10262332)
+
+The review of `665f894` found two defects in the new field-call path.  A field holding an
+instance with `__call__` went to `call_value`, which accepts only `AIL_T_FUNC`, so
+`class F: def __call__(self, x): ...; class C: def f(...); self.f = F()` stopped with
+`TypeError: 'instance' object is not callable` where CPython prints `11`.  The field path now
+dispatches `__call__` on the field's run-time class (deepest override first, static and class
+methods included) and keeps the ordinary function/class-value call otherwise.  The caller's
+not-callable message also used `ail_type_name`, which maps every instance (including `bytes`
+and `bytearray`) to `instance`; it now uses `ail__tname_c`, so CPython's `'F' object is not
+callable` / `'bytes' object is not callable` match.
+
+Probes in `/tmp/probes/pre279` on both builds: `call_basic`, `call_types`, `call_routes`,
+`call_conditional`, `call_inherit`, `call_external`, `call_noargs`, `callv_noclass`,
+`t_callable_names` and the existing `shadow_*`/`p02*` match CPython; `type_names` and
+`type_instances` match for None/bool/int/float/str/bytes/bytearray/list/tuple/dict and plain
+instances.  `call_alias_field` (bound-method value) and `call_instance` (calling a plain
+instance) keep their pre-existing unsupported behaviour, unchanged by this job.  Final-state
+tests: `test_ail_pre279`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`,
+`test_ail_virtual_dispatch`, `test_ail_typed_inherit` (6 modules, 323 s, 0 failed).
+`python3 tools/update_manifest.py --check` passes.
+
+## 2026-10-26 - pre279: an instance field shadows a same-named class method (job-pre279-10262332)
+
+The first still-differing pre-existing item from the pre260 review was its p02 method/field
+collision: with `self.f = lambda x: x + 100` in `__init__` and `def f(self, x): return x + 101`,
+both builds printed `102 103`, where CPython prints `101 102`.  `_call_attribute` dispatched the
+static method before reading the instance table, although a function is a non-data descriptor.
+Both general paths now remember every `obj.attr = ...` name in the program and test the instance
+table first (`ail_inst_findattr`, emitted only for a program that needs it), for a statically
+known receiver and for the dynamic user-method dispatch; the method still applies when the field
+is absent or deleted, and a non-callable field raises CPython's TypeError.  A call with keyword
+or starred arguments is refused by name when a field may shadow the method.  The full quirks
+module (the first unverified item in the task) already passes on this tree.
+
+Probes in `/tmp/probes/pre279`: `shadow_basic`, `shadow_routes`, `shadow_external_nodelete`,
+`shadow_conditional`, `shadow_types`, `shadow_noncallable`, `shadow_inherit`, `shadow_static`,
+`shadow_alias_value` and `shadow_nofeature` match CPython on both builds; `shadow_kwargs` and
+`shadow_external` (`del c.f`) are refused by name.  Added `AIL_CURRENT/test_ail_pre279.py` and
+registered it in `ail_check.MODULES` and `tools/ci_shards.json`.  Final-state tests:
+`test_ail_pre279`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+`python3 tools/update_manifest.py --check` passes.
 
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 

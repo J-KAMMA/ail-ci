@@ -428,7 +428,7 @@ class ClosureMixin:
             'static ail_st ail__callv(ail_ctx *cx, ail_obj *out, ail_obj fv, ail_obj *args, int64_t n) {\n'
             '    char msg[200];\n'
             '    if (fv.tag != AIL_T_FUNC) {\n'
-            '        snprintf(msg, sizeof msg, "\'%%s\' object is not callable", ail_type_name(fv.tag));\n'
+            '        snprintf(msg, sizeof msg, "\'%%s\' object is not callable", ail__tname_c(fv));\n'
             '        return ail_raise_c(cx, AIL_B_TYPEERROR, msg);\n'
             '    }\n'
             '    ail_funcobj *f = (ail_funcobj *)fv.o;\n'
