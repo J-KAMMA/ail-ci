@@ -2290,6 +2290,15 @@ general and default builds.
   `False` and `abs(True)` printed `True` where CPython prints `0` and `1`. The plain call and the
   builtin-as-`key=`/`map()` wrapper now use `ail_bi_abs`, which boxes an intlike argument as an
   int. Added `test_ail_fuzz42.py` and registered it in `ail_check.MODULES`.
+## 2026-10-24 - fuzz54: do not type a mixed display from its first element
+
+`Exprs.seq_type` kept the first known element type and dropped later, incompatible ones. With a
+mixed list display such as `[["a"], {"x": "y"}]`, the tuple pass typed it `list[list[str]]`; when
+another statement (`repr`) made the pass emit its rewritten source, `print` used the list-of-list
+helper and rendered the dict as its keys. Incompatible non-numeric element types now refuse the
+tuple rewrite, leaving the source as written so the generic path prints the real objects. The
+numeric family still falls back as in job-rbfuzz54, and `bool` mixed with `int` types as `int`.
+Added `test_ail_fuzz54.py` and registered it.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
