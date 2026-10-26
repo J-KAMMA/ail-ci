@@ -1,5 +1,17 @@
 # DEVLOG
 
+## 2026-10-26 - fuzz95 suite fix: keep CPython's NaN sort order
+
+The Timsort change broke three modules on the integration branch. The typed float sort still
+matches CPython, but its `TIMSORTIDX` helper was emitted for every program with a struct, even
+one that never sorts, changing the pinned generated C; it is now emitted only when a struct sort
+key has a float field (`test_ail_record_initializers`). The float-sort `qsort` call keeps using
+`L->n` so the existing generated-code assertion in `test_ail_numeric_profiles` holds. The native
+profile test still expected the rejected `ValueError`; it now compares the sorted NaN bit
+patterns with CPython (`test_ail_numeric_profiles_native`), and its cleanup loop sorts the same
+list without expecting an exception. Ported the `fmt` upper-bound printing fix from the
+integration branch for `test_ail_pre110`. `test_ail_fuzz95` still passes on both builds.
+
 ## 2026-10-24 - fuzz95: reproduce CPython's Timsort order for NaN
 
 The reviewer rejected the earlier runtime refusal: it rejected valid sorts (a NaN that is never

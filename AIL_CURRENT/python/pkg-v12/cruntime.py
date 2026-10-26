@@ -28997,7 +28997,7 @@ static void ail_flist_sort(ail_flist *L) {
     int nan = 0;
     if (n < 2) return;
     for (i = 0; i < n; i++) if (isnan(L->p[i])) { nan = 1; break; }
-    if (!nan) { qsort(L->p, (size_t)n, sizeof *L->p, ail_flist_compare); return; }
+    if (!nan) { qsort(L->p, (size_t)L->n, sizeof *L->p, ail_flist_compare); return; }
     int64_t *perm = (int64_t *)malloc((size_t)n * sizeof *perm);
     double *tmp = (double *)malloc((size_t)n * sizeof *tmp);
     if (!perm || !tmp) ail_die("out of memory");

@@ -31411,7 +31411,15 @@ static void *ail_olist_pop(ail_olist *v, int64_t i) {
     return element;
 }
 '''))
-    out.append(cruntime.SOURCE['TIMSORTIDX'])
+    # The index Timsort is only referenced by a struct sort whose key has a float field (the
+    # NaN branch below). Emitting it for every class -- including programs that never sort --
+    # changed the generated C of unrelated struct programs, so gate it on that use.
+    needs_timsort = any(
+        info.field_types.get(info.field_order[spec[k]]) == FLT
+        for info in classes.values() for spec in info.sort_specs.values()
+        for k in range(0, len(spec), 2))
+    if needs_timsort:
+        out.append(cruntime.SOURCE['TIMSORTIDX'])
     if any(STR in info.field_types.values() for info in classes.values()):
         out.append('''/* A struct's str field owns a buffer of at least ail__fcap(n) bytes, n its current length: every
    writer below keeps that invariant, so the capacity needs no field of its own. Assigning a shorter
