@@ -10,6 +10,11 @@ accepted test accepts either named refusal; the new wording is exercised by the 
 slice cases that reach the added helper.  In-range constants (`del a[1 + 1]`, `del a[-2:-1]`,
 bool indexes) and the same expression outside a `del` are unchanged.
 
+Follow-up for the full suite: the helper now treats the literal spelling `-9223372036854775808`
+(unary minus on the Constant `2**63`) as INT64_MIN without an overflow, matching the compiler's
+unary branch, so `del box.values[::-9223372036854775808]` in `test_ail_string_field_mutation`
+still builds.  A computed `del a[-2**63]` (unary minus on a power) is still refused.
+
 Added `AIL_CURRENT/test_ail_pre19.py` (3 tests, both builds), registered it in
 `ail_check.MODULES` and `ci_shards.json`.  Probes `pre19_*` in `/tmp/probes` cover index, INT64_MIN,
 huge power, huge slice/step, nested subscript, attribute, list item and dict value routes, a

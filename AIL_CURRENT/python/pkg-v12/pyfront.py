@@ -285,6 +285,13 @@ def _int_constant_with_overflow(node):
         value = int(node.value)
         return value, not (_I64_MIN <= value <= _I64_MAX)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        # `-9223372036854775808` is unary minus on the literal `2**63`.  The compiler emits
+        # INT64_MIN for exactly that spelling (the literal itself never overflows), so the
+        # intermediate is not a reason to refuse it here.  A computed `-(2**63)` is different:
+        # it reaches the power first and is still caught.
+        if (isinstance(node.op, ast.USub) and isinstance(node.operand, ast.Constant)
+                and type(node.operand.value) is int and node.operand.value == 1 << 63):
+            return _I64_MIN, False
         value, overflow = _int_constant_with_overflow(node.operand)
         if value is None:
             return None, overflow
