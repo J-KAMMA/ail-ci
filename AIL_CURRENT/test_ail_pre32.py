@@ -48,6 +48,10 @@ REFUSED = '''def main() -> None:
 main()
 '''
 
+REFUSALS = ('int64 literal out of range',
+            'int64 constant out of range',
+            'int64 constant expression out of range')
+
 MODULE_ASSIGNMENTS = '''MAX = (2**63 - 1)
 MIN = -(2**63)
 KNOWN = 9223372036854775807
@@ -132,7 +136,8 @@ class Pre32(unittest.TestCase):
                 with self.subTest(build='general' if unified else 'default'):
                     built, _ = build(directory, REFUSED, unified)
                     self.assertNotEqual(built.returncode, 0)
-                    self.assertIn('int64 literal out of range', built.stdout + built.stderr)
+                    text = built.stdout + built.stderr
+                    self.assertTrue(any(message in text for message in REFUSALS), text)
 
     def test_a_module_ancestor_that_overflows_is_refused_by_name(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre32-') as directory:
@@ -141,8 +146,7 @@ class Pre32(unittest.TestCase):
                     built, _ = build(directory, OVERLAP_REFUSED, unified)
                     self.assertNotEqual(built.returncode, 0)
                     text = built.stdout + built.stderr
-                    self.assertTrue('int64 literal out of range' in text
-                                    or 'int64 constant expression out of range' in text, text)
+                    self.assertTrue(any(message in text for message in REFUSALS), text)
 
 
 if __name__ == '__main__':

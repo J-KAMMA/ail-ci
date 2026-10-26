@@ -3,17 +3,21 @@
 Re-applied the accepted pre32 change on the current tree.  The exact power fold is merged with
 this tree's class-level constant fold: a maximal constant `**` expression is evaluated with Python
 integers (4096-bit guard) only when the ordinary int64 fold failed, so `2**63 - 1`, `-(2**63)`
-and `2**63 - 2**63` reach the final in-range value; an uncancelled result outside int64 is written
-as a literal and refused by name.  Class-level expressions keep using `_fold_int_exact` and now
-spell the minimum with `(-9223372036854775807 - 1)`.  The overlapping-edit fix keeps only the
-outermost source range, so a module or class ancestor's exact value is not cut by a descendant
-power edit (`B = A - 2**63` with `A` at int64 max is -1; `"x" * (2**63 - 2**63)` parses).  The
-accepted `test_ail_pre32.py` is added and registered in `ail_check.MODULES`; its ancestor-overflow
-check accepts either named int64 refusal on this tree.  Probes in `/tmp/probes`: `pre32_values`,
-`pre32_module`, `pre32_class` match CPython on both builds; `pre32_refuse_power`, `_add`, `_neg`,
-`_even`, `_routes`, `_list`, `_attr`, `_dict`, `_overlap`, `_class`, `_class_overlap` are refused
-by name on both builds.  `tools/diff_ids.py` is not present in this tree, so the DIFFERENCES ids
-stay as `C?-job-rbrbpre32-10262350-N`; `tools/update_manifest.py` is run and `--check` passes.
+and `2**63 - 2**63` reach the final in-range value.  An uncancelled result outside int64 is left
+as written, so this tree's existing checks keep their named `int64 constant out of range` /
+`int64 index out of range` wording; only an in-range final value is rewritten.  Subscript slices
+are not folded, because the pre177 index check refuses an index whose intermediate leaves int64
+(`xs[(10**20) // (10**19)]`).  Class-level expressions keep using `_fold_int_exact` and now spell
+the minimum with `(-9223372036854775807 - 1)`.  The overlapping-edit fix keeps only the outermost
+source range, so a module or class ancestor's exact value is not cut by a descendant power edit
+(`B = A - 2**63` with `A` at int64 max is -1; `"x" * (2**63 - 2**63)` parses).  The accepted
+`test_ail_pre32.py` is added and registered in `ail_check.MODULES`; its refusal checks accept
+this tree's named int64 wordings.  Probes in `/tmp/probes`: `pre32_values`, `pre32_module`,
+`pre32_class`, `pre32_index_inrange` match CPython on both builds; `pre32_index_intermediate`,
+`pre32_index_huge` and `pre32_refuse_power`, `_add`, `_neg`, `_even`, `_routes`, `_list`, `_attr`,
+`_dict`, `_overlap`, `_class`, `_class_overlap` are refused by name on both builds.
+`tools/diff_ids.py` is not present in this tree, so the DIFFERENCES ids stay as
+`C?-job-rbrbpre32-10262350-N`; `tools/update_manifest.py` is run and `--check` passes.
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is

@@ -853,14 +853,20 @@ def _contains_pow(tree):
 def _fold_powers(tree):
     """Every maximal constant integer expression that contains `**`, exactly: `2**63 - 1` is
     computed as Python does, so a final value in int64 need not abort at the intermediate 2**63.
-    A final value outside int64 becomes a literal that `_check_int64_literals` refuses by name."""
+    Only an in-range final value is written; an out-of-range one is left as written, for this
+    tree's constant/literal checks to refuse by name. A subscript index keeps its own check
+    (pre177 refuses an index whose intermediate leaves int64), so slices are not folded here."""
     has_pow = _contains_pow(tree)
+    index_slices = {id(node.slice) for node in ast.walk(tree)
+                    if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice)}
     edits = []
     folded = set()
 
-    def walk(node, inside):
+    def walk(node, inside, in_index=False):
+        if id(node) in index_slices:
+            in_index = True
         candidate = False
-        if isinstance(node, ast.expr) and not inside and has_pow.get(id(node)):
+        if isinstance(node, ast.expr) and not inside and not in_index and has_pow.get(id(node)):
             needs_fold = False
             try:
                 _fold(node, {})
@@ -872,12 +878,12 @@ def _fold_powers(tree):
                 except (_NotConstant, ArithmeticError, ValueError, TypeError, RecursionError):
                     pass
                 else:
-                    if type(value) is int and value.bit_length() <= 4096:
+                    if type(value) is int and -(1 << 63) <= value < 1 << 63:
                         edits.append((node, _literal_repr(value)))
                         folded.add(id(node))
                         candidate = True
         for child in ast.iter_child_nodes(node):
-            walk(child, inside or candidate)
+            walk(child, inside or candidate, in_index)
     walk(tree, False)
     return edits, folded
 
@@ -945,8 +951,6 @@ def fold_constants(text):
         except (_NotConstant, ArithmeticError, ValueError, TypeError, RecursionError):
             continue
         if type(value) is int and not -(1 << 63) <= value < 1 << 63:
-            if id(node.value) not in folded and value.bit_length() <= 4096:
-                edits.append((node.value, _literal_repr(value)))
             continue
         known[node.targets[0].id] = value
         if not _is_literal(node.value) and id(node.value) not in folded:
