@@ -1,3 +1,16 @@
+## 2026-10-26 -- reapply pre33: constant integer `**` beyond int64 (job-rbpre33-10261702)
+
+Re-applied the accepted pre33 change on this tree. The behaviour is already present in the
+generic all-constant folder: a constant integer power whose exact result leaves int64 is refused
+at compile time by name (`int64 constant out of range` / `outside the signed 64-bit range`),
+including inside a tuple, through an argument, a list item, an attribute and a dict value, on both
+builds. The accepted `refuse_int_pow_overflow` check is therefore not duplicated; the reapply adds
+the accepted `AIL_CURRENT/test_ail_pre33.py` (8 refused placements, 2 matching programs, both
+builds) and registers it in `ail_check.MODULES`. Probes in `/tmp/probes`: `pre33_p01`-`pre33_p08`
+and `pre33_p14`-`pre33_p16` are refused by name on both builds; `pre33_p09`-`pre33_p13` match
+CPython on both. Tests on the final tree: `test_ail_pre33`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`.
+
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is
