@@ -1,3 +1,20 @@
+## 2026-10-26 -- pre262: stop false abs() refusals from mutation and reassignment (job-pre262-10261653)
+
+The pre262 review found the new constant-flow check refused valid programs: it kept immutable
+snapshots, ignored later subscript/attribute assignment, method mutation and reassignment of
+parameters, loop targets and ordinary locals.  The flow is now a small sequential abstract
+interpreter with shared mutable list/dict/attribute values (so aliases see mutations), assignment,
+augmented assignment, deletion and method invalidation/updates, constant-true/false branch
+selection, conservative branch/loop merges that retain a possible minimum, and call-site capture of
+free/global containers plus invalidation of mutable arguments after a user call.  Unconditional
+overwrites, `if True` bodies, callee mutations and parameter/loop-target reassignment now match
+CPython, while genuinely reachable minima (including an unknown `if` whose other branch keeps the
+minimum) are still refused by name.  FALSE-REFUSAL REGRESSIONS ADDED to `test_ail_pre262.py`.
+Probes `/tmp/probes/*.py` and the 15 original `/tmp/probes/pre262/*.py` all match CPython or are
+refused by name on both builds.  Final-state tests: test_ail_pre262, test_ail_safetynet,
+test_ail_files, test_ail_corpus_findings3, test_ail_pre214, test_ail_pre215 and test_ail_pre248
+(7 modules, 225 s, 0 failed).
+
 ## 2026-10-26 -- refuse abs() of an int64 minimum reached through a container (job-pre262-10261653)
 
 The bigint-fix13 review recorded a pre-existing CPython difference: `abs(xs[0])`, `abs(box.value)`,

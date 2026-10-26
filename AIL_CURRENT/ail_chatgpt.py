@@ -689,7 +689,7 @@ def _abs_int_value(node, env, classes, depth=0):
             if isinstance(item, ast.Starred):
                 return None
             values.append(_abs_int_value(item, env, classes, depth + 1))
-        return ('seq', tuple(values))
+        return ('seq', values)
     if isinstance(node, ast.Dict):
         pairs = []
         for key_node, value_node in zip(node.keys, node.values):
@@ -701,8 +701,8 @@ def _abs_int_value(node, env, classes, depth=0):
             value = None
             if value_node is not None:
                 value = _abs_int_value(value_node, env, classes, depth + 1)
-            pairs.append((key, value))
-        return ('dict', tuple(pairs))
+            pairs.append([key, value])
+        return ('dict', pairs)
     if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice):
         base = _abs_int_value(node.value, env, classes, depth + 1)
         if base is None:
@@ -800,75 +800,175 @@ def _abs_classes(tree, env):
     return classes
 
 
-def _abs_invalidate_method_call(statement, env):
-    if not (isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call)):
+def _abs_invalidate_container(value):
+    """Mark a shared container as no longer holding any exact constant."""
+    if value is None:
         return
-    func = statement.value.func
-    if not (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)):
+    if value[0] == 'seq':
+        value[1][:] = [None] * len(value[1])
+    elif value[0] == 'dict':
+        for pair in value[1]:
+            pair[1] = None
+    elif value[0] == 'obj':
+        value[1].clear()
+
+
+def _abs_copy_value(value, memo):
+    if value is None:
+        return None
+    marker = id(value)
+    if marker in memo:
+        return memo[marker]
+    kind = value[0]
+    if kind == 'seq':
+        copied = ('seq', [])
+        memo[marker] = copied
+        copied[1].extend(_abs_copy_value(item, memo) for item in value[1])
+        return copied
+    if kind == 'dict':
+        copied = ('dict', [])
+        memo[marker] = copied
+        for key, item in value[1]:
+            copied[1].append([key, _abs_copy_value(item, memo)])
+        return copied
+    if kind == 'obj':
+        copied = ('obj', {})
+        memo[marker] = copied
+        for name, item in value[1].items():
+            copied[1][name] = _abs_copy_value(item, memo)
+        return copied
+    return value
+
+
+def _abs_copy_env(env):
+    memo = {}
+    return {name: _abs_copy_value(value, memo) for name, value in env.items()}
+
+
+def _abs_contains_min(value):
+    if value is None:
+        return False
+    if value[0] == 'int':
+        return value[1] == _INT64_MIN
+    if value[0] == 'seq':
+        return any(_abs_contains_min(item) for item in value[1])
+    if value[0] == 'dict':
+        return any(_abs_contains_min(pair[0]) or _abs_contains_min(pair[1])
+                   for pair in value[1])
+    if value[0] == 'obj':
+        return any(_abs_contains_min(item) for item in value[1].values())
+    return False
+
+
+def _abs_merge_values(first, second):
+    if _abs_same_value(first, second):
+        return first
+    if _abs_contains_min(first):
+        return first
+    if _abs_contains_min(second):
+        return second
+    return None
+
+
+def _abs_same_value(left, right):
+    if left is right:
+        return True
+    if left is None or right is None:
+        return left is right
+    if left[0] != right[0]:
+        return False
+    try:
+        return left == right
+    except Exception:
+        return False
+
+
+def _abs_merge_env(target, first, second):
+    names = set(target) | set(first) | set(second)
+    merged = {}
+    for name in names:
+        if name not in first or name not in second:
+            merged[name] = None
+        else:
+            merged[name] = _abs_merge_values(first[name], second[name])
+    target.clear()
+    target.update(merged)
+
+
+def _abs_invalidate_method_call(node, env, classes):
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
         return
-    base = env.get(func.value.id)
-    if base is not None and base[0] == 'obj':
-        base[1].clear()
+    base = _abs_int_value(node.func.value, env, classes)
+    if base is None:
+        return
+    method = node.func.attr
+    if base[0] == 'seq':
+        if method in ('copy', 'count', 'index'):
+            return
+        if method in ('sort', 'reverse'):
+            items = base[1]
+            if len(items) <= 1:
+                return
+            if all(item is not None and item[0] == 'int' for item in items):
+                items.sort(key=lambda item: item[1], reverse=(method == 'reverse'))
+                return
+        elif method == 'clear':
+            base[1].clear()
+            return
+        elif method == 'append' and len(node.args) == 1:
+            base[1].append(_abs_int_value(node.args[0], env, classes))
+            return
+        elif method == 'extend' and len(node.args) == 1:
+            argument = _abs_int_value(node.args[0], env, classes)
+            if argument is not None and argument[0] == 'seq':
+                base[1].extend(argument[1])
+                return
+        elif method == 'pop' and len(node.args) <= 1:
+            if base[1]:
+                if node.args:
+                    index = _abs_key_value(node.args[0], env, classes)
+                    if type(index) is int and -len(base[1]) <= index < len(base[1]):
+                        base[1].pop(index)
+                        return
+                else:
+                    base[1].pop()
+                    return
+        _abs_invalidate_container(base)
+    elif base[0] == 'dict':
+        if method in ('copy', 'get', 'keys', 'values', 'items', 'setdefault'):
+            return
+        if method == 'clear':
+            base[1].clear()
+            return
+        if method == 'pop' and node.args:
+            key = _abs_key_value(node.args[0], env, classes)
+            if key is not None:
+                base[1][:] = [pair for pair in base[1]
+                              if not (type(pair[0]) is type(key) and pair[0] == key)]
+                return
+        _abs_invalidate_container(base)
+    elif base[0] == 'obj':
+        _abs_invalidate_container(base)
 
 
 def _abs_module_env(tree, known, classes):
-    env = {name: ('int', value) for name, value in known.items()}
-    stores = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
-            stores[node.id] = stores.get(node.id, 0) + 1
-    for statement in tree.body:
-        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
-            target = statement.targets[0]
-            if isinstance(target, ast.Name):
-                if stores.get(target.id) == 1:
-                    value = _abs_int_value(statement.value, env, classes)
-                    if value is not None:
-                        env[target.id] = value
-            elif isinstance(target, ast.Attribute):
-                base = _abs_int_value(target.value, env, classes)
-                if base is not None and base[0] == 'obj':
-                    base[1][target.attr] = _abs_int_value(statement.value, env, classes)
-        elif (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
-              and statement.value is not None and stores.get(statement.target.id) == 1):
-            value = _abs_int_value(statement.value, env, classes)
-            if value is not None:
-                env[statement.target.id] = value
-        _abs_invalidate_method_call(statement, env)
-    return env
+    return {name: ('int', value) for name, value in known.items()}
 
 
 def _abs_function_env(function, module_env, classes):
     env = dict(module_env)
     parameters = set(_abs_all_params(function))
-    stores = _function_scope_stores(function)
     declared = set()
     for node in ast.walk(function):
         if isinstance(node, (ast.Global, ast.Nonlocal)):
             declared.update(node.names)
-    for name in stores:
+    for name in _function_scope_stores(function):
         env.pop(name, None)
     for name in parameters | declared:
         env.pop(name, None)
-    for statement in function.body:
-        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
-            target = statement.targets[0]
-            if (isinstance(target, ast.Name) and stores.get(target.id) == 1
-                    and target.id not in parameters and target.id not in declared):
-                value = _abs_int_value(statement.value, env, classes)
-                if value is not None:
-                    env[target.id] = value
-            elif isinstance(target, ast.Attribute):
-                base = _abs_int_value(target.value, env, classes)
-                if base is not None and base[0] == 'obj':
-                    base[1][target.attr] = _abs_int_value(statement.value, env, classes)
-        elif (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
-              and statement.value is not None and stores.get(statement.target.id) == 1
-              and statement.target.id not in parameters and statement.target.id not in declared):
-            value = _abs_int_value(statement.value, env, classes)
-            if value is not None:
-                env[statement.target.id] = value
-        _abs_invalidate_method_call(statement, env)
+    for name, value in list(env.items()):
+        if value is not None and value[0] in ('seq', 'dict', 'obj'):
+            env.pop(name)
     return env
 
 
@@ -882,47 +982,236 @@ def _abs_iter_variants(value):
     return None
 
 
-def _abs_bind_target(target, value, env):
+def _abs_bind_target(target, value, env, classes):
+    _abs_assign_target(target, value, env, classes)
+
+
+def _abs_assign_target(target, value, env, classes):
     if isinstance(target, ast.Name):
         env[target.id] = value
-    elif isinstance(target, ast.Tuple):
-        for item in target.elts:
-            if isinstance(item, ast.Name):
-                env.pop(item.id, None)
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        items = target.elts
+        if value is not None and value[0] == 'seq' and len(value[1]) == len(items):
+            for item, item_value in zip(items, value[1]):
+                _abs_assign_target(item, item_value, env, classes)
+        else:
+            for item in items:
+                _abs_assign_target(item, None, env, classes)
+    elif isinstance(target, ast.Starred):
+        _abs_assign_target(target.value, None, env, classes)
+    elif isinstance(target, ast.Attribute):
+        base = _abs_int_value(target.value, env, classes)
+        if base is not None and base[0] == 'obj':
+            base[1][target.attr] = value
+    elif isinstance(target, ast.Subscript):
+        base = _abs_int_value(target.value, env, classes)
+        if base is None:
+            return
+        if isinstance(target.slice, ast.Slice):
+            if base[0] in ('seq', 'dict', 'obj'):
+                _abs_invalidate_container(base)
+            return
+        if base[0] == 'seq':
+            index = _abs_key_value(target.slice, env, classes)
+            if type(index) is int and -len(base[1]) <= index < len(base[1]):
+                base[1][index] = value
+            else:
+                _abs_invalidate_container(base)
+        elif base[0] == 'dict':
+            key = _abs_key_value(target.slice, env, classes)
+            if key is None:
+                _abs_invalidate_container(base)
+                return
+            for pair in base[1]:
+                if type(pair[0]) is type(key) and pair[0] == key:
+                    pair[1] = value
+                    return
+            base[1].append([key, value])
+        elif base[0] == 'obj':
+            _abs_invalidate_container(base)
+
+
+def _abs_aug_assign_target(node, env, classes):
+    target = node.target
+    if isinstance(target, ast.Name):
+        env[target.id] = None
+    elif isinstance(target, ast.Attribute):
+        base = _abs_int_value(target.value, env, classes)
+        if base is not None and base[0] == 'obj':
+            base[1][target.attr] = None
+    elif isinstance(target, ast.Subscript):
+        base = _abs_int_value(target.value, env, classes)
+        if base is not None and base[0] in ('seq', 'dict', 'obj'):
+            _abs_invalidate_container(base)
+
+
+def _abs_flow_expression(node, env, classes):
+    if isinstance(node, ast.Lambda):
+        return
+    yield node, env
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.stmt):
+            yield from _abs_flow_statement(child, env, classes)
+        else:
+            yield from _abs_flow_expression(child, env, classes)
+    if isinstance(node, ast.Call):
+        _abs_invalidate_method_call(node, env, classes)
+
+
+def _abs_replace_env(target, value):
+    target.clear()
+    target.update(_abs_copy_env(value))
+
+
+def _abs_constant_truth(node, env, classes):
+    if isinstance(node, ast.Constant):
+        return bool(node.value)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        inner = _abs_constant_truth(node.operand, env, classes)
+        return None if inner is None else not inner
+    value = _abs_int_value(node, env, classes)
+    if value is not None and value[0] == 'int':
+        return bool(value[1])
+    if isinstance(node, ast.Compare) and len(node.ops) == 1:
+        left = _abs_int_value(node.left, env, classes)
+        right = _abs_int_value(node.comparators[0], env, classes)
+        if (left is not None and left[0] == 'int'
+                and right is not None and right[0] == 'int'):
+            left_value, right_value = left[1], right[1]
+            operation = node.ops[0]
+            if isinstance(operation, ast.Eq):
+                return left_value == right_value
+            if isinstance(operation, ast.NotEq):
+                return left_value != right_value
+            if isinstance(operation, ast.Lt):
+                return left_value < right_value
+            if isinstance(operation, ast.LtE):
+                return left_value <= right_value
+            if isinstance(operation, ast.Gt):
+                return left_value > right_value
+            if isinstance(operation, ast.GtE):
+                return left_value >= right_value
+    return None
+
+
+def _abs_flow_for(node, env, classes):
+    variants = _abs_iter_variants(_abs_int_value(node.iter, env, classes))
+    if variants is not None and not variants:
+        return
+    if variants is not None and len(variants) <= 64:
+        merged = None
+        for variant in variants:
+            loop_env = _abs_copy_env(env)
+            _abs_bind_target(node.target, variant, loop_env, classes)
+            yield from _abs_flow(node.body, loop_env, classes)
+            if merged is None:
+                merged = loop_env
+            else:
+                _abs_merge_env(merged, merged, loop_env)
+        if merged is not None:
+            _abs_replace_env(env, merged)
+    else:
+        loop_env = _abs_copy_env(env)
+        if variants is not None and len(variants) > 64:
+            chosen = next((variant for variant in variants
+                           if variant is not None and variant[0] == 'int'
+                           and variant[1] == _INT64_MIN), None)
+            _abs_bind_target(node.target, chosen, loop_env, classes)
+        else:
+            _abs_bind_target(node.target, None, loop_env, classes)
+        yield from _abs_flow(node.body, loop_env, classes)
+        _abs_merge_env(env, env, loop_env)
+
+
+def _abs_flow_while(node, env, classes):
+    truth = _abs_constant_truth(node.test, env, classes)
+    if truth is False:
+        return
+    body_env = _abs_copy_env(env)
+    yield from _abs_flow(node.body, body_env, classes)
+    if truth is True:
+        _abs_replace_env(env, body_env)
+    else:
+        _abs_merge_env(env, env, body_env)
+
+
+def _abs_flow_if(node, env, classes):
+    truth = _abs_constant_truth(node.test, env, classes)
+    if truth is True:
+        yield from _abs_flow(node.body, env, classes)
+    elif truth is False:
+        yield from _abs_flow(node.orelse, env, classes)
+    else:
+        body_env = _abs_copy_env(env)
+        else_env = _abs_copy_env(env)
+        yield from _abs_flow(node.body, body_env, classes)
+        yield from _abs_flow(node.orelse, else_env, classes)
+        _abs_merge_env(env, body_env, else_env)
+
+
+def _abs_flow_statement(node, env, classes):
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+        return
+    if isinstance(node, (ast.Assign, ast.AnnAssign)):
+        value_node = node.value
+        if value_node is not None:
+            yield from _abs_flow_expression(value_node, env, classes)
+            value = _abs_int_value(value_node, env, classes)
+        else:
+            value = None
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        for target in targets:
+            if isinstance(target, ast.Attribute):
+                yield from _abs_flow_expression(target.value, env, classes)
+            elif isinstance(target, ast.Subscript):
+                yield from _abs_flow_expression(target.value, env, classes)
+                yield from _abs_flow_expression(target.slice, env, classes)
+            _abs_assign_target(target, value, env, classes)
+        return
+    if isinstance(node, ast.AugAssign):
+        yield from _abs_flow_expression(node.value, env, classes)
+        if isinstance(node.target, ast.Subscript):
+            yield from _abs_flow_expression(node.target.value, env, classes)
+            yield from _abs_flow_expression(node.target.slice, env, classes)
+        _abs_aug_assign_target(node, env, classes)
+        return
+    if isinstance(node, ast.For):
+        yield from _abs_flow_expression(node.iter, env, classes)
+        yield from _abs_flow_for(node, env, classes)
+        if node.orelse:
+            yield from _abs_flow(node.orelse, env, classes)
+        return
+    if isinstance(node, ast.While):
+        yield from _abs_flow_expression(node.test, env, classes)
+        yield from _abs_flow_while(node, env, classes)
+        if node.orelse:
+            yield from _abs_flow(node.orelse, env, classes)
+        return
+    if isinstance(node, ast.If):
+        yield from _abs_flow_expression(node.test, env, classes)
+        yield from _abs_flow_if(node, env, classes)
+        return
+    if isinstance(node, ast.Delete):
+        for target in node.targets:
+            _abs_assign_target(target, None, env, classes)
+        return
+    if isinstance(node, (ast.With, ast.AsyncWith)):
+        for item in node.items:
+            yield from _abs_flow_expression(item.context_expr, env, classes)
+            if item.optional_vars is not None:
+                _abs_assign_target(item.optional_vars, None, env, classes)
+        yield from _abs_flow(node.body, env, classes)
+        return
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.stmt):
+            yield from _abs_flow_statement(child, env, classes)
+        else:
+            yield from _abs_flow_expression(child, env, classes)
 
 
 def _abs_flow(nodes, env, classes):
     for node in nodes:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
-            continue
-        yield node, env
-        if isinstance(node, ast.For):
-            for child in ast.iter_child_nodes(node):
-                if child is node.target:
-                    continue
-                if child is node.iter or child in node.orelse:
-                    yield from _abs_flow([child], env, classes)
-                    continue
-                variants = _abs_iter_variants(_abs_int_value(node.iter, env, classes))
-                if variants is None:
-                    loop_env = dict(env)
-                    _abs_bind_target(node.target, None, loop_env)
-                    yield from _abs_flow([child], loop_env, classes)
-                elif len(variants) > 64:
-                    chosen = next((variant for variant in variants
-                                   if variant is not None and variant[0] == 'int'
-                                   and variant[1] == _INT64_MIN), None)
-                    loop_env = dict(env)
-                    _abs_bind_target(node.target, chosen, loop_env)
-                    yield from _abs_flow([child], loop_env, classes)
-                else:
-                    for variant in variants:
-                        loop_env = dict(env)
-                        _abs_bind_target(node.target, variant, loop_env)
-                        yield from _abs_flow([child], loop_env, classes)
-        else:
-            for child in ast.iter_child_nodes(node):
-                yield from _abs_flow([child], env, classes)
+        yield from _abs_flow_statement(node, env, classes)
 
 
 def _abs_check_call(node, env, classes):
@@ -942,6 +1231,33 @@ def _abs_check_call(node, env, classes):
         raise error
 
 
+def _abs_free_names(function):
+    parameters = set(_abs_all_params(function))
+    local = set(_function_scope_stores(function))
+    declared = set()
+    for node in ast.walk(function):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            declared.update(node.names)
+    loads = {node.id for node in _walk_own_scope(function)
+             if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)}
+    return (loads - local - parameters) | declared
+
+
+def _abs_invalidate_call_value(node, env, classes):
+    if isinstance(node, ast.Starred):
+        node = node.value
+    value = _abs_int_value(node, env, classes)
+    if value is not None and value[0] in ('obj', 'seq', 'dict'):
+        _abs_invalidate_container(value)
+
+
+def _abs_invalidate_call_arguments(call, env, classes):
+    for argument in call.args:
+        _abs_invalidate_call_value(argument, env, classes)
+    for keyword in call.keywords:
+        _abs_invalidate_call_value(keyword.value, env, classes)
+
+
 def _check_int64_abs_flows(tree, known):
     """Follow a constant int64 minimum through containers, attributes and call arguments into
     ``abs``.  The exact value is needed: an unknown operand keeps its run-time behaviour."""
@@ -953,29 +1269,35 @@ def _check_int64_abs_flows(tree, known):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             functions.setdefault(node.name, []).append(node)
     function_by_id = {id(node): node for nodes in functions.values() for node in nodes}
-    base = {fid: _abs_function_env(function, module_env, classes)
-            for fid, function in function_by_id.items()}
+    free_by_id = {fid: _abs_free_names(function) for fid, function in function_by_id.items()}
     queue = []
 
-    def collect(pairs):
-        for node, env in pairs:
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-                for function in functions.get(node.func.id, ()):
-                    bindings = _abs_call_bindings(function, node, env, classes)
-                    if bindings is not None:
-                        queue.append((id(function), bindings))
+    def observe(node, env):
+        _abs_check_call(node, env, classes)
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+            return
+        callees = functions.get(node.func.id, ())
+        if not callees:
+            return
+        for function in callees:
+            bindings = _abs_call_bindings(function, node, env, classes)
+            if bindings is None:
+                continue
+            for name in free_by_id.get(id(function), ()):
+                if name in env:
+                    bindings[name] = env[name]
+            queue.append((id(function), _abs_copy_env(bindings)))
+        _abs_invalidate_call_arguments(node, env, classes)
 
-    def check(pairs):
-        for node, env in pairs:
-            _abs_check_call(node, env, classes)
+    def run(nodes, env):
+        for node, current in _abs_flow(nodes, env, classes):
+            observe(node, current)
 
-    module_nodes = list(_abs_flow(tree.body, module_env, classes))
-    check(module_nodes)
-    collect(module_nodes)
+    run(tree.body, module_env)
+    base = {fid: _abs_function_env(function, module_env, classes)
+            for fid, function in function_by_id.items()}
     for fid, function in function_by_id.items():
-        nodes = list(_abs_flow(function.body, base[fid], classes))
-        check(nodes)
-        collect(nodes)
+        run(function.body, _abs_copy_env(base[fid]))
     seen = set()
     index = 0
     while index < len(queue) and index < 4000:
@@ -986,11 +1308,9 @@ def _check_int64_abs_flows(tree, known):
             continue
         seen.add(key)
         function = function_by_id[fid]
-        env = dict(base[fid])
-        env.update(bindings)
-        nodes = list(_abs_flow(function.body, env, classes))
-        check(nodes)
-        collect(nodes)
+        env = _abs_copy_env(base[fid])
+        env.update(_abs_copy_env(bindings))
+        run(function.body, env)
 
 
 def _check_int64_abs_constants(tree, known):

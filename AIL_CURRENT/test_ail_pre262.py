@@ -170,6 +170,68 @@ main()
 
 main()
 ''',
+    'mutation_and_reassignment': '''class Box:
+    def __init__(self, value):
+        self.value = value
+
+    def reset(self):
+        self.value = 5
+
+
+def change(values):
+    values[0] = 5
+
+
+def show(value):
+    value = 5
+    print(abs(value))
+
+
+def mutate(box):
+    box.value = 5
+    print(abs(box.value))
+
+
+def method(box):
+    box.reset()
+    print(abs(box.value))
+
+
+def main():
+    xs = [-(2 ** 63)]
+    xs[0] = 5
+    print(abs(xs[0]))
+    xs = [-(2 ** 63)]
+    ys = xs
+    ys[0] = 5
+    print(abs(xs[0]))
+    d = {"v": -(2 ** 63)}
+    d["v"] = 5
+    print(abs(d["v"]))
+    xs = [-(2 ** 63)]
+    xs.clear()
+    xs.append(7)
+    print(abs(xs[0]))
+    show(-(2 ** 63))
+    mutate(Box(-(2 ** 63)))
+    method(Box(-(2 ** 63)))
+    for value in [-(2 ** 63)]:
+        value = 5
+        print(abs(value))
+    value = -(2 ** 63)
+    value += 1
+    print(abs(value))
+    xs = [-(2 ** 63)]
+    if True:
+        xs[0] = 5
+    print(abs(xs[0]))
+    xs = [-(2 ** 63)]
+    change(xs)
+    print(abs(xs[0]))
+
+
+main()
+''',
     'unused_minimum': '''MIN = -(2 ** 63)
 
 
