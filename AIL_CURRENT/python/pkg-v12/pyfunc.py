@@ -37238,7 +37238,32 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
                   and fn.body[-1].value is not None
                   and not any(isinstance(nd, (ast.For, ast.While, ast.Try, ast.With))
                               for st in fn.body for nd in ast.walk(st)))
-    if (not separate_units and not _is_entry and not recursive and _inlinable
+    # ONE SMALL LEAF LOOP, for the same reason and under a budget. `parse_int64_decimal` is a
+    # nine-statement leaf whose body is one digit loop; gcc will not inline it at -O2, and the
+    # surviving call clobbers caller state in csv_table's row loop. Measured 2026-10-23 on the
+    # 132 MB three-million-row csv_table input: 1.24 s before, 0.99 s with the attribute (user
+    # time 1.08 s -> 0.84 s), output byte-identical. The predicate stays conservative: one
+    # `for`, no other loop/try/with/yield, no call to another function or class constructor,
+    # a SCALAR NUMERIC return, at most 12 statements and 180 AST nodes. String/list/object
+    # returns are excluded because inlining a loop that owns heap storage duplicates cleanup
+    # paths -- inlining `json_quote` as well measured 1.42 s, slower than this 1.25 s. The cap
+    # is on the WHOLE body, not just the loop header, and async/generator forms are refused
+    # because a call gcc cannot inline is a hard compile error rather than a missed
+    # optimisation.
+    _loop_nodes = sum(1 for st in fn.body for _ in ast.walk(st))
+    _calls_user = any(isinstance(nd, ast.Call) and isinstance(nd.func, ast.Name)
+                      and (nd.func.id in sigs or (classes and nd.func.id in classes))
+                      for st in fn.body for nd in ast.walk(st))
+    _single_loop_inlinable = (
+        len(fn.body) <= 12 and _loop_nodes <= 180 and not _calls_user
+        and ret in (INT, FLT)
+        and isinstance(fn.body[-1], ast.Return) and fn.body[-1].value is not None
+        and sum(isinstance(nd, ast.For) for st in fn.body for nd in ast.walk(st)) == 1
+        and not any(isinstance(nd, (ast.While, ast.AsyncFor, ast.Try, ast.With, ast.AsyncWith,
+                                   ast.Yield, ast.YieldFrom, ast.Await))
+                    for st in fn.body for nd in ast.walk(st)))
+    if (not separate_units and not _is_entry and not recursive
+            and (_inlinable or _single_loop_inlinable)
             and ret not in (NORET, LIST, FLIST, GRIDRET, BYTES)
             and not _is_tuple_ret(ret) and not _is_multi_ret(ret)):
         # The attribute and the storage class go on their OWN line, so the signature line
