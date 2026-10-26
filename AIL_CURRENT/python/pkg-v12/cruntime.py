@@ -27710,7 +27710,12 @@ static double ail__fpow_slow(double iv, double iw, double r) {
         ail_die("a negative number raised to a fractional power is a complex number in Python; AIL has no complex type");
     }
     if (isinf(iv) || isinf(iw)) return r;
-    if (iv == 0.0) ail_die("division by zero");
+    if (iv == 0.0) {
+        static const char zero_negative[] = "0.0 cannot be raised to a negative power";
+        ail_raise_value_adopt(ail_exception_new(AIL_EXC_ZERODIV,
+            (const uint8_t *)zero_negative,
+            (int64_t)(sizeof zero_negative - 1), 1));
+    }
     ail_die("(34, 'Numerical result out of range')");
     return r;
 }

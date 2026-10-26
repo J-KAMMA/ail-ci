@@ -83,6 +83,28 @@ class attribute/dict value routes, list/tuple/dict sources, in-range values, inv
 an explicit base and a dynamic helper; every probe matches CPython or is refused by name on both
 builds.  Final-state tests: test_ail_pre263, test_ail_safetynet, test_ail_files,
 test_ail_corpus_findings3.
+## 2026-10-26 -- zero to a negative power names CPython's ZeroDivisionError (job-pre265-10262131)
+
+The first still-differing item recorded by the rbpre33 reviewer was the default build's message
+for a constant `0 ** -1`: it raised `ZeroDivisionError: division by zero` where CPython says
+`0.0 cannot be raised to a negative power`. A constant negative exponent takes the float `pow()`
+path, whose shared typed helper `ail__fpow_slow` still used the older division text. The helper
+now raises a catchable `AIL_EXC_ZERODIV` with CPython's text, so both the caught `str(e)` and an
+uncaught stop agree; the general path already had the message. The same fix covers `0.0 ** -1`,
+`(-0.0) ** -1`, `False ** -1`, `0 ** -1.0`, `0.0 ** -0.5`, and a zero base arriving through an
+argument, a list item, an attribute, a dict value, an alias or a local. Non-zero negative
+exponents keep their float results, and a *variable* negative exponent keeps the deliberate
+exact-integer trap documented in SEMANTICS.md. The other two recorded pre-existing items were
+checked and needed no change: an out-of-int64 intermediate/result such as `2**64 // 2` or
+`(-3)**40` is already refused by name, and the v1 dict-literal case now matches CPython.
+
+Added `AIL_CURRENT/test_ail_pre265.py` and registered it in `ail_check.MODULES` and
+`ci_shards.json`. Probes in `/tmp/probes` (`pre265_item1`, `pre265_zero_direct`,
+`pre265_zero_values`, `pre265_arg_int`, `pre265_arg_float`, `pre265_arg_pair`,
+`pre265_fit_args`, `pre265_pow_regression`, `pre265_pow_neg`) match CPython on both builds;
+`pre265_item2a/b/c` are refused by name on both. Tests on the final tree: `test_ail_pre265`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is
