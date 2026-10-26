@@ -4351,7 +4351,11 @@ static void ail_sfield_delete(ail_pslist *L, int64_t i) {
     if (!L->wide) {
         ail_pslist_check(L);
         int64_t j = i < 0 ? i + L->n : i;
-        if (j >= 0 && j == L->n - 1) { L->n--; L->tn = L->e[L->n]; return; }
+        if (j < 0 || j >= L->n) ail_die("list assignment index out of range");
+        if (j == L->n - 1) { L->n--; L->tn = L->e[L->n]; return; }
+    } else {
+        int64_t j = i < 0 ? i + L->n : i;
+        if (j < 0 || j >= L->n) ail_die("list assignment index out of range");
     }
     ail_pslist_widen(L);
     ail_wfield_delete(&L->w, i);
@@ -4565,7 +4569,9 @@ static inline __attribute__((always_inline)) void PREFIX##set(LISTTYPE *s, int64
     i = PREFIX##index(s, i); s->p[i] = value; \
 } \
 static void PREFIX##delete(LISTTYPE *s, int64_t i) { \
-    i = PREFIX##index(s, i); \
+    PREFIX##validate(s); \
+    if (i < 0) i += s->n; \
+    if (i < 0 || i >= s->n) ail_die("list assignment index out of range"); \
     memmove(s->p + i, s->p + i + 1, (size_t)(s->n - i - 1) * sizeof(SCALAR)); --s->n; \
 } \
 static void PREFIX##set_slice(LISTTYPE *s, const LISTTYPE *source, \
@@ -10249,7 +10255,7 @@ static inline void ail_list_setitem(ail_obj lst, int64_t i, ail_obj x) {
     i = ail__norm_index(i, lst.v->n, "list"); lst.v->p[i] = x;
 }
 static inline void ail_list_delitem(ail_obj lst, int64_t i) {
-    ail_vec *v = lst.v; i = ail__norm_index(i, v->n, "list");
+    ail_vec *v = lst.v; i = ail__norm_index(i, v->n, "list assignment");
     for (int64_t k = i; k + 1 < v->n; k++) v->p[k] = v->p[k + 1];
     v->n--;
 }
@@ -15117,7 +15123,7 @@ static inline ail_st ail_list_setitem(ail_ctx *cx, ail_obj lst, int64_t i, ail_o
 }
 static inline ail_st ail_list_delitem(ail_ctx *cx, ail_obj lst, int64_t i) {
     ail_vecobj *v = (ail_vecobj *)lst.o;
-    int64_t ni; ail_st st = ail__norm_index(cx, &ni, i, v->n, "list"); if (st != AIL_OK) return st;
+    int64_t ni; ail_st st = ail__norm_index(cx, &ni, i, v->n, "list assignment"); if (st != AIL_OK) return st;
     for (int64_t k = ni; k + 1 < v->n; k++) v->p[k] = v->p[k + 1];
     v->n--; return AIL_OK;
 }

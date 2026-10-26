@@ -1,3 +1,24 @@
+## 2026-10-26 -- pre272: `del` out-of-range says CPython's list assignment text (job-pre272-10262304)
+
+The rbpre19 pre-existing constant `del` bounds (`2**63-1`, `2**100000`, `2**100:2**101`, and the
+argument/list-item/attribute/dict routes) are already refused by name on both builds, so they no
+longer differ.  The first remaining pre-existing CPython difference in that family was the
+uncaught message for deleting an out-of-range list item: the general path said
+`list index out of range` and the typed int-list path said `pop from empty list` /
+`pop index out of range`, where CPython says `list assignment index out of range`.  General
+`ail_list_delitem` (both runtimes) now uses the assignment text, and the typed local int list,
+string field, and int/float numeric field delete paths check with the same text before removing
+the item.  `list.pop()` keeps its own messages, and in-range deletes are unchanged.
+Added `test_ail_pre272.py` (3 tests, both builds) and registered it in `ail_check.MODULES`.
+
+Probes in `/tmp/probes/pre272` (58 programs) cover empty, positive/negative out of range,
+`INT64_MIN`, bool, int/str/float/object/bytes/nested lists, an argument, a list item, an
+attribute, a dict value and a field, plus caught `str(e)`/`e.args`, `pop()` messages and
+in-range deletes: 38 match CPython on both builds and 20 are refused by name on both builds (the
+constant-bound cases), with no runtime difference.  Final-state tests: test_ail_pre272,
+test_ail_safetynet, test_ail_files, test_ail_corpus_findings3; `tools/update_manifest.py --check`
+and `tools/ci_shards.py --check` pass.
+
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is

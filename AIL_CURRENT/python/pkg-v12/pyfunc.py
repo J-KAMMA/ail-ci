@@ -22071,9 +22071,8 @@ def _stmt_inner(node, ctx, ind):
                 ctx.has_try = True
                 if exctext.ACTIVE:
                     _exc_text_parts(ctx)
-                    return pre + ('%s{ int64_t _dk = %s; if (_dk >= %s.n || _dk < -%s.n) ail_die("list assignment index out of range"); '
-                                  '(void)ail_list_pop(&%s, _dk); }\n' % (pad, k, c, c, c))
-                return pre + '%s(void)ail_list_pop(&%s, %s);\n' % (pad, c, k)
+                return pre + ('%s{ int64_t _dk = %s; if (_dk >= %s.n || _dk < -%s.n) ail_die("list assignment index out of range"); '
+                              '(void)ail_list_pop(&%s, _dk); }\n' % (pad, k, c, c, c))
         raise Unsupported(_shape_refusal(node, _STMT_SHAPE_REFUSALS, 'statement'))
     if isinstance(node, ast.Assert):
         # F4 (DESIGN_FOUNDATION_20260914.md section 5): `ail_die` given a value the program
