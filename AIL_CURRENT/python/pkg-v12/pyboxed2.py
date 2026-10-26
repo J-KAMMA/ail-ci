@@ -8188,6 +8188,10 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.emit('%s = ail_box_bool(%sail_str_any_outside(%s, %dLL, %dLL));'
                          % (res, neg, v, lo, hi))
                 return res
+            if any(isinstance(g.iter, ast.GeneratorExp) for g in arg.generators):
+                raise Unsupported('%s() over a generator expression whose iterable is itself a '
+                                  'generator expression (the inner generator would be materialised '
+                                  'eagerly)' % name)
             # fused: short-circuits at the first deciding element, like CPython's any()/all()
             # over a generator (the materialising list path cannot, so it must not be used).
             # The two -> bool is still computed in evaluation order; the `goto` leaves every

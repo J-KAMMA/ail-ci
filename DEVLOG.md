@@ -1,3 +1,19 @@
+## 2026-10-26 -- re-apply pre41: nested generator expression as an any()/all() iterable (job-rbpre41-10261713)
+
+Re-applied the accepted pre41 change on this tree. The current fused `any()`/`all()` path
+short-circuits the outer generator, but an inner `GeneratorExp` used as that generator's
+iterable still goes through `_open_iter_loop` -> `expr_GeneratorExp`, which materialises it as
+an eager list. So `any(x for x in (mark(i) for i in [0, 1, 2]))` still ran the side effects
+after the deciding element (`inner 0`, `inner 1`, `inner 2` where CPython stops after
+`inner 1`). The named refusal is therefore kept, placed just before the fused path, and covers
+the iterable reached directly, through an argument, a list item, an attribute, a dict value and
+a second `for` clause on both builds. Eager iterables (list, tuple, str, dict, set, range, an
+argument, a list comprehension) still build unchanged. Added the accepted
+`AIL_CURRENT/test_ail_pre41.py` (8 refused shapes, one CPython-compared eager program) and
+registered it in `ail_check.MODULES`. Probes `/tmp/probes/pre41_nested.py`,
+`pre41_routes.py` and `pre41_eager.py`: the first two are refused by name on both builds; the
+last matches CPython on both.
+
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is
