@@ -335,7 +335,9 @@ def _check_constant_power(node, parents, maxsplit):
 def _check_index_expression(slice_node):
     """Refuse a constant subscript index that int64 cannot hold. A literal or signed literal is
     already refused by _check_int64_literals with its own message, so only compound arithmetic is
-    read here."""
+    read here. A step may leave int64 while the exact final index fits (`2**63 * 0`,
+    `(1 << 63) >> 62`); the whole expression is folded with the same size budget as the other
+    constant checks before the result is refused."""
     literal = (isinstance(slice_node, ast.Constant)
                or isinstance(slice_node, ast.UnaryOp) and isinstance(slice_node.op, (ast.UAdd, ast.USub))
                and isinstance(slice_node.operand, ast.Constant))
@@ -343,11 +345,17 @@ def _check_index_expression(slice_node):
         return
     try:
         _const_expr_int(slice_node)
+        return
     except _Int64ConstantOverflow as overflow:
-        error = ValueError(f'int64 index out of range: {_constant_diagnostic(overflow.args[0])}')
-        error.source_line = slice_node.lineno
-        error.source_column = slice_node.col_offset
-        raise error
+        value = _const_fold_int(slice_node)
+        if value is not None and _INT64_MIN <= value <= _INT64_MAX:
+            return
+        if value is None:
+            value = overflow.args[0]
+    error = ValueError(f'int64 index out of range: {_constant_diagnostic(value)}')
+    error.source_line = slice_node.lineno
+    error.source_column = slice_node.col_offset
+    raise error
 
 
 def _check_int64_literals(tree):

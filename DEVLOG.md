@@ -127,6 +127,23 @@ path; `p267_decode_bmp.py`, `p267_decode_invalid.py`, `p267_decode_bounds_bmp.py
 `p267_decode_encoding_bmp.py`, and the three mutated bytearray/list/dict probes
 (`p267_mutate_bytearray.py`, `p267_mutate_list.py`, `p267_mutate_dict.py`) match CPython on both
 builds.
+## 2026-10-26 -- constant index through an out-of-int64 intermediate (job-pre269-10262136)
+
+`del a[2**63 * 0]` and `del a[(1 << 63) >> 62]` were refused by the front-end with
+`int64 index out of range: 9223372036854775808` although CPython deletes an element: the
+intermediate `2**63` leaves int64, but the exact final index is 0 or 2.  `_check_index_expression`
+now retries a bounded-fold overflow by folding the whole index with the shared `_const_fold_int`
+budget (2**20 bits, the same budget as the other constant checks) and accepts an exact final value
+inside int64; only a final value outside int64 keeps the named refusal (now naming that exact
+value).  This root-cause fix also accepts `(10 ** 20) // (10 ** 19)` (final 10) and
+`((1 << 64) - 1) >> 1` (INT64_MAX), so the stale intermediate case is removed from
+`test_ail_pre177`'s refusal table and its docstring is updated.  A genuinely wider intermediate,
+a literal, and a final value outside int64 keep their existing refusals.
+
+Probes in `/tmp/probes` on both builds: `del_bound`, `index_exact`, `index_routes` and
+`index_boundary` match CPython; `index_refuse1`-`index_refuse5` are refused by name.  Tests on
+the final tree: pre269, pre177, pre246, pre201, pre204, pre238, pre121, safetynet, files and
+corpus_findings3 (48 tests, 596 s, 0 failed, 1 skipped).
 
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
