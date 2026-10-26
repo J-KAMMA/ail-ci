@@ -309,6 +309,23 @@ item, attribute, dict value, keyword/expression, empty pool, bool, r=0, r=n, r>n
 and the typed for-loop path). Tests on the final commit: pre59, pre137, pre126, safetynet, files,
 corpus_findings3.
 
+## 2026-10-26 - pre61: functools.partial with bound values (job-rbpre61-10261900)
+
+Re-applied the accepted pre61 change on this tree.  The general path lowered `functools.partial`
+of a def or lambda to synthetic lambda closures without source locations, so the lambda scan that
+looks for a name bound after a lambda stopped with
+`AttributeError: 'Lambda' object has no attribute 'lineno'` (pyboxed2.py).  `genlib._partial` now
+copies the `partial()` call's location onto every lambda it builds, so partials with positional,
+keyword, empty and run-time bound values compile and match CPython on both builds; a bound value
+that arrives through an argument, a list item, a dict value or an attribute is covered too.  The
+shapes the general path already refused (a non-def/lambda callable, too many bound arguments, a
+non-trailing keyword, `*args`, no function) remain refused by name.  Added the accepted
+`AIL_CURRENT/test_ail_pre61.py` and registered it in `ail_check.MODULES` and `ci_shards.json`.
+`tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run and `--check`
+passes.  Probes in `/tmp/probes` (`pre61_lambda`, `pre61_def_map`, `pre61_routes`,
+`pre61_runtime`, `pre61_types`) match CPython on both builds; `pre61_refuse_kwlambda` and
+`pre61_refuse_notdef`/`_toomany`/`_kworder`/`_star`/`_nofunc` are refused by name on both.  Final-state tests: `test_ail_pre61`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`.
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is
