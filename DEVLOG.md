@@ -1,15 +1,18 @@
 ## 2026-10-26 -- reapply pre33: constant integer `**` beyond int64 (job-rbpre33-10261702)
 
-Re-applied the accepted pre33 change on this tree. The behaviour is already present in the
-generic all-constant folder: a constant integer power whose exact result leaves int64 is refused
-at compile time by name (`int64 constant out of range` / `outside the signed 64-bit range`),
-including inside a tuple, through an argument, a list item, an attribute and a dict value, on both
-builds. The accepted `refuse_int_pow_overflow` check is therefore not duplicated; the reapply adds
-the accepted `AIL_CURRENT/test_ail_pre33.py` (8 refused placements, 2 matching programs, both
-builds) and registers it in `ail_check.MODULES`. Probes in `/tmp/probes`: `pre33_p01`-`pre33_p08`
-and `pre33_p14`-`pre33_p16` are refused by name on both builds; `pre33_p09`-`pre33_p13` match
-CPython on both. Tests on the final tree: `test_ail_pre33`, `test_ail_safetynet`,
-`test_ail_files`, `test_ail_corpus_findings3`.
+Re-applied the accepted pre33 change on this tree, including its compiler fix: a constant integer
+power whose exact result leaves int64 is refused at compile time by name
+(`the integer power 10 ** 40 does not fit in a 64-bit signed integer (DIFFERENCES
+C?-job-pre33-10240909-1)`) on both builds and in the IR lowerer. The accepted
+`refuse_int_pow_overflow` helper is added to `pyfront.py` and called from `pyboxed.py`,
+`pyboxed2.py`, `pyfunc.py` and `ir/lower.py`; this closes the v1 general-emitter gap where an
+assigned `x = 10**40` or `b.v = 10**40` compiled and then stopped at run time with
+`integer overflow`. The reapply also adds the accepted `AIL_CURRENT/test_ail_pre33.py` (8 refused
+placements, 2 matching programs, both builds) and registers it in `ail_check.MODULES`.
+Probes: assigned, plain, tuple, argument, list, attribute and dict placements are refused by name
+on both builds; fit, float, negative-exponent and bases -1/0/1 programs match CPython. Tests on the
+final tree: `test_ail_pre33`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`.
 
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
