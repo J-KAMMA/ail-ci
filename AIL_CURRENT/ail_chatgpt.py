@@ -161,7 +161,6 @@ def _const_expr_int(node, bounded=True):
 
 _CONST_FOLD_BITS = 1 << 20
 _CONST_FOLD_SPECIAL_BITS = 1 << 24
-_CONST_FOLD_INDEX_BITS = 1 << 22
 
 
 def _const_fold_int(node, limit=_CONST_FOLD_BITS):
@@ -336,8 +335,7 @@ def _check_constant_power(node, parents, maxsplit):
 def _check_index_expression(slice_node):
     """Refuse a constant subscript index that int64 cannot hold. A literal or signed literal is
     already refused by _check_int64_literals with its own message, so only compound arithmetic is
-    read here.  A wider intermediate that reduces to an in-range index (pre246's unary case, or
-    ``(-2**63) // (2**63) == -1``) is folded exactly, as the code generator does."""
+    read here."""
     literal = (isinstance(slice_node, ast.Constant)
                or isinstance(slice_node, ast.UnaryOp) and isinstance(slice_node.op, (ast.UAdd, ast.USub))
                and isinstance(slice_node.operand, ast.Constant))
@@ -346,9 +344,6 @@ def _check_index_expression(slice_node):
     try:
         _const_expr_int(slice_node)
     except _Int64ConstantOverflow as overflow:
-        value = _const_fold_int(slice_node, _CONST_FOLD_INDEX_BITS)
-        if value is not None and _INT64_MIN <= value <= _INT64_MAX:
-            return
         error = ValueError(f'int64 index out of range: {_constant_diagnostic(overflow.args[0])}')
         error.source_line = slice_node.lineno
         error.source_column = slice_node.col_offset

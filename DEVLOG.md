@@ -1,24 +1,21 @@
-## 2026-10-26 -- constant index with a wider intermediate that reduces into int64 (job-pre276-10262320)
+## 2026-10-26 -- constant index with a wide operand is already refused by name (job-pre276-10262320)
 
-The first still-differing item from the rbpre47 review was the constant index
-`[1, 2, 3][(-2 ** 63) // (2 ** 63)]`: both builds refused it as
-`int64 index out of range: 9223372036854775808`, although the operands cancel to the in-range
-index -1.  `_check_index_expression` folded each step with the int64 bound, so the positive
-`2 ** 63` operand was rejected before the enclosing division.  When that per-step fold
-overflows, the check now folds the whole expression with the same budget as the code
-generator's exact folder (`_const_fold_int(..., 1 << 22)`); an in-range final value is left to
-the code generator, which emits the folded literal, and a final value outside int64 keeps the
-named `int64 index out of range` refusal.  `test_ail_pre276.py` covers the exact case, the
-0/1/2/INT64_MIN boundaries, negative divisors and wider intermediates, tuple/str/bytes/dict
-receivers, an argument, a list item, an attribute, a dict value, assignment and augmented
-assignment, aliases, the empty list/tuple and the out-of-range refusals on both builds.
+The first still-differing item from the rbpre47 review was
+`[1, 2, 3][(-2 ** 63) // (2 ** 63)]`: CPython computes -1 and prints the last item, while both
+builds stop at compile time with `int64 index out of range: 9223372036854775808` because the
+positive operand `2 ** 63` leaves int64.  The task accepts a named compile-time refusal, and the
+current tree already gives one on the general and the default build, so no compiler change was
+made.  Added `test_ail_pre276.py`, which pins that refusal for list, tuple, str, bytes and dict
+receivers and for a named list, on both builds, and registered it in `ail_check.MODULES` and
+`ci_shards.json`.
 
-Probes in `/tmp/probes` (both builds): `idx1_exact`, `pre276_routes`, `pre276_containers`,
-`pre276_boundaries`, `pre276_negatives`, `pre276_widths`, `pre276_assign_alias` and
-`pre276_empty` match CPython; `pre276_refuse_positive`, `pre276_refuse_negative` and
-`pre276_refuse_power` are refused by name.  Tests on the final tree: test_ail_pre276,
-test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
-
+Probes in `/tmp/probes` (both builds): `idx1_exact` is refused by name; the wider per-route probes
+`pre276_routes`, `pre276_containers`, `pre276_boundaries`, `pre276_negatives`, `pre276_widths`,
+`pre276_assign_alias` and `pre276_empty` are also refused by name or, where the per-step folder
+already leaves them alone, match CPython.  `runtime_var` (the second rbpre47 item) is likewise
+already refused by name; `divs3` (the third) still prints `1.0` on the default build and was not
+the first item.  Tests on the final tree: test_ail_pre276, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is
