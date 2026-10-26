@@ -31,7 +31,7 @@ TEXT, REPR, TYPE, QUAL, ARGSREPR = '__ail_text__', '__ail_repr__', '__ail_type__
 FILENAME = '__ail_filename__'
 VIRTUAL_FIELDS = (TEXT, REPR, TYPE, QUAL, ARGSREPR, FILENAME)
 OS_CLASS_NAMES = ('OSError', 'FileNotFoundError', 'PermissionError', 'IsADirectoryError', 'FileExistsError', 'NotADirectoryError')
-INTRINSICS = ('_ail_exc_arg', '_ail_exc_nargs', '_ail_exc_isa', '_ail_exc_is')
+INTRINSICS = ('_ail_exc_arg', '_ail_exc_argrepr', '_ail_exc_nargs', '_ail_exc_isa', '_ail_exc_is')
 ATTR_INTRINSICS = ('_ail_exc_attr_s', '_ail_exc_attr_i', '_ail_exc_attr_f')
 
 
@@ -138,8 +138,73 @@ class _Handler(ast.NodeTransformer):
             return self.call('_ail_exc_arg', [ast.Name(self.name, ast.Load()), index], node)
         return self.generic_visit(node)
 
+    # -- aliases: e.args[i] is kept as its text on this path, so a value stored in a name, a container,
+    #    an attribute or a user function would print differently when repr() reads it later.  Refuse
+    #    that by name; the default build then takes the general path, which keeps the argument object.
+    def args_element(self, node):
+        return (isinstance(node, ast.Subscript) and self.is_args(node.value)
+                and not isinstance(node.slice, ast.Slice))
+
+    def mentions_args(self, node):
+        return any(self.args_element(n) for n in ast.walk(node))
+
+    def leaked_alias(self, node):
+        if self.args_element(node):
+            return 'direct'
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            return 'container' if any(self.leaked_alias(e) for e in node.elts) else None
+        if isinstance(node, ast.Dict):
+            for e in list(node.keys) + list(node.values):
+                if e is not None and self.leaked_alias(e):
+                    return 'container'
+        return None
+
+    def refuse_alias(self, node):
+        from pyfront import Unsupported
+        raise Unsupported('storing an exception argument e.args[i] in a variable, a list, a tuple, a dict, '
+                          'an attribute or a function argument (the typed path keeps e.args[i] as text, so '
+                          'repr() of the stored value would differ from CPython)')
+
+    def visit_Assign(self, node):
+        if self.mentions_args(node.value):
+            self.refuse_alias(node)
+        return self.generic_visit(node)
+
+    def visit_AnnAssign(self, node):
+        if node.value is not None and self.mentions_args(node.value):
+            self.refuse_alias(node)
+        return self.generic_visit(node)
+
+    def visit_AugAssign(self, node):
+        if self.mentions_args(node.value):
+            self.refuse_alias(node)
+        return self.generic_visit(node)
+
+    _TEXT_CALLS = frozenset(('print', 'str', 'repr', 'int', 'float', 'len', 'isinstance', 'type', 'bool', 'format'))
+
+    def stored_alias_in_call(self, node):
+        if isinstance(node.func, ast.Name):
+            text_call = node.func.id in self._TEXT_CALLS
+        elif isinstance(node.func, ast.Attribute):
+            text_call = node.func.attr == 'format'
+        else:
+            text_call = False
+        for arg in list(node.args) + [kw.value for kw in node.keywords]:
+            leak = self.leaked_alias(arg)
+            if leak == 'container' or (leak == 'direct' and not text_call):
+                return True
+        return False
+
     # -- text contexts
     def visit_FormattedValue(self, node):
+        if (node.conversion == 114 and isinstance(node.value, ast.Subscript)
+                and self.is_args(node.value.value) and not isinstance(node.value.slice, ast.Slice)):
+            # repr(e.args[i]) keeps the argument's own repr: a float stays 3.0, not the text '3.0'
+            index = self.visit(node.value.slice)
+            node.value = self.call('_ail_exc_argrepr', [ast.Name(self.name, ast.Load()), index], node.value)
+            node.conversion = -1
+            node.format_spec = self.visit(node.format_spec) if node.format_spec is not None else None
+            return node
         if node.conversion in (115, 114) or node.conversion == -1 and node.format_spec is None:
             text = self.text_of(node.value, want_repr=node.conversion == 114)
             if text is not None:
@@ -148,6 +213,8 @@ class _Handler(ast.NodeTransformer):
         return self.generic_visit(node)
 
     def visit_Call(self, node):
+        if self.stored_alias_in_call(node):
+            self.refuse_alias(node)
         func = node.func
         if isinstance(func, ast.Name):
             if func.id == 'print':
@@ -778,6 +845,17 @@ static ail_str ail_exc_argstr(const ail_exception *e, int64_t i, ail_sarena *A) 
     ail_exarg a = ail_exc_arg(e, i);
     ail_str s = ail__exc_piece(&a, 0, A);
     return a.kind == 0 ? ail_exception_string_copy(s, A) : s;
+}
+/* repr(e.args[i]): the argument's own repr (a str is quoted, a float stays 3.0) */
+static ail_str ail_exc_argrepr(const ail_exception *e, int64_t i, ail_sarena *A) {
+    int64_t n = ail_exc_nargs(e);
+    if (i < 0) i += n;
+    if (i < 0 || i >= n) {
+        static const char m[] = "tuple index out of range";
+        ail_raise_value_adopt(ail_exception_new(AIL_EXC_INDEX, (const uint8_t *)m, (int64_t)sizeof m - 1, 1));
+    }
+    ail_exarg a = ail_exc_arg(e, i);
+    return ail__exc_piece(&a, 1, A);
 }
 /* the message of an exception built from arguments: what str(e) would be, kept in p/n for e.message and for the
    report of an uncaught exception (a single str argument is the message itself) */

@@ -1,3 +1,24 @@
+## 2026-10-26 -- re-apply pre48: exception argument `repr` and file OSError `args` (job-rbpre48-10261855)
+
+Re-applied the accepted pre48 change on the current integration tree; its compiler edits
+(`exctext.py`, `filert.py`, `pyfunc.py`) applied without conflicts, so both sides' fixes are kept.
+Direct `repr(e.args[i])` now has the `_ail_exc_argrepr` intrinsic and runtime helper, which reads
+the argument's own repr (str/int/float/bool/None, negative and out-of-range indices, empty args as
+IndexError); storing an `e.args[i]` value in a name, container, attribute or user function is
+refused by name on the typed path so the default build uses the general path, which keeps the
+object. The general-path file OSError adapter builds two-element `args == (errno, strerror)` and
+keeps the filename as an attribute. Added and registered `test_ail_pre48.py`; `tools/diff_ids.py`
+is not present on this tree, and `tools/update_manifest.py` (then `--check`) passes.
+
+Probes in `/tmp/probes` (`p48_direct`, `p48_alias`, `p48_index_routes`, `p48_oserror_ctor`,
+`p48_empty`, `p48_file_missing`, `p48_file_dir`) run with `cmp.sh`: every one matches CPython on
+the default build, and all but `p48_oserror_ctor` match on the forced build; that probe is
+refused by name there (`not in the subset: raising OSError with more than one argument`), as are
+multi-argument `raise ValueError(...)` probes. Final-state modules: test_ail_pre48,
+test_ail_exception_context, test_ail_exception_values_core, test_ail_exception_values_app,
+test_ail_exception_aggregate_objects, test_ail_exc_str, test_ail_excfix, test_ail_raise_from,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (11 modules, 522 s, 0 failed).
+
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is
