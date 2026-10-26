@@ -26,7 +26,7 @@ the legacy path's locals). A parameter that is never assigned stays an SSA value
 import ast
 import os
 
-from pyfront import int_constant
+from pyfront import int_constant, refuse_int_pow_overflow
 from . import ir as I
 from . import effects as E
 from . import ownership
@@ -2149,6 +2149,8 @@ class Lowering(TextLowering):
         raise NotS0('unary %s' % type(op).__name__)
 
     def binop(self, node):
+        if isinstance(node.op, ast.Pow):
+            refuse_int_pow_overflow(node)
         return self.binop_values(node, self.expr(node.left), self.expr(node.right))
 
     def binop_values(self, node, left, right):
