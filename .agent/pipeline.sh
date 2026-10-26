@@ -143,8 +143,15 @@ commit_leftovers() {  # an agent's uncommitted edits still count as its work
 }
 
 rules=$(cat .agent/rules.txt 2>/dev/null)
+# time boxes (minutes) for the worker, each review and the fix round. The bigint fix jobs are large: with 100/60/60
+# nearly all of them were cut off mid-work and judged FIX (2026-10-26), so they get a longer first pass and the time
+# left decides whether a second review still fits. They also skip the full suite here: their base (the bigint export)
+# fails ~70 modules until all fixes are in, and the merged result runs the full suite in the private repo.
+W0=100; RV=60; W1=60; SUITE=1; T_END=$(( $(date +%s) + 320 * 60 ))
+case "$(git rev-parse --abbrev-ref HEAD)" in job-bigint-*) W0=170; RV=50; W1=70; SUITE=0;; esac
+left() { echo $(( (T_END - $(date +%s)) / 60 )); }
 cat .agent/task.md > "$RUNNER_TEMP/work0.md"
-report=$(run_oc "$RUNNER_TEMP/work0.md" work0 100)
+report=$(run_oc "$RUNNER_TEMP/work0.md" work0 $W0)
 printf '\n## worker report 0\n%s\n' "$report" >> "$log"
 commit_leftovers worker
 if [ "$(git rev-list --count work..HEAD)" = 0 ]; then
@@ -154,10 +161,11 @@ fi
 verdict=NONE
 for i in 0 1; do
   { cat .agent/review.md; cat .agent/task.md; printf '\n--- WORKER REPORT ---\n%s\n' "$report"; } > "$RUNNER_TEMP/review$i.md"
-  rv=$(run_oc "$RUNNER_TEMP/review$i.md" "review$i" 60)
+  [ "$(left)" -lt $(( RV + 5 )) ] && { printf '\n## review %s skipped: only %s minutes left\n' "$i" "$(left)" >> "$log"; [ $i = 0 ] && verdict=ERROR; break; }
+  rv=$(run_oc "$RUNNER_TEMP/review$i.md" "review$i" $RV)
   if ! grep -q 'VERDICT:' <<< "$rv"; then   # no verdict: an infrastructure failure, try once more
     printf '\n## review %s failed to run: %s\n' "$i" "$(tail -3 <<< "$rv" | tr '\n' ' ')" >> "$log"
-    sleep 120; rv=$(run_oc "$RUNNER_TEMP/review$i.md" "review$i" 60)
+    sleep 120; rv=$(run_oc "$RUNNER_TEMP/review$i.md" "review$i" $RV)
   fi
   printf '\n## review %s\n%s\n' "$i" "$rv" >> "$log"
   git reset -q --hard HEAD; git clean -qfd -e .agent -e corpus   # the reviewer only judges; drop anything it left
@@ -168,7 +176,9 @@ for i in 0 1; do
   [ $i = 1 ] && break
   { printf 'You work in this directory on the current branch (your earlier commits). The reviewer found defects. Fix every one of them, re-run the probes and the required tests, and commit.\n\n--- ORIGINAL TASK ---\n'
     cat .agent/task.md; printf '\n--- REVIEW ---\n%s\n%s\n' "$rv" "$rules"; } > "$RUNNER_TEMP/work1.md"
-  report=$(run_oc "$RUNNER_TEMP/work1.md" work1 60)
+  w=$(( $(left) - RV - 10 )); [ $w -gt $W1 ] && w=$W1
+  [ $w -lt 15 ] && { printf '\n## fix round skipped: only %s minutes left\n' "$(left)" >> "$log"; break; }
+  report=$(run_oc "$RUNNER_TEMP/work1.md" work1 $w)
   printf '\n## worker report 1\n%s\n' "$report" >> "$log"
   commit_leftovers fix
 done
@@ -177,7 +187,7 @@ suite_new() {  # prints the test modules that fail now and are not in the known-
   (cd AIL_CURRENT && timeout 75m python3 ../tools/par_check.py -j 4 > "$RUNNER_TEMP/suite.log" 2>&1)
   grep -oE 'FAIL test_ail_[a-z0-9_]+' "$RUNNER_TEMP/suite.log" | awk '{print $2}' | sort -u | grep -vxF -f .agent/integ_base_fail.txt 2>/dev/null
 }
-if [ "$verdict" = ACCEPT ]; then
+if [ "$verdict" = ACCEPT ] && [ $SUITE = 1 ]; then
   bad=$(suite_new)
   printf '\n## full suite\n%s\n' "${bad:-no new failures}" >> "$log"
   if [ -n "$bad" ]; then
