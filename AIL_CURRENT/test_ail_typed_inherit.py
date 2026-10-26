@@ -582,8 +582,77 @@ def main() -> None:
 main()
 '''
 
+ABSTRACT = '''class Visitor:
+    def visit_file(self, element: "File") -> None:
+        raise NotImplementedError
+
+    def visit_directory(self, element: "Directory") -> None:
+        raise NotImplementedError
+
+
+class File:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def accept(self, visitor: Visitor) -> None:
+        visitor.visit_file(self)
+
+
+class Directory:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.children: list[File] = []
+
+    def add(self, child: File) -> "Directory":
+        self.children.append(child)
+        return self
+
+    def accept(self, visitor: Visitor) -> None:
+        visitor.visit_directory(self)
+
+
+class PrintVisitor(Visitor):
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+
+    def visit_file(self, element: File) -> None:
+        self.lines.append(element.name)
+
+    def visit_directory(self, element: Directory) -> None:
+        self.lines.append(element.name + "/")
+        for child in element.children:
+            child.accept(self)
+
+
+class CountVisitor(Visitor):
+    def __init__(self) -> None:
+        self.files: int = 0
+        self.directories: int = 0
+
+    def visit_file(self, element: File) -> None:
+        self.files += 1
+
+    def visit_directory(self, element: Directory) -> None:
+        self.directories += 1
+        for child in element.children:
+            child.accept(self)
+
+
+def main() -> None:
+    root = Directory("root").add(File("a")).add(File("b"))
+    p = PrintVisitor()
+    root.accept(p)
+    c = CountVisitor()
+    root.accept(c)
+    print(p.lines)
+    print(c.files, c.directories)
+
+
+main()
+'''
+
 FIXED = [('names', NAMES), ('animals', ANIMALS), ('expr', EXPR), ('accounts', ACCOUNTS), ('loggers', LOGGERS), ('fields', FIELDS),
-         ('tasks', TASKS), ('tree', TREE), ('shapes', SHAPES)]
+         ('tasks', TASKS), ('tree', TREE), ('shapes', SHAPES), ('abstract', ABSTRACT)]
 
 _A = '''class A:
     def __init__(self, x: int) -> None:
