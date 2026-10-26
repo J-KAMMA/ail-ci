@@ -1,16 +1,6 @@
-**Fix one pre-existing difference from CPython.** A reviewer of job `pre26` recorded these as already present before that job:
+**Your change fails tests on top of the current integration branch.** Applied alone on today's integ, one or more of these test modules fail: test_ail_pre48 test_ail_safetynet.
 
-- `p21`/`p22`: `s = e.args[0]; repr(s)` still textual (`'3.0'`), and list/attribute/dict aliases likewise; direct `repr(e.args[i])` is fixed.
-- `p9`: general path `repr(e.args[-1])` on an `OSError` prints the filename instead of strerror.
-- `p34`: general-path `repr(e)` of a numeric exception still `ValueError('3.0')`; `args_mutate` and `args_getattr` unchanged (eager text, unsupported `getattr`).
-
-**Tests/records:** `test_ail_pre26`, `test_ail_safetynet` (86 s), `test_ail_exc_str` (94 s), `test_ail_files`, `test_ail_corpus_findings3` all pass, 0 failed; `update_manifest.py --check` passes. Records/DIFFERENCES/DEVLOG present; commit message and `Co-Authored-By` correct.
-
-**Claim check:** fix and probe claims verified; “general path unchanged” is true behaviourally, though C for programs that read exception text (but not `repr(args)`) gains one unused static helper; non-exception gdev C is byte-identical (`g00_000`, `g05_010`, `g20_000`). The DIFFERENCES “both builds match CPython” wording is slightly overbroad because the general path refuses multi-arg raises by name (acceptable). Test timings not exactly reproduced but all five modules pass.
-
-**Speed:** not measured; change is off the hot path (only `repr` of an exception argument). `tools/icount.c` is in fact present.
-
-Reproduce the first one that still differs on this tree (`bash ~/tools/cmp.sh` on both builds). Fix that one cause, or refuse the construct by name at compile time. Add the case to a new `test_ail_pre48.py` and run only that module and `test_ail_safetynet`, then commit. If none of them still differs, change nothing and say so.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find why it fails here (another change may have altered behaviour or output your test expects), and fix it so they pass while keeping your fix and its test. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
