@@ -673,6 +673,28 @@ def _constant_text(node, known_text, known_int, known_containers=None):
         return node.value
     if isinstance(node, ast.Name) and node.id in known_text:
         return known_text[node.id]
+    if isinstance(node, ast.Attribute):
+        fields = []
+        base = node
+        while isinstance(base, ast.Attribute):
+            field = re.fullmatch(r'f(\d+)', base.attr)
+            if field is None:
+                break
+            fields.append(int(field.group(1)))
+            base = base.value
+        if (fields and isinstance(base, ast.Call) and isinstance(base.func, ast.Name)
+                and base.func.id.startswith('_AilT_') and not base.keywords):
+            value_node = base
+            for index in reversed(fields):
+                if (not isinstance(value_node, ast.Call) or not isinstance(value_node.func, ast.Name)
+                        or not value_node.func.id.startswith('_AilT_') or value_node.keywords
+                        or index >= len(value_node.args)
+                        or any(isinstance(arg, ast.Starred) for arg in value_node.args)):
+                    value_node = None
+                    break
+                value_node = value_node.args[index]
+            if value_node is not None:
+                return _constant_text(value_node, known_text, known_int, known_containers)
     if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice):
         if isinstance(node.value, ast.Name):
             container = (known_containers or {}).get(node.value.id)

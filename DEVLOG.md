@@ -1,3 +1,17 @@
+## 2026-10-26 -- pre263 follow-up: inline tuple source (job-pre263-10261654)
+
+The reviewer found the new row claimed a literal tuple source was covered, while
+`int(("9999999999999999999",)[0])` still compiled and stopped with `integer overflow`.
+`python_surface` rewrites that tuple to `_AilT_s(...).f0`, which `_constant_text` did not read.
+It now follows the generated `_AilT_*` constructor and field chain, so the one-argument parse
+sees the same constant text and refuses the out-of-range value by name; nested tuple sources
+and `[-1]` work as well, and an unselected out-of-range sibling is not refused.  Added
+`tuple_source` and `tuple_source_negative_index` to `test_ail_pre263.py`.  Probes
+`/tmp/probes/pre263fix/t01`-`t20` cover direct/multi/negative/bytes/nested/whitespace, both
+int64 boundaries, two-argument and explicit-base forms, argument/list-item/dict-value/class
+attribute/module-alias routes, in-range values, invalid and empty text; every one matches
+CPython or is refused by name on both builds.
+
 ## 2026-10-26 -- pre263: constant single-argument int(text) beyond int64 (job-pre263-10261654)
 
 The task named a pre-existing difference from the bigint-fix05 review, but its list was empty in

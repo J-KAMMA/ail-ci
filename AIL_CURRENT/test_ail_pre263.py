@@ -104,6 +104,18 @@ main()
 
 main()
 ''',
+    'tuple_source': '''def main():
+    print(int(("9999999999999999999",)[0]))
+
+
+main()
+''',
+    'tuple_source_negative_index': '''def main():
+    print(int(("1", b"9999999999999999999")[-1]))
+
+
+main()
+''',
     'max_plus_one': '''def main():
     print(int("9223372036854775808"))
 
