@@ -135,6 +135,28 @@ default build and are refused on the general build; `n1/n2` are refused at run t
 Tests on the final tree: `test_ail_pre283`, `test_ail_safetynet`, `test_ail_files`,
 `test_ail_corpus_findings3`, `test_ail_dunders`, `test_ail_typed_inherit` (6 modules, 320 s,
 0 failed).  `tools/update_manifest.py` run and `--check` passes.
+## 2026-10-26 -- local constant cancellation refused by name (job-pre285-10270302)
+
+The reviewer of job `rbrbpre32` recorded `a = 2**62; b = a * 2 - 1` as a pre-existing
+difference: both builds computed `a * 2` in int64 and stopped with `integer overflow` at run
+time, while CPython's unbounded int prints INT64_MAX.  The first recorded item (index/slice/
+dead-code out-of-range powers) is already refused by name on this tree, so this job fixes the
+first item that was still an uncaught run-time difference.
+
+`ail_chatgpt.py` now follows a function's single-assignment int constants (direct, aliased,
+annotated, and visible module constants) when it checks an expression, and refuses by name
+(`int64 constant expression out of range`) a step that leaves int64 while the whole expression
+fits.  The check reuses the existing `_function_local_int_constants` +
+`_constant_int_exact` machinery.  A literal cancellation such as `2**63 - 1`, in-range local
+steps and values that only arrive at run time are unchanged; an expression whose own final
+value leaves int64 keeps its previous run-time stop.  Added `AIL_CURRENT/test_ail_pre285.py`
+(12 refusal cases, 6 matching cases, both builds), registered it in `ail_check.MODULES` and
+updated `tools/ci_shards.json`.  Probes `p285_*` in `/tmp/probes`: `p285_direct`,
+`p285_routes`, `p285_alias` and `p285_ops` are refused by name on both builds; `p285_small`,
+`p285_literal` and `p285_runtime` match CPython on both builds.  Tests on the final tree:
+`test_ail_pre285`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` and 13
+related `pre*` modules (17 modules, 361 s, 0 failed).  `tools/update_manifest.py --check`
+passes.
 
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
