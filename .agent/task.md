@@ -1,44 +1,12 @@
-You continue on the current branch, where your earlier work is committed. **Fix only these findings from the last review, nothing else:**
+# Continue: fix the reviewer's findings
 
-## review 1
-[model opencode-go/deepseek-v4.1-flash]
-**What the change really does:** removes `driver.py`'s blanket refusal for module-variable writers, makes int module statics `ail_tint` when the whole program is eligible (`GLOBAL_INT_TINT`), lowers `global.load/store` as tint, and adds `tint.pow`/`ail_tint_pow`; `bigcap.py` also trusts a module literal for constant powers.
+You continue a job on its own branch: your earlier commits are already here. The reviewer returned FIX. Its last
+review is the last "## review" section of `.agent/pipeline.md` in this checkout (read the whole file: the original task,
+your reports and the reviews are there).
 
-**Probes (HEAD vs CPython, base checked):**
-- `p1_counter` typed prints `2`; base refused. Verified.
-- `p2_grow`, `p5_pow`, `p12_biglit`, `p17_double`: default path matches CPython; p2/p12 typed refusal is same as base (big power literal), acceptable.
-- `p3_mixed`, `p4_neg`, `p11_while`, `p15_flow`: default matches; base same default output.
-- `p6_negpow`, `p7_float`: typed refusal, default matches CPython and base.
-- `p20_retmin`: **new regression** (below).
-- `p13_str`/`p21_str`: C unchanged; `p13_plain`/`p14_modconst` C differs only by the unused `ail_tint_pow` helper.
-
-**Tests:**
-- `test_ail_globals`: **30/32**, not 32/32 (2 failures).
-- `test_ail_safetynet`: 5/5 OK.
-- `test_ail_bigint test_ail_tint test_ail_unified`: 62/62 OK.
-- `test_ail_dunders test_ail_nested_functions test_ail_unbound`: 27 failures on both HEAD and base, identical names (report verified).
-- `test_ail_files`, `test_ail_corpus_findings3`: not run.
-- `tools/update_manifest.py --check`: **rc=1**, seven stale files; `par_check.py` preflight raises `ValueError: hash mismatch: python/pkg-v12/pyfunc.py`.
-
-**Defects:**
-1. Returning a module int that grew past int64 now crashes the default (typed) build. Probe `/tmp/rprobes/p20_retmin.py`:
-```python
-x = 4611686018427387904
-def get() -> int:
-    return x
-def main() -> None:
-    global x
-    x *= 4
-    print(get())
-main()
-```
-Expected `18446744073709551616` (CPython and base default/general path). Actual HEAD default: no stdout, stderr `integer overflow`, exit 1 (both AIL_IR=0 and AIL_IR=1). Caused by the new tint global being converted to the function's int64 return.
-2. Required `test_ail_globals` still fails: `test_a_range_bound_is_read_once_and_a_while_test_every_time` — typed refusal `a range loop with a tagged start or step needs a tagged index`; `test_floats_negative_and_large_starts_and_every_operator` — typed refusal `a bit operation on an unproven int` (`e |= 3`). Both tests must pass typed; report's 32/32 claim is false.
-3. `MANIFEST.json` was not refreshed after commit `6db0182`; `--check` fails and `par_check.py` cannot run (hash mismatch), contradicting the report.
-
-Minor: int-only programs that never touch module variables get a new unused `ail_tint_pow` in their C, so that C is not byte-identical to base (no behavioural difference observed).
-
-Probe both builds with `bash ~/tools/cmp.sh`, add each fixed case to the tests, then commit. If a finding cannot be fixed safely, refuse the construct by name at compile time instead of leaving a silent wrong answer.
+Fix every defect the last review lists, re-run the probes and the test modules the original task names, and commit.
+Do not undo the earlier work unless a finding requires it. If a finding is wrong, say so in your report with the
+evidence (program, CPython output, AIL output).
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
