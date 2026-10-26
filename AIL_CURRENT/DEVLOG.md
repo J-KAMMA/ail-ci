@@ -230,6 +230,17 @@ arguments were quoted the same way.  The handler rewrite now lowers `repr(e.args
 `f"{e.args[i]!r}"` and `%r` of one argument to a new `_ail_exc_arg_repr` accessor that formats
 the stored argument (a str keeps its quotes, a number does not).  Both builds agree with
 CPython; `test_ail_pre26.py` keeps the probe, including negative and out-of-range indexes.
+## 2026-10-24 - pre44: unassigned Callable locals are UnboundLocalError
+
+The `test_ail_callable_values` failure recorded by the `regmods` review was a stale
+expectation, not a compiler difference: a Callable local that the definite-assignment pass
+has not assigned already raises CPython's `UnboundLocalError` (directly, through a list item,
+a dict value or an argument, and after `if`/`for`/`del`) on both builds. The R570 test still
+expected `RuntimeError`; it now catches `UnboundLocalError`. The same test module's refusal
+list also still contained a managed-struct Callable field, which R594 supports and
+`test_ail_exception_values_core` covers. Added `test_ail_pre44.py` with CPython comparisons
+for the direct, annotation-only, container/argument and control-flow cases. No language
+behaviour changed.
 
 ## 2026-10-23 -- fuzz37: ordering TypeError names the written operator
 
