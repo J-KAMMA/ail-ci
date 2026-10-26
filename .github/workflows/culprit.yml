@@ -47,6 +47,8 @@ jobs:
           git fetch -q origin "+refs/heads/$BR:refs/remotes/origin/$BR"
           git diff "$JB" "origin/$BR" -- . ':!.agent' ':!corpus' ':!AIL_CURRENT/MANIFEST.json' > /tmp/job.diff
           git apply --3way --whitespace=nowarn /tmp/job.diff || echo "some hunks did not apply"
+          # the manifest pins every source file: regenerate it, or every job "breaks" the pin-checking modules
+          python3 tools/update_manifest.py >/dev/null 2>&1 || true
           cd AIL_CURRENT
           rc=0
           for m in $MODS; do
