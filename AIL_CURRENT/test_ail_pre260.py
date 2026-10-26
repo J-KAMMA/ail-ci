@@ -155,6 +155,90 @@ main()
 '''
 
 
+BOUND_METHOD = r"""from typing import Callable
+
+class Other:
+    def __init__(self, k: int) -> None:
+        self.k = k
+    def add(self, x: int) -> int:
+        return self.k + x
+
+class C:
+    f: Callable[[int], int]
+    g: Callable[[], int]
+    other: Callable[[int], int]
+    def __init__(self, o: Other) -> None:
+        self.k = 100
+        self.f = self.add
+        self.g = self.kval
+        self.other = o.add
+    def add(self, x: int) -> int:
+        return self.k + x
+    def kval(self) -> int:
+        return self.k
+    def run(self, x: int) -> int:
+        return self.f(x) + self.g() + self.other(x)
+
+def apply(f: Callable[[int], int], x: int) -> int:
+    return f(x)
+
+def main() -> None:
+    o = Other(10)
+    c = C(o)
+    alias = c.f
+    xs = [c.f, o.add]
+    d = {"f": c.f, "o": o.add}
+    print(c.f(1), c.g(), c.run(2), alias(3), xs[0](4), xs[1](5), d["f"](6), d["o"](7))
+    print(apply(c.f, 8), apply(o.add, 9))
+    c.f = o.add
+    print(c.f(10), c.run(11), alias(12), xs[0](13), d["f"](14), apply(c.f, 15))
+main()
+"""
+
+CALLABLE_INSTANCE = r"""from typing import Callable
+
+class Adder:
+    def __init__(self, k: int) -> None:
+        self.k = k
+    def __call__(self, x: int) -> int:
+        return self.k + x
+
+class Base:
+    def __init__(self, k: int) -> None:
+        self.k = k
+    def __call__(self, x: int) -> int:
+        return self.k - x
+
+class Child(Base):
+    pass
+
+class Holder:
+    f: Callable[[int], int]
+    def __init__(self, f: Callable[[int], int]) -> None:
+        self.f = f
+    def run(self, x: int) -> int:
+        return self.f(x)
+
+def apply(f: Callable[[int], int], x: int) -> int:
+    return f(x)
+
+def main() -> None:
+    a = Adder(10)
+    b = Adder(20)
+    h = Holder(a)
+    alias = a
+    xs = [a, b]
+    d = {"a": a, "b": b}
+    print(a(1), b(2), h.run(3), h.f(4), alias(5), xs[0](6), xs[1](7), d["a"](8), d["b"](9), apply(b, 10))
+    h.f = b
+    print(h.f(11), h.run(12))
+    c = Child(30)
+    g = c
+    print(c(13), g(14), apply(c, 15))
+main()
+"""
+
+
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -206,6 +290,12 @@ class Pre260Tests(unittest.TestCase):
 
     def test_callable_field_errors(self):
         self.check('errors', ERRORS)
+
+    def test_callable_field_bound_method(self):
+        self.check('bound_method', BOUND_METHOD)
+
+    def test_callable_field_callable_instance(self):
+        self.check('callable_instance', CALLABLE_INSTANCE)
 
 
 if __name__ == '__main__':

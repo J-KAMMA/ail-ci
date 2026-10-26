@@ -5315,6 +5315,39 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('st = ail2x_args(cx, &%s, %s);' % (t, obj))
             ctx.check()
             return t
+        mv_owners = self._method_value_owners(node.attr)
+        if mv_owners:
+            # reading a method as a value: bind it to the receiver (CPython's bound method), as a FUNC
+            # value so a Callable field, an argument, a list/dict item, ... can hold and call it.
+            self.rt_needs.add('attr')
+            t = ctx.tmp()
+            first = True
+            for c, info in mv_owners:
+                cond = ('(%s.tag == AIL_T_INST || %s.tag == AIL_T_EXC) && '
+                        'ail_class_is_or_subclass(((ail_instobj *)%s.o)->cls, g_slots_arr[%d])'
+                        % (obj, obj, obj, self.global_slots['class:' + c]))
+                ctx.emit('%sif (%s) {' % ('' if first else '} else ', cond))
+                first = False
+                ctx.indent += 1
+                ctx.emit('{ ail_obj _own;')
+                ctx.emit('if (ail2a_find(cx, %s, "%s", &_own)) { %s = _own; } else {'
+                         % (obj, node.attr, t))
+                ctx.indent += 1
+                mv = self._method_value(info, obj, ctx)
+                ctx.emit('%s = %s;' % (t, mv))
+                ctx.indent -= 1
+                ctx.emit('}')
+                ctx.emit('}')
+                ctx.indent -= 1
+            ctx.emit('} else {')
+            ctx.indent += 1
+            self.attr_names.add(node.attr)
+            ctx.emit('st = ail_inst_getattr(cx, &%s, %s, g_attr_%s, %s);' %
+                     (t, obj, node.attr, c_str_literal(node.attr)))
+            ctx.check()
+            ctx.indent -= 1
+            ctx.emit('}')
+            return t
         self.attr_names.add(node.attr)
         t = ctx.tmp()
         if self.lib_tuples and re.fullmatch(r'f[0-9]+', node.attr) and any(c.startswith('_AilT_') for c in self.classes):
@@ -8346,6 +8379,65 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _b_quit(self, args, kwargs, ctx):
         return self._emit_sys_exit(args, kwargs, ctx)
+
+    def _method_value_owners(self, attr):
+        """Classes whose own body defines `attr` as a plain instance method, most derived first."""
+        owners = []
+        for c in self.class_order:
+            info = self.classes[c]['methods'].get(attr)
+            if info is not None and info.get('is_method') and not info.get('is_static') \
+                    and not info.get('is_classmethod') and not info.get('is_property') \
+                    and not info.get('is_setter'):
+                owners.append((c, info))
+
+        def depth(c):
+            n = 0
+            k = self.classes[c]['base']
+            while k in self.classes and n < 64:
+                n += 1
+                k = self.classes[k]['base']
+            return n
+
+        owners.sort(key=lambda ci: depth(ci[0]), reverse=True)
+        return owners
+
+    def _method_value(self, info, obj, ctx):
+        """A FUNC value for the bound method `obj.<method>` (cells: the arity word and the receiver)."""
+        node = info['node']
+        if node.args.posonlyargs or info.get('kwonly') or info.get('vararg') or info.get('kwarg') \
+                or info.get('defaults') or info.get('generator'):
+            raise Unsupported('the method .%s() as a value (it has defaults, *args, **kwargs or yield)'
+                              % node.name)
+        params = info['params'][1:]
+        n = len(params)
+        adapter = 'pmv_' + info['cname']
+        adapters = getattr(self, 'method_value_adapters', None)
+        if adapters is None:
+            adapters = self.method_value_adapters = set()
+        if adapter not in adapters:
+            adapters.add(adapter)
+            if n == 0:
+                body = '    (void)arg;\n    return %s(cx, out, clo[1]);' % info['cname']
+            elif n == 1:
+                body = '    return %s(cx, out, clo[1], arg);' % info['cname']
+            else:
+                body = ('    ail_vecobj *v = (ail_vecobj *)arg.o;\n'
+                        '    return %s(cx, out, clo[1]%s);'
+                        % (info['cname'], ''.join(', v->p[%d]' % i for i in range(n))))
+            self.top_decls.append('static ail_st %s(ail_ctx *cx, ail_obj *out, ail_obj arg, '
+                                  'void *closure);\n' % adapter)
+            self.top_defs.append('static ail_st %s(ail_ctx *cx, ail_obj *out, ail_obj arg, '
+                                 'void *closure) {\n'
+                                 '    ail_obj *clo = (ail_obj *)closure;\n%s\n}\n\n' % (adapter, body))
+        t = ctx.tmp()
+        ctx.emit('{ ail_funcobj *_fo = (ail_funcobj *)ail_gc_alloc(cx, AIL_K_FUNC, sizeof(ail_funcobj)); '
+                 '_fo->fn = %s; _fo->n_cells = 0; _fo->name = "%s"; '
+                 '_fo->cells = (ail_obj *)ail_xmalloc(2 * sizeof(ail_obj)); '
+                 '_fo->cells[0] = ail_box_int((int64_t)((0x%XLL << 32) | (%dLL << 16) | %dLL)); '
+                 '_fo->cells[1] = %s; _fo->n_cells = 2; '
+                 '%s.tag = AIL_T_FUNC; %s.o = (ail_gcobj *)_fo; }'
+                 % (adapter, boxclosure._c_name(node.name, params), boxclosure.TAG, n, n, obj, t, t))
+        return t
 
     def _call_attribute(self, f, args, kwargs, ctx):
         recv = f.value

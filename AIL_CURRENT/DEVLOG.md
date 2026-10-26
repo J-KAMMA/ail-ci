@@ -1,3 +1,15 @@
+## 2026-10-26 -- Callable fields: bound methods and __call__ instances (job-pre260-10261651 review)
+
+The review found that storing a bound method (`self.f = self.add`, `self.f = o.add`) or an instance
+whose class defines `__call__` in a `Callable` field compiled and then crashed.  Reading a plain
+instance method as a value now builds a FUNC value that binds the receiver (an own instance
+attribute still wins over the class method, as in CPython), and a call through a function value
+dispatches an `__call__` method before the runtime's not-callable error.  Inherited and overridden
+methods and `__call__` dispatch most-derived first.  A method value whose signature has defaults,
+`*args`, `**kwargs` or `yield` is refused by name.  `test_ail_pre260.py` adds both routes; probes
+cover zero/one/two arguments, int64 edges, empty/negative values, inheritance/shadowing and the
+argument/list/item/attribute/dict routes on both builds.
+
 ## 2026-10-26 -- Callable values stored in instance fields (job-pre260-10261651)
 
 The reviewer of job `bigint-fix04` recorded that the general path refused a `Callable` held in
