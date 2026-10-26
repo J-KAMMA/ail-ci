@@ -1,3 +1,27 @@
+## 2026-10-26 -- pre274 review: keep the base DIE classifier byte-identical (job-pre274-10262317)
+
+The review of this branch's first commit found that adding `0.0 cannot be raised to a negative
+power` to the shared `ail_exc_kind_of` changed every default-build `program.c`, failing the
+`test_ail_record_initializers` and `test_ail_numeric_bindings` codegen pins.  The base classifier
+(`cruntime.py`) is now untouched; the message is mapped to `ZeroDivisionError` only in the
+exception-enabled DIE block (`exctext.DIE_EDITS`' `newString`), which is spliced in only when a
+program reads an exception's text.  `python3 tools/codegen_diff.py --base 7317635` shows all five
+pin sources with old == new; the two pin modules pass again.  The two `**` helpers
+(`ail_ipow`, `ail__fpow_slow`) keep last commit's message change, so `0 ** -1` still names
+CPython's text on both builds and `try`/`except` still catches it.
+
+Probes in `/tmp/probes` on both `cmp.sh` builds, all matching CPython: `p1_uncaught`
+(literal, float, mixed, int/float variable, bool, list item, dict value, attribute, argument,
+computed base, `0 ** -100`), `p2_caught` (same routes under `except ZeroDivisionError`, with
+`str` and `args`), `p3_edges` (`-0.0`, `0`, positive, fractional, `-inf`, `inf`, `nan` exponents,
+`True ** -1`, `2 ** -1`), `p4_fncatch` (the argument route under `except Exception` and
+`except ZeroDivisionError`), `p7_negzero` (`-0.0` base caught).  The pre-existing mixed-clone
+catch gap after a caught-trap loop and the non-zero variable negative-exponent trap are unchanged
+from the base.  Tests on the final commit: `test_ail_record_initializers`,
+`test_ail_numeric_bindings`, `test_ail_pre274`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` (6 modules, 281 s, 0 failed).  `tools/update_manifest.py --check`
+passes.
+
 ## 2026-10-26 -- zero base to a negative power names CPython's ZeroDivisionError (job-pre274-10262317)
 
 Fixing the first pre-existing difference recorded by the rbpre69 review: `0 ** -1` stopped with
