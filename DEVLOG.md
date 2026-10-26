@@ -61,6 +61,16 @@ the captured list, sibling inner defs, a returned inner def called twice, rebind
 name after the intermediate call, three levels, an unbound scalar read before assignment and
 after deletion, and a deep `nonlocal` write stays refused by name.  Probes in `/tmp/probes`
 match CPython or are refused by name on both builds.
+## 2026-10-26 -- reapply pre225: grouping with an unrecognised type code (job-rbpre225-10261321)
+
+Re-applied the accepted pre225 change. Its safetyrt.py fix is already present on this tree from
+the pre206 review: `ail2f_parse` checks the grouping against the type before an unknown code (its
+whitelist gives the same result as pre225's `bcdeEfFgGnosxX%` once the `n`/`s`/`c` and
+`,`+`b/o/x/X` conflicts are applied), and `ail2f_code_text` already escapes a space code as
+`\x20` (`c <= 0x20`). The code therefore needed no further edit, keeping both sides' fixes. Added
+`AIL_CURRENT/test_ail_pre225.py` (1 test, both builds) and registered it in
+`ail_check.MODULES`. Probes `/tmp/probes/pre225_*` (group matrix, value routes, NUL/code points,
+boundaries) match CPython on both builds. Tests: pre225, safetynet, files, corpus_findings3.
 
 ## 2026-10-25 -- pre227 suite fix: the constant check owns the refusal wording (job-pre227-10260534)
 
