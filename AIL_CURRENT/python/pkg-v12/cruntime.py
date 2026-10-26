@@ -10872,6 +10872,15 @@ static inline void ail_die(const char *w) {
     fputc('\n', stderr);
     _Exit(1);
 }
+static inline void ail_die_bare(const char *w) {
+    if (ail_die_out_buf && *ail_die_out_buf && ail_die_out_len && *ail_die_out_len) {
+        fwrite(*ail_die_out_buf, 1, *ail_die_out_len, stdout); *ail_die_out_len = 0;
+    }
+    fflush(stdout);
+    fputs(w, stderr);
+    fputc('\n', stderr);
+    _Exit(1);
+}
 static inline void *ail_xmalloc(size_t n) {
     void *p = malloc(n ? n : 1);
     if (!p) ail_die("out of memory");
@@ -19255,8 +19264,8 @@ static inline ail_st ail_op_imul(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b
     if (a.tag == AIL_T_LIST && ail__is_intlike(b.tag)) {
         ail_vecobj *v = (ail_vecobj *)a.o; int64_t k = b.i, n = v->n;
         if (k <= 0) { v->n = 0; }
-        else if (k > 1) {
-            if (n > 0 && k > (INT64_MAX / 16) / n) return ail_hit_limit(cx, "int_overflow", "list repeat too large");
+        else if (k > 1 && n > 0) {
+            if (k > (INT64_MAX / (int64_t)sizeof(ail_obj)) / n) ail_die_bare("MemoryError");
             ail_vec_reserve(cx, v, n * k);
             for (int64_t r = 1; r < k; r++) for (int64_t j = 0; j < n; j++) v->p[v->n++] = v->p[j];
         }
