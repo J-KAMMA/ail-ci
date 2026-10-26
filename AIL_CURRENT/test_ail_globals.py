@@ -290,6 +290,45 @@ def main():
 main()
 ''')
 
+    def test_a_returned_variable_keeps_the_exact_value_past_int64(self):
+        self.same('''x = 4611686018427387904
+
+
+def get():
+    return x
+
+
+def wrap():
+    return get() + 1
+
+
+def main():
+    global x
+    x *= 4
+    print(get())
+    print(wrap())
+
+
+main()
+''', irs=("1",))
+
+    def test_bit_operations_on_a_variable_past_int64(self):
+        self.same('''x = 4611686018427387904
+n = -4611686018427387904
+
+
+def main():
+    global x, n
+    x *= 4
+    n *= 4
+    print(x & 255, x | 1, x ^ 3)
+    print(n & 255, n | 1, n ^ 3)
+    print(~x, ~n)
+
+
+main()
+''', irs=("1",))
+
     def test_exceptions_methods_and_a_parameter_with_the_variable_name(self):
         self.same('''hits = 0
 total = 0

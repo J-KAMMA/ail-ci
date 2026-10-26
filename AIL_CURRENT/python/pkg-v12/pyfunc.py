@@ -34926,6 +34926,27 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                 return True
         return False
 
+    # Under whole-program module-int tint storage, a function whose int result can be a module
+    # int must return the exact tagged value: converting it to the int64 result ABI would abort
+    # (`p20`). Calls propagate it, so a wrapper that only returns another such call is marked too.
+    _modint_names = {n for n, (k, _v) in _MODCONSTS.vars.items() if k == INT} if GLOBAL_INT_TINT else set()
+    _exact_int_ret = set()
+    if _modint_names:
+        _changed = True
+        while _changed:
+            _changed = False
+            for _f in fns:
+                if _f.name in _exact_int_ret or sigs[_f.name][1] != INT:
+                    continue
+                if _f.name == entry_name and not library:
+                    continue
+                _hits = any(isinstance(n, ast.Name) and n.id in _modint_names for n in ast.walk(_f)) \
+                    or any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                           and n.func.id in _exact_int_ret for n in ast.walk(_f))
+                if _hits:
+                    _exact_int_ret.add(_f.name)
+                    _changed = True
+
     for _i, _f in enumerate(fns if (_python_surface and not TINT_DISABLED and _ir_on) else []):
         # Real I/O is the one exemption: its lowering stays on the legacy typed path, so a tint
         # signature would not match it. A compiler rewrite (`_ail_divmod_f`, ...) is not I/O.
@@ -34947,10 +34968,14 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         # A method's `self` is a non-int value, so an attribute operation (`self.x * self.x`) has no
         # unproven local to name; its proof failure still means the method needs the tagged lowering.
         _needs_tint = bool(_unproven) or (_proof is not None and _f.name in method_names)
-        _params = tuple(1 if (k == INT and n in _unproven
-                              and (sigs[_f.name][1] == INT or _param_arith(_f, n))) else 0
+        # With whole-program module-int tint storage an int value can cross any user call, so
+        # every int parameter and result of the user functions is tagged: converting a module
+        # value at a call boundary would abort on a value past int64 (`p20_arg_show`).
+        _all_tint = bool(GLOBAL_INT_TINT)
+        _params = tuple(1 if (k == INT and (_all_tint or (n in _unproven
+                                                            and (sigs[_f.name][1] == INT or _param_arith(_f, n))))) else 0
                         for n, k in sigs[_f.name][0])
-        _ret = 1 if (sigs[_f.name][1] == INT and _needs_tint
+        _ret = 1 if (sigs[_f.name][1] == INT and (_all_tint or _needs_tint or _f.name in _exact_int_ret)
                      and not (_f.name == entry_name and not library)) else 0
         _tint_sigs[_f.name] = (_params, _ret)
         _tint_sigs[csym[_f.name]] = (_params, _ret)

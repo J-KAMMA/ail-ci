@@ -325,7 +325,12 @@ class Lowering(TextLowering):
             if isinstance(_e, ast.BinOp):
                 return _may_tint(_e.left) or _may_tint(_e.right)
             if isinstance(_e, ast.Name):
-                return _e.id in self.tint_names
+                if _e.id in self.tint_names:
+                    return True
+                if getattr(self.P, 'GLOBAL_INT_TINT', False):
+                    _mods = getattr(getattr(self.ctx, 'modconsts', None), 'vars', {})
+                    return _e.id in _mods and _mods[_e.id][0] == self.P.INT
+                return False
             if isinstance(_e, ast.Call):
                 if isinstance(_e.func, ast.Name):
                     _sig = getattr(self.P, 'TINT_SIGS', {}).get(_e.func.id)
@@ -1145,18 +1150,18 @@ class Lowering(TextLowering):
             if not node.elts:
                 self.b.emit('list.reset', [ref_fn()])
                 return
-            vals = [self.field_value(self.expr(e), elem) for e in node.elts]
+            vals = [self.field_value(self.expr(e), elem, e) for e in node.elts]
             self.b.emit('list.lit', [ref_fn()] + vals)
             return
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
             for lst, cnt, first in ((node.left, node.right, True), (node.right, node.left, False)):
                 if isinstance(lst, ast.List) and len(lst.elts) == 1 and not isinstance(lst.elts[0], ast.Starred):
                     if first:
-                        v = self.field_value(self.expr(lst.elts[0]), elem)
+                        v = self.field_value(self.expr(lst.elts[0]), elem, lst.elts[0])
                         n = self.as_int(self.expr(cnt))
                     else:
                         n = self.as_int(self.expr(cnt))
-                        v = self.field_value(self.expr(lst.elts[0]), elem)
+                        v = self.field_value(self.expr(lst.elts[0]), elem, lst.elts[0])
                     self.b.emit('list.repeat', [ref_fn(), v, n])
                     return
             raise NotS0('a list product that is not [v] * n')
@@ -1234,7 +1239,7 @@ class Lowering(TextLowering):
         body = I.Region([index])
 
         def push():
-            v = self.field_value(self.expr(node.elt), elem)
+            v = self.field_value(self.expr(node.elt), elem, node.elt)
             self.b.emit('list.push', [ref, v])
 
         def conds(k):
@@ -2095,6 +2100,8 @@ class Lowering(TextLowering):
             if isinstance(target.slice, ast.Slice):
                 raise NotS0('slice assignment')
             key = self.dict_key(target.slice)
+            if v.type == TINT and self.module_int_value(value_node):
+                raise NotS0('a module int stored in an int64 container')
             self.b.emit('dict.put', [self.places[target.value.id], key, self.as_int(v)])
             return
         if isinstance(target, ast.Attribute):
@@ -2102,7 +2109,7 @@ class Lowering(TextLowering):
             if kind not in (self.P.INT, self.P.FLT):
                 raise NotS0('store to field %s.%s of kind %r' % (cls, target.attr, kind))
             t = I.I64 if kind == self.P.INT else I.F64
-            self.b.emit('field.set', [obj, self.field_value(v, t)], [], {'cls': cls, 'name': target.attr})
+            self.b.emit('field.set', [obj, self.field_value(v, t, value_node)], [], {'cls': cls, 'name': target.attr})
             return
         if isinstance(target.slice, ast.Slice):
             raise NotS0('slice assignment')
@@ -2110,17 +2117,34 @@ class Lowering(TextLowering):
         self.guard_field_ba(base, target.slice)
         if base.type == BYTEARRAY:
             index = self.as_int(self.expr(target.slice))
-            self.b.emit('ba.set', [base, index, self.field_value(v, I.I64)], [], {'mode': 'ck'})
+            self.b.emit('ba.set', [base, index, self.field_value(v, I.I64, value_node)], [], {'mode': 'ck'})
             return
         if not self.is_list(base):
             raise NotS0('element store into %s' % base.type)
         index = self.as_int(self.expr(target.slice))
         elem = base.type.args[0].args[0]
-        self.b.emit('list.set', [base, index, self.field_value(v, elem)], [], {'mode': self.index_mode(target)})
+        self.b.emit('list.set', [base, index, self.field_value(v, elem, value_node)], [], {'mode': self.index_mode(target)})
 
-    def field_value(self, v, t):
+    def module_int_value(self, node):
+        """Whether this expression can carry a module int (a direct read or a call that returns
+        one); such a value must not be narrowed into an int64 container."""
+        if node is None or not getattr(self.P, 'GLOBAL_INT_TINT', False):
+            return False
+        mods = getattr(getattr(self.ctx, 'modconsts', None), 'vars', {})
+        for n in ast.walk(node):
+            if isinstance(n, ast.Name) and n.id in mods and mods[n.id][0] == self.P.INT:
+                return True
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name):
+                sig = getattr(self.P, 'TINT_SIGS', {}).get(n.func.id)
+                if sig is not None and sig[1]:
+                    return True
+        return False
+
+    def field_value(self, v, t, node=None):
         if v.type == I.F64 and t != I.F64:
             raise NotS0('a float stored into an int slot')
+        if node is not None and v.type == TINT and t == I.I64 and self.module_int_value(node):
+            raise NotS0('a module int stored in an int64 container')
         return self.coerce(v, t)
 
     def aug_target(self, s):
@@ -2134,7 +2158,7 @@ class Lowering(TextLowering):
             attrs = {'cls': cls, 'name': target.attr}
             old = self.b.value('field.get', [obj], t, dict(attrs))
             new = self.apply_binop(s, old, self.expr(s.value))
-            self.b.emit('field.set', [obj, self.field_value(new, t)], [], attrs)
+            self.b.emit('field.set', [obj, self.field_value(new, t, s.value)], [], attrs)
             return
         if isinstance(target.slice, ast.Slice):
             raise NotS0('slice augmented assignment')
@@ -2143,6 +2167,8 @@ class Lowering(TextLowering):
             key = self.dict_key(target.slice)
             old = self.b.value('dict.need', [place, key], I.I64)
             new = self.apply_binop(s, old, self.expr(s.value))
+            if new.type == TINT and self.module_int_value(s.value):
+                raise NotS0('a module int stored in an int64 container')
             self.b.emit('dict.put', [place, key, self.as_int(new)])
             return
         base = self.container(target.value)
@@ -2153,7 +2179,7 @@ class Lowering(TextLowering):
         mode = self.index_mode(target)
         old = self.b.value('list.get', [base, index], elem, {'mode': mode})
         new = self.apply_binop(s, old, self.expr(s.value))
-        self.b.emit('list.set', [base, index, self.field_value(new, elem)], [], {'mode': 'nck'})
+        self.b.emit('list.set', [base, index, self.field_value(new, elem, s.value)], [], {'mode': 'nck'})
 
     def apply_binop(self, s, left, right):
         """`left <op> right` for an augmented assignment, typed as the legacy path types the
@@ -2274,7 +2300,7 @@ class Lowering(TextLowering):
         if name == 'append' and len(node.args) == 1:
             if not statement:
                 raise NotS0('append() used as a value')
-            v = self.field_value(self.expr(node.args[0]), elem)
+            v = self.field_value(self.expr(node.args[0]), elem, node.args[0])
             self.b.emit('list.push', [base, v])
             return None
         if name == 'pop' and not node.args:
@@ -2368,7 +2394,8 @@ class Lowering(TextLowering):
                     return self.b.value('tint.' + name + '_i64', [right, left], TINT)
             return self.b.value('tint.' + name, [self.coerce(left, TINT), self.coerce(right, TINT)], TINT)
         if tint and isinstance(op, (ast.BitAnd, ast.BitOr, ast.BitXor)):
-            raise NotS0('a bit operation on an unproven int')
+            name = {ast.BitAnd: 'and', ast.BitOr: 'or', ast.BitXor: 'xor'}[type(op)]
+            return self.b.value('tint.' + name, [self.coerce(left, TINT), self.coerce(right, TINT)], TINT)
         floating = I.F64 in (left.type, right.type)
         if isinstance(op, ast.Div):
             return self.b.value('fdiv', [self.coerce(left, I.F64), self.coerce(right, I.F64)], I.F64)

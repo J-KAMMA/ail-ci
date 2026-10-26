@@ -322,6 +322,30 @@ static AIL_BIGFN ail_tint ail_tint_pow(ail_tint a, ail_tint n) {
     return r;
 }
 
+/* `& | ^` with Python's infinite two's complement, exact past int64 as `ail_big_bitop` is for
+   the general path. Small values stay on the int64 fast path. */
+static AIL_BIGFN ail_tint ail_tint_bitop(ail_tint a, ail_tint b, char op) {
+    if (__builtin_expect(!a.b && !b.b, 1))
+        return ail_tint_from_int64(op == '&' ? (a.i & b.i) : op == '|' ? (a.i | b.i) : (a.i ^ b.i));
+    ail_tbv x, y; ail_tbv_of(&x, a); ail_tbv_of(&y, b);
+    size_t L = (x.n > y.n ? x.n : y.n) + 1;
+    ail_limb *t = (ail_limb *)malloc(2 * L * sizeof(ail_limb));
+    if (!t) ail_die("out of memory");
+    ail_bn_to_twos(t, L, x.d, x.n, x.sign < 0);
+    ail_bn_to_twos(t + L, L, y.d, y.n, y.sign < 0);
+    for (size_t i = 0; i < L; i++)
+        t[i] = op == '&' ? (t[i] & t[L + i]) : op == '|' ? (t[i] | t[L + i]) : (t[i] ^ t[L + i]);
+    size_t n; int sign = ail_bn_from_twos(t, L, &n);
+    ail_tbig *r = ail_tint__new(n ? n : 1);
+    if (n) memcpy(r->d, t, n * sizeof(ail_limb));
+    r->n = (uint32_t)n;
+    free(t);
+    return ail_tint_demote(r, sign);
+}
+static inline ail_tint ail_tint_and(ail_tint a, ail_tint b) { return ail_tint_bitop(a, b, '&'); }
+static inline ail_tint ail_tint_or(ail_tint a, ail_tint b) { return ail_tint_bitop(a, b, '|'); }
+static inline ail_tint ail_tint_xor(ail_tint a, ail_tint b) { return ail_tint_bitop(a, b, '^'); }
+
 static inline int ail_tint_cmp(ail_tint a, ail_tint b) {
     if (__builtin_expect(!a.b && !b.b, 1)) return a.i < b.i ? -1 : a.i > b.i ? 1 : 0;
     ail_tbv x, y; ail_tbv_of(&x, a); ail_tbv_of(&y, b);
