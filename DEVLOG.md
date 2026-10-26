@@ -1,3 +1,20 @@
+## 2026-10-26 - pre209 reapply: bytearray defaults of nested defs
+
+The accepted pre209 change proposed naming a nested `def`'s `bytearray(...)` default as a mutable
+literal and refusing it by name, because the old surface only matched the generic "nested def with
+default parameters" refusal. This tree contains the pre141 fix, which evaluates every non-literal
+default once at the `def` statement into a hidden local, including a `bytearray(...)` call and one
+inside a tuple/list/set/dict display. That matches CPython (the object is shared between calls, and
+a negative count raises at def time), so a refusal would regress it. Both changes are kept: pre141's
+evaluation stands, and `test_ail_pre209.py` re-applies pre209's cases as CPython-parity regressions
+(empty/bytes/size/list-arg bytearray defaults, tuple/list/dict/nested-tuple containers, an outer
+value, keyword-only, class-object and source-keyword defaults, alias bindings through an argument,
+a list item, an attribute and a dict value, module-level/returned/doubly-nested/loop-built/lambda/
+recursive/immutable defaults, the negative count, and the deeper-nested keyword call still refused
+by name). No compiler code change was needed. Probes `p01`-`p24` in `/tmp/probes/pre209` match
+CPython or are refused by name on both builds. Tests: pre209, pre141, safetynet, files,
+corpus_findings3.
+
 ## 2026-10-25 -- pre227 suite fix: the constant check owns the refusal wording (job-pre227-10260534)
 
 The class-constant fix still folds `N = 2**62; class C: X = N * 4` to a literal, but the
