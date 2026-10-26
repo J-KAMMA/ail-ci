@@ -234,7 +234,8 @@ class Pre190Tests(unittest.TestCase):
             import pyfunc
         finally:
             sys.path.pop(0)
-        self.assertEqual(pyfunc._CONST_INT_BITS, pyfunc._MAXSPLIT_BITS)
+        self.assertGreaterEqual(pyfunc._CONST_INT_BITS, pyfunc._MAXSPLIT_BITS)
+        self.assertEqual(pyfunc._CONST_INT_BITS, 1 << 22)
 
     def test_oversized_maxsplit_still_refused(self):
         for slug, text in OUT_OF_RANGE:

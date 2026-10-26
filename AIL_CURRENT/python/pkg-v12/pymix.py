@@ -280,23 +280,21 @@ def _escapes(fn_facts, parents):
     # `obj.method()`.  Include their bodies (and attribute call sites naming them) in the call
     # graph so such a call is visible to `_protected`, instead of leaving the callee selected as
     # a typed clone that would bypass the boxed handler.
-    method_bodies = {node.name: node for node, parent in parents.items()
-                     if isinstance(node, ast.FunctionDef) and isinstance(parent, ast.ClassDef)}
-    bodies = {name: f.node for name, f in fn_facts.items()}
-    for name, node in method_bodies.items():
-        bodies.setdefault(name, node)
-        call_sites.setdefault(name, [])
-    for name, body in bodies.items():
+    method_bodies = [(node.name, node) for node, parent in parents.items()
+                     if isinstance(node, ast.FunctionDef) and isinstance(parent, ast.ClassDef)]
+    method_names = {name for name, _ in method_bodies}
+    bodies = [(name, f.node) for name, f in fn_facts.items()] + method_bodies
+    for name, body in bodies:
         for n in _walk_own_body(body):
             if not isinstance(n, ast.Call):
                 continue
             if isinstance(n.func, ast.Name):
                 callee = n.func.id
-            elif isinstance(n.func, ast.Attribute) and n.func.attr in method_bodies:
+            elif isinstance(n.func, ast.Attribute) and n.func.attr in method_names:
                 callee = n.func.attr
             else:
                 continue
-            if callee in bodies:
+            if callee in fn_facts or callee in method_names:
                 call_sites.setdefault(callee, []).append((n, name))
 
     for _ in range(MAX_ROUNDS):

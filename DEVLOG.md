@@ -108,6 +108,65 @@ DEVLOG entry is placed before the 2026-10-24 codec-name entry. Overlapping fixes
 kept on both sides: pre192's `int(bytearray)` text and pre103's NUL format type still hold while the
 int()/float() error path now uses the UTF-16 repr helpers and `%.200R`, and the format parser
 distinguishes an ASCII type (including NUL) from a whole non-ASCII `wide_type`.
+## 2026-10-26 - re-apply pre237: method call sites with colliding names stay boxed (job-rbpre237-10261405)
+
+Re-applied accepted job `job-pre237-10260353` on this tree. The current export already carried
+an equivalent `pymix._escapes` fix, but it keyed method bodies by name in a dict and skipped a
+method whose name collided with a module function (`bodies.setdefault`), so duplicate method
+names across classes collapsed to one body. The re-applied change keeps every method body as a
+separate entry (`method_bodies` list) and walks both module functions and methods, recording
+`obj.method()` call sites when the attribute names a method. A module function `run` and class
+methods `run` (including duplicates) are therefore all visible, so the shift helper `shl`
+stays boxed under a caller's `try` on both builds.
+
+Added `test_ail_pre237.py` (2 tests: colliding method call sites with literal/argument/
+list-item/attribute/dict-value/alias counts and valid/zero shifts, plus an uncaught method shift
+naming `ValueError: negative shift count`) and registered it in `ail_check.MODULES`. Probes
+`/tmp/probes/pre237_*` cover the same forms on both builds; results are in the job report.
+## 2026-10-26 -- re-apply pre243: full "Invalid format specifier" text (job-rbpre243-10261424)
+
+Re-applying pre243 on this tree: the runtime change it proposed is already present from the
+pre206 parser fix (`ail2f_raise_invalid`, the parser's `-2` whole-spec code and the value-type
+name), so no `safetyrt.py` edit was needed; pre243's base-only note about a single non-ASCII type
+code is superseded by pre206's CPython `Unknown format code '\x..'` text.  Added the accepted
+`test_ail_pre243.py` and registered it in `ail_check.MODULES`; it passes on both builds.
+Probes `/tmp/probes/p243_invalid_spec.py` and `p243_extra.py` (multi-character, empty, control,
+NUL, quote, long and non-ASCII specs; int/bool/float/str values, negative/zero/empty; literal,
+argument, list item, attribute, dict value and alias routes) match CPython on both builds.
+## 2026-10-26 -- pre251 reapply: bool constants in constant integer shifts (job-rbpre251-10261432)
+
+Re-applied the accepted pre251 change on this tree. The three `pyfunc.py` edits are already
+present here: `_maxsplit_const` and `_const_int_expr` accept a bool constant as CPython's 0/1,
+and `fold_int_constant` still leaves a bool-only result (`True & True`) to the run time so its
+type stays bool. The current tree's later wider-intermediate and unary-plus fixes are kept.
+Added `test_ail_pre251.py` (6 tests, both builds) and registered it in `ail_check.MODULES`.
+
+Probes `/tmp/probes/pre251_accept.py`, `pre251_contexts.py`, `pre251_boolops.py`,
+`pre251_module_const.py`, `pre251_maxsplit.py` and `pre251_pow.py` match CPython on both builds;
+`pre251_refuse_shift.py` and `pre251_refuse_wide.py` are refused by name on both builds.
+Final-state tests: test_ail_pre251, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3; `tools/update_manifest.py --check` passes.
+## 2026-10-26 - reapply negative INT64_MIN unary constants (job-rbrbrbpre204-10261336)
+
+Re-applied the accepted job-pre204 fix on the current tree. The tree's pre177/pre190/pre236 work
+already folds whole constant expressions exactly through `pyfront.int_constant` and
+`pyfunc.fold_int_constant`, so the accepted per-emitter unary checks were already covered on the
+typed, typed-legacy and general paths; the one uncovered path was the general legacy
+`expr_UnaryOp` in `pyboxed.py`, which now folds the whole unary constant expression too. The exact
+constant-folding size limit is raised to `1 << 22` bits in `pyfront._CONST_INT_LIMIT` and in
+`pyfunc._CONST_INT_BITS` (including its late assignment that previously shared the 2**20
+`_MAXSPLIT_BITS`), so `-(1 << 63)`, `-((1 << 5000) >> 4937)` and the large intermediate
+reductions (`0 >> (1 << 5000)`, `2 ** ((1 << 2000000) - (1 << 2000000))`,
+`(1 << 2000000) >> 2000000`) fold to their in-range result instead of trapping on the
+intermediate. Values that reach a negation as variables keep the fixed-width run-time trap.
+
+The new `test_ail_pre204.py` covers negative INT64_MIN spellings, the four value flows (argument,
+list item, attribute, dict value), aliases and returns, in-range boundaries, the large-intermediate
+reductions, and dynamic operands, on all four emitter modes. Registered it in `ail_check.MODULES`
+and both `tools/ci_shards.json` lists. Conflict resolution with the later pre190/pre236 tests:
+pre190 now requires the generic fold limit to cover (not equal) the maxsplit limit and asserts the
+new 2**22 value, and pre236's non-special wide-shift refusal moved from the old 2**20 boundary to
+the new 2**22 one; both keep their original intent.
 
 ## 2026-10-25 -- pre227 suite fix: the constant check owns the refusal wording (job-pre227-10260534)
 

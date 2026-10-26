@@ -8,6 +8,29 @@ whitelist gives the same result as pre225's `bcdeEfFgGnosxX%` once the `n`/`s`/`
 `AIL_CURRENT/test_ail_pre225.py` (1 test, both builds) and registered it in
 `ail_check.MODULES`. Probes `/tmp/probes/pre225_*` (group matrix, value routes, NUL/code points,
 boundaries) match CPython on both builds. Tests: pre225, safetynet, files, corpus_findings3.
+## 2026-10-26 -- re-apply pre243: full "Invalid format specifier" text (job-rbpre243-10261424)
+
+Re-applying pre243 on this tree: the runtime change it proposed is already present from the
+pre206 parser fix (`ail2f_raise_invalid`, the parser's `-2` whole-spec code and the value-type
+name), so no `safetyrt.py` edit was needed; pre243's base-only note about a single non-ASCII type
+code is superseded by pre206's CPython `Unknown format code '\x..'` text.  Added the accepted
+`test_ail_pre243.py` and registered it in `ail_check.MODULES`; it passes on both builds.
+Probes `/tmp/probes/p243_invalid_spec.py` and `p243_extra.py` (multi-character, empty, control,
+NUL, quote, long and non-ASCII specs; int/bool/float/str values, negative/zero/empty; literal,
+argument, list item, attribute, dict value and alias routes) match CPython on both builds.
+## 2026-10-26 -- pre251 reapply: bool constants in constant integer shifts (job-rbpre251-10261432)
+
+Re-applied the accepted pre251 change on this tree. The three `pyfunc.py` edits are already
+present here: `_maxsplit_const` and `_const_int_expr` accept a bool constant as CPython's 0/1,
+and `fold_int_constant` still leaves a bool-only result (`True & True`) to the run time so its
+type stays bool. The current tree's later wider-intermediate and unary-plus fixes are kept.
+Added `test_ail_pre251.py` (6 tests, both builds) and registered it in `ail_check.MODULES`.
+
+Probes `/tmp/probes/pre251_accept.py`, `pre251_contexts.py`, `pre251_boolops.py`,
+`pre251_module_const.py`, `pre251_maxsplit.py` and `pre251_pow.py` match CPython on both builds;
+`pre251_refuse_shift.py` and `pre251_refuse_wide.py` are refused by name on both builds.
+Final-state tests: test_ail_pre251, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3; `tools/update_manifest.py --check` passes.
 
 ## 2026-10-25 -- pre227 suite fix: the constant check owns the refusal wording (job-pre227-10260534)
 
