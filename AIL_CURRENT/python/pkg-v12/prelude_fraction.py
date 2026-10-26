@@ -128,6 +128,15 @@ def _ail_fr_scan(s: str, i: int) -> int:
     return j
 
 
+def _ail_fr_pow10(exp: int) -> int:
+    r = 1
+    i = 0
+    while i < exp:
+        r = r * 10
+        i = i + 1
+    return r
+
+
 def _ail_fr_parse(text: str) -> list[int]:
     s = text.strip()
     n = len(s)
@@ -183,13 +192,13 @@ def _ail_fr_parse(text: str) -> list[int]:
         if intpart != "":
             num = int(intpart)
         if frac != "":
-            scale = 10 ** len(frac)
+            scale = _ail_fr_pow10(len(frac))
             num = num * scale + int(frac)
             den = den * scale
         if exp >= 0:
-            num = num * 10 ** exp
+            num = num * _ail_fr_pow10(exp)
         else:
-            den = den * 10 ** (-exp)
+            den = den * _ail_fr_pow10(-exp)
     if neg:
         num = -num
     return [num, den]
@@ -303,7 +312,7 @@ class Fraction:
             if fl % 2 == 0:
                 return fl
             return fl + 1
-        shift = 10 ** abs(ndigits)
+        shift = _ail_fr_pow10(abs(ndigits))
         if ndigits > 0:
             return Fraction((self * shift).__round__(None), shift)
         return Fraction((self / shift).__round__(None) * shift)
