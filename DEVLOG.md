@@ -7,9 +7,14 @@ prints `11`; a non-callable field printed the method's result instead of raising
 TypeError (`'F'`, `'bytes'`, `'int'`), and the pre279 route reported `'instance'`.  `pyboxed2.py`
 now records each class's instance fields (`self.x = ...`, tuple unpacking, `setattr(self, ...)`)
 and refuses `obj.x(...)` by name at compile time when a field of that name shadows a method of the
-receiver's class (or of a descendant), naming the field and class; the dynamic-receiver path does
-the same for every class that defines the method.  `super().x(...)`, `C.x(obj, ...)` and the typed
-path's `Callable` field keep their CPython-matching behaviour.
+receiver's class (or of a descendant), naming the field and class.  On the dynamic-receiver path
+it refuses only when every user class that defines the method has the shadowing field and no
+built-in method of that name exists, so a field of one class does not poison a call on an
+unrelated class or a built-in receiver.  A nested def/lambda/class with its own `self` is a
+different object and its assignments are not this class's instance fields.  `super().x(...)`,
+`C.x(obj, ...)` and the typed path's `Callable` field keep their CPython-matching behaviour.
+The pre293 review's three regressions are fixed: unrelated classes, a field named like a built-in
+method beside a built-in receiver, and a nested function's `self` parameter.
 
 Probes in /tmp/probes, each on both builds with `tools/cmp.sh`: `p1_callable_instance`,
 `p2_noncallable_instance`, `p3_bytes_field`, `p4_int_field`, `p5_lambda_field`, `p6_argument`,
@@ -19,8 +24,11 @@ Probes in /tmp/probes, each on both builds with `tools/cmp.sh`: `p1_callable_ins
 and `p15_unbound` match CPython on both builds; `callable_typed_field` matches CPython on the
 default build and is refused by name on the forced-general build.  `p10_plain_field`, `p13_getattr`
 and the `field_only_*` probes keep their pre-existing named refusals (no method of the same name).
-Tests on the final tree: `test_ail_pre293`, `test_ail_safetynet`, `test_ail_files`,
-`test_ail_corpus_findings3` (4 modules, 331 s, 0 failed).
+Review-fix probes, both builds: `def1_unrelated_classes`, `def2_unrelated_builtin`,
+`def3_nested_scope`, `dyn_field_unrelated_reverse`, `dyn_field_third_class`, `dyn_builtin_count`,
+`dyn_field_via_routes`, `nested_lambda_own_self` and `nested_rebind_self` match CPython;
+`nested_lambda_field` is refused by name.  Tests on the final tree: `test_ail_pre293`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` (4 modules, 204 s, 0 failed).
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is

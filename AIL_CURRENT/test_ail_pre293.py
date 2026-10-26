@@ -124,6 +124,32 @@ class C:
 print(C(inc).g(1))
 '''
 
+UNRELATED_CLASSES = '''class A:
+    def __init__(self): self.f = 5
+    def f(self, x): return x + 10
+class B:
+    def f(self, x): return x + 100
+def go(x): return x.f(1)
+print(go(B()))
+'''
+
+UNRELATED_BUILTIN = '''class C:
+    def __init__(self): self.append = 5
+    def append(self, x): return x
+def go(x): x.append(1)
+go([])
+print('ok')
+'''
+
+NESTED_SCOPE = '''class C:
+    def f(self, x): return x + 100
+    def g(self):
+        def h(self):
+            self.f = 5
+        return 1
+print(C().f(1))
+'''
+
 
 class Pre293Tests(unittest.TestCase):
     def setUp(self):
@@ -212,6 +238,15 @@ class Pre293Tests(unittest.TestCase):
         built = self.build("typed_callable", TYPED_CALLABLE_FIELD, True)
         self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
         self.assertIn("calling the instance field 'g'", built.stdout + built.stderr)
+
+    def test_unknown_receiver_is_not_refused_by_another_class(self):
+        # a dynamic receiver may be B or a list; a field of A/C must not poison that call
+        self.check_output("unrelated_classes", UNRELATED_CLASSES)
+        self.check_output("unrelated_builtin", UNRELATED_BUILTIN)
+
+    def test_nested_scope_receiver_is_not_the_instance(self):
+        # `self` in h is h's own parameter, so C has no field named f
+        self.check_output("nested_scope", NESTED_SCOPE)
 
 
 if __name__ == "__main__":

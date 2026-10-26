@@ -3123,7 +3123,40 @@ class Compiler(boxclosure.ClosureMixin):
             if 'staticmethod' in decs or 'classmethod' in decs or not item.args.args:
                 continue
             recv = item.args.args[0].arg
-            for n in ast.walk(item):
+            def same_scope(n):
+                yield n
+                for ch in ast.iter_child_nodes(n):
+                    if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda,
+                                       ast.ClassDef, ast.ListComp, ast.SetComp, ast.DictComp,
+                                       ast.GeneratorExp)):
+                        continue
+                    yield from same_scope(ch)
+
+            def binds_recv(scope):
+                a = getattr(scope, 'args', None)
+                if a is not None:
+                    params = list(getattr(a, 'posonlyargs', [])) + list(a.args) + \
+                        list(getattr(a, 'kwonlyargs', []))
+                    params += [x for x in (a.vararg, a.kwarg) if x is not None]
+                    if any(x.arg == recv for x in params):
+                        return True
+                return any(isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)
+                           and n.id == recv for n in same_scope(scope) if n is not scope)
+
+            def method_scope(n):
+                yield n
+                for ch in ast.iter_child_nodes(n):
+                    if isinstance(ch, ast.ClassDef):
+                        continue
+                    if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda,
+                                       ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+                        # A nested scope with its own `self` is a different object; one that
+                        # only closes over this method's `self` still sets this instance's field.
+                        if binds_recv(ch):
+                            continue
+                    yield from method_scope(ch)
+
+            for n in method_scope(item):
                 if (isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Store)
                         and isinstance(n.value, ast.Name) and n.value.id == recv):
                     inst_fields.add(n.attr)
@@ -8699,7 +8732,11 @@ class Compiler(boxclosure.ClosureMixin):
             return None
         owners.sort(key=depth, reverse=True)
         shadow = [c for c in owners if self._shadowing_field_owners(c, f.attr)]
-        if shadow:
+        # Refuse only when every class that defines the method has a shadowing instance field
+        # and no built-in method of the same name exists.  With an unknown receiver, a field
+        # of one candidate class must not refuse a call that may land on another user class
+        # (a B instance) or on a built-in receiver (a list's `.append`).
+        if shadow and len(shadow) == len(owners) and builtin is None:
             raise Unsupported("calling the instance field '%s' of %s (a field with the same "
                               "name shadows the method, and a call through the field's value "
                               "is not modelled)" % (f.attr, shadow[0]))
