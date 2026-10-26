@@ -14,6 +14,46 @@ CPython on both builds.
 Final-state tests: test_ail_pre271, test_ail_local_count_repeat, test_ail_list_ops,
 test_ail_safetynet, test_ail_files, test_ail_corpus_findings3 (6 modules, 271 s, 0 failed).
 `tools/update_manifest.py --check` passes.
+## 2026-10-26 -- preludes avoid the refused variable-exponent power (job-pre273-10262306 review)
+
+The review found that `refuse_variable_int_pow` also saw compiler-injected library source:
+`prelude_fraction.py`'s `10 ** len(frac)` / `10 ** exp` / `10 ** abs(ndigits)` made every
+`from fractions import Fraction` program fail at compile time, and `test_ail_pre133` failed 2/3.
+The preludes now stay inside the subset the refusal describes: `prelude_fraction.py` scales
+through a new `_ail_fr_pow10` multiplication loop, and `prelude_random.py`'s `sample` adds the
+already-computed `p` instead of recomputing `4 ** m`. No refusal or runtime rule changed; a user
+program that writes `2 ** n` is still refused by name on both builds. Added a Fraction prelude
+case to `test_ail_pre273.py`; `test_ail_pre133` is back to 3/3.
+
+Probes in `/tmp/probes`: `pow_fraction_modern.py` (constructor from an int pair, decimal and
+exponent strings, arithmetic and `round` through the prelude's powers of ten) matches CPython on
+both builds; `pow_random_prelude.py` (the prelude's own `Random` class plus `sample` with k > 5)
+matches CPython on both builds. The earlier `pre273_*` probes still behave as recorded: the
+refused forms are refused by name and `bounds`/`safe`/`zero_neg` match CPython.
+
+## 2026-10-26 -- computed exponent on a constant integer base is refused (job-pre273-10262306)
+
+The first still-differing item in the rbpre69 review was the variable-exponent power: `2 ** n`
+compiled and then stopped with `integer overflow`, where CPython keeps an unbounded int. The
+constant-exponent form is already folded and refused when it leaves int64, so the remaining case
+is an exponent known only at run time. `pyfront.refuse_variable_int_pow` now refuses a power
+whose base is a compile-time int64 constant with |base| >= 2 and whose exponent is not a constant
+expression, naming the base and the int64 boundary on the typed path and both general emitters.
+Constant exponents (including bool leaves), the safe bases 0/1/-1, float bases with a
+constant float exponent and a variable base with a constant exponent are unchanged. The three existing tests that used the old trap
+(`test_all.integer_power`, `test_ail_pre160`, `test_ail_crypto`) now exercise the new boundary.
+Added `test_ail_pre273.py` (2 tests, both builds) and registered it in `ail_check.MODULES`;
+DIFFERENCES row `C?-job-pre273-10262306-1`. `tools/diff_ids.py` is not present on this tree;
+`tools/update_manifest.py` was run and `--check` passes.
+
+Probes in `/tmp/probes`: `pre273_arg`, `pre273_list`, `pre273_attr`, `pre273_dict`,
+`pre273_alias` and `pre273_float_dynamic` are refused by name on both builds; `pre273_bounds`,
+`pre273_safe` and `pre273_zero_neg` match CPython on both builds (constant/float/bool exponents,
+the bases 0/1/-1, negative constant exponents and a variable base with a constant exponent).
+`pre273_expr_pow` keeps the older named refusal for a constant exponent outside int64;
+`pre273_neg_literal` matches CPython. Tests on the final tree: `test_ail_pre273`,
+`test_ail_pre160`, `test_ail_crypto`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3`.
 
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
