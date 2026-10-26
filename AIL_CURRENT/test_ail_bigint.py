@@ -502,10 +502,11 @@ class DefaultBuild(unittest.TestCase):
         self.check("typed_overflow_stops")
 
     def test_constant_shift_that_fits_int64(self):
-        """Zero shifted by any count fits int64 and stays on the IR; -1 << 63 stays on the IR as a
-        promotable tagged value, so later arithmetic that exceeds int64 still works. CPython's
-        value, through a helper argument, a list item, an attribute and a dict value, on the
-        general and the default build."""
+        """Zero shifted by any count fits int64 and stays on the IR. A direct -1 << 63 stays on the
+        IR as a promotable tagged value, so later arithmetic that exceeds int64 still works; when
+        it is stored in a list, tuple, dict or attribute the function keeps the exact general path
+        (the IR containers are int64). CPython's value, through a helper argument, a list item, an
+        attribute and a dict value, on the general and the default build."""
         self.check_both("big_shift_zero")
 
     def test_b2_review_probes_on_both_builds(self):

@@ -27,5 +27,20 @@ def main() -> None:
     print(d["v"] << 300)
     print(h(0, 500))
     print(h(c.v, 64))
+    cont()
+
+def cont() -> None:
+    xs = [-1 << 63]
+    print(xs[0] - 1)
+    d = {"k": -1 << 63}
+    print(d["k"] * 2)
+    t = (-1 << 63,)
+    print(t[0] * 2)
+    c = C()
+    c.v = -1 << 63
+    print(c.v * 2)
+    v = -1 << 63
+    ys = [v]
+    print(ys[0] - 1)
 
 main()

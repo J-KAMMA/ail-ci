@@ -109,6 +109,91 @@ def _w_alias_shortcuts(ctx, fn_name, notes):
                                 'afterwards: Python semantics (the legacy emitter copies here)'})
 
 
+def _negative_one_shift_escapes(fn, P):
+    """True when a literal ``-1 << 63`` can be stored in an int64 container (a list, tuple or
+    dict display, an element or attribute store, a list mutator, or a return value).  The IR's
+    containers hold int64, so narrowing the tagged INT64_MIN there would make later arithmetic
+    overflow; such a function must keep the exact general path instead."""
+    shifts = []
+    for node in ast.walk(fn):
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.LShift) \
+                and isinstance(node.right, ast.Constant) and type(node.right.value) is int \
+                and node.right.value == 63:
+            try:
+                left = P._int_const(node.left)
+            except Exception:
+                left = None
+            if type(left) is int and left == -1:
+                shifts.append(node)
+    if not shifts:
+        return False
+    ids = {id(s) for s in shifts}
+    tainted = set()
+
+    def mentions(node):
+        for sub in ast.walk(node):
+            if id(sub) in ids:
+                return True
+            if isinstance(sub, ast.Name) and sub.id in tainted:
+                return True
+        return False
+
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(fn):
+            value = None
+            target = None
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                value, target = node.value, node.targets[0]
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                value, target = node.value, node.target
+            elif isinstance(node, ast.NamedExpr):
+                value, target = node.value, node.target
+            if isinstance(target, ast.Name) and value is not None and mentions(value) \
+                    and target.id not in tainted:
+                tainted.add(target.id)
+                changed = True
+
+    def any_mention(exprs):
+        return any(e is not None and mentions(e) for e in exprs)
+
+    for node in ast.walk(fn):
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            if any_mention(node.elts):
+                return True
+        elif isinstance(node, ast.Dict):
+            if any_mention(list(node.keys) + list(node.values)):
+                return True
+        elif isinstance(node, ast.ListComp):
+            if mentions(node.elt):
+                return True
+        elif isinstance(node, ast.DictComp):
+            if mentions(node.key) or mentions(node.value):
+                return True
+        elif isinstance(node, (ast.SetComp, ast.GeneratorExp)):
+            if mentions(node.elt):
+                return True
+        elif isinstance(node, ast.Assign):
+            if any(isinstance(t, (ast.Subscript, ast.Attribute)) for t in node.targets) \
+                    and mentions(node.value):
+                return True
+        elif isinstance(node, ast.AugAssign):
+            if isinstance(node.target, (ast.Subscript, ast.Attribute)) and mentions(node.value):
+                return True
+        elif isinstance(node, ast.Call):
+            # a call can store the value (a class or tuple constructor, list.append, a helper
+            # that keeps it); print is the direct use that stays exact through the tag.
+            func = node.func
+            if isinstance(func, ast.Name) and func.id == 'print':
+                continue
+            if any_mention(list(node.args) + [k.value for k in node.keywords]):
+                return True
+        elif isinstance(node, ast.Return) and node.value is not None and mentions(node.value):
+            return True
+    return False
+
+
 def _legacy_walias(P, fn, ctx):
     """W-ALIAS sites of a function that stays on the legacy emitter (syntactic scan, walias.py)."""
     try:
@@ -218,6 +303,7 @@ def _apply(P, args, kwargs, result, current):
     _sig = getattr(P, 'TINT_SIGS', {}).get(fn.name) if _py else None
     if _sig and (any(_sig[0]) or _sig[1]) and not _io_like:
         _needs_tint = True
+    _neg63_escapes = _negative_one_shift_escapes(fn, P) if _py else False
     _big_shift = False
     for _n in ast.walk(fn):
         if isinstance(_n, ast.BinOp) and isinstance(_n.op, ast.LShift):
@@ -232,8 +318,9 @@ def _apply(P, args, kwargs, result, current):
             except Exception:
                 _lv = None
             if isinstance(_lv, int) and not isinstance(_lv, bool) \
-                    and (_lv == 0 or (_rhs.value == 63 and _lv == -1)):
-                # zero fits int64; -1 << 63 stays on the IR as a promotable tagged value
+                    and (_lv == 0 or (_rhs.value == 63 and _lv == -1 and not _neg63_escapes)):
+                # zero fits int64; -1 << 63 stays on the IR as a promotable tagged value unless it
+                # is stored in an int64 container, where the tag would be narrowed
                 continue
             _big_shift = True
             break
