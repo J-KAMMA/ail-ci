@@ -25,8 +25,7 @@ CALLABLE_SHADOW_SOURCE = 'fn target(n:int)->int {return n+1;} fn apply(hex:Calla
 CLEANUP_SOURCE = '''fn main()->int {let total:int=0;
 for i in range(1024) {let text:str=hex(i);total+=len(text);
 let xs:list[float]=[3.0,-0.0,0.0,float("inf"),float("-inf")];xs.sort();
-let failed:list[float]=[1.0,float("nan"),-2.0];
-try {failed.sort();return 9;}except ValueError {total+=len(failed);}}
+let failed:list[float]=[1.0,float("nan"),-2.0];failed.sort();total+=len(failed);}
 print(total);return 0;}'''
 
 
@@ -124,13 +123,16 @@ int main(void) {
                 self.assertEqual(actual, reference)
                 self.assertTrue(all(a <= b for a, b in zip(actual, actual[1:])))
 
-    def test_nan_caught_and_list_completely_unchanged(self):
+    def test_nan_sorted_like_cpython(self):
         for bits in NAN_CASES:
             with self.subTest(bits=bits):
-                expected = b'caught\n' + b''.join(x.to_bytes(8, 'little') for x in bits).hex().encode() + b'\n'
+                values = struct.unpack('<' + 'd' * len(bits),
+                                       b''.join(x.to_bytes(8, 'little') for x in bits))
+                ordered = b''.join(struct.pack('<d', value) for value in sorted(values))
+                expected = b'miss\n' + ordered.hex().encode() + b'\n'
                 self.assertEqual(self.execute(sort_source(bits, True)), expected)
 
-    def test_repeated_success_failure_and_runtime_cleanup(self):
+    def test_repeated_success_and_runtime_cleanup(self):
         expected = sum(len(hex(i)) + 3 for i in range(1024))
         self.assertEqual(self.execute(CLEANUP_SOURCE), f'{expected}\n'.encode())
 

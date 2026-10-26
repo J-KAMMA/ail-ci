@@ -10494,9 +10494,378 @@ static inline void ail__vec_merge_sort(ail_obj *p, ail_obj *tmp, int64_t lo, int
     while (j < hi) tmp[k++] = p[j++];
     for (int64_t x = lo; x < hi; x++) p[x] = tmp[x];
 }
+/* CPython's Timsort (Objects/listobject.c, 3.12) for keys that contain a NaN: `<` is
+   inconsistent there, so the stable merge sort below returns a different permutation from
+   CPython's.  A NaN-free list still takes the cheaper merge sort.  The comparison mirrors
+   CPython's `<` (float NaN compares false; tuple/list compare tests equality first and then
+   the first differing element), not the three-way ail_obj_cmp. */
+#define AIL_TS_MIN_GALLOP 7
+#define AIL_TS_MAX_PENDING ((int)(sizeof(size_t) * 8))
+typedef struct { ail_obj *keys; ail_obj *values; } ail__ts_slice;
+typedef struct { ail__ts_slice base; int64_t len; int power; } ail__ts_run;
+typedef struct {
+    ail__ts_slice a;
+    int64_t alloced;
+    int n;
+    ail__ts_run pending[AIL_TS_MAX_PENDING];
+    int64_t min_gallop;
+    int64_t listlen;
+    ail_obj *basekeys;
+} ail__ts_state;
+static int ail__sort_lt(ail_obj a, ail_obj b) {
+    if ((a.tag == AIL_LIST && b.tag == AIL_LIST) || (a.tag == AIL_TUPLE && b.tag == AIL_TUPLE)) {
+        int64_t n = a.v->n < b.v->n ? a.v->n : b.v->n;
+        int64_t i;
+        for (i = 0; i < n; i++) if (!ail_obj_eq_raw(a.v->p[i], b.v->p[i])) break;
+        if (i >= a.v->n || i >= b.v->n) return a.v->n < b.v->n;
+        return ail__sort_lt(a.v->p[i], b.v->p[i]);
+    }
+    return ail_obj_cmp(a, b) < 0;
+}
+static inline void ail__ts_copy(ail__ts_slice *s1, int64_t i, ail__ts_slice *s2, int64_t j) {
+    s1->keys[i] = s2->keys[j];
+    if (s1->values) s1->values[i] = s2->values[j];
+}
+static inline void ail__ts_copy_incr(ail__ts_slice *d, ail__ts_slice *s) {
+    *d->keys++ = *s->keys++;
+    if (d->values) *d->values++ = *s->values++;
+}
+static inline void ail__ts_copy_decr(ail__ts_slice *d, ail__ts_slice *s) {
+    *d->keys-- = *s->keys--;
+    if (d->values) *d->values-- = *s->values--;
+}
+static inline void ail__ts_memcpy(ail__ts_slice *s1, int64_t i, ail__ts_slice *s2, int64_t j, int64_t n) {
+    memcpy(&s1->keys[i], &s2->keys[j], sizeof(ail_obj) * (size_t)n);
+    if (s1->values) memcpy(&s1->values[i], &s2->values[j], sizeof(ail_obj) * (size_t)n);
+}
+static inline void ail__ts_memmove(ail__ts_slice *s1, int64_t i, ail__ts_slice *s2, int64_t j, int64_t n) {
+    memmove(&s1->keys[i], &s2->keys[j], sizeof(ail_obj) * (size_t)n);
+    if (s1->values) memmove(&s1->values[i], &s2->values[j], sizeof(ail_obj) * (size_t)n);
+}
+static inline void ail__ts_advance(ail__ts_slice *s, int64_t n) {
+    s->keys += n;
+    if (s->values) s->values += n;
+}
+static inline void ail__ts_reverse(ail_obj *lo, ail_obj *hi) {
+    --hi;
+    while (lo < hi) { ail_obj t = *lo; *lo = *hi; *hi = t; ++lo; --hi; }
+}
+static void ail__ts_binarysort(ail__ts_state *ms, ail__ts_slice lo, ail_obj *hi, ail_obj *start) {
+    ail_obj *l, *p, *r, pivot;
+    (void)ms;
+    if (lo.keys == start) ++start;
+    for (; start < hi; ++start) {
+        l = lo.keys; r = start; pivot = *r;
+        do {
+            p = l + ((r - l) >> 1);
+            if (ail__sort_lt(pivot, *p)) r = p; else l = p + 1;
+        } while (l < r);
+        for (p = start; p > l; --p) *p = *(p - 1);
+        *l = pivot;
+        if (lo.values) {
+            int64_t offset = lo.values - lo.keys;
+            p = start + offset; pivot = *p; l += offset;
+            for (p = start + offset; p > l; --p) *p = *(p - 1);
+            *l = pivot;
+        }
+    }
+}
+static int64_t ail__ts_count_run(ail__ts_state *ms, ail_obj *lo, ail_obj *hi, int *descending) {
+    int64_t n;
+    (void)ms;
+    *descending = 0;
+    ++lo;
+    if (lo == hi) return 1;
+    n = 2;
+    if (ail__sort_lt(*lo, *(lo - 1))) {
+        *descending = 1;
+        for (lo = lo + 1; lo < hi; ++lo, ++n) { if (!ail__sort_lt(*lo, *(lo - 1))) break; }
+    } else {
+        for (lo = lo + 1; lo < hi; ++lo, ++n) { if (ail__sort_lt(*lo, *(lo - 1))) break; }
+    }
+    return n;
+}
+static int64_t ail__ts_gallop_left(ail__ts_state *ms, ail_obj key, ail_obj *a, int64_t n, int64_t hint) {
+    int64_t ofs, lastofs, k;
+    (void)ms;
+    a += hint;
+    lastofs = 0; ofs = 1;
+    if (ail__sort_lt(*a, key)) {
+        const int64_t maxofs = n - hint;
+        while (ofs < maxofs) {
+            if (ail__sort_lt(a[ofs], key)) { lastofs = ofs; ofs = (ofs << 1) + 1; }
+            else break;
+        }
+        if (ofs > maxofs) ofs = maxofs;
+        lastofs += hint; ofs += hint;
+    } else {
+        const int64_t maxofs = hint + 1;
+        while (ofs < maxofs) {
+            if (ail__sort_lt(*(a - ofs), key)) break;
+            lastofs = ofs; ofs = (ofs << 1) + 1;
+        }
+        if (ofs > maxofs) ofs = maxofs;
+        k = lastofs; lastofs = hint - ofs; ofs = hint - k;
+    }
+    a -= hint;
+    ++lastofs;
+    while (lastofs < ofs) {
+        int64_t m = lastofs + ((ofs - lastofs) >> 1);
+        if (ail__sort_lt(a[m], key)) lastofs = m + 1; else ofs = m;
+    }
+    return ofs;
+}
+static int64_t ail__ts_gallop_right(ail__ts_state *ms, ail_obj key, ail_obj *a, int64_t n, int64_t hint) {
+    int64_t ofs, lastofs, k;
+    (void)ms;
+    a += hint;
+    lastofs = 0; ofs = 1;
+    if (ail__sort_lt(key, *a)) {
+        const int64_t maxofs = hint + 1;
+        while (ofs < maxofs) {
+            if (ail__sort_lt(key, *(a - ofs))) { lastofs = ofs; ofs = (ofs << 1) + 1; }
+            else break;
+        }
+        if (ofs > maxofs) ofs = maxofs;
+        k = lastofs; lastofs = hint - ofs; ofs = hint - k;
+    } else {
+        const int64_t maxofs = n - hint;
+        while (ofs < maxofs) {
+            if (ail__sort_lt(key, a[ofs])) break;
+            lastofs = ofs; ofs = (ofs << 1) + 1;
+        }
+        if (ofs > maxofs) ofs = maxofs;
+        lastofs += hint; ofs += hint;
+    }
+    a -= hint;
+    ++lastofs;
+    while (lastofs < ofs) {
+        int64_t m = lastofs + ((ofs - lastofs) >> 1);
+        if (ail__sort_lt(key, a[m])) ofs = m; else lastofs = m + 1;
+    }
+    return ofs;
+}
+static void ail__ts_merge_lo(ail__ts_state *ms, ail__ts_slice ssa, int64_t na, ail__ts_slice ssb, int64_t nb) {
+    ail__ts_slice dest;
+    int64_t min_gallop;
+    ail__ts_memcpy(&ms->a, 0, &ssa, 0, na);
+    dest = ssa; ssa = ms->a;
+    ail__ts_copy_incr(&dest, &ssb); --nb;
+    if (nb == 0) goto Succeed;
+    if (na == 1) goto CopyB;
+    min_gallop = ms->min_gallop;
+    for (;;) {
+        int64_t acount = 0, bcount = 0;
+        for (;;) {
+            if (ail__sort_lt(ssb.keys[0], ssa.keys[0])) {
+                ail__ts_copy_incr(&dest, &ssb); ++bcount; acount = 0; --nb;
+                if (nb == 0) goto Succeed;
+                if (bcount >= min_gallop) break;
+            } else {
+                ail__ts_copy_incr(&dest, &ssa); ++acount; bcount = 0; --na;
+                if (na == 1) goto CopyB;
+                if (acount >= min_gallop) break;
+            }
+        }
+        ++min_gallop;
+        do {
+            int64_t k;
+            min_gallop -= min_gallop > 1;
+            ms->min_gallop = min_gallop;
+            k = ail__ts_gallop_right(ms, ssb.keys[0], ssa.keys, na, 0);
+            acount = k;
+            if (k) {
+                ail__ts_memcpy(&dest, 0, &ssa, 0, k);
+                ail__ts_advance(&dest, k); ail__ts_advance(&ssa, k); na -= k;
+                if (na == 1) goto CopyB;
+                if (na == 0) goto Succeed;
+            }
+            ail__ts_copy_incr(&dest, &ssb); --nb;
+            if (nb == 0) goto Succeed;
+            k = ail__ts_gallop_left(ms, ssa.keys[0], ssb.keys, nb, 0);
+            bcount = k;
+            if (k) {
+                ail__ts_memmove(&dest, 0, &ssb, 0, k);
+                ail__ts_advance(&dest, k); ail__ts_advance(&ssb, k); nb -= k;
+                if (nb == 0) goto Succeed;
+            }
+            ail__ts_copy_incr(&dest, &ssa); --na;
+            if (na == 1) goto CopyB;
+        } while (acount >= AIL_TS_MIN_GALLOP || bcount >= AIL_TS_MIN_GALLOP);
+        ++min_gallop;
+        ms->min_gallop = min_gallop;
+    }
+Succeed:
+    if (na) ail__ts_memcpy(&dest, 0, &ssa, 0, na);
+    return;
+CopyB:
+    ail__ts_memmove(&dest, 0, &ssb, 0, nb);
+    ail__ts_copy(&dest, nb, &ssa, 0);
+}
+static void ail__ts_merge_hi(ail__ts_state *ms, ail__ts_slice ssa, int64_t na, ail__ts_slice ssb, int64_t nb) {
+    ail__ts_slice dest, basea, baseb;
+    int64_t min_gallop;
+    dest = ssb; ail__ts_advance(&dest, nb - 1);
+    ail__ts_memcpy(&ms->a, 0, &ssb, 0, nb);
+    basea = ssa; baseb = ms->a;
+    ssb.keys = ms->a.keys + nb - 1;
+    if (ssb.values) ssb.values = ms->a.values + nb - 1;
+    ail__ts_advance(&ssa, na - 1);
+    ail__ts_copy_decr(&dest, &ssa); --na;
+    if (na == 0) goto Succeed;
+    if (nb == 1) goto CopyA;
+    min_gallop = ms->min_gallop;
+    for (;;) {
+        int64_t acount = 0, bcount = 0;
+        for (;;) {
+            if (ail__sort_lt(ssb.keys[0], ssa.keys[0])) {
+                ail__ts_copy_decr(&dest, &ssa); ++acount; bcount = 0; --na;
+                if (na == 0) goto Succeed;
+                if (acount >= min_gallop) break;
+            } else {
+                ail__ts_copy_decr(&dest, &ssb); ++bcount; acount = 0; --nb;
+                if (nb == 1) goto CopyA;
+                if (bcount >= min_gallop) break;
+            }
+        }
+        ++min_gallop;
+        do {
+            int64_t k;
+            min_gallop -= min_gallop > 1;
+            ms->min_gallop = min_gallop;
+            k = ail__ts_gallop_right(ms, ssb.keys[0], basea.keys, na, na - 1);
+            k = na - k; acount = k;
+            if (k) {
+                ail__ts_advance(&dest, -k); ail__ts_advance(&ssa, -k);
+                ail__ts_memmove(&dest, 1, &ssa, 1, k); na -= k;
+                if (na == 0) goto Succeed;
+            }
+            ail__ts_copy_decr(&dest, &ssb); --nb;
+            if (nb == 1) goto CopyA;
+            k = ail__ts_gallop_left(ms, ssa.keys[0], baseb.keys, nb, nb - 1);
+            k = nb - k; bcount = k;
+            if (k) {
+                ail__ts_advance(&dest, -k); ail__ts_advance(&ssb, -k);
+                ail__ts_memcpy(&dest, 1, &ssb, 1, k); nb -= k;
+                if (nb == 1) goto CopyA;
+                if (nb == 0) goto Succeed;
+            }
+            ail__ts_copy_decr(&dest, &ssa); --na;
+            if (na == 0) goto Succeed;
+        } while (acount >= AIL_TS_MIN_GALLOP || bcount >= AIL_TS_MIN_GALLOP);
+        ++min_gallop;
+        ms->min_gallop = min_gallop;
+    }
+Succeed:
+    if (nb) ail__ts_memcpy(&dest, -(nb - 1), &baseb, 0, nb);
+    return;
+CopyA:
+    ail__ts_memmove(&dest, 1 - na, &ssa, 1 - na, na);
+    ail__ts_advance(&dest, -na); ail__ts_advance(&ssa, -na);
+    ail__ts_copy(&dest, 0, &ssb, 0);
+}
+static void ail__ts_merge_at(ail__ts_state *ms, int64_t i) {
+    ail__ts_slice ssa = ms->pending[i].base, ssb = ms->pending[i + 1].base;
+    int64_t na = ms->pending[i].len, nb = ms->pending[i + 1].len, k;
+    ms->pending[i].len = na + nb;
+    if (i == ms->n - 3) ms->pending[i + 1] = ms->pending[i + 2];
+    --ms->n;
+    k = ail__ts_gallop_right(ms, *ssb.keys, ssa.keys, na, 0);
+    ail__ts_advance(&ssa, k); na -= k;
+    if (na == 0) return;
+    nb = ail__ts_gallop_left(ms, ssa.keys[na - 1], ssb.keys, nb, nb - 1);
+    if (nb <= 0) return;
+    if (na <= nb) ail__ts_merge_lo(ms, ssa, na, ssb, nb);
+    else ail__ts_merge_hi(ms, ssa, na, ssb, nb);
+}
+static int ail__ts_powerloop(int64_t s1, int64_t n1, int64_t n2, int64_t n) {
+    int result = 0;
+    int64_t a = 2 * s1 + n1, b = a + n1 + n2;
+    for (;;) {
+        ++result;
+        if (a >= n) { a -= n; b -= n; }
+        else if (b >= n) break;
+        a <<= 1; b <<= 1;
+    }
+    return result;
+}
+static void ail__ts_found_new_run(ail__ts_state *ms, int64_t n2) {
+    if (ms->n) {
+        ail__ts_run *p = ms->pending;
+        int64_t s1 = p[ms->n - 1].base.keys - ms->basekeys;
+        int64_t n1 = p[ms->n - 1].len;
+        int power = ail__ts_powerloop(s1, n1, n2, ms->listlen);
+        while (ms->n > 1 && p[ms->n - 2].power > power) ail__ts_merge_at(ms, ms->n - 2);
+        p[ms->n - 1].power = power;
+    }
+}
+static void ail__ts_force_collapse(ail__ts_state *ms) {
+    ail__ts_run *p = ms->pending;
+    while (ms->n > 1) {
+        int64_t n = ms->n - 2;
+        if (n > 0 && p[n - 1].len < p[n + 1].len) --n;
+        ail__ts_merge_at(ms, n);
+    }
+}
+static int64_t ail__ts_minrun(int64_t n) {
+    int64_t r = 0;
+    while (n >= 64) { r |= n & 1; n >>= 1; }
+    return n + r;
+}
+static void ail__timsort(ail_obj *keys, ail_obj *values, int64_t n) {
+    ail__ts_state ms;
+    ail__ts_slice lo;
+    int64_t nremaining, minrun, half;
+    if (n < 2) return;
+    half = (n + 1) / 2;
+    lo.keys = keys; lo.values = values;
+    ms.a.keys = (ail_obj *)ail_alloc((size_t)half * sizeof(ail_obj));
+    ms.a.values = values ? (ail_obj *)ail_alloc((size_t)half * sizeof(ail_obj)) : NULL;
+    ms.alloced = half;
+    ms.n = 0;
+    ms.min_gallop = AIL_TS_MIN_GALLOP;
+    ms.listlen = n;
+    ms.basekeys = keys;
+    nremaining = n;
+    minrun = ail__ts_minrun(nremaining);
+    do {
+        int descending;
+        int64_t r = ail__ts_count_run(&ms, lo.keys, lo.keys + nremaining, &descending);
+        if (descending) {
+            ail__ts_reverse(lo.keys, lo.keys + r);
+            if (lo.values) ail__ts_reverse(lo.values, lo.values + r);
+        }
+        if (r < minrun) {
+            int64_t force = nremaining <= minrun ? nremaining : minrun;
+            ail__ts_binarysort(&ms, lo, lo.keys + force, lo.keys + r);
+            r = force;
+        }
+        ail__ts_found_new_run(&ms, r);
+        ms.pending[ms.n].base = lo;
+        ms.pending[ms.n].len = r;
+        ++ms.n;
+        ail__ts_advance(&lo, r);
+        nremaining -= r;
+    } while (nremaining);
+    ail__ts_force_collapse(&ms);
+}
+/* A NaN has no total order: when the keys contain one, ail__timsort above reproduces
+   CPython's own permutation.  A NaN-free list still takes the cheaper merge sort. */
+static int ail__sort_has_nan(ail_obj x) {
+    if (x.tag == AIL_FLOAT) return x.f != x.f;
+    if (x.tag == AIL_LIST || x.tag == AIL_TUPLE) {
+        for (int64_t i = 0; i < x.v->n; i++) if (ail__sort_has_nan(x.v->p[i])) return 1;
+    }
+    return 0;
+}
+static int ail__sort_nan_at(ail_obj *p, int64_t n) {
+    for (int64_t i = 0; i < n; i++) if (ail__sort_has_nan(p[i])) return 1;
+    return 0;
+}
 static inline void ail_list_sort(ail_obj lst) {
     ail_vec *v = lst.v;
     if (v->n < 2) return;
+    if (ail__sort_nan_at(v->p, v->n)) { ail__timsort(v->p, NULL, v->n); return; }
     /* Arena, not malloc/free: ail_obj_cmp (called inside the merge) can longjmp out on a
        TypeError (case 39's own coverage), which would skip a free() and leak the scratch
        buffer -- exactly what the sanitizer sweep caught here on the first run. Arena
@@ -15150,6 +15519,426 @@ static inline ail_st ail__vec_merge_sort(ail_ctx *cx, ail_obj *p, ail_obj *keys,
     for (int64_t x = lo; x < hi; x++) { p[x] = tmp[x]; keys[x] = ktmp[x]; }
     return AIL_OK;
 }
+/* CPython's Timsort (Objects/listobject.c, 3.12) for sort keys that contain a NaN: `<` is
+   inconsistent there, so the stable merge sort below returns a different permutation from
+   CPython's.  A NaN-free list still takes the cheaper merge sort.  The comparison mirrors
+   CPython's `<` (float NaN compares false; tuple/list compare tests equality first and then
+   the first differing element), not the three-way ail_obj_cmp. */
+#define AIL_TS2_MIN_GALLOP 7
+#define AIL_TS2_MAX_PENDING ((int)(sizeof(size_t) * 8))
+typedef struct { ail_obj *keys; ail_obj *values; } ail__ts2_slice;
+typedef struct { ail__ts2_slice base; int64_t len; int power; } ail__ts2_run;
+typedef struct {
+    ail__ts2_slice a;
+    int64_t alloced;
+    int n;
+    ail__ts2_run pending[AIL_TS2_MAX_PENDING];
+    int64_t min_gallop;
+    int64_t listlen;
+    ail_obj *basekeys;
+    ail_ctx *cx;
+} ail__ts2_state;
+static ail_st ail__sort2_lt(ail_ctx *cx, int *out, ail_obj a, ail_obj b) {
+    if ((a.tag == AIL_T_LIST && b.tag == AIL_T_LIST) || (a.tag == AIL_T_TUPLE && b.tag == AIL_T_TUPLE)) {
+        ail_vecobj *va = (ail_vecobj *)a.o, *vb = (ail_vecobj *)b.o;
+        int64_t n = va->n < vb->n ? va->n : vb->n, i;
+        for (i = 0; i < n; i++) if (!(ail_identical(va->p[i], vb->p[i]) || ail_obj_eq_raw(va->p[i], vb->p[i]))) break;
+        if (i >= va->n || i >= vb->n) { *out = va->n < vb->n; return AIL_OK; }
+        return ail__sort2_lt(cx, out, va->p[i], vb->p[i]);
+    }
+    int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b);
+    if (st != AIL_OK) return st;
+    *out = c < 0;
+    return AIL_OK;
+}
+static inline void ail__ts2_copy(ail__ts2_slice *s1, int64_t i, ail__ts2_slice *s2, int64_t j) {
+    s1->keys[i] = s2->keys[j];
+    if (s1->values) s1->values[i] = s2->values[j];
+}
+static inline void ail__ts2_copy_incr(ail__ts2_slice *d, ail__ts2_slice *s) {
+    *d->keys++ = *s->keys++;
+    if (d->values) *d->values++ = *s->values++;
+}
+static inline void ail__ts2_copy_decr(ail__ts2_slice *d, ail__ts2_slice *s) {
+    *d->keys-- = *s->keys--;
+    if (d->values) *d->values-- = *s->values--;
+}
+static inline void ail__ts2_memcpy(ail__ts2_slice *s1, int64_t i, ail__ts2_slice *s2, int64_t j, int64_t n) {
+    memcpy(&s1->keys[i], &s2->keys[j], sizeof(ail_obj) * (size_t)n);
+    if (s1->values) memcpy(&s1->values[i], &s2->values[j], sizeof(ail_obj) * (size_t)n);
+}
+static inline void ail__ts2_memmove(ail__ts2_slice *s1, int64_t i, ail__ts2_slice *s2, int64_t j, int64_t n) {
+    memmove(&s1->keys[i], &s2->keys[j], sizeof(ail_obj) * (size_t)n);
+    if (s1->values) memmove(&s1->values[i], &s2->values[j], sizeof(ail_obj) * (size_t)n);
+}
+static inline void ail__ts2_advance(ail__ts2_slice *s, int64_t n) {
+    s->keys += n;
+    if (s->values) s->values += n;
+}
+static inline void ail__ts2_reverse(ail_obj *lo, ail_obj *hi) {
+    --hi;
+    while (lo < hi) { ail_obj t = *lo; *lo = *hi; *hi = t; ++lo; --hi; }
+}
+static ail_st ail__ts2_binarysort(ail__ts2_state *ms, ail__ts2_slice lo, ail_obj *hi, ail_obj *start) {
+    ail_obj *l, *p, *r, pivot;
+    int k;
+    if (lo.keys == start) ++start;
+    for (; start < hi; ++start) {
+        l = lo.keys; r = start; pivot = *r;
+        do {
+            ail_st st;
+            p = l + ((r - l) >> 1);
+            st = ail__sort2_lt(ms->cx, &k, pivot, *p); if (st != AIL_OK) return st;
+            if (k) r = p; else l = p + 1;
+        } while (l < r);
+        for (p = start; p > l; --p) *p = *(p - 1);
+        *l = pivot;
+        if (lo.values) {
+            int64_t offset = lo.values - lo.keys;
+            p = start + offset; pivot = *p; l += offset;
+            for (p = start + offset; p > l; --p) *p = *(p - 1);
+            *l = pivot;
+        }
+    }
+    return AIL_OK;
+}
+static ail_st ail__ts2_count_run(ail__ts2_state *ms, ail_obj *lo, ail_obj *hi, int *descending, int64_t *out) {
+    int64_t n;
+    int k;
+    ail_st st;
+    *descending = 0;
+    ++lo;
+    if (lo == hi) { *out = 1; return AIL_OK; }
+    n = 2;
+    st = ail__sort2_lt(ms->cx, &k, *lo, *(lo - 1)); if (st != AIL_OK) return st;
+    if (k) {
+        *descending = 1;
+        for (lo = lo + 1; lo < hi; ++lo, ++n) {
+            st = ail__sort2_lt(ms->cx, &k, *lo, *(lo - 1)); if (st != AIL_OK) return st;
+            if (!k) break;
+        }
+    } else {
+        for (lo = lo + 1; lo < hi; ++lo, ++n) {
+            st = ail__sort2_lt(ms->cx, &k, *lo, *(lo - 1)); if (st != AIL_OK) return st;
+            if (k) break;
+        }
+    }
+    *out = n;
+    return AIL_OK;
+}
+static ail_st ail__ts2_gallop_left(ail__ts2_state *ms, ail_obj key, ail_obj *a, int64_t n, int64_t hint, int64_t *out) {
+    int64_t ofs, lastofs, k;
+    int less;
+    ail_st st;
+    a += hint;
+    lastofs = 0; ofs = 1;
+    st = ail__sort2_lt(ms->cx, &less, *a, key); if (st != AIL_OK) return st;
+    if (less) {
+        const int64_t maxofs = n - hint;
+        while (ofs < maxofs) {
+            st = ail__sort2_lt(ms->cx, &less, a[ofs], key); if (st != AIL_OK) return st;
+            if (less) { lastofs = ofs; ofs = (ofs << 1) + 1; }
+            else break;
+        }
+        if (ofs > maxofs) ofs = maxofs;
+        lastofs += hint; ofs += hint;
+    } else {
+        const int64_t maxofs = hint + 1;
+        while (ofs < maxofs) {
+            st = ail__sort2_lt(ms->cx, &less, *(a - ofs), key); if (st != AIL_OK) return st;
+            if (less) break;
+            lastofs = ofs; ofs = (ofs << 1) + 1;
+        }
+        if (ofs > maxofs) ofs = maxofs;
+        k = lastofs; lastofs = hint - ofs; ofs = hint - k;
+    }
+    a -= hint;
+    ++lastofs;
+    while (lastofs < ofs) {
+        int64_t m = lastofs + ((ofs - lastofs) >> 1);
+        st = ail__sort2_lt(ms->cx, &less, a[m], key); if (st != AIL_OK) return st;
+        if (less) lastofs = m + 1; else ofs = m;
+    }
+    *out = ofs;
+    return AIL_OK;
+}
+static ail_st ail__ts2_gallop_right(ail__ts2_state *ms, ail_obj key, ail_obj *a, int64_t n, int64_t hint, int64_t *out) {
+    int64_t ofs, lastofs, k;
+    int less;
+    ail_st st;
+    a += hint;
+    lastofs = 0; ofs = 1;
+    st = ail__sort2_lt(ms->cx, &less, key, *a); if (st != AIL_OK) return st;
+    if (less) {
+        const int64_t maxofs = hint + 1;
+        while (ofs < maxofs) {
+            st = ail__sort2_lt(ms->cx, &less, key, *(a - ofs)); if (st != AIL_OK) return st;
+            if (less) { lastofs = ofs; ofs = (ofs << 1) + 1; }
+            else break;
+        }
+        if (ofs > maxofs) ofs = maxofs;
+        k = lastofs; lastofs = hint - ofs; ofs = hint - k;
+    } else {
+        const int64_t maxofs = n - hint;
+        while (ofs < maxofs) {
+            st = ail__sort2_lt(ms->cx, &less, key, a[ofs]); if (st != AIL_OK) return st;
+            if (less) break;
+            lastofs = ofs; ofs = (ofs << 1) + 1;
+        }
+        if (ofs > maxofs) ofs = maxofs;
+        lastofs += hint; ofs += hint;
+    }
+    a -= hint;
+    ++lastofs;
+    while (lastofs < ofs) {
+        int64_t m = lastofs + ((ofs - lastofs) >> 1);
+        st = ail__sort2_lt(ms->cx, &less, key, a[m]); if (st != AIL_OK) return st;
+        if (less) ofs = m; else lastofs = m + 1;
+    }
+    *out = ofs;
+    return AIL_OK;
+}
+static ail_st ail__ts2_merge_lo(ail__ts2_state *ms, ail__ts2_slice ssa, int64_t na, ail__ts2_slice ssb, int64_t nb) {
+    ail__ts2_slice dest;
+    int64_t min_gallop;
+    int less;
+    ail_st st;
+    ail__ts2_memcpy(&ms->a, 0, &ssa, 0, na);
+    dest = ssa; ssa = ms->a;
+    ail__ts2_copy_incr(&dest, &ssb); --nb;
+    if (nb == 0) goto Succeed;
+    if (na == 1) goto CopyB;
+    min_gallop = ms->min_gallop;
+    for (;;) {
+        int64_t acount = 0, bcount = 0;
+        for (;;) {
+            st = ail__sort2_lt(ms->cx, &less, ssb.keys[0], ssa.keys[0]); if (st != AIL_OK) return st;
+            if (less) {
+                ail__ts2_copy_incr(&dest, &ssb); ++bcount; acount = 0; --nb;
+                if (nb == 0) goto Succeed;
+                if (bcount >= min_gallop) break;
+            } else {
+                ail__ts2_copy_incr(&dest, &ssa); ++acount; bcount = 0; --na;
+                if (na == 1) goto CopyB;
+                if (acount >= min_gallop) break;
+            }
+        }
+        ++min_gallop;
+        do {
+            int64_t k;
+            min_gallop -= min_gallop > 1;
+            ms->min_gallop = min_gallop;
+            st = ail__ts2_gallop_right(ms, ssb.keys[0], ssa.keys, na, 0, &k); if (st != AIL_OK) return st;
+            acount = k;
+            if (k) {
+                ail__ts2_memcpy(&dest, 0, &ssa, 0, k);
+                ail__ts2_advance(&dest, k); ail__ts2_advance(&ssa, k); na -= k;
+                if (na == 1) goto CopyB;
+                if (na == 0) goto Succeed;
+            }
+            ail__ts2_copy_incr(&dest, &ssb); --nb;
+            if (nb == 0) goto Succeed;
+            st = ail__ts2_gallop_left(ms, ssa.keys[0], ssb.keys, nb, 0, &k); if (st != AIL_OK) return st;
+            bcount = k;
+            if (k) {
+                ail__ts2_memmove(&dest, 0, &ssb, 0, k);
+                ail__ts2_advance(&dest, k); ail__ts2_advance(&ssb, k); nb -= k;
+                if (nb == 0) goto Succeed;
+            }
+            ail__ts2_copy_incr(&dest, &ssa); --na;
+            if (na == 1) goto CopyB;
+        } while (acount >= AIL_TS2_MIN_GALLOP || bcount >= AIL_TS2_MIN_GALLOP);
+        ++min_gallop;
+        ms->min_gallop = min_gallop;
+    }
+Succeed:
+    if (na) ail__ts2_memcpy(&dest, 0, &ssa, 0, na);
+    return AIL_OK;
+CopyB:
+    ail__ts2_memmove(&dest, 0, &ssb, 0, nb);
+    ail__ts2_copy(&dest, nb, &ssa, 0);
+    return AIL_OK;
+}
+static ail_st ail__ts2_merge_hi(ail__ts2_state *ms, ail__ts2_slice ssa, int64_t na, ail__ts2_slice ssb, int64_t nb) {
+    ail__ts2_slice dest, basea, baseb;
+    int64_t min_gallop;
+    int less;
+    ail_st st;
+    dest = ssb; ail__ts2_advance(&dest, nb - 1);
+    ail__ts2_memcpy(&ms->a, 0, &ssb, 0, nb);
+    basea = ssa; baseb = ms->a;
+    ssb.keys = ms->a.keys + nb - 1;
+    if (ssb.values) ssb.values = ms->a.values + nb - 1;
+    ail__ts2_advance(&ssa, na - 1);
+    ail__ts2_copy_decr(&dest, &ssa); --na;
+    if (na == 0) goto Succeed;
+    if (nb == 1) goto CopyA;
+    min_gallop = ms->min_gallop;
+    for (;;) {
+        int64_t acount = 0, bcount = 0;
+        for (;;) {
+            st = ail__sort2_lt(ms->cx, &less, ssb.keys[0], ssa.keys[0]); if (st != AIL_OK) return st;
+            if (less) {
+                ail__ts2_copy_decr(&dest, &ssa); ++acount; bcount = 0; --na;
+                if (na == 0) goto Succeed;
+                if (acount >= min_gallop) break;
+            } else {
+                ail__ts2_copy_decr(&dest, &ssb); ++bcount; acount = 0; --nb;
+                if (nb == 1) goto CopyA;
+                if (bcount >= min_gallop) break;
+            }
+        }
+        ++min_gallop;
+        do {
+            int64_t k;
+            min_gallop -= min_gallop > 1;
+            ms->min_gallop = min_gallop;
+            st = ail__ts2_gallop_right(ms, ssb.keys[0], basea.keys, na, na - 1, &k); if (st != AIL_OK) return st;
+            k = na - k; acount = k;
+            if (k) {
+                ail__ts2_advance(&dest, -k); ail__ts2_advance(&ssa, -k);
+                ail__ts2_memmove(&dest, 1, &ssa, 1, k); na -= k;
+                if (na == 0) goto Succeed;
+            }
+            ail__ts2_copy_decr(&dest, &ssb); --nb;
+            if (nb == 1) goto CopyA;
+            st = ail__ts2_gallop_left(ms, ssa.keys[0], baseb.keys, nb, nb - 1, &k); if (st != AIL_OK) return st;
+            k = nb - k; bcount = k;
+            if (k) {
+                ail__ts2_advance(&dest, -k); ail__ts2_advance(&ssb, -k);
+                ail__ts2_memcpy(&dest, 1, &ssb, 1, k); nb -= k;
+                if (nb == 1) goto CopyA;
+                if (nb == 0) goto Succeed;
+            }
+            ail__ts2_copy_decr(&dest, &ssa); --na;
+            if (na == 0) goto Succeed;
+        } while (acount >= AIL_TS2_MIN_GALLOP || bcount >= AIL_TS2_MIN_GALLOP);
+        ++min_gallop;
+        ms->min_gallop = min_gallop;
+    }
+Succeed:
+    if (nb) ail__ts2_memcpy(&dest, -(nb - 1), &baseb, 0, nb);
+    return AIL_OK;
+CopyA:
+    ail__ts2_memmove(&dest, 1 - na, &ssa, 1 - na, na);
+    ail__ts2_advance(&dest, -na); ail__ts2_advance(&ssa, -na);
+    ail__ts2_copy(&dest, 0, &ssb, 0);
+    return AIL_OK;
+}
+static ail_st ail__ts2_merge_at(ail__ts2_state *ms, int64_t i) {
+    ail__ts2_slice ssa = ms->pending[i].base, ssb = ms->pending[i + 1].base;
+    int64_t na = ms->pending[i].len, nb = ms->pending[i + 1].len, k;
+    ail_st st;
+    ms->pending[i].len = na + nb;
+    if (i == ms->n - 3) ms->pending[i + 1] = ms->pending[i + 2];
+    --ms->n;
+    st = ail__ts2_gallop_right(ms, *ssb.keys, ssa.keys, na, 0, &k); if (st != AIL_OK) return st;
+    ail__ts2_advance(&ssa, k); na -= k;
+    if (na == 0) return AIL_OK;
+    st = ail__ts2_gallop_left(ms, ssa.keys[na - 1], ssb.keys, nb, nb - 1, &nb); if (st != AIL_OK) return st;
+    if (nb <= 0) return AIL_OK;
+    if (na <= nb) return ail__ts2_merge_lo(ms, ssa, na, ssb, nb);
+    return ail__ts2_merge_hi(ms, ssa, na, ssb, nb);
+}
+static int ail__ts2_powerloop(int64_t s1, int64_t n1, int64_t n2, int64_t n) {
+    int result = 0;
+    int64_t a = 2 * s1 + n1, b = a + n1 + n2;
+    for (;;) {
+        ++result;
+        if (a >= n) { a -= n; b -= n; }
+        else if (b >= n) break;
+        a <<= 1; b <<= 1;
+    }
+    return result;
+}
+static ail_st ail__ts2_found_new_run(ail__ts2_state *ms, int64_t n2) {
+    if (ms->n) {
+        ail__ts2_run *p = ms->pending;
+        int64_t s1 = p[ms->n - 1].base.keys - ms->basekeys;
+        int64_t n1 = p[ms->n - 1].len;
+        int power = ail__ts2_powerloop(s1, n1, n2, ms->listlen);
+        while (ms->n > 1 && p[ms->n - 2].power > power) {
+            ail_st st = ail__ts2_merge_at(ms, ms->n - 2); if (st != AIL_OK) return st;
+        }
+        p[ms->n - 1].power = power;
+    }
+    return AIL_OK;
+}
+static ail_st ail__ts2_force_collapse(ail__ts2_state *ms) {
+    ail__ts2_run *p = ms->pending;
+    while (ms->n > 1) {
+        int64_t n = ms->n - 2;
+        ail_st st;
+        if (n > 0 && p[n - 1].len < p[n + 1].len) --n;
+        st = ail__ts2_merge_at(ms, n); if (st != AIL_OK) return st;
+    }
+    return AIL_OK;
+}
+static int64_t ail__ts2_minrun(int64_t n) {
+    int64_t r = 0;
+    while (n >= 64) { r |= n & 1; n >>= 1; }
+    return n + r;
+}
+static ail_st ail__timsort(ail_ctx *cx, ail_obj *keys, ail_obj *values, int64_t n) {
+    ail__ts2_state ms;
+    ail__ts2_slice lo;
+    int64_t nremaining, minrun, half;
+    ail_st st = AIL_OK;
+    if (n < 2) return AIL_OK;
+    half = (n + 1) / 2;
+    lo.keys = keys; lo.values = values;
+    ms.a.keys = (ail_obj *)ail_xmalloc((size_t)half * sizeof(ail_obj));
+    ms.a.values = values ? (ail_obj *)ail_xmalloc((size_t)half * sizeof(ail_obj)) : NULL;
+    ms.alloced = half;
+    ms.n = 0;
+    ms.min_gallop = AIL_TS2_MIN_GALLOP;
+    ms.listlen = n;
+    ms.basekeys = keys;
+    ms.cx = cx;
+    nremaining = n;
+    minrun = ail__ts2_minrun(nremaining);
+    do {
+        int descending;
+        int64_t r;
+        st = ail__ts2_count_run(&ms, lo.keys, lo.keys + nremaining, &descending, &r);
+        if (st != AIL_OK) break;
+        if (descending) {
+            ail__ts2_reverse(lo.keys, lo.keys + r);
+            if (lo.values) ail__ts2_reverse(lo.values, lo.values + r);
+        }
+        if (r < minrun) {
+            int64_t force = nremaining <= minrun ? nremaining : minrun;
+            st = ail__ts2_binarysort(&ms, lo, lo.keys + force, lo.keys + r);
+            if (st != AIL_OK) break;
+            r = force;
+        }
+        st = ail__ts2_found_new_run(&ms, r);
+        if (st != AIL_OK) break;
+        ms.pending[ms.n].base = lo;
+        ms.pending[ms.n].len = r;
+        ++ms.n;
+        ail__ts2_advance(&lo, r);
+        nremaining -= r;
+    } while (nremaining);
+    if (st == AIL_OK) st = ail__ts2_force_collapse(&ms);
+    free(ms.a.keys);
+    free(ms.a.values);
+    return st;
+}
+/* A NaN has no total order: when the keys contain one, ail__timsort above reproduces
+   CPython's own permutation.  A NaN-free list still takes the cheaper merge sort. */
+static int ail__sort2_has_nan(ail_obj x) {
+    if (x.tag == AIL_T_FLOAT) return ail_float_val(x) != ail_float_val(x);
+    if (x.tag == AIL_T_LIST || x.tag == AIL_T_TUPLE) {
+        ail_vecobj *v = (ail_vecobj *)x.o;
+        for (int64_t i = 0; i < v->n; i++) if (ail__sort2_has_nan(v->p[i])) return 1;
+    }
+    return 0;
+}
+static int ail__sort2_nan_at(ail_obj *p, int64_t n) {
+    for (int64_t i = 0; i < n; i++) if (ail__sort2_has_nan(p[i])) return 1;
+    return 0;
+}
 /* ail_list_sort -- the key function (if not AIL_T_NONE) is called EXACTLY ONCE per
    element, into a scratch `keys` array (decorate), the merge sort above compares only
    those decorations (never re-invoking the key), then the element array is left permuted
@@ -15181,11 +15970,14 @@ static inline ail_st ail_list_sort(ail_ctx *cx, ail_obj lst, ail_obj key_fn_or_n
     } else {
         for (int64_t i = 0; i < n; i++) keys[i] = v->p[i];
     }
-    if (reverse) for (int64_t i = 0, j = n - 1; i < j; i++, j--) {
+    if (st == AIL_OK && reverse) for (int64_t i = 0, j = n - 1; i < j; i++, j--) {
         ail_obj t = v->p[i]; v->p[i] = v->p[j]; v->p[j] = t;
         t = keys[i]; keys[i] = keys[j]; keys[j] = t;
     }
-    if (st == AIL_OK) st = ail__vec_merge_sort(cx, v->p, keys, tmp, ktmp, 0, n);
+    if (st == AIL_OK) {
+        if (n > 1 && ail__sort2_nan_at(keys, n)) st = ail__timsort(cx, keys, v->p, n);
+        else st = ail__vec_merge_sort(cx, v->p, keys, tmp, ktmp, 0, n);
+    }
     AIL_FRAME_LEAVE(cx, fr);
     AIL_FRAME_LEAVE(cx, frl);
     free(keys); free(tmp); free(ktmp);
@@ -28337,21 +29129,361 @@ ORDER.append('HEXINT')
 SOURCE['HEXINT'] = HEXINT
 REQUIRES['HEXINT'] = ['STR']
 
+TIMSORTIDX = r"""
+#ifndef AIL_TIMSORT_IDX_DEFINED
+#define AIL_TIMSORT_IDX_DEFINED
+/* CPython's Timsort (Objects/listobject.c, 3.12) over an int64 index permutation with a
+   caller-supplied strict `<`.  The typed sorts whose keys can contain a NaN use it to reproduce
+   CPython's own input-dependent order exactly (a stable merge sort with a total-order comparator
+   does not).  Same algorithm as the boxed runtime's ail__timsort, with (key, value) records
+   reduced to indices. */
+#define AIL_TSI_MIN_GALLOP 7
+#define AIL_TSI_MAX_PENDING ((int)(sizeof(size_t) * 8))
+typedef int (*ail_tsi_less)(const void *ctx, int64_t a, int64_t b);
+typedef struct { int64_t *keys; } ail__tsi_slice;
+typedef struct { ail__tsi_slice base; int64_t len; int power; } ail__tsi_run;
+typedef struct {
+    ail__tsi_slice a;
+    int64_t alloced;
+    int n;
+    ail__tsi_run pending[AIL_TSI_MAX_PENDING];
+    int64_t min_gallop;
+    int64_t listlen;
+    int64_t *basekeys;
+    ail_tsi_less less;
+    const void *ctx;
+} ail__tsi_state;
+static inline int ail__tsi_lt(ail__tsi_state *ms, int64_t a, int64_t b) { return ms->less(ms->ctx, a, b); }
+static inline void ail__tsi_copy(ail__tsi_slice *s1, int64_t i, ail__tsi_slice *s2, int64_t j) { s1->keys[i] = s2->keys[j]; }
+static inline void ail__tsi_copy_incr(ail__tsi_slice *d, ail__tsi_slice *s) { *d->keys++ = *s->keys++; }
+static inline void ail__tsi_copy_decr(ail__tsi_slice *d, ail__tsi_slice *s) { *d->keys-- = *s->keys--; }
+static inline void ail__tsi_memcpy(ail__tsi_slice *s1, int64_t i, ail__tsi_slice *s2, int64_t j, int64_t n) { memcpy(&s1->keys[i], &s2->keys[j], sizeof(int64_t) * (size_t)n); }
+static inline void ail__tsi_memmove(ail__tsi_slice *s1, int64_t i, ail__tsi_slice *s2, int64_t j, int64_t n) { memmove(&s1->keys[i], &s2->keys[j], sizeof(int64_t) * (size_t)n); }
+static inline void ail__tsi_advance(ail__tsi_slice *s, int64_t n) { s->keys += n; }
+static inline void ail__tsi_reverse(int64_t *lo, int64_t *hi) { --hi; while (lo < hi) { int64_t t = *lo; *lo = *hi; *hi = t; ++lo; --hi; } }
+static void ail__tsi_binarysort(ail__tsi_state *ms, ail__tsi_slice lo, int64_t *hi, int64_t *start) {
+    int64_t *l, *p, *r, pivot;
+    if (lo.keys == start) ++start;
+    for (; start < hi; ++start) {
+        l = lo.keys; r = start; pivot = *r;
+        do {
+            p = l + ((r - l) >> 1);
+            if (ail__tsi_lt(ms, pivot, *p)) r = p; else l = p + 1;
+        } while (l < r);
+        for (p = start; p > l; --p) *p = *(p - 1);
+        *l = pivot;
+    }
+}
+static int64_t ail__tsi_count_run(ail__tsi_state *ms, int64_t *lo, int64_t *hi, int *descending) {
+    int64_t n;
+    *descending = 0;
+    ++lo;
+    if (lo == hi) return 1;
+    n = 2;
+    if (ail__tsi_lt(ms, *lo, *(lo - 1))) {
+        *descending = 1;
+        for (lo = lo + 1; lo < hi; ++lo, ++n) { if (!ail__tsi_lt(ms, *lo, *(lo - 1))) break; }
+    } else {
+        for (lo = lo + 1; lo < hi; ++lo, ++n) { if (ail__tsi_lt(ms, *lo, *(lo - 1))) break; }
+    }
+    return n;
+}
+static int64_t ail__tsi_gallop_left(ail__tsi_state *ms, int64_t key, int64_t *a, int64_t n, int64_t hint) {
+    int64_t ofs, lastofs, k;
+    a += hint;
+    lastofs = 0; ofs = 1;
+    if (ail__tsi_lt(ms, *a, key)) {
+        const int64_t maxofs = n - hint;
+        while (ofs < maxofs) {
+            if (ail__tsi_lt(ms, a[ofs], key)) { lastofs = ofs; ofs = (ofs << 1) + 1; }
+            else break;
+        }
+        if (ofs > maxofs) ofs = maxofs;
+        lastofs += hint; ofs += hint;
+    } else {
+        const int64_t maxofs = hint + 1;
+        while (ofs < maxofs) {
+            if (ail__tsi_lt(ms, *(a - ofs), key)) break;
+            lastofs = ofs; ofs = (ofs << 1) + 1;
+        }
+        if (ofs > maxofs) ofs = maxofs;
+        k = lastofs; lastofs = hint - ofs; ofs = hint - k;
+    }
+    a -= hint;
+    ++lastofs;
+    while (lastofs < ofs) {
+        int64_t m = lastofs + ((ofs - lastofs) >> 1);
+        if (ail__tsi_lt(ms, a[m], key)) lastofs = m + 1; else ofs = m;
+    }
+    return ofs;
+}
+static int64_t ail__tsi_gallop_right(ail__tsi_state *ms, int64_t key, int64_t *a, int64_t n, int64_t hint) {
+    int64_t ofs, lastofs, k;
+    a += hint;
+    lastofs = 0; ofs = 1;
+    if (ail__tsi_lt(ms, key, *a)) {
+        const int64_t maxofs = hint + 1;
+        while (ofs < maxofs) {
+            if (ail__tsi_lt(ms, key, *(a - ofs))) { lastofs = ofs; ofs = (ofs << 1) + 1; }
+            else break;
+        }
+        if (ofs > maxofs) ofs = maxofs;
+        k = lastofs; lastofs = hint - ofs; ofs = hint - k;
+    } else {
+        const int64_t maxofs = n - hint;
+        while (ofs < maxofs) {
+            if (ail__tsi_lt(ms, key, a[ofs])) break;
+            lastofs = ofs; ofs = (ofs << 1) + 1;
+        }
+        if (ofs > maxofs) ofs = maxofs;
+        lastofs += hint; ofs += hint;
+    }
+    a -= hint;
+    ++lastofs;
+    while (lastofs < ofs) {
+        int64_t m = lastofs + ((ofs - lastofs) >> 1);
+        if (ail__tsi_lt(ms, key, a[m])) ofs = m; else lastofs = m + 1;
+    }
+    return ofs;
+}
+static void ail__tsi_merge_lo(ail__tsi_state *ms, ail__tsi_slice ssa, int64_t na, ail__tsi_slice ssb, int64_t nb) {
+    ail__tsi_slice dest;
+    int64_t min_gallop;
+    ail__tsi_memcpy(&ms->a, 0, &ssa, 0, na);
+    dest = ssa; ssa = ms->a;
+    ail__tsi_copy_incr(&dest, &ssb); --nb;
+    if (nb == 0) goto Succeed;
+    if (na == 1) goto CopyB;
+    min_gallop = ms->min_gallop;
+    for (;;) {
+        int64_t acount = 0, bcount = 0;
+        for (;;) {
+            if (ail__tsi_lt(ms, ssb.keys[0], ssa.keys[0])) {
+                ail__tsi_copy_incr(&dest, &ssb); ++bcount; acount = 0; --nb;
+                if (nb == 0) goto Succeed;
+                if (bcount >= min_gallop) break;
+            } else {
+                ail__tsi_copy_incr(&dest, &ssa); ++acount; bcount = 0; --na;
+                if (na == 1) goto CopyB;
+                if (acount >= min_gallop) break;
+            }
+        }
+        ++min_gallop;
+        do {
+            int64_t k;
+            min_gallop -= min_gallop > 1;
+            ms->min_gallop = min_gallop;
+            k = ail__tsi_gallop_right(ms, ssb.keys[0], ssa.keys, na, 0);
+            acount = k;
+            if (k) {
+                ail__tsi_memcpy(&dest, 0, &ssa, 0, k);
+                ail__tsi_advance(&dest, k); ail__tsi_advance(&ssa, k); na -= k;
+                if (na == 1) goto CopyB;
+                if (na == 0) goto Succeed;
+            }
+            ail__tsi_copy_incr(&dest, &ssb); --nb;
+            if (nb == 0) goto Succeed;
+            k = ail__tsi_gallop_left(ms, ssa.keys[0], ssb.keys, nb, 0);
+            bcount = k;
+            if (k) {
+                ail__tsi_memmove(&dest, 0, &ssb, 0, k);
+                ail__tsi_advance(&dest, k); ail__tsi_advance(&ssb, k); nb -= k;
+                if (nb == 0) goto Succeed;
+            }
+            ail__tsi_copy_incr(&dest, &ssa); --na;
+            if (na == 1) goto CopyB;
+        } while (acount >= AIL_TSI_MIN_GALLOP || bcount >= AIL_TSI_MIN_GALLOP);
+        ++min_gallop;
+        ms->min_gallop = min_gallop;
+    }
+Succeed:
+    if (na) ail__tsi_memcpy(&dest, 0, &ssa, 0, na);
+    return;
+CopyB:
+    ail__tsi_memmove(&dest, 0, &ssb, 0, nb);
+    ail__tsi_copy(&dest, nb, &ssa, 0);
+}
+static void ail__tsi_merge_hi(ail__tsi_state *ms, ail__tsi_slice ssa, int64_t na, ail__tsi_slice ssb, int64_t nb) {
+    ail__tsi_slice dest, basea, baseb;
+    int64_t min_gallop;
+    dest = ssb; ail__tsi_advance(&dest, nb - 1);
+    ail__tsi_memcpy(&ms->a, 0, &ssb, 0, nb);
+    basea = ssa; baseb = ms->a;
+    ssb.keys = ms->a.keys + nb - 1;
+    ail__tsi_advance(&ssa, na - 1);
+    ail__tsi_copy_decr(&dest, &ssa); --na;
+    if (na == 0) goto Succeed;
+    if (nb == 1) goto CopyA;
+    min_gallop = ms->min_gallop;
+    for (;;) {
+        int64_t acount = 0, bcount = 0;
+        for (;;) {
+            if (ail__tsi_lt(ms, ssb.keys[0], ssa.keys[0])) {
+                ail__tsi_copy_decr(&dest, &ssa); ++acount; bcount = 0; --na;
+                if (na == 0) goto Succeed;
+                if (acount >= min_gallop) break;
+            } else {
+                ail__tsi_copy_decr(&dest, &ssb); ++bcount; acount = 0; --nb;
+                if (nb == 1) goto CopyA;
+                if (bcount >= min_gallop) break;
+            }
+        }
+        ++min_gallop;
+        do {
+            int64_t k;
+            min_gallop -= min_gallop > 1;
+            ms->min_gallop = min_gallop;
+            k = ail__tsi_gallop_right(ms, ssb.keys[0], basea.keys, na, na - 1);
+            k = na - k; acount = k;
+            if (k) {
+                ail__tsi_advance(&dest, -k); ail__tsi_advance(&ssa, -k);
+                ail__tsi_memmove(&dest, 1, &ssa, 1, k); na -= k;
+                if (na == 0) goto Succeed;
+            }
+            ail__tsi_copy_decr(&dest, &ssb); --nb;
+            if (nb == 1) goto CopyA;
+            k = ail__tsi_gallop_left(ms, ssa.keys[0], baseb.keys, nb, nb - 1);
+            k = nb - k; bcount = k;
+            if (k) {
+                ail__tsi_advance(&dest, -k); ail__tsi_advance(&ssb, -k);
+                ail__tsi_memcpy(&dest, 1, &ssb, 1, k); nb -= k;
+                if (nb == 1) goto CopyA;
+                if (nb == 0) goto Succeed;
+            }
+            ail__tsi_copy_decr(&dest, &ssa); --na;
+            if (na == 0) goto Succeed;
+        } while (acount >= AIL_TSI_MIN_GALLOP || bcount >= AIL_TSI_MIN_GALLOP);
+        ++min_gallop;
+        ms->min_gallop = min_gallop;
+    }
+Succeed:
+    if (nb) ail__tsi_memcpy(&dest, -(nb - 1), &baseb, 0, nb);
+    return;
+CopyA:
+    ail__tsi_memmove(&dest, 1 - na, &ssa, 1 - na, na);
+    ail__tsi_advance(&dest, -na); ail__tsi_advance(&ssa, -na);
+    ail__tsi_copy(&dest, 0, &ssb, 0);
+}
+static void ail__tsi_merge_at(ail__tsi_state *ms, int64_t i) {
+    ail__tsi_slice ssa = ms->pending[i].base, ssb = ms->pending[i + 1].base;
+    int64_t na = ms->pending[i].len, nb = ms->pending[i + 1].len, k;
+    ms->pending[i].len = na + nb;
+    if (i == ms->n - 3) ms->pending[i + 1] = ms->pending[i + 2];
+    --ms->n;
+    k = ail__tsi_gallop_right(ms, *ssb.keys, ssa.keys, na, 0);
+    ail__tsi_advance(&ssa, k); na -= k;
+    if (na == 0) return;
+    nb = ail__tsi_gallop_left(ms, ssa.keys[na - 1], ssb.keys, nb, nb - 1);
+    if (nb <= 0) return;
+    if (na <= nb) ail__tsi_merge_lo(ms, ssa, na, ssb, nb);
+    else ail__tsi_merge_hi(ms, ssa, na, ssb, nb);
+}
+static int ail__tsi_powerloop(int64_t s1, int64_t n1, int64_t n2, int64_t n) {
+    int result = 0;
+    int64_t a = 2 * s1 + n1, b = a + n1 + n2;
+    for (;;) {
+        ++result;
+        if (a >= n) { a -= n; b -= n; }
+        else if (b >= n) break;
+        a <<= 1; b <<= 1;
+    }
+    return result;
+}
+static void ail__tsi_found_new_run(ail__tsi_state *ms, int64_t n2) {
+    if (ms->n) {
+        ail__tsi_run *p = ms->pending;
+        int64_t s1 = p[ms->n - 1].base.keys - ms->basekeys;
+        int64_t n1 = p[ms->n - 1].len;
+        int power = ail__tsi_powerloop(s1, n1, n2, ms->listlen);
+        while (ms->n > 1 && p[ms->n - 2].power > power) ail__tsi_merge_at(ms, ms->n - 2);
+        p[ms->n - 1].power = power;
+    }
+}
+static void ail__tsi_force_collapse(ail__tsi_state *ms) {
+    ail__tsi_run *p = ms->pending;
+    while (ms->n > 1) {
+        int64_t n = ms->n - 2;
+        if (n > 0 && p[n - 1].len < p[n + 1].len) --n;
+        ail__tsi_merge_at(ms, n);
+    }
+}
+static int64_t ail__tsi_minrun(int64_t n) {
+    int64_t r = 0;
+    while (n >= 64) { r |= n & 1; n >>= 1; }
+    return n + r;
+}
+static void ail__timsort_idx(int64_t *keys, int64_t n, ail_tsi_less less, const void *ctx) {
+    ail__tsi_state ms;
+    ail__tsi_slice lo;
+    int64_t nremaining, minrun, half;
+    if (n < 2) return;
+    half = (n + 1) / 2;
+    lo.keys = keys;
+    ms.a.keys = (int64_t *)malloc((size_t)half * sizeof(int64_t));
+    if (!ms.a.keys) ail_die("out of memory");
+    ms.alloced = half;
+    ms.n = 0;
+    ms.min_gallop = AIL_TSI_MIN_GALLOP;
+    ms.listlen = n;
+    ms.basekeys = keys;
+    ms.less = less;
+    ms.ctx = ctx;
+    nremaining = n;
+    minrun = ail__tsi_minrun(nremaining);
+    do {
+        int descending;
+        int64_t r = ail__tsi_count_run(&ms, lo.keys, lo.keys + nremaining, &descending);
+        if (descending) ail__tsi_reverse(lo.keys, lo.keys + r);
+        if (r < minrun) {
+            int64_t force = nremaining <= minrun ? nremaining : minrun;
+            ail__tsi_binarysort(&ms, lo, lo.keys + force, lo.keys + r);
+            r = force;
+        }
+        ail__tsi_found_new_run(&ms, r);
+        ms.pending[ms.n].base = lo;
+        ms.pending[ms.n].len = r;
+        ++ms.n;
+        ail__tsi_advance(&lo, r);
+        nremaining -= r;
+    } while (nremaining);
+    ail__tsi_force_collapse(&ms);
+    free(ms.a.keys);
+}
+#endif
+"""
+ORDER.append('TIMSORTIDX')
+SOURCE['TIMSORTIDX'] = TIMSORTIDX
+REQUIRES['TIMSORTIDX'] = ['DIE']
+
 FLISTSORT = r"""
 #include <math.h>
 static int ail_flist_compare(const void *left, const void *right) {
     double a = *(const double *)left, b = *(const double *)right;
     return (a > b) - (a < b);
 }
+static int ail_flist_ts_less(const void *ctx, int64_t a, int64_t b) {
+    const double *d = (const double *)ctx;
+    return d[a] < d[b];
+}
 static void ail_flist_sort(ail_flist *L) {
-    for (int64_t i = 0; i < L->n; ++i)
-        if (isnan(L->p[i])) ail_raise_named(AIL_EXC_VALUE);
-    if (L->n > 1) qsort(L->p, (size_t)L->n, sizeof *L->p, ail_flist_compare);
+    int64_t n = L->n, i;
+    int nan = 0;
+    if (n < 2) return;
+    for (i = 0; i < n; i++) if (isnan(L->p[i])) { nan = 1; break; }
+    if (!nan) { qsort(L->p, (size_t)L->n, sizeof *L->p, ail_flist_compare); return; }
+    int64_t *perm = (int64_t *)malloc((size_t)n * sizeof *perm);
+    double *tmp = (double *)malloc((size_t)n * sizeof *tmp);
+    if (!perm || !tmp) ail_die("out of memory");
+    for (i = 0; i < n; i++) perm[i] = i;
+    ail__timsort_idx(perm, n, ail_flist_ts_less, L->p);
+    for (i = 0; i < n; i++) tmp[i] = L->p[perm[i]];
+    memcpy(L->p, tmp, (size_t)n * sizeof *tmp);
+    free(perm); free(tmp);
 }
 """
 ORDER.append('FLISTSORT')
 SOURCE['FLISTSORT'] = FLISTSORT
-REQUIRES['FLISTSORT'] = ['FLIST', 'DIE']
+REQUIRES['FLISTSORT'] = ['FLIST', 'DIE', 'TIMSORTIDX']
 
 # ---- KEYSORT: decorate-sort-undecorate for sorted(key=...) / list.sort(key=...) -----------------
 #
@@ -28397,6 +29529,33 @@ static inline int ail_keycol_cmp(const ail_keycol *c, int nc, int64_t a, int64_t
 static inline int ail_keysort_before(const ail_keycol *c, int nc, int rev, int64_t b, int64_t a) {
     int r = ail_keycol_cmp(c, nc, b, a);
     return rev ? r > 0 : r < 0;
+}
+/* The strict `<` of CPython's key tuple, for the Timsort used when a float key column holds a
+   NaN: a float NaN is unequal to everything (so the tuple comparison stops there and answers
+   false), while ail_keycol_cmp's three-way form would call it equal and read the next column. */
+typedef struct { const ail_keycol *cols; int nc; } ail_keysort_ts_ctx;
+static int ail_keysort_ts_less(const void *ctxp, int64_t b, int64_t a) {
+    const ail_keysort_ts_ctx *t = (const ail_keysort_ts_ctx *)ctxp;
+    const ail_keycol *c = t->cols;
+    for (int k = 0; k < t->nc; k++) {
+        if (c[k].kind == 0) {
+            const int64_t *p = (const int64_t *)c[k].p;
+            if (p[b] != p[a]) return p[b] < p[a];
+        } else if (c[k].kind == 1) {
+            const double *p = (const double *)c[k].p;
+            double x = p[b], y = p[a];
+            if (x != y && !(x != x && y != y)) return x < y;
+        } else {
+#ifdef AIL_KEYSORT_STR
+            const ail_str *p = (const ail_str *)c[k].p;
+            int r = (int)ail_str_cmp(p[b], p[a]);
+            if (r) return r < 0;
+#else
+            return 0;
+#endif
+        }
+    }
+    return 0;
 }
 /* One int64 key column -- `order.sort(key=lambda i: arr[i])`, the commonest keyed sort -- with the
    comparison written out: the same stable bottom-up merge sort as below, without the per-compare
@@ -28480,13 +29639,14 @@ static void ail_keysort_perm(ail_list *out, const ail_keycol *given, int nc, int
     ail_keycol cols[AIL_KEYSORT_MAX];
     uint64_t *owned[AIL_KEYSORT_MAX];
     int64_t n = nc ? given[0].n : 0;
+    int has_nan = 0;
     for (int k = 0; k < nc; k++) {
         cols[k] = given[k];
         owned[k] = 0;
         if (given[k].n != n) ail_die("sort keys of different lengths");
         if (given[k].kind == 1) {
             const double *d = (const double *)given[k].p;
-            for (int64_t i = 0; i < n; i++) if (isnan(d[i])) ail_raise_named(AIL_EXC_VALUE);
+            for (int64_t i = 0; i < n; i++) if (isnan(d[i])) { has_nan = 1; break; }
         }
 #ifdef AIL_KEYSORT_STR
         if (given[k].kind == 2) {
@@ -28515,7 +29675,12 @@ static void ail_keysort_perm(ail_list *out, const ail_keycol *given, int nc, int
         for (int64_t i = 0; i < n; i++) out->p[i] = i;
         out->n = n;
     }
-    if (n >= 2 && nc == 1 && cols[0].kind == 0) {
+    if (n >= 2 && has_nan) {
+        ail_keysort_ts_ctx ctx = { cols, nc };
+        if (rev) { int64_t i = 0, j = n - 1; while (i < j) { int64_t t = out->p[i]; out->p[i] = out->p[j]; out->p[j] = t; ++i; --j; } }
+        ail__timsort_idx(out->p, n, ail_keysort_ts_less, &ctx);
+        if (rev) { int64_t i = 0, j = n - 1; while (i < j) { int64_t t = out->p[i]; out->p[i] = out->p[j]; out->p[j] = t; ++i; --j; } }
+    } else if (n >= 2 && nc == 1 && cols[0].kind == 0) {
         int64_t *buf = (int64_t *)malloc((size_t)n * sizeof *buf);
         if (!buf) ail_die("out of memory");
         ail__keysort_i64(out->p, buf, n, (const int64_t *)cols[0].p, rev);
@@ -28546,7 +29711,7 @@ SOURCE['KEYSORTSTR'] = KEYSORTSTR
 REQUIRES['KEYSORTSTR'] = ['SLIST']
 ORDER.append('KEYSORT')
 SOURCE['KEYSORT'] = KEYSORT
-REQUIRES['KEYSORT'] = ['TYPES', 'DIE', 'LIST']
+REQUIRES['KEYSORT'] = ['TYPES', 'DIE', 'LIST', 'TIMSORTIDX']
 
 
 # `parallel for i in range(a, b) { ... }`: pyfunc._par_outline moves the loop body into a worker

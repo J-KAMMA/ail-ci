@@ -1,3 +1,15 @@
+## 2026-10-26 -- re-apply fuzz95: CPython's NaN sort order (job-rbfuzz95-10270750)
+
+Re-applied the accepted fuzz95 change on the current integration tree. The typed, v1 boxed and
+v2 boxed sort engines run a port of CPython 3.12's Timsort only when the sort keys can contain a
+NaN, so a direct, keyed, nested, reverse, argument, list-item, attribute or dict-value sort now
+matches CPython exactly; a NaN-free key keeps the cheaper merge sort. The struct list sort emits
+`TIMSORTIDX` only when a float sort key exists. `test_ail_fuzz95.py` and the updated
+`test_ail_numeric_profiles_native.py` are applied; DIFFERENCES records the fixed behaviour.
+`tools/diff_ids.py` is not present on this tree. Probes in `/tmp/probes`: `fz95_direct`,
+`fz95_reverse`, `fz95_key`, `fz95_nested`, `fz95_routes`, `fz95_edges`, `fz95_struct`, all
+matching CPython on both builds.
+
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
@@ -2375,6 +2387,40 @@ implementation when the base has no body.  `g17_004`, `g17_024` and `g13_036` no
 print what CPython prints on both builds; the census refused 50 afterwards.  Added the positional
 partial program to `test_ail_silent6.py` and an abstract-visitor hierarchy to
 `test_ail_typed_inherit.py`.
+## 2026-10-26 - fuzz95 suite fix: keep CPython's NaN sort order
+
+The Timsort change broke three modules on the integration branch. The typed float sort still
+matches CPython, but its `TIMSORTIDX` helper was emitted for every program with a struct, even
+one that never sorts, changing the pinned generated C; it is now emitted only when a struct sort
+key has a float field (`test_ail_record_initializers`). The float-sort `qsort` call keeps using
+`L->n` so the existing generated-code assertion in `test_ail_numeric_profiles` holds. The native
+profile test still expected the rejected `ValueError`; it now compares the sorted NaN bit
+patterns with CPython (`test_ail_numeric_profiles_native`), and its cleanup loop sorts the same
+list without expecting an exception. Ported the `fmt` upper-bound printing fix from the
+integration branch for `test_ail_pre110`. `test_ail_fuzz95` still passes on both builds.
+
+## 2026-10-24 - fuzz95: reproduce CPython's Timsort order for NaN
+
+The reviewer rejected the earlier runtime refusal: it rejected valid sorts (a NaN that is never
+reached cannot change the order) and failed after valid output. The typed, v1 boxed and v2 boxed
+sort engines now all carry a port of CPython 3.12's Timsort and use it only when the sort keys
+can contain a NaN; NaN-free keys keep the existing merge/introsort. `reverse=True` follows
+CPython's own reverse-input / ascending-sort / reverse-output sequence, and tuple/list key
+comparison checks identity first so a shared NaN object compares like CPython's. The typed
+keyed/struct sorts carry their reverse flag at runtime instead of negating the key fields.
+`test_ail_fuzz95.py` now asserts CPython's NaN order (direct, keyed, nested, reverse, through an
+argument, a list item, an attribute and a dict value) in both builds. Six fresh probes
+(`/tmp/probes/p200`-`p205`) and the ten reviewer probes match CPython on both builds.
+
+## 2026-10-24 - fuzz95: NaN sorting refused by name
+
+Differential probes for dict/list comprehensions and sorting found that `sorted`/`list.sort`
+with a NaN in the values, or in a tuple/list sort key, silently returned a different order from
+CPython in both boxed builds: CPython's Timsort gives NaN an input-dependent order that the
+stable merge sort does not reproduce. Both boxed sort paths now scan the sort keys (recursively
+through tuples/lists) and raise `ValueError: sorting NaN: CPython's Timsort order for NaN cannot
+be reproduced`. A key with no NaN is still allowed. `test_ail_fuzz95.py` keeps the case. Other
+probes matched CPython; a `10**30` integer overflow and four build refusals were non-silent.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
