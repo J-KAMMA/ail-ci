@@ -9,12 +9,13 @@ the existing `int64 constant expression out of range` wording.  In-range floats,
 non-float arguments, an overridden default and a default the body does not convert are unchanged;
 compiling programs keep their C because the check only raises or falls through.
 
-Probes `/tmp/probes/p275_*` (18 programs: the default, keyword default, boundary +/- (in and out),
-negative, expression, module/local/alias, argument, list, dict incl. duplicate key, attribute, NaN,
-infinity, in-range, override, unused default, non-float, shadowed int) match CPython or are refused
-by name on both builds.  Added `test_ail_pre275.py` (8 tests, both builds) and registered it in
-`ail_check.MODULES`.  Final-state tests: test_ail_pre275, test_ail_safetynet, test_ail_files and
-test_ail_corpus_findings3; `tools/update_manifest.py --check` passes.
+Probes `/tmp/probes/p275_*` (19 programs: default, default-expression, boundary +/- in and out,
+negative, expression, module/local/alias, literal, argument/list/dict route, duplicate dict key,
+NaN, infinity, in-range, override, unused default, non-float, shadowed int) match CPython or are
+refused by name on both builds; `test_ail_pre275.py` also covers the list-item, attribute and
+dict-value routes individually.  Added `test_ail_pre275.py` (8 tests, both builds) and registered
+it in `ail_check.MODULES`.  Final-state tests: test_ail_pre275, test_ail_safetynet, test_ail_files
+and test_ail_corpus_findings3; `tools/update_manifest.py --check` passes.
 
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
