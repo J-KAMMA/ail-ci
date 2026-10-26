@@ -1,3 +1,21 @@
+## 2026-10-26 - re-apply pre7: refuse `del` with an out-of-int64 constant index (job-rbpre7-10261903)
+
+Re-applying the accepted pre7 change on the current integration tree. `del a[2**63]` (also
+`2**64` and `-2**63 - 1`, including a nested receiver) used to keep the index as arithmetic, so
+both builds trapped `integer overflow` while computing it, where CPython's unbounded int raises
+`IndexError: cannot fit 'int' into an index-sized integer`. `pyfront.refuse_out_of_range_delete_index`
+now evaluates a constant integer index exactly and refuses the delete by name at compile time on
+both the typed path (`pyfunc.py`) and the general path (`pyboxed2.py`); in-range constant indexes
+are untouched. The current tree's existing `int_constant` folder is kept as is; the new helper is
+separate because it evaluates only the index shapes and bounds the work before building a value.
+This tree also has the earlier front-end check (`_check_int64_literals` -> `_check_index_expression`),
+which already refuses the same deletes with `int64 index out of range`; that fix is kept and the
+new hook remains a second, later guard. The accepted test now accepts either named refusal.
+
+Tests on this commit: `test_ail_pre7` (new, both builds), `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`; `update_manifest.py --check` and `ci_shards.py --check` rc 0.
+`tools/diff_ids.py` is not present on this tree.
+
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
 Re-applying the accepted pre203 change on the current integration tree.  The behaviour is
