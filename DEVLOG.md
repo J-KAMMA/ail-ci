@@ -12,13 +12,14 @@ constant are refused by name.  No compiler change was needed.  Added
 `AIL_CURRENT/test_ail_pre345.py` (22 programs, both builds) and registered it in
 `ail_check.MODULES` and `tools/ci_shards.json`.
 
-Probes in `/tmp/probes/pre345` on both builds: `p1`-`p10` and `p26`-`p28` (float literals and
-routes) are refused by name except `p9`/`p10`, which are refused as `a nan/inf float literal`;
-`p18` (in-range boundaries), `p13` (local lambda `int`) and `p17`/`p30` (parameter `int`) match
-CPython; `p14`/`p16` (`def int`, module `int` constant) and `p15` (unrelated local shadow with an
-out-of-range call) are refused by name.  Final-state tests: test_ail_pre345, test_ail_safetynet,
-test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check`
-passes.
+Probes in `/tmp/probes/pre345` on both builds: `p1`-`p3`, `p5`-`p7`, `p9`, `p10`, `p14`-`p16`,
+`p19`, `p20` and `p22`-`p28` are refused by name (`p9`/`p10` as `a nan/inf float literal`, the
+rest as `int() of a float outside int64` or the int-shadow message); `p13`, `p17`, `p18` and
+`p30` match CPython.  Shapes outside the recorded literal refusals still stop at run time on both
+builds and were not changed: `p4` (non-constant conditional), `p8`/`p21` (instance attribute),
+`p11` (`2.0**63`), `p12` (`float(1e300)`) and `p29` (power through a wrapper).  Final-state
+tests: test_ail_pre345, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes.
 
 ## 2026-10-27 -- pre326: a nested class inside a function is already refused by name (job-pre326-10271918)
 
