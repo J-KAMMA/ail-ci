@@ -1,3 +1,28 @@
+## 2026-10-27 -- pre377 follow-up: long class names in item-error messages
+
+The pre377 review found that the class name still went into a fixed `char buf[64]`, so a
+40-character class truncated the message mid-word (`...' object is not subscr`) on both
+builds, while base had printed a complete `'instance'` message.  `ail__raise_item_tname` now
+formats the six item-error sites (getitem default and dict-view, setitem, delitem, getslice
+default and dict-view) into a buffer sized from the message and name; no fixed buffer remains
+on that path.  Probes also showed CPython itself formats the name with `%.200s`: a
+300-character class prints its first 200 characters, so the helper caps the name at 200 to
+match.  The dunderrt patch anchors were updated to the helper calls.  Added 40- and
+210-character cases to `test_ail_pre377.py` (both builds), and corrected the DIFFERENCES row:
+a builtin function object now says `builtin_function_or_method` (CPython's text) instead of
+`'function'`; other builtin values are unchanged.
+
+Probes in `/tmp/probes` (both builds via `cmp.sh`): `p01_boundaries` (class-name lengths 1,
+20-25, 32-35, 40, 300; getitem, negative index, slice, setitem, delitem) matches, including
+the 200-character cap; `p02_uncaught_long` (40) and `p03_uncaught_short` match uncaught stderr;
+`p04_routes_long` (argument, alias, list item, attribute, dict value, subclass, setitem and
+delitem through an argument) matches; `p05_dunder_long` (long-named class with the item
+methods still works); `p06_builtins` (int, None, bool, float, bytes, builtin function, lambda,
+str key, tuple key) matches; `p07_empty_ok` matches.  Final-state tests:
+`par_check.py -j 2 test_ail_pre377 test_ail_safetynet test_ail_files
+test_ail_corpus_findings3` -- 4 modules, 0 failed (371 s).  `tools/update_manifest.py` was run
+and `--check` passes.
+
 ## 2026-10-27 -- pre377: instance item errors name the class (job-pre377-10280635)
 
 The pre354 review's first recorded item no longer reproduces on this tree: `p08_dict_slice`

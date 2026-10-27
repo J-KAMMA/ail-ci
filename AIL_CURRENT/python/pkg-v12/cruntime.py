@@ -14840,6 +14840,18 @@ static inline const char *ail__tname_c(ail_obj x) {
     if (x.tag == AIL_T_LIST && ((ail_gcobj *)x.o)->aux) return ((ail_gcobj *)x.o)->aux == 1 ? "dict_keys" : ((ail_gcobj *)x.o)->aux == 2 ? "dict_values" : "dict_items";
     return ail_type_name(x.tag);
 }
+/* the item errors quote the class name; CPython formats it with %.200s */
+static inline ail_st ail__raise_item_tname(ail_ctx *cx, int builtin_id, const char *fmt, ail_obj c) {
+    char tnbuf[201];
+    snprintf(tnbuf, sizeof tnbuf, "%s", ail__tname_c(c));
+    size_t need = strlen(fmt) + strlen(tnbuf) + 1;
+    char *buf = (char *)malloc(need);
+    if (!buf) ail_die("out of memory");
+    snprintf(buf, need, fmt, tnbuf);
+    ail_st st = ail_raise_c(cx, builtin_id, buf);
+    free(buf);
+    return st;
+}
 static inline ail_st ail_deque_concat(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b);
 static inline ail_st ail_counter_binop(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, int op);
 static inline ail_st ail_counter_unary(ail_ctx *cx, ail_obj *out, ail_obj a, int neg);
@@ -16061,8 +16073,7 @@ static inline ail_st ail_op_contains(ail_ctx *cx, int *out, ail_obj c, ail_obj i
 }
 static inline ail_st ail_op_getitem(ail_ctx *cx, ail_obj *out, ail_obj c, ail_obj key) {
     if (c.tag == AIL_T_LIST && __builtin_expect(((ail_gcobj *)c.o)->aux, 0)) {   /* a dict view */
-        char vb[64]; snprintf(vb, sizeof vb, "'%s' object is not subscriptable", ail__tname_c(c));
-        return ail_raise_c(cx, AIL_B_TYPEERROR, vb);
+        return ail__raise_item_tname(cx, AIL_B_TYPEERROR, "'%s' object is not subscriptable", c);
     }
     if (c.tag == AIL_T_LIST && __builtin_expect(((ail_gcobj *)c.o)->flags, 0)) {   /* a deque: its data (IndexError text of deque) */
         ail_obj dq = ((ail_vecobj *)c.o)->p[0];
@@ -16091,7 +16102,7 @@ static inline ail_st ail_op_getitem(ail_ctx *cx, ail_obj *out, ail_obj c, ail_ob
             if (i >= 0 ? ord >= n : (uint64_t)(~i) >= n) return ail_raise_c(cx, AIL_B_INDEXERROR, "range object index out of range");
             *out = ail_box_int(ail__range_at(r->start, r->step, ord)); return AIL_OK;
         }
-        default: { char buf[64]; snprintf(buf, sizeof buf, "'%s' object is not subscriptable", ail__tname_c(c)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
+        default: { return ail__raise_item_tname(cx, AIL_B_TYPEERROR, "'%s' object is not subscriptable", c); }
     }
 }
 static inline ail_st ail_op_setitem(ail_ctx *cx, ail_obj c, ail_obj key, ail_obj val) {
@@ -16100,8 +16111,7 @@ static inline ail_st ail_op_setitem(ail_ctx *cx, ail_obj c, ail_obj key, ail_obj
         return ail_list_setitem(cx, c, key.i, val);
     }
     if (c.tag == AIL_T_DICT) return ail_dict_set(cx, c, key, val);
-    char buf[64]; snprintf(buf, sizeof buf, "'%s' object does not support item assignment", ail__tname_c(c));
-    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    return ail__raise_item_tname(cx, AIL_B_TYPEERROR, "'%s' object does not support item assignment", c);
 }
 static inline ail_st ail_op_delitem(ail_ctx *cx, ail_obj c, ail_obj key) {
     if (c.tag == AIL_T_LIST) {
@@ -16109,15 +16119,13 @@ static inline ail_st ail_op_delitem(ail_ctx *cx, ail_obj c, ail_obj key) {
         return ail_list_delitem(cx, c, key.i);
     }
     if (c.tag == AIL_T_DICT) return ail_dict_del(cx, c, key);
-    char buf[64]; snprintf(buf, sizeof buf, "'%s' object doesn't support item deletion", ail__tname_c(c));
-    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    return ail__raise_item_tname(cx, AIL_B_TYPEERROR, "'%s' object doesn't support item deletion", c);
 }
 static inline ail_obj ail_range_new(ail_ctx *cx, int64_t start, int64_t stop, int64_t step); /* defined below */
 static inline ail_st ail_op_getslice(ail_ctx *cx, ail_obj *out, ail_obj c, int has_lo, int64_t lo, int has_hi, int64_t hi, int has_step, int64_t step) {
     if (c.tag == AIL_T_STR) return ail_str_getslice(cx, out, c, has_lo, lo, has_hi, hi, has_step, step);
     if (c.tag == AIL_T_LIST && __builtin_expect(((ail_gcobj *)c.o)->aux, 0)) {   /* a dict view */
-        char vb[64]; snprintf(vb, sizeof vb, "'%s' object is not subscriptable", ail__tname_c(c));
-        return ail_raise_c(cx, AIL_B_TYPEERROR, vb);
+        return ail__raise_item_tname(cx, AIL_B_TYPEERROR, "'%s' object is not subscriptable", c);
     }
     if (c.tag == AIL_T_LIST || c.tag == AIL_T_TUPLE) return ail_vec_getslice(cx, out, c, has_lo, lo, has_hi, hi, has_step, step);
     if (c.tag == AIL_T_RANGE) {
@@ -16151,8 +16159,7 @@ static inline ail_st ail_op_getslice(ail_ctx *cx, ail_obj *out, ail_obj c, int h
         *out = ail_range_new(cx, (int64_t)ns, (int64_t)ne, (int64_t)nd);
         return AIL_OK;
     }
-    char buf[64]; snprintf(buf, sizeof buf, "'%s' object is not subscriptable", ail__tname_c(c));
-    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    return ail__raise_item_tname(cx, AIL_B_TYPEERROR, "'%s' object is not subscriptable", c);
 }
 
 /* ===================================================================================

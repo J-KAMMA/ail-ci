@@ -101,6 +101,28 @@ try:
 except TypeError as e:
     print(type(e).__name__, e)
 ''',
+    'long_name': '''
+class Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:
+    pass
+
+a = Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa()
+try:
+    a[0]
+except TypeError as e:
+    print(type(e).__name__, e)
+try:
+    a[1:2]
+except TypeError as e:
+    print(type(e).__name__, e)
+try:
+    a[0] = 1
+except TypeError as e:
+    print(type(e).__name__, e)
+try:
+    del a[0]
+except TypeError as e:
+    print(type(e).__name__, e)
+''',
     'builtins': '''
 def show(obj, key):
     try:
@@ -145,11 +167,29 @@ print(d[3:4], d[slice(3, 4)])
 ''',
 }
 
+
+def _long_case(name):
+    return ('class %s:\n    pass\n\na = %s()\n' % (name, name)
+            + 'try:\n    a[0]\nexcept TypeError as e:\n    print(type(e).__name__, e)\n'
+            + 'try:\n    a[0] = 1\nexcept TypeError as e:\n    print(type(e).__name__, e)\n'
+            + 'try:\n    del a[0]\nexcept TypeError as e:\n    print(type(e).__name__, e)\n')
+
+
+# CPython formats the type name with %.200s, so a 210-character class shows its first 200
+CASES['long_name_200'] = _long_case('A' + 'a' * 209)
+
 UNCAUGHT = '''
 class A:
     pass
 
 print(A()[0])
+'''
+
+UNCAUGHT_LONG = '''
+class Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:
+    pass
+
+print(Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa()[0])
 '''
 
 
@@ -202,6 +242,9 @@ class Pre377(unittest.TestCase):
 
     def test_uncaught_instance_subscript(self):
         self.check('uncaught', UNCAUGHT, uncaught=True)
+
+    def test_uncaught_long_class_name(self):
+        self.check('uncaught_long', UNCAUGHT_LONG, uncaught=True)
 
 
 if __name__ == '__main__':

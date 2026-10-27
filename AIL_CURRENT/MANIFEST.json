@@ -974,7 +974,7 @@
     "test_ail_owned_type_repair.py": "69c06613a1270419a92e7bbfbd18ded38fffcb613f5cf1f017df763974b741b6",
     "python/pkg-v12/callable_types.py": "403e4bc3a2186c803407ba1192a3551209d5b3659435d67633b49c30b256c5a3",
     "language_examples/integer_quantiles.ail": "f4fbb4396faa7f571470997a7fa1773f966f35de581da6604986411d3ba345e1",
-    "python/pkg-v12/cruntime.py": "5898626778f7e3da0c3505544013c102fc346e1fe656174f6a6b261d5f864a39",
+    "python/pkg-v12/cruntime.py": "f74b54f95ef05bfa78486e85d85748ab97f8279370df26495751dbd71a1b4bde",
     "test_ail_string_field_mutation.py": "76683df6504ef82ce482a0cecef0bd5fd4c68066a7e9b349664e46d527f742c4",
     "test_ail_owned_type_details.py": "8d5c657a91b53c1e322d13686c5471f7185697d641738b26746405804286e1e5",
     "test_ail_list_expression_extend.py": "2835cffcac2a3a7c08606152c2441ad7d7c340967e94cb93b9ce9457d47e8784",
@@ -1226,7 +1226,7 @@
     "test_ail_optional_locals.py": "aa1bfbde7f5eefd181d3698629e6e6bad6583dfd6cb12ca6a1cf64f8fbe0bfff",
     "test_ail_raise_from.py": "4e66dd112d7845444f686238af999f174e91b29fb10c3d52a579cad5c54a2639",
     "test_ail_boolfield.py": "af635061d2bd405dfb2a127fb9ef50dc2335040ec6af864370e175a0e3f836f4",
-    "python/pkg-v12/dunderrt.py": "69e955e7758953594e73187bd4986acd08eb5221968adebcdc5cf0724dcd44d9",
+    "python/pkg-v12/dunderrt.py": "fefc6238c721bc654eda248bc4fe013add43847da8738c201982b94875f041b2",
     "python/pkg-v12/enumlib.py": "743f20ac5c4e5cd9afcf633762e2f8c1b5b8a9ccc7b525d6d6a8e847ada1028f",
     "python/pkg-v12/ntlib.py": "01a9148313be99a12b173e85e1268088e49fcadc4558903402274704951e2962",
     "python/pkg-v12/prelude_array.py": "21d85806b20bde9bc6461edee51582fab194ff98208d0d2e28b23a576814c02e",
@@ -1593,7 +1593,7 @@
     "test_ail_pre365.py": "0d942051b2d7ddca90c52f2b50ce7a1230824c66c5c3d48de56c2586ce96ac48",
     "test_ail_pre360.py": "aa32c06bc22afcee2e06221726d76e39011cd3d7a4d2412f647f15e6bade7dee",
     "test_ail_pre363.py": "06e13dfa5f411f5a912cbbb32e90efe00de8f9b4619e079b4790b8d563129104",
-    "test_ail_pre377.py": "7b1b4ad3b0dd75df7ea71a3b2e7c0ce677a6995cc1eb298fee80461b4e694b6d"
+    "test_ail_pre377.py": "21f5bbb444a6bb95e7c2ecf429e52a67f01ffc16bfdd002be1ffb99d8c0275dc"
   },
   "files": {
     "python/pkg-v12/pipeline.py": "d185d3cd067d1ca503f1fda8e2d8f415e93a0db26fbef6d4b919dd4c0b9a1251",
@@ -1638,7 +1638,7 @@
     "test_ail_owned_type_repair.py": "69c06613a1270419a92e7bbfbd18ded38fffcb613f5cf1f017df763974b741b6",
     "python/pkg-v12/callable_types.py": "403e4bc3a2186c803407ba1192a3551209d5b3659435d67633b49c30b256c5a3",
     "language_examples/integer_quantiles.ail": "f4fbb4396faa7f571470997a7fa1773f966f35de581da6604986411d3ba345e1",
-    "python/pkg-v12/cruntime.py": "5898626778f7e3da0c3505544013c102fc346e1fe656174f6a6b261d5f864a39",
+    "python/pkg-v12/cruntime.py": "f74b54f95ef05bfa78486e85d85748ab97f8279370df26495751dbd71a1b4bde",
     "test_ail_string_field_mutation.py": "76683df6504ef82ce482a0cecef0bd5fd4c68066a7e9b349664e46d527f742c4",
     "test_ail_owned_type_details.py": "8d5c657a91b53c1e322d13686c5471f7185697d641738b26746405804286e1e5",
     "test_ail_list_expression_extend.py": "2835cffcac2a3a7c08606152c2441ad7d7c340967e94cb93b9ce9457d47e8784",
@@ -1886,7 +1886,7 @@
     "test_ail_optional_locals.py": "aa1bfbde7f5eefd181d3698629e6e6bad6583dfd6cb12ca6a1cf64f8fbe0bfff",
     "test_ail_raise_from.py": "4e66dd112d7845444f686238af999f174e91b29fb10c3d52a579cad5c54a2639",
     "test_ail_boolfield.py": "af635061d2bd405dfb2a127fb9ef50dc2335040ec6af864370e175a0e3f836f4",
-    "python/pkg-v12/dunderrt.py": "69e955e7758953594e73187bd4986acd08eb5221968adebcdc5cf0724dcd44d9",
+    "python/pkg-v12/dunderrt.py": "fefc6238c721bc654eda248bc4fe013add43847da8738c201982b94875f041b2",
     "python/pkg-v12/enumlib.py": "743f20ac5c4e5cd9afcf633762e2f8c1b5b8a9ccc7b525d6d6a8e847ada1028f",
     "python/pkg-v12/ntlib.py": "01a9148313be99a12b173e85e1268088e49fcadc4558903402274704951e2962",
     "python/pkg-v12/prelude_array.py": "21d85806b20bde9bc6461edee51582fab194ff98208d0d2e28b23a576814c02e",
@@ -2253,6 +2253,6 @@
     "test_ail_pre365.py": "0d942051b2d7ddca90c52f2b50ce7a1230824c66c5c3d48de56c2586ce96ac48",
     "test_ail_pre360.py": "aa32c06bc22afcee2e06221726d76e39011cd3d7a4d2412f647f15e6bade7dee",
     "test_ail_pre363.py": "06e13dfa5f411f5a912cbbb32e90efe00de8f9b4619e079b4790b8d563129104",
-    "test_ail_pre377.py": "7b1b4ad3b0dd75df7ea71a3b2e7c0ce677a6995cc1eb298fee80461b4e694b6d"
+    "test_ail_pre377.py": "21f5bbb444a6bb95e7c2ecf429e52a67f01ffc16bfdd002be1ffb99d8c0275dc"
   }
 }
