@@ -164,6 +164,28 @@ Probes in `/tmp/probes/pre293`, all matching CPython on both builds with `tools/
 `p10_super_unbound`, `p11_ordinary`, `p12_unrelated_classes`, `p13_unrelated_builtin`,
 `p14_nested_scope`, `p15_typed_callable`, `p16_setattr_routes`, `p17_setattr_unpack` and
 `p18_negative_alias`.
+## 2026-10-26 - constant pow() outside int64 is refused by name (job-pre294-10270438)
+
+The reviewer of job pre273 recorded the first still-differing pre-existing item: `pow(2, 63)`
+compiled on both builds and then stopped with `integer overflow`, while CPython prints the
+bignum `9223372036854775808`; `pow(10, 100)` behaved the same way.  The two-argument builtin is
+now folded at compile time.  An exact result outside int64 is refused by name with `int64
+constant expression out of range`; an in-range result keeps the ordinary lowering, a negative
+exponent keeps CPython's float answer, and the three-argument modular form is untouched.  The
+check follows module and function-local constants and a module/function alias of `pow`, and skips
+a program that binds its own `pow`.  It does not touch `**`, so the prelude `Fraction` sources
+are unaffected.
+
+Probes in `/tmp/probes` (both g/d builds): refused by name - `pre294_direct`, `pre294_ten`,
+`pre294_negative_base`, `pre294_argument`, `pre294_list_item`, `pre294_attribute`,
+`pre294_dict_value`, `pre294_alias`, `pre294_alias_local`, `pre294_alias_chain`,
+`pre294_module_constants`, `pre294_local_constants`, `pre294_expressions`; matched CPython -
+`pre294_boundary`, `pre294_types`, `pre294_negative_exp`, `pre294_mod`, `pre294_shadow`.
+
+Tests on the final tree: `test_ail_pre294`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` (4 modules, 0 failed; 10 s, 119 s, 125 s, 195 s).
+`tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run and
+`--check` passes.
 
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
