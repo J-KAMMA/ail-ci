@@ -1169,6 +1169,10 @@ def _function_local_int_constants(function, module_known):
                 value = _const_expr_int(value_node, bounded=False)
             except _Int64ConstantOverflow:
                 value = None
+        if value is None:
+            value = _const_fold_int(value_node)
+            if type(value) is not int:
+                value = None
         if value is not None:
             local[name] = value
 
@@ -1210,6 +1214,10 @@ def _known_module_constants(tree):
             try:
                 value = _const_expr_int(node.value, bounded=False)
             except _Int64ConstantOverflow:
+                value = None
+        if value is None:
+            value = _const_fold_int(node.value)
+            if type(value) is not int:
                 value = None
         if value is not None:
             known[target.id] = value
@@ -1530,6 +1538,17 @@ def _check_int64_pow_constants(tree, known):
     if not names:
         return
 
+    def fold(node, scope_known):
+        value = _constant_int(node, scope_known)
+        if value is None:
+            try:
+                value = _const_expr_int(node, bounded=False)
+            except _Int64ConstantOverflow:
+                value = None
+        if value is None:
+            value = _const_fold_int(node)
+        return value
+
     def check(node, scope_known, scope_names):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id in scope_names):
@@ -1537,18 +1556,8 @@ def _check_int64_pow_constants(tree, known):
         if len(node.args) != 2 or node.keywords or any(
                 isinstance(argument, ast.Starred) for argument in node.args):
             return
-        base = _constant_int(node.args[0], scope_known)
-        exponent = _constant_int(node.args[1], scope_known)
-        if base is None:
-            try:
-                base = _const_expr_int(node.args[0], bounded=False)
-            except _Int64ConstantOverflow:
-                base = None
-        if exponent is None:
-            try:
-                exponent = _const_expr_int(node.args[1], bounded=False)
-            except _Int64ConstantOverflow:
-                exponent = None
+        base = fold(node.args[0], scope_known)
+        exponent = fold(node.args[1], scope_known)
         if base is None or exponent is None or exponent < 0:
             return
         if exponent == 0:
