@@ -422,17 +422,20 @@ class _KnownClassValue:
 
 class _KnownInstance:
     """An instance of a class whose literal class and __init__ attributes this pass can read."""
-    __slots__ = ('name', 'arguments')
+    __slots__ = ('name', 'arguments', 'method_self')
 
-    def __init__(self, name, arguments=None):
+    def __init__(self, name, arguments=None, method_self=False):
         self.name = name
         self.arguments = arguments or {}
+        self.method_self = method_self
 
 
 class _KnownClassAttributes:
-    def __init__(self, classes, aliases):
+    def __init__(self, classes, aliases, descendants=None, self_unsafe=()):
         self.classes = classes
         self.aliases = aliases
+        self.descendants = descendants or {}
+        self.self_unsafe = set(self_unsafe)
 
     def class_of(self, name):
         return self.aliases.get(name)
@@ -440,6 +443,26 @@ class _KnownClassAttributes:
     def class_value(self, cls, attr):
         info = self.classes.get(cls)
         return _UNKNOWN if info is None else info['class'].get(attr, _UNKNOWN)
+
+    def self_value(self, cls, attr):
+        """A class attribute read as ``self.attr`` in a method of ``cls``.
+
+        Only a scalar or a flat literal container is returned, only when no instance store or
+        mutation is known and every subclass in the program resolves the name to the same
+        value: the run-time class may be a subclass, and one that overrides or stores the name
+        keeps the read unknown.
+        """
+        info = self.classes.get(cls)
+        if info is None or cls in self.self_unsafe:
+            return _UNKNOWN
+        value = self.instance_value(cls, attr)
+        if not _foldable_self_value(value):
+            return _UNKNOWN
+        for name in self.descendants.get(cls, ()):
+            other = self.instance_value(name, attr)
+            if not _foldable_self_value(other) or other != value:
+                return _UNKNOWN
+        return value
 
     def instance_value(self, cls, attr, arguments=None):
         info = self.classes.get(cls)
@@ -585,10 +608,31 @@ def _known_class_attributes(tree, module_known):
         return _KnownClassAttributes({}, {})
     aliases = {name: name for name in class_nodes}
     aliases.update(alias_targets)
+    descendants = {name: [] for name in class_nodes}
+    for name, base in base_names.items():
+        seen = set()
+        while base in descendants and base not in seen:
+            seen.add(base)
+            descendants[base].append(name)
+            base = base_names.get(base)
+    self_unsafe = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.ClassDef) and node.name not in class_nodes
+                and len(node.bases) == 1 and isinstance(node.bases[0], ast.Name)):
+            target = aliases.get(node.bases[0].id)
+            if target in class_nodes:
+                self_unsafe.add(target)
     stores = {}
+    mutated = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del)):
             stores.setdefault(node.attr, []).append(node)
+        elif isinstance(node, ast.Subscript) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            base = node.value
+            while isinstance(base, ast.Subscript):
+                base = base.value
+            if isinstance(base, ast.Attribute):
+                mutated.add(base.attr)
     setattr_names = set()
     dynamic_setattr = False
     for node in ast.walk(tree):
@@ -683,15 +727,15 @@ def _known_class_attributes(tree, module_known):
             else:
                 info['instance'][attr] = value
         for attr in list(info['class']):
-            if attr in setattr_names or any(id(store) not in allowed_ids
-                                            for store in stores.get(attr, ())):
+            if (attr in setattr_names or attr in mutated
+                    or any(id(store) not in allowed_ids for store in stores.get(attr, ()))):
                 del info['class'][attr]
         if dynamic_setattr:
             info['unsafe'].update(info['class'])
             info['unsafe'].update(info['instance'])
             info['unsafe'].update(info['instance_param'])
         classes[name] = info
-    return _KnownClassAttributes(classes, aliases)
+    return _KnownClassAttributes(classes, aliases, descendants, self_unsafe)
 
 
 def _constant_value(node, lookup, global_name, passthrough, attributes=None):
@@ -770,6 +814,8 @@ def _constant_value(node, lookup, global_name, passthrough, attributes=None):
         if attributes is not None and isinstance(base, _KnownClassValue):
             return attributes.class_value(base.name, node.attr)
         if attributes is not None and isinstance(base, _KnownInstance):
+            if base.method_self:
+                return attributes.self_value(base.name, node.attr)
             return attributes.instance_value(base.name, node.attr, base.arguments)
         if node.attr.startswith('f') and node.attr[1:].isdigit() and isinstance(base, tuple):
             index = int(node.attr[1:])
@@ -1008,6 +1054,11 @@ def _flat_constant_container(value):
     return False
 
 
+def _foldable_self_value(value):
+    """A value `self.attr` may fold to: a scalar, or a flat container of scalars."""
+    return type(value) in (bool, int, float, str, bytes, type(None)) or _flat_constant_container(value)
+
+
 def _escaped_constant_names(root, program_bound):
     """Names read in a way that may mutate or expose a container, propagated through aliases.
 
@@ -1059,7 +1110,8 @@ def _escaped_constant_names(root, program_bound):
     return escaped
 
 
-def _scope_constant_map(body, root, base, stores, bound, parameters, declared, program_bound):
+def _scope_constant_map(body, root, base, stores, bound, parameters, declared, program_bound,
+                        scope_values=None, attributes=None):
     """Constant values a scope's top-level names bind, including safe container aliases.
 
     Scalars are followed exactly as before.  A flat list/tuple/dict literal (or an alias of
@@ -1067,6 +1119,8 @@ def _scope_constant_map(body, root, base, stores, bound, parameters, declared, p
     the value dynamic, so a later alias read is left to the run-time int64 trap.
     """
     local = {name: value for name, value in base.items() if name not in bound}
+    if scope_values:
+        local.update(scope_values)
 
     def candidate(statement):
         if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
@@ -1085,7 +1139,7 @@ def _scope_constant_map(body, root, base, stores, bound, parameters, declared, p
                     or name in parameters or name in declared):
                 continue
             value = _constant_value(value_node, lambda item: local.get(item, _UNKNOWN),
-                                    lambda unused: True, {})
+                                    lambda unused: True, {}, attributes)
             if type(value) in (bool, int, float, str, bytes, type(None)):
                 local[name] = value
 
@@ -1097,7 +1151,7 @@ def _scope_constant_map(body, root, base, stores, bound, parameters, declared, p
                 or name in parameters or name in declared or name in escaped):
             continue
         value = _constant_value(value_node, lambda item: local.get(item, _UNKNOWN),
-                                lambda unused: True, {})
+                                lambda unused: True, {}, attributes)
         if _flat_constant_container(value):
             local[name] = value
     add_scalars()
@@ -1114,6 +1168,7 @@ class _Int64CallChecker(ast.NodeVisitor):
         self.program_bound = program_bound
         self.shadow = []
         self.value_scopes = [known]
+        self.class_stack = []
 
     def _global_name(self, name):
         return not any(name in scope for scope in self.shadow)
@@ -1167,10 +1222,18 @@ class _Int64CallChecker(ast.NodeVisitor):
         self._visit_outer_arguments(node.args)
         if node.returns is not None:
             self.visit(node.returns)
+        method_class = None
+        if self.class_stack and not node.decorator_list:
+            positional = [*node.args.posonlyargs, *node.args.args]
+            if (positional and positional[0].arg == 'self'
+                    and not _binding_counts(node.body).get('self')):
+                method_class = self.class_stack[-1]
+        scope_values = ({'self': _KnownInstance(method_class, method_self=True)}
+                        if method_class is not None else None)
         local = _scope_constant_map(node.body, node, self.value_scopes[-1],
                                     _binding_counts(node.body), _function_bindings(node),
                                     _scope_parameters(node), _scope_declared(node),
-                                    self.program_bound)
+                                    self.program_bound, scope_values, self.attributes)
         self.shadow.append(_function_bindings(node))
         self.value_scopes.append(local)
         for statement in node.body:
@@ -1212,8 +1275,10 @@ class _Int64CallChecker(ast.NodeVisitor):
                  if name not in bindings}
         self.shadow.append(bindings)
         self.value_scopes.append(local)
+        self.class_stack.append(node.name)
         for statement in node.body:
             self.visit(statement)
+        self.class_stack.pop()
         self.value_scopes.pop()
         self.shadow.pop()
 

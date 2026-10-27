@@ -1,3 +1,33 @@
+## 2026-10-27 -- pre376: int() of a class attribute read as `self.attr` in a method (job-pre376-10280607)
+
+The pre359 review's `r10` probe still differed on this tree: a plain method reading its class
+attribute through `self` (`class Box: text = 1e300` with `def get(self): text = self.text;
+return int(text)`, and the direct `int(self.text)` spelling) compiled on both builds and stopped
+with `integer overflow`, where CPython prints the big integer.  The static int() fold resolved a
+class attribute through a class value or a constructor instance, but not through the method's
+own `self`, so the value never reached the check.  The review's `r34` (`Box.text[0] = 5`) and its
+plain-class control already match CPython on both builds (only the underlying fold could still
+be stale), so they needed no output change.
+
+`_KnownClassAttributes.self_value` reads `self.attr` for a plain instance method of a known
+class; the checker tracks the enclosing class and seeds the method scope with a marked
+`_KnownInstance`, and `_scope_constant_map` accepts that seeding (and the class-attribute table)
+so a method-local variable bound from `self.attr`, and a list/dict/tuple item read from it, are
+folded too.  The read is left unknown when a subclass overrides the name, an instance store or
+`__init__` parameter shadows it (`self.text = 45`), or `self` is rebound.  A subscript store on a
+class attribute (`Box.text[0] = 5`) now removes it from the fold, so a mutated container is not
+read at its old value.
+
+Probes in `/tmp/probes/pre376` on both builds via `cmp.sh`: `r10a`, `r10b`, `r10d`, `r10e`,
+`r10f`, `r10g`, `r10h`, `c01`, `c03`, `c05`, `c06`, `c11` and `m10` are refused by name
+(`int() of a float outside int64`, or `int64 constant expression out of range` for a string);
+`m01`-`m04`, `m06`, `m09`, `c02`, `c04`, `c07`, `c08`, `c09`, `c10` and `r34a`-`r34c` match
+CPython.  `m05` (`self = Box()` before the read) keeps the pre-existing `integer overflow`; a
+method that rebinds `self` is not folded.  Added
+`AIL_CURRENT/test_ail_pre376.py` (2 tests, 19 programs, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.  Final-state tests: test_ail_pre376,
+test_ail_pre359, test_ail_pre338, test_ail_pre358, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
