@@ -282,6 +282,18 @@ Probes `/tmp/probes/p245_*` cover the static forms, every dynamic route above, b
 shadowing, a plain list key, `frozenset(genexpr)` and consumption; each matches CPython or is
 refused by name on both builds.  Added `test_ail_pre245.py` and registered it in `ail_check` and
 the CI shards.
+## 2026-10-27 -- re-apply pre31: int() of a float outside int64 (job-rbrbpre31-10271028)
+
+Re-applied the accepted pre31 change on the current tree. This tree already carries the later,
+reviewed scope-aware and value-exact refusal inside `_check_int64_literals` (literal, unshadowed
+module constant, arithmetic/conditional value, list/tuple/dict item, identity function, and
+positional or keyword wrapper argument, with shadowed names left alone); both sides' fixes are
+kept. Added the accepted `test_ail_pre31.py`, registered it in `ail_check.MODULES`, and recorded
+the difference row. Final-state tests: `test_ail_pre31`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` (4 modules, 237 s, 0 failed); probes in `/tmp/probes` cover in-range
+literals, shadowing, arithmetic/conditional values, argument, list, tuple, dict and attribute
+routes, plus refusals for literal, negative, routed and boundary values on both builds.
+
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
