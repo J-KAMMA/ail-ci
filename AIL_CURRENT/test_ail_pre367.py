@@ -8,8 +8,10 @@ locals and a parameter it unconditionally rebinds to a constant), through a lite
 tuple or dict read by subscript, through a class or instance attribute, and through a
 constant argument to a function that raises it to a constant exponent.  The exact result is
 compared with int64 while compiling, so an out-of-range power is refused with the usual name
-and an in-range power keeps matching CPython.  A value that only exists at run time still
-uses the language's documented run-time `integer overflow` stop.
+and an in-range power keeps matching CPython.  A nested function's free name resolves to the
+value the enclosing function scope binds, not to a same-named module constant, so a closure
+that shadows a module constant is neither wrongly refused nor wrongly folded.  A value that
+only exists at run time still uses the language's documented run-time `integer overflow` stop.
 """
 import os
 import subprocess
@@ -72,6 +74,12 @@ class Pre367(unittest.TestCase):
         'alias_int': 'x = 10\ny = x\nprint(y ** 40)\n',
         'argument_list_item': 'def f(v):\n    return v ** 40\nxs = [10]\nprint(f(xs[0]))\n',
         'argument_dict_value': 'def f(v):\n    return v ** 40\nd = {"k": 10}\nprint(f(d["k"]))\n',
+        'closure_out_of_range': ('x = 2\ndef outer():\n    x = 10\n    def inner():\n'
+                                 '        return x ** 62\n    return inner()\nprint(outer())\n'),
+        'closure_negative_out_of_range': ('x = 2\ndef outer():\n    x = -10\n    def inner():\n'
+                                          '        return x ** 41\n    return inner()\nprint(outer())\n'),
+        'closure_out_of_range_exponent': ('x = 2\ndef outer():\n    n = 63\n    def inner():\n'
+                                          '        return x ** n\n    return inner()\nprint(outer())\n'),
     }
 
     MATCH = {
@@ -93,6 +101,33 @@ class Pre367(unittest.TestCase):
         'in_range_local_exponent': 'def f():\n    x = 10\n    n = 18\n    return x ** n\nprint(f())\n',
         'empty_containers': 'xs = []\nd = {}\nt = ()\nprint(len(xs), len(d), len(t), xs == [])\n',
         'dynamic_argument': 'def f(x, n):\n    return x ** n\nprint(f(2, 3), f(10, 2))\n',
+        'closure_shadow': ('x = 10\ndef outer():\n    x = 2\n    def inner():\n'
+                           '        return x ** 62\n    return inner()\nprint(outer())\n'),
+        'closure_parameter': ('p = 10\ndef outer(p):\n    def inner():\n'
+                              '        return p ** 62\n    return inner()\nprint(outer(2))\n'),
+        'method_closure': ('x = 10\nclass C:\n    def m(self):\n        x = 2\n'
+                           '        def inner():\n            return x ** 62\n'
+                           '        return inner()\nprint(C().m())\n'),
+        'closure_deep': ('x = 10\ndef grand():\n    x = 2\n    def middle():\n'
+                         '        def inner():\n            return x ** 62\n'
+                         '        return inner()\n    return middle()\nprint(grand())\n'),
+        'closure_global_decl': ('x = 2\ndef outer():\n    global x\n    def inner():\n'
+                                '        return x ** 62\n    return inner()\nprint(outer())\n'),
+        'closure_container': ('xs = [10]\ndef outer():\n    xs = [2]\n    def inner():\n'
+                              '        return xs[0] ** 62\n    return inner()\nprint(outer())\n'),
+        'closure_instance': ('class Box:\n    def __init__(self, v):\n        self.v = v\n'
+                             'b = Box(10)\ndef outer():\n    b = Box(2)\n    def inner():\n'
+                             '        return b.v ** 62\n    return inner()\nprint(outer())\n'),
+        'closure_rebound': ('x = 10\ndef outer():\n    x = 3\n    x = 2\n    def inner():\n'
+                            '        return x ** 62\n    return inner()\nprint(outer())\n'),
+        'closure_default_arg': ('x = 10\ndef outer():\n    x = 2\n    def inner(v=x):\n'
+                                '        return v ** 62\n    return inner()\nprint(outer())\n'),
+        'closure_exponent': ('x = 2\ndef outer():\n    n = 62\n    def inner():\n'
+                             '        return x ** n\n    return inner()\nprint(outer())\n'),
+        'closure_def_name_shadow': ('helper = 10\ndef outer():\n    def helper():\n'
+                                    '        return 2\n    def inner():\n'
+                                    '        return helper ** 62\n    return inner()\n'
+                                    'print(outer())\n'),
     }
 
     def test_out_of_range_powers_are_refused_by_name(self):

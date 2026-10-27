@@ -1,3 +1,25 @@
+## 2026-10-27 -- pre367 follow-up: closure free names resolve to the enclosing function (job-pre367-10280424)
+
+The pre367 review found a false refusal: a nested function's free name was looked up only
+against module constants, so `x = 10; def outer(): x = 2; def inner(): return x ** 62` was
+refused as `10 ** 62` instead of computing `2 ** 62`.  `_binpow_function_lookup` now takes the
+names bound by enclosing function scopes (parameters, stores, nested def/class names, imports
+and exception targets; a global/nonlocal declaration is not a local binding and stays with the
+outer map) and prefers the enclosing scope's single-assignment int constant to a same-named
+module value.  `_binpow_enclosing_scope` builds that map as the checker descends into nested
+functions; methods of a class nested in a function inherit the function's bindings the same
+way.  Module-level functions are unchanged.
+
+Probes in `/tmp/probes/pre367_fix` on both builds: `c1`, `c2`, `c11` and `f01`-`f04`,
+`f07`-`f10`, `f13`, `f14` (value or exponent bound by an enclosing local, parameter, method,
+two-level nesting, default argument) match CPython; `f05`, `f06`, `f15` (an out-of-range value
+or exponent bound in the enclosing scope) are refused by name; `f12` (enclosing name bound to a
+nested def) matches base and CPython (runtime TypeError, no false refusal); `f11` (class nested
+in a function) is the unchanged "not in the subset" on both builds.  Added these cases to
+`test_ail_pre367.py` (2 tests, 45 programs, both builds).  Required tests: test_ail_pre367,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py`
+was run and `--check` passes.
+
 ## 2026-10-27 -- pre367: a constant power behind a name is refused by name (job-pre367-10280424)
 
 The pre351 reviewer's unverified items were re-run first: `test_ail_files` and

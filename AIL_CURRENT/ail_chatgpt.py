@@ -1482,6 +1482,37 @@ def _scope_declared(function):
     return declared
 
 
+def _scope_bound_names(function):
+    """Names a function binds in its own scope (parameters, stores, nested def/class names,
+    imports and exception targets), not counting global/nonlocal declarations and not
+    descending into nested functions, classes or lambdas."""
+    names = set(_scope_parameters(function))
+
+    def visit(node):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.add(child.name)
+                continue
+            if isinstance(child, ast.Lambda):
+                continue
+            if isinstance(child, ast.Name) and isinstance(child.ctx, (ast.Store, ast.Del)):
+                names.add(child.id)
+            elif isinstance(child, (ast.Import, ast.ImportFrom)):
+                names.update(alias.asname or alias.name.split('.')[0] for alias in child.names)
+            elif isinstance(child, ast.ExceptHandler) and child.name:
+                names.add(child.name)
+            elif isinstance(child, ast.MatchAs) and child.name:
+                names.add(child.name)
+            elif isinstance(child, ast.MatchStar) and child.name:
+                names.add(child.name)
+            elif isinstance(child, ast.MatchMapping) and child.rest:
+                names.add(child.rest)
+            visit(child)
+
+    visit(function)
+    return names - _scope_declared(function)
+
+
 def _scope_class_aliases(scope, classes, stores, parameters, declared):
     """name -> class for a name this scope's own top-level statements bind once to a class name."""
     aliases = {}
@@ -1817,25 +1848,44 @@ def _check_binpow_constant(node, base, exponent):
     raise error
 
 
-def _binpow_function_lookup(function, module_known, module_int_known):
-    """A name lookup for one function body: its own int constants, then the module's rich
-    constant values for names the function does not shadow."""
+def _binpow_function_lookup(function, module_known, module_int_known, enclosing=None):
+    """A name lookup for one function body: its own int constants, then a name bound by an
+    enclosing function scope, then the module's rich constant values for names the function
+    does not shadow.  ``enclosing`` maps a free name to the constant value the enclosing
+    scope binds (or ``_UNKNOWN``), the way a closure reads it at run time."""
     local = _function_local_int_constants(function, module_int_known)
     shadowed = set(_function_scope_stores(function))
     shadowed |= _scope_parameters(function)
     shadowed |= _scope_declared(function)
+    own = {name: local[name] for name in shadowed if name in local}
+    inherited = enclosing or {}
 
     def lookup(name):
-        if name in local:
-            return local[name]
         if name in shadowed:
-            return _UNKNOWN
+            return own.get(name, _UNKNOWN)
+        if name in inherited:
+            return inherited[name]
         return module_known.get(name, _UNKNOWN)
 
     def global_name(name):
-        return name not in shadowed
+        return name not in shadowed and name not in inherited
 
     return lookup, global_name
+
+
+def _binpow_enclosing_scope(function, module_int_known, enclosing):
+    """The names a nested function reads from ``function``'s scope, with a single unbranched
+    int constant where ``function`` binds one.  A global/nonlocal name is not a local binding
+    here, so the name stays with the outer map it already had."""
+    local = _function_local_int_constants(function, module_int_known)
+    stores = _function_scope_stores(function)
+    declared = _scope_declared(function)
+    own = {name: local[name] for name in stores
+           if name in local and name not in declared}
+    scope = dict(enclosing or {})
+    for name in _scope_bound_names(function):
+        scope[name] = own.get(name, _UNKNOWN)
+    return scope
 
 
 def _binpow_param_constants(function, lookup, global_name, attributes, passthrough):
@@ -1950,31 +2000,32 @@ def _check_int64_binpow_constants(tree, module_known, attributes, passthrough, p
                 return
             _check_binpow_constant(node, base, exponent)
 
-    def visit(node, lookup, global_name, param_constants):
+    def visit(node, lookup, global_name, param_constants, enclosing):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             for default in (*node.args.defaults, *[item for item in node.args.kw_defaults
                                                    if item is not None]):
-                visit(default, lookup, global_name, param_constants)
+                visit(default, lookup, global_name, param_constants, enclosing)
             inner_lookup, inner_global = _binpow_function_lookup(node, module_known,
-                                                                 module_int_known)
+                                                                 module_int_known, enclosing)
             inner_params = _binpow_param_constants(node, inner_lookup, inner_global,
                                                    attributes, passthrough)
+            inner_enclosing = _binpow_enclosing_scope(node, module_int_known, enclosing)
             for statement in node.body:
-                visit(statement, inner_lookup, inner_global, inner_params)
+                visit(statement, inner_lookup, inner_global, inner_params, inner_enclosing)
             return
         if isinstance(node, ast.ClassDef):
             for item in (*node.decorator_list, *node.bases, *node.keywords):
-                visit(item, lookup, global_name, param_constants)
+                visit(item, lookup, global_name, param_constants, enclosing)
             for statement in node.body:
                 if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                    visit(statement, lookup, global_name, param_constants)
+                    visit(statement, lookup, global_name, param_constants, enclosing)
             return
         check(node, lookup, global_name, param_constants)
         for child in ast.iter_child_nodes(node):
-            visit(child, lookup, global_name, param_constants)
+            visit(child, lookup, global_name, param_constants, enclosing)
 
     for statement in tree.body:
-        visit(statement, module_lookup, module_global, {})
+        visit(statement, module_lookup, module_global, {}, {})
 
 
 def _check_int64_unary_constants(tree):
