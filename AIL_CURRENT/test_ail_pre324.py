@@ -179,6 +179,13 @@ class C:
         return f()
 print(C().m())
 ''',
+        'annotation_value': '''x = 100
+class C:
+    x: int = 3
+    def m(self, a=x):
+        return a
+print(C().m())
+''',
     }
 
     MATCH = {
@@ -231,6 +238,27 @@ print(f())
         pass
     def m(self, a=7):
         return a + C.x
+print(C().m())
+''',
+        'annotation_only': '''x = 100
+class C:
+    x: int
+    def m(self, a=x):
+        return a
+print(C().m())
+''',
+        'comp_target': '''x = 100
+class C:
+    y = [x for x in range(3)]
+    def m(self, a=x):
+        return a
+print(C().m())
+''',
+        'nested_comp_target': '''x = 100
+class C:
+    y = [[x for x in range(2)] for _ in range(2)]
+    def m(self, a=x):
+        return a
 print(C().m())
 ''',
     }

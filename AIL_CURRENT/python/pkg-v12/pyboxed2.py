@@ -1284,7 +1284,9 @@ def _module_stmt_binds(stmt):
 
 def _store_linenos(stmts):
     """{name: first line that binds it} for one function / module / class body. Stops at a nested
-    def (its own scope; only its NAME is bound here), a nested class, and a lambda body."""
+    def (its own scope; only its NAME is bound here), a nested class, and a lambda body. An
+    annotation with no value binds only ``__annotations__``; a comprehension target is local to
+    the comprehension, so neither binds a name in this body."""
     pos = {}
 
     def walk(node):
@@ -1292,6 +1294,26 @@ def _store_linenos(stmts):
             pos.setdefault(node.name, node.lineno)
             return
         if isinstance(node, ast.Lambda):
+            return
+        if isinstance(node, ast.AnnAssign):
+            # `x: int` records only `__annotations__`; `x: int = 3` binds x.
+            walk(node.annotation)
+            if node.value is not None:
+                walk(node.target)
+                walk(node.value)
+            return
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
+            # The generator targets belong to the comprehension's own scope. Its other parts run
+            # in this scope, so a named expression there still binds here.
+            for gen in node.generators:
+                walk(gen.iter)
+                for cond in gen.ifs:
+                    walk(cond)
+            if isinstance(node, ast.DictComp):
+                walk(node.key)
+                walk(node.value)
+            else:
+                walk(node.elt)
             return
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
             pos.setdefault(node.id, node.lineno)

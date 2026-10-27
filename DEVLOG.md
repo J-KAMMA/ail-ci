@@ -1,3 +1,26 @@
+## 2026-10-27 -- pre324 review: annotation-only names and comprehension targets are not class-body bindings (job-pre324-10271601)
+
+The review found that the earlier refusal was too broad because `_store_linenos` counted every
+`ast.Name` store in the class body.  It now skips the target of an annotation with no value
+(`x: int` records only `__annotations__`, while `x: int = 3` still binds `x`) and the generator
+targets of a comprehension (their own scope, while a named expression in the comprehension still
+binds here).  So `x = 100; class C: x: int; def m(self, a=x)` and
+`x = 100; class C: y = [x for x in range(3)]; def m(self, a=x)` match CPython (100) again on both
+builds; an annotation with a value, a real class attribute before the comprehension target, or an
+attribute after it is still refused by name.  `test_ail_pre324` adds `annotation_only`,
+`annotation_value`, `comp_target` and `nested_comp_target`.
+
+Probes in `/tmp/probes/pre324` on both builds: the 10 matching new probes are `p18_ann_only`,
+`p18_ann_only_alias`, `p18_ann_only_arg`, `p18_ann_only_multi`, `p18_comp_target`,
+`p18_comp_target_arg`, `p18_comp_target_dict`, `p18_comp_target_gen`,
+`p18_comp_target_nested` and `p18_comp_target_tuple`; `p18_ann_value`, `p18_ann_only_then_attr`,
+`p18_comp_target_with_attr` and `p18_comp_target_then_attr` are refused by name as intended.  The
+18 earlier pre324 probes still match (5) or are refused by name (13).  Final-code tests:
+`test_ail_pre324`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`
+(4 modules, 263 s, 0 failed), plus `test_ail_fuzz1.NonLiteralDefaults` and
+`test_ail_fuzz1.ForwardLambdaDefaults` (16 tests, OK).  `tools/update_manifest.py` was run and
+`--check` passes.
+
 ## 2026-10-27 -- pre324: class method default reading an earlier class-body name (job-pre324-10271601)
 
 The pre304 review's first pre-existing difference (p18) still reproduced on this tree:
