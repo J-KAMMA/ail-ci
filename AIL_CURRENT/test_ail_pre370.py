@@ -9,7 +9,10 @@ item, negative index and keyword-only parameter; a single local alias of the par
 held in a module constant; the argument reaching the call as a list item, a dict value, a class
 attribute or a module container alias; a wrapper function; and two call sites where one is out of
 range.  In-range values, int64 boundaries, an empty list, a callee that overwrites the item and a
-dynamic argument keep the run-time route and match CPython.
+dynamic argument keep the run-time route and match CPython.  A module container passed to a
+function whose parameter escapes -- mutated through another callee, a method call, a nested def,
+a mutual chain, or returned and then mutated -- also keeps the run-time route, so the check never
+refuses a value the program changed first; a chain of read-only wrappers is still followed.
 """
 import os
 import subprocess
@@ -144,6 +147,20 @@ def show(*, xs):
 
 show(xs=[1e300])
 ''',
+    'wrapper_chain_module_container': '''
+XS = [1e300]
+
+def show(xs):
+    print(int(xs[0]))
+
+def w1(ys):
+    show(ys)
+
+def w2(zs):
+    w1(zs)
+
+w2(XS)
+''',
     'mixed_call_sites': '''
 def show(xs):
     print(int(xs[0]))
@@ -254,6 +271,75 @@ def show(xs):
     print(int(xs[0]))
 
 show([1e300])
+''',
+    'mutated_through_callee': '''
+XS = [1e300]
+
+def g(ys):
+    ys[0] = 5.0
+
+def f(xs):
+    g(xs)
+
+def show(xs):
+    print(int(xs[0]))
+
+f(XS)
+show(XS)
+''',
+    'mutated_through_method': '''
+XS = [1e300]
+
+def f(xs):
+    xs.pop()
+    xs.append(5.0)
+
+def show(xs):
+    print(int(xs[0]))
+
+f(XS)
+show(XS)
+''',
+    'mutated_through_nested_def': '''
+XS = [1e300]
+
+def f(xs):
+    def inner():
+        xs[0] = 5.0
+    inner()
+
+def show(xs):
+    print(int(xs[0]))
+
+f(XS)
+show(XS)
+''',
+    'mutated_after_returned': '''
+XS = [1e300]
+
+def ident(xs):
+    return xs
+
+def show(xs):
+    print(int(xs[0]))
+
+ident(XS)[0] = 5.0
+show(XS)
+''',
+    'mutated_through_mutual_chain': '''
+XS = [1e300]
+
+def a(xs):
+    b(xs)
+
+def b(xs):
+    xs[0] = 5.0
+
+def show(xs):
+    print(int(xs[0]))
+
+a(XS)
+show(XS)
 ''',
     'dynamic_argument': '''
 import sys

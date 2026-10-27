@@ -1447,14 +1447,116 @@ def _safe_module_containers(tree, module_counts, global_names, parents, call_arg
     return safe
 
 
-def _read_only_functions(tree, module_counts):
-    """Module functions that never store to or delete an item of a parameter."""
-    names = set()
+_READ_ONLY_CALLS = frozenset({
+    'abs', 'all', 'any', 'bool', 'float', 'format', 'hash', 'int', 'len', 'list', 'max',
+    'min', 'print', 'repr', 'round', 'sorted', 'str', 'sum', 'tuple',
+})
+
+
+def _parameter_names(fn):
+    names = {argument.arg for argument in
+             (*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs)}
+    if fn.args.vararg is not None:
+        names.add(fn.args.vararg.arg)
+    if fn.args.kwarg is not None:
+        names.add(fn.args.kwarg.arg)
+    return names
+
+
+def _callee_escapes(call, pure, local, dependencies):
+    func = call.func
+    if (isinstance(func, ast.Name) and isinstance(func.ctx, ast.Load)
+            and func.id not in local):
+        if func.id in pure:
+            return False
+        dependencies.add(func.id)
+        return False
+    return True
+
+
+def _parameter_escapes(node, parents, pure, local, dependencies):
+    """Whether a load of a parameter name lets the container escape a read.
+
+    A subscript read, iteration, a truth test or an argument to a pure builtin keeps the
+    original object reachable only for reading; anything else (assignment to another name,
+    a method call, a return, a non-pure call) lets the callee mutate it later."""
+    parent = parents.get(node)
+    if isinstance(parent, ast.Subscript) and parent.value is node:
+        return not isinstance(parent.ctx, ast.Load)
+    if isinstance(parent, (ast.For, ast.AsyncFor)) and parent.iter is node:
+        return False
+    if isinstance(parent, ast.comprehension) and parent.iter is node:
+        return False
+    if isinstance(parent, (ast.If, ast.While, ast.Assert, ast.BoolOp, ast.Compare,
+                          ast.UnaryOp)):
+        return False
+    if isinstance(parent, ast.Starred):
+        call = parents.get(parent)
+        if isinstance(call, ast.Call) and any(argument is parent for argument in call.args):
+            return _callee_escapes(call, pure, local, dependencies)
+        return True
+    if isinstance(parent, ast.keyword):
+        call = parents.get(parent)
+        if isinstance(call, ast.Call):
+            return _callee_escapes(call, pure, local, dependencies)
+        return True
+    if isinstance(parent, ast.Call) and any(argument is node for argument in parent.args):
+        return _callee_escapes(parent, pure, local, dependencies)
+    return True
+
+
+def _parameter_dependencies(fn, parents, pure):
+    """Callees that receive a parameter directly, or None when the parameter can escape.
+
+    Only a direct `f(param)`, `f(*param)` or `f(x=param)` makes another function able to
+    change the container; passing an item or a slice hands over a value the callee cannot
+    use to alter the parameter itself."""
+    parameters = _parameter_names(fn)
+    local = set(_binding_counts(fn.body)) | parameters
+    dependencies = set()
+    for sub in ast.walk(fn):
+        if (sub is not fn
+                and isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                                     ast.Lambda, ast.Yield, ast.YieldFrom))):
+            return None
+    for sub in _shallow_walk(fn.body):
+        if isinstance(sub, ast.Name) and sub.id in parameters:
+            if isinstance(sub.ctx, (ast.Store, ast.Del)):
+                return None
+            if _parameter_escapes(sub, parents, pure, local, dependencies):
+                return None
+        elif isinstance(sub, ast.Subscript) and isinstance(sub.ctx, (ast.Store, ast.Del)):
+            return None
+        elif isinstance(sub, ast.Attribute) and isinstance(sub.ctx, (ast.Store, ast.Del)):
+            base = sub.value
+            if isinstance(base, ast.Name) and base.id in parameters:
+                return None
+    return dependencies
+
+
+def _read_only_functions(tree, module_counts, parents):
+    """Module functions that only read a container passed to one of their parameters.
+
+    A nested def/lambda/class, a yield, an item or attribute store, a rebinding, a return of
+    the parameter or a call that hands the parameter to something unknown all disqualify the
+    function.  Calls to other module functions are followed to a fixed point, so a chain of
+    wrappers stays read-only while a callee that mutates removes every caller as well."""
+    rebound = _all_bound_names(tree)
+    pure = _READ_ONLY_CALLS - rebound
+    dependencies = {}
     for fn in tree.body:
         if (isinstance(fn, ast.FunctionDef) and not fn.decorator_list
-                and module_counts.get(fn.name) == 1 and not _mutated_parameters(fn)):
-            names.add(fn.name)
-    return names
+                and module_counts.get(fn.name) == 1):
+            calls = _parameter_dependencies(fn, parents, pure)
+            if calls is not None:
+                dependencies[fn.name] = calls
+    safe = set(dependencies)
+    while True:
+        removed = {name for name in safe
+                   if any(callee not in safe for callee in dependencies[name])}
+        if not removed:
+            return safe
+        safe -= removed
 
 
 def _call_argument_containers(tree, module_counts, global_names, parents, known):
@@ -1463,7 +1565,7 @@ def _call_argument_containers(tree, module_counts, global_names, parents, known)
     The value is the one bound at module level; a subscript store or delete through the name or
     an alias, a rebinding, or use by anything but a read disqualifies it."""
     safe = _safe_module_containers(tree, module_counts, global_names, parents,
-                                   _read_only_functions(tree, module_counts))
+                                   _read_only_functions(tree, module_counts, parents))
     values = {}
     for statement in tree.body:
         if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:

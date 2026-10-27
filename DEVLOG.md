@@ -1,3 +1,30 @@
+## 2026-10-27 -- pre370 follow-up: unsound read-only functions refused valid programs (job-pre370-10280456)
+
+The pre370 review found four false compile-time refusals.  `_read_only_functions` marked a
+module function read-only whenever it did not store to a subscript named as the parameter, so a
+function that changed the container through another callee (`g(xs)`), a method call (`xs.pop()`
+/ `append`), a nested def, or returned it for the caller to mutate (`ident(XS)[0] = 5.0`) was
+still considered read-only.  `_call_argument_containers` then resolved the stale module constant
+and refused `int(xs[0])` in programs that print `5` on CPython and on the base build.  The pass
+is now a conservative fixed point (`_read_only_functions`, `_parameter_dependencies`,
+`_parameter_escapes`): a nested def/lambda/class, a yield, any item or attribute store, a
+rebinding, a return or other escape of the parameter, or a call that hands the parameter to
+anything but a pure builtin (or to another module function, followed transitively) disqualifies
+it.  A call to a builtin counts as pure only when the name is bound nowhere in the program, as
+`_escaped_constant_names` already does, so a shadowed `len`/`print` is not trusted.  A chain of
+read-only wrappers is still followed, so the module-container and two-level wrapper refusals are
+kept; the mutated/returned cases now compile and match CPython.  A module container passed to a
+function whose parameter escapes stays dynamic and keeps the pre-existing run-time trap instead
+of a false refusal; `DIFFERENCES.md` says so.
+
+Probes in `/tmp/probes/pre370fix` on both builds: p05 (callee), p06 (pop/append), p07 (nested
+def), p18 (identity return), p19/p25/p26 (local alias), p23 (mutual chain) and p24 (return chain)
+now match CPython (`5`); p20 (direct literal), q06 (two-level read-only wrapper), q08 (module
+alias), q09 (read-only loop) and q11 (loop/if reads) are still refused by name; q07 and q10
+(in-range) match CPython.  Added 6 cases to `test_ail_pre370.py` (five escapes plus the read-only
+wrapper chain).  Final-state tests: test_ail_pre370, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre370: int() of a parameter's list item is refused by name (job-pre370-10280456)
 
 The pre358 review's remaining pre-existing item reproduced on both builds:
