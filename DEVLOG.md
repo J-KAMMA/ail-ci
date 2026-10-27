@@ -1,3 +1,20 @@
+## 2026-10-27 -- pre337 review fixes: mutation through calls and aliases, shadowed function names (job-pre337-10272138)
+
+The pre337 review found the new parameter-item check refused three programs that CPython runs: a
+container mutated inside a called module function (`bump(a)`), a container mutated through a
+module alias (`b = a; b[0] = 1.5`), and a call to a function name shadowed by a local definition.
+The container pass now derives which module functions can mutate a parameter (subscript,
+attribute or method store, `del`, augmented assignment, aliases inside the callee, and transitive
+calls) and drops any container passed to such a function; alias unsafety propagates across the
+whole alias group; and the final check skips a call whose callee name is locally bound.  Read-only
+module containers are still refused by name.
+
+Probes in `/tmp/probes/pre337fix` (`a2`-`a9`, `a11`) and `/tmp/rprobes` (`r1`-`r6`) match CPython
+on both builds; `r1`-`r3` were the reviewer's failures.  Added the same programs to the matching
+set of `test_ail_pre337.py`.  Final-state tests: test_ail_pre337, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check`
+passes.
+
 ## 2026-10-27 -- pre337: int() of an out-of-int64 float read through a parameter item (job-pre337-10272138)
 
 The pre315 reviewer's first pre-existing item was `int(items[0])` with `items` a function

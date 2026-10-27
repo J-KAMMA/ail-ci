@@ -863,6 +863,110 @@ def _literal_container(value):
     return _immutable_constant(value)
 
 
+def _positional_parameters(fn):
+    return [arg.arg for arg in (*fn.args.posonlyargs, *fn.args.args)]
+
+
+def _parameter_mutations(tree):
+    """Module functions and the parameters they can mutate in place."""
+    counts = _binding_counts(tree.body)
+    functions = {}
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef) or counts.get(node.name) != 1:
+            continue
+        parameters = _positional_parameters(node)
+        if node.decorator_list:
+            functions[node.name] = (parameters, set(parameters))
+            continue
+        names = set(parameters)
+        names.update(arg.arg for arg in node.args.kwonlyargs)
+        if node.args.vararg is not None:
+            names.add(node.args.vararg.arg)
+        if node.args.kwarg is not None:
+            names.add(node.args.kwarg.arg)
+        origins = {name: name for name in names}
+        changed = True
+        while changed:
+            changed = False
+            for item in _shallow_walk(node.body):
+                if (isinstance(item, ast.Assign) and len(item.targets) == 1
+                        and isinstance(item.targets[0], ast.Name)
+                        and isinstance(item.value, ast.Name)
+                        and item.value.id in origins):
+                    target = item.targets[0].id
+                    origin = origins[item.value.id]
+                    if origins.get(target) != origin:
+                        origins[target] = origin
+                        changed = True
+        mutated = set()
+
+        def mutate(root):
+            while isinstance(root, (ast.Subscript, ast.Attribute)):
+                root = root.value
+            if isinstance(root, ast.Name):
+                origin = origins.get(root.id, root.id)
+                if origin in names:
+                    mutated.add(origin)
+
+        for item in _shallow_walk(node.body):
+            if isinstance(item, ast.Assign):
+                for target in item.targets:
+                    mutate(target)
+            elif isinstance(item, (ast.AnnAssign, ast.AugAssign)):
+                mutate(item.target)
+            elif isinstance(item, ast.Delete):
+                for target in item.targets:
+                    mutate(target)
+            elif isinstance(item, ast.Call) and isinstance(item.func, ast.Attribute):
+                mutate(item.func.value)
+        functions[node.name] = (parameters, mutated, origins)
+    changed = True
+    while changed:
+        changed = False
+        for node in tree.body:
+            if (not isinstance(node, ast.FunctionDef) or node.decorator_list
+                    or node.name not in functions):
+                continue
+            parameters, mutated, origins = functions[node.name]
+            for item in _shallow_walk(node.body):
+                if (not isinstance(item, ast.Call) or not isinstance(item.func, ast.Name)
+                        or item.func.id not in functions):
+                    continue
+                callee_parameters, callee_mutated = functions[item.func.id][:2]
+                for index, argument in enumerate(item.args):
+                    if (isinstance(argument, ast.Name) and argument.id in origins
+                            and index < len(callee_parameters)
+                            and callee_parameters[index] in callee_mutated):
+                        origin = origins[argument.id]
+                        if origin not in mutated:
+                            mutated.add(origin)
+                            changed = True
+                for keyword in item.keywords:
+                    if (keyword.arg is not None and isinstance(keyword.value, ast.Name)
+                            and keyword.value.id in origins
+                            and keyword.arg in callee_mutated):
+                        origin = origins[keyword.value.id]
+                        if origin not in mutated:
+                            mutated.add(origin)
+                            changed = True
+            functions[node.name] = (parameters, mutated, origins)
+    return functions
+
+
+def _call_mutates_argument(call, node, functions):
+    if not isinstance(call.func, ast.Name) or call.func.id not in functions:
+        return False
+    parameters, mutated = functions[call.func.id][:2]
+    for index, argument in enumerate(call.args):
+        if (argument is node and index < len(parameters)
+                and parameters[index] in mutated):
+            return True
+    for keyword in call.keywords:
+        if keyword.value is node and keyword.arg in mutated:
+            return True
+    return False
+
+
 def _passable_module_containers(tree, known, attributes):
     counts = _binding_counts(tree.body)
     declarations = {}
@@ -880,12 +984,14 @@ def _passable_module_containers(tree, known, attributes):
             if isinstance(value, (list, tuple, dict)) and _literal_container(value):
                 values[name] = value
     aliases = {}
+    alias_edges = {}
     for node in tree.body:
         if (isinstance(node, ast.Assign) and len(node.targets) == 1
                 and isinstance(node.targets[0], ast.Name)
                 and isinstance(node.value, ast.Name)):
             name = node.targets[0].id
             source = node.value.id
+            alias_edges.setdefault(name, set()).add(source)
             if counts.get(name) == 1:
                 aliases[name] = source
     changed = True
@@ -896,6 +1002,7 @@ def _passable_module_containers(tree, known, attributes):
                 values[name] = values[source]
                 changed = True
     parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    mutations = _parameter_mutations(tree)
     unsafe = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Name) or node.id not in values:
@@ -914,6 +1021,26 @@ def _passable_module_containers(tree, known, attributes):
         elif isinstance(parent, ast.Call) and isinstance(parent.func, ast.Attribute) \
                 and parent.func.value is node:
             unsafe.add(node.id)
+        elif isinstance(parent, ast.Call) and _call_mutates_argument(parent, node, mutations):
+            unsafe.add(node.id)
+        elif isinstance(parent, ast.keyword) and _call_mutates_argument(
+                parents[parent], node, mutations):
+            unsafe.add(node.id)
+        elif isinstance(parent, ast.Starred):
+            call = parents.get(parent)
+            if (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+                    and call.func.id in mutations and mutations[call.func.id][1]):
+                unsafe.add(node.id)
+    changed = True
+    while changed:
+        changed = False
+        for name, sources in alias_edges.items():
+            group = sources | {name}
+            if name in unsafe or group & unsafe:
+                for member in group:
+                    if member not in unsafe:
+                        unsafe.add(member)
+                        changed = True
     return {name: value for name, value in values.items() if name not in unsafe}
 
 
@@ -1004,8 +1131,10 @@ def _check_parameter_index_int_calls(tree, known, passthrough, int_shadowed, att
         if (not isinstance(call, ast.Call) or not isinstance(call.func, ast.Name)
                 or call.func.id not in infos):
             continue
-        target = infos[call.func.id]
         local = _enclosing_bindings(call, parents)
+        if call.func.id in local:
+            continue
+        target = infos[call.func.id]
 
         def lookup(name):
             if name in local:

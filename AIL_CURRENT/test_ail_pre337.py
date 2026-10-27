@@ -226,6 +226,149 @@ def f(items):
 
 print(f(a))
 ''',
+    'mutated_via_call': '''
+def bump(xs):
+    xs[0] = 1.5
+
+
+a = [1e300]
+bump(a)
+
+
+def f(items):
+    return int(items[0])
+
+
+print(f(a))
+''',
+    'mutated_via_method_call': '''
+def bump(xs):
+    xs.clear()
+    xs.append(1.5)
+
+
+a = [1e300]
+bump(a)
+
+
+def f(items):
+    return int(items[0])
+
+
+print(f(a))
+''',
+    'mutated_via_keyword_call': '''
+def bump(xs):
+    xs[0] = 1.5
+
+
+a = [1e300]
+bump(xs=a)
+
+
+def f(items):
+    return int(items[0])
+
+
+print(f(a))
+''',
+    'mutated_via_wrapper_call': '''
+def setx(xs):
+    xs[0] = 1.5
+
+
+def bump(ys):
+    setx(ys)
+
+
+a = [1e300]
+bump(a)
+
+
+def f(items):
+    return int(items[0])
+
+
+print(f(a))
+''',
+    'mutated_via_inner_alias': '''
+def bump(xs):
+    ys = xs
+    ys[0] = 1.5
+
+
+a = [1e300]
+bump(a)
+
+
+def f(items):
+    return int(items[0])
+
+
+print(f(a))
+''',
+    'mutated_via_alias': '''
+a = [1e300]
+b = a
+b[0] = 1.5
+
+
+def f(items):
+    return int(items[0])
+
+
+print(f(a))
+''',
+    'mutated_via_alias_chain': '''
+a = [1e300]
+b = a
+c = b
+c[0] = 1.5
+
+
+def f(items):
+    return int(items[0])
+
+
+print(f(a))
+''',
+    'mutated_alias_source': '''
+a = [1e300]
+b = a
+a[0] = 1.5
+
+
+def f(items):
+    return int(items[0])
+
+
+print(f(b))
+''',
+    'shadowed_function': '''
+def f(items):
+    return int(items[0])
+
+
+def other():
+    def f(x):
+        return 1.5
+    return f([1e300])
+
+
+print(other())
+''',
+    'shadowed_function_variable': '''
+def f(items):
+    return int(items[0])
+
+
+def other():
+    f = lambda x: 1.5
+    return f([1e300])
+
+
+print(other())
+''',
     'alias_in_range': '''
 a = [1.9]
 b = a
