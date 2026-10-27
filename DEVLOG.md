@@ -1,3 +1,43 @@
+## 2026-10-27 -- pre387: an int() read before a later container mutation is refused (job-pre387-10280823)
+
+The pre374 review left that job's worker probes p09-p20 unverified.  Recovered them from the
+fetched pre374 report: p09, p14, p16, p18 and p19 matched CPython there, while p10-p13, p15 and
+p20 stopped with ``integer overflow`` on both builds -- the per-name check dropped a container
+as soon as any later mutation made it dynamic, so a read before that mutation was never refused.
+The first one, p10, is
+
+    d = {"k": 1e300}
+    print(int(d.get("k")))
+    d.update({"k": 1.5})
+
+which CPython prints as the exact big integer.
+
+Added ``_check_flow_int64_containers`` in ``AIL_CURRENT/ail_chatgpt.py``, called from
+``_check_int64_literals`` after the per-call checker.  It walks the module statements in source
+order with a small read-only model -- a flat or nested literal list/tuple/dict, a simple alias
+(and alias chains), a scalar, and a simple rebinding -- and refuses an ``int()`` read of an
+out-of-int64 float (``int() of a float outside int64``) or str/int (``int64 constant expression
+out of range``) before any mutation.  Any statement it cannot model (a call, loop, try, dead
+condition, mutation, import or def) drops every tracked name it mentions first, so a read after a
+mutation, a mutating sibling, a dead ``IfExp``/``BoolOp``, an alias escaping through a ``bool``/
+``if`` expression, loop target, constructor or call result, and a value reaching the code through
+a list item or a dict value all still match CPython.  Class-attribute lookups use the live
+environment, so an attribute mutated through its class is not read from a stale map.  No code is
+generated differently: the pass only raises.
+
+Probes in ``/tmp/probes/pre387`` on both builds via ``cmp.sh``: refused by name ``p01``-``p02``,
+``p05``, ``p07``, ``p09``, ``p11``, ``p13``, ``p16``-``p17``, ``p26``, ``p32``, ``q05``-``q08``,
+``q10``, ``q12``, ``q14`` (aliases, nested dict/list, negative index, str, empty dict default,
+scalar in a dict, tuple rebinding, read before a called mutation); match CPython ``p03``-``p04``,
+``p06``, ``p08``, ``p10``, ``p12``, ``p14``-``p15``, ``p18``-``p25``, ``p27``-``p31``, ``q01``-
+``q04``, ``q09``, ``q11``, ``q13``.  The class-attribute read-before-store (``p33``) is refused by
+name as before; the attribute store-before-read (``p34``) is a pre-existing false refusal on the
+base too and is unchanged.  ``test_ail_pre387.py`` pins 12 refused and 26 matching programs on
+both builds.
+
+Final-state tests: test_ail_pre387, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  ``tools/update_manifest.py`` was run and ``--check`` passes.
+
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The

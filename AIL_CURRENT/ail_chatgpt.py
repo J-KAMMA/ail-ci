@@ -1328,6 +1328,197 @@ def _safe_module_containers(tree, module_counts, global_names, parents):
     return safe
 
 
+_FLOW_PURE_CALLS = frozenset({'print', 'len', 'str', 'repr', 'int'})
+_FLOW_SCALARS = (bool, int, float, str, bytes, type(None))
+
+
+def _flow_mention_names(node):
+    return {sub.id for sub in ast.walk(node) if isinstance(sub, ast.Name)}
+
+
+def _flow_container(value):
+    """Whether value is a literal container tree of immutable scalars (possibly nested)."""
+    if type(value) in _FLOW_SCALARS:
+        return False
+    if isinstance(value, (list, tuple)):
+        return all(type(item) in _FLOW_SCALARS or _flow_container(item) for item in value)
+    if isinstance(value, dict):
+        return all((type(key) in _FLOW_SCALARS or _flow_container(key))
+                   and (type(item) in _FLOW_SCALARS or _flow_container(item))
+                   for key, item in value.items())
+    return False
+
+
+def _flow_pure_expression(node, lookup, pure_calls, attributes):
+    """Whether evaluating ``node`` only reads: builtin calls and plain-dict ``get``.
+
+    Short-circuit, conditional, lambda and comprehension forms are rejected because a call
+    inside them may not run, so judging it on the statement's entry state could refuse a
+    value CPython never converts.  Any other call may mutate a tracked container.
+    """
+    for sub in ast.walk(node):
+        if isinstance(sub, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp,
+                            ast.GeneratorExp, ast.NamedExpr, ast.IfExp, ast.BoolOp,
+                            ast.Await, ast.Yield, ast.YieldFrom, ast.Starred)):
+            return False
+        if isinstance(sub, ast.Call):
+            if isinstance(sub.func, ast.Name):
+                if sub.func.id not in pure_calls and not sub.func.id.startswith('_AilT_'):
+                    return False
+            elif (isinstance(sub.func, ast.Attribute) and sub.func.attr == 'get'
+                  and isinstance(sub.func.value, (ast.Name, ast.Subscript))):
+                base = _constant_value(sub.func.value, lookup, lambda unused: True, {},
+                                       attributes)
+                if not isinstance(base, dict):
+                    return False
+            else:
+                return False
+        elif isinstance(sub, (ast.Subscript, ast.Attribute)) and isinstance(sub.ctx, ast.Store):
+            return False
+        elif isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Del):
+            return False
+    return True
+
+
+def _refuse_flow_int64(node, value):
+    if _outside_int64_float(value):
+        error = ValueError(f'int() of a float outside int64: {value!r} (CPython makes a big integer)')
+    else:
+        converted = _int_conversion_outside_int64(value)
+        error = ValueError(f'int64 constant expression out of range: {_constant_diagnostic(converted)}')
+    error.source_line = node.lineno
+    error.source_column = node.col_offset
+    raise error
+
+
+def _check_flow_int64_containers(tree, known, attributes, int_shadowed, program_bound,
+                                 module_counts, global_names):
+    """Refuse an int() read of a known out-of-int64 value that precedes a later mutation.
+
+    ``_scope_constant_map`` drops a container as soon as it is mutated anywhere, so a read
+    that happens before the mutation was left to the run-time ``integer overflow`` trap.
+    Walk the module statements in source order with a small read-only model (a flat literal
+    container, a simple alias, or a scalar).  Any statement that is not modelled and mentions
+    a tracked name drops that name and its aliases first, so an unmodelled call, loop, dead
+    branch or mutation can cost a refusal but never invent one.
+    """
+    if int_shadowed:
+        return
+    pure_calls = _FLOW_PURE_CALLS - program_bound
+    env = dict(known)
+    share = {}
+    members = {}
+    counter = [0]
+    simple_counts = {}
+    for statement in tree.body:
+        if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                and isinstance(statement.targets[0], ast.Name)):
+            name = statement.targets[0].id
+        elif (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
+              and statement.value is not None):
+            name = statement.target.id
+        else:
+            continue
+        simple_counts[name] = simple_counts.get(name, 0) + 1
+
+    def lookup(name):
+        return env.get(name, _UNKNOWN)
+
+    def global_name(name):
+        return name in env
+
+    def drop(name):
+        env.pop(name, None)
+        token = share.pop(name, None)
+        if token is not None:
+            group = members.get(token)
+            if group is not None:
+                group.discard(name)
+                if not group:
+                    members.pop(token, None)
+
+    def drop_group(name):
+        token = share.get(name)
+        if token is None:
+            env.pop(name, None)
+            return
+        for member in tuple(members.get(token, ())):
+            env.pop(member, None)
+            share.pop(member, None)
+        members.pop(token, None)
+
+    def bind_container(name, value):
+        drop(name)
+        counter[0] += 1
+        share[name] = counter[0]
+        members[counter[0]] = {name}
+        env[name] = value
+
+    def bind_alias(name, source):
+        drop(name)
+        if source == name or source not in env:
+            return
+        env[name] = env[source]
+        token = share.get(source)
+        if token is not None:
+            share[name] = token
+            members[token].add(name)
+
+    def drop_mentions(node):
+        for name in _flow_mention_names(node):
+            drop_group(name)
+
+    def check_calls(node):
+        for sub in ast.walk(node):
+            if not (isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name)
+                    and sub.func.id == 'int' and len(sub.args) == 1 and not sub.keywords):
+                continue
+            value = _constant_value(sub.args[0], lookup, global_name, {}, attributes)
+            if _outside_int64_float(value) or _int_conversion_outside_int64(value) is not None:
+                _refuse_flow_int64(sub, value)
+
+    def trackable(name):
+        return (name not in global_names and simple_counts.get(name, 0) > 0
+                and module_counts.get(name, 0) == simple_counts[name])
+
+    def self_contained(node):
+        return all(not isinstance(sub, ast.Name)
+                   or not isinstance(lookup(sub.id), (list, tuple, dict))
+                   for sub in ast.walk(node))
+
+    for statement in tree.body:
+        target = value_node = None
+        if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                and isinstance(statement.targets[0], ast.Name)):
+            target, value_node = statement.targets[0].id, statement.value
+        elif (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
+              and statement.value is not None):
+            target, value_node = statement.target.id, statement.value
+        if (value_node is not None
+                and _flow_pure_expression(value_node, lookup, pure_calls, attributes)):
+            check_calls(value_node)
+            value = _constant_value(value_node, lookup, global_name, {}, attributes)
+            if not trackable(target):
+                drop(target)
+            elif isinstance(value_node, ast.Name) and value_node.id in env:
+                bind_alias(target, value_node.id)
+            elif (isinstance(value_node, (ast.List, ast.Tuple, ast.Dict))
+                  and self_contained(value_node) and _flow_container(value)):
+                bind_container(target, value)
+            elif type(value) in _FLOW_SCALARS:
+                drop(target)
+                env[target] = value
+            else:
+                drop_mentions(statement)
+                drop(target)
+            continue
+        if (isinstance(statement, ast.Expr)
+                and _flow_pure_expression(statement.value, lookup, pure_calls, attributes)):
+            check_calls(statement.value)
+            continue
+        drop_mentions(statement)
+
+
 def _fold_float_int_text(text):
     """Rewrite `float(<an exact int constant outside int64>)` to a float literal.
 
@@ -1425,6 +1616,8 @@ def _check_int64_literals(tree):
     int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attributes)
     _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes,
                       program_bound).visit(tree)
+    _check_flow_int64_containers(tree, known, attributes, int_shadowed, program_bound,
+                                 module_counts, global_names)
     maxsplit = _maxsplit_constant_nodes(tree)
     nodes = [tree]
     while nodes:
