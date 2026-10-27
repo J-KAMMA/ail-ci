@@ -1,3 +1,26 @@
+## 2026-10-27 -- fuzz28 follows pre304's class-body namespace (job-rbpre304-10272032)
+
+The integration branch's `test_ail_fuzz28.py` still expected the general path to refuse
+`print(C.ys, C.zs, C.ws)` for a class-body comprehension by name.  That refusal was the old
+behaviour the accepted pre304 change replaced: a class body now has its own namespace, so an
+earlier class attribute is visible to a comprehension's outermost iterable and the read evaluates
+on both builds.  I reproduced the failure (`[0, 1, 2] {0: 0, 1: 1, 2: 2} {0, 1, 2}` from the
+general path), verified the same program matches CPython on both builds, and changed fuzz28 to
+assert that parity instead of the obsolete refusal.  The still-refused cases (a comprehension
+body reading the class name, and a method/property rebinding an earlier attribute) remain in
+`test_ail_pre304.py`; no compiler code was changed.  Updated the old fuzz28 DIFFERENCES row to
+point at pre304 and added `C?-job-rbpre304-10272032-1`.
+
+Probes in `/tmp/probes/pre304fix` on both builds: `p1_types` (positive/negative/bool/zero,
+list/set/dict), `p2_empty`, `p3_routes` (argument, list item, attribute, dict value, alias and
+module name), `p4_containers` (class read and instance through argument/list/attribute/dict),
+`p5_duplicate`, `p6_inherit`, `p7_shadow` and `p8_body_global` match CPython; `p9_body_refuse`
+and `p10_method_refuse` are refused by name (`name 'x' is not defined`) on both builds.
+`test_ail_fuzz28` and `test_ail_pre304` (7 tests) pass on this change.  A separate exploratory
+probe, a class-body comprehension target with the same name as a module global, showed a
+pre-existing compscope limitation (the target overwrites the module global); it does not involve
+the earlier-name map and was not changed here.
+
 ## 2026-10-27 -- re-apply pre304: class-body names visible to later attributes (job-rbpre304-10271604)
 
 Re-applied the accepted pre304 change on top of this tree; its class-body name map and the
