@@ -722,6 +722,68 @@ class _Int64CallChecker(ast.NodeVisitor):
         self._visit_comprehension(node)
 
 
+def _fold_float_int_text(text):
+    """Rewrite `float(<an exact int constant outside int64>)` to a float literal.
+
+    CPython converts an unbounded int to the nearest double, so `float(10 ** 40)` is
+    1e+40 even though the int itself does not fit int64.  Without this fold the int
+    constant checks and the front end refuse the valid program.  Only the direct,
+    unshadowed builtin form is folded, and only when the conversion is finite; the
+    int64 range, an overflowing conversion and a rebound `float` are left alone.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return text
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)) \
+                and node.id == 'float':
+            return text
+        if isinstance(node, ast.arg) and node.arg == 'float':
+            return text
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) \
+                and node.name == 'float':
+            return text
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if (alias.asname or alias.name.split('.')[0]) == 'float':
+                    return text
+
+    lines = text.splitlines(keepends=True)
+
+    def offset(line, column):
+        return sum(len(item) for item in lines[:line - 1]) + len(
+            lines[line - 1].encode('utf-8')[:column].decode('utf-8'))
+
+    spans = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'float' and isinstance(node.func.ctx, ast.Load)
+                and len(node.args) == 1 and not node.keywords):
+            continue
+        ok, value = _constant_int_exact(node.args[0])
+        if not ok or value is _CONST_INT_TOO_BIG:
+            continue
+        if _INT64_MIN <= value <= _INT64_MAX:
+            continue
+        try:
+            converted = float(value)
+        except (OverflowError, ValueError):
+            continue
+        if not math.isfinite(converted):
+            continue
+        replacement = repr(converted)
+        if replacement.startswith('-'):
+            # The call is a primary expression, so a bare negative literal would let a
+            # following ``**`` bind tighter than the unary minus (``float(-(10**40)) ** 2``).
+            replacement = '(' + replacement + ')'
+        spans.append((offset(node.lineno, node.col_offset),
+                      offset(node.end_lineno, node.end_col_offset), replacement))
+    for begin, finish, replacement in sorted(spans, reverse=True):
+        text = text[:begin] + replacement + text[finish:]
+    return text
+
+
 def _check_int64_literals(tree):
     global_names = set()
     for node in ast.walk(tree):
@@ -1964,6 +2026,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 text = python_surface(text, None if notes is None else notes.setdefault(str(path), []),
                                      library=module_only)
             text = fold_constants(text)
+            text = _fold_float_int_text(text)
             tree = ast.parse(text, filename=str(path))
             if syntax == 'python' and entry and not module_only and not declarations_only:
                 _check_main_called(tree)
