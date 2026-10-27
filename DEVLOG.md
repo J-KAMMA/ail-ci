@@ -1,3 +1,13 @@
+## 2026-10-27 -- rbrbfuzz59 re-check: current integ already passes both target modules (job-rbrbfuzz59-10272028)
+
+The repair task reported `test_ail_fuzz59` and `test_ail_safetynet` failing when this job was
+applied alone to the integration tree.  Re-ran the exact culprit patch (`git diff 753c709
+4212b36 -- . ':!.agent' ':!corpus' ':!AIL_CURRENT/MANIFEST.json'`) on current `origin/integ`
+(`82a3ead`, the PR #160 merge), including the culprit workflow's conflict handling and manifest
+refresh: `test_ail_fuzz59` passed in 22.3 s and `test_ail_safetynet` in 76.5 s.  Also checked the
+earlier integration candidates `60d5cb6`, `6789dfa`, `a74a15f` and `a949741`; both modules pass
+on each.  No source change was needed; this entry records the re-verification.
+
 ## 2026-10-27 -- re-apply fuzz59: keep list repr and `%r` on the typed path (job-rbrbfuzz59-10271816)
 
 Re-applied the accepted fuzz59 change on this tree.  The `del`-bound half was already here in a
