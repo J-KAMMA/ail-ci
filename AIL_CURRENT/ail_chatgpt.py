@@ -2001,6 +2001,144 @@ def _check_int64_pow_constants(tree, known):
             check(node, local, scope_names)
 
 
+def _routed_power_known(tree):
+    """Module values the routed-power check may read: scalars, safe literal containers and
+    class attributes, with the same fold rules the int() pass uses."""
+    global_names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            global_names.update(node.names)
+    module_counts = _binding_counts(tree.body)
+    parents = {child: parent for parent in ast.walk(tree)
+               for child in ast.iter_child_nodes(parent)}
+    program_bound = _all_bound_names(tree)
+    known = _scope_constant_map(tree.body, tree, {}, module_counts, set(module_counts),
+                                set(), global_names, program_bound)
+    attributes = _known_class_attributes(tree, known)
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)):
+            name = node.targets[0].id
+            if module_counts.get(name) != 1 or name in global_names:
+                continue
+            value = _constant_value(node.value, lambda item: known.get(item, _UNKNOWN),
+                                    lambda unused: True, {}, attributes)
+            if type(value) in (int, float) or isinstance(value, (_KnownClassValue, _KnownInstance)):
+                known[name] = value
+    return known, attributes, module_counts
+
+
+def _check_int64_routed_power(tree):
+    """Refuse a power whose constant operands reach it through calls, by name.
+
+    A function body that computes ``b ** e`` from its parameters was left to the fixed-width run
+    time even when every reachable call site supplies constants whose exact result leaves int64
+    (``def power(b, e): return b ** e`` called with ``2`` directly or through another function).
+    The call graph is followed from module-scope calls, binding parameter names to statically
+    known argument values; a power whose exact result does not fit int64 is refused by name.
+    Calls the fold cannot resolve, and powers whose result fits, are left unchanged."""
+    known, attributes, module_counts = _routed_power_known(tree)
+    functions = {}
+    for node in tree.body:
+        if (isinstance(node, ast.FunctionDef) and not node.decorator_list
+                and module_counts.get(node.name) == 1):
+            functions[node.name] = node
+    if not functions:
+        return
+    pow_available = not _binds_name(tree, 'pow')
+
+    def refuse(node, value):
+        shown = 'too large' if value is _CONST_INT_TOO_BIG else _constant_diagnostic(value)
+        error = ValueError(
+            'int64 constant expression out of range: %s (the constant operands reach the '
+            'integer power through a call, so it is refused by name at compile time; CPython '
+            'computes it exactly with an unbounded int)' % shown)
+        error.source_line = node.lineno
+        error.source_column = node.col_offset
+        raise error
+
+    def resolve(node, env, scope_known):
+        if isinstance(node, ast.Name) and node.id in env:
+            return env[node.id]
+        lookup = scope_known if scope_known is not None else known
+        value = _constant_value(node, lambda name: lookup.get(name, known.get(name, _UNKNOWN)),
+                                lambda unused: True, {}, attributes)
+        if type(value) is int:
+            return value
+        value = _pow_static_int(node, lookup)
+        return value if type(value) is int else _UNKNOWN
+
+    def bind(callee, arguments, keywords, env, scope_known):
+        positional = [argument.arg for argument in
+                      (*callee.args.posonlyargs, *callee.args.args)]
+        every = _scope_parameters(callee)
+        bound = {}
+        for index, argument in enumerate(arguments):
+            if isinstance(argument, ast.Starred):
+                return None
+            if index >= len(positional):
+                if callee.args.vararg is None:
+                    return None
+                break
+            value = resolve(argument, env, scope_known)
+            if value is not _UNKNOWN:
+                bound[positional[index]] = value
+        for keyword in keywords:
+            if keyword.arg is None or keyword.arg not in every or keyword.arg in positional:
+                return None
+            value = resolve(keyword.value, env, scope_known)
+            if value is not _UNKNOWN:
+                bound[keyword.arg] = value
+        return bound
+
+    def check_power(node, base, exponent):
+        if type(base) is int and type(exponent) is int and exponent >= 0:
+            value = _exact_pow_or_too_big(base, exponent)
+            if value is _CONST_INT_TOO_BIG or not _INT64_MIN <= value <= _INT64_MAX:
+                refuse(node, value)
+
+    def scan(function, env, depth, seen):
+        if depth > 12:
+            return
+        key = (id(function), tuple(sorted(env.items())))
+        if key in seen:
+            return
+        seen = seen | {key}
+        scope_known = _function_local_int_constants(function, known)
+        parameters = _scope_parameters(function)
+        bindings = _binding_counts(function.body)
+
+        def follows_parameter(node):
+            return isinstance(node, ast.Name) and node.id in env
+
+        for node in _walk_own_scope(function):
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+                if follows_parameter(node.left) or follows_parameter(node.right):
+                    check_power(node, resolve(node.left, env, scope_known),
+                                resolve(node.right, env, scope_known))
+            elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and isinstance(node.func.ctx, ast.Load)):
+                name = node.func.id
+                if (name in functions and name not in bindings and name not in parameters
+                        and name not in env):
+                    bound = bind(functions[name], node.args, node.keywords, env, scope_known)
+                    if bound is not None:
+                        scan(functions[name], bound, depth + 1, seen)
+                elif (pow_available and name == 'pow' and name not in bindings
+                      and name not in parameters and len(node.args) == 2 and not node.keywords
+                      and not any(isinstance(argument, ast.Starred) for argument in node.args)
+                      and any(follows_parameter(argument) for argument in node.args)):
+                    check_power(node, resolve(node.args[0], env, scope_known),
+                                resolve(node.args[1], env, scope_known))
+
+    for node in _walk_module_scope(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and isinstance(node.func.ctx, ast.Load) and node.func.id in functions):
+            bound = bind(functions[node.func.id], node.args, node.keywords, {}, None)
+            if bound is not None:
+                scan(functions[node.func.id], bound, 0, set())
+
+
 def _check_int64_unary_constants(tree):
     """Refuse a statically known unary integer constant expression outside int64 by name.
     `-MIN` on a module constant or a nested literal compiles to the fixed-width trap on the
@@ -2925,6 +3063,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 _check_int64_local_cancellations(tree)
                 _check_int64_int_base_constants(tree)
                 _check_int64_pow_constants(tree, _known_module_constants(tree))
+                _check_int64_routed_power(tree)
                 _check_class_attribute_assignment(tree)
                 _check_genexpr_hash_keys(tree)
             if merged is not None and merged.positions:

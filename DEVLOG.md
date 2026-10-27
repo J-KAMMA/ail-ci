@@ -1,3 +1,32 @@
+## 2026-10-27 -- pre385: refuse a power whose constant operands are routed through calls (job-pre385-10280736)
+
+The pre364 review's first still-differing pre-existing item was `u1_nested_call`: both
+parameters of a function routed through another call into `b ** e` compiled on both builds and
+then stopped with `integer overflow`, where CPython prints the bignum.  `v1_mixed_sites` (a safe
+module call plus a nested `f(2)` with a wide constant exponent) differed the same way.
+`AIL_CURRENT/ail_chatgpt.py` now runs `_check_int64_routed_power` next to the other int64 checks:
+from every module-scope call it binds a plain top-level function's parameters to statically known
+arguments (literals, module constants, safe list/dict items, aliases and literal class
+attributes), follows calls made inside the callee the same way, and refuses by name a `**` or
+two-argument `pow()` that follows such a parameter when the exact result leaves int64.  Only
+operands that syntactically follow a call-bound parameter are checked, so the existing
+constant-power folders keep deciding plain constant sub-expressions such as `(3**100)>>150`.
+Unresolved calls, in-range values, float/bool bases, negative exponents, mutated containers and
+run-time-only values are unchanged.
+
+Probes in `/tmp/probes` (19 programs, both builds via `cmp.sh`): `u1a`-`u1h`, `u1l`-`u1o`,
+`u1r` and `v1a` are refused by name (`int64 constant expression out of range ... through a
+call`), covering the nested call, argument/wrapper, direct call, `pow()` spelling, list item,
+alias, class attribute and dict value routes plus exponent 63 and a huge exponent; `u1i`-`u1k`,
+`u1p` and `u1q` match CPython (in-range and boundary powers, bases 0/1/-1, float/bool/negative
+exponents, a mutated list and a runtime exponent).  Added `test_ail_pre385.py` (11 refused + 1
+matching program, both builds), registered in `ail_check.MODULES`; `tools/ci_shards.json` gained
+its weight and assignment.  Final-state tests: `test_ail_pre385`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`, `test_ail_pre351`, `test_ail_pre299`,
+`test_ail_pre331`, `test_ail_pre294`, `test_ail_pre33` and `test_ail_pre34` pass;
+`tools/update_manifest.py --check` passes; `ci_shards.py --check` reports only the four
+pre-existing duplicate entries.
+
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
