@@ -1,3 +1,25 @@
+## 2026-10-27 -- pre327: a slice of an instance reached through an unknown value (job-pre327-10271919)
+
+The pre323 reviewer's second pre-existing item reproduced on this tree: a user-class slice
+through a parameter, a `for` / `with` target or a tuple-unpacked item built and then stopped with
+`NotImplementedError: slicing an instance through __getitem__ is not supported: this path has no
+slice objects`, where CPython calls `__getitem__` with `slice(1, 2, None)`. The general path's
+unknown-kind branch in `expr_Subscript` was gated on `want_slice`, so when no statically known
+instance slice appeared earlier in the program the prelude was never requested. The branch now
+raises `NeedSlice` on the first attempt and, after the retry, tests the instance tag and passes a
+slice object; built-ins keep `ail2s_getslice`. Slices whose value is not an instance still match
+CPython. The first recorded item, a direct out-of-int64 literal including as a slice bound, is
+already refused by name (`int64 literal out of range`) on both builds, so it was not changed.
+
+Probes in `/tmp/probes/pre327` (both builds via `cmp.sh`): `p1_literal`, `p19_huge` and
+`p20_huge_neg` are refused by name; `p2_for_inrange` through `p15_assign`, `p17_incode` and
+`p18_nofeature` match CPython. `p16_other` / `p16b_other_only` still print `'instance' object is
+not subscriptable` where CPython names `'A'`, identical on the base (pre-existing). A program
+whose only slices are built-ins compiles to different C because the slice prelude is now present,
+but its output matches. Added `AIL_CURRENT/test_ail_pre327.py` (8 programs, both builds; each
+matches CPython or is refused by name) and registered it in `ail_check.MODULES` and
+`tools/ci_shards.json`.
+
 ## 2026-10-27 -- pre319: calling an earlier function-valued class attribute is already refused by name (job-pre319-10271538)
 
 The pre304 reviewer's first pre-existing item was a class body that calls a function bound
