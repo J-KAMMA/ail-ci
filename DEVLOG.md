@@ -1,9 +1,21 @@
+## 2026-10-27 -- pre382 fix: a saved generator expression reads the class lazily
+
+The review of the first commit found the busy-class gate firing inside a generator expression
+stored in the class body: `class C: v = 1; g = (C for i in range(1)); list(C().g)` raised
+`NameError` where CPython (and the base tree) return the class once the generator is consumed.
+CPython runs a generator body at consumption time, after the class name is bound, so
+`pyboxed2._emit_comp(..., lazy_body=True)` -- used only by `expr_GeneratorExp` -- now drops
+`ctx.busy_class` after the eagerly evaluated outermost iterable.  The outermost iterable
+(`g = (i for i in (C,))`) and the fused in-place consumers (`any`/`all`/`next`) keep the gate,
+and list/set/dict comprehensions stay fully gated, so those still raise `NameError`.
+`test_ail_pre382.py` gains 5 saved-generator and 4 `NameError` programs.
+
 ## 2026-10-27 -- pre382: a class name is not bound inside its own body (job-pre382-10280718)
 
 The pre362 review recorded an immediately-invoked class-body self-construction that ran where
 CPython raises `NameError`: `class C: y = (lambda: C)()` printed the class with exit 0 on both
-builds, and `class D: v = 1; fs = [(lambda: [D][0]().v)()]` printed `[1]` (base: a compile
-`RecursionError`).  `pyboxed2` created every class object before the module body, so
+builds, and `class D: v = 1; fs = [(lambda: [D][0]().v)()]` printed `[1]` (base compiled and ran both
+examples too).  `pyboxed2` created every class object before the module body, so
 `expr_Name` returned it for a read of the class name even inside its own body, where CPython has
 not bound the name yet.
 
@@ -27,7 +39,7 @@ pre-existing and separate from the recorded defect.  A direct `x = C()` (or a la
 `C()`) in the body is refused at compile time by the existing "class attribute through the class"
 restriction when the constructor copies a non-constant class attribute, and by-name otherwise.
 
-`test_ail_pre382.py` pins 9 deferred/control programs and 15 `NameError` programs on both builds.
+`test_ail_pre382.py` pins 14 deferred/control programs and 19 `NameError` programs on both builds.
 
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The

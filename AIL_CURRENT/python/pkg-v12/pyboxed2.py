@@ -6021,17 +6021,21 @@ class Compiler(boxclosure.ClosureMixin):
             return
         raise Unsupported('a comprehension for-target of type %s' % type(target).__name__)
 
-    def _emit_comp(self, node, ctx, init_c, add_stmt_fn):
+    def _emit_comp(self, node, ctx, init_c, add_stmt_fn, lazy_body=False):
         t = ctx.tmp()
         ctx.emit('%s = %s;' % (t, init_c))
         saved = ctx.class_locals
+        saved_busy = ctx.busy_class
         try:
-            self._emit_comp_generators(node.generators, 0, node, ctx, t, add_stmt_fn, set())
+            self._emit_comp_generators(node.generators, 0, node, ctx, t, add_stmt_fn, set(),
+                                       lazy_body=lazy_body)
         finally:
             ctx.class_locals = saved
+            ctx.busy_class = saved_busy
         return t
 
-    def _emit_comp_generators(self, generators, i, node, ctx, t, add_stmt_fn, declared, opened=None):
+    def _emit_comp_generators(self, generators, i, node, ctx, t, add_stmt_fn, declared,
+                              opened=None, lazy_body=False):
         if i == len(generators):
             add_stmt_fn(node, ctx, t)
             return
@@ -6043,12 +6047,18 @@ class Compiler(boxclosure.ClosureMixin):
             # CPython evaluates a comprehension's outermost iterable in the enclosing scope but
             # runs the rest in a function of its own, which cannot see the class body's names.
             ctx.class_locals = None
+            if lazy_body:
+                # A generator expression's body runs when it is consumed -- after the class
+                # name is bound -- so the busy-class gate must not fire there (only the
+                # outermost iterable above is evaluated during the class body).
+                ctx.busy_class = None
         self._declare_comp_target(gen.target, val, ctx, declared)
         for cond in gen.ifs:
             cc = self.expr(cond, ctx)
             ctx.emit('if (ail_obj_truthy(%s)) {' % cc)
             ctx.indent += 1
-        self._emit_comp_generators(generators, i + 1, node, ctx, t, add_stmt_fn, declared)
+        self._emit_comp_generators(generators, i + 1, node, ctx, t, add_stmt_fn, declared,
+                                   lazy_body=lazy_body)
         for cond in gen.ifs:
             ctx.indent -= 1
             ctx.emit('}')
@@ -6065,7 +6075,12 @@ class Compiler(boxclosure.ClosureMixin):
         if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
             raise Unsupported('a generator expression nested inside another generator expression '
                               '(the inner one would be materialised eagerly, not lazily)')
-        t = self.expr_ListComp(node, ctx)
+        def add(n, c, t):
+            v = self.expr(n.elt, c)
+            c.emit('ail_list_append(cx, %s, %s);' % (t, v))
+        # The materialised elements correspond to a generator body, which CPython runs when the
+        # generator is consumed (after a class body's own name is bound), not here.
+        t = self._emit_comp(node, ctx, 'ail_list_new(cx)', add, lazy_body=True)
         ctx.emit('((ail_vecobj *)(%s).o)->from_generator = 1;' % t)
         return t
 

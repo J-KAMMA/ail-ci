@@ -11,7 +11,10 @@ immediately called lambda, a lambda default, or a ``map``/``sorted`` callback) r
 ``NameError``.  The general path now gives each such class a module-lifetime flag that is 0
 while its body runs and turns 1 afterwards; a read of the busy class compiles to a NameError
 unless the flag is set, so a lambda stored in the class body and called later still returns the
-class, as CPython does.
+class, as CPython does.  A generator expression stored in the class body is likewise read only
+when the generator is consumed (its body is lowered lazily, only the outermost iterable runs
+during the class body), so a saved generator expression sees the class and a generator whose
+outermost iterable -- or that `any`/`next` consume in place -- reads the class raises ``NameError``.
 
 Every program is built with the general path forced and with the default build; stdout and the
 exit status must match CPython.
@@ -80,6 +83,38 @@ class C:
     v = 1
     d = {"f": lambda: C.v}
 print(C().d["f"]())
+''',
+    'deferred_generator': '''
+class C:
+    v = 1
+    g = (C for i in range(1))
+out = list(C().g)
+print(out[0] is C)
+''',
+    'deferred_generator_attribute': '''
+class C:
+    v = 1
+    g = (C.v for i in range(1))
+print(list(C().g))
+''',
+    'deferred_generator_lambda': '''
+class C:
+    v = 1
+    g = (lambda: C for i in range(1))
+f = list(C().g)[0]
+print(f() is C)
+''',
+    'deferred_generator_second_loop': '''
+class C:
+    v = 1
+    g = ((i, x) for i in range(1) for x in [C])
+print(list(C().g))
+''',
+    'deferred_generator_condition': '''
+class C:
+    v = 1
+    g = (i for i in range(3) if C.v)
+print(list(C().g))
 ''',
 }
 
@@ -162,6 +197,27 @@ print(C.A)
     'tuple_item': '''
 class C:
     x = (C, C)[0]
+print(C.x)
+''',
+    'generator_outermost_iterable': '''
+class C:
+    g = (i for i in (C,))
+print(list(C().g))
+''',
+    'generator_outermost_attribute': '''
+class C:
+    v = 1
+    g = (i for i in C.v)
+print(list(C().g))
+''',
+    'generator_consumed_by_any': '''
+class C:
+    x = any(C for i in range(1))
+print(C.x)
+''',
+    'generator_consumed_by_next': '''
+class C:
+    x = next(C for i in range(1))
 print(C.x)
 ''',
 }
