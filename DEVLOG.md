@@ -1,3 +1,15 @@
+## 2026-10-27 - rbpre1 reconcile full-suite expectations with the current tree (job-rbpre1-10270815)
+
+Syncing `python/pkg-v12` to the current integration versions restored the integration codegen and
+its refusal of a variable-exponent integer power, but three modules still carried the older job
+tree's expectations: `test_ail_numeric_bindings` and `test_ail_record_initializers` pinned the old
+generated-C bytes, and `test_ail_crypto` used `2 ** k` for a runtime exponent.  The module pins now
+match the current codegen (and the current integration tree), and the crypto probe uses the
+shift `1 << k` that the subset accepts.  `test_ail_pre1` and the positional-only change are
+unchanged.  Final-state tests: test_ail_crypto, test_ail_numeric_bindings,
+test_ail_record_initializers (30 tests, 0 failed) and test_ail_pre1 (4 tests, 0 failed);
+`tools/update_manifest.py --check` passes.
+
 ## 2026-10-26 - rbpre1 re-applied on the current integration tree (job-rbpre1-10270815)
 
 The positional-only parameter change (`def f(a, /, ...)`) was written against an older integration
