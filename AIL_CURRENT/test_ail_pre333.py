@@ -7,8 +7,10 @@ raises TypeError.  This tree now refuses `int()` of a container value by name on
 
 The check follows a module name bound once to a literal list, tuple, dict or set, aliases of it,
 a subscript or dict lookup that yields a container, a known attribute, and a function argument
-that its body converts with `int()`.  Scalars, strings, bytes, bytearray, a local shadow and a
-container that is only read (not converted) keep their previous behaviour.
+that its body converts with `int()`.  Element stores are folded in source order, so a later item
+overwrite (including through an alias, `append`/`insert`/`extend`, dict `update`/`setdefault` or
+`del`) no longer keeps a stale container value.  Scalars, strings, bytes, bytearray, a local
+shadow and a container that is only read (not converted) keep their previous behaviour.
 """
 import os
 import shutil
@@ -166,6 +168,65 @@ def f():
 
 print(f())
 ''',
+    'nested_item_overwrite': '''
+xs = [[1]]
+xs[0][0] = 5
+print(int(xs[0]))
+''',
+    'append_keeps_head_container': '''
+xs = [[1]]
+xs.append([2])
+print(int(xs[0]))
+''',
+    'module_item_overwrite_after_read': '''
+xs = [[1]]
+print(int(xs[0]))
+xs[0] = 5
+''',
+    'local_item_overwrite_after_read': '''
+def f():
+    xs = [[1]]
+    print(int(xs[0]))
+    xs[0] = 5
+
+
+f()
+''',
+    'delete_keeps_container': '''
+xs = [[1], [2]]
+del xs[0]
+print(int(xs[0]))
+''',
+    'dict_nested_overwrite': '''
+d = {"v": [[1]]}
+d["v"][0] = 5
+print(int(d["v"]))
+''',
+    'dict_setdefault_existing': '''
+d = {"v": [1]}
+d.setdefault("v", 5)
+print(int(d["v"]))
+''',
+    'update_other_key': '''
+d = {"v": [1]}
+d.update(w=5)
+print(int(d["v"]))
+''',
+    'sort_keeps_container': '''
+xs = [[1], [2]]
+xs.sort()
+print(int(xs[0]))
+''',
+    'pop_keeps_container': '''
+xs = [[1], [2]]
+xs.pop(0)
+print(int(xs[0]))
+''',
+    'dict_pop_other_key': '''
+d = {"v": [1], "w": [2]}
+d.pop("w")
+print(int(d["v"]))
+''',
 }
 
 MATCH = {
@@ -204,6 +265,81 @@ print(int(a[0][0]))
     'list_scalar_item': '''
 a = [1.9]
 print(int(a[0]))
+''',
+    'module_item_overwrite': '''
+xs = [[1]]
+xs[0] = 5
+print(int(xs[0]))
+''',
+    'local_item_overwrite': '''
+def f():
+    xs = [[1]]
+    xs[0] = 5
+    return int(xs[0])
+
+
+print(f())
+''',
+    'alias_item_overwrite': '''
+xs = [[1]]
+ys = xs
+ys[0] = 5
+print(int(xs[0]))
+''',
+    'local_alias_item_overwrite': '''
+def f():
+    xs = [[1]]
+    ys = xs
+    ys[0] = 5
+    return int(xs[0])
+
+
+print(f())
+''',
+    'dict_update_method': '''
+d = {"v": [1]}
+d.update({"v": 5})
+print(int(d["v"]))
+''',
+    'dict_update_keyword': '''
+d = {"v": [1]}
+d.update(v=5)
+print(int(d["v"]))
+''',
+    'append_scalar_head': '''
+xs = [[1]]
+xs.append(5)
+print(int(xs[1]))
+''',
+    'insert_scalar_head': '''
+xs = [[1]]
+xs.insert(0, 5)
+print(int(xs[0]))
+''',
+    'extend_scalar_head': '''
+xs = [[1]]
+xs.extend([5])
+print(int(xs[1]))
+''',
+    'alias_append_head': '''
+xs = [[1]]
+ys = xs
+ys.append(5)
+print(int(xs[1]))
+''',
+    'unknown_rhs': '''
+def f(v):
+    xs = [[1]]
+    xs[0] = v
+    return int(xs[0])
+
+
+print(f(5))
+''',
+    'update_positional_and_keyword': '''
+d = {"v": [1], "w": [2]}
+d.update({"w": 5}, v=6)
+print(int(d["v"]), int(d["w"]))
 ''',
 }
 

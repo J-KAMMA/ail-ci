@@ -1,3 +1,24 @@
+## 2026-10-27 -- pre333 review: fold container item stores (job-pre333-10272024)
+
+The review found that the new container-value fold ignored later element stores, so `xs = [[1]];
+xs[0] = 5; int(xs[0])` (module, local, alias, and dict-value spellings) was refused by name where
+CPython returns `5`; base matched both builds except the pre-existing default dict-value failure.
+`_Int64CallChecker` now records container bindings as it walks each scope and folds element stores
+in source order: subscript and dict-key stores, `del`, and the mutating methods `append`,
+`extend`, `insert`, `pop`, `remove`, `clear`, `sort`, `reverse`, dict `update`/`setdefault`/`pop`,
+and set `add`/`discard`/`remove`/`update`.  A store whose path or key is not known taints that
+literal container, so its contents are no longer folded; a store after the `int()` read still sees
+the original container, and a nested store keeps the outer element's kind.  `global` module
+rebinds keep the earlier behaviour and are not recorded as containers.  Added 11 refused and 12
+matching cases to `test_ail_pre333.py` (30 refused, 20 matching).
+
+Probes in `/tmp/probes/pre333` on both builds: `p34`-`p36`, `p38`, `p41`-`p44`, `p49`, `p50`,
+`p52` and `p57` match CPython; `p39`, `p40`, `p45`-`p48`, `p51`, `p53`-`p56` and `p58` are refused
+by name; `p37` (`d["v"] = 5`) matches on the general build and keeps the pre-existing default
+build compile failure noted by the review.  Final-state tests: `test_ail_pre333`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre333: int() of a bare container is refused by name (job-pre333-10272024)
 
 The rbpre311 review's first pre-existing item was its `p10_bare_read`: a module-level container

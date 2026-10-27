@@ -499,6 +499,272 @@ def _container_bindings(nodes, outer_kinds, outer_values):
     return bindings
 
 
+_MUTATING_CONTAINER_METHODS = {
+    'append', 'extend', 'insert', 'pop', 'remove', 'clear', 'sort', 'reverse',
+    'update', 'setdefault', 'popitem', 'add', 'discard', 'difference_update',
+    'intersection_update', 'symmetric_difference_update', '__setitem__', '__delitem__',
+}
+
+
+def _container_key(node, lookup):
+    """A subscript key that can be applied to a folded literal container."""
+    value = _constant_value(node, lookup, lambda unused: True, {})
+    if value is _UNKNOWN or isinstance(value, (list, tuple, dict, set)):
+        return _UNKNOWN
+    try:
+        hash(value)
+    except TypeError:
+        return _UNKNOWN
+    return value
+
+
+def _resolve_container_path(node, lookup, tainted):
+    """The literal container a load expression names, or _UNKNOWN when it is not safe to fold."""
+    if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load):
+        base = _resolve_container_path(node.value, lookup, tainted)
+        if base is _UNKNOWN:
+            return _UNKNOWN
+        key = _container_key(node.slice, lookup)
+        if key is _UNKNOWN or not isinstance(base, (list, tuple, dict)):
+            return _UNKNOWN
+        try:
+            value = base[key]
+        except (IndexError, KeyError, TypeError):
+            return _UNKNOWN
+        return _UNKNOWN if id(value) in tainted else value
+    value = _constant_value(node, lookup, lambda unused: True, {})
+    if value is _UNKNOWN or id(value) in tainted:
+        return _UNKNOWN
+    return value
+
+
+def _taint_container_root(node, lookup, tainted):
+    while isinstance(node, (ast.Subscript, ast.Attribute)):
+        node = node.value
+    if isinstance(node, ast.Name):
+        value = lookup(node.id)
+        if value is not _UNKNOWN:
+            tainted.add(id(value))
+
+
+def _set_container_item(base, key, value):
+    if isinstance(base, list):
+        if type(key) is int and -len(base) <= key < len(base):
+            base[key] = value
+            return True
+        return False
+    if isinstance(base, dict):
+        try:
+            base[key] = value
+        except (TypeError, ValueError):
+            return False
+        return True
+    return False
+
+
+def _apply_element_store(target, value_node, lookup, tainted):
+    """Fold one ``container[key] = value`` (or a matching mutation call) into a literal value."""
+    if not isinstance(target, ast.Subscript):
+        return
+    base = _resolve_container_path(target.value, lookup, tainted)
+    if base is _UNKNOWN:
+        _taint_container_root(target.value, lookup, tainted)
+        return
+    key = _container_key(target.slice, lookup)
+    if key is _UNKNOWN:
+        tainted.add(id(base))
+        return
+    value = (_UNKNOWN if value_node is None
+             else _constant_value(value_node, lookup, lambda unused: True, {}))
+    if not _set_container_item(base, key, value):
+        tainted.add(id(base))
+
+
+def _apply_delete(target, lookup, tainted):
+    if not isinstance(target, ast.Subscript):
+        return
+    base = _resolve_container_path(target.value, lookup, tainted)
+    key = _container_key(target.slice, lookup)
+    if base is _UNKNOWN or key is _UNKNOWN or isinstance(target.slice, ast.Slice):
+        _taint_container_root(target, lookup, tainted)
+        return
+    try:
+        if isinstance(base, list) and type(key) is int and -len(base) <= key < len(base):
+            del base[key]
+        elif isinstance(base, dict):
+            del base[key]
+        else:
+            tainted.add(id(base))
+    except (IndexError, KeyError, TypeError):
+        tainted.add(id(base))
+
+
+def _apply_call_mutation(node, lookup, tainted):
+    if not (isinstance(node.func, ast.Attribute) and isinstance(node.func.ctx, ast.Load)
+            and node.func.attr in _MUTATING_CONTAINER_METHODS):
+        return
+    receiver = _resolve_container_path(node.func.value, lookup, tainted)
+    if receiver is _UNKNOWN:
+        _taint_container_root(node.func.value, lookup, tainted)
+        return
+    attr = node.func.attr
+    args = node.args
+    keywords = node.keywords
+
+    def argument(index):
+        if index < len(args):
+            return _constant_value(args[index], lookup, lambda unused: True, {})
+        return _UNKNOWN
+
+    if isinstance(receiver, list):
+        if attr == 'append' and len(args) == 1 and not keywords:
+            receiver.append(argument(0))
+        elif attr == 'extend' and len(args) == 1 and not keywords:
+            value = argument(0)
+            if isinstance(value, (list, tuple)):
+                receiver.extend(value)
+            else:
+                tainted.add(id(receiver))
+        elif attr == 'insert' and len(args) == 2 and not keywords:
+            key = _container_key(args[0], lookup)
+            if type(key) is int:
+                receiver.insert(key, argument(1))
+            else:
+                tainted.add(id(receiver))
+        elif attr == 'clear' and not args and not keywords:
+            receiver.clear()
+        elif attr == 'reverse' and not args and not keywords:
+            receiver.reverse()
+        elif attr == 'sort' and not args:
+            reverse = False
+            ok = True
+            for keyword in keywords:
+                if keyword.arg != 'reverse':
+                    ok = False
+                    break
+                value = _constant_value(keyword.value, lookup, lambda unused: True, {})
+                if type(value) is not bool:
+                    ok = False
+                    break
+                reverse = value
+            if ok:
+                try:
+                    receiver.sort(reverse=reverse)
+                except TypeError:
+                    tainted.add(id(receiver))
+            else:
+                tainted.add(id(receiver))
+        elif attr == 'pop' and not keywords and len(args) <= 1:
+            key = _container_key(args[0], lookup) if args else -1
+            if type(key) is int:
+                try:
+                    receiver.pop(key)
+                except (IndexError, TypeError):
+                    tainted.add(id(receiver))
+            else:
+                tainted.add(id(receiver))
+        elif attr == 'remove' and len(args) == 1 and not keywords:
+            try:
+                receiver.remove(argument(0))
+            except (ValueError, TypeError):
+                tainted.add(id(receiver))
+        elif attr == '__setitem__' and len(args) == 2 and not keywords:
+            key = _container_key(args[0], lookup)
+            if not _set_container_item(receiver, key, argument(1)):
+                tainted.add(id(receiver))
+        elif attr == '__delitem__' and len(args) == 1 and not keywords:
+            key = _container_key(args[0], lookup)
+            try:
+                if type(key) is int and -len(receiver) <= key < len(receiver):
+                    del receiver[key]
+                else:
+                    tainted.add(id(receiver))
+            except (IndexError, TypeError):
+                tainted.add(id(receiver))
+        else:
+            tainted.add(id(receiver))
+    elif isinstance(receiver, dict):
+        if attr == 'update':
+            update = {}
+            ok = True
+            if len(args) > 1:
+                ok = False
+            elif args:
+                value = argument(0)
+                if isinstance(value, dict):
+                    update.update(value)
+                elif isinstance(value, (list, tuple)) and all(
+                        isinstance(item, tuple) and len(item) == 2 for item in value):
+                    update.update(value)
+                else:
+                    ok = False
+            for keyword in keywords:
+                if keyword.arg is None:
+                    ok = False
+                    break
+                update[keyword.arg] = _constant_value(keyword.value, lookup,
+                                                      lambda unused: True, {})
+            if ok:
+                receiver.update(update)
+            else:
+                tainted.add(id(receiver))
+        elif attr == 'setdefault' and 1 <= len(args) <= 2 and not keywords:
+            key = _container_key(args[0], lookup)
+            if key is _UNKNOWN:
+                tainted.add(id(receiver))
+            else:
+                receiver.setdefault(key, argument(1) if len(args) == 2 else None)
+        elif attr == 'clear' and not args and not keywords:
+            receiver.clear()
+        elif attr == 'pop' and not keywords and 1 <= len(args) <= 2:
+            key = _container_key(args[0], lookup)
+            if key is _UNKNOWN:
+                tainted.add(id(receiver))
+            else:
+                try:
+                    if len(args) == 2:
+                        receiver.pop(key, argument(1))
+                    else:
+                        receiver.pop(key)
+                except (KeyError, TypeError):
+                    tainted.add(id(receiver))
+        elif attr == '__setitem__' and len(args) == 2 and not keywords:
+            key = _container_key(args[0], lookup)
+            if not _set_container_item(receiver, key, argument(1)):
+                tainted.add(id(receiver))
+        elif attr == '__delitem__' and len(args) == 1 and not keywords:
+            key = _container_key(args[0], lookup)
+            try:
+                del receiver[key]
+            except (KeyError, TypeError):
+                tainted.add(id(receiver))
+        else:
+            tainted.add(id(receiver))
+    elif isinstance(receiver, set):
+        if attr == 'add' and len(args) == 1 and not keywords:
+            receiver.add(argument(0))
+        elif attr == 'clear' and not args and not keywords:
+            receiver.clear()
+        elif (attr in ('update', 'difference_update', 'intersection_update',
+                       'symmetric_difference_update')
+              and len(args) == 1 and not keywords):
+            value = argument(0)
+            if isinstance(value, (set, frozenset, list, tuple, dict)):
+                getattr(receiver, attr)(value)
+            else:
+                tainted.add(id(receiver))
+        elif attr in ('discard', 'remove') and len(args) == 1 and not keywords:
+            value = argument(0)
+            try:
+                getattr(receiver, attr)(value)
+            except (KeyError, TypeError):
+                tainted.add(id(receiver))
+        else:
+            tainted.add(id(receiver))
+    else:
+        tainted.add(id(receiver))
+
+
 def _only_subscripted(tree, name, definition):
     """Whether a module name is used only by subscript loads after its one definition.
 
@@ -850,7 +1116,8 @@ def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough):
 
 class _Int64CallChecker(ast.NodeVisitor):
     def __init__(self, known, passthrough, int_params, int_shadowed, attributes,
-                 container_kinds=None, container_values=None):
+                 container_kinds=None, container_values=None, module_counts=None,
+                 global_names=None):
         self.known = known
         self.passthrough = passthrough
         self.int_params = int_params
@@ -858,7 +1125,11 @@ class _Int64CallChecker(ast.NodeVisitor):
         self.attributes = attributes
         self.container_kinds = container_kinds or {}
         self.container_values = container_values or {}
+        self.module_counts = module_counts or {}
+        self.global_names = global_names or set()
         self.local_containers = []
+        self.local_container_counts = []
+        self.tainted_containers = set()
         self.shadow = []
 
     def _global_name(self, name):
@@ -878,13 +1149,14 @@ class _Int64CallChecker(ast.NodeVisitor):
     def _container_lookup(self, name):
         local = self._local_container(name)
         if local is not None:
-            return local[1]
-        if not self._global_name(name):
+            value = local[1]
+        elif not self._global_name(name):
             return _UNKNOWN
-        value = self.known.get(name, _UNKNOWN)
-        if value is not _UNKNOWN:
-            return value
-        return self.container_values.get(name, _UNKNOWN)
+        else:
+            value = self.known.get(name, _UNKNOWN)
+            if value is _UNKNOWN:
+                value = self.container_values.get(name, _UNKNOWN)
+        return _UNKNOWN if id(value) in self.tainted_containers else value
 
     def _value(self, node):
         return _constant_value(node, self._lookup, self._global_name, self.passthrough,
@@ -911,6 +1183,8 @@ class _Int64CallChecker(ast.NodeVisitor):
             if local is not None:
                 return local[0]
         value = self._container_value(node)
+        if id(value) in self.tainted_containers:
+            return None
         if isinstance(value, list):
             return 'list'
         if isinstance(value, tuple):
@@ -955,6 +1229,52 @@ class _Int64CallChecker(ast.NodeVisitor):
                     if _outside_int64_float(value):
                         self._refuse(node, value)
         self.generic_visit(node)
+        _apply_call_mutation(node, self._container_lookup, self.tainted_containers)
+
+    def _record_container_binding(self, target, value_node):
+        if not isinstance(target, ast.Name) or not isinstance(value_node, ast.AST):
+            return
+        if self.local_containers:
+            scope = self.local_containers[-1]
+            if self.local_container_counts[-1].get(target.id) != 1:
+                return
+        elif (not self.shadow and self.module_counts.get(target.id) == 1
+                and target.id not in self.global_names):
+            scope = self.container_values
+        else:
+            return
+        kind = self._container_kind(value_node)
+        if kind is None:
+            return
+        value = self._container_value(value_node)
+        if not isinstance(value, (list, tuple, dict, set)):
+            value = _UNKNOWN
+        scope[target.id] = value if scope is self.container_values else (kind, value)
+
+    def _store_target(self, target, value_node):
+        self._record_container_binding(target, value_node)
+        _apply_element_store(target, value_node, self._container_lookup,
+                             self.tainted_containers)
+
+    def visit_Assign(self, node):
+        self.generic_visit(node)
+        for target in node.targets:
+            self._store_target(target, node.value)
+
+    def visit_AnnAssign(self, node):
+        self.generic_visit(node)
+        if node.value is not None:
+            self._store_target(node.target, node.value)
+
+    def visit_AugAssign(self, node):
+        self.generic_visit(node)
+        _apply_element_store(node.target, None, self._container_lookup,
+                             self.tainted_containers)
+
+    def visit_Delete(self, node):
+        self.generic_visit(node)
+        for target in node.targets:
+            _apply_delete(target, self._container_lookup, self.tainted_containers)
 
     def _visit_outer_arguments(self, args):
         for default in (*args.defaults, *[d for d in args.kw_defaults if d is not None]):
@@ -972,8 +1292,10 @@ class _Int64CallChecker(ast.NodeVisitor):
         self.shadow.append(_function_bindings(node))
         self.local_containers.append(
             _container_bindings(node.body, self.container_kinds, self.container_values))
+        self.local_container_counts.append(_binding_counts(node.body))
         for statement in node.body:
             self.visit(statement)
+        self.local_container_counts.pop()
         self.local_containers.pop()
         self.shadow.pop()
 
@@ -1158,7 +1480,8 @@ def _check_int64_literals(tree):
     passthrough = _passthrough_functions(tree, module_counts)
     int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough)
     _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes,
-                      container_kinds, container_values).visit(tree)
+                      container_kinds, container_values, module_counts,
+                      global_names).visit(tree)
     parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
     maxsplit = _maxsplit_constant_nodes(tree)
     nodes = [tree]
