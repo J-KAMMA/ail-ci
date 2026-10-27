@@ -80,7 +80,9 @@ class Pre367(unittest.TestCase):
                             'b = Box()\nprint(x ** 62, xs[0] ** 62, ys[0] ** 62, d["k"] ** 62, '
                             'Box.v ** 62, b.v ** 62)\n'),
         'boundaries': ('print(2 ** 62)\nprint((-2) ** 63)\nprint((-2) ** 62)\n'
-                       'print((-1) ** 41, 0 ** 40, 1 ** 40)\nprint(10 ** 18, (-10) ** 18)\n'),
+                       'print((-1) ** 41, 0 ** 40, 1 ** 40)\nprint(10 ** 18, (-10) ** 18)\n'
+                       'print((2 ** 63 - 1) // 1)\nprint(10 ** 40 - 10 ** 40)\n'
+                       'print(2 ** 63 - 2 ** 63)\n'),
         'types': ('x = 10\nprint(x ** -1)\nprint(x ** -40)\nprint(x ** 40.0)\n'
                   'f = 10.0\nprint(f ** 40)\nprint(True ** 40)\nprint(False ** 40)\n'),
         'dynamic': 'def f(x):\n    return x ** 2\nprint(f(10), f(-5))\n',
