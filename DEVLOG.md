@@ -1,3 +1,20 @@
+## 2026-10-27 -- pre319: calling an earlier function-valued class attribute is already refused by name (job-pre319-10271538)
+
+The pre304 reviewer's first pre-existing item was a class body that calls a function bound
+earlier in the same body (`f = lambda: 3; g = f()`, also the `def` spelling and the alias,
+list-item, dict-value, attribute and argument routes).  Reproduced it on both builds: this tree
+already refuses the construct at compile time with a named `not in the subset` message
+(`reading the class attribute C.g through the class: its value is not a constant ...`), which
+the task allows, so no compiler change was needed.  Functions bound outside the class through a
+module-level list item or dict value still match CPython.  Added `AIL_CURRENT/test_ail_pre319.py`
+(13 programs, both builds; each is either refused by name or matches CPython) and registered it
+in `ail_check.MODULES` and `tools/ci_shards.json`.
+
+Probes in `/tmp/probes/pre319` on both builds: `p01`-`p10`, `p12`, `p14`-`p17` and `p20` are
+refused by name; `p11`, `p18`, `p19` and `p21` match CPython.  Final-state tests:
+test_ail_pre319, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-26 -- pre302 review: parenthesize a folded negative float literal (job-pre302-10270745)
 
 The review found that the replacement produced by `_fold_float_int_text` was an
