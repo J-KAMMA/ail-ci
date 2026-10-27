@@ -884,29 +884,32 @@ def _parameter_mutations(tree):
             names.add(node.args.vararg.arg)
         if node.args.kwarg is not None:
             names.add(node.args.kwarg.arg)
-        origins = {name: name for name in names}
+        origins = {name: {name} for name in names}
+        edges = []
+        for item in _shallow_walk(node.body):
+            if (isinstance(item, ast.Assign) and len(item.targets) == 1
+                    and isinstance(item.targets[0], ast.Name)
+                    and isinstance(item.value, ast.Name)):
+                edges.append((item.targets[0].id, item.value.id))
         changed = True
         while changed:
             changed = False
-            for item in _shallow_walk(node.body):
-                if (isinstance(item, ast.Assign) and len(item.targets) == 1
-                        and isinstance(item.targets[0], ast.Name)
-                        and isinstance(item.value, ast.Name)
-                        and item.value.id in origins):
-                    target = item.targets[0].id
-                    origin = origins[item.value.id]
-                    if origins.get(target) != origin:
-                        origins[target] = origin
-                        changed = True
+            for target, source in edges:
+                inherited = origins.get(source)
+                if not inherited:
+                    continue
+                current = origins.setdefault(target, set())
+                new = inherited - current
+                if new:
+                    current.update(new)
+                    changed = True
         mutated = set()
 
         def mutate(root):
             while isinstance(root, (ast.Subscript, ast.Attribute)):
                 root = root.value
             if isinstance(root, ast.Name):
-                origin = origins.get(root.id, root.id)
-                if origin in names:
-                    mutated.add(origin)
+                mutated.update(origins.get(root.id, set()) & names)
 
         for item in _shallow_walk(node.body):
             if isinstance(item, ast.Assign):
@@ -934,21 +937,20 @@ def _parameter_mutations(tree):
                     continue
                 callee_parameters, callee_mutated = functions[item.func.id][:2]
                 for index, argument in enumerate(item.args):
-                    if (isinstance(argument, ast.Name) and argument.id in origins
+                    if (isinstance(argument, ast.Name)
                             and index < len(callee_parameters)
                             and callee_parameters[index] in callee_mutated):
-                        origin = origins[argument.id]
-                        if origin not in mutated:
-                            mutated.add(origin)
-                            changed = True
+                        for origin in origins.get(argument.id, ()):
+                            if origin not in mutated:
+                                mutated.add(origin)
+                                changed = True
                 for keyword in item.keywords:
                     if (keyword.arg is not None and isinstance(keyword.value, ast.Name)
-                            and keyword.value.id in origins
                             and keyword.arg in callee_mutated):
-                        origin = origins[keyword.value.id]
-                        if origin not in mutated:
-                            mutated.add(origin)
-                            changed = True
+                        for origin in origins.get(keyword.value.id, ()):
+                            if origin not in mutated:
+                                mutated.add(origin)
+                                changed = True
             functions[node.name] = (parameters, mutated, origins)
     return functions
 
@@ -983,6 +985,8 @@ def _passable_module_containers(tree, known, attributes):
                                     lambda unused: True, {}, attributes)
             if isinstance(value, (list, tuple, dict)) and _literal_container(value):
                 values[name] = value
+    if not values:
+        return {}
     aliases = {}
     alias_edges = {}
     for node in tree.body:
