@@ -10306,7 +10306,9 @@ static inline void ail_list_setitem(ail_obj lst, int64_t i, ail_obj x) {
     i = ail__norm_index(i, lst.v->n, "list"); lst.v->p[i] = x;
 }
 static inline void ail_list_delitem(ail_obj lst, int64_t i) {
-    ail_vec *v = lst.v; i = ail__norm_index(i, v->n, "list assignment");
+    ail_vec *v = lst.v;
+    if (i < 0) i += v->n;
+    if (i < 0 || i >= v->n) { ail_raise_c(AIL_ERR_INDEX, "list assignment index out of range"); return; }
     for (int64_t k = i; k + 1 < v->n; k++) v->p[k] = v->p[k + 1];
     v->n--;
 }
@@ -15220,8 +15222,9 @@ static inline ail_st ail_list_setitem(ail_ctx *cx, ail_obj lst, int64_t i, ail_o
 }
 static inline ail_st ail_list_delitem(ail_ctx *cx, ail_obj lst, int64_t i) {
     ail_vecobj *v = (ail_vecobj *)lst.o;
-    int64_t ni; ail_st st = ail__norm_index(cx, &ni, i, v->n, "list assignment"); if (st != AIL_OK) return st;
-    for (int64_t k = ni; k + 1 < v->n; k++) v->p[k] = v->p[k + 1];
+    if (i < 0) i += v->n;
+    if (i < 0 || i >= v->n) return ail_raise_c(cx, AIL_B_INDEXERROR, "list assignment index out of range");
+    for (int64_t k = i; k + 1 < v->n; k++) v->p[k] = v->p[k + 1];
     v->n--; return AIL_OK;
 }
 /* stable merge sort, used both for the plain (keyless) form and as the engine for
@@ -28415,6 +28418,10 @@ def _piece_text(p, want):
             text = _filert.http_exception(text)        # G12: URLError / HTTPError, codes 30, 31 (after the others)
     elif p in _filert.LEGACY_EDITS and 'FILEEXC' in want:
         text = _filert.legacy_errno(p, text)
+    if p == 'DIE' and 'LISTDELMSG' in want:
+        old = '    if (!strcmp(w, "list index out of range") || !strcmp(w, "pop index out of range")\n'
+        if old in text:
+            text = text.replace(old, '    if (!strcmp(w, "list index out of range") || !strcmp(w, "list assignment index out of range")\n        || !strcmp(w, "pop index out of range")\n')
     if p == 'DIE' and 'EXCCLASSES' in want:
         text = _exctext.classes_table(text)          # S4e: Exception (28) and the user exception classes (29..)
     if 'EXCSTR' in want and p != 'DIE':
