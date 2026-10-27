@@ -1,3 +1,28 @@
+## 2026-10-27 -- pre370: int() of a parameter's list item is refused by name (job-pre370-10280456)
+
+The pre358 review's remaining pre-existing item reproduced on both builds:
+`def show(xs): print(int(xs[0])); show([1e300])` compiled and then stopped with `integer
+overflow`, where CPython prints the big integer (`t04_arg_list_item.py`).  The int64 call check
+(`_wrapper_int_params` / `_Int64CallChecker` in `ail_chatgpt.py`) now records a constant
+subscript path with each parameter that flows into `int()`: `_parameter_item_source` follows
+`xs[i]`, a single local alias of the parameter or of one of its items, and a key that is a
+literal or a module constant, and composes paths through wrapper functions.  At every call site
+`_constant_path_value` takes the item out of a constant list, tuple or dict argument and the two
+existing named refusals fire (`int() of a float outside int64`, `int64 constant expression out
+of range` for text and bytes).  A module container passed directly to a function that never
+stores to or deletes a parameter item is still resolved at the call site
+(`_call_argument_containers`); a parameter whose items the callee stores to or deletes stays
+dynamic, as does an empty call argument.  In-range values, INT64 and float boundaries, a dynamic
+argument and a program that does not call `int()` match CPython.
+
+Added `AIL_CURRENT/test_ail_pre370.py` (2 tests, 28 programs, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json` (weight 55.0).  Probes in `/tmp/probes/pre370` on
+both builds: p01-p13, p18, p21, p24, p26 and p27 are refused by name; p14-p17, p19-p20, p22-p23
+and p25 match CPython (p22 is the callee-overwrites-the-item route, p23 dynamic, p25 no `int()`
+use, p26 local alias, p27 module-constant index).  Final-state tests: test_ail_pre370,
+test_ail_pre358, test_ail_pre359, test_ail_pre331, test_ail_pre340, test_ail_pre351,
+test_ail_pre311, test_ail_pre322, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
