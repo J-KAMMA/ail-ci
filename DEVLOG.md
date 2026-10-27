@@ -14,6 +14,26 @@ Probes in `/tmp/probes/pre319` on both builds: `p01`-`p10`, `p12`, `p14`-`p17` a
 refused by name; `p11`, `p18`, `p19` and `p21` match CPython.  Final-state tests:
 test_ail_pre319, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
 `tools/update_manifest.py` was run and `--check` passes.
+## 2026-10-27 -- re-apply pre278: field/method collision refusal (job-rbrbpre278-10271620)
+
+Re-applied the accepted rbpre278 change on the current integration tree.  The tree already has
+pre279's instance-table lookup, so the direct, argument, list-item, dict-value, attribute, alias,
+inherited and `self.f()` routes match CPython on both builds; the remaining shapes are refused by
+name: `self.f()` in a base method whose subclass stores the field, and a field holding a bound
+method (`self.f = self.g`, another object's method, a builtin method, a
+classmethod/staticmethod, or such a value through an argument, a list item, a dict value, an
+attribute or an alias).  Name lookups follow Python's scopes, so a same-named local in an
+unrelated function no longer causes a false refusal.  The front end calls
+`refuse_field_method_call` from both typed entry points and the general emitter (the latter with
+`allow_owners=True`); `AIL_CURRENT/test_ail_pre278.py` is registered in `ail_check.MODULES`.
+
+Probes in `/tmp/probes` (both builds, via `cmp.sh`): `p_direct`, `p_routes`, `p_inherited_self`,
+`p_noncallable`, `p_unrelated` and `p_shadow_scopes` match CPython.  `p_base_refusal`,
+`p_bound_self`, `p_bound_routes`, `p_bound_dict_alias`, `p_bound_builtin` and `p_shadow_branch`
+are refused by the pre278 wording.  Final-state tests: `test_ail_pre278` (8 tests, OK),
+`test_ail_pre279` (7, OK), `test_ail_safetynet` (5, OK), `test_ail_files` (18, OK with 1
+skipped) and `test_ail_corpus_findings3` (2, OK).  `tools/diff_ids.py` is not present on this
+tree; `tools/update_manifest.py` was run and `--check` passes.
 
 ## 2026-10-26 -- pre302 review: parenthesize a folded negative float literal (job-pre302-10270745)
 
