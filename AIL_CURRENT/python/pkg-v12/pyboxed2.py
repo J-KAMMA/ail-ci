@@ -3312,9 +3312,14 @@ class Compiler(boxclosure.ClosureMixin):
         self.rt_needs.add('slice')
 
     def _slice_obj(self, sl, ctx):
-        """A slice object for `a:b:c` (the class of safetyrt.SLICE_PRELUDE)."""
+        """A slice object for `a:b:c` (the class of safetyrt.SLICE_PRELUDE).
+
+        The call names the prelude's private alias, not the user-visible `slice`, so a
+        parameter or local called `slice` cannot shadow the class (CPython still uses its
+        builtin slice type for the subscript).
+        """
         none = ast.Constant(value=None)
-        call = ast.Call(func=ast.Name(id='slice', ctx=ast.Load()),
+        call = ast.Call(func=ast.Name(id='_ail_slice_type', ctx=ast.Load()),
                         args=[sl.lower or none, sl.upper or none, sl.step or none], keywords=[])
         return self.expr(call, ctx)
 

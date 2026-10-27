@@ -1,3 +1,26 @@
+## 2026-10-27 -- pre354: a local named `slice` no longer shadows the slice class (job-pre354-10280045)
+
+The first pre-existing item from the pre327 review still reproduced on this tree: a function
+whose parameter or local is named `slice`, followed by a slice of a user-class instance
+(`def cut(slice, x): return x[1:2]`), built on both builds and then stopped with
+`TypeError: 'int' object is not callable`, where CPython passes its builtin slice object to
+`__getitem__`.  The general path's `_slice_obj` built the object with a call to the
+user-visible name `slice`, which the local shadowed.  The prelude now also binds a private
+`_ail_slice_type = slice` alias, and `_slice_obj` calls that alias; user code that binds
+`slice` still sees its own binding, and an ordinary `slice(...)` call is unchanged.
+
+Probes in `/tmp/probes/pre354` (both builds via `cmp.sh`): `p01_shadow_param`,
+`p02_shadow_local`, `p03_shadow_method`, `p04_shadow_module`, `p05_shadow_global_func`,
+`p06_user_slice`, `p07_shadow_loop` and `p10_routes_shadow` (alias, attribute, dict value,
+list item, slice assignment/deletion) all match CPython.  The review's other pre-existing
+items still differ and were not changed: `p08_dict_slice` (`TypeError` instead of
+`KeyError slice(...)`) and `p09_instance_name` (`'instance'` instead of `'A'`).
+
+Added `AIL_CURRENT/test_ail_pre354.py` (8 programs, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.  Final-state tests: test_ail_pre354,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py`
+was run and `--check` passes.
+
 ## 2026-10-27 -- pre338: int() of an out-of-int64 class attribute read through an instance is refused (job-pre338-10272141)
 
 The pre315 reviewer's first pre-existing item was `t01_class_attr_instance.py`:
