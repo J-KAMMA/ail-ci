@@ -1,3 +1,33 @@
+## 2026-10-27 -- pre373: int() read before a later module-container mutation (job-pre373-10280524)
+
+The pre355 review's first still-differing pre-existing item was `p20`: `items=[1e300];
+a=items; print(int(a[0])); a[0]=1.5` compiled on both builds and then stopped with
+`integer overflow`, where CPython prints the bignum.  `_safe_module_containers` and
+`_scope_constant_map` are order-insensitive, so any later mutation anywhere dropped the whole
+container and the earlier read stayed unfolded.  A new `_check_flow_int64_containers` in
+`AIL_CURRENT/ail_chatgpt.py` walks the module statements in order, tracks each name's known
+value (aliases share the object), applies a constant-index subscript store and `append` in
+place, and refuses the read by name (`int() of a float outside int64`, or
+`int64 constant expression out of range` for out-of-range text) at the point it happens.  A
+mutation before the read updates the tracked value, so the same program still prints CPython's
+1.  Branches, loops, `try`, `with`, `match`, imports, class bodies, unknown calls, unsupported
+stores and walrus clear the tracked state instead of guessing, so a value is refused only when
+the program definitely reads it.  The `append`-before-read spelling from the same cause is
+refused by name too.
+
+Probes in `/tmp/probes/pre373f` (33 programs, both builds via `cmp.sh`): `r01`-`r14` refusals
+by name for the read-before-store, alias/chain/tuple/dict/negative/multi-target routes, the
+`append` route, a wrapper argument and a list-item/assignment/empty-dict/variable-index route;
+`m01`-`m08` and `m10`-`m19` match CPython (mutation before read, dict/negative/multi-target
+mutations, `append` at index 0/negative, pop+append, function mutation, `if False`/lambda/
+comprehension/`IfExp`/`BoolOp` deferral, walrus rebind, in-range read, empty append, variable
+index store and a no-feature program).  `m09` (a class-body mutation) keeps an unrelated
+pre-existing named refusal (`not in the subset: a class body statement ...`).  No probe in the
+relevant set ends in `integer overflow`.  `test_ail_pre373.py` pins both groups on both builds
+and is registered next to `test_ail_pre361`; `tools/ci_shards.json` gained its weight (31.6)
+and shard entry.  Reads inside a `for` or a later `if` branch are still unfolded
+(pre-existing), and no codegen path is touched.
+
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
