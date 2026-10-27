@@ -1,3 +1,21 @@
+## 2026-10-27 -- pre349 review fixes: wrapper-local, global and nested-def pow constants (job-pre349-10272331)
+
+The pre349 review found three regressions in the wrapper pass.  The wrapper's own top-level
+assignments now resolve before the caller/module values (scalar, list and dict, including a
+single reassignment of a parameter before the `pow` call), a module constant changed through
+`global` before the call is no longer folded from its original value, and a nested `def` binds
+its name in the enclosing function scope, so it shadows a module wrapper instead of extending
+the wrapper chain.  The new cases are covered by `AIL_CURRENT/test_ail_pre349.py` and the
+existing target row in `DIFFERENCES.md` now records the wrapper-local, global and nested-def
+behaviour.
+
+Probes in `/tmp/probes` on both builds: `t07` (global reset), `t15`/`t16` (local scalar
+shadow), `t20`/`t21` (nested `def` shadow), `t22`/`t23` (local list/dict shadow) and `t26`-`t28`
+(parameter reassignment before/after the call) match CPython; `t24` (local wide shadow) and
+`t25`/`t29` (parameter reassigned to a wide exponent) are refused by name.
+`tools/update_manifest.py` was run and `--check` passes.  Final-state tests: test_ail_pre349,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+
 ## 2026-10-27 -- pre349: a wide constant exponent passed through a pow() wrapper is refused (job-pre349-10272331)
 
 The pre330 review's first pre-existing item was a wide constant exponent reaching `pow()` through

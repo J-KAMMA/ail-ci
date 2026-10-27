@@ -5,7 +5,9 @@ constant exponent (``def power(b, e): return pow(b, e)`` called with ``2`` and
 ``(3**100) >> 150``) ran on both builds and then stopped with ``integer overflow``, where
 CPython prints the bignum.  The pow check now follows constant arguments through a module-level
 wrapper, including a keyword call, a default, an alias of ``pow``, a chain of wrappers, and a
-value held in a module list or dict or a class attribute.  In-range and safe powers, negative
+value held in a module list or dict or a class attribute.  A wrapper's own scalar, list and
+dict assignments win over the caller and module values, a ``global`` mutation before the call
+is seen, and a nested ``def`` shadows a wrapper name.  In-range and safe powers, negative
 exponents, bool and float operands, an unused wrapper and a shadowed wrapper name still match
 CPython.
 """
@@ -87,6 +89,21 @@ def power(b, e):
     return pow(b, e)
 print(power(3, 40))
 ''',
+    'local_wide_shadow': '''
+A = 2
+E = 10
+def power(x):
+    A = 3
+    E = 40
+    return pow(A, E)
+print(power(0))
+''',
+    'parameter_reassignment_wide': '''
+def power(b, e):
+    e = 63
+    return pow(b, e)
+print(power(2, 0), power(-2, 0))
+''',
 }
 
 MATCH = {
@@ -141,6 +158,77 @@ print(7)
 def power(b, e):
     return pow(b, e)
 print(power(2, -((3**100) >> 150)))
+''',
+    'local_constant_shadow': '''
+e = 40
+def power(b, x):
+    e = 10
+    return pow(b, e)
+print(power(3, 0))
+''',
+    'local_constant_shadow_both': '''
+A = 3
+E = 40
+def power(x):
+    A = 2
+    E = 10
+    return pow(A, E)
+print(power(0))
+''',
+    'global_reset_before_call': '''
+E = (3**100) >> 150
+def power(b, e):
+    return pow(b, e)
+def reset():
+    global E
+    E = 10
+reset()
+print(power(2, E))
+''',
+    'nested_def_shadow': '''
+def inner(b, e):
+    return pow(b, e)
+def outer(b, e):
+    def inner(b, e):
+        return 7
+    return inner(b, e)
+print(outer(2, (3**100) >> 150))
+''',
+    'nested_def_shadow_in_range': '''
+def inner(b, e):
+    return pow(b, e)
+def outer(b, e):
+    def inner(b, e):
+        return b + e
+    return inner(b, e)
+print(outer(2, 10))
+''',
+    'local_list_shadow': '''
+vals = [2, 40]
+def power(b, x):
+    vals = [2, 10]
+    return pow(vals[0], vals[1])
+print(power(0, 0))
+''',
+    'local_dict_shadow': '''
+d = {"b": 2, "e": 40}
+def power(b, x):
+    d = {"b": 2, "e": 10}
+    return pow(d["b"], d["e"])
+print(power(0, 0))
+''',
+    'parameter_reassignment_safe': '''
+def power(b, e):
+    e = 10
+    return pow(b, e)
+print(power(3, 40))
+''',
+    'parameter_reassignment_after_call': '''
+def power(b, e):
+    r = pow(b, e)
+    e = 100
+    return r
+print(power(2, 10))
 ''',
 }
 

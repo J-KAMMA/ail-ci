@@ -1208,12 +1208,16 @@ def _maxsplit_constant_nodes(tree):
 
 
 def _function_scope_stores(function):
-    """Names stored in a function's own scope, ignoring nested functions, classes and lambdas."""
+    """Names stored in a function's own scope: a nested def or class binds its name there, while
+    its body and a lambda stay outside the scope."""
     stores = {}
 
     def visit(node):
         for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                stores[child.name] = stores.get(child.name, 0) + 1
+                continue
+            if isinstance(child, ast.Lambda):
                 continue
             if isinstance(child, ast.Name) and isinstance(child.ctx, (ast.Store, ast.Del)):
                 stores[child.id] = stores.get(child.id, 0) + 1
@@ -1667,10 +1671,8 @@ def _pow_constant_value(node, known, values, attributes):
                            lambda unused: True, {}, attributes)
 
 
-def _pow_value_constants(tree, known):
-    counts = _binding_counts(tree.body)
-    values = dict(known)
-    for statement in tree.body:
+def _pow_bound_values(body, counts, known, values, subscripted, excluded=()):
+    for statement in body:
         target = value_node = None
         if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
                 and isinstance(statement.targets[0], ast.Name)):
@@ -1678,16 +1680,45 @@ def _pow_value_constants(tree, known):
         elif (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
               and statement.value is not None):
             target, value_node = statement.target, statement.value
-        if target is None or counts.get(target.id) != 1:
+        if target is None or counts.get(target.id) != 1 or target.id in excluded:
             continue
         value = _pow_constant_value(value_node, known, values, None)
         if value is _UNKNOWN:
             continue
-        if (isinstance(value, (list, tuple, dict))
-                and not _only_subscripted(tree, target.id, target)):
+        if isinstance(value, (list, tuple, dict)) and not subscripted(target.id, target):
             continue
         values[target.id] = value
     return values
+
+
+def _global_declared_names(tree):
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Global):
+            names.update(node.names)
+    return names
+
+
+def _pow_value_constants(tree, known):
+    declared_global = _global_declared_names(tree)
+    known = {name: value for name, value in known.items() if name not in declared_global}
+    counts = _binding_counts(tree.body)
+    values = dict(known)
+    return _pow_bound_values(tree.body, counts, known, values,
+                             lambda name, target: _only_subscripted(tree, name, target),
+                             declared_global)
+
+
+def _pow_local_value_constants(function, caller_known, caller_values):
+    stores = _function_scope_stores(function)
+    parameters = _scope_parameters(function)
+    declared = _scope_declared(function)
+    excluded = set(stores) | parameters | declared
+    values = {name: value for name, value in caller_values.items() if name not in excluded}
+    counts = _binding_counts(function.body)
+    return _pow_bound_values(function.body, counts, caller_known, values,
+                             lambda name, target: _only_subscripted(function, name, target),
+                             declared)
 
 
 def _pow_wrapper_call_check(tree, known, names):
@@ -1705,7 +1736,26 @@ def _pow_wrapper_call_check(tree, known, names):
         if not parameters:
             continue
         stores = _function_scope_stores(function)
-        if any(stores.get(name) for name in parameters):
+        simple_assignments = {}
+        for statement in function.body:
+            target = None
+            if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                    and isinstance(statement.targets[0], ast.Name)):
+                target = statement.targets[0]
+            elif (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
+                  and statement.value is not None):
+                target = statement.target
+            if target is not None:
+                simple_assignments.setdefault(target.id, []).append(statement)
+        reassigned = set()
+        for name in parameters:
+            if not stores.get(name):
+                continue
+            if stores[name] != 1 or len(simple_assignments.get(name, ())) != 1:
+                reassigned = None
+                break
+            reassigned.add(name)
+        if reassigned is None:
             continue
         scope_names = _pow_aliases(function.body, names, stores, set(parameters))
         candidates[function.name] = (function, positional, keyword_only, scope_names, stores,
@@ -1764,8 +1814,8 @@ def _pow_wrapper_call_check(tree, known, names):
             return
         if len(call.args) > len(positional):
             return
-        scope_known = dict(caller_known)
-        scope_values = dict(caller_values)
+        scope_known = _function_local_int_constants(function, caller_known)
+        scope_values = _pow_local_value_constants(function, caller_known, caller_values)
 
         def bind(parameter, index, default):
             argument = None
@@ -1796,15 +1846,36 @@ def _pow_wrapper_call_check(tree, known, names):
         for parameter, default in zip(keyword_only, function.args.kw_defaults):
             bind(parameter, None, default)
 
+        overrides = {}
+        for name in reassigned:
+            statement = simple_assignments[name][0]
+            overrides[name] = (statement.lineno, statement.col_offset, statement.value)
+
         for node in _walk_own_scope(function):
             if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
                 continue
+            node_known = dict(scope_known)
+            node_values = dict(scope_values)
+            for parameter, (line, column, value_node) in overrides.items():
+                if (line, column) < (node.lineno, node.col_offset):
+                    value = _pow_constant_value(value_node, node_known, node_values, attributes)
+                    if value is _UNKNOWN:
+                        node_known.pop(parameter, None)
+                        node_values.pop(parameter, None)
+                    else:
+                        node_values[parameter] = value
+                        if type(value) is bool:
+                            node_known[parameter] = int(value)
+                        elif type(value) is int:
+                            node_known[parameter] = value
+                        else:
+                            node_known.pop(parameter, None)
             if (node.func.id in scope_names and len(node.args) == 2
                     and not node.keywords
                     and not any(isinstance(argument, ast.Starred) for argument in node.args)):
-                base_value = _pow_constant_value(node.args[0], scope_known, scope_values,
+                base_value = _pow_constant_value(node.args[0], node_known, node_values,
                                                  attributes)
-                exponent_value = _pow_constant_value(node.args[1], scope_known, scope_values,
+                exponent_value = _pow_constant_value(node.args[1], node_known, node_values,
                                                      attributes)
                 base = None
                 if type(base_value) is bool:
@@ -1823,11 +1894,11 @@ def _pow_wrapper_call_check(tree, known, names):
                             raise error
                     continue
             elif (node.func.id in wrappers
-                  and node.func.id not in scope_known
-                  and node.func.id not in scope_values
+                  and node.func.id not in node_known
+                  and node.func.id not in node_values
                   and node.func.id not in stores
                   and node.func.id not in parameters):
-                inspect(node.func.id, node, scope_known, scope_values, seen | {name})
+                inspect(node.func.id, node, node_known, node_values, seen | {name})
 
     for call in calls:
         function = enclosing_function(call)
