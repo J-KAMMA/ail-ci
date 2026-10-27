@@ -1283,7 +1283,9 @@ def _module_stmt_binds(stmt):
 
 def _store_linenos(stmts):
     """{name: first line that binds it} for one function / module / class body. Stops at a nested
-    def (its own scope; only its NAME is bound here), a nested class, and a lambda body."""
+    def (its own scope; only its NAME is bound here), a nested class, and a lambda body. An
+    annotation with no value binds only ``__annotations__``; a comprehension target is local to
+    the comprehension, so neither binds a name in this body."""
     pos = {}
 
     def walk(node):
@@ -1291,6 +1293,26 @@ def _store_linenos(stmts):
             pos.setdefault(node.name, node.lineno)
             return
         if isinstance(node, ast.Lambda):
+            return
+        if isinstance(node, ast.AnnAssign):
+            # `x: int` records only `__annotations__`; `x: int = 3` binds x.
+            walk(node.annotation)
+            if node.value is not None:
+                walk(node.target)
+                walk(node.value)
+            return
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
+            # The generator targets belong to the comprehension's own scope. Its other parts run
+            # in this scope, so a named expression there still binds here.
+            for gen in node.generators:
+                walk(gen.iter)
+                for cond in gen.ifs:
+                    walk(cond)
+            if isinstance(node, ast.DictComp):
+                walk(node.key)
+                walk(node.value)
+            else:
+                walk(node.elt)
             return
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
             pos.setdefault(node.id, node.lineno)
@@ -1454,6 +1476,32 @@ def _refuse_lambda_forward_defaults(tree, bound_at):
             scan_stmt(stmt, i, set(), _store_linenos([stmt]))
 
 
+def _default_scope_loads(node):
+    """Names a default expression reads when the `def` statement evaluates it.  A lambda or
+    comprehension body is a nested scope that runs later; a lambda's own defaults are evaluated
+    now, and a comprehension's outermost iterable is evaluated in the enclosing scope."""
+    out = set()
+
+    def walk(n):
+        if isinstance(n, ast.Lambda):
+            for d in list(n.args.defaults) + [d for d in n.args.kw_defaults if d is not None]:
+                walk(d)
+            return
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            return
+        if isinstance(n, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
+            if n.generators:
+                walk(n.generators[0].iter)
+            return
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load):
+            out.add(n.id)
+        for c in ast.iter_child_nodes(n):
+            walk(c)
+
+    walk(node)
+    return out
+
+
 def _hoist_defaults(tree):
     """CPython evaluates a default argument ONCE, when the `def` runs, so `def f(x, acc=[])` shares
     one list between calls. This emitter builds a default at each call site, which would hand every
@@ -1496,15 +1544,27 @@ def _hoist_defaults(tree):
     _refuse_lambda_forward_defaults(tree, bound_at)
     for si, stmt in enumerate(tree.body):
         funcs = []
+        class_binds = None
         if isinstance(stmt, ast.FunctionDef):
             funcs = [stmt]
         elif isinstance(stmt, ast.ClassDef):
             funcs = [m for m in stmt.body if isinstance(m, ast.FunctionDef)]
+            class_binds = _store_linenos(stmt.body)
         for f in funcs:
+            earlier = ({nm for nm, ln in class_binds.items() if ln < f.lineno}
+                       if class_binds is not None else set())
             for defaults in (f.args.defaults, f.args.kw_defaults):
                 for i, d in enumerate(defaults):
                     if d is None or not (isinstance(d, _HOISTED_DEFAULTS) or not _is_literal_default(d)):
                         continue
+                    if earlier:
+                        hits = _default_scope_loads(d) & earlier
+                        if hits:
+                            raise Unsupported('a default in method %s.%s reads the class-body '
+                                              'name %s; this path evaluates defaults at module '
+                                              'scope, so it would read a different value (CPython '
+                                              'evaluates the default in the class body)'
+                                              % (stmt.name, f.name, sorted(hits)[0]))
                     before = set().union(*bound_at[:si]) if si else set()
                     for nm in ast.walk(d):
                         if (isinstance(nm, ast.Name) and isinstance(nm.ctx, ast.Load) and nm.id not in before
