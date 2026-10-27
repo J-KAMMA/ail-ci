@@ -231,6 +231,57 @@ matches CPython or is refused by name on both builds.  Final-state modules: test
 test_ail_string_field_mutation, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
 `tools/diff_ids.py` is not present on this tree; `update_manifest.py --check` rc 0.
 
+## 2026-10-27 - re-apply pre245: generator expression as a hash key refused by name (job-rbrbpre245-10270958)
+
+Re-applied the accepted pre245 change on the current tree.  A generator expression is
+materialised eagerly as a list (pre166), so using it as a set element or dict key exited 1 with
+`TypeError: unhashable type: 'list'` where CPython hashes the generator by identity and shows its
+address-bearing repr.  The construct is now refused by name on both builds, statically by
+`_check_genexpr_hash_keys` and dynamically by the v2 `ail_obj_hash` (with the matching
+`dunderrt.py` text edit).  The static refusal covers set/dict literals and comprehensions,
+`hash()`, and `set()`/`frozenset()` over a collection, including a key reached through a tuple,
+an `if` expression or a `tuple()`/`frozenset()` call; names the program binds are not treated as
+the builtin.  Consumed generator expressions and ones kept as a dict value are unchanged.
+Added `test_ail_pre245.py` and registered it in `ail_check` and the CI shards.  The conflicts
+with this tree's newer `_check_class_attribute_assignment` call, DIFFERENCES rows, DEVLOG entries
+and CI timings were resolved by keeping both sides.
+
+Probes `/tmp/probes/p245_*` cover every static refusal form (set/dict literal and comprehension,
+tuple/if-expression/tuple()/frozenset() keys, `hash()`, `set()`, empty and nested keys), each
+dynamic route (saved, alias, argument, list item, attribute, dict value, `.add`, membership,
+subscript, `hash(name)`, tuple key, `dict.get`), bound-name shadowing, a plain list key and the
+matching consumed/value cases; every probe matches CPython or is refused by name on both builds.
+Tests on the final tree: test_ail_pre245, test_ail_pre166, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (5 modules, 323 s, 0 failed).  `tools/diff_ids.py` does not exist on this
+tree; `tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-26 - generator expression as a hash key refused by name (job-rbpre245-10261431)
+
+Re-applying pre245 on this tree.  The pre222 review recorded p8c as still differing here:
+`print({(x for x in [1, 2])})` exits 1 with `TypeError: unhashable type: 'list'` on both builds,
+while CPython stores the generator object and hashes it by identity (its display carries the
+address).  The cause is the pre166 representation: a generator expression is materialised
+eagerly as a list carrying `from_generator`, so it has neither CPython's identity hash nor its
+generator repr.
+
+The construct is now refused by name on both builds.  `_check_genexpr_hash_keys` in
+`ail_chatgpt.py` refuses a generator expression that a set literal or comprehension, a dict literal
+key or comprehension, `hash()`, or `set()`/`frozenset()` over a collection must hash, including one
+reached through a tuple, an `if` expression or a `tuple()`/`frozenset()` call over a collection.
+`_bound_names` keeps a program that binds `hash`/`set`/`frozenset`/`tuple` (def, assignment,
+parameter, import, `global`/`nonlocal`, match name) on CPython's result; an over-approximated
+scope only moves a genuinely builtin call to the run-time refusal.  The v2 `ail_obj_hash` (with
+the matching `dunderrt.py` text edit) raises the same named `TypeError` when a saved, aliased,
+passed, stored or otherwise dynamic generator expression reaches a hash bucket, so `dict.get`,
+membership, `.add`, a subscript and `hash(name)` name the construct instead of the list.  A
+consumed generator expression (`sum`, `next`, `list`, `frozenset(genexpr)`, a genexpr passed to
+`tuple()`/`frozenset()` as a key) and one kept as a dict value are unchanged.  `print(g)` still
+shows the list repr, the separate later item.
+
+Probes `/tmp/probes/p245_*` cover the static forms, every dynamic route above, bound-name
+shadowing, a plain list key, `frozenset(genexpr)` and consumption; each matches CPython or is
+refused by name on both builds.  Added `test_ail_pre245.py` and registered it in `ail_check` and
+the CI shards.
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
