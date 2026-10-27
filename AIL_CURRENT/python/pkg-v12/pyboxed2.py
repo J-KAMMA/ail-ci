@@ -5681,7 +5681,16 @@ class Compiler(boxclosure.ClosureMixin):
             owner, hit = self._class_chain_definition(cname, node.attr)
             if hit is not None and (direct or hit[0] in ('m', 'p')):
                 if hit[0] == 'a':
-                    return self._cached_class_attr(hit[3], hit[2], ctx)
+                    value, slot = hit[2], hit[3]
+                    if isinstance(value, ast.Constant) or (isinstance(value, ast.UnaryOp)
+                                                           and isinstance(value.operand, ast.Constant)):
+                        return self._cached_class_attr(slot, value, ctx)
+                    try:
+                        return self._cached_class_attr(slot, value, ctx)
+                    except Unsupported as exc:
+                        if getattr(exc, 'source_line', None) is not None:
+                            raise
+                        raise self._class_attr_through_class_refusal(cname, node.attr)
                 raise Unsupported("reading %s %s.%s through a class value" %
                                   ('property' if hit[0] == 'p' else 'method', owner, node.attr))
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
@@ -6654,10 +6663,25 @@ class Compiler(boxclosure.ClosureMixin):
             seen += 1
         return name in EXC_IDS
 
+    def _class_attr_through_class_refusal(self, name, attr):
+        return Unsupported('reading the class attribute %s.%s through the class: its value is '
+                           'not a constant, and the general path can only read a class attribute '
+                           'through the class when it is an int/float/str/bytes/bool literal.\n'
+                           '  write instead: read it from an instance (`%s().%s`) or store the '
+                           'value in a module-level constant'
+                           % (name, attr, name, attr))
+
     def _init_class_attrs(self, name, ctx):
         """Evaluate a class body's attributes once, at its class-definition statement."""
         for _aname, aval, slot in self.classes[name].get('class_attrs', []):
-            v = self.expr(aval, ctx)
+            try:
+                v = self.expr(aval, ctx)
+            except Unsupported as exc:
+                if (isinstance(aval, ast.Constant) or (isinstance(aval, ast.UnaryOp)
+                                                        and isinstance(aval.operand, ast.Constant))
+                        or getattr(exc, 'source_line', None) is not None):
+                    raise
+                raise self._class_attr_through_class_refusal(name, _aname)
             ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
         if name in self.module_names:
             # A module-level assignment to the class name (before or after the definition, or a
