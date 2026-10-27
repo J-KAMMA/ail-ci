@@ -2437,6 +2437,15 @@ arguments were quoted the same way.  The handler rewrite now lowers `repr(e.args
 `f"{e.args[i]!r}"` and `%r` of one argument to a new `_ail_exc_arg_repr` accessor that formats
 the stored argument (a str keeps its quotes, a number does not).  Both builds agree with
 CPython; `test_ail_pre26.py` keeps the probe, including negative and out-of-range indexes.
+## 2026-10-24 - pre27: an optional import is refused by name at its own line
+
+`try: import html ... except ImportError:` reached the general emitter's try check, which refused
+`ImportError` as an unsupported caught exception type without a position. The check now names the
+guarded import (`import of 'html' guarded by except ImportError`), points at the import line and
+column, and says to move it to the top of the file; `ModuleNotFoundError` gets the same message.
+Other unsupported caught types are located at their `try` instead of printing no location.
+`except Exception` is unchanged. Added `AIL_CURRENT/test_ail_pre27.py` (nine refusals, both builds,
+plus the accepted `except Exception` program).
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
