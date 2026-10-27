@@ -1,3 +1,28 @@
+## 2026-10-27 -- pre353: a dict subscription by a slice uses the slice as the key (job-pre353-10280033)
+
+The first still-differing item recorded by the pre328 reviewer was `p2_noninstance`: in CPython
+3.12 a slice is hashable, so `d[1:2]` is a dict lookup with `slice(1, 2, None)` and a missing key
+raises `KeyError: slice(1, 2, None)`; both AIL builds instead said `'dict' object is not
+subscriptable` (the set half already matched CPython's own TypeError).  The general path's
+`pyboxed2.expr_Subscript` now builds a slice object for a dict (also `Counter`/`defaultdict`)
+target and uses it as the key; its unknown-kind branch checks `AIL_T_DICT` as well as
+`AIL_T_INST`; `_store_slice` does the same for item assignment and deletion.  `safetyrt`'s
+`ail2s_getitem`/`ail2s_setitem` treat a dict as keyed by the slice object rather than slicing
+it, and `SLICE_PRELUDE` now defines `__hash__` over the three fields so equal slices find each
+other.  The second recorded item (a local or parameter named `slice` shadowing the injected
+prelude) is unchanged.  List/str/tuple/range slices and set subscriptions keep their behaviour.
+
+Added `AIL_CURRENT/test_ail_pre353.py` (3 tests, 13 programs, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`; added DIFFERENCES row
+`C?-job-pre353-10280033-1`.  Probes in `/tmp/probes/pre353` on both builds: `p01`-`p15`, `p20`
+and `p22` match CPython, including missing/present keys, an empty dict, caught and uncaught
+`KeyError`, equal slice objects, argument/list-item/attribute/dict-value/alias routes,
+dynamic/None/negative/bool bounds, literal and variable assignment and deletion, membership,
+list/str/tuple controls and the set `TypeError` control.  `test_ail_pre353` (3 tests, 50 s)
+passes; `test_ail_silent5` and `test_ail_pre327` also pass on this change (2 modules, 118 s).
+Final-state tests: test_ail_pre353, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py --check` passes.
+
 ## 2026-10-27 -- pre338: int() of an out-of-int64 class attribute read through an instance is refused (job-pre338-10272141)
 
 The pre315 reviewer's first pre-existing item was `t01_class_attr_instance.py`:

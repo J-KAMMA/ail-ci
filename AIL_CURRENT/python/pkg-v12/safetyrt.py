@@ -99,8 +99,10 @@ static inline ail_st ail2s_fields(ail_ctx *cx, ail_obj k, ail_obj *lo, ail_obj *
 static inline int ail2s_is_slice(ail_obj k, ail_obj cls) {
     return k.tag == AIL_T_INST && ail_class_is_or_subclass(((ail_instobj *)k.o)->cls, cls);
 }
-/* c[key] where key may be a slice object: a str / list / tuple is sliced, anything else is indexed with it */
+/* c[key] where key may be a slice object: a dict uses the slice as its key (CPython 3.12 slices are
+   hashable), a str / list / tuple is sliced, anything else is indexed with it */
 static inline ail_st ail2s_getitem(ail_ctx *cx, ail_obj *out, ail_obj c, ail_obj key, ail_obj cls) {
+    if (c.tag == AIL_T_DICT) return ail_op_getitem(cx, out, c, key);
     if (c.tag != AIL_T_INST && ail2s_is_slice(key, cls)) {
         ail_obj lo, hi, step; ail_st st = ail2s_fields(cx, key, &lo, &hi, &step);
         if (st != AIL_OK) return st;
@@ -111,6 +113,8 @@ static inline ail_st ail2s_getitem(ail_ctx *cx, ail_obj *out, ail_obj c, ail_obj
 /* c[key] = v / del c[key] where key may be a slice object */
 static inline ail_st ail2s_setslice(ail_ctx *cx, ail_obj c, ail_obj lo, ail_obj hi, ail_obj step, ail_obj value, int del);
 static inline ail_st ail2s_setitem(ail_ctx *cx, ail_obj c, ail_obj key, ail_obj v, ail_obj cls, int del) {
+    if (c.tag == AIL_T_DICT)
+        return del ? ail_op_delitem(cx, c, key) : ail_op_setitem(cx, c, key, v);
     if (c.tag != AIL_T_INST && ail2s_is_slice(key, cls)) {
         ail_obj lo, hi, step; ail_st st = ail2s_fields(cx, key, &lo, &hi, &step);
         if (st != AIL_OK) return st;
@@ -2342,6 +2346,9 @@ class slice:
         if not isinstance(other, slice):
             return False
         return (self.start, self.stop, self.step) == (other.start, other.stop, other.step)
+
+    def __hash__(self):
+        return hash((self.start, self.stop, self.step))
 
     def indices(self, n):
         return _ail_slice_indices(self.start, self.stop, self.step, n)
