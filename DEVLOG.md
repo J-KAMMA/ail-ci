@@ -1,3 +1,28 @@
+## 2026-10-27 -- pre349: a wide constant exponent passed through a pow() wrapper is refused (job-pre349-10272331)
+
+The pre330 review's first pre-existing item was a wide constant exponent reaching `pow()` through
+a user function's arguments: `def power(b, e): return pow(b, e)` called with `2` and
+`(3**100) >> 150` compiled on both builds and then stopped with `integer overflow`, where CPython
+prints the bignum.  The `pow` check now follows constant call arguments into module-level wrappers
+(including a keyword call, a default value, a `pow` alias and a chain of wrappers) and refuses the
+out-of-int64 result by name with the existing `int64 constant expression out of range` wording.
+Arguments may come from a module list or dict item, a list literal item, or a class attribute;
+in-range and safe powers, negative exponents, bool and float operands, a shadowed wrapper name and
+an unused wrapper still match CPython.  The review's later items are unchanged: a class-body pow
+and a lambda-body pow still trap at run time, while the reassigned module constant, the exponent
+passed only to a constant-base wrapper and the class-attribute exponent are already refused by
+name on this tree.
+
+Probes in `/tmp/probes/pre349` on both builds: `p09_power_args` (and its `p09_base_arg` variant)
+are now refused by name; `b01`-`b20` cover in-range, int64 boundaries, safe bases, negative
+exponents, bool/float operands, keyword/default/alias/chain calls, list/dict/attribute arguments,
+shadowing, an unused wrapper and the unchanged later items.  Added
+`AIL_CURRENT/test_ail_pre349.py` (12 refused and 9 CPython-parity programs, both builds) and
+registered it in `ail_check.MODULES` and `tools/ci_shards.json`.  Final-state tests:
+test_ail_pre349, test_ail_pre294, test_ail_pre299, test_ail_pre305, test_ail_pre273,
+test_ail_pre310, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre326: a nested class inside a function is already refused by name (job-pre326-10271918)
 
 The pre324 reviewer's first pre-existing item was a nested class inside a function

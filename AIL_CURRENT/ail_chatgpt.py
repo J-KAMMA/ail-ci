@@ -1602,6 +1602,255 @@ def _walk_module_scope(tree):
         stack.extend(ast.iter_child_nodes(node))
 
 
+def _pow_out_of_range_error(node, base, exponent):
+    value = _exact_pow_or_too_big(base, exponent)
+    if value is None or (value is not _CONST_INT_TOO_BIG
+                         and _INT64_MIN <= value <= _INT64_MAX):
+        return None
+    shown = 'too large' if value is _CONST_INT_TOO_BIG else _constant_diagnostic(value)
+    error = ValueError(f'int64 constant expression out of range: {shown}')
+    error.source_line = node.lineno
+    error.source_column = node.col_offset
+    return error
+
+
+def _pow_constant_value(node, known, values, attributes):
+    if isinstance(node, ast.List):
+        items = []
+        for element in node.elts:
+            if isinstance(element, ast.Starred):
+                return _UNKNOWN
+            value = _pow_constant_value(element, known, values, attributes)
+            if value is _UNKNOWN:
+                return _UNKNOWN
+            items.append(value)
+        return items
+    if isinstance(node, ast.Tuple):
+        items = []
+        for element in node.elts:
+            if isinstance(element, ast.Starred):
+                return _UNKNOWN
+            value = _pow_constant_value(element, known, values, attributes)
+            if value is _UNKNOWN:
+                return _UNKNOWN
+            items.append(value)
+        return tuple(items)
+    if isinstance(node, ast.Dict):
+        result = {}
+        for key_node, value_node in zip(node.keys, node.values):
+            if key_node is None:
+                return _UNKNOWN
+            key = _pow_constant_value(key_node, known, values, attributes)
+            value = _pow_constant_value(value_node, known, values, attributes)
+            if key is _UNKNOWN or value is _UNKNOWN:
+                return _UNKNOWN
+            try:
+                result[key] = value
+            except TypeError:
+                return _UNKNOWN
+        return result
+    if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load):
+        base = _pow_constant_value(node.value, known, values, attributes)
+        key = _pow_constant_value(node.slice, known, values, attributes)
+        if base is _UNKNOWN or key is _UNKNOWN:
+            return _UNKNOWN
+        try:
+            if isinstance(base, (list, tuple, dict, str, bytes)):
+                return base[key]
+        except (IndexError, KeyError, TypeError):
+            return _UNKNOWN
+        return _UNKNOWN
+    ok, exact = _constant_int_exact_with_known(node, known)
+    if ok and exact is not _CONST_INT_TOO_BIG:
+        return exact
+    return _constant_value(node, lambda name: values.get(name, _UNKNOWN),
+                           lambda unused: True, {}, attributes)
+
+
+def _pow_value_constants(tree, known):
+    counts = _binding_counts(tree.body)
+    values = dict(known)
+    for statement in tree.body:
+        target = value_node = None
+        if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                and isinstance(statement.targets[0], ast.Name)):
+            target, value_node = statement.targets[0], statement.value
+        elif (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
+              and statement.value is not None):
+            target, value_node = statement.target, statement.value
+        if target is None or counts.get(target.id) != 1:
+            continue
+        value = _pow_constant_value(value_node, known, values, None)
+        if value is _UNKNOWN:
+            continue
+        if (isinstance(value, (list, tuple, dict))
+                and not _only_subscripted(tree, target.id, target)):
+            continue
+        values[target.id] = value
+    return values
+
+
+def _pow_wrapper_call_check(tree, known, names):
+    counts = _binding_counts(tree.body)
+    candidates = {}
+    for function in tree.body:
+        if (not isinstance(function, ast.FunctionDef) or function.decorator_list
+                or counts.get(function.name) != 1
+                or function.args.vararg is not None or function.args.kwarg is not None):
+            continue
+        positional = [argument.arg for argument in
+                      (*function.args.posonlyargs, *function.args.args)]
+        keyword_only = [argument.arg for argument in function.args.kwonlyargs]
+        parameters = positional + keyword_only
+        if not parameters:
+            continue
+        stores = _function_scope_stores(function)
+        if any(stores.get(name) for name in parameters):
+            continue
+        scope_names = _pow_aliases(function.body, names, stores, set(parameters))
+        candidates[function.name] = (function, positional, keyword_only, scope_names, stores,
+                                     set(parameters))
+    marked = set()
+    for name, (function, _, _, scope_names, _, _) in candidates.items():
+        for node in _walk_own_scope(function):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id in scope_names and len(node.args) == 2
+                    and not node.keywords
+                    and not any(isinstance(argument, ast.Starred) for argument in node.args)):
+                marked.add(name)
+                break
+    changed = True
+    while changed:
+        changed = False
+        for name, (function, _, _, _, stores, parameters) in candidates.items():
+            if name in marked:
+                continue
+            for node in _walk_own_scope(function):
+                if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                        and node.func.id in marked and node.func.id not in stores
+                        and node.func.id not in parameters):
+                    marked.add(name)
+                    changed = True
+                    break
+    wrappers = {name: candidates[name] for name in marked}
+    if not wrappers:
+        return
+
+    values = _pow_value_constants(tree, known)
+    attributes = _known_class_attributes(tree, known)
+    parents = {child: parent for parent in ast.walk(tree)
+               for child in ast.iter_child_nodes(parent)}
+    calls = [node for node in ast.walk(tree)
+             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+             and node.func.id in wrappers]
+
+    def enclosing_function(node):
+        parent = parents.get(node)
+        while parent is not None:
+            if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                return parent
+            if isinstance(parent, ast.Lambda):
+                return None
+            parent = parents.get(parent)
+        return None
+
+    def inspect(name, call, caller_known, caller_values, seen):
+        if name in seen:
+            return
+        function, positional, keyword_only, scope_names, stores, parameters = wrappers[name]
+        if any(isinstance(argument, ast.Starred) for argument in call.args):
+            return
+        if any(keyword.arg is None for keyword in call.keywords):
+            return
+        if len(call.args) > len(positional):
+            return
+        scope_known = dict(caller_known)
+        scope_values = dict(caller_values)
+
+        def bind(parameter, index, default):
+            argument = None
+            if index is not None and index < len(call.args):
+                argument = call.args[index]
+            else:
+                for keyword in call.keywords:
+                    if keyword.arg == parameter:
+                        argument = keyword.value
+                        break
+            if argument is None:
+                argument = default
+            if argument is None:
+                return
+            value = _pow_constant_value(argument, caller_known, caller_values, attributes)
+            if value is _UNKNOWN:
+                return
+            scope_values[parameter] = value
+            if type(value) is bool:
+                scope_known[parameter] = int(value)
+            elif type(value) is int:
+                scope_known[parameter] = value
+
+        positional_defaults = [None] * (len(positional) - len(function.args.defaults))
+        positional_defaults.extend(function.args.defaults)
+        for index, (parameter, default) in enumerate(zip(positional, positional_defaults)):
+            bind(parameter, index, default)
+        for parameter, default in zip(keyword_only, function.args.kw_defaults):
+            bind(parameter, None, default)
+
+        for node in _walk_own_scope(function):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+                continue
+            if (node.func.id in scope_names and len(node.args) == 2
+                    and not node.keywords
+                    and not any(isinstance(argument, ast.Starred) for argument in node.args)):
+                base_value = _pow_constant_value(node.args[0], scope_known, scope_values,
+                                                 attributes)
+                exponent_value = _pow_constant_value(node.args[1], scope_known, scope_values,
+                                                     attributes)
+                base = None
+                if type(base_value) is bool:
+                    base = int(base_value)
+                elif type(base_value) is int:
+                    base = base_value
+                exponent = None
+                if type(exponent_value) is bool:
+                    exponent = int(exponent_value)
+                elif type(exponent_value) is int:
+                    exponent = exponent_value
+                if base is not None and exponent is not None:
+                    if exponent >= 0:
+                        error = _pow_out_of_range_error(node, base, exponent)
+                        if error is not None:
+                            raise error
+                    continue
+            elif (node.func.id in wrappers
+                  and node.func.id not in scope_known
+                  and node.func.id not in scope_values
+                  and node.func.id not in stores
+                  and node.func.id not in parameters):
+                inspect(node.func.id, node, scope_known, scope_values, seen | {name})
+
+    for call in calls:
+        function = enclosing_function(call)
+        if function is None:
+            caller_known = known
+            caller_values = values
+        else:
+            stores = _function_scope_stores(function)
+            parameters = {argument.arg for argument in
+                          (*function.args.posonlyargs, *function.args.args,
+                           *function.args.kwonlyargs)}
+            if (call.func.id in stores or call.func.id in parameters
+                    or isinstance(parents.get(function), ast.Lambda)):
+                caller_known = None
+            else:
+                caller_known = _function_local_int_constants(function, known)
+                caller_values = {name: value for name, value in values.items()
+                                 if name not in stores and name not in parameters}
+                caller_values.update(caller_known)
+        if caller_known is not None:
+            inspect(call.func.id, call, caller_known, caller_values, frozenset())
+
+
 def _check_int64_pow_constants(tree, known):
     """Refuse ``pow(base, exp)`` on constant ints whose exact result leaves int64, by name.
 
@@ -1670,6 +1919,7 @@ def _check_int64_pow_constants(tree, known):
                                    _function_scope_stores(function), parameters)
         for node in _walk_own_scope(function):
             check(node, local, scope_names)
+    _pow_wrapper_call_check(tree, known, names)
 
 
 def _check_int64_unary_constants(tree):
