@@ -1,3 +1,28 @@
+## 2026-10-27 -- re-apply pre19: refuse `del` bounds a constant cannot evaluate in int64 (job-rbpre19-10261657)
+
+Re-applied the accepted pre19 change on the current tree.  `pyfront.refuse_unrepresentable_delete_bounds`
+evaluates a constant `del` index or slice bound exactly, keeping the intermediate-overflow flag (so
+`del a[2**63 - 1]`, `del a[-2**63]`, `2**100000` and `2**100:2**101` are all caught), and refuses the
+`del` by name on both the typed path (`pyfunc._stmt_inner`) and the general path
+(`pyboxed2.Compiler.stmt_Delete`).  This tree's earlier checks already refuse compound constant
+indexes and powers by name (`int64 index out of range` / `int64 constant out of range`), so the
+accepted test accepts either named refusal; the new wording is exercised by the unary-int64 and
+slice cases that reach the added helper.  In-range constants (`del a[1 + 1]`, `del a[-2:-1]`,
+bool indexes) and the same expression outside a `del` are unchanged.
+
+The helper treats the literal spelling `-9223372036854775808` (unary minus on the Constant
+`2**63`) as INT64_MIN without an overflow, matching the compiler's unary branch, so
+`del box.values[::-9223372036854775808]` in `test_ail_string_field_mutation` still builds.  A
+computed `del a[-2**63]` (unary minus on a power) is still refused.
+
+Added `AIL_CURRENT/test_ail_pre19.py` (3 tests, both builds), registered it in
+`ail_check.MODULES` and `ci_shards.json`.  Probes `pre19_*` in `/tmp/probes` cover index, INT64_MIN,
+huge power, huge slice/step, nested subscript, attribute, list item and dict value routes, a
+function argument, representable bounds, bool indexes and the non-`del` expression: every one
+matches CPython or is refused by name on both builds.  Final-state modules: test_ail_pre19,
+test_ail_string_field_mutation, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/diff_ids.py` is not present on this tree; `update_manifest.py --check` rc 0.
+
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
