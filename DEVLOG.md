@@ -1,3 +1,35 @@
+## 2026-10-27 -- pre388: a container read before a later mutation is folded for int() (job-pre388-10280828)
+
+The pre373 review's first recorded item reproduced on both builds:
+`items = [1e300]; a = items; x = a[0]; a[0] = 1.5; print(int(x))` compiled and then stopped with
+`integer overflow`, where CPython prints the big integer.  `_escaped_constant_names` collected one
+scope-wide set of container names that may be mutated, so the later `a[0] = 1.5` made the whole
+flat list dynamic and the scalar `x` bound from `a[0]` stayed unknown.  The escape analysis now
+returns the event per top-level statement (`_escaped_constant_statements`), and
+`_scope_constant_map` walks the statements in order: a scalar read through a load-only subscript
+keeps the literal's value up to the statement that may mutate the container, and a container is
+dropped from that statement on.  Top-level statements run once and in order, and a use inside a
+nested definition counts at its definition statement, so a mutation that comes first still makes
+the read dynamic.  The conversion is refused by name on both builds with the existing
+`int() of a float outside int64: ... (CPython makes a big integer)` message (an int or string
+item keeps `int64 constant expression out of range`).
+
+Covered by `AIL_CURRENT/test_ail_pre388.py` (2 tests, 24 programs, both builds): the recorded
+alias, a direct scalar read, a dict value, a computed index, `del` after the read, an alias
+chain, a tuple, a negative value, the int64 boundary float, a function-local list, a call or
+`print` between the read and the conversion, and an int/str item.  A mutation that comes first
+(direct, through an alias, a loop, a nested definition or inside a function), in-range reads
+before and after a mutation, an append, and an inline item match CPython.
+
+Probes in `/tmp/probes/pre388` on both builds: `v01`-`v12`, `w01`-`w15` and `x01`-`x06`; every one
+matches CPython or is refused by name except the review's second item (a list held in an instance
+attribute, `v11`/`pre388_r10`), a list or float reaching a function as an argument (`w02`, `w03`)
+and an attribute-held scalar (`w04`), which keep the pre-existing run-time trap and are recorded
+in DIFFERENCES.  Final-state tests: test_ail_pre388, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3, plus test_ail_pre322, test_ail_pre311, test_ail_pre31, test_ail_pre9,
+test_ail_pre39, test_ail_pre357, test_ail_pre358 and test_ail_pre359.  `tools/update_manifest.py`
+was run and `--check` passes.
+
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
