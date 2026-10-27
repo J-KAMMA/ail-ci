@@ -1,3 +1,30 @@
+## 2026-10-27 -- pre352: a class alias assigned in a try reaches the field/method refusal (job-pre352-10280028)
+
+The pre339 review's first pre-existing item was a class alias assigned inside a `try`
+(`try: Alias = C ... print(Alias().f())`), which compiled on both builds and then stopped with
+`AttributeError: 'C' object has no attribute 'g'` where CPython calls the stored bound method
+and prints 55.  The receiver of the field/method collision screen in
+`AIL_CURRENT/python/pkg-v12/pyfront.py` resolved only a name that was itself a class, so an alias
+never reached it.  It now resolves a name bound by plain assignments in its own scope (following
+alias chains, tuple unpacking and an assignment inside a `try`), and refuses the call by name on
+both builds.  A name with several class bindings, a runtime conditional or `for` rebind, a
+local/module rebind of the class name, or a keyword-only parameter shadow keeps CPython's result;
+the alias reaches the same refusal through an argument, a list item, an attribute and a dict
+value.  `_param_names` now includes keyword-only parameters.  The review's second pre-existing
+item (a function use before a later rebinding of an ancestor name) still prints the same
+`AttributeError` on both builds and is not changed here.
+
+Added `AIL_CURRENT/test_ail_pre352.py` (2 tests, 11 refused and 13 matching programs, both
+builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.  Probes in
+`/tmp/probes/pre352` on both builds: `rv08_try`, `rv08_try_pass`, `rv08_try_finally`,
+`alias_basic`, `chain`, `tuple_unpack`, `local_alias`, `alias_arg`, `alias_list`, `alias_attr`
+and `alias_dict` are refused by name; `no_feature`, `alias_to_d`, `reassigned_d`, `p2_reassign`,
+`p3_dead_if`, `p4_for_rebind`, `rv04_local_shadow`, `rv05_param_shadow`, `rv06_module_rebind`,
+`rv13_kwonly`, `rv17_cond`, `arg_other_class` and `list_other_class` match CPython.
+`rv09_before_later` still differs (the second pre-existing item).  Final-state tests:
+test_ail_pre352, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 on this commit.
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre338: int() of an out-of-int64 class attribute read through an instance is refused (job-pre338-10272141)
 
 The pre315 reviewer's first pre-existing item was `t01_class_attr_instance.py`:

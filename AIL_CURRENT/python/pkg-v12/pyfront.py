@@ -710,7 +710,7 @@ def refuse_field_method_call(tree, allow_owners=False):
 
     def _param_names(func):
         args = func.args
-        return [arg.arg for arg in args.posonlyargs + args.args]
+        return [arg.arg for arg in args.posonlyargs + args.args + args.kwonlyargs]
 
     call_ctx = {}
 
@@ -730,12 +730,115 @@ def refuse_field_method_call(tree, allow_owners=False):
 
     _visit(tree, None, None)
 
+    def _is_parameter(scope, name):
+        if not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            return False
+        args = scope.args
+        names = args.posonlyargs + args.args + args.kwonlyargs
+        if args.vararg is not None:
+            names.append(args.vararg)
+        if args.kwarg is not None:
+            names.append(args.kwarg)
+        return any(arg.arg == name for arg in names)
+
+    def _other_binding(scope, name):
+        """Whether a ``for``/``with``/``except``/import/``del``/nested def binds the name."""
+        if isinstance(scope, ast.Lambda):
+            body = [scope.body]
+        elif isinstance(getattr(scope, 'body', None), list):
+            body = scope.body
+        else:
+            return False
+
+        def names_in(target):
+            return any(isinstance(item, ast.Name) and item.id == name
+                       for item in ast.walk(target))
+
+        def walk(node):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                return node.name == name and not (
+                    isinstance(node, ast.ClassDef) and name in classes)
+            if isinstance(node, ast.Lambda):
+                return False
+            if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+                return False
+            if isinstance(node, (ast.For, ast.AsyncFor)) and names_in(node.target):
+                return True
+            if isinstance(node, ast.With):
+                for item in node.items:
+                    if item.optional_vars is not None and names_in(item.optional_vars):
+                        return True
+            elif isinstance(node, ast.ExceptHandler) and node.name == name:
+                return True
+            elif isinstance(node, ast.NamedExpr) and names_in(node.target):
+                return True
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if (alias.asname or alias.name.split('.')[0]) == name:
+                        return True
+            elif isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    if alias.name != '*' and (alias.asname or alias.name) == name:
+                        return True
+            elif isinstance(node, ast.Delete):
+                if any(isinstance(item, ast.Name) and item.id == name
+                       for item in node.targets):
+                    return True
+            return any(walk(child) for child in ast.iter_child_nodes(node))
+
+        return any(walk(node) for node in body)
+
+    def _unique_alias_classes(node, ctx, seen):
+        """The class a name denotes when its scope binds it with one plain assignment.
+
+        A name assigned more than once (a later rebinding, a branch or a loop) is not resolved:
+        the call then keeps its old behaviour instead of being refused for a class the name may
+        no longer hold.  A parameter or a local binding in an inner scope shadows the module name.
+        """
+        scope = scope_of.get(id(node), tree)
+        key = ('alias', id(scope), node.id)
+        if key in seen:
+            return set()
+        seen = set(seen) | {key}
+        lookup = scope
+        while True:
+            if _is_parameter(lookup, node.id) or _other_binding(lookup, node.id):
+                return set()
+            values = [value for name, value in assignments.get(lookup, ())
+                      if name == node.id]
+            if values:
+                found = set()
+                for value in values:
+                    if isinstance(value, ast.Name):
+                        found |= _unique_alias_classes(value, ctx, seen)
+                if len(found) == 1:
+                    return found
+                return set()
+            if lookup is tree:
+                break
+            parent = scope_parent.get(lookup)
+            if parent is None:
+                break
+            lookup = parent
+        return {node.id} if node.id in classes else set()
+
     def _classes_of(node, ctx=(None, None), seen=frozenset()):
         if isinstance(node, ast.Call):
-            if isinstance(node.func, ast.Name) and node.func.id in classes:
-                return {node.func.id}
-            return set()
+            if isinstance(node.func, ast.Name):
+                if node.func.id in classes:
+                    return {node.func.id}
+                found = _unique_alias_classes(node.func, ctx, seen)
+                if found:
+                    return found
+                scope = scope_of.get(id(node.func), tree)
+                if _is_parameter(scope, node.func.id):
+                    return _classes_of(node.func, ctx, seen)
+                return set()
+            return _classes_of(node.func, ctx, seen)
         if isinstance(node, ast.Name):
+            alias = _unique_alias_classes(node, ctx, seen)
+            if alias:
+                return alias
             cls_name, func = ctx
             if func is not None:
                 params = _param_names(func)
