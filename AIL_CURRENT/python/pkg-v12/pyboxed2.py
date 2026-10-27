@@ -5632,7 +5632,6 @@ class Compiler(boxclosure.ClosureMixin):
                 # a value of unknown kind: an instance takes a slice object, anything else is sliced
                 if not self.want_slice:
                     raise NeedSlice()
-                lo, hi, step = self._slice_bounds(node.slice, ctx)
                 t = ctx.tmp()
                 ctx.emit('if (%s.tag == AIL_T_INST) {' % c)
                 ctx.indent += 1
@@ -5642,6 +5641,8 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.indent -= 1
                 ctx.emit('} else {')
                 ctx.indent += 1
+                # Only this arm runs, so the bounds are evaluated exactly once.
+                lo, hi, step = self._slice_bounds(node.slice, ctx)
                 ctx.emit('st = ail2s_getslice(cx, &%s, %s, %s, %s, %s);' % (t, c, lo, hi, step))
                 ctx.check()
                 ctx.indent -= 1

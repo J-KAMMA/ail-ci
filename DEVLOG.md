@@ -1,3 +1,22 @@
+## 2026-10-27 -- pre327 review fix: slice bounds evaluated once (job-pre327-10271919)
+
+The reviewer found that the unknown-kind slice branch evaluated the non-`None` bounds with
+`_slice_bounds` before the instance tag test and then again inside `_slice_obj`. An instance
+reached through an unknown value therefore ran `f():g():h()` twice (and `x[data.pop():data.pop()]`
+popped once per bound before the tag test, giving an `IndexError` instead of CPython's
+`(2, 1, None)`). `_slice_bounds` now emits only inside the non-instance `else` arm, so each
+runtime path evaluates the bounds exactly once; the instance arm keeps `_slice_obj`.
+
+Probes in `/tmp/probes/pre327fix` (both builds via `cmp.sh`): `p_eval_once` (instance through an
+argument, an attribute, a list item, a dict value and an alias; list and str non-instances),
+`p_mutating` (two and three `list.pop()` bounds on an instance, a list, a tuple and a str),
+`p_types` (empty, negative, `None`, bool and step bounds on instance, list, tuple, str, bytes,
+bytearray and range), `p_routes` (inherited `__getitem__` through argument, alias, attribute,
+dict value, list item, `for`, `with` and tuple unpacking) all match CPython. `p_literal_bounds`
+is refused by name (`int64 literal out of range`). Required tests on this final state:
+test_ail_pre327, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (4 modules,
+0 failed). `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre327: a slice of an instance reached through an unknown value (job-pre327-10271919)
 
 The pre323 reviewer's second pre-existing item reproduced on this tree: a user-class slice
@@ -15,8 +34,9 @@ Probes in `/tmp/probes/pre327` (both builds via `cmp.sh`): `p1_literal`, `p19_hu
 `p20_huge_neg` are refused by name; `p2_for_inrange` through `p15_assign`, `p17_incode` and
 `p18_nofeature` match CPython. `p16_other` / `p16b_other_only` still print `'instance' object is
 not subscriptable` where CPython names `'A'`, identical on the base (pre-existing). A program
-whose only slices are built-ins compiles to different C because the slice prelude is now present,
-but its output matches. Added `AIL_CURRENT/test_ail_pre327.py` (8 programs, both builds; each
+whose only executed slices are built-ins compiles to different C only when it also defines a
+class with `__getitem__` (the branch's gate); with no such class the C is unchanged. Its output
+matches CPython either way. Added `AIL_CURRENT/test_ail_pre327.py` (8 programs, both builds; each
 matches CPython or is refused by name) and registered it in `ail_check.MODULES` and
 `tools/ci_shards.json`.
 

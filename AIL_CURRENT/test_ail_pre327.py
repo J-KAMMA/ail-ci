@@ -164,6 +164,52 @@ s = f(C())
 print(s.start, s.stop, s.step, repr(f(C())))
 print(f(C()).start is None, f(C()).step is None)
 ''',
+    'eval_once': '''
+class C:
+    def __getitem__(self, i):
+        return (i.start, i.stop, i.step)
+
+
+def f():
+    print("f-called")
+    return 1
+
+
+def g():
+    print("g-called")
+    return 4
+
+
+def h():
+    print("h-called")
+    return 2
+
+
+def cut(x):
+    return x[f():g():h()]
+
+
+print(cut(C()))
+''',
+    'mutating_bounds': '''
+class C:
+    def __getitem__(self, i):
+        return (i.start, i.stop, i.step)
+
+
+def cut(x):
+    data = [1, 2]
+    return x[data.pop():data.pop()]
+
+
+def cutlist():
+    data = [1, 2]
+    return [0, 1, 2][data.pop():data.pop()]
+
+
+print(cut(C()))
+print(cutlist())
+''',
     'direct_literal': '''
 print(9223372036854775808)
 a = [1, 2, 3]
