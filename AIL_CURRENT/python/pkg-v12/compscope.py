@@ -95,6 +95,14 @@ class _Scope(ast.NodeVisitor):
 
     def visit_ClassDef(self, node):
         self.scope_names.add(node.name)
+        for expr in node.decorator_list:
+            self.visit(expr)
+        for base in node.bases:
+            self.visit(base)
+        for keyword in node.keywords:
+            self.visit(keyword.value)
+        for statement in node.body:
+            self.visit(statement)
 
 
 def _scopes(tree):

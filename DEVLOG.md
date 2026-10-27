@@ -1,3 +1,22 @@
+## 2026-10-27 -- pre347: a class-body comprehension target stays local (job-pre347-10272320)
+
+The reviewer of job rbpre304 recorded `x = 99; class C: ys = [x for x in range(3)];
+print(x, C.ys)`: both builds printed `2 [0, 1, 2]` where CPython prints `99 [0, 1, 2]`.  The
+comprehension-scope pass (`compscope.py`) analysed module and function bodies but not class
+bodies, so a class-body comprehension target kept the enclosing module's name slot and overwrote
+the global.  `visit_ClassDef` now visits the class decorators, bases, keywords and body in the
+enclosing scope, so a target that can clash with an enclosing name gets the existing fresh
+identifier.  This covers list, set, dict and generator comprehensions, nested and
+multiple-generator forms, a target equal to a class attribute, the class name or a builtin name,
+and empty or negative ranges; programs without a class-body comprehension target are unchanged.
+
+Probes in `/tmp/probes/pre347` on both builds: `p01`-`p05` and `p07`-`p12` match CPython; `p06`
+(a nested class) and `p13` (a destructuring target over a module list, also refused on the base)
+are refused by name; `p14`-`p21` match CPython.  Final-state tests: test_ail_pre347 (1 test, 15
+programs, both builds), test_ail_pre304, test_ail_quirks Q2, test_ail_fuzz23,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py`
+was run and `--check` passes.
+
 ## 2026-10-27 -- pre326: a nested class inside a function is already refused by name (job-pre326-10271918)
 
 The pre324 reviewer's first pre-existing item was a nested class inside a function
