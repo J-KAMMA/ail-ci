@@ -1,3 +1,16 @@
+## 2026-10-27 -- re-apply pre39: keyword-wrapper int() refusal (job-rbrbrbrbpre39-10271218)
+
+Re-applied the accepted pre39 change on this tree. The current tree already carries a superset of
+the accepted `ail_chatgpt._check_int64_literals` pass from the later pre290 wrapper-chain work
+(module constants, literal containers, identity/keyword/keyword-only wrappers, `_UNKNOWN` for
+unresolved names, and propagation through wrapper chains), so no compiler edit was needed and
+both sides' fixes are kept. Added the accepted `test_ail_pre39.py` (13 refused, 12
+CPython-parity programs, both builds) and registered it in `ail_check.MODULES`. Probes in
+`/tmp/probes`: 8 matching (`p39_match_{values,boundary,nonfinite,shadow,unknown,attribute,alias,empty}`)
+and 14 refused by name (`p39_refuse_{literal,negative,boundary,keyword,positional,kwonly,identity,constant,constant_keyword,items,tuple,dict,numeric_key,expression}`),
+all against CPython on both builds. `python3 tools/diff_ids.py` is not present in this tree;
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
