@@ -381,6 +381,9 @@ class ClosureMixin:
         self._need_callv()
         t = ctx.tmp()
         classes = getattr(self, 'class_values', ())
+        busy = getattr(self, 'class_attr_busy', ())
+        if busy:
+            classes = [c for c in classes if c not in busy]
         if classes:
             from pyboxed2 import _PreC
             # a class held in a variable: construct it, as calling the class by name does

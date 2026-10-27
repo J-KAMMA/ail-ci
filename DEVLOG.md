@@ -1,3 +1,38 @@
+## 2026-10-27 -- pre362: a lambda in a comprehension keeps its variable (job-pre362-10280246)
+
+The pre347 reviewer's defect reproduces on this tree in a wider form than recorded. The exact
+`x = 99; class C: ys = [(lambda: x)() for x in range(3)]` program is still the base tree's named
+refusal (`not in the subset: closures nested too deeply to settle their shared names`), but any
+class-body comprehension that contains a lambda crashes both builds with an uncaught
+`RecursionError` (`class C: ys = [(lambda: 7)() for x in range(3)]`, also `(lambda x: x)(7)` and a
+lambda in a condition), renamed or not. The traceback is the pre-existing cycle `expr_Call` ->
+`boxclosure.call_value` -> `_call_class` -> `_class_attr_value` -> the same comprehension ->
+`expr_Call`: `call_value` emits a class-construction branch for every class in `class_values`, and
+`_call_class` copies class attributes, eagerly re-compiling the attribute being compiled. The
+pre347 `keep` rule only hid the spelling where the lambda reads the target.
+
+The same rename gap also gave a silent wrong answer for a function-local target:
+`def f(): x = 99; ys = [(lambda: x)() for x in range(3)]; return x, ys` printed
+`(99, [99, 99, 99])` where CPython prints `(99, [0, 1, 2])`, because the target was renamed and the
+lambda body kept reading `x`.
+
+`compscope._Scope` now resolves a lambda body's names against the enclosing comprehensions (a
+lambda parameter shadows the target; defaults still evaluate in the enclosing scope), so renaming
+a target renames the lambda's read too; the class-body `keep` set is built from those resolved
+reads rather than every `Name` in the lambda, so a shadowing parameter no longer suppresses the
+rename. `call_value` skips the class whose attribute is currently being compiled
+(`class_attr_busy`, pushed by `_init_class_attrs` and `_class_attr_value`), which breaks the cycle.
+
+Probes in `/tmp/probes` on both builds: `p9` (module target) and `p1`/`p2`/`p4`-`p6`/`p8`/`p10`,
+`q3`/`q5`, `r2`-`r5` (class-body lambda reads the target) are refused by name with exit 1 and no
+`RecursionError`; `q4`, `u1`-`u9` (function/module routes: argument, list item, attribute, dict
+value, strings, empty/negative, two targets, late binding, nested function), `q2`, `r6`-`r12`,
+`s1`/`s2`/`s4`-`s6`, `r1`, `t2`-`t5` and the pre347 class programs match CPython. Added
+`AIL_CURRENT/test_ail_pre362.py` (2 tests, 26 programs) and registered it in `ail_check.MODULES`
+and `tools/ci_shards.json`. Final-state tests: test_ail_pre362, test_ail_pre347, test_ail_pre304,
+test_ail_pre324, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre351: local constant power is already refused by name (job-pre351-10280022)
 
 The rbrbrbrbrbpre33 review's first pre-existing difference was `x = 10; print(x**40)`, a

@@ -6865,6 +6865,10 @@ class Compiler(boxclosure.ClosureMixin):
     def _init_class_attrs(self, name, ctx):
         """Evaluate a class body's attributes once, at its class-definition statement."""
         saved = ctx.class_locals
+        busy = getattr(self, 'class_attr_busy', None)
+        if busy is None:
+            self.class_attr_busy = busy = []
+        busy.append(name)
         try:
             for _aname, aval, slot in self.classes[name].get('class_attrs', []):
                 # The class body runs in its own namespace: an earlier attribute is visible to a
@@ -6883,6 +6887,7 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
         finally:
             ctx.class_locals = saved
+            busy.pop()
         if name in self.module_names:
             # A module-level assignment to the class name (before or after the definition, or a
             # `global` declaration) rebinds the module slot: do that binding HERE, at the
@@ -6898,12 +6903,18 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('if (g_slots_arr[%d].tag == AIL_T_UNBOUND) {' % slot)
             ctx.indent += 1
             saved = ctx.class_locals
+            busy = getattr(self, 'class_attr_busy', None)
             if cname is not None:
                 ctx.class_locals = self._class_attr_locals(cname, slot)
+                if busy is None:
+                    self.class_attr_busy = busy = []
+                busy.append(cname)
             try:
                 v = self.expr(value, ctx)
             finally:
                 ctx.class_locals = saved
+                if cname is not None:
+                    busy.pop()
             ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
             ctx.indent -= 1
             ctx.emit('}')

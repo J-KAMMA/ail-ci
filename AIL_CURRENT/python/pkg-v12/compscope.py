@@ -31,7 +31,9 @@ def _bound(comp):
 
 class _Scope(ast.NodeVisitor):
     """One function (or the module) body. `uses[id(name node)]` is the comprehension that binds the
-    name there (None: the enclosing function scope); nested defs/lambdas/classes are separate scopes."""
+    name there (None: the enclosing function scope); nested defs and classes are separate scopes,
+    and a lambda body is walked only for the comprehension names an enclosing comprehension binds
+    (its own parameters shadow them, and its other names are not the enclosing scope's)."""
 
     def __init__(self):
         self.stack = []             # enclosing comprehensions, innermost last
@@ -41,16 +43,22 @@ class _Scope(ast.NodeVisitor):
         self.comps = {}             # id(comp) -> comp
         self.scope_names = set()    # names used in the enclosing scope proper
         self.class_bodies = []      # class definitions whose body is analysed separately
+        self.lambda_params = []     # parameter names of the lambdas being walked, innermost last
+        self.lambda_reads = set()   # (id(comp), name) a lambda body reads from that comprehension
 
     def visit_Name(self, node):
         owner = None
-        for comp in reversed(self.stack):
-            if node.id in self.bound[id(comp)]:
-                owner = comp
-                break
+        if not any(node.id in params for params in self.lambda_params):
+            for comp in reversed(self.stack):
+                if node.id in self.bound[id(comp)]:
+                    owner = comp
+                    break
         self.resolved.append((node, owner))
         if owner is None:
-            self.scope_names.add(node.id)
+            if not self.lambda_params:
+                self.scope_names.add(node.id)
+        elif self.lambda_params:
+            self.lambda_reads.add((id(owner), node.id))
 
     def visit_arg(self, node):
         self.scope_names.add(node.arg)
@@ -93,22 +101,24 @@ class _Scope(ast.NodeVisitor):
     def visit_Lambda(self, node):
         for expr in node.args.defaults + [d for d in node.args.kw_defaults if d is not None]:
             self.visit(expr)
+        # a comprehension variable is visible in a lambda defined in its body, so resolve the body
+        # too (a renamed target must be renamed in the lambda as well); its other names belong to
+        # the lambda's own scope and are not the enclosing scope's
+        a = node.args
+        params = {x.arg for x in a.posonlyargs + a.args + a.kwonlyargs}
+        if a.vararg:
+            params.add(a.vararg.arg)
+        if a.kwarg:
+            params.add(a.kwarg.arg)
+        self.lambda_params.append(params)
+        try:
+            self.visit(node.body)
+        finally:
+            self.lambda_params.pop()
 
     def visit_ClassDef(self, node):
         self.scope_names.add(node.name)
         self.class_bodies.append(node)
-
-
-def _lambda_loads(node):
-    """Names a lambda nested anywhere in `node` reads (its body and defaults); used only to keep a
-    class-body comprehension target unrenamed when a lambda would otherwise stop sharing its name."""
-    names = set()
-    for child in ast.walk(node):
-        if isinstance(child, ast.Lambda):
-            for name in ast.walk(child):
-                if isinstance(name, ast.Name) and isinstance(name.ctx, ast.Load):
-                    names.add(name.id)
-    return names
 
 
 def _scopes(tree):
@@ -138,10 +148,10 @@ def rename(source):
         scope.scope_names.update(outer_names)
         for statement in body:
             scope.visit(statement)
-        keep = {}               # class-body comps whose target a nested lambda reads
+        keep = {}               # class-body comps a lambda reads the target of: keep the refusal
         if is_class:
-            for key, comp in scope.comps.items():
-                keep[key] = _lambda_loads(comp) & scope.bound[key]
+            for key in scope.comps:
+                keep[key] = {name for owner, name in scope.lambda_reads if owner == key}
         if scope.comps:
             renames = {}        # (id(comp), name) -> fresh identifier
             for key, comp in scope.comps.items():
