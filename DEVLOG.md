@@ -306,6 +306,27 @@ refusal wording was updated, keeping that fix).  `tools/diff_ids.py` is not pres
 tree; `tools/update_manifest.py` was run and `--check` passes.  Probes
 `/tmp/probes/pre1_defaults.py`, `pre1_sources.py`, `pre1_methods_nested.py` match CPython on
 both builds, and `pre1_refuse.py` is refused by name on both.
+## 2026-10-27 -- re-apply pre48: exception argument `repr` and file OSError `args` (job-rbrbpre48-10271116)
+
+Re-applied the accepted pre48 change on the current integration tree. This tree already carried the
+direct `repr(e.args[i])` half (as `_ail_exc_arg_repr`), so that side is kept unchanged rather than
+duplicated; the missing alias refusal was added to `exctext.py`, and the general-path file OSError
+adapter in `filert.py` now builds two-element `args == (errno, strerror)` with the filename kept as
+an attribute instead of appended to `args`. Storing an `e.args[i]` value in a name, list, tuple,
+dict, attribute or user-function argument is refused by name on the typed path, so the default
+build takes the general path, which keeps the argument object; a direct `repr(e.args[i])` keeps the
+argument's own kind (str/int/float/bool/None, negative and out-of-range indices, empty args as
+IndexError). Added and registered `test_ail_pre48.py`. `tools/diff_ids.py` is not present on this
+tree; `tools/update_manifest.py` (then `--check`) passes.
+
+Probes in `/tmp/probes` (all eight run with `cmp.sh`): `p48_direct`, `p48_floats`, `p48_routes`,
+`p48_alias`, `p48_alias_arg`, `p48_empty` and `p48_file` match CPython on both the forced general
+and default builds; `p48_oserror` matches CPython on the default build and is refused by name on
+the forced build (`not in the subset: raising OSError with more than one argument`). Final-state
+modules: test_ail_pre48, test_ail_exception_context, test_ail_exception_values_core,
+test_ail_exception_values_app, test_ail_exception_aggregate_objects, test_ail_exc_str,
+test_ail_excfix, test_ail_raise_from, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (11 modules, 82 tests, 925 s, 0 failed, 1 skipped).
 
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 

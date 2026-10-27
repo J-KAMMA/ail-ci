@@ -574,12 +574,11 @@ static ail_st ailo_raise_os(ail_ctx *cx, int error, const char *message, const c
     v[1] = ail_bi_str_from_utf8(cx, message, (int64_t)strlen(message));
     ail_st st = ail_raise(cx, cx->builtin_cls[ail_bi_oserror_id(error)], v[1]);
     v[2] = ail_exc_as_value(cx);
-    ail_obj args[3] = {ail_box_int(error), v[0], ail_box_none()};
-    int nargs = 2;
-    if (filename) { v[4] = ail_bi_str_from_utf8(cx, filename, (int64_t)strlen(filename)); args[2] = v[4]; nargs = 3; }
-    v[3] = ail_tuple_new(cx, args, nargs);
+    ail_obj args[2] = {ail_box_int(error), v[0]};
+    v[3] = ail_tuple_new(cx, args, 2);
     ail_inst_setattr(cx, v[2], ail_intern(cx, "errno"), ail_box_int(error));
     ail_inst_setattr(cx, v[2], ail_intern(cx, "strerror"), v[0]);
+    if (filename) v[4] = ail_bi_str_from_utf8(cx, filename, (int64_t)strlen(filename));
     ail_inst_setattr(cx, v[2], ail_intern(cx, "filename"), filename ? v[4] : ail_box_none());
     if (filename2) { v[5] = ail_bi_str_from_utf8(cx, filename2, (int64_t)strlen(filename2)); ail_inst_setattr(cx, v[2], ail_intern(cx, "filename2"), v[5]); }
     ail_inst_setattr(cx, v[2], ail_intern(cx, "args"), v[3]);
