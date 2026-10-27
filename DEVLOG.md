@@ -1,3 +1,21 @@
+## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
+
+Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
+only conflict was in `_check_int64_literals`: this tree already carried `_safe_module_containers`,
+`_known_class_attributes` and the class-instance second loop, so all were kept, while the new
+`_all_bound_names` / `_scope_constant_map` pass supplies scalars and safe aliased containers and
+its `program_bound` is passed to `_Int64CallChecker`.  The tree's newer `_int_conversion_outside_int64`
+branch and `_wrapper_int_params(..., attributes)` signature are preserved.  `test_ail_pre322.py` is
+registered next to `test_ail_pre321`, and `tools/ci_shards.json` gained its weight (10.0).
+`tools/diff_ids.py` is not present on this tree.
+
+Probes in `/tmp/probes` (31 programs, both builds via `cmp.sh`): `r01`-`r13` are refused by name
+(`int() of a float outside int64 ... big integer`) for module/function/chain/tuple/dict/
+negative/computed-index/wrapper/boundary and builtin-`len`/`print`/`str`/`repr` aliases;
+`m01`-`m18` match CPython (in-range list/tuple/dict/nested aliases, mutated/rebound/empty/printed
+aliases, module and enclosing `len`/`repr`/`print` shadows, plus values through an argument, a
+list item, an attribute and a dict value).
+
 ## 2026-10-27 -- pre351: local constant power is already refused by name (job-pre351-10280022)
 
 The rbrbrbrbrbpre33 review's first pre-existing difference was `x = 10; print(x**40)`, a
