@@ -566,7 +566,11 @@ static void ail_die(const char *w) {
        failure path a trap already was -- never on the path that succeeds. */
     if (ail_exc_top >= 0) {
         int k = ail_exc_kind_of(w);
-        if (k) { ail_exception_store(&ail_exc_value, NULL, 1); ail_exc_code = k; ail_exc_unwind(); ail_exc_throw(); }
+        if (k) {
+            ail_exception_store(&ail_exc_value,
+                                ail_exception_new(k, (const uint8_t *)w, (int64_t)strlen(w), 1), 1);
+            ail_exc_code = k; ail_exc_unwind(); ail_exc_throw();
+        }
     }
     /* `fflush(stdout)` here is F3's correctness fix, not a new feature (DESIGN_FOUNDATION_20260914.md
        section 5): `_Exit` never flushes stdio buffers, and stdout is fully buffered whenever it is

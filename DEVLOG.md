@@ -1,3 +1,24 @@
+## 2026-10-27 -- pre329: an uncaught nested-list deletion keeps its IndexError text (job-pre329-10271938)
+
+The pre307 reviewer's first pre-existing item reproduced on the default build: with an open `try`
+that does not catch it, `del rows[i][j]` into a nested list (a list literal, an argument, a class
+attribute, a dict value, an alias and an empty inner list) prints just `IndexError` where CPython
+says `IndexError: list assignment index out of range`.  `ail_die()`'s conversion to a catchable
+exception stored an empty payload, so the re-raised exception had no text; it now stores the trap
+message, and `exctext` still swaps in CPython's wording when the program reads exception text.
+The general path already matched.  Added `test_ail_pre329.py` (7 uncaught routes plus a
+caught/`finally` route, both builds) and registered it in `ail_check.MODULES` and
+`tools/ci_shards.json`.
+
+Probes in `/tmp/probes/pre329` via `cmp.sh` on both builds: `p09`, `p11` and `p12` reproduce and
+now match CPython; `p13` and `p14` (caught and bare re-raise, which read the text) still match.
+Unchanged pre-existing: the second item (`del ps[-1]` on a list of tuples does not remove the
+element, both builds) and the third (an uncaught typed list delete without an open `try` omits
+the `IndexError:` prefix).  The full-C pins in `test_ail_numeric_bindings` and
+`test_ail_record_initializers` were regenerated for the changed DIE block.  Final-state tests:
+test_ail_pre329, test_ail_pre272, test_ail_numeric_bindings, test_ail_record_initializers,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes.
 ## 2026-10-27 -- pre319: calling an earlier function-valued class attribute is already refused by name (job-pre319-10271538)
 
 The pre304 reviewer's first pre-existing item was a class body that calls a function bound
