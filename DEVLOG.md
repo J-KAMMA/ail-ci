@@ -1,3 +1,21 @@
+## 2026-10-27 -- pre306 review: instance folding ignores setattr (job-pre306-10271301)
+
+The review found that the new instance-attribute folding still folded a literal `self.attr` after
+`setattr(instance, 'attr', in_range)` (literal or dynamic name), so a program CPython runs as `1`
+was falsely refused with the out-of-int64 wording.  `_known_class_attributes` now marks an
+instance attribute unsafe when any `setattr` names it, and a `setattr` with a non-constant name
+keeps every attribute read through an instance unknown (including a class attribute fallback).
+A direct class read (`int(C.v)`) is still folded and refused when an unrelated dynamic `setattr`
+targets an instance.  `AIL_CURRENT/test_ail_pre306.py` adds four matching cases (literal and
+dynamic names, instance `self.attr` and class-attribute fallback) and one named-refusal case.
+Probes in `/tmp/probes`: `pre306_attr_setattr_instance`, `pre306_attr_setattr_dynamic`,
+`pre306_attr_setattr_routes`, `pre306_attr_setattr_boundary`, `pre306_attr_setattr_alias`,
+`pre306_attr_setattr_int`, `pre306_attr_setattr_multiple`, `pre306_attr_setattr_dict_name`,
+`pre306_attr_setattr_attr_name`, `pre306_attr_setattr_class_attr_fallback_constant` and
+`..._dynamic` match CPython on both builds; `pre306_attr_setattr_class_direct_dynamic` is refused
+by name on both builds.  `setattr` on a class object and `C.v = ...` stay unsupported on both
+builds (pre-existing).  `tools/update_manifest.py --check` passes.
+
 ## 2026-10-27 -- pre306: int() of an out-of-int64 float through an attribute is refused by name (job-pre306-10271301)
 
 The first still-differing pre-existing item from the rbrbpre31 review was `int(C().v)` with a class

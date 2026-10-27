@@ -480,7 +480,9 @@ def _known_class_attributes(tree, module_known):
     A class attribute is folded only when the class is a plain top-level class bound once and no
     other attribute store of that name exists.  An instance attribute is folded only from one
     direct ``self.attr = value`` in ``__init__`` and when no other store of that name exists, so a
-    later mutation (``c.attr = ...``) is never folded.  Anything else stays unknown.
+    later mutation (``c.attr = ...`` or ``setattr(c, 'attr', ...)``) is never folded.  A
+    ``setattr`` with a dynamic name keeps every attribute read through an instance unknown.
+    Anything else stays unknown.
     """
     counts = _binding_counts(tree.body)
     class_nodes = {}
@@ -508,12 +510,15 @@ def _known_class_attributes(tree, module_known):
         if isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del)):
             stores.setdefault(node.attr, []).append(node)
     setattr_names = set()
+    dynamic_setattr = False
     for node in ast.walk(tree):
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                and node.func.id == 'setattr' and len(node.args) >= 2
-                and isinstance(node.args[1], ast.Constant)
-                and isinstance(node.args[1].value, str)):
-            setattr_names.add(node.args[1].value)
+                and node.func.id == 'setattr'):
+            if (len(node.args) >= 2 and isinstance(node.args[1], ast.Constant)
+                    and isinstance(node.args[1].value, str)):
+                setattr_names.add(node.args[1].value)
+            else:
+                dynamic_setattr = True
     classes = {}
     for name, node in class_nodes.items():
         info = {'class': {}, 'instance': {}, 'unsafe': set(), 'constructible': True}
@@ -550,7 +555,8 @@ def _known_class_attributes(tree, module_known):
                         allowed.setdefault(target.attr, []).append((target, stmt.value))
         allowed_ids = {id(target) for entries in allowed.values() for target, _value in entries}
         for attr, entries in allowed.items():
-            if len(entries) != 1 or attr in methods:
+            if (len(entries) != 1 or attr in methods or attr in setattr_names
+                    or dynamic_setattr):
                 info['unsafe'].add(attr)
                 continue
             if any(id(store) not in allowed_ids for store in stores.get(attr, ())):
@@ -566,6 +572,9 @@ def _known_class_attributes(tree, module_known):
             if attr in setattr_names or any(id(store) not in allowed_ids
                                             for store in stores.get(attr, ())):
                 del info['class'][attr]
+        if dynamic_setattr:
+            info['unsafe'].update(info['class'])
+            info['unsafe'].update(info['instance'])
         classes[name] = info
     return _KnownClassAttributes(classes, aliases)
 

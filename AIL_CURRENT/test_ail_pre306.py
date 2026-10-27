@@ -145,6 +145,15 @@ class C:
 c = C()
 print(int(c.v))
 ''',
+    'class_attribute_with_unrelated_dynamic_setattr': '''
+class C:
+    v = 1e300
+
+c = C()
+name = 'v'
+setattr(c, name, 1.5)
+print(int(C.v))
+''',
 }
 
 MATCH = {
@@ -173,6 +182,42 @@ class C:
 
 c = C()
 c.v = 9.0e18
+print(int(c.v))
+''',
+    'setattr_instance_constant_name': '''
+class C:
+    def __init__(self):
+        self.v = 1e300
+
+c = C()
+setattr(c, 'v', 1.5)
+print(int(c.v))
+''',
+    'setattr_instance_dynamic_name': '''
+class C:
+    def __init__(self):
+        self.v = 1e300
+
+c = C()
+name = 'v'
+setattr(c, name, 1.5)
+print(int(c.v))
+''',
+    'setattr_instance_constant_class_attribute': '''
+class C:
+    v = 1e300
+
+c = C()
+setattr(c, 'v', 1.5)
+print(int(c.v))
+''',
+    'setattr_instance_dynamic_class_attribute': '''
+class C:
+    v = 1e300
+
+c = C()
+name = 'v'
+setattr(c, name, 1.5)
 print(int(c.v))
 ''',
     'in_range_containers': '''
