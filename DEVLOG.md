@@ -1,3 +1,26 @@
+## 2026-10-27 -- pre378: a subscript of an instance names its class (job-pre378-10280656)
+
+The pre354 review's first still-differing item reproduced on both builds: ``A()[1]`` (a class
+with no ``__getitem__``) raised ``TypeError: 'instance' object is not subscriptable`` where
+CPython names the class (``'A' object is not subscriptable``); the slice spelling
+(``A()[1:2]``) differed the same way.  The v2 runtime's ``ail_op_getitem`` /
+``ail_op_getslice`` fallbacks asked the tag table, which knows only the generic instance tag;
+they now call ``ail__tname_c``, the class-name helper attribute errors already use, and
+``dunderrt``'s string-matched patch of the getslice fallback was updated to match.  A subclass
+names the subclass, and builtin values keep their type names.  The review's other items are
+unchanged: ``p08`` (a dict with a slice key) already matches CPython on this tree, and the
+nested ``def slice`` / ``class slice`` programs are still refused by name.  The class object
+itself (``A[1]``) is a separate pre-existing difference and is untouched.
+
+Probes in ``/tmp/probes/pre378`` (13 programs, both builds via ``cmp.sh``): ``p08_dict_slice``,
+``p09_instance_name``, ``p09_routes``, ``p09_slice_routes``, ``p09_uncaught``,
+``p09_control_getitem`` and ``r11_nested_def_module`` match CPython; ``p11``, ``r12``-``r16``
+are refused by name (``a slice object the general path could not build`` or ``a nested class
+definition (slice)``).  Added ``AIL_CURRENT/test_ail_pre378.py`` (9 caught programs plus an
+uncaught one, both builds) and registered it in ``ail_check.MODULES`` and
+``tools/ci_shards.json``.  Final-state tests: test_ail_pre378, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.  ``tools/update_manifest.py`` was run and
+``--check`` passes.
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The

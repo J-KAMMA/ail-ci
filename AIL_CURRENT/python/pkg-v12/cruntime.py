@@ -16091,7 +16091,7 @@ static inline ail_st ail_op_getitem(ail_ctx *cx, ail_obj *out, ail_obj c, ail_ob
             if (i >= 0 ? ord >= n : (uint64_t)(~i) >= n) return ail_raise_c(cx, AIL_B_INDEXERROR, "range object index out of range");
             *out = ail_box_int(ail__range_at(r->start, r->step, ord)); return AIL_OK;
         }
-        default: { char buf[64]; snprintf(buf, sizeof buf, "'%s' object is not subscriptable", ail_type_name(c.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
+        default: { char buf[64]; snprintf(buf, sizeof buf, "'%s' object is not subscriptable", ail__tname_c(c)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
     }
 }
 static inline ail_st ail_op_setitem(ail_ctx *cx, ail_obj c, ail_obj key, ail_obj val) {
@@ -16151,7 +16151,7 @@ static inline ail_st ail_op_getslice(ail_ctx *cx, ail_obj *out, ail_obj c, int h
         *out = ail_range_new(cx, (int64_t)ns, (int64_t)ne, (int64_t)nd);
         return AIL_OK;
     }
-    char buf[64]; snprintf(buf, sizeof buf, "'%s' object is not subscriptable", ail_type_name(c.tag));
+    char buf[64]; snprintf(buf, sizeof buf, "'%s' object is not subscriptable", ail__tname_c(c));
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
 }
 

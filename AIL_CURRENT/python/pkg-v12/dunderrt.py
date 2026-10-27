@@ -355,11 +355,11 @@ def _edits(inplace=False):
               '            ail_st e = ail__eq_err; ail__eq_scope = sv_scope; ail__eq_err = sv_err; if (e) return e;\n'
               '            *out = found; return AIL_OK;\n'))
     # a slice of an instance: there are no slice objects, so __getitem__ cannot be given one (named, not "not subscriptable")
-    e.append(('    char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable", ail_type_name(c.tag));\n'
+    e.append(('    char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable", ail__tname_c(c));\n'
               '    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n}\n\n/* ====',
               '    if (c.tag == AIL_T_INST && ail_dun2(c, AIL_D2_GETITEM))\n'
               '        return ail_raise_c(cx, AIL_B_NOTIMPLEMENTEDERROR, "slicing an instance through __getitem__ is not supported: this path has no slice objects");\n'
-              '    char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable", ail_type_name(c.tag));\n'
+              '    char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable", ail__tname_c(c));\n'
               '    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n}\n\n/* ===='))
     # hashing
     genexpr_hash_refusal = (
