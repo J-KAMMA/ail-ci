@@ -43,7 +43,7 @@ import buildcache
 import shadowing
 import fastwalk
 fastwalk.install()      # the same ast.walk in half the time, for every pass of this run
-from pyfront import Unsupported, to_pipeline_c
+from pyfront import Unsupported, to_pipeline_c, _number_constant
 import pyfunc
 from pyfunc import to_c as func_to_c
 from pyfunc import _module_const_scalar, module_table_refusal, _written_globals
@@ -692,6 +692,50 @@ last_fallback_reason = None
 last_fallback_line = None
 
 
+def _refuse_round_at_int64_boundary(source):
+    """Name the one `round(<float constant>)` whose int64 result cannot be used by abs()/-/* -1.
+
+    `round(x)` with one argument returns an int.  AIL's int is int64 (SEMANTICS section 1), and
+    CPython's is unbounded.  At the lower boundary the rounded value (-2**63) is representable,
+    but its absolute value is not: `abs`, unary `-` and `* -1` must overflow, where CPython returns
+    2**63.  The value is known at compile time, so refuse the source there rather than compiling a
+    program that stops later with `integer overflow` (found by the pre54 review as `z_intmin`).
+    A two-argument round() returns a float and is left alone; an int argument is exact already.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return
+    # A program that binds `round` itself is calling its own function, not this built-in.
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == 'round':
+            return
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == 'round':
+            return
+        if isinstance(node, ast.arg) and node.arg == 'round':
+            return
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if (alias.asname or alias.name.split('.')[0]) == 'round':
+                    return
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'round' and not node.keywords and len(node.args) == 1):
+            continue
+        value = _number_constant(node.args[0])
+        if type(value) is not float or value != value or value in (float('inf'), float('-inf')):
+            continue
+        if value <= -(1 << 63) or value >= (1 << 63):
+            refusal = Unsupported(
+                'round() of a constant float at the int64 boundary is refused: the rounded value '
+                'is at or outside the signed 64-bit range, so abs(), unary - and * -1 cannot '
+                'represent its magnitude (CPython\'s int is unbounded).\n'
+                '  write instead: keep the value a float and call abs() on that, or use a value '
+                'whose absolute value is below 2**63')
+            refusal.source_line = getattr(node, 'lineno', None)
+            raise refusal
+
+
 def _source_line_marker(line):
     """`ail-source-line: N` on its own stderr line, for ail_chatgpt.py to turn into file:line:col.
     Printed only when it asks for it (AIL_REPORT_SOURCE_LINE=1); it removes the line from the text."""
@@ -734,6 +778,7 @@ def build(source, out, strict=True, report=None, force_general=False):
     # A module-level definition shadowing a built-in (`def abs`, `def heappush`) is renamed before
     # either path sees it, so the general path's name-keyed dispatch honours it too (shadowing.py).
     source, shadow = shadowing.rename_all(source, Unsupported)
+    _refuse_round_at_int64_boundary(source)
     try:
         result = _build_unshadowed(source, out, strict, report, force_general)
         if last_fallback_reason is not None and shadow:
