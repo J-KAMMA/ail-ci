@@ -3302,6 +3302,24 @@ the default build and compares both with CPython 3.12.
 
 The fused emitter in this tree already short-circuited equivalently, so the code side of this
 re-application was a no-op; the regression test and its registration are new.
+## 2026-10-24 - re-apply assert message value fix (job-rbpre15-10241827)
+
+Re-applied the accepted pre15 change (assert messages keep their own value in `e.args`) on top of
+the current tree: the typed path (`pyfunc.py`) now stringifies a numeric message only when no
+exception text is read (`exctext.ACTIVE` false), and the general path keeps the message object for
+`e.args`. The conflict in `pyboxed2.py` was resolved by keeping the current tree's unconditional
+object form, which already covers the accepted change's semantics (and tuple/list/dict messages);
+`test_ail_pre15.py` and the pre15 DIFFERENCES row are imported as accepted.
+
+## 2026-10-23 - assert message keeps its value in e.args (job-pre15-10240045)
+
+`assert False, 42` now raises `AssertionError(42)`, so `e.args` is `(42,)` (CPython's value), not
+`('42',)`. The typed path converts a numeric message with `str()` only when the program does not
+read `e.args`; otherwise it builds the exception with the number itself. The general path now keeps
+the message value for `e.args` whenever the program reads it (also covering list/dict/tuple
+messages). Uncaught output stays `AssertionError: 42`. New `test_ail_pre15.py` covers int, float
+and bool messages, int64 limits, negative/empty/str messages, and values arriving through an
+argument, a list item, an attribute and a dict value, on the typed and general paths.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
