@@ -17,7 +17,7 @@ Probes in `/tmp/probes`: the bound-method programs `pre316_bound_user`, `pre316_
 both builds; `pre316_field_shadow_read` and `pre316_partial_still_works` match CPython on both,
 and all 15 earlier `pre316_*` probes keep their recorded results.  Final-state tests:
 `test_ail_pre316`, `test_ail_pre279`, `test_ail_safetynet`, `test_ail_files`,
-`test_ail_corpus_findings3` (5 modules, 206 s, 0 failed).  `tools/update_manifest.py --check`
+`test_ail_corpus_findings3` (5 modules, 157 s, 0 failed).  `tools/update_manifest.py --check`
 passes.
 ## 2026-10-27 -- pre316: an attribute-assigned partial is called as the field (job-pre316-10271448)
 
