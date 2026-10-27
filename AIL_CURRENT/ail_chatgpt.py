@@ -422,10 +422,11 @@ class _KnownClassValue:
 
 class _KnownInstance:
     """An instance of a class whose literal class and __init__ attributes this pass can read."""
-    __slots__ = ('name',)
+    __slots__ = ('name', 'arguments')
 
-    def __init__(self, name):
+    def __init__(self, name, arguments=None):
         self.name = name
+        self.arguments = arguments or {}
 
 
 class _KnownClassAttributes:
@@ -440,13 +441,72 @@ class _KnownClassAttributes:
         info = self.classes.get(cls)
         return _UNKNOWN if info is None else info['class'].get(attr, _UNKNOWN)
 
-    def instance_value(self, cls, attr):
+    def instance_value(self, cls, attr, arguments=None):
         info = self.classes.get(cls)
         if info is None or attr in info['unsafe']:
             return _UNKNOWN
         if attr in info['instance']:
             return info['instance'][attr]
+        parameter = info['instance_param'].get(attr)
+        if parameter is not None:
+            if arguments is None:
+                return _UNKNOWN
+            return arguments.get(parameter, _UNKNOWN)
         return info['class'].get(attr, _UNKNOWN)
+
+
+def _constructor_parameters(init):
+    """The bindable signature of ``__init__`` (or an empty one when there is none)."""
+    if init is None:
+        return {'positional': [], 'kwonly': [], 'defaults': {}, 'kwdefaults': {},
+                'vararg': False, 'kwarg': False}
+    args = init.args
+    positional = [arg.arg for arg in (*args.posonlyargs, *args.args)]
+    if positional and positional[0] == 'self':
+        positional = positional[1:]
+    defaults = {}
+    for name, node in zip(positional[len(positional) - len(args.defaults):], args.defaults):
+        value = _constant_value(node, lambda unused: _UNKNOWN, lambda unused: True, {})
+        defaults[name] = value
+    kwonly = [arg.arg for arg in args.kwonlyargs]
+    kwdefaults = {}
+    for name, node in zip(kwonly, args.kw_defaults):
+        if node is not None:
+            kwdefaults[name] = _constant_value(node, lambda unused: _UNKNOWN,
+                                               lambda unused: True, {})
+    return {'positional': positional, 'kwonly': kwonly, 'defaults': defaults,
+            'kwdefaults': kwdefaults, 'vararg': args.vararg is not None,
+            'kwarg': args.kwarg is not None}
+
+
+def _bind_constructor_arguments(info, node, resolve):
+    """Bind a constructor call to its ``__init__`` parameters, or return None when unsafe."""
+    if any(isinstance(argument, ast.Starred) for argument in node.args):
+        return None
+    if any(keyword.arg is None for keyword in node.keywords):
+        return None
+    positional = info['constructor']['positional']
+    kwonly = info['constructor']['kwonly']
+    bound = {}
+    if len(node.args) > len(positional):
+        return None
+    for name, argument in zip(positional, node.args):
+        bound[name] = resolve(argument)
+    for keyword in node.keywords:
+        if keyword.arg not in positional and keyword.arg not in kwonly:
+            return None
+        bound[keyword.arg] = resolve(keyword.value)
+    for name in positional:
+        if name not in bound:
+            if name not in info['constructor']['defaults']:
+                return None
+            bound[name] = info['constructor']['defaults'][name]
+    for name in kwonly:
+        if name not in bound:
+            if name not in info['constructor']['kwdefaults']:
+                return None
+            bound[name] = info['constructor']['kwdefaults'][name]
+    return bound
 
 
 def _contains_known_instance(value):
@@ -526,7 +586,8 @@ def _known_class_attributes(tree, module_known):
                 dynamic_setattr = True
     classes = {}
     for name, node in class_nodes.items():
-        info = {'class': {}, 'instance': {}, 'unsafe': set(), 'constructible': True}
+        info = {'class': {}, 'instance': {}, 'instance_param': {}, 'unsafe': set(),
+                'constructible': True}
         methods = {stmt.name for stmt in node.body if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))}
         init = None
         for stmt in node.body:
@@ -546,7 +607,9 @@ def _known_class_attributes(tree, module_known):
                                     lambda unused: True, {})
             if value is not _UNKNOWN:
                 info['class'][target] = value
+        info['constructor'] = _constructor_parameters(init)
         allowed = {}
+        init_bindings = _binding_counts(init.body) if init is not None else {}
         if init is not None:
             args = init.args
             required = [arg for arg in (*args.posonlyargs, *args.args) if arg.arg != 'self']
@@ -567,9 +630,18 @@ def _known_class_attributes(tree, module_known):
             if any(id(store) not in allowed_ids for store in stores.get(attr, ())):
                 info['unsafe'].add(attr)
                 continue
-            value = _constant_value(entries[0][1], lambda n: module_known.get(n, _UNKNOWN),
+            value_node = entries[0][1]
+            value = _constant_value(value_node, lambda n: module_known.get(n, _UNKNOWN),
                                     lambda unused: True, {})
-            if value is _UNKNOWN:
+            parameter = None
+            if (isinstance(value_node, ast.Name) and isinstance(value_node.ctx, ast.Load)
+                    and value_node.id in info['constructor']['positional']
+                    + info['constructor']['kwonly']
+                    and not init_bindings.get(value_node.id)):
+                parameter = value_node.id
+            if parameter is not None:
+                info['instance_param'][attr] = parameter
+            elif value is _UNKNOWN:
                 info['unsafe'].add(attr)
             else:
                 info['instance'][attr] = value
@@ -580,6 +652,7 @@ def _known_class_attributes(tree, module_known):
         if dynamic_setattr:
             info['unsafe'].update(info['class'])
             info['unsafe'].update(info['instance'])
+            info['unsafe'].update(info['instance_param'])
         classes[name] = info
     return _KnownClassAttributes(classes, aliases)
 
@@ -660,7 +733,7 @@ def _constant_value(node, lookup, global_name, passthrough, attributes=None):
         if attributes is not None and isinstance(base, _KnownClassValue):
             return attributes.class_value(base.name, node.attr)
         if attributes is not None and isinstance(base, _KnownInstance):
-            return attributes.instance_value(base.name, node.attr)
+            return attributes.instance_value(base.name, node.attr, base.arguments)
         if node.attr.startswith('f') and node.attr[1:].isdigit() and isinstance(base, tuple):
             index = int(node.attr[1:])
             if index < len(base):
@@ -695,10 +768,13 @@ def _constant_value(node, lookup, global_name, passthrough, attributes=None):
         cls = value.name if isinstance(value, _KnownClassValue) else None
         if cls is None and attributes is not None:
             cls = attributes.class_of(node.func.id)
-        if (cls is not None and not node.args and not node.keywords
-                and attributes is not None and cls in attributes.classes
-                and attributes.classes[cls]['constructible']):
-            return _KnownInstance(cls)
+        if (cls is not None and attributes is not None and cls in attributes.classes):
+            arguments = _bind_constructor_arguments(
+                attributes.classes[cls], node,
+                lambda argument: _constant_value(argument, lookup, global_name, passthrough,
+                                                 attributes))
+            if arguments is not None:
+                return _KnownInstance(cls, arguments)
         if node.func.id in passthrough:
             name, index = passthrough[node.func.id]
             argument = _bound_argument(node, name, index)
@@ -755,7 +831,7 @@ def _passthrough_functions(tree, module_counts):
     return functions
 
 
-def _parameter_source(node, mapped, passthrough, local):
+def _parameter_source(node, mapped, passthrough, local, attributes=None):
     if isinstance(node, ast.Name) and node.id in mapped:
         return node.id
     if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
@@ -764,11 +840,35 @@ def _parameter_source(node, mapped, passthrough, local):
         name, index = passthrough[node.func.id]
         argument = _bound_argument(node, name, index)
         if argument is not None:
-            return _parameter_source(argument, mapped, passthrough, local)
+            return _parameter_source(argument, mapped, passthrough, local, attributes)
+    if (isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load)
+            and isinstance(node.value, ast.Call) and attributes is not None):
+        call = node.value
+        if (isinstance(call.func, ast.Name) and isinstance(call.func.ctx, ast.Load)
+                and call.func.id not in local
+                and not any(isinstance(argument, ast.Starred) for argument in call.args)
+                and not any(keyword.arg is None for keyword in call.keywords)):
+            cls = attributes.class_of(call.func.id)
+            info = attributes.classes.get(cls) if cls is not None else None
+            if info is not None and node.attr not in info['unsafe']:
+                parameter = info['instance_param'].get(node.attr)
+                positional = info['constructor']['positional']
+                if parameter is not None and parameter in positional:
+                    index = positional.index(parameter)
+                    if index < len(call.args):
+                        argument = call.args[index]
+                    else:
+                        argument = next((keyword.value for keyword in call.keywords
+                                         if keyword.arg == parameter), None)
+                    if argument is not None:
+                        source = _parameter_source(argument, mapped, passthrough, local,
+                                                   attributes)
+                        if source is not None:
+                            return source
     return None
 
 
-def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough):
+def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attributes):
     candidates = {}
     for fn in tree.body:
         if (not isinstance(fn, ast.FunctionDef) or fn.decorator_list
@@ -790,7 +890,7 @@ def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough):
         for sub in _shallow_walk(fn.body):
             if (not int_shadowed and isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name)
                     and sub.func.id == 'int' and len(sub.args) == 1 and not sub.keywords):
-                source = _parameter_source(sub.args[0], mapped, passthrough, local)
+                source = _parameter_source(sub.args[0], mapped, passthrough, local, attributes)
                 if source is not None and source not in rebound:
                     used[source] = mapped[source]
         if used:
@@ -812,7 +912,7 @@ def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough):
                     argument = _bound_argument(sub, parameter, index)
                     if argument is None:
                         continue
-                    source = _parameter_source(argument, mapped, passthrough, local)
+                    source = _parameter_source(argument, mapped, passthrough, local, attributes)
                     if source is not None and source not in rebound:
                         used[source] = mapped[source]
             if used != functions.get(name, {}):
@@ -1122,7 +1222,7 @@ def _check_int64_literals(tree):
                        or (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == 'int')
                        for node in ast.walk(tree))
     passthrough = _passthrough_functions(tree, module_counts)
-    int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough)
+    int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attributes)
     _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes).visit(tree)
     maxsplit = _maxsplit_constant_nodes(tree)
     nodes = [tree]
