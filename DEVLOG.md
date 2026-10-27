@@ -1,3 +1,31 @@
+## 2026-10-27 -- pre366: a wrapper reached through an alias is followed by the constant checks (job-pre366-10280408)
+
+The pre349 reviewer's `r12` reproduced on both builds: a wrapper called through an alias
+variable (`q = power`) compiled and then stopped with `integer overflow` where CPython keeps
+the exact unbounded result.  The same shape reproduced for a wrapper returning
+`base ** exponent`, one returning `pow(base, exponent)`, and an `int()` wrapper.
+
+`ail_chatgpt._add_function_aliases` now adds module-level `q = wrapper` names to the int()/float
+wrapper map, so an out-of-int64 value reaching an aliased `int()` wrapper is refused by name
+with the existing `int() of a float outside int64` wording.  `_pow_wrapper_functions` and
+`_pow_wrapper_scope` follow a module function whose body is exactly one returned `**`/`pow`
+through direct and aliased calls (and alias chains), in module and function scopes.  Constant
+operands whose exact result leaves int64 are refused with `int64 constant expression out of
+range`; an aliased power wrapper whose operands are not statically known is refused by name
+because its result can leave int64.  Safe constants, `q(2, 62)`, a negative exponent, the safe
+base -1 with a run-time exponent and an in-range aliased `int()` conversion still match CPython.
+A direct wrapper call with a run-time operand keeps its previous behaviour.
+
+Added `AIL_CURRENT/test_ail_pre366.py` and registered it in `ail_check.MODULES` and
+`tools/ci_shards.json`; added DIFFERENCES row `C?-job-pre366-10280408-1`.  Probes in
+`/tmp/probes/pre366` on both builds: `p01`, `p05`, `p07`, `p09`, `p15`, `p16`, `p22`, `p23`
+and `p24` match CPython; `p03`, `p04`, `p06`, `p08`, `p10`, `p13`, `p17`-`p21` and `p25` are
+refused by name; `p02`, `p11`, `p12` and `p14` are refused by name as aliased wrappers with
+run-time operands.  Final
+tests: `test_ail_pre366`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`
+and the related power/wrapper modules.  `tools/update_manifest.py` was run and `--check`
+passes.
+
 ## 2026-10-27 -- pre351: local constant power is already refused by name (job-pre351-10280022)
 
 The rbrbrbrbrbpre33 review's first pre-existing difference was `x = 10; print(x**40)`, a
