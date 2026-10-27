@@ -1,3 +1,23 @@
+## 2026-10-27 -- re-apply pre289: collision call through a function-return receiver (job-rbpre289-10270940)
+
+Re-applying the accepted pre289 change on the current integration tree.  Its target difference
+(`make(4).f()` printed the method's -1 where CPython calls the instance field and prints 40) is
+already fixed here by pre279: the instance table is consulted before both the static and the
+dynamic method dispatch, so every pre289 route matches CPython on both builds.  The accepted
+named refusal is therefore not added (it would turn programs that pre279 now compiles correctly
+into refusals); keeping the pre279 fix is the conflict resolution.  Added
+`AIL_CURRENT/test_ail_pre289.py` (7 tests, both builds) with the direct, V1, annotation, chain,
+assigned, argument, list, dict, attribute, alias, subclass and conditional routes, boundaries
+(0, negative, +/-2**62), arguments and value types, a missing field, a non-callable field, two
+unrelated returns, a mixed C/A return and a non-class return, and registered it in
+`ail_check.MODULES`.  Probes in `/tmp/probes/p289` (`direct`, `v1`, `annotated`, `chain`,
+`assigned`, `argument`, `list`, `dict`, `attribute`, `alias`, `subclass`, `conditional`,
+`boundaries`, `arguments`, `field_absent`, `noncallable_return`, `mixed`, `method_args_types`,
+`unrelated`, `unrelated_conditional`, `non_class`) all match CPython on both builds; `deleted`
+is refused by name for the unrelated pre-existing `del` on an attribute.  `tools/diff_ids.py`
+is not present on this tree; `tools/update_manifest.py` was run and `--check` passes.  Final-state
+tests: test_ail_pre289, test_ail_pre279, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
