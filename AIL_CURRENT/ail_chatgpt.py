@@ -808,6 +808,239 @@ def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough):
     return functions
 
 
+def _index_slice_ok(node, params, rebound):
+    if isinstance(node, ast.Constant) and type(node.value) in (bool, int, str):
+        return True
+    if (isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub))
+            and isinstance(node.operand, ast.Constant) and type(node.operand.value) is int):
+        return True
+    return isinstance(node, ast.Name) and node.id in params and node.id not in rebound
+
+
+def _index_path(node, params, rebound):
+    slices = []
+    while isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load):
+        slices.append(node.slice)
+        node = node.value
+    if (not slices or not isinstance(node, ast.Name) or node.id not in params
+            or node.id in rebound):
+        return None
+    slices.reverse()
+    if not all(_index_slice_ok(item, params, rebound) for item in slices):
+        return None
+    return node.id, tuple(slices)
+
+
+def _literal_index_path(path):
+    return all(not isinstance(item, ast.Name) for item in path)
+
+
+def _index_int_paths(fn, rebound):
+    params = {arg.arg for arg in (*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs)}
+    paths = set()
+    for node in _shallow_walk(fn.body):
+        if (not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name)
+                or node.func.id != 'int' or len(node.args) != 1 or node.keywords):
+            continue
+        argument = node.args[0]
+        if isinstance(argument, ast.Name) and argument.id in params and argument.id not in rebound:
+            paths.add((argument.id, ()))
+            continue
+        found = _index_path(argument, params, rebound)
+        if found is not None:
+            paths.add(found)
+    return paths
+
+
+def _literal_container(value):
+    if isinstance(value, (str, bytes)):
+        return True
+    if isinstance(value, (list, tuple)):
+        return all(_literal_container(item) for item in value)
+    if isinstance(value, dict):
+        return all(_literal_container(key) and _literal_container(item)
+                   for key, item in value.items())
+    return _immutable_constant(value)
+
+
+def _passable_module_containers(tree, known, attributes):
+    counts = _binding_counts(tree.body)
+    declarations = {}
+    values = {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)):
+            target = node.targets[0]
+            name = target.id
+            if counts.get(name) != 1:
+                continue
+            declarations[name] = id(target)
+            value = _constant_value(node.value, lambda item: known.get(item, _UNKNOWN),
+                                    lambda unused: True, {}, attributes)
+            if isinstance(value, (list, tuple, dict)) and _literal_container(value):
+                values[name] = value
+    aliases = {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and isinstance(node.value, ast.Name)):
+            name = node.targets[0].id
+            source = node.value.id
+            if counts.get(name) == 1:
+                aliases[name] = source
+    changed = True
+    while changed:
+        changed = False
+        for name, source in aliases.items():
+            if name not in values and source in values:
+                values[name] = values[source]
+                changed = True
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    unsafe = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Name) or node.id not in values:
+            continue
+        parent = parents.get(node)
+        if isinstance(node.ctx, ast.Store):
+            if declarations.get(node.id) != id(node):
+                unsafe.add(node.id)
+            continue
+        if not isinstance(node.ctx, ast.Load):
+            unsafe.add(node.id)
+        elif isinstance(parent, ast.Subscript) and isinstance(parent.ctx, (ast.Store, ast.Del)):
+            unsafe.add(node.id)
+        elif isinstance(parent, ast.Attribute) and isinstance(parent.ctx, (ast.Store, ast.Del)):
+            unsafe.add(node.id)
+        elif isinstance(parent, ast.Call) and isinstance(parent.func, ast.Attribute) \
+                and parent.func.value is node:
+            unsafe.add(node.id)
+    return {name: value for name, value in values.items() if name not in unsafe}
+
+
+def _enclosing_bindings(node, parents):
+    names = set()
+    current = parents.get(node)
+    while current is not None:
+        if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            names |= _function_bindings(current)
+        elif isinstance(current, ast.Lambda):
+            args = current.args
+            names |= {arg.arg for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs)}
+            if args.vararg is not None:
+                names.add(args.vararg.arg)
+            if args.kwarg is not None:
+                names.add(args.kwarg.arg)
+            names |= set(_binding_counts([current.body]))
+        elif isinstance(current, ast.ClassDef):
+            names |= set(_binding_counts(current.body))
+        elif isinstance(current, (ast.ListComp, ast.SetComp, ast.DictComp,
+                                  ast.GeneratorExp)):
+            for generator in current.generators:
+                names |= set(_binding_counts([generator.target]))
+        current = parents.get(current)
+    return names
+
+
+def _path_value(value, path, environment, constant_of):
+    for item in path:
+        if isinstance(item, ast.Name) and item.id in environment:
+            key = environment[item.id]
+        else:
+            key = constant_of(item)
+        if key is _UNKNOWN or not isinstance(value, (list, tuple, dict, str, bytes)):
+            return _UNKNOWN
+        try:
+            value = value[key]
+        except (IndexError, KeyError, TypeError):
+            return _UNKNOWN
+    return value
+
+
+def _check_parameter_index_int_calls(tree, known, passthrough, int_shadowed, attributes, parents):
+    if int_shadowed:
+        return
+    containers = _passable_module_containers(tree, known, attributes)
+    module_counts = _binding_counts(tree.body)
+    infos = {}
+    for node in tree.body:
+        if (not isinstance(node, ast.FunctionDef) or node.decorator_list
+                or module_counts.get(node.name) != 1):
+            continue
+        positional = [arg.arg for arg in (*node.args.posonlyargs, *node.args.args)]
+        keyword_only = [arg.arg for arg in node.args.kwonlyargs]
+        mapped = {name: index for index, name in enumerate(positional)}
+        mapped.update((name, None) for name in keyword_only)
+        rebound = {name for name in mapped if _binding_counts(node.body).get(name, 0)}
+        infos[node.name] = {'node': node, 'mapped': mapped, 'rebound': rebound,
+                            'local': _binding_counts(node.body),
+                            'paths': _index_int_paths(node, rebound)}
+    changed = True
+    while changed:
+        changed = False
+        for info in infos.values():
+            params = set(info['mapped'])
+            for call in _shallow_walk(info['node'].body):
+                if (not isinstance(call, ast.Call) or not isinstance(call.func, ast.Name)
+                        or call.func.id not in infos or call.func.id in info['local']):
+                    continue
+                target = infos[call.func.id]
+                for parameter, path in target['paths']:
+                    argument = _bound_argument(call, parameter, target['mapped'][parameter])
+                    if argument is None:
+                        continue
+                    if isinstance(argument, ast.Name) and argument.id in params \
+                            and argument.id not in info['rebound']:
+                        base = (argument.id, ())
+                    else:
+                        base = _index_path(argument, params, info['rebound'])
+                    if base is None or not _literal_index_path(base[1]) \
+                            or not _literal_index_path(path):
+                        continue
+                    combined = (base[0], base[1] + path)
+                    if combined not in info['paths']:
+                        info['paths'].add(combined)
+                        changed = True
+    for call in ast.walk(tree):
+        if (not isinstance(call, ast.Call) or not isinstance(call.func, ast.Name)
+                or call.func.id not in infos):
+            continue
+        target = infos[call.func.id]
+        local = _enclosing_bindings(call, parents)
+
+        def lookup(name):
+            if name in local:
+                return _UNKNOWN
+            if name in containers:
+                return containers[name]
+            return known.get(name, _UNKNOWN)
+
+        def constant_of(node):
+            return _constant_value(node, lookup, lambda name: name not in local,
+                                   passthrough, attributes)
+
+        environment = {}
+        for parameter, index in target['mapped'].items():
+            argument = _bound_argument(call, parameter, index)
+            if argument is not None:
+                value = constant_of(argument)
+                if value is not _UNKNOWN:
+                    environment[parameter] = value
+        for parameter, path in target['paths']:
+            argument = _bound_argument(call, parameter, target['mapped'][parameter])
+            if argument is None:
+                continue
+            value = constant_of(argument)
+            if value is _UNKNOWN:
+                continue
+            value = _path_value(value, path, environment, constant_of)
+            if _outside_int64_float(value):
+                error = ValueError(
+                    f'int() of a float outside int64: {value!r} (CPython makes a big integer)')
+                error.source_line = call.lineno
+                error.source_column = call.col_offset
+                raise error
+
+
 class _Int64CallChecker(ast.NodeVisitor):
     def __init__(self, known, passthrough, int_params, int_shadowed, attributes):
         self.known = known
@@ -1104,6 +1337,7 @@ def _check_int64_literals(tree):
     passthrough = _passthrough_functions(tree, module_counts)
     int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough)
     _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes).visit(tree)
+    _check_parameter_index_int_calls(tree, known, passthrough, int_shadowed, attributes, parents)
     maxsplit = _maxsplit_constant_nodes(tree)
     nodes = [tree]
     while nodes:

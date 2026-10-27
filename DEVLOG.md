@@ -1,3 +1,26 @@
+## 2026-10-27 -- pre337: int() of an out-of-int64 float read through a parameter item (job-pre337-10272138)
+
+The pre315 reviewer's first pre-existing item was `int(items[0])` with `items` a function
+parameter: both builds compiled it and then stopped with `integer overflow`, where CPython prints
+the exact big integer.  Reproduced it on this tree (`p1`); the other two recorded items were not
+touched by this job.
+
+The front end now follows a parameter's constant subscript (and a short wrapper chain) back to a
+statically known call argument and refuses the conversion with the existing named message
+`int() of a float outside int64: ... (CPython makes a big integer)` on both builds.  This covers a
+literal argument, a negative or parameter index, a literal list/tuple/dict item at the call site,
+a module literal container or alias, a class attribute and a short wrapper.  In-range items, a
+rebound parameter or index, a container mutated before the call, a locally shadowed `int` and a
+same-named local in an enclosing scope still match CPython.
+
+Probes in `/tmp/probes/pre337` on both builds: `p1`-`p1q` (refused routes and in-range/boundary
+controls), `p1r`/`p1s` (closure and comprehension shadowing) and `p2`-`p6`.  All changed routes are
+refused by name; the matching controls are CPython-identical.  Added
+`AIL_CURRENT/test_ail_pre337.py` (14 refused, 12 matching programs, both builds) and registered it
+in `ail_check.MODULES` and `tools/ci_shards.json`.  Final-state tests: test_ail_pre337,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py` was run
+and `--check` passes.
+
 ## 2026-10-27 -- pre326: a nested class inside a function is already refused by name (job-pre326-10271918)
 
 The pre324 reviewer's first pre-existing item was a nested class inside a function
