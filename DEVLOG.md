@@ -12,18 +12,22 @@ defined`, guarded by a module-lifetime `g_cls_ready_<slot>` int that `_init_clas
 while the body runs and sets to 1 afterwards.  The busy class name is propagated into lambdas
 compiled by `boxclosure.closure_value` and by `_func_pointer_of` / `_func_pointer_lib`, so an
 immediately called lambda, a lambda default and a `map`/`sorted`/`reduce`/`groupby` callback
-raise the same `NameError`.  A lambda stored in the class body and called later (also through a
-list item or dict value), a method returning the class, an unrelated class, an earlier class-body
-attribute, an earlier module binding and a class defined before the lambda is made still match
-CPython.  Only a class with such a read gets the flag, so the generated C of other programs is
-unchanged.
+raise the same `NameError`.  The same gate covers a class-body attribute read through the name
+(`x = C.v`, also the receiver of a call `C().v` or `C()` before the constructor copies attributes)
+and a name read into an alias or tuple (`A = C`, `(C, C)[0]`).  A lambda stored in the class body
+and called later (also through a list item, dict value or an attribute read `C.v`), a method
+returning the class, an unrelated class, an earlier class-body attribute, an earlier module
+binding and a class defined before the lambda is made still match CPython.  Only a class with
+such a read gets the flag, so the generated C of other programs is unchanged.
 
 Observed, not fixed: an indirect read through a module-level function called while the body runs
 (`def f(): return C` used as a class attribute value) still returns the class object; and
 class-body expression statements (`class C: print("body")`) are still dropped.  Both are
-pre-existing and separate from the recorded defect.
+pre-existing and separate from the recorded defect.  A direct `x = C()` (or a lambda calling
+`C()`) in the body is refused at compile time by the existing "class attribute through the class"
+restriction when the constructor copies a non-constant class attribute, and by-name otherwise.
 
-`test_ail_pre382.py` pins 8 deferred/control programs and 12 `NameError` programs on both builds.
+`test_ail_pre382.py` pins 9 deferred/control programs and 15 `NameError` programs on both builds.
 
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The

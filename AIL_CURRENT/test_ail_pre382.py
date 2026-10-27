@@ -75,6 +75,12 @@ class C:
 f = lambda: C
 print(f() is C)
 ''',
+    'deferred_attribute': '''
+class C:
+    v = 1
+    d = {"f": lambda: C.v}
+print(C().d["f"]())
+''',
 }
 
 # CPython raises NameError (exit 1) and prints nothing new; the busy class name must do the same.
@@ -140,6 +146,23 @@ print("before")
 class C:
     x = C
 print("after")
+''',
+    'class_attribute': '''
+class C:
+    v = 1
+    x = C.v
+print(C.x)
+''',
+    'alias': '''
+class C:
+    v = 1
+    A = C
+print(C.A)
+''',
+    'tuple_item': '''
+class C:
+    x = (C, C)[0]
+print(C.x)
 ''',
 }
 

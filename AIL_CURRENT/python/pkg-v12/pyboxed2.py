@@ -3429,6 +3429,13 @@ class Compiler(boxclosure.ClosureMixin):
             self.busy_class_flags[cname] = flag
         return flag
 
+    def _emit_busy_class_check(self, cname, ctx):
+        """CPython binds a class's name only after its body has run: a read while the body is
+        executing raises NameError (a lambda stored there and called later sees the flag set)."""
+        ctx.emit('if (!%s) { st = ail_raise_c(cx, AIL_B_NAMEERROR, "name \'%s\' is not defined"); '
+                 'goto %s; }' % (self._busy_class_flag(cname), cname, ctx.cur_err_target()))
+        ctx.uses_st = True
+
     def _module_stmt(self, node, ctx):
         self.stmt(node, ctx)
 
@@ -5072,14 +5079,7 @@ class Compiler(boxclosure.ClosureMixin):
             # A local/parameter of the same name shadows the class, and a module-level assignment
             # to the name rebinds it: those go through the ordinary name lookup below.
             if ctx.busy_class == node.id:
-                # CPython binds a class's name only after its body has run. Inside the body
-                # (including a lambda/comprehension called there) the class object exists here,
-                # but the name must still raise NameError until the body finishes.
-                flag = self._busy_class_flag(node.id)
-                ctx.emit('if (!%s) { st = ail_raise_c(cx, AIL_B_NAMEERROR, '
-                         '"name \'%s\' is not defined"); goto %s; }' %
-                         (flag, node.id, ctx.cur_err_target()))
-                ctx.uses_st = True
+                self._emit_busy_class_check(node.id, ctx)
             return 'g_slots_arr[%d]' % self.global_slots['class:' + node.id]
         if node.id in ctx.nested_funcs:
             raise Unsupported('using function %s as a first-class value' % node.id)
@@ -5875,6 +5875,8 @@ class Compiler(boxclosure.ClosureMixin):
         # through to the base attribute).
         direct = (isinstance(node.value, ast.Name) and node.value.id in self.classes
                   and node.value.id not in ctx.slot_of and node.value.id not in self.module_names)
+        if direct and ctx.busy_class == node.value.id:
+            self._emit_busy_class_check(node.value.id, ctx)
         value_kind = self.infer_kind(node.value, ctx)
         cname = node.value.id if direct else (value_kind[6:] if value_kind and value_kind.startswith('class:') else None)
         if cname is not None:
@@ -7200,6 +7202,8 @@ class Compiler(boxclosure.ClosureMixin):
             # CPython for the WHOLE activation: U() then calls that value, not the class (an
             # unbound local is UnboundLocalError, an instance is TypeError), exactly as expr_Name
             # already reads it. Without this the constructor-call path silently called the class.
+            if ctx.busy_class == name:
+                self._emit_busy_class_check(name, ctx)
             return self._call_class(name, args, kwargs, ctx)
         if name in ctx.nested_funcs:
             return self._call_nested_function(name, args, kwargs, ctx)
@@ -9043,6 +9047,9 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _call_attribute(self, f, args, kwargs, ctx):
         recv = f.value
+        if (isinstance(recv, ast.Name) and recv.id == ctx.busy_class
+                and recv.id not in ctx.slot_of and recv.id not in self.module_names):
+            self._emit_busy_class_check(recv.id, ctx)
         # sys.stdin.read() / .readline(): the only sys.stdin surface this emitter models
         # (B046/B047 -- glue in the preamble, see the module docstring's stdin note).
         if isinstance(recv, ast.Attribute) and isinstance(recv.value, ast.Name) and \
