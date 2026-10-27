@@ -58,6 +58,48 @@ if WIDE_EMBED and os.environ.get('AIL_V2_INCLUDE_ABS'):
 WIDE_STRINGS = WIDE_EMBED or bool(os.environ.get('AIL_V2_INCLUDE_ABS'))
 STRBACK_C_TYPE = 'int32_t' if WIDE_STRINGS else 'uint16_t'
 
+_REPEAT_ELEMENT_LIMIT = 1 << 60
+
+
+def _constant_int(node):
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        return node.value
+    if isinstance(node, ast.UnaryOp):
+        value = _constant_int(node.operand)
+        if value is None:
+            return None
+        if isinstance(node.op, ast.USub):
+            return -value
+        if isinstance(node.op, ast.UAdd):
+            return value
+        if isinstance(node.op, ast.Invert):
+            return ~value
+        return None
+    if isinstance(node, ast.BinOp):
+        left, right = _constant_int(node.left), _constant_int(node.right)
+        if left is None or right is None:
+            return None
+        try:
+            if isinstance(node.op, ast.Add):
+                return left + right
+            if isinstance(node.op, ast.Sub):
+                return left - right
+            if isinstance(node.op, ast.Mult):
+                return left * right
+            if isinstance(node.op, ast.Pow):
+                return left ** right if 0 <= right <= 4096 else None
+            if isinstance(node.op, ast.LShift):
+                return left << right if 0 <= right <= 4096 else None
+            if isinstance(node.op, ast.RShift):
+                return left >> right if right >= 0 else None
+            if isinstance(node.op, ast.FloorDiv) and right:
+                return left // right
+            if isinstance(node.op, ast.Mod) and right:
+                return left % right
+        except (ArithmeticError, ValueError):
+            return None
+    return None
+
 # ---------------------------------------------------------------------------------------------
 # BRIEF_mixed_mode.md (2026-09-16): per-FUNCTION typed compilation inside this general-path
 # program, integration step. `pymix.py` (whole-program kind analysis, not edited here) names the
@@ -1226,6 +1268,15 @@ def _literal_default_is_mutable(d):
         return False
 
     return mutable(value)
+
+def _literal_int(node):
+    """The int a literal expression stands for (including `-1`), or None."""
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        return node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)) \
+            and isinstance(node.operand, ast.Constant) and type(node.operand.value) is int:
+        return -node.operand.value if isinstance(node.op, ast.USub) else node.operand.value
+    return None
 
 
 def _module_stmt_binds(stmt):
@@ -4947,6 +4998,17 @@ class Compiler(boxclosure.ClosureMixin):
                  ast.Sub: 'ail_meth_set_difference', ast.BitXor: 'ail_meth_set_symmetric_difference'}
 
     def expr_BinOp(self, node, ctx):
+        if isinstance(node.op, ast.Mult):
+            for sequence, count_node in ((node.left, node.right), (node.right, node.left)):
+                if isinstance(sequence, (ast.List, ast.Tuple)) and sequence.elts \
+                        and not any(isinstance(e, ast.Starred) for e in sequence.elts):
+                    count = _constant_int(count_node)
+                    if count is not None and count > 0 \
+                            and len(sequence.elts) * count > _REPEAT_ELEMENT_LIMIT:
+                        raise Unsupported('a %s repeat of %d elements is too large for this runtime'
+                                          % ('list' if isinstance(sequence, ast.List) else 'tuple',
+                                             len(sequence.elts) * count))
+                    break
         constant = int_constant(node)
         if type(constant) is int and -(1 << 63) <= constant < (1 << 63):
             return 'ail_box_int(%s)' % ('(-9223372036854775807LL - 1LL)' if constant == -(1 << 63)
@@ -5463,13 +5525,22 @@ class Compiler(boxclosure.ClosureMixin):
     def expr_Set(self, node, ctx):
         t = ctx.tmp()
         ctx.emit('%s = ail_set_new(cx);' % t)
-        for e in node.elts:
-            if isinstance(e, ast.Starred):
-                src = self.expr(e.value, ctx)
-                ctx.emit('st = ail_set_update_any(cx, %s, %s);' % (t, src))
+        if any(isinstance(e, ast.Starred) for e in node.elts):
+            for e in node.elts:
+                if isinstance(e, ast.Starred):
+                    src = self.expr(e.value, ctx)
+                    ctx.emit('st = ail_set_update_any(cx, %s, %s);' % (t, src))
+                    ctx.check()
+                    continue
+                v = self.expr(e, ctx)
+                ctx.emit('st = ail_set_add(cx, %s, %s);' % (t, v))
                 ctx.check()
-                continue
-            v = self.expr(e, ctx)
+            return t
+        # CPython 3.12's BUILD_SET evaluates every element expression before it hashes
+        # any of them (an unhashable first element therefore does not hide the side
+        # effects of the later ones). Keep the same two phases.
+        vals = [self.expr(e, ctx) for e in node.elts]
+        for v in vals:
             ctx.emit('st = ail_set_add(cx, %s, %s);' % (t, v))
             ctx.check()
         return t
@@ -5477,11 +5548,16 @@ class Compiler(boxclosure.ClosureMixin):
     def expr_Dict(self, node, ctx):
         t = ctx.tmp()
         ctx.emit('%s = ail_dict_new(cx);' % t)
+        pairs = []
         for k, v in zip(node.keys, node.values):
             if k is None:
                 raise Unsupported('a ** unpacking inside a dict literal')
             kc = self.expr(k, ctx)
             vc = self.expr(v, ctx)
+            pairs.append((kc, vc))
+        # CPython 3.12's BUILD_MAP hashes/inserts only after every key and value
+        # expression has run; `{bad_key: f(), good: g()}` still runs g().
+        for kc, vc in pairs:
             ctx.emit('st = ail_dict_set(cx, %s, %s, %s);' % (t, kc, vc))
             ctx.check()
         return t
@@ -5619,7 +5695,16 @@ class Compiler(boxclosure.ClosureMixin):
             owner, hit = self._class_chain_definition(cname, node.attr)
             if hit is not None and (direct or hit[0] in ('m', 'p')):
                 if hit[0] == 'a':
-                    return self._cached_class_attr(hit[3], hit[2], ctx)
+                    value, slot = hit[2], hit[3]
+                    if isinstance(value, ast.Constant) or (isinstance(value, ast.UnaryOp)
+                                                           and isinstance(value.operand, ast.Constant)):
+                        return self._cached_class_attr(slot, value, ctx)
+                    try:
+                        return self._cached_class_attr(slot, value, ctx)
+                    except Unsupported as exc:
+                        if getattr(exc, 'source_line', None) is not None:
+                            raise
+                        raise self._class_attr_through_class_refusal(cname, node.attr)
                 raise Unsupported("reading %s %s.%s through a class value" %
                                   ('property' if hit[0] == 'p' else 'method', owner, node.attr))
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
@@ -6592,10 +6677,25 @@ class Compiler(boxclosure.ClosureMixin):
             seen += 1
         return name in EXC_IDS
 
+    def _class_attr_through_class_refusal(self, name, attr):
+        return Unsupported('reading the class attribute %s.%s through the class: its value is '
+                           'not a constant, and the general path can only read a class attribute '
+                           'through the class when it is an int/float/str/bytes/bool literal.\n'
+                           '  write instead: read it from an instance (`%s().%s`) or store the '
+                           'value in a module-level constant'
+                           % (name, attr, name, attr))
+
     def _init_class_attrs(self, name, ctx):
         """Evaluate a class body's attributes once, at its class-definition statement."""
         for _aname, aval, slot in self.classes[name].get('class_attrs', []):
-            v = self.expr(aval, ctx)
+            try:
+                v = self.expr(aval, ctx)
+            except Unsupported as exc:
+                if (isinstance(aval, ast.Constant) or (isinstance(aval, ast.UnaryOp)
+                                                        and isinstance(aval.operand, ast.Constant))
+                        or getattr(exc, 'source_line', None) is not None):
+                    raise
+                raise self._class_attr_through_class_refusal(name, _aname)
             ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
         if name in self.module_names:
             # A module-level assignment to the class name (before or after the definition, or a
@@ -7735,6 +7835,10 @@ class Compiler(boxclosure.ClosureMixin):
         if kwargs and set(kwargs) != {'r'} or len(args) + len(kwargs) != 2:
             raise Unsupported('combinations() with other than (iterable, r)')
         r_node = args[1] if len(args) > 1 else kwargs['r']
+        rv = _literal_int(r_node)
+        if rv is not None and rv < 0:
+            raise Unsupported('itertools.combinations: a negative r literal (CPython raises '
+                              'ValueError: r must be non-negative)')
         src = self._resolve_iter_src(args[0], ctx)
         r = self.expr(r_node, ctx)
         t = ctx.tmp()
@@ -7746,6 +7850,10 @@ class Compiler(boxclosure.ClosureMixin):
         if (kwargs and set(kwargs) != {'r'}) or not 1 <= len(args) + len(kwargs) <= 2 or not args:
             raise Unsupported('permutations() with other than (iterable[, r])')
         r_node = args[1] if len(args) > 1 else kwargs.get('r')
+        rv = _literal_int(r_node)
+        if rv is not None and rv < 0:
+            raise Unsupported('itertools.permutations: a negative r literal (CPython raises '
+                              'ValueError: r must be non-negative)')
         src = self._resolve_iter_src(args[0], ctx)
         if r_node is None or (isinstance(r_node, ast.Constant) and r_node.value is None):
             has_r, r = '0', 'ail_box_none()'     # permutations(xs) and permutations(xs, None) alike
@@ -7776,6 +7884,10 @@ class Compiler(boxclosure.ClosureMixin):
         if kwargs and set(kwargs) != {'r'} or len(args) + len(kwargs) != 2:
             raise Unsupported('combinations_with_replacement() with other than (iterable, r)')
         r_node = args[1] if len(args) > 1 else kwargs['r']
+        rv = _literal_int(r_node)
+        if rv is not None and rv < 0:
+            raise Unsupported('itertools.combinations_with_replacement: a negative r literal '
+                              '(CPython raises ValueError: r must be non-negative)')
         src = self._resolve_iter_src(args[0], ctx)
         t = ctx.tmp()
         ctx.emit('st = ail_it_combinations_wr(cx, &%s, %s, %s);' % (t, src, self.expr(r_node, ctx)))

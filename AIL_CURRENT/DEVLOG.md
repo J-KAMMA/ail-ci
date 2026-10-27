@@ -86,8 +86,38 @@ argument, a list comprehension) still build unchanged. Added the accepted
 registered it in `ail_check.MODULES`. Probes `/tmp/probes/pre41_nested.py`,
 `pre41_routes.py` and `pre41_eager.py`: the first two are refused by name on both builds; the
 last matches CPython on both.
+## 2026-10-26 - re-apply pre51: format-spec diagnostics and the float z flag (job-rbpre51-10261856)
+
+Re-applied accepted job `job-pre51-10241239` on the current tree. The space-sign-on-str
+wording, the whole-spec `Invalid format specifier '<spec>' for object of type '<type>'` text
+and the `\xNN` escaping of an unknown format code are already present here from the pre206
+parser fix, which also keeps NUL and grouping handling; those newer fixes are kept. From the
+accepted change, the parser now decodes a non-BMP type code from a surrogate pair (the spec's
+`wide_type` is 32-bit), so a non-BMP code is named as CPython's `\x1f600` instead of being
+rejected as a longer spec. Non-BMP and surrogate string literals are still refused by name by
+the compiler, so that path is not reachable from source. The float `z` flag already matched.
+Added `AIL_CURRENT/test_ail_pre51.py` (2 tests, both builds) and registered it in
+`ail_check.MODULES`. `tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py`
+was run and `--check` passes. Probes `/tmp/probes/pre51_errors.py`, `pre51_codes.py` and
+`pre51_z.py` match CPython on both builds; the non-BMP/surrogate literal probes are refused by
+name. Tests: pre51, pre206, pre225, pre243, pre103, safetynet, files, corpus_findings3 (0 failed).
 
 ## 2026-10-26 -- reapply pre225: grouping with an unrecognised type code (job-rbpre225-10261321)
+## 2026-10-26 -- re-apply pre54: round() at the int64 boundary is refused by name (job-rbpre54-10270147)
+
+Re-applied the accepted pre54 change on this tree.  `pyc.build` now calls
+`_refuse_round_at_int64_boundary` before either build path: a one-argument `round()` of a
+constant float at or beyond the signed 64-bit boundary (`round(-9223372036854775808.0)` is
+INT64_MIN) is refused by name, because `abs()`, unary `-` and `* -1` need 2**63 and AIL's int is
+int64.  The accepted change's workflow half (OpenCode v1.19.4 with its sha256, the qoder.key /
+cc.key secret files and the three-key scan) is already present on this tree, so no edit was
+needed; pre104's catchable ValueError / OverflowError for nan/inf is kept, and finite
+out-of-range values that are not compile-time constants still take the runtime trap.  Added
+`AIL_CURRENT/test_ail_pre54.py`, registered it in `ail_check.MODULES`, and added DIFFERENCES row
+C?-job-rbpre54-10270147-1.  Probes in `/tmp/probes`: `p54_near`, `p54_two_arg`, `p54_shadow` and
+`p54_nonconstant` match CPython on both builds; `p54_refuse_direct`, `p54_refuse_argument`,
+`p54_refuse_container`, `p54_refuse_positive` and `p54_refuse_beyond` are refused by name on both
+builds (exit 3, no executable).  `python3 tools/diff_ids.py` is not present in this tree.
 
 Re-applied the accepted pre225 change. Its safetyrt.py fix is already present on this tree from
 the pre206 review: `ail2f_parse` checks the grouping against the type before an unknown code (its

@@ -1,3 +1,16 @@
+## 2026-10-27 - pre52 suite fix: update the branch onto today's integ (job-pre52-10270920)
+
+The integration gate applied this branch alone on today's integration branch and reported 136 test
+modules failing. The branch was still based on integ 8346862, eight integrated candidates behind
+today's integ (cand-1027092746), so the branch delta still contained the reverse of those candidates
+(their runtime, pyboxed2, pyc, pyfunc and safetyrt changes) and applying it removed them. The
+current integration branch is now merged into this branch, resolving the record files by keeping
+today's rows and re-applying only the pre52 change on top. No compiler behaviour beyond pre52's
+narrowing changed: `stmt_Try` still scans only the `try` body for a guarded import and still locates
+the caught-type refusal at the `try`, and `test_ail_pre52.py` is still registered. Final-state tests:
+`test_ail_pre52`, `test_ail_pre27`, `test_ail_pre270`, `test_ail_multifile`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3`; `tools/update_manifest.py --check` passes.
+
 ## 2026-10-26 - pre52: re-apply the optional-import refusal on the current tree (job-pre52-10270755)
 
 Current integration already carries the same refusal from pre27, but with a wider trigger: it scans
@@ -251,6 +264,31 @@ that formats the stored argument (a str keeps its quotes, a number does not). Bo
 CPython; the accepted `test_ail_pre26.py` keeps the probe, including negative and out-of-range
 indexes, and is registered in `ail_check.MODULES`.
 
+## 2026-10-26 -- pre54 review fix: MANIFEST pin and DIFFERENCES row order (job-rbpre54-10270147)
+
+The reviewer found the committed tree was missing the `test_ail_pre54.py` pin, so
+`tools/update_manifest.py --check` exited 1 and `ail_check.preflight` aborted every module with
+`hash mismatch`; re-ran `tools/update_manifest.py` and committed the pin (`--check` now exits 0).
+The DIFFERENCES row also had its cells in the wrong columns (`refused | round | <text>`); it is
+now `round | <text> | refused` under the `| id | area | difference | status |` header.
+Re-ran the `/tmp/probes/p54_*` probes: the four match probes match CPython on both builds, the
+five boundary probes are refused by name on both (exit 3, no executable).
+
+## 2026-10-26 -- re-apply pre54: round() at the int64 boundary is refused by name (job-rbpre54-10270147)
+
+Re-applied the accepted pre54 change on this tree.  `pyc.build` now calls
+`_refuse_round_at_int64_boundary` before either build path: a one-argument `round()` of a
+constant float at or beyond the signed 64-bit boundary (`round(-9223372036854775808.0)` is
+INT64_MIN) is refused by name, because `abs()`, unary `-` and `* -1` need 2**63 and AIL's int is
+int64.  The accepted change's workflow half (OpenCode v1.19.4 with its sha256, the qoder.key /
+cc.key secret files and the three-key scan) is already present on this tree, so no edit was
+needed; pre104's catchable ValueError / OverflowError for nan/inf is kept, and finite
+out-of-range values that are not compile-time constants still take the runtime trap.  Added
+`AIL_CURRENT/test_ail_pre54.py`, registered it in `ail_check.MODULES`, and added DIFFERENCES row
+C?-job-rbpre54-10270147-1.  Probes in `/tmp/probes`: `p54_near`, `p54_two_arg`, `p54_shadow` and
+`p54_nonconstant` match CPython on both builds; `p54_refuse_direct`, `p54_refuse_argument`,
+`p54_refuse_container`, `p54_refuse_positive` and `p54_refuse_beyond` are refused by name on both
+builds (exit 3, no executable).  `python3 tools/diff_ids.py` is not present in this tree.
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is
@@ -464,6 +502,129 @@ argument, a list comprehension) still build unchanged. Added the accepted
 registered it in `ail_check.MODULES`. Probes `/tmp/probes/pre41_nested.py`,
 `pre41_routes.py` and `pre41_eager.py`: the first two are refused by name on both builds; the
 last matches CPython on both.
+## 2026-10-26 - re-apply pre51: format-spec diagnostics and the float z flag (job-rbpre51-10261856)
+
+Re-applied accepted job `job-pre51-10241239` on the current tree. The space-sign-on-str
+wording, the whole-spec `Invalid format specifier '<spec>' for object of type '<type>'` text
+and the `\xNN` escaping of an unknown format code are already present here from the pre206
+parser fix, which also keeps NUL and grouping handling; those newer fixes are kept. From the
+accepted change, the parser now decodes a non-BMP type code from a surrogate pair (the spec's
+`wide_type` is 32-bit), so a non-BMP code is named as CPython's `\x1f600` instead of being
+rejected as a longer spec. Non-BMP and surrogate string literals are still refused by name by
+the compiler, so that path is not reachable from source. The float `z` flag already matched.
+Added `AIL_CURRENT/test_ail_pre51.py` (2 tests, both builds) and registered it in
+`ail_check.MODULES`. `tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py`
+was run and `--check` passes. Probes `/tmp/probes/pre51_errors.py`, `pre51_codes.py` and
+`pre51_z.py` match CPython on both builds; the non-BMP/surrogate literal probes are refused by
+name. Tests: pre51, pre206, pre225, pre243, pre103, safetynet, files, corpus_findings3 (0 failed).
+## 2026-10-26 -- re-apply pre55: oversized list/tuple repeats (job-rbpre55-10261858)
+
+Re-applied the accepted pre55 change on the current tree. Constant list/tuple repeats whose element
+count exceeds 2**60 are refused by name in the general path (`pyboxed2.expr_BinOp`, before the
+existing `int_constant` fold). Dynamic repeats are guarded in the boxed `ail_op_mul` (the empty
+sequence is skipped and the multiplication is checked), in the typed `_list_repeat_value` (now
+reserving `_count * len(elements)` for every element count, including str lists), and in the
+one-element `list.repeat` IR; they stop with CPython's `MemoryError`. Empty and negative counts
+are unchanged, so `[] * 2**62` is empty as before. Added `AIL_CURRENT/test_ail_pre55.py` and
+registered it in `ail_check.MODULES`. The accepted `_constant_int` helper is kept, including its
+unary `~` handling.
+
+Probes in `/tmp/probes` match CPython or are refused by name on both builds: `pre55_refuse_pow`,
+`pre55_refuse_lit`, `pre55_refuse_tuple`, `pre55_refuse_rev`, `pre55_refuse_invert`,
+`pre55_refuse_boundary` (refused on the unified build, `MemoryError` on the default), `pre55_empty`,
+`pre55_runtime_arg`, `pre55_runtime_tuple`, `pre55_runtime_routes`, `pre55_runtime_attr`,
+`pre55_runtime_dict`, `pre55_small`, `pre55_small_widths`. Tests on the final tree:
+`test_ail_pre55`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`
+(4 modules, 229 s, 0 failed).
+## 2026-10-26 - re-apply pre59: itertools choosers reject negative r (job-rbpre59-10261859)
+
+Re-applying the accepted pre59 change. The runtime fix is already present on this tree:
+pre137/pre126 route a given `r` through `ail_it_r_index`, which raises
+`ValueError: r must be non-negative` before the "r larger than the pool" early exit on both
+builds, so the fetched runtime hunk is superseded and no runtime edit was needed. Added the
+accepted `AIL_CURRENT/test_ail_pre59.py` and registered it in `ail_check.MODULES`; updated the
+fuzz8 DIFFERENCES row to cite it. `tools/diff_ids.py` is not present on this tree;
+`tools/update_manifest.py` was run and `--check` passes. Probes `pre59_routes`, `pre59_keyword`
+and `pre59_loop` in `/tmp/probes` match CPython on both builds (direct/literal, argument, list
+item, attribute, dict value, keyword/expression, empty pool, bool, r=0, r=n, r>n, huge negative,
+and the typed for-loop path). Tests on the final commit: pre59, pre137, pre126, safetynet, files,
+corpus_findings3.
+## 2026-10-26 - pre75: itertools negative r (job-pre75-10241832)
+
+`itertools.permutations` / `combinations` / `combinations_with_replacement` on the general
+path returned `[]` for a negative `r`; CPython consumes the iterable and then raises
+`ValueError: r must be non-negative`. The runtime helpers now raise it, and the default
+build's `list(...)` collection of the same shape no longer emits invalid C: a negative `r`
+literal is refused by name at compile time on both builds, while a non-literal negative
+`r` (argument, list item, attribute, dict value) raises the ValueError on both. Added
+`AIL_CURRENT/test_ail_pre75.py`; probes are in `/tmp/probes/pre75_*.py`. The pre137 catch/order
+program now passes its direct negative `r` through a computed value, because that literal is
+refused at compile time; its runtime and pool-order checks are unchanged. The pre126 bounds
+program does the same for its empty-pool negative-`r` cases.
+## 2026-10-26 - re-apply qtest4: bytes/bytearray fillchar wrong-type message (job-rbqtest4-10262127)
+
+Re-applied the accepted qtest4 change on this tree.  The `_ail_b_fill` type guard is already
+present from the pre182 fix (`bytes`/`bytearray` membership is checked before `_ail_bs`), so no
+prelude edit was needed and the conflict resolution keeps that fix.  Added the accepted
+`AIL_CURRENT/test_ail_qtest4.py` (the wrong-type bytes/bytearray cases at normal, narrow,
+negative and zero widths, plus a str control) and registered it in `ail_check.MODULES` after
+`test_ail_fuzz51`.  `tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py`
+was run and `--check` passes.  Probes `/tmp/probes/q4_direct.py`, `q4_routes.py`,
+`q4_str_control.py` and `q4_valid.py` (direct, argument/list/attribute/dict routes, valid and
+empty/multi-byte fills, bytearray receivers, str control) match CPython on both builds.  Tests:
+test_ail_qtest4, test_ail_pre182, test_ail_safetynet, test_ail_files, test_ail_corpus_findings3.
+## 2026-10-26 - re-apply fuzz28: class-body comprehension read through the class (job-rbrbfuzz28-10262128)
+
+Re-applied the accepted fuzz28 change on the current tree. A class-body list/set/dict comprehension
+is a class attribute; CPython reads it as `C.ys`, but a comprehension that uses a class-scope name
+cannot be built here. `_init_class_attrs` now refuses that evaluation by name (`reading the class
+attribute C.ys through the class`) instead of failing with an unrelated name error, and the class
+attribute read through a class does the same when the shared slot was not filled, but only when the
+value is not a literal. The current tree's module-lifetime slots and computed values (including
+comprehensions over module-level names) are unchanged, so `test_ail_fuzz29`'s definition-time,
+shared and inherited class attributes still work. Added `test_ail_fuzz28.py` and registered it in
+`ail_check.MODULES`. Probes in `/tmp/probes`: `f28_literal`, `f28_computed`, `f28_inherit_alias`,
+`f28_shadow`, `f28_routes` and `f28_bounds` match CPython on both builds; `f28_read` is refused by
+name on both. `f28_read_method` (a read inside a method) is refused by name with `name 'x' is not
+defined` on both. Tests on the final tree: `test_ail_fuzz28`, `test_ail_fuzz29`, `test_ail_pre170`,
+`test_ail_pre227`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` (7 modules,
+40 tests, 0 failed, 1 skipped for no zig).
+
+Follow-up after the full suite: the new refusal must not hide a value-specific refusal. Both catch
+sites now re-raise an `Unsupported` that already carries a `source_line` -- the int64 constant-range
+refusal that `fold_int_constant` raises -- so `class C: x = True << 64; print(C.x)` keeps
+`outside the signed 64-bit range` on both builds instead of being reported as a non-literal class
+attribute (the `test_ail_pre201` / `test_ail_pre241` attribute cases). A plain undefined-name
+failure inside a comprehension carries no source line and is still turned into the class-attribute
+refusal. Tests: `test_ail_fuzz28`, `test_ail_fuzz29`, `test_ail_pre170`, `test_ail_pre201`,
+`test_ail_pre227`, `test_ail_pre241`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` (9 modules, 45 tests, 0 failed, 1 skipped for no zig).
+## 2026-10-26 - re-apply fuzz4: dict hashing and literal order (job-rbrbfuzz4-10262129)
+
+Re-applied the accepted fuzz4 change on top of this tree.  Both sides' fixes are kept: the
+accepted object-runtime hashing work and literal-order lowering were applied cleanly; the
+conflicts were only the module registry, shard list, DEVLOG and DIFFERENCES rows, where this
+tree's newer entries are kept alongside the fuzz4 rows (renamed to this branch's ids).
+
+The change makes `dict.pop`/`setdefault` hash a key once (and skip hashing on the empty-dict
+`pop` fast path), makes `copy`, `update(other_dict)`, `popitem` and `dict(d)` reuse stored
+hashes, and makes the general path's dict/set literals evaluate every key/value/element before
+hashing any of them.  `test_ail_fuzz4.py` is registered in `ail_check.MODULES` and
+`ci_shards.json`.
+
+Probes in `/tmp/probes` (`f4_hash_once`, `f4_copy_update`, `f4_literal_order`,
+`f4_collisions`, `f4_nested_containers`) cover hit/miss `pop`/`setdefault`, the empty-dict
+fast path, copy/update/dict/popitem, colliding `__hash__`, unhashable early literal keys with
+later side effects, starred set literals, and values reaching a call through an argument, a
+list item, an attribute, a dict value and an alias; all match CPython on both builds.
+A colliding `dict(d)` variant exposed the already-recorded open `__eq__`-count difference
+(`C?-job-rbrbfuzz4-10262129-4`); the retained probes avoid that known table-shape case.
+
+`python3 tools/diff_ids.py` is not present in this tree (or in the accepted job), so it could
+not be run.  `python3 tools/update_manifest.py` updated the manifest for the touched files.
+
+Tests on the final commit: `test_ail_fuzz4`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` (4 modules, 354 s, 0 failed).
 
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
@@ -2384,6 +2545,34 @@ implementation when the base has no body.  `g17_004`, `g17_024` and `g13_036` no
 print what CPython prints on both builds; the census refused 50 afterwards.  Added the positional
 partial program to `test_ail_silent6.py` and an abstract-visitor hierarchy to
 `test_ail_typed_inherit.py`.
+
+## 2026-10-24 - job-rbfuzz4-10240913 (dicts, sets, comprehensions)
+
+Re-applied the accepted fuzz4 change on top of this tree, keeping both sides' fixes.
+
+Ran 240 generated programs (dict order churn, set algebra/subset churn, set range churn,
+comprehension and update/delete templates) plus ~60 hand-written edge programs and 8 probes in
+`/tmp/probes`, each with `bash ~/tools/cmp.sh` on the general path and the default build.
+
+Fixed two silent-difference causes:
+
+1. Dict operations on stored keys re-ran `__hash__`: `pop`/`setdefault` hashed twice, and
+   `update(other_dict)`, `copy`, `popitem`, `dict(d)` re-hashed.  The object runtime now uses one
+   hash for pop/setdefault, clones the entry table for `copy`, removes the last entry directly
+   for `popitem`, and reuses stored hashes for update/dict.  `dict.pop` on an empty dict also
+   takes CPython's no-hash fast path.
+2. Dict and set literals on the general path hashed each element as it was evaluated.  CPython
+   3.12's `BUILD_MAP`/`BUILD_SET` evaluate every key/value/element first, then hash/insert; the
+   general lowering now does the two phases.  The typed literal emitter still inserts per pair,
+   but its keys are scalar int/str/bytes/float values with no user `__hash__`, so no silent
+   stdout difference was observed on that path.
+
+Remaining (not fixed): same-size dict mutation during iteration still differs by path/declared
+structural-mutation rule; `reversed(dict)` and `dict | dict` are accepted then stop at run time;
+and `dict(d)` may call a user `__eq__` a different number of times than CPython when the source
+table has a particular internal shape (CPython's own count depends on key-table sharing).
+`test_ail_fuzz1` could not run locally because `difffuzz` is not in this snapshot; the required
+and targeted modules were run on the final commit.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
