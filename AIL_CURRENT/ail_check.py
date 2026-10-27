@@ -28,6 +28,7 @@ MODULES = (
     'test_ail_pre290',
     'test_ail_pre41',
     'test_ail_safetynet',
+    'test_ail_pre55',
     'test_ail_pre100',
     'test_ail_pre114',
     'test_ail_pre44',
