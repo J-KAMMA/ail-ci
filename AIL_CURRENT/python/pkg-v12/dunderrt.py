@@ -114,6 +114,31 @@ static void ail__dun_tname(char *buf, size_t n, ail_obj x) {
     snprintf(buf, n, "%s", ail_type_name(x.tag));
 }
 static const char *ail__dun_tname_s(ail_obj x) { static char b[80]; ail__dun_tname(b, sizeof b, x); return b; }
+/* sequence repeat takes a non-int count through __index__ (CPython's sq_repeat).  Only a
+   sequence receiver asks, so Fraction/IntEnum operands keep their ordinary arithmetic. */
+static inline int ail__dun_seq(ail_obj a) {
+    if (a.tag == AIL_T_LIST || a.tag == AIL_T_TUPLE || a.tag == AIL_T_STR) return 1;
+    if (a.tag == AIL_T_INST) {
+        const char *n = ail__dun_tname_s(a);
+        return !strcmp(n, "bytes") || !strcmp(n, "bytearray") || !strcmp(n, "collections.deque");
+    }
+    return 0;
+}
+static inline ail_st ail__dun_index(ail_ctx *cx, ail_obj *out, ail_obj x, int *found) {
+    *found = 0;
+    ail_d1_fn f = ail_dun1(x, AIL_D1_INDEX);
+    ail_obj r;
+    if (!f) return AIL_OK;
+    *found = 1;
+    ail_st st = f(cx, &r, x);
+    if (st != AIL_OK) return st;
+    if (r.tag != AIL_T_INT && r.tag != AIL_T_BOOL) {
+        char buf[96]; snprintf(buf, sizeof buf, "__index__ returned non-int (type %s)", ail__dun_tname_s(r));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
+    *out = r;
+    return AIL_OK;
+}
 __attribute__((noinline, cold)) static ail_st ail_dun_noattr(ail_ctx *cx, ail_obj inst, const char *name_for_msg) {
     char b2[200], tn[80]; ail__dun_tname(tn, sizeof tn, inst);
     snprintf(b2, sizeof b2, "'%s' object has no attribute '%s'", tn, name_for_msg);
@@ -404,6 +429,21 @@ def _edits(inplace=False):
               '    ' + _binop_guard('SUB', 'RSUB', '-') + 'char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for -: \'%s\' and \'%s\'"'))
     e.append(('    char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for *: \'%s\' and \'%s\'"',
               '    ' + _binop_guard('MUL', 'RMUL', '*') + 'char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for *: \'%s\' and \'%s\'"'))
+    # a sequence repeat count that is an instance with __index__: convert it before the
+    # list/tuple/str branches and before bytes/bytearray/deque reaches its own __mul__/__imul__
+    e.append(('static inline ail_st ail_op_mul(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n',
+              'static inline ail_st ail_op_mul(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n'
+              '    if (b.tag == AIL_T_INST && ail__dun_seq(a)) {\n'
+              '        ail_d2_fn rf = ail_dun2(b, AIL_D2_RMUL);\n'
+              '        if (rf) return rf(cx, out, b, a);\n'
+              '        int found; ail_obj ib; ail_st st = ail__dun_index(cx, &ib, b, &found);\n'
+              '        if (st != AIL_OK) return st;\n'
+              '        if (found) b = ib;\n'
+              '    } else if (a.tag == AIL_T_INST && ail__dun_seq(b) && !ail_dun2(a, AIL_D2_MUL)) {\n'
+              '        int found; ail_obj ia; ail_st st = ail__dun_index(cx, &ia, a, &found);\n'
+              '        if (st != AIL_OK) return st;\n'
+              '        if (found) a = ia;\n'
+              '    }\n'))
     for sym, fwd, rev in (('//', 'FLOORDIV', 'RFLOORDIV'), ('%', 'MOD', 'RMOD'), ('/', 'TRUEDIV', 'RTRUEDIV'),
                           ('**', 'POW', 'RPOW')):
         e.append(('    return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %s");' % sym,
@@ -446,6 +486,14 @@ def _edits(inplace=False):
                       'static inline ail_st ail_op_%s(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n'
                       '    if (a.tag == AIL_T_INST) { ail_d2_fn f = ail_dun2(a, AIL_D2_%s); if (f) return f(cx, out, a, b); }\n'
                       % (fn, key)))
+        # after the __imul__ dispatch line, so the sequence's count is converted first
+        e.append(('static inline ail_st ail_op_imul(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n',
+                  'static inline ail_st ail_op_imul(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n'
+                  '    if (b.tag == AIL_T_INST && ail__dun_seq(a)) {\n'
+                  '        int found; ail_obj ib; ail_st st = ail__dun_index(cx, &ib, b, &found);\n'
+                  '        if (st != AIL_OK) return st;\n'
+                  '        if (found) b = ib;\n'
+                  '    }\n'))
     # format(x, spec) / f"{x:spec}" of an instance whose class defines __format__ (an Enum / Flag member does)
     e.append(('static inline ail_st ail_obj_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {\n',
               'static inline ail_st ail_obj_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {\n'

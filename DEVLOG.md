@@ -1,3 +1,31 @@
+## 2026-10-27 -- pre379: a sequence repeat count goes through __index__ (job-pre379-10280702)
+
+The pre313 review's first still-differing pre-existing item was `c *= Idx()` where `Idx`
+defines `__index__` and `c` is a bytearray: CPython prints `bytearray(b'xyxy')` and both
+builds raised `TypeError: can't multiply sequence by non-int of type 'Idx'`.  The generated
+code called `ail_op_imul`, whose instance branch dispatched to the prelude's
+`bytearray.__imul__`, which only accepts `int`; `ail_op_mul` had the same gap for
+list/tuple/str/bytes and for a reflected count.
+
+`dunderrt.py` now gives `ail_op_mul` and `ail_op_imul` a prologue that recognises a sequence
+receiver (native list/tuple/str, or a bytes/bytearray/deque instance by name) and converts a
+non-int count through its class's `__index__` table entry.  A non-int result raises
+`__index__ returned non-int (type ...)`; an object without `__index__` is left to the old
+error, which still names its type.  CPython's precedence is kept: a count that defines
+`__rmul__` is called reflected instead of converted, and a left operand that defines
+`__mul__` is not converted.  Direct dunder calls (`bytearray.__mul__(Idx())`) are a separate
+pre-existing route and are unchanged.
+
+Added `AIL_CURRENT/test_ail_pre379.py` (3 tests, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.  Probes in `/tmp/probes/pre379` on both
+builds via `cmp.sh`: `p01`-`p10` cover `*=`, `*`, reflected, all five sequence types, deque,
+negative/empty counts, a non-int `__index__` result, no-`__index__` errors and the count
+reaching the code through an argument, a list item, an attribute and a dict value; `p12`-`p24`
+cover a bool result, an exception from `__index__`, aliasing, non-inplace routes, inherited
+and overridden `__index__`, `__mul__`/`__rmul__` precedence and cross-sequence error wording.
+All 22 operator probes match CPython on both builds; `p11` (direct `__mul__`/`__imul__`
+method calls) still differs and is the separate pre-existing route noted above.
+
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
