@@ -556,6 +556,19 @@ Probes in `/tmp/probes` match CPython or are refused by name on both builds: `pr
 `pre55_runtime_dict`, `pre55_small`, `pre55_small_widths`. Tests on the final tree:
 `test_ail_pre55`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`
 (4 modules, 229 s, 0 failed).
+## 2026-10-26 - re-apply pre59: itertools choosers reject negative r (job-rbpre59-10261859)
+
+Re-applying the accepted pre59 change. The runtime fix is already present on this tree:
+pre137/pre126 route a given `r` through `ail_it_r_index`, which raises
+`ValueError: r must be non-negative` before the "r larger than the pool" early exit on both
+builds, so the fetched runtime hunk is superseded and no runtime edit was needed. Added the
+accepted `AIL_CURRENT/test_ail_pre59.py` and registered it in `ail_check.MODULES`; updated the
+fuzz8 DIFFERENCES row to cite it. `tools/diff_ids.py` is not present on this tree;
+`tools/update_manifest.py` was run and `--check` passes. Probes `pre59_routes`, `pre59_keyword`
+and `pre59_loop` in `/tmp/probes` match CPython on both builds (direct/literal, argument, list
+item, attribute, dict value, keyword/expression, empty pool, bool, r=0, r=n, r>n, huge negative,
+and the typed for-loop path). Tests on the final commit: pre59, pre137, pre126, safetynet, files,
+corpus_findings3.
 
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
