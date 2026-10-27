@@ -737,6 +737,104 @@ Probes in `/tmp/probes/pre335` on both builds: `p02_pow_zero_expr`, `p12_bounds`
 `p03_pow_zero_routes`, `p04_float400`, `p05_fstring` and `p06_maxsplit` probes also stay
 refused by name.  Final-state tests: `test_ail_pre335`, `test_ail_safetynet`, `test_ail_files`
 and `test_ail_corpus_findings3`.  `tools/update_manifest.py` was run and `--check` passes.
+## 2026-10-27 -- fuzz59 suite fix: CPython 3.12.15 changed the step-1 slice TypeError text (job-rbrbfuzz59-10280352)
+
+`test_ail_fuzz59` failed on the integration runner because CI's setup-python 3.12 is now
+3.12.15, and CPython 3.12.15 (like 3.13) raises `TypeError: must assign iterable to extended
+slice` for a non-iterable value on a step-1 slice (`b[1:2] = 5`), where 3.12.3 says `can only
+assign an iterable`.  AIL still emits the 3.12.3 text (`safetyrt.py` picks it by `step == 1`),
+so the `ERRORS` program's exact-output comparison failed only on the newer interpreter.
+`test_ail_fuzz59` now normalizes those two known spellings before comparing stdout, so it
+passes on both; the exception type and every other message are still compared verbatim.  No
+compiler change: `test_ail_fuzz59` passes under system CPython 3.12.3, 3.12.15 and 3.13.16 on
+the general and default builds (AIL keeps 3.12.3's wording, which the normalization accepts
+when the host is newer).  `test_ail_safetynet`, the other module named by the task, passes
+its 5 tests on 3.12.3, 3.12.15 and 3.13.16, on integ `0ece0a9` plus this branch's diff and on
+this tree; its failure in the batch suite was not reproducible.  Probes
+`/tmp/probes/p1_slot_foreign.py`, `p2_routes.py`, `p3_noniter_slices.py`,
+`p4_valid_slices.py` and `p5_srepr.py` match CPython on both builds.  Final-state tests:
+test_ail_fuzz59, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3;
+`tools/update_manifest.py --check` passes.
+
+## 2026-10-27 -- rbrbfuzz59 repair re-check: branch is green on the batch bases (job-rbrbfuzz59-10280140)
+
+The repair task reported `test_ail_fuzz59` and `test_ail_safetynet` failing when this branch is
+applied alone on the integration tree.  The culprit job (`culprit rbrbfuzz59`, run 40542121839,
+16:33Z) ran while the repair branch it names was still the export that predates the fix from
+job-rbrbfuzz59-10272331 (the `_ail_srepr` non-str fallback and the `list[str]` route), so the
+report describes that earlier tree, not this one.  Re-ran the exact culprit steps here: this
+branch is a snapshot of integ `753c709` plus a 7-file change (352 insertions: `tuplegen.lrepr`
+scalars through `%r`, `_ail_srepr` falling back to `%r` for a non-str, `%r` lowered through
+`_repr_conv` in `pyfunc._build_percent_value`, the new `test_ail_fuzz59`, registration, the two
+DIFFERENCES rows and this log).  `git diff 753c709 b8c01c7 -- . ':!.agent' ':!corpus'
+':!AIL_CURRENT/MANIFEST.json'` piped into `git apply --3way` on integ `5dff385` and on the batch
+candidate base `cf63372` conflicts only in `DEVLOG.md` (union merge, as before); no source hunk
+conflicts.  On both bases `test_ail_fuzz59` passed 7 tests in 37.7 s and `test_ail_safetynet`
+passed 5 tests in 134-136 s; on this branch itself they pass in 37.6 s and 131.6 s.  The same
+check on the pre-fix snapshot (branch job-rbrbfuzz59-10272028, `7cd2ef1`) also passes (37.7 s,
+134.3 s), so nothing in the branch's semantics depends on the older export.  Probes
+`p1_slot_foreign` (int/bool/float/None left in a `list[str]` by a failed `heappush`, plus a str
+in a `list[int]` slot), `p2_slot_routes` (item, dict value, attribute, argument), `p3_srepr_escapes`
+(quotes, backslash, newline/tab/CR, control and non-ASCII characters, empty string),
+`p4_percent_r` (int, negative, bool, float, str, None, tuple, list, dict, and a program-defined
+`repr`) and `p5_refused_width` (`%5r`, `%.2r`) match CPython on the general and default builds.
+No source change was needed; this entry records the re-verification.  `tools/update_manifest.py
+--check` passes.
+
+## 2026-10-27 -- fuzz59 apply on an integ that already has the first change (job-rbrbfuzz59-10272331)
+
+The culprit gate applied this job alone on an integ tree that already contained the first fuzz59
+change (its `lrepr` used `repr_expr` for a `list[str]` slot), so the second change's hunk in
+`tuplegen.lrepr` conflicted; `git apply --3way` left conflict markers in the source and both
+`test_ail_fuzz59` and `test_ail_safetynet` failed to compile.  The branch's diff now keeps that
+`lrepr` hunk byte-for-byte identical to the first change, so it merges cleanly there, and puts the
+later half in `_ail_srepr`: a value whose runtime type is not a str (an int, bool, float or None
+that a failed `heappush` left in a `list[str]`) falls back to `"%r"` and shows its own repr, while
+a real str keeps the existing quoting/escaping.  Simulated the culprit steps on integ `894a446`
+with the first change already applied, then this diff: only `DEVLOG.md` needed the union merge,
+`update_manifest.py --check` passed, and `test_ail_fuzz59`, `test_ail_fuzz65` and
+`test_ail_safetynet` all passed (132 s, 0 failed).  Probes `f59_slot_foreign` (int/negative/bool/
+float/None through an argument, empty list), `f59_slot_routes` (through a list item, a dict value
+and an attribute) and `f59_str_repr` (quotes, escapes, non-ASCII, empty, nested lists and tuples)
+match CPython on the general and default builds.
+
+## 2026-10-27 -- fuzz59 regression: a `list[str]` repr uses the value's `%r` (job-rbrbfuzz59-10272028)
+
+The re-applied fuzz59 change gave a `list[str]` slot the generated str-repr helper
+(`repr_expr`), which calls `_ail_srepr(x)` and iterates its argument as a string.  fuzz65 pushes
+an int into a `list[str]` (CPython appends before its comparison raises, so the int stays there)
+and then prints the list: both builds stopped with `TypeError: argument of type 'int' is not
+iterable` where CPython prints the list with `1`.  `tuplegen.Gen.lrepr` now formats every scalar
+element with `%r`, str included; the typed path lowers `%r` of a str through `_repr_conv`, so a
+real str keeps `_ail_srepr`'s quoting and a value of another type in a `list[str]` slot shows its
+own repr.  fuzz59's `list[int]`/`repr`-shadowing cases and fuzz65 both pass on the general and
+default builds; probes over quotes, escapes, non-ASCII and int/bool/float/None elements match
+CPython.  `tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-27 -- rbrbfuzz59 re-check: current integ already passes both target modules (job-rbrbfuzz59-10272028)
+
+The repair task reported `test_ail_fuzz59` and `test_ail_safetynet` failing when this job was
+applied alone to the integration tree.  Re-ran the exact culprit patch (`git diff 753c709
+4212b36 -- . ':!.agent' ':!corpus' ':!AIL_CURRENT/MANIFEST.json'`) on current `origin/integ`
+(`82a3ead`, the PR #160 merge), including the culprit workflow's conflict handling and manifest
+refresh: `test_ail_fuzz59` passed in 22.3 s and `test_ail_safetynet` in 76.5 s.  Also checked the
+earlier integration candidates `60d5cb6`, `6789dfa`, `a74a15f` and `a949741`; both modules pass
+on each.  No source change was needed; this entry records the re-verification.
+
+## 2026-10-27 -- re-apply fuzz59: keep list repr and `%r` on the typed path (job-rbrbfuzz59-10271816)
+
+Re-applied the accepted fuzz59 change on this tree.  The `del`-bound half was already here in a
+newer form (`pyfront.refuse_unrepresentable_delete_bounds` folded the whole expression, with a
+more thorough `test_ail_pre19.py`), so both were kept.  Added the remaining half:
+`tuplegen.lrepr` now formats scalar elements with the built-in `%r` conversion instead of the
+shadowable `repr` name, so a program-defined `repr` cannot hijack the generated list helper and a
+value whose runtime type differs from the list annotation after a slice store shows its own repr;
+`_build_percent_value` lowers `%r` through the same `_repr_conv` used by an f-string's `!r` and a
+`.format()` field's `!r` (a width or precision is still refused by name), and `tuplegen` uses the
+generated str-repr helper for a `list[str]` slot.  Added `AIL_CURRENT/test_ail_fuzz59.py` and
+registered it in `ail_check.MODULES`; added the DIFFERENCES row to both ledgers.
+`tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run and `--check`
+passes.
 
 ## 2026-10-27 -- pre319: calling an earlier function-valued class attribute is already refused by name (job-pre319-10271538)
 

@@ -201,6 +201,8 @@ STRHASH = '''def _ail_strhash(s: str) -> int:
     return h
 '''
 SREPR = r'''def _ail_srepr(s: str) -> str:
+    if not isinstance(s, str):
+        return "%r" % (s,)
     q = "'"
     if "'" in s and '"' not in s:
         q = '"'
@@ -415,10 +417,16 @@ class Gen:
             return name
         self.out[name] = None
         elem = ann_text(t[1])
-        # repr(), not a per-annotation spelling: a heap operation may have put a differently
-        # typed value into a list whose annotation says otherwise (CPython appends before the
-        # failed comparison), and list repr always uses the VALUE's repr.
-        shown = 'repr(x)' if t[1] in SCALARS else self.repr_expr(t[1], 'x')
+        # `repr()` as a name is shadowable (a program may define its own `repr`); `%r` is the
+        # built-in conversion and still uses the VALUE's repr if a slice store put another
+        # scalar type into a slot whose annotation says otherwise.  A list[str] slot uses the
+        # generated str-repr helper instead: the typed path has no `%r` for a str.
+        if t[1] == STR:
+            shown = self.repr_expr(STR, 'x')
+        elif t[1] in SCALARS:
+            shown = '("%r" % (x,))'
+        else:
+            shown = self.repr_expr(t[1], 'x')
         self.out[name] = ('def %s(xs: list[%s]) -> str:\n    parts: list[str] = []\n    for x in xs:\n'
                           '        parts.append(%s)\n    return "[" + ", ".join(parts) + "]"\n'
                           % (name, elem, shown))
