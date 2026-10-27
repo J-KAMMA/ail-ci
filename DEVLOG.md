@@ -1,3 +1,31 @@
+## 2026-10-27 -- pre355: int() before a later container mutation is refused (job-pre355-10280140)
+
+The rbrbpre322 reviewer's first pre-existing item reproduced on both builds: `items=[1e300];
+a=items; int(a[0]); a[0]=1.5` compiled and then stopped with `integer overflow`, where CPython
+prints the bignum.  `_safe_module_containers` drops a module container as soon as anything
+mutates it, so the read before the mutation stayed unfolded; the static checker had no value.
+
+`_check_flow_int64_containers` in `ail_chatgpt.py` now walks the module statements in order,
+tracking the value each name denotes (scalars and literal containers, with aliases sharing the
+same object and subscript stores applied in place), and refuses `int()` of a statically known
+value outside int64 exactly as the static pass would when nothing mutated it.  A mutation
+before the read updates the tracked value, a statically false/true `if` skips the branch it
+cannot run, and a call, loop, rebind, function/class-body use or `int` definition drops the
+name, so only a definitely-read value is refused.  Refusal wording is the existing
+`int() of a float outside int64` (and `int64 constant expression out of range` for out-of-range
+text) on both builds.
+
+The reviewer's r11 (`globals()["items"]=[1.5]`) is still refused by name and r17 matches
+CPython on both builds; both are unchanged.  Probes in `/tmp/probes/pre355` (28 programs, both
+builds): 19 are refused by name (p01-p04, p08-p12, p14, p16, p21-p25, p27, p30; p22 by the
+pre-existing static pass and p28 by the `int` shadow rule) and 9 match CPython (p05-p07, p13,
+p15, p17, p19, p26, p29).  Two out-of-scope pre-existing holes stay: an `append` mutation
+before the read and the constructor-attribute route still stop with `integer overflow`
+(`/tmp/probes/pre355/out_of_scope`), unchanged here.
+
+Added `AIL_CURRENT/test_ail_pre355.py` (3 tests, 27 programs, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.  `tools/update_manifest.py` was run and
+`--check` passes.
 ## 2026-10-27 -- pre338: int() of an out-of-int64 class attribute read through an instance is refused (job-pre338-10272141)
 
 The pre315 reviewer's first pre-existing item was `t01_class_attr_instance.py`:
