@@ -1519,6 +1519,321 @@ def _check_class_attribute_assignment(tree):
                 _refuse_class_attr_target(target, aliases, containers)
 
 
+_VARS_MUTATORS = frozenset(('update', 'setdefault', 'pop', 'popitem', 'clear', '__setitem__', '__delitem__'))
+_VARS_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
+_VARS_MAXSEED = 5
+
+
+def _vars_merge(dst, src):
+    for depth, origins in src.items():
+        dst.setdefault(depth, set()).update(origins)
+    return dst
+
+
+def _vars_copy(t):
+    return {d: set(o) for d, o in t.items()}
+
+
+def _vars_shift(t):
+    return {d + 1: set(o) for d, o in t.items()}
+
+
+def _vars_sub(t):
+    return {d - 1: set(o) for d, o in t.items() if d > 0}
+
+
+def _vars_params(fn):
+    a = fn.args
+    out = [x.arg for x in a.posonlyargs + a.args]
+    if a.vararg is not None:
+        out.append(a.vararg.arg)
+    out += [x.arg for x in a.kwonlyargs]
+    if a.kwarg is not None:
+        out.append(a.kwarg.arg)
+    return out
+
+
+def _vars_nodes(scope):
+    stack = [(n, scope) for n in reversed(scope.body)]
+    while stack:
+        node, parent = stack.pop()
+        if isinstance(node, _VARS_SCOPES):
+            continue
+        yield node, parent
+        for child in reversed(list(ast.iter_child_nodes(node))):
+            stack.append((child, node))
+
+
+def _vars_bindings(scope):
+    names = set()
+    if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        names.update(_vars_params(scope))
+    for node, _ in _vars_nodes(scope):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            names.add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.arg):
+            names.add(node.arg)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for a in node.names:
+                names.add((a.asname or a.name).split('.')[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            names.add(node.name)
+    return names
+
+
+class _VarsMutationCheck:
+    def __init__(self, tree):
+        self.tree = tree
+        self.funcs = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        self.by_name = {}
+        for f in self.funcs:
+            self.by_name.setdefault(f.name, []).append(f)
+        self.scopes = [tree] + [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))]
+        self.module_taint = {}
+        self.attr_taint = {}
+        self.param_seed = {f: {} for f in self.funcs}
+        self.mutated = {f: set() for f in self.funcs}
+        self.ret = {f: {} for f in self.funcs}
+        self.vars_shadowed = _binds_name(tree, 'vars')
+        self.bindings = {s: _vars_bindings(s) for s in self.scopes}
+
+    def expr(self, e, tmap, scope):
+        if isinstance(e, ast.Name):
+            t = _vars_copy(tmap.get(e.id, {}))
+            if e.id not in self.bindings.get(scope, set()):
+                _vars_merge(t, self.module_taint.get(e.id, {}))
+            return t
+        if isinstance(e, ast.Attribute):
+            return _vars_copy(self.attr_taint.get(e.attr, {}))
+        if isinstance(e, ast.Subscript):
+            return _vars_sub(self.expr(e.value, tmap, scope))
+        if isinstance(e, (ast.List, ast.Tuple, ast.Set)):
+            t = {}
+            for x in e.elts:
+                _vars_merge(t, self.expr(x, tmap, scope))
+            return _vars_shift(t)
+        if isinstance(e, ast.Dict):
+            t = {}
+            for x in e.values:
+                if x is not None:
+                    _vars_merge(t, self.expr(x, tmap, scope))
+            return _vars_shift(t)
+        if isinstance(e, ast.IfExp):
+            return _vars_merge(self.expr(e.body, tmap, scope), self.expr(e.orelse, tmap, scope))
+        if isinstance(e, ast.BoolOp):
+            t = {}
+            for x in e.values:
+                _vars_merge(t, self.expr(x, tmap, scope))
+            return t
+        if isinstance(e, (ast.NamedExpr, ast.Starred)):
+            return self.expr(e.value, tmap, scope)
+        if isinstance(e, ast.Call):
+            f = e.func
+            if isinstance(f, ast.Name) and f.id == 'vars' and not self.vars_shadowed:
+                return {0: {''}}
+            if isinstance(f, ast.Attribute):
+                recv = self.expr(f.value, tmap, scope)
+                if f.attr == 'values':
+                    return recv
+                if f.attr == 'items':
+                    return _vars_shift(recv)
+                if f.attr in ('get', 'pop'):
+                    return _vars_sub(recv)
+                return {}
+            if isinstance(f, ast.Name) and f.id in self.by_name:
+                out = {}
+                for callee in self.by_name[f.id]:
+                    summary = self.ret.get(callee, {})
+                    for depth, origins in summary.items():
+                        for origin in origins:
+                            if origin == '':
+                                out.setdefault(depth, set()).add('')
+                            elif isinstance(origin, tuple) and origin[0] == 'p':
+                                _, p, s = origin
+                                arg = self._arg_expr(e, callee, p)
+                                if arg is None:
+                                    continue
+                                for ad, ao in self.expr(arg, tmap, scope).items():
+                                    nd = depth - s + ad
+                                    if nd >= 0:
+                                        out.setdefault(nd, set()).update(ao)
+                return out
+            return {}
+        return {}
+
+    def _arg_expr(self, call, fn, name):
+        names = _vars_params(fn)
+        if name not in names:
+            return None
+        i = names.index(name)
+        pos = [x for x in call.args if not isinstance(x, ast.Starred)]
+        if i < len(pos):
+            return pos[i]
+        for kw in call.keywords:
+            if kw.arg == name:
+                return kw.value
+        return None
+
+    def _add_container(self, base, t, tmap, scope):
+        if not t:
+            return
+        if isinstance(base, ast.Name):
+            _vars_merge(tmap.setdefault(base.id, {}), t)
+        elif isinstance(base, ast.Attribute):
+            _vars_merge(self.attr_taint.setdefault(base.attr, {}), t)
+        elif isinstance(base, ast.Subscript):
+            self._add_container(base.value, _vars_shift(t), tmap, scope)
+
+    def assign(self, target, t, tmap, scope):
+        if isinstance(target, ast.Name):
+            if t:
+                _vars_merge(tmap.setdefault(target.id, {}), t)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for e in target.elts:
+                self.assign(e, _vars_sub(t), tmap, scope)
+        elif isinstance(target, ast.Starred):
+            self.assign(target.value, _vars_sub(t), tmap, scope)
+        elif isinstance(target, ast.Attribute):
+            if t:
+                _vars_merge(self.attr_taint.setdefault(target.attr, {}), t)
+        elif isinstance(target, ast.Subscript):
+            self._add_container(target.value, _vars_shift(t), tmap, scope)
+
+    def mutate(self, node, t, scope, summary):
+        if 0 not in t:
+            return False
+        origins = t[0]
+        if '' in origins and not summary:
+            self.refuse(node)
+        for origin in origins:
+            if isinstance(origin, tuple) and origin[0] == 'p':
+                self.mutated[scope].add(origin[1])
+        return True
+
+    def refuse(self, node):
+        error = ValueError('mutating the dict returned by vars() is not in the subset '
+                           '(CPython updates the instance __dict__)')
+        error.source_line = getattr(node, 'lineno', 0)
+        error.source_column = getattr(node, 'col_offset', 0)
+        raise error
+
+    def scan(self, scope, summary=False, seed=None):
+        tmap = {}
+        if seed:
+            for name, t in seed.items():
+                _vars_merge(tmap.setdefault(name, {}), t)
+        for _ in range(6):
+            before = repr(sorted((k, sorted((d, tuple(sorted(map(str, o)))) for d, o in v.items())) for k, v in tmap.items()))
+            for node, parent in _vars_nodes(scope):
+                if isinstance(node, ast.Assign):
+                    t = self.expr(node.value, tmap, scope)
+                    for target in node.targets:
+                        self.assign(target, t, tmap, scope)
+                elif isinstance(node, ast.AnnAssign):
+                    if node.value is not None:
+                        self.assign(node.target, self.expr(node.value, tmap, scope), tmap, scope)
+                elif isinstance(node, ast.AugAssign):
+                    if isinstance(node.target, ast.Subscript):
+                        self.mutate(node, self.expr(node.target.value, tmap, scope), scope, summary)
+                    if isinstance(node.target, ast.Name):
+                        _vars_merge(tmap.setdefault(node.target.id, {}), self.expr(node.value, tmap, scope))
+                elif isinstance(node, ast.NamedExpr):
+                    self.assign(node.target, self.expr(node.value, tmap, scope), tmap, scope)
+                elif isinstance(node, (ast.For, ast.AsyncFor)):
+                    t = _vars_sub(self.expr(node.iter, tmap, scope))
+                    self.assign(node.target, t, tmap, scope)
+                elif isinstance(node, (ast.With, ast.AsyncWith)):
+                    for item in node.items:
+                        if item.optional_vars is not None:
+                            self.assign(item.optional_vars, self.expr(item.context_expr, tmap, scope), tmap, scope)
+                elif isinstance(node, ast.comprehension):
+                    t = _vars_sub(self.expr(node.iter, tmap, scope))
+                    self.assign(node.target, t, tmap, scope)
+                elif isinstance(node, ast.Call):
+                    f = node.func
+                    if isinstance(f, ast.Attribute) and f.attr in _VARS_MUTATORS:
+                        self.mutate(node, self.expr(f.value, tmap, scope), scope, summary)
+                    self._pass_args(node, tmap, scope, summary)
+            after = repr(sorted((k, sorted((d, tuple(sorted(map(str, o)))) for d, o in v.items())) for k, v in tmap.items()))
+            if after == before:
+                break
+        # final mutation checks for subscript stores/deletes and mutating methods
+        for node, parent in _vars_nodes(scope):
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for target in targets:
+                    for sub in ast.walk(target):
+                        if isinstance(sub, ast.Subscript) and isinstance(sub.ctx, (ast.Store, ast.Del)):
+                            self.mutate(sub, self.expr(sub.value, tmap, scope), scope, summary)
+            elif isinstance(node, ast.Delete):
+                for target in node.targets:
+                    for sub in ast.walk(target):
+                        if isinstance(sub, ast.Subscript):
+                            self.mutate(sub, self.expr(sub.value, tmap, scope), scope, summary)
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in _VARS_MUTATORS:
+                self.mutate(node, self.expr(node.func.value, tmap, scope), scope, summary)
+        # return taint (summary only)
+        if summary:
+            ret = {}
+            for node, _ in _vars_nodes(scope):
+                if isinstance(node, ast.Return) and node.value is not None:
+                    _vars_merge(ret, self.expr(node.value, tmap, scope))
+            return tmap, ret
+        return tmap, None
+
+    def _pass_args(self, call, tmap, scope, summary):
+        f = call.func
+        if not (isinstance(f, ast.Name) and f.id in self.by_name):
+            return
+        for callee in self.by_name[f.id]:
+            for p in _vars_params(callee):
+                arg = self._arg_expr(call, callee, p)
+                if arg is None:
+                    continue
+                t = self.expr(arg, tmap, scope)
+                if t:
+                    if not summary:
+                        _vars_merge(self.param_seed[callee].setdefault(p, {}), t)
+                    if p in self.mutated.get(callee, set()) and 0 in t:
+                        self.mutate(call, {0: t[0]}, scope, summary)
+
+    def run(self):
+        for _ in range(8):
+            changed = False
+            # summaries
+            for fn in self.funcs:
+                seed = {}
+                for p in _vars_params(fn):
+                    for s in range(_VARS_MAXSEED):
+                        seed.setdefault(p, {}).setdefault(s, set()).add(('p', p, s))
+                _, ret = self.scan(fn, summary=True, seed=seed)
+                if ret != self.ret[fn]:
+                    self.ret[fn] = ret
+                    changed = True
+            # normal scans
+            for scope in self.scopes:
+                if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    seed = {p: {d: {('p', p)} for d in depths} for p, depths in self.param_seed[scope].items()}
+                    self.scan(scope, summary=False, seed=seed)
+                else:
+                    self.scan(scope, summary=False)
+            if not changed:
+                break
+
+def _check_vars_result_mutation(tree):
+    """Refuse a mutation of the dict `vars()` returns, by name.
+
+    The general path's `vars(instance)` returns a fresh dict copied from the instance's
+    attributes, while CPython returns the live `__dict__`: `vars(d)['g'] = 5` changes `d.g`
+    there.  Making the runtime hand out a live view would touch every dict path, so this
+    front-end pass tracks a `vars()` result through aliases, displays, attributes, loop and
+    with targets, function arguments and returns, and refuses the first write through it
+    (item store/delete/augmented store, `update`/`setdefault`/`pop`/`popitem`/`clear`).
+    Read-only uses of `vars()` are left alone."""
+    _VarsMutationCheck(tree).run()
+
 def _check_int64_abs_constants(tree, known):
     """Refuse a constant ``abs`` whose exact value int64 cannot hold, by name.
 
@@ -2594,6 +2909,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 _check_int64_int_base_constants(tree)
                 _check_int64_pow_constants(tree, _known_module_constants(tree))
                 _check_class_attribute_assignment(tree)
+                _check_vars_result_mutation(tree)
                 _check_genexpr_hash_keys(tree)
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)

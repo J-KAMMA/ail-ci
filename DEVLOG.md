@@ -1,3 +1,24 @@
+## 2026-10-27 -- pre344: mutation of the dict returned by vars() is refused by name (job-pre344-10272238)
+
+The task file was truncated, so the pre-existing item was recovered from the pre318 review:
+`vars(d)['g'] = 5; print(d.g)` prints `5` in CPython but raised
+`AttributeError: 'D' object has no attribute 'g'` on both builds.  The runtime's `ail2a_vars`
+returns a fresh dict copy, while CPython returns the live `__dict__`; making that view live would
+touch every dict operation, so `_check_vars_result_mutation` now refuses the first write through
+a `vars()` result at compile time with the named message
+`mutating the dict returned by vars() is not in the subset (CPython updates the instance __dict__)`.
+The pass tracks the result through aliases, list/dict/attribute containers, tuple, star, loop,
+comprehension and `with` targets, `.values()`/`.items()`, arguments, returns and transitive calls;
+item store/delete/augmented store, `update`, `setdefault`, `pop`, `popitem` and `clear` are
+refused.  Read-only uses and unrelated same-name locals still match CPython.  Added
+`AIL_CURRENT/test_ail_pre344.py` (32 programs, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.
+
+Probes in `/tmp/probes/pre344` on both builds cover direct/alias/argument/container routes,
+callee-owned `vars()`, returned values, `.values()`/`.items()` loops, unpacking, and read-only
+controls.  Final-state tests: test_ail_pre344, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre326: a nested class inside a function is already refused by name (job-pre326-10271918)
 
 The pre324 reviewer's first pre-existing item was a nested class inside a function
