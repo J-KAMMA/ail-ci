@@ -358,11 +358,15 @@ def _args_item_target(node, names):
 
 
 _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda,
-           ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp, ast.ExceptHandler)
+           ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
 
 
 def _scope_nodes(body):
-    """The nodes of one scope in source order, without a nested function/class/comprehension/handler body."""
+    """The nodes of one scope in source order, without a nested function/class/comprehension body.
+
+    An exception handler stays in the enclosing function's scope, so its body is walked; the
+    handler's own name is forgotten by `_forget_binding` when the walk reaches it.
+    """
     def walk(node):
         yield node
         if isinstance(node, _SCOPES):
