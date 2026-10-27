@@ -1,3 +1,26 @@
+## 2026-10-27 -- pre373 review fix: evaluation order inside one statement (job-pre373-10280524)
+
+The pre373 review found three false refusals: a mutation by a call that runs earlier in the
+same statement was checked against the state from before the statement, so
+`print(a.pop(0), int(a[0]))`, `print(change(), int(items[0]))` and
+`print(d.update(v=1.5), int(d["v"]))` were refused while CPython and the base build print
+`1e+300 1`, `0 1` and `None 1`.  `_flow_check_int_calls` now walks each expression in
+evaluation order (`_flow_eval_children`: call target then positional arguments then keyword
+arguments, dict key/value pairs interleaved) instead of scanning every operand with the
+pre-statement state.  A call evaluated before a later `int()` operand is applied when its
+effect is known -- `append`, `pop` with a constant index/key, `dict.update` with constant
+contents, and the read-only `get`/`count`/`index`/`keys`/`values`/`items`/`copy` -- and
+otherwise clears the tracked containers, so a read before the mutation is still refused by
+name and a read after it is not.  Statement-level may-call clearing was removed because the
+walk now owns it; comprehensions, `IfExp` tests and `BoolOp` operands still clear on unknown
+calls without refusing an `int()` inside them.  `test_ail_pre373.py` gained 15 ordering
+cases (9 that must match CPython, 6 read-before-call cases that must be refused by name).
+Probes in `/tmp/probes/pre373r` (16 programs, both builds via `cmp.sh`): `p01`-`p05`,
+`p09`, `p10`, `p13`, `p16` match CPython (pop/update/user-call before read, negative index,
+dict pop+get, variable pop index, dict argument, list-item and int64-width boundaries);
+`p06`-`p08`, `p11`, `p12`, `p15` are refused by name (read before pop/user call, update of
+another key, `count`/`get` before read, dict `pop` default on an absent key).
+
 ## 2026-10-27 -- pre373: int() read before a later module-container mutation (job-pre373-10280524)
 
 The pre355 review's first still-differing pre-existing item was `p20`: `items=[1e300];

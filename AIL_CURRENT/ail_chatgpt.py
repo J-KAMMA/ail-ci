@@ -1350,40 +1350,107 @@ def _refuse_flow_int64(node, value):
     raise error
 
 
-def _flow_check_int_calls(node, lookup, int_params, int_shadowed):
+def _flow_eval_children(node):
+    """Direct children of an expression in the order Python evaluates them."""
+    if isinstance(node, ast.Call):
+        yield node.func
+        yield from node.args
+        for keyword in node.keywords:
+            yield keyword.value
+        return
+    if isinstance(node, ast.Dict):
+        for key, value in zip(node.keys, node.values):
+            if key is not None:
+                yield key
+            yield value
+        return
+    if isinstance(node, ast.Compare):
+        yield node.left
+        yield from node.comparators
+        return
+    yield from ast.iter_child_nodes(node)
+
+
+def _flow_check_int_calls(node, lookup, int_params, int_shadowed, pure_calls, state):
     """Refuse int() conversions in an expression that module-level code evaluates now.
+
+    The walk follows evaluation order, so a call that runs earlier in the same statement
+    -- ``a.pop(0)``, a user function, ``dict.update`` -- updates or clears the tracked
+    containers before a later ``int()`` operand is checked; checking every operand
+    against the state from before the statement refused programs CPython runs.  A call
+    that is not known to leave the tracked containers alone clears them.
 
     Calls inside a function, lambda, class body or comprehension may run later or not at
     all, so they stay with the static checker; a refusal based on the current walk state
     could be false there.  The same holds for a non-constant ``if`` expression or a
-    short-circuit ``and``/``or``, whose operands need not run.
+    short-circuit ``and``/``or``, whose operands need not run: their calls can still
+    have run and clear the state, but an ``int()`` inside them is not refused.
     """
-    stack = [node]
-    while stack:
-        sub = stack.pop()
-        if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda,
-                            ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
-            continue
+    def clear():
+        state.clear()
+
+    def may_be_unknown(sub):
+        return (_flow_may_call_unknown(sub, pure_calls, int_shadowed)
+                or _flow_has_walrus(sub))
+
+    def check_call(sub):
+        if not isinstance(sub.func, ast.Name):
+            return
+        if (not int_shadowed and sub.func.id == 'int'
+                and len(sub.args) == 1 and not sub.keywords):
+            _refuse_flow_int64(sub, _constant_value(sub.args[0], lookup,
+                                                    lambda unused: True, {}))
+        if sub.func.id in int_params:
+            for name, index in int_params[sub.func.id].items():
+                argument = _bound_argument(sub, name, index)
+                if argument is not None:
+                    value = _constant_value(argument, lookup, lambda unused: True, {})
+                    if _outside_int64_float(value):
+                        _refuse_flow_int64(sub, value)
+
+    def walk(sub):
+        if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                            ast.Lambda)):
+            return
+        if isinstance(sub, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            if may_be_unknown(sub):
+                clear()
+            return
         if isinstance(sub, ast.IfExp):
             test = _constant_value(sub.test, lookup, lambda unused: True, {})
             if type(test) is bool:
-                stack.append(sub.body if test else sub.orelse)
-            continue
+                walk(sub.body if test else sub.orelse)
+            elif may_be_unknown(sub.test):
+                clear()
+            return
         if isinstance(sub, ast.BoolOp):
-            continue
-        if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name):
-            if (not int_shadowed and sub.func.id == 'int'
-                    and len(sub.args) == 1 and not sub.keywords):
-                _refuse_flow_int64(sub, _constant_value(sub.args[0], lookup,
-                                                        lambda unused: True, {}))
-            if sub.func.id in int_params:
-                for name, index in int_params[sub.func.id].items():
-                    argument = _bound_argument(sub, name, index)
-                    if argument is not None:
-                        value = _constant_value(argument, lookup, lambda unused: True, {})
-                        if _outside_int64_float(value):
-                            _refuse_flow_int64(sub, value)
-        stack.extend(ast.iter_child_nodes(sub))
+            if may_be_unknown(sub):
+                clear()
+            return
+        if isinstance(sub, ast.NamedExpr):
+            walk(sub.value)
+            clear()
+            return
+        if isinstance(sub, ast.Call):
+            for child in _flow_eval_children(sub):
+                walk(child)
+            check_call(sub)
+            function = sub.func
+            if (isinstance(function, ast.Name)
+                    and (function.id in pure_calls
+                         or (function.id == 'int' and not int_shadowed))):
+                return
+            if (_flow_read_only(sub, lookup, state)
+                    or _flow_append(sub, lookup, state)
+                    or _flow_pop(sub, lookup, state)
+                    or _flow_update(sub, lookup, state)):
+                return
+            clear()
+            return
+        for child in _flow_eval_children(sub):
+            walk(child)
+
+    walk(node)
 
 
 def _flow_may_call_unknown(node, pure_calls, int_shadowed):
@@ -1451,6 +1518,90 @@ def _flow_append(call, lookup, state):
     return True
 
 
+_FLOW_READ_ONLY_METHODS = frozenset(
+    {'get', 'count', 'index', 'keys', 'values', 'items', 'copy'})
+
+
+def _flow_read_only(call, lookup, state):
+    """Whether a tracked container method leaves the object unchanged; False otherwise."""
+    if (not isinstance(call.func, ast.Attribute)
+            or call.func.attr not in _FLOW_READ_ONLY_METHODS):
+        return False
+    base = _constant_value(call.func.value, lookup, lambda unused: True, {})
+    return _flow_tracked(base, state)
+
+
+def _flow_pop(call, lookup, state):
+    """Apply `base.pop(...)` to a tracked list or dict; False when it is not statically known."""
+    if not isinstance(call.func, ast.Attribute) or call.func.attr != 'pop' or call.keywords:
+        return False
+    base = _constant_value(call.func.value, lookup, lambda unused: True, {})
+    if not _flow_tracked(base, state):
+        return False
+    if isinstance(base, list):
+        if len(call.args) > 1:
+            return False
+        if not call.args:
+            if not base:
+                return False
+            base.pop()
+            return True
+        index = _constant_value(call.args[0], lookup, lambda unused: True, {})
+        if type(index) not in (int, bool):
+            return False
+        index = int(index)
+        if not -len(base) <= index < len(base):
+            return False
+        del base[index]
+        return True
+    if isinstance(base, dict):
+        if not 1 <= len(call.args) <= 2:
+            return False
+        key = _constant_value(call.args[0], lookup, lambda unused: True, {})
+        if key is _UNKNOWN:
+            return False
+        try:
+            if key in base:
+                del base[key]
+                return True
+        except TypeError:
+            return False
+        # Absent key with a default leaves the dict unchanged; without one the
+        # program stops with KeyError, so the effect is not known.
+        return len(call.args) == 2
+    return False
+
+
+def _flow_update(call, lookup, state):
+    """Apply `base.update(...)` to a tracked dict; False when it is not statically known."""
+    if not isinstance(call.func, ast.Attribute) or call.func.attr != 'update':
+        return False
+    base = _constant_value(call.func.value, lookup, lambda unused: True, {})
+    if not isinstance(base, dict) or not _flow_tracked(base, state):
+        return False
+    if len(call.args) > 1:
+        return False
+    pairs = []
+    if call.args:
+        other = _constant_value(call.args[0], lookup, lambda unused: True, {})
+        if not isinstance(other, dict):
+            return False
+        pairs.extend(other.items())
+    for keyword in call.keywords:
+        if keyword.arg is None:
+            return False
+        value = _constant_value(keyword.value, lookup, lambda unused: True, {})
+        if value is _UNKNOWN:
+            return False
+        pairs.append((keyword.arg, value))
+    try:
+        for key, value in pairs:
+            base[key] = value
+    except TypeError:
+        return False
+    return True
+
+
 def _check_flow_int64_containers(tree, known, int_params, int_shadowed):
     """Refuse int() of a known out-of-int64 value read before a module container is mutated.
 
@@ -1479,7 +1630,7 @@ def _check_flow_int64_containers(tree, known, int_params, int_shadowed):
             state.pop(name, None)
 
     def scan(node):
-        _flow_check_int_calls(node, lookup, int_params, int_shadowed)
+        _flow_check_int_calls(node, lookup, int_params, int_shadowed, pure_calls, state)
 
     for statement in tree.body:
         if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -1543,11 +1694,6 @@ def _check_flow_int64_containers(tree, known, int_params, int_shadowed):
             continue
         if isinstance(statement, ast.Expr):
             scan(statement.value)
-            if isinstance(statement.value, ast.Call) and _flow_append(statement.value, lookup, state):
-                continue
-            if (_flow_may_call_unknown(statement.value, pure_calls, int_shadowed)
-                    or _flow_has_walrus(statement.value)):
-                state.clear()
             continue
         if isinstance(statement, (ast.Assign, ast.AnnAssign)):
             value_node = statement.value
@@ -1559,10 +1705,6 @@ def _check_flow_int64_containers(tree, known, int_params, int_shadowed):
             for target in targets:
                 if isinstance(target, ast.Subscript):
                     scan(target)
-            if (_flow_may_call_unknown(value_node, pure_calls, int_shadowed)
-                    or _flow_has_walrus(statement)):
-                state.clear()
-                continue
             value = _constant_value(value_node, lookup, lambda unused: True, {})
             handled = True
             for target in targets:

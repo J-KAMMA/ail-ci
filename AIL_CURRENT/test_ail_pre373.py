@@ -5,11 +5,14 @@ outside int64 was mutated after an ``int()`` read of it, so `_safe_module_contai
 dropped the container for the whole program and the earlier read stayed unfolded; both
 builds then stopped at run time with ``integer overflow`` where CPython prints the big
 integer.  A straight-line walk now tracks each module name's container in statement
-order and refuses the read by name at the point it happens.  A mutation before the read
-updates the shared container (aliases included), so those programs still match CPython;
-anything whose effect is not known (a branch, loop, function or class body, import,
-walrus or unsupported store) drops the walk state and leaves the pre-existing run-time
-stop.  Programs are built with the general path forced and with the default build.
+order and refuses the read by name.  Expressions are walked in evaluation order, so a
+mutation that runs earlier in the same statement (``a.pop(0)``, a user call,
+``dict.update``) is applied or clears the state before a later ``int()`` operand is
+checked; a mutation before the read updates the shared container (aliases included), so
+those programs still match CPython; anything whose effect is not known (a branch, loop,
+function or class body, import, walrus or unsupported store) drops the walk state and
+leaves the pre-existing run-time stop.  Programs are built with the general path forced
+and with the default build.
 """
 import os
 import shutil
@@ -114,6 +117,41 @@ class C:
         self.a = [1e300]
 c = C()
 print(int(c.a[0]))
+''',
+    'read_before_pop_same_statement': '''
+items = [1e300]
+a = items
+print(int(a[0]), a.pop(0))
+''',
+    'read_before_user_call_same_statement': '''
+items = [1e300]
+def change():
+    items[0] = 1.5
+    return 0
+print(int(items[0]), change())
+''',
+    'update_other_key_before_read': '''
+d = {"v": 1e300}
+a = d
+print(d.update(w=2), int(a["v"]))
+''',
+    'count_before_read': '''
+items = [1e300]
+a = items
+print(a.count(0), int(a[0]))
+a[0] = 1.5
+''',
+    'get_before_read': '''
+d = {"v": 1e300}
+a = d
+print(d.get("v"), int(a["v"]))
+d["v"] = 1.5
+''',
+    'dict_pop_default_missing': '''
+d = {"v": 1e300}
+a = d
+print(a.pop("w", 9), int(a["v"]))
+d["v"] = 1.5
 ''',
 }
 
@@ -229,6 +267,55 @@ print(int(items[0]))
     'no_feature': '''
 xs = [1, 2, 3]
 print(sum(xs), len(xs))
+''',
+    'pop_before_read': '''
+items = [1e300, 1.5]
+a = items
+print(a.pop(0), int(a[0]))
+''',
+    'user_call_before_read': '''
+items = [1e300]
+def change():
+    items[0] = 1.5
+    return 0
+print(change(), int(items[0]))
+''',
+    'update_before_read': '''
+d = {"v": 1e300}
+print(d.update(v=1.5), int(d["v"]))
+''',
+    'negative_pop_before_read': '''
+items = [2.5, 1e300]
+a = items
+print(a.pop(1), int(a[-1]))
+''',
+    'dict_pop_get_after': '''
+d = {"v": 1e300}
+a = d
+print(a.pop("v"), int(d.get("v", 1)))
+''',
+    'variable_pop_index': '''
+items = [1e300, 1.5]
+a = items
+i = 0
+print(a.pop(i), int(a[0]))
+''',
+    'update_dict_argument': '''
+d = {"v": 1e300}
+a = d
+x = {"v": 1.5}
+print(a.update(x), int(d["v"]))
+''',
+    'list_item_pop': '''
+inner = [1e300, 2.5]
+rows = [inner]
+a = rows[0]
+print(a.pop(0), int(a[0]))
+''',
+    'width_boundary_pop': '''
+items = [9.3e18, 1.5]
+a = items
+print(a.pop(0), int(a[0]))
 ''',
 }
 
