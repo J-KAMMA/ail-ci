@@ -2,7 +2,7 @@
 
 Re-applied the accepted pre299 change on top of this integration tree, keeping the newer
 front-end work (pre273's `**` rule, pre285 local cancellation, pre290 int() wrappers) unchanged.
-Added `_check_int64_pow_constants`, called after `_check_int64_int_base_constants`: a
+Extended the existing `_check_int64_pow_constants`, called after `_check_int64_int_base_constants`: a
 two-argument builtin `pow()` with statically known int arguments (module and function-local
 constants, expressions and aliases included) is folded exactly, and a result outside int64 is
 refused with `int64 constant expression out of range`; when the base is a constant int with
@@ -11,15 +11,15 @@ following pre273's rule for `**`. Bases 0/1/-1 with computed exponents, constant
 float and bool powers, `pow(base, exp, mod)`, and a program that binds its own `pow` are
 unchanged.
 
-Probes in `/tmp/probes` on both builds: `p299_safe`, `p299_routes_safe`, `p299_shadow` and
-`p299_zero_neg` match CPython; `p299_const`, `p299_const_expr`, `p299_const_local` and
-`p299_const_module` are refused as constant out-of-int64 values; `p299_dyn_arg`, `p299_dyn_alias`,
-`p299_dyn_list`, `p299_dyn_attr`, `p299_dyn_dict` and `p299_dyn_negbase` are refused as
-computed-exponent constructs. Final-state tests: `test_ail_pre299`, `test_ail_pre273`,
+Probes in `/tmp/probes` and `/tmp/rprobes` on both builds: the safe/aliased/shadowed/zero-base
+forms match CPython; constant out-of-int64 forms are refused as `int64 constant expression out
+of range`; computed-exponent forms are refused by name, including calls in a class body and a
+lambda body. Final-state tests: `test_ail_pre299`, `test_ail_pre294`, `test_ail_pre273`,
 `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` (0 failed).
 `tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run and
-`--check` passes. `tools/ci_shards.py --check` still reports the pre-existing duplicated
-`test_ail_pre126`, unrelated to this change.
+`--check` passes. `tools/ci_shards.py --check` reports only the pre-existing duplicated
+`test_ail_fuzz4`, `test_ail_pre126` and `test_ail_pre61`; this change adds only
+`test_ail_pre299` to one shard.
 
 ## 2026-10-26 -- pre302 review: parenthesize a folded negative float literal (job-pre302-10270745)
 

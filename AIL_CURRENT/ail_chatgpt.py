@@ -1566,11 +1566,15 @@ def _check_int64_pow_constants(tree, known):
             error.source_column = node.col_offset
             raise error
 
-    for node in _walk_module_scope(tree):
-        check(node, known, names)
-    for function in ast.walk(tree):
-        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
+    functions = [node for node in ast.walk(tree)
+                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    function_nodes = set()
+    for function in functions:
+        function_nodes.update(id(node) for node in _walk_own_scope(function))
+    for node in ast.walk(tree):
+        if id(node) not in function_nodes:
+            check(node, known, names)
+    for function in functions:
         local = _function_local_int_constants(function, known)
         parameters = {argument.arg for argument in
                       function.args.posonlyargs + function.args.args + function.args.kwonlyargs}
