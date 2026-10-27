@@ -34,7 +34,76 @@ are refused by the pre278 wording.  Final-state tests: `test_ail_pre278` (8 test
 `test_ail_pre279` (7, OK), `test_ail_safetynet` (5, OK), `test_ail_files` (18, OK with 1
 skipped) and `test_ail_corpus_findings3` (2, OK).  `tools/diff_ids.py` is not present on this
 tree; `tools/update_manifest.py` was run and `--check` passes.
+## 2026-10-27 -- pre324 review: annotation-only names and comprehension targets are not class-body bindings (job-pre324-10271601)
 
+The review found that the earlier refusal was too broad because `_store_linenos` counted every
+`ast.Name` store in the class body.  It now skips the target of an annotation with no value
+(`x: int` records only `__annotations__`, while `x: int = 3` still binds `x`) and the generator
+targets of a comprehension (their own scope, while a named expression in the comprehension still
+binds here).  So `x = 100; class C: x: int; def m(self, a=x)` and
+`x = 100; class C: y = [x for x in range(3)]; def m(self, a=x)` match CPython (100) again on both
+builds; an annotation with a value, a real class attribute before the comprehension target, or an
+attribute after it is still refused by name.  `test_ail_pre324` adds `annotation_only`,
+`annotation_value`, `comp_target` and `nested_comp_target`.
+
+Probes in `/tmp/probes/pre324` on both builds: the 10 matching new probes are `p18_ann_only`,
+`p18_ann_only_alias`, `p18_ann_only_arg`, `p18_ann_only_multi`, `p18_comp_target`,
+`p18_comp_target_arg`, `p18_comp_target_dict`, `p18_comp_target_gen`,
+`p18_comp_target_nested` and `p18_comp_target_tuple`; `p18_ann_value`, `p18_ann_only_then_attr`,
+`p18_comp_target_with_attr` and `p18_comp_target_then_attr` are refused by name as intended.  The
+18 earlier pre324 probes still match (5) or are refused by name (13).  Final-code tests:
+`test_ail_pre324`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`
+(4 modules, 263 s, 0 failed), plus `test_ail_fuzz1.NonLiteralDefaults` and
+`test_ail_fuzz1.ForwardLambdaDefaults` (16 tests, OK).  `tools/update_manifest.py` was run and
+`--check` passes.
+
+## 2026-10-27 -- pre324: class method default reading an earlier class-body name (job-pre324-10271601)
+
+The pre304 review's first pre-existing difference (p18) still reproduced on this tree:
+`x = 100; class C: x = 3; def m(self, a=x): ...` printed `100` on both builds, because a
+non-literal method default is hoisted to module scope before the class body runs, where CPython
+evaluates it in the class namespace and prints `3`.  A method/property bound earlier in the same
+class body was wrong the same way (`a=x` became the module global instead of the function).
+`_hoist_defaults` now refuses this one construct by name on both builds
+(`a default in method C.m reads the class-body name x; ... CPython evaluates the default in the
+class body`).  The scan only counts names bound earlier in the class body and only loads that the
+def statement evaluates now: a class attribute bound later, an unrelated class name, a module
+global, a module function's default, and a lambda/comprehension body (which resolves globals) are
+unchanged.
+
+Probes in `/tmp/probes/pre324` on both builds: `p18_default_class_attr`, `p18_default_expr`,
+`p18_with_init`, `p18_init_before_attr`, `p18_kwonly`, `p18_method_earlier`, `p18_alias_attr`,
+`p18_class_attr_route`, `p18_negative_attr`, `p18_empty_attr`, `p18_builtin_shadow`,
+`p18_comp_outer_class` and `p18_lambda_default_class` are refused by name; `p18_default_later`,
+`p18_no_class_attr`, `p18_lambda_global`, `p18_comp_body_global` and `p18_module_func` match
+CPython.  Final-commit tests: `test_ail_pre324`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` (4 modules, 341 s, 0 failed); the related
+`test_ail_fuzz1.NonLiteralDefaults.test_class_attribute_default_refused_or_same` passes.  The
+full `test_ail_fuzz1` module has two unrelated environment failures (`difffuzz` is not installed).
+`tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-27 -- re-apply pre281: empty sequence repeated by a huge count (job-rbrbpre281-10271623)
+
+Re-applying the accepted pre281 change on the current integration tree.  The current tree already
+has pre271's empty-list skip in `ail_op_imul` (with the bare `MemoryError` guard for an oversized
+repeat), and `ail_op_mul` already skipped an empty list/tuple with the same guard; those sites keep
+both fixes unchanged.  The remaining pre281 sites are applied: the v1 `ail__repeat_str` /
+`ail__repeat_vec` helpers and the v2 `ail_str_repeat` now skip the repeat loop when the sequence has
+no elements, so `[] * 10**18`, `() * 10**18`, `"" * 10**18` and `b"" * 10**18` return at once
+instead of looping over the huge count.  Negative, zero, bool, non-empty and aliased sequences are
+unchanged, and a huge count reaching the statement through an argument, a list item, an attribute
+or a dict value matches CPython on both builds.
+`AIL_CURRENT/test_ail_pre281.py` (4 tests, both builds) is added and registered in
+`ail_check.MODULES` and `ci_shards.json`.  `AIL_CURRENT/MANIFEST.json` was refreshed (the new
+module is pinned after `git add`); `tools/update_manifest.py --check` passes.  `tools/diff_ids.py`
+is not present on this tree.
+Probes in `/tmp/probes/pre281_*.py` on both builds: `p1_empty_literals`, `p2_nonempty`,
+`p3_routes` (argument, list item, attribute and dict value), `p4_alias`, `p5_nested`,
+`p6_boundaries` (0, -1, -10**18, 1, 2, bool, 10**18 and 2**62) and `p7_bytearray` match CPython;
+`p8_bytearray_alias` still shows the pre-existing bytearray `*=` aliasing difference recorded as
+`C?-job-rbrbpre281-10271623-2`.
+Targeted tests before the final commit: `test_ail_pre281`, `test_ail_pre271`,
+`test_ail_string_repeat_fusion` and `test_ail_local_count_repeat` (15 tests, 80.5 s, 0 failed).
 ## 2026-10-26 -- pre302 review: parenthesize a folded negative float literal (job-pre302-10270745)
 
 The review found that the replacement produced by `_fold_float_int_text` was an
