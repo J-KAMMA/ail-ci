@@ -1,3 +1,26 @@
+## 2026-10-27 -- re-apply pre299: builtin pow() outside int64 is refused by name (job-rbpre299-10270953)
+
+Re-applied the accepted pre299 change on top of this integration tree, keeping the newer
+front-end work (pre273's `**` rule, pre285 local cancellation, pre290 int() wrappers) unchanged.
+Added `_check_int64_pow_constants`, called after `_check_int64_int_base_constants`: a
+two-argument builtin `pow()` with statically known int arguments (module and function-local
+constants, expressions and aliases included) is folded exactly, and a result outside int64 is
+refused with `int64 constant expression out of range`; when the base is a constant int with
+|base| >= 2 and the exponent is not statically known, the construct is refused at compile time,
+following pre273's rule for `**`. Bases 0/1/-1 with computed exponents, constant in-range powers,
+float and bool powers, `pow(base, exp, mod)`, and a program that binds its own `pow` are
+unchanged.
+
+Probes in `/tmp/probes` on both builds: `p299_safe`, `p299_routes_safe`, `p299_shadow` and
+`p299_zero_neg` match CPython; `p299_const`, `p299_const_expr`, `p299_const_local` and
+`p299_const_module` are refused as constant out-of-int64 values; `p299_dyn_arg`, `p299_dyn_alias`,
+`p299_dyn_list`, `p299_dyn_attr`, `p299_dyn_dict` and `p299_dyn_negbase` are refused as
+computed-exponent constructs. Final-state tests: `test_ail_pre299`, `test_ail_pre273`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` (0 failed).
+`tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run and
+`--check` passes. `tools/ci_shards.py --check` still reports the pre-existing duplicated
+`test_ail_pre126`, unrelated to this change.
+
 ## 2026-10-26 -- pre302 review: parenthesize a folded negative float literal (job-pre302-10270745)
 
 The review found that the replacement produced by `_fold_float_int_text` was an
