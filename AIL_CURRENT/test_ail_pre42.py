@@ -113,6 +113,13 @@ def main() -> None:
 main()
 """
 
+ANY_ELEMENT = r"""def main() -> None:
+    print(any((y for y in [x]) for x in [1, 2]))
+
+
+main()
+"""
+
 REFUSED = {
     'element': ELEMENT,
     'unused': UNUSED,
@@ -121,6 +128,7 @@ REFUSED = {
     'fold_element': FOLD,
     'condition': CONDITION,
     'next_argument': NEXT,
+    'any_element': ANY_ELEMENT,
 }
 
 PLAIN = r"""def src(x: int):

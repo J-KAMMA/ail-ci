@@ -6,11 +6,15 @@ one was evaluated when the outer object was built (CPython creates it only when 
 reached); the side-effect order differed and consuming the outer could end in
 `AIL internal error: ail_it_next: unknown library iterator kind`.  Both general emitters now
 refuse the nested construct by name, and the `next()` / `any()` / `all()` fused paths check the
-outer argument too.  This tree's pre116/pre166 saved-generator screen (`a generator expression
+outer argument too.  The pre41 any()/all() screen keeps its own wording for a generator expression
+used as the iterable (`iterable is itself a generator expression`): the generic pre-scan leaves an
+any()/all() argument to that fused path, which checks the iterable first and the other nested shapes
+second.  This tree's pre116/pre166 saved-generator screen (`a generator expression
 used as a value`) would otherwise claim a nested one first, so the nested check runs before it;
 that screen is kept unchanged for non-nested saved generators.  A generator expression with no
 generator expression inside it, including one holding a list/set/dict comprehension, still builds
-and matches CPython.  Added `AIL_CURRENT/test_ail_pre42.py` and registered it in `ail_check.MODULES`.
+and matches CPython.  Added `AIL_CURRENT/test_ail_pre42.py` and registered it in `ail_check.MODULES`;
+its `any_element` case covers the generic any()/all() shape that is not an iterable nesting.
 
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 

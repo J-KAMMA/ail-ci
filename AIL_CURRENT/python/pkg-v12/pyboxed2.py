@@ -2176,8 +2176,13 @@ class Compiler(boxclosure.ClosureMixin):
         self.assigned_attrs = frozenset(
             n.attr for n in ast.walk(tree)
             if isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Store))
+        any_all_genargs = set()
+        for call in ast.walk(tree):
+            if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and \
+                    call.func.id in ('any', 'all'):
+                any_all_genargs.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
         for gen in ast.walk(tree):
-            if isinstance(gen, ast.GeneratorExp) and \
+            if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
                     any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
                 refusal = Unsupported(
                     'a generator expression nested inside another generator expression '
@@ -8547,9 +8552,6 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.emit('%s = ail_box_bool(%d);' % (res, 0 if name == 'any' else 1))
         arg = args[0]
         if isinstance(arg, ast.GeneratorExp):
-            if any(n is not arg and isinstance(n, ast.GeneratorExp) for n in ast.walk(arg)):
-                raise Unsupported('a generator expression nested inside another generator expression '
-                                  '(the inner one would be materialised eagerly, not lazily)')
             plan = self._str_scan_plan(arg, name, ctx)
             if plan is not None:
                 iternode, lo, hi = plan
@@ -8562,6 +8564,9 @@ class Compiler(boxclosure.ClosureMixin):
                 raise Unsupported('%s() over a generator expression whose iterable is itself a '
                                   'generator expression (the inner generator would be materialised '
                                   'eagerly)' % name)
+            if any(n is not arg and isinstance(n, ast.GeneratorExp) for n in ast.walk(arg)):
+                raise Unsupported('a generator expression nested inside another generator expression '
+                                  '(the inner one would be materialised eagerly, not lazily)')
             # fused: short-circuits at the first deciding element, like CPython's any()/all()
             # over a generator (the materialising list path cannot, so it must not be used).
             # The two -> bool is still computed in evaluation order; the `goto` leaves every
