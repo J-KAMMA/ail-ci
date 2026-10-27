@@ -58,6 +58,48 @@ if WIDE_EMBED and os.environ.get('AIL_V2_INCLUDE_ABS'):
 WIDE_STRINGS = WIDE_EMBED or bool(os.environ.get('AIL_V2_INCLUDE_ABS'))
 STRBACK_C_TYPE = 'int32_t' if WIDE_STRINGS else 'uint16_t'
 
+_REPEAT_ELEMENT_LIMIT = 1 << 60
+
+
+def _constant_int(node):
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        return node.value
+    if isinstance(node, ast.UnaryOp):
+        value = _constant_int(node.operand)
+        if value is None:
+            return None
+        if isinstance(node.op, ast.USub):
+            return -value
+        if isinstance(node.op, ast.UAdd):
+            return value
+        if isinstance(node.op, ast.Invert):
+            return ~value
+        return None
+    if isinstance(node, ast.BinOp):
+        left, right = _constant_int(node.left), _constant_int(node.right)
+        if left is None or right is None:
+            return None
+        try:
+            if isinstance(node.op, ast.Add):
+                return left + right
+            if isinstance(node.op, ast.Sub):
+                return left - right
+            if isinstance(node.op, ast.Mult):
+                return left * right
+            if isinstance(node.op, ast.Pow):
+                return left ** right if 0 <= right <= 4096 else None
+            if isinstance(node.op, ast.LShift):
+                return left << right if 0 <= right <= 4096 else None
+            if isinstance(node.op, ast.RShift):
+                return left >> right if right >= 0 else None
+            if isinstance(node.op, ast.FloorDiv) and right:
+                return left // right
+            if isinstance(node.op, ast.Mod) and right:
+                return left % right
+        except (ArithmeticError, ValueError):
+            return None
+    return None
+
 # ---------------------------------------------------------------------------------------------
 # BRIEF_mixed_mode.md (2026-09-16): per-FUNCTION typed compilation inside this general-path
 # program, integration step. `pymix.py` (whole-program kind analysis, not edited here) names the
@@ -4977,6 +5019,17 @@ class Compiler(boxclosure.ClosureMixin):
                  ast.Sub: 'ail_meth_set_difference', ast.BitXor: 'ail_meth_set_symmetric_difference'}
 
     def expr_BinOp(self, node, ctx):
+        if isinstance(node.op, ast.Mult):
+            for sequence, count_node in ((node.left, node.right), (node.right, node.left)):
+                if isinstance(sequence, (ast.List, ast.Tuple)) and sequence.elts \
+                        and not any(isinstance(e, ast.Starred) for e in sequence.elts):
+                    count = _constant_int(count_node)
+                    if count is not None and count > 0 \
+                            and len(sequence.elts) * count > _REPEAT_ELEMENT_LIMIT:
+                        raise Unsupported('a %s repeat of %d elements is too large for this runtime'
+                                          % ('list' if isinstance(sequence, ast.List) else 'tuple',
+                                             len(sequence.elts) * count))
+                    break
         constant = int_constant(node)
         if type(constant) is int and -(1 << 63) <= constant < (1 << 63):
             return 'ail_box_int(%s)' % ('(-9223372036854775807LL - 1LL)' if constant == -(1 << 63)

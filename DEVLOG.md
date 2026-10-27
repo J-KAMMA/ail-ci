@@ -242,6 +242,31 @@ that formats the stored argument (a str keeps its quotes, a number does not). Bo
 CPython; the accepted `test_ail_pre26.py` keeps the probe, including negative and out-of-range
 indexes, and is registered in `ail_check.MODULES`.
 
+## 2026-10-26 -- pre54 review fix: MANIFEST pin and DIFFERENCES row order (job-rbpre54-10270147)
+
+The reviewer found the committed tree was missing the `test_ail_pre54.py` pin, so
+`tools/update_manifest.py --check` exited 1 and `ail_check.preflight` aborted every module with
+`hash mismatch`; re-ran `tools/update_manifest.py` and committed the pin (`--check` now exits 0).
+The DIFFERENCES row also had its cells in the wrong columns (`refused | round | <text>`); it is
+now `round | <text> | refused` under the `| id | area | difference | status |` header.
+Re-ran the `/tmp/probes/p54_*` probes: the four match probes match CPython on both builds, the
+five boundary probes are refused by name on both (exit 3, no executable).
+
+## 2026-10-26 -- re-apply pre54: round() at the int64 boundary is refused by name (job-rbpre54-10270147)
+
+Re-applied the accepted pre54 change on this tree.  `pyc.build` now calls
+`_refuse_round_at_int64_boundary` before either build path: a one-argument `round()` of a
+constant float at or beyond the signed 64-bit boundary (`round(-9223372036854775808.0)` is
+INT64_MIN) is refused by name, because `abs()`, unary `-` and `* -1` need 2**63 and AIL's int is
+int64.  The accepted change's workflow half (OpenCode v1.19.4 with its sha256, the qoder.key /
+cc.key secret files and the three-key scan) is already present on this tree, so no edit was
+needed; pre104's catchable ValueError / OverflowError for nan/inf is kept, and finite
+out-of-range values that are not compile-time constants still take the runtime trap.  Added
+`AIL_CURRENT/test_ail_pre54.py`, registered it in `ail_check.MODULES`, and added DIFFERENCES row
+C?-job-rbpre54-10270147-1.  Probes in `/tmp/probes`: `p54_near`, `p54_two_arg`, `p54_shadow` and
+`p54_nonconstant` match CPython on both builds; `p54_refuse_direct`, `p54_refuse_argument`,
+`p54_refuse_container`, `p54_refuse_positive` and `p54_refuse_beyond` are refused by name on both
+builds (exit 3, no executable).  `python3 tools/diff_ids.py` is not present in this tree.
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is
@@ -497,6 +522,53 @@ test_ail_pre184, test_ail_pre190, test_ail_pre203, test_ail_pre214, test_ail_pre
 test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (44 tests, 1 skipped, 0 failed,
 274 s).  `tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run and
 `--check` passed.
+## 2026-10-26 - re-apply pre51: format-spec diagnostics and the float z flag (job-rbpre51-10261856)
+
+Re-applied accepted job `job-pre51-10241239` on the current tree. The space-sign-on-str
+wording, the whole-spec `Invalid format specifier '<spec>' for object of type '<type>'` text
+and the `\xNN` escaping of an unknown format code are already present here from the pre206
+parser fix, which also keeps NUL and grouping handling; those newer fixes are kept. From the
+accepted change, the parser now decodes a non-BMP type code from a surrogate pair (the spec's
+`wide_type` is 32-bit), so a non-BMP code is named as CPython's `\x1f600` instead of being
+rejected as a longer spec. Non-BMP and surrogate string literals are still refused by name by
+the compiler, so that path is not reachable from source. The float `z` flag already matched.
+Added `AIL_CURRENT/test_ail_pre51.py` (2 tests, both builds) and registered it in
+`ail_check.MODULES`. `tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py`
+was run and `--check` passes. Probes `/tmp/probes/pre51_errors.py`, `pre51_codes.py` and
+`pre51_z.py` match CPython on both builds; the non-BMP/surrogate literal probes are refused by
+name. Tests: pre51, pre206, pre225, pre243, pre103, safetynet, files, corpus_findings3 (0 failed).
+## 2026-10-26 -- re-apply pre55: oversized list/tuple repeats (job-rbpre55-10261858)
+
+Re-applied the accepted pre55 change on the current tree. Constant list/tuple repeats whose element
+count exceeds 2**60 are refused by name in the general path (`pyboxed2.expr_BinOp`, before the
+existing `int_constant` fold). Dynamic repeats are guarded in the boxed `ail_op_mul` (the empty
+sequence is skipped and the multiplication is checked), in the typed `_list_repeat_value` (now
+reserving `_count * len(elements)` for every element count, including str lists), and in the
+one-element `list.repeat` IR; they stop with CPython's `MemoryError`. Empty and negative counts
+are unchanged, so `[] * 2**62` is empty as before. Added `AIL_CURRENT/test_ail_pre55.py` and
+registered it in `ail_check.MODULES`. The accepted `_constant_int` helper is kept, including its
+unary `~` handling.
+
+Probes in `/tmp/probes` match CPython or are refused by name on both builds: `pre55_refuse_pow`,
+`pre55_refuse_lit`, `pre55_refuse_tuple`, `pre55_refuse_rev`, `pre55_refuse_invert`,
+`pre55_refuse_boundary` (refused on the unified build, `MemoryError` on the default), `pre55_empty`,
+`pre55_runtime_arg`, `pre55_runtime_tuple`, `pre55_runtime_routes`, `pre55_runtime_attr`,
+`pre55_runtime_dict`, `pre55_small`, `pre55_small_widths`. Tests on the final tree:
+`test_ail_pre55`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`
+(4 modules, 229 s, 0 failed).
+## 2026-10-26 - re-apply pre59: itertools choosers reject negative r (job-rbpre59-10261859)
+
+Re-applying the accepted pre59 change. The runtime fix is already present on this tree:
+pre137/pre126 route a given `r` through `ail_it_r_index`, which raises
+`ValueError: r must be non-negative` before the "r larger than the pool" early exit on both
+builds, so the fetched runtime hunk is superseded and no runtime edit was needed. Added the
+accepted `AIL_CURRENT/test_ail_pre59.py` and registered it in `ail_check.MODULES`; updated the
+fuzz8 DIFFERENCES row to cite it. `tools/diff_ids.py` is not present on this tree;
+`tools/update_manifest.py` was run and `--check` passes. Probes `pre59_routes`, `pre59_keyword`
+and `pre59_loop` in `/tmp/probes` match CPython on both builds (direct/literal, argument, list
+item, attribute, dict value, keyword/expression, empty pool, bool, r=0, r=n, r>n, huge negative,
+and the typed for-loop path). Tests on the final commit: pre59, pre137, pre126, safetynet, files,
+corpus_findings3.
 
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 

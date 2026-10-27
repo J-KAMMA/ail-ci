@@ -707,7 +707,7 @@ static inline ail_obj ail2f_done(ail_ctx *cx, ail2f_buf *b) {
     free(b->p); b->p = NULL;
     return ail_str_buf_done(bu, b->n);
 }
-typedef struct { uint16_t fill; char align, sign; int alt, zero, z, has_width, has_prec; int64_t width, prec; char group, type, has_type; uint16_t wide_type; int has_wide_type; } ail2f_spec;
+typedef struct { uint16_t fill; char align, sign; int alt, zero, z, has_width, has_prec; int64_t width, prec; char group, type, has_type; uint32_t wide_type; int has_wide_type; } ail2f_spec;
 /* 0, or -1 with the ValueError text in msg; a whole unparseable spec says
    "Invalid format specifier" so the caller can build the full CPython message. */
 static inline int ail2f_parse(ail_str s, ail2f_spec *f, char *msg, size_t msz) {
@@ -745,17 +745,21 @@ static inline int ail2f_parse(ail_str s, ail2f_spec *f, char *msg, size_t msz) {
             f->prec = f->prec * 10 + (ail_chr(s, i++) - '0');
         }
     }
-    if (n - i > 1) { snprintf(msg, msz, "Invalid format specifier"); return -1; }
     if (i < n) {
-        uint16_t t = ail_chr(s, i);
+        uint32_t t = ail_chr(s, i++);
+        if (t >= 0xD800 && t < 0xDC00 && i < n) {
+            uint32_t d = ail_chr(s, i);
+            if (d >= 0xDC00 && d < 0xE000) { t = 0x10000u + ((t - 0xD800u) << 10) + (d - 0xDC00u); i++; }
+        }
         if (t > 127) { f->wide_type = t; f->has_wide_type = 1; }
         else { f->type = (char)t; f->has_type = 1; }
     }
+    if (i < n) { snprintf(msg, msz, "Invalid format specifier"); return -1; }
     return 0;
 }
 /* CPython's wording for a conversion/type character it does not know: controls up to and
    including space, or a non-ASCII code point, are shown as \x%x; the rest through DEL literally. */
-static inline ail_st ail2f_unknown_code(ail_ctx *cx, uint16_t t, const char *tn) {
+static inline ail_st ail2f_unknown_code(ail_ctx *cx, uint32_t t, const char *tn) {
     char msg[128];
     if (t <= 0x20 || t > 0x7f)
         snprintf(msg, sizeof msg, "Unknown format code '\\x%x' for object of type '%s'", (unsigned)t, tn);
@@ -765,7 +769,7 @@ static inline ail_st ail2f_unknown_code(ail_ctx *cx, uint16_t t, const char *tn)
 }
 /* CPython validates a grouping option against the conversion character before it checks the
    value, so a non-ASCII type is reported as a grouping conflict, not an unknown code. */
-static inline ail_st ail2f_group_code(ail_ctx *cx, char group, uint16_t t) {
+static inline ail_st ail2f_group_code(ail_ctx *cx, char group, uint32_t t) {
     char msg[128];
     if (t <= 0x20 || t > 0x7f)
         snprintf(msg, sizeof msg, "Cannot specify '%c' with '\\x%x'.", group, (unsigned)t);
