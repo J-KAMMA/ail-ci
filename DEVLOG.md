@@ -7,8 +7,9 @@ assign an iterable`.  AIL still emits the 3.12.3 text (`safetyrt.py` picks it by
 so the `ERRORS` program's exact-output comparison failed only on the newer interpreter.
 `test_ail_fuzz59` now normalizes those two known spellings before comparing stdout, so it
 passes on both; the exception type and every other message are still compared verbatim.  No
-compiler change: the same program matches system CPython 3.12.3, 3.12.15 and 3.13.16 on the
-general and default builds.  `test_ail_safetynet`, the other module named by the task, passes
+compiler change: `test_ail_fuzz59` passes under system CPython 3.12.3, 3.12.15 and 3.13.16 on
+the general and default builds (AIL keeps 3.12.3's wording, which the normalization accepts
+when the host is newer).  `test_ail_safetynet`, the other module named by the task, passes
 its 5 tests on 3.12.3, 3.12.15 and 3.13.16, on integ `0ece0a9` plus this branch's diff and on
 this tree; its failure in the batch suite was not reproducible.  Probes
 `/tmp/probes/p1_slot_foreign.py`, `p2_routes.py`, `p3_noniter_slices.py`,
