@@ -1,3 +1,18 @@
+## 2026-10-27 -- re-apply fuzz59: keep list repr and `%r` on the typed path (job-rbrbfuzz59-10271816)
+
+Re-applied the accepted fuzz59 change on this tree.  The `del`-bound half was already here in a
+newer form (`pyfront.refuse_unrepresentable_delete_bounds` folded the whole expression, with a
+more thorough `test_ail_pre19.py`), so both were kept.  Added the remaining half:
+`tuplegen.lrepr` now formats scalar elements with the built-in `%r` conversion instead of the
+shadowable `repr` name, so a program-defined `repr` cannot hijack the generated list helper and a
+value whose runtime type differs from the list annotation after a slice store shows its own repr;
+`_build_percent_value` lowers `%r` through the same `_repr_conv` used by an f-string's `!r` and a
+`.format()` field's `!r` (a width or precision is still refused by name), and `tuplegen` uses the
+generated str-repr helper for a `list[str]` slot.  Added `AIL_CURRENT/test_ail_fuzz59.py` and
+registered it in `ail_check.MODULES`; added the DIFFERENCES row to both ledgers.
+`tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run and `--check`
+passes.
+
 ## 2026-10-27 -- pre319: calling an earlier function-valued class attribute is already refused by name (job-pre319-10271538)
 
 The pre304 reviewer's first pre-existing item was a class body that calls a function bound
