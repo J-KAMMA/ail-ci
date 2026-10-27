@@ -1,3 +1,21 @@
+## 2026-10-27 - pre309: hash() of a frozenset uses CPython's element hashes (job-pre309-10271313)
+
+The only pre-existing difference recorded by the rbrbpre245 reviewer was
+`hash(frozenset([1, 2]))`: both builds printed `7543283827113604033` where CPython prints
+`-1826646154956904602`. The runtime's frozenset mix used the private set-table hashes; `ail_pyhash`
+now feeds it each element's Python hash, so empty and int/bool/None/float/tuple/nested-frozenset
+sets match. A frozenset of tuples was lowered to a tuple table whose instance hash was its
+identity; a `hash()` call on such a table now leaves the program on the general path (tupcalls
+`b_hash`), where the real frozenset is hashed. Strings keep CPython's per-process randomised hash,
+so only their order independence is checked. Added `test_ail_pre309.py` and registered it in
+`ail_check.MODULES`.
+
+Probes in `/tmp/probes`: `pre309_hash_frozenset`, `pre309_hash_int`, `pre309_fs_basic`,
+`pre309_fs_types`, `pre309_fs_routes`, `pre309_fs_semantics`, `pre309_fs_strings`,
+`pre309_fs_setdiff`, `pre309_fs_tuple`, `pre309_fs_repr`, `pre309_fs_diag1`, `pre309_fs_diag2`,
+`pre309_fs_diag3`, `pre309_fs_seq1` and `pre309_fs_seq2` all match CPython on both builds (15/15).
+Final-state tests: test_ail_pre309, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (4 modules, 356 s, 0 failed). `tools/update_manifest.py --check` passes.
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's

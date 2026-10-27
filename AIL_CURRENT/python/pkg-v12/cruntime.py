@@ -17972,6 +17972,24 @@ static inline ail_st ail_pyhash(ail_ctx *cx, int64_t *out, ail_obj x) {
             if (v != v) return ail_obj_hash(cx, out, x);   /* a NaN hashes by identity in CPython */
             *out = ail_pyhash_double(v); return AIL_OK;
         }
+        case AIL_T_FROZENSET: {
+            /* CPython's own frozenset mix over the elements' Python hash values (the same
+               formula as ail_frozenset_hash), so hash() is language-fixed for int, bool,
+               None, float and tuple elements; the internal table hash is unchanged. */
+            ail_setobj *so = AIL_SETOBJ(x);
+            uint64_t hash = 0;
+            for (int64_t i = 0; i < so->n; i++) {
+                if (!ail_setx_live(&so->ent[i])) continue;
+                int64_t eh; ail_st st = ail_pyhash(cx, &eh, so->ent[i].key);
+                if (st != AIL_OK) return st;
+                uint64_t h = (uint64_t)eh;
+                hash ^= ((h ^ 89869747ULL) ^ (h << 16)) * 3644798167ULL;
+            }
+            hash ^= ((uint64_t)so->used + 1) * 1927868237ULL;
+            hash ^= (hash >> 11) ^ (hash >> 25);
+            hash = hash * 69069U + 907133923ULL;
+            *out = (int64_t)hash; return AIL_OK;
+        }
         case AIL_T_TUPLE: {
             ail_vecobj *vt = (ail_vecobj *)x.o;
             const uint64_t P1 = 11400714785074694791ULL, P2 = 14029467366897019727ULL, P5 = 2870177450012600261ULL;
