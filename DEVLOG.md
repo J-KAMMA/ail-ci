@@ -3178,6 +3178,21 @@ means the default bound), and the static check admits instances so the runtime
 conversion is reachable. Added `AIL_CURRENT/test_ail_qtest1.py`; tuple prefixes,
 empty prefixes, None, negative/huge bounds and wrong types stay compared on both
 builds.
+## 2026-10-24 - qtest2: str.split/rsplit maxsplit=None
+
+`"a b".split(maxsplit=None)` and `"a,b,c".rsplit(",", maxsplit=None)` silently used
+maxsplit=0 on both builds (the general path read the None object's int slot), so the
+first kept one piece and the second kept the whole text. CPython raises
+`TypeError: 'NoneType' object cannot be interpreted as an integer`. A literal None
+maxsplit is now refused by name in `python/pkg-v12/pyboxed2.py`; the unified build falls
+back to that refusal. `test_ail_qtest2.py` keeps the surrounding whitespace-run,
+tab/newline, maxsplit 0/1/-1 and empty-string shapes compared with CPython on both builds.
+
+Other differences seen while probing (not changed): a separator that is None at run time
+through a variable/list/dict gives `ValueError: empty separator` where CPython splits on
+whitespace (`None` is only recognised as a literal), and a maxsplit constant above
+int64 (for example `2**63`) fails to compile with "integer overflow" where CPython raises
+`OverflowError`.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
