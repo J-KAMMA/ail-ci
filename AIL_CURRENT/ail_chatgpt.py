@@ -1328,6 +1328,232 @@ def _safe_module_containers(tree, module_counts, global_names, parents):
     return safe
 
 
+class _FlowValue:
+    """The value a module name denotes at the current point of the module walk."""
+    __slots__ = ('value', 'valid')
+
+    def __init__(self, value, valid=True):
+        self.value = value
+        self.valid = valid
+
+
+def _flow_names(node):
+    return {sub.id for sub in ast.walk(node) if isinstance(sub, ast.Name)}
+
+
+def _flow_containers(value, seen):
+    """Add every container reachable from ``value`` by identity to ``seen``."""
+    if not isinstance(value, (list, tuple, dict)) or id(value) in seen:
+        return
+    seen.add(id(value))
+    members = value.values() if isinstance(value, dict) else value
+    for member in members:
+        _flow_containers(member, seen)
+
+
+def _invalidate_flow(state, node):
+    """Drop the names in ``node`` and every tracked name sharing a container with them.
+
+    A statement the walk cannot apply may mutate a container through one alias.  Any name
+    denoting that same object, or containing it, then no longer denotes its tracked value
+    either, so a read through it must not be refused on the old value.
+    """
+    names = _flow_names(node)
+    mutated = set()
+    for name in names:
+        tracked = state.get(name)
+        if tracked is not None and tracked.valid:
+            _flow_containers(tracked.value, mutated)
+    for name in names:
+        tracked = state.get(name)
+        if tracked is not None:
+            tracked.valid = False
+    for tracked in state.values():
+        if tracked.valid:
+            seen = set()
+            _flow_containers(tracked.value, seen)
+            if seen & mutated:
+                tracked.valid = False
+
+
+def _flow_trackable(value):
+    return type(value) in (bool, int, float, str, bytes, type(None)) or isinstance(
+        value, (list, tuple, dict))
+
+
+def _flow_mutating_use(node, functions):
+    """Whether an expression contains a call that could mutate something it names."""
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Call):
+            if isinstance(sub.func, ast.Attribute):
+                return True
+            if isinstance(sub.func, ast.Name) and sub.func.id in functions:
+                return True
+    return False
+
+
+def _flow_bindable(tree):
+    """Names whose every module-level binding is a single ``name = value`` assignment."""
+    kinds = {}
+    for statement in tree.body:
+        simple = (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                  and isinstance(statement.targets[0], ast.Name))
+        counts = _binding_counts([statement])
+        for name in counts:
+            kinds.setdefault(name, set()).add(
+                'assign' if simple and counts == {name: 1} else 'other')
+    return {name for name, bound in kinds.items() if bound == {'assign'}}
+
+
+def _refuse_int64_conversion(node, value):
+    if _outside_int64_float(value):
+        error = ValueError(f'int() of a float outside int64: {value!r} (CPython makes a big integer)')
+    else:
+        converted = _int_conversion_outside_int64(value)
+        if converted is None:
+            return
+        error = ValueError(
+            f'int64 constant expression out of range: {_constant_diagnostic(converted)}')
+    error.source_line = node.lineno
+    error.source_column = node.col_offset
+    raise error
+
+
+def _check_flow_int_calls(node, lookup, int_params, int_shadowed):
+    deferred = set()
+    for sub in ast.walk(node):
+        if isinstance(sub, (ast.Lambda, ast.ListComp, ast.SetComp, ast.GeneratorExp,
+                            ast.DictComp)):
+            deferred.update(id(inner) for inner in ast.walk(sub) if isinstance(inner, ast.Call))
+    for sub in ast.walk(node):
+        if not isinstance(sub, ast.Call) or id(sub) in deferred:
+            continue
+        if not isinstance(sub.func, ast.Name):
+            continue
+        if (not int_shadowed and sub.func.id == 'int'
+                and len(sub.args) == 1 and not sub.keywords):
+            _refuse_int64_conversion(
+                sub, _constant_value(sub.args[0], lookup, lambda unused: True, {}))
+        if sub.func.id in int_params:
+            for name, index in int_params[sub.func.id].items():
+                argument = _bound_argument(sub, name, index)
+                if argument is None:
+                    continue
+                value = _constant_value(argument, lookup, lambda unused: True, {})
+                if _outside_int64_float(value):
+                    _refuse_int64_conversion(sub, value)
+
+
+def _flow_loop_body_runs(statement, lookup, range_shadowed):
+    """Whether a ``for`` loop's body definitely runs at least once."""
+    value = _constant_value(statement.iter, lookup, lambda unused: True, {})
+    if isinstance(value, (list, tuple, str, bytes, dict)):
+        return len(value) > 0
+    if (not range_shadowed and isinstance(statement.iter, ast.Call)
+            and isinstance(statement.iter.func, ast.Name)
+            and statement.iter.func.id == 'range' and not statement.iter.keywords):
+        arguments = [_constant_value(argument, lookup, lambda unused: True, {})
+                     for argument in statement.iter.args]
+        if not 1 <= len(arguments) <= 3 or any(type(argument) is not int for argument in arguments):
+            return False
+        try:
+            return len(range(*arguments)) > 0
+        except (ValueError, OverflowError):
+            return False
+    return False
+
+
+def _check_flow_int64_containers(tree, global_names, int_params, int_shadowed):
+    """Refuse int() of a known out-of-int64 value read before a module container is mutated.
+
+    ``_safe_module_containers`` stops folding a container as soon as anything anywhere mutates
+    it, so a read that happens before the mutation stayed unfolded and stopped at run time with
+    ``integer overflow``: ``items=[1e300]; int(items[0]); items[0]=1.5``.  Walk the module
+    statements in order, tracking the literal value each name denotes, and refuse such a read
+    when no mutation precedes it.  A statement the walk cannot apply drops the name and every
+    tracked name sharing or containing its container, since a mutation through one alias
+    changes what the others denote; a name mentioned inside a function or class body is never
+    tracked, because such a body can run between a read and the mutation.  A loop whose body
+    definitely runs is walked; a branch or loop that may not run leaves the names it mentions
+    untracked, so a value is refused only when the program definitely reads it.
+    """
+    sealed = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            sealed |= _flow_names(node)
+    bindable = _flow_bindable(tree)
+    functions = {node.name for node in tree.body
+                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    range_shadowed = any(
+        (isinstance(node, ast.FunctionDef) and node.name == 'range')
+        or (isinstance(node, ast.arg) and node.arg == 'range')
+        or (isinstance(node, ast.alias) and (node.asname or node.name.split('.')[0]) == 'range')
+        or (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == 'range')
+        for node in ast.walk(tree))
+    state = {}
+
+    def lookup(name):
+        tracked = state.get(name)
+        if tracked is not None:
+            return tracked.value if tracked.valid else _UNKNOWN
+        return _UNKNOWN
+
+    def walk(statements):
+        for statement in statements:
+            if isinstance(statement, ast.If):
+                test = _constant_value(statement.test, lookup, lambda unused: True, {})
+                if type(test) in (bool, int):
+                    if walk(statement.body if test else statement.orelse):
+                        return True
+                    continue
+                _invalidate_flow(state, statement)
+                continue
+            if isinstance(statement, ast.While):
+                test = _constant_value(statement.test, lookup, lambda unused: True, {})
+                if type(test) in (bool, int):
+                    if test:
+                        walk(statement.body)
+                        _invalidate_flow(state, ast.Module(
+                            body=statement.body + statement.orelse, type_ignores=[]))
+                    continue
+                _invalidate_flow(state, statement)
+                continue
+            if isinstance(statement, (ast.For, ast.AsyncFor)):
+                if (isinstance(statement, ast.For)
+                        and _flow_loop_body_runs(statement, lookup, range_shadowed)):
+                    walk(statement.body)
+                _invalidate_flow(state, statement)
+                continue
+            if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                _invalidate_flow(state, statement)
+                continue
+            if isinstance(statement, (ast.Break, ast.Continue, ast.Return, ast.Raise)):
+                _invalidate_flow(state, statement)
+                return True
+            if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+                target = statement.targets[0]
+                if isinstance(target, ast.Name):
+                    _check_flow_int_calls(statement.value, lookup, int_params, int_shadowed)
+                    name = target.id
+                    value = _constant_value(statement.value, lookup, lambda unused: True, {})
+                    mutating = _flow_mutating_use(statement.value, functions)
+                    if name in sealed or mutating:
+                        _invalidate_flow(state, statement.value)
+                    if (name not in sealed and name not in global_names and name in bindable
+                            and not mutating and _flow_trackable(value)):
+                        state[name] = _FlowValue(value)
+                    else:
+                        state[name] = _FlowValue(_UNKNOWN, False)
+                    continue
+            if isinstance(statement, (ast.Assign, ast.AnnAssign, ast.AugAssign,
+                                      ast.Expr, ast.Delete)):
+                _check_flow_int_calls(statement, lookup, int_params, int_shadowed)
+            _invalidate_flow(state, statement)
+        return False
+
+    walk(tree.body)
+
+
 def _fold_float_int_text(text):
     """Rewrite `float(<an exact int constant outside int64>)` to a float literal.
 
@@ -1425,6 +1651,7 @@ def _check_int64_literals(tree):
     int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attributes)
     _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes,
                       program_bound).visit(tree)
+    _check_flow_int64_containers(tree, global_names, int_params, int_shadowed)
     maxsplit = _maxsplit_constant_nodes(tree)
     nodes = [tree]
     while nodes:

@@ -1,3 +1,35 @@
+## 2026-10-27 -- pre374: a loop read before a later container mutation is refused by name (job-pre374-10280536)
+
+The pre355 review's first still-differing recorded item was its p04: `items = [1e300]` /
+`for i in range(1): print(int(items[0]))` / `items[0] = 1.5` compiled on both builds and stopped
+with `integer overflow`, where CPython prints the big integer.  The same cause covers its p15 dict
+`update` read-before-mutation item.  Its p02/p03 `globals()` key items are already refused by name
+on both builds (allowed), and its p08 class-attribute program is refused by name on both builds on
+this tree rather than matching CPython.
+
+`_safe_module_containers` stops folding a container as soon as anything anywhere mutates it, so a
+read before the mutation was never refused.  `_check_flow_int64_containers` in
+`AIL_CURRENT/ail_chatgpt.py` now walks the module statements in order, tracking each name's
+literal value and dropping the name, every alias and every containing container on any statement
+it cannot apply, so a mutation through one route cannot leave another route stale.  It refuses
+`int()` of a known out-of-int64 item by name on both builds.  A loop whose body definitely runs
+(`range` with constant arguments, a non-empty literal iterable, `while True`) and constant `if`
+branches are walked; loops or branches that may not run, function and class bodies, and
+`break`/`continue`/`return`/`raise`-terminated blocks leave the names untracked, so a value is
+refused only when the program definitely reads it.
+
+Added `AIL_CURRENT/test_ail_pre374.py` (17 refused and 23 matching programs, both builds) and
+registered it in `ail_check.MODULES` and `tools/ci_shards.json`.  Probes in `/tmp/probes/pre374`
+(53 programs, both builds via `cmp.sh`): p02, p03, p04a, p04b, p08, p15a, p15c, p36, p37, p39,
+p42, p45, p50, p52, p53, p56, p58, p63, p64 and p76 are refused by name (`int() of a float
+outside int64` or `int64 constant expression out of range`); p04c, p15b, p38, p40, p41, p43, p44,
+p46-p49, p51, p57, p60-p62, p65-p70, p72, p74, p75, p77, p79 and p81 match CPython; p54 (class
+attribute), p55 (function argument), p59 (`while` with an unknown condition), p71 (`try` body)
+and p78 (read-only function alias) are identical on base and HEAD (`integer overflow`), so they
+are pre-existing.  p66's default build reports its pre-existing "not in the subset" limitation on
+base and HEAD; the general build matches.  Final-state tests run on this commit:
+test_ail_pre374, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
