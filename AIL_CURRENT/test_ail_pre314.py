@@ -7,9 +7,11 @@ bound method (the instance table wins over the class's non-data method descripto
 instance-table route handles plain functions, classes and ``__call__`` instances, but it has no
 route for a bound method, so such a call is refused by name at compile time on both builds.
 The bound method reaches the field directly, through an argument/default, a list item, a dict
-value, an attribute or an alias; a base method's ``self.f()`` with a field stored by a subclass
-is refused too.  Fields holding lambdas/functions still match CPython, and an unrelated local in
-another function is not caught by a collision elsewhere.
+value, an attribute or an alias; a base method's ``self.f()`` is refused when a constructed
+subclass stores a bound method.  Fields holding lambdas/functions still match CPython (including
+through a base method), and a receiver that is never constructed, a subclass that overrides
+``__init__`` without storing the field, and an unrelated local or stale annotation are not caught
+by a collision elsewhere.
 """
 import os
 import subprocess
@@ -117,15 +119,29 @@ class C:
         return 102
 print(C().f())
 ''',
-    'base_method_subclass_field': '''class B:
+    'base_method_bound_field': '''class B:
     def run(self):
         return self.f()
     def f(self):
         return 100
 class C(B):
     def __init__(self):
-        self.f = lambda: 5
-print(C().run(), B().run())
+        self.f = self.g
+    def g(self):
+        return 5
+print(C().run())
+''',
+    'super_init_bound_field': '''class C:
+    def __init__(self):
+        self.f = self.g
+    def g(self):
+        return 5
+    def f(self):
+        return 100
+class D(C):
+    def __init__(self):
+        super().__init__()
+print(D().f())
 ''',
 }
 
@@ -186,6 +202,99 @@ for v in (None, True, -1, "", [], 2.5):
     def twice(self):
         return self.x * 2
 print(C(21).twice())
+''',
+    # A base method's ``self.f()`` with a lambda field stored by a subclass: the pre279
+    # instance-table route handles it, so this must not be refused (review defect 2).
+    'base_method_subclass_lambda': '''class B:
+    def run(self):
+        return self.f()
+    def f(self):
+        return 100
+class C(B):
+    def __init__(self):
+        self.f = lambda: 5
+print(C().run(), B().run())
+''',
+    # Only D (which overrides f and does not store the field) is constructed; C stores a bound
+    # method but never runs (review defect 1).
+    'sibling_only': '''class B:
+    def run(self):
+        return self.f()
+class C(B):
+    def __init__(self):
+        self.f = self.g
+    def g(self):
+        return 5
+    def f(self):
+        return 100
+class D(B):
+    def f(self):
+        return 7
+print(D().run())
+''',
+    # D overrides __init__ without storing the field, so it inherits no field from C.
+    'sub_overrides': '''class C:
+    def __init__(self):
+        self.f = self.g
+    def g(self):
+        return 55
+    def f(self):
+        return 102
+class D(C):
+    def __init__(self):
+        pass
+    def f(self):
+        return 7
+print(D().f())
+''',
+    # The annotation is stale; the value actually iterated is a D.
+    'for_annot': '''class C:
+    def __init__(self):
+        self.f = self.g
+    def g(self):
+        return 55
+    def f(self):
+        return 102
+class D:
+    def f(self):
+        return 7
+x: C
+for x in [D()]:
+    print(x.f())
+''',
+    'base_method_subclass_function': '''def five():
+    return 5
+class B:
+    def run(self):
+        return self.f()
+    def f(self):
+        return 100
+class C(B):
+    def __init__(self):
+        self.f = five
+print(C().run(), B().run())
+''',
+    'super_init_lambda': '''class C:
+    def __init__(self):
+        self.f = lambda: 5
+    def f(self):
+        return 100
+class D(C):
+    def __init__(self):
+        super().__init__()
+print(D().f(), C().f())
+''',
+    'super_init_override': '''class C:
+    def __init__(self):
+        self.f = self.g
+    def g(self):
+        return 5
+    def f(self):
+        return 100
+class D(C):
+    def __init__(self):
+        self.x = 1
+print(D().f())
 ''',
 }
 

@@ -8,18 +8,29 @@ is re-applied from the accepted rbpre278 fix on the typed entry points and the g
 a bound-method field value is refused by name instead of being let through to the class method.
 The same refusal covers another object's method, a builtin method, a classmethod/staticmethod,
 a value reaching the field through an argument, a default, a list item, a dict value, an
-attribute or an alias, and a base method's `self.f()` with the field stored by a subclass.
-Name resolution follows Python scopes, so a same-named local in an unrelated function is left
-alone; fields holding lambdas or plain functions still match CPython on both builds.
+attribute or an alias, and a base method's `self.f()` when a constructed subclass stores a bound
+method.  Name resolution follows Python scopes, so a same-named local in an unrelated function is
+left alone.
+
+The rbpre278 re-application over-refused, and that was corrected here: `self` is only expanded to
+descendants that are actually constructed (`sibling_only`), the `__init__` that runs is resolved
+through inheritance so a subclass that overrides it without `super().__init__()` carries no base
+field (`sub_overrides`, `sub_override_attr`), a real assignment wins over a stale annotation
+(`for_annot`), and the general emitter keeps pre279's lambda/plain-function field support through
+a base method (`base_sub_lambda`).  Fields holding lambdas or plain functions still match CPython
+on both builds; a bound method remains refused, including through `super().__init__()`.
 
 Added `AIL_CURRENT/test_ail_pre314.py` (2 tests, both builds) and registered it in
 `ail_check.MODULES`; DIFFERENCES row `C?-job-pre314-10271440-1`.  `tools/diff_ids.py` is not
 present on this tree; `tools/update_manifest.py --check` passes.
 
 Probes in `/tmp/probes`: `pre314_bound_{self,other,builtin,arg,default,list,dict,attr,alias,
-base_sub}` are refused by name on both builds; `pre314_lambda_field`, `pre314_function_field`,
-`pre314_unrelated_scope`, `pre314_collide_nocall` and `pre314_plain_no_feature` match CPython on
-both builds.
+base_sub}` and `pre314_base_sub_bound`, `pre314_super_init_bound` are refused by name on both
+builds; `pre314_lambda_field`, `pre314_function_field`, `pre314_unrelated_scope`,
+`pre314_collide_nocall`, `pre314_plain_no_feature`, `pre314_sibling_only`,
+`pre314_sub_overrides`, `pre314_for_annot`, `pre314_base_sub_lambda`,
+`pre314_base_sub_function`, `pre314_super_init_lambda` and `pre314_super_init_override` match
+CPython on both builds.
 
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 

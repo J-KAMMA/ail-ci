@@ -286,14 +286,13 @@ def refuse_field_method_call(tree, allow_owners=False):
     caught by a collision elsewhere in the program.
 
     ``allow_owners`` is for the general emitter, which now looks in the instance table before a
-    method of the receiver's own class: a receiver that can only be a colliding class is handled
-    there, so only a receiver whose static class is a base of the colliding class (``self.f()`` in
-    a base method, with the field stored by a subclass) is still refused.  A field holding a
-    bound method (``self.f = self.g``, another object's method, a builtin method, a
-    classmethod/staticmethod, or such a value reaching the field through an argument, list item,
-    dict value, attribute or alias) is refused too: the instance-table route only calls plain
-    functions, classes and ``__call__`` instances, so letting that receiver through compiled the
-    class method instead.
+    method of the receiver's own class: a lambda/plain-function field is handled there even when
+    the receiver's static class is a base of the class that stores it (``self.f()`` in a base
+    method).  A field holding a bound method (``self.f = self.g``, another object's method, a
+    builtin method, a classmethod/staticmethod, or such a value reaching the field through an
+    argument, list item, dict value, attribute or alias) is still refused: the instance-table
+    route only calls plain functions, classes and ``__call__`` instances, so letting that
+    receiver through compiled the class method instead.
     """
     def _own_nodes(node):
         stack = list(ast.iter_child_nodes(node))
@@ -309,7 +308,8 @@ def refuse_field_method_call(tree, allow_owners=False):
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef):
             continue
-        methods, field_values, bases = set(), {}, []
+        methods, method_values, bases = set(), {}, []
+        init_super = False
         for base in node.bases:
             if isinstance(base, ast.Name):
                 bases.append(base.id)
@@ -317,6 +317,10 @@ def refuse_field_method_call(tree, allow_owners=False):
             if not isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             methods.add(item.name)
+            # Keep each method's own fields separately: a subclass that overrides ``__init__``
+            # (or any other method) replaces the assignments of the inherited version, so the
+            # inherited field is not present at run time.
+            own_values = method_values.setdefault(item.name, {})
             args = item.args.posonlyargs + item.args.args
             if not args:
                 continue
@@ -329,15 +333,22 @@ def refuse_field_method_call(tree, allow_owners=False):
                 elif isinstance(sub, ast.AugAssign):
                     targets, value = [sub.target], None
                 else:
+                    if (item.name == '__init__' and isinstance(sub, ast.Call)
+                            and isinstance(sub.func, ast.Attribute)
+                            and sub.func.attr == '__init__'
+                            and isinstance(sub.func.value, ast.Call)
+                            and isinstance(sub.func.value.func, ast.Name)
+                            and sub.func.value.func.id == 'super'):
+                        init_super = True
                     continue
                 for target in targets:
                     if (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
                             and target.value.id == self_name):
-                        values = field_values.setdefault(target.attr, [])
+                        values = own_values.setdefault(target.attr, [])
                         if value is not None:
                             values.append(value)
-        classes[node.name] = {'methods': methods, 'fields': set(field_values),
-                              'field_values': field_values, 'bases': bases}
+        classes[node.name] = {'methods': methods, 'method_values': method_values,
+                              'bases': bases, 'init_super': init_super}
 
     # Name resolution follows Python's scopes: an assignment to a local name in b() must not make
     # an unrelated local x in a() look like a possible class for b's x.
@@ -379,6 +390,16 @@ def refuse_field_method_call(tree, allow_owners=False):
             _add_assign(item.targets, item.value, scope_of.get(id(item), tree))
         elif isinstance(item, ast.AnnAssign) and item.value is not None:
             _add_assign([item.target], item.value, scope_of.get(id(item), tree))
+        elif isinstance(item, (ast.For, ast.AsyncFor)):
+            scope = scope_of.get(id(item), tree)
+            if isinstance(item.iter, (ast.List, ast.Tuple)):
+                if (isinstance(item.target, (ast.Tuple, ast.List))
+                        and len(item.target.elts) == len(item.iter.elts)):
+                    for target, value in zip(item.target.elts, item.iter.elts):
+                        _add_assign([target], value, scope)
+                else:
+                    for value in item.iter.elts:
+                        _add_assign([item.target], value, scope)
 
     def _inherited(name, key, seen):
         info = classes.get(name)
@@ -402,9 +423,97 @@ def refuse_field_method_call(tree, allow_owners=False):
         return {other for other in classes
                 if other == name or name in _bases_of(other)}
 
+    def _resolved_method(name, method, seen=frozenset()):
+        info = classes.get(name)
+        if info is None or name in seen:
+            return None
+        values = info['method_values'].get(method)
+        if values is not None:
+            return values
+        for base in info['bases']:
+            found = _resolved_method(base, method, seen | {name})
+            if found is not None:
+                return found
+        return None
+
+    def _init_fields(name, seen=frozenset()):
+        """Fields stored by the ``__init__`` that actually runs for ``name``.
+
+        A subclass that overrides ``__init__`` without ``super().__init__()`` does not run the
+        base version, so the base field is absent on its instances; one that calls
+        ``super().__init__()`` still stores it.
+        """
+        info = classes.get(name)
+        if info is None or name in seen:
+            return None
+        own = info['method_values'].get('__init__')
+        if own is not None:
+            found = {}
+            for attr, items in own.items():
+                found.setdefault(attr, []).extend(items)
+            if info.get('init_super'):
+                for base in info['bases']:
+                    inherited = _init_fields(base, seen | {name})
+                    if inherited:
+                        for attr, items in inherited.items():
+                            found.setdefault(attr, []).extend(items)
+            return found
+        for base in info['bases']:
+            inherited = _init_fields(base, seen | {name})
+            if inherited is not None:
+                return inherited
+        return None
+
+    effective_cache = {}
+
+    def _effective_fields(name):
+        """Fields an instance of ``name`` can actually carry.
+
+        The ``__init__`` that runs is resolved once through inheritance (with an explicit
+        ``super().__init__()`` chain); fields set by other methods stay possible because those
+        methods can still be called.
+        """
+        cached = effective_cache.get(name)
+        if cached is not None:
+            return cached
+        info = classes.get(name)
+        if info is None:
+            return {}
+        method_names, pending, seen = set(), [name], set()
+        while pending:
+            current = pending.pop()
+            if current in seen:
+                continue
+            seen.add(current)
+            current_info = classes.get(current)
+            if current_info is None:
+                continue
+            method_names.update(current_info['method_values'])
+            pending.extend(current_info['bases'])
+        found = _init_fields(name) or {}
+        for method in method_names:
+            if method == '__init__':
+                continue
+            values = _resolved_method(name, method)
+            if values is None:
+                continue
+            for attr, items in values.items():
+                found.setdefault(attr, []).extend(items)
+        effective_cache[name] = found
+        return found
+
+    # A class that is never constructed cannot be the run-time receiver.  ``self`` in a base
+    # method is otherwise expanded to every descendant, which refused programs that never built
+    # the colliding class at all.
+    instantiated = set()
+    for item in ast.walk(tree):
+        if isinstance(item, ast.Call) and isinstance(item.func, ast.Name) \
+                and item.func.id in classes:
+            instantiated.add(item.func.id)
+
     collisions = {}
     for name in classes:
-        both = _inherited(name, 'methods', frozenset()) & _inherited(name, 'fields', frozenset())
+        both = _inherited(name, 'methods', frozenset()) & set(_effective_fields(name))
         if both:
             collisions[name] = both
     if not collisions:
@@ -453,7 +562,8 @@ def refuse_field_method_call(tree, allow_owners=False):
                 if node.id in params:
                     index = params.index(node.id)
                     if index == 0 and cls_name is not None:
-                        return _descendants(cls_name)
+                        family = _descendants(cls_name)
+                        return family & instantiated if instantiated else family
                     key = ('param', id(func), node.id)
                     if key in seen:
                         return set()
@@ -488,9 +598,13 @@ def refuse_field_method_call(tree, allow_owners=False):
                 if parent is None:
                     break
                 lookup = parent
+            assigned = False
             for name, value in assignments.get(tree, ()):
                 if name == node.id:
+                    assigned = True
                     found |= _classes_of(value, ctx, seen)
+            if assigned:
+                return found
             for item in ast.walk(tree):
                 if isinstance(item, ast.arg) and item.arg == node.id \
                         and isinstance(item.annotation, ast.Name) and item.annotation.id in classes \
@@ -511,7 +625,7 @@ def refuse_field_method_call(tree, allow_owners=False):
                 info = classes.get(cls_name)
                 if info is None:
                     continue
-                for value in info['field_values'].get(node.attr, ()):
+                for value in _effective_fields(cls_name).get(node.attr, ()):
                     found |= _classes_of(value, ctx, seen | {key})
             return found
         if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
@@ -531,14 +645,8 @@ def refuse_field_method_call(tree, allow_owners=False):
             return found
         return set()
 
-    def _field_values(name, attr, seen=frozenset()):
-        info = classes.get(name)
-        if info is None or name in seen:
-            return []
-        values = list(info['field_values'].get(attr, ()))
-        for base in info['bases']:
-            values.extend(_field_values(base, attr, seen | {name}))
-        return values
+    def _field_values(name, attr):
+        return list(_effective_fields(name).get(attr, ()))
 
     def _may_be_bound(node, seen=frozenset()):
         """Whether a value stored in the colliding field can be a bound method.
@@ -649,6 +757,14 @@ def refuse_field_method_call(tree, allow_owners=False):
             return False
         if isinstance(node, (ast.List, ast.Tuple, ast.Dict)):
             return False
+        if isinstance(node, ast.BoolOp):
+            return any(_may_be_bound(value, seen) for value in node.values)
+        if isinstance(node, ast.IfExp):
+            return _may_be_bound(node.body, seen) or _may_be_bound(node.orelse, seen)
+        if isinstance(node, (ast.UnaryOp, ast.BinOp, ast.Compare)):
+            # Arithmetic/comparison results (``-1``, ``a + b``, ``x < y``) are not methods;
+            # only a value that can be a bound method itself needs refusing.
+            return False
         return True
 
     for node in ast.walk(tree):
@@ -666,8 +782,13 @@ def refuse_field_method_call(tree, allow_owners=False):
         possible = _classes_of(recv, call_ctx.get(id(node), (None, None)))
         if not (possible & owners):
             continue
-        if allow_owners and possible <= owners:
-            if not any(_may_be_bound(value) for cls_name in possible
+        if allow_owners:
+            # The instance-table route handles a callable field (the pre279 lambda/function
+            # case) even when the receiver's static class is only a base of the class that
+            # stores it.  Only a possible receiver whose field may hold a bound method still
+            # needs pre278's refusal; a receiver with no field at all keeps the method.
+            shadowed = possible & owners
+            if not any(_may_be_bound(value) for cls_name in shadowed
                        for value in _field_values(cls_name, attr)):
                 continue
         raise Unsupported('the method .%s() on an instance whose class also stores an instance '
