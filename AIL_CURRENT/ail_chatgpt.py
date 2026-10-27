@@ -1163,7 +1163,9 @@ def _function_local_int_constants(function, module_known):
         name = target.id
         if stores.get(name) != 1 or name in parameters or name in declared:
             return
-        value = _constant_int(value_node, local)
+        ok, value = _constant_int_exact_with_known(value_node, local)
+        if not ok or value is _CONST_INT_TOO_BIG:
+            value = _constant_int(value_node, local)
         if value is None:
             try:
                 value = _const_expr_int(value_node, bounded=False)
@@ -1205,7 +1207,9 @@ def _known_module_constants(tree):
         target = node.targets[0]
         if not isinstance(target, ast.Name) or stores.get(target.id) != 1 or target.id in parameters:
             continue
-        value = _constant_int(node.value, known)
+        ok, value = _constant_int_exact_with_known(node.value, known)
+        if not ok or value is _CONST_INT_TOO_BIG:
+            value = _constant_int(node.value, known)
         if value is None:
             try:
                 value = _const_expr_int(node.value, bounded=False)
@@ -1518,6 +1522,28 @@ def _walk_module_scope(tree):
         stack.extend(ast.iter_child_nodes(node))
 
 
+def _pow_static_int(node, known):
+    """The exact int a ``pow()`` operand denotes, including a wide constant expression.
+
+    ``_const_expr_int`` stops at a power or shift whose intermediate leaves its small step
+    bounds, so ``(3**100) >> 150`` used to stay unfurled and the power trapped at run time.
+    The exact folder is tried first (with known module and local constants substituted); the
+    older folders remain the fallback for shapes it does not cover."""
+    ok, value = _constant_int_exact_with_known(node, known)
+    if ok and value is not _CONST_INT_TOO_BIG:
+        return value
+    value = _constant_int(node, known)
+    if value is not None:
+        return value
+    try:
+        value = _const_expr_int(node, bounded=False)
+    except _Int64ConstantOverflow:
+        value = None
+    if value is None:
+        value = _const_fold_int(node)
+    return value
+
+
 def _check_int64_pow_constants(tree, known):
     """Refuse ``pow(base, exp)`` on constant ints whose exact result leaves int64, by name.
 
@@ -1537,18 +1563,8 @@ def _check_int64_pow_constants(tree, known):
         if len(node.args) != 2 or node.keywords or any(
                 isinstance(argument, ast.Starred) for argument in node.args):
             return
-        base = _constant_int(node.args[0], scope_known)
-        exponent = _constant_int(node.args[1], scope_known)
-        if base is None:
-            try:
-                base = _const_expr_int(node.args[0], bounded=False)
-            except _Int64ConstantOverflow:
-                base = None
-        if exponent is None:
-            try:
-                exponent = _const_expr_int(node.args[1], bounded=False)
-            except _Int64ConstantOverflow:
-                exponent = None
+        base = _pow_static_int(node.args[0], scope_known)
+        exponent = _pow_static_int(node.args[1], scope_known)
         if base is None or exponent is None or exponent < 0:
             return
         if exponent == 0:

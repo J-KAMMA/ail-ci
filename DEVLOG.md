@@ -1,3 +1,24 @@
+## 2026-10-27 -- pre330: wide constant pow() exponent is refused by name (job-pre330-10271955)
+
+The first still-differing pre-existing item from the rbrbpre299 review was
+`pow(2, (3**100) >> 150)`: both builds compiled it and then stopped with `integer overflow`,
+where CPython prints the bignum.  `_check_int64_pow_constants` folded its operands with
+`_const_expr_int`, which refuses a `**` exponent above 64 and a shift of 64 or more, so the
+exponent stayed unknown.  A new `_pow_static_int` tries `_constant_int_exact_with_known` first
+(and keeps the older folders as fallbacks), and the module/function-local constant maps prefer
+the exact folder too.  The exponent 361 is now known, so the out-of-int64 result is refused by
+name on both builds, also through a module constant, a function-local constant and an alias of
+`pow`.  In-range wide exponents, the safe bases 0/1/-1, a wide in-range base and int64
+boundaries keep matching CPython.  The review's later items (for example a lambda with an
+enclosing function-local base) are unchanged.
+
+Probes in `/tmp/probes/pre330` on both builds: `p01_direct`, `p02_module_alias`, `p03_local`,
+`p04_boundary` and `p05_neg_base` are refused by name; `m01_in_range_wide`, `m02_safe_bases`,
+`m03_wide_base`, `m04_local_in_range`, `m05_module_in_range`, `m06_routes` (argument, list item,
+attribute and dict value) and `m07_bounds`, `m08_alias_in_range` match CPython.
+`AIL_CURRENT/test_ail_pre330.py` is registered in `ail_check.MODULES` and `tools/ci_shards.json`.
+Final-state tests: test_ail_pre330, test_ail_pre294, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
 ## 2026-10-27 -- pre319: calling an earlier function-valued class attribute is already refused by name (job-pre319-10271538)
 
 The pre304 reviewer's first pre-existing item was a class body that calls a function bound
