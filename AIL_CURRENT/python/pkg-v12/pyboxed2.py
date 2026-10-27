@@ -3312,11 +3312,14 @@ class Compiler(boxclosure.ClosureMixin):
         self.rt_needs.add('slice')
 
     def _slice_obj(self, sl, ctx):
-        """A slice object for `a:b:c` (the class of safetyrt.SLICE_PRELUDE)."""
+        """A slice object for `a:b:c` (the class of safetyrt.SLICE_PRELUDE).
+
+        The constructor is called through the class reference the compiler already holds, not
+        through the name `slice`, so a parameter, local or module global called `slice` cannot
+        shadow the class (CPython still uses its builtin slice type for the subscript).
+        """
         none = ast.Constant(value=None)
-        call = ast.Call(func=ast.Name(id='slice', ctx=ast.Load()),
-                        args=[sl.lower or none, sl.upper or none, sl.step or none], keywords=[])
-        return self.expr(call, ctx)
+        return self._call_class('slice', [sl.lower or none, sl.upper or none, sl.step or none], {}, ctx)
 
     def _slice_bounds(self, sl, ctx):
         """The three bounds of `a:b:c` as values (None where omitted)."""
