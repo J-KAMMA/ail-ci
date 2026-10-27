@@ -273,6 +273,23 @@ def int_constant(node, _limit=_CONST_INT_LIMIT):
         return None
     return result if type(result) is int and result.bit_length() <= _limit else None
 
+def refuse_int_float_literal(node):
+    """`int(<float literal>)` where the truncated value cannot fit int64.
+
+    CPython returns an exact big integer for `int(1e300)`; an int here is 64-bit (SEMANTICS
+    section 1), so the value is known now and refusing it here, by name, is the same
+    compile-time outcome an out-of-range integer literal already gets. Values that fit int64
+    take the ordinary conversion, and a non-literal argument is unaffected.
+    """
+    value = _number_constant(node)
+    if isinstance(value, float) and not (-9223372036854775808.0 <= value < 9223372036854775808.0):
+        raise Unsupported(
+            'the float literal %r converted with int() does not fit in a 64-bit signed integer, '
+            'and an integer here is one (SEMANTICS section 1). CPython computes a finite value '
+            'exactly because its int is unbounded, raises OverflowError for an infinity and '
+            'ValueError for a NaN; AIL has no big integer type' % value)
+
+
 def refuse_complex_pow(node):
     """`(-4.0) ** 0.5`: a negative base to a fractional power is a complex number in Python, and this
     language has no complex type. Constant operands are refused here, at compile time; any other
