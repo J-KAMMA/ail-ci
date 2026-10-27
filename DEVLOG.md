@@ -23,6 +23,58 @@ matches CPython, on both builds.  The route probes `r_arg`, `r_list`, `r_attr`, 
 above, not changed by this job.  Final-state tests (4 modules, 0 failed): test_ail_pre351,
 test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py`
 was run and `--check` passes.
+## 2026-10-27 -- pre353: a dict subscription by a slice uses the slice as the key (job-pre353-10280033)
+
+The first still-differing item recorded by the pre328 reviewer was `p2_noninstance`: in CPython
+3.12 a slice is hashable, so `d[1:2]` is a dict lookup with `slice(1, 2, None)` and a missing key
+raises `KeyError: slice(1, 2, None)`; both AIL builds instead said `'dict' object is not
+subscriptable` (the set half already matched CPython's own TypeError).  The general path's
+`pyboxed2.expr_Subscript` now builds a slice object for a dict (also `Counter`/`defaultdict`)
+target and uses it as the key; its unknown-kind branch checks `AIL_T_DICT` as well as
+`AIL_T_INST`; `_store_slice` does the same for item assignment and deletion.  `safetyrt`'s
+`ail2s_getitem`/`ail2s_setitem` treat a dict as keyed by the slice object rather than slicing
+it, and `SLICE_PRELUDE` now defines `__hash__` over the three fields so equal slices find each
+other.  The second recorded item (a local or parameter named `slice` shadowing the injected
+prelude) is unchanged.  List/str/tuple/range slices and set subscriptions keep their behaviour.
+
+Added `AIL_CURRENT/test_ail_pre353.py` (3 tests, 13 programs, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`; added DIFFERENCES row
+`C?-job-pre353-10280033-1`.  Probes in `/tmp/probes/pre353` on both builds: `p01`-`p15`, `p20`
+and `p22` match CPython, including missing/present keys, an empty dict, caught and uncaught
+`KeyError`, equal slice objects, argument/list-item/attribute/dict-value/alias routes,
+dynamic/None/negative/bool bounds, literal and variable assignment and deletion, membership,
+list/str/tuple controls and the set `TypeError` control.  `test_ail_pre353` (3 tests, 50 s)
+passes; `test_ail_silent5` and `test_ail_pre327` also pass on this change (2 modules, 118 s).
+Final-state tests: test_ail_pre353, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py --check` passes.
+## 2026-10-27 -- pre354: a local named `slice` no longer shadows the slice class (job-pre354-10280045)
+
+The first pre-existing item from the pre327 review still reproduced on this tree: a function
+whose parameter or local is named `slice`, followed by a slice of a user-class instance
+(`def cut(slice, x): return x[1:2]`), built on both builds and then stopped with
+`TypeError: 'int' object is not callable`, where CPython passes its builtin slice object to
+`__getitem__`.  The general path's `_slice_obj` built the object with a call to the
+user-visible name `slice`, which the local shadowed.  `_slice_obj` now calls the prelude's
+class through the compiler's own class reference (`_call_class('slice', ...)`), so neither
+`slice` nor any helper name can shadow it; user code that binds `slice` still sees its own
+binding, and an ordinary `slice(...)` call is unchanged.  (The first fix used an
+`_ail_slice_type` alias; the review showed a user binding of that name shadowed it too, so
+the alias is gone.)
+
+Probes in `/tmp/probes/pre354` (both builds via `cmp.sh`): `p01_shadow_param`,
+`p02_shadow_local`, `p03_shadow_method`, `p04_shadow_module`, `p05_shadow_global_func`,
+`p06_user_slice`, `p07_shadow_loop` and `p10_routes_shadow` (alias, attribute, dict value,
+list item, slice assignment/deletion) all match CPython, as do the review's `r01`-`r07`
+(including `r02_alias_local` and `r03_alias_global`, where a user `_ail_slice_type`
+binding previously shadowed the alias).  The review's other pre-existing items still differ
+and were not changed: `p08_dict_slice` (`TypeError` instead of `KeyError slice(...)`) and
+`p09_instance_name` (`'instance'` instead of `'A'`); `p11_lambda_comp` is still refused by
+name.
+
+Added `AIL_CURRENT/test_ail_pre354.py` (11 programs, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.  Final-state tests: test_ail_pre354,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py`
+was run and `--check` passes.
 
 ## 2026-10-27 -- pre338: int() of an out-of-int64 class attribute read through an instance is refused (job-pre338-10272141)
 
@@ -201,6 +253,53 @@ this tree, so it was not run.  Probes re-run for this job in `/tmp/probes/pre328
 range`).  Final-state tests on this commit: `test_ail_pre328`, `test_ail_silent5`,
 `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` (48 tests, OK, 696 s,
 1 skipped); `tools/update_manifest.py --check` passes.
+
+## 2026-10-27 -- pre345 fix: accept the re-applied pre9 infinity refusal wording (job-pre345-10280059)
+
+Applied alone on today's integ, `test_ail_pre345` failed.  The integ "re-apply pre9" change
+(`job-rbrbrbrbpre9-10272112`) gave the infinity-literal refusal its own named wording,
+`the float literal inf converted with int() does not fit in a 64-bit signed integer ...`, where
+this branch still says `not in the subset: a nan/inf float literal`.  The test's `REFUSALS`
+list had no marker for the new text, so its first affected slug (`infinity_literal`) failed on
+both builds and, because the per-slug mode check sits outside the subTest, the assertion ended
+the loop and skipped the remaining slugs.
+
+`REFUSALS` now also accepts `does not fit in a 64-bit signed integer` (the wording integ's own
+`test_ail_pre9` accepts), keeping the previous markers so the test passes on both this branch
+and integ.  No compiler code changed.  `test_ail_safetynet` is byte-identical on this branch
+and integ; it passes on the integ worktree with the patched test and on this branch, so its
+recorded failure could not be reproduced (not observed under `par_check.py -j 2`).
+
+Probes in `/tmp/probes/pre345fix` with `cmp.sh` on both builds: `p01_inf`, `p02_ninf` are
+refused by name (`a nan/inf float literal` here); `p03_finite_pos`, `p04_boundary_hi`,
+`p07_list_item`, `p08_dict_value`, `p09_attr`, `p10_arg`, `p11_alias` are refused by name
+(`int() of a float outside int64`); `p05_boundary_inrange`, `p06_rounding` and
+`p12_inrange_flows` (argument, list item, dict value, attribute) match CPython.  Final-state
+tests: test_ail_pre345, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-27 -- pre345: pre9's int() float-literal and int-shadow cases are already refused by name (job-pre345-10272303)
+
+The pre9 reviewer recorded as pre-existing the pre290 finite float-literal refusals, the
+infinity literal refusal and the int-shadowing refusal.  Reproduced the first on this tree with
+`bash ~/tools/cmp.sh` on both builds: a finite out-of-int64 float literal passed directly,
+negatively, through a unary paren, a constant conditional, a module constant, a list/tuple/dict
+item, an alias, or a positional/keyword/positional-only wrapper already stops at compile time
+with the named `int() of a float outside int64` message; `int(1e400)` and `int(-1e400)` stop
+with `not in the subset: a nan/inf float literal`.  The int-shadow cases are also resolved: a
+local lambda or a parameter named `int` matches CPython, while `def int` and a module `int`
+constant are refused by name.  No compiler change was needed.  Added
+`AIL_CURRENT/test_ail_pre345.py` (22 programs, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.
+
+Probes in `/tmp/probes/pre345` on both builds: `p1`-`p3`, `p5`-`p7`, `p9`, `p10`, `p14`-`p16`,
+`p19`, `p20` and `p22`-`p28` are refused by name (`p9`/`p10` as `a nan/inf float literal`, the
+rest as `int() of a float outside int64` or the int-shadow message); `p13`, `p17`, `p18` and
+`p30` match CPython.  Shapes outside the recorded literal refusals still stop at run time on both
+builds and were not changed: `p4` (non-constant conditional), `p8`/`p21` (instance attribute),
+`p11` (`2.0**63`), `p12` (`float(1e300)`) and `p29` (power through a wrapper).  Final-state
+tests: test_ail_pre345, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes.
 
 ## 2026-10-27 -- pre326: a nested class inside a function is already refused by name (job-pre326-10271918)
 
