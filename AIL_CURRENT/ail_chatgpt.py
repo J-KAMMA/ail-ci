@@ -459,6 +459,46 @@ def _contains_known_instance(value):
     return False
 
 
+def _container_bindings(nodes, outer_kinds, outer_values):
+    """Container kinds and constant values for names bound once in a function body."""
+    counts = _binding_counts(nodes)
+    bindings = {name: (None, _UNKNOWN) for name in counts}
+    for statement in _shallow_walk(nodes):
+        if not (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                and isinstance(statement.targets[0], ast.Name)):
+            continue
+        name = statement.targets[0].id
+        value = statement.value
+        kind = None
+        if isinstance(value, ast.List):
+            kind = 'list'
+        elif isinstance(value, ast.Tuple):
+            kind = 'tuple'
+        elif isinstance(value, ast.Dict):
+            kind = 'dict'
+        elif isinstance(value, ast.Set):
+            kind = 'set'
+        elif isinstance(value, ast.Name) and value.id not in counts:
+            kind = outer_kinds.get(value.id)
+        if name not in counts or counts[name] != 1 or kind is None:
+            continue
+        if isinstance(value, ast.Name):
+            if value.id in bindings:
+                bindings[name] = (kind, bindings[value.id][1])
+            else:
+                bindings[name] = (kind, outer_values.get(value.id, _UNKNOWN))
+            continue
+
+        def lookup(item):
+            if item in bindings:
+                return bindings[item][1]
+            return outer_values.get(item, _UNKNOWN)
+
+        resolved = _constant_value(value, lookup, lambda unused: True, {})
+        bindings[name] = (kind, resolved if isinstance(resolved, (list, tuple, dict, set)) else _UNKNOWN)
+    return bindings
+
+
 def _only_subscripted(tree, name, definition):
     """Whether a module name is used only by subscript loads after its one definition.
 
@@ -809,12 +849,16 @@ def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough):
 
 
 class _Int64CallChecker(ast.NodeVisitor):
-    def __init__(self, known, passthrough, int_params, int_shadowed, attributes):
+    def __init__(self, known, passthrough, int_params, int_shadowed, attributes,
+                 container_kinds=None, container_values=None):
         self.known = known
         self.passthrough = passthrough
         self.int_params = int_params
         self.int_shadowed = int_shadowed
         self.attributes = attributes
+        self.container_kinds = container_kinds or {}
+        self.container_values = container_values or {}
+        self.local_containers = []
         self.shadow = []
 
     def _global_name(self, name):
@@ -825,9 +869,57 @@ class _Int64CallChecker(ast.NodeVisitor):
             return _UNKNOWN
         return self.known.get(name, _UNKNOWN)
 
+    def _local_container(self, name):
+        for scope in reversed(self.local_containers):
+            if name in scope:
+                return scope[name]
+        return None
+
+    def _container_lookup(self, name):
+        local = self._local_container(name)
+        if local is not None:
+            return local[1]
+        if not self._global_name(name):
+            return _UNKNOWN
+        value = self.known.get(name, _UNKNOWN)
+        if value is not _UNKNOWN:
+            return value
+        return self.container_values.get(name, _UNKNOWN)
+
     def _value(self, node):
         return _constant_value(node, self._lookup, self._global_name, self.passthrough,
                                self.attributes)
+
+    def _container_value(self, node):
+        return _constant_value(node, self._container_lookup, self._global_name,
+                               self.passthrough, self.attributes)
+
+    def _container_kind(self, node):
+        if isinstance(node, ast.List):
+            return 'list'
+        if isinstance(node, ast.Tuple):
+            return 'tuple'
+        if isinstance(node, ast.Dict):
+            return 'dict'
+        if isinstance(node, ast.Set):
+            return 'set'
+        if (isinstance(node, ast.Name) and self._global_name(node.id)
+                and node.id in self.container_kinds):
+            return self.container_kinds[node.id]
+        if isinstance(node, ast.Name):
+            local = self._local_container(node.id)
+            if local is not None:
+                return local[0]
+        value = self._container_value(node)
+        if isinstance(value, list):
+            return 'list'
+        if isinstance(value, tuple):
+            return 'tuple'
+        if isinstance(value, dict):
+            return 'dict'
+        if isinstance(value, set):
+            return 'set'
+        return None
 
     def _refuse(self, node, value):
         error = ValueError(f'int() of a float outside int64: {value!r} (CPython makes a big integer)')
@@ -835,9 +927,19 @@ class _Int64CallChecker(ast.NodeVisitor):
         error.source_column = node.col_offset
         raise error
 
+    def _refuse_container(self, node, kind):
+        error = ValueError(f'int() of a {kind}: a container cannot be converted to an integer '
+                           '(CPython raises TypeError)')
+        error.source_line = node.lineno
+        error.source_column = node.col_offset
+        raise error
+
     def visit_Call(self, node):
         if (not self.int_shadowed and isinstance(node.func, ast.Name) and node.func.id == 'int'
                 and self._global_name('int') and len(node.args) == 1 and not node.keywords):
+            kind = self._container_kind(node.args[0])
+            if kind is not None:
+                self._refuse_container(node, kind)
             value = self._value(node.args[0])
             if _outside_int64_float(value):
                 self._refuse(node, value)
@@ -846,6 +948,9 @@ class _Int64CallChecker(ast.NodeVisitor):
             for name, index in self.int_params[node.func.id].items():
                 argument = _bound_argument(node, name, index)
                 if argument is not None:
+                    kind = self._container_kind(argument)
+                    if kind is not None:
+                        self._refuse_container(node, kind)
                     value = self._value(argument)
                     if _outside_int64_float(value):
                         self._refuse(node, value)
@@ -865,8 +970,11 @@ class _Int64CallChecker(ast.NodeVisitor):
         if node.returns is not None:
             self.visit(node.returns)
         self.shadow.append(_function_bindings(node))
+        self.local_containers.append(
+            _container_bindings(node.body, self.container_kinds, self.container_values))
         for statement in node.body:
             self.visit(statement)
+        self.local_containers.pop()
         self.shadow.pop()
 
     def visit_FunctionDef(self, node):
@@ -1012,13 +1120,45 @@ def _check_int64_literals(tree):
             elif (isinstance(value, (list, tuple, dict)) and _contains_known_instance(value)
                     and _only_subscripted(tree, name, node.targets[0])):
                 known[name] = value
+    container_kinds = {}
+    container_values = {}
+    for node in tree.body:
+        if not (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)):
+            continue
+        name = node.targets[0].id
+        if module_counts.get(name) != 1 or name in global_names:
+            continue
+        value = node.value
+        kind = None
+        if isinstance(value, ast.List):
+            kind = 'list'
+        elif isinstance(value, ast.Tuple):
+            kind = 'tuple'
+        elif isinstance(value, ast.Dict):
+            kind = 'dict'
+        elif isinstance(value, ast.Set):
+            kind = 'set'
+        elif isinstance(value, ast.Name) and value.id in container_kinds:
+            kind = container_kinds[value.id]
+        if kind is None:
+            continue
+        container_kinds[name] = kind
+        if isinstance(value, ast.Name) and value.id in container_values:
+            container_values[name] = container_values[value.id]
+        else:
+            resolved = _constant_value(value, lambda item: container_values.get(item, _UNKNOWN),
+                                       lambda unused: True, {})
+            if isinstance(resolved, (list, tuple, dict, set)):
+                container_values[name] = resolved
     int_shadowed = any((isinstance(node, ast.FunctionDef) and node.name == 'int')
                        or (isinstance(node, ast.arg) and node.arg == 'int')
                        or (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == 'int')
                        for node in ast.walk(tree))
     passthrough = _passthrough_functions(tree, module_counts)
     int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough)
-    _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes).visit(tree)
+    _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes,
+                      container_kinds, container_values).visit(tree)
     parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
     maxsplit = _maxsplit_constant_nodes(tree)
     nodes = [tree]

@@ -1,3 +1,24 @@
+## 2026-10-27 -- pre333: int() of a bare container is refused by name (job-pre333-10272024)
+
+The rbpre311 review's first pre-existing item was its `p10_bare_read`: a module-level container
+read bare into `int()` (`a = [1e300]; print(int(a))`) ran on the general path and the default
+build stopped with an incompatible `ail_flist` assignment, where CPython raises TypeError.
+Reproduced it on this tree.  `_Int64CallChecker` now also refuses `int()` of a statically known
+list, tuple, dict or set by name on both builds; the check follows a module name bound once to a
+literal container, aliases, a local binding, a subscript or dict value that yields a container, a
+known attribute, and a function argument converted in the body.  Strings, bytes, bytearray,
+scalars, a local shadow and a container that is only read are unchanged.  Added
+`AIL_CURRENT/test_ail_pre333.py` (19 refused, 8 matching cases) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.
+
+Probes in `/tmp/probes/pre333` on both builds: `p04` (module list), `p09` (alias),
+`p11` (tuple alias), `p12` (dict), `p19` (local list), `p23`/`p24` (literals), `p25` (list
+item), `p26` (dict value), `p27` (attribute), `p28` (keyword argument), `p29` (argument chain)
+are refused by name; `p30` (local shadow), `p32` (nested scalar) and `p33` (strings, bools,
+in-range floats, bytearray, set length, dict scalar value, list scalar item) match CPython.
+Final-state tests: `test_ail_pre333`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3`.
+
 ## 2026-10-27 -- pre319: calling an earlier function-valued class attribute is already refused by name (job-pre319-10271538)
 
 The pre304 reviewer's first pre-existing item was a class body that calls a function bound
