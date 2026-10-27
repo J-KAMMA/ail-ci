@@ -44,6 +44,32 @@ matches on the general build and keeps the pre-existing default-build failure; `
 both.  Final-state tests: test_ail_pre340, test_ail_pre306, test_ail_pre302, test_ail_pre311,
 test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (7 modules, 0 failed).
 `tools/update_manifest.py` was run and `--check` passes.
+## 2026-10-27 -- pre341: a mutated module-level list of number tuples keeps the list (job-pre341-10272226)
+
+The pre329 review's first pre-existing item reproduced on both builds: `ps = [(1, 2), (3, 4)]` at
+module level followed by `del ps[-1]` printed the unchanged list.  The tuple pass kept a module-level
+list of number tuples as two number columns and rebuilt a fresh list (`_ail_rc_ps()`) for every value
+use, so the delete (and `append`, `pop`, an item store, or a mutation through an alias or a function
+argument) changed the temporary instead of the list CPython shares.
+
+`tupcommon.rowconst_module_in_place` now checks the module-level statements too, ignoring only the
+defining assignment: anything but a for/comprehension walk, an indexed read, an `in` test or a
+read-only builtin keeps the list as written, and the normal compiler handles the mutation.  In-place
+reads still lower to columns.  Deletions of lists of int, float, bool, string, mixed and nested
+tuples, empty lists, out-of-range and uncaught indexes, indexes arriving through a list item,
+attribute or dict value, aliases and function arguments match CPython on both builds.
+
+Only the first reported item was in scope and is fixed.  Spot-check probes for the others were not
+exhaustive: a no-try typed int-list delete (`del xs[9]`, also `-9`) already printed the `IndexError:`
+prefix on this tree, the typed nested shapes did not build on the default path in the probe shape,
+and the uncaught trap wordings (`KeyError`, `ZeroDivisionError`, bytes `IndexError`) still differ on
+the default build.  None of them was changed here.
+Probes in `/tmp/probes/pre341` (46 programs): all 33 i2 module-tuple probes match CPython on both
+builds; the i3/i4/i5 probes cover the other items.  Added `AIL_CURRENT/test_ail_pre341.py` (13
+programs, both builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.
+Final-state tests:
+test_ail_pre341, test_ail_safetynet, test_ail_tuples, test_ail_files and test_ail_corpus_findings3
+(5 modules, 434 s, 0 failed).  `tools/update_manifest.py` was run and `--check` passes.
 
 ## 2026-10-27 -- pre326: a nested class inside a function is already refused by name (job-pre326-10271918)
 
