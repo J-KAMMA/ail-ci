@@ -1253,6 +1253,10 @@ def _function_local_int_constants(function, module_known):
                 value = _const_expr_int(value_node, bounded=False)
             except _Int64ConstantOverflow:
                 value = None
+        if value is None:
+            value = _const_fold_int(value_node)
+            if type(value) is not int:
+                value = None
         if value is not None:
             local[name] = value
 
@@ -1294,6 +1298,10 @@ def _known_module_constants(tree):
             try:
                 value = _const_expr_int(node.value, bounded=False)
             except _Int64ConstantOverflow:
+                value = None
+        if value is None:
+            value = _const_fold_int(node.value)
+            if type(value) is not int:
                 value = None
         if value is not None:
             known[target.id] = value
@@ -2105,6 +2113,9 @@ def _pow_exponent_is_constant(node):
 
 
 def _pow_static_int(node, known):
+    value = _const_fold_int(node)
+    if type(value) is int:
+        return value
     value = _constant_int(node, known, shifts=True)
     if value is None:
         try:
