@@ -420,6 +420,49 @@ and 14 refused by name (`p39_refuse_{literal,negative,boundary,keyword,positiona
 all against CPython on both builds. `python3 tools/diff_ids.py` is not present in this tree;
 `tools/update_manifest.py` was run and `--check` passes.
 
+## 2026-10-27 -- pre306 review: instance folding ignores setattr (job-pre306-10271301)
+
+The review found that the new instance-attribute folding still folded a literal `self.attr` after
+`setattr(instance, 'attr', in_range)` (literal or dynamic name), so a program CPython runs as `1`
+was falsely refused with the out-of-int64 wording.  `_known_class_attributes` now marks an
+instance attribute unsafe when any `setattr` names it, and a `setattr` with a non-constant name
+keeps every attribute read through an instance unknown (including a class attribute fallback).
+A direct class read (`int(C.v)`) is still folded and refused when an unrelated dynamic `setattr`
+targets an instance.  `AIL_CURRENT/test_ail_pre306.py` adds four matching cases (literal and
+dynamic names, instance `self.attr` and class-attribute fallback) and one named-refusal case.
+Probes in `/tmp/probes`: `pre306_attr_setattr_instance`, `pre306_attr_setattr_dynamic`,
+`pre306_attr_setattr_routes`, `pre306_attr_setattr_boundary`, `pre306_attr_setattr_alias`,
+`pre306_attr_setattr_int`, `pre306_attr_setattr_multiple`, `pre306_attr_setattr_dict_name`,
+`pre306_attr_setattr_attr_name`, `pre306_attr_setattr_class_attr_fallback_constant` and
+`..._dynamic` match CPython on both builds; `pre306_attr_setattr_class_direct_dynamic` is refused
+by name on both builds.  `setattr` on a class object and `C.v = ...` stay unsupported on both
+builds (pre-existing).  `tools/update_manifest.py --check` passes.
+
+## 2026-10-27 -- pre306: int() of an out-of-int64 float through an attribute is refused by name (job-pre306-10271301)
+
+The first still-differing pre-existing item from the rbrbpre31 review was `int(C().v)` with a class
+attribute `v = 1e300`: both builds compiled it and then stopped with `integer overflow`, where
+CPython prints the big integer.  The front end now folds literal class attributes and literal
+`self.attr` values set in `__init__`, and follows them through a class alias, a module constant or
+instance, a list/tuple/dict item, an identity/wrapper argument, a keyword argument and a class read.
+An out-of-int64 float is refused on both builds with the existing
+`int() of a float outside int64: ... (CPython makes a big integer)` wording.  Folding is
+conservative: a class is skipped when it has bases, decorators or a keyword, a class attribute when
+any other attribute store or `setattr` names it, and an instance attribute when it is assigned more
+than once or outside the class's direct `__init__` body.  Values that fit, shadowed class names and
+attributes mutated after construction are unchanged.
+
+`AIL_CURRENT/test_ail_pre306.py` covers the refused routes (class attribute direct and through
+`C()`, negative, `__init__`, module constant, alias, list and dict item, identity and wrapper
+argument, module instance) and in-range/mutated/shadowed programs against CPython on both builds.
+DIFFERENCES row `C?-job-pre306-10271301-1` added; `test_ail_pre306` is registered in
+`ail_check.MODULES` and pinned.  Probes in `/tmp/probes`: `pre306_attr_class`,
+`pre306_attr_class_direct`, `pre306_attr_neg`, `pre306_attr_init`, `pre306_attr_module_const`,
+`pre306_attr_alias`, `pre306_attr_list`, `pre306_attr_dict`, `pre306_attr_instance` (refused by name,
+both builds); `pre306_attr_fit`, `pre306_attr_mutated_instance` (match CPython, both builds).
+`pre306_attr_instance` with an out-of-range value assigned after construction still keeps the
+run-time trap.  Final tests on the committed tree: `test_ail_pre306`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`.  `tools/update_manifest.py --check` passes.
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
@@ -3193,6 +3236,90 @@ through a variable/list/dict gives `ValueError: empty separator` where CPython s
 whitespace (`None` is only recognised as a literal), and a maxsplit constant above
 int64 (for example `2**63`) fails to compile with "integer overflow" where CPython raises
 `OverflowError`.
+## 2026-10-24 -- str.partition / rpartition reject non-str separators correctly (job-qtest3-10241647)
+
+Probing `str.partition` / `str.rpartition` on both builds found one stdout difference:
+`"a-b".partition(sep)` with `sep` an int, float or None printed `TypeError: object of type
+'int' has no len()` (the tuple helper ran `len(sep)` before `find(sep)`), while CPython says
+`TypeError: must be str, not int`.  The helper now calls `s.find(sep)` / `s.rfind(sep)` first,
+so the existing separator type check raises the right error; the empty-separator `ValueError`
+is still checked before the not-found branch.  Bytes, list, str-subclass and multi-character /
+repeated separators, argument/list/attribute/dict channels and a 100000-character input match
+CPython on both builds.  `test_ail_qtest3.py` keeps the probes.  No other differences were seen.
+## 2026-10-24 - qtest5: zfill/expandtabs receiver evaluated twice (job-qtest5-10241814)
+
+Ten small zfill/expandtabs programs (signs, empty strings, widths below the length, tab sizes
+0/1/8, tabs after newlines, dynamic/list/attribute/dict values, wrong types) matched CPython on
+both builds, with one exception:
+
+    i = [0]
+    def nxt():
+        i[0] += 1
+        return i[0]
+    print(repr(("-" + str(nxt())).zfill(nxt())))   # CPython '-1' 2, both AIL builds '-02' 3
+
+The receiver `("-" + str(nxt()))` ran its side effect twice: `_str_concat_flatten`
+(pyboxed2.py) evaluated the concat's leaves while deciding whether to flatten, then returned
+None for a two-leaf `a + str(b)` it could not prove (the `str(nxt())` argument's kind is not
+static), leaving the emitted code behind while the normal `+` path evaluated the leaves again.
+The flatten plan (per-leaf format and operand) is now computed before any emission, so the
+decision cannot leave side effects behind. `test_ail_qtest5.py` keeps the case and the area
+comparison. Other differences seen (not fixed): a str method accessed as a value
+(`f = "a\tb".expandtabs`) raises AttributeError, `str.zfill(s, w)` is refused as "name 'str' is
+not defined", `zfill(width=...)` / `expandtabs(tabsize=..., positional)` are refused by name,
+and a non-BMP literal is still a 16-bit-runtime refusal.
+## 2026-10-24 - fuzz54: do not type a mixed display from its first element
+
+`Exprs.seq_type` kept the first known element type and dropped later, incompatible ones. With a
+mixed list display such as `[["a"], {"x": "y"}]`, the tuple pass typed it `list[list[str]]`; when
+another statement (`repr`) made the pass emit its rewritten source, `print` used the list-of-list
+helper and rendered the dict as its keys. Incompatible non-numeric element types now refuse the
+tuple rewrite, leaving the source as written so the generic path prints the real objects. The
+numeric family still falls back as in job-rbfuzz54, and `bool` mixed with `int` types as `int`.
+Added `test_ail_fuzz54.py` and registered it.
+## 2026-10-24 - job-rbfuzz63-10241240
+
+- Re-applied the accepted fuzz63 change on this tree. The sign-of-zero float remainder fix is already present here through the CPython `float_divmod` helpers (`ail_obj_ffloormod` / `ail_obj2_ffloormod` use `copysign(0.0, divisor)` for a zero remainder), so both sides' fixes are kept: `-0.0 % 1.0` is `0.0` and `0.0 % -1.0` is `-0.0` on the general, unified and boxed paths. Added `AIL_CURRENT/test_ail_fuzz63.py` (literal, argument, list, dict, attribute, augmented-assignment, chained and nonzero boundary cases on both builds) and registered it in `ail_check.py`.
+## 2026-10-24 - fuzz81 re-apply: runtime KeyError keeps the raw key
+
+Re-applied the accepted fuzz81 change on the current tree. The runtime already carries an
+equivalent `ail_raise_key_arg` helper (the branch's `ail_raise_key`): a missing dict key in `d[k]`,
+`d.pop`/`del d[k]`/`popitem` and `set.remove`/`set.pop` stores the raw key as the exception
+argument. `str(e)` stays `repr(key)`, while `repr(e)` is `KeyError(repr-key)` and `e.args` is
+`(key,)`, matching CPython for str (including "" and quotes), int (0, -42, 2**62), tuple, bool,
+None and float keys; empty `popitem`/`set.pop` keep their message argument. Added the branch's
+`test_ail_fuzz81.py` (both builds against CPython); probes in `/tmp/probes` covered argument,
+list-item, attribute and dict-value routes. `tools/diff_ids.py` is not present in this tree.
+## 2026-10-24 - any/all generator expressions stop at the decisive element (job-pre13-10240022)
+
+The general path's fused `any`/`all` generator expression walked every element even after the
+answer was known, so `any(hit(log, a, b) for a, b in pairs)` called `hit` for every pair; CPython
+stops at the first truthy element. The fused loops now jump to one label at that element (the same
+shape as the existing `next(genexp)` fusion), so tuple/list destructuring targets, filters and
+nested for-clauses all stop where CPython does. Empty and no-decisive-element sequences keep the
+old result. Added `AIL_CURRENT/test_ail_pre13.py`, which builds the cases on the general path and
+the default build and compares both with CPython 3.12.
+
+The fused emitter in this tree already short-circuited equivalently, so the code side of this
+re-application was a no-op; the regression test and its registration are new.
+## 2026-10-24 - re-apply assert message value fix (job-rbpre15-10241827)
+
+Re-applied the accepted pre15 change (assert messages keep their own value in `e.args`) on top of
+the current tree: the typed path (`pyfunc.py`) now stringifies a numeric message only when no
+exception text is read (`exctext.ACTIVE` false), and the general path keeps the message object for
+`e.args`. The conflict in `pyboxed2.py` was resolved by keeping the current tree's unconditional
+object form, which already covers the accepted change's semantics (and tuple/list/dict messages);
+`test_ail_pre15.py` and the pre15 DIFFERENCES row are imported as accepted.
+
+## 2026-10-23 - assert message keeps its value in e.args (job-pre15-10240045)
+
+`assert False, 42` now raises `AssertionError(42)`, so `e.args` is `(42,)` (CPython's value), not
+`('42',)`. The typed path converts a numeric message with `str()` only when the program does not
+read `e.args`; otherwise it builds the exception with the number itself. The general path now keeps
+the message value for `e.args` whenever the program reads it (also covering list/dict/tuple
+messages). Uncaught output stays `AssertionError: 42`. New `test_ail_pre15.py` covers int, float
+and bool messages, int64 limits, negative/empty/str messages, and values arriving through an
+argument, a list item, an attribute and a dict value, on the typed and general paths.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 

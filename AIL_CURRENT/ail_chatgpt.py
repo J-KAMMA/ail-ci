@@ -412,19 +412,191 @@ def _function_bindings(fn):
     return set(names) | set(_binding_counts(fn.body))
 
 
-def _constant_value(node, lookup, global_name, passthrough):
+class _KnownClassValue:
+    """A class name whose literal class attributes this pass can read."""
+    __slots__ = ('name',)
+
+    def __init__(self, name):
+        self.name = name
+
+
+class _KnownInstance:
+    """An instance of a class whose literal class and __init__ attributes this pass can read."""
+    __slots__ = ('name',)
+
+    def __init__(self, name):
+        self.name = name
+
+
+class _KnownClassAttributes:
+    def __init__(self, classes, aliases):
+        self.classes = classes
+        self.aliases = aliases
+
+    def class_of(self, name):
+        return self.aliases.get(name)
+
+    def class_value(self, cls, attr):
+        info = self.classes.get(cls)
+        return _UNKNOWN if info is None else info['class'].get(attr, _UNKNOWN)
+
+    def instance_value(self, cls, attr):
+        info = self.classes.get(cls)
+        if info is None or attr in info['unsafe']:
+            return _UNKNOWN
+        if attr in info['instance']:
+            return info['instance'][attr]
+        return info['class'].get(attr, _UNKNOWN)
+
+
+def _contains_known_instance(value):
+    if isinstance(value, _KnownInstance):
+        return True
+    if isinstance(value, (list, tuple)):
+        return any(_contains_known_instance(item) for item in value)
+    if isinstance(value, dict):
+        return any(_contains_known_instance(item) for item in value.values())
+    return False
+
+
+def _only_subscripted(tree, name, definition):
+    """Whether a module name is used only by subscript loads after its one definition.
+
+    A module container is safe to fold for an attribute read only when nothing can mutate it:
+    an attribute or subscript store, a call that receives it, or any other read keeps it out.
+    """
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Name) and node.id == name):
+            continue
+        if node is definition:
+            continue
+        parent = parents.get(node)
+        if (isinstance(node.ctx, ast.Load) and isinstance(parent, ast.Subscript)
+                and parent.value is node and isinstance(parent.ctx, ast.Load)):
+            continue
+        return False
+    return True
+
+
+def _known_class_attributes(tree, module_known):
+    """Classes whose literal class/__init__ attributes are safe to fold for int() checks.
+
+    A class attribute is folded only when the class is a plain top-level class bound once and no
+    other attribute store of that name exists.  An instance attribute is folded only from one
+    direct ``self.attr = value`` in ``__init__`` and when no other store of that name exists, so a
+    later mutation (``c.attr = ...`` or ``setattr(c, 'attr', ...)``) is never folded.  A
+    ``setattr`` with a dynamic name keeps every attribute read through an instance unknown.
+    Anything else stays unknown.
+    """
+    counts = _binding_counts(tree.body)
+    class_nodes = {}
+    for node in tree.body:
+        if (isinstance(node, ast.ClassDef) and counts.get(node.name) == 1
+                and not node.decorator_list and not node.bases and not node.keywords):
+            class_nodes[node.name] = node
+    if not class_nodes:
+        return _KnownClassAttributes({}, {})
+    aliases = {name: name for name in class_nodes}
+    changed = True
+    while changed:
+        changed = False
+        for node in tree.body:
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name)
+                    and isinstance(node.value, ast.Name)):
+                target, source = node.targets[0].id, node.value.id
+                if (target not in aliases and counts.get(target) == 1
+                        and counts.get(source) == 1 and source in aliases):
+                    aliases[target] = aliases[source]
+                    changed = True
+    stores = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            stores.setdefault(node.attr, []).append(node)
+    setattr_names = set()
+    dynamic_setattr = False
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'setattr'):
+            if (len(node.args) >= 2 and isinstance(node.args[1], ast.Constant)
+                    and isinstance(node.args[1].value, str)):
+                setattr_names.add(node.args[1].value)
+            else:
+                dynamic_setattr = True
+    classes = {}
+    for name, node in class_nodes.items():
+        info = {'class': {}, 'instance': {}, 'unsafe': set(), 'constructible': True}
+        methods = {stmt.name for stmt in node.body if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        init = None
+        for stmt in node.body:
+            if isinstance(stmt, ast.FunctionDef) and stmt.name == '__init__' and not stmt.decorator_list:
+                init = stmt
+        for stmt in node.body:
+            target = value_node = None
+            if (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1
+                    and isinstance(stmt.targets[0], ast.Name)):
+                target, value_node = stmt.targets[0].id, stmt.value
+            elif (isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name)
+                    and stmt.value is not None):
+                target, value_node = stmt.target.id, stmt.value
+            if target is None or target in methods:
+                continue
+            value = _constant_value(value_node, lambda n: module_known.get(n, _UNKNOWN),
+                                    lambda unused: True, {})
+            if value is not _UNKNOWN:
+                info['class'][target] = value
+        allowed = {}
+        if init is not None:
+            args = init.args
+            required = [arg for arg in (*args.posonlyargs, *args.args) if arg.arg != 'self']
+            info['constructible'] = len(required) <= len(args.defaults)
+            for stmt in init.body:
+                if not isinstance(stmt, ast.Assign):
+                    continue
+                for target in stmt.targets:
+                    if (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
+                            and target.value.id == 'self'):
+                        allowed.setdefault(target.attr, []).append((target, stmt.value))
+        allowed_ids = {id(target) for entries in allowed.values() for target, _value in entries}
+        for attr, entries in allowed.items():
+            if (len(entries) != 1 or attr in methods or attr in setattr_names
+                    or dynamic_setattr):
+                info['unsafe'].add(attr)
+                continue
+            if any(id(store) not in allowed_ids for store in stores.get(attr, ())):
+                info['unsafe'].add(attr)
+                continue
+            value = _constant_value(entries[0][1], lambda n: module_known.get(n, _UNKNOWN),
+                                    lambda unused: True, {})
+            if value is _UNKNOWN:
+                info['unsafe'].add(attr)
+            else:
+                info['instance'][attr] = value
+        for attr in list(info['class']):
+            if attr in setattr_names or any(id(store) not in allowed_ids
+                                            for store in stores.get(attr, ())):
+                del info['class'][attr]
+        if dynamic_setattr:
+            info['unsafe'].update(info['class'])
+            info['unsafe'].update(info['instance'])
+        classes[name] = info
+    return _KnownClassAttributes(classes, aliases)
+
+
+def _constant_value(node, lookup, global_name, passthrough, attributes=None):
     if isinstance(node, ast.Constant):
         if type(node.value) in (bool, int, float, str, bytes, type(None)):
             return node.value
         return _UNKNOWN
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
-        value = _constant_value(node.operand, lookup, global_name, passthrough)
+        value = _constant_value(node.operand, lookup, global_name, passthrough, attributes)
         if type(value) in (int, float):
             return -value if isinstance(node.op, ast.USub) else value
         return _UNKNOWN
     if (isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div))):
-        left = _constant_value(node.left, lookup, global_name, passthrough)
-        right = _constant_value(node.right, lookup, global_name, passthrough)
+        left = _constant_value(node.left, lookup, global_name, passthrough, attributes)
+        right = _constant_value(node.right, lookup, global_name, passthrough, attributes)
         if (type(left) in (int, float) and type(right) in (int, float)
                 and (type(left) is float or type(right) is float)):
             try:
@@ -439,17 +611,24 @@ def _constant_value(node, lookup, global_name, passthrough):
                 return _UNKNOWN
         return _UNKNOWN
     if isinstance(node, ast.IfExp):
-        test = _constant_value(node.test, lookup, global_name, passthrough)
+        test = _constant_value(node.test, lookup, global_name, passthrough, attributes)
         if type(test) is bool:
             branch = node.body if test else node.orelse
-            return _constant_value(branch, lookup, global_name, passthrough)
+            return _constant_value(branch, lookup, global_name, passthrough, attributes)
         return _UNKNOWN
     if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-        return lookup(node.id)
+        value = lookup(node.id)
+        if value is not _UNKNOWN:
+            return value
+        if attributes is not None and global_name(node.id):
+            cls = attributes.class_of(node.id)
+            if cls is not None:
+                return _KnownClassValue(cls)
+        return _UNKNOWN
     if isinstance(node, ast.List):
         values = []
         for element in node.elts:
-            value = _constant_value(element, lookup, global_name, passthrough)
+            value = _constant_value(element, lookup, global_name, passthrough, attributes)
             if value is _UNKNOWN:
                 return _UNKNOWN
             values.append(value)
@@ -457,7 +636,7 @@ def _constant_value(node, lookup, global_name, passthrough):
     if isinstance(node, ast.Tuple):
         values = []
         for element in node.elts:
-            value = _constant_value(element, lookup, global_name, passthrough)
+            value = _constant_value(element, lookup, global_name, passthrough, attributes)
             if value is _UNKNOWN:
                 return _UNKNOWN
             values.append(value)
@@ -467,8 +646,8 @@ def _constant_value(node, lookup, global_name, passthrough):
         for key_node, value_node in zip(node.keys, node.values):
             if key_node is None:
                 return _UNKNOWN
-            key = _constant_value(key_node, lookup, global_name, passthrough)
-            value = _constant_value(value_node, lookup, global_name, passthrough)
+            key = _constant_value(key_node, lookup, global_name, passthrough, attributes)
+            value = _constant_value(value_node, lookup, global_name, passthrough, attributes)
             if key is _UNKNOWN or value is _UNKNOWN:
                 return _UNKNOWN
             try:
@@ -476,19 +655,22 @@ def _constant_value(node, lookup, global_name, passthrough):
             except TypeError:
                 return _UNKNOWN
         return values
-    if (isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load)
-            and node.attr.startswith('f') and node.attr[1:].isdigit()):
-        base = _constant_value(node.value, lookup, global_name, passthrough)
-        if isinstance(base, tuple):
+    if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
+        base = _constant_value(node.value, lookup, global_name, passthrough, attributes)
+        if attributes is not None and isinstance(base, _KnownClassValue):
+            return attributes.class_value(base.name, node.attr)
+        if attributes is not None and isinstance(base, _KnownInstance):
+            return attributes.instance_value(base.name, node.attr)
+        if node.attr.startswith('f') and node.attr[1:].isdigit() and isinstance(base, tuple):
             index = int(node.attr[1:])
             if index < len(base):
                 return base[index]
         return _UNKNOWN
     if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load):
-        base = _constant_value(node.value, lookup, global_name, passthrough)
+        base = _constant_value(node.value, lookup, global_name, passthrough, attributes)
         if base is _UNKNOWN:
             return _UNKNOWN
-        key = _constant_value(node.slice, lookup, global_name, passthrough)
+        key = _constant_value(node.slice, lookup, global_name, passthrough, attributes)
         if key is _UNKNOWN:
             return _UNKNOWN
         try:
@@ -502,18 +684,26 @@ def _constant_value(node, lookup, global_name, passthrough):
             and node.func.id.startswith('_AilT_')):
         values = []
         for argument in node.args:
-            value = _constant_value(argument, lookup, global_name, passthrough)
+            value = _constant_value(argument, lookup, global_name, passthrough, attributes)
             if value is _UNKNOWN:
                 return _UNKNOWN
             values.append(value)
         return tuple(values)
     if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-            and isinstance(node.func.ctx, ast.Load) and global_name(node.func.id)
-            and node.func.id in passthrough):
-        name, index = passthrough[node.func.id]
-        argument = _bound_argument(node, name, index)
-        if argument is not None:
-            return _constant_value(argument, lookup, global_name, passthrough)
+            and isinstance(node.func.ctx, ast.Load) and global_name(node.func.id)):
+        value = lookup(node.func.id)
+        cls = value.name if isinstance(value, _KnownClassValue) else None
+        if cls is None and attributes is not None:
+            cls = attributes.class_of(node.func.id)
+        if (cls is not None and not node.args and not node.keywords
+                and attributes is not None and cls in attributes.classes
+                and attributes.classes[cls]['constructible']):
+            return _KnownInstance(cls)
+        if node.func.id in passthrough:
+            name, index = passthrough[node.func.id]
+            argument = _bound_argument(node, name, index)
+            if argument is not None:
+                return _constant_value(argument, lookup, global_name, passthrough, attributes)
         return _UNKNOWN
     return _UNKNOWN
 
@@ -619,11 +809,12 @@ def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough):
 
 
 class _Int64CallChecker(ast.NodeVisitor):
-    def __init__(self, known, passthrough, int_params, int_shadowed):
+    def __init__(self, known, passthrough, int_params, int_shadowed, attributes):
         self.known = known
         self.passthrough = passthrough
         self.int_params = int_params
         self.int_shadowed = int_shadowed
+        self.attributes = attributes
         self.shadow = []
 
     def _global_name(self, name):
@@ -635,7 +826,8 @@ class _Int64CallChecker(ast.NodeVisitor):
         return self.known.get(name, _UNKNOWN)
 
     def _value(self, node):
-        return _constant_value(node, self._lookup, self._global_name, self.passthrough)
+        return _constant_value(node, self._lookup, self._global_name, self.passthrough,
+                               self.attributes)
 
     def _refuse(self, node, value):
         error = ValueError(f'int() of a float outside int64: {value!r} (CPython makes a big integer)')
@@ -806,13 +998,27 @@ def _check_int64_literals(tree):
                                     lambda unused: True, {})
             if type(value) in (int, float):
                 known[name] = value
+    attributes = _known_class_attributes(tree, known)
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)):
+            name = node.targets[0].id
+            if module_counts.get(name) != 1 or name in global_names:
+                continue
+            value = _constant_value(node.value, lambda name: known.get(name, _UNKNOWN),
+                                    lambda unused: True, {}, attributes)
+            if type(value) in (int, float) or isinstance(value, (_KnownClassValue, _KnownInstance)):
+                known[name] = value
+            elif (isinstance(value, (list, tuple, dict)) and _contains_known_instance(value)
+                    and _only_subscripted(tree, name, node.targets[0])):
+                known[name] = value
     int_shadowed = any((isinstance(node, ast.FunctionDef) and node.name == 'int')
                        or (isinstance(node, ast.arg) and node.arg == 'int')
                        or (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == 'int')
                        for node in ast.walk(tree))
     passthrough = _passthrough_functions(tree, module_counts)
     int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough)
-    _Int64CallChecker(known, passthrough, int_params, int_shadowed).visit(tree)
+    _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes).visit(tree)
     parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
     maxsplit = _maxsplit_constant_nodes(tree)
     nodes = [tree]

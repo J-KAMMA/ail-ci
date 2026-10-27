@@ -38,6 +38,8 @@ MODULES = (
     'test_ail_pre114',
     'test_ail_pre44',
     'test_ail_pre68',
+    'test_ail_pre13',
+    'test_ail_pre15',
     'test_ail_strict', 'test_ail_cratebridge', 'test_ail_typed_parallel', 'test_ail_freestanding', 'test_ail_freestanding2',
     'test_ail_flush_exit', 'test_ail_mixed_bounds', 'test_ail_typed_submit', 'test_ail_typed_tuples',
     'test_ail_lsp', 'test_ail_project', 'test_ail_debug', 'test_ail_debug_lines', 'test_ail_debug_flush',
@@ -64,7 +66,10 @@ MODULES = (
     'test_ail_fuzz58',
     'test_ail_fuzz49',
     'test_ail_qtest1',
+    'test_ail_fuzz54',
+    'test_ail_fuzz63',
     'test_ail_fuzz20',
+    'test_ail_pre16',
     'test_ail_c169',
     'test_ail_pre168',
     'test_ail_pre173',
@@ -184,6 +189,7 @@ MODULES = (
     'test_ail_pre305',
     'test_ail_pre310',
     'test_ail_pre293',
+    'test_ail_pre306',
     'test_ail_pre205',
     'test_ail_pre206',
     'test_ail_pre209',
@@ -228,6 +234,8 @@ MODULES = (
     'test_ail_pre34',
     'test_ail_pre70',
     'test_ail_qtest2',
+    'test_ail_qtest5',
+    'test_ail_fuzz4',
 )
 
 
