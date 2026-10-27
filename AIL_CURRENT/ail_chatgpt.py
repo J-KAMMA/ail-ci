@@ -552,25 +552,39 @@ def _known_class_attributes(tree, module_known):
     """
     counts = _binding_counts(tree.body)
     class_nodes = {}
+    base_names = {}
+    alias_targets = {}
     for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Name)):
+            target, source = node.targets[0].id, node.value.id
+            if (target not in alias_targets and target not in class_nodes
+                    and counts.get(target) == 1 and counts.get(source) == 1):
+                if source in class_nodes:
+                    alias_targets[target] = source
+                elif source in alias_targets:
+                    alias_targets[target] = alias_targets[source]
+            continue
         if (isinstance(node, ast.ClassDef) and counts.get(node.name) == 1
-                and not node.decorator_list and not node.bases and not node.keywords):
+                and not node.decorator_list and not node.keywords
+                and len(node.bases) <= 1):
+            base = None
+            if node.bases:
+                base_node = node.bases[0]
+                if not isinstance(base_node, ast.Name) or counts.get(base_node.id) != 1:
+                    continue
+                if base_node.id in class_nodes:
+                    base = base_node.id
+                elif base_node.id in alias_targets:
+                    base = alias_targets[base_node.id]
+                else:
+                    continue
             class_nodes[node.name] = node
+            base_names[node.name] = base
     if not class_nodes:
         return _KnownClassAttributes({}, {})
     aliases = {name: name for name in class_nodes}
-    changed = True
-    while changed:
-        changed = False
-        for node in tree.body:
-            if (isinstance(node, ast.Assign) and len(node.targets) == 1
-                    and isinstance(node.targets[0], ast.Name)
-                    and isinstance(node.value, ast.Name)):
-                target, source = node.targets[0].id, node.value.id
-                if (target not in aliases and counts.get(target) == 1
-                        and counts.get(source) == 1 and source in aliases):
-                    aliases[target] = aliases[source]
-                    changed = True
+    aliases.update(alias_targets)
     stores = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del)):
@@ -587,13 +601,28 @@ def _known_class_attributes(tree, module_known):
                 dynamic_setattr = True
     classes = {}
     for name, node in class_nodes.items():
-        info = {'class': {}, 'instance': {}, 'instance_param': {}, 'unsafe': set(),
-                'constructible': True}
+        base = base_names[name]
+        inherited = classes.get(base) if base is not None else None
+        info = {
+            'class': dict(inherited['class']) if inherited is not None else {},
+            'instance': dict(inherited['instance']) if inherited is not None else {},
+            'instance_param': dict(inherited['instance_param']) if inherited is not None else {},
+            'unsafe': set(inherited['unsafe']) if inherited is not None else set(),
+            'constructible': inherited['constructible'] if inherited is not None else True,
+        }
         methods = {stmt.name for stmt in node.body if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))}
         init = None
         for stmt in node.body:
             if isinstance(stmt, ast.FunctionDef) and stmt.name == '__init__' and not stmt.decorator_list:
                 init = stmt
+        shadowed = set()
+        for stmt in _shallow_walk(node.body):
+            if isinstance(stmt, ast.Name) and isinstance(stmt.ctx, (ast.Store, ast.Del)):
+                shadowed.add(stmt.id)
+            elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                shadowed.add(stmt.name)
+        for attr in shadowed:
+            info['class'].pop(attr, None)
         for stmt in node.body:
             target = value_node = None
             if (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1
@@ -608,7 +637,14 @@ def _known_class_attributes(tree, module_known):
                                     lambda unused: True, {})
             if value is not _UNKNOWN:
                 info['class'][target] = value
-        info['constructor'] = _constructor_parameters(init)
+        if init is not None:
+            info['instance'] = {}
+            info['instance_param'] = {}
+            info['constructor'] = _constructor_parameters(init)
+        elif inherited is not None:
+            info['constructor'] = inherited['constructor']
+        else:
+            info['constructor'] = _constructor_parameters(None)
         allowed = {}
         init_bindings = _binding_counts(init.body) if init is not None else {}
         if init is not None:
