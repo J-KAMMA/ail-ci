@@ -1269,6 +1269,15 @@ def _literal_default_is_mutable(d):
 
     return mutable(value)
 
+def _literal_int(node):
+    """The int a literal expression stands for (including `-1`), or None."""
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        return node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)) \
+            and isinstance(node.operand, ast.Constant) and type(node.operand.value) is int:
+        return -node.operand.value if isinstance(node.op, ast.USub) else node.operand.value
+    return None
+
 
 def _module_stmt_binds(stmt):
     """Names a module-level statement binds (def, class, assignment targets, imports)."""
@@ -7788,6 +7797,10 @@ class Compiler(boxclosure.ClosureMixin):
         if kwargs and set(kwargs) != {'r'} or len(args) + len(kwargs) != 2:
             raise Unsupported('combinations() with other than (iterable, r)')
         r_node = args[1] if len(args) > 1 else kwargs['r']
+        rv = _literal_int(r_node)
+        if rv is not None and rv < 0:
+            raise Unsupported('itertools.combinations: a negative r literal (CPython raises '
+                              'ValueError: r must be non-negative)')
         src = self._resolve_iter_src(args[0], ctx)
         r = self.expr(r_node, ctx)
         t = ctx.tmp()
@@ -7799,6 +7812,10 @@ class Compiler(boxclosure.ClosureMixin):
         if (kwargs and set(kwargs) != {'r'}) or not 1 <= len(args) + len(kwargs) <= 2 or not args:
             raise Unsupported('permutations() with other than (iterable[, r])')
         r_node = args[1] if len(args) > 1 else kwargs.get('r')
+        rv = _literal_int(r_node)
+        if rv is not None and rv < 0:
+            raise Unsupported('itertools.permutations: a negative r literal (CPython raises '
+                              'ValueError: r must be non-negative)')
         src = self._resolve_iter_src(args[0], ctx)
         if r_node is None or (isinstance(r_node, ast.Constant) and r_node.value is None):
             has_r, r = '0', 'ail_box_none()'     # permutations(xs) and permutations(xs, None) alike
@@ -7829,6 +7846,10 @@ class Compiler(boxclosure.ClosureMixin):
         if kwargs and set(kwargs) != {'r'} or len(args) + len(kwargs) != 2:
             raise Unsupported('combinations_with_replacement() with other than (iterable, r)')
         r_node = args[1] if len(args) > 1 else kwargs['r']
+        rv = _literal_int(r_node)
+        if rv is not None and rv < 0:
+            raise Unsupported('itertools.combinations_with_replacement: a negative r literal '
+                              '(CPython raises ValueError: r must be non-negative)')
         src = self._resolve_iter_src(args[0], ctx)
         t = ctx.tmp()
         ctx.emit('st = ail_it_combinations_wr(cx, &%s, %s, %s);' % (t, src, self.expr(r_node, ctx)))
