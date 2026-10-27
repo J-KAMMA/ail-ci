@@ -39,6 +39,22 @@ Probes in `/tmp/probes/pre302` on both builds: `item1_fit`, `item1_float2`,
 `test_ail_pre302` (12 s, 0 failed), plus `test_ail_safetynet` (124 s), `test_ail_files`
 (131 s) and `test_ail_corpus_findings3` (210 s), all 0 failed.  `tools/update_manifest.py`
 was run and `--check` passes.
+## 2026-10-27 -- huge exponent with a safe integer base no longer loops (job-pre305-10271259)
+
+The first pre-existing difference in the rbpre299 review was `pow(-1, 10**12)`: the general
+path's integer power multiplied once per exponent, so the program hung where CPython prints 1;
+the same loop ran for the bases 0 and 1 and for odd exponents. `ail_obj_pow` and `ail_op_pow`
+now use exponentiation by squaring, matching `ail_ipow`, so at most 63 steps are taken. The
+parity sign of -1, the safe bases 0/1, bool and negative exponents, and in-range int64 boundaries
+match CPython on both builds; an out-of-int64 result keeps the existing run-time integer-overflow
+stop. No compile-time refusal was added.
+
+Probes in `/tmp/probes` on both builds: `pre305_pow_neg1_huge`, `pre305_pow_safe_bases`,
+`pre305_pow_operator`, `pre305_pow_routes` (argument, list item, attribute, dict value and alias)
+and `pre305_pow_boundaries` match CPython; `pre305_from_builtins_pow` also matches CPython (the
+review's second recorded item is not a difference on this tree). Final-state tests:
+`test_ail_pre305`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+`tools/update_manifest.py --check` passes.
 
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 

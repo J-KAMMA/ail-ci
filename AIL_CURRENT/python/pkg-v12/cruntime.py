@@ -10164,10 +10164,17 @@ static inline ail_obj ail_obj_truediv(ail_obj a, ail_obj b) {
 static inline ail_obj ail_obj_pow(ail_obj a, ail_obj b) {
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag) && b.i >= 0) {
         int64_t base = a.i, e = b.i, r = 1;
-        for (int64_t k = 0; k < e; k++) {
+        while (e) {
             int64_t nr;
-            if (__builtin_mul_overflow(r, base, &nr)) ail_die("OverflowError: integer overflow (this runtime's int64 boundary, not catchable)");
-            r = nr;
+            if (e & 1) {
+                if (__builtin_mul_overflow(r, base, &nr)) ail_die("OverflowError: integer overflow (this runtime's int64 boundary, not catchable)");
+                r = nr;
+            }
+            e >>= 1;
+            if (e) {
+                if (__builtin_mul_overflow(base, base, &nr)) ail_die("OverflowError: integer overflow (this runtime's int64 boundary, not catchable)");
+                base = nr;
+            }
         }
         return ail_box_int(r);
     }
@@ -14979,10 +14986,17 @@ static inline ail_st ail_op_truediv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_ob
 static inline ail_st ail_op_pow(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag) && b.i >= 0) {
         int64_t base = a.i, e = b.i, r = 1;
-        for (int64_t k = 0; k < e; k++) {
+        while (e) {
             int64_t nr;
-            if (__builtin_mul_overflow(r, base, &nr)) return ail_hit_limit(cx, "int_overflow", "integer overflow in **");
-            r = nr;
+            if (e & 1) {
+                if (__builtin_mul_overflow(r, base, &nr)) return ail_hit_limit(cx, "int_overflow", "integer overflow in **");
+                r = nr;
+            }
+            e >>= 1;
+            if (e) {
+                if (__builtin_mul_overflow(base, base, &nr)) return ail_hit_limit(cx, "int_overflow", "integer overflow in **");
+                base = nr;
+            }
         }
         *out = ail_box_int(r); return AIL_OK;
     }
