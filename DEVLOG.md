@@ -3280,6 +3280,16 @@ Added `test_ail_fuzz54.py` and registered it.
 ## 2026-10-24 - job-rbfuzz63-10241240
 
 - Re-applied the accepted fuzz63 change on this tree. The sign-of-zero float remainder fix is already present here through the CPython `float_divmod` helpers (`ail_obj_ffloormod` / `ail_obj2_ffloormod` use `copysign(0.0, divisor)` for a zero remainder), so both sides' fixes are kept: `-0.0 % 1.0` is `0.0` and `0.0 % -1.0` is `-0.0` on the general, unified and boxed paths. Added `AIL_CURRENT/test_ail_fuzz63.py` (literal, argument, list, dict, attribute, augmented-assignment, chained and nonzero boundary cases on both builds) and registered it in `ail_check.py`.
+## 2026-10-24 - fuzz81 re-apply: runtime KeyError keeps the raw key
+
+Re-applied the accepted fuzz81 change on the current tree. The runtime already carries an
+equivalent `ail_raise_key_arg` helper (the branch's `ail_raise_key`): a missing dict key in `d[k]`,
+`d.pop`/`del d[k]`/`popitem` and `set.remove`/`set.pop` stores the raw key as the exception
+argument. `str(e)` stays `repr(key)`, while `repr(e)` is `KeyError(repr-key)` and `e.args` is
+`(key,)`, matching CPython for str (including "" and quotes), int (0, -42, 2**62), tuple, bool,
+None and float keys; empty `popitem`/`set.pop` keep their message argument. Added the branch's
+`test_ail_fuzz81.py` (both builds against CPython); probes in `/tmp/probes` covered argument,
+list-item, attribute and dict-value routes. `tools/diff_ids.py` is not present in this tree.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
