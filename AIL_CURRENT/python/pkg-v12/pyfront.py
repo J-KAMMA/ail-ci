@@ -730,10 +730,12 @@ def refuse_field_method_call(tree, allow_owners=False):
 
     _visit(tree, None, None)
 
-    def _classes_of(node, ctx=(None, None), seen=frozenset()):
+    def _classes_of(node, ctx=(None, None), seen=frozenset(), names_are_classes=False):
         if isinstance(node, ast.Call):
             if isinstance(node.func, ast.Name) and node.func.id in classes:
                 return {node.func.id}
+            if isinstance(node.func, (ast.Name, ast.Attribute, ast.Subscript)):
+                return _classes_of(node.func, ctx, seen, True)
             return set()
         if isinstance(node, ast.Name):
             cls_name, func = ctx
@@ -757,7 +759,7 @@ def refuse_field_method_call(tree, allow_owners=False):
                                     value = keyword.value
                         if value is not None:
                             found |= _classes_of(value, call_ctx.get(id(call), (None, None)),
-                                                 seen | {key})
+                                                 seen | {key}, names_are_classes)
                     return found
             scope = scope_of.get(id(node), tree)
             key = ('name', id(scope), node.id)
@@ -771,7 +773,7 @@ def refuse_field_method_call(tree, allow_owners=False):
                           if name == node.id]
                 if values:
                     for value in values:
-                        found |= _classes_of(value, ctx, seen)
+                        found |= _classes_of(value, ctx, seen, names_are_classes)
                     return found
                 parent = scope_parent.get(lookup)
                 if parent is None:
@@ -779,7 +781,7 @@ def refuse_field_method_call(tree, allow_owners=False):
                 lookup = parent
             for name, value in assignments.get(tree, ()):
                 if name == node.id:
-                    found |= _classes_of(value, ctx, seen)
+                    found |= _classes_of(value, ctx, seen, names_are_classes)
             for item in ast.walk(tree):
                 if isinstance(item, ast.arg) and item.arg == node.id \
                         and isinstance(item.annotation, ast.Name) and item.annotation.id in classes \
@@ -790,6 +792,8 @@ def refuse_field_method_call(tree, allow_owners=False):
                         and item.annotation.id in classes \
                         and scope_of.get(id(item)) is scope:
                     found.add(item.annotation.id)
+            if names_are_classes and node.id in classes:
+                found.add(node.id)
             return found
         if isinstance(node, ast.Attribute):
             key = ('attr', id(node))
@@ -801,7 +805,7 @@ def refuse_field_method_call(tree, allow_owners=False):
                 if info is None:
                     continue
                 for value in info['field_values'].get(node.attr, ()):
-                    found |= _classes_of(value, ctx, seen | {key})
+                    found |= _classes_of(value, ctx, seen | {key}, names_are_classes)
             return found
         if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
             found = set()
@@ -812,11 +816,11 @@ def refuse_field_method_call(tree, allow_owners=False):
                     continue
                 if isinstance(item.value, (ast.List, ast.Tuple)):
                     for elt in item.value.elts:
-                        found |= _classes_of(elt, ctx, seen)
+                        found |= _classes_of(elt, ctx, seen, names_are_classes)
                 elif isinstance(item.value, ast.Dict) and isinstance(node.slice, ast.Constant):
                     for key, value in zip(item.value.keys, item.value.values):
                         if isinstance(key, ast.Constant) and key.value == node.slice.value:
-                            found |= _classes_of(value, ctx, seen)
+                            found |= _classes_of(value, ctx, seen, names_are_classes)
             return found
         return set()
 
