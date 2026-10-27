@@ -1,3 +1,29 @@
+## 2026-10-27 -- re-apply pre47: constant integer expressions (job-rbrbpre47-10271110)
+
+Re-applied the accepted pre47 change on this tree. The generic exact folder
+(`pyfunc._const_int_expr` / `fold_int_constant`) was already present, so the conflict resolution
+keeps its zero/base shortcuts, bool-result handling and 2**22-bit budget. `pyfront.fold_int_constants`
+now runs before both builds (from `pyc.to_c` and `_build_unshadowed`): an in-range constant
+expression becomes one int64 literal (`-2**63`, `2**63 - 1`) and an out-of-range one is refused by
+name with the pre47 wording (`a constant integer expression overflows int64: ... outside the signed
+64-bit range ... 64-bit signed integer`), without the older `int64 constant expression out of
+range` phrase that `test_ail_pre191` rejects. The pass skips `str.split`/`rsplit` maxsplit arguments
+and f-strings, and separates a rewritten digit from an adjacent keyword. `pyfront._c_expr` refuses
+an out-of-int64 literal and emits a folded INT64_MIN as `(-9223372036854775807LL - 1)` instead of
+`ck_neg(9223372036854775808)`; `pyboxed` and `pyboxed2` accept the same unary spelling. Added
+`AIL_CURRENT/test_ail_pre47.py` and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.
+`tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run and `--check`
+passes.
+
+Probes in `/tmp/probes` (both builds via `~/tools/cmp.sh`): `pre47_inrange`, `pre47_fstring` and
+`pre47_keyword` match CPython (INT64_MIN/MAX, negative/zero, bool shift, argument, list item,
+attribute, dict value, alias, f-string debug, keyword adjacency); `pre47_refuse_pow`, `_negated`,
+`_decimal`, `_shift`, `_cancel`, `_huge`, `_argument`, `_list`, `_attribute`, `_dict` and `_alias`
+are refused by name. `pre47_pipeline.py` builds six pipeline elements with `pyc`: `sum((-2**63) ...)`,
+`x + (-2**63)`, `-1 << 63`, `max`, guarded `min` and `(2**63 - 1)` all answer CPython. Final-state
+tests: 15 modules (pre47, pre191, pre204, pre203, pre236, pre251, pre121, pre172, pre177, pre201,
+pre269, pre285, safetynet, files, corpus_findings3), 67 tests, 0 failed.
+
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
