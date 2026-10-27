@@ -3134,6 +3134,15 @@ finite floats toward zero, raises `ValueError` for NaN and `OverflowError` for i
 produces CPython's type-error message. Out-of-int64 finite floats remain the documented int64
 limit. Added `test_ail_pre34.py` (4 programs, both builds) and registered it in
 `ail_check.MODULES`; DIFFERENCES `C?-job-pre34-10240952-1`.
+## 2026-10-24 - pre68: literal `%d`/`%i`/`%u` with a float
+
+A literal format string such as `"%d" % 3.7` was lowered to `ail_obj_format`'s `d` spec, which
+rejects a float (`TypeError: unsupported format string passed to non-int`) on both the forced
+general build and the default build. CPython truncates the float toward zero for `d`, `i` and `u`
+and raises `OverflowError` / `ValueError` for infinity / NaN. Those three conversions now fall
+back to the run-time formatter (`safetyrt.FMT`) unless the argument is provably an `int` or
+`bool`; widths, signs, `%%`, ints/bools, and values through an argument, list item, attribute and
+dict value are covered by `AIL_CURRENT/test_ail_pre68.py` (2 programs, both builds).
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
