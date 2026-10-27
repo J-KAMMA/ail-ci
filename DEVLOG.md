@@ -1,3 +1,26 @@
+## 2026-10-27 -- pre314: bound-method field is refused by name (job-pre314-10271440)
+
+The first still-differing pre-existing item from the rbpre278 review was `v_bound`: a class that
+defines a method `f` and stores a bound method in an instance field `f` (`self.f = self.g`)
+compiled and then stopped with `AttributeError: 'C' object has no attribute 'g'` where CPython
+calls the stored bound method.  This tree lacked pre278's refusal, so `refuse_field_method_call`
+is re-applied from the accepted rbpre278 fix on the typed entry points and the general emitter;
+a bound-method field value is refused by name instead of being let through to the class method.
+The same refusal covers another object's method, a builtin method, a classmethod/staticmethod,
+a value reaching the field through an argument, a default, a list item, a dict value, an
+attribute or an alias, and a base method's `self.f()` with the field stored by a subclass.
+Name resolution follows Python scopes, so a same-named local in an unrelated function is left
+alone; fields holding lambdas or plain functions still match CPython on both builds.
+
+Added `AIL_CURRENT/test_ail_pre314.py` (2 tests, both builds) and registered it in
+`ail_check.MODULES`; DIFFERENCES row `C?-job-pre314-10271440-1`.  `tools/diff_ids.py` is not
+present on this tree; `tools/update_manifest.py --check` passes.
+
+Probes in `/tmp/probes`: `pre314_bound_{self,other,builtin,arg,default,list,dict,attr,alias,
+base_sub}` are refused by name on both builds; `pre314_lambda_field`, `pre314_function_field`,
+`pre314_unrelated_scope`, `pre314_collide_nocall` and `pre314_plain_no_feature` match CPython on
+both builds.
+
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
