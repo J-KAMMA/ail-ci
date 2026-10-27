@@ -55,6 +55,9 @@ class Pre379Tests(unittest.TestCase):
 
     def test_index_count_operator(self):
         self.check('operator', '''
+from collections import deque
+
+
 class Idx:
     def __index__(self):
         return 2
@@ -65,43 +68,37 @@ class Neg:
         return -1
 
 
-def main():
-    c = bytearray(b'xy')
-    alias = c
-    c *= Idx()
-    print(c)
-    print(alias is c)
-    print(bytearray(b'xy') * Idx())
-    print(Idx() * bytearray(b'xy'))
-    print(bytes(b'xy') * Idx())
-    print(Idx() * bytes(b'xy'))
-    xs = [1, 2]
-    xs *= Idx()
-    print(xs)
-    print([3] * Idx())
-    print(Idx() * [4])
-    s = 'ab'
-    s *= Idx()
-    print(s)
-    print('cd' * Idx())
-    print(Idx() * 'ef')
-    t = (1, 2)
-    t *= Idx()
-    print(t)
-    print((3,) * Idx())
+c = bytearray(b'xy')
+alias = c
+c *= Idx()
+print(c)
+print(alias is c)
+print(bytearray(b'xy') * Idx())
+print(Idx() * bytearray(b'xy'))
+print(bytes(b'xy') * Idx())
+print(Idx() * bytes(b'xy'))
+xs = [1, 2]
+xs *= Idx()
+print(xs)
+print([3] * Idx())
+print(Idx() * [4])
+s = 'ab'
+s *= Idx()
+print(s)
+print('cd' * Idx())
+print(Idx() * 'ef')
+t = (1, 2)
+t *= Idx()
+print(t)
+print((3,) * Idx())
+q = deque([1, 2])
+q *= Idx()
+print(q)
+print(deque([3]) * Idx())
+print(Idx() * deque([4]))
 
-    from collections import deque
-    q = deque([1, 2])
-    q *= Idx()
-    print(q)
-    print(deque([3]) * Idx())
-    print(Idx() * deque([4]))
-
-    for seq in (bytearray(b'xy'), b'xy', [1, 2], 'ab', (1, 2), bytearray(), b'', [], '', ()):
-        print(repr(seq * Neg()))
-
-
-main()
+for seq in (bytearray(b'xy'), b'xy', [1, 2], 'ab', (1, 2), bytearray(), b'', [], '', ()):
+    print(repr(seq * Neg()))
 ''')
 
     def test_index_count_routes(self):
