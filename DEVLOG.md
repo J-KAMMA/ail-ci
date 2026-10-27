@@ -186,6 +186,50 @@ Tests on the final tree: `test_ail_pre294`, `test_ail_safetynet`, `test_ail_file
 `test_ail_corpus_findings3` (4 modules, 0 failed; 10 s, 119 s, 125 s, 195 s).
 `tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run and
 `--check` passes.
+## 2026-10-27 -- reconcile pre19 `del` bound refusal with pre269 (review of job-rbrbpre19-10270955)
+
+The re-applied pre19 helper refused as soon as any intermediate of a constant `del` bound left
+int64, so it also refused valid in-range results such as `del a[2**63 * 0]`,
+`del a[(1 << 63) >> 62]`, `del a[(10**20) // (10**19)]`,
+`del a[(1 << 63) - (1 << 63) + 3]`, `del a[-(1 << 63) >> 62]`, and the representable boundaries
+`del a[2**63 - 1]` / `del a[-2**63]`, contradicting this tree's pre269 fix.  The helper now folds
+the whole bound with Python's unbounded ints -- including `>>`, `//`, `%`, bitwise ops and bool
+leaves -- and range-checks only the exact final value; a final value outside int64, or a constant
+too large to fold, keeps the named refusal.  `test_ail_pre19` now expects the pre269 cases and the
+two boundary values to build and match CPython (the boundaries raise IndexError at run time) and
+refuses only constants whose final value leaves int64.
+
+Probes in `/tmp/probes`: `pre19_wide_intermediates`, `pre19_wide_ops`, `pre19_wide_routes`,
+`pre19_empty_wide`, `pre19_boundary_max`, `pre19_boundary_min`, `pre19_refuse_wide_slice`,
+`pre19_refuse_below_min`, plus the earlier `pre19_*` probes, all matching CPython or refused by
+name on both builds.  Final-state modules: test_ail_pre19, test_ail_pre269,
+test_ail_string_field_mutation, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
+
+## 2026-10-27 -- re-apply pre19: refuse `del` bounds a constant cannot evaluate in int64 (job-rbpre19-10261657)
+
+Re-applied the accepted pre19 change on the current tree.  `pyfront.refuse_unrepresentable_delete_bounds`
+evaluates a constant `del` index or slice bound exactly, keeping the intermediate-overflow flag (so
+`del a[2**63 - 1]`, `del a[-2**63]`, `2**100000` and `2**100:2**101` are all caught), and refuses the
+`del` by name on both the typed path (`pyfunc._stmt_inner`) and the general path
+(`pyboxed2.Compiler.stmt_Delete`).  This tree's earlier checks already refuse compound constant
+indexes and powers by name (`int64 index out of range` / `int64 constant out of range`), so the
+accepted test accepts either named refusal; the new wording is exercised by the unary-int64 and
+slice cases that reach the added helper.  In-range constants (`del a[1 + 1]`, `del a[-2:-1]`,
+bool indexes) and the same expression outside a `del` are unchanged.
+
+The helper treats the literal spelling `-9223372036854775808` (unary minus on the Constant
+`2**63`) as INT64_MIN without an overflow, matching the compiler's unary branch, so
+`del box.values[::-9223372036854775808]` in `test_ail_string_field_mutation` still builds.  A
+computed `del a[-2**63]` (unary minus on a power) is still refused.
+
+Added `AIL_CURRENT/test_ail_pre19.py` (3 tests, both builds), registered it in
+`ail_check.MODULES` and `ci_shards.json`.  Probes `pre19_*` in `/tmp/probes` cover index, INT64_MIN,
+huge power, huge slice/step, nested subscript, attribute, list item and dict value routes, a
+function argument, representable bounds, bool indexes and the non-`del` expression: every one
+matches CPython or is refused by name on both builds.  Final-state modules: test_ail_pre19,
+test_ail_string_field_mutation, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/diff_ids.py` is not present on this tree; `update_manifest.py --check` rc 0.
 
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
