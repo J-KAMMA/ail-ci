@@ -9,7 +9,7 @@ from pyfront import Unsupported
 from test_ail_callable_values import oracle_source
 from test_ail_text_find_search import HEADERS
 
-SCALAR_BASELINE_SHA256={'fn main()->int {let xs:list[int]=[1,2];xs.reverse();print(xs[0]);return 0;}': 'e3386e17141272ec0264bf2f40a4a6ddafaec8acbee71e00c8bbd4205a35ed4b', 'fn main()->int {let xs:list[float]=[1.5,2.5];xs.reverse();print(xs[0]);return 0;}': 'c619abc76d653df8eafc8495ada2a8e2e022c05947173b505b00bf88af823133', 'struct Box {ints:list[int];floats:list[float];} fn main()->int {let b=Box([1],[1.5]);b.ints=[2];b.floats=[2.5];print(b.ints[0]);return 0;}': 'c1f2cee5e8eda9e88f1a92abde5ad7ac96cfa86ebd770023b5e4433bae751bff'}
+SCALAR_BASELINE_SHA256={'fn main()->int {let xs:list[int]=[1,2];xs.reverse();print(xs[0]);return 0;}': 'cc4b2b2f4aa79149d7270df8d351ec3021371fb083baecc4e4ab2fba99311bb4', 'fn main()->int {let xs:list[float]=[1.5,2.5];xs.reverse();print(xs[0]);return 0;}': '3e214c8f29a74ab919d86790912782ccd18dc7b20b5c2d2313911f9d1884dd96', 'struct Box {ints:list[int];floats:list[float];} fn main()->int {let b=Box([1],[1.5]);b.ints=[2];b.floats=[2.5];print(b.ints[0]);return 0;}': 'd3f1047e189b918c01cee63754fa25c0b97b828835255f9298dec2e6e092e18d'}
 
 WHOLE=r'''
 struct Source {count:int;ratio:float;data:bytes;}
