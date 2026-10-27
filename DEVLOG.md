@@ -3236,6 +3236,16 @@ through a variable/list/dict gives `ValueError: empty separator` where CPython s
 whitespace (`None` is only recognised as a literal), and a maxsplit constant above
 int64 (for example `2**63`) fails to compile with "integer overflow" where CPython raises
 `OverflowError`.
+## 2026-10-24 -- str.partition / rpartition reject non-str separators correctly (job-qtest3-10241647)
+
+Probing `str.partition` / `str.rpartition` on both builds found one stdout difference:
+`"a-b".partition(sep)` with `sep` an int, float or None printed `TypeError: object of type
+'int' has no len()` (the tuple helper ran `len(sep)` before `find(sep)`), while CPython says
+`TypeError: must be str, not int`.  The helper now calls `s.find(sep)` / `s.rfind(sep)` first,
+so the existing separator type check raises the right error; the empty-separator `ValueError`
+is still checked before the not-found branch.  Bytes, list, str-subclass and multi-character /
+repeated separators, argument/list/attribute/dict channels and a 100000-character input match
+CPython on both builds.  `test_ail_qtest3.py` keeps the probes.  No other differences were seen.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
