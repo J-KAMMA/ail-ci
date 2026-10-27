@@ -1,3 +1,23 @@
+## 2026-10-27 -- reconcile pre19 `del` bound refusal with pre269 (review of job-rbrbpre19-10270955)
+
+The re-applied pre19 helper refused as soon as any intermediate of a constant `del` bound left
+int64, so it also refused valid in-range results such as `del a[2**63 * 0]`,
+`del a[(1 << 63) >> 62]`, `del a[(10**20) // (10**19)]`,
+`del a[(1 << 63) - (1 << 63) + 3]`, `del a[-(1 << 63) >> 62]`, and the representable boundaries
+`del a[2**63 - 1]` / `del a[-2**63]`, contradicting this tree's pre269 fix.  The helper now folds
+the whole bound with Python's unbounded ints -- including `>>`, `//`, `%`, bitwise ops and bool
+leaves -- and range-checks only the exact final value; a final value outside int64, or a constant
+too large to fold, keeps the named refusal.  `test_ail_pre19` now expects the pre269 cases and the
+two boundary values to build and match CPython (the boundaries raise IndexError at run time) and
+refuses only constants whose final value leaves int64.
+
+Probes in `/tmp/probes`: `pre19_wide_intermediates`, `pre19_wide_ops`, `pre19_wide_routes`,
+`pre19_empty_wide`, `pre19_boundary_max`, `pre19_boundary_min`, `pre19_refuse_wide_slice`,
+`pre19_refuse_below_min`, plus the earlier `pre19_*` probes, all matching CPython or refused by
+name on both builds.  Final-state modules: test_ail_pre19, test_ail_pre269,
+test_ail_string_field_mutation, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
+
 ## 2026-10-27 -- re-apply pre19: refuse `del` bounds a constant cannot evaluate in int64 (job-rbpre19-10261657)
 
 Re-applied the accepted pre19 change on the current tree.  `pyfront.refuse_unrepresentable_delete_bounds`

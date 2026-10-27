@@ -276,64 +276,99 @@ def int_constant(node, _limit=_CONST_INT_LIMIT):
 
 _I64_MIN = -(1 << 63)
 _I64_MAX = (1 << 63) - 1
-_CONST_BITS_LIMIT = 100000
+_CONST_BITS_LIMIT = _CONST_INT_LIMIT
 
 
 def _int_constant_with_overflow(node):
-    """The exact Python value of a constant integer expression and whether an AIL int64 would overflow."""
+    """The exact Python value of a constant integer expression, and whether it leaves int64.
+
+    The whole expression is folded with Python's unbounded integers, so an intermediate that is
+    outside int64 is not a reason to refuse when the final value fits (the pre269 constant-index
+    pass folds the same way).  The second item is True only for a constant expression whose exact
+    final value leaves int64 or is too large to fold; a non-constant expression returns
+    (None, False).  Bool leaves count as 0/1, as CPython uses them.
+    """
     if isinstance(node, ast.Constant) and type(node.value) in (int, bool):
         value = int(node.value)
         return value, not (_I64_MIN <= value <= _I64_MAX)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
-        # `-9223372036854775808` is unary minus on the literal `2**63`.  The compiler emits
-        # INT64_MIN for exactly that spelling (the literal itself never overflows), so the
-        # intermediate is not a reason to refuse it here.  A computed `-(2**63)` is different:
-        # it reaches the power first and is still caught.
-        if (isinstance(node.op, ast.USub) and isinstance(node.operand, ast.Constant)
-                and type(node.operand.value) is int and node.operand.value == 1 << 63):
-            return _I64_MIN, False
-        value, overflow = _int_constant_with_overflow(node.operand)
+        value, uncomputable = _int_constant_with_overflow(node.operand)
         if value is None:
-            return None, overflow
+            return None, uncomputable
         value = -value if isinstance(node.op, ast.USub) else value
-        return value, overflow or not (_I64_MIN <= value <= _I64_MAX)
+        return value, not (_I64_MIN <= value <= _I64_MAX)
     if not isinstance(node, ast.BinOp):
         return None, False
-    left, left_overflow = _int_constant_with_overflow(node.left)
-    right, right_overflow = _int_constant_with_overflow(node.right)
-    overflow = left_overflow or right_overflow
+    op = type(node.op)
+    left, left_bad = _int_constant_with_overflow(node.left)
+    right, right_bad = _int_constant_with_overflow(node.right)
+    unable = left_bad or right_bad
     if left is None or right is None:
-        return None, overflow
-    if isinstance(node.op, ast.Add):
-        value = left + right
-    elif isinstance(node.op, ast.Sub):
-        value = left - right
-    elif isinstance(node.op, ast.Mult):
-        value = left * right
-    elif isinstance(node.op, ast.Pow):
-        if right < 0:
-            return None, overflow
-        if right == 0 or left in (0, 1):
-            value = 1
-        elif left == -1:
-            value = -1 if right & 1 else 1
-        else:
-            if max(1, abs(left).bit_length()) * right > _CONST_BITS_LIMIT:
+        # `0 * x`, `0 & x` and `0 << x` have a decided result even when the other operand is too
+        # large to fold.  A genuinely variable operand is still left for the compiler.
+        if op in (ast.Mult, ast.BitAnd):
+            if left == 0:
+                return (0, False) if right_bad else (None, False)
+            if right == 0:
+                return (0, False) if left_bad else (None, False)
+        if op is ast.LShift and left == 0:
+            return (None, False) if not right_bad else (None, True)
+        if op is ast.Pow and left == 1:
+            return 1, False
+        return None, unable
+    try:
+        if op is ast.Add:
+            value = left + right
+        elif op is ast.Sub:
+            value = left - right
+        elif op is ast.Mult:
+            if (left and right
+                    and abs(left).bit_length() + abs(right).bit_length() > _CONST_BITS_LIMIT):
                 return None, True
-            value = left ** right
-    elif isinstance(node.op, ast.LShift):
-        if right < 0:
-            return None, overflow
-        if left == 0:
-            value = 0
-        else:
-            if max(1, abs(left).bit_length()) + right > _CONST_BITS_LIMIT:
+            value = left * right
+        elif op is ast.FloorDiv:
+            value = left // right
+        elif op is ast.Mod:
+            value = left % right
+        elif op is ast.Pow:
+            if right < 0:
                 return None, True
-            value = left << right
-    else:
-        return None, overflow
-    return value, overflow or not (_I64_MIN <= value <= _I64_MAX)
-
+            if right == 0:
+                value = 1
+            elif left in (0, 1):
+                value = left
+            elif left == -1:
+                value = -1 if right & 1 else 1
+            elif max(1, abs(left).bit_length()) * right > _CONST_BITS_LIMIT:
+                return None, True
+            else:
+                value = left ** right
+        elif op is ast.LShift:
+            if right < 0:
+                return None, True
+            if left == 0:
+                value = 0
+            elif max(1, abs(left).bit_length()) + right > _CONST_BITS_LIMIT:
+                return None, True
+            else:
+                value = left << right
+        elif op is ast.RShift:
+            if right < 0:
+                return None, True
+            value = left >> right
+        elif op is ast.BitAnd:
+            value = left & right
+        elif op is ast.BitOr:
+            value = left | right
+        elif op is ast.BitXor:
+            value = left ^ right
+        else:
+            return None, unable
+    except (ArithmeticError, ValueError):
+        return None, True
+    if type(value) is not int:
+        return None, True
+    return value, not (_I64_MIN <= value <= _I64_MAX)
 
 def refuse_unrepresentable_delete_bounds(target):
     """Refuse a `del` whose constant index or slice bound cannot be evaluated as an AIL int64."""
