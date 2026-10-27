@@ -40,6 +40,7 @@ class _Scope(ast.NodeVisitor):
         self.bound = {}             # id(comp) -> names it binds
         self.comps = {}             # id(comp) -> comp
         self.scope_names = set()    # names used in the enclosing scope proper
+        self.class_bodies = []      # class definitions whose body is analysed separately
 
     def visit_Name(self, node):
         owner = None
@@ -95,14 +96,7 @@ class _Scope(ast.NodeVisitor):
 
     def visit_ClassDef(self, node):
         self.scope_names.add(node.name)
-        for expr in node.decorator_list:
-            self.visit(expr)
-        for base in node.bases:
-            self.visit(base)
-        for keyword in node.keywords:
-            self.visit(keyword.value)
-        for statement in node.body:
-            self.visit(statement)
+        self.class_bodies.append(node)
 
 
 def _scopes(tree):
@@ -125,28 +119,35 @@ def rename(source):
     plans = []                  # (name node, new identifier)
     used = None
     counter = 0
-    for body in _scopes(tree):
+
+    def analyse(body, outer_names):
+        nonlocal used, counter
         scope = _Scope()
+        scope.scope_names.update(outer_names)
         for statement in body:
             scope.visit(statement)
-        if not scope.comps:
-            continue
-        renames = {}            # (id(comp), name) -> fresh identifier
-        for key, comp in scope.comps.items():
-            for name in sorted(scope.bound[key]):
-                if name in scope.scope_names or key in scope.nested_clash:
-                    if used is None:
-                        used = set(re.findall(r'\w+', source))
-                    counter += 1
-                    fresh = '%s__c%d' % (name, counter)
-                    while fresh in used:
+        if scope.comps:
+            renames = {}        # (id(comp), name) -> fresh identifier
+            for key, comp in scope.comps.items():
+                for name in sorted(scope.bound[key]):
+                    if name in scope.scope_names or key in scope.nested_clash:
+                        if used is None:
+                            used = set(re.findall(r'\w+', source))
                         counter += 1
                         fresh = '%s__c%d' % (name, counter)
-                    used.add(fresh)
-                    renames[(key, name)] = fresh
-        for node, owner in scope.resolved:
-            if owner is not None and (id(owner), node.id) in renames:
-                plans.append((node, renames[(id(owner), node.id)]))
+                        while fresh in used:
+                            counter += 1
+                            fresh = '%s__c%d' % (name, counter)
+                        used.add(fresh)
+                        renames[(key, name)] = fresh
+            for node, owner in scope.resolved:
+                if owner is not None and (id(owner), node.id) in renames:
+                    plans.append((node, renames[(id(owner), node.id)]))
+        for node in scope.class_bodies:
+            analyse(node.body, scope.scope_names)
+
+    for body in _scopes(tree):
+        analyse(body, ())
     if not plans:
         return source, {}
     lines = stripped.split('\n')

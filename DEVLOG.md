@@ -4,15 +4,16 @@ The reviewer of job rbpre304 recorded `x = 99; class C: ys = [x for x in range(3
 print(x, C.ys)`: both builds printed `2 [0, 1, 2]` where CPython prints `99 [0, 1, 2]`.  The
 comprehension-scope pass (`compscope.py`) analysed module and function bodies but not class
 bodies, so a class-body comprehension target kept the enclosing module's name slot and overwrote
-the global.  `visit_ClassDef` now visits the class decorators, bases, keywords and body in the
-enclosing scope, so a target that can clash with an enclosing name gets the existing fresh
-identifier.  This covers list, set, dict and generator comprehensions, nested and
-multiple-generator forms, a target equal to a class attribute, the class name or a builtin name,
-and empty or negative ranges; programs without a class-body comprehension target are unchanged.
+the global.  `visit_ClassDef` now records each class body, and the analysis runs it separately
+with the enclosing scope's names, so a target that can clash with an enclosing or class-body
+name gets the existing fresh identifier.  Module and function comprehensions keep their previous
+C.  This covers list, set, dict and generator comprehensions, nested and multiple-generator
+forms, a target equal to a class attribute, the class name or a builtin name, empty or negative
+ranges, other value types and aliases.
 
 Probes in `/tmp/probes/pre347` on both builds: `p01`-`p05` and `p07`-`p12` match CPython; `p06`
 (a nested class) and `p13` (a destructuring target over a module list, also refused on the base)
-are refused by name; `p14`-`p21` match CPython.  Final-state tests: test_ail_pre347 (1 test, 15
+are refused by name; `p14`-`p23` match CPython.  Final-state tests: test_ail_pre347 (1 test, 15
 programs, both builds), test_ail_pre304, test_ail_quirks Q2, test_ail_fuzz23,
 test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py`
 was run and `--check` passes.
