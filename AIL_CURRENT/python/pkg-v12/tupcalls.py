@@ -157,6 +157,17 @@ class Calls:
 
     # ------------------------------------------------------------------------------------------
     # builtins
+    def b_hash(self, node, want, ctx):
+        # A set / frozenset holding tuples is lowered to a table class here; that class hashes by
+        # identity, not by CPython's frozenset mix over its elements.  Leaving this program on the
+        # general path keeps the real frozenset object, whose hash() is the CPython value.
+        if len(node.args) == 1 and not node.keywords:
+            t = self.typeof(node.args[0])
+            if is_table_set(t):
+                self.refuse(node, 'hash() of a set or frozenset holding tuples is not built by the '
+                                  'tuple table; the general path handles it')
+        return self.generic_call(node)
+
     def b_len(self, node, want, ctx):
         if len(node.args) != 1 or node.keywords:
             return self.generic_call(node)

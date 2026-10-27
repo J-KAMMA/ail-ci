@@ -236,6 +236,7 @@ MODULES = (
     'test_ail_qtest2',
     'test_ail_qtest5',
     'test_ail_fuzz4',
+    'test_ail_pre309',
 )
 
 
