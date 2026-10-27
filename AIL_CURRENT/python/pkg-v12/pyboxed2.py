@@ -1437,8 +1437,13 @@ def _refuse_lambda_forward_defaults(tree, bound_at):
             scan_class(stmt, at_index, enclosed)
             return
         for lam in _lambdas_in(stmt):
-            later = {nm for nm, ln in assign.items() if ln > lam.lineno}
-            earlier = {nm for nm, ln in assign.items() if ln < lam.lineno}
+            # a lambda synthesized by a rewrite (functools.partial, map, ...) may have no location;
+            # it runs where the statement that holds it does
+            line = getattr(lam, 'lineno', None)
+            if line is None:
+                line = getattr(stmt, 'lineno', 0)
+            later = {nm for nm, ln in assign.items() if ln > line}
+            earlier = {nm for nm, ln in assign.items() if ln < line}
             refuse(lam, at_index, later, earlier, enclosed)
 
     for i, stmt in enumerate(tree.body):
